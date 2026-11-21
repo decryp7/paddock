@@ -255,8 +255,19 @@ impl AppState {
 
     /// A model was removed or its engine changed: its cached answers and saved prompt prefixes go now.
     pub fn invalidate_model(&self, id: &ModelId) {
-        self.caches.clear(&pitwall_core::cache::Scope::Model(id.to_string()));
-        crate::warm::drop_prefix(&self.dirs.slots(), &crate::warm::model_prefix(id.as_str()), None);
+        self.invalidate_models(std::slice::from_ref(id));
+    }
+
+    /// Several models were removed or their engine changed: their cached answers and saved prompt prefixes go now, in one
+    /// cache clear (one transaction) and one listing of the prefix folder, however many there are (ADR 0108, PW-1).
+    pub fn invalidate_models(&self, ids: &[ModelId]) {
+        if ids.is_empty() {
+            return;
+        }
+        self.caches
+            .clear(&pitwall_core::cache::Scope::Models(ids.iter().map(ToString::to_string).collect()));
+        let prefixes: Vec<String> = ids.iter().map(|id| crate::warm::model_prefix(id.as_str())).collect();
+        crate::warm::drop_prefixes(&self.dirs.slots(), &prefixes);
     }
 
     /// The engine build that serves models changed: everything computed by the old one goes now.

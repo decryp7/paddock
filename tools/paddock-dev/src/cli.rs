@@ -1,7 +1,7 @@
 use crate::{
     audit, brief_check, check, check_ids, ci_build_env, ci_build_jobs, ci_host, ci_isolation, ci_run, ci_runs, ci_rust_pin, ci_s3_guard,
-    ci_setup_rust, disk, gates, generators, golden_cmd, heavy_cmd, heavy_install, hook, input_hash, ipc_endpoints, load, local_sccache,
-    locks, merge_check, places, plan, plan_cmd, pr, pre_push, queue, release_isolation, slots, wait, worktree,
+    ci_setup_rust, disk, gates, generators, golden_cmd, heavy_cmd, heavy_install, hook, input_hash, ipc_endpoints, lessons_driver, load,
+    local_sccache, locks, merge_check, places, plan, plan_cmd, pr, pre_push, queue, release_isolation, slots, wait, worktree,
 };
 use clap::{Args, Parser, Subcommand};
 use paddock_cli::{CliError, Exit, Format, Report, finish};
@@ -241,6 +241,17 @@ enum MergeCommand {
     /// (`git revert <sha>`, git's "revert a faulty merge"; run them after `git merge <train>`), and warn about reverts of other
     /// branches' merges the member holds. Read-only: runs nothing. Run it before the merge of the train.
     SyncMember(SyncMemberArgs),
+    /// Git's merge driver of docs/lessons.md (`merge=lessons`, set by `./dev hooks install`): `./dev merge lessons-driver %O %A %B`.
+    /// Git's union merge of two appended sections, then the blank line it drops before a `## ` heading put back. The result is
+    /// written to the second file (ours).
+    LessonsDriver {
+        /// The merge base (%O).
+        base: PathBuf,
+        /// Our version (%A); receives the result.
+        ours: PathBuf,
+        /// Their version (%B).
+        theirs: PathBuf,
+    },
 }
 
 #[derive(Args)]
@@ -315,6 +326,15 @@ struct MergeCheckArgs {
 enum SelfCommand {
     /// Print the input hash this binary's sources, dependencies and compiler give, and the hash it was built from.
     Hash,
+}
+
+#[derive(Args)]
+struct ProptestSeedsArgs {
+    /// The nextest output of the step, as a file.
+    log: PathBuf,
+    /// The repository root the printed paths are made relative to (default: PADDOCK_WORKSPACE, then GITHUB_WORKSPACE).
+    #[arg(long)]
+    root: Option<String>,
 }
 
 #[derive(Args)]
@@ -393,6 +413,9 @@ enum CiCommand {
     /// Whether a scheduled run ends early because a train's dispatch run is queued or running (skip=true|false to
     /// GITHUB_OUTPUT). Fails open: an unreadable API lets the run proceed, with a warning.
     ScheduleSkip(ci_runs::ScheduleSkipArgs),
+    /// Whether a push to main ends early because a full green run of the workflow, with no FLAKY test, already tested this exact
+    /// commit (`reuse=true|false` and `run=<id>` to GITHUB_OUTPUT; ER-49). Fails open: anything unreadable lets the run proceed.
+    Reuse(ci_runs::ReuseArgs),
     /// Dispatch a workflow once no other run is on its single-machine runner (macOS, Windows): waits like `wait --ci-run`, at
     /// most --max, then ends with an `::error::` naming the busy run. Linux-only workflows dispatch at once, and so does a train
     /// (`train/*`) whose workflow waits in its own first job (the runner-wait action), so scheduled runs see it queued.
@@ -400,6 +423,10 @@ enum CiCommand {
     /// The first job of a train run (the runner-wait action): wait, at most --max, until no older run has an unfinished job on this run's
     /// single-machine runner (macOS, Windows). Fails open when the runs cannot be read; ends with an `::error::` at --max.
     RunnerWait(ci_runs::RunnerWaitArgs),
+    /// The failing proptest cases in a nextest log (a file): one `::error::` line each with the crate, the test, the `cc <hex>`
+    /// seed line and the file of `proptest-regressions/` to commit it to (rule 89). Prints nothing when no proptest failed; exit 0 either
+    /// way (the step that ran nextest already failed), 6 when the log cannot be read.
+    ProptestSeeds(ProptestSeedsArgs),
     /// Delete the `trial/*` refs (`ci dispatch --trial`) of branches that are gone or landed on main (ADR 0098 WP-4).
     TrialPrune(ci_runs::TrialPruneArgs),
 }
@@ -743,6 +770,28 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
             Ok(paddock_cli::Report::new(serde_json::json!({ "args": args }), args.join(" ")))
         }),
         Command::Ci {
+            command: CiCommand::ProptestSeeds(a),
+        } => {
+            let log = std::fs::read_to_string(&a.log).map_err(|e| {
+                paddock_cli::CliError::new(
+                    paddock_cli::Exit::NotMeasured,
+                    format!(
+                        "::error::proptest seeds NOT MEASURED: cannot read {}: {e}. Next step: give the file the step's nextest output was kept in.",
+                        a.log.display()
+                    ),
+                )
+            })?;
+            let root = a.root.clone().or_else(|| ["PADDOCK_WORKSPACE", "GITHUB_WORKSPACE"].iter().find_map(|k| std::env::var(k).ok()));
+            let lines = crate::proptest_seeds::report(&log, root.as_deref());
+            let text = lines.join("\n");
+            let json: Vec<_> = crate::proptest_seeds::find(&log)
+                .seeds
+                .iter()
+                .map(|s| serde_json::json!({ "crate": s.krate, "test": s.test, "cc": s.cc, "file": s.file }))
+                .collect();
+            Ok(paddock_cli::Report::new(serde_json::json!({ "seeds": json }), text))
+        }
+        Command::Ci {
             command: CiCommand::Triage(a),
         } => ci_runs::triage(&a),
         Command::Ci {
@@ -751,6 +800,9 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
         Command::Ci {
             command: CiCommand::ScheduleSkip(a),
         } => ci_runs::schedule_skip(&a),
+        Command::Ci {
+            command: CiCommand::Reuse(a),
+        } => ci_runs::reuse(&a),
         Command::Ci {
             command: CiCommand::RustPin(a),
         } => ci_rust_pin::command(&a),
@@ -871,6 +923,9 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
         Command::Merge {
             command: MergeCommand::SyncMember(a),
         } => merge_check::sync_member::command(a.root.as_deref(), &a.train, a.member.as_deref()),
+        Command::Merge {
+            command: MergeCommand::LessonsDriver { base, ours, theirs },
+        } => lessons_driver::command(&base, &ours, &theirs),
         Command::Gen {
             command: GenCommand::Check(a),
         } => generators::command(&generators::CheckArgs {

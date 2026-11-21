@@ -19,7 +19,7 @@ function playwright(dir: string, serve: string, port: number) {
   writeFileSync(
     join(dir, 'playwright.config.ts'),
     `import { paddockConfig } from ${JSON.stringify(join(src, 'config.ts'))};\n` +
-      `export default paddockConfig({ app: 'ready', defaultPort: ${port}, webkit: false, testDir: './e2e', serveTimeoutMs: 20000, serve: () => ${JSON.stringify(serve)}, env: { PW_PORT: '${port}' } });\n`,
+      `export default paddockConfig({ app: 'ready', defaultPort: ${port}, webkit: false, launcher: 'off', testDir: './e2e', serveTimeoutMs: 20000, serve: () => ${JSON.stringify(serve)}, env: { PW_PORT: '${port}' } });\n`,
   );
   writeFileSync(
     join(dir, 'e2e', 'page.spec.ts'),

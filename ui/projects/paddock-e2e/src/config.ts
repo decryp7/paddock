@@ -1,5 +1,6 @@
 import { defineConfig, devices, type PlaywrightTestConfig, type ReporterDescription } from '@playwright/test';
-import { assertChromeForTesting, pinnedChrome } from './browser.ts';
+import { assertChromeForTesting } from './browser.ts';
+import { internalBrowserUse } from './browser-launcher.ts';
 import { assertFreshBuilds, reuseServer, type BuildGuard } from './build-guard.ts';
 import { e2ePort, isOn } from './env.ts';
 import { paddockServers } from './servers.ts';
@@ -41,6 +42,8 @@ export interface PaddockConfigOptions {
    * `ui-dist` (css and `ui/dist`, for an app that maps @decryp7/paddock-ui to it). Anything but `none` needs `uiRoot`; `PW_SKIP_BUILD_GUARD=1` skips it.
    */
   readonly buildGuard?: BuildGuard;
+  /** `off` leaves the browser's working folder alone (the unit tests of the preset, which must not need an installed browser); default `auto` (the macOS wrapper, browser-launcher.ts). */
+  readonly launcher?: 'auto' | 'off';
   /** The repo's ui/ folder (for `buildGuard`). */
   readonly uiRoot?: string;
   /** The window size of the specs (default 1280 x 800). */
@@ -75,8 +78,9 @@ export function paddockConfig(options: PaddockConfigOptions): PlaywrightTestConf
   const port = e2ePort(options.portEnv ?? 'PW_PORT', options.defaultPort, env);
   const viewport = options.viewport ?? DEFAULT_VIEWPORT;
   const shots = options.screenshotSpecs ?? SCREENSHOT_SPECS;
-  const executablePath = pinnedChrome(env);
-  const chromium = { ...devices['Desktop Chrome'], viewport, ...(executablePath ? { launchOptions: { executablePath } } : {}) };
+  // Every folder the browser writes, and (on macOS) the folder it starts in, are on the internal disk: a removable volume makes macOS ask the user (ER-14).
+  const { launchOptions } = internalBrowserUse(env, options.launcher);
+  const chromium = { ...devices['Desktop Chrome'], viewport, launchOptions };
   const reporter: PlaywrightTestConfig['reporter'] = isOn(env['PADDOCK_E2E_BLOB'])
     ? [['blob', { outputDir: 'blob-report', fileName: `${options.app}-${env['PADDOCK_E2E_SHARD'] ?? 'all'}.zip` }], ['list']]
     : [['list'], ...(options.reporters ?? [])];

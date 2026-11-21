@@ -17,7 +17,7 @@ function fixture({ state = 'clean', selfHash = `embedded ${HASH}`, stderr = '' }
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'paddock-dev-tool-cache-')));
   const dev = `#!/bin/sh
 case "$1" in
-  --wrapper-hash) printf 'dev: hash ${HASH} inputs: stand-in\\n${HASH}\\n${state}\\n' ;;
+  --wrapper-hash) { printf 'dev: hash ${HASH} inputs: stand-in\\n' >&2; printf '${HASH}\\n${state}\\n'; } ;;
   self) printf '%s\\n' '${stderr}' >&2; printf '%s\\n' '${selfHash}' ;;
 esac
 `;
@@ -109,4 +109,26 @@ test('the summary line names the key and the outcome, and a save the lookup did 
   assert.match(bad.sum, /save NOT confirmed/);
   assert.match(bad.text, /::warning::dev-tool-cache:/);
   assert.match(sum(['not run', '', '']).sum, /not measured \(not run\)/, 'a step that did not run is not measured');
+});
+
+test('the key reads the real wrapper contract: hash and state on standard output, the inputs line on standard error (run 8509)', () => {
+  const r = spawnSync('sh', [join(PADDOCK, 'dev'), '--wrapper-hash'], { encoding: 'utf8', env: { ...process.env, RUSTUP_AUTO_INSTALL: '0' } });
+  assert.equal(r.status, 0, `the real ./dev --wrapper-hash needs a Rust compiler here: ${r.stderr}`);
+  const lines = r.stdout.trim().split('\n');
+  assert.equal(lines.length, 2, `stdout must be exactly hash and state, got: ${r.stdout}`);
+  assert.match(lines[0], /^[0-9a-f]{40}$/);
+  assert.match(lines[1], /^(clean|dirty)$/);
+  assert.match(r.stderr, /^dev: hash [0-9a-f]{40} inputs:/m);
+});
+
+test('a wrapper that gives no hash fails the step loudly, never a silent miss (ER-33)', () => {
+  const root = fixture();
+  writeFileSync(join(root, 'dev'), '#!/bin/sh\nexit 2\n');
+  const r = run(root, ['key']);
+  assert.notEqual(r.status, 0);
+  assert.match(r.text, /::error::dev-tool-cache: .*wrapper-hash failed/);
+  writeFileSync(join(root, 'dev'), "#!/bin/sh\necho nonsense\n");
+  const bad = run(root, ['key']);
+  assert.notEqual(bad.status, 0);
+  assert.match(bad.text, /::error::dev-tool-cache: .*unexpected shape/);
 });

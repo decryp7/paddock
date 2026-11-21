@@ -29,4 +29,5 @@ paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
 [dev-dependencies]
 postcard = { version = "1", default-features = false, features = ["use-std"] }
 proptest = "1"
+paddock-testkit = { workspace = true }
 tempfile = "3"

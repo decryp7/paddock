@@ -2,6 +2,8 @@ import { defineConfig, devices } from '@playwright/test';
 import { resolve } from 'node:path';
 import { appBuildGuard, reuseServer } from '../../../../../ui/projects/paddock-e2e/src/build-guard.ts';
 import { paddockServers } from '../../../../../ui/projects/paddock-e2e/src/servers.ts';
+import { assertChromeForTesting } from '../../../../../ui/projects/paddock-e2e/src/browser.ts';
+import { internalBrowserUse } from '../../../../../ui/projects/paddock-e2e/src/browser-launcher.ts';
 import { e2ePortOrCiDefault } from '../../../../../ui/projects/paddock-e2e/src/env.ts';
 
 // Fails fast, before any server starts, when what the app consumes of ui (ui/dist, the css) is stale (build-guard.ts).
@@ -14,7 +16,8 @@ appBuildGuard(resolve(__dirname, '../../'), resolve(__dirname, '../../../../../u
 // DEBRIEF_QA_THEMES=dark,light.
 const PORT = e2ePortOrCiDefault('DEBRIEF_QA_PORT', 4330);
 
-export default defineConfig({
+// The guard refuses an installed browser (rule 7) and a browser folder on a removable volume (ER-14).
+export default assertChromeForTesting(defineConfig({
   testDir: '.',
   testMatch: 'sweep.ts',
   workers: Number(process.env['DEBRIEF_QA_WORKERS'] ?? 2),
@@ -22,7 +25,7 @@ export default defineConfig({
   timeout: 900_000,
   reporter: [['list']],
   use: {
-    ...devices['Desktop Chrome'],
+    ...devices['Desktop Chrome'], ...internalBrowserUse(),
     baseURL: `http://localhost:${PORT}`,
     deviceScaleFactor: 1,
     actionTimeout: 8_000,
@@ -36,4 +39,4 @@ export default defineConfig({
       timeoutMs: 180_000,
     },
   ]),
-});
+}));

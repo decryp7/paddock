@@ -15,3 +15,4 @@ paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
 
 [dev-dependencies]
 proptest = "1"
+paddock-testkit = { workspace = true }

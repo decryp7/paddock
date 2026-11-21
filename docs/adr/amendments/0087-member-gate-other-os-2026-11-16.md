@@ -1,7 +1,7 @@
 # Amendment to ADR 0087 (2026-11-16, draft): the other-OS member gate runs on the real CI runners
 
 - Status: Proposed 2026-11-16. **Decided by the user on 2026-11-16: real runners**, as merge queues and merge trains do. The step
-  is built and report-only (ER-41).
+  is built and report-only (ER-41); enforced 2026-11-21 (see below).
 - Trigger: train 12 spent about 17 hours in three red CI rounds, and every failure was Linux- or Windows-only: run 8138 (23
   failures: a hidden PATH, `/srv` paths that are not absolute on Windows, a lost Git-bash PATH, slow process starts, ext4 folder
   blocks), run 8147 (a `#!/bin/sh` fixture Windows cannot run), run 8152 (TestCommand 6x slower on Windows). All of them passed
@@ -37,7 +37,7 @@ own planner already selects the jobs.
 
 ## The gate: `other-os`, a row of `./dev merge check --gates`
 
-`tools/paddock-dev/src/merge_check/other_os.rs`, after the fast gates, for a merge commit (report-only, `ENFORCED = false`):
+`tools/paddock-dev/src/merge_check/other_os.rs`, after the fast gates, for a merge commit (`ENFORCED = true` since 2026-11-21):
 
 1. **Selection is the plan's.** `./dev plan <train before> <merge>`; a member that reaches no project is `not run (<why>)`.
    There is no second copy of "what does a change reach" (rule 55); the earlier path heuristic and `select()` are gone.
@@ -56,8 +56,79 @@ own planner already selects the jobs.
 "never counts"). The pass or fail of a partial member run is this step's, built on the same `Client` and `triage` readers the train
 queue uses.
 
-Needs `GITEA_TOKEN` (write access: it pushes the scratch ref) and `PADDOCK_TRIAL_DIR` (a folder for the askpass program, as
-`ci dispatch --trial`); either missing is `not measured` with what to set.
+Needs `GITEA_TOKEN` (write access: it pushes the scratch ref and dispatches `ci.yml`). The trial's scratch folder is
+`<trial root>/<branch>-<sha12>`: the trial root is `PADDOCK_TRIAL_DIR`, else git config `paddock.trialRoot`, else `trials` beside
+`paddock.worktreeRoot` (never inside HOME, ER-14); the step makes the folder and removes it at the end (ER-51).
+
+### Enforced since 2026-11-21 (user: "member checks on real runners, build it next")
+
+The gate was report-only (ER-41) and, with `PADDOCK_TRIAL_DIR` unset, printed "NOT MEASURED" and let the merge go on, so no
+train 18 member was ever checked on Windows or Linux; a Windows-only failure (the `sccache_eviction` tests, runs 8495 and 8509)
+was found only after the merge. Now `ENFORCED = true`:
+
+- `merge check --gates` on a merge commit dispatches the trial itself whenever `GITEA_TOKEN` is set, with the same code path as
+  `ci dispatch` (reservation, `Sent::Busy` bound), and waits on the run id with a bound (ER-32).
+- What it could not measure (no token, no trial folder, a train reservation with no progress for 45 minutes, a run that did not end
+  in 2 hours, a run that never reached its tests, a failure triage cannot blame) is `not measured` and exits 6; a failing test on
+  one OS exits 5. The output names
+  the cause and the next step. A member the plan says reaches no project is `not run`, with no token needed.
+- **The handle (ER-51).** The gate judges only the run its own dispatch made. `ci dispatch` returns the run id when Gitea's
+  answer names it (`dispatch::run_with_id`; `ci dispatch --json` prints `run`). When the server answers with an empty 204, the
+  gate records the highest run id before the dispatch and accepts only a newer `ci.yml` run on the commit from a
+  `workflow_dispatch` on exactly the trial ref (`pick_run`); an older run on the same commit (a train's, a rerun, an earlier
+  trial of the same merge) is never taken. Each part has its own ref (`trial/member-<sha12>-linux` and `-windows`), so a part
+  can never take the other OS's run (ER-51: identity by a ref only the part pushed); when the same part's POST was retried after a 502
+  and made two runs, the newest on its ref is judged, compared with the id before the FIRST attempt. (The run list of this Gitea does
+  not expose a run's `os` input, so the ref is the identity.) The loop looks once per tick, only while Gitea answers.
+- **A row is measured only when the run reached its tests.** The plan job must have succeeded and the run must not be cancelled
+  or unfinished, else every row is `not measured`; a row whose jobs were all skipped is `not applicable` only after that. Jobs
+  are put on an OS by their name's matrix label, else by their runner label (conformance, tools, ui on `ubuntu-latest`); jobs on
+  another machine (macOS) are listed as `not judged` in the output and in `notJudged`, never counted as clean.
+- **Judged per test by the train's rules (ER-12, user 2026-11-20).** A test that failed both tries blocks, also when it fails on
+  main too (the label "also failing on main" stays, as a failing finding). A FLAKY test (failed, then passed on its one retry;
+  `Failure.retried`) blocks only when the member touches its feature (`feature_touched`): first through the plan's own graph (a
+  test whose project the plan for the member does not reach is untouched), then within a reached project through the files the
+  test drives, a Playwright or Vitest test by its spec file's feature (the spec, or any file or folder named like it), a Rust test
+  by the files of its own crate or app named like its modules. A change only in a dependency of the test's crate is not its
+  feature (ER-12 names "the files it drives, not any file of the same crate"); a test whose feature cannot be told counts as
+  touched. In an untouched feature the row passes and the flake is listed as `FLAKY (recorded, not blocking ...)` and in
+  `flakyRecorded`, a fix item for the next train.
+- **Reach is read from the plan's own output**, with no list of its project keys: any true flag other than `docs` and
+  `conformance`, `all`, an app, or conformance reached for a reason beyond its standing one (`plan::CONFORMANCE_ALWAYS`, read
+  from `why`). A plan that does not say why reaches projects (when unsure the gate runs).
+- **Two parts, two runs: trials use spare lanes (user, 2026-11-21).** The trial is one `ci.yml` run per OS, each with its own handle.
+  The Linux part (`os=linux`) is dispatched at once when no train holds the runners. While a train holds them it goes only beside a
+  train that is working (a job of an unfinished `train/*` run is in progress: between two stages of the sequence nothing runs and
+  the next stage may start any moment, so it waits), with no Linux job of any unfinished run queued or waiting (those take the
+  lanes first), and with as many free lanes as its own Linux jobs (read from the plan, capped at the lanes there are): a trial never
+  jumps a running train (ER-24). The lanes are `conformance/ci/runner-slots.json`'s `linux` (one place, `dispatch::linux_slots`;
+  corrected from 3 to 6, the Linux host's lanes since 2026-11-20, and checked against `conformance/ci/build-jobs.sh` by a
+  conformance test); the train waiters keep their own declared cap of 2 (`trainWaiters` in the same file, with its reason: no measured cause to raise it, ER-12); every job keeps its lanes-times-threads
+  share (ER-48). The Windows part (`os=windows`) waits for the
+  train's reservation by progress (below). The Mac runner is not judged by the gate, so no run asks for it; the output and `data.macos` say so (`macos: not judged (dev OS; covered by the local pre-push run, not a CI-like clone)`). The gate looks at both
+  parts on every tick: the Linux verdict is reported the moment its run ends ("linux clean (the member stays pending until the
+  other OS part is judged)"), but the command returns, and the row is "passed", only after the Windows part is judged; Linux
+  alone never passes (not measured, exit 6, when Windows cannot be had).
+- **How the classes are told apart.** ci.yml has a new `os` input (`linux`, `windows`, `macos`, empty for all), handled by the
+  planner like every other narrowing (`src/plan_os.rs`, `PLAN_OS`): the plan job narrows the matrix legs it writes (`apps`,
+  `crate_legs`, `paddock_dev_legs`) to the OS and writes `rerun_jobs`, the list every job's `if` already reads, as the jobs that can
+  run on the OS (read from ci.yml's own `runs-on`; matrix jobs for every OS, their legs filtered). No job of ci.yml changed; a run
+  with `os` set is never a complete run (`plan verdict: complete=false`). `ci dispatch` narrows the runners a run waits for by the
+  same input (`restrict_to_os_input`: `os=linux` waits for neither the Mac nor the Windows runner).
+- **The train goes first, and the wait ends on stall, not on a clock.** A part waits for the train's reservation while the train's
+  CI progresses (the unfinished runs change; `reservation::Stall`) and is `not measured` only after 45 minutes with no progress,
+  or at an 8-hour hard limit (ER-32). It is not dispatched when the fast gates of `merge check --gates` already failed (the row
+  says so: not measured, exit 6). `PADDOCK_TRIAL_DIR`, like the config, must be absolute and outside HOME. The test seam
+  `PADDOCK_MERGE_CHECK_PLAN` exists in debug builds only.
+- **A trial of several members that are already on origin.** `./dev ci dispatch ci.yml --trial-members a,b,c --onto <train ref> --max
+  <bound>` merges them in the trial clone in the order given (merge commits with the members' own commits, never a rebase), pushes
+  `trial/members-<head12>` from there (the existing trial path: no local, hook-gated push of an unproven head) and dispatches it. A
+  member that is not on origin is refused before anything is merged (`not on origin: <names>`); the first merge conflict stops
+  the trial and names its member and the members merged before it. The answer carries the run id (`run`), the one run to judge
+  (ER-51). At most 10 members.
+- Logged (ER-27): the run id, the verdict per OS and the run's wall time split into queue wait (run created to job start), setup,
+  compile and tests (the jobs' step timings, by step name; job-seconds summed per OS, the queue wait the longest) in the step's
+  text and `data.rows[].phases`.
 
 ## What stays of the VM work
 

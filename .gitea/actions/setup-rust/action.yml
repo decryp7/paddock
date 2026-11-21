@@ -14,8 +14,8 @@ inputs:
     description: "Install the Linux libraries Tauri needs (webkit2gtk, gtk, rsvg, appindicator); ignored on other systems."
     default: "false"
   sccache-backend:
-    description: "local (default: sccache's disk cache, the job slot's kept folder sccache-s<n> on a host runner, /sccache in a container when that mount exists), auto (Redis when an endpoint is set, else local), redis (the endpoint is required) or s3 (the local disk first, the shared RustFS store behind it; the local disk alone when S3 cannot be used). The default is the dispatch input `sccache_backend` of ci.yml (one run), else the Gitea variable PADDOCK_CI_SCCACHE_BACKEND, local when both are unset (docs/research/2026-11-19-sccache.md section 8)."
-    default: ${{ github.event.inputs.sccache_backend || vars.PADDOCK_CI_SCCACHE_BACKEND || 'local' }}
+    description: "s3 (the default: the local disk first, the shared RustFS store behind it; the local disk alone, with a ::notice:: naming the cause, when S3 cannot be used: no secret passed, the endpoint down, a failed health check, or a release, rule 54 or tag run, which never reads the shared store), local (sccache's disk cache only: the job slot's kept folder sccache-s<n> on a host runner, /sccache in a container when that mount exists), auto (Redis when an endpoint is set, else local) or redis (the endpoint is required). The dispatch input `sccache_backend` of ci.yml overrides it for one run (a measurement); no repository variable switches it (user decision 2026-11-21; docs/research/2026-11-19-sccache.md section 8)."
+    default: ${{ github.event.inputs.sccache_backend || 's3' }}
   sccache-redis-endpoint:
     description: "Shared sccache backend, e.g. redis://172.16.1.188:6379 (no path: sccache ignores it). Used on every OS; empty means sccache's local disk."
     default: ${{ vars.SCCACHE_REDIS_ENDPOINT }}
@@ -156,6 +156,9 @@ runs:
         # The rule lives once, in conformance/ci/kit.sh (it prints its reason on standard error).
         kit="$(bash "${{ github.action_path }}/../../../conformance/ci/kit.sh" which)"
         echo "kit=$kit" >> "$GITHUB_OUTPUT"
+        # The compile cache's S3 guard asks the release condition itself, never PADDOCK_DEV_DOWNLOAD (the step below sets that one for a job
+        # with no read token as well): true on a release, rule 54 or tag run (conformance/ci/kit.sh release_reason).
+        echo "release=$(bash "${{ github.action_path }}/../../../conformance/ci/kit.sh" release-path)" >> "$GITHUB_OUTPUT"
         echo "setup-rust: compile cache through the $kit implementation"
     # ./dev builds itself from source when no pinned copy exists (cargo, build scripts): that runs here, in a step that holds no S3 key.
     # The step below then only runs the built tool, which hands the key to the sccache server and to nothing else.
@@ -172,6 +175,7 @@ runs:
       shell: bash
       env:
         BACKEND: ${{ inputs.sccache-backend }}
+        PADDOCK_CI_RELEASE: ${{ steps.kit.outputs.release }}
         PADDOCK_SCCACHE_REDIS_ENDPOINT: ${{ inputs.sccache-redis-endpoint }}
         REDIS_DB: ${{ inputs.sccache-redis-db }}
         TAURI_LINUX_DEPS: ${{ inputs.tauri-linux-deps }}

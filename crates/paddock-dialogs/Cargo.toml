@@ -56,6 +56,7 @@ log = { version = "0.4", features = ["kv"] }
 ts-rs = "11.1"
 # Property tests of the size state machine (ADR 0043 check 2).
 proptest = "1"
+paddock-testkit = { workspace = true }
 
 # The §6 real-window probe: a Tauri app needs the main thread, so no libtest harness. Exits 0 at once unless
 # PADDOCK_REAL_WINDOWS=1 (see crates/README.md).

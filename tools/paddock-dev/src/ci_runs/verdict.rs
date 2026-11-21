@@ -8,6 +8,8 @@
 //!   rerun of failures and the mode is full. A push to main needs it too: a push whose plan said `run=false` tested nothing. The earlier scope line (`plan mode: full=`) is not enough: a schedule-skipped run
 //!   or a `since_run` dispatch logs `full=true` and ends green having tested nothing or less. A base dispatch or a pull request
 //!   tests less and never counts, so it can neither clear a red full run nor stand in for one.
+//! - "Complete" is one scope for a workflow (ER-15): ci.yml logs it for a push to main (WebKit included), a dispatch that asked for
+//!   WebKit and an app's own gates, never for a full dispatch without WebKit (conformance `ci-reuse-wiring.test.mjs`).
 //! - Gitea's in-place "rerun failed jobs" keeps the run id: a deciding run with `run_attempt > 1` reads its earlier attempts,
 //!   and any failed job there is red (an unreadable attempt is not measured).
 //! - The newest full run decides (a green old run does not cover a newer red one).
@@ -203,6 +205,32 @@ fn read_mode(client: &mut Client, run: &RunInfo) -> Mode {
 
 /// Reads the runs listed for `sha` (up to four pages of 50) and decides.
 pub fn verdict(client: &mut Client, workflow: &str, sha: &str) -> Verdict {
+    verdict_excluding(client, workflow, sha, None)
+}
+
+/// [`verdict`] without one run of the list: the run that is asking (a push to main asking whether an earlier full green run
+/// already tested its commit, `ci reuse`). That run is still going, so its plan log is not final and it is never evidence for
+/// itself.
+pub fn verdict_excluding(client: &mut Client, workflow: &str, sha: &str, exclude: Option<u64>) -> Verdict {
+    match verdict_core(client, workflow, sha, exclude) {
+        Verdict::Red { run: None, reason } => {
+            let next = match last_full(client, workflow, sha) {
+                Some(last) => {
+                    format!("the last fully tested commit on main is {last}: tag that one, or dispatch a full run on this commit")
+                }
+                None => "no fully tested commit was found among the newest runs of main: dispatch a full run on this commit".into(),
+            };
+            Verdict::Red {
+                run: None,
+                reason: format!("{reason}. Next: {next}"),
+            }
+        }
+        other => other,
+    }
+}
+
+/// The decision over the runs listed for `sha`, without the hint of the last fully tested commit.
+fn verdict_core(client: &mut Client, workflow: &str, sha: &str, exclude: Option<u64>) -> Verdict {
     let query = format!("head_sha={sha}");
     let mut runs = Vec::new();
     for page in 1..=4 {
@@ -220,29 +248,17 @@ pub fn verdict(client: &mut Client, workflow: &str, sha: &str) -> Verdict {
             Err(e) => return Verdict::NotMeasured(format!("the runs of {} could not be listed: {e}", short(sha))),
         }
     }
+    runs.retain(|r| Some(r.id) != exclude);
     // A run's jobs and log are read only for a run whose mode is needed.
     let client = std::cell::RefCell::new(client);
     let mut modes = |r: &RunInfo| read_mode(&mut client.borrow_mut(), r);
     let mut earlier = |r: &RunInfo| read_earlier(&mut client.borrow_mut(), r);
-    let v = decide(&runs, workflow, sha, &mut modes, &mut earlier);
-    match v {
-        Verdict::Red { run: None, reason } => {
-            let next = match last_full(&mut client.borrow_mut(), workflow, sha) {
-                Some(last) => {
-                    format!("the last fully tested commit on main is {last}: tag that one, or dispatch a full run on this commit")
-                }
-                None => "no fully tested commit was found among the newest runs of main: dispatch a full run on this commit".into(),
-            };
-            Verdict::Red {
-                run: None,
-                reason: format!("{reason}. Next: {next}"),
-            }
-        }
-        other => other,
-    }
+    decide(&runs, workflow, sha, &mut modes, &mut earlier)
 }
 
-/// The newest commit (not `not_sha`) whose own push run to main finished green and was complete, among the newest five.
+/// The newest commit (not `not_sha`) that main's own push runs name (finished green) and that the reader finds fully tested, among
+/// the newest five. The deciding run need not be the push: a push that reused a train's run (`ci reuse`) is partial itself, and its
+/// commit was tested by that run, so every candidate is asked of the same reader, [`verdict_core`].
 fn last_full(client: &mut Client, workflow: &str, not_sha: &str) -> Option<String> {
     let page = client.runs_page_where(1, "branch=main&event=push").ok()?;
     let mut cands: Vec<&RunInfo> = page
@@ -251,11 +267,15 @@ fn last_full(client: &mut Client, workflow: &str, not_sha: &str) -> Option<Strin
         .filter(|r| workflow_file(&r.path) == workflow && r.head_sha != not_sha && r.finished() && r.conclusion == "success")
         .collect();
     cands.sort_by_key(|r| std::cmp::Reverse(r.id));
-    cands
+    let mut seen = std::collections::BTreeSet::new();
+    let shas: Vec<String> = cands
         .into_iter()
+        .filter(|r| seen.insert(r.head_sha.clone()))
         .take(5)
-        .find(|r| read_mode(client, r) == Mode::Full)
         .map(|r| r.head_sha.clone())
+        .collect();
+    shas.into_iter()
+        .find(|sha| matches!(verdict_core(client, workflow, sha, None), Verdict::Green { .. }))
 }
 
 /// The verdict as the shared outcome (ADR 0089 amendment, WP-T4): a green full run is [`Outcome::KnownCommit`] with the run as its
@@ -392,12 +412,20 @@ mod tests {
     fn a_push_to_main_whose_plan_skipped_it_is_not_full_and_names_the_last_fully_tested_commit() {
         // Run 8 (this commit) was skipped by its plan: green, every job skipped. Run 6 (an earlier commit) was complete.
         let skipped = "plan mode: full=true\nplan verdict: complete=false\n";
-        let mut earlier = main_push(6, "success");
-        earlier["head_sha"] = json!("e".repeat(40));
+        let earlier_run = || {
+            let mut r = main_push(6, "success");
+            r["head_sha"] = json!("e".repeat(40));
+            r
+        };
+        let earlier = earlier_run();
         let mut f = server(vec![main_push(8, "success")], &[(8, 80, Some(skipped))]);
         f.json(
             &format!("{API}/runs?branch=main&event=push&limit=50&page=1"),
             json!({"total_count": 2, "workflow_runs": [main_push(8, "success"), earlier]}),
+        );
+        f.json(
+            &format!("{API}/runs?head_sha={}&limit=50&page=1", "e".repeat(40)),
+            json!({"total_count": 1, "workflow_runs": [earlier_run()]}),
         );
         f.json(
             &format!("{API}/runs/6/jobs?limit=50&page=1"),
@@ -418,6 +446,42 @@ mod tests {
         ));
         assert!(
             matches!(&v, Verdict::Red { run: None, reason } if reason.contains("dispatch a full run")),
+            "{v:?}"
+        );
+    }
+
+    #[test]
+    fn the_hint_names_a_commit_tested_by_a_train_run_when_its_own_push_was_reused() {
+        // This commit has no full run. The newest commit on main, e, was fast-forwarded from a train: its push run 6 reused the
+        // train's run (complete=false), and its train dispatch run 7 is the full green one that decided it.
+        let e = "e".repeat(40);
+        let mut push_e = main_push(6, "success");
+        push_e["head_sha"] = json!(e);
+        let mut train_e = dispatch(7, "success");
+        train_e["head_sha"] = json!(e);
+        let mut f = server(vec![main_push(8, "success")], &[(8, 80, Some("plan verdict: complete=false\n"))]);
+        f.json(
+            &format!("{API}/runs?branch=main&event=push&limit=50&page=1"),
+            json!({"total_count": 2, "workflow_runs": [main_push(8, "success"), push_e.clone()]}),
+        );
+        f.json(
+            &format!("{API}/runs?head_sha={e}&limit=50&page=1"),
+            json!({"total_count": 2, "workflow_runs": [push_e, train_e]}),
+        );
+        for (run, job, log) in [(6, 60, "plan verdict: complete=false\n"), (7, 70, "plan verdict: complete=true\n")] {
+            f.json(
+                &format!("{API}/runs/{run}/jobs?limit=50&page=1"),
+                json!({"total_count": 1, "jobs": [{"id": job, "name": "plan (affected projects)", "conclusion": "success"}]}),
+            );
+            f.log(job, log);
+        }
+        let v = ask(&mut f);
+        assert!(matches!(&v, Verdict::Red { run: None, reason } if reason.contains(&e)), "{v:?}");
+        // Positive control: the train's run partial too, and no commit is named.
+        f.log(70, "plan verdict: complete=false\n");
+        let v = ask(&mut f);
+        assert!(
+            matches!(&v, Verdict::Red { run: None, reason } if !reason.contains(&e) && reason.contains("dispatch a full run")),
             "{v:?}"
         );
     }

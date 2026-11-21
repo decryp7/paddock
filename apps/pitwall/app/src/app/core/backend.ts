@@ -1,4 +1,5 @@
 import { InjectionToken } from '@angular/core';
+import type { ItemResult } from '@decryp7/paddock-ui/ipc';
 import type {
   ChatModels,
   ChatAttached,
@@ -112,6 +113,8 @@ export interface PitwallBackend {
   downloads(): Promise<Download[]>;
   cancelDownload(id: string): Promise<void>;
   deleteModel(id: string): Promise<void>;
+  /** Deletes many models in one call (one scan of the library): one result per id, in order; a model that is loaded, gone or unusable fails alone (`err`). */
+  deleteModels(ids: readonly string[]): Promise<ItemResult<null>[]>;
   loadModel(id: string): Promise<void>;
   unloadModel(id: string): Promise<void>;
   pinModel(id: string, pinned: boolean): Promise<void>;

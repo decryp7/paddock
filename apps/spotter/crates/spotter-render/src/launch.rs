@@ -314,6 +314,9 @@ impl Chromium {
         // The one constructor, as paddock-chromium launches it: counted for budget tests.
         let mut cmd = paddock_proc::command(&exe.path);
         cmd.env(MAC_TEMP_ENV, &temp);
+        // Start in the browser's own temp folder, never the caller's working folder: one on an external volume makes macOS ask the user for
+        // access to a removable volume (ER-14).
+        cmd.current_dir(&temp);
         let stderr = std::fs::File::create(dir.join(STDERR_FILE)).map_or_else(|_| std::process::Stdio::null(), std::process::Stdio::from);
         cmd.args(args(&dir, opts.mode, exe.flavor, &opts.extra_args))
             .stdin(std::process::Stdio::null())
@@ -663,6 +666,46 @@ mod tests {
         assert_eq!(Path::new(temp), Path::new(profile).join(BROWSER_TEMP), "{seen:?}");
         // The folder existed when the browser started: the stand-in could write into it.
         assert!(!e.contains("nonexistent") && !e.contains("No such file"), "{e}");
+    }
+
+    /// The browser starts in its own temp folder, not in the caller's working folder: one on an external volume makes macOS
+    /// ask the user for access to a removable volume, a window on the desktop (ER-14).
+    #[test]
+    fn the_browser_starts_in_its_own_temp_folder_not_the_callers() {
+        let base = tempfile::tempdir().unwrap();
+        let seen = base.path().join("cwd.txt");
+        let exe_path = paddock_testkit::StandIn::new(base.path(), "cwd-chrome")
+            .when_args(
+                &[],
+                paddock_testkit::Actions::new()
+                    .writes_with(&seen.to_string_lossy(), "{cwd}\n{env:MAC_CHROMIUM_TMPDIR|unset}\n")
+                    .exit(1),
+            )
+            .install()
+            .unwrap()
+            .program()
+            .to_path_buf();
+        let exe = Browser {
+            flavor: crate::discover::Flavor::Chromium,
+            path: exe_path,
+        };
+        let _ = Chromium::launch(&exe, &headless(base.path())).err();
+        let text = std::fs::read_to_string(&seen).expect("the stand-in did not record its folder");
+        let mut lines = text.lines();
+        let (cwd, temp) = (lines.next().unwrap(), lines.next().unwrap());
+        // The throwaway profile is gone by now, so compare the last two names (profile, browser-temp).
+        let tail = |p: &str| -> Vec<String> {
+            let mut v: Vec<String> = Path::new(p)
+                .components()
+                .rev()
+                .take(2)
+                .map(|c| c.as_os_str().to_string_lossy().into_owned())
+                .collect();
+            v.reverse();
+            v
+        };
+        assert_eq!(tail(cwd), tail(temp), "the browser started in {cwd}, not in its temp folder {temp}");
+        assert_eq!(tail(cwd)[1], BROWSER_TEMP);
     }
 
     /// A kept temp folder from an earlier start is emptied, so the browser never reads leftovers.

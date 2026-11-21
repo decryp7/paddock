@@ -17,6 +17,7 @@ use debrief_core::workspace::{
     WatchSignal, WatchSink, WatcherFactory,
 };
 use notify_debouncer_mini::notify;
+use paddock_watch::{Change, NotifySource};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -144,13 +145,9 @@ impl<W: notify::Watcher + Send> FileWatcher for Notified<W> {
 
 impl WatcherFactory for NotifyFactory {
     fn create(&self, mode: WatchMode, poll: Duration, sink: WatchSink) -> anyhow::Result<Box<dyn FileWatcher>> {
-        let handler = move |res: notify::Result<notify::Event>| match res {
-            // Opening or reading a file changes nothing.
-            Ok(ev) if matches!(ev.kind, notify::EventKind::Access(_)) => {}
-            Ok(ev) => sink(WatchSignal::Paths(ev.paths)),
-            Err(e) => {
-                log_watcher_error(&e, std::time::Instant::now());
-                sink(WatchSignal::Error(e.to_string()))
+        let handler = move |res: notify::Result<notify::Event>| {
+            if let Some(signal) = watch_signal(res) {
+                sink(signal);
             }
         };
         Ok(match mode {
@@ -163,14 +160,41 @@ impl WatcherFactory for NotifyFactory {
     }
 }
 
+/// What one `notify` result tells the engine, if anything. Whether changes may have been lost is decided by paddock-watch's shared
+/// mapping ([`NotifySource::change_from`], conformance C146): a Rescan flag becomes [`WatchSignal::Rescan`] (look at every root), an
+/// error stays [`WatchSignal::Error`] (fall back to polling, then look at every root).
+fn watch_signal(res: notify::Result<notify::Event>) -> Option<WatchSignal> {
+    match (NotifySource::change_from(&res), res) {
+        (_, Err(e)) => {
+            log_watcher_error(&e, std::time::Instant::now());
+            Some(WatchSignal::Error(e.to_string()))
+        }
+        (Change::Rescan(cause), Ok(_)) => Some(WatchSignal::Rescan(cause)),
+        // The mapping calls only an error a failure, and errors are handled above; kept total for a future source.
+        (Change::Failed(cause), Ok(_)) => Some(WatchSignal::Error(cause)),
+        // Opening or reading a file changes nothing.
+        (Change::Changed, Ok(ev)) if matches!(ev.kind, notify::EventKind::Access(_)) => None,
+        (Change::Changed, Ok(ev)) => Some(WatchSignal::Paths(ev.paths)),
+    }
+}
+
 /// File watcher errors are logged at most once per this interval (a broken watcher reports continuously).
 const WATCHER_ERROR_INTERVAL: Duration = Duration::from_secs(10);
 
 /// Logs a file watcher error: its kind only (the message may name paths), throttled, with how many were
 /// left out since the last entry. Returns whether it logged.
 fn log_watcher_error(e: &notify::Error, now: std::time::Instant) -> bool {
-    static LAST: std::sync::Mutex<(Option<std::time::Instant>, u64)> = std::sync::Mutex::new((None, 0));
-    let mut last = crate::sync::lock(&LAST);
+    static LAST: ErrorThrottle = std::sync::Mutex::new((None, 0));
+    log_watcher_error_in(&LAST, e, now)
+}
+
+/// When the last watcher error was logged, and how many were left out since.
+type ErrorThrottle = std::sync::Mutex<(Option<std::time::Instant>, u64)>;
+
+/// [`log_watcher_error`] over a given throttle: the process has one, a test its own (a test sharing the process's one counted
+/// another test's real watcher errors as its own suppressed ones).
+fn log_watcher_error_in(throttle: &ErrorThrottle, e: &notify::Error, now: std::time::Instant) -> bool {
+    let mut last = crate::sync::lock(throttle);
     if last.0.is_some_and(|t| now.duration_since(t) < WATCHER_ERROR_INTERVAL) {
         last.1 += 1;
         return false;
@@ -609,6 +633,52 @@ mod tests {
         }
     }
 
+    /// Regression (ER-21 class "a watcher adapter loses notify's Rescan"): notify sends an inotify or ReadDirectoryChangesW
+    /// overflow as a Rescan flag with no path, which became an empty batch that looked at nothing. It must look at every root,
+    /// and it is not a watcher failure: the roots keep their events.
+    #[test]
+    fn a_rescan_notice_with_no_path_rescans_every_root() {
+        // A factory whose watchers report nothing, so the notice below is the only signal (a real watcher on a fresh folder can
+        // report the folder itself, which named every root and hid the bug).
+        struct Quiet;
+        impl FileWatcher for Quiet {
+            fn watch(&mut self, _: &Path, _: bool) -> anyhow::Result<()> {
+                Ok(())
+            }
+        }
+        struct QuietFactory;
+        impl WatcherFactory for QuietFactory {
+            fn create(&self, _: WatchMode, _: Duration, _: WatchSink) -> anyhow::Result<Box<dyn FileWatcher>> {
+                Ok(Box::new(Quiet))
+            }
+        }
+        let (a, b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let roots = [a.path().to_path_buf(), b.path().to_path_buf()];
+        let batches = Arc::new(Mutex::new(Vec::<Vec<PathBuf>>::new()));
+        let seen = batches.clone();
+        let live = LiveTail::start(
+            &roots,
+            WatchSettings {
+                tick_ms: 60_000,
+                ..WatchSettings::default()
+            },
+            Arc::new(QuietFactory),
+            Box::new(move |x| seen.lock().unwrap().push(x)),
+            Box::new(|_, _| {}),
+        );
+        assert!(live.roots().iter().all(|r| r.mode == WatchMode::Events), "{:?}", live.roots());
+        let overflow = notify::Event::new(notify::EventKind::Other).set_flag(notify::event::Flag::Rescan);
+        live.signal(watch_signal(Ok(overflow)).expect("a rescan notice is passed on"));
+        paddock_testkit::wait_until_within("a batch that names every root", LOADED_CI, || {
+            batches.lock().unwrap().iter().any(|b| roots.iter().all(|r| b.contains(r)))
+        });
+        assert!(
+            live.roots().iter().all(|r| r.mode == WatchMode::Events),
+            "a rescan is no fallback: {:?}",
+            live.roots()
+        );
+    }
+
     use crate::test_support::{block, main_window, test_app, window, TempDir};
     use crate::workspace_commands::{open_paths, set_live, workspace_summary};
     use std::sync::Mutex as StdMutex;
@@ -966,24 +1036,29 @@ mod tests {
     #[test]
     fn watcher_errors_are_logged_by_kind_and_throttled() {
         let _g = crate::activity::test_capture();
-        let t0 = std::time::Instant::now() + Duration::from_secs(3600);
+        // Its own throttle: other tests' real watchers may log errors into the process's one meanwhile.
+        let throttle: ErrorThrottle = std::sync::Mutex::new((None, 0));
+        let t0 = std::time::Instant::now();
         let e = notify::Error::path_not_found().add_path(PathBuf::from("/secret/dir/a.log"));
-        assert!(log_watcher_error(&e, t0));
-        assert!(!log_watcher_error(&e, t0 + Duration::from_secs(1)));
+        assert!(log_watcher_error_in(&throttle, &e, t0));
+        assert!(!log_watcher_error_in(&throttle, &e, t0 + Duration::from_secs(1)));
         let io = notify::Error::io(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "/secret/dir"));
-        assert!(log_watcher_error(&io, t0 + WATCHER_ERROR_INTERVAL * 2));
+        assert!(log_watcher_error_in(&throttle, &io, t0 + WATCHER_ERROR_INTERVAL * 2));
+        // The capture is the process's: another test's watcher may add its own lines, so ours are found in order among them.
         let logged: Vec<_> = crate::activity::captured()
             .into_iter()
             .filter(|c| c.message.starts_with("File watcher error"))
             .collect();
-        assert_eq!(logged.len(), 2);
-        assert_eq!(
-            (logged[0].level, logged[0].props["ErrorKind"].as_str()),
-            (log::Level::Warn, "PathNotFound")
-        );
-        assert_eq!(
-            (logged[1].props["ErrorKind"].as_str(), logged[1].props["Suppressed"].as_str()),
-            ("Io(PermissionDenied)", "1")
+        let ours = |c: &crate::activity::Captured, kind: &str, suppressed: &str| {
+            c.level == log::Level::Warn && c.props["ErrorKind"] == kind && c.props["Suppressed"] == suppressed
+        };
+        let first = logged
+            .iter()
+            .position(|c| ours(c, "PathNotFound", "0"))
+            .expect("the first error is logged");
+        assert!(
+            logged[first + 1..].iter().any(|c| ours(c, "Io(PermissionDenied)", "1")),
+            "the next one after the interval, counting the one left out: {logged:?}"
         );
         assert!(logged.iter().all(|c| !format!("{:?}", c.props).contains("secret")));
     }

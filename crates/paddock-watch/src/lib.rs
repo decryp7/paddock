@@ -19,7 +19,7 @@ mod native;
 mod settle;
 mod source;
 
-pub use debounce::{Debouncer, Due};
+pub use debounce::{DEFAULT_RESYNC, Debouncer, Due};
 #[cfg(feature = "notify")]
 pub use native::NotifySource;
 pub use settle::{
@@ -28,4 +28,7 @@ pub use settle::{
     MAX_SCAN_DEPTH, MAX_SCAN_ENTRIES, Ready, Scan, Settle, SettleConfig, Skipped,
     is_temporary_name, scan_folder, scan_folder_limited,
 };
-pub use source::{ChangeSource, FakeSource, WatchError, WatchHandle, spawn};
+pub use source::{
+    Change, ChangeSource, FakeSource, RESTART_FIRST, RESTART_MAX, ROOT_POLL, WatchError,
+    WatchHandle, restart_delay, spawn,
+};

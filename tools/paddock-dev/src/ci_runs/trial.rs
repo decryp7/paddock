@@ -23,13 +23,17 @@ pub enum Outcome {
         /// The trial merge commit.
         head: String,
     },
-    /// Git's merge conflicts: the files, the target and the branch's head. Nothing was pushed.
+    /// Git's merge conflicts: the member that did not merge, the files, the target. Nothing was pushed.
     Conflict {
-        /// What the branch was to be merged onto.
+        /// The member whose merge conflicted (the branch, with `--trial`).
+        member: String,
+        /// What the members were to be merged onto.
         target: String,
         /// The conflicting files.
         files: Vec<String>,
     },
+    /// Members that are not on origin (a local branch is not a member of a trial): none was merged and nothing was pushed.
+    NotOnOrigin(Vec<String>),
     /// The merge check found something in the combined tree: its text. Nothing was pushed.
     Findings(String),
 }
@@ -41,6 +45,63 @@ pub fn valid_branch(name: &str) -> bool {
         && !name.contains("..")
         && !name.ends_with(['/', '.'])
         && name.chars().all(|c| c.is_ascii_alphanumeric() || "._-/".contains(c))
+}
+
+/// The folder a trial's scratch folders live in (ER-14: a data drive, never inside the home folder; one place for `ci dispatch
+/// --trial`, `ci trial-prune` and the member gate of `merge check`, rule 55). In this order: `PADDOCK_TRIAL_DIR`, git config
+/// `paddock.trialRoot`, then `trials` beside the worktree root (git config `paddock.worktreeRoot`, else `PADDOCK_WORKTREE_ROOT`).
+/// Whichever gives the folder, it must be absolute, without `..`, and not inside `home` (ER-14). `Err` names the cause and the next
+/// step.
+pub fn trial_root(
+    env: &dyn Fn(&str) -> Option<String>,
+    config: &dyn Fn(&str) -> Option<String>,
+    home: Option<&Path>,
+) -> Result<std::path::PathBuf, String> {
+    use std::path::PathBuf;
+    let nonempty = |v: Option<String>| v.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+    let (path, from) = if let Some(v) = nonempty(env("PADDOCK_TRIAL_DIR")) {
+        (PathBuf::from(v), "PADDOCK_TRIAL_DIR".to_string())
+    } else if let Some(v) = nonempty(config("paddock.trialRoot")) {
+        (PathBuf::from(v), "git config paddock.trialRoot".to_string())
+    } else if let Some(w) = nonempty(config("paddock.worktreeRoot")).or_else(|| nonempty(env("PADDOCK_WORKTREE_ROOT"))) {
+        let parent = PathBuf::from(&w).parent().map(Path::to_path_buf).filter(|p| p.parent().is_some());
+        match parent {
+            Some(p) => (p.join("trials"), format!("`trials` beside the worktree root {w}")),
+            None => {
+                return Err(format!(
+                    "the worktree root {w} has no parent folder to put `trials` in. Next step: run `git config paddock.trialRoot <folder on a data drive>` once, or set PADDOCK_TRIAL_DIR"
+                ));
+            }
+        }
+    } else {
+        return Err("no trial folder is set: PADDOCK_TRIAL_DIR is empty, git config `paddock.trialRoot` and `paddock.worktreeRoot` are not set. Next step: run `git config paddock.trialRoot <folder on a data drive, not under your home>` once in the main checkout".into());
+    };
+    if !path.is_absolute() || path.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+        return Err(format!(
+            "the trial folder {} ({from}) is not an absolute folder without `..`. Next step: set `git config paddock.trialRoot` (or PADDOCK_TRIAL_DIR) to one",
+            path.display()
+        ));
+    }
+    if home.is_some_and(|h| path.starts_with(h)) {
+        return Err(format!(
+            "the trial folder {} ({from}) is inside your home folder (ER-14). Next step: set `git config paddock.trialRoot` (or PADDOCK_TRIAL_DIR) to a folder on a data drive",
+            path.display()
+        ));
+    }
+    Ok(path)
+}
+
+/// [`trial_root`] with the process environment, the repository's git config (read from `repo`) and the home folder.
+pub fn trial_root_real(repo: &Path) -> Result<std::path::PathBuf, String> {
+    let git_config = |key: &str| {
+        crate::worktree::git::Repo::discover(repo)
+            .ok()
+            .and_then(|r| r.git().text(&["config", "--get", key]).ok())
+    };
+    let home = std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(std::path::PathBuf::from);
+    trial_root(&|k| std::env::var(k).ok(), &git_config, home.as_deref())
 }
 
 fn git(g: &GitTrain, kind: Child, args: &[&str]) -> Result<String, String> {
@@ -74,18 +135,85 @@ pub fn open_train(g: &GitTrain) -> Result<Option<String>, String> {
     Ok(None)
 }
 
-/// Fetches, merges and pushes. `check` is the merge check on the trial commit (the clone is its root); it returns the findings'
-/// text as an error. `onto` names the target (`origin/train/x`) instead of the open train.
+/// The `::error::` text of an outcome that is not [`Outcome::Ready`] (`None` for a ready one): which member, why, and the next step.
+/// A conflict names the member that did not merge and the members merged before it.
+pub fn refusal(outcome: &Outcome, members: &[String]) -> Option<String> {
+    match outcome {
+        Outcome::Ready { .. } => None,
+        Outcome::Conflict { member, target, files } => {
+            let before: Vec<&str> = members.iter().map(String::as_str).take_while(|m| m != member).collect();
+            let after = if before.is_empty() {
+                String::new()
+            } else {
+                format!(" (after merging {})", before.join(", "))
+            };
+            Some(format!(
+                "{member} conflicts with {target}{after} in {} file(s): {}. Next step: send {member} back to its author to merge {target} and resolve them; nothing was pushed or dispatched",
+                files.len(),
+                files.join(", ")
+            ))
+        }
+        Outcome::NotOnOrigin(missing) => Some(format!(
+            "not on origin: {}. Next step: push the branch(es) so they are proven heads (a local-only branch is not a member of a trial); nothing was merged or dispatched",
+            missing.join(", ")
+        )),
+        Outcome::Findings(text) => Some(format!(
+            "the merge check found something in the merged members; nothing was dispatched: {text}"
+        )),
+    }
+}
+
+/// The most members one trial composes (a train has 3 to 4; ER-9).
+pub const MAX_MEMBERS: usize = 10;
+
+/// Fetches, merges and pushes one branch: [`prepare_members`] with that branch as the only member (its trial ref is `trial/<branch>`).
 pub fn prepare(
     g: &GitTrain,
     branch: &str,
     onto: Option<&str>,
     check: &dyn Fn(&Path, &str) -> Result<(), String>,
 ) -> Result<Outcome, String> {
-    if !valid_branch(branch) {
-        return Err(format!(
-            "`{branch}` is not a branch name this command accepts (letters, digits, . _ - and /)"
-        ));
+    prepare_members(g, &[branch.to_string()], onto, check)
+}
+
+/// Fetches, merges and pushes. `check` is the merge check on the trial commit (the clone is its root); it returns the findings'
+/// text as an error. `onto` names the target (`origin/train/x`) instead of the open train.
+///
+/// The members are merged in the order given, each with git's own three-way merge (merge commits, never a rebase, so a member's own
+/// commits are the commits of the trial), in the tool's clone with no checkout. Every member must already be on origin: a branch
+/// that is only local is refused before anything is merged, so a trial never runs an unproven head. The first merge that conflicts
+/// stops the trial and names its member. One member's trial ref is `trial/<branch>`; several members' is `trial/members-<head12>`.
+pub fn prepare_members(
+    g: &GitTrain,
+    members: &[String],
+    onto: Option<&str>,
+    check: &dyn Fn(&Path, &str) -> Result<(), String>,
+) -> Result<Outcome, String> {
+    if members.is_empty() || members.len() > MAX_MEMBERS {
+        return Err(format!("a trial takes 1 to {MAX_MEMBERS} members, not {}", members.len()));
+    }
+    for (i, m) in members.iter().enumerate() {
+        if !valid_branch(m) {
+            return Err(format!(
+                "`{m}` is not a branch name this command accepts (letters, digits, . _ - and /)"
+            ));
+        }
+        if members[..i].contains(m) {
+            return Err(format!("`{m}` is named twice: a member is merged once"));
+        }
+    }
+    // Every member must be on origin (one question for all of them), before anything is fetched or merged.
+    let mut ask: Vec<String> = ["ls-remote", "--heads", "origin"].map(String::from).to_vec();
+    ask.extend(members.iter().map(|m| format!("refs/heads/{m}")));
+    let listed = git(g, Child::Authed, &ask.iter().map(String::as_str).collect::<Vec<_>>())?;
+    let on_origin: Vec<&str> = listed
+        .lines()
+        .filter_map(|l| l.split_whitespace().nth(1))
+        .filter_map(|r| r.strip_prefix("refs/heads/"))
+        .collect();
+    let missing: Vec<String> = members.iter().filter(|m| !on_origin.contains(&m.as_str())).cloned().collect();
+    if !missing.is_empty() {
+        return Ok(Outcome::NotOnOrigin(missing));
     }
     let mut fetch: Vec<String> = [
         "fetch",
@@ -97,10 +225,10 @@ pub fn prepare(
     ]
     .map(String::from)
     .to_vec();
-    fetch.push(format!("+refs/heads/{branch}:refs/remotes/origin/{branch}"));
+    fetch.extend(members.iter().map(|m| format!("+refs/heads/{m}:refs/remotes/origin/{m}")));
     // A target that is neither main nor a train (an experiment branch) is fetched too: the kept clone only has the refs named here.
     if let Some(name) = onto.and_then(|t| t.strip_prefix("origin/"))
-        && name != branch
+        && !members.iter().any(|m| m == name)
         && name != "main"
         && !name.starts_with("train/")
     {
@@ -120,57 +248,57 @@ pub fn prepare(
     let target_sha = git(g, Child::Local, &["rev-parse", "--verify", &format!("{target}^{{commit}}")])?
         .trim()
         .to_string();
-    let branch_sha = git(
-        g,
-        Child::Local,
-        &["rev-parse", "--verify", &format!("refs/remotes/origin/{branch}^{{commit}}")],
-    )?
-    .trim()
-    .to_string();
-    // Git's own merge, in memory: exit 1 is a conflict and lists the files.
-    let (clean, out) = g.run_git(
-        Child::Local,
-        &[
-            "merge-tree",
-            "--write-tree",
-            "--name-only",
-            "--no-messages",
-            &target_sha,
-            &branch_sha,
-        ],
-    )?;
-    if !clean {
-        let files: Vec<String> = out
-            .lines()
-            .skip(1)
-            .map(str::trim)
-            .take_while(|l| !l.is_empty())
-            .map(str::to_string)
-            .collect();
-        if files.is_empty() {
-            return Err(format!("git merge-tree failed: {}", out.trim()));
+    let single_ref = (members.len() == 1).then(|| format!("trial/{}", members[0]));
+    let mut head = target_sha.clone();
+    for m in members {
+        let sha = git(
+            g,
+            Child::Local,
+            &["rev-parse", "--verify", &format!("refs/remotes/origin/{m}^{{commit}}")],
+        )?
+        .trim()
+        .to_string();
+        // Git's own merge, in memory: exit 1 is a conflict and lists the files.
+        let (clean, out) = g.run_git(
+            Child::Local,
+            &["merge-tree", "--write-tree", "--name-only", "--no-messages", &head, &sha],
+        )?;
+        if !clean {
+            let files: Vec<String> = out
+                .lines()
+                .skip(1)
+                .map(str::trim)
+                .take_while(|l| !l.is_empty())
+                .map(str::to_string)
+                .collect();
+            if files.is_empty() {
+                return Err(format!("git merge-tree failed for {m}: {}", out.trim()));
+            }
+            // A branch that is sent back keeps no trial ref from an earlier, cleaner trial.
+            if let Some(r) = &single_ref {
+                delete(g, r)?;
+            }
+            return Ok(Outcome::Conflict {
+                member: m.clone(),
+                target,
+                files,
+            });
         }
-        // A branch that is sent back keeps no trial ref from an earlier, cleaner trial.
-        delete(g, &format!("trial/{branch}"))?;
-        return Ok(Outcome::Conflict { target, files });
+        let tree = out.lines().next().unwrap_or("").trim().to_string();
+        let message = format!("Merge {m} ({}) into trial of {target}\n", sha.get(..9).unwrap_or(&sha));
+        head = git(g, Child::Local, &["commit-tree", &tree, "-p", &head, "-p", &sha, "-m", &message])?
+            .trim()
+            .to_string();
     }
-    let tree = out.lines().next().unwrap_or("").trim().to_string();
-    let message = format!(
-        "Merge {branch} ({}) into trial of {target}\n",
-        branch_sha.get(..9).unwrap_or(&branch_sha)
-    );
-    let head = git(
-        g,
-        Child::Local,
-        &["commit-tree", &tree, "-p", &target_sha, "-p", &branch_sha, "-m", &message],
-    )?
-    .trim()
-    .to_string();
+    let trial_ref = single_ref
+        .clone()
+        .unwrap_or_else(|| format!("trial/members-{}", head.get(..12).unwrap_or(&head)));
     if let Err(findings) = check(&g.root, &head) {
-        delete(g, &format!("trial/{branch}"))?;
+        if let Some(r) = &single_ref {
+            delete(g, r)?;
+        }
         return Ok(Outcome::Findings(findings));
     }
-    let trial_ref = format!("trial/{branch}");
     // A scratch ref of this command alone: the next trial of the branch replaces it, so the push is forced.
     git(
         g,
@@ -280,6 +408,50 @@ pub fn prune(g: &GitTrain, dry: bool) -> Result<Vec<Stale>, String> {
 mod tests {
     use super::*;
     use std::path::PathBuf;
+
+    fn root_of(env: &[(&str, &str)], cfg: &[(&str, &str)], home: Option<&str>) -> Result<PathBuf, String> {
+        let e = |k: &str| env.iter().find(|(n, _)| *n == k).map(|(_, v)| v.to_string());
+        let c = |k: &str| cfg.iter().find(|(n, _)| *n == k).map(|(_, v)| v.to_string());
+        trial_root(&e, &c, home.map(Path::new))
+    }
+
+    #[test]
+    fn the_trial_root_is_the_variable_then_the_config_then_trials_beside_the_worktree_root() {
+        let home = Some("/home/me");
+        assert_eq!(
+            root_of(&[("PADDOCK_TRIAL_DIR", "/d/t")], &[("paddock.trialRoot", "/d/x")], home).unwrap(),
+            PathBuf::from("/d/t")
+        );
+        // The variable is checked like the config: inside HOME, relative or with `..` it is refused.
+        for bad in ["/home/me/t", "rel/t", "/d/../home/me"] {
+            let e = root_of(&[("PADDOCK_TRIAL_DIR", bad)], &[], home).unwrap_err();
+            assert!(e.contains("PADDOCK_TRIAL_DIR") && e.contains("Next step"), "{bad}: {e}");
+        }
+        assert_eq!(root_of(&[], &[("paddock.trialRoot", "/d/x")], home).unwrap(), PathBuf::from("/d/x"));
+        assert_eq!(
+            root_of(&[], &[("paddock.worktreeRoot", "/data/dev-targets/wt")], home).unwrap(),
+            PathBuf::from("/data/dev-targets/trials")
+        );
+        assert_eq!(
+            root_of(&[("PADDOCK_WORKTREE_ROOT", "/data/dev-targets/wt")], &[], home).unwrap(),
+            PathBuf::from("/data/dev-targets/trials")
+        );
+    }
+
+    #[test]
+    fn a_trial_root_that_cannot_be_used_says_why_and_the_next_step() {
+        let home = Some("/home/me");
+        for (cfg, want) in [
+            (vec![], "no trial folder is set"),
+            (vec![("paddock.trialRoot", "/home/me/trials")], "inside your home folder"),
+            (vec![("paddock.worktreeRoot", "/home/me/wt")], "inside your home folder"),
+            (vec![("paddock.trialRoot", "relative/dir")], "not an absolute folder"),
+            (vec![("paddock.trialRoot", "/d/../home/me")], "not an absolute folder"),
+        ] {
+            let e = root_of(&[], &cfg, home).unwrap_err();
+            assert!(e.contains(want) && e.contains("Next step"), "{e}");
+        }
+    }
 
     #[allow(clippy::disallowed_methods, reason = "a test starts git in its own scratch repositories")]
     fn git_in(dir: &Path, args: &[&str]) -> String {
@@ -419,7 +591,7 @@ mod tests {
         commit(&w, "train/open", "shared.txt", "train side\n", "train/open");
         commit(&w, "feat/c", "shared.txt", "branch side\n", "main");
         let g = open(&w);
-        let Outcome::Conflict { target, files } = prepare(&g, "feat/c", None, &ok).unwrap() else {
+        let Outcome::Conflict { target, files, .. } = prepare(&g, "feat/c", None, &ok).unwrap() else {
             panic!("expected a conflict")
         };
         assert_eq!(target, "origin/train/open");
@@ -515,5 +687,126 @@ mod tests {
         g.timeout = std::time::Duration::from_secs(1);
         let e = g.run_git(Child::Local, &["-c", "alias.slow=!sleep 30", "slow"]).unwrap_err();
         assert!(e.contains("ended before it answered"), "{e}");
+    }
+
+    fn members(names: &[&str]) -> Vec<String> {
+        names.iter().map(|n| n.to_string()).collect()
+    }
+
+    /// Several members already on origin are merged onto the target in order, as merge commits with the members' own commits (no
+    /// rebase), and the one trial ref is pushed from the clone.
+    #[test]
+    fn members_on_origin_are_merged_in_order_as_merge_commits_and_pushed_from_the_clone() {
+        let w = world();
+        commit(&w, "feat/a", "a.txt", "a", "main");
+        commit(&w, "feat/b", "b.txt", "b", "main");
+        let g = open(&w);
+        let ms = members(&["feat/a", "feat/b"]);
+        let Outcome::Ready {
+            trial_ref, target, head, ..
+        } = prepare_members(&g, &ms, Some("origin/train/open"), &ok).unwrap()
+        else {
+            panic!("expected a ready trial");
+        };
+        assert_eq!(target, "origin/train/open");
+        assert!(
+            trial_ref.starts_with("trial/members-") && trial_ref.len() == "trial/members-".len() + 12,
+            "{trial_ref}"
+        );
+        assert_eq!(git_in(&w.origin, &["rev-parse", &format!("refs/heads/{trial_ref}")]), head);
+        // Two merge commits on the first-parent line, a first then b, the members' own commits as second parents.
+        let first_parents = git_in(&w.origin, &["log", "--first-parent", "--format=%s", &head, "-3"]);
+        let lines: Vec<&str> = first_parents.lines().collect();
+        assert!(
+            lines[0].starts_with("Merge feat/b") && lines[1].starts_with("Merge feat/a"),
+            "{first_parents}"
+        );
+        let b = git_in(&w.origin, &["rev-parse", "refs/heads/feat/b"]);
+        assert_eq!(
+            git_in(&w.origin, &["rev-parse", &format!("{head}^2")]),
+            b,
+            "the member's own commit, not a rebased copy"
+        );
+        let tree = git_in(&w.origin, &["ls-tree", "-r", "--name-only", &head]);
+        assert!(["a.txt", "b.txt", "m1.txt"].iter().all(|f| tree.contains(f)), "{tree}");
+        assert_eq!(
+            refusal(
+                &Outcome::Ready {
+                    trial_ref,
+                    target,
+                    target_sha: String::new(),
+                    head
+                },
+                &ms
+            ),
+            None
+        );
+    }
+
+    /// A member that is only local (not on origin) is refused before anything is merged or pushed, and named.
+    #[test]
+    fn a_member_that_is_not_on_origin_is_refused_and_nothing_is_pushed() {
+        let w = world();
+        commit(&w, "feat/a", "a.txt", "a", "main");
+        // Local only: committed in the working copy, never pushed.
+        git_in(&w.work, &["checkout", "-q", "-B", "feat/local", "main"]);
+        std::fs::write(w.work.join("l.txt"), "l").unwrap();
+        git_in(&w.work, &["add", "-A"]);
+        git_in(&w.work, &["commit", "-q", "-m", "feat: l"]);
+        let g = open(&w);
+        let ms = members(&["feat/a", "feat/local"]);
+        let out = prepare_members(&g, &ms, None, &ok).unwrap();
+        assert_eq!(out, Outcome::NotOnOrigin(vec!["feat/local".into()]));
+        let why = refusal(&out, &ms).unwrap();
+        assert!(why.contains("not on origin: feat/local") && why.contains("Next step"), "{why}");
+        assert!(
+            git_in(&w.origin, &["for-each-ref", "refs/heads/trial/"]).is_empty(),
+            "nothing was pushed"
+        );
+    }
+
+    /// The first member that conflicts stops the trial and is named, with the members merged before it; nothing is pushed.
+    #[test]
+    fn the_first_conflicting_member_stops_the_trial_and_is_named() {
+        let w = world();
+        commit(&w, "feat/a", "shared.txt", "from a\n", "main");
+        commit(&w, "feat/b", "b.txt", "b", "main");
+        commit(&w, "feat/c", "shared.txt", "from c\n", "main");
+        let g = open(&w);
+        let ms = members(&["feat/a", "feat/b", "feat/c"]);
+        let out = prepare_members(&g, &ms, Some("origin/main"), &ok).unwrap();
+        let Outcome::Conflict { member, files, .. } = &out else {
+            panic!("expected a conflict, got {out:?}");
+        };
+        assert_eq!(member, "feat/c");
+        assert_eq!(files, &vec!["shared.txt".to_string()]);
+        let why = refusal(&out, &ms).unwrap();
+        assert!(
+            why.contains("feat/c conflicts") && why.contains("after merging feat/a, feat/b") && why.contains("shared.txt"),
+            "{why}"
+        );
+        assert!(
+            git_in(&w.origin, &["for-each-ref", "refs/heads/trial/"]).is_empty(),
+            "nothing was pushed"
+        );
+    }
+
+    #[test]
+    fn a_trial_takes_one_to_ten_distinct_valid_members() {
+        let w = world();
+        let g = open(&w);
+        assert!(prepare_members(&g, &[], None, &ok).unwrap_err().contains("1 to 10"));
+        assert!(
+            prepare_members(&g, &members(&["a"; 2]), None, &ok)
+                .unwrap_err()
+                .contains("named twice")
+        );
+        assert!(
+            prepare_members(&g, &members(&["bad branch;x"]), None, &ok)
+                .unwrap_err()
+                .contains("not a branch name")
+        );
+        let many: Vec<String> = (0..11).map(|i| format!("m{i}")).collect();
+        assert!(prepare_members(&g, &many, None, &ok).unwrap_err().contains("1 to 10"));
     }
 }

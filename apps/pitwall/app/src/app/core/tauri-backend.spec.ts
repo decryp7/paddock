@@ -1,6 +1,8 @@
 import type { AppPermissions, JobEvent, LiveUpdate, PlaygroundEvent, PlaygroundRequest, PresetDraft, Settings } from './api.types';
 import type { PitwallBackend } from './backend';
+import { countingInvoke, expectInvokes } from '@decryp7/paddock-ui/ipc/testing';
 import { JOB_METHODS } from './backend';
+import { APP_COMMANDS } from '../generated/app-commands';
 import { LIVE_EVENT, POPOVER_EVENT, TauriBackend, toBase64, type TauriBridge } from './tauri-backend';
 
 interface Call {
@@ -158,6 +160,67 @@ const JOBS: [string, (b: PitwallBackend) => Promise<unknown>, string, Record<str
 ];
 
 describe('TauriBackend', () => {
+  /** PW-1 (ADR 0108): N ids are one invoke, not N, and the reply is checked: one result per id. */
+  describe('deleteModels', () => {
+    const IDS = ['a-q4_k_m', 'b-q4_k_m', 'c-q4_k_m', 'd-q4_k_m'];
+    const gone = { code: 'notFound', message: 'no such model', retryable: false };
+
+    it('sends every id in one delete_models invoke and returns one result per id, in order', async () => {
+      const { bridge } = fakeBridge(() => IDS.map((_, i) => (i === 2 ? { err: gone } : { ok: null })));
+      const counter = countingInvoke(bridge.invoke);
+      const backend = new TauriBackend({ ...bridge, invoke: counter.invoke });
+      const results = await expectInvokes(counter, 1, () => backend.deleteModels(IDS));
+      expect(counter.calls).toEqual([{ command: 'delete_models', args: { ids: IDS } }]);
+      expect(results).toEqual([{ ok: null }, { ok: null }, { err: gone }, { ok: null }]);
+    });
+
+    it('answers every id of a reply that does not have one result per id with an internal error (the backend broke its contract)', async () => {
+      const { bridge } = fakeBridge(() => [{ ok: null }]);
+      const results = await new TauriBackend(bridge).deleteModels(IDS);
+      expect(results).toHaveLength(IDS.length);
+      for (const r of results) expect(r).toMatchObject({ err: { code: 'internal' } });
+    });
+
+    /** P2-3: the chunking lives here, where the request bound lives, so a caller makes one call whatever the list. */
+    describe('a list too large for one call', () => {
+      const LONG = Array.from({ length: 1300 }, (_, i) => `model-${i}`.padEnd(200, 'x'));
+
+      it('goes in chunks that each fit the command limit, in order, and the results are merged in the order of the ids', async () => {
+        const sent: string[][] = [];
+        const { bridge } = fakeBridge(() => []);
+        const invoke = <T>(cmd: string, args?: Record<string, unknown>): Promise<T> => {
+          const ids = (args as { ids: string[] }).ids;
+          sent.push(ids);
+          return Promise.resolve(ids.map((id, i) => (i % 2 === 0 ? { ok: null } : { err: { ...gone, message: id } })) as T);
+        };
+        const results = await new TauriBackend({ ...bridge, invoke }).deleteModels(LONG);
+        expect(sent.length).toBeGreaterThan(1);
+        for (const ids of sent) expect(new TextEncoder().encode(JSON.stringify({ ids })).length).toBeLessThan(APP_COMMANDS.delete_models.limit);
+        expect(sent.flat()).toEqual(LONG);
+        expect(results).toHaveLength(LONG.length);
+        const expected = sent.flatMap((ids) => ids.map((id, i) => (i % 2 === 0 ? { ok: null } : { err: { ...gone, message: id } })));
+        expect(results).toEqual(expected);
+      });
+
+      it('still answers every id when one chunk fails: its ids carry the error, the others their own results', async () => {
+        const { bridge } = fakeBridge(() => []);
+        let call = 0;
+        const invoke = <T>(_cmd: string, args?: Record<string, unknown>): Promise<T> => {
+          const ids = (args as { ids: string[] }).ids;
+          return ++call === 2 ? Promise.reject({ code: 'busy', message: 'the server is busy' }) : Promise.resolve(ids.map(() => ({ ok: null })) as T);
+        };
+        const results = await new TauriBackend({ ...bridge, invoke }).deleteModels(LONG);
+        expect(call).toBeGreaterThan(2);
+        expect(results).toHaveLength(LONG.length);
+        const failed = results.flatMap((r, i) => ('err' in r ? [i] : []));
+        expect(failed.length).toBeGreaterThan(0);
+        expect(failed.length).toBeLessThan(LONG.length);
+        for (const i of failed) expect(results[i]).toEqual({ err: { code: 'busy', message: 'the server is busy', retryable: true } });
+        expect(failed[failed.length - 1]! - failed[0]! + 1).toBe(failed.length); // one contiguous chunk
+      });
+    });
+  });
+
   it.each(TABLE)('%s invokes its command with the documented arguments', async (_name, call, cmd, args) => {
     const { bridge, calls } = fakeBridge();
     await call(new TauriBackend(bridge));
@@ -172,8 +235,8 @@ describe('TauriBackend', () => {
   });
 
   it('covers every request/response method of the backend interface', () => {
-    const methods = Object.getOwnPropertyNames(TauriBackend.prototype).filter((m) => m !== 'constructor' && m !== 'run' && m !== 'job');
-    const pinned = new Set([...TABLE.map((r) => r[0]), ...JOBS.map((r) => r[0]), 'subscribe', 'onPopover', 'onQuitAsk', 'onConnectedApps', 'chat', 'jobEvents']);
+    const methods = Object.getOwnPropertyNames(TauriBackend.prototype).filter((m) => m !== 'constructor' && m !== 'run' && m !== 'job' && m !== 'deleteChunk');
+    const pinned = new Set([...TABLE.map((r) => r[0]), ...JOBS.map((r) => r[0]), 'deleteModels', 'subscribe', 'onPopover', 'onQuitAsk', 'onConnectedApps', 'chat', 'jobEvents']);
     expect(methods.filter((m) => !pinned.has(m))).toEqual([]);
   });
 

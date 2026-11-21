@@ -13,6 +13,7 @@
  "apps": [],
  "kinds": {},
  "packages": {},
+ "cargoOnly": [],
  "why": {
   "conformance": [
    "conformance always runs"

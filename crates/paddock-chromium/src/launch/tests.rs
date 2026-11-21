@@ -1636,3 +1636,48 @@ fn the_browser_gets_a_fresh_temp_folder_inside_its_profile() {
     assert_eq!(Path::new(&temp), kept.join(BROWSER_TEMP));
     assert!(!kept.join(BROWSER_TEMP).join("old").exists());
 }
+
+/// The browser starts in its own temp folder, not in the caller's working folder: a browser started from a folder on an
+/// external volume (the dev machine's repo checkout) makes macOS ask the user for access to a removable volume, a window on
+/// the desktop (ER-14).
+#[test]
+fn the_browser_starts_in_its_own_temp_folder_not_the_callers() {
+    let d = tempfile::tempdir().unwrap();
+    let seen = d.path().join("cwd.txt");
+    let exe = Browser::chromium(
+        paddock_testkit::StandIn::new(d.path(), "cwd-chrome")
+            .when_args(
+                &[],
+                paddock_testkit::Actions::new()
+                    .writes_with(
+                        &seen.to_string_lossy(),
+                        "{cwd}\n{env:MAC_CHROMIUM_TMPDIR|unset}\n",
+                    )
+                    .exit(1),
+            )
+            .install()
+            .unwrap()
+            .program(),
+    );
+    let _ = Chromium::launch_with(&exe, &opts(&d.path().join("p")), Sandbox::On);
+    let text = std::fs::read_to_string(&seen).expect("the stand-in did not record its folder");
+    let mut lines = text.lines();
+    let (cwd, temp) = (lines.next().unwrap(), lines.next().unwrap());
+    // The throwaway profile is gone by now, so compare the last two names (profile, browser-temp), not the real paths.
+    let tail = |p: &str| -> Vec<String> {
+        let mut v: Vec<String> = Path::new(p)
+            .components()
+            .rev()
+            .take(2)
+            .map(|c| c.as_os_str().to_string_lossy().into_owned())
+            .collect();
+        v.reverse();
+        v
+    };
+    assert_eq!(
+        tail(cwd),
+        tail(temp),
+        "the browser started in {cwd}, not in its temp folder {temp}"
+    );
+    assert_eq!(tail(cwd)[1], BROWSER_TEMP);
+}
