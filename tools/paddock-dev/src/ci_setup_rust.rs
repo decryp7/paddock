@@ -98,9 +98,10 @@ const TAURI_LINUX_PACKAGES: [&str; 6] = [
 /// `dev ci setup-rust`.
 #[derive(Args, Debug)]
 pub struct SetupRustArgs {
-    /// local (sccache's disk cache), auto (Redis when PADDOCK_SCCACHE_REDIS_ENDPOINT is set, else local), redis, or s3 (the local
-    /// disk first and the shared S3 store behind it, falling back to the local disk alone when S3 cannot be used).
-    #[arg(long, default_value = "local")]
+    /// s3 (the default: the local disk first and the shared S3 store behind it, falling back to the local disk alone, with a notice
+    /// naming the cause, when S3 cannot be used or the run is a release or tag run), local (sccache's disk cache), auto (Redis when
+    /// PADDOCK_SCCACHE_REDIS_ENDPOINT is set, else local) or redis.
+    #[arg(long, default_value = "s3")]
     pub sccache_backend: String,
     /// The Redis database number for sccache (empty: 5, the shared server's database for sccache).
     #[arg(long, default_value = "")]
@@ -223,7 +224,7 @@ pub fn lane_s3_dir(mount: &str, lane: &str) -> String {
 }
 
 /// The S3 tier beside any job-private sccache folder.
-fn s3_tier_of(plain: &str) -> String {
+pub(crate) fn s3_tier_of(plain: &str) -> String {
     format!("{plain}{S3_TIER_SUFFIX}")
 }
 
@@ -322,20 +323,7 @@ impl S3Ci {
 /// The settings the sccache SERVER starts with (never a build's environment): the multi-level chain `disk,s3` behind the local disk
 /// (`dir`, `size`) and the S3 store. Only the start call gets these; `$GITHUB_ENV` gets [`s3_build_settings`].
 pub fn s3_server_settings(s3: &S3Ci, dir: &str, size: &str) -> Vec<(String, String)> {
-    [
-        ("SCCACHE_DIR", dir),
-        ("SCCACHE_CACHE_SIZE", size),
-        ("SCCACHE_MULTILEVEL_CHAIN", "disk,s3"),
-        ("SCCACHE_MULTILEVEL_WRITE_ERROR_POLICY", "l0"),
-        ("SCCACHE_BUCKET", &s3.bucket),
-        ("SCCACHE_ENDPOINT", &s3.endpoint),
-        ("SCCACHE_REGION", "auto"),
-        ("SCCACHE_S3_USE_SSL", if s3.ssl { "true" } else { "false" }),
-        ("SCCACHE_S3_KEY_PREFIX", &s3.prefix),
-    ]
-    .into_iter()
-    .map(|(k, v)| (k.to_string(), v.to_string()))
-    .collect()
+    crate::local_sccache::multilevel_settings(dir, size, &s3.bucket, &s3.endpoint, s3.ssl, &s3.prefix)
 }
 
 /// The settings every later step of the job gets in `$GITHUB_ENV` when the S3 level is on: the local disk only, the two that keep
@@ -1266,6 +1254,19 @@ mod tests {
         ("PADDOCK_SCCACHE_S3_ACCESS_KEY_ID", "test-key-id"),
         ("PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY", "test-secret"),
     ];
+
+    /// User decision 2026-11-21: s3 is the default of the command and of the action (no Gitea variable switches it).
+    #[test]
+    fn the_command_defaults_to_the_s3_backend() {
+        #[derive(clap::Parser)]
+        struct Cli {
+            #[command(flatten)]
+            args: SetupRustArgs,
+        }
+        use clap::Parser;
+        assert_eq!(Cli::parse_from(["x"]).args.sccache_backend, "s3");
+        assert_eq!(Cli::parse_from(["x", "--sccache-backend", "local"]).args.sccache_backend, "local");
+    }
 
     #[test]
     fn s3_is_its_own_backend_and_has_one_key_prefix_per_runner_class() {

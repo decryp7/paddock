@@ -172,12 +172,16 @@ impl Runner {
     #[allow(clippy::disallowed_methods)]
     fn rust(&self, input: &Input, extra: &[(&str, &str)]) -> Result {
         self.reset();
+        // An empty backend leaves the flag out: the command's own default (s3, user decision 2026-11-21) is what runs.
+        let backend: Vec<&str> = if input.backend.is_empty() {
+            vec![]
+        } else {
+            vec!["--sccache-backend", input.backend]
+        };
         let r = crate::dev_bin::command()
+            .args(["ci", "setup-rust"])
+            .args(backend)
             .args([
-                "ci",
-                "setup-rust",
-                "--sccache-backend",
-                input.backend,
                 "--sccache-redis-db",
                 input.db,
                 "--tauri-linux-deps",
@@ -920,6 +924,87 @@ fn a_tag_run_with_a_key_stays_on_the_plain_local_disk() {
         .find(|l| l.starts_with("--start-server"))
         .expect("the server is started");
     assert!(start.contains("chain= ") && start.contains("key= "), "no chain and no key: {start}");
+}
+
+/// No `--sccache-backend` at all: the default is s3, so a job that passes its key uses the local disk first and the store behind it.
+#[test]
+fn the_default_backend_is_s3() {
+    let r = Runner::new(Some(Fail::Never));
+    health_curl(&r, 0);
+    let rs = r.rust(&Input { backend: "", ..S3_INPUT }, &S3_ENV);
+    assert_eq!(rs.code, 0, "{}", rs.out);
+    let start = rs
+        .calls
+        .lines()
+        .find(|l| l.starts_with("--start-server"))
+        .expect("the server is started");
+    assert!(
+        start.contains("chain=disk,s3") && start.contains("bucket=sccache-paddock"),
+        "the default is the S3 chain: {start}"
+    );
+    stop_guard(guard_port(&rs.env));
+}
+
+/// The default with no secret passed: the local disk, one notice naming the cause (never a failure).
+#[test]
+fn the_default_without_a_secret_falls_back_to_the_disk_with_a_notice() {
+    let r = Runner::new(Some(Fail::Never));
+    let env: Vec<(&str, &str)> = S3_ENV
+        .iter()
+        .copied()
+        .filter(|(k, _)| !k.contains("KEY") && !k.contains("SECRET"))
+        .collect();
+    let rs = r.rust(&Input { backend: "", ..S3_INPUT }, &env);
+    assert_eq!(rs.code, 0, "{}", rs.out);
+    assert!(rs.out.contains("::notice::sccache: this workflow passes no S3 key"), "{}", rs.out);
+    assert!(!rs.env.contains("MULTILEVEL") && rs.env.contains("SCCACHE_DIR="), "{}", rs.env);
+}
+
+/// A release or tag run with the default backend: the local disk, whatever key it holds.
+#[test]
+fn the_default_on_a_tag_or_release_run_is_the_plain_local_disk() {
+    for extra in [("GITHUB_REF", "refs/tags/dyno-v1.2.0"), ("PADDOCK_DEV_DOWNLOAD", "0")] {
+        let r = Runner::new(Some(Fail::Never));
+        health_curl(&r, 0);
+        let mut env = S3_ENV.to_vec();
+        env.push(extra);
+        let rs = r.rust(&Input { backend: "", ..S3_INPUT }, &env);
+        assert_eq!(rs.code, 0, "{}", rs.out);
+        assert!(
+            rs.out.contains("a release or tag build never reads the shared S3 cache"),
+            "{extra:?}: {}",
+            rs.out
+        );
+        let start = rs
+            .calls
+            .lines()
+            .find(|l| l.starts_with("--start-server"))
+            .expect("the server is started");
+        assert!(
+            start.contains("chain= ") && start.contains("key= "),
+            "{extra:?}: no chain and no key: {start}"
+        );
+        assert!(!rs.env.contains("PADDOCK_S3_GUARD_PORT"), "{}", rs.env);
+    }
+}
+
+/// The shell steps a release, rule 54 or tag run keeps until the release-path lane never use S3, whatever the default or the key
+/// (the cache-poisoning guard: any branch could have written to the shared store). Positive control: without the guard in the
+/// action's `sccache` step this run fails on `s3` as an unknown backend.
+#[test]
+fn the_release_paths_shell_steps_never_use_s3() {
+    let r = Runner::new(Some(Fail::Never));
+    let rs = r.shell(&S3_INPUT, &S3_ENV, true);
+    assert_eq!(rs.code, 0, "{}", rs.out);
+    assert!(
+        rs.out.contains("::notice::sccache-backend s3 is not used by this shell path"),
+        "{}",
+        rs.out
+    );
+    for gone in ["MULTILEVEL", "SCCACHE_BUCKET", "AWS_ACCESS", "AWS_SECRET", "PADDOCK_S3_GUARD_PORT"] {
+        assert!(!rs.env.contains(gone), "$GITHUB_ENV holds `{gone}`:\n{}", rs.env);
+    }
+    assert!(rs.env.contains("SCCACHE_DIR="), "{}", rs.env);
 }
 
 /// A store whose health check fails is not used: the job warns and runs on its local disk (never fails the build).
