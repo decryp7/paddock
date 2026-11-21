@@ -905,9 +905,14 @@ impl<'a> Acquirer<'a> {
     }
 
     fn make_ticket(&mut self) -> Result<(), String> {
+        let n = self.h.clock.now_micros();
+        let ticket = self.h.cfg.root.join(format!("{TICKET_PREFIX}{n:016}-{}", self.h.pid));
+        self.write_ticket(ticket)
+    }
+
+    /// Writes this run's ticket at `ticket` (its name carries the queue age) and remembers it.
+    fn write_ticket(&mut self, ticket: PathBuf) -> Result<(), String> {
         let h = self.h;
-        let n = h.clock.now_micros();
-        let ticket = h.cfg.root.join(format!("{TICKET_PREFIX}{n:016}-{}", h.pid));
         let tmp = PathBuf::from(format!("{}.tmp", ticket.display()));
         let body = record::format_ticket(
             h.pid,
@@ -1320,10 +1325,14 @@ impl<'a> Acquirer<'a> {
     }
 
     /// Gives the slot back and nothing else: the ticket and the marker stay, for a taker that steps back and waits again.
-    /// Gives the slot back and keeps the claim: the next [`Acquirer::poll`] queues again (a new ticket, at the back). For a slot taken
-    /// just as the load gate closed.
+    /// Gives the slot back and keeps the claim, with its age: the ticket (removed when the slot was taken) is written again under its
+    /// own name, so the next [`Acquirer::poll`] finds this run where it stood and a younger waiter does not pass it. For a slot taken
+    /// just as the load gate closed. A high-priority run (no ticket) just waits again.
     pub fn step_back(&mut self) {
         self.release_slot();
+        if self.marker.is_none() && !self.ticket.is_file() {
+            let _ = self.write_ticket(self.ticket.clone());
+        }
     }
 
     fn release_slot(&mut self) {
