@@ -29,7 +29,7 @@ on:
         type: boolean
         default: false
       sccache_backend:
-        description: "The compile cache of this run's Rust jobs: local, s3 (the local disk first, RustFS behind it) or empty (the repository variable PADDOCK_CI_SCCACHE_BACKEND, local when unset). For a trial of the shared cache without changing the variable for every run."
+        description: "The compile cache of this run's Rust jobs: local (the disk only), s3 (the local disk first, RustFS behind it) or empty (the default, s3). A one-run override for measurements, for example a run with local to compare hit rates."
         required: false
         default: ""
       since_run:

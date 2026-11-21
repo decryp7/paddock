@@ -39,14 +39,20 @@ cmd_key() {
     echo "- dev-tool cache: not used (this job builds ./dev from source: PADDOCK_DEV_DOWNLOAD=0, or no read token in this step's environment, or PADDOCK_DEV_FRESH=1)" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
     return 0
   fi
-  if ! lines="$("${dev[@]}" --wrapper-hash 2>/dev/null)" || [ "$(printf '%s\n' "$lines" | wc -l)" -lt 3 ]; then
-    echo "::warning::dev-tool-cache: ./dev --wrapper-hash gave no hash (no Rust compiler yet?), so the tool is not cached by key. Next step: run the setup-rust action before this one."
-    out usable false
-    return 0
+  # `./dev --wrapper-hash` prints the hash and `clean` or `dirty` on standard output (two lines; the inputs line is on standard error).
+  # Reading line 2 and 3 here once made every Linux job miss the cache without a word (run 8509). A shape that is not exactly that is
+  # an error, never a quiet miss (ER-33): the tool then builds in every job and the cost is invisible.
+  if ! lines="$("${dev[@]}" --wrapper-hash 2>/dev/null)"; then
+    echo "::error::dev-tool-cache: ./dev --wrapper-hash failed (no Rust compiler runs here?). Next step: run the setup-rust action's toolchain step before this one, then ./dev --wrapper-hash in the job to see why."
+    exit 1
   fi
-  hash="$(printf '%s\n' "$lines" | sed -n 2p)"
-  state="$(printf '%s\n' "$lines" | sed -n 3p)"
-  if [ "$state" != clean ] || ! [[ "$hash" =~ ^[0-9a-f]{40}$ ]]; then
+  hash="$(printf '%s\n' "$lines" | sed -n 1p)"
+  state="$(printf '%s\n' "$lines" | sed -n 2p)"
+  if [ "$(printf '%s\n' "$lines" | wc -l)" -ne 2 ] || ! [[ "$hash" =~ ^[0-9a-f]{40}$ ]] || { [ "$state" != clean ] && [ "$state" != dirty ]; }; then
+    echo "::error::dev-tool-cache: ./dev --wrapper-hash printed an unexpected shape (want a 40-hex hash, then clean or dirty). Next step: compare the wrapper's --wrapper-hash output with conformance/ci/dev-tool-cache.sh."
+    exit 1
+  fi
+  if [ "$state" != clean ]; then
     echo "::notice::dev-tool-cache: the tool's inputs have uncommitted changes (state '$state'), so no committed hash names its binary; nothing is restored or saved."
     out usable false
     return 0
@@ -59,8 +65,8 @@ cmd_key() {
 
 cmd_verify() {
   local hit="${1:-}" hash log said state save=false
-  hash="$("${dev[@]}" --wrapper-hash 2>/dev/null | sed -n 2p)"
-  [ -n "$hash" ] || { echo "::error::dev-tool-cache: ./dev gave no hash. Next step: run ./dev --wrapper-hash in the job to see why."; exit 1; }
+  hash="$("${dev[@]}" --wrapper-hash 2>/dev/null | sed -n 1p)"
+  [[ "$hash" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::dev-tool-cache: ./dev gave no hash. Next step: run ./dev --wrapper-hash in the job to see why."; exit 1; }
   log="$(mktemp)"
   # ./dev runs the binary only when it runs and is for this hash; otherwise it downloads or builds one (and says so).
   said="$("${dev[@]}" self hash 2>"$log")" || { cat "$log" >&2; echo "::error::dev-tool-cache: ./dev self hash failed (above). Next step: ./dev cannot build the tool in this job; fix that first."; exit 1; }
