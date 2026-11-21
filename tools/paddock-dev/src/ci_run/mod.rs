@@ -378,15 +378,17 @@ mod line_command_tests {
         // The job's own environment says rustup may install: the policy still pins the ban (a caller opts in on the command).
         let mut env: HashMap<String, String> = HashMap::new();
         env.insert("RUSTUP_AUTO_INSTALL".into(), "1".into());
-        let mut cmd = line_command("cat; echo done", Path::new("."), &env, &[]);
+        let cmd = line_command("cat; echo done", Path::new("."), &env, &[]);
         let got: Vec<(String, String)> = cmd
             .get_envs()
             .filter_map(|(k, v)| v.map(|v| (k.to_string_lossy().into_owned(), v.to_string_lossy().into_owned())))
             .collect();
         assert!(got.contains(&("RUSTUP_AUTO_INSTALL".to_string(), "0".to_string())), "{got:?}");
         // End of file at once: `cat` returns instead of waiting for this test's input.
+        // Only the Unix run mutates the command, so the binding is mutable there alone (`-D warnings` on Windows, ci.yml 8495).
         #[cfg(unix)]
         {
+            let mut cmd = cmd;
             let out = cmd.stdout(std::process::Stdio::piped()).output().expect("bash runs");
             assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "done");
         }
