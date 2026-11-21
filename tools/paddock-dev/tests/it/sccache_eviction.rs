@@ -35,7 +35,13 @@ struct Cache {
 impl Cache {
     fn command(&self, program: &str) -> TestCommand {
         let mut c = TestCommand::new_in(program, &self.work);
-        c.env("SCCACHE_DIR", &self.cache_dir)
+        // Every config file sccache reads is named, inside the test's own folder (they need not exist: a missing file is the
+        // default config), so it never reads the machine's (ER-14). sccache still asks the OS for its folders elsewhere (the disk
+        // and dist cache defaults, src/config.rs:103 and :110); TestCommand makes the folders it redirects to, without which every
+        // start panicked on Windows (runs 8529, 8532).
+        c.env("SCCACHE_CONF", self.work.join("sccache-config.toml"))
+            .env("SCCACHE_CACHED_CONF", self.work.join("sccache-cached-config.toml"))
+            .env("SCCACHE_DIR", &self.cache_dir)
             .env("SCCACHE_CACHE_SIZE", "1M")
             .env("SCCACHE_SERVER_PORT", self.port.to_string())
             .env("SCCACHE_IGNORE_SERVER_IO_ERROR", "1")
@@ -45,16 +51,21 @@ impl Cache {
 
     /// Starts the server on a port of its own and checks that the server answering there is this one: its "Cache location" must be
     /// `cache_dir`. A port some other sccache already serves answers with another folder, and is skipped without stopping that
-    /// server (it is not ours); after five tries the test fails rather than run on a server it does not own.
+    /// server (it is not ours); after five tries the test fails rather than run on a server it does not own. The failure names, for
+    /// every try, the port, both exit codes, what sccache printed, the server's own log and who listens on the port (ER-27).
     fn start(cache_dir: &Path, work: &Path) -> Cache {
+        let mut tries = Vec::new();
         for _ in 0..5 {
             let c = Cache {
                 cache_dir: cache_dir.to_path_buf(),
                 port: free_port(),
                 work: work.to_path_buf(),
             };
+            let log = c.work.join(format!("sccache-server-{}.log", c.port));
             let started = c
                 .command("sccache")
+                .env("SCCACHE_ERROR_LOG", &log)
+                .env("SCCACHE_LOG", "debug")
                 .arg("--start-server")
                 .output()
                 .expect("sccache is on PATH (the CI image has it): not measured otherwise");
@@ -65,12 +76,46 @@ impl Cache {
             if started.status.success() && ours {
                 return c;
             }
+            // Only a port another server holds is worth another try: sccache's own "Address in use", or a server that started
+            // here but answers with another folder. Any other failure (a panic, a refused port, a storage error) fails now.
+            let taken = String::from_utf8_lossy(&started.stderr).contains("Address in use") || started.status.success();
+            tries.push(format!(
+                "port {port}: --start-server {s1}, stdout {o1:?}, stderr {e1:?}; --show-stats {s2}, location {loc:?}, stderr {e2:?}; \
+                 listener: {who}; server log ({log}): {tail}",
+                port = c.port,
+                s1 = started.status,
+                o1 = tail(&started.stdout),
+                e1 = tail(&started.stderr),
+                s2 = stats.status,
+                loc = String::from_utf8_lossy(&stats.stdout)
+                    .lines()
+                    .find(|l| l.starts_with("Cache location"))
+                    .unwrap_or("<no Cache location line>")
+                    .to_string(),
+                e2 = tail(&stats.stderr),
+                who = listener(c.port),
+                log = log.display(),
+                tail = std::fs::read(&log).map_or_else(|e| format!("<none: {e}>"), |b| tail(&b)),
+            ));
             // Not ours (a taken port, or a server of another folder): forget it without stopping anything.
             std::mem::forget(c);
+            if !taken {
+                panic!(
+                    "sccache did not start this test's own server, for a reason another port cannot fix; env passed: SCCACHE_DIR={}, \
+                     SCCACHE_CACHE_SIZE=1M, SCCACHE_SERVER_PORT=<port>, SCCACHE_IGNORE_SERVER_IO_ERROR=1, SCCACHE_CONF and \
+                     SCCACHE_CACHED_CONF in {}; try:\n{}",
+                    cache_dir.display(),
+                    work.display(),
+                    tries.join("\n")
+                );
+            }
         }
         panic!(
-            "no port in five tries served this test's own sccache server (a Cache location other than {})",
-            cache_dir.display()
+            "no port in five tries served this test's own sccache server (a Cache location other than {}); env passed: \
+             SCCACHE_DIR={}, SCCACHE_CACHE_SIZE=1M, SCCACHE_SERVER_PORT=<port>, SCCACHE_IGNORE_SERVER_IO_ERROR=1; tries:\n{}",
+            cache_dir.display(),
+            cache_dir.display(),
+            tries.join("\n")
         );
     }
 
@@ -105,6 +150,37 @@ impl Cache {
     }
 }
 
+/// The last 2000 bytes of a program's output, as text.
+fn tail(bytes: &[u8]) -> String {
+    let text = String::from_utf8_lossy(bytes);
+    let start = text.len().saturating_sub(2000);
+    let start = (start..=text.len()).find(|i| text.is_char_boundary(*i)).unwrap_or(text.len());
+    text[start..].trim().to_string()
+}
+
+/// Who listens on `port`, with its pid, from the OS's own tool (`netstat -ano` on Windows, `lsof` elsewhere); diagnostics only.
+fn listener(port: u16) -> String {
+    let out = if cfg!(windows) {
+        TestCommand::new("netstat").args(["-ano", "-p", "TCP"]).output()
+    } else {
+        TestCommand::new("lsof")
+            .args(["-nP", &format!("-iTCP:{port}"), "-sTCP:LISTEN"])
+            .output()
+    };
+    match out {
+        Ok(o) => {
+            let needle = format!(":{port} ");
+            let lines: Vec<String> = String::from_utf8_lossy(&o.stdout)
+                .lines()
+                .filter(|l| cfg!(not(windows)) || l.contains(&needle))
+                .map(|l| l.split_whitespace().collect::<Vec<_>>().join(" "))
+                .collect();
+            if lines.is_empty() { "nobody".into() } else { lines.join(" | ") }
+        }
+        Err(e) => format!("<not measured: {e}>"),
+    }
+}
+
 impl Drop for Cache {
     fn drop(&mut self) {
         let _ = self.command("sccache").arg("--stop-server").output();
@@ -129,7 +205,8 @@ fn location_names(line: &str, dir: &Path, os: Os) -> bool {
 
 #[test]
 fn the_location_check_reads_windows_forms_of_one_folder_as_the_same() {
-    // What the Windows runner printed (run 8495, job 43574): the folder as `{:?}` escapes it, against the folder as the test holds it.
+    // The form sccache prints on Windows (the folder through Rust's `{:?}`, so every backslash doubled; not captured from a run: runs
+    // 8495 and 8509 never got a stats line, see run 8529), against the folder as the test holds it.
     let dir = Path::new(r"C:\gitea-runner\work\8a221e7c66bab078\tmp\.tmpoYlqSG\mount");
     let line = r#"Cache location                  Local disk: "C:\\gitea-runner\\work\\8a221e7c66bab078\\tmp\\.tmpoYlqSG\\mount""#;
     let win = Os::Windows;
@@ -162,6 +239,33 @@ fn the_location_check_reads_windows_forms_of_one_folder_as_the_same() {
         Path::new("/tmp/a/mount"),
         Os::Linux
     ));
+}
+
+#[test]
+fn every_config_file_sccache_reads_is_named_inside_the_tests_scratch() {
+    // Run 8529 (job 43889, Windows): with neither variable set, sccache looks its config folder up through the `directories` crate,
+    // and every `--start-server` and `--show-stats` panicked with "Unable to get config directory" (src/config.rs:1300, v0.19.0).
+    // Both variables keep the test off any machine config on every OS (ER-14); the folder lookups sccache makes anyway are
+    // TestCommand's to make work (its redirected folders exist, run 8532).
+    let scratch = tempfile::tempdir().unwrap();
+    let cache = Cache {
+        cache_dir: scratch.path().join("mount"),
+        port: 1,
+        work: scratch.path().join("work"),
+    };
+    let c = cache.command("sccache");
+    for name in ["SCCACHE_CONF", "SCCACHE_CACHED_CONF"] {
+        let value = c
+            .get_envs()
+            .find(|(k, _)| *k == std::ffi::OsStr::new(name))
+            .and_then(|(_, v)| v)
+            .unwrap_or_else(|| panic!("{name} is not set, so sccache asks the OS for its config folder"));
+        assert!(
+            Path::new(value).starts_with(scratch.path()),
+            "{name}={value:?} is outside the test's scratch"
+        );
+    }
+    std::mem::forget(cache);
 }
 
 fn big_file(path: &Path) {

@@ -19,3 +19,8 @@ paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
 # `Scratch` makes its folders in the caller's effective group (getegid).
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+# `tests/it/process.rs`: a child that resolves its folders the way sccache does (Windows: `SHGetKnownFolderPath`); already in the
+# lockfile through tauri.
+[dev-dependencies]
+dirs = "7"

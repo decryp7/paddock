@@ -4787,6 +4787,7 @@ dependencies = [
 name = "paddock-testkit"
 version = "0.1.0"
 dependencies = [
+ "dirs",
  "libc",
  "paddock-env",
  "paddock-jobs",
