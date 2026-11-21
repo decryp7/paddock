@@ -300,6 +300,20 @@ mod tests {
     }
 
     #[test]
+    fn an_earlier_full_run_still_going_runs_the_commit_with_a_notice_naming_it_never_a_warning() {
+        let mut going = run(7, "workflow_dispatch", "train/x", "");
+        going["status"] = json!("in_progress");
+        let mut f = server(vec![going], &[7], 7, &[(71, Some("ok\n"))]);
+        let r = ask(&mut f, Some(9));
+        assert!(
+            matches!(&r, Reuse::Run(why) if why.contains('7') && why.contains("in_progress")),
+            "{r:?}"
+        );
+        let line = r.annotation("ci.yml", SHA);
+        assert!(line.starts_with("::notice::") && !line.contains("token"), "{line}");
+    }
+
+    #[test]
     fn no_run_at_all_or_an_unreadable_list_means_run() {
         let mut f = server(vec![], &[], 0, &[]);
         assert!(matches!(ask(&mut f, Some(9)), Reuse::Run(_)));
