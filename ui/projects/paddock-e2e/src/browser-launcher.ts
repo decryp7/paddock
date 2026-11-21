@@ -8,17 +8,19 @@
  * prompt, so only macOS gets the wrapper; Linux and Windows run the real browser as before (a Windows `.cmd` cannot be spawned
  * without a shell, which Playwright does not use, so there is none).
  *
- * The real browser is the pinned binary (`CHROMIUM_TEST_PATH`), else Playwright's own headless shell, found through
- * `playwright install --dry-run` (the public way to ask where it lives; `chromium.executablePath()` names the full Chromium,
- * a different browser). A browser that cannot be found, or a wrapper that cannot be written, stops the config with an `::error::`
- * line: it never falls back to the checkout as the working folder.
+ * The wrapper is written when the config loads and finds the real browser only when a browser starts (a config for WebKit only, or
+ * with no Chromium installed, loads without a browser): the pinned binary (`CHROMIUM_TEST_PATH`, baked in), else by the arguments
+ * Playwright gives it, the headless shell for `--headless` (found with `playwright install --dry-run`, the public way to ask where
+ * it lives) and the full Chromium (`chromium.executablePath()`) for a headed run. The answer is kept in a file of the scratch root
+ * (per Playwright version and browsers folder), so only the first launch pays the 0.4 s of the dry run. A browser that cannot be
+ * found, or a wrapper that cannot be written, prints an `::error::` line with the cause and the next step; the launch never falls
+ * back to the checkout as the working folder.
  */
-import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
-import { browserScratchRoot, type BrowserUse, internalBrowserLaunch, isInstalledBrowser, isRemovableVolume, LAUNCHER_PREFIX, pinnedChrome } from './browser.ts';
+import { browserScratchRoot, type BrowserUse, internalBrowserLaunch, isInstalledBrowser, isRemovableVolume, LAUNCHER_PREFIX, pinnedChrome, registerLauncher } from './browser.ts';
 
 /** A launcher problem, worded as a CI error annotation: the cause and the next step. */
 export class LauncherError extends Error {
@@ -33,104 +35,111 @@ export function shellQuote(text: string): string {
   return `'${text.replace(/'/g, `'\\''`)}'`;
 }
 
-/** The wrapper's text: start in `cwd`, then become the real browser with the arguments as they came. */
-export function launcherScript(real: string, cwd: string): string {
-  return `#!/bin/sh\n# Written by paddock-e2e (browser-launcher.ts): the browser starts in an internal folder, never the checkout (ER-14).\ncd ${shellQuote(cwd)} || { echo "::error::browser launcher: cannot enter ${cwd.replace(/["\\$`]/g, '_')}" >&2; exit 126; }\nexec ${shellQuote(real)} "$@"\n`;
+/** What the wrapper needs to find the real browser when it starts. */
+export interface LauncherSpec {
+  /** The folder the browser starts in. */
+  readonly cwd: string;
+  /** The named browser (`CHROMIUM_TEST_PATH`): started as it is, in every mode. */
+  readonly pinned?: string;
+  /** Where the answer of a look for Playwright's own browser is kept (a folder; made when needed). */
+  readonly cache: string;
+  /** The Node program and Playwright's `cli.js` and `playwright-core` entry file, by absolute path. */
+  readonly node: string;
+  readonly cli: string;
+  readonly core: string;
+}
+
+const FAIL = (cause: string, next: string) => `{ echo "::error::browser launcher: ${cause}. Next: ${next}" >&2; exit 127; }`;
+
+/** The wrapper's text. Not a function of the environment: what it needs is in `spec`, so one name (a hash of the text) is one wrapper. */
+export function launcherScript(spec: LauncherSpec): string {
+  const enter = `cd ${shellQuote(spec.cwd)} || { echo "::error::browser launcher: cannot enter the internal folder. Next: make PADDOCK_JOB_TEMP (or the OS temp folder) writable" >&2; exit 126; }`;
+  const head = `#!/bin/sh\n# Written by paddock-e2e (browser-launcher.ts): the browser starts in an internal folder, never the checkout (ER-14).\n${enter}\n`;
+  if (spec.pinned) return `${head}exec ${shellQuote(spec.pinned)} "$@"\n`;
+  return `${head}mode=chromium
+for a in "$@"; do
+  case "$a" in --headless|--headless=old) mode=headless-shell ;; esac
+done
+cache=${shellQuote(spec.cache)}
+real=$(cat "$cache/$mode" 2>/dev/null)
+if [ ! -x "$real" ]; then
+  if [ "$mode" = headless-shell ]; then
+    out=$(${shellQuote(spec.node)} ${shellQuote(spec.cli)} install --dry-run chromium-headless-shell 2>&1) || ${FAIL('Playwright could not say where its headless shell is', 'run npx playwright install chromium-headless-shell, or name a pinned browser in CHROMIUM_TEST_PATH')}
+    loc=$(printf '%s\\n' "$out" | sed -n 's/^[[:space:]]*Install location:[[:space:]]*//p' | head -n 1)
+    real=$(ls -d "$loc"/*/chrome-headless-shell 2>/dev/null | head -n 1)
+  else
+    real=$(${shellQuote(spec.node)} -e 'console.log(require(process.argv[1]).chromium.executablePath())' ${shellQuote(spec.core)} 2>/dev/null)
+  fi
+  [ -x "$real" ] || ${FAIL('the Playwright $mode is not installed ("$real")', 'run npx playwright install chromium (headed) or npx playwright install chromium-headless-shell (PLAYWRIGHT_BROWSERS_PATH names the folder), or name a pinned browser in CHROMIUM_TEST_PATH')}
+  mkdir -p "$cache" && printf '%s\\n' "$real" > "$cache/$mode.$$" && mv "$cache/$mode.$$" "$cache/$mode"
+fi
+exec "$real" "$@"
+`;
 }
 
 /**
- * Writes the wrapper for `real` into `dir` and returns its path. The name holds a hash of its content, so every worker that
- * writes it writes the same bytes; each writes a private file first and renames it into place (an atomic step), so a worker that
- * starts at the same moment never executes a half-written script. `cwd` is made if it is missing.
+ * Writes the wrapper for `spec` into `dir` and returns its path. The name holds a hash of its content, so every worker that writes
+ * it writes the same bytes; each writes a private file first and renames it into place (an atomic step), so a worker that starts
+ * at the same moment never executes a half-written script. `spec.cwd` is made if it is missing.
  */
-export function writeLauncher(dir: string, real: string, cwd: string): string {
-  const text = launcherScript(real, cwd);
+export function writeLauncher(dir: string, spec: LauncherSpec): string {
+  const text = launcherScript(spec);
   const path = join(dir, `${LAUNCHER_PREFIX}${createHash('sha256').update(text).digest('hex').slice(0, 16)}.sh`);
   try {
     mkdirSync(dir, { recursive: true });
-    mkdirSync(cwd, { recursive: true });
-    if (existsSync(path) && readFileSync(path, 'utf8') === text) return path;
-    const own = `${path}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
-    writeFileSync(own, text, { mode: 0o755 });
-    chmodSync(own, 0o755);
-    renameSync(own, path);
-    return path;
+    mkdirSync(spec.cwd, { recursive: true });
+    if (!(existsSync(path) && readFileSync(path, 'utf8') === text)) {
+      const own = `${path}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
+      writeFileSync(own, text, { mode: 0o755 });
+      chmodSync(own, 0o755);
+      renameSync(own, path);
+    }
   } catch (e) {
     throw new LauncherError(`cannot write ${path} (${(e as Error).message})`, 'make the browser scratch folder writable (PADDOCK_JOB_TEMP, or the OS temp folder)');
   }
+  registerLauncher(path);
+  return path;
 }
 
-/** What `playwright install --dry-run chromium-headless-shell` prints: the install folder in the headless shell's block. */
-export function installLocation(dryRun: string): string | undefined {
-  const lines = dryRun.split(/\r?\n/);
-  const at = lines.findIndex((l) => /headless shell/i.test(l) || /chromium-headless-shell/.test(l));
-  if (at < 0) return undefined;
-  for (const line of lines.slice(at + 1)) {
-    if (/^\S/.test(line)) break;
-    const m = /Install location:\s+(.+?)\s*$/.exec(line);
-    if (m) return m[1];
-  }
-  return undefined;
-}
+/** The Playwright files and the cache key of the Playwright this process runs under (found from the current folder upwards, as the tests' own). */
+export type PlaywrightFiles = Pick<LauncherSpec, 'node' | 'cli' | 'core'> & { readonly key: string };
 
-/** The headless shell's executable inside its install folder (one folder down, as Playwright unpacks it), or undefined. */
-export function headlessShellIn(location: string, exists: (p: string) => boolean = existsSync, list: (p: string) => string[] = (p) => readdirSync(p)): string | undefined {
-  const exe = process.platform === 'win32' ? 'chrome-headless-shell.exe' : 'chrome-headless-shell';
-  if (!exists(location)) return undefined;
-  return list(location)
-    .map((d) => join(location, d, exe))
-    .find((p) => exists(p));
-}
-
-/** Runs `playwright install --dry-run chromium-headless-shell` with the Playwright found from the current folder upwards (the tests' own), and returns what it printed. */
-function dryRun(env: Readonly<Record<string, string | undefined>>): string {
-  const cli = join(dirname(createRequire(join(process.cwd(), 'noop.js')).resolve('playwright/package.json')), 'cli.js');
-  const r = spawnSync(process.execPath, [cli, 'install', '--dry-run', 'chromium-headless-shell'], { env: env as NodeJS.ProcessEnv, encoding: 'utf8', timeout: 60_000 });
-  if (r.status !== 0) throw new Error(`exit ${r.status}: ${(r.stderr || r.error?.message || '').trim().slice(0, 300)}`);
-  return r.stdout;
-}
-
-/** The real browser the wrapper starts: the pinned binary, else Playwright's headless shell. Throws a {@link LauncherError} when there is none. */
-export function realBrowser(env: Readonly<Record<string, string | undefined>> = process.env, ask: (env: Readonly<Record<string, string | undefined>>) => string = dryRun): string {
-  const pinned = pinnedChrome(env);
-  if (pinned) {
-    if (isInstalledBrowser(pinned)) throw new LauncherError(`${pinned} is the installed browser (rule 7)`, 'name a Chrome for Testing build in CHROMIUM_TEST_PATH');
-    return pinned;
-  }
-  let out: string;
+function playwrightFiles(env: Readonly<Record<string, string | undefined>>): PlaywrightFiles {
   try {
-    out = ask(env);
+    const here = createRequire(join(process.cwd(), 'noop.js'));
+    const dir = dirname(here.resolve('playwright/package.json'));
+    const version = (JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')) as { version?: string }).version ?? '?';
+    const core = createRequire(join(dir, 'noop.js')).resolve('playwright-core');
+    const key = createHash('sha256').update(`${version}\n${env['PLAYWRIGHT_BROWSERS_PATH'] ?? ''}`).digest('hex').slice(0, 12);
+    return { node: process.execPath, cli: join(dir, 'cli.js'), core, key };
   } catch (e) {
-    throw new LauncherError(`Playwright could not say where its headless shell is (${(e as Error).message})`, 'run `npx playwright install chromium-headless-shell`, or name a pinned browser in CHROMIUM_TEST_PATH');
+    throw new LauncherError(`Playwright was not found from ${process.cwd()} (${(e as Error).message})`, 'run the tests from inside the repository after `npm ci`');
   }
-  const location = installLocation(out);
-  const exe = location ? headlessShellIn(location) : undefined;
-  if (!exe) {
-    throw new LauncherError(`the Playwright headless shell is not installed${location ? ` in ${location}` : ''}`, 'run `npx playwright install chromium-headless-shell` (PLAYWRIGHT_BROWSERS_PATH names the folder), or name a pinned browser in CHROMIUM_TEST_PATH');
-  }
-  return exe;
 }
 
 /**
  * The wrapper to launch the test browser through: written into `root`, starting the browser in `root/cwd`. `undefined` where the
  * wrapper is not needed (not macOS) and when `root` is on a removable volume (nothing is written there; the guard in browser.ts then
- * refuses the folder with its own message).
+ * refuses the folder with its own message). Nothing about the browser is looked up here (see the file's comment).
  */
 export function browserLauncher(
   root: string,
   env: Readonly<Record<string, string | undefined>> = process.env,
   platform: string = process.platform,
   isRemovable: (path: string) => boolean = isRemovableVolume,
-  ask?: (env: Readonly<Record<string, string | undefined>>) => string,
+  files?: PlaywrightFiles,
 ): string | undefined {
   if (platform !== 'darwin' || isRemovable(root)) return undefined;
-  return writeLauncher(join(root, 'launcher'), realBrowser(env, ask), join(root, 'cwd'));
+  const pinned = pinnedChrome(env);
+  if (pinned && isInstalledBrowser(pinned)) throw new LauncherError(`${pinned} is the installed browser (rule 7)`, 'name a Chrome for Testing build in CHROMIUM_TEST_PATH');
+  const found: PlaywrightFiles = pinned ? { node: '', cli: '', core: '', key: 'pinned' } : (files ?? playwrightFiles(env));
+  return writeLauncher(join(root, 'launcher'), { cwd: join(root, 'cwd'), cache: join(root, 'browsers', found.key), pinned, node: found.node, cli: found.cli, core: found.core });
 }
 
 /**
  * The Playwright `use` for a Chromium project: the browser's writable folders on the internal disk ({@link internalBrowserLaunch}) and,
  * on macOS, the wrapper as its `executablePath` so that it also starts in an internal folder. Spread it into the project's `use`.
- * Throws a {@link LauncherError} when the wrapper is needed and cannot be made.
+ * It looks for no browser (see {@link browserLauncher}), so a config for WebKit only loads without Chromium.
  */
 export function internalBrowserUse(
   env: Readonly<Record<string, string | undefined>> = process.env,

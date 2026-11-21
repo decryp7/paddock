@@ -3275,14 +3275,20 @@ reveal grows the total, `Total grew outside a round` 7 ms after the press here) 
 - **The browser's working folder under Playwright: fixed with a wrapper launcher (macOS), measured.** `launchOptions` has no `cwd`, and a
   `globalSetup` `process.chdir` would change every worker's cwd (`repoRoot()`, `e2ePort`, `doc-screens` and specs read it). So
   `browser-launcher.ts` writes a small `sh` script into the scratch root (`cd '<root>/cwd' && exec '<real browser>' "$@"`; `exec`, so the
-  pid stays the browser's), and `internalBrowserUse` sets it as `executablePath`. The real browser is the pinned `CHROMIUM_TEST_PATH`, else
-  the headless shell, found with `playwright install --dry-run chromium-headless-shell`: `chromium.executablePath()` names the full
-  Chromium, a different browser. The script is written to a private file and renamed (its name holds a hash of its text), so workers that
-  start together never run a half-written one. A missing browser or an unwritable root stops the config with an `::error::` line; it never
-  falls back to the checkout. Measured with a stand-in browser under a real `playwright test`: with the wrapper `pwd` is
-  `<scratch>/cwd`, without it the checkout (`ui/`); arguments and environment arrive unchanged (browser-launcher.test.ts and that run).
-  Only macOS has the prompt, so only macOS gets the wrapper: a Windows `.cmd` cannot be spawned without a shell, which Playwright does not
-  use, and Linux gains nothing. The Playwright preset's own unit tests pass `launcher: 'off'` so they need no installed browser.
+  pid stays the browser's), and `internalBrowserUse` sets it as `executablePath`. The script is written when the config loads but looks
+  for the real browser only when a browser starts (the first version looked at config load and threw in ci.yml's WebKit-only macOS job,
+  which installs no Chromium, and on a headless-shell version mismatch). It takes the pinned `CHROMIUM_TEST_PATH` (baked in), else
+  decides by the arguments Playwright passes: `--headless` or `--headless=old` is the headless shell, found with
+  `playwright install --dry-run chromium-headless-shell` (`chromium.executablePath()` names the full Chromium, a different browser);
+  anything else (a headed run, `--headless=new`) is the full Chromium through `chromium.executablePath()`. The answer is kept in the
+  scratch root per Playwright version and browsers folder, so only the first launch pays the 0.4 s of the dry run. The script is written
+  to a private file and renamed (its name holds a hash of its text), so workers that start together never run a half-written one. A
+  missing browser or an unwritable root prints an `::error::` line with the cause and next step and starts nothing; it never falls back
+  to the checkout. The guard in browser.ts accepts as `executablePath` only the exact path the launcher returned. Measured with a stand-in
+  browser under a real `playwright test`: with the wrapper `pwd` is `<scratch>/cwd`, without it the checkout (`ui/`); arguments and
+  environment arrive unchanged (browser-launcher.test.ts). Only macOS has the prompt, so only macOS gets the wrapper: a Windows `.cmd`
+  cannot be spawned without a shell, which Playwright does not use, and Linux gains nothing. The Playwright preset's own unit tests pass
+  `launcher: 'off'`.
 - **Not measured:** whether the browser binary on `/Volumes/vault-dev/caches/ms-playwright` still prompts once everything else is internal,
   and whether the working folder is the prompt's only source (measuring risks the desktop prompt). The user checks with a run under the
   new code from a checkout on `/Volumes`; if it prompts, `PLAYWRIGHT_BROWSERS_PATH` moves to the internal disk too.

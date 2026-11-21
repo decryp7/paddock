@@ -6,10 +6,18 @@
  */
 
 import { tmpdir } from 'node:os';
-import { basename, join } from 'node:path';
+import { join } from 'node:path';
 
-/** The prefix of the launcher wrapper's file name (browser-launcher.ts); the guard accepts it as `executablePath`: it only ever starts the pinned or Playwright's own browser. */
+/** The prefix of the launcher wrapper's file name (browser-launcher.ts). */
 export const LAUNCHER_PREFIX = 'paddock-browser-launcher-';
+
+/** The wrappers this process wrote (browser-launcher.ts): the guard accepts as `executablePath` exactly these paths, not a file by its name. */
+const launchers = new Set<string>();
+
+/** Records a wrapper the launcher module just wrote, so the guard accepts that exact path. */
+export function registerLauncher(path: string): void {
+  launchers.add(path);
+}
 
 /** The variable that may name a pinned browser binary (Chrome for Testing) for `launchOptions.executablePath`. */
 export const CHROME_ENV = 'PADDOCK_E2E_CHROME';
@@ -128,7 +136,7 @@ export function browserProblems(use: BrowserUse | undefined, env: Readonly<Recor
   problems.push(...removableFolderProblems(use?.launchOptions, env));
   const path = use?.launchOptions?.executablePath;
   if (path) {
-    if (basename(path).startsWith(LAUNCHER_PREFIX)) {
+    if (launchers.has(path)) {
       // Our own wrapper, written by browser-launcher.ts around the pinned or Playwright's browser.
     } else if (isInstalledBrowser(path)) problems.push(`executablePath ${path} is the installed browser; tests never use it (rule 7)`);
     else if (path !== pinnedChrome(env)) problems.push(`executablePath ${path} is not the pinned browser named in ${CHROMIUM_TEST_ENV} (or ${CHROME_ENV})`);

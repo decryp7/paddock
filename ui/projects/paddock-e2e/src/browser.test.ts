@@ -125,7 +125,8 @@ test('every Playwright config spreads the internal folders and runs the guard: a
   const list = (rel: string, jobTemp: string) =>
     spawnSync('npx', ['playwright', 'test', '--list', '--config', join(root, rel)], {
       cwd: join(root, 'ui'),
-      env: { ...process.env, PW_SKIP_BUILD_GUARD: '1', PW_PORT: '4999', PADDOCK_JOB_TEMP: jobTemp, CHROMIUM_TEST_PATH: process.execPath },
+      // No browser is installed in PLAYWRIGHT_BROWSERS_PATH: a config load looks for none (a WebKit-only job, a wrong version).
+      env: { ...process.env, PW_SKIP_BUILD_GUARD: '1', PW_PORT: '4999', PADDOCK_JOB_TEMP: jobTemp, PLAYWRIGHT_BROWSERS_PATH: join(tmpdir(), 'pw-no-browsers'), CHROMIUM_TEST_PATH: '', PADDOCK_E2E_CHROME: '' },
       encoding: 'utf8',
       shell: process.platform === 'win32',
       timeout: 120_000,
