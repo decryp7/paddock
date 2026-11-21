@@ -510,8 +510,8 @@ The user accepted the reviewer's answers to the open decisions. The numbers stay
 
 ## Amendment (2026-11-21): one echo queue, a merge proof, and a cap that drops nothing
 
-- Status: proposed by the coordinator under the user's approval of this redesign (2026-11-21); D-A and D-B below are
-  open for the user.
+- Status: accepted. The user approved this redesign and decided D-A and D-B below (user, 2026-11-21, relayed by the
+  coordinator).
 - Evidence read at `origin/main` `3d776b605` and `origin/fix/dialogs-size-mode-unexplained` `989a479b4` (2026-11-21).
   The late-echo list this replaces came with `b4dda40d5` and is in `dyno-v1.1.0` (`git tag --contains b4dda40d5`).
 
@@ -575,11 +575,11 @@ events, where the 400 is an echo), so it is tested in the two decidable forms ab
 
 **Cost.** This amendment and its code: about 1 agent-day, done. The common-practice alternative is D-B (a).
 
-**Decisions for the user.**
-- **D-A.** A single resize to exactly the size of a request whose echo may still come is taken as that echo
+**Decisions (user, 2026-11-21).**
+- **D-A, decided: the echo.** A single resize to exactly the size of a request whose echo may still come is taken as that echo
   (recommended: a false `Manual` stops sizing for the whole opening, a missed one is corrected at the drag's next size)
-  or as the user (breaks the in-order echo case of seed `ef445c8e`).
-- **D-B.** On X11 and Wayland: (a) do as Electron and never infer a user resize there (a user's resize is then undone by
+  or as the user (breaks the in-order echo case of seed `ef445c8e`). The user chose the echo, as built.
+- **D-B, decided: (b), keep inferring.** On X11 and Wayland: (a) do as Electron and never infer a user resize there (a user's resize is then undone by
   the next content change; about 0.25 agent-day, cheaper than this design); (b) keep inferring through this queue
   (recommended, as built); (c) later, read the Wayland `resizing` state and configure serials through a tao change
-  (several agent-days upstream; beyond common practice).
+  (several agent-days upstream; beyond common practice). The user chose (b), as built.
