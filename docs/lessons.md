@@ -3454,3 +3454,7 @@ about 45 ms a start on that runner plus a fork per command substitution. **Fix:*
 - **Dyno WebKit e2e FLAKY** `e2e/flows.spec.ts:743` "startup filter › hides the system and signed entries, shows the counts and
   remembers the choice" (dyno-release.yml run 8549 on fa3397043, job 44142, app dyno ubuntu e2e-webkit; try 1 failed, retry passed).
   Train 18 changes no file under apps/dyno or ui. Next: a failing reproduction first.
+- **Debrief WebKit e2e FLAKYs in the scheduled nightly on main 67ac6d6ec** (debrief.yml run 8559; each failed try 1 and passed its
+  retry): `e2e/ai-pitwall.e2e.ts:68` "with no Pitwall at all, every AI entry point lands on Settings ▸ AI and none is a dead button"
+  (shard 3/4, job 44324) and `e2e/live-tail-follow.e2e.ts:255` "a scrollbar drag across refresh rounds ends where the user dropped
+  it" (shard 4/4, job 44325). Train 18 changed no file under apps/debrief or ui. Next: a failing reproduction first.
