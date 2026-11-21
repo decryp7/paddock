@@ -6,6 +6,9 @@
 //! `tools/paddock-dev/tests/it/host_steps.rs`), so the file says `<uid>` and every machine writes the same; conformance C131 reads
 //! the tracked golden folders for these literals.
 //!
+//! **Paths.** Both sides of a comparison go through [`crate::golden_paths::normalise_paths`] first: Windows-style paths in one spelling
+//! (`/` separators, no `\\?\`), this machine's temp and home folders as `<tmp>` and `<home>`.
+//!
 //! **Rewriting.** With [`UPDATE_VAR`] set, a differing golden is rewritten, and the run prints [`confirm_command`]: the exact command
 //! that runs that test on Linux as root in the CI image (`tools/linux-container.sh --ci-image`). Run it before committing the file.
 //! `./dev golden confirm <test filter>` does both runs, on this machine and in that image, and passes only if both pass
@@ -188,9 +191,11 @@ pub fn rewritten_notice(
     )
 }
 
-/// Line endings as `\n`, so a Windows checkout with `core.autocrlf` still matches.
+/// Line endings as `\n` (so a Windows checkout with `core.autocrlf` still matches) and every path in winpath's spelling with this
+/// machine's temp and home folders as `<tmp>` and `<home>` ([`crate::golden_paths`]): a golden never holds a form only one OS
+/// prints (ER-46). Both the file and the actual text go through it, and a rewrite writes the normalised text.
 fn normalise(text: &str) -> String {
-    text.replace("\r\n", "\n")
+    crate::golden_paths::normalise_paths(&text.replace("\r\n", "\n"))
 }
 
 /// Compares `actual` with the file at `path` (or rewrites it in [`GoldenMode::Update`], making its folders).

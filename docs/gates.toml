@@ -161,7 +161,7 @@ approved = "coordinator"
 
 [[report_only]]
 id = "C122"
-reason = "ER-41: report-only until its first green run on the real tree, recorded by run id here; then flip SEVERITY in tools/paddock-dev/src/check/c122.rs and the mode to gate. Rules A and B start with no sites on the tree (all 63 migrated onto paddock_testkit::path in the same change, ADR 0099 WP-3b); rule C only ever warns"
+reason = "ER-41: report-only until its first green run on the real tree, recorded by run id here; then flip SEVERITY in tools/paddock-dev/src/check/c122.rs and the mode to gate. Rules A and B start with no sites on the tree (all 63 migrated onto paddock_testkit::path in the same change, ADR 0099 WP-3b); rule C only ever warns; rules D and E (path text handed to a program or golden, string comparison of path text; 2026-11-21) only ever warn and start with 72 sites on the tree, none fixed in the change that added them"
 owner = "ADR 0099"
 since = 2026-11-13
 review_by = 2026-12-13

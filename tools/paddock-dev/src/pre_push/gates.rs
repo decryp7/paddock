@@ -244,13 +244,17 @@ pub fn own_workspaces(plan: &Value, files: &[String]) -> std::collections::BTree
         .collect()
 }
 
-/// Why a workspace gets no Windows lint here. An app opts in with `windowsClippy` in its `paddock.ci.json`; a workspace with no
-/// such contract (`tools/paddock-dev`) is linted by CI's own job on every OS leg, so on Windows natively.
+/// Workspaces with no `paddock.ci.json` contract that are linted for Windows anyway (`cargo xwin clippy --all-targets`). The
+/// developer tool's Windows-only lints (dead code under `cfg(unix)` helpers, path spelling) first showed in CI (run 8495, ER-9),
+/// so its row is part of the member and pre-push gate; its cost is in docs/benchmarks.md.
+pub const ALWAYS_WINDOWS: &[&str] = &["tools/paddock-dev"];
+
+/// Why a workspace gets no Windows lint here: an app opts in with `windowsClippy` in its `paddock.ci.json`.
 pub(super) fn windows_skip_reason(ws: &str) -> String {
     if ws.starts_with("apps/") {
         "CI lints this workspace on the host OSes only (no windowsClippy in its paddock.ci.json)".into()
     } else {
-        format!("{ws} has no paddock.ci.json contract: CI's own job runs cargo clippy on its Windows leg natively, so no xwin lint here")
+        format!("{ws} has no windowsClippy opt-in: only crates and ALWAYS_WINDOWS get the xwin lint here")
     }
 }
 
@@ -377,7 +381,7 @@ pub fn plan_gates(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> 
         g.build_dir = Some(build_dir(facts, &ws, None));
         out.push(Planned::Run(g));
         out.push(doctest(&ws, &change.files, facts));
-        if all_features || facts.windows_clippy.contains(&ws) {
+        if all_features || facts.windows_clippy.contains(&ws) || ALWAYS_WINDOWS.contains(&ws.as_str()) {
             let mut args: Vec<&str> = vec![
                 "xwin",
                 "clippy",

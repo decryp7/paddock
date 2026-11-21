@@ -436,34 +436,39 @@ fn what_the_change_does_not_reach_is_skipped_with_a_reason() {
     );
 }
 
-/// A workspace without a `paddock.ci.json` (tools/paddock-dev) says why it has no Windows lint: CI's own job lints it natively on
-/// its Windows leg. The app wording stays for apps, which can opt in with `windowsClippy`.
+/// Gate gap of run 8495 (ER-9): tools/paddock-dev gets the xwin Clippy row with `--all-targets`, with no `windowsClippy` contract. Its
+/// Windows-only lints (a Unix-only test helper that is dead code on Windows) first showed in CI.
 #[test]
-fn the_windows_skip_reason_names_the_real_cause_per_workspace() {
-    assert!(windows_skip_reason("tools/paddock-dev").contains("Windows leg natively"));
-    assert!(!windows_skip_reason("tools/paddock-dev").contains("windowsClippy"));
-    assert!(windows_skip_reason("apps/debrief").contains("windowsClippy"));
-}
-
-/// The reason as `plan_gates` prints it: the `Planned::Skip` of the Windows lint, not only the helper's string.
-#[test]
-fn plan_gates_skips_the_windows_lint_of_paddock_dev_with_its_own_reason() {
+fn plan_gates_lints_paddock_dev_for_windows_with_all_targets() {
     let mut p = plan();
     p["packages"]["tools/paddock-dev"] = json!(["paddock-dev"]);
     let mut f = facts();
     f.left_out.insert("tools/paddock-dev".to_string(), Ok(crates_of(&[], 1)));
-    let windows_skip = |planned: &[Planned], ws: &str| {
-        planned.iter().find_map(|g| match g {
-            Planned::Skip { id, reason } if *id == format!("clippy-windows {ws}") => Some(reason.clone()),
+    assert!(
+        !f.windows_clippy.contains("tools/paddock-dev"),
+        "no opt-in: the row comes from ALWAYS_WINDOWS"
+    );
+    let planned = plan_gates(&p, &change(&["tools/paddock-dev/src/a.rs", "apps/debrief/src/a.rs"]), &f);
+    let row = planned
+        .iter()
+        .find_map(|g| match g {
+            Planned::Run(g) if g.id == "clippy-windows tools/paddock-dev" => Some(g),
             _ => None,
         })
-    };
-    let planned = plan_gates(&p, &change(&["tools/paddock-dev/src/a.rs", "apps/debrief/src/a.rs"]), &f);
-    let tool = windows_skip(&planned, "tools/paddock-dev").unwrap_or_else(|| panic!("no Windows skip for paddock-dev: {planned:?}"));
-    assert!(tool.contains("Windows leg natively") && !tool.contains("windowsClippy"), "{tool}");
-    // Positive control: an app without `windowsClippy` still gets the app wording, so the assertion above can tell the two apart.
-    let app = windows_skip(&planned, "apps/debrief").unwrap_or_else(|| panic!("no Windows skip for debrief: {planned:?}"));
-    assert!(app.contains("windowsClippy") && !app.contains("Windows leg natively"), "{app}");
+        .unwrap_or_else(|| panic!("no Windows lint row for paddock-dev: {planned:?}"));
+    assert!(
+        row.args.iter().any(|a| a == "--all-targets") && row.args.iter().any(|a| a == "x86_64-pc-windows-msvc"),
+        "{:?}",
+        row.args
+    );
+    assert_eq!(row.need, Need::Tool("cargo-xwin".into()));
+    // Positive control: an app without `windowsClippy` still gets no row, only the skip with the app wording.
+    let ids: Vec<String> = planned
+        .iter()
+        .filter_map(|g| if let Planned::Run(g) = g { Some(g.id.clone()) } else { None })
+        .collect();
+    assert!(!ids.contains(&"clippy-windows apps/debrief".to_string()), "{ids:?}");
+    assert!(windows_skip_reason("apps/debrief").contains("windowsClippy"));
 }
 
 /// ER-41 (user, 2026-11-14): a branch's touched-file tests passed and the full conformance run failed (lib-usage.test.mjs on

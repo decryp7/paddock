@@ -148,7 +148,22 @@ fn the_frozen_real_tree_answers_as_the_js_host_did() {
         ci: Some(false),
     };
     let raw = run_checks(&opts, &registry()).unwrap().json();
-    let shared = json!({"app": raw["app"], "checks": raw["checks"], "findings": raw["findings"], "waived": raw["waived"], "errors": raw["errors"], "warnings": raw["warnings"]});
+    // C122's rules D and E (2026-11-21) are newer than the JavaScript host this file records: the comparison covers the rules it had.
+    let is_new_rule = |f: &Value| {
+        f["message"]
+            .as_str()
+            .is_some_and(|m| m.contains("(rule D:") || m.contains("(rule E:"))
+    };
+    let findings: Vec<Value> = raw["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|f| !is_new_rule(f))
+        .cloned()
+        .collect();
+    let dropped = raw["findings"].as_array().unwrap().len() - findings.len();
+    let warnings = raw["warnings"].as_u64().unwrap() - dropped as u64;
+    let shared = json!({"app": raw["app"], "checks": raw["checks"], "findings": findings, "waived": raw["waived"], "errors": raw["errors"], "warnings": warnings});
     let want = crate::recorded::expect("frozen-real-tree", &shared);
     assert_eq!(normal(&shared), normal(&want));
 }

@@ -5,7 +5,13 @@
 //!
 //! - rule A: a `format!` that joins a `.display()` argument with a literal `/` or `\` next to a placeholder;
 //! - rule B: a hand separator fold, `.replace('\\', "/")` (also with strings);
-//! - rule C (a warning, a heuristic): `assert_eq!`/`assert_ne!` with an operand that is path text.
+//! - rule C (a warning, a heuristic): `assert_eq!`/`assert_ne!` with an operand that is path text;
+//! - rule D (a warning, new 2026-11-21): a path rendered with `.display()` or `.to_string_lossy()` and handed to a program as an
+//!   argument (`.arg`, `.args`, `.env`), formatted into a golden (`assert_golden`, `check_golden`) or into an `expected`/`want`/`golden`
+//!   binding; the tools' spelling is `paddock_env::winpath::for_tools`;
+//! - rule E (a warning, new 2026-11-21): a string comparison (`==`, `!=`, `contains`, `starts_with`) with a path rendered to text on
+//!   one side; compare paths with `winpath::same`/`starts_with`. A line that names `file_name()`, `extension()` or `file_stem()` is a
+//!   name, not a place, and is left alone.
 //!
 //! A site that is not a path comparison carries `// conformance: path-text — <why>` on the line or the line above. Report-only
 //! (ER-41): A and B are warnings until the first green run on the real tree; flip [`SEVERITY_AB`] then.
@@ -36,7 +42,16 @@ static FORMAT_CALL: LazyLock<Regex> = LazyLock::new(|| rx(r"\bformat!\s*\("));
 static ASSERT_CALL: LazyLock<Regex> = LazyLock::new(|| rx(r"\bassert_(?:eq|ne)!\s*\("));
 static FORMAT_LITERAL: LazyLock<Regex> = LazyLock::new(|| rx(r"\}(?:/|\\\\)|(?:/|\\\\)\{"));
 static FOLD: LazyLock<Regex> = LazyLock::new(|| rx(r##"\.replace\(\s*(?:'\\\\'|"\\\\"|r#*"\\"#*)\s*,\s*(?:"/"|'/')\s*\)"##));
-static PREFILTER: LazyLock<Regex> = LazyLock::new(|| rx(r"format!|\.replace\(|assert_(?:eq|ne)!"));
+static PREFILTER: LazyLock<Regex> = LazyLock::new(|| rx(r"format!|\.replace\(|assert_(?:eq|ne)!|\.display\(\)|\.to_string_lossy\(\)"));
+static ARG_CALL: LazyLock<Regex> = LazyLock::new(|| rx(r"\.(?:arg|args|env)\s*\("));
+static GOLDEN_CALL: LazyLock<Regex> = LazyLock::new(|| rx(r"\b(?:assert_golden|check_golden)\s*\("));
+static EXPECTED_BINDING: LazyLock<Regex> = LazyLock::new(|| rx(r"\b(?:expected|want|golden)\w*\s*(?::[^=;]+)?=\s*$"));
+static COMPARE_CALL: LazyLock<Regex> = LazyLock::new(|| rx(r"\.(?:contains|starts_with)\s*\("));
+static TEXT_THEN_COMPARE: LazyLock<Regex> = LazyLock::new(|| {
+    rx(r"(?:\.display\(\)|\.to_string_lossy\(\))(?:\.(?:to_string|into_owned|to_owned)\(\))?\s*(?:\.(?:contains|starts_with)\s*\(|[=!]=)")
+});
+static COMPARE_THEN_TEXT: LazyLock<Regex> = LazyLock::new(|| rx(r"[=!]=\s*&?[^;{}\n]*?(?:\.display\(\)|\.to_string_lossy\(\))"));
+static NAME_ONLY: LazyLock<Regex> = LazyLock::new(|| rx(r"file_name\(\)|\.extension\(\)|file_stem\(\)"));
 const PATH_TEXT: [&str; 3] = [".display().to_string()", ".to_str().unwrap()", ".to_string_lossy()"];
 
 /// The rule of a site.
@@ -48,6 +63,10 @@ pub enum Rule {
     B,
     /// `assert_eq!` over path text (warning).
     C,
+    /// A path rendered to text and handed to a program, a golden or an expected value (warning).
+    D,
+    /// A string comparison with a path rendered to text (warning).
+    E,
 }
 
 impl Rule {
@@ -56,6 +75,8 @@ impl Rule {
             Rule::A => 'A',
             Rule::B => 'B',
             Rule::C => 'C',
+            Rule::D => 'D',
+            Rule::E => 'E',
         }
     }
 }
@@ -200,6 +221,81 @@ pub fn path_text_sites(text: &str, file: &str) -> Vec<Site> {
             push(start, Rule::C, "compares path text, not paths");
         }
     }
+    let path_text = |args: &str| args.contains(".display()") || args.contains(".to_string_lossy()");
+    let line_text = |index: usize| lines.get(line_at(index) - 1).copied().unwrap_or("");
+    for (call, what) in [
+        (
+            &*ARG_CALL,
+            "hands a path to a program as `.display()` text: use `paddock_env::winpath::for_tools`",
+        ),
+        (
+            &*GOLDEN_CALL,
+            "formats a path into a golden with `.display()`: the golden holds this machine's spelling",
+        ),
+    ] {
+        for c in call.find_iter(&masked) {
+            let start = in_masked.at(c.start());
+            if start < from {
+                continue;
+            }
+            let open = in_masked.at(c.end()) - 1;
+            let Some(end) = close_of(&m, open) else { continue };
+            let args = slice(&m, open, end);
+            if path_text(&args) && !NAME_ONLY.is_match(&args) {
+                push(start, Rule::D, what);
+            }
+        }
+    }
+    for c in FORMAT_CALL.find_iter(&masked) {
+        let start = in_masked.at(c.start());
+        if start < from {
+            continue;
+        }
+        let open = in_masked.at(c.end()) - 1;
+        let Some(end) = close_of(&m, open) else { continue };
+        let before = &masked[..c.start()];
+        let before_line = before.rsplit('\n').next().unwrap_or("");
+        if path_text(&slice(&m, open, end)) && EXPECTED_BINDING.is_match(before_line) && !NAME_ONLY.is_match(&slice(&m, open, end)) {
+            push(
+                start,
+                Rule::D,
+                "formats a path into an expected value with `.display()`: the text is this machine's spelling",
+            );
+        }
+    }
+    let mut seen_e: Vec<usize> = Vec::new();
+    let mut note_e = |start: usize, out_push: &mut dyn FnMut(usize)| {
+        let line = line_at(start);
+        if !seen_e.contains(&line) {
+            seen_e.push(line);
+            out_push(start);
+        }
+    };
+    let mut e_sites: Vec<usize> = Vec::new();
+    for c in TEXT_THEN_COMPARE.find_iter(&masked).chain(COMPARE_THEN_TEXT.find_iter(&masked)) {
+        let start = in_masked.at(c.start());
+        if start >= from && !NAME_ONLY.is_match(line_text(start)) {
+            note_e(start, &mut |s| e_sites.push(s));
+        }
+    }
+    for c in COMPARE_CALL.find_iter(&masked) {
+        let start = in_masked.at(c.start());
+        if start < from {
+            continue;
+        }
+        let open = in_masked.at(c.end()) - 1;
+        let Some(end) = close_of(&m, open) else { continue };
+        if path_text(&slice(&m, open, end)) && !NAME_ONLY.is_match(line_text(start)) {
+            note_e(start, &mut |s| e_sites.push(s));
+        }
+    }
+    for s in e_sites {
+        push(
+            s,
+            Rule::E,
+            "compares a path rendered to text as a string: Windows spells the same place differently",
+        );
+    }
     out.sort_by(|a, b| a.index.cmp(&b.index).then(a.rule.letter().cmp(&b.rule.letter())));
     out
 }
@@ -210,6 +306,10 @@ fn fix(rule: Rule) -> &'static str {
             "Build the path with `Path::join` or `paddock_testkit::path::under`, or the expected text with `paddock_testkit::path::text`."
         }
         Rule::B => "Use `paddock_testkit::path::text` (the tools' spelling) or compare with `same_path` / `assert_same_path!`.",
+        Rule::D => {
+            "Pass `paddock_env::winpath::for_tools(path, os)` to a program, and normalise a golden's paths (`paddock_testkit::golden`)."
+        }
+        Rule::E => "Compare with `paddock_env::winpath::same` / `starts_with` (or `paddock_testkit::path::same_path`), not as strings.",
         Rule::C => {
             "Compare `Path`s, or use `paddock_testkit::assert_same_path!`; keep text only for what a program printed (`path::text`)."
         }
@@ -290,7 +390,11 @@ impl Check for C122 {
                 } else {
                     ""
                 };
-                let severity = if s.rule == Rule::C { Severity::Warn } else { SEVERITY_AB };
+                let severity = if matches!(s.rule, Rule::C | Rule::D | Rule::E) {
+                    Severity::Warn
+                } else {
+                    SEVERITY_AB
+                };
                 let message = format!(
                     "{}{bare} (rule {}: the same place is spelled differently on Windows)",
                     s.what,
@@ -415,6 +519,47 @@ mod tests {
         );
         assert_eq!(sites(&format!("{l} // conformance: path-text — a URL path")), ["A1:reason"]);
         assert_eq!(sites(&format!("// conformance: path-text\n{l}")), ["A2:no-reason"]);
+    }
+
+    #[test]
+    fn a_path_text_handed_to_a_program_or_a_golden_is_rule_d() {
+        assert_eq!(
+            sites("let o = Command::new(\"git\").arg(p.display().to_string()).output();"),
+            ["D1"]
+        );
+        assert_eq!(sites("cmd.args([\"-C\", &dir.to_string_lossy()]);"), ["D1"]);
+        assert_eq!(sites("cmd.env(\"HOME\", home.display().to_string());"), ["D1"]);
+        assert_eq!(sites("assert_golden(&g, &format!(\"{}\", root.display()));"), ["D1"]);
+        assert_eq!(sites("let expected = format!(\"cache {}\", root.display());"), ["D1"]);
+        // clean: a path handed over as a path, a file name, a literal, text that is no path binding
+        assert!(sites("cmd.arg(&p);").is_empty());
+        assert!(sites("cmd.arg(p.file_name().unwrap().to_string_lossy().to_string());").is_empty());
+        assert!(sites("cmd.arg(\"x\");").is_empty());
+        assert!(sites("let msg = format!(\"saw {}\", root.display());").is_empty());
+        assert!(sites("// cmd.arg(p.display().to_string());\n").is_empty());
+    }
+
+    #[test]
+    fn a_string_comparison_of_path_text_is_rule_e() {
+        assert_eq!(sites("assert!(out.contains(&p.display().to_string()));"), ["E1"]);
+        assert_eq!(sites("assert!(p.to_string_lossy().contains(\"cache\"));"), ["E1"]);
+        assert_eq!(sites("assert!(p.display().to_string().starts_with(\"C:\"));"), ["E1"]);
+        assert_eq!(sites("if a.to_string_lossy() == b { f(); }"), ["E1"]);
+        assert_eq!(sites("if a == b.to_string_lossy() { f(); }"), ["E1"]);
+        assert_eq!(sites("assert!(s.starts_with(&root.to_string_lossy().to_string()));"), ["E1"]);
+        // clean: a name, a path comparison, a plain string
+        assert!(sites("assert!(p.file_name().unwrap().to_string_lossy().contains(\"x\"));").is_empty());
+        assert!(sites("assert!(p.extension().unwrap().to_string_lossy() == \"json\");").is_empty());
+        assert!(sites("assert!(p.starts_with(&root));").is_empty());
+        assert!(sites("assert!(out.contains(\"x\"));").is_empty());
+    }
+
+    #[test]
+    fn a_waiver_covers_rules_d_and_e() {
+        assert_eq!(
+            sites("// conformance: path-text \u{2014} a URL, not a file\ncmd.arg(u.display().to_string());"),
+            ["D2:reason"]
+        );
     }
 
     #[test]

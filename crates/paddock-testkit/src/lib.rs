@@ -49,6 +49,7 @@ pub mod cases;
 pub mod env;
 pub mod exe;
 pub mod golden;
+pub mod golden_paths;
 pub mod hostile;
 pub mod limits;
 pub mod net;

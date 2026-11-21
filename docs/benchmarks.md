@@ -2393,3 +2393,17 @@ Quoted by [docs/research/2026-11-20-ci-job-cost.md](research/2026-11-20-ci-job-c
   and 3,878 (8346), macOS 2,545 and 1,680, Linux 814 (8346); `merge_check` 1,089 / 303 / 53, `golden` 643 / 189, `queue`
   637 / 388 / 58; queue tests 7.3 s median on Windows.
 - **Fixed waits:** `waitForTimeout` 10 in Debrief's specs, 3 in Dyno's, 5 in `ui/e2e`, 0 in Pitwall's.
+
+## Windows Clippy row for tools/paddock-dev in the member and pre-push gate (2026-11-21, feat/path-guards-and-devtool-xwin)
+
+`./dev check --pre-push` and the member gate now run `cargo xwin clippy --target x86_64-pc-windows-msvc --workspace --all-targets --locked -- -D warnings` in `tools/paddock-dev` (`ALWAYS_WINDOWS` in `tools/paddock-dev/src/pre_push/gates.rs`), as they already did for `crates` and for apps with `windowsClippy`. Run 8495 (Windows job 43574) found Windows-only lints in paddock-dev first in CI (ER-9).
+
+Measured on the Mac mini, `CARGO_BUILD_JOBS=2`, sccache on, a fresh xwin build folder, machine load 17 to 54 (other agents running), one run each, so a rough cost and not a distribution:
+
+| Run | Wall time |
+|---|---|
+| cold: first xwin Clippy of the workspace (all dependencies and all targets) | 54 s |
+| warm: after a change to `src/lib.rs` (paddock-dev rechecked, dependencies cached) | 4 s |
+| host Clippy of the same workspace, warm, for comparison | 4 s (cold run was in the same 100 s block as the xwin one) |
+
+The row runs in parallel with the host Clippy (rank 3, heavy, bounded by load), so the added gate time on a warm folder is about the longer of the two, not their sum. The folder is kept per worktree (`<kept>/tools-paddock-dev/xwin`), so only the first push of a worktree pays the cold cost.

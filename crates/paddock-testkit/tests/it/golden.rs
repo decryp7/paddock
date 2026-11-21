@@ -233,3 +233,34 @@ fn the_test_name_is_nextests_whole_name_else_the_thread_s() {
     assert_eq!(test_name_of(Some("a b"), Some("x::y")), Some("x::y"));
     assert_eq!(test_name_of(None, None), None);
 }
+
+/// ER-46: a golden never holds a form only one OS prints. The file says `<tmp>/x/y`; a Windows run prints the mixed-separator text a
+/// `Path::join` onto a `/` base gave in train B (run 8495), and it still matches. Positive control: the same text differs
+/// without the normalisation (compared raw).
+#[test]
+fn a_windows_spelling_of_the_same_path_matches_the_stable_golden() {
+    let s = Scratch::new();
+    let tmp = std::env::temp_dir();
+    let file = s
+        .write(
+            "g.txt",
+            "dir <tmp>/x\nroot <home>\nnote C:/data/node-caches/npm\n",
+        )
+        .expect("write");
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .unwrap_or_default();
+    let actual = format!(
+        "dir {}/x\nroot {home}\nnote C:\\data/node-caches\\npm\n",
+        tmp.to_string_lossy().trim_end_matches(['/', '\\'])
+    );
+    assert_ne!(
+        actual.replace("\r\n", "\n"),
+        std::fs::read_to_string(&file).unwrap(),
+        "raw, the spellings differ"
+    );
+    assert_eq!(
+        check_golden(&file, &actual, GoldenMode::Check).unwrap(),
+        Golden::Matched
+    );
+}
