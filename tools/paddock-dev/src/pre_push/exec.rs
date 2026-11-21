@@ -804,16 +804,27 @@ fn stalled_holder(done: &Done) -> String {
     text.as_deref()
         .and_then(stall_line_holder)
         .or_else(|| queue_holder(done.log.as_deref()))
+        .or_else(|| text.as_deref().and_then(wait_status))
         .unwrap_or_else(|| "nobody named (heavy logged no holder)".to_string())
 }
 
-/// The line the push prints while a step waits for the heavy slot: the wait so far and who holds the slot, and that none of it is run time
-/// (ER-27: the queue is a state of its own in the log).
-pub fn waiting_line(id: &str, waited: Duration, holder: Option<&str>, stall: Duration) -> String {
+/// What heavy last said about the wait, from its own `<agent> waiting 126s: <status>` lines in the step's log: `queued, position 7 of 8,
+/// behind <agent>` while in the ticket queue, `the lock is held by <agent> (pid N) for 3 min` at the head. `None` before the first line.
+pub fn wait_status(log: &str) -> Option<String> {
+    log.lines().rev().find_map(|l| {
+        let rest = l.split(" waiting ").nth(1)?;
+        let (secs, status) = rest.split_once("s: ")?;
+        secs.chars().all(|c| c.is_ascii_digit()).then(|| status.trim().to_string())
+    })
+}
+
+/// The line the push prints while a step waits for the heavy slot: the wait so far and heavy's own status (who holds the slot, or the
+/// place in the queue and who is ahead), and that none of it is run time (ER-27: the queue is a state of its own in the log).
+pub fn waiting_line(id: &str, waited: Duration, status: Option<&str>, stall: Duration) -> String {
     format!(
-        "pre-push: {id}: waiting for a heavy slot, {} s so far, held by {} (queue time, not run time; the wait ends only after {} min without progress)",
+        "pre-push: {id}: waiting for a heavy slot, {} s so far; {} (queue time, not run time; the wait ends only after {} min without progress)",
         waited.as_secs(),
-        holder.unwrap_or("nobody named yet"),
+        status.unwrap_or("heavy has not said who holds it yet"),
         stall.as_secs() / 60
     )
 }
@@ -1217,8 +1228,8 @@ impl Exec for RealExec {
                         }
                         if Instant::now() >= said {
                             said += WAITING_SAY;
-                            let holder = queue_holder(Some(&log.display().to_string()));
-                            eprintln!("{}", waiting_line(&gate.id, began.elapsed(), holder.as_deref(), limits.stall));
+                            let status = std::fs::read_to_string(&log).ok().and_then(|t| wait_status(&t));
+                            eprintln!("{}", waiting_line(&gate.id, began.elapsed(), status.as_deref(), limits.stall));
                         }
                         std::thread::sleep(SLOT_POLL);
                     }
@@ -1637,20 +1648,23 @@ mod tests {
     /// The wait for the slot is a state of its own in the log: the time so far, the holder, and that it is not run time.
     #[test]
     fn the_waiting_line_names_the_time_waited_and_the_holder() {
+        let log = "heavy: pre-push-1-2 waiting 60s: queued, position 3 of 4, behind agent-7\nheavy: pre-push-1-2 waiting 125s: queued, position 2 of 4, behind agent-7\n";
+        assert_eq!(wait_status(log).as_deref(), Some("queued, position 2 of 4, behind agent-7"));
+        assert_eq!(wait_status("compiling x\n"), None);
         let line = waiting_line(
             "clippy a",
             Duration::from_secs(125),
-            Some("agent-7 (pid 41)"),
+            wait_status(log).as_deref(),
             Duration::from_secs(1800),
         );
         assert!(
             line.contains("clippy a")
                 && line.contains("125 s so far")
-                && line.contains("held by agent-7 (pid 41)")
+                && line.contains("position 2 of 4, behind agent-7")
                 && line.contains("not run time"),
             "{line}"
         );
-        assert!(waiting_line("x", Duration::ZERO, None, QUEUE_STALL).contains("nobody named yet"));
+        assert!(waiting_line("x", Duration::ZERO, None, QUEUE_STALL).contains("has not said who holds it yet"));
     }
 
     /// The row cap counts only run time: a step that queued for hours and then ran 10 s is nowhere near it, a step still waiting is
