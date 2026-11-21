@@ -1296,3 +1296,11 @@ owner = "ER-21 class: a read on 'it is in the DOM' (feat/e2e-ready-gating)"
 since = 2026-11-18
 review_by = 2026-12-18
 approved = "user"
+
+[[report_only]]
+id = "C146"
+reason = "ER-41: report-only until its first green run on the real tree, recorded by run id here and in tools/paddock-dev/src/check/c146.rs. It flags a Rust file outside crates/paddock-watch that starts a notify watcher (recommended_watcher, RecommendedWatcher::new, PollWatcher::new, new_debouncer) or implements notify's EventHandler without reading the results through paddock_watch::NotifySource::change_from, the shared mapping that turns a Rescan flag or an error into a rescan with its cause; a site that has to read them another way carries `// conformance: notify-direct — <why>`. On fix/debrief-watch-rescan (2026-11-21) the only sites were Debrief's live.rs, which now calls change_from: 0 findings. Known gaps: a watcher started through a helper in another file, and a file that calls change_from but drops a Rescan elsewhere"
+owner = "ER-21 class: a watcher adapter loses notify's Rescan (paddock-watch d6b5c79ee; Debrief live tail, fix/debrief-watch-rescan)"
+since = 2026-11-21
+review_by = 2026-12-21
+approved = "user"
