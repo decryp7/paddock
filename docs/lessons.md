@@ -3282,3 +3282,17 @@ reveal grows the total, `Total grew outside a round` 7 ms after the press here) 
 - **Class: concurrent jobs write one folder.** Earlier: run 8027 (E0514, one build folder for two compilers), the heavy binary vanishing
   (2026-11-14), the Windows running-tool replace (`dev`, the `mv -f` fallback). The rule is drafted in ADR 0111: no writable folder is
   shared between concurrent CI lanes; shared state goes through a keyed cache or an artifact.
+
+## A NAS restart and a tool prompt each held work for hours: the tools now hold on a down service and never wait on stdin (2026-11-20)
+- **Failure:** a NAS restart took Gitea (HTTP 502) and RustFS down in the middle of a release: a hand-typed push through the keychain
+  helper got a 401 that erased the user's git login (now prevented by the repository's helper, which reads `GITEA_TOKEN` and ignores
+  erase), and a cache trial failed with nothing to say why. Separately `cargo llvm-cov` waited 4 h on "install llvm-tools? [Y/n]", and
+  rustup auto-installed a pinned toolchain in run 8060.
+- **Cause:** nothing asked whether the servers answered before a dispatch, a wait or a push, and a child started by a check inherited the
+  caller's standard input and rustup's default.
+- **Fix:** `paddock-dev`'s health gate (`health.rs`) holds `ci dispatch` and `wait --ci-run` (and `ci dispatch --trial`'s push) while
+  Gitea is down, bounded by the command's own `--max`; a command holds only on the services it needs (a wait on a run never on
+  RustFS, review of aa64cb4c3), and a wrong `--server` fails at once; `paddock_env::command::no_prompts` closes standard input and pins
+  `RUSTUP_AUTO_INSTALL=0` for `heavy`, `ci run` lines and the generators; `.claude/hooks/no-local-installs.sh` refuses an agent's
+  `cargo llvm-cov`, rustup installs and updates, and `cargo install cargo-llvm-cov`. Each has a test that fails without it.
+- **Class: a tool that waits on something it cannot see.** Earlier: run 8060 (rustup auto-install), `pgrep -f` loops (ER-32).

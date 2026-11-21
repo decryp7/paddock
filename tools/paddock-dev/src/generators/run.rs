@@ -103,6 +103,8 @@ fn base_command(program: impl AsRef<std::ffi::OsStr>, env: &HashMap<String, Stri
     let mut cmd = command(program);
     paddock_env::clear_env_from(&mut cmd, &[], |k| env.get(k).map(std::ffi::OsString::from));
     cmd.envs(env).current_dir(dir).env("CARGO_BUILD_JOBS", jobs);
+    // The prompt policy last (ER-47, named: paddock_env::command::no_prompts): no standard input, no toolchain auto-install.
+    paddock_env::command::no_prompts(&mut cmd);
     cmd
 }
 
@@ -128,6 +130,15 @@ mod command_tests {
         ] {
             assert!(got.contains(&(k.to_string(), v.to_string())), "{k}: {got:?}");
         }
+        // The prompt policy: standard input closed, the install ban pinned even where the map says otherwise.
+        let mut loose = env.clone();
+        loose.insert("RUSTUP_AUTO_INSTALL".into(), "1".into());
+        let cmd = base_command("x", &loose, Path::new("."), "2".into());
+        assert!(
+            cmd.get_envs()
+                .any(|(k, v)| k == "RUSTUP_AUTO_INSTALL" && v == Some(std::ffi::OsStr::new("0"))),
+            "the ban was not pinned"
+        );
         // Positive control: a variable that is not in the map is not taken from the process.
         assert!(!got.iter().any(|(k, _)| k == "CARGO_NET_OFFLINE"), "{got:?}");
     }
