@@ -13,6 +13,9 @@
 #   - a private key reached a run whose GITHUB_REF is not a tag (the workflow must pass the secret only on tags), or
 #   - a tag run has the public key but no private key (a release would ship without signatures, or a throw-away key).
 # A local run keeps a key a person set by hand.
+# The tag rehearsal (PADDOCK_TAG_REHEARSAL=1, .gitea/workflows/tag-rehearsal.yml; is-tag-run.mjs answers "tag"): the release path with
+# a throw-away key. updater_key_take then fails when ANY private key is present (the real key must not be reachable), skips the
+# "tag run without a private key" check, and updater_key_throwaway always makes a key pair, replacing any public key it was given.
 # updater_key_throwaway: on a CI run that is not a tag, with the public key given and no private key, makes a key pair in a temp
 # folder with the app's own Tauri CLI (empty password, `--ci`: no secret on a command line) and signs with it, so a rule 54
 # dispatch still exercises the signing path. Its public key goes into the build too; such a build is never published. A tag never makes one.
@@ -24,7 +27,12 @@ updater_key_here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 updater_key_tag_run() {
   local rc=0
   node "$updater_key_here/../src/util/is-tag-run.mjs" || rc=$?
-  case "$rc" in 0) updater_key_is_tag=true ;; 3) updater_key_is_tag=false ;; *)
+  updater_key_rehearsal=false
+  [ "${PADDOCK_TAG_REHEARSAL:-}" = 1 ] && updater_key_rehearsal=true
+  case "$rc" in 0) updater_key_is_tag=true ;; 3) updater_key_is_tag=false
+    if [ "$updater_key_rehearsal" = true ]; then
+      echo "::error::is-tag-run.mjs said \"not a tag\" (exit 3) in a tag rehearsal, which it must answer \"tag\": the rehearsal would not exercise the release path. Next step: run PADDOCK_TAG_REHEARSAL=1 node conformance/src/util/is-tag-run.mjs and read why."; return 1
+    fi ;; 4) echo "::error::is-tag-run.mjs refused (exit 4): the tag rehearsal switch is on in a run that is a real tag, or has a bad value. Next step: read its error above; the rehearsal runs from the default branch only."; return 1 ;; *)
     echo "::error::is-tag-run.mjs exited $rc (0 is a tag, 3 is not), so the step cannot tell a tag from a branch. Next step: run node conformance/src/util/is-tag-run.mjs and read its error."; return 1 ;; esac
 }
 updater_key_on_tag() { [ "$updater_key_is_tag" = true ]; }
@@ -42,12 +50,16 @@ updater_key_take() {
   unset TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD TAURI_UPDATER_PUBKEY
   updater_key_tag_run || return 1
   updater_key_signing=false
+  if [ "$updater_key_rehearsal" = true ] && [ -n "$updater_key" ]; then
+    echo "::error::A private updater key reached the tag rehearsal (GITHUB_REF=${GITHUB_REF:-unset}): the rehearsal signs with a throw-away key only and its workflow passes no secrets. Next step: remove the secrets from the rehearsal job (tag-rehearsal.yml)."
+    return 1
+  fi
   if [ "${GITHUB_ACTIONS:-}" = true ]; then
     if [ -n "$updater_key" ] && ! updater_key_on_tag; then
       echo "::error::The updater signing key reached a run that is not a tag (GITHUB_REF=${GITHUB_REF:-unset}): ADR 0085 D7 gives it to release tag runs only. Next step: pass the secret only when the ref is the app's release tag (see app-release.yml's tauri-bundle step)."
       return 1
     fi
-    if [ -z "$updater_key" ] && [ -n "$updater_pubkey" ] && updater_key_on_tag; then
+    if [ -z "$updater_key" ] && [ -n "$updater_pubkey" ] && updater_key_on_tag && [ "$updater_key_rehearsal" != true ]; then
       echo "::error::This tag run has the updater public key but no private key (GITHUB_REF=${GITHUB_REF}): its installers would ship unsigned. Next step: check the TAURI_SIGNING_PRIVATE_KEY secret and that the tag is the app's release tag (<app>-vX.Y.Z), which the workflow's key gate names."
       return 1
     fi
@@ -58,7 +70,9 @@ updater_key_take() {
 # <dir>: the app folder, where `npx tauri` resolves the CLI.
 updater_key_throwaway() {
   local dir="${1:?updater_key_throwaway needs the app folder}"
-  if [ -n "$updater_key" ] || [ -z "$updater_pubkey" ] || [ "${GITHUB_ACTIONS:-}" != true ] || updater_key_on_tag; then
+  if [ "$updater_key_rehearsal" = true ]; then
+    [ -z "$updater_key" ] || { echo "::error::updater_key_throwaway: a private key is set in the tag rehearsal."; return 1; }
+  elif [ -n "$updater_key" ] || [ -z "$updater_pubkey" ] || [ "${GITHUB_ACTIONS:-}" != true ] || updater_key_on_tag; then
     return 0
   fi
   local tmp
@@ -72,7 +86,7 @@ updater_key_throwaway() {
   updater_pubkey="$(tr -d ' \t\r\n' < "$tmp/updater.key.pub")"
   updater_key_password=""
   rm -rf "$tmp"
-  echo "::notice::This build is signed with a throw-away updater key made in this job (ADR 0085 D7: the real key reaches tag runs only). Its installers cannot verify a real update and are never published."
+  echo "::notice::This build is signed with a throw-away updater key made in this job (ADR 0085 D7: the real key reaches tag runs only$([ "$updater_key_rehearsal" = true ] && echo "; tag rehearsal")). Its installers cannot verify a real update and are never published."
   updater_key_check_pair
 }
 

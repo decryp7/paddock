@@ -266,7 +266,7 @@ fn the_limit_follows_the_cost_class() {
 #[cfg(unix)]
 mod real {
     use super::super::registry::Cost;
-    use super::super::run::{Ran, Real, Runner, Spec};
+    use super::super::run::{Ran, Real, Runner, Spec, ran_from};
     use paddock_testkit::{Actions, Exec, StandIn};
     use std::collections::HashMap;
     use std::path::PathBuf;
@@ -377,28 +377,34 @@ mod real {
         assert_eq!(Cost::Fast.name(), "fast");
     }
 
+    /// A run that `paddock_proc` ended at its limit, with what it wrote until then.
+    fn timed_out(stderr: &str) -> paddock_proc::Output {
+        paddock_proc::Output {
+            outcome: paddock_proc::Outcome::TimedOut,
+            stdout: Vec::new(),
+            stderr: stderr.as_bytes().to_vec(),
+            truncated: false,
+        }
+    }
+
     #[test]
     fn a_wait_for_the_slot_past_the_hang_guard_is_not_measured_and_names_the_holder() {
-        let f = fixture(
-            Actions::new()
-                .stderr("heavy: the lock is held by Bob (pid 12) for 3m, running: cargo test")
-                .sleeps(Duration::from_secs(30)),
-        );
-        let real = Real::with(&f.repo, env(&f), Vec::new());
-        let ran = real.run(
-            &f.repo,
-            &argv(),
-            Duration::from_secs(1),
-            &Spec {
-                heavy: true,
-                workspace: "crates",
-            },
-        );
-        match ran {
+        // On the run's output alone, not on a stand-in timed out by the clock: that test raced the stand-in's start against a 1 s
+        // limit and failed on a loaded runner when the line came after it (run 8546, job 44050; a stand-in that waits 1.5 s before
+        // the line reproduces it every time). paddock_proc's own tests show a run ended at its limit keeps what was written.
+        let held = timed_out("heavy: the lock is held by Bob (pid 12) for 3m, running: cargo test\n");
+        match ran_from(&held, true) {
             Ran::SlotWait(who) => assert!(who.contains("Bob"), "{who}"),
             other => panic!("{other:?}"),
         }
-        assert!(calls(&f).is_empty(), "cargo never started");
+        // Positive controls: the same log from a fast entry, which never queues, and from a heavy that took the lock and ran the
+        // command, are plain timeouts; so is a heavy that wrote nothing before the limit.
+        assert_eq!(ran_from(&held, false), Ran::TimedOut);
+        let took = timed_out(
+            "heavy: the lock is held by Bob (pid 12) for 3m, running: cargo test\nheavy: pre-push holds the lock (pid 9) at 10:00:00Z, waited 4s\n",
+        );
+        assert_eq!(ran_from(&took, true), Ran::TimedOut);
+        assert_eq!(ran_from(&timed_out(""), true), Ran::TimedOut);
     }
 
     #[test]

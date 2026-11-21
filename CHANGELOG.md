@@ -4,11 +4,41 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `paddock-dev`, `heavy`, `paddock-env`: a health gate for Gitea, and no tool prompts (user decision 2026-11-20)
+- `./dev ci dispatch`, `./dev wait --ci-run` and the queue and member-gate dispatch look at Gitea (`GET /api/v1/version`) and hold while it
+  is down: any answer below 500 is up (a 401 or 403 included), a refused connection, a timeout or a 5xx is down. They hold on Gitea
+  only, since reading a run or sending a dispatch needs nothing else; `health::services(.., rustfs: true)` adds RustFS (a GET of its
+  bucket URL from `PADDOCK_SCCACHE_S3_*`) for a command that compiles through the shared cache. An address that can never work (a
+  malformed URL, a host that does not resolve: a wrong `--server`) is an error at the first look, not a hold; it is held for only after
+  the service has answered once. One log line per change of state; the hold counts against the command's `--max` and ends with one
+  `::error::` naming the service and the next step.
+- A push of the train tools (`ci dispatch --trial`) is not sent while Gitea is down, held for at most that command's `--max`
+  (`GitTrain::push_hold`); the queue and the member gate set no bound and try again on their next turn. These tools authenticate with an
+  askpass program and `GIT_TERMINAL_PROMPT=0`, so they never touched a git login; the erased login of 2026-11-20 was a hand-typed push
+  through the keychain helper, which the repository's helper (reads `GITEA_TOKEN`, ignores erase) now prevents. The hold only keeps a
+  push from failing with an unreadable 502.
+- New `paddock_env::command::no_prompts`: standard input is `/dev/null` and `RUSTUP_AUTO_INSTALL=0` (a named policy, ER-47). `heavy`
+  applies it to its command (`HEAVY_STDIN=inherit` opts in), and so do `./dev ci run` lines and the generators' programs.
+- New hook `.claude/hooks/no-local-installs.sh`: an agent's `cargo llvm-cov`, `rustup component add`, `rustup toolchain install`, `rustup target add`, `rustup update`, `rustup default <ver>` and `cargo install cargo-llvm-cov` are
+  refused with the next step (CI's llvm-cov gate measures coverage; the user installs toolchains).
+
 ### `@decryp7/paddock-e2e`: `untilItsPageCloses` and `clickThatClosesItsPage`, for a step that closes its own window
 - A test step whose action ends the page it acts on (a pop-out's Dock back, the pointer-up that docks a dragged pop-out) counts as done
   when that page closed: Playwright can reject such a step with "Target page, context or browser has been closed" when the window goes
   away while it is still finishing the step (Debrief's popout.e2e.ts:62, run 8338). A step that fails while the page stays open, or
   that leaves it open, still fails. Debrief's pop-out specs use it; a selftest (`selftest/close-click.spec.ts`) reproduces the race.
+
+### CI's S3 compile cache: `paddock_net::stall_guard`, a localhost proxy that cuts a request the store does not answer, and `paddock_testkit::net::broken_server`
+- New `paddock_net::stall_guard` (std only, no TLS stack): `Guard` forwards the bytes of every connection to a store and closes one
+  that has had no byte for `Limits::stall`; a cut with the request unanswered, or a failed connect, opens a breaker so new connections
+  are refused for `Limits::cooldown` and a dead store costs one stall. The rules are pure (`Limits`, `Breaker`, `Watch`, `Verdict`,
+  every time passed in), the sockets are a thin adapter, errors are `StallGuardError`, at most `MAX_CONNECTIONS` connections at once.
+  First user: `./dev ci s3-guard`, started by `./dev ci setup-rust` in front of RustFS so sccache 0.19.0 (a fixed 60 s read timeout,
+  none for a write) goes on with its local disk when the store hangs (docs/research/2026-11-19-sccache.md section 8).
+- New `paddock_testkit::net::broken_server(Mode)`: a loopback server that breaks on purpose (`BlackHole`: accepts and never answers,
+  `Drip`, `CutMidResponse`, `Refuse`, and `Answer` as the healthy control), bounded in connections and body size, joined on drop.
+- CI's `setup-rust` gets the `s3` backend (the local disk first, RustFS behind it, switched on by the Gitea variable
+  `PADDOCK_CI_SCCACHE_BACKEND`; the key goes to the setup step only; conformance C141 checks that).
 
 ### `@decryp7/paddock-conformance`: C39, C53, C119-C125 and C129-C131 left the package (pair P3, ADR 0022 amendment 2026-11-19)
 - Breaking: these 12 checks have no JavaScript module any more, so `paddock-conformance --only C39` (and the others) is an `unknown

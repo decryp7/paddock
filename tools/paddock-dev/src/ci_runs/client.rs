@@ -200,6 +200,18 @@ impl<'a> Client<'a> {
         Ok(self.retry(|c| c.http.get_json(&url, &c.token))?.map(|v| RunInfo::from_json(&v)))
     }
 
+    /// The head commit of a branch (`GET .../branches/<branch>`); `Ok(None)` when the branch is gone (404) or names no commit.
+    pub fn branch_head(&mut self, branch: &str) -> Result<Option<String>, String> {
+        let url = format!(
+            "{}/api/v1/repos/{}/branches/{}",
+            self.server.trim_end_matches('/'),
+            self.repo,
+            encode_path(branch)
+        );
+        let v = self.retry(|c| c.http.get_json(&url, &c.token))?;
+        Ok(v.and_then(|v| v["commit"]["id"].as_str().filter(|s| !s.is_empty()).map(str::to_string)))
+    }
+
     /// Page `page` of the run list (50 a page), an empty page for a missing one.
     pub fn runs_page(&mut self, page: u32) -> Result<RunsPage, String> {
         self.runs_page_where(page, "")
@@ -259,8 +271,28 @@ impl<'a> Client<'a> {
     }
 }
 
+/// Percent-encodes a path whose `/` separators stay (a branch name): every other byte outside the unreserved set is `%XX`.
+pub fn encode_path(p: &str) -> String {
+    let mut out = String::new();
+    for b in p.bytes() {
+        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~' | b'/') {
+            out.push(b as char);
+        } else {
+            out.push_str(&format!("%{b:02X}"));
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_branch_path_is_encoded_per_segment() {
+        assert_eq!(super::encode_path("train/2026-11-19_17.x"), "train/2026-11-19_17.x");
+        assert_eq!(super::encode_path("train/a b#c%?"), "train/a%20b%23c%25%3F");
+        assert_eq!(super::encode_path("tr\u{e4}in"), "tr%C3%A4in");
+    }
+
     use super::*;
     use crate::ci_runs::testutil::Fake;
 

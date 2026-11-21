@@ -94,7 +94,7 @@ export function checkVerdict(res) {
 }
 
 /** Runs every check; returns `[{ name, ok, detail }]`, stopping nowhere: all failures are reported. */
-export async function runChecks({ tag, sha, read, git, verdict }) {
+export async function runChecks({ tag, sha, read, git, verdict, dryRun = false }) {
   const results = [];
   const step = async (name, fn) => {
     try {
@@ -121,6 +121,8 @@ export async function runChecks({ tag, sha, read, git, verdict }) {
     checkNotSkipCi(git(['log', '-1', '--format=%B', sha]), sha);
   });
   await step('tag does not exist', () => {
+    // The one named difference of the tag rehearsal (tag-rehearsal.yml): it asks for the tag of the version already released, which exists.
+    if (dryRun) return 'skipped (dry run: the rehearsal names the current version\'s tag, which may exist; a real request checks this)';
     const have = git(['ls-remote', '--tags', 'origin', `refs/tags/${tag}`]).trim();
     if (have) throw new Error(`${tag} already exists on origin; a tag is never moved: bump the version and request a new tag`);
   });
@@ -133,11 +135,11 @@ export async function runChecks({ tag, sha, read, git, verdict }) {
 }
 
 /** Markdown for the job summary. */
-export function summary(tag, sha, results) {
+export function summary(tag, sha, results, dryRun = false) {
   const bad = results.filter((r) => !r.ok).length;
   return [
-    `## Tag request: ${tag}`,
-    `Commit \`${sha}\`. ${bad ? `**Refused: ${bad} check(s) failed.** No tag was made.` : 'All checks passed.'}`,
+    `## ${dryRun ? 'Tag rehearsal (dry run, no tag is made)' : 'Tag request'}: ${tag}`,
+    `Commit \`${sha}\`. ${bad ? `**${dryRun ? 'Failed' : 'Refused'}: ${bad} check(s) failed.** No tag was made.` : 'All checks passed.'}`,
     '',
     '| Check | Result | Detail |',
     '| --- | --- | --- |',
@@ -175,8 +177,10 @@ if (isMain(import.meta.url)) {
       maxBuffer: 16 << 20,
       timeout: 20 * 60 * 1000,
     });
-  const results = await runChecks({ tag: o.tag, sha: o.sha, read, git, verdict });
-  const md = summary(o.tag, o.sha, results);
+  // --dry-run true: the tag rehearsal. The same checks; this script never pushes in either mode (the bot's push is tag.yml's own job).
+  const dryRun = o['dry-run'] === 'true';
+  const results = await runChecks({ tag: o.tag, sha: o.sha, read, git, verdict, dryRun });
+  const md = summary(o.tag, o.sha, results, dryRun);
   if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, md);
   console.log(md);
   for (const r of results.filter((x) => !x.ok)) console.error(`::error::request-tag: ${r.name}: ${r.detail}`);

@@ -359,6 +359,12 @@ fn exec(h: &Heavy, args: &[String], opts: RunOpts, stop: Stop<'_>, acq: &mut Acq
     cmd.args(&args[1..]);
     // The correlation id travels to the command, so its own logs can be matched to this run.
     cmd.env("DEVKIT_RUN_ID", h.log.run_id());
+    // The prompt policy (ER-47, named: paddock_env::command::no_prompts): no standard input and no toolchain auto-install, so a
+    // tool that asks "install X? [Y/n]" cannot hold the slot for hours (cargo llvm-cov did, 2026-11-20). HEAVY_STDIN=inherit opts in.
+    paddock_env::command::no_prompts(&mut cmd);
+    if h.cfg.stdin_inherit {
+        cmd.stdin(Stdio::inherit());
+    }
     if opts.low {
         lower_priority(&mut cmd);
     }

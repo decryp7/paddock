@@ -2947,6 +2947,17 @@ tools/paddock-dev/Cargo.toml --profile ci --no-tests=fail -E 'test(/^contracts::
 paddock-ci, `tools/linux-container.sh --ci-image`, 4 CPUs, 2 jobs, a new empty build volume, host load 27): cold 71 s, warm 1 s (the 12
 tests run in 1.2 s). Under the limits set for the choice (30 s warm, 3 min cold), so the step stays a nextest step. Not measured: a
 real amd64 CI runner; read the step's timing from the next train run and revisit if the cold time passes 3 min.
+
+## Fix item: sccache with `SCCACHE_BASEDIRS` once a release ships it (2026-11-19)
+
+sccache 0.19.0 (2026-10-24, the pin in `tools/paddock-dev/src/ci_setup_rust.rs`) keys every Rust compile on the checkout path
+(`CARGO_MANIFEST_DIR`, the working folder), so the workspace's own crates never hit across worktrees and 18% of third-party crates
+(those with `OUT_DIR`) miss too (docs/research/2026-11-19-sccache.md). The fix, PRs #2918 and #3022 (`SCCACHE_BASEDIRS` for rustc and
+`SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS`), was merged on 2026-11-02 and is in no release yet. **To do (user decision 2026-11-19, WP-6):**
+when a release contains both, bump `SCCACHE_VERSION` and the four checksums, start the agents' server with
+`SCCACHE_BASEDIRS=<worktree root>` and `SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS=CARGO_MANIFEST_DIR,CARGO_MANIFEST_PATH`
+(`local_sccache.rs`), and measure workspace-crate hits across worktrees with incremental off in the push gates. Check
+<https://github.com/mozilla/sccache/releases> at each train.
 ## A slow-to-start stand-in git met the phase limit: the mark now bounds every call of a hung-phase test (2026-11-19)
 `ci_host::kept_clone::tests::a_phase_abandoned_at_its_bound_writes_nothing_into_the_next_phase` failed once at a 1-minute load of
 about 31 (integrator-train16, m2-nextest.log): the stand-in git recorded no call, because the git's own 1 s limit, counted from its
@@ -3243,6 +3254,11 @@ reveal grows the total, `Total grew outside a round` 7 ms after the press here) 
   `paddock-job-tmpdir-*` and more). The planned redesign is a shared per-run scratch root for tests, plus a report-only conformance
   check with a positive control (ER-21, ER-41).
 
+## cargo-llvm-cov asks to install into ~/.rustup and waits on stdin (sccache work, 2026-11-20)
+
+- **What happened:** a local `cargo llvm-cov nextest -p paddock-net` stopped at "I will run `rustup component add llvm-tools-preview` ... Proceed? [Y/n]" and sat there for 4 hours, because a background run has no stdin to answer it. Answering yes would have installed a component into the user's `~/.rustup` (ER-14, ER-45).
+- **Rule of thumb:** never run `cargo llvm-cov` locally. Coverage is measured by CI's llvm-cov gate (`./dev ci run crates coverage`, `scripts/coverage-gate.mjs`), whose image has the component. A shared crate's coverage is "not measured" in a branch report and read from the first CI run.
+- **Recurring class:** a tool that starts an installer or a prompt when a probe runs (ER-45; earlier instance: rustup 1.28.1 installing a missing pinned toolchain, run 8060). Any local tool step that can prompt gets stdin from /dev/null so it ends with an error instead of waiting.
 ## A streamed answer that was still arriving failed its wait: the wait bounded the whole stream, not a stall (Debrief, 2026-11-20, train A)
 - **Failure:** Debrief WebKit `ai-chat.e2e.ts:116` "the conversation is busy from the moment its turn is drawn until the answer is
   done" red on both tries in debrief.yml run 8377 job 42784 (shard 3/4, Linux), at `expectStreamDone` (paddock-e2e `ready.ts:85`):
@@ -3264,3 +3280,100 @@ reveal grows the total, `Total grew outside a round` 7 ms after the press here) 
 - **Class: an end-to-end wait bounds a streamed result by one expect timeout.** Earlier: debrief.yml run 8300, where six streamed
   answers ran past the wait (64f8165ae, fixed for that spec only by sending answers in one piece). It is fixed for every caller of
   `waitAnswered` here.
+
+## A folder shared between concurrent CI lanes (2026-11-21, ADR 0111)
+
+- **Run 8373 (debrief.yml, job 42677): E0463 "can't find crate for `foldhash`".** Linux CI had set `SCCACHE_DIR` to the whole `/sccache`
+  mount, where `./dev` kept its build folder. sccache's local cache is one LRU over every file below its folder, so an insert that took
+  it over `SCCACHE_CACHE_SIZE` deleted cargo's rlibs. Six lanes also meant six sccache servers on one folder, which sccache documents
+  as unsupported. Reproduction: `tools/paddock-dev/tests/it/sccache_eviction.rs` (the file survives beside the cache folder, not in it).
+- **Fix:** a lane folder per job (`<mount>/sccache-<lane>`, the slot holder the hosts use), `./dev` in the job's own home with its binary
+  kept through `actions/cache` and verified for its hash, npm and Angular through `actions/cache`, every `actions/cache` use pinned to a digest.
+- **Class: concurrent jobs write one folder.** Earlier: run 8027 (E0514, one build folder for two compilers), the heavy binary vanishing
+  (2026-11-14), the Windows running-tool replace (`dev`, the `mv -f` fallback). The rule is drafted in ADR 0111: no writable folder is
+  shared between concurrent CI lanes; shared state goes through a keyed cache or an artifact.
+
+## A NAS restart and a tool prompt each held work for hours: the tools now hold on a down service and never wait on stdin (2026-11-20)
+- **Failure:** a NAS restart took Gitea (HTTP 502) and RustFS down in the middle of a release: a hand-typed push through the keychain
+  helper got a 401 that erased the user's git login (now prevented by the repository's helper, which reads `GITEA_TOKEN` and ignores
+  erase), and a cache trial failed with nothing to say why. Separately `cargo llvm-cov` waited 4 h on "install llvm-tools? [Y/n]", and
+  rustup auto-installed a pinned toolchain in run 8060.
+- **Cause:** nothing asked whether the servers answered before a dispatch, a wait or a push, and a child started by a check inherited the
+  caller's standard input and rustup's default.
+- **Fix:** `paddock-dev`'s health gate (`health.rs`) holds `ci dispatch` and `wait --ci-run` (and `ci dispatch --trial`'s push) while
+  Gitea is down, bounded by the command's own `--max`; a command holds only on the services it needs (a wait on a run never on
+  RustFS, review of aa64cb4c3), and a wrong `--server` fails at once; `paddock_env::command::no_prompts` closes standard input and pins
+  `RUSTUP_AUTO_INSTALL=0` for `heavy`, `ci run` lines and the generators; `.claude/hooks/no-local-installs.sh` refuses an agent's
+  `cargo llvm-cov`, rustup installs and updates, and `cargo install cargo-llvm-cov`. Each has a test that fails without it.
+- **Class: a tool that waits on something it cannot see.** Earlier: run 8060 (rustup auto-install), `pgrep -f` loops (ER-32).
+
+## Fix items from Train A's full rounds (ci.yml 8389, 8425; debrief.yml 8426; dyno-release.yml 8446), not its features (2026-11-21)
+- **paddock-ipc `endings::ipc_link_server_ends_every_connection_right_or_is_in_the_ratchet` on Windows** (ci.yml run 8425, job 43164,
+  crate (windows-latest); FLAKY: try 1 "ipc-link-server busy: RIG FAILURE (write)", try 2 passed). Second Windows instance after run
+  8174. Next: a failing reproduction first, then the cause.
+- **debrief webkit `e2e/a11y.e2e.ts:6` main screen has no serious accessibility violations (dark)** (debrief.yml run 8426, job 43195,
+  shard 3/4; FLAKY, third sighting after 8373). Next: a failing reproduction first.
+- **dyno webkit `e2e/layout.spec.ts:224` settings pages at 900x600 with the advanced fields** (dyno-release.yml run 8446, job 43252;
+  FLAKY: `span.dy-pw-muted "Memory 24.8 of 48 GB": text needs 135px, has 132px, no accepted ellipsis`). A product bug, not only a test:
+  a live value can overflow the popup-widget preview at 900x600. Next: a failing reproduction that pins the longest value, then an
+  accepted ellipsis or a width that fits it.
+- **paddock-watch `native::a_real_folder_change_reaches_the_action_and_a_recursive_watch_sees_sub_folders` on macOS** (ci.yml run 8389,
+  job 42837, d7-mac-mini; FLAKY: try 1 timed out at 30 s "the watcher did not report the change", try 2 passed in 4.5 s). First run
+  with three concurrent macOS jobs on one runner. Next: a failing reproduction first; check job interference on the shared runner.
+- **The pre-push `conformance-tests` row failed once under load without naming the failing test** (2026-11-21, reported by the
+  coordinator). Two items: the hook output does not say which conformance test failed (ER-27: a failing step names its cause), and
+  an unknown conformance test is flaky under load. Next: make the row print the failing test's name and its last lines, then a
+  failing reproduction under load.
+
+## Two real-folder watcher tests timed out on the Mac: fseventsd was saturated, and the tests assumed a prompt, lossless watch (2026-11-21)
+- **Failure:** ci.yml run 8466 job 43338 (`crate (macos-latest)`, d7-mac-mini): `paddock-packs::it native::the_real_watcher_applies_an_added_a_broken_and_a_deleted_pack`
+  and `paddock-watch::it native::a_real_folder_change_reaches_the_action_and_a_recursive_watch_sees_sub_folders` timed out at 30 s
+  on try 1 and passed on try 2 (3.6 s, 2.3 s); run 8389 job 42837 had the same paddock-watch failure. Both waited on one FSEvents
+  event after `notify` started a stream.
+- **Hypotheses and what refuted them:** the watched folder on the external volume, or TCC Removable Volumes: both jobs logged
+  `job-tmpdir: temp folder /Users/***/gitea-runner/tmp/<job> on the internal disk`, and the TCC log had no request from cargo,
+  nextest or a test binary in the failure window (the two Removable Volumes requests that day, at 00:03Z and 00:27Z, came
+  through sandboxd and were answered in about 2 ms; the user saw the prompt from `chrome-headless-shell`, whose copy lives in
+  `/Volumes/vault-dev/caches/ms-playwright`). The macOS job share (8 test threads per job at capacity 3) and load: not ruled out
+  at load 60 or more, but with fseventsd healthy at load 15 to 20 every event took about 10 ms.
+- **Root cause (host):** fseventsd had run 6.5 days and sat at 100% to 130% CPU with 12.7 GB resident. A probe on the same Mac
+  (a new watch, a write at once, a second write after the first event or 30 s) measured, with fseventsd saturated: the first event
+  in a median 912 ms (up to 4.1 s), the second in a median 119 ms, and 5 of 50 waits saw nothing for 30 s. fseventsd restarted at
+  02:37:54Z (not by the agent); after that, 0 of 100 waits were lost and each took about 10 ms, whether the test wrote at once or
+  after a readiness probe. Not reproduced: putting the saturation back (it cannot be made on purpose without loading the user's Mac).
+- **Contributing (tests):** the tests wrote the change right after the watch started and waited for exactly one event, so a late
+  start or one dropped event failed them, and a late event from an earlier write (seen: one arrived 0 ms after the drain) could
+  have passed a wait for a later change. Apple documents dropped events (`kFSEventStreamEventFlagKernelDropped`/`UserDropped`,
+  with `MustScanSubDirs`: "you must do a full scan"), so a test of a real watch cannot assume none.
+- **Fix:** both tests prove the watch live first: a probe file (one the pack loader ignores) is rewritten every 250 ms until the
+  action has run once (`paddock_testkit::wait::retry_within`, 30 s guard as before). The paddock-watch action reports which of the
+  test's paths existed when it ran, so a late event cannot stand in for the change; the packs waits already checked the store's
+  content. A timeout names the likely host state (a saturated fseventsd) and the command to see it. A change the watch still drops
+  fails, as it should on a sick host. Host: restart fseventsd or reboot when it sits at 100% CPU.
+- **Why the logs did not show it:** the failure said only "Timeout", nothing about the host. fseventsd's CPU and memory were found
+  with `ps`; the probe needed the event times.
+- **Open (not verified):** whether `notify` 8.2's FSEvents callback drops a dropped-events notice whose path is outside the watched
+  folder (it filters by path before it turns flags into a `Rescan` event, `fsevent.rs` callback); if so, a product watch never
+  learns it lost events. What grew fseventsd to 12.7 GB (a client that stopped reading, or the 690k leaked test folders and their
+  paused delete) is not known.
+- **Class:** a test of an OS notification assumes it is prompt and lossless. Earlier instances: none recorded.
+
+## Train 18's two FLAKYs: a stand-in timed against a 1 s limit, and a wrapper that started a program per folder level (2026-11-22, run 8546)
+**macOS, `generators::tests::real::a_wait_for_the_slot_past_the_hang_guard_is_not_measured_and_names_the_holder` (job 44050).**
+Try 1 panicked with `TimedOut` after 1.042 s; try 2 passed. Causes listed: (1) `run_bounded` dropped output written just before
+the kill: ruled out by reading it, the loop waits for both pipes to drain after the kill (`PIPE_GRACE`); (2) train 18's change to
+`base_command` (`no_prompts`: stdin null, `RUSTUP_AUTO_INSTALL=0`): ruled out, `run_bounded` already closed stdin,
+and the variable does not reach the stand-in's first write; (3) the 1 s limit counts from the spawn, and the stand-in's start-up plus its first write took longer on a loaded
+runner: confirmed, a stand-in that waits 1.5 s before its line fails the same way at the same line every time; the natural rate on a
+quiet Mac was 0 of 25 runs at 4 threads. **Fix:** what `Real::run` makes of a finished run is `run::ran_from`, a function of the
+output alone; the test gives it a timed-out output and no clock is involved (30 stress runs of the group at 4 threads, green).
+Fifth sighting of "work before the hang point of a timed test meets its limit under load" (2026-11-15, 2026-11-19 `kept_clone`
+above): the phase audit sees only files that use `ci_host::phase`, so this one was not checked.
+**Windows, `paddock-dev::it wrapper::a_config_that_only_names_the_build_folder_does_not_change_the_hash` (job 44099).** Try 1 hit
+nextest's 60 s; try 2 took 33.9 s; on earlier runs it took 27 to 44 s (runs 8335, 8346, 8359, 8495, 8509), so it sat near the limit
+before train 18, whose `dev` changes are not on the `--wrapper-hash` path. The test runs `./dev --wrapper-hash` eight times, and each
+run started 42 programs in the macOS test fixture (a `dirname` per folder level, and grep, sed, cut and tr for each parsed line), at
+about 45 ms a start on that runner plus a fork per command substitution. **Fix:** the walks go up with parameter expansion and the
+`-vV` lines, the flag filter and the explain line are read by the shell or one awk: 13 starts, guarded by
+`a_wrapper_hash_costs_a_bounded_number_of_starts_whatever_the_folder_depth` (red at 42 before). On a bare drive the walk now ends at
+`C:` as Rust's `Path::ancestors` does, where dirname went on to `.`. Same class as the 2026-11-18 Windows git starts (ER-20).

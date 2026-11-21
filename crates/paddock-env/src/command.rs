@@ -41,6 +41,20 @@ pub fn attached_command(program: impl AsRef<OsStr>) -> Command {
     Command::new(program)
 }
 
+/// The prompt policy of a tool a check starts (ER-47: a named policy with a reason; children otherwise inherit the environment).
+/// Applied last, after the environment is set:
+///
+/// - standard input is `/dev/null` (`NUL` on Windows), so a program that asks "install X? [Y/n]" reads end-of-file at once instead
+///   of waiting for an answer nobody gives (on 2026-11-20 `cargo llvm-cov` waited 4 h on "install llvm-tools?");
+/// - `RUSTUP_AUTO_INSTALL=0`, so rustup does not install a missing toolchain on its own (ER-45; Paddock run 8060).
+///
+/// A caller that needs one of them says so after this call (`cmd.stdin(Stdio::inherit())`, `cmd.env("RUSTUP_AUTO_INSTALL", "1")`);
+/// nothing else of the environment is touched. A caller that pipes standard input (`stdin(Stdio::piped())`) does so after it too.
+pub fn no_prompts(cmd: &mut Command) -> &mut Command {
+    cmd.stdin(std::process::Stdio::null())
+        .env("RUSTUP_AUTO_INSTALL", "0")
+}
+
 /// A variable that **restricts** what a child may do, with the values that restrict it (ER-47). A value that loosens it
 /// (`PADDOCK_DEV_DOWNLOAD=1`, `RUSTUP_AUTO_INSTALL=1`, `CARGO_NET_OFFLINE=false`) is not a restriction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -180,6 +194,39 @@ mod tests {
                 }
             })
         }
+    }
+
+    #[test]
+    fn no_prompts_closes_stdin_and_pins_the_install_ban_and_nothing_else() {
+        let mut c = command("x");
+        c.env("KEEP", "1");
+        no_prompts(&mut c);
+        let e = envs(&c);
+        assert!(
+            e.contains(&("RUSTUP_AUTO_INSTALL".into(), "0".into())),
+            "{e:?}"
+        );
+        assert!(e.contains(&("KEEP".into(), "1".into())), "{e:?}");
+        assert_eq!(e.len(), 2, "{e:?}");
+        // The child reads end-of-file at once (`cat` ends with no output); `output()` would otherwise wait for this test's stdin.
+        #[cfg(unix)]
+        {
+            let mut c = command("cat");
+            no_prompts(&mut c);
+            let out = c
+                .stdout(std::process::Stdio::piped())
+                .output()
+                .expect("cat runs");
+            assert!(out.status.success() && out.stdout.is_empty());
+        }
+    }
+
+    #[test]
+    fn a_caller_can_opt_in_after_the_policy() {
+        let mut c = command("x");
+        no_prompts(&mut c);
+        c.env("RUSTUP_AUTO_INSTALL", "1");
+        assert!(envs(&c).contains(&("RUSTUP_AUTO_INSTALL".into(), "1".into())));
     }
 
     #[test]

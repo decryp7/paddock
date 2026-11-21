@@ -18,4 +18,6 @@ paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
 notify = { version = "8", optional = true, default-features = false, features = ["macos_fsevent"] }
 
 [dev-dependencies]
+# The bounded retry of the real-folder test (`wait::retry_within`).
+paddock-testkit = { workspace = true }
 tempfile = "3"

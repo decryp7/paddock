@@ -1099,6 +1099,23 @@ adr = "docs/adr/0022-rust-developer-and-ci-tool.md"
   delete_by = "v0.5.0"
   note = "The action's shell steps (Install sccache, sccache, Linux dependencies for Tauri) stay for release, rule 54 and tag runs until the release-path lane (plan step 5), which deletes them and the Implementation step after the app tags; tools/paddock-dev/tests/it/setup_rust.rs runs both on the same inputs. A paddock tag, as no app tag fits owner = paddock."
 
+[[mechanism]]
+id = "sccache-server-env"
+title = "The environment of a sccache server that may serve S3: the survival settings, the keys only for the server, no metadata lookup"
+canonical = "tools/paddock-dev"
+paths = ["tools/paddock-dev/src/local_sccache.rs"]
+symbols = ["item:server_env", "item:survival_vars"]
+status = "built"
+adr = "docs/adr/0022-rust-developer-and-ci-tool.md"
+
+  [[mechanism.copy]]
+  paths = ["tools/paddock-dev/src/ci_setup_rust.rs"]
+  symbols = ["item:s3_build_settings", "item:s3_server_settings"]
+  kind = "wiring"
+  owner = "paddock"
+  delete_by = "v0.5.0"
+  note = "CI's setup-rust starts its server through local_sccache::server_env (one function, ER-22) and only chooses the settings: the chain, bucket and keys for the server's start (s3_server_settings), the disk settings and survival variables for $GITHUB_ENV (s3_build_settings). The agents' server (local_sccache::Server) uses the same function. The wiring stays while CI's setup-rust is a separate command from the agents' prepare; a paddock tag, as no app tag fits owner = paddock."
+
 
 [[mechanism]]
 id = "build-folder-config"

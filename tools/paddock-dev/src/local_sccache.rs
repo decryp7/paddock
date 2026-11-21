@@ -37,6 +37,15 @@ pub fn server_port(env: &HashMap<String, String>) -> String {
         .unwrap_or_else(|| "4226".into())
 }
 
+/// Whether a server listens on [`server_port`] on this machine (sccache listens on 127.0.0.1). A connect has no side effect, unlike
+/// `--show-stats`, which starts a server when none runs (ER-45). Which server it is, ours or not, is decided by its stats.
+pub fn listening(env: &HashMap<String, String>) -> bool {
+    let Ok(port) = server_port(env).parse::<u16>() else {
+        return false;
+    };
+    std::net::TcpStream::connect_timeout(&std::net::SocketAddr::from(([127, 0, 0, 1], port)), Duration::from_millis(300)).is_ok()
+}
+
 /// Whether [`prepare`] may download the pinned release.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Install {
@@ -350,7 +359,7 @@ struct Server<'a> {
 impl Server<'_> {
     fn call(&self, arg: &str) -> ToolCall {
         let run = self.run.to_string_lossy();
-        let mut c = ToolCall::new(self.bin.to_string_lossy())
+        let c = ToolCall::new(self.bin.to_string_lossy())
             .args([arg])
             .pass(PASS)
             .cwd(self.run.to_path_buf())
@@ -362,24 +371,41 @@ impl Server<'_> {
             .env("TEMP", run.as_ref())
             .env("SCCACHE_ERROR_LOG", error_log(self.run).to_string_lossy())
             .env("SCCACHE_LOG", self.log_level.as_str())
-            // The server never exits on its own: a build that finds none would start one with the build's environment (and, for S3,
-            // without the keys), and that one would replace ours.
-            .env("SCCACHE_IDLE_TIMEOUT", "0")
-            .env("SCCACHE_IGNORE_SERVER_IO_ERROR", "1")
             .timeout(Duration::from_secs(60));
-        for (k, v) in self.backend.vars() {
-            c = c.env(k, v);
-        }
-        if matches!(self.backend, Backend::S3(_)) {
-            // No instance-metadata lookup: with no keys it hangs for about 75 s before it fails.
-            c = c.env("AWS_EC2_METADATA_DISABLED", "true");
-        }
-        // Only the server needs the keys, and the logged command masks them.
-        for (k, v) in self.creds.map(Creds::pairs).unwrap_or_default() {
-            c = c.env(k.as_str(), v.as_str()).secret(v.as_str());
-        }
-        c
+        let creds = self.creds.map(Creds::pairs).unwrap_or_default();
+        server_env(c, &self.backend.vars(), true, matches!(self.backend, Backend::S3(_)), creds)
     }
+}
+
+/// The two settings that keep the server we start the only one: it never exits on its own (a build that finds none would start one
+/// with the build's environment, and for S3 without the keys, and that one would replace ours and fail), and with S3 there is no
+/// instance-metadata lookup (with no keys it hangs for about 75 s before it fails). Builds get these too (`ready_vars`, setup-rust's
+/// `$GITHUB_ENV`), so a server a build starts anyway behaves the same way. Never a credential.
+pub(crate) fn survival_vars(s3: bool) -> Vec<(String, String)> {
+    let mut v = vec![("SCCACHE_IDLE_TIMEOUT".to_string(), "0".to_string())];
+    if s3 {
+        v.push(("AWS_EC2_METADATA_DISABLED".to_string(), "true".to_string()));
+    }
+    v
+}
+
+/// The one place a sccache server gets its environment (ER-22, rule 55: the agents' local server and CI's setup-rust both start
+/// through it): `settings` (what the server runs with), [`survival_vars`] when `survive`, and the credentials in `creds`, which only
+/// the server gets and the logged command masks. `s3` turns the metadata lookup off.
+pub(crate) fn server_env(mut c: ToolCall, settings: &[(String, String)], survive: bool, s3: bool, creds: &[(String, String)]) -> ToolCall {
+    c = c.env("SCCACHE_IGNORE_SERVER_IO_ERROR", "1");
+    for (k, v) in settings {
+        c = c.env(k.as_str(), v.as_str());
+    }
+    if survive {
+        for (k, v) in survival_vars(s3) {
+            c = c.env(k.as_str(), v.as_str());
+        }
+    }
+    for (k, v) in creds {
+        c = c.env(k.as_str(), v.as_str()).secret(v.as_str());
+    }
+    c
 }
 
 /// The folder beside the sccache binary that holds the shim, so the shim can be called `sccache`.
@@ -468,10 +494,7 @@ fn ready_vars(bin: &Path, backend: &Backend) -> Vec<(String, String)> {
     let mut vars = vec![("RUSTC_WRAPPER".to_string(), rustc_wrapper_for(bin).display().to_string())];
     vars.extend(backend.vars());
     vars.push(("SCCACHE_IGNORE_SERVER_IO_ERROR".into(), "1".into()));
-    vars.push(("SCCACHE_IDLE_TIMEOUT".into(), "0".into()));
-    if matches!(backend, Backend::S3(_)) {
-        vars.push(("AWS_EC2_METADATA_DISABLED".into(), "true".into()));
-    }
+    vars.extend(survival_vars(matches!(backend, Backend::S3(_))));
     vars
 }
 
@@ -684,15 +707,27 @@ pub fn prepare(env: &HashMap<String, String>, install: Install) -> Outcome {
         let start_log = run.join(format!("start-{}.log", std::process::id()));
         // The server outlives this process and would hold a pipe open, so its starter writes to a file.
         let mut started_here = false;
-        let start = server
-            .call("--start-server")
-            .output(Output::File(start_log.clone()))
-            .run(env, &mut std::io::sink())
-            .map(|mut s| {
-                started_here = s.success;
-                s.success |= already_running(&s);
-                s
-            });
+        // A server already listening is not started again: the start would only fail with "Address in use" and write that to the
+        // running server's error log, the log every warning names (247 times in two days, docs/research/2026-11-19-sccache.md).
+        // After a restart of our own server the port is started without asking.
+        let start = if !restarted && listening(env) {
+            Ok(crate::ci_tool::Ran {
+                success: true,
+                how: "already listening".into(),
+                stdout: String::new(),
+                stderr: String::new(),
+            })
+        } else {
+            server
+                .call("--start-server")
+                .output(Output::File(start_log.clone()))
+                .run(env, &mut std::io::sink())
+                .map(|mut s| {
+                    started_here = s.success;
+                    s.success |= already_running(&s);
+                    s
+                })
+        };
         let _ = std::fs::remove_file(&start_log);
         let stats = server.call("--show-adv-stats").run(env, &mut std::io::sink());
         let (start, stats) = match (start, stats) {
@@ -1068,6 +1103,8 @@ mod tests {
             ("PADDOCK_DEV_HOME", home.path().to_str().unwrap()),
             ("SCCACHE_DIR", home.path().join("cache").to_str().unwrap()),
             ("PATH", "/usr/bin:/bin"),
+            // A port nothing listens on: the default 4226 is the machine's own server, which a test must never see (ER-14).
+            ("SCCACHE_SERVER_PORT", free_port().to_string().as_str()),
         ]);
         let bin = install_path(&e).unwrap();
         let dir = bin.parent().unwrap();
@@ -1115,6 +1152,37 @@ mod tests {
         let installed = fake.install().unwrap();
         write_shim(installed.program()).unwrap(); // what `./dev sccache env` did once on this machine
         (home, e, installed)
+    }
+
+    /// A port that is taken for the rest of the test process and nothing listens on (HeldPort::refusing, kept by `forget`): no
+    /// other process can be given it while a test reads it.
+    fn free_port() -> u16 {
+        let held = paddock_testkit::net::HeldPort::refusing();
+        let port = held.port();
+        std::mem::forget(held);
+        port
+    }
+
+    #[test]
+    fn listening_sees_a_listener_and_not_a_free_port() {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = l.local_addr().unwrap().port().to_string();
+        assert!(listening(&env(&[("SCCACHE_SERVER_PORT", port.as_str())])));
+        drop(l);
+        assert!(!listening(&env(&[("SCCACHE_SERVER_PORT", free_port().to_string().as_str())])));
+        assert!(!listening(&env(&[("SCCACHE_SERVER_PORT", "not-a-port")])));
+    }
+
+    /// A server already listening on the port is not started again (its error log would get "Address in use" on every call),
+    /// and it is not ours, so a read-only one is not stopped either.
+    #[cfg(unix)]
+    #[test]
+    fn a_listening_server_is_not_started_again() {
+        let (_h, mut e, bin) = fake(0, None);
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        e.insert("SCCACHE_SERVER_PORT".into(), l.local_addr().unwrap().port().to_string());
+        assert!(matches!(prepare(&e, Install::Never), Outcome::Ready(_)));
+        assert_eq!(calls(&bin), Vec::<String>::new(), "no --start-server, no --stop-server");
     }
 
     #[cfg(unix)]

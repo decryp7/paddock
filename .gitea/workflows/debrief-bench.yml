@@ -60,7 +60,7 @@ jobs:
           dev-token: ${{ secrets.BUILD_INPUTS_TOKEN }}
 
       # Exact-key lookup only: nothing is downloaded. The marker is saved by the nightly-mark job after a fully green run.
-      - uses: actions/cache/restore@v4
+      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         id: green
         if: github.event_name == 'schedule'
         with:
@@ -108,7 +108,7 @@ jobs:
 
       # Restore and save separately, with the run id in the saved key: a fixed key can never be updated once it
       # exists, and a failing run still warms the cache (see build.yml).
-      - uses: actions/cache/restore@v4
+      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: |
             ~/.cargo/registry
@@ -119,7 +119,7 @@ jobs:
 
       # The store crates link the official prebuilt libduckdb (ADR 0014): fetched once per version, SHA-256 pinned,
       # so every job that builds the workspace links it (a test that is skipped still has to link).
-      - uses: actions/cache@v4
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         if: runner.os != 'Windows'
         with:
           path: ~/.cache/debrief-libduckdb
@@ -147,7 +147,7 @@ jobs:
       - name: Benchmarks (quick)
         run: cargo bench -p debrief-core --bench engine -- --quick
 
-      - uses: actions/cache/save@v4
+      - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         if: always()
         with:
           path: |
@@ -187,7 +187,7 @@ jobs:
 
       # The store crates link the official prebuilt libduckdb (ADR 0014): fetched once per version, SHA-256 pinned,
       # so every job that builds the workspace links it (a test that is skipped still has to link).
-      - uses: actions/cache@v4
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         if: runner.os != 'Windows'
         with:
           path: ~/.cache/debrief-libduckdb
@@ -212,7 +212,7 @@ jobs:
             Windows) cygpath -w "$DUCKDB_LIB_DIR" >> "$GITHUB_PATH" ;;
           esac
 
-      - uses: actions/cache@v4
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ~/.cache/debrief-bench-corpus
           key: store-bench-corpus-v1
@@ -251,7 +251,7 @@ jobs:
           mkdir -p .nightly-green
           echo "${{ github.sha }}" > .nightly-green/sha
 
-      - uses: actions/cache/save@v4
+      - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: .nightly-green
           key: debrief-bench-nightly-green-${{ github.sha }}

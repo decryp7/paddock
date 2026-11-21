@@ -65,6 +65,9 @@ jobs:
           name: paddock-crate
 
       - uses: ./.gitea/actions/setup-rust
+        with:
+          sccache-s3-access-key-id: ${{ secrets.PADDOCK_SCCACHE_S3_ACCESS_KEY_ID }}
+          sccache-s3-secret-access-key: ${{ secrets.PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY }}
 
       - name: Measure
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/crates

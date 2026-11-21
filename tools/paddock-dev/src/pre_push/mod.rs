@@ -8,7 +8,8 @@
 //!
 //! What is checked. With `--refs-from-stdin` (the hook) exactly the commit being pushed: it is checked out in a throw-away worktree
 //! (locked, named by the run's pid and start time, under `PADDOCK_PREPUSH_WORKTREES` or the project's worktree root, never under the
-//! home folder; leftovers of ended runs are swept at the next start; builds go to a kept folder per workspace beside it)
+//! home folder; leftovers of ended runs are swept at the next start; builds go to a kept folder per workspace beside it, which
+//! [`kept`] keeps bounded after every run)
 //! and every gate runs there, so a dirty tree or another checked-out commit cannot change the answer. Without it, the working tree
 //! as it is (a person's run). Only workspaces that hold a changed file themselves get Clippy and format; the ones reached through
 //! dependencies are CI's (ER-9 overlap), and the Linux Clippy in the CI image (native architecture) runs for every touched workspace.
@@ -34,6 +35,7 @@ pub mod deny;
 pub mod exec;
 pub mod gates;
 pub mod heavy_tool;
+pub mod kept;
 pub mod known;
 pub mod linux_inputs;
 pub mod members;
@@ -558,6 +560,15 @@ fn command_in(
     rows.extend(extra_ref_rows(&extra));
     accept_not_measured(&mut rows, &accept, &state);
     log_queue_times(&state, checked.as_deref(), &base, &timings);
+    // The kept build folders of the throw-away worktrees stay bounded (kept.rs): stale incremental state goes, a folder a build
+    // holds is skipped.
+    if let Some(targets) = &facts.kept_targets {
+        let mut said = Vec::new();
+        kept::prune_all(&env, Path::new(targets), std::time::SystemTime::now(), &mut said);
+        for line in String::from_utf8_lossy(&said).lines() {
+            eprintln!("pre-push: {line}");
+        }
+    }
     let mut report = render_timed(head.trim_end(), &rows, &timings);
     if stop.load(Ordering::SeqCst) {
         report = report.with_exit(Exit::Interrupted);
