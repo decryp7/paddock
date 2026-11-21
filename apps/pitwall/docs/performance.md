@@ -27,6 +27,40 @@ behaviour, not measured budgets. Rule 16's budgets (start-up, request latency, q
 
 ## Results (newest first)
 
+### 2026-11-20, bulk delete and the embeddings cache: operation counts per call (feat/pitwall-bulk-wp3, ADR 0108 WP-3)
+
+Quoted by [ADR 0108](../../../docs/adr/0108-bulk-apis-one-call-for-many-items.md) (PW-1, PW-2) and the CHANGELOG. These are counts of statements, commits,
+scans and cache calls, read by the budget tests themselves (SQLite's own trace and commit hook, the library's scan counter, the
+cache's call counter); they do not depend on the machine or its load, so there is no timing here.
+
+- **Commit:** base `5740e7ea3~1` (before WP-3) against `5740e7ea3` and the review fixes on `fix/pitwall-bulk-wp3-review` (the rows below the first seven are the second review round's).
+- **Machine:** the Mac mini M4 Pro (arm64, macOS 27.2). Counts only; no timing was taken.
+- **Load:** not relevant to counts.
+- **Build:** debug.
+- **Corpus:** synthetic: 60 vectors of 16 bytes; 5 to 6 inputs per request; 4 ids per delete call.
+- **Command:** `cargo nextest run -p pitwall-server -E 'test(/bulk|caching|cache_db|library/)'`
+- **Runs:** single (deterministic counts, asserted with `==`).
+- **Numbers:**
+
+  | Measure | Before | After | Budget (asserted) |
+  |---|---|---|---|
+  | 60 stores, commits | 60 | 1 | `== 1` (`a_batch_of_stores_is_one_commit`) |
+  | 60 stores, statements | 120 | 63 (60 to 66 allowed) | `60..=66` |
+  | 60 stores, `SUM(size)` over the table | 60 | 0 after the first | `== 0` (`stores_never_sum_the_table_again`, floor `>= 1` at open) |
+  | 60 reads, commits and statements | 60 and 120 | 1 and 1 read plus 1 commit for the hit counts | `== 1` each |
+  | Embeddings request of N inputs, cache reads and writes | N and N | 1 and 1 | `== 1` each (`an_embeddings_request_reads_and_writes_the_disk_cache_once`, N = 6) |
+  | Embeddings request, all hits | N reads | 1 read, 0 writes | `== (1, 0)` |
+  | `delete_models` of 4 ids, scans of the models folder | 4 | 1 | `== 1` (`delete_models_scans_once_and_answers_one_result_per_id`) |
+  | Clearing the cached entries of 8 deleted models, commits | 8 | 1 | `== 1` (`clearing_many_models_is_one_commit`; control `the_spy_sees_one_commit_per_single_model_clear` shows 8) |
+  | `delete_models` of 5 models, listings of the keep-warm folder | 5 | 1 | `== 1` (`delete_models_lists_the_keep_warm_folder_once`; control `single_invalidations_list_the_folder_once_each` shows 4 for 4) |
+  | 40 hit counts, `UPDATE` statements | 40 | 1 | `== 1` (`a_batch_of_hit_counts_is_one_update_statement`) |
+  | Expired entries deleted, then a store: `SUM(size)` over the table | 1 | 0 | `== 0` (`deleting_expired_entries_adjusts_the_running_size`, floor `>= 1` at open) |
+
+- **Notes:** the "before" statement and commit counts for 60 stores and reads are the author's figures from the WP-3 commit message
+  (`5740e7ea3`), measured by the same spy on the per-key code; the per-request and per-delete "before" counts follow from the old
+  code's loop (one call per input or id). The review round showed each budget test red against the old shape: the per-key loop put
+  back in `http.rs` fails the request-path test (N reads and N writes against 1 and 1).
+
 ### 2026-11-11, Whisper small Q8_0 on CPU: Windows ARM64 VM and Linux container (docs/pitwall-speech-spike, WP-6 second revision)
 
 Quoted by the [speech spike note](research/speech-spike-2026-11-11.md), sections 5 and 6 (the user's choice of Whisper

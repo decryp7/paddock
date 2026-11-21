@@ -1,5 +1,8 @@
 import { Channel, invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { parseItemResults, type ItemResult } from '@decryp7/paddock-ui/ipc';
+import { APP_COMMANDS } from '../generated/app-commands';
+import { chunkIds } from './chunk-ids';
 import type {
   ChatModels,
   ChatAttached,
@@ -56,7 +59,7 @@ import type { LoadingRows, PopoverHeader } from './generated/widgets';
 import type { PopoverEdit, PopoverPush, PopoverValues, PopoverView } from './widgets.types';
 import type { PitwallBackend, Unsubscribe } from './backend';
 import { parseJobEvent } from './job-wire';
-import { toCommandError } from './command-error';
+import { toCommandError, toItemError } from './command-error';
 
 /** The Tauri event the app forwards every live update on. */
 export const LIVE_EVENT = 'pitwall://live';
@@ -215,6 +218,24 @@ export class TauriBackend implements PitwallBackend {
   }
   deleteModel(id: string): Promise<void> {
     return this.run('delete_model', { id });
+  }
+  /**
+   * One result per id, in order. A list too large for one call (the command's request limit, the server's bound) goes in as few
+   * calls as fit, half the limit each, one after the other; a call that fails as a whole fails its own ids, so every id is answered.
+   */
+  async deleteModels(ids: readonly string[]): Promise<ItemResult<null>[]> {
+    const results: ItemResult<null>[] = [];
+    for (const chunk of chunkIds(ids, APP_COMMANDS.delete_models.limit / 2)) results.push(...(await this.deleteChunk(chunk)));
+    return results;
+  }
+  private async deleteChunk(chunk: readonly string[]): Promise<ItemResult<null>[]> {
+    try {
+      const reply = await this.run<unknown>('delete_models', { ids: [...chunk] });
+      return parseItemResults(reply, chunk.length, (v): v is null => v === null);
+    } catch (e) {
+      const err = toItemError(e);
+      return chunk.map(() => ({ err }));
+    }
   }
   loadModel(id: string): Promise<void> {
     return this.job('start_load_model', { id });
