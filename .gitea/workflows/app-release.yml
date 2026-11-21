@@ -121,6 +121,10 @@ on:
         description: "A command run by bash on the Windows runner from the repository root after the installer is built, with the cargo profile folder (holding bundle/nsis) appended: the per-machine artifact gate (`node conformance/release/check-per-machine-installer.mjs --conf <tauri.conf.json> --dir`; ADR 0039). Empty: none."
         type: string
         default: ""
+      rehearsal:
+        description: "The tag rehearsal (tag-rehearsal.yml, from the default branch only): the release path of a tag with a throw-away signing key, and no publishing. PADDOCK_TAG_REHEARSAL=1 makes conformance/src/util/is-tag-run.mjs answer \"tag\"; the caller passes NO secrets. Never on a real tag: the run fails closed."
+        type: boolean
+        default: false
       image:
         type: string
         default: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
@@ -137,6 +141,8 @@ on:
         required: false
 
 env:
+  # The tag rehearsal switch (is-tag-run.mjs, updater-key.sh): "1" only when the caller says rehearsal, else empty.
+  PADDOCK_TAG_REHEARSAL: ${{ inputs.rehearsal == true && '1' || '' }}
   # The fallback switch of conformance/ci/kit.sh (WP-1): set the repository variable to shell and every kit step runs its script.
   PADDOCK_CI_KIT: ${{ vars.PADDOCK_CI_KIT }}
 
@@ -170,6 +176,18 @@ jobs:
         run: |
           if not exist "%ProgramFiles%\Git\bin\bash.exe" (echo Git for Windows is not installed on this runner & exit /b 1)
           echo %ProgramFiles%\Git\bin>>"%GITHUB_PATH%"
+
+      # A rehearsal never runs on a tag and never holds a signing secret (the caller passes none; updater-key.sh also refuses any key).
+      - name: Rehearsal guard
+        if: inputs.rehearsal == true
+        shell: bash
+        run: |
+          if [ "${PADDOCK_TAG_REHEARSAL:-}" != 1 ]; then
+            echo "::error::tag rehearsal: rehearsal was requested but PADDOCK_TAG_REHEARSAL is '${PADDOCK_TAG_REHEARSAL:-}', not 1: the build would take the branch path with no tag decisions and no throw-away key. Next step: check the workflow-level env of app-release.yml."
+            exit 1
+          fi
+          case "$GITHUB_REF" in refs/tags/*) echo "::error::tag rehearsal: this run is a real tag ($GITHUB_REF). A rehearsal runs from the default branch only. Next step: dispatch tag-rehearsal.yml on main."; exit 1 ;; esac
+          echo "::notice::TAG REHEARSAL: the release path of a tag with a throw-away key. Nothing is published and no tag or release is made."
 
       # The kit (actions, scripts, tools) is this very commit: the monorepo's release callers pass `paddock-ref: ${{ github.sha }}`
       # (ADR 0014). A second checkout of it under .paddock wrote the whole tree again on every host job (runs 7848-7853), and the
@@ -217,7 +235,7 @@ jobs:
         with:
           name: paddock-checkout-${{ runner.os }}
           profile: bundle
-          fresh: ${{ startsWith(github.ref, 'refs/tags/') }}
+          fresh: ${{ startsWith(github.ref, 'refs/tags/') || inputs.rehearsal == true }}
 
       - uses: ./.gitea/actions/build-folder
         with:
@@ -256,25 +274,36 @@ jobs:
 
       # Not on a tag (rule 78): the kept npm and Angular caches are written by branch runs. A tag gets a cache of its own.
       - uses: ./.gitea/actions/node-caches
-        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        if: ${{ !startsWith(github.ref, 'refs/tags/') && inputs.rehearsal != true }}
         with:
           angular-dir: ${{ inputs.app-dir }}
           name: ${{ inputs.app-id }}-bundle
 
       - name: Fresh npm cache and no kept Angular cache on a tag
-        if: ${{ startsWith(github.ref, 'refs/tags/') }}
+        if: ${{ startsWith(github.ref, 'refs/tags/') || inputs.rehearsal == true }}
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}
         env:
           ANGULAR_DIR: ${{ inputs.app-dir }}
         run: bash conformance/ci/tag-node-caches.sh "$ANGULAR_DIR"
 
-      # A tag names the version the installers carry: fail before three OS build the wrong one.
-      - name: The tag names the app's version
-        if: startsWith(github.ref, format('refs/tags/{0}v', inputs.tag-prefix))
+      # A rehearsal's tag is the one the app's own version would be released under (<prefix>v<version of tauri.conf.json>).
+      - name: The rehearsal's tag name
+        id: rtag
+        if: inputs.rehearsal == true
         shell: bash
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}
         env:
-          TAG: ${{ github.ref_name }}
+          PREFIX: ${{ inputs.tag-prefix }}
+          CONF: ${{ inputs.app-dir }}/src-tauri/tauri.conf.json
+        run: echo "tag=${PREFIX}v$(node -p "require('./$CONF').version")" >> "$GITHUB_OUTPUT"
+
+      # A tag names the version the installers carry: fail before three OS build the wrong one.
+      - name: The tag names the app's version
+        if: startsWith(github.ref, format('refs/tags/{0}v', inputs.tag-prefix)) || inputs.rehearsal == true
+        shell: bash
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}
+        env:
+          TAG: ${{ inputs.rehearsal == true && steps.rtag.outputs.tag || github.ref_name }}
           PREFIX: ${{ inputs.tag-prefix }}
           CONF: ${{ inputs.app-dir }}/src-tauri/tauri.conf.json
         run: node conformance/ci/check-tag.mjs --tag "$TAG" --prefix "$PREFIX" --conf "$CONF"
@@ -284,11 +313,11 @@ jobs:
       # Linux only: it lists the server's tags with the checkout's credentials, which the kept clone never keeps (the release job
       # runs the same script again with a full fetch).
       - name: The first release's CHANGELOG section is ready
-        if: runner.os == 'Linux' && startsWith(github.ref, format('refs/tags/{0}v', inputs.tag-prefix)) && inputs.first-release-changelog != ''
+        if: runner.os == 'Linux' && (startsWith(github.ref, format('refs/tags/{0}v', inputs.tag-prefix)) || inputs.rehearsal == true) && inputs.first-release-changelog != ''
         shell: bash
         env:
           FIRST_CHANGELOG: ${{ inputs.first-release-changelog }}
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ inputs.rehearsal == true && steps.rtag.outputs.tag || github.ref_name }}
           PREFIX: ${{ inputs.tag-prefix }}
           NOTES_FROM_CHANGELOG: ${{ inputs.notes-from-changelog }}
         run: |
@@ -307,6 +336,9 @@ jobs:
           PADDOCK_SETUP_UPDATE_KEY: ${{ secrets.TAURI_UPDATER_PUBKEY }}
         run: |
           set -euo pipefail
+          # The tag rehearsal has no secret: paddock-setup is built with the public half of the repository's test fixture key, so the release
+          # requirement (a public key) is rehearsed; its fingerprint is not compared (the installer check's PADDOCK_EXPECT_UPDATE_KEY is empty).
+          if [ "${PADDOCK_TAG_REHEARSAL:-}" = 1 ]; then PADDOCK_SETUP_UPDATE_KEY="$(tr -d ' \t\r\n' < conformance/test/fixtures/updater-sig/key.pub)"; export PADDOCK_SETUP_UPDATE_KEY; fi
           eval "$STAGE" || { echo "::error::staging paddock-setup.exe failed (command: $STAGE); see the lines above"; exit 1; }
 
       # The updater key reaches this step only on the app's release tag (<prefix>vX.Y.Z; ADR 0085 D7, rule 78): a dispatch,
@@ -403,7 +435,7 @@ jobs:
   # rest). The release waits for it.
   keychain:
     name: C99 (no Keychain in a macOS build)
-    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch' || inputs.rehearsal == true
     runs-on: ubuntu-latest
     container:
       image: dev.decryptology.net/decryp7/paddock-ci:v3
@@ -423,7 +455,7 @@ jobs:
 
   release:
     name: release
-    if: startsWith(github.ref, format('refs/tags/{0}v', inputs.tag-prefix))
+    if: startsWith(github.ref, format('refs/tags/{0}v', inputs.tag-prefix)) && inputs.rehearsal != true
     needs: [bundle, keychain]
     runs-on: ubuntu-latest
     env:
@@ -489,3 +521,46 @@ jobs:
           latest-tag: ${{ inputs.latest-tag }}
           notes-extra: ${{ inputs.notes-extra }}
           token: ${{ secrets.RELEASE_TOKEN }}
+
+  # The tag rehearsal's stand-in for `release`: the same notes and latest.json from the built installers, read back, and NO publishing
+  # (conformance/ci/rehearse-release.mjs imports no publisher; this job has no token, no `contents: write` and no publish-release step).
+  rehearse-release:
+    name: release (rehearsal, nothing published)
+    if: inputs.rehearsal == true
+    needs: [bundle]
+    runs-on: ubuntu-latest
+    env:
+      PADDOCK_DEV_DOWNLOAD: "0"
+    permissions:
+      contents: read
+    container:
+      image: ${{ inputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@9bc31d5ccc31df68ecc42ccf4149144866c47d8a # v3
+        with:
+          path: artifacts
+
+      - name: Every platform's installers are present
+        run: |
+          mkdir -p release
+          find artifacts -type f -exec cp {} release/ \;
+          for pattern in '*.dmg' '*-setup.exe' '*.deb' '*.AppImage'; do
+            ls release/$pattern >/dev/null 2>&1 || { echo "::error::tag rehearsal: no $pattern was built: a real release would publish nothing"; exit 1; }
+          done
+
+      - name: Release notes and latest.json, made and read back
+        env:
+          APP_NAME: ${{ inputs.app-name }}
+          CONF: ${{ inputs.app-dir }}/src-tauri/tauri.conf.json
+          PREFIX: ${{ inputs.tag-prefix }}
+          FIRST_CHANGELOG: ${{ inputs.first-release-changelog }}
+          NOTES_FROM_CHANGELOG: ${{ inputs.notes-from-changelog }}
+          EXTRA: ${{ inputs.notes-extra }}
+        run: |
+          version="$(node -p "require('./$CONF').version")"
+          TAG="${PREFIX}v${version}" OUT=release/CHANGELOG-latest.md bash conformance/ci/first-release-notes.sh || exit 1
+          # An app with no CHANGELOG section source (git-cliff builds its notes) gets a stand-in line: the notes' content is not what is rehearsed.
+          [ -s release/CHANGELOG-latest.md ] || echo "Rehearsal: notes come from git-cliff in a real release." > release/CHANGELOG-latest.md
+          node conformance/ci/rehearse-release.mjs --app-name "$APP_NAME" --changelog release/CHANGELOG-latest.md --dir release --version "$version" --extra "$EXTRA"

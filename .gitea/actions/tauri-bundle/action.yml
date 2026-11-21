@@ -37,7 +37,7 @@ runs:
     # only: a tag run reads no cache at all (ADR 0085 D9) and downloads them; tauri-tools.mjs ignores a kept folder on a tag too.
     - name: Bundler tools cache key
       id: tools
-      if: "runner.os == 'Linux' && !startsWith(github.ref, 'refs/tags/')"
+      if: "runner.os == 'Linux' && !startsWith(github.ref, 'refs/tags/') && env.PADDOCK_TAG_REHEARSAL != '1'"
       shell: bash
       env:
         BUNDLES: ${{ inputs.bundles }}

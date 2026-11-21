@@ -40,11 +40,23 @@ The Linux runner runs 3 jobs at once (3 Linux slots, declared in `conformance/ci
 | nightly | `3 21 * * *` | 05:03 | Linux, Windows, macOS | 25-123 min; its `generators` job (`./dev gen check --all`, every registry command, ER-40) measured once in the paddock-ci:v2 container on a Mac (amd64 emulated, 4 CPUs, 12 GB): 92 min, 32 checks current, exit 0, 2026-11-12; added to `mark` after the first green run (record run id: not yet) | uncapped for the rest (reusable ci.yml and many jobs); its five fuzz calls are chained in two chains, so at most 2 at once |
 | debrief | `3 22 * * *` | 06:03 | Linux, Windows, macOS | 37-147 min | uncapped (parallel jobs, 4 e2e shards) |
 | dev-tool | `33 21 * * *` | 05:33 | Linux, Windows, macOS | not measured | 1 (Linux leg) |
+| tag-rehearsal | `3 1 * * *` | 09:03 | Linux, Windows, macOS | not measured (never ran; first green run id: not yet) | 1 (Linux), the four apps chained |
 
 The Linux-only block (22:03-23:13) is serial so that fuzz, which takes two slots, runs after the small jobs have ended.
 nightly and debrief cannot be capped by `max-parallel` (many unrelated jobs); only the stagger and the runner's capacity
 limit them. Gitea counts runner slots per caller, so `max-parallel` inside the reusable `app-fuzz.yml` does not cap
 five separate callers: nightly chains them with `needs:` instead.
+
+## Tag rehearsal
+
+`tag-rehearsal.yml` (user, 2026-11-20) runs a tag's release path every day on main's head, and by hand, with no tag, no release and
+nothing published: the tag checks in dry-run mode (`request-tag.mjs --dry-run true`, the tag gates), then each app's installers with
+`PADDOCK_TAG_REHEARSAL=1` (is-tag-run.mjs answers "tag": pre-sign, signing with a throw-away key made in the job, check-bundle's
+release=1, fresh caches, C99) and `rehearse-release` (release notes and latest.json made and read back). The four apps with an
+`app-release.yml` caller (Dyno, Pitcrew, Pitwall, Spotter) run one after the other. The named differences from a real tag are listed in
+the workflow's header; Debrief has tag checks only (no rehearsal caller yet). The 09:03 slot follows nightly and debrief. Report-only:
+nothing waits on it. Its schedule is **disabled in Gitea** like the other schedule-only workflows (scheduled-ci-paused) and is enabled
+only after its first green run, whose id goes in the table row above and which must be a dispatched run that really ran (a night skipped for a train skips the verdict job: it is neutral, never green, and never the recorded run), its measured duration fits the slot (ER-24: the chain holds no runner reservation between apps; only the start yields to a train), and Dyno 1.2.0 has shipped.
 
 ## Dependency audits
 
