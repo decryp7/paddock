@@ -2,6 +2,7 @@ import { defineConfig, devices } from '@playwright/test';
 import { resolve } from 'node:path';
 import { appBuildGuard, reuseServer } from '../../../ui/projects/paddock-e2e/src/build-guard.ts';
 import { paddockServers } from '../../../ui/projects/paddock-e2e/src/servers.ts';
+import { internalBrowserUse } from '../../../ui/projects/paddock-e2e/src/browser.ts';
 import { e2ePortOrCiDefault } from '../../../ui/projects/paddock-e2e/src/env.ts';
 
 // Fails fast, before any server starts, when what the app consumes of ui (ui/dist, the css) is stale (build-guard.ts).
@@ -31,11 +32,11 @@ export default defineConfig({
     trace: 'retain-on-failure',
   },
   projects: [
-    { name: 'chromium', testIgnore: /screenshots\.spec\.ts/, use: { ...devices['Desktop Chrome'], viewport: { width: 1280, height: 800 } } },
+    { name: 'chromium', testIgnore: /screenshots\.spec\.ts/, use: { ...devices['Desktop Chrome'], ...internalBrowserUse(), viewport: { width: 1280, height: 800 } } },
     { name: 'webkit', testIgnore: /screenshots\.spec\.ts/, use: { ...devices['Desktop Safari'], viewport: { width: 1280, height: 800 } } },
     // Only on request, so a plain `npx playwright test` never rewrites the documentation images.
     ...(process.env['SCREENSHOTS']
-      ? [{ name: 'screenshots', testMatch: /screenshots\.spec\.ts/, use: { ...devices['Desktop Chrome'], viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2 } }]
+      ? [{ name: 'screenshots', testMatch: /screenshots\.spec\.ts/, use: { ...devices['Desktop Chrome'], ...internalBrowserUse(), viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2 } }]
       : []),
   ],
   ...paddockServers([

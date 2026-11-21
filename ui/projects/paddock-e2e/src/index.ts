@@ -11,7 +11,7 @@ export { e2ePort } from './env.ts';
 export { stablePressPoint } from './press.ts';
 export { scrollAnchoringShift, expectNoScrollMovesOfItsOwn, anchoringVerdict, type AnchoringShift } from './owned-scroll.ts';
 export { clickShape, hoverShape, pointInShape, type PagePoint } from './svg.ts';
-export { assertChromeForTesting, browserProblems, isInstalledBrowser, pinnedChrome, CHROME_ENV, CHROMIUM_TEST_ENV, INSTALLED_CHANNELS, type BrowserUse, type GuardedConfig } from './browser.ts';
+export { assertChromeForTesting, browserProblems, browserScratchRoot, internalBrowserLaunch, internalBrowserUse, isRemovableVolume, removableFolderProblems, isInstalledBrowser, pinnedChrome, CHROME_ENV, CHROMIUM_TEST_ENV, INSTALLED_CHANNELS, type BrowserUse, type GuardedConfig } from './browser.ts';
 export { startServers, ServerNotReady, type ServerSpec, type RunningServers } from './server-ready.ts';
 export { paddockConfig, paddockServers, isOn, SCREENSHOT_SPECS, DOC_SCREEN_VIEWPORT, type PaddockConfigOptions } from './config.ts';
 export {

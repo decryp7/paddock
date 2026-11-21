@@ -660,6 +660,9 @@ impl Chromium {
             .map_or_else(|_| std::process::Stdio::null(), std::process::Stdio::from);
         let mut cmd = paddock_proc::command(&exe.path);
         cmd.env(MAC_TEMP_ENV, &temp);
+        // Start in the browser's own temp folder, never the caller's working folder: one on an external volume makes macOS ask the user for
+        // access to a removable volume (ER-14).
+        cmd.current_dir(&temp);
         cmd.args(command_line(exe.flavor, &dir, opts, sandbox))
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())

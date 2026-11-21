@@ -3254,3 +3254,19 @@ reveal grows the total, `Total grew outside a round` 7 ms after the press here) 
 - **Class: an end-to-end wait bounds a streamed result by one expect timeout.** Earlier: debrief.yml run 8300, where six streamed
   answers ran past the wait (64f8165ae, fixed for that spec only by sending answers in one piece). It is fixed for every caller of
   `waitAnswered` here.
+
+## The test browser must not touch the removable volume (macOS TCC prompt, 2026-11-21)
+- **Symptom:** `chrome-headless-shell` on the Mac runner and on dev machines made macOS ask for access to a removable volume (a window on
+  the desktop, ER-14, and a possible hang). The browsers, the checkouts and the build folders live on `/Volumes/vault-dev`, which macOS
+  treats as removable.
+- **Found by reading, not measured:** the Rust launchers (paddock-chromium and the Debrief and Spotter copies) started the browser in the
+  caller's working folder, which is the checkout on `/Volumes` (a stand-in that prints `{cwd}` showed it: red before the fix). The
+  Playwright configs left downloads and traces to defaults and a `test.use({ launchOptions })` replaces the config's whole object
+  (Playwright merges `use` one level deep).
+- **Fix:** the Rust launchers start the browser in its own `browser-temp` folder (inside the profile, on the internal disk).
+  `paddock-e2e` has one helper (`internalBrowserUse`, `internalBrowserLaunch`) that names the temp folder, downloads, traces, crash dumps and disk cache under
+  `$PADDOCK_JOB_TEMP` (the runner's internal job temp) or the OS temp folder, and `browserProblems` refuses any of them on `/Volumes/` (positive
+  control in browser.test.ts). Every Chromium project of every Playwright config spreads the helper.
+- **Not measured:** whether a browser binary that stays on `/Volumes/vault-dev/caches/ms-playwright` still prompts once all of this is
+  internal (measuring it risks the desktop prompt). The user checks with a run under the new code; if it prompts, the browser binary
+  folder (`PLAYWRIGHT_BROWSERS_PATH`) moves to the internal disk.
