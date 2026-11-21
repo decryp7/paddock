@@ -8,11 +8,14 @@
 //! - [`become_child_subreaper`] (Linux): orphans of this process's descendants are re-parented to it instead of to init,
 //!   so they stay in its tree.
 //! - [`reap_zombie`] (Linux): collects an ended orphan that was re-parented to this process.
+//! - [`Owned`], [`Unit`], [`members`] (ADR 0112): the owner trait and the pure rule over [`look`]'s rows that says which processes
+//!   belong to one unit of work (see `owner.rs`).
 //! - [`KillOnClose`] (Windows): a kill-on-close job that a child, and everything it starts, joins.
 //!
 //! Nothing here signals a process except [`KillOnClose::terminate`], which acts through a job handle the caller owns.
 
 use crate::identity::{ProcessId, StartTime};
+pub use crate::owner::{Member, Owned, Unit, Waited, Why, members};
 use std::process::Command;
 use sysinfo::{Pid, ProcessRefreshKind, ProcessStatus, ProcessesToUpdate, System, UpdateKind};
 
