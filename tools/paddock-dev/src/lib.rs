@@ -71,6 +71,7 @@ pub mod heavy_install;
 pub mod hook;
 pub mod input_hash;
 pub mod ipc_endpoints;
+pub mod lessons_driver;
 pub mod load;
 pub mod local_sccache;
 pub mod locks;

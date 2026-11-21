@@ -4,6 +4,13 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### Conformance C145 checks the lessons file's format, and `docs/lessons.md` has a merge driver (2026-11-21)
+- New report-only conformance check C145 (Rust host): `docs/lessons.md` has a blank line before every `## ` heading, one title, no
+  repeated heading and one final newline. The file's 35 headings that had lost their blank line to a union merge have it again.
+- `docs/lessons.md` merges with the `lessons` driver, `./dev merge lessons-driver %O %A %B`: git's union merge, then the blank line it
+  drops before a `## ` heading put back (it dropped it four times, 9ec43be3c, b9bf5fc4b, 75ce0d2c8, 5c241d93f). `./dev hooks install`
+  sets `merge.lessons.driver` in the clone; a clone without it gets a plain conflict, never a silent drop.
+
 ### `@decryp7/paddock-e2e`: `untilItsPageCloses` and `clickThatClosesItsPage`, for a step that closes its own window
 - A test step whose action ends the page it acts on (a pop-out's Dock back, the pointer-up that docks a dragged pop-out) counts as done
   when that page closed: Playwright can reject such a step with "Target page, context or browser has been closed" when the window goes
