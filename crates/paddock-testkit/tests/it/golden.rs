@@ -1,5 +1,7 @@
 use paddock_testkit::golden::UPDATE_VAR;
-use paddock_testkit::{Golden, GoldenError, GoldenMode, Scratch, check_golden};
+use paddock_testkit::{
+    Golden, GoldenError, GoldenMode, GoldenPaths, Scratch, check_golden, check_golden_with,
+};
 
 #[test]
 fn matching_and_crlf_files_pass() {
@@ -234,33 +236,98 @@ fn the_test_name_is_nextests_whole_name_else_the_thread_s() {
     assert_eq!(test_name_of(None, None), None);
 }
 
-/// ER-46: a golden never holds a form only one OS prints. The file says `<tmp>/x/y`; a Windows run prints the mixed-separator text a
-/// `Path::join` onto a `/` base gave in train B (run 8495), and it still matches. Positive control: the same text differs
-/// without the normalisation (compared raw).
-#[test]
-fn a_windows_spelling_of_the_same_path_matches_the_stable_golden() {
+/// The golden `golden` against `actual`, with `paths`.
+fn verdict(golden: &str, actual: &str, paths: GoldenPaths) -> Result<Golden, GoldenError> {
     let s = Scratch::new();
-    let tmp = std::env::temp_dir();
-    let file = s
-        .write(
-            "g.txt",
-            "dir <tmp>/x\nroot <home>\nnote C:/data/node-caches/npm\n",
+    let file = s.write("g.txt", golden).expect("write");
+    check_golden_with(&file, actual, GoldenMode::Check, paths)
+}
+
+/// ER-46: a golden never holds this machine. The temp and home folders become `<tmp>` and `<home>` by default, on both sides.
+#[test]
+fn the_temp_and_home_folders_of_this_machine_are_tokens() {
+    let ambient = paddock_testkit::ambient::ambient();
+    let tmp = ambient
+        .temp_dir
+        .to_string_lossy()
+        .trim_end_matches(['/', '\\'])
+        .to_string();
+    assert_eq!(
+        verdict(
+            "dir <tmp>/x\n",
+            &format!("dir {tmp}/x\n"),
+            GoldenPaths::Roots
         )
-        .expect("write");
-    let home = std::env::var("HOME")
-        .or_else(|_| std::env::var("USERPROFILE"))
-        .unwrap_or_default();
-    let actual = format!(
-        "dir {}/x\nroot {home}\nnote C:\\data/node-caches\\npm\n",
-        tmp.to_string_lossy().trim_end_matches(['/', '\\'])
+        .unwrap(),
+        Golden::Matched
     );
-    assert_ne!(
-        actual.replace("\r\n", "\n"),
-        std::fs::read_to_string(&file).unwrap(),
-        "raw, the spellings differ"
+    if let Some(home) = &ambient.home {
+        let home = home.to_string_lossy();
+        assert_eq!(
+            verdict(
+                "root <home>/y\n",
+                &format!("root {home}/y\n"),
+                GoldenPaths::Roots
+            )
+            .unwrap(),
+            Golden::Matched
+        );
+        // negative control: the two tokens are not one
+        assert!(matches!(
+            verdict(
+                "root <tmp>/y\n",
+                &format!("root {home}/y\n"),
+                GoldenPaths::Roots
+            ),
+            Err(GoldenError::Differs { .. })
+        ));
+    }
+}
+
+/// P1-2 (review of de09dab8a): by default a Windows spelling that regressed is still caught (ER-33): `C:\a` is not `C:/a`.
+#[test]
+fn by_default_a_changed_windows_spelling_is_a_difference() {
+    assert!(matches!(
+        verdict("path C:/a\n", "path C:\\a\n", GoldenPaths::Roots),
+        Err(GoldenError::Differs { .. })
+    ));
+    assert!(matches!(
+        verdict("path C:/a\n", "path \\\\?\\C:/a\n", GoldenPaths::Roots),
+        Err(GoldenError::Differs { .. })
+    ));
+    assert_eq!(
+        verdict("path C:/a\n", "path C:/a\n", GoldenPaths::Roots).unwrap(),
+        Golden::Matched
+    );
+}
+
+/// The opt-in: with `Fold` the same text matches, and the fold still tells places apart (`C:` is not `D:`).
+#[test]
+fn fold_reads_windows_spellings_as_one_and_still_tells_drives_apart() {
+    assert_eq!(
+        verdict("path C:/a\n", "path C:\\a\n", GoldenPaths::Fold).unwrap(),
+        Golden::Matched
     );
     assert_eq!(
-        check_golden(&file, &actual, GoldenMode::Check).unwrap(),
+        verdict("path C:/a/b\n", "path C:\\a/b\n", GoldenPaths::Fold).unwrap(),
+        Golden::Matched
+    );
+    assert!(matches!(
+        verdict("path C:/a\n", "path D:\\a\n", GoldenPaths::Fold),
+        Err(GoldenError::Differs { .. })
+    ));
+}
+
+/// Train B (run 8495): a `Path::join` onto a `/` base printed `C:\data/node-caches\npm`; with `Fold` it matches the stable golden.
+#[test]
+fn fold_matches_the_mixed_separator_text_of_a_join() {
+    assert_eq!(
+        verdict(
+            "note C:/data/node-caches/npm\n",
+            "note C:\\data/node-caches\\npm\n",
+            GoldenPaths::Fold
+        )
+        .unwrap(),
         Golden::Matched
     );
 }

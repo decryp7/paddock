@@ -6,14 +6,17 @@
 //! `tools/paddock-dev/tests/it/host_steps.rs`), so the file says `<uid>` and every machine writes the same; conformance C131 reads
 //! the tracked golden folders for these literals.
 //!
-//! **Paths.** Both sides of a comparison go through [`crate::golden_paths::normalise_paths`] first: Windows-style paths in one spelling
-//! (`/` separators, no `\\?\`), this machine's temp and home folders as `<tmp>` and `<home>`.
+//! **Paths.** Both sides of a comparison go through [`crate::golden_paths::normalise_paths`] first: this machine's temp and home
+//! folders become `<tmp>` and `<home>` ([`GoldenPaths::Roots`], the default) and nothing else changes, so a golden still catches a Windows
+//! spelling that regressed. A test whose subject is a path the platforms spell differently opts into [`GoldenPaths::Fold`] with
+//! [`check_golden_with`] or [`assert_golden_with`].
 //!
 //! **Rewriting.** With [`UPDATE_VAR`] set, a differing golden is rewritten, and the run prints [`confirm_command`]: the exact command
 //! that runs that test on Linux as root in the CI image (`tools/linux-container.sh --ci-image`). Run it before committing the file.
 //! `./dev golden confirm <test filter>` does both runs, on this machine and in that image, and passes only if both pass
 //! (docs/dev-setup.md, "Golden files").
 
+use crate::golden_paths::GoldenPaths;
 use std::fmt;
 use std::fs;
 use std::io;
@@ -191,22 +194,33 @@ pub fn rewritten_notice(
     )
 }
 
-/// Line endings as `\n` (so a Windows checkout with `core.autocrlf` still matches) and every path in winpath's spelling with this
-/// machine's temp and home folders as `<tmp>` and `<home>` ([`crate::golden_paths`]): a golden never holds a form only one OS
-/// prints (ER-46). Both the file and the actual text go through it, and a rewrite writes the normalised text.
-fn normalise(text: &str) -> String {
-    crate::golden_paths::normalise_paths(&text.replace("\r\n", "\n"))
+/// Line endings as `\n` (so a Windows checkout with `core.autocrlf` still matches) and this machine's temp and home folders as `<tmp>`
+/// and `<home>`, with the rest of the path text as `paths` says ([`crate::golden_paths`]): a golden never holds this machine (ER-46).
+/// Both the file and the actual text go through it, and a rewrite writes the normalised text.
+fn normalise(text: &str, paths: GoldenPaths) -> String {
+    crate::golden_paths::normalise_paths(&text.replace("\r\n", "\n"), paths)
 }
 
-/// Compares `actual` with the file at `path` (or rewrites it in [`GoldenMode::Update`], making its folders).
+/// Compares `actual` with the file at `path` (or rewrites it in [`GoldenMode::Update`], making its folders); only the machine's temp and
+/// home folders are normalised ([`GoldenPaths::Roots`]).
 pub fn check_golden(path: &Path, actual: &str, mode: GoldenMode) -> Result<Golden, GoldenError> {
+    check_golden_with(path, actual, mode, GoldenPaths::Roots)
+}
+
+/// [`check_golden`] with the path normalisation `paths` says ([`GoldenPaths::Fold`] is the explicit opt-in to fold Windows spellings).
+pub fn check_golden_with(
+    path: &Path,
+    actual: &str,
+    mode: GoldenMode,
+    paths: GoldenPaths,
+) -> Result<Golden, GoldenError> {
     let io_err = |source| GoldenError::Io {
         path: path.to_path_buf(),
         source,
     };
-    let actual = normalise(actual);
+    let actual = normalise(actual, paths);
     let expected = match fs::read_to_string(path) {
-        Ok(text) => Some(normalise(&text)),
+        Ok(text) => Some(normalise(&text, paths)),
         Err(e) if e.kind() == io::ErrorKind::NotFound => None,
         Err(e) => return Err(io_err(e)),
     };
@@ -275,6 +289,16 @@ pub fn check_golden(path: &Path, actual: &str, mode: GoldenMode) -> Result<Golde
 /// When the golden file is missing, differs or cannot be read (that is the assertion).
 pub fn assert_golden(path: &Path, actual: &str) {
     if let Err(e) = check_golden(path, actual, GoldenMode::from_env()) {
+        panic!("{e}");
+    }
+}
+
+/// [`assert_golden`] with the path normalisation `paths` says.
+///
+/// # Panics
+/// When the golden file is missing, differs or cannot be read (that is the assertion).
+pub fn assert_golden_with(path: &Path, actual: &str, paths: GoldenPaths) {
+    if let Err(e) = check_golden_with(path, actual, GoldenMode::from_env(), paths) {
         panic!("{e}");
     }
 }

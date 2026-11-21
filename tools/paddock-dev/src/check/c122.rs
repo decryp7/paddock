@@ -7,11 +7,11 @@
 //! - rule B: a hand separator fold, `.replace('\\', "/")` (also with strings);
 //! - rule C (a warning, a heuristic): `assert_eq!`/`assert_ne!` with an operand that is path text;
 //! - rule D (a warning, new 2026-11-21): a path rendered with `.display()` or `.to_string_lossy()` and handed to a program as an
-//!   argument (`.arg`, `.args`, `.env`), formatted into a golden (`assert_golden`, `check_golden`) or into an `expected`/`want`/`golden`
+//!   argument (`.arg`, `.args`; not `.env`: a Rust child reads its own variables), formatted into a golden (`assert_golden`, `check_golden`) or into an `expected`/`want`/`golden`
 //!   binding; the tools' spelling is `paddock_env::winpath::for_tools`;
 //! - rule E (a warning, new 2026-11-21): a string comparison (`==`, `!=`, `contains`, `starts_with`) with a path rendered to text on
-//!   one side; compare paths with `winpath::same`/`starts_with`. A line that names `file_name()`, `extension()` or `file_stem()` is a
-//!   name, not a place, and is left alone.
+//!   one side and no fixed literal on the other; compare paths with `winpath::same`/`starts_with`. A statement that names `file_name()`,
+//!   `extension()` or `file_stem()`, or checks for the `\\?\` prefix, is a name or a spelling check, not a place, and is left alone.
 //!
 //! A site that is not a path comparison carries `// conformance: path-text — <why>` on the line or the line above. Report-only
 //! (ER-41): A and B are warnings until the first green run on the real tree; flip [`SEVERITY_AB`] then.
@@ -43,14 +43,11 @@ static ASSERT_CALL: LazyLock<Regex> = LazyLock::new(|| rx(r"\bassert_(?:eq|ne)!\
 static FORMAT_LITERAL: LazyLock<Regex> = LazyLock::new(|| rx(r"\}(?:/|\\\\)|(?:/|\\\\)\{"));
 static FOLD: LazyLock<Regex> = LazyLock::new(|| rx(r##"\.replace\(\s*(?:'\\\\'|"\\\\"|r#*"\\"#*)\s*,\s*(?:"/"|'/')\s*\)"##));
 static PREFILTER: LazyLock<Regex> = LazyLock::new(|| rx(r"format!|\.replace\(|assert_(?:eq|ne)!|\.display\(\)|\.to_string_lossy\(\)"));
-static ARG_CALL: LazyLock<Regex> = LazyLock::new(|| rx(r"\.(?:arg|args|env)\s*\("));
-static GOLDEN_CALL: LazyLock<Regex> = LazyLock::new(|| rx(r"\b(?:assert_golden|check_golden)\s*\("));
+static ARG_CALL: LazyLock<Regex> = LazyLock::new(|| rx(r"\.(?:arg|args)\s*\("));
+static GOLDEN_CALL: LazyLock<Regex> = LazyLock::new(|| rx(r"\b(?:assert_golden|check_golden)(?:_with)?\s*\("));
 static EXPECTED_BINDING: LazyLock<Regex> = LazyLock::new(|| rx(r"\b(?:expected|want|golden)\w*\s*(?::[^=;]+)?=\s*$"));
+static EQ_OP: LazyLock<Regex> = LazyLock::new(|| rx(r"[=!]="));
 static COMPARE_CALL: LazyLock<Regex> = LazyLock::new(|| rx(r"\.(?:contains|starts_with)\s*\("));
-static TEXT_THEN_COMPARE: LazyLock<Regex> = LazyLock::new(|| {
-    rx(r"(?:\.display\(\)|\.to_string_lossy\(\))(?:\.(?:to_string|into_owned|to_owned)\(\))?\s*(?:\.(?:contains|starts_with)\s*\(|[=!]=)")
-});
-static COMPARE_THEN_TEXT: LazyLock<Regex> = LazyLock::new(|| rx(r"[=!]=\s*&?[^;{}\n]*?(?:\.display\(\)|\.to_string_lossy\(\))"));
 static NAME_ONLY: LazyLock<Regex> = LazyLock::new(|| rx(r"file_name\(\)|\.extension\(\)|file_stem\(\)"));
 const PATH_TEXT: [&str; 3] = [".display().to_string()", ".to_str().unwrap()", ".to_string_lossy()"];
 
@@ -97,6 +94,75 @@ pub struct Site {
 
 fn slice(u: &[u16], a: usize, b: usize) -> String {
     String::from_utf16_lossy(&u[a.min(u.len())..b.min(u.len())])
+}
+
+/// Whether the text of an expression renders a path as text (`.display()` or `.to_string_lossy()`).
+fn is_path_text(expr: &str) -> bool {
+    expr.contains(".display()") || expr.contains(".to_string_lossy()")
+}
+
+/// Whether the text is a string or character literal (its quotes are kept by the mask): the other side of a comparison is then a fixed
+/// text, a check of what the path ends in or names, not a comparison of two places.
+fn is_literal(expr: &str) -> bool {
+    let t = expr.trim().trim_start_matches('&');
+    let t = t.strip_prefix('r').map_or(t, |r| r.trim_start_matches('#'));
+    // a closure is a test of a character, not a place
+    t.starts_with('"') && t.trim_end_matches('#').ends_with('"') || t.starts_with('\'') && t.ends_with('\'') || t.starts_with('|')
+}
+
+/// Whether two operands compare a path rendered to text with something that is not a fixed literal (either way round).
+fn compares_path_text(a: &str, b: &str) -> bool {
+    (is_path_text(a) && !is_literal(b)) || (is_path_text(b) && !is_literal(a))
+}
+
+/// The unit range of the statement around `at`: from the previous `;`, `{` or `}` to the next `;` or `}`.
+fn statement(m: &[u16], at: usize) -> (usize, usize) {
+    let is = |c: u16, set: &[u8]| set.iter().any(|&x| c == u16::from(x));
+    let start = m[..at.min(m.len())].iter().rposition(|&c| is(c, b";{}")).map_or(0, |p| p + 1);
+    let end = m[at.min(m.len())..].iter().position(|&c| is(c, b";}")).map_or(m.len(), |p| at + p);
+    (start, end)
+}
+
+/// The operand that ends just before `end`: back to an opening bracket, a comma, a statement or block boundary, `=`, `|` or `&` at its own depth.
+fn left_operand(m: &[u16], end: usize) -> (usize, usize) {
+    let mut depth = 0usize;
+    let mut i = end.min(m.len());
+    while i > 0 {
+        let c = m[i - 1];
+        if c == u16::from(b')') || c == u16::from(b']') {
+            depth += 1;
+        } else if c == u16::from(b'(') || c == u16::from(b'[') {
+            if depth == 0 {
+                break;
+            }
+            depth -= 1;
+        } else if depth == 0 && b",;{}=|&".iter().any(|&x| c == u16::from(x)) {
+            break;
+        }
+        i -= 1;
+    }
+    (i, end.min(m.len()))
+}
+
+/// The operand that starts at `start`: forward to a closing bracket, a comma, a statement or block boundary, `|` or `&` at its own depth.
+fn right_operand(m: &[u16], start: usize) -> (usize, usize) {
+    let mut depth = 0usize;
+    let mut i = start.min(m.len());
+    while i < m.len() {
+        let c = m[i];
+        if c == u16::from(b'(') || c == u16::from(b'[') {
+            depth += 1;
+        } else if c == u16::from(b')') || c == u16::from(b']') {
+            if depth == 0 {
+                break;
+            }
+            depth -= 1;
+        } else if depth == 0 && b",;{}|&".iter().any(|&x| c == u16::from(x)) {
+            break;
+        }
+        i += 1;
+    }
+    (start.min(m.len()), i)
 }
 
 /// The unit index just past the `)` that closes the `(` at `open`.
@@ -221,8 +287,13 @@ pub fn path_text_sites(text: &str, file: &str) -> Vec<Site> {
             push(start, Rule::C, "compares path text, not paths");
         }
     }
-    let path_text = |args: &str| args.contains(".display()") || args.contains(".to_string_lossy()");
-    let line_text = |index: usize| lines.get(line_at(index) - 1).copied().unwrap_or("");
+    // Rules D and E judge one statement at a time, on its operands (narrowed after the review of de09dab8a: most of the first
+    // sample were not path comparisons).
+    let skip = |at: usize| {
+        let (a, b) = statement(&m, at);
+        let (masked_stmt, source) = (slice(&m, a, b), slice(&t, a, b));
+        NAME_ONLY.is_match(&masked_stmt) || source.contains("?\\")
+    };
     for (call, what) in [
         (
             &*ARG_CALL,
@@ -240,8 +311,7 @@ pub fn path_text_sites(text: &str, file: &str) -> Vec<Site> {
             }
             let open = in_masked.at(c.end()) - 1;
             let Some(end) = close_of(&m, open) else { continue };
-            let args = slice(&m, open, end);
-            if path_text(&args) && !NAME_ONLY.is_match(&args) {
+            if is_path_text(&slice(&m, open, end)) && !skip(start) {
                 push(start, Rule::D, what);
             }
         }
@@ -253,9 +323,8 @@ pub fn path_text_sites(text: &str, file: &str) -> Vec<Site> {
         }
         let open = in_masked.at(c.end()) - 1;
         let Some(end) = close_of(&m, open) else { continue };
-        let before = &masked[..c.start()];
-        let before_line = before.rsplit('\n').next().unwrap_or("");
-        if path_text(&slice(&m, open, end)) && EXPECTED_BINDING.is_match(before_line) && !NAME_ONLY.is_match(&slice(&m, open, end)) {
+        let before_line = masked[..c.start()].rsplit('\n').next().unwrap_or("");
+        if is_path_text(&slice(&m, open, end)) && EXPECTED_BINDING.is_match(before_line) && !skip(start) {
             push(
                 start,
                 Rule::D,
@@ -263,30 +332,35 @@ pub fn path_text_sites(text: &str, file: &str) -> Vec<Site> {
             );
         }
     }
-    let mut seen_e: Vec<usize> = Vec::new();
-    let mut note_e = |start: usize, out_push: &mut dyn FnMut(usize)| {
+    let mut e_lines: Vec<usize> = Vec::new();
+    let mut e_sites: Vec<usize> = Vec::new();
+    let mut note_e = |start: usize| {
         let line = line_at(start);
-        if !seen_e.contains(&line) {
-            seen_e.push(line);
-            out_push(start);
+        if !e_lines.contains(&line) && !skip(start) {
+            e_lines.push(line);
+            e_sites.push(start);
         }
     };
-    let mut e_sites: Vec<usize> = Vec::new();
-    for c in TEXT_THEN_COMPARE.find_iter(&masked).chain(COMPARE_THEN_TEXT.find_iter(&masked)) {
-        let start = in_masked.at(c.start());
-        if start >= from && !NAME_ONLY.is_match(line_text(start)) {
-            note_e(start, &mut |s| e_sites.push(s));
+    for c in EQ_OP.find_iter(&masked) {
+        let at = in_masked.at(c.start());
+        if at < from {
+            continue;
+        }
+        let (left, right) = (left_operand(&m, at), right_operand(&m, in_masked.at(c.end())));
+        if compares_path_text(&slice(&m, left.0, left.1), &slice(&m, right.0, right.1)) {
+            note_e(at);
         }
     }
     for c in COMPARE_CALL.find_iter(&masked) {
-        let start = in_masked.at(c.start());
-        if start < from {
+        let at = in_masked.at(c.start());
+        if at < from {
             continue;
         }
         let open = in_masked.at(c.end()) - 1;
         let Some(end) = close_of(&m, open) else { continue };
-        if path_text(&slice(&m, open, end)) && !NAME_ONLY.is_match(line_text(start)) {
-            note_e(start, &mut |s| e_sites.push(s));
+        let receiver = left_operand(&m, at);
+        if compares_path_text(&slice(&m, receiver.0, receiver.1), &slice(&m, open + 1, end - 1)) {
+            note_e(at);
         }
     }
     for s in e_sites {
@@ -314,6 +388,15 @@ fn fix(rule: Rule) -> &'static str {
             "Compare `Path`s, or use `paddock_testkit::assert_same_path!`; keep text only for what a program printed (`path::text`)."
         }
     }
+}
+
+/// The rule letter of a finding's message, as [`C122::run`] writes it (`(rule A: ...`): the one reader of that format, for the tests
+/// that hold one rule apart from the others.
+pub fn rule_of(message: &str) -> Option<char> {
+    let rest = message.split("(rule ").nth(1)?;
+    let mut chars = rest.chars();
+    let letter = chars.next()?;
+    (chars.next() == Some(':') && letter.is_ascii_uppercase()).then_some(letter)
 }
 
 /// The check.
@@ -364,6 +447,7 @@ impl Check for C122 {
 
     fn run(&self, ctx: &Ctx) -> CheckOutput {
         let mut findings = Vec::new();
+        let mut found: std::collections::BTreeMap<char, usize> = std::collections::BTreeMap::new();
         let mut probes = 0;
         let mut completed = true;
         for f in ctx.files().iter() {
@@ -385,6 +469,7 @@ impl Check for C122 {
                 if s.waived == Some(true) {
                     continue;
                 }
+                *found.entry(s.rule.letter()).or_default() += 1;
                 let bare = if s.waived == Some(false) {
                     " (the waiver comment has no reason)"
                 } else {
@@ -409,6 +494,10 @@ impl Check for C122 {
                     Severity::Error => Finding::error("C122", 40, f, s.line, message, fixed),
                 });
             }
+        }
+        // The baseline counts the whole tree: a run over some files only (a push gate's scope) cannot judge it.
+        if ctx.files().len() == ctx.tree_files().len() {
+            findings.extend(super::c122_baseline::judge(ctx, &found));
         }
         let has_rs = ctx.tree_files().iter().any(|f| f.ends_with(".rs"));
         CheckOutput {
@@ -528,8 +617,8 @@ mod tests {
             ["D1"]
         );
         assert_eq!(sites("cmd.args([\"-C\", &dir.to_string_lossy()]);"), ["D1"]);
-        assert_eq!(sites("cmd.env(\"HOME\", home.display().to_string());"), ["D1"]);
         assert_eq!(sites("assert_golden(&g, &format!(\"{}\", root.display()));"), ["D1"]);
+        assert_eq!(sites("check_golden_with(&g, &x.display().to_string(), mode, paths);"), ["D1"]);
         assert_eq!(sites("let expected = format!(\"cache {}\", root.display());"), ["D1"]);
         // clean: a path handed over as a path, a file name, a literal, text that is no path binding
         assert!(sites("cmd.arg(&p);").is_empty());
@@ -537,21 +626,61 @@ mod tests {
         assert!(sites("cmd.arg(\"x\");").is_empty());
         assert!(sites("let msg = format!(\"saw {}\", root.display());").is_empty());
         assert!(sites("// cmd.arg(p.display().to_string());\n").is_empty());
+        // narrowed: `.env` is read by a Rust child; a `\\?\` check is a spelling check
+        assert!(sites("cmd.env(\"HOME\", home.display().to_string());").is_empty());
+        assert!(sites("cmd.arg(format!(\"{}\", p.display().to_string().trim_start_matches(r\"\\\\?\\\")));").is_empty());
     }
 
     #[test]
     fn a_string_comparison_of_path_text_is_rule_e() {
         assert_eq!(sites("assert!(out.contains(&p.display().to_string()));"), ["E1"]);
-        assert_eq!(sites("assert!(p.to_string_lossy().contains(\"cache\"));"), ["E1"]);
-        assert_eq!(sites("assert!(p.display().to_string().starts_with(\"C:\"));"), ["E1"]);
+        assert_eq!(
+            sites("assert!(p.display().to_string().starts_with(&root.display().to_string()));"),
+            ["E1"]
+        );
         assert_eq!(sites("if a.to_string_lossy() == b { f(); }"), ["E1"]);
         assert_eq!(sites("if a == b.to_string_lossy() { f(); }"), ["E1"]);
         assert_eq!(sites("assert!(s.starts_with(&root.to_string_lossy().to_string()));"), ["E1"]);
+        assert_eq!(
+            sites("assert!(\n    shown\n        .to_string_lossy()\n        .to_string() != other);"),
+            ["E4"]
+        );
         // clean: a name, a path comparison, a plain string
         assert!(sites("assert!(p.file_name().unwrap().to_string_lossy().contains(\"x\"));").is_empty());
         assert!(sites("assert!(p.extension().unwrap().to_string_lossy() == \"json\");").is_empty());
         assert!(sites("assert!(p.starts_with(&root));").is_empty());
         assert!(sites("assert!(out.contains(\"x\"));").is_empty());
+    }
+
+    /// The narrowing after the review of de09dab8a: most of the first sample were not comparisons of two places.
+    #[test]
+    fn a_fixed_literal_a_prefix_check_or_a_file_name_in_the_statement_is_not_rule_e() {
+        // the other side is a fixed literal: what the path ends in, not which place
+        assert!(sites("assert!(c[0].path.to_string_lossy().contains(\"msedge.exe\"));").is_empty());
+        assert!(sites("assert!(p.display().to_string().starts_with(\"C:\"));").is_empty());
+        assert!(sites("assert!(p.to_string_lossy() == \"x\");").is_empty());
+        assert!(sites("assert!(\"abc\" != p.to_string_lossy());").is_empty());
+        assert!(sites("assert!(p.to_string_lossy() == r\"E:\\Apps\\x.exe\");").is_empty());
+        assert!(sites("assert!(p.to_string_lossy().starts_with(|c: char| c.is_ascii_digit()));").is_empty());
+        // a spelling check for the verbatim prefix
+        assert!(sites("assert!(!p.display().to_string().starts_with(r\"\\\\?\\\"));").is_empty());
+        assert!(sites("assert!(!shown.to_string_lossy().contains(\"\\\\\\\\?\\\\\"), \"verbatim\");").is_empty());
+        // a name earlier in the same statement (a multi-line chain)
+        assert!(sites("assert!(\n    p.file_name()\n        .unwrap()\n        .to_string_lossy()\n        .contains(&name));").is_empty());
+        // a line that merely holds the conversion is no comparison
+        assert!(sites("let t = p\n    .to_string_lossy()\n    .to_string();").is_empty());
+        // the sites that stay: the same two checks with a path on the other side
+        assert_eq!(sites("assert!(p.to_string_lossy().contains(&q.to_string_lossy()));"), ["E1"]);
+    }
+
+    #[test]
+    fn the_rule_of_a_message_is_read_from_the_text_the_check_writes() {
+        assert_eq!(
+            rule_of("compares path text, not paths (rule C: the same place is spelled differently on Windows)"),
+            Some('C')
+        );
+        assert_eq!(rule_of("x (the waiver comment has no reason) (rule E: y)"), Some('E'));
+        assert_eq!(rule_of("a finding of another check"), None);
     }
 
     #[test]

@@ -1,0 +1,112 @@
+{
+ "findings": [
+  {
+   "check": "C122",
+   "severity": "warn",
+   "rule": 40,
+   "file": "apps/debrief/crates/chromium-driver/src/launch.rs",
+   "line": 1330,
+   "message": "compares a path rendered to text as a string: Windows spells the same place differently (rule E: the same place is spelled differently on Windows)",
+   "fix": "Compare with `paddock_env::winpath::same` / `starts_with` (or `paddock_testkit::path::same_path`), not as strings. A site that is not a path comparison carries `// conformance: path-text — <why>`."
+  },
+  {
+   "check": "C122",
+   "severity": "warn",
+   "rule": 40,
+   "file": "apps/pitcrew/crates/pitcrew-service/src/disclaim.rs",
+   "line": 220,
+   "message": "compares a path rendered to text as a string: Windows spells the same place differently (rule E: the same place is spelled differently on Windows)",
+   "fix": "Compare with `paddock_env::winpath::same` / `starts_with` (or `paddock_testkit::path::same_path`), not as strings. A site that is not a path comparison carries `// conformance: path-text — <why>`."
+  },
+  {
+   "check": "C122",
+   "severity": "warn",
+   "rule": 40,
+   "file": "apps/pitcrew/crates/pitcrew-service/tests/supervision.rs",
+   "line": 172,
+   "message": "compares a path rendered to text as a string: Windows spells the same place differently (rule E: the same place is spelled differently on Windows)",
+   "fix": "Compare with `paddock_env::winpath::same` / `starts_with` (or `paddock_testkit::path::same_path`), not as strings. A site that is not a path comparison carries `// conformance: path-text — <why>`."
+  },
+  {
+   "check": "C122",
+   "severity": "warn",
+   "rule": 40,
+   "file": "crates/paddock-env/src/private/dir.rs",
+   "line": 814,
+   "message": "compares a path rendered to text as a string: Windows spells the same place differently (rule E: the same place is spelled differently on Windows)",
+   "fix": "Compare with `paddock_env::winpath::same` / `starts_with` (or `paddock_testkit::path::same_path`), not as strings. A site that is not a path comparison carries `// conformance: path-text — <why>`."
+  },
+  {
+   "check": "C122",
+   "severity": "warn",
+   "rule": 40,
+   "file": "crates/paddock-setup/tests/vm/windows.rs",
+   "line": 313,
+   "message": "compares a path rendered to text as a string: Windows spells the same place differently (rule E: the same place is spelled differently on Windows)",
+   "fix": "Compare with `paddock_env::winpath::same` / `starts_with` (or `paddock_testkit::path::same_path`), not as strings. A site that is not a path comparison carries `// conformance: path-text — <why>`."
+  },
+  {
+   "check": "C122",
+   "severity": "warn",
+   "rule": 40,
+   "file": "crates/paddock-setup/tests/vm/windows.rs",
+   "line": 919,
+   "message": "compares a path rendered to text as a string: Windows spells the same place differently (rule E: the same place is spelled differently on Windows)",
+   "fix": "Compare with `paddock_env::winpath::same` / `starts_with` (or `paddock_testkit::path::same_path`), not as strings. A site that is not a path comparison carries `// conformance: path-text — <why>`."
+  },
+  {
+   "check": "C122",
+   "severity": "warn",
+   "rule": 40,
+   "file": "crates/paddock-setup/tests/vm/windows.rs",
+   "line": 1053,
+   "message": "compares a path rendered to text as a string: Windows spells the same place differently (rule E: the same place is spelled differently on Windows)",
+   "fix": "Compare with `paddock_env::winpath::same` / `starts_with` (or `paddock_testkit::path::same_path`), not as strings. A site that is not a path comparison carries `// conformance: path-text — <why>`."
+  },
+  {
+   "check": "C122",
+   "severity": "warn",
+   "rule": 40,
+   "file": "crates/paddock-testkit/src/ambient.rs",
+   "line": 195,
+   "message": "compares a path rendered to text as a string: Windows spells the same place differently (rule E: the same place is spelled differently on Windows)",
+   "fix": "Compare with `paddock_env::winpath::same` / `starts_with` (or `paddock_testkit::path::same_path`), not as strings. A site that is not a path comparison carries `// conformance: path-text — <why>`."
+  },
+  {
+   "check": "C122",
+   "severity": "warn",
+   "rule": 40,
+   "file": "tools/paddock-dev/src/local_sccache.rs",
+   "line": 1023,
+   "message": "compares a path rendered to text as a string: Windows spells the same place differently (rule E: the same place is spelled differently on Windows)",
+   "fix": "Compare with `paddock_env::winpath::same` / `starts_with` (or `paddock_testkit::path::same_path`), not as strings. A site that is not a path comparison carries `// conformance: path-text — <why>`."
+  },
+  {
+   "check": "C122",
+   "severity": "warn",
+   "rule": 40,
+   "file": "tools/paddock-dev/src/local_sccache.rs",
+   "line": 1248,
+   "message": "hands a path to a program as `.display()` text: use `paddock_env::winpath::for_tools` (rule D: the same place is spelled differently on Windows)",
+   "fix": "Pass `paddock_env::winpath::for_tools(path, os)` to a program, and normalise a golden's paths (`paddock_testkit::golden`). A site that is not a path comparison carries `// conformance: path-text — <why>`."
+  },
+  {
+   "check": "C122",
+   "severity": "warn",
+   "rule": 40,
+   "file": "tools/paddock-dev/tests/it/host_steps.rs",
+   "line": 936,
+   "message": "compares a path rendered to text as a string: Windows spells the same place differently (rule E: the same place is spelled differently on Windows)",
+   "fix": "Compare with `paddock_env::winpath::same` / `starts_with` (or `paddock_testkit::path::same_path`), not as strings. A site that is not a path comparison carries `// conformance: path-text — <why>`."
+  },
+  {
+   "check": "C122",
+   "severity": "warn",
+   "rule": 40,
+   "file": "tools/paddock-dev/tests/it/wrapper.rs",
+   "line": 486,
+   "message": "compares a path rendered to text as a string: Windows spells the same place differently (rule E: the same place is spelled differently on Windows)",
+   "fix": "Compare with `paddock_env::winpath::same` / `starts_with` (or `paddock_testkit::path::same_path`), not as strings. A site that is not a path comparison carries `// conformance: path-text — <why>`."
+  }
+ ]
+}

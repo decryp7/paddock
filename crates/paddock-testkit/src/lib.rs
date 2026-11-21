@@ -65,7 +65,11 @@ pub mod wait;
 pub use ambient::{Ambient, ambient, tempdir};
 pub use cases::{both, case, run_cases};
 pub use env::{EnvLock, env_lock};
-pub use golden::{Golden, GoldenError, GoldenMode, assert_golden, check_golden};
+pub use golden::{
+    Golden, GoldenError, GoldenMode, assert_golden, assert_golden_with, check_golden,
+    check_golden_with,
+};
+pub use golden_paths::GoldenPaths;
 pub use hostile::{assert_never_panics, corpus, never_panics};
 pub use paddock_env::winpath::{real_or_given, same};
 pub use paddock_jobs::time::{Clock, FakeClock};

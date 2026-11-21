@@ -106,3 +106,107 @@ fn live_tree_run_is_sound_and_no_rule_a_or_b_site_is_left() {
         .collect();
     assert!(left.is_empty(), "rule A or B sites are back in test code: {left:?}");
 }
+
+/// Two rule D sites and one rule E site, in test code.
+const DE_SOURCE: &str = "fn t() {\n    cmd.arg(a.display().to_string());\n    cmd.arg(b.display().to_string());\n    assert!(out.contains(&c.display().to_string()));\n}\n";
+
+fn baseline_tree(counts: &str) -> tempfile::TempDir {
+    let d = tempfile::tempdir().unwrap();
+    for (rel, text) in [
+        ("crates/a/tests/it/de.rs", DE_SOURCE.to_string()),
+        (paddock_dev::check::c122_baseline::FILE, format!("{{\"counts\": {counts}}}")),
+    ] {
+        let to = d.path().join(rel);
+        std::fs::create_dir_all(to.parent().unwrap()).unwrap();
+        std::fs::write(to, text).unwrap();
+    }
+    d
+}
+
+fn at_baseline(r: &paddock_dev::check::RunResult) -> Vec<String> {
+    r.findings
+        .iter()
+        .filter(|f| f.file == paddock_dev::check::c122_baseline::FILE)
+        .map(|f| f.message.clone())
+        .collect()
+}
+
+/// ER-46: the count of rules D and E may only shrink. At the baseline there is nothing to say (the positive control: the tree has
+/// sites, so a check that never counted would pass the same way, which the next two tests exclude).
+#[test]
+fn the_de_baseline_holds_when_the_counts_are_equal() {
+    let r = run_checks(&options(baseline_tree(r#"{"D": 2, "E": 1}"#).path(), "fixture"), &registry()).unwrap();
+    assert_eq!(
+        r.findings.iter().filter(|f| f.file.ends_with("de.rs")).count(),
+        3,
+        "the three sites are reported as warnings"
+    );
+    assert!(at_baseline(&r).is_empty(), "{:?}", at_baseline(&r));
+}
+
+#[test]
+fn a_count_above_the_baseline_is_one_unwaivable_finding_and_below_asks_to_lower_it() {
+    let above = run_checks(&options(baseline_tree(r#"{"D": 1, "E": 1}"#).path(), "fixture"), &registry()).unwrap();
+    assert_eq!(
+        at_baseline(&above),
+        ["rule D has 2 sites and the baseline allows 1: the count may only shrink"]
+    );
+    assert!(
+        above
+            .findings
+            .iter()
+            .any(|f| f.file == paddock_dev::check::c122_baseline::FILE && f.unwaivable)
+    );
+    let below = run_checks(&options(baseline_tree(r#"{"D": 2, "E": 4}"#).path(), "fixture"), &registry()).unwrap();
+    assert_eq!(at_baseline(&below), ["rule E has 1 sites and the baseline still allows 4"]);
+    assert_eq!(above.errors() + below.errors(), 0, "report-only");
+}
+
+#[test]
+fn an_unreadable_baseline_is_a_check_broken_finding() {
+    let r = run_checks(&options(baseline_tree("5").path(), "fixture"), &registry()).unwrap();
+    assert_eq!(at_baseline(&r).len(), 1, "{:?}", at_baseline(&r));
+    assert!(at_baseline(&r)[0].starts_with("the check cannot look:"));
+}
+
+/// The file against the merge base: a raised count in a commit is growth, one finding that needs the user's approval.
+#[test]
+fn a_baseline_raised_against_the_merge_base_is_growth() {
+    let d = baseline_tree(r#"{"D": 2, "E": 1}"#);
+    #[allow(clippy::disallowed_methods, reason = "a test spawns git; it ends it itself")]
+    let git = |args: &[&str]| {
+        let out = std::process::Command::new("git")
+            .args([
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@example.invalid",
+                "-c",
+                "commit.gpgsign=false",
+            ])
+            .args(args)
+            .current_dir(d.path())
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+    };
+    git(&["init", "-q"]);
+    std::fs::write(
+        d.path().join(paddock_dev::check::c122_baseline::FILE),
+        r#"{"counts": {"D": 1, "E": 1}}"#,
+    )
+    .unwrap();
+    git(&["add", "-A"]);
+    git(&["commit", "-q", "-m", "base"]);
+    std::fs::write(
+        d.path().join(paddock_dev::check::c122_baseline::FILE),
+        r#"{"counts": {"D": 2, "E": 1}}"#,
+    )
+    .unwrap();
+    git(&["commit", "-q", "-am", "raise"]);
+    let mut o = options(d.path(), "fixture");
+    o.base_ref = Some("HEAD".into());
+    let r = run_checks(&o, &registry()).unwrap();
+    let said = at_baseline(&r);
+    assert!(said.iter().any(|m| m.starts_with("the count baseline grew by 1 site")), "{said:?}");
+}

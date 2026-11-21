@@ -1,0 +1,7 @@
+{
+ "_comment": "Sites of C122's rules D (path text handed to a program or golden) and E (string comparison of path text) on the tree, 2026-11-21. Report-only (ER-41). May only shrink (ER-46): fix or waive a site (`// conformance: path-text — <why>`), then lower the count. Growing it needs the user's approval.",
+ "counts": {
+  "D": 5,
+  "E": 31
+ }
+}

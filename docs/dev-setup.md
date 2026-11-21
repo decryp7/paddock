@@ -222,7 +222,9 @@ author or by `./dev brief` (not on main yet): that call belongs there. The Rust 
 - **Golden files (`paddock_testkit::golden`):** a golden is captured on one machine and checked on all of them (the Mac, the
   Linux CI image, which runs as root, and Windows). A value of the capturing machine (a uid, a home folder, a temp path) makes it
   fail elsewhere; normalise it in the test before the comparison (for example `norm()` in
-  `tools/paddock-dev/tests/it/host_steps.rs`), so the file says `<uid>`. Conformance C131 (report-only, ER-41) reads the golden
+  `tools/paddock-dev/tests/it/host_steps.rs`), so the file says `<uid>`. `check_golden` also turns this machine's temp and home folders into `<tmp>` and `<home>` (whole paths only);
+  a test whose subject is a path the platforms spell differently opts into folding Windows spellings with `GoldenPaths::Fold`
+  (`check_golden_with`), which is never the default, so a golden still catches a regressed Windows spelling. Conformance C131 (report-only, ER-41) reads the golden
   folders (and `*.golden` and `*.snap` files) for uid and gid numbers, `/Users`, `/home` and `C:\Users` paths and temp paths, by
   fixed patterns, so it gives the same result on every machine; it walks the working folder today (reading git's tracked list is
   the approved train-14 item). A value that is fine (an invented user) gets an entry with a reason in `conformance/c131-allow.json`.
