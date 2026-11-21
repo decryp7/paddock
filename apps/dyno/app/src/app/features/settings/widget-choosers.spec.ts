@@ -32,6 +32,16 @@ describe('dy-popup-widgets', () => {
     expect(el.querySelector('[aria-label="Preview of the popup"] pd-tray-popover pd-widget-area')).not.toBeNull();
   });
 
+  it('says the whole memory label in a title, so a value wider than its box is cut with an accepted ellipsis', async () => {
+    const { f, el } = setup(PopupWidgets);
+    await vi.waitFor(() => {
+      f.detectChanges();
+      const label = [...el.querySelectorAll<HTMLElement>('[aria-label="Preview of the popup"] .dy-pw-muted')].find((s) => s.textContent?.trim().startsWith('Memory'));
+      expect(label, 'the memory label is in the preview').toBeDefined();
+      expect(label!.getAttribute('title')).toBe(label!.textContent!.trim());
+    });
+  });
+
   it('adds a widget through the engine, and the preview follows', async () => {
     const { f, mock, el } = setup(PopupWidgets);
     await vi.waitFor(() => {

@@ -80,7 +80,7 @@ const SK_ISSUE: IssueValue = { title: 'Disk write errors on disk4', app: '', kin
           <pd-sparkline [values]="c?.cpuMinute ?? []" scale="zero" [area]="true" [max]="100" [capacity]="sparkCapacity" [formatValue]="pct" [pad]="0" [dot]="false" [height]="20" color="var(--accent)" label="CPU over the last minute" />
         </div>
         <div class="dy-pw-half dy-pw-half--next" [attr.data-tone]="c?.memoryTone ?? 'ok'">
-          <span class="dy-pw-muted" pdSkeleton>Memory {{ memText(c) }}</span>
+          <span class="dy-pw-muted" [attr.title]="'Memory ' + memText(c)" pdSkeleton>Memory {{ memText(c) }}</span>
           <span class="dy-pw-big" pdSkeleton>{{ big(c?.memoryPercent ?? 0) }}<small>%</small></span>
           <span class="dy-pw-meter dy-pw-tall" role="img" [attr.aria-label]="'Memory in use ' + big(c?.memoryPercent ?? 0) + '%'" pdSkeleton><i [style.width.%]="c?.memoryPercent ?? 0"></i></span>
         </div>
