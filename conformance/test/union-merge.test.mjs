@@ -11,8 +11,8 @@ import { fileURLToPath } from 'node:url';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
-/** The append-only log: new sections are added, earlier ones are not rewritten. Only its git attribute is read, never its text
- * (the planner's DOC_INPUTS, tools/paddock-dev/src/plan.rs, lists this file as not reading docs). */
+/** The append-only log: new sections are added, earlier ones are not rewritten. Only its git attribute is read here (conformance C145 reads its text;
+ * the planner's DOC_INPUTS, tools/paddock-dev/src/plan.rs, lists it). */
 const APPEND_ONLY = ['docs/lessons.md'];
 /** Edited in place (a corrected results block): union would keep both versions silently. */
 const EDITED_IN_PLACE = ['docs/benchmarks.md', 'apps/dyno/docs/performance.md', 'docs/gates.toml'];

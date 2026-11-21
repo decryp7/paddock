@@ -246,6 +246,8 @@ static DOC_INPUTS: LazyLock<Vec<(Regex, Marks)>> = LazyLock::new(|| {
             Marks::Owner,
         ),
         (re(r"^docs/rules\.md$"), Marks::Projects(&["conformance", "tools"])),
+        // Read by conformance C145 (the lessons file's format) and by the merge driver's test.
+        (re(r"^docs/lessons\.md$"), Marks::Projects(&["conformance", "tools"])),
         (re(r"^docs/blocks/"), Marks::Projects(&["conformance", "tools"])),
         (re(r"^docs/(design-guide|benchmarks)\.md$"), Marks::Projects(&["conformance"])),
         (re(r"^docs/wiki/"), Marks::Projects(&["tools"])),
