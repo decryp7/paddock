@@ -1057,6 +1057,77 @@ fn on_a_ci_runner_the_tool_never_lives_on_the_kept_mount_and_an_explicit_home_st
     assert!(own.join("bin").join(&hash).exists());
 }
 
+/// The programs `./dev --wrapper-hash` may start. The child's `PATH` holds only counting shims of these, so a program missing here
+/// fails the run instead of going uncounted.
+#[cfg(unix)]
+const COUNTED: &[&str] = &[
+    "git", "grep", "tr", "sed", "awk", "dirname", "ls", "uname", "sort", "cut", "env", "head", "cat",
+];
+
+/// Starts of one `./dev --wrapper-hash` (with `RUSTC` set and one config file), measured on macOS 2026-11-22 once the walk up the
+/// folders and the parsing were done by the shell itself: 13. Before, 42 in the same test (eleven folder levels: a `dirname` per
+/// level, and grep, sed, cut and tr per parsed line), at about 45 ms each on the Windows runner plus a fork per command substitution
+/// (ER-20; run 8546, job 44099).
+#[cfg(unix)]
+const WRAPPER_HASH_STARTS: usize = 13;
+
+#[cfg(unix)]
+#[test]
+fn a_wrapper_hash_costs_a_bounded_number_of_starts_whatever_the_folder_depth() {
+    // ER-20: a command's count of process starts is a measured budget a test guards. The wrapper tests start `--wrapper-hash` many
+    // times; on Windows each start costs about 45 ms and each `$(...)` a fork, so a start per folder level put one test over
+    // nextest's 60 s (run 8546).
+    let f = Fixture::new();
+    let scratch = tempfile::tempdir().unwrap();
+    let rustc = fake_rustc(scratch.path(), "rustc-real", "1.90.0", "aaaa", "test-host");
+    let shims = scratch.path().join("shims");
+    std::fs::create_dir_all(&shims).unwrap();
+    let log = scratch.path().join("starts.log");
+    let path: Vec<PathBuf> = paddock_dev::process_env::vars()
+        .find(|(k, _)| k == "PATH")
+        .map(|(_, v)| std::env::split_paths(&v).collect())
+        .unwrap_or_default();
+    let shim = |name: &str, real: &Path| {
+        let body = format!("#!/bin/sh\necho {name} >> '{}'\nexec '{}' \"$@\"\n", log.display(), real.display());
+        paddock_testkit::exe::write_program(shims.join(name), body).unwrap();
+    };
+    for name in COUNTED {
+        let real = path
+            .iter()
+            .map(|d| d.join(name))
+            .find(|p| p.is_file())
+            .unwrap_or_else(|| panic!("{name} is not on PATH"));
+        shim(name, &real);
+    }
+    shim("rustc", Path::new(&rustc));
+    let mut cmd = TestCommand::new("sh");
+    cmd.arg(f.root().join("dev"))
+        .arg("--wrapper-hash")
+        .current_dir(f.root().join("tools/paddock-dev/src"))
+        .env("PATH", &shims)
+        .env("RUSTC", shims.join("rustc"))
+        .env("CARGO_HOME", f.cargo_home.path())
+        .env("PADDOCK_DEV_HOME", f.cargo_home.path().join("dev-home"))
+        .env_remove("CARGO_BUILD_RUSTC")
+        .env_remove("CARGO_TARGET_DIR")
+        .env_remove("CARGO_BUILD_TARGET_DIR");
+    let out = cmd.output().unwrap();
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "{err}");
+    let starts: Vec<String> = std::fs::read_to_string(&log).unwrap().lines().map(str::to_string).collect();
+    // Positive control: the probe sees the starts it must (the tree is read with git, the compiler is asked).
+    assert!(
+        starts.iter().any(|s| s == "git") && starts.iter().any(|s| s == "rustc"),
+        "{starts:?}"
+    );
+    assert!(!starts.iter().any(|s| s == "dirname"), "no start per folder level: {starts:?}");
+    assert!(
+        starts.len() <= WRAPPER_HASH_STARTS,
+        "{} starts, over the budget of {WRAPPER_HASH_STARTS}: {starts:?}",
+        starts.len()
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn a_cache_hit_costs_two_starts_the_probe_and_the_command() {

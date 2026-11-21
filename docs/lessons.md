@@ -3365,3 +3365,23 @@ reveal grows the total, `Total grew outside a round` 7 ms after the press here) 
   learns it lost events. What grew fseventsd to 12.7 GB (a client that stopped reading, or the 690k leaked test folders and their
   paused delete) is not known.
 - **Class:** a test of an OS notification assumes it is prompt and lossless. Earlier instances: none recorded.
+
+## Train 18's two FLAKYs: a stand-in timed against a 1 s limit, and a wrapper that started a program per folder level (2026-11-22, run 8546)
+**macOS, `generators::tests::real::a_wait_for_the_slot_past_the_hang_guard_is_not_measured_and_names_the_holder` (job 44050).**
+Try 1 panicked with `TimedOut` after 1.042 s; try 2 passed. Causes listed: (1) `run_bounded` dropped output written just before
+the kill: ruled out by reading it, the loop waits for both pipes to drain after the kill (`PIPE_GRACE`); (2) train 18's change to
+`base_command` (`no_prompts`: stdin null, `RUSTUP_AUTO_INSTALL=0`): ruled out, `run_bounded` already closed stdin,
+and the variable does not reach the stand-in's first write; (3) the 1 s limit counts from the spawn, and the stand-in's start-up plus its first write took longer on a loaded
+runner: confirmed, a stand-in that waits 1.5 s before its line fails the same way at the same line every time; the natural rate on a
+quiet Mac was 0 of 25 runs at 4 threads. **Fix:** what `Real::run` makes of a finished run is `run::ran_from`, a function of the
+output alone; the test gives it a timed-out output and no clock is involved (30 stress runs of the group at 4 threads, green).
+Fifth sighting of "work before the hang point of a timed test meets its limit under load" (2026-11-15, 2026-11-19 `kept_clone`
+above): the phase audit sees only files that use `ci_host::phase`, so this one was not checked.
+**Windows, `paddock-dev::it wrapper::a_config_that_only_names_the_build_folder_does_not_change_the_hash` (job 44099).** Try 1 hit
+nextest's 60 s; try 2 took 33.9 s; on earlier runs it took 27 to 44 s (runs 8335, 8346, 8359, 8495, 8509), so it sat near the limit
+before train 18, whose `dev` changes are not on the `--wrapper-hash` path. The test runs `./dev --wrapper-hash` eight times, and each
+run started 42 programs in the macOS test fixture (a `dirname` per folder level, and grep, sed, cut and tr for each parsed line), at
+about 45 ms a start on that runner plus a fork per command substitution. **Fix:** the walks go up with parameter expansion and the
+`-vV` lines, the flag filter and the explain line are read by the shell or one awk: 13 starts, guarded by
+`a_wrapper_hash_costs_a_bounded_number_of_starts_whatever_the_folder_depth` (red at 42 before). On a bare drive the walk now ends at
+`C:` as Rust's `Path::ancestors` does, where dirname went on to `.`. Same class as the 2026-11-18 Windows git starts (ER-20).
