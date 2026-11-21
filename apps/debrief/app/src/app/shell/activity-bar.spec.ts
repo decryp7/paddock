@@ -86,6 +86,9 @@ describe('ActivityBar', () => {
   });
 
   it('switches views, focuses search, toggles the explorer and opens settings', async () => {
+    // The Settings screen is a lazy chunk: load it here, in the test's own 5 s budget, so the click below finds it cached and the
+    // window opens within a few microtasks, not within waitFor's 1 s on a loaded machine.
+    await import('../settings/settings-screen');
     const { fixture, dock } = setup();
     const store = TestBed.inject(WorkspaceStore);
     await settle(fixture);
@@ -100,7 +103,7 @@ describe('ActivityBar', () => {
     expect(store.focusSearchNonce()).toBe(1);
     expect(store.sidebarOpen()).toBe(false);
     expect(button(fixture, 'Explorer').getAttribute('aria-pressed')).toBe('false');
-    // The Settings screen is a lazy chunk: the window opens once it has loaded.
+    // The chunk is already loaded, so the window opens once the service's own awaits have run.
     await vi.waitFor(() => expect(TestBed.inject(DialogService).stack().map((d) => d.options.title)).toEqual(['Settings']));
   });
 
