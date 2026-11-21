@@ -159,9 +159,15 @@ fn shim_state(root: &Path) -> &'static str {
     }
 }
 
-/// Copies `exe` to the common git folder and writes the stamp beside it. Nothing else is written: not a file of the checkout
-/// (the shim is tracked; a missing or different one is a warning) and not git's configuration (`core.hooksPath` would switch
-/// off `.git/hooks/commit-msg`, the ER-5 guard; setting it belongs to the tracked-hooks change of ADR 0038).
+/// The merge driver of `docs/lessons.md` (`merge=lessons` in .gitattributes): its configuration key and value. The value is relative
+/// to the folder git runs the merge in, which is a worktree's top folder, where `scripts/lessons-merge.sh` is tracked.
+pub const LESSONS_DRIVER: (&str, &str) = ("merge.lessons.driver", "bash scripts/lessons-merge.sh %O %A %B");
+
+/// Copies `exe` to the common git folder and writes the stamp beside it, and sets the one git configuration the repository needs,
+/// the merge driver of the lessons file ([`LESSONS_DRIVER`]; a union merge dropped a blank line four times, so a clone without the
+/// driver falls back to git's plain merge, which conflicts, never to a silent drop). Not written: a file of the checkout (the shim is
+/// tracked; a missing or different one is a warning) and `core.hooksPath` (it would switch off `.git/hooks/commit-msg`, the ER-5
+/// guard; setting it belongs to the tracked-hooks change of ADR 0038).
 pub fn install(exec: &dyn Exec, root: &Path, exe: &Path, origin: &Origin) -> Result<Report, CliError> {
     let fail = |what: &str, e: std::io::Error| {
         CliError::failure(format!("{what}: {e}.")).with_hint("Check that the folder is writable, then run ./dev hooks install again.")
@@ -201,6 +207,9 @@ pub fn install(exec: &dyn Exec, root: &Path, exe: &Path, origin: &Origin) -> Res
     let mut text = serde_json::to_string_pretty(&stamp).unwrap_or_default();
     text.push('\n');
     place_bytes(text.as_bytes(), &stamp_path, false).map_err(|e| fail(&format!("{} could not be written", stamp_path.display()), e))?;
+
+    exec.run("git", &["config", "--local", LESSONS_DRIVER.0, LESSONS_DRIVER.1], root, None)
+        .map_err(|e| e.with_hint("Run ./dev hooks install inside a git repository whose configuration is writable."))?;
 
     let state = shim_state(root);
     let shim_line = match state {
@@ -435,6 +444,14 @@ mod tests {
                 .is_err()
         );
         assert_eq!(git(&f, &["status", "--porcelain", "--untracked-files=all"]), tracked_before);
+        // The lessons file's merge driver is the one git setting written.
+        assert_eq!(
+            f.exec
+                .run("git", &["config", "--local", "--get", LESSONS_DRIVER.0], &f.root, None)
+                .unwrap()
+                .trim(),
+            LESSONS_DRIVER.1
+        );
         assert!(!report.text.contains("hooksPath") && report.data.get("hooks_path_set").is_none());
         assert_eq!(
             std::fs::read_dir(&f.exec.home).unwrap().count(),

@@ -10,7 +10,7 @@ Conventional Commits; one semver tag for the whole repo.
   5 s. `acquire` reports processes that carry the token of a finished job (`dev ci isolation processes sweep [--end]`). New
   `paddock_proc::own::carriers(name)`. Windows reports "not measured" (another process's environment is not read there).
 - New report-only conformance check C145 (Rust host): `docs/lessons.md` has a blank line before every `## ` heading, one title, no
-  repeated heading and one final newline. The file's 35 headings that had lost their blank line to a union merge have it again.
+  repeated heading and one final newline. `docs/lessons.md` now merges with the `lessons` driver (`scripts/lessons-merge.sh`: git's union merge, then the blank line it drops before a heading restored; `./dev hooks install` sets it). The file's 35 headings that had lost their blank line to a union merge have it again.
 
 ### `@decryp7/paddock-e2e`: `untilItsPageCloses` and `clickThatClosesItsPage`, for a step that closes its own window
 - A test step whose action ends the page it acts on (a pop-out's Dock back, the pointer-up that docks a dragged pop-out) counts as done

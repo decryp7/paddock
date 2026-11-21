@@ -1,4 +1,4 @@
-// The append-only docs merge with git's union driver (.gitattributes): two branches that each add a section at the end of
+// The append-only docs merge with the lessons driver (.gitattributes `merge=lessons`: git's union merge, then the blank line before each heading restored; scripts/lessons-merge.sh): two branches that each add a section at the end of
 // docs/lessons.md merge without a conflict. The attribute is read through git itself (`git check-attr`), and the merge runs in a
 // scratch repository that carries the repository's own .gitattributes.
 import assert from 'node:assert/strict';
@@ -26,11 +26,11 @@ function git(cwd, ...args) {
   return { status: r.status, out: (r.stdout ?? '') + (r.stderr ?? '') };
 }
 
-test('the append-only docs use the union merge driver', () => {
+test('the append-only docs use the lessons merge driver', () => {
   for (const file of APPEND_ONLY) {
     const r = git(root, 'check-attr', 'merge', '--', file);
     assert.equal(r.status, 0, r.out);
-    assert.match(r.out, /: merge: union$/m, `${file} has no merge=union in .gitattributes: ${r.out}`);
+    assert.match(r.out, /: merge: lessons$/m, `${file} has no merge=lessons in .gitattributes: ${r.out}`);
   }
   // Files edited in place must conflict on two edits of one line, not keep both.
   for (const file of EDITED_IN_PLACE) assert.match(git(root, 'check-attr', 'merge', '--', file).out, /: merge: unspecified$/m, file);
@@ -41,6 +41,9 @@ test('two branches that each add a lesson at the end merge without a conflict an
   try {
     assert.equal(git(dir, 'init', '-q', '-b', 'main').status, 0);
     copyFileSync(join(root, '.gitattributes'), join(dir, '.gitattributes'));
+    mkdirSync(join(dir, 'scripts'));
+    copyFileSync(join(root, 'scripts', 'lessons-merge.sh'), join(dir, 'scripts', 'lessons-merge.sh'));
+    git(dir, 'config', 'merge.lessons.driver', 'bash scripts/lessons-merge.sh %O %A %B');
     mkdirSync(join(dir, 'docs'));
     const lessons = join(dir, 'docs', 'lessons.md');
     writeFileSync(lessons, '# Lessons\n\n## First (2026-11-01)\n\n- One.\n');
@@ -59,6 +62,8 @@ test('two branches that each add a lesson at the end merge without a conflict an
     assert.match(merged, /## From a[\s\S]*- Lesson a\./);
     assert.match(merged, /## From b[\s\S]*- Lesson b\./);
     assert.doesNotMatch(merged, /^(<<<<<<<|>>>>>>>|=======)/m);
+    // The blank line before the second heading survives (git's plain union drops it: lessons-merge.test.mjs shows the control).
+    assert.match(merged, /- Lesson [ab]\.\n\n## From [ab]/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

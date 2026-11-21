@@ -3320,3 +3320,11 @@ reveal grows the total, `Total grew outside a round` 7 ms after the press here) 
 - **Class: a state change that ends something does not end what the something started** (earlier: Windows test VM `slot hold` and
   `vm-win.sh` left by a failed test, 82d5ee496; the reaper of ADR 0103, which ended a test's processes but not a job's) and **a
   merge-driver that works on lines damages a file whose meaning is in its blank lines** (9ec43be3c, b9bf5fc4b).
+- **Cause of the drop, and the fix (the 4th time: 9ec43be3c, b9bf5fc4b, 75ce0d2c8, 5c241d93f).** `git merge-file --union` on two branches that each append
+  `\n## X\n- x\n` gives `... - a\n## B\n- b`: the blank line is a line both sides added identically, so the diff takes it as one shared
+  line and the second branch's heading is glued to the first branch's last line. A trailing blank line at the end of each entry drops the same
+  way (measured), so no file layout avoids it. Fix: `.gitattributes` says `merge=lessons`; `scripts/lessons-merge.sh` runs the union merge and
+  puts the blank line back before every `## ` heading outside a fence. `./dev hooks install` sets `merge.lessons.driver` (a git setting, per
+  clone, shared by its worktrees: run it once in the main checkout and the integrator's worktrees; a clone without it falls back to git's plain
+  merge, which conflicts and is loud, never a silent drop). Tested with a real three-way merge (`conformance/test/lessons-merge.test.mjs`,
+  with the plain union as the control that reproduces the drop); C145 stays as the net.
