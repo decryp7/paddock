@@ -59,6 +59,9 @@ const clickTab = async (f: Parameters<typeof settle>[0], el: HTMLElement, text: 
 const returns = (mock: MockBackend, output: JobOutput) => vi.spyOn(mock, 'jobResult').mockResolvedValue(output);
 
 describe('dy-extras-page', () => {
+  // A test that fails or times out must not leave fake timers behind for the tests after it.
+  afterEach(() => vi.useRealTimers());
+
   it('shows the software list an earlier run saved at once, with its age, and Refresh has the fresh one', async () => {
     vi.useFakeTimers({ now: NOW, toFake: ['Date'] });
     const { f, el, store } = render('inventory', { savedListsAgeMs: 3 * 3_600_000 });
@@ -71,7 +74,6 @@ describe('dy-extras-page', () => {
     await settle(f);
     expect(store.software().data!.savedAt).toBeNull();
     expect(el.querySelector('[data-testid="saved-list"]')).toBeNull();
-    vi.useRealTimers();
   });
 
   it('has the eight tabs in a tablist, opens What changed first, and reads each tab only when opened', async () => {
