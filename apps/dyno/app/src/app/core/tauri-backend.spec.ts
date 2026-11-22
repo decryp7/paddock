@@ -1,6 +1,9 @@
 import type { JobSpec } from './api.types';
 import { EVENTS, TauriBackend, type InvokeFn, type ListenFn } from './tauri-backend';
 
+// The real clock back after every test, so a test that times out cannot leave fake timers for the next one (ER-12, C154).
+afterEach(() => vi.useRealTimers());
+
 const REF = { pid: 7, started: 1000 };
 const SETTINGS = { launchAtLogin: true, revision: 3 } as never;
 

@@ -6,6 +6,9 @@ import { ProjectBackend } from '../core/tools-backend';
 import { ProjectService } from './project.service';
 import { OpenRequests } from './open-requests';
 
+// The real clock back after every test, so a test that times out cannot leave fake timers for the next one (ER-12, C154).
+afterEach(() => vi.useRealTimers());
+
 function setup(summary: unknown, unlisten: () => void = () => undefined) {
   const subscribe = vi.fn(async () => unlisten);
   TestBed.configureTestingModule({

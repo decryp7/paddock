@@ -2102,13 +2102,13 @@ test('build-jobs rejects nonsense and leading zeros (bash would read 010 as 8 an
 
 test('build-jobs logs on stderr, prints only the assignments, appends it to GITHUB_ENV, and probes this machine', () => {
   const r = buildJobs(MAC);
-  assert.equal(r.stdout, 'CARGO_BUILD_JOBS=4\nNEXTEST_TEST_THREADS=8\n');
+  assert.equal(r.stdout, 'CARGO_BUILD_JOBS=4\nNEXTEST_TEST_THREADS=8\nPADDOCK_E2E_WORKERS=4\nVITEST_MAX_WORKERS=4\n');
   assert.match(r.stderr, /^build-jobs: this host: 14 cores, 65536 MB of RAM/m);
   const dir = mkdtempSync(join(tmpdir(), 'build-jobs-'));
   const envFile = join(dir, 'env');
   writeFileSync(envFile, '');
   assert.equal(buildJobs({ ...MAC, GITHUB_ENV: envFile }).status, 0);
-  assert.equal(read(envFile), 'CARGO_BUILD_JOBS=4\nNEXTEST_TEST_THREADS=8\n');
+  assert.equal(read(envFile), 'CARGO_BUILD_JOBS=4\nNEXTEST_TEST_THREADS=8\nPADDOCK_E2E_WORKERS=4\nVITEST_MAX_WORKERS=4\n');
   rmSync(dir, { recursive: true, force: true });
   // The real probes count something on this machine.
   const real = buildJobs({ RUNNER_OS: 'macOS', PADDOCK_CI_RESERVED_CORES: '0' });
@@ -2152,8 +2152,27 @@ test('build-jobs gives nextest the class\'s measured test threads on the shared 
   const envFile = join(dir, 'env');
   writeFileSync(envFile, '');
   assert.equal(buildJobs({ ...MAC, GITHUB_ENV: envFile }).status, 0);
-  assert.equal(read(envFile), 'CARGO_BUILD_JOBS=4\nNEXTEST_TEST_THREADS=8\n');
+  assert.equal(read(envFile), 'CARGO_BUILD_JOBS=4\nNEXTEST_TEST_THREADS=8\nPADDOCK_E2E_WORKERS=4\nVITEST_MAX_WORKERS=4\n');
   rmSync(dir, { recursive: true, force: true });
+});
+
+// ER-48: Playwright's and Vitest's workers each use a core, so lanes x workers stay within the host's cores. PADDOCK_E2E_WORKERS is
+// read by e2eWorkers (ui/projects/paddock-e2e/src/env.ts); Vitest reads VITEST_MAX_WORKERS itself. No class exception: the macOS 8
+// threads are nextest's, measured, and not carried over to browsers.
+const workersOf = (r, name) => new RegExp(`^${name}=(\\d+)$`, 'm').exec(r.stdout)?.[1];
+test('build-jobs gives the e2e and unit-test workers the job\'s core share, the runner\'s number winning, and warns when lanes x workers exceed the cores', () => {
+  const r = buildJobs(MAC);
+  assert.equal(workersOf(r, 'PADDOCK_E2E_WORKERS'), '4', '(14 - 2) / 3, not the 8 threads of nextest');
+  assert.equal(workersOf(r, 'VITEST_MAX_WORKERS'), '4');
+  assert.equal(workersOf(buildJobs(LINUX), 'VITEST_MAX_WORKERS'), '5');
+  assert.equal(workersOf(buildJobs(MAC, ['2']), 'PADDOCK_E2E_WORKERS'), '2', 'a split job halves it');
+  assert.equal(workersOf(buildJobs(MAC, ['16']), 'PADDOCK_E2E_WORKERS'), '1', 'never below one');
+  assert.equal(workersOf(buildJobs({ ...LINUX, PADDOCK_CI_TEST_WORKERS: '3' }), 'PADDOCK_E2E_WORKERS'), '3');
+  assert.doesNotMatch(buildJobs({ ...LINUX, PADDOCK_CI_TEST_WORKERS: '3' }).stdout, /::warning::/);
+  // Positive control: 6 jobs x 8 workers on 30 cores.
+  const over = buildJobs({ ...LINUX, PADDOCK_CI_TEST_WORKERS: '8' });
+  assert.match(over.stdout, /::warning::build-jobs: PADDOCK_CI_TEST_WORKERS is 8 and the host runs 6 jobs at once: 48 workers on 30 cores/);
+  assert.notEqual(buildJobs({ ...LINUX, PADDOCK_CI_TEST_WORKERS: '0' }).status, 0);
 });
 
 test('no nextest profile says a CI job has its host to itself: the job\'s share comes from build-jobs', () => {

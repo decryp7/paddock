@@ -5,6 +5,9 @@ import { MockBackend } from '../../core/mock-backend';
 import { MOCK_SCHEMES } from '../../core/mock/mock-extraction';
 import { appProviders, flush, makeMock, settle, text, type as typeInto } from '../../../testing/test-helpers';
 
+// The real clock back after every test, so a test that times out cannot leave fake timers for the next one (ER-12, C154).
+afterEach(() => vi.useRealTimers());
+
 const NAME = 'Acme-PRO-R3.10.00T32.iso';
 
 @Component({

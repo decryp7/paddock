@@ -5,6 +5,9 @@ import { MockBackend } from '../../core/mock-backend';
 import { Toasts } from '../../core/toasts';
 import { DOWN_POLL_MS, MAX_DOWN_CHECKS, REPAIR_POLL_MS, ServiceStore } from './service.store';
 
+// The real clock back after every test, so a test that times out cannot leave fake timers for the next one (ER-12, C154).
+afterEach(() => vi.useRealTimers());
+
 describe('ServiceStore', () => {
   function setup(options: ConstructorParameters<typeof MockBackend>[0] = {}, backend?: PitwallBackend) {
     TestBed.configureTestingModule({ providers: [{ provide: BACKEND, useValue: backend ?? new MockBackend(options) }] });

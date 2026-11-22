@@ -5,6 +5,9 @@ import { JOB_METHODS } from './backend';
 import { APP_COMMANDS } from '../generated/app-commands';
 import { LIVE_EVENT, POPOVER_EVENT, TauriBackend, toBase64, type TauriBridge } from './tauri-backend';
 
+// The real clock back after every test, so a test that times out cannot leave fake timers for the next one (ER-12, C154).
+afterEach(() => vi.useRealTimers());
+
 interface Call {
   cmd: string;
   args?: Record<string, unknown>;

@@ -150,10 +150,30 @@ emit_threads() {
   put NEXTEST_TEST_THREADS "$t" "$why"
 }
 
+# emit_workers <share> <why> [<cores> <lanes>]: Playwright's workers (PADDOCK_E2E_WORKERS) and Vitest's (VITEST_MAX_WORKERS, which
+# Vitest reads itself): the runner's PADDOCK_CI_TEST_WORKERS, else the job's core share. With <cores> and <lanes> the runner's number
+# is checked against them (ER-48): lanes x workers must fit the host's cores.
+emit_workers() {
+  local w="$1" why="$2"
+  if [ -n "${PADDOCK_CI_TEST_WORKERS:-}" ]; then
+    w=$PADDOCK_CI_TEST_WORKERS
+    why="the runner's PADDOCK_CI_TEST_WORKERS"
+    if [ $# -ge 4 ] && [ $((w * $4)) -gt "$3" ]; then
+      echo "::warning::build-jobs: PADDOCK_CI_TEST_WORKERS is $w and the host runs $4 jobs at once: $((w * $4)) workers on $3 cores, more than the host has (ER-48); lower it to $(($3 / $4 > 0 ? $3 / $4 : 1)) or fewer"
+    fi
+  fi
+  [ "$w" -ge 1 ] || w=1
+  put PADDOCK_E2E_WORKERS "$w" "$why"
+  put VITEST_MAX_WORKERS "$w" "$why"
+}
+
 split="${1:-1}"
 is_count "$split" || fail "the split (builds at once in this job) must be a whole number >= 1, not '$split'"
 if [ -n "${PADDOCK_CI_TEST_THREADS:-}" ]; then
   is_count "$PADDOCK_CI_TEST_THREADS" || fail "PADDOCK_CI_TEST_THREADS must be a whole number >= 1, not '$PADDOCK_CI_TEST_THREADS'"
+fi
+if [ -n "${PADDOCK_CI_TEST_WORKERS:-}" ]; then
+  is_count "$PADDOCK_CI_TEST_WORKERS" || fail "PADDOCK_CI_TEST_WORKERS must be a whole number >= 1, not '$PADDOCK_CI_TEST_WORKERS'"
 fi
 n=$(cores)
 mem=$(ram_mb)
@@ -165,6 +185,7 @@ if [ -n "${PADDOCK_CI_BUILD_JOBS:-}" ]; then
   [ "$jobs" -ge 1 ] || jobs=1
   emit "$jobs" "the runner's PADDOCK_CI_BUILD_JOBS / $split builds at once"
   emit_threads "$jobs" "the runner's PADDOCK_CI_BUILD_JOBS / $split test runs at once"
+  emit_workers "$jobs" "the runner's PADDOCK_CI_BUILD_JOBS / $split test runs at once"
   exit 0
 fi
 
@@ -213,3 +234,5 @@ jobs=$((jobs / split))
 [ "$jobs" -ge 1 ] || jobs=1
 emit "$jobs" "$why / $split builds at once"
 emit_threads "$threads" "$threads_why"
+[ "$threads" -ge 1 ] || threads=1
+emit_workers "$threads" "$threads_why" "$n" "$share"
