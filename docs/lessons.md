@@ -3465,3 +3465,13 @@ about 45 ms a start on that runner plus a fork per command substitution. **Fix:*
   no save bar while clean" timed out at 5000 ms (job 44477, TZ=Pacific/Auckland; it also failed in main's push run 8555 and passed in
   8554 on the same commit). Vitest has no retry here, so it cannot show as FLAKY: give it flaky-as-failure like nextest and
   Playwright (ER-12). Next: a failing reproduction for each first.
+- **From train 19's trial ci.yml run 8601 (7d3f5a6c6), in Dyno code train 19 does not touch (it changes only Dyno's lockfiles and
+  notices):** Dyno vitest, single attempts with no retry (job 44651, app dyno ubuntu-latest): `network-page.spec.ts` "Try again on
+  the owners source line asks the helper now, once, outside the poll" and `processes-page-actions.spec.ts` "summarises the machine"
+  timed out at 5000 ms (network-page also failed in main's push run 8555); `tray.spec.ts` "draws the engine layout in order: alarms,
+  disk space, CPU and memory, with their values" (`expected 'Active alarms2 active' to contain 'node started listening on TCP port
+  30...'`) and "lists every alarm and volume the engine sends, scrolling inside the popover ..." (`Cannot read properties of null
+  (reading 'getAttribute')`). Dyno e2e `[chromium] e2e/layout.spec.ts:224` "settings pages at 1024x800 with the advanced fields"
+  (job 44649; FLAKY: failed once, passed its retry; the class of the 900x600 item). Different Dyno specs time out at 5 s in each run
+  (8576, 8601): the class the vitest retry and worker budget of feat/fixed-wait-checks address (6 lanes x 29 vitest workers on 30
+  cores before, 6 x 5 after). Next: a failing reproduction for each first.
