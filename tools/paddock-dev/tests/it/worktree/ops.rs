@@ -1130,3 +1130,105 @@ fn claim_takes_a_worktree_name_as_well_as_its_path() {
     let unknown = fx.dev(&["worktree", "claim", "no-such-name", "--agent", "agent-A"]);
     assert_ne!(unknown.code, 0, "{} {}", unknown.json, unknown.err);
 }
+
+// ---- the default base: the newest open train, else origin/main ----
+
+/// Pushes a commit on top of origin/main as `refs/heads/<branch>` of origin and returns its sha; main itself does not move.
+fn push_train(fx: &Fixture, branch: &str, file: &str) -> String {
+    fx.git(&fx.primary, &["checkout", "-q", "-B", "scratch", "origin/main"]);
+    std::fs::write(fx.primary.join(file), "t\n").unwrap();
+    fx.git(&fx.primary, &["add", "."]);
+    fx.git(&fx.primary, &["commit", "-q", "-m", file]);
+    let sha = fx.git(&fx.primary, &["rev-parse", "HEAD"]);
+    fx.git(&fx.primary, &["push", "-q", "origin", &format!("HEAD:refs/heads/{branch}")]);
+    fx.git(&fx.primary, &["checkout", "-q", "main"]);
+    sha
+}
+
+fn add_default(fx: &Fixture, name: &str, extra: &[&str]) -> super::Run {
+    let mut a = vec!["worktree", "add", name, "-b", name, "--owner", "a:b"];
+    a.extend_from_slice(extra);
+    fx.dev(&a)
+}
+
+#[test]
+fn add_without_base_and_no_open_train_starts_from_main() {
+    let fx = Fixture::new();
+    let r = add_default(&fx, "w", &[]);
+    assert_eq!(r.code, 0, "{} {}", r.json, r.err);
+    assert_eq!(
+        fx.git(&fx.path("w"), &["rev-parse", "HEAD"]),
+        fx.git(&fx.primary, &["rev-parse", "origin/main"])
+    );
+    assert_eq!(r.json["base"], "origin/main");
+}
+
+#[test]
+fn add_without_base_starts_from_the_open_train_and_says_why() {
+    let fx = Fixture::new();
+    let sha = push_train(&fx, "train/2026-11-22-20", "t1");
+    // The remote-tracking ref is not here yet: the tool fetches first.
+    let r = add_default(&fx, "w", &[]);
+    assert_eq!(r.code, 0, "{} {}", r.json, r.err);
+    assert_eq!(fx.git(&fx.path("w"), &["rev-parse", "HEAD"]), sha);
+    assert_eq!(r.json["base"], "origin/train/2026-11-22-20");
+    let why = r.json["base_why"].as_str().unwrap();
+    assert!(
+        why.contains(&sha[..9]) && why.contains("the open train") && why.contains("--base origin/main"),
+        "{why}"
+    );
+    let text = fx
+        .cmd_text(&fx.primary, &["worktree", "add", "w2", "-b", "w2", "--owner", "a:b"])
+        .output()
+        .unwrap();
+    assert!(String::from_utf8_lossy(&text.stdout).contains("based on origin/train/2026-11-22-20"));
+}
+
+#[test]
+fn add_without_base_takes_the_newest_open_train_and_ignores_a_landed_one() {
+    let fx = Fixture::new();
+    push_train(&fx, "train/2026-11-21-3", "old");
+    let mid = push_train(&fx, "train/2026-11-22-9", "mid");
+    let newest = push_train(&fx, "train/2026-11-22-20", "new");
+    // Land the newest train: main is fast-forwarded to it, so it is an ancestor of main and no longer open.
+    fx.git(&fx.primary, &["push", "-q", "origin", &format!("{newest}:refs/heads/main")]);
+    let r = add_default(&fx, "w", &[]);
+    assert_eq!(r.code, 0, "{} {}", r.json, r.err);
+    assert_eq!(r.json["base"], "origin/train/2026-11-22-9", "{}", r.err);
+    assert_eq!(fx.git(&fx.path("w"), &["rev-parse", "HEAD"]), mid);
+}
+
+#[test]
+fn an_explicit_base_wins_over_an_open_train() {
+    let fx = Fixture::new();
+    push_train(&fx, "train/2026-11-22-20", "t1");
+    let r = add_default(&fx, "w", &["--base", "origin/main"]);
+    assert_eq!(r.code, 0, "{} {}", r.json, r.err);
+    assert_eq!(
+        fx.git(&fx.path("w"), &["rev-parse", "HEAD"]),
+        fx.git(&fx.primary, &["rev-parse", "origin/main"])
+    );
+    assert_eq!(r.json["base"], "origin/main");
+}
+
+#[test]
+fn two_open_trains_that_rank_the_same_fail_and_make_nothing() {
+    let fx = Fixture::new();
+    push_train(&fx, "train/2026-11-22-20", "a");
+    push_train(&fx, "train/2026-11-22-020", "b");
+    let r = add_default(&fx, "w", &[]);
+    assert_ne!(r.code, 0);
+    assert!(r.err.contains("train/2026-11-22-20") && r.err.contains("--base"), "{}", r.err);
+    assert!(!fx.path("w").exists());
+}
+
+#[test]
+fn attaching_to_an_existing_branch_is_unchanged_by_an_open_train() {
+    let fx = Fixture::new();
+    fx.git(&fx.primary, &["branch", "mine", "origin/main"]);
+    push_train(&fx, "train/2026-11-22-20", "t1");
+    let r = add_default(&fx, "mine", &[]);
+    assert_eq!(r.code, 0, "{} {}", r.json, r.err);
+    assert_eq!(r.json["base"], "origin/main");
+    assert!(r.json["attached"].is_string());
+}

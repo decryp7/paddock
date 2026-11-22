@@ -36,6 +36,9 @@ package.json     the one npm workspace and package-lock.json (ui, eslint, icons,
   `./dev gates check` and `./dev plan` read most folders, and a sparse cone makes them stop with an `::error::` line naming the
   missing folders (measurements: [benchmarks](docs/benchmarks.md#2026-11-12-full-against-sparse-worktree-checkout-fixworktree-gates-profile));
   `--sparse` is only for a `--detach` review copy, and `-b <branch>` attaches to a branch that already exists.
+  A new branch starts from the newest open train by default (the newest `origin/train/YYYY-MM-DD-N` with commits main lacks;
+  main when none is open, a tie fails): `add` fetches first and prints the base it chose and why; `--base <ref>` always wins
+  (`--base origin/main` to start from main). A branch built on an old main clashes with the open train.
   Never work in the main checkout; never `git stash`.
 - **Build folders.** One build folder per app per worktree, kept between tasks for the same app (reusing it is what makes
   rebuilds fast). Pass it to cargo as `--config build.target-dir='<dir>'` (or `build.target-dir` in a `.cargo/config.toml`),

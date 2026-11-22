@@ -282,8 +282,10 @@ author or by `./dev brief` (not on main yet): that call belongs there. The Rust 
 
 ## Parallel work (people and agents)
 
-- One git worktree per task (`git worktree add -b <branch> ~/.<app>-wt-<task> origin/<base>`); the main checkout stays on
-  `main`. Never `git stash` (it is shared by all worktrees).
+- One git worktree per task, made with `./dev worktree add <name> -b <branch> --owner <role>:<task>`; the main checkout stays on
+  `main`. A new branch starts from the newest open train (an `origin/train/YYYY-MM-DD-N` with commits main lacks; main when
+  none is open): the tool fetches, prints the base it chose and why, and `--base <ref>` (for example `--base origin/main`)
+  overrides it. `-b` on an existing branch attaches to it, unchanged. Raw `git worktree add` still needs its base named. Never `git stash` (it is shared by all worktrees).
 - Own `CARGO_TARGET_DIR` per worktree (`~/.<app>-target-<task>`). Seed a new one as a copy-on-write clone of a recent one
   to skip the first build: `cp -c -R ~/.<app>-target-<old> ~/.<app>-target-<new>` (APFS; no extra disk until it changes).
 - Own e2e port per worktree (each app's Playwright config reads it from the environment and requires it in CI).

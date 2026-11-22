@@ -4,6 +4,7 @@
 use super::git::{Git, GitError, Repo, WorkState, WorktreeInfo, is_under, key, worktrees};
 use super::note::{Note, check_owner, format_utc, now_secs};
 use super::owners::{Claim, OwnerError, OwnerMap, OwnerStore, PENDING_TTL, same_path};
+use super::primary::REMOTE_MAIN;
 use super::procs;
 use paddock_cli::{CliError, Report};
 use serde_json::json;
@@ -73,8 +74,8 @@ pub struct AddRequest<'a> {
     pub root: &'a Path,
     /// The new branch, or `None` for a detached copy.
     pub branch: Option<&'a str>,
-    /// The commit-ish to start from.
-    pub base: &'a str,
+    /// The commit-ish to start from; `None` is the newest open train, else `origin/main` (see [`super::base`]).
+    pub base: Option<&'a str>,
     /// `<role>:<task>`.
     pub owner: &'a str,
     /// Folders for a sparse cone checkout.
@@ -289,19 +290,30 @@ pub fn add(repo: &Repo, caller: &Caller, req: &AddRequest<'_>) -> Result<Report,
             ));
     }
     let git = repo.git();
-    let base_sha = git
-        .text(&["rev-parse", "--verify", "--quiet", &format!("{}^{{commit}}", req.base)])
-        .map_err(|_| {
-            CliError::usage(format!("The base `{}` is not a commit here.", req.base))
-                .with_hint("Fetch it (`git fetch origin`) or name another base.")
-        })?
-        .trim()
-        .to_string();
     let attach = match req.branch {
         Some(b) => Attach::find(&git, b)?,
         None => Attach::New,
     };
-    let drift = attach.drift(&git, req.base, &base_sha, req.branch.unwrap_or_default())?;
+    // No `--base`: a new branch or review copy starts from the newest open train; an existing branch keeps its commits and is
+    // only compared with main (no fetch: nothing starts from it).
+    let (base, base_why) = match (req.base, &attach) {
+        (Some(b), _) => (b.to_string(), format!("based on {b} (--base)")),
+        (None, Attach::New) => {
+            let chosen = super::base::open_train_or_main(&|a| git.text(a))?;
+            (chosen.name, chosen.why)
+        }
+        (None, _) => (REMOTE_MAIN.to_string(), format!("compared with {REMOTE_MAIN}")),
+    };
+    let base = base.as_str();
+    let base_sha = git
+        .text(&["rev-parse", "--verify", "--quiet", &format!("{base}^{{commit}}")])
+        .map_err(|_| {
+            CliError::usage(format!("The base `{base}` is not a commit here."))
+                .with_hint("Fetch it (`git fetch origin`) or name another base.")
+        })?
+        .trim()
+        .to_string();
+    let drift = attach.drift(&git, base, &base_sha, req.branch.unwrap_or_default())?;
     // An existing branch keeps its own commits: the base it was made from is the branch's tip, not `--base`.
     let base_sha = match &attach {
         Attach::New => base_sha,
@@ -385,14 +397,15 @@ pub fn add(repo: &Repo, caller: &Caller, req: &AddRequest<'_>) -> Result<Report,
     }
     Ok(Report::new(
         json!({"path": k, "branch": req.branch, "head": head, "owner": req.owner, "locked": true, "note": note,
-               "claimed_by": caller.agent.as_ref().map(|a| a.id.clone()), "attached": attach.describe(), "drift": drift.as_ref().map(Drift::json)}),
+               "claimed_by": caller.agent.as_ref().map(|a| a.id.clone()), "attached": attach.describe(), "base": base, "base_why": base_why, "drift": drift.as_ref().map(Drift::json)}),
         format!(
             "Made {k} ({}{}), locked: {note}{record_note}{deps_note}",
             req.branch.map_or("detached".to_string(), |b| format!("branch {b}")),
             attach
                 .describe()
                 .map_or(String::new(), |d| format!(", attached to the existing {d}"))
-        ) + &drift.as_ref().map_or(String::new(), |d| format!("\n{}", d.text(req.base))),
+        ) + &format!("\n{base_why}")
+            + &drift.as_ref().map_or(String::new(), |d| format!("\n{}", d.text(base))),
     ))
 }
 

@@ -13,6 +13,7 @@
 /// The exit code of `check primary` when its only problems are checks that could not run (5 is a found problem).
 pub const EXIT_NOT_MEASURED: i32 = 6;
 
+pub mod base;
 pub mod git;
 pub mod inventory;
 pub mod note;
@@ -78,9 +79,11 @@ pub enum Profile {
 pub struct AddArgs {
     /// The folder name (one component); the worktree is made at <root>/<name>.
     name: String,
-    /// The commit-ish to start from (for example origin/main).
+    /// The commit-ish to start from (for example origin/main). Default: the newest open train (an `origin/train/YYYY-MM-DD-N`
+    /// with commits main lacks), else origin/main; `add` fetches first and prints which it chose. An existing branch keeps its own
+    /// commits and is only compared with origin/main.
     #[arg(long)]
-    base: String,
+    base: Option<String>,
     /// The new branch (default: the name). Not with --detach.
     #[arg(short = 'b', long = "branch", conflicts_with = "detach")]
     branch: Option<String>,
@@ -202,7 +205,7 @@ pub fn command(c: WorktreeCommand) -> Result<Report, CliError> {
                     } else {
                         Some(a.branch.as_deref().unwrap_or(&a.name))
                     },
-                    base: &a.base,
+                    base: a.base.as_deref(),
                     owner: &a.owner,
                     sparse: &a.sparse,
                 },
