@@ -502,7 +502,7 @@ mod tests {
         )
         .unwrap();
         match verdict(&mut c, "ci.yml", SHA) {
-            Verdict::Red { run: Some(5), reason } => assert!(reason.contains("did not land"), "{reason}"),
+            Verdict::NotMeasured(why) => assert!(why.contains("did not land"), "{why}"),
             other => panic!("{other:?}"),
         }
     }
