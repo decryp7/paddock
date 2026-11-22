@@ -2430,3 +2430,34 @@ Quoted by [docs/research/2026-11-20-ci-job-cost.md](research/2026-11-20-ci-job-c
   and 3,878 (8346), macOS 2,545 and 1,680, Linux 814 (8346); `merge_check` 1,089 / 303 / 53, `golden` 643 / 189, `queue`
   637 / 388 / 58; queue tests 7.3 s median on Windows.
 - **Fixed waits:** `waitForTimeout` 10 in Debrief's specs, 3 in Dyno's, 5 in `ui/e2e`, 0 in Pitwall's.
+
+## Worker budget: Vitest and Playwright workers in the ER-48 lane budget (2026-11-22, feat/fixed-wait-checks)
+
+Cause: ER-48 counted cargo jobs and nextest threads per lane, not the other worker pools of a job. Vitest's default in a non-watch run is
+`availableParallelism() - 1` workers (`getDefaultMaxWorkers` in vitest 5.0.5, `dist/chunks/index.1TqnEahn.js`), so every `ng test` job
+on a shared host used the whole host, as cargo had before 2026-11-20 (docs/benchmarks.md, "CI job cost, step by step"). Playwright's default
+is half the cores, and the configs set 1 (`paddockConfig`, Dyno, Spotter, Pitcrew, Pitwall, ui) or, in Debrief, 2 on CI. Change:
+`./dev ci build-jobs` (and `conformance/ci/build-jobs.sh`) also write `PADDOCK_E2E_WORKERS` and `VITEST_MAX_WORKERS`, the job's core share
+((cores - kept) / jobs per host / split; no class exception, the macOS 8 threads are nextest's and were measured for nextest only);
+Vitest reads `VITEST_MAX_WORKERS` itself, and `e2eWorkers` (`@decryp7/paddock-e2e`) takes the smaller of the variable and a config's own count
+and warns naming both. A runner can set `PADDOCK_CI_TEST_WORKERS`; the step then warns naming both numbers when it times the jobs per host
+over the cores.
+
+Measured on this tree (no CI run, a quiet-enough 14-core Mac, `uptime` load 13 at the time, so the numbers are counts, not times):
+
+| Check | Before | After |
+|---|---|---|
+| Debrief's real vitest config (`apps/debrief/app/vitest-base.config.mts`) resolved through `vitest/node` `resolveConfig`, `VITEST_MAX_WORKERS` unset / set to 4 | `maxWorkers` 13 | 4 |
+| `build-jobs` goldens (`tests/it/build_jobs_golden.rs`, `build_jobs.rs`) for the three classes | no worker variable | Linux 5, Windows 5, macOS 4 |
+
+Lanes times workers per host, from the class layout (lanes x workers against the usable cores):
+
+| Class | Lanes | Cores usable | Vitest before | Vitest after | Playwright (configs, CI) after |
+|---|---|---|---|---|---|
+| Linux d-gtr9 | 6 | 30 | 6 x 29 = 174 | 6 x 5 = 30 | at most 1 (Debrief 2), capped at 5 |
+| Windows | 3 | 16 | 3 x 15 = 45 | 3 x 5 = 15 | at most 1 (Debrief 2), capped at 5 |
+| macOS | 3 | 12 | 3 x 13 = 39 | 3 x 4 = 12 | at most 1 (Debrief 2), capped at 4 |
+
+Not measured: the run time of the Vitest jobs at the lower worker count (the first full CI run after this lands says; ER-12: a count that
+turns out too low is raised only with that measurement recorded here). Playwright was already within the budget (workers 1, Debrief 2), so
+its row changes only where a host's share falls below a config's own count.

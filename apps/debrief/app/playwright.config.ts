@@ -2,7 +2,7 @@ import { defineConfig, devices } from '@playwright/test';
 import { resolve } from 'node:path';
 import { appBuildGuard } from '../../../ui/projects/paddock-e2e/src/build-guard.ts';
 import { paddockServers } from '../../../ui/projects/paddock-e2e/src/servers.ts';
-import { e2ePortOrCiDefault } from '../../../ui/projects/paddock-e2e/src/env.ts';
+import { e2ePortOrCiDefault, e2eWorkers } from '../../../ui/projects/paddock-e2e/src/env.ts';
 
 // Fails fast, before any server starts, when what the app consumes of ui (ui/dist, the css) is stale (build-guard.ts).
 appBuildGuard(resolve(__dirname, './'), resolve(__dirname, '../../../ui'));
@@ -39,7 +39,7 @@ export default defineConfig({
   // Multi-step flows (tour, live tail) outlast 30 s of wall clock on a shared WebKit runner without being broken.
   timeout: CI ? 60_000 : 30_000,
   // Two on CI: each shard's container shares a runner host with other jobs; three made WebKit tests time out.
-  workers: CI ? 2 : undefined,
+  workers: e2eWorkers(CI ? 2 : undefined),
   reporter: [['html', { open: 'never' }], ['list'], ['./e2e/retried-reporter.mjs']],
   use: {
     baseURL: `http://localhost:${PORT}`,
