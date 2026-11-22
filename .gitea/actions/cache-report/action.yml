@@ -1,0 +1,37 @@
+name: cache-report
+description: "Reports one actions/cache step in the job summary and in the fixed `cache-report:` log line that `./dev ci cache-audit` reads (ADR 0115, conformance/ci/cache-report.sh): for a restore (or a combined cache step) pass `key`, `hit` (the step's cache-hit output), `matched` (cache-matched-key) and `saved` (`pending` for a combined step whose post step saves, `n/a` when this job saves under another key or never); for a save step pass `key` and `save-outcome` (the step's outcome). Put it right after the cache step with `if: always() && steps.<id>.outcome != 'skipped'`; it never fails the job."
+inputs:
+  name:
+    description: "What the cache is (a short label shared by its restore and save)."
+    required: true
+  key:
+    description: "The cache key (the step's own `key:` value)."
+    required: true
+  hit:
+    description: "The restore step's cache-hit output."
+    default: ""
+  matched:
+    description: "The restore step's cache-matched-key output."
+    default: ""
+  saved:
+    description: "pending | n/a | yes | no (restore steps)."
+    default: n/a
+  save-outcome:
+    description: "A save step's outcome (success, failure, ...): the report is then a save report."
+    default: ""
+runs:
+  using: composite
+  steps:
+    - name: Cache report
+      shell: bash
+      env:
+        NAME: ${{ inputs.name }}
+        KEY: ${{ inputs.key }}
+        HIT: ${{ inputs.hit }}
+        MATCHED: ${{ inputs.matched }}
+        SAVED: ${{ inputs.saved }}
+        SAVE_OUTCOME: ${{ inputs.save-outcome }}
+      run: |
+        r="${{ github.action_path }}/../../../conformance/ci/cache-report.sh"
+        if [ -n "$SAVE_OUTCOME" ]; then bash "$r" save "$NAME" "$KEY" "$SAVE_OUTCOME" || true
+        else bash "$r" line "$NAME" "$KEY" "$HIT" "$MATCHED" "$SAVED" || true; fi

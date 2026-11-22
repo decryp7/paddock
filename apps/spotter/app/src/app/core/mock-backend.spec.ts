@@ -3,6 +3,9 @@ import type { CommandError, StatePush, WatchDraft } from './api.types';
 import { MockBackend } from './mock-backend';
 import { DAY, PRESETS, SOURCE_KINDS, makeReleases, rng } from './mock/mock-data';
 
+// The real clock back after every test, so a test that times out cannot leave fake timers for the next one (ER-12, C154).
+afterEach(() => vi.useRealTimers());
+
 const NOW = Date.UTC(2026, 9, 22, 12, 0, 0);
 const make = (o: ConstructorParameters<typeof MockBackend>[0] = {}) => new MockBackend({ now: () => NOW, ...o });
 

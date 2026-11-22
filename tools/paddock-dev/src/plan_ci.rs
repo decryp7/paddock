@@ -346,6 +346,8 @@ pub fn ci_outputs(plan: &Value, legs: &[Value], base: Option<&str>) -> Vec<(Stri
         ("tools".into(), b("tools")),
         ("icons".into(), b("icons")),
         ("paddock_dev".into(), b("paddockDev")),
+        // Whether the WebKit tests run (plan_ci::wants_webkit): the `e2e-webkit` job and the declared scope's engines read this one value.
+        ("webkit".into(), plan["webkit"].as_bool().unwrap_or(false).to_string()),
         ("crates_filter".into(), plan["filters"]["crates"].as_str().unwrap_or("").to_string()),
         (
             "paddock_dev_filter".into(),

@@ -3317,6 +3317,24 @@ reveal grows the total, `Total grew outside a round` 7 ms after the press here) 
   answers ran past the wait (64f8165ae, fixed for that spec only by sending answers in one piece). It is fixed for every caller of
   `waitAnswered` here.
 
+## The other-OS member gate printed "not measured" and let every train 18 member merge (2026-11-21)
+
+- **What happened:** `./dev merge check --gates` has an other-OS row (068186e2d) that runs a trial on the real Windows and Linux
+  runners. With `PADDOCK_TRIAL_DIR` unset it printed "NOT MEASURED" and the merge went on, because the row was report-only
+  (ER-41) and its exit never changed. No train 18 member was checked on Windows or Linux; a deterministic Windows-only failure
+  (the `sccache_eviction` tests, runs 8495 and 8509) was found only after the merge (ER-9, ER-33).
+- **Fix:** the gate dispatches the trial itself whenever `GITEA_TOKEN` is set, the trial folder has a configured default
+  (`paddock.trialRoot`, else `trials` beside the worktree root) and is removed at the end, what it cannot measure exits 6, a NEW
+  failure exits 5, and a FLAKY test blocks only when the member touches its feature (ER-12). Details: the ADR 0087 amendment of
+  2026-11-16, "Enforced since 2026-11-21".
+- **Class: a gate that needs a setting nobody set reports and goes on.** Earlier: ER-41's report-only start with no date on which
+  it turns blocking (C130, C137, C139 stayed report-only after their first green run).
+- **Review round (2026-11-21):** the first version found its run by "any ci.yml run on the sha" (it could judge an older train run), let
+  a run whose plan job failed read as clean (all jobs skipped), accepted failures also on main as known, and ignored Linux jobs
+  that name no OS. Fix: judge only the run the dispatch made (the handle, ER-51), and make a row measured only when the plan job
+  succeeded. **Class: a check judges something it did not start or did not see run.** Earlier: run 8139's verdict on a rerun-only run
+  (ER-15), a "clean" Linux row over unjudged jobs (this fix).
+
 ## A folder shared between concurrent CI lanes (2026-11-21, ADR 0111)
 
 - **Run 8373 (debrief.yml, job 42677): E0463 "can't find crate for `foldhash`".** Linux CI had set `SCCACHE_DIR` to the whole `/sccache`
@@ -3475,3 +3493,14 @@ about 45 ms a start on that runner plus a fork per command substitution. **Fix:*
   (job 44649; FLAKY: failed once, passed its retry; the class of the 900x600 item). Different Dyno specs time out at 5 s in each run
   (8576, 8601): the class the vitest retry and worker budget of feat/fixed-wait-checks address (6 lanes x 29 vitest workers on 30
   cores before, 6 x 5 after). Next: a failing reproduction for each first.
+- **From train 19's full ci.yml run 8610 (b3c254a2d), in code train 19 does not touch (it changes only Spotter's lockfile):**
+  `paddock-chromium::it real_browser::a_browser_ended_by_force_leaves_nothing_behind` on Windows (job 44761, crate windows-latest;
+  FLAKY: try 1 panicked at real_browser.rs:539 after 7.0 s, try 2 passed in 5.0 s) and `spotter-render::real_browser
+  a_download_address_is_reported_as_a_download` on macOS (job 44768, app spotter macos-latest; FLAKY: try 1 panicked at
+  real_browser.rs:318 after 120.3 s, try 2 passed in 2.0 s). Next: a failing reproduction for each first.
+- **A push gate row not measured, cause likely but not proven (2026-11-22):** the first push of fix/member-gate-self-dispatch
+  (0b1482f0b) was refused with `clippy-linux tools/paddock-dev` NOT MEASURED (10 passed, 1 not measured, 2154 s). The row's reason
+  line was lost: the integrator filtered the push output to row summaries, and the row left no log under paddock-pre-push/logs.
+  On the same commit with main merged in, under the gate that counts heavy queue time apart from run time (fix/push-gate-queue-stall),
+  the row passed alone in 15.6 s after 223 s in the queue. Likely cause: the old gate's 15-minute budget spent on the heavy queue
+  while other agents held the slot; not proven. Since then the integrator keeps the full output of every gate row.

@@ -13,6 +13,9 @@ import { SettingsStore } from '../../state/settings.store';
 import { ExtrasBoot } from './extras-boot';
 import { ExtrasPage, tabFrom } from './extras-page';
 
+// The real clock back after every test, so a test that times out cannot leave fake timers for the next one (ER-12, C154).
+afterEach(() => vi.useRealTimers());
+
 @Component({ selector: 'dy-chart', template: '' })
 class StubChart {
   readonly options = input<unknown>(null);

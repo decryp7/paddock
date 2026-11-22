@@ -67,6 +67,14 @@ jobs:
           path: .nightly-green
           key: debrief-bench-nightly-green-${{ github.sha }}
           lookup-only: true
+      - uses: ./.gitea/actions/cache-report
+        if: always() && steps.green.outcome != 'skipped'
+        with:
+          name: bench-green
+          key: debrief-bench-nightly-green-${{ github.sha }}
+          hit: ${{ steps.green.outputs.cache-hit }}
+          matched: ${{ steps.green.outputs.cache-matched-key }}
+          saved: n/a
 
       - name: Decide
         id: plan
@@ -109,6 +117,7 @@ jobs:
       # Restore and save separately, with the run id in the saved key: a fixed key can never be updated once it
       # exists, and a failing run still warms the cache (see build.yml).
       - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        id: cache2
         with:
           path: |
             ~/.cargo/registry
@@ -116,14 +125,31 @@ jobs:
             apps/debrief/target
           key: bench-${{ runner.os }}-${{ hashFiles('apps/debrief/Cargo.lock') }}
           restore-keys: bench-${{ runner.os }}-
+      - uses: ./.gitea/actions/cache-report
+        if: always() && steps.cache2.outcome != 'skipped'
+        with:
+          name: bench-target
+          key: bench-${{ runner.os }}-${{ hashFiles('apps/debrief/Cargo.lock') }}
+          hit: ${{ steps.cache2.outputs.cache-hit }}
+          matched: ${{ steps.cache2.outputs.cache-matched-key }}
+          saved: n/a
 
       # The store crates link the official prebuilt libduckdb (ADR 0014): fetched once per version, SHA-256 pinned,
       # so every job that builds the workspace links it (a test that is skipped still has to link).
       - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        id: cache3
         if: runner.os != 'Windows'
         with:
           path: ~/.cache/debrief-libduckdb
           key: libduckdb-${{ runner.os }}-${{ hashFiles('apps/debrief/crates/debrief-store-duck/scripts/fetch-libduckdb.sh') }}
+      - uses: ./.gitea/actions/cache-report
+        if: always() && steps.cache3.outcome != 'skipped'
+        with:
+          name: libduckdb
+          key: libduckdb-${{ runner.os }}-${{ hashFiles('apps/debrief/crates/debrief-store-duck/scripts/fetch-libduckdb.sh') }}
+          hit: ${{ steps.cache3.outputs.cache-hit }}
+          matched: ${{ steps.cache3.outputs.cache-matched-key }}
+          saved: pending
 
       - name: libduckdb (prebuilt, pinned SHA-256)
         shell: bash
@@ -148,6 +174,7 @@ jobs:
         run: cargo bench -p debrief-core --bench engine -- --quick
 
       - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        id: cache4
         if: always()
         with:
           path: |
@@ -155,6 +182,12 @@ jobs:
             ~/.cargo/git
             apps/debrief/target
           key: bench-${{ runner.os }}-${{ hashFiles('apps/debrief/Cargo.lock') }}-${{ github.run_id }}
+      - uses: ./.gitea/actions/cache-report
+        if: always() && steps.cache4.outcome != 'skipped'
+        with:
+          name: bench-target
+          key: bench-${{ runner.os }}-${{ hashFiles('apps/debrief/Cargo.lock') }}-${{ github.run_id }}
+          save-outcome: ${{ steps.cache4.outcome }}
 
       - name: Upload criterion report
         if: always()
@@ -188,10 +221,19 @@ jobs:
       # The store crates link the official prebuilt libduckdb (ADR 0014): fetched once per version, SHA-256 pinned,
       # so every job that builds the workspace links it (a test that is skipped still has to link).
       - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        id: cache5
         if: runner.os != 'Windows'
         with:
           path: ~/.cache/debrief-libduckdb
           key: libduckdb-${{ runner.os }}-${{ hashFiles('apps/debrief/crates/debrief-store-duck/scripts/fetch-libduckdb.sh') }}
+      - uses: ./.gitea/actions/cache-report
+        if: always() && steps.cache5.outcome != 'skipped'
+        with:
+          name: libduckdb
+          key: libduckdb-${{ runner.os }}-${{ hashFiles('apps/debrief/crates/debrief-store-duck/scripts/fetch-libduckdb.sh') }}
+          hit: ${{ steps.cache5.outputs.cache-hit }}
+          matched: ${{ steps.cache5.outputs.cache-matched-key }}
+          saved: pending
 
       - name: libduckdb (prebuilt, pinned SHA-256)
         shell: bash
@@ -213,9 +255,18 @@ jobs:
           esac
 
       - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        id: cache6
         with:
           path: ~/.cache/debrief-bench-corpus
           key: store-bench-corpus-v1
+      - uses: ./.gitea/actions/cache-report
+        if: always() && steps.cache6.outcome != 'skipped'
+        with:
+          name: bench-corpus
+          key: store-bench-corpus-v1
+          hit: ${{ steps.cache6.outputs.cache-hit }}
+          matched: ${{ steps.cache6.outputs.cache-matched-key }}
+          saved: pending
 
       - name: Import, index and reads at 10M events (budgets asserted)
         env:
@@ -252,6 +303,13 @@ jobs:
           echo "${{ github.sha }}" > .nightly-green/sha
 
       - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        id: cache7
         with:
           path: .nightly-green
           key: debrief-bench-nightly-green-${{ github.sha }}
+      - uses: ./.gitea/actions/cache-report
+        if: always() && steps.cache7.outcome != 'skipped'
+        with:
+          name: bench-green
+          key: debrief-bench-nightly-green-${{ github.sha }}
+          save-outcome: ${{ steps.cache7.outcome }}

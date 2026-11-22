@@ -328,3 +328,20 @@ fn a_waiter_behind_a_holder_past_its_cap_stalls_after_the_limit() {
         n.said()
     );
 }
+
+/// A slot given back (taken just as the load rose) keeps the claim's age: the ticket comes back under its own name, so a younger waiter
+/// does not pass it, and a load that keeps swinging cannot push a run to the back again and again.
+#[test]
+fn a_slot_given_back_keeps_the_place_of_the_ticket() {
+    let rig = Rig::new();
+    let (a, b) = (rig.agent(12), rig.agent(13));
+    let mut first = Acquirer::new(&a.h, req("A")).unwrap();
+    // A younger waiter queues behind A.
+    rig.clock.advance(Duration::from_secs(5));
+    let mut second = Acquirer::new(&b.h, req("B")).unwrap();
+    assert_eq!(first.poll(), Poll::Held);
+    first.step_back();
+    // B is the only ticket left in the folder unless A's came back; B must wait for A, which is older.
+    assert_eq!(second.poll(), Poll::Waiting, "A's ticket kept its age, B is second");
+    assert_eq!(first.poll(), Poll::Held, "A is first again");
+}

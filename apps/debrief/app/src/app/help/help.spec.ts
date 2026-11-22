@@ -13,6 +13,9 @@ import { SettingsDialogService } from '../settings/settings-dialog';
 import { at } from '../../testing/must';
 import { debriefContributionProviders } from '../extensions/contributions';
 
+// The real clock back after every test, so a test that times out cannot leave fake timers for the next one (ER-12, C154).
+afterEach(() => vi.useRealTimers());
+
 const cmd = (id: string, title: string, extra: Partial<DebriefCommand> = {}): DebriefCommand => ({ id, title, run: () => undefined, ...extra });
 
 describe('shortcutGroups', () => {

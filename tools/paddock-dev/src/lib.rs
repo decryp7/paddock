@@ -86,6 +86,7 @@ pub mod plan;
 pub mod plan_ci;
 pub mod plan_cmd;
 pub mod plan_gitea;
+pub mod plan_os;
 pub mod plan_repo;
 pub mod plan_since;
 pub mod pr;
@@ -93,6 +94,7 @@ pub mod pre_push;
 pub mod process_env;
 pub mod queue;
 pub mod release_isolation;
+pub mod run_scope;
 pub mod safe_remove;
 pub mod slots;
 // Unix only: it starts the helper through a POSIX shell, and every test that uses it is `#[cfg(unix)]`.

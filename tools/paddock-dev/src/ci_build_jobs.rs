@@ -1,4 +1,4 @@
-//! `dev ci build-jobs`: CARGO_BUILD_JOBS (and NEXTEST_TEST_THREADS) for a CI job, the port of `conformance/ci/build-jobs.sh`
+//! `dev ci build-jobs`: CARGO_BUILD_JOBS (and NEXTEST_TEST_THREADS, PADDOCK_E2E_WORKERS and VITEST_MAX_WORKERS) for a CI job, the port of `conformance/ci/build-jobs.sh`
 //! (docs/plans/ci-in-rust.md, WP-1). The one place CI sets them (ER-22): the `build-jobs` action and setup-rust run it as an
 //! early step, and a conformance test fails when a workflow, action or CI script sets CARGO_BUILD_JOBS itself.
 //!
@@ -20,6 +20,10 @@
 //!    least 1. Without the `runner.envs` the runner class's known layout decides ([`class_default`]); Linux is d-gtr9's layout (6 jobs
 //!    on 30 cores, [`layout_cores`]; a different core count is a warning).
 //! 3. NEXTEST_TEST_THREADS: the runner's `PADDOCK_CI_TEST_THREADS`, else the class's measured number, else the job's core share.
+//! 4. PADDOCK_E2E_WORKERS (Playwright's workers, read by `e2eWorkers` of `@decryp7/paddock-e2e`) and VITEST_MAX_WORKERS (Vitest reads
+//!    it itself): the runner's `PADDOCK_CI_TEST_WORKERS`, else the job's core share. Both are browsers or test processes that each
+//!    use a core, so lanes x workers must stay within the host's cores (ER-48); with the runner's number a host where that does not
+//!    hold gets a `::warning::` naming both numbers.
 //!
 //! The host's cores come from `nproc`, then `sysctl -n hw.ncpu`, then `NUMBER_OF_PROCESSORS`, then `getconf` (as the script
 //! did, so a container's cpuset is honoured the same way); its RAM from the cgroup's `memory.max` when it is a number, else
@@ -280,6 +284,30 @@ impl Step<'_> {
     }
 }
 
+impl Step<'_> {
+    /// PADDOCK_E2E_WORKERS and VITEST_MAX_WORKERS: the runner's `PADDOCK_CI_TEST_WORKERS`, else the given core share. `lanes` is
+    /// `(host cores, jobs the host runs at once)` when known: the runner's number is then checked against them (ER-48).
+    fn put_workers(&mut self, share: i64, why: &str, lanes: Option<(i64, i64)>) -> Result<(), i32> {
+        let (mut w, mut why) = (share, why.to_string());
+        if let Some(runner) = var(self.env, "PADDOCK_CI_TEST_WORKERS") {
+            w = number(runner);
+            why = "the runner's PADDOCK_CI_TEST_WORKERS".to_string();
+            if let Some((cores, jobs)) = lanes
+                && w.saturating_mul(jobs) > cores
+            {
+                self.print(&format!(
+                    "::warning::build-jobs: PADDOCK_CI_TEST_WORKERS is {w} and the host runs {jobs} jobs at once: {} workers on {cores} cores, more than the host has (ER-48); lower it to {} or fewer",
+                    w.saturating_mul(jobs),
+                    (cores / jobs).max(1)
+                ));
+            }
+        }
+        let w = w.max(1).to_string();
+        self.put("PADDOCK_E2E_WORKERS", &w, &why)?;
+        self.put("VITEST_MAX_WORKERS", &w, &why)
+    }
+}
+
 /// A value already checked by [`is_count`] or [`is_amount`], as a number (too large for 63 bits: the largest).
 fn number(s: &str) -> i64 {
     s.parse::<i64>().unwrap_or(i64::MAX)
@@ -325,6 +353,14 @@ fn decide(step: &mut Step<'_>, host: &dyn Host, split_text: &str) -> Result<(), 
             "fix the variable in the runner's runner.envs.",
         ));
     }
+    if let Some(t) = var(env, "PADDOCK_CI_TEST_WORKERS")
+        && !is_count(t)
+    {
+        return Err(step.fail(
+            &format!("PADDOCK_CI_TEST_WORKERS must be a whole number >= 1, not '{t}'"),
+            "fix the variable in the runner's runner.envs.",
+        ));
+    }
     let os = var(env, "RUNNER_OS").unwrap_or("").to_string();
     let n = host.cores(env);
     let mem = host.ram_mb(env);
@@ -348,10 +384,15 @@ fn decide(step: &mut Step<'_>, host: &dyn Host, split_text: &str) -> Result<(), 
             &jobs.to_string(),
             &format!("the runner's PADDOCK_CI_BUILD_JOBS / {split} builds at once"),
         )?;
-        return step.put_threads(
+        step.put_threads(
             jobs,
             &format!("the runner's PADDOCK_CI_BUILD_JOBS / {split} test runs at once"),
             split,
+        )?;
+        return step.put_workers(
+            jobs,
+            &format!("the runner's PADDOCK_CI_BUILD_JOBS / {split} test runs at once"),
+            None,
         );
     }
 
@@ -430,7 +471,8 @@ fn decide(step: &mut Step<'_>, host: &dyn Host, split_text: &str) -> Result<(), 
     }
     jobs = (jobs / split).max(1);
     step.put("CARGO_BUILD_JOBS", &jobs.to_string(), &format!("{why} / {split} builds at once"))?;
-    step.put_threads(threads, &threads_why, split)
+    step.put_threads(threads, &threads_why, split)?;
+    step.put_workers(threads.max(1), &threads_why, Some((cores, share_n)))
 }
 
 fn or_unknown<'a>(text: &'a str, unknown: &'a str) -> &'a str {
@@ -486,7 +528,10 @@ mod tests {
     fn the_shared_mac_gets_a_third_of_its_cores_and_the_measured_test_threads() {
         let (code, out, err) = go("1", &Fixed("14", "65536"), &[("RUNNER_OS", "macOS")]);
         assert_eq!(code, 0);
-        assert_eq!(out, "CARGO_BUILD_JOBS=4\nNEXTEST_TEST_THREADS=8\n");
+        assert_eq!(
+            out,
+            "CARGO_BUILD_JOBS=4\nNEXTEST_TEST_THREADS=8\nPADDOCK_E2E_WORKERS=4\nVITEST_MAX_WORKERS=4\n"
+        );
         assert!(
             err.contains("build-jobs: this host: 14 cores, 65536 MB of RAM, runner class macOS"),
             "{err}"
@@ -498,19 +543,28 @@ mod tests {
         // 2026-11-20: 30 CPUs, 64 GiB, runner capacity 6 (docs/benchmarks.md, "CI job cost, step by step").
         let (code, out, err) = go("1", &Fixed("30", "65536"), &[("RUNNER_OS", "Linux")]);
         assert_eq!(code, 0);
-        assert_eq!(out, "CARGO_BUILD_JOBS=5\nNEXTEST_TEST_THREADS=5\n");
+        assert_eq!(
+            out,
+            "CARGO_BUILD_JOBS=5\nNEXTEST_TEST_THREADS=5\nPADDOCK_E2E_WORKERS=5\nVITEST_MAX_WORKERS=5\n"
+        );
         assert!(err.contains("(30 cores - 0 kept) / 6 jobs per host"), "{err}");
         assert!(!out.contains("::warning::"), "the layout's cores matched: {out}");
         // A split job divides the share between its builds.
         let (_, out, _) = go("2", &Fixed("30", "65536"), &[("RUNNER_OS", "Linux")]);
-        assert_eq!(out, "CARGO_BUILD_JOBS=2\nNEXTEST_TEST_THREADS=2\n");
+        assert_eq!(
+            out,
+            "CARGO_BUILD_JOBS=2\nNEXTEST_TEST_THREADS=2\nPADDOCK_E2E_WORKERS=2\nVITEST_MAX_WORKERS=2\n"
+        );
     }
 
     #[test]
     fn linux_memory_bounds_the_share() {
         // 8 GiB: (8192 - 2048) / (6 x 1536) = 0 by RAM, so 1 build job; the tests keep the core share of 5.
         let (_, out, err) = go("1", &Fixed("30", "8192"), &[("RUNNER_OS", "Linux")]);
-        assert_eq!(out, "CARGO_BUILD_JOBS=1\nNEXTEST_TEST_THREADS=5\n");
+        assert_eq!(
+            out,
+            "CARGO_BUILD_JOBS=1\nNEXTEST_TEST_THREADS=5\nPADDOCK_E2E_WORKERS=5\nVITEST_MAX_WORKERS=5\n"
+        );
         assert!(err.contains("MB per rustc"), "{err}");
     }
 
@@ -580,6 +634,13 @@ mod tests {
                 !oversubscribed(share, jobs, cores_n - kept),
                 "{os}: {share} jobs x {jobs} build jobs on {cores} cores"
             );
+            // ER-48 for the browsers and test processes of the e2e and unit steps: no exception, every class fits.
+            let workers = value(&out, "PADDOCK_E2E_WORKERS");
+            assert_eq!(workers, value(&out, "VITEST_MAX_WORKERS"), "{os}: the two counts are one budget");
+            assert!(
+                !oversubscribed(share, workers, cores_n - kept),
+                "{os}: {share} jobs x {workers} e2e and vitest workers on {cores} cores"
+            );
             // macOS is a recorded, measured exception: 8 test threads in each of 3 jobs on 12 usable cores, because its tests
             // mostly wait (2026-11-09, docs/benchmarks.md, "CI share on the shared Mac": 4 threads made a dyno run 2.3 times
             // longer, 8 matched 14).
@@ -599,6 +660,48 @@ mod tests {
         // Positive control: Windows before 2026-11-20 ran 3 jobs x 8 threads on 16 cores (runs 8335 against 8359).
         assert!(oversubscribed(3, 8, 16));
         assert!(!oversubscribed(3, 5, 16));
+    }
+
+    #[test]
+    fn the_runners_worker_count_wins_and_a_host_it_oversubscribes_is_warned_with_both_numbers() {
+        let linux = [("RUNNER_OS", "Linux"), ("PADDOCK_CI_TEST_WORKERS", "3")];
+        let (code, out, err) = go("1", &Fixed("30", "65536"), &linux);
+        assert_eq!(code, 0);
+        assert!(out.contains("PADDOCK_E2E_WORKERS=3\nVITEST_MAX_WORKERS=3\n"), "{out}");
+        assert!(
+            err.contains("PADDOCK_E2E_WORKERS=3 (the runner's PADDOCK_CI_TEST_WORKERS)"),
+            "{err}"
+        );
+        assert!(!out.contains("::warning::"), "6 jobs x 3 workers fit 30 cores: {out}");
+        // Positive control: 6 jobs x 8 workers on 30 cores is the oversubscription ER-48 names.
+        let (_, out, _) = go(
+            "1",
+            &Fixed("30", "65536"),
+            &[("RUNNER_OS", "Linux"), ("PADDOCK_CI_TEST_WORKERS", "8")],
+        );
+        assert!(
+            out.contains("::warning::build-jobs: PADDOCK_CI_TEST_WORKERS is 8 and the host runs 6 jobs at once: 48 workers on 30 cores")
+                && out.contains("lower it to 5 or fewer"),
+            "{out}"
+        );
+        // It still writes the number (the warning does not decide for the runner).
+        assert!(out.contains("PADDOCK_E2E_WORKERS=8\n"), "{out}");
+    }
+
+    #[test]
+    fn a_bad_worker_count_is_an_error_line() {
+        for bad in ["0", "08", "x"] {
+            let (code, out, _) = go(
+                "1",
+                &Fixed("30", "65536"),
+                &[("RUNNER_OS", "Linux"), ("PADDOCK_CI_TEST_WORKERS", bad)],
+            );
+            assert_eq!(code, 1, "{bad}");
+            assert!(
+                out.starts_with("::error::PADDOCK_CI_TEST_WORKERS must be a whole number >= 1"),
+                "{out}"
+            );
+        }
     }
 
     #[test]

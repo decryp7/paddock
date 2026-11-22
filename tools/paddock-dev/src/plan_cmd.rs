@@ -26,8 +26,10 @@ use crate::plan_ci::{
     BaseInput, LintInput, MatrixOpts, USAGE, choose_base, ci_outputs, commit_lint_range, is_ci_yml, matrix, member_run, only_app,
     package_filters, parse_args, summary, wants_webkit,
 };
+use crate::plan_os;
 use crate::plan_repo::git_text;
 use crate::plan_since::{APP_WORKFLOWS, GiteaRuns, SincePlan, since_run};
+use crate::run_scope::{DEFAULT_OS_LEGS, Scope, ci_scope, scope_of};
 use crate::wait::{CurlHttp, Http};
 use paddock_cli::{CliError, Report};
 use paddock_repo_graph::GitHistory;
@@ -225,7 +227,7 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
     }
     let plan = match &plan_app {
         Some(p) => only_app(&planned, p),
-        None => planned,
+        None => planned.clone(),
     };
     let narrow = (event == "pull_request" && plan_app.is_none())
         || member_run(
@@ -274,7 +276,80 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
     }
     let mut plan = plan;
     plan["filters"] = package_filters(&plan, &graph, narrow);
-    let outputs = ci_outputs(&plan, &legs, if plan_app.is_some() { None } else { base.as_deref() });
+    plan["webkit"] = serde_json::json!(wants_webkit(env));
+    // The `os` input (ci.yml `os`, PLAN_OS): only that operating system's part of the plan (src/plan_os.rs).
+    let os_part = plan_os::parse(&env("PLAN_OS").unwrap_or_default()).map_err(fail)?;
+    let legs = match os_part {
+        Some(os) => plan_os::filter_legs(legs, os),
+        None => legs,
+    };
+    let mut outputs = ci_outputs(&plan, &legs, if plan_app.is_some() { None } else { base.as_deref() });
+    if let Some(os) = os_part {
+        let text =
+            workflow_text(root, "ci.yml").ok_or_else(|| fail("the os input needs .gitea/workflows/ci.yml in this checkout".to_string()))?;
+        let default_legs = env("PLAN_OS_LEGS")
+            .filter(|l| !l.is_empty())
+            .unwrap_or_else(|| serde_json::to_string(&[serde_json::json!({"os": os.label()})]).unwrap_or_default());
+        outputs.extend(plan_os::outputs(&text, os, &default_legs).map_err(fail)?);
+        log(&format!("os: only {} (rerun_jobs and the legs are narrowed to it)", os.input()));
+    }
+    // ADR 0113: the run declares its scope as data (what it ran, what a push to main does for this tree); `ci verdict` compares them.
+    // A reused run (`PLAN_REUSE`, ci.yml's reuse step found a complete green run of this commit) runs no job: no job reads an empty
+    // `rerun_jobs` as its own, and it declares that it ran nothing.
+    let reused = env("PLAN_REUSE").as_deref() == Some("true");
+    if reused {
+        outputs.push(("rerun_jobs".into(), "[]".into()));
+    }
+    let os_legs = os_legs(env);
+    // An `os` run ran only that operating system's crate and paddock-dev jobs; what a push to main needs stays every runner.
+    let ran_os_legs: Vec<String> = match os_part {
+        Some(os) => os_legs
+            .iter()
+            .filter(|l| plan_os::filter_legs(vec![serde_json::json!({ "os": l })], os).len() == 1)
+            .cloned()
+            .collect(),
+        None => os_legs.clone(),
+    };
+    let filter_of = |p: &Value, k: &str| p["filters"][k].as_str().unwrap_or("").to_string();
+    let ran = if reused {
+        Scope::default()
+    } else {
+        scope_of(
+            &plan,
+            &legs,
+            wants_webkit(env),
+            &ran_os_legs,
+            &[filter_of(&plan, "crates").as_str(), filter_of(&plan, "paddockDev").as_str()],
+        )
+    };
+    // A push to main is its own measure (its plan is the diff from the last green main); every other run is measured against the
+    // whole tree, which is what a run with a base, an app only or a rerun is not.
+    let need_plan = if event == "push" && plan_app.is_none() {
+        plan.clone()
+    } else if req.all {
+        planned.clone()
+    } else {
+        let all = Request {
+            files: Vec::new(),
+            all: true,
+            explain: true,
+            root: None,
+            base: None,
+            head: "HEAD".into(),
+        };
+        plan_with_graph(root, &history, &all).map_err(|e| fail(e.to_string()))?.1
+    };
+    let need_legs = matrix(
+        &need_plan,
+        &graph,
+        MatrixOpts {
+            narrow: false,
+            webkit: true,
+        },
+    )
+    .map_err(fail)?;
+    let need = scope_of(&need_plan, &need_legs, true, &os_legs, &[]);
+    log(&ci_scope(ran, false, need).with_os(os_part.map(|o| o.input())).line());
     if narrow {
         log("narrowed to the packages the change reaches (a member run; the final head's full run tests the rest)");
     }
@@ -288,6 +363,19 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
         serde_json::json!({ "base": base, "reason": reason, "apps": legs.len() }),
         String::new(),
     ))
+}
+
+/// The runners of the `crate` and `paddock-dev` jobs: the `os` of each entry of `PLAN_OS_LEGS` (ci.yml's own default list), or the
+/// three runners when it is not set or not readable.
+fn os_legs(env: &dyn Fn(&str) -> Option<String>) -> Vec<String> {
+    env("PLAN_OS_LEGS")
+        .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+        .and_then(|v| {
+            v.as_array()
+                .map(|a| a.iter().filter_map(|e| e["os"].as_str().map(str::to_string)).collect::<Vec<_>>())
+        })
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| DEFAULT_OS_LEGS.iter().map(|s| s.to_string()).collect())
 }
 
 /// The workflow file a run names (`ci.yml`), from this checkout; `None` for a name that is not a plain file name.
@@ -423,6 +511,18 @@ fn since_ci_with(root: &Path, env: &dyn Fn(&str) -> Option<String>, id: u64, rea
     };
     let (graph, everything) = plan_with_graph(root, &history, &all).map_err(|e| fail(e.to_string()))?;
     let legs = matrix(&everything, &graph, MatrixOpts { narrow: false, webkit }).map_err(fail)?;
+    // ADR 0113: a rerun of failures is never complete; it declares the scope a push to main needs and that it ran none of it.
+    let need_legs = matrix(
+        &everything,
+        &graph,
+        MatrixOpts {
+            narrow: false,
+            webkit: true,
+        },
+    )
+    .map_err(fail)?;
+    let need = scope_of(&everything, &need_legs, true, &os_legs(env), &[]);
+    eprintln!("{}", ci_scope(Scope::default(), true, need).line());
     if let Some(why) = &plan.everything {
         println!("::warning::dev plan --since-run {id}: {why}; this run tests everything");
         let reason = format!("everything: the rerun of run {id} cannot be narrowed ({why})");

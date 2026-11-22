@@ -401,9 +401,18 @@ enum CiCommand {
     /// it). A run counts if it is a push to main or its plan job logged `plan mode: full=true`; the newest full run decides.
     /// Exit 0 full green, 5 red or only partial runs, 6 not measured (never a pass).
     Verdict(ci_runs::VerdictArgs),
+    /// The cache keys of the last runs that no job ever saved, read from the `cache-report:` lines of the job logs (ADR 0115).
+    /// Report-only (exit 0) unless `--fail-on-never-saved` (5); no report line in the window exits 6, check broken.
+    CacheAudit(ci_runs::CacheAuditArgs),
     /// Whether a scheduled run ends early because a train's dispatch run is queued or running (skip=true|false to
     /// GITHUB_OUTPUT). Fails open: an unreadable API lets the run proceed, with a warning.
     ScheduleSkip(ci_runs::ScheduleSkipArgs),
+    /// The scope line of an app's own workflow (`plan scope: {json}`, ADR 0113): what the run did and what a push to main does, which
+    /// `ci verdict` compares. ci.yml's plan prints its own (`dev plan --ci`).
+    Scope(ci_runs::ScopeArgs),
+    /// Records the first green run of a scope producer in docs/ci-scope-first-runs.toml, which switches `ci verdict` from the producer's
+    /// old line to its declared scope (ER-41, ADR 0113). Refuses a run that is not green, complete and run.
+    ScopeRecord(ci_runs::ScopeRecordArgs),
     /// Whether a push to main ends early because a full green run of the workflow, with no FLAKY test, already tested this exact
     /// commit (`reuse=true|false` and `run=<id>` to GITHUB_OUTPUT; ER-49). Fails open: anything unreadable lets the run proceed.
     Reuse(ci_runs::ReuseArgs),
@@ -769,11 +778,20 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
             command: CiCommand::Reuse(a),
         } => ci_runs::reuse(&a),
         Command::Ci {
+            command: CiCommand::Scope(a),
+        } => ci_runs::scope(&a),
+        Command::Ci {
+            command: CiCommand::ScopeRecord(a),
+        } => ci_runs::scope_record(&a),
+        Command::Ci {
             command: CiCommand::RustPin(a),
         } => ci_rust_pin::command(&a),
         Command::Ci {
             command: CiCommand::Verdict(a),
         } => ci_runs::verdict(&a),
+        Command::Ci {
+            command: CiCommand::CacheAudit(a),
+        } => ci_runs::cache_audit(&a),
         Command::Ci {
             command: CiCommand::Dispatch(a),
         } => ci_runs::dispatch(&a),

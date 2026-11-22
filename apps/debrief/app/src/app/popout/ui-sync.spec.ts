@@ -6,6 +6,9 @@ import { SyncMessage } from './sync-protocol';
 import { HELLO_INTERVAL_MS, HELLO_TRIES, SyncedValue, UiSync } from './ui-sync';
 import { at } from '../../testing/must';
 
+// The real clock back after every test, so a test that times out cannot leave fake timers for the next one (ER-12, C154).
+afterEach(() => vi.useRealTimers());
+
 function value<T>(key: string, initial: T, direction?: 'both' | 'fromHost') {
   const s = signal<T>(initial);
   const v: SyncedValue<T> = { key, read: () => s(), apply: (x) => s.set(x as T), ...(direction ? { direction } : {}) };

@@ -22,6 +22,9 @@ import { loadDockview } from './dockview-loader';
 import { at, must } from '../../testing/must';
 import { labelTabOverflow, overflowLabel } from './dock-dom';
 
+// The real clock back after every test, so a test that times out cannot leave fake timers for the next one (ER-12, C154).
+afterEach(() => vi.useRealTimers());
+
 // dockview is loaded on demand (see dockview-loader); load it once so attach() is synchronous here.
 beforeAll(() => loadDockview());
 

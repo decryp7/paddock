@@ -6,6 +6,9 @@ import { MockBackend } from './mock-backend';
 import { BROWSER_VERSION } from '../shell/engines';
 import { demoEngines, demoLimitStatuses, demoFit, demoHistory, demoRepo, demoRequests, demoSearch, presetMemory, prng, GiB } from './mock-data';
 
+// The real clock back after every test, so a test that times out cannot leave fake timers for the next one (ER-12, C154).
+afterEach(() => vi.useRealTimers());
+
 const NOW = new Date(2026, 9, 22, 14, 30).getTime();
 
 describe('MockBackend', () => {
