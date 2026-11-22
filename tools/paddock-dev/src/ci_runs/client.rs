@@ -219,7 +219,9 @@ impl<'a> Client<'a> {
                     return Ok(Some(t("status").or_else(|| t("state")).unwrap_or_default()));
                 }
             }
-            if list.len() < limit {
+            // The end is an EMPTY page, never a short one: the server may cap a page below `limit` (MAX_RESPONSE_ITEMS), and the body
+            // carries no total (its `total_count` is the page length, measured), so a short page proves nothing.
+            if list.is_empty() {
                 return Ok(None);
             }
         }

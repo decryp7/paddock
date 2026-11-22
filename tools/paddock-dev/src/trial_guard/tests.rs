@@ -18,6 +18,8 @@ pub struct FakeGitea {
     pub status_post_fails: bool,
     /// `permissions.push` of the repository it answers for (None: the repository answers 404).
     pub repo_push: Option<bool>,
+    /// The most statuses the server returns per page whatever `limit` asks (Gitea's MAX_RESPONSE_ITEMS).
+    pub status_page_cap: Option<usize>,
 }
 
 impl Http for FakeGitea {
@@ -30,7 +32,10 @@ impl Http for FakeGitea {
                     .and_then(|v| v.split('&').next())
                     .and_then(|v| v.parse::<usize>().ok())
             };
-            let (page, limit) = (q("page").unwrap_or(1), q("limit").unwrap_or(50));
+            let (page, mut limit) = (q("page").unwrap_or(1), q("limit").unwrap_or(50));
+            if let Some(cap) = self.status_page_cap {
+                limit = limit.min(cap);
+            }
             let mut latest: Vec<&(u64, String, String)> = Vec::new();
             for st in self.statuses.iter() {
                 match latest.iter().position(|l| l.1 == st.1) {
@@ -746,4 +751,31 @@ fn a_full_gate_pass_clears_a_red_record_and_posts_success() {
     let mut up = FakeGitea::default();
     sweep(d.path(), &mut up, "t", &time(1_000, LIVE), &|_, _| {});
     assert_eq!(up.statuses, vec![(1, CONTEXT.to_string(), "success".to_string())]);
+}
+
+/// Round 3 P2-3: a server that returns fewer than `limit` items per page (its own cap) must not end the paging on a short page:
+/// that would read the rest as absent, which fails open. Paging ends on an empty page.
+#[test]
+fn a_server_page_cap_below_the_limit_does_not_hide_the_slow_rows_status() {
+    let mut statuses = vec![stat(1, CONTEXT, "failure")];
+    statuses.extend(filler(10, 45));
+    let mut g = FakeGitea {
+        statuses,
+        status_page_cap: Some(30),
+        ..Default::default()
+    };
+    let mut client = Client::new(&mut g, "https://gitea.invalid", "o/r", "t");
+    client.backoff_ms = 0;
+    assert_eq!(
+        client.slow_rows_status(SHA),
+        Ok(Some("failure".to_string())),
+        "found on the second, short page"
+    );
+    let mut none = FakeGitea {
+        statuses: filler(10, 45),
+        status_page_cap: Some(30),
+        ..Default::default()
+    };
+    let mut client = Client::new(&mut none, "https://gitea.invalid", "o/r", "t");
+    assert_eq!(client.slow_rows_status(SHA), Ok(None), "absent only after an empty page");
 }
