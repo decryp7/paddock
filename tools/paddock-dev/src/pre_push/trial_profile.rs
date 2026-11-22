@@ -15,7 +15,7 @@
 //! 70 s of the median push (conformance dominates), the slow set about 250 s plus the compile queue behind other agents' heavy
 //! steps, which is what stalled pushes for hours.
 
-use super::exec::{Exec, Kind, Row};
+use super::exec::{Done, Exec, Kind, Limits, Row};
 use super::gates::Planned;
 use crate::trial_guard::{self, Slow, State};
 use clap::ValueEnum;
@@ -264,6 +264,22 @@ pub fn finish(ex: &dyn Exec, state: &Path, rec: &Slow) -> String {
         );
     }
     ex.settle_trial(state, &rec.sha)
+}
+
+/// The executor of the slow phase's own hooks (heartbeat, pending status, settle) before the gate has built its own: it can run no
+/// row. Used by [`super::slow_guarded`] when no executor is given.
+pub struct RealHooks;
+
+impl Exec for RealHooks {
+    fn has_tool(&self, _program: &str) -> bool {
+        false
+    }
+    fn docker_up(&self) -> bool {
+        false
+    }
+    fn run(&self, gate: &super::gates::Gate, _limits: Limits) -> Result<Done, String> {
+        Err(format!("{} cannot run through the hooks-only executor", gate.id))
+    }
 }
 
 /// The settle on the real machine: the token from `GITEA_TOKEN`, curl, the clock and the process table. The final status is posted

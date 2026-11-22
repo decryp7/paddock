@@ -38,6 +38,11 @@ struct Phase {
 /// (`extra` goes on its command line: a row selection a hook never passes, to make a case that passes). Returns once the child's
 /// record is no longer running, or panics after 180 s.
 fn run_slow_phase(extra: &[&str]) -> Phase {
+    run_slow_phase_with(extra, true)
+}
+
+/// [`run_slow_phase`], with or without a folder for the throw-away worktrees (without: the gate fails before any row).
+fn run_slow_phase_with(extra: &[&str], worktrees: bool) -> Phase {
     let d = tempfile::tempdir().unwrap();
     let base = paddock_env::winpath::real(d.path()).unwrap();
     let root: PathBuf = base.join("repo");
@@ -85,7 +90,11 @@ fn run_slow_phase(extra: &[&str]) -> Phase {
     .unwrap();
     let mut env: HashMap<String, String> = paddock_env::vars().filter(|(k, _)| k != "GITEA_TOKEN").collect();
     env.insert("PADDOCK_SCCACHE".into(), "off".into());
-    env.insert("PADDOCK_PREPUSH_WORKTREES".into(), base.join("wt").to_string_lossy().into_owned());
+    if worktrees {
+        env.insert("PADDOCK_PREPUSH_WORKTREES".into(), base.join("wt").to_string_lossy().into_owned());
+    } else {
+        env.remove("PADDOCK_PREPUSH_WORKTREES");
+    }
     env.insert("HOME".into(), base.join("home").to_string_lossy().into_owned());
     let stdin = format!("refs/heads/wip/x {sha} refs/heads/wip/x {}\n", "0".repeat(40));
     let mut args = child_args(&first, Some("origin"), &root, &logs);
@@ -172,4 +181,14 @@ fn a_slow_phase_whose_rows_all_pass_leaves_a_passed_record() {
         "it settled as a passed record: {}",
         p.log
     );
+}
+
+/// Round 3 P2-1: with no folder for the worktrees the gate fails before any row; the record must say so (not measured, with the
+/// cause) within the bound, never stay running.
+#[test]
+fn a_slow_phase_that_fails_before_any_row_leaves_a_not_measured_record_with_the_cause() {
+    let p = run_slow_phase_with(&[], false);
+    assert_eq!(p.rec.state, State::NotMeasured, "{:?}\n{}", p.rec, p.log);
+    assert_eq!(p.rec.row, "slow phase");
+    assert!(p.rec.why.contains("pre-push worktrees"), "the cause is the error: {:?}", p.rec);
 }

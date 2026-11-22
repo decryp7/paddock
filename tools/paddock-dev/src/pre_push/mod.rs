@@ -338,8 +338,81 @@ impl known::Lookups for OnceLookups<'_> {
 }
 
 /// [`command`] with the repository, git's pre-push lines and the outside lookups given, and the executor of the gates (`None`: the
-/// real machine).
+/// real machine). The slow phase of the trial push profile runs guarded: its heartbeat and pending status start first thing, and
+/// any error or panic before or between its rows is settled as a not-measured record ([`slow_guarded`]).
 fn command_in(
+    args: &PrePushArgs,
+    root: &Path,
+    stdin: &str,
+    look: &dyn known::Lookups,
+    wrapper: crate::local_sccache::Lazy,
+    given: Option<&dyn exec::Exec>,
+) -> Result<Report, CliError> {
+    let slow = trial_profile::phase_for(
+        args.split_phase,
+        args.refs_from_stdin,
+        args.member_gate,
+        !args.only.is_empty(),
+        stdin,
+    ) == Some(trial_profile::Phase::Slow);
+    match (slow, parse_push(stdin).first()) {
+        (true, Some(p)) => slow_guarded(args, root, stdin, look, wrapper, given, &p.sha),
+        _ => command_in_inner(args, root, stdin, look, wrapper, given),
+    }
+}
+
+/// The slow phase: the heartbeat and the pending status start before anything can fail, and whatever the gate does (an `Err`
+/// from a missing worktree folder or a checkout, a panic) ends in a record that says so: `not measured` with the cause, posted
+/// as the commit status, the guarded run cancelled. A record never stays `running` because the child died early (round 3 P2-1).
+fn slow_guarded(
+    args: &PrePushArgs,
+    root: &Path,
+    stdin: &str,
+    look: &dyn known::Lookups,
+    wrapper: crate::local_sccache::Lazy,
+    given: Option<&dyn exec::Exec>,
+    sha: &str,
+) -> Result<Report, CliError> {
+    let state = state_dir(root);
+    let hooks = trial_profile::RealHooks;
+    let ex: &dyn exec::Exec = given.unwrap_or(&hooks);
+    let done = AtomicBool::new(false);
+    let outcome = std::thread::scope(|scope| {
+        scope.spawn(|| ex.beat_trial(&state, sha, &done));
+        scope.spawn(|| eprintln!("pre-push: {}", ex.post_trial_pending(&state, sha, &done)));
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            command_in_inner(args, root, stdin, look, wrapper, given)
+        }));
+        done.store(true, Ordering::SeqCst);
+        r
+    });
+    let why = match &outcome {
+        Ok(Ok(_)) => return outcome.unwrap_or_else(|_| unreachable!()),
+        Ok(Err(e)) => e.message.clone(),
+        Err(payload) => {
+            let text = payload
+                .downcast_ref::<&str>()
+                .map(|s| s.to_string())
+                .or_else(|| payload.downcast_ref::<String>().cloned())
+                .unwrap_or_else(|| "a panic with no message".into());
+            format!("the slow phase panicked: {text}")
+        }
+    };
+    if let Ok(Some(mut rec)) = crate::trial_guard::read_slow(&state, sha) {
+        rec.state = crate::trial_guard::State::NotMeasured;
+        rec.row = "slow phase".into();
+        rec.why = why.chars().take(300).collect();
+        rec.next = "fix what it names, then run `./dev check --pre-push` on the commit".into();
+        rec.posted = false;
+        eprintln!("pre-push: {}", trial_profile::finish(ex, &state, &rec));
+    }
+    match outcome {
+        Ok(Err(e)) => Err(e),
+        _ => Err(CliError::failure(why).with_hint("The slow phase ended in a not-measured record; read slow-phase.log.")),
+    }
+}
+
+fn command_in_inner(
     args: &PrePushArgs,
     root: &Path,
     stdin: &str,
@@ -623,29 +696,18 @@ fn command_in(
     // What the run is about (the commit and its tree) is the evidence of every pass, so it is known before the first gate runs.
     let checked = pushed.first().cloned().or_else(|| if clean { head_sha.clone() } else { None });
     let subject = outcome::subject_of(&root, checked.as_deref());
-    // The background phase posts `pending` for the commit and keeps a heartbeat in its record while its rows run (the push may land
-    // after it started: the pending post retries). A slow phase that keeps beating is never cancelled, however long its queue.
-    let rows_done = AtomicBool::new(false);
-    let (mut rows, timings) = std::thread::scope(|scope| {
-        if phase == Some(trial_profile::Phase::Slow)
-            && let Some(sha) = checked.as_deref()
-        {
-            scope.spawn(|| eprintln!("pre-push: {}", ex.post_trial_pending(&state, sha, &rows_done)));
-            scope.spawn(|| ex.beat_trial(&state, sha, &rows_done));
-        }
-        let r = run_all_timed(
-            &planned,
-            ex,
-            &RunOpts {
-                workers: n,
-                queue_stall,
-                stop: &stop,
-                subject: &subject,
-            },
-        );
-        rows_done.store(true, Ordering::SeqCst);
-        r
-    });
+    // The slow phase's heartbeat and pending status run beside this ([`slow_guarded`]); a slow phase that keeps beating is never
+    // cancelled, however long its queue.
+    let (mut rows, timings) = run_all_timed(
+        &planned,
+        ex,
+        &RunOpts {
+            workers: n,
+            queue_stall,
+            stop: &stop,
+            subject: &subject,
+        },
+    );
     rows.extend(extra_ref_rows(&extra));
     accept_not_measured(&mut rows, &accept, &state);
     log_queue_times(&state, checked.as_deref(), &base, &timings);

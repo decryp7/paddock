@@ -718,6 +718,18 @@ struct Fake {
     gitea: Mutex<Option<crate::trial_guard::tests::FakeGitea>>,
     /// What every settle printed.
     settled: Mutex<Vec<String>>,
+    /// How often each background hook of the trial profile was called (a wiring positive control, ER-33).
+    hooks: Hooks,
+}
+
+/// Counters of the trial profile's hooks the fake executor answers.
+#[derive(Default)]
+struct Hooks {
+    beats: std::sync::atomic::AtomicUsize,
+    pendings: std::sync::atomic::AtomicUsize,
+    sweeps: std::sync::atomic::AtomicUsize,
+    clears: Mutex<Vec<String>>,
+    probes: std::sync::atomic::AtomicUsize,
 }
 
 impl Exec for Fake {
@@ -736,10 +748,23 @@ impl Exec for Fake {
         self.slow_start.clone().unwrap_or(Ok((4242, 7)))
     }
     fn sweep_trial(&self, _state: &std::path::Path) -> Vec<String> {
+        self.hooks.sweeps.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         Vec::new()
     }
     fn post_trial_pending(&self, _state: &std::path::Path, _sha: &str, _done: &AtomicBool) -> String {
+        self.hooks.pendings.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         "pending".into()
+    }
+    fn beat_trial(&self, _state: &std::path::Path, _sha: &str, _done: &AtomicBool) {
+        self.hooks.beats.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }
+    fn clear_trial(&self, _state: &std::path::Path, sha: &str) -> Option<String> {
+        self.hooks.clears.lock().unwrap().push(sha.to_string());
+        None
+    }
+    fn probe_status_write(&self, _server: &str, _repo: &str) -> Result<(), String> {
+        self.hooks.probes.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Ok(())
     }
     fn end_trial_holder(&self, pid: u32, start_micros: u64) {
         self.ended.lock().unwrap().push((pid, start_micros));
@@ -4093,6 +4118,83 @@ mod trial_profile {
         let r = trial_guard::read_slow(d.path(), SHA).unwrap().unwrap();
         assert_eq!(r.state, State::NotMeasured, "a late pass must not turn a superseded record green");
         assert!(fake.settled.lock().unwrap().is_empty());
+    }
+
+    /// Round 3 P2-1 and P2-11: the slow phase starts its heartbeat and its pending post first thing, and an error before any row
+    /// (here the pushed commit is not in the repository) leaves a not-measured record with the error as its cause, the status posted
+    /// and the guarded run cancelled, instead of a record that stays running.
+    #[test]
+    fn an_early_error_in_the_slow_phase_leaves_a_not_measured_record_and_cancels_the_run() {
+        let (_d, r, _one, _two) = super::known_commit::repo();
+        let state = state_dir(&r);
+        let ghost = "c".repeat(40);
+        trial_guard::write_slow(
+            &state,
+            &crate::trial_guard::Slow {
+                sha: ghost.clone(),
+                state: State::Running,
+                row: String::new(),
+                why: String::new(),
+                next: String::new(),
+                pid: 4242,
+                start_micros: 7,
+                beat: u64::MAX,
+                posted: false,
+                logs: "/l".into(),
+                remote_ref: "refs/heads/wip/x".into(),
+                server: "https://gitea.invalid".into(),
+                repo: "o/r".into(),
+            },
+        )
+        .unwrap();
+        trial_guard::write_dispatched(
+            &state,
+            &Dispatched {
+                sha: ghost.clone(),
+                run_id: 9001,
+                workflow: "ci.yml".into(),
+                git_ref: "wip/x".into(),
+                server: "https://gitea.invalid".into(),
+                repo: "o/r".into(),
+            },
+        )
+        .unwrap();
+        let fake = Fake {
+            gitea: gitea(),
+            ..Fake::default()
+        };
+        let a = PrePushArgs {
+            root: Some(r.clone()),
+            split_phase: Some(Phase::Slow),
+            base: Some("origin/main".into()),
+            ..args()
+        };
+        let line = format!("refs/heads/x {ghost} refs/heads/wip/x {}\n", "0".repeat(40));
+        let got = command_in(
+            &a,
+            &r,
+            &line,
+            &super::known_commit::fake(None, Err("no run")),
+            crate::local_sccache::Lazy::off(),
+            Some(&fake),
+        );
+        assert!(got.is_err(), "the commit cannot be checked out: {got:?}");
+        let rec = trial_guard::read_slow(&state, &ghost).unwrap().unwrap();
+        assert_eq!(
+            rec.state,
+            State::NotMeasured,
+            "an early error must not leave the record running: {rec:?}"
+        );
+        assert!(!rec.why.is_empty() && rec.row == "slow phase", "the cause is recorded: {rec:?}");
+        assert_eq!(cancels(&fake), 1, "the guarded run is cancelled");
+        let posted = fake.gitea.lock().unwrap().as_ref().unwrap().statuses.clone();
+        assert_eq!(posted.last().map(|s| s.2.as_str()), Some("error"), "{posted:?}");
+        let n = |c: &std::sync::atomic::AtomicUsize| c.load(std::sync::atomic::Ordering::SeqCst);
+        assert_eq!(
+            (n(&fake.hooks.beats), n(&fake.hooks.pendings)),
+            (1, 1),
+            "the heartbeat and the pending post start first thing"
+        );
     }
 
     /// The pass-through of one more landing rule: the slow child's logs folder is owned by the child, so a prune never takes it.
