@@ -1102,14 +1102,29 @@ test('every e2e job of every kit app, ci.yml and debrief.yml runs on a port no o
 test('app-gates tests last-packages apart on Linux only, and a host leg leaves them out of clippy, tests and doc tests', () => {
   const gates = read(join(ACTIONS, 'app-gates', 'action.yml'));
   assert.match(gates, /for pkg in \$LAST_PACKAGES; do exclude\+=\(--exclude "\$pkg"\); last\+=\(-p "\$pkg"\); done/, 'one list feeds the exclusions and the separate run');
-  assert.match(gates, /sel=\(--workspace \$\{exclude\[@\]\+"\$\{exclude\[@\]\}"\}/, 'the workspace run never includes them');
+  assert.match(gates, /scope=\(--workspace\)/, 'the default scope is the whole workspace');
+  assert.match(gates, /sel=\("\$\{scope\[@\]\}" \$\{exclude\[@\]\+"\$\{exclude\[@\]\}"\}/, 'the workspace run never includes them');
   assert.match(gates, /if \[ "\$RUNNER_OS" = Linux \] && \[ \$\{#last\[@\]\} -gt 0 \]; then\n\s+sel=\(\$\{last\[@\]\+"\$\{last\[@\]\}"\}/, 'Linux runs them after the rest');
-  assert.match(gates, /step cargo clippy --workspace \$\{hostexclude\[@\]\+"\$\{hostexclude\[@\]\}"\}/, 'clippy: excluded on a host only');
-  assert.match(gates, /step cargo test --workspace \$\{hostexclude\[@\]\+"\$\{hostexclude\[@\]\}"\} --doc/, 'doc tests: excluded on a host only');
+  assert.match(gates, /step cargo clippy "\$\{scope\[@\]\}" \$\{hostexclude\[@\]\+"\$\{hostexclude\[@\]\}"\}/, 'clippy: excluded on a host only');
+  assert.match(gates, /step cargo test "\$\{scope\[@\]\}" \$\{hostexclude\[@\]\+"\$\{hostexclude\[@\]\}"\} --doc/, 'doc tests: excluded on a host only');
   assert.match(read(join(WORKFLOWS, 'ci.yml')), /rust-checks: \$\{\{ matrix\.rust_checks \}\}/, 'ci.yml hands rustChecks to app-gates');
   assert.match(read(join(WORKFLOWS, 'ci.yml')), /host-rust-checks: \$\{\{ matrix\.host_rust_checks \}\}/, 'ci.yml hands hostRustChecks to app-gates');
   assert.match(read(join(WORKFLOWS, 'ci.yml')), /notices: \$\{\{ matrix\.notices \}\}/, 'ci.yml hands the notices check to app-gates');
   assert.match(read(join(WORKFLOWS, 'ci.yml')), /last-packages: \$\{\{ matrix\.last_packages \}\}/, 'ci.yml hands the contract field to app-gates');
+});
+
+test('hostTests (OS-scoped tests): a host leg builds and tests only its packages, Linux never does, and the nightly runs everything', () => {
+  const gates = read(join(ACTIONS, 'app-gates', 'action.yml'));
+  assert.match(gates, /if \[ "\$RUNNER_OS" != Linux \] && \[ "\$TESTS_ONLY" != true \]; then\n\s+if \[ -n "\$HOST_PACKAGES" \]/, 'only a host leg that is not a rerun of failed tests is scoped');
+  assert.match(gates, /for pkg in \$HOST_PACKAGES; do scope\+=\(-p "\$pkg"\); done; exclude=\(\); hostexclude=\(\)/, '--exclude only goes with --workspace');
+  const ci = read(join(WORKFLOWS, 'ci.yml'));
+  assert.match(ci, /host-packages: \$\{\{ matrix\.host_packages \}\}/, 'ci.yml hands the packages to app-gates');
+  assert.match(ci, /host-filter: \$\{\{ matrix\.host_filter \}\}/, 'ci.yml hands the filterset to app-gates');
+  assert.match(ci, /TEST_PACKAGES: \$\{\{ matrix\.test_packages \}\}/, 'the crate leg reads its packages from the plan');
+  assert.equal((ci.match(/TEST_FILTER: \$\{\{ matrix\.test_filter \}\}/g) ?? []).length, 2, 'the crate and paddock-dev legs read their filterset from the plan');
+  assert.match(ci, /PLAN_FULL_OS: /, 'the plan knows when a run is a full every-OS run');
+  assert.match(read(join(WORKFLOWS, 'nightly.yml')), /os_full: true/, 'the nightly asks for every package on every OS');
+  assert.doesNotMatch(read(join(WORKFLOWS, 'ci.yml')), /tools-macos/, 'the VM tooling job is gone');
 });
 
 test('app-gates reports every failed check: the steps after a failed check still run', () => {
@@ -2321,7 +2336,7 @@ test('a release or installer job never runs a downloaded ./dev: PADDOCK_DEV_DOWN
     assert.match(job.text, /PADDOCK_DEV_DOWNLOAD: \$\{\{ \(inputs\.release == true \|\| startsWith\(github\.ref, 'refs\/tags\/'\)\) && '0' \|\| '' \}\}/, `ci.yml:${job.id}: a run for a tag builds the tool from source`);
     tagJobs += 1;
   }
-  assert.equal(tagJobs, 11, 'the ci.yml jobs that read the prebuilt tool with the credential at job level: the four that take a host slot, ipc-endpoints, conformance, tools-macos, and wiki, heavy, crates and audit (setup-rust runs ./dev); ui, e2e, tools, icons and eslint-preset (`./dev ci run`) set it on their ./dev steps only (WP-3 review)');
+  assert.equal(tagJobs, 10, 'the ci.yml jobs that read the prebuilt tool with the credential at job level: the four that take a host slot, ipc-endpoints, conformance, and wiki, heavy, crates and audit (setup-rust runs ./dev); ui, e2e, tools, icons and eslint-preset (`./dev ci run`) set it on their ./dev steps only (WP-3 review)');
 });
 
 test('dev-tool.yml publishes only from main, in every job (ADR 0022: the store is written only by main)', () => {

@@ -28,6 +28,10 @@ on:
         description: "Also run the WebKit tests (the WebKit job, and an app's WebKit lines)"
         type: boolean
         default: false
+      os_full:
+        description: "Test every package on every OS (hostTests unscoped: the nightly's and the release gates' scope); empty: the OS-specific code on each OS, the rest on Linux (OS-scoped tests)"
+        type: boolean
+        default: false
       sccache_backend:
         description: "The compile cache of this run's Rust jobs: local, s3 (the local disk first, RustFS behind it) or empty (the repository variable PADDOCK_CI_SCCACHE_BACKEND, local when unset). For a trial of the shared cache without changing the variable for every run."
         required: false
@@ -49,6 +53,10 @@ on:
         default: ""
       release:
         description: "A release workflow's gates (a rule 54 dispatch counts as a release): ./dev never downloads its tool, whatever the ref"
+        type: boolean
+        default: false
+      os_full:
+        description: "Test every package on every OS (hostTests unscoped): the nightly's scope"
         type: boolean
         default: false
     secrets:
@@ -143,6 +151,10 @@ jobs:
           PADDOCK_DEV_DOWNLOAD: ${{ (inputs.release == true || startsWith(github.ref, 'refs/tags/')) && '0' || '' }}
           PLAN_BASE: ${{ github.event.inputs.base }}
           PLAN_APP: ${{ inputs.app }}
+          # OS-scoped tests (hostTests): every package on every OS only in the nightly, a tag's or an app's release gates and a manual ask
+          # (tools/paddock-dev/src/plan_ci.rs full_os); every other run tests OS-specific code on each OS and the rest on Linux.
+          PLAN_FULL_OS: ${{ (inputs.os_full == true || inputs.os_full == 'true' || github.event.inputs.os_full == 'true') && 'true' || '' }}
+          PLAN_RELEASE: ${{ inputs.release == true && 'true' || '' }}
           PLAN_WEBKIT: ${{ (inputs.webkit == true || inputs.webkit == 'true') && '1' || '' }}
           # The rerun reads the earlier run's jobs and logs through the API (tools/paddock-dev/src/plan_since.rs).
           PLAN_SINCE_RUN: ${{ github.event.inputs.since_run }}
@@ -572,35 +584,6 @@ jobs:
 
       - uses: ./.gitea/actions/sccache-stats
         if: always()
-
-  # The Windows test VM tooling (scripts/vm-lock.sh, vm-win.sh, vm-win/) is a macOS tool: its lock and guard-rail tests have seven cases that
-  # need sysctl, BSD stat, the keychain and Fusion's lease file, which the Linux `ui` job skips ("not measured on this OS", ER-33). They run
-  # here, on the Mac host, against fakes only (no VM, no Fusion). Gated on the `tools` output, which every scripts/ change turns on.
-  tools-macos:
-    name: VM tooling tests (macOS)
-    needs: [plan]
-    if: ${{ needs.plan.outputs.tools == 'true' && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["tools-macos"]'), 'tools-macos') }}
-    runs-on: macos-latest
-    env:
-      PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
-      PADDOCK_DEV_DOWNLOAD: ${{ (inputs.release == true || startsWith(github.ref, 'refs/tags/')) && '0' || '' }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-
-      # CARGO_BUILD_JOBS: this runner's share of the host's cores (the tests build and run ./dev).
-      - uses: ./.gitea/actions/build-jobs
-
-      - uses: ./.gitea/actions/job-isolation
-
-      - name: VM lock and Windows test VM guard rails
-        run: node --test scripts/vm-lock.test.mjs scripts/vm-win.test.mjs scripts/member-gate.test.mjs
-
-      - uses: ./.gitea/actions/job-isolation
-        if: always()
-        with:
-          mode: release
 
   # `wiki` (tools/wiki, the LLM-wiki lint, log and page tool): its own Cargo workspace; Linux only (it reads text and runs git).
   # Its tests include a lint of this repository's docs/wiki, so the pilot wiki is checked whenever the tool changes.
@@ -1079,12 +1062,18 @@ jobs:
           # network service went away is only in there).
           PADDOCK_TEST_BROWSER_LOG: ${{ runner.os == 'Windows' && format('{0}/chrome-logs', runner.temp) || '' }}
           FILTER: ${{ matrix.filter }}
-          PACKAGE_FILTER: ${{ needs.plan.outputs.crates_filter }}
+          # OS-scoped tests (paddock.ci.json `hostTests`, ./dev plan --ci): the packages and the filterset this host leg tests. The filterset
+          # also holds a member run's reached packages, so one value carries both.
+          TEST_PACKAGES: ${{ matrix.test_packages }}
+          TEST_FILTER: ${{ matrix.test_filter }}
         run: |
-          filter=()
+          filter=(); sel=(--workspace)
           if [ -n "$FILTER" ]; then echo "::notice::nextest reruns only the failed tests: $FILTER"; filter=(-E "$FILTER" --no-tests=warn)
-          elif [ -n "$PACKAGE_FILTER" ]; then echo "::notice::nextest runs only the packages this change reaches (a member run): $PACKAGE_FILTER"; filter=(-E "$PACKAGE_FILTER" --no-tests=warn); fi
-          cargo nextest run --workspace --all-features --profile ci ${filter[@]+"${filter[@]}"}
+          else
+            if [ -n "$TEST_PACKAGES" ]; then echo "::notice::nextest tests only the packages with OS-specific code on this runner (hostTests): $TEST_PACKAGES"; sel=(); for p in $TEST_PACKAGES; do sel+=(-p "$p"); done; fi
+            if [ -n "$TEST_FILTER" ]; then echo "::notice::nextest filter (hostTests, and the packages this change reaches in a member run): $TEST_FILTER"; filter=(-E "$TEST_FILTER" --no-tests=warn); fi
+          fi
+          cargo nextest run "${sel[@]}" --all-features --profile ci ${filter[@]+"${filter[@]}"}
 
       - uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v3
         if: failure() && runner.os == 'Windows'
@@ -1408,6 +1397,8 @@ jobs:
           checks: ${{ matrix.checks }}
           rust-checks: ${{ matrix.rust_checks }}
           host-rust-checks: ${{ matrix.host_rust_checks }}
+          host-packages: ${{ matrix.host_packages }}
+          host-filter: ${{ matrix.host_filter }}
           ui-checks: ${{ matrix.ui_checks }}
           rust: ${{ matrix.rust }}
           ui: ${{ matrix.ui }}
@@ -1563,11 +1554,13 @@ jobs:
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/paddock-dev
         env:
           FILTER: ${{ matrix.filter }}
-          PACKAGE_FILTER: ${{ needs.plan.outputs.paddock_dev_filter }}
+          # OS-scoped tests (tools/paddock-dev/paddock.ci.json `hostTests`, ./dev plan --ci): the modules this host leg tests, with a member
+          # run's reached packages. Linux tests everything.
+          TEST_FILTER: ${{ matrix.test_filter }}
         run: |
           filter=()
           if [ -n "$FILTER" ]; then echo "::notice::nextest reruns only the failed tests: $FILTER"; filter=(-E "$FILTER" --no-tests=warn)
-          elif [ -n "$PACKAGE_FILTER" ]; then echo "::notice::nextest runs only the packages this change reaches (a member run): $PACKAGE_FILTER"; filter=(-E "$PACKAGE_FILTER" --no-tests=warn); fi
+          elif [ -n "$TEST_FILTER" ]; then echo "::notice::nextest filter (hostTests, and the packages this change reaches in a member run): $TEST_FILTER"; filter=(-E "$TEST_FILTER" --no-tests=warn); fi
           cargo nextest run --profile ci --locked --no-fail-fast ${filter[@]+"${filter[@]}"}
 
       # Licences, advisories, sources (tools/paddock-dev/deny.toml, the crates' rules); the image has cargo-deny.
