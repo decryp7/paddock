@@ -94,13 +94,14 @@ pub struct PrePushArgs {
     /// Also read from PADDOCK_ACCEPT_NOT_MEASURED (comma separated).
     #[arg(long, value_delimiter = ',')]
     pub accept_not_measured: Vec<String>,
-    /// Internal: the trial push profile's background phase (`trial_profile`). The hook's own process picks the fast phase from the
-    /// push (every ref under `wip/` or `trial/`); the slow rows run in a child started with `slow`.
+    /// Internal: the split push profile's background phase (`trial_profile`; named `split` because "trial" already means `ci dispatch
+    /// --trial` and the trial merge). The hook's own process picks the fast phase from the push (every ref under `wip/` or `trial/`);
+    /// the slow rows run in a child started with `slow`. Honoured only for such a push.
     #[arg(long, hide = true, value_enum)]
-    pub trial_phase: Option<trial_profile::Phase>,
-    /// Internal: the hook's log folder, which the background phase writes its rows' logs into (with `--trial-phase slow`).
+    pub split_phase: Option<trial_profile::Phase>,
+    /// Internal: the hook's log folder, which the background phase writes its rows' logs into (with `--split-phase slow`).
     #[arg(long, hide = true)]
-    pub trial_logs: Option<PathBuf>,
+    pub split_logs: Option<PathBuf>,
 }
 
 const GIT_TIMEOUT: Duration = Duration::from_secs(120);
@@ -277,6 +278,10 @@ impl known::Lookups for RealLookups {
         git_text(&self.root, &["ls-remote", "--", remote])
     }
     fn ci_green(&self, sha: &str) -> Result<u64, String> {
+        // A commit whose slow local rows did not pass (this checkout's record) is never known by a green CI run.
+        if let Some(reason) = crate::ci_runs::guard::local_slow_rows(&self.root, sha) {
+            return Err(format!("red or partial: {reason}"));
+        }
         match crate::ci_runs::ci_verdict(known::CI_WORKFLOW, sha) {
             crate::ci_runs::verdict::Verdict::Green { run } => Ok(run),
             crate::ci_runs::verdict::Verdict::Red { reason, .. } => Err(format!("red or partial: {reason}")),
@@ -368,13 +373,26 @@ fn command_in(
     let pushed: Vec<String> = pushes.iter().map(|p| p.sha.clone()).collect();
     // The trial push profile (ADR 0114): a push of only `wip/` and `trial/` refs runs the fast rows now and the slow ones in the
     // background; every other push is `None` and runs the full gate exactly as before.
-    let phase = trial_profile::phase_for(
-        args.trial_phase,
+    let mut phase = trial_profile::phase_for(
+        args.split_phase,
         args.refs_from_stdin,
         args.member_gate,
         !args.only.is_empty(),
         stdin,
     );
+    // The fast phase needs a token and a server to post the slow rows' verdict to (the commit status): without them the full gate
+    // runs, and the run says so.
+    let mut status_to = (String::new(), String::new());
+    let mut phase_note = None;
+    if phase == Some(trial_profile::Phase::Fast) {
+        match trial_profile::status_target(&root, args.remote.as_deref(), env.get("GITEA_TOKEN").map(String::as_str)) {
+            Ok(t) => status_to = t,
+            Err(why) => {
+                phase = None;
+                phase_note = Some(format!("trial push profile not used, the full gate runs: {why}"));
+            }
+        }
+    }
     // Every pushed commit's base comes first: a pass record counts only when it was measured from that base or an older one.
     let bases: Vec<(String, String)> = match &args.base {
         Some(b) => vec![(b.clone(), format!("--base {b} was given"))],
@@ -397,6 +415,7 @@ fn command_in(
     }
     let (change, mut notes, extra) = discover(&root, &base, &args.files, &pushed)?;
     notes.insert(0, format!("base: {base} ({base_why})"));
+    notes.extend(phase_note);
     let dropped: Vec<&str> = crate::git_env::REPO_VARS
         .iter()
         .copied()
@@ -430,7 +449,9 @@ fn command_in(
     let _checkout;
     let mut kept_targets = None;
     let work = match pushed.first() {
-        Some(sha) if head_sha.as_deref() == Some(sha.as_str()) && clean => {
+        // The slow phase always measures a throw-away worktree of the pushed commit, never a live tree that may have moved on (a dry run
+        // runs nothing, so it needs none).
+        Some(sha) if (phase != Some(trial_profile::Phase::Slow) || args.dry_run) && head_sha.as_deref() == Some(sha.as_str()) && clean => {
             notes.push(format!(
                 "checking the pushed commit {} (it is HEAD of a clean tree)",
                 &sha[..sha.len().min(12)]
@@ -472,7 +493,7 @@ fn command_in(
             let all = state.join("logs");
             exec::prune_run_logs(&all, KEEP_RUN_LOGS);
             // The background phase writes beside the hook's rows: one log folder per push (ADR 0114).
-            let mine = match (&args.trial_logs, phase) {
+            let mine = match (&args.split_logs, phase) {
                 (Some(dir), Some(trial_profile::Phase::Slow)) => dir.clone(),
                 _ => all.join(exec::run_token()),
             };
@@ -549,6 +570,10 @@ fn command_in(
             eprintln!("::warning::trial: the slow rows' holder could not be recorded: {e}");
         }
     }
+    // Records of slow phases whose process died or passed its deadline are settled by whoever starts a gate (ADR 0114).
+    for line in ex.sweep_trial(&state) {
+        eprintln!("pre-push: {line}");
+    }
     let load = ex.load();
     let n = workers(load, std::thread::available_parallelism().map_or(1, |n| n.get()));
     let mut overridden = String::new();
@@ -582,17 +607,28 @@ fn command_in(
     // What the run is about (the commit and its tree) is the evidence of every pass, so it is known before the first gate runs.
     let checked = pushed.first().cloned().or_else(|| if clean { head_sha.clone() } else { None });
     let subject = outcome::subject_of(&root, checked.as_deref());
-    let (mut rows, timings) = run_all_timed(
-        &planned,
-        ex,
-        &RunOpts {
-            workers: n,
-            budget: BUDGET,
-            queue,
-            stop: &stop,
-            subject: &subject,
-        },
-    );
+    // The background phase posts `pending` for the commit while its rows run (the push may land after it started: it retries).
+    let rows_done = AtomicBool::new(false);
+    let (mut rows, timings) = std::thread::scope(|scope| {
+        if phase == Some(trial_profile::Phase::Slow)
+            && let Some(sha) = checked.as_deref()
+        {
+            scope.spawn(|| eprintln!("pre-push: {}", ex.post_trial_pending(&state, sha, &rows_done)));
+        }
+        let r = run_all_timed(
+            &planned,
+            ex,
+            &RunOpts {
+                workers: n,
+                budget: BUDGET,
+                queue,
+                stop: &stop,
+                subject: &subject,
+            },
+        );
+        rows_done.store(true, Ordering::SeqCst);
+        r
+    });
     rows.extend(extra_ref_rows(&extra));
     accept_not_measured(&mut rows, &accept, &state);
     log_queue_times(&state, checked.as_deref(), &base, &timings);
@@ -613,6 +649,9 @@ fn command_in(
         let run = TrialRun {
             ex,
             state: &state,
+            root: &root,
+            remote_ref: pushes.first().map_or("", |p| p.remote_ref.as_str()),
+            status_to: &status_to,
             sha,
             base: &base,
             args,
@@ -653,14 +692,14 @@ fn command_in(
     Ok(report)
 }
 
-/// What the trial profile does after its rows: the fast phase (its rows passed) writes the slow rows' record and starts them in the
-/// background; the slow phase writes the final record and settles the CI run. Returns the line the run prints. Nothing here turns a
-/// run green: the fast phase's pass lets the push go, and a train still runs the full gate (ADR 0114).
 /// What one trial-profile step needs besides its phase and rows: the executor, the state folder, the pushed commit and the push's
 /// own inputs (the child re-reads them), and the gate's limits the deadline is derived from.
 struct TrialRun<'a> {
     ex: &'a dyn exec::Exec,
     state: &'a Path,
+    root: &'a Path,
+    remote_ref: &'a str,
+    status_to: &'a (String, String),
     sha: &'a str,
     base: &'a str,
     args: &'a PrePushArgs,
@@ -671,11 +710,18 @@ struct TrialRun<'a> {
     queue: Duration,
 }
 
+/// What the trial profile does after its rows: the fast phase (its rows passed) ends the slow rows of an earlier push of the same ref,
+/// writes this push's record and starts them in the background; the slow phase writes the final record, posts the commit status and
+/// settles the CI run. Returns the line the run prints. Nothing here turns a run green: the fast phase's pass lets the push go, and a
+/// train still runs the full gate (ADR 0114).
 fn trial_step(phase: trial_profile::Phase, run: &TrialRun<'_>, rows: &[(String, Row)], exit: Exit) -> String {
     use crate::trial_guard::{Slow, State};
     let TrialRun {
         ex,
         state,
+        root,
+        remote_ref,
+        status_to,
         sha,
         base,
         args,
@@ -699,6 +745,9 @@ fn trial_step(phase: trial_profile::Phase, run: &TrialRun<'_>, rows: &[(String, 
         start_micros: 0,
         finish_by: now + trial_profile::deadline_after(budget, queue, exec::ROW_CAP).as_secs(),
         logs: logs.to_string_lossy().into_owned(),
+        remote_ref: remote_ref.to_string(),
+        server: status_to.0.clone(),
+        repo: status_to.1.clone(),
     };
     match phase {
         trial_profile::Phase::Fast => {
@@ -707,20 +756,30 @@ fn trial_step(phase: trial_profile::Phase, run: &TrialRun<'_>, rows: &[(String, 
                     "trial profile: the fast rows did not pass; the push is stopped and the slow rows were not started ({short})"
                 );
             }
+            // A new push to the same ref ends the earlier push's slow rows through their pid and start time (ER-51), cancels its run and
+            // posts its status; the folder of records stays bounded.
+            for old in crate::trial_guard::supersede(state, remote_ref, sha, &|pid, start| ex.end_trial_holder(pid, start)) {
+                eprintln!("pre-push: {}", ex.settle_trial(state, &old.sha));
+            }
+            crate::trial_guard::prune(state, crate::trial_guard::KEEP_RECORDS);
             if let Err(e) = crate::trial_guard::write_slow(state, &rec) {
                 return format!(
                     "::warning::trial profile: the slow rows' record could not be written ({e}); the slow rows were NOT started and the trial is not guarded. Next: run `./dev check --pre-push` on {short} before relying on its CI run"
                 );
             }
-            let child = trial_profile::child_args(base, args.remote.as_deref(), logs);
-            match ex.start_trial_slow(&child, stdin, logs, env) {
+            let child = trial_profile::child_args(base, args.remote.as_deref(), root, logs);
+            match ex.start_trial_slow(&child, stdin, root, logs, env) {
                 Ok((pid, start)) => {
+                    // The folder is the child's from now on: never pruned while that process runs.
+                    exec::claim_run_logs_for(logs, pid);
                     if let Err(e) = crate::trial_guard::note_holder(state, sha, pid, start) {
                         eprintln!("::warning::trial profile: the holder of the slow rows could not be recorded: {e}");
                     }
                     format!(
-                        "trial profile: ONLY the fast rows ran (not a full pass). The slow rows (doctest, Windows and Linux Clippy, conformance tests, audits) run in the background, pid {pid}, logs in {} (slow-phase.log); if one fails or cannot be measured the CI run dispatched with `./dev ci dispatch --guard` for {short} is cancelled. A train still runs the full gate.",
-                        logs.display()
+                        "trial profile: ONLY the fast rows ran (not a full pass). Every other row (the fast ones are {}) runs in the background, pid {pid}, logs in {} (slow-phase.log); its verdict is the commit status {} and, if one fails or cannot be measured, the CI run dispatched with `./dev ci dispatch --guard` for {short} is cancelled. A train still runs the full gate.",
+                        trial_profile::FAST.join(", "),
+                        logs.display(),
+                        crate::trial_guard::CONTEXT
                     )
                 }
                 Err(e) => {

@@ -30,13 +30,47 @@ pub enum Phase {
     Slow,
 }
 
-/// Which phase a run is in, as the full gate is the case that is not named: `given` is the hidden `--trial-phase` of the background
-/// child; otherwise the hook's push decides ([`covers`]). `None` is the full gate.
+/// Which phase a run is in, as the full gate is the case that is not named: `given` is the hidden `--split-phase` of the background
+/// child; otherwise the hook's push decides. Either way the push must be [`covers`]ed: a phase named for a `train/*` or `main` push
+/// is not honoured (the full gate runs), so no flag reaches a landing. `None` is the full gate.
 pub fn phase_for(given: Option<Phase>, refs_from_stdin: bool, member_gate: bool, only: bool, stdin: &str) -> Option<Phase> {
-    if let Some(p) = given {
-        return Some(p);
+    if !covers(stdin) {
+        return None;
     }
-    (refs_from_stdin && !member_gate && !only && covers(stdin)).then_some(Phase::Fast)
+    given.or_else(|| (refs_from_stdin && !member_gate && !only).then_some(Phase::Fast))
+}
+
+/// The Gitea server and repository a remote URL names (`https://host/owner/name.git` or `git@host:owner/name.git`): where the slow
+/// rows' commit status is posted. `None` for a URL that is not one of those shapes.
+pub fn server_repo(url: &str) -> Option<(String, String)> {
+    let url = url.trim();
+    let (server, path) = if let Some(rest) = url.strip_prefix("https://") {
+        let (host, path) = rest.split_once('/')?;
+        (format!("https://{host}"), path)
+    } else {
+        let rest = url.strip_prefix("git@")?;
+        let (host, path) = rest.split_once(':')?;
+        (format!("https://{host}"), path)
+    };
+    let repo = path.trim_end_matches('/').trim_end_matches(".git");
+    let ok = repo.split('/').count() == 2
+        && repo
+            .split('/')
+            .all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_alphanumeric() || "._-".contains(c)));
+    (ok && !server.contains(['"', '\n', '\\'])).then(|| (server, repo.to_string()))
+}
+
+/// Where the slow rows' verdict is posted: the server and repository of `remote`'s URL, needing a token. `Err`: why the profile
+/// cannot be used for this push (the caller runs the full gate and says so).
+pub fn status_target(root: &Path, remote: Option<&str>, token: Option<&str>) -> Result<(String, String), String> {
+    if token.is_none_or(str::is_empty) {
+        return Err("GITEA_TOKEN is not set, so the slow rows' verdict cannot be posted as a commit status".into());
+    }
+    let remote = remote.filter(|r| !r.is_empty() && !r.starts_with('-')).unwrap_or("origin");
+    let url = crate::plan_repo::git_text(root, &["remote", "get-url", "--", remote])
+        .ok_or_else(|| format!("the URL of remote {remote} cannot be read"))?;
+    server_repo(&url)
+        .ok_or_else(|| format!("remote {remote} is not an https or ssh Gitea URL (`owner/name`), so no commit status can be posted"))
 }
 
 /// A remote ref the profile covers: `refs/heads/wip/<name>` or `refs/heads/trial/<name>`.
@@ -64,7 +98,7 @@ pub fn covers(stdin: &str) -> bool {
 }
 
 /// The rows that run before the push: each is cheap (median under about a minute) and static. Everything else is slow.
-const FAST: &[&str] = &[
+pub const FAST: &[&str] = &[
     "fmt",
     "lockfile",
     "commit-lint",
@@ -145,17 +179,19 @@ pub fn fold(sha: &str, rows: &[(String, Row)], base: &Slow) -> Slow {
     rec
 }
 
-/// The background child's command line: the same program, the slow phase, the logs folder of the hook's run. Its standard input is
-/// git's pre-push lines in a file, so it checks out and measures exactly what the hook did.
-pub fn child_args(base: &str, remote: Option<&str>, logs: &Path) -> Vec<String> {
-    let mut a: Vec<String> = ["check", "--pre-push", "--refs-from-stdin", "--trial-phase", "slow", "--base", base]
+/// The background child's command line: the same program, the slow phase, the repository root (it runs from there, never from the
+/// logs folder, which is inside `.git`) and the logs folder of the hook's run. Its standard input is git's pre-push lines in a file,
+/// and it always measures a throw-away worktree of the pushed commit, never the live tree.
+pub fn child_args(base: &str, remote: Option<&str>, root: &Path, logs: &Path) -> Vec<String> {
+    let mut a: Vec<String> = ["check", "--pre-push", "--refs-from-stdin", "--split-phase", "slow", "--base", base]
         .iter()
         .map(|s| s.to_string())
         .collect();
     if let Some(r) = remote {
         a.extend(["--remote".into(), r.into()]);
     }
-    a.extend(["--trial-logs".into(), logs.to_string_lossy().into_owned()]);
+    a.extend(["--root".into(), root.to_string_lossy().into_owned()]);
+    a.extend(["--split-logs".into(), logs.to_string_lossy().into_owned()]);
     a
 }
 
@@ -166,6 +202,7 @@ pub fn start_slow(
     program: &str,
     args: &[String],
     stdin: &str,
+    root: &Path,
     logs: &Path,
     env: &std::collections::HashMap<String, String>,
 ) -> Result<(u32, u64), String> {
@@ -178,7 +215,7 @@ pub fn start_slow(
     let input = std::fs::File::open(&in_file).map_err(|e| format!("{} cannot be read: {e}", in_file.display()))?;
     let mut cmd = paddock_proc::command(program);
     cmd.args(args)
-        .current_dir(logs)
+        .current_dir(root)
         .stdin(Stdio::from(input))
         .stdout(Stdio::from(out))
         .stderr(Stdio::from(err));
@@ -189,6 +226,12 @@ pub fn start_slow(
     // The child is not waited for: it ends on its own and the record says how. Dropping the handle does not end it.
     let start = paddock_proc::ProcessId::of(pid).map_or(0, |p| p.started().as_micros());
     drop(child);
+    if start == 0 {
+        // A holder whose start time cannot be read cannot be told from a reused pid later: the rows are not measured.
+        return Err(format!(
+            "the start time of process {pid} cannot be read, so its identity cannot be kept (ER-51)"
+        ));
+    }
     Ok((pid, start))
 }
 
@@ -203,18 +246,50 @@ pub fn finish(ex: &dyn Exec, state: &Path, rec: &Slow) -> String {
     ex.settle_trial(state, &rec.sha)
 }
 
-/// [`settle_with`] on the real machine: the token from `GITEA_TOKEN`, curl, the clock and the process table.
+/// The settle on the real machine: the token from `GITEA_TOKEN`, curl, the clock and the process table. The final status is posted
+/// first, retried for a minute (the push may not have landed on the server yet), then the run is settled.
 pub fn settle_real(state: &Path, sha: &str) -> String {
     let token = std::env::var("GITEA_TOKEN").unwrap_or_default();
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs());
-    let alive =
-        |pid: u32, start: u64| start == 0 || paddock_proc::ProcessId::new(pid, paddock_proc::StartTime::from_micros(start)).may_be_alive();
-    settle_with(state, sha, &mut crate::wait::CurlHttp, &token, now, &alive)
+    let mut status = String::new();
+    if let Ok(Some(rec)) = trial_guard::read_slow(state, sha) {
+        for attempt in 0..6 {
+            match trial_guard::post_slow_status(&mut crate::wait::CurlHttp, &token, &rec) {
+                Ok(_) => {
+                    status.clear();
+                    break;
+                }
+                Err(e) => {
+                    status = format!(
+                        "::warning::trial {}: the status {} could not be posted ({e}); `./dev ci dispatch --guard` and the next gate start post it again. ",
+                        &sha[..sha.len().min(12)],
+                        trial_guard::CONTEXT
+                    );
+                    if attempt < 5 {
+                        std::thread::sleep(Duration::from_secs(10));
+                    }
+                }
+            }
+        }
+    }
+    format!(
+        "{status}{}",
+        settle_with(
+            state,
+            sha,
+            &mut crate::wait::CurlHttp,
+            &token,
+            now,
+            &trial_guard::holder_alive,
+            false
+        )
+    )
 }
 
-/// Settles and words the result as the log line of the slow phase (an `::error::` when the run is cancelled or cannot be).
+/// Settles and words the result as the log line of the slow phase (an `::error::` when the run is cancelled or cannot be). With
+/// `post_status`, the record's verdict is first posted as the commit status (once, no retry).
 pub fn settle_with(
     state: &Path,
     sha: &str,
@@ -222,10 +297,21 @@ pub fn settle_with(
     token: &str,
     now: u64,
     alive: &dyn Fn(u32, u64) -> bool,
+    post_status: bool,
 ) -> String {
     use trial_guard::Settled;
     let short = &sha[..sha.len().min(12)];
-    match trial_guard::settle(state, sha, http, token, now, alive) {
+    let mut status = String::new();
+    if post_status
+        && let Ok(Some(rec)) = trial_guard::read_slow(state, sha)
+        && let Err(e) = trial_guard::post_slow_status(http, token, &rec)
+    {
+        status = format!(
+            "::warning::trial {short}: the status {} could not be posted ({e}). ",
+            trial_guard::CONTEXT
+        );
+    }
+    let line = match trial_guard::settle(state, sha, http, token, now, alive) {
         Ok(Settled::Cancelled { run, why, already_over }) => format!(
             "::error::{why}. CI run {run} {}",
             if already_over {
@@ -247,6 +333,62 @@ pub fn settle_with(
             "::error::trial {short}: the CI run could not be settled against the slow rows ({e}). Next: cancel the run by hand if the record says failed (`{}`)",
             trial_guard::dir(state).join(format!("{sha}.slow.json")).display()
         ),
+    };
+    format!("{status}{line}")
+}
+
+/// The sweep on the real machine ([`trial_guard::sweep`]): records whose process is dead or past its deadline are settled. Without
+/// a token nothing is posted or cancelled (the records still refuse locally).
+pub fn sweep_real(state: &Path) -> Vec<String> {
+    let token = std::env::var("GITEA_TOKEN").unwrap_or_default();
+    if token.is_empty() {
+        return Vec::new();
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    trial_guard::sweep(
+        state,
+        &mut crate::wait::CurlHttp,
+        &token,
+        &trial_guard::Time {
+            now,
+            alive: &trial_guard::holder_alive,
+        },
+    )
+}
+
+/// Posts `pending` for the record of `sha`, retried every 5 s for at most a minute while `done` is not set (the push may not have
+/// landed yet, and the status needs the commit on the server). Returns what happened, for the log.
+pub fn post_pending_real(state: &Path, sha: &str, done: &std::sync::atomic::AtomicBool) -> String {
+    use std::sync::atomic::Ordering;
+    let short = &sha[..sha.len().min(12)];
+    let token = std::env::var("GITEA_TOKEN").unwrap_or_default();
+    let Ok(Some(rec)) = trial_guard::read_slow(state, sha) else {
+        return format!("trial {short}: no record to post a status for");
+    };
+    let mut last = String::new();
+    for _ in 0..12 {
+        match trial_guard::post_slow_status(&mut crate::wait::CurlHttp, &token, &rec) {
+            Ok(_) => return format!("trial {short}: status {} is pending", trial_guard::CONTEXT),
+            Err(e) => last = e,
+        }
+        for _ in 0..50 {
+            if done.load(Ordering::SeqCst) {
+                return format!("trial {short}: the pending status was not posted ({last}); the rows ended first");
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    }
+    format!("trial {short}: the pending status could not be posted within a minute ({last})")
+}
+
+/// Ends the process that held a superseded trial's slow rows, by identity: only a process still running with that pid and start
+/// time (`paddock_proc::kill_tree`, ER-51, rule 53).
+pub fn end_holder_real(pid: u32, start_micros: u64) {
+    let id = paddock_proc::ProcessId::new(pid, paddock_proc::StartTime::from_micros(start_micros));
+    if id.may_be_alive() {
+        paddock_proc::kill_tree(id);
     }
 }
 

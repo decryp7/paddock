@@ -181,16 +181,35 @@ pub trait Exec: Sync {
             .map(|p| p.to_string_lossy().to_string())
             .map_err(|e| e.to_string())
     }
-    /// Starts the slow phase of a trial push in the background (`trial_profile`): one process in its own group, returning its
-    /// pid and start time. A test's executor records the call and starts nothing (ER-14).
-    fn start_trial_slow(&self, args: &[String], stdin: &str, logs: &Path, env: &HashMap<String, String>) -> Result<(u32, u64), String> {
+    /// Starts the slow phase of a trial push in the background (`trial_profile`): one process in its own group, started in `root`,
+    /// returning its pid and start time. A test's executor records the call and starts nothing (ER-14).
+    fn start_trial_slow(
+        &self,
+        args: &[String],
+        stdin: &str,
+        root: &Path,
+        logs: &Path,
+        env: &HashMap<String, String>,
+    ) -> Result<(u32, u64), String> {
         let program = self.dev_program()?;
-        super::trial_profile::start_slow(&program, args, stdin, logs, env)
+        super::trial_profile::start_slow(&program, args, stdin, root, logs, env)
     }
-    /// Settles the trial's CI run against the slow rows' record ([`crate::trial_guard::settle`]): cancels it when the rows failed or
-    /// were not measured. Returns the line to print. A test's executor answers from a fake dispatch.
+    /// Settles the trial's CI run against the slow rows' record ([`crate::trial_guard::settle`]) and posts its commit status: cancels
+    /// the run when the rows failed or were not measured. Returns the line to print. A test's executor answers from a fake dispatch.
     fn settle_trial(&self, state: &Path, sha: &str) -> String {
         super::trial_profile::settle_real(state, sha)
+    }
+    /// The shared sweep of dead or overdue slow-row records ([`crate::trial_guard::sweep`]); the lines to print.
+    fn sweep_trial(&self, state: &Path) -> Vec<String> {
+        super::trial_profile::sweep_real(state)
+    }
+    /// Posts the pending status of a started slow phase, retrying while `done` is unset (the push may not have landed).
+    fn post_trial_pending(&self, state: &Path, sha: &str, done: &std::sync::atomic::AtomicBool) -> String {
+        super::trial_profile::post_pending_real(state, sha, done)
+    }
+    /// Ends the process that held a superseded trial's slow rows, by pid and start time.
+    fn end_trial_holder(&self, pid: u32, start_micros: u64) {
+        super::trial_profile::end_holder_real(pid, start_micros);
     }
 }
 
@@ -1114,6 +1133,14 @@ pub fn prune_run_logs(root: &Path, keep: usize) {
 pub fn claim_run_logs(dir: &Path) {
     if std::fs::create_dir_all(dir).is_ok() {
         let _ = std::fs::write(dir.join("owner"), format!("{}\n", std::process::id()));
+    }
+}
+
+/// [`claim_run_logs`] for a process this run started (the background phase): its pid is the owner, so the folder is never pruned
+/// while that process runs.
+pub fn claim_run_logs_for(dir: &Path, pid: u32) {
+    if std::fs::create_dir_all(dir).is_ok() {
+        let _ = std::fs::write(dir.join("owner"), format!("{pid}\n"));
     }
 }
 

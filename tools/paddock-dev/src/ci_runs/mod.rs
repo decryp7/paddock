@@ -425,7 +425,8 @@ pub fn ci_verdict(workflow: &str, sha: &str) -> verdict::Verdict {
         Ok(token) => {
             let mut http = CurlHttp;
             let mut client = Client::new(&mut http, SERVER, "decryp7/paddock", &token);
-            verdict::verdict(&mut client, workflow, sha)
+            let v = verdict::verdict(&mut client, workflow, sha);
+            guard::with_slow_rows(&mut client, v, sha)
         }
     }
 }
@@ -442,8 +443,16 @@ pub fn verdict(a: &VerdictArgs) -> Result<Report, CliError> {
         Err(_) => verdict::Verdict::NotMeasured("GITEA_TOKEN is not set, so the runs cannot be read".into()),
         Ok(token) => {
             let mut http = CurlHttp;
+            for line in guard::sweep(&root) {
+                eprintln!("{line}");
+            }
             let mut client = Client::new(&mut http, &a.server, &a.repo, &token);
-            verdict::verdict(&mut client, &a.workflow, &a.sha)
+            let v = verdict::verdict(&mut client, &a.workflow, &a.sha);
+            let v = guard::with_slow_rows(&mut client, v, &a.sha);
+            match (&v, guard::local_slow_rows(&root, &a.sha)) {
+                (verdict::Verdict::Green { run }, Some(reason)) => verdict::Verdict::Red { run: Some(*run), reason },
+                _ => v,
+            }
         }
     };
     let r = verdict::report(&v, &a.workflow, &a.sha, &crate::pre_push::outcome::GitRepo(&root));
@@ -592,8 +601,10 @@ pub fn dispatch(a: &DispatchArgs) -> Result<Report, CliError> {
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.as_secs())
     };
-    let alive =
-        |pid: u32, start: u64| start == 0 || paddock_proc::ProcessId::new(pid, paddock_proc::StartTime::from_micros(start)).may_be_alive();
+    let alive = crate::trial_guard::holder_alive;
+    for line in guard::sweep(&root) {
+        eprintln!("{line}");
+    }
     let target = dispatch::Target {
         server: &a.server,
         repo: &a.repo,

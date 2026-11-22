@@ -194,6 +194,44 @@ impl<'a> Client<'a> {
         Ok(None)
     }
 
+    /// The commit statuses of `sha` (`GET .../commits/<sha>/statuses`), newest first as the server sorts them: `(id, context, state)`.
+    /// A commit the server does not have is an empty list (404). The state is the API's `status` (older servers `state`).
+    pub fn commit_statuses(&mut self, sha: &str) -> Result<Vec<(u64, String, String)>, String> {
+        let url = format!(
+            "{}/api/v1/repos/{}/commits/{sha}/statuses?limit=50",
+            self.server.trim_end_matches('/'),
+            self.repo
+        );
+        let body = self.retry(|c| c.http.get_json(&url, &c.token))?.unwrap_or(Value::Null);
+        Ok(body
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .map(|s| {
+                        let t = |k: &str| s[k].as_str().unwrap_or("").to_string();
+                        let state = if s["status"].is_string() { t("status") } else { t("state") };
+                        (s["id"].as_u64().unwrap_or(0), t("context"), state)
+                    })
+                    .collect()
+            })
+            .unwrap_or_default())
+    }
+
+    /// Sets a commit status (`POST .../statuses/<sha>`): `state` is `pending`, `success`, `failure` or `error`. The commit must be on
+    /// the server: a push that has not landed answers 404, which is an error here (the caller decides whether to retry).
+    pub fn post_status(&mut self, sha: &str, state: &str, context: &str, description: &str) -> Result<(), String> {
+        let url = format!("{}/api/v1/repos/{}/statuses/{sha}", self.server.trim_end_matches('/'), self.repo);
+        let mut desc: String = description.chars().take(140).collect();
+        desc = desc.replace('\n', " ");
+        self.http
+            .post_json(
+                &url,
+                &self.token,
+                &serde_json::json!({"state": state, "context": context, "description": desc}),
+            )
+            .map(|_| ())
+    }
+
     /// One run by id; `Ok(None)` when the server has no such run (404).
     pub fn run(&mut self, id: u64) -> Result<Option<RunInfo>, String> {
         let url = format!("{}/runs/{id}", self.api());

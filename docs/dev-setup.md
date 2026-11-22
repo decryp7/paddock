@@ -292,7 +292,7 @@ git push origin HEAD:refs/heads/wip/<name>
 ./dev ci dispatch ci.yml --ref wip/<name> --guard --max 30m
 ```
 
-`--guard` registers the dispatched run; if a slow row fails, is not measured, or never finishes, the run is cancelled and one
+The profile needs `GITEA_TOKEN`: it posts the slow rows' verdict as the commit status `paddock/slow-rows`, which the verdict reader and the push gate's known-commit shortcut refuse unless it is `success`. Without it, or without a Gitea remote URL, the push runs the full gate and says so. `--guard` registers the dispatched run; if a slow row fails, is not measured, or never finishes, the run is cancelled and one
 `::error::` line names the row and the next step (the dispatch is refused when the rows have already failed). The record per commit is
 `<git common dir>/paddock-pre-push/trial/<sha>.slow.json`. This is not a full pass: a `train/*` or `main` push runs the full gate, and
 a train needs its full CI run before landing. `--trial <branch>` is unchanged and does not combine with `--guard`.

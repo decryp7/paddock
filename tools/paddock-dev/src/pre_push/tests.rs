@@ -707,7 +707,9 @@ struct Fake {
     /// The limits every gate was started with.
     limits: Mutex<Vec<(String, Limits)>>,
     /// The background slow phases started: their command line and standard input (trial profile).
-    slow_started: Mutex<Vec<(Vec<String>, String)>>,
+    slow_started: Mutex<Vec<(Vec<String>, String, std::path::PathBuf)>>,
+    /// The holders ended `(pid, start)`.
+    ended: Mutex<Vec<(u32, u64)>>,
     /// What starting the slow phase gives (None: a child with pid 4242).
     slow_start: Option<Result<(u32, u64), String>>,
     /// The fake Gitea the trial's cancel talks to (None: the settle is only recorded).
@@ -721,15 +723,28 @@ impl Exec for Fake {
         &self,
         args: &[String],
         stdin: &str,
+        root: &std::path::Path,
         _logs: &std::path::Path,
         _env: &std::collections::HashMap<String, String>,
     ) -> Result<(u32, u64), String> {
-        self.slow_started.lock().unwrap().push((args.to_vec(), stdin.to_string()));
+        self.slow_started
+            .lock()
+            .unwrap()
+            .push((args.to_vec(), stdin.to_string(), root.to_path_buf()));
         self.slow_start.clone().unwrap_or(Ok((4242, 7)))
+    }
+    fn sweep_trial(&self, _state: &std::path::Path) -> Vec<String> {
+        Vec::new()
+    }
+    fn post_trial_pending(&self, _state: &std::path::Path, _sha: &str, _done: &AtomicBool) -> String {
+        "pending".into()
+    }
+    fn end_trial_holder(&self, pid: u32, start_micros: u64) {
+        self.ended.lock().unwrap().push((pid, start_micros));
     }
     fn settle_trial(&self, state: &std::path::Path, sha: &str) -> String {
         let line = match self.gitea.lock().unwrap().as_mut() {
-            Some(g) => super::trial_profile::settle_with(state, sha, g, "t", 1_000, &|_, _| true),
+            Some(g) => super::trial_profile::settle_with(state, sha, g, "t", 1_000, &|_, _| true, true),
             None => "settled".to_string(),
         };
         self.settled.lock().unwrap().push(line.clone());
@@ -1700,8 +1715,8 @@ mod known_commit {
             refs_from_stdin: true,
             member_gate: false,
             accept_not_measured: vec![],
-            trial_phase: None,
-            trial_logs: None,
+            split_phase: None,
+            split_logs: None,
         }
     }
 
@@ -2346,8 +2361,8 @@ mod base_choice {
             refs_from_stdin: true,
             member_gate: false,
             accept_not_measured: vec![],
-            trial_phase: None,
-            trial_logs: None,
+            split_phase: None,
+            split_logs: None,
         };
         let line = format!("refs/heads/x {two} refs/heads/main {}\n", "0".repeat(40));
         let got = command_in(
@@ -3701,9 +3716,13 @@ mod trial_profile {
     fn step(phase: Phase, ex: &Fake, state: &Path, rows: &[(String, Row)], exit: Exit) -> String {
         let a = args();
         let env = HashMap::new();
+        let status_to = ("https://gitea.invalid".to_string(), "o/r".to_string());
         let run = TrialRun {
             ex,
             state,
+            root: Path::new("/repo"),
+            remote_ref: "refs/heads/wip/x",
+            status_to: &status_to,
             sha: SHA,
             base: "origin/main",
             args: &a,
@@ -3727,8 +3746,8 @@ mod trial_profile {
             refs_from_stdin: true,
             member_gate: false,
             accept_not_measured: vec![],
-            trial_phase: None,
-            trial_logs: None,
+            split_phase: None,
+            split_logs: None,
         }
     }
 
@@ -3769,7 +3788,10 @@ mod trial_profile {
         let said = step(Phase::Fast, &fake, d.path(), &[], Exit::Ok);
         let started = fake.slow_started.lock().unwrap();
         assert_eq!(started.len(), 1, "one background process for all slow rows");
-        assert_eq!(started[0].0, child_args("origin/main", Some("origin"), Path::new("/logs/run")));
+        assert_eq!(
+            started[0].0,
+            child_args("origin/main", Some("origin"), Path::new("/repo"), Path::new("/logs/run"))
+        );
         assert_eq!(started[0].1, "pre-push lines\n", "the child measures the very push the hook saw");
         let rec = trial_guard::read_slow(d.path(), SHA).unwrap().unwrap();
         assert_eq!(
@@ -3827,6 +3849,9 @@ mod trial_profile {
                 start_micros: 7,
                 finish_by: u64::MAX,
                 logs: "/logs/run".into(),
+                remote_ref: "refs/heads/wip/x".into(),
+                server: "https://gitea.invalid".into(),
+                repo: "o/r".into(),
             },
         )
         .unwrap();
@@ -3853,6 +3878,12 @@ mod trial_profile {
             "{said}"
         );
         assert_eq!(trial_guard::read_slow(d.path(), SHA).unwrap().unwrap().state, State::Failed);
+        let posted = fake.gitea.lock().unwrap().as_ref().unwrap().statuses.clone();
+        assert_eq!(
+            posted,
+            vec![(1, trial_guard::CONTEXT.to_string(), "failure".to_string())],
+            "the verdict is also the commit status, which a train's verdict reader refuses"
+        );
     }
 
     /// A not-measured slow row also cancels.
@@ -3893,6 +3924,129 @@ mod trial_profile {
         assert_eq!(trial_guard::read_slow(d.path(), SHA).unwrap().unwrap().state, State::Passed);
     }
 
+    /// The fast phase hands the child the repository root (P1-1) and the status server, and says what the fast list is.
+    #[test]
+    fn the_fast_phase_starts_the_child_from_the_repository_root_with_the_status_target() {
+        let d = tempfile::tempdir().unwrap();
+        let fake = Fake::default();
+        let said = step(Phase::Fast, &fake, d.path(), &[], Exit::Ok);
+        let started = fake.slow_started.lock().unwrap();
+        assert_eq!(
+            started[0].2,
+            Path::new("/repo"),
+            "the working folder is the root, never the logs folder inside .git"
+        );
+        let args = &started[0].0;
+        let at = args.iter().position(|a| a == "--root").expect("--root is passed");
+        assert_eq!(args[at + 1], "/repo");
+        let rec = trial_guard::read_slow(d.path(), SHA).unwrap().unwrap();
+        assert_eq!(
+            (rec.remote_ref.as_str(), rec.server.as_str(), rec.repo.as_str()),
+            ("refs/heads/wip/x", "https://gitea.invalid", "o/r")
+        );
+        assert!(
+            said.contains(&super::super::trial_profile::FAST.join(", ")),
+            "the message reads the fast list: {said}"
+        );
+        assert!(said.contains(trial_guard::CONTEXT), "{said}");
+    }
+
+    /// ER-51: a second push to the same wip ref ends the first push's process by pid and start time, cancels its run and posts its
+    /// status; the new push's own record is written after.
+    #[test]
+    fn a_second_push_to_the_same_ref_ends_the_first_slow_child_and_cancels_its_run() {
+        let d = tempfile::tempdir().unwrap();
+        let old = "b".repeat(40);
+        trial_guard::write_slow(
+            d.path(),
+            &crate::trial_guard::Slow {
+                sha: old.clone(),
+                state: State::Running,
+                row: String::new(),
+                why: String::new(),
+                next: String::new(),
+                pid: 99,
+                start_micros: 5,
+                finish_by: u64::MAX,
+                logs: "/logs/old".into(),
+                remote_ref: "refs/heads/wip/x".into(),
+                server: "https://gitea.invalid".into(),
+                repo: "o/r".into(),
+            },
+        )
+        .unwrap();
+        trial_guard::write_dispatched(
+            d.path(),
+            &Dispatched {
+                sha: old.clone(),
+                run_id: 9001,
+                workflow: "ci.yml".into(),
+                git_ref: "wip/x".into(),
+                server: "https://gitea.invalid".into(),
+                repo: "o/r".into(),
+            },
+        )
+        .unwrap();
+        let fake = Fake {
+            gitea: gitea(),
+            ..Fake::default()
+        };
+        step(Phase::Fast, &fake, d.path(), &[], Exit::Ok);
+        assert_eq!(*fake.ended.lock().unwrap(), vec![(99, 5)], "ended through its pid and start time");
+        assert_eq!(cancels(&fake), 1, "its CI run is cancelled");
+        let r = trial_guard::read_slow(d.path(), &old).unwrap().unwrap();
+        assert_eq!(r.state, State::NotMeasured);
+        assert!(
+            trial_guard::read_slow(d.path(), SHA).unwrap().is_some(),
+            "the new push has its own record"
+        );
+        assert!(trial_guard::dir(d.path()).join("owner").exists(), "the folder has its owner note");
+    }
+
+    /// P1-2: the push gate's known-commit shortcut must not accept a green CI run for a commit whose slow rows did not pass, so a
+    /// stale green wip run cannot let a train skip its full gate. The refusal comes before any CI lookup (no network here).
+    #[test]
+    fn a_commit_whose_slow_rows_failed_is_never_known_by_a_green_ci_run() {
+        use super::super::known::Lookups;
+        let (_d, r, _one, two) = super::known_commit::repo();
+        let state = state_dir(&r);
+        trial_guard::write_slow(
+            &state,
+            &crate::trial_guard::Slow {
+                sha: two.clone(),
+                state: State::Failed,
+                row: "clippy-linux crates".into(),
+                why: "boom".into(),
+                next: "fix it".into(),
+                pid: 0,
+                start_micros: 0,
+                finish_by: 0,
+                logs: "/l".into(),
+                remote_ref: "refs/heads/wip/x".into(),
+                server: String::new(),
+                repo: String::new(),
+            },
+        )
+        .unwrap();
+        let why = super::super::RealLookups { root: r.clone() }.ci_green(&two).unwrap_err();
+        assert!(why.contains("red or partial") && why.contains("slow local rows"), "{why}");
+    }
+
+    /// The pass-through of one more landing rule: the slow child's logs folder is owned by the child, so a prune never takes it.
+    #[test]
+    fn the_logs_folder_of_a_live_child_is_never_pruned() {
+        let d = tempfile::tempdir().unwrap();
+        let logs = d.path().join("logs");
+        let mine = logs.join("a-live-child");
+        std::fs::create_dir_all(&mine).unwrap();
+        super::super::exec::claim_run_logs_for(&mine, std::process::id());
+        for n in 0..4 {
+            std::fs::create_dir_all(logs.join(format!("z{n}"))).unwrap();
+        }
+        super::super::exec::prune_run_logs(&logs, 1);
+        assert!(mine.exists(), "its owner process runs");
+    }
+
     /// The pushes the profile never touches keep the whole gate: a dry run of the hook's push lists every row of the full gate for
     /// a `train/*`, `main` or feature ref, and only the fast rows for a `wip/` ref. The slow rows are listed by the slow phase.
     #[test]
@@ -3903,7 +4057,7 @@ mod trial_profile {
             let a = PrePushArgs {
                 root: Some(r.clone()),
                 dry_run: true,
-                trial_phase: phase,
+                split_phase: phase,
                 base: Some("origin/main".into()),
                 ..args()
             };
@@ -3932,16 +4086,24 @@ mod trial_profile {
         for landing in ["refs/heads/main", "refs/heads/feat/x"] {
             assert_eq!(ids(landing, None), full, "{landing} runs the same full gate as a train");
         }
-        let fast = ids("refs/heads/wip/x", None);
-        assert!(
-            !fast.is_empty() && fast.iter().all(|i| super::super::trial_profile::is_fast_row(i)),
-            "{fast:?}"
+        // Without GITEA_TOKEN and a Gitea remote the hook cannot post the slow rows' verdict, so a wip push runs the full gate too.
+        assert_eq!(
+            ids("refs/heads/wip/x", None),
+            full,
+            "no status target: the full gate, not a smaller one"
         );
+        // A phase named for a landing ref is not honoured either.
+        assert_eq!(ids("refs/heads/train/x", Some(Phase::Slow)), full, "a flag never reaches a train");
         let slow = ids("refs/heads/wip/x", Some(Phase::Slow));
         assert!(
             !slow.is_empty() && slow.iter().all(|i| !super::super::trial_profile::is_fast_row(i)),
             "{slow:?}"
         );
+        let fast: Vec<String> = full
+            .iter()
+            .filter(|i| super::super::trial_profile::is_fast_row(i))
+            .cloned()
+            .collect();
         let mut both: Vec<String> = fast.iter().chain(slow.iter()).cloned().collect();
         let mut want = full.clone();
         both.sort();

@@ -76,13 +76,20 @@ pub struct Slow {
     pub finish_by: u64,
     /// The folder of the rows' logs.
     pub logs: String,
+    /// The remote ref pushed (`refs/heads/wip/x`): a later push of the same ref ends this one's process.
+    pub remote_ref: String,
+    /// The Gitea server and repository the verdict is posted to as a commit status (empty: none is posted).
+    pub server: String,
+    /// See `server` (`owner/name`).
+    pub repo: String,
 }
 
 impl Slow {
     /// The record as JSON.
     pub fn to_json(&self) -> Value {
         json!({"sha": self.sha, "state": self.state.name(), "row": self.row, "why": self.why, "next": self.next,
-               "pid": self.pid, "start_micros": self.start_micros, "finish_by": self.finish_by, "logs": self.logs})
+               "pid": self.pid, "start_micros": self.start_micros, "finish_by": self.finish_by, "logs": self.logs,
+               "remote_ref": self.remote_ref, "server": self.server, "repo": self.repo})
     }
 
     /// Reads a record; `None` when it is not one.
@@ -98,6 +105,9 @@ impl Slow {
             start_micros: v["start_micros"].as_u64().unwrap_or(0),
             finish_by: v["finish_by"].as_u64().unwrap_or(0),
             logs: s("logs"),
+            remote_ref: s("remote_ref"),
+            server: s("server"),
+            repo: s("repo"),
         })
         .filter(|r| valid_sha(&r.sha))
     }
@@ -264,6 +274,12 @@ pub struct Time<'a> {
     pub alive: &'a dyn Fn(u32, u64) -> bool,
 }
 
+/// Whether the holder of the slow rows may still run. A start time of 0 (it could not be read) is NOT alive: a record that cannot
+/// prove its process is not evidence, and it must never keep a run unguarded for good.
+pub fn holder_alive(pid: u32, start_micros: u64) -> bool {
+    start_micros != 0 && paddock_proc::ProcessId::new(pid, paddock_proc::StartTime::from_micros(start_micros)).may_be_alive()
+}
+
 /// What [`settle`] did.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Settled {
@@ -358,6 +374,190 @@ pub fn find_new_run(runs: &[RunInfo], before: &[u64], workflow: &str, git_ref: &
             "runs {} all look like this dispatch ({workflow} on {git_ref} at {sha}); none is registered",
             hits.iter().map(u64::to_string).collect::<Vec<_>>().join(", ")
         )),
+    }
+}
+
+/// The commit status context the slow rows' verdict is posted under. A sha whose status of this context exists and is not
+/// `success` is refused by the verdict reader and by the push gate's known-commit shortcut (GitLab merge trains and GitHub's merge
+/// queue take required checks from the server in the same way).
+pub const CONTEXT: &str = "paddock/slow-rows";
+
+/// The commit status state of a record: running is `pending`, passed `success`, failed `failure`, not measured `error`.
+pub fn status_state(state: State) -> &'static str {
+    match state {
+        State::Running => "pending",
+        State::Passed => "success",
+        State::Failed => "failure",
+        State::NotMeasured => "error",
+    }
+}
+
+/// Posts the record's verdict as a commit status on its sha. `Ok(false)`: the record names no server, so nothing was posted.
+pub fn post_slow_status(http: &mut dyn Http, token: &str, rec: &Slow) -> Result<bool, String> {
+    if rec.server.is_empty() || rec.repo.is_empty() {
+        return Ok(false);
+    }
+    let what = match rec.state {
+        State::Running => "the slow rows are running".to_string(),
+        State::Passed => "every slow row passed".to_string(),
+        State::Failed => format!("failed: {} ({}); next: {}", rec.row, rec.why, rec.next),
+        State::NotMeasured => format!("not measured: {} ({}); next: {}", rec.row, rec.why, rec.next),
+    };
+    let mut client = Client::new(http, &rec.server, &rec.repo, token);
+    client.backoff_ms = 0;
+    client.post_status(&rec.sha, status_state(rec.state), CONTEXT, &what).map(|()| true)
+}
+
+/// Why the server's status of `sha` refuses it: `Some(line)` when a `paddock/slow-rows` status exists and its newest entry is not
+/// `success`; `None` when there is none or it is success. `Err`: the statuses could not be read (the caller fails closed).
+pub fn status_refusal(client: &mut Client, sha: &str) -> Result<Option<String>, String> {
+    let newest = client
+        .commit_statuses(sha)?
+        .into_iter()
+        .filter(|(_, ctx, _)| ctx == CONTEXT)
+        .max_by_key(|(id, _, _)| *id);
+    Ok(match newest {
+        Some((_, _, state)) if state != "success" => Some(format!(
+            "the slow local rows of {} have status `{state}` ({CONTEXT}): a wip/ or trial/ push that ran only its fast rows before the push. Next: read the rows' logs, fix, and push again; a train needs the full push gate",
+            &sha[..sha.len().min(12)]
+        )),
+        _ => None,
+    })
+}
+
+/// Why this checkout's own record refuses `sha`: a slow-rows record exists and is not `passed` (still running counts: the rows have
+/// not shown anything yet). `None` when there is no record or it passed. An unreadable record refuses (fail closed).
+pub fn local_refusal(state: &Path, sha: &str) -> Option<String> {
+    let short = &sha[..sha.len().min(12)];
+    match read_slow(state, sha) {
+        Ok(None) => None,
+        Ok(Some(r)) if r.state == State::Passed => None,
+        Ok(Some(r)) => Some(format!(
+            "the slow local rows of {short} are `{}` in {}: only the fast rows ran before that push. Next: let them finish (`{}`) or run `./dev check --pre-push` on the commit",
+            r.state.name(),
+            dir(state).display(),
+            r.logs
+        )),
+        Err(e) => Some(format!(
+            "the slow-rows record of {short} cannot be read ({e}); it counts as not passed"
+        )),
+    }
+}
+
+fn slow_records(state: &Path) -> Vec<Slow> {
+    let Ok(read) = std::fs::read_dir(dir(state)) else {
+        return Vec::new();
+    };
+    read.flatten()
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().into_owned();
+            let sha = name.strip_suffix(".slow.json")?.to_string();
+            read_slow(state, &sha).ok().flatten()
+        })
+        .collect()
+}
+
+/// The one shared settle for records whose process is dead or past its deadline: run on every push gate start, every `ci dispatch`
+/// and the verdict command. Each such record has its registered run cancelled and its status posted as `error`, and only then is
+/// it rewritten as not measured, so a failure of either leaves it running (it still refuses locally) to be settled by the next
+/// sweep. Returns one line per record.
+pub fn sweep(state: &Path, http: &mut dyn Http, token: &str, time: &Time<'_>) -> Vec<String> {
+    let mut lines = Vec::new();
+    for mut rec in slow_records(state) {
+        if rec.state != State::Running {
+            continue;
+        }
+        let Verdict::Cancel(why) = judge(&rec, time.now, time.alive) else {
+            continue;
+        };
+        let short = rec.sha[..rec.sha.len().min(12)].to_string();
+        let cancelled = match settle(state, &rec.sha, http, token, time.now, time.alive) {
+            Ok(Settled::Cancelled { run, .. }) => format!("run {run} cancelled"),
+            Ok(_) => "no run registered".to_string(),
+            Err(e) => {
+                lines.push(format!(
+                    "::warning::trial {short}: {why}. The run could not be settled ({e}); the next gate start tries again"
+                ));
+                continue;
+            }
+        };
+        rec.state = State::NotMeasured;
+        rec.row = "slow rows".into();
+        rec.why = "the process holding them ended or passed its deadline without a result".into();
+        rec.next = "run `./dev check --pre-push` on the commit".into();
+        if let Err(e) = post_slow_status(http, token, &rec) {
+            lines.push(format!(
+                "::warning::trial {short}: {why}. The status could not be posted ({e}); the next gate start tries again"
+            ));
+            continue;
+        }
+        if let Err(e) = write_slow(state, &rec) {
+            lines.push(format!("::warning::trial {short}: the record could not be rewritten ({e})"));
+            continue;
+        }
+        lines.push(format!("::error::{why}. {cancelled}; the status {CONTEXT} is `error`"));
+    }
+    lines
+}
+
+/// A new push to `remote_ref`: the records of other commits pushed to that ref whose slow rows still run are ended through their
+/// process identity (`end(pid, start)`, never a bare pid, ER-51) and rewritten as not measured, "superseded". Returns them, so the
+/// caller can settle each (cancel its run, post its status).
+pub fn supersede(state: &Path, remote_ref: &str, new_sha: &str, end: &dyn Fn(u32, u64)) -> Vec<Slow> {
+    let mut out = Vec::new();
+    for mut rec in slow_records(state) {
+        if rec.state != State::Running || rec.remote_ref != remote_ref || rec.sha == new_sha {
+            continue;
+        }
+        if rec.pid != 0 && rec.start_micros != 0 {
+            end(rec.pid, rec.start_micros);
+        }
+        rec.state = State::NotMeasured;
+        rec.row = "slow rows".into();
+        rec.why = format!("superseded by a push of {} to {remote_ref}", &new_sha[..new_sha.len().min(12)]);
+        rec.next = "run `./dev check --pre-push` on the commit if its CI run is still wanted".into();
+        if write_slow(state, &rec).is_ok() {
+            out.push(rec);
+        }
+    }
+    out
+}
+
+/// How many commits' records `<state>/trial/` keeps (about 400 bytes each, so under 100 KiB): the oldest go first.
+pub const KEEP_RECORDS: usize = 200;
+
+/// The owner of the folder: written beside the records so nobody wonders what it is (ER-51).
+const OWNER_NOTE: &str = "owner: paddock-dev (`./dev check --pre-push`, the trial push profile, ADR 0114).\nlimit: 200 commits' records (<sha>.slow.json and <sha>.dispatch.json), about 100 KiB; eviction: oldest first, never a record whose process still runs.\n";
+
+/// Keeps the folder to [`KEEP_RECORDS`]: removes the oldest records beyond it, by exact path through the one guarded remover, except a
+/// running record whose holder may still run. Writes the owner note. Best effort.
+pub fn prune(state: &Path, keep: usize) {
+    let d = dir(state);
+    if std::fs::create_dir_all(&d).is_err() {
+        return;
+    }
+    let _ = std::fs::write(d.join("owner"), OWNER_NOTE);
+    let Ok(read) = std::fs::read_dir(&d) else { return };
+    let mut files: Vec<(std::time::SystemTime, Slow)> = read
+        .flatten()
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().into_owned();
+            let sha = name.strip_suffix(".slow.json")?.to_string();
+            let rec = read_slow(state, &sha).ok().flatten()?;
+            Some((e.metadata().ok()?.modified().ok()?, rec))
+        })
+        .collect();
+    files.sort_by_key(|(t, _)| *t);
+    let drop = files.len().saturating_sub(keep);
+    for (_, rec) in files.into_iter().take(drop) {
+        if rec.state == State::Running && holder_alive(rec.pid, rec.start_micros) {
+            continue;
+        }
+        for what in ["slow", "dispatch"] {
+            if let Ok(p) = path(state, &rec.sha, what) {
+                let _ = crate::safe_remove::remove_under(&d, &p, None);
+            }
+        }
     }
 }
 

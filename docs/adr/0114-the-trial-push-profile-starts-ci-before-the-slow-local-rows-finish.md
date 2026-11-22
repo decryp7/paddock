@@ -23,13 +23,32 @@ run the slow local checks beside it, and cancel the run at once if one fails. No
    doctest 38.6 / 202, Linux Clippy 18.8 / 66 (up to 710), xwin Clippy 14.8 / 99 (cold 346 / 859), dyno-wire-fixtures 82,
    member-audits 36 / 60. The fast rows run in parallel, so they take about the time of conformance (47 s median); the slow rows are
    about 250 s of work plus the queue for the heavy slot.
-3. **The slow rows are one owned process.** The hook starts `./dev check --pre-push --trial-phase slow` through
-   `paddock_proc::spawn_detached` (its own process group; no pipe of git's, which would hold the push open) with its input and output
-   in the push's log folder (`slow-phase.stdin`, `slow-phase.log`, the rows' logs beside the fast rows'). The starter keeps its
-   identity (pid and start time) in `<state>/trial/<sha>.slow.json` (ER-51). One record per commit says running, passed, failed or
+3. **The slow rows are one owned process.** The hook starts `./dev check --pre-push --split-phase slow --root <repo>` through
+   `paddock_proc::spawn_detached`, with the repository root as its working folder (never the log folder, which is inside `.git`:
+   there git finds no checkout and the child died at once, the first review's P1-1). The flag says `split` because "trial" already
+   means `ci dispatch --trial` and the trial merge; it is honoured only for a push the profile covers. The child has no pipe of git's,
+   which would hold the push open; its input and output are in the push's log folder (`slow-phase.stdin`, `slow-phase.log`, the rows'
+   logs beside the fast rows'), whose owner file names the child so a prune never takes it. The slow phase always measures a
+   throw-away worktree of the pushed commit, never the live tree. The starter keeps its identity (pid and start time; a start time
+   that cannot be read is an error, and 0 never counts as alive) in `<state>/trial/<sha>.slow.json` (ER-51). One record per commit says running, passed, failed or
    not measured, the first row at fault and the next step, and a deadline derived from the gate's own limits (run budget, queue
    allowance, row cap, and 5 minutes).
-4. **Cancel.** `./dev ci dispatch <workflow> --ref wip/<name> --guard --max <d>` is the second step. It reads the ref's head from the
+4. **The verdict is a commit status.** The slow rows' record carries the Gitea server and repository (from the push's remote URL), and
+   its state is posted on the commit as the status `paddock/slow-rows`: `pending` while they run, then `success`, `failure` (a row
+   failed) or `error` (not measured, interrupted, superseded, dead, overdue). The commit has to be on the server first, so the child
+   retries the pending post while it works and the final post for a minute. Any reader of CI for a sha refuses it when that status
+   exists and is not `success`: the shared verdict reader (`ci verdict`, the pre-push known-commit shortcut, the landing checks that
+   ask it) turns a green run into red, and a status it cannot read into not measured; the push gate also refuses from this checkout's
+   own record without a server. So a green CI run that finished before the slow rows failed cannot let a train skip its full gate (the
+   first review's P1-2). GitLab merge trains and GitHub's merge queue take required checks from the server in the same way.
+   Without `GITEA_TOKEN` or a Gitea remote URL at the fast phase, the profile is not used: the full gate runs and the log says why.
+5. **Dead or overdue children are settled by whoever comes next.** One shared sweep (`trial_guard::sweep`) runs at every push gate
+   start, `ci dispatch` and `ci verdict`: a record still running whose process is gone (pid plus start time) or past its deadline
+   gets its registered run cancelled and its status posted as `error`, and is rewritten as not measured only when both worked, so a
+   failure leaves it running (it still refuses locally) for the next sweep. A new push to the same ref ends the previous push's
+   process through its pid and start time (never a bare pid) and settles it as superseded. `<state>/trial/` has an owner note, a limit
+   of 200 commits' records (about 100 KiB) and oldest-first eviction that never takes a live holder (ER-51).
+6. **Cancel.** `./dev ci dispatch <workflow> --ref wip/<name> --guard --max <d>` is the second step. It reads the ref's head from the
    server and the record; a record that already says failed, not measured or never finished refuses the dispatch (nothing sent,
    nothing to cancel). Otherwise it dispatches, finds the new run by difference against the run list taken before (never "the newest
    run of the branch", ER-51), writes `<sha>.dispatch.json` and settles. The slow process settles when it ends. Each side writes its
@@ -37,11 +56,11 @@ run the slow local checks beside it, and cancel the run at once if one fails. No
    (`POST /api/v1/repos/<repo>/actions/runs/<id>/cancel`) when the rows failed, were not measured, were interrupted, the process is
    gone without a result, or the deadline passed, and prints one `::error::` with the row, cause and next step. ER-9 allows the
    cancel with no further approval. A run that cannot be found is reported as not guarded, loudly.
-5. **Never green by skipping.** The fast phase says it is not a full pass. Neither phase writes a pass record (so `known::find` never
+7. **Never green by skipping.** The fast phase says it is not a full pass. Neither phase writes a pass record (so `known::find` never
    skips a later train gate on the strength of a partial run). A trial whose slow rows never finished is not evidence: `judge` has no
-   pass for a running record past its deadline or whose process is gone. A train still runs its full gate on the train push and its
+   pass for a running record past its deadline or whose process is gone, and the commit status says so to every other reader. A train still runs its full gate on the train push and its
    full CI run before landing (ER-8, ER-15). The profile only starts CI sooner.
-6. **`--trial <branch>` is unchanged.** It merges a branch onto the train in its own clone and pushes `trial/<branch>` with hooks off,
+8. **`--trial <branch>` is unchanged.** It merges a branch onto the train in its own clone and pushes `trial/<branch>` with hooks off,
    so no local row runs for it at all (ADR 0098); `--guard` conflicts with it, because the merge commit is not a commit the slow rows
    measured. The documented flow for a hand push is two commands:
    `git push origin HEAD:refs/heads/wip/<name>` and `./dev ci dispatch <workflow> --ref wip/<name> --guard --max 30m`.

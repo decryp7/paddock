@@ -129,6 +129,9 @@ fn base() -> Slow {
         start_micros: 6,
         finish_by: 7,
         logs: "/l".into(),
+        remote_ref: String::new(),
+        server: String::new(),
+        repo: String::new(),
     }
 }
 
@@ -183,14 +186,14 @@ fn the_slow_record_passes_only_when_every_slow_row_passed() {
 
 #[test]
 fn the_child_runs_the_slow_phase_of_the_same_commit_with_the_hooks_log_folder() {
-    let a = child_args("abc123", Some("origin"), Path::new("/logs/run-1"));
+    let a = child_args("abc123", Some("origin"), Path::new("/repo"), Path::new("/logs/run-1"));
     let joined = a.join(" ");
     assert!(
-        joined.starts_with("check --pre-push --refs-from-stdin --trial-phase slow --base abc123"),
+        joined.starts_with("check --pre-push --refs-from-stdin --split-phase slow --base abc123"),
         "{joined}"
     );
     assert!(
-        joined.contains("--remote origin") && joined.ends_with("--trial-logs /logs/run-1"),
+        joined.contains("--remote origin") && joined.ends_with("--split-logs /logs/run-1"),
         "{joined}"
     );
 }
@@ -208,7 +211,7 @@ fn the_deadline_is_the_gates_own_limits_plus_a_margin() {
 fn the_slow_phase_starts_detached_with_its_output_and_input_in_the_log_folder() {
     let d = tempfile::tempdir().unwrap();
     let env: std::collections::HashMap<String, String> = [("PATH".to_string(), "/usr/bin:/bin".to_string())].into();
-    let (pid, start) = start_slow("cat", &[], "pushed lines\n", d.path(), &env).unwrap();
+    let (pid, start) = start_slow("cat", &[], "pushed lines\n", d.path(), d.path(), &env).unwrap();
     assert!(pid > 1 && start > 0, "{pid} {start}");
     // The input is the pushed lines in a file of the log folder and the output goes to a log file there, never to git's pipes.
     assert_eq!(
@@ -216,5 +219,62 @@ fn the_slow_phase_starts_detached_with_its_output_and_input_in_the_log_folder() 
         "pushed lines\n"
     );
     assert!(d.path().join("slow-phase.log").exists());
-    assert!(start_slow("/nonexistent/program", &[], "", d.path(), &env).is_err());
+    assert!(start_slow("/nonexistent/program", &[], "", d.path(), d.path(), &env).is_err());
+}
+
+#[test]
+fn a_phase_named_for_a_landing_push_is_not_honoured() {
+    for landing in ["refs/heads/main", "refs/heads/train/x", "refs/heads/feat/x"] {
+        for given in [Phase::Fast, Phase::Slow] {
+            assert_eq!(
+                phase_for(Some(given), true, false, false, &line(landing)),
+                None,
+                "{given:?} on {landing}"
+            );
+        }
+    }
+    assert_eq!(
+        phase_for(Some(Phase::Slow), true, false, false, &line("refs/heads/wip/a")),
+        Some(Phase::Slow)
+    );
+}
+
+#[test]
+fn the_status_server_and_repository_come_from_the_remotes_url() {
+    for (url, want) in [
+        (
+            "https://dev.decryptology.net/decryp7/paddock.git",
+            Some(("https://dev.decryptology.net", "decryp7/paddock")),
+        ),
+        ("https://h.example/o/n", Some(("https://h.example", "o/n"))),
+        ("git@h.example:o/n.git\n", Some(("https://h.example", "o/n"))),
+        ("/some/path/repo", None),
+        ("https://h.example/onlyone", None),
+        ("https://h.example/a/b/c", None),
+        ("https://h.example/a/b\"x", None),
+    ] {
+        assert_eq!(server_repo(url).as_ref().map(|(s, r)| (s.as_str(), r.as_str())), want, "{url}");
+    }
+    let d = tempfile::tempdir().unwrap();
+    assert!(status_target(d.path(), Some("origin"), None).unwrap_err().contains("GITEA_TOKEN"));
+    assert!(
+        status_target(d.path(), Some("origin"), Some(""))
+            .unwrap_err()
+            .contains("GITEA_TOKEN")
+    );
+    assert!(
+        status_target(d.path(), Some("origin"), Some("t")).is_err(),
+        "not a repository: no URL"
+    );
+}
+
+#[test]
+fn the_child_gets_the_repository_root_and_the_phase_flag_is_not_called_trial() {
+    let a = child_args("abc", None, Path::new("/the/repo"), Path::new("/logs/x"));
+    let pos = a.iter().position(|x| x == "--root").expect("--root");
+    assert_eq!(a[pos + 1], "/the/repo");
+    assert!(
+        a.contains(&"--split-phase".to_string()) && !a.iter().any(|x| x.contains("trial")),
+        "{a:?}"
+    );
 }
