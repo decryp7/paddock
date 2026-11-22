@@ -81,6 +81,7 @@ fn run_slow_phase_with(extra: &[&str], worktrees: bool) -> Phase {
             start_micros: 0,
             beat: u64::MAX,
             posted: false,
+            orphaned: false,
             logs: logs.to_string_lossy().into_owned(),
             remote_ref: "refs/heads/wip/x".into(),
             server: String::new(),

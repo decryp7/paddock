@@ -75,6 +75,7 @@ fn rec(state: State) -> Slow {
         start_micros: 6,
         beat: u64::MAX,
         posted: false,
+        orphaned: false,
         logs: "/l".into(),
         remote_ref: String::new(),
         server: String::new(),

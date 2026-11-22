@@ -494,6 +494,7 @@ mod tests {
                 start_micros: 0,
                 beat: 0,
                 posted: false,
+                orphaned: false,
                 logs: String::new(),
                 remote_ref: String::new(),
                 server: String::new(),

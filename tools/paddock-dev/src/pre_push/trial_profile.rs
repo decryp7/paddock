@@ -282,46 +282,77 @@ impl Exec for RealHooks {
     }
 }
 
-/// The settle on the real machine: the token from `GITEA_TOKEN`, curl, the clock and the process table. The final status is posted
-/// first, retried for a minute (the push may not have landed on the server yet), then the run is settled.
+/// The settle on the real machine: the token from `GITEA_TOKEN`, curl, the clock and the process table. The run is cancelled FIRST
+/// (a status that fails or stalls must not delay it), then the final status is posted, retried for a minute (the push may not have
+/// landed on the server yet).
 pub fn settle_real(state: &Path, sha: &str) -> String {
     let token = std::env::var("GITEA_TOKEN").unwrap_or_default();
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs());
+    settle_then_post(
+        state,
+        sha,
+        &mut crate::wait::CurlHttp,
+        &token,
+        now,
+        &trial_guard::holder_alive,
+        &mut Retry {
+            tries: 6,
+            pause: &mut |_| std::thread::sleep(Duration::from_secs(10)),
+        },
+    )
+}
+
+/// How the final status post is retried: `tries` in all, `pause(try)` between two of them.
+pub struct Retry<'a> {
+    /// How many tries.
+    pub tries: u32,
+    /// What waits between two tries.
+    pub pause: &'a mut dyn FnMut(u32),
+}
+
+/// [`settle_real`] over any HTTP: [`settle_with`] without the status first, then the final status in up to `tries` tries with
+/// `pause(try)` between them. The line says both.
+pub fn settle_then_post(
+    state: &Path,
+    sha: &str,
+    http: &mut dyn crate::wait::Http,
+    token: &str,
+    now: u64,
+    alive: &dyn Fn(u32, u64) -> bool,
+    retry: &mut Retry<'_>,
+) -> String {
+    let short = &sha[..sha.len().min(12)];
+    let settled = settle_with(state, sha, http, token, now, alive, false);
     let mut status = String::new();
     if let Ok(Some(mut rec)) = trial_guard::read_slow(state, sha) {
-        for attempt in 0..6 {
-            match trial_guard::post_final(state, &mut crate::wait::CurlHttp, &token, &mut rec) {
+        for attempt in 0..retry.tries {
+            match trial_guard::post_final(state, http, token, &mut rec) {
+                Ok(trial_guard::Post::Orphaned) => {
+                    status = format!(
+                        "::warning::trial {short}: the commit is not on the server, so the status {} is not posted. ",
+                        trial_guard::CONTEXT
+                    );
+                    break;
+                }
                 Ok(_) => {
                     status.clear();
                     break;
                 }
                 Err(e) => {
                     status = format!(
-                        "::warning::trial {}: the status {} could not be posted ({e}); `./dev ci dispatch --guard` and the next gate start post it again. ",
-                        &sha[..sha.len().min(12)],
+                        "::warning::trial {short}: the status {} could not be posted ({e}); `./dev ci dispatch --guard` and the next gate start post it again. ",
                         trial_guard::CONTEXT
                     );
-                    if attempt < 5 {
-                        std::thread::sleep(Duration::from_secs(10));
+                    if attempt + 1 < retry.tries {
+                        (retry.pause)(attempt);
                     }
                 }
             }
         }
     }
-    format!(
-        "{status}{}",
-        settle_with(
-            state,
-            sha,
-            &mut crate::wait::CurlHttp,
-            &token,
-            now,
-            &trial_guard::holder_alive,
-            false
-        )
-    )
+    format!("{settled} {status}").trim_end().to_string()
 }
 
 /// Settles and words the result as the log line of the slow phase (an `::error::` when the run is cancelled or cannot be). With

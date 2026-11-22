@@ -80,6 +80,8 @@ pub struct Slow {
     /// The final status (success, failure or error) has been posted on the commit; a final record with this false is posted again by
     /// the next sweep.
     pub posted: bool,
+    /// The commit is not on the server (the status post answered 404 or 422): it is never posted again and the sweep said so once.
+    pub orphaned: bool,
     /// The folder of the rows' logs.
     pub logs: String,
     /// The remote ref pushed (`refs/heads/wip/x`): a later push of the same ref ends this one's process.
@@ -99,7 +101,7 @@ impl Slow {
     /// The record as JSON.
     pub fn to_json(&self) -> Value {
         json!({"sha": self.sha, "state": self.state.name(), "row": self.row, "why": self.why, "next": self.next,
-               "pid": self.pid, "start_micros": self.start_micros, "beat": self.beat, "posted": self.posted, "logs": self.logs,
+               "pid": self.pid, "start_micros": self.start_micros, "beat": self.beat, "posted": self.posted, "orphaned": self.orphaned, "logs": self.logs,
                "remote_ref": self.remote_ref, "server": self.server, "repo": self.repo})
     }
 
@@ -116,6 +118,7 @@ impl Slow {
             start_micros: v["start_micros"].as_u64().unwrap_or(0),
             beat: v["beat"].as_u64().unwrap_or(0),
             posted: v["posted"].as_bool().unwrap_or(false),
+            orphaned: v["orphaned"].as_bool().unwrap_or(false),
             logs: s("logs"),
             remote_ref: s("remote_ref"),
             server: s("server"),
@@ -553,15 +556,43 @@ pub fn with_status_lock<T>(f: impl FnOnce() -> T) -> T {
     f()
 }
 
+/// Whether a failed status post says the commit is not on the server (Gitea answers 404, or 422 for an unknown sha).
+pub fn is_commit_missing(error: &str) -> bool {
+    error.contains("error: 404") || error.contains("error: 422") || error.contains("HTTP 404") || error.contains("HTTP 422")
+}
+
+/// What [`post_final`] did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Post {
+    /// The status landed.
+    Posted,
+    /// The record names no server: nothing was posted.
+    NoServer,
+    /// The server does not have the commit (it never reached it): the record is marked orphaned and never posted again.
+    Orphaned,
+}
+
 /// Posts the record's final verdict as the commit status and, when it landed for a final record, keeps that in the record (`posted`):
-/// a final record whose post did not land is posted again by the next sweep. `Ok(false)`: the record names no server.
-pub fn post_final(state: &Path, http: &mut dyn Http, token: &str, rec: &mut Slow) -> Result<bool, String> {
-    let posted = with_status_lock(|| post_slow_status(http, token, rec))?;
-    if posted && rec.state != State::Running && !rec.posted {
-        rec.posted = true;
-        write_slow(state, rec)?;
+/// a final record whose post did not land is posted again by the next sweep. A commit the server does not have is orphaned
+/// (marked, said once by the caller, never posted again); any other failure is an error to retry.
+pub fn post_final(state: &Path, http: &mut dyn Http, token: &str, rec: &mut Slow) -> Result<Post, String> {
+    match with_status_lock(|| post_slow_status(http, token, rec)) {
+        Ok(false) => Ok(Post::NoServer),
+        Ok(true) => {
+            if rec.state != State::Running && !rec.posted {
+                rec.posted = true;
+                write_slow(state, rec)?;
+            }
+            Ok(Post::Posted)
+        }
+        Err(e) if is_commit_missing(&e) && rec.state != State::Running => {
+            rec.posted = true;
+            rec.orphaned = true;
+            write_slow(state, rec)?;
+            Ok(Post::Orphaned)
+        }
+        Err(e) => Err(e),
     }
-    Ok(posted)
 }
 
 /// A full push-gate pass on `sha` clears a red record: it becomes `passed` and `success` is posted, so the "run `./dev check
@@ -581,10 +612,10 @@ pub fn clear_after_full_pass(state: &Path, http: &mut dyn Http, token: &str, sha
     Ok(Some(format!(
         "trial {}: the full gate passed, so the slow-rows record is cleared and the status {CONTEXT} is {}",
         &sha[..sha.len().min(12)],
-        if landed {
-            "`success`"
-        } else {
-            "not posted (no server in the record)"
+        match landed {
+            Post::Posted => "`success`",
+            Post::NoServer => "not posted (no server in the record)",
+            Post::Orphaned => "not posted (the commit is not on the server)",
         }
     )))
 }
@@ -603,6 +634,9 @@ pub fn sweep(state: &Path, http: &mut dyn Http, token: &str, time: &Time<'_>, en
         if rec.state != State::Running {
             if !rec.posted && !rec.server.is_empty() {
                 lines.push(match post_final(state, http, token, &mut rec) {
+                    Ok(Post::Orphaned) => format!(
+                        "::warning::trial {short}: the commit is not on the server (it was never pushed, or the push failed), so the status {CONTEXT} is not posted and will not be again"
+                    ),
                     Ok(_) => format!("trial {short}: the status {CONTEXT} that had not landed is posted"),
                     Err(e) => {
                         format!("::warning::trial {short}: the status {CONTEXT} is still not posted ({e}); the next gate start tries again")
@@ -698,11 +732,17 @@ pub fn prune(state: &Path, keep: usize) {
         })
         .collect();
     files.sort_by_key(|(t, _)| *t);
-    let drop = files.len().saturating_sub(keep);
-    for (_, rec) in files.into_iter().take(drop) {
-        if rec.state == State::Running && holder_alive(rec.pid, rec.start_micros) {
+    let mut remaining = files.len();
+    for (_, rec) in files {
+        if remaining <= keep {
+            break;
+        }
+        // Never a running record (its holder may be gone and the sweep still has to settle it) nor a final one whose status has not
+        // landed (the sweep still has to post it); they count toward the limit, so the others go until the folder fits.
+        if rec.state == State::Running || (!rec.posted && !rec.server.is_empty()) {
             continue;
         }
+        remaining -= 1;
         for what in ["slow", "dispatch"] {
             if let Ok(p) = path(state, &rec.sha, what) {
                 let _ = crate::safe_remove::remove_under(&d, &p, None);

@@ -129,6 +129,7 @@ fn base() -> Slow {
         start_micros: 6,
         beat: 7,
         posted: false,
+        orphaned: false,
         logs: "/l".into(),
         remote_ref: String::new(),
         server: String::new(),
@@ -324,6 +325,7 @@ fn the_pending_post_reads_the_record_again_each_try_and_stops_once_it_is_not_run
         start_micros: 1,
         beat: u64::MAX,
         posted: false,
+        orphaned: false,
         logs: String::new(),
         remote_ref: String::new(),
         server: "https://gitea.invalid".into(),
@@ -351,4 +353,67 @@ fn the_pending_post_reads_the_record_again_each_try_and_stops_once_it_is_not_run
     trial_guard::write_slow(d.path(), &rec(State::Running)).unwrap();
     assert!(pending_loop(d.path(), &sha, |_| Ok(true), |_| false, 5).contains("is pending"));
     assert!(pending_loop(d.path(), &sha, |_| Err("x".into()), |_| true, 5).contains("rows ended first"));
+}
+
+/// Round 3 P2-6: the run is cancelled BEFORE the final status is posted (a post that fails or stalls must not delay the cancel).
+#[test]
+fn the_run_is_cancelled_before_the_final_status_is_posted() {
+    use crate::trial_guard::tests::FakeGitea;
+    use crate::trial_guard::{Dispatched, Slow, State};
+    let sha = "ab".repeat(20);
+    let d = tempfile::tempdir().unwrap();
+    trial_guard::write_slow(
+        d.path(),
+        &Slow {
+            sha: sha.clone(),
+            state: State::Failed,
+            row: "doctest crates".into(),
+            why: "boom".into(),
+            next: "fix".into(),
+            pid: 1,
+            start_micros: 1,
+            beat: u64::MAX,
+            posted: false,
+            orphaned: false,
+            logs: String::new(),
+            remote_ref: String::new(),
+            server: "https://gitea.invalid".into(),
+            repo: "o/r".into(),
+        },
+    )
+    .unwrap();
+    trial_guard::write_dispatched(
+        d.path(),
+        &Dispatched {
+            sha: sha.clone(),
+            run_id: 9001,
+            workflow: "ci.yml".into(),
+            git_ref: "wip/x".into(),
+            server: "https://gitea.invalid".into(),
+            repo: "o/r".into(),
+        },
+    )
+    .unwrap();
+    let mut g = FakeGitea {
+        runs: vec![(9001, "in_progress")],
+        ..Default::default()
+    };
+    let line = settle_then_post(
+        d.path(),
+        &sha,
+        &mut g,
+        "t",
+        1_000,
+        &|_, _| true,
+        &mut Retry {
+            tries: 3,
+            pause: &mut |_| {},
+        },
+    );
+    let order: Vec<&str> = g
+        .writes
+        .iter()
+        .map(|(_, u)| if u.contains("/cancel") { "cancel" } else { "status" })
+        .collect();
+    assert_eq!(order, ["cancel", "status"], "{line}");
 }

@@ -20,6 +20,8 @@ pub struct FakeGitea {
     pub repo_push: Option<bool>,
     /// The most statuses the server returns per page whatever `limit` asks (Gitea's MAX_RESPONSE_ITEMS).
     pub status_page_cap: Option<usize>,
+    /// Make every status POST fail with this text (another error than the commit being missing).
+    pub status_post_error: Option<String>,
 }
 
 impl Http for FakeGitea {
@@ -70,6 +72,9 @@ impl Http for FakeGitea {
     }
     fn send_json(&mut self, method: &str, url: &str, _token: &str, body: Option<&Value>) -> Result<Value, String> {
         if url.contains("/statuses/") {
+            if let Some(e) = &self.status_post_error {
+                return Err(e.clone());
+            }
             if self.status_post_fails {
                 return Err("curl: (22) The requested URL returned error: 404".into());
             }
@@ -97,6 +102,7 @@ fn slow(state: State) -> Slow {
         start_micros: 7,
         beat: 1_000,
         posted: false,
+        orphaned: false,
         logs: "/logs/x".into(),
         remote_ref: String::new(),
         server: String::new(),
@@ -130,6 +136,9 @@ fn cancels(g: &FakeGitea) -> Vec<&(String, String)> {
         .filter(|(m, u)| m == "POST" && u.ends_with("/actions/runs/9001/cancel"))
         .collect()
 }
+
+/// A status post failure that is not "the commit is missing" (a server error): the post is retried, never orphaned.
+const TRANSIENT: &str = "curl: (22) The requested URL returned error: 503";
 
 const LIVE: &dyn Fn(u32, u64) -> bool = &|_, _| true;
 const GONE: &dyn Fn(u32, u64) -> bool = &|_, _| false;
@@ -526,7 +535,7 @@ fn the_sweep_settles_a_dead_or_overdue_child_and_leaves_a_live_one() {
 
     let down = dir_with(Some(&on_server(slow(State::Running))), Some(&dispatched()));
     let mut g = FakeGitea {
-        status_post_fails: true,
+        status_post_error: Some(TRANSIENT.into()),
         ..gitea_with_run()
     };
     let lines = sweep(down.path(), &mut g, "t", &time(1_000, GONE), &|_, _| {});
@@ -634,7 +643,8 @@ fn the_records_folder_has_an_owner_a_limit_and_evicts_the_oldest_but_never_a_liv
     let left = |n: u32| read_slow(d.path(), &sha(n)).unwrap().is_some();
     assert!(left(1), "the oldest is a live holder: kept");
     assert!(!left(2), "the next oldest goes first");
-    assert!(left(3) && left(4) && left(5));
+    assert!(!left(3), "a live holder counts toward the limit, so the next oldest goes too");
+    assert!(left(4) && left(5));
     assert!(
         read_dispatched(d.path(), &sha(2)).unwrap().is_none(),
         "its dispatch record goes with it"
@@ -708,12 +718,13 @@ fn a_final_status_that_did_not_land_is_posted_again_by_the_next_sweep() {
         d.path(),
         &Slow {
             posted: false,
+            orphaned: false,
             ..on_server(failed())
         },
     )
     .unwrap();
     let mut down = FakeGitea {
-        status_post_fails: true,
+        status_post_error: Some(TRANSIENT.into()),
         ..Default::default()
     };
     let mut rec = read_slow(d.path(), SHA).unwrap().unwrap();
@@ -770,7 +781,7 @@ fn a_full_gate_pass_clears_a_red_record_and_posts_success() {
 
     write_slow(d.path(), &on_server(failed())).unwrap();
     let mut down = FakeGitea {
-        status_post_fails: true,
+        status_post_error: Some(TRANSIENT.into()),
         ..Default::default()
     };
     assert!(clear_after_full_pass(d.path(), &mut down, "t", SHA).is_err());
@@ -839,4 +850,99 @@ fn a_server_success_does_not_override_this_checkouts_record_that_did_not_pass() 
         "unreadable fails closed"
     );
     assert_eq!(gate_kind(ok(), None), Ok(Gate::Counts), "no state folder given: the server alone");
+}
+
+/// Round 3 P2-6: a commit the server does not have (404 or 422 on the status post) is orphaned: reposting stops and the sweep says
+/// so once; any other failure keeps retrying.
+#[test]
+fn a_commit_the_server_does_not_have_is_orphaned_and_said_once_while_other_errors_keep_retrying() {
+    let d = tempfile::tempdir().unwrap();
+    write_slow(
+        d.path(),
+        &Slow {
+            posted: false,
+            ..on_server(failed())
+        },
+    )
+    .unwrap();
+    let mut missing = FakeGitea {
+        status_post_fails: true,
+        ..Default::default()
+    };
+    let lines = sweep(d.path(), &mut missing, "t", &time(1_000, LIVE), &|_, _| {});
+    assert!(lines.iter().any(|l| l.contains("not on the server")), "said once: {lines:?}");
+    let r = read_slow(d.path(), SHA).unwrap().unwrap();
+    assert!(r.orphaned && r.posted, "{r:?}");
+    assert_eq!(r.state, State::Failed, "the verdict itself stays");
+    let before = missing.writes.len();
+    assert!(
+        sweep(d.path(), &mut missing, "t", &time(1_001, LIVE), &|_, _| {}).is_empty(),
+        "nothing said again"
+    );
+    assert_eq!(missing.writes.len(), before, "and nothing posted again");
+    assert!(local_refusal(d.path(), SHA).is_some(), "the record still refuses locally");
+
+    let other = tempfile::tempdir().unwrap();
+    write_slow(
+        other.path(),
+        &Slow {
+            posted: false,
+            ..on_server(failed())
+        },
+    )
+    .unwrap();
+    let mut flaky = FakeGitea {
+        status_post_error: Some("curl: (22) The requested URL returned error: 500".into()),
+        ..Default::default()
+    };
+    let lines = sweep(other.path(), &mut flaky, "t", &time(1_000, LIVE), &|_, _| {});
+    assert!(lines.iter().any(|l| l.contains("still not posted")), "{lines:?}");
+    assert!(
+        !read_slow(other.path(), SHA).unwrap().unwrap().orphaned,
+        "a server error is not an orphan"
+    );
+    assert!(is_commit_missing("curl: (22) The requested URL returned error: 422"));
+    assert!(!is_commit_missing("curl: (22) The requested URL returned error: 500"));
+}
+
+/// Round 3 P2-6: the records folder never evicts a running record or one whose final status is not posted yet.
+#[test]
+fn the_records_folder_never_evicts_running_or_unposted_records() {
+    let d = tempfile::tempdir().unwrap();
+    let sha = |n: u32| format!("{n:040x}");
+    let old = std::time::SystemTime::now() - std::time::Duration::from_secs(5_000);
+    let kinds = [
+        (1u32, State::Running, false),
+        (2, State::Failed, false),
+        (3, State::Passed, true),
+        (4, State::Passed, true),
+        (5, State::Passed, true),
+    ];
+    for (n, state, posted) in kinds {
+        write_slow(
+            d.path(),
+            &Slow {
+                sha: sha(n),
+                state,
+                posted,
+                pid: 999_999_999,
+                start_micros: 1,
+                ..on_server(slow(State::Passed))
+            },
+        )
+        .unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(dir(d.path()).join(format!("{}.slow.json", sha(n))))
+            .unwrap()
+            .set_modified(old + std::time::Duration::from_secs(u64::from(n)))
+            .unwrap();
+    }
+    prune(d.path(), 2);
+    let left = |n: u32| read_slow(d.path(), &sha(n)).unwrap().is_some();
+    assert!(left(1) && left(2), "a dead-holder running record and an unposted one stay");
+    assert!(
+        !left(3) && !left(4) && !left(5),
+        "posted records go oldest first until the folder fits the limit"
+    );
 }
