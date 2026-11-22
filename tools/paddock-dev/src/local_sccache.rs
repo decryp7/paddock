@@ -268,11 +268,16 @@ fn location(stats: &str) -> Option<String> {
         .map(|r| r.trim().to_string())
 }
 
-/// The line of one level of a multi-level server (`  L0 (disk)   Local disk: "<dir>"`), without its label.
+/// The description line of one level of a multi-level server (`  L0 (disk)   Local disk: "<dir>"`), without its label. The descriptions
+/// follow the `Cache location` line; the per-level counter lines (`  L0 (disk) hits   0`) come before it and start with the same label,
+/// so only the lines after the location line are read (sccache 0.19.0, measured), and a line whose rest is not separated from the
+/// label by a gap is a counter, not a description.
 fn level(stats: &str, label: &str) -> Option<String> {
     stats
         .lines()
-        .find_map(|l| l.trim_start().strip_prefix(label))
+        .skip_while(|l| !l.starts_with("Cache location"))
+        .skip(1)
+        .find_map(|l| l.trim_start().strip_prefix(label).filter(|r| r.starts_with("  ")))
         .map(|r| r.trim().to_string())
 }
 
@@ -1347,6 +1352,7 @@ mod tests {
         std::fs::create_dir_all(dir).unwrap();
         let starts = |n: u32| dir.join(format!("starts-{n}"));
         let location = match foreign_location {
+            Some(l) if l.starts_with(MULTILEVEL_LOCATION) => format!("{CHAIN_COUNTERS}Cache location                  {l}"),
             Some(l) => format!("Cache location                  {l}"),
             None => "Cache location                  Local disk: \"{env:SCCACHE_DIR}\"".to_string(),
         };
@@ -2080,11 +2086,16 @@ mod tests {
         assert!(dir(&plain).ends_with("cache"), "{plain:?}");
     }
 
-    /// The stats of a server started with the two-level chain, as sccache 0.19.0 prints them (measured): the location line, then one
-    /// line per level.
+    /// The part of a two-level server's `--show-adv-stats` that comes before the cache location, as sccache 0.19.0 prints it
+    /// (measured on a running server, 2026-11-22): the per-level counter lines, which start with the same labels as the level
+    /// description lines further down. A fixture without them cannot tell a reader of the descriptions from a reader of the counters.
+    const CHAIN_COUNTERS: &str = "Unsupported compiler calls            0\nAverage cache write               0.038 s\nMulti-level cache levels              2\n  L0 (disk) hits                      0\n  L0 (disk) misses                  179\n  L0 (disk) hit rate               0.00 %\n  L0 (disk) writes                  179\n  L0 (disk) write failures            0\n  L0 (disk) backfills from            0\n  L0 (disk) backfills to              0\n  L0 (disk) avg cache write       0.000 s\n  L0 (disk) avg cache read hit    0.000 s\n  L1 (s3) hits                        0\n  L1 (s3) misses                    179\n  L1 (s3) hit rate                 0.00 %\n  L1 (s3) writes                    179\n  L1 (s3) write failures              0\n  L1 (s3) backfills from              0\n  L1 (s3) backfills to                0\n  L1 (s3) avg cache write         0.052 s\n  L1 (s3) avg cache read hit      0.000 s\n\nNon-cacheable reasons:\nincremental                          17\n\n";
+
+    /// The stats of a server started with the two-level chain, as sccache 0.19.0 prints them (measured): the counters, then the
+    /// location line, then one description line per level.
     fn chain_stats(l0_dir: &str, bucket: &str, prefix: &str) -> String {
         format!(
-            "Cache location                  Multi-level (2 levels)\n  L0 (disk)                     Local disk: \"{l0_dir}\"\n  L1 (s3)                       s3, name: {bucket}, prefix: /{prefix}/\n"
+            "{CHAIN_COUNTERS}Cache location                  Multi-level (2 levels)\n  L0 (disk)                     Local disk: \"{l0_dir}\"\n  L1 (s3)                       s3, name: {bucket}, prefix: /{prefix}/\nEffective cache mode            ReadWrite\n"
         )
     }
 
@@ -2108,11 +2119,11 @@ mod tests {
         assert!(!b.matches_stats(&chain_stats(dir, "other-bucket", &s3.prefix)), "another bucket");
         assert!(!b.matches_stats(&chain_stats(dir, &s3.bucket, "other")), "another prefix");
         assert!(
-            !b.matches_stats("Cache location                  Multi-level (2 levels)\n"),
+            !b.matches_stats(&format!("{CHAIN_COUNTERS}Cache location                  Multi-level (2 levels)\n")),
             "the location line alone says nothing"
         );
         assert!(
-            !b.matches_stats(&format!("Cache location                  Multi-level (2 levels)\n  L0 (disk)                     Local disk: \"{dir}\"\n  L1 (redis)                    Redis: x\n")),
+            !b.matches_stats(&format!("{CHAIN_COUNTERS}Cache location                  Multi-level (2 levels)\n  L0 (disk)                     Local disk: \"{dir}\"\n  L1 (redis)                    Redis: x\n")),
             "another second level"
         );
     }
@@ -2146,7 +2157,7 @@ mod tests {
             .when(
                 &Case::new().args_start_with(&["--show-adv-stats"]).file_exists(&stopped),
                 rw(Actions::new()
-                    .stdout("Cache location                  Multi-level (2 levels)")
+                    .stdout_with(&format!("{CHAIN_COUNTERS}Cache location                  Multi-level (2 levels)"))
                     .stdout_with("  L0 (disk)                     Local disk: \"{env:SCCACHE_DIR}\"")
                     .stdout_with("  L1 (s3)                       s3, name: {env:SCCACHE_BUCKET}, prefix: /{env:SCCACHE_S3_KEY_PREFIX}/")),
             )
