@@ -172,7 +172,7 @@ Licence expressions (packages):
 - foreign-types 0.5.0 — MIT OR Apache-2.0 [MIT-186]
 - foreign-types-macros 0.2.4 — MIT OR Apache-2.0 [MIT-186]
 - foreign-types-shared 0.3.1 — MIT OR Apache-2.0 [MIT-186]
-- form_urlencoded 1.2.2 — MIT OR Apache-2.0 [MIT-51]
+- form_urlencoded 1.2.3 — MIT OR Apache-2.0 [MIT-51]
 - fs4 0.13.1 — MIT OR Apache-2.0 [MIT-1]
 - futures 0.3.34 — MIT OR Apache-2.0 [MIT-169]
 - futures-channel 0.3.34 — MIT OR Apache-2.0 [MIT-169]
@@ -520,7 +520,7 @@ Licence expressions (packages):
 - uom 0.38.0 — Apache-2.0 OR MIT [MIT-82]
 - ureq 3.5.0 — MIT OR Apache-2.0 [MIT-35]
 - ureq-proto 0.6.5 — MIT OR Apache-2.0 [MIT-176]
-- url 2.5.8 — MIT OR Apache-2.0 [MIT-117]
+- url 2.5.9 — MIT OR Apache-2.0 [MIT-117]
 - urlpattern 0.6.0 — MIT [MIT-218]
 - utf8-zero 0.8.1 — MIT OR Apache-2.0 [MIT-47]
 - utf8_iter 1.0.4 — Apache-2.0 OR MIT [MIT-120]
@@ -5358,7 +5358,7 @@ Used by (1):
 ### MIT-51
 
 Used by (1):
-  form_urlencoded 1.2.2
+  form_urlencoded 1.2.3
 
     Copyright (c) 2013-2016 The rust-url developers
 
@@ -7313,7 +7313,7 @@ Used by (1):
 ### MIT-117
 
 Used by (3):
-  idna 1.1.0, percent-encoding 2.3.2, url 2.5.8
+  idna 1.1.0, percent-encoding 2.3.2, url 2.5.9
 
     Copyright (c) 2013-2025 The rust-url developers
 

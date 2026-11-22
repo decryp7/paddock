@@ -146,12 +146,24 @@ test('the shared actions follow the repo rules: no AI attribution text, Gitea-co
   }
 });
 
-test('setup-rust declares the sccache backend inputs: local disk by default, Redis only when asked for', () => {
+test('no workflow, action or doc switches the compile cache by a repository variable any more (user decision 2026-11-21)', () => {
+  const files = spawnSync('git', ['ls-files', '.gitea', 'docs', 'tools', 'conformance', 'scripts', 'AGENTS.md'], { cwd: PADDOCK, encoding: 'utf8' }).stdout.split('\n').filter(Boolean);
+  assert.ok(files.length > 50, 'the file list was read');
+  const hits = files.filter((f) => !/\.test\.mjs$/.test(f) && /\.(ya?ml|md|rs|mjs|sh|tsv|toml)$/.test(f) && read(join(PADDOCK, f)).includes('PADDOCK_CI_SCCACHE_BACKEND'));
+  assert.deepEqual(hits, [], 'PADDOCK_CI_SCCACHE_BACKEND is gone: the default is s3, ci.yml\'s sccache_backend input overrides one run');
+  // The override stays, and only as ci.yml's dispatch input.
+  assert.match(read(join(WORKFLOWS, 'ci.yml')), /\n {6}sccache_backend:\n {8}description: /);
+});
+
+test('setup-rust declares the sccache backend inputs: s3 by default, Redis only when asked for', () => {
   const text = read(join(ACTIONS, 'setup-rust', 'action.yml'));
   const declared = declaredInputs(text);
   for (const i of ['sccache-backend', 'sccache-redis-endpoint', 'sccache-redis-db', 'sccache-s3-access-key-id', 'sccache-s3-secret-access-key', 'sccache-s3-endpoint', 'sccache-s3-bucket']) assert.ok(declared.includes(i), `${i} is declared`);
-  // The switch is the Gitea variable, local when it is unset (ER-41: s3 only after its first green run).
-  assert.match(text, /sccache-backend:\n(?:.*\n)*?\s+default: \$\{\{ github\.event\.inputs\.sccache_backend \|\| vars\.PADDOCK_CI_SCCACHE_BACKEND \|\| 'local' \}\}/);
+  // s3 is the default (user decision 2026-11-21); the dispatch input of ci.yml is the only one-run override, no Gitea variable.
+  assert.match(text, /sccache-backend:\n(?:.*\n)*?\s+default: \$\{\{ github\.event\.inputs\.sccache_backend \|\| 's3' \}\}/);
+  // The S3 guard asks the release condition itself (kit.sh release-path), never PADDOCK_DEV_DOWNLOAD, which the same step sets for a job with no read token.
+  assert.match(text, /echo "release=\$\(bash "[^"\n]*kit\.sh" release-path\)" >> "\$GITHUB_OUTPUT"/);
+  assert.match(text, /PADDOCK_CI_RELEASE: \$\{\{ steps\.kit\.outputs\.release \}\}/);
   // The S3 key reaches the one step that runs ./dev ci setup-rust, never $GITHUB_ENV or another step (conformance C141 checks the callers).
   assert.equal(text.split('PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY: ${{ inputs.sccache-s3-secret-access-key }}').length - 1, 1, 'one step receives the secret');
   assert.doesNotMatch(text, /GITHUB_ENV.*S3_SECRET/);
@@ -1102,8 +1114,8 @@ test('every e2e job of every kit app, ci.yml and debrief.yml runs on a port no o
 test('app-gates tests last-packages apart on Linux only, and a host leg leaves them out of clippy, tests and doc tests', () => {
   const gates = read(join(ACTIONS, 'app-gates', 'action.yml'));
   assert.match(gates, /for pkg in \$LAST_PACKAGES; do exclude\+=\(--exclude "\$pkg"\); last\+=\(-p "\$pkg"\); done/, 'one list feeds the exclusions and the separate run');
-  assert.match(gates, /step \$\{wrap\[@\]\+"\$\{wrap\[@\]\}"\} cargo nextest run --workspace \$\{exclude\[@\]\+"\$\{exclude\[@\]\}"\}/, 'the workspace run never includes them');
-  assert.match(gates, /if \[ "\$RUNNER_OS" = Linux \] && \[ \$\{#last\[@\]\} -gt 0 \]; then step \$\{wrap\[@\]\+"\$\{wrap\[@\]\}"\} cargo nextest run \$\{last\[@\]\+"\$\{last\[@\]\}"\}/, 'Linux runs them after the rest');
+  assert.match(gates, /sel=\(--workspace \$\{exclude\[@\]\+"\$\{exclude\[@\]\}"\}/, 'the workspace run never includes them');
+  assert.match(gates, /if \[ "\$RUNNER_OS" = Linux \] && \[ \$\{#last\[@\]\} -gt 0 \]; then\n\s+sel=\(\$\{last\[@\]\+"\$\{last\[@\]\}"\}/, 'Linux runs them after the rest');
   assert.match(gates, /step cargo clippy --workspace \$\{hostexclude\[@\]\+"\$\{hostexclude\[@\]\}"\}/, 'clippy: excluded on a host only');
   assert.match(gates, /step cargo test --workspace \$\{hostexclude\[@\]\+"\$\{hostexclude\[@\]\}"\} --doc/, 'doc tests: excluded on a host only');
   assert.match(read(join(WORKFLOWS, 'ci.yml')), /rust-checks: \$\{\{ matrix\.rust_checks \}\}/, 'ci.yml hands rustChecks to app-gates');

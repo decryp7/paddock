@@ -37,7 +37,7 @@ pub const MAX_CHAT_TOOL_BYTES: usize = 256 * 1024;
 pub fn timeout_for(method: &str) -> Duration {
     Duration::from_secs(match method {
         "stop_serving" => 30,
-        "delete_model" | "install_build" | "remove_build" | "select_build" | "rollback_build" => 120,
+        "delete_model" | "delete_models" | "install_build" | "remove_build" | "select_build" | "rollback_build" => 120,
         "search_models" | "repo_files" | "download_model" | "release_memory" | "unload_model" => 60,
         _ => 15,
     })
@@ -66,6 +66,15 @@ impl Validate for String {
             return Err(bad(field, "must not contain control characters"));
         }
         Ok(())
+    }
+}
+
+/// A list of ids (a bulk call): only its length is checked here, with the same function and bound as the server
+/// ([`pitwall_core::mgmt::check_bulk`]). An id that is too long or malformed is that id's own result from the server
+/// (`invalid`), never a refusal of the whole call (ADR 0108: errors per item).
+impl Validate for Vec<String> {
+    fn validate(&self, field: &str) -> Result<(), CommandError> {
+        pitwall_core::mgmt::check_bulk(self.len(), field)
     }
 }
 
@@ -259,6 +268,9 @@ rpc!(
 rpc!(
     /// Deletes a model from disk.
     delete_model => "delete_model", id: String = "id");
+rpc!(
+    /// Deletes many models from disk with one scan; one `ItemResult` per id, in order (ADR 0108, PW-1).
+    delete_models => "delete_models", ids: Vec<String> = "ids");
 rpc!(
     /// Unloads a model.
     unload_model => "unload_model", id: String = "id");
@@ -482,6 +494,25 @@ mod tests {
         assert!(Some("x".to_string()).validate("p").is_ok());
         assert!(Option::<String>::None.validate("p").is_ok());
         assert!(Some("a\nb".to_string()).validate("p").is_err());
+    }
+
+    /// A list of ids (a bulk call) is bounded as a whole; a bad id in it is not refused here but answered by the server as that
+    /// id's own result (ADR 0108), so one bad id never fails the rest.
+    #[test]
+    fn a_list_of_ids_is_bounded_and_a_bad_id_is_left_to_the_server() {
+        assert!(vec!["a".to_string(), "b".to_string()].validate("ids").is_ok());
+        assert!(Vec::<String>::new().validate("ids").is_ok());
+        let many = vec!["a".to_string(); pitwall_core::mgmt::MAX_BULK_IDS + 1];
+        let e = many.validate("ids").unwrap_err();
+        assert_eq!(e.code, ErrorCode::BadRequest);
+        assert_eq!(
+            e.message,
+            pitwall_core::mgmt::check_bulk(many.len(), "ids").unwrap_err().message,
+            "the server's text"
+        );
+        assert!(vec!["ok".to_string(), "a\u{0}b".to_string(), "x".repeat(MAX_TEXT + 1)]
+            .validate("ids")
+            .is_ok());
     }
 
     #[test]

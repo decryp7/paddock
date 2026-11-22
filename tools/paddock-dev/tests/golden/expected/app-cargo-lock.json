@@ -23,6 +23,9 @@
    "z"
   ]
  },
+ "cargoOnly": [
+  "app:z"
+ ],
  "why": {
   "app:z": [
    "apps/z/app/src-tauri/Cargo.lock"

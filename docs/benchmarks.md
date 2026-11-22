@@ -170,10 +170,22 @@ failing mode.
   `pre-push done` line: queue time = `waited` (lock) + `held` - `ran` (the load gate, which runs while the lock is held)
 - **Command:** `grep " done rc=" pitcrew-lock-activity.log | perl -ne 'print "$1 ",$4+$3-$2,"\n" if /Z (\S+) done rc=\S+, ran (\d+)s \(held (\d+)s, waited (\d+)s\)/'`, sorted
 - **Numbers:** 145 steps, all `pre-push`: p50 21 s, p90 386 s, p95 703 s, p99 993 s, max 1,187 s
-- **Notes:** the basis of `QUEUE_MAX` (30 min) as the whole push's queue allowance (tools/paddock-dev/src/pre_push/exec.rs, ADR
+- **Notes:** (superseded 2026-11-21 by the stall limit below) the basis of `QUEUE_MAX` (30 min) as the whole push's queue allowance (tools/paddock-dev/src/pre_push/exec.rs, ADR
   0102 amendment 2026-11-15): one step's worst wait (about 20 min) fits; a push whose heavy steps wait 30 min in all is a busy
   machine's finding, reported "not measured" with the time queued and the load. Not measured: the queue time per push (the log
   does not say which push a step belonged to).
+
+### 2026-11-21, pre-push heavy queue progress gaps (fix/push-gate-queue-stall)
+
+- **Commit:** 3d776b605 (main when measured)
+- **Machine:** Mac mini, Apple M4 Pro, 14 cores, 64 GB, macOS 27.2; the shared machine with other agents running
+- **Source:** heavy's activity log (`pitcrew-lock-activity.log` in heavy's lock folder), 2026-11-14 13:02Z to 2026-11-21 10:12Z, 22,646 lines
+- **Method:** the queue's progress events are the `took the lock` and `done rc=` lines; a gap is the time between two consecutive events with at least one `waiting` line inside it (somebody was waiting, nothing moved). A short Python script over the log (not kept; the log is in the machine's temp folder).
+- **Numbers:** 1,386 gaps: p50 81 s, p90 314 s, p95 453 s, p99 813 s, max 1,446 s (the five longest: 1,112, 1,143, 1,182, 1,443 and 1,446 s)
+- **Queue length:** the most steps waiting at once in the same log: 13 (`position N of 13`). Rows of the three refused pushes of 2026-11-21 (watch-rescan push4, push5, push6): 45 rows decided per push (32 passed + 13 not measured, 31 + 14, 30 + 15) and 20 skipped; the longest of those gate runs was 76 minutes (the log files' times, 15:32 to 16:48).
+- **Derived limits (ER-12):** `WAIT_BACKSTOP` = 2 x 13 x 1,122 s (the slowest healthy row, "Doctest row of the push gate") = 29,172 s (8 h 6 min); the member gate's outer `TIMEOUT` is 24 h, 19 times the longest push gate run seen. Both are backstops for a hung client or gate: the judgement is the row cap and the queue's progress.
+- **Holders count while they live:** a holder whose record is inside the cap its own row lives under (the waiter's `--run-max`, `ROW_CAP` + grace, 3,675 s) is progress by itself, so a waiter behind a healthy 31 to 60 minute step is not stalled; past the cap it is not live, and the same picture ends the wait a stall limit later.
+- **Notes:** the basis of `QUEUE_STALL` (30 min, 1,800 s) in `tools/paddock-dev/src/pre_push/exec.rs`: over the longest gap seen, so a queue that moves is never ended. A holder that runs longer is ended by its own row cap. The per-push totals it replaces (15 min of run, 30 min of queue) were exceeded by three pushes on 2026-11-21 with no row running too long: 13, 14 and 15 rows, and 5 rows, were not measured. Not measured: the gaps of a quiet machine.
 
 ### 2026-11-12, SVG drift check: font metrics (ci/svg-drift-check)
 
@@ -2335,6 +2347,12 @@ save more, on each OS? And did the user's Defender process exclusions for git ch
 
 - **Result:** the dispatch input switched the S3 level on in every job (`sccache: local disk .../s3, then S3 bucket ... (through the timeout guard on 127.0.0.1:<port>)` on all 15 jobs that compile or start the server); all three classes reached RustFS, wrote to it (5,240 writes, 0 failures) and read from it (385 L1 hits, 208 of them on macOS in the `paddock-dev` job, whose crates the earlier trials had stored). The guard cut **no** request: its logs held 185 lines `was quiet for 10 s and is closed` (idle keep-alive connections, routine) and no `did not answer`. One guard ended by its 15-minute idle limit in a job whose compiles were more than 15 minutes apart; from then on that job used its local disk alone (a connect to the guard is refused, which sccache's `l0` policy ignores). That is the measured cause for the change of the idle limit to 6 hours (`Limits::default`); the job's own end stops the guard. The hit rate of a first run is low by construction (macOS 31%, Linux 15%, Windows 0.6%); the second run of the same head is the measurement of the shared cache, and was not made (one run per head).
 - **Not measured:** a second run's hit rate, the time saved on a full ci.yml run, and a store that hangs on the real runners (none did).
+
+## sccache on RustFS as the default everywhere it is allowed (2026-11-21, feat/sccache-s3-default)
+
+- **Question:** with `s3` as the default of `setup-rust` and of `./dev sccache env` (user decision 2026-11-21), what are the hit rates (L0 disk, L1 S3) per runner class and on the developer's Mac?
+- **Not measured yet:** the first-run hit rates of ci.yml on the three runner classes and of a local `./dev sccache env` session will be added here, with their run ids, after the first full CI run on this change (docs/research/2026-11-19-sccache.md, section 8, "Not measured"). Until then the only numbers are the 2026-11-20 trial above (run 8363, a dispatch with `sccache_backend=s3`).
+- **dev-tool cache (same branch):** `conformance/ci/dev-tool-cache.sh` read the wrong lines of `./dev --wrapper-hash`, so in run 8509 every Linux job logged "gave no hash" and built `./dev` cold (about 1 to 2 minutes per job, about 40 jobs a run). The minutes saved by the fix are not measured yet: the second job of the first run on this change should log `state=hit`; its time and the first job's build time will be recorded here.
 
 ## CI job cost, step by step (2026-11-20, docs/ci-job-cost-research)
 

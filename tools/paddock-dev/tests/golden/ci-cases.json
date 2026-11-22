@@ -45,6 +45,20 @@
   }
  },
  {
+  "name": "ci-member-run-narrows-nextest-to-the-reached-package",
+  "args": [
+   "--ci"
+  ],
+  "env": {
+   "GITHUB_EVENT_NAME": "workflow_dispatch",
+   "GITHUB_REF": "refs/heads/topic",
+   "PLAN_BASE": "fixture-head"
+  },
+  "edit": {
+   "crates/b/src/lib.rs": "// a member's one change\npub fn b() {}\n"
+  }
+ },
+ {
   "name": "ci-manual-run-without-a-base",
   "args": [
    "--ci"

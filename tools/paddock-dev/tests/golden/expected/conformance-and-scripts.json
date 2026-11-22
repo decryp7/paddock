@@ -30,6 +30,7 @@
   ]
  },
  "packages": {},
+ "cargoOnly": [],
  "why": {
   "app:x": [
    "conformance conformance/src/a.mjs"

@@ -45,7 +45,7 @@ pub mod warm;
 use crate::plan::{Request, plan_with_graph};
 use crate::plan_repo::git_text;
 use clap::Args;
-use exec::{BUDGET, Kind, QUEUE_MAX, RealExec, Row, RunOpts, run_all_timed, workers};
+use exec::{Kind, QUEUE_STALL, RealExec, Row, RunOpts, run_all_timed, workers};
 use gates::{Change, Facts};
 use paddock_cli::{CliError, Exit, Report};
 use paddock_env::winpath;
@@ -471,7 +471,7 @@ fn command_in(
         row_cap: exec::ROW_CAP,
         state: state.clone(),
     };
-    let queue = queue_max(&env);
+    let queue_stall = queue_stall(&env);
     let history = GitHistory::new(&work, GIT_TIMEOUT);
     let req = Request {
         files: change.files.clone(),
@@ -526,17 +526,16 @@ fn command_in(
         notes.push("no heavy on PATH: the compiles (clippy, xwin, Linux) run through the heavy built from tools/heavy (cached under ~/.paddock-dev/bin); if that build fails they are not measured (ER-24)".into());
     }
     let head = format!(
-        "{overridden}pre-push: base {} ({}), {} commit(s) beyond it; {} changed file(s); {} gate(s) at a time (1-minute load {}); run budget {} min (after it no new row starts; a started row is not cut by it) and a cap of {} min per row, stacks logged before a step is ended; watchdog: {} (time queued for the heavy slot behind other agents is reported apart and bounded on its own: {} min for the whole push; {}); logs in {}\n{}",
+        "{overridden}pre-push: base {} ({}), {} commit(s) beyond it; {} changed file(s); {} gate(s) at a time (1-minute load {}); no total budget: each row has a cap of {} min on its own run time, counted from when it starts running, stacks logged before a step is ended; watchdog: {} (waiting for the heavy slot is queue time, reported apart and never run time; it goes on while the queue moves and ends after {} min without progress; {}); logs in {}\n{}",
         base,
         base_why,
         commit_count(&root, &base, pushed.first().map_or("HEAD", String::as_str)),
         change.files.len(),
         n,
         load.map_or("unknown".to_string(), |l| format!("{l:.1}")),
-        BUDGET.as_secs() / 60,
         exec::ROW_CAP.as_secs() / 60,
         real.watchdog.name(),
-        queue.as_secs() / 60,
+        queue_stall.as_secs() / 60,
         if real.priority {
             "priority lane: this push lands on a train, main or a release tag"
         } else {
@@ -553,8 +552,7 @@ fn command_in(
         ex,
         &RunOpts {
             workers: n,
-            budget: BUDGET,
-            queue,
+            queue_stall,
             stop: &stop,
             subject: &subject,
         },
@@ -603,7 +601,7 @@ fn command_in(
 }
 
 /// One line per run in `queue-times.log` beside the gate logs: the whole push's heavy queue and run time, the measurement the
-/// per-push queue allowance ([`QUEUE_MAX`]) is to be revisited with (its basis so far is per step, ADR 0102 amendment).
+/// stall limit ([`QUEUE_STALL`]) can be checked against (the gaps between queue events are in docs/benchmarks.md, ADR 0102 amendment 2026-11-21).
 fn log_queue_times(state: &Path, sha: Option<&str>, base: &str, timings: &std::collections::BTreeMap<String, budget::Timing>) {
     use std::io::Write;
     let queued: f64 = timings.values().map(|t| t.queued).sum();
@@ -625,13 +623,13 @@ fn log_queue_times(state: &Path, sha: Option<&str>, base: &str, timings: &std::c
         .and_then(|mut f| f.write_all(line.as_bytes()));
 }
 
-/// The push's queue allowance (all its heavy steps' waits for the slot together): `PADDOCK_QUEUE_MAX` (seconds, at least 1) or
-/// [`QUEUE_MAX`].
-fn queue_max(env: &HashMap<String, String>) -> Duration {
-    env.get("PADDOCK_QUEUE_MAX")
+/// How long a step's wait for the heavy slot may go without the queue making progress: `PADDOCK_QUEUE_STALL` (seconds, at least 1) or
+/// [`QUEUE_STALL`].
+fn queue_stall(env: &HashMap<String, String>) -> Duration {
+    env.get("PADDOCK_QUEUE_STALL")
         .and_then(|v| v.trim().parse::<u64>().ok())
         .filter(|s| *s >= 1)
-        .map_or(QUEUE_MAX, Duration::from_secs)
+        .map_or(QUEUE_STALL, Duration::from_secs)
 }
 
 /// One not-measured row per pushed commit beyond the first: a run checks a single commit, so the others are never passed.

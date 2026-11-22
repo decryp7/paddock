@@ -10,8 +10,8 @@
 
 use pitwall_core::cache::{CacheStore, Expiry, Key, Kind, KindStats, Limits, Meta, Scope};
 use pitwall_core::time::Millis;
-use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
-use std::collections::HashMap;
+use rusqlite::{params, Connection, OpenFlags};
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -28,10 +28,19 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 type Limiter = Arc<Mutex<HashMap<Kind, Limits>>>;
 type Pending = Arc<Mutex<HashMap<(Kind, Key), (Vec<u8>, Meta, Millis)>>>;
 
+/// One value to store: its key, bytes and who it belongs to.
+type Item = (Key, Vec<u8>, Meta);
+
 enum Job {
-    Put(Kind, Key, Vec<u8>, Meta, Millis),
-    Touch(Kind, Key, Millis),
-    Delete(Kind, Key),
+    /// A batch of stores of one kind: one transaction, one trim. All or nothing, atomic by design: if one row fails the
+    /// transaction rolls back and none of the batch is stored (the error is kept for [`SqliteStore::last_error`]); a cache may
+    /// lose a store, so there are no per-item errors (PRINCIPLES: Bulk APIs, atomic by design).
+    PutMany(Kind, Vec<Item>, Millis),
+    /// Hit counts of a batch of reads: one transaction.
+    TouchMany(Kind, Vec<Key>, Millis),
+    /// Expired entries found by a read, each with the `created` time the reader saw: one transaction. A row stored again since
+    /// has another `created` and stays.
+    DeleteMany(Kind, Vec<(Key, i64)>),
     Clear(Scope, SyncSender<u64>),
     Sweep(Kind, Millis, u64, SyncSender<u64>),
     Trim(Kind),
@@ -105,7 +114,13 @@ impl SqliteStore {
     /// Opens (or creates) the database. A file that cannot be used is moved aside and replaced; the error is only
     /// returned when even a fresh file cannot be created.
     pub fn open(path: &Path, response: Limits, embedding: Limits) -> Result<SqliteStore, String> {
-        let writer = match init(path) {
+        Self::open_with(path, response, embedding, |_| {})
+    }
+
+    /// [`SqliteStore::open`], with `tune` run on each connection (writer, then reader) before it is used: the tests count
+    /// commits and statements there.
+    fn open_with(path: &Path, response: Limits, embedding: Limits, tune: impl Fn(&mut Connection)) -> Result<SqliteStore, String> {
+        let mut writer = match init(path) {
             Ok(c) => c,
             Err(_) => {
                 let stamp = crate::paths::now_ms();
@@ -117,7 +132,9 @@ impl SqliteStore {
                 init(path).map_err(|e| format!("the cache database cannot be created: {e}"))?
             }
         };
-        let reader = set_up(path, OpenFlags::SQLITE_OPEN_READ_ONLY).map_err(|e| format!("the cache database cannot be read: {e}"))?;
+        tune(&mut writer);
+        let mut reader = set_up(path, OpenFlags::SQLITE_OPEN_READ_ONLY).map_err(|e| format!("the cache database cannot be read: {e}"))?;
+        tune(&mut reader);
         let limits: Limiter = Arc::new(Mutex::new(HashMap::from([
             (Kind::Response, response),
             (Kind::Embedding, embedding),
@@ -145,7 +162,7 @@ impl SqliteStore {
         Ok(s)
     }
 
-    /// The last write error, if any (cleared by the next successful write).
+    /// The last write or read error, if any (a write error is cleared by the next successful write).
     pub fn last_error(&self) -> Option<String> {
         lock(&self.last_error).clone()
     }
@@ -167,61 +184,193 @@ fn record(err: &Mutex<Option<String>>, r: rusqlite::Result<()>) {
     *lock(err) = r.err().map(|e| e.to_string());
 }
 
+/// The bytes each kind holds, kept by the writer thread so a store never sums the whole table: read once on the first need
+/// and updated by every store and eviction; any other change to the rows (clear, sweep, delete, a failed write) forgets it.
+type Sizes = HashMap<Kind, i64>;
+
+/// Keys per `IN (...)` list (SQLite's variable limit is far higher; this keeps statements small).
+const IN_CHUNK: usize = 500;
+
+/// `?{from}, ?{from+1}, ...` for `n` variables.
+fn placeholders(n: usize, from: usize) -> String {
+    (from..from + n).map(|i| format!("?{i}")).collect::<Vec<_>>().join(",")
+}
+
+/// Runs `f` in one transaction: one commit for everything it did.
+fn in_tx<T>(c: &Connection, f: impl FnOnce(&Connection) -> rusqlite::Result<T>) -> rusqlite::Result<T> {
+    let tx = c.unchecked_transaction()?;
+    let out = f(&tx)?;
+    tx.commit()?;
+    Ok(out)
+}
+
 fn writer_loop(c: &Connection, rx: &Receiver<Job>, limits: &Limiter, pending: &Pending, err: &Mutex<Option<String>>) {
+    let mut sizes = Sizes::new();
     while let Ok(job) = rx.recv() {
         match job {
-            Job::Put(kind, key, value, meta, now) => {
-                let r = c
-                    .execute(
-                        "INSERT OR REPLACE INTO entries (kind,key,value,size,created,used,hits,model,app,preset) VALUES (?1,?2,?3,?4,?5,?5,0,?6,?7,?8)",
-                        params![kind.name(), key.as_slice(), value.as_slice(), value.len() as i64, now as i64, meta.model, meta.app, meta.preset],
-                    )
-                    .map(|_| ());
-                let ok = r.is_ok();
+            Job::PutMany(kind, items, now) => {
+                let r = in_tx(c, |c| put_many(c, kind, &items, now, limits, &mut sizes));
+                if r.is_err() {
+                    sizes.remove(&kind);
+                }
                 record(err, r);
                 let mut p = lock(pending);
-                if p.get(&(kind, key)).is_some_and(|(v, _, t)| *t == now && *v == value) {
-                    p.remove(&(kind, key));
-                }
-                drop(p);
-                if ok {
-                    record(err, trim(c, kind, limits));
+                for (key, value, _) in &items {
+                    if p.get(&(kind, *key)).is_some_and(|(v, _, t)| *t == now && v == value) {
+                        p.remove(&(kind, *key));
+                    }
                 }
             }
-            Job::Touch(kind, key, now) => record(
-                err,
-                c.execute(
-                    "UPDATE entries SET used=?3, hits=hits+1 WHERE kind=?1 AND key=?2",
-                    params![kind.name(), key.as_slice(), now as i64],
-                )
-                .map(|_| ()),
-            ),
-            Job::Delete(kind, key) => record(
-                err,
-                c.execute("DELETE FROM entries WHERE kind=?1 AND key=?2", params![kind.name(), key.as_slice()])
-                    .map(|_| ()),
-            ),
+            Job::TouchMany(kind, keys, now) => record(err, in_tx(c, |c| touch_many(c, kind, &keys, now))),
+            Job::DeleteMany(kind, keys) => {
+                let r = in_tx(c, |c| delete_expired(c, kind, &keys));
+                match &r {
+                    // The rows that went are subtracted from the running figure; it is only forgotten when the delete failed.
+                    Ok(freed) => {
+                        if let Some(total) = sizes.get_mut(&kind) {
+                            *total -= freed;
+                        }
+                    }
+                    Err(_) => {
+                        sizes.remove(&kind);
+                    }
+                }
+                record(err, r.map(|_| ()));
+            }
             Job::Clear(scope, reply) => {
+                sizes.clear();
                 let n = match &scope {
                     Scope::All => c.execute("DELETE FROM entries", []),
                     Scope::Kind(k) => c.execute("DELETE FROM entries WHERE kind=?1", params![k.name()]),
                     Scope::App(a) => c.execute("DELETE FROM entries WHERE app=?1", params![a]),
                     Scope::Model(m) => c.execute("DELETE FROM entries WHERE model=?1", params![m]),
+                    Scope::Models(ms) => delete_models(c, ms),
                     Scope::Preset(p) => c.execute("DELETE FROM entries WHERE preset=?1", params![p]),
                 };
                 lock(pending).retain(|(k, _), (_, meta, _)| !scope.covers(*k, meta));
                 let _ = reply.send(n.unwrap_or(0) as u64);
             }
             Job::Sweep(kind, now, max, reply) => {
+                sizes.remove(&kind);
                 let n = limits_for(limits, kind).map_or(0, |l| sweep(c, kind, l.expiry, now, max));
                 let _ = reply.send(n);
             }
-            Job::Trim(kind) => record(err, trim(c, kind, limits)),
+            Job::Trim(kind) => {
+                let r = in_tx(c, |c| trim(c, kind, limits, &mut sizes));
+                if r.is_err() {
+                    sizes.remove(&kind);
+                }
+                record(err, r);
+            }
             Job::Flush(reply) => {
                 let _ = reply.send(());
             }
         }
     }
+}
+
+/// Deletes every entry of `models` in one transaction: one `model IN (...)` statement per chunk of models, one commit.
+fn delete_models(c: &Connection, models: &[String]) -> rusqlite::Result<usize> {
+    let mut n = 0;
+    in_tx(c, |c| {
+        for chunk in models.chunks(IN_CHUNK) {
+            let sql = format!("DELETE FROM entries WHERE model IN ({})", placeholders(chunk.len(), 1));
+            n += c.execute(&sql, rusqlite::params_from_iter(chunk))?;
+        }
+        Ok(())
+    })?;
+    Ok(n)
+}
+
+/// Counts one hit and the use time on every key of `keys` (distinct): one `key IN (...)` update per chunk, in the caller's
+/// transaction (ADR 0108, PW-2).
+fn touch_many(c: &Connection, kind: Kind, keys: &[Key], now: Millis) -> rusqlite::Result<()> {
+    let (kn, used) = (kind.name(), now as i64);
+    for chunk in keys.chunks(IN_CHUNK) {
+        let sql = format!(
+            "UPDATE entries SET used=?2, hits=hits+1 WHERE kind=?1 AND key IN ({})",
+            placeholders(chunk.len(), 3)
+        );
+        let args = [&kn as &dyn rusqlite::ToSql, &used]
+            .into_iter()
+            .chain(chunk.iter().map(|k| k as &dyn rusqlite::ToSql));
+        c.execute(&sql, rusqlite::params_from_iter(args))?;
+    }
+    Ok(())
+}
+
+/// Deletes the entries a reader found expired, only while they are still the rows it saw (same `created`): a value stored
+/// again after the read is fresh and stays. Returns the bytes that went, for the running size.
+fn delete_expired(c: &Connection, kind: Kind, seen: &[(Key, i64)]) -> rusqlite::Result<i64> {
+    let mut q = c.prepare_cached("DELETE FROM entries WHERE kind=?1 AND key=?2 AND created=?3 RETURNING size")?;
+    let mut freed = 0;
+    for (key, created) in seen {
+        let mut rows = q.query(params![kind.name(), key.as_slice(), created])?;
+        while let Some(r) = rows.next()? {
+            freed += r.get::<_, i64>(0)?;
+        }
+    }
+    Ok(freed)
+}
+
+/// What `kind` holds, in bytes: the running figure, read from the table once.
+fn total_of(c: &Connection, kind: Kind, sizes: &mut Sizes) -> rusqlite::Result<i64> {
+    if let Some(t) = sizes.get(&kind) {
+        return Ok(*t);
+    }
+    let t: i64 = c.query_row(
+        "SELECT coalesce(sum(size),0) FROM entries WHERE kind=?1",
+        params![kind.name()],
+        |r| r.get(0),
+    )?;
+    sizes.insert(kind, t);
+    Ok(t)
+}
+
+/// Stores a batch inside the caller's transaction: the sizes of the rows it replaces come in one `IN (...)` read per
+/// chunk, the rows go in through one prepared statement, and the kind is trimmed once at the end (ADR 0108, PW-2).
+fn put_many(c: &Connection, kind: Kind, items: &[Item], now: Millis, limits: &Limiter, sizes: &mut Sizes) -> rusqlite::Result<()> {
+    if items.is_empty() {
+        return Ok(());
+    }
+    let mut total = total_of(c, kind, sizes)?;
+    let mut held: HashMap<Key, i64> = HashMap::new();
+    for chunk in items.chunks(IN_CHUNK) {
+        let sql = format!(
+            "SELECT key, size FROM entries WHERE kind=?1 AND key IN ({})",
+            placeholders(chunk.len(), 2)
+        );
+        let mut q = c.prepare(&sql)?;
+        let kn = kind.name();
+        let args = std::iter::once(&kn as &dyn rusqlite::ToSql).chain(chunk.iter().map(|i| &i.0 as &dyn rusqlite::ToSql));
+        let mut rows = q.query(rusqlite::params_from_iter(args))?;
+        while let Some(r) = rows.next()? {
+            if let Ok(k) = Key::try_from(r.get::<_, Vec<u8>>(0)?) {
+                held.insert(k, r.get(1)?);
+            }
+        }
+    }
+    {
+        let mut ins = c.prepare_cached(
+            "INSERT OR REPLACE INTO entries (kind,key,value,size,created,used,hits,model,app,preset) VALUES (?1,?2,?3,?4,?5,?5,0,?6,?7,?8)",
+        )?;
+        for (key, value, meta) in items {
+            let size = value.len() as i64;
+            ins.execute(params![
+                kind.name(),
+                key.as_slice(),
+                value.as_slice(),
+                size,
+                now as i64,
+                meta.model,
+                meta.app,
+                meta.preset
+            ])?;
+            total += size - held.insert(*key, size).unwrap_or(0);
+        }
+    }
+    sizes.insert(kind, total);
+    trim(c, kind, limits, sizes)
 }
 
 fn limits_for(limits: &Limiter, kind: Kind) -> Option<Limits> {
@@ -238,65 +387,143 @@ fn sweep(c: &Connection, kind: Kind, exp: Expiry, now: Millis, max: u64) -> u64 
         .map_or(0, |n| n as u64)
 }
 
-/// Evicts least recently used entries until the kind is within its size cap.
-fn trim(c: &Connection, kind: Kind, limits: &Limiter) -> rusqlite::Result<()> {
+/// Evicts least recently used entries until the kind is within its size cap, in the caller's transaction. The kind's size
+/// is the running figure; only an eviction reads rows.
+fn trim(c: &Connection, kind: Kind, limits: &Limiter, sizes: &mut Sizes) -> rusqlite::Result<()> {
     let Some(l) = limits_for(limits, kind) else { return Ok(()) };
-    let total: i64 = c.query_row(
-        "SELECT coalesce(sum(size),0) FROM entries WHERE kind=?1",
-        params![kind.name()],
-        |r| r.get(0),
-    )?;
+    let total = total_of(c, kind, sizes)?;
     let mut over = total - i64::try_from(l.max_bytes).unwrap_or(i64::MAX);
     if over <= 0 {
         return Ok(());
     }
     let mut doomed: Vec<Vec<u8>> = vec![];
+    let mut freed = 0;
     {
         let mut q = c.prepare("SELECT key, size FROM entries WHERE kind=?1 ORDER BY used ASC")?;
         let mut rows = q.query(params![kind.name()])?;
         while over > 0 {
             let Some(r) = rows.next()? else { break };
             doomed.push(r.get(0)?);
-            over -= r.get::<_, i64>(1)?;
+            let size = r.get::<_, i64>(1)?;
+            over -= size;
+            freed += size;
         }
     }
-    for k in doomed {
-        c.execute("DELETE FROM entries WHERE kind=?1 AND key=?2", params![kind.name(), k])?;
+    for chunk in doomed.chunks(IN_CHUNK) {
+        let sql = format!("DELETE FROM entries WHERE kind=?1 AND key IN ({})", placeholders(chunk.len(), 2));
+        let kn = kind.name();
+        let args = std::iter::once(&kn as &dyn rusqlite::ToSql).chain(chunk.iter().map(|k| k as &dyn rusqlite::ToSql));
+        c.execute(&sql, rusqlite::params_from_iter(args))?;
     }
+    sizes.insert(kind, total - freed);
     Ok(())
 }
 
 impl CacheStore for SqliteStore {
     fn get(&self, kind: Kind, key: &Key, now: Millis) -> Option<Vec<u8>> {
-        let exp = self.limits_of(kind)?.expiry;
-        if let Some((v, _, stored)) = lock(&self.pending).get(&(kind, *key)) {
-            return (!exp.expired(*stored, *stored, now)).then(|| v.clone());
+        self.get_many(kind, std::slice::from_ref(key), now).pop().flatten()
+    }
+
+    /// One `IN (...)` read per chunk of keys; the hit counts and the expired entries it found go to the writer as one job each.
+    fn get_many(&self, kind: Kind, keys: &[Key], now: Millis) -> Vec<Option<Vec<u8>>> {
+        let mut out: Vec<Option<Vec<u8>>> = vec![None; keys.len()];
+        let Some(exp) = self.limits_of(kind).map(|l| l.expiry) else {
+            return out;
+        };
+        let mut want: Vec<usize> = vec![];
+        {
+            let pending = lock(&self.pending);
+            for (i, k) in keys.iter().enumerate() {
+                match pending.get(&(kind, *k)) {
+                    Some((v, _, stored)) => out[i] = (!exp.expired(*stored, *stored, now)).then(|| v.clone()),
+                    None => want.push(i),
+                }
+            }
         }
-        let row = lock(&self.reader)
-            .query_row(
-                "SELECT value, created, used FROM entries WHERE kind=?1 AND key=?2",
-                params![kind.name(), key.as_slice()],
-                |r| Ok((r.get::<_, Vec<u8>>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?)),
-            )
-            .optional()
-            .ok()
-            .flatten()?;
-        if exp.expired(row.1 as Millis, row.2 as Millis, now) {
-            let _ = self.tx.try_send(Job::Delete(kind, *key));
-            return None;
+        if want.is_empty() {
+            return out;
         }
-        let _ = self.tx.try_send(Job::Touch(kind, *key, now));
-        Some(row.0)
+        let mut rows: HashMap<Key, (Vec<u8>, i64, i64)> = HashMap::new();
+        {
+            let reader = lock(&self.reader);
+            let distinct: Vec<Key> = want
+                .iter()
+                .map(|i| keys[*i])
+                .collect::<std::collections::BTreeSet<_>>()
+                .into_iter()
+                .collect();
+            for chunk in distinct.chunks(IN_CHUNK) {
+                let sql = format!(
+                    "SELECT key, value, created, used FROM entries WHERE kind=?1 AND key IN ({})",
+                    placeholders(chunk.len(), 2)
+                );
+                let kn = kind.name();
+                let args = std::iter::once(&kn as &dyn rusqlite::ToSql).chain(chunk.iter().map(|k| k as &dyn rusqlite::ToSql));
+                let read = (|| -> rusqlite::Result<()> {
+                    let mut q = reader.prepare(&sql)?;
+                    let mut found = q.query(rusqlite::params_from_iter(args))?;
+                    while let Some(r) = found.next()? {
+                        if let Ok(k) = Key::try_from(r.get::<_, Vec<u8>>(0)?) {
+                            rows.insert(k, (r.get(1)?, r.get(2)?, r.get(3)?));
+                        }
+                    }
+                    Ok(())
+                })();
+                // A read that fails is a miss, as for a single key, but not a silent one: the cause is kept for `last_error`.
+                if let Err(e) = read {
+                    *lock(&self.last_error) = Some(format!("cache read failed: {e}"));
+                }
+            }
+        }
+        let (mut touched, mut expired) = (vec![], vec![]);
+        let (mut seen_touched, mut seen_expired): (HashSet<Key>, HashSet<Key>) = (HashSet::new(), HashSet::new());
+        for i in want {
+            let Some((value, created, used)) = rows.get(&keys[i]) else {
+                continue;
+            };
+            if exp.expired(*created as Millis, *used as Millis, now) {
+                if seen_expired.insert(keys[i]) {
+                    expired.push((keys[i], *created));
+                }
+            } else {
+                out[i] = Some(value.clone());
+                if seen_touched.insert(keys[i]) {
+                    touched.push(keys[i]);
+                }
+            }
+        }
+        if !expired.is_empty() {
+            let _ = self.tx.try_send(Job::DeleteMany(kind, expired));
+        }
+        if !touched.is_empty() {
+            let _ = self.tx.try_send(Job::TouchMany(kind, touched, now));
+        }
+        out
     }
 
     fn put(&self, kind: Kind, key: Key, value: Vec<u8>, meta: Meta, now: Millis) {
+        self.put_many(kind, vec![(key, value, meta)], now);
+    }
+
+    /// One job for the whole batch: one transaction, one trim. All or nothing, atomic by design (see [`Job::PutMany`]).
+    fn put_many(&self, kind: Kind, items: Vec<(Key, Vec<u8>, Meta)>, now: Millis) {
         let Some(l) = self.limits_of(kind) else { return };
-        if value.len() as u64 > l.max_bytes {
+        let items: Vec<Item> = items.into_iter().filter(|(_, v, _)| v.len() as u64 <= l.max_bytes).collect();
+        if items.is_empty() {
             return;
         }
-        lock(&self.pending).insert((kind, key), (value.clone(), meta.clone(), now));
-        if self.tx.try_send(Job::Put(kind, key, value, meta, now)).is_err() {
-            lock(&self.pending).remove(&(kind, key));
+        {
+            let mut pending = lock(&self.pending);
+            for (k, v, m) in &items {
+                pending.insert((kind, *k), (v.clone(), m.clone(), now));
+            }
+        }
+        let keys: Vec<Key> = items.iter().map(|i| i.0).collect();
+        if self.tx.try_send(Job::PutMany(kind, items, now)).is_err() {
+            let mut pending = lock(&self.pending);
+            for k in keys {
+                pending.remove(&(kind, k));
+            }
         }
     }
 
@@ -374,6 +601,322 @@ mod tests {
             model: model.into(),
             preset: String::new(),
         }
+    }
+
+    /// What the database was asked to do (ADR 0108): every statement's text and every commit, seen by SQLite itself.
+    #[derive(Clone, Default)]
+    struct Spy {
+        sql: Arc<Mutex<Vec<String>>>,
+        commits: Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    impl Spy {
+        fn attach(&self, c: &mut Connection) {
+            use rusqlite::trace::{TraceEvent, TraceEventCodes};
+            let sql = self.sql.clone();
+            c.trace_v2(
+                TraceEventCodes::SQLITE_TRACE_STMT,
+                Some(move |ev: TraceEvent<'_>| {
+                    if let TraceEvent::Stmt(_, text) = ev {
+                        lock(&sql).push(text.to_string());
+                    }
+                }),
+            )
+            .unwrap();
+            let n = self.commits.clone();
+            c.commit_hook(Some(move || {
+                n.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                false
+            }))
+            .unwrap();
+        }
+        fn commits(&self) -> usize {
+            self.commits.load(std::sync::atomic::Ordering::SeqCst)
+        }
+        /// Statements so far whose text contains `part`.
+        fn statements(&self, part: &str) -> usize {
+            lock(&self.sql).iter().filter(|s| s.contains(part)).count()
+        }
+        fn all_statements(&self) -> usize {
+            lock(&self.sql).len()
+        }
+    }
+
+    fn open_spied(dir: &Path, max: u64) -> (SqliteStore, Spy) {
+        let spy = Spy::default();
+        let s = {
+            let spy = spy.clone();
+            SqliteStore::open_with(
+                &dir.join("cache.sqlite"),
+                lim(max, Some(1000), false),
+                lim(max, Some(1000), true),
+                move |c| spy.attach(c),
+            )
+            .unwrap()
+        };
+        s.flush();
+        (s, spy)
+    }
+
+    fn batch(from: u8, n: u8, size: usize) -> Vec<(Key, Vec<u8>, Meta)> {
+        (from..from + n).map(|i| ([i; 32], vec![i; size], meta("app", "model"))).collect()
+    }
+
+    /// PW-2 (ADR 0108): a batch of N stores is one commit and about one statement per row, however large N is.
+    #[test]
+    fn a_batch_of_stores_is_one_commit() {
+        let d = tempfile::tempdir().unwrap();
+        let (s, spy) = open_spied(d.path(), 1_000_000);
+        let (commits, statements) = (spy.commits(), spy.all_statements());
+        s.put_many(Kind::Embedding, batch(1, 60, 16), 5);
+        s.flush();
+        assert_eq!(spy.commits() - commits, 1, "one commit for 60 vectors");
+        let used = spy.all_statements() - statements;
+        assert!(
+            (60..=60 + 6).contains(&used),
+            "one insert per row (the floor shows the spy counts them) and a handful around them, got {used}"
+        );
+        assert_eq!(s.stats(Kind::Embedding).entries, 60);
+        assert!(s.last_error().is_none());
+    }
+
+    /// The positive control (ER-33): the same 60 vectors stored one by one are 60 commits, so the counter above can see a loop.
+    #[test]
+    fn the_spy_sees_one_commit_per_single_store() {
+        let d = tempfile::tempdir().unwrap();
+        let (s, spy) = open_spied(d.path(), 1_000_000);
+        let commits = spy.commits();
+        for (k, v, m) in batch(1, 60, 16) {
+            s.put(Kind::Embedding, k, v, m, 5);
+            s.flush();
+        }
+        assert_eq!(spy.commits() - commits, 60);
+    }
+
+    /// PW-2: the cache's size is a running figure: stores never sum the table again after the first.
+    #[test]
+    fn stores_never_sum_the_table_again() {
+        let d = tempfile::tempdir().unwrap();
+        let (s, spy) = open_spied(d.path(), 1_000_000);
+        let before = spy.statements("sum(size)");
+        assert!(
+            before >= 1,
+            "the spy sees the sum the open made (else the 0 below proves nothing), got {before}"
+        );
+        for round in 0..5u8 {
+            s.put_many(Kind::Embedding, batch(round * 10, 10, 16), 5);
+            s.flush();
+        }
+        assert_eq!(
+            spy.statements("sum(size)") - before,
+            0,
+            "the first sum was read at open, the figure is kept since"
+        );
+        assert_eq!(s.stats(Kind::Embedding).entries, 50);
+    }
+
+    /// PW-2: reading N keys is one `IN (...)` statement, and the hit counts are one commit.
+    #[test]
+    fn a_batch_of_reads_is_one_statement_and_one_commit() {
+        let d = tempfile::tempdir().unwrap();
+        let (s, spy) = open_spied(d.path(), 1_000_000);
+        s.put_many(Kind::Embedding, batch(1, 40, 8), 5);
+        s.flush();
+        let (reads, commits) = (spy.statements("FROM entries WHERE kind=?1 AND key IN"), spy.commits());
+        let mut keys: Vec<Key> = (1..=40u8).map(|i| [i; 32]).collect();
+        keys.push([200; 32]);
+        let got = s.get_many(Kind::Embedding, &keys, 6);
+        s.flush();
+        assert_eq!(got.iter().filter(|v| v.is_some()).count(), 40);
+        assert!(got[40].is_none(), "an unknown key is a miss, in its place");
+        assert_eq!(got[3].as_deref(), Some(&[4u8; 8][..]));
+        assert_eq!(
+            spy.statements("FROM entries WHERE kind=?1 AND key IN") - reads,
+            1,
+            "one read for 41 keys"
+        );
+        assert_eq!(spy.commits() - commits, 1, "one commit for 40 hit counts");
+        assert_eq!(s.stats(Kind::Embedding).hits, 40);
+    }
+
+    /// P3-7: the hit counts of N reads are one `UPDATE ... key IN (...)` statement, not N.
+    #[test]
+    fn a_batch_of_hit_counts_is_one_update_statement() {
+        let d = tempfile::tempdir().unwrap();
+        let (s, spy) = open_spied(d.path(), 1_000_000);
+        s.put_many(Kind::Embedding, batch(1, 40, 8), 5);
+        s.flush();
+        let before = spy.statements("UPDATE entries SET used");
+        let keys: Vec<Key> = (1..=40u8).map(|i| [i; 32]).collect();
+        assert_eq!(s.get_many(Kind::Embedding, &keys, 6).iter().flatten().count(), 40);
+        s.flush();
+        assert_eq!(
+            spy.statements("UPDATE entries SET used") - before,
+            1,
+            "one update for 40 hit counts"
+        );
+        assert_eq!(s.stats(Kind::Embedding).hits, 40, "every key counted once");
+        s.get_many(Kind::Embedding, &keys[..3], 7);
+        s.flush();
+        assert_eq!(s.stats(Kind::Embedding).hits, 43);
+    }
+
+    /// P3-8: deleting expired entries adjusts the running size by what went; the table is not summed again for the next store.
+    #[test]
+    fn deleting_expired_entries_adjusts_the_running_size() {
+        let d = tempfile::tempdir().unwrap();
+        let (s, spy) = open_spied(d.path(), 100);
+        s.put_many(Kind::Response, batch(1, 3, 20), 10);
+        s.flush();
+        let sums = spy.statements("SELECT coalesce(sum(size)");
+        assert!(
+            sums >= 1,
+            "the spy sees the sum the open made (else the 0 below proves nothing), got {sums}"
+        );
+        let got = s.get_many(Kind::Response, &[[1; 32], [2; 32], [3; 32]], 5000);
+        assert!(got.iter().all(Option::is_none), "created at 10, ttl 1000");
+        s.flush();
+        assert_eq!(s.stats(Kind::Response).entries, 0);
+        // 60 bytes went, so 100 more fit within the cap of 100 with nothing evicted: the figure is 100, not 160.
+        s.put_many(Kind::Response, batch(10, 5, 20), 5001);
+        s.flush();
+        assert_eq!(
+            s.stats(Kind::Response).entries,
+            5,
+            "no entry was evicted for bytes that were already gone"
+        );
+        assert_eq!(
+            spy.statements("SELECT coalesce(sum(size)") - sums,
+            0,
+            "the table was not summed again"
+        );
+        assert!(s.last_error().is_none());
+    }
+
+    #[test]
+    fn a_batch_over_the_chunk_size_reads_in_chunks_and_keeps_order() {
+        let d = tempfile::tempdir().unwrap();
+        let s = open(d.path(), 10_000_000);
+        let items: Vec<_> = (0..1200u32)
+            .map(|i| {
+                let mut k = [0u8; 32];
+                k[..4].copy_from_slice(&i.to_be_bytes());
+                (k, i.to_be_bytes().to_vec(), meta("a", "m"))
+            })
+            .collect();
+        let keys: Vec<Key> = items.iter().map(|i| i.0).collect();
+        s.put_many(Kind::Embedding, items, 1);
+        s.flush();
+        let got = s.get_many(Kind::Embedding, &keys, 2);
+        for (i, v) in got.iter().enumerate() {
+            assert_eq!(v.as_deref(), Some(&(i as u32).to_be_bytes()[..]), "key {i}");
+        }
+        assert_eq!(s.stats(Kind::Embedding).entries, 1200);
+    }
+
+    /// The running size agrees with the table after replacing, evicting, deleting and clearing.
+    #[test]
+    fn the_running_size_stays_right_and_the_cap_holds() {
+        let d = tempfile::tempdir().unwrap();
+        let s = open(d.path(), 100);
+        s.put_many(Kind::Embedding, batch(1, 3, 20), 1);
+        s.put_many(Kind::Embedding, batch(4, 3, 20), 2);
+        s.flush();
+        let st = s.stats(Kind::Embedding);
+        assert_eq!((st.entries, st.bytes), (5, 100), "one oldest entry went to fit 120 bytes into 100");
+        assert!(
+            (4..=6u8).all(|i| s.get(Kind::Embedding, &[i; 32], 3).is_some()),
+            "the newer batch stays"
+        );
+        // A batch that stores the same key twice and replaces a held one: the last value counts once.
+        s.put_many(
+            Kind::Embedding,
+            vec![
+                ([4; 32], vec![0; 10], meta("a", "m")),
+                ([4; 32], vec![0; 30], meta("a", "m")),
+                ([9; 32], vec![0; 10], meta("a", "m")),
+            ],
+            4,
+        );
+        s.flush();
+        let st = s.stats(Kind::Embedding);
+        assert_eq!(st.bytes, 100, "stats are the table's own sum: the cap held");
+        assert_eq!(s.get(Kind::Embedding, &[4; 32], 5).unwrap().len(), 30);
+        s.clear(&Scope::All);
+        s.put_many(Kind::Embedding, batch(1, 5, 20), 6);
+        s.put_many(Kind::Embedding, batch(6, 1, 20), 7);
+        s.flush();
+        let st = s.stats(Kind::Embedding);
+        assert_eq!(
+            (st.entries, st.bytes),
+            (5, 100),
+            "clearing forgot the old figure; the cap holds again"
+        );
+        assert!(s.last_error().is_none());
+    }
+
+    /// Expired entries found by a batch read go in one delete job, and the batch answers them as misses.
+    #[test]
+    fn a_batch_read_drops_what_expired() {
+        let d = tempfile::tempdir().unwrap();
+        let s = open(d.path(), 10_000);
+        s.put_many(Kind::Response, batch(1, 3, 4), 10);
+        s.flush();
+        let got = s.get_many(Kind::Response, &[[1; 32], [2; 32], [3; 32]], 5000);
+        assert!(got.iter().all(Option::is_none), "created at 10, ttl 1000");
+        s.flush();
+        assert_eq!(s.stats(Kind::Response).entries, 0);
+    }
+
+    /// An expired entry found by a read is deleted only while it is still the row the reader saw: a value stored again
+    /// meanwhile has another `created` and stays (and a stale one goes), so a fresh value is never removed.
+    #[test]
+    fn deleting_an_expired_entry_leaves_a_value_stored_again_since() {
+        let d = tempfile::tempdir().unwrap();
+        let s = open(d.path(), 10_000);
+        s.put_many(Kind::Response, batch(1, 2, 4), 10);
+        s.flush();
+        // The reader saw [1] and [2] created at 10; [2] is stored again (created 900) before the delete job runs.
+        s.put_many(Kind::Response, batch(2, 1, 4), 900);
+        s.flush();
+        let c = Connection::open(d.path().join("cache.sqlite")).unwrap();
+        let freed = in_tx(&c, |c| delete_expired(c, Kind::Response, &[([1; 32], 10), ([2; 32], 10)])).unwrap();
+        assert_eq!(freed, 4, "only the row that went is counted: the stale one of 4 bytes");
+        let left: Vec<Vec<u8>> = c
+            .prepare("SELECT key FROM entries WHERE kind='response' ORDER BY key")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        assert_eq!(left, vec![vec![2u8; 32]], "the stale row went, the fresh one stayed");
+    }
+
+    /// A batch read that fails is a miss in place, and the cause is kept for `last_error` instead of being dropped.
+    #[test]
+    fn a_failed_batch_read_is_a_miss_and_is_recorded() {
+        let d = tempfile::tempdir().unwrap();
+        let s = open(d.path(), 10_000);
+        s.put_many(Kind::Embedding, batch(1, 2, 4), 10);
+        s.flush();
+        assert!(s.last_error().is_none());
+        Connection::open(d.path().join("cache.sqlite"))
+            .unwrap()
+            .execute_batch("ALTER TABLE entries RENAME TO gone")
+            .unwrap();
+        let got = s.get_many(Kind::Embedding, &[[1; 32], [2; 32]], 11);
+        assert!(got.iter().all(Option::is_none));
+        let e = s.last_error().expect("the failed read is recorded");
+        assert!(e.contains("cache read failed") && e.contains("no such table"), "{e}");
+    }
+
+    #[test]
+    fn a_batch_sees_what_is_still_pending() {
+        let d = tempfile::tempdir().unwrap();
+        let s = open(d.path(), 10_000);
+        s.put_many(Kind::Embedding, batch(1, 3, 4), 10);
+        let got = s.get_many(Kind::Embedding, &[[1; 32], [3; 32], [7; 32]], 11);
+        assert_eq!(got.iter().map(Option::is_some).collect::<Vec<_>>(), [true, true, false]);
     }
 
     #[test]
@@ -499,6 +1042,53 @@ mod tests {
         s.put(Kind::Response, [5; 32], vec![1], meta("x", "m"), 0);
         s.clear(&Scope::All);
         assert!(s.get(Kind::Response, &[5; 32], 1).is_none());
+    }
+
+    /// PW-1 (ADR 0108, P2-2): clearing the entries of N models is one commit, however large N is; the positive control below shows
+    /// the counter sees one commit per single-model clear.
+    #[test]
+    fn clearing_many_models_is_one_commit() {
+        let d = tempfile::tempdir().unwrap();
+        let (s, spy) = open_spied(d.path(), 1_000_000);
+        for i in 0..8u8 {
+            s.put(Kind::Embedding, [i; 32], vec![i; 4], meta("app", &format!("m{i}")), 1);
+        }
+        s.put(Kind::Embedding, [100; 32], vec![1; 4], meta("app", "keep"), 1);
+        s.flush();
+        let commits = spy.commits();
+        let models: Vec<String> = (0..8).map(|i| format!("m{i}")).collect();
+        assert_eq!(s.clear(&Scope::Models(models)), 8);
+        assert_eq!(spy.commits() - commits, 1, "one commit for 8 models");
+        assert_eq!(s.stats(Kind::Embedding).entries, 1, "the other model's entry stays");
+    }
+
+    /// The positive control (ER-33) of the test above.
+    #[test]
+    fn the_spy_sees_one_commit_per_single_model_clear() {
+        let d = tempfile::tempdir().unwrap();
+        let (s, spy) = open_spied(d.path(), 1_000_000);
+        for i in 0..8u8 {
+            s.put(Kind::Embedding, [i; 32], vec![i; 4], meta("app", &format!("m{i}")), 1);
+        }
+        s.flush();
+        let commits = spy.commits();
+        for i in 0..8 {
+            s.clear(&Scope::Model(format!("m{i}")));
+        }
+        assert_eq!(spy.commits() - commits, 8);
+    }
+
+    /// Pending (not yet written) stores of the models are cleared too.
+    #[test]
+    fn clearing_many_models_drops_what_is_still_pending() {
+        let d = tempfile::tempdir().unwrap();
+        let s = open(d.path(), 10_000);
+        s.put(Kind::Response, [1; 32], vec![1], meta("a", "m1"), 0);
+        s.put(Kind::Response, [2; 32], vec![1], meta("a", "m2"), 0);
+        s.put(Kind::Response, [3; 32], vec![1], meta("a", "m3"), 0);
+        s.clear(&Scope::Models(vec!["m1".into(), "m2".into()]));
+        assert!(s.get(Kind::Response, &[1; 32], 1).is_none() && s.get(Kind::Response, &[2; 32], 1).is_none());
+        assert!(s.get(Kind::Response, &[3; 32], 1).is_some());
     }
 
     #[test]

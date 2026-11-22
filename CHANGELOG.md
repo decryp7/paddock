@@ -4,6 +4,27 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `paddock-dev`, CI: sccache on RustFS is the default everywhere it is allowed, and the dev-tool cache key reads the real wrapper output (user decision 2026-11-21)
+- `setup-rust`'s `sccache-backend` and `./dev ci setup-rust --sccache-backend` default to `s3` (the local disk first, RustFS behind it);
+  the Gitea variable that switched it is gone, ci.yml's `sccache_backend` dispatch input stays as a one-run override. No secret, an
+  endpoint that is down or a failed health check gives the local disk with a notice or warning naming the cause; a release, rule 54 or
+  tag run stays on the plain local disk.
+- `./dev sccache env` and the tools that start builds default to `PADDOCK_SCCACHE_BACKEND=auto`: the local disk first and RustFS behind it
+  when `~/.config/paddock/sccache-s3.env` is there and the store answers (docs/dev-setup.md, "Local sccache"); `local` and `s3` are as before. The keys reach
+  the server's environment only.
+- Review fixes: a plain-disk server started while RustFS was down is replaced once the store is back; a two-level server is ours only with
+  this disk folder, bucket and prefix; the S3 guard tests the release condition itself (`kit.sh release-path`, named in the log), not
+  `PADDOCK_DEV_DOWNLOAD`; CI and the Mac share one bounded health check; the key file outranks a stray `AWS_*`; the doubled disk use is documented.
+- `conformance/ci/dev-tool-cache.sh` read lines 2 and 3 of `./dev --wrapper-hash` (it prints the hash and the state on lines 1 and 2), so
+  every Linux job missed the cache silently and built `./dev` (run 8509). It reads the right lines, and a missing or misshapen hash fails the step.
+
+### Conformance C145 checks the lessons file's format, and `docs/lessons.md` has a merge driver (2026-11-21)
+- New report-only conformance check C145 (Rust host): `docs/lessons.md` has a blank line before every `## ` heading, one title, no
+  repeated heading and one final newline. The file's 35 headings that had lost their blank line to a union merge have it again.
+- `docs/lessons.md` merges with the `lessons` driver, `./dev merge lessons-driver %O %A %B`: git's union merge, then the blank line it
+  drops before a `## ` heading put back (it dropped it four times, 9ec43be3c, b9bf5fc4b, 75ce0d2c8, 5c241d93f). `./dev hooks install`
+  sets `merge.lessons.driver` in the clone; a clone without it gets a plain conflict, never a silent drop.
+
 ### `paddock-dev`, `heavy`, `paddock-env`: a health gate for Gitea, and no tool prompts (user decision 2026-11-20)
 - `./dev ci dispatch`, `./dev wait --ci-run` and the queue and member-gate dispatch look at Gitea (`GET /api/v1/version`) and hold while it
   is down: any answer below 500 is up (a 401 or 403 included), a refused connection, a timeout or a 5xx is down. They hold on Gitea

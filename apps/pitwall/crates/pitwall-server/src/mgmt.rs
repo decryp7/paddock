@@ -96,6 +96,164 @@ pub fn undo_cancelled_load(st: &AppState, id: &ModelId, loaded_here: bool) {
     }
 }
 
+/// A failed removal as the item's own error, by what the OS said: a model that is gone is `notFound`, one that may not be
+/// removed `denied`, anything else `io` (retryable by default).
+fn delete_error(e: &std::io::Error) -> paddock_commands::CommandError {
+    use paddock_commands::CommandError as ItemError;
+    use std::io::ErrorKind;
+    match e.kind() {
+        ErrorKind::NotFound => ItemError::not_found(e.to_string()),
+        ErrorKind::PermissionDenied => ItemError::denied(e.to_string()),
+        _ => ItemError::io(e.to_string()),
+    }
+    .field("ids")
+}
+
+/// Unloads and deletes `ids` (ADR 0108, PW-1): one result per id, in order, from one scan of the library. A model a request is
+/// using answers `busy` and is neither unloaded nor deleted; every other id is marked as being deleted (loads of it are refused
+/// until its files are gone, see `Serving::begin_delete`), then removed on a blocking thread. The one path of `delete_model` and
+/// `delete_models`.
+async fn delete_ids(st: &Arc<AppState>, ids: Vec<ModelId>) -> R<Vec<paddock_commands::ItemResult<()>>> {
+    use paddock_commands::{CommandError as ItemError, ItemResult};
+    use std::collections::HashMap;
+    let mut out: Vec<Option<ItemResult<()>>> = vec![None; ids.len()];
+    let mut guards = HashMap::new();
+    let mut refused: HashMap<ModelId, ItemError> = HashMap::new();
+    let mut slots = vec![];
+    for (i, id) in ids.iter().enumerate() {
+        if let Some(why) = refused.get(id) {
+            out[i] = Some(ItemResult::Err(why.clone()));
+        } else if guards.contains_key(id) {
+            // A repeated id goes to the library, which answers it `notFound` the second time.
+            slots.push(i);
+        } else {
+            match st.serving.begin_delete(id) {
+                Ok(g) => {
+                    guards.insert(id.clone(), g);
+                    st.serving.retry(id);
+                    slots.push(i);
+                }
+                Err(why) => {
+                    let e = match why {
+                        crate::serving::DeleteRefused::Busy => {
+                            ItemError::busy(format!("{id} is in use by a running request; try again when it ends"))
+                        }
+                        crate::serving::DeleteRefused::AlreadyDeleting => ItemError::busy(format!("{id} is already being deleted")),
+                    }
+                    .field("ids");
+                    refused.insert(id.clone(), e.clone());
+                    out[i] = Some(ItemResult::Err(e));
+                }
+            }
+        }
+    }
+    let owned: Vec<ModelId> = slots.iter().map(|i| ids[*i].clone()).collect();
+    let state = st.clone();
+    let done = tokio::task::spawn_blocking(move || {
+        let results = state.library.delete_many(&owned);
+        let gone: Vec<ModelId> = owned
+            .iter()
+            .zip(&results)
+            .filter(|(_, r)| r.is_ok())
+            .map(|(id, _)| id.clone())
+            .collect();
+        state.invalidate_models(&gone);
+        results
+    })
+    .await
+    .map_err(|e| err(mgmt::ErrorCode::Internal, e.to_string()))?;
+    drop(guards);
+    for (i, r) in slots.into_iter().zip(done) {
+        out[i] = Some(match r {
+            Ok(()) => ItemResult::Ok(()),
+            Err(e) => ItemResult::Err(delete_error(&e)),
+        });
+    }
+    Ok(out
+        .into_iter()
+        .map(|r| r.unwrap_or_else(|| ItemResult::Err(ItemError::internal("no result"))))
+        .collect())
+}
+
+/// `delete_models`: a bad id fails alone (`invalid`), the others go through [`delete_ids`].
+async fn delete_models(st: &Arc<AppState>, a: &Value) -> R<Value> {
+    use paddock_commands::{CommandError as ItemError, ItemResult};
+    let started = std::time::Instant::now();
+    let raw: Vec<String> = arg(a, "ids")?;
+    mgmt::check_bulk(raw.len(), "ids")?;
+    let mut out: Vec<Option<ItemResult<()>>> = vec![None; raw.len()];
+    let (mut ids, mut slots) = (vec![], vec![]);
+    for (i, s) in raw.iter().enumerate() {
+        match ModelId::parse(s) {
+            Ok(id) => {
+                ids.push(id);
+                slots.push(i);
+            }
+            Err(e) => out[i] = Some(ItemResult::Err(ItemError::invalid(e.to_string()).field("ids"))),
+        }
+    }
+    for (i, r) in slots.into_iter().zip(delete_ids(st, ids).await?) {
+        out[i] = Some(r);
+    }
+    let out: Vec<ItemResult<()>> = out
+        .into_iter()
+        .map(|r| r.unwrap_or_else(|| ItemResult::Err(ItemError::internal("no result"))))
+        .collect();
+    log_deleted(&raw, &out, started.elapsed());
+    ok(out)
+}
+
+/// The log of one `delete_models` call (ER-27): one info line with the counts and the duration, one warn line per failed id with its
+/// code. An id that is not a model id is counted and named by its place only: it is the caller's text.
+fn log_deleted(raw: &[String], out: &[paddock_commands::ItemResult<()>], took: std::time::Duration) {
+    use paddock_commands::{ErrorCode, ItemResult};
+    let failed = out.iter().filter(|r| !r.is_ok()).count();
+    log::info!(
+        target: "pitwall_server",
+        "delete_models: requested {}, deleted {}, failed {failed}, {} ms",
+        raw.len(),
+        out.len() - failed,
+        took.as_millis()
+    );
+    for (i, r) in out.iter().enumerate() {
+        if let ItemResult::Err(e) = r {
+            if e.code == ErrorCode::Invalid {
+                log::warn!(target: "pitwall_server", "delete_models: item {i} is not a model id ({})", e.code.as_str());
+            } else if let Some(id) = raw.get(i) {
+                log::warn!(target: "pitwall_server", "delete_models: {id} was not deleted ({})", e.code.as_str());
+            }
+        }
+    }
+}
+
+/// `delete_model`: the bulk path with one id; its failure is the command's error, in the code the item carried.
+async fn delete_model(st: &Arc<AppState>, id: ModelId) -> R<Value> {
+    use paddock_commands::ItemResult;
+    match delete_ids(st, vec![id]).await?.pop() {
+        Some(ItemResult::Ok(())) => ok(()),
+        Some(ItemResult::Err(e)) => Err(single_delete_error(e)),
+        None => Err(err(mgmt::ErrorCode::Internal, "no result")),
+    }
+}
+
+/// The error of the single `delete_model` for one item's failure: the code the item carried (P3-5), `internal` only for a code
+/// with no better home.
+fn single_delete_error(e: paddock_commands::CommandError) -> CommandError {
+    use paddock_commands::ErrorCode as Item;
+    err(
+        match e.code {
+            Item::NotFound => mgmt::ErrorCode::NotFound,
+            Item::Busy => mgmt::ErrorCode::Busy,
+            Item::Denied => mgmt::ErrorCode::Forbidden,
+            Item::Invalid => mgmt::ErrorCode::BadRequest,
+            // A file that could not be removed now (in use, locked): the state does not allow it yet, try again.
+            Item::Io => mgmt::ErrorCode::Conflict,
+            _ => mgmt::ErrorCode::Internal,
+        },
+        e.message,
+    )
+}
+
 fn model(a: &Value, name: &str) -> R<ModelId> {
     let s: String = arg(a, name)?;
     ModelId::parse(&s).map_err(|e| err(mgmt::ErrorCode::BadRequest, e.to_string()))
@@ -267,14 +425,8 @@ async fn call(st: &Arc<AppState>, method: &str, a: &Value) -> R<Value> {
                 Err(err(mgmt::ErrorCode::NotFound, "no such download"))
             }
         }
-        "delete_model" => {
-            let id = model(a, "id")?;
-            st.serving.unload(&id, pitwall_core::memory::ReleaseReason::Manual);
-            st.serving.retry(&id);
-            st.library.delete(&id).map_err(|e| err(mgmt::ErrorCode::NotFound, e.to_string()))?;
-            st.invalidate_model(&id);
-            ok(())
-        }
+        "delete_model" => delete_model(st, model(a, "id")?).await,
+        "delete_models" => delete_models(st, a).await,
         "load_model" => {
             let id = model(a, "id")?;
             st.serving.retry(&id);
@@ -1407,5 +1559,39 @@ mod tests {
             "{}",
             blocked.message
         );
+    }
+
+    /// A delete's I/O failure, by kind: missing is `notFound`, no rights is `denied`, anything else `io` (retryable). A locked
+    /// file on Windows (the model in use by another program) is one of the last two; Windows-only, so not measured here.
+    #[test]
+    fn a_delete_failure_keeps_what_the_io_error_says() {
+        use paddock_commands::ErrorCode as Item;
+        use std::io::{Error, ErrorKind};
+        let code = |k| delete_error(&Error::new(k, "x")).code;
+        assert_eq!(code(ErrorKind::NotFound), Item::NotFound);
+        assert_eq!(code(ErrorKind::PermissionDenied), Item::Denied);
+        assert_eq!(code(ErrorKind::Other), Item::Io);
+        let e = delete_error(&Error::new(ErrorKind::PermissionDenied, "x"));
+        assert!(!e.retryable, "no rights is not retried by itself");
+        assert!(delete_error(&Error::other("x")).retryable);
+        assert_eq!(e.field.as_deref(), Some("ids"));
+    }
+
+    /// P3-5: the single delete says what the item said (`io` stays retryable-shaped, `invalid` stays a bad request) instead of a
+    /// bug (`internal`); only a code with no better home is `internal`.
+    #[test]
+    fn the_single_delete_keeps_the_item_code() {
+        use paddock_commands::CommandError as Item;
+        let code = |e: Item| single_delete_error(e).code;
+        assert_eq!(code(Item::not_found("x")), ErrorCode::NotFound);
+        assert_eq!(code(Item::busy("x")), ErrorCode::Busy);
+        assert_eq!(code(Item::denied("x")), ErrorCode::Forbidden);
+        assert_eq!(code(Item::invalid("x")), ErrorCode::BadRequest);
+        assert_eq!(
+            code(Item::io("x")),
+            ErrorCode::Conflict,
+            "a file that could not be removed now: try again"
+        );
+        assert_eq!(code(Item::internal("x")), ErrorCode::Internal);
     }
 }

@@ -30,6 +30,7 @@
   ]
  },
  "packages": {},
+ "cargoOnly": [],
  "why": {
   "app:x": [
    "everything (no base)"
