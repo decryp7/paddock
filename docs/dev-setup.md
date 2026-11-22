@@ -105,21 +105,36 @@ tools and never by your shell profile (user decision 2026-11-16; docs/research/s
   and names the log in the warning. It is off without a warning in CI (`CI`, `GITHUB_ACTIONS`), with
   `PADDOCK_SCCACHE=off`, or when `RUSTC_WRAPPER` is already set.
 - The build folder goes in as `--config build.target-dir=...` in every tool (see AGENTS.md, "Build folders").
-- **One setting picks the backend, `PADDOCK_SCCACHE_BACKEND`:** `local` (the default; `SCCACHE_DIR` and `SCCACHE_CACHE_SIZE` from
-  the profile above) or `s3` (a shared cache on an S3-compatible store, through sccache's own S3 support). `s3` needs
-  `PADDOCK_SCCACHE_S3_BUCKET` and `PADDOCK_SCCACHE_S3_ENDPOINT` (`host:port`), and optionally `PADDOCK_SCCACHE_S3_REGION` (default
-  `auto`), `PADDOCK_SCCACHE_S3_SSL` (`true`; default `false`) and `PADDOCK_SCCACHE_S3_PREFIX` (default `paddock`).
-- **S3 credentials are never in the repository, a log or a message.** They are read from `AWS_ACCESS_KEY_ID` and
-  `AWS_SECRET_ACCESS_KEY` in the environment, else from `~/.config/paddock/sccache-s3.env` (`$XDG_CONFIG_HOME/paddock/sccache-s3.env`,
-  or the file `PADDOCK_SCCACHE_ENV_FILE` names): two `NAME=value` lines, mode 600 (a file others can read is refused). The tools
+- **One setting picks the backend, `PADDOCK_SCCACHE_BACKEND`:** `auto` (the default, user decision 2026-11-21: the local disk first
+  with the shared RustFS store behind it, as CI's `s3` backend, when `~/.config/paddock/sccache-s3.env` (below) is there and the store
+  answers its HTTP health check, `/minio/health/live`, within 5 s; otherwise the local disk alone, with one `::notice::` (no file: the
+  shared cache is not set up on this machine) or `::warning::` (an unreadable file, a store that does not answer) naming the cause),
+  `local` (the disk only; `SCCACHE_DIR` and `SCCACHE_CACHE_SIZE` from the profile above) or `s3` (the store alone, through sccache's
+  own S3 support; needs `PADDOCK_SCCACHE_S3_BUCKET` and `PADDOCK_SCCACHE_S3_ENDPOINT`). The store is `PADDOCK_SCCACHE_S3_ENDPOINT`
+  (`host:port`, default `172.16.1.220:15000`) and `PADDOCK_SCCACHE_S3_BUCKET` (default `sccache-paddock`), each taken from the environment,
+  else from an optional line of that name in the key file below, else the default (the one place the defaults are named: this file; the code
+  holds them as `DEFAULT_S3_ENDPOINT` and `DEFAULT_S3_BUCKET` in `local_sccache.rs`); optionally
+  `PADDOCK_SCCACHE_S3_PREFIX` (default `paddock`) and, for `s3`, `PADDOCK_SCCACHE_S3_REGION` (default `auto`) and
+  `PADDOCK_SCCACHE_S3_SSL` (`true`; default `false`). With `auto` the first level is the sibling folder `<SCCACHE_DIR>-s3` (what S3
+  backfills never reaches the plain folder, as in CI, ADR 0111): the first build after the switch starts from the store, not from
+  the old folder, and the two folders together use up to twice `SCCACHE_CACHE_SIZE` on the Mac's disk (each is capped at that size; lower
+  the size, or delete the plain folder once the shared cache is in use). The store's health check is CI's own (`curl` with a 3 s connect
+  limit, DNS included, and a 5 s total limit). If the store was down at the first `sccache env`, the plain-disk server that call started
+  is stopped and started again with the store behind the disk at the next call that finds the store up (one `::notice::`); a server on
+  another folder or setup is never touched. The keys go to the server's environment only; builds see the disk setting alone.
+- **S3 credentials are never in the repository, a log or a message.** They are read from the key file
+  `~/.config/paddock/sccache-s3.env` (`$XDG_CONFIG_HOME/paddock/sccache-s3.env`, or the file `PADDOCK_SCCACHE_ENV_FILE` names): two
+  `NAME=value` lines, mode 600 (a file others can read is refused), and only when it holds none from `AWS_ACCESS_KEY_ID` and
+  `AWS_SECRET_ACCESS_KEY` in the environment. A stray `AWS_*` in your shell (another project's login) never outranks the file: it is
+  ignored for sccache, with one `::notice::`. The tools
   print only `credentials configured` or `credentials missing`. The macOS keychain is not read by the tools (it would raise a
   dialog); export the key from it into the file yourself.
 - One server takes one cache at a time. To switch the backend, run `sccache --stop-server` once, then the next build starts the
   server with the new setting. A server on the port that uses another cache is never stopped by the tools.
 
-The shared RustFS cache (S3 API `http://172.16.1.220:15000`, bucket `sccache-paddock`, 50 GiB quota, policy `sccache-paddock-rw`):
-`PADDOCK_SCCACHE_BACKEND=s3 PADDOCK_SCCACHE_S3_BUCKET=sccache-paddock PADDOCK_SCCACHE_S3_ENDPOINT=172.16.1.220:15000`, plus the
-key in the file above. Create the access key bound to that policy in the RustFS console (port 15001) and write it as:
+The shared RustFS cache (S3 API `http://172.16.1.220:15000`, bucket `sccache-paddock`, 50 GiB quota, policy `sccache-paddock-rw`) is
+used by default once the key file above exists; nothing else to set. A server already running with the old local-only setting is
+left alone with a warning: run `sccache --stop-server` once. Create the access key bound to that policy in the RustFS console (port 15001) and write it as:
 
 ```sh
 mkdir -p ~/.config/paddock && umask 077 && cat > ~/.config/paddock/sccache-s3.env <<'KEYS'
@@ -154,10 +169,11 @@ since Rust 1.90), where mold saves a little more per link. macOS keeps the defau
 
 ## Shared build cache
 
-CI Rust jobs use sccache's **local disk** on every OS: the job slot's kept folder on a host runner, `/sccache` in a container
-(the `setup-rust` input `sccache-backend` defaults to the variable `PADDOCK_CI_SCCACHE_BACKEND`, `local` when it is unset, and so does
-`./dev ci setup-rust`, `ci_setup_rust.rs`). No workflow picks another backend; the RustFS store behind the disk is switched on by that
-variable (below). The shared Dragonfly (Redis-compatible) server at `172.16.1.188:6379` was CI's backend until 2026-10-25: it
+CI Rust jobs use sccache's **local disk first, the shared RustFS store behind it** on every OS (user decision 2026-11-21): the
+job slot's kept folder on a host runner, `/sccache` in a container, then the store. The `setup-rust` input `sccache-backend` and
+`./dev ci setup-rust` (`ci_setup_rust.rs`) default to `s3`; no repository variable switches it, and ci.yml's dispatch input
+`sccache_backend` (`local` or `s3`) overrides one run for a measurement. A release, rule 54 or tag run stays on the plain local disk
+(below). The shared Dragonfly (Redis-compatible) server at `172.16.1.188:6379` was CI's backend until 2026-10-25: it
 filled up, the Mac job's sccache server failed to start and every rustc call failed (commit 1383e9898); the user decided against a
 shared backend on 2026-10-28 and again on 2026-11-17 (CI keeps its per-slot caches). The Redis path is kept for a deliberate trial:
 
@@ -165,16 +181,19 @@ shared backend on 2026-10-28 and again on 2026-11-17 (CI keeps its per-slot cach
   `SCCACHE_REDIS_DB=5`. The `setup-rust` action reads them as its input defaults; they are used only with `auto` or `redis`.
   sccache uses **database 5 only**; never use another database number.
 - The database goes in `SCCACHE_REDIS_DB`, never in the URL: sccache 0.18 ignores a `/5` path and writes to database 0.
-- `sccache-backend: local | auto | redis | s3` (default: the Gitea variable `PADDOCK_CI_SCCACHE_BACKEND`, `local` when it is unset;
-  `auto` is Redis when an endpoint is set, else local; `redis` fails the job when no endpoint is set).
+- `sccache-backend: s3 | local | auto | redis` (default `s3`; `auto` is Redis when an endpoint is set, else local; `redis` fails the job when no endpoint is set).
 - **`s3`: the local disk first, the shared RustFS store behind it** (docs/research/2026-11-19-sccache.md section 8, user decision
   2026-11-19; trial numbers in docs/benchmarks.md, "CI's sccache on RustFS"). Settings, all in Gitea (Settings, Actions): the
   variables `PADDOCK_SCCACHE_S3_ENDPOINT` (`http://172.16.1.220:15000`) and `PADDOCK_SCCACHE_S3_BUCKET` (`sccache-paddock`), the
   secrets `PADDOCK_SCCACHE_S3_ACCESS_KEY_ID` and `PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY` (one key for every runner class, scoped to
-  `sccache-paddock/paddock-ci/*`), and the variable `PADDOCK_CI_SCCACHE_BACKEND=s3` to switch it on for every run, or the dispatch input `sccache_backend=s3` of ci.yml for one run (delete the variable to switch off: every
-  job is back on its local disk at the next run). The key reaches only the `setup-rust` step (each use passes it; conformance C141
+  `sccache-paddock/paddock-ci/*`). The key reaches only the `setup-rust` step (each use passes it; conformance C141
   checks that, and that the gates job and the release workflows hold none); the sccache server gets the chain and the key, every
-  later step only the local disk. A job falls back to its local disk, with a `::warning::`, when the store's HTTP health check
+  later step only the local disk. **A release, rule 54 or tag run never reads the shared store** (any branch could have written to
+  it: cache poisoning): its workflows hold no key (C141), `./dev ci setup-rust` refuses S3 for a tag ref, a tag rehearsal and `PADDOCK_CI_RELEASE=true` (setup-rust sets it from
+  `conformance/ci/kit.sh release-path`, the one definition: tag, rehearsal, or the `PADDOCK_DEV_DOWNLOAD=0` that release and rule 54
+  workflows set; the guard never reads that flag itself, since setup-rust sets it for any job without a read token too) with a
+  `::notice::` that names the trigger, and the action's shell path takes `s3` as `local`; tests: `the_default_on_a_tag_or_release_run_is_the_plain_local_disk`,
+  `the_release_paths_shell_steps_never_use_s3`. A job with no secret passed gets one `::notice::` naming that, and its local disk. A job falls back to its local disk, with a `::warning::`, when the store's HTTP health check
   (`/minio/health/live`, 5 s at most) fails, and a failed S3 write never fails a build. A store that hangs in the middle of a job
   is cut by the **timeout guard** (`paddock_net::stall_guard`, a localhost proxy `setup-rust` starts in front of the store: a request with no
   byte for 10 s fails, then new connections are refused for 60 s, so sccache uses its local disk; the job log shows what it cut).

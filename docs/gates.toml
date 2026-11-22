@@ -1320,3 +1320,11 @@ owner = "ER-21 class: a whole streamed answer bounded by one expect timeout (deb
 since = 2026-11-20
 review_by = 2026-12-20
 approved = "user"
+
+[[report_only]]
+id = "C145"
+reason = "ER-41: report-only until its first green run on the real tree, recorded by run id here; then flip `mode` in tools/paddock-dev/src/check/c145.rs to Gate. It reads docs/lessons.md, which is merged with git's union driver: twice a merge dropped the blank line before a `## ` heading (9ec43be3c, b9bf5fc4b). The real tree is at 0 findings (the 35 headings that sat under a non-blank line were given their blank line in the commit that added the check)."
+owner = "ER-41"
+since = 2026-11-21
+review_by = 2026-12-21
+approved = "user"

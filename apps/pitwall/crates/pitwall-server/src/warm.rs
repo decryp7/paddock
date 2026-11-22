@@ -34,13 +34,51 @@ pub fn file_name(model: &str, alias: &str, fingerprint: &str, system_prompt: &st
     format!("{}{}.bin", preset_prefix(model, alias), hex(&h.finalize()[..8]))
 }
 
+/// Folder listings made per folder, for the budget tests (ADR 0108): a clear of N models lists the folder once.
+#[cfg(any(test, feature = "test-support"))]
+static LISTINGS: std::sync::Mutex<Vec<std::path::PathBuf>> = std::sync::Mutex::new(Vec::new());
+
+/// How many times `dir` was listed by this module so far.
+#[cfg(any(test, feature = "test-support"))]
+pub fn listings(dir: &Path) -> usize {
+    LISTINGS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .iter()
+        .filter(|d| *d == dir)
+        .count()
+}
+
+fn list(dir: &Path) -> std::io::Result<std::fs::ReadDir> {
+    #[cfg(any(test, feature = "test-support"))]
+    LISTINGS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .push(dir.to_path_buf());
+    std::fs::read_dir(dir)
+}
+
+/// Deletes the files whose names start with any of `prefixes`, in one listing of `dir`: the bulk form of [`drop_prefix`]
+/// (ADR 0108, PW-1). Returns how many went.
+pub fn drop_prefixes(dir: &Path, prefixes: &[String]) -> u64 {
+    if prefixes.is_empty() {
+        return 0;
+    }
+    drop_matching(dir, |name| prefixes.iter().any(|p| name.starts_with(p.as_str())))
+}
+
 /// Deletes the files whose names start with `prefix` except `keep`; returns how many went.
 pub fn drop_prefix(dir: &Path, prefix: &str, keep: Option<&str>) -> u64 {
-    let Ok(rd) = std::fs::read_dir(dir) else { return 0 };
+    drop_matching(dir, |name| name.starts_with(prefix) && Some(name) != keep)
+}
+
+/// Deletes the files of `dir` whose names `doomed` accepts, from one listing.
+fn drop_matching(dir: &Path, doomed: impl Fn(&str) -> bool) -> u64 {
+    let Ok(rd) = list(dir) else { return 0 };
     let mut n = 0;
     for e in rd.filter_map(Result::ok) {
         let name = e.file_name().to_string_lossy().into_owned();
-        if name.starts_with(prefix) && Some(name.as_str()) != keep && std::fs::remove_file(e.path()).is_ok() {
+        if doomed(&name) && std::fs::remove_file(e.path()).is_ok() {
             n += 1;
         }
     }
@@ -142,6 +180,27 @@ mod tests {
         assert_eq!(drop_prefix(d.path(), &model_prefix("m"), None), 1);
         assert_eq!(usage(d.path()), (1, 1), "only the unrelated file is left");
         assert_eq!(drop_prefix(&d.path().join("missing"), "x", None), 0);
+    }
+
+    /// PW-1 (ADR 0108, P2-2): dropping the files of N models lists the folder once; the positive control is N single drops.
+    #[test]
+    fn dropping_many_prefixes_lists_the_folder_once() {
+        let d = tempfile::tempdir().unwrap();
+        let models: Vec<String> = (0..6).map(|i| format!("o/m{i}")).collect();
+        for m in &models {
+            std::fs::write(d.path().join(file_name(m, "fast", "fp", "p")), b"x").unwrap();
+        }
+        std::fs::write(d.path().join(file_name("o/keep", "fast", "fp", "p")), b"x").unwrap();
+        let prefixes: Vec<String> = models.iter().map(|m| model_prefix(m)).collect();
+        let before = listings(d.path());
+        assert_eq!(drop_prefixes(d.path(), &prefixes), 6);
+        assert_eq!(listings(d.path()) - before, 1, "one listing for 6 models");
+        assert_eq!(usage(d.path()), (1, 1), "the other model's file stays");
+        let before = listings(d.path());
+        for p in &prefixes {
+            drop_prefix(d.path(), p, None);
+        }
+        assert_eq!(listings(d.path()) - before, 6, "positive control: one listing per single drop");
     }
 
     #[test]

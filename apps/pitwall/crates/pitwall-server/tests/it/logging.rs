@@ -80,3 +80,32 @@ async fn a_playground_chat_leaves_its_lines_in_the_server_log_file_without_conte
         text.lines().next().unwrap_or("")
     );
 }
+
+/// P2-4 (ER-27): a `delete_models` call leaves one info line with its counts and duration and one warn line per failed id with its
+/// code, in the server log; an id that is not even a model id is counted but never written down (it is the caller's text).
+#[tokio::test]
+async fn delete_models_logs_its_counts_and_each_failure_with_its_code() {
+    let logs = tempfile::tempdir().unwrap();
+    let handle = pitwall_server::logging::install_in(logs.path(), &logs.path().join("crash")).expect("the log installs");
+    let h = harness(false).await;
+    let junk = "not a model id! planted-4f9a";
+    let r = h.rpc("delete_models", json!({"ids": ["tiny-q4_k_m", "ghost-q4_k_m", junk]})).await;
+    assert_eq!(r.status, 200, "{}", r.body);
+    let text = std::fs::read_to_string(handle.active_file().expect("a log file")).unwrap();
+    let lines: Vec<&str> = text.lines().filter(|l| l.contains("delete_models")).collect();
+    assert!(
+        lines
+            .iter()
+            .any(|l| l.contains("requested 3") && l.contains("deleted 1") && l.contains("failed 2") && l.contains(" ms")),
+        "the call's counts and duration: {lines:?}"
+    );
+    assert!(
+        lines.iter().any(|l| l.contains("ghost-q4_k_m") && l.contains("notFound")),
+        "a warn line for the missing model with its code: {lines:?}"
+    );
+    assert!(
+        lines.iter().any(|l| l.contains("invalid") && !l.contains("planted")),
+        "the unparsable id is counted with its code, without its text: {lines:?}"
+    );
+    assert!(!text.contains("planted-4f9a"), "the caller's text is not in the log");
+}

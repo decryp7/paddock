@@ -19,6 +19,7 @@ fn opts() -> RunOpts {
         gate: false,
         low: false,
         queue_max: None,
+        queue_stall: None,
         run_max: None,
     }
 }
@@ -200,4 +201,130 @@ fn unmark_withdraws_the_marker_so_the_next_run_goes_at_once() {
     assert_eq!(rig.count("pitcrew-heavy.high."), 0);
     assert!(!ci.h.unmark("ci-s1", 84), "a second withdrawal finds nothing and is no error");
     assert_eq!(Acquirer::new(&n.h, req("N")).unwrap().poll(), Poll::Held);
+}
+
+/// The queue is bounded by progress: a holder that never lets go stalls it, and the wait names who held the slot.
+#[test]
+fn a_queue_that_makes_no_progress_ends_stalled_and_names_the_holder() {
+    let rig = Rig::new();
+    let n = rig.agent(12);
+    rig.procs.run(31, rig.now() - 50);
+    rig.plant_lock(&format!("31\nx\nholder\n{}\n/work\nsleep 9\n", rig.now()));
+    let args = vec!["true".to_string()];
+    let code = run(
+        &n.h,
+        req("N"),
+        &args,
+        RunOpts {
+            queue_stall: Some(Duration::from_secs(600)),
+            ..opts()
+        },
+        &|| None,
+    );
+    assert_eq!(code, exit::QUEUE_LIMIT);
+    let said = n.said();
+    assert!(said.contains("queue stalled") && said.contains("holder (pid 31)"), "{said}");
+}
+
+/// The other half: a queue whose holders change keeps its waiter far past the stall limit, then the waiter takes the slot and runs.
+#[test]
+fn a_queue_that_keeps_moving_is_waited_for_past_the_stall_limit() {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    let rig = Rig::new();
+    let n = rig.agent(12);
+    let args = vec!["true".to_string()];
+    let (swaps, last) = (AtomicU64::new(0), AtomicU64::new(rig.now()));
+    let start = rig.now();
+    rig.procs.run(99, start - 50);
+    rig.plant_lock(&format!("99\nx\nholder-first\n{start}\n/work\nsleep 9\n"));
+    // The stop callback is read once per poll; it hands the slot to a new holder every 100 s of fake time (12 times: four times the
+    // stall limit), then leaves it free.
+    let stop = || {
+        let (now, done) = (rig.now(), swaps.load(Ordering::SeqCst));
+        if now.saturating_sub(last.load(Ordering::SeqCst)) >= 100 && done < 12 {
+            let _ = fs::remove_dir_all(rig.lock_dir());
+            let pid = 100 + done as u32;
+            rig.procs.run(pid, now - 50);
+            rig.plant_lock(&format!("{pid}\nx\nholder-{done}\n{now}\n/work\nsleep 9\n"));
+            swaps.store(done + 1, Ordering::SeqCst);
+            last.store(now, Ordering::SeqCst);
+        } else if done >= 12 && now.saturating_sub(last.load(Ordering::SeqCst)) >= 100 {
+            let _ = fs::remove_dir_all(rig.lock_dir());
+        }
+        None
+    };
+    let code = run(
+        &n.h,
+        req("N"),
+        &args,
+        RunOpts {
+            queue_stall: Some(Duration::from_secs(300)),
+            ..opts()
+        },
+        &stop,
+    );
+    assert_eq!(code, 0, "{}", n.said());
+    assert!(rig.now() - start >= 1200, "it waited 1200 s of fake time, 4 times the stall limit");
+}
+
+/// A holder running inside the bound this waiter gives its own command is progress, even when nothing else in the queue changes: the
+/// waiter is not stalled after the stall limit but waits until the holder lets go (here 20 minutes, four times the limit).
+#[test]
+fn a_waiter_behind_a_live_holder_inside_its_cap_is_not_stalled() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let rig = Rig::new();
+    let n = rig.agent(12);
+    let args = vec!["true".to_string()];
+    let start = rig.now();
+    rig.procs.run(31, start - 50);
+    rig.plant_lock(&format!("31\nx\nholder\n{start}\n/work\nsleep 9\n"));
+    let released = AtomicBool::new(false);
+    let stop = || {
+        if rig.now() - start >= 1200 && !released.swap(true, Ordering::SeqCst) {
+            let _ = fs::remove_dir_all(rig.lock_dir());
+        }
+        None
+    };
+    let code = run(
+        &n.h,
+        req("N"),
+        &args,
+        RunOpts {
+            queue_stall: Some(Duration::from_secs(300)),
+            run_max: Some(Duration::from_secs(3600)),
+            ..opts()
+        },
+        &stop,
+    );
+    assert_eq!(code, 0, "{}", n.said());
+    assert!(rig.now() - start >= 1200);
+}
+
+/// The same holder past that bound is not trusted any more: it is the holder's own guard that ends it, and a waiter that sees nothing
+/// move for the stall limit after that ends the wait.
+#[test]
+fn a_waiter_behind_a_holder_past_its_cap_stalls_after_the_limit() {
+    let rig = Rig::new();
+    let n = rig.agent(12);
+    let args = vec!["true".to_string()];
+    rig.procs.run(31, rig.now() - 8000);
+    // The record is two hours old: past the 3600 s a command may run.
+    rig.plant_lock(&format!("31\nx\nholder\n{}\n/work\nsleep 9\n", rig.now() - 7200));
+    let code = run(
+        &n.h,
+        req("N"),
+        &args,
+        RunOpts {
+            queue_stall: Some(Duration::from_secs(300)),
+            run_max: Some(Duration::from_secs(3600)),
+            ..opts()
+        },
+        &|| None,
+    );
+    assert_eq!(code, exit::QUEUE_LIMIT);
+    assert!(
+        n.said().contains("queue stalled") && n.said().contains("holder (pid 31)"),
+        "{}",
+        n.said()
+    );
 }
