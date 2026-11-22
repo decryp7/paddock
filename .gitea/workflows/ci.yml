@@ -95,6 +95,11 @@ jobs:
       rerun_jobs: ${{ steps.plan.outputs.rerun_jobs }}
       crate_legs: ${{ steps.plan.outputs.crate_legs }}
       paddock_dev_legs: ${{ steps.plan.outputs.paddock_dev_legs }}
+      # A member run (a dispatch with a base): the nextest filterset of the packages of that workspace the change reaches (empty: every
+      # test, and always so on main, a tag and a manual run with no base: the final head's full run). The Linux crate tests run
+      # whole under coverage in `crates`.
+      crates_filter: ${{ steps.plan.outputs.crates_filter }}
+      paddock_dev_filter: ${{ steps.plan.outputs.paddock_dev_filter }}
     env:
       PADDOCK_DEV_DOWNLOAD: ${{ (inputs.release == true || startsWith(github.ref, 'refs/tags/')) && '0' || '' }}
     steps:
@@ -117,6 +122,17 @@ jobs:
             grep -Eq '^[[:space:]]*run: \./dev gates check( --warn)?$' "$f" || { echo "::error file=$f::C100 is not wired: no line runs ./dev gates check. Fix: restore the line (ADR 0060 section 4)."; exit 1; }
           done
 
+      # ER-49, test a commit once: a push to main of a commit that a complete green run of this workflow already tested (the train's
+      # dispatch, when main fast-forwards to its head) ends here, with that run named in the summary. Only a full green run with
+      # no FLAKY test counts (tag.yml's verdict reader needs one); anything unreadable runs the commit (./dev ci reuse fails open).
+      - name: Reuse a full green run of this commit
+        id: reuse
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        env:
+          PLAN_TOKEN: ${{ github.token }}
+          PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+        run: ./dev ci reuse --workflow ci.yml
+
       - name: Affected projects
         id: plan
         env:
@@ -134,14 +150,21 @@ jobs:
           # main, an app's own gates, a manual run with no base. The line `plan verdict: complete=` at the end of the step is what
           # `./dev ci verdict` reads (plan_since::COMPLETE_LINE); this one is only the scope.
           PLAN_MODE_FULL: ${{ github.event_name == 'push' || inputs.app != '' || (github.event_name == 'workflow_dispatch' && github.event.inputs.base == '' && github.event.inputs.since_run == '') }}
+          # A reused run (the step above): no job runs and the run is not complete; the reused run decides the commit.
+          PLAN_REUSE: ${{ steps.reuse.outputs.reuse }}
+          EVENT: ${{ github.event_name }}
         run: |
           echo "plan mode: full=$PLAN_MODE_FULL"
-          ./dev plan --ci
+          if [ "$PLAN_REUSE" = true ]; then echo 'rerun_jobs=[]' >> "$GITHUB_OUTPUT"; else ./dev plan --ci; fi
           grep -q '^crate_legs=' "$GITHUB_OUTPUT" || echo "crate_legs=$PLAN_OS_LEGS" >> "$GITHUB_OUTPUT"
           grep -q '^paddock_dev_legs=' "$GITHUB_OUTPUT" || echo "paddock_dev_legs=$PLAN_OS_LEGS" >> "$GITHUB_OUTPUT"
           # After the plan decided: complete only for a full run that is not a rerun of failures (plan_since::COMPLETE_LINE).
           complete=false
-          if [ -z "$PLAN_SINCE_RUN" ] && [ "$PLAN_MODE_FULL" = true ]; then complete=true; fi
+          # One meaning of "complete" (ER-15): the scope of a push to main, WebKit included (plan_ci::wants_webkit). A full dispatch
+          # without the webkit input, or a rerun, is a smaller scope, so the tag gate never reads it as the tested commit, and a
+          # push to main is never skipped for it (ci_runs::reuse). A dispatch with `app` is that app only, with no exemption: it is a
+          # smaller scope than a push to main, whatever the webkit input says of the rest.
+          if [ -z "$PLAN_SINCE_RUN" ] && [ "$PLAN_MODE_FULL" = true ] && [ "$PLAN_REUSE" != true ] && [ -z "$PLAN_APP" ] && { [ "$EVENT" = push ] || [ -n "$PLAN_WEBKIT" ]; }; then complete=true; fi
           echo "plan verdict: complete=$complete"
 
   # C102 (ADR 0072): every listen site of the Rust sources is in docs/ipc-endpoints.toml with an ending test or a reason, and the
@@ -1053,9 +1076,11 @@ jobs:
           # network service went away is only in there).
           PADDOCK_TEST_BROWSER_LOG: ${{ runner.os == 'Windows' && format('{0}/chrome-logs', runner.temp) || '' }}
           FILTER: ${{ matrix.filter }}
+          PACKAGE_FILTER: ${{ needs.plan.outputs.crates_filter }}
         run: |
           filter=()
-          if [ -n "$FILTER" ]; then echo "::notice::nextest reruns only the failed tests: $FILTER"; filter=(-E "$FILTER" --no-tests=warn); fi
+          if [ -n "$FILTER" ]; then echo "::notice::nextest reruns only the failed tests: $FILTER"; filter=(-E "$FILTER" --no-tests=warn)
+          elif [ -n "$PACKAGE_FILTER" ]; then echo "::notice::nextest runs only the packages this change reaches (a member run): $PACKAGE_FILTER"; filter=(-E "$PACKAGE_FILTER" --no-tests=warn); fi
           cargo nextest run --workspace --all-features --profile ci ${filter[@]+"${filter[@]}"}
 
       - uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v3
@@ -1535,9 +1560,11 @@ jobs:
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/paddock-dev
         env:
           FILTER: ${{ matrix.filter }}
+          PACKAGE_FILTER: ${{ needs.plan.outputs.paddock_dev_filter }}
         run: |
           filter=()
-          if [ -n "$FILTER" ]; then echo "::notice::nextest reruns only the failed tests: $FILTER"; filter=(-E "$FILTER" --no-tests=warn); fi
+          if [ -n "$FILTER" ]; then echo "::notice::nextest reruns only the failed tests: $FILTER"; filter=(-E "$FILTER" --no-tests=warn)
+          elif [ -n "$PACKAGE_FILTER" ]; then echo "::notice::nextest runs only the packages this change reaches (a member run): $PACKAGE_FILTER"; filter=(-E "$PACKAGE_FILTER" --no-tests=warn); fi
           cargo nextest run --profile ci --locked --no-fail-fast ${filter[@]+"${filter[@]}"}
 
       # Licences, advisories, sources (tools/paddock-dev/deny.toml, the crates' rules); the image has cargo-deny.

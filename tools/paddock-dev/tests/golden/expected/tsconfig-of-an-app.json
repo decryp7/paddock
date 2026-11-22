@@ -19,6 +19,7 @@
   ]
  },
  "packages": {},
+ "cargoOnly": [],
  "why": {
   "app:y": [
    "apps/y/app/tsconfig.json"

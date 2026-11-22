@@ -20,6 +20,7 @@
   ]
  },
  "packages": {},
+ "cargoOnly": [],
  "why": {
   "app:x": [
    ".gitea/workflows/gates.yml used by .gitea/workflows/x.yml"

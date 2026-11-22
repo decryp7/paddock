@@ -424,11 +424,23 @@ pub fn conformance_apps(root: &Path) -> Vec<String> {
 #[derive(Default)]
 struct State {
     why: BTreeMap<String, Vec<String>>,
+    /// Projects with a reason that is not a Cargo reach (a UI file, an installer file, a lockfile, a script, a workflow...): their
+    /// whole test set is wanted, never a package subset (`cargoOnly` of the plan).
+    beyond_cargo: BTreeSet<String>,
     kinds: BTreeMap<String, BTreeSet<&'static str>>,
 }
 
 impl State {
+    /// A reason that is not a Cargo reach: the project's nextest cannot be narrowed to packages.
     fn mark(&mut self, project: Option<String>, reason: String) {
+        if let Some(p) = project {
+            self.beyond_cargo.insert(p.clone());
+            self.why.entry(p).or_default().push(reason);
+        }
+    }
+
+    /// A reason that is a change in, or a Cargo dependency on, a crate of the project's own workspace.
+    fn mark_cargo(&mut self, project: Option<String>, reason: String) {
         if let Some(p) = project {
             self.why.entry(p).or_default().push(reason);
         }
@@ -611,10 +623,15 @@ pub fn affected(files: &[String], graph: &RepoGraph, opts: &Options) -> Result<V
             mark_all(&mut st, &format!("unknown root file {f}"), &mut everything);
             continue;
         };
-        for p in &own {
-            st.mark(Some(p.clone()), f.clone());
-        }
         let c = graph.cargo.node_of(f).map(str::to_string);
+        for p in &own {
+            // A file of a crate of the project's own workspace is a Cargo reach, unless a declared input lists it for more.
+            if input.is_none() && c.as_ref().is_some_and(|c| project_of_dir(c).as_ref() == Some(p)) {
+                st.mark_cargo(Some(p.clone()), f.clone());
+            } else {
+                st.mark(Some(p.clone()), f.clone());
+            }
+        }
         let n = graph.npm.node_of(f).map(str::to_string);
         if let Some(c) = &c
             && project_of_dir(c).is_some_and(|p| own.contains(&p))
@@ -726,7 +743,7 @@ pub fn affected(files: &[String], graph: &RepoGraph, opts: &Options) -> Result<V
     sorted_changed.sort();
     for d in crates.iter().filter(|d| !changed_crates.contains(d)) {
         let p = project_of_dir(d);
-        st.mark(p.clone(), format!("cargo {d} reaches {}", sorted_changed.join(", ")));
+        st.mark_cargo(p.clone(), format!("cargo {d} reaches {}", sorted_changed.join(", ")));
         st.kind(p.as_deref(), "rust");
     }
     for d in graph
@@ -782,6 +799,9 @@ pub fn affected(files: &[String], graph: &RepoGraph, opts: &Options) -> Result<V
         .collect();
     out.insert("kinds".into(), Value::Object(kinds));
     out.insert("packages".into(), json!(packages));
+    // The projects whose every reason is a Cargo reach: only these may run a subset of their packages (a member run's nextest filter).
+    let cargo_only: Vec<&String> = st.why.keys().filter(|p| !st.beyond_cargo.contains(*p)).collect();
+    out.insert("cargoOnly".into(), json!(cargo_only));
     if opts.explain {
         out.insert("why".into(), json!(st.why));
     }
@@ -1113,6 +1133,54 @@ mod tests {
         ] {
             assert!(!owners(f).is_some_and(|o| o.iter().any(|p| p == "eslint")), "{f}");
         }
+    }
+
+    fn cargo_only(p: &Value, project: &str) -> bool {
+        p["cargoOnly"].as_array().is_some_and(|a| a.iter().any(|x| x == project))
+    }
+
+    #[test]
+    fn a_project_is_cargo_only_when_every_reason_for_it_is_a_cargo_reach() {
+        // Source in one shared crate: the crates workspace and the app that depends on it are reached through Cargo only.
+        let p = plan(&["crates/core/src/lib.rs"]);
+        assert!(cargo_only(&p, "crates") && cargo_only(&p, "app:dyno"), "{}", p["cargoOnly"]);
+        // Conformance always runs for a reason that is not a Cargo reach, so it is never a package subset.
+        assert!(!cargo_only(&p, "conformance"));
+        // A crate plus a per-machine installer file: the sync test reads the file, so `crates` runs whole (a positive control
+        // for the case above: the crate change alone narrows).
+        let p = plan(&["crates/core/src/lib.rs", "crates/paddock-setup/nsis/paddock-per-machine.nsh"]);
+        assert!(!cargo_only(&p, "crates"), "{}", p["cargoOnly"]);
+        // Frontend source of an app plus a crate it does not depend on: the app has a UI reason, the crates workspace has none.
+        let p = plan(&["apps/dyno/app/src/app/x.ts", "crates/ui-kit/src/lib.rs"]);
+        assert!(!cargo_only(&p, "app:dyno") && cargo_only(&p, "crates"), "{}", p["cargoOnly"]);
+        // Npm reach: a shared UI package marks the app (its src-tauri build embeds the frontend), a reason beyond Cargo.
+        let p = plan(&["ui/projects/paddock-ui/src/a.ts"]);
+        assert!(!cargo_only(&p, "app:dyno"), "{}", p["cargoOnly"]);
+        // The shared workspace's own config reaches every member: no subset.
+        let p = plan(&["crates/Cargo.toml"]);
+        assert!(!cargo_only(&p, "crates"), "{}", p["cargoOnly"]);
+    }
+
+    #[test]
+    fn paddock_dev_is_cargo_only_for_its_sources_and_not_for_its_launcher_or_a_mixed_change() {
+        let mut g = sample();
+        g.cargo.insert("tools/paddock-dev", node("paddock-dev", "tools/paddock-dev", &[]));
+        let run = |files: &[&str]| {
+            let files: Vec<String> = files.iter().map(|s| s.to_string()).collect();
+            affected(
+                &files,
+                &g,
+                &Options {
+                    explain: true,
+                    ..Options::default()
+                },
+            )
+            .unwrap()
+        };
+        assert!(cargo_only(&run(&["tools/paddock-dev/src/lib.rs"]), "paddock-dev"));
+        // `dev` (the launcher) is owned by paddock-dev but belongs to no crate: its tests are not a package list.
+        assert!(!cargo_only(&run(&["tools/paddock-dev/src/lib.rs", "dev"]), "paddock-dev"));
+        assert!(!cargo_only(&run(&["dev"]), "paddock-dev"));
     }
 
     #[test]

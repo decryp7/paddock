@@ -28,6 +28,7 @@
   ]
  },
  "packages": {},
+ "cargoOnly": [],
  "why": {
   "app:x": [
    "npm apps/x/app"
