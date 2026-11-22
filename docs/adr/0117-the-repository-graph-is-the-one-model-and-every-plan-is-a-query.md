@@ -85,16 +85,24 @@ drafted, `cargo`, `npm`, `ci` moved from `gates/ci.rs`, `os`).
 Every tracked file belongs to exactly one *owner* node, by this precedence (review P1-4):
 
 1. a named input (§3) claims it (the root `package.json`, `.gitattributes`, `docs/lessons.md`);
-2. otherwise the deepest **project folder** that contains it: a project's own docs, changelog and data belong to the project
-   (`apps/dyno/CHANGELOG.md` is compiled in by `apps/dyno/app/src-tauri/src/lib.rs:276`, `include_str!`). Its reach kind is `docs`
-   unless a `reads` edge (§4) or a declared input names the file, then `code`;
-3. otherwise a declared owner rule for the paths outside every project (`docs/**`, root `*.md`, `.gitea/**/*.md`, `spikes/**`,
-   `conformance/reserved/**`). There is no catch-all rule.
+2. otherwise the deepest **project folder** that contains it. Only **prose** (`*.md`, `*.txt`, `LICENSE*`) in a project folder is
+   `docs` for that project, and a `reads` edge (§4) or a declared input raises it to `code` (`apps/dyno/CHANGELOG.md` is compiled in
+   by `apps/dyno/app/src-tauri/src/lib.rs:276` and is the `changelogs` input). **Every other file in a project folder is `code`** for
+   that project (review round 2, P1-A): data, fixtures, JSON and `src-tauri/capabilities/*.json`, which `tauri-build` reads with no
+   literal path (code for the app's Rust half);
+3. otherwise a declared owner rule for the paths outside every project (`docs/**`, `diagrams/**`, root `*.md`, `LICENSE*`,
+   `.gitea/**/*.md`, `spikes/**`). There is no catch-all rule. Under a doc owner only prose and documentation images are `docs`:
+   **every other file must be a named input**, or it is unowned. The registers under `docs/` are inputs that reach their checks:
+   `docs/repo-graph.toml` (paddock-dev, conformance), `docs/gates.toml` (paddock-dev, conformance), `docs/generators.toml`
+   (paddock-dev), `docs/known-copies.toml` (tools, conformance), `docs/harnesses.toml`, `docs/ipc-endpoints.toml` and its ratchet
+   (conformance), `docs/ci-scope-first-runs.toml` (paddock-dev); the lessons and rules files reach C145 and the tools tests as `code`
+   (G13). The control: a `.toml` under `docs/` that no input names makes the owner check fail and the plan answer everything.
 
 A file none of these claims is **unowned**: the plan itself answers "everything" for that run and prints the file in an `::error::`
 line with the next step (declare an owner); the owner check runs inside the plan job, not only in a separate check, so it cannot be
 skipped. It starts report-only (ER-41, review P2-6): until its first green run is recorded, an unowned file widens the plan to
-everything and nothing fails.
+everything and nothing fails. An extractor that cannot read a file (`ExtractError`) puts that file's project on full in the same
+way (review round 2, P2-6).
 
 ### 3. Declared inputs, replacing `GLOBAL` and the path regexes
 
@@ -199,12 +207,29 @@ less than full) and the line becomes `"v":2`; `Declared::complete` refuses a run
 affected tests ... not the full suite"), and an older reader refuses v2 as not measured (ER-15, ER-33, ER-49). Until ci.yml is
 recorded (ADR 0113 §5) the old `plan verdict: complete=` line also says false when any job ran less than full.
 
-"Complete" stays exact (review P1-3). The base of a push to main or a landing run is **the last commit with a complete verdict from
-the one verdict reader** (`./dev ci verdict`), not the last green run as `choose_base` takes it today (`plan_ci.rs:285` and below),
-so a smoke or affected run never becomes the base and diffs accumulate from the last complete commit. A v2 run is complete only
-when its selection was full for everything its plan reached **and** its base was itself complete. A golden pins the sequence: a
-plumbing-only push (smoke, not complete) followed by a code push: the code push diffs from the commit before the smoke push, so it
-runs the plumbing change's jobs in full too, and is complete.
+**One definition of green** (review round 2, P1-C). A run's outcome is its **scope** times its **result**:
+
+- scope: `Complete` (the selection was full for everything its plan reached, no step or test was skipped because of a failure, and
+  its base was itself `Complete` with a green result) or `Partial` (anything less: smoke, affected tests, a rerun, a skipped step);
+- result: `Green` (every test passed on its first try), `GreenWithFixItems` (every failure is a FLAKY test that passed on its one
+  retry, in a target the run's own reach did **not** mark `code` or `test`), `Red` (a test failed both tries, a FLAKY test sits in a
+  target the change touched, or a non-test step failed) or `NotMeasured` (a report cannot be read).
+
+`Complete × Green` and `Complete × GreenWithFixItems` are the only green outcomes, for every reader: the landing check, the base of a
+push or landing run, `ci reuse` (ER-49) and the run scope. A tag needs `Complete × Green`; a tag's run on a `GreenWithFixItems`
+commit is the one allowed flake retry (ER-12, ER-49). Controls: a FLAKY test inside a touched target makes the run `Red`; a step
+skipped because an earlier one failed makes it `Partial`; a both-tries failure is `Red`; an unreadable report is `NotMeasured`.
+
+FLAKY comes from the run's own reports, nextest JUnit and Playwright JSON, through one accessor pinned to the run (review round 2,
+P2-3); the fix items are derived from those reports and the run's reach, so the verdict has no input that changes with time (P2-2).
+The reader reads a workflow's runs once, newest first and bounded, and matches commits by sha in memory, with a test that counts its
+API calls (P2-4).
+
+The base of a push to main or a landing run is the last first-parent commit of main with a green outcome (above), not the last green
+run as `choose_base` takes it today (`plan_ci.rs:285` and below), so a smoke or affected run never becomes the base. A golden pins
+the sequence: a plumbing-only push (smoke, `Partial`) followed by a code push: the code push diffs from the commit before the smoke
+push, so it runs the plumbing change's jobs in full too, and is `Complete`. WP-4 is built to exactly this definition by a separate
+implementer in parallel (`feat/verdict-one-green`, base main plus `fix/run-scope-reuse-p2`).
 
 **The verdict reader's "last fully tested commit" is wrong today, and WP-4 fixes it.** Read-only check on 2026-11-23:
 `./dev ci verdict --workflow ci.yml --sha d04af7b46...` names `f7bbe2b86` (a train-7 commit of 2026-11-13) as the last fully tested
@@ -237,12 +262,12 @@ WP-4 fixes the reader, failing tests first:
 
 1. `last_full` over main's first-parent commits: a main whose push runs are all failed or cancelled, with a green complete train
    run on `67ac6d6ec` (the 8554 shape), names that commit (red today: it names `f7bbe2b86`).
-2. One typed outcome per run, from the reader that the landing check also calls: `Green`, `GreenWithFixItems` (every failure is a
-   FLAKY test that passed on retry, outside the features the change touched, each recorded as a fix item; ER-12), `Red` (a test
-   failed both tries, or a non-test step failed), `Partial`, `NotMeasured`. A test: a run whose only failures are FLAKY retries in
-   untouched features is `GreenWithFixItems`, not `Red`; a both-tries failure stays `Red` (positive control).
-3. The base of a push or landing run (§6) is the last commit whose outcome is `Green` or `GreenWithFixItems`; a tag still needs
-   `Green` (ER-15). A failed run after a green one on the same commit decides only when its failures are not FLAKY-only.
+2. One outcome per run, scope times result, as defined above, from the reader that the landing check also calls, with its four
+   controls (FLAKY in a touched target is `Red`; a skipped step is `Partial`; both tries failed is `Red`; an unreadable report is
+   `NotMeasured`).
+3. The base of a push or landing run is the last first-parent commit with `Complete × Green` or `Complete × GreenWithFixItems`; a tag
+   needs `Complete × Green` (ER-15). A failed run after a green one on the same commit decides only when it is `Red` by the
+   definition above.
 4. The push-to-main reuse (ER-49) asks the same reader, so a push after a `GreenWithFixItems` train run reuses it instead of
    rerunning 48 jobs.
 
@@ -269,7 +294,7 @@ and over the last 200 commits of `main`; every difference is either in this list
    its positive control: a real action file with no user still marks everything) is carried over as a golden case.
 2. A plumbing-only reach: smoke instead of full; `--app <app>` answers `false` (no installers).
 3. A test-only reach: affected test targets instead of full.
-4. `conformance/src`, `conformance/bin`: no app marks.
+4. `conformance/src`, `conformance/bin`: no app tests; each app's conformance step (the `runs` edge from its contract's check line).
 5. OS legs from derivation instead of `hostTests` (only where C155 already reports the list wrong).
 6. The audit's gaps (below): each closed gap changes the goldens it covers, and only those.
 7. A train dispatch with `base` (WP-8): the landing run plans the train's diff, not everything.
@@ -278,7 +303,7 @@ The audit's gap list (`docs/research/ci-run-audit-2026-11-23.md` §3), each mapp
 
 | Gap | What over-marks today | Closed by | As |
 |---|---|---|---|
-| G1 | a train dispatch has no base, so `choose_base` plans everything (runs 8610, 8635, 8647) | WP-8 | the dispatch passes `base` = main's tested head; ADR 0113's `need` for that run and for a push = the run's own plan |
+| G1 | a train dispatch has no base, so `choose_base` plans everything (runs 8610, 8635, 8647) | WP-8 | the dispatch passes `base` = main's last commit with a green outcome (§6, the one definition); ADR 0113's `need` for that run and for a push = the run's own plan |
 | G2 | `.gitattributes` is a whole-file global | WP-1 | an attribute-aware extractor: only `text`, `eol`, `binary`, `filter`, `diff` changes reach the owners of the paths they match; `merge=` and comments reach conformance only (D4) |
 | G3 | an unknown root file (`spikes/*/Cargo.lock`) marks everything | WP-1 | owners: every root folder is declared (owned or "not built"); an unowned file fails the graph's check |
 | G4 | a mention is a use (the plan job's grep naming `nightly.yml`) | WP-2 | `uses` and `runs` edges come only from `uses:` and a step's invoked program and script arguments, never from a path inside other shell text; the "C100 stays wired" grep moves to the conformance job |
@@ -291,7 +316,7 @@ The audit's gap list (`docs/research/ci-run-audit-2026-11-23.md` §3), each mapp
 | G11 | tests run per workspace, not per reached package, except on member runs | WP-3 | `selection` names the reached packages (`-p`) on every run kind; whole workspaces only on the nightly and tags |
 | G12 | no test-level graph | WP-3 | `test-file` nodes and `imports` edges |
 | G13 | `docs/lessons.md` marks conformance and tools | WP-1 | kept as a declared input (C145 reads it) |
-| G14 | a push's base is the last green push run, so a red push widens the next one | WP-8 | the base reader (the ADR 0113 verdict reader, the one place) accepts the train's complete run on the same tree |
+| G14 | a push's base is the last green push run, so a red push widens the next one | WP-8, WP-4 | the base is the last first-parent commit with a green outcome by the one definition (§6), so a train's `Complete × Green` run on the same commit counts |
 
 The regenerated goldens (ER-40, with their generators) carry exactly these differences; review reads the diff of the goldens.
 
@@ -305,7 +330,9 @@ The net is wider than the goldens (review P1-6):
 - **`--compare` prints what a narrowing drops**: for every node the new planner selects less of, the targets it no longer runs.
 - **Escape monitor** (the practice of Google TAP and Meta's predictive test selection): each nightly's full results are compared with
   the selection of every commit since the last green nightly; a test that fails in the nightly, bisected to a commit whose selection
-  did not include it, is an escape, reported with the commit and the dropped edge. The old rule tables are deleted only after five
+  did not include it, is an escape, reported with the commit and the dropped edge. The bisect is bounded (review round 2, P2-7): at most
+  the commits since the last green nightly, capped at 30, and only the failing test's own target, at most 10 runs of it per nightly;
+  past the bound the escape is reported `not measured` with the range, never guessed. The old rule tables are deleted only after five
   consecutive nightlies with zero escapes (D12); until then they stay behind `--compare`.
 
 **Positive controls** (ER-33, review P1-5), each a fixture that removes what the control watches and asserts that reach or
@@ -369,7 +396,12 @@ file reads batched. Extractors run in parallel over files (rayon, cores minus on
 The graph train is the one train while the others are held (D9): 0113 and os-scoped first, then WP-1 to WP-5 with WP-8, each member
 gated as ER-8 says; WP-6, WP-7 and WP-9 follow in the next train.
 
-### 12. Review round 1 answers (and two later questions: extensibility, §15; the verdict reader, §6)
+### 12. Review round 1 and 2 answers (and the later questions: extensibility, §15; the verdict reader, §6; a database, D13)
+
+Round 2: P1-A data is code and registers are inputs (§2, §14); P1-B the slice's precedence and fail-closed fixed (§13, Consequences);
+P1-C one definition of green (§6, WP-4, G1, G14, §14); P2-1 difference 4 (§8); P2-2 and P2-3 reports pinned to the run (§6); P2-4 runs
+read once (§6); P2-5 the no-path-rule check's scope (§14); P2-6 extract errors put the project on full (§2); P2-7 the bounded bisect
+(§8).
 
 P1-1 `reads` edge (§4, §5 `input_hash`); P1-2 scripts run by path (§4 `reads`); P1-3 complete stays exact (§6); P1-4 fail closed and
 owner precedence (§2); P1-5 positive controls (§8 table); P1-6 migration net (§8); P1-7 resolution without `node_modules` (§4); P1-8
@@ -383,16 +415,17 @@ decisions are in order).
 WP-1, first slice, on `origin/feat/repo-graph-model` (`de3f23c08` the crate, `499ed5553` the accessor; base `a073aae56`): `crates/paddock-repo-graph/src/model/` (`Reach`,
 owners, named inputs and defaults, the attribute extractor, `reach` at the project level) and `imports.rs`, 39 crate tests with
 positive controls for G3, G7/G8 and G9 (a mutation of each rule turns its test red); `tools/paddock-dev/src/repo_inputs.rs` (the TOML
-accessor, 3 tests) and `docs/repo-graph.toml`. Known gap against this revision: the slice gives declared owner rules precedence over
-project folders, the reverse of §2 (P1-4); WP-1 fixes it first.
+accessor, 3 tests) and `docs/repo-graph.toml`. Round 2's P1-A and P1-B are fixed in `402e1d8a4` (failing tests first): project folders
+before owner rules, prose versus code, the registers under `docs/` as inputs, unowned files answering everything; 43 crate tests.
 
 ### 14. Once and for all: how each instance becomes impossible or checked
 
 **No path rule outside the graph.** When WP-5 and WP-9 are done, the planner holds no regex or path list: every fact that today is
 a rule (`GLOBAL`, the input regexes, `OWNERS`, `CI_JOBS`, `TRACED_SCRIPT`, `GITEA_FILE`, the `conformance → every app` loop, the
 `src-tauri` kind rule, `hostTests`, the generators' `paths`) is a declared input in `docs/repo-graph.toml`, a project contract
-field, or an edge an extractor reads from the code. A conformance check (WP-5) fails when `tools/paddock-dev/src/plan*.rs` gains a
-`Regex` or a path literal, with a positive control.
+field, or an edge an extractor reads from the code. A conformance check (WP-5) fails when any of paddock-dev's planning code (every
+module that calls `reach` or `selection`, not only `plan*.rs`) gains a `Regex` or a path literal outside a short allow-list of output
+literals (job names, output keys), with a positive control (review round 2, P2-5).
 
 "Impossible" means the structure cannot express the defect; "checked" means a named check fails when it comes back.
 
@@ -405,7 +438,7 @@ field, or an edge an extractor reads from the code. A conformance check (WP-5) f
 | Foundation change runs app jobs (G8) | impossible | conformance reaches only the conformance job and the apps' conformance steps through `runs` edges (§6) |
 | OS placement by hand list | checked | derived `os` marks; C155 fails on an exception the derivation contradicts; `os.skip` needs the user (§7) |
 | Generator inputs by hand list | impossible | generator inputs are edges to nodes, not globs (§4) |
-| G1 no base on a train dispatch | checked | WP-8: the dispatch passes `base`; `./dev ci dispatch` refuses a train dispatch without one; a golden pins it |
+| G1 no base on a train dispatch | checked | WP-8: the dispatch passes `base` (the last green outcome by §6's one definition); `./dev ci dispatch` refuses a train dispatch without one; a golden pins it |
 | G2 `.gitattributes` global | impossible | the attribute extractor; only content attributes reach (§3) |
 | G3 unknown root file marks everything | checked | the owner check fails on an unowned file and the plan prints it; owners are declared for every root folder (§2) |
 | G4 a mention is a use | impossible | edges come only from `uses:` and invoked programs (§4) |
@@ -414,7 +447,8 @@ field, or an edge an extractor reads from the code. A conformance check (WP-5) f
 | G10 e2e guard files | checked | kept as `imports` edges; their positive control (§8) |
 | G11 per-workspace runs | impossible | `selection` names packages on every run kind (WP-3) |
 | G13 lessons file | checked | a declared input with its golden |
-| G14 a red push widens the next base | impossible | the base is the last complete verdict from the one reader (§6) |
+| G14 a red push widens the next base | impossible | the base is the last first-parent commit with a green outcome by the one definition (§6) |
+| Data that selects nothing (round 2, P1-A) | checked | every non-prose file has a code-reaching owner: in a project folder it is `code`, under a doc owner it must be a named input or the owner check fails (control: an undeclared `.toml` under `docs/`) |
 
 Every row has its positive control in the §8 table and its golden; the escape monitor (D12) is the net for what no structure covers.
 
@@ -537,10 +571,16 @@ cause once and for all: all nine work packages, in the order of §11.
   goldens match (WP-5). *Recommended: (a)*: Google TAP and Meta keep a full-run safety net and measure escapes before they trust
   a selection.
 
+- **D13. No database** (the user asked, 2026-11-23). The graph is built in memory per run from the commit's tree, within the 3 s / 5 s
+  budget; persisted state lives only in stores that exist: test-result cache objects in RustFS S3 (ADR 0116), verdicts in the Gitea
+  API, and the escape monitor's selection records as a small JSON per run (an artifact or S3). A graph cache file keyed by the git
+  tree object id is allowed only if a measurement needs it, as Nx keeps its project-graph cache file (nx.dev, "Project Graph"
+  caching); Bazel and Pants likewise rebuild their graphs in memory from the tree.
+
 ## Consequences
 
-- A new planner question is a query or a declared input, not a rule; a file no node owns fails the graph's check instead of planning
-  everything.
+- A new planner question is a query or a declared input, not a rule. A file no node owns makes the plan answer everything (fail
+  closed) and the owner check name it, so the gap is fixed by declaring an owner, never by a silent narrowing.
 - `plan_gitea.rs`, the `GLOBAL` and input regex tables of `plan.rs`, the CI job table and the duplicate CI reader go; `plan_ci.rs`
   shrinks to output. `plan_since.rs` (reruns from logs) stays: it reads runs, not the repository.
 - The ADR 0113 amendment's behaviours keep their text; its mechanism (planner rules, the `plumbingOnly`/`affectedTests` lists) is
