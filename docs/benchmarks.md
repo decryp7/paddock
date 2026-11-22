@@ -2479,3 +2479,33 @@ Lanes times workers per host, from the class layout (lanes x workers against the
 Not measured: the run time of the Vitest jobs at the lower worker count (the first full CI run after this lands says; ER-12: a count that
 turns out too low is raised only with that measurement recorded here). Playwright was already within the budget (workers 1, Debrief 2), so
 its row changes only where a host's share falls below a config's own count.
+
+## CI rounds of trains 19 and 20 by runner class (2026-11-23, docs/ci-run-audit)
+
+Quoted by [docs/research/ci-run-audit-2026-11-23.md](research/ci-run-audit-2026-11-23.md).
+
+- **Method.** Gitea API job metadata (`/actions/runs/<id>/jobs`, started to completed; reusable-workflow wrapper jobs with no
+  runner label left out, so a called workflow is not counted twice; jobs over 4 h or with no start time left out) and the job
+  logs, each cut at its `::group::` markers. Runner class from the job's label (ubuntu: the six Linux lanes; macos: the one Mac;
+  windows: the one Windows runner). Limits: segment classes follow step names; queue time is not counted; per-job CPU not sampled
+  (**not measured**).
+- **Job-minutes per round:**
+
+  | Round (runs) | Linux | macOS | Windows | Total |
+  |---|---:|---:|---:|---:|
+  | Train 19, b3c254a2d (8610 ci, 8611 debrief, 8614/8615/8620/8624/8625 release) | 425 | 125 | 181 | 731 |
+  | Train 19's push to main of the same commit (8626, 8627, 8628) | 207 | 41 | 81 | 329 |
+  | Train 19 trial runs (8560, 8576, 8601), each | 136 to 268 | 37 to 71 | 71 to 82 | 248 to 409 |
+  | Train 20 round 1, 0ae8b4794 (8635 to 8640) | 412 | 98 | 195 | 704 |
+  | Train 20 round 2, fe097b7a4 (8647 to 8653, partly cancelled) | 381 | 70 | 138 | 588 |
+  | Train 20 round 3, 803aed12d (8654 to 8661, cancelled) | 344 | 67 | 136 | 547 |
+
+- **Base of the plan.** Runs 8610, 8635 and 8647 (train dispatches) printed `base: a manual run without a base: everything`;
+  the trial runs 8560, 8576 and 8601 planned from `the base input 67ac6d6ec`.
+- **Job groups in train 20 round 1 (8635 to 8640), job-min (Linux / macOS / Windows):** crate legs and `crates` 7.4 / 3.0 / 11.4;
+  eslint, icons and audit 9.9 / 0 / 0; app Rust legs on macOS and Windows 0 / 11.4 / 31.5; WebKit e2e in ci.yml 52.1 / 19.1 / 0;
+  Debrief e2e shards 104.5 / 0 / 0; bundles in all workflows 63.0 / 33.9 / 124.4.
+- **Debrief e2e by engine** (sum of per-test durations, list reporter, 2 workers): run 8611 Chromium 703 tests 54.1 min, WebKit
+  691 tests 107.0 min; run 8636 Chromium 703 tests 55.4 min, WebKit 693 tests 113.5 min.
+- **`./dev` builds inside jobs** (the `build-jobs` segments, ADR 0115 instance 3): run 8610 60.9 min over 47 jobs (29 over 60 s),
+  run 8635 16.7 min (4 over 60 s), run 8647 0.6 min (none).
