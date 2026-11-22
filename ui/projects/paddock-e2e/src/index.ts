@@ -26,7 +26,7 @@ export {
   type DocScreensOptions,
   type PlannedShot,
 } from './doc-screens.ts';
-export { axeViolations, settleTransitions, axeInThemes, axeTargets, WCAG_TAGS, THEMES, type Theme, type AxeOptions, type AxeTarget } from './axe.ts';
+export { axeViolations, withPageStill, onEveryAxeScan, settleTransitions, axeInThemes, axeTargets, WCAG_TAGS, THEMES, type Theme, type AxeOptions, type AxeTarget } from './axe.ts';
 export { axeEveryDialog, dialogTargets, type EveryDialogOptions } from './a11y.ts';
 export {
   tabWalk,
