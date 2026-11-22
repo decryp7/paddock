@@ -113,6 +113,24 @@ fn unlisting_local_sccache_goes_red_through_the_import_of_ci_setup_rust() {
 }
 
 #[test]
+fn dropping_the_declared_edge_exemption_goes_red_through_gates_command_importing_cli() {
+    let d = scratch();
+    edit_contract(d.path(), "tools/paddock-dev/paddock.ci.json", |v| {
+        assert!(
+            v["hostTests"].as_object_mut().unwrap().remove("edgeExempt").is_some(),
+            "the contract declares the exemption"
+        );
+    });
+    let (findings, _) = run(d.path());
+    assert!(
+        findings
+            .iter()
+            .any(|(f, m)| f.ends_with("src/gates/command.rs") && m.contains("[import-edge]") && m.contains("crate::cli")),
+        "{findings:#?}"
+    );
+}
+
+#[test]
 fn unlisting_pre_push_exec_goes_red_through_the_import_of_ci_run() {
     let d = scratch();
     edit_contract(d.path(), "tools/paddock-dev/paddock.ci.json", |v| {

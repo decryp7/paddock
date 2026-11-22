@@ -2449,7 +2449,7 @@ summary line.
 
 | Job | run 8554 (before) | first run after landing | tests before | tests after |
 |---|---|---|---|---|
-| paddock-dev (windows) | 14.9 min | TBD | 1,871 | TBD |
+| paddock-dev (windows) | 14.9 min | TBD | 1,871 | about 1,000 of 1,871 expected (1,264 of 2,319 listed on macOS) |
 | paddock-dev (macos) | 7.5 min | TBD | 2,285 | TBD |
 | crate (windows) | 11.4 min | TBD | 4,813 | TBD |
 | crate (macos) | 12.1 min | TBD | | TBD |

@@ -19,11 +19,14 @@
 //!    `mod.rs` (`crate::pre_push::stop_on_signals`) is covered when some module of that folder is listed. The cases that made this
 //!    rule: `ci_setup_rust` imports `local_sccache` and `ci_run` imports `pre_push::exec`, so those keep their Windows and macOS tests.
 //!    A package in the contract's `lastPackages` is kept off the host legs by that older decision and is not read.
+//!    A package or module that only macOS tests (`only.macos-latest`) and holds Windows code (a cfg naming `windows`, a Windows API crate) is an
+//!    **os-code-windows** finding: that code would never run on Windows. An import edge the contract declares in `edgeExempt` (with its reason) is
+//!    not followed.
 //! 4. **stale-entry**: a name in `hostTests` that is no package of the workspace and no module of paddock-dev (a typo or a deleted crate).
 //! 5. **bad-contract**: a `hostTests` the reader refuses.
 //!
 //! Positive controls ([`Check::control`], ER-33): an unlisted package with `cfg(windows)` and an unlisted module that a listed one
-//! imports each go red; `tests/it/check_c155.rs` unlists `paddock-proc` and `local_sccache` in the real contracts and shows the same.
+//! imports each go red; `tests/it/os_scoped.rs` unlists `paddock-proc` and `local_sccache` in the real contracts and shows the same.
 //!
 //! **Report-only (warnings) until its first green run on the real tree is recorded here and in docs/gates.toml (ER-41).** Recorded: not
 //! yet. First count on the real tree (this branch): see CHANGELOG. Lists only shrink in effect (ER-46): the check keeps no list of its
@@ -44,11 +47,17 @@ const CRATES: &str = "crates/paddock.ci.json";
 const PADDOCK_DEV: &str = "tools/paddock-dev/paddock.ci.json";
 const PD_DIR: &str = "tools/paddock-dev/";
 
-static CFG: LazyLock<Regex> = LazyLock::new(|| rx(r"\bcfg(?:_attr)?!?\s*\([^\n]*?\b(?:windows|unix|target_os|target_family)\b"));
-static API: LazyLock<Regex> = LazyLock::new(|| rx(r"\b(?:windows_sys|libc|objc2|core_foundation|security_framework|zbus)\s*::"));
+// Over lines: `cfg(any(\n windows,\n unix))` is one site. The parentheses nest three deep.
+// Over lines: `cfg(any(\n windows,\n unix))` is one site. The span ends at `;`, a brace or the `]` that closes the attribute, so a
+// word of a following item is never read as part of it.
+static CFG: LazyLock<Regex> = LazyLock::new(|| rx(r"\bcfg(?:_attr)?!?\s*\([^;{}\]]{0,300}?\b(?:windows|unix|target_os|target_family)\b"));
+// `windows::` only as a crate (not after `::`, where it is one of our own `endpoint::windows` modules).
+static API: LazyLock<Regex> = LazyLock::new(|| {
+    rx(r"\b(?:windows_sys|libc|objc2|core_foundation|security_framework|zbus|nix|rustix|winreg)\s*::|(?:^|[^:A-Za-z0-9_])windows\s*::")
+});
 static LAYER: LazyLock<Regex> = LazyLock::new(|| {
     rx(
-        r"\bpaddock_proc\s*::\s*command\b|\bpaddock_env\s*::\s*(?:winpath|atomic)\b|\bprocess\s*::\s*Command\b|\bfd_lock\b|\bfs2\s*::|\b(?:try_lock|lock_exclusive|flock)\b",
+        r"\bpaddock_proc\s*::\s*command\b|\bpaddock_env\s*::\s*(?:winpath|atomic)\b|\bprocess\s*::\s*Command\b|\bprocess\s*::\s*\{[^}]*\bCommand\b|\bfd_lock\b|\bfs2\s*::|\b(?:try_lock|lock_exclusive|flock)\b",
     )
 });
 static PACKAGE_NAME: LazyLock<Regex> = LazyLock::new(|| rx(r#"(?m)^name\s*=\s*"([^"]+)""#));
@@ -61,6 +70,8 @@ pub struct Site {
     pub line: usize,
     /// `cfg`, `os-api` or `layer`.
     pub kind: &'static str,
+    /// The site is Windows code: a cfg that names `windows`, or a Windows API crate. Code only macOS tests never runs on Windows.
+    pub windows: bool,
 }
 
 /// Whether a file is test code: under a `tests/` folder, or named `tests.rs` or `*_tests.rs` (a module only `#[cfg(test)]` includes).
@@ -78,11 +89,19 @@ pub fn sites(text: &str, test_file: bool) -> Vec<Site> {
     let production = if test_file { String::new() } else { without_test_items(&m) };
     let line = |s: &str, at: usize| s[..at].bytes().filter(|b| *b == b'\n').count() + 1;
     let mut out = Vec::new();
-    for (re, kind, text) in [(&*CFG, "cfg", &m), (&*API, "os-api", &m), (&*LAYER, "layer", &production)] {
-        for hit in re.find_iter(text) {
+    for (re, kind, scanned) in [(&*CFG, "cfg", &m), (&*API, "os-api", &m), (&*LAYER, "layer", &production)] {
+        for hit in re.find_iter(scanned) {
+            // A match may start on the character before the word (the `windows::` form): the site is the word.
+            let word = hit.as_str().trim_start_matches(|c: char| !c.is_alphanumeric() && c != '_');
+            let at = hit.end() - word.len();
+            // Strings are blanked in `m`, so `target_os = "windows"` is read from the original (offsets are kept).
+            let original = text.get(hit.start()..hit.end()).unwrap_or("");
+            let windows = (kind == "cfg" && original.contains("windows"))
+                || (kind == "os-api" && (word.starts_with("windows") || word.starts_with("winreg")));
             out.push(Site {
-                line: line(text, hit.start()),
+                line: line(scanned, at),
                 kind,
+                windows,
             });
         }
     }
@@ -182,6 +201,15 @@ fn src_module(rel: &str) -> Option<String> {
     }
     let inner = inner.strip_suffix("/mod").unwrap_or(inner);
     Some(inner.replace('/', "::"))
+}
+
+/// [`src_module`], and also the test-only files (`tests.rs`, a `tests/` folder): the module a file belongs to when its OS code is looked for.
+fn src_module_any(rel: &str) -> Option<String> {
+    let inner = rel.strip_prefix(&format!("{PD_DIR}src/"))?.strip_suffix(".rs")?;
+    if inner == "lib" || inner == "main" {
+        return None;
+    }
+    Some(inner.strip_suffix("/mod").unwrap_or(inner).replace('/', "::"))
 }
 
 /// The test-name prefix of a file of `tests/it/` (`worktree/mod.rs` is `worktree`, `golden/planner.rs` is `golden::planner`).
@@ -317,6 +345,20 @@ impl C155 {
                         "Add \"{name}\" to `hostTests.packages` in {contract} (its tests behave differently per OS), or remove the OS code."
                     ),
                 ));
+            } else if !host.package_runs_on(name, "windows-latest") && files.iter().any(|(_, s)| s.iter().any(|x| x.windows)) {
+                // Listed for macos-latest only, but it has Windows code: that code would never run on Windows.
+                let (file, site) = files
+                    .iter()
+                    .find_map(|(f, s)| s.iter().find(|x| x.windows).map(|x| (f, x.line)))
+                    .unwrap_or((&files[0].0, 1));
+                out.push(Finding::warn(
+                    "C155",
+                    RULE,
+                    file,
+                    site,
+                    format!("[os-code-windows] `{name}` is listed only for macos-latest but has Windows code at {file}:{site}: it would never run on Windows"),
+                    format!("List \"{name}\" for every host (`hostTests.packages`), or remove the Windows code."),
+                ));
             } else if let Some(skips) = host.skip.get(*name) {
                 let dir = owner(&files[0].0, &pkgs).map(|(_, d)| d.clone()).unwrap_or_default();
                 for (file, s) in files {
@@ -339,6 +381,8 @@ impl C155 {
 
     /// The findings of paddock-dev: its modules and the import edges between them.
     fn module_findings(&self, ctx: &Ctx, host: &HostTests, out: &mut Vec<Finding>, probes: &mut usize) {
+        let windows_on = host.module_prefixes("windows-latest");
+        let mac_on = host.module_prefixes("macos-latest");
         let mut listed: Vec<String> = host.modules.clone();
         listed.extend(host.only.values().flatten().filter(|e| e.ends_with("::")).cloned());
         listed.sort();
@@ -350,10 +394,11 @@ impl C155 {
             .cloned()
             .collect();
         let src_modules: BTreeSet<String> = files.iter().filter_map(|f| src_module(f)).collect();
+        let src_any: BTreeSet<String> = files.iter().filter_map(|f| src_module_any(f)).collect();
         let it_modules: BTreeSet<String> = files.iter().filter_map(|f| it_module(f)).collect();
         for l in &listed {
             let m = l.trim_end_matches("::");
-            let known = src_modules.iter().chain(it_modules.iter()).any(|x| format!("{x}::").starts_with(l.as_str()))
+            let known = src_any.iter().chain(it_modules.iter()).any(|x| format!("{x}::").starts_with(l.as_str()))
                 // a Windows-only module is not built on the machine that reads it, but its file is there
                 || src_modules.contains(m);
             if !known {
@@ -370,14 +415,26 @@ impl C155 {
         // OS-specific code in a module that no listed prefix covers: one finding per module (a file's module path).
         let mut unlisted: BTreeMap<String, Vec<(String, Vec<Site>)>> = BTreeMap::new();
         for f in &files {
-            let module = src_module(f).or_else(|| it_module(f));
+            let module = src_module_any(f).or_else(|| it_module(f));
             let Some(module) = module else { continue };
             let Some(text) = ctx.read(f) else { continue };
             *probes += 1;
+            let s = sites(&text, is_test_file(f));
+            // Windows code in a module only macOS tests: it never runs on Windows (the other direction is not looked for).
             if below(&module, &listed) {
+                if s.iter().any(|x| x.windows) && !below(&module, &windows_on) && below(&module, &mac_on) {
+                    let site = s.iter().find(|x| x.windows).map_or(1, |x| x.line);
+                    out.push(Finding::warn(
+                        "C155",
+                        RULE,
+                        f,
+                        site,
+                        format!("[os-code-windows] `{module}::` is listed only for macos-latest but has Windows code at line {site}: it would never run on Windows"),
+                        format!("List \"{module}::\" for windows-latest too (`hostTests.modules`), or remove the Windows code."),
+                    ));
+                }
                 continue;
             }
-            let s = sites(&text, is_test_file(f));
             if !s.is_empty() {
                 unlisted.entry(module).or_default().push((f.clone(), s));
             }
@@ -416,7 +473,7 @@ impl C155 {
                         .map(|n| segs[..n].join("::"))
                         .find(|p| src_modules.contains(p));
                     let Some(target) = target else { continue };
-                    if covered(&target, &on) || !seen.insert((f.clone(), target.clone())) {
+                    if covered(&target, &on) || host.edge_is_exempt(&module, &target) || !seen.insert((f.clone(), target.clone())) {
                         continue;
                     }
                     out.push(Finding::warn(
@@ -613,6 +670,31 @@ mod tests {
             assert!(sites(text, false).is_empty(), "{text}");
         }
         assert_eq!(kinds("#[cfg(windows)]\nlet p = libc::x();"), vec!["cfg", "os-api"]);
+    }
+
+    #[test]
+    fn grouped_process_imports_more_os_api_crates_and_multi_line_cfgs_are_sites() {
+        for text in [
+            "use std::process::{Command, ExitCode};",
+            "use std::process::{ExitCode,\n    Command};",
+            "use windows::Win32::Foundation::HANDLE;",
+            "use winreg::RegKey;",
+            "use nix::unistd::getpid;",
+            "let _ = rustix::process::getpid();",
+            "#[cfg(any(\n    windows,\n    unix\n))]\nfn a() {}",
+            "#[cfg(all(\n    not(feature = \"x\"),\n    target_os = \"macos\"\n))]\nfn a() {}",
+        ] {
+            assert!(!sites(text, false).is_empty(), "{text}");
+        }
+        // Positive controls for the new forms: a grouped import without Command, a module named windows reached through a path, and a
+        // cfg on a feature are no site.
+        for text in [
+            "use std::process::{ExitCode, Stdio};",
+            "use crate::endpoint::windows::open;",
+            "#[cfg(all(\n    feature = \"a\",\n    test\n))]\nfn a() {}",
+        ] {
+            assert!(sites(text, false).is_empty(), "{text}");
+        }
     }
 
     #[test]

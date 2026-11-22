@@ -12,13 +12,20 @@ Conventional Commits; one semver tag for the whole repo.
   `paddock_dev_legs` (the filter also holds a member run's package filter), and `host_packages_macos` and `host_filter_macos` for
   debrief.yml's macOS tests; ci.yml, the `app-gates` action and debrief.yml run `-p <packages>` and `-E <filterset>` from them. The
   nightly (`os_full: true`), a tag run, a release workflow's gates and an app's own gates (`PLAN_APP`) run every package on every OS
-  (`plan_ci::full_os`, ADR 0080 amendment 2026-11-22). ADR 0113's scope is unchanged: a host leg is the same job, only a member run's
+  (`plan_ci::full_os`, the ADR 0080 amendment, docs/adr/amendments/0080-os-scoped-placement-2026-11-22.md on docs/adr-audit-2026-11-22, landing in a docs train). ADR 0113's scope is unchanged: a host leg is the same job, only a member run's
   package filter makes a run partial (`run_scope` test).
 - C155 (Rust, `tools/paddock-dev/src/check/c155.rs`, report-only, ER-41) reads the sources: OS code (an OS `cfg`, an OS-API crate, a
   portable-layer entry point in production code) in a package or module that `hostTests` does not list; a skipped module with OS code; a
   stale entry; and, for paddock-dev, the import edges (`ci_setup_rust` imports `local_sccache`, `ci_run` imports `pre_push::exec`, so
   they keep their host tests). Positive controls: the check's own control, and `tests/it/os_scoped.rs`, which unlists `paddock-proc`,
-  `local_sccache` and `pre_push::exec` in the real contracts and sees each go red. Hit count on the real tree: see below.
+  `local_sccache` and `pre_push::exec` in the real contracts and sees each go red. It also flags Windows code in a package or module that
+  only macOS tests (`[os-code-windows]`), grouped `use std::process::{..}`, the `windows`, `nix`, `rustix` and `winreg` crates,
+  multi-line `cfg`, and `src/<mod>/tests.rs`. Hit count on the real tree: 0 findings in the 7 declared workspaces (the test asserts more than 1,500 source files were read). Getting there needed 2 non-member entries dropped (`tray-icon`, `quack-harness`), Debrief's `xtask` added, and nine paddock-dev modules with Windows code (`audit`, `generators`, `merge_check`, `health`, `locks`, `queue::tests` and others) listed for Windows too, so paddock-dev keeps about 1,264 of 2,319 tests on Windows (54%) and about 1,927 on macOS (83%), counted on this Mac.
+- A tag needs a full every-OS run: a scoped run declares `os_full: false` in its `plan scope:` line (ci.yml, and debrief.yml through
+  `./dev ci scope --os-scoped`), and `./dev ci verdict --tag` (which `conformance/ci/request-tag.mjs` now passes) refuses it, on the
+  scope basis and the old `complete=` basis alike; a landing may still rest on a scoped run. A member run builds only the host packages
+  it reaches (`test_packages`, with `test_skip` when it reaches none), an empty host filter now fails (`--no-tests=fail`), a malformed
+  `hostTests` is an error in the gates model, and `hostTests` refuses `packages` mixed with test-name prefixes.
 - `tools-macos` ("VM tooling tests", macOS) is deleted with the tests of the retired VM tooling (`scripts/vm-lock.test.mjs`,
   `vm-win.test.mjs`, `member-gate.test.mjs`, `vm-test-support.mjs` and its test); the scripts themselves stay until their own clean-up.
 

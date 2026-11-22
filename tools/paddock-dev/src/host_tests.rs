@@ -37,6 +37,9 @@ pub struct HostTests {
     pub modules: Vec<String>,
     /// Per host runner: more packages (a plain name) or prefixes (ending in `::`).
     pub only: BTreeMap<String, Vec<String>>,
+    /// Import edges conformance C155 does not follow: importer module to {imported module: why}. For a module that uses only an item of a
+    /// big module (`gates::command` reads the command tree of `cli`), where the import says nothing about behaviour per OS.
+    pub edge_exempt: BTreeMap<String, BTreeMap<String, String>>,
 }
 
 /// What one host leg runs: the packages to build and test (`-p`, empty: the workspace's) and the nextest filterset (empty: none).
@@ -105,6 +108,25 @@ impl HostTests {
                         h.skip.insert(pkg.clone(), list);
                     }
                 }
+                "edgeExempt" => {
+                    let Some(m) = val.as_object() else {
+                        return Err(format!("{at} must be an object of importer to {{imported: why}}"));
+                    };
+                    for (importer, targets) in m {
+                        let Some(t) = targets.as_object() else {
+                            return Err(format!("{at}.{importer} must be an object of imported module to the reason"));
+                        };
+                        for (target, why) in t {
+                            let Some(why) = why.as_str().filter(|w| w.len() >= 10) else {
+                                return Err(format!("{at}.{importer}.{target} needs a reason (a sentence)"));
+                            };
+                            h.edge_exempt
+                                .entry(importer.clone())
+                                .or_default()
+                                .insert(target.clone(), why.to_string());
+                        }
+                    }
+                }
                 "only" => {
                     let Some(m) = val.as_object() else {
                         return Err(format!("{at} must be an object of runner to entries"));
@@ -122,7 +144,7 @@ impl HostTests {
                 }
                 other => {
                     return Err(format!(
-                        "{what}: unknown `hostTests.{other}` (known: packages, skip, modules, only)"
+                        "{what}: unknown `hostTests.{other}` (known: packages, skip, modules, only, edgeExempt)"
                     ));
                 }
             }
@@ -130,6 +152,14 @@ impl HostTests {
         if let Some(pkg) = h.skip.keys().find(|p| !h.packages.contains(p)) {
             return Err(format!(
                 "{what}: `hostTests.skip` names `{pkg}`, which is not in `hostTests.packages`"
+            ));
+        }
+        // A workspace is scoped by packages (`-p`) or by test-name prefixes (a one-crate workspace), never both: a prefix over a package
+        // list would restrict the listed packages to those modules instead of adding them.
+        let only_prefix = h.only.values().flatten().any(|e| is_prefix(e));
+        if !h.packages.is_empty() && (!h.modules.is_empty() || only_prefix) {
+            return Err(format!(
+                "{what}: `hostTests` mixes `packages` with test-name prefixes (`modules` or an `only` entry ending in `::`); a workspace is scoped by one or the other"
             ));
         }
         if h.packages.is_empty() && h.modules.is_empty() {
@@ -187,6 +217,18 @@ impl HostTests {
         out
     }
 
+    /// Whether the import of module `target` by module `importer` is declared exempt (`edgeExempt`; the importer matches by prefix).
+    pub fn edge_is_exempt(&self, importer: &str, target: &str) -> bool {
+        self.edge_exempt
+            .iter()
+            .any(|(i, ts)| (importer == i || importer.starts_with(&format!("{i}::"))) && ts.contains_key(target))
+    }
+
+    /// Whether `package` is tested on `os` (a host runner): listed for every host, or for that one.
+    pub fn package_runs_on(&self, package: &str, os: &str) -> bool {
+        self.packages.iter().any(|p| p == package) || self.only.get(os).is_some_and(|l| l.iter().any(|e| e == package))
+    }
+
     /// Whether `package` is tested on a host runner (on every one, or on one of them).
     pub fn lists_package(&self, package: &str) -> bool {
         self.packages.iter().any(|p| p == package) || self.only.values().flatten().any(|e| e == package)
@@ -230,6 +272,14 @@ mod tests {
             (json!({"modules": ["m"]}), "ending in `::`"),
             (json!({"packages": ["a"], "only": {"ubuntu-latest": ["b"]}}), "not a host runner"),
             (json!({}), "names no package and no module"),
+            (
+                json!({"packages": ["a"], "modules": ["m::"]}),
+                "mixes `packages` with test-name prefixes",
+            ),
+            (
+                json!({"packages": ["a"], "only": {"macos-latest": ["m::"]}}),
+                "mixes `packages` with test-name prefixes",
+            ),
             (json!({"modules": ["a b::"]}), "ending in `::`"),
         ] {
             let e = HostTests::parse(&json!({ "hostTests": bad }), "x.json").unwrap_err();
@@ -239,7 +289,7 @@ mod tests {
 
     #[test]
     fn linux_is_never_scoped_and_a_host_runner_gets_its_packages_and_its_own_additions() {
-        let h = parse(json!({"packages": ["b", "a"], "only": {"macos-latest": ["c", "m::"]}}));
+        let h = parse(json!({"packages": ["b", "a"], "only": {"macos-latest": ["c"]}}));
         assert_eq!(h.scope(LINUX), HostScope::default());
         let win = h.scope("windows-latest");
         assert_eq!(
@@ -248,7 +298,10 @@ mod tests {
         );
         let mac = h.scope("macos-latest");
         assert_eq!(mac.packages, ["a", "b", "c"]);
-        assert_eq!(mac.filter, "test(/^(?:m::)/)");
+        assert_eq!(mac.filter, "");
+        let by_module = parse(json!({"modules": ["a::"], "only": {"macos-latest": ["m::"]}}));
+        assert_eq!(by_module.scope("macos-latest").filter, "test(/^(?:a::|m::)/)");
+        assert_eq!(by_module.scope("windows-latest").filter, "test(/^(?:a::)/)");
     }
 
     #[test]
@@ -265,6 +318,15 @@ mod tests {
     }
 
     #[test]
+    fn an_exempt_edge_is_named_with_its_reason_and_matches_by_importer_prefix() {
+        let h = parse(json!({"modules": ["m::"], "edgeExempt": {"gates::command": {"cli": "reads the command tree only"}}}));
+        assert!(h.edge_is_exempt("gates::command", "cli"));
+        assert!(h.edge_is_exempt("gates::command::sub", "cli"));
+        assert!(!h.edge_is_exempt("gates::command", "plan"), "another target is not exempt");
+        assert!(!h.edge_is_exempt("gates::tree", "cli"), "another importer is not exempt");
+    }
+
+    #[test]
     fn and_filters_keeps_either_side_alone_and_joins_two() {
         assert_eq!(and_filters("", ""), "");
         assert_eq!(and_filters("a", ""), "a");
@@ -274,8 +336,9 @@ mod tests {
 
     #[test]
     fn lists_say_whether_a_package_or_module_runs_on_any_host() {
-        let h = parse(json!({"packages": ["a"], "modules": ["m::"], "only": {"macos-latest": ["b", "n::"]}}));
-        assert!(h.lists_package("a") && h.lists_package("b") && !h.lists_package("c"));
+        let h = parse(json!({"modules": ["m::"], "only": {"macos-latest": ["n::"]}}));
         assert!(h.lists_module("m::") && h.lists_module("n::") && !h.lists_module("o::"));
+        let h = parse(json!({"packages": ["a"], "only": {"macos-latest": ["b"]}}));
+        assert!(h.lists_package("a") && h.lists_package("b") && !h.lists_package("c"));
     }
 }

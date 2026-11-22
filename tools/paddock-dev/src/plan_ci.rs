@@ -102,7 +102,7 @@ pub fn package_filters(plan: &Value, graph: &RepoGraph, narrow: bool) -> Value {
 /// Whether a run tests every package on every OS (no `hostTests` scope): the nightly (a `schedule` event, or the nightly's own
 /// `os_full` input, which also covers its manual dispatch), a tag run, a release workflow's gates (`release`) and an app's own gates
 /// (`PLAN_APP`). Every other run (a pull request, a member or fix-round dispatch, a push to main, a manual run) tests the OS-specific
-/// code on each OS and the rest on Linux (ADR 0080 amendment 2026-11-22: the nightly and the release gates are the full runs).
+/// code on each OS and the rest on Linux (the ADR 0080 amendment, docs/adr/amendments/0080-os-scoped-placement-2026-11-22.md on docs/adr-audit-2026-11-22: the nightly and the release gates are the full runs).
 pub fn full_os(env: &dyn Fn(&str) -> Option<String>) -> bool {
     let set = |k: &str| env(k).is_some_and(|v| v == "true" || v == "1");
     set("PLAN_FULL_OS")
@@ -117,15 +117,27 @@ pub fn full_os(env: &dyn Fn(&str) -> Option<String>) -> bool {
 /// Windows or macOS leg tests only what the workspace's `hostTests` names (OS-scoped tests); every leg also keeps the member run's
 /// package filter, so a member run on a host leg tests the reached packages that a host tests. A workspace with no `hostTests` has
 /// empty packages and the member filter alone on every leg: every test everywhere, as before.
-pub fn workspace_legs(os_legs: &[String], host: Option<&HostTests>, member_filter: &str) -> Vec<Value> {
+pub fn workspace_legs(os_legs: &[String], host: Option<&HostTests>, member_filter: &str, reached: Option<&[String]>) -> Vec<Value> {
     os_legs
         .iter()
         .map(|os| {
             let scope = host.map(|h| h.scope(os)).unwrap_or_default();
+            // A member run builds only the host packages it reaches (`reached`: the packages the plan names, given when the run is
+            // narrowed); a run that reaches none of them has nothing to test on this host, said by `test_skip` (the step ends with a
+            // notice), never by an empty list (which would mean the whole workspace).
+            let (packages, skip) = match (reached, scope.packages.is_empty()) {
+                (Some(r), false) => {
+                    let hit: Vec<String> = scope.packages.iter().filter(|p| r.contains(p)).cloned().collect();
+                    let none = hit.is_empty();
+                    (hit, none)
+                }
+                _ => (scope.packages.clone(), false),
+            };
             json!({
                 "os": os,
-                "test_packages": scope.packages.join(" "),
+                "test_packages": packages.join(" "),
                 "test_filter": and_filters(member_filter, &scope.filter),
+                "test_skip": if skip { "true" } else { "" },
             })
         })
         .collect()
@@ -996,6 +1008,36 @@ mod tests {
     }
 
     #[test]
+    fn a_member_run_builds_only_the_host_packages_it_reaches_and_says_so_when_it_reaches_none() {
+        let os: Vec<String> = [LINUX, "windows-latest"].map(String::from).to_vec();
+        let host = HostTests::parse(&json!({"hostTests": {"packages": ["h-a", "h-b"]}}), "t.json")
+            .unwrap()
+            .unwrap();
+        let reached = |r: &[&str]| -> Vec<String> { r.iter().map(|s| s.to_string()).collect() };
+        let rows = |r: &[&str]| -> Vec<(String, String)> {
+            workspace_legs(&os, Some(&host), "package(=h-a) | package(=l-x)", Some(&reached(r)))
+                .iter()
+                .map(|l| {
+                    (
+                        l["test_packages"].as_str().unwrap().to_string(),
+                        l["test_skip"].as_str().unwrap().to_string(),
+                    )
+                })
+                .collect()
+        };
+        // Linux is never scoped: it keeps no package list and never skips.
+        assert_eq!(rows(&["h-a", "l-x"]), vec![("".into(), "".into()), ("h-a".into(), "".into())]);
+        // The run reaches only a Linux-only package: the Windows leg has nothing to test (a skip, not an empty list that means everything).
+        assert_eq!(rows(&["l-x"]), vec![("".into(), "".into()), ("".into(), "true".into())]);
+        // Positive control: not narrowed (None) keeps every host package and never skips.
+        let whole = workspace_legs(&os, Some(&host), "", None);
+        assert_eq!(
+            (whole[1]["test_packages"].as_str(), whole[1]["test_skip"].as_str()),
+            (Some("h-a h-b"), Some(""))
+        );
+    }
+
+    #[test]
     fn the_crate_and_paddock_dev_legs_carry_the_host_scope_and_a_member_runs_package_filter_together() {
         let os: Vec<String> = [LINUX, "windows-latest", "macos-latest"].map(String::from).to_vec();
         let host = HostTests::parse(
@@ -1004,7 +1046,7 @@ mod tests {
         )
         .unwrap()
         .unwrap();
-        let legs = workspace_legs(&os, Some(&host), "package(=paddock-dev)");
+        let legs = workspace_legs(&os, Some(&host), "package(=paddock-dev)", None);
         let rows: Vec<(String, String, String)> = legs
             .iter()
             .map(|l| (l["os"].to_string(), l["test_packages"].to_string(), l["test_filter"].to_string()))
@@ -1026,7 +1068,7 @@ mod tests {
             ]
         );
         // Positive control: no `hostTests` and no member filter is the old behaviour, every test on every OS.
-        let plain = workspace_legs(&os, None, "");
+        let plain = workspace_legs(&os, None, "", None);
         assert!(plain.iter().all(|l| l["test_packages"] == "" && l["test_filter"] == ""));
         assert_eq!(plain.len(), 3);
     }

@@ -300,19 +300,31 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
     let mut outputs = ci_outputs(&plan, &legs, if plan_app.is_some() { None } else { base.as_deref() });
     // OS-scoped tests: the legs of the `crate` and `paddock-dev` jobs with what each runner tests (`hostTests` of their contracts).
     let os_runners = os_legs(env);
-    for (name, contract, key) in [
-        ("crate_legs", CRATES_CONTRACT, "crates"),
-        ("paddock_dev_legs", PADDOCK_DEV_CONTRACT, "paddockDev"),
+    // Whether this run is OS-scoped: some leg tests only the packages with OS-specific code (declared in its scope line, `os_full`).
+    let mut os_scoped = legs
+        .iter()
+        .any(|l| !l["host_packages"].as_str().unwrap_or("").is_empty() || !l["host_filter"].as_str().unwrap_or("").is_empty());
+    for (name, contract, key, workspace_dir) in [
+        ("crate_legs", CRATES_CONTRACT, "crates", "crates"),
+        ("paddock_dev_legs", PADDOCK_DEV_CONTRACT, "paddockDev", "tools/paddock-dev"),
     ] {
         let host = if full_os(env) {
             None
         } else {
             read_host_tests(root, contract).map_err(fail)?
         };
+        os_scoped |= host.is_some();
+        // The packages a member run reaches in this workspace (the plan's list, when the run is narrowed to it: the member filter is set).
+        let reached: Option<Vec<String>> = (!plan["filters"][key].as_str().unwrap_or("").is_empty()).then(|| {
+            plan["packages"][workspace_dir]
+                .as_array()
+                .map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect())
+                .unwrap_or_default()
+        });
         let member = plan["filters"][key].as_str().unwrap_or("");
         outputs.push((
             name.into(),
-            serde_json::to_string(&workspace_legs(&os_runners, host.as_ref(), member)).unwrap_or_default(),
+            serde_json::to_string(&workspace_legs(&os_runners, host.as_ref(), member, reached.as_deref())).unwrap_or_default(),
         ));
     }
     // ADR 0113: the run declares its scope as data (what it ran, what a push to main does for this tree); `ci verdict` compares them.
@@ -324,7 +336,7 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
     }
     let os_legs = os_legs(env);
     let filter_of = |p: &Value, k: &str| p["filters"][k].as_str().unwrap_or("").to_string();
-    let ran = if reused {
+    let mut ran = if reused {
         Scope::default()
     } else {
         scope_of(
@@ -335,6 +347,8 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
             &[filter_of(&plan, "crates").as_str(), filter_of(&plan, "paddockDev").as_str()],
         )
     };
+    ran.os_full = !os_scoped;
+
     // A push to main is its own measure (its plan is the diff from the last green main); every other run is measured against the
     // whole tree, which is what a run with a base, an app only or a rerun is not.
     let need_plan = if event == "push" && plan_app.is_none() {

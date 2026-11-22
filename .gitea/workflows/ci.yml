@@ -1066,12 +1066,15 @@ jobs:
           # also holds a member run's reached packages, so one value carries both.
           TEST_PACKAGES: ${{ matrix.test_packages }}
           TEST_FILTER: ${{ matrix.test_filter }}
+          TEST_SKIP: ${{ matrix.test_skip }}
         run: |
+          # A member run that reaches none of the host packages has nothing to test on this host (the plan says so, never an empty list).
+          if [ -z "$FILTER" ] && [ "$TEST_SKIP" = true ]; then echo "::notice::this member run reaches no package with OS-specific code: nothing to test on this runner (hostTests)"; exit 0; fi
           filter=(); sel=(--workspace)
           if [ -n "$FILTER" ]; then echo "::notice::nextest reruns only the failed tests: $FILTER"; filter=(-E "$FILTER" --no-tests=warn)
           else
             if [ -n "$TEST_PACKAGES" ]; then echo "::notice::nextest tests only the packages with OS-specific code on this runner (hostTests): $TEST_PACKAGES"; sel=(); for p in $TEST_PACKAGES; do sel+=(-p "$p"); done; fi
-            if [ -n "$TEST_FILTER" ]; then echo "::notice::nextest filter (hostTests, and the packages this change reaches in a member run): $TEST_FILTER"; filter=(-E "$TEST_FILTER" --no-tests=warn); fi
+            if [ -n "$TEST_FILTER" ]; then echo "::notice::nextest filter (hostTests, and the packages this change reaches in a member run): $TEST_FILTER"; filter=(-E "$TEST_FILTER" --no-tests=fail); fi
           fi
           cargo nextest run "${sel[@]}" --all-features --profile ci ${filter[@]+"${filter[@]}"}
 
@@ -1560,7 +1563,7 @@ jobs:
         run: |
           filter=()
           if [ -n "$FILTER" ]; then echo "::notice::nextest reruns only the failed tests: $FILTER"; filter=(-E "$FILTER" --no-tests=warn)
-          elif [ -n "$TEST_FILTER" ]; then echo "::notice::nextest filter (hostTests, and the packages this change reaches in a member run): $TEST_FILTER"; filter=(-E "$TEST_FILTER" --no-tests=warn); fi
+          elif [ -n "$TEST_FILTER" ]; then echo "::notice::nextest filter (hostTests, and the packages this change reaches in a member run): $TEST_FILTER"; filter=(-E "$TEST_FILTER" --no-tests=fail); fi
           cargo nextest run --profile ci --locked --no-fail-fast ${filter[@]+"${filter[@]}"}
 
       # Licences, advisories, sources (tools/paddock-dev/deny.toml, the crates' rules); the image has cargo-deny.

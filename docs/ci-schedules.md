@@ -41,7 +41,7 @@ the same change. Runs from before the scope line have none: they stay valid on t
 **OS-scoped tests (2026-11-22).** Every run but the full ones tests, on the Windows and macOS legs, only the packages and paddock-dev
 modules that a contract's `hostTests` names (code with OS-specific behaviour; conformance C155 keeps the lists honest); Linux tests
 everything. The nightly (`os_full`), a tag, a release's gates and an app's own gates (`PLAN_APP`) run every package on every OS
-(`plan_ci::full_os`), so the nightly is the full every-OS run of ADR 0080's amendment. The planner writes the packages and filtersets
+(`plan_ci::full_os`), so the nightly is the full every-OS run of the ADR 0080 amendment (docs/adr/amendments/0080-os-scoped-placement-2026-11-22.md on docs/adr-audit-2026-11-22, landing in a docs train). The planner writes the packages and filtersets
 into each leg (`host_packages`, `host_filter`, `test_packages`, `test_filter`).
 
 **Member runs test only the reached packages (2026-11-21).** A dispatch with a `base` and no `since_run` (a member or a fix round)

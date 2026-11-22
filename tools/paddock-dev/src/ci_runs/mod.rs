@@ -173,6 +173,9 @@ pub struct VerdictArgs {
     /// The Gitea server.
     #[arg(long, default_value = SERVER)]
     server: String,
+    /// The answer is for a tag: only a run that tested every package on every OS counts, never an OS-scoped one (ER-15).
+    #[arg(long)]
+    tag: bool,
 }
 
 /// Arguments of `ci triage`.
@@ -280,6 +283,10 @@ pub struct ScopeArgs {
     /// The `since_run` input of a rerun of failures (empty: not a rerun).
     #[arg(long, default_value = "")]
     since_run: String,
+    /// Whether the run is OS-scoped (`true` or `false`): its Windows and macOS tests covered only the packages with OS-specific code
+    /// (`hostTests`), so a tag cannot rest on it (`ci verdict --tag`).
+    #[arg(long, default_value = "false")]
+    os_scoped: String,
     /// The engines a full run tests, comma separated (a run that is not full tests the first only).
     #[arg(long, default_value = "chromium")]
     full_engines: String,
@@ -310,6 +317,7 @@ pub fn scope(a: &ScopeArgs) -> Result<Report, CliError> {
         flag("full", &a.full)?,
         flag("run", &a.run)?,
         !a.since_run.trim().is_empty(),
+        flag("os-scoped", &a.os_scoped)?,
         &engines,
     );
     Ok(Report::new(serde_json::json!({ "complete": d.complete().is_ok() }), d.line()))
@@ -598,7 +606,11 @@ pub fn verdict(a: &VerdictArgs) -> Result<Report, CliError> {
         Ok(token) => {
             let mut http = CurlHttp;
             let mut client = Client::new(&mut http, &a.server, &a.repo, &token);
-            verdict::verdict(&mut client, &a.workflow, &a.sha)
+            if a.tag {
+                verdict::verdict_tag(&mut client, &a.workflow, &a.sha)
+            } else {
+                verdict::verdict(&mut client, &a.workflow, &a.sha)
+            }
         }
     };
     let r = verdict::report(&v, &a.workflow, &a.sha, &crate::pre_push::outcome::GitRepo(&root));

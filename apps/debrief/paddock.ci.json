@@ -41,7 +41,8 @@
       "debrief-store-duck",
       "debrief-store-worker",
       "debrief-symbols",
-      "debrief-video"
+      "debrief-video",
+      "xtask"
     ]
   }
 }
