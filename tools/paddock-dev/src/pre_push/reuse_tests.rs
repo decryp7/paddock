@@ -41,8 +41,22 @@ impl Scratch {
         self.git(&["add", "-A"]);
         self.git(&["commit", "-q", "-m", file]);
     }
+    /// A file standing in for the dev binary (a test program is refused as one by `self_exe`).
+    fn dev(&self) -> Result<PathBuf, String> {
+        let p = self.store.with_file_name("dev-stand-in");
+        std::fs::write(&p, "stand-in").unwrap();
+        Ok(p)
+    }
     fn reuse(&self) -> Reuse {
-        Reuse::new(&self.root, self.store.clone(), &HashMap::new(), "run-1-abc".into(), false).expect("on")
+        Reuse::new(
+            &self.root,
+            self.store.clone(),
+            &HashMap::new(),
+            "run-1-abc".into(),
+            self.dev(),
+            false,
+        )
+        .expect("on")
     }
 }
 
@@ -89,6 +103,26 @@ fn the_checkout_path_and_build_folder_are_not_in_the_key() {
         normalised_args(&args, "/w/r"),
         vec!["clippy", "--manifest-path", "<root>/Cargo.toml"]
     );
+}
+
+/// ER-33 control: when the binary cannot be named the key cannot be made, so the row runs (never a reuse on an unknown tool).
+#[test]
+fn an_unknown_dev_binary_means_no_reuse() {
+    let s = Scratch::new();
+    s.commit("a.txt", "one\n");
+    let r = Reuse::new(
+        &s.root,
+        s.store.clone(),
+        &HashMap::new(),
+        "r".into(),
+        Err("it is a test program".into()),
+        false,
+    )
+    .unwrap();
+    assert!(matches!(
+        r.lookup(&gate("conformance", "", ""), &test_subject()),
+        Lookup::Miss(None)
+    ));
 }
 
 #[test]
@@ -342,11 +376,11 @@ fn the_second_run_of_an_unchanged_tree_starts_nothing() {
     run_once(&bad);
     assert_eq!(bad.ran.load(Ordering::SeqCst), 2, "a failure is never reused");
 
-    let off = Reuse::new(&s.root, s.store.clone(), &HashMap::new(), "r".into(), true);
+    let off = Reuse::new(&s.root, s.store.clone(), &HashMap::new(), "r".into(), s.dev(), true);
     assert!(off.is_none(), "--no-reuse");
     let env: HashMap<String, String> = [(ENV_OFF.to_string(), "1".to_string())].into();
     assert!(
-        Reuse::new(&s.root, s.store.clone(), &env, "r".into(), false).is_none(),
+        Reuse::new(&s.root, s.store.clone(), &env, "r".into(), s.dev(), false).is_none(),
         "PADDOCK_NO_REUSE"
     );
 }

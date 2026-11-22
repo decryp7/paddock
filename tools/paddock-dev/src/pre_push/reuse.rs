@@ -237,6 +237,7 @@ pub struct Reuse {
     store: PathBuf,
     env: Vec<(String, String)>,
     run: String,
+    dev_exe: Result<PathBuf, String>,
     dev: std::sync::OnceLock<Result<String, String>>,
     probes: Mutex<HashMap<String, Result<String, String>>>,
     graphs: Mutex<HashMap<String, Result<BTreeSet<String>, String>>>,
@@ -245,8 +246,16 @@ pub struct Reuse {
 
 impl Reuse {
     /// Reuse for the checkout at `root`, records in `store`, the run's variables `env` and its token `run`. `None` when it is turned off
-    /// (`--no-reuse`, [`ENV_OFF`]).
-    pub fn new(root: &Path, store: PathBuf, env: &HashMap<String, String>, run: String, off: bool) -> Option<Reuse> {
+    /// (`--no-reuse`, [`ENV_OFF`]). `dev_exe` is this program as [`crate::tool_cache::self_exe`] names it: its bytes are hashed into every key
+    /// (an error there turns reuse off for every row, with the cause).
+    pub fn new(
+        root: &Path,
+        store: PathBuf,
+        env: &HashMap<String, String>,
+        run: String,
+        dev_exe: Result<PathBuf, String>,
+        off: bool,
+    ) -> Option<Reuse> {
         if off || env.get(ENV_OFF).is_some_and(|v| !v.trim().is_empty() && v.trim() != "0") {
             return None;
         }
@@ -261,6 +270,7 @@ impl Reuse {
             store,
             env: vars,
             run,
+            dev_exe,
             dev: Default::default(),
             probes: Default::default(),
             graphs: Default::default(),
@@ -275,8 +285,7 @@ impl Reuse {
     fn dev_hash(&self) -> Result<String, String> {
         self.dev
             .get_or_init(|| {
-                // The running binary itself (a test program is hashed too: what runs the gates is what the key names).
-                let exe = std::env::current_exe().map_err(|e| format!("this program cannot be found: {e}"))?;
+                let exe = self.dev_exe.clone()?;
                 let bytes = std::fs::read(&exe).map_err(|e| format!("{} cannot be read: {e}", exe.display()))?;
                 Ok(hex_of(&bytes))
             })

@@ -617,7 +617,14 @@ fn command_in(
 /// Reuse of green results for the checkout `work`, records beside the whole-run pass records in `state` ([`stamp::ROWS_DIR`]); `None`
 /// when it is switched off.
 fn reuse_for(work: &Path, state: &Path, env: &HashMap<String, String>, off: bool) -> Option<reuse::Reuse> {
-    reuse::Reuse::new(work, state.join(stamp::ROWS_DIR), env, exec::run_token(), off)
+    reuse::Reuse::new(
+        work,
+        state.join(stamp::ROWS_DIR),
+        env,
+        exec::run_token(),
+        crate::tool_cache::self_exe().map_err(|e| e.to_string()),
+        off,
+    )
 }
 
 /// One line per run in `queue-times.log` beside the gate logs: the whole push's heavy queue and run time, the measurement the
