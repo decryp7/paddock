@@ -3,7 +3,9 @@
 - Status: Accepted 2026-11-23 (the user, through the coordinator): D1 (a), all seven work packages now; D6 (a); D7 (a); D2, D3,
   D4 (b), D5 (a), D8 (a), D9 (a), D10 (a) as recommended; and D11 (the landing run tests the train's diff from main's tested head,
   WP-8). One independent review of this ADR runs beside the build; a P1 stops the build. The direction is the user's ("fix the
-  graph first, and hold all trains until it lands").
+  graph first, and hold all trains until it lands"). Review round 1 (2026-11-23, at `a073aae56`) found 10 P1s and 8 P2s; the
+  build stopped and every finding is answered in this text (§2 to §13, the work packages and the decisions); a second review round
+  follows.
 - Date: 2026-11-23
 - Related: ER-20 (bulk work, spawn budgets), ER-21 (a recurring class gets a redesign), ER-22 (share first; a value another
   module decides is read from it), ER-15 and ER-49 (a smoke or partial run is never complete; test a commit once), ER-37 (common
@@ -78,8 +80,19 @@ drafted, `cargo`, `npm`, `ci` moved from `gates/ci.rs`, `os`).
 | `generator` | `gen:cargo-lock-crates` | `docs/generators.toml` (command, outputs; inputs become edges, §4) |
 | `doc` | `doc:<path>` | everything matched by the docs input (§3) that no other node owns |
 
-Every tracked file belongs to exactly one *owner* node (the deepest that claims it); a file no node claims is an error in the
-graph's own check, not a silent global.
+Every tracked file belongs to exactly one *owner* node, by this precedence (review P1-4):
+
+1. a named input (§3) claims it (the root `package.json`, `.gitattributes`, `docs/lessons.md`);
+2. otherwise the deepest **project folder** that contains it: a project's own docs, changelog and data belong to the project
+   (`apps/dyno/CHANGELOG.md` is compiled in by `apps/dyno/app/src-tauri/src/lib.rs:276`, `include_str!`). Its reach kind is `docs`
+   unless a `reads` edge (§4) or a declared input names the file, then `code`;
+3. otherwise a declared owner rule for the paths outside every project (`docs/**`, root `*.md`, `.gitea/**/*.md`, `spikes/**`,
+   `conformance/reserved/**`). There is no catch-all rule.
+
+A file none of these claims is **unowned**: the plan itself answers "everything" for that run and prints the file in an `::error::`
+line with the next step (declare an owner); the owner check runs inside the plan job, not only in a separate check, so it cannot be
+skipped. It starts report-only (ER-41, review P2-6): until its first green run is recorded, an unowned file widens the plan to
+everything and nothing fails.
 
 ### 3. Declared inputs, replacing `GLOBAL` and the path regexes
 
@@ -87,21 +100,43 @@ One file, `docs/repo-graph.toml` (schema documented in the file, read by one acc
 crate, in the shape of Nx `namedInputs` and Turborepo `globalDependencies`:
 
 ```toml
-[inputs.rust-toolchain]            # a named input: a file set and the node kinds it reaches
-files = ["rust-toolchain.toml", ".cargo/**", "lint/**"]
-reaches = ["kind:project/cargo", "job:ci.yml#crate", "job:ci.yml#paddock-dev"]
-reach = "code"                      # code | plumbing | test | release | docs (§5)
+version = 1
 
-[inputs.npm-root]
+[[input]]                           # a named input: a file set and what it reaches
+name = "rust-toolchain"
+files = ["rust-toolchain", "rust-toolchain.toml"]
+reaches = ["all"]                   # all | cargo | npm | apps | project:<id>
+reach = "code"                      # code | release | test | plumbing | docs (§5)
+
+[[input]]
+name = "npm-root"
 files = ["package.json", ".npmrc", ".nvmrc", "tsconfig/**"]
-reaches = ["kind:project/npm"]
-reach = "code"
+reaches = ["all"]
 
-[inputs.git-attributes]
+[[input]]
+name = "npm-lock"
+files = ["package-lock.json"]
+reaches = ["npm"]
+extractor = "npm-lock"              # a content extractor narrows it (below)
+
+[[input]]
+name = "git-attributes"
 files = [".gitattributes"]
-reaches = ["kind:generator", "conformance"]   # it changes line ends, not builds: see D4
-reach = "code"
+reaches = ["project:conformance"]
+extractor = "attributes"            # text/eol/binary/filter/diff changes reach the owners of the files they match (G2, D4)
+
+[[owner]]                           # paths outside every project
+paths = ["spikes/**", "conformance/reserved/**"]
+node = "none"
 ```
+
+**Content extractors** (review P2-2) are the named concept for an input that is narrowed by reading its text before and after the
+change, each with its own golden: `attributes` (the attribute diff, G2), `npm-lock` (`lock_diff`, `crates/paddock-repo-graph/src/lock.rs:90`,
+used at `plan.rs:599`), `guards` (`guards_changed`, `plan.rs:173`, used at `plan.rs:507`: an ignore attribute or an environment
+guard changed, which C100 reads). A new one is a new variant, registered once.
+
+Narrowing an entry of `docs/repo-graph.toml` (fewer files or targets) is the unsafe direction: it needs a golden diff in the same
+change and the user's approval (review P2-6, ER-46); widening needs neither.
 
 A project contract (`paddock.ci.json`) declares what only the project knows: `tests` (test-file globs per runner), `smoke` (the
 smoke set per phase and a nextest filterset), and OS overrides with a reason (§7). The current regex tables move into this file
@@ -114,11 +149,13 @@ one by one, each with the golden cases that cover it (§8).
 | `depends` | crate → crate, package → package | Cargo metadata, npm workspaces (today) |
 | `path-ref` | project → project | `frontendDist`, `tsconfig`, `angular.json`, ESLint config (today) |
 | `uses` | workflow/job/step/action → action, workflow → reusable workflow | the CI reader |
-| `runs` | step → script, step → project phase (`./dev ci run <p> <phase>`), step → test-target | the CI reader plus the contract |
-| `imports` | script → script, test-file → module (relative TS/JS imports, transitively), test-file → package | `imports` extractor (the scanner drafted on `feat/infra-only-smoke`, uncommitted, with tests) |
-| `tests` | test-target → test-file → project | Cargo targets (`tests/*.rs` is a binary, `tests/<dir>/**` a helper of every binary of the crate), contract runner globs |
+| `runs` | step → script, step → project phase (`./dev ci run <p> <phase>`), step → test-target, contract check line → script (`node conformance/bin/paddock-conformance.mjs --only C13` in the app contracts of dyno, pitcrew, pitwall and spotter) | the CI reader plus the contract (review P1-10) |
+| `reads` | target → data file it reads at build or test time | `syn` over Rust: `include_str!`/`include_bytes!` (253 sites, 45 of them three folders up, for example `debrief-plugins/tests/it/windows_markers.rs:89,106` reading `debrief-plugin-windows` fixtures), `#[path]`, `build.rs` `rerun-if-changed` (13 build scripts); string-literal paths a test passes to a script or a file read (`conformance/test/cache-report.test.mjs:9` runs `conformance/ci/cache-report.sh`); declared runtime reads (`reads` in `paddock.ci.json`). A read file selects its reader target; a script run by a path that does not resolve runs its owning project in full (review P1-1, P1-2) |
+| `imports` | script → script, test-file → module (relative TS/JS imports, transitively), test-file → package | `oxc_parser` and `oxc_resolver` with **no `node_modules`** (CI's plan job has none): a workspace package resolves through the crate's npm graph, an external package is a package-level edge, an unresolved relative import runs the importer's project in full; a test shows the same answer with and without `node_modules` (review P1-7). The text scanner `imports.rs` (`feat/repo-graph-model` `de3f23c08`, §13) is the fallback |
+| `tests` | test-target → test-file → project | Cargo targets from `cargo metadata` (`targets[].src_path` and `kind`, review P2-5; a file under `tests/` that is no target's `src_path` is a helper of every test target of its crate), contract runner globs |
 | `input` / `output` | generator → files or nodes | `docs/generators.toml` `outputs`, inputs as references to nodes (`kind:project/cargo` manifests and their closure, `paddock.ci.json`, `wf:ci.yml`, `action:*`, the Rust sources of TS bindings, `scripts/notices.sh`) instead of hand globs |
 | `os` | node → OS set | §7 |
+| `reads-script` | script → script it runs (a `.sh` calling another) | the shell lines' invoked programs, never a path inside other text (G4) |
 
 ### 5. Queries
 
@@ -127,14 +164,21 @@ All bulk: each takes the whole changed-file set and answers per node (ER-20, PRI
 - **`reach(changed) -> {node: Reach}`.** The owners of the changed files, then the reverse closure over the edges. `Reach` is the
   strongest *kind* over the paths that arrive at the node: `code` > `release` > `test` > `plumbing` > `docs`. A path's kind is the
   kind of its first edge out of the changed file's owner: a file owned by an `action` or `script` node reached only through
-  `uses`/`runs` is `plumbing`; a file owned by a release action, a release workflow or `conformance/release` is `release`; a file owned
-  by a `test-file` node is `test`; source, manifests and config are `code`.
+  `uses`/`runs` is `plumbing`; a file owned by a `test-file` node is `test`; source, manifests, config and every file a `reads` edge
+  names are `code`. `release` comes from the edges, not a list (review P2-3): an action or script reached through a `uses` edge out of
+  a release workflow's bundle or publish job (the jobs that call `tauri-bundle`, `publish-release`, `macos-verify`, the signing
+  steps) is `release`, unless `docs/repo-graph.toml` declares the action setup-only (`setup-rust`, `build-jobs`, the cache actions),
+  which is then `plumbing` for that job too (rule 54).
 - **`selection(reach) -> {job or leg: Full | Smoke | Affected(test-targets) | Installers | Skip}`.** `code` → full for that project;
   `test` → the reached `test-target`s with their files (nextest `binary_id(...)`, vitest `--include`, Playwright file arguments);
   `plumbing` → the project's declared smoke set; `release` → installers (rule 54); `docs` → nothing beyond the docs checks. A
   project without a `smoke` or `tests` declaration falls back to full (never less than declared).
-- **`input_hash(node)`** (a prerequisite of ADR 0116's WP-0) — the content hash of the node's own files plus its declared inputs plus its dependencies' hashes, for
-  the test-result cache (0116 draft) and `ER-49` reuse.
+- **`input_hash(node)`** (a prerequisite of ADR 0116's WP-0), built on the mechanism `tools/paddock-dev/src/input_hash.rs` already
+  uses for the tool's binary (ADR 0022 §3.3: `git ls-tree` object ids, the `commit-hash:` and `release:` lines of `rustc -vV`, the
+  hashed environment variables and a digest of each cargo config file), over: the node's own files and every file its `reads`
+  edges name; its dependencies' hashes; the build-script environment (`paddock-setup`'s `build.rs` reads variables); the runner
+  command lines of its phases in `paddock.ci.json`; the nextest, Vitest and Playwright config files that select and run it; the CI
+  image digest; and the OS (review P1-8).
 - **`select_os(node) -> OS set`** — §7.
 - **`due(generators, changed)`** and **`stale_after_merge(generators, a, b)`** — the generators whose input closure the change reaches.
 
@@ -146,12 +190,19 @@ All bulk: each takes the whole changed-file set and answers per node (ER-20, PRI
 | Plumbing-only → smoke | `reach = plumbing` for a project → its declared smoke set |
 | Test-only → affected tests | `reach = test` → `Affected(test-targets)` through `imports`/`tests` edges; a helper no spec reaches → full (cannot prove) |
 | Rule 54: installers only on real release changes | `Installers` only for `reach ∈ {code, release}` of an app; plumbing never; tags always (`all`) |
-| Foundation changes plan no app jobs | `tools/`, `conformance/` (not the plumbing scripts), docs own no edge into an app: the `conformance → every app` rule goes |
+| Foundation changes plan no app tests | `tools/` and docs own no edge into an app. A `conformance/bin` or `conformance/src` change reaches the conformance job and, through the `runs` edge from each app contract's check line, that app leg's **conformance step** (Linux, static), not the app's tests (review P1-10); `conformance/reserved/*` reaches nothing |
 
 The **declared run scope** (ADR 0113) is produced from `selection`: `ran` gains `smoke` and `affected` (the jobs and legs that ran
 less than full) and the line becomes `"v":2`; `Declared::complete` refuses a run with either ("it ran a smoke set ... / only the
 affected tests ... not the full suite"), and an older reader refuses v2 as not measured (ER-15, ER-33, ER-49). Until ci.yml is
 recorded (ADR 0113 §5) the old `plan verdict: complete=` line also says false when any job ran less than full.
+
+"Complete" stays exact (review P1-3). The base of a push to main or a landing run is **the last commit with a complete verdict from
+the one verdict reader** (`./dev ci verdict`), not the last green run as `choose_base` takes it today (`plan_ci.rs:285` and below),
+so a smoke or affected run never becomes the base and diffs accumulate from the last complete commit. A v2 run is complete only
+when its selection was full for everything its plan reached **and** its base was itself complete. A golden pins the sequence: a
+plumbing-only push (smoke, not complete) followed by a code push: the code push diffs from the commit before the smoke push, so it
+runs the plumbing change's jobs in full too, and is complete.
 
 ### 7. OS placement is derived, with exceptions kept by hand
 
@@ -160,8 +211,11 @@ The C155 detectors become edge extractors: an OS `cfg`, a use of an OS-API crate
 `paddock_env::winpath`/`atomic`, `std::process::Command`, file locks) gives the module or package an `os` mark; `imports` (Rust
 `crate::<m>` and `use` paths, module granularity for paddock-dev, package granularity elsewhere) carries it to its importers and to
 the test targets that cover them. `select_os` is the union of marks; a portable node runs on Linux only (ER-9, user 2026-11-22).
-`hostTests` shrinks to exceptions with a reason (`os.add`/`os.skip`, ER-46: shrink-only, growth needs the user) and C155 becomes the
-graph's consistency check (an exception the derivation already implies is stale). Tags and the nightly still run every OS.
+The signals also include `CARGO_CFG_TARGET_OS` in build scripts, `cfg!(...)` expressions, `std::env::consts::OS`, `process.platform`
+in TypeScript and dependencies whose behaviour differs by OS (review P2-4). Narrowing by `std::process::Command` sites is measured in
+WP-6 before it is used (how many test targets it moves on or off a host OS). `hostTests` shrinks to exceptions with a reason:
+`os.add` is free; `os.skip` (taking an OS away) is the unsafe direction and needs the user (ER-46). C155 becomes the graph's
+consistency check, report-only until its first green run (P2-6). Tags and the nightly still run every OS.
 
 ### 8. Migration: the goldens are the net
 
@@ -198,12 +252,41 @@ The audit's gap list (`docs/research/ci-run-audit-2026-11-23.md` §3), each mapp
 | G14 | a push's base is the last green push run, so a red push widens the next one | WP-8 | the base reader (the ADR 0113 verdict reader, the one place) accepts the train's complete run on the same tree |
 
 The regenerated goldens (ER-40, with their generators) carry exactly these differences; review reads the diff of the goldens.
-The old rule tables are deleted in the last work package, not kept as a fallback.
+
+The net is wider than the goldens (review P1-6):
+
+- **Train replay.** Every non-merge member commit of trains 15 to 20 is planned against its parent by the old and the new planner;
+  differences outside the list above are defects.
+- **One golden per migrated rule.** Each regex table and content rule that moves gets its own golden before it moves:
+  `guards_changed`, `PER_MACHINE_INPUT`, `APP_CAPABILITY_INPUT`, `NOTICES_INPUTS`, `C99_INPUT`, `PARITY_INPUT`, `HOOKS_PARITY_INPUT`,
+  `GENERATED`, `LINT_WIRING`, `OWNERS`, `.gitattributes`, `rust-toolchain`, `lock_diff`.
+- **`--compare` prints what a narrowing drops**: for every node the new planner selects less of, the targets it no longer runs.
+- **Escape monitor** (the practice of Google TAP and Meta's predictive test selection): each nightly's full results are compared with
+  the selection of every commit since the last green nightly; a test that fails in the nightly, bisected to a commit whose selection
+  did not include it, is an escape, reported with the commit and the dropped edge. The old rule tables are deleted only after five
+  consecutive nightlies with zero escapes (D12); until then they stay behind `--compare`.
+
+**Positive controls** (ER-33, review P1-5), each a fixture that removes what the control watches and asserts that reach or
+selection shrinks (or that the check goes red):
+
+| Control | Fixture removes | Asserts |
+|---|---|---|
+| each node kind (project, workflow, job, step, action, script, test-file, test-target, generator, doc) | the node's declaration or file | its reach entry disappears |
+| each edge kind (`depends`, `path-ref`, `uses`, `runs`, `reads`, `reads-script`, `imports`, `tests`, generator input, `os`) | the edge's source line (`include_str!`, `uses:`, the import, the cfg) | the downstream node is no longer reached or selected |
+| each content extractor (`attributes`, `npm-lock`, `guards`) | the attribute, lock or guard change | the narrowed targets drop |
+| the owner check | the owner rule of a folder | the plan answers everything with an `::error::` |
+| `--compare` | a rule from the new planner | `--compare` reports the difference |
+| the spawn budget | the bulk reader (one read per file) | the budget test fails |
+| C155 consistency | an OS cfg in a module | the module's `os` mark disappears and C155 reports the exception stale |
+
 
 ### 9. Performance, parallelism and cost
 
 Built once per run: one `git ls-files`, one `git cat-file --batch` for every file text a query needs (CI files, contracts, test
-files, Rust sources for the OS and import extractors), one `cargo metadata` per Cargo workspace (today's count), no spawn per file.
+files, Rust sources for the OS, `reads` and import extractors), one `cargo metadata` per Cargo workspace (about 12 that CI builds:
+the seven app workspaces, `crates`, `tools/paddock-dev`, `tools/heavy` and the demos; the fuzz and spike workspaces are not
+planned), no spawn per file. The plan job also builds or downloads `./dev` (the prebuilt download is the normal case; a rebuild is
+about a minute, ADR 0022), which the budget counts (review P2-8).
 A spawn budget test pins the count (ER-20). Today `./dev plan --all` takes 2.9 s and `./dev plan origin/main~20 --explain` 12.8 s on
 the dev Mac (measured 2026-11-23 on this base under load; [benchmarks](../benchmarks.md#planner-run-time-before-the-repository-graph-model-2026-11-23-docsadr-repo-graph-model-base-803aed12d)); the target is the same or less, with the
 file reads batched. Extractors run in parallel over files (rayon, cores minus one), results deterministic (sorted).
@@ -221,6 +304,10 @@ file reads batched. Extractors run in parallel over files (rayon, cores minus on
   workspace), use gigabytes of memory, and answer editor questions incrementally; CI needs one deterministic cold-start answer per
   run. Common practice agrees: Nx scans imports with its own parser (nx.dev, "Project Graph": "Nx analyzes source files"), Bazel
   reads declared deps, Turborepo reads manifests, Pants infers from imports with its own parsers ("Dependency inference").
+- **Features** (review P2-7): the extractors sit behind crate features (`ci-yaml`, `ts` for oxc, `rust-syn`, `parallel` for rayon);
+  paddock-dev enables them, other users of the crate do not. Measured during WP-1: adding one dependency (`toml`) to
+  `paddock-repo-graph` regenerated `paddock-workspace-hack` and changed all five app `Cargo.lock` files (which would mark every
+  app's Rust half), so the TOML accessor moved to paddock-dev instead (`tools/paddock-dev/src/repo_inputs.rs`).
 - **Granularity limit**: Rust tests are selected by test binary (`binary_id`), TypeScript tests by spec file, Playwright by spec file
   and project. No test-function level, as Bazel's target-level practice.
 - **Budget (ER-20)**: one `git cat-file --batch` for every text, one `cargo metadata` per Cargo workspace, no other spawn; the whole
@@ -228,6 +315,34 @@ file reads batched. Extractors run in parallel over files (rayon, cores minus on
   repository today: 3,780 `.ts` files (24.1 MB, generated ones included), 633 `.mjs` (4.8 MB), 3,732 `.rs` (46.3 MB); a text scan of
   their import and `cfg` lines takes 0.8 s and 0.9 s in one process ([benchmarks](../benchmarks.md#import-and-cfg-scan-of-the-whole-repository-2026-11-23-docsadr-repo-graph-model)),
   the lower bound a parser is compared with in WP-3.
+
+### 11. Prerequisites and landing order (review P1-9)
+
+| Prerequisite | Where it is | How it lands while trains are held |
+|---|---|---|
+| ADR 0113, `run_scope` and the verdict reader | `origin/fix/run-scope-reuse-p2` `bab7a4a97` (in train 21's local work) | first member of the graph train |
+| OS-scoped tests, `hostTests`, C155 | `origin/feat/os-scoped-tests` `c61339b9f` | second member of the graph train (WP-6 builds on it) |
+| The TS import scanner (`imports.rs`) and the WP-1 model | `origin/feat/repo-graph-model` `de3f23c08`, `499ed5553` (§13) | the graph train's WP-1 member |
+
+The graph train is the one train while the others are held (D9): 0113 and os-scoped first, then WP-1 to WP-5 with WP-8, each member
+gated as ER-8 says; WP-6, WP-7 and WP-9 follow in the next train.
+
+### 12. Review round 1 answers
+
+P1-1 `reads` edge (§4, §5 `input_hash`); P1-2 scripts run by path (§4 `reads`); P1-3 complete stays exact (§6); P1-4 fail closed and
+owner precedence (§2); P1-5 positive controls (§8 table); P1-6 migration net (§8); P1-7 resolution without `node_modules` (§4); P1-8
+`input_hash` on `input_hash.rs` (§5); P1-9 prerequisites (§11); P1-10 conformance steps (§4 `runs`, §6). P2-1 D4 and §3 (D4, §3);
+P2-2 content extractors (§3); P2-3 release from edges (§5); P2-4 OS signals (§7); P2-5 test targets from `src_path` (§4); P2-6
+narrowing needs approval, checks report-only (§2, §3, §7); P2-7 features (§10); P2-8 budget and cost (§9, the table below; the
+decisions are in order).
+
+### 13. Work done before the build stopped
+
+WP-1, first slice, on `origin/feat/repo-graph-model` (`de3f23c08` the crate, `499ed5553` the accessor; base `a073aae56`): `crates/paddock-repo-graph/src/model/` (`Reach`,
+owners, named inputs and defaults, the attribute extractor, `reach` at the project level) and `imports.rs`, 39 crate tests with
+positive controls for G3, G7/G8 and G9 (a mutation of each rule turns its test red); `tools/paddock-dev/src/repo_inputs.rs` (the TOML
+accessor, 3 tests) and `docs/repo-graph.toml`. Known gap against this revision: the slice gives declared owner rules precedence over
+project folders, the reverse of §2 (P1-4); WP-1 fixes it first.
 
 ## Common practice (ER-37)
 
@@ -250,22 +365,20 @@ file reads batched. Extractors run in parallel over files (rayon, cores minus on
 
 | WP | Content | Agent-days |
 |---|---|---|
-| WP-1 | Node and edge types, `docs/repo-graph.toml` and its accessor, owners, the bulk file reader with a spawn budget, `reach` with kinds, the benchmark | 1.0 |
-| WP-2 | The CI reader moved from `gates/ci.rs` into the crate (`gates` keeps using it), `uses`/`runs` edges, action and script nodes; `plan_gitea` deleted | 1.0 |
-| WP-3 | Test files and targets, the `imports` extractor (drafted), contract `tests`/`smoke` declarations for the apps and root projects, `selection`, the ci.yml and app-gates wiring (`PADDOCK_RUN_SCOPE`, filters) | 1.5 |
-| WP-4 | Run scope v2 (`smoke`, `affected`) and `complete()`; the old `complete=` line | 0.3 |
-| WP-5 | `--compare` over the goldens and 200 commits, the listed differences, regenerated goldens, old rule tables deleted | 1.0 |
-| WP-6 | OS derivation (C155 detectors as extractors), `hostTests` cut to exceptions | 1.0 |
-| WP-7 | Generators as nodes (`due`, stale after merge); `input_hash` for the 0116 draft | 0.5 |
-| WP-8 | The landing run tests the train's diff (D11): `./dev ci dispatch` passes `base` = main's tested head for a train, `choose_base` uses it, ADR 0113's `need` for that run and for a push = its own plan, the base reader accepts the train's complete run (G1, G14) | 1.0 |
-| | Gaps folded into WP-1 to WP-3 (G2 attribute diff, G4 mention vs use, G5 plan-job inputs, G11 per-package runs) | 0.7 |
-| | **Total** | **8.0** (accepted scope 6.3; the user was told about 4 to 6) |
+| WP-1 | Node and edge types, the inputs file and accessor, owners with precedence and fail-closed in the plan job, content extractors (`attributes`, `npm-lock`, `guards`), the bulk reader with a spawn budget, `reach` with kinds, the positive-control harness, the benchmark | 1.5 |
+| WP-2 | The CI reader moved into the crate, `uses`/`runs` edges (contract check lines included), action and script nodes, mention vs use (G4), plan-job inputs (G5); `plan_gitea` deleted | 1.3 |
+| WP-3 | Test files and targets from `src_path`, the `reads` extractor (`syn`), `imports` through oxc without `node_modules` and its determinism test, contract `tests`/`smoke` declarations, `selection`, per-package runs (G11), the ci.yml and app-gates wiring | 2.0 |
+| WP-4 | Run scope v2, complete only on a complete base, the base from the verdict reader, the smoke-then-code golden | 0.5 |
+| WP-5 | `--compare` with dropped targets, train replay (trains 15 to 20), one golden per migrated rule, the listed differences, regenerated goldens | 2.0 |
+| WP-6 | OS derivation with the wider signals, the `Command` measurement, `hostTests` cut to exceptions, C155 as the consistency check | 1.3 |
+| WP-7 | Generators as nodes (`due`, stale after merge); `input_hash` on `input_hash.rs` with the added inputs | 0.8 |
+| WP-8 | The landing run tests the train's diff (D11, G1, G14) | 1.0 |
+| WP-9 | The escape monitor and the five-nightly gate before the old tables go (D12) | 0.7 |
+| | **Total** | **11.1** (accepted 6.3; spent so far about 0.3 on WP-1) |
 
-The total grew 27 % over the accepted 6.3 days with WP-8 and the gaps (more than ER-37's 20 %): the coordinator takes the new
-figure back to the user; WP-1 starts now under the accepted scope.
-
-Common-practice cost, for the decision: the five behaviours as five more planner rules (the ADR 0113 amendment's design) cost about
-3 to 4 days and leave the class open; WP-1 to WP-5 alone (no OS derivation, no generators) are 4.8 days and close it for planning.
+The total grew 76 % over the accepted 6.3 days, from the review's findings (the `reads` edge, the migration net and the escape
+monitor are most of it). That is beyond ER-37's 20 %, so it goes back to the user. The cheaper option inside this design: WP-1 to
+WP-5 with WP-8 (8.3 days) now, WP-6, WP-7 and WP-9 later, with the old tables kept behind `--compare` until WP-9 lands.
 
 ## Decisions
 
@@ -277,9 +390,9 @@ Common-practice cost, for the decision: the five behaviours as five more planner
 - **D3. Inputs file.** (a) One `docs/repo-graph.toml` merged over crate defaults, project facts in `paddock.ci.json`. (b) Everything
   in `paddock.ci.json` files. *Recommended: (a)*: repository-wide inputs (toolchain, root npm files) belong to no project, as Nx's
   `nx.json` and Turborepo's root `turbo.json`.
-- **D4. `.gitattributes`.** (a) Keep it a global (today). (b) An input of generators and conformance only (line ends change checked-out
-  text, which the generators and C57/C-line checks read; builds and tests read text through git's normalisation). *Recommended:
-  (b)*, with a golden difference listed; common practice (Nx, Turborepo) does not treat it as an input at all.
+- **D4. `.gitattributes`.** (a) Keep it a global (today). (b) The attribute extractor: a change of `text`, `eol`, `binary`, `filter`,
+  `diff`, `working-tree-encoding` or `crlf` reaches the owners of the files its pattern matches (they change checked-out bytes);
+  `merge=`, `linguist-*` and comments reach conformance only. *Chosen: (b)* (review P2-1).
 - **D5. Reach kinds.** (a) The five kinds of §5 (`code`, `release`, `test`, `plumbing`, `docs`). (b) Only `code` and `plumbing`
   (smoke) now. *Recommended: (a)*: the user approved all four behaviours.
 - **D6. A test helper no spec reaches.** (a) Full suite (cannot prove). (b) Nothing. *Recommended: (a)*; Pants and Jest
@@ -289,6 +402,8 @@ Common-practice cost, for the decision: the five behaviours as five more planner
   nightly, on app or crate code and on tags").
 - **D8. Migration.** (a) Old and new side by side with `--compare` until the goldens match except the listed differences, then the old
   tables go in the same train. (b) Switch at once. *Recommended: (a)*.
+- **D9. Trains.** (a) Hold all trains until WP-1 to WP-5 land (the user's instruction). (b) Let release-only trains through. *As
+  instructed: (a)*.
 - **D10. Extraction.** (a) Parsers as §10 (`oxc_parser`/`oxc_resolver`, `syn` or the C155 scan), cold start, one answer per run.
   (b) Language servers (rust-analyzer, tsserver) queried by the planner. (c) Text scans only (relative imports, `cfg` lines).
   *Recommended: (a)*, with (c) as the measured fallback; (b) is not common practice for build graphs and is too slow and stateful
@@ -296,8 +411,9 @@ Common-practice cost, for the decision: the five behaviours as five more planner
 - **D11. The landing run's base** (user, 2026-11-23, from the CI audit). (a) The landing run tests the train's diff from main's
   tested head and the push to main reuses that run, as GitHub merge queues and GitLab merge trains do. (b) The landing run tests
   the whole tree (today, ADR 0113). *Chosen: (a)*; the nightly and tags stay whole-tree on every OS.
-- **D9. Trains.** (a) Hold all trains until WP-1 to WP-5 land (the user's instruction). (b) Let release-only trains through. *As
-  instructed: (a)*.
+- **D12. When the old rule tables go** (review P1-6). (a) After five consecutive nightlies with zero escapes (WP-9). (b) When the
+  goldens match (WP-5). *Recommended: (a)*: Google TAP and Meta keep a full-run safety net and measure escapes before they trust
+  a selection.
 
 ## Consequences
 
