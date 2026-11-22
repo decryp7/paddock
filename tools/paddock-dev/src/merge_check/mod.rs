@@ -593,20 +593,23 @@ fn check(req: &Request) -> Result<Checked, CliError> {
                 steps.push("write-reverted", Some(write_reverted_step(&git, &merge, &found, file)));
             }
             if req.gates {
-                steps.push(
-                    "gates",
-                    Some(if req.commit.is_none() {
-                        gates::not_run("a branch is checked before it is merged, so there is no checkout of the result; run `./dev merge check --gates <merge-commit>` after merging")
-                    } else {
-                        gates::run(&root, &git, &merge, &gates::Real, gates::ENFORCED)
-                    }),
-                );
+                let gates_step = if req.commit.is_none() {
+                    gates::not_run(
+                        "a branch is checked before it is merged, so there is no checkout of the result; run `./dev merge check --gates <merge-commit>` after merging",
+                    )
+                } else {
+                    gates::run(&root, &git, &merge, &gates::Real, gates::ENFORCED)
+                };
+                // A member whose fast gates already failed is not dispatched on the real runners: the trial would spend their time on a
+                // merge that must be fixed first. The row says so, and is not a pass (not measured).
+                let gates_failed = gates_step.data["outcome"] == "failed";
+                steps.push("gates", Some(gates_step));
                 steps.push(
                     "other_os",
                     Some(if req.commit.is_none() {
                         other_os::not_run("a branch is checked before it is merged, so there is no checkout of the result")
                     } else {
-                        other_os::run_real(&root, &git, &merge, other_os::ENFORCED)
+                        other_os::run_real(&root, &git, &merge, other_os::ENFORCED, gates_failed)
                     }),
                 );
             }

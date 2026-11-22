@@ -13,6 +13,11 @@ test('the declared Linux slot count is a whole number above one', () => {
   assert.ok(Number.isInteger(slots.linux) && slots.linux >= 2, `linux = ${slots.linux}`);
 });
 
+test('the train waiters cap is its own declared number below the lane count, with a reason', () => {
+  assert.ok(Number.isInteger(slots.trainWaiters) && slots.trainWaiters >= 1 && slots.trainWaiters < slots.linux, `trainWaiters = ${slots.trainWaiters}`);
+  assert.ok(typeof slots.trainWaitersWhy === 'string' && slots.trainWaitersWhy.length > 40, 'trainWaiters carries its reason');
+});
+
 test('docs/ci-schedules.md states the declared count, and no schedule takes more slots than there are', () => {
   const doc = readFileSync(join(PADDOCK, 'docs', 'ci-schedules.md'), 'utf8');
   const stated = /The Linux runner runs (\d+) jobs at once \((\d+) Linux slots, declared in `conformance\/ci\/runner-slots\.json`\)/.exec(doc);
@@ -49,4 +54,11 @@ test('every workflow or action comment that names "the N Linux slots" uses the d
   }
   assert.ok(seen >= 3, `the comments are found (${seen})`);
   assert.deepEqual(wrong, [], `these name another count than conformance/ci/runner-slots.json (${slots.linux})`);
+});
+
+test('conformance/ci/build-jobs.sh documents the same Linux jobs per host as the declared slot count (ER-48: the layout is one number)', () => {
+  const text = readFileSync(join(PADDOCK, 'conformance', 'ci', 'build-jobs.sh'), 'utf8');
+  const row = /^#\s+Linux\s+(\d+)\s+\d+\s+\d+ GB/m.exec(text);
+  assert.ok(row, 'the Linux row of the layout table in build-jobs.sh is found');
+  assert.equal(Number(row[1]), slots.linux, 'build-jobs.sh and runner-slots.json name different Linux lane counts');
 });
