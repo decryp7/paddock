@@ -89,6 +89,6 @@ export { expectLoopSettles, expectSizeToContent, SIZE_SCALES, type SizeFixture }
 export { startFrameCost, stopFrameCost } from './frame-cost.ts';
 export { pinnedClockTest, pinnedInstant, newPinnedContext, reportTimerErrors, PINNED_AT, PINNED_LOCALE, PINNED_NOW, PINNED_NOW_ENV, PINNED_ZONE, type PinnedClockFixtures, type PinnedClockOptions, type PinnedClockSetting } from './pinned-clock.ts';
 export { settledLayout, layoutSettled, type LayoutReading, type SettledLayoutOptions } from './settled-layout.ts';
-export { expectListFiltered, expectMenuAnchoredTo, expectOverlayAlignedWith, expectWired, expectStreamDone, expectDockPlanned, expectNotMoving, menuGap, overlayOffset, streamGrew, type StreamProgress } from './ready.ts';
+export { expectListFiltered, expectMenuAnchoredTo, expectOverlayAlignedWith, expectWired, expectStreamDone, expectDockPlanned, DOCK_LOOP_STEPS, expectNotMoving, menuGap, overlayOffset, streamGrew, type StreamProgress } from './ready.ts';
 export { pauseLive, resumeLive, withLivePaused, clickWithLivePaused } from './live-page.ts';
 export { clickThatClosesItsPage, untilItsPageCloses } from './close-click.ts';

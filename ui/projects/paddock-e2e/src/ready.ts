@@ -125,11 +125,50 @@ export async function expectStreamDone(stream: Locator, options: { timeout?: num
 }
 
 /**
+ * The most steps (plans run, resizes that held the plan back) one wait for the dock may see before it counts as a loop: a Debrief load takes 2 to 5
+ * (2 or 3 plans, measured with its `ui.layout` log on a Mac at load 25, 2026-11-23); a dock that re-plans for ever reaches this within a few waits.
+ */
+export const DOCK_LOOP_STEPS = 50;
+
+async function readDockProgress(page: Page): Promise<number | null> {
+  const value = await page.locator('[data-dock-progress]').first().getAttribute('data-dock-progress', { timeout: 1_000 }).catch(() => null);
+  return value === null ? null : Number(value);
+}
+
+/**
  * Waits until the dock has planned its arrangement for the window's current size (`data-dock-planned`, Debrief's DockService.planned).
- * `timeout` (default: the expect timeout) is for a caller whose wait is part of a longer phase with its own budget, such as an app's first load.
+ *
+ * The bound is on a stall, not on the whole planning, as `expectStreamDone` does for a stream (ADR 0103: a step is bounded on progress): each wait
+ * lasts the expect timeout (or `timeout`), and the next one starts only when the dock took a step during it (`data-dock-progress`: a plan ran or
+ * a resize held the plan back). How long planning takes is the app's work times the runner's speed: a fixed budget failed on loaded WebKit
+ * runners while the dock was still working (debrief.yml runs 8559 and 8636, ai-pitwall.e2e.ts:68 and ai-vision.e2e.ts:96; tests there took 15 s on
+ * average). A dock that stands still fails after one wait and says so; one that keeps re-planning fails at {@link DOCK_LOOP_STEPS} steps.
  */
 export async function expectDockPlanned(page: Page, options: { timeout?: number } = {}): Promise<void> {
-  await expect(page.locator('[data-dock-planned]'), 'the dock has planned for the current window size').toBeAttached(options);
+  const planned = page.locator('[data-dock-planned]');
+  const started = Date.now();
+  const first = await readDockProgress(page);
+  let seen = first;
+  for (let waits = 1; ; waits++) {
+    try {
+      await expect(planned, 'the dock has planned for the current window size').toBeAttached(options);
+      if (waits > 1) test.info().annotations.push({ type: 'dock-wait', description: `planned after ${waits} waits, ${Date.now() - started} ms, progress ${first} to ${seen}` });
+      return;
+    } catch (error) {
+      const now = await readDockProgress(page);
+      if (!(error instanceof Error)) throw error;
+      if (now === seen) {
+        error.message += `\n\nThe dock is stuck: no plan ran and no resize held it back during wait ${waits} (${Date.now() - started} ms in all; progress ${now ?? 'not shown: no dock host'}).`;
+        throw error;
+      }
+      if (now !== null && now - (first ?? 0) >= DOCK_LOOP_STEPS) {
+        error.message += `\n\nThe dock keeps re-planning: ${now - (first ?? 0)} steps in ${waits} waits (${Date.now() - started} ms) without settling.`;
+        throw error;
+      }
+      test.info().annotations.push({ type: 'dock-wait', description: `wait ${waits} ended with the dock still working: progress ${seen} to ${now}` });
+      seen = now;
+    }
+  }
 }
 
 /** Waits until an element's box (left, top, width, height) is the same in two reads in a row: it is drawn and not moving (`settledLayout`). */
