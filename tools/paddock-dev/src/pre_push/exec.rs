@@ -181,6 +181,17 @@ pub trait Exec: Sync {
             .map(|p| p.to_string_lossy().to_string())
             .map_err(|e| e.to_string())
     }
+    /// Starts the slow phase of a trial push in the background (`trial_profile`): one process in its own group, returning its
+    /// pid and start time. A test's executor records the call and starts nothing (ER-14).
+    fn start_trial_slow(&self, args: &[String], stdin: &str, logs: &Path, env: &HashMap<String, String>) -> Result<(u32, u64), String> {
+        let program = self.dev_program()?;
+        super::trial_profile::start_slow(&program, args, stdin, logs, env)
+    }
+    /// Settles the trial's CI run against the slow rows' record ([`crate::trial_guard::settle`]): cancels it when the rows failed or
+    /// were not measured. Returns the line to print. A test's executor answers from a fake dispatch.
+    fn settle_trial(&self, state: &Path, sha: &str) -> String {
+        super::trial_profile::settle_real(state, sha)
+    }
 }
 
 /// One table row: a shared [`Outcome`] (ADR 0089 amendment, WP-T3) plus what the table prints around it. A pass or a failure is

@@ -16,6 +16,7 @@
 pub mod client;
 pub mod dispatch;
 pub mod flakes;
+pub mod guard;
 pub mod logfind;
 pub mod members;
 pub mod preconditions;
@@ -87,6 +88,13 @@ pub struct DispatchArgs {
     /// With --trial: merge onto this ref (for example `origin/train/2026-11-13-8`) instead of the open train.
     #[arg(long, value_name = "REF", requires = "trial")]
     onto: Option<String>,
+    /// The trial push profile's second step (ADR 0114), for a `--ref` under `wip/` or `trial/`: refuse to dispatch when the slow
+    /// rows of that pushed commit (started in the background by the push) already failed, were not measured or never finished;
+    /// otherwise dispatch, register the run, and cancel it at once, or later from the slow rows' own process, if they fail. Two steps:
+    /// `git push origin HEAD:refs/heads/wip/<name>` (fast rows only), then `./dev ci dispatch <workflow> --ref wip/<name> --guard
+    /// --max <duration>` (needs GITEA_TOKEN with write access, which also cancels). A train still needs its full gate and CI run.
+    #[arg(long, requires = "git_ref", conflicts_with = "trial")]
+    guard: bool,
     /// A workflow input, `key=value` (repeat for more).
     #[arg(long = "input", value_name = "KEY=VALUE")]
     inputs: Vec<String>,
@@ -579,15 +587,55 @@ pub fn dispatch(a: &DispatchArgs) -> Result<Report, CliError> {
     }
     let mut http = CurlHttp;
     let mut clock = dispatch::system_clock();
+    let now_secs = || {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs())
+    };
+    let alive =
+        |pid: u32, start: u64| start == 0 || paddock_proc::ProcessId::new(pid, paddock_proc::StartTime::from_micros(start)).may_be_alive();
+    let target = dispatch::Target {
+        server: &a.server,
+        repo: &a.repo,
+        token: &token,
+    };
+    // The trial push profile's guard: refuses a dispatch the slow rows already condemned (nothing is sent, so nothing to cancel).
+    let guard_state = crate::pre_push::state_dir(&root);
+    let guard = if a.guard {
+        match guard::before(
+            &mut http,
+            &target,
+            &guard_state,
+            &git_ref,
+            &crate::trial_guard::Time {
+                now: now_secs(),
+                alive: &alive,
+            },
+        ) {
+            Ok(guard::Before::Guarded(g)) => Some(g),
+            Ok(guard::Before::Unguarded(why)) => {
+                eprintln!("::warning::guard: {why}");
+                None
+            }
+            Ok(guard::Before::Refuse(why)) => {
+                eprintln!("::error::{why}");
+                return Err(CliError::failure(format!("not dispatched: {why}"))
+                    .with_hint("Fix what the slow rows found (their logs are named above), push again, then dispatch with --guard."));
+            }
+            Err(e) => {
+                eprintln!("::error::guard: {e}");
+                return Err(CliError::failure(format!("not dispatched: the guard could not be read ({e})"))
+                    .with_hint("Check the ref (wip/ or trial/), that it is pushed, and GITEA_TOKEN."));
+            }
+        }
+    } else {
+        None
+    };
     let mut reach = crate::health::CurlReach;
     let mut health = crate::health::Health::new(crate::health::real_services(&a.server, "dispatch", false), &mut reach);
     let result = dispatch::run(
         &mut http,
-        &dispatch::Target {
-            server: &a.server,
-            repo: &a.repo,
-            token: &token,
-        },
+        &target,
         &req,
         &read,
         &mut clock,
@@ -602,15 +650,35 @@ pub fn dispatch(a: &DispatchArgs) -> Result<Report, CliError> {
         eprintln!("::warning::trial: {trial_ref} could not be deleted after the dispatch failed ({e}); run `./dev ci trial-prune`");
     }
     match result {
-        Ok(dispatch::Dispatched::Yes { waited }) => Ok(Report::new(
-            serde_json::json!({"dispatched": true, "waitedMs": waited.as_millis() as u64}),
-            format!(
-                "Dispatched {} on {} after waiting {}.",
-                req.workflow,
-                req.git_ref,
-                crate::wait::fmt_duration(waited)
-            ),
-        )),
+        Ok(dispatch::Dispatched::Yes { waited }) => {
+            let guarded = guard.as_ref().map(|g| {
+                guard::register(
+                    g,
+                    &mut http,
+                    &target,
+                    &req,
+                    &mut clock,
+                    &crate::trial_guard::Time {
+                        now: now_secs(),
+                        alive: &alive,
+                    },
+                    &mut std::io::stderr(),
+                )
+            });
+            if let Some(line) = &guarded {
+                eprintln!("{line}");
+            }
+            Ok(Report::new(
+                serde_json::json!({"dispatched": true, "waitedMs": waited.as_millis() as u64, "guard": guarded}),
+                format!(
+                    "Dispatched {} on {} after waiting {}.{}",
+                    req.workflow,
+                    req.git_ref,
+                    crate::wait::fmt_duration(waited),
+                    guarded.map_or(String::new(), |l| format!(" {l}"))
+                ),
+            ))
+        }
         Ok(dispatch::Dispatched::ServiceDown { last }) => Err(CliError::failure(format!("not dispatched: {last}."))
             .with_hint("Wait until Gitea answers (the ::error:: line above names it), then dispatch again.")),
         Ok(dispatch::Dispatched::StillBusy { last }) => Err(CliError::failure(format!("not dispatched: the runner stayed busy ({last})."))

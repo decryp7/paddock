@@ -706,9 +706,35 @@ struct Fake {
     dev_program: Option<String>,
     /// The limits every gate was started with.
     limits: Mutex<Vec<(String, Limits)>>,
+    /// The background slow phases started: their command line and standard input (trial profile).
+    slow_started: Mutex<Vec<(Vec<String>, String)>>,
+    /// What starting the slow phase gives (None: a child with pid 4242).
+    slow_start: Option<Result<(u32, u64), String>>,
+    /// The fake Gitea the trial's cancel talks to (None: the settle is only recorded).
+    gitea: Mutex<Option<crate::trial_guard::tests::FakeGitea>>,
+    /// What every settle printed.
+    settled: Mutex<Vec<String>>,
 }
 
 impl Exec for Fake {
+    fn start_trial_slow(
+        &self,
+        args: &[String],
+        stdin: &str,
+        _logs: &std::path::Path,
+        _env: &std::collections::HashMap<String, String>,
+    ) -> Result<(u32, u64), String> {
+        self.slow_started.lock().unwrap().push((args.to_vec(), stdin.to_string()));
+        self.slow_start.clone().unwrap_or(Ok((4242, 7)))
+    }
+    fn settle_trial(&self, state: &std::path::Path, sha: &str) -> String {
+        let line = match self.gitea.lock().unwrap().as_mut() {
+            Some(g) => super::trial_profile::settle_with(state, sha, g, "t", 1_000, &|_, _| true),
+            None => "settled".to_string(),
+        };
+        self.settled.lock().unwrap().push(line.clone());
+        line
+    }
     fn dev_program(&self) -> Result<String, String> {
         self.dev_program.clone().map_or_else(
             || {
@@ -1640,7 +1666,7 @@ mod known_commit {
     use paddock_cli::Exit;
     use std::path::{Path, PathBuf};
 
-    struct Fake {
+    pub(super) struct Fake {
         ls: Option<String>,
         ci: Result<u64, String>,
         asked: std::cell::RefCell<Vec<String>>,
@@ -1655,7 +1681,7 @@ mod known_commit {
             self.ci.clone()
         }
     }
-    fn fake(ls: Option<&str>, ci: Result<u64, &str>) -> Fake {
+    pub(super) fn fake(ls: Option<&str>, ci: Result<u64, &str>) -> Fake {
         Fake {
             ls: ls.map(String::from),
             ci: ci.map_err(String::from),
@@ -1674,11 +1700,13 @@ mod known_commit {
             refs_from_stdin: true,
             member_gate: false,
             accept_not_measured: vec![],
+            trial_phase: None,
+            trial_logs: None,
         }
     }
 
     /// A repository with two commits; main is at the first, origin/train at the second (the 2026-11-13 shape).
-    fn repo() -> (tempfile::TempDir, PathBuf, String, String) {
+    pub(super) fn repo() -> (tempfile::TempDir, PathBuf, String, String) {
         let d = tempfile::tempdir().unwrap();
         let r = d.path().join("r");
         std::fs::create_dir(&r).unwrap();
@@ -2318,6 +2346,8 @@ mod base_choice {
             refs_from_stdin: true,
             member_gate: false,
             accept_not_measured: vec![],
+            trial_phase: None,
+            trial_logs: None,
         };
         let line = format!("refs/heads/x {two} refs/heads/main {}\n", "0".repeat(40));
         let got = command_in(
@@ -3651,5 +3681,272 @@ mod only_selection {
             select_rows(Vec::new(), &["fmt".into()]).is_err(),
             "no rows at all is also not a pass"
         );
+    }
+}
+
+/// The trial push profile through the gate's own steps (ADR 0114): which pushes it covers, what the fast phase starts, and how the
+/// slow phase ends a CI run, against a fake executor and a fake dispatch.
+mod trial_profile {
+    use super::super::trial_profile::{Phase, child_args};
+    use super::super::{PrePushArgs, TrialRun, command_in, state_dir, trial_step};
+    use super::*;
+    use crate::trial_guard::tests::FakeGitea;
+    use crate::trial_guard::{self, Dispatched, State};
+    use paddock_cli::Exit;
+    use std::collections::HashMap;
+    use std::path::Path;
+
+    const SHA: &str = "0123456789abcdef0123456789abcdef01234567";
+
+    fn step(phase: Phase, ex: &Fake, state: &Path, rows: &[(String, Row)], exit: Exit) -> String {
+        let a = args();
+        let env = HashMap::new();
+        let run = TrialRun {
+            ex,
+            state,
+            sha: SHA,
+            base: "origin/main",
+            args: &a,
+            stdin: "pre-push lines\n",
+            logs: Path::new("/logs/run"),
+            env: &env,
+            budget: Duration::from_secs(900),
+            queue: Duration::from_secs(1800),
+        };
+        trial_step(phase, &run, rows, exit)
+    }
+
+    fn args() -> PrePushArgs {
+        PrePushArgs {
+            root: None,
+            base: None,
+            remote: Some("origin".into()),
+            only: vec![],
+            dry_run: false,
+            files: vec![],
+            refs_from_stdin: true,
+            member_gate: false,
+            accept_not_measured: vec![],
+            trial_phase: None,
+            trial_logs: None,
+        }
+    }
+
+    fn registered(state: &Path) {
+        trial_guard::write_dispatched(
+            state,
+            &Dispatched {
+                sha: SHA.into(),
+                run_id: 9001,
+                workflow: "ci.yml".into(),
+                git_ref: "wip/x".into(),
+                server: "https://gitea.invalid".into(),
+                repo: "o/r".into(),
+            },
+        )
+        .unwrap();
+    }
+
+    fn cancels(fake: &Fake) -> usize {
+        fake.gitea
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map_or(0, |g| g.writes.iter().filter(|(_, u)| u.ends_with("/runs/9001/cancel")).count())
+    }
+
+    fn gitea() -> Mutex<Option<FakeGitea>> {
+        Mutex::new(Some(FakeGitea {
+            runs: vec![(9001, "in_progress")],
+            ..Default::default()
+        }))
+    }
+
+    #[test]
+    fn a_passing_fast_phase_writes_the_record_and_starts_the_slow_rows_once_holding_their_identity() {
+        let d = tempfile::tempdir().unwrap();
+        let fake = Fake::default();
+        let said = step(Phase::Fast, &fake, d.path(), &[], Exit::Ok);
+        let started = fake.slow_started.lock().unwrap();
+        assert_eq!(started.len(), 1, "one background process for all slow rows");
+        assert_eq!(started[0].0, child_args("origin/main", Some("origin"), Path::new("/logs/run")));
+        assert_eq!(started[0].1, "pre-push lines\n", "the child measures the very push the hook saw");
+        let rec = trial_guard::read_slow(d.path(), SHA).unwrap().unwrap();
+        assert_eq!(
+            (rec.state, rec.pid, rec.start_micros),
+            (State::Running, 4242, 7),
+            "the starter keeps the handle (ER-51)"
+        );
+        assert!(rec.finish_by > 0, "a deadline, so a child that never reports is not evidence");
+        assert!(
+            said.contains("ONLY the fast rows") && said.contains("not a full pass") && said.contains("pid 4242"),
+            "{said}"
+        );
+    }
+
+    #[test]
+    fn a_failing_fast_phase_starts_no_slow_rows() {
+        let d = tempfile::tempdir().unwrap();
+        let fake = Fake::default();
+        for exit in [Exit::Findings, Exit::NotMeasured, Exit::Interrupted] {
+            let said = step(Phase::Fast, &fake, d.path(), &[], exit);
+            assert!(said.contains("slow rows were not started"), "{said}");
+        }
+        assert!(fake.slow_started.lock().unwrap().is_empty());
+        assert!(trial_guard::read_slow(d.path(), SHA).unwrap().is_none());
+    }
+
+    /// Never green by skipping: slow rows that cannot even be started are recorded as not measured, so a guarded dispatch refuses.
+    #[test]
+    fn slow_rows_that_cannot_be_started_are_recorded_as_not_measured() {
+        let d = tempfile::tempdir().unwrap();
+        let fake = Fake {
+            slow_start: Some(Err("fork failed".into())),
+            ..Fake::default()
+        };
+        let said = step(Phase::Fast, &fake, d.path(), &[], Exit::Ok);
+        assert!(said.contains("could not be started") && said.contains("fork failed"), "{said}");
+        let rec = trial_guard::read_slow(d.path(), SHA).unwrap().unwrap();
+        assert_eq!(rec.state, State::NotMeasured);
+        assert!(matches!(trial_guard::judge(&rec, 1, &|_, _| true), trial_guard::Verdict::Cancel(_)));
+    }
+
+    /// ER-33 positive control, end to end against a fake dispatch: a failing slow row ends in a cancel of the registered run.
+    #[test]
+    fn a_failing_slow_row_cancels_the_trial_dispatch() {
+        let d = tempfile::tempdir().unwrap();
+        trial_guard::write_slow(
+            d.path(),
+            &crate::trial_guard::Slow {
+                sha: SHA.into(),
+                state: State::Running,
+                row: String::new(),
+                why: String::new(),
+                next: String::new(),
+                pid: 4242,
+                start_micros: 7,
+                finish_by: u64::MAX,
+                logs: "/logs/run".into(),
+            },
+        )
+        .unwrap();
+        registered(d.path());
+        let fake = Fake {
+            gitea: gitea(),
+            ..Fake::default()
+        };
+        let rows = vec![(
+            "clippy-linux crates".to_string(),
+            Row::failed(
+                "clippy-linux crates",
+                &test_subject(),
+                "boom".into(),
+                "t".into(),
+                "fix it".into(),
+                2.0,
+            ),
+        )];
+        let said = step(Phase::Slow, &fake, d.path(), &rows, Exit::Findings);
+        assert_eq!(cancels(&fake), 1, "{said}");
+        assert!(
+            said.contains("::error::") && said.contains("clippy-linux crates") && said.contains("was cancelled"),
+            "{said}"
+        );
+        assert_eq!(trial_guard::read_slow(d.path(), SHA).unwrap().unwrap().state, State::Failed);
+    }
+
+    /// A not-measured slow row also cancels.
+    #[test]
+    fn a_not_measured_slow_row_cancels_the_trial_dispatch() {
+        let d = tempfile::tempdir().unwrap();
+        registered(d.path());
+        let fake = Fake {
+            gitea: gitea(),
+            ..Fake::default()
+        };
+        let rows = vec![("clippy-windows crates".to_string(), Row::not_measured("no xwin", "install it"))];
+        let said = step(Phase::Slow, &fake, d.path(), &rows, Exit::NotMeasured);
+        assert_eq!(cancels(&fake), 1, "{said}");
+        assert_eq!(trial_guard::read_slow(d.path(), SHA).unwrap().unwrap().state, State::NotMeasured);
+    }
+
+    /// An interrupted slow phase (its starter or the person stopped it) with no failing row is still no evidence.
+    #[test]
+    fn an_interrupted_slow_phase_cancels_and_a_passing_one_does_not() {
+        let d = tempfile::tempdir().unwrap();
+        registered(d.path());
+        let rows = vec![("doctest crates".to_string(), Row::skipped("not reached"))];
+        let fake = Fake {
+            gitea: gitea(),
+            ..Fake::default()
+        };
+        step(Phase::Slow, &fake, d.path(), &rows, Exit::Interrupted);
+        assert_eq!(cancels(&fake), 1);
+        let d = tempfile::tempdir().unwrap();
+        registered(d.path());
+        let fake = Fake {
+            gitea: gitea(),
+            ..Fake::default()
+        };
+        let said = step(Phase::Slow, &fake, d.path(), &rows, Exit::Ok);
+        assert_eq!(cancels(&fake), 0, "{said}");
+        assert_eq!(trial_guard::read_slow(d.path(), SHA).unwrap().unwrap().state, State::Passed);
+    }
+
+    /// The pushes the profile never touches keep the whole gate: a dry run of the hook's push lists every row of the full gate for
+    /// a `train/*`, `main` or feature ref, and only the fast rows for a `wip/` ref. The slow rows are listed by the slow phase.
+    #[test]
+    fn a_train_main_or_feature_push_plans_the_full_gate_and_a_wip_push_only_the_fast_rows() {
+        let (_d, r, _one, two) = super::known_commit::repo();
+        let ids = |remote_ref: &str, phase: Option<Phase>| -> Vec<String> {
+            let line = format!("refs/heads/x {two} {remote_ref} {}\n", "0".repeat(40));
+            let a = PrePushArgs {
+                root: Some(r.clone()),
+                dry_run: true,
+                trial_phase: phase,
+                base: Some("origin/main".into()),
+                ..args()
+            };
+            let rep = command_in(
+                &a,
+                &r,
+                &line,
+                &super::known_commit::fake(None, Err("no run")),
+                crate::local_sccache::Lazy::off(),
+                Some(&Fake::default()),
+            )
+            .unwrap_or_else(|e| panic!("{e:?}"));
+            rep.data["gates"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|g| g["id"].as_str().unwrap().to_string())
+                .collect()
+        };
+        let full = ids("refs/heads/train/x", None);
+        assert!(
+            full.iter().any(|i| !super::super::trial_profile::is_fast_row(i)),
+            "the control tree has a slow row: {full:?}"
+        );
+        assert!(full.iter().any(|i| super::super::trial_profile::is_fast_row(i)), "{full:?}");
+        for landing in ["refs/heads/main", "refs/heads/feat/x"] {
+            assert_eq!(ids(landing, None), full, "{landing} runs the same full gate as a train");
+        }
+        let fast = ids("refs/heads/wip/x", None);
+        assert!(
+            !fast.is_empty() && fast.iter().all(|i| super::super::trial_profile::is_fast_row(i)),
+            "{fast:?}"
+        );
+        let slow = ids("refs/heads/wip/x", Some(Phase::Slow));
+        assert!(
+            !slow.is_empty() && slow.iter().all(|i| !super::super::trial_profile::is_fast_row(i)),
+            "{slow:?}"
+        );
+        let mut both: Vec<String> = fast.iter().chain(slow.iter()).cloned().collect();
+        let mut want = full.clone();
+        both.sort();
+        want.sort();
+        assert_eq!(both, want, "fast and slow together are the full gate: no row is lost");
+        let _ = state_dir(&r);
     }
 }

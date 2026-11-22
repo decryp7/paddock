@@ -281,6 +281,22 @@ author or by `./dev brief` (not on main yet): that call belongs there. The Rust 
   for scripts. The limits are flags (`--start-below`, `--hold-above`, `--min-free-gib`, `--ci-hold`, `--disk <path>`, `--no-ci`).
   It decides nothing by itself: it does not start or stop agents, and `heavy.sh` still caps the heavy steps.
 
+## Trial pushes: CI before the slow local rows (ADR 0114)
+
+A push of only `wip/<name>` or `trial/<name>` refs runs just the fast static rows in the hook (fmt, lockfiles, commit-lint,
+conformance, host Clippy, the small audits: about a minute) and starts the slow rows (doctest, xwin and Linux Clippy, conformance
+tests, member audits) in one background process, logs in the push's log folder (`slow-phase.log`). Two commands start CI at once:
+
+```sh
+git push origin HEAD:refs/heads/wip/<name>
+./dev ci dispatch ci.yml --ref wip/<name> --guard --max 30m
+```
+
+`--guard` registers the dispatched run; if a slow row fails, is not measured, or never finishes, the run is cancelled and one
+`::error::` line names the row and the next step (the dispatch is refused when the rows have already failed). The record per commit is
+`<git common dir>/paddock-pre-push/trial/<sha>.slow.json`. This is not a full pass: a `train/*` or `main` push runs the full gate, and
+a train needs its full CI run before landing. `--trial <branch>` is unchanged and does not combine with `--guard`.
+
 ## Things that cost time when forgotten
 
 - Don't run macOS tests under `nice`: it is SIP-protected and strips `DYLD_*` variables, so libraries are not found.
