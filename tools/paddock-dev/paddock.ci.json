@@ -99,6 +99,7 @@
         "hook::",
         "host_tests::",
         "ipc_endpoints::",
+        "lessons_merge::",
         "load::",
         "plan_ci::",
         "plan_cmd::",
