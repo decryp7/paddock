@@ -27,7 +27,7 @@
 
 use super::client::{Client, RunInfo};
 use crate::plan_since::{COMPLETE_LINE, read_complete, workflow_file};
-use crate::run_scope::{self, SCOPE_LINE};
+use crate::run_scope::{self, Asker, SCOPE_LINE};
 use paddock_cli::outcome::{
     CheckId, Evidence, Finding, LiveRepo, Outcome, Reason, RunId, Sha, Subject, ToolVersion, TreeId, UnixSeconds, measure,
 };
@@ -192,12 +192,12 @@ fn read_earlier(client: &mut Client, run: &RunInfo) -> Earlier {
 /// The mode a plan job's log gives on the new basis (ADR 0113): the declared scope covers a push to main's, and the jobs it declared ran
 /// ("ran means ran": a declared job that was skipped or cancelled makes it partial, one with no job of its name is not measured). A
 /// run that has not finished is not checked for its jobs: the decision waits for it.
-fn scope_mode(run: &RunInfo, jobs: &[super::client::TimedJob], log: &str) -> Mode {
+fn scope_mode(run: &RunInfo, jobs: &[super::client::TimedJob], log: &str, asker: Asker) -> Mode {
     match run_scope::read(log) {
         Some(Ok(d)) if d.workflow != run.workflow() => {
             Mode::Partial(format!("its plan job declared the scope of {}, not of this workflow", d.workflow))
         }
-        Some(Ok(d)) => match d.complete() {
+        Some(Ok(d)) => match d.serves(asker) {
             Err(why) => Mode::Partial(format!("its declared scope is not complete: {why}")),
             Ok(()) if !run.finished() => Mode::Full,
             Ok(()) => {
@@ -239,7 +239,7 @@ fn describe(m: &Mode) -> String {
 /// How one run's plan job declared its mode. With `scope_decisive` (its producer is recorded in the register) the declared scope
 /// decides; without it the old line decides and the scope view is printed as a notice, so a run of the report-only phase shows what
 /// the new basis would say (ER-41).
-fn read_mode(client: &mut Client, run: &RunInfo, scope_decisive: bool) -> Mode {
+fn read_mode(client: &mut Client, run: &RunInfo, scope_decisive: bool, asker: Asker) -> Mode {
     let jobs = match client.timed_jobs(run.id) {
         Ok(Some(j)) => j,
         Ok(None) => return Mode::Unknown("the server has no job list for the run".into()),
@@ -253,7 +253,7 @@ fn read_mode(client: &mut Client, run: &RunInfo, scope_decisive: bool) -> Mode {
         Ok(None) => return Mode::Unknown("the plan job has no log".into()),
         Err(e) => return Mode::Unknown(format!("the plan job's log could not be read: {e}")),
     };
-    let scope = scope_mode(run, &jobs, &log);
+    let scope = scope_mode(run, &jobs, &log, asker);
     if scope_decisive {
         return scope;
     }
@@ -292,9 +292,15 @@ pub fn verdict_excluding(client: &mut Client, workflow: &str, sha: &str, exclude
 
 /// [`verdict_excluding`] with the basis given: `scope` decides on the declared scope, otherwise on the old line (the report-only phase).
 pub fn verdict_with(client: &mut Client, workflow: &str, sha: &str, exclude: Option<u64>, scope: bool) -> Verdict {
-    match verdict_core(client, workflow, sha, exclude, scope) {
+    verdict_for(client, workflow, sha, exclude, scope, Asker::Push)
+}
+
+/// [`verdict_with`] for a run that must stand in for `asker`: a scheduled asker counts only a run whose declared scope is as wide as a
+/// night's ([`Declared::serves`]).
+pub fn verdict_for(client: &mut Client, workflow: &str, sha: &str, exclude: Option<u64>, scope: bool, asker: Asker) -> Verdict {
+    match verdict_core(client, workflow, sha, exclude, scope, asker) {
         Verdict::Red { run: None, reason } => {
-            let next = match last_full(client, workflow, sha, scope) {
+            let next = match last_full(client, workflow, sha, scope, asker) {
                 Some(last) => {
                     format!("the last fully tested commit on main is {last}: tag that one, or dispatch a full run on this commit")
                 }
@@ -310,7 +316,7 @@ pub fn verdict_with(client: &mut Client, workflow: &str, sha: &str, exclude: Opt
 }
 
 /// The decision over the runs listed for `sha`, without the hint of the last fully tested commit.
-fn verdict_core(client: &mut Client, workflow: &str, sha: &str, exclude: Option<u64>, scope: bool) -> Verdict {
+fn verdict_core(client: &mut Client, workflow: &str, sha: &str, exclude: Option<u64>, scope: bool, asker: Asker) -> Verdict {
     let query = format!("head_sha={sha}");
     let mut runs = Vec::new();
     for page in 1..=4 {
@@ -331,7 +337,7 @@ fn verdict_core(client: &mut Client, workflow: &str, sha: &str, exclude: Option<
     runs.retain(|r| Some(r.id) != exclude);
     // A run's jobs and log are read only for a run whose mode is needed.
     let client = std::cell::RefCell::new(client);
-    let mut modes = |r: &RunInfo| read_mode(&mut client.borrow_mut(), r, scope);
+    let mut modes = |r: &RunInfo| read_mode(&mut client.borrow_mut(), r, scope, asker);
     let mut earlier = |r: &RunInfo| read_earlier(&mut client.borrow_mut(), r);
     decide(&runs, workflow, sha, &mut modes, &mut earlier)
 }
@@ -359,7 +365,7 @@ pub fn first_green_scope(client: &mut Client, workflow: &str, run_id: u64) -> Re
     if state != "success" {
         return Err(format!("run {run_id} is {state}, not success: a first run is a green one"));
     }
-    match read_mode(client, &run, true) {
+    match read_mode(client, &run, true, Asker::Push) {
         Mode::Full => Ok(format!(
             "run {run_id} of {workflow} on {} is green and declared a complete scope that ran",
             short(&run.head_sha)
@@ -372,7 +378,7 @@ pub fn first_green_scope(client: &mut Client, workflow: &str, run_id: u64) -> Re
 /// The newest commit (not `not_sha`) that main's own push runs name (finished green) and that the reader finds fully tested, among
 /// the newest five. The deciding run need not be the push: a push that reused a train's run (`ci reuse`) is partial itself, and its
 /// commit was tested by that run, so every candidate is asked of the same reader, [`verdict_core`].
-fn last_full(client: &mut Client, workflow: &str, not_sha: &str, scope: bool) -> Option<String> {
+fn last_full(client: &mut Client, workflow: &str, not_sha: &str, scope: bool, asker: Asker) -> Option<String> {
     let page = client.runs_page_where(1, "branch=main&event=push").ok()?;
     let mut cands: Vec<&RunInfo> = page
         .runs
@@ -388,7 +394,7 @@ fn last_full(client: &mut Client, workflow: &str, not_sha: &str, scope: bool) ->
         .map(|r| r.head_sha.clone())
         .collect();
     shas.into_iter()
-        .find(|sha| matches!(verdict_core(client, workflow, sha, None, scope), Verdict::Green { .. }))
+        .find(|sha| matches!(verdict_core(client, workflow, sha, None, scope, asker), Verdict::Green { .. }))
 }
 
 /// The verdict as the shared outcome (ADR 0089 amendment, WP-T4): a green full run is [`Outcome::KnownCommit`] with the run as its
@@ -877,7 +883,7 @@ mod tests {
             apps: Default::default(),
             whole: true,
         };
-        format!("{}\n", run_scope::ci_scope(scope(ran_jobs), false, scope(need_jobs)).line())
+        format!("{}\n", run_scope::ci_scope(scope(ran_jobs), false, scope(need_jobs), true).line())
     }
 
     /// Run 5 (a push to main) with the plan log `log` and these jobs besides its plan job: `(id, name, conclusion)`.

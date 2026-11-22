@@ -560,6 +560,26 @@ fn ci_plan_declares_a_scope_that_is_complete_only_when_it_covers_a_push_to_main(
     assert!(outputs.lines().any(|l| l == "rerun_jobs=[]"), "{outputs}");
     // Every run names its workflow, so the reader ignores it for another.
     assert_eq!(main.workflow, "ci.yml");
+    // ER-49 for a schedule: only a run whose need is the whole tree stands in for a night. A push to main's need is its own plan;
+    // a night (event `schedule`, webkit input) and a full dispatch with WebKit declare the whole tree.
+    use paddock_dev::run_scope::Asker;
+    assert!(!main.tree && main.serves(Asker::Schedule).is_err(), "{}", main.line());
+    let night = declared_scope(&[
+        ("GITHUB_EVENT_NAME", "schedule"),
+        ("GITHUB_REF", "refs/heads/main"),
+        ("PLAN_WEBKIT", "1"),
+    ])
+    .0;
+    assert!(night.tree && night.serves(Asker::Schedule).is_ok(), "{}", night.line());
+    let full = dispatch(&[("PLAN_WEBKIT", "1")]);
+    assert!(full.tree && full.serves(Asker::Schedule).is_ok(), "{}", full.line());
+    // A schedule runs WebKit by its event, whatever the input says (wants_webkit): a night with no input is as wide.
+    let night_event_only = declared_scope(&[("GITHUB_EVENT_NAME", "schedule"), ("GITHUB_REF", "refs/heads/main")]).0;
+    assert!(
+        night_event_only.ran.engines.contains("webkit") && night_event_only.serves(Asker::Schedule).is_ok(),
+        "{}",
+        night_event_only.line()
+    );
 }
 
 // ---------------------------------------------------------------------------------------------------------------------

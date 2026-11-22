@@ -97,12 +97,30 @@ pub struct Declared {
     pub ran: Scope,
     /// What a push to main does for this tree.
     pub need: Scope,
+    /// True when `need` is the whole tree (every job and app leg, every engine), not a push's own affected plan: the declaration of
+    /// ci.yml for every run but a push to main. Only such a run can stand in for a scheduled run, which tests the whole tree
+    /// (ER-49). Absent in a line from before this field: false, so an older run is never reused for a schedule.
+    pub tree: bool,
 }
+
+/// What a run is asked to stand in for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Asker {
+    /// A push to main: complete as declared (`need` is the push's own plan).
+    Push,
+    /// A scheduled run (the nightly): the whole tree, and for an app workflow the nightly's own jobs ([`NIGHTLY_JOB`]).
+    Schedule,
+}
+
+/// The job an app workflow's scope declares in `ran` when it is a scheduled run that ran in full: the budgets, benchmarks and
+/// scheduled-only steps a push or dispatch run does not do. Never in `need` (a push to main is complete without it), so only a
+/// scheduled run that ran can be reused for another one.
+pub const NIGHTLY_JOB: &str = "nightly";
 
 impl Declared {
     /// The scope line.
     pub fn line(&self) -> String {
-        let v = json!({"v": VERSION, "workflow": self.workflow, "rerun": self.rerun, "ran": self.ran.json(), "need": self.need.json()});
+        let v = json!({"v": VERSION, "workflow": self.workflow, "rerun": self.rerun, "ran": self.ran.json(), "need": self.need.json(), "tree": self.tree});
         format!("{SCOPE_LINE}{v}")
     }
 
@@ -121,6 +139,27 @@ impl Declared {
         } else {
             Err(format!("it did not cover what a push to main does: {}", gone.join("; ")))
         }
+    }
+
+    /// `Ok` when the run can stand in for `asker`: complete, and for a scheduled asker also as wide as a night's run. ci.yml's night
+    /// tests the whole tree, so the run's `need` must be the whole tree (`tree`; its `ran` covers `need` by [`Self::complete`], WebKit
+    /// included). An app workflow's night does more than a push (`DEBRIEF_TEST_APP_BUDGETS`, the start-up benchmark), so the run
+    /// must have declared [`NIGHTLY_JOB`] as run. Anything else: `Err` with the reason, and the night runs (fails safe, ER-33).
+    pub fn serves(&self, asker: Asker) -> Result<(), String> {
+        self.complete()?;
+        if asker == Asker::Push {
+            return Ok(());
+        }
+        if self.workflow == "ci.yml" {
+            if !self.tree {
+                return Err("its need is a push to main's own plan, not the whole tree a scheduled run tests".into());
+            }
+        } else if !self.ran.jobs.contains(NIGHTLY_JOB) {
+            return Err(format!(
+                "it did not declare the {NIGHTLY_JOB:?} job (a scheduled run's budgets, benchmark and scheduled-only steps), which only a scheduled run that ran does"
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -149,6 +188,8 @@ fn parse(text: &str) -> Result<Declared, String> {
         rerun: v["rerun"].as_bool().ok_or("the scope line has no rerun flag")?,
         ran: Scope::parse(&v["ran"], "ran")?,
         need: Scope::parse(&v["need"], "need")?,
+        // Optional: a line from before the field has none, and is not the whole tree.
+        tree: v["tree"].as_bool().unwrap_or(false),
     })
 }
 
@@ -298,20 +339,23 @@ pub fn check_ran(d: &Declared, jobs: &[(String, String)]) -> Result<(), RanProbl
 /// What a ci.yml plan job declares. `ran` is the scope the run's own plan switched on (empty for a reused run, which runs no job,
 /// and for a rerun); `need` the same planner's answer for a push to main, with every engine on and every test whole. A rerun is
 /// never complete, whatever it ran.
-pub fn ci_scope(ran: Scope, rerun: bool, need: Scope) -> Declared {
+/// `tree` is true when `need` is the whole tree (every run but a push to main).
+pub fn ci_scope(ran: Scope, rerun: bool, need: Scope, tree: bool) -> Declared {
     Declared {
         workflow: "ci.yml".into(),
         rerun,
         ran,
         need,
+        tree,
     }
 }
 
 /// What an app's own workflow declares (`./dev ci scope`): one gates job for the app. `full` is the workflow's own full mode
 /// (a push, a tag, the nightly, a dispatch with its full input), `run` whether its plan ran its jobs at all (a schedule skipped
 /// for a train, an unchanged main, a tagged commit ran none), `since_run` a rerun of failures. `full_engines` are the engines a
-/// full run tests; a run that is not full tests the first one only.
-pub fn app_scope(workflow: &str, app: &str, full: bool, run: bool, since_run: bool, full_engines: &[String]) -> Declared {
+/// full run tests; a run that is not full tests the first one only. `nightly` is a scheduled run: one that ran in full also
+/// declares [`NIGHTLY_JOB`].
+pub fn app_scope(workflow: &str, app: &str, full: bool, run: bool, since_run: bool, nightly: bool, full_engines: &[String]) -> Declared {
     let need = Scope {
         jobs: ["gates".to_string()].into(),
         engines: full_engines.iter().cloned().collect(),
@@ -320,8 +364,12 @@ pub fn app_scope(workflow: &str, app: &str, full: bool, run: bool, since_run: bo
     };
     let ran = if run && !since_run {
         // A run that is not full ran no gates job (its nightly or installer jobs are not the gates) and one engine.
+        let mut jobs = if full { need.jobs.clone() } else { BTreeSet::new() };
+        if full && nightly {
+            jobs.insert(NIGHTLY_JOB.to_string());
+        }
         Scope {
-            jobs: if full { need.jobs.clone() } else { BTreeSet::new() },
+            jobs,
             engines: if full {
                 need.engines.clone()
             } else {
@@ -337,6 +385,7 @@ pub fn app_scope(workflow: &str, app: &str, full: bool, run: bool, since_run: bo
         rerun: since_run,
         ran,
         need,
+        tree: false,
     }
 }
 
@@ -406,6 +455,10 @@ pub fn with_first_run(text: &str, producer: &str, run: u64) -> Result<String, St
 #[cfg(test)]
 pub const TEST_COMPLETE: &str = "plan scope: {\"v\":1,\"workflow\":\"ci.yml\",\"rerun\":false,\"ran\":{\"jobs\":[\"conformance\"],\"engines\":[\"chromium\",\"webkit\"],\"apps\":[],\"whole\":true},\"need\":{\"jobs\":[\"conformance\"],\"engines\":[\"chromium\",\"webkit\"],\"apps\":[],\"whole\":true}}\n";
 
+/// A complete ci.yml scope line of a run whose need is the whole tree (a dispatch, a night): the run that can stand in for a night.
+#[cfg(test)]
+pub const TEST_COMPLETE_TREE: &str = "plan scope: {\"v\":1,\"workflow\":\"ci.yml\",\"rerun\":false,\"ran\":{\"jobs\":[\"conformance\"],\"engines\":[\"chromium\",\"webkit\"],\"apps\":[],\"whole\":true},\"need\":{\"jobs\":[\"conformance\"],\"engines\":[\"chromium\",\"webkit\"],\"apps\":[],\"whole\":true},\"tree\":true}\n";
+
 /// A ci.yml scope line of a run that missed one engine (WebKit): not complete.
 #[cfg(test)]
 pub const TEST_PARTIAL: &str = "plan scope: {\"v\":1,\"workflow\":\"ci.yml\",\"rerun\":false,\"ran\":{\"jobs\":[\"conformance\"],\"engines\":[\"chromium\"],\"apps\":[],\"whole\":true},\"need\":{\"jobs\":[\"conformance\"],\"engines\":[\"chromium\",\"webkit\"],\"apps\":[],\"whole\":true}}\n";
@@ -445,7 +498,7 @@ mod tests {
     fn declared(ran_webkit: bool, filters: &[&str]) -> Declared {
         let need = scope_of(&plan(), &legs(true), true, &os(), &[]);
         let ran = scope_of(&plan(), &legs(ran_webkit), ran_webkit, &os(), filters);
-        ci_scope(ran, false, need)
+        ci_scope(ran, false, need, true)
     }
 
     #[test]
@@ -498,7 +551,7 @@ mod tests {
     #[test]
     fn a_rerun_and_a_run_that_ran_nothing_are_never_complete() {
         let need = scope_of(&plan(), &legs(true), true, &os(), &[]);
-        let rerun = ci_scope(Scope::default(), true, need.clone());
+        let rerun = ci_scope(Scope::default(), true, need.clone(), true);
         assert!(rerun.complete().unwrap_err().contains("rerun"), "{:?}", rerun.complete());
         // Even a rerun that claims to have run everything is a rerun.
         let mut claims = declared(true, &[]);
@@ -522,6 +575,7 @@ mod tests {
                 whole: true,
                 ..Scope::default()
             },
+            tree: true,
         };
         assert!(nothing.complete().unwrap_err().contains("empty"));
     }
@@ -588,7 +642,7 @@ mod tests {
         failed[0].1 = "failure".into();
         assert_eq!(check_ran(&d, &failed), Ok(()));
         // Another workflow's declaration has no job names to check.
-        let other = app_scope("debrief.yml", "debrief", true, true, false, &["chromium".to_string()]);
+        let other = app_scope("debrief.yml", "debrief", true, true, false, false, &["chromium".to_string()]);
         assert_eq!(check_ran(&other, &[]), Ok(()));
     }
 
@@ -703,7 +757,7 @@ mod tests {
     #[test]
     fn an_app_workflow_is_complete_only_when_full_run_and_not_a_rerun() {
         let engines = strings(&["chromium", "webkit"]);
-        let at = |full, run, since| app_scope("debrief.yml", "debrief", full, run, since, &engines);
+        let at = |full, run, since| app_scope("debrief.yml", "debrief", full, run, since, false, &engines);
         assert_eq!(at(true, true, false).complete(), Ok(()));
         // Positive controls, one dimension each: not full (no WebKit), skipped (no run), a rerun.
         assert!(at(false, true, false).complete().unwrap_err().contains("engines webkit"));
@@ -711,12 +765,60 @@ mod tests {
         assert!(at(true, true, true).complete().unwrap_err().contains("rerun"));
         // One engine only: the engine cannot tell a full run from a partial one, the gates job does.
         let one = strings(&["chromium"]);
-        assert_eq!(app_scope("dyno-release.yml", "dyno", true, true, false, &one).complete(), Ok(()));
+        assert_eq!(
+            app_scope("dyno-release.yml", "dyno", true, true, false, false, &one).complete(),
+            Ok(())
+        );
         assert!(
-            app_scope("dyno-release.yml", "dyno", false, true, false, &one)
+            app_scope("dyno-release.yml", "dyno", false, true, false, false, &one)
                 .complete()
                 .unwrap_err()
                 .contains("jobs gates")
         );
+    }
+
+    /// ER-49 for a schedule: an earlier run stands in for a night only when its declared scope is as wide as a night's.
+    #[test]
+    fn a_scheduled_run_is_served_only_by_a_run_of_the_whole_tree_or_one_that_declared_the_nightly_job() {
+        // ci.yml: a push to main's need is its own plan (tree false): complete for a push, not for a night. The same declaration with
+        // the whole tree as its need serves both (positive control: one flag).
+        let mut push = declared(true, &[]);
+        push.tree = false;
+        assert_eq!(push.complete(), Ok(()));
+        assert_eq!(push.serves(Asker::Push), Ok(()));
+        let err = push.serves(Asker::Schedule).unwrap_err();
+        assert!(err.contains("whole tree"), "{err}");
+        let mut tree = push.clone();
+        tree.tree = true;
+        assert_eq!(tree.serves(Asker::Schedule), Ok(()));
+        // A line from before the field is not the whole tree.
+        let old = tree.line().replace(",\"tree\":true", "");
+        assert!(!old.contains("tree"), "{old}");
+        let read_back = read(&format!("{old}\n")).unwrap().unwrap();
+        assert!(!read_back.tree);
+        assert!(read_back.serves(Asker::Schedule).is_err());
+        // A tree run that missed WebKit is not complete, so it serves nobody.
+        let mut no_webkit = declared(false, &[]);
+        no_webkit.tree = true;
+        assert!(no_webkit.serves(Asker::Schedule).unwrap_err().contains("engines webkit"));
+        // An app workflow: the night declares `nightly` when it ran in full; a full push or dispatch does not.
+        let engines = strings(&["chromium", "webkit"]);
+        let night = app_scope("debrief.yml", "debrief", true, true, false, true, &engines);
+        let full = app_scope("debrief.yml", "debrief", true, true, false, false, &engines);
+        assert!(night.ran.jobs.contains(NIGHTLY_JOB) && !night.need.jobs.contains(NIGHTLY_JOB));
+        assert_eq!(night.complete(), Ok(()), "a night is complete for a push too");
+        assert_eq!(night.serves(Asker::Schedule), Ok(()));
+        assert_eq!(full.serves(Asker::Push), Ok(()));
+        assert!(full.serves(Asker::Schedule).unwrap_err().contains("nightly"));
+        // A night that was skipped (run=false: a train, an unchanged main, a reuse) or a rerun ran nothing and serves nobody.
+        for d in [
+            app_scope("debrief.yml", "debrief", true, false, false, true, &engines),
+            app_scope("debrief.yml", "debrief", true, true, true, true, &engines),
+        ] {
+            assert!(d.serves(Asker::Schedule).is_err() && d.serves(Asker::Push).is_err(), "{}", d.line());
+        }
+        // A night that is not full never declares the nightly job.
+        let partial = app_scope("debrief.yml", "debrief", false, true, false, true, &engines);
+        assert!(!partial.ran.jobs.contains(NIGHTLY_JOB));
     }
 }

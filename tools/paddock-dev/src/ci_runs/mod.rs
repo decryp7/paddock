@@ -283,6 +283,10 @@ pub struct ScopeArgs {
     /// The engines a full run tests, comma separated (a run that is not full tests the first only).
     #[arg(long, default_value = "chromium")]
     full_engines: String,
+    /// `true` or `false`: a scheduled run (the nightly). One that ran in full declares the `nightly` job (budgets, benchmark and the
+    /// scheduled-only steps), which a scheduled run needs of a run it reuses.
+    #[arg(long, default_value = "false")]
+    nightly: String,
 }
 
 /// `ci scope`: prints the scope line (`plan scope: {json}`) of an app's own workflow; the one reader (`ci verdict`) compares it
@@ -310,6 +314,7 @@ pub fn scope(a: &ScopeArgs) -> Result<Report, CliError> {
         flag("full", &a.full)?,
         flag("run", &a.run)?,
         !a.since_run.trim().is_empty(),
+        flag("nightly", &a.nightly)?,
         &engines,
     );
     Ok(Report::new(serde_json::json!({ "complete": d.complete().is_ok() }), d.line()))
@@ -377,6 +382,10 @@ pub struct ReuseArgs {
     /// The Gitea server (default: GITHUB_SERVER_URL, then the family's).
     #[arg(long)]
     server: Option<String>,
+    /// The asking run's event (default: GITHUB_EVENT_NAME): `push` (to main) or `schedule`. A scheduled run reuses only a run that
+    /// declared a night's scope. Any other event runs the commit.
+    #[arg(long)]
+    event: Option<String>,
 }
 
 /// `ci reuse`: `reuse=true|false` and `run=<id>` to `GITHUB_OUTPUT` (standard output without it), one annotation, a summary line.
@@ -400,12 +409,22 @@ pub fn reuse(a: &ReuseArgs) -> Result<Report, CliError> {
         .unwrap_or_else(|| "decryp7/paddock".into());
     let current = a.run_id.or_else(|| env("GITHUB_RUN_ID").and_then(|v| v.parse().ok()));
     let token = env("PLAN_TOKEN").or_else(|| env("GITEA_TOKEN")).unwrap_or_default();
-    let d = if token.is_empty() {
-        reuse::Reuse::Run("no token to read the Actions runs (PLAN_TOKEN, GITEA_TOKEN)".into())
-    } else {
-        let mut http = CurlHttp;
-        let mut client = Client::new(&mut http, &server, &repo, &token);
-        reuse::decide(&mut client, &a.workflow, &sha, current)
+    let event = a.event.clone().or_else(|| env("GITHUB_EVENT_NAME")).unwrap_or_default();
+    let asker = match event.as_str() {
+        "push" => Some(crate::run_scope::Asker::Push),
+        "schedule" => Some(crate::run_scope::Asker::Schedule),
+        _ => None,
+    };
+    let d = match asker {
+        _ if token.is_empty() => reuse::Reuse::Run("no token to read the Actions runs (PLAN_TOKEN, GITEA_TOKEN)".into()),
+        None => reuse::Reuse::Run(format!(
+            "the event {event:?} is not one that reuses a run (a push to main or a schedule does)"
+        )),
+        Some(asker) => {
+            let mut http = CurlHttp;
+            let mut client = Client::new(&mut http, &server, &repo, &token);
+            reuse::decide(&mut client, &a.workflow, &sha, current, asker)
+        }
     };
     let run = if let reuse::Reuse::Skip { run, .. } = &d {
         run.to_string()

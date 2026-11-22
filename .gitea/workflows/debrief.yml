@@ -118,9 +118,12 @@ jobs:
       # ER-49, test a commit once: a push to main of a commit that a complete green run of this workflow already tested (the train's
       # dispatch, when main fast-forwards to its head) ends early. Only a full green run with no FLAKY test counts (tag.yml's verdict
       # reader needs one); anything unreadable runs the commit (./dev ci reuse fails open).
+      # A scheduled run asks too, for more: a night also runs the budgets, the start-up benchmark and the scheduled-only steps, so only
+      # an earlier run that declared the `nightly` job (`ci scope --nightly`, run_scope::NIGHTLY_JOB) counts, never a push or a dispatch.
+      # A reused night sets run=false below, so `nightly-mark` (run == 'true') never records it: only a night that ran earns the marker.
       - name: Reuse a full green run of this commit
         id: reuse
-        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        if: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'schedule' }}
         shell: bash
         env:
           PLAN_TOKEN: ${{ github.token }}
@@ -133,6 +136,8 @@ jobs:
         env:
           REUSE: ${{ steps.reuse.outputs.reuse }}
           EVENT: ${{ github.event_name }}
+          # A scheduled run that ran in full declares the `nightly` job in its scope (what a later night needs of a run it reuses).
+          NIGHTLY: ${{ github.event_name == 'schedule' }}
           REF: ${{ github.ref }}
           SHA: ${{ github.sha }}
           GREEN: ${{ steps.green.outputs.cache-hit }}
@@ -180,7 +185,7 @@ jobs:
           complete=false
           if [ "$run" = true ] && [ -z "$PLAN_SINCE_RUN" ] && [ "$PLAN_MODE_FULL" = true ]; then complete=true; fi
           echo "plan verdict: complete=$complete"
-          ./dev ci scope --workflow debrief.yml --app debrief --full "$PLAN_MODE_FULL" --run "$run" --since-run "$PLAN_SINCE_RUN" --full-engines chromium,webkit
+          ./dev ci scope --workflow debrief.yml --app debrief --full "$PLAN_MODE_FULL" --run "$run" --since-run "$PLAN_SINCE_RUN" --full-engines chromium,webkit --nightly "$NIGHTLY"
 
       # ADR 0060 3.2: the lint-adoption ratchet of Debrief (docs/gates.toml [[ratchet]] C13) must be empty before the release it names
       # (debrief-v1.2.0) or a later one is tagged. A tag run refuses at once, before anything is built. Only the ratchets of this

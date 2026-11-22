@@ -20,6 +20,19 @@ that was red, partial (a base or `since_run` dispatch), or green with a FLAKY te
 is a real full run that `tag.yml`'s reader can use (a train that was red only with FLAKY tests needs it). Anything that cannot be
 read (the list, a job, a log, the token) runs the commit (fail open to running, never to skipping).
 
+**A scheduled run reuses a run that was as wide as a night (ER-49, user, 2026-11-22).** `ci.yml` (the nightly's `everything` call, event
+`schedule`) and `debrief.yml` also ask `./dev ci reuse` for a scheduled run, with the same FLAKY refusal, but a night tests more than a push
+to main, so the reader asks for more of the earlier run (`run_scope::Asker::Schedule`, `Declared::serves`): ci.yml counts only a run whose
+`need` was the whole tree (`"tree":true` in its scope line: a dispatch, a tag, an earlier night, never a push to main's own affected plan),
+WebKit included; debrief.yml counts only a run that declared the `nightly` job (`./dev ci scope --nightly`, which a scheduled run that ran in
+full prints), because a night also runs the budgets, the start-up benchmark and the scheduled-only steps that a push or dispatch does not. A
+scope line from before the field is not the whole tree. Until the producer is recorded in `docs/ci-scope-first-runs.toml` (ER-41) a night is
+never reused, because the old `complete=` line cannot say a night's scope. A reused debrief night sets `run=false`, so `nightly-mark` (which
+needs `run == 'true'`) writes no marker for it; the nightly's `mark` job still needs the `ci` call and every other job of nightly.yml, which
+run as before (fuzz, dialog commands, audit, installers). Not covered, because they declare no scope: dev-tool.yml, canary.yml,
+service-smoke.yml, app-fuzz.yml and the debrief fuzz, bench, corpus and mutants workflows; nightly.yml's own jobs; the four release
+workflows (no schedule).
+
 **"Complete" is a declared scope, compared by one reader (ER-15, ADR 0113, 2026-11-21).** Each plan job prints one line,
 `plan scope: {json}`: what the run did (`ran`: jobs, the crate and paddock-dev jobs on each runner, app legs, browser engines, whole
 or narrowed tests) and what a push to main does for the same tree (`need`), both written by the planner (`./dev plan --ci` for

@@ -299,7 +299,8 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
     };
     // A push to main is its own measure (its plan is the diff from the last green main); every other run is measured against the
     // whole tree, which is what a run with a base, an app only or a rerun is not.
-    let need_plan = if event == "push" && plan_app.is_none() {
+    let own_plan = event == "push" && plan_app.is_none();
+    let need_plan = if own_plan {
         plan.clone()
     } else if req.all {
         planned.clone()
@@ -324,7 +325,7 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
     )
     .map_err(fail)?;
     let need = scope_of(&need_plan, &need_legs, true, &os_legs, &[]);
-    log(&ci_scope(ran, false, need).line());
+    log(&ci_scope(ran, false, need, !own_plan).line());
     if narrow {
         log("narrowed to the packages the change reaches (a member run; the final head's full run tests the rest)");
     }
@@ -497,7 +498,7 @@ fn since_ci_with(root: &Path, env: &dyn Fn(&str) -> Option<String>, id: u64, rea
     )
     .map_err(fail)?;
     let need = scope_of(&everything, &need_legs, true, &os_legs(env), &[]);
-    eprintln!("{}", ci_scope(Scope::default(), true, need).line());
+    eprintln!("{}", ci_scope(Scope::default(), true, need, true).line());
     if let Some(why) = &plan.everything {
         println!("::warning::dev plan --since-run {id}: {why}; this run tests everything");
         let reason = format!("everything: the rerun of run {id} cannot be narrowed ({why})");

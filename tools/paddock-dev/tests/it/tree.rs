@@ -1041,6 +1041,88 @@ fn every_scheduled_workflow_skips_while_a_train_is_in_ci_and_never_marks_a_skipp
     assert!(action.contains("ci schedule-skip") && action.contains("fail open"));
 }
 
+/// ER-49 for a schedule: what a workflow's reuse step must look like so that a night is reused only on proof and a reused night
+/// never records a green marker it did not earn (ER-33). `Err` names the part that is wrong.
+fn schedule_reuse_wiring(file: &str, text: &str) -> Result<(), String> {
+    let step_at = text.find("        id: reuse\n").ok_or_else(|| format!("{file}: no reuse step"))?;
+    let step: String = text[step_at..].lines().take(12).collect::<Vec<_>>().join("\n");
+    let cond = step
+        .lines()
+        .find(|l| l.trim_start().starts_with("if: "))
+        .ok_or_else(|| format!("{file}: the reuse step has no if"))?;
+    if !cond.contains("github.event_name == 'schedule'") || !cond.contains("github.event_name == 'push'") {
+        return Err(format!(
+            "{file}: the reuse step must ask for a push to main and for a schedule ({cond})"
+        ));
+    }
+    if !step.contains(&format!("./dev ci reuse --workflow {file}")) {
+        return Err(format!("{file}: the reuse step does not run `./dev ci reuse --workflow {file}`"));
+    }
+    if file == "debrief.yml" {
+        // A reused night ends with run=false, which every mark job of the file asks (the generic test above), and the scope line
+        // carries the night's flag, which a later night asks of the run it reuses.
+        if !text.contains("if [ \"$REUSE\" = true ]; then\n            run=false") {
+            return Err(format!("{file}: a reused run must set run=false (no mark, no jobs)"));
+        }
+        if !text.contains("--nightly \"$NIGHTLY\"") || !text.contains("NIGHTLY: ${{ github.event_name == 'schedule' }}") {
+            return Err(format!("{file}: the scope line must declare the nightly job for a scheduled run"));
+        }
+        let mark_at = text
+            .find("  nightly-mark:\n")
+            .ok_or_else(|| format!("{file}: no nightly-mark job"))?;
+        let mark = text[mark_at..].lines().take(6).collect::<Vec<_>>().join("\n");
+        if !mark.contains("needs.plan.outputs.run == 'true'") {
+            return Err(format!("{file}: nightly-mark must need plan.outputs.run == 'true'"));
+        }
+    }
+    Ok(())
+}
+
+/// ci.yml and debrief.yml ask `ci reuse` for a scheduled run, and the nightly-mark of a reused night is never written (positive controls:
+/// each part removed turns the check red).
+#[test]
+fn a_scheduled_run_asks_for_reuse_and_a_reused_night_writes_no_marker() {
+    let read = |f: &str| {
+        std::fs::read_to_string(root().join(".gitea/workflows").join(f))
+            .unwrap()
+            .replace("\r\n", "\n")
+    };
+    for f in ["ci.yml", "debrief.yml"] {
+        let text = read(f);
+        assert_eq!(schedule_reuse_wiring(f, &text), Ok(()), "{f}");
+        let without = text.replace("|| github.event_name == 'schedule' }}", "}}");
+        assert!(
+            schedule_reuse_wiring(f, &without).unwrap_err().contains("schedule"),
+            "{f}: control: no schedule"
+        );
+    }
+    let debrief = read("debrief.yml");
+    for (from, to, what) in [
+        (
+            "if [ \"$REUSE\" = true ]; then\n            run=false",
+            "if [ \"$REUSE\" = true ]; then\n            :",
+            "run=false",
+        ),
+        ("--nightly \"$NIGHTLY\"", "", "nightly job"),
+        (
+            "    if: github.event_name == 'schedule' && success() && needs.plan.outputs.run == 'true'",
+            "    if: github.event_name == 'schedule' && success()",
+            "run == 'true'",
+        ),
+    ] {
+        assert!(debrief.contains(from), "control input: {what}");
+        let broken = debrief.replace(from, to);
+        assert!(
+            schedule_reuse_wiring("debrief.yml", &broken).unwrap_err().contains(what),
+            "control: {what}"
+        );
+    }
+    // The nightly's `ci` call is a plain workflow call: its reuse step is ci.yml's, and the mark still needs every job of the night.
+    let nightly = read("nightly.yml");
+    assert!(nightly.contains("    uses: ./.gitea/workflows/ci.yml\n"));
+    assert!(nightly.contains("needs: [gate, ci, dialog-commands,"), "mark needs the ci call");
+}
+
 #[test]
 fn every_c100_input_glob_marks_conformance_on_the_real_tree_and_an_ordinary_file_does_not() {
     let globs: Vec<&str> = paddock_dev::gates::inputs::GLOBS

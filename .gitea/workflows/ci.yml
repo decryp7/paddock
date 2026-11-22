@@ -123,9 +123,14 @@ jobs:
       # ER-49, test a commit once: a push to main of a commit that a complete green run of this workflow already tested (the train's
       # dispatch, when main fast-forwards to its head) ends here, with that run named in the summary. Only a full green run with
       # no FLAKY test counts (tag.yml's verdict reader needs one); anything unreadable runs the commit (./dev ci reuse fails open).
+      # The nightly (nightly.yml's `ci` call, event `schedule`) asks too, for more: only a run whose declared scope is the whole tree
+      # with WebKit counts (`tree` in the scope line, run_scope::Asker::Schedule), never a push to main's own affected plan. A night
+      # reused here ends the `everything` call early; nightly.yml's own jobs (fuzz, dialog commands, audit, installers) still run, and its
+      # `mark` job still needs them all, so the mark records only a night whose every job passed or was proved by the reused run.
+      # A manual dispatch of the nightly runs the commit.
       - name: Reuse a full green run of this commit
         id: reuse
-        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        if: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'schedule' }}
         env:
           PLAN_TOKEN: ${{ github.token }}
           PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
