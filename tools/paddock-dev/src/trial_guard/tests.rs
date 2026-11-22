@@ -806,3 +806,36 @@ fn a_server_page_cap_below_the_limit_does_not_hide_the_slow_rows_status() {
     let mut client = Client::new(&mut none, "https://gitea.invalid", "o/r", "t");
     assert_eq!(client.slow_rows_status(SHA), Ok(None), "absent only after an empty page");
 }
+
+/// Round 3 P2-7: the local record is read whenever there is one, also next to a server `success`, so `ci verdict` and the queue
+/// agree with the push gate's known-commit shortcut: a server success does not override this checkout's failed or running record.
+#[test]
+fn a_server_success_does_not_override_this_checkouts_record_that_did_not_pass() {
+    let d = tempfile::tempdir().unwrap();
+    let ok = || vec![stat(1, CONTEXT, "success")];
+    write_slow(d.path(), &on_server(slow(State::Passed))).unwrap();
+    assert_eq!(
+        gate_kind(ok(), Some(d.path())),
+        Ok(Gate::Counts),
+        "a passed record and a success agree"
+    );
+    write_slow(d.path(), &on_server(failed())).unwrap();
+    assert!(
+        matches!(gate_kind(ok(), Some(d.path())), Ok(Gate::Red(_))),
+        "the record failed: red whatever the server says"
+    );
+    assert!(
+        matches!(gate_kind(vec![], Some(d.path())), Ok(Gate::Red(_))),
+        "and without any status too"
+    );
+    for state in [State::Running, State::NotMeasured] {
+        write_slow(d.path(), &on_server(slow(state))).unwrap();
+        assert!(matches!(gate_kind(ok(), Some(d.path())), Ok(Gate::NotMeasured(_))), "{state:?}");
+    }
+    std::fs::write(dir(d.path()).join(format!("{SHA}.slow.json")), "not json").unwrap();
+    assert!(
+        matches!(gate_kind(ok(), Some(d.path())), Ok(Gate::NotMeasured(_))),
+        "unreadable fails closed"
+    );
+    assert_eq!(gate_kind(ok(), None), Ok(Gate::Counts), "no state folder given: the server alone");
+}

@@ -455,11 +455,20 @@ pub const STATUS_PAGES: u32 = 10;
 pub fn slow_rows_gate(client: &mut Client, local: Option<&Path>, sha: &str) -> Result<Gate, String> {
     let short = &sha[..sha.len().min(12)];
     let status = client.slow_rows_status(sha)?;
-    let recorded = match local {
-        None => false,
-        Some(state) => !matches!(read_slow(state, sha), Ok(None)),
+    // This checkout's own record is read whenever there is one, next to a server success too: `ci verdict`, the queue and the push
+    // gate's known-commit shortcut then agree, and a success that is not this checkout's record never overrides a failed one.
+    let record = local.map(|state| read_slow(state, sha));
+    let local_says = match &record {
+        None | Some(Ok(None)) => None,
+        Some(Ok(Some(r))) if r.state == State::Passed => None,
+        Some(Ok(Some(r))) if r.state == State::Failed => Some(Gate::Red(local_why(short, r))),
+        Some(Ok(Some(r))) => Some(Gate::NotMeasured(local_why(short, r))),
+        Some(Err(e)) => Some(Gate::NotMeasured(format!(
+            "the slow-rows record of {short} cannot be read ({e}); it counts as not passed"
+        ))),
     };
-    Ok(match status {
+    let recorded = !matches!(record, None | Some(Ok(None)));
+    let from_server = match status {
         Some(state) if state == "success" => Gate::Counts,
         Some(state) => {
             let why = format!(
@@ -475,7 +484,21 @@ pub fn slow_rows_gate(client: &mut Client, local: Option<&Path>, sha: &str) -> R
             "this checkout has a split-push record for {short} but the server has no `{CONTEXT}` status for it (the post did not land). Next: run `./dev check --pre-push` on the commit (it posts `success`), or any `./dev ci dispatch` posts it again"
         )),
         None => Gate::Counts,
+    };
+    // The worse of the two: a red anywhere is red, else anything unknown is not measured, else it counts.
+    Ok(match (local_says, from_server) {
+        (Some(Gate::Red(why)), _) | (_, Gate::Red(why)) => Gate::Red(why),
+        (Some(Gate::NotMeasured(why)), _) | (_, Gate::NotMeasured(why)) => Gate::NotMeasured(why),
+        _ => Gate::Counts,
     })
+}
+
+fn local_why(short: &str, r: &Slow) -> String {
+    format!(
+        "this checkout's slow-rows record of {short} is `{}`: only the fast rows ran before that push. Next: let the rows finish (`{}`) or run `./dev check --pre-push` on the commit",
+        r.state.name(),
+        r.logs
+    )
 }
 
 /// What [`slow_rows_gate`] decides about CI evidence for a commit.
