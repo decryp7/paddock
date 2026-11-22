@@ -125,8 +125,10 @@ export async function expectStreamDone(stream: Locator, options: { timeout?: num
 }
 
 /**
- * The most steps (plans run, resizes that held the plan back) one wait for the dock may see before it counts as a loop: a Debrief load takes 2 to 5
- * (2 or 3 plans, measured with its `ui.layout` log on a Mac at load 25, 2026-11-23); a dock that re-plans for ever reaches this within a few waits.
+ * The most steps (`data-dock-progress`) a single wait for the dock may see before it counts as a loop: a whole Debrief load takes 4 to 8 (attach,
+ * whenSized's arrival, 2 or 3 plans, each resize that held a plan back and the two release frames after each plan; 2 or 3 plans measured with its
+ * `ui.layout` log on a Mac at load 25, 2026-11-23). A fast loop passes this within one wait; a loop slower than this per wait is bounded by the
+ * test's own timeout (ADR 0103: the step is bounded on progress, the test on its total).
  */
 export const DOCK_LOOP_STEPS = 50;
 
@@ -135,34 +137,60 @@ async function readDockProgress(page: Page): Promise<number | null> {
   return value === null ? null : Number(value);
 }
 
+async function isPlanned(page: Page): Promise<boolean> {
+  return (await page.locator('[data-dock-planned]').count().catch(() => 0)) > 0;
+}
+
+/** How long each wait of {@link expectDockPlanned} lasts. */
+export interface DockWaitOptions {
+  /** Each wait after the first (default: the expect timeout). */
+  readonly timeout?: number;
+  /**
+   * The first wait (default: `timeout`). A caller whose load phase had a budget passes what is left of it (never less than the expect timeout),
+   * so the dock gets at least the time the fixed budget gave it before the stall rule applies (review of 6dc9adb8a).
+   */
+  readonly firstTimeout?: number;
+}
+
 /**
  * Waits until the dock has planned its arrangement for the window's current size (`data-dock-planned`, Debrief's DockService.planned).
  *
- * The bound is on a stall, not on the whole planning, as `expectStreamDone` does for a stream (ADR 0103: a step is bounded on progress): each wait
- * lasts the expect timeout (or `timeout`), and the next one starts only when the dock took a step during it (`data-dock-progress`: a plan ran or
- * a resize held the plan back). How long planning takes is the app's work times the runner's speed: a fixed budget failed on loaded WebKit
- * runners while the dock was still working (debrief.yml runs 8559 and 8636, ai-pitwall.e2e.ts:68 and ai-vision.e2e.ts:96; tests there took 15 s on
- * average). A dock that stands still fails after one wait and says so; one that keeps re-planning fails at {@link DOCK_LOOP_STEPS} steps.
+ * The bound is on a stall, not on the whole planning, as `expectStreamDone` does for a stream (ADR 0103: a step is bounded on progress): the first
+ * wait lasts `firstTimeout`, each later one `timeout`, and the next one starts only when the dock took a step during the last (`data-dock-progress`:
+ * attach, whenSized's arrival, a plan, a resize that held the plan back, a release frame). Before it fails, it looks once more for `planned`, which
+ * can land between the end of a wait and the read of the progress. A dock that stands still for a whole wait fails and says so; one that takes
+ * {@link DOCK_LOOP_STEPS} steps within one wait fails as a loop.
+ *
+ * Why: a fixed budget ran out on loaded WebKit runners (debrief.yml runs 8559 and 8636, ai-pitwall.e2e.ts:68 and ai-vision.e2e.ts:96; tests there took
+ * 15 s on average). That the dock was still working then, rather than stuck or looping, is NOT confirmed: the CI logs had no `ui.layout` lines. The
+ * next failure's log (the dock's "Plan ran" / "Planned" lines and this wait's message) settles it (fix item in docs/lessons.md, 2026-11-23).
  */
-export async function expectDockPlanned(page: Page, options: { timeout?: number } = {}): Promise<void> {
+export async function expectDockPlanned(page: Page, options: DockWaitOptions = {}): Promise<void> {
   const planned = page.locator('[data-dock-planned]');
   const started = Date.now();
   const first = await readDockProgress(page);
   let seen = first;
   for (let waits = 1; ; waits++) {
+    const timeout = waits === 1 ? (options.firstTimeout ?? options.timeout) : options.timeout;
     try {
-      await expect(planned, 'the dock has planned for the current window size').toBeAttached(options);
+      await expect(planned, 'the dock has planned for the current window size').toBeAttached(timeout === undefined ? {} : { timeout });
       if (waits > 1) test.info().annotations.push({ type: 'dock-wait', description: `planned after ${waits} waits, ${Date.now() - started} ms, progress ${first} to ${seen}` });
       return;
     } catch (error) {
-      const now = await readDockProgress(page);
       if (!(error instanceof Error)) throw error;
-      if (now === seen) {
-        error.message += `\n\nThe dock is stuck: no plan ran and no resize held it back during wait ${waits} (${Date.now() - started} ms in all; progress ${now ?? 'not shown: no dock host'}).`;
+      const now = await readDockProgress(page);
+      const stuck = now === seen;
+      const loop = !stuck && now !== null && now - (seen ?? 0) >= DOCK_LOOP_STEPS;
+      if ((stuck || loop) && (await isPlanned(page))) {
+        test.info().annotations.push({ type: 'dock-wait', description: `planned as wait ${waits} ended, ${Date.now() - started} ms, progress ${first} to ${now}` });
+        return;
+      }
+      if (stuck) {
+        error.message += `\n\nThe dock is stuck: it took no step (plan, resize, whenSized, release frame) during wait ${waits} (${Date.now() - started} ms in all; progress ${now ?? 'not shown: no dock host'}).`;
         throw error;
       }
-      if (now !== null && now - (first ?? 0) >= DOCK_LOOP_STEPS) {
-        error.message += `\n\nThe dock keeps re-planning: ${now - (first ?? 0)} steps in ${waits} waits (${Date.now() - started} ms) without settling.`;
+      if (loop) {
+        error.message += `\n\nThe dock keeps re-planning: ${(now ?? 0) - (seen ?? 0)} steps during wait ${waits} (${Date.now() - started} ms in all) without settling.`;
         throw error;
       }
       test.info().annotations.push({ type: 'dock-wait', description: `wait ${waits} ended with the dock still working: progress ${seen} to ${now}` });

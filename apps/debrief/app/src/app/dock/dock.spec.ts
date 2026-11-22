@@ -818,7 +818,9 @@ describe('DockService with dockview', () => {
     const layout = testLogger().entries.filter((e) => e.category === 'ui.layout' && e.level === 'debug');
     expect(layout.map((e) => e.message)).toEqual(['Plan ran', 'Planned']);
     expect(at(layout, 1).props).toEqual({ Plans: 1, WaitedMs: expect.any(Number) });
-    expect(dock.planProgress()).toBeGreaterThan(0);
+    // Every step towards planned is progress, the waits included (review of 6dc9adb8a: the gaps are where whenSized waits for its observer
+    // and the two release frames are pending): attach, whenSized's arrival, the plan, and each of the two release frames.
+    expect(dock.planProgress()).toBe(5);
   });
 
   it('falls back to the default layout when the saved one cannot be restored', () => {

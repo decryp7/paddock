@@ -9,6 +9,8 @@ export const THEMES = ['dark', 'light'] as const;
 export type Theme = (typeof THEMES)[number];
 
 export interface AxeOptions {
+  /** Rule tags to check beyond `WCAG_TAGS` (for example 'best-practice'). */
+  readonly extraTags?: readonly string[];
   /** Only these parts of the page (CSS selectors). */
   readonly include?: readonly string[];
   readonly exclude?: readonly string[];
@@ -115,7 +117,7 @@ export async function axeViolations(page: Page, options: AxeOptions = {}): Promi
   // A click leaves the pointer on its target, and a hover tooltip (Material's opens after 500 ms) would appear while axe
   // scans. Moving the pointer away cancels the pending tooltip and closes an open one.
   await page.mouse.move(0, 0);
-  let builder = new AxeBuilder({ page }).withTags([...WCAG_TAGS]);
+  let builder = new AxeBuilder({ page }).withTags([...WCAG_TAGS, ...(options.extraTags ?? [])]);
   for (const s of options.include ?? []) builder = builder.include(s);
   for (const s of options.exclude ?? []) builder = builder.exclude(s);
   const results = await withPageStill(page, () => builder.analyze());
