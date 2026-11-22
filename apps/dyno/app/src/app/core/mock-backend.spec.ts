@@ -5,6 +5,9 @@ import { SPARK_CAPACITY, appendSeries, type Series } from '../state/live.store';
 import { LIVE_BACKLOG, MockBackend, type MockOptions, applyMockPlatform, mockOptionsFromUrl } from './mock-backend';
 import { MAC_CPU_TOTAL } from './mock/mac-machine';
 
+// The real clock back after every test, so a test that times out cannot leave fake timers for the next one (ER-12, C154).
+afterEach(() => vi.useRealTimers());
+
 const NOW = 1_700_000_000_000;
 const make = (o: MockOptions = {}) => new MockBackend({ latencyMs: 0, now: () => NOW, ...o });
 

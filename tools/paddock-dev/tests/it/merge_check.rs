@@ -1364,15 +1364,6 @@ mod member_gate {
             .unwrap();
     }
 
-    /// Plays `dev plan <base> <head>` for the other-OS row: a documentation-only answer, so the row says `not run` (there is no CI to
-    /// dispatch on in a test; a member that reached a project would need `GITEA_TOKEN` and is `not measured`, exit 6).
-    fn fake_plan(dir: &Path) {
-        StandIn::new(dir, "plan")
-            .answers(Actions::new().stdout(r#"{"docs":true}"#))
-            .install()
-            .unwrap();
-    }
-
     struct Train {
         repo: Repo,
         gates: tempfile::TempDir,
@@ -1388,8 +1379,6 @@ mod member_gate {
                 .repo
                 .dev_cmd()
                 .env("PADDOCK_MERGE_CHECK_GATES", self.gates.path().join("gates"))
-                .env("PADDOCK_MERGE_CHECK_PLAN", self.gates.path().join("plan"))
-                .env_remove("GITEA_TOKEN")
                 .env("GATES_LOG", self.log())
                 .env("GATES_EXIT", gates_exit)
                 .env("PADDOCK_MERGE_CHECK_CARGO", "/nonexistent/cargo")
@@ -1420,38 +1409,7 @@ mod member_gate {
         }
         let gates = tempfile::tempdir().unwrap();
         fake_gates(gates.path());
-        fake_plan(gates.path());
         Train { repo, gates }
-    }
-
-    /// The other-OS row through the real binary (2026-11-21): a member that reaches a project, with no `GITEA_TOKEN`, is `not measured`
-    /// and the merge check exits 6 with the cause and the next step; it never prints and goes on.
-    #[test]
-    fn a_member_that_reaches_a_project_without_a_token_is_not_measured_and_exits_6() {
-        let t = train(false);
-        StandIn::new(t.gates.path(), "plan")
-            .answers(Actions::new().stdout(r#"{"crates":true}"#))
-            .install()
-            .unwrap();
-        let (code, out) = t.run(&["--gates", "HEAD"], "5");
-        assert_eq!(code, 6, "{out}");
-        assert!(out.contains("::error::member gate other-os NOT MEASURED"), "{out}");
-        assert!(out.contains("GITEA_TOKEN is not set") && out.contains("Next step"), "{out}");
-    }
-
-    /// P3: a member whose fast gates already failed is not dispatched: the other-OS row says so (not measured, exit 6) and never
-    /// reaches the token or the folder.
-    #[test]
-    fn a_member_whose_fast_gates_failed_is_not_dispatched() {
-        let t = train(true);
-        StandIn::new(t.gates.path(), "plan")
-            .answers(Actions::new().stdout(r#"{"crates":true}"#))
-            .install()
-            .unwrap();
-        let (code, out) = t.run(&["--gates", "HEAD"], "5");
-        assert_eq!(code, 6, "{out}");
-        assert!(out.contains("fast gates already failed"), "{out}");
-        assert!(!out.contains("GITEA_TOKEN is not set"), "no dispatch was attempted: {out}");
     }
 
     #[test]

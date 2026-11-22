@@ -1,35 +1,10 @@
 import { expect, test, type Page } from '@playwright/test';
-import { axeInThemes, axeViolations } from '../src/index.ts';
+import { axeInThemes, axeViolations, onEveryAxeScan } from '../src/index.ts';
 
 // Pitwall run 8134 (WebKit): axe read Benchmarks' muted cells on a row half-way through the theme's 100 ms background
 // transition (#a0a7b2 on #5c5d60, 2.71:1). Colours read while they change are not a measurement, so axeViolations holds the
 // page still for the scan (no transitions or animations, reduced motion). These pages start motion from inside axe's own
-// scan (`onEveryScan`), so the order is certain: before the change, axe read them mid-change.
-
-/** Runs `body` (the source of a function of the scan number `n`) in the page at the start of each of axe's scans. */
-async function onEveryScan(page: Page, body: string): Promise<void> {
-  await page.evaluate((source) => {
-    type Run = (...a: unknown[]) => Promise<unknown>;
-    const w = window as unknown as { scans: number; onScan: (n: number) => void };
-    w.scans = 0;
-    w.onScan = new Function('n', source) as (n: number) => void;
-    let real: object | undefined;
-    // axe-core assigns window.axe first and its runPartial later: wrap runPartial whenever it is assigned.
-    Object.defineProperty(window, 'axe', {
-      configurable: true,
-      get: () => real,
-      set: (axe: object) => {
-        let run: Run | undefined;
-        const wrapped: Run = async (...args) => {
-          w.onScan(++w.scans);
-          return (run as Run)(...args);
-        };
-        Object.defineProperty(axe, 'runPartial', { configurable: true, get: () => (run ? wrapped : undefined), set: (f: Run) => (run = f) });
-        real = axe;
-      },
-    });
-  }, body);
-}
+// scan (`onEveryAxeScan`), so the order is certain: before the change, axe read them mid-change.
 
 const open = (page: Page, html: string) => page.goto(`data:text/html,${encodeURIComponent(`<!doctype html><html lang="en"><title>Motion</title>${html}</html>`)}`);
 
@@ -39,9 +14,9 @@ const FLASH = '@keyframes flash { from { background: rgb(110, 110, 110); } to { 
 
 test('a 90 ms colour animation that starts as the scan begins is not read half-way', async ({ page }) => {
   await open(page, `<style>${CELL} ${FLASH} .go td { animation: flash 90ms linear; }</style><table><tbody><tr><td>muted text</td></tr></tbody></table>`);
-  await onEveryScan(page, "document.documentElement.classList.add('go');");
+  await onEveryAxeScan(page, () => document.documentElement.classList.add('go'));
   expect(await axeViolations(page)).toEqual([]);
-  expect(await page.evaluate(() => (window as unknown as { scans: number }).scans), 'the probe ran in the scan').toBe(1);
+  expect(await page.evaluate(() => (window as unknown as { axeScans: number }).axeScans), 'the probe ran in the scan').toBe(1);
 });
 
 test('the same animation on a ::before is not read half-way either', async ({ page }) => {
@@ -50,7 +25,10 @@ test('the same animation on a ::before is not read half-way either', async ({ pa
   await open(page, `<style>${CELL} ${style}</style><table><tbody><tr><td>muted text</td></tr></tbody></table>`);
   // axe judges text against what lies behind it, and reads a pseudo-element's colours only partly, so the probe also reads
   // the ::before's background as the scan starts: its end state, not the animation's first frame.
-  await onEveryScan(page, "document.documentElement.classList.add('go'); window.seen = getComputedStyle(document.querySelector('td'), '::before').backgroundColor;");
+  await onEveryAxeScan(page, () => {
+    document.documentElement.classList.add('go');
+    (window as unknown as { seen: string }).seen = getComputedStyle(document.querySelector('td') as Element, '::before').backgroundColor;
+  });
   expect(await axeViolations(page)).toEqual([]);
   expect(await page.evaluate(() => (window as unknown as { seen: string }).seen)).toBe('rgb(255, 255, 255)');
 });
@@ -58,7 +36,10 @@ test('the same animation on a ::before is not read half-way either', async ({ pa
 test('a fill-opacity transition started in the scan is at its end state while axe reads', async ({ page }) => {
   await open(page, `<style>rect { fill-opacity: 0.2; transition: fill-opacity 3s linear; } .go rect { fill-opacity: 1; }</style>
     <svg width="40" height="40" aria-hidden="true"><rect id="r" width="40" height="40" fill="rgb(0, 0, 0)" /></svg><p>text</p>`);
-  await onEveryScan(page, "document.documentElement.classList.add('go'); window.seen = getComputedStyle(document.getElementById('r')).fillOpacity;");
+  await onEveryAxeScan(page, () => {
+    document.documentElement.classList.add('go');
+    (window as unknown as { seen: string }).seen = getComputedStyle(document.getElementById('r') as Element).fillOpacity;
+  });
   expect(await axeViolations(page)).toEqual([]);
   expect(await page.evaluate(() => (window as unknown as { seen: string }).seen)).toBe('1');
 });

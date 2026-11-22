@@ -28,10 +28,6 @@ on:
         description: "Also run the WebKit tests (the WebKit job, and an app's WebKit lines)"
         type: boolean
         default: false
-      os:
-        description: "Only this operating system's part of the plan (linux, windows or macos; empty: all). The member gate runs Linux at once on spare lanes and Windows after the train's reservation (src/plan_os.rs); a partial run never counts as a complete one"
-        required: false
-        default: ""
       sccache_backend:
         description: "The compile cache of this run's Rust jobs: local (the disk only), s3 (the local disk first, RustFS behind it) or empty (the default, s3). A one-run override for measurements, for example a run with local to compare hit rates."
         required: false
@@ -148,14 +144,12 @@ jobs:
           PLAN_WEBKIT: ${{ (inputs.webkit == true || inputs.webkit == 'true') && '1' || '' }}
           # The rerun reads the earlier run's jobs and logs through the API (tools/paddock-dev/src/plan_since.rs).
           PLAN_SINCE_RUN: ${{ github.event.inputs.since_run }}
-          # One operating system's part of the plan (the `os` input): the plan job narrows the legs and `rerun_jobs` to it.
-          PLAN_OS: ${{ github.event.inputs.os }}
           # The crate and paddock-dev legs when the plan names none of its own (every run but a rerun of their failures).
           PLAN_OS_LEGS: '[{"os":"ubuntu-latest"},{"os":"windows-latest"},{"os":"macos-latest"}]'
           # The scope of this run (tests everything its plan can reach, not a diff from a base or a rerun of failures): a push to
           # main, an app's own gates, a manual run with no base. The line `plan verdict: complete=` at the end of the step is what
           # `./dev ci verdict` reads (plan_since::COMPLETE_LINE); this one is only the scope.
-          PLAN_MODE_FULL: ${{ github.event_name == 'push' || inputs.app != '' || (github.event_name == 'workflow_dispatch' && github.event.inputs.base == '' && github.event.inputs.since_run == '' && github.event.inputs.os == '') }}
+          PLAN_MODE_FULL: ${{ github.event_name == 'push' || inputs.app != '' || (github.event_name == 'workflow_dispatch' && github.event.inputs.base == '' && github.event.inputs.since_run == '') }}
           # A reused run (the step above): no job runs and the run is not complete; the reused run decides the commit.
           PLAN_REUSE: ${{ steps.reuse.outputs.reuse }}
           EVENT: ${{ github.event_name }}

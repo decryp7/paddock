@@ -22,6 +22,9 @@ import { loadDockview } from './dockview-loader';
 import { at, must } from '../../testing/must';
 import { labelTabOverflow, overflowLabel } from './dock-dom';
 
+// The real clock back after every test, so a test that times out cannot leave fake timers for the next one (ER-12, C154).
+afterEach(() => vi.useRealTimers());
+
 // dockview is loaded on demand (see dockview-loader); load it once so attach() is synchronous here.
 beforeAll(() => loadDockview());
 
@@ -806,6 +809,18 @@ describe('DockService with dockview', () => {
     const second = setup({ stored: saved });
     second.dock.attach(container);
     expect(ids(second.dock)).toEqual(['events', 'inspector', 'timeline']);
+  });
+
+  it('logs each plan and the moment the arrangement is planned, with the plans run and the wait (ER-27)', async () => {
+    const { dock } = setup();
+    dock.attach(container);
+    await vi.waitFor(() => expect(dock.planned()).toBe(true));
+    const layout = testLogger().entries.filter((e) => e.category === 'ui.layout' && e.level === 'debug');
+    expect(layout.map((e) => e.message)).toEqual(['Plan ran', 'Planned']);
+    expect(at(layout, 1).props).toEqual({ Plans: 1, WaitedMs: expect.any(Number) });
+    // Every step towards planned is progress, the waits included (review of 6dc9adb8a: the gaps are where whenSized waits for its observer
+    // and the two release frames are pending): attach, whenSized's arrival, the plan, and each of the two release frames.
+    expect(dock.planProgress()).toBe(5);
   });
 
   it('falls back to the default layout when the saved one cannot be restored', () => {

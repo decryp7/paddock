@@ -1,8 +1,8 @@
-import { TestBed } from '@angular/core/testing';
+import { type ComponentFixture, TestBed } from '@angular/core/testing';
+import { until } from '@decryp7/paddock-ui/testing';
 import { MockBackend } from '../../core/mock-backend';
 import { NOW, appProviders, byText, flush, makeMock, settle, text, type as typeInto } from '../../../testing/test-helpers';
 import { ConfigPanel, parseCapacity, parseTriState, triState } from './config-panel';
-import { PREVIEW_DEBOUNCE_MS } from './runner-config.store';
 
 describe('config panel helpers', () => {
   it('reads the capacity box', () => {
@@ -43,10 +43,15 @@ describe('ConfigPanel', () => {
   }
   const dialog = () => document.querySelector('[role="dialog"]') as HTMLElement | null;
   const input = (el: HTMLElement, id: string) => el.querySelector(`#${id}`) as HTMLInputElement;
-  async function edit(f: { detectChanges(): void }, field: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement, value: string, ev = 'input') {
+  /** Waits for the debounced preview to land: the store says `previewing` from the edit until the engine answers (rule 49, no guess at the debounce). */
+  async function previewLanded(f: ComponentFixture<ConfigPanel>) {
+    const store = (f.componentInstance as unknown as { store: { previewing(): boolean } }).store;
+    await until(() => !store.previewing(), { what: 'the debounced config preview to land', settle: () => settle(f, 1) });
+  }
+  async function edit(f: ComponentFixture<ConfigPanel>, field: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement, value: string, ev = 'input') {
     typeInto(field, value, ev);
-    await flush(PREVIEW_DEBOUNCE_MS + 50);
-    await settle(f as never, 3);
+    await previewLanded(f);
+    await settle(f, 3);
   }
 
   it('shows the file’s settings with the runner’s defaults as placeholders', async () => {
@@ -96,7 +101,7 @@ describe('ConfigPanel', () => {
     const labels = el.querySelector('#cfg-labels') as HTMLInputElement;
     typeInto(labels, 'gpu:host');
     labels.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-    await flush(PREVIEW_DEBOUNCE_MS + 50);
+    await previewLanded(f);
     await settle(f, 3);
     expect(text(el.querySelector('pc-string-list'))).toContain('gpu:host');
     (el.querySelector('button[aria-label="Remove windows:host"]') as HTMLElement).click();

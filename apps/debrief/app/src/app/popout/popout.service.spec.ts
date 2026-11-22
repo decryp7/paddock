@@ -12,6 +12,9 @@ import { FakeBackend } from './popout-testing';
 import { loadDockview } from '../dock/dockview-loader';
 import { DragGhostBackend, GhostRequest, NoDragGhost } from './drag-ghost-backend';
 
+// The real clock back after every test, so a test that times out cannot leave fake timers for the next one (ER-12, C154).
+afterEach(() => vi.useRealTimers());
+
 /** A ghost that records its requests and was last at `at`. */
 class RecordingGhost extends DragGhostBackend {
   readonly available = true;

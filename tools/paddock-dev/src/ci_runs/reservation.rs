@@ -77,45 +77,6 @@ pub fn wait_free(
     }
 }
 
-/// The "nothing progresses" rule of a wait on the train's CI: a signature of what moves (the holder, the ids of the unfinished runs)
-/// is looked at again and again; the wait is over when it has not changed for `stall`, or at `hard_max` (ER-32: always bounded).
-#[derive(Debug, Clone)]
-pub struct Stall {
-    stall: Duration,
-    hard_max: Duration,
-    last: Option<String>,
-    moved_at: Duration,
-}
-
-impl Stall {
-    /// A tracker that starts at `now` (the clock's elapsed time).
-    pub fn new(stall: Duration, hard_max: Duration, now: Duration) -> Stall {
-        Stall {
-            stall,
-            hard_max,
-            last: None,
-            moved_at: now,
-        }
-    }
-
-    /// Looks once at `signature` at time `now`. `Err(why)` when the wait must end now (the stall or the hard limit passed); `Ok(true)`
-    /// when the signature changed since the last look (progress), `Ok(false)` otherwise.
-    pub fn observe(&mut self, now: Duration, signature: String) -> Result<bool, String> {
-        let moved = self.last.as_ref().is_some_and(|l| *l != signature);
-        if self.last.as_ref() != Some(&signature) {
-            self.last = Some(signature);
-            self.moved_at = now;
-        }
-        if now >= self.hard_max {
-            return Err(format!("still held after the hard limit of {}", fmt_duration(self.hard_max)));
-        }
-        if now.saturating_sub(self.moved_at) >= self.stall {
-            return Err(format!("nothing progressed for {}", fmt_duration(self.stall)));
-        }
-        Ok(moved)
-    }
-}
-
 /// The folder of the reservation lock: `PADDOCK_TRAIN_CI_LOCK_ROOT`, else `train-ci` beside the test machines' lock folder
 /// (`./dev places --get lock-root`'s parent). `None` when neither can be derived.
 pub fn lock_root() -> Option<PathBuf> {
@@ -290,34 +251,5 @@ mod tests {
             Some("/x/owner-1".into())
         );
         assert_eq!(holder_of(&json!({})), None);
-    }
-
-    /// The member gate's wait goes on while the train moves, past any fixed short bound, and ends only when nothing progressed for the
-    /// stall (or at the hard limit).
-    #[test]
-    fn the_stall_tracker_ends_only_when_nothing_progresses() {
-        let stall = Duration::from_secs(600);
-        let hard = Duration::from_secs(86_400);
-        let at = |s: u64| Duration::from_secs(s);
-        // The signature changes every minute for two hours: far past the stall, still going.
-        let mut t = Stall::new(stall, hard, at(0));
-        for minute in 0..120u64 {
-            assert!(t.observe(at(minute * 60), format!("run {minute}")).is_ok(), "minute {minute}");
-        }
-        // Nothing moves: it ends after the stall, naming it.
-        let mut t = Stall::new(stall, hard, at(0));
-        assert_eq!(t.observe(at(0), "run 7".into()), Ok(false));
-        assert_eq!(t.observe(at(599), "run 7".into()), Ok(false));
-        assert!(t.observe(at(600), "run 7".into()).unwrap_err().contains("nothing progressed"));
-        // A change is progress and moves the deadline.
-        let mut t = Stall::new(stall, hard, at(0));
-        assert_eq!(t.observe(at(0), "a".into()), Ok(false));
-        assert_eq!(t.observe(at(500), "b".into()), Ok(true));
-        assert_eq!(t.observe(at(1000), "b".into()), Ok(false));
-        assert!(t.observe(at(1100), "b".into()).is_err());
-        // The hard limit ends it even while it moves.
-        let mut t = Stall::new(stall, at(1800), at(0));
-        assert!(t.observe(at(1799), "x".into()).is_ok());
-        assert!(t.observe(at(1800), "y".into()).unwrap_err().contains("hard limit"));
     }
 }

@@ -1,7 +1,7 @@
 import { defineConfig, devices, type PlaywrightTestConfig, type ReporterDescription } from '@playwright/test';
 import { assertChromeForTesting, pinnedChrome } from './browser.ts';
 import { assertFreshBuilds, reuseServer, type BuildGuard } from './build-guard.ts';
-import { e2ePort, isOn } from './env.ts';
+import { e2ePort, e2eWorkers, isOn } from './env.ts';
 import { paddockServers } from './servers.ts';
 
 export { isOn };
@@ -85,7 +85,7 @@ export function paddockConfig(options: PaddockConfigOptions): PlaywrightTestConf
     // Inside .angular/, which git ignores.
     outputDir: './.angular/playwright-results',
     fullyParallel: false,
-    workers: 1,
+    workers: e2eWorkers(1, env),
     forbidOnly: isOn(env['CI']),
     retries: 0,
     reporter,

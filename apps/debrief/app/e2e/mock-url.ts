@@ -9,13 +9,15 @@ import { loadWait } from './app';
  */
 export async function openAppWith(page: Page, search: string, options: { grid?: boolean } = {}): Promise<void> {
   // The first load builds the demo workspace; under a full parallel run it takes longer than one assertion. Its waits share
-  // one budget (APP_LOAD_TIMEOUT, measured there), the dock's planning included.
+  // one budget (APP_LOAD_TIMEOUT, measured there); the dock's planning starts from what is left of it and goes on while it progresses.
   const load = loadWait();
   await page.goto(`/${search}`);
   await expect(page.locator('debrief-status-bar')).toContainText('events', { timeout: load.timeout() });
   if (options.grid ?? true) {
     await expect(page.locator('debrief-events-grid')).toBeVisible({ timeout: load.timeout() });
-    await expectDockPlanned(page, { timeout: load.timeout() });
+    // The dock's planning gets what is left of the budget as its first wait (at least the expect timeout), then waits on as long as it
+    // takes steps (expectDockPlanned): on loaded runners the budget alone ran out in runs 8559 and 8636.
+    await expectDockPlanned(page, { firstTimeout: load.timeout() });
   }
 }
 

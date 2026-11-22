@@ -9,6 +9,8 @@ export const THEMES = ['dark', 'light'] as const;
 export type Theme = (typeof THEMES)[number];
 
 export interface AxeOptions {
+  /** Rule tags to check beyond `WCAG_TAGS` (for example 'best-practice'). */
+  readonly extraTags?: readonly string[];
   /** Only these parts of the page (CSS selectors). */
   readonly include?: readonly string[];
   readonly exclude?: readonly string[];
@@ -82,28 +84,22 @@ async function reducedMotion(page: Page, on: boolean): Promise<void> {
 }
 
 /**
- * The page's axe violations as `rule: target, target` lines (empty: none), against `WCAG_TAGS`.
+ * Runs `scan` with the page held still, and returns its result.
  *
- * Colours read while they change are not a measurement (Pitwall run 8134 read a row half-way to the dark theme; earlier a
- * tooltip fading in). Common practice is to hold the page still for the scan: the style above (no transitions, finite
- * animations at their end) and `prefers-reduced-motion: reduce`, two animation frames, one scan, and both undone, the media
- * setting first. An error of the undoing never replaces axe's own; without one, it is thrown.
+ * Colours read while they change are not a measurement (Pitwall run 8134 read a row half-way to the dark theme; Debrief's
+ * runs 8297 to 8556 read the Inspector half-way through its slide-in; earlier a tooltip fading in). Common practice is to hold
+ * the page still for the scan: the style above (no transitions, finite animations at their end) and
+ * `prefers-reduced-motion: reduce`, two animation frames, the scan, and both undone, the media setting first. An error of the
+ * undoing never replaces the scan's own; without one, it is thrown. Every axe scan of the family goes through here.
  */
-export async function axeViolations(page: Page, options: AxeOptions = {}): Promise<string[]> {
-  // A click leaves the pointer on its target, and a hover tooltip (Material's opens after 500 ms) would appear while axe
-  // scans. Moving the pointer away cancels the pending tooltip and closes an open one.
-  await page.mouse.move(0, 0);
-  let builder = new AxeBuilder({ page }).withTags([...WCAG_TAGS]);
-  for (const s of options.include ?? []) builder = builder.include(s);
-  for (const s of options.exclude ?? []) builder = builder.exclude(s);
+export async function withPageStill<T>(page: Page, scan: () => Promise<T>): Promise<T> {
   let reducedBefore: boolean | undefined;
   let scanFailed = false;
   try {
     reducedBefore = await addStillStyle(page);
     if (!reducedBefore) await reducedMotion(page, true);
     await nextFrames(page);
-    const results = await builder.analyze();
-    return results.violations.map((v) => (options.idsOnly ? v.id : `${v.id}: ${v.nodes.map((n) => n.target.join(' ')).join(', ')}`));
+    return await scan();
   } catch (e) {
     scanFailed = true;
     throw e;
@@ -114,6 +110,48 @@ export async function axeViolations(page: Page, options: AxeOptions = {}): Promi
     // eslint-disable-next-line no-unsafe-finally -- a failed undo must not pass silently when the scan itself succeeded.
     if (!scanFailed && undoErrors.length) throw undoErrors[0];
   }
+}
+
+/** The page's axe violations as `rule: target, target` lines (empty: none), against `WCAG_TAGS`, scanned with the page held still. */
+export async function axeViolations(page: Page, options: AxeOptions = {}): Promise<string[]> {
+  // A click leaves the pointer on its target, and a hover tooltip (Material's opens after 500 ms) would appear while axe
+  // scans. Moving the pointer away cancels the pending tooltip and closes an open one.
+  await page.mouse.move(0, 0);
+  let builder = new AxeBuilder({ page }).withTags([...WCAG_TAGS, ...(options.extraTags ?? [])]);
+  for (const s of options.include ?? []) builder = builder.include(s);
+  for (const s of options.exclude ?? []) builder = builder.exclude(s);
+  const results = await withPageStill(page, () => builder.analyze());
+  return results.violations.map((v) => (options.idsOnly ? v.id : `${v.id}: ${v.nodes.map((n) => n.target.join(' ')).join(', ')}`));
+}
+
+/**
+ * Calls `onScan` in the page at the start of each of axe's scans (its `runPartial`), with the scan's number, and counts them in
+ * `window.axeScans`. For tests of what a scan sees: motion started from here begins inside the scan, so its order against the
+ * helper's preparations is certain. Installed through the debugging protocol, so a CSP without 'unsafe-eval' does not stop it
+ * (the Tauri apps' CSP); `onScan` is page code and closes over nothing of the test.
+ */
+export async function onEveryAxeScan(page: Page, onScan: (n: number) => void): Promise<void> {
+  await page.evaluate(`window.__pdAxeOnScan = (${onScan.toString()});`);
+  await page.evaluate(() => {
+    type Run = (...a: unknown[]) => Promise<unknown>;
+    const w = window as unknown as { axeScans: number; __pdAxeOnScan: (n: number) => void };
+    w.axeScans = 0;
+    let real: object | undefined;
+    // axe-core assigns window.axe first and its runPartial later: wrap runPartial whenever it is assigned.
+    Object.defineProperty(window, 'axe', {
+      configurable: true,
+      get: () => real,
+      set: (axe: object) => {
+        let run: Run | undefined;
+        const wrapped: Run = async (...args) => {
+          w.__pdAxeOnScan(++w.axeScans);
+          return (run as Run)(...args);
+        };
+        Object.defineProperty(axe, 'runPartial', { configurable: true, get: () => (run ? wrapped : undefined), set: (f: Run) => (run = f) });
+        real = axe;
+      },
+    });
+  });
 }
 
 /** `axeViolations` in each theme (the page is switched with `emulateMedia`), as `theme: rule: targets` lines. */

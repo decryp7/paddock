@@ -1,6 +1,6 @@
 # Scheduled CI runs
 
-Scheduled workflows run at night, local time UTC+8 (cron is UTC), staggered so they do not overlap on the six Linux
+Scheduled workflows run at night, local time UTC+8 (cron is UTC), staggered so they do not overlap on the three Linux
 runner slots. Matrix jobs are capped with `strategy.max-parallel` so one Linux slot stays free for release and branch runs
 (rule 50; trigger: Debrief's fuzz run at 10:23 local held all three slots for about 30 minutes).
 
@@ -54,7 +54,7 @@ known; 04:00 local (20:00 UTC) is assumed until evidence says otherwise. The Win
 Typical durations are from the last five scheduled runs (Gitea API, 2026-11-06 to 11-10; the failed runs count, they
 ran the same jobs).
 
-The Linux runner runs 6 jobs at once (6 Linux slots, declared in `conformance/ci/runner-slots.json`).
+The Linux runner runs 3 jobs at once (3 Linux slots, declared in `conformance/ci/runner-slots.json`).
 
 | Workflow | Cron (UTC) | Local (UTC+8) | OS legs | Typical duration | Linux slots at most |
 | --- | --- | --- | --- | --- | --- |

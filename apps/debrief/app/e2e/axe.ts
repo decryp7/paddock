@@ -1,10 +1,14 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, Page, TestInfo } from '@playwright/test';
+import { WCAG_TAGS as FAMILY_WCAG_TAGS, withPageStill } from '../../../../ui/projects/paddock-e2e/src/axe.ts';
 
-/** The WCAG levels every axe check covers: 2.0, 2.1 and 2.2, A and AA. */
-export const WCAG_TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'];
+/**
+ * The WCAG levels every Debrief axe check covers: the family's (paddock-e2e `WCAG_TAGS`: 2.0 A and AA, 2.2 AA) and 2.1 A and AA, which the family's
+ * list does not name although 2.2 AA includes them (four rules in axe-core 4.14: autocomplete-valid, avoid-inline-spacing, css-orientation-lock,
+ * label-content-name-mismatch).
+ */
+export const WCAG_TAGS = [...FAMILY_WCAG_TAGS, 'wcag21a', 'wcag21aa'];
 
-/** Runs axe against WCAG 2.2 A/AA and fails on any serious or critical violation. */
 /** Waits until no CSS animation or transition is running: axe measures colours as rendered, so a panel sliding in or a
  *  scrim fading out mid-scan reads as low contrast (WebKit, being slower, used to hit this). */
 export async function settleAnimations(page: Page): Promise<void> {
@@ -25,10 +29,16 @@ export async function settleAnimations(page: Page): Promise<void> {
   );
 }
 
+/**
+ * Runs axe against WCAG 2.2 A/AA and fails on any serious or critical violation. Motion that has started finishes first
+ * (`settleAnimations`), then the scan runs with the page held still (paddock-e2e's `withPageStill`: no transitions, finite
+ * animations at their end, reduced motion), so motion that starts during the scan is read at its end state too: the Inspector's
+ * slide-in, read half-way, failed contrast in WebKit about 1 run in 145 (debrief.yml runs 8297 to 8556; a11y.e2e.ts).
+ */
 export async function expectNoSeriousViolations(page: Page, testInfo: TestInfo, label: string, include?: string): Promise<void> {
   await settleAnimations(page);
   const builder = new AxeBuilder({ page }).withTags(WCAG_TAGS);
-  const { violations } = await (include ? builder.include(include) : builder).analyze();
+  const { violations } = await withPageStill(page, () => (include ? builder.include(include) : builder).analyze());
   const blocking = violations
     .filter((v) => v.impact === 'serious' || v.impact === 'critical')
     .map((v) => ({ id: v.id, impact: v.impact, help: v.help, count: v.nodes.length, nodes: v.nodes.slice(0, 8).map((n) => ({ target: n.target.join(" "), html: n.html.slice(0, 300), data: n.any[0]?.data, related: n.any[0]?.relatedNodes?.slice(0, 4).map((r) => r.target.join(' ')) })) }));
