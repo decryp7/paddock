@@ -10,27 +10,32 @@ import { codeLines, jobText } from './ci-verdict-reader.test.mjs';
 import { loadWorkflow } from './lib/workflow.mjs';
 
 const text = (w) => readFileSync(join(PADDOCK, '.gitea', 'workflows', w), 'utf8');
-const PUSH_TO_MAIN = "if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}";
+// A push to main, or a scheduled run (the night): the reader asks more of the earlier run for a night (run_scope::Asker::Schedule), and
+// every other event (a dispatch, a tag, a pull request) runs the commit.
+const PUSH_TO_MAIN = "if: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'schedule' }}";
 
-/** Why a workflow's plan job does not ask `./dev ci reuse` for a push to main only, or null. */
+/** Why a workflow's plan job does not ask `./dev ci reuse` for a push to main and a schedule only, or null. */
 export function reuseProblem(workflowText, file) {
   const plan = jobText(workflowText, 'plan') ?? '';
   const at = plan.indexOf(`run: ./dev ci reuse --workflow ${file}`);
   if (at < 0) return `its plan job does not run \`./dev ci reuse --workflow ${file}\``;
   const step = plan.slice(plan.lastIndexOf('- name:', at), at);
   if (!step.includes('id: reuse')) return 'the reuse step has no `id: reuse` for the decision to read';
-  if (!step.includes(PUSH_TO_MAIN)) return `the reuse step is not limited to a push to main (${PUSH_TO_MAIN})`;
+  if (!step.includes(PUSH_TO_MAIN)) return `the reuse step is not limited to a push to main and a schedule (${PUSH_TO_MAIN})`;
   return null;
 }
 
-test('ci.yml and debrief.yml ask ./dev ci reuse for a push to main, and only for that', () => {
+test('ci.yml and debrief.yml ask ./dev ci reuse for a push to main and for a schedule, and only for those', () => {
   for (const w of ['ci.yml', 'debrief.yml']) assert.equal(reuseProblem(text(w), w), null, w);
 });
 
 test('the reuse check sees a missing, unguarded or unnamed step (positive control)', () => {
   const ci = text('ci.yml');
   assert.match(reuseProblem(ci.replace('run: ./dev ci reuse --workflow ci.yml', 'run: true'), 'ci.yml'), /does not run/);
-  assert.match(reuseProblem(ci.replace(PUSH_TO_MAIN, ''), 'ci.yml'), /not limited to a push to main/);
+  assert.match(reuseProblem(ci.replace(PUSH_TO_MAIN, ''), 'ci.yml'), /not limited to a push to main and a schedule/);
+  // Dropping the schedule term, or widening to every event, is refused too.
+  assert.match(reuseProblem(ci.replace(PUSH_TO_MAIN, "if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}"), 'ci.yml'), /not limited/);
+  assert.match(reuseProblem(ci.replace(PUSH_TO_MAIN, ''), 'ci.yml'), /not limited/);
   assert.match(reuseProblem(ci.replace('id: reuse', 'id: other'), 'ci.yml'), /no `id: reuse`/);
   assert.match(reuseProblem(text('debrief.yml'), 'ci.yml'), /does not run/);
 });
