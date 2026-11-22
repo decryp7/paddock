@@ -426,25 +426,32 @@ pub fn sweep_real(state: &Path) -> Vec<String> {
     )
 }
 
-/// Writes the heartbeat of the slow phase into its record every [`trial_guard::BEAT_EVERY_SECS`] until `done` is set. The first beat
-/// is written at once. Returns when the rows have ended.
+/// Whether a heartbeat is due: none was written yet, or `every` of wall time has passed since the last one. The clock decides, not a
+/// count of sleeps: a stalled sleep or a slow write never makes beats pile up or go missing.
+pub fn beat_due(last: Option<std::time::Instant>, now: std::time::Instant, every: Duration) -> bool {
+    last.is_none_or(|l| now.saturating_duration_since(l) >= every)
+}
+
+/// Writes the heartbeat of the slow phase into its record every [`trial_guard::BEAT_EVERY_SECS`] of wall time until `done` is set.
+/// The first beat is written at once. Returns when the rows have ended.
 pub fn beat_real(state: &Path, sha: &str, done: &std::sync::atomic::AtomicBool) {
     use std::sync::atomic::Ordering;
-    let now = || {
+    let unix = || {
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.as_secs())
     };
+    let every = Duration::from_secs(trial_guard::BEAT_EVERY_SECS);
+    let mut last = None;
     while !done.load(Ordering::SeqCst) {
-        if let Err(e) = trial_guard::beat(state, sha, now()) {
-            eprintln!("::warning::trial: the heartbeat could not be written ({e})");
-        }
-        for _ in 0..trial_guard::BEAT_EVERY_SECS * 10 {
-            if done.load(Ordering::SeqCst) {
-                return;
+        let now = std::time::Instant::now();
+        if beat_due(last, now, every) {
+            last = Some(now);
+            if let Err(e) = trial_guard::beat(state, sha, unix()) {
+                eprintln!("::warning::trial: the heartbeat could not be written ({e})");
             }
-            std::thread::sleep(Duration::from_millis(100));
         }
+        std::thread::sleep(Duration::from_millis(100));
     }
 }
 

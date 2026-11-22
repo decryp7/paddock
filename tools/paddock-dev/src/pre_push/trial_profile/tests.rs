@@ -417,3 +417,18 @@ fn the_run_is_cancelled_before_the_final_status_is_posted() {
         .collect();
     assert_eq!(order, ["cancel", "status"], "{line}");
 }
+
+/// Round 3 minor: the heartbeat is paced by the clock, not by counting sleeps: it is due when `every` of wall time has passed since
+/// the last beat (a stalled sleep or a slow write never makes beats pile up or go missing).
+#[test]
+fn the_heartbeat_is_due_by_wall_time_not_by_counted_sleeps() {
+    let every = Duration::from_secs(30);
+    let t0 = std::time::Instant::now();
+    assert!(beat_due(None, t0, every), "the first beat is at once");
+    assert!(!beat_due(Some(t0), t0 + Duration::from_secs(29), every));
+    assert!(beat_due(Some(t0), t0 + Duration::from_secs(30), every));
+    assert!(
+        beat_due(Some(t0), t0 + Duration::from_secs(300), every),
+        "a long stall is caught up with one beat"
+    );
+}
