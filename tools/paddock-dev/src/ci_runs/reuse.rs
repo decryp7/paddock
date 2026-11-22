@@ -4,8 +4,9 @@
 //!
 //! The answer comes only from [`verdict::verdict_excluding`], the one reader of the runs for "is there a full green run of W on
 //! S" (the asking run itself left out: it is still going). Reuse needs more than a green verdict:
-//! - every job that ran must have a readable log without a FLAKY test (2026-11-21: a run that was red only with FLAKY tests, or
-//!   green with one marked, is not the run `tag.yml` can use, so the post-landing run on main has to be a real one);
+//! - a run that is green must have no FLAKY test in a job log that ran (2026-11-21: green with one marked is not the run `tag.yml` can
+//!   use, so the post-landing run on main has to be a real one); a run that is red only with FLAKY tests of untouched targets is
+//!   green with fix items on the one definition (ADR 0117 WP-4) and is reused (a tag then takes its one allowed retry, ER-49);
 //! - anything that cannot be read (the runs, the jobs, a log) means "run": the step fails open to the full run, never to a
 //!   skipped one.
 //!
@@ -106,11 +107,31 @@ pub fn decide(client: &mut Client, workflow: &str, sha: &str, current: Option<u6
 
 /// [`decide`] with the basis given.
 pub fn decide_with(client: &mut Client, workflow: &str, sha: &str, current: Option<u64>, scope: bool) -> Reuse {
-    match verdict::verdict_with(client, workflow, sha, current, scope) {
+    let root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let first_parent = super::green::first_parent_before(&root, sha);
+    decide_with_touched(client, workflow, sha, current, scope, &first_parent, &mut |s| {
+        super::green::plan_touched(&root, s)
+    })
+}
+
+/// [`decide_with`] with the way to read what a commit's change touched given.
+pub fn decide_with_touched(
+    client: &mut Client,
+    workflow: &str,
+    sha: &str,
+    current: Option<u64>,
+    scope: bool,
+    first_parent: &[String],
+    touched: &mut dyn FnMut(&str) -> Option<super::green::Touched>,
+) -> Reuse {
+    match verdict::verdict_with_touched(client, workflow, sha, current, scope, first_parent, touched) {
         Verdict::Green { run } => match clean_of_flaky(client, run) {
             Ok(logs) => Reuse::Skip { run, logs },
             Err(why) => Reuse::Run(why),
         },
+        // ADR 0117 WP-4: a complete run whose only failures are FLAKY tests of untouched targets is green for a landing, so the push
+        // after it reuses it (its fix items are recorded); a tag asks for a run without them and takes its one retry (ER-49).
+        Verdict::GreenWithFixItems { run, .. } => Reuse::Skip { run, logs: 0 },
         Verdict::Red { reason, .. } => Reuse::Run(reason),
         Verdict::NotMeasured(why) => Reuse::Run(why),
     }
@@ -342,5 +363,32 @@ mod tests {
         let mut f = Fake::default();
         f.error(&format!("{API}/runs?head_sha={SHA}&limit=50&page=1"), "curl exited with 22: 500");
         assert!(matches!(ask(&mut f, Some(9)), Reuse::Run(_)));
+    }
+
+    #[test]
+    fn a_failed_run_with_only_untouched_flaky_failures_is_reused_by_the_push_after_it() {
+        // ADR 0117 WP-4: the landing took it as green with fix items, so the push to main reuses it instead of testing again.
+        let mut r = run(8610, "workflow_dispatch", "train/x", "failure");
+        r["head_sha"] = json!(SHA);
+        let mut f = server(vec![r], &[8610], 8610, &[]);
+        let step = json!([{"name": "s", "started_at": "2026-11-21T00:00:00Z", "completed_at": "2026-11-21T00:01:00Z"}]);
+        f.json(
+            &format!("{API}/runs/8610/jobs?limit=50&page=1"),
+            json!({"total_count": 3, "jobs": [
+                {"id": 13610, "name": "plan (affected projects)", "conclusion": "success", "runner_id": 1, "steps": step},
+                {"id": 17610, "name": "conformance (checks, release scripts)", "conclusion": "success", "runner_id": 1, "steps": step},
+                {"id": 18000, "name": "app dyno (ubuntu-latest)", "conclusion": "failure", "runner_id": 1, "steps": step}]}),
+        );
+        f.log(18000, include_str!("../../tests/ci-runs/nextest-r1-flaky-only.log"));
+        let mut c = Client::new(&mut f, "https://gitea.invalid", "decryp7/paddock", "t");
+        c.backoff_ms = 0;
+        let untouched = |_: &str| Some(crate::ci_runs::green::Touched::default());
+        let d = decide_with_touched(&mut c, "ci.yml", SHA, None, true, &[], &mut { untouched });
+        assert_eq!(d, Reuse::Skip { run: 8610, logs: 0 });
+        // Positive control: when the change touched dyno, the FLAKY test is red and the push runs.
+        let mut touched = crate::ci_runs::green::Touched::default();
+        touched.apps.insert("dyno".into());
+        let d = decide_with_touched(&mut c, "ci.yml", SHA, None, true, &[], &mut |_: &str| Some(touched.clone()));
+        assert!(matches!(d, Reuse::Run(_)), "{d:?}");
     }
 }

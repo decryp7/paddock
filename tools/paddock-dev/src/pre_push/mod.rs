@@ -270,7 +270,7 @@ impl known::Lookups for RealLookups {
     }
     fn ci_green(&self, sha: &str) -> Result<u64, String> {
         match crate::ci_runs::ci_verdict(known::CI_WORKFLOW, sha) {
-            crate::ci_runs::verdict::Verdict::Green { run } => Ok(run),
+            crate::ci_runs::verdict::Verdict::Green { run } | crate::ci_runs::verdict::Verdict::GreenWithFixItems { run, .. } => Ok(run),
             crate::ci_runs::verdict::Verdict::Red { reason, .. } => Err(format!("red or partial: {reason}")),
             crate::ci_runs::verdict::Verdict::NotMeasured(why) => Err(format!("not measured: {why}")),
         }

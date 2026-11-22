@@ -273,10 +273,10 @@ pub struct BaseInput<'a> {
     pub input_base: &'a str,
     /// `GITHUB_BASE_REF`.
     pub base_ref: &'a str,
-    /// The newest-first ci.yml runs from the Gitea API (read only for a push to main).
-    pub runs: Option<&'a [Value]>,
-    /// Whether HEAD contains a commit.
-    pub contains: &'a dyn Fn(&str) -> bool,
+    /// The base of a push to main from the one definition of green (`ci_runs::green::find_base`: the last first-parent commit whose
+    /// outcome is complete and green, with or without fix items): the commit and the run that decided it, `Ok(None)` when none is
+    /// found, `Err` when the runs could not be read. `None`: not asked (every other event).
+    pub green: Option<&'a Result<Option<(String, u64)>, String>>,
     /// A pull request's merge base with a branch.
     pub merge_base: &'a dyn Fn(&str) -> Option<String>,
 }
@@ -298,29 +298,17 @@ pub fn choose_base(i: &BaseInput) -> (Option<String>, String) {
         };
     }
     if i.event == "push" && i.reference == main {
-        let Some(runs) = i.runs else {
-            return (None, "the CI runs could not be read: everything".to_string());
-        };
-        let green = runs.iter().find(|r| {
-            r["conclusion"] == "success"
-                && r["event"] == "push"
-                && r["head_branch"] == "main"
-                && is_ci_yml(r["path"].as_str().unwrap_or("ci.yml@"))
-                && (i.contains)(r["head_sha"].as_str().unwrap_or(""))
-        });
-        return match green {
-            Some(r) => {
-                let sha = r["head_sha"].as_str().unwrap_or("");
-                let id = r["id"].as_u64().map(|n| n.to_string()).unwrap_or_else(|| r["id"].to_string());
-                (
-                    Some(sha.to_string()),
-                    format!(
-                        "the last green ci run on main ({}, run {id})",
-                        sha.chars().take(10).collect::<String>()
-                    ),
-                )
-            }
-            None => (None, "no green ci run on main that HEAD contains: everything".to_string()),
+        return match i.green {
+            None => (None, "the CI runs could not be read: everything".to_string()),
+            Some(Err(why)) => (None, format!("the CI runs could not be read ({why}): everything")),
+            Some(Ok(Some((sha, id)))) => (
+                Some(sha.clone()),
+                format!(
+                    "the last complete green ci run on main ({}, run {id})",
+                    sha.chars().take(10).collect::<String>()
+                ),
+            ),
+            Some(Ok(None)) => (None, "no complete green ci run among main's newest commits: everything".to_string()),
         };
     }
     (None, format!("{} {}: everything", i.event, i.reference))
@@ -1063,22 +1051,19 @@ mod tests {
         assert_eq!(only["packages"], json!({}));
     }
 
-    fn run(over: Value) -> Value {
-        let mut r = json!({"id": 1, "conclusion": "success", "event": "push", "head_branch": "main", "path": "ci.yml@refs/heads/main", "head_sha": "green1"});
-        for (k, v) in over.as_object().unwrap() {
-            r[k] = v.clone();
-        }
-        r
-    }
-
-    fn base_of(event: &str, reference: &str, input_base: &str, base_ref: &str, runs: Option<&[Value]>) -> (Option<String>, String) {
+    fn base_of(
+        event: &str,
+        reference: &str,
+        input_base: &str,
+        base_ref: &str,
+        green: Option<&Result<Option<(String, u64)>, String>>,
+    ) -> (Option<String>, String) {
         choose_base(&BaseInput {
             event,
             reference,
             input_base,
             base_ref,
-            runs,
-            contains: &|s| s != "elsewhere",
+            green,
             merge_base: &|b| (b == "main").then(|| "mb123".to_string()),
         })
     }
@@ -1087,21 +1072,15 @@ mod tests {
     fn the_base_of_a_run_follows_its_event() {
         assert_eq!(base_of("pull_request", "", "", "main", None).0.as_deref(), Some("mb123"));
         assert_eq!(base_of("pull_request", "", "", "gone", None).0, None);
-        let runs = [
-            run(json!({"head_sha": "red", "conclusion": "failure"})),
-            run(json!({"head_sha": "other", "path": "canary.yml@refs/heads/main"})),
-            run(json!({"head_sha": "disp", "event": "workflow_dispatch"})),
-            run(json!({"head_sha": "elsewhere"})),
-            run(json!({"head_sha": "green1", "id": 7})),
-            run(json!({"head_sha": "green0"})),
-        ];
-        let (b, why) = base_of("push", "refs/heads/main", "", "", Some(&runs));
+        // A push to main takes the base the one definition of green found (ci_runs::green::find_base, tested there).
+        let found = Ok(Some(("green1".to_string(), 7)));
+        let (b, why) = base_of("push", "refs/heads/main", "", "", Some(&found));
         assert_eq!(b.as_deref(), Some("green1"));
         assert!(why.contains("run 7"), "{why}");
-        assert_eq!(
-            base_of("push", "refs/heads/main", "", "", Some(&[run(json!({"conclusion": "failure"}))])).0,
-            None
-        );
+        assert_eq!(base_of("push", "refs/heads/main", "", "", Some(&Ok(None))).0, None);
+        let unread = Err("HTTP 500".to_string());
+        let (b, why) = base_of("push", "refs/heads/main", "", "", Some(&unread));
+        assert!(b.is_none() && why.contains("HTTP 500"), "{why}");
         assert_eq!(base_of("push", "refs/heads/main", "", "", None).0, None);
         assert_eq!(base_of("workflow_dispatch", "", "abc", "", None).0.as_deref(), Some("abc"));
         assert_eq!(base_of("workflow_dispatch", "", "", "", None).0, None);

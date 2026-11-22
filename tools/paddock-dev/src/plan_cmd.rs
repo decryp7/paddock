@@ -23,8 +23,8 @@
 
 use crate::plan::{Request, plan_with_graph};
 use crate::plan_ci::{
-    BaseInput, LintInput, MatrixOpts, USAGE, choose_base, ci_outputs, commit_lint_range, is_ci_yml, matrix, member_run, only_app,
-    package_filters, parse_args, summary, wants_webkit,
+    BaseInput, LintInput, MatrixOpts, USAGE, choose_base, ci_outputs, commit_lint_range, matrix, member_run, only_app, package_filters,
+    parse_args, summary, wants_webkit,
 };
 use crate::plan_os;
 use crate::plan_repo::git_text;
@@ -51,36 +51,42 @@ fn fail(message: impl Into<String>) -> CliError {
     CliError::failure(format!("affected: {message}\n{USAGE}"))
 }
 
-/// The newest ci.yml runs on main (Gitea API), or `None` with a warning when they cannot be read.
-pub fn ci_runs(http: &mut dyn Http, env: &dyn Fn(&str) -> Option<String>, warn: &mut dyn FnMut(&str)) -> Option<Vec<Value>> {
+/// The base of a push to main: the last first-parent commit whose outcome is complete and green, with or without fix items, by the one
+/// definition of green (`ci_runs::green::find_base`, ADR 0117 WP-4: the same reader as `ci verdict`, `ci reuse` and the landing
+/// queue). The runs are read once, in pages, and matched to commits in memory. An unreadable list warns and plans everything.
+pub fn green_base(
+    http: &mut dyn Http,
+    env: &dyn Fn(&str) -> Option<String>,
+    root: &Path,
+    warn: &mut dyn FnMut(&str),
+) -> Result<Option<(String, u64)>, String> {
+    use crate::ci_runs::client::Client;
     let server = env("GITHUB_SERVER_URL").unwrap_or_else(|| "https://dev.decryptology.net".into());
     let repo = env("GITHUB_REPOSITORY").unwrap_or_else(|| "decryp7/paddock".into());
     let token = env("PLAN_TOKEN").unwrap_or_default();
-    let api = format!("{}/api/v1/repos/{repo}", server.trim_end_matches('/'));
-    let mut out: Vec<Value> = Vec::new();
-    for page in 1..=4 {
-        let url = format!("{api}/actions/runs?branch=main&event=push&limit=50&page={page}");
-        let body = match http.get_json(&url, &token) {
-            Ok(b) => b,
-            Err(e) => {
-                warn(&format!(
-                    "::warning::the CI runs of main could not be read ({e}); this run tests everything"
-                ));
-                return None;
-            }
-        };
-        let runs = body["workflow_runs"].as_array().cloned().unwrap_or_default();
-        let count = runs.len();
-        out.extend(runs);
-        if count < 50
-            || out
-                .iter()
-                .any(|r| r["conclusion"] == "success" && is_ci_yml(r["path"].as_str().unwrap_or("")))
-        {
-            break;
+    let mut client = Client::new(http, &server, &repo, &token);
+    green_base_in(&mut client, root, warn)
+}
+
+/// [`green_base`] over a client already made.
+fn green_base_in(
+    client: &mut crate::ci_runs::client::Client,
+    root: &Path,
+    warn: &mut dyn FnMut(&str),
+) -> Result<Option<(String, u64)>, String> {
+    use crate::ci_runs::{green, verdict};
+    let first_parent = green::first_parent_before(root, "HEAD");
+    let scope = verdict::scope_decisive("ci.yml");
+    let found = green::find_base(client, "ci.yml", &first_parent, scope, &mut |s| green::plan_touched(root, s));
+    match found {
+        Ok(base) => Ok(base.map(|b| (b.sha, b.run))),
+        Err(e) => {
+            warn(&format!(
+                "::warning::the CI runs of main could not be read ({e}); this run tests everything"
+            ));
+            Err(e)
         }
     }
-    Some(out)
 }
 
 fn repo_root(root: Option<PathBuf>) -> Result<PathBuf, CliError> {
@@ -183,15 +189,16 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
         };
     }
     let log = |l: &str| eprintln!("{l}");
-    let contains = |sha: &str| git_text(root, &["merge-base", "--is-ancestor", sha, "HEAD"]).is_some();
     let merge_base = |b: &str| git_text(root, &["merge-base", "HEAD", &format!("origin/{b}")]).map(|s| s.trim().to_string());
     let event = env("GITHUB_EVENT_NAME").unwrap_or_default();
     let reference = env("GITHUB_REF").unwrap_or_default();
     let plan_app = env("PLAN_APP").filter(|a| !a.is_empty());
     let mut http = CurlHttp;
-    let runs = if event == "push" && reference == "refs/heads/main" {
+    let green = if event == "push" && reference == "refs/heads/main" {
         // A workflow command is read from standard output; with `--app` standard output is the answer, so it goes to the log.
-        ci_runs(&mut http, env, &mut |w| if app.is_some() { log(w) } else { println!("{w}") })
+        Some(green_base(&mut http, env, root, &mut |w| {
+            if app.is_some() { log(w) } else { println!("{w}") }
+        }))
     } else {
         None
     };
@@ -200,8 +207,7 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
         reference: &reference,
         input_base: &env("PLAN_BASE").unwrap_or_default(),
         base_ref: &env("GITHUB_BASE_REF").unwrap_or_default(),
-        runs: runs.as_deref(),
-        contains: &contains,
+        green: green.as_ref(),
         merge_base: &merge_base,
     });
     if base.as_deref().is_some_and(|b| b.starts_with('-')) {
@@ -556,42 +562,8 @@ mod tests {
         }
     }
 
-    fn page(n: usize, green: bool) -> Value {
-        let run = |i: usize| serde_json::json!({"id": i, "conclusion": if green { "success" } else { "failure" }, "path": "ci.yml@refs/heads/main", "head_sha": "x"});
-        serde_json::json!({"workflow_runs": (0..n).map(run).collect::<Vec<_>>()})
-    }
-
     fn no_env(_: &str) -> Option<String> {
         None
-    }
-
-    #[test]
-    fn the_runs_are_read_page_by_page_until_a_short_page_or_a_green_ci_run() {
-        let mut http = Fake {
-            pages: vec![Ok(page(50, false)), Ok(page(50, false)), Ok(page(3, false))],
-            urls: vec![],
-        };
-        let runs = ci_runs(&mut http, &no_env, &mut |_| {}).unwrap();
-        assert_eq!(runs.len(), 103);
-        assert_eq!(http.urls.len(), 3);
-        assert_eq!(
-            http.urls[0],
-            "https://dev.decryptology.net/api/v1/repos/decryp7/paddock/actions/runs?branch=main&event=push&limit=50&page=1"
-        );
-        let mut http = Fake {
-            pages: vec![Ok(page(50, true)), Ok(page(50, true))],
-            urls: vec![],
-        };
-        assert_eq!(
-            ci_runs(&mut http, &no_env, &mut |_| {}).unwrap().len(),
-            50,
-            "a green run stops the paging"
-        );
-        let mut http = Fake {
-            pages: (0..6).map(|_| Ok(page(50, false))).collect(),
-            urls: vec![],
-        };
-        assert_eq!(ci_runs(&mut http, &no_env, &mut |_| {}).unwrap().len(), 200, "at most four pages");
     }
 
     #[test]
@@ -704,15 +676,18 @@ mod tests {
     #[test]
     fn unreadable_runs_warn_and_plan_everything() {
         let mut http = Fake {
-            pages: vec![Err("HTTP 500".into())],
+            pages: (0..4).map(|_| Err("HTTP 500".to_string())).collect(),
             urls: vec![],
         };
         let mut warned = String::new();
-        assert!(ci_runs(&mut http, &no_env, &mut |w| warned = w.to_string()).is_none());
-        assert_eq!(
-            warned,
-            "::warning::the CI runs of main could not be read (HTTP 500); this run tests everything"
-        );
+        let root = tempfile::tempdir().unwrap();
+        let mut client = crate::ci_runs::client::Client::new(&mut http, "https://gitea.invalid", "decryp7/paddock", "t");
+        client.backoff_ms = 0;
+        let got = green_base_in(&mut client, root.path(), &mut |w| warned = w.to_string());
+        assert!(got.is_err(), "{got:?}");
+        assert!(warned.starts_with("::warning::the CI runs of main could not be read ("), "{warned}");
+        assert!(warned.ends_with("this run tests everything"), "{warned}");
+        assert!(warned.contains("HTTP 500"), "{warned}");
     }
 
     #[test]

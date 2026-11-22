@@ -17,6 +17,7 @@ pub mod cache_audit;
 pub mod client;
 pub mod dispatch;
 pub mod flakes;
+pub mod green;
 pub mod logfind;
 pub mod members;
 pub mod preconditions;

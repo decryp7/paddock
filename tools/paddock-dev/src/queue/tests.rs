@@ -426,6 +426,31 @@ fn one_green_pull_request_is_built_dispatched_and_landed() {
 }
 
 #[test]
+fn a_failed_run_that_is_green_with_fix_items_lands() {
+    // ADR 0117 WP-4, train 19's 8610: the landing run failed only in FLAKY tests of untouched targets (ER-12); the one reader says so.
+    let mut w = World::new();
+    w.approved(1, "crates/x/new.rs", &["x"]);
+    let Tick::Built { head, .. } = w.tick() else { panic!() };
+    w.tick();
+    w.run(&head, 8001, RunState::Failed("failure".into()));
+    w.ci.verdicts.insert(
+        ("ci.yml".to_string(), head.clone()),
+        Verdict::GreenWithFixItems {
+            run: 8001,
+            items: vec!["app dyno (ubuntu-latest): nxflaky t::flaky_once".into()],
+        },
+    );
+    assert_eq!(
+        w.tick(),
+        Tick::Landed {
+            head: head.clone(),
+            prs: vec![1]
+        }
+    );
+    assert_eq!(w.repos.origin_ref("refs/heads/main"), head);
+}
+
+#[test]
 fn a_green_partial_run_gets_the_full_run_before_landing() {
     let mut w = World::new();
     w.approved(1, "crates/x/new.rs", &["x"]);

@@ -449,7 +449,7 @@ fn judge(p: &mut Ports, env: &Env, in_train: &[&Pull], head: &str, marker: &Mark
         match &newest.state {
             RunState::Running => return Ok(Tick::Waiting(newest.id)),
             RunState::Success => match p.ci.verdict(&wf, head) {
-                Verdict::Green { .. } => {}
+                Verdict::Green { .. } | Verdict::GreenWithFixItems { .. } => {}
                 Verdict::NotMeasured(why) => {
                     return Ok(Tick::Stuck {
                         why: format!(
@@ -475,6 +475,11 @@ fn judge(p: &mut Ports, env: &Env, in_train: &[&Pull], head: &str, marker: &Mark
             },
             RunState::Failed(how) => {
                 let (id, how) = (newest.id, how.clone());
+                // The one definition of green (ADR 0117 WP-4): a failed run whose only failures are FLAKY tests of untouched targets
+                // is green with fix items, as ER-12 lets it land; the reader says so, not a second reading of the failures here.
+                if how != "cancelled" && matches!(p.ci.verdict(&wf, head), Verdict::GreenWithFixItems { .. }) {
+                    continue;
+                }
                 return failed_run(p, in_train, head, marker, main, &wf, id, &how);
             }
         }
