@@ -202,6 +202,8 @@ struct Inner {
     events: Arc<Mutex<EventLog>>,
     hot: Mutex<HashMap<ModelId, Arc<HotModel>>>,
     loading: Mutex<HashMap<ModelId, Arc<tokio::sync::Mutex<()>>>>,
+    /// Models whose files are being deleted: loads of them are refused until the delete ends (see [`Serving::begin_delete`]).
+    deleting: Mutex<std::collections::HashSet<ModelId>>,
     sched: Mutex<Scheduler>,
     wake: Notify,
     last_activity: AtomicU64,
@@ -260,6 +262,31 @@ fn api(kind: ErrorKind, m: impl Into<String>) -> ApiError {
     ApiError::new(kind, m)
 }
 
+fn being_deleted(id: &ModelId) -> ApiError {
+    api(ErrorKind::NotFound, format!("the model {id} is being deleted"))
+}
+
+/// Why a model cannot be marked for deletion ([`Serving::begin_delete`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeleteRefused {
+    /// A request is using it (it is loaded and cannot be unloaded).
+    Busy,
+    /// Another delete of it is running.
+    AlreadyDeleting,
+}
+
+/// The mark "this model is being deleted": loads of it are refused while the guard lives.
+pub struct Deleting {
+    inner: Arc<Inner>,
+    id: ModelId,
+}
+
+impl Drop for Deleting {
+    fn drop(&mut self) {
+        lock(&self.inner.deleting).remove(&self.id);
+    }
+}
+
 impl Serving {
     /// Serving over an engine, a library and the shared settings.
     pub fn new(
@@ -281,6 +308,7 @@ impl Serving {
                 events,
                 hot: Mutex::new(HashMap::new()),
                 loading: Mutex::new(HashMap::new()),
+                deleting: Mutex::new(std::collections::HashSet::new()),
                 sched: Mutex::new(Scheduler::new(caps)),
                 wake: Notify::new(),
                 last_activity: AtomicU64::new(now_ms()),
@@ -845,6 +873,9 @@ impl Serving {
         let gate = lock(&self.inner.loading).entry(id.clone()).or_default().clone();
         let _g = gate.lock().await;
         self.inner.last_activity.store(self.now(), Ordering::SeqCst);
+        if lock(&self.inner.deleting).contains(id) {
+            return Err(being_deleted(id));
+        }
         if let Some(h) = lock(&self.inner.hot).get(id).cloned() {
             return Ok((Busy::new(h), None));
         }
@@ -959,7 +990,15 @@ impl Serving {
             slot_table: Mutex::new(SlotTable::new(slots.count())),
             warm: Mutex::new(HashMap::new()),
         });
-        lock(&self.inner.hot).insert(id.clone(), h.clone());
+        {
+            // The check and the insert are one step under the mark's lock: a delete that marked the model first is obeyed
+            // (this engine ends with `h`), one that marks it later finds the model loaded and unloads it.
+            let deleting = lock(&self.inner.deleting);
+            if deleting.contains(id) {
+                return Err(being_deleted(id));
+            }
+            lock(&self.inner.hot).insert(id.clone(), h.clone());
+        }
         lock(&self.inner.sched).set_model_slots(id, slots.count());
         self.inner.wake.notify_waiters();
         lock(&self.inner.supervisor).started(id);
@@ -992,6 +1031,24 @@ impl Serving {
     /// Crashed engines being restarted or given up on, for the dashboard.
     pub fn issues(&self) -> Vec<pitwall_core::mgmt::EngineIssue> {
         lock(&self.inner.supervisor).issues()
+    }
+
+    /// Marks `id` as being deleted and unloads it: until the returned guard is dropped a load of it is refused, so a load
+    /// cannot slip in between the unload, the scan and the removal of its files (Dyno ADR 0034: newer-only state). A model
+    /// a request is using is refused (`Busy`) and left loaded, unmarked.
+    pub fn begin_delete(&self, id: &ModelId) -> Result<Deleting, DeleteRefused> {
+        if !lock(&self.inner.deleting).insert(id.clone()) {
+            return Err(DeleteRefused::AlreadyDeleting);
+        }
+        let guard = Deleting {
+            inner: self.inner.clone(),
+            id: id.clone(),
+        };
+        self.unload(id, ReleaseReason::Manual);
+        if self.is_loaded(id) {
+            return Err(DeleteRefused::Busy);
+        }
+        Ok(guard)
     }
 
     /// Unload a model now (a busy model is refused).

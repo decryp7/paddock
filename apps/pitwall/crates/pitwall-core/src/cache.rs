@@ -189,6 +189,8 @@ pub enum Scope {
     App(String),
     /// Entries of one model.
     Model(String),
+    /// Entries of any of several models: one clear for a batch of removed models (ADR 0108, PW-1).
+    Models(Vec<String>),
     /// Entries of requests that named one preset.
     Preset(String),
 }
@@ -201,6 +203,7 @@ impl Scope {
             Scope::Kind(k) => *k == kind,
             Scope::App(a) => &meta.app == a,
             Scope::Model(m) => &meta.model == m,
+            Scope::Models(ms) => ms.contains(&meta.model),
             Scope::Preset(p) => &meta.preset == p,
         }
     }
@@ -340,6 +343,18 @@ pub trait CacheStore: Send + Sync {
     /// Stores a value (replacing one), evicting least recently used entries to stay within the limits. A value larger
     /// than the whole cache is not stored.
     fn put(&self, kind: Kind, key: Key, value: Vec<u8>, meta: Meta, now: Millis);
+    /// Many values at once, one result per key in order (what [`CacheStore::get`] says for each). A backend that can share
+    /// work across keys (one statement for the batch) overrides it; this default asks one key at a time.
+    fn get_many(&self, kind: Kind, keys: &[Key], now: Millis) -> Vec<Option<Vec<u8>>> {
+        keys.iter().map(|k| self.get(kind, k, now)).collect()
+    }
+    /// Stores many values of one kind as [`CacheStore::put`] stores one (a later item replaces an earlier one with the same
+    /// key). A backend overrides it to write the batch at once; this default stores one at a time.
+    fn put_many(&self, kind: Kind, items: Vec<(Key, Vec<u8>, Meta)>, now: Millis) {
+        for (key, value, meta) in items {
+            self.put(kind, key, value, meta, now);
+        }
+    }
     /// Removes the entries in scope; returns how many.
     fn clear(&self, scope: &Scope) -> u64;
     /// What `kind` holds.

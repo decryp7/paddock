@@ -58,6 +58,7 @@ wires = [
   "app-command:start_load_model",
   "app-command:cancel_job",
   "app-command:delete_model",
+  "app-command:delete_models",
   "app-command:pin_model",
   "app-command:set_model_pin",
   "app-command:set_model_idle",
