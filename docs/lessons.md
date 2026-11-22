@@ -3475,3 +3475,8 @@ about 45 ms a start on that runner plus a fork per command substitution. **Fix:*
   (job 44649; FLAKY: failed once, passed its retry; the class of the 900x600 item). Different Dyno specs time out at 5 s in each run
   (8576, 8601): the class the vitest retry and worker budget of feat/fixed-wait-checks address (6 lanes x 29 vitest workers on 30
   cores before, 6 x 5 after). Next: a failing reproduction for each first.
+- **From train 19's full ci.yml run 8610 (b3c254a2d), in code train 19 does not touch (it changes only Spotter's lockfile):**
+  `paddock-chromium::it real_browser::a_browser_ended_by_force_leaves_nothing_behind` on Windows (job 44761, crate windows-latest;
+  FLAKY: try 1 panicked at real_browser.rs:539 after 7.0 s, try 2 passed in 5.0 s) and `spotter-render::real_browser
+  a_download_address_is_reported_as_a_download` on macOS (job 44768, app spotter macos-latest; FLAKY: try 1 panicked at
+  real_browser.rs:318 after 120.3 s, try 2 passed in 2.0 s). Next: a failing reproduction for each first.
