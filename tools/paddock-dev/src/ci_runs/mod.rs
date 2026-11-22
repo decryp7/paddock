@@ -13,6 +13,7 @@
 //! The API client ([`client`]) reuses the planner's [`Http`](crate::wait::Http) and [`GiteaRuns`](crate::plan_since::GiteaRuns).
 //! The token is read from `GITEA_TOKEN`, travels in a header only and is printed nowhere.
 
+pub mod cache_audit;
 pub mod client;
 pub mod dispatch;
 pub mod flakes;
@@ -68,6 +69,29 @@ pub struct FlakesArgs {
     /// the folder containing .git, found from the current folder).
     #[arg(long)]
     root: Option<PathBuf>,
+}
+
+/// Arguments of `ci cache-audit`.
+#[derive(Args)]
+pub struct CacheAuditArgs {
+    /// The workflow file whose runs are read.
+    #[arg(long, default_value = "ci.yml")]
+    workflow: String,
+    /// How many finished runs to read (the newest first); each run's jobs are read one log at a time.
+    #[arg(long, default_value_t = 3, value_parser = clap::value_parser!(u32).range(1..=20))]
+    runs: u32,
+    /// A key counts as never saved from this many misses with no hit and no confirmed save.
+    #[arg(long, default_value_t = 3, value_parser = clap::value_parser!(u32).range(1..=1000))]
+    min_misses: u32,
+    /// Exit 5 when a key was never saved (default: exit 0, report-only, ER-41). A window that shows no `cache-report:` line exits 6.
+    #[arg(long)]
+    fail_on_never_saved: bool,
+    /// The repository.
+    #[arg(long, default_value = "decryp7/paddock")]
+    repo: String,
+    /// The Gitea server.
+    #[arg(long, default_value = SERVER)]
+    server: String,
 }
 
 /// Arguments of `ci dispatch`.
@@ -443,6 +467,47 @@ pub fn verdict(a: &VerdictArgs) -> Result<Report, CliError> {
         eprintln!("::error::ci verdict: {}", r.text);
     }
     Ok(r)
+}
+
+/// `ci cache-audit`: the cache keys of the last runs that were never saved (ADR 0115). Report-only unless `--fail-on-never-saved`.
+pub fn cache_audit(a: &CacheAuditArgs) -> Result<Report, CliError> {
+    let token = token()?;
+    let mut http = CurlHttp;
+    let mut client = Client::new(&mut http, &a.server, &a.repo, &token);
+    let w = cache_audit::read(&mut client, &a.workflow, a.runs as usize).map_err(|e| {
+        CliError::failure(format!("the runs of {} could not be read: {e}", a.workflow))
+            .with_hint("Check GITEA_TOKEN and the server, then run it again.")
+    })?;
+    let verdict = cache_audit::judge(&w, a.min_misses as usize);
+    let mut text = format!(
+        "{} run(s), {} job log(s) read, {} cache report(s)",
+        w.runs.len(),
+        w.logs_read,
+        w.seen.len()
+    );
+    for u in &w.unreadable {
+        text.push_str(&format!("\n::warning::ci cache-audit: {u} (not read, so not counted)"));
+    }
+    let (kind, exit) = match &verdict {
+        cache_audit::Verdict::Clean => ("clean", Exit::Ok),
+        cache_audit::Verdict::Broken(why) => {
+            text.push_str(&format!(
+                "\n::error::ci cache-audit: check broken: {why}. Next step: run one job's log through `grep cache-report:`."
+            ));
+            ("broken", Exit::NotMeasured)
+        }
+        cache_audit::Verdict::NeverSaved(lines) => {
+            for l in lines {
+                text.push_str(&format!(
+                    "\n::{}::ci cache-audit: {l}. Next step: read that cache's restore and save steps in a job log (cache server, key, post step).",
+                    if a.fail_on_never_saved { "error" } else { "warning" }
+                ));
+            }
+            ("never_saved", if a.fail_on_never_saved { Exit::Findings } else { Exit::Ok })
+        }
+    };
+    let data = serde_json::json!({"verdict": kind, "runs": w.runs, "logs_read": w.logs_read, "reports": w.seen.len(), "unreadable": w.unreadable.len()});
+    Ok(Report::new(data, text).with_exit(exit))
 }
 
 /// `ci runner-wait`: waits (bounded) until no older run holds this run's single-machine runner. Exit 0 when free or when the

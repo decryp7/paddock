@@ -2554,3 +2554,50 @@ test('the dev-tool-cache action restores, verifies, saves and reports from the r
   assert.match(steps.find((s) => s.id === 'save').if, /steps\.verify\.outputs\.save == 'true'/);
   assert.match(text, /PADDOCK_DEV_TOOL_CACHE_DONE/, 'a later use in the same job does nothing');
 });
+
+// ADR 0115, WP-3: a cache step reports restore, hit and save through conformance/ci/cache-report.sh. The two actions above do. These
+// are the `actions/cache` steps that do not yet, per file. The list only shrinks (ER-46): a new cache step reports, an old one that
+// is wired to report lowers its number here (this test fails when a number is too high, to make that visible).
+const UNREPORTED_CACHE_STEPS = {
+  '.gitea/workflows/debrief-mutants.yml': 3,
+  '.gitea/workflows/nightly.yml': 2,
+  '.gitea/workflows/app-fuzz.yml': 2,
+  '.gitea/workflows/debrief-fuzz.yml': 1,
+  '.gitea/workflows/debrief-bench.yml': 7,
+  '.gitea/workflows/debrief-corpus.yml': 4,
+  '.gitea/workflow-templates/bench-nightly.yml': 2,
+  '.gitea/actions/tauri-bundle/action.yml': 1,
+  '.gitea/actions/plan/action.yml': 1,
+  '.gitea/workflows/debrief.yml': 4,
+  '.gitea/actions/nightly-mark/action.yml': 1,
+};
+
+function cacheStepsByFile() {
+  const found = {};
+  const dirs = [['.gitea/workflows', WORKFLOWS], ['.gitea/workflow-templates', join(PADDOCK, '.gitea', 'workflow-templates')]];
+  for (const n of names) dirs.push([`.gitea/actions/${n}`, join(ACTIONS, n)]);
+  for (const [rel, dir] of dirs) {
+    for (const f of readdirSync(dir).filter((x) => /\.ya?ml$/.test(x))) {
+      const count = (read(join(dir, f)).replace(/#.*$/gm, '').match(/uses: actions\/cache(?:\/(?:save|restore))?@/g) ?? []).length;
+      if (count) found[`${rel}/${f}`] = count;
+    }
+  }
+  return found;
+}
+
+test('every actions/cache step reports through cache-report.sh, except the listed ones, and that list only shrinks', () => {
+  const found = cacheStepsByFile();
+  const reporting = ['.gitea/actions/node-caches/action.yml', '.gitea/actions/dev-tool-cache/action.yml'];
+  for (const f of reporting) {
+    assert.ok(found[f] > 0, `${f} has cache steps`);
+    const text = read(join(PADDOCK, f));
+    assert.ok(/cache-report\.sh|dev-tool-cache\.sh/.test(text), `${f} reports through the shared reader`);
+    delete found[f];
+  }
+  assert.deepEqual(found, UNREPORTED_CACHE_STEPS, 'an actions/cache step that is not in the list must report (ADR 0115); lower an entry when its steps report');
+});
+
+test('the cache-step finder sees a step it is not told about (positive control)', () => {
+  const found = cacheStepsByFile();
+  assert.ok(Object.keys(found).length >= 12, 'it finds the known cache steps');
+});
