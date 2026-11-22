@@ -11,7 +11,7 @@ import { test } from 'node:test';
 import { executableIn, platformId } from '../ci/install-test-browser.mjs';
 import { isMain } from '../src/util/is-main.mjs';
 import { parseSteps } from '../src/util/workflows.mjs';
-import { conjuncts, expr, job as workflowJob, loadAction, loadWorkflow, needsOf, stepsOf } from './lib/workflow.mjs';
+import { conjuncts, expr, job as workflowJob, loadAction, loadWorkflow, needsOf, parseYaml, stepsOf } from './lib/workflow.mjs';
 import { PADDOCK } from './helpers.mjs';
 
 const ACTIONS = join(PADDOCK, '.gitea', 'actions');
@@ -217,7 +217,7 @@ function runToolchainStep(env, { toolchains = '', components = '', targets = '',
   const dir = mkdtempSync(join(tmpdir(), 'paddock-rustup-'));
   const text = read(join(ACTIONS, 'setup-rust', 'action.yml'));
   const at = text.indexOf('- name: Rust toolchain\n');
-  const block = text.slice(at, text.indexOf('    # Every Rust job gets', at));
+  const block = text.slice(at, text.indexOf('    # ./dev\'s own binary through the Actions cache', at));
   const body = block.slice(block.indexOf('run: |\n') + 'run: |\n'.length).split('\n').map((l) => l.slice(8)).join('\n');
   mkdirSync(join(dir, 'bin'));
   const calls = join(dir, 'calls');
@@ -2547,4 +2547,92 @@ test('no setup action or workflow uses the shared /sccache mount as a writable f
     if (/["'\s=]\/sccache(?!-)[\w/.-]*/.test(code) && file !== '.gitea/actions/setup-rust/action.yml') offenders.push(file);
   }
   assert.deepEqual(offenders, [], 'ADR 0111: shared state goes through a keyed cache or an artifact');
+});
+
+// ADR 0115, run 8576: setup-rust's build-jobs step ran ./dev (which builds the tool from source when it is missing) before the tool
+// cache's restore, so 42 of 44 jobs rebuilt it in 130-176 s and the cache was never saved. Read through the workflow accessor
+// (ER-42), not by grepping the files: the first step that runs ./dev is after the step that restores the tool.
+const runsDev = (step) => typeof step.run === 'string' && /kit\.sh"? (?:build-jobs|host|isolation|build-env)|\/dev"? ci |\.\/dev ci /.test(step.run);
+const usesToolCache = (step) => step.uses === './.gitea/actions/dev-tool-cache';
+
+/** The index of the first step that runs ./dev and of the step that restores the tool, in an action's steps. */
+function devOrder(steps) {
+  return { firstDev: steps.findIndex(runsDev), restore: steps.findIndex(usesToolCache) };
+}
+
+for (const name of ['setup-rust', 'node-caches', 'build-jobs']) {
+  test(`${name}: the dev tool cache is restored before the first ./dev call`, () => {
+    const { firstDev, restore } = devOrder(stepsOf(loadAction(name)));
+    assert.ok(firstDev >= 0, `${name} calls ./dev in a step (the finder sees it)`);
+    assert.ok(restore >= 0, `${name} uses the dev-tool-cache action`);
+    assert.ok(restore < firstDev, `${name}: the tool cache (step ${restore}) comes before its first ./dev call (step ${firstDev})`);
+  });
+}
+
+test('the order check sees a ./dev call before the restore (positive control)', () => {
+  const bad = [{ run: 'bash conformance/ci/kit.sh build-jobs' }, { uses: './.gitea/actions/dev-tool-cache' }];
+  const { firstDev, restore } = devOrder(bad);
+  assert.ok(restore > firstDev, 'the finder puts the ./dev call first, so the test above would fail');
+  assert.equal(devOrder([{ uses: './.gitea/actions/dev-tool-cache' }, ...bad.slice(0, 1)]).restore, 0);
+});
+
+test('the dev-tool-cache action restores, verifies, saves and reports from the restore step\'s own outputs', () => {
+  const steps = stepsOf(loadAction('dev-tool-cache'));
+  const text = JSON.stringify(steps);
+  const verify = steps.find((s) => s.id === 'verify');
+  assert.match(verify.run, /steps\.restore\.outputs\.cache-hit/);
+  assert.match(verify.run, /steps\.restore\.outputs\.cache-matched-key/);
+  assert.match(steps.find((s) => s.id === 'save').if, /steps\.verify\.outputs\.save == 'true'/);
+  assert.match(text, /PADDOCK_DEV_TOOL_CACHE_DONE/, 'a later use in the same job does nothing');
+});
+
+// ADR 0115: every `actions/cache` step is followed, in its own job, by a step that reports it (the cache-report action, or for the
+// workflow template that runs in other repositories, a step named "Cache report" / "Cache save report" that prints the same line).
+// The step reads the cache step's id, so the report is of its own outputs. Read through the YAML reader (ER-42).
+const isCacheStep = (st) => /^actions\/cache(?:\/(?:save|restore))?@/.test(st.uses ?? '');
+const reports = (st, id) => (st.uses === './.gitea/actions/cache-report' || /^Cache (?:save )?report$/.test(st.name ?? '')) && JSON.stringify(st).includes(`steps.${id}.`);
+
+/** Every list of steps of the repository's workflows, templates and actions: [file, steps]. */
+function stepLists() {
+  const out = [];
+  const dirs = [[WORKFLOWS, 'jobs'], [join(PADDOCK, '.gitea', 'workflow-templates'), 'jobs']];
+  for (const [dir] of dirs) {
+    for (const f of readdirSync(dir).filter((x) => /\.ya?ml$/.test(x))) {
+      const doc = parseYaml(read(join(dir, f)));
+      for (const [id, j] of Object.entries(doc.jobs ?? {})) out.push([`${basename(dir)}/${f}:${id}`, stepsOf(j)]);
+    }
+  }
+  for (const n of names) out.push([`actions/${n}`, stepsOf(loadAction(n))]);
+  return out;
+}
+
+/** The cache steps that no step right after them reports: `file: id-or-index`. */
+function unreportedCacheSteps(lists) {
+  const bad = [];
+  for (const [file, steps] of lists) {
+    steps.forEach((st, i) => {
+      if (!isCacheStep(st)) return;
+      const next = steps[i + 1];
+      if (!st.id || !next || !reports(next, st.id)) bad.push(`${file}: step ${i + 1} (${st.id ?? 'no id'})`);
+    });
+  }
+  return bad;
+}
+
+test('every actions/cache step is reported by the step after it, from its own id (the list of unreported steps is empty)', () => {
+  const lists = stepLists();
+  const total = lists.reduce((n, [, steps]) => n + steps.filter(isCacheStep).length, 0);
+  assert.ok(total >= 30, `the finder sees the cache steps (${total})`);
+  // dev-tool-cache and node-caches report in their own summary steps (conformance/test/dev-tool-cache.test.mjs and above).
+  const own = ['actions/dev-tool-cache', 'actions/node-caches'];
+  const bad = unreportedCacheSteps(lists.filter(([f]) => !own.includes(f)));
+  assert.deepEqual(bad, [], 'put the cache-report action right after the cache step (ADR 0115)');
+});
+
+test('the unreported-step finder sees a cache step with no report after it (positive control)', () => {
+  const steps = [{ id: 'c', uses: 'actions/cache@abc' }, { run: 'echo' }];
+  assert.equal(unreportedCacheSteps([['x', steps]]).length, 1);
+  assert.equal(unreportedCacheSteps([['x', [{ uses: 'actions/cache/save@abc' }, { uses: './.gitea/actions/cache-report' }]]]).length, 1, 'a step with no id cannot be reported');
+  const ok = [steps[0], { uses: './.gitea/actions/cache-report', with: { hit: '${{ steps.c.outputs.cache-hit }}' } }];
+  assert.deepEqual(unreportedCacheSteps([['x', ok]]), []);
 });

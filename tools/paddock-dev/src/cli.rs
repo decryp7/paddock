@@ -401,6 +401,9 @@ enum CiCommand {
     /// it). A run counts if it is a push to main or its plan job logged `plan mode: full=true`; the newest full run decides.
     /// Exit 0 full green, 5 red or only partial runs, 6 not measured (never a pass).
     Verdict(ci_runs::VerdictArgs),
+    /// The cache keys of the last runs that no job ever saved, read from the `cache-report:` lines of the job logs (ADR 0115).
+    /// Report-only (exit 0) unless `--fail-on-never-saved` (5); no report line in the window exits 6, check broken.
+    CacheAudit(ci_runs::CacheAuditArgs),
     /// Whether a scheduled run ends early because a train's dispatch run is queued or running (skip=true|false to
     /// GITHUB_OUTPUT). Fails open: an unreadable API lets the run proceed, with a warning.
     ScheduleSkip(ci_runs::ScheduleSkipArgs),
@@ -774,6 +777,9 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
         Command::Ci {
             command: CiCommand::Verdict(a),
         } => ci_runs::verdict(&a),
+        Command::Ci {
+            command: CiCommand::CacheAudit(a),
+        } => ci_runs::cache_audit(&a),
         Command::Ci {
             command: CiCommand::Dispatch(a),
         } => ci_runs::dispatch(&a),
