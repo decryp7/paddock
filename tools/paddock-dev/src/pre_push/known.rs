@@ -88,7 +88,7 @@ fn record_path(state: &Path, sha: &str) -> std::path::PathBuf {
 }
 
 fn tree_of(root: &Path, sha: &str) -> Option<String> {
-    git_text(root, &["rev-parse", "--verify", "--quiet", &format!("{sha}^{{tree}}")]).map(|t| t.trim().to_string())
+    super::stamp::tree_of(root, sha)
 }
 
 /// The tool's fixed row set as one string, stored in every record and compared when one is read.
@@ -124,6 +124,11 @@ fn read_one(root: &Path, state: &Path, sha: &str) -> Option<(String, Outcome, St
     let from = v["base_commit"].as_str()?.to_string();
     // A record made with another set of rows says nothing about a row added since (ER-33).
     if v["gate_rows"].as_str() != Some(row_set().as_str()) {
+        return None;
+    }
+    // The stamp is the one key of ADR 0042 §5 ([`super::stamp::run_stamp`]): the tree as it is now, this tool and its row set.
+    let stamp = super::stamp::run_stamp(&tree_of(root, sha)?, env!("CARGO_PKG_VERSION"), &row_set());
+    if v["stamp"].as_str() != Some(stamp.as_str()) {
         return None;
     }
     let proof = Proof::from_json(v.get("evidence")?).ok()?;
@@ -175,6 +180,7 @@ pub fn write_record(root: &Path, state: &Path, sha: &str, base: &str, gates: &[S
     let base_commit = commit_of(root, base).ok_or_else(|| format!("the base {base} is not a commit here"))?;
     let rec = json!({
         "id": format!("{}@{now}", &sha[..sha.len().min(12)]), "sha": sha, "tree": tree, "base": base, "base_commit": base_commit, "gates": gates, "gate_rows": row_set(),
+        "stamp": super::stamp::run_stamp(&tree, env!("CARGO_PKG_VERSION"), &row_set()),
         "tool_version": env!("CARGO_PKG_VERSION"), "time": now, "evidence": passed.evidence().to_json(),
     });
     let path = record_path(state, sha);

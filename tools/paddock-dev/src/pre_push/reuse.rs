@@ -21,13 +21,16 @@
 //! never reused. The checks never change what they check (ER-45): reading git and starting `--version` probes only; a probe
 //! that fails turns reuse off for that row, with the cause printed, and the row runs.
 //!
-//! **Storage**: `<dev-targets>/check-reuse/<key>.json`, one small JSON file per record, written by temp file and rename, evicted after
-//! every run ([`Reuse::evict`]) by age ([`MAX_AGE`]) and count ([`KEEP`]). Never under HOME or `/private/tmp` (ER-14).
+//! **Storage**: `<git common dir>/paddock-pre-push/records/rows/<key>.json` ([`super::stamp::ROWS_DIR`]), beside the whole-run pass
+//! records of [`super::known`] and keyed by the same function ([`super::stamp::digest`], ADR 0042 §5: one key for local reuse). One
+//! small JSON file per record, written by temp file and rename, evicted after every run ([`Reuse::evict`]) by age ([`MAX_AGE`])
+//! and count ([`KEEP`]). Never under HOME or `/private/tmp` (ER-14).
 //!
 //! **Escape**: `--no-reuse` (or `PADDOCK_NO_REUSE=1`, which also reaches the member gate's child through the environment).
 
 use super::exec::Row;
 use super::gates::Gate;
+use super::stamp::digest;
 use crate::input_hash::is_hashed_var;
 use crate::plan_repo::git_text;
 use paddock_cli::{CheckId, Outcome, Subject, UnixSeconds, measure};
@@ -145,17 +148,6 @@ pub fn normalised_args(args: &[String], root: &str) -> Vec<String> {
         out.push(if root.is_empty() { a.clone() } else { a.replace(root, "<root>") });
     }
     out
-}
-
-/// SHA-256 over length-prefixed fields, as lower-case hex: two field lists differ in the key whenever they differ in any field or in
-/// where the fields split.
-pub fn digest(fields: &[String]) -> String {
-    let mut h = Sha256::new();
-    for f in fields {
-        h.update((f.len() as u64).to_le_bytes());
-        h.update(f.as_bytes());
-    }
-    h.finalize().iter().map(|b| format!("{b:02x}")).collect()
 }
 
 /// The paths a Cargo row reads, from the `cargo metadata --no-deps` JSON of one workspace (`ws`, repository-relative):

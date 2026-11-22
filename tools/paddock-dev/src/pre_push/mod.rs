@@ -41,6 +41,7 @@ pub mod linux_inputs;
 pub mod members;
 pub mod outcome;
 pub mod reuse;
+pub mod stamp;
 pub mod warm;
 
 use crate::plan::{Request, plan_with_graph};
@@ -474,7 +475,7 @@ fn command_in(
         )),
         row_cap: exec::ROW_CAP,
         state: state.clone(),
-        reuse: reuse_for(&work, &root, &env, args.no_reuse),
+        reuse: reuse_for(&work, &state, &env, args.no_reuse),
     };
     let queue = queue_max(&env);
     let history = GitHistory::new(&work, GIT_TIMEOUT);
@@ -613,20 +614,10 @@ fn command_in(
     Ok(report)
 }
 
-/// Reuse of green results for the checkout `work`, records under `<dev-targets>/check-reuse`; `None` when it is off or the dev-targets
-/// folder cannot be derived (the rows then run, and the line says why).
-fn reuse_for(work: &Path, root: &Path, env: &HashMap<String, String>, off: bool) -> Option<reuse::Reuse> {
-    let look = |k: &str| env.get(k).cloned();
-    let store = match crate::places::dev_targets(root, &look) {
-        Ok(d) => d.join("check-reuse"),
-        Err(e) => {
-            if !off {
-                eprintln!("pre-push: result reuse is off: no dev-targets folder ({e:?})");
-            }
-            return None;
-        }
-    };
-    reuse::Reuse::new(work, store, env, exec::run_token(), off)
+/// Reuse of green results for the checkout `work`, records beside the whole-run pass records in `state` ([`stamp::ROWS_DIR`]); `None`
+/// when it is switched off.
+fn reuse_for(work: &Path, state: &Path, env: &HashMap<String, String>, off: bool) -> Option<reuse::Reuse> {
+    reuse::Reuse::new(work, state.join(stamp::ROWS_DIR), env, exec::run_token(), off)
 }
 
 /// One line per run in `queue-times.log` beside the gate logs: the whole push's heavy queue and run time, the measurement the

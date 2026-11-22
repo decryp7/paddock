@@ -80,12 +80,6 @@ impl Tap for Row {
 }
 
 #[test]
-fn the_key_depends_on_where_fields_split() {
-    assert_ne!(digest(&["ab".into(), "c".into()]), digest(&["a".into(), "bc".into()]));
-    assert_eq!(digest(&["a".into()]), digest(&["a".into()]));
-}
-
-#[test]
 fn the_checkout_path_and_build_folder_are_not_in_the_key() {
     let args: Vec<String> = ["clippy", "--config", "build.target-dir=/x/y", "--manifest-path", "/w/r/Cargo.toml"]
         .iter()

@@ -1786,6 +1786,24 @@ mod known_commit {
         assert!(trail.iter().any(|t| t.contains("rows")), "{trail:?}");
     }
 
+    /// The record's stamp is the shared key (stamp.rs): one made by another tool version, or edited, is no evidence.
+    #[test]
+    fn a_record_whose_stamp_is_not_this_tools_key_is_no_evidence() {
+        let (_d, r, _one, two) = repo();
+        let l = fake(None, Err("no run"));
+        known::write_record(&r, &state(&r), &two, "origin/main", &[], 1, &pass_for(&r, &two)).unwrap();
+        let rec = state(&r).join("records").join(format!("{two}.json"));
+        let text = std::fs::read_to_string(&rec).unwrap();
+        assert!(text.contains("\"stamp\""), "{text}");
+        let (found, _) = known::find(&r, &state(&r), None, std::slice::from_ref(&two), &["origin/main"], &l);
+        assert!(found.is_some(), "positive control");
+        let mut v: serde_json::Value = serde_json::from_str(&text).unwrap();
+        v["stamp"] = serde_json::json!("0000");
+        std::fs::write(&rec, v.to_string()).unwrap();
+        let (found, _) = known::find(&r, &state(&r), None, &[two], &["origin/main"], &l);
+        assert!(found.is_none(), "another stamp is refused");
+    }
+
     #[test]
     fn a_complete_green_ci_run_counts_only_when_the_pushed_remote_has_the_sha_as_a_tip() {
         let (_d, r, _one, two) = repo();
