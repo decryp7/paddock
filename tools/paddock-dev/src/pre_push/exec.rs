@@ -207,6 +207,11 @@ pub trait Exec: Sync {
     fn post_trial_pending(&self, state: &Path, sha: &str, done: &std::sync::atomic::AtomicBool) -> String {
         super::trial_profile::post_pending_real(state, sha, done)
     }
+    /// The token the trial profile posts statuses with (`GITEA_TOKEN`); a test's executor gives a fake one, so no test needs the
+    /// environment or reaches the network.
+    fn gitea_token(&self) -> Option<String> {
+        std::env::var("GITEA_TOKEN").ok().filter(|t| !t.is_empty())
+    }
     /// The slow phase's heartbeat: writes it into the record until `done` is set.
     fn beat_trial(&self, state: &Path, sha: &str, done: &std::sync::atomic::AtomicBool) {
         super::trial_profile::beat_real(state, sha, done);

@@ -432,14 +432,13 @@ pub fn flakes(a: &FlakesArgs) -> Result<Report, CliError> {
 
 /// The verdict of `workflow` on `sha` from the family's server: the one reader (`ci verdict` and the pre-push shortcut). Without a
 /// token it is NotMeasured, never green.
-pub fn ci_verdict(workflow: &str, sha: &str, local_state: Option<std::path::PathBuf>) -> verdict::Verdict {
+pub fn ci_verdict(workflow: &str, sha: &str, local_state: Option<&std::path::Path>) -> verdict::Verdict {
     match token() {
         Err(_) => verdict::Verdict::NotMeasured("GITEA_TOKEN is not set, so the runs cannot be read".into()),
         Ok(token) => {
             let mut http = CurlHttp;
             let mut client = Client::new(&mut http, SERVER, "decryp7/paddock", &token);
-            client.local_state = local_state;
-            verdict::verdict(&mut client, workflow, sha)
+            verdict::verdict(&mut client, workflow, sha, local_state)
         }
     }
 }
@@ -468,8 +467,7 @@ fn verdict_with(
         Some(token) => {
             // A query has no side effects (CQS, ER-45): dead or silent slow phases are settled by a gate start and `ci dispatch`, never here.
             let mut client = Client::new(http, &a.server, &a.repo, token);
-            client.local_state = Some(crate::pre_push::state_dir(root));
-            verdict::verdict(&mut client, &a.workflow, &a.sha)
+            verdict::verdict(&mut client, &a.workflow, &a.sha, Some(&crate::pre_push::state_dir(root)))
         }
     };
     let r = verdict::report(&v, &a.workflow, &a.sha, &crate::pre_push::outcome::GitRepo(root));

@@ -762,6 +762,9 @@ impl Exec for Fake {
         self.hooks.clears.lock().unwrap().push(sha.to_string());
         None
     }
+    fn gitea_token(&self) -> Option<String> {
+        Some("fake-token".into())
+    }
     fn probe_status_write(&self, _server: &str, _repo: &str) -> Result<(), String> {
         self.hooks.probes.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         Ok(())
@@ -1773,6 +1776,16 @@ mod known_commit {
             paddock_cli::outcome::UnixSeconds(1),
             || Ok(Vec::new()),
         )
+    }
+
+    /// A pass outcome for `sha` (the only way a pass is made: through `measure`).
+    pub(super) fn pass_outcome(r: &Path, sha: &str) -> paddock_cli::Outcome {
+        pass_for(r, sha)
+    }
+
+    /// Writes the pass record of `sha`.
+    pub(super) fn write_pass(r: &Path, sha: &str) {
+        known::write_record(r, &state(r), sha, "origin/main", &[], 5, &pass_for(r, sha)).unwrap();
     }
 
     fn push_line(sha: &str) -> String {
@@ -4199,6 +4212,122 @@ mod trial_profile {
             (n(&fake.hooks.beats), n(&fake.hooks.pendings)),
             (1, 1),
             "the heartbeat and the pending post start first thing"
+        );
+    }
+
+    fn count(c: &std::sync::atomic::AtomicUsize) -> usize {
+        c.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// Round 3 P2-10, wiring positive controls: every hook the trial profile hangs on the push gate is called where it should be.
+    /// The sweep of dead or silent slow phases runs once at the start of a gate that runs rows (never in a dry run, which runs none).
+    #[test]
+    fn the_sweep_runs_once_at_the_start_of_a_gate_that_runs_rows() {
+        let (_d, r, _one, two) = super::known_commit::repo();
+        let fake = Fake::default();
+        let a = PrePushArgs {
+            root: Some(r.clone()),
+            only: vec!["commit-lint".into()],
+            base: Some("origin/main".into()),
+            ..args()
+        };
+        let _ = command_in(
+            &a,
+            &r,
+            &format!("refs/heads/x {two} refs/heads/feat/x {}\n", "0".repeat(40)),
+            &super::known_commit::fake(None, Err("no run")),
+            crate::local_sccache::Lazy::off(),
+            Some(&fake),
+        );
+        assert_eq!(count(&fake.hooks.sweeps), 1, "once at the start of a run that runs rows");
+        let dry = Fake::default();
+        let a = PrePushArgs {
+            dry_run: true,
+            only: vec![],
+            ..a
+        };
+        let _ = command_in(
+            &a,
+            &r,
+            &format!("refs/heads/x {two} refs/heads/feat/x {}\n", "0".repeat(40)),
+            &super::known_commit::fake(None, Err("no run")),
+            crate::local_sccache::Lazy::off(),
+            Some(&dry),
+        );
+        assert_eq!(count(&dry.hooks.sweeps), 0, "a dry run runs nothing and settles nothing");
+    }
+
+    /// A pass record found for the commit is a full gate pass: it clears the commit's slow-rows record through the hook.
+    #[test]
+    fn a_known_commit_pass_record_clears_the_slow_rows_record_through_the_hook() {
+        let (_d, r, _one, two) = super::known_commit::repo();
+        super::known_commit::write_pass(&r, &two);
+        let fake = Fake::default();
+        let a = PrePushArgs {
+            root: Some(r.clone()),
+            ..args()
+        };
+        let got = command_in(
+            &a,
+            &r,
+            &format!("refs/heads/x {two} refs/heads/main {}\n", "0".repeat(40)),
+            &super::known_commit::fake(None, Err("x")),
+            crate::local_sccache::Lazy::off(),
+            Some(&fake),
+        )
+        .unwrap();
+        assert_eq!(got.data["verdict"], "known_commit");
+        assert_eq!(*fake.hooks.clears.lock().unwrap(), vec![two.clone()]);
+    }
+
+    /// A full gate pass writes the pass record and then clears the slow-rows record of the same commit.
+    #[test]
+    fn a_full_pass_leaves_the_pass_record_and_clears_the_slow_rows_record() {
+        let (_d, r, _one, two) = super::known_commit::repo();
+        let state = state_dir(&r);
+        let fake = Fake::default();
+        let outcome = super::known_commit::pass_outcome(&r, &two);
+        super::super::leave_pass_record(&fake, &r, &state, &two, "origin/main", &[], &outcome);
+        assert_eq!(*fake.hooks.clears.lock().unwrap(), vec![two.clone()]);
+        assert!(
+            state.join("records").join(format!("{two}.json")).exists(),
+            "the pass record is written first"
+        );
+    }
+
+    /// The fast phase probes write access before it relies on the commit status: a repository URL and a token make the probe run once
+    /// and keep the fast rows; the dry run lists only fast rows.
+    #[test]
+    fn the_fast_phase_probes_write_access_once_and_lists_only_the_fast_rows() {
+        let (_d, r, _one, two) = super::known_commit::repo();
+        crate::plan_repo::git_text(&r, &["remote", "add", "origin", "https://gitea.invalid/o/r.git"]).unwrap();
+        let fake = Fake::default();
+        let a = PrePushArgs {
+            root: Some(r.clone()),
+            dry_run: true,
+            base: Some("origin/main".into()),
+            ..args()
+        };
+        let line = format!("refs/heads/x {two} refs/heads/wip/x {}\n", "0".repeat(40));
+        let rep = command_in(
+            &a,
+            &r,
+            &line,
+            &super::known_commit::fake(None, Err("x")),
+            crate::local_sccache::Lazy::off(),
+            Some(&fake),
+        )
+        .unwrap();
+        assert_eq!(count(&fake.hooks.probes), 1, "the probe runs once");
+        let ids: Vec<String> = rep.data["gates"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|g| g["id"].as_str().unwrap().to_string())
+            .collect();
+        assert!(
+            !ids.is_empty() && ids.iter().all(|i| super::super::trial_profile::is_fast_row(i)),
+            "{ids:?}"
         );
     }
 

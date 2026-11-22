@@ -282,7 +282,7 @@ impl known::Lookups for RealLookups {
         if let Some(reason) = crate::ci_runs::guard::local_slow_rows(&self.root, sha) {
             return Err(format!("red or partial: {reason}"));
         }
-        match crate::ci_runs::ci_verdict(known::CI_WORKFLOW, sha, Some(state_dir(&self.root))) {
+        match crate::ci_runs::ci_verdict(known::CI_WORKFLOW, sha, Some(&state_dir(&self.root))) {
             crate::ci_runs::verdict::Verdict::Green { run } => Ok(run),
             crate::ci_runs::verdict::Verdict::Red { reason, .. } => Err(format!("red or partial: {reason}")),
             crate::ci_runs::verdict::Verdict::NotMeasured(why) => Err(format!("not measured: {why}")),
@@ -455,6 +455,10 @@ fn command_in_inner(
     );
     // The fast phase needs a token and a server to post the slow rows' verdict to (the commit status): without them the full gate
     // runs, and the run says so.
+    let token = match given {
+        Some(g) => g.gitea_token(),
+        None => env.get("GITEA_TOKEN").cloned(),
+    };
     let mut status_to = (String::new(), String::new());
     let probe_write = |server: &str, repo: &str| match given {
         Some(g) => g.probe_status_write(server, repo),
@@ -467,7 +471,7 @@ fn command_in_inner(
     let mut phase_note = None;
     if phase == Some(trial_profile::Phase::Fast) {
         match trial_profile::fast_allowed(
-            trial_profile::status_target(&root, args.remote.as_deref(), env.get("GITEA_TOKEN").map(String::as_str)),
+            trial_profile::status_target(&root, args.remote.as_deref(), token.as_deref()),
             &probe_write,
         ) {
             Ok(t) => status_to = t,
@@ -759,18 +763,31 @@ fn command_in_inner(
             .filter(|(_, v)| v.kind() == Kind::Passed)
             .map(|(id, _)| id.clone())
             .collect();
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0, |d| d.as_secs());
-        if let Err(e) = known::write_record(&root, &state, &sha, &base, &passed, now, &run_outcome) {
-            eprintln!("::warning::pre-push: the pass record of {sha} was not written: {e}. A later push of it is checked again.");
-        }
-        // A full pass on a commit that went through a split push clears its red slow-rows record and posts `success` (ADR 0114).
-        if let Some(line) = ex.clear_trial(&state, &sha) {
-            eprintln!("pre-push: {line}");
-        }
+        leave_pass_record(ex, &root, &state, &sha, &base, &passed, &run_outcome);
     }
     Ok(report)
+}
+
+/// A full gate pass on `sha`: writes its pass record (what a later push of the same commit may rest on, [`known::find`]) and then
+/// clears a red slow-rows record of the commit, posting `success` (ADR 0114).
+fn leave_pass_record(
+    ex: &dyn exec::Exec,
+    root: &Path,
+    state: &Path,
+    sha: &str,
+    base: &str,
+    passed: &[String],
+    outcome: &paddock_cli::Outcome,
+) {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    if let Err(e) = known::write_record(root, state, sha, base, passed, now, outcome) {
+        eprintln!("::warning::pre-push: the pass record of {sha} was not written: {e}. A later push of it is checked again.");
+    }
+    if let Some(line) = ex.clear_trial(state, sha) {
+        eprintln!("pre-push: {line}");
+    }
 }
 
 /// What one trial-profile step needs besides its phase and rows: the executor, the state folder, the pushed commit and the push's

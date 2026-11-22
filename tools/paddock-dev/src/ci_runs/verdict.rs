@@ -205,11 +205,10 @@ fn read_mode(client: &mut Client, run: &RunInfo) -> Mode {
 /// when the commit never went through a split push (no status, no record) or its status is explicitly `success`
 /// ([`crate::trial_guard::slow_rows_gate`]); a status that can't be read is not measured. Every reader of CI for a commit (the
 /// pre-push known-commit shortcut, `ci verdict`, the queue's landing checks) goes through here.
-pub fn verdict(client: &mut Client, workflow: &str, sha: &str) -> Verdict {
+pub fn verdict(client: &mut Client, workflow: &str, sha: &str, local_state: Option<&std::path::Path>) -> Verdict {
     let v = verdict_of_runs(client, workflow, sha);
     let Verdict::Green { run } = v else { return v };
-    let local = client.local_state.clone();
-    match crate::trial_guard::slow_rows_gate(client, local.as_deref(), sha) {
+    match crate::trial_guard::slow_rows_gate(client, local_state, sha) {
         Ok(crate::trial_guard::Gate::Counts) => Verdict::Green { run },
         Ok(crate::trial_guard::Gate::Red(reason)) => Verdict::Red { run: Some(run), reason },
         Ok(crate::trial_guard::Gate::NotMeasured(reason)) => Verdict::NotMeasured(format!("run {run} is green, but {reason}")),
@@ -392,7 +391,7 @@ mod tests {
     fn ask(f: &mut Fake) -> Verdict {
         let mut c = Client::new(f, "https://gitea.invalid", "decryp7/paddock", "t");
         c.backoff_ms = 0;
-        verdict(&mut c, "ci.yml", SHA)
+        verdict(&mut c, "ci.yml", SHA, None)
     }
 
     fn code(v: &Verdict) -> i32 {
@@ -480,8 +479,11 @@ mod tests {
         let mut f = server(vec![main_push(5, "success")], &[]);
         let mut c = Client::new(&mut f, "https://gitea.invalid", "decryp7/paddock", "t");
         c.backoff_ms = 0;
-        c.local_state = Some(d.path().to_path_buf());
-        assert_eq!(verdict(&mut c, "ci.yml", SHA), Verdict::Green { run: 5 }, "no record: unchanged");
+        assert_eq!(
+            verdict(&mut c, "ci.yml", SHA, Some(d.path())),
+            Verdict::Green { run: 5 },
+            "no record: unchanged"
+        );
         crate::trial_guard::write_slow(
             d.path(),
             &crate::trial_guard::Slow {
@@ -502,7 +504,7 @@ mod tests {
             },
         )
         .unwrap();
-        match verdict(&mut c, "ci.yml", SHA) {
+        match verdict(&mut c, "ci.yml", SHA, Some(d.path())) {
             Verdict::NotMeasured(why) => assert!(why.contains("did not land"), "{why}"),
             other => panic!("{other:?}"),
         }

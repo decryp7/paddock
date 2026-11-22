@@ -164,9 +164,6 @@ pub struct Client<'a> {
     token: String,
     /// Waits between retries; tests set it to nothing.
     pub backoff_ms: u64,
-    /// The push gate's state folder of this checkout, when the caller has one: a verdict also reads the split-push record there
-    /// ([`crate::trial_guard::slow_rows_gate`]).
-    pub local_state: Option<std::path::PathBuf>,
 }
 
 impl<'a> Client<'a> {
@@ -178,7 +175,6 @@ impl<'a> Client<'a> {
             repo: repo.to_string(),
             token: token.to_string(),
             backoff_ms: 500,
-            local_state: None,
         }
     }
 

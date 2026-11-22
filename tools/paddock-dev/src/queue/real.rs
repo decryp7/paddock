@@ -841,9 +841,9 @@ impl Ci for GiteaCi<'_> {
 
     fn verdict(&mut self, workflow: &str, head: &str) -> Verdict {
         let mut c = Client::new(self.http, &self.server, &self.repo, &self.token);
-        // The split-push record of this checkout counts too: a commit whose slow rows did not pass is never green here.
-        c.local_state = Some(crate::pre_push::state_dir(&self.root));
-        verdict::verdict(&mut c, workflow, head)
+        // The split-push record of this checkout counts too: a commit whose slow rows did not pass is never green here (the state
+        // folder is a required argument of the verdict reader, so no caller can forget it).
+        verdict::verdict(&mut c, workflow, head, Some(&crate::pre_push::state_dir(&self.root)))
     }
 
     fn dispatch(&mut self, workflow: &str, inputs: &[(String, String)]) -> Result<Sent, String> {
