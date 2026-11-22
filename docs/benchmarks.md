@@ -2479,3 +2479,15 @@ Lanes times workers per host, from the class layout (lanes x workers against the
 Not measured: the run time of the Vitest jobs at the lower worker count (the first full CI run after this lands says; ER-12: a count that
 turns out too low is raised only with that measurement recorded here). Playwright was already within the budget (workers 1, Debrief 2), so
 its row changes only where a host's share falls below a config's own count.
+
+## Planner run time before the repository graph model (2026-11-23, docs/adr-repo-graph-model, base 803aed12d)
+
+The baseline ADR 0117 §9 holds the graph model to. Dev Mac (14 cores, load about 15 at the time, so the numbers are a ceiling), `./dev`
+already built, one run each, `/usr/bin/time -p`:
+
+| Command | real | user | sys |
+|---|---|---|---|
+| `./dev plan --all` | 2.90 s | 0.38 s | 0.35 s |
+| `./dev plan origin/main~20 --explain` | 12.79 s | 3.92 s | 3.55 s |
+
+Not measured: the spawn count (WP-1 adds the budget test), and the same commands on the Linux runner.
