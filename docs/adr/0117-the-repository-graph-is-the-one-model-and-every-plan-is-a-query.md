@@ -218,6 +218,34 @@ candidate filter never asks. Fix (WP-4): candidates are main's first-parent comm
 run's conclusion, each asked of the one reader; a golden pins a main whose pushes were all cancelled after green train runs. Until
 then the base of §6 falls back to "everything" (safe, not cheap).
 
+A second cause sits under the first (checked read-only through the Gitea API on 2026-11-23). Even with the candidates fixed, the
+reader lets the **newest** full run of a commit decide, and a push to main counts as full by its event. The landed trains' commits
+all have a failed run newest:
+
+| Commit | Train run | Push run after it | Newest decides |
+|---|---|---|---|
+| `67ac6d6ec` (train 18) | 8554 `success` (dispatch, `train/2026-11-21-18`) | 8555 `failure`: `app dyno (ubuntu-latest)`, `app spotter (ubuntu-latest)`, `paddock-dev (windows-latest)` | red |
+| `b3c254a2d` (train 19) | 8610 `failure`: `crate (windows-latest)`, `app spotter (macos-latest)` | 8626 `failure`: `app dyno (ubuntu-latest)` | red |
+
+So push run 8664 on `d04af7b46` planned everything (47 jobs, cancelled by the coordinator) against `f7bbe2b86`. Train 19 landed on
+a run whose conclusion is `failure` (8610). If, as the landing reports say, those failures were FLAKY tests in features the train
+did not touch (ER-12 lets those land as recorded fix items, and nextest's `flaky-result = "fail"` makes the run's conclusion
+`failure`), then the landing check and the verdict reader use two definitions of "green". That is the class ER-15 forbids ("one
+shared reader defines complete"). Not measured yet: whether every failed job of 8555, 8610 and 8626 was FLAKY-only; WP-4 reads it.
+
+WP-4 fixes the reader, failing tests first:
+
+1. `last_full` over main's first-parent commits: a main whose push runs are all failed or cancelled, with a green complete train
+   run on `67ac6d6ec` (the 8554 shape), names that commit (red today: it names `f7bbe2b86`).
+2. One typed outcome per run, from the reader that the landing check also calls: `Green`, `GreenWithFixItems` (every failure is a
+   FLAKY test that passed on retry, outside the features the change touched, each recorded as a fix item; ER-12), `Red` (a test
+   failed both tries, or a non-test step failed), `Partial`, `NotMeasured`. A test: a run whose only failures are FLAKY retries in
+   untouched features is `GreenWithFixItems`, not `Red`; a both-tries failure stays `Red` (positive control).
+3. The base of a push or landing run (§6) is the last commit whose outcome is `Green` or `GreenWithFixItems`; a tag still needs
+   `Green` (ER-15). A failed run after a green one on the same commit decides only when its failures are not FLAKY-only.
+4. The push-to-main reuse (ER-49) asks the same reader, so a push after a `GreenWithFixItems` train run reuses it instead of
+   rerunning 48 jobs.
+
 ### 7. OS placement is derived, with exceptions kept by hand
 
 The C155 detectors become edge extractors: an OS `cfg`, a use of an OS-API crate (`windows_sys`, `libc`, `objc2`, `core_foundation`,
@@ -461,22 +489,22 @@ and Nx plugins (`createNodes` and `createDependencies`, nx.dev "Extending the Pr
 | WP-1 | Node and edge types, the `Extractor` port and its registry (§15), the inputs file and accessor, owners with precedence and fail-closed in the plan job, content extractors (`attributes`, `npm-lock`, `guards`), the bulk reader with a spawn budget, `reach` with kinds, the positive-control harness, the benchmark | 1.7 |
 | WP-2 | The CI reader moved into the crate, `uses`/`runs` edges (contract check lines included), action and script nodes, mention vs use (G4), plan-job inputs (G5); `plan_gitea` deleted | 1.3 |
 | WP-3 | Test files and targets from `src_path`, the `reads` extractor (`syn`), `imports` through oxc without `node_modules` and its determinism test, contract `tests`/`smoke` declarations, `selection`, per-package runs (G11), the ci.yml and app-gates wiring | 2.0 |
-| WP-4 | Run scope v2, complete only on a complete base, the base from the verdict reader, the smoke-then-code golden; `last_full` asks main's first-parent commits, not only green push runs (§6) | 0.8 |
+| WP-4 | Run scope v2, complete only on a complete base, the base from the verdict reader, the smoke-then-code golden; the reader fixes of §6 (first-parent candidates, one typed outcome shared with the landing check, FLAKY-only runs as `GreenWithFixItems`, reuse through it), failing tests first | 1.3 |
 | WP-5 | `--compare` with dropped targets, train replay (trains 15 to 20), one golden per migrated rule, the listed differences, regenerated goldens | 2.0 |
 | WP-6 | OS derivation with the wider signals, the `Command` measurement, `hostTests` cut to exceptions, C155 as the consistency check | 1.3 |
 | WP-7 | Generators as nodes (`due`, stale after merge); `input_hash` on `input_hash.rs` with the added inputs | 0.8 |
 | WP-8 | The landing run tests the train's diff (D11, G1, G14) | 1.0 |
 | WP-9 | The escape monitor and the five-nightly gate before the old tables go (D12) | 0.7 |
 | | The no-path-rule conformance check, positive controls for every node, edge and extractor kind (§8), fail-closed tests | included above |
-| | **Total** | **11.6** (accepted 6.3; spent so far about 0.3 on WP-1). Approved by the user on 2026-11-23 ("over 8 d is OK as long as it fixes the root cause once and for all") |
+| | **Total** | **12.1** (accepted 6.3; spent so far about 0.3 on WP-1). Approved by the user on 2026-11-23 ("over 8 d is OK as long as it fixes the root cause once and for all") |
 
-The .NET and C/C++ adapters are not in this total (about 1 day each, when wanted). The total grew 84 % over the accepted 6.3 days, from the review's findings (the `reads` edge, the migration net and the escape
+The .NET and C/C++ adapters are not in this total (about 1 day each, when wanted). The total grew 92 % over the accepted 6.3 days, from the review's findings (the `reads` edge, the migration net and the escape
 monitor are most of it). It went back to the user (ER-37), who approved it on 2026-11-23 on the condition that it fixes the root
 cause once and for all: all nine work packages, in the order of §11.
 
 ## Decisions
 
-- **D1. Scope.** *Chosen 2026-11-23: (a), widened to WP-1 to WP-9, 11.6 days (§14).* (a) WP-1 to WP-7, 6.3 days. (b) WP-1 to WP-5 now, WP-6 and WP-7 after the next release, 4.8 days.
+- **D1. Scope.** *Chosen 2026-11-23: (a), widened to WP-1 to WP-9, 12.1 days (§14).* (a) WP-1 to WP-7, 6.3 days. (b) WP-1 to WP-5 now, WP-6 and WP-7 after the next release, 4.8 days.
   (c) Common practice: the five behaviours as planner rules, 3 to 4 days, no model. *Recommended: (b)*: it closes the planning class
   within the told budget; OS placement and generators have working hand lists with checks today.
 - **D2. Where the model lives.** (a) `paddock-repo-graph`, extractors as modules behind the existing ports. (b) A new crate
