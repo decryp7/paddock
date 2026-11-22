@@ -359,9 +359,12 @@ changes here, every app's copy is updated in the same change.
 
 ## Release path (user, 2026-10-30)
 54. **Every change that touches an app's release path builds that app's installers before it lands on main, once per
-    train or batch that touches it (user, 2026-11-12), not once per branch.** The release path is the release workflow,
-    the shared app-release workflow, the bundle and prepare steps, the Tauri config and the app's imports of shared
-    packages.
+    train or batch that touches it (user, 2026-11-12), not once per branch.** The release path is real release changes
+    only (user, 2026-11-23): bundling, signing, notarising, publishing, a release workflow's own steps (the app's workflows and the
+    shared app-release workflow), the app's code and its Tauri config, and every tag. A change to a shared setup or cache action
+    that release workflows also use is not on the release path: it gets ci.yml's smoke run only, no installer rebuild. The
+    planner decides it: `plan::affected` with the release actions of `plan_gitea::RELEASE_ACTIONS`, read by
+    `./dev plan --ci --app <app>`, which answers `false` for an app reached by CI plumbing alone (ADR 0113 amendment 2026-11-23).
     (a) The batch dispatches `<app>-release.yml` with gates on and the installers (bundle) built; passing tests alone is
     not enough.
     (a2) A train dispatches an app's release gate only when the plan (`./dev plan`, over the train's
