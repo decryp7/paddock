@@ -1,3 +1,4 @@
+// ci-runs-reader: the tests of the one definition of green, over the fake runs API
 //! The one definition of green (ADR 0117 WP-4), over the fake server of `testutil`.
 //!
 //! Provenance of the fixtures: the run and job records have the keys the Gitea Actions API returns (`id`, `path`, `event`,
