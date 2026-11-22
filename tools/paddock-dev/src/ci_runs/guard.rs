@@ -1,4 +1,5 @@
-//! `ci dispatch --guard`: the dispatch side of the trial push profile (docs/adr/0114-trial-push-profile.md).
+// ci-runs-reader: trial push profile: registers and cancels one dispatched run; no pass/fail verdict on a commit
+//! `ci dispatch --guard`: the dispatch side of the trial push profile (docs/adr/0114-the-trial-push-profile-starts-ci-before-the-slow-local-rows-finish.md).
 //!
 //! Before the dispatch: the ref's head commit is read from the server and its slow-rows record from the push gate's state folder
 //! ([`crate::trial_guard`]). A record that already says failed, not measured or never finished refuses the dispatch (nothing is

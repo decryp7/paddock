@@ -1,3 +1,4 @@
+// ci-runs-reader: trial push profile: registers and cancels one dispatched run; no pass/fail verdict on a commit
 use super::*;
 use crate::wait::Http;
 use serde_json::{Value, json};

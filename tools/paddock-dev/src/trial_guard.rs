@@ -1,4 +1,5 @@
-//! The trial push profile's records and its cancel (ER-9 overlap, ER-33, ER-51; docs/adr/0114-trial-push-profile.md).
+// ci-runs-reader: trial push profile: registers and cancels one dispatched run; no pass/fail verdict on a commit
+//! The trial push profile's records and its cancel (ER-9 overlap, ER-33, ER-51; docs/adr/0114-the-trial-push-profile-starts-ci-before-the-slow-local-rows-finish.md).
 //!
 //! A push of a `wip/` or `trial/` ref runs only the fast static rows before the push ([`crate::pre_push::trial_profile`]) and
 //! starts the slow rows in a background process that outlives the hook. CI for that ref is dispatched at the same time

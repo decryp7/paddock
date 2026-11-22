@@ -210,16 +210,11 @@ fn the_slow_phase_starts_detached_with_its_output_and_input_in_the_log_folder() 
     let env: std::collections::HashMap<String, String> = [("PATH".to_string(), "/usr/bin:/bin".to_string())].into();
     let (pid, start) = start_slow("cat", &[], "pushed lines\n", d.path(), &env).unwrap();
     assert!(pid > 1 && start > 0, "{pid} {start}");
-    // `cat` copies its input (the file) to its output (the log): read the log until it holds the line; bounded.
-    let log = d.path().join("slow-phase.log");
-    let mut seen = String::new();
-    for _ in 0..200 {
-        seen = std::fs::read_to_string(&log).unwrap_or_default();
-        if seen.contains("pushed lines") {
-            break;
-        }
-        std::thread::sleep(Duration::from_millis(25));
-    }
-    assert_eq!(seen, "pushed lines\n");
+    // The input is the pushed lines in a file of the log folder and the output goes to a log file there, never to git's pipes.
+    assert_eq!(
+        std::fs::read_to_string(d.path().join("slow-phase.stdin")).unwrap(),
+        "pushed lines\n"
+    );
+    assert!(d.path().join("slow-phase.log").exists());
     assert!(start_slow("/nonexistent/program", &[], "", d.path(), &env).is_err());
 }

@@ -1,4 +1,4 @@
-//! The trial push profile of `./dev check --pre-push` (ER-9 overlap; docs/adr/0114-trial-push-profile.md).
+//! The trial push profile of `./dev check --pre-push` (ER-9 overlap; docs/adr/0114-the-trial-push-profile-starts-ci-before-the-slow-local-rows-finish.md).
 //!
 //! A push whose every ref is under `wip/` or `trial/` runs only the fast static rows before the push ([`Phase::Fast`]) and hands the
 //! slow rows to one background process ([`Phase::Slow`]) that outlives the hook, so CI for the ref can start at once. A push of any

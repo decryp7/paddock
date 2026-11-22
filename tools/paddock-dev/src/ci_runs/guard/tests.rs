@@ -1,3 +1,4 @@
+// ci-runs-reader: trial push profile: registers and cancels one dispatched run; no pass/fail verdict on a commit
 use super::*;
 use crate::trial_guard::tests::FakeGitea as RunsOnly;
 use crate::trial_guard::{Slow, State, write_slow};
