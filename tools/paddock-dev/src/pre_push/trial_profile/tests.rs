@@ -307,3 +307,48 @@ fn the_fast_phase_needs_a_status_target_and_a_token_that_can_write_statuses() {
         Err("no token".into())
     );
 }
+
+/// Round 3 P2-5: the pending post reads the record again on each try and stops once it is not running, so a stale copy can never
+/// post `pending` after the final status.
+#[test]
+fn the_pending_post_reads_the_record_again_each_try_and_stops_once_it_is_not_running() {
+    let sha = "ab".repeat(20);
+    let d = tempfile::tempdir().unwrap();
+    let rec = |state| Slow {
+        sha: sha.clone(),
+        state,
+        row: String::new(),
+        why: String::new(),
+        next: String::new(),
+        pid: 1,
+        start_micros: 1,
+        beat: u64::MAX,
+        posted: false,
+        logs: String::new(),
+        remote_ref: String::new(),
+        server: "https://gitea.invalid".into(),
+        repo: "o/r".into(),
+    };
+    trial_guard::write_slow(d.path(), &rec(State::Running)).unwrap();
+    let posts = std::cell::Cell::new(0);
+    let got = pending_loop(
+        d.path(),
+        &sha,
+        |_| {
+            posts.set(posts.get() + 1);
+            Err("404".to_string())
+        },
+        |_| {
+            // Between two tries the rows end and the final record is written.
+            trial_guard::write_slow(d.path(), &rec(State::Failed)).unwrap();
+            false
+        },
+        5,
+    );
+    assert_eq!(posts.get(), 1, "no second post once the record is settled: {got}");
+    assert!(got.contains("no longer running"), "{got}");
+    // A running record posts once and stops; a pause that says "ended" stops the loop.
+    trial_guard::write_slow(d.path(), &rec(State::Running)).unwrap();
+    assert!(pending_loop(d.path(), &sha, |_| Ok(true), |_| false, 5).contains("is pending"));
+    assert!(pending_loop(d.path(), &sha, |_| Err("x".into()), |_| true, 5).contains("rows ended first"));
+}

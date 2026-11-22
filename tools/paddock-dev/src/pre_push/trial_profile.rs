@@ -454,22 +454,49 @@ pub fn probe_with(http: &mut dyn crate::wait::Http, server: &str, repo: &str, to
 /// landed yet, and the status needs the commit on the server). Returns what happened, for the log.
 pub fn post_pending_real(state: &Path, sha: &str, done: &std::sync::atomic::AtomicBool) -> String {
     use std::sync::atomic::Ordering;
-    let short = &sha[..sha.len().min(12)];
     let token = std::env::var("GITEA_TOKEN").unwrap_or_default();
-    let Ok(Some(rec)) = trial_guard::read_slow(state, sha) else {
-        return format!("trial {short}: no record to post a status for");
-    };
-    let mut last = String::new();
-    for _ in 0..12 {
-        match trial_guard::post_slow_status(&mut crate::wait::CurlHttp, &token, &rec) {
-            Ok(_) => return format!("trial {short}: status {} is pending", trial_guard::CONTEXT),
-            Err(e) => last = e,
-        }
-        for _ in 0..50 {
-            if done.load(Ordering::SeqCst) {
-                return format!("trial {short}: the pending status was not posted ({last}); the rows ended first");
+    pending_loop(
+        state,
+        sha,
+        |rec| trial_guard::post_slow_status(&mut crate::wait::CurlHttp, &token, rec),
+        |_| {
+            for _ in 0..50 {
+                if done.load(Ordering::SeqCst) {
+                    return true;
+                }
+                std::thread::sleep(Duration::from_millis(100));
             }
-            std::thread::sleep(Duration::from_millis(100));
+            false
+        },
+        12,
+    )
+}
+
+/// The pending post's loop over `tries`: each try reads the record AGAIN (a stale copy would post `pending` after the final status)
+/// and stops once it is not running; the read and the post are one step under the status lock the final post also takes
+/// ([`trial_guard::post_final`]), so the two never interleave. `post` posts the status of the record it is given, `pause` waits
+/// between tries and says whether the rows have ended.
+pub fn pending_loop(
+    state: &Path,
+    sha: &str,
+    mut post: impl FnMut(&Slow) -> Result<bool, String>,
+    mut pause: impl FnMut(u32) -> bool,
+    tries: u32,
+) -> String {
+    let short = &sha[..sha.len().min(12)];
+    let mut last = String::new();
+    for i in 0..tries {
+        let step = trial_guard::with_status_lock(|| match trial_guard::read_slow(state, sha) {
+            Ok(Some(rec)) if rec.state == State::Running => Some(post(&rec)),
+            _ => None,
+        });
+        match step {
+            None => return format!("trial {short}: the record is no longer running, so no pending status is posted"),
+            Some(Ok(_)) => return format!("trial {short}: status {} is pending", trial_guard::CONTEXT),
+            Some(Err(e)) => last = e,
+        }
+        if pause(i) {
+            return format!("trial {short}: the pending status was not posted ({last}); the rows ended first");
         }
     }
     format!("trial {short}: the pending status could not be posted within a minute ({last})")

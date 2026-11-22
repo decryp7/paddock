@@ -756,11 +756,12 @@ fn a_full_gate_pass_clears_a_red_record_and_posts_success() {
         Ok(None),
         "the commit's evidence counts again"
     );
-    assert_eq!(
-        clear_after_full_pass(d.path(), &mut g, "t", SHA).unwrap(),
-        None,
-        "nothing left to clear"
-    );
+    // Round 3 P2-5: a passed and posted record is still posted again (idempotent), so a stale `pending` on the server can never
+    // outlive a full pass.
+    g.statuses.push(stat(9, CONTEXT, "pending"));
+    let again = clear_after_full_pass(d.path(), &mut g, "t", SHA).unwrap();
+    assert!(again.is_some(), "the repost happens");
+    assert_eq!(g.statuses.last().unwrap().2, "success", "{:?}", g.statuses);
     assert_eq!(
         clear_after_full_pass(tempfile::tempdir().unwrap().path(), &mut g, "t", SHA).unwrap(),
         None,

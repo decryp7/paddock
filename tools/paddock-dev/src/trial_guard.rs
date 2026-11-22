@@ -544,10 +544,19 @@ fn slow_records(state: &Path) -> Vec<Slow> {
         .collect()
 }
 
+static STATUS_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Runs `f` holding the process-wide status lock: the pending post (read the record, post) and a final post never interleave, so a
+/// `pending` can not land after the final status in this process.
+pub fn with_status_lock<T>(f: impl FnOnce() -> T) -> T {
+    let _held = STATUS_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    f()
+}
+
 /// Posts the record's final verdict as the commit status and, when it landed for a final record, keeps that in the record (`posted`):
 /// a final record whose post did not land is posted again by the next sweep. `Ok(false)`: the record names no server.
 pub fn post_final(state: &Path, http: &mut dyn Http, token: &str, rec: &mut Slow) -> Result<bool, String> {
-    let posted = post_slow_status(http, token, rec)?;
+    let posted = with_status_lock(|| post_slow_status(http, token, rec))?;
     if posted && rec.state != State::Running && !rec.posted {
         rec.posted = true;
         write_slow(state, rec)?;
@@ -556,13 +565,12 @@ pub fn post_final(state: &Path, http: &mut dyn Http, token: &str, rec: &mut Slow
 }
 
 /// A full push-gate pass on `sha` clears a red record: it becomes `passed` and `success` is posted, so the "run `./dev check
-/// --pre-push`" step of a failed trial is true. `Ok(None)`: nothing to clear (no record, or already passed and posted). The record
+/// --pre-push`" step of a failed trial is true. `Ok(None)`: nothing to clear (no record). The record
 /// is rewritten first, so a failed post leaves a passed record that is not posted, which the next sweep posts.
 pub fn clear_after_full_pass(state: &Path, http: &mut dyn Http, token: &str, sha: &str) -> Result<Option<String>, String> {
     let Some(mut rec) = read_slow(state, sha)? else { return Ok(None) };
-    if rec.state == State::Passed && rec.posted {
-        return Ok(None);
-    }
+    // Posted again even when the record is passed and posted already (idempotent): a stale `pending` or `failure` on the server
+    // never outlives a full pass.
     rec.state = State::Passed;
     rec.row.clear();
     rec.why.clear();
