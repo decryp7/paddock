@@ -82,6 +82,11 @@ pub fn stats(seen: &Seen) -> BTreeMap<String, KeyStats> {
         s.name = r.name.clone();
         match (r.outcome.as_str(), r.saved.as_str()) {
             ("exact", _) => s.hits += 1,
+            // A save step's own report (the key it saved under): a success is a confirmed save, a failure counts as a miss.
+            ("save", "yes") => s.saved += 1,
+            ("save", _) => s.misses += 1,
+            // This job never saves the key (a marker lookup, or a restore whose save is another key): nothing to expect.
+            (_, "n/a") => {}
             (_, "yes") => {
                 s.saved += 1;
                 s.misses += 1;
@@ -237,6 +242,17 @@ mod tests {
         seen.push((2, 20, rep("npm", "miss", "pending", "k")));
         seen.push((3, 30, rep("npm", "partial", "pending", "k")));
         assert_eq!(never_saved(&stats(&seen), 3).len(), 1);
+    }
+
+    #[test]
+    fn a_restore_that_this_job_never_saves_is_not_a_finding_and_a_save_report_clears_a_key() {
+        let seen: Seen = (0..5).map(|i| (1, i, rep("bench", "partial", "n/a", "k"))).collect();
+        assert!(never_saved(&stats(&seen), 3).is_empty(), "n/a is not expected to be saved");
+        let mut seen = many(5, "miss", "no");
+        seen.push((1, 9, rep("dev-tool", "save", "yes", "k")));
+        assert!(never_saved(&stats(&seen), 3).is_empty());
+        let seen: Seen = (0..4).map(|i| (1, i, rep("x", "save", "no", "k"))).collect();
+        assert_eq!(never_saved(&stats(&seen), 3).len(), 1, "a save that keeps failing is named");
     }
 
     #[test]

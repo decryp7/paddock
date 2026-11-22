@@ -107,6 +107,14 @@ jobs:
           path: .nightly-green
           key: debrief-nightly-green-${{ github.sha }}
           lookup-only: true
+      - uses: ./.gitea/actions/cache-report
+        if: always() && steps.green.outcome != 'skipped'
+        with:
+          name: debrief-green
+          key: debrief-nightly-green-${{ github.sha }}
+          hit: ${{ steps.green.outputs.cache-hit }}
+          matched: ${{ steps.green.outputs.cache-matched-key }}
+          saved: n/a
 
       # A scheduled run ends early while a train's dispatch run is queued or running (ADR 0093 amendment 2026-11-12).
       - id: train
@@ -505,6 +513,7 @@ jobs:
       # cache both download everything on every run. The image's CARGO_HOME is /usr/local/cargo. Saved on every run (a
       # new key each time), so the advisory database stays fresh.
       - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        id: cache2
         with:
           path: |
             /usr/local/cargo/registry/index
@@ -512,6 +521,14 @@ jobs:
             /usr/local/cargo/advisory-dbs
           key: debrief-licences-${{ runner.os }}-${{ hashFiles('apps/debrief/Cargo.lock') }}
           restore-keys: debrief-licences-${{ runner.os }}-
+      - uses: ./.gitea/actions/cache-report
+        if: always() && steps.cache2.outcome != 'skipped'
+        with:
+          name: debrief-licences
+          key: debrief-licences-${{ runner.os }}-${{ hashFiles('apps/debrief/Cargo.lock') }}
+          hit: ${{ steps.cache2.outputs.cache-hit }}
+          matched: ${{ steps.cache2.outputs.cache-matched-key }}
+          saved: n/a
 
       # The binary, not the Docker-based action: no image to pull on every run. Every workspace crate, not just
       # the root package.
@@ -527,6 +544,7 @@ jobs:
           cd ../.. && scripts/notices.sh debrief --check
 
       - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        id: cache3
         if: always()
         with:
           path: |
@@ -534,6 +552,12 @@ jobs:
             /usr/local/cargo/registry/cache
             /usr/local/cargo/advisory-dbs
           key: debrief-licences-${{ runner.os }}-${{ hashFiles('apps/debrief/Cargo.lock') }}-${{ github.run_id }}
+      - uses: ./.gitea/actions/cache-report
+        if: always() && steps.cache3.outcome != 'skipped'
+        with:
+          name: debrief-licences
+          key: debrief-licences-${{ runner.os }}-${{ hashFiles('apps/debrief/Cargo.lock') }}-${{ github.run_id }}
+          save-outcome: ${{ steps.cache3.outcome }}
 
   frontend:
     name: frontend build, lint + unit tests
@@ -1381,6 +1405,13 @@ jobs:
           echo "${{ github.sha }}" > .nightly-green/sha
 
       - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        id: cache4
         with:
           path: .nightly-green
           key: debrief-nightly-green-${{ github.sha }}
+      - uses: ./.gitea/actions/cache-report
+        if: always() && steps.cache4.outcome != 'skipped'
+        with:
+          name: debrief-green
+          key: debrief-nightly-green-${{ github.sha }}
+          save-outcome: ${{ steps.cache4.outcome }}

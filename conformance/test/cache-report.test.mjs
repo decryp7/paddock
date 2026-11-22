@@ -30,3 +30,12 @@ test('the line names restore and save, and says pending for a post-step save ins
 test('an unknown call is refused with the usage line', () => {
   assert.equal(sh('nope').status, 2);
 });
+
+test('a save step is reported from its own outcome: success is saved, anything else is NO with a warning', () => {
+  const ok = sh('save', 'bench', 'bench-k', 'success').text;
+  assert.match(ok, /^cache-report: name=bench outcome=save saved=yes key=bench-k$/m);
+  const bad = sh('save', 'bench', 'bench-k', 'failure').text;
+  assert.match(bad, /outcome=save saved=no key=bench-k/);
+  assert.match(bad, /::warning::cache-report: the save of cache `bench-k` did not succeed/);
+  assert.match(sh('save', 'bench', 'bench-k', '').text, /saved: NO \(the save step ended 'not run'\)/);
+});

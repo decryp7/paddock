@@ -11,7 +11,7 @@ import { test } from 'node:test';
 import { executableIn, platformId } from '../ci/install-test-browser.mjs';
 import { isMain } from '../src/util/is-main.mjs';
 import { parseSteps } from '../src/util/workflows.mjs';
-import { conjuncts, expr, job as workflowJob, loadAction, loadWorkflow, needsOf, stepsOf } from './lib/workflow.mjs';
+import { conjuncts, expr, job as workflowJob, loadAction, loadWorkflow, needsOf, parseYaml, stepsOf } from './lib/workflow.mjs';
 import { PADDOCK } from './helpers.mjs';
 
 const ACTIONS = join(PADDOCK, '.gitea', 'actions');
@@ -2555,49 +2555,53 @@ test('the dev-tool-cache action restores, verifies, saves and reports from the r
   assert.match(text, /PADDOCK_DEV_TOOL_CACHE_DONE/, 'a later use in the same job does nothing');
 });
 
-// ADR 0115, WP-3: a cache step reports restore, hit and save through conformance/ci/cache-report.sh. The two actions above do. These
-// are the `actions/cache` steps that do not yet, per file. The list only shrinks (ER-46): a new cache step reports, an old one that
-// is wired to report lowers its number here (this test fails when a number is too high, to make that visible).
-const UNREPORTED_CACHE_STEPS = {
-  '.gitea/workflows/debrief-mutants.yml': 3,
-  '.gitea/workflows/nightly.yml': 2,
-  '.gitea/workflows/app-fuzz.yml': 2,
-  '.gitea/workflows/debrief-fuzz.yml': 1,
-  '.gitea/workflows/debrief-bench.yml': 7,
-  '.gitea/workflows/debrief-corpus.yml': 4,
-  '.gitea/workflow-templates/bench-nightly.yml': 2,
-  '.gitea/actions/tauri-bundle/action.yml': 1,
-  '.gitea/actions/plan/action.yml': 1,
-  '.gitea/workflows/debrief.yml': 4,
-  '.gitea/actions/nightly-mark/action.yml': 1,
-};
+// ADR 0115: every `actions/cache` step is followed, in its own job, by a step that reports it (the cache-report action, or for the
+// workflow template that runs in other repositories, a step named "Cache report" / "Cache save report" that prints the same line).
+// The step reads the cache step's id, so the report is of its own outputs. Read through the YAML reader (ER-42).
+const isCacheStep = (st) => /^actions\/cache(?:\/(?:save|restore))?@/.test(st.uses ?? '');
+const reports = (st, id) => (st.uses === './.gitea/actions/cache-report' || /^Cache (?:save )?report$/.test(st.name ?? '')) && JSON.stringify(st).includes(`steps.${id}.`);
 
-function cacheStepsByFile() {
-  const found = {};
-  const dirs = [['.gitea/workflows', WORKFLOWS], ['.gitea/workflow-templates', join(PADDOCK, '.gitea', 'workflow-templates')]];
-  for (const n of names) dirs.push([`.gitea/actions/${n}`, join(ACTIONS, n)]);
-  for (const [rel, dir] of dirs) {
+/** Every list of steps of the repository's workflows, templates and actions: [file, steps]. */
+function stepLists() {
+  const out = [];
+  const dirs = [[WORKFLOWS, 'jobs'], [join(PADDOCK, '.gitea', 'workflow-templates'), 'jobs']];
+  for (const [dir] of dirs) {
     for (const f of readdirSync(dir).filter((x) => /\.ya?ml$/.test(x))) {
-      const count = (read(join(dir, f)).replace(/#.*$/gm, '').match(/uses: actions\/cache(?:\/(?:save|restore))?@/g) ?? []).length;
-      if (count) found[`${rel}/${f}`] = count;
+      const doc = parseYaml(read(join(dir, f)));
+      for (const [id, j] of Object.entries(doc.jobs ?? {})) out.push([`${basename(dir)}/${f}:${id}`, stepsOf(j)]);
     }
   }
-  return found;
+  for (const n of names) out.push([`actions/${n}`, stepsOf(loadAction(n))]);
+  return out;
 }
 
-test('every actions/cache step reports through cache-report.sh, except the listed ones, and that list only shrinks', () => {
-  const found = cacheStepsByFile();
-  const reporting = ['.gitea/actions/node-caches/action.yml', '.gitea/actions/dev-tool-cache/action.yml'];
-  for (const f of reporting) {
-    assert.ok(found[f] > 0, `${f} has cache steps`);
-    const text = read(join(PADDOCK, f));
-    assert.ok(/cache-report\.sh|dev-tool-cache\.sh/.test(text), `${f} reports through the shared reader`);
-    delete found[f];
+/** The cache steps that no step right after them reports: `file: id-or-index`. */
+function unreportedCacheSteps(lists) {
+  const bad = [];
+  for (const [file, steps] of lists) {
+    steps.forEach((st, i) => {
+      if (!isCacheStep(st)) return;
+      const next = steps[i + 1];
+      if (!st.id || !next || !reports(next, st.id)) bad.push(`${file}: step ${i + 1} (${st.id ?? 'no id'})`);
+    });
   }
-  assert.deepEqual(found, UNREPORTED_CACHE_STEPS, 'an actions/cache step that is not in the list must report (ADR 0115); lower an entry when its steps report');
+  return bad;
+}
+
+test('every actions/cache step is reported by the step after it, from its own id (the list of unreported steps is empty)', () => {
+  const lists = stepLists();
+  const total = lists.reduce((n, [, steps]) => n + steps.filter(isCacheStep).length, 0);
+  assert.ok(total >= 30, `the finder sees the cache steps (${total})`);
+  // dev-tool-cache and node-caches report in their own summary steps (conformance/test/dev-tool-cache.test.mjs and above).
+  const own = ['actions/dev-tool-cache', 'actions/node-caches'];
+  const bad = unreportedCacheSteps(lists.filter(([f]) => !own.includes(f)));
+  assert.deepEqual(bad, [], 'put the cache-report action right after the cache step (ADR 0115)');
 });
 
-test('the cache-step finder sees a step it is not told about (positive control)', () => {
-  const found = cacheStepsByFile();
-  assert.ok(Object.keys(found).length >= 12, 'it finds the known cache steps');
+test('the unreported-step finder sees a cache step with no report after it (positive control)', () => {
+  const steps = [{ id: 'c', uses: 'actions/cache@abc' }, { run: 'echo' }];
+  assert.equal(unreportedCacheSteps([['x', steps]]).length, 1);
+  assert.equal(unreportedCacheSteps([['x', [{ uses: 'actions/cache/save@abc' }, { uses: './.gitea/actions/cache-report' }]]]).length, 1, 'a step with no id cannot be reported');
+  const ok = [steps[0], { uses: './.gitea/actions/cache-report', with: { hit: '${{ steps.c.outputs.cache-hit }}' } }];
+  assert.deepEqual(unreportedCacheSteps([['x', ok]]), []);
 });

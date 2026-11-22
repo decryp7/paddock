@@ -44,9 +44,12 @@ cache was ever filled.
    no confirmed save. Report-only (ER-41: exit 0 with `::warning::`); it turns blocking in the tool step that records its first green run
    on the real tree, by run id here: *not yet recorded*. A window with no `cache-report:` line is "check broken" (exit 6), never clean
    (ER-33). Its positive control is a unit test: 42 misses and no save is a finding; the same window without the lines is broken.
-5. **No unreported cache step grows.** `conformance/test/ci-actions.test.mjs` lists the `actions/cache` steps that do not report yet (11
-   files, 28 steps: the scheduled and release workflows, `plan`, `tauri-bundle`, `nightly-mark`); the list only shrinks (ER-46). New
-   cache steps report through `cache-report.sh`. Wiring the listed steps is the follow-up (WP-3 below).
+5. **Every `actions/cache` step is reported by the step after it.** The `cache-report` action (a restore as exact, partial or miss
+   with its save `pending`, `n/a` or the save step's own outcome) follows each of the repository's cache steps: the scheduled and
+   release workflows, `plan`, `tauri-bundle`, `nightly-mark`; the workflow template, which runs in other repositories at a pinned tag,
+   prints the same line inline. A conformance test reads the workflows, templates and actions through the YAML reader and fails for a
+   cache step with no report right after it that names its id; the list of unreported steps is empty and stays empty. The audit ignores
+   a report whose save is `n/a` (a marker lookup, or a restore whose save is another key): nothing is expected there.
 6. **Not covered, on purpose.** sccache's local folder is not an `actions/cache` step; the `sccache-stats` action already reports its
    hit rate. The 3 MB Angular build cache stays: it is a partial-restore cache keyed by lockfile and sources, and the report now says
    when it is `partial`. Whether it buys anything is measured from the first runs that carry the report, not guessed (the brief of this
@@ -66,8 +69,7 @@ in a row showed that a summary nobody reads does not find an empty cache.
 
 - WP-1 (done in the change that adds this ADR): items 1 to 3 and the order test.
 - WP-2 (done in the same change): `ci cache-audit` and its tests, report-only.
-- WP-3: wire the listed unreported `actions/cache` steps through `cache-report.sh` and shrink the list; delete-by: the first release
-  line after Dyno 1.2.0.
+- WP-3 (done in the same change, ER-44): every other `actions/cache` step is reported; the test keeps the list empty.
 - WP-4: record the first green `ci cache-audit` run on the real tree by run id, then make it blocking (ER-41).
 
 ## Consequences

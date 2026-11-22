@@ -94,6 +94,7 @@ jobs:
 
       # One key per shard: each shard builds the same targets, so its fuzz/target is all it needs.
       - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        id: cache1
         with:
           path: |
             ~/.cargo/registry
@@ -102,15 +103,32 @@ jobs:
             ${{ inputs.fuzz-dir }}/target
           key: fuzz-shard${{ matrix.shard }}-${{ inputs.fuzz-dir }}-${{ runner.os }}-${{ inputs.toolchain }}-${{ hashFiles(format('{0}/Cargo.lock', inputs.fuzz-dir), 'Cargo.lock') }}
           restore-keys: fuzz-shard${{ matrix.shard }}-${{ inputs.fuzz-dir }}-${{ runner.os }}-${{ inputs.toolchain }}-
+      - uses: ./.gitea/actions/cache-report
+        if: always() && steps.cache1.outcome != 'skipped'
+        with:
+          name: fuzz-target
+          key: fuzz-shard${{ matrix.shard }}-${{ inputs.fuzz-dir }}-${{ runner.os }}-${{ inputs.toolchain }}-${{ hashFiles(format('{0}/Cargo.lock', inputs.fuzz-dir), 'Cargo.lock') }}
+          hit: ${{ steps.cache1.outputs.cache-hit }}
+          matched: ${{ steps.cache1.outputs.cache-matched-key }}
+          saved: pending
 
       # The corpus grows with every night: restored from the newest earlier one for the same fuzz dir and lock file and saved
       # under a key of its own (a cache is never overwritten under the same key). libFuzzer writes the inputs it finds to the
       # FIRST folder it is given, so `corpus/<target>` comes first on the command line; `work/<target>` is only extra input.
       - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        id: cache2
         with:
           path: ${{ inputs.fuzz-dir }}/corpus
           key: fuzz-corpus-shard${{ matrix.shard }}-${{ inputs.fuzz-dir }}-${{ hashFiles(format('{0}/Cargo.lock', inputs.fuzz-dir)) }}-${{ github.run_id }}
           restore-keys: fuzz-corpus-shard${{ matrix.shard }}-${{ inputs.fuzz-dir }}-${{ hashFiles(format('{0}/Cargo.lock', inputs.fuzz-dir)) }}-
+      - uses: ./.gitea/actions/cache-report
+        if: always() && steps.cache2.outcome != 'skipped'
+        with:
+          name: fuzz-corpus
+          key: fuzz-corpus-shard${{ matrix.shard }}-${{ inputs.fuzz-dir }}-${{ hashFiles(format('{0}/Cargo.lock', inputs.fuzz-dir)) }}-${{ github.run_id }}
+          hit: ${{ steps.cache2.outputs.cache-hit }}
+          matched: ${{ steps.cache2.outputs.cache-matched-key }}
+          saved: pending
 
       - name: Install cargo-fuzz
         run: command -v cargo-fuzz || cargo install cargo-fuzz --locked

@@ -8,6 +8,7 @@
 # <cache-hit> is actions/cache's output: "true" for an exact key, "false" for a restore-keys match, empty for no match or a step that did
 # not run. <saved> is yes | no | pending | n/a: `pending` is a save in actions/cache's post step at the end of the job (its result cannot be
 # known here; `ci cache-audit` reads whether the key ever got saved), `n/a` is a cache that is never saved by this job.
+#   cache-report.sh save <name> <key> <outcome>                a save step's own result (success or not): outcome=save, saved yes | no
 # The `cache-report:` line is the fixed format `ci cache-audit` (tools/paddock-dev) reads from a job log: change both together.
 set -euo pipefail
 
@@ -38,5 +39,13 @@ case "${1:-}" in
     echo "- $name cache \`$key\`: $what; $sv" | tee -a "${GITHUB_STEP_SUMMARY:-/dev/null}"
     echo "cache-report: name=$name outcome=$o saved=$saved key=$key"
     ;;
-  *) echo "usage: cache-report.sh outcome <hit> <matched> | line <name> <key> <hit> <matched> <saved>" >&2; exit 2 ;;
+  save)
+    shift
+    name="${1:?name}" key="${2:-}" result="${3:-}"
+    if [ "$result" = success ]; then sv=yes; sw="saved: yes"; else sv=no; sw="saved: NO (the save step ended '${result:-not run}')"; fi
+    echo "- $name cache \`$key\`: $sw" | tee -a "${GITHUB_STEP_SUMMARY:-/dev/null}"
+    echo "cache-report: name=$name outcome=save saved=$sv key=$key"
+    [ "$sv" = yes ] || echo "::warning::cache-report: the save of cache \`$key\` did not succeed. Next step: read the save step's log (cache server, size limit)."
+    ;;
+  *) echo "usage: cache-report.sh outcome <hit> <matched> | line <name> <key> <hit> <matched> <saved> | save <name> <key> <outcome>" >&2; exit 2 ;;
 esac
