@@ -71,7 +71,7 @@ jobs:
       image: ${{ inputs.image }}
     strategy:
       fail-fast: false
-      max-parallel: 2 # four of the six Linux slots stay free
+      max-parallel: 2 # one of the three Linux slots stays free
       matrix:
         include: ${{ fromJSON(inputs.shards) }}
     env:

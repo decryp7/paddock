@@ -57,7 +57,7 @@ jobs:
       image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
     strategy:
       fail-fast: false
-      # One app at a time: scheduled runs leave at least five of the six Linux slots free.
+      # One app at a time: scheduled runs leave at least one of the three Linux slots free.
       max-parallel: 1
       matrix:
         # Every app's UI is `app/` and its Rust side `app/src-tauri/` (the family layout).

@@ -231,7 +231,6 @@ mod tests {
             projects: projects.iter().map(|s| s.to_string()).collect(),
             files: Vec::new(),
             blame,
-            retried: false,
         }
     }
 

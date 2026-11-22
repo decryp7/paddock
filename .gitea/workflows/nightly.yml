@@ -449,7 +449,7 @@ jobs:
   # (rule 55: one implementation of the fuzz run). A crash fails its job, uploads the reproducer and keeps the night from being
   # marked green. Each crate's fuzz folder is its own workspace (`crates/<crate>/fuzz`).
   # Gitea counts runner slots per caller, so the five calls are chained in two chains (ipc, view, testplan and plugin-package,
-  # archive): at most two run at once, which leaves four of the six Linux slots free. A later link runs even after a crash
+  # archive): at most two run at once and one of the three Linux slots stays free. A later link runs even after a crash
   # in the earlier one (`!cancelled()`), so one crash does not hide the others.
   fuzz-ipc:
     name: fuzz (paddock-ipc)

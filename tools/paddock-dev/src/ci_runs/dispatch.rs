@@ -316,7 +316,7 @@ pub struct Request {
     pub max: Duration,
     /// How often to look.
     pub interval: Duration,
-    /// At most this many train runs may wait for their runner at once (the declared `trainWaiters` cap, [`train_waiters`]); 0 when
+    /// At most this many train runs may wait for their runner at once (the Linux slots less one, [`train_waiters`]); 0 when
     /// unknown, and then a train dispatch waits here like any other.
     pub train_waiters: usize,
 }
@@ -410,26 +410,10 @@ pub fn run(
     read: ReadWorkflow<'_>,
     clock: &mut dyn Clock,
     log: &mut dyn Write,
-    health: Option<&mut Health<'_>>,
-) -> Result<Dispatched, String> {
-    run_with_id(http, target, req, read, clock, log, health).map(|(d, _)| d)
-}
-
-/// [`run`], and the id of the run the dispatch created when Gitea's answer names it (newer servers answer the dispatch with the run;
-/// older ones with an empty 204, then `None`). A caller that judges a run it started keeps this handle and judges only that id
-/// (ER-51); with `None` it must find the run another way and prove it is its own (`other_os::pick_run`).
-pub fn run_with_id(
-    http: &mut dyn Http,
-    target: &Target<'_>,
-    req: &Request,
-    read: ReadWorkflow<'_>,
-    clock: &mut dyn Clock,
-    log: &mut dyn Write,
     mut health: Option<&mut Health<'_>>,
-) -> Result<(Dispatched, Option<u64>), String> {
+) -> Result<Dispatched, String> {
     let Target { server, repo, token } = *target;
-    let mut wanted = classes_of(&req.workflow, read)?;
-    restrict_to_os_input(&mut wanted, &req.inputs);
+    let wanted = classes_of(&req.workflow, read)?;
     let mut waited = Duration::ZERO;
     // Hold while Gitea is down: before anything is read or sent, and again inside each wait below. The hold shares the
     // clock, so it counts against the same `--max`.
@@ -443,7 +427,7 @@ pub fn run_with_id(
             log,
         );
         match held {
-            Outcome::TimedOut { .. } => return Ok((service_down(&req.workflow, health.as_deref(), req.max, log), None)),
+            Outcome::TimedOut { .. } => return Ok(service_down(&req.workflow, health.as_deref(), req.max, log)),
             // An address that can never work (a wrong --server): no hold will help.
             Outcome::Failed { detail, .. } => return Err(detail),
             _ => {}
@@ -469,7 +453,7 @@ pub fn run_with_id(
             let waited = match wait_held(&mut probe, health.as_deref_mut(), clock, req.max, req.interval, log) {
                 Outcome::Done { elapsed, .. } => elapsed,
                 Outcome::TimedOut { .. } if health.as_deref().is_some_and(|h| !h.down_now().is_empty()) => {
-                    return Ok((service_down(&req.workflow, health.as_deref(), req.max, log), None));
+                    return Ok(service_down(&req.workflow, health.as_deref(), req.max, log));
                 }
                 Outcome::TimedOut { last, max } => {
                     let _ = writeln!(
@@ -478,7 +462,7 @@ pub fn run_with_id(
                         req.workflow,
                         fmt_duration(max)
                     );
-                    return Ok((Dispatched::StillBusy { last }, None));
+                    return Ok(Dispatched::StillBusy { last });
                 }
                 Outcome::Broken { error, .. } => return Err(format!("the run list could not be read: {error}")),
                 Outcome::Failed { detail, .. } => return Err(detail),
@@ -513,7 +497,7 @@ pub fn run_with_id(
             match wait_held(&mut probe, health.as_deref_mut(), clock, req.max, req.interval, log) {
                 Outcome::Done { elapsed, .. } => waited = elapsed,
                 Outcome::TimedOut { .. } if health.as_deref().is_some_and(|h| !h.down_now().is_empty()) => {
-                    return Ok((service_down(&req.workflow, health.as_deref(), req.max, log), None));
+                    return Ok(service_down(&req.workflow, health.as_deref(), req.max, log));
                 }
                 Outcome::TimedOut { last, max } => {
                     let _ = writeln!(
@@ -523,7 +507,7 @@ pub fn run_with_id(
                         fmt_duration(max),
                         probe.next_step()
                     );
-                    return Ok((Dispatched::StillBusy { last }, None));
+                    return Ok(Dispatched::StillBusy { last });
                 }
                 Outcome::Broken { error, .. } => return Err(format!("the run list could not be read: {error}")),
                 Outcome::Failed { detail, .. } => return Err(detail),
@@ -561,13 +545,7 @@ fn service_down(workflow: &str, health: Option<&Health<'_>>, max: Duration, log:
 }
 
 /// Sends the dispatch.
-fn send(
-    http: &mut dyn Http,
-    target: &Target<'_>,
-    req: &Request,
-    waited: Duration,
-    log: &mut dyn Write,
-) -> Result<(Dispatched, Option<u64>), String> {
+fn send(http: &mut dyn Http, target: &Target<'_>, req: &Request, waited: Duration, log: &mut dyn Write) -> Result<Dispatched, String> {
     let url = format!(
         "{}/api/v1/repos/{}/actions/workflows/{}/dispatches",
         target.server.trim_end_matches('/'),
@@ -575,8 +553,7 @@ fn send(
         req.workflow
     );
     let inputs: serde_json::Map<String, Value> = req.inputs.iter().map(|(k, v)| (k.clone(), json!(v))).collect();
-    let answer = http.post_json(&url, target.token, &json!({"ref": req.git_ref, "inputs": inputs}))?;
-    let run = run_id_of(&answer);
+    http.post_json(&url, target.token, &json!({"ref": req.git_ref, "inputs": inputs}))?;
     let _ = writeln!(
         log,
         "dispatch: dispatched {} on {} after waiting {}",
@@ -584,73 +561,23 @@ fn send(
         req.git_ref,
         fmt_duration(waited)
     );
-    match run {
-        Some(id) => {
-            let _ = writeln!(log, "dispatch: the server created run {id}");
-        }
-        None => {
-            let _ = writeln!(log, "dispatch: the server did not name the run it created (an empty answer)");
-        }
-    }
-    Ok((Dispatched::Yes { waited }, run))
-}
-
-/// The run id in the server's answer to a dispatch: `id`, `run_id` or `workflow_run_id` (also under `workflow_run`), a positive
-/// whole number; `None` for the empty answer of older servers.
-pub fn run_id_of(answer: &Value) -> Option<u64> {
-    ["id", "run_id", "workflow_run_id"]
-        .iter()
-        .find_map(|k| answer.get(k).and_then(Value::as_u64))
-        .or_else(|| answer.get("workflow_run").and_then(run_id_of))
-        .filter(|n| *n > 0)
-}
-
-/// An `os` input (ci.yml's: `linux`, `windows`, `macos`) narrows the single-machine classes the run needs to that one OS: an `os=linux`
-/// run asks for neither the Mac nor the Windows runner, so it does not wait for them (the member gate's Linux part runs at once on
-/// spare lanes), and `os=windows` waits for Windows only. No `os` input, or an empty one: unchanged.
-pub fn restrict_to_os_input(wanted: &mut BTreeSet<RunnerClass>, inputs: &[(String, String)]) {
-    let Some((_, os)) = inputs.iter().rev().find(|(k, _)| k == "os") else {
-        return;
-    };
-    match os.trim() {
-        "linux" => wanted.clear(),
-        "windows" => wanted.retain(|c| *c == RunnerClass::Windows),
-        "macos" => wanted.retain(|c| *c == RunnerClass::Macos),
-        _ => {}
-    }
+    Ok(Dispatched::Yes { waited })
 }
 
 /// The file that declares how many jobs each runner class runs at once (`{"linux": 3}`), relative to the repository root.
 pub const RUNNER_SLOTS: &str = "conformance/ci/runner-slots.json";
 
-/// How many train runs may wait in their runner-wait job at once: the `trainWaiters` cap of [`RUNNER_SLOTS`] (its own declared number
-/// with its reason, not derived from the lane count: the cap was measured at 2, and a bigger host does not change that, ER-12), so
-/// slots stay free for the older runs' own Linux jobs (a Mac job that needs them would otherwise never start, and every waiter would
-/// stall to its limit). `Err` when the file cannot be read, holds no `trainWaiters`, or it is not below the `linux` count.
+/// How many train runs may wait in their runner-wait job at once: the Linux slots of [`RUNNER_SLOTS`] less one, so one slot
+/// stays free for the older runs' own Linux jobs (a Mac job that needs them would otherwise never start, and every waiter would
+/// stall to its limit). `Err` when the file cannot be read or holds no `linux` count of at least 2.
 pub fn train_waiters(root: &std::path::Path) -> Result<usize, String> {
     let path = root.join(RUNNER_SLOTS);
     let text = std::fs::read_to_string(&path).map_err(|e| format!("{} cannot be read: {e}", path.display()))?;
     let v: Value = serde_json::from_str(&text).map_err(|e| format!("{} is not JSON: {e}", path.display()))?;
-    let linux = v["linux"].as_u64().unwrap_or(0);
-    match v["trainWaiters"].as_u64() {
-        Some(n) if n >= 1 && n < linux => Ok(n as usize),
-        _ => Err(format!(
-            "{} has no `trainWaiters` cap of at least 1 and below its `linux` count ({linux})",
-            path.display()
-        )),
+    match v["linux"].as_u64() {
+        Some(n) if n >= 2 => Ok(n as usize - 1),
+        _ => Err(format!("{} has no `linux` slot count of at least 2", path.display())),
     }
-}
-
-/// The Linux lanes the runners run at once, as [`RUNNER_SLOTS`] declares them (the one place; ER-48). `Err` when the file cannot be read
-/// or holds no `linux` count.
-pub fn linux_slots(root: &std::path::Path) -> Result<usize, String> {
-    let path = root.join(RUNNER_SLOTS);
-    let text = std::fs::read_to_string(&path).map_err(|e| format!("{} cannot be read: {e}", path.display()))?;
-    let v: Value = serde_json::from_str(&text).map_err(|e| format!("{} is not JSON: {e}", path.display()))?;
-    v["linux"]
-        .as_u64()
-        .map(|n| n as usize)
-        .ok_or_else(|| format!("{} has no `linux` slot count of at least 2", path.display()))
 }
 
 /// The display name of a workflow's runner-wait job (the first job whose steps use [`RUNNER_WAIT_ACTION`]): its `name`, else its id.
@@ -904,8 +831,6 @@ mod tests {
         branch_seq: VecDeque<String>,
         /// `GET .../runs/<id>/jobs`: the job lists in order per run (the last one repeats).
         jobs: Vec<(u64, VecDeque<Value>)>,
-        /// What the server answers to the dispatch (`Null`: Gitea's empty 204).
-        post_answer: Value,
     }
 
     impl Script {
@@ -920,7 +845,6 @@ mod tests {
                 branch_sha: String::new(),
                 branch_seq: VecDeque::new(),
                 jobs: Vec::new(),
-                post_answer: Value::Null,
             }
         }
     }
@@ -971,7 +895,7 @@ mod tests {
         }
         fn post_json(&mut self, url: &str, _token: &str, body: &Value) -> Result<Value, String> {
             self.posts.push((url.to_string(), body.clone()));
-            Ok(self.post_answer.clone())
+            Ok(Value::Null)
         }
     }
 
@@ -1241,7 +1165,7 @@ mod tests {
         assert_eq!(
             train_waiters(&repo_root()),
             Ok(2),
-            "conformance/ci/runner-slots.json declares the cap of 2 train waiters (measured at 3 slots, kept at 6 lanes)"
+            "conformance/ci/runner-slots.json declares 3 Linux slots"
         );
     }
 
@@ -1250,19 +1174,9 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         assert!(train_waiters(d.path()).unwrap_err().contains("cannot be read"));
         std::fs::create_dir_all(d.path().join("conformance/ci")).unwrap();
-        // The cap is its own number: absent, zero, or not below the lanes is refused; 2 of 6 is 2, whatever the lane count is.
-        for bad in [
-            r#"{"linux": 6}"#,
-            r#"{"linux": 6, "trainWaiters": 0}"#,
-            r#"{"linux": 2, "trainWaiters": 2}"#,
-            r#"{"linux": 1, "trainWaiters": 1}"#,
-        ] {
-            std::fs::write(d.path().join(RUNNER_SLOTS), bad).unwrap();
-            assert!(train_waiters(d.path()).unwrap_err().contains("trainWaiters"), "{bad}");
-        }
-        std::fs::write(d.path().join(RUNNER_SLOTS), r#"{"linux": 6, "trainWaiters": 2}"#).unwrap();
-        assert_eq!(train_waiters(d.path()), Ok(2));
-        std::fs::write(d.path().join(RUNNER_SLOTS), r#"{"linux": 5, "trainWaiters": 4}"#).unwrap();
+        std::fs::write(d.path().join(RUNNER_SLOTS), r#"{"linux": 1}"#).unwrap();
+        assert!(train_waiters(d.path()).unwrap_err().contains("at least 2"));
+        std::fs::write(d.path().join(RUNNER_SLOTS), r#"{"linux": 5}"#).unwrap();
         assert_eq!(train_waiters(d.path()), Ok(4));
         // Unknown (0): the train dispatch waits in the dispatcher, as before runner-wait.
         let mut http = Script::new(vec![
@@ -1834,119 +1748,6 @@ mod tests {
         );
         assert!(parse_request("a.yml", "main", &[], "0s", None).is_err());
         assert!(parse_request("../a.yml", "main", &[], "1m", None).is_err());
-    }
-
-    /// ER-51: the dispatch hands back the run it created when the server names it; the empty answer of an older server is `None`
-    /// (the caller then proves a run is its own), and a zero or a malformed id is never a handle.
-    #[test]
-    fn the_run_a_dispatch_created_is_read_from_the_servers_answer() {
-        assert_eq!(run_id_of(&json!({"id": 8512})), Some(8512));
-        assert_eq!(run_id_of(&json!({"run_id": 7})), Some(7));
-        assert_eq!(run_id_of(&json!({"workflow_run": {"id": 9}})), Some(9));
-        assert_eq!(run_id_of(&Value::Null), None);
-        assert_eq!(run_id_of(&json!({})), None);
-        assert_eq!(run_id_of(&json!({"id": 0})), None);
-        assert_eq!(run_id_of(&json!({"id": "12"})), None);
-    }
-
-    /// The `os` input of ci.yml narrows what a run waits for: Linux waits for no single-machine runner, Windows and macOS for their own.
-    #[test]
-    fn an_os_input_narrows_the_runners_a_dispatch_waits_for() {
-        let both: BTreeSet<RunnerClass> = [RunnerClass::Macos, RunnerClass::Windows].into();
-        let input = |v: &str| vec![("base".to_string(), "x".to_string()), ("os".to_string(), v.to_string())];
-        let mut w = both.clone();
-        restrict_to_os_input(&mut w, &input("linux"));
-        assert!(w.is_empty());
-        let mut w = both.clone();
-        restrict_to_os_input(&mut w, &input("windows"));
-        assert_eq!(w, [RunnerClass::Windows].into());
-        let mut w = both.clone();
-        restrict_to_os_input(&mut w, &input("macos"));
-        assert_eq!(w, [RunnerClass::Macos].into());
-        for none in [vec![], input(""), input("all")] {
-            let mut w = both.clone();
-            restrict_to_os_input(&mut w, &none);
-            assert_eq!(w, both);
-        }
-    }
-
-    /// ER-51 through the whole dispatch: the run id the server answers with comes back from `run_with_id` (and `run` is unchanged);
-    /// with the empty answer of an older server there is no handle.
-    #[test]
-    fn run_with_id_hands_back_the_run_the_dispatch_created() {
-        for (answer, want) in [(json!({"id": 8512}), Some(8512)), (Value::Null, None)] {
-            let mut http = Script::new(vec![runs(&[])]);
-            http.post_answer = answer;
-            let (mut clock, mut log) = (FakeClock(Duration::ZERO), Vec::new());
-            let target = Target {
-                server: SERVER,
-                repo: REPO,
-                token: "secret-token",
-            };
-            let (d, id) = run_with_id(&mut http, &target, &request("linux.yml", "1m"), &files, &mut clock, &mut log, None).unwrap();
-            assert_eq!(d, Dispatched::Yes { waited: Duration::ZERO });
-            assert_eq!(id, want);
-            let log = String::from_utf8(log).unwrap();
-            assert!(
-                log.contains(if want.is_some() {
-                    "the server created run 8512"
-                } else {
-                    "did not name the run"
-                }),
-                "{log}"
-            );
-        }
-    }
-
-    /// Train 18's health hold reaches the split `run_with_id` too: with Gitea down (502 twice) nothing is sent, the hold is the only wait,
-    /// and once it answers the dispatch goes out and the created run comes back. With Gitea down for the whole `--max` it ends in
-    /// `ServiceDown` (not busy) and sends nothing.
-    #[test]
-    fn run_with_id_holds_while_gitea_is_down_then_hands_back_the_run() {
-        use crate::health::Reach;
-        let target = Target {
-            server: SERVER,
-            repo: REPO,
-            token: "secret-token",
-        };
-        let mut reach = crate::health::tests::Scripted::new().script(
-            "api/v1/version",
-            vec![Reach::Answered(502), Reach::Answered(502), Reach::Answered(200)],
-        );
-        let mut health = Health::new(crate::health::tests::both(), &mut reach);
-        let mut http = Script::new(vec![runs(&[])]);
-        http.post_answer = json!({"id": 9001});
-        let (mut clock, mut log) = (FakeClock(Duration::ZERO), Vec::new());
-        let (d, id) = run_with_id(
-            &mut http,
-            &target,
-            &request("linux.yml", "10m"),
-            &files,
-            &mut clock,
-            &mut log,
-            Some(&mut health),
-        )
-        .unwrap();
-        assert_eq!((d, id), (Dispatched::Yes { waited: Duration::ZERO }, Some(9001)));
-        assert!(clock.0 > Duration::ZERO, "it held while Gitea was down");
-        assert_eq!(http.posts.len(), 1);
-        // Down for the whole --max: ServiceDown, nothing sent.
-        let mut reach = crate::health::tests::Scripted::new().script("api/v1/version", vec![Reach::Answered(503)]);
-        let mut health = Health::new(crate::health::tests::both(), &mut reach);
-        let mut http = Script::new(vec![runs(&[])]);
-        let (mut clock, mut log) = (FakeClock(Duration::ZERO), Vec::new());
-        let (d, id) = run_with_id(
-            &mut http,
-            &target,
-            &request("linux.yml", "1m"),
-            &files,
-            &mut clock,
-            &mut log,
-            Some(&mut health),
-        )
-        .unwrap();
-        assert!(matches!(d, Dispatched::ServiceDown { .. }) && id.is_none(), "{d:?}");
-        assert!(http.posts.is_empty());
     }
 
     #[test]

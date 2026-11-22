@@ -67,7 +67,7 @@ jobs:
       RUSTUP_TOOLCHAIN: nightly-2026-10-01
     strategy:
       fail-fast: false
-      # Two shards at a time: of the six Linux runner slots four stay free for release and branch runs.
+      # Two shards at a time: of the three Linux runner slots one stays free for release and branch runs.
       max-parallel: 2
       matrix:
         include:
