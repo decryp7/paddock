@@ -84,6 +84,36 @@ uses it, results in
 
 ## Results of shared tooling
 
+### 2026-11-22, check-result reuse in the member gate (feat/check-result-reuse)
+
+- **Commit:** the tip of `feat/check-result-reuse`, four commits over origin/main `67ac6d6ec`; the change under test is paddock-dev only
+- **Machine:** Mac mini, Apple M4 Pro, 14 cores, macOS 27.2; other agents' builds shared the machine
+- **Load:** 1-minute load about 10 to 20 during the runs; the heavy slot was shared, so queued time is reported apart from run time
+- **Command:** `CARGO_BUILD_JOBS=2 ./dev check --pre-push --member-gate --base origin/main`, in the worktree of the branch, a clean tree
+- **Runs:** one cold run (no record for the binary's key), then one warm run straight after (same tree, same binary); single, not repeated
+- **Numbers:**
+
+  | Row | Cold (run / queued) | Warm |
+  |---|---|---|
+  | lockfile, fmt, clippy, doctest (paddock-dev) | 0.4 + 2.9 + 0.4 + 1.2 s run; 82.5 + 20.4 s queued | reused |
+  | clippy-linux | 9.7 s run, 5.1 s queued | reused |
+  | conformance | 32.6 s | reused |
+  | conformance-tests | 81.1 s run, 112.6 s queued | reused |
+  | ipc-endpoints, gates-register | 2.8 s, 8.6 s | reused |
+  | member-audits | 29.9 s run, 5.1 s queued | ran again: 29.5 s run, 36.0 s queued (never reused: it reads history and the base) |
+  | commit-lint | 0.1 s | ran again (reads commits) |
+  | **Whole command** | **406 s** | **68 s** |
+
+- **Notes:** the whole-command time includes the dev binary start and the queue; the row run times add up to about 170 s cold, of which
+  about 140 s are rows the second run did not repeat. The first warm try (before the last code fix) reused only the cargo rows
+  (fmt, lockfile, clippy): the three rows that start this binary again named it by a held link whose name carries the run's pid, so
+  their key changed every run; the measurement found it and a test (`the_dev_binarys_path_is_not_in_the_key_but_its_bytes_are`) now
+  guards it. A change to one input file reruns the row (`one_changed_input_file_runs_the_row_again`,
+  `a_cargo_row_keys_on_its_workspace_and_path_dependencies_only`). Not measured: a member gate on a real merge where only some
+  workspaces changed (the saving there is the cargo rows of the workspaces the member did not touch; the whole-tree rows rerun),
+  and other machines. The records are `<git common dir>/paddock-pre-push/records/rows/<key>.json`, beside the pass records, with
+  one key function (`pre_push/stamp.rs`).
+
 ### 2026-11-16, unit suites with the test leak detector (feat/test-leak-detector)
 
 - **Commit:** the tip of `feat/test-leak-detector`; base `3585bcab1` (train 13) plus `fix/debrief-startup-loads-drain`
