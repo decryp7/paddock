@@ -48,7 +48,10 @@ fn host<'a>(os: &'a str, cores: &'a str, ram: &'a str) -> Vec<(&'a str, &'a str)
 fn the_shared_mac_gets_a_third_of_its_cores_and_eight_test_threads() {
     let r = build_jobs(&host("macOS", "14", "65536"), None, true);
     assert_eq!(r.code, 0, "{}", r.stderr);
-    assert_eq!(r.env_file, "CARGO_BUILD_JOBS=4\nNEXTEST_TEST_THREADS=8\nPADDOCK_E2E_WORKERS=4\nVITEST_MAX_WORKERS=4\n");
+    assert_eq!(
+        r.env_file,
+        "CARGO_BUILD_JOBS=4\nNEXTEST_TEST_THREADS=8\nPADDOCK_E2E_WORKERS=4\nVITEST_MAX_WORKERS=4\n"
+    );
     assert_eq!(
         r.stderr,
         "build-jobs: this host: 14 cores, 65536 MB of RAM, runner class macOS\n\
@@ -62,7 +65,10 @@ fn the_shared_mac_gets_a_third_of_its_cores_and_eight_test_threads() {
 #[test]
 fn windows_gets_three_jobs_per_host_and_says_it_assumed_the_capacity() {
     let r = build_jobs(&host("Windows", "16", "32768"), None, true);
-    assert_eq!(r.env_file, "CARGO_BUILD_JOBS=5\nNEXTEST_TEST_THREADS=5\nPADDOCK_E2E_WORKERS=5\nVITEST_MAX_WORKERS=5\n");
+    assert_eq!(
+        r.env_file,
+        "CARGO_BUILD_JOBS=5\nNEXTEST_TEST_THREADS=5\nPADDOCK_E2E_WORKERS=5\nVITEST_MAX_WORKERS=5\n"
+    );
     assert!(
         r.stdout
             .starts_with("::notice::build-jobs assumes the Windows runner's capacity is 3"),
@@ -76,7 +82,10 @@ fn memory_is_the_ceiling_when_it_is_smaller_than_the_cores() {
     let mut vars = host("macOS", "14", "4096");
     vars.push(("PADDOCK_CI_RESERVED_RAM_MB", "1024"));
     let r = build_jobs(&vars, None, true);
-    assert_eq!(r.env_file, "CARGO_BUILD_JOBS=1\nNEXTEST_TEST_THREADS=8\nPADDOCK_E2E_WORKERS=4\nVITEST_MAX_WORKERS=4\n");
+    assert_eq!(
+        r.env_file,
+        "CARGO_BUILD_JOBS=1\nNEXTEST_TEST_THREADS=8\nPADDOCK_E2E_WORKERS=4\nVITEST_MAX_WORKERS=4\n"
+    );
     assert!(
         r.stderr
             .contains("(4096 MB - 1024 MB kept) / (3 jobs per host x 1536 MB per rustc)"),
@@ -88,7 +97,10 @@ fn memory_is_the_ceiling_when_it_is_smaller_than_the_cores() {
 #[test]
 fn linux_is_d_gtr9s_layout_of_six_jobs_on_thirty_cores() {
     let r = build_jobs(&host("Linux", "30", "65536"), None, true);
-    assert_eq!(r.env_file, "CARGO_BUILD_JOBS=5\nNEXTEST_TEST_THREADS=5\nPADDOCK_E2E_WORKERS=5\nVITEST_MAX_WORKERS=5\n");
+    assert_eq!(
+        r.env_file,
+        "CARGO_BUILD_JOBS=5\nNEXTEST_TEST_THREADS=5\nPADDOCK_E2E_WORKERS=5\nVITEST_MAX_WORKERS=5\n"
+    );
     assert!(r.stderr.contains("(30 cores - 0 kept) / 6 jobs per host"), "{}", r.stderr);
     assert!(!r.stdout.contains("::warning::"), "{}", r.stdout);
     assert_eq!(
@@ -97,7 +109,10 @@ fn linux_is_d_gtr9s_layout_of_six_jobs_on_thirty_cores() {
     );
     // Another core count: the share follows it and the warning names both numbers and the next step.
     let other = build_jobs(&host("Linux", "16", "131072"), None, true);
-    assert_eq!(other.env_file, "CARGO_BUILD_JOBS=2\nNEXTEST_TEST_THREADS=2\nPADDOCK_E2E_WORKERS=2\nVITEST_MAX_WORKERS=2\n");
+    assert_eq!(
+        other.env_file,
+        "CARGO_BUILD_JOBS=2\nNEXTEST_TEST_THREADS=2\nPADDOCK_E2E_WORKERS=2\nVITEST_MAX_WORKERS=2\n"
+    );
     assert!(
         other
             .stdout
@@ -111,7 +126,12 @@ fn linux_is_d_gtr9s_layout_of_six_jobs_on_thirty_cores() {
 #[test]
 fn without_a_github_env_the_assignments_are_printed() {
     let r = build_jobs(&host("macOS", "14", "65536"), None, false);
-    assert!(r.stdout.starts_with("CARGO_BUILD_JOBS=4\nNEXTEST_TEST_THREADS=8\nPADDOCK_E2E_WORKERS=4\nVITEST_MAX_WORKERS=4\n"), "{}", r.stdout);
+    assert!(
+        r.stdout
+            .starts_with("CARGO_BUILD_JOBS=4\nNEXTEST_TEST_THREADS=8\nPADDOCK_E2E_WORKERS=4\nVITEST_MAX_WORKERS=4\n"),
+        "{}",
+        r.stdout
+    );
 }
 
 #[test]

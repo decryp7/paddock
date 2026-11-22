@@ -110,7 +110,7 @@ pub fn mask(text: &str) -> String {
 }
 
 /// The text from `at` (a call's name) to its matching `)`, or to the end; `open`/`close` pick `(`/`)` or `{`/`}`.
-fn span<'a>(masked: &'a str, at: usize, open: char, close: char) -> &'a str {
+fn span(masked: &str, at: usize, open: char, close: char) -> &str {
     let mut depth = 0usize;
     let mut started = false;
     for (off, ch) in masked[at..].char_indices() {
@@ -144,19 +144,20 @@ fn restores_in_finally(masked: &str) -> bool {
 pub fn scan(text: &str, setup_restores: bool) -> Vec<Site> {
     let m = mask(text);
     let mut sites = Vec::new();
-    if let Some(first) = FAKE.find(&m) {
-        if !setup_restores && !restores_in_hook(&m) {
-            let how = if restores_in_finally(&m) {
-                "it puts the real timers back only in a `finally` block, which a test that times out never reaches"
-            } else {
-                "no afterEach, afterAll or onTestFinished of the file puts the real timers back"
-            };
-            sites.push(Site {
-                line: line_of(&m, first.start()),
-                rule: "fake-timers",
-                message: format!("`vi.useFakeTimers` is called and {how}: the fake clock leaks into the next test of the worker"),
-            });
-        }
+    if let Some(first) = FAKE.find(&m)
+        && !setup_restores
+        && !restores_in_hook(&m)
+    {
+        let how = if restores_in_finally(&m) {
+            "it puts the real timers back only in a `finally` block, which a test that times out never reaches"
+        } else {
+            "no afterEach, afterAll or onTestFinished of the file puts the real timers back"
+        };
+        sites.push(Site {
+            line: line_of(&m, first.start()),
+            rule: "fake-timers",
+            message: format!("`vi.useFakeTimers` is called and {how}: the fake clock leaks into the next test of the worker"),
+        });
     }
     for hit in FIXED_FLUSH.find_iter(&m) {
         sites.push(Site {
