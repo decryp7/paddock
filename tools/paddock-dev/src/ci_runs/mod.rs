@@ -182,6 +182,19 @@ pub struct VerdictArgs {
     server: String,
 }
 
+#[cfg(test)]
+impl VerdictArgs {
+    /// Arguments for a test: `ci.yml` on `sha` at the family's server and repository.
+    fn for_test(sha: &str) -> VerdictArgs {
+        VerdictArgs {
+            workflow: "ci.yml".into(),
+            sha: sha.into(),
+            repo: "decryp7/paddock".into(),
+            server: SERVER.into(),
+        }
+    }
+}
+
 /// Arguments of `ci triage`.
 #[derive(Args)]
 pub struct TriageArgs {
@@ -439,19 +452,27 @@ pub fn verdict(a: &VerdictArgs) -> Result<Report, CliError> {
             .with_hint("Pass the whole sha (`git rev-parse HEAD`)."));
     }
     let root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-    let v = match token() {
-        Err(_) => verdict::Verdict::NotMeasured("GITEA_TOKEN is not set, so the runs cannot be read".into()),
-        Ok(token) => {
-            let mut http = CurlHttp;
-            for line in guard::sweep(&root) {
-                eprintln!("{line}");
-            }
-            let mut client = Client::new(&mut http, &a.server, &a.repo, &token);
-            client.local_state = Some(crate::pre_push::state_dir(&root));
+    let token = token().ok();
+    verdict_with(a, &root, token.as_deref(), &mut CurlHttp)
+}
+
+/// [`verdict`] over any HTTP and a given token (`None`: not set): the answer of the shared reader plus its report.
+fn verdict_with(
+    a: &VerdictArgs,
+    root: &std::path::Path,
+    token: Option<&str>,
+    http: &mut dyn crate::wait::Http,
+) -> Result<Report, CliError> {
+    let v = match token {
+        None => verdict::Verdict::NotMeasured("GITEA_TOKEN is not set, so the runs cannot be read".into()),
+        Some(token) => {
+            // A query has no side effects (CQS, ER-45): dead or silent slow phases are settled by a gate start and `ci dispatch`, never here.
+            let mut client = Client::new(http, &a.server, &a.repo, token);
+            client.local_state = Some(crate::pre_push::state_dir(root));
             verdict::verdict(&mut client, &a.workflow, &a.sha)
         }
     };
-    let r = verdict::report(&v, &a.workflow, &a.sha, &crate::pre_push::outcome::GitRepo(&root));
+    let r = verdict::report(&v, &a.workflow, &a.sha, &crate::pre_push::outcome::GitRepo(root));
     if r.exit != Exit::Ok {
         eprintln!("::error::ci verdict: {}", r.text);
     }

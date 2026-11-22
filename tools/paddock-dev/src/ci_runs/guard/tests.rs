@@ -182,3 +182,30 @@ fn this_checkouts_failed_record_refuses_without_a_server() {
     write_slow(d.path(), &rec(State::Failed)).unwrap();
     assert!(trial_guard::local_refusal(d.path(), SHA).is_some());
 }
+
+/// Round 3 P2-8 (CQS, ER-45): `ci verdict` only reads. A running record whose holder is gone is left exactly as it is, and nothing
+/// is written to the server; only a gate start and `ci dispatch` settle such records.
+#[test]
+fn ci_verdict_is_read_only_and_leaves_a_dead_holders_record_alone() {
+    let d = tempfile::tempdir().unwrap();
+    let root = d.path().join("repo");
+    std::fs::create_dir_all(&root).unwrap();
+    assert!(crate::plan_repo::git_text(&root, &["init", "-q"]).is_some());
+    let state = crate::pre_push::state_dir(&root);
+    write_slow(
+        &state,
+        &Slow {
+            pid: 999_999_999,
+            start_micros: 1,
+            beat: 1,
+            ..rec(State::Running)
+        },
+    )
+    .unwrap();
+    let mut f = crate::ci_runs::testutil::Fake::default();
+    let a = super::super::VerdictArgs::for_test(SHA);
+    let report = super::super::verdict_with(&a, &root, Some("t"), &mut f);
+    assert!(report.is_ok());
+    let after = trial_guard::read_slow(&state, SHA).unwrap().unwrap();
+    assert_eq!(after.state, State::Running, "a query must not settle a record: {after:?}");
+}
