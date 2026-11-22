@@ -164,6 +164,9 @@ pub struct Client<'a> {
     token: String,
     /// Waits between retries; tests set it to nothing.
     pub backoff_ms: u64,
+    /// The push gate's state folder of this checkout, when the caller has one: a verdict also reads the split-push record there
+    /// ([`crate::trial_guard::slow_rows_gate`]).
+    pub local_state: Option<std::path::PathBuf>,
 }
 
 impl<'a> Client<'a> {
@@ -175,6 +178,7 @@ impl<'a> Client<'a> {
             repo: repo.to_string(),
             token: token.to_string(),
             backoff_ms: 500,
+            local_state: None,
         }
     }
 
@@ -194,27 +198,47 @@ impl<'a> Client<'a> {
         Ok(None)
     }
 
-    /// The commit statuses of `sha` (`GET .../commits/<sha>/statuses`), newest first as the server sorts them: `(id, context, state)`.
-    /// A commit the server does not have is an empty list (404). The state is the API's `status` (older servers `state`).
-    pub fn commit_statuses(&mut self, sha: &str) -> Result<Vec<(u64, String, String)>, String> {
-        let url = format!(
-            "{}/api/v1/repos/{}/commits/{sha}/statuses?limit=50",
-            self.server.trim_end_matches('/'),
-            self.repo
-        );
-        let body = self.retry(|c| c.http.get_json(&url, &c.token))?.unwrap_or(Value::Null);
-        Ok(body
-            .as_array()
-            .map(|a| {
-                a.iter()
-                    .map(|s| {
-                        let t = |k: &str| s[k].as_str().unwrap_or("").to_string();
-                        let state = if s["status"].is_string() { t("status") } else { t("state") };
-                        (s["id"].as_u64().unwrap_or(0), t("context"), state)
-                    })
-                    .collect()
-            })
-            .unwrap_or_default())
+    /// The state of the slow-rows commit status of `sha`, from Gitea's combined per-context endpoint (`GET .../commits/<sha>/status`,
+    /// the newest status of each context, paged): `Ok(Some(state))` when the context is found, `Ok(None)` when the pages end without
+    /// it (or the commit is not on the server), `Err` when a page can't be read or [`crate::trial_guard::STATUS_PAGES`] pages were
+    /// read without finding it or reaching the end: an unseen status is never "absent". The state is the entry's `status` (older
+    /// servers `state`).
+    pub fn slow_rows_status(&mut self, sha: &str) -> Result<Option<String>, String> {
+        let limit = 50;
+        for page in 1..=crate::trial_guard::STATUS_PAGES {
+            let url = format!(
+                "{}/api/v1/repos/{}/commits/{sha}/status?page={page}&limit={limit}",
+                self.server.trim_end_matches('/'),
+                self.repo
+            );
+            let body = self.retry(|c| c.http.get_json(&url, &c.token))?.unwrap_or(Value::Null);
+            let list = body["statuses"].as_array().cloned().unwrap_or_default();
+            for s in &list {
+                if s["context"].as_str() == Some(crate::trial_guard::CONTEXT) {
+                    let t = |k: &str| s[k].as_str().map(str::to_string);
+                    return Ok(Some(t("status").or_else(|| t("state")).unwrap_or_default()));
+                }
+            }
+            if list.len() < limit {
+                return Ok(None);
+            }
+        }
+        Err(format!(
+            "the {} status of {} was not among the first {} statuses of the commit",
+            crate::trial_guard::CONTEXT,
+            &sha[..sha.len().min(12)],
+            u64::from(crate::trial_guard::STATUS_PAGES) * 50
+        ))
+    }
+
+    /// Whether the token's user may write to the repository (`GET .../repos/<repo>`: `permissions.push`), the right a commit status
+    /// needs. `Err` when it can't be read, `Ok(false)` when it can't write.
+    pub fn can_write(&mut self) -> Result<bool, String> {
+        let url = format!("{}/api/v1/repos/{}", self.server.trim_end_matches('/'), self.repo);
+        let body = self
+            .retry(|c| c.http.get_json(&url, &c.token))?
+            .ok_or("the repository was not found")?;
+        Ok(body["permissions"]["push"].as_bool().unwrap_or(false))
     }
 
     /// Sets a commit status (`POST .../statuses/<sha>`): `state` is `pending`, `success`, `failure` or `error`. The commit must be on

@@ -13,7 +13,7 @@
 //! never finished. Each side writes its own file first and reads the other's afterwards, so at least one of them sees both and
 //! no lock is needed; a cancel is idempotent (a finished run is left alone).
 //!
-//! Never green by skipping: [`judge`] has no "fine" for a record that is still running past its deadline or whose process is
+//! Never green by skipping: [`judge`] has no "fine" for a record whose heartbeat went silent or whose process is
 //! gone. A trial whose slow rows never finished is not evidence, and the run is cancelled.
 
 use crate::ci_runs::client::{Client, RunInfo};
@@ -40,7 +40,8 @@ pub enum State {
 }
 
 impl State {
-    fn name(self) -> &'static str {
+    /// The state's name as the record and the status text use it.
+    pub fn name(self) -> &'static str {
         match self {
             State::Running => "running",
             State::Passed => "passed",
@@ -72,8 +73,13 @@ pub struct Slow {
     pub pid: u32,
     /// Start time of that process in microseconds (0: not known).
     pub start_micros: u64,
-    /// Unix seconds after which a record that is still running counts as never finished.
-    pub finish_by: u64,
+    /// Unix seconds of the last heartbeat of the process running the rows (written every [`BEAT_EVERY_SECS`] while it works). There is
+    /// no total deadline: a slow phase that keeps beating, queued behind other agents for hours, is never cancelled; one that goes
+    /// silent for [`STALE_AFTER_SECS`] is.
+    pub beat: u64,
+    /// The final status (success, failure or error) has been posted on the commit; a final record with this false is posted again by
+    /// the next sweep.
+    pub posted: bool,
     /// The folder of the rows' logs.
     pub logs: String,
     /// The remote ref pushed (`refs/heads/wip/x`): a later push of the same ref ends this one's process.
@@ -85,10 +91,15 @@ pub struct Slow {
 }
 
 impl Slow {
+    /// The record's state name.
+    pub fn state_name(&self) -> &'static str {
+        self.state.name()
+    }
+
     /// The record as JSON.
     pub fn to_json(&self) -> Value {
         json!({"sha": self.sha, "state": self.state.name(), "row": self.row, "why": self.why, "next": self.next,
-               "pid": self.pid, "start_micros": self.start_micros, "finish_by": self.finish_by, "logs": self.logs,
+               "pid": self.pid, "start_micros": self.start_micros, "beat": self.beat, "posted": self.posted, "logs": self.logs,
                "remote_ref": self.remote_ref, "server": self.server, "repo": self.repo})
     }
 
@@ -103,7 +114,8 @@ impl Slow {
             next: s("next"),
             pid: v["pid"].as_u64().and_then(|n| u32::try_from(n).ok()).unwrap_or(0),
             start_micros: v["start_micros"].as_u64().unwrap_or(0),
-            finish_by: v["finish_by"].as_u64().unwrap_or(0),
+            beat: v["beat"].as_u64().unwrap_or(0),
+            posted: v["posted"].as_bool().unwrap_or(false),
             logs: s("logs"),
             remote_ref: s("remote_ref"),
             server: s("server"),
@@ -218,7 +230,7 @@ pub fn read_dispatched(state: &Path, sha: &str) -> Result<Option<Dispatched>, St
 /// What the slow rows' record says about the run.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Verdict {
-    /// Still running inside its deadline: nothing to do yet.
+    /// Still running and beating: nothing to do yet.
     Pending,
     /// Every slow row passed.
     Pass,
@@ -250,9 +262,10 @@ pub fn judge(rec: &Slow, now: u64, alive: &dyn Fn(u32, u64) -> bool) -> Verdict 
         State::Passed => Verdict::Pass,
         State::Failed => Verdict::Cancel(at("failed")),
         State::NotMeasured => Verdict::Cancel(at("were not measured (not evidence)")),
-        State::Running if rec.finish_by != 0 && now > rec.finish_by => Verdict::Cancel(format!(
-            "trial {}: the slow rows never finished before their deadline; a trial whose slow rows never finished is not evidence. Next: read the logs in {}, then run `./dev check --pre-push` on the commit",
+        State::Running if now > rec.beat.saturating_add(STALE_AFTER_SECS) => Verdict::Cancel(format!(
+            "trial {}: the slow rows stopped reporting (no heartbeat for over {} min); a trial whose slow rows never finished is not evidence. Next: read the logs in {}, then run `./dev check --pre-push` on the commit",
             &rec.sha[..rec.sha.len().min(12)],
+            STALE_AFTER_SECS / 60,
             rec.logs
         )),
         State::Running if rec.pid != 0 && !alive(rec.pid, rec.start_micros) => Verdict::Cancel(format!(
@@ -263,6 +276,25 @@ pub fn judge(rec: &Slow, now: u64, alive: &dyn Fn(u32, u64) -> bool) -> Verdict 
         )),
         State::Running => Verdict::Pending,
     }
+}
+
+/// How often the process running the slow rows writes its heartbeat into the record.
+pub const BEAT_EVERY_SECS: u64 = 30;
+
+/// How long a running record may go without a heartbeat before it counts as silent: 10 missed beats. The slow phase has no total
+/// time budget (the push gate's own limits are per row and by queue progress, ADR 0102 amendment 2026-11-22); this is the only
+/// clock on it, and it measures that the process still works, not how long the work takes.
+pub const STALE_AFTER_SECS: u64 = 300;
+
+/// Writes a heartbeat into the record of `sha` if it is still running (a settled record is never put back to running).
+pub fn beat(state: &Path, sha: &str, now: u64) -> Result<(), String> {
+    if let Some(mut r) = read_slow(state, sha)?
+        && r.state == State::Running
+    {
+        r.beat = now;
+        write_slow(state, &r)?;
+    }
+    Ok(())
 }
 
 /// The clock and the process table a verdict is read with: `now` in unix seconds, `alive(pid, start_micros)` whether a holder may
@@ -408,20 +440,33 @@ pub fn post_slow_status(http: &mut dyn Http, token: &str, rec: &Slow) -> Result<
     client.post_status(&rec.sha, status_state(rec.state), CONTEXT, &what).map(|()| true)
 }
 
-/// Why the server's status of `sha` refuses it: `Some(line)` when a `paddock/slow-rows` status exists and its newest entry is not
-/// `success`; `None` when there is none or it is success. `Err`: the statuses could not be read (the caller fails closed).
-pub fn status_refusal(client: &mut Client, sha: &str) -> Result<Option<String>, String> {
-    let newest = client
-        .commit_statuses(sha)?
-        .into_iter()
-        .filter(|(_, ctx, _)| ctx == CONTEXT)
-        .max_by_key(|(id, _, _)| *id);
-    Ok(match newest {
-        Some((_, _, state)) if state != "success" => Some(format!(
-            "the slow local rows of {} have status `{state}` ({CONTEXT}): a wip/ or trial/ push that ran only its fast rows before the push. Next: read the rows' logs, fix, and push again; a train needs the full push gate",
-            &sha[..sha.len().min(12)]
+/// The pages of the combined status read for the slow-rows context, and their size: a context that is not in the first
+/// `STATUS_PAGES` pages is not measured, never "absent".
+pub const STATUS_PAGES: u32 = 10;
+
+/// Whether CI evidence for `sha` may count, from the slow-rows status and this checkout's own record, failing closed (a status or a
+/// record that can't be read, or a status that is not in its pages, is never "no refusal"):
+/// - the status exists in any state: only `success` lets the evidence count;
+/// - there is none and this checkout has a record (or one it cannot read): refused, because a status that should exist did not land;
+/// - there is none and no record: the commit never went through a split push, so the evidence counts.
+///
+/// `Ok(Some(why))` refuses, `Ok(None)` lets it count, `Err` is not measured.
+pub fn slow_rows_gate(client: &mut Client, local: Option<&Path>, sha: &str) -> Result<Option<String>, String> {
+    let short = &sha[..sha.len().min(12)];
+    let status = client.slow_rows_status(sha)?;
+    let recorded = match local {
+        None => false,
+        Some(state) => !matches!(read_slow(state, sha), Ok(None)),
+    };
+    Ok(match status {
+        Some(state) if state == "success" => None,
+        Some(state) => Some(format!(
+            "the slow local rows of {short} have status `{state}` ({CONTEXT}): a wip/ or trial/ push that ran only its fast rows before the push. Next: read the rows' logs, fix, and push again; a train needs the full push gate"
         )),
-        _ => None,
+        None if recorded => Some(format!(
+            "this checkout has a split-push record for {short} but the server has no `{CONTEXT}` status for it (the post did not land). Next: run `./dev check --pre-push` on the commit (it posts `success`), or any `./dev ci dispatch` posts it again"
+        )),
+        None => None,
     })
 }
 
@@ -457,20 +502,68 @@ fn slow_records(state: &Path) -> Vec<Slow> {
         .collect()
 }
 
-/// The one shared settle for records whose process is dead or past its deadline: run on every push gate start, every `ci dispatch`
-/// and the verdict command. Each such record has its registered run cancelled and its status posted as `error`, and only then is
-/// it rewritten as not measured, so a failure of either leaves it running (it still refuses locally) to be settled by the next
-/// sweep. Returns one line per record.
-pub fn sweep(state: &Path, http: &mut dyn Http, token: &str, time: &Time<'_>) -> Vec<String> {
+/// Posts the record's final verdict as the commit status and, when it landed for a final record, keeps that in the record (`posted`):
+/// a final record whose post did not land is posted again by the next sweep. `Ok(false)`: the record names no server.
+pub fn post_final(state: &Path, http: &mut dyn Http, token: &str, rec: &mut Slow) -> Result<bool, String> {
+    let posted = post_slow_status(http, token, rec)?;
+    if posted && rec.state != State::Running && !rec.posted {
+        rec.posted = true;
+        write_slow(state, rec)?;
+    }
+    Ok(posted)
+}
+
+/// A full push-gate pass on `sha` clears a red record: it becomes `passed` and `success` is posted, so the "run `./dev check
+/// --pre-push`" step of a failed trial is true. `Ok(None)`: nothing to clear (no record, or already passed and posted). The record
+/// is rewritten first, so a failed post leaves a passed record that is not posted, which the next sweep posts.
+pub fn clear_after_full_pass(state: &Path, http: &mut dyn Http, token: &str, sha: &str) -> Result<Option<String>, String> {
+    let Some(mut rec) = read_slow(state, sha)? else { return Ok(None) };
+    if rec.state == State::Passed && rec.posted {
+        return Ok(None);
+    }
+    rec.state = State::Passed;
+    rec.row.clear();
+    rec.why.clear();
+    rec.next.clear();
+    rec.posted = false;
+    write_slow(state, &rec)?;
+    let landed = post_final(state, http, token, &mut rec)?;
+    Ok(Some(format!(
+        "trial {}: the full gate passed, so the slow-rows record is cleared and the status {CONTEXT} is {}",
+        &sha[..sha.len().min(12)],
+        if landed {
+            "`success`"
+        } else {
+            "not posted (no server in the record)"
+        }
+    )))
+}
+
+/// The one shared settle: run on every push gate start, every `ci dispatch` and the verdict command. A running record whose process
+/// is gone, or whose heartbeat went silent, has its registered run cancelled, its holder ended if it is still alive (`end`, through
+/// the held pid and start time, ER-51) and its status posted as `error`, and only then is it rewritten as not measured, so a failure
+/// leaves it running (it still refuses locally) for the next sweep. A final record whose status did not land is posted again. Returns
+/// one line per record.
+pub fn sweep(state: &Path, http: &mut dyn Http, token: &str, time: &Time<'_>, end: &dyn Fn(u32, u64)) -> Vec<String> {
     let mut lines = Vec::new();
+    // per-item: Gitea has no bulk commit-status or run-cancel API; each record names its own commit and run, and the folder is
+    // bounded to KEEP_RECORDS commits (and only running or unposted records make a request)
     for mut rec in slow_records(state) {
+        let short = rec.sha[..rec.sha.len().min(12)].to_string();
         if rec.state != State::Running {
+            if !rec.posted && !rec.server.is_empty() {
+                lines.push(match post_final(state, http, token, &mut rec) {
+                    Ok(_) => format!("trial {short}: the status {CONTEXT} that had not landed is posted"),
+                    Err(e) => {
+                        format!("::warning::trial {short}: the status {CONTEXT} is still not posted ({e}); the next gate start tries again")
+                    }
+                });
+            }
             continue;
         }
         let Verdict::Cancel(why) = judge(&rec, time.now, time.alive) else {
             continue;
         };
-        let short = rec.sha[..rec.sha.len().min(12)].to_string();
         let cancelled = match settle(state, &rec.sha, http, token, time.now, time.alive) {
             Ok(Settled::Cancelled { run, .. }) => format!("run {run} cancelled"),
             Ok(_) => "no run registered".to_string(),
@@ -481,21 +574,28 @@ pub fn sweep(state: &Path, http: &mut dyn Http, token: &str, time: &Time<'_>) ->
                 continue;
             }
         };
+        let ended = if rec.pid != 0 && (time.alive)(rec.pid, rec.start_micros) {
+            end(rec.pid, rec.start_micros);
+            "; its process was still alive and was ended"
+        } else {
+            ""
+        };
         rec.state = State::NotMeasured;
         rec.row = "slow rows".into();
-        rec.why = "the process holding them ended or passed its deadline without a result".into();
+        rec.why = "the process holding them ended or went silent without a result".into();
         rec.next = "run `./dev check --pre-push` on the commit".into();
-        if let Err(e) = post_slow_status(http, token, &rec) {
-            lines.push(format!(
-                "::warning::trial {short}: {why}. The status could not be posted ({e}); the next gate start tries again"
-            ));
-            continue;
-        }
+        rec.posted = false;
         if let Err(e) = write_slow(state, &rec) {
             lines.push(format!("::warning::trial {short}: the record could not be rewritten ({e})"));
             continue;
         }
-        lines.push(format!("::error::{why}. {cancelled}; the status {CONTEXT} is `error`"));
+        if let Err(e) = post_final(state, http, token, &mut rec) {
+            lines.push(format!(
+                "::warning::trial {short}: {why}. The status could not be posted ({e}); the next gate start posts it"
+            ));
+            continue;
+        }
+        lines.push(format!("::error::{why}. {cancelled}{ended}; the status {CONTEXT} is `error`"));
     }
     lines
 }

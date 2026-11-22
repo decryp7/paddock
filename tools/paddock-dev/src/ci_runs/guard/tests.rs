@@ -73,7 +73,8 @@ fn rec(state: State) -> Slow {
         next: "fix it".into(),
         pid: 5,
         start_micros: 6,
-        finish_by: u64::MAX,
+        beat: u64::MAX,
+        posted: false,
         logs: "/l".into(),
         remote_ref: String::new(),
         server: String::new(),
@@ -171,56 +172,6 @@ fn a_run_that_never_shows_is_reported_as_not_guarded() {
     assert!(line.contains("::warning::") && line.contains("NOT guarded"), "{line}");
     assert!(g.inner.writes.is_empty());
     assert!(trial_guard::read_dispatched(d.path(), SHA).unwrap().is_none());
-}
-
-/// P1-2: a run that finished green before the slow rows failed is still refused, through the commit status.
-#[test]
-fn a_green_run_is_refused_when_the_slow_rows_status_is_not_success() {
-    use super::super::verdict::Verdict as V;
-    let verdict_of = |statuses: Vec<(u64, &str, &str)>, v: V| {
-        let mut g = RunsOnly {
-            statuses: statuses.into_iter().map(|(i, c, s)| (i, c.to_string(), s.to_string())).collect(),
-            ..Default::default()
-        };
-        let mut client = Client::new(&mut g, "https://gitea.invalid", "o/r", "t");
-        with_slow_rows(&mut client, v, SHA)
-    };
-    let green = || V::Green { run: 77 };
-    assert_eq!(verdict_of(vec![], green()), green(), "no status: unchanged");
-    assert_eq!(verdict_of(vec![(1, trial_guard::CONTEXT, "success")], green()), green());
-    for bad in ["failure", "error", "pending"] {
-        match verdict_of(vec![(1, trial_guard::CONTEXT, bad)], green()) {
-            V::Red { run: Some(77), reason } => assert!(reason.contains(bad), "{reason}"),
-            other => panic!("{bad}: {other:?}"),
-        }
-    }
-    let red = V::Red {
-        run: None,
-        reason: "x".into(),
-    };
-    assert_eq!(
-        verdict_of(vec![(1, trial_guard::CONTEXT, "failure")], red.clone()),
-        red,
-        "a red verdict stays as it was"
-    );
-}
-
-#[test]
-fn a_green_run_whose_status_cannot_be_read_is_not_measured() {
-    struct Down;
-    impl Http for Down {
-        fn get_json(&mut self, _u: &str, _t: &str) -> Result<Value, String> {
-            Err("curl: (7) connection refused".into())
-        }
-    }
-    let mut http = Down;
-    let mut client = Client::new(&mut http, "https://gitea.invalid", "o/r", "t");
-    client.backoff_ms = 0;
-    let v = with_slow_rows(&mut client, super::super::verdict::Verdict::Green { run: 5 }, SHA);
-    assert!(
-        matches!(&v, super::super::verdict::Verdict::NotMeasured(why) if why.contains("could not be read")),
-        "{v:?}"
-    );
 }
 
 #[test]

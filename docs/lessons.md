@@ -3019,6 +3019,16 @@ started row has its own generous cap (60 min) with the process list and stacks w
 row's own progress follows. Recurring: a wall-clock bound judges liveness (ADR 0031's class; CI run 7096, the 2026-11-12 slot-acquire
 wait, ER-12).
 
+## A total over the rows of one push is the same defect as the 15-minute budget, with a new number (2026-11-21, fix/push-gate-queue-stall)
+
+The 2026-11-19 fix kept a total run budget "only to stop new rows" and made the queue allowance a total over the push; on 2026-11-21
+three pushes were refused with 5 to 15 rows "not measured" and no row over its cap. Time a step queued while a sibling row of its own push
+held the heavy slot counted as run time, so one `clippy-windows` run (859 s run, 1,534 s queued) spent the 15 minutes; the allowance then
+ran out over 15 rows. **Rule:** a row's bound is its own, on its own run time, from when it starts; a wait is bounded by the progress
+of what it waits for, not by its length, and never by a total shared with other rows (ADR 0102, amendment 2026-11-21; ER-12: the number
+is the longest measured gap, recorded in docs/benchmarks.md). Recurring: a wall-clock total judges liveness (2026-11-19 lesson above;
+ADR 0031's class; CI run 7096; the 2026-11-12 slot-acquire wait).
+
 ## A FLAKY test blocks only when the change touches its feature (train 14, runs 8297 and 8300, 2026-11-19)
 
 Debrief train 14 was held by rare WebKit flakes (1 in 145 runs) in the accessibility check and the home dashboard. The train changed

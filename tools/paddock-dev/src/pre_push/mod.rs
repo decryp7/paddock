@@ -46,7 +46,7 @@ pub mod warm;
 use crate::plan::{Request, plan_with_graph};
 use crate::plan_repo::git_text;
 use clap::Args;
-use exec::{BUDGET, Kind, QUEUE_MAX, RealExec, Row, RunOpts, run_all_timed, workers};
+use exec::{Kind, QUEUE_STALL, RealExec, Row, RunOpts, run_all_timed, workers};
 use gates::{Change, Facts};
 use paddock_cli::{CliError, Exit, Report};
 use paddock_env::winpath;
@@ -282,7 +282,7 @@ impl known::Lookups for RealLookups {
         if let Some(reason) = crate::ci_runs::guard::local_slow_rows(&self.root, sha) {
             return Err(format!("red or partial: {reason}"));
         }
-        match crate::ci_runs::ci_verdict(known::CI_WORKFLOW, sha) {
+        match crate::ci_runs::ci_verdict(known::CI_WORKFLOW, sha, Some(state_dir(&self.root))) {
             crate::ci_runs::verdict::Verdict::Green { run } => Ok(run),
             crate::ci_runs::verdict::Verdict::Red { reason, .. } => Err(format!("red or partial: {reason}")),
             crate::ci_runs::verdict::Verdict::NotMeasured(why) => Err(format!("not measured: {why}")),
@@ -383,9 +383,20 @@ fn command_in(
     // The fast phase needs a token and a server to post the slow rows' verdict to (the commit status): without them the full gate
     // runs, and the run says so.
     let mut status_to = (String::new(), String::new());
+    let probe_write = |server: &str, repo: &str| match given {
+        Some(g) => g.probe_status_write(server, repo),
+        None => trial_profile::probe_status_write_real(server, repo),
+    };
+    let clear = |state: &Path, sha: &str| match given {
+        Some(g) => g.clear_trial(state, sha),
+        None => trial_profile::clear_real(state, sha),
+    };
     let mut phase_note = None;
     if phase == Some(trial_profile::Phase::Fast) {
-        match trial_profile::status_target(&root, args.remote.as_deref(), env.get("GITEA_TOKEN").map(String::as_str)) {
+        match trial_profile::fast_allowed(
+            trial_profile::status_target(&root, args.remote.as_deref(), env.get("GITEA_TOKEN").map(String::as_str)),
+            &probe_write,
+        ) {
             Ok(t) => status_to = t,
             Err(why) => {
                 phase = None;
@@ -409,6 +420,12 @@ fn command_in(
         let (found, trail) = known::find(&root, &state, args.remote.as_deref(), &pushed, &measured, look);
         log_known(&state, &pushed, args.remote.as_deref(), &trail);
         if let Some(ev) = found {
+            // A pass record is a full gate pass: it clears a red slow-rows record of the same commit.
+            for sha in &pushed {
+                if let Some(line) = clear(&state, sha) {
+                    eprintln!("pre-push: {line}");
+                }
+            }
             return Ok(known::report(&pushed, args.remote.as_deref(), &ev));
         }
         lookup_notes = trail;
@@ -513,7 +530,7 @@ fn command_in(
         row_cap: exec::ROW_CAP,
         state: state.clone(),
     };
-    let queue = queue_max(&env);
+    let queue_stall = queue_stall(&env);
     let history = GitHistory::new(&work, GIT_TIMEOUT);
     let req = Request {
         files: change.files.clone(),
@@ -585,17 +602,16 @@ fn command_in(
         notes.push("no heavy on PATH: the compiles (clippy, xwin, Linux) run through the heavy built from tools/heavy (cached under ~/.paddock-dev/bin); if that build fails they are not measured (ER-24)".into());
     }
     let head = format!(
-        "{overridden}pre-push: base {} ({}), {} commit(s) beyond it; {} changed file(s); {} gate(s) at a time (1-minute load {}); run budget {} min (after it no new row starts; a started row is not cut by it) and a cap of {} min per row, stacks logged before a step is ended; watchdog: {} (time queued for the heavy slot behind other agents is reported apart and bounded on its own: {} min for the whole push; {}); logs in {}\n{}",
+        "{overridden}pre-push: base {} ({}), {} commit(s) beyond it; {} changed file(s); {} gate(s) at a time (1-minute load {}); no total budget: each row has a cap of {} min on its own run time, counted from when it starts running, stacks logged before a step is ended; watchdog: {} (waiting for the heavy slot is queue time, reported apart and never run time; it goes on while the queue moves and ends after {} min without progress; {}); logs in {}\n{}",
         base,
         base_why,
         commit_count(&root, &base, pushed.first().map_or("HEAD", String::as_str)),
         change.files.len(),
         n,
         load.map_or("unknown".to_string(), |l| format!("{l:.1}")),
-        BUDGET.as_secs() / 60,
         exec::ROW_CAP.as_secs() / 60,
         real.watchdog.name(),
-        queue.as_secs() / 60,
+        queue_stall.as_secs() / 60,
         if real.priority {
             "priority lane: this push lands on a train, main or a release tag"
         } else {
@@ -607,21 +623,22 @@ fn command_in(
     // What the run is about (the commit and its tree) is the evidence of every pass, so it is known before the first gate runs.
     let checked = pushed.first().cloned().or_else(|| if clean { head_sha.clone() } else { None });
     let subject = outcome::subject_of(&root, checked.as_deref());
-    // The background phase posts `pending` for the commit while its rows run (the push may land after it started: it retries).
+    // The background phase posts `pending` for the commit and keeps a heartbeat in its record while its rows run (the push may land
+    // after it started: the pending post retries). A slow phase that keeps beating is never cancelled, however long its queue.
     let rows_done = AtomicBool::new(false);
     let (mut rows, timings) = std::thread::scope(|scope| {
         if phase == Some(trial_profile::Phase::Slow)
             && let Some(sha) = checked.as_deref()
         {
             scope.spawn(|| eprintln!("pre-push: {}", ex.post_trial_pending(&state, sha, &rows_done)));
+            scope.spawn(|| ex.beat_trial(&state, sha, &rows_done));
         }
         let r = run_all_timed(
             &planned,
             ex,
             &RunOpts {
                 workers: n,
-                budget: BUDGET,
-                queue,
+                queue_stall,
                 stop: &stop,
                 subject: &subject,
             },
@@ -658,8 +675,6 @@ fn command_in(
             stdin,
             logs: &real.logs,
             env: &env,
-            budget: BUDGET,
-            queue,
         };
         let line = trial_step(ph, &run, &rows, report.exit);
         report.text = format!("{}\n{line}", report.text);
@@ -688,12 +703,16 @@ fn command_in(
         if let Err(e) = known::write_record(&root, &state, &sha, &base, &passed, now, &run_outcome) {
             eprintln!("::warning::pre-push: the pass record of {sha} was not written: {e}. A later push of it is checked again.");
         }
+        // A full pass on a commit that went through a split push clears its red slow-rows record and posts `success` (ADR 0114).
+        if let Some(line) = ex.clear_trial(&state, &sha) {
+            eprintln!("pre-push: {line}");
+        }
     }
     Ok(report)
 }
 
 /// What one trial-profile step needs besides its phase and rows: the executor, the state folder, the pushed commit and the push's
-/// own inputs (the child re-reads them), and the gate's limits the deadline is derived from.
+/// own inputs (the child re-reads them). There is no budget here: the slow phase is bounded by its heartbeat, not a total time.
 struct TrialRun<'a> {
     ex: &'a dyn exec::Exec,
     state: &'a Path,
@@ -706,8 +725,6 @@ struct TrialRun<'a> {
     stdin: &'a str,
     logs: &'a Path,
     env: &'a HashMap<String, String>,
-    budget: Duration,
-    queue: Duration,
 }
 
 /// What the trial profile does after its rows: the fast phase (its rows passed) ends the slow rows of an earlier push of the same ref,
@@ -728,8 +745,6 @@ fn trial_step(phase: trial_profile::Phase, run: &TrialRun<'_>, rows: &[(String, 
         stdin,
         logs,
         env,
-        budget,
-        queue,
     } = *run;
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -743,7 +758,8 @@ fn trial_step(phase: trial_profile::Phase, run: &TrialRun<'_>, rows: &[(String, 
         next: String::new(),
         pid: 0,
         start_micros: 0,
-        finish_by: now + trial_profile::deadline_after(budget, queue, exec::ROW_CAP).as_secs(),
+        beat: now,
+        posted: false,
         logs: logs.to_string_lossy().into_owned(),
         remote_ref: remote_ref.to_string(),
         server: status_to.0.clone(),
@@ -808,7 +824,7 @@ fn trial_step(phase: trial_profile::Phase, run: &TrialRun<'_>, rows: &[(String, 
 }
 
 /// One line per run in `queue-times.log` beside the gate logs: the whole push's heavy queue and run time, the measurement the
-/// per-push queue allowance ([`QUEUE_MAX`]) is to be revisited with (its basis so far is per step, ADR 0102 amendment).
+/// stall limit ([`QUEUE_STALL`]) can be checked against (the gaps between queue events are in docs/benchmarks.md, ADR 0102 amendment 2026-11-21).
 fn log_queue_times(state: &Path, sha: Option<&str>, base: &str, timings: &std::collections::BTreeMap<String, budget::Timing>) {
     use std::io::Write;
     let queued: f64 = timings.values().map(|t| t.queued).sum();
@@ -830,13 +846,13 @@ fn log_queue_times(state: &Path, sha: Option<&str>, base: &str, timings: &std::c
         .and_then(|mut f| f.write_all(line.as_bytes()));
 }
 
-/// The push's queue allowance (all its heavy steps' waits for the slot together): `PADDOCK_QUEUE_MAX` (seconds, at least 1) or
-/// [`QUEUE_MAX`].
-fn queue_max(env: &HashMap<String, String>) -> Duration {
-    env.get("PADDOCK_QUEUE_MAX")
+/// How long a step's wait for the heavy slot may go without the queue making progress: `PADDOCK_QUEUE_STALL` (seconds, at least 1) or
+/// [`QUEUE_STALL`].
+fn queue_stall(env: &HashMap<String, String>) -> Duration {
+    env.get("PADDOCK_QUEUE_STALL")
         .and_then(|v| v.trim().parse::<u64>().ok())
         .filter(|s| *s >= 1)
-        .map_or(QUEUE_MAX, Duration::from_secs)
+        .map_or(QUEUE_STALL, Duration::from_secs)
 }
 
 /// One not-measured row per pushed commit beyond the first: a run checks a single commit, so the others are never passed.

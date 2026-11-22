@@ -201,8 +201,26 @@ fn read_mode(client: &mut Client, run: &RunInfo) -> Mode {
     }
 }
 
-/// Reads the runs listed for `sha` (up to four pages of 50) and decides.
+/// Reads the runs listed for `sha` (up to four pages of 50) and decides, then applies the slow-rows gate: a green run counts only
+/// when the commit never went through a split push (no status, no record) or its status is explicitly `success`
+/// ([`crate::trial_guard::slow_rows_gate`]); a status that can't be read is not measured. Every reader of CI for a commit (the
+/// pre-push known-commit shortcut, `ci verdict`, the queue's landing checks) goes through here.
 pub fn verdict(client: &mut Client, workflow: &str, sha: &str) -> Verdict {
+    let v = verdict_of_runs(client, workflow, sha);
+    let Verdict::Green { run } = v else { return v };
+    let local = client.local_state.clone();
+    match crate::trial_guard::slow_rows_gate(client, local.as_deref(), sha) {
+        Ok(None) => Verdict::Green { run },
+        Ok(Some(reason)) => Verdict::Red { run: Some(run), reason },
+        Err(e) => Verdict::NotMeasured(format!(
+            "run {run} is green, but the {} status of {} could not be read ({e}); a commit's slow local rows must be known",
+            crate::trial_guard::CONTEXT,
+            short(sha)
+        )),
+    }
+}
+
+fn verdict_of_runs(client: &mut Client, workflow: &str, sha: &str) -> Verdict {
     let query = format!("head_sha={sha}");
     let mut runs = Vec::new();
     for page in 1..=4 {
@@ -378,6 +396,106 @@ mod tests {
 
     fn code(v: &Verdict) -> i32 {
         report(v, "ci.yml", SHA, &Knows(true)).exit.code()
+    }
+
+    const STATUS_URL: &str = "https://gitea.invalid/api/v1/repos/decryp7/paddock/commits/0123456789abcdef0123456789abcdef01234567/status";
+
+    fn statuses(f: &mut Fake, page: u32, list: Vec<serde_json::Value>) {
+        f.json(
+            &format!("{STATUS_URL}?page={page}&limit=50"),
+            json!({"state": "", "statuses": list}),
+        );
+    }
+
+    fn st(context: &str, state: &str) -> serde_json::Value {
+        json!({"context": context, "status": state})
+    }
+
+    fn filler(n: usize) -> Vec<serde_json::Value> {
+        (0..n).map(|i| st(&format!("ci/job-{i}"), "success")).collect()
+    }
+
+    /// The slow-rows gate sits inside the verdict, so every reader of it is covered (the pre-push shortcut, `ci verdict`, the queue).
+    #[test]
+    fn a_green_run_counts_only_with_no_split_push_or_an_explicit_slow_rows_success() {
+        let mut f = server(vec![main_push(5, "success")], &[]);
+        statuses(&mut f, 1, vec![st(crate::trial_guard::CONTEXT, "success")]);
+        assert_eq!(ask(&mut f), Verdict::Green { run: 5 });
+        // No status at all and no record of this checkout: the commit never went through a split push.
+        let mut f = server(vec![main_push(5, "success")], &[]);
+        assert_eq!(ask(&mut f), Verdict::Green { run: 5 });
+        for bad in ["failure", "error", "pending"] {
+            let mut f = server(vec![main_push(5, "success")], &[]);
+            statuses(&mut f, 1, vec![st(crate::trial_guard::CONTEXT, bad)]);
+            match ask(&mut f) {
+                Verdict::Red { run: Some(5), reason } => assert!(reason.contains(bad), "{reason}"),
+                other => panic!("{bad}: {other:?}"),
+            }
+        }
+    }
+
+    /// Round 2 P1-1: more than 50 newer statuses must not page the slow-rows status out of sight: the combined endpoint is read page by
+    /// page until the context is found.
+    #[test]
+    fn a_failed_slow_rows_status_behind_more_than_fifty_newer_statuses_still_refuses() {
+        let mut f = server(vec![main_push(5, "success")], &[]);
+        statuses(&mut f, 1, filler(50));
+        statuses(
+            &mut f,
+            2,
+            filler(30).into_iter().chain([st(crate::trial_guard::CONTEXT, "failure")]).collect(),
+        );
+        assert!(matches!(ask(&mut f), Verdict::Red { run: Some(5), .. }), "found on page 2");
+    }
+
+    /// Hitting the page bound without finding the context or reaching the end is not measured, never "absent".
+    #[test]
+    fn statuses_that_never_end_are_not_measured_and_an_unreadable_page_is_too() {
+        let mut f = server(vec![main_push(5, "success")], &[]);
+        for page in 1..=crate::trial_guard::STATUS_PAGES {
+            statuses(&mut f, page, filler(50));
+        }
+        assert!(
+            matches!(ask(&mut f), Verdict::NotMeasured(why) if why.contains("first")),
+            "the bound is not measured"
+        );
+        let mut f = server(vec![main_push(5, "success")], &[]);
+        f.error(&format!("{STATUS_URL}?page=1&limit=50"), "curl: (7) connection refused");
+        assert!(matches!(ask(&mut f), Verdict::NotMeasured(why) if why.contains("could not be read")));
+    }
+
+    /// Round 2 P1-3: a post that never landed (no status) while this checkout holds a record for the commit is a refusal, not a pass.
+    #[test]
+    fn a_post_that_never_landed_is_refused_through_this_checkouts_record() {
+        let d = tempfile::tempdir().unwrap();
+        let mut f = server(vec![main_push(5, "success")], &[]);
+        let mut c = Client::new(&mut f, "https://gitea.invalid", "decryp7/paddock", "t");
+        c.backoff_ms = 0;
+        c.local_state = Some(d.path().to_path_buf());
+        assert_eq!(verdict(&mut c, "ci.yml", SHA), Verdict::Green { run: 5 }, "no record: unchanged");
+        crate::trial_guard::write_slow(
+            d.path(),
+            &crate::trial_guard::Slow {
+                sha: SHA.into(),
+                state: crate::trial_guard::State::Passed,
+                row: String::new(),
+                why: String::new(),
+                next: String::new(),
+                pid: 0,
+                start_micros: 0,
+                beat: 0,
+                posted: false,
+                logs: String::new(),
+                remote_ref: String::new(),
+                server: String::new(),
+                repo: String::new(),
+            },
+        )
+        .unwrap();
+        match verdict(&mut c, "ci.yml", SHA) {
+            Verdict::Red { run: Some(5), reason } => assert!(reason.contains("did not land"), "{reason}"),
+            other => panic!("{other:?}"),
+        }
     }
 
     #[test]

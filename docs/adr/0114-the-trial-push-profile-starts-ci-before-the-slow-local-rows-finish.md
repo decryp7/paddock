@@ -31,34 +31,45 @@ run the slow local checks beside it, and cancel the run at once if one fails. No
    logs beside the fast rows'), whose owner file names the child so a prune never takes it. The slow phase always measures a
    throw-away worktree of the pushed commit, never the live tree. The starter keeps its identity (pid and start time; a start time
    that cannot be read is an error, and 0 never counts as alive) in `<state>/trial/<sha>.slow.json` (ER-51). One record per commit says running, passed, failed or
-   not measured, the first row at fault and the next step, and a deadline derived from the gate's own limits (run budget, queue
-   allowance, row cap, and 5 minutes).
-4. **The verdict is a commit status.** The slow rows' record carries the Gitea server and repository (from the push's remote URL), and
-   its state is posted on the commit as the status `paddock/slow-rows`: `pending` while they run, then `success`, `failure` (a row
-   failed) or `error` (not measured, interrupted, superseded, dead, overdue). The commit has to be on the server first, so the child
-   retries the pending post while it works and the final post for a minute. Any reader of CI for a sha refuses it when that status
-   exists and is not `success`: the shared verdict reader (`ci verdict`, the pre-push known-commit shortcut, the landing checks that
-   ask it) turns a green run into red, and a status it cannot read into not measured; the push gate also refuses from this checkout's
-   own record without a server. So a green CI run that finished before the slow rows failed cannot let a train skip its full gate (the
-   first review's P1-2). GitLab merge trains and GitHub's merge queue take required checks from the server in the same way.
-   Without `GITEA_TOKEN` or a Gitea remote URL at the fast phase, the profile is not used: the full gate runs and the log says why.
-5. **Dead or overdue children are settled by whoever comes next.** One shared sweep (`trial_guard::sweep`) runs at every push gate
-   start, `ci dispatch` and `ci verdict`: a record still running whose process is gone (pid plus start time) or past its deadline
-   gets its registered run cancelled and its status posted as `error`, and is rewritten as not measured only when both worked, so a
-   failure leaves it running (it still refuses locally) for the next sweep. A new push to the same ref ends the previous push's
-   process through its pid and start time (never a bare pid) and settles it as superseded. `<state>/trial/` has an owner note, a limit
-   of 200 commits' records (about 100 KiB) and oldest-first eviction that never takes a live holder (ER-51).
+   not measured, the first row at fault and the next step, and a heartbeat (decision 5).
+4. **The verdict is a commit status, and only an explicit `success` is positive evidence.** The record carries the Gitea server and
+   repository (from the push's remote URL) and its state is posted on the commit as `paddock/slow-rows`: `pending` while the rows run,
+   then `success`, `failure` (a row failed) or `error` (not measured, interrupted, superseded, dead, silent). The commit has to be on
+   the server first, so the child retries the pending post while it works and the final post for a minute. The review's second round
+   showed that reading the status's ABSENCE as "nothing wrong" fails three ways (only the newest 50 statuses were read, so it paged
+   out behind CI's own job statuses; a post that never landed looked like no refusal; no read could tell), so every reader fails
+   closed. CI-green evidence for a commit counts only when (a) the combined per-context status
+   (`GET .../commits/<sha>/status`, the newest status of each context) says `success`, or (b) the commit never went through a split push:
+   no status and no record in this checkout. A status in any other state refuses; no status while this checkout holds a record
+   refuses (the post did not land); the status is read page by page until the context is found or the pages end, and a page
+   bound (10 pages of 50) or an unreadable page is NOT MEASURED, never absent. The gate lives inside `verdict::verdict`, so every
+   reader of CI for a sha is covered: the pre-push known-commit shortcut (`known::find`, also refusing from this checkout's own
+   record before any lookup), `ci verdict` (the tag workflow), and the queue's landing verdict (`queue/real.rs`). Otherwise the
+   train or main push simply runs its full gate. GitLab merge trains and GitHub's merge queue take required checks from the server
+   in the same way. Without `GITEA_TOKEN`, a Gitea remote URL, or write permission on the repository (probed with `GET
+   .../repos/<repo>`, `permissions.push`) at the fast phase, the profile is not used: the full gate runs and the log says why.
+5. **Posts that failed are posted again; dead, silent and superseded children are settled by whoever comes next.** The record has a
+   `posted` flag; a final record whose status did not land is posted again by the next sweep. One shared sweep
+   (`trial_guard::sweep`) runs at every push gate start, `ci dispatch` and `ci verdict`: a running record whose process is gone
+   (pid plus start time) or whose heartbeat went silent has its registered run cancelled, its holder ENDED through the held pid and
+   start time if it is still alive (ER-51), and its status posted as `error`. There is no total time budget (the gate's own limits
+   are per row and by queue progress, the stall fix of 5652345ae): the child writes a heartbeat into its record every 30 s and a
+   record is silent after 10 missed beats (5 min), so a slow phase that keeps moving through the queue is never cancelled by
+   mistake. A late result never overwrites a record someone else settled. A new push to the same ref ends the previous push's
+   process through its pid and start time and settles it as superseded. A full-gate pass on a red commit clears its record and posts
+   `success`, so "run `./dev check --pre-push`" is true. `<state>/trial/` has an owner note, a limit of 200 commits' records (about
+   100 KiB) and oldest-first eviction that never takes a live holder (ER-51).
 6. **Cancel.** `./dev ci dispatch <workflow> --ref wip/<name> --guard --max <d>` is the second step. It reads the ref's head from the
    server and the record; a record that already says failed, not measured or never finished refuses the dispatch (nothing sent,
    nothing to cancel). Otherwise it dispatches, finds the new run by difference against the run list taken before (never "the newest
    run of the branch", ER-51), writes `<sha>.dispatch.json` and settles. The slow process settles when it ends. Each side writes its
    own file first and reads the other's after, so at least one sees both and no lock is needed. Settling cancels the run
    (`POST /api/v1/repos/<repo>/actions/runs/<id>/cancel`) when the rows failed, were not measured, were interrupted, the process is
-   gone without a result, or the deadline passed, and prints one `::error::` with the row, cause and next step. ER-9 allows the
+   gone without a result, or went silent (no heartbeat), and prints one `::error::` with the row, cause and next step. ER-9 allows the
    cancel with no further approval. A run that cannot be found is reported as not guarded, loudly.
 7. **Never green by skipping.** The fast phase says it is not a full pass. Neither phase writes a pass record (so `known::find` never
    skips a later train gate on the strength of a partial run). A trial whose slow rows never finished is not evidence: `judge` has no
-   pass for a running record past its deadline or whose process is gone, and the commit status says so to every other reader. A train still runs its full gate on the train push and its
+   pass for a running record whose heartbeat went silent or whose process is gone, and the commit status says so to every other reader. A train still runs its full gate on the train push and its
    full CI run before landing (ER-8, ER-15). The profile only starts CI sooner.
 8. **`--trial <branch>` is unchanged.** It merges a branch onto the train in its own clone and pushes `trial/<branch>` with hooks off,
    so no local row runs for it at all (ADR 0098); `--guard` conflicts with it, because the merge commit is not a commit the slow rows

@@ -25,19 +25,17 @@ use std::time::Duration;
 /// Whether a failing member gate changes the exit code. False until ADR 0098 records the first green run on a real train.
 pub const ENFORCED: bool = false;
 
-/// An outer bound on the gate run (ER-32): `check --pre-push` stops starting rows after its run budget, lets a started row run its row
-/// cap and the grace beyond it (the stack capture), builds `heavy` once at most (its build limit), and waits for the slot and for
-/// build folders at most its queue allowance; this one only ends a hang of the gate itself, so it is that sum and a few minutes more,
-/// never shorter. The sum, from the constants: 15 min budget + 30 min queue allowance + 60 min row cap + 75 s grace + 20 min heavy
-/// build + 5 min slack = 131 min 15 s (it was 20 minutes while the gate's budget was 15, then 110 without the grace and the build).
-const TIMEOUT: Duration = Duration::from_secs(
-    crate::pre_push::exec::BUDGET.as_secs()
-        + crate::pre_push::exec::QUEUE_MAX.as_secs()
-        + crate::pre_push::exec::ROW_CAP.as_secs()
-        + crate::pre_push::exec::CAP_GRACE.as_secs()
-        + crate::pre_push::heavy_tool::BUILD_LIMIT.as_secs()
-        + 5 * 60,
-);
+/// An outer bound on the gate run (ER-32). `check --pre-push` has no total of its own: each row has its own cap on its own run time
+/// ([`ROW_CAP`](crate::pre_push::exec::ROW_CAP) and the grace beyond it for the stack capture), and a wait for the heavy slot goes on
+/// while the queue moves and ends only after [`QUEUE_STALL`](crate::pre_push::exec::QUEUE_STALL) without progress. So this one only
+/// ends a hang of the gate itself and must never end a healthy run: at least one worst row (a whole wait for the slot, the row cap and
+/// its grace) and one heavy build; the figure is the measured one below.
+///
+/// Measured cause (ER-12, docs/benchmarks.md, "Pre-push heavy queue progress gaps"): the longest push gate run seen is 95 minutes (5,705 s,
+/// the push of fix/push-gate-queue-stall on 2026-11-21: 27 rows passed, each waiting its turn behind other agents' steps; the refused
+/// pushes of the same day ran 33 to 76 minutes); 24 hours is 15 times that. A backstop for a hung gate, not a judgement: the row cap and
+/// the queue's progress end every normal run first.
+const TIMEOUT: Duration = Duration::from_secs(24 * 60 * 60);
 
 /// What the gates said.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -357,15 +355,21 @@ mod tests {
         }
     }
 
-    /// The member gate's outer bound is never shorter than what the gate allows itself (budget, queue allowance, one row cap with its
-    /// grace, one heavy build): a shorter one would end a healthy long run as "could not run" before the gate's own guards could say
-    /// anything. The written sum (131 min 15 s) is what the constants give.
+    /// The member gate's outer bound is never shorter than one worst row (a whole wait for the slot, then the whole row cap with its
+    /// grace) plus one heavy build: a shorter one would end a healthy long run as "could not run" before the gate's own guards could say
+    /// anything.
     #[test]
     fn the_outer_bound_outlasts_everything_the_gate_allows_itself() {
-        use crate::pre_push::exec::{BUDGET, CAP_GRACE, QUEUE_MAX, ROW_CAP};
+        use crate::pre_push::exec::WAIT_BACKSTOP;
+        use crate::pre_push::exec::{CAP_GRACE, ROW_CAP};
         use crate::pre_push::heavy_tool::BUILD_LIMIT;
-        assert!(TIMEOUT > BUDGET + QUEUE_MAX + ROW_CAP + CAP_GRACE + BUILD_LIMIT, "{TIMEOUT:?}");
-        assert_eq!(TIMEOUT, Duration::from_secs(131 * 60 + 15), "the sum written next to the constant");
+        let worst_row = ROW_CAP + CAP_GRACE + WAIT_BACKSTOP;
+        assert!(TIMEOUT > worst_row + BUILD_LIMIT + Duration::from_secs(5 * 60), "{TIMEOUT:?}");
+        assert_eq!(
+            TIMEOUT,
+            Duration::from_secs(24 * 60 * 60),
+            "the figure written next to the constant"
+        );
     }
 
     /// The mapping without the checkout precondition.

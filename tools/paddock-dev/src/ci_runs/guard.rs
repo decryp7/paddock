@@ -144,23 +144,6 @@ pub fn register(
     )
 }
 
-/// The verdict of a workflow run on `sha`, refused when the sha's `paddock/slow-rows` status exists and is not success: a wip/ or trial/
-/// push whose slow local rows failed must not count as green through a CI run that finished first. A green run with an unreadable
-/// status is not measured (never green by skipping, ER-33). Other verdicts pass through.
-pub fn with_slow_rows(client: &mut Client, v: super::verdict::Verdict, sha: &str) -> super::verdict::Verdict {
-    use super::verdict::Verdict as V;
-    let V::Green { run } = v else { return v };
-    match trial_guard::status_refusal(client, sha) {
-        Ok(None) => V::Green { run },
-        Ok(Some(reason)) => V::Red { run: Some(run), reason },
-        Err(e) => V::NotMeasured(format!(
-            "run {run} is green, but the {} status of {} could not be read ({e}); a commit's slow local rows must be known",
-            trial_guard::CONTEXT,
-            &sha[..sha.len().min(12)]
-        )),
-    }
-}
-
 /// The same refusal from this checkout's own record (no server needed): `Some(reason)` when a record for `sha` exists and did not pass.
 pub fn local_slow_rows(root: &Path, sha: &str) -> Option<String> {
     trial_guard::local_refusal(&crate::pre_push::state_dir(root), sha)

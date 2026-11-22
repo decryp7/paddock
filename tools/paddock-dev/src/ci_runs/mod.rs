@@ -419,14 +419,14 @@ pub fn flakes(a: &FlakesArgs) -> Result<Report, CliError> {
 
 /// The verdict of `workflow` on `sha` from the family's server: the one reader (`ci verdict` and the pre-push shortcut). Without a
 /// token it is NotMeasured, never green.
-pub fn ci_verdict(workflow: &str, sha: &str) -> verdict::Verdict {
+pub fn ci_verdict(workflow: &str, sha: &str, local_state: Option<std::path::PathBuf>) -> verdict::Verdict {
     match token() {
         Err(_) => verdict::Verdict::NotMeasured("GITEA_TOKEN is not set, so the runs cannot be read".into()),
         Ok(token) => {
             let mut http = CurlHttp;
             let mut client = Client::new(&mut http, SERVER, "decryp7/paddock", &token);
-            let v = verdict::verdict(&mut client, workflow, sha);
-            guard::with_slow_rows(&mut client, v, sha)
+            client.local_state = local_state;
+            verdict::verdict(&mut client, workflow, sha)
         }
     }
 }
@@ -447,12 +447,8 @@ pub fn verdict(a: &VerdictArgs) -> Result<Report, CliError> {
                 eprintln!("{line}");
             }
             let mut client = Client::new(&mut http, &a.server, &a.repo, &token);
-            let v = verdict::verdict(&mut client, &a.workflow, &a.sha);
-            let v = guard::with_slow_rows(&mut client, v, &a.sha);
-            match (&v, guard::local_slow_rows(&root, &a.sha)) {
-                (verdict::Verdict::Green { run }, Some(reason)) => verdict::Verdict::Red { run: Some(*run), reason },
-                _ => v,
-            }
+            client.local_state = Some(crate::pre_push::state_dir(&root));
+            verdict::verdict(&mut client, &a.workflow, &a.sha)
         }
     };
     let r = verdict::report(&v, &a.workflow, &a.sha, &crate::pre_push::outcome::GitRepo(&root));

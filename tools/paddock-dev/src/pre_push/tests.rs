@@ -1,7 +1,7 @@
 //! The push gate with a plan, a list of files and a fake machine: no process starts (ER-14).
 
 use super::budget::Timing;
-use super::exec::{Done, Exec, Kind, Limits, QUEUE_MAX, Row, RunOpts, decide, run_all_timed, run_all_with, test_subject};
+use super::exec::{Done, Exec, Kind, Limits, QUEUE_STALL, Row, RunOpts, decide, run_all_timed, run_all_with, test_subject};
 use super::gates::{AUDIT_PROFILE, Change, Facts, Gate, Need, Planned, plan_gates, windows_skip_reason};
 use super::{accept_not_measured, parse_refs, render, render_timed};
 use paddock_cli::Exit;
@@ -701,6 +701,8 @@ struct Fake {
     timing: Option<Timing>,
     /// Gates that never got a slot: `how` is heavy's queue-limit text.
     no_slot: Vec<String>,
+    /// Gates whose queue stalled: heavy's log of the step (with the line that names the holder) is this file.
+    stalled: Option<(Vec<String>, String)>,
     ran: Mutex<Vec<String>>,
     /// The stand-in for this program that the rows `./dev` runs itself start (None: the real answer, a test program is refused).
     dev_program: Option<String>,
@@ -791,6 +793,18 @@ impl Exec for Fake {
                 log: Some("/logs/x.log".into()),
                 timing: None,
                 ending: crate::pre_push::exec::Ending::RowCap,
+            });
+        }
+        if let Some((ids, log)) = &self.stalled
+            && ids.contains(&g.id)
+        {
+            return Ok(Done {
+                success: false,
+                how: "no progress of the queue for 1800 s".into(),
+                tail: String::new(),
+                log: Some(log.clone()),
+                timing: Some(Timing { queued: 1801.2, ran: 0.0 }),
+                ending: crate::pre_push::exec::Ending::QueueLimit,
             });
         }
         if self.no_slot.contains(&g.id) {
@@ -949,7 +963,7 @@ fn a_docker_failure_names_its_cause() {
     let planned = plan_gates(&plan(), &change(&["crates/a.rs"]), &facts());
     let g = run_gates(&planned).into_iter().find(|g| g.id == "clippy-linux crates").unwrap();
     assert!({
-        let r = decide(g, &Oom, Duration::from_secs(60), &test_subject());
+        let r = decide(g, &Oom, &test_subject());
         r.kind() == Kind::Failed && r.next.contains("PADDOCK_LINUX_MEMORY")
     });
 }
@@ -1039,35 +1053,14 @@ fn a_crashed_runner_and_a_row_that_never_ran_are_not_measured() {
     let v = verdicts(&rows);
     assert!(matches!(nm(&v["fmt crates"]), Some((reason, _)) if reason.contains("crashed")));
     assert!(passed(&v["lockfile apps/dyno"]), "the other gates still ran");
-    // With a budget of nothing nothing starts: every gate that would run is not measured, none passes.
-    let fake = Fake::default();
-    let rows = run_all_with(
-        &crates_gates(),
-        &fake,
-        &RunOpts {
-            workers: 2,
-            budget: Duration::ZERO,
-            queue: QUEUE_MAX,
-            stop: &AtomicBool::new(false),
-            subject: &test_subject(),
-        },
-    );
-    assert!(fake.ran.lock().unwrap().is_empty());
-    for (id, v) in &rows {
-        assert!(!matches!(v.kind(), Kind::Passed | Kind::Failed), "{id}: {v:?}");
-    }
-    assert!(matches!(nm(&verdicts(&rows)["fmt crates"]), Some((reason, _)) if reason.contains("budget")));
-    let fmt = &rows.iter().find(|(id, _)| id == "fmt crates").expect("the row").1;
-    assert_eq!(fmt.ended_by.as_deref(), Some("budget"), "the summary names what stopped it");
-    // A signal stops the rest the same way.
+    // A signal stops the rest: nothing starts, every gate that would run is not measured, none passes.
     let fake = Fake::default();
     let rows = run_all_with(
         &crates_gates(),
         &fake,
         &RunOpts {
             workers: 1,
-            budget: Duration::from_secs(60),
-            queue: QUEUE_MAX,
+            queue_stall: QUEUE_STALL,
             stop: &AtomicBool::new(true),
             subject: &test_subject(),
         },
@@ -2619,8 +2612,7 @@ fn queue_time_and_run_time_are_reported_apart_and_the_pass_counts_only_the_run()
         &fake,
         &RunOpts {
             workers: 2,
-            budget: Duration::from_secs(900),
-            queue: QUEUE_MAX,
+            queue_stall: QUEUE_STALL,
             stop: &AtomicBool::new(false),
             subject: &test_subject(),
         },
@@ -2659,8 +2651,7 @@ fn a_step_that_never_got_a_slot_is_not_measured_with_its_queue_time_never_passed
         &fake,
         &RunOpts {
             workers: 2,
-            budget: Duration::from_secs(900),
-            queue: QUEUE_MAX,
+            queue_stall: QUEUE_STALL,
             stop: &AtomicBool::new(false),
             subject: &test_subject(),
         },
@@ -2670,13 +2661,126 @@ fn a_step_that_never_got_a_slot_is_not_measured_with_its_queue_time_never_passed
         panic!("{:?}", v["clippy crates"])
     };
     assert!(
-        reason.contains("never got a heavy slot (queue allowance spent") && reason.contains("31.0 s"),
+        reason.starts_with("queue stalled, held by") && reason.contains("31.0 s"),
         "{reason}"
     );
-    assert!(next.contains("heavy status") && next.contains("PADDOCK_QUEUE_MAX"), "{next}");
+    assert!(next.contains("heavy status") && next.contains("PADDOCK_QUEUE_STALL"), "{next}");
     let report = render_timed("h", &rows, &timings);
     assert_eq!(report.exit, Exit::NotMeasured);
     assert!(report.text.contains("NOT MEASURED  clippy crates"), "{}", report.text);
+}
+
+/// 2026-11-21 (three refused pushes): a row's wait for the heavy slot is queue time, never run time. A long wait followed by a short
+/// run passes, and the table shows both numbers. No clock: the numbers are what heavy's timing line would say.
+#[test]
+fn a_long_queue_wait_followed_by_a_short_run_passes() {
+    let planned = vec![heavy_gate("clippy a", 1), heavy_gate("clippy b", 2), heavy_gate("clippy c", 3)];
+    let fake = Fake {
+        timing: Some(Timing { queued: 5400.0, ran: 3.0 }),
+        ..Fake::default()
+    };
+    let (rows, timings) = run_all_timed(
+        &planned,
+        &fake,
+        &RunOpts {
+            workers: 3,
+            queue_stall: QUEUE_STALL,
+            stop: &AtomicBool::new(false),
+            subject: &test_subject(),
+        },
+    );
+    assert!(
+        rows.iter().all(|(_, v)| passed(v) && (v.secs - 3.0).abs() < 1e-9),
+        "an hour and a half queued is not run time: {rows:?}"
+    );
+    let report = render_timed("h", &rows, &timings);
+    assert!(report.text.contains("3.0 s run, 5400.0 s queued"), "{}", report.text);
+}
+
+/// The other half of the same evidence: there is no total shared by the rows. Sixteen rows that each run 700 s (3 h 7 min together,
+/// over the old 15-minute budget twelve times) all get to run and pass.
+#[test]
+fn rows_that_together_run_far_longer_than_the_old_total_all_pass() {
+    let planned: Vec<Planned> = (0..16).map(|i| heavy_gate(&format!("clippy w{i}"), 1)).collect();
+    let fake = Fake {
+        timing: Some(Timing { queued: 30.0, ran: 700.0 }),
+        ..Fake::default()
+    };
+    let rows = run_all_with(
+        &planned,
+        &fake,
+        &RunOpts {
+            workers: 3,
+            queue_stall: QUEUE_STALL,
+            stop: &AtomicBool::new(false),
+            subject: &test_subject(),
+        },
+    );
+    assert_eq!(rows.len(), 16);
+    assert!(rows.iter().all(|(_, v)| passed(v)), "{rows:?}");
+    assert_eq!(fake.ran.lock().unwrap().len(), 16, "every row started");
+}
+
+/// A queue that made no progress is "not measured" with the holder named and the next step, never a pass (ER-33).
+#[test]
+fn a_queue_with_no_progress_is_not_measured_and_names_the_holder() {
+    let d = tempfile::tempdir().unwrap();
+    let log = d.path().join("step.log");
+    std::fs::write(
+        &log,
+        "pre-push-7-1 queue stalled: the queue made no progress for 1800 s (queued 1801.2 s, held by agent-9 (pid 4242)), so the command never ran\n",
+    )
+    .unwrap();
+    let planned = vec![heavy_gate("clippy a", 1), heavy_gate("clippy b", 2)];
+    let fake = Fake {
+        stalled: Some((vec!["clippy a".into()], log.display().to_string())),
+        ..Fake::default()
+    };
+    let (rows, timings) = run_all_timed(
+        &planned,
+        &fake,
+        &RunOpts {
+            workers: 1,
+            queue_stall: QUEUE_STALL,
+            stop: &AtomicBool::new(false),
+            subject: &test_subject(),
+        },
+    );
+    let v = verdicts(&rows);
+    let Some((reason, next)) = nm(&v["clippy a"]) else {
+        panic!("{:?}", v["clippy a"])
+    };
+    assert!(
+        reason.starts_with("queue stalled, held by agent-9 (pid 4242)") && reason.contains("1801.2 s"),
+        "{reason}"
+    );
+    assert!(
+        next.contains("--only clippy") && next.contains("heavy status") && next.contains("30 min"),
+        "{next}"
+    );
+    assert!(
+        passed(&v["clippy b"]),
+        "the control: the other row's queue moved, it ran: {:?}",
+        v["clippy b"]
+    );
+    assert_eq!(render_timed("h", &rows, &timings).exit, Exit::NotMeasured);
+}
+
+/// A row that really runs past its own cap is not measured and is never a pass (ER-33): the cap is the guard that stays.
+#[test]
+fn a_row_over_its_own_cap_is_still_not_measured() {
+    let planned = vec![heavy_gate("clippy a", 1), heavy_gate("clippy b", 2)];
+    let fake = Fake {
+        cut_short: vec!["clippy a".into()],
+        ..Fake::default()
+    };
+    let rows = run_all(&planned, &fake, 1);
+    let v = verdicts(&rows);
+    let Some((reason, _)) = nm(&v["clippy a"]) else {
+        panic!("{:?}", v["clippy a"])
+    };
+    assert!(reason.contains("timed out"), "{reason}");
+    assert!(passed(&v["clippy b"]), "the control: the row that ended by itself passes");
 }
 
 /// ADR 0089 amendment A2: an environment that is not ready is not measured (exit 6), not a broken check (exit 7).
@@ -2699,14 +2803,10 @@ fn an_environment_not_ready_ends_the_run_with_exit_6_not_7() {
     );
 }
 
-/// A heavy step that waits `queued` for other agents (it moves the fake clock the budget is read on by that much, as the wait
-/// would) and then runs at once; it records how many heavy steps of the push were in flight together and the limits each started
-/// with.
+/// A heavy step that reports `queued` of queue time and then runs at once; it records how many heavy steps of the push were in flight
+/// together and the limits each started with.
 struct Queued {
     queued: Duration,
-    start: std::time::Instant,
-    /// Microseconds the fake clock has moved.
-    moved: std::sync::atomic::AtomicU64,
     in_flight: std::sync::atomic::AtomicUsize,
     most: std::sync::atomic::AtomicUsize,
     limits: Mutex<Vec<(String, Limits)>>,
@@ -2722,8 +2822,6 @@ impl Queued {
     fn new(queued: Duration) -> Queued {
         Queued {
             queued,
-            start: std::time::Instant::now(),
-            moved: Default::default(),
             in_flight: Default::default(),
             most: Default::default(),
             limits: Mutex::new(Vec::new()),
@@ -2744,9 +2842,6 @@ impl Exec for Queued {
     }
     fn load(&self) -> Option<f64> {
         Some(28.0)
-    }
-    fn now(&self) -> std::time::Instant {
-        self.start + Duration::from_micros(self.moved.load(std::sync::atomic::Ordering::SeqCst))
     }
     fn run(&self, g: &Gate, limits: Limits) -> Result<Done, String> {
         use std::sync::atomic::Ordering::SeqCst;
@@ -2769,7 +2864,6 @@ impl Exec for Queued {
             .wait_timeout_while(n, Duration::from_millis(200), |n| *n == mine)
             .unwrap();
         drop(_held);
-        self.moved.fetch_add(u64::try_from(self.queued.as_micros()).unwrap(), SeqCst);
         self.running.lock().unwrap().retain(|id| *id != g.id);
         self.in_flight.fetch_sub(1, SeqCst);
         Ok(Done {
@@ -2804,38 +2898,8 @@ fn heavy_gate(id: &str, rank: u8) -> Planned {
     })
 }
 
-/// 2026-11-14/15: rows of a push at load 28 were "not measured" because time spent waiting for the heavy slot was charged to the
-/// 15-minute run budget. The run budget counts run time only: steps that queued for others three times the whole budget still get
-/// all of it, and the time queued is reported apart.
-#[test]
-fn a_long_queue_for_other_agents_does_not_eat_the_run_budget() {
-    let budget = Duration::from_millis(100);
-    let fake = Queued::new(Duration::from_millis(150));
-    let planned = vec![heavy_gate("clippy a", 1), heavy_gate("clippy b", 2), heavy_gate("clippy c", 3)];
-    let (rows, timings) = run_all_timed(
-        &planned,
-        &fake,
-        &RunOpts {
-            workers: 3,
-            budget,
-            queue: Duration::from_secs(60),
-            stop: &AtomicBool::new(false),
-            subject: &test_subject(),
-        },
-    );
-    assert!(rows.iter().all(|(_, v)| v.kind() == Kind::Passed), "{rows:?}");
-    for (id, l) in fake.limits.lock().unwrap().iter() {
-        assert!(
-            l.run > budget / 2,
-            "{id} started with {:?} of run time: the queue ate the budget",
-            l.run
-        );
-    }
-    assert_eq!(timings.len(), 3, "every row's queue time is reported: {timings:?}");
-}
-
 /// Heavy has one machine-wide slot: two heavy steps of one push in flight together only queue behind each other, and that wait
-/// would be credited as waiting for others (the budget would grow with the number of workers).
+/// would be told apart from waiting for others only by the heavy tool's own lines.
 #[test]
 fn a_push_has_one_heavy_step_in_flight_at_a_time() {
     let fake = Queued::new(Duration::from_millis(30));
@@ -2845,50 +2909,13 @@ fn a_push_has_one_heavy_step_in_flight_at_a_time() {
         &fake,
         &RunOpts {
             workers: 3,
-            budget: Duration::from_secs(60),
-            queue: Duration::from_secs(60),
+            queue_stall: Duration::from_secs(60),
             stop: &AtomicBool::new(false),
             subject: &test_subject(),
         },
     );
     assert!(rows.iter().all(|(_, v)| v.kind() == Kind::Passed), "{rows:?}");
     assert_eq!(fake.most.load(std::sync::atomic::Ordering::SeqCst), 1);
-}
-
-/// The queue has its own bound, for the whole push: each step may wait only what is left of it, and a step that would start after
-/// it is spent is not measured with the time queued and the load, and says what to do next.
-#[test]
-fn the_queue_allowance_bounds_the_whole_push_and_a_row_it_stops_says_queued_and_load() {
-    let fake = Queued::new(Duration::from_millis(60));
-    let planned = vec![heavy_gate("clippy a", 1), heavy_gate("clippy b", 2), heavy_gate("clippy c", 3)];
-    let allowance = Duration::from_millis(100);
-    let rows = run_all_with(
-        &planned,
-        &fake,
-        &RunOpts {
-            workers: 1,
-            budget: Duration::from_secs(60),
-            queue: allowance,
-            stop: &AtomicBool::new(false),
-            subject: &test_subject(),
-        },
-    );
-    let v = verdicts(&rows);
-    assert!(passed(&v["clippy a"]) && passed(&v["clippy b"]), "{rows:?}");
-    let limits = fake.limits.lock().unwrap().clone();
-    assert_eq!(limits[0].1.queue, allowance);
-    assert!(
-        limits[1].1.queue <= allowance - Duration::from_millis(60),
-        "the second step waits only what is left: {limits:?}"
-    );
-    let Some((reason, next)) = nm(&v["clippy c"]) else {
-        panic!("{:?}", v["clippy c"])
-    };
-    assert!(
-        reason.starts_with("never started: the push's queue allowance") && reason.contains("queued 0.1 s in all, load 28.0"),
-        "{reason}"
-    );
-    assert!(next.contains("heavy status") && next.contains("--only clippy"), "{next}");
 }
 
 /// The 2026-11-14/15 shape: train 10 is being built locally (partly pushed or not at all), a fix branch is stacked on it. The push
@@ -3043,8 +3070,7 @@ fn a_free_worker_runs_light_rows_while_a_heavy_step_is_in_flight() {
         &fake,
         &RunOpts {
             workers: 2,
-            budget: Duration::from_secs(60),
-            queue: Duration::from_secs(60),
+            queue_stall: Duration::from_secs(60),
             stop: &AtomicBool::new(false),
             subject: &test_subject(),
         },
@@ -3512,7 +3538,7 @@ mod deny_row {
             .find(|g| g.id.starts_with("pitwall-deny"))
             .unwrap()
             .clone();
-        (decide(&g, &ex, Duration::from_secs(60), &test_subject()), planned)
+        (decide(&g, &ex, &test_subject()), planned)
     }
 
     fn notice(planned: &[Planned]) -> Option<String> {
@@ -3729,8 +3755,6 @@ mod trial_profile {
             stdin: "pre-push lines\n",
             logs: Path::new("/logs/run"),
             env: &env,
-            budget: Duration::from_secs(900),
-            queue: Duration::from_secs(1800),
         };
         trial_step(phase, &run, rows, exit)
     }
@@ -3799,7 +3823,7 @@ mod trial_profile {
             (State::Running, 4242, 7),
             "the starter keeps the handle (ER-51)"
         );
-        assert!(rec.finish_by > 0, "a deadline, so a child that never reports is not evidence");
+        assert!(rec.beat > 0, "a first heartbeat, so a child that never reports is judged silent");
         assert!(
             said.contains("ONLY the fast rows") && said.contains("not a full pass") && said.contains("pid 4242"),
             "{said}"
@@ -3847,7 +3871,8 @@ mod trial_profile {
                 next: String::new(),
                 pid: 4242,
                 start_micros: 7,
-                finish_by: u64::MAX,
+                beat: u64::MAX,
+                posted: false,
                 logs: "/logs/run".into(),
                 remote_ref: "refs/heads/wip/x".into(),
                 server: "https://gitea.invalid".into(),
@@ -3967,7 +3992,8 @@ mod trial_profile {
                 next: String::new(),
                 pid: 99,
                 start_micros: 5,
-                finish_by: u64::MAX,
+                beat: u64::MAX,
+                posted: false,
                 logs: "/logs/old".into(),
                 remote_ref: "refs/heads/wip/x".into(),
                 server: "https://gitea.invalid".into(),
@@ -4020,7 +4046,8 @@ mod trial_profile {
                 next: "fix it".into(),
                 pid: 0,
                 start_micros: 0,
-                finish_by: 0,
+                beat: 0,
+                posted: false,
                 logs: "/l".into(),
                 remote_ref: "refs/heads/wip/x".into(),
                 server: String::new(),
@@ -4030,6 +4057,42 @@ mod trial_profile {
         .unwrap();
         let why = super::super::RealLookups { root: r.clone() }.ci_green(&two).unwrap_err();
         assert!(why.contains("red or partial") && why.contains("slow local rows"), "{why}");
+    }
+
+    /// Round 2 P2-4: a late result never overwrites a record that someone else settled (a newer push superseded it, a sweep found it
+    /// silent): that verdict stands.
+    #[test]
+    fn a_late_slow_phase_result_does_not_overwrite_a_settled_record() {
+        let d = tempfile::tempdir().unwrap();
+        trial_guard::write_slow(
+            d.path(),
+            &crate::trial_guard::Slow {
+                sha: SHA.into(),
+                state: State::NotMeasured,
+                row: "slow rows".into(),
+                why: "superseded by a push of aaaa to refs/heads/wip/x".into(),
+                next: "x".into(),
+                pid: 4242,
+                start_micros: 7,
+                beat: 0,
+                posted: true,
+                logs: "/l".into(),
+                remote_ref: "refs/heads/wip/x".into(),
+                server: "https://gitea.invalid".into(),
+                repo: "o/r".into(),
+            },
+        )
+        .unwrap();
+        let fake = Fake {
+            gitea: gitea(),
+            ..Fake::default()
+        };
+        let rows = vec![("doctest crates".to_string(), Row::skipped("not reached"))];
+        let said = step(Phase::Slow, &fake, d.path(), &rows, Exit::Ok);
+        assert!(said.contains("already settled") && said.contains("not written over"), "{said}");
+        let r = trial_guard::read_slow(d.path(), SHA).unwrap().unwrap();
+        assert_eq!(r.state, State::NotMeasured, "a late pass must not turn a superseded record green");
+        assert!(fake.settled.lock().unwrap().is_empty());
     }
 
     /// The pass-through of one more landing rule: the slow child's logs folder is owned by the child, so a prune never takes it.

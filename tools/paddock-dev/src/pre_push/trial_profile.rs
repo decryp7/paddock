@@ -1,3 +1,4 @@
+// ci-runs-reader: trial push profile: the status and repository permission of one commit and the cancel of one run; no pass/fail verdict on a commit
 //! The trial push profile of `./dev check --pre-push` (ER-9 overlap; docs/adr/0114-the-trial-push-profile-starts-ci-before-the-slow-local-rows-finish.md).
 //!
 //! A push whose every ref is under `wip/` or `trial/` runs only the fast static rows before the push ([`Phase::Fast`]) and hands the
@@ -73,6 +74,18 @@ pub fn status_target(root: &Path, remote: Option<&str>, token: Option<&str>) -> 
         .ok_or_else(|| format!("remote {remote} is not an https or ssh Gitea URL (`owner/name`), so no commit status can be posted"))
 }
 
+/// Whether the fast phase may be used for this push: the status target must be known and the token must be able to write statuses
+/// there (`probe`). `Err` says why not; the caller then runs the full gate and says so (a status that can never be posted would leave
+/// a failed trial unmarked on the server).
+pub fn fast_allowed(
+    target: Result<(String, String), String>,
+    probe: &dyn Fn(&str, &str) -> Result<(), String>,
+) -> Result<(String, String), String> {
+    let (server, repo) = target?;
+    probe(&server, &repo)?;
+    Ok((server, repo))
+}
+
 /// A remote ref the profile covers: `refs/heads/wip/<name>` or `refs/heads/trial/<name>`.
 pub fn is_trial_ref(remote_ref: &str) -> bool {
     ["refs/heads/wip/", "refs/heads/trial/"]
@@ -133,12 +146,6 @@ pub fn rows_of(planned: Vec<Planned>, phase: Phase) -> Vec<Planned> {
         .collect()
 }
 
-/// How long after its start a slow phase may run before its record counts as never finished: the gate's run budget and queue
-/// allowance, one row cap and a margin. Derived from the gate's own limits, not a new number.
-pub fn deadline_after(budget: Duration, queue: Duration, row_cap: Duration) -> Duration {
-    budget + queue + row_cap + Duration::from_secs(300)
-}
-
 /// The record a finished slow phase leaves: the first failing row (or the first not-measured) decides, nothing else passes. A row
 /// excused by a person's override still counts as not measured here: the override lets a push go, it never makes a trial's evidence.
 pub fn fold(sha: &str, rows: &[(String, Row)], base: &Slow) -> Slow {
@@ -147,6 +154,7 @@ pub fn fold(sha: &str, rows: &[(String, Row)], base: &Slow) -> Slow {
         row: String::new(),
         why: String::new(),
         next: String::new(),
+        posted: false,
         ..base.clone()
     };
     rec.sha = sha.to_string();
@@ -238,6 +246,18 @@ pub fn start_slow(
 /// What a finished slow phase prints, and does, about the CI run: writes the final record, then settles with the dispatch record.
 /// Never fails the rows' own verdict; an error here is returned as text for the log.
 pub fn finish(ex: &dyn Exec, state: &Path, rec: &Slow) -> String {
+    // A record that is no longer running was settled by someone else (a newer push superseded this one, or a sweep found it silent):
+    // that verdict stands, this late result never overwrites it.
+    if let Ok(Some(current)) = trial_guard::read_slow(state, &rec.sha)
+        && current.state != trial_guard::State::Running
+    {
+        return format!(
+            "trial {}: the record was already settled as `{}` ({}), so this result is not written over it",
+            &rec.sha[..rec.sha.len().min(12)],
+            current.state_name(),
+            current.why
+        );
+    }
     if let Err(e) = trial_guard::write_slow(state, rec) {
         return format!(
             "::error::trial: the slow rows' record could not be written ({e}); a guarded dispatch will treat the trial as not measured. Next: run `./dev check --pre-push` on the commit"
@@ -254,9 +274,9 @@ pub fn settle_real(state: &Path, sha: &str) -> String {
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs());
     let mut status = String::new();
-    if let Ok(Some(rec)) = trial_guard::read_slow(state, sha) {
+    if let Ok(Some(mut rec)) = trial_guard::read_slow(state, sha) {
         for attempt in 0..6 {
-            match trial_guard::post_slow_status(&mut crate::wait::CurlHttp, &token, &rec) {
+            match trial_guard::post_final(state, &mut crate::wait::CurlHttp, &token, &mut rec) {
                 Ok(_) => {
                     status.clear();
                     break;
@@ -303,8 +323,8 @@ pub fn settle_with(
     let short = &sha[..sha.len().min(12)];
     let mut status = String::new();
     if post_status
-        && let Ok(Some(rec)) = trial_guard::read_slow(state, sha)
-        && let Err(e) = trial_guard::post_slow_status(http, token, &rec)
+        && let Ok(Some(mut rec)) = trial_guard::read_slow(state, sha)
+        && let Err(e) = trial_guard::post_final(state, http, token, &mut rec)
     {
         status = format!(
             "::warning::trial {short}: the status {} could not be posted ({e}). ",
@@ -355,7 +375,63 @@ pub fn sweep_real(state: &Path) -> Vec<String> {
             now,
             alive: &trial_guard::holder_alive,
         },
+        &end_holder_real,
     )
+}
+
+/// Writes the heartbeat of the slow phase into its record every [`trial_guard::BEAT_EVERY_SECS`] until `done` is set. The first beat
+/// is written at once. Returns when the rows have ended.
+pub fn beat_real(state: &Path, sha: &str, done: &std::sync::atomic::AtomicBool) {
+    use std::sync::atomic::Ordering;
+    let now = || {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs())
+    };
+    while !done.load(Ordering::SeqCst) {
+        if let Err(e) = trial_guard::beat(state, sha, now()) {
+            eprintln!("::warning::trial: the heartbeat could not be written ({e})");
+        }
+        for _ in 0..trial_guard::BEAT_EVERY_SECS * 10 {
+            if done.load(Ordering::SeqCst) {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    }
+}
+
+/// A full push-gate pass on `sha` on the real machine: clears its slow-rows record and posts `success` ([`trial_guard::clear_after_full_pass`]).
+/// `None` when there was nothing to clear.
+pub fn clear_real(state: &Path, sha: &str) -> Option<String> {
+    let token = std::env::var("GITEA_TOKEN").unwrap_or_default();
+    match trial_guard::clear_after_full_pass(state, &mut crate::wait::CurlHttp, &token, sha) {
+        Ok(line) => line,
+        Err(e) => Some(format!(
+            "::warning::trial {}: the slow-rows record could not be cleared ({e}); the next gate start tries again",
+            &sha[..sha.len().min(12)]
+        )),
+    }
+}
+
+/// Whether the token may write commit statuses to `server`/`repo` (the repository permission `push`), before a push relies on the
+/// profile: a status that can never be posted would leave a failed trial unmarked on the server. `Err` says why not.
+pub fn probe_status_write_real(server: &str, repo: &str) -> Result<(), String> {
+    let token = std::env::var("GITEA_TOKEN").unwrap_or_default();
+    probe_with(&mut crate::wait::CurlHttp, server, repo, &token)
+}
+
+/// [`probe_status_write_real`] over any HTTP.
+pub fn probe_with(http: &mut dyn crate::wait::Http, server: &str, repo: &str, token: &str) -> Result<(), String> {
+    let mut client = crate::ci_runs::client::Client::new(http, server, repo, token);
+    client.backoff_ms = 0;
+    match client.can_write() {
+        Ok(true) => Ok(()),
+        Ok(false) => Err(format!(
+            "the token has no write permission on {repo}, so the slow rows' status cannot be posted"
+        )),
+        Err(e) => Err(format!("write access to {repo} on {server} could not be checked ({e})")),
+    }
 }
 
 /// Posts `pending` for the record of `sha`, retried every 5 s for at most a minute while `done` is not set (the push may not have

@@ -127,7 +127,8 @@ fn base() -> Slow {
         next: String::new(),
         pid: 5,
         start_micros: 6,
-        finish_by: 7,
+        beat: 7,
+        posted: false,
         logs: "/l".into(),
         remote_ref: String::new(),
         server: String::new(),
@@ -196,12 +197,6 @@ fn the_child_runs_the_slow_phase_of_the_same_commit_with_the_hooks_log_folder() 
         joined.contains("--remote origin") && joined.ends_with("--split-logs /logs/run-1"),
         "{joined}"
     );
-}
-
-#[test]
-fn the_deadline_is_the_gates_own_limits_plus_a_margin() {
-    let d = deadline_after(Duration::from_secs(900), Duration::from_secs(1800), Duration::from_secs(900));
-    assert_eq!(d, Duration::from_secs(900 + 1800 + 900 + 300));
 }
 
 /// The real start, with a stand-in program: it returns the child's identity at once, gives it no pipe of the hook and leaves its
@@ -276,5 +271,39 @@ fn the_child_gets_the_repository_root_and_the_phase_flag_is_not_called_trial() {
     assert!(
         a.contains(&"--split-phase".to_string()) && !a.iter().any(|x| x.contains("trial")),
         "{a:?}"
+    );
+}
+
+/// Round 2 P2: the fast phase probes write access first; a token that cannot write statuses means the full gate runs.
+#[test]
+fn the_fast_phase_needs_a_status_target_and_a_token_that_can_write_statuses() {
+    use crate::trial_guard::tests::FakeGitea;
+    let target = || Ok(("https://gitea.invalid".to_string(), "o/r".to_string()));
+    let probe = |push: Option<bool>| {
+        move |server: &str, repo: &str| {
+            probe_with(
+                &mut FakeGitea {
+                    repo_push: push,
+                    ..Default::default()
+                },
+                server,
+                repo,
+                "t",
+            )
+        }
+    };
+    assert_eq!(
+        fast_allowed(target(), &probe(Some(true))),
+        Ok(("https://gitea.invalid".into(), "o/r".into()))
+    );
+    assert!(
+        fast_allowed(target(), &probe(Some(false)))
+            .unwrap_err()
+            .contains("no write permission")
+    );
+    assert!(fast_allowed(target(), &probe(None)).unwrap_err().contains("could not be checked"));
+    assert_eq!(
+        fast_allowed(Err("no token".into()), &|_, _| panic!("no probe without a target")),
+        Err("no token".into())
     );
 }

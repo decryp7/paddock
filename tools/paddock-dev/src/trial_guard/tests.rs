@@ -16,18 +16,43 @@ pub struct FakeGitea {
     pub statuses: Vec<(u64, String, String)>,
     /// Make every status POST fail (the commit is not on the server yet).
     pub status_post_fails: bool,
+    /// `permissions.push` of the repository it answers for (None: the repository answers 404).
+    pub repo_push: Option<bool>,
 }
 
 impl Http for FakeGitea {
     fn get_json(&mut self, url: &str, _token: &str) -> Result<Value, String> {
-        if url.contains("/statuses") {
-            return Ok(Value::Array(
-                self.statuses
-                    .iter()
-                    .rev()
-                    .map(|(id, c, s)| json!({"id": id, "context": c, "status": s}))
-                    .collect(),
-            ));
+        if url.contains("/commits/") && url.contains("/status") {
+            // Gitea's combined status: the newest status of each context, newest first, paged.
+            let q = |k: &str| {
+                url.split(&format!("{k}="))
+                    .nth(1)
+                    .and_then(|v| v.split('&').next())
+                    .and_then(|v| v.parse::<usize>().ok())
+            };
+            let (page, limit) = (q("page").unwrap_or(1), q("limit").unwrap_or(50));
+            let mut latest: Vec<&(u64, String, String)> = Vec::new();
+            for st in self.statuses.iter() {
+                match latest.iter().position(|l| l.1 == st.1) {
+                    Some(i) if latest[i].0 < st.0 => latest[i] = st,
+                    Some(_) => {}
+                    None => latest.push(st),
+                }
+            }
+            latest.sort_by_key(|l| std::cmp::Reverse(l.0));
+            let list: Vec<Value> = latest
+                .iter()
+                .skip((page - 1) * limit)
+                .take(limit)
+                .map(|(id, c, s)| json!({"id": id, "context": c, "status": s}))
+                .collect();
+            return Ok(json!({"state": "", "statuses": list}));
+        }
+        if url.ends_with("/api/v1/repos/o/r") {
+            return self
+                .repo_push
+                .map(|p| json!({"permissions": {"push": p}}))
+                .ok_or_else(|| "curl: (22) The requested URL returned error: 404".to_string());
         }
         let id: u64 = url.rsplit('/').next().and_then(|s| s.parse().ok()).ok_or("unexpected GET")?;
         self.runs
@@ -65,7 +90,8 @@ fn slow(state: State) -> Slow {
         next: String::new(),
         pid: 4242,
         start_micros: 7,
-        finish_by: 2_000,
+        beat: 1_000,
+        posted: false,
         logs: "/logs/x".into(),
         remote_ref: String::new(),
         server: String::new(),
@@ -338,32 +364,86 @@ fn each_state_is_posted_as_its_own_commit_status_under_one_context() {
     assert!(g.writes.is_empty());
 }
 
-/// P1-2: a green CI run that finished before the slow rows failed must still be refused, through the server's status.
-#[test]
-fn a_slow_rows_status_that_is_not_success_refuses_the_commit_and_the_newest_one_counts() {
-    let refusal = |statuses: Vec<(u64, &str, &str)>| {
-        let mut g = FakeGitea {
-            statuses: statuses.into_iter().map(|(i, c, s)| (i, c.to_string(), s.to_string())).collect(),
-            ..Default::default()
-        };
-        let mut client = Client::new(&mut g, "https://gitea.invalid", "o/r", "t");
-        status_refusal(&mut client, SHA).unwrap()
+fn gate(statuses: Vec<(u64, String, String)>, local: Option<&Path>) -> Result<Option<String>, String> {
+    let mut g = FakeGitea {
+        statuses,
+        ..Default::default()
     };
+    let mut client = Client::new(&mut g, "https://gitea.invalid", "o/r", "t");
+    client.backoff_ms = 0;
+    slow_rows_gate(&mut client, local, SHA)
+}
+
+fn stat(id: u64, context: &str, state: &str) -> (u64, String, String) {
+    (id, context.to_string(), state.to_string())
+}
+
+fn filler(first_id: u64, n: u64) -> Vec<(u64, String, String)> {
+    (0..n).map(|i| stat(first_id + i, &format!("ci/job-{i}"), "success")).collect()
+}
+
+/// The gate fails closed: success is the only positive evidence once a status exists, whatever else the commit has.
+#[test]
+fn the_slow_rows_gate_lets_evidence_count_only_for_no_split_push_or_an_explicit_success() {
     for bad in ["failure", "error", "pending"] {
-        let why = refusal(vec![(1, CONTEXT, bad)]).unwrap_or_else(|| panic!("{bad} must refuse"));
+        let why = gate(vec![stat(1, CONTEXT, bad)], None)
+            .unwrap()
+            .unwrap_or_else(|| panic!("{bad} must refuse"));
         assert!(why.contains(bad) && why.contains(CONTEXT) && why.contains("Next:"), "{why}");
     }
-    assert!(refusal(vec![]).is_none(), "no status: a commit that never had a profile run");
-    assert!(refusal(vec![(1, CONTEXT, "success")]).is_none());
-    assert!(refusal(vec![(1, "ci/other", "failure")]).is_none(), "another context is not ours");
-    assert!(
-        refusal(vec![(1, CONTEXT, "failure"), (2, CONTEXT, "success")]).is_none(),
+    assert_eq!(gate(vec![], None), Ok(None), "no status and no record: never a split push");
+    assert_eq!(gate(vec![stat(1, CONTEXT, "success")], None), Ok(None));
+    assert_eq!(
+        gate(vec![stat(1, "ci/other", "failure")], None),
+        Ok(None),
+        "another context is not ours"
+    );
+    assert_eq!(
+        gate(vec![stat(1, CONTEXT, "failure"), stat(2, CONTEXT, "success")], None),
+        Ok(None),
         "the newest status wins"
     );
     assert!(
-        refusal(vec![(1, CONTEXT, "success"), (2, CONTEXT, "failure")]).is_some(),
-        "a later failure refuses"
+        gate(vec![stat(1, CONTEXT, "success"), stat(2, CONTEXT, "failure")], None)
+            .unwrap()
+            .is_some()
     );
+}
+
+/// Round 2 P1-1: the status paged out behind more than 50 newer CI statuses is still found, and a bound hit is not measured.
+#[test]
+fn a_slow_rows_status_behind_more_than_fifty_newer_statuses_is_found_and_the_page_bound_is_not_measured() {
+    let mut statuses = vec![stat(1, CONTEXT, "failure")];
+    statuses.extend(filler(10, 120));
+    let why = gate(statuses, None)
+        .unwrap()
+        .expect("a failure behind 120 newer statuses still refuses");
+    assert!(why.contains("failure"), "{why}");
+    let mut ok = vec![stat(1, CONTEXT, "success")];
+    ok.extend(filler(10, 120));
+    assert_eq!(gate(ok, None), Ok(None));
+    let mut too_many = vec![stat(1, CONTEXT, "failure")];
+    too_many.extend(filler(10, u64::from(STATUS_PAGES) * 50 + 10));
+    let err = gate(too_many, None).unwrap_err();
+    assert!(err.contains("first"), "{err}");
+}
+
+/// Round 2 P1-3: no status while this checkout holds a record for the commit means the post did not land: refused. An unreadable
+/// record refuses too.
+#[test]
+fn a_post_that_never_landed_is_refused_through_the_local_record_and_a_cleared_one_lets_evidence_count() {
+    let d = tempfile::tempdir().unwrap();
+    assert_eq!(gate(vec![], Some(d.path())), Ok(None), "no record here: unchanged");
+    write_slow(d.path(), &on_server(slow(State::Passed))).unwrap();
+    let why = gate(vec![], Some(d.path())).unwrap().expect("no status, but a record");
+    assert!(why.contains("did not land") && why.contains("Next:"), "{why}");
+    assert_eq!(
+        gate(vec![stat(1, CONTEXT, "success")], Some(d.path())),
+        Ok(None),
+        "explicit success counts"
+    );
+    std::fs::write(dir(d.path()).join(format!("{SHA}.slow.json")), "not json").unwrap();
+    assert!(gate(vec![], Some(d.path())).unwrap().is_some(), "an unreadable record fails closed");
 }
 
 #[test]
@@ -389,7 +469,7 @@ fn this_checkouts_own_record_refuses_a_commit_whose_slow_rows_did_not_pass() {
 fn the_sweep_settles_a_dead_or_overdue_child_and_leaves_a_live_one() {
     let dead = dir_with(Some(&on_server(slow(State::Running))), Some(&dispatched()));
     let mut g = gitea_with_run();
-    let lines = sweep(dead.path(), &mut g, "t", &time(1_000, GONE));
+    let lines = sweep(dead.path(), &mut g, "t", &time(1_000, GONE), &|_, _| {});
     assert_eq!(cancels(&g).len(), 1, "{lines:?}");
     assert_eq!(g.statuses, vec![(1, CONTEXT.to_string(), "error".to_string())], "{lines:?}");
     assert_eq!(read_slow(dead.path(), SHA).unwrap().unwrap().state, State::NotMeasured);
@@ -398,18 +478,18 @@ fn the_sweep_settles_a_dead_or_overdue_child_and_leaves_a_live_one() {
         "{lines:?}"
     );
     assert!(
-        sweep(dead.path(), &mut g, "t", &time(1_001, GONE)).is_empty(),
+        sweep(dead.path(), &mut g, "t", &time(1_001, GONE), &|_, _| {}).is_empty(),
         "a settled record is not settled twice"
     );
 
     let overdue = dir_with(Some(&on_server(slow(State::Running))), Some(&dispatched()));
     let mut g = gitea_with_run();
-    sweep(overdue.path(), &mut g, "t", &time(2_001, LIVE));
+    sweep(overdue.path(), &mut g, "t", &time(2_001, LIVE), &|_, _| {});
     assert_eq!(cancels(&g).len(), 1, "past its deadline even though the pid answers");
 
     let alive = dir_with(Some(&on_server(slow(State::Running))), Some(&dispatched()));
     let mut g = gitea_with_run();
-    assert!(sweep(alive.path(), &mut g, "t", &time(1_000, LIVE)).is_empty());
+    assert!(sweep(alive.path(), &mut g, "t", &time(1_000, LIVE), &|_, _| {}).is_empty());
     assert!(g.writes.is_empty() && read_slow(alive.path(), SHA).unwrap().unwrap().state == State::Running);
 
     let down = dir_with(Some(&on_server(slow(State::Running))), Some(&dispatched()));
@@ -417,13 +497,17 @@ fn the_sweep_settles_a_dead_or_overdue_child_and_leaves_a_live_one() {
         status_post_fails: true,
         ..gitea_with_run()
     };
-    let lines = sweep(down.path(), &mut g, "t", &time(1_000, GONE));
+    let lines = sweep(down.path(), &mut g, "t", &time(1_000, GONE), &|_, _| {});
     assert!(lines.iter().any(|l| l.contains("could not be posted")), "{lines:?}");
+    let r = read_slow(down.path(), SHA).unwrap().unwrap();
     assert_eq!(
-        read_slow(down.path(), SHA).unwrap().unwrap().state,
-        State::Running,
-        "left running: the next sweep tries again"
+        (r.state, r.posted),
+        (State::NotMeasured, false),
+        "settled locally, not posted: the next sweep posts it"
     );
+    let mut up = gitea_with_run();
+    sweep(down.path(), &mut up, "t", &time(1_001, LIVE), &|_, _| {});
+    assert_eq!(up.statuses, vec![(1, CONTEXT.to_string(), "error".to_string())]);
 }
 
 /// ER-51: a new push to the same ref ends the previous push's process through its pid and start time, and only that one.
@@ -523,4 +607,143 @@ fn the_records_folder_has_an_owner_a_limit_and_evicts_the_oldest_but_never_a_liv
         read_dispatched(d.path(), &sha(2)).unwrap().is_none(),
         "its dispatch record goes with it"
     );
+}
+
+/// Round 2 P2-4: a holder that is still alive but went silent is ENDED through the pid and start time the record holds, not only
+/// cancelled; a holder that is gone is not "ended" again.
+#[test]
+fn a_silent_holder_that_is_still_alive_is_ended_through_its_held_identity() {
+    let silent = dir_with(Some(&on_server(slow(State::Running))), Some(&dispatched()));
+    let ended = std::cell::RefCell::new(Vec::new());
+    let mut g = gitea_with_run();
+    let lines = sweep(silent.path(), &mut g, "t", &time(1_301, LIVE), &|p, s| {
+        ended.borrow_mut().push((p, s))
+    });
+    // `LIVE` answers for any pid, so the held identity of the record (4242, 7) is what is ended.
+    assert_eq!(*ended.borrow(), vec![(4242, 7)], "{lines:?}");
+    assert_eq!(cancels(&g).len(), 1);
+    assert!(lines.iter().any(|l| l.contains("still alive and was ended")), "{lines:?}");
+
+    let gone = dir_with(Some(&on_server(slow(State::Running))), Some(&dispatched()));
+    let ended = std::cell::RefCell::new(Vec::new());
+    sweep(gone.path(), &mut gitea_with_run(), "t", &time(1_000, GONE), &|p, s| {
+        ended.borrow_mut().push((p, s))
+    });
+    assert!(ended.borrow().is_empty(), "a dead holder is not ended again");
+}
+
+/// Progress, not a total budget: a record that keeps beating is never judged silent, however old the push; silence is.
+#[test]
+fn a_record_that_keeps_beating_is_never_cancelled_and_a_silent_one_is() {
+    let d = tempfile::tempdir().unwrap();
+    write_slow(
+        d.path(),
+        &Slow {
+            beat: 100,
+            ..on_server(slow(State::Running))
+        },
+    )
+    .unwrap();
+    let long_after = 100 + 24 * 3600;
+    assert!(matches!(
+        judge(&read_slow(d.path(), SHA).unwrap().unwrap(), 100 + STALE_AFTER_SECS, LIVE),
+        Verdict::Pending
+    ));
+    beat(d.path(), SHA, long_after - 10).unwrap();
+    let r = read_slow(d.path(), SHA).unwrap().unwrap();
+    assert!(
+        matches!(judge(&r, long_after, LIVE), Verdict::Pending),
+        "a day in the queue, still beating"
+    );
+    assert!(
+        matches!(judge(&r, long_after - 10 + STALE_AFTER_SECS + 1, LIVE), Verdict::Cancel(_)),
+        "silence is judged"
+    );
+    write_slow(d.path(), &slow(State::Failed)).unwrap();
+    beat(d.path(), SHA, 5).unwrap();
+    assert_eq!(
+        read_slow(d.path(), SHA).unwrap().unwrap().state,
+        State::Failed,
+        "a settled record is never beaten back to running"
+    );
+}
+
+/// Round 2 P1-3: a final record whose status post did not land is posted again by the next sweep (the `posted` flag).
+#[test]
+fn a_final_status_that_did_not_land_is_posted_again_by_the_next_sweep() {
+    let d = tempfile::tempdir().unwrap();
+    write_slow(
+        d.path(),
+        &Slow {
+            posted: false,
+            ..on_server(failed())
+        },
+    )
+    .unwrap();
+    let mut down = FakeGitea {
+        status_post_fails: true,
+        ..Default::default()
+    };
+    let mut rec = read_slow(d.path(), SHA).unwrap().unwrap();
+    assert!(post_final(d.path(), &mut down, "t", &mut rec).is_err());
+    assert!(
+        !read_slow(d.path(), SHA).unwrap().unwrap().posted,
+        "a post that failed is not marked posted"
+    );
+    let lines = sweep(d.path(), &mut down, "t", &time(1_000, LIVE), &|_, _| {});
+    assert!(lines.iter().any(|l| l.contains("still not posted")), "{lines:?}");
+    let mut up = FakeGitea::default();
+    let lines = sweep(d.path(), &mut up, "t", &time(1_000, LIVE), &|_, _| {});
+    assert_eq!(up.statuses, vec![(1, CONTEXT.to_string(), "failure".to_string())], "{lines:?}");
+    assert!(read_slow(d.path(), SHA).unwrap().unwrap().posted);
+    assert!(
+        sweep(d.path(), &mut up, "t", &time(1_001, LIVE), &|_, _| {}).is_empty(),
+        "posted once, not again"
+    );
+    assert_eq!(up.statuses.len(), 1);
+}
+
+/// Round 2 P2-3: a full-gate pass on a red commit clears its record and posts `success`, so the "run ./dev check --pre-push" step
+/// of a failed trial is true; a failed post leaves a passed record that the sweep posts.
+#[test]
+fn a_full_gate_pass_clears_a_red_record_and_posts_success() {
+    let d = tempfile::tempdir().unwrap();
+    write_slow(d.path(), &on_server(failed())).unwrap();
+    let mut g = FakeGitea {
+        statuses: vec![stat(1, CONTEXT, "failure")],
+        ..Default::default()
+    };
+    let line = clear_after_full_pass(d.path(), &mut g, "t", SHA)
+        .unwrap()
+        .expect("something to clear");
+    assert!(line.contains("`success`"), "{line}");
+    let r = read_slow(d.path(), SHA).unwrap().unwrap();
+    assert_eq!((r.state, r.posted, r.row.as_str()), (State::Passed, true, ""));
+    assert_eq!(
+        gate(g.statuses.clone(), Some(d.path())),
+        Ok(None),
+        "the commit's evidence counts again"
+    );
+    assert_eq!(
+        clear_after_full_pass(d.path(), &mut g, "t", SHA).unwrap(),
+        None,
+        "nothing left to clear"
+    );
+    assert_eq!(
+        clear_after_full_pass(tempfile::tempdir().unwrap().path(), &mut g, "t", SHA).unwrap(),
+        None,
+        "no record, nothing to do"
+    );
+
+    write_slow(d.path(), &on_server(failed())).unwrap();
+    let mut down = FakeGitea {
+        status_post_fails: true,
+        ..Default::default()
+    };
+    assert!(clear_after_full_pass(d.path(), &mut down, "t", SHA).is_err());
+    let r = read_slow(d.path(), SHA).unwrap().unwrap();
+    assert_eq!((r.state, r.posted), (State::Passed, false), "passed locally, not yet on the server");
+    let mut up = FakeGitea::default();
+    sweep(d.path(), &mut up, "t", &time(1_000, LIVE), &|_, _| {});
+    assert_eq!(up.statuses, vec![(1, CONTEXT.to_string(), "success".to_string())]);
 }
