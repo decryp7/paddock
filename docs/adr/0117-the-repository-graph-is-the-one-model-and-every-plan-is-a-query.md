@@ -8,14 +8,15 @@
   practice and cost), ER-40 (generated files), ER-42 (read declared data through its accessor), ER-46 (lists only shrink); ADR 0022
   (paddock-dev, `paddock-repo-graph`), ADR 0038 (CI commands as data in `paddock.ci.json`), ADR 0060 (the CI model of `./dev gates`),
   ADR 0080 (CI speed), ADR 0113 and its amendment of 2026-11-23 (the declared run scope; plumbing-only and test-only runs),
-  the 0116 drafts (`a test target whose inputs did not change reuses its pass`, worktree `adr-test-result-cache`; `a merge
-  regenerates what it made stale`, local `feat/merge-regenerates`).
+  ADR 0116 draft (`a test target whose inputs did not change reuses its pass`, `origin/docs/adr-test-result-cache` `4e984ce2c`:
+  its WP-0 needs this ADR's `input_hash`; it measured about 75 to 110 job-minutes per round, 28 to 34 %, in jobs whose test inputs
+  did not change), and the paused `a merge regenerates what it made stale` draft (local `feat/merge-regenerates`, to be renumbered).
 - Supersedes as a mechanism (not as behaviour): the planner rule tables of `tools/paddock-dev/src/plan.rs` and `plan_gitea.rs`,
   the ADR 0113 amendment's planner-rule design (its behaviours stay and become queries, §6), the hand lists `hostTests` (C155) and
   `docs/generators.toml` `paths`.
 - Number: 0117. Searched 2026-11-23: `git ls-tree docs/adr/` over every `origin` branch and every local branch, and `docs/adr/` of
-  every worktree under the worktree root. Highest found: 0115 on `origin`; 0116 twice, unpushed (`feat/merge-regenerates` and the
-  `adr-test-result-cache` worktree, a clash between those two, not this one); no 0117.
+  every worktree under the worktree root, again before the last commit. Highest found: 0116 on `origin`
+  (`docs/adr-test-result-cache`); a second local 0116 on `feat/merge-regenerates` (to be renumbered); no 0117 anywhere.
 - Evidence heads (ADR 0091), read 2026-11-23 and again before commit: `origin/main` = `b3c254a2d`, `origin/train/2026-11-22-20` =
   `803aed12d` (this branch's base), `origin/fix/run-scope-reuse-p2` = `bab7a4a97` (ADR 0113), `origin/feat/os-scoped-tests` =
   `c61339b9f` (`hostTests`, C155), `origin/feat/infra-only-smoke` = `29864b700` (the ADR 0113 amendment, docs only; its planner work
@@ -38,7 +39,7 @@ Each rule marks a project *whole*, with no notion of *how* a file reaches it, so
 
 | Instance | What it did | Checked |
 |---|---|---|
-| A README in an action folder is a global | `.gitea/actions/README.md` is an "action nobody uses", so `gitea_targets` answers `None` and the planner marks everything | `./dev plan 298cc726b^ 298cc726b` (train 20's cache-step commit): `"all": true` |
+| A README in an action folder is a global | `.gitea/actions/README.md` is an "action nobody uses", so `gitea_targets` answers `None` (`plan_gitea.rs:325-328`) and `plan.rs:536-540` marks everything | `./dev plan 298cc726b^ 298cc726b` (train 20's cache-step commit): `"all": true` |
 | A shared action marks every job that uses it, whole | the same commit (four setup and cache actions): every app leg, crates coverage, three crate legs, UI specs, e2e shards, paddock-dev | the same plan's `why` (`build-jobs/action.yml used by ci.yml, job app`) |
 | Installers rebuild on a cache step | the same plan marks `app:dyno` with `build-jobs ... used by dyno-release.yml`; the plan action asks `./dev plan --ci --app dyno`, which answers `true`, so `dyno-release.yml` builds installers | `.gitea/actions/plan/action.yml` (`run=$(... plan --ci --app "$APP")`), `plan.rs` `affected` |
 | A test-only change runs the whole suite | `apps/dyno/app/src/app/x.spec.ts` marks `app:dyno` (kind `ui`): every UI and e2e command | `plan.rs` test `conformance_is_in_every_plan`, `owners()` |
@@ -129,7 +130,7 @@ All bulk: each takes the whole changed-file set and answers per node (ER-20, PRI
   `test` → the reached `test-target`s with their files (nextest `binary_id(...)`, vitest `--include`, Playwright file arguments);
   `plumbing` → the project's declared smoke set; `release` → installers (rule 54); `docs` → nothing beyond the docs checks. A
   project without a `smoke` or `tests` declaration falls back to full (never less than declared).
-- **`input_hash(node)`** — the content hash of the node's own files plus its declared inputs plus its dependencies' hashes, for
+- **`input_hash(node)`** (a prerequisite of ADR 0116's WP-0) — the content hash of the node's own files plus its declared inputs plus its dependencies' hashes, for
   the test-result cache (0116 draft) and `ER-49` reuse.
 - **`select_os(node) -> OS set`** — §7.
 - **`due(generators, changed)`** and **`stale_after_merge(generators, a, b)`** — the generators whose input closure the change reaches.
