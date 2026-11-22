@@ -8,6 +8,9 @@ import { lazyCommandFactory } from '../app/extensions/lazy-registration';
 import { startupLoadsSettled } from '../app/extensions/startup-loads';
 import { settleStartup } from './startup';
 
+// The real clock back after every test, so a test that times out cannot leave fake timers for the next one (ER-12, C154).
+afterEach(() => vi.useRealTimers());
+
 /** A lazy command set whose chunk arrives when `release()` is called; start-up begins its load at once (immediate idle). */
 function bootGatedSet() {
   const state = { chunkLoaded: false, factoryRuns: 0, release: () => undefined as void };

@@ -47,6 +47,14 @@ runs:
         path: .nightly-green
         key: nightly-green-${{ github.sha }}
         lookup-only: true
+    - uses: ./.gitea/actions/cache-report
+      if: always() && steps.green.outcome != 'skipped'
+      with:
+        name: nightly-green
+        key: nightly-green-${{ github.sha }}
+        hit: ${{ steps.green.outputs.cache-hit }}
+        matched: ${{ steps.green.outputs.cache-matched-key }}
+        saved: n/a
     - id: decide
       shell: bash
       env:

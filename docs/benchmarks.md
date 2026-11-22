@@ -170,10 +170,22 @@ failing mode.
   `pre-push done` line: queue time = `waited` (lock) + `held` - `ran` (the load gate, which runs while the lock is held)
 - **Command:** `grep " done rc=" pitcrew-lock-activity.log | perl -ne 'print "$1 ",$4+$3-$2,"\n" if /Z (\S+) done rc=\S+, ran (\d+)s \(held (\d+)s, waited (\d+)s\)/'`, sorted
 - **Numbers:** 145 steps, all `pre-push`: p50 21 s, p90 386 s, p95 703 s, p99 993 s, max 1,187 s
-- **Notes:** the basis of `QUEUE_MAX` (30 min) as the whole push's queue allowance (tools/paddock-dev/src/pre_push/exec.rs, ADR
+- **Notes:** (superseded 2026-11-21 by the stall limit below) the basis of `QUEUE_MAX` (30 min) as the whole push's queue allowance (tools/paddock-dev/src/pre_push/exec.rs, ADR
   0102 amendment 2026-11-15): one step's worst wait (about 20 min) fits; a push whose heavy steps wait 30 min in all is a busy
   machine's finding, reported "not measured" with the time queued and the load. Not measured: the queue time per push (the log
   does not say which push a step belonged to).
+
+### 2026-11-21, pre-push heavy queue progress gaps (fix/push-gate-queue-stall)
+
+- **Commit:** 3d776b605 (main when measured)
+- **Machine:** Mac mini, Apple M4 Pro, 14 cores, 64 GB, macOS 27.2; the shared machine with other agents running
+- **Source:** heavy's activity log (`pitcrew-lock-activity.log` in heavy's lock folder), 2026-11-14 13:02Z to 2026-11-21 10:12Z, 22,646 lines
+- **Method:** the queue's progress events are the `took the lock` and `done rc=` lines; a gap is the time between two consecutive events with at least one `waiting` line inside it (somebody was waiting, nothing moved). A short Python script over the log (not kept; the log is in the machine's temp folder).
+- **Numbers:** 1,386 gaps: p50 81 s, p90 314 s, p95 453 s, p99 813 s, max 1,446 s (the five longest: 1,112, 1,143, 1,182, 1,443 and 1,446 s)
+- **Queue length:** the most steps waiting at once in the same log: 13 (`position N of 13`). Rows of the three refused pushes of 2026-11-21 (watch-rescan push4, push5, push6): 45 rows decided per push (32 passed + 13 not measured, 31 + 14, 30 + 15) and 20 skipped; the longest of those gate runs was 76 minutes (the log files' times, 15:32 to 16:48), and the push of this change itself, with the new gate, ran 95 minutes (5,705 s, 27 rows passed, none not measured: clippy crates queued 1,225 s and ran 312 s, clippy-windows crates queued 758 s and ran 339 s, doctest crates queued 593 s and ran 334 s).
+- **Derived limits (ER-12):** `WAIT_BACKSTOP` = 2 x 13 x 1,122 s (the slowest healthy row, "Doctest row of the push gate") = 29,172 s (8 h 6 min); the member gate's outer `TIMEOUT` is 24 h, 15 times the longest push gate run seen (95 min). Both are backstops for a hung client or gate: the judgement is the row cap and the queue's progress.
+- **Holders count while they live:** a holder whose record is inside the cap its own row lives under (the waiter's `--run-max`, `ROW_CAP` + grace, 3,675 s) is progress by itself, so a waiter behind a healthy 31 to 60 minute step is not stalled; past the cap it is not live, and the same picture ends the wait a stall limit later.
+- **Notes:** the basis of `QUEUE_STALL` (30 min, 1,800 s) in `tools/paddock-dev/src/pre_push/exec.rs`: over the longest gap seen, so a queue that moves is never ended. A holder that runs longer is ended by its own row cap. The per-push totals it replaces (15 min of run, 30 min of queue) were exceeded by three pushes on 2026-11-21 with no row running too long: 13, 14 and 15 rows, and 5 rows, were not measured. Not measured: the gaps of a quiet machine.
 
 ### 2026-11-12, SVG drift check: font metrics (ci/svg-drift-check)
 
@@ -2336,6 +2348,12 @@ save more, on each OS? And did the user's Defender process exclusions for git ch
 - **Result:** the dispatch input switched the S3 level on in every job (`sccache: local disk .../s3, then S3 bucket ... (through the timeout guard on 127.0.0.1:<port>)` on all 15 jobs that compile or start the server); all three classes reached RustFS, wrote to it (5,240 writes, 0 failures) and read from it (385 L1 hits, 208 of them on macOS in the `paddock-dev` job, whose crates the earlier trials had stored). The guard cut **no** request: its logs held 185 lines `was quiet for 10 s and is closed` (idle keep-alive connections, routine) and no `did not answer`. One guard ended by its 15-minute idle limit in a job whose compiles were more than 15 minutes apart; from then on that job used its local disk alone (a connect to the guard is refused, which sccache's `l0` policy ignores). That is the measured cause for the change of the idle limit to 6 hours (`Limits::default`); the job's own end stops the guard. The hit rate of a first run is low by construction (macOS 31%, Linux 15%, Windows 0.6%); the second run of the same head is the measurement of the shared cache, and was not made (one run per head).
 - **Not measured:** a second run's hit rate, the time saved on a full ci.yml run, and a store that hangs on the real runners (none did).
 
+## sccache on RustFS as the default everywhere it is allowed (2026-11-21, feat/sccache-s3-default)
+
+- **Question:** with `s3` as the default of `setup-rust` and of `./dev sccache env` (user decision 2026-11-21), what are the hit rates (L0 disk, L1 S3) per runner class and on the developer's Mac?
+- **Not measured yet:** the first-run hit rates of ci.yml on the three runner classes and of a local `./dev sccache env` session will be added here, with their run ids, after the first full CI run on this change (docs/research/2026-11-19-sccache.md, section 8, "Not measured"). Until then the only numbers are the 2026-11-20 trial above (run 8363, a dispatch with `sccache_backend=s3`).
+- **dev-tool cache (same branch):** `conformance/ci/dev-tool-cache.sh` read the wrong lines of `./dev --wrapper-hash`, so in run 8509 every Linux job logged "gave no hash" and built `./dev` cold (about 1 to 2 minutes per job, about 40 jobs a run). The minutes saved by the fix are not measured yet: the second job of the first run on this change should log `state=hit`; its time and the first job's build time will be recorded here.
+
 ## CI job cost, step by step (2026-11-20, docs/ci-job-cost-research)
 
 Quoted by [docs/research/2026-11-20-ci-job-cost.md](research/2026-11-20-ci-job-cost.md).
@@ -2430,3 +2448,34 @@ Quoted by [docs/research/2026-11-20-ci-job-cost.md](research/2026-11-20-ci-job-c
   and 3,878 (8346), macOS 2,545 and 1,680, Linux 814 (8346); `merge_check` 1,089 / 303 / 53, `golden` 643 / 189, `queue`
   637 / 388 / 58; queue tests 7.3 s median on Windows.
 - **Fixed waits:** `waitForTimeout` 10 in Debrief's specs, 3 in Dyno's, 5 in `ui/e2e`, 0 in Pitwall's.
+
+## Worker budget: Vitest and Playwright workers in the ER-48 lane budget (2026-11-22, feat/fixed-wait-checks)
+
+Cause: ER-48 counted cargo jobs and nextest threads per lane, not the other worker pools of a job. Vitest's default in a non-watch run is
+`availableParallelism() - 1` workers (`getDefaultMaxWorkers` in vitest 5.0.5, `dist/chunks/index.1TqnEahn.js`), so every `ng test` job
+on a shared host used the whole host, as cargo had before 2026-11-20 (docs/benchmarks.md, "CI job cost, step by step"). Playwright's default
+is half the cores, and the configs set 1 (`paddockConfig`, Dyno, Spotter, Pitcrew, Pitwall, ui) or, in Debrief, 2 on CI. Change:
+`./dev ci build-jobs` (and `conformance/ci/build-jobs.sh`) also write `PADDOCK_E2E_WORKERS` and `VITEST_MAX_WORKERS`, the job's core share
+((cores - kept) / jobs per host / split; no class exception, the macOS 8 threads are nextest's and were measured for nextest only);
+Vitest reads `VITEST_MAX_WORKERS` itself, and `e2eWorkers` (`@decryp7/paddock-e2e`) takes the smaller of the variable and a config's own count
+and warns naming both. A runner can set `PADDOCK_CI_TEST_WORKERS`; the step then warns naming both numbers when it times the jobs per host
+over the cores.
+
+Measured on this tree (no CI run, a quiet-enough 14-core Mac, `uptime` load 13 at the time, so the numbers are counts, not times):
+
+| Check | Before | After |
+|---|---|---|
+| Debrief's real vitest config (`apps/debrief/app/vitest-base.config.mts`) resolved through `vitest/node` `resolveConfig`, `VITEST_MAX_WORKERS` unset / set to 4 | `maxWorkers` 13 | 4 |
+| `build-jobs` goldens (`tests/it/build_jobs_golden.rs`, `build_jobs.rs`) for the three classes | no worker variable | Linux 5, Windows 5, macOS 4 |
+
+Lanes times workers per host, from the class layout (lanes x workers against the usable cores):
+
+| Class | Lanes | Cores usable | Vitest before | Vitest after | Playwright (configs, CI) after |
+|---|---|---|---|---|---|
+| Linux d-gtr9 | 6 | 30 | 6 x 29 = 174 | 6 x 5 = 30 | at most 1 (Debrief 2), capped at 5 |
+| Windows | 3 | 16 | 3 x 15 = 45 | 3 x 5 = 15 | at most 1 (Debrief 2), capped at 5 |
+| macOS | 3 | 12 | 3 x 13 = 39 | 3 x 4 = 12 | at most 1 (Debrief 2), capped at 4 |
+
+Not measured: the run time of the Vitest jobs at the lower worker count (the first full CI run after this lands says; ER-12: a count that
+turns out too low is raised only with that measurement recorded here). Playwright was already within the budget (workers 1, Debrief 2), so
+its row changes only where a host's share falls below a config's own count.

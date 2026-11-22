@@ -7,7 +7,7 @@
  */
 export { test, expect, type PaddockFixtures } from './fixtures.ts';
 export type { Page, Locator, BrowserContext } from '@playwright/test';
-export { e2ePort } from './env.ts';
+export { e2ePort, e2eWorkers } from './env.ts';
 export { stablePressPoint } from './press.ts';
 export { scrollAnchoringShift, expectNoScrollMovesOfItsOwn, anchoringVerdict, type AnchoringShift } from './owned-scroll.ts';
 export { clickShape, hoverShape, pointInShape, type PagePoint } from './svg.ts';

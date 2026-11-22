@@ -4,9 +4,9 @@
 #
 #   dev-tool-cache.sh no-download         exit 0 when this job builds ./dev from source and never downloads it (no cache then)
 #   dev-tool-cache.sh key                 the cache key and path of this checkout's tool (outputs: usable, hash, key, path)
-#   dev-tool-cache.sh verify <hit>        runs the tool (./dev rebuilds a binary that does not run or is not for its hash), checks that
+#   dev-tool-cache.sh verify <hit> <matched-key>   runs the tool (./dev rebuilds a binary that does not run or is not for its hash), checks that
 #                                         it reports the expected hash, and says what happened (outputs: state hit|miss|rejected, save)
-#   dev-tool-cache.sh summary <state> <saved> <verified>   the job-summary line (cache key, hit or miss, save result)
+#   dev-tool-cache.sh summary <state> <saved> <verified> [<hit> <matched-key>]   the job-summary line (cache key, restore, save result)
 #
 # The key is exactly the launcher's input hash plus the OS, the architecture and a cache-version salt (PADDOCK_DEV_TOOL_CACHE_VERSION,
 # bump it to retire every saved binary), with no restore-keys: a binary of another hash is never restored. Only a build that passed
@@ -39,14 +39,20 @@ cmd_key() {
     echo "- dev-tool cache: not used (this job builds ./dev from source: PADDOCK_DEV_DOWNLOAD=0, or no read token in this step's environment, or PADDOCK_DEV_FRESH=1)" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
     return 0
   fi
-  if ! lines="$("${dev[@]}" --wrapper-hash 2>/dev/null)" || [ "$(printf '%s\n' "$lines" | wc -l)" -lt 3 ]; then
-    echo "::warning::dev-tool-cache: ./dev --wrapper-hash gave no hash (no Rust compiler yet?), so the tool is not cached by key. Next step: run the setup-rust action before this one."
-    out usable false
-    return 0
+  # `./dev --wrapper-hash` prints the hash and `clean` or `dirty` on standard output (two lines; the inputs line is on standard error).
+  # Reading line 2 and 3 here once made every Linux job miss the cache without a word (run 8509). A shape that is not exactly that is
+  # an error, never a quiet miss (ER-33): the tool then builds in every job and the cost is invisible.
+  if ! lines="$("${dev[@]}" --wrapper-hash 2>/dev/null)"; then
+    echo "::error::dev-tool-cache: ./dev --wrapper-hash failed (no Rust compiler runs here?). Next step: run the setup-rust action's toolchain step before this one, then ./dev --wrapper-hash in the job to see why."
+    exit 1
   fi
-  hash="$(printf '%s\n' "$lines" | sed -n 2p)"
-  state="$(printf '%s\n' "$lines" | sed -n 3p)"
-  if [ "$state" != clean ] || ! [[ "$hash" =~ ^[0-9a-f]{40}$ ]]; then
+  hash="$(printf '%s\n' "$lines" | sed -n 1p)"
+  state="$(printf '%s\n' "$lines" | sed -n 2p)"
+  if [ "$(printf '%s\n' "$lines" | wc -l)" -ne 2 ] || ! [[ "$hash" =~ ^[0-9a-f]{40}$ ]] || { [ "$state" != clean ] && [ "$state" != dirty ]; }; then
+    echo "::error::dev-tool-cache: ./dev --wrapper-hash printed an unexpected shape (want a 40-hex hash, then clean or dirty). Next step: compare the wrapper's --wrapper-hash output with conformance/ci/dev-tool-cache.sh."
+    exit 1
+  fi
+  if [ "$state" != clean ]; then
     echo "::notice::dev-tool-cache: the tool's inputs have uncommitted changes (state '$state'), so no committed hash names its binary; nothing is restored or saved."
     out usable false
     return 0
@@ -58,45 +64,63 @@ cmd_key() {
 }
 
 cmd_verify() {
-  local hit="${1:-}" hash log said state save=false
-  hash="$("${dev[@]}" --wrapper-hash 2>/dev/null | sed -n 2p)"
-  [ -n "$hash" ] || { echo "::error::dev-tool-cache: ./dev gave no hash. Next step: run ./dev --wrapper-hash in the job to see why."; exit 1; }
+  # <cache-hit> and <matched-key> are the restore step's own outputs (ADR 0115): the state is what the restore found, never what this
+  # run of ./dev printed. An earlier step of the job may have built the tool already (run 8576), and a log of "no build" then said "hit".
+  local hit="${1:-}" matched="${2:-}" hash log said embedded state save=false outcome
+  outcome="$(bash "$here/cache-report.sh" outcome "$hit" "$matched")"
+  hash="$("${dev[@]}" --wrapper-hash 2>/dev/null | sed -n 1p)"
+  [[ "$hash" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::dev-tool-cache: ./dev gave no hash. Next step: run ./dev --wrapper-hash in the job to see why."; exit 1; }
   log="$(mktemp)"
   # ./dev runs the binary only when it runs and is for this hash; otherwise it downloads or builds one (and says so).
-  said="$("${dev[@]}" self hash 2>"$log")" || { cat "$log" >&2; echo "::error::dev-tool-cache: ./dev self hash failed (above). Next step: ./dev cannot build the tool in this job; fix that first."; exit 1; }
+  said="$("${dev[@]}" self hash --json 2>"$log")" || { cat "$log" >&2; echo "::error::dev-tool-cache: ./dev self hash failed (above). Next step: ./dev cannot build the tool in this job; fix that first."; exit 1; }
   cat "$log" >&2
-  if [ "$said" != "embedded $hash" ]; then
-    echo "::error::dev-tool-cache: the tool reports '$said', not 'embedded $hash'. It is not saved. Next step: bump PADDOCK_DEV_TOOL_CACHE_VERSION if a restored copy keeps being wrong."
+  # `dev self hash` has a text form of several lines (hash, wrapper, embedded, dirty) and a JSON form; the JSON field is its contract
+  # (tools/paddock-dev/src/input_hash.rs), so it is read by that key (no node or jq is needed on the runner), never matched in the text (ER-42; the text shape grew and broke this, run 8560).
+  embedded="$(printf '%s' "$said" | sed -n 's/.*"embedded":"\([0-9a-f]*\)".*/\1/p')"
+  [ -n "$embedded" ] || embedded=-   # null: a binary built outside the launcher
+  if [ "$embedded" != "$hash" ]; then
+    echo "::error::dev-tool-cache: the tool embeds '$embedded', not '$hash'. It is not saved. Next step: bump PADDOCK_DEV_TOOL_CACHE_VERSION if a restored copy keeps being wrong."
     exit 1
   fi
-  if grep -qE '^dev: (building|downloaded) paddock-dev' "$log"; then
-    if [ "$hit" = true ]; then
-      state=rejected   # the cache had the key but its binary was not usable: ./dev rebuilt it; the key exists, so it cannot be saved again
-      echo "::warning::dev-tool-cache: the binary restored under this key was rejected and rebuilt (it did not run or was not for hash $hash). The key already exists, so the good build cannot be saved under it. Next step: bump PADDOCK_DEV_TOOL_CACHE_VERSION."
-    else
+  case "$outcome" in
+    exact)
+      state=hit
+      # A restored binary that ./dev had to rebuild is a restore that did not work. This reads the log only to warn; no save follows
+      # either way (the key exists, so it cannot be saved again).
+      if grep -qE '^dev: (building|downloaded) paddock-dev' "$log"; then
+        state=rejected
+        echo "::warning::dev-tool-cache: the binary restored under this key was rejected and rebuilt (it did not run or was not for hash $hash). The key already exists, so the good build cannot be saved under it. Next step: bump PADDOCK_DEV_TOOL_CACHE_VERSION."
+      fi ;;
+    *)
+      # Nothing restored under the exact key (there are no restore-keys, so partial cannot happen): whatever ran here, built in this step
+      # or earlier in the job, was verified above for its hash, and the key is new, so it is saved.
       state=miss
-      save=true
-    fi
-  else
-    state=hit
-  fi
+      save=true ;;
+  esac
   rm -f "$log"
   out state "$state"
   out save "$save"
 }
 
 cmd_summary() {
-  local key="${KEY:-}" state="${1:-miss}" saved="${2:-}" verified="${3:-}" line
+  local key="${KEY:-}" state="${1:-miss}" saved="${2:-}" verified="${3:-}" hit="${4:-}" matched="${5:-}" line
   case "$state" in
-    hit) line="hit (restored, verified for its hash)" ;;
-    rejected) line="rejected (restored but not usable; rebuilt; NOT saved)" ;;
+    hit) line="restored: exact hit (verified for its hash); saved: not needed" ;;
+    rejected) line="restored: exact hit but NOT usable (rebuilt); saved: NO (the key exists)" ;;
     miss)
-      if [ "$saved" = true ] && [ "$verified" = true ]; then line="miss (built; saved and found again by key)"
-      elif [ "$saved" = true ]; then line="miss (built; save NOT confirmed: the cache lookup after the save found nothing)"
-      else line="miss (built; not saved)"; fi ;;
+      if [ "$saved" = true ] && [ "$verified" = true ]; then line="restored: miss (built); saved: yes (found again by key)"
+      elif [ "$saved" = true ]; then line="restored: miss (built); saved: NOT confirmed (the cache lookup after the save found nothing)"
+      else line="restored: miss (built); saved: NO"; fi ;;
     *) line="not measured ($state)" ;;
   esac
   echo "- dev-tool cache \`$key\`: $line" | tee -a "${GITHUB_STEP_SUMMARY:-/dev/null}"
+  # The audit line (ci cache-audit): saved is yes only when the lookup after the save found the key.
+  if [ -n "$key" ] && { [ "$state" = hit ] || [ "$state" = miss ] || [ "$state" = rejected ]; }; then
+    local sv=n/a
+    case "$state" in miss) if [ "$saved" = true ] && [ "$verified" = true ]; then sv=yes; else sv=no; fi ;; rejected) sv=no ;; esac
+    local o; o="$(bash "$here/cache-report.sh" outcome "$hit" "$matched")"
+    echo "cache-report: name=dev-tool outcome=$o saved=$sv key=$key"
+  fi
   case "$line" in *"NOT"*) echo "::warning::dev-tool-cache: $line. Next step: check the cache server (RustFS) and the runner's cache settings." ;; esac
 }
 
@@ -105,5 +129,5 @@ case "${1:-}" in
   no-download) cmd_no_download ;;
   verify) shift; cmd_verify "$@" ;;
   summary) shift; cmd_summary "$@" ;;
-  *) echo "usage: dev-tool-cache.sh key | verify <hit> | summary <state> <saved> <verified>" >&2; exit 2 ;;
+  *) echo "usage: dev-tool-cache.sh key | verify <hit> <matched-key> | summary <state> <saved> <verified> [<hit> <matched-key>]" >&2; exit 2 ;;
 esac

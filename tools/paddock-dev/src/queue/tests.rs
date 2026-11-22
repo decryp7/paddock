@@ -469,6 +469,7 @@ fn two_pull_requests_one_breaks_it_is_dropped_with_a_comment_and_the_other_retri
             projects: set(&["x"]),
             files: vec![],
             blame: Blame::New,
+            retried: false,
         }],
     );
     let Tick::Dropped {
@@ -525,12 +526,14 @@ fn several_suspects_are_all_dropped_and_a_failure_that_also_fails_on_main_blames
                 projects: set(&["x"]),
                 files: vec![],
                 blame: Blame::New,
+                retried: false,
             },
             Failure {
                 what: "ui main-red".into(),
                 projects: set(&["ui"]),
                 files: vec![],
                 blame: Blame::OnMain,
+                retried: false,
             },
         ],
     );
@@ -557,6 +560,7 @@ fn only_failures_of_mains_own_stop_the_train_and_blame_nobody() {
             projects: set(&["x"]),
             files: vec![],
             blame: Blame::OnMain,
+            retried: false,
         }],
     );
     assert!(matches!(w.tick(), Tick::Stuck { measured: true, .. }));
@@ -740,6 +744,7 @@ fn failure(what: &str, projects: &[&str], blame: Blame) -> Failure {
         projects: set(projects),
         files: vec![],
         blame,
+        retried: false,
     }
 }
 
@@ -2567,6 +2572,7 @@ fn gate(files: &[&str]) -> Failure {
         projects: set(&["traingate"]),
         files: files.iter().map(|s| s.to_string()).collect(),
         blame: Blame::New,
+        retried: false,
     }
 }
 

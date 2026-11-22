@@ -5,6 +5,8 @@
 # `bash conformance/ci/kit.sh <step> ...` and nothing else.
 #
 #   kit.sh which                     prints dev or shell (the reason goes to stderr)
+#   kit.sh release-path              prints true on a release, rule 54 or tag run, else false (the trigger goes to stderr): the compile
+#                                    cache never reads the shared S3 store on one
 #   kit.sh isolation <args>          `./dev ci isolation <args>` (or job-isolation.sh <args>)
 #   kit.sh build-jobs [<split>]      `./dev ci build-jobs [<split>]` (or build-jobs.sh [<split>])
 #   kit.sh build-env                 `./dev ci build-env` (or node build-env.mjs): PADDOCK_BUILD_COMMIT and PADDOCK_BUILD_DATE
@@ -82,13 +84,22 @@ if [ "${1:-}" = portable ]; then
   esac
 fi
 
+# release_reason: the one definition of "this is a release, rule 54 or tag run" (it prints the reason and succeeds; prints nothing and fails
+# otherwise). The kit choice below and the compile cache's S3 guard (`kit.sh release-path`, setup-rust) both ask it, so the two never
+# disagree. PADDOCK_DEV_DOWNLOAD=0 counts here because the release and rule 54 WORKFLOWS set it; setup-rust's own export of it for a job
+# with no read token comes later and is not asked.
+release_reason() {
+  case "${GITHUB_REF:-}" in refs/tags/*) echo "a tag run"; return 0 ;; esac
+  # The tag rehearsal takes the tag's path (is-tag-run.mjs; a rehearsal on a real tag never gets here: the build step refuses it first).
+  if [ "${PADDOCK_TAG_REHEARSAL:-}" = 1 ]; then echo "a tag rehearsal"; return 0; fi
+  if [ "${PADDOCK_DEV_DOWNLOAD:-}" = 0 ]; then echo "PADDOCK_DEV_DOWNLOAD=0 (a release or rule 54 run)"; return 0; fi
+  return 1
+}
+
 # kit_choice: prints "<dev|shell> <reason>".
 kit_choice() {
   if [ "${PADDOCK_CI_KIT:-}" = shell ]; then echo "shell PADDOCK_CI_KIT=shell"; return; fi
-  case "${GITHUB_REF:-}" in refs/tags/*) echo "shell a tag run"; return ;; esac
-  # The tag rehearsal takes the tag's path (is-tag-run.mjs; a rehearsal on a real tag never gets here: the build step refuses it first).
-  if [ "${PADDOCK_TAG_REHEARSAL:-}" = 1 ]; then echo "shell a tag rehearsal"; return; fi
-  if [ "${PADDOCK_DEV_DOWNLOAD:-}" = 0 ]; then echo "shell PADDOCK_DEV_DOWNLOAD=0 (a release or rule 54 run)"; return; fi
+  if why=$(release_reason); then echo "shell $why"; return; fi
   # ./dev runs the tool of the checkout it is started in (as setup-rust does): another repository using these actions, or a
   # sparse checkout without tools/, has none.
   top=$(git rev-parse --show-toplevel 2>/dev/null || true)
@@ -247,6 +258,10 @@ kit_host() {
 
 case "${1:-}" in
   which) echo "$kit" ;;
+  release-path)
+    # true or false on standard output (the S3 guard of setup-rust's compile-cache step reads it), the trigger on standard error.
+    if why=$(release_reason); then echo "kit: release path: $why" >&2; echo true; else echo false; fi
+    ;;
   host)
     shift
     kit_host "$@"
@@ -271,7 +286,7 @@ case "${1:-}" in
     exec node "$here/build-env.mjs"
     ;;
   *)
-    echo "usage: kit.sh which | isolation <args> | build-jobs [<split>] | build-env | host <step> <args> | portable <what> <path>" >&2
+    echo "usage: kit.sh which | release-path | isolation <args> | build-jobs [<split>] | build-env | host <step> <args> | portable <what> <path>" >&2
     exit 2
     ;;
 esac

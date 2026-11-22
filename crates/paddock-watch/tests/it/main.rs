@@ -3,4 +3,5 @@
 
 mod debounce;
 mod native;
+mod rescan;
 mod settle;

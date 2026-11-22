@@ -10,6 +10,9 @@ import { ModelsStore } from './models.store';
 import { SlotsPanel } from './slots-panel';
 import { FIT_DELAY_MS } from './slots.store';
 
+// The real clock back after every test, so a test that times out cannot leave fake timers for the next one (ER-12, C154).
+afterEach(() => vi.useRealTimers());
+
 const tick = async (n = 6) => {
   for (let i = 0; i < n; i++) await new Promise((r) => setTimeout(r, 0));
 };

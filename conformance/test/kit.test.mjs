@@ -57,6 +57,26 @@ test('the kit picks Rust off the release path and the shell on it', () => {
   }
 });
 
+test('release-path is the one definition of a release, rule 54 or tag run, and names its trigger', () => {
+  const c = checkout();
+  try {
+    const ask = (env) => { const r = c.run(['release-path'], env); return { out: r.stdout.trim(), why: r.stderr }; };
+    assert.equal(ask({}).out, 'false', 'a branch run');
+    assert.equal(ask({ GITHUB_REF: 'refs/heads/main' }).out, 'false');
+    for (const [env, named] of [
+      [{ GITHUB_REF: 'refs/tags/dyno-v1.2.0' }, /a tag run/],
+      [{ PADDOCK_TAG_REHEARSAL: '1' }, /a tag rehearsal/],
+      [{ PADDOCK_DEV_DOWNLOAD: '0' }, /PADDOCK_DEV_DOWNLOAD=0 \(a release or rule 54 run\)/],
+    ]) {
+      const r = ask(env);
+      assert.equal(r.out, 'true', JSON.stringify(env));
+      assert.match(r.why, named, 'the trigger is named');
+    }
+  } finally {
+    c.done();
+  }
+});
+
 test('where ./dev cannot run the shell runs: no tool in the checkout, no rustc', () => {
   for (const missing of [{ tools: false }, { rustc: false }]) {
     const c = checkout(missing);

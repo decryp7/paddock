@@ -21,6 +21,7 @@ use crate::procs::{Presence, Procs, evidence, pid_alive};
 use crate::record::{self, Owner, OwnerRead};
 use crate::timefmt::{clock_text, day_text, mins, oneline, utc_text};
 use crate::waitfor::{self, Break, Role, Rules, Waiter};
+use paddock_proc::queue_stall::{Holder, QueueView, within_cap};
 use serde_json::{Value, json};
 use std::fs;
 use std::io::Read;
@@ -904,9 +905,14 @@ impl<'a> Acquirer<'a> {
     }
 
     fn make_ticket(&mut self) -> Result<(), String> {
+        let n = self.h.clock.now_micros();
+        let ticket = self.h.cfg.root.join(format!("{TICKET_PREFIX}{n:016}-{}", self.h.pid));
+        self.write_ticket(ticket)
+    }
+
+    /// Writes this run's ticket at `ticket` (its name carries the queue age) and remembers it.
+    fn write_ticket(&mut self, ticket: PathBuf) -> Result<(), String> {
         let h = self.h;
-        let n = h.clock.now_micros();
-        let ticket = h.cfg.root.join(format!("{TICKET_PREFIX}{n:016}-{}", h.pid));
         let tmp = PathBuf::from(format!("{}.tmp", ticket.display()));
         let body = record::format_ticket(
             h.pid,
@@ -1235,6 +1241,39 @@ impl<'a> Acquirer<'a> {
         }
     }
 
+    /// The queue as this run sees it now (its place and who holds the slots): what [`paddock_proc::queue_stall::StallClock`] judges
+    /// progress by.
+    ///
+    /// A holder whose record is younger than `holder_cap` is `live`: running, and inside the bound this waiter would give its own
+    /// command, so the wait behind it is progress, not a stall. `None`: no holder is trusted for any time.
+    pub fn queue_view(&self, holder_cap: Option<Duration>) -> QueueView {
+        let position = if self.ticket.is_file() {
+            self.h.queue(&self.ticket, &self.req.name).0
+        } else {
+            0
+        };
+        let now = self.h.now();
+        let owners: Vec<Owner> = self
+            .h
+            .held_dirs()
+            .iter()
+            .filter_map(|d| match self.h.read_owner(d) {
+                OwnerRead::Ok(o) => Some(o),
+                _ => None,
+            })
+            .collect();
+        let live = holder_cap.is_some_and(|c| owners.iter().any(|o| within_cap(o.epoch, now, c)));
+        let holders = owners
+            .into_iter()
+            .map(|o| Holder {
+                name: o.name,
+                pid: o.pid,
+                epoch: o.epoch,
+            })
+            .collect();
+        QueueView { position, holders, live }
+    }
+
     /// Records the command this run started (pid and OS start time) as line 7 of the owner record, atomically, so a heavy
     /// that is killed while its command still runs does not let the next waiter break the lock.
     pub fn set_child(&mut self, pid: u32, start_micros: u64) {
@@ -1286,6 +1325,16 @@ impl<'a> Acquirer<'a> {
     }
 
     /// Gives the slot back and nothing else: the ticket and the marker stay, for a taker that steps back and waits again.
+    /// Gives the slot back and keeps the claim, with its age: the ticket (removed when the slot was taken) is written again under its
+    /// own name, so the next [`Acquirer::poll`] finds this run where it stood and a younger waiter does not pass it. For a slot taken
+    /// just as the load gate closed. A high-priority run (no ticket) just waits again.
+    pub fn step_back(&mut self) {
+        self.release_slot();
+        if self.marker.is_none() && !self.ticket.is_file() {
+            let _ = self.write_ticket(self.ticket.clone());
+        }
+    }
+
     fn release_slot(&mut self) {
         let h = self.h;
         if let Some(i) = self.held.take() {
