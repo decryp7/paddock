@@ -1,0 +1,9 @@
+# The declared inputs and owners of the repository model (ADR 0117 §3). Read by one accessor, tools/paddock-dev/src/repo_inputs.rs,
+# and merged over the defaults in crates/paddock-repo-graph/src/model/inputs.rs (`Inputs::defaults`): the two true globals
+# (rust-toolchain, the root npm files), the Cargo config, the attribute-aware .gitattributes input, the lessons file, and the owners
+# of docs, conformance/reserved and spikes. An [[input]] here replaces the default of the same name; an [[owner]] here wins a tie.
+#
+# [[input]]  name, files (globs), reaches (all | cargo | npm | apps | project:<id>), reach (code | release | test | plumbing | docs),
+#            attributes (true for a .gitattributes file)
+# [[owner]]  paths (globs), node (none | doc | project:<id>)
+version = 1
