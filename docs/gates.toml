@@ -1320,3 +1320,10 @@ owner = "ER-21 class: a whole streamed answer bounded by one expect timeout (deb
 since = 2026-11-20
 review_by = 2026-12-20
 approved = "user"
+
+[[report_only]]
+id = "C154"
+reason = "ER-41: report-only until its first green run on the real tree, recorded by run id here and in tools/paddock-dev/src/check/c154.rs, then flip the mode to Gate. Three rules over *.spec.ts and *.e2e.ts (comments and strings masked): fake-timers (vi.useFakeTimers with no afterEach, afterAll or onTestFinished that restores the real clock and no test-setup that does), fixed-wait (flush(CONSTANT + n)) and lazy-wait (vi.waitFor or expect.poll that only imports, or a sync advanceTimersByTime followed by a DOM assertion). waitForTimeout and setTimeout-promise sleeps stay C71's. No baseline file (ER-46); a baseline needs the user's approval. First count at 67ac6d6ec: see the CHANGELOG entry"
+owner = "ER-21 class: a fixed-time wait or a leaked fake clock fails a spec on a loaded runner (Dyno extras-page leak c249b271c, Spotter flush(TEST_DEBOUNCE_MS + 20) ad0221ac1, Pitcrew flush(PREVIEW_DEBOUNCE_MS + 50); feat/fixed-wait-checks)"
+since = 2026-11-22
+review_by = 2026-12-22
