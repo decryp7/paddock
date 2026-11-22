@@ -4,8 +4,9 @@
   D4 (b), D5 (a), D8 (a), D9 (a), D10 (a) as recommended; and D11 (the landing run tests the train's diff from main's tested head,
   WP-8). One independent review of this ADR runs beside the build; a P1 stops the build. The direction is the user's ("fix the
   graph first, and hold all trains until it lands"). Review round 1 (2026-11-23, at `a073aae56`) found 10 P1s and 8 P2s; the
-  build stopped and every finding is answered in this text (§2 to §13, the work packages and the decisions); a second review round
-  follows.
+  build stopped and every finding is answered in this text (§2 to §14, the work packages and the decisions); a second review round
+  follows. Cost: the user approved the increase over 8 days on 2026-11-23 "as long as it fixes the root cause once and for all", so
+  the scope is the complete one (§14 says how each instance becomes impossible or checked).
 - Date: 2026-11-23
 - Related: ER-20 (bulk work, spawn budgets), ER-21 (a recurring class gets a redesign), ER-22 (share first; a value another
   module decides is read from it), ER-15 and ER-49 (a smoke or partial run is never complete; test a commit once), ER-37 (common
@@ -344,6 +345,42 @@ positive controls for G3, G7/G8 and G9 (a mutation of each rule turns its test r
 accessor, 3 tests) and `docs/repo-graph.toml`. Known gap against this revision: the slice gives declared owner rules precedence over
 project folders, the reverse of §2 (P1-4); WP-1 fixes it first.
 
+### 14. Once and for all: how each instance becomes impossible or checked
+
+**No path rule outside the graph.** When WP-5 and WP-9 are done, the planner holds no regex or path list: every fact that today is
+a rule (`GLOBAL`, the input regexes, `OWNERS`, `CI_JOBS`, `TRACED_SCRIPT`, `GITEA_FILE`, the `conformance → every app` loop, the
+`src-tauri` kind rule, `hostTests`, the generators' `paths`) is a declared input in `docs/repo-graph.toml`, a project contract
+field, or an edge an extractor reads from the code. A conformance check (WP-5) fails when `tools/paddock-dev/src/plan*.rs` gains a
+`Regex` or a path literal, with a positive control.
+
+"Impossible" means the structure cannot express the defect; "checked" means a named check fails when it comes back.
+
+| Instance | Becomes | By |
+|---|---|---|
+| Actions README is global (G7) | impossible | a `.md` is owned by its folder's project or a `doc` rule (§2); no rule turns an untraced file into "everything" except fail-closed on an *unowned* file, which also fails the owner check |
+| A shared action marks every job whole (G6) | impossible | reach carries a kind; `plumbing` selects only the declared smoke set (§5) |
+| Installers on a cache step (rule 54) | impossible | `release` comes only from `uses` edges out of a bundle or publish job; setup-only actions are declared (§5) |
+| Test-only change runs the whole suite (G12) | impossible, or full when unprovable | `test` selects the reached test targets; an unresolved import or path runs full (§4, D6) |
+| Foundation change runs app jobs (G8) | impossible | conformance reaches only the conformance job and the apps' conformance steps through `runs` edges (§6) |
+| OS placement by hand list | checked | derived `os` marks; C155 fails on an exception the derivation contradicts; `os.skip` needs the user (§7) |
+| Generator inputs by hand list | impossible | generator inputs are edges to nodes, not globs (§4) |
+| G1 no base on a train dispatch | checked | WP-8: the dispatch passes `base`; `./dev ci dispatch` refuses a train dispatch without one; a golden pins it |
+| G2 `.gitattributes` global | impossible | the attribute extractor; only content attributes reach (§3) |
+| G3 unknown root file marks everything | checked | the owner check fails on an unowned file and the plan prints it; owners are declared for every root folder (§2) |
+| G4 a mention is a use | impossible | edges come only from `uses:` and invoked programs (§4) |
+| G5 ci.yml header or plan job is global | impossible | the plan job's inputs are edges to paddock-dev's planner tests and the jobs reading changed outputs (WP-2) |
+| G9 npm edge gives the Rust half | impossible | an npm edge carries the UI half only (§4, WP-1 test) |
+| G10 e2e guard files | checked | kept as `imports` edges; their positive control (§8) |
+| G11 per-workspace runs | impossible | `selection` names packages on every run kind (WP-3) |
+| G13 lessons file | checked | a declared input with its golden |
+| G14 a red push widens the next base | impossible | the base is the last complete verdict from the one reader (§6) |
+
+Every row has its positive control in the §8 table and its golden; the escape monitor (D12) is the net for what no structure covers.
+
+**What still needs a human:** narrowing `docs/repo-graph.toml` (fewer files or targets for an input, or a new `none`/`doc` owner for
+a path that was built), adding an `os.skip` exception, declaring an action setup-only, and lowering a project's smoke set. Each is
+the unsafe direction, so each needs a golden diff in the same change and the user's approval (ER-46). Widening needs neither.
+
 ## Common practice (ER-37)
 
 - **Nx**: a project graph from package manifests and plugins, `namedInputs` and `targetDefaults.inputs` per target, `nx affected`
@@ -374,15 +411,16 @@ project folders, the reverse of §2 (P1-4); WP-1 fixes it first.
 | WP-7 | Generators as nodes (`due`, stale after merge); `input_hash` on `input_hash.rs` with the added inputs | 0.8 |
 | WP-8 | The landing run tests the train's diff (D11, G1, G14) | 1.0 |
 | WP-9 | The escape monitor and the five-nightly gate before the old tables go (D12) | 0.7 |
-| | **Total** | **11.1** (accepted 6.3; spent so far about 0.3 on WP-1) |
+| | The no-path-rule conformance check, positive controls for every node, edge and extractor kind (§8), fail-closed tests | included above |
+| | **Total** | **11.1** (accepted 6.3; spent so far about 0.3 on WP-1). Approved by the user on 2026-11-23 ("over 8 d is OK as long as it fixes the root cause once and for all") |
 
 The total grew 76 % over the accepted 6.3 days, from the review's findings (the `reads` edge, the migration net and the escape
-monitor are most of it). That is beyond ER-37's 20 %, so it goes back to the user. The cheaper option inside this design: WP-1 to
-WP-5 with WP-8 (8.3 days) now, WP-6, WP-7 and WP-9 later, with the old tables kept behind `--compare` until WP-9 lands.
+monitor are most of it). It went back to the user (ER-37), who approved it on 2026-11-23 on the condition that it fixes the root
+cause once and for all: all nine work packages, in the order of §11.
 
 ## Decisions
 
-- **D1. Scope.** (a) WP-1 to WP-7, 6.3 days. (b) WP-1 to WP-5 now, WP-6 and WP-7 after the next release, 4.8 days.
+- **D1. Scope.** *Chosen 2026-11-23: (a), widened to WP-1 to WP-9, 11.1 days (§14).* (a) WP-1 to WP-7, 6.3 days. (b) WP-1 to WP-5 now, WP-6 and WP-7 after the next release, 4.8 days.
   (c) Common practice: the five behaviours as planner rules, 3 to 4 days, no model. *Recommended: (b)*: it closes the planning class
   within the told budget; OS placement and generators have working hand lists with checks today.
 - **D2. Where the model lives.** (a) `paddock-repo-graph`, extractors as modules behind the existing ports. (b) A new crate
