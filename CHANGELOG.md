@@ -4,6 +4,26 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### Conformance C154 (report-only), `until` in `@decryp7/paddock-ui/testing`, and workers in the ER-48 budget (ER-21 class: fixed-time waits and leaked fake clocks, user decision 2026-11-22)
+- `until(condition, { what, settle?, maxRounds? })` in `@decryp7/paddock-ui/testing`: waits on a condition (returns or stops throwing), runs
+  one settle round between reads (default one event-loop turn), counts rounds instead of milliseconds, and fails naming `what` with the last
+  error as the cause. It replaces `flush(CONSTANT + n)`. The apps' own `settleUntil` and Spotter's spec-local `until` are left as they are
+  (Spotter's lives on `fix/main-8555-flakes`, not on this base; moving it onto the shared one is a one-line change after that lands). The
+  Pitcrew `config-panel` spec uses it.
+- C154 (Rust, `tools/paddock-dev/src/check/c154.rs`, report-only, ER-41) over `*.spec.ts` and `*.e2e.ts`: `fake-timers` (a file that calls
+  `vi.useFakeTimers` and has no `afterEach`, `afterAll` or `onTestFinished` that restores the real clock, and no test-setup that does), `fixed-wait`
+  (`flush(CONSTANT + n)`) and `lazy-wait` (`vi.waitFor` or `expect.poll` that only imports; a sync `advanceTimersByTime` followed by a DOM
+  assertion). `waitForTimeout` and `setTimeout`-promise sleeps stay C71's. Each rule has a positive control; no baseline file (ER-46).
+  First count at 67ac6d6ec (host run over the 1359 spec files): 38 findings, 35 fake-timers (Debrief 21, Dyno 4, Pitcrew 2, Pitwall 4,
+  Spotter 4) and 3 fixed-wait (Pitcrew `config-panel.spec.ts` twice, Spotter `pattern-helper.spec.ts`), 0 lazy-wait. Every site is fixed in this
+  change (an `afterEach` that restores the real clock; the Pitcrew waits use `until` on the store's `previewing`) except Spotter's
+  `pattern-helper.spec.ts`, which `fix/main-8555-flakes` rewrites; after the fixes the tree reads 1 finding (that file). `ui/projects/paddock-ui`
+  is exempt because its setup calls `installTestKit`, which restores the clock after every test. The check stays report-only (ER-41); no baseline.
+- `./dev ci build-jobs` (and its shell twin) also writes `PADDOCK_E2E_WORKERS` and `VITEST_MAX_WORKERS`, the job's core share (runner
+  override `PADDOCK_CI_TEST_WORKERS`), and warns naming both numbers when the runner's number times its jobs per host exceeds the cores.
+  `e2eWorkers` of `@decryp7/paddock-e2e` takes the smaller of the variable and a config's own count (paddockConfig and Debrief's config);
+  Vitest reads `VITEST_MAX_WORKERS` itself. Before, Vitest ran cores - 1 workers in every job (6 x 29 on d-gtr9's 30 cores).
+
 ### `paddock-dev`, `heavy`, `paddock-env`: a health gate for Gitea, and no tool prompts (user decision 2026-11-20)
 - `./dev ci dispatch`, `./dev wait --ci-run` and the queue and member-gate dispatch look at Gitea (`GET /api/v1/version`) and hold while it
   is down: any answer below 500 is up (a 401 or 403 included), a refused connection, a timeout or a 5xx is down. They hold on Gitea
