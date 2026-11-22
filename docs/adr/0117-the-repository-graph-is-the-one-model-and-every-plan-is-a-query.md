@@ -1,7 +1,7 @@
 # 0117. The repository graph is the one model of the repository, and every plan is a query on it
 
 - Status: Proposed 2026-11-23. The direction is the user's (2026-11-23, through the coordinator: "fix the graph first, and hold all
-  trains until it lands"); the decisions below (D1 to D9) are open.
+  trains until it lands"); the decisions below (D1 to D10) are open.
 - Date: 2026-11-23
 - Related: ER-20 (bulk work, spawn budgets), ER-21 (a recurring class gets a redesign), ER-22 (share first; a value another
   module decides is read from it), ER-15 and ER-49 (a smoke or partial run is never complete; test a commit once), ER-37 (common
@@ -182,6 +182,27 @@ A spawn budget test pins the count (ER-20). Today `./dev plan --all` takes 2.9 s
 the dev Mac (measured 2026-11-23 on this base under load; [benchmarks](../benchmarks.md#planner-run-time-before-the-repository-graph-model-2026-11-23-docsadr-repo-graph-model-base-803aed12d)); the target is the same or less, with the
 file reads batched. Extractors run in parallel over files (rayon, cores minus one), results deterministic (sorted).
 
+### 10. Edges come from parsers, not language servers
+
+- **Project level**: `cargo metadata` and the npm workspaces, as today. **CI**: the YAML reader of ADR 0060 plus script imports.
+- **TypeScript and JavaScript files**: `oxc_parser` with `oxc_resolver` (Rust libraries, no server, the parser and resolver that
+  Rolldown and Biome build on; MIT), which resolve `tsconfig` paths and package `exports` that a text scan cannot. The text scanner
+  drafted on `feat/infra-only-smoke` (`imports.rs`, relative specifiers only) is the fallback if WP-3 measures oxc as too slow or
+  too large a dependency.
+- **Rust within a crate**: `mod`, `use crate::` and `cfg` attributes, through `syn` (already a direct dependency of paddock-dev, `tools/paddock-dev/Cargo.toml:30`; new to `paddock-repo-graph`)
+  or the C155 text scan; WP-6 picks by measurement.
+- **Why not a language server** (rust-analyzer, tsserver): they are stateful, start slowly (seconds to minutes to index a
+  workspace), use gigabytes of memory, and answer editor questions incrementally; CI needs one deterministic cold-start answer per
+  run. Common practice agrees: Nx scans imports with its own parser (nx.dev, "Project Graph": "Nx analyzes source files"), Bazel
+  reads declared deps, Turborepo reads manifests, Pants infers from imports with its own parsers ("Dependency inference").
+- **Granularity limit**: Rust tests are selected by test binary (`binary_id`), TypeScript tests by spec file, Playwright by spec file
+  and project. No test-function level, as Bazel's target-level practice.
+- **Budget (ER-20)**: one `git cat-file --batch` for every text, one `cargo metadata` per Cargo workspace, no other spawn; the whole
+  extraction at most 3 s on the dev Mac and 5 s on the Linux runner, pinned by a test that counts spawns and a benchmark row. The
+  repository today: 3,780 `.ts` files (24.1 MB, generated ones included), 633 `.mjs` (4.8 MB), 3,732 `.rs` (46.3 MB); a text scan of
+  their import and `cfg` lines takes 0.8 s and 0.9 s in one process ([benchmarks](../benchmarks.md#import-and-cfg-scan-of-the-whole-repository-2026-11-23-docsadr-repo-graph-model)),
+  the lower bound a parser is compared with in WP-3.
+
 ## Common practice (ER-37)
 
 - **Nx**: a project graph from package manifests and plugins, `namedInputs` and `targetDefaults.inputs` per target, `nx affected`
@@ -237,6 +258,10 @@ Common-practice cost, for the decision: the five behaviours as five more planner
   nightly, on app or crate code and on tags").
 - **D8. Migration.** (a) Old and new side by side with `--compare` until the goldens match except the listed differences, then the old
   tables go in the same train. (b) Switch at once. *Recommended: (a)*.
+- **D10. Extraction.** (a) Parsers as §10 (`oxc_parser`/`oxc_resolver`, `syn` or the C155 scan), cold start, one answer per run.
+  (b) Language servers (rust-analyzer, tsserver) queried by the planner. (c) Text scans only (relative imports, `cfg` lines).
+  *Recommended: (a)*, with (c) as the measured fallback; (b) is not common practice for build graphs and is too slow and stateful
+  for CI.
 - **D9. Trains.** (a) Hold all trains until WP-1 to WP-5 land (the user's instruction). (b) Let release-only trains through. *As
   instructed: (a)*.
 

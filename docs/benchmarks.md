@@ -2491,3 +2491,14 @@ already built, one run each, `/usr/bin/time -p`:
 | `./dev plan origin/main~20 --explain` | 12.79 s | 3.92 s | 3.55 s |
 
 Not measured: the spawn count (WP-1 adds the budget test), and the same commands on the Linux runner.
+
+## Import and cfg scan of the whole repository (2026-11-23, docs/adr-repo-graph-model)
+
+The lower bound ADR 0117 §10 compares a parser with. Dev Mac under load (about 15), one run each, `/usr/bin/time -p`, over the tracked files:
+
+| Files | Count | Bytes | Scan | real |
+|---|---|---|---|---|
+| `*.ts`, `*.mjs` | 3,780 + 633 | 24.1 MB + 4.8 MB | `grep -oE` for relative `from`/`import`/`require(` specifiers (15,743 hits) | 0.82 s |
+| `*.rs` | 3,732 | 46.3 MB | `grep -oE` for `use crate::`, `mod x;`, OS `cfg` (8,115 hits) | 0.91 s |
+
+Not measured: `oxc_parser` and `syn` on the same files (WP-3, WP-6), and the Linux runner.
