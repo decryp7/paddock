@@ -1,9 +1,13 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, Page, TestInfo } from '@playwright/test';
-import { withPageStill } from '../../../../ui/projects/paddock-e2e/src/axe.ts';
+import { WCAG_TAGS as FAMILY_WCAG_TAGS, withPageStill } from '../../../../ui/projects/paddock-e2e/src/axe.ts';
 
-/** The WCAG levels every axe check covers: 2.0, 2.1 and 2.2, A and AA. */
-export const WCAG_TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'];
+/**
+ * The WCAG levels every Debrief axe check covers: the family's (paddock-e2e `WCAG_TAGS`: 2.0 A and AA, 2.2 AA) and 2.1 A and AA, which the family's
+ * list does not name although 2.2 AA includes them (four rules in axe-core 4.14: autocomplete-valid, avoid-inline-spacing, css-orientation-lock,
+ * label-content-name-mismatch).
+ */
+export const WCAG_TAGS = [...FAMILY_WCAG_TAGS, 'wcag21a', 'wcag21aa'];
 
 /** Waits until no CSS animation or transition is running: axe measures colours as rendered, so a panel sliding in or a
  *  scrim fading out mid-scan reads as low contrast (WebKit, being slower, used to hit this). */
