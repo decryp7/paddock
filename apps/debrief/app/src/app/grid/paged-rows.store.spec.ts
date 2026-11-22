@@ -2,6 +2,9 @@ import { Page, PageRequest, Query, RecordView } from '../core/api.types';
 import { EMPTY_QUERY } from '../core/workspace/query.store';
 import { PagedRowsStore } from './paged-rows.store';
 
+// The real clock back after every test, so a test that times out cannot leave fake timers for the next one (ER-12, C154).
+afterEach(() => vi.useRealTimers());
+
 const row = (id: number) => ({ id }) as RecordView;
 
 /** A backend of `total` rows whose answers the test releases. */

@@ -16,6 +16,9 @@ import { RedactedCopyCommands } from './redacted-copy-commands';
 import { PREVIEW_DEBOUNCE_MS, RedactedCopyDialog } from './redacted-copy-dialog';
 import { detectorLabel, modeChoices } from './redacted-copy-labels';
 
+// The real clock back after every test, so a test that times out cannot leave fake timers for the next one (ER-12, C154).
+afterEach(() => vi.useRealTimers());
+
 /** The tiny incident plus an email in one event and a CSV source. */
 function dataset(): MockDataset {
   const d = tinyDataset();

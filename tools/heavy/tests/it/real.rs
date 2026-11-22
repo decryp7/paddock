@@ -349,7 +349,11 @@ fn the_load_gate_waits_and_stopping_during_it_releases_the_lock() {
     wait_until("the gate to close", || {
         w.read(w.root().join("pitcrew-lock-activity.log")).contains("load gate")
     });
-    assert!(w.lock_dir().exists(), "the gate waits while holding the lock");
+    assert!(
+        !w.lock_dir().exists(),
+        "the gate is waited for before a slot is taken (ER-43): no slot is held while waiting for load"
+    );
+    assert_eq!(w.count("pitcrew-heavy.ticket."), 1, "the run keeps its ticket and place");
     let id = ProcessId::of(g.pid()).expect("heavy runs");
     assert!(ask(id));
     let st = g.finish();
@@ -578,7 +582,6 @@ fn a_stop_in_ci_is_annotated() {
         &["run", "--gate-load", "0", "Gate", "--", "true"],
         &[("HEAVY_GATE_POLL", "0.1"), ("CI", "1")],
     );
-    wait_until("the gate to close", || w.lock_dir().exists());
     wait_until("the gate wait to be noted", || {
         w.read(w.root().join("pitcrew-lock-activity.log")).contains("load gate")
     });
@@ -638,4 +641,50 @@ fn the_owner_record_names_the_command_while_it_runs() {
     assert_eq!(w.owner_line(0), a.pid().to_string(), "line 1 stays heavy's own pid for the shell");
     w.release();
     assert!(a.finish().success());
+}
+
+/// `heavy run` of `cat; echo eof-seen` with the caller's standard input an open pipe nobody writes to or closes.
+fn run_with_open_stdin(w: &World, env: &[(&str, &str)], limit: std::time::Duration) -> Option<(String, String)> {
+    use paddock_testkit::TestCommand;
+    use std::io::Read;
+    use std::process::Stdio;
+    let mut c = TestCommand::new(BIN);
+    base_env(&mut c, w);
+    c.args(["run", "--no-gate", "S", "--", "sh", "-c", "cat; echo eof-seen"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    for (k, v) in env {
+        c.env(k, v);
+    }
+    let mut g = Guard {
+        child: c.spawn().expect("spawn heavy"),
+        label: "heavy run with an open stdin".into(),
+    };
+    let ended = g.wait(limit)?;
+    assert!(ended.success(), "heavy failed: {ended:?}");
+    let (mut o, mut e) = (String::new(), String::new());
+    g.child.stdout.take().map(|mut s| s.read_to_string(&mut o));
+    g.child.stderr.take().map(|mut s| s.read_to_string(&mut e));
+    Some((o, e))
+}
+
+#[test]
+fn a_command_never_waits_on_the_standard_input_of_the_caller() {
+    // The prompt policy (ER-47): the command reads end-of-file at once, though the caller holds the pipe open.
+    let w = World::new();
+    let (o, e) = run_with_open_stdin(&w, &[], std::time::Duration::from_secs(10))
+        .expect("the command waited on the caller's standard input (a prompt would have hung the run)");
+    assert!(o.contains("eof-seen"), "{o} {e}");
+}
+
+#[test]
+fn heavy_stdin_inherit_is_the_explicit_opt_in_and_the_probe_sees_an_open_pipe() {
+    // Positive control: the same run with the opt-in does wait for the open pipe, so the test above could have failed.
+    let w = World::new();
+    let r = run_with_open_stdin(&w, &[("HEAVY_STDIN", "inherit")], std::time::Duration::from_secs(4));
+    assert!(
+        r.is_none(),
+        "with HEAVY_STDIN=inherit the command should wait on the open pipe: {r:?}"
+    );
 }

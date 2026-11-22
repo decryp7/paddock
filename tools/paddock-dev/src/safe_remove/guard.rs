@@ -135,6 +135,35 @@ pub fn strictly_under(root: &Path, target: &Path, rules: Rules) -> Result<bool, 
 /// removed; `Ok(false)`: it was not there.
 pub fn remove_under(root: &Path, target: &Path, home: Option<&Path>) -> Result<bool, RemoveError> {
     check_root(root, home).map_err(RemoveError::Refused)?;
+    remove_below(root, target)
+}
+
+/// [`remove_under`] for a child of a kept mount a job's own step names (a Linux runner's `/sccache`, one folder deep): the mount
+/// may be a top-level folder, because the caller is the owner of that mount and removes only fixed children of it; it is still
+/// refused when it is not absolute, has a `..`, or is the home folder or above it. Everything else is `remove_under`'s.
+pub fn remove_in_mount(mount: &Path, target: &Path, home: Option<&Path>) -> Result<bool, RemoveError> {
+    let parts =
+        split(mount, Rules::host()).ok_or_else(|| RemoveError::Refused(format!("the mount {} has a `..` in it", mount.display())))?;
+    if !parts.absolute || parts.names.is_empty() {
+        return Err(RemoveError::Refused(format!(
+            "the mount {} is not an absolute folder below a drive root",
+            mount.display()
+        )));
+    }
+    if let Some(h) = home
+        && let Some(hp) = split(h, Rules::host())
+        && !hp.names.is_empty()
+        && starts_with(&hp, &parts, Rules::host())
+    {
+        return Err(RemoveError::Refused(format!(
+            "the mount {} is the home folder or above it",
+            mount.display()
+        )));
+    }
+    remove_below(mount, target)
+}
+
+fn remove_below(root: &Path, target: &Path) -> Result<bool, RemoveError> {
     // The path that is checked and removed is the target's names joined again: a trailing `/`, `//` or `/.` would make the OS
     // read a final link as the folder it names (`root/link/` is what `link` points at), so `symlink_metadata` would see a folder
     // and `remove_dir_all` would empty it (review of 2026-11-15; the shared parity table, tests/fixtures/safe-remove-parity.tsv).

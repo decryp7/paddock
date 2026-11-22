@@ -42,6 +42,8 @@ paddock-proc = { path = "../../../../crates/paddock-proc" }
 # The family's log (ER-27, ER-22): one dated CLEF file per process in the app's log folder, redaction, panic hook, crash marker.
 paddock-log = { path = "../../../../crates/paddock-log" }
 paddock-env = { path = "../../../../crates/paddock-env" }
+# The per-item result of a bulk command (ADR 0108 G4): `delete_models` answers one `ItemResult` per id.
+paddock-commands = { path = "../../../../crates/paddock-commands" }
 # The admin key's owner-only file (ADR 0057 WP-4): the one shared secret-file mechanism, never the OS credential store.
 paddock-secrets = { path = "../../../../crates/paddock-secrets" }
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "query", "matched-path"] }
@@ -79,6 +81,8 @@ windows = { workspace = true, features = [
 # The self dev-dependency that turns `test-support` on for this package's tests and builds the fake engine for them.
 pitwall-server = { path = ".", features = ["test-support"] }
 tempfile.workspace = true
+# The cache database tests count commits and statements (ADR 0108 D: a budget per bulk call); the counters need these two.
+rusqlite = { version = "0.41", features = ["hooks", "trace"] }
 # A held loopback port for "nothing answers there" (C39): the speech engine's dead-port test.
 paddock-testkit = { path = "../../../../crates/paddock-testkit" }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "time", "process", "fs", "io-util", "sync", "signal"] }

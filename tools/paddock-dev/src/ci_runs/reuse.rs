@@ -205,6 +205,28 @@ mod tests {
     }
 
     #[test]
+    fn an_os_only_run_of_the_commit_is_not_reused_as_its_complete_verdict() {
+        // Run 7's plan declares a scope that covers a push to main's, but for `os=linux` only: the member gate's Linux trial.
+        let mut f = server(
+            vec![run(7, "workflow_dispatch", "train/x", "success")],
+            &[7],
+            7,
+            &[(71, Some("ok\n"))],
+        );
+        f.log(7 + 5000, crate::run_scope::TEST_OS_ONLY);
+        let r = ask(&mut f, Some(9));
+        assert!(matches!(&r, Reuse::Run(why) if why.contains("one operating system")), "{r:?}");
+        // Positive control: the same run without the os flag is reused.
+        let mut f = server(
+            vec![run(7, "workflow_dispatch", "train/x", "success")],
+            &[7],
+            7,
+            &[(71, Some("ok\n"))],
+        );
+        assert!(ask(&mut f, Some(9)).skip());
+    }
+
+    #[test]
     fn a_full_green_dispatch_without_webkit_is_not_reused_and_one_with_webkit_is() {
         // ci.yml declares a scope without the WebKit engine for a full dispatch that did not run it (a smaller scope than a push to main): run 7 below.
         let mut f = server(

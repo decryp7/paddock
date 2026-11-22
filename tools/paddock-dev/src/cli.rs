@@ -1,7 +1,7 @@
 use crate::{
-    audit, brief_check, check, check_ids, ci_build_env, ci_build_jobs, ci_host, ci_isolation, ci_run, ci_runs, ci_rust_pin, ci_setup_rust,
-    disk, gates, generators, golden_cmd, heavy_cmd, heavy_install, hook, input_hash, ipc_endpoints, load, local_sccache, locks,
-    merge_check, places, plan, plan_cmd, pr, pre_push, queue, release_isolation, slots, wait, worktree,
+    audit, brief_check, check, check_ids, ci_build_env, ci_build_jobs, ci_host, ci_isolation, ci_run, ci_runs, ci_rust_pin, ci_s3_guard,
+    ci_setup_rust, disk, gates, generators, golden_cmd, heavy_cmd, heavy_install, hook, input_hash, ipc_endpoints, lessons_driver, load,
+    local_sccache, locks, merge_check, places, plan, plan_cmd, pr, pre_push, queue, release_isolation, slots, wait, worktree,
 };
 use clap::{Args, Parser, Subcommand};
 use paddock_cli::{CliError, Exit, Format, Report, finish};
@@ -241,6 +241,17 @@ enum MergeCommand {
     /// (`git revert <sha>`, git's "revert a faulty merge"; run them after `git merge <train>`), and warn about reverts of other
     /// branches' merges the member holds. Read-only: runs nothing. Run it before the merge of the train.
     SyncMember(SyncMemberArgs),
+    /// Git's merge driver of docs/lessons.md (`merge=lessons`, set by `./dev hooks install`): `./dev merge lessons-driver %O %A %B`.
+    /// Git's union merge of two appended sections, then the blank line it drops before a `## ` heading put back. The result is
+    /// written to the second file (ours).
+    LessonsDriver {
+        /// The merge base (%O).
+        base: PathBuf,
+        /// Our version (%A); receives the result.
+        ours: PathBuf,
+        /// Their version (%B).
+        theirs: PathBuf,
+    },
 }
 
 #[derive(Args)]
@@ -342,6 +353,12 @@ enum CiCommand {
     /// the setup-rust action's shell steps. The action keeps CARGO_BUILD_JOBS and the toolchain install in YAML (./dev needs
     /// rustc first). Messages and `::warning::` lines on standard output, one `::error::` line on failure.
     SetupRust(ci_setup_rust::SetupRustArgs),
+    /// The localhost proxy in front of CI's S3 compile cache that cuts a request the store does not answer (user decision
+    /// 2026-11-20): `ci setup-rust` starts it, `ci sccache-stats` stops it.
+    S3Guard {
+        #[command(subcommand)]
+        command: ci_s3_guard::GuardCommand,
+    },
     /// The compiler a release job builds with is the exact version `rust-toolchain.toml` pins (`rustc --version` against its `channel`, read
     /// with the TOML parser): one `::error::` line naming both versions when they differ or the channel floats.
     RustPin(ci_rust_pin::RustPinArgs),
@@ -384,6 +401,9 @@ enum CiCommand {
     /// it). A run counts if it is a push to main or its plan job logged `plan mode: full=true`; the newest full run decides.
     /// Exit 0 full green, 5 red or only partial runs, 6 not measured (never a pass).
     Verdict(ci_runs::VerdictArgs),
+    /// The cache keys of the last runs that no job ever saved, read from the `cache-report:` lines of the job logs (ADR 0115).
+    /// Report-only (exit 0) unless `--fail-on-never-saved` (5); no report line in the window exits 6, check broken.
+    CacheAudit(ci_runs::CacheAuditArgs),
     /// Whether a scheduled run ends early because a train's dispatch run is queued or running (skip=true|false to
     /// GITHUB_OUTPUT). Fails open: an unreadable API lets the run proceed, with a warning.
     ScheduleSkip(ci_runs::ScheduleSkipArgs),
@@ -415,6 +435,8 @@ enum SlotCommand {
     Release(slots::ReleaseArgs),
     /// Show which slots are held.
     Status(slots::StatusArgs),
+    /// Check that this job still holds its slot (the lock file is the one it locked, its holder lives; a lost lane is an error).
+    Check(slots::CheckArgs),
     /// Run a command only while a slot is idle, holding its lock until the command ends (skips a busy slot).
     IdleRun(slots::IdleRunArgs),
     /// The detached holder that `acquire` starts. Not for people.
@@ -603,6 +625,13 @@ pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
         return ci_setup_rust::run(a, out, err);
     }
     if let Command::Ci {
+        command: CiCommand::S3Guard { command },
+    } = &cli.command
+    {
+        // The guard is a long-running process with its own contract: one `PORT <n>` line, then silence.
+        return ci_s3_guard::run(command, out, err);
+    }
+    if let Command::Ci {
         command: CiCommand::BuildJobs(a),
     } = &cli.command
     {
@@ -682,6 +711,7 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
             SlotCommand::Acquire(a) => slots::acquire(&a),
             SlotCommand::Release(a) => slots::release(&a),
             SlotCommand::Status(a) => slots::status(&a),
+            SlotCommand::Check(a) => slots::check(&a),
             SlotCommand::IdleRun(a) => slots::idle_run(&a),
             SlotCommand::Hold(a) => slots::hold(&a),
         },
@@ -691,6 +721,9 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
         Command::Ci {
             command: CiCommand::SetupRust(_),
         } => Err(CliError::failure("`ci setup-rust` was dispatched through the report path.")),
+        Command::Ci {
+            command: CiCommand::S3Guard { .. },
+        } => Err(CliError::failure("`ci s3-guard` was dispatched through the report path.")),
         Command::Ci {
             command: CiCommand::BuildJobs(_),
         } => Err(CliError::failure("`ci build-jobs` was dispatched through the report path.")),
@@ -756,6 +789,9 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
         Command::Ci {
             command: CiCommand::Verdict(a),
         } => ci_runs::verdict(&a),
+        Command::Ci {
+            command: CiCommand::CacheAudit(a),
+        } => ci_runs::cache_audit(&a),
         Command::Ci {
             command: CiCommand::Dispatch(a),
         } => ci_runs::dispatch(&a),
@@ -870,6 +906,9 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
         Command::Merge {
             command: MergeCommand::SyncMember(a),
         } => merge_check::sync_member::command(a.root.as_deref(), &a.train, a.member.as_deref()),
+        Command::Merge {
+            command: MergeCommand::LessonsDriver { base, ours, theirs },
+        } => lessons_driver::command(&base, &ours, &theirs),
         Command::Gen {
             command: GenCommand::Check(a),
         } => generators::command(&generators::CheckArgs {

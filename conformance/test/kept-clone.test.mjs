@@ -611,7 +611,7 @@ function assertBundleJob(text) {
   assert.match(clone.text, /if: runner\.os != 'Linux'/, 'host runners only');
   assert.match(clone.text, /name: paddock-checkout-\$\{\{ runner\.os \}\}\n/, 'one kept clone per slot');
   assert.match(clone.text, /profile: bundle\n/, 'the bundle profile');
-  assert.match(clone.text, /fresh: \$\{\{ startsWith\(github\.ref, 'refs\/tags\/'\) \}\}/, 'a tag run builds from a fresh clone');
+  assert.match(clone.text, /fresh: \$\{\{ startsWith\(github\.ref, 'refs\/tags\/'\)(?: \|\| inputs\.rehearsal == true)? \}\}/, 'a tag run builds from a fresh clone');
   const at = (re) => steps.findIndex((s) => re.test(s.text));
   assert.ok(at(/actions\/kept-clone/) > at(/actions\/job-isolation/), 'after the slot is taken');
   assert.ok(at(/actions\/kept-clone/) < at(/actions\/build-folder/), 'before the build folder');

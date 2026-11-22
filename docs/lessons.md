@@ -725,6 +725,7 @@ guard: `paddockConfig({ buildGuard: 'none' | 'ui' | 'ui-dist', uiRoot })`; an ap
 `ui/dist` (today Spotter), else nothing. `PW_SKIP_BUILD_GUARD=1` skips it. The ui config checks the css only with `PW_REUSE_SERVER=1` (its webServers run `build:css` themselves). Dot-files (`.DS_Store`) are ignored; README and doc edits under `projects/paddock-ui` mark the dist stale on purpose (every non-test file counts). A direct `ng build paddock-ui` leaves `ui/dist` unstamped, so the guard fails: build with `npm run build -w ui`. Tests: `build-guard.test.ts`, `env.test.ts`
 (including every app config on a fresh checkout). Proposed binding rule (the user decides): every Playwright config
 uses these three, and `scripts/new-app.mjs` templates do.
+
 ## 2026-10-29: a harness that stands in for a plugin must stand in for its routing and its ACL
 
 The ADR 0026 real-window probe ended "no report within 90s: the dialog page never became ready" on macOS, and it looked like
@@ -892,6 +893,7 @@ bash 3.2** (what `shell: bash` runs on the Mac host) cannot parse an apostrophe 
 `${var:+word}` or `${var:=word}` within double quotes, nor a `case` with unparenthesised patterns (`a)`) inside `$(...)`:
 write `(a)`. A `$(...)` inside a case branch is fine (an earlier version of this lesson said otherwise). `bash -n` does not
 always catch the second, so a conformance check greps every CI script for both and also runs `/bin/bash -n` where it exists.
+
 ## A fake server's polling timeout belongs after the handshake (2026-10-29)
 Spotter's and `paddock-chromium`'s fake DevTools servers set their 10 ms polling read timeout before
 `tungstenite::accept`, so on a loaded runner a client whose upgrade request came a tick late was dropped mid-handshake
@@ -900,12 +902,14 @@ Spotter's and `paddock-chromium`'s fake DevTools servers set their 10 ms polling
 not ticks) and only then sets its polling timeout; the
 regression test keeps the client quiet for many ticks before it shakes hands. A fix in one copy of duplicated code is
 searched for in the others the same day.
+
 ## An unexplained browser abort needs its cause in the message (2026-10-29)
 `net::ERR_ABORTED` covers every load Chrome cancels before commit: a download, a replacing navigation, the tab's own first
 navigation, and a restart of the browser's network service. Fixing them one guess at a time cost three rounds of Windows
 CI. Ending the network service locally reproduced the Windows trace exactly. **Rule:** a driver error that can have
 several causes says which ones it ruled out (the trace, the network service's process), and a real-browser test drives
 each named cause on purpose (ADR 0030). Diagnostics land before a fix that would hide the cause.
+
 ## 2026-10-29: `ControlOrMeta` follows the test machine, the app follows the page (Dyno's WebKit leg)
 
 Dyno's WebKit e2e on the Linux runner failed every shortcut test (command palette, Settings with `Mod+,`, and the axe
@@ -915,6 +919,7 @@ Chromium-only and the macOS runner has a Mac host and a Mac page, so only the We
 and the Settings tests had been red there since that leg began. **Rule:** e2e tests press the app's shortcuts with
 `pressMod(page, 'Mod+…')` from `@decryp7/paddock-e2e`, which reads the page's navigator; never `ControlOrMeta` for an
 app shortcut. The selftest `mod-key.shot.ts` makes the mismatch on any host by giving the page the other platform.
+
 ## 2026-10-30: CI runners have the VC++ runtime, so only a clean PC or an import check shows a missing one (Dyno, all apps)
 
 On a clean Windows 11 VM, Dyno 1.0's `dyno-agent.exe` exited with 0xC0000135 (`STATUS_DLL_NOT_FOUND`) until Microsoft's
@@ -926,6 +931,7 @@ in the root `.cargo/config.toml`; every app sets Tauri's `staticVCRuntime` to fa
 link), and every Windows installer build runs `conformance/release/windows-crt-imports.mjs` over the files it ships. More
 generally, a dependency that the build machine has and a user's PC may lack (a runtime, a framework, a font, a driver)
 is checked on the artifact, with an import or bundle check, or on a clean machine, never inferred from a green CI.
+
 ## A pid is not a process: one test's close could kill another test's browser (2026-10-30)
 `paddock_proc::kill_tree` read the process table, ran `taskkill /T /F`, then killed every pid from that table again. By then
 those pids were free, and Windows hands a freed pid on at once: with four real-browser tests in parallel, the next owner was
@@ -944,6 +950,7 @@ or verify its identity (`paddock_proc::ProcessId`, pid plus start time) right be
 job membership. Clippy's `disallowed-methods` and check C53 enforce it. **Also:** when a flaky test fails right after
 another test in the same binary ended something, suspect the ending before the failing test; and test an identity source
 with a process of another user, not only your own.
+
 ## 2026-10-30: a caller that waits on macOS `BACKGROUND` threads waits as long as the machine is busy (Debrief)
 
 `debrief-cli`'s `the_report_is_written_as_html_and_never_overwritten_silently` took 3 to 9 s on the Mac runner most of
@@ -959,6 +966,7 @@ wait for (a report, an analysis, an import blocked on a lock, a download) never 
 level; lowered means `UTILITY` on macOS, nice 10 on Linux and below-normal on Windows. Family ADR 0020 was amended the
 same day: its `Background` class uses those levels, and only `Idle` work, which nobody waits on, may use the starvable
 ones (check C54).
+
 ## A launchd `Background` job is DARWIN_BG as a whole: thread QoS cannot lift it (2026-10-30, Dyno)
 After Debrief's report waited on `QOS_CLASS_BACKGROUND` pool threads (100 s instead of 3 s on a loaded Mac), Dyno's disk scan
 had the same class, and the agent itself ran as a launch agent with `ProcessType Background`. launchd spawns such a job as
@@ -1249,6 +1257,7 @@ the state and nothing but a reviewer's memory prevented it. **Rule (ER-21, no ne
 choice explicit and refuses the unchosen one at the app's start, independent of the CI's secrets (`tauri::install` returns
 `InstallerUndeclared` unless `.installer(..)` or `.no_install()` was called), the status says what the build can do
 (`canInstall`) so the UI offers only that, and a conformance check (C59) covers every app.
+
 ## A detached chart host resized to 0 stayed at height 0 (2026-11-03, Dyno; open question)
 
 Dyno 1.0.0: switching the history range left the chart empty until the view was reopened. The panel's skeleton detaches the
@@ -1297,6 +1306,7 @@ the log once. Confirmed by putting the cause back: a temporary 300 ms delay per 
 reported message every time, and the waiting test passes 10 of 10 with it. The test now waits on the line with the real clock.
 **Lesson (class: two event sources, one assumed order):** a test that waits for event A on one path never reads state fed by
 event B on another path without waiting for B; to measure a rare order race, inject the delay on the path that is assumed fast.
+
 ## A baseline read after an async step hides what changed during it (2026-11-03, Dyno dialogs)
 
 Dyno 1.0.0's Updates window showed a scrollbar beside one line. `DialogFrame.watch()` took its "last measure" from a fresh
@@ -1308,6 +1318,7 @@ fonts (same content height in the later fit). Found on the way: tao resizes the 
 so a refit inside that event is overwritten (now scheduled); and a hand-resized window must stop being fitted. **Lesson:** a change detector's baseline is what was last sent, never what
 is measured now; and a fix for a user report is claimed only after the report's own scene (Windows, 100 % and 150 %) is run.
 Follow-up: Spotter and Pitwall have no dialog-fit e2e like Dyno's and the shell demo's.
+
 ## `maxminddb` `Reader::verify` never returns on a search tree with a cycle (2026-11-03, Dyno)
 
 Dyno's location databases are downloaded, so their bytes are untrusted. A byte-damage scan over a tiny valid file (every
@@ -1419,6 +1430,7 @@ Proof, honestly (Linux, OrbStack `paddock-gate-arm`, 6 cores, 12 busy loops star
   (the CI runner needed 5.25 s), but the old test costs four times the work, which is what the 5 s limit trips on; the cause is the cost that grows with the item count.
 - Shift+F10: old and fixed both passed 50 of 50 (15.4 s and 15.7 s); the failure was **not reproduced and the lost-key cause is from reading the code and the CI log, not proven**.
   The resend is harmless to keep, but if this spec fails again the cause is something else: record the row's `disabled` state and the actions at the moment of the key before guessing again.
+
 ## A CDK virtual viewport measures its height once; a body that grows later is blank (2026-11-04, paddock-ui `pd-table`, Dyno 1.1.0 RC)
 Dyno's Processes page (458 rows) showed blank space under the last drawn row. `CdkVirtualScrollViewport` measures its own
 height at start and on a window resize only; `pd-table`'s body height follows its frame (`maxHeight`) and its rows, so a body
@@ -1455,6 +1467,7 @@ temp folder sits under `/Volumes/d7sst7/...`, and `is_network_path` treats every
 mounted" by design. The test now uses a path that is not under a mount point. **Lesson:** a temp folder's location is an environment input: a test of
 path classification must not take its path from `temp_dir()`. (A re-run of an old macOS job after the runner's workdir moved failed differently: "failed to
 read action.yml ... no such file": a stale `hostexecutor` path, so re-dispatch instead of re-running after a runner change.)
+
 ## TCC blocked self-responsible processes on the external work volume (2026-11-04, Mac runner)
 
 With the runner's work folder on the USB volume `/Volumes/d7sst7`, Pitcrew's disclaim and supervision tests failed with
@@ -1488,6 +1501,7 @@ origin/main..<branch>`, rule 50(g)); C23 in the conformance run is the backstop.
 ## A delayed service looked like a broken one (2026-11-04, Dyno helper after a Windows restart)
 
 After a restart the Dyno helper card said "installed but did not answer, Repair" until the person ran Repair (UAC), though nothing was damaged. By the code, four things added up: the service was `delayed-auto` (it starts a minute or two after the boot), the agent turned "program present, pipe absent" straight into Silent and Repair, nothing started a stopped service although its security descriptor already lets interactive users start it, and the card read the state once and never again. A start that is merely late, or a service that is merely stopped, is not damage. **Lesson (class: a state that fixes itself is not a fault):** a status that can be transient is polled with a backoff and says "starting", an unelevated start is tried before an elevated repair is offered, and Repair is for a service that stopped with an error, with the service's exit code and reason in the detail. `paddock_service::start::revive` is the one implementation; a refusal at the service's start leaves its reason in the Event Log and in its service-specific exit code (ER-27), because a service that stops silently can only be repaired by guessing.
+
 ## The Linux "Turn off" reported done and nothing proved it: a result dropped at the OS edge, a removal with no read-back (2026-11-04, ADR 0054 RC-2 and E-3/E-4)
 
 The Dyno 1.1.0 review found `Systemd::unregister` running `let _ = self.ctl(&["disable", "--now", ..])` and returning `Ok(())` for a packaged unit
@@ -1661,6 +1675,7 @@ connection held.
 - A test that starts the product in its own process shares its limits: a leak in the test's client exhausts the product.
 - Logs explain the failure only if the rig shows them: an in-process agent's `log` lines went nowhere until the rig captured them.
 - Class: a handle whose drop does not release its resource (`BodyPeer`, `Peer`); reported for an ER-21 decision.
+
 ## A background-lister test asserted a call count that a second trigger can change (2026-11-09)
 
 Symptom: `disk::centre::tests::the_cached_volumes_never_list_on_the_request` failed in CI (`ci.yml` run 7767, Linux Dyno leg, nextest, twice): `a cached read within the
@@ -1671,6 +1686,7 @@ wait for the job to end, not only for its first result, and must name every trig
 real clock somewhere while the test advances only the fake: grep the window's `Instant` and `SystemTime` use in `centre.rs`; (3) a second listing from the volume watcher
 (`mount_events` has macOS, Linux and Windows adapters, so this is not Linux-only): run the test with the watcher stubbed out; (4) a shared static between tests in one process:
 run it alone 200 times in the CI container. No sleep or raised timeout (ER-12).
+
 ## A popover test failed once under load: disk-space was missing before the volume cache was filled (2026-11-08)
 
 Dyno's `widget_layouts::popover_values_answer_only_the_slow_kinds_the_layout_has` (apps/dyno/crates/dyno-agent/tests/agent.rs) failed once, right after a heavy build, with `disk-space` missing (`["active-alarms"]` instead of `["active-alarms", "disk-space"]`). Rerun alone it passed 3 of 3 times, it passed in the full run, and it passed on a clean origin/main. Not fixed here (ER-12: the fix is to wait on the condition, never a sleep).
@@ -1681,6 +1697,7 @@ Causes considered (ER-28), with what would rule each out:
 - The branch under test (the data-folder trust change) changed the answer. Ruled out so far: the popover code reads no folder, and the test passed 3 of 3 alone on the same tree.
 Second sighting the next day, same code area: `disk::centre::tests::cached_volumes_refresh_once_they_are_older_than_the_freshness_window` (dyno-agent lib) failed once in a full run (left `Some(589000000000)`, right `Some(1256000000000)`: the refresh had not landed when the test looked) and passed 3 of 3 alone. It is the same shape: the test reads the cache right after asking for a refresh, without waiting for the refresh to finish. Both point at the volume-cache tests racing the background refresh under load.
 Class: a test that asks a cached answer before its cache is filled.
+
 ## Debrief store tests remove a store folder while its index threads still write into it (2026-11-09)
 
 Under a full nextest run two store-duck tests failed once each with "Directory not empty": `segments::reopening_recovers_from_a_crash_and_refuses_damage` (`tests/it/segments.rs:240`, `remove_dir_all` of the moved store) and `search::indexing_many_segments_in_batches_is_complete_and_repeatable` (`tests/it/search.rs:220`, `remove_dir_all` of the `index` folder right after `drop(store)`). Both passed 30 of 30 times alone under `--stress-count 30 -j 6`, on this branch and on the base, so the cause is not the temp-folder change. Probable cause (not measured): the store's index threads finish writing after `drop`, so the removal races them. Not fixed in the LINT-1 branch: a separate branch should make the store's drop wait for its index threads (or the test wait on the condition), not retry or sleep (ER-12).
@@ -1946,6 +1963,7 @@ list shows it to every user of the machine, while the app's `beforeBuildCommand`
 Debrief Windows tag still reused a branch-written `node_modules`. Hand a secret over by `export` and `exec`, never as an
 argument; check what a tool starts on its own (a build hook) before calling a step "the one command"; and list every kept
 input a tag reads, not only the one that was found.
+
 ## Process rules grew faster than the product: cap cost, retire what is not kept up (2026-11-12)
 
 A cut review of all apps and the family rules found the same pattern as the elevated-helper design of 2026-11-11: each
@@ -1957,6 +1975,7 @@ growth over 20% going back to the user, and one cut review per release. Rules 14
 ER-33, ER-30 retired, rules 22 and 55 and 54 narrowed, and hooks that judge an agent's text only warn. The review's
 proposed cap on review rounds was not adopted: security code keeps its rounds. Mechanism: text rules and the reviewer
 line, no tool.
+
 ## Store threads still inside DuckDB when the process exits: stop them, do not only order the drain (Debrief, 2026-11-12)
 
 CI 6734 (SIGSEGV) and CI 7997 (SIGBUS) were one class: a background thread of the store (the catalogue builder, the indexer)
@@ -2073,6 +2092,7 @@ env overrides, and refuse with a `Blocked: ... Next step: ...` message when they
 (`.claude/hooks/lib/paddockpaths.py`). Tests build temp repos at run time. **Rule:** a path that can be derived (from git, a
 config key or the script's own location) is never a literal default, and a guard whose input is missing fails closed.
 **Class: stale machine paths after a move** (earlier: the tart symlink and plists in paddock-bench/RESUME-AFTER-REBOOT.md).
+
 ## A test child that inherits the machine's environment reads the machine (tests, 2026-11-13)
 Twice in one day a new environment lookup in a tool reached real machine state through tests: the pre-push integration tests ran
 the real heavy steps (`PATH` found `heavy.sh`), and on `fix/precommit-heavy-slot` the helper `dev()` found the real
@@ -2293,6 +2313,7 @@ the shell, so a call starts no program but `rm` (`tr` only for names beyond ASCI
 runs inside a bounded phase costs no program per call that it can compute once or in the shell itself. **Class: work before the hang
 point of a 1 s hung-phase test meeting its limit under load (earlier: fe1bd861d, a `git rev-parse` over 1 s in 4 of 204 runs;
 e0fdd0286, run 8099).**
+
 ## An abandoned kept-clone phase marked the next one hung, and hung-phase tests timed the work before the hang (2026-11-15)
 Under load (6 burners and ten loops of the checkout parity test, load up to 38), 1 of 80 runs failed with the Rust side printing
 `'create the clone' did not finish within 900 s` at once. The Rust phases shared one error buffer, log and timed-out flag; a
@@ -2304,6 +2325,7 @@ limit three times through work before the hang (a `git rev-parse` outside the ph
 hang, in the shell and in Rust (ADR 0103, "Amendment"). **Rule:** a test of a time limit times the thing that hangs, from a
 signal it gives, not the setup before it; state that an abandoned worker can still write is that worker's own. **Class: work before
 the hang point of a hung-phase test meeting its limit under load (third sighting; ADR 0103 amendment).**
+
 ## A git-fixture property test timed out on Windows: count a fixture's processes (2026-11-15)
 The pre-push property test built 24 random git stacks in one test: 1,651 git processes, 17 s on the Mac, and past nextest's
 60 s limit on the Windows runner (run 8138, job 39335), where a process spawn costs about 100 ms. Enumerating the shapes (each
@@ -2333,6 +2355,7 @@ update, green 15 of 15 with one `clock.runFor(1000)` after the swap. Fix in the 
 and its comment no longer says the clock stands still. **Open (product):** the redraw is real for a user too (a row menu opened in
 the first second after a list swap closes on the next update); a fix needs a workaround in `pd-table` around the CDK table. **Resolved (2026-11-16, user: local workaround, no upstream issue):** the cause is an upstream regression since @angular/cdk 22.1.8 (angular/components#33670; 22.2.4 installed, unfixed upstream as of 22.2.7 per the research, 2026-11-16); `pd-table` records the views of its body table after each render (`recordRecycledRows`), the spec "keeps every row element through live updates after rows were removed and added again" was red on stock CDK (9 of 12 rows redrawn) and the Dyno e2e fixme is a test again; the extra `clock.runFor(1000)` in the Shift+F10 spec is gone; a canary spec (workaround switched off, stock CDK must still redraw) fails when a CDK upgrade fixes the bug and says to delete the workaround. Dyno row keys carry a start time the OS gave earlier (`carryStarts`), so a start time that comes and goes does not flip a key. Remove the workaround when the CDK fixes it (the spec stays). **Class:
 a test assumed a quiet page while live updates ran (earlier: Debrief's Stop-button probe, 2026-11-15; this file's Escape fix, 0315ca827).**
+
 ## The AI browsing chip's Stop moved when the jobs pill appeared, and the click was lost (Debrief, 2026-11-15, CI run 8136)
 WebKit `browser.e2e.ts:71` flaked on main (2 of 147 runs): after "Stop the AI's browser" the chip was still there. The trace
 had no "Stop pressed on the AI browsing chip" log, so `stop()` never ran: the click did not reach the button. Its DOM
@@ -2406,6 +2429,7 @@ script and then set its mode now call `write_program`.
 **Rule:** a test writes a program with `paddock_testkit::exe::write_program` and starts one it did not write with `exe::spawn`,
 `output` or `status`; product code starts programs through `paddock-proc`.
 **Class: a test or harness whose outcome depended on which thread ran first (earlier: the Debrief Stop-button probe and the row-menu e2e above), and Linux's text-busy refusal of a file written or run a moment ago (no earlier lesson).**
+
 ## Rules ER-43 to ER-47 and the ER-9, ER-14, ER-24 amendments (user, 2026-11-15 and 2026-11-16)
 Waiter holding a slot the waited-for build needed (2026-11-14/15, ER-43); a slowdown fix split into a small part and a deferred root fix (2026-11-16, ER-44); a probe that would have started installs and a reviewer's probe that installed into `~/.rustup` (ER-45); growable exception lists and Mac-only goldens, Spotter e2e after midnight UTC (run 8154, ER-46); cleared child environments (run 8138, ER-47); train 12's red rounds (runs 8138, 8147, 8152, 8154, ER-9). The rules and reasons are in `docs/rules.md` 80 to 84 and the engineering rules. **Class: a mechanism changed the thing it checked, waited on or started.**
 
@@ -2423,11 +2447,13 @@ Two old races in shared crates that train 12 did not touch (`paddock-ipc` ending
 
 ## "3 of 3 green" was 3 of 7 red (2026-11-16, Debrief live tail; rule 49 (e))
 A live-tail fix was reported "3 of 3" and was 3 of 7 red; a later "12 of 12" was 4 of 150 red (`fix/debrief-events-grid-live-tail`, `fix/debrief-live-tail-adr`). A small green count says little when the failure rate is a few percent and depends on workers and engine. **Rule:** a stability claim states runs x workers x engines (or OS); e2e timing fixes run at least 20 per engine at 4 workers, more when the measured rate needs it; a bare "N of N green" is rejected in review. **Class: a claim without its sample size (ER-28, ER-12).**
+
 ## Linux-only Rust was never linted before a push (pre-push, 2026-11-16)
 Symptom: CI's Linux legs went red on lints in code only Linux compiles: `zombie_processes` in paddock-env `tests/it/text_busy.rs` and an unused import in dyno-agent `tests/bench_units.rs` (fix/shared-crate-flakes-8174, 2026-11-16). Cause: the Mac Clippy and the xwin Clippy do not compile `cfg(target_os = "linux")` code, and the pre-push Linux row was opt-in (`--linux`) and for `crates/` only. Fix: the row runs by default for every touched Cargo workspace (not only those a text scan finds Linux-only code in: the scan missed `cfg(unix)`, `not(macos)`, target dependencies and build scripts), as one container run on the native architecture with a kept target folder per workspace and CI image version; the Tauri app crates are left out, found from `cargo metadata` and named in the row text, so a pass never claims them; no container runtime or a cold volume is "not measured", exit 6, with `./dev check --warm-linux` as the next step. Tests: the row is chosen for apps and crates and names what it leaves out, the real script runs against a stub cargo (per-workspace folder, exclusion, a failing workspace does not hide the next), a planted Linux-only lint was red in the real container. **Class:** a platform-only code path that no local check compiles (earlier instances not re-verified here: Windows-only assumptions in tests, ADR 0021).
 
 ## Design note: a read-only container plus build scripts that write into the source tree (2026-11-16)
 Two instances in one day. (1) The pre-push Linux Clippy of `apps/dyno` failed in the Tauri app crate: `paddock-build`'s build script writes the sidecar placeholders into `apps/dyno/app/src-tauri/binaries/` and tauri-build writes `gen/`, and `tools/linux-container.sh` mounts the repository read-only (ER-14), so `dyno-app` fails with "Read-only file system" before Clippy runs. (2) Another agent hit the same in the Linux container for `debrief-app` and the other app crates and had to use `--workspace --exclude <app>-app`. Options: **(A) a writable overlay** of the repository in the container (copy-on-write or a tmpfs over `src-tauri/binaries` and `gen`), so the app crates are linted too; **(B) declared container-lintable crates**: the row leaves out the packages whose build dependencies include `tauri-build` or `paddock-build` (read on the host through the repository's cargo-metadata accessor, not a path match), names them in the row text and in the NOT_RUN table, and CI lints them. **Chosen: B.** An overlay needs the helper to mount more than the repository read-only (a writable layer per app, a copy of the placeholders, and a check that nothing else leaks into the host tree), which is more than one crate per app is worth, and CI's Linux legs already lint those crates; B costs one metadata read and a row suffix. Revisit A when more than the app crates need to write into the tree, or when a Linux-only lint is found in an app crate in CI that this gate left out (then lint `src-tauri` through an overlay, not a bypass). Mechanism: `linux_inputs::tauri_crates`, `gates::linux_gate`; tests `the_tauri_crates_are_the_packages_with_a_writing_build_dependency` and `a_passing_linux_clippy_names_the_crates_it_never_linted`.
+
 ## A test blamed for what an earlier test left behind: a shared leak detector (tests, 2026-11-16)
 
 The apps' and ui's Vitest suites run with `isolate: false` (one page per worker), so state one test leaves reaches a later
@@ -2489,6 +2515,7 @@ polite ask and the forced end never ran, and `end`'s outcome was dropped): a sig
 end of a stop. **Rule:** a kill action names a
 `ProcessId`, never a pid plus an optional time. **Class: an OS name acted on without identity (earlier: ADR 0033 WP-6 sites; the
 family `ProcessRef` follows).**
+
 ## The midnight/noon sweep: six of seven e2e failures were not about the time (2026-11-17)
 The pinned-clock sweep (`PADDOCK_E2E_NOW` at 2026-11-15T23:59Z, 2026-11-16T00:19Z and 12:00Z, every app, both engines, once each) failed
 seven specs: Debrief `ux-welcome` (before and after), `ai-chat` (before), `dock-default-split` (noon); ui `gallery`
@@ -2566,6 +2593,7 @@ sweep's five specs moved onto the helpers. First count (`node scripts/e2e-ready-
 no waiver was added (ER-46), so the count only goes down as specs move or the rule flips to error after its first green run on the real tree. Many of
 the 74 are reads of a static element; a waiver `// conformance: e2e-ready — <why>` was meant for those (replaced by suppressions, see the entry below).
 Debrief's `openApp` and `openAppWith` now wait on the dock signal (`expectDockPlanned`). Suite time on 9 related files (68 tests, Chromium, 4 workers, one run each, machine idle): 1.1 min with the wait, 1.0 min without; the difference is inside the run-to-run noise of one run each.
+
 ## The ready-reads sites are gone and the rule is an ordinary lint error (2026-11-18)
 All 74 sites were moved onto the helpers (`expectNotMoving` for a box, a retrying assertion or `expect.poll` for text, colours and attributes) or are one of six reads that are immediate by design (the page's own ready signal, a faked-clock read, a focus loop, a "nothing happened" check, the CSP violation list, a "did not move" check). `data.spec.ts` "loading and empty" (FLAKY in run 8215) took the settled position of one box and then polled the other three for it; a box that agrees with itself while the others still settle gave a wrong `loaded`. It now reads all four boxes in one reading and settles when two readings agree and all four are at the same position. A `for` loop after a bare wait counts as the next statement: put the helper before the loop.
 **The first gate was the wrong shape, and so was the second.** A JavaScript script with baseline, waiver and switch files (d5ad6babd to 1e7c273a5) never ran on app-only changes, passed silently in a shallow clone and could be turned off by deleting its switch. The redo (6fa33ef59 to 15c1702bf) made the rule an error and the six exceptions `eslint-disable-next-line` directives counted by a C139 that parsed ESLint's comment grammar with its own regex. Review measured that rule switch off, unseen by both ESLint and C139, three ways with the real configs: an inline `/* eslint paddock/e2e-ready-reads: "off" */` (or `: 0`), a block comment with the directive on its second line, and the description separators ESLint accepts (`/\s-{2,}\s/`: a tab before `--`, `---`, `--\t`); the string literal that held the directive text was a false positive. **The cause is parsing a grammar that the tool already owns.** The fix leaves the grammar to ESLint: the e2e lint block sets `linterOptions.noInlineConfig`, so every inline config comment is ignored (and reported), and an exception is an entry of the project's `eslint-suppressions.json` (ESLint bulk suppressions, applied by the Angular lint target through `applySuppressions` and by the ui's CLI by itself). The CLI fails on an unused entry (the API the Angular builder uses does not, so `eslint/test/wiring.test.cjs` runs the CLI over each project with a suppressions file and forbids the flag that ignores unused ones). C139 shrank to the part ESLint cannot do: each suppressions file against the merge base through the shared baseline reader (not measured is an error in CI), and a run that reads no e2e spec is not measured. The six entries (Debrief 3, Dyno 3) were approved by the user on 2026-11-18. A run of the checks on a change that only touched an app's `eslint.config.js` marked no eslint project, so nothing would have caught `e2ePinnedClock({ ready: 'off' })`: `scripts/affected.mjs` and `./dev plan` now mark the eslint project for the lint wiring files (an app's or the ui's `eslint.config.*`, `eslint-suppressions.json`, `angular.json`, and the ui's `package.json`), and the ui's lint script has `--max-warnings 0`. The wiring test resolves the rule's severity (and survives an inline `off`) in the six real configs (ER-33). **Class: a new gate built as a separate script, or as our own parser of another tool's grammar, instead of on the tool's own mechanism and the existing baseline reader** (earlier: the hand-written baselines that C53, C115 and the allow lists replaced).
@@ -2709,6 +2737,7 @@ row layer changes height" grows the layer by 100 px and reads `scrollTop`; red i
 **Why the logs showed it only partly.** The `Scroll origin` line showed a no-input move, not its size against the layer change; WebKit's
 console preview cut the line after five fields. **Class:** a browser default that moves the scroll position (clamping, bug 3 of ADR 0072;
 anchoring here).
+
 ## A test kit that read the live environment saw other tests' changes (tests, 2026-11-16, ADR 0100)
 Symptom: under the plain harness `env::hermetic_points_the_user_folders_and_tmp_into_the_scratch` failed 5 of 40 runs, as
 "scratch folder: No such file or directory" or `Leftovers([".tmp…/"])`, and a test program started directly linked rustup's
@@ -2733,6 +2762,7 @@ When the owner changed, or two reads disagreed, the copy did not follow.
 says so, and the pre-review checklist and the independent-review checks ask "does any number re-type a decision another module
 owns?" (ER-22).
 **Class: a copied value that drifts from its owner (earlier: the filter bar height placeholder; mechanism copies of rule 55 are the same shape).**
+
 ## paddock-ipc: a call whose connection closed before its caller looked it up waited for its whole timeout (CI run 8214, 2026-11-17)
 
 **Symptom.** In ci.yml run 8214 (train 13, the crates job on Linux) paddock-plugin-host's
@@ -2867,6 +2897,7 @@ returns before the orphan sweep of unslotted folders has finished (rule out: the
 `release` waits on it); (2) the unslotted folder is swept only under a lock another concurrent test file can hold (rule out: the
 lock path is under the test's own `host()` root); (3) the 20-day time stamp is renewed by something before the sweep (rule out: the
 folder's mtime just before `release`). Next: reproduce under load with a failing run first (ER-28), then fix the cause.
+
 ## paddock-assistant: "Stop ends a slow Pitwall within 2 s" timed the turn's save, not Stop (CI run 8241, Windows, 2026-11-18)
 **Symptom.** `pitwall::stop_ends_a_slow_pitwall_within_a_read_slice_in_every_phase` failed once on main's Windows crate job
 (run 8241, job 41141; 2.8 s against its 2 s limit) and passed on its retry (FLAKY). It measured from Stop to the turn's end event.
@@ -2888,6 +2919,7 @@ that the blocked generation saw the stop, without its 100 ms limit. Positive con
 the new test fails at its hang guard ("the generation never ended after Stop"). Stress: 300 of 300 (macOS, load 30).
 **Why the logs did not show it.** The test printed only the total; the split needed the probe. **Class: a test asserts a wall-clock
 limit** (rule 40; earlier: Debrief 1.1.1's three cancel tests, 2026-10-25, above).
+
 ## Debrief: two live-tail e2e timed out in WebKit because every live tick costs the page about a second (CI run 8243, 2026-11-18)
 **Symptom.** `live-tail.e2e.ts:207` (the tail status panel and Settings ▸ Live tail) and `:247` (rolling files) failed both tries in
 WebKit on main (debrief.yml run 8243, shard 3/4): the Settings form not visible after 5 s ("Loading settings…" in the snapshot), an
@@ -2947,6 +2979,18 @@ tools/paddock-dev/Cargo.toml --profile ci --no-tests=fail -E 'test(/^contracts::
 paddock-ci, `tools/linux-container.sh --ci-image`, 4 CPUs, 2 jobs, a new empty build volume, host load 27): cold 71 s, warm 1 s (the 12
 tests run in 1.2 s). Under the limits set for the choice (30 s warm, 3 min cold), so the step stays a nextest step. Not measured: a
 real amd64 CI runner; read the step's timing from the next train run and revisit if the cold time passes 3 min.
+
+## Fix item: sccache with `SCCACHE_BASEDIRS` once a release ships it (2026-11-19)
+
+sccache 0.19.0 (2026-10-24, the pin in `tools/paddock-dev/src/ci_setup_rust.rs`) keys every Rust compile on the checkout path
+(`CARGO_MANIFEST_DIR`, the working folder), so the workspace's own crates never hit across worktrees and 18% of third-party crates
+(those with `OUT_DIR`) miss too (docs/research/2026-11-19-sccache.md). The fix, PRs #2918 and #3022 (`SCCACHE_BASEDIRS` for rustc and
+`SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS`), was merged on 2026-11-02 and is in no release yet. **To do (user decision 2026-11-19, WP-6):**
+when a release contains both, bump `SCCACHE_VERSION` and the four checksums, start the agents' server with
+`SCCACHE_BASEDIRS=<worktree root>` and `SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS=CARGO_MANIFEST_DIR,CARGO_MANIFEST_PATH`
+(`local_sccache.rs`), and measure workspace-crate hits across worktrees with incremental off in the push gates. Check
+<https://github.com/mozilla/sccache/releases> at each train.
+
 ## A slow-to-start stand-in git met the phase limit: the mark now bounds every call of a hung-phase test (2026-11-19)
 `ci_host::kept_clone::tests::a_phase_abandoned_at_its_bound_writes_nothing_into_the_next_phase` failed once at a 1-minute load of
 about 31 (integrator-train16, m2-nextest.log): the stand-in git recorded no call, because the git's own 1 s limit, counted from its
@@ -2966,6 +3010,7 @@ ambient load 35 to 40 from other agents): 200 runs of the 4 kept_clone unit test
 executions, 0 failed. **The class is now checked, not reviewed for (ER-21):** `phase::tests::no_source_file_times_a_phase_test_from_its_start_without_a_clock_mark_or_a_reason` fails on any test in a file that uses `ci_host::phase` that calls `.phase(`, `bounded*` or `run_with(` without a `ClockMark` (or `hang_flow`/`hang_env`) or a `// conformance: no-clock-mark - <reason>` line (two exemptions, both fakes with no program); its positive control is `the_audit_of_unmarked_phase_tests_sees_one_and_accepts_a_mark_or_a_reason`. The 20 s general limit is one constant, `phase::HUNG_TEST_GENERAL_LIMIT`. **Rule:** a timed hung-phase test counts every limit it asserts from the stand-in's mark, setup calls included, and proves it
 with a stand-in that is slow before its hang. **Class: work before the hang point of a hung-phase test meeting its limit under load
 (fourth sighting; ADR 0103, second amendment).**
+
 ## Fix item: `./dev ci dispatch --trial --onto` and `--json` (2026-11-18, Windows slowdown trials 8251 to 8257)
 - **`--onto` with a branch pushed after the trial clone was made** ("trial: git rev-parse failed: fatal: Needed a single revision").
   Already fixed on train 14 in ae662f1e9 (`trial::prepare` fetches an `origin/<branch>` target; test
@@ -3008,6 +3053,16 @@ started row has its own generous cap (60 min) with the process list and stacks w
 row's own progress follows. Recurring: a wall-clock bound judges liveness (ADR 0031's class; CI run 7096, the 2026-11-12 slot-acquire
 wait, ER-12).
 
+## A total over the rows of one push is the same defect as the 15-minute budget, with a new number (2026-11-21, fix/push-gate-queue-stall)
+
+The 2026-11-19 fix kept a total run budget "only to stop new rows" and made the queue allowance a total over the push; on 2026-11-21
+three pushes were refused with 5 to 15 rows "not measured" and no row over its cap. Time a step queued while a sibling row of its own push
+held the heavy slot counted as run time, so one `clippy-windows` run (859 s run, 1,534 s queued) spent the 15 minutes; the allowance then
+ran out over 15 rows. **Rule:** a row's bound is its own, on its own run time, from when it starts; a wait is bounded by the progress
+of what it waits for, not by its length, and never by a total shared with other rows (ADR 0102, amendment 2026-11-21; ER-12: the number
+is the longest measured gap, recorded in docs/benchmarks.md). Recurring: a wall-clock total judges liveness (2026-11-19 lesson above;
+ADR 0031's class; CI run 7096; the 2026-11-12 slot-acquire wait).
+
 ## A FLAKY test blocks only when the change touches its feature (train 14, runs 8297 and 8300, 2026-11-19)
 
 Debrief train 14 was held by rare WebKit flakes (1 in 145 runs) in the accessibility check and the home dashboard. The train changed
@@ -3024,6 +3079,7 @@ flaky failure on every member whose plan reaches its project (`tools/paddock-dev
 - `ts-dyno-shell` warned that its build step "does not build what it runs". Cause (measured, not guessed): `paddock-build` creates the sidecar placeholders during the build script's run and lists them in `rerun-if-changed`, so cargo saw them as newer than the run and rebuilt `dyno-app` once on the next call. Placeholders now get the oldest mtime (best effort, with a `cargo:warning` when it fails); the registry entry was right. A tool that copies a real sidecar over a placeholder with its old time (`cp -p`, `tar` x) will not make cargo rerun the build script: touch the file. The warning also names the first crates that compiled.
 
 Recurring: a check or run that cannot see its subject reads as a pass (ER-33; also lessons of 2026-11-17 on C137 and `expectIdle`).
+
 ## Debrief: four WebKit e2e tests failed once each in debrief.yml run 8297 (train 14, 2026-11-19)
 Each failed on its first try and passed on its retry; none had failed in the 281 earlier Debrief runs of 30 days (`./dev ci flakes`).
 Flows read from the failing attempts' traces and screencasts (playwright-report-3 and -4 of run 8297).
@@ -3233,6 +3289,12 @@ reveal grows the total, `Total grew outside a round` 7 ms after the press here) 
   `paddock-job-tmpdir-*` and more). The planned redesign is a shared per-run scratch root for tests, plus a report-only conformance
   check with a positive control (ER-21, ER-41).
 
+## cargo-llvm-cov asks to install into ~/.rustup and waits on stdin (sccache work, 2026-11-20)
+
+- **What happened:** a local `cargo llvm-cov nextest -p paddock-net` stopped at "I will run `rustup component add llvm-tools-preview` ... Proceed? [Y/n]" and sat there for 4 hours, because a background run has no stdin to answer it. Answering yes would have installed a component into the user's `~/.rustup` (ER-14, ER-45).
+- **Rule of thumb:** never run `cargo llvm-cov` locally. Coverage is measured by CI's llvm-cov gate (`./dev ci run crates coverage`, `scripts/coverage-gate.mjs`), whose image has the component. A shared crate's coverage is "not measured" in a branch report and read from the first CI run.
+- **Recurring class:** a tool that starts an installer or a prompt when a probe runs (ER-45; earlier instance: rustup 1.28.1 installing a missing pinned toolchain, run 8060). Any local tool step that can prompt gets stdin from /dev/null so it ends with an error instead of waiting.
+
 ## A streamed answer that was still arriving failed its wait: the wait bounded the whole stream, not a stall (Debrief, 2026-11-20, train A)
 - **Failure:** Debrief WebKit `ai-chat.e2e.ts:116` "the conversation is busy from the moment its turn is drawn until the answer is
   done" red on both tries in debrief.yml run 8377 job 42784 (shard 3/4, Linux), at `expectStreamDone` (paddock-e2e `ready.ts:85`):
@@ -3254,3 +3316,191 @@ reveal grows the total, `Total grew outside a round` 7 ms after the press here) 
 - **Class: an end-to-end wait bounds a streamed result by one expect timeout.** Earlier: debrief.yml run 8300, where six streamed
   answers ran past the wait (64f8165ae, fixed for that spec only by sending answers in one piece). It is fixed for every caller of
   `waitAnswered` here.
+
+## The other-OS member gate printed "not measured" and let every train 18 member merge (2026-11-21)
+
+- **What happened:** `./dev merge check --gates` has an other-OS row (068186e2d) that runs a trial on the real Windows and Linux
+  runners. With `PADDOCK_TRIAL_DIR` unset it printed "NOT MEASURED" and the merge went on, because the row was report-only
+  (ER-41) and its exit never changed. No train 18 member was checked on Windows or Linux; a deterministic Windows-only failure
+  (the `sccache_eviction` tests, runs 8495 and 8509) was found only after the merge (ER-9, ER-33).
+- **Fix:** the gate dispatches the trial itself whenever `GITEA_TOKEN` is set, the trial folder has a configured default
+  (`paddock.trialRoot`, else `trials` beside the worktree root) and is removed at the end, what it cannot measure exits 6, a NEW
+  failure exits 5, and a FLAKY test blocks only when the member touches its feature (ER-12). Details: the ADR 0087 amendment of
+  2026-11-16, "Enforced since 2026-11-21".
+- **Class: a gate that needs a setting nobody set reports and goes on.** Earlier: ER-41's report-only start with no date on which
+  it turns blocking (C130, C137, C139 stayed report-only after their first green run).
+- **Review round (2026-11-21):** the first version found its run by "any ci.yml run on the sha" (it could judge an older train run), let
+  a run whose plan job failed read as clean (all jobs skipped), accepted failures also on main as known, and ignored Linux jobs
+  that name no OS. Fix: judge only the run the dispatch made (the handle, ER-51), and make a row measured only when the plan job
+  succeeded. **Class: a check judges something it did not start or did not see run.** Earlier: run 8139's verdict on a rerun-only run
+  (ER-15), a "clean" Linux row over unjudged jobs (this fix).
+
+## A folder shared between concurrent CI lanes (2026-11-21, ADR 0111)
+
+- **Run 8373 (debrief.yml, job 42677): E0463 "can't find crate for `foldhash`".** Linux CI had set `SCCACHE_DIR` to the whole `/sccache`
+  mount, where `./dev` kept its build folder. sccache's local cache is one LRU over every file below its folder, so an insert that took
+  it over `SCCACHE_CACHE_SIZE` deleted cargo's rlibs. Six lanes also meant six sccache servers on one folder, which sccache documents
+  as unsupported. Reproduction: `tools/paddock-dev/tests/it/sccache_eviction.rs` (the file survives beside the cache folder, not in it).
+- **Fix:** a lane folder per job (`<mount>/sccache-<lane>`, the slot holder the hosts use), `./dev` in the job's own home with its binary
+  kept through `actions/cache` and verified for its hash, npm and Angular through `actions/cache`, every `actions/cache` use pinned to a digest.
+- **Class: concurrent jobs write one folder.** Earlier: run 8027 (E0514, one build folder for two compilers), the heavy binary vanishing
+  (2026-11-14), the Windows running-tool replace (`dev`, the `mv -f` fallback). The rule is drafted in ADR 0111: no writable folder is
+  shared between concurrent CI lanes; shared state goes through a keyed cache or an artifact.
+
+## A NAS restart and a tool prompt each held work for hours: the tools now hold on a down service and never wait on stdin (2026-11-20)
+- **Failure:** a NAS restart took Gitea (HTTP 502) and RustFS down in the middle of a release: a hand-typed push through the keychain
+  helper got a 401 that erased the user's git login (now prevented by the repository's helper, which reads `GITEA_TOKEN` and ignores
+  erase), and a cache trial failed with nothing to say why. Separately `cargo llvm-cov` waited 4 h on "install llvm-tools? [Y/n]", and
+  rustup auto-installed a pinned toolchain in run 8060.
+- **Cause:** nothing asked whether the servers answered before a dispatch, a wait or a push, and a child started by a check inherited the
+  caller's standard input and rustup's default.
+- **Fix:** `paddock-dev`'s health gate (`health.rs`) holds `ci dispatch` and `wait --ci-run` (and `ci dispatch --trial`'s push) while
+  Gitea is down, bounded by the command's own `--max`; a command holds only on the services it needs (a wait on a run never on
+  RustFS, review of aa64cb4c3), and a wrong `--server` fails at once; `paddock_env::command::no_prompts` closes standard input and pins
+  `RUSTUP_AUTO_INSTALL=0` for `heavy`, `ci run` lines and the generators; `.claude/hooks/no-local-installs.sh` refuses an agent's
+  `cargo llvm-cov`, rustup installs and updates, and `cargo install cargo-llvm-cov`. Each has a test that fails without it.
+- **Class: a tool that waits on something it cannot see.** Earlier: run 8060 (rustup auto-install), `pgrep -f` loops (ER-32).
+
+## Fix items from Train A's full rounds (ci.yml 8389, 8425; debrief.yml 8426; dyno-release.yml 8446), not its features (2026-11-21)
+- **paddock-ipc `endings::ipc_link_server_ends_every_connection_right_or_is_in_the_ratchet` on Windows** (ci.yml run 8425, job 43164,
+  crate (windows-latest); FLAKY: try 1 "ipc-link-server busy: RIG FAILURE (write)", try 2 passed). Second Windows instance after run
+  8174. Next: a failing reproduction first, then the cause.
+- **debrief webkit `e2e/a11y.e2e.ts:6` main screen has no serious accessibility violations (dark)** (debrief.yml run 8426, job 43195,
+  shard 3/4; FLAKY, third sighting after 8373). Next: a failing reproduction first.
+- **dyno webkit `e2e/layout.spec.ts:224` settings pages at 900x600 with the advanced fields** (dyno-release.yml run 8446, job 43252;
+  FLAKY: `span.dy-pw-muted "Memory 24.8 of 48 GB": text needs 135px, has 132px, no accepted ellipsis`). A product bug, not only a test:
+  a live value can overflow the popup-widget preview at 900x600. Next: a failing reproduction that pins the longest value, then an
+  accepted ellipsis or a width that fits it.
+- **paddock-watch `native::a_real_folder_change_reaches_the_action_and_a_recursive_watch_sees_sub_folders` on macOS** (ci.yml run 8389,
+  job 42837, d7-mac-mini; FLAKY: try 1 timed out at 30 s "the watcher did not report the change", try 2 passed in 4.5 s). First run
+  with three concurrent macOS jobs on one runner. Next: a failing reproduction first; check job interference on the shared runner.
+- **The pre-push `conformance-tests` row failed once under load without naming the failing test** (2026-11-21, reported by the
+  coordinator). Two items: the hook output does not say which conformance test failed (ER-27: a failing step names its cause), and
+  an unknown conformance test is flaky under load. Next: make the row print the failing test's name and its last lines, then a
+  failing reproduction under load.
+
+## Two real-folder watcher tests timed out on the Mac: fseventsd was saturated, and the tests assumed a prompt, lossless watch (2026-11-21)
+- **Failure:** ci.yml run 8466 job 43338 (`crate (macos-latest)`, d7-mac-mini): `paddock-packs::it native::the_real_watcher_applies_an_added_a_broken_and_a_deleted_pack`
+  and `paddock-watch::it native::a_real_folder_change_reaches_the_action_and_a_recursive_watch_sees_sub_folders` timed out at 30 s
+  on try 1 and passed on try 2 (3.6 s, 2.3 s); run 8389 job 42837 had the same paddock-watch failure. Both waited on one FSEvents
+  event after `notify` started a stream.
+- **Hypotheses and what refuted them:** the watched folder on the external volume, or TCC Removable Volumes: both jobs logged
+  `job-tmpdir: temp folder /Users/***/gitea-runner/tmp/<job> on the internal disk`, and the TCC log had no request from cargo,
+  nextest or a test binary in the failure window (the two Removable Volumes requests that day, at 00:03Z and 00:27Z, came
+  through sandboxd and were answered in about 2 ms; the user saw the prompt from `chrome-headless-shell`, whose copy lives in
+  `/Volumes/vault-dev/caches/ms-playwright`). The macOS job share (8 test threads per job at capacity 3) and load: not ruled out
+  at load 60 or more, but with fseventsd healthy at load 15 to 20 every event took about 10 ms.
+- **Root cause (host):** fseventsd had run 6.5 days and sat at 100% to 130% CPU with 12.7 GB resident. A probe on the same Mac
+  (a new watch, a write at once, a second write after the first event or 30 s) measured, with fseventsd saturated: the first event
+  in a median 912 ms (up to 4.1 s), the second in a median 119 ms, and 5 of 50 waits saw nothing for 30 s. fseventsd restarted at
+  02:37:54Z (not by the agent); after that, 0 of 100 waits were lost and each took about 10 ms, whether the test wrote at once or
+  after a readiness probe. Not reproduced: putting the saturation back (it cannot be made on purpose without loading the user's Mac).
+- **Contributing (tests):** the tests wrote the change right after the watch started and waited for exactly one event, so a late
+  start or one dropped event failed them, and a late event from an earlier write (seen: one arrived 0 ms after the drain) could
+  have passed a wait for a later change. Apple documents dropped events (`kFSEventStreamEventFlagKernelDropped`/`UserDropped`,
+  with `MustScanSubDirs`: "you must do a full scan"), so a test of a real watch cannot assume none.
+- **Fix:** both tests prove the watch live first: a probe file (one the pack loader ignores) is rewritten every 250 ms until the
+  action has run once (`paddock_testkit::wait::retry_within`, 30 s guard as before). The paddock-watch action reports which of the
+  test's paths existed when it ran, so a late event cannot stand in for the change; the packs waits already checked the store's
+  content. A timeout names the likely host state (a saturated fseventsd) and the command to see it. A change the watch still drops
+  fails, as it should on a sick host. Host: restart fseventsd or reboot when it sits at 100% CPU.
+- **Why the logs did not show it:** the failure said only "Timeout", nothing about the host. fseventsd's CPU and memory were found
+  with `ps`; the probe needed the event times.
+- **Open (not verified):** whether `notify` 8.2's FSEvents callback drops a dropped-events notice whose path is outside the watched
+  folder (it filters by path before it turns flags into a `Rescan` event, `fsevent.rs` callback); if so, a product watch never
+  learns it lost events. What grew fseventsd to 12.7 GB (a client that stopped reading, or the 690k leaked test folders and their
+  paused delete) is not known.
+- **Class:** a test of an OS notification assumes it is prompt and lossless. Earlier instances: none recorded.
+
+## Train 18's two FLAKYs: a stand-in timed against a 1 s limit, and a wrapper that started a program per folder level (2026-11-22, run 8546)
+**macOS, `generators::tests::real::a_wait_for_the_slot_past_the_hang_guard_is_not_measured_and_names_the_holder` (job 44050).**
+Try 1 panicked with `TimedOut` after 1.042 s; try 2 passed. Causes listed: (1) `run_bounded` dropped output written just before
+the kill: ruled out by reading it, the loop waits for both pipes to drain after the kill (`PIPE_GRACE`); (2) train 18's change to
+`base_command` (`no_prompts`: stdin null, `RUSTUP_AUTO_INSTALL=0`): ruled out, `run_bounded` already closed stdin,
+and the variable does not reach the stand-in's first write; (3) the 1 s limit counts from the spawn, and the stand-in's start-up plus its first write took longer on a loaded
+runner: confirmed, a stand-in that waits 1.5 s before its line fails the same way at the same line every time; the natural rate on a
+quiet Mac was 0 of 25 runs at 4 threads. **Fix:** what `Real::run` makes of a finished run is `run::ran_from`, a function of the
+output alone; the test gives it a timed-out output and no clock is involved (30 stress runs of the group at 4 threads, green).
+Fifth sighting of "work before the hang point of a timed test meets its limit under load" (2026-11-15, 2026-11-19 `kept_clone`
+above): the phase audit sees only files that use `ci_host::phase`, so this one was not checked.
+**Windows, `paddock-dev::it wrapper::a_config_that_only_names_the_build_folder_does_not_change_the_hash` (job 44099).** Try 1 hit
+nextest's 60 s; try 2 took 33.9 s; on earlier runs it took 27 to 44 s (runs 8335, 8346, 8359, 8495, 8509), so it sat near the limit
+before train 18, whose `dev` changes are not on the `--wrapper-hash` path. The test runs `./dev --wrapper-hash` eight times, and each
+run started 42 programs in the macOS test fixture (a `dirname` per folder level, and grep, sed, cut and tr for each parsed line), at
+about 45 ms a start on that runner plus a fork per command substitution. **Fix:** the walks go up with parameter expansion and the
+`-vV` lines, the flag filter and the explain line are read by the shell or one awk: 13 starts, guarded by
+`a_wrapper_hash_costs_a_bounded_number_of_starts_whatever_the_folder_depth` (red at 42 before). On a bare drive the walk now ends at
+`C:` as Rust's `Path::ancestors` does, where dirname went on to `.`. Same class as the 2026-11-18 Windows git starts (ER-20).
+
+## The lessons file lost its blank lines to git's union merge four times (2026-11-21)
+- **Lessons file format (C145).** The file is merged with git's union driver, which works on lines: twice (9ec43be3c, b9bf5fc4b) a merge
+  dropped the blank line between two sections and left a `## ` heading directly under the last line of the section above, so the heading
+  rendered as text; 35 such headings were already in the file. New check C145 (report-only, ER-41) reads docs/lessons.md for the
+  format it relies on: a blank line before every `## ` heading, one `# ` title on the first line, no repeated heading, a single final
+  newline (headings in fenced code are not headings). It runs in the conformance job, so every member's gate runs it on the combined tree
+  at merge time; `./dev merge check` has no separate detector, because its detectors judge a merge three-way against its parents and
+  this defect is visible in the merged text alone.
+- **Cause of the drop, and the fix (the 4th time: 9ec43be3c, b9bf5fc4b, 75ce0d2c8, 5c241d93f).** `git merge-file --union` on two branches that each append
+  `\n## X\n- x\n` gives `... - a\n## B\n- b`: the blank line is a line both sides added identically, so the diff takes it as one shared
+  line and the second branch's heading is glued to the first branch's last line. A trailing blank line at the end of each entry drops the same
+  way (measured), so no file layout avoids it. Fix: `.gitattributes` says `merge=lessons`; `./dev merge lessons-driver` runs the union merge and
+  puts the blank line back before every `## ` heading outside a fence. `./dev hooks install` sets `merge.lessons.driver` (a git setting, per
+  clone, shared by its worktrees: run it once in the main checkout and the integrator's worktrees; a clone without it falls back to git's plain
+  merge, which conflicts and is loud, never a silent drop). Tested with a real three-way merge (`conformance/test/lessons-merge.test.mjs`,
+  with the plain union as the control that reproduces the drop); C145 stays as the net.
+- **Class: a merge driver that works on lines damages a file whose meaning is in its blank lines** (9ec43be3c, b9bf5fc4b, 75ce0d2c8, 5c241d93f).
+
+## Fix items from train 18's rounds (ci.yml 8495, 8509, 8546, 8554; debrief.yml 8511, 8547; dyno-release.yml 8549), not its features (2026-11-22)
+- **paddock-dev `golden::workflow_action_and_script_edits_narrow_the_plan` on Windows** (ci.yml run 8509, job 43734; FLAKY: try 1
+  killed at 240 s, try 2 passed in 110 s; again in run 8546, job 44099: try 1 killed at 240 s, try 2 passed in 231 s, on
+  fa3397043; it passed in 179 s in the green run 8554, still close to its 240 s limit). The train does not touch the planner. The time is git starts on the Windows runner (about
+  45 ms each, ER-20). Next: count the test's git starts and batch them (the shared batched reader), with a spawn budget that a test
+  guards; a failing reproduction first.
+- **dyno-agent `disk::centre::tests::the_cached_volumes_never_list_on_the_request` on macOS** (ci.yml run 8495, job 43528; FLAKY: "a
+  cached read within the freshness window never asks the system again" failed once, passed on retry). A time-window assertion under
+  load, likely reading the wall clock. Next: inject the clock (ER-12), a failing reproduction first.
+- **debrief webkit `e2e/ai-chat.e2e.ts:12` streams an answer with a tool chip, and a cited event jumps to the grid** (debrief.yml run
+  8511, job 43736, shard 3/4; FLAKY: 16.5 s, then passed in 22.2 s). Train 18 does not touch Debrief's app. Next: a failing
+  reproduction first; check whether the progress-based stream wait (95c7e4722) also covers this test's citation step.
+- **debrief webkit `e2e/home-narrow.e2e.ts:70` nothing overflows at 720 px** (debrief.yml run 8511, job 43736; FLAKY). A layout check:
+  check it reads no live value (the class of the Dyno 900x600 item). Next: a failing reproduction first.
+- **Debrief WebKit e2e FLAKYs on train 18** (debrief.yml run 8547 on fa3397043; each failed try 1 and passed its retry, WebKit only):
+  `e2e/a11y.e2e.ts:6` "main screen has no serious accessibility violations (dark)" (shard 3/4, job 44075; the fourth sighting, after 8373, 8426);
+  `e2e/resilience-context-live.e2e.ts:88` "the status bar Live toggle keeps the selection, passes axe while on ..." and
+  `e2e/ux-shortcuts-editor.e2e.ts:21` "rebinds a command, warns about a conflict ..." (shard 4/4, job 44076). Train 18 changes no
+  file under apps/debrief or ui, so none blocks (ER-12). Next: a failing reproduction per spec under the pinned clock, then the fix.
+- **Dyno WebKit e2e FLAKY** `e2e/flows.spec.ts:743` "startup filter › hides the system and signed entries, shows the counts and
+  remembers the choice" (dyno-release.yml run 8549 on fa3397043, job 44142, app dyno ubuntu e2e-webkit; try 1 failed, retry passed).
+  Train 18 changes no file under apps/dyno or ui. Next: a failing reproduction first.
+- **Debrief WebKit e2e FLAKYs in the scheduled nightly on main 67ac6d6ec** (debrief.yml run 8559; each failed try 1 and passed its
+  retry): `e2e/ai-pitwall.e2e.ts:68` "with no Pitwall at all, every AI entry point lands on Settings ▸ AI and none is a dead button"
+  (shard 3/4, job 44324) and `e2e/live-tail-follow.e2e.ts:255` "a scrollbar drag across refresh rounds ends where the user dropped
+  it" (shard 4/4, job 44325). Train 18 changed no file under apps/debrief or ui. Next: a failing reproduction first.
+- **From train 19's trial ci.yml run 8576 (ebe7ddd17), in code train 19 does not touch:** paddock-dev
+  `sccache_eviction::control_the_same_file_beside_the_sccache_folder_survives` on Windows (job 44486; FLAKY: try 1 failed at 2.8 s,
+  try 2 passed at 3.8 s; train 18's test, started through paddock-testkit); dyno-agent `disk::centre::tests::the_cached_volumes_never_list_on_the_request`
+  on macOS again (job 44462; FLAKY, after 8495); Dyno vitest `settings-page.spec.ts:41` "renders the sections once loaded and shows
+  no save bar while clean" timed out at 5000 ms (job 44477, TZ=Pacific/Auckland; it also failed in main's push run 8555 and passed in
+  8554 on the same commit). Vitest has no retry here, so it cannot show as FLAKY: give it flaky-as-failure like nextest and
+  Playwright (ER-12). Next: a failing reproduction for each first.
+- **From train 19's trial ci.yml run 8601 (7d3f5a6c6), in Dyno code train 19 does not touch (it changes only Dyno's lockfiles and
+  notices):** Dyno vitest, single attempts with no retry (job 44651, app dyno ubuntu-latest): `network-page.spec.ts` "Try again on
+  the owners source line asks the helper now, once, outside the poll" and `processes-page-actions.spec.ts` "summarises the machine"
+  timed out at 5000 ms (network-page also failed in main's push run 8555); `tray.spec.ts` "draws the engine layout in order: alarms,
+  disk space, CPU and memory, with their values" (`expected 'Active alarms2 active' to contain 'node started listening on TCP port
+  30...'`) and "lists every alarm and volume the engine sends, scrolling inside the popover ..." (`Cannot read properties of null
+  (reading 'getAttribute')`). Dyno e2e `[chromium] e2e/layout.spec.ts:224` "settings pages at 1024x800 with the advanced fields"
+  (job 44649; FLAKY: failed once, passed its retry; the class of the 900x600 item). Different Dyno specs time out at 5 s in each run
+  (8576, 8601): the class the vitest retry and worker budget of feat/fixed-wait-checks address (6 lanes x 29 vitest workers on 30
+  cores before, 6 x 5 after). Next: a failing reproduction for each first.
+- **From train 19's full ci.yml run 8610 (b3c254a2d), in code train 19 does not touch (it changes only Spotter's lockfile):**
+  `paddock-chromium::it real_browser::a_browser_ended_by_force_leaves_nothing_behind` on Windows (job 44761, crate windows-latest;
+  FLAKY: try 1 panicked at real_browser.rs:539 after 7.0 s, try 2 passed in 5.0 s) and `spotter-render::real_browser
+  a_download_address_is_reported_as_a_download` on macOS (job 44768, app spotter macos-latest; FLAKY: try 1 panicked at
+  real_browser.rs:318 after 120.3 s, try 2 passed in 2.0 s). Next: a failing reproduction for each first.
+- **A push gate row not measured, cause likely but not proven (2026-11-22):** the first push of fix/member-gate-self-dispatch
+  (0b1482f0b) was refused with `clippy-linux tools/paddock-dev` NOT MEASURED (10 passed, 1 not measured, 2154 s). The row's reason
+  line was lost: the integrator filtered the push output to row summaries, and the row left no log under paddock-pre-push/logs.
+  On the same commit with main merged in, under the gate that counts heavy queue time apart from run time (fix/push-gate-queue-stall),
+  the row passed alone in 15.6 s after 223 s in the queue. Likely cause: the old gate's 15-minute budget spent on the heavy queue
+  while other agents held the slot; not proven. Since then the integrator keeps the full output of every gate row.

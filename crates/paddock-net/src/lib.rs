@@ -22,6 +22,7 @@ mod fake;
 mod policy;
 mod reach;
 mod request;
+pub mod stall_guard;
 #[cfg(feature = "http")]
 mod ureq_wire;
 mod wire;

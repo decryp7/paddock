@@ -562,6 +562,26 @@ fn ci_plan_declares_a_scope_that_is_complete_only_when_it_covers_a_push_to_main(
     assert_eq!(main.workflow, "ci.yml");
 }
 
+/// The `os` input narrows a run to one operating system's part, and the plan declares that: the declared run is never complete, even
+/// for a push-shaped full dispatch with WebKit that would be (positive control: the same environment without `PLAN_OS`).
+#[test]
+fn an_os_narrowed_plan_declares_its_os_and_is_never_complete() {
+    let base = [
+        ("GITHUB_EVENT_NAME", "workflow_dispatch"),
+        ("GITHUB_REF", "refs/heads/topic"),
+        ("PLAN_WEBKIT", "1"),
+    ];
+    let full = declared_scope(&base).0;
+    assert_eq!(full.complete(), Ok(()), "{}", full.line());
+    let mut narrowed = base.to_vec();
+    narrowed.push(("PLAN_OS", "linux"));
+    let (d, _) = declared_scope(&narrowed);
+    assert_eq!(d.os.as_deref(), Some("linux"), "{}", d.line());
+    assert!(d.complete().unwrap_err().contains("one operating system"), "{}", d.line());
+    // What it needs stays a push to main's: every runner.
+    assert_eq!(d.need, full.need);
+}
+
 // ---------------------------------------------------------------------------------------------------------------------
 // The per-job narrowing of `.gitea/` and `conformance/ci` changes, made deterministic (the recorded cases and the history
 // sample do not reach every job): uncommitted edits in a copy of this repository, the script as the oracle.

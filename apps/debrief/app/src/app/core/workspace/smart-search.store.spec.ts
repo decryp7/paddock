@@ -6,6 +6,9 @@ import { QueryStore, TEXT_DEBOUNCE_MS } from './query.store';
 import { isWordSearch, SmartSearchStore } from './smart-search.store';
 import { WorkspaceDataStore } from './workspace-data.store';
 
+// The real clock back after every test, so a test that times out cannot leave fake timers for the next one (ER-12, C154).
+afterEach(() => vi.useRealTimers());
+
 function setup(backend: MockBackend = tinyBackend()) {
   TestBed.configureTestingModule({ providers: provideTinyBackendBare(backend) });
   const smart = TestBed.inject(SmartSearchStore);

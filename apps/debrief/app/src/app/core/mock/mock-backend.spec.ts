@@ -6,6 +6,9 @@ import { MOCK_PROFILE_TOML } from './mock-profile';
 import { at } from '../../../testing/must';
 import { mockJobs } from '../../jobs/mock-jobs';
 import { ManualClock } from '../../../testing/manual-clock';
+
+// The real clock back after every test, so a test that times out cannot leave fake timers for the next one (ER-12, C154).
+afterEach(() => vi.useRealTimers());
 describe('MockBackend', () => {
   let backend: MockBackend;
   beforeEach(() => (backend = tinyBackend()));

@@ -4,11 +4,82 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### Conformance C154 (report-only), `until` in `@decryp7/paddock-ui/testing`, and workers in the ER-48 budget (ER-21 class: fixed-time waits and leaked fake clocks, user decision 2026-11-22)
+- `until(condition, { what, settle?, maxRounds? })` in `@decryp7/paddock-ui/testing`: waits on a condition (returns or stops throwing), runs
+  one settle round between reads (default one event-loop turn), counts rounds instead of milliseconds, and fails naming `what` with the last
+  error as the cause. It replaces `flush(CONSTANT + n)`. The apps' own `settleUntil` and Spotter's spec-local `until` are left as they are
+  (Spotter's lives on `fix/main-8555-flakes`, not on this base; moving it onto the shared one is a one-line change after that lands). The
+  Pitcrew `config-panel` spec uses it.
+- C154 (Rust, `tools/paddock-dev/src/check/c154.rs`, report-only, ER-41) over `*.spec.ts` and `*.e2e.ts`: `fake-timers` (a file that calls
+  `vi.useFakeTimers` and has no `afterEach`, `afterAll` or `onTestFinished` that restores the real clock, and no test-setup that does), `fixed-wait`
+  (`flush(CONSTANT + n)`) and `lazy-wait` (`vi.waitFor` or `expect.poll` that only imports; a sync `advanceTimersByTime` followed by a DOM
+  assertion). `waitForTimeout` and `setTimeout`-promise sleeps stay C71's. Each rule has a positive control; no baseline file (ER-46).
+  First count at 67ac6d6ec (host run over the 1359 spec files): 38 findings, 35 fake-timers (Debrief 21, Dyno 4, Pitcrew 2, Pitwall 4,
+  Spotter 4) and 3 fixed-wait (Pitcrew `config-panel.spec.ts` twice, Spotter `pattern-helper.spec.ts`), 0 lazy-wait. Every site is fixed in this
+  change (an `afterEach` that restores the real clock; the Pitcrew waits use `until` on the store's `previewing`) except Spotter's
+  `pattern-helper.spec.ts`, which `fix/main-8555-flakes` rewrites; after the fixes the tree reads 1 finding (that file). `ui/projects/paddock-ui`
+  is exempt because its setup calls `installTestKit`, which restores the clock after every test. The check stays report-only (ER-41); no baseline.
+- `./dev ci build-jobs` (and its shell twin) also writes `PADDOCK_E2E_WORKERS` and `VITEST_MAX_WORKERS`, the job's core share (runner
+  override `PADDOCK_CI_TEST_WORKERS`), and warns naming both numbers when the runner's number times its jobs per host exceeds the cores.
+  `e2eWorkers` of `@decryp7/paddock-e2e` takes the smaller of the variable and a config's own count (paddockConfig and Debrief's config);
+  Vitest reads `VITEST_MAX_WORKERS` itself. Before, Vitest ran cores - 1 workers in every job (6 x 29 on d-gtr9's 30 cores).
+
+### `paddock-dev`, CI: sccache on RustFS is the default everywhere it is allowed, and the dev-tool cache key reads the real wrapper output (user decision 2026-11-21)
+- `setup-rust`'s `sccache-backend` and `./dev ci setup-rust --sccache-backend` default to `s3` (the local disk first, RustFS behind it);
+  the Gitea variable that switched it is gone, ci.yml's `sccache_backend` dispatch input stays as a one-run override. No secret, an
+  endpoint that is down or a failed health check gives the local disk with a notice or warning naming the cause; a release, rule 54 or
+  tag run stays on the plain local disk.
+- `./dev sccache env` and the tools that start builds default to `PADDOCK_SCCACHE_BACKEND=auto`: the local disk first and RustFS behind it
+  when `~/.config/paddock/sccache-s3.env` is there and the store answers (docs/dev-setup.md, "Local sccache"); `local` and `s3` are as before. The keys reach
+  the server's environment only.
+- Review fixes: a plain-disk server started while RustFS was down is replaced once the store is back; a two-level server is ours only with
+  this disk folder, bucket and prefix; the S3 guard tests the release condition itself (`kit.sh release-path`, named in the log), not
+  `PADDOCK_DEV_DOWNLOAD`; CI and the Mac share one bounded health check; the key file outranks a stray `AWS_*`; the doubled disk use is documented.
+- `conformance/ci/dev-tool-cache.sh` read lines 2 and 3 of `./dev --wrapper-hash` (it prints the hash and the state on lines 1 and 2), so
+  every Linux job missed the cache silently and built `./dev` (run 8509). It reads the right lines, and a missing or misshapen hash fails the step.
+
+### Conformance C145 checks the lessons file's format, and `docs/lessons.md` has a merge driver (2026-11-21)
+- New report-only conformance check C145 (Rust host): `docs/lessons.md` has a blank line before every `## ` heading, one title, no
+  repeated heading and one final newline. The file's 35 headings that had lost their blank line to a union merge have it again.
+- `docs/lessons.md` merges with the `lessons` driver, `./dev merge lessons-driver %O %A %B`: git's union merge, then the blank line it
+  drops before a `## ` heading put back (it dropped it four times, 9ec43be3c, b9bf5fc4b, 75ce0d2c8, 5c241d93f). `./dev hooks install`
+  sets `merge.lessons.driver` in the clone; a clone without it gets a plain conflict, never a silent drop.
+
+### `paddock-dev`, `heavy`, `paddock-env`: a health gate for Gitea, and no tool prompts (user decision 2026-11-20)
+- `./dev ci dispatch`, `./dev wait --ci-run` and the queue and member-gate dispatch look at Gitea (`GET /api/v1/version`) and hold while it
+  is down: any answer below 500 is up (a 401 or 403 included), a refused connection, a timeout or a 5xx is down. They hold on Gitea
+  only, since reading a run or sending a dispatch needs nothing else; `health::services(.., rustfs: true)` adds RustFS (a GET of its
+  bucket URL from `PADDOCK_SCCACHE_S3_*`) for a command that compiles through the shared cache. An address that can never work (a
+  malformed URL, a host that does not resolve: a wrong `--server`) is an error at the first look, not a hold; it is held for only after
+  the service has answered once. One log line per change of state; the hold counts against the command's `--max` and ends with one
+  `::error::` naming the service and the next step.
+- A push of the train tools (`ci dispatch --trial`) is not sent while Gitea is down, held for at most that command's `--max`
+  (`GitTrain::push_hold`); the queue and the member gate set no bound and try again on their next turn. These tools authenticate with an
+  askpass program and `GIT_TERMINAL_PROMPT=0`, so they never touched a git login; the erased login of 2026-11-20 was a hand-typed push
+  through the keychain helper, which the repository's helper (reads `GITEA_TOKEN`, ignores erase) now prevents. The hold only keeps a
+  push from failing with an unreadable 502.
+- New `paddock_env::command::no_prompts`: standard input is `/dev/null` and `RUSTUP_AUTO_INSTALL=0` (a named policy, ER-47). `heavy`
+  applies it to its command (`HEAVY_STDIN=inherit` opts in), and so do `./dev ci run` lines and the generators' programs.
+- New hook `.claude/hooks/no-local-installs.sh`: an agent's `cargo llvm-cov`, `rustup component add`, `rustup toolchain install`, `rustup target add`, `rustup update`, `rustup default <ver>` and `cargo install cargo-llvm-cov` are
+  refused with the next step (CI's llvm-cov gate measures coverage; the user installs toolchains).
+
 ### `@decryp7/paddock-e2e`: `untilItsPageCloses` and `clickThatClosesItsPage`, for a step that closes its own window
 - A test step whose action ends the page it acts on (a pop-out's Dock back, the pointer-up that docks a dragged pop-out) counts as done
   when that page closed: Playwright can reject such a step with "Target page, context or browser has been closed" when the window goes
   away while it is still finishing the step (Debrief's popout.e2e.ts:62, run 8338). A step that fails while the page stays open, or
   that leaves it open, still fails. Debrief's pop-out specs use it; a selftest (`selftest/close-click.spec.ts`) reproduces the race.
+
+### CI's S3 compile cache: `paddock_net::stall_guard`, a localhost proxy that cuts a request the store does not answer, and `paddock_testkit::net::broken_server`
+- New `paddock_net::stall_guard` (std only, no TLS stack): `Guard` forwards the bytes of every connection to a store and closes one
+  that has had no byte for `Limits::stall`; a cut with the request unanswered, or a failed connect, opens a breaker so new connections
+  are refused for `Limits::cooldown` and a dead store costs one stall. The rules are pure (`Limits`, `Breaker`, `Watch`, `Verdict`,
+  every time passed in), the sockets are a thin adapter, errors are `StallGuardError`, at most `MAX_CONNECTIONS` connections at once.
+  First user: `./dev ci s3-guard`, started by `./dev ci setup-rust` in front of RustFS so sccache 0.19.0 (a fixed 60 s read timeout,
+  none for a write) goes on with its local disk when the store hangs (docs/research/2026-11-19-sccache.md section 8).
+- New `paddock_testkit::net::broken_server(Mode)`: a loopback server that breaks on purpose (`BlackHole`: accepts and never answers,
+  `Drip`, `CutMidResponse`, `Refuse`, and `Answer` as the healthy control), bounded in connections and body size, joined on drop.
+- CI's `setup-rust` gets the `s3` backend (the local disk first, RustFS behind it, switched on by the Gitea variable
+  `PADDOCK_CI_SCCACHE_BACKEND`; the key goes to the setup step only; conformance C141 checks that).
 
 ### `@decryp7/paddock-conformance`: C39, C53, C119-C125 and C129-C131 left the package (pair P3, ADR 0022 amendment 2026-11-19)
 - Breaking: these 12 checks have no JavaScript module any more, so `paddock-conformance --only C39` (and the others) is an `unknown

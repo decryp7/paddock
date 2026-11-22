@@ -28,6 +28,14 @@ on:
         description: "Also run the WebKit tests (the WebKit job, and an app's WebKit lines)"
         type: boolean
         default: false
+      os:
+        description: "Only this operating system's part of the plan (linux, windows or macos; empty: all). The member gate runs Linux at once on spare lanes and Windows after the train's reservation (src/plan_os.rs); a partial run never counts as a complete one"
+        required: false
+        default: ""
+      sccache_backend:
+        description: "The compile cache of this run's Rust jobs: local (the disk only), s3 (the local disk first, RustFS behind it) or empty (the default, s3). A one-run override for measurements, for example a run with local to compare hit rates."
+        required: false
+        default: ""
       since_run:
         description: "Rerun only what failed in this finished ci.yml run (its API id, as ./dev ci dispatch and ./dev wait --ci-run print it; not its run number): the failed jobs, and inside a job that failed only in nextest only its failed tests (./dev plan --since-run; ER-10). Passed jobs do not run; a full run before landing catches the rest."
         required: false
@@ -142,12 +150,14 @@ jobs:
           PLAN_WEBKIT: ${{ (inputs.webkit == true || inputs.webkit == 'true') && '1' || '' }}
           # The rerun reads the earlier run's jobs and logs through the API (tools/paddock-dev/src/plan_since.rs).
           PLAN_SINCE_RUN: ${{ github.event.inputs.since_run }}
+          # One operating system's part of the plan (the `os` input): the plan job narrows the legs and `rerun_jobs` to it.
+          PLAN_OS: ${{ github.event.inputs.os }}
           # The crate and paddock-dev legs when the plan names none of its own (every run but a rerun of their failures).
           PLAN_OS_LEGS: '[{"os":"ubuntu-latest"},{"os":"windows-latest"},{"os":"macos-latest"}]'
           # The scope of a rerun planner's reading of this run (plan_since::MODE_LINE). It is not the verdict: `./dev plan --ci` prints
           # the line `plan scope: {json}` (ADR 0113), what the run does against what a push to main does, and `./dev ci verdict`
           # compares them. No line of this workflow decides "complete".
-          PLAN_MODE_FULL: ${{ github.event_name == 'push' || inputs.app != '' || (github.event_name == 'workflow_dispatch' && github.event.inputs.base == '' && github.event.inputs.since_run == '') }}
+          PLAN_MODE_FULL: ${{ github.event_name == 'push' || inputs.app != '' || (github.event_name == 'workflow_dispatch' && github.event.inputs.base == '' && github.event.inputs.since_run == '' && github.event.inputs.os == '') }}
           # A reused run (the step above): the planner switches every job off and declares that it ran nothing; the reused run decides
           # the commit.
           PLAN_REUSE: ${{ steps.reuse.outputs.reuse }}
@@ -186,6 +196,9 @@ jobs:
 
       # Before the first ./dev of the job: it hashes and builds itself with the job's pinned compiler (C119).
       - uses: ./.gitea/actions/setup-rust
+        with:
+          sccache-s3-access-key-id: ${{ secrets.PADDOCK_SCCACHE_S3_ACCESS_KEY_ID }}
+          sccache-s3-secret-access-key: ${{ secrets.PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY }}
 
       - name: Every listen site is registered
         run: ./dev check ipc-endpoints
@@ -218,6 +231,9 @@ jobs:
       - env:
           PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
         uses: ./.gitea/actions/setup-rust
+        with:
+          sccache-s3-access-key-id: ${{ secrets.PADDOCK_SCCACHE_S3_ACCESS_KEY_ID }}
+          sccache-s3-secret-access-key: ${{ secrets.PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY }}
 
       - uses: ./.gitea/actions/node-caches
 
@@ -311,6 +327,9 @@ jobs:
       - env:
           PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
         uses: ./.gitea/actions/setup-rust
+        with:
+          sccache-s3-access-key-id: ${{ secrets.PADDOCK_SCCACHE_S3_ACCESS_KEY_ID }}
+          sccache-s3-secret-access-key: ${{ secrets.PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY }}
 
       # Playwright's browsers and Chrome for Testing are baked into the image (ci-image/): nothing is downloaded per job.
       - uses: ./.gitea/actions/node-caches
@@ -419,6 +438,9 @@ jobs:
 
       # Before the first ./dev of the job (the commands below are ./dev ci run steps).
       - uses: ./.gitea/actions/setup-rust
+        with:
+          sccache-s3-access-key-id: ${{ secrets.PADDOCK_SCCACHE_S3_ACCESS_KEY_ID }}
+          sccache-s3-secret-access-key: ${{ secrets.PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY }}
 
       - name: Install (yaml for C111, from the root package-lock.json)
         working-directory: .
@@ -503,6 +525,9 @@ jobs:
       - env:
           PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
         uses: ./.gitea/actions/setup-rust
+        with:
+          sccache-s3-access-key-id: ${{ secrets.PADDOCK_SCCACHE_S3_ACCESS_KEY_ID }}
+          sccache-s3-secret-access-key: ${{ secrets.PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY }}
 
       - env:
           PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
@@ -625,6 +650,8 @@ jobs:
       - uses: ./.gitea/actions/setup-rust
         with:
           components: clippy,rustfmt
+          sccache-s3-access-key-id: ${{ secrets.PADDOCK_SCCACHE_S3_ACCESS_KEY_ID }}
+          sccache-s3-secret-access-key: ${{ secrets.PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY }}
 
       # The engineering rules are optional input of the lint; say loudly when they are missing instead of skipping quietly.
       - name: Engineering rules present
@@ -738,6 +765,8 @@ jobs:
       - uses: ./.gitea/actions/setup-rust
         with:
           components: clippy,rustfmt
+          sccache-s3-access-key-id: ${{ secrets.PADDOCK_SCCACHE_S3_ACCESS_KEY_ID }}
+          sccache-s3-secret-access-key: ${{ secrets.PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY }}
 
       - name: Lockfile is current
         run: |
@@ -785,6 +814,9 @@ jobs:
       - env:
           PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
         uses: ./.gitea/actions/setup-rust
+        with:
+          sccache-s3-access-key-id: ${{ secrets.PADDOCK_SCCACHE_S3_ACCESS_KEY_ID }}
+          sccache-s3-secret-access-key: ${{ secrets.PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY }}
 
       - uses: ./.gitea/actions/node-caches
 
@@ -825,6 +857,9 @@ jobs:
       - env:
           PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
         uses: ./.gitea/actions/setup-rust
+        with:
+          sccache-s3-access-key-id: ${{ secrets.PADDOCK_SCCACHE_S3_ACCESS_KEY_ID }}
+          sccache-s3-secret-access-key: ${{ secrets.PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY }}
 
       - uses: ./.gitea/actions/node-caches
         with:
@@ -860,6 +895,9 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.gitea/actions/setup-rust
+        with:
+          sccache-s3-access-key-id: ${{ secrets.PADDOCK_SCCACHE_S3_ACCESS_KEY_ID }}
+          sccache-s3-secret-access-key: ${{ secrets.PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY }}
       - run: ./dev ci run crates fmt
 
       # cargo-hakari and cargo-machete come with the image (ci-image/).
@@ -999,10 +1037,12 @@ jobs:
           name: paddock-${{ github.job }}
 
       # Toolchain and sccache on every OS: sccache's local disk cache (host runners: the job slot's kept folder sccache-s<n>,
-      # containers: the /sccache mount).
+      # containers: the lane's own folder sccache-<lane> on the /sccache mount, never the mount itself; ADR 0111).
       - uses: ./.gitea/actions/setup-rust
         with:
           components: clippy
+          sccache-s3-access-key-id: ${{ secrets.PADDOCK_SCCACHE_S3_ACCESS_KEY_ID }}
+          sccache-s3-secret-access-key: ${{ secrets.PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY }}
 
       - name: Toolchain present
         run: |
@@ -1152,6 +1192,9 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
       - uses: ./.gitea/actions/setup-rust
+        with:
+          sccache-s3-access-key-id: ${{ secrets.PADDOCK_SCCACHE_S3_ACCESS_KEY_ID }}
+          sccache-s3-secret-access-key: ${{ secrets.PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY }}
       - name: Audit against the merge base
         run: |
           enforce=()
@@ -1310,6 +1353,8 @@ jobs:
       - uses: ./.gitea/actions/setup-rust
         with:
           components: clippy rustfmt
+          sccache-s3-access-key-id: ${{ secrets.PADDOCK_SCCACHE_S3_ACCESS_KEY_ID }}
+          sccache-s3-secret-access-key: ${{ secrets.PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY }}
 
       - uses: ./.gitea/actions/host-tools
         if: runner.os != 'Linux'
@@ -1484,6 +1529,8 @@ jobs:
       - uses: ./.gitea/actions/setup-rust
         with:
           components: clippy,rustfmt
+          sccache-s3-access-key-id: ${{ secrets.PADDOCK_SCCACHE_S3_ACCESS_KEY_ID }}
+          sccache-s3-secret-access-key: ${{ secrets.PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY }}
 
       - uses: ./.gitea/actions/host-tools
 

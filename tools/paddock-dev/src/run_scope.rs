@@ -93,6 +93,9 @@ pub struct Declared {
     pub workflow: String,
     /// A rerun of an earlier run's failures: never complete, whatever it ran.
     pub rerun: bool,
+    /// The one operating system an `os` run was narrowed to (`linux`, `windows`, `macos`; ci.yml's `os` input): such a run is never
+    /// the complete run of its commit, whatever it ran (ER-15: only a complete run counts).
+    pub os: Option<String>,
     /// What the run did.
     pub ran: Scope,
     /// What a push to main does for this tree.
@@ -100,17 +103,31 @@ pub struct Declared {
 }
 
 impl Declared {
+    /// This declaration for a run narrowed to one operating system (`None`: every OS).
+    pub fn with_os(self, os: Option<&str>) -> Declared {
+        Declared {
+            os: os.map(str::to_string),
+            ..self
+        }
+    }
+
     /// The scope line.
     pub fn line(&self) -> String {
-        let v = json!({"v": VERSION, "workflow": self.workflow, "rerun": self.rerun, "ran": self.ran.json(), "need": self.need.json()});
+        let mut v = json!({"v": VERSION, "workflow": self.workflow, "rerun": self.rerun, "ran": self.ran.json(), "need": self.need.json()});
+        if let Some(os) = &self.os {
+            v["os"] = json!(os);
+        }
         format!("{SCOPE_LINE}{v}")
     }
 
-    /// `Ok` when the run is complete: not a rerun, `need` is not empty (an empty need proves nothing), and `ran` covers `need`.
+    /// `Ok` when the run is complete: not a rerun, not one operating system's part (`os`), `need` is not empty (an empty need proves nothing), and `ran` covers `need`.
     /// `Err` names what is missing.
     pub fn complete(&self) -> Result<(), String> {
         if self.rerun {
             return Err("it is a rerun of an earlier run's failures".into());
+        }
+        if let Some(os) = &self.os {
+            return Err(format!("it ran one operating system's part only (the os input: {os}), not every runner"));
         }
         if self.need.jobs.is_empty() && self.need.apps.is_empty() {
             return Err("its declared need is empty (a scope that needs nothing proves nothing)".into());
@@ -147,6 +164,11 @@ fn parse(text: &str) -> Result<Declared, String> {
     Ok(Declared {
         workflow: v["workflow"].as_str().ok_or("the scope line has no workflow")?.to_string(),
         rerun: v["rerun"].as_bool().ok_or("the scope line has no rerun flag")?,
+        os: match &v["os"] {
+            Value::Null => None,
+            Value::String(s) if !s.is_empty() => Some(s.clone()),
+            other => return Err(format!("the scope line's os is {other}, not a name")),
+        },
         ran: Scope::parse(&v["ran"], "ran")?,
         need: Scope::parse(&v["need"], "need")?,
     })
@@ -302,6 +324,7 @@ pub fn ci_scope(ran: Scope, rerun: bool, need: Scope) -> Declared {
     Declared {
         workflow: "ci.yml".into(),
         rerun,
+        os: None,
         ran,
         need,
     }
@@ -335,6 +358,7 @@ pub fn app_scope(workflow: &str, app: &str, full: bool, run: bool, since_run: bo
     Declared {
         workflow: workflow.into(),
         rerun: since_run,
+        os: None,
         ran,
         need,
     }
@@ -406,6 +430,10 @@ pub fn with_first_run(text: &str, producer: &str, run: u64) -> Result<String, St
 #[cfg(test)]
 pub const TEST_COMPLETE: &str = "plan scope: {\"v\":1,\"workflow\":\"ci.yml\",\"rerun\":false,\"ran\":{\"jobs\":[\"conformance\"],\"engines\":[\"chromium\",\"webkit\"],\"apps\":[],\"whole\":true},\"need\":{\"jobs\":[\"conformance\"],\"engines\":[\"chromium\",\"webkit\"],\"apps\":[],\"whole\":true}}\n";
 
+/// The line of [`TEST_COMPLETE`] from an `os=linux` run: it covers its `need` here, but it is one operating system's part only.
+#[cfg(test)]
+pub const TEST_OS_ONLY: &str = "plan scope: {\"v\":1,\"workflow\":\"ci.yml\",\"rerun\":false,\"os\":\"linux\",\"ran\":{\"jobs\":[\"conformance\"],\"engines\":[\"chromium\",\"webkit\"],\"apps\":[],\"whole\":true},\"need\":{\"jobs\":[\"conformance\"],\"engines\":[\"chromium\",\"webkit\"],\"apps\":[],\"whole\":true}}\n";
+
 /// A ci.yml scope line of a run that missed one engine (WebKit): not complete.
 #[cfg(test)]
 pub const TEST_PARTIAL: &str = "plan scope: {\"v\":1,\"workflow\":\"ci.yml\",\"rerun\":false,\"ran\":{\"jobs\":[\"conformance\"],\"engines\":[\"chromium\"],\"apps\":[],\"whole\":true},\"need\":{\"jobs\":[\"conformance\"],\"engines\":[\"chromium\",\"webkit\"],\"apps\":[],\"whole\":true}}\n";
@@ -456,6 +484,25 @@ mod tests {
         assert!(d.need.jobs.contains("crate@macos-latest") && d.need.jobs.contains("ui"));
         assert_eq!(d.need.engines, ["chromium", "webkit"].map(String::from).into());
         assert!(d.need.apps.contains("dyno@ubuntu-latest:e2e-webkit"));
+    }
+
+    #[test]
+    fn an_os_only_run_is_never_complete_even_when_its_scope_covers_the_need() {
+        let d = declared(true, &[]).with_os(Some("linux"));
+        assert_eq!(d.ran, d.need, "the control: nothing but the os flag differs from a complete run");
+        let why = d.complete().unwrap_err();
+        assert!(why.contains("linux") && why.contains("one operating system"), "{why}");
+        // It survives the line: the reader sees the flag the producer wrote.
+        let read = read(&d.line()).unwrap().unwrap();
+        assert_eq!(read.os.as_deref(), Some("linux"));
+        assert!(read.complete().is_err());
+        // Positive control: the same run with no os is complete, and a line with a malformed os is refused.
+        assert_eq!(declared(true, &[]).complete(), Ok(()));
+        assert!(read_err(&TEST_OS_ONLY.replace("\"linux\"", "7")).contains("os"));
+    }
+
+    fn read_err(line: &str) -> String {
+        read(line).unwrap().unwrap_err()
     }
 
     #[test]
@@ -514,6 +561,7 @@ mod tests {
         let nothing = Declared {
             workflow: "ci.yml".into(),
             rerun: false,
+            os: None,
             ran: Scope {
                 whole: true,
                 ..Scope::default()

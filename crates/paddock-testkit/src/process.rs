@@ -91,7 +91,10 @@ const FIXED: &[(&str, &str)] = &[
 /// The private global git config: no background maintenance or gc, a test identity, every folder trusted (see the module).
 const GITCONFIG: &str = "[maintenance]\n\tauto = false\n[gc]\n\tauto = 0\n[user]\n\tname = Paddock Test\n\temail = test@example.invalid\n[safe]\n\tdirectory = *\n";
 
-/// The folders the private home and temp variables name (see [`TestCommand::private_dir`]).
+/// The folders the private home and temp variables name (see [`TestCommand::private_dir`]). This is the kept list of folder
+/// variables: each points into the command's private folder, and each folder exists before the child starts (but
+/// `GIT_CEILING_DIRECTORIES`, the machine's temp root), so a tool that asks the OS or the `dirs` crate for its home, config, data,
+/// cache or temp folder gets a test-owned one that is there, never the user's and never none (ER-14, ER-47; run 8529).
 const REDIRECTED: &[&str] = &[
     "GIT_CEILING_DIRECTORIES",
     "HOME",
@@ -282,6 +285,13 @@ impl TestCommand {
             ("TMP", tmp),
         ];
         for (k, v) in vars {
+            // Every folder the redirection names exists (except the ceiling, the machine's temp root): Windows resolves a known
+            // folder (`SHGetKnownFolderPath`, which the `directories` and `dirs` crates call with no flags) through this environment
+            // and fails for an absent folder unless `KF_FLAG_DONT_VERIFY` is passed, so a child that asks for its config folder
+            // got none and sccache panicked "Unable to get config directory" (run 8529). A failure surfaces as the child's own error.
+            if k != "GIT_CEILING_DIRECTORIES" {
+                let _ = std::fs::create_dir_all(&v);
+            }
             cmd.env(k, v);
         }
         for (k, v) in FIXED {

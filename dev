@@ -2,10 +2,10 @@
 # ./dev: runs paddock-dev, the Paddock developer and CI tool (ADR 0022). Works from any subfolder: it finds the repository
 # root with git and runs the tool in the folder you are in. The tool is a content-addressed binary: the hash of its inputs
 # (tools/paddock-dev/inputs.txt, from git, plus the compiler cargo will use) names it. Order: the per-user cache (on a CI runner the
-# kept mount, see below), the prebuilt download (R0b: on a CI runner by default, elsewhere with PADDOCK_DEV_DOWNLOAD=1), then a local build. A build also happens whenever an input has
+# job's own home, see below), the prebuilt download (R0b: on a CI runner by default, elsewhere with PADDOCK_DEV_DOWNLOAD=1), then a local build. A build also happens whenever an input has
 # uncommitted changes, because then HEAD's hash cannot describe it. `./dev --wrapper-hash` prints the hash and stops.
 # Environment: PADDOCK_DEV_TARGET_DIR (build folder, default tools/paddock-dev/target, which is ignored by git),
-# PADDOCK_DEV_HOME (cache, default ~/.paddock-dev), PADDOCK_CI_MOUNT (a CI runner's kept mount, default /sccache),
+# PADDOCK_DEV_HOME (cache, default ~/.paddock-dev),
 # PADDOCK_DEV_FRESH=1 (build from source in a fresh folder without a compiler wrapper, as release jobs do).
 # Download: PADDOCK_DEV_DOWNLOAD (1 on, 0 off; default on only when GITHUB_ACTIONS=true), PADDOCK_DEV_PACKAGES (the Gitea generic
 # package base, default https://dev.decryptology.net/api/packages/paddock-build-inputs/generic), PADDOCK_DEV_TOKEN (read token, else the job's
@@ -162,24 +162,21 @@ tool="$root/tools/paddock-dev"
   echo "dev: tools/paddock-dev is not in this checkout (a sparse checkout without it). Run: git sparse-checkout add tools" >&2
   exit 2
 }
-inputs=$(grep -v '^[[:space:]]*#' "$tool/inputs.txt" | grep -v '^[[:space:]]*$' | tr '\n' ' ')
+# One awk for the list (not grep, grep and tr: each start costs about 45 ms on the Windows runner, ER-20). A carriage return counts as
+# blank, as [[:space:]] did, where awk has no classes everywhere (mawk 1.3.3).
+inputs=$(awk '!/^[ \t\r]*(#|$)/ { printf "%s ", $0 }' "$tool/inputs.txt")
 
-# runs <file>: an executable that answers --version with some text (an empty or truncated file is not a tool; sh would run an
-# empty file as an empty script and call that success).
-runs() { [ -x "$1" ] && v=$("$1" --version 2>/dev/null) && [ -n "$v" ]; }
+# is_for_hash <file>: it is an executable that was built for this wrapper hash: `self hash` prints the hash embedded at build time. One
+# start is the whole probe (a second `--version` start cost a process per call, ER-20): an empty or truncated file prints nothing, so it
+# is not a tool (sh would run an empty file as an empty script and call that success), and a binary that a cache restored under a key
+# but that holds other bytes (a flipped byte, a tool of another hash) is rebuilt, never run (ER-33).
+is_for_hash() { [ -x "$1" ] && "$1" self hash 2>/dev/null | grep -q "^embedded $hash\$"; }
 
-# On a CI runner with a kept mount (a Linux container's /sccache, which the node-caches action also uses) the tool and its build
-# folder live there, so a plan job compiles the tool once per hash and not on every run. An explicit PADDOCK_DEV_HOME or
-# PADDOCK_DEV_TARGET_DIR wins.
-ci_mount="${PADDOCK_CI_MOUNT:-/sccache}"
-kept_target=
-if [ "${GITHUB_ACTIONS:-}" = true ] && [ -d "$ci_mount" ] && [ -w "$ci_mount" ]; then
-  if [ -z "${PADDOCK_DEV_HOME:-}" ]; then
-    PADDOCK_DEV_HOME="$ci_mount/paddock-dev"
-    # One build folder per hash (below): jobs of other hashes on the same mount never replace the binary this job just built.
-    [ -n "${PADDOCK_DEV_TARGET_DIR:-}" ] || kept_target=1
-  fi
-fi
+# No folder is shared between concurrent CI jobs (ADR 0111): on a CI runner the tool and its build folder live in the job's own home
+# (~/.paddock-dev in a Linux container, which dies with the job), never on the runner's kept /sccache mount, where sccache's LRU
+# evicted cargo's rlibs (run 8373) and another lane's build could replace the binary a job was running (ER-26's cousin, run 8027).
+# What is kept between jobs is the restored dev-tool cache (setup-rust's steps), keyed by this hash. An explicit
+# PADDOCK_DEV_HOME or PADDOCK_DEV_TARGET_DIR wins.
 home="${PADDOCK_DEV_HOME:-${HOME:-/nonexistent}/.paddock-dev}"
 # A run that never downloads (PADDOCK_DEV_DOWNLOAD=0: release and tag jobs) keeps its tools in its own folder, bin-source, which the
 # download path never writes: what it runs was built from source by a run that also did not download.
@@ -187,6 +184,17 @@ binroot=bin
 [ "${PADDOCK_DEV_DOWNLOAD:-}" = 0 ] && binroot=bin-source
 exe=
 case "$(uname -s)" in MINGW* | MSYS* | CYGWIN*) exe=.exe ;; esac
+
+# up <dir>: sets `parent` to the folder above <dir>, as dirname prints it, without starting a program (one start per folder level of
+# the walks below cost about 45 ms each on the Windows runner, plus a fork for the substitution; run 8546, ER-20): "/a" gives "/", and
+# "/" and a bare drive ("C:", what Git for Windows' "C:/Users" goes up to) give themselves, where a walk ends, as Rust's
+# Path::ancestors ends at "C:\" (dirname went on to ".", the current folder, which input_hash.rs never reads).
+up() {
+  case $1 in
+    */*) parent=${1%/*}; [ -n "$parent" ] || parent=/ ;;
+    *) parent=$1 ;;
+  esac
+}
 
 # The config files cargo reads for the tool, closest first, one per line: `config.toml` and `config` in every `.cargo` folder
 # from the tool's own up to the filesystem root, the other `*.toml` files of the tool's `.cargo` (what `include` pulls in, such
@@ -197,12 +205,12 @@ config_files() {
     for f in config.toml config; do
       if [ -f "$d/.cargo/$f" ]; then printf '%s\n' "$d/.cargo/$f"; fi
     done
-    if [ "$d" = "$tool" ]; then
+    if [ "$d" = "$tool" ] && [ -d "$d/.cargo" ]; then
       for f in $(cd "$d/.cargo" 2>/dev/null && LC_ALL=C ls ./*.toml 2>/dev/null); do
         case "$f" in ./config.toml) ;; *) printf '%s\n' "$d/.cargo/${f#./}" ;; esac
       done
     fi
-    parent=$(dirname "$d")
+    up "$d"
     [ "$parent" = "$d" ] && break
     d=$parent
   done
@@ -236,7 +244,7 @@ toolchain_file() {
     for f in rust-toolchain.toml rust-toolchain; do
       if [ -f "$d/$f" ]; then printf '%s\n' "$d/$f"; return 0; fi
     done
-    parent=$(dirname "$d")
+    up "$d"
     [ "$parent" = "$d" ] && return 1
     d=$parent
   done
@@ -306,16 +314,31 @@ if [ -z "${vv:-}" ]; then
   echo "::error::./dev: no Rust compiler runs here (${rustc_cmd:-rustc}), so the tool's hash cannot be computed and no cached paddock-dev is run in its place (it may lack this command). Install Rust with rustup (https://rustup.rs) or the toolchain rust-toolchain.toml pins (rustup toolchain install, in tools/paddock-dev), then run ./dev again; rustc was not found." >&2
   exit 2
 fi
-compiler=$(printf '%s\n' "$vv" | grep -E '^(commit-hash|release):' || true)
-if ! printf '%s\n' "$compiler" | grep -q '^release:'; then
+# The `-vV` lines that name the compiler (commit-hash and release, in their order), its host and its commit, read by the shell itself
+# (grep, sed and cut were a start each, about 45 ms on the Windows runner, ER-20).
+nl='
+'
+compiler='' host='' _commit='' _release='' _has_release=''
+while IFS= read -r _l; do
+  case $_l in commit-hash:* | release:*) compiler=${compiler:+$compiler$nl}$_l ;; esac
+  case $_l in release:*) _has_release=1 ;; esac
+  case $_l in
+    'host: '*) host=${host:+$host$nl}${_l#host: } ;;
+    'commit-hash: '*) _commit=${_commit:+$_commit$nl}${_l#commit-hash: } ;;
+    'release: '*) _release=${_release:+$_release$nl}${_l#release: } ;;
+  esac
+done <<EOF
+$vv
+EOF
+if [ -z "$_has_release" ]; then
   echo "dev: ${rustc_cmd:-rustc} -vV printed no release line, so it is not a Rust compiler this tool can identify." >&2
   exit 2
 fi
-host=$(printf '%s\n' "$vv" | sed -n 's/^host: //p')
-# The compiler's own key (its commit, else its release): a build folder is never shared between two compilers, because cargo
-# keeps rlibs of the old one beside the new ones and a half-replaced toolchain reads them as E0514 (run 8027, pitwall-mac).
-ckey=$(printf '%s\n' "$compiler" | sed -n 's/^commit-hash: //p' | cut -c1-12)
-[ -n "$ckey" ] || ckey=$(printf '%s\n' "$compiler" | sed -n 's/^release: //p' | tr -c 'A-Za-z0-9.\n' '_')
+# The compiler's own key (its commit's first 12 characters, else its release): a build folder is never shared between two compilers,
+# because cargo keeps rlibs of the old one beside the new ones and a half-replaced toolchain reads them as E0514 (run 8027, pitwall-mac).
+ckey=$_commit
+while [ "${#ckey}" -gt 12 ]; do ckey=${ckey%?}; done
+[ -n "$ckey" ] || ckey=$(printf '%s\n' "$_release" | tr -c 'A-Za-z0-9.\n' '_')
 
 # compiler_now: the `compiler` lines of the compiler as it is now (empty when it does not run), asked the way it was asked above.
 compiler_now() {
@@ -327,13 +350,13 @@ compiler_now() {
 # hashed either), and CI's build-folder action writes exactly such a ci.toml next to the tool in the middle of a job. Prints
 # nothing, so a trace never shows what the file holds.
 only_build_folder() {
-  tr -d '\r' <"$1" | awk '
-    { line = $0; sub(/^[ \t]+/, "", line) }
+  awk '
+    { line = $0; gsub(/\r/, "", line); sub(/^[ \t]+/, "", line) }
     line == "" || line ~ /^#/ { next }
     line ~ /^\[/ { sec = line; gsub(/[ \t]/, "", sec); if (sec != "[build]") bad = 1; next }
     (sec == "[build]" && line ~ /^target-dir[ \t]*=/) || (sec == "" && line ~ /^build\.target-dir[ \t]*=/) { next }
     { bad = 1 }
-    END { exit bad ? 1 : 0 }'
+    END { exit bad ? 1 : 0 }' "$1"
 }
 
 # What else changes the compiled code: the environment variables RUSTFLAGS, CARGO_ENCODED_RUSTFLAGS, CARGO_BUILD_*,
@@ -342,8 +365,9 @@ only_build_folder() {
 # name the build folder), the digest being git's blob id of the file with carriage returns dropped. A config file can hold
 # registry tokens, so it is streamed into git and only its digest is ever held in a variable (which `sh -x` would print).
 flags=$(
-  env | grep -E '^(RUSTFLAGS|CARGO_ENCODED_RUSTFLAGS|CARGO_BUILD_[A-Za-z0-9_]*|CARGO_PROFILE_[A-Za-z0-9_]*|CARGO_TARGET_[A-Za-z0-9_]*)=' |
-    grep -v -E '^(CARGO_TARGET_DIR|CARGO_BUILD_JOBS|CARGO_BUILD_TARGET_DIR|CARGO_BUILD_RUSTC)=' | grep -v '=$' | LC_ALL=C sort || true
+  # One awk for the three filters (ER-20).
+  env | awk '/^(RUSTFLAGS|CARGO_ENCODED_RUSTFLAGS|CARGO_BUILD_[A-Za-z0-9_]*|CARGO_PROFILE_[A-Za-z0-9_]*|CARGO_TARGET_[A-Za-z0-9_]*)=/ &&
+    !/^(CARGO_TARGET_DIR|CARGO_BUILD_JOBS|CARGO_BUILD_TARGET_DIR|CARGO_BUILD_RUSTC)=/ && !/=$/' | LC_ALL=C sort || true
   if [ -n "$configs" ]; then
     while IFS= read -r cfg; do
       only_build_folder "$cfg" && continue
@@ -361,9 +385,28 @@ dirty=$(git -C "$root" status --porcelain --untracked-files=all -- $inputs)
 
 # The inputs of the hash that are not the tracked files, one line, so a miss (a binary published under another hash) can be
 # explained from the logs alone (ER-27): the compiler release, the names (never the values) of the hashed environment variables,
-# and the digests of the cargo config files.
+# and the digests of the cargo config files. Built by the shell alone (it was eight programs and four forks per call, ER-20).
 explain_hash() {
-  echo "dev: hash $hash inputs: $(printf '%s' "$compiler" | tr '\n' ' ')| env: $(printf '%s\n' "$flags" | grep -v '^config-file ' | sed 's/=.*//' | tr '\n' ' ')| configs: $(printf '%s\n' "$configs" | tr '\n' ' ')| digests: $(printf '%s\n' "$flags" | sed -n 's/^config-file //p' | cut -c1-8 | tr '\n' ' ')" >&2
+  _ec='' _ee='' _ed='' _eg=''
+  while IFS= read -r _l; do _ec=${_ec:+$_ec }$_l; done <<EOF
+$compiler
+EOF
+  while IFS= read -r _l; do
+    case $_l in
+      'config-file '*)
+        _d=${_l#config-file }
+        while [ "${#_d}" -gt 8 ]; do _d=${_d%?}; done
+        _eg="$_eg$_d "
+        ;;
+      *) _ee="$_ee${_l%%=*} " ;;
+    esac
+  done <<EOF
+$flags
+EOF
+  while IFS= read -r _l; do _ed="$_ed$_l "; done <<EOF
+$configs
+EOF
+  echo "dev: hash $hash inputs: $_ec| env: $_ee| configs: $_ed| digests: $_eg" >&2
 }
 
 if [ "${1:-}" = "--wrapper-hash" ]; then
@@ -572,8 +615,8 @@ cache="$home/$binroot/$hash"
 # replaces it by an atomic rename, and a failed probe is no proof (a slow `--version` on a loaded machine), while another run may
 # have pinned this path (`--print-binary`) or be about to start it.
 stale=
-if [ -e "$cache/$name" ] && ! runs "$cache/$name"; then
-  echo "dev: the cached tool binary $cache/$name does not run; rebuilding it." >&2
+if [ -e "$cache/$name" ] && ! is_for_hash "$cache/$name"; then
+  echo "dev: the cached tool binary $cache/$name does not run or is not for hash $hash; rebuilding it." >&2
   stale=1
 fi
 if [ -n "$stale" ] || [ ! -x "$cache/$name" ]; then
@@ -582,10 +625,10 @@ if [ -n "$stale" ] || [ ! -x "$cache/$name" ]; then
   if [ -z "$fetched" ]; then
     # One build folder per compiler (never one that spans two): cargo's own lock on it serialises builds of one compiler, a
     # change to an input rebuilds only the tool's own crate (warm), and a build of another compiler cannot meet its rlibs (run 8027:
-    # E0514). It sits next to the cache in a kept mount, else inside PADDOCK_DEV_TARGET_DIR (or the tool's own target folder).
-    if [ -n "$kept_target" ]; then tbase=$home; else tbase=${PADDOCK_DEV_TARGET_DIR:-$tool/target}; fi
-    if [ -z "$kept_target" ] && [ "${GITHUB_ACTIONS:-}" = true ] && [ -z "${PADDOCK_DEV_HOME:-}" ]; then
-      echo "::notice::./dev builds paddock-dev in this job: the runner has no writable $ci_mount, so nothing is kept between runs (cold build, about a minute or two)." >&2
+    # E0514). It sits inside PADDOCK_DEV_TARGET_DIR (or the tool's own target folder).
+    tbase=${PADDOCK_DEV_TARGET_DIR:-$tool/target}
+    if [ "${GITHUB_ACTIONS:-}" = true ] && [ -z "${PADDOCK_DEV_HOME:-}" ]; then
+      echo "::notice::./dev builds paddock-dev in this job (cold build, about a minute or two): nothing here is kept between jobs; the dev-tool cache restores it by its hash." >&2
     fi
     target=$tbase/rustc-$ckey
     if ! mkdir -p "$target"; then
@@ -617,7 +660,7 @@ if [ -n "$stale" ] || [ ! -x "$cache/$name" ]; then
     if ! mv -f "$tmp" "$cache/$name"; then
       # Windows cannot replace a tool that another job is running: the same hash, so that tool is as good as ours.
       rm -f "$tmp"
-      if runs "$cache/$name" && "$cache/$name" self hash 2>/dev/null | grep -q "^embedded $hash\$"; then
+      if is_for_hash "$cache/$name"; then
         echo "dev: another run published paddock-dev $hash first; using it." >&2
       else
         echo "::error::./dev could not publish paddock-dev $hash into $cache. Close programs that use it or delete the folder, then run ./dev again." >&2

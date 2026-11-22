@@ -8,7 +8,14 @@ runs:
       run: |
         mkdir -p .nightly-green
         echo "${{ github.sha }}" > .nightly-green/sha
-    - uses: actions/cache/save@v4
+    - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      id: cache1
       with:
         path: .nightly-green
         key: nightly-green-${{ github.sha }}
+    - uses: ./.gitea/actions/cache-report
+      if: always() && steps.cache1.outcome != 'skipped'
+      with:
+        name: nightly-green
+        key: nightly-green-${{ github.sha }}
+        save-outcome: ${{ steps.cache1.outcome }}

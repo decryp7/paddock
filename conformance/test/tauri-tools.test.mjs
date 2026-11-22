@@ -406,7 +406,7 @@ test('the tauri-bundle action keeps the verified tools in actions/cache on branc
   const at = action.indexOf('id: tools');
   const cacheAt = action.indexOf('uses: actions/cache@');
   assert.ok(at > 0 && at < cacheAt && cacheAt < action.indexOf('tauri-bundle.sh'), 'key, cache, then the build');
-  assert.match(action, /id: tools\n\s+if: "runner\.os == 'Linux' && !startsWith\(github\.ref, 'refs\/tags\/'\)"\n/);
+  assert.match(action, /id: tools\n\s+if: "runner\.os == 'Linux' && !startsWith\(github\.ref, 'refs\/tags\/'\) && env\.PADDOCK_TAG_REHEARSAL != '1'"\n/);
   assert.match(action, /if: steps\.tools\.outputs\.key != ''\n/);
   assert.match(action, /path: \$\{\{ steps\.tools\.outputs\.dir \}\}\n\s+key: \$\{\{ steps\.tools\.outputs\.key \}\}/);
   const block = action.slice(action.indexOf('run: |\n', at) + 'run: |\n'.length, action.indexOf('    - uses: actions/cache@'));

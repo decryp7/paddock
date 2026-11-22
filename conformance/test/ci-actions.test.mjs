@@ -11,7 +11,7 @@ import { test } from 'node:test';
 import { executableIn, platformId } from '../ci/install-test-browser.mjs';
 import { isMain } from '../src/util/is-main.mjs';
 import { parseSteps } from '../src/util/workflows.mjs';
-import { conjuncts, expr, job as workflowJob, loadAction, loadWorkflow, needsOf, stepsOf } from './lib/workflow.mjs';
+import { conjuncts, expr, job as workflowJob, loadAction, loadWorkflow, needsOf, parseYaml, stepsOf } from './lib/workflow.mjs';
 import { PADDOCK } from './helpers.mjs';
 
 const ACTIONS = join(PADDOCK, '.gitea', 'actions');
@@ -75,7 +75,8 @@ test('every run step of an action names its shell; every script it runs exists; 
       assert.ok(existsSync(join(PADDOCK, m[1])), `${n}: ${m[1]} does not exist`);
     }
     const declared = declaredInputs(text);
-    for (const m of text.matchAll(/inputs\.([\w-]+)/g)) assert.ok(declared.includes(m[1]), `${n}: input ${m[1]} is used but not declared`);
+    // `github.event.inputs.x` is the dispatching workflow's input, not this action's.
+    for (const m of text.matchAll(/(?<!event\.)inputs\.([\w-]+)/g)) assert.ok(declared.includes(m[1]), `${n}: input ${m[1]} is used but not declared`);
   }
 });
 
@@ -145,14 +146,30 @@ test('the shared actions follow the repo rules: no AI attribution text, Gitea-co
   }
 });
 
-test('setup-rust declares the sccache backend inputs: local disk by default, Redis only when asked for', () => {
+test('no workflow, action or doc switches the compile cache by a repository variable any more (user decision 2026-11-21)', () => {
+  const files = spawnSync('git', ['ls-files', '.gitea', 'docs', 'tools', 'conformance', 'scripts', 'AGENTS.md'], { cwd: PADDOCK, encoding: 'utf8' }).stdout.split('\n').filter(Boolean);
+  assert.ok(files.length > 50, 'the file list was read');
+  const hits = files.filter((f) => !/\.test\.mjs$/.test(f) && /\.(ya?ml|md|rs|mjs|sh|tsv|toml)$/.test(f) && read(join(PADDOCK, f)).includes('PADDOCK_CI_SCCACHE_BACKEND'));
+  assert.deepEqual(hits, [], 'PADDOCK_CI_SCCACHE_BACKEND is gone: the default is s3, ci.yml\'s sccache_backend input overrides one run');
+  // The override stays, and only as ci.yml's dispatch input.
+  assert.match(read(join(WORKFLOWS, 'ci.yml')), /\n {6}sccache_backend:\n {8}description: /);
+});
+
+test('setup-rust declares the sccache backend inputs: s3 by default, Redis only when asked for', () => {
   const text = read(join(ACTIONS, 'setup-rust', 'action.yml'));
   const declared = declaredInputs(text);
-  for (const i of ['sccache-backend', 'sccache-redis-endpoint', 'sccache-redis-db']) assert.ok(declared.includes(i), `${i} is declared`);
-  assert.match(text, /sccache-backend:\n(?:.*\n)*?\s+default: local/);
+  for (const i of ['sccache-backend', 'sccache-redis-endpoint', 'sccache-redis-db', 'sccache-s3-access-key-id', 'sccache-s3-secret-access-key', 'sccache-s3-endpoint', 'sccache-s3-bucket']) assert.ok(declared.includes(i), `${i} is declared`);
+  // s3 is the default (user decision 2026-11-21); the dispatch input of ci.yml is the only one-run override, no Gitea variable.
+  assert.match(text, /sccache-backend:\n(?:.*\n)*?\s+default: \$\{\{ github\.event\.inputs\.sccache_backend \|\| 's3' \}\}/);
+  // The S3 guard asks the release condition itself (kit.sh release-path), never PADDOCK_DEV_DOWNLOAD, which the same step sets for a job with no read token.
+  assert.match(text, /echo "release=\$\(bash "[^"\n]*kit\.sh" release-path\)" >> "\$GITHUB_OUTPUT"/);
+  assert.match(text, /PADDOCK_CI_RELEASE: \$\{\{ steps\.kit\.outputs\.release \}\}/);
+  // The S3 key reaches the one step that runs ./dev ci setup-rust, never $GITHUB_ENV or another step (conformance C141 checks the callers).
+  assert.equal(text.split('PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY: ${{ inputs.sccache-s3-secret-access-key }}').length - 1, 1, 'one step receives the secret');
+  assert.doesNotMatch(text, /GITHUB_ENV.*S3_SECRET/);
   assert.match(text, /BACKEND: \$\{\{ inputs\.sccache-backend \}\}/);
   assert.match(text, /REDIS_ENDPOINT: \$\{\{ inputs\.sccache-redis-endpoint \}\}/);
-  assert.match(text, /sccache-backend must be auto, redis or local/);
+  assert.match(text, /sccache-backend must be auto, redis, local or s3/);
   assert.match(text, /sccache-backend is redis but sccache-redis-endpoint is empty/);
   const ci = read(join(WORKFLOWS, 'ci.yml'));
   assert.doesNotMatch(ci, /sccache-redis|SCCACHE_REDIS|sccache-backend/, 'Paddock CI no longer uses the shared Redis backend');
@@ -174,8 +191,10 @@ test('the sccache step uses the local disk: the runner home on a host, /sccache 
   assert.match(linux, /^SCCACHE_DIR=.*paddock-nomount\/sccache$/m, 'no mount: a folder of the container');
   const mount = mkdtempSync(join(tmpdir(), 'paddock-mount-'));
   const mounted = runSccacheStep({ RUNNER_OS: 'Linux', RUNNER_TEMP: nomount, PADDOCK_SCCACHE_MOUNT: mount });
-  assert.match(mounted, new RegExp(`^SCCACHE_DIR=${mount.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'm'), 'a writable mount is used');
-  assert.match(mounted, /^SCCACHE_CACHE_SIZE=20G$/m);
+  const escaped = mount.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  assert.match(mounted, new RegExp(`^SCCACHE_DIR=${escaped}/sccache-s1$`, 'm'), 'a writable mount gives the job its lane folder (ADR 0111)');
+  assert.doesNotMatch(mounted, new RegExp(`^SCCACHE_DIR=${escaped}$`, 'm'), 'never the mount itself: sccache evicts any file below its folder');
+  assert.match(mounted, /^SCCACHE_CACHE_SIZE=10G$/m, 'the 60 GB budget divided between the 6 lanes');
   const redis = runSccacheStep({ BACKEND: 'auto', REDIS_ENDPOINT: 'redis://h:6379', REDIS_DB: '' });
   assert.match(redis, /^SCCACHE_REDIS_ENDPOINT=redis:\/\/h:6379$/m);
   assert.match(redis, /^SCCACHE_REDIS_DB=5$/m);
@@ -198,7 +217,7 @@ function runToolchainStep(env, { toolchains = '', components = '', targets = '',
   const dir = mkdtempSync(join(tmpdir(), 'paddock-rustup-'));
   const text = read(join(ACTIONS, 'setup-rust', 'action.yml'));
   const at = text.indexOf('- name: Rust toolchain\n');
-  const block = text.slice(at, text.indexOf('    # Every Rust job gets', at));
+  const block = text.slice(at, text.indexOf('    # ./dev\'s own binary through the Actions cache', at));
   const body = block.slice(block.indexOf('run: |\n') + 'run: |\n'.length).split('\n').map((l) => l.slice(8)).join('\n');
   mkdirSync(join(dir, 'bin'));
   const calls = join(dir, 'calls');
@@ -1223,7 +1242,7 @@ function runNodeCaches(os, env = {}) {
   mkdirSync(join(root, 'ws', 'ui', '.angular', 'cache'), { recursive: true });
   writeFileSync(join(root, 'ws', 'ui', '.angular', 'cache', 'stale'), '');
   const r = spawnSync('bash', ['-e', '-o', 'pipefail', join(PADDOCK, 'conformance', 'ci', 'host', 'node-caches.sh')], {
-    env: { PATH: '/usr/bin:/bin', HOME: join(root, 'home'), RUNNER_OS: os, PADDOCK_CI_SLOT: 's1', GITHUB_WORKSPACE: join(root, 'ws'), GITHUB_ENV: join(root, 'github-env'), ANGULAR_DIR: 'ui', NAME: 'e2e-1', PADDOCK_CI_MOUNT: join(root, 'no-mount'), ...env },
+    env: { PATH: '/usr/bin:/bin', HOME: join(root, 'home'), RUNNER_OS: os, PADDOCK_CI_SLOT: 's1', GITHUB_WORKSPACE: join(root, 'ws'), GITHUB_ENV: join(root, 'github-env'), ANGULAR_DIR: 'ui', NAME: 'e2e-1', RUNNER_TEMP: join(root, 'temp'), PADDOCK_CI_MOUNT: join(root, 'no-mount'), ...env },
     encoding: 'utf8',
   });
   assert.equal(r.status, 0, r.stderr + r.stdout);
@@ -1231,19 +1250,29 @@ function runNodeCaches(os, env = {}) {
   return { root, stdout: r.stdout, written };
 }
 
-test('node-caches keeps the npm and Angular caches on the host or the container mount, never failing a job', () => {
+test('node-caches keeps the caches in the host slot\'s folders, or in a container\'s own job folders, and never writes the shared mount', () => {
   const host = runNodeCaches('macOS');
   const kept = join(host.root, 'home', '.paddock-ci');
   assert.match(host.written, new RegExp(`^npm_config_cache=${kept}/npm-s1$`, 'm'));
   assert.equal(realpathSync(join(host.root, 'ws', 'ui', '.angular', 'cache')), join(kept, 'angular', 'e2e-1-s1'), 'one Angular cache per job, shard and job slot');
+  // A container: the runner's old mount exists and is writable, and is not used (ADR 0111); actions/cache fills the job's own folders.
   const mount = join(host.root, 'mount');
   mkdirSync(mount);
   const linux = runNodeCaches('Linux', { PADDOCK_CI_MOUNT: mount });
-  assert.match(linux.written, /^npm_config_cache=.*\/mount\/npm$/m);
-  const bare = runNodeCaches('Linux');
-  assert.equal(bare.written, '');
-  assert.match(bare.stdout, /::notice::no \/sccache mount/);
+  assert.match(linux.written, new RegExp(`^npm_config_cache=${linux.root}/temp/node-caches/npm$`, 'm'));
+  assert.equal(realpathSync(join(linux.root, 'ws', 'ui', '.angular', 'cache')), join(linux.root, 'temp', 'node-caches', 'angular'));
+  assert.deepEqual(readdirSync(mount), [], 'nothing is written to the shared mount');
   assert.match(read(join(PADDOCK, 'ui', 'angular.json')), /"cache": \{ "enabled": true, "environment": "all" \}/, 'Angular keeps its cache in CI too');
+});
+
+test('the node-caches action keys npm by OS, Node and the lockfile and Angular by the lockfile and the sources, each cache pinned and summarised', () => {
+  const action = read(join(ACTIONS, 'node-caches', 'action.yml'));
+  assert.match(action, /key: npm-v1-\$\{\{ runner\.os \}\}-\$\{\{ runner\.arch \}\}-node-\$\{\{ steps\.node\.outputs\.version \}\}-\$\{\{ hashFiles\('package-lock\.json'\) \}\}\n\s+restore-keys:/, 'npm may fall back to an older cache');
+  const ng = (/id: angular-cache[\s\S]*?(?=\n    - name:)/.exec(action)?.[0] ?? '').replace(/^\s*#.*$/gm, '');
+  assert.match(ng, /hashFiles\('package-lock\.json'\)[\s\S]*hashFiles\(format\('\{0\}\/projects\/\*\*'/, 'the Angular key holds the lockfile and the sources');
+  assert.match(ng, /restore-keys: \|\n\s+ng-v1-[^\n]*hashFiles\('package-lock\.json'\) \}\}-(?:\n|$)/, 'the Angular cache is content-addressed: an entry of the same lockfile may be restored partly, one of another lockfile never');
+  assert.doesNotMatch(action.replace(/^(\s*#.*|description:.*)$/gm, ''), /\/sccache/, 'no use of the shared mount');
+  assert.match(action, /Cache summary[\s\S]*GITHUB_STEP_SUMMARY/, 'key and hit or miss in the job summary');
 });
 
 // Debrief's workflow (.gitea/workflows/debrief.yml) on the same speed rules as ci.yml (Paddock lessons, "Test and build speed").
@@ -2073,13 +2102,13 @@ test('build-jobs rejects nonsense and leading zeros (bash would read 010 as 8 an
 
 test('build-jobs logs on stderr, prints only the assignments, appends it to GITHUB_ENV, and probes this machine', () => {
   const r = buildJobs(MAC);
-  assert.equal(r.stdout, 'CARGO_BUILD_JOBS=4\nNEXTEST_TEST_THREADS=8\n');
+  assert.equal(r.stdout, 'CARGO_BUILD_JOBS=4\nNEXTEST_TEST_THREADS=8\nPADDOCK_E2E_WORKERS=4\nVITEST_MAX_WORKERS=4\n');
   assert.match(r.stderr, /^build-jobs: this host: 14 cores, 65536 MB of RAM/m);
   const dir = mkdtempSync(join(tmpdir(), 'build-jobs-'));
   const envFile = join(dir, 'env');
   writeFileSync(envFile, '');
   assert.equal(buildJobs({ ...MAC, GITHUB_ENV: envFile }).status, 0);
-  assert.equal(read(envFile), 'CARGO_BUILD_JOBS=4\nNEXTEST_TEST_THREADS=8\n');
+  assert.equal(read(envFile), 'CARGO_BUILD_JOBS=4\nNEXTEST_TEST_THREADS=8\nPADDOCK_E2E_WORKERS=4\nVITEST_MAX_WORKERS=4\n');
   rmSync(dir, { recursive: true, force: true });
   // The real probes count something on this machine.
   const real = buildJobs({ RUNNER_OS: 'macOS', PADDOCK_CI_RESERVED_CORES: '0' });
@@ -2123,8 +2152,27 @@ test('build-jobs gives nextest the class\'s measured test threads on the shared 
   const envFile = join(dir, 'env');
   writeFileSync(envFile, '');
   assert.equal(buildJobs({ ...MAC, GITHUB_ENV: envFile }).status, 0);
-  assert.equal(read(envFile), 'CARGO_BUILD_JOBS=4\nNEXTEST_TEST_THREADS=8\n');
+  assert.equal(read(envFile), 'CARGO_BUILD_JOBS=4\nNEXTEST_TEST_THREADS=8\nPADDOCK_E2E_WORKERS=4\nVITEST_MAX_WORKERS=4\n');
   rmSync(dir, { recursive: true, force: true });
+});
+
+// ER-48: Playwright's and Vitest's workers each use a core, so lanes x workers stay within the host's cores. PADDOCK_E2E_WORKERS is
+// read by e2eWorkers (ui/projects/paddock-e2e/src/env.ts); Vitest reads VITEST_MAX_WORKERS itself. No class exception: the macOS 8
+// threads are nextest's, measured, and not carried over to browsers.
+const workersOf = (r, name) => new RegExp(`^${name}=(\\d+)$`, 'm').exec(r.stdout)?.[1];
+test('build-jobs gives the e2e and unit-test workers the job\'s core share, the runner\'s number winning, and warns when lanes x workers exceed the cores', () => {
+  const r = buildJobs(MAC);
+  assert.equal(workersOf(r, 'PADDOCK_E2E_WORKERS'), '4', '(14 - 2) / 3, not the 8 threads of nextest');
+  assert.equal(workersOf(r, 'VITEST_MAX_WORKERS'), '4');
+  assert.equal(workersOf(buildJobs(LINUX), 'VITEST_MAX_WORKERS'), '5');
+  assert.equal(workersOf(buildJobs(MAC, ['2']), 'PADDOCK_E2E_WORKERS'), '2', 'a split job halves it');
+  assert.equal(workersOf(buildJobs(MAC, ['16']), 'PADDOCK_E2E_WORKERS'), '1', 'never below one');
+  assert.equal(workersOf(buildJobs({ ...LINUX, PADDOCK_CI_TEST_WORKERS: '3' }), 'PADDOCK_E2E_WORKERS'), '3');
+  assert.doesNotMatch(buildJobs({ ...LINUX, PADDOCK_CI_TEST_WORKERS: '3' }).stdout, /::warning::/);
+  // Positive control: 6 jobs x 8 workers on 30 cores.
+  const over = buildJobs({ ...LINUX, PADDOCK_CI_TEST_WORKERS: '8' });
+  assert.match(over.stdout, /::warning::build-jobs: PADDOCK_CI_TEST_WORKERS is 8 and the host runs 6 jobs at once: 48 workers on 30 cores/);
+  assert.notEqual(buildJobs({ ...LINUX, PADDOCK_CI_TEST_WORKERS: '0' }).status, 0);
 });
 
 test('no nextest profile says a CI job has its host to itself: the job\'s share comes from build-jobs', () => {
@@ -2460,4 +2508,131 @@ test('a workflow that runs runner-wait runs it in a first job that every macOS o
     }
   }
   assert.ok(users.includes('ci.yml') && users.includes('debrief.yml') && users.includes('dyno-release.yml'), `the train workflows wait in their first job: ${users}`);
+});
+
+/** The workflow, action and template files under .gitea, each with its text. */
+function giteaYaml() {
+  const out = [];
+  const walk = (dir) => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const p = join(dir, e.name);
+      if (e.isDirectory()) walk(p);
+      else if (/\.ya?ml$/.test(e.name)) out.push([relative(PADDOCK, p), read(p)]);
+    }
+  };
+  walk(join(PADDOCK, '.gitea'));
+  return out;
+}
+
+// ER-26: a floating `@v4` follows whatever the tag points at; the digest is what was verified (v4.3.0, 2026-11-20).
+const CACHE_USE = /^\s*(?:-\s+)?uses:\s*actions\/cache(?:\/restore|\/save)?@(\S+)(.*)$/gm;
+test('every actions/cache use under .gitea is pinned to the verified digest, with its version in a comment', () => {
+  let uses = 0;
+  for (const [file, text] of giteaYaml()) {
+    for (const m of text.matchAll(CACHE_USE)) {
+      uses++;
+      assert.equal(m[1], '0057852bfaa89a56745cba8c7296529d2fc39830', `${file}: actions/cache is pinned to the v4.3.0 digest, not '${m[1]}'`);
+      assert.match(m[2], /#\s*v4\.3\.0\s*$/, `${file}: the version is in a comment`);
+    }
+  }
+  assert.ok(uses >= 25, `the pattern saw ${uses} uses: a pattern that sees none passes on nothing (ER-12)`);
+  // Positive control: the pattern does see a floating tag.
+  assert.equal([...'      - uses: actions/cache/save@v4\n'.matchAll(CACHE_USE)][0][1], 'v4');
+});
+
+test('no setup action or workflow uses the shared /sccache mount as a writable folder of its own, except the lanes setup-rust makes below it', () => {
+  const offenders = [];
+  for (const [file, text] of giteaYaml()) {
+    const code = text.split('\n').filter((l) => !/^\s*(#|description:)/.test(l)).join('\n');
+    if (/["'\s=]\/sccache(?!-)[\w/.-]*/.test(code) && file !== '.gitea/actions/setup-rust/action.yml') offenders.push(file);
+  }
+  assert.deepEqual(offenders, [], 'ADR 0111: shared state goes through a keyed cache or an artifact');
+});
+
+// ADR 0115, run 8576: setup-rust's build-jobs step ran ./dev (which builds the tool from source when it is missing) before the tool
+// cache's restore, so 42 of 44 jobs rebuilt it in 130-176 s and the cache was never saved. Read through the workflow accessor
+// (ER-42), not by grepping the files: the first step that runs ./dev is after the step that restores the tool.
+const runsDev = (step) => typeof step.run === 'string' && /kit\.sh"? (?:build-jobs|host|isolation|build-env)|\/dev"? ci |\.\/dev ci /.test(step.run);
+const usesToolCache = (step) => step.uses === './.gitea/actions/dev-tool-cache';
+
+/** The index of the first step that runs ./dev and of the step that restores the tool, in an action's steps. */
+function devOrder(steps) {
+  return { firstDev: steps.findIndex(runsDev), restore: steps.findIndex(usesToolCache) };
+}
+
+for (const name of ['setup-rust', 'node-caches', 'build-jobs']) {
+  test(`${name}: the dev tool cache is restored before the first ./dev call`, () => {
+    const { firstDev, restore } = devOrder(stepsOf(loadAction(name)));
+    assert.ok(firstDev >= 0, `${name} calls ./dev in a step (the finder sees it)`);
+    assert.ok(restore >= 0, `${name} uses the dev-tool-cache action`);
+    assert.ok(restore < firstDev, `${name}: the tool cache (step ${restore}) comes before its first ./dev call (step ${firstDev})`);
+  });
+}
+
+test('the order check sees a ./dev call before the restore (positive control)', () => {
+  const bad = [{ run: 'bash conformance/ci/kit.sh build-jobs' }, { uses: './.gitea/actions/dev-tool-cache' }];
+  const { firstDev, restore } = devOrder(bad);
+  assert.ok(restore > firstDev, 'the finder puts the ./dev call first, so the test above would fail');
+  assert.equal(devOrder([{ uses: './.gitea/actions/dev-tool-cache' }, ...bad.slice(0, 1)]).restore, 0);
+});
+
+test('the dev-tool-cache action restores, verifies, saves and reports from the restore step\'s own outputs', () => {
+  const steps = stepsOf(loadAction('dev-tool-cache'));
+  const text = JSON.stringify(steps);
+  const verify = steps.find((s) => s.id === 'verify');
+  assert.match(verify.run, /steps\.restore\.outputs\.cache-hit/);
+  assert.match(verify.run, /steps\.restore\.outputs\.cache-matched-key/);
+  assert.match(steps.find((s) => s.id === 'save').if, /steps\.verify\.outputs\.save == 'true'/);
+  assert.match(text, /PADDOCK_DEV_TOOL_CACHE_DONE/, 'a later use in the same job does nothing');
+});
+
+// ADR 0115: every `actions/cache` step is followed, in its own job, by a step that reports it (the cache-report action, or for the
+// workflow template that runs in other repositories, a step named "Cache report" / "Cache save report" that prints the same line).
+// The step reads the cache step's id, so the report is of its own outputs. Read through the YAML reader (ER-42).
+const isCacheStep = (st) => /^actions\/cache(?:\/(?:save|restore))?@/.test(st.uses ?? '');
+const reports = (st, id) => (st.uses === './.gitea/actions/cache-report' || /^Cache (?:save )?report$/.test(st.name ?? '')) && JSON.stringify(st).includes(`steps.${id}.`);
+
+/** Every list of steps of the repository's workflows, templates and actions: [file, steps]. */
+function stepLists() {
+  const out = [];
+  const dirs = [[WORKFLOWS, 'jobs'], [join(PADDOCK, '.gitea', 'workflow-templates'), 'jobs']];
+  for (const [dir] of dirs) {
+    for (const f of readdirSync(dir).filter((x) => /\.ya?ml$/.test(x))) {
+      const doc = parseYaml(read(join(dir, f)));
+      for (const [id, j] of Object.entries(doc.jobs ?? {})) out.push([`${basename(dir)}/${f}:${id}`, stepsOf(j)]);
+    }
+  }
+  for (const n of names) out.push([`actions/${n}`, stepsOf(loadAction(n))]);
+  return out;
+}
+
+/** The cache steps that no step right after them reports: `file: id-or-index`. */
+function unreportedCacheSteps(lists) {
+  const bad = [];
+  for (const [file, steps] of lists) {
+    steps.forEach((st, i) => {
+      if (!isCacheStep(st)) return;
+      const next = steps[i + 1];
+      if (!st.id || !next || !reports(next, st.id)) bad.push(`${file}: step ${i + 1} (${st.id ?? 'no id'})`);
+    });
+  }
+  return bad;
+}
+
+test('every actions/cache step is reported by the step after it, from its own id (the list of unreported steps is empty)', () => {
+  const lists = stepLists();
+  const total = lists.reduce((n, [, steps]) => n + steps.filter(isCacheStep).length, 0);
+  assert.ok(total >= 30, `the finder sees the cache steps (${total})`);
+  // dev-tool-cache and node-caches report in their own summary steps (conformance/test/dev-tool-cache.test.mjs and above).
+  const own = ['actions/dev-tool-cache', 'actions/node-caches'];
+  const bad = unreportedCacheSteps(lists.filter(([f]) => !own.includes(f)));
+  assert.deepEqual(bad, [], 'put the cache-report action right after the cache step (ADR 0115)');
+});
+
+test('the unreported-step finder sees a cache step with no report after it (positive control)', () => {
+  const steps = [{ id: 'c', uses: 'actions/cache@abc' }, { run: 'echo' }];
+  assert.equal(unreportedCacheSteps([['x', steps]]).length, 1);
+  assert.equal(unreportedCacheSteps([['x', [{ uses: 'actions/cache/save@abc' }, { uses: './.gitea/actions/cache-report' }]]]).length, 1, 'a step with no id cannot be reported');
+  const ok = [steps[0], { uses: './.gitea/actions/cache-report', with: { hit: '${{ steps.c.outputs.cache-hit }}' } }];
+  assert.deepEqual(unreportedCacheSteps([['x', ok]]), []);
 });

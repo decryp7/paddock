@@ -12,6 +12,9 @@ import { MockProblemsBackend } from './mock/mock-problems-backend';
 import { PROBLEMS_REFRESH_HIDDEN_MS, PROBLEMS_REFRESH_VISIBLE_MS, ProblemsStore } from './problems.store';
 import { RefreshThrottle, ThrottleClock } from './refresh-throttle';
 
+// The real clock back after every test, so a test that times out cannot leave fake timers for the next one (ER-12, C154).
+afterEach(() => vi.useRealTimers());
+
 /** A clock the test moves by hand. */
 class ManualClock implements ThrottleClock {
   t = 0;

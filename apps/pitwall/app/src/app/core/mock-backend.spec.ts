@@ -6,6 +6,9 @@ import { MockBackend } from './mock-backend';
 import { BROWSER_VERSION } from '../shell/engines';
 import { demoEngines, demoLimitStatuses, demoFit, demoHistory, demoRepo, demoRequests, demoSearch, presetMemory, prng, GiB } from './mock-data';
 
+// The real clock back after every test, so a test that times out cannot leave fake timers for the next one (ER-12, C154).
+afterEach(() => vi.useRealTimers());
+
 const NOW = new Date(2026, 9, 22, 14, 30).getTime();
 
 describe('MockBackend', () => {
@@ -133,9 +136,23 @@ describe('MockBackend', () => {
     await expect(mock.saveSettings({ ...s, server: { ...s.server, port: 80 } })).rejects.toMatchObject({ code: 'badRequest' });
   });
 
+  it('deletes many models in one call, one result each (a loaded or unknown one fails alone)', async () => {
+    const mock = new MockBackend({ now: clock });
+    const results = await mock.deleteModels(['qwen3.5-9b-q4_k_m', 'qwen3.5-2b-q8_0', 'nope']);
+    expect(results).toEqual([
+      { err: { code: 'busy', message: 'Unload the model before deleting it.', retryable: false } },
+      { ok: null },
+      { err: { code: 'notFound', message: 'No model nope.', retryable: false } },
+    ]);
+    expect((await mock.localModels()).length).toBe(7);
+    expect(await mock.deleteModels([])).toEqual([]);
+  });
+
   it('manages the model library', async () => {
     const mock = new MockBackend({ now: clock });
-    await expect(mock.deleteModel('qwen3.5-9b-q4_k_m')).rejects.toMatchObject({ code: 'conflict' });
+    // One code for the single and the bulk delete of a loaded model.
+    await expect(mock.deleteModel('qwen3.5-9b-q4_k_m')).rejects.toMatchObject({ code: 'busy', message: 'Unload the model before deleting it.' });
+    expect(await mock.deleteModels(['qwen3.5-9b-q4_k_m'])).toEqual([{ err: { code: 'busy', message: 'Unload the model before deleting it.', retryable: false } }]);
     await mock.deleteModel('qwen3.5-2b-q8_0');
     expect((await mock.localModels()).length).toBe(7);
     await mock.loadModel('gemma-4-12b-it-q4_k_m');

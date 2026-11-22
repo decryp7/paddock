@@ -7,6 +7,9 @@ import { EMPTY_QUERY, loadPrefs, savePrefs, WorkspaceStore } from './workspace.s
 import { at } from '../../testing/must';
 import { mockJobs } from '../jobs/mock-jobs';
 
+// The real clock back after every test, so a test that times out cannot leave fake timers for the next one (ER-12, C154).
+afterEach(() => vi.useRealTimers());
+
 const fakePlatform = {
   failDialog: false,
   dropHandler: null as ((paths: string[]) => void) | null,

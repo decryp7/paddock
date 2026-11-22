@@ -5,6 +5,9 @@ import { RegisterLauncher } from '../../layout/register-launcher';
 import { appProviders, byText, flush, makeMock, settle, text } from '../../../testing/test-helpers';
 import { DashboardPage } from './dashboard-page';
 
+// The real clock back after every test, so a test that times out cannot leave fake timers for the next one (ER-12, C154).
+afterEach(() => vi.useRealTimers());
+
 describe('DashboardPage', () => {
   let mock: MockBackend;
   const register = { open: vi.fn() };

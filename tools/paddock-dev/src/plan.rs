@@ -210,6 +210,10 @@ enum Marks {
     Reviewed,
 }
 
+/// The reason the plan gives for the conformance project that is in every plan (user decision 2026-11-12); a reader that asks whether
+/// a change reaches conformance itself looks for any other reason (ER-22: one copy of the text).
+pub const CONFORMANCE_ALWAYS: &str = "conformance always runs";
+
 /// Whether `path` is documentation (it marks only the link check unless it is a declared input).
 pub fn is_docs(path: &str) -> bool {
     DOCS.iter().any(|r| r.is_match(path))
@@ -246,6 +250,8 @@ static DOC_INPUTS: LazyLock<Vec<(Regex, Marks)>> = LazyLock::new(|| {
             Marks::Owner,
         ),
         (re(r"^docs/rules\.md$"), Marks::Projects(&["conformance", "tools"])),
+        // Read by conformance C145 (the lessons file's format) and by the merge driver's test.
+        (re(r"^docs/lessons\.md$"), Marks::Projects(&["conformance", "tools"])),
         (re(r"^docs/blocks/"), Marks::Projects(&["conformance", "tools"])),
         (re(r"^docs/(design-guide|benchmarks)\.md$"), Marks::Projects(&["conformance"])),
         (re(r"^docs/wiki/"), Marks::Projects(&["tools"])),
@@ -756,7 +762,7 @@ pub fn affected(files: &[String], graph: &RepoGraph, opts: &Options) -> Result<V
     }
 
     // The conformance job is in every plan, whatever changed (user decision 2026-11-12); as `affected` of the retired scripts/affected.mjs did.
-    st.mark(Some("conformance".to_string()), "conformance always runs".to_string());
+    st.mark(Some("conformance".to_string()), CONFORMANCE_ALWAYS.to_string());
     let has = |p: &str| st.why.contains_key(p);
     let mut packages: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for d in &crates {
