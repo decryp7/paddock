@@ -1,7 +1,9 @@
 # 0117. The repository graph is the one model of the repository, and every plan is a query on it
 
-- Status: Proposed 2026-11-23. The direction is the user's (2026-11-23, through the coordinator: "fix the graph first, and hold all
-  trains until it lands"); the decisions below (D1 to D10) are open.
+- Status: Accepted 2026-11-23 (the user, through the coordinator): D1 (a), all seven work packages now; D6 (a); D7 (a); D2, D3,
+  D4 (b), D5 (a), D8 (a), D9 (a), D10 (a) as recommended; and D11 (the landing run tests the train's diff from main's tested head,
+  WP-8). One independent review of this ADR runs beside the build; a P1 stops the build. The direction is the user's ("fix the
+  graph first, and hold all trains until it lands").
 - Date: 2026-11-23
 - Related: ER-20 (bulk work, spawn budgets), ER-21 (a recurring class gets a redesign), ER-22 (share first; a value another
   module decides is read from it), ER-15 and ER-49 (a smoke or partial run is never complete; test a commit once), ER-37 (common
@@ -20,7 +22,8 @@
 - Evidence heads (ADR 0091), read 2026-11-23 and again before commit: `origin/main` = `b3c254a2d`, `origin/train/2026-11-22-20` =
   `803aed12d` (this branch's base), `origin/fix/run-scope-reuse-p2` = `bab7a4a97` (ADR 0113), `origin/feat/os-scoped-tests` =
   `c61339b9f` (`hostTests`, C155), `origin/feat/infra-only-smoke` = `29864b700` (the ADR 0113 amendment, docs only; its planner work
-  stopped unbuilt).
+  stopped unbuilt), `origin/docs/ci-run-audit` = `365d15bb7` (the gap list G1 to G14, `docs/research/ci-run-audit-2026-11-23.md`
+  section 3), `origin/fix/plan-actions-readme-not-global` = `3461629bd` (the README fix with its red-first test).
 
 ## Context: the class
 
@@ -166,11 +169,33 @@ The planner's recorded answers (`tools/paddock-dev/tests/golden`: 29 cases, 34 c
 ci-run tables) stay the regression net. The new planner runs beside the old one (`./dev plan --compare`) over every golden case
 and over the last 200 commits of `main`; every difference is either in this list or a defect:
 
-1. `.gitea/**/*.md`: docs, not global.
+1. `.gitea/**/*.md`: docs, not global. The test of `3461629bd` (`a_markdown_file_under_gitea_actions_marks_only_conformance`, with
+   its positive control: a real action file with no user still marks everything) is carried over as a golden case.
 2. A plumbing-only reach: smoke instead of full; `--app <app>` answers `false` (no installers).
 3. A test-only reach: affected test targets instead of full.
 4. `conformance/src`, `conformance/bin`: no app marks.
 5. OS legs from derivation instead of `hostTests` (only where C155 already reports the list wrong).
+6. The audit's gaps (below): each closed gap changes the goldens it covers, and only those.
+7. A train dispatch with `base` (WP-8): the landing run plans the train's diff, not everything.
+
+The audit's gap list (`docs/research/ci-run-audit-2026-11-23.md` §3), each mapped to the work package that closes it:
+
+| Gap | What over-marks today | Closed by | As |
+|---|---|---|---|
+| G1 | a train dispatch has no base, so `choose_base` plans everything (runs 8610, 8635, 8647) | WP-8 | the dispatch passes `base` = main's tested head; ADR 0113's `need` for that run and for a push = the run's own plan |
+| G2 | `.gitattributes` is a whole-file global | WP-1 | an attribute-aware extractor: only `text`, `eol`, `binary`, `filter`, `diff` changes reach the owners of the paths they match; `merge=` and comments reach conformance only (D4) |
+| G3 | an unknown root file (`spikes/*/Cargo.lock`) marks everything | WP-1 | owners: every root folder is declared (owned or "not built"); an unowned file fails the graph's check |
+| G4 | a mention is a use (the plan job's grep naming `nightly.yml`) | WP-2 | `uses` and `runs` edges come only from `uses:` and a step's invoked program and script arguments, never from a path inside other shell text; the "C100 stays wired" grep moves to the conformance job |
+| G5 | a ci.yml header or plan-job change is global | WP-2 | the plan job's env and step text reach paddock-dev's planner tests and goldens; a changed output name reaches the jobs that read it |
+| G6 | a shared action or `conformance/ci` script marks every job that uses it, kind all | WP-3 | `reach = plumbing` → the declared smoke set |
+| G7 | `.gitea/actions/README.md` is global | WP-1 | a `doc` node (difference 1) |
+| G8 | any `conformance/` file (even `reserved/*`) marks every app, kind all | WP-1 | conformance reaches the conformance job and each app's conformance step only; `conformance/reserved/*` reaches nothing |
+| G9 | an npm dependent ending in `src-tauri` gets kind all | WP-1 | an npm edge gives the UI half; a Rust half only from a Cargo edge or the Tauri config |
+| G10 | `paddock-e2e` env and guard files mark every app's UI half | WP-3 | kept, through `imports` edges (every Playwright config imports them) |
+| G11 | tests run per workspace, not per reached package, except on member runs | WP-3 | `selection` names the reached packages (`-p`) on every run kind; whole workspaces only on the nightly and tags |
+| G12 | no test-level graph | WP-3 | `test-file` nodes and `imports` edges |
+| G13 | `docs/lessons.md` marks conformance and tools | WP-1 | kept as a declared input (C145 reads it) |
+| G14 | a push's base is the last green push run, so a red push widens the next one | WP-8 | the base reader (the ADR 0113 verdict reader, the one place) accepts the train's complete run on the same tree |
 
 The regenerated goldens (ER-40, with their generators) carry exactly these differences; review reads the diff of the goldens.
 The old rule tables are deleted in the last work package, not kept as a fallback.
@@ -232,7 +257,12 @@ file reads batched. Extractors run in parallel over files (rayon, cores minus on
 | WP-5 | `--compare` over the goldens and 200 commits, the listed differences, regenerated goldens, old rule tables deleted | 1.0 |
 | WP-6 | OS derivation (C155 detectors as extractors), `hostTests` cut to exceptions | 1.0 |
 | WP-7 | Generators as nodes (`due`, stale after merge); `input_hash` for the 0116 draft | 0.5 |
-| | **Total** | **6.3** (the user was told about 4 to 6) |
+| WP-8 | The landing run tests the train's diff (D11): `./dev ci dispatch` passes `base` = main's tested head for a train, `choose_base` uses it, ADR 0113's `need` for that run and for a push = its own plan, the base reader accepts the train's complete run (G1, G14) | 1.0 |
+| | Gaps folded into WP-1 to WP-3 (G2 attribute diff, G4 mention vs use, G5 plan-job inputs, G11 per-package runs) | 0.7 |
+| | **Total** | **8.0** (accepted scope 6.3; the user was told about 4 to 6) |
+
+The total grew 27 % over the accepted 6.3 days with WP-8 and the gaps (more than ER-37's 20 %): the coordinator takes the new
+figure back to the user; WP-1 starts now under the accepted scope.
 
 Common-practice cost, for the decision: the five behaviours as five more planner rules (the ADR 0113 amendment's design) cost about
 3 to 4 days and leave the class open; WP-1 to WP-5 alone (no OS derivation, no generators) are 4.8 days and close it for planning.
@@ -263,6 +293,9 @@ Common-practice cost, for the decision: the five behaviours as five more planner
   (b) Language servers (rust-analyzer, tsserver) queried by the planner. (c) Text scans only (relative imports, `cfg` lines).
   *Recommended: (a)*, with (c) as the measured fallback; (b) is not common practice for build graphs and is too slow and stateful
   for CI.
+- **D11. The landing run's base** (user, 2026-11-23, from the CI audit). (a) The landing run tests the train's diff from main's
+  tested head and the push to main reuses that run, as GitHub merge queues and GitLab merge trains do. (b) The landing run tests
+  the whole tree (today, ADR 0113). *Chosen: (a)*; the nightly and tags stay whole-tree on every OS.
 - **D9. Trains.** (a) Hold all trains until WP-1 to WP-5 land (the user's instruction). (b) Let release-only trains through. *As
   instructed: (a)*.
 
