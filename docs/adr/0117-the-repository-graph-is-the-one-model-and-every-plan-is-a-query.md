@@ -22,7 +22,8 @@
 - Number: 0117. Searched 2026-11-23: `git ls-tree docs/adr/` over every `origin` branch and every local branch, and `docs/adr/` of
   every worktree under the worktree root, again before the last commit. Highest found: 0116 on `origin`
   (`docs/adr-test-result-cache`); a second local 0116 on `feat/merge-regenerates` (to be renumbered); no 0117 anywhere.
-- Evidence heads (ADR 0091), read 2026-11-23 and again before commit: `origin/main` = `b3c254a2d`, `origin/train/2026-11-22-20` =
+- Evidence heads (ADR 0091), read 2026-11-23 and again before the last commit: `origin/main` = `b3c254a2d`, then `d04af7b46` (one
+  commit, the local sccache fix; no change to the planner, `verdict.rs` or `paddock-repo-graph`), `origin/train/2026-11-22-20` =
   `803aed12d` (this branch's base), `origin/fix/run-scope-reuse-p2` = `bab7a4a97` (ADR 0113), `origin/feat/os-scoped-tests` =
   `c61339b9f` (`hostTests`, C155), `origin/feat/infra-only-smoke` = `29864b700` (the ADR 0113 amendment, docs only; its planner work
   stopped unbuilt), `origin/docs/ci-run-audit` = `365d15bb7` (the gap list G1 to G14, `docs/research/ci-run-audit-2026-11-23.md`
