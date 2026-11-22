@@ -477,11 +477,6 @@
       "reason": "The guest-side mount point of the VM's shared folder (macOS Virtualization framework), not a host disk"
     },
     {
-      "site": "/Volumes/no-such-volume-paddock-test",
-      "reason": "A volume that cannot exist, so a regression cannot leave a folder behind",
-      "count": 3
-    },
-    {
       "path": "tools/macos-vm-smoke.sh",
       "site": "/Volumes/My",
       "reason": "The guest-side mount point of the VM's shared folder (macOS Virtualization framework), not a host disk"

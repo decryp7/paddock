@@ -448,18 +448,65 @@
    ".gitea/workflows/ci.yml"
   ],
   "plan": {
-   "all": false,
+   "all": true,
    "crates": true,
-   "ui": false,
-   "eslint": false,
+   "ui": true,
+   "eslint": true,
    "conformance": true,
-   "c99": false,
-   "tools": false,
-   "icons": false,
+   "c99": true,
+   "tools": true,
+   "icons": true,
    "paddockDev": true,
    "docs": false,
-   "apps": [],
-   "kinds": {}
+   "apps": [
+    "debrief",
+    "dyno",
+    "pacenotes",
+    "pitcrew",
+    "pitwall",
+    "shell-demo",
+    "sighter",
+    "spotter",
+    "workbench-demo"
+   ],
+   "kinds": {
+    "debrief": [
+     "rust",
+     "ui"
+    ],
+    "dyno": [
+     "rust",
+     "ui"
+    ],
+    "pacenotes": [
+     "rust",
+     "ui"
+    ],
+    "pitcrew": [
+     "rust",
+     "ui"
+    ],
+    "pitwall": [
+     "rust",
+     "ui"
+    ],
+    "shell-demo": [
+     "rust",
+     "ui"
+    ],
+    "sighter": [
+     "rust",
+     "ui"
+    ],
+    "spotter": [
+     "rust",
+     "ui"
+    ],
+    "workbench-demo": [
+     "rust",
+     "ui"
+    ]
+   }
   }
  },
  {
