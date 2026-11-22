@@ -1119,6 +1119,7 @@ impl Gitea {
             planner: crate::queue::real::run_planner,
             timeout: crate::queue::real::GIT_TIMEOUT,
             push_hold: None,
+            starts: Default::default(),
         }
     }
 

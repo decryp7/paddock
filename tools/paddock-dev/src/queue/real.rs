@@ -193,6 +193,8 @@ pub struct GitTrain {
     /// How long a push waits while Gitea is down ([`crate::health::hold_gitea`]): the calling command's own `--max`. `None` (the queue,
     /// the member gate: they try again on their next turn) sends the push at once, as before.
     pub push_hold: Option<Duration>,
+    /// The git processes this value started, for spawn-budget tests ([`GitTrain::starts`]).
+    pub starts: std::sync::atomic::AtomicUsize,
 }
 
 /// [`GitTrain::timeout`] by default: a clone or fetch of this repository over the network takes seconds to a few minutes.
@@ -215,6 +217,7 @@ impl GitTrain {
             planner: run_planner,
             timeout: GIT_TIMEOUT,
             push_hold: None,
+            starts: Default::default(),
         };
         if !g.root.join(".git").exists() {
             let kind = if authed_fetch { Child::Authed } else { Child::Local };
@@ -246,7 +249,13 @@ impl GitTrain {
             planner: run_planner,
             timeout: GIT_TIMEOUT,
             push_hold: None,
+            starts: Default::default(),
         }
+    }
+
+    /// The git processes started through this value so far: what a spawn-budget test measures (ER-20).
+    pub fn starts(&self) -> usize {
+        self.starts.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     fn redact(&self, text: &str) -> String {
@@ -324,6 +333,7 @@ impl GitTrain {
         }
         let mut cmd = self.command(dir, kind);
         cmd.args(args);
+        self.starts.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         // Bounded (ER-32): a fetch or push that never answers ends the git tree and says so, instead of holding the tool.
         let out = paddock_proc::run_bounded(cmd, paddock_proc::Limits::new(self.timeout)).map_err(|e| format!("cannot run git: {e}"))?;
         if !matches!(out.outcome, paddock_proc::Outcome::Exited(_)) {

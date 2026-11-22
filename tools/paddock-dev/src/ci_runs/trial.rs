@@ -122,17 +122,30 @@ pub fn open_train(g: &GitTrain) -> Result<Option<String>, String> {
         &[
             "for-each-ref",
             "--sort=-committerdate",
-            "--format=%(refname:short)",
+            "--format=%(objectname) %(refname:short)",
             "refs/remotes/origin/train/",
         ],
     )?;
-    for name in listed.lines().map(str::trim).filter(|l| !l.is_empty()) {
-        let (ok, _) = g.run_git(Child::Local, &["merge-base", "--is-ancestor", name, "origin/main"])?;
-        if !ok {
-            return Ok(Some(name.to_string()));
-        }
+    let trains: Vec<(&str, &str)> = listed.lines().filter_map(|l| l.trim().split_once(' ')).collect();
+    // One question for all trains (ER-20): the tips that are not reachable from main, in the order given (newest first).
+    let tips: Vec<&str> = trains.iter().map(|(sha, _)| *sha).collect();
+    let open = not_on_main(g, &tips)?;
+    Ok(open
+        .first()
+        .and_then(|sha| trains.iter().find(|(s, _)| s == sha))
+        .map(|(_, name)| name.to_string()))
+}
+
+/// The commits of `shas` that are not reachable from `origin/main`, in the order given: one `git rev-list`, not a `merge-base` per
+/// commit (a git start costs about 45 ms on the Windows runner, ER-20).
+fn not_on_main(g: &GitTrain, shas: &[&str]) -> Result<Vec<String>, String> {
+    if shas.is_empty() {
+        return Ok(Vec::new());
     }
-    Ok(None)
+    let mut args = vec!["rev-list", "--no-walk=unsorted"];
+    args.extend(shas);
+    args.extend(["--not", "origin/main"]);
+    Ok(git(g, Child::Local, &args)?.lines().map(|l| l.trim().to_string()).collect())
 }
 
 /// The `::error::` text of an outcome that is not [`Outcome::Ready`] (`None` for a ready one): which member, why, and the next step.
@@ -365,13 +378,17 @@ pub fn prune(g: &GitTrain, dry: bool) -> Result<Vec<Stale>, String> {
         .filter_map(|l| l.split_whitespace().nth(1))
         .filter_map(|r| r.strip_prefix("refs/heads/"))
         .collect();
+    // The head the trial merged is its second parent: on main, the branch landed. Parents come with the listing (`%(parent)`).
     let listed = git(
         g,
         Child::Local,
-        &["for-each-ref", "--format=%(refname:short)", "refs/remotes/origin/trial/"],
+        &["for-each-ref", "--format=%(refname:short) %(parent)", "refs/remotes/origin/trial/"],
     )?;
     let mut stale = Vec::new();
-    for short in listed.lines().map(str::trim).filter(|l| !l.is_empty()) {
+    let mut live: Vec<(String, String, String)> = Vec::new();
+    for line in listed.lines().map(str::trim).filter(|l| !l.is_empty()) {
+        let mut words = line.split_whitespace();
+        let Some(short) = words.next() else { continue };
         let Some(trial_ref) = short.strip_prefix("origin/") else { continue };
         let branch = trial_ref.trim_start_matches("trial/");
         if !branches.contains(branch) {
@@ -379,17 +396,21 @@ pub fn prune(g: &GitTrain, dry: bool) -> Result<Vec<Stale>, String> {
                 trial_ref: trial_ref.to_string(),
                 why: format!("branch {branch} is gone"),
             });
-            continue;
+        } else if let Some(second) = words.nth(1) {
+            live.push((trial_ref.to_string(), branch.to_string(), second.to_string()));
         }
-        // The head the trial merged is its second parent: on main, the branch landed.
-        let (landed, _) = g.run_git(Child::Local, &["merge-base", "--is-ancestor", &format!("{short}^2"), "origin/main"])?;
-        if landed {
+    }
+    let heads: Vec<&str> = live.iter().map(|(_, _, sha)| sha.as_str()).collect();
+    let open = not_on_main(g, &heads)?;
+    for (trial_ref, branch, sha) in &live {
+        if !open.contains(sha) {
             stale.push(Stale {
-                trial_ref: trial_ref.to_string(),
+                trial_ref: trial_ref.clone(),
                 why: format!("branch {branch} landed on main"),
             });
         }
     }
+    stale.sort_by(|a, b| a.trial_ref.cmp(&b.trial_ref));
     if !dry && !stale.is_empty() {
         let mut args = vec![
             "push".to_string(),
@@ -478,6 +499,11 @@ mod tests {
                 "commit.gpgsign=false",
                 "-c",
                 "protocol.file.allow=always",
+                // No background `git maintenance` after each command: it is a start per command on a runner that pays for starts.
+                "-c",
+                "maintenance.auto=false",
+                "-c",
+                "gc.auto=0",
             ])
             .args(args)
             .output()
@@ -489,48 +515,100 @@ mod tests {
     struct World {
         _dir: tempfile::TempDir,
         origin: PathBuf,
-        work: PathBuf,
         clone: PathBuf,
     }
 
+    /// `git <args>` in `dir` with `input` on its standard input (one start for any number of objects or refs).
+    #[allow(clippy::disallowed_methods, reason = "a test starts git in its own scratch repositories")]
+    fn git_stdin(dir: &Path, args: &[&str], input: &str) {
+        use std::io::Write;
+        let mut child = crate::git_env::git()
+            .current_dir(dir)
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", if cfg!(windows) { "NUL" } else { "/dev/null" })
+            .args(["-c", "maintenance.auto=false", "-c", "gc.auto=0"])
+            .args(args)
+            .stdin(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        child.stdin.take().unwrap().write_all(input.as_bytes()).unwrap();
+        assert!(child.wait().unwrap().success(), "git {args:?}");
+    }
+
+    static CLOCK: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+    /// The `git fast-import` text of one new commit on each of `specs` (branch, file, text, parent branch; no parent for `""`).
+    fn commit_script(specs: &[(&str, &str, &str, &str)]) -> String {
+        let mut script = String::new();
+        for (branch, file, text, from) in specs {
+            let msg = format!("feat: {file}");
+            // `^0` lets a commit continue its own branch: fast-import refuses `from` the same ref name, and without `from` it starts a root.
+            let from_line = if from.is_empty() {
+                String::new()
+            } else {
+                format!("from refs/heads/{from}{}\n", if branch == from { "^0" } else { "" })
+            };
+            script.push_str(&format!(
+                "commit refs/heads/{branch}\ncommitter t <t@example.invalid> {} +0000\ndata {}\n{msg}\n{from_line}M 100644 inline {file}\ndata {}\n{text}\n\n",
+                // Each commit is a second newer than the one before, so `--sort=-committerdate` has a fixed order.
+                1_700_000_000 + CLOCK.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+                msg.len(),
+                text.len()
+            ));
+        }
+        script
+    }
+
+    /// New commits on `specs`, made straight in the origin by one `git fast-import` (one start however many branches; a start costs
+    /// about 45 ms on the Windows runner, ER-20). There is no working copy and no push.
+    fn commits(w: &World, specs: &[(&str, &str, &str, &str)]) {
+        git_stdin(&w.origin, &["fast-import", "--quiet", "--force"], &commit_script(specs));
+    }
+
+    /// Moves or deletes branches of the origin in one `git update-ref --stdin` (`update <ref> <to>`, `delete <ref>`).
+    fn refs(w: &World, lines: &[&str]) {
+        git_stdin(&w.origin, &["update-ref", "--stdin"], &(lines.join("\n") + "\n"));
+    }
+
     fn commit(w: &World, branch: &str, file: &str, text: &str, from: &str) {
-        git_in(&w.work, &["checkout", "-q", "-B", branch, from]);
-        std::fs::write(w.work.join(file), text).unwrap();
-        git_in(&w.work, &["add", "-A"]);
-        git_in(&w.work, &["commit", "-q", "-m", &format!("feat: {file}")]);
-        git_in(&w.work, &["push", "-q", "-f", "origin", branch]);
+        commits(w, &[(branch, file, text, from)]);
     }
 
     /// An origin with main (shared.txt), a landed train, an open train with member `m1`, and a working copy that makes branches.
     fn world() -> World {
         let dir = tempfile::tempdir().unwrap();
         let origin = dir.path().join("origin.git");
-        let work = dir.path().join("work");
-        std::fs::create_dir_all(&work).unwrap();
         git_in(dir.path(), &["init", "-q", "--bare", "-b", "main", origin.to_str().unwrap()]);
-        git_in(&work, &["init", "-q", "-b", "main"]);
-        git_in(&work, &["remote", "add", "origin", origin.to_str().unwrap()]);
-        std::fs::write(work.join("shared.txt"), "one\n").unwrap();
-        git_in(&work, &["add", "-A"]);
-        git_in(&work, &["commit", "-q", "-m", "base"]);
-        git_in(&work, &["push", "-q", "origin", "main"]);
+        no_auto_maintenance(&origin);
         let w = World {
             origin,
             clone: dir.path().join("clone"),
-            work,
             _dir: dir,
         };
-        commit(&w, "train/old", "old.txt", "old", "main");
-        git_in(&w.work, &["checkout", "-q", "main"]);
-        git_in(&w.work, &["merge", "-q", "--ff-only", "train/old"]);
-        git_in(&w.work, &["push", "-q", "origin", "main"]);
-        commit(&w, "train/open", "m1.txt", "m1", "main");
+        // main (shared.txt) is the landed train/old; train/open is an open train with member m1: three commits, one start.
+        let mut script = commit_script(&[("main", "shared.txt", "one\n", "")]);
+        script.push_str(&commit_script(&[
+            ("train/old", "old.txt", "old", "main"),
+            ("train/open", "m1.txt", "m1", "main"),
+        ]));
+        script.push_str("reset refs/heads/main\nfrom refs/heads/train/old\n\n");
+        git_stdin(&w.origin, &["fast-import", "--quiet"], &script);
         w
+    }
+
+    /// Writes the config that stops git's automatic maintenance (a `git maintenance` and `gc` start after fetches and pushes) into a
+    /// repository's config file: a file write, not a git start.
+    fn no_auto_maintenance(git_dir: &Path) {
+        use std::io::Write;
+        let mut f = std::fs::OpenOptions::new().append(true).open(git_dir.join("config")).unwrap();
+        writeln!(f, "[maintenance]\n\tauto = false\n[gc]\n\tauto = 0\n[receive]\n\tautogc = false").unwrap();
     }
 
     fn open(w: &World) -> GitTrain {
         let url = w.origin.to_str().unwrap();
-        GitTrain::open(url, &w.clone, None, false, true).unwrap()
+        let g = GitTrain::open(url, &w.clone, None, false, true).unwrap();
+        no_auto_maintenance(&g.root.join(".git"));
+        g
     }
 
     fn ok(_: &Path, _: &str) -> Result<(), String> {
@@ -586,7 +664,7 @@ mod tests {
     #[test]
     fn with_no_open_train_the_target_is_main() {
         let w = world();
-        git_in(&w.work, &["push", "-q", "origin", "--delete", "train/open"]);
+        refs(&w, &["delete refs/heads/train/open"]);
         commit(&w, "feat/b", "b.txt", "b", "main");
         let g = open(&w);
         let Outcome::Ready { target, .. } = prepare(&g, "feat/b", None, &ok).unwrap() else {
@@ -655,10 +733,10 @@ mod tests {
             assert!(matches!(prepare(&g, b, None, &ok).unwrap(), Outcome::Ready { .. }));
         }
         // landed: the branch head reaches main; gone: the branch is deleted.
-        git_in(&w.work, &["checkout", "-q", "main"]);
-        git_in(&w.work, &["merge", "-q", "--ff-only", "feat/landed"]);
-        git_in(&w.work, &["push", "-q", "origin", "main"]);
-        git_in(&w.work, &["push", "-q", "origin", "--delete", "feat/gone"]);
+        refs(
+            &w,
+            &["update refs/heads/main refs/heads/feat/landed", "delete refs/heads/feat/gone"],
+        );
         let dry = prune(&g, true).unwrap();
         assert_eq!(
             dry.iter().map(|s| s.trial_ref.as_str()).collect::<Vec<_>>(),
@@ -675,6 +753,51 @@ mod tests {
             left.contains("trial/feat/live") && !left.contains("gone") && !left.contains("landed"),
             "{left}"
         );
+    }
+
+    /// The spawn budget of `prune` (ER-20, the class: one git start per ref, ADR 0108): the starts do not grow with the refs.
+    /// 6 live, 1 gone and 1 landed trial refs: fetch, ls-remote, for-each-ref, one landed question for all, one push.
+    #[test]
+    fn prune_starts_a_fixed_number_of_gits_however_many_trial_refs_there_are() {
+        let w = world();
+        let names: Vec<String> = (0..8).map(|i| format!("feat/b{i}")).collect();
+        let specs: Vec<(&str, String)> = names.iter().map(|n| (n.as_str(), format!("{}.txt", n.replace('/', "_")))).collect();
+        let specs: Vec<(&str, &str, &str, &str)> = specs.iter().map(|(n, f)| (*n, f.as_str(), *n, "main")).collect();
+        commits(&w, &specs);
+        let g = open(&w);
+        for n in &names {
+            assert!(matches!(prepare(&g, n, None, &ok).unwrap(), Outcome::Ready { .. }));
+        }
+        refs(&w, &["update refs/heads/main refs/heads/feat/b0", "delete refs/heads/feat/b1"]);
+        let before = g.starts();
+        let done = prune(&g, false).unwrap();
+        let used = g.starts() - before;
+        assert_eq!(done.len(), 2, "{done:?}");
+        assert!(
+            used <= 5,
+            "prune started {used} gits for 8 trial refs; the budget is 5 (fetch, ls-remote, for-each-ref, rev-list, push)"
+        );
+    }
+
+    /// The spawn budget of `open_train`: one listing and one question for all trains, not one `merge-base` per landed train.
+    #[test]
+    fn open_train_starts_two_gits_however_many_landed_trains_are_newer() {
+        let w = world();
+        commits(&w, &[("train/l1", "l1.txt", "l1", "main")]);
+        commits(&w, &[("train/l2", "l2.txt", "l2", "train/l1")]);
+        commits(&w, &[("train/l3", "l3.txt", "l3", "train/l2")]);
+        refs(&w, &["update refs/heads/main refs/heads/train/l3"]);
+        let g = open(&w);
+        git(
+            &g,
+            Child::Authed,
+            &["fetch", "--quiet", "--no-tags", "origin", "+refs/heads/*:refs/remotes/origin/*"],
+        )
+        .unwrap();
+        let before = g.starts();
+        assert_eq!(open_train(&g).unwrap().as_deref(), Some("origin/train/open"));
+        let used = g.starts() - before;
+        assert!(used <= 2, "open_train started {used} gits with 4 landed trains; the budget is 2");
     }
 
     #[test]
@@ -758,11 +881,7 @@ mod tests {
     fn a_member_that_is_not_on_origin_is_refused_and_nothing_is_pushed() {
         let w = world();
         commit(&w, "feat/a", "a.txt", "a", "main");
-        // Local only: committed in the working copy, never pushed.
-        git_in(&w.work, &["checkout", "-q", "-B", "feat/local", "main"]);
-        std::fs::write(w.work.join("l.txt"), "l").unwrap();
-        git_in(&w.work, &["add", "-A"]);
-        git_in(&w.work, &["commit", "-q", "-m", "feat: l"]);
+        // `feat/local` exists only locally: origin has no such branch.
         let g = open(&w);
         let ms = members(&["feat/a", "feat/local"]);
         let out = prepare_members(&g, &ms, None, &ok).unwrap();
