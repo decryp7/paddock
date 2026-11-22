@@ -734,6 +734,11 @@ fn command_in_inner(
             state: &state,
             root: &root,
             remote_ref: pushes.first().map_or("", |p| p.remote_ref.as_str()),
+            others: &pushes
+                .iter()
+                .skip(1)
+                .map(|p| (p.sha.clone(), p.remote_ref.clone()))
+                .collect::<Vec<_>>(),
             status_to: &status_to,
             sha,
             base: &base,
@@ -797,6 +802,8 @@ struct TrialRun<'a> {
     state: &'a Path,
     root: &'a Path,
     remote_ref: &'a str,
+    /// The other commits of the push `(sha, remote ref)`: only the first is measured, so each gets a not-measured record.
+    others: &'a [(String, String)],
     status_to: &'a (String, String),
     sha: &'a str,
     base: &'a str,
@@ -817,6 +824,7 @@ fn trial_step(phase: trial_profile::Phase, run: &TrialRun<'_>, rows: &[(String, 
         state,
         root,
         remote_ref,
+        others,
         status_to,
         sha,
         base,
@@ -862,6 +870,33 @@ fn trial_step(phase: trial_profile::Phase, run: &TrialRun<'_>, rows: &[(String, 
                 return format!(
                     "::warning::trial profile: the slow rows' record could not be written ({e}); the slow rows were NOT started and the trial is not guarded. Next: run `./dev check --pre-push` on {short} before relying on its CI run"
                 );
+            }
+            // The gate measures the first commit of a push only. Every other pushed commit gets a not-measured record (and so a
+            // status, posted by the next sweep once the push has landed), so no CI evidence for it counts, with or without
+            // PADDOCK_ACCEPT_NOT_MEASURED letting the push go.
+            for (other, other_ref) in others {
+                let rec = Slow {
+                    sha: other.clone(),
+                    state: State::NotMeasured,
+                    row: "slow rows".into(),
+                    why: "a push of several commits measures only the first one".into(),
+                    next: format!(
+                        "push {} alone, or run `./dev check --pre-push` on it",
+                        &other[..other.len().min(12)]
+                    ),
+                    pid: 0,
+                    start_micros: 0,
+                    beat: 0,
+                    posted: false,
+                    orphaned: false,
+                    logs: logs.to_string_lossy().into_owned(),
+                    remote_ref: other_ref.clone(),
+                    server: status_to.0.clone(),
+                    repo: status_to.1.clone(),
+                };
+                if let Err(e) = crate::trial_guard::write_slow(state, &rec) {
+                    eprintln!("::warning::trial profile: the record of {other} could not be written ({e})");
+                }
             }
             let child = trial_profile::child_args(base, args.remote.as_deref(), root, logs);
             match ex.start_trial_slow(&child, stdin, root, logs, env) {

@@ -3786,6 +3786,7 @@ mod trial_profile {
             state,
             root: Path::new("/repo"),
             remote_ref: "refs/heads/wip/x",
+            others: &[],
             status_to: &status_to,
             sha: SHA,
             base: "origin/main",
@@ -4329,6 +4330,51 @@ mod trial_profile {
             !ids.is_empty() && ids.iter().all(|i| super::super::trial_profile::is_fast_row(i)),
             "{ids:?}"
         );
+    }
+
+    /// Round 3 minor: with PADDOCK_ACCEPT_NOT_MEASURED (or any push of several commits) every pushed commit gets a record, not only the
+    /// first: the others are not measured, so no CI evidence for them counts.
+    #[test]
+    fn every_pushed_commit_gets_a_record_not_only_the_first() {
+        let d = tempfile::tempdir().unwrap();
+        let fake = Fake::default();
+        let second = "d".repeat(40);
+        let third = "e".repeat(40);
+        let a = args();
+        let env = HashMap::new();
+        let status_to = ("https://gitea.invalid".to_string(), "o/r".to_string());
+        let others = vec![
+            (second.clone(), "refs/heads/wip/y".to_string()),
+            (third.clone(), "refs/heads/trial/z".to_string()),
+        ];
+        let run = TrialRun {
+            ex: &fake,
+            state: d.path(),
+            root: Path::new("/repo"),
+            remote_ref: "refs/heads/wip/x",
+            others: &others,
+            status_to: &status_to,
+            sha: SHA,
+            base: "origin/main",
+            args: &a,
+            stdin: "pre-push lines\n",
+            logs: Path::new("/logs/run"),
+            env: &env,
+        };
+        trial_step(Phase::Fast, &run, &[], Exit::Ok);
+        for (sha, r) in &others {
+            let rec = trial_guard::read_slow(d.path(), sha)
+                .unwrap()
+                .expect("a record for every pushed commit");
+            assert_eq!(
+                (rec.state, rec.remote_ref.as_str(), rec.posted),
+                (State::NotMeasured, r.as_str(), false),
+                "{rec:?}"
+            );
+            assert!(rec.why.contains("only the first"), "{rec:?}");
+            assert!(trial_guard::local_refusal(d.path(), sha).is_some(), "and it refuses evidence");
+        }
+        assert!(trial_guard::read_slow(d.path(), SHA).unwrap().is_some());
     }
 
     /// The pass-through of one more landing rule: the slow child's logs folder is owned by the child, so a prune never takes it.
