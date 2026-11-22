@@ -369,7 +369,7 @@ fn each_state_is_posted_as_its_own_commit_status_under_one_context() {
     assert!(g.writes.is_empty());
 }
 
-fn gate(statuses: Vec<(u64, String, String)>, local: Option<&Path>) -> Result<Option<String>, String> {
+fn gate_kind(statuses: Vec<(u64, String, String)>, local: Option<&Path>) -> Result<Gate, String> {
     let mut g = FakeGitea {
         statuses,
         ..Default::default()
@@ -377,6 +377,33 @@ fn gate(statuses: Vec<(u64, String, String)>, local: Option<&Path>) -> Result<Op
     let mut client = Client::new(&mut g, "https://gitea.invalid", "o/r", "t");
     client.backoff_ms = 0;
     slow_rows_gate(&mut client, local, SHA)
+}
+
+/// The gate as a refusal text: `Some(why)` for anything but `Counts`.
+fn gate(statuses: Vec<(u64, String, String)>, local: Option<&Path>) -> Result<Option<String>, String> {
+    Ok(match gate_kind(statuses, local)? {
+        Gate::Counts => None,
+        Gate::Red(why) | Gate::NotMeasured(why) => Some(why),
+    })
+}
+
+/// Round 3 P2-4: a finding is red (exit 5); a status that says nothing yet, or a post that did not land, is not measured (exit 6).
+#[test]
+fn only_a_failure_is_red_and_pending_error_or_a_lost_post_are_not_measured() {
+    assert!(matches!(gate_kind(vec![stat(1, CONTEXT, "failure")], None), Ok(Gate::Red(_))));
+    for unknown in ["pending", "error", "something-new"] {
+        assert!(
+            matches!(gate_kind(vec![stat(1, CONTEXT, unknown)], None), Ok(Gate::NotMeasured(_))),
+            "{unknown}"
+        );
+    }
+    let d = tempfile::tempdir().unwrap();
+    write_slow(d.path(), &on_server(slow(State::Passed))).unwrap();
+    assert!(
+        matches!(gate_kind(vec![], Some(d.path())), Ok(Gate::NotMeasured(_))),
+        "a post that did not land says nothing: not measured"
+    );
+    assert_eq!(gate_kind(vec![stat(1, CONTEXT, "success")], None), Ok(Gate::Counts));
 }
 
 fn stat(id: u64, context: &str, state: &str) -> (u64, String, String) {

@@ -210,8 +210,9 @@ pub fn verdict(client: &mut Client, workflow: &str, sha: &str) -> Verdict {
     let Verdict::Green { run } = v else { return v };
     let local = client.local_state.clone();
     match crate::trial_guard::slow_rows_gate(client, local.as_deref(), sha) {
-        Ok(None) => Verdict::Green { run },
-        Ok(Some(reason)) => Verdict::Red { run: Some(run), reason },
+        Ok(crate::trial_guard::Gate::Counts) => Verdict::Green { run },
+        Ok(crate::trial_guard::Gate::Red(reason)) => Verdict::Red { run: Some(run), reason },
+        Ok(crate::trial_guard::Gate::NotMeasured(reason)) => Verdict::NotMeasured(format!("run {run} is green, but {reason}")),
         Err(e) => Verdict::NotMeasured(format!(
             "run {run} is green, but the {} status of {} could not be read ({e}); a commit's slow local rows must be known",
             crate::trial_guard::CONTEXT,
@@ -424,12 +425,20 @@ mod tests {
         // No status at all and no record of this checkout: the commit never went through a split push.
         let mut f = server(vec![main_push(5, "success")], &[]);
         assert_eq!(ask(&mut f), Verdict::Green { run: 5 });
-        for bad in ["failure", "error", "pending"] {
+        let mut f = server(vec![main_push(5, "success")], &[]);
+        statuses(&mut f, 1, vec![st(crate::trial_guard::CONTEXT, "failure")]);
+        match ask(&mut f) {
+            Verdict::Red { run: Some(5), reason } => assert!(reason.contains("failure"), "{reason}"),
+            other => panic!("{other:?}"),
+        }
+        // Round 3 P2-4: a status that says nothing yet (pending, or error: the rows could not be measured) is not a finding, so it
+        // is NOT MEASURED (exit 6), never a red (exit 5); both still refuse.
+        for unknown in ["pending", "error"] {
             let mut f = server(vec![main_push(5, "success")], &[]);
-            statuses(&mut f, 1, vec![st(crate::trial_guard::CONTEXT, bad)]);
+            statuses(&mut f, 1, vec![st(crate::trial_guard::CONTEXT, unknown)]);
             match ask(&mut f) {
-                Verdict::Red { run: Some(5), reason } => assert!(reason.contains(bad), "{reason}"),
-                other => panic!("{bad}: {other:?}"),
+                Verdict::NotMeasured(why) => assert!(why.contains(unknown), "{why}"),
+                other => panic!("{unknown}: {other:?}"),
             }
         }
     }

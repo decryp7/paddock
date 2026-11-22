@@ -450,8 +450,9 @@ pub const STATUS_PAGES: u32 = 10;
 /// - there is none and this checkout has a record (or one it cannot read): refused, because a status that should exist did not land;
 /// - there is none and no record: the commit never went through a split push, so the evidence counts.
 ///
-/// `Ok(Some(why))` refuses, `Ok(None)` lets it count, `Err` is not measured.
-pub fn slow_rows_gate(client: &mut Client, local: Option<&Path>, sha: &str) -> Result<Option<String>, String> {
+/// A finding (`failure`) is `Red`; a status that says nothing yet (`pending`, `error`: the rows could not be measured), or a post that
+/// did not land, is `NotMeasured` (exit 6 of `ci verdict`, not 5): both refuse, only the word differs (ER-33).
+pub fn slow_rows_gate(client: &mut Client, local: Option<&Path>, sha: &str) -> Result<Gate, String> {
     let short = &sha[..sha.len().min(12)];
     let status = client.slow_rows_status(sha)?;
     let recorded = match local {
@@ -459,15 +460,33 @@ pub fn slow_rows_gate(client: &mut Client, local: Option<&Path>, sha: &str) -> R
         Some(state) => !matches!(read_slow(state, sha), Ok(None)),
     };
     Ok(match status {
-        Some(state) if state == "success" => None,
-        Some(state) => Some(format!(
-            "the slow local rows of {short} have status `{state}` ({CONTEXT}): a wip/ or trial/ push that ran only its fast rows before the push. Next: read the rows' logs, fix, and push again; a train needs the full push gate"
-        )),
-        None if recorded => Some(format!(
+        Some(state) if state == "success" => Gate::Counts,
+        Some(state) => {
+            let why = format!(
+                "the slow local rows of {short} have status `{state}` ({CONTEXT}): a wip/ or trial/ push that ran only its fast rows before the push. Next: read the rows' logs, fix, and push again; a train needs the full push gate"
+            );
+            if state == "failure" {
+                Gate::Red(why)
+            } else {
+                Gate::NotMeasured(why)
+            }
+        }
+        None if recorded => Gate::NotMeasured(format!(
             "this checkout has a split-push record for {short} but the server has no `{CONTEXT}` status for it (the post did not land). Next: run `./dev check --pre-push` on the commit (it posts `success`), or any `./dev ci dispatch` posts it again"
         )),
-        None => None,
+        None => Gate::Counts,
     })
+}
+
+/// What [`slow_rows_gate`] decides about CI evidence for a commit.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Gate {
+    /// The evidence counts.
+    Counts,
+    /// The slow local rows found something: the commit is red.
+    Red(String),
+    /// Nothing is known (pending, error, a post that did not land): the evidence does not count, and it is not a finding.
+    NotMeasured(String),
 }
 
 /// Why this checkout's own record refuses `sha`: a slow-rows record exists and is not `passed` (still running counts: the rows have
