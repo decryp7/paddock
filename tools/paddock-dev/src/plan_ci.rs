@@ -3,6 +3,7 @@
 //! `chooseBase`, `ciOutputs`, `summary`, `commitLintRange`, `parseArgs` and `ci`); the rules that decide which projects a change
 //! reaches are in [`crate::plan`].
 
+use crate::host_tests::{HostTests, and_filters};
 use crate::plan::RepoGraph;
 use paddock_repo_graph::join_normalized;
 use serde_json::{Map, Value, json};
@@ -18,6 +19,9 @@ pub struct MatrixOpts {
     pub narrow: bool,
     /// The run wants the WebKit tests.
     pub webkit: bool,
+    /// The run tests every package on every OS, whatever `hostTests` says (the nightly, a tag's or an app's release gates: see
+    /// [`full_os`]).
+    pub full_os: bool,
 }
 
 fn strings(v: &Value, key: &str) -> Vec<String> {
@@ -95,6 +99,38 @@ pub fn package_filters(plan: &Value, graph: &RepoGraph, narrow: bool) -> Value {
     })
 }
 
+/// Whether a run tests every package on every OS (no `hostTests` scope): the nightly (a `schedule` event, or the nightly's own
+/// `os_full` input, which also covers its manual dispatch), a tag run, a release workflow's gates (`release`) and an app's own gates
+/// (`PLAN_APP`). Every other run (a pull request, a member or fix-round dispatch, a push to main, a manual run) tests the OS-specific
+/// code on each OS and the rest on Linux (ADR 0080 amendment 2026-11-22: the nightly and the release gates are the full runs).
+pub fn full_os(env: &dyn Fn(&str) -> Option<String>) -> bool {
+    let set = |k: &str| env(k).is_some_and(|v| v == "true" || v == "1");
+    set("PLAN_FULL_OS")
+        || set("PLAN_RELEASE")
+        || env("PLAN_APP").is_some_and(|a| !a.is_empty())
+        || env("GITHUB_EVENT_NAME").as_deref() == Some("schedule")
+        || env("GITHUB_REF").is_some_and(|r| r.starts_with("refs/tags/"))
+}
+
+/// The legs of one of the two jobs that are not apps (`crate`, `paddock-dev`): one object per runner of `os_legs` with the packages
+/// (`test_packages`, space-separated, for `-p`; empty: the workspace's) and the nextest filterset (`test_filter`) its tests run. A
+/// Windows or macOS leg tests only what the workspace's `hostTests` names (OS-scoped tests); every leg also keeps the member run's
+/// package filter, so a member run on a host leg tests the reached packages that a host tests. A workspace with no `hostTests` has
+/// empty packages and the member filter alone on every leg: every test everywhere, as before.
+pub fn workspace_legs(os_legs: &[String], host: Option<&HostTests>, member_filter: &str) -> Vec<Value> {
+    os_legs
+        .iter()
+        .map(|os| {
+            let scope = host.map(|h| h.scope(os)).unwrap_or_default();
+            json!({
+                "os": os,
+                "test_packages": scope.packages.join(" "),
+                "test_filter": and_filters(member_filter, &scope.filter),
+            })
+        })
+        .collect()
+}
+
 /// The matrix legs of the affected apps: one object per app and operating system (paddock.ci.json `os`, default Linux only)
 /// with the app's contract, the halves to run and the nextest filter (only when `narrow`: a pull request whose change reaches
 /// part of the app's Cargo workspace; '' runs it all). The Linux leg runs everything the change reaches; a Windows or macOS leg
@@ -133,6 +169,8 @@ pub fn matrix(plan: &Value, graph: &RepoGraph, opts: MatrixOpts) -> Result<Vec<V
         } else {
             package_filter(plan, graph, &cargo_dir, &format!("app:{name}"), opts.narrow)
         };
+        // hostTests (OS-scoped tests): what each Windows and macOS leg of this app tests; none declared, every test on every OS.
+        let host = HostTests::parse(app, &format!("apps/{name}/paddock.ci.json"))?;
         let kinds = kinds_of(plan, name);
         let rust = kinds.iter().any(|k| k == "rust");
         let ui = kinds.iter().any(|k| k == "ui");
@@ -177,6 +215,10 @@ pub fn matrix(plan: &Value, graph: &RepoGraph, opts: MatrixOpts) -> Result<Vec<V
             leg.insert("rust".into(), json!(rust));
             leg.insert("ui".into(), json!(linux && ui));
             leg.insert("filter".into(), json!(filter));
+            // The packages (`-p`) and the nextest filterset this host leg tests, empty on Linux and for an app with no `hostTests`.
+            let scope = host.as_ref().filter(|_| !opts.full_os).map(|h| h.scope(os)).unwrap_or_default();
+            leg.insert("host_packages".into(), json!(scope.packages.join(" ")));
+            leg.insert("host_filter".into(), json!(scope.filter));
             leg.insert("e2e_checks".into(), json!(""));
             leg.insert("e2e_shard".into(), json!(""));
             leg.insert("e2e_leg".into(), json!(""));
@@ -803,6 +845,7 @@ mod tests {
             MatrixOpts {
                 narrow: true,
                 webkit: false,
+                ..MatrixOpts::default()
             },
         )
         .unwrap();
@@ -814,7 +857,8 @@ mod tests {
                 &g,
                 MatrixOpts {
                     narrow: true,
-                    webkit: false
+                    webkit: false,
+                    ..MatrixOpts::default()
                 }
             )
             .unwrap()[0]["filter"],
@@ -827,7 +871,8 @@ mod tests {
                 &g,
                 MatrixOpts {
                     narrow: true,
-                    webkit: false
+                    webkit: false,
+                    ..MatrixOpts::default()
                 }
             )
             .unwrap()[0]["filter"],
@@ -906,6 +951,87 @@ mod tests {
     }
 
     #[test]
+    fn host_legs_of_an_app_with_host_tests_name_its_packages_and_linux_and_an_app_without_them_name_none() {
+        let os = json!([LINUX, "windows-latest", "macos-latest"]);
+        let with = graph_with(
+            vec![(
+                "x",
+                json!({"cargo": ".", "os": os, "hostTests": {"packages": ["x-b", "x-a"], "skip": {"x-a": ["pure::"]}, "only": {"macos-latest": ["x-m"]}}}),
+            )],
+            Graph::new(),
+        );
+        let legs = matrix(&plan(&["x"], json!({"x": ["rust"]}), json!({})), &with, MatrixOpts::default()).unwrap();
+        let rows: Vec<Vec<Value>> = legs.iter().map(|l| row(l, &["os", "host_packages", "host_filter"])).collect();
+        assert_eq!(
+            rows,
+            vec![
+                vec![json!(LINUX), json!(""), json!("")],
+                vec![
+                    json!("windows-latest"),
+                    json!("x-a x-b"),
+                    json!("not ((package(=x-a) & test(/^(?:pure::)/)))")
+                ],
+                vec![
+                    json!("macos-latest"),
+                    json!("x-a x-b x-m"),
+                    json!("not ((package(=x-a) & test(/^(?:pure::)/)))")
+                ],
+            ],
+            "Linux tests everything; a host leg tests the declared packages (and its own additions)"
+        );
+        // Positive control: the same app without the field has no scope on any leg.
+        let without = graph_with(vec![("x", json!({"cargo": ".", "os": os}))], Graph::new());
+        let legs = matrix(&plan(&["x"], json!({"x": ["rust"]}), json!({})), &without, MatrixOpts::default()).unwrap();
+        assert!(legs.iter().all(|l| l["host_packages"] == "" && l["host_filter"] == ""));
+        // A malformed field fails the plan, never turns the scope off.
+        let bad = graph_with(
+            vec![("x", json!({"cargo": ".", "os": os, "hostTests": {"pakages": ["a"]}}))],
+            Graph::new(),
+        );
+        let err = matrix(&plan(&["x"], json!({"x": ["rust"]}), json!({})), &bad, MatrixOpts::default()).unwrap_err();
+        assert!(
+            err.contains("apps/x/paddock.ci.json") && err.contains("unknown `hostTests.pakages`"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn the_crate_and_paddock_dev_legs_carry_the_host_scope_and_a_member_runs_package_filter_together() {
+        let os: Vec<String> = [LINUX, "windows-latest", "macos-latest"].map(String::from).to_vec();
+        let host = HostTests::parse(
+            &json!({"hostTests": {"modules": ["a::"], "only": {"macos-latest": ["b::"]}}}),
+            "t.json",
+        )
+        .unwrap()
+        .unwrap();
+        let legs = workspace_legs(&os, Some(&host), "package(=paddock-dev)");
+        let rows: Vec<(String, String, String)> = legs
+            .iter()
+            .map(|l| (l["os"].to_string(), l["test_packages"].to_string(), l["test_filter"].to_string()))
+            .collect();
+        assert_eq!(
+            rows,
+            vec![
+                (r#""ubuntu-latest""#.into(), r#""""#.into(), r#""package(=paddock-dev)""#.into()),
+                (
+                    r#""windows-latest""#.into(),
+                    r#""""#.into(),
+                    r#""(package(=paddock-dev)) & (test(/^(?:a::)/))""#.into()
+                ),
+                (
+                    r#""macos-latest""#.into(),
+                    r#""""#.into(),
+                    r#""(package(=paddock-dev)) & (test(/^(?:a::|b::)/))""#.into()
+                ),
+            ]
+        );
+        // Positive control: no `hostTests` and no member filter is the old behaviour, every test on every OS.
+        let plain = workspace_legs(&os, None, "");
+        assert!(plain.iter().all(|l| l["test_packages"] == "" && l["test_filter"] == ""));
+        assert_eq!(plain.len(), 3);
+    }
+
+    #[test]
     fn the_notices_check_runs_on_exactly_one_linux_leg_of_an_app_that_has_the_block() {
         // Cases of the retired affected.test.mjs: the block, the leg that runs Rust or UI on Linux, never a host leg, an e2e shard or the WebKit leg.
         let with = json!({"cargo": ".", "os": [LINUX, "windows-latest"], "ui": ["npm test"], "e2e": ["pw"], "e2eShards": 2,
@@ -916,6 +1042,7 @@ mod tests {
         let opts = MatrixOpts {
             narrow: false,
             webkit: true,
+            ..MatrixOpts::default()
         };
         let legs = matrix(&p, &graph_with(vec![("x", with)], Graph::new()), opts).unwrap();
         assert!(legs.len() > 3, "the main leg, a host leg, the shards and WebKit: {}", legs.len());
@@ -942,6 +1069,7 @@ mod tests {
             MatrixOpts {
                 narrow: false,
                 webkit: true,
+                ..MatrixOpts::default()
             },
         )
         .unwrap();
@@ -974,7 +1102,8 @@ mod tests {
                 &g,
                 MatrixOpts {
                     narrow: false,
-                    webkit: true
+                    webkit: true,
+                    ..MatrixOpts::default()
                 }
             )
             .unwrap()

@@ -21,10 +21,11 @@
 //! Log lines of `--ci` go to standard error (the script printed them to standard output unless `--app` was given); the job log
 //! shows both streams.
 
+use crate::host_tests::HostTests;
 use crate::plan::{Request, plan_with_graph};
 use crate::plan_ci::{
-    BaseInput, LintInput, MatrixOpts, USAGE, choose_base, ci_outputs, commit_lint_range, is_ci_yml, matrix, member_run, only_app,
-    package_filters, parse_args, summary, wants_webkit,
+    BaseInput, LintInput, MatrixOpts, USAGE, choose_base, ci_outputs, commit_lint_range, full_os, is_ci_yml, matrix, member_run, only_app,
+    package_filters, parse_args, summary, wants_webkit, workspace_legs,
 };
 use crate::plan_repo::git_text;
 use crate::plan_since::{APP_WORKFLOWS, GiteaRuns, SincePlan, since_run};
@@ -241,6 +242,7 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
         MatrixOpts {
             narrow,
             webkit: wants_webkit(env),
+            full_os: full_os(env),
         },
     )
     .map_err(fail)?;
@@ -271,12 +273,47 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
             };
             append(&path, &format!("### {app}\n\nBase: {reason}\n\n{verdict}\n"))?;
         }
+        // OS-scoped tests: the packages and filterset of the app's macOS leg of its own workflow (debrief.yml's `rust tests (macOS)`), from
+        // its `hostTests`; empty when it declares none, so the job tests everything as before. A rerun writes its own filter instead.
+        if let Some(path) = env("GITHUB_OUTPUT") {
+            let host = HostTests::parse(graph.config(app), &format!("apps/{app}/paddock.ci.json")).map_err(fail)?;
+            // A nightly or a tag run tests every package here too (`full_os` without PLAN_APP: the app's own workflow asks for it by name).
+            let full = env("PLAN_FULL_OS").is_some_and(|v| v == "true")
+                || env("GITHUB_EVENT_NAME").as_deref() == Some("schedule")
+                || env("GITHUB_REF").is_some_and(|r| r.starts_with("refs/tags/"));
+            let scope = host.filter(|_| !full).map(|h| h.scope("macos-latest")).unwrap_or_default();
+            append(
+                &path,
+                &format!(
+                    "host_packages_macos={}\nhost_filter_macos={}\n",
+                    scope.packages.join(" "),
+                    scope.filter
+                ),
+            )?;
+        }
         return Ok(Report::new(serde_json::json!({ "affected": runs_it }), runs_it.to_string()));
     }
     let mut plan = plan;
     plan["filters"] = package_filters(&plan, &graph, narrow);
     plan["webkit"] = serde_json::json!(wants_webkit(env));
     let mut outputs = ci_outputs(&plan, &legs, if plan_app.is_some() { None } else { base.as_deref() });
+    // OS-scoped tests: the legs of the `crate` and `paddock-dev` jobs with what each runner tests (`hostTests` of their contracts).
+    let os_runners = os_legs(env);
+    for (name, contract, key) in [
+        ("crate_legs", CRATES_CONTRACT, "crates"),
+        ("paddock_dev_legs", PADDOCK_DEV_CONTRACT, "paddockDev"),
+    ] {
+        let host = if full_os(env) {
+            None
+        } else {
+            read_host_tests(root, contract).map_err(fail)?
+        };
+        let member = plan["filters"][key].as_str().unwrap_or("");
+        outputs.push((
+            name.into(),
+            serde_json::to_string(&workspace_legs(&os_runners, host.as_ref(), member)).unwrap_or_default(),
+        ));
+    }
     // ADR 0113: the run declares its scope as data (what it ran, what a push to main does for this tree); `ci verdict` compares them.
     // A reused run (`PLAN_REUSE`, ci.yml's reuse step found a complete green run of this commit) runs no job: no job reads an empty
     // `rerun_jobs` as its own, and it declares that it ran nothing.
@@ -320,6 +357,7 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
         MatrixOpts {
             narrow: false,
             webkit: true,
+            full_os: true,
         },
     )
     .map_err(fail)?;
@@ -338,6 +376,20 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
         serde_json::json!({ "base": base, "reason": reason, "apps": legs.len() }),
         String::new(),
     ))
+}
+
+/// The contract that declares the `hostTests` of the shared crates.
+const CRATES_CONTRACT: &str = "crates/paddock.ci.json";
+/// The contract that declares the `hostTests` of paddock-dev (a one-crate workspace: test-name prefixes).
+const PADDOCK_DEV_CONTRACT: &str = "tools/paddock-dev/paddock.ci.json";
+
+/// The `hostTests` of the contract at `path` (from the repository root); `None` when the file or the field is absent.
+fn read_host_tests(root: &Path, path: &str) -> Result<Option<HostTests>, String> {
+    let Ok(text) = std::fs::read_to_string(root.join(path)) else {
+        return Ok(None);
+    };
+    let contract: Value = serde_json::from_str(&text).map_err(|e| format!("{path} is not valid JSON: {e}"))?;
+    HostTests::parse(&contract, path)
 }
 
 /// The runners of the `crate` and `paddock-dev` jobs: the `os` of each entry of `PLAN_OS_LEGS` (ci.yml's own default list), or the
@@ -485,7 +537,16 @@ fn since_ci_with(root: &Path, env: &dyn Fn(&str) -> Option<String>, id: u64, rea
         head: "HEAD".into(),
     };
     let (graph, everything) = plan_with_graph(root, &history, &all).map_err(|e| fail(e.to_string()))?;
-    let legs = matrix(&everything, &graph, MatrixOpts { narrow: false, webkit }).map_err(fail)?;
+    let legs = matrix(
+        &everything,
+        &graph,
+        MatrixOpts {
+            narrow: false,
+            webkit,
+            ..MatrixOpts::default()
+        },
+    )
+    .map_err(fail)?;
     // ADR 0113: a rerun of failures is never complete; it declares the scope a push to main needs and that it ran none of it.
     let need_legs = matrix(
         &everything,
@@ -493,6 +554,7 @@ fn since_ci_with(root: &Path, env: &dyn Fn(&str) -> Option<String>, id: u64, rea
         MatrixOpts {
             narrow: false,
             webkit: true,
+            ..MatrixOpts::default()
         },
     )
     .map_err(fail)?;

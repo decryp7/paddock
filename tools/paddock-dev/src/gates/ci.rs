@@ -403,6 +403,8 @@ pub const LEG_KEYS: &[&str] = &[
     "rust",
     "ui",
     "filter",
+    "host_packages",
+    "host_filter",
     "e2e_checks",
     "e2e_shard",
     "e2e_leg",
@@ -459,6 +461,11 @@ fn app_legs(app: &str, contract: &Json, webkit: bool) -> Result<Vec<BTreeMap<Str
     let mut legs: Vec<BTreeMap<String, String>> = Vec::new();
     for os in oses {
         let linux = os == LINUX;
+        let host_scope = crate::host_tests::HostTests::parse(contract, "the contract")
+            .ok()
+            .flatten()
+            .map(|h| h.scope(&os))
+            .unwrap_or_default();
         let m: BTreeMap<String, String> = [
             ("app", app.to_string()),
             ("os", os.clone()),
@@ -479,6 +486,8 @@ fn app_legs(app: &str, contract: &Json, webkit: bool) -> Result<Vec<BTreeMap<Str
                     join_lines(contract, "hostRustChecks")
                 },
             ),
+            ("host_packages", host_scope.packages.join(" ")),
+            ("host_filter", host_scope.filter.clone()),
             ("ui_checks", if linux { join_lines(contract, "ui") } else { String::new() }),
             (
                 "angular_dir",

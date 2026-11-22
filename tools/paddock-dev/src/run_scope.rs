@@ -226,10 +226,7 @@ pub const PROJECT_JOBS: &[(&str, &[&str])] = &[
     ("eslint", &["eslint preset"]),
     ("conformance", &["conformance ("]),
     ("c99", &["C99 ("]),
-    (
-        "tools",
-        &["tools and shared scripts", "VM tooling tests", "wiki tool", "heavy tool"],
-    ),
+    ("tools", &["tools and shared scripts", "wiki tool", "heavy tool"]),
     ("icons", &["icons ("]),
     ("e2e", &["reference apps (shard"]),
     ("e2e-webkit", &["reference apps in WebKit"]),
@@ -456,6 +453,25 @@ mod tests {
         assert!(d.need.jobs.contains("crate@macos-latest") && d.need.jobs.contains("ui"));
         assert_eq!(d.need.engines, ["chromium", "webkit"].map(String::from).into());
         assert!(d.need.apps.contains("dyno@ubuntu-latest:e2e-webkit"));
+    }
+
+    #[test]
+    fn a_host_leg_with_a_host_scope_is_the_same_job_so_the_scope_does_not_change_and_a_narrowed_filter_still_does() {
+        // OS-scoped tests: a host leg tests fewer packages but is still the job the push to main declares, and `need` is computed from
+        // the same planner, so `ran` still covers it. Only a member run's package filter (`filter`) makes a run partial.
+        let mut scoped = legs(true);
+        for l in &mut scoped {
+            l["host_packages"] = json!("a b");
+            l["host_filter"] = json!("not (package(=a))");
+        }
+        let need = scope_of(&plan(), &legs(true), true, &os(), &[]);
+        let ran = scope_of(&plan(), &scoped, true, &os(), &["", ""]);
+        assert_eq!(ran, need);
+        assert_eq!(ci_scope(ran, false, need.clone()).complete(), Ok(()));
+        // Positive control: the same legs with a member filter are partial.
+        scoped[1]["filter"] = json!("package(=a)");
+        let narrowed = scope_of(&plan(), &scoped, true, &os(), &["", ""]);
+        assert!(ci_scope(narrowed, false, need).complete().is_err());
     }
 
     #[test]
