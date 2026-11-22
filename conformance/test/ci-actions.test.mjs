@@ -910,18 +910,18 @@ test('the test browser of a host job lives in a kept folder of its job slot, out
   assert.ok(ci.indexOf('PADDOCK_TEST_BROWSER_DIR') < ci.indexOf('uses: ./.gitea/actions/install-test-browser'), 'the folder is chosen before the browser is installed');
 });
 
-test('the WebKit job runs on the Mac runner for pushes to main and v* tags only, and runs the three WebKit projects', () => {
+test('the WebKit job runs on the Mac runner when the planner says so (a push to main, a v* tag, the webkit input) and runs the three WebKit projects', () => {
   const ci = read(join(WORKFLOWS, 'ci.yml'));
   const on = ci.match(/^on:\n((?:[ \t]+.*\n|\n)+)/m)?.[1] ?? '';
   assert.match(on, /push:\n\s+branches: \[main\]\n\s+tags: \["v\*"\]/, 'a push is only main or a v* tag');
   const job = ci.match(/^  e2e-webkit:\n((?:    .*\n|\n)+)/m)?.[1] ?? '';
   assert.notEqual(job, '', 'the e2e-webkit job exists');
   assert.match(job, /runs-on: macos-latest/);
+  // One expression for WebKit (ADR 0113): the planner's `webkit` output (plan_ci::wants_webkit: a push to main or a tag, the nightly, the
+  // webkit input), which the scope the run declares also reads. The workflow keeps no second condition that could drift from it.
   const cond = job.match(/^    if: (.*)$/m)?.[1] ?? '';
-  assert.match(cond, /github\.event_name == 'push'/, 'never a pull request or a manual run');
-  assert.match(cond, /github\.ref == 'refs\/heads\/main'/);
-  assert.match(cond, /startsWith\(github\.ref, 'refs\/tags\/v'\)/);
-  assert.doesNotMatch(cond, /pull_request|workflow_dispatch/);
+  assert.match(cond, /needs\.plan\.outputs\.webkit == 'true'/, 'the planner decides whether WebKit runs');
+  assert.doesNotMatch(cond, /pull_request|inputs\.webkit|github\.ref/);
   for (const project of ['gallery-webkit', 'shell-demo-webkit', 'workbench-demo-webkit']) assert.match(job, new RegExp(`--project=${project}`));
   assert.match(job, /PADDOCK_WEBKIT: "1"/, 'the projects exist only with PADDOCK_WEBKIT');
 });
@@ -1102,8 +1102,8 @@ test('every e2e job of every kit app, ci.yml and debrief.yml runs on a port no o
 test('app-gates tests last-packages apart on Linux only, and a host leg leaves them out of clippy, tests and doc tests', () => {
   const gates = read(join(ACTIONS, 'app-gates', 'action.yml'));
   assert.match(gates, /for pkg in \$LAST_PACKAGES; do exclude\+=\(--exclude "\$pkg"\); last\+=\(-p "\$pkg"\); done/, 'one list feeds the exclusions and the separate run');
-  assert.match(gates, /step \$\{wrap\[@\]\+"\$\{wrap\[@\]\}"\} cargo nextest run --workspace \$\{exclude\[@\]\+"\$\{exclude\[@\]\}"\}/, 'the workspace run never includes them');
-  assert.match(gates, /if \[ "\$RUNNER_OS" = Linux \] && \[ \$\{#last\[@\]\} -gt 0 \]; then step \$\{wrap\[@\]\+"\$\{wrap\[@\]\}"\} cargo nextest run \$\{last\[@\]\+"\$\{last\[@\]\}"\}/, 'Linux runs them after the rest');
+  assert.match(gates, /sel=\(--workspace \$\{exclude\[@\]\+"\$\{exclude\[@\]\}"\}/, 'the workspace run never includes them');
+  assert.match(gates, /if \[ "\$RUNNER_OS" = Linux \] && \[ \$\{#last\[@\]\} -gt 0 \]; then\n\s+sel=\(\$\{last\[@\]\+"\$\{last\[@\]\}"\}/, 'Linux runs them after the rest');
   assert.match(gates, /step cargo clippy --workspace \$\{hostexclude\[@\]\+"\$\{hostexclude\[@\]\}"\}/, 'clippy: excluded on a host only');
   assert.match(gates, /step cargo test --workspace \$\{hostexclude\[@\]\+"\$\{hostexclude\[@\]\}"\} --doc/, 'doc tests: excluded on a host only');
   assert.match(read(join(WORKFLOWS, 'ci.yml')), /rust-checks: \$\{\{ matrix\.rust_checks \}\}/, 'ci.yml hands rustChecks to app-gates');

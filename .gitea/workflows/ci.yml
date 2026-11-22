@@ -95,6 +95,13 @@ jobs:
       rerun_jobs: ${{ steps.plan.outputs.rerun_jobs }}
       crate_legs: ${{ steps.plan.outputs.crate_legs }}
       paddock_dev_legs: ${{ steps.plan.outputs.paddock_dev_legs }}
+      # A member run (a dispatch with a base): the nextest filterset of the packages of that workspace the change reaches (empty: every
+      # test, and always so on main, a tag and a manual run with no base: the final head's full run). The Linux crate tests run
+      # whole under coverage in `crates`.
+      # Whether the WebKit tests run: the e2e-webkit job and the scope this run declares (ADR 0113) read the one value of the planner.
+      webkit: ${{ steps.plan.outputs.webkit }}
+      crates_filter: ${{ steps.plan.outputs.crates_filter }}
+      paddock_dev_filter: ${{ steps.plan.outputs.paddock_dev_filter }}
     env:
       PADDOCK_DEV_DOWNLOAD: ${{ (inputs.release == true || startsWith(github.ref, 'refs/tags/')) && '0' || '' }}
     steps:
@@ -117,6 +124,17 @@ jobs:
             grep -Eq '^[[:space:]]*run: \./dev gates check( --warn)?$' "$f" || { echo "::error file=$f::C100 is not wired: no line runs ./dev gates check. Fix: restore the line (ADR 0060 section 4)."; exit 1; }
           done
 
+      # ER-49, test a commit once: a push to main of a commit that a complete green run of this workflow already tested (the train's
+      # dispatch, when main fast-forwards to its head) ends here, with that run named in the summary. Only a full green run with
+      # no FLAKY test counts (tag.yml's verdict reader needs one); anything unreadable runs the commit (./dev ci reuse fails open).
+      - name: Reuse a full green run of this commit
+        id: reuse
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        env:
+          PLAN_TOKEN: ${{ github.token }}
+          PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+        run: ./dev ci reuse --workflow ci.yml
+
       - name: Affected projects
         id: plan
         env:
@@ -130,18 +148,26 @@ jobs:
           PLAN_SINCE_RUN: ${{ github.event.inputs.since_run }}
           # The crate and paddock-dev legs when the plan names none of its own (every run but a rerun of their failures).
           PLAN_OS_LEGS: '[{"os":"ubuntu-latest"},{"os":"windows-latest"},{"os":"macos-latest"}]'
-          # The scope of this run (tests everything its plan can reach, not a diff from a base or a rerun of failures): a push to
-          # main, an app's own gates, a manual run with no base. The line `plan verdict: complete=` at the end of the step is what
-          # `./dev ci verdict` reads (plan_since::COMPLETE_LINE); this one is only the scope.
+          # The scope of a rerun planner's reading of this run (plan_since::MODE_LINE). It is not the verdict: `./dev plan --ci` prints
+          # the line `plan scope: {json}` (ADR 0113), what the run does against what a push to main does, and `./dev ci verdict`
+          # compares them. No line of this workflow decides "complete".
           PLAN_MODE_FULL: ${{ github.event_name == 'push' || inputs.app != '' || (github.event_name == 'workflow_dispatch' && github.event.inputs.base == '' && github.event.inputs.since_run == '') }}
+          # A reused run (the step above): the planner switches every job off and declares that it ran nothing; the reused run decides
+          # the commit.
+          PLAN_REUSE: ${{ steps.reuse.outputs.reuse }}
+          EVENT: ${{ github.event_name }}
         run: |
           echo "plan mode: full=$PLAN_MODE_FULL"
           ./dev plan --ci
           grep -q '^crate_legs=' "$GITHUB_OUTPUT" || echo "crate_legs=$PLAN_OS_LEGS" >> "$GITHUB_OUTPUT"
           grep -q '^paddock_dev_legs=' "$GITHUB_OUTPUT" || echo "paddock_dev_legs=$PLAN_OS_LEGS" >> "$GITHUB_OUTPUT"
-          # After the plan decided: complete only for a full run that is not a rerun of failures (plan_since::COMPLETE_LINE).
+          # REPORT-ONLY PHASE (ER-41, ADR 0113): until docs/ci-scope-first-runs.toml names ci.yml, `./dev ci verdict` still decides on this
+          # line (and prints the scope view the planner declared above as a notice). `./dev ci scope-record --workflow ci.yml --run <id>`
+          # records the first green scope run and switches the reader; this block is deleted in the same change (conformance fails
+          # while a recorded producer still prints it). The condition is the one reviewed on 2026-11-21: a push to main's scope, WebKit
+          # included, never an app-only dispatch, a rerun or a reused run.
           complete=false
-          if [ -z "$PLAN_SINCE_RUN" ] && [ "$PLAN_MODE_FULL" = true ]; then complete=true; fi
+          if [ -z "$PLAN_SINCE_RUN" ] && [ "$PLAN_MODE_FULL" = true ] && [ "$PLAN_REUSE" != true ] && [ -z "$PLAN_APP" ] && { [ "$EVENT" = push ] || [ -n "$PLAN_WEBKIT" ]; }; then complete=true; fi
           echo "plan verdict: complete=$complete"
 
   # C102 (ADR 0072): every listen site of the Rust sources is in docs/ipc-endpoints.toml with an ending test or a reason, and the
@@ -326,7 +352,7 @@ jobs:
   e2e-webkit:
     name: reference apps in WebKit (macOS)
     needs: [plan]
-    if: ${{ needs.plan.outputs.ui == 'true' && (inputs.webkit == true || (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))) || contains(fromJSON(needs.plan.outputs.rerun_jobs || '[]'), 'e2e-webkit')) && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["e2e-webkit"]'), 'e2e-webkit') }}
+    if: ${{ needs.plan.outputs.ui == 'true' && (needs.plan.outputs.webkit == 'true' || contains(fromJSON(needs.plan.outputs.rerun_jobs || '[]'), 'e2e-webkit')) && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["e2e-webkit"]'), 'e2e-webkit') }}
     runs-on: macos-latest
     env:
       # A run for a tag builds the tool from source (ADR 0022: release and tag jobs bypass every cache); other runs may download it.
@@ -1053,9 +1079,11 @@ jobs:
           # network service went away is only in there).
           PADDOCK_TEST_BROWSER_LOG: ${{ runner.os == 'Windows' && format('{0}/chrome-logs', runner.temp) || '' }}
           FILTER: ${{ matrix.filter }}
+          PACKAGE_FILTER: ${{ needs.plan.outputs.crates_filter }}
         run: |
           filter=()
-          if [ -n "$FILTER" ]; then echo "::notice::nextest reruns only the failed tests: $FILTER"; filter=(-E "$FILTER" --no-tests=warn); fi
+          if [ -n "$FILTER" ]; then echo "::notice::nextest reruns only the failed tests: $FILTER"; filter=(-E "$FILTER" --no-tests=warn)
+          elif [ -n "$PACKAGE_FILTER" ]; then echo "::notice::nextest runs only the packages this change reaches (a member run): $PACKAGE_FILTER"; filter=(-E "$PACKAGE_FILTER" --no-tests=warn); fi
           cargo nextest run --workspace --all-features --profile ci ${filter[@]+"${filter[@]}"}
 
       - uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v3
@@ -1535,9 +1563,11 @@ jobs:
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/paddock-dev
         env:
           FILTER: ${{ matrix.filter }}
+          PACKAGE_FILTER: ${{ needs.plan.outputs.paddock_dev_filter }}
         run: |
           filter=()
-          if [ -n "$FILTER" ]; then echo "::notice::nextest reruns only the failed tests: $FILTER"; filter=(-E "$FILTER" --no-tests=warn); fi
+          if [ -n "$FILTER" ]; then echo "::notice::nextest reruns only the failed tests: $FILTER"; filter=(-E "$FILTER" --no-tests=warn)
+          elif [ -n "$PACKAGE_FILTER" ]; then echo "::notice::nextest runs only the packages this change reaches (a member run): $PACKAGE_FILTER"; filter=(-E "$PACKAGE_FILTER" --no-tests=warn); fi
           cargo nextest run --profile ci --locked --no-fail-fast ${filter[@]+"${filter[@]}"}
 
       # Licences, advisories, sources (tools/paddock-dev/deny.toml, the crates' rules); the image has cargo-deny.

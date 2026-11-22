@@ -115,10 +115,23 @@ jobs:
           workflow: debrief.yml
           dev-token: ${{ secrets.BUILD_INPUTS_TOKEN }}
 
+      # ER-49, test a commit once: a push to main of a commit that a complete green run of this workflow already tested (the train's
+      # dispatch, when main fast-forwards to its head) ends early. Only a full green run with no FLAKY test counts (tag.yml's verdict
+      # reader needs one); anything unreadable runs the commit (./dev ci reuse fails open).
+      - name: Reuse a full green run of this commit
+        id: reuse
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        shell: bash
+        env:
+          PLAN_TOKEN: ${{ github.token }}
+          PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+        run: ./dev ci reuse --workflow debrief.yml
+
       - name: Decide
         id: plan
         shell: bash
         env:
+          REUSE: ${{ steps.reuse.outputs.reuse }}
           EVENT: ${{ github.event_name }}
           REF: ${{ github.ref }}
           SHA: ${{ github.sha }}
@@ -153,13 +166,21 @@ jobs:
               echo "::notice::commit is tagged $tag; the tag run is the gate."
             fi
           fi
+          if [ "$REUSE" = true ]; then
+            run=false
+            echo "::notice::a full green run already tested this commit; this run reuses it."
+          fi
           echo "run=$run" >> "$GITHUB_OUTPUT"
-          # The line `./dev ci verdict` trusts (plan_since::COMPLETE_LINE), printed after every decision above: the plan ran its jobs,
-          # this is not a rerun of failures and the mode is full. The scope line at the top is logged before these decisions, so a
-          # run skipped for a train or an unchanged main, or a since_run dispatch, would pass for full on it.
+          # The scope this run declares, printed after every decision above (ADR 0113): what the run did against what a push to main
+          # does, which `./dev ci verdict` compares. A run skipped for a train, an unchanged main, a tagged commit or a reuse ran
+          # nothing (run=false); a since_run dispatch is a rerun; a run that is not full tests one engine, a full run both.
+          # REPORT-ONLY PHASE (ER-41, ADR 0113): until docs/ci-scope-first-runs.toml names debrief.yml, `./dev ci verdict` still decides on
+          # the line below and prints the scope view as a notice. Recording the first green scope run (`./dev ci scope-record`) switches
+          # the reader; the block is deleted in the same change.
           complete=false
           if [ "$run" = true ] && [ -z "$PLAN_SINCE_RUN" ] && [ "$PLAN_MODE_FULL" = true ]; then complete=true; fi
           echo "plan verdict: complete=$complete"
+          ./dev ci scope --workflow debrief.yml --app debrief --full "$PLAN_MODE_FULL" --run "$run" --since-run "$PLAN_SINCE_RUN" --full-engines chromium,webkit
 
       # ADR 0060 3.2: the lint-adoption ratchet of Debrief (docs/gates.toml [[ratchet]] C13) must be empty before the release it names
       # (debrief-v1.2.0) or a later one is tagged. A tag run refuses at once, before anything is built. Only the ratchets of this

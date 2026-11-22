@@ -404,27 +404,162 @@ fn fixture_with_origin() -> (tempfile::TempDir, PathBuf) {
 
 #[test]
 fn recorded_command_line_cases_match_the_planners_answers_on_the_fixture_repository() {
-    let (_keep, root) = fixture_with_origin();
+    let (_keep, shared_root) = fixture_with_origin();
     let mut failures = Vec::new();
     let cases = cli_cases();
     assert!(cases.len() >= 25, "the recorded command line cases");
     for case in &cases {
         let name = case["name"].as_str().unwrap();
-        let expected: Value =
-            serde_json::from_str(&std::fs::read_to_string(golden_dir().join("expected/cli").join(format!("{name}.json"))).unwrap())
-                .unwrap();
+        // A case with an `edit` ({path: text}) runs on its own copy of the fixture with one more commit that writes those files, the
+        // change of a member's branch.
+        let own = case.get("edit").and_then(Value::as_object).map(|edit| {
+            let (keep, root) = fixture_with_origin();
+            for (path, text) in edit {
+                std::fs::write(root.join(path), text.as_str().unwrap()).unwrap();
+            }
+            git(&root, &["add", "-A"]);
+            git(&root, &["commit", "-q", "-m", "member"]);
+            (keep, root)
+        });
+        let root = own.as_ref().map_or(&shared_root, |(_, r)| r);
+        let recorded = std::fs::read_to_string(golden_dir().join("expected/cli").join(format!("{name}.json"))).ok();
         let mut program = crate::dev_bin::command();
         program.arg("plan");
-        let got = run_cli(&mut program, &root, case);
+        let got = run_cli(&mut program, root, case);
         if bless() {
             record(&golden_dir().join("expected/cli").join(format!("{name}.json")), &got);
             continue;
         }
-        if got != expected {
-            failures.push(format!("{name}:\n  expected {expected}\n  got      {got}"));
+        let expected: Option<Value> = recorded.map(|t| serde_json::from_str(&t).unwrap());
+        if expected.as_ref() != Some(&got) {
+            failures.push(format!("{name}:\n  expected {expected:?}\n  got      {got}"));
         }
     }
     assert!(failures.is_empty(), "{}\n{REGENERATE}", failures.join("\n"));
+}
+
+/// The `crates_filter` and `paddock_dev_filter` lines `./dev plan --ci` wrote for `event` with `base`, on the fixture after one more
+/// commit that touches only the leaf crate `crates/b`.
+fn package_filters(event: &str, base: &str, app: Option<&str>) -> (String, String, String) {
+    let (_keep, root) = fixture_with_origin();
+    std::fs::write(root.join("crates/b/src/lib.rs"), "// a member's one change\npub fn b() {}\n").unwrap();
+    git(&root, &["add", "-A"]);
+    git(&root, &["commit", "-q", "-m", "member"]);
+    let mut env = serde_json::Map::new();
+    env.insert("GITHUB_EVENT_NAME".into(), json!(event));
+    // A push is a push to main (the ref ci.yml's reuse and full-run rules read); the others run on a branch.
+    env.insert(
+        "GITHUB_REF".into(),
+        json!(if event == "push" { "refs/heads/main" } else { "refs/heads/topic" }),
+    );
+    if !base.is_empty() {
+        env.insert("PLAN_BASE".into(), json!(base));
+    }
+    if let Some(app) = app {
+        env.insert("PLAN_APP".into(), json!(app));
+    }
+    let mut program = crate::dev_bin::command();
+    program.arg("plan");
+    let got = run_cli(&mut program, &root, &json!({"args": ["--ci"], "env": env}));
+    assert_eq!(got["code"], 0, "{got}");
+    let out = got["outputs"].as_str().unwrap_or_default().to_string();
+    let line = |k: &str| out.lines().find_map(|l| l.strip_prefix(&format!("{k}="))).map(str::to_string);
+    (
+        line("crates_filter").expect("the output crates_filter is always written"),
+        line("paddock_dev_filter").expect("the output paddock_dev_filter is always written"),
+        out,
+    )
+}
+
+/// D-member (2026-11-21): a member run (a dispatch with a base) narrows nextest to the packages the change reaches; every full run
+/// (a push to main, a tag, the nightly, a manual run with no base, an app's gates) tests the whole workspace.
+#[test]
+fn a_member_run_narrows_nextest_to_the_reached_packages_and_a_full_run_never_does() {
+    let (crates, _, out) = package_filters("workflow_dispatch", "fixture-head", None);
+    assert_eq!(crates, "package(=fx-b)", "{out}");
+    // Positive control: the same change, the full runs. A missing narrowing would show here as the filter on a run that must be whole.
+    for (event, base, app) in [
+        ("push", "", None),
+        ("schedule", "", None),
+        ("workflow_dispatch", "", None),
+        ("workflow_dispatch", "fixture-head", Some("x")),
+    ] {
+        let (crates, paddock_dev, out) = package_filters(event, base, app);
+        assert_eq!((crates.as_str(), paddock_dev.as_str()), ("", ""), "{event} {base:?} {app:?}: {out}");
+    }
+}
+
+/// The scope declaration `./dev plan --ci` printed (ADR 0113) for the given workflow environment, and its `GITHUB_OUTPUT`, on the
+/// fixture repository.
+fn declared_scope(env: &[(&str, &str)]) -> (paddock_dev::run_scope::Declared, String) {
+    let (_keep, root) = fixture_with_origin();
+    let dir = tempfile::tempdir().unwrap();
+    let mut program = crate::dev_bin::command();
+    program.arg("plan").current_dir(&root);
+    for (k, _) in paddock_dev::process_env::vars() {
+        if k.starts_with("GITHUB_") || k.starts_with("PLAN_") {
+            program.env_remove(k);
+        }
+    }
+    program
+        .env("GITHUB_OUTPUT", dir.path().join("out"))
+        .env("GITHUB_STEP_SUMMARY", dir.path().join("summary"));
+    for (k, v) in env {
+        program.env(k, v);
+    }
+    let out = program.arg("--ci").output().unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let log = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    let declared = paddock_dev::run_scope::read(&log)
+        .unwrap_or_else(|| panic!("no `plan scope:` line in the log of {env:?}:\n{log}"))
+        .unwrap();
+    (declared, std::fs::read_to_string(dir.path().join("out")).unwrap_or_default())
+}
+
+/// ADR 0113: what a ci.yml plan declares for each kind of run, read back by the one reader. A push to main, a full dispatch with
+/// WebKit and a tag are complete; every smaller scope is not, each missing one dimension (positive controls: the same tree).
+#[test]
+fn ci_plan_declares_a_scope_that_is_complete_only_when_it_covers_a_push_to_main() {
+    let push = [("GITHUB_EVENT_NAME", "push"), ("GITHUB_REF", "refs/heads/main")];
+    let dispatch = |extra: &[(&'static str, &'static str)]| {
+        let mut e = vec![("GITHUB_EVENT_NAME", "workflow_dispatch"), ("GITHUB_REF", "refs/heads/topic")];
+        e.extend_from_slice(extra);
+        declared_scope(&e).0
+    };
+    // Complete: a push to main (WebKit always), a full dispatch with the webkit input, a tag.
+    let main = declared_scope(&push).0;
+    assert_eq!(main.complete(), Ok(()), "{}", main.line());
+    assert!(
+        main.need.engines.contains("webkit") && main.ran.engines.contains("webkit"),
+        "{}",
+        main.line()
+    );
+    assert_eq!(dispatch(&[("PLAN_WEBKIT", "1")]).complete(), Ok(()));
+    assert_eq!(
+        declared_scope(&[("GITHUB_EVENT_NAME", "push"), ("GITHUB_REF", "refs/tags/v1.0.0")])
+            .0
+            .complete(),
+        Ok(())
+    );
+    // One engine missing: the same full dispatch without the webkit input (the D4 hole).
+    let no_webkit = dispatch(&[]);
+    assert!(no_webkit.complete().unwrap_err().contains("engines webkit"), "{}", no_webkit.line());
+    // One app (and its legs) missing: a dispatch with `app` is that app only, with or without WebKit.
+    let app_only = dispatch(&[("PLAN_APP", "x"), ("PLAN_WEBKIT", "1")]);
+    assert!(app_only.complete().unwrap_err().contains("apps "), "{}", app_only.line());
+    // A member run (a base) covers less than the whole tree even with WebKit.
+    let member = dispatch(&[("PLAN_BASE", "fixture-head"), ("PLAN_WEBKIT", "1")]);
+    assert!(member.complete().is_err(), "{}", member.line());
+    // A reused run ran nothing; it also switches every job off.
+    let (reused, outputs) = declared_scope(&[
+        ("GITHUB_EVENT_NAME", "push"),
+        ("GITHUB_REF", "refs/heads/main"),
+        ("PLAN_REUSE", "true"),
+    ]);
+    assert!(reused.complete().is_err() && reused.ran.jobs.is_empty(), "{}", reused.line());
+    assert!(outputs.lines().any(|l| l == "rerun_jobs=[]"), "{outputs}");
+    // Every run names its workflow, so the reader ignores it for another.
+    assert_eq!(main.workflow, "ci.yml");
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
