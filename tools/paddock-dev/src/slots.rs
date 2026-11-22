@@ -368,8 +368,8 @@ fn holder_pid(root: &Path, id: SlotId) -> Value {
 /// `dev ci slot hold` (the holder).
 pub fn hold(a: &HoldArgs) -> Result<Report, CliError> {
     check_max(a.max)?;
-    // Before anything else: descriptors inherited from the job (a pipe the runner waits on) must not outlive the step.
-    paddock_proc::close_inherited();
+    // The descriptors inherited from the job (a pipe the runner waits on) were closed first thing in `main`: `spawn_detached_clearing_handles`
+    // marked this process (`paddock_proc::close_inherited_if_marked`).
     let locks = FsLocks::new(&a.root);
     let end = paddock_slots::hold_with(
         &locks,

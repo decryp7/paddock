@@ -62,7 +62,8 @@ const CLEARING_FLAGS: u32 = crate::CREATE_NO_WINDOW | 0x0000_0200;
 /// caller is single-threaded.
 ///
 /// Build `cmd` with [`crate::command`] and set its arguments, working directory and standard streams first. The flags set here
-/// replace any creation flags already on `cmd`. On Unix the started program should call [`close_inherited`] first.
+/// replace any creation flags already on `cmd`. On Unix the started program should call [`close_inherited_if_marked`] first thing in its `main`: the start marks the child
+/// ([`CLOSE_INHERITED_ENV`]), so no caller has to ask for it.
 ///
 /// # Errors
 /// [`DetachError::Spawn`] when the program could not be started.
@@ -95,7 +96,40 @@ pub fn spawn_detached_clearing_handles(cmd: &mut Command) -> Result<Child, Detac
     start(cmd)
 }
 
+/// The environment variable [`spawn_detached`] and [`spawn_detached_clearing_handles`] set on the child: a program that calls
+/// [`close_inherited_if_marked`] first thing in its `main` closes every descriptor it inherited, so no caller has to remember to.
+pub const CLOSE_INHERITED_ENV: &str = "PADDOCK_PROC_CLOSE_INHERITED";
+
+/// Whether an environment value marks the process to close what it inherited: exactly `1`.
+pub fn is_marked(value: Option<&str>) -> bool {
+    value == Some("1")
+}
+
+/// For the first line of a program's `main` (single-threaded still): when the starter marked this process
+/// ([`CLOSE_INHERITED_ENV`]), removes the marker (so this process's own children are not marked) and closes every inherited
+/// descriptor above 2 ([`close_inherited`], Unix). Returns whether it was marked. On Windows the starter's
+/// [`spawn_detached_clearing_handles`] keeps the handles from the child, so there is nothing to close here.
+pub fn close_inherited_if_marked() -> bool {
+    let marked = is_marked(std::env::var(CLOSE_INHERITED_ENV).ok().as_deref());
+    if marked {
+        // SAFETY: called first thing in `main`, before this process starts a thread, so nothing reads the environment concurrently.
+        #[allow(unsafe_code)]
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "single-threaded start of main: the marker must not reach this process's own children"
+        )]
+        unsafe {
+            std::env::remove_var(CLOSE_INHERITED_ENV);
+        }
+        #[cfg(unix)]
+        close_inherited();
+    }
+    marked
+}
+
 fn start(cmd: &mut Command) -> Result<Child, DetachError> {
+    // Whoever the child is, a program that calls `close_inherited_if_marked` first thing closes what it inherited.
+    cmd.env(CLOSE_INHERITED_ENV, "1");
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
@@ -270,6 +304,42 @@ pub fn keep_handles_from_children() -> std::io::Result<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Round 3 P2-2: a detached child is told, through the environment, to close what it inherited; the starter no longer has to
+    /// remember to do it in the child's main (the class of run 8019, seen three times).
+    #[cfg(unix)]
+    #[test]
+    fn both_detached_starts_mark_the_child_to_close_what_it_inherited() {
+        let d = tempfile::tempdir().unwrap();
+        for (i, clearing) in [false, true].into_iter().enumerate() {
+            let out = d.path().join(format!("marker-{i}"));
+            let mut cmd = crate::command("sh");
+            cmd.arg("-c").arg(format!(
+                "printf %s \"${CLOSE_INHERITED_ENV}\" > {}",
+                out.display()
+            ));
+            let mut child = if clearing {
+                spawn_detached_clearing_handles(&mut cmd)
+            } else {
+                spawn_detached(&mut cmd)
+            }
+            .unwrap();
+            assert!(child.wait().unwrap().success());
+            assert_eq!(
+                std::fs::read_to_string(&out).unwrap(),
+                "1",
+                "clearing: {clearing}"
+            );
+        }
+    }
+
+    #[test]
+    fn only_the_marker_value_one_marks_a_process() {
+        assert!(is_marked(Some("1")));
+        for no in [None, Some(""), Some("0"), Some("true"), Some("11")] {
+            assert!(!is_marked(no), "{no:?}");
+        }
+    }
 
     #[cfg(unix)]
     #[test]
