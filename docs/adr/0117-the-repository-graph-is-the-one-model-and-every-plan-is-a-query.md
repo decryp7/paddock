@@ -5,7 +5,10 @@
   WP-8). One independent review of this ADR runs beside the build; a P1 stops the build. The direction is the user's ("fix the
   graph first, and hold all trains until it lands"). Review round 1 (2026-11-23, at `a073aae56`) found 10 P1s and 8 P2s; the
   build stopped and every finding is answered in this text (§2 to §14, the work packages and the decisions); a second review round
-  follows. Cost: the user approved the increase over 8 days on 2026-11-23 "as long as it fixes the root cause once and for all", so
+  followed (3 P1s, answered), and round 3 (2026-11-23) found 2 P1s and 5 P2s, answered here without a design change: prose inside a
+  project folder is only `README*`, `CHANGELOG*`, `LICENSE*` and its `docs/` (§2) with a folder form of `reads` (§4); the FLAKY
+  "touched" test is strict in the interim and at ER-12's feature level after WP-3b (§6, the user's decision); cancelled runs, whole-tree
+  runs, `templates/**` and the escape records' retention (§6, §8); and content detection as an aid (D14, the user's addition). Cost: the user approved the increase over 8 days on 2026-11-23 "as long as it fixes the root cause once and for all", so
   the scope is the complete one (§14 says how each instance becomes impossible or checked).
 - Date: 2026-11-23
 - Related: ER-20 (bulk work, spawn budgets), ER-21 (a recurring class gets a redesign), ER-22 (share first; a value another
@@ -22,7 +25,9 @@
 - Number: 0117. Searched 2026-11-23: `git ls-tree docs/adr/` over every `origin` branch and every local branch, and `docs/adr/` of
   every worktree under the worktree root, again before the last commit. Highest found: 0116 on `origin`
   (`docs/adr-test-result-cache`); a second local 0116 on `feat/merge-regenerates` (to be renumbered); no 0117 anywhere.
-- Evidence heads (ADR 0091), read 2026-11-23 and again before the last commit: `origin/main` = `b3c254a2d`, then `d04af7b46` (one
+- Evidence heads (ADR 0091), read 2026-11-23 and again before the round-3 commit (unchanged: `origin/main` `d04af7b46`,
+  `origin/feat/repo-graph-model` `499ed5553`, `origin/fix/run-scope-reuse-p2` `bab7a4a97`, `origin/feat/os-scoped-tests` `c61339b9f`,
+  `origin/train/2026-11-22-20` `803aed12d`; `feat/verdict-one-green` not on origin yet): `origin/main` = `b3c254a2d`, then `d04af7b46` (one
   commit, the local sccache fix; no change to the planner, `verdict.rs` or `paddock-repo-graph`), `origin/train/2026-11-22-20` =
   `803aed12d` (this branch's base), `origin/fix/run-scope-reuse-p2` = `bab7a4a97` (ADR 0113), `origin/feat/os-scoped-tests` =
   `c61339b9f` (`hostTests`, C155), `origin/feat/infra-only-smoke` = `29864b700` (the ADR 0113 amendment, docs only; its planner work
@@ -85,21 +90,32 @@ drafted, `cargo`, `npm`, `ci` moved from `gates/ci.rs`, `os`).
 Every tracked file belongs to exactly one *owner* node, by this precedence (review P1-4):
 
 1. a named input (§3) claims it (the root `package.json`, `.gitattributes`, `docs/lessons.md`);
-2. otherwise the deepest **project folder** that contains it. Only **prose** (`*.md`, `*.txt`, `LICENSE*`) in a project folder is
-   `docs` for that project, and a `reads` edge (§4) or a declared input raises it to `code` (`apps/dyno/CHANGELOG.md` is compiled in
-   by `apps/dyno/app/src-tauri/src/lib.rs:276` and is the `changelogs` input). **Every other file in a project folder is `code`** for
-   that project (review round 2, P1-A): data, fixtures, JSON and `src-tauri/capabilities/*.json`, which `tauri-build` reads with no
-   literal path (code for the app's Rust half);
+2. otherwise the deepest **project folder** that contains it. Only **prose** in a project folder is `docs` for that project, and
+   prose there is narrow (review round 3, P1-A): a file named `README*`, `CHANGELOG*` or `LICENSE*`, or a file under the project's
+   own `docs/` folder. A `reads` edge (§4) or a declared input raises even that to `code` (`apps/dyno/CHANGELOG.md` is compiled in by
+   `apps/dyno/app/src-tauri/src/lib.rs:276` and is the `changelogs` input). **Every other file in a project folder is `code`** for
+   that project (review round 2, P1-A; round 3, P1-A): data, fixtures, JSON, `src-tauri/capabilities/*.json` (which `tauri-build`
+   reads with no literal path), and every `*.txt` and other `*.md`. Of the 236 tracked `.txt` files in project folders (counted at
+   `402e1d8a4`) most are test data
+   read by a folder path, not by a file literal: `crates/paddock-service/tests/recorded/*.txt`
+   (`crates/paddock-service/src/recorded_tests.rs:15`, a folder join), `tools/paddock-dev/tests/ci-runs/timings`
+   (`tools/paddock-dev/src/ci_runs/timings.rs:921`, a `concat!` folder), `tests/fixtures/check/cases`, the
+   `debrief-plugin-windows` fixtures, `conformance/ci/ports.txt` and `kept-folders.txt`, and `paddock-names/src/words.txt`
+   (`include_str!`). Control: a `.txt` under a project's `tests/` reaches `code`;
 3. otherwise a declared owner rule for the paths outside every project (`docs/**`, `diagrams/**`, root `*.md`, `LICENSE*`,
    `.gitea/**/*.md`, `spikes/**`). There is no catch-all rule. Under a doc owner only prose and documentation images are `docs`:
-   **every other file must be a named input**, or it is unowned. The registers under `docs/` are inputs that reach their checks:
+   **every other file must be a named input**, or it is unowned. Content detection is an aid here and nowhere else (D14): with the
+   `content` feature, a file under a doc owner whose first kilobyte is binary (an image or other binary asset, read as bat and
+   ripgrep do with `content_inspector`) is a documentation asset without being listed, and a file with an image extension whose
+   content is text is not (control: a renamed `.png` that holds text is unowned); text files there still need a named input. The registers under `docs/` are inputs that reach their checks:
    `docs/repo-graph.toml` (paddock-dev, conformance), `docs/gates.toml` (paddock-dev, conformance), `docs/generators.toml`
    (paddock-dev), `docs/known-copies.toml` (tools, conformance), `docs/harnesses.toml`, `docs/ipc-endpoints.toml` and its ratchet
    (conformance), `docs/ci-scope-first-runs.toml` (paddock-dev); the lessons and rules files reach C145 and the tools tests as `code`
    (G13). The control: a `.toml` under `docs/` that no input names makes the owner check fail and the plan answer everything.
 
 A file none of these claims is **unowned**: the plan itself answers "everything" for that run and prints the file in an `::error::`
-line with the next step (declare an owner); the owner check runs inside the plan job, not only in a separate check, so it cannot be
+line with the next step (declare an owner) and the file's detected kind (JSON, TOML, binary or text, D14), so the declaration is
+quick; the owner check runs inside the plan job, not only in a separate check, so it cannot be
 skipped. It starts report-only (ER-41, review P2-6): until its first green run is recorded, an unowned file widens the plan to
 everything and nothing fails. An extractor that cannot read a file (`ExtractError`) puts that file's project on full in the same
 way (review round 2, P2-6).
@@ -160,7 +176,9 @@ one by one, each with the golden cases that cover it (§8).
 | `path-ref` | project → project | `frontendDist`, `tsconfig`, `angular.json`, ESLint config (today) |
 | `uses` | workflow/job/step/action → action, workflow → reusable workflow | the CI reader |
 | `runs` | step → script, step → project phase (`./dev ci run <p> <phase>`), step → test-target, contract check line → script (`node conformance/bin/paddock-conformance.mjs --only C13` in the app contracts of dyno, pitcrew, pitwall and spotter) | the CI reader plus the contract (review P1-10) |
-| `reads` | target → data file it reads at build or test time | `syn` over Rust: `include_str!`/`include_bytes!` (253 sites, 45 of them three folders up, for example `debrief-plugins/tests/it/windows_markers.rs:89,106` reading `debrief-plugin-windows` fixtures), `#[path]`, `build.rs` `rerun-if-changed` (13 build scripts); string-literal paths a test passes to a script or a file read (`conformance/test/cache-report.test.mjs:9` runs `conformance/ci/cache-report.sh`); declared runtime reads (`reads` in `paddock.ci.json`). A read file selects its reader target; a script run by a path that does not resolve runs its owning project in full (review P1-1, P1-2) |
+| `reads` | target → data file it reads at build or test time | `syn` over Rust: `include_str!`/`include_bytes!` (253 sites, 45 of them three folders up, for example `debrief-plugins/tests/it/windows_markers.rs:89,106` reading `debrief-plugin-windows` fixtures), `#[path]`, `build.rs` `rerun-if-changed` (13 build scripts); string-literal paths a test passes to a script or a file read (`conformance/test/cache-report.test.mjs:9` runs `conformance/ci/cache-report.sh`); declared runtime reads (`reads` in `paddock.ci.json`). A `reads` edge may name a **folder** (review round 3, P1-A): a literal
+folder path joined at run time (`crates/paddock-service/src/recorded_tests.rs:15` joins `tests/recorded`,
+`tools/paddock-dev/src/ci_runs/timings.rs:921` builds `tests/ci-runs/timings` with `concat!`) reads every file under it, so a change to any of them selects the reader. A read file selects its reader target; a script run by a path that does not resolve runs its owning project in full (review P1-1, P1-2) |
 | `imports` | script → script, test-file → module (relative TS/JS imports, transitively), test-file → package | `oxc_parser` and `oxc_resolver` with **no `node_modules`** (CI's plan job has none): a workspace package resolves through the crate's npm graph, an external package is a package-level edge, an unresolved relative import runs the importer's project in full; a test shows the same answer with and without `node_modules` (review P1-7). The text scanner `imports.rs` (`feat/repo-graph-model` `de3f23c08`, §13) is the fallback |
 | `tests` | test-target → test-file → project | Cargo targets from `cargo metadata` (`targets[].src_path` and `kind`, review P2-5; a file under `tests/` that is no target's `src_path` is a helper of every test target of its crate), contract runner globs |
 | `input` / `output` | generator → files or nodes | `docs/generators.toml` `outputs`, inputs as references to nodes (`kind:project/cargo` manifests and their closure, `paddock.ci.json`, `wf:ci.yml`, `action:*`, the Rust sources of TS bindings, `scripts/notices.sh`) instead of hand globs |
@@ -212,12 +230,27 @@ recorded (ADR 0113 §5) the old `plan verdict: complete=` line also says false w
 - scope: `Complete` (the selection was full for everything its plan reached, no step or test was skipped because of a failure, and
   its base was itself `Complete` with a green result) or `Partial` (anything less: smoke, affected tests, a rerun, a skipped step);
 - result: `Green` (every test passed on its first try), `GreenWithFixItems` (every failure is a FLAKY test that passed on its one
-  retry, in a target the run's own reach did **not** mark `code` or `test`), `Red` (a test failed both tries, a FLAKY test sits in a
-  target the change touched, or a non-test step failed) or `NotMeasured` (a report cannot be read).
+  retry, in a target the change did **not** touch, as defined below), `Red` (a test failed both tries, a FLAKY test sits in a target
+  the change touched, or a non-test step failed) or `NotMeasured` (a report cannot be read).
+- A **cancelled** run (or job) is `Partial × NotMeasured`: never green, never red, never a base (ER-33: cancelled is not a failure
+  and not a pass; review round 3, P2).
+- A **whole-tree** run (the nightly, a tag, `--all`) is `Complete` whatever its base: it tested everything, so the base recursion
+  stops there (review round 3, P2).
+
+**"Touched" for a FLAKY test** (review round 3, P1-C; the user's decision of 2026-11-23: a strict interim, then the feature level):
+
+- **TEMPORARY, until module edges land (WP-3's `imports`/`reads` and WP-6's Rust `use crate::` edges):** a FLAKY test in any crate or
+  app that the run's reach marks (any kind) makes the run `Red`. This is stricter than ER-12 on purpose, because without module
+  edges the reader cannot tell which feature a test exercises; the user chose strict over guessed.
+- **Then, exactly ER-12's feature level** (WP-3b, below): a FLAKY test makes the run `Red` only if the test's own file changed, or the
+  change reaches that file through `imports`, `reads` or Rust `use crate::` edges; for an e2e spec, if the spec, its helpers (its
+  import closure) or the contract's declared feature sources for that spec changed. Otherwise it is a fix item
+  (`GreenWithFixItems`). Control: a fixture where the change reaches a FLAKY test's file through one import edge is `Red`;
+  removing that import edge makes it `GreenWithFixItems`.
 
 `Complete × Green` and `Complete × GreenWithFixItems` are the only green outcomes, for every reader: the landing check, the base of a
 push or landing run, `ci reuse` (ER-49) and the run scope. A tag needs `Complete × Green`; a tag's run on a `GreenWithFixItems`
-commit is the one allowed flake retry (ER-12, ER-49). Controls: a FLAKY test inside a touched target makes the run `Red`; a step
+commit is the one allowed flake retry (ER-12, ER-49). Controls: a FLAKY test inside a touched target makes the run `Red` (in the interim, any reached crate or app); a step
 skipped because an earlier one failed makes it `Partial`; a both-tries failure is `Red`; an unreadable report is `NotMeasured`.
 
 FLAKY comes from the run's own reports, nextest JUnit and Playwright JSON, through one accessor pinned to the run (review round 2,
@@ -323,7 +356,8 @@ The regenerated goldens (ER-40, with their generators) carry exactly these diffe
 The net is wider than the goldens (review P1-6):
 
 - **Train replay.** Every non-merge member commit of trains 15 to 20 is planned against its parent by the old and the new planner;
-  differences outside the list above are defects.
+  differences outside the list above are defects. The replay includes the commits that touch `templates/**`, which reaches
+  `tools` and `paddock-dev` (`tools/paddock-dev/src/brief_check.rs:609` compiles a template in with `include_str!`; review round 3, P2).
 - **One golden per migrated rule.** Each regex table and content rule that moves gets its own golden before it moves:
   `guards_changed`, `PER_MACHINE_INPUT`, `APP_CAPABILITY_INPUT`, `NOTICES_INPUTS`, `C99_INPUT`, `PARITY_INPUT`, `HOOKS_PARITY_INPUT`,
   `GENERATED`, `LINT_WIRING`, `OWNERS`, `.gitattributes`, `rust-toolchain`, `lock_diff`.
@@ -332,7 +366,9 @@ The net is wider than the goldens (review P1-6):
   the selection of every commit since the last green nightly; a test that fails in the nightly, bisected to a commit whose selection
   did not include it, is an escape, reported with the commit and the dropped edge. The bisect is bounded (review round 2, P2-7): at most
   the commits since the last green nightly, capped at 30, and only the failing test's own target, at most 10 runs of it per nightly;
-  past the bound the escape is reported `not measured` with the range, never guessed. The old rule tables are deleted only after five
+  past the bound the escape is reported `not measured` with the range, never guessed. The selection records are kept for 14 days
+  (review round 3, P2): long enough to cover the span from one green nightly to the next across a weekend and a paused nightly, and
+  pruned oldest first by the sweep of ER-51; a record older than the last green nightly before the window is never needed. The old rule tables are deleted only after five
   consecutive nightlies with zero escapes (D12); until then they stay behind `--compare`.
 
 **Positive controls** (ER-33, review P1-5), each a fixture that removes what the control watches and asserts that reach or
@@ -391,7 +427,7 @@ file reads batched. Extractors run in parallel over files (rayon, cores minus on
 |---|---|---|
 | ADR 0113, `run_scope` and the verdict reader | `origin/fix/run-scope-reuse-p2` `bab7a4a97` (in train 21's local work) | first member of the graph train |
 | OS-scoped tests, `hostTests`, C155 | `origin/feat/os-scoped-tests` `c61339b9f` | second member of the graph train (WP-6 builds on it) |
-| The TS import scanner (`imports.rs`) and the WP-1 model | `origin/feat/repo-graph-model` `de3f23c08`, `499ed5553` (§13) | the graph train's WP-1 member |
+| The TS import scanner (`imports.rs`) and the WP-1 model | `origin/feat/repo-graph-model` `de3f23c08`, `499ed5553`; the round-2 fixes `402e1d8a4` (pushed with the WP-1 build, a fast-forward from the local branch `feat/repo-graph-wp123`, §13) | the graph train's WP-1 member |
 
 The graph train is the one train while the others are held (D9): 0113 and os-scoped first, then WP-1 to WP-5 with WP-8, each member
 gated as ER-8 says; WP-6, WP-7 and WP-9 follow in the next train.
@@ -523,6 +559,7 @@ and Nx plugins (`createNodes` and `createDependencies`, nx.dev "Extending the Pr
 | WP-1 | Node and edge types, the `Extractor` port and its registry (§15), the inputs file and accessor, owners with precedence and fail-closed in the plan job, content extractors (`attributes`, `npm-lock`, `guards`), the bulk reader with a spawn budget, `reach` with kinds, the positive-control harness, the benchmark | 1.7 |
 | WP-2 | The CI reader moved into the crate, `uses`/`runs` edges (contract check lines included), action and script nodes, mention vs use (G4), plan-job inputs (G5); `plan_gitea` deleted | 1.3 |
 | WP-3 | Test files and targets from `src_path`, the `reads` extractor (`syn`), `imports` through oxc without `node_modules` and its determinism test, contract `tests`/`smoke` declarations, `selection`, per-package runs (G11), the ci.yml and app-gates wiring | 2.0 |
+| WP-3b | The FLAKY "touched" test at ER-12's feature level (§6): replaces the interim (any reached crate or app is `Red`) once WP-3's `imports`/`reads` edges and WP-6's Rust module edges land; the control of §6 (one import edge makes it `Red`, removing it makes it a fix item) | 0.3 |
 | WP-4 | Run scope v2, complete only on a complete base, the base from the verdict reader, the smoke-then-code golden; the reader fixes of §6 (first-parent candidates, one typed outcome shared with the landing check, FLAKY-only runs as `GreenWithFixItems`, reuse through it), failing tests first | 1.3 |
 | WP-5 | `--compare` with dropped targets, train replay (trains 15 to 20), one golden per migrated rule, the listed differences, regenerated goldens | 2.0 |
 | WP-6 | OS derivation with the wider signals, the `Command` measurement, `hostTests` cut to exceptions, C155 as the consistency check | 1.3 |
@@ -530,7 +567,7 @@ and Nx plugins (`createNodes` and `createDependencies`, nx.dev "Extending the Pr
 | WP-8 | The landing run tests the train's diff (D11, G1, G14) | 1.0 |
 | WP-9 | The escape monitor and the five-nightly gate before the old tables go (D12) | 0.7 |
 | | The no-path-rule conformance check, positive controls for every node, edge and extractor kind (§8), fail-closed tests | included above |
-| | **Total** | **12.1** (accepted 6.3; spent so far about 0.3 on WP-1). Approved by the user on 2026-11-23 ("over 8 d is OK as long as it fixes the root cause once and for all") |
+| | **Total** | **12.4** (WP-3b added in review round 3, 0.3) (accepted 6.3; spent so far about 0.3 on WP-1). Approved by the user on 2026-11-23 ("over 8 d is OK as long as it fixes the root cause once and for all") |
 
 The .NET and C/C++ adapters are not in this total (about 1 day each, when wanted). The total grew 92 % over the accepted 6.3 days, from the review's findings (the `reads` edge, the migration net and the escape
 monitor are most of it). It went back to the user (ER-37), who approved it on 2026-11-23 on the condition that it fixes the root
@@ -570,6 +607,12 @@ cause once and for all: all nine work packages, in the order of §11.
 - **D12. When the old rule tables go** (review P1-6). (a) After five consecutive nightlies with zero escapes (WP-9). (b) When the
   goldens match (WP-5). *Recommended: (a)*: Google TAP and Meta keep a full-run safety net and measure escapes before they trust
   a selection.
+
+- **D14. Content detection is an aid, never a selector** (the user, 2026-11-23). With the `content` feature, the first kilobyte of a
+  file under a doc owner is inspected (`content_inspector`, as bat and ripgrep do: binary or text, and the encoding): a binary file
+  there is a documentation asset without being listed, a text file with an image extension is not, and the owner check's error
+  names each unowned file's detected kind. Selection stays decided by `reads` edges and the code-by-default rule; detection never
+  skips a test.
 
 - **D13. No database** (the user asked, 2026-11-23). The graph is built in memory per run from the commit's tree, within the 3 s / 5 s
   budget; persisted state lives only in stores that exist: test-result cache objects in RustFS S3 (ADR 0116), verdicts in the Gitea
