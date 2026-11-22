@@ -113,14 +113,16 @@ fn unlisting_local_sccache_goes_red_through_the_import_of_ci_setup_rust() {
 }
 
 #[test]
-fn dropping_the_declared_edge_exemption_goes_red_through_gates_command_importing_cli() {
+fn gates_command_importing_cli_again_goes_red_and_the_real_tree_has_no_such_edge() {
     let d = scratch();
-    edit_contract(d.path(), "tools/paddock-dev/paddock.ci.json", |v| {
-        assert!(
-            v["hostTests"].as_object_mut().unwrap().remove("edgeExempt").is_some(),
-            "the contract declares the exemption"
-        );
-    });
+    let command = d.path().join("tools/paddock-dev/src/gates/command.rs");
+    let text = std::fs::read_to_string(&command).unwrap();
+    assert!(
+        !text.contains("crate::cli"),
+        "gates::command is handed the command tree, it never imports cli"
+    );
+    // Positive control: the import the restructure removed, put back, is what C155 reports.
+    std::fs::write(&command, format!("{text}\nfn back() {{ let _ = crate::cli::Cli::command(); }}\n")).unwrap();
     let (findings, _) = run(d.path());
     assert!(
         findings

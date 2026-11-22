@@ -37,9 +37,6 @@ pub struct HostTests {
     pub modules: Vec<String>,
     /// Per host runner: more packages (a plain name) or prefixes (ending in `::`).
     pub only: BTreeMap<String, Vec<String>>,
-    /// Import edges conformance C155 does not follow: importer module to {imported module: why}. For a module that uses only an item of a
-    /// big module (`gates::command` reads the command tree of `cli`), where the import says nothing about behaviour per OS.
-    pub edge_exempt: BTreeMap<String, BTreeMap<String, String>>,
 }
 
 /// What one host leg runs: the packages to build and test (`-p`, empty: the workspace's) and the nextest filterset (empty: none).
@@ -108,25 +105,6 @@ impl HostTests {
                         h.skip.insert(pkg.clone(), list);
                     }
                 }
-                "edgeExempt" => {
-                    let Some(m) = val.as_object() else {
-                        return Err(format!("{at} must be an object of importer to {{imported: why}}"));
-                    };
-                    for (importer, targets) in m {
-                        let Some(t) = targets.as_object() else {
-                            return Err(format!("{at}.{importer} must be an object of imported module to the reason"));
-                        };
-                        for (target, why) in t {
-                            let Some(why) = why.as_str().filter(|w| w.len() >= 10) else {
-                                return Err(format!("{at}.{importer}.{target} needs a reason (a sentence)"));
-                            };
-                            h.edge_exempt
-                                .entry(importer.clone())
-                                .or_default()
-                                .insert(target.clone(), why.to_string());
-                        }
-                    }
-                }
                 "only" => {
                     let Some(m) = val.as_object() else {
                         return Err(format!("{at} must be an object of runner to entries"));
@@ -144,7 +122,7 @@ impl HostTests {
                 }
                 other => {
                     return Err(format!(
-                        "{what}: unknown `hostTests.{other}` (known: packages, skip, modules, only, edgeExempt)"
+                        "{what}: unknown `hostTests.{other}` (known: packages, skip, modules, only)"
                     ));
                 }
             }
@@ -215,13 +193,6 @@ impl HostTests {
         out.sort();
         out.dedup();
         out
-    }
-
-    /// Whether the import of module `target` by module `importer` is declared exempt (`edgeExempt`; the importer matches by prefix).
-    pub fn edge_is_exempt(&self, importer: &str, target: &str) -> bool {
-        self.edge_exempt
-            .iter()
-            .any(|(i, ts)| (importer == i || importer.starts_with(&format!("{i}::"))) && ts.contains_key(target))
     }
 
     /// Whether `package` is tested on `os` (a host runner): listed for every host, or for that one.
@@ -315,15 +286,6 @@ mod tests {
             and_filters("package(=p)", &s.scope("macos-latest").filter),
             "(package(=p)) & (not ((package(=p) & test(/^(?:model::|x::y::)/))))"
         );
-    }
-
-    #[test]
-    fn an_exempt_edge_is_named_with_its_reason_and_matches_by_importer_prefix() {
-        let h = parse(json!({"modules": ["m::"], "edgeExempt": {"gates::command": {"cli": "reads the command tree only"}}}));
-        assert!(h.edge_is_exempt("gates::command", "cli"));
-        assert!(h.edge_is_exempt("gates::command::sub", "cli"));
-        assert!(!h.edge_is_exempt("gates::command", "plan"), "another target is not exempt");
-        assert!(!h.edge_is_exempt("gates::tree", "cli"), "another importer is not exempt");
     }
 
     #[test]

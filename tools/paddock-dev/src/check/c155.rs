@@ -20,8 +20,7 @@
 //!    rule: `ci_setup_rust` imports `local_sccache` and `ci_run` imports `pre_push::exec`, so those keep their Windows and macOS tests.
 //!    A package in the contract's `lastPackages` is kept off the host legs by that older decision and is not read.
 //!    A package or module that only macOS tests (`only.macos-latest`) and holds Windows code (a cfg naming `windows`, a Windows API crate) is an
-//!    **os-code-windows** finding: that code would never run on Windows. An import edge the contract declares in `edgeExempt` (with its reason) is
-//!    not followed.
+//!    **os-code-windows** finding: that code would never run on Windows.
 //! 4. **stale-entry**: a name in `hostTests` that is no package of the workspace and no module of paddock-dev (a typo or a deleted crate).
 //! 5. **bad-contract**: a `hostTests` the reader refuses.
 //!
@@ -473,7 +472,7 @@ impl C155 {
                         .map(|n| segs[..n].join("::"))
                         .find(|p| src_modules.contains(p));
                     let Some(target) = target else { continue };
-                    if covered(&target, &on) || host.edge_is_exempt(&module, &target) || !seen.insert((f.clone(), target.clone())) {
+                    if covered(&target, &on) || !seen.insert((f.clone(), target.clone())) {
                         continue;
                     }
                     out.push(Finding::warn(

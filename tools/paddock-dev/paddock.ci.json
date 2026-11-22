@@ -106,11 +106,6 @@
         "sparse::",
         "worktree::"
       ]
-    },
-    "edgeExempt": {
-      "gates::command": {
-        "cli": "reads the command tree only (Cli::command()): the import says nothing about behaviour per OS, and the cli module imports every command"
-      }
     }
   }
 }

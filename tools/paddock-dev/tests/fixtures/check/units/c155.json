@@ -258,7 +258,7 @@
      "rule": 3,
      "file": "apps/x/paddock.ci.json",
      "line": 1,
-     "message": "[bad-contract] apps/x/paddock.ci.json: unknown `hostTests.pakages` (known: packages, skip, modules, only, edgeExempt)",
+     "message": "[bad-contract] apps/x/paddock.ci.json: unknown `hostTests.pakages` (known: packages, skip, modules, only)",
      "fix": "Fix `hostTests` (docs/research/2026-11-22-os-scoped-tests.md)."
     },
     {

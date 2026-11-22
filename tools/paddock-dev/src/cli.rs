@@ -803,15 +803,18 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
         } => gates::command::model(a.root.as_deref()),
         Command::Gates {
             command: GatesCommand::Check(a),
-        } => gates::command::check(&gates::command::CheckArgs {
-            root: a.root,
-            release_tag: a.release_tag,
-            warn: a.warn,
-            base: a.base,
-        }),
+        } => gates::command::check(
+            &gates::command::CheckArgs {
+                root: a.root,
+                release_tag: a.release_tag,
+                warn: a.warn,
+                base: a.base,
+            },
+            dev_command_paths(),
+        ),
         Command::Gates {
             command: GatesCommand::List(a),
-        } => gates::command::list(a.root.as_deref(), &a.base),
+        } => gates::command::list(a.root.as_deref(), &a.base, dev_command_paths()),
         Command::Gates {
             command: GatesCommand::Inputs,
         } => gates::command::inputs(),
@@ -914,4 +917,25 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
             head: a.head,
         }),
     }
+}
+
+/// Every visible subcommand path of `./dev` (`ci run`, `gates check`, ...), read from the command tree this module defines: what the gate
+/// register's `dev` rows are checked against. It lives here because only `cli` may name `Cli` without importing every command
+/// the other way round (`gates::command` is handed the set, so conformance C155 sees no edge from it to `cli`).
+fn dev_command_paths() -> std::collections::BTreeSet<String> {
+    use clap::CommandFactory;
+    fn walk(c: &clap::Command, prefix: &str, out: &mut std::collections::BTreeSet<String>) {
+        for s in c.get_subcommands().filter(|s| !s.is_hide_set()) {
+            let path = if prefix.is_empty() {
+                s.get_name().to_string()
+            } else {
+                format!("{prefix} {}", s.get_name())
+            };
+            out.insert(path.clone());
+            walk(s, &path, out);
+        }
+    }
+    let mut out = std::collections::BTreeSet::new();
+    walk(&Cli::command(), "", &mut out);
+    out
 }
