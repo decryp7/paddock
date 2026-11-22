@@ -127,7 +127,9 @@ impl Declared {
             return Err("it is a rerun of an earlier run's failures".into());
         }
         if let Some(os) = &self.os {
-            return Err(format!("it ran one operating system's part only (the os input: {os}), not every runner"));
+            return Err(format!(
+                "it ran one operating system's part only (the os input: {os}), not every runner"
+            ));
         }
         if self.need.jobs.is_empty() && self.need.apps.is_empty() {
             return Err("its declared need is empty (a scope that needs nothing proves nothing)".into());
