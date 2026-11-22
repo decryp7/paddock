@@ -146,9 +146,11 @@ fn cargo_paths_name_the_workspace_its_manifests_and_its_path_dependencies() {
 #[test]
 fn eviction_drops_old_records_and_keeps_the_newest() {
     let d = tempfile::tempdir().unwrap();
-    for i in 0..5 {
-        std::fs::write(d.path().join(format!("k{i}.json")), "{}").unwrap();
-        std::thread::sleep(Duration::from_millis(20));
+    // Modified times are set, not waited for: k4 is the newest, k0 the oldest.
+    let now = std::time::SystemTime::now();
+    for i in 0..5u64 {
+        let f = std::fs::File::create(d.path().join(format!("k{i}.json"))).unwrap();
+        f.set_modified(now - Duration::from_secs(100 - i)).unwrap();
     }
     std::fs::write(d.path().join("notes.txt"), "kept: not ours").unwrap();
     assert_eq!(evict(d.path(), std::time::SystemTime::now(), MAX_AGE, 3), 2, "count");
