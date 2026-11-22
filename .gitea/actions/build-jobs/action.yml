@@ -7,6 +7,9 @@ inputs:
 runs:
   using: composite
   steps:
+    # `./dev ci build-jobs` below is a ./dev call: the tool cache comes first (ADR 0115). With no compiler yet it leaves the work to a later use.
+    - name: ./dev tool cache
+      uses: ./.gitea/actions/dev-tool-cache
     - name: Build jobs for this runner
       shell: bash
       env:

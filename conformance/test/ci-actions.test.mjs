@@ -205,7 +205,7 @@ function runToolchainStep(env, { toolchains = '', components = '', targets = '',
   const dir = mkdtempSync(join(tmpdir(), 'paddock-rustup-'));
   const text = read(join(ACTIONS, 'setup-rust', 'action.yml'));
   const at = text.indexOf('- name: Rust toolchain\n');
-  const block = text.slice(at, text.indexOf('    # Every Rust job gets', at));
+  const block = text.slice(at, text.indexOf('    # ./dev\'s own binary through the Actions cache', at));
   const body = block.slice(block.indexOf('run: |\n') + 'run: |\n'.length).split('\n').map((l) => l.slice(8)).join('\n');
   mkdirSync(join(dir, 'bin'));
   const calls = join(dir, 'calls');
@@ -2516,4 +2516,41 @@ test('no setup action or workflow uses the shared /sccache mount as a writable f
     if (/["'\s=]\/sccache(?!-)[\w/.-]*/.test(code) && file !== '.gitea/actions/setup-rust/action.yml') offenders.push(file);
   }
   assert.deepEqual(offenders, [], 'ADR 0111: shared state goes through a keyed cache or an artifact');
+});
+
+// ADR 0115, run 8576: setup-rust's build-jobs step ran ./dev (which builds the tool from source when it is missing) before the tool
+// cache's restore, so 42 of 44 jobs rebuilt it in 130-176 s and the cache was never saved. Read through the workflow accessor
+// (ER-42), not by grepping the files: the first step that runs ./dev is after the step that restores the tool.
+const runsDev = (step) => typeof step.run === 'string' && /kit\.sh"? (?:build-jobs|host|isolation|build-env)|\/dev"? ci |\.\/dev ci /.test(step.run);
+const usesToolCache = (step) => step.uses === './.gitea/actions/dev-tool-cache';
+
+/** The index of the first step that runs ./dev and of the step that restores the tool, in an action's steps. */
+function devOrder(steps) {
+  return { firstDev: steps.findIndex(runsDev), restore: steps.findIndex(usesToolCache) };
+}
+
+for (const name of ['setup-rust', 'node-caches', 'build-jobs']) {
+  test(`${name}: the dev tool cache is restored before the first ./dev call`, () => {
+    const { firstDev, restore } = devOrder(stepsOf(loadAction(name)));
+    assert.ok(firstDev >= 0, `${name} calls ./dev in a step (the finder sees it)`);
+    assert.ok(restore >= 0, `${name} uses the dev-tool-cache action`);
+    assert.ok(restore < firstDev, `${name}: the tool cache (step ${restore}) comes before its first ./dev call (step ${firstDev})`);
+  });
+}
+
+test('the order check sees a ./dev call before the restore (positive control)', () => {
+  const bad = [{ run: 'bash conformance/ci/kit.sh build-jobs' }, { uses: './.gitea/actions/dev-tool-cache' }];
+  const { firstDev, restore } = devOrder(bad);
+  assert.ok(restore > firstDev, 'the finder puts the ./dev call first, so the test above would fail');
+  assert.equal(devOrder([{ uses: './.gitea/actions/dev-tool-cache' }, ...bad.slice(0, 1)]).restore, 0);
+});
+
+test('the dev-tool-cache action restores, verifies, saves and reports from the restore step\'s own outputs', () => {
+  const steps = stepsOf(loadAction('dev-tool-cache'));
+  const text = JSON.stringify(steps);
+  const verify = steps.find((s) => s.id === 'verify');
+  assert.match(verify.run, /steps\.restore\.outputs\.cache-hit/);
+  assert.match(verify.run, /steps\.restore\.outputs\.cache-matched-key/);
+  assert.match(steps.find((s) => s.id === 'save').if, /steps\.verify\.outputs\.save == 'true'/);
+  assert.match(text, /PADDOCK_DEV_TOOL_CACHE_DONE/, 'a later use in the same job does nothing');
 });
