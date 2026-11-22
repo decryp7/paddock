@@ -4,6 +4,24 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### CI: OS-scoped tests, `hostTests`, conformance C155 (report-only), and `tools-macos` is gone (user decision 2026-11-22: D1 full, D2 "a test runs on an OS only if its code behaves differently there", D3, D4)
+- `hostTests` in a CI contract (`crates/paddock.ci.json`, `apps/<app>/paddock.ci.json`, the new `tools/paddock-dev/paddock.ci.json`) names the
+  packages (or, for paddock-dev, the test-name prefixes) that the Windows and macOS legs build and test; `skip` keeps pure modules of a
+  host package on Linux, `only.<os>` adds per runner. Linux runs everything, in every kind of run. `./dev plan --ci` reads it through
+  `host_tests.rs` and writes `host_packages` and `host_filter` on each app leg, `test_packages` and `test_filter` on the `crate_legs` and
+  `paddock_dev_legs` (the filter also holds a member run's package filter), and `host_packages_macos` and `host_filter_macos` for
+  debrief.yml's macOS tests; ci.yml, the `app-gates` action and debrief.yml run `-p <packages>` and `-E <filterset>` from them. The
+  nightly (`os_full: true`), a tag run, a release workflow's gates and an app's own gates (`PLAN_APP`) run every package on every OS
+  (`plan_ci::full_os`, ADR 0080 amendment 2026-11-22). ADR 0113's scope is unchanged: a host leg is the same job, only a member run's
+  package filter makes a run partial (`run_scope` test).
+- C155 (Rust, `tools/paddock-dev/src/check/c155.rs`, report-only, ER-41) reads the sources: OS code (an OS `cfg`, an OS-API crate, a
+  portable-layer entry point in production code) in a package or module that `hostTests` does not list; a skipped module with OS code; a
+  stale entry; and, for paddock-dev, the import edges (`ci_setup_rust` imports `local_sccache`, `ci_run` imports `pre_push::exec`, so
+  they keep their host tests). Positive controls: the check's own control, and `tests/it/os_scoped.rs`, which unlists `paddock-proc`,
+  `local_sccache` and `pre_push::exec` in the real contracts and sees each go red. Hit count on the real tree: see below.
+- `tools-macos` ("VM tooling tests", macOS) is deleted with the tests of the retired VM tooling (`scripts/vm-lock.test.mjs`,
+  `vm-win.test.mjs`, `member-gate.test.mjs`, `vm-test-support.mjs` and its test); the scripts themselves stay until their own clean-up.
+
 ### `paddock-dev`, `heavy`, `paddock-env`: a health gate for Gitea, and no tool prompts (user decision 2026-11-20)
 - `./dev ci dispatch`, `./dev wait --ci-run` and the queue and member-gate dispatch look at Gitea (`GET /api/v1/version`) and hold while it
   is down: any answer below 500 is up (a 401 or 403 included), a refused connection, a timeout or a 5xx is down. They hold on Gitea

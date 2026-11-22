@@ -38,6 +38,12 @@ partial, a missing one not measured, a failed one is the run's own red. **Report
 --workflow <file> --run <id>` records the first green scope run and switches that producer in one step, and its old block is deleted in
 the same change. Runs from before the scope line have none: they stay valid on the old basis, and partial after the switch.
 
+**OS-scoped tests (2026-11-22).** Every run but the full ones tests, on the Windows and macOS legs, only the packages and paddock-dev
+modules that a contract's `hostTests` names (code with OS-specific behaviour; conformance C155 keeps the lists honest); Linux tests
+everything. The nightly (`os_full`), a tag, a release's gates and an app's own gates (`PLAN_APP`) run every package on every OS
+(`plan_ci::full_os`), so the nightly is the full every-OS run of ADR 0080's amendment. The planner writes the packages and filtersets
+into each leg (`host_packages`, `host_filter`, `test_packages`, `test_filter`).
+
 **Member runs test only the reached packages (2026-11-21).** A dispatch with a `base` and no `since_run` (a member or a fix round)
 passes `./dev plan --ci` the event, and the plan narrows nextest to the packages the change reaches: the app legs' `filter`, and
 `crates_filter` and `paddock_dev_filter` for the host legs of `crate` and the tests of `paddock-dev`. The Linux crate tests run
