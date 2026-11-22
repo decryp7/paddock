@@ -3458,3 +3458,10 @@ about 45 ms a start on that runner plus a fork per command substitution. **Fix:*
   retry): `e2e/ai-pitwall.e2e.ts:68` "with no Pitwall at all, every AI entry point lands on Settings ▸ AI and none is a dead button"
   (shard 3/4, job 44324) and `e2e/live-tail-follow.e2e.ts:255` "a scrollbar drag across refresh rounds ends where the user dropped
   it" (shard 4/4, job 44325). Train 18 changed no file under apps/debrief or ui. Next: a failing reproduction first.
+- **From train 19's trial ci.yml run 8576 (ebe7ddd17), in code train 19 does not touch:** paddock-dev
+  `sccache_eviction::control_the_same_file_beside_the_sccache_folder_survives` on Windows (job 44486; FLAKY: try 1 failed at 2.8 s,
+  try 2 passed at 3.8 s; train 18's test, started through paddock-testkit); dyno-agent `disk::centre::tests::the_cached_volumes_never_list_on_the_request`
+  on macOS again (job 44462; FLAKY, after 8495); Dyno vitest `settings-page.spec.ts:41` "renders the sections once loaded and shows
+  no save bar while clean" timed out at 5000 ms (job 44477, TZ=Pacific/Auckland; it also failed in main's push run 8555 and passed in
+  8554 on the same commit). Vitest has no retry here, so it cannot show as FLAKY: give it flaky-as-failure like nextest and
+  Playwright (ER-12). Next: a failing reproduction for each first.
