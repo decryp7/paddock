@@ -1382,12 +1382,32 @@ fn unix_now() -> u64 {
         .map_or(0, |d| d.as_secs())
 }
 
-/// Writes `pid`, the time and the step into the lock file just taken, for the waiters to read. Best effort: a waiter that finds no record
-/// sees a holder it knows nothing about, which is not live.
-fn write_holder_record(file: &std::fs::File, id: &str, now: u64) {
-    use std::io::Write;
-    let _ = file.set_len(0);
-    let _ = (&*file).write_all(format!("{}\n{}\n{}\n", std::process::id(), now, id).as_bytes());
+/// How the lock file of a build folder is opened: for writing, not for appending. A Windows append-only handle has no right to change
+/// the file's length, so `set_len(0)` failed there and the second record was written after the first: waiters read the old holder's
+/// pid and time (train 19 trial, run 8560: the restamp test failed on both tries).
+fn lock_file_options() -> std::fs::OpenOptions {
+    let mut o = std::fs::OpenOptions::new();
+    o.create(true).write(true);
+    o
+}
+
+/// Writes `pid`, the time and the step into the lock file just taken, for the waiters to read, as the whole content of the file. A
+/// failure is returned for the caller to say: a waiter that finds no record sees a holder it knows nothing about, which is not live.
+fn write_holder_record(file: &std::fs::File, id: &str, now: u64) -> std::io::Result<()> {
+    use std::io::{Seek, SeekFrom, Write};
+    file.set_len(0)?;
+    let mut f = file;
+    f.seek(SeekFrom::Start(0))?;
+    f.write_all(format!("{}\n{}\n{}\n", std::process::id(), now, id).as_bytes())
+}
+
+/// [`write_holder_record`], and a line in the log when it failed (ER-27): the step still runs, the waiters just cannot judge it.
+fn write_holder_record_or_say(file: &std::fs::File, id: &str, now: u64) {
+    if let Err(e) = write_holder_record(file, id, now) {
+        eprintln!(
+            "pre-push: {id}: the holder record of the build folder lock could not be written ({e}); a waiter will see a holder it knows nothing about. Next step: none needed, the step runs."
+        );
+    }
 }
 
 /// The picture a waiter has of a build folder's holder from its record (`pid`, start time, step id): the holder is live while it is
@@ -1418,7 +1438,7 @@ impl BuildLock {
     /// slot for longer than the cap).
     fn restamp(&self, id: &str, now: u64) {
         if let Some(f) = &self.held {
-            write_holder_record(f, id, now);
+            write_holder_record_or_say(f, id, now);
         }
     }
 }
@@ -1442,7 +1462,7 @@ impl RealExec {
         if let Some(parent) = path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        let Ok(file) = std::fs::OpenOptions::new().create(true).append(true).open(&path) else {
+        let Ok(file) = lock_file_options().open(&path) else {
             eprintln!(
                 "pre-push: no lock file for the build folder {dir} ({}): the step runs without it",
                 path.display()
@@ -1460,7 +1480,7 @@ impl RealExec {
                         eprintln!("pre-push: the build folder {dir} is free after {:.1} s", waited.as_secs_f64());
                         self.set_slot(Slot::Unknown);
                     }
-                    write_holder_record(&file, id, unix_now());
+                    write_holder_record_or_say(&file, id, unix_now());
                     return Ok((BuildLock { held: Some(file) }, if said { waited } else { Duration::ZERO }));
                 }
                 Err(std::fs::TryLockError::WouldBlock) => {}
@@ -1717,9 +1737,9 @@ mod tests {
     fn a_holder_that_waited_in_heavys_queue_is_stamped_again_when_its_slot_is_taken() {
         let d = tempfile::tempdir().unwrap();
         let path = d.path().join("f.lock");
-        let file = std::fs::OpenOptions::new().create(true).append(true).open(&path).unwrap();
+        let file = lock_file_options().open(&path).unwrap();
         let t0 = 1_000_000u64;
-        write_holder_record(&file, "clippy a", t0);
+        write_holder_record(&file, "clippy a", t0).unwrap();
         let held = BuildLock { held: Some(file) };
         let cap = ROW_CAP + CAP_GRACE;
         let later = t0 + 70 * 60;
@@ -1731,6 +1751,34 @@ mod tests {
         held.restamp("clippy a", later);
         let after = build_holder_view(&std::fs::read_to_string(&path).unwrap(), later + 60, cap);
         assert!(after.live && after.holders.len() == 1, "stamped when its slot was taken: {after:?}");
+    }
+
+    /// The Windows cause of the restamp test's failure: an append-only handle may not shorten the file there, so the second record
+    /// went after the first. The lock file is opened for writing, never for appending (the options carry no `append`); this runs on
+    /// every OS, because the Debug text of the options is the one place the flag can be read back.
+    #[test]
+    fn the_lock_file_is_opened_for_writing_not_for_appending() {
+        let shown = format!("{:?}", lock_file_options());
+        assert!(shown.contains("append: false") && shown.contains("write: true"), "{shown}");
+    }
+
+    /// A record left by an earlier holder is replaced whole, however long it was, and a failed write is returned, not swallowed.
+    #[test]
+    fn a_holder_record_replaces_an_older_longer_one_and_a_failed_write_is_reported() {
+        let d = tempfile::tempdir().unwrap();
+        let path = d.path().join("f.lock");
+        std::fs::write(&path, "4242\n999\na much longer step name than the new one\n").unwrap();
+        let file = lock_file_options().open(&path).unwrap();
+        write_holder_record(&file, "x", 5_000).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            format!("{}\n5000\nx\n", std::process::id())
+        );
+        let read_only = std::fs::File::open(&path).unwrap();
+        assert!(
+            write_holder_record(&read_only, "x", 6_000).is_err(),
+            "a handle that cannot write says so"
+        );
     }
 
     /// Heavy's own line names the holder of a stalled queue; the failure line after it (the same words without the closing phrase) is
