@@ -33,6 +33,8 @@ pub struct Guard {
     state: PathBuf,
     sha: String,
     before: Vec<u64>,
+    /// The run id the dispatch itself returned (Gitea answers it), when it did: the handle is then held, not found.
+    pub(crate) known_run: Option<u64>,
 }
 
 /// The branch name of a `--ref` that the profile covers; `Err` for any other ref (`train/*`, `main`, a tag, a feature branch keep the
@@ -77,6 +79,7 @@ pub fn before(http: &mut dyn Http, target: &Target<'_>, state: &Path, git_ref: &
         state: state.to_path_buf(),
         sha,
         before: ids,
+        known_run: None,
     }))
 }
 
@@ -93,8 +96,9 @@ pub fn register(
 ) -> String {
     let Target { server, repo, token } = *target;
     let (workflow, git_ref) = (req.workflow.as_str(), req.git_ref.as_str());
-    let mut found = None;
-    for look in 0..8 {
+    // The dispatch's own answer is the handle (ER-51); only without it is the run found by difference against the list before.
+    let mut found = g.known_run;
+    for look in 0..if found.is_some() { 0 } else { 8 } {
         if look > 0 {
             clock.sleep(Duration::from_secs(4));
         }

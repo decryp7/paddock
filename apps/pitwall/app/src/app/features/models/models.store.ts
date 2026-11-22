@@ -1,4 +1,5 @@
 import { computed, inject } from '@angular/core';
+import { splitItemResults, type CommandError as ItemError } from '@decryp7/paddock-ui/ipc';
 import { patchState, signalStore, withComputed, withMethods, withState } from '@ngrx/signals';
 import type { CommandError, DiskUsage, EnginePinState, HfModel, HfRepo, InstalledBuild, LocalModel, PacksInfo, PinChange, QuantVariant, Recommendation, SlotsChange } from '../../core/api.types';
 import { BACKEND } from '../../core/backend';
@@ -248,15 +249,26 @@ export const ModelsStore = signalStore(
       async cleanUnused(): Promise<void> {
         const models = store.unusedModels();
         if (!models.length) return;
-        const freed = store.unusedBytes();
-        await act(
-          'cleanup',
-          async () => {
-            for (const m of models) await backend.deleteModel(m.id);
-          },
-          `Freed ${bytes(freed)}.`,
-        );
-        // Reload either way: a failure part-way still deleted the models before it.
+        const ids = models.map((m) => m.id);
+        // One call for all of them (one scan of the library on the server); each model answers for itself. The backend splits a
+        // list too large for one call. Failures are reported here, per id with the code each really failed with, not thrown.
+        const outcome = { freed: 0, deleted: 0, failed: [] as { item: string; error: ItemError }[] };
+        const ran = await act('cleanup', async () => {
+          const { ok, failed } = splitItemResults(ids, await backend.deleteModels(ids));
+          outcome.freed = ok.reduce((sum, { item }) => sum + (models.find((m) => m.id === item)?.sizeBytes ?? 0), 0);
+          outcome.deleted = ok.length;
+          outcome.failed = failed;
+        });
+        if (ran) {
+          const { freed, deleted, failed } = outcome;
+          if (failed.length) {
+            const list = failed.map(({ item, error }) => `${item} (${error.code}: ${error.message})`).join('; ');
+            toasts.show(`Deleted ${deleted} of ${ids.length} models (freed ${bytes(freed)}). Not deleted: ${list}`, 'bad', 7000);
+          } else {
+            toasts.ok(`Freed ${bytes(freed)}.`);
+          }
+        }
+        // Reload either way: each model answers for itself, so the ones that were deleted are gone even when others failed.
         await load();
       },
     };

@@ -928,6 +928,7 @@ pub fn failures_of(report: &triage::Report, run: u64, http: &mut dyn Http, serve
             projects: projects_of_row(&r.job, &r.test),
             files: files.get(&r.job).cloned().unwrap_or_default(),
             blame: blame_of(&r.status),
+            retried: matches!(r.status, Status::Flaky { .. }),
         })
         .collect()
 }

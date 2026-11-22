@@ -1,6 +1,9 @@
 import type { BackendEvent, Config, RegisterRequest, RunnerConfig } from './api.types';
 import { EVENT_NAME, platformFromUserAgent, TauriBackend, type CommandCall, type EventListen } from './tauri-backend';
 
+// The real clock back after every test, so a test that times out cannot leave fake timers for the next one (ER-12, C154).
+afterEach(() => vi.useRealTimers());
+
 function setup(result: unknown = undefined) {
   const call = vi.fn(async () => result);
   const backend = new TauriBackend(call as unknown as CommandCall, vi.fn() as unknown as EventListen);

@@ -1,6 +1,9 @@
 import { MOCK_ON_CLOSE_KEY, MockWindowHost, MockWindowingBackend, seededOpenAsk, seededTasks } from './mock-windowing-backend';
 import { at } from '../../testing/must';
 
+// The real clock back after every test, so a test that times out cannot leave fake timers for the next one (ER-12, C154).
+afterEach(() => vi.useRealTimers());
+
 class FakeStorage {
   readonly map = new Map<string, string>();
   getItem = (k: string) => this.map.get(k) ?? null;

@@ -1,3 +1,4 @@
+import type { ItemResult } from '@decryp7/paddock-ui/ipc';
 import { buildDownloadName } from '../shared/build-download';
 import type {
   AppDetail,
@@ -763,9 +764,20 @@ export class MockBackend implements PitwallBackend {
 
   deleteModel(id: string): Promise<void> {
     return this.reply('deleteModel', () => {
-      if (this.loaded.some((m) => m.modelId === id)) this.fail('conflict', 'Unload the model before deleting it.');
+      if (this.loaded.some((m) => m.modelId === id)) this.fail('busy', 'Unload the model before deleting it.');
       this.library = this.library.filter((m) => m.id !== id);
     });
+  }
+
+  deleteModels(ids: readonly string[]): Promise<ItemResult<null>[]> {
+    return this.reply('deleteModels', () =>
+      ids.map((id): ItemResult<null> => {
+        if (this.loaded.some((m) => m.modelId === id)) return { err: { code: 'busy', message: 'Unload the model before deleting it.', retryable: false } };
+        if (!this.library.some((m) => m.id === id)) return { err: { code: 'notFound', message: `No model ${id}.`, retryable: false } };
+        this.library = this.library.filter((m) => m.id !== id);
+        return { ok: null };
+      }),
+    );
   }
 
   loadModel(id: string): Promise<void> {

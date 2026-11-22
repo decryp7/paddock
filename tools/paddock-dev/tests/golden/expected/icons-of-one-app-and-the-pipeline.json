@@ -27,6 +27,7 @@
   ]
  },
  "packages": {},
+ "cargoOnly": [],
  "why": {
   "app:x": [
    "icons icons/x/a.svg",

@@ -2,9 +2,11 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 mod audio_parts;
+mod bulk;
 mod caching;
 mod cancel;
 mod common;
+mod delete_race;
 mod discovery;
 mod e2e;
 mod engine_pins;

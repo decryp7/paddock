@@ -50,10 +50,19 @@ runs:
         echo "key=$key" >> "$GITHUB_OUTPUT"
         echo "PADDOCK_TAURI_TOOLS_CACHE=$dir" >> "$GITHUB_ENV"
     - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      id: cache1
       if: steps.tools.outputs.key != ''
       with:
         path: ${{ steps.tools.outputs.dir }}
         key: ${{ steps.tools.outputs.key }}
+    - uses: ./.gitea/actions/cache-report
+      if: always() && steps.cache1.outcome != 'skipped'
+      with:
+        name: tauri-tools
+        key: ${{ steps.tools.outputs.key }}
+        hit: ${{ steps.cache1.outputs.cache-hit }}
+        matched: ${{ steps.cache1.outputs.cache-matched-key }}
+        saved: pending
     - shell: bash
       env:
         BUNDLES: ${{ inputs.bundles }}

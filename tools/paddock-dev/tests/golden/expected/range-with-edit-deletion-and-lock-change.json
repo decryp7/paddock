@@ -37,6 +37,9 @@
    "fx-b"
   ]
  },
+ "cargoOnly": [
+  "crates"
+ ],
  "why": {
   "app:x": [
    "lock apps/x/app",

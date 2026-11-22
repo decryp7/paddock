@@ -209,3 +209,23 @@ fn ci_verdict_is_read_only_and_leaves_a_dead_holders_record_alone() {
     let after = trial_guard::read_slow(&state, SHA).unwrap().unwrap();
     assert_eq!(after.state, State::Running, "a query must not settle a record: {after:?}");
 }
+
+/// With the run id the dispatch itself returned, no run list is read: the handle is held, not found (ER-51).
+#[test]
+fn a_run_id_the_dispatch_returned_is_registered_without_looking_for_it() {
+    let d = tempfile::tempdir().unwrap();
+    write_slow(d.path(), &rec(State::Running)).unwrap();
+    // The list is an error: reading it would fail the lookup, so a registered run proves it was not read.
+    let mut g = gitea(Some(SHA), vec![vec![]]);
+    let Before::Guarded(mut guard) = before(&mut g, &T, d.path(), "wip/x", &time(1)).unwrap() else {
+        panic!("guarded")
+    };
+    guard.known_run = Some(9001);
+    let mut clock = Clk(Duration::ZERO);
+    let looks = g.looks;
+    let line = register(&guard, &mut g, &T, &req(), &mut clock, &time(2), &mut Vec::new());
+    assert!(line.contains("run 9001 is registered"), "{line}");
+    assert_eq!(g.looks, looks, "no run list was read");
+    assert_eq!(clock.0, Duration::ZERO, "and nothing waited");
+    assert_eq!(trial_guard::read_dispatched(d.path(), SHA).unwrap().unwrap().run_id, 9001);
+}
