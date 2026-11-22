@@ -105,6 +105,25 @@ fn the_checkout_path_and_build_folder_are_not_in_the_key() {
     );
 }
 
+/// A row that starts this binary again names it by a path that differs per run (a held link): the key must not.
+#[test]
+fn the_dev_binarys_path_is_not_in_the_key_but_its_bytes_are() {
+    let s = Scratch::new();
+    s.commit("a.txt", "one\n");
+    let key = |name: &str, bytes: &str| {
+        let exe = s.store.with_file_name(name);
+        std::fs::write(&exe, bytes).unwrap();
+        let r = Reuse::new(&s.root, s.store.clone(), &HashMap::new(), "r".into(), Ok(exe.clone()), false).unwrap();
+        r.prepare(&gate("conformance", "", exe.to_str().unwrap())).unwrap().key
+    };
+    assert_eq!(
+        key("dev-held-1", "bin"),
+        key("dev-held-2", "bin"),
+        "another link name, same binary: same key"
+    );
+    assert_ne!(key("dev-held-1", "bin"), key("dev-held-1", "other"), "another binary: another key");
+}
+
 /// ER-33 control: when the binary cannot be named the key cannot be made, so the row runs (never a reuse on an unknown tool).
 #[test]
 fn an_unknown_dev_binary_means_no_reuse() {

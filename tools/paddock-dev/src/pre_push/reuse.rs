@@ -412,12 +412,16 @@ impl Reuse {
         let class = class_of(g).ok_or("this row is never reused (it reads more than the tree, or its result is not stable)")?;
         let root = self.root.to_string_lossy().to_string();
         let mut f: Vec<String> = vec![format!("schema {SCHEMA}"), format!("row {}", g.id), format!("cwd {}", g.cwd)];
-        f.push(format!(
-            "program {}",
+        // This binary's own path differs per run (a held hard link named by the run's pid); its bytes are in the key as `dev`.
+        let is_dev = self.dev_exe.as_ref().is_ok_and(|d| d == Path::new(&g.program));
+        let program = if is_dev {
+            "<dev>".to_string()
+        } else {
             Path::new(&g.program)
                 .file_name()
                 .map_or(g.program.clone(), |n| n.to_string_lossy().to_string())
-        ));
+        };
+        f.push(format!("program {program}"));
         f.extend(normalised_args(&g.args, &root).into_iter().map(|a| format!("arg {a}")));
         let mut own: Vec<String> = g
             .env
