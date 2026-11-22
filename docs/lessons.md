@@ -3378,7 +3378,9 @@ narrowing test out on both tries. The same tests took at most 14.3 s on the macO
 44229, 44301). The first plan was to make the tests cheaper (batched git, a spawn budget, ER-20). The user asked first where the planner
 runs: only on Linux (ci.yml's plan job) and macOS (the push gate and `./dev`), never on Windows. So the Windows leg was paying minutes,
 and a retried timeout, to test a path no Windows host takes. **Fix:** the planner's tests are in `tests/it/golden/planner.rs`, a module
-behind `#[cfg(not(windows))]` whose doc comment gives the reason and when to build it on Windows again. The planner's only Windows-specific
+behind `#[cfg(not(windows))]` whose doc comment gives the reason and when to build it on Windows again. The other tests of the planner's answers
+follow it: `cli::graph_affected_prints_the_plan_for_the_repository_it_runs_in_or_is_pointed_at`, the `gates_planner` module and the
+fixture repository they share. The command-line checks of `graph affected` (no repository, nothing to plan) still run on Windows. The planner's only Windows-specific
 parts get pure tests that run on every OS: the root spelling (`plan::tests::a_graph_root_over_the_limit_is_refused_and_a_short_verbatim_one_is_plain`,
 `Os::Windows` passed in), a CRLF ci.yml (`workflow_jobs` now reads `\r\n` as `\n`; before, an LF HEAD against a CRLF working tree had different
 headers and planned everything) and a `--files` entry with `\` (now refused with the `/` spelling). The `golden::` nextest waivers

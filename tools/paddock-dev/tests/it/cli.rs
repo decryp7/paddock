@@ -68,6 +68,10 @@ fn self_hash_prints_one_object_with_the_hash_and_the_compiler() {
     assert!(out.starts_with("hash "));
 }
 
+/// Not built on Windows: it checks the planner's answers on the fixture repository, and the planner runs only on Linux and macOS
+/// (user, 2026-11-22; the doc comment on `golden::planner`). The command-line behaviour of `graph affected` (no repository, nothing to
+/// plan) is checked on every OS by the two tests below.
+#[cfg(not(windows))]
 #[test]
 fn graph_affected_prints_the_plan_for_the_repository_it_runs_in_or_is_pointed_at() {
     // The golden fixture repository, built in a scratch folder: no dependence on the checkout this test runs from.

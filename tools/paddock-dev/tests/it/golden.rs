@@ -1,11 +1,11 @@
 //! The planner's recorded answers (`./dev plan`) and the fixture repository they are recorded on.
 //!
-//! This file holds what other test modules share: the fixture repository (`fixture_repo`, also read by `cli` and `gates_planner`),
-//! the `git` helper, the bless switch (`check` and `check_units` bless through it) and `record` (also used by `recorded`). The planner's own tests are in
-//! [`planner`], which is not built on Windows (see its doc comment).
+//! This file holds what other test modules share: the fixture repository (`fixture_repo`, also read by `cli` and `gates_planner`; not
+//! built on Windows, like its users), the `git` helper, the bless switch (`check` and `check_units` bless through it) and `record`
+//! (also used by `recorded`). The planner's own tests are in `planner`, which is not built on Windows (see its doc comment).
 #![allow(clippy::disallowed_methods, clippy::unwrap_used, clippy::expect_used)]
 use serde_json::Value;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
 
 /// The planner's tests: the recorded cases on the fixture repository, the command line cases, the real-tree samples and the
@@ -70,43 +70,90 @@ pub(crate) fn record(path: &Path, value: &Value) {
 // ---------------------------------------------------------------------------------------------------------------------
 // The fixture repository
 
-fn golden_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden")
-}
+/// The fixture repository the planner is tested on (`planner`, `cli`, `gates_planner`). Not built on Windows, like its users: the
+/// planner runs only on Linux and macOS (user, 2026-11-22; the doc comment on `mod planner` above).
+#[cfg(not(windows))]
+mod fixture {
+    use super::git;
+    use std::path::{Path, PathBuf};
 
-/// A lockfile stored in the fixture as `package-lock.fixture.json`, so the repository's own "one lockfile" check ignores it.
-fn placed_name(name: &str) -> &str {
-    if name == "package-lock.fixture.json" {
-        "package-lock.json"
-    } else {
-        name
+    pub(crate) fn golden_dir() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden")
     }
-}
 
-fn copy_tree(from: &Path, to: &Path) {
-    for entry in std::fs::read_dir(from).unwrap() {
-        let entry = entry.unwrap();
-        let target = to.join(placed_name(&entry.file_name().to_string_lossy()));
-        if entry.file_type().unwrap().is_dir() {
-            std::fs::create_dir_all(&target).unwrap();
-            copy_tree(&entry.path(), &target);
+    /// A lockfile stored in the fixture as `package-lock.fixture.json`, so the repository's own "one lockfile" check ignores it.
+    fn placed_name(name: &str) -> &str {
+        if name == "package-lock.fixture.json" {
+            "package-lock.json"
         } else {
-            std::fs::create_dir_all(target.parent().unwrap()).unwrap();
-            std::fs::copy(entry.path(), target).unwrap();
+            name
         }
     }
-}
 
-fn files_below(dir: &Path, base: &Path, out: &mut Vec<PathBuf>) {
-    for entry in std::fs::read_dir(dir).unwrap() {
-        let path = entry.unwrap().path();
-        if path.is_dir() {
-            files_below(&path, base, out);
-        } else {
-            out.push(path.strip_prefix(base).unwrap().to_path_buf());
+    fn copy_tree(from: &Path, to: &Path) {
+        for entry in std::fs::read_dir(from).unwrap() {
+            let entry = entry.unwrap();
+            let target = to.join(placed_name(&entry.file_name().to_string_lossy()));
+            if entry.file_type().unwrap().is_dir() {
+                std::fs::create_dir_all(&target).unwrap();
+                copy_tree(&entry.path(), &target);
+            } else {
+                std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+                std::fs::copy(entry.path(), target).unwrap();
+            }
         }
     }
+
+    fn files_below(dir: &Path, base: &Path, out: &mut Vec<PathBuf>) {
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                files_below(&path, base, out);
+            } else {
+                out.push(path.strip_prefix(base).unwrap().to_path_buf());
+            }
+        }
+    }
+
+    /// The fixture repository: the overlay over the fixture is commit `fixture-base`, the fixture alone (overlay-only files removed) is `fixture-head`.
+    pub(crate) fn fixture_repo() -> (tempfile::TempDir, PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let root = paddock_env::winpath::real(dir.path()).unwrap();
+        git(&root, &["init", "-q", "-b", "main"]);
+        copy_tree(&golden_dir().join("fixture"), &root);
+        copy_tree(&golden_dir().join("base-overlay"), &root);
+        git(&root, &["add", "-A"]);
+        git(&root, &["commit", "-q", "-m", "base"]);
+        git(&root, &["tag", "fixture-base"]);
+        copy_tree(&golden_dir().join("fixture"), &root);
+        let mut overlay = Vec::new();
+        files_below(&golden_dir().join("base-overlay"), &golden_dir().join("base-overlay"), &mut overlay);
+        for rel in overlay.into_iter().filter(|r| !golden_dir().join("fixture").join(r).exists()) {
+            std::fs::remove_file(root.join(rel)).unwrap(); // overlay-only files carry no renamed names
+        }
+        git(&root, &["add", "-A"]);
+        git(&root, &["commit", "-q", "-m", "head"]);
+        git(&root, &["tag", "fixture-head"]);
+        // The steps: one commit each on a side branch, so `main` and HEAD stay at `fixture-head` for the command line cases.
+        git(&root, &["checkout", "-q", "-b", "steps"]);
+        let mut steps: Vec<PathBuf> = std::fs::read_dir(golden_dir().join("steps"))
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .collect();
+        steps.sort();
+        for step in steps {
+            copy_tree(&step, &root);
+            git(&root, &["add", "-A"]);
+            git(&root, &["commit", "-q", "-m", "step"]);
+            git(&root, &["tag", &format!("step-{}", step.file_name().unwrap().to_string_lossy())]);
+        }
+        git(&root, &["checkout", "-q", "main"]);
+        (dir, root)
+    }
 }
+
+#[cfg(not(windows))]
+pub(crate) use fixture::{fixture_repo, golden_dir};
 
 pub(crate) fn git(dir: &Path, args: &[&str]) {
     let st = Command::new("git")
@@ -126,40 +173,4 @@ pub(crate) fn git(dir: &Path, args: &[&str]) {
         .status()
         .unwrap();
     assert!(st.success(), "git {args:?}");
-}
-
-/// The fixture repository: the overlay over the fixture is commit `fixture-base`, the fixture alone (overlay-only files removed) is `fixture-head`.
-pub(crate) fn fixture_repo() -> (tempfile::TempDir, PathBuf) {
-    let dir = tempfile::tempdir().unwrap();
-    let root = paddock_env::winpath::real(dir.path()).unwrap();
-    git(&root, &["init", "-q", "-b", "main"]);
-    copy_tree(&golden_dir().join("fixture"), &root);
-    copy_tree(&golden_dir().join("base-overlay"), &root);
-    git(&root, &["add", "-A"]);
-    git(&root, &["commit", "-q", "-m", "base"]);
-    git(&root, &["tag", "fixture-base"]);
-    copy_tree(&golden_dir().join("fixture"), &root);
-    let mut overlay = Vec::new();
-    files_below(&golden_dir().join("base-overlay"), &golden_dir().join("base-overlay"), &mut overlay);
-    for rel in overlay.into_iter().filter(|r| !golden_dir().join("fixture").join(r).exists()) {
-        std::fs::remove_file(root.join(rel)).unwrap(); // overlay-only files carry no renamed names
-    }
-    git(&root, &["add", "-A"]);
-    git(&root, &["commit", "-q", "-m", "head"]);
-    git(&root, &["tag", "fixture-head"]);
-    // The steps: one commit each on a side branch, so `main` and HEAD stay at `fixture-head` for the command line cases.
-    git(&root, &["checkout", "-q", "-b", "steps"]);
-    let mut steps: Vec<PathBuf> = std::fs::read_dir(golden_dir().join("steps"))
-        .unwrap()
-        .map(|e| e.unwrap().path())
-        .collect();
-    steps.sort();
-    for step in steps {
-        copy_tree(&step, &root);
-        git(&root, &["add", "-A"]);
-        git(&root, &["commit", "-q", "-m", "step"]);
-        git(&root, &["tag", &format!("step-{}", step.file_name().unwrap().to_string_lossy())]);
-    }
-    git(&root, &["checkout", "-q", "main"]);
-    (dir, root)
 }

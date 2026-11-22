@@ -28,6 +28,9 @@ mod contracts;
 mod dev_bin;
 mod dev_tool_publish;
 mod dev_tool_workflow;
+/// Not built on Windows: these tests check the planner's answers that C100 reads, on the fixture repository, and the planner runs only
+/// on Linux and macOS (user, 2026-11-22; the doc comment on `golden::planner`).
+#[cfg(not(windows))]
 mod gates_planner;
 mod generators;
 mod golden;
