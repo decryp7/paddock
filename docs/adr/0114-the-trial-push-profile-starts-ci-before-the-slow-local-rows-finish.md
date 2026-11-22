@@ -85,7 +85,24 @@ option (leave the gate as it is) is what stalled CI for three hours.
 
 ## Not covered, on purpose
 
-The cancel API call was written from the run objects' `cancel_url` (the recorded Gitea JSON in `tests/ci-triage`) and is tested only
-against a fake dispatch; its first live use is the first guarded dispatch. The conflict with the stall fix on
-`fix/push-gate-queue-stall` (5652345ae) and the result reuse on `feat/check-result-reuse` (f67b7f6a1) is in `exec.rs`'s `Exec` trait
-(two methods added at its end) and in `command_in`; neither branch is merged here.
+The cancel, commit-status and repository-permission calls were written from Gitea's API shapes and the recorded run objects
+(`cancel_url` in `tests/ci-triage`) and are tested only against a fake Gitea; their first live use is the first guarded dispatch.
+
+## Depends on
+
+This branch needs 5652345ae (`fix/push-gate-queue-stall`, in train 20) and is based on it: the slow phase has no total budget because
+that fix removed `BUDGET` and `RunOpts.budget`. The result reuse on `feat/check-result-reuse` (f67b7f6a1) touches the same
+`command_in` and `exec.rs` and is not merged here; the conflict is the `Exec` trait's methods at its end and `command_in`.
+
+## Round 3 (third review, all P2)
+
+- An early error or panic in the slow child is settled as a not-measured record with the error as its cause (heartbeat and pending
+  status start first thing, in `slow_guarded`); a record never stays running because the child died early.
+- Detached children close what they inherited without being asked: `spawn_detached` marks the child
+  (`PADDOCK_PROC_CLOSE_INHERITED`) and paddock-dev's `main` calls `paddock_proc::close_inherited_if_marked` first (the class of run 8019).
+- The status paging ends on an EMPTY page (a server may cap a page below the limit); a `failure` is red, `pending`, `error` and a post
+  that did not land are not measured (exit 6, ER-33), all refusing; this checkout's record is read next to a server success.
+- A pending status is re-read each try and never posts after the final one (one status lock); a full gate pass posts `success` every
+  time; a commit the server does not have (404/422) is orphaned and never reposted, said once; the run is cancelled before the status
+  is posted; `<state>/trial/` never evicts a running record or one whose status has not landed.
+- `ci verdict` only reads (CQS): the sweep runs at a gate start and in `ci dispatch`.
