@@ -74,6 +74,9 @@ export class DockService {
    * `planned` never comes back from a settle that a newer plan has overtaken.
    */
   private plannedToken = 0;
+  /** Plans run since attach, and when the current wait for `planned` began (ER-27: the log tells a slow dock from one that keeps re-planning). */
+  private plansRun = 0;
+  private holdSince: number | null = null;
   /** The arrangement before the last fit to a small window (the saved one), for Undo; null when nothing was fitted. */
   private fitted: SavedLayout | null = null;
   /** Conditional views that were available at the last check, to detect "became available". */
@@ -113,6 +116,12 @@ export class DockService {
    * (a spec, a screenshot) is final from then until the window or the user changes it again; the dock host shows it as `data-dock-planned`.
    */
   readonly planned = computed(() => this.ctx.firstPlanned() && !this.ctx.replanPending());
+  private readonly progress = signal(0);
+  /**
+   * Steps the dock has taken towards `planned` since attach: each plan run and each resize that holds `planned` back. A reader waiting for
+   * `planned` tells a slow dock (this grows) from a stuck one (it stands still); the dock host shows it as `data-dock-progress`.
+   */
+  readonly planProgress = this.progress.asReadonly();
   /** Ticks on every layout change of the dock (panels that keep native content in place follow it). */
   readonly layoutChanged = this.ctx.layoutVersion.asReadonly();
 
@@ -338,6 +347,7 @@ export class DockService {
     this.evaluated = false;
     this.wasAvailable.clear();
     this.ctx.apiReady.set(true);
+    this.holdSince = performance.now();
     this.ctx.firstPlanned.set(false);
     this.ctx.replanPending.set(false);
     const stopResize = this.layout.watchResize(api, () => this.fitToWindow(api, null), (pending) => (pending ? this.holdPlanned() : this.releasePlannedAfterFrames()));
@@ -371,6 +381,9 @@ export class DockService {
     this.ctx.guides = null;
     this.ctx.apiReady.set(false);
     this.plannedToken++;
+    this.plansRun = 0;
+    this.progress.set(0);
+    this.holdSince = null;
     this.ctx.firstPlanned.set(false);
     this.ctx.replanPending.set(false);
     this.ctx.docked.set(new Set());
@@ -849,6 +862,9 @@ export class DockService {
    */
   private fitToWindow(api: DockviewApi, before: SavedLayout | null): void {
     if (this.ctx.api !== api || this.ctx.restoring) return;
+    this.plansRun++;
+    this.progress.update((n) => n + 1);
+    this.logger.debug('ui.layout', 'Plan ran', { Plan: this.plansRun, Width: Math.round(api.width), Height: Math.round(api.height) });
     const plan = this.layout.plan(api);
     if (!plan) {
       this.layout.constrain(api);
@@ -878,6 +894,8 @@ export class DockService {
   /** A plan is on its way: `planned` is false until it has run and the window's reaction to it has settled. */
   private holdPlanned(): void {
     this.plannedToken++;
+    this.holdSince ??= performance.now();
+    this.progress.update((n) => n + 1);
     this.ctx.replanPending.set(true);
   }
 
@@ -891,11 +909,15 @@ export class DockService {
    */
   private releasePlannedAfterFrames(): void {
     const token = ++this.plannedToken;
+    this.holdSince ??= performance.now();
     this.ctx.replanPending.set(true);
     const frame = typeof requestAnimationFrame === 'function' ? requestAnimationFrame : (cb: () => void) => setTimeout(cb, 16);
     frame(() =>
       frame(() => {
-        if (token === this.plannedToken) this.ctx.replanPending.set(false);
+        if (token !== this.plannedToken) return;
+        this.ctx.replanPending.set(false);
+        this.logger.debug('ui.layout', 'Planned', { Plans: this.plansRun, WaitedMs: Math.round(performance.now() - (this.holdSince ?? performance.now())) });
+        this.holdSince = null;
       }),
     );
   }

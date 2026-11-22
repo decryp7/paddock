@@ -1,6 +1,6 @@
 import { expect, test } from './test';
 import AxeBuilder from '@axe-core/playwright';
-import { startFrameCost, stopFrameCost, type Locator, type Page } from '@decryp7/paddock-e2e';
+import { startFrameCost, stopFrameCost, type Locator, type Page, withPageStill } from '@decryp7/paddock-e2e';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -48,7 +48,7 @@ for (const theme of THEMES) {
     test(`Widget grid: axe finds no violations while editing (${theme}, contrast ${contrast})`, async ({ page }) => {
       await open(page, theme, contrast);
       await startEditing(page);
-      const results = await new AxeBuilder({ page }).include('[data-testid="widget-grid"]').withTags(['wcag2a', 'wcag2aa', 'wcag22aa']).analyze();
+      const results = await withPageStill(page, () => new AxeBuilder({ page }).include('[data-testid="widget-grid"]').withTags(['wcag2a', 'wcag2aa', 'wcag22aa']).analyze());
       expect(results.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(' ')).join(', ')}`)).toEqual([]);
     });
   }

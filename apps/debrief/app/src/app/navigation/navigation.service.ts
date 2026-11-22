@@ -1,4 +1,5 @@
 import { computed, effect, inject, Injectable, Injector, signal, untracked } from '@angular/core';
+import { Logger } from '../core/logger';
 import { WorkspaceStore } from '../core/workspace.store';
 import { DockService } from '../dock/dock.service';
 import { NavHistory, NavPlace } from './nav-history';
@@ -17,6 +18,7 @@ export class NavigationHistory {
   private readonly store = inject(WorkspaceStore);
   private readonly dock = inject(DockService);
   private readonly injector = inject(Injector);
+  private readonly logger = inject(Logger);
   private readonly history = new NavHistory();
   private readonly version = signal(0);
   private started = false;
@@ -42,11 +44,20 @@ export class NavigationHistory {
       },
       { injector: this.injector },
     );
-    effect(
+    // The range alone, compared by value: any other change of the query (a filter, a search, a jump's own change) is not a place. Read from the
+    // whole query, it recorded the unchanged range as a new place, which dropped the places ahead whenever that change landed after the echo
+    // window (debrief.yml run 8636: Alt+Right went nowhere on a loaded runner).
+    const range = computed(
       () => {
         const q = this.store.query();
-        if (q.window) return;
-        untracked(() => this.observe({ kind: 'range', from: q.from ?? null, to: q.to ?? null }));
+        return q.window ? null : { from: q.from ?? null, to: q.to ?? null };
+      },
+      { equal: (a, b) => a === b || (a !== null && b !== null && a.from === b.from && a.to === b.to) },
+    );
+    effect(
+      () => {
+        const r = range();
+        if (r) untracked(() => this.observe({ kind: 'range', ...r }));
       },
       { injector: this.injector },
     );
@@ -62,8 +73,14 @@ export class NavigationHistory {
 
   /** @internal Records a place (exposed for tests). */
   observe(place: NavPlace): void {
-    if (this.now() < this.quietUntil) return;
-    if (this.history.record(place, this.now())) this.version.update((v) => v + 1);
+    if (this.now() < this.quietUntil) {
+      this.logger.debug('ui.nav', 'Echo ignored', describe(place));
+      return;
+    }
+    if (this.history.record(place, this.now())) {
+      this.version.update((v) => v + 1);
+      this.logger.debug('ui.nav', 'Place recorded', { ...describe(place), Places: this.history.size });
+    }
   }
 
   back(): boolean {
@@ -83,6 +100,7 @@ export class NavigationHistory {
   private go(place: NavPlace | null): boolean {
     this.version.update((v) => v + 1);
     if (!place) return false;
+    this.logger.debug('ui.nav', 'Went to a place', describe(place));
     this.quietUntil = this.now() + NAV_ECHO_MS;
     switch (place.kind) {
       case 'event':
@@ -97,4 +115,10 @@ export class NavigationHistory {
     }
     return true;
   }
+}
+
+/** A place for the log: its kind and its id or range (no user content). */
+function describe(place: NavPlace): Record<string, string | number | null> {
+  if (place.kind === 'range') return { Kind: 'range', From: place.from, To: place.to };
+  return { Kind: place.kind, Id: place.id };
 }

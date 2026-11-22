@@ -1,5 +1,5 @@
 import { expect, test } from './test';
-import { axeViolations, installTauriFake, THEMES } from '@decryp7/paddock-e2e';
+import { axeViolations, installTauriFake, THEMES, withPageStill } from '@decryp7/paddock-e2e';
 
 // Frame navigation on Angular Material and the CDK (Material migration WP-4): the sidebar's arrow keys come from the CDK
 // FocusKeyManager, the badges are matBadge, the rail and status bar tooltips are matTooltip, and the copy menu is a CDK
@@ -93,7 +93,7 @@ for (const colorScheme of THEMES) {
       await expect(page.getByRole('list').filter({ has: page.locator('a[data-page-link]') })).toHaveCount(2);
       await expect(page.getByRole('listitem').filter({ has: page.locator('a[data-page-link]') })).toHaveCount(await app.sidebar.links.count());
       const { default: AxeBuilder } = await import('@axe-core/playwright');
-      const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag22aa', 'best-practice']).analyze();
+      const results = await withPageStill(page, () => new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag22aa', 'best-practice']).analyze());
       expect(results.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(' ')).join(', ')}`)).toEqual([]);
     });
 

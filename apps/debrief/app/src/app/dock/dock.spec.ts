@@ -811,6 +811,16 @@ describe('DockService with dockview', () => {
     expect(ids(second.dock)).toEqual(['events', 'inspector', 'timeline']);
   });
 
+  it('logs each plan and the moment the arrangement is planned, with the plans run and the wait (ER-27)', async () => {
+    const { dock } = setup();
+    dock.attach(container);
+    await vi.waitFor(() => expect(dock.planned()).toBe(true));
+    const layout = testLogger().entries.filter((e) => e.category === 'ui.layout' && e.level === 'debug');
+    expect(layout.map((e) => e.message)).toEqual(['Plan ran', 'Planned']);
+    expect(at(layout, 1).props).toEqual({ Plans: 1, WaitedMs: expect.any(Number) });
+    expect(dock.planProgress()).toBeGreaterThan(0);
+  });
+
   it('falls back to the default layout when the saved one cannot be restored', () => {
     const { dock } = setup({ stored: { grid: null, panels: {} } as never });
     dock.attach(container);

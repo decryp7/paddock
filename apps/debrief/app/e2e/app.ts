@@ -2,9 +2,10 @@ import { expect, Locator, Page } from '@playwright/test';
 import { expectDockPlanned } from '../../../../ui/projects/paddock-e2e/src/ready.ts';
 
 /**
- * How long the first load of the demo workspace may take, from navigation until the dock has planned (it is slower while the
- * whole suite runs in parallel). One budget for the whole load, its waits included (`loadWait`). The dock's planning is the load's
- * last phase and grows with CPU contention, in WebKit most: debrief.yml run 8243 (2 workers on a loaded runner) planned 3.8 to 5.2 s
+ * How long the first load of the demo workspace may take, from navigation until the grid shows its first rows (it is slower while
+ * the whole suite runs in parallel). One budget for these waits (`loadWait`). The dock's planning, the load's last phase, is not in
+ * it: `expectDockPlanned` bounds it on the dock's progress (a fixed budget ran out while the dock was still working on loaded WebKit
+ * runners, debrief.yml runs 8559 and 8636). The planning grows with CPU contention, in WebKit most: debrief.yml run 8243 (2 workers on a loaded runner) planned 3.8 to 5.2 s
  * after the status bar showed the events and failed twice at the default 5 s; in the CI image with 4 CPUs, 1 worker took 0.05 to 1.9 s
  * and 4 workers 3.9 to 6.5 s, the whole load 7.1 to 10.5 s (8 loads each; docs/lessons.md, 2026-11-18).
  */
@@ -43,7 +44,9 @@ export async function openApp(page: Page): Promise<void> {
   await expect(page.locator('debrief-status-bar')).toContainText('events', { timeout: load.timeout() });
   await expect(page.locator('debrief-timeline-panel .lane').first()).toBeVisible({ timeout: load.timeout() });
   await expect(gridRows(page).first()).toBeVisible({ timeout: load.timeout() });
-  await expectDockPlanned(page, { timeout: load.timeout() });
+  // The dock's planning is bounded on its progress, not on this budget (expectDockPlanned): on a loaded runner it outlasted the budget
+  // while still working (debrief.yml runs 8559, 8636).
+  await expectDockPlanned(page);
 }
 
 /**
