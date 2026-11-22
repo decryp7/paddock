@@ -3480,3 +3480,9 @@ about 45 ms a start on that runner plus a fork per command substitution. **Fix:*
   FLAKY: try 1 panicked at real_browser.rs:539 after 7.0 s, try 2 passed in 5.0 s) and `spotter-render::real_browser
   a_download_address_is_reported_as_a_download` on macOS (job 44768, app spotter macos-latest; FLAKY: try 1 panicked at
   real_browser.rs:318 after 120.3 s, try 2 passed in 2.0 s). Next: a failing reproduction for each first.
+- **A push gate row not measured, cause likely but not proven (2026-11-22):** the first push of fix/member-gate-self-dispatch
+  (0b1482f0b) was refused with `clippy-linux tools/paddock-dev` NOT MEASURED (10 passed, 1 not measured, 2154 s). The row's reason
+  line was lost: the integrator filtered the push output to row summaries, and the row left no log under paddock-pre-push/logs.
+  On the same commit with main merged in, under the gate that counts heavy queue time apart from run time (fix/push-gate-queue-stall),
+  the row passed alone in 15.6 s after 223 s in the queue. Likely cause: the old gate's 15-minute budget spent on the heavy queue
+  while other agents held the slot; not proven. Since then the integrator keeps the full output of every gate row.
