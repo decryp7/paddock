@@ -288,8 +288,8 @@ fn app_of(path: &str, apps: &[String]) -> Option<String> {
 /// job, an app's workflow). Users that are no pull-request gate (nightly, publish, canary) are reported as such and mark tools.
 pub fn gitea_targets(f: &str, gitea: &dyn GiteaSource) -> Option<Vec<(String, String)>> {
     let is_script = TRACED_SCRIPT.is_match(f);
-    if !is_script && !GITEA_FILE.is_match(f) {
-        return Some(Vec::new()); // workflow-templates, READMEs: only the conformance run added by the caller
+    if !is_script && (!GITEA_FILE.is_match(f) || f.ends_with(".md")) {
+        return Some(Vec::new()); // workflow-templates, READMEs and other documentation: only the conformance run added by the caller
     }
     // Files mode compares HEAD with the working tree: a committed change shows no difference, so nothing can be narrowed.
     if gitea.dirty(f) == Some(false) {

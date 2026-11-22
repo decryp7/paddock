@@ -1786,6 +1786,27 @@ mod tests {
     }
 
     #[test]
+    fn a_markdown_file_under_gitea_actions_marks_only_conformance() {
+        let g = fixed(&base_tree(), &[], None);
+        for f in [
+            ".gitea/actions/README.md",
+            ".gitea/actions/node-caches/README.md",
+            ".gitea/workflows/NOTES.md",
+        ] {
+            let r = gitea_plan(&[f], &g);
+            assert_eq!(r["all"], false, "{f} is documentation, not an action");
+            assert_eq!(r["conformance"], true, "{f}: conformance reads it (C100)");
+            assert_eq!(
+                (r["ui"].clone(), r["crates"].clone(), r["apps"].clone(), r["tools"].clone()),
+                (json!(false), json!(false), json!([]), json!(false)),
+                "{f}"
+            );
+        }
+        // Positive control: a real action file with no user still marks everything.
+        assert_eq!(gitea_plan(&[".gitea/actions/unused/action.yml"], &g)["all"], true);
+    }
+
+    #[test]
     fn an_action_marks_only_the_jobs_and_app_workflows_that_use_it() {
         let g = fixed(&base_tree(), &[], None);
         let ui = gitea_plan(&[".gitea/actions/node-caches/action.yml"], &g);
