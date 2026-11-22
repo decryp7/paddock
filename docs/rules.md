@@ -224,7 +224,7 @@ changes here, every app's copy is updated in the same change.
     (c) A branch already merged into another branch gets no CI of its own.
     (d) Docs-only changes land after the local conformance checks, without waiting for CI.
     (e) Branch runs use the affected plan (rule 3); the full gates run once on main or at release.
-    (f) is reserved for the push check (ADR 0049 WP-1, D2).
+    (f) is free: the push check (ADR 0049 WP-1) was dropped on 2026-11-22 (user; amendment `0049-push-check-dropped-and-drift-2026-11-22.md`).
     (g) Before landing a branch (a merge into main), the integrator lints its commits locally:
     `node conformance/bin/paddock-conformance.mjs commit-lint --range origin/main..<branch>`. A push to main lints only what main
     itself gets (`--first-parent`), so this is where a branch's own subjects and trailers are checked; C23 is the backstop.

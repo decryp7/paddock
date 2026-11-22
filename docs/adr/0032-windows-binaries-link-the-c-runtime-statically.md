@@ -1,6 +1,6 @@
 # 32. Windows binaries link the C runtime statically
 
-- Status: Proposed (2026-10-30). Release blocker for Dyno 1.0.0; applies to every app with a Windows installer
+- Status: Accepted (2026-11-22 audit: built, `+crt-static` for every `*-pc-windows-msvc` target is in the root `.cargo/config.toml` and `conformance/release/windows-crt-imports.mjs` checks the installers). Was: Proposed (2026-10-30). Release blocker for Dyno 1.0.0; applies to every app with a Windows installer
 - Date: 2026-10-30
 - Related: ER-21 (recurring bugs mean a missing design rule: one mechanism plus a check over every instance), ER-14,
   rule 23 (verify what was built, not what was meant); ADR 0014 §2 (the root `.cargo/config.toml` is read by every

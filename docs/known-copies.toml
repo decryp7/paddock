@@ -1007,7 +1007,14 @@ adr = "0041"
   paths = ["apps/dyno/app/src/testing/settle.ts"]
   owner = "dyno"
   delete_by = "dyno-v1.3.0"
-  note = "The fake-clock settle (settle, useSettleClock, untilResolved); it moves to @decryp7/paddock-ui/testing (ADR 0041 WP-3) and the apps then call it."
+  note = "The fake-clock settle (settle, useSettleClock, untilResolved); it moves to @decryp7/paddock-ui/testing (ADR 0041 WP-3, and ADR 0082 §3 `settleUntil`/`untilState`) and the apps then call it. `untilResolved` is the `until` copy: audit 2026-11-22."
+
+  [[mechanism.copy]]
+  paths = ["apps/debrief/app/src/testing/helpers.ts"]
+  symbols = ["item:settleUntil"]
+  owner = "debrief"
+  delete_by = "debrief-v1.2.0"
+  note = "Debrief's `settleUntil` (a fixture settled until a condition holds): the `until` copy that ADR 0082 §3 names as the shared `settleUntil`/`untilState` in @decryp7/paddock-ui/testing. Registered 2026-11-22 (ADR audit)."
 
   [[mechanism.copy]]
   paths = ["apps/pitcrew/app/src/testing/test-helpers.ts"]
@@ -1535,3 +1542,44 @@ status = "built"
   owner = "dyno"
   delete_by = "dyno-v1.2.0"
   note = "A benchmark scratch folder's identity as text: dev:ino on Unix (symlink_metadata), volume:index from dyno-platform's fileid on Windows."
+
+# =====================================================================================================================
+# Children's environment, folder watching (ADR audit 2026-11-22, rule 55)
+# =====================================================================================================================
+
+[[mechanism]]
+id = "child-env-kept-list"
+title = "The list of variables a child process inherits after the environment is cleared (ER-47, ADR 0100)"
+canonical = "paddock-proc"
+paths = ["crates/paddock-proc/src/command.rs"]
+symbols = ["item:KEPT_ENV"]
+status = "built"
+adr = "0100"
+
+  [[mechanism.copy]]
+  paths = ["apps/debrief/crates/debrief-ipc/src/process.rs"]
+  symbols = ["item:KEPT_ENV"]
+  owner = "debrief"
+  delete_by = "debrief-v1.2.0"
+  note = "Debrief's own `KEPT_ENV`, used by its engine launcher and the plugin host's built-ins; it becomes `paddock_proc::KEPT_ENV` (plus any Debrief-only names as a listed extra). Registered 2026-11-22 (ADR audit)."
+
+  [[mechanism.copy]]
+  paths = ["apps/pitwall/crates/pitwall-server/src/process.rs"]
+  symbols = ["item:KEPT_ENV"]
+  owner = "pitwall"
+  delete_by = "pitwall-v1.2.0"
+  note = "Pitwall's own `KEPT_ENV` for the engine it starts (no tokens, proxies or user variables); it becomes `paddock_proc::KEPT_ENV`. Registered 2026-11-22 (ADR audit)."
+
+[[mechanism]]
+id = "folder-watch"
+title = "Watching a folder: change events, a debounce on the shared clock, a watcher thread (plan X23)"
+canonical = "paddock-watch"
+paths = ["crates/paddock-watch/src/**"]
+status = "built"
+
+  [[mechanism.copy]]
+  paths = ["apps/debrief/app/src-tauri/src/live.rs"]
+  symbols = ["text:notify_debouncer_mini"]
+  owner = "debrief"
+  delete_by = "debrief-v1.2.0"
+  note = "Debrief's own `notify` watcher (notify-debouncer-mini) behind the engine's FileWatcher port; paddock-watch was built to replace it (its doc names Debrief) and pins notify 8. Debrief moves onto `paddock_watch::NotifySource`, so the family has one notify version and no fork of notify 9. Registered 2026-11-22 (ADR audit)."

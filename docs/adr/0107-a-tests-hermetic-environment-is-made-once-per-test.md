@@ -1,6 +1,6 @@
 # 107. A test's hermetic environment is made once, never per child
 
-- Status: Proposed 2026-11-18. The user chose to fix forward: TestCommand stays on train 14, and this ADR is the redesign in
+- Status: Accepted 2026-11-22 (user), option A only, closed: option A is built (`crates/paddock-testkit/src/ambient.rs`, `tools/paddock-dev/src/ci_isolation/home.rs`; ci run 8247 measured it) and option B is not wanted. Was: Proposed 2026-11-18. The user chose to fix forward: TestCommand stays on train 14, and this ADR is the redesign in
   the same round (ER-21, ER-44). It amends ADR 0100. The choice between options A and B below is for the user.
 - Date: 2026-11-18
 - Related: ADR 0100 (one process builder with a listed environment), ADR 0025 (CI job isolation, kept folders), ER-9 (a gate
