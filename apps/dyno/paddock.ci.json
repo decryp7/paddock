@@ -92,8 +92,7 @@
       "dyno-helper",
       "dyno-helper-service",
       "dyno-platform",
-      "dyno-plugin-host",
-      "tray-icon"
+      "dyno-plugin-host"
     ]
   }
 }

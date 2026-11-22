@@ -41,8 +41,7 @@
       "debrief-store-duck",
       "debrief-store-worker",
       "debrief-symbols",
-      "debrief-video",
-      "quack-harness"
+      "debrief-video"
     ]
   }
 }

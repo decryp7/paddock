@@ -279,6 +279,7 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
             let host = HostTests::parse(graph.config(app), &format!("apps/{app}/paddock.ci.json")).map_err(fail)?;
             // A nightly or a tag run tests every package here too (`full_os` without PLAN_APP: the app's own workflow asks for it by name).
             let full = env("PLAN_FULL_OS").is_some_and(|v| v == "true")
+                || env("PLAN_FULL").is_some_and(|v| v == "true")
                 || env("GITHUB_EVENT_NAME").as_deref() == Some("schedule")
                 || env("GITHUB_REF").is_some_and(|r| r.starts_with("refs/tags/"));
             let scope = host.filter(|_| !full).map(|h| h.scope("macos-latest")).unwrap_or_default();

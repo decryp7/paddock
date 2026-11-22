@@ -249,7 +249,7 @@
      "rule": 3,
      "file": "crates/paddock.ci.json",
      "line": 1,
-     "message": "[stale-entry] `hostTests` lists the package `paddock-gone`, which is no package under crates/",
+     "message": "[stale-entry] `hostTests` lists the package `paddock-gone`, which is no member package under crates/ (a vendored, fuzz or research crate cannot be selected with `-p`)",
      "fix": "Delete the entry or fix its spelling: a typo here silently drops that package's host tests."
     },
     {
@@ -449,6 +449,58 @@
    "waived": [],
    "errors": 0,
    "warnings": 3
+  }
+ },
+ {
+  "name": "a-listed-vendored-or-standalone-package-is-no-member",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "apps/x/paddock.ci.json",
+    "{\"hostTests\": {\"packages\": [\"x-a\", \"tray-icon\", \"quack-harness\"]}}"
+   ],
+   [
+    "apps/x/a/Cargo.toml",
+    "[package]\nname = \"x-a\"\n"
+   ],
+   [
+    "apps/x/a/src/lib.rs",
+    "fn a() {}\n"
+   ],
+   [
+    "apps/x/vendor/tray-icon/Cargo.toml",
+    "[package]\nname = \"tray-icon\"\n"
+   ],
+   [
+    "apps/x/docs/research/harness/Cargo.toml",
+    "[package]\nname = \"quack-harness\"\n\n[workspace]\n"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C155",
+     "severity": "warn",
+     "rule": 3,
+     "file": "apps/x/paddock.ci.json",
+     "line": 1,
+     "message": "[stale-entry] `hostTests` lists the package `tray-icon`, which is no member package under apps/x/ (a vendored, fuzz or research crate cannot be selected with `-p`)",
+     "fix": "Delete the entry or fix its spelling: a typo here silently drops that package's host tests."
+    },
+    {
+     "check": "C155",
+     "severity": "warn",
+     "rule": 3,
+     "file": "apps/x/paddock.ci.json",
+     "line": 1,
+     "message": "[stale-entry] `hostTests` lists the package `quack-harness`, which is no member package under apps/x/ (a vendored, fuzz or research crate cannot be selected with `-p`)",
+     "fix": "Delete the entry or fix its spelling: a typo here silently drops that package's host tests."
+    }
+   ],
+   "waived": [],
+   "errors": 0,
+   "warnings": 2
   }
  }
 ]

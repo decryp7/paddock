@@ -206,7 +206,14 @@ fn below(module: &str, listed: &[String]) -> bool {
     listed.iter().any(|l| with.starts_with(l.as_str()))
 }
 
-/// `(package name, dir)` of every package of the tree under `prefix` (a folder with a `Cargo.toml` that has a `[package]`).
+/// Whether a manifest is no member of the workspace around it: it has a `[workspace]` of its own, or sits in a folder cargo's workspace
+/// excludes by convention here (`vendor`, `docs` research harnesses, `fuzz` crates). cargo cannot select such a package with `-p`
+/// (Dyno's vendored `tray-icon`, Debrief's `quack-harness`), so a `hostTests` entry for one would break every scoped leg.
+fn non_member(rel: &str, text: &str) -> bool {
+    text.contains("[workspace]") || rel.split('/').any(|s| matches!(s, "vendor" | "docs" | "fuzz"))
+}
+
+/// `(package name, dir)` of every member package of the tree under `prefix` (a folder with a `Cargo.toml` that has a `[package]`).
 fn packages(ctx: &Ctx, prefix: &str) -> Vec<(String, String)> {
     let mut out = Vec::new();
     for f in ctx
@@ -215,7 +222,7 @@ fn packages(ctx: &Ctx, prefix: &str) -> Vec<(String, String)> {
         .filter(|f| f.starts_with(prefix) && f.ends_with("/Cargo.toml"))
     {
         let Some(text) = ctx.read(f) else { continue };
-        if !text.contains("[package]") {
+        if !text.contains("[package]") || non_member(f, &text) {
             continue;
         }
         let after = &text[text.find("[package]").unwrap_or(0)..];
@@ -272,7 +279,7 @@ impl C155 {
                     RULE,
                     contract,
                     1,
-                    format!("[stale-entry] `hostTests` lists the package `{stale}`, which is no package under {root}"),
+                    format!("[stale-entry] `hostTests` lists the package `{stale}`, which is no member package under {root} (a vendored, fuzz or research crate cannot be selected with `-p`)"),
                     "Delete the entry or fix its spelling: a typo here silently drops that package's host tests.",
                 ));
             }
@@ -651,6 +658,15 @@ mod tests {
         assert!(!covered("pre_push::gates", &listed));
         assert!(!covered("local_sccache", &listed));
         assert!(below("ci_host::x", &listed) && !below("pre_push", &listed));
+    }
+
+    #[test]
+    fn a_vendored_fuzz_research_or_standalone_manifest_is_no_member() {
+        assert!(non_member("apps/d/vendor/tray-icon/Cargo.toml", "[package]"));
+        assert!(non_member("apps/d/docs/research/h/Cargo.toml", "[package]"));
+        assert!(non_member("crates/x/fuzz/Cargo.toml", "[package]"));
+        assert!(non_member("apps/d/h/Cargo.toml", "[package]\n[workspace]"));
+        assert!(!non_member("apps/d/app/src-tauri/Cargo.toml", "[package]"));
     }
 
     #[test]
