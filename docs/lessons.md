@@ -3504,3 +3504,18 @@ about 45 ms a start on that runner plus a fork per command substitution. **Fix:*
   On the same commit with main merged in, under the gate that counts heavy queue time apart from run time (fix/push-gate-queue-stall),
   the row passed alone in 15.6 s after 223 s in the queue. Likely cause: the old gate's 15-minute budget spent on the heavy queue
   while other agents held the slot; not proven. Since then the integrator keeps the full output of every gate row.
+
+## Debrief WebKit e2e on loaded runners: a navigation echo, the dock-planned budget and the Inspector slide (train 20, 2026-11-23)
+- **Fixed: navigation-history.e2e.ts:83** (debrief.yml run 8636, job 45079, both tries; passed in 8643). After a Back or Forward, the
+  range watcher saw the unchanged range again on any query change and recorded it as a new place, which dropped the places ahead; only
+  the 600 ms echo window (`NAV_ECHO_MS`) hid it, so on a slow runner Alt+Right went nowhere. The watcher now reads the range alone, by
+  value (63e95174b; unit test first). Users who filtered after going back lost Forward the same way. The echo window is still a wall-clock
+  rule: recognising an echo by its cause instead is the class fix, not done.
+- **Fixed: a11y.e2e.ts:6 (dark)** (runs 8297, 8300, 8373, 8426, 8547, 8556, 8643): axe read the Inspector's 140 ms slide-in half-way.
+  Every axe scan now holds the page still (`withPageStill`, c51c1b39a; deterministic test that restarts the slide inside the scan).
+- **Fix item, open: the dock-planned wait** (ai-vision.e2e.ts:96 in 8636 job 45078, both tries; ai-pitwall.e2e.ts:68 in 8559 job 44324).
+  Both ran out on `[data-dock-planned]` with 6.2 to 7.1 s of the 15 s load budget left, in shards whose tests averaged 15 s. Not
+  reproduced on the Mac (0 of 80 WebKit runs, two of them with 12 CPU burners). The wait is now bounded on the dock's progress
+  (`data-dock-progress`, first wait = what is left of the load budget), and the dock logs `ui.layout` "Plan ran" / "Planned". Whether the
+  dock was slow, stuck or looping in those runs is NOT confirmed (ER-28): the next failure's log, with those lines and the wait's
+  "stuck" / "keeps re-planning" message, settles it. Close this item then.

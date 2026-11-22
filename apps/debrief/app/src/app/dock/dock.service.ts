@@ -118,7 +118,8 @@ export class DockService {
   readonly planned = computed(() => this.ctx.firstPlanned() && !this.ctx.replanPending());
   private readonly progress = signal(0);
   /**
-   * Steps the dock has taken towards `planned` since attach: each plan run and each resize that holds `planned` back. A reader waiting for
+   * Steps the dock has taken towards `planned` since attach (`step`): attach, whenSized's arrival, each plan run, each resize that holds `planned`
+   * back and each of the two release frames after a plan, so the waits for an observer or a frame count too. A reader waiting for
    * `planned` tells a slow dock (this grows) from a stuck one (it stands still); the dock host shows it as `data-dock-progress`.
    */
   readonly planProgress = this.progress.asReadonly();
@@ -348,6 +349,7 @@ export class DockService {
     this.wasAvailable.clear();
     this.ctx.apiReady.set(true);
     this.holdSince = performance.now();
+    this.step();
     this.ctx.firstPlanned.set(false);
     this.ctx.replanPending.set(false);
     const stopResize = this.layout.watchResize(api, () => this.fitToWindow(api, null), (pending) => (pending ? this.holdPlanned() : this.releasePlannedAfterFrames()));
@@ -360,6 +362,7 @@ export class DockService {
       stopDrag();
     };
     this.layout.whenSized(api, () => {
+      this.step();
       this.fitToWindow(api, loaded);
       this.ctx.firstPlanned.set(true);
       this.releasePlannedAfterFrames();
@@ -863,7 +866,7 @@ export class DockService {
   private fitToWindow(api: DockviewApi, before: SavedLayout | null): void {
     if (this.ctx.api !== api || this.ctx.restoring) return;
     this.plansRun++;
-    this.progress.update((n) => n + 1);
+    this.step();
     this.logger.debug('ui.layout', 'Plan ran', { Plan: this.plansRun, Width: Math.round(api.width), Height: Math.round(api.height) });
     const plan = this.layout.plan(api);
     if (!plan) {
@@ -891,11 +894,16 @@ export class DockService {
     this.windowListeners.forEach((l) => l());
   }
 
+  /** One step towards `planned` (`planProgress`): attach, whenSized's arrival, a plan, a resize that holds the plan back, a release frame. */
+  private step(): void {
+    this.progress.update((n) => n + 1);
+  }
+
   /** A plan is on its way: `planned` is false until it has run and the window's reaction to it has settled. */
   private holdPlanned(): void {
     this.plannedToken++;
     this.holdSince ??= performance.now();
-    this.progress.update((n) => n + 1);
+    this.step();
     this.ctx.replanPending.set(true);
   }
 
@@ -912,14 +920,16 @@ export class DockService {
     this.holdSince ??= performance.now();
     this.ctx.replanPending.set(true);
     const frame = typeof requestAnimationFrame === 'function' ? requestAnimationFrame : (cb: () => void) => setTimeout(cb, 16);
-    frame(() =>
+    frame(() => {
+      this.step();
       frame(() => {
+        this.step();
         if (token !== this.plannedToken) return;
         this.ctx.replanPending.set(false);
         this.logger.debug('ui.layout', 'Planned', { Plans: this.plansRun, WaitedMs: Math.round(performance.now() - (this.holdSince ?? performance.now())) });
         this.holdSince = null;
-      }),
-    );
+      });
+    });
   }
 
   /** A fit moves panels, which makes dockview leave the maximized state: full screen keeps its document well maximized. */
