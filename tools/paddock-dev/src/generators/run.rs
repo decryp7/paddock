@@ -103,6 +103,8 @@ fn base_command(program: impl AsRef<std::ffi::OsStr>, env: &HashMap<String, Stri
     let mut cmd = command(program);
     paddock_env::clear_env_from(&mut cmd, &[], |k| env.get(k).map(std::ffi::OsString::from));
     cmd.envs(env).current_dir(dir).env("CARGO_BUILD_JOBS", jobs);
+    // The prompt policy last (ER-47, named: paddock_env::command::no_prompts): no standard input, no toolchain auto-install.
+    paddock_env::command::no_prompts(&mut cmd);
     cmd
 }
 
@@ -128,6 +130,15 @@ mod command_tests {
         ] {
             assert!(got.contains(&(k.to_string(), v.to_string())), "{k}: {got:?}");
         }
+        // The prompt policy: standard input closed, the install ban pinned even where the map says otherwise.
+        let mut loose = env.clone();
+        loose.insert("RUSTUP_AUTO_INSTALL".into(), "1".into());
+        let cmd = base_command("x", &loose, Path::new("."), "2".into());
+        assert!(
+            cmd.get_envs()
+                .any(|(k, v)| k == "RUSTUP_AUTO_INSTALL" && v == Some(std::ffi::OsStr::new("0"))),
+            "the ban was not pinned"
+        );
         // Positive control: a variable that is not in the map is not taken from the process.
         assert!(!got.iter().any(|(k, _)| k == "CARGO_NET_OFFLINE"), "{got:?}");
     }
@@ -207,6 +218,35 @@ impl Real {
     }
 }
 
+/// What a finished run means for the check: heavy's own refusals (status 75 or 78 with its message) and a run that timed out while
+/// heavy still waited for the slot (its log names the holder and never says it took the lock) are not the check's verdict. Kept apart
+/// from the start of the program so that every outcome is tested on its output alone: a test that started a stand-in to time it out
+/// raced the stand-in's start against the limit (run 8546, job 44050: the line came after the 1 s limit on a loaded runner).
+pub(super) fn ran_from(o: &paddock_proc::Output, heavy: bool) -> Ran {
+    let text = format!("{}\n{}", o.stderr_text(), o.stdout_text());
+    match o.outcome {
+        paddock_proc::Outcome::Exited(status) => {
+            if heavy && matches!(status.code(), Some(75 | 78)) && text.contains("heavy ") {
+                return Ran::Unavailable(format!(
+                    "heavy gave no slot (status {}): {}",
+                    status.code().unwrap_or(0),
+                    tail(&text)
+                ));
+            }
+            Ran::Exited {
+                code: status.code(),
+                tail: tail(&text),
+                text,
+            }
+        }
+        paddock_proc::Outcome::TimedOut => match crate::pre_push::exec::slot_wait(&text).filter(|_| heavy) {
+            Some(w) => Ran::SlotWait(w),
+            None => Ran::TimedOut,
+        },
+        paddock_proc::Outcome::OutputCap => Ran::OutputCap,
+    }
+}
+
 impl Runner for Real {
     fn run(&self, dir: &Path, argv: &[String], limit: Duration, spec: &Spec) -> Ran {
         let target = match self.target_dir(spec.workspace) {
@@ -268,32 +308,7 @@ impl Runner for Real {
             cmd.env("CARGO_TARGET_DIR", &target);
         }
         match run_bounded(cmd, Limits::new(limit).max_output(1 << 22).stop_on_cap()) {
-            Ok(o) => match o.outcome {
-                paddock_proc::Outcome::Exited(status) => {
-                    let text = format!("{}\n{}", o.stderr_text(), o.stdout_text());
-                    // heavy's own refusals (it could not take the lock, or refused the folder) are not the check's verdict.
-                    if spec.heavy && matches!(status.code(), Some(75 | 78)) && text.contains("heavy ") {
-                        return Ran::Unavailable(format!(
-                            "heavy gave no slot (status {}): {}",
-                            status.code().unwrap_or(0),
-                            tail(&text)
-                        ));
-                    }
-                    Ran::Exited {
-                        code: status.code(),
-                        tail: tail(&text),
-                        text,
-                    }
-                }
-                paddock_proc::Outcome::TimedOut => {
-                    let text = format!("{}\n{}", o.stderr_text(), o.stdout_text());
-                    match crate::pre_push::exec::slot_wait(&text).filter(|_| spec.heavy) {
-                        Some(w) => Ran::SlotWait(w),
-                        None => Ran::TimedOut,
-                    }
-                }
-                paddock_proc::Outcome::OutputCap => Ran::OutputCap,
-            },
+            Ok(o) => ran_from(&o, spec.heavy),
             Err(e) => Ran::Unavailable(e.to_string()),
         }
     }

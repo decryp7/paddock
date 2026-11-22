@@ -6,6 +6,9 @@ import { provideIcons } from '../../shared/icons';
 import { HelperStore } from '../../state/helper.store';
 import { HelperCard } from './helper-card';
 
+// The real clock back after every test, so a test that times out cannot leave fake timers for the next one (ER-12, C154).
+afterEach(() => vi.useRealTimers());
+
 async function make(helper: MockHelperVariant, fail: string[] = []) {
   const { mock, jobs } = mockWithJobs({ helper, fail: new Set(fail) });
   TestBed.configureTestingModule({ providers: [provideIcons(), jobsProviders(jobs), { provide: BACKEND, useValue: mock }] });

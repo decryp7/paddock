@@ -2,6 +2,12 @@ use paddock_jobs::time::Clock;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+/// How long a watch may stay silent before it looks at the folder anyway (one hour, Syncthing's default full-scan
+/// interval beside its watcher). The OS can drop change events without telling us: `notify` 8.2 discards an FSEvents
+/// dropped-events notice whose path is outside the watched folder, and passes no notice for a Windows
+/// `ReadDirectoryChangesW` overflow or `ERROR_NOTIFY_ENUM_DIR`. This bounds how stale a missed change can stay.
+pub const DEFAULT_RESYNC: Duration = Duration::from_secs(60 * 60);
+
 /// What [`Debouncer::poll`] found.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Due {
@@ -26,18 +32,56 @@ pub struct Debouncer {
     clock: Arc<dyn Clock>,
     quiet: Duration,
     max_wait: Duration,
+    resync: Option<Duration>,
     pending: Mutex<Option<Pending>>,
+    /// When the action last ran (or the debouncer was made), on the clock.
+    last_due: Mutex<Duration>,
 }
 
 impl Debouncer {
-    /// A debouncer with explicit timing (`max_wait` is raised to at least `quiet`).
+    /// A debouncer with explicit timing (`max_wait` is raised to at least `quiet`) and the [`DEFAULT_RESYNC`] time.
     pub fn new(clock: Arc<dyn Clock>, quiet: Duration, max_wait: Duration) -> Self {
+        let now = clock.monotonic();
         Self {
             clock,
             quiet,
             max_wait: max_wait.max(quiet),
+            resync: Some(DEFAULT_RESYNC),
             pending: Mutex::new(None),
+            last_due: Mutex::new(now),
         }
+    }
+
+    /// The same debouncer with another resync time: how long the watch may stay silent before
+    /// [`resync_due`](Self::resync_due) says to look anyway. `None` never resyncs (only for a source known never to drop
+    /// events, such as a test's fake).
+    #[must_use]
+    pub fn with_resync(mut self, every: Option<Duration>) -> Self {
+        self.resync = every;
+        self
+    }
+
+    fn last_due(&self) -> std::sync::MutexGuard<'_, Duration> {
+        self.last_due.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Whether the resync time has passed since the action last ran, with no change waiting; when it says `true` it
+    /// counts as a run, so the next resync is a full resync time later. The watcher thread asks this after
+    /// [`poll`](Self::poll) and runs the action, so a change the OS never reported is found within the resync time.
+    pub fn resync_due(&self) -> bool {
+        let Some(every) = self.resync else {
+            return false;
+        };
+        if self.has_pending() {
+            return false;
+        }
+        let now = self.clock.monotonic();
+        let mut last = self.last_due();
+        if now.saturating_sub(*last) < every {
+            return false;
+        }
+        *last = now;
+        true
     }
 
     fn state(&self) -> std::sync::MutexGuard<'_, Option<Pending>> {
@@ -80,6 +124,8 @@ impl Debouncer {
             return Due::Waiting(due - now);
         }
         *p = None;
+        drop(p);
+        *self.last_due() = now;
         Due::Now
     }
 }

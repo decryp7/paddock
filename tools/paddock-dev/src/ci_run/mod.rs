@@ -316,6 +316,8 @@ fn line_command(text: &str, dir: &Path, env: &HashMap<String, String>, heavy: &[
     cmd.args(&argv[1..]).current_dir(dir);
     paddock_env::clear_env_from(&mut cmd, &[], |k| env.get(k).map(std::ffi::OsString::from));
     cmd.envs(env);
+    // The prompt policy last (ER-47, named: paddock_env::command::no_prompts): no standard input, no toolchain auto-install.
+    paddock_env::command::no_prompts(&mut cmd);
     cmd
 }
 
@@ -367,9 +369,28 @@ mod line_command_tests {
         for (k, v) in [("PADDOCK_DEV_DOWNLOAD", "0"), ("CARGO_NET_OFFLINE", "true")] {
             assert!(got.contains(&(k.to_string(), v.to_string())), "{k}: {got:?}");
         }
-        assert!(
-            !got.iter().any(|(k, _)| k == "RUSTUP_AUTO_INSTALL"),
-            "taken from the process: {got:?}"
-        );
+        // Not taken from the process, but pinned by the prompt policy (a line never lets rustup install a toolchain, ER-45).
+        assert!(got.contains(&("RUSTUP_AUTO_INSTALL".to_string(), "0".to_string())), "{got:?}");
+    }
+
+    #[test]
+    fn a_line_never_waits_on_standard_input_and_never_lets_rustup_install() {
+        // The job's own environment says rustup may install: the policy still pins the ban (a caller opts in on the command).
+        let mut env: HashMap<String, String> = HashMap::new();
+        env.insert("RUSTUP_AUTO_INSTALL".into(), "1".into());
+        let cmd = line_command("cat; echo done", Path::new("."), &env, &[]);
+        let got: Vec<(String, String)> = cmd
+            .get_envs()
+            .filter_map(|(k, v)| v.map(|v| (k.to_string_lossy().into_owned(), v.to_string_lossy().into_owned())))
+            .collect();
+        assert!(got.contains(&("RUSTUP_AUTO_INSTALL".to_string(), "0".to_string())), "{got:?}");
+        // End of file at once: `cat` returns instead of waiting for this test's input.
+        // Only the Unix run mutates the command, so the binding is mutable there alone (`-D warnings` on Windows, ci.yml 8495).
+        #[cfg(unix)]
+        {
+            let mut cmd = cmd;
+            let out = cmd.stdout(std::process::Stdio::piped()).output().expect("bash runs");
+            assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "done");
+        }
     }
 }

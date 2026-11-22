@@ -571,7 +571,7 @@ async fn embed(
     let bypass = pitwall_core::cache::bypass(header_str(h, "cache-control"));
     let keys: Vec<pitwall_core::cache::Key> = req.input.iter().map(|t| pitwall_core::cache::embed_key(&fp, t)).collect();
     let mut vectors: Vec<Option<Vec<f32>>> = if on && !bypass {
-        keys.iter().map(|k| st.caches.vector(k, now)).collect()
+        st.caches.vectors(&keys, now)
     } else {
         vec![None; keys.len()]
     };
@@ -616,10 +616,11 @@ async fn embed(
             app: app.to_string(),
             preset: resolved.preset.as_ref().map(|p| p.alias.to_string()).unwrap_or_default(),
         };
-        for (i, v) in missing.iter().zip(out.vectors) {
-            if on {
-                st.caches.store_vector(keys[*i], &v, meta.clone(), now);
-            }
+        let fresh: Vec<(pitwall_core::cache::Key, Vec<f32>)> = missing.iter().zip(out.vectors).map(|(i, v)| (keys[*i], v)).collect();
+        if on {
+            st.caches.store_vectors(&fresh, &meta, now);
+        }
+        for (i, (_, v)) in missing.iter().zip(fresh) {
             vectors[*i] = Some(v);
         }
     }

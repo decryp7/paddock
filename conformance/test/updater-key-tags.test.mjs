@@ -100,9 +100,9 @@ test('the bundle jobs read no kept npm or Angular cache and no kept node_modules
     const ifOf = (name, uses) => expr(parsed.find((s) => (name ? s.name === name : true) && (uses ? (s.uses ?? '').includes(uses) : true))?.if);
     const parsedCaches = parsed.filter((s) => (s.uses ?? '').includes('./.gitea/actions/node-caches'));
     assert.equal(parsedCaches.length, caches.length, `${file}: the parsed workflow sees the same node-caches steps`);
-    for (const c of parsedCaches) assert.match(expr(c.if), /^(?:runner\.os != 'Windows' && )?!startsWith\(github\.ref, 'refs\/tags\/'\)$/, `${file}: node-caches is skipped on a tag`);
+    for (const c of parsedCaches) assert.match(expr(c.if), /^(?:runner\.os != 'Windows' && )?!startsWith\(github\.ref, 'refs\/tags\/'\)(?: && inputs\.rehearsal != true)?$/, `${file}: node-caches is skipped on a tag`);
     const fresh = steps.find((s) => s.name === 'Fresh npm cache and no kept Angular cache on a tag');
-    assert.equal(ifOf(fresh.name), "startsWith(github.ref, 'refs/tags/')");
+    assert.match(ifOf(fresh.name), /^startsWith\(github\.ref, 'refs\/tags\/'\)(?: \|\| inputs\.rehearsal == true)?$/);
     assert.match(fresh.run, /bash conformance\/ci\/tag-node-caches\.sh /);
   }
   const { steps } = stepOf(read('debrief.yml'), 'bundle', 'Build installers');

@@ -504,6 +504,14 @@ pub fn release(ctx: &Ctx, io: &mut Sinks<'_>) -> R<()> {
     if is_linux(ctx)? {
         return Ok(());
     }
+    // The S3 level's guard and the sccache server that holds the S3 secret end with the job, even when its stats step never ran.
+    {
+        let mut said = Vec::new();
+        crate::ci_s3_guard::stop_job_cache(&ctx.env_snapshot(), &mut said);
+        if !said.is_empty() {
+            io.say(String::from_utf8_lossy(&said).trim_end());
+        }
+    }
     // The job's socket folder goes whether or not this job got a slot (acquire made it).
     if let Err(e) = tmpdir::remove(ctx, io) {
         if !e.text.is_empty() {
@@ -604,6 +612,34 @@ mod tests {
         assert_eq!((code, out.as_str()), (0, ""));
         assert!(err.contains("no slot in a Linux container"));
         assert_eq!(go(&c, &["release"]).0, 0);
+    }
+
+    /// The net under `ci sccache-stats`: the host job's last step stops the S3 level's server even when the stats step never ran.
+    #[cfg(unix)]
+    #[test]
+    fn release_stops_the_s3_levels_guard_and_server() {
+        use paddock_testkit::{Actions, StandIn};
+        let d = crate::ci_host::canonical_tempdir();
+        let calls = d.path().join("calls").display().to_string();
+        StandIn::new(d.path(), "sccache")
+            .answers(Actions::new().appends_with(&calls, "sccache {args}\n"))
+            .install()
+            .unwrap();
+        let guard = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = guard.local_addr().unwrap().port().to_string();
+        let path = format!("{}:/usr/bin:/bin", d.path().display());
+        let c = ctx(&[
+            ("RUNNER_OS", "macOS"),
+            ("PATH", path.as_str()),
+            ("PADDOCK_S3_GUARD_PORT", port.as_str()),
+            ("SCCACHE_SERVER_PORT", "4501"),
+        ]);
+        let _ = go(&c, &["release"]);
+        assert_eq!(
+            std::fs::read_to_string(d.path().join("calls")).unwrap_or_default(),
+            "sccache --stop-server\n"
+        );
+        assert!(guard.accept().is_ok(), "the guard got the stop request");
     }
 
     #[test]

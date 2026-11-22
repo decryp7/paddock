@@ -1,5 +1,5 @@
 name: node-caches
-description: "Keeps npm's download cache and the Angular build cache between runs: on a host runner in the CI home's kept folders (job-isolation: npm shared, angular/<name>-<slot> per job slot), in a Linux container on the runner's /sccache mount (its npm/ and angular/ subfolders); a container without the mount keeps both in the job (a notice says so)."
+description: "Keeps npm's download cache and the Angular build cache between runs: on a host runner in the job slot's own kept folders (job-isolation: npm-<slot> and angular/<name>-<slot>); in a Linux container in the job's own folders under RUNNER_TEMP, filled and kept through actions/cache (the runners' RustFS S3): npm keyed by OS, Node and the lockfile with restore-keys, Angular by the lockfile (which holds the Angular version) and the app's sources, falling back to the same lockfile's older entry (content-addressed, so partial is safe). No folder of the shared /sccache mount is used (ADR 0111). The job summary gets each cache's key, exact hit, partial hit or miss, and the save (pending: it runs in actions/cache's post step, whose log says if it failed)."
 inputs:
   angular-dir:
     description: "The Angular workspace whose .angular/cache is kept (relative to the checkout); empty keeps only the npm cache."
@@ -10,9 +10,58 @@ inputs:
 runs:
   using: composite
   steps:
+    # The first ./dev call of this action is the next step (`kit.sh host node-caches`): the tool cache comes before it (ADR 0115).
+    - name: ./dev tool cache
+      uses: ./.gitea/actions/dev-tool-cache
     - name: npm and Angular caches
       shell: bash
       env:
         ANGULAR_DIR: ${{ inputs.angular-dir }}
         NAME: ${{ inputs.name }}
       run: bash "${{ github.action_path }}/../../../conformance/ci/kit.sh" host node-caches "$ANGULAR_DIR" "$NAME"
+    # Linux containers only (a host keeps its slot's folders): the folders node-caches made are filled from, and saved to, the Actions
+    # cache. The save is actions/cache's post step at the end of the job and only for a miss on a green job.
+    - name: Node version for the cache key
+      id: node
+      if: runner.os == 'Linux'
+      shell: bash
+      run: echo "version=$(node --version 2>/dev/null || echo none)" >> "$GITHUB_OUTPUT"
+    - name: npm download cache
+      id: npm-cache
+      if: runner.os == 'Linux'
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      with:
+        path: ${{ runner.temp }}/node-caches/npm
+        key: npm-v1-${{ runner.os }}-${{ runner.arch }}-node-${{ steps.node.outputs.version }}-${{ hashFiles('package-lock.json') }}
+        restore-keys: |
+          npm-v1-${{ runner.os }}-${{ runner.arch }}-node-${{ steps.node.outputs.version }}-
+    - name: Angular build cache
+      id: angular-cache
+      if: runner.os == 'Linux' && inputs.angular-dir != ''
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      with:
+        path: ${{ runner.temp }}/node-caches/angular
+        # The lockfile pins the Angular version; the sources are what the cache was built from. Angular's cache is content-addressed, so a
+        # partial restore from the same job and lockfile is safe: it only misses the entries whose sources changed.
+        key: ng-v1-${{ runner.os }}-${{ runner.arch }}-${{ inputs.name }}-${{ hashFiles('package-lock.json') }}-${{ hashFiles(format('{0}/projects/**', inputs.angular-dir), format('{0}/src/**', inputs.angular-dir), format('{0}/angular.json', inputs.angular-dir)) }}
+        restore-keys: |
+          ng-v1-${{ runner.os }}-${{ runner.arch }}-${{ inputs.name }}-${{ hashFiles('package-lock.json') }}-
+    - name: Cache summary
+      if: always() && runner.os == 'Linux'
+      shell: bash
+      env:
+        NPM_KEY: ${{ steps.npm-cache.outputs.cache-primary-key }}
+        NPM_HIT: ${{ steps.npm-cache.outputs.cache-hit }}
+        NPM_MATCHED: ${{ steps.npm-cache.outputs.cache-matched-key }}
+        NG_KEY: ${{ steps.angular-cache.outputs.cache-primary-key }}
+        NG_HIT: ${{ steps.angular-cache.outputs.cache-hit }}
+        NG_MATCHED: ${{ steps.angular-cache.outputs.cache-matched-key }}
+      run: |
+        # One reader of the cache steps' outputs (ADR 0115): exact, partial or miss from cache-hit and cache-matched-key. The save is
+        # actions/cache's post step at the end of the job, so it is reported as pending; `ci cache-audit` reads whether the key got saved.
+        r="${{ github.action_path }}/../../../conformance/ci/cache-report.sh"
+        {
+          if [ -n "$NPM_KEY" ]; then bash "$r" line npm "$NPM_KEY" "$NPM_HIT" "$NPM_MATCHED" pending
+          else echo "- npm cache: not measured (the step did not run)" | tee -a "$GITHUB_STEP_SUMMARY"; fi
+          [ -z "$NG_KEY" ] || bash "$r" line Angular "$NG_KEY" "$NG_HIT" "$NG_MATCHED" pending
+        }

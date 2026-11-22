@@ -1,0 +1,211 @@
+[
+ {
+  "name": "unwired-step",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    ".gitea/workflows/ci.yml",
+    "jobs:\n  a:\n    steps:\n      - uses: ./.gitea/actions/setup-rust\n"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C141",
+     "severity": "warn",
+     "rule": 79,
+     "file": ".gitea/workflows/ci.yml",
+     "line": 4,
+     "message": "the S3 key lines are missing: paste after line 4:\n        with:\n          sccache-s3-access-key-id: ${{ secrets.PADDOCK_SCCACHE_S3_ACCESS_KEY_ID }}\n          sccache-s3-secret-access-key: ${{ secrets.PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY }}",
+     "fix": "Paste the lines exactly as shown (the indentation is the file's own); docs/research/2026-11-19-sccache.md section 8."
+    }
+   ],
+   "waived": [],
+   "errors": 0,
+   "warnings": 1
+  }
+ },
+ {
+  "name": "wired-step",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    ".gitea/workflows/ci.yml",
+    "jobs:\n  a:\n    steps:\n      - uses: ./.gitea/actions/setup-rust\n        with:\n          sccache-s3-access-key-id: ${{ secrets.PADDOCK_SCCACHE_S3_ACCESS_KEY_ID }}\n          sccache-s3-secret-access-key: ${{ secrets.PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY }}\n"
+   ]
+  ],
+  "result": {
+   "findings": [],
+   "waived": [],
+   "errors": 0,
+   "warnings": 0
+  }
+ },
+ {
+  "name": "no-secret-job-holds-none",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    ".gitea/workflows/ci.yml",
+    "jobs:\n  train-gates:\n    steps:\n      - uses: ./.gitea/actions/setup-rust\n"
+   ]
+  ],
+  "result": {
+   "findings": [],
+   "waived": [],
+   "errors": 0,
+   "warnings": 0
+  }
+ },
+ {
+  "name": "no-secret-job-holding-a-key",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    ".gitea/workflows/ci.yml",
+    "jobs:\n  train-gates:\n    steps:\n      - uses: ./.gitea/actions/setup-rust\n        with:\n          sccache-s3-access-key-id: ${{ secrets.PADDOCK_SCCACHE_S3_ACCESS_KEY_ID }}\n"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C141",
+     "severity": "warn",
+     "rule": 79,
+     "file": ".gitea/workflows/ci.yml",
+     "line": 6,
+     "message": "names an S3 key secret outside a setup-rust step's `with:` or a reusable workflow's `secrets:`",
+     "fix": "Remove it here: the key reaches only the setup-rust step (least privilege; docs/research/2026-11-19-sccache.md section 8)."
+    }
+   ],
+   "waived": [],
+   "errors": 0,
+   "warnings": 1
+  }
+ },
+ {
+  "name": "key-in-a-job-env",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    ".gitea/workflows/ci.yml",
+    "jobs:\n  a:\n    env:\n      K: ${{ secrets.PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY }}\n    steps:\n      - run: echo hi\n"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C141",
+     "severity": "warn",
+     "rule": 79,
+     "file": ".gitea/workflows/ci.yml",
+     "line": 4,
+     "message": "names an S3 key secret outside a setup-rust step's `with:` or a reusable workflow's `secrets:`",
+     "fix": "Remove it here: the key reaches only the setup-rust step (least privilege; docs/research/2026-11-19-sccache.md section 8)."
+    }
+   ],
+   "waived": [],
+   "errors": 0,
+   "warnings": 1
+  }
+ },
+ {
+  "name": "fuzz-caller-without-secrets",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    ".gitea/workflows/nightly.yml",
+    "jobs:\n  f:\n    uses: ./.gitea/workflows/app-fuzz.yml\n    with:\n      x: y\n"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C141",
+     "severity": "warn",
+     "rule": 79,
+     "file": ".gitea/workflows/nightly.yml",
+     "line": 3,
+     "message": "the S3 key lines are missing: paste after line 3:\n    secrets:\n      PADDOCK_SCCACHE_S3_ACCESS_KEY_ID: ${{ secrets.PADDOCK_SCCACHE_S3_ACCESS_KEY_ID }}\n      PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY: ${{ secrets.PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY }}",
+     "fix": "Paste the lines exactly as shown (the indentation is the file's own); docs/research/2026-11-19-sccache.md section 8."
+    }
+   ],
+   "waived": [],
+   "errors": 0,
+   "warnings": 1
+  }
+ },
+ {
+  "name": "action-names-the-input-twice",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    ".gitea/actions/setup-rust/action.yml",
+    "name: setup-rust\nruns:\n  using: composite\n  steps:\n    - name: one\n      env:\n        K: ${{ inputs.sccache-s3-access-key-id }}\n        S: ${{ inputs.sccache-s3-secret-access-key }}\n      run: echo hi\n    - name: two\n      run: echo ${{ inputs.sccache-s3-secret-access-key }}\n"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C141",
+     "severity": "error",
+     "rule": 79,
+     "file": ".gitea/workflows",
+     "line": 1,
+     "message": "not measured: the run read no workflow, so no setup-rust use was looked at",
+     "fix": "Run the check over the whole repository.",
+     "unwaivable": true,
+     "outcome": "not-measured"
+    },
+    {
+     "check": "C141",
+     "severity": "warn",
+     "rule": 79,
+     "file": ".gitea/actions/setup-rust/action.yml",
+     "line": 10,
+     "message": "`inputs.sccache-s3-secret-access-key` is named by 2 steps; exactly one (the step that runs `./dev ci setup-rust`) may name it",
+     "fix": "Hand each input to the one step that runs ./dev ci setup-rust, in its `env:`, and write nothing of it to $GITHUB_ENV."
+    }
+   ],
+   "waived": [],
+   "errors": 1,
+   "warnings": 1
+  }
+ },
+ {
+  "name": "no-workflow-is-not-measured",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "docs/x.md",
+    "x\n"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C141",
+     "severity": "error",
+     "rule": 79,
+     "file": ".gitea/workflows",
+     "line": 1,
+     "message": "not measured: the run read no workflow, so no setup-rust use was looked at",
+     "fix": "Run the check over the whole repository.",
+     "unwaivable": true,
+     "outcome": "not-measured"
+    }
+   ],
+   "waived": [],
+   "errors": 1,
+   "warnings": 0
+  }
+ }
+]

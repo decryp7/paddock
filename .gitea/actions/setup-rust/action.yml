@@ -14,14 +14,26 @@ inputs:
     description: "Install the Linux libraries Tauri needs (webkit2gtk, gtk, rsvg, appindicator); ignored on other systems."
     default: "false"
   sccache-backend:
-    description: "local (default: sccache's disk cache, the job slot's kept folder sccache-s<n> on a host runner, /sccache in a container when that mount exists), auto (Redis when an endpoint is set, else local) or redis (the endpoint is required)."
-    default: local
+    description: "s3 (the default: the local disk first, the shared RustFS store behind it; the local disk alone, with a ::notice:: naming the cause, when S3 cannot be used: no secret passed, the endpoint down, a failed health check, or a release, rule 54 or tag run, which never reads the shared store), local (sccache's disk cache only: the job slot's kept folder sccache-s<n> on a host runner, /sccache in a container when that mount exists), auto (Redis when an endpoint is set, else local) or redis (the endpoint is required). The dispatch input `sccache_backend` of ci.yml overrides it for one run (a measurement); no repository variable switches it (user decision 2026-11-21; docs/research/2026-11-19-sccache.md section 8)."
+    default: ${{ github.event.inputs.sccache_backend || 's3' }}
   sccache-redis-endpoint:
     description: "Shared sccache backend, e.g. redis://172.16.1.188:6379 (no path: sccache ignores it). Used on every OS; empty means sccache's local disk."
     default: ${{ vars.SCCACHE_REDIS_ENDPOINT }}
   sccache-redis-db:
     description: "Redis database number for sccache. The shared server gives sccache database 5 (docs/dev-setup.md); never another number."
     default: ${{ vars.SCCACHE_REDIS_DB }}
+  sccache-s3-access-key-id:
+    description: "The RustFS key's id: pass the repository secret PADDOCK_SCCACHE_S3_ACCESS_KEY_ID. Used only with sccache-backend s3, and only by the one step that runs ./dev ci setup-rust (conformance C141 checks every use passes it)."
+    default: ""
+  sccache-s3-secret-access-key:
+    description: "The RustFS key's secret: pass the repository secret PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY. Never reaches $GITHUB_ENV or a later step."
+    default: ""
+  sccache-s3-endpoint:
+    description: "The S3 store's URL, http://host:port."
+    default: ${{ vars.PADDOCK_SCCACHE_S3_ENDPOINT }}
+  sccache-s3-bucket:
+    description: "The S3 bucket."
+    default: ${{ vars.PADDOCK_SCCACHE_S3_BUCKET }}
 runs:
   using: composite
   steps:
@@ -82,13 +94,18 @@ runs:
         settle "$TOOLCHAIN"
         rustc --version
         cargo --version
+    # ./dev's own binary through the Actions cache (the dev-tool-cache action, ADR 0111 and 0115). It comes before the first ./dev call of
+    # this action, the one below: a ./dev call before the restore builds the tool from source and leaves nothing to save (run 8576: 42 of 44
+    # jobs rebuilt it). Needs the toolchain, so after it.
+    - name: ./dev tool cache
+      uses: ./.gitea/actions/dev-tool-cache
     # Every Rust job gets its runner's share of the host's cores, also when no build-jobs step ran before this one. It comes after
     # the toolchain: `./dev ci build-jobs` needs rustc (the shell script on the release path does not).
     - name: Build jobs for this runner
       shell: bash
       run: |
         if [ -z "${CARGO_BUILD_JOBS:-}" ]; then bash "${{ github.action_path }}/../../../conformance/ci/kit.sh" build-jobs; else echo "CARGO_BUILD_JOBS=$CARGO_BUILD_JOBS (set earlier in the job)"; fi
-    # Everything after the toolchain is `./dev ci setup-rust` (tools/paddock-dev/src/ci_setup_rust.rs). The two steps above stay
+    # Everything after the toolchain is `./dev ci setup-rust` (tools/paddock-dev/src/ci_setup_rust.rs). The steps above stay
     # here: ./dev needs rustc to hash and build itself, and the job's later ./dev calls must see the same compiler.
     # Until the release-path lane (docs/plans/ci-in-rust.md, step 5), a run that never downloads ./dev (a release or rule 54
     # dispatch, a tag) keeps the shell steps below unchanged; tests/it/setup_rust.rs proves both give the same result.
@@ -99,18 +116,37 @@ runs:
         # The rule lives once, in conformance/ci/kit.sh (it prints its reason on standard error).
         kit="$(bash "${{ github.action_path }}/../../../conformance/ci/kit.sh" which)"
         echo "kit=$kit" >> "$GITHUB_OUTPUT"
+        # The compile cache's S3 guard asks the release condition itself, never PADDOCK_DEV_DOWNLOAD (the step below sets that one for a job
+        # with no read token as well): true on a release, rule 54 or tag run (conformance/ci/kit.sh release_reason).
+        echo "release=$(bash "${{ github.action_path }}/../../../conformance/ci/kit.sh" release-path)" >> "$GITHUB_OUTPUT"
         echo "setup-rust: compile cache through the $kit implementation"
+    # ./dev builds itself from source when no pinned copy exists (cargo, build scripts): that runs here, in a step that holds no S3 key.
+    # The step below then only runs the built tool, which hands the key to the sccache server and to nothing else.
+    - name: Build ./dev
+      if: steps.kit.outputs.kit == 'dev'
+      shell: bash
+      run: |
+        if [ -z "${PADDOCK_DEV:-}" ]; then
+          if [ -z "${PADDOCK_DEV_TOKEN-}${GITHUB_TOKEN-}" ]; then export PADDOCK_DEV_DOWNLOAD=0; fi
+          bash "${{ github.action_path }}/../../../dev" ci setup-rust --help >/dev/null
+        fi
     - name: Compile cache and Tauri libraries
       if: steps.kit.outputs.kit == 'dev'
       shell: bash
       env:
         BACKEND: ${{ inputs.sccache-backend }}
+        PADDOCK_CI_RELEASE: ${{ steps.kit.outputs.release }}
         PADDOCK_SCCACHE_REDIS_ENDPOINT: ${{ inputs.sccache-redis-endpoint }}
         REDIS_DB: ${{ inputs.sccache-redis-db }}
         TAURI_LINUX_DEPS: ${{ inputs.tauri-linux-deps }}
+        # The S3 key goes to this step only (never $GITHUB_ENV): ./dev masks it and hands it to the sccache server it starts.
+        PADDOCK_SCCACHE_S3_ACCESS_KEY_ID: ${{ inputs.sccache-s3-access-key-id }}
+        PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY: ${{ inputs.sccache-s3-secret-access-key }}
+        PADDOCK_SCCACHE_S3_ENDPOINT: ${{ inputs.sccache-s3-endpoint }}
+        PADDOCK_SCCACHE_S3_BUCKET: ${{ inputs.sccache-s3-bucket }}
       run: |
         # Without the read credential ./dev builds itself from source and never takes a binary from the store (ADR 0022 section 3.3).
-        if [ -z "${PADDOCK_DEV_TOKEN-}${GITHUB_TOKEN-}" ]; then export PADDOCK_DEV_DOWNLOAD=0; fi
+        if bash "${{ github.action_path }}/../../../conformance/ci/dev-tool-cache.sh" no-download; then export PADDOCK_DEV_DOWNLOAD=0; fi
         # The tool job-isolation pinned for this job, else the wrapper (one tool per job, never a second fetch).
         if [ -n "${PADDOCK_DEV:-}" ]; then
           "$PADDOCK_DEV" ci setup-rust --sccache-backend "$BACKEND" --sccache-redis-db "$REDIS_DB" --tauri-linux-deps "$TAURI_LINUX_DEPS"
@@ -172,7 +208,11 @@ runs:
           echo "::warning::sccache is not available on this runner; building without the compile cache."
           exit 0
         fi
-        case "$BACKEND" in auto|redis|local) ;; *) echo "::error::sccache-backend must be auto, redis or local (got '$BACKEND')"; exit 1 ;; esac
+        if [ "$BACKEND" = s3 ]; then
+          echo "::notice::sccache-backend s3 is not used by this shell path (a release, rule 54 or tag run); the local disk is used until the release lane runs ./dev ci setup-rust."
+          BACKEND=local
+        fi
+        case "$BACKEND" in auto|redis|local) ;; *) echo "::error::sccache-backend must be auto, redis, local or s3 (got '$BACKEND')"; exit 1 ;; esac
         if [ "$BACKEND" = redis ] && [ -z "$REDIS_ENDPOINT" ]; then
           echo "::error::sccache-backend is redis but sccache-redis-endpoint is empty (set the Gitea variable SCCACHE_REDIS_ENDPOINT)"; exit 1
         fi
@@ -190,12 +230,44 @@ runs:
           SETTINGS+=("SCCACHE_REDIS_ENDPOINT=$REDIS_ENDPOINT" "SCCACHE_REDIS_DB=${REDIS_DB:-5}")
           echo "sccache: shared backend $REDIS_ENDPOINT db ${REDIS_DB:-5}"
         else
-          # Local disk. A host runner keeps it in the job slot's kept folder, so it outlives the job; a container uses the /sccache
-          # mount the runner provides, or a folder that dies with the container (with a notice: every job then starts cold).
+          # Local disk, one folder per job slot on every OS (ADR 0111; the Rust twin is tools/paddock-dev/src/ci_setup_rust.rs). sccache's
+          # LRU evicts any file below its folder and its local storage "only supports a single sccache server at a time" (docs/Local.md),
+          # so a Linux lane never gets the mount itself: its folder is <mount>/sccache-<lane>. A host runner's slot folder outlives
+          # the job; a container without the mount keeps the cache in the job (with a notice: every job then starts cold).
+          # This path never uses the S3 level (see the notice above); the Rust command's S3 local tier is the sibling folder
+          # <mount>/sccache-<lane>-s3 (ci_setup_rust::lane_s3_dir), never a folder inside the lane's, so a shell twin would name it the same.
           SIZE=20G
           if [ "$RUNNER_OS" = Linux ]; then
             MOUNT="${PADDOCK_SCCACHE_MOUNT:-/sccache}"  # overridable so the step's test does not depend on the runner's real mount
-            if [ -d "$MOUNT" ] && [ -w "$MOUNT" ]; then DIR="$MOUNT"
+            LANES="${PADDOCK_CI_SLOTS:-${PADDOCK_CI_JOBS_PER_HOST:-6}}"
+            LANE="${PADDOCK_CI_SLOT:-}"
+            if [ -d "$MOUNT" ] && [ -w "$MOUNT" ] && [ -z "$LANE" ] && [ -n "${RUNNER_TEMP:-}" ]; then
+              # The lane the Rust command takes: the same slot holder, in the mount's lanes/ folder. Only the tool this job already has
+              # (PADDOCK_DEV, pinned by job-isolation): this path never builds ./dev, and a failure is said, never hidden.
+              LANE_ERR="$(mktemp)"
+              if [ -n "${PADDOCK_DEV:-}" ] && [ -x "$PADDOCK_DEV" ]; then
+                LANE="$("$PADDOCK_DEV" ci slot acquire --max "$LANES" --owner "$RUNNER_TEMP" --root "$MOUNT/lanes" 2>"$LANE_ERR" | awk 'NR == 1 { print $1 }')" || LANE=""
+              else
+                echo "no ./dev binary is pinned for this job (PADDOCK_DEV), and this path never builds one" > "$LANE_ERR"
+              fi
+              if [ -n "$LANE" ]; then
+                # The slot, and what the end-of-job check (`dev ci slot check`, in sccache-stats) needs: the lanes folder and the lock file's identity.
+                { echo "PADDOCK_CI_SLOT=$LANE"; echo "PADDOCK_CI_LANE_ROOT=$MOUNT/lanes"; echo "PADDOCK_CI_LANE_LOCK=$(stat -c '%d:%i' "$MOUNT/lanes/slots/$LANE.lock" 2>/dev/null || true)"; } >> "$GITHUB_ENV" || { echo "::error::could not record the lane $LANE in GITHUB_ENV"; exit 1; }
+                echo "sccache: this job holds lane $LANE of $LANES on $MOUNT"
+              else
+                echo "::warning::no lane of $MOUNT was taken: $(tr '\n' ' ' < "$LANE_ERR"). The compile cache lives and dies with the job."
+                echo "- sccache lane: NOT taken ($(tr '\n' ' ' < "$LANE_ERR")); job-private folder" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+              fi
+              rm -f "$LANE_ERR"
+            fi
+            if [ -d "$MOUNT" ] && [ -w "$MOUNT" ] && [ -n "$LANE" ]; then
+              DIR="$MOUNT/sccache-$LANE"
+              TOTAL="${PADDOCK_CI_SCCACHE_GB:-60}"
+              case "$TOTAL" in '' | *[!0-9]*) TOTAL=60 ;; esac
+              PER=$((TOTAL / LANES)); if [ "$PER" -lt 2 ]; then PER=2; fi
+              SIZE="${PER}G"
+            elif [ -d "$MOUNT" ] && [ -w "$MOUNT" ]; then
+              DIR="${RUNNER_TEMP:-/tmp}/sccache"; echo "::notice::no lane of $MOUNT could be taken; the compile cache lives and dies with the job."
             else DIR="${RUNNER_TEMP:-/tmp}/sccache"; echo "::notice::no /sccache mount in this container; the compile cache lives and dies with the job."; fi
           else
             # The job slot's own cache: sccache's local storage "only supports a single sccache server at a time" (docs/Local.md),

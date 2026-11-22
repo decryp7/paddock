@@ -69,3 +69,26 @@ function portFrom(name: string, fallback: number, env: Readonly<Record<string, s
 export function isOn(value: string | undefined): boolean {
   return value !== undefined && value !== '' && value !== '0';
 }
+
+/**
+ * The Playwright worker count of a config whose own choice is `wanted` (ER-48: lanes x workers must fit the host's cores). On CI the
+ * `build-jobs` step writes `PADDOCK_E2E_WORKERS`, the job's core share; the result is then the smaller of the two, so a config never
+ * runs more browsers than the layout allows, and `warn` is told once when `wanted` was cut (name both numbers). Locally the variable
+ * is unset and `wanted` stands (`undefined` leaves Playwright's own default, half the cores). A set but unusable variable is an error.
+ */
+export function e2eWorkers(
+  wanted: number | undefined,
+  env: Readonly<Record<string, string | undefined>> = process.env,
+  warn: (line: string) => void = (line) => console.warn(line),
+): number | undefined {
+  const raw = env['PADDOCK_E2E_WORKERS'];
+  if (raw === undefined || raw === '') return wanted;
+  const budget = Number(raw);
+  if (!Number.isInteger(budget) || budget < 1) throw new Error(`PADDOCK_E2E_WORKERS is not a whole number >= 1: ${JSON.stringify(raw)}`);
+  if (wanted === undefined) return budget;
+  if (wanted > budget) {
+    warn(`::warning::this config asks for ${wanted} Playwright workers but the job's layout gives ${budget} (PADDOCK_E2E_WORKERS, ER-48); using ${budget}`);
+    return budget;
+  }
+  return wanted;
+}

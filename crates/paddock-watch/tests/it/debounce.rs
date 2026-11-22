@@ -109,7 +109,7 @@ fn a_source_that_cannot_start_or_a_folder_that_cannot_be_made_is_reported() {
             &self,
             _: &std::path::Path,
             _: bool,
-            _: mpsc::Sender<()>,
+            _: mpsc::Sender<paddock_watch::Change>,
         ) -> Result<Box<dyn Send>, paddock_watch::WatchError> {
             Err(paddock_watch::WatchError("no watches left".into()))
         }
@@ -153,7 +153,7 @@ fn a_source_that_goes_away_ends_the_thread() {
             &self,
             _: &std::path::Path,
             _: bool,
-            tx: mpsc::Sender<()>,
+            tx: mpsc::Sender<paddock_watch::Change>,
         ) -> Result<Box<dyn Send>, paddock_watch::WatchError> {
             drop(tx);
             Ok(Box::new(()))

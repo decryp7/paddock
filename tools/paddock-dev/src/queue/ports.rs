@@ -160,6 +160,9 @@ pub struct Failure {
     pub files: Vec<String>,
     /// The triage answer.
     pub blame: Blame,
+    /// The test failed and then passed on its one retry in this run (triage said FLAKY, ER-12): independent of `blame`, which
+    /// says whose failure it is.
+    pub retried: bool,
 }
 
 /// How a dispatch ended.

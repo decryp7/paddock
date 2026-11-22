@@ -12,6 +12,9 @@ import { CONFIG_DIFF_COMMANDS, CONFIG_DIFF_VIEWS, provideConfigDiff } from './pr
 import { at } from '../../testing/must';
 import { contributed } from '../../testing/contributions';
 
+// The real clock back after every test, so a test that times out cannot leave fake timers for the next one (ER-12, C154).
+afterEach(() => vi.useRealTimers());
+
 class FakePicker {
   file: Record<Side, string | null> = { left: '/l/a.json', right: '/r/a.json' };
   folder: Record<Side, string | null> = { left: '/snap/mon', right: '/snap/tue' };
