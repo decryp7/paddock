@@ -2942,6 +2942,8 @@ decide it. **To do:** read the `golden::` test durations from the next train CI 
 60 s default, delete the override and the `golden::` entry of the default profile's override. Until then the old budget stays, with its old
 cause noted in the file.
 
+**Done 2026-11-22** (fix/windows-golden-planner-spawns): both waivers are gone; see "The planner's tests left the Windows leg" below.
+
 Measured 2026-11-19 (the conformance step's cost of compiling paddock-dev's tests): the step `cargo nextest run --manifest-path
 tools/paddock-dev/Cargo.toml --profile ci --no-tests=fail -E 'test(/^contracts::/)'` in the local CI image (arm64 build of
 paddock-ci, `tools/linux-container.sh --ci-image`, 4 CPUs, 2 jobs, a new empty build volume, host load 27): cold 71 s, warm 1 s (the 12
@@ -3367,3 +3369,20 @@ about 45 ms a start on that runner plus a fork per command substitution. **Fix:*
 `-vV` lines, the flag filter and the explain line are read by the shell or one awk: 13 starts, guarded by
 `a_wrapper_hash_costs_a_bounded_number_of_starts_whatever_the_folder_depth` (red at 42 before). On a bare drive the walk now ends at
 `C:` as Rust's `Path::ancestors` does, where dirname went on to `.`. Same class as the 2026-11-18 Windows git starts (ER-20).
+
+## The planner's tests left the Windows leg: a test for a platform the code never runs on (2026-11-22, runs 8554 and 8555)
+In ci.yml run 8554 (green) the Windows paddock-dev job spent 179 s, 129 s and 75 s on the three golden tests that copy the repository
+(`workflow_action_and_script_edits_narrow_the_plan`, `the_repository_copy_reuses_the_source_objects_instead_of_hashing_every_file`,
+`guard_edits_mark_conformance`) and 54 s, 32 s and 25 s on the fixture and real-tree golden tests. Run 8555, on a shared host, timed the
+narrowing test out on both tries. The same tests took at most 14.3 s on the macOS leg and 3.7 s on the Linux leg (job logs 44206, 44228,
+44229, 44301). The first plan was to make the tests cheaper (batched git, a spawn budget, ER-20). The user asked first where the planner
+runs: only on Linux (ci.yml's plan job) and macOS (the push gate and `./dev`), never on Windows. So the Windows leg was paying minutes,
+and a retried timeout, to test a path no Windows host takes. **Fix:** the planner's tests are in `tests/it/golden/planner.rs`, a module
+behind `#[cfg(not(windows))]` whose doc comment gives the reason and when to build it on Windows again. The planner's only Windows-specific
+parts get pure tests that run on every OS: the root spelling (`plan::tests::a_graph_root_over_the_limit_is_refused_and_a_short_verbatim_one_is_plain`,
+`Os::Windows` passed in), a CRLF ci.yml (`workflow_jobs` now reads `\r\n` as `\n`; before, an LF HEAD against a CRLF working tree had different
+headers and planned everything) and a `--files` entry with `\` (now refused with the `/` spelling). The `golden::` nextest waivers
+(the 2026-11-19 fix item above) are removed. **Rule:** before making a slow test cheaper on one OS, ask whether the code under test
+runs on that OS at all. A test of a Linux- and macOS-only tool does not run on the Windows leg. Cover the OS-specific parts it does
+have with pure tests that take the OS as a parameter, and say in the code why the leg is left out. **Class:** Windows process-start cost
+(ER-20; f7fc4bfe6 `--wrapper-hash`, train 14 merge check runs 8251 to 8257). This instance is closed by scope, not by batching.

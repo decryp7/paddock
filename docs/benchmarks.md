@@ -2430,3 +2430,32 @@ Quoted by [docs/research/2026-11-20-ci-job-cost.md](research/2026-11-20-ci-job-c
   and 3,878 (8346), macOS 2,545 and 1,680, Linux 814 (8346); `merge_check` 1,089 / 303 / 53, `golden` 643 / 189, `queue`
   637 / 388 / 58; queue tests 7.3 s median on Windows.
 - **Fixed waits:** `waitForTimeout` 10 in Debrief's specs, 3 in Dyno's, 5 in `ui/e2e`, 0 in Pitwall's.
+
+## Windows runner: the planner's golden tests, per leg, before they left the Windows leg (2026-11-22, fix/windows-golden-planner-spawns)
+
+- **Question:** the narrowing test `golden::workflow_action_and_script_edits_narrow_the_plan` timed out on both tries on Windows in
+  ci.yml run 8555. How long do the golden tests take on each leg, and do they need their nextest waiver (4 x 60 s) anywhere once the
+  planner's tests no longer run on Windows (the planner runs only on Linux and macOS, user 2026-11-22)?
+- **Method:** nextest's PASS/SLOW lines from the paddock-dev job logs, read through the Gitea API: run 8554 macOS job 44206, Linux job
+  44228, Windows job 44229; run 8555 Windows job 44301. Build-jobs lines: macOS 14 cores and 8 test threads, Linux 30 cores and 5 test
+  threads, Windows 16 cores (3 jobs per host assumed, test threads not logged).
+
+  | Test | macOS 8554 | Linux 8554 | Windows 8554 | Windows 8555 |
+  |---|---:|---:|---:|---:|
+  | `workflow_action_and_script_edits_narrow_the_plan` (4 copies of the tree) | 14.3 s | 3.7 s | 179.0 s | timed out, both tries |
+  | `guard_edits_mark_conformance` (1 copy) | 11.5 s | 3.6 s | 74.9 s | 46.1 s |
+  | `the_repository_copy_reuses_the_source_objects_instead_of_hashing_every_file` (1 copy) | 2.5 s | 2.6 s | 128.6 s | 198.5 s |
+  | `recorded_plans_match_the_planners_answers_on_the_fixture_repository` | 5.7 s | 1.9 s | 53.5 s | 35.7 s |
+  | `recorded_real_tree_samples_match_the_planners_flags` | 9.5 s | 1.7 s | 32.4 s | 32.5 s |
+  | `recorded_command_line_cases_match_the_planners_answers_on_the_fixture_repository` | 5.1 s | 1.0 s | 24.7 s | 22.8 s |
+  | the other golden tests | 0.01 to 0.05 s | under 0.02 s | under 1.6 s | under 1.6 s |
+
+  The whole nextest run took 707 s on Windows in 8554 and 1083 s in 8555, against 165 s on macOS and 90 s on Linux.
+- **Result:** the copy and planner tests are 10 to 50 times slower on Windows than on Linux. That fits the per-start cost measured
+  earlier on that runner (about 45 ms a git start against about 6 ms on the Mac, train 14). On macOS and Linux every golden test is far
+  inside nextest's 60 s default, so both `golden::` waivers are removed. The planner's tests are no longer built on Windows
+  (`tests/it/golden.rs`, `mod planner`).
+- **Not measured:** the count of process starts per test. The build that would have counted them with a logging `git` shim was stopped
+  for the 2026-11-22 disk move, and once the tests left the Windows leg the count no longer decides anything. Batching the planner's git
+  reads (`GitGitea::before` and `History::file_at` start one `git show` per file) would help only the macOS and Linux legs, which already
+  take seconds.
