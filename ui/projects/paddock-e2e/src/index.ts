@@ -7,7 +7,7 @@
  */
 export { test, expect, type PaddockFixtures } from './fixtures.ts';
 export type { Page, Locator, BrowserContext } from '@playwright/test';
-export { e2ePort } from './env.ts';
+export { e2ePort, e2eWorkers } from './env.ts';
 export { stablePressPoint } from './press.ts';
 export { scrollAnchoringShift, expectNoScrollMovesOfItsOwn, anchoringVerdict, type AnchoringShift } from './owned-scroll.ts';
 export { clickShape, hoverShape, pointInShape, type PagePoint } from './svg.ts';
@@ -26,7 +26,7 @@ export {
   type DocScreensOptions,
   type PlannedShot,
 } from './doc-screens.ts';
-export { axeViolations, settleTransitions, axeInThemes, axeTargets, WCAG_TAGS, THEMES, type Theme, type AxeOptions, type AxeTarget } from './axe.ts';
+export { axeViolations, withPageStill, onEveryAxeScan, settleTransitions, axeInThemes, axeTargets, WCAG_TAGS, THEMES, type Theme, type AxeOptions, type AxeTarget } from './axe.ts';
 export { axeEveryDialog, dialogTargets, type EveryDialogOptions } from './a11y.ts';
 export {
   tabWalk,
@@ -89,6 +89,6 @@ export { expectLoopSettles, expectSizeToContent, SIZE_SCALES, type SizeFixture }
 export { startFrameCost, stopFrameCost } from './frame-cost.ts';
 export { pinnedClockTest, pinnedInstant, newPinnedContext, reportTimerErrors, PINNED_AT, PINNED_LOCALE, PINNED_NOW, PINNED_NOW_ENV, PINNED_ZONE, type PinnedClockFixtures, type PinnedClockOptions, type PinnedClockSetting } from './pinned-clock.ts';
 export { settledLayout, layoutSettled, type LayoutReading, type SettledLayoutOptions } from './settled-layout.ts';
-export { expectListFiltered, expectMenuAnchoredTo, expectOverlayAlignedWith, expectWired, expectStreamDone, expectDockPlanned, expectNotMoving, menuGap, overlayOffset, streamGrew, type StreamProgress } from './ready.ts';
+export { expectListFiltered, expectMenuAnchoredTo, expectOverlayAlignedWith, expectWired, expectStreamDone, expectDockPlanned, DOCK_LOOP_STEPS, type DockWaitOptions, expectNotMoving, menuGap, overlayOffset, streamGrew, type StreamProgress } from './ready.ts';
 export { pauseLive, resumeLive, withLivePaused, clickWithLivePaused } from './live-page.ts';
 export { clickThatClosesItsPage, untilItsPageCloses } from './close-click.ts';

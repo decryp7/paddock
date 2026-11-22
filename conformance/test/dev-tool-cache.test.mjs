@@ -13,12 +13,17 @@ const SCRIPT = join(PADDOCK, 'conformance', 'ci', 'dev-tool-cache.sh');
 const HASH = 'a'.repeat(40);
 
 /** A repository root whose `dev` answers --wrapper-hash and `self hash` as the test says. */
-function fixture({ state = 'clean', selfHash = `embedded ${HASH}`, stderr = '' } = {}) {
+function fixture({ state = 'clean', embedded = HASH, stderr = '' } = {}) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'paddock-dev-tool-cache-')));
   const dev = `#!/bin/sh
 case "$1" in
-  --wrapper-hash) printf 'dev: hash ${HASH} inputs: stand-in\\n${HASH}\\n${state}\\n' ;;
-  self) printf '%s\\n' '${stderr}' >&2; printf '%s\\n' '${selfHash}' ;;
+  --wrapper-hash) { printf 'dev: hash ${HASH} inputs: stand-in\\n' >&2; printf '${HASH}\\n${state}\\n'; } ;;
+  self) printf '%s\\n' '${stderr}' >&2
+    # The real tool's two shapes (tools/paddock-dev/src/input_hash.rs, \`dev self hash\`): four text lines, or one JSON object with --json.
+    case "$*" in
+      *--json*) printf '{"ok":true,"hash":"${HASH}","wrapper":"${HASH}","embedded":"${embedded}","dirty":false,"compiler":[],"inputs":[]}\\n' ;;
+      *) printf 'hash     ${HASH}\\nwrapper  ${HASH}\\nembedded ${embedded}\\ndirty    false\\n' ;;
+    esac ;;
 esac
 `;
   writeFileSync(join(root, 'dev'), dev);
@@ -76,37 +81,94 @@ test('a checkout with uncommitted tool inputs is not cached: usable is false, ne
 });
 
 test('a miss builds, is called a miss, and is saved only after the tool reported its own hash', () => {
-  const r = run(fixture({ stderr: 'dev: building paddock-dev x in y (compiler z, try 1).' }), ['verify', 'false']);
+  const r = run(fixture({ stderr: 'dev: building paddock-dev x in y (compiler z, try 1).' }), ['verify', 'false', '']);
   assert.equal(r.status, 0, r.text);
   assert.deepEqual([r.out.state, r.out.save], ['miss', 'true']);
 });
 
+// Run 8576: ./dev was built by an earlier step of the job, so verify's own run printed no build line and it said `hit save=false`
+// although the restore had found nothing: the tool was never saved (42 of 44 jobs rebuilt it, 5bdd263cc onward). The state comes from
+// the restore step's output, not from the log of verify's own run.
+test('a restore miss with the tool already built earlier in the job is a miss and is saved', () => {
+  for (const hit of ['', 'false']) {
+    const r = run(fixture({ stderr: '' }), ['verify', hit, '']);
+    assert.equal(r.status, 0, r.text);
+    assert.deepEqual([r.out.state, r.out.save], ['miss', 'true'], `cache-hit '${hit}'`);
+  }
+});
+
 test('a hit that ./dev ran as it was is a hit and is not saved again', () => {
-  const r = run(fixture(), ['verify', 'true']);
+  const r = run(fixture(), ['verify', 'true', 'the-key']);
   assert.deepEqual([r.out.state, r.out.save], ['hit', 'false']);
 });
 
 test('a restored binary that ./dev had to rebuild is rejected, said aloud and not saved (the key exists)', () => {
-  const r = run(fixture({ stderr: 'dev: the cached tool binary x does not run or is not for hash y; rebuilding it.\ndev: building paddock-dev x in y (compiler z, try 1).' }), ['verify', 'true']);
+  const r = run(fixture({ stderr: 'dev: the cached tool binary x does not run or is not for hash y; rebuilding it.\ndev: building paddock-dev x in y (compiler z, try 1).' }), ['verify', 'true', 'the-key']);
   assert.deepEqual([r.out.state, r.out.save], ['rejected', 'false']);
   assert.match(r.text, /::warning::dev-tool-cache: the binary restored under this key was rejected and rebuilt/);
 });
 
 test('a tool that reports another hash fails the step and is never saved', () => {
-  const r = run(fixture({ selfHash: `embedded ${'b'.repeat(40)}` }), ['verify', 'false']);
+  const r = run(fixture({ embedded: 'b'.repeat(40) }), ['verify', 'false', '']);
   assert.notEqual(r.status, 0);
-  assert.match(r.text, /::error::dev-tool-cache: the tool reports 'embedded b+', not 'embedded a+'/);
+  assert.match(r.text, /::error::dev-tool-cache: the tool embeds 'b+', not 'a+'/);
   assert.equal(r.out.save, undefined);
 });
 
 test('the summary line names the key and the outcome, and a save the lookup did not confirm is a warning, not a pass', () => {
   const root = fixture();
   const sum = (args) => run(root, ['summary', ...args], { KEY: 'the-key' });
-  assert.match(sum(['hit', 'false', '']).sum, /`the-key`: hit/);
-  assert.match(sum(['miss', 'false', '']).sum, /miss \(built; not saved\)/);
-  assert.match(sum(['miss', 'true', 'true']).sum, /miss \(built; saved and found again by key\)/);
+  assert.match(sum(['hit', 'false', '']).sum, /`the-key`: restored: exact hit/);
+  assert.match(sum(['miss', 'false', '']).sum, /restored: miss \(built\); saved: NO/);
+  assert.match(sum(['miss', 'true', 'true']).sum, /restored: miss \(built\); saved: yes \(found again by key\)/);
   const bad = sum(['miss', 'true', 'false']);
-  assert.match(bad.sum, /save NOT confirmed/);
+  assert.match(bad.sum, /saved: NOT confirmed/);
   assert.match(bad.text, /::warning::dev-tool-cache:/);
   assert.match(sum(['not run', '', '']).sum, /not measured \(not run\)/, 'a step that did not run is not measured');
+});
+
+test('the summary prints the audit line from the restore outputs: outcome exact, partial or miss, and whether the save was found', () => {
+  const root = fixture();
+  const sum = (args) => run(root, ['summary', ...args], { KEY: 'the-key' }).text;
+  assert.match(sum(['hit', 'false', '', 'true', 'the-key']), /cache-report: name=dev-tool outcome=exact saved=n\/a key=the-key/);
+  assert.match(sum(['miss', 'true', 'true', '', '']), /cache-report: name=dev-tool outcome=miss saved=yes key=the-key/);
+  assert.match(sum(['miss', 'true', 'false', '', '']), /cache-report: name=dev-tool outcome=miss saved=no key=the-key/, 'an unconfirmed save is "no"');
+  assert.doesNotMatch(sum(['not run', '', '']), /cache-report:/, 'a step that did not run reports nothing');
+});
+
+test('the key reads the real wrapper contract: hash and state on standard output, the inputs line on standard error (run 8509)', () => {
+  const r = spawnSync('sh', [join(PADDOCK, 'dev'), '--wrapper-hash'], { encoding: 'utf8', env: { ...process.env, RUSTUP_AUTO_INSTALL: '0' } });
+  assert.equal(r.status, 0, `the real ./dev --wrapper-hash needs a Rust compiler here: ${r.stderr}`);
+  const lines = r.stdout.trim().split('\n');
+  assert.equal(lines.length, 2, `stdout must be exactly hash and state, got: ${r.stdout}`);
+  assert.match(lines[0], /^[0-9a-f]{40}$/);
+  assert.match(lines[1], /^(clean|dirty)$/);
+  assert.match(r.stderr, /^dev: hash [0-9a-f]{40} inputs:/m);
+});
+
+test('verify reads the real `dev self hash --json` shape: an embedded hash equal to the launcher hash (train 18 run 8560)', () => {
+  const r = spawnSync('sh', [join(PADDOCK, 'dev'), 'self', 'hash', '--json'], { encoding: 'utf8', env: { ...process.env, RUSTUP_AUTO_INSTALL: '0' } });
+  assert.equal(r.status, 0, `the real ./dev self hash needs a Rust compiler here: ${r.stderr}`);
+  const j = JSON.parse(r.stdout);
+  assert.match(j.hash, /^[0-9a-f]{40}$/);
+  assert.equal(j.embedded, j.hash, 'a binary the launcher built or fetched for this hash embeds it');
+});
+
+test('a tool that reports no embedded hash (a binary built outside the launcher) fails the step', () => {
+  const root = fixture({ embedded: '-' });
+  const r = run(root, ['verify', 'false']);
+  assert.notEqual(r.status, 0);
+  assert.match(r.text, /::error::dev-tool-cache: the tool embeds '-', not 'a+'/);
+});
+
+test('a wrapper that gives no hash fails the step loudly, never a silent miss (ER-33)', () => {
+  const root = fixture();
+  writeFileSync(join(root, 'dev'), '#!/bin/sh\nexit 2\n');
+  const r = run(root, ['key']);
+  assert.notEqual(r.status, 0);
+  assert.match(r.text, /::error::dev-tool-cache: .*wrapper-hash failed/);
+  writeFileSync(join(root, 'dev'), "#!/bin/sh\necho nonsense\n");
+  const bad = run(root, ['key']);
+  assert.notEqual(bad.status, 0);
+  assert.match(bad.text, /::error::dev-tool-cache: .*unexpected shape/);
 });

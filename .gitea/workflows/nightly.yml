@@ -218,6 +218,14 @@ jobs:
           path: .nightly-installers
           key: nightly-installers-${{ github.sha }}-${{ hashFiles('ci-image/**', 'rust-toolchain*', '.nvmrc') }}
           lookup-only: true
+      - uses: ./.gitea/actions/cache-report
+        if: always() && steps.built.outcome != 'skipped'
+        with:
+          name: installers-built
+          key: nightly-installers-${{ github.sha }}-${{ hashFiles('ci-image/**', 'rust-toolchain*', '.nvmrc') }}
+          hit: ${{ steps.built.outputs.cache-hit }}
+          matched: ${{ steps.built.outputs.cache-matched-key }}
+          saved: n/a
       - id: decide
         shell: bash
         env:
@@ -428,9 +436,16 @@ jobs:
       - run: mkdir -p .nightly-installers && echo "${{ github.sha }}" > .nightly-installers/sha
         shell: bash
       - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        id: cache2
         with:
           path: .nightly-installers
           key: nightly-installers-${{ github.sha }}-${{ hashFiles('ci-image/**', 'rust-toolchain*', '.nvmrc') }}
+      - uses: ./.gitea/actions/cache-report
+        if: always() && steps.cache2.outcome != 'skipped'
+        with:
+          name: installers-built
+          key: nightly-installers-${{ github.sha }}-${{ hashFiles('ci-image/**', 'rust-toolchain*', '.nvmrc') }}
+          save-outcome: ${{ steps.cache2.outcome }}
 
   # IP1 item 6 (plan 1.2): every shared crate's fuzz targets run for a bounded time each, through the reusable app-fuzz workflow
   # (rule 55: one implementation of the fuzz run). A crash fails its job, uploads the reproducer and keeps the night from being

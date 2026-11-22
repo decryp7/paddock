@@ -100,6 +100,28 @@ describe('NavigationHistory', () => {
     expect(nav.canForward()).toBe(false);
   });
 
+  it('a query change that keeps the range is not a place, so it never drops the places ahead (debrief.yml run 8636)', async () => {
+    const { store, nav } = setup();
+    nav.start();
+    await settle();
+    const jump = vi.spyOn(store, 'jumpTo');
+    store.select(row(1));
+    await settle();
+    store.select(row(5));
+    await settle();
+    store.select(row(9));
+    await settle();
+    expect(nav.back()).toBe(true);
+    await settle();
+    // The query changes and its range does not (a filter, a search, or a jump's own change landing after the echo window on a slow
+    // machine): no place was made, so forward still leads to event 9.
+    store.patchQuery({ text: 'timeout' });
+    await settle();
+    expect(nav.canForward()).toBe(true);
+    expect(nav.forward()).toBe(true);
+    expect(jump.mock.calls).toEqual([[5], [9]]);
+  });
+
   it('ignores a sliding live window', async () => {
     const { store, nav } = setup();
     nav.start();

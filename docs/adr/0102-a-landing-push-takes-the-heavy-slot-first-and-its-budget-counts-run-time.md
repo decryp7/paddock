@@ -175,3 +175,39 @@ Distribution (same date): `heavy` is released from a `heavy-vX.Y.Z` tag by `.git
 x86_64 and arm64 and Windows x86_64 plus `SHA256SUMS` on the Gitea release, the crate to the `decryp7` registry when its dependencies are there), and
 `./dev heavy-install` downloads the asset for the machine, verifies the checksum, installs atomically into `<dev-targets>/heavy/bin/heavy` and records
 the version (tools/heavy/README.md); the engineering-rules wrapper only looks there and says the install command when it is missing.
+
+## Amendment 2026-11-21: no total budget, and the queue is judged by its progress
+
+Three pushes were refused on 2026-11-21 although no row had run too long: `clippy-linux apps/dyno` was "not measured" after the 15-minute
+run budget was spent by `clippy-windows` (859 s of run, 1,534 s queued; the time a step queued while a sibling row of its own push held
+the slot counted as run time), the watch-rescan push lost 13 rows to the budget and then 14 and 15 rows to the 30-minute queue
+allowance, and the path-guards push lost 5 rows to the allowance. The budget and the allowance were both totals over the rows of one
+push, so a push with many rows could not fit however healthy each row was (lessons, 2026-11-19 and 2026-11-21). The user approved the
+change on 2026-11-21 (part of the gate-hang design, `docs/research/2026-11-19-gate-hang-detection.md`).
+
+1. **No shared total.** `BUDGET` and the credit clock (`BudgetClock`) are gone. Every row has its own cap on its own run time,
+   `ROW_CAP` (60 min), counted from the moment its command starts (the heavy slot taken), never from the start of its wait. The
+   watchdog and the stall judgement are unchanged. A row over its cap is still "not measured" and never a pass (ER-33).
+2. **Queue wait is a state of its own.** The push logs `waiting for a heavy slot, N s so far, held by <who>` every minute, and the table
+   keeps run and queued seconds apart. Waiting for the build folder (`ER-43`) is the same state.
+3. **The wait ends on a stalled queue, not on its length.** `heavy run --queue-stall S` (new; `--queue-max` stays for other users) keeps
+   a waiter waiting while the queue moves (a lock taken or released, or the waiter's place changing) and ends it with exit 79 only
+   after S seconds of the same picture, naming the holders. `QUEUE_STALL` is 30 min, over the longest gap between two queue events
+   measured (1,446 s; docs/benchmarks.md, "Pre-push heavy queue progress gaps"). The push reports it as "not measured: queue stalled,
+   held by <who>" with the next step; the old per-push `QUEUE_MAX` and `PADDOCK_QUEUE_MAX` are replaced by `PADDOCK_QUEUE_STALL`.
+   A closed load gate behind a taken slot counts as no progress after the same time; a wait for a build folder (a file lock, no named
+   holder) ends after the same time with "another run of this checkout".
+   Every wait is judged by one mechanism, `paddock_proc::queue_stall` (a changed picture of the queue, or a live holder inside its own
+   cap, is progress; the same picture with nobody live for the limit is a stall), so a waiter behind a healthy 31 to 60 minute holder is
+   not stalled: the holder's record younger than the waiter's own run limit counts as live. The build-folder lock uses it too (its holder
+   writes its pid, start and step into the lock file). The load gate is waited for BEFORE a slot is taken (ER-43): the run keeps its
+   ticket, and a slot taken just as the load rose is given back with its ticket written again under its own name (it keeps its age, so a swinging load cannot send it to the back again and again). A build-folder holder's record is stamped again when its heavy slot is taken, so the cap a waiter counts starts when the step runs.
+4. **Outer bounds.** Because a wait has no total any more, the process limit of a step is the run limit plus `WAIT_BACKSTOP` (derived: twice
+   the longest queue seen times the slowest healthy row, about 8 h), and the member gate's outer bound is 24 h (15 times the longest push gate
+   run seen, 95 min): both only end a hung `heavy` client or gate, never a healthy run (docs/benchmarks.md, "Pre-push heavy queue progress gaps").
+5. **Linux Clippy, cold volume.** Not changed to a separate warm-up phase. A cold run of one workspace was measured at 39.7 to 173.7 s
+   (docs/benchmarks.md, "Pre-push Linux Clippy, native"), far inside the row cap, and the row's command is the one `./dev check
+   --warm-linux` runs (`gates::linux_gate`), so a warm-up phase would run the same command twice and need a volume probe (one more
+   Docker call per push) to decide. The row failed on 2026-11-21 because of the shared total, which is gone. A missing image still is
+   "not measured" with the `--warm-linux` next step, as before.
+

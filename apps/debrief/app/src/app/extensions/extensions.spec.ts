@@ -30,6 +30,9 @@ import {
 import { debriefContributionProviders } from './contributions';
 import { contributed, FakeCommandContext } from '../../testing/contributions';
 
+// The real clock back after every test, so a test that times out cannot leave fake timers for the next one (ER-12, C154).
+afterEach(() => vi.useRealTimers());
+
 const key = (init: KeyboardEventInit & { key: string }) => new KeyboardEvent('keydown', { cancelable: true, ...init });
 
 describe('fuzzy matching', () => {

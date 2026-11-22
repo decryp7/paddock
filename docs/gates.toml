@@ -1328,3 +1328,27 @@ owner = "OS-scoped tests (user decision 2026-11-22, docs/research/2026-11-22-os-
 since = 2026-11-22
 review_by = 2026-12-22
 approved = "coordinator"
+
+[[report_only]]
+id = "C156"
+reason = "ER-41: report-only until its first green run on the real tree, recorded by run id in C156-axe-scan-held-still.mjs, then flip SEVERITY to error and the mode to gate. First count 2026-11-22: 0 sites on fix/debrief-webkit-flakes-t20; the same check finds 12 sites in 10 files on main 67ac6d6ec (positive control on the real tree, ER-33), all moved onto withPageStill or axeViolations in that branch"
+owner = "ER-21 class: axe read colours mid-motion (Pitwall run 8134; Debrief a11y.e2e.ts:6 in debrief.yml runs 8297 to 8643; fix/debrief-webkit-flakes-t20)"
+since = 2026-11-22
+review_by = 2026-12-22
+approved = "coordinator"
+
+[[report_only]]
+id = "C145"
+reason = "ER-41: report-only until its first green run on the real tree, recorded by run id here; then flip `mode` in tools/paddock-dev/src/check/c145.rs to Gate. It reads docs/lessons.md, which is merged with git's union driver: twice a merge dropped the blank line before a `## ` heading (9ec43be3c, b9bf5fc4b). The real tree is at 0 findings (the 35 headings that sat under a non-blank line were given their blank line in the commit that added the check)."
+owner = "ER-41"
+since = 2026-11-21
+review_by = 2026-12-21
+approved = "user"
+
+[[report_only]]
+id = "C154"
+reason = "ER-41: report-only until its first green run on the real tree, recorded by run id here and in tools/paddock-dev/src/check/c154.rs, then flip the mode to Gate. Three rules over *.spec.ts and *.e2e.ts (comments and strings masked): fake-timers (vi.useFakeTimers with no afterEach, afterAll or onTestFinished that restores the real clock and no test-setup that does), fixed-wait (flush(CONSTANT + n)) and lazy-wait (vi.waitFor or expect.poll that only imports, or a sync advanceTimersByTime followed by a DOM assertion). waitForTimeout and setTimeout-promise sleeps stay C71's. No baseline file (ER-46); a baseline needs the user's approval. First count at 67ac6d6ec: see the CHANGELOG entry"
+owner = "ER-21 class: a fixed-time wait or a leaked fake clock fails a spec on a loaded runner (Dyno extras-page leak c249b271c, Spotter flush(TEST_DEBOUNCE_MS + 20) ad0221ac1, Pitcrew flush(PREVIEW_DEBOUNCE_MS + 50); feat/fixed-wait-checks)"
+since = 2026-11-22
+review_by = 2026-12-22
+approved = "user"

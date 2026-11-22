@@ -1,0 +1,196 @@
+[
+ {
+  "name": "leaked-fake-clock",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "apps/a/app/src/leak.spec.ts",
+    "it('x', () => {\n  vi.useFakeTimers();\n});\n"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C154",
+     "severity": "warn",
+     "rule": 49,
+     "file": "apps/a/app/src/leak.spec.ts",
+     "line": 2,
+     "message": "[fake-timers] `vi.useFakeTimers` is called and no afterEach, afterAll or onTestFinished of the file puts the real timers back: the fake clock leaks into the next test of the worker",
+     "fix": "Put the real clock back in `afterEach(() => vi.useRealTimers())` (or call installTestKit() from the app's test-setup, which does it after every test)."
+    }
+   ],
+   "waived": [],
+   "errors": 0,
+   "warnings": 1
+  }
+ },
+ {
+  "name": "restore-only-in-finally",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "apps/a/app/src/fin.spec.ts",
+    "it('x', () => {\n  try {\n    vi.useFakeTimers();\n  } finally {\n    vi.useRealTimers();\n  }\n});\n"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C154",
+     "severity": "warn",
+     "rule": 49,
+     "file": "apps/a/app/src/fin.spec.ts",
+     "line": 3,
+     "message": "[fake-timers] `vi.useFakeTimers` is called and it puts the real timers back only in a `finally` block, which a test that times out never reaches: the fake clock leaks into the next test of the worker",
+     "fix": "Put the real clock back in `afterEach(() => vi.useRealTimers())` (or call installTestKit() from the app's test-setup, which does it after every test)."
+    }
+   ],
+   "waived": [],
+   "errors": 0,
+   "warnings": 1
+  }
+ },
+ {
+  "name": "restored-in-after-each",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "apps/a/app/src/ok.spec.ts",
+    "afterEach(() => vi.useRealTimers());\nit('x', () => { vi.useFakeTimers(); });\n"
+   ]
+  ],
+  "result": {
+   "findings": [],
+   "waived": [],
+   "errors": 0,
+   "warnings": 0
+  }
+ },
+ {
+  "name": "the-apps-setup-restores",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "apps/a/app/src/test-setup.ts",
+    "afterEach(() => { vi.useRealTimers(); });\n"
+   ],
+   [
+    "apps/a/app/src/a.spec.ts",
+    "it('x', () => { vi.useFakeTimers(); });\n"
+   ],
+   [
+    "apps/b/app/src/b.spec.ts",
+    "it('x', () => { vi.useFakeTimers(); });\n"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C154",
+     "severity": "warn",
+     "rule": 49,
+     "file": "apps/b/app/src/b.spec.ts",
+     "line": 1,
+     "message": "[fake-timers] `vi.useFakeTimers` is called and no afterEach, afterAll or onTestFinished of the file puts the real timers back: the fake clock leaks into the next test of the worker",
+     "fix": "Put the real clock back in `afterEach(() => vi.useRealTimers())` (or call installTestKit() from the app's test-setup, which does it after every test)."
+    }
+   ],
+   "waived": [],
+   "errors": 0,
+   "warnings": 1
+  }
+ },
+ {
+  "name": "fixed-wait",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "apps/a/app/src/fixed.spec.ts",
+    "await flush(DEBOUNCE_MS + 20);\nawait flush(10);\n"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C154",
+     "severity": "warn",
+     "rule": 49,
+     "file": "apps/a/app/src/fixed.spec.ts",
+     "line": 1,
+     "message": "[fixed-wait] `flush(DEBOUNCE_MS + 20)` waits a constant plus a guess: too short when the runner is loaded",
+     "fix": "Wait on the condition: `until(() => ..., { what })` from @decryp7/paddock-ui/testing, `settleUntil` or `vi.waitFor` with an `expect` inside; a constant plus a guess is too short on a loaded runner."
+    }
+   ],
+   "waived": [],
+   "errors": 0,
+   "warnings": 1
+  }
+ },
+ {
+  "name": "lazy-waits",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "apps/a/app/src/lazy.spec.ts",
+    "await vi.waitFor(() => import('./x'));\nawait vi.waitFor(async () => { const m = await import('./x'); expect(m).toBeTruthy(); });\nvi.advanceTimersByTime(300);\nexpect(el.querySelector('a')).toBeNull();\n"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C154",
+     "severity": "warn",
+     "rule": 49,
+     "file": "apps/a/app/src/lazy.spec.ts",
+     "line": 1,
+     "message": "[lazy-wait] `vi.waitFor` only imports a module and holds no condition (no `expect`, no `throw`): it waits for nothing",
+     "fix": "Give the wait a condition that fails until the thing is there (an `expect` or a `throw` on the view), or use `until` from @decryp7/paddock-ui/testing."
+    },
+    {
+     "check": "C154",
+     "severity": "warn",
+     "rule": 49,
+     "file": "apps/a/app/src/lazy.spec.ts",
+     "line": 3,
+     "message": "[lazy-wait] `advanceTimersByTime` is followed directly by an assertion on the view: it runs no promise, so async UI is not there yet",
+     "fix": "Give the wait a condition that fails until the thing is there (an `expect` or a `throw` on the view), or use `until` from @decryp7/paddock-ui/testing."
+    }
+   ],
+   "waived": [],
+   "errors": 0,
+   "warnings": 2
+  }
+ },
+ {
+  "name": "comments-strings-and-other-files",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "apps/a/app/src/c.spec.ts",
+    "// vi.useFakeTimers() flush(A_MS + 1)\nconst s = 'flush(A_MS + 1)';\n"
+   ],
+   [
+    "apps/a/app/src/not-a-spec.ts",
+    "vi.useFakeTimers();\nflush(A_MS + 1);\n"
+   ],
+   [
+    "apps/a/app/node_modules/x/n.spec.ts",
+    "vi.useFakeTimers();\n"
+   ]
+  ],
+  "result": {
+   "findings": [],
+   "waived": [],
+   "errors": 0,
+   "warnings": 0
+  }
+ }
+]

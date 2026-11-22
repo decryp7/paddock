@@ -1,7 +1,10 @@
 import { ChangeDetectionStrategy, Component } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AFTER_READY, provideStartupContract, ReadyReply, reportReady, retryUntilAnswered } from './startup-contract';
+
+// The real clock back after every test, so a test that times out cannot leave fake timers for the next one (ER-12, C154).
+afterEach(() => vi.useRealTimers());
 
 /** A call whose attempts are answered by hand. */
 function manual<T>() {

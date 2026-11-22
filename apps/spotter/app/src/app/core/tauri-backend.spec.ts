@@ -1,6 +1,9 @@
 import { STATE_EVENT, NAVIGATE_EVENT, JOB_EVENT, TauriBackend, platformFromUserAgent, type CommandCall, type EventListen } from './tauri-backend';
 import type { WatchDraft } from './api.types';
 
+// The real clock back after every test, so a test that times out cannot leave fake timers for the next one (ER-12, C154).
+afterEach(() => vi.useRealTimers());
+
 describe('TauriBackend', () => {
   const calls: [string, Record<string, unknown> | undefined][] = [];
   const call: CommandCall = <T>(cmd: string, args?: Record<string, unknown>) => {

@@ -18,14 +18,14 @@ thiserror.workspace = true
 toml.workspace = true
 # Widget layouts (family ADR 0035): the closed catalogue of the tray popup lives here.
 paddock-widgets = { path = "../../../../crates/paddock-widgets" }
+# `ItemResult` and `check_batch` (the one bound check of bulk calls, `mgmt::check_bulk`); also `testing::sync_generated` in tests.
+paddock-commands = { path = "../../../../crates/paddock-commands" }
 # TypeScript for the catalogue and value types (generated into the UI's core/generated/widgets.ts).
 ts-rs = "11.1"
 
 [dev-dependencies]
 proptest.workspace = true
 tempfile.workspace = true
-# `testing::sync_generated`, the stale-file check of the generated TypeScript and the mock's fixtures.
-paddock-commands = { path = "../../../../crates/paddock-commands" }
 
 [lints]
 workspace = true

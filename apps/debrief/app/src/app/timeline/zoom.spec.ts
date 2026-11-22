@@ -3,6 +3,9 @@ import { provideTinyBackend, settle, SEC, T0 } from '../../testing/helpers';
 import { WorkspaceStore } from '../core/workspace.store';
 import { clampRange, coversExtent, pan, RangeHistory, span, TimelineZoom, wheelFactor, xToTs, zoomAt } from './zoom';
 
+// The real clock back after every test, so a test that times out cannot leave fake timers for the next one (ER-12, C154).
+afterEach(() => vi.useRealTimers());
+
 const EXT = { from: 0, to: 1000 };
 
 describe('zoom math', () => {

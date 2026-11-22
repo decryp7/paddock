@@ -29,6 +29,47 @@ Conventional Commits; one semver tag for the whole repo.
 - `tools-macos` ("VM tooling tests", macOS) is deleted with the tests of the retired VM tooling (`scripts/vm-lock.test.mjs`,
   `vm-win.test.mjs`, `member-gate.test.mjs`, `vm-test-support.mjs` and its test); the scripts themselves stay until their own clean-up.
 
+### Conformance C154 (report-only), `until` in `@decryp7/paddock-ui/testing`, and workers in the ER-48 budget (ER-21 class: fixed-time waits and leaked fake clocks, user decision 2026-11-22)
+- `until(condition, { what, settle?, maxRounds? })` in `@decryp7/paddock-ui/testing`: waits on a condition (returns or stops throwing), runs
+  one settle round between reads (default one event-loop turn), counts rounds instead of milliseconds, and fails naming `what` with the last
+  error as the cause. It replaces `flush(CONSTANT + n)`. The apps' own `settleUntil` and Spotter's spec-local `until` are left as they are
+  (Spotter's lives on `fix/main-8555-flakes`, not on this base; moving it onto the shared one is a one-line change after that lands). The
+  Pitcrew `config-panel` spec uses it.
+- C154 (Rust, `tools/paddock-dev/src/check/c154.rs`, report-only, ER-41) over `*.spec.ts` and `*.e2e.ts`: `fake-timers` (a file that calls
+  `vi.useFakeTimers` and has no `afterEach`, `afterAll` or `onTestFinished` that restores the real clock, and no test-setup that does), `fixed-wait`
+  (`flush(CONSTANT + n)`) and `lazy-wait` (`vi.waitFor` or `expect.poll` that only imports; a sync `advanceTimersByTime` followed by a DOM
+  assertion). `waitForTimeout` and `setTimeout`-promise sleeps stay C71's. Each rule has a positive control; no baseline file (ER-46).
+  First count at 67ac6d6ec (host run over the 1359 spec files): 38 findings, 35 fake-timers (Debrief 21, Dyno 4, Pitcrew 2, Pitwall 4,
+  Spotter 4) and 3 fixed-wait (Pitcrew `config-panel.spec.ts` twice, Spotter `pattern-helper.spec.ts`), 0 lazy-wait. Every site is fixed in this
+  change (an `afterEach` that restores the real clock; the Pitcrew waits use `until` on the store's `previewing`) except Spotter's
+  `pattern-helper.spec.ts`, which `fix/main-8555-flakes` rewrites; after the fixes the tree reads 1 finding (that file). `ui/projects/paddock-ui`
+  is exempt because its setup calls `installTestKit`, which restores the clock after every test. The check stays report-only (ER-41); no baseline.
+- `./dev ci build-jobs` (and its shell twin) also writes `PADDOCK_E2E_WORKERS` and `VITEST_MAX_WORKERS`, the job's core share (runner
+  override `PADDOCK_CI_TEST_WORKERS`), and warns naming both numbers when the runner's number times its jobs per host exceeds the cores.
+  `e2eWorkers` of `@decryp7/paddock-e2e` takes the smaller of the variable and a config's own count (paddockConfig and Debrief's config);
+  Vitest reads `VITEST_MAX_WORKERS` itself. Before, Vitest ran cores - 1 workers in every job (6 x 29 on d-gtr9's 30 cores).
+
+### `paddock-dev`, CI: sccache on RustFS is the default everywhere it is allowed, and the dev-tool cache key reads the real wrapper output (user decision 2026-11-21)
+- `setup-rust`'s `sccache-backend` and `./dev ci setup-rust --sccache-backend` default to `s3` (the local disk first, RustFS behind it);
+  the Gitea variable that switched it is gone, ci.yml's `sccache_backend` dispatch input stays as a one-run override. No secret, an
+  endpoint that is down or a failed health check gives the local disk with a notice or warning naming the cause; a release, rule 54 or
+  tag run stays on the plain local disk.
+- `./dev sccache env` and the tools that start builds default to `PADDOCK_SCCACHE_BACKEND=auto`: the local disk first and RustFS behind it
+  when `~/.config/paddock/sccache-s3.env` is there and the store answers (docs/dev-setup.md, "Local sccache"); `local` and `s3` are as before. The keys reach
+  the server's environment only.
+- Review fixes: a plain-disk server started while RustFS was down is replaced once the store is back; a two-level server is ours only with
+  this disk folder, bucket and prefix; the S3 guard tests the release condition itself (`kit.sh release-path`, named in the log), not
+  `PADDOCK_DEV_DOWNLOAD`; CI and the Mac share one bounded health check; the key file outranks a stray `AWS_*`; the doubled disk use is documented.
+- `conformance/ci/dev-tool-cache.sh` read lines 2 and 3 of `./dev --wrapper-hash` (it prints the hash and the state on lines 1 and 2), so
+  every Linux job missed the cache silently and built `./dev` (run 8509). It reads the right lines, and a missing or misshapen hash fails the step.
+
+### Conformance C145 checks the lessons file's format, and `docs/lessons.md` has a merge driver (2026-11-21)
+- New report-only conformance check C145 (Rust host): `docs/lessons.md` has a blank line before every `## ` heading, one title, no
+  repeated heading and one final newline. The file's 35 headings that had lost their blank line to a union merge have it again.
+- `docs/lessons.md` merges with the `lessons` driver, `./dev merge lessons-driver %O %A %B`: git's union merge, then the blank line it
+  drops before a `## ` heading put back (it dropped it four times, 9ec43be3c, b9bf5fc4b, 75ce0d2c8, 5c241d93f). `./dev hooks install`
+  sets `merge.lessons.driver` in the clone; a clone without it gets a plain conflict, never a silent drop.
+
 ### `paddock-dev`, `heavy`, `paddock-env`: a health gate for Gitea, and no tool prompts (user decision 2026-11-20)
 - `./dev ci dispatch`, `./dev wait --ci-run` and the queue and member-gate dispatch look at Gitea (`GET /api/v1/version`) and hold while it
   is down: any answer below 500 is up (a 401 or 403 included), a refused connection, a timeout or a 5xx is down. They hold on Gitea

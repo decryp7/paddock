@@ -1,6 +1,9 @@
 import { cellText, downloadText, sortRows, toCsv } from './table-utils';
 import { at } from '../../testing/must';
 
+// The real clock back after every test, so a test that times out cannot leave fake timers for the next one (ER-12, C154).
+afterEach(() => vi.useRealTimers());
+
 describe('table utils', () => {
   it('renders cells', () => {
     expect(cellText(null)).toBe('');

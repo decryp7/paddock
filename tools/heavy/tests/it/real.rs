@@ -349,7 +349,11 @@ fn the_load_gate_waits_and_stopping_during_it_releases_the_lock() {
     wait_until("the gate to close", || {
         w.read(w.root().join("pitcrew-lock-activity.log")).contains("load gate")
     });
-    assert!(w.lock_dir().exists(), "the gate waits while holding the lock");
+    assert!(
+        !w.lock_dir().exists(),
+        "the gate is waited for before a slot is taken (ER-43): no slot is held while waiting for load"
+    );
+    assert_eq!(w.count("pitcrew-heavy.ticket."), 1, "the run keeps its ticket and place");
     let id = ProcessId::of(g.pid()).expect("heavy runs");
     assert!(ask(id));
     let st = g.finish();
@@ -578,7 +582,6 @@ fn a_stop_in_ci_is_annotated() {
         &["run", "--gate-load", "0", "Gate", "--", "true"],
         &[("HEAVY_GATE_POLL", "0.1"), ("CI", "1")],
     );
-    wait_until("the gate to close", || w.lock_dir().exists());
     wait_until("the gate wait to be noted", || {
         w.read(w.root().join("pitcrew-lock-activity.log")).contains("load gate")
     });

@@ -1,6 +1,5 @@
 import { expect, test } from './test';
-import AxeBuilder from '@axe-core/playwright';
-import { expectNoButtonLabelWraps, expectWired, type Page, settledLayout } from '@decryp7/paddock-e2e';
+import { expectNoButtonLabelWraps, expectWired, type Page, settledLayout, axeViolations } from '@decryp7/paddock-e2e';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -53,8 +52,7 @@ async function closeOverlays(page: Page): Promise<void> {
 for (const theme of THEMES) {
   test(`Material controls: axe finds no violations in the section (${theme})`, async ({ page }) => {
     await open(page, theme);
-    const results = await new AxeBuilder({ page }).include('[data-testid="material"]').withTags(['wcag2a', 'wcag2aa', 'wcag22aa']).analyze();
-    expect(results.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(' ')).join(', ')}`)).toEqual([]);
+    expect(await axeViolations(page, { include: ['[data-testid="material"]'] })).toEqual([]);
   });
 
   test(`Material controls: buttons and fields follow the tokens (${theme})`, async ({ page }) => {

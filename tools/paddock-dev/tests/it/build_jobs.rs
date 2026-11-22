@@ -183,9 +183,15 @@ fn every_runner_class_gets_the_shells_share() {
 fn the_class_values_are_the_documented_ones() {
     let s = Scratch::new();
     let mac = same(&s, None, &host("macOS", "14", "65536"), true);
-    assert_eq!(mac.env_file, "CARGO_BUILD_JOBS=4\nNEXTEST_TEST_THREADS=8\n");
+    assert_eq!(
+        mac.env_file,
+        "CARGO_BUILD_JOBS=4\nNEXTEST_TEST_THREADS=8\nPADDOCK_E2E_WORKERS=4\nVITEST_MAX_WORKERS=4\n"
+    );
     let win = same(&s, None, &host("Windows", "16", "32768"), true);
-    assert_eq!(win.env_file, "CARGO_BUILD_JOBS=5\nNEXTEST_TEST_THREADS=5\n");
+    assert_eq!(
+        win.env_file,
+        "CARGO_BUILD_JOBS=5\nNEXTEST_TEST_THREADS=5\nPADDOCK_E2E_WORKERS=5\nVITEST_MAX_WORKERS=5\n"
+    );
     assert!(
         win.stdout
             .contains("::notice::build-jobs assumes the Windows runner's capacity is 3"),
@@ -194,13 +200,22 @@ fn the_class_values_are_the_documented_ones() {
     );
     // d-gtr9 since 2026-11-20: 30 CPUs, 64 GiB, capacity 6 (docs/benchmarks.md, "CI job cost, step by step").
     let linux = same(&s, None, &host("Linux", "30", "65536"), true);
-    assert_eq!(linux.env_file, "CARGO_BUILD_JOBS=5\nNEXTEST_TEST_THREADS=5\n");
+    assert_eq!(
+        linux.env_file,
+        "CARGO_BUILD_JOBS=5\nNEXTEST_TEST_THREADS=5\nPADDOCK_E2E_WORKERS=5\nVITEST_MAX_WORKERS=5\n"
+    );
     assert!(!linux.stdout.contains("::warning::"), "{}", linux.stdout);
     let split = same(&s, Some("2"), &host("Linux", "30", "65536"), true);
-    assert_eq!(split.env_file, "CARGO_BUILD_JOBS=2\nNEXTEST_TEST_THREADS=2\n");
+    assert_eq!(
+        split.env_file,
+        "CARGO_BUILD_JOBS=2\nNEXTEST_TEST_THREADS=2\nPADDOCK_E2E_WORKERS=2\nVITEST_MAX_WORKERS=2\n"
+    );
     // Another core count is named, never taken silently (and the share still follows the real cores).
     let other = same(&s, None, &host("Linux", "16", "131072"), true);
-    assert_eq!(other.env_file, "CARGO_BUILD_JOBS=2\nNEXTEST_TEST_THREADS=2\n");
+    assert_eq!(
+        other.env_file,
+        "CARGO_BUILD_JOBS=2\nNEXTEST_TEST_THREADS=2\nPADDOCK_E2E_WORKERS=2\nVITEST_MAX_WORKERS=2\n"
+    );
     assert!(
         other
             .stdout
@@ -218,6 +233,10 @@ fn the_runners_own_variables_win_over_the_class() {
         vec![("PADDOCK_CI_BUILD_JOBS", "1")],
         vec![("PADDOCK_CI_BUILD_JOBS", "6"), ("PADDOCK_CI_TEST_THREADS", "12")],
         vec![("PADDOCK_CI_TEST_THREADS", "3")],
+        vec![("PADDOCK_CI_TEST_WORKERS", "2")],
+        // Over the host's cores: both hosts print the same warning.
+        vec![("PADDOCK_CI_TEST_WORKERS", "9")],
+        vec![("PADDOCK_CI_BUILD_JOBS", "6"), ("PADDOCK_CI_TEST_WORKERS", "3")],
         vec![("PADDOCK_CI_JOBS_PER_HOST", "2"), ("PADDOCK_CI_RESERVED_CORES", "1")],
         vec![("PADDOCK_CI_JOBS_PER_HOST", "4"), ("PADDOCK_CI_RESERVED_RAM_MB", "0")],
         vec![("PADDOCK_CI_JOBS_PER_HOST", "2"), ("PADDOCK_CI_RUSTC_MB", "8192")],
@@ -257,6 +276,8 @@ fn wrong_values_fail_with_the_shells_cause_and_a_next_step() {
         ("PADDOCK_CI_BUILD_JOBS", "08"),
         ("PADDOCK_CI_BUILD_JOBS", "x"),
         ("PADDOCK_CI_TEST_THREADS", "010"),
+        ("PADDOCK_CI_TEST_WORKERS", "0"),
+        ("PADDOCK_CI_TEST_WORKERS", "010"),
         ("PADDOCK_CI_JOBS_PER_HOST", "0"),
         ("PADDOCK_CI_JOBS_PER_HOST", "two"),
         ("PADDOCK_CI_RESERVED_CORES", "01"),

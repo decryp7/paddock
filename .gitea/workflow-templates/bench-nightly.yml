@@ -43,10 +43,23 @@ jobs:
 
       # Last green night's results, for the regression check. Exact key per night, newest restored by prefix.
       - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        id: previous
         with:
           path: bench/previous
           key: bench-previous-${{ github.run_id }}
           restore-keys: bench-previous-
+      # The report of the cache step (ADR 0115: restore, hit as exact, partial or miss, from the step's own outputs). A template runs in
+      # another repository, pinned to a Paddock tag that need not have the cache-report action, so it prints the same line inline
+      # (conformance/ci/cache-report.sh is the one definition; `./dev ci cache-audit` reads the `cache-report:` line).
+      - name: Cache report
+        if: always()
+        shell: bash
+        env:
+          HIT: ${{ steps.previous.outputs.cache-hit }}
+          MATCHED: ${{ steps.previous.outputs.cache-matched-key }}
+        run: |
+          o=miss; if [ "$HIT" = true ]; then o=exact; elif [ -n "$MATCHED" ]; then o=partial; fi
+          echo "- bench-previous cache: restored: $o; saved: by the save step below" | tee -a "${GITHUB_STEP_SUMMARY:-/dev/null}"
 
       - name: Benchmarks
         run: ${{ env.BENCH_COMMAND }}
@@ -66,9 +79,16 @@ jobs:
       - name: Keep these results as the baseline
         run: mkdir -p bench/previous && cp "bench/${APP_ID}.results.json" bench/previous/
       - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        id: keep
         with:
           path: bench/previous
           key: bench-previous-${{ github.run_id }}
+      - name: Cache save report
+        if: always() && steps.keep.outcome != 'skipped'
+        shell: bash
+        env:
+          RESULT: ${{ steps.keep.outcome }}
+        run: echo "- bench-previous cache: saved: $RESULT" | tee -a "${GITHUB_STEP_SUMMARY:-/dev/null}"
 
       - uses: actions/upload-artifact@v3
         if: always()
