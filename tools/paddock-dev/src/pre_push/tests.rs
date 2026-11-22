@@ -1674,6 +1674,7 @@ mod known_commit {
             refs_from_stdin: true,
             member_gate: false,
             accept_not_measured: vec![],
+            no_reuse: false,
         }
     }
 
@@ -2318,6 +2319,7 @@ mod base_choice {
             refs_from_stdin: true,
             member_gate: false,
             accept_not_measured: vec![],
+            no_reuse: false,
         };
         let line = format!("refs/heads/x {two} refs/heads/main {}\n", "0".repeat(40));
         let got = command_in(
@@ -3453,6 +3455,7 @@ mod deny_row {
             watchdog: Arc::new(crate::pre_push::watchdog::Never),
             row_cap: crate::pre_push::exec::ROW_CAP,
             state: d.join("state"),
+            reuse: None,
         }
     }
 

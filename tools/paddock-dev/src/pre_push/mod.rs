@@ -40,6 +40,7 @@ pub mod known;
 pub mod linux_inputs;
 pub mod members;
 pub mod outcome;
+pub mod reuse;
 pub mod warm;
 
 use crate::plan::{Request, plan_with_graph};
@@ -93,6 +94,9 @@ pub struct PrePushArgs {
     /// Also read from PADDOCK_ACCEPT_NOT_MEASURED (comma separated).
     #[arg(long, value_delimiter = ',')]
     pub accept_not_measured: Vec<String>,
+    /// Run every row even when an earlier green run of the same inputs is on record (`PADDOCK_NO_REUSE=1` is the same switch).
+    #[arg(long)]
+    pub no_reuse: bool,
 }
 
 const GIT_TIMEOUT: Duration = Duration::from_secs(120);
@@ -470,6 +474,7 @@ fn command_in(
         )),
         row_cap: exec::ROW_CAP,
         state: state.clone(),
+        reuse: reuse_for(&work, &root, &env, args.no_reuse),
     };
     let queue = queue_max(&env);
     let history = GitHistory::new(&work, GIT_TIMEOUT);
@@ -559,6 +564,12 @@ fn command_in(
             subject: &subject,
         },
     );
+    if let Some(r) = &real.reuse {
+        let gone = r.evict();
+        if gone > 0 {
+            eprintln!("pre-push: result reuse: {gone} old record(s) evicted");
+        }
+    }
     rows.extend(extra_ref_rows(&extra));
     accept_not_measured(&mut rows, &accept, &state);
     log_queue_times(&state, checked.as_deref(), &base, &timings);
@@ -600,6 +611,22 @@ fn command_in(
         }
     }
     Ok(report)
+}
+
+/// Reuse of green results for the checkout `work`, records under `<dev-targets>/check-reuse`; `None` when it is off or the dev-targets
+/// folder cannot be derived (the rows then run, and the line says why).
+fn reuse_for(work: &Path, root: &Path, env: &HashMap<String, String>, off: bool) -> Option<reuse::Reuse> {
+    let look = |k: &str| env.get(k).cloned();
+    let store = match crate::places::dev_targets(root, &look) {
+        Ok(d) => d.join("check-reuse"),
+        Err(e) => {
+            if !off {
+                eprintln!("pre-push: result reuse is off: no dev-targets folder ({e:?})");
+            }
+            return None;
+        }
+    };
+    reuse::Reuse::new(work, store, env, exec::run_token(), off)
 }
 
 /// One line per run in `queue-times.log` beside the gate logs: the whole push's heavy queue and run time, the measurement the
@@ -1221,7 +1248,10 @@ pub fn render_timed(head: &str, rows: &[(String, Row)], timings: &std::collectio
         let (line, kind) = match v.kind() {
             Kind::Passed => {
                 ok += 1;
-                (format!("ok            {id:<34} {}", both(id, v.secs)), "passed")
+                match &v.reused {
+                    Some(note) => (format!("ok (reused)   {id:<34} {note}"), "passed"),
+                    None => (format!("ok            {id:<34} {}", both(id, v.secs)), "passed"),
+                }
             }
             Kind::Skipped => {
                 skip += 1;
@@ -1267,6 +1297,9 @@ pub fn render_timed(head: &str, rows: &[(String, Row)], timings: &std::collectio
         if let Some(t) = timings.get(id) {
             row["run_secs"] = json!(t.ran);
             row["queued_secs"] = json!(t.queued);
+        }
+        if let Some(n) = &v.reused {
+            row["reused"] = json!(n);
         }
         if let Some(g) = &v.ended_by {
             row["ended_by"] = json!(g);

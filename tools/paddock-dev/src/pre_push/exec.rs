@@ -156,6 +156,10 @@ pub trait Exec: Sync {
     /// Runs the gate within `limits` (a heavy step: at most `limits.run` of running and `limits.queue` of waiting for the slot).
     /// `Err`: it could not be started (the program is missing).
     fn run(&self, gate: &Gate, limits: Limits) -> Result<Done, String>;
+    /// The reuse of green results ([`super::reuse`]); none for a fake and when `--no-reuse` is set.
+    fn reuse(&self) -> Option<&super::reuse::Reuse> {
+        None
+    }
     /// The 1-minute load average now, for the reason of a row the queue stopped (None: unknown).
     fn load(&self) -> Option<f64> {
         None
@@ -200,6 +204,8 @@ pub struct Row {
     pub excused_by: Option<String>,
     /// The guard that ended the step: the watchdog's name, or `row cap` (the summary names it).
     pub ended_by: Option<String>,
+    /// The earlier green run this row rests on instead of a run of its own ([`super::reuse`]); `None` for a row that ran.
+    pub reused: Option<String>,
 }
 
 /// The kind of a row, for the table and its JSON.
@@ -232,7 +238,22 @@ impl Row {
             next,
             excused_by: None,
             ended_by: None,
+            reused: None,
         }
+    }
+
+    /// A pass that rests on an earlier green run of the same inputs (`note` names it); a pass like any other for the verdict, made by
+    /// [`measure`] for `subject`.
+    pub fn reused(id: &str, subject: &Subject, note: String) -> Row {
+        let mut r = Row::plain(super::reuse::clean_for(id, subject), 0.0, String::new(), String::new());
+        r.reused = Some(note);
+        r
+    }
+
+    /// A pass this run measured itself: the only kind that is stored for reuse (not a reused row, a known-commit pass, a failure, a
+    /// row that was not measured, broken or excused).
+    pub fn is_fresh_pass(&self) -> bool {
+        matches!(self.outcome, Outcome::Clean(_)) && self.reused.is_none() && self.excused_by.is_none()
     }
 
     /// The row with the guard that ended its step named.
@@ -716,6 +737,19 @@ pub fn run_all_timed(planned: &[Planned], exec: &dyn Exec, opts: &RunOpts) -> (V
                                         }
                                     }
                                 };
+                                let looked = exec.reuse().map(|r| r.lookup(g, opts.subject));
+                                let key = match looked {
+                                    Some(super::reuse::Lookup::Hit(row)) => {
+                                        clock.end_step();
+                                        turns.end(g.heavy);
+                                        if let Ok(mut slot) = results[i].lock() {
+                                            *slot = Some(*row);
+                                        }
+                                        continue;
+                                    }
+                                    Some(super::reuse::Lookup::Miss(k)) => k,
+                                    None => None,
+                                };
                                 let row = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                                     decide_with(g, exec, limits, opts.subject, &mut seen)
                                 }))
@@ -725,6 +759,9 @@ pub fn run_all_timed(planned: &[Planned], exec: &dyn Exec, opts: &RunOpts) -> (V
                                         "report this with the command that ran; re-run it alone",
                                     )
                                 });
+                                if let (Some(r), Some(k)) = (exec.reuse(), &key) {
+                                    r.store(g, k, &row);
+                                }
                                 clock.end_step();
                                 turns.end(g.heavy);
                                 row
@@ -887,6 +924,8 @@ pub struct RealExec {
     /// The state folder of this checkout (`<git common dir>/paddock-pre-push`): the history and the build-folder locks live in it. Given
     /// by the caller, never derived from the logs folder (review P2-2: a test's logs folder gave a lock file in `$TMPDIR`).
     pub state: PathBuf,
+    /// Reuse of green results by input hash ([`super::reuse`]); `None`: off (`--no-reuse`) or not available.
+    pub reuse: Option<super::reuse::Reuse>,
 }
 
 /// Variables every gate may see besides the base list: the toolchain, Docker, caches and Paddock's own settings.
@@ -1115,6 +1154,9 @@ pub fn run_token() -> String {
 }
 
 impl Exec for RealExec {
+    fn reuse(&self) -> Option<&super::reuse::Reuse> {
+        self.reuse.as_ref()
+    }
     fn has_tool(&self, program: &str) -> bool {
         on_path(&self.env, program)
     }
@@ -1796,6 +1838,7 @@ exit $rc
                 watchdog: Arc::new(crate::pre_push::watchdog::Never),
                 row_cap: ROW_CAP,
                 state: dir.join("state"),
+                reuse: None,
             }
         }
 
@@ -1998,6 +2041,7 @@ exit $rc
                 watchdog: Arc::new(crate::pre_push::watchdog::Never),
                 row_cap: ROW_CAP,
                 state: d.join("state"),
+                reuse: None,
             }
         }
 
@@ -2241,6 +2285,7 @@ exit $rc
                 watchdog: Arc::new(crate::pre_push::watchdog::Never),
                 row_cap: ROW_CAP,
                 state: ex.state.clone(),
+                reuse: None,
             };
             assert!(decide(&g, &ex2, Duration::from_secs(60), &test_subject()).kind() == Kind::Passed);
         }
