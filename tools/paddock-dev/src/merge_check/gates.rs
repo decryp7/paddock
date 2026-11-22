@@ -31,9 +31,10 @@ pub const ENFORCED: bool = false;
 /// ends a hang of the gate itself and must never end a healthy run: at least one worst row (a whole wait for the slot, the row cap and
 /// its grace) and one heavy build; the figure is the measured one below.
 ///
-/// Measured cause (ER-12, docs/benchmarks.md, "Pre-push heavy queue progress gaps"): the longest push gate run seen is 76 minutes (the
-/// refused push of 2026-11-21 with 45 rows decided: 32 passed, 13 not measured, 20 skipped); 24 hours is 19 times that. A backstop for a
-/// hung gate, not a judgement: the row cap and the queue's progress end every normal run first.
+/// Measured cause (ER-12, docs/benchmarks.md, "Pre-push heavy queue progress gaps"): the longest push gate run seen is 95 minutes (5,705 s,
+/// the push of fix/push-gate-queue-stall on 2026-11-21: 27 rows passed, each waiting its turn behind other agents' steps; the refused
+/// pushes of the same day ran 33 to 76 minutes); 24 hours is 15 times that. A backstop for a hung gate, not a judgement: the row cap and
+/// the queue's progress end every normal run first.
 const TIMEOUT: Duration = Duration::from_secs(24 * 60 * 60);
 
 /// What the gates said.
