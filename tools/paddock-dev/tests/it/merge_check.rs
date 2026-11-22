@@ -881,7 +881,10 @@ fn a_file_found_only_by_the_moved_test_search_that_does_not_parse_is_skipped_not
     r.write("crates/x/src/lib.rs", &format!("{}{KEPT}", padding()));
     r.write("crates/x/tests/fixtures/bad.rs", "fn new_case( {\n");
     r.write("other.txt", &lines(10, "o"));
-    r.commit("initial");
+    // `lib.rs` is a shared integration point, so the train-clash step reads `origin/main`; give the fixture one so only this test's own
+    // question (a file that does not parse) can make the run NOT MEASURED.
+    let base = r.commit("initial");
+    r.git(&["update-ref", "refs/remotes/origin/main", &base]);
     r.git(&["checkout", "-q", "-b", "feature"]);
     r.write("crates/x/src/lib.rs", &format!("pub const BRANCH: u32 = 1;\n{}{KEPT}", padding()));
     r.commit("feat: branch change");
@@ -2700,11 +2703,18 @@ fn an_overlap_with_another_open_train_is_refused_without_the_trailer_when_enforc
     // Refused: enforced, no trailer.
     let (code, out) = clashing_merge("Merge member into train").check(&["--no-generators", "--enforce-train-clash", "HEAD"]);
     assert_eq!(code, 5, "{out}");
-    assert!(out.contains("::error::train clash") && out.contains("train/a") && out.contains("Train-clash: eslint/src/rule.js: train/a:"), "{out}");
+    assert!(
+        out.contains("::error::train clash") && out.contains("train/a") && out.contains("Train-clash: eslint/src/rule.js: train/a:"),
+        "{out}"
+    );
     // Accepted: the same merge with the trailer (the positive control: the same check can see the overlap and let it through).
-    let (code, out) = clashing_merge(&format!("Merge member into train\n\n{CLASH_TRAILER}")).check(&["--no-generators", "--enforce-train-clash", "HEAD"]);
+    let (code, out) =
+        clashing_merge(&format!("Merge member into train\n\n{CLASH_TRAILER}")).check(&["--no-generators", "--enforce-train-clash", "HEAD"]);
     assert_eq!(code, 0, "{out}");
-    assert!(out.contains("::notice::train clash answered") && !out.contains("::error::"), "{out}");
+    assert!(
+        out.contains("::notice::train clash answered") && !out.contains("::error::"),
+        "{out}"
+    );
 }
 
 #[test]
@@ -2719,9 +2729,19 @@ fn without_the_switch_an_overlap_is_a_warning_and_a_branch_before_its_merge_neve
     let r = clashing_merge("Merge member into train");
     let (code, out) = r.check(&["--no-generators", "HEAD"]);
     assert_eq!(code, 0, "{out}");
-    assert!(out.contains("::warning::train clash (report-only)") && out.contains("once enforced"), "{out}");
+    assert!(
+        out.contains("::warning::train clash (report-only)") && out.contains("once enforced"),
+        "{out}"
+    );
     // The branch form has no merge message to read: it warns even when enforcing.
-    let (code, out) = r.check(&["--no-generators", "--enforce-train-clash", "--branch", "member", "--target", "train~1"]);
+    let (code, out) = r.check(&[
+        "--no-generators",
+        "--enforce-train-clash",
+        "--branch",
+        "member",
+        "--target",
+        "train~1",
+    ]);
     assert_eq!(code, 0, "{out}");
     assert!(out.contains("::warning::train clash"), "{out}");
 }

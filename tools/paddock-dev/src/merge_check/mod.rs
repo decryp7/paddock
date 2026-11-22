@@ -598,7 +598,7 @@ fn check(req: &Request) -> Result<Checked, CliError> {
             if let [train, member] = merge.parents.as_slice() {
                 let clash = crate::train_clash::for_merge(&git, train, member);
                 if !clash.is_quiet() {
-                    let judge = merge.commit.is_some().then(|| crate::train_clash::Judge {
+                    let judge = merge.commit.is_some().then_some(crate::train_clash::Judge {
                         message: merge.message.as_str(),
                         enforced: req.train_clash_enforced,
                     });
