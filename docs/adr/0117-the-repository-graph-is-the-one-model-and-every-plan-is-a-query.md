@@ -205,6 +205,18 @@ when its selection was full for everything its plan reached **and** its base was
 plumbing-only push (smoke, not complete) followed by a code push: the code push diffs from the commit before the smoke push, so it
 runs the plumbing change's jobs in full too, and is complete.
 
+**The verdict reader's "last fully tested commit" is wrong today, and WP-4 fixes it.** Read-only check on 2026-11-23:
+`./dev ci verdict --workflow ci.yml --sha d04af7b46...` names `f7bbe2b86` (a train-7 commit of 2026-11-13) as the last fully tested
+commit on main, although trains 8 to 19 landed after it. Cause, in `last_full` (`tools/paddock-dev/src/ci_runs/verdict.rs` on
+`origin/main` `b3c254a2d`): it takes as candidates only the commits whose **push run on main concluded `success`**, then asks the
+reader about each. Since 2026-11-13 no ci.yml push run on main has: the API's newest 50 push runs show ci.yml runs 8054, 8134, 8198,
+8241, 8315, 8555 and 8626 `failure` and 8341, 8392 and 8461 `cancelled` (pushes cancelled because a train run had already tested the
+commit, ER-49), and 8045 (`f7bbe2b86`) the newest `success`. A commit that its train's dispatch run tested in full is therefore
+never a candidate, even though `verdict_core` would accept it. It is not the marker: the train runs log `complete=true`; the
+candidate filter never asks. Fix (WP-4): candidates are main's first-parent commits (newest first, bounded), whatever their push
+run's conclusion, each asked of the one reader; a golden pins a main whose pushes were all cancelled after green train runs. Until
+then the base of §6 falls back to "everything" (safe, not cheap).
+
 ### 7. OS placement is derived, with exceptions kept by hand
 
 The C155 detectors become edge extractors: an OS `cfg`, a use of an OS-API crate (`windows_sys`, `libc`, `objc2`, `core_foundation`,
@@ -328,7 +340,7 @@ file reads batched. Extractors run in parallel over files (rayon, cores minus on
 The graph train is the one train while the others are held (D9): 0113 and os-scoped first, then WP-1 to WP-5 with WP-8, each member
 gated as ER-8 says; WP-6, WP-7 and WP-9 follow in the next train.
 
-### 12. Review round 1 answers
+### 12. Review round 1 answers (and two later questions: extensibility, §15; the verdict reader, §6)
 
 P1-1 `reads` edge (§4, §5 `input_hash`); P1-2 scripts run by path (§4 `reads`); P1-3 complete stays exact (§6); P1-4 fail closed and
 owner precedence (§2); P1-5 positive controls (§8 table); P1-6 migration net (§8); P1-7 resolution without `node_modules` (§4); P1-8
@@ -381,6 +393,49 @@ Every row has its positive control in the §8 table and its golden; the escape m
 a path that was built), adding an `os.skip` exception, declaring an action setup-only, and lowering a project's smoke set. Each is
 the unsafe direction, so each needs a golden diff in the same change and the user's approval (ER-46). Widening needs neither.
 
+### 15. Extensible by language: one `Extractor` port
+
+Extraction is an open set (open/closed, ports and adapters). The core knows nodes, edges, inputs and queries, never a language:
+
+```rust
+/// One adapter: reads its own manifests and sources from the bulk reader and emits nodes and edges.
+pub trait Extractor {
+    fn name(&self) -> &'static str;
+    /// The files it claims to read (globs), so the owner check and `input_hash` know them.
+    fn claims(&self) -> &[&'static str];
+    /// Nodes and edges for these files, through `read` (the one bulk reader; no spawn of its own unless declared).
+    fn extract(&self, files: &[String], read: &dyn BulkRead) -> Result<Extracted, ExtractError>;
+    /// The processes it may start (`cargo metadata` per workspace): the spawn budget test sums these.
+    fn spawn_budget(&self, files: &[String]) -> usize;
+}
+```
+
+Adapters are registered in one place (`model::extractors()`), each behind its crate feature (§10), each with its own positive
+controls (§8: remove its source line, its edge disappears) and its own spawn budget.
+
+| Adapter | Reads | Emits | State |
+|---|---|---|---|
+| Cargo | `cargo metadata` per workspace | crate nodes, `depends`, test targets from `src_path` | today (moves in) |
+| npm | workspaces, `tsconfig`/`angular.json`/ESLint path references, Tauri `frontendDist` | package nodes, `depends`, `path-ref` | today (moves in) |
+| TS imports | `.ts`/`.mts`/`.mjs` sources (oxc) | `imports` | WP-3 |
+| Rust in-crate | `mod`, `use crate::`, `cfg`, `include_str!`, `#[path]` (syn), `build.rs` | `imports` (module level), `reads`, `os` | WP-3, WP-6 |
+| CI YAML | workflows and actions (the ADR 0060 reader) | workflow, job, step, action nodes; `uses`, `runs` | WP-2 |
+| Generators | `docs/generators.toml` | generator nodes, `input`/`output` | WP-7 |
+| Data reads | declared runtime `reads`, string-literal paths in tests | `reads` | WP-3 |
+| .NET (planned) | `*.csproj`, `*.fsproj`, `*.sln`, `Directory.Build.props/targets`, `packages.lock.json`: `ProjectReference`, `PackageReference`, read by a parser or MSBuild's static evaluation, never by running a build | project nodes, `depends`, package-level edges | after this ADR, about 1 day |
+| C/C++ (planned) | the CMake File API or `compile_commands.json` (targets, `#include` edges), `*.vcxproj` `ProjectReference` | target nodes, `depends`, `imports` | after this ADR, about 1 day |
+
+A new language plugs in as one new adapter and one registry line; `reach`, `selection`, `input_hash` and `select_os` do not change,
+because they walk nodes and edges, not languages. Until an adapter exists, its files are owned by the project folder that holds
+them and a change to them reaches that project in full (fail closed). The repository has .NET today:
+`apps/debrief/tools/dotnet-sample-gen` (a `.csproj` tool) and `apps/debrief/crates/debrief-plugin-dotnet/tests/fixtures/Busy` (a
+fixture project). Both are owned by Debrief's folder now, and the Rust tests that build or read them
+(`debrief-plugin-dotnet/tests/it/real_runtime.rs`, `debrief-core` and `debrief-plugins` `tests/it/real_libraries.rs`) get `reads`
+edges to them in WP-3, so a change there selects those tests; the .NET adapter later adds the `.csproj` edges.
+
+Common practice: Pants backends (one per language, with dependency inference), Bazel rules (`rules_rust`, `rules_dotnet`, `rules_cc`),
+and Nx plugins (`createNodes` and `createDependencies`, nx.dev "Extending the Project Graph") are the same shape.
+
 ## Common practice (ER-37)
 
 - **Nx**: a project graph from package manifests and plugins, `namedInputs` and `targetDefaults.inputs` per target, `nx affected`
@@ -402,25 +457,25 @@ the unsafe direction, so each needs a golden diff in the same change and the use
 
 | WP | Content | Agent-days |
 |---|---|---|
-| WP-1 | Node and edge types, the inputs file and accessor, owners with precedence and fail-closed in the plan job, content extractors (`attributes`, `npm-lock`, `guards`), the bulk reader with a spawn budget, `reach` with kinds, the positive-control harness, the benchmark | 1.5 |
+| WP-1 | Node and edge types, the `Extractor` port and its registry (§15), the inputs file and accessor, owners with precedence and fail-closed in the plan job, content extractors (`attributes`, `npm-lock`, `guards`), the bulk reader with a spawn budget, `reach` with kinds, the positive-control harness, the benchmark | 1.7 |
 | WP-2 | The CI reader moved into the crate, `uses`/`runs` edges (contract check lines included), action and script nodes, mention vs use (G4), plan-job inputs (G5); `plan_gitea` deleted | 1.3 |
 | WP-3 | Test files and targets from `src_path`, the `reads` extractor (`syn`), `imports` through oxc without `node_modules` and its determinism test, contract `tests`/`smoke` declarations, `selection`, per-package runs (G11), the ci.yml and app-gates wiring | 2.0 |
-| WP-4 | Run scope v2, complete only on a complete base, the base from the verdict reader, the smoke-then-code golden | 0.5 |
+| WP-4 | Run scope v2, complete only on a complete base, the base from the verdict reader, the smoke-then-code golden; `last_full` asks main's first-parent commits, not only green push runs (§6) | 0.8 |
 | WP-5 | `--compare` with dropped targets, train replay (trains 15 to 20), one golden per migrated rule, the listed differences, regenerated goldens | 2.0 |
 | WP-6 | OS derivation with the wider signals, the `Command` measurement, `hostTests` cut to exceptions, C155 as the consistency check | 1.3 |
 | WP-7 | Generators as nodes (`due`, stale after merge); `input_hash` on `input_hash.rs` with the added inputs | 0.8 |
 | WP-8 | The landing run tests the train's diff (D11, G1, G14) | 1.0 |
 | WP-9 | The escape monitor and the five-nightly gate before the old tables go (D12) | 0.7 |
 | | The no-path-rule conformance check, positive controls for every node, edge and extractor kind (§8), fail-closed tests | included above |
-| | **Total** | **11.1** (accepted 6.3; spent so far about 0.3 on WP-1). Approved by the user on 2026-11-23 ("over 8 d is OK as long as it fixes the root cause once and for all") |
+| | **Total** | **11.6** (accepted 6.3; spent so far about 0.3 on WP-1). Approved by the user on 2026-11-23 ("over 8 d is OK as long as it fixes the root cause once and for all") |
 
-The total grew 76 % over the accepted 6.3 days, from the review's findings (the `reads` edge, the migration net and the escape
+The .NET and C/C++ adapters are not in this total (about 1 day each, when wanted). The total grew 84 % over the accepted 6.3 days, from the review's findings (the `reads` edge, the migration net and the escape
 monitor are most of it). It went back to the user (ER-37), who approved it on 2026-11-23 on the condition that it fixes the root
 cause once and for all: all nine work packages, in the order of §11.
 
 ## Decisions
 
-- **D1. Scope.** *Chosen 2026-11-23: (a), widened to WP-1 to WP-9, 11.1 days (§14).* (a) WP-1 to WP-7, 6.3 days. (b) WP-1 to WP-5 now, WP-6 and WP-7 after the next release, 4.8 days.
+- **D1. Scope.** *Chosen 2026-11-23: (a), widened to WP-1 to WP-9, 11.6 days (§14).* (a) WP-1 to WP-7, 6.3 days. (b) WP-1 to WP-5 now, WP-6 and WP-7 after the next release, 4.8 days.
   (c) Common practice: the five behaviours as planner rules, 3 to 4 days, no model. *Recommended: (b)*: it closes the planning class
   within the told budget; OS placement and generators have working hand lists with checks today.
 - **D2. Where the model lives.** (a) `paddock-repo-graph`, extractors as modules behind the existing ports. (b) A new crate
