@@ -16,6 +16,9 @@ import { VideoBackend } from '../video/video-backend';
 import { BrowserRuntimeBackend } from '../browser/browser-runtime-backend';
 import { MockBrowserRuntimeBackend } from '../browser/mock-browser-runtime-backend';
 
+// The real clock back after every test, so a test that times out cannot leave fake timers for the next one (ER-12, C154).
+afterEach(() => vi.useRealTimers());
+
 async function setup(backend = new MockSettingsBackend(), withRef = true) {
   const closed = vi.fn();
   const restart = vi.fn(async () => undefined);

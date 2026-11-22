@@ -10,6 +10,9 @@ import { sanitizeQuery } from '../core/sanitize-query';
 import { CoreUiState } from './core-ui-state';
 import { UI_STATE_CONTRIBUTIONS, UiStateRegistry } from './ui-state';
 
+// The real clock back after every test, so a test that times out cannot leave fake timers for the next one (ER-12, C154).
+afterEach(() => vi.useRealTimers());
+
 describe('UiStateRegistry', () => {
   function setup(contributions: unknown[] = []) {
     TestBed.configureTestingModule({

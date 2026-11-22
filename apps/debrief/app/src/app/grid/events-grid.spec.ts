@@ -18,6 +18,9 @@ import { RecordActions } from '../context/record-actions';
 import { HighlightRules } from '../projects/bookmarks/highlight-rules.store';
 import { at } from '../../testing/must';
 
+// The real clock back after every test, so a test that times out cannot leave fake timers for the next one (ER-12, C154).
+afterEach(() => vi.useRealTimers());
+
 const VIEWPORT_H = 260;
 
 /** A scroll by the user: a real one always comes with an input event (the grid tells it from the browser's own scroll adjustments by that). */
