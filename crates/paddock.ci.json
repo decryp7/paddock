@@ -20,5 +20,61 @@
   "deny": [
     "cd crates",
     "cargo deny check"
-  ]
+  ],
+  "hostTests": {
+    "packages": [
+      "cargo-paddock-plugin",
+      "paddock-archive",
+      "paddock-assistant",
+      "paddock-channels",
+      "paddock-chromium",
+      "paddock-commands",
+      "paddock-diag",
+      "paddock-dialogs",
+      "paddock-download",
+      "paddock-env",
+      "paddock-files",
+      "paddock-git",
+      "paddock-health",
+      "paddock-ipc",
+      "paddock-jobs",
+      "paddock-live",
+      "paddock-mcp",
+      "paddock-menu",
+      "paddock-metrics",
+      "paddock-packs",
+      "paddock-panels",
+      "paddock-pitwall",
+      "paddock-plugin-api",
+      "paddock-plugin-host",
+      "paddock-plugin-package",
+      "paddock-plugin-test",
+      "paddock-power",
+      "paddock-proc",
+      "paddock-repo-files",
+      "paddock-repo-graph",
+      "paddock-runtime",
+      "paddock-secrets",
+      "paddock-service",
+      "paddock-settings",
+      "paddock-setup",
+      "paddock-shell",
+      "paddock-siblings",
+      "paddock-slots",
+      "paddock-startup",
+      "paddock-storage",
+      "paddock-testkit",
+      "paddock-testkit-start",
+      "paddock-updater",
+      "paddock-watch",
+      "paddock-window",
+      "paddock-workbench"
+    ],
+    "skip": {
+      "paddock-service": [
+        "resume_tests::",
+        "scenarios::"
+      ]
+    }
+  }
 }
