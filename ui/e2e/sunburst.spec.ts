@@ -1,6 +1,6 @@
 import { expect, test } from './test';
 import AxeBuilder from '@axe-core/playwright';
-import { clickShape, hoverShape, type Page } from '@decryp7/paddock-e2e';
+import { clickShape, hoverShape, type Page, withPageStill } from '@decryp7/paddock-e2e';
 import { mkdirSync } from 'node:fs';
 
 // `pd-sunburst` in the gallery (docs/plans/pd-sunburst.md): drill by click and keyboard, the centre going up, the states, axe in both
@@ -45,7 +45,7 @@ const centreName = (page: Page) => box(page).locator('[data-testid="sunburst-cen
 for (const theme of THEMES) {
   test(`sunburst: axe finds no violations (${theme})`, async ({ page }) => {
     await open(page, theme);
-    const results = await new AxeBuilder({ page }).include('section[data-testid="sunburst"]').withTags(['wcag2a', 'wcag2aa', 'wcag22aa']).analyze();
+    const results = await withPageStill(page, () => new AxeBuilder({ page }).include('section[data-testid="sunburst"]').withTags(['wcag2a', 'wcag2aa', 'wcag22aa']).analyze());
     expect(results.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(' ')).join(', ')}`)).toEqual([]);
   });
 }
