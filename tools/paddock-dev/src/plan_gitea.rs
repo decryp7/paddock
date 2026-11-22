@@ -79,8 +79,11 @@ fn trim_end(s: &str) -> String {
 
 /// Splits a workflow file into its header and jobs, or `None` when that shape is not found, when a two-space line is
 /// neither a job key nor a comment, or when the file uses anchors or aliases (so a job may depend on text outside it).
+/// CRLF line ends read as LF: a Windows checkout writes the file with CRLF while git stores LF, and the line ends change nothing CI
+/// runs, so a CRLF working tree compared with its LF HEAD shows only the jobs whose text changed.
 pub fn workflow_jobs(text: &str) -> Option<Workflow> {
-    if YAML_REUSE.is_match(text) {
+    let text = text.replace("\r\n", "\n");
+    if YAML_REUSE.is_match(&text) {
         return None;
     }
     let lines: Vec<&str> = text.split('\n').collect();
@@ -386,5 +389,31 @@ impl GiteaSource for Fixed {
     }
     fn after(&self, f: &str) -> Option<String> {
         self.after.get(f).cloned()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A Windows checkout with `core.autocrlf=true` writes ci.yml with CRLF while git stores it with LF, so in files mode the
+    /// planner compares an LF `before` with a CRLF `after`. Line endings change nothing CI runs: the split and the changed jobs are
+    /// those of the LF text (before the fix, the headers differed and every edit planned everything).
+    #[test]
+    fn a_crlf_workflow_splits_like_its_lf_text() {
+        let lf = "on:\n  push:\njobs:\n  plan:\n    runs-on: x\n  ui:\n    runs-on: y\n";
+        let crlf = lf.replace('\n', "\r\n");
+        assert_eq!(workflow_jobs(&crlf), workflow_jobs(lf));
+        assert!(
+            workflow_jobs(lf).is_some_and(|w| w.jobs.len() == 2),
+            "a positive control: the LF text splits"
+        );
+        let edited = crlf.replace("runs-on: y", "runs-on: z");
+        assert_eq!(changed_jobs(Some(lf), Some(&edited)), Some(vec!["ui".to_string()]));
+        assert_eq!(
+            changed_jobs(Some(lf), Some(&crlf)),
+            Some(vec![]),
+            "line endings alone change no job"
+        );
     }
 }

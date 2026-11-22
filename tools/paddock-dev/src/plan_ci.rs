@@ -586,6 +586,13 @@ pub fn parse_args(args: &[String]) -> Result<PlanArgs, String> {
     if files.as_ref().is_some_and(|f| f.is_empty()) {
         return Err("--files needs at least one file".into());
     }
+    // Repository paths use `/` on every OS (git's spelling); a Windows path names no tracked file and would plan a file nobody changed.
+    if let Some(bad) = files.iter().flatten().find(|f| f.contains('\\')) {
+        return Err(format!(
+            "--files takes repository paths with '/', not '\\': {bad} (write it as {})",
+            bad.replace('\\', "/")
+        ));
+    }
     Ok(PlanArgs {
         files,
         base,
@@ -1191,6 +1198,21 @@ mod tests {
         let a = args(&["--since-run", "7821"]).unwrap();
         assert_eq!((a.since_run, a.base, a.ci), (Some(7821), None, false));
         assert_eq!(args(&["a"]).unwrap().since_run, None);
+    }
+
+    /// `--files` takes repository paths, which git spells with `/` on every OS. A Windows path (`apps\dyno\x.rs`) names no tracked
+    /// file, so the planner would answer for a root-level file nobody changed; it is refused with the spelling to use instead.
+    #[test]
+    fn a_files_entry_with_a_backslash_is_refused_with_the_next_step() {
+        let e = args(&["--files", r"ui/a.ts,apps\dyno\x.rs"]).unwrap_err();
+        assert_eq!(
+            e,
+            r"--files takes repository paths with '/', not '\': apps\dyno\x.rs (write it as apps/dyno/x.rs)"
+        );
+        assert!(
+            args(&["--files", "ui/a.ts,apps/dyno/x.rs"]).is_ok(),
+            "a positive control: the same paths with '/' parse"
+        );
     }
 
     #[test]
