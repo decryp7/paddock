@@ -11,6 +11,7 @@
 //! reaches = ["all"]              # all | cargo | npm | apps | project:<id>
 //! reach = "code"                 # code | release | test | plumbing | docs
 //! attributes = false             # true: a .gitattributes file, reached by the attribute lines that changed
+//! except = ["**/*.md"]           # globs taken back out of `files`
 //!
 //! [[owner]]                      # who owns a path no project claims
 //! paths = ["spikes/**"]
@@ -81,6 +82,7 @@ fn read(text: &str) -> Result<Inputs, String> {
             reaches,
             reach,
             attributes,
+            except: strings(e.get("except"), &format!("{what}.except"))?,
         });
     }
     let mut owners = Vec::new();

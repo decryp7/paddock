@@ -95,8 +95,12 @@ pub struct Reached {
     pub nodes: BTreeMap<String, NodeReach>,
     /// Changed files that nothing builds (owner `none`).
     pub not_built: Vec<String>,
-    /// Changed files no rule, project or input owns: the graph's check fails on them (ADR 0117 §2, G3), never "everything".
+    /// Changed files no input, project folder or owner rule claims, and non-prose files under a doc owner that no input names
+    /// (ADR 0117 §2, review round 2 P1-A/P1-B). The plan fails closed on them: [`Reached::everything`] is set and every project is
+    /// reached in full, and the owner check names each file.
     pub unowned: Vec<String>,
+    /// The plan must answer everything because a file is unowned (fail closed).
+    pub everything: bool,
 }
 
 impl Reached {
@@ -143,6 +147,19 @@ fn halves(facts: &Facts, path: &str) -> (bool, bool) {
         (None, Some(_)) => (false, true),
         (None, None) => (true, true),
     }
+}
+
+/// Prose: read by people, not by a build or a test unless an input or a `reads` edge says so (review round 2, P1-A).
+pub fn is_prose(path: &str) -> bool {
+    let name = path.rsplit('/').next().unwrap_or(path);
+    name.starts_with("LICENSE") || [".md", ".txt"].iter().any(|e| name.ends_with(e))
+}
+
+/// Images that only documentation shows: prose-like under a doc owner, code inside a project folder (an icon is built).
+pub fn is_doc_asset(path: &str) -> bool {
+    [".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"]
+        .iter()
+        .any(|e| path.ends_with(e))
 }
 
 /// Every project a change reaches, how and which half (ADR 0117 §5, the project level). `text(path)` gives a changed file's
@@ -207,28 +224,49 @@ pub fn reach(changed: &[String], facts: &Facts, inputs: &Inputs, text: TextOf) -
                             }
                         }
                         Target::Project(p) => out.mark(p, i.reach, true, true, why.clone()),
+                        Target::Owner => match project_of(facts, f) {
+                            Some(p) => out.mark(p, i.reach, true, true, why.clone()),
+                            None => out.unowned.push(f.clone()),
+                        },
                     }
                 }
             }
             continue;
         }
+        // A project folder comes before the owner rules (§2): its prose is docs for the project, everything else is code.
+        if let Some(p) = project_of(facts, f) {
+            if is_prose(f) {
+                out.mark(p, Reach::Docs, false, false, f.clone());
+                continue;
+            }
+            let (rust, ui) = halves(facts, f);
+            out.mark(p, Reach::Code, rust, ui, f.clone());
+            if let Some(c) = facts.cargo.node_of(f) {
+                crates.insert(c.to_string());
+            }
+            if let Some(n) = facts.npm.node_of(f) {
+                packages.insert(n.to_string());
+            }
+            continue;
+        }
         match inputs.owner_of(f) {
             Some(Owner::None) => out.not_built.push(f.clone()),
-            Some(Owner::Doc) => out.mark("docs", Reach::Docs, false, false, f.clone()),
+            Some(Owner::Doc) if is_prose(f) || is_doc_asset(f) => {
+                out.mark("docs", Reach::Docs, false, false, f.clone())
+            }
             Some(Owner::Project(p)) => out.mark(p, Reach::Code, true, true, f.clone()),
-            None => match project_of(facts, f) {
-                Some(p) => {
-                    let (rust, ui) = halves(facts, f);
-                    out.mark(p, Reach::Code, rust, ui, f.clone());
-                    if let Some(c) = facts.cargo.node_of(f) {
-                        crates.insert(c.to_string());
-                    }
-                    if let Some(n) = facts.npm.node_of(f) {
-                        packages.insert(n.to_string());
-                    }
-                }
-                None => out.unowned.push(f.clone()),
-            },
+            // Data under a doc owner that no input names, or a path nothing claims.
+            Some(Owner::Doc) | None => out.unowned.push(f.clone()),
+        }
+    }
+    if !out.unowned.is_empty() {
+        out.everything = true;
+        let why = format!(
+            "unowned {}: the plan answers everything (fail closed; declare an owner or an input)",
+            out.unowned.join(", ")
+        );
+        for (id, _) in facts.projects {
+            out.mark(id, Reach::Code, true, true, why.clone());
         }
     }
     for d in facts.cargo.dependents(&crates).difference(&crates) {

@@ -22,6 +22,8 @@ pub enum Target {
     Apps,
     /// One project by id (`crates`, `ui`, `conformance`, `tools`, `paddock-dev`, `app:dyno`).
     Project(String),
+    /// The project whose folder holds the changed file (a changelog compiled into its app).
+    Owner,
 }
 
 impl Target {
@@ -32,17 +34,224 @@ impl Target {
             "cargo" => Target::Cargo,
             "npm" => Target::Npm,
             "apps" => Target::Apps,
+            "owner" => Target::Owner,
             _ => match s.strip_prefix("project:") {
                 Some(p) if !p.is_empty() => Target::Project(p.to_string()),
                 _ => {
                     return Err(format!(
-                        "unknown target {s:?} (all, cargo, npm, apps or project:<id>)"
+                        "unknown target {s:?} (all, cargo, npm, apps, owner or project:<id>)"
                     ));
                 }
             },
         })
     }
 }
+
+/// The default named inputs: (name, files, reaches, attributes); every reach is `code`. A reach word as the inputs file spells it.
+const DEFAULT_INPUTS: &[(&str, &[&str], &[&str], bool)] = &[
+    (
+        "rust-toolchain",
+        &["rust-toolchain", "rust-toolchain.toml"],
+        &["all"],
+        false,
+    ),
+    (
+        "npm-root",
+        &["package.json", ".npmrc", ".nvmrc", "tsconfig/**"],
+        &["all"],
+        false,
+    ),
+    ("npm-lock", &["package-lock.json"], &["npm"], false),
+    (
+        "cargo-config",
+        &[".cargo/**", "lint/**"],
+        &["cargo", "project:crates", "project:paddock-dev"],
+        false,
+    ),
+    (
+        "git-attributes",
+        &[".gitattributes"],
+        &["project:conformance"],
+        true,
+    ),
+    (
+        "check-id-reservations",
+        &["conformance/reserved/**"],
+        &[],
+        false,
+    ),
+    (
+        "lessons",
+        &["docs/lessons.md", "docs/rules.md", "docs/blocks/**"],
+        &["project:conformance", "project:tools"],
+        false,
+    ),
+    (
+        "repo-graph",
+        &["docs/repo-graph.toml"],
+        &["project:paddock-dev", "project:conformance"],
+        false,
+    ),
+    (
+        "gates-register",
+        &["docs/gates.toml"],
+        &["project:paddock-dev", "project:conformance"],
+        false,
+    ),
+    (
+        "generators-register",
+        &["docs/generators.toml"],
+        &["project:paddock-dev"],
+        false,
+    ),
+    (
+        "known-copies",
+        &["docs/known-copies.toml"],
+        &["project:tools", "project:conformance"],
+        false,
+    ),
+    (
+        "harnesses",
+        &["docs/harnesses.toml"],
+        &["project:conformance"],
+        false,
+    ),
+    (
+        "ipc-endpoints",
+        &["docs/ipc-endpoints.toml", "docs/ipc-endpoint-ratchet.toml"],
+        &["project:conformance"],
+        false,
+    ),
+    (
+        "ci-scope-register",
+        &["docs/ci-scope-first-runs.toml"],
+        &["project:paddock-dev"],
+        false,
+    ),
+    (
+        "design-docs",
+        &[
+            "docs/design-guide.md",
+            "docs/benchmarks.md",
+            "docs/benchmarks/**",
+        ],
+        &["project:conformance"],
+        false,
+    ),
+    (
+        "doc-images",
+        &[
+            "docs/images/src/**",
+            "docs/design/**",
+            "**/*.drawio",
+            "docs/**/svg/*.svg",
+            "diagrams/**/svg/*.svg",
+            "docs/images/*.svg",
+        ],
+        &["project:tools"],
+        false,
+    ),
+    ("wiki", &["docs/wiki/**"], &["project:tools"], false),
+    (
+        "changelogs",
+        &[
+            "apps/*/CHANGELOG.md",
+            "crates/*/CHANGELOG.md",
+            "ui/projects/*/CHANGELOG.md",
+            "apps/*/vendor/**/*.md",
+        ],
+        &["owner"],
+        false,
+    ),
+    (
+        "prose-read-by-code",
+        &[
+            "**/resources/**/*.md",
+            "**/samples/**/*.md",
+            "**/src/**/*.md",
+            "**/tests/**/*.md",
+            "**/test/**/*.md",
+            "**/templates/**/*.md",
+            "**/e2e/**/*.md",
+            "**/fixtures/**/*.md",
+        ],
+        &["owner"],
+        false,
+    ),
+    (
+        "demo-readmes",
+        &["apps/shell-demo/README.md", "apps/workbench-demo/README.md"],
+        &["project:tools"],
+        false,
+    ),
+    (
+        "lint-wiring",
+        &[
+            "apps/*/app/eslint*.js",
+            "apps/*/app/eslint*.cjs",
+            "apps/*/app/eslint*.mjs",
+            "apps/*/app/eslint-suppressions.json",
+            "apps/*/app/angular.json",
+            "apps/*/app/package.json",
+            "apps/*/paddock.ci.json",
+            "ui/eslint*.js",
+            "ui/eslint*.cjs",
+            "ui/eslint*.mjs",
+            "ui/eslint-suppressions.json",
+            "ui/angular.json",
+            "ui/package.json",
+            "ui/paddock.ci.json",
+        ],
+        &["owner", "project:eslint"],
+        false,
+    ),
+    (
+        "conformance-config",
+        &[
+            "paddock.conformance.json",
+            "paddock.waivers.toml",
+            ".gitleaks.toml",
+        ],
+        &["project:conformance"],
+        false,
+    ),
+    (
+        "dev-wrapper",
+        &["dev", "dev.cmd"],
+        &["project:paddock-dev"],
+        false,
+    ),
+    (
+        "scripts",
+        &["scripts/**"],
+        &["project:tools", "project:ui"],
+        false,
+    ),
+    (
+        "ci-image",
+        &["ci-image/**"],
+        &["project:ci-image", "project:ui", "project:tools"],
+        false,
+    ),
+    (
+        "repo-tooling",
+        &[
+            "templates/**",
+            "renovate/**",
+            "renovate.json",
+            "CODEOWNERS",
+            "wiki-lint.json",
+            ".claude/hooks/**",
+            ".claude/settings.json",
+            "lefthook.yml",
+        ],
+        &["project:tools"],
+        false,
+    ),
+    // Until the CI adapter (WP-2) reads workflows and actions, a non-prose file under .gitea reaches everything, as the planner
+    // without its revision reader does today.
+    ("ci-files", &[".gitea/**"], &["all"], false),
+];
 
 /// One named input.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -57,6 +266,8 @@ pub struct Input {
     pub reach: Reach,
     /// A `.gitattributes` file: only the attribute lines that changed reach anything (G2).
     pub attributes: bool,
+    /// Globs taken back out of `files` (the CI files' input leaves their prose to the doc owner).
+    pub except: Vec<String>,
 }
 
 /// The owner a declared pattern gives a path.
@@ -89,68 +300,47 @@ pub struct Inputs {
 }
 
 impl Inputs {
-    /// The defaults: the former `GLOBAL` list of the planner, narrowed (ADR 0117 §3, G2, G7, G8, G13), and the owners of the root
-    /// folders no project claims.
+    /// The defaults: the former `GLOBAL` list of the planner narrowed (ADR 0117 §3, G2, G7, G8, G13), the declared doc inputs and
+    /// root-file owners it carried (`DOC_INPUTS`, `OWNERS`, `LINT_WIRING`), the registers under `docs/` with the checks that read
+    /// them (review round 2, P1-A), and the owners of the paths outside every project folder.
     pub fn defaults() -> Inputs {
-        let input =
-            |name: &str, files: &[&str], reaches: Vec<Target>, reach: Reach, attributes: bool| {
-                Input {
-                    name: name.into(),
-                    files: files.iter().map(|s| s.to_string()).collect(),
-                    reaches,
-                    reach,
-                    attributes,
-                }
-            };
-        let project = |p: &str| Target::Project(p.into());
+        use Reach::Code;
+        let inputs = DEFAULT_INPUTS
+            .iter()
+            .map(|(name, files, reaches, attributes)| Input {
+                name: name.to_string(),
+                files: files.iter().map(|s| s.to_string()).collect(),
+                // The table is this crate's own literal; its words are checked by the tests below.
+                reaches: reaches
+                    .iter()
+                    .filter_map(|r| Target::parse(r).ok())
+                    .collect(),
+                reach: Code,
+                attributes: *attributes,
+                except: if *name == "ci-files" {
+                    vec!["**/*.md".to_string()]
+                } else {
+                    Vec::new()
+                },
+            })
+            .collect();
         let owner = |paths: &[&str], owner: Owner| OwnerRule {
             paths: paths.iter().map(|s| s.to_string()).collect(),
             owner,
         };
         Inputs {
-            inputs: vec![
-                input(
-                    "rust-toolchain",
-                    &["rust-toolchain", "rust-toolchain.toml"],
-                    vec![Target::All],
-                    Reach::Code,
-                    false,
-                ),
-                input(
-                    "npm-root",
-                    &["package.json", ".npmrc", ".nvmrc", "tsconfig/**"],
-                    vec![Target::All],
-                    Reach::Code,
-                    false,
-                ),
-                input(
-                    "cargo-config",
-                    &[".cargo/**", "lint/**"],
-                    vec![Target::Cargo, project("crates"), project("paddock-dev")],
-                    Reach::Code,
-                    false,
-                ),
-                input(
-                    "git-attributes",
-                    &[".gitattributes"],
-                    vec![project("conformance")],
-                    Reach::Code,
-                    true,
-                ),
-                input(
-                    "lessons",
-                    &["docs/lessons.md"],
-                    vec![project("conformance"), project("tools")],
-                    Reach::Docs,
-                    false,
-                ),
-            ],
+            inputs,
             owners: vec![
                 owner(
-                    &["docs/**", "**/*.md", "LICENSE*", ".gitea/**/*.md"],
+                    &[
+                        "docs/**",
+                        "diagrams/**",
+                        "*.md",
+                        "LICENSE*",
+                        ".gitea/**/*.md",
+                    ],
                     Owner::Doc,
                 ),
-                owner(&["conformance/reserved/**"], Owner::None),
                 owner(&["spikes/**"], Owner::None),
             ],
         }
@@ -172,7 +362,10 @@ impl Inputs {
     pub fn inputs_of(&self, path: &str) -> Vec<&Input> {
         self.inputs
             .iter()
-            .filter(|i| i.files.iter().any(|g| glob::matches(g, path)))
+            .filter(|i| {
+                i.files.iter().any(|g| glob::matches(g, path))
+                    && !i.except.iter().any(|g| glob::matches(g, path))
+            })
             .collect()
     }
 
@@ -206,17 +399,23 @@ mod tests {
             .filter(|x| x.reaches.contains(&Target::All))
             .map(|x| x.name.as_str())
             .collect();
-        assert_eq!(all, ["rust-toolchain", "npm-root"]);
+        // The CI files reach everything only until the CI adapter (WP-2) reads them.
+        assert_eq!(all, ["rust-toolchain", "npm-root", "ci-files"]);
+        assert!(
+            i.inputs_of(".gitea/actions/README.md").is_empty(),
+            "G7: prose under .gitea is the doc owner's"
+        );
         assert!(i.inputs_of(".gitattributes")[0].attributes);
         assert_eq!(
             i.owner_of(".gitea/actions/README.md"),
             Some(&Owner::Doc),
             "G7"
         );
-        assert_eq!(
-            i.owner_of("conformance/reserved/C156-x"),
-            Some(&Owner::None),
-            "G8"
+        assert!(
+            i.inputs_of("conformance/reserved/C156-x")[0]
+                .reaches
+                .is_empty(),
+            "G8: claimed, reaches nothing"
         );
         assert_eq!(
             i.owner_of("spikes/dialog-hidden/Cargo.lock"),
@@ -235,6 +434,7 @@ mod tests {
                 reaches: vec![Target::Npm],
                 reach: Reach::Code,
                 attributes: false,
+                except: Vec::new(),
             }],
             owners: vec![OwnerRule {
                 paths: vec!["spikes/**".into()],
@@ -249,6 +449,15 @@ mod tests {
             i.owner_of("spikes/x"),
             Some(&Owner::Project("tools".into()))
         );
+    }
+
+    #[test]
+    fn every_default_reach_word_parses() {
+        for (name, _, reaches, _) in DEFAULT_INPUTS {
+            for r in *reaches {
+                assert!(Target::parse(r).is_ok(), "{name}: {r}");
+            }
+        }
     }
 
     #[test]

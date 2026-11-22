@@ -115,17 +115,26 @@ fn g9_an_npm_edge_into_a_tauri_shell_reaches_the_ui_half_only() {
 }
 
 #[test]
-fn g3_a_spike_reaches_nothing_and_an_unknown_root_file_is_unowned_not_everything() {
-    // Today: `unknown root file spikes/dialog-hidden/Cargo.lock` marks all 18 projects.
+fn g3_a_spike_reaches_nothing_and_an_unknown_root_file_makes_the_plan_answer_everything() {
+    // Today: `unknown root file spikes/dialog-hidden/Cargo.lock` marks all 18 projects. Now a spike is "not built", and a file
+    // nothing owns fails closed: every project, full, with the file named (ADR 0117 §2, review P1-B).
     let w = world();
-    let r = run(
-        &w,
-        &["spikes/dialog-hidden/Cargo.lock", "mystery.cfg"],
-        &none,
+    let spike = run(&w, &["spikes/dialog-hidden/Cargo.lock"], &none);
+    assert!(
+        spike.nodes.is_empty() && !spike.everything,
+        "{:?}",
+        spike.nodes
     );
-    assert!(r.nodes.is_empty(), "{:?}", r.nodes);
-    assert_eq!(r.not_built, ["spikes/dialog-hidden/Cargo.lock"]);
+    assert_eq!(spike.not_built, ["spikes/dialog-hidden/Cargo.lock"]);
+    let r = run(&w, &["mystery.cfg"], &none);
     assert_eq!(r.unowned, ["mystery.cfg"]);
+    assert!(r.everything);
+    assert_eq!(r.nodes.len(), w.projects.len());
+    assert!(
+        r.nodes
+            .values()
+            .all(|n| n.reach == Reach::Code && n.rust && n.ui)
+    );
 }
 
 #[test]
@@ -141,7 +150,7 @@ fn g7_g8_docs_and_reservations_reach_no_project_and_conformance_code_reaches_con
         &none,
     );
     assert_eq!(ids(&r), ["docs"]);
-    assert_eq!(r.not_built, ["conformance/reserved/C156-branch"]);
+    assert!(!r.everything);
     let c = run(
         &w,
         &["conformance/src/checks/C156-axe-scan-held-still.mjs"],
@@ -150,16 +159,74 @@ fn g7_g8_docs_and_reservations_reach_no_project_and_conformance_code_reaches_con
     assert_eq!(
         ids(&c),
         ["conformance"],
-        "foundation changes plan no app jobs"
+        "foundation changes plan no app tests"
     );
 }
 
 #[test]
-fn g13_the_lessons_file_reaches_its_declared_readers() {
+fn g13_the_lessons_file_selects_its_readers_as_code() {
+    // C145 and the merge driver's test read it: a docs reach would select nothing (review P1-B).
     let w = world();
     let r = run(&w, &["docs/lessons.md"], &none);
     assert_eq!(ids(&r), ["conformance", "tools"]);
-    assert_eq!(r.nodes["tools"].reach, Reach::Docs);
+    assert_eq!(r.nodes["conformance"].reach, Reach::Code);
+}
+
+#[test]
+fn p1b_a_project_folder_beats_the_docs_rules_and_prose_in_it_is_docs_for_that_project() {
+    let w = world();
+    // A changelog is compiled in (`include_str!` in dyno's lib.rs): the declared changelog input reaches its owner as code.
+    let cl = run(&w, &["apps/dyno/CHANGELOG.md"], &none);
+    assert_eq!(ids(&cl), ["app:dyno"]);
+    assert_eq!(cl.nodes["app:dyno"].reach, Reach::Code);
+    // A README in the app is prose: docs for the app, nothing to run.
+    let rd = run(&w, &["apps/dyno/README.md"], &none);
+    assert_eq!(ids(&rd), ["app:dyno"]);
+    assert_eq!(rd.nodes["app:dyno"].reach, Reach::Docs);
+}
+
+#[test]
+fn p1a_data_in_a_project_folder_is_code_for_that_project() {
+    let w = world();
+    // tauri-build reads the capabilities with no literal path: code for the app's Rust half.
+    let r = run(
+        &w,
+        &[
+            "apps/dyno/app/src-tauri/capabilities/default.json",
+            "apps/dyno/docs/data/table.csv",
+        ],
+        &none,
+    );
+    let d = &r.nodes["app:dyno"];
+    assert_eq!((d.reach, d.rust), (Reach::Code, true));
+    assert!(
+        d.why.iter().any(|w| w.ends_with("table.csv")),
+        "{:?}",
+        d.why
+    );
+}
+
+#[test]
+fn p1a_every_non_prose_file_under_a_doc_owner_is_a_named_input_or_unowned() {
+    let w = world();
+    let g = run(&w, &["docs/gates.toml"], &none);
+    assert_eq!(ids(&g), ["conformance", "paddock-dev"]);
+    assert!(g.nodes.values().all(|n| n.reach == Reach::Code));
+    let model = run(&w, &["docs/repo-graph.toml"], &none);
+    assert_eq!(ids(&model), ["conformance", "paddock-dev"]);
+    // Positive control: a register nobody declared fails closed.
+    let stray = run(&w, &["docs/new-register.toml"], &none);
+    assert_eq!(stray.unowned, ["docs/new-register.toml"]);
+    assert!(stray.everything);
+    // Prose and images under docs stay docs.
+    assert_eq!(
+        ids(&run(
+            &w,
+            &["docs/plans/x.md", "docs/images/shot.png"],
+            &none
+        )),
+        ["docs"]
+    );
 }
 
 #[test]
