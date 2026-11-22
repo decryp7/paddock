@@ -1335,4 +1335,4 @@ reason = "ER-41: report-only until its first green run on the real tree, recorde
 owner = "ER-21 class: a fixed-time wait or a leaked fake clock fails a spec on a loaded runner (Dyno extras-page leak c249b271c, Spotter flush(TEST_DEBOUNCE_MS + 20) ad0221ac1, Pitcrew flush(PREVIEW_DEBOUNCE_MS + 50); feat/fixed-wait-checks)"
 since = 2026-11-22
 review_by = 2026-12-22
-approved = "coordinator"
+approved = "user"
