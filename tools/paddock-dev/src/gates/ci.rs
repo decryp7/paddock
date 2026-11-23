@@ -268,6 +268,32 @@ pub fn workflow_events(path: &str, text: &str) -> Result<BTreeSet<String>, Strin
     parse_workflow(path, text).map(|w| w.events)
 }
 
+/// The input names of a workflow's `workflow_dispatch` and `workflow_call` triggers, read by the same parser as the model (C160
+/// asks it which inputs `ci.yml` has, in file order).
+pub fn workflow_inputs(path: &str, text: &str) -> Result<WorkflowInputs, String> {
+    let w = parse_workflow(path, text)?;
+    Ok(WorkflowInputs {
+        dispatch: w.dispatch_inputs.into_keys().collect(),
+        call: w.call_inputs.into_keys().collect(),
+    })
+}
+
+/// [`workflow_inputs`] of the workflow file `rel` under `root`: the model reads the file itself, so a test or a tool that wants the
+/// inputs of a real workflow never reads its text (conformance C158).
+pub fn workflow_inputs_at(root: &std::path::Path, rel: &str) -> Result<WorkflowInputs, String> {
+    let text = std::fs::read_to_string(root.join(rel)).map_err(|e| format!("{rel}: {e}"))?;
+    workflow_inputs(rel, &text)
+}
+
+/// The inputs of a workflow's two trigger kinds, sorted by name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkflowInputs {
+    /// `on.workflow_dispatch.inputs`.
+    pub dispatch: Vec<String>,
+    /// `on.workflow_call.inputs`.
+    pub call: Vec<String>,
+}
+
 fn parse_workflow(path: &str, text: &str) -> Result<Workflow, String> {
     let doc = yaml::parse(text)?;
     let on = doc.get("on").or_else(|| doc.get("true"));

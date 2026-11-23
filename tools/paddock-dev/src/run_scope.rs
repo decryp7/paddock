@@ -22,6 +22,56 @@ pub const VERSION: u64 = 2;
 /// The runners the `crate` and `paddock-dev` jobs run on when the plan names none of its own (ci.yml's `PLAN_OS_LEGS`).
 pub const DEFAULT_OS_LEGS: [&str; 3] = ["ubuntu-latest", "windows-latest", "macos-latest"];
 
+/// How one input of `ci.yml`'s `workflow_dispatch` or `workflow_call` trigger relates to what a run declares (ADR 0113, ADR 0117 §6):
+/// an input that can make a run cover less than a push to main does must show in the scope line, or be said not to narrow. Conformance
+/// C160 reads this table (ER-42) and `ci.yml`'s inputs through the CI model, and flags an input the table does not name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InputScope {
+    /// The input narrows (or widens) the run and the scope line says so: the dotted key of the line's JSON that carries it
+    /// (`rerun`, `base`, `os`, `ran.engines`, `ran.os_full`, `ran.apps`).
+    Declared(&'static str),
+    /// The input changes neither what runs nor what it tests; the reason says why.
+    NonNarrowing(&'static str),
+}
+
+/// The inputs of `ci.yml` (both triggers) and how each reaches the scope line. A new input is added here in the change that adds it.
+pub const CI_INPUTS: [(&str, InputScope); 8] = [
+    ("base", InputScope::Declared("base")),
+    ("landing_base", InputScope::Declared("base")),
+    ("since_run", InputScope::Declared("rerun")),
+    ("webkit", InputScope::Declared("ran.engines")),
+    ("os_full", InputScope::Declared("ran.os_full")),
+    ("app", InputScope::Declared("ran.apps")),
+    (
+        "release",
+        InputScope::NonNarrowing("a release workflow's gates: it only forbids downloading the dev tool (PADDOCK_DEV_DOWNLOAD)"),
+    ),
+    (
+        "sccache_backend",
+        InputScope::NonNarrowing("the compile cache of the Rust jobs: no job or test is added or dropped"),
+    ),
+];
+
+/// The dotted keys a scope line carries (`rerun`, `base`, `os`, `ran.engines`, ...), read off a line this module writes, so a table
+/// entry that names a key the line does not have is found.
+pub fn line_keys() -> BTreeSet<String> {
+    let line = ci_scope(Scope::default(), false, Scope::default(), false)
+        .with_os(Some("linux"))
+        .with_base(Some("base"))
+        .line();
+    let json: Value = serde_json::from_str(line.strip_prefix(SCOPE_LINE).unwrap_or("{}")).unwrap_or(Value::Null);
+    let mut keys = BTreeSet::new();
+    if let Some(top) = json.as_object() {
+        for (k, v) in top {
+            keys.insert(k.clone());
+            if let Some(inner) = v.as_object() {
+                keys.extend(inner.keys().map(|i| format!("{k}.{i}")));
+            }
+        }
+    }
+    keys
+}
+
 /// The project flags of a plan that each decide a job of ci.yml.
 const PROJECTS: [&str; 8] = ["crates", "ui", "eslint", "conformance", "c99", "tools", "icons", "paddockDev"];
 

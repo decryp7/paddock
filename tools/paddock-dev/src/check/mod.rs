@@ -68,6 +68,7 @@ register_checks! {
     c155::C155,
     c158::C158,
     c159::C159,
+    c160::C160,
 }
 
 use config::Config;

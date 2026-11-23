@@ -1368,3 +1368,11 @@ owner = "ER-21 class: a blanket lint allow hides the calls the lint bans (Pitcre
 since = 2026-11-23
 review_by = 2026-12-22
 approved = "user"
+
+[[report_only]]
+id = "C160"
+reason = "ER-41: report-only until its first green run on the real tree, recorded by run id here and in tools/paddock-dev/src/check/c160.rs, then flip the mode to Gate. Reads the inputs of ci.yml's workflow_dispatch and workflow_call triggers through the CI model (gates::ci::workflow_inputs) and tools/paddock-dev/src/run_scope.rs CI_INPUTS: an input the table does not name, a stale entry, a Declared key the scope line does not carry, a NonNarrowing entry without a reason. No baseline or allow list (ER-46): the table is the list. First count at 64e01dd84 (train/2026-11-23-graph): 0 findings, 8 inputs (base, landing_base, since_run, webkit, os_full, app declared; release, sccache_backend non-narrowing). Positive controls: the check's own control (an undeclared input), and the unit test that drops `since_run` from the real table and sees it go red"
+owner = "ER-21 class: an input narrowed a run and the scope line did not say so (the `tree` and `os` inputs widened what complete meant; ADR 0113, ADR 0117 section 6; feat/conformance-guards-2026-11-23)"
+since = 2026-11-23
+review_by = 2026-12-22
+approved = "user"
