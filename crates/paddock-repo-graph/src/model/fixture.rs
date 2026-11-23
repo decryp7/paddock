@@ -110,12 +110,12 @@ const DEFAULT_INPUTS: &[InputRow] = &[
     (
         "doc-images",
         &[
-            "docs/images/src/**",
+            "docs/pictures/src/**",
             "docs/mocks/**",
             "**/*.drawio",
             "docs/**/svg/*.svg",
             "diagrams/**/svg/*.svg",
-            "docs/images/*.svg",
+            "docs/pictures/*.svg",
         ],
         &["project:tools"],
         None,
