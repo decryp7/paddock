@@ -187,6 +187,15 @@ failing mode.
 - **Holders count while they live:** a holder whose record is inside the cap its own row lives under (the waiter's `--run-max`, `ROW_CAP` + grace, 3,675 s) is progress by itself, so a waiter behind a healthy 31 to 60 minute step is not stalled; past the cap it is not live, and the same picture ends the wait a stall limit later.
 - **Notes:** the basis of `QUEUE_STALL` (30 min, 1,800 s) in `tools/paddock-dev/src/pre_push/exec.rs`: over the longest gap seen, so a queue that moves is never ended. A holder that runs longer is ended by its own row cap. The per-push totals it replaces (15 min of run, 30 min of queue) were exceeded by three pushes on 2026-11-21 with no row running too long: 13, 14 and 15 rows, and 5 rows, were not measured. Not measured: the gaps of a quiet machine.
 
+### 2026-11-23, the repository model's ownership test without the OS placement (fix/owner-test-batched-git)
+
+- **Commit:** 64e01dd84 (train/2026-11-23-graph) against the fix
+- **Machine:** Mac mini, Apple M4 Pro, 14 cores, 64 GB, macOS 27.2; 1-minute load 26 over the window (an indication, not a quiet run). Debug build (the test profile), `CARGO_BUILD_JOBS=2`
+- **Source:** the checkout's own tracked files (about 14,000, of which about 700 outside every project folder)
+- **Command:** `cargo nextest run -E 'test(every_tracked_file_of_the_tree)'` (paddock-dev lib), run alone; git starts counted with a `git` shim on PATH that logs every call
+- **Numbers:** git starts: 5 before and 5 after (two `ls-files`, one `grep`, two `cat-file --batch-command` readers), the same for any tree size. Wall time: before 15.4 s and 15.0 s, after 8.6, 8.7 and 8.5 s. A sample of the run before: 99% of the test thread was in `read_graph` deriving the OS placement (`os_placement::derive`, lexing every Rust source of three workspaces); the model's own work (`build_world`, `reach_in`) was the rest
+- **Notes:** run 8674 (Windows) timed out at 60 s on try 1 and took 37.9 s on try 2; the cause was not git starts (the reader was already one process per revision) but this placement work, which the test never reads. `read_graph_unplaced` skips it for the repository model's own checks; `read_graph` (plans) still derives it. What remains is the model's parsing of every source file (syn, oxc, the lexers) in a debug build. Not measured: Windows.
+
 ### 2026-11-12, SVG drift check: font metrics (ci/svg-drift-check)
 
 - **Commit:** 8a3c3111a (the branch merged with origin/main 0b736ac0b, which has train 7's Pitwall re-export c8057ff13)
