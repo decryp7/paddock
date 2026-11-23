@@ -576,6 +576,49 @@ edges to them in WP-3, so a change there selects those tests; the .NET adapter l
 Common practice: Pants backends (one per language, with dependency inference), Bazel rules (`rules_rust`, `rules_dotnet`, `rules_cc`),
 and Nx plugins (`createNodes` and `createDependencies`, nx.dev "Extending the Project Graph") are the same shape.
 
+### 16. The wiring: `./dev plan --ci` plans from the selection (2026-11-23)
+
+Evidence heads read for this section (ADR 0091), 2026-11-23: `origin/feat/repo-graph-integrated` = `8cab10234`,
+`origin/docs/adr-0117-structural-rule` = `91cbecac7`, `origin/feat/repo-graph-wp9` = `19d45c880`, `origin/main` = `d04af7b46`; built
+on `feat/repo-graph-wiring`. Nothing here is on a tag yet (`git tag --contains 8cab10234` is empty).
+
+The user decided the graph plans CI from landing; the rule tables stay for `--compare`, `--replay` and an emergency switch.
+
+- **The switch is data.** `docs/repo-graph.toml` `[planner]`: `mode = "graph"` (also the default when the table is missing) or
+  `mode = "rules"`, which needs a `reason` (switching back is a commit that says why). The plan job logs `planner: graph` or
+  `planner: rules (<reason>)`. Enforced by `repo_inputs::planner` (an unknown mode or key, or `rules` without a reason, is an error)
+  and its test; the planner fixture of the recorded CLI answers (`tests/golden/fixture/docs/repo-graph.toml`) is on `rules`, so the
+  recorded answers prove the switch reproduces the rule tables exactly.
+- **The output schema stays; two outputs are added** (`plan_graph::OUTPUTS`, only under the graph): `selection` (each narrowed
+  project's kept phases and affected files, passed to every job that runs `./dev ci run` as `PADDOCK_PLAN_SELECTION`) and `partial`.
+  The mapping is in `tools/paddock-dev/src/plan_graph.rs`:
+
+  | Selection | Outputs |
+  |---|---|
+  | `full` | the project flag and app legs as before; a member run keeps the package filters (G11) |
+  | `smoke` | the flag; `selection` keeps the declared phases (`./dev ci run` skips the rest with a notice); the smoke filterset as the app leg's `filter` (member semantics: the gates run) or as the `crate`/`paddock-dev` leg `filter` (tests only) |
+  | `affected` | the flag; `binary_id(=..)` of the reached nextest targets as the leg `filter` with `tests_only`; the spec files per runner in `selection` (Vitest and `ng test --include`, Playwright and `node --test` file arguments, `ci_run::select`); only the phases whose runner lines take a file, and a runner whose files no line can take runs the project whole (never less, §5) |
+  | `phases` | the flag; those phases in `selection` |
+  | `installers` | `--app <app>` answers `true` |
+  | per OS | host legs for `full` and `smoke`; for `affected` only when a reached target's package holds OS-specific code (the derived placement of §7) |
+
+  debrief.yml (an app with its own workflow) gets `rerun_jobs`, `rust_test_filter` and `frontend_include` for an affected selection,
+  the outputs its rerun mode already reads.
+- **The declared scope is version 2** (ADR 0113): `ran` names the projects that ran a smoke set or phases (`smoke`) or only affected
+  tests (`affected`), and `Declared::complete` refuses either; every scope states `os_full` (a missing key is an error, review P2-2);
+  the line states `need_whole`, and `complete_for_tag` refuses a need taken from a push's or a landing's diff (review P2-3). The old
+  report-only lines of ci.yml and debrief.yml read `partial` and are never `complete=true` for a narrowed run. A golden of the plan job
+  log under the graph (`tests/golden/expected/cli-graph.json`, `tests/it/plan_graph_ci.rs`) shows each kind of change end to end.
+- **The escape monitor records what CI ran** (WP-9): the graph's selection (`plan_graph::escape_selected`), the rule tables' answer
+  only under `rules`.
+- **Contracts are read at the planned revision** (`decl::load` through the world's reader), not the working tree.
+
+Common practice (ER-37): Nx (`nx affected`, nx.dev "Run Only Tasks Affected by a PR"), Turborepo (`--filter=...[ref]`,
+turborepo.com "Filtering"), Bazel target determinators (`bazel-diff`, github.com/Tinder/bazel-diff) and GitHub's path filters
+(docs.github.com, "Workflow syntax: on.push.paths") all select whole projects or targets; none narrows a project to a smoke set
+for a plumbing change, and Google TAP and Meta keep a full nightly as the net (§8). The smoke and affected narrowing here is more
+than they do; D15 offers the common option. (Sources from the review rounds of this ADR; not fetched again on 2026-11-23.)
+
 ## Common practice (ER-37)
 
 - **Nx**: a project graph from package manifests and plugins, `namedInputs` and `targetDefaults.inputs` per target, `nx affected`
@@ -660,6 +703,12 @@ cause once and for all: all nine work packages, in the order of §11.
   API, and the escape monitor's selection records as a small JSON per run (an artifact or S3). A graph cache file keyed by the git
   tree object id is allowed only if a measurement needs it, as Nx keeps its project-graph cache file (nx.dev, "Project Graph"
   caching); Bazel and Pants likewise rebuild their graphs in memory from the tree.
+
+- **D15. How narrow the graph plans** (the wiring, §16). (a) As built: `smoke` and `affected` narrow a project (cost spent: about
+  1 agent-day for the wiring). (b) Common practice (Nx, Turborepo, Bazel target determinators): every reached project runs in full;
+  the switch to (b) is one line in `plan_graph::plan` (treat every non-skip selection as `full`), about 0.2 agent-day with its
+  goldens. *Recommended: (a)*: the user approved the smoke and affected behaviours (§6, "the approved behaviours"; D7 (a) for a push to main) and the declared scope keeps such runs from
+  counting as complete; (b) stays available if escapes show up (WP-9).
 
 ## Consequences
 
