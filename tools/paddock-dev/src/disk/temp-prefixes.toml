@@ -1,0 +1,90 @@
+# The entries our tests and tools make directly in the OS temp folder (ER-51: every shared cache and leftover place is declared with an
+# owner, a limit and an eviction rule, and one sweep enforces them). `./dev disk temp` (and `./dev disk clean`) read this file: past a
+# prefix's limits it removes that prefix's entries oldest first, never one younger than `min_age_hours`, never one a running process
+# stands in, and never anything whose name this file does not claim.
+#
+# Why (2026-11-23): the dev Mac's temp folder held about 992,000 entries, about 71% of them `x9-fixture-*` folders a test helper had
+# left; a process whose working folder had been deleted there made macOS's getcwd read every entry, and each git start took 20 s to over
+# 2 min (docs/lessons.md, "The long paddock-dev test hangs had one cause").
+#
+# `suffix`: `mkdtemp` claims only the prefix plus exactly six letters or digits (what Node's mkdtempSync, mktemp and the tempfile crate
+# add), for a generic prefix another program could use too; `any` claims every name that starts with the prefix (a prefix only this
+# project uses).
+
+version = 1
+
+# A warning (not a removal) when the temp folder holds more entries than this, ours or not: the getcwd scan above is linear in it. A first
+# value from that one measurement (about 992,000 entries cost 20 s to over 2 min per git start, so 50,000 is about 1 to 6 s).
+warn_entries = 50000
+
+[[prefix]]
+name = "paddock-"
+owner = "every Paddock test and tool (TestCommand's paddock-test-cmd-, the CI kit's tests: paddock-isolation-, paddock-job-tmpdir-, ...)"
+suffix = "any"
+max_count = 500
+max_gib = 20
+min_age_hours = 24
+
+[[prefix]]
+name = "x9-fixture-"
+owner = "conformance/test/helpers.mjs (one folder per test process)"
+suffix = "mkdtemp"
+max_count = 100
+max_gib = 2
+min_age_hours = 24
+
+[[prefix]]
+name = "rt5-fixture-"
+owner = "tools/paddock-dev/tests/fixtures/check/generate.mjs"
+suffix = "mkdtemp"
+max_count = 20
+max_gib = 2
+min_age_hours = 24
+
+[[prefix]]
+name = "full-checkout-"
+owner = "conformance/test/full-checkout.test.mjs"
+suffix = "mkdtemp"
+max_count = 50
+max_gib = 1
+min_age_hours = 24
+
+[[prefix]]
+name = "no-repo-"
+owner = "conformance/test/full-checkout.test.mjs"
+suffix = "mkdtemp"
+max_count = 50
+max_gib = 1
+min_age_hours = 24
+
+[[prefix]]
+name = "sparse-"
+owner = "conformance/test/require-full-tree.test.mjs"
+suffix = "mkdtemp"
+max_count = 50
+max_gib = 1
+min_age_hours = 24
+
+[[prefix]]
+name = "publish-"
+owner = "apps/pacenotes and apps/sighter scripts/release/publish.test.mjs"
+suffix = "mkdtemp"
+max_count = 50
+max_gib = 1
+min_age_hours = 24
+
+[[prefix]]
+name = "icons-"
+owner = "apps/debrief and apps/pitwall scripts/ci/check-icons.test.mjs"
+suffix = "mkdtemp"
+max_count = 50
+max_gib = 1
+min_age_hours = 24
+
+[[prefix]]
+name = "dyno-helper-sign-test-"
+owner = "conformance/test/dyno-helper-sign.test.mjs"
+suffix = "mkdtemp"
+max_count = 50
+max_gib = 1
+min_age_hours = 24
