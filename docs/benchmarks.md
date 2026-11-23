@@ -2492,6 +2492,21 @@ already built, one run each, `/usr/bin/time -p`:
 
 Not measured: the spawn count (WP-1 adds the budget test), and the same commands on the Linux runner.
 
+## Planner with the repository model beside it (2026-11-23, feat/repo-graph-model WP-1 to WP-3, 05455f446)
+
+ADR 0117 §9 and §10 budget the model at the planner's own time or less. Dev Mac (14 cores, 1-minute load 13 to 20), the tool binary
+run directly (`./dev --print-binary`), two warm runs each, `/usr/bin/time -p`:
+
+| Command | real | user | sys |
+|---|---|---|---|
+| `plan origin/main~20 --explain` (the rule tables alone) | 0.65 s, 0.75 s | 0.30 s, 0.31 s | 0.24 s, 0.25 s |
+| `plan origin/main~20 --compare` (the rules, then the model: CI, Cargo and code adapters, reach, selection) | 1.06 s, 1.03 s | 0.34 s, 0.35 s | 0.30 s, 0.31 s |
+
+The first, cold `--compare` run took 7.24 s real (the batched reader's object reads and the `git grep` for read candidates cold).
+The model's processes: at most one `git cat-file --batch-command` per reader (two readers, pinned by
+`repo_model::tests::the_bulk_reader_starts_at_most_one_git_for_many_files_and_the_control_counts_one_per_reader`), one `git grep -l`,
+and no `cargo metadata` of its own (it replays what `read_graph` recorded). Not measured: the Linux runner, and a cold run per adapter.
+
 ## Import and cfg scan of the whole repository (2026-11-23, docs/adr-repo-graph-model)
 
 The lower bound ADR 0117 §10 compares a parser with. Dev Mac under load (about 15), one run each, `/usr/bin/time -p`, over the tracked files:
