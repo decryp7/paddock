@@ -299,6 +299,8 @@ export interface MockWidgetsOptions {
   popup?: Partial<Record<PopoverKind, MockWidgetState>>;
   /** Show the popup as if the agent had stopped. */
   agentStopped?: boolean;
+  /** Memory in use and installed, in GiB, instead of the session's usual values (`?memory=999.9:999`): the widest label the CPU and memory widget can show. */
+  memoryGiB?: { used: number; total: number };
   /** Long alarm and volume lists, past the engine's bound (`?lists=long`). */
   longLists?: boolean;
   /** The engine's golden cases: a dashboard whose layout is a case's items answers that case's gesture as the engine did. */
@@ -307,14 +309,16 @@ export interface MockWidgetsOptions {
 }
 
 /** Reads `?popup=diskSpace:error,network:empty&agent=stopped`. */
-export function mockWidgetOptionsFromUrl(search: string): Pick<MockWidgetsOptions, 'popup' | 'agentStopped'> {
+export function mockWidgetOptionsFromUrl(search: string): Pick<MockWidgetsOptions, 'popup' | 'agentStopped' | 'memoryGiB'> {
   const q = new URLSearchParams(search);
   const popup: Partial<Record<PopoverKind, MockWidgetState>> = {};
   for (const pair of (q.get('popup') ?? '').split(',')) {
     const [kind, state] = pair.split(':').map((t) => t.trim());
     if (kind && POPOVER_KINDS.some((k) => k.kind === kind) && STATES.includes(state as MockWidgetState)) popup[kind as PopoverKind] = state as MockWidgetState;
   }
-  return { popup, agentStopped: q.get('agent') === 'stopped' };
+  const [used, total] = (q.get('memory') ?? '').split(':').map(Number);
+  const memory = used !== undefined && total !== undefined && used > 0 && total >= used && Number.isFinite(total) ? { memoryGiB: { used, total } } : {};
+  return { popup, agentStopped: q.get('agent') === 'stopped', ...memory };
 }
 
 /** The mock's widget engine and popup values. */
@@ -326,6 +330,7 @@ export class MockWidgets {
   private readonly states: Partial<Record<PopoverKind, MockWidgetState>>;
   private agentStopped: boolean;
   private readonly longLists: boolean;
+  private readonly memoryGiB: { used: number; total: number } | null;
   private readonly layoutListeners = new Set<(s: DynoSurface) => void>();
   private readonly valueListeners = new Set<(v: PopoverSurfaceValues) => void>();
 
@@ -336,6 +341,7 @@ export class MockWidgets {
     this.states = { ...options.popup };
     this.agentStopped = options.agentStopped ?? false;
     this.longLists = options.longLists ?? false;
+    this.memoryGiB = options.memoryGiB ?? null;
     this.state = this.load();
     if (this.storage && typeof window !== 'undefined') {
       window.addEventListener('storage', (e) => {
@@ -345,6 +351,14 @@ export class MockWidgets {
         this.pushValues();
       });
     }
+  }
+
+  /** The CPU and memory widget's memory fields: the session's usual values, or the pinned `?memory=` ones. */
+  private memoryValues(): { memoryUsed: number; memoryTotal: number; memoryPercent: number } {
+    if (!this.memoryGiB) return { memoryUsed: MAC_MEMORY_USED, memoryTotal: MAC_MEMORY_TOTAL, memoryPercent: MAC_MEMORY_PERCENT };
+    const GIB = 1024 ** 3;
+    const { used, total } = this.memoryGiB;
+    return { memoryUsed: used * GIB, memoryTotal: total * GIB, memoryPercent: Math.round((used / total) * 100) };
   }
 
   private load(): Record<DynoSurface, Stored> {
@@ -715,7 +729,7 @@ export class MockWidgets {
         return ready({ diskSpace: { rows: [{ id: '/', name: 'Macintosh HD', usedPercent: MAC_DISK_USED_PERCENT, freeBytes: MAC_DISK_FREE, totalBytes: MAC_DISK_TOTAL, tone: 'ok', reachable: true, measuredAt: null, freshness: 'fresh' as const }, { id: '/Volumes/Projects', name: 'Projects', usedPercent: 96, freeBytes: 19 * GB, totalBytes: 500 * GB, tone: 'bad', reachable: true, measuredAt: null, freshness: 'fresh' as const }], more: 0 } }, stale);
       }
       case 'cpuMemory':
-        return ready({ cpuMemory: { cpuPercent: MAC_CPU_TOTAL, cpuTone: 'warn', memoryUsed: MAC_MEMORY_USED, memoryTotal: MAC_MEMORY_TOTAL, memoryPercent: MAC_MEMORY_PERCENT, memoryTone: 'ok', cpuMinute: wave(70, 12) } }, stale);
+        return ready({ cpuMemory: { cpuPercent: MAC_CPU_TOTAL, cpuTone: 'warn', ...this.memoryValues(), memoryTone: 'ok', cpuMinute: wave(70, 12) } }, stale);
       case 'network':
         if (state === 'empty') return empty('See traffic when online', 'Offline now.', 'Open network', { openPage: 'network' });
         return ready({ network: { rxBps: 2.4e6, txBps: 310e3, rxMinute: wave(2e6, 5e5, 2), txMinute: wave(3e5, 5e4, 3) } }, stale);
