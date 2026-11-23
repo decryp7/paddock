@@ -75,5 +75,6 @@
       ],
       "nextest": "package(=pitwall-core)"
     }
-  }
+  },
+  "hostTests": {}
 }

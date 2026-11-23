@@ -27,5 +27,6 @@
         "app/src/testing/**"
       ]
     }
-  }
+  },
+  "hostTests": {}
 }

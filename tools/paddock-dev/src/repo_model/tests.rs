@@ -62,7 +62,10 @@ fn a_docs_reach_runs_nothing_and_a_half_is_a_narrowing() {
     let mut r = Reached::default();
     r.nodes.insert("crates".into(), hit(Reach::Code, true, true));
     r.nodes.insert("app:dyno".into(), hit(Reach::Docs, false, false));
-    assert_eq!(compare(&plan(), &r, &graph(), &declared_inputs(), &BTreeSet::new())["dropped"], json!(["app:dyno"]));
+    assert_eq!(
+        compare(&plan(), &r, &graph(), &declared_inputs(), &BTreeSet::new())["dropped"],
+        json!(["app:dyno"])
+    );
     let mut p = plan();
     p["kinds"]["dyno"] = json!(["all"]);
     let mut r2 = Reached::default();

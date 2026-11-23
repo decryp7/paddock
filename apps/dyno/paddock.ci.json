@@ -111,5 +111,6 @@
         "apps/*/docs/diagrams/src/*.mjs"
       ]
     }
-  }
+  },
+  "hostTests": {}
 }

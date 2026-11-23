@@ -80,9 +80,15 @@ fn pairs(v: Option<&toml::Value>, what: &str) -> Result<Vec<(String, String)>, S
     v.as_array()
         .ok_or_else(|| format!("{what} is not a list"))?
         .iter()
-        .map(|x| match x.as_array().map(|a| a.iter().map(toml::Value::as_str).collect::<Vec<_>>()).as_deref() {
-            Some([Some(from), Some(to)]) => Ok((from.to_string(), to.to_string())),
-            _ => Err(format!("{what} holds a value that is not a [from, to] pair of strings")),
+        .map(|x| {
+            match x
+                .as_array()
+                .map(|a| a.iter().map(toml::Value::as_str).collect::<Vec<_>>())
+                .as_deref()
+            {
+                Some([Some(from), Some(to)]) => Ok((from.to_string(), to.to_string())),
+                _ => Err(format!("{what} holds a value that is not a [from, to] pair of strings")),
+            }
         })
         .collect()
 }

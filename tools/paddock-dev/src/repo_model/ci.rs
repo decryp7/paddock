@@ -94,7 +94,9 @@ fn in_script_folder(p: &Paths, f: &str) -> bool {
 /// A text with every declared spelling of the repository root (`[paths]` `root_spellings`: the checkout, the stable host-runner
 /// path, and the folder an app repository checks Paddock out to for the reusable workflows) replaced, so a path under it resolves.
 fn rooted(p: &Paths, text: &str) -> String {
-    p.root_spellings.iter().fold(text.to_string(), |t, (from, to)| t.replace(from.as_str(), to))
+    p.root_spellings
+        .iter()
+        .fold(text.to_string(), |t, (from, to)| t.replace(from.as_str(), to))
 }
 
 fn is_script(f: &str) -> bool {
@@ -759,7 +761,13 @@ impl CiExtractor {
                 let mut inv = Invoked::default();
                 for (script, env) in input_variants(&script, &env, inputs) {
                     // After the inputs are put in: a value a caller passes may spell the root too.
-                    let one = invoked_env(&rooted(&self.decl.paths, &script), action_dir, tracked, &|w| self.project_of(w), &env);
+                    let one = invoked_env(
+                        &rooted(&self.decl.paths, &script),
+                        action_dir,
+                        tracked,
+                        &|w| self.project_of(w),
+                        &env,
+                    );
                     inv.scripts.extend(one.scripts);
                     inv.projects.extend(one.projects);
                     inv.reads.extend(one.reads);
@@ -1009,7 +1017,9 @@ impl Extractor for CiExtractor {
             }
             if let Some(text) = texts.get(s) {
                 let dir = s.rsplit_once('/').map(|(d, _)| d).unwrap_or("");
-                let inv = invoked(&rooted(paths, &script_dir_named(text, dir)), None, &tracked, &|w| self.project_of(w));
+                let inv = invoked(&rooted(paths, &script_dir_named(text, dir)), None, &tracked, &|w| {
+                    self.project_of(w)
+                });
                 let from = if action_of(paths, s).is_some() {
                     action_id(action_of(paths, s).unwrap_or_default())
                 } else {

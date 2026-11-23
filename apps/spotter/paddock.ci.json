@@ -62,5 +62,6 @@
       ],
       "nextest": "package(=spotter-core)"
     }
-  }
+  },
+  "hostTests": {}
 }

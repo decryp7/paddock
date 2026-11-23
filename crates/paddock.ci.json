@@ -28,5 +28,17 @@
       ],
       "nextest": "package(=paddock-proc)"
     }
+  },
+  "hostTests": {
+    "skip": [
+      {
+        "name": "paddock-service",
+        "modules": [
+          "resume_tests::",
+          "scenarios::"
+        ],
+        "reason": "pure logic of the package (models and scenarios), no OS behaviour: Linux only (OS-scoped tests, user decision 2026-11-22)"
+      }
+    ]
   }
 }

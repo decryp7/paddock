@@ -304,6 +304,18 @@ pub const ALLOWED: &[(&str, &str)] = &[
     ("extract.rs", "eslint.config.js"),
     ("extract.rs", "eslint.config.mjs"),
     ("extract.rs", "eslint.config.cjs"),
+    // os.rs reads source files by their language's own layout: a crate's `src/` and `tests/it/` folders and `mod.rs` (Cargo's), and
+    // the extensions of Rust, TypeScript and JavaScript sources. None names a place in this repository.
+    ("os.rs", "/src/"),
+    ("os.rs", "/mod"),
+    ("os.rs", "/tests/it/"),
+    ("os.rs", ".rs"),
+    ("os.rs", ".ts"),
+    ("os.rs", ".tsx"),
+    ("os.rs", ".mts"),
+    ("os.rs", ".mjs"),
+    ("os.rs", ".cjs"),
+    ("os.rs", ".js"),
 ];
 
 #[cfg(test)]

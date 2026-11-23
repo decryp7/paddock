@@ -461,6 +461,7 @@ fn everything_gives_every_app_both_halves_on_linux_and_the_summary_names_each_le
         MatrixOpts {
             narrow: true,
             webkit: false,
+            ..MatrixOpts::default()
         },
     ) {
         assert_eq!(l["filter"], "", "everything never narrows");
@@ -474,6 +475,7 @@ fn a_pull_request_narrows_nextest_to_the_reached_crates() {
         MatrixOpts {
             narrow: true,
             webkit: false,
+            ..MatrixOpts::default()
         },
         "shell-demo",
     );
@@ -483,6 +485,7 @@ fn a_pull_request_narrows_nextest_to_the_reached_crates() {
         MatrixOpts {
             narrow: true,
             webkit: false,
+            ..MatrixOpts::default()
         },
         "shell-demo",
     );
@@ -603,6 +606,7 @@ fn a_tags_gates_keep_one_app_both_halves_and_no_other_project() {
         MatrixOpts {
             narrow: true,
             webkit: false,
+            ..MatrixOpts::default()
         },
     )
     .iter()

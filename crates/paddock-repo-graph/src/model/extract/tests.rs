@@ -67,6 +67,8 @@ fn built(m: &MemoryRead) -> Built {
     let ports = Ports {
         cargo: Some(&FakeCargo),
         root: "/r",
+        rust_lex: None,
+        module_crates: &[],
     };
     build(&m.paths(), m, &extractors(&ports))
 }
@@ -140,6 +142,8 @@ fn every_adapter_reads_through_one_bulk_call_and_declares_its_spawns() {
     let ports = Ports {
         cargo: Some(&FakeCargo),
         root: "/r",
+        rust_lex: None,
+        module_crates: &[],
     };
     let adapters = extractors(&ports);
     let b = build(&m.paths(), &rec, &adapters);
@@ -175,6 +179,8 @@ fn the_registry_leaves_cargo_out_without_its_port() {
     let ports = Ports {
         cargo: None,
         root: "/r",
+        rust_lex: None,
+        module_crates: &[],
     };
     let names: Vec<&str> = extractors(&ports).iter().map(|a| a.name()).collect();
     assert_eq!(names, ["npm"]);

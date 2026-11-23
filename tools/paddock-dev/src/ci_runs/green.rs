@@ -308,11 +308,22 @@ pub fn grade_run(
     scope_decisive: bool,
     touched: &mut dyn FnMut(&mut Client) -> Option<Touched>,
 ) -> Outcome {
+    grade_run_for(client, run, scope_decisive, false, touched)
+}
+
+/// [`grade_run`] with the tag rule given: for a tag an OS-scoped run is partial (`verdict::read_mode_jobs_for`).
+pub fn grade_run_for(
+    client: &mut Client,
+    run: &RunInfo,
+    scope_decisive: bool,
+    tag: bool,
+    touched: &mut dyn FnMut(&mut Client) -> Option<Touched>,
+) -> Outcome {
     if matches!(run.conclusion.as_str(), "cancelled" | "skipped") {
         let why = format!("run {} was {}", run.id, run.conclusion);
         return Outcome::of(Scope::Partial, GradedResult::NotMeasured(why.clone())).noted(why);
     }
-    let read = verdict::read_mode_jobs(client, run, scope_decisive);
+    let read = verdict::read_mode_jobs_for(client, run, scope_decisive, tag);
     let (scope, why) = match read.mode {
         Mode::Full => (Scope::Complete, String::new()),
         Mode::Partial(why) => (Scope::Partial, why),
@@ -419,12 +430,23 @@ pub fn commit_outcome(
     scope_decisive: bool,
     touched: &mut dyn FnMut(&mut Client) -> Option<Touched>,
 ) -> Option<CommitOutcome> {
+    commit_outcome_for(client, runs, scope_decisive, false, touched)
+}
+
+/// [`commit_outcome`] with the tag rule given (`tag`: an OS-scoped run is partial, so an older every-OS run may decide).
+pub fn commit_outcome_for(
+    client: &mut Client,
+    runs: &[&RunInfo],
+    scope_decisive: bool,
+    tag: bool,
+    touched: &mut dyn FnMut(&mut Client) -> Option<Touched>,
+) -> Option<CommitOutcome> {
     let mut newest = runs.to_vec();
     newest.sort_by_key(|r| std::cmp::Reverse(r.id));
     let mut partial = Vec::new();
     let mut fallback: Option<(u64, Outcome)> = None;
     for r in newest {
-        let o = grade_run(client, r, scope_decisive, touched);
+        let o = grade_run_for(client, r, scope_decisive, tag, touched);
         if o.unreadable || o.blocking || o.scope == Scope::Complete {
             return Some(CommitOutcome {
                 run: r.id,

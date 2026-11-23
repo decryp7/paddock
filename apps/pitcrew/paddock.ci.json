@@ -34,5 +34,6 @@
       ],
       "nextest": "package(=pitcrew-core)"
     }
-  }
+  },
+  "hostTests": {}
 }

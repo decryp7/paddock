@@ -70,6 +70,8 @@ jobs:
     uses: ./.gitea/workflows/ci.yml
     with:
       webkit: true
+      # The full run on every OS (the ADR 0080 amendment, docs/adr/amendments/0080-os-scoped-placement-2026-11-22.md on docs/adr-audit-2026-11-22, landing in a docs train): every package on Windows and macOS too, whatever hostTests says.
+      os_full: true
     secrets:
       BUILD_INPUTS_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
 

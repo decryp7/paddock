@@ -210,6 +210,10 @@ pub struct Ports<'a> {
     pub cargo: Option<&'a dyn CargoMetadata>,
     /// The absolute root in the spelling cargo prints.
     pub root: &'a str,
+    /// The host's Rust lexer; `None` leaves the OS adapter out (it cannot tell code from comments without one).
+    pub rust_lex: Option<&'a dyn super::os::RustLex>,
+    /// The crate folders whose OS placement is judged module by module (paddock-dev).
+    pub module_crates: &'a [String],
 }
 
 /// The registry: every built-in adapter, in order (ADR 0117 §15). The CI, test and import adapters join here in WP-2 and WP-3.
@@ -223,6 +227,12 @@ pub fn extractors<'a>(ports: &Ports<'a>) -> Vec<Box<dyn Extractor + 'a>> {
         }));
     }
     v.push(Box::new(NpmExtractor));
+    if let Some(lex) = ports.rust_lex {
+        v.push(Box::new(super::os::OsExtractor::new(
+            lex,
+            ports.module_crates,
+        )));
+    }
     v
 }
 

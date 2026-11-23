@@ -1,8 +1,206 @@
 {
-  "$comment": "paddock-dev's contract holds only its repository-graph declarations (ADR 0117 \u00a73): the `paddock-dev` job of ci.yml runs its own steps, so there are no phases here. `graph.smoke` is what a plumbing-only change runs (docs/repo-graph.toml declares which actions are setup-only); its Rust tests come from cargo metadata.",
+  "$comment": "paddock-dev's contract holds only its repository-graph declarations (ADR 0117 \u00a73): the `paddock-dev` job of ci.yml runs its own steps, so there are no phases here. `graph.smoke` is what a plumbing-only change runs (docs/repo-graph.toml declares which actions are setup-only); its Rust tests come from cargo metadata. Which tests the Windows and macOS legs of the paddock-dev job run (OS-scoped tests, docs/research/2026-11-22-os-scoped-tests.md; ADR 0117 section 7; src/host_tests.rs; conformance C155). paddock-dev is one crate, so the placement is by test-name prefix (module). It is derived from the code (src/os_placement.rs: an OS cfg, an OS-API crate, an entry point of the portable layer, build.rs, env::consts::OS, an OS-behaviour dependency, and the import edge from a host module to the module it calls); only the exceptions, each with a reason, are declared here. `add` is free: code the derivation cannot see (host-runner production code with no OS signal of its own). `only` and `skip` take a host away and need the user (C155 compares them with the merge base): the agent tools of the dev Mac stay macOS-only. Everything else (the planner and its recorded answers, the conformance checks, the gate register, the CI run readers) is portable and tested on Linux only.",
   "graph": {
     "smoke": {
       "nextest": "binary_id(paddock-dev::it) & test(/^contracts::/)"
     }
+  },
+  "hostTests": {
+    "add": [
+      {
+        "name": "build_env::",
+        "reason": "host-runner production code of the CI kit: it runs on every runner, and no OS signal in the module says so (docs/research/2026-11-22-os-scoped-tests.md section 1)"
+      },
+      {
+        "name": "ci_build_env::",
+        "reason": "host-runner production code of the CI kit: it runs on every runner, and no OS signal in the module says so (docs/research/2026-11-22-os-scoped-tests.md section 1)"
+      },
+      {
+        "name": "ci_rust_pin::",
+        "reason": "host-runner production code of the CI kit: it runs on every runner, and no OS signal in the module says so (docs/research/2026-11-22-os-scoped-tests.md section 1)"
+      },
+      {
+        "name": "dev_bin::",
+        "reason": "host-runner production code of the CI kit: it runs on every runner, and no OS signal in the module says so (docs/research/2026-11-22-os-scoped-tests.md section 1)"
+      },
+      {
+        "name": "full_tree::",
+        "reason": "host-runner production code of the CI kit: it runs on every runner, and no OS signal in the module says so (docs/research/2026-11-22-os-scoped-tests.md section 1)"
+      },
+      {
+        "name": "gates::tree::",
+        "reason": "host-runner production code of the CI kit: it runs on every runner, and no OS signal in the module says so (docs/research/2026-11-22-os-scoped-tests.md section 1)"
+      },
+      {
+        "name": "host_steps_golden::",
+        "reason": "host-runner production code of the CI kit: it runs on every runner, and no OS signal in the module says so (docs/research/2026-11-22-os-scoped-tests.md section 1)"
+      },
+      {
+        "name": "hostile::",
+        "reason": "host-runner production code of the CI kit: it runs on every runner, and no OS signal in the module says so (docs/research/2026-11-22-os-scoped-tests.md section 1)"
+      },
+      {
+        "name": "pre_push::exec::",
+        "reason": "called by host-runner production code (ci_run, ci_setup_rust) inside a folder that is otherwise dev-Mac only, so it is tested on every host (docs/research/2026-11-22-os-scoped-tests.md section 1)"
+      },
+      {
+        "name": "pre_push::heavy_tool::",
+        "reason": "called by host-runner production code (ci_run, ci_setup_rust) inside a folder that is otherwise dev-Mac only, so it is tested on every host (docs/research/2026-11-22-os-scoped-tests.md section 1)"
+      },
+      {
+        "name": "pre_push::stacks::",
+        "reason": "called by host-runner production code (ci_run, ci_setup_rust) inside a folder that is otherwise dev-Mac only, so it is tested on every host (docs/research/2026-11-22-os-scoped-tests.md section 1)"
+      },
+      {
+        "name": "safe_remove_lint::",
+        "reason": "host-runner production code of the CI kit: it runs on every runner, and no OS signal in the module says so (docs/research/2026-11-22-os-scoped-tests.md section 1)"
+      },
+      {
+        "name": "test_sleeper::",
+        "reason": "host-runner production code of the CI kit: it runs on every runner, and no OS signal in the module says so (docs/research/2026-11-22-os-scoped-tests.md section 1)"
+      },
+      {
+        "name": "worktree::git::",
+        "reason": "called by host-runner production code (ci_run, ci_setup_rust) inside a folder that is otherwise dev-Mac only, so it is tested on every host (docs/research/2026-11-22-os-scoped-tests.md section 1)"
+      },
+      {
+        "name": "worktree::note::",
+        "reason": "called by host-runner production code (ci_run, ci_setup_rust) inside a folder that is otherwise dev-Mac only, so it is tested on every host (docs/research/2026-11-22-os-scoped-tests.md section 1)"
+      },
+      {
+        "name": "worktree::ops::",
+        "reason": "called by host-runner production code (ci_run, ci_setup_rust) inside a folder that is otherwise dev-Mac only, so it is tested on every host (docs/research/2026-11-22-os-scoped-tests.md section 1)"
+      },
+      {
+        "name": "worktree::owners::",
+        "reason": "called by host-runner production code (ci_run, ci_setup_rust) inside a folder that is otherwise dev-Mac only, so it is tested on every host (docs/research/2026-11-22-os-scoped-tests.md section 1)"
+      },
+      {
+        "name": "worktree::procs::",
+        "reason": "called by host-runner production code (ci_run, ci_setup_rust) inside a folder that is otherwise dev-Mac only, so it is tested on every host (docs/research/2026-11-22-os-scoped-tests.md section 1)"
+      }
+    ],
+    "only": [
+      {
+        "os": "macos-latest",
+        "name": "brief_check::",
+        "reason": "a tool or check of the developer's Mac: tested on macOS only, never on a Windows host (user decision 2026-11-22, docs/research/2026-11-22-os-scoped-tests.md section 1)"
+      },
+      {
+        "os": "macos-latest",
+        "name": "check::",
+        "reason": "a tool or check of the developer's Mac: tested on macOS only, never on a Windows host (user decision 2026-11-22, docs/research/2026-11-22-os-scoped-tests.md section 1)"
+      },
+      {
+        "os": "macos-latest",
+        "name": "check_allow_list::",
+        "reason": "a tool or check of the developer's Mac: tested on macOS only, never on a Windows host (user decision 2026-11-22, docs/research/2026-11-22-os-scoped-tests.md section 1)"
+      },
+      {
+        "os": "macos-latest",
+        "name": "check_c125::",
+        "reason": "a tool or check of the developer's Mac: tested on macOS only, never on a Windows host (user decision 2026-11-22, docs/research/2026-11-22-os-scoped-tests.md section 1)"
+      },
+      {
+        "os": "macos-latest",
+        "name": "check_c129::",
+        "reason": "a tool or check of the developer's Mac: tested on macOS only, never on a Windows host (user decision 2026-11-22, docs/research/2026-11-22-os-scoped-tests.md section 1)"
+      },
+      {
+        "os": "macos-latest",
+        "name": "check_ids::",
+        "reason": "a tool or check of the developer's Mac: tested on macOS only, never on a Windows host (user decision 2026-11-22, docs/research/2026-11-22-os-scoped-tests.md section 1)"
+      },
+      {
+        "os": "macos-latest",
+        "name": "ci_runs::reservation::",
+        "reason": "a tool or check of the developer's Mac: tested on macOS only, never on a Windows host (user decision 2026-11-22, docs/research/2026-11-22-os-scoped-tests.md section 1)"
+      },
+      {
+        "os": "macos-latest",
+        "name": "dev_tool_publish::",
+        "reason": "a tool or check of the developer's Mac: tested on macOS only, never on a Windows host (user decision 2026-11-22, docs/research/2026-11-22-os-scoped-tests.md section 1)"
+      },
+      {
+        "os": "macos-latest",
+        "name": "disk::measure::",
+        "reason": "a tool or check of the developer's Mac: tested on macOS only, never on a Windows host (user decision 2026-11-22, docs/research/2026-11-22-os-scoped-tests.md section 1)"
+      },
+      {
+        "os": "macos-latest",
+        "name": "gates::edge::",
+        "reason": "a tool or check of the developer's Mac: tested on macOS only, never on a Windows host (user decision 2026-11-22, docs/research/2026-11-22-os-scoped-tests.md section 1)"
+      },
+      {
+        "os": "macos-latest",
+        "name": "gates::yaml::",
+        "reason": "a tool or check of the developer's Mac: tested on macOS only, never on a Windows host (user decision 2026-11-22, docs/research/2026-11-22-os-scoped-tests.md section 1)"
+      },
+      {
+        "os": "macos-latest",
+        "name": "golden_cmd::",
+        "reason": "a tool or check of the developer's Mac: tested on macOS only, never on a Windows host (user decision 2026-11-22, docs/research/2026-11-22-os-scoped-tests.md section 1)"
+      },
+      {
+        "os": "macos-latest",
+        "name": "heavy_cmd::",
+        "reason": "a tool or check of the developer's Mac: tested on macOS only, never on a Windows host (user decision 2026-11-22, docs/research/2026-11-22-os-scoped-tests.md section 1)"
+      },
+      {
+        "os": "macos-latest",
+        "name": "heavy_install::",
+        "reason": "a tool or check of the developer's Mac: tested on macOS only, never on a Windows host (user decision 2026-11-22, docs/research/2026-11-22-os-scoped-tests.md section 1)"
+      },
+      {
+        "os": "macos-latest",
+        "name": "hook::",
+        "reason": "a tool or check of the developer's Mac: tested on macOS only, never on a Windows host (user decision 2026-11-22, docs/research/2026-11-22-os-scoped-tests.md section 1)"
+      },
+      {
+        "os": "macos-latest",
+        "name": "host_tests::",
+        "reason": "a tool or check of the developer's Mac: tested on macOS only, never on a Windows host (user decision 2026-11-22, docs/research/2026-11-22-os-scoped-tests.md section 1)"
+      },
+      {
+        "os": "macos-latest",
+        "name": "ipc_endpoints::",
+        "reason": "a tool or check of the developer's Mac: tested on macOS only, never on a Windows host (user decision 2026-11-22, docs/research/2026-11-22-os-scoped-tests.md section 1)"
+      },
+      {
+        "os": "macos-latest",
+        "name": "lessons_merge::",
+        "reason": "a tool or check of the developer's Mac: tested on macOS only, never on a Windows host (user decision 2026-11-22, docs/research/2026-11-22-os-scoped-tests.md section 1)"
+      },
+      {
+        "os": "macos-latest",
+        "name": "load::",
+        "reason": "a tool or check of the developer's Mac: tested on macOS only, never on a Windows host (user decision 2026-11-22, docs/research/2026-11-22-os-scoped-tests.md section 1)"
+      },
+      {
+        "os": "macos-latest",
+        "name": "plan_ci::",
+        "reason": "a tool or check of the developer's Mac: tested on macOS only, never on a Windows host (user decision 2026-11-22, docs/research/2026-11-22-os-scoped-tests.md section 1)"
+      },
+      {
+        "os": "macos-latest",
+        "name": "plan_cmd::",
+        "reason": "a tool or check of the developer's Mac: tested on macOS only, never on a Windows host (user decision 2026-11-22, docs/research/2026-11-22-os-scoped-tests.md section 1)"
+      },
+      {
+        "os": "macos-latest",
+        "name": "pre_push::",
+        "reason": "a tool or check of the developer's Mac: tested on macOS only, never on a Windows host (user decision 2026-11-22, docs/research/2026-11-22-os-scoped-tests.md section 1)"
+      },
+      {
+        "os": "macos-latest",
+        "name": "sparse::",
+        "reason": "a tool or check of the developer's Mac: tested on macOS only, never on a Windows host (user decision 2026-11-22, docs/research/2026-11-22-os-scoped-tests.md section 1)"
+      },
+      {
+        "os": "macos-latest",
+        "name": "worktree::",
+        "reason": "a tool or check of the developer's Mac: tested on macOS only, never on a Windows host (user decision 2026-11-22, docs/research/2026-11-22-os-scoped-tests.md section 1)"
+      }
+    ]
   }
 }

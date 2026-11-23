@@ -584,7 +584,9 @@ pub fn compare(plan: &Value, reached: &Reached, graph: &RepoGraph, inputs: &Inpu
                 let packages: Vec<&str> = reached
                     .crates
                     .iter()
-                    .filter(|c| crate::repo_model::project_dir_of(inputs, graph, &id).is_some_and(|d| c.starts_with(&format!("{d}/")) || **c == d))
+                    .filter(|c| {
+                        crate::repo_model::project_dir_of(inputs, graph, &id).is_some_and(|d| c.starts_with(&format!("{d}/")) || **c == d)
+                    })
                     .filter_map(|c| graph.cargo.get(c).map(|n| n.name.as_str()))
                     .collect();
                 if !reached.whole.contains(&id) && !reached.everything && !packages.is_empty() {

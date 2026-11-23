@@ -392,6 +392,11 @@ impl Model {
             .collect()
     }
 
+    /// The nodes that have an `imports` edge to `id` (the callers: what needs it over a module import).
+    pub fn importers(&self, id: &str) -> Vec<&str> {
+        self.sources(id, EdgeKind::Imports)
+    }
+
     /// The nodes `id` has an edge of `kind` to (forward: what it needs).
     pub fn targets(&self, id: &str, kind: EdgeKind) -> Vec<&str> {
         self.edges

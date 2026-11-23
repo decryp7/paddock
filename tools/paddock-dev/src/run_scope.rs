@@ -35,6 +35,10 @@ pub struct Scope {
     pub apps: BTreeSet<String>,
     /// True when no test run was narrowed to a package list.
     pub whole: bool,
+    /// True when the Windows and macOS legs tested every package (the full every-OS scope: the nightly, a release's gates); false for
+    /// an OS-scoped run, which tested only the packages with OS-specific code there (`hostTests`). A push to main's scope does not need
+    /// it (a landing may be scoped); a tag does ([`Declared::complete_for_tag`]).
+    pub os_full: bool,
 }
 
 fn set(v: &Value) -> BTreeSet<String> {
@@ -46,7 +50,7 @@ fn set(v: &Value) -> BTreeSet<String> {
 impl Scope {
     /// The scope as JSON (sorted lists).
     pub fn json(&self) -> Value {
-        json!({"jobs": self.jobs, "engines": self.engines, "apps": self.apps, "whole": self.whole})
+        json!({"jobs": self.jobs, "engines": self.engines, "apps": self.apps, "whole": self.whole, "os_full": self.os_full})
     }
 
     fn parse(v: &Value, what: &str) -> Result<Scope, String> {
@@ -63,6 +67,8 @@ impl Scope {
             engines: set(&v["engines"]),
             apps: set(&v["apps"]),
             whole,
+            // A line of an older planner has no key: it was written before OS-scoped tests, so it tested every OS.
+            os_full: v["os_full"].as_bool().unwrap_or(true),
         })
     }
 
@@ -139,6 +145,19 @@ impl Declared {
             Ok(())
         } else {
             Err(format!("it did not cover what a push to main does: {}", gone.join("; ")))
+        }
+    }
+}
+
+impl Declared {
+    /// [`Declared::complete`], and the run tested every package on every OS: a tag counts only a full every-OS run (ER-15, ADR 0113),
+    /// never an OS-scoped one. A landing may be scoped (the nightly and the release gates are the full runs).
+    pub fn complete_for_tag(&self) -> Result<(), String> {
+        self.complete()?;
+        if self.ran.os_full {
+            Ok(())
+        } else {
+            Err("it was an OS-scoped run (the Windows and macOS legs tested only the packages with OS-specific code, hostTests); a tag needs a full every-OS run (os_full, the nightly or a release's gates)".into())
         }
     }
 }
@@ -220,6 +239,7 @@ pub fn scope_of(plan: &Value, legs: &[Value], webkit: bool, os_legs: &[String], 
         engines,
         apps: legs.iter().map(leg_id).collect(),
         whole,
+        os_full: true,
     }
 }
 
@@ -250,10 +270,7 @@ pub const PROJECT_JOBS: &[(&str, &[&str])] = &[
     ("eslint", &["eslint preset"]),
     ("conformance", &["conformance ("]),
     ("c99", &["C99 ("]),
-    (
-        "tools",
-        &["tools and shared scripts", "VM tooling tests", "wiki tool", "heavy tool"],
-    ),
+    ("tools", &["tools and shared scripts", "wiki tool", "heavy tool"]),
     ("icons", &["icons ("]),
     ("e2e", &["reference apps (shard"]),
     ("e2e-webkit", &["reference apps in WebKit"]),
@@ -336,12 +353,13 @@ pub fn ci_scope(ran: Scope, rerun: bool, need: Scope) -> Declared {
 /// (a push, a tag, the nightly, a dispatch with its full input), `run` whether its plan ran its jobs at all (a schedule skipped
 /// for a train, an unchanged main, a tagged commit ran none), `since_run` a rerun of failures. `full_engines` are the engines a
 /// full run tests; a run that is not full tests the first one only.
-pub fn app_scope(workflow: &str, app: &str, full: bool, run: bool, since_run: bool, full_engines: &[String]) -> Declared {
+pub fn app_scope(workflow: &str, app: &str, full: bool, run: bool, since_run: bool, os_scoped: bool, full_engines: &[String]) -> Declared {
     let need = Scope {
         jobs: ["gates".to_string()].into(),
         engines: full_engines.iter().cloned().collect(),
         apps: [app.to_string()].into(),
         whole: true,
+        os_full: true,
     };
     let ran = if run && !since_run {
         // A run that is not full ran no gates job (its nightly or installer jobs are not the gates) and one engine.
@@ -352,6 +370,7 @@ pub fn app_scope(workflow: &str, app: &str, full: bool, run: bool, since_run: bo
             } else {
                 full_engines.iter().take(1).cloned().collect()
             },
+            os_full: !os_scoped,
             ..need.clone()
         }
     } else {
@@ -508,6 +527,40 @@ mod tests {
     }
 
     #[test]
+    fn a_host_leg_with_a_host_scope_is_the_same_job_so_the_scope_does_not_change_and_a_narrowed_filter_still_does() {
+        // OS-scoped tests: a host leg tests fewer packages but is still the job the push to main declares, and `need` is computed from
+        // the same planner, so `ran` still covers it. Only a member run's package filter (`filter`) makes a run partial.
+        let mut scoped = legs(true);
+        for l in &mut scoped {
+            l["host_packages"] = json!("a b");
+            l["host_filter"] = json!("not (package(=a))");
+        }
+        let need = scope_of(&plan(), &legs(true), true, &os(), &[]);
+        let ran = scope_of(&plan(), &scoped, true, &os(), &["", ""]);
+        assert_eq!(ran, need);
+        assert_eq!(ci_scope(ran, false, need.clone()).complete(), Ok(()));
+        // Positive control: the same legs with a member filter are partial.
+        scoped[1]["filter"] = json!("package(=a)");
+        let narrowed = scope_of(&plan(), &scoped, true, &os(), &["", ""]);
+        assert!(ci_scope(narrowed, false, need).complete().is_err());
+    }
+
+    #[test]
+    fn a_tag_needs_an_every_os_run_and_a_landing_does_not() {
+        let mut scoped = declared(true, &["", ""]);
+        scoped.ran.os_full = false;
+        assert_eq!(scoped.complete(), Ok(()), "a landing may be scoped");
+        let why = scoped.complete_for_tag().unwrap_err();
+        assert!(why.contains("OS-scoped"), "{why}");
+        // Positive control: the same run with os_full is fine for a tag, and an older line without the key reads as full.
+        let full = declared(true, &["", ""]);
+        assert_eq!(full.complete_for_tag(), Ok(()));
+        let old = parse(full.line().replace(",\"os_full\":true", "").trim_start_matches(SCOPE_LINE)).unwrap();
+        assert!(old.ran.os_full && old.need.os_full);
+        assert!(!full.line().is_empty());
+    }
+
+    #[test]
     fn a_run_missing_one_engine_is_not_complete_and_the_positive_control_with_it_is() {
         // The D4 hole: a full run without WebKit. Without the engine the same run, in the same scope function, is incomplete.
         let without = declared(false, &[]);
@@ -566,10 +619,12 @@ mod tests {
             os: None,
             ran: Scope {
                 whole: true,
+                os_full: true,
                 ..Scope::default()
             },
             need: Scope {
                 whole: true,
+                os_full: true,
                 ..Scope::default()
             },
         };
@@ -638,7 +693,7 @@ mod tests {
         failed[0].1 = "failure".into();
         assert_eq!(check_ran(&d, &failed), Ok(()));
         // Another workflow's declaration has no job names to check.
-        let other = app_scope("debrief.yml", "debrief", true, true, false, &["chromium".to_string()]);
+        let other = app_scope("debrief.yml", "debrief", true, true, false, false, &["chromium".to_string()]);
         assert_eq!(check_ran(&other, &[]), Ok(()));
     }
 
@@ -753,7 +808,7 @@ mod tests {
     #[test]
     fn an_app_workflow_is_complete_only_when_full_run_and_not_a_rerun() {
         let engines = strings(&["chromium", "webkit"]);
-        let at = |full, run, since| app_scope("debrief.yml", "debrief", full, run, since, &engines);
+        let at = |full, run, since| app_scope("debrief.yml", "debrief", full, run, since, false, &engines);
         assert_eq!(at(true, true, false).complete(), Ok(()));
         // Positive controls, one dimension each: not full (no WebKit), skipped (no run), a rerun.
         assert!(at(false, true, false).complete().unwrap_err().contains("engines webkit"));
@@ -761,9 +816,12 @@ mod tests {
         assert!(at(true, true, true).complete().unwrap_err().contains("rerun"));
         // One engine only: the engine cannot tell a full run from a partial one, the gates job does.
         let one = strings(&["chromium"]);
-        assert_eq!(app_scope("dyno-release.yml", "dyno", true, true, false, &one).complete(), Ok(()));
+        assert_eq!(
+            app_scope("dyno-release.yml", "dyno", true, true, false, false, &one).complete(),
+            Ok(())
+        );
         assert!(
-            app_scope("dyno-release.yml", "dyno", false, true, false, &one)
+            app_scope("dyno-release.yml", "dyno", false, true, false, false, &one)
                 .complete()
                 .unwrap_err()
                 .contains("jobs gates")

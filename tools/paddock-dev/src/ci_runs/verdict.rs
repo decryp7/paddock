@@ -162,8 +162,8 @@ fn describe(m: &Mode) -> String {
 /// How one run's plan job declared its mode. With `scope_decisive` (its producer is recorded in the register) the declared scope
 /// decides; without it the old line decides and the scope view is printed as a notice, so a run of the report-only phase shows what
 /// the new basis would say (ER-41).
-fn read_mode(client: &mut Client, run: &RunInfo, scope_decisive: bool) -> Mode {
-    read_mode_jobs(client, run, scope_decisive).mode
+fn read_mode(client: &mut Client, run: &RunInfo, scope_decisive: bool, tag: bool) -> Mode {
+    read_mode_jobs_for(client, run, scope_decisive, tag).mode
 }
 
 /// What reading a run's plan job gave: the mode on the basis that decides, the mode the declared scope gives whatever the basis (the
@@ -175,14 +175,31 @@ pub(super) struct ModeRead {
     pub scope_view: Mode,
     /// The run's jobs (empty when they could not be listed).
     pub jobs: Vec<super::client::TimedJob>,
+    /// Why a tag cannot rest on the run although a landing may (its declared scope was OS-scoped); `None`: no such reason was read.
+    pub tag_refusal: Option<String>,
 }
 
-/// [`read_mode`] with the run's jobs it read for it (the failed ones are graded by [`super::green`]).
-pub(super) fn read_mode_jobs(client: &mut Client, run: &RunInfo, scope_decisive: bool) -> ModeRead {
+/// [`read_mode`] with the run's jobs it read for it (the failed ones are graded by [`super::green`]), and the tag rule: for a tag
+/// (`tag`) a run counts only when it tested every package on every OS, so an OS-scoped one (hostTests, `os_full` false in its
+/// declared scope) is partial whichever basis decided (ER-15, ADR 0113).
+pub(super) fn read_mode_jobs_for(client: &mut Client, run: &RunInfo, scope_decisive: bool, tag: bool) -> ModeRead {
+    let mut read = read_mode_plain(client, run, scope_decisive);
+    if tag
+        && matches!(read.mode, Mode::Full)
+        && let Some(why) = read.tag_refusal.take()
+    {
+        read.mode = Mode::Partial(format!("not a run a tag can rest on: {why}"));
+    }
+    read
+}
+
+/// [`read_mode_jobs_for`] without the tag rule; it notes why a tag cannot rest on the run (`tag_refusal`).
+fn read_mode_plain(client: &mut Client, run: &RunInfo, scope_decisive: bool) -> ModeRead {
     let same = |m: Mode, jobs| ModeRead {
         scope_view: m.clone(),
         mode: m,
         jobs,
+        tag_refusal: None,
     };
     let jobs = match client.timed_jobs(run.id) {
         Ok(Some(j)) => j,
@@ -198,8 +215,12 @@ pub(super) fn read_mode_jobs(client: &mut Client, run: &RunInfo, scope_decisive:
         Err(e) => return same(Mode::Unknown(format!("the plan job's log could not be read: {e}")), jobs),
     };
     let scope = scope_mode(run, &jobs, &log);
+    let tag_refusal = run_scope::read(&log).and_then(Result::ok).and_then(|d| d.complete_for_tag().err());
     if scope_decisive {
-        return same(scope, jobs);
+        return ModeRead {
+            tag_refusal,
+            ..same(scope, jobs)
+        };
     }
     eprintln!(
         "::notice::scope view (report-only; {} does not name {}): run {} {}",
@@ -219,6 +240,7 @@ pub(super) fn read_mode_jobs(client: &mut Client, run: &RunInfo, scope_decisive:
         mode,
         scope_view: scope,
         jobs,
+        tag_refusal,
     }
 }
 
@@ -255,6 +277,26 @@ pub fn verdict_with(client: &mut Client, workflow: &str, sha: &str, exclude: Opt
     verdict_in(client, workflow, sha, exclude, scope, &root)
 }
 
+/// [`verdict`] for a tag (`ci verdict --tag`): a run counts only when it tested every package on every OS, never an OS-scoped one.
+pub fn verdict_tag(client: &mut Client, workflow: &str, sha: &str) -> Verdict {
+    verdict_for(client, workflow, sha, None, scope_decisive(workflow), true)
+}
+
+/// [`verdict_with`] with the tag rule given, over the current folder's checkout.
+pub fn verdict_for(client: &mut Client, workflow: &str, sha: &str, exclude: Option<u64>, scope: bool, tag: bool) -> Verdict {
+    let root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    verdict_with_touched_for(
+        client,
+        workflow,
+        sha,
+        exclude,
+        scope,
+        tag,
+        &mut || green::first_parent_before(&root, sha),
+        &mut |c, s| green::touched_in(c, workflow, &root, s, scope, None),
+    )
+}
+
 /// The verdict of the repository at `root`: `git` and the planner read that checkout (the queue's clone), the basis is the one
 /// recorded in its register.
 pub fn verdict_at(client: &mut Client, workflow: &str, sha: &str, root: &std::path::Path) -> Verdict {
@@ -286,7 +328,22 @@ pub fn verdict_with_touched(
     first_parent: &mut dyn FnMut() -> Vec<String>,
     touched: &mut dyn FnMut(&mut Client, &str) -> Option<Touched>,
 ) -> Verdict {
-    match verdict_core(client, workflow, sha, exclude, scope, touched) {
+    verdict_with_touched_for(client, workflow, sha, exclude, scope, false, first_parent, touched)
+}
+
+/// [`verdict_with_touched`] with the tag rule given (`tag`: an OS-scoped run is partial, [`read_mode_jobs_for`]).
+#[allow(clippy::too_many_arguments)]
+pub fn verdict_with_touched_for(
+    client: &mut Client,
+    workflow: &str,
+    sha: &str,
+    exclude: Option<u64>,
+    scope: bool,
+    tag: bool,
+    first_parent: &mut dyn FnMut() -> Vec<String>,
+    touched: &mut dyn FnMut(&mut Client, &str) -> Option<Touched>,
+) -> Verdict {
+    match verdict_core(client, workflow, sha, exclude, scope, tag, touched) {
         Verdict::Red { run: None, reason } => {
             let next = match last_full(client, workflow, scope, &first_parent(), touched) {
                 Some(last) => {
@@ -311,6 +368,7 @@ fn verdict_core(
     sha: &str,
     exclude: Option<u64>,
     scope: bool,
+    tag: bool,
     touched: &mut dyn FnMut(&mut Client, &str) -> Option<Touched>,
 ) -> Verdict {
     let query = format!("head_sha={sha}");
@@ -341,7 +399,7 @@ fn verdict_core(
             short(sha)
         ));
     }
-    let Some(decided) = green::commit_outcome(client, &mine, scope, &mut |c| touched(c, sha)) else {
+    let Some(decided) = green::commit_outcome_for(client, &mine, scope, tag, &mut |c| touched(c, sha)) else {
         return Verdict::NotMeasured(format!("no {workflow} run for {} could be graded", short(sha)));
     };
     let id = decided.run;
@@ -412,7 +470,7 @@ pub fn first_green_scope(client: &mut Client, workflow: &str, run_id: u64) -> Re
     if state != "success" {
         return Err(format!("run {run_id} is {state}, not success: a first run is a green one"));
     }
-    match read_mode(client, &run, true) {
+    match read_mode(client, &run, true, false) {
         Mode::Full => Ok(format!(
             "run {run_id} of {workflow} on {} is green and declared a complete scope that ran",
             short(&run.head_sha)
@@ -593,6 +651,35 @@ mod tests {
 
     fn code(v: &Verdict) -> i32 {
         report(v, "ci.yml", SHA, &Knows(true)).exit.code()
+    }
+
+    /// A TEST_COMPLETE scope line whose `ran` says it was OS-scoped (the Windows and macOS legs tested only the OS-specific packages).
+    fn scoped_line() -> String {
+        run_scope::TEST_COMPLETE.replacen("\"whole\":true}", "\"whole\":true,\"os_full\":false}", 1)
+    }
+
+    #[test]
+    fn a_tag_refuses_an_os_scoped_run_that_a_landing_accepts_and_accepts_a_full_every_os_one() {
+        // The scoped line: `ran` has os_full false (the first object), `need` is unchanged.
+        let line = scoped_line();
+        assert!(line.contains("\"os_full\":false"), "the control line is scoped: {line}");
+        let ask_tag = |f: &mut Fake| {
+            let mut c = Client::new(f, "https://gitea.invalid", "decryp7/paddock", "t");
+            c.backoff_ms = 0;
+            verdict_for(&mut c, "ci.yml", SHA, None, true, true)
+        };
+        let mut scoped = server(vec![main_push(5, "success")], &[(5, 50, Some(line.as_str()))]);
+        assert_eq!(
+            ask(&mut scoped),
+            Verdict::Green { run: 5 },
+            "a landing may rest on an OS-scoped run"
+        );
+        let mut scoped = server(vec![main_push(5, "success")], &[(5, 50, Some(line.as_str()))]);
+        let refused = ask_tag(&mut scoped);
+        assert!(matches!(refused, Verdict::Red { .. }), "a tag refuses it: {refused:?}");
+        // Positive control: the same run with a full every-OS scope is accepted for a tag.
+        let mut full = server(vec![main_push(5, "success")], &[(5, 50, Some(run_scope::TEST_COMPLETE))]);
+        assert_eq!(ask_tag(&mut full), Verdict::Green { run: 5 });
     }
 
     #[test]
@@ -951,6 +1038,7 @@ mod tests {
             engines: ["chromium", "webkit"].map(String::from).into(),
             apps: Default::default(),
             whole: true,
+            os_full: true,
         };
         format!("{}\n", run_scope::ci_scope(scope(ran_jobs), false, scope(need_jobs)).line())
     }

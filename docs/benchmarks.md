@@ -2449,6 +2449,36 @@ Quoted by [docs/research/2026-11-20-ci-job-cost.md](research/2026-11-20-ci-job-c
   637 / 388 / 58; queue tests 7.3 s median on Windows.
 - **Fixed waits:** `waitForTimeout` 10 in Debrief's specs, 3 in Dyno's, 5 in `ui/e2e`, 0 in Pitwall's.
 
+## OS-scoped tests: minutes saved on the Windows and macOS legs (2026-11-22, feat/os-scoped-tests, WP-5)
+
+Rule: a test runs on Windows or macOS only when its code behaves differently there (`hostTests` in the CI contracts, conformance C155;
+docs/research/2026-11-22-os-scoped-tests.md). The note's estimates, from the job logs of run 8554 (train 18, full, green), before anything
+moved: Windows about 16 of 55 job-minutes (paddock-dev about 10, crate about 2.5, the apps about 3.5), macOS about 4.5 of 39 plus 4 to 8
+for the deleted `tools-macos` job and 3 to 5 per debrief.yml run; per train (two to three ci.yml runs) 35 to 50 Windows and 10 to 35 macOS
+minutes. These are estimates, not results.
+
+**Measured at landing: not yet.** Read the first CI run after this branch lands on main (a full run, not a member run: member runs also
+narrow by package) and record here, per job, the minutes of `crate (windows|macos)`, `paddock-dev (windows|macos)`, `app <app>
+(windows|macos)` and debrief.yml's `rust tests (macOS)` against run 8554 (and debrief 8547 for the macOS tests), and the Windows and macOS
+span of the run: the run id to read is `TBD` (the first ci.yml run on main after the landing; the integrator fills it in from
+`./dev ci verdict` in the same step that records C155's first green run in docs/gates.toml). Method: Gitea API job metadata, started to
+completed, as in the table of the note (`jobs.py` over `/actions/runs/<id>/jobs`), nextest wall and test count from each job log's
+summary line.
+
+| Job | run 8554 (before) | first run after landing | tests before | tests after |
+|---|---|---|---|---|
+| paddock-dev (windows) | 14.9 min | TBD | 1,871 | about 1,000 of 1,871 expected (1,264 of 2,319 listed on macOS) |
+| paddock-dev (macos) | 7.5 min | TBD | 2,285 | TBD |
+| crate (windows) | 11.4 min | TBD | 4,813 | TBD |
+| crate (macos) | 12.1 min | TBD | | TBD |
+| app dyno (windows) | 16.6 min | TBD | | TBD |
+| app dyno (macos) | 7.7 min | TBD | | TBD |
+| debrief `rust tests (macOS)` | 5.6 and 11.5 min (8496, 8547) | TBD | | TBD |
+| tools-macos (VM tooling tests) | 4 to 8 min | deleted | | |
+
+The test counts a host leg runs, listed from the tree before landing (what `cargo nextest list` selects with each leg's filter) are in the
+CHANGELOG entry of this change.
+
 ## Worker budget: Vitest and Playwright workers in the ER-48 lane budget (2026-11-22, feat/fixed-wait-checks)
 
 Cause: ER-48 counted cargo jobs and nextest threads per lane, not the other worker pools of a job. Vitest's default in a non-watch run is
@@ -2553,3 +2583,47 @@ So a base up to about a week old is found; an older one plans everything (the sa
 means. Narrowing the request to ci.yml is not possible (the API's list takes `event`, `branch`, `status` and `head_sha`, not a
 workflow, and a train's run is a `workflow_dispatch` on a `train/*` branch, which a `branch=main` filter would drop). Raise `MAX_PAGES`
 only with a new measurement recorded here (ER-12).
+
+## OS placement derived from the code: what `std::process::Command` decides, and the cost of deriving (2026-11-23, feat/repo-graph-wp6, ADR 0117 WP-6)
+
+`./dev` derives which packages and modules run on the Windows and macOS legs from the code (`tools/paddock-dev/src/os_placement.rs`
+over the repository graph's `os` edges, `crates/paddock-repo-graph/src/model/os.rs`); the `hostTests` of each contract hold only
+exceptions with a reason. ADR 0117 §7 asked to measure, before it is used, how much narrowing the marks by `std::process::Command`
+moves tests on or off a host OS.
+
+Method: `os_placement::derive` and `derive_without` over `git ls-files` of this branch (base `59e5f7ec3` merged with
+`origin/feat/os-scoped-tests` `9959bcb3f`), each workspace of a contract that declares `hostTests`, with every signal on, with
+the `layer` signal (portable-layer entry points: `std::process::Command`, `paddock_proc::command`, file locks) left out, and with the
+`dependency` signal left out. Counts are packages (module prefixes for paddock-dev) that a host leg tests. Dev Mac, debug build,
+load average about 21 (not a quiet machine: counts are exact, times are indications).
+
+| Workspace | Known | All signals | Without `layer` | Without `dependency` |
+|---|---|---|---|---|
+| `crates` (packages) | 58 | 49 | 47 (`paddock-git`, `paddock-siblings`; 31 `#[test]`s) | 49 |
+| `apps/debrief` | 47 | 27 | 27 | 27 |
+| `apps/dyno` | 12 | 10 | 10 | 10 |
+| `apps/pitcrew`, `pitwall`, `spotter` | 4, 6, 5 | 3, 6, 4 | 3, 6, 4 | 3, 6, 4 |
+| `tools/paddock-dev` (modules) | 298 | 125 | 116 (9 modules: `ci_runs::reservation`, `gates::shell`, `golden_cmd`, `load`, `pre_push::warm`, `release_isolation::ledger`, `repo_inputs`, `repo_model`, `repo_model::code`) | 125 |
+
+Result. Dropping `std::process::Command` narrows 2 of 49 crates (31 tests) and 9 of 125 modules; every app is unchanged. It would
+also take Windows and macOS tests away from code that starts `git`, `cargo` or a shell, where the per-process cost differs most per
+OS (about 45 ms a git start on the Windows runner against 6 ms on the Mac, ER-20, Paddock train 14). So the signal is kept: the saving
+is small and it is the unsafe direction. The `dependency` signal (`sysinfo`, `notify`, `tauri`, the OS-API crates) adds nothing to the
+placement on this tree (every package it marks has a code signal already); it stays as the net for a crate that gains such a
+dependency before it gains a call. `os:layer` is a mark of its own (`select_os(.., ignoring)` leaves it out), so the measurement can be
+repeated on any tree: `derive_without(root, files, read, &[Signal::Layer])`.
+
+Against the hand lists of `feat/os-scoped-tests`: every package of the old lists is derived (46 of 46 in `crates`, 27, 10, 3, 4, 4 in
+the apps); the derivation adds `paddock-bench` and `paddock-log` (`env::consts::OS`), `paddock-workspace-hack` (a `[target.'cfg(..)']` table;
+it has no tests), and `pitwall-core` (`env::consts::OS`) and, by the code, `pitwall-app`, which `lastPackages` keeps off the host
+legs. For paddock-dev 101 listed prefixes become 125 derived modules (the import edge now also carries through `ci_run`, `hook::install`,
+`merge_check::git` and others), 17 listed prefixes with no OS signal stay as `add` exceptions with a reason (host-runner production
+code of the CI kit and the callees of host code inside the dev-Mac folders), and the 24 `only.macos-latest` entries stay as `only`
+exceptions (user decision 2026-11-22).
+
+Cost of deriving, release build, load average about 21, all workspaces one after the other: 1.24 s for `crates` 257 ms,
+`apps/debrief` 492 ms, `apps/dyno` 210 ms, `tools/paddock-dev` 87 ms, the rest 230 ms; one bulk read of each workspace's `.rs` files and a
+substring prefilter that skips the lexer for a file with none of the signal words. The same derivation in a debug build without the
+prefilter took 5.6 to 6.5 s (the build and the prefilter were changed together, so the prefilter's share is not separated). The planner
+runs it once per plan, only for the workspaces whose contract declares `hostTests`.
+

@@ -1,7 +1,7 @@
 {
  "code": 0,
  "stdout": "true",
- "outputs": null,
+ "outputs": "host_packages_macos=\nhost_filter_macos=\n",
  "summary": "### x\n\nBase: merge base with main\n\nAffected: every job runs.\n",
  "error": null
 }
