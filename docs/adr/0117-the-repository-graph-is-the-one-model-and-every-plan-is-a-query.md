@@ -122,8 +122,11 @@ way (review round 2, P2-6).
 
 ### 3. Declared inputs, replacing `GLOBAL` and the path regexes
 
-One file, `docs/repo-graph.toml` (schema documented in the file, read by one accessor, ER-42), merged over defaults built into the
-crate, in the shape of Nx `namedInputs` and Turborepo `globalDependencies`:
+One file, `docs/repo-graph.toml` (schema documented in the file, read by one accessor, `tools/paddock-dev/src/repo_inputs.rs`,
+ER-42), in the shape of Nx `namedInputs` and Turborepo `globalDependencies`. Every input, owner rule, prose rule and CI declaration
+lives there; the crate holds no defaults and no path literal (the user's decision of 2026-11-23, §14), which its own guard test
+(`model::guard`, with a positive control that puts a literal back) enforces. A missing file is an error, never an empty set read as
+"nothing reaches anything":
 
 ```toml
 version = 1
@@ -457,7 +460,8 @@ before owner rules, prose versus code, the registers under `docs/` as inputs, un
 
 ### 14. Once and for all: how each instance becomes impossible or checked
 
-**No path rule outside the graph.** When WP-5 and WP-9 are done, the planner holds no regex or path list: every fact that today is
+**No path rule outside the graph.** The model's own code already holds none: its defaults moved into `docs/repo-graph.toml` and
+`model::guard` fails on a path literal in the crate's model code (2026-11-23). When WP-5 and WP-9 are done, the planner holds no regex or path list: every fact that today is
 a rule (`GLOBAL`, the input regexes, `OWNERS`, `CI_JOBS`, `TRACED_SCRIPT`, `GITEA_FILE`, the `conformance → every app` loop, the
 `src-tauri` kind rule, `hostTests`, the generators' `paths`) is a declared input in `docs/repo-graph.toml`, a project contract
 field, or an edge an extractor reads from the code. A conformance check (WP-5) fails when any of paddock-dev's planning code (every
