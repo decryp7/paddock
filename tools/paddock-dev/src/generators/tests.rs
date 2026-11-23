@@ -244,6 +244,14 @@ fn a_crash_is_never_stale() {
         let (exit, _) = verdict_of(Ran::exit(code, "test result: FAILED"));
         assert_eq!(exit, Exit::NotMeasured, "status {code}");
     }
+    // What is missing is named with the command that provides it; an unknown cause keeps no invented advice.
+    let (_, text) = verdict_of(Ran::exit(6, "cargo-about 0.9.2 is not installed (this check never installs it)"));
+    assert!(
+        text.contains("Next: run `cargo install cargo-about --version 0.9.2 --locked --features cli`"),
+        "{text}"
+    );
+    let (_, text) = verdict_of(Ran::exit(6, "something unknown"));
+    assert!(!text.contains("Next: run"), "{text}");
     // Ended by a signal, and the output cap.
     let (exit, _) = verdict_of(Ran::Exited {
         code: None,

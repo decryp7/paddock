@@ -433,19 +433,59 @@ pub fn execute(root: &Path, due: &[&Generator], runner: &dyn Runner, log: &(dyn 
         .collect()
 }
 
+/// The command that provides what a NOT MEASURED check lacked, named by the file it requires or the words of its output (`None`: not
+/// known; nothing is invented). The commands are the ones the repository documents: the root `npm ci` (which `./dev worktree add`
+/// runs by default), the UI package build, the pinned `cargo-about` of the notices jobs and the pinned libduckdb of Debrief.
+pub fn next_step(what: &str) -> Option<String> {
+    if what.starts_with("node_modules/") {
+        return Some("run `npm ci --ignore-scripts` at the repository root (`./dev worktree add` does it by default)".into());
+    }
+    if what.starts_with("ui/dist/") {
+        return Some("run `npm run build -w ui` at the repository root (after `npm ci --ignore-scripts`)".into());
+    }
+    if what.contains("cargo-about") {
+        return Some("run `cargo install cargo-about --version 0.9.2 --locked --features cli` (the checks never install it)".into());
+    }
+    if what.contains("duckdb") {
+        return Some(
+            "fetch the pinned libduckdb and export DUCKDB_LIB_DIR: `eval \"$(apps/debrief/crates/debrief-store-duck/scripts/fetch-libduckdb.sh <folder>)\"`"
+                .into(),
+        );
+    }
+    None
+}
+
+/// The NOT MEASURED reason of a check whose required file is missing, with the command that provides it when it is known.
+fn not_on_tree(missing: &str) -> String {
+    match next_step(missing) {
+        Some(n) => format!("not on this tree: {missing} is missing. Next: {n}"),
+        None => format!(
+            "not on this tree: {missing} is missing (the check needs it: install or build what provides it, or merge the branch that adds it)"
+        ),
+    }
+}
+
+/// `tail`, followed by the next command when the output names what is missing.
+fn with_next(tail: &str, text: &str) -> String {
+    match next_step(text) {
+        Some(n) => format!("{tail}. Next: {n}"),
+        None => tail.to_string(),
+    }
+}
+
 /// A check that failed: drift only when it says so (a failing finding). A crash, a missing tool, a build that does not compile, a
 /// status that means "could not look", or (when the entry names `drift_marker`s) a failure that carries none of them is NOT
 /// MEASURED.
 pub fn classify_failure(g: &Generator, code: Option<i32>, tail: &str, text: &str) -> Result<Vec<Finding>, Unmeasured> {
     let not = |why: String| Err(Unmeasured::NotMeasured(Reason::new(why)));
     if let Some(c) = code.filter(|c| status_says_not_measured(*c)) {
-        return not(format!("it ended with status {c} (could not look): {tail}"));
+        return not(format!("it ended with status {c} (could not look): {}", with_next(tail, text)));
     }
     if code.is_none() {
         return not(format!("it was ended by a signal: {tail}"));
     }
     if let Some(why) = broken_tool(text) {
-        return not(format!("the tool did not run to a verdict ({why}): {tail}"));
+        return not(format!("the tool did not run to a verdict ({why}): {}", with_next(tail, text)));
     }
     if !g.drift_marker.is_empty() && !g.drift_marker.iter().any(|m| text.contains(m.as_str())) {
         return not(format!(
@@ -474,14 +514,8 @@ fn one(root: &Path, g: &Generator, runner: &dyn Runner, subject: &Subject, log: 
         built,
     };
     if let Some(missing) = g.requires.iter().find(|r| !runner.exists(&root.join(r))) {
-        let c = done(
-            Outcome::NotMeasured(Reason::new(format!(
-                "not on this tree: {missing} is missing (the check needs it: install or build what provides it, or merge the branch that adds it)"
-            ))),
-            Duration::ZERO,
-            None,
-        );
-        log(&format!("gen {}: NOT MEASURED, not on this tree ({missing} is missing)", g.id));
+        let c = done(Outcome::NotMeasured(Reason::new(not_on_tree(missing))), Duration::ZERO, None);
+        log(&format!("gen {}: NOT MEASURED, {}", g.id, not_on_tree(missing)));
         return c;
     }
     let dir = root.join(&g.cwd);
@@ -569,9 +603,10 @@ fn build_failed(ran: Ran) -> Option<String> {
     match ran {
         Ran::Exited { code: Some(0), .. } => None,
         Ran::Exited { code, tail, text } => Some(format!(
-            "the build phase failed ({}), so the check did not run{}: {tail}",
+            "the build phase failed ({}), so the check did not run{}: {}",
             code.map_or_else(|| "ended by a signal".to_string(), |c| format!("status {c}")),
-            broken_tool(&text).map(|w| format!(" ({w})")).unwrap_or_default()
+            broken_tool(&text).map(|w| format!(" ({w})")).unwrap_or_default(),
+            with_next(&tail, &text)
         )),
         Ran::Unavailable(why) => Some(format!("the build phase could not start: {why}")),
         Ran::SlotWait(who) => Some(format!(
@@ -598,6 +633,37 @@ mod tests {
         assert!(broken_tool("error: no test target named `shell`").is_some());
         assert!(broken_tool("error: no such command: `hakari`").is_some());
         assert_eq!(broken_tool("messages.xlf is stale"), None);
+    }
+
+    #[test]
+    fn a_missing_install_names_the_command_that_provides_it() {
+        let node = next_step("node_modules/@angular/core/package.json").unwrap();
+        assert!(node.contains("npm ci --ignore-scripts"), "{node}");
+        let dist = next_step("ui/dist/paddock-ui/package.json").unwrap();
+        assert!(dist.contains("npm run build -w ui"), "{dist}");
+        let about = next_step("cargo-about 0.9.2 is not installed (this check never installs it)").unwrap();
+        assert!(
+            about.contains("cargo install cargo-about --version 0.9.2 --locked --features cli"),
+            "{about}"
+        );
+        let duck = next_step("ld: library 'duckdb' not found").unwrap();
+        assert!(duck.contains("fetch-libduckdb.sh") && duck.contains("DUCKDB_LIB_DIR"), "{duck}");
+        // Positive control: what it does not know, it does not invent.
+        assert_eq!(next_step("scripts/svg-drift.mjs"), None);
+        assert_eq!(next_step("messages.xlf is stale"), None);
+    }
+
+    #[test]
+    fn a_missing_file_says_what_is_missing_and_what_provides_it() {
+        let m = not_on_tree("node_modules/@angular/core/package.json");
+        assert!(
+            m.starts_with("not on this tree: node_modules/@angular/core/package.json is missing"),
+            "{m}"
+        );
+        assert!(m.contains("Next: run `npm ci --ignore-scripts`"), "{m}");
+        // A file the table does not know keeps the general advice.
+        let m = not_on_tree("scripts/svg-drift.mjs");
+        assert!(m.contains("merge the branch that adds it") && !m.contains("Next:"), "{m}");
     }
 
     #[test]
