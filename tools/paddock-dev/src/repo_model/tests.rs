@@ -11,6 +11,7 @@ fn graph() -> RepoGraph {
         npm: Graph::new(),
         apps: ["dyno".to_string()].into_iter().collect(),
         configs: BTreeMap::new(),
+        ..Default::default()
     }
 }
 

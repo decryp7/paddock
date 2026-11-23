@@ -666,6 +666,7 @@ mod tests {
                     (n.to_string(), v)
                 })
                 .collect::<BTreeMap<_, _>>(),
+            ..Default::default()
         }
     }
 

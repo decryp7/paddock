@@ -137,7 +137,39 @@ pub fn reach_for(root: &Path, history: &dyn History, req: &Request, graph: &Repo
     };
     let adapters: Vec<Box<dyn paddock_repo_graph::model::extract::Extractor>> = vec![Box::new(adapter)];
     let built = paddock_repo_graph::model::extract::build(&files, &head_read, &adapters);
-    let model = built.model;
+    let mut model = built.model;
+    let mut errors = built.errors;
+    // The Cargo adapter (test targets and files, replaying the metadata read_graph recorded) and the code adapter (reads, script
+    // imports, spec targets), which follows the imports of the scripts the CI adapter found.
+    let recorded = paddock_repo_graph::RecordedMetadata(graph.metadata.clone());
+    let scripts: BTreeSet<String> = model
+        .nodes()
+        .filter(|n| n.kind == paddock_repo_graph::model::nodes::NodeKind::Script)
+        .flat_map(|n| n.files.iter().cloned())
+        .collect();
+    let mut second: Vec<Box<dyn paddock_repo_graph::model::extract::Extractor>> = vec![Box::new(code::CodeExtractor {
+        root: root.to_path_buf(),
+        cargo: graph.cargo.clone(),
+        npm: graph.npm.clone(),
+        scripts,
+    })];
+    if !graph.metadata.is_empty() {
+        second.insert(
+            0,
+            Box::new(paddock_repo_graph::model::extract::CargoExtractor::new(&recorded, &graph.root_text)),
+        );
+    }
+    let more = paddock_repo_graph::model::extract::build(&files, &head_read, &second);
+    for n in more.model.nodes() {
+        // A script the CI adapter already has keeps its node (and its flags).
+        if model.node(&n.id).is_none() {
+            model.add_node(n.clone());
+        }
+    }
+    for e in more.model.edges() {
+        model.add_edge(e.clone());
+    }
+    errors.extend(more.errors);
     let mut seeds: Vec<(String, String, String)> = Vec::new();
     for f in changed
         .iter()
@@ -192,9 +224,9 @@ pub fn reach_for(root: &Path, history: &dyn History, req: &Request, graph: &Repo
     };
     let mut reached = reach(&changed, &facts, &inputs, &text);
     // An adapter that cannot read a file fails closed (ADR 0117 §2, review round 2 P2-6).
-    if !built.errors.is_empty() {
+    if !errors.is_empty() {
         reached.everything = true;
-        let why = built.errors.iter().map(ToString::to_string).collect::<Vec<_>>().join("; ");
+        let why = errors.iter().map(ToString::to_string).collect::<Vec<_>>().join("; ");
         for (id, _) in &projects {
             reached.nodes.insert(
                 id.clone(),
@@ -293,6 +325,17 @@ fn new_runs(reached: &Reached) -> BTreeMap<String, String> {
     out
 }
 
+/// The projects whose contract declares a smoke set (`smoke` in `apps/<app>/paddock.ci.json`, ADR 0117 §3): only they may run
+/// less than full on a plumbing reach.
+pub fn smoke_declared(graph: &RepoGraph) -> BTreeSet<String> {
+    graph
+        .configs
+        .iter()
+        .filter(|(_, c)| c.get("smoke").is_some())
+        .map(|(a, _)| format!("app:{a}"))
+        .collect()
+}
+
 /// `--compare`: the projects where the model and the rule tables differ, each with both answers and both reasons. `dropped` lists
 /// the projects the model runs less of (ADR 0117 §8: a narrowing names what it no longer runs).
 pub fn compare(plan: &Value, reached: &Reached, graph: &RepoGraph) -> Value {
@@ -344,10 +387,27 @@ pub fn compare(plan: &Value, reached: &Reached, graph: &RepoGraph) -> Value {
         })
         .collect();
     out.insert("model".into(), Value::Object(model));
+    let sel: Map<String, Value> = paddock_repo_graph::model::selection(reached, &smoke_declared(graph))
+        .into_iter()
+        .map(|(id, s)| {
+            let v = match s {
+                paddock_repo_graph::model::Selection::Full => json!("full"),
+                paddock_repo_graph::model::Selection::Smoke => json!("smoke"),
+                paddock_repo_graph::model::Selection::Installers => json!("installers"),
+                paddock_repo_graph::model::Selection::Skip => json!("skip"),
+                paddock_repo_graph::model::Selection::Affected(t) => {
+                    json!({"affected": t, "files": reached.test_files.get(&id).cloned().unwrap_or_default()})
+                }
+            };
+            (id, v)
+        })
+        .collect();
+    out.insert("selection".into(), Value::Object(sel));
     Value::Object(out)
 }
 
 pub mod ci;
+pub mod code;
 
 #[cfg(test)]
 mod tests;

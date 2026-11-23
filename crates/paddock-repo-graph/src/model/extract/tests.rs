@@ -13,8 +13,12 @@ impl CargoMetadata for FakeCargo {
                 .iter()
                 .map(|d| format!(r#"{{"name":"x","path":"/r/{d}"}}"#))
                 .collect();
+            let targets = format!(
+                r#"[{{"kind":["lib"],"name":"{n}","src_path":"/r/{dir}/src/lib.rs"}},{{"kind":["test"],"name":"it","src_path":"/r/{dir}/tests/it/main.rs"}},{{"kind":["custom-build"],"name":"build-script-build","src_path":"/r/{dir}/build.rs"}}]"#,
+                n = name.replace('-', "_")
+            );
             format!(
-                r#"{{"name":"{name}","manifest_path":"/r/{dir}/Cargo.toml","dependencies":[{}]}}"#,
+                r#"{{"name":"{name}","manifest_path":"/r/{dir}/Cargo.toml","dependencies":[{}],"targets":{targets}}}"#,
                 deps.join(",")
             )
         };
@@ -174,4 +178,62 @@ fn the_registry_leaves_cargo_out_without_its_port() {
     };
     let names: Vec<&str> = extractors(&ports).iter().map(|a| a.name()).collect();
     assert_eq!(names, ["npm"]);
+}
+
+#[test]
+fn cargo_emits_test_targets_their_root_files_and_helpers_with_tests_edges() {
+    let m = repo(true, false)
+        .with("crates/paddock-proc/tests/it/main.rs", "mod helper;")
+        .with("crates/paddock-proc/tests/it/helper.rs", "")
+        .with("crates/paddock-proc/src/lib.rs", "");
+    let b = built(&m);
+    assert!(b.errors.is_empty(), "{:?}", b.errors);
+    assert_eq!(
+        b.model.node("nextest:paddock-proc::it").map(|n| n.kind),
+        Some(NodeKind::TestTarget)
+    );
+    assert_eq!(
+        b.model.node("nextest:paddock-proc").map(|n| n.kind),
+        Some(NodeKind::TestTarget),
+        "the library's unit tests"
+    );
+    assert!(
+        b.model
+            .node("nextest:paddock-proc::build-script-build")
+            .is_none(),
+        "a build script is no test target"
+    );
+    assert_eq!(
+        edge(
+            &b,
+            "nextest:paddock-proc::it",
+            "test:crates/paddock-proc/tests/it/main.rs"
+        ),
+        Some(EdgeKind::Tests)
+    );
+    assert_eq!(
+        edge(
+            &b,
+            "nextest:paddock-proc::it",
+            "test:crates/paddock-proc/tests/it/helper.rs"
+        ),
+        Some(EdgeKind::Tests)
+    );
+    assert!(
+        b.model
+            .node("test:crates/paddock-proc/src/lib.rs")
+            .is_none(),
+        "a source file is code, not a test file"
+    );
+    let (hits, _) = b
+        .model
+        .reach(&["crates/paddock-proc/tests/it/helper.rs".to_string()]);
+    assert_eq!(hits["nextest:paddock-proc::it"].reach, Reach::Test);
+    // Positive control: without the crates workspace no metadata, no target, and the helper is no test file.
+    let c = built(&repo(false, false).with("crates/paddock-proc/tests/it/helper.rs", ""));
+    assert!(
+        c.model
+            .node("test:crates/paddock-proc/tests/it/helper.rs")
+            .is_none()
+    );
 }

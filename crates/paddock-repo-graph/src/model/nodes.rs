@@ -141,9 +141,17 @@ pub struct ModelNode {
     pub release: bool,
     /// An action declared setup-only (`setup-rust`, the cache actions): plumbing even for a release job (rule 54).
     pub setup_only: bool,
+    /// The package folder a test target or test file belongs to (its project is the one that owns this folder).
+    pub home: Option<String>,
 }
 
 impl ModelNode {
+    /// The same node with its home folder.
+    pub fn with_home(mut self, home: &str) -> ModelNode {
+        self.home = Some(home.to_string());
+        self
+    }
+
     /// A node of `kind` owning `files`.
     pub fn new(id: impl Into<String>, kind: NodeKind, files: &[&str]) -> ModelNode {
         ModelNode {
@@ -152,6 +160,7 @@ impl ModelNode {
             files: files.iter().map(|s| s.to_string()).collect(),
             release: false,
             setup_only: false,
+            home: None,
         }
     }
 }
@@ -267,8 +276,11 @@ impl Model {
     /// changed): the seed gets its own kind ([`own_reach`]) and the paths out of it get theirs ([`carry`]).
     pub fn reach_from(&self, seeds: &[(String, String)]) -> BTreeMap<String, Hit> {
         let mut hits: BTreeMap<String, Hit> = BTreeMap::new();
-        // (node, the kind that arrives, the kind of the seed node, the seed's setup-only flag, first hop)
-        let mut queue: VecDeque<(String, Reach, NodeKind, bool, bool)> = VecDeque::new();
+        // (node, the kind that arrives, whether the path passed a setup-only action)
+        let mut queue: VecDeque<(String, Reach, bool)> = VecDeque::new();
+        // Nodes reached on a path with no setup-only action: such a path can still turn into release, so it is followed even when
+        // the node was reached before with the same kind through a setup-only action (release is the safe direction, rule 54).
+        let mut free: BTreeSet<String> = BTreeSet::new();
         let put = |hits: &mut BTreeMap<String, Hit>, id: &str, r: Reach, why: String| -> bool {
             let h = hits.entry(id.to_string()).or_insert(Hit {
                 reach: r,
@@ -286,19 +298,27 @@ impl Model {
                 continue;
             };
             let own = own_reach(n.kind);
-            if put(&mut hits, &n.id, own, why.clone()) {
-                queue.push_back((n.id.clone(), own, n.kind, n.setup_only, true));
+            let grew = put(&mut hits, &n.id, own, why.clone());
+            let new_free = !n.setup_only && free.insert(n.id.clone());
+            if grew || new_free {
+                queue.push_back((n.id.clone(), own, n.setup_only));
             }
         }
-        while let Some((id, r, seed, setup_only, first)) = queue.pop_front() {
+        while let Some((id, r, setup_only)) = queue.pop_front() {
+            let Some(at) = self.nodes.get(&id) else {
+                continue;
+            };
             for (from, kind) in self.rev.get(&id).into_iter().flatten() {
                 let Some(up) = self.nodes.get(from) else {
                     continue;
                 };
-                let next = carry(r, seed, *kind, up, setup_only, first);
+                let next = carry(r, at, *kind, up, setup_only);
+                let flag = setup_only || up.setup_only;
                 let why = format!("{} {id}", kind.name());
-                if put(&mut hits, from, next, why) {
-                    queue.push_back((from.clone(), next, seed, setup_only, false));
+                let grew = put(&mut hits, from, next, why);
+                let new_free = !flag && free.insert(from.clone());
+                if grew || new_free {
+                    queue.push_back((from.clone(), next, flag));
                 }
             }
         }
@@ -326,27 +346,28 @@ fn own_reach(kind: NodeKind) -> Reach {
     }
 }
 
-/// The kind that arrives at `up` over one edge `kind`, coming with `r` from a path that started at a node of kind `seed`.
+/// The kind that arrives at `up` over one edge `kind` from `at`, coming with `r`; `setup_only` says the path passed a setup-only
+/// action.
 ///
-/// - The first hop out of an action or script over `uses`, `runs` or `reads-script` is plumbing; into a release job or step (not
-///   for a setup-only action) it is release.
-/// - A plumbing path stays plumbing, except over `uses` into a release node (release, unless the seed is setup-only).
+/// - Leaving the scripts and actions (an edge out of an action or script into a step, job or workflow) is plumbing: their users
+///   run them, they are not the users' code; into a release job or step it is release, unless the path passed a setup-only action.
+/// - Between scripts and actions (`imports`, `reads-script`, an action using an action) the kind stays: a module a script imports
+///   is that script's code.
+/// - A plumbing path stays plumbing, except over `uses`/`runs` into a release node (release, unless setup-only).
 /// - Every other kind arrives as it left (a test file's `test` reaches its target as test; a read data file is code).
-pub fn carry(
-    r: Reach,
-    seed: NodeKind,
-    kind: EdgeKind,
-    up: &ModelNode,
-    setup_only: bool,
-    first: bool,
-) -> Reach {
-    let ci_edge = matches!(
-        kind,
-        EdgeKind::Uses | EdgeKind::Runs | EdgeKind::ReadsScript
-    );
-    let from_plumbing = matches!(seed, NodeKind::Action | NodeKind::Script);
-    let release = up.release && !setup_only && matches!(kind, EdgeKind::Uses | EdgeKind::Runs);
-    if first && from_plumbing && ci_edge {
+pub fn carry(r: Reach, at: &ModelNode, kind: EdgeKind, up: &ModelNode, setup_only: bool) -> Reach {
+    let script = |n: &ModelNode| matches!(n.kind, NodeKind::Action | NodeKind::Script);
+    let release = up.release
+        && !setup_only
+        && !at.setup_only
+        && matches!(kind, EdgeKind::Uses | EdgeKind::Runs);
+    if script(at)
+        && !script(up)
+        && matches!(
+            kind,
+            EdgeKind::Uses | EdgeKind::Runs | EdgeKind::ReadsScript
+        )
+    {
         return if release {
             Reach::Release
         } else {
@@ -473,6 +494,61 @@ mod tests {
         );
         let (_, unowned) = m.reach(&["nowhere.txt".to_string()]);
         assert_eq!(unowned, ["nowhere.txt"]);
+    }
+
+    #[test]
+    fn a_module_a_script_imports_is_plumbing_for_the_scripts_users_and_release_skips_setup_only_paths()
+     {
+        // From --compare: conformance/src/checks/C99 (imported by the CLI a step runs) reached the apps as code.
+        let mut m = model();
+        m.add_node(ModelNode::new(
+            "script:bin/cli.mjs",
+            NodeKind::Script,
+            &["bin/cli.mjs"],
+        ));
+        m.add_node(ModelNode::new(
+            "script:src/check.mjs",
+            NodeKind::Script,
+            &["src/check.mjs"],
+        ));
+        m.add_edge(Edge::new(
+            "script:bin/cli.mjs",
+            "script:src/check.mjs",
+            EdgeKind::Imports,
+        ));
+        m.add_edge(Edge::new(
+            "job:ci.yml#crates",
+            "script:bin/cli.mjs",
+            EdgeKind::Runs,
+        ));
+        m.add_edge(Edge::new(
+            "job:dyno.yml#bundle",
+            "script:bin/cli.mjs",
+            EdgeKind::Runs,
+        ));
+        let r = reach_of(&m, &["src/check.mjs"]);
+        assert_eq!(
+            r["script:bin/cli.mjs"],
+            Reach::Code,
+            "the importer's own code"
+        );
+        assert_eq!(r["job:ci.yml#crates"], Reach::Plumbing);
+        assert_eq!(r["job:dyno.yml#bundle"], Reach::Release);
+        // A script run only through a setup-only action stays plumbing in the release job.
+        m.add_node(ModelNode::new(
+            "script:report.sh",
+            NodeKind::Script,
+            &["report.sh"],
+        ));
+        m.add_edge(Edge::new(
+            "action:setup-rust",
+            "script:report.sh",
+            EdgeKind::Runs,
+        ));
+        assert_eq!(
+            reach_of(&m, &["report.sh"])["job:dyno.yml#bundle"],
+            Reach::Plumbing
+        );
     }
 
     #[test]

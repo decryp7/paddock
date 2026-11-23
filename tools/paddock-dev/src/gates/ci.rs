@@ -1591,6 +1591,7 @@ jobs:
             npm: Graph::new(),
             apps: ["x".to_string()].into(),
             configs: [("x".to_string(), serde_json::json!({"cargo": ".", "dir": "apps/x"}))].into(),
+            ..Default::default()
         };
         let plan = serde_json::json!({"all": false, "apps": ["x"], "kinds": {"x": ["rust"]}, "packages": {}});
         let legs = crate::plan_ci::matrix(&plan, &graph, crate::plan_ci::MatrixOpts::default()).unwrap();

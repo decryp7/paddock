@@ -669,6 +669,7 @@ fn the_checks_the_rust_host_runs_in_ci_are_in_the_plan_for_every_input_they_read
         npm: paddock_repo_graph::Graph::new(),
         apps: BTreeSet::new(),
         configs: Default::default(),
+        ..Default::default()
     };
     let registry = paddock_dev::check::registry();
     let mut inputs = BTreeSet::new();

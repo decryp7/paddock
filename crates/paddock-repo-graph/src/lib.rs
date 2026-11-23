@@ -25,7 +25,10 @@ mod source;
 
 #[cfg(feature = "cargo-metadata")]
 pub use cargo::CargoCli;
-pub use cargo::{CargoMetadata, cargo_graph, parse_metadata};
+pub use cargo::{
+    CargoMetadata, CargoTarget, RecordedMetadata, Recording, cargo_graph, parse_metadata,
+    parse_targets,
+};
 pub use error::GraphError;
 pub use graph::{Graph, Node};
 pub use history::{Commit, History, parse_log};

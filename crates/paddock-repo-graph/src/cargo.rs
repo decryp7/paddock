@@ -57,6 +57,137 @@ pub fn parse_metadata(
     Ok(())
 }
 
+/// One Cargo target of `cargo metadata` (ADR 0117 §4 `tests`, review P2-5: test targets from `targets[].src_path` and `kind`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CargoTarget {
+    /// The package name.
+    pub package: String,
+    /// The package folder (repository-relative).
+    pub dir: String,
+    /// The target name.
+    pub name: String,
+    /// Its kinds (`lib`, `bin`, `test`, `bench`, `example`, `proc-macro`, `custom-build`).
+    pub kinds: Vec<String>,
+    /// Its root source file (repository-relative).
+    pub src_path: String,
+}
+
+impl CargoTarget {
+    /// The nextest binary id (`pkg` for a library's unit tests, `pkg::name` for an integration test, `pkg::bin/name` for a
+    /// binary), or `None` for a target nextest does not run (a build script).
+    pub fn binary_id(&self) -> Option<String> {
+        let k = |x: &str| self.kinds.iter().any(|y| y == x);
+        if k("custom-build") {
+            None
+        } else if k("lib")
+            || k("rlib")
+            || k("proc-macro")
+            || k("cdylib")
+            || k("staticlib")
+            || k("dylib")
+        {
+            Some(self.package.clone())
+        } else if k("test") {
+            Some(format!("{}::{}", self.package, self.name))
+        } else {
+            let kind = self.kinds.first()?;
+            Some(format!("{}::{kind}/{}", self.package, self.name))
+        }
+    }
+}
+
+/// The targets of one `cargo metadata --no-deps` JSON text, paths relative to `root`.
+pub fn parse_targets(json: &str, root: &str) -> Result<Vec<CargoTarget>, GraphError> {
+    let bad = |reason: String| GraphError::Metadata {
+        manifest: "cargo metadata".to_string(),
+        reason,
+    };
+    let v: Value = serde_json::from_str(json).map_err(|e| bad(e.to_string()))?;
+    let mut out = Vec::new();
+    for p in v
+        .get("packages")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let text = |v: &Value, k: &str| v.get(k).and_then(Value::as_str).map(str::to_string);
+        let (Some(package), Some(manifest)) = (text(p, "name"), text(p, "manifest_path")) else {
+            return Err(bad("a package without name or manifest_path".to_string()));
+        };
+        let dir = relative(root, &dirname(&manifest.replace('\\', "/")));
+        for t in p
+            .get("targets")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            let (Some(name), Some(src)) = (text(t, "name"), text(t, "src_path")) else {
+                continue;
+            };
+            let kinds = t
+                .get("kind")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect();
+            out.push(CargoTarget {
+                package: package.clone(),
+                dir: dir.clone(),
+                name,
+                kinds,
+                src_path: relative(root, &src.replace('\\', "/")),
+            });
+        }
+    }
+    Ok(out)
+}
+
+/// A [`CargoMetadata`] that answers from texts recorded earlier (the planner reads every workspace once and the model reuses the
+/// answers: one `cargo metadata` per workspace per run, ADR 0117 §9).
+#[derive(Debug, Default, Clone)]
+pub struct RecordedMetadata(pub std::collections::BTreeMap<String, String>);
+
+impl CargoMetadata for RecordedMetadata {
+    fn metadata(&self, manifest: &str) -> Result<String, GraphError> {
+        self.0
+            .get(manifest)
+            .cloned()
+            .ok_or_else(|| GraphError::Metadata {
+                manifest: manifest.to_string(),
+                reason: "not recorded in this run".to_string(),
+            })
+    }
+}
+
+/// A [`CargoMetadata`] that records every answer of another (to replay it with [`RecordedMetadata`]).
+pub struct Recording<'a> {
+    inner: &'a dyn CargoMetadata,
+    /// The answers so far, by manifest.
+    pub texts: std::cell::RefCell<std::collections::BTreeMap<String, String>>,
+}
+
+impl<'a> Recording<'a> {
+    /// Wraps a port.
+    pub fn new(inner: &'a dyn CargoMetadata) -> Recording<'a> {
+        Recording {
+            inner,
+            texts: std::cell::RefCell::new(std::collections::BTreeMap::new()),
+        }
+    }
+}
+
+impl CargoMetadata for Recording<'_> {
+    fn metadata(&self, manifest: &str) -> Result<String, GraphError> {
+        let t = self.inner.metadata(manifest)?;
+        self.texts
+            .borrow_mut()
+            .insert(manifest.to_string(), t.clone());
+        Ok(t)
+    }
+}
+
 /// The Cargo graph of every workspace among `files`: a `Cargo.toml` with a `[workspace]` line is a root.
 pub fn cargo_graph(
     files: &[String],

@@ -132,6 +132,10 @@ pub struct Reached {
     pub everything: bool,
     /// The detected kind of each unowned file the detector could read (D14), for the owner check's error.
     pub unowned_kind: BTreeMap<String, Detected>,
+    /// Per project, the test targets the change reached (a `test` reach selects these, ADR 0117 §5).
+    pub targets: BTreeMap<String, BTreeSet<String>>,
+    /// Per project, the changed test files (a spec runner is given these: Vitest `--include`, Playwright file arguments).
+    pub test_files: BTreeMap<String, BTreeSet<String>>,
 }
 
 impl Reached {
@@ -258,8 +262,31 @@ pub fn reach(changed: &[String], facts: &Facts, inputs: &Inputs, text: TextOf) -
                 .iter()
                 .filter(|(file, _, _)| file == f)
                 .collect();
+            let owner = m.owner_of(f);
+            // A test file in a project folder is test for its project: its targets, not the project's dependents (G12).
+            if narrowed.is_empty()
+                && named.iter().all(|i| i.adds)
+                && let Some(n) = owner.filter(|n| n.kind == nodes::NodeKind::TestFile)
+                && let Some(p) = project_of(facts, f)
+            {
+                model_seeds.push((n.id.clone(), f.clone()));
+                let (rust, ui) = halves(facts, f);
+                out.mark(p, Reach::Test, rust, ui, f.clone());
+                out.test_files
+                    .entry(p.to_string())
+                    .or_default()
+                    .insert(f.clone());
+                for i in named.iter() {
+                    for t in &i.reaches {
+                        if let Target::Project(q) = t {
+                            out.mark(q, i.reach, true, true, format!("input {} ({f})", i.name));
+                        }
+                    }
+                }
+                continue;
+            }
             let owned = if narrowed.is_empty() {
-                m.owner_of(f)
+                owner
                     .map(|n| model_seeds.push((n.id.clone(), f.clone())))
                     .is_some()
             } else {
@@ -413,6 +440,41 @@ pub fn reach(changed: &[String], facts: &Facts, inputs: &Inputs, text: TextOf) -
     }
     if let Some(m) = facts.model {
         for (id, hit) in m.reach_from(&model_seeds) {
+            let node = m.node(&id);
+            // A reached test target: its project selects it (and is marked with the kind that arrived).
+            if let Some(n) = node.filter(|n| n.kind == nodes::NodeKind::TestTarget)
+                && let Some(p) = n.home.as_deref().and_then(|h| project_of(facts, h))
+            {
+                out.targets
+                    .entry(p.to_string())
+                    .or_default()
+                    .insert(id.clone());
+                let (rust, ui) = halves(facts, &format!("{}/x", n.home.as_deref().unwrap_or("")));
+                out.mark(
+                    p,
+                    hit.reach,
+                    rust,
+                    ui,
+                    format!("{id} ({})", hit.why.join("; ")),
+                );
+                continue;
+            }
+            // A crate reached over a `reads` edge (it reads another crate's data at build or test time) is code for its project.
+            if let Some(dir) = id.strip_prefix("crate:")
+                && hit.reach == Reach::Code
+                && hit.why.iter().any(|w| w.starts_with("reads "))
+                && let Some(p) = project_of(facts, dir)
+            {
+                out.mark(
+                    p,
+                    Reach::Code,
+                    true,
+                    false,
+                    format!("{id} reads it ({})", hit.why.join("; ")),
+                );
+                crates.insert(dir.to_string());
+                continue;
+            }
             // An action or script changed itself is plumbing for the projects it runs (its own code is its own); a job or step
             // passes on the kind that reached it.
             let own = m.node(&id).is_some_and(|n| {
@@ -484,6 +546,49 @@ pub fn reach(changed: &[String], facts: &Facts, inputs: &Inputs, text: TextOf) -
         }
     }
     out
+}
+
+/// What a project runs (ADR 0117 §5 `selection`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Selection {
+    /// Its whole suite.
+    Full,
+    /// Its declared smoke set.
+    Smoke,
+    /// Only these test targets.
+    Affected(BTreeSet<String>),
+    /// Its installers (rule 54).
+    Installers,
+    /// Nothing beyond the docs checks.
+    Skip,
+}
+
+/// What each reached project runs: `code` its whole suite, `test` the reached test targets, `plumbing` its declared smoke set,
+/// `release` an app's installers, `docs` nothing. Never less than declared (§5): a `plumbing` reach of a project with no smoke set
+/// in `smoke`, or a `test` reach with no target the model can name, runs the whole suite; a plan that answers everything runs
+/// every project in full.
+pub fn selection(reached: &Reached, smoke: &BTreeSet<String>) -> BTreeMap<String, Selection> {
+    reached
+        .nodes
+        .iter()
+        .map(|(id, n)| {
+            let s = match n.reach {
+                _ if id == "docs" => Selection::Skip,
+                Reach::Docs => Selection::Skip,
+                _ if reached.everything => Selection::Full,
+                Reach::Code => Selection::Full,
+                Reach::Release if id.starts_with("app:") => Selection::Installers,
+                Reach::Release => Selection::Full,
+                Reach::Plumbing if smoke.contains(id) => Selection::Smoke,
+                Reach::Plumbing => Selection::Full,
+                Reach::Test => match reached.targets.get(id) {
+                    Some(t) if !t.is_empty() => Selection::Affected(t.clone()),
+                    _ => Selection::Full,
+                },
+            };
+            (id.clone(), s)
+        })
+        .collect()
 }
 
 #[cfg(test)]

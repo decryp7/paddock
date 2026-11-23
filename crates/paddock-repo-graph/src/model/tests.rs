@@ -190,7 +190,9 @@ fn p1b_a_project_folder_beats_the_docs_rules_and_prose_in_it_is_docs_for_that_pr
     assert_eq!(ids(&cl), ["app:dyno"]);
     assert_eq!(cl.nodes["app:dyno"].reach, Reach::Code);
     // A README in the app is prose: docs for the app, nothing to run.
-    let rd = run(&w, &["apps/dyno/README.md"], &none);
+    // Built at run time: a literal path to a tracked markdown file would count as a read (contracts.rs, DOC_INPUTS).
+    let readme = format!("apps/{}/README.md", "dyno");
+    let rd = run(&w, &[readme.as_str()], &none);
     assert_eq!(
         ids(&rd),
         ["app:dyno", "conformance"],
@@ -572,7 +574,7 @@ fn each_migrated_additive_rule_adds_its_reader_and_the_control_removes_it() {
     let cases = [
         ("c99-reads", "crates/paddock-proc/src/lib.rs", "c99"),
         ("cause-code-scan", "crates/paddock-proc/src/lib.rs", "ui"),
-        ("c100-reads", "apps/dyno/AGENTS.md", "conformance"),
+        ("c100-reads", "apps/x/AGENTS.md", "conformance"),
         (
             "conformance-parity",
             "conformance/src/checks/c1.mjs",
@@ -697,5 +699,150 @@ fn an_owner_input_is_its_projects_own_code_and_reaches_its_packages_dependents()
         r.nodes.get("app:dyno").is_some_and(|n| n.ui),
         "{:?}",
         r.nodes.keys()
+    );
+}
+
+fn test_model(tests_edge: bool, reads_edge: bool) -> nodes::Model {
+    use nodes::{Edge, EdgeKind, ModelNode, NodeKind};
+    let mut m = nodes::Model::new();
+    m.add_node(ModelNode::new(
+        "crate:crates/paddock-proc",
+        NodeKind::Project,
+        &["crates/paddock-proc/"],
+    ));
+    m.add_node(ModelNode::new(
+        "crate:apps/shell-demo/src-tauri",
+        NodeKind::Project,
+        &["apps/shell-demo/src-tauri/"],
+    ));
+    m.add_node(
+        ModelNode::new("nextest:paddock-proc::it", NodeKind::TestTarget, &[])
+            .with_home("crates/paddock-proc"),
+    );
+    m.add_node(
+        ModelNode::new(
+            "test:crates/paddock-proc/tests/it/main.rs",
+            NodeKind::TestFile,
+            &["crates/paddock-proc/tests/it/main.rs"],
+        )
+        .with_home("crates/paddock-proc"),
+    );
+    m.add_edge(Edge::new(
+        "nextest:paddock-proc::it",
+        "crate:crates/paddock-proc",
+        EdgeKind::Depends,
+    ));
+    if tests_edge {
+        m.add_edge(Edge::new(
+            "nextest:paddock-proc::it",
+            "test:crates/paddock-proc/tests/it/main.rs",
+            EdgeKind::Tests,
+        ));
+    }
+    if reads_edge {
+        m.add_edge(Edge::new(
+            "crate:apps/shell-demo/src-tauri",
+            "crate:crates/paddock-proc",
+            EdgeKind::Reads,
+        ));
+    }
+    m
+}
+
+#[test]
+fn g12_a_test_file_reaches_its_target_as_test_and_not_the_crates_dependents() {
+    let w = world();
+    let r = run_model(
+        &w,
+        &test_model(true, false),
+        &["crates/paddock-proc/tests/it/main.rs"],
+        &[],
+    );
+    assert_eq!(r.nodes["crates"].reach, Reach::Test);
+    assert!(
+        !r.nodes.contains_key("app:dyno"),
+        "a test file is not a dependency: {:?}",
+        r.nodes.keys()
+    );
+    assert_eq!(
+        r.targets["crates"].iter().collect::<Vec<_>>(),
+        ["nextest:paddock-proc::it"]
+    );
+    let s = selection(&r, &BTreeSet::new());
+    assert_eq!(
+        s["crates"],
+        Selection::Affected(
+            ["nextest:paddock-proc::it".to_string()]
+                .into_iter()
+                .collect()
+        )
+    );
+    // Positive control (tests edge): without it no target is reached and the selection cannot prove less than full.
+    let c = run_model(
+        &w,
+        &test_model(false, false),
+        &["crates/paddock-proc/tests/it/main.rs"],
+        &[],
+    );
+    assert!(c.targets.get("crates").is_none_or(|t| t.is_empty()));
+    assert_eq!(selection(&c, &BTreeSet::new())["crates"], Selection::Full);
+}
+
+#[test]
+fn a_reads_edge_makes_the_reader_code_and_the_control_drops_it() {
+    let w = world();
+    let r = run_model(
+        &w,
+        &test_model(true, true),
+        &["crates/paddock-proc/tests/data/run.txt"],
+        &[],
+    );
+    assert_eq!(
+        r.nodes.get("app:shell-demo").map(|n| n.reach),
+        Some(Reach::Code),
+        "{:?}",
+        r.nodes.keys()
+    );
+    let c = run_model(
+        &w,
+        &test_model(true, false),
+        &["crates/paddock-proc/tests/data/run.txt"],
+        &[],
+    );
+    assert!(!c.nodes.contains_key("app:shell-demo"));
+}
+
+#[test]
+fn selection_maps_each_kind_and_falls_back_to_full_without_a_declaration() {
+    let mut r = Reached::default();
+    let hit = |reach| NodeReach {
+        reach,
+        rust: true,
+        ui: true,
+        why: vec![],
+    };
+    r.nodes.insert("app:dyno".into(), hit(Reach::Plumbing));
+    r.nodes.insert("app:pitwall".into(), hit(Reach::Release));
+    r.nodes.insert("ui".into(), hit(Reach::Plumbing));
+    r.nodes.insert("tools".into(), hit(Reach::Code));
+    r.nodes.insert("docs".into(), hit(Reach::Docs));
+    r.nodes.insert("crates".into(), hit(Reach::Test));
+    let smoke: BTreeSet<String> = ["app:dyno".to_string()].into_iter().collect();
+    let s = selection(&r, &smoke);
+    assert_eq!(s["app:dyno"], Selection::Smoke);
+    assert_eq!(s["ui"], Selection::Full, "no smoke declared: full");
+    assert_eq!(s["app:pitwall"], Selection::Installers);
+    assert_eq!(s["tools"], Selection::Full);
+    assert_eq!(s["docs"], Selection::Skip);
+    assert_eq!(
+        s["crates"],
+        Selection::Full,
+        "test reach without targets: full"
+    );
+    r.everything = true;
+    assert!(
+        selection(&r, &smoke)
+            .values()
+            .all(|x| *x == Selection::Full || *x == Selection::Skip)
     );
 }

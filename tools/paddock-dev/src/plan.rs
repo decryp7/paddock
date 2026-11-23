@@ -300,6 +300,7 @@ fn project_of_dir(dir: &str) -> Option<String> {
 }
 
 /// The graphs a plan is computed from.
+#[derive(Default)]
 pub struct RepoGraph {
     /// Rust crates.
     pub cargo: Graph,
@@ -309,6 +310,11 @@ pub struct RepoGraph {
     pub apps: BTreeSet<String>,
     /// Each app's `paddock.ci.json` with its `dir` (`apps/<name>`): the CI contract of a matrix leg.
     pub configs: BTreeMap<String, Value>,
+    /// The `cargo metadata` answers by workspace manifest, recorded while reading `cargo` (the repository model replays them: one
+    /// `cargo metadata` per workspace per run, ADR 0117 §9). Empty where the graph was built by hand.
+    pub metadata: BTreeMap<String, String>,
+    /// The repository root in the spelling cargo prints its paths in.
+    pub root_text: String,
 }
 
 impl RepoGraph {
@@ -815,7 +821,9 @@ pub fn read_graph(root: &Path, history: &dyn History) -> Result<RepoGraph, Graph
     let (root, root_text) = graph_root(&resolved, paddock_env::Os::current())?;
     let root = root.as_path();
     let disk = DiskFiles(root.to_path_buf());
-    let cargo = cargo_graph(&files, &disk, &CargoCli::new(root, TIMEOUT), &root_text)?;
+    let cli = CargoCli::new(root, TIMEOUT);
+    let recording = paddock_repo_graph::Recording::new(&cli);
+    let cargo = cargo_graph(&files, &disk, &recording, &root_text)?;
     let apps = apps_of(&files);
     let mut configs = BTreeMap::new();
     for app in &apps {
@@ -835,6 +843,8 @@ pub fn read_graph(root: &Path, history: &dyn History) -> Result<RepoGraph, Graph
         npm: npm_graph(&files, &disk)?,
         apps,
         configs,
+        metadata: recording.texts.into_inner(),
+        root_text: root_text.clone(),
     })
 }
 
@@ -983,6 +993,7 @@ mod tests {
                 ("dyno".to_string(), json!({"cargo": "app/src-tauri", "dir": "apps/dyno"})),
                 ("debrief".to_string(), json!({"dir": "apps/debrief"})),
             ]),
+            ..Default::default()
         }
     }
 

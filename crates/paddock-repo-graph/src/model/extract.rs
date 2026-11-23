@@ -219,30 +219,83 @@ impl Extractor for CargoExtractor<'_> {
     }
 
     fn claims(&self) -> &[&'static str] {
-        &["Cargo.toml"]
+        &["Cargo.toml", ".rs"]
     }
 
     fn extract(&self, files: &[String], read: &dyn BulkRead) -> Result<Extracted, ExtractError> {
-        let src = Prefetched::of(read, files.to_vec());
+        let manifests: Vec<String> = files
+            .iter()
+            .filter(|f| f.ends_with("Cargo.toml"))
+            .cloned()
+            .collect();
+        let src = Prefetched::of(read, manifests.clone());
         let calls = Cell::new(0);
-        let g = cargo_graph(files, &src, &Counting(self.metadata, &calls), &self.root).map_err(
-            |e| ExtractError {
-                extractor: "cargo",
-                file: match &e {
-                    GraphError::Read { path, .. } | GraphError::Parse { path, .. } => path.clone(),
-                    GraphError::Metadata { manifest, .. } => manifest.clone(),
-                    _ => "Cargo.toml".to_string(),
-                },
-                reason: e.to_string(),
+        let recording = crate::Recording::new(self.metadata);
+        let err = |e: GraphError| ExtractError {
+            extractor: "cargo",
+            file: match &e {
+                GraphError::Read { path, .. } | GraphError::Parse { path, .. } => path.clone(),
+                GraphError::Metadata { manifest, .. } => manifest.clone(),
+                _ => "Cargo.toml".to_string(),
             },
-        )?;
-        Ok(from_graph(&g, crate_id, |_| EdgeKind::Depends))
+            reason: e.to_string(),
+        };
+        let g = cargo_graph(&manifests, &src, &Counting(&recording, &calls), &self.root)
+            .map_err(err)?;
+        let mut x = from_graph(&g, crate_id, |_| EdgeKind::Depends);
+        let mut targets = Vec::new();
+        for json in recording.texts.borrow().values() {
+            targets.extend(crate::parse_targets(json, &self.root).map_err(err)?);
+        }
+        test_targets(&mut x, &targets, files);
+        Ok(x)
     }
 
     fn spawn_budget(&self, files: &[String]) -> usize {
         // One `cargo metadata` per workspace root; which manifests are roots is known only after reading them, so the budget is
         // the bound: every claimed manifest (a member manifest is never asked).
-        files.len()
+        files.iter().filter(|f| f.ends_with("Cargo.toml")).count()
+    }
+}
+
+/// The test targets of the crates (ADR 0117 §4 `tests`): a node per target nextest runs, with a `depends` edge to its crate (a
+/// crate change reaches its tests); a test file per integration test's root (`tests` edge from that target only); and every other
+/// `.rs` under a crate's `tests/` folder as a helper of every integration test target of that crate.
+fn test_targets(x: &mut Extracted, targets: &[crate::CargoTarget], files: &[String]) {
+    let mut roots: BTreeMap<String, (String, String)> = BTreeMap::new();
+    let mut by_crate: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for t in targets {
+        let Some(bin) = t.binary_id() else { continue };
+        let id = format!("nextest:{bin}");
+        x.nodes
+            .push(ModelNode::new(&id, NodeKind::TestTarget, &[]).with_home(&t.dir));
+        x.edges
+            .push(Edge::new(&id, crate_id(&t.dir), EdgeKind::Depends));
+        if t.kinds.iter().any(|k| k == "test") {
+            roots.insert(t.src_path.clone(), (id.clone(), t.dir.clone()));
+            by_crate.entry(t.dir.clone()).or_default().push(id);
+        }
+    }
+    for f in files.iter().filter(|f| f.ends_with(".rs")) {
+        let file_id = format!("test:{f}");
+        if let Some((id, dir)) = roots.get(f) {
+            x.nodes
+                .push(ModelNode::new(&file_id, NodeKind::TestFile, &[f.as_str()]).with_home(dir));
+            x.edges.push(Edge::new(id, &file_id, EdgeKind::Tests));
+            continue;
+        }
+        let Some((dir, ids)) = by_crate
+            .iter()
+            .filter(|(d, _)| f.starts_with(&format!("{d}/tests/")))
+            .max_by_key(|(d, _)| d.len())
+        else {
+            continue;
+        };
+        x.nodes
+            .push(ModelNode::new(&file_id, NodeKind::TestFile, &[f.as_str()]).with_home(dir));
+        for id in ids {
+            x.edges.push(Edge::new(id, &file_id, EdgeKind::Tests));
+        }
     }
 }
 
