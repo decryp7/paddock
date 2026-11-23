@@ -8,8 +8,10 @@ import { after, describe, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import {
   cargoToken,
+  crateCommands,
   crateProblems,
   crateStepsMissing,
+  readCiModel,
   entryPoints,
   formatTable,
   indexPath,
@@ -198,27 +200,47 @@ describe('tagProblems (rule 9)', () => {
 });
 
 describe('crateStepsMissing', () => {
-  const yaml = (name) => `      - name: ${name}\n        run: cargo clippy -p ${name} --all-targets --all-features -- -D warnings && cargo nextest run -p ${name} --all-features --profile ci\n`;
+  const yaml = (name) => [`cargo clippy -p ${name} --all-targets --all-features -- -D warnings`, `cargo nextest run -p ${name} --all-features --profile ci`];
   test('names crates without both steps', () => {
-    const ci = yaml('paddock-a') + '        run: cargo clippy -p paddock-b --all-targets --all-features -- -D warnings\n';
+    const ci = [...yaml('paddock-a'), 'cargo clippy -p paddock-b --all-targets --all-features -- -D warnings'];
     assert.deepEqual(crateStepsMissing(ci, ['paddock-a', 'paddock-b', 'paddock-c']), ['paddock-b', 'paddock-c']);
   });
   test('a prefix does not count for a longer name', () => {
     assert.deepEqual(crateStepsMissing(yaml('paddock-a'), ['paddock-ab']), ['paddock-ab']);
   });
   test('a --workspace step covers every crate it does not exclude', () => {
-    const ws = '        run: cargo clippy --workspace --all-targets --all-features -- -D warnings\n        run: cargo nextest run --workspace --all-features --profile ci --exclude paddock-b\n';
+    const ws = ['cargo clippy --workspace --all-targets --all-features -- -D warnings', 'cargo nextest run --workspace --all-features --profile ci --exclude paddock-b'];
     assert.deepEqual(crateStepsMissing(ws, ['paddock-a', 'paddock-b']), ['paddock-b']);
-    const cov = '        run: cargo clippy --workspace --all-targets --all-features -- -D warnings\n          cargo llvm-cov nextest --profile ci --workspace --all-features --lcov\n';
+    const cov = ['cargo clippy --workspace --all-targets --all-features -- -D warnings', 'cargo llvm-cov nextest --profile ci --workspace --all-features --lcov'];
     assert.deepEqual(crateStepsMissing(cov, ['paddock-a']), []);
-    const noFeatures = '        run: cargo clippy --workspace --all-targets -- -D warnings\n        run: cargo nextest run --workspace --profile ci\n';
+    const noFeatures = ['cargo clippy --workspace --all-targets -- -D warnings', 'cargo nextest run --workspace --profile ci'];
     assert.deepEqual(crateStepsMissing(noFeatures, ['paddock-a']), ['paddock-a'], 'without --all-features the adapters are not built');
   });
-  test('the real ci.yml has a step for every workspace member', () => {
+  // ci.yml 1126 (OS-scoped tests, 50555b0ef): the host legs' line is `cargo nextest run "${sel[@]}" --all-features ...`; the packages are
+  // a runtime value, so the line names none. The Linux run under llvm-cov (`--workspace`) is the line that covers the crates.
+  test('a host leg with a runtime package selection names no crate; the --workspace line still covers them', () => {
+    const sel = 'cargo nextest run "${sel[@]}" --all-features --profile ci ${filter[@]+"${filter[@]}"}';
+    const clippy = 'cargo clippy --workspace --all-targets --all-features -- -D warnings';
+    const llvm = 'cargo llvm-cov nextest --profile ci --workspace --all-features --lcov';
+    assert.deepEqual(crateStepsMissing([clippy, sel, llvm], ['paddock-a', 'paddock-b']), []);
+  });
+  test('positive control: a crate that only a runtime selection could reach is refused', () => {
+    const sel = 'cargo nextest run "${sel[@]}" --all-features --profile ci';
+    const clippy = 'cargo clippy --workspace --all-targets --all-features -- -D warnings';
+    assert.deepEqual(crateStepsMissing([clippy, sel], ['paddock-a']), ['paddock-a']);
+    const llvm = 'cargo llvm-cov nextest --profile ci --workspace --all-features --exclude paddock-b';
+    assert.deepEqual(crateStepsMissing([clippy, sel, llvm], ['paddock-a', 'paddock-b']), ['paddock-b']);
+  });
+  test('crateCommands keeps gated branch lines in crates/ outside app legs only', () => {
+    const line = (o) => ({ cwd: 'crates', app: null, levels: { branch: 'Gated' }, text: 'x', ...o });
+    const model = { lines: [line({ text: 'keep' }), line({ text: 'cond', levels: { branch: 'Conditional' } }), line({ text: 'app', app: 'dyno' }), line({ text: 'elsewhere', cwd: 'ui' }), line({ text: 'tag', levels: {} })] };
+    assert.deepEqual(crateCommands(model), ['keep']);
+  });
+  test('the real CI model gates a clippy and a nextest line for every workspace member', () => {
     const metadata = JSON.parse(execFileSync('cargo', ['metadata', '--format-version', '1', '--no-deps'], { cwd: join(root, 'crates'), encoding: 'utf8' }));
     const names = workspaceCrates(metadata).map((c) => c.name);
     assert.ok(names.includes('paddock-jobs'));
-    assert.deepEqual(crateStepsMissing(readFileSync(join(root, '.gitea/workflows/ci.yml'), 'utf8'), names), []);
+    assert.deepEqual(crateStepsMissing(crateCommands(readCiModel(root)), names), []);
     assert.deepEqual(crateProblems(workspaceCrates(metadata)), []);
   });
   // ci.yml 7989: paddock-testkit's `start` feature (an optional dependency on paddock-proc) and paddock-proc's versioned
