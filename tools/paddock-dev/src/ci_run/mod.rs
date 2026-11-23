@@ -19,6 +19,7 @@
 //! gives `i`; empty without a shard), as the end-to-end step did, and the download credential of `./dev` (`PADDOCK_DEV_TOKEN`) is not passed on. `export` in one line does not carry to the next (each line is its own shell, as before). `--heavy` puts each line through the machine-wide slot (ER-24), as the pre-push gate does.
 
 pub mod contract;
+pub mod select;
 
 use crate::ci_tool::{describe_status, error_line};
 use clap::Args;
@@ -160,10 +161,41 @@ pub fn run_with(args: &RunArgs, env: &HashMap<String, String>, stop: &Arc<Atomic
             );
         }
     };
-    let lines = match contract::phase_lines(&contract, &args.project, &args.phase).and_then(|l| expand(&l)) {
+    let mut lines = match contract::phase_lines(&contract, &args.project, &args.phase).and_then(|l| expand(&l)) {
         Ok(l) => l,
         Err(e) => return fail(out, e, "fix the phase in the project's paddock.ci.json"),
     };
+    // The plan's selection of this project (ADR 0117 §5): a phase it does not keep is skipped, a test runner gets only its affected
+    // files. A value that cannot be read runs everything (never less than declared) and says so.
+    let id = select::project_id(&args.project);
+    match select::of(env.get(select::ENV).map(String::as_str).unwrap_or(""), &id) {
+        Ok(Some(n)) => {
+            if n.phases.as_ref().is_some_and(|p| !p.contains(&args.phase)) {
+                let _ = writeln!(
+                    out,
+                    "::notice::ci run {} {}: skipped, not run: this run's selection (the plan job's `selection` output: a smoke set or \
+                     affected tests, ADR 0117) does not keep this phase; the run declares that it was not complete",
+                    args.project, args.phase
+                );
+                return 0;
+            }
+            if !n.files.is_empty() {
+                let (narrowed, kept) = select::narrow_lines(&lines, &n.files);
+                let _ = writeln!(
+                    out,
+                    "::notice::ci run {} {}: only the affected test files run ({kept} test runner line(s) kept): {}",
+                    args.project,
+                    args.phase,
+                    n.files.values().flatten().cloned().collect::<Vec<_>>().join(" ")
+                );
+                lines = narrowed;
+            }
+        }
+        Ok(None) => {}
+        Err(e) => {
+            let _ = writeln!(out, "::warning::ci run {} {}: {e}; every line runs", args.project, args.phase);
+        }
+    }
     let mut child_env = env.clone();
     if args.project == "conformance" && contract.get("conformance").is_some() {
         match contract::conformance_args(&contract) {

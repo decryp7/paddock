@@ -59,6 +59,69 @@ pub fn parse(text: &str) -> Result<Inputs, String> {
     read(text).map_err(|e| format!("{FILE}: {e}"))
 }
 
+/// Which planner decides the plans of `./dev plan --ci` (the ci.yml plan job and the app workflows' plan jobs).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlannerMode {
+    /// The repository graph's selection (ADR 0117 §5): the user's decision of 2026-11-23, the default.
+    Graph,
+    /// The rule tables of `plan.rs` (the emergency switch back; `--compare` and `--replay` read them whatever this says).
+    Rules,
+}
+
+/// The `[planner]` table: the mode and, for a switch back to the rule tables, the stated reason.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Planner {
+    /// Which planner decides.
+    pub mode: PlannerMode,
+    /// Why (required for `rules`: flipping back is a commit whose reason is stated in the file).
+    pub reason: String,
+}
+
+impl Planner {
+    /// The plan job's log line: `planner: graph` or `planner: rules (<reason>)`.
+    pub fn line(&self) -> String {
+        match self.mode {
+            PlannerMode::Graph => "planner: graph".to_string(),
+            PlannerMode::Rules => format!("planner: rules ({})", self.reason),
+        }
+    }
+}
+
+/// The `[planner]` table of the inputs file text: no table is the graph; `mode = "rules"` needs a non-empty `reason`; anything else
+/// is an error naming it (a typo never silently picks a planner).
+pub fn planner(text: &str) -> Result<Planner, String> {
+    let t: toml::Table = text.parse().map_err(|e| format!("{FILE}: not TOML: {e}"))?;
+    let Some(p) = t.get("planner") else {
+        return Ok(Planner {
+            mode: PlannerMode::Graph,
+            reason: String::new(),
+        });
+    };
+    let p = p.as_table().ok_or_else(|| format!("{FILE}: [planner] is not a table"))?;
+    only_keys(p, &["mode", "reason"], &format!("{FILE}: [planner]"))?;
+    let reason = p.get("reason").and_then(toml::Value::as_str).unwrap_or("").trim().to_string();
+    match p.get("mode").and_then(toml::Value::as_str) {
+        Some("graph") => Ok(Planner {
+            mode: PlannerMode::Graph,
+            reason,
+        }),
+        Some("rules") if reason.is_empty() => Err(format!(
+            "{FILE}: [planner] mode = \"rules\" needs a `reason` (switching back to the rule tables is a commit that says why)"
+        )),
+        Some("rules") => Ok(Planner {
+            mode: PlannerMode::Rules,
+            reason,
+        }),
+        other => Err(format!("{FILE}: [planner] mode is {other:?}, not \"graph\" or \"rules\"")),
+    }
+}
+
+/// [`planner`] of the inputs file under `root` (the checkout the plan job runs in).
+pub fn load_planner(root: &Path) -> Result<Planner, String> {
+    let text = std::fs::read_to_string(root.join(FILE)).map_err(|e| format!("{FILE} cannot be read: {e}"))?;
+    planner(&text)
+}
+
 fn strings(v: Option<&toml::Value>, what: &str) -> Result<Vec<String>, String> {
     let Some(v) = v else { return Ok(Vec::new()) };
     v.as_array()
@@ -158,7 +221,7 @@ fn read(text: &str) -> Result<Inputs, String> {
     let t: toml::Table = text.parse().map_err(|e| format!("not TOML: {e}"))?;
     only_keys(
         &t,
-        &["version", "input", "owner", "project", "paths", "prose", "ci", "hash"],
+        &["version", "input", "owner", "project", "paths", "prose", "ci", "hash", "planner"],
         "the file",
     )?;
     match t.get("version").and_then(toml::Value::as_integer) {
@@ -349,6 +412,31 @@ mod tests {
             t.push_str("[ci]\n");
         }
         t
+    }
+
+    #[test]
+    fn the_planner_switch_defaults_to_the_graph_and_a_switch_back_states_its_reason() {
+        // No table, and `mode = "graph"`: the graph decides.
+        assert_eq!(planner(&doc("")).unwrap().mode, PlannerMode::Graph);
+        let g = planner(&doc("[planner]\nmode = \"graph\"\n")).unwrap();
+        assert_eq!((g.mode, g.line().as_str()), (PlannerMode::Graph, "planner: graph"));
+        // `rules` with its reason: the rule tables decide, and the log line says why.
+        let r = planner(&doc("[planner]\nmode = \"rules\"\nreason = \"run 9001 planned too little\"\n")).unwrap();
+        assert_eq!(r.mode, PlannerMode::Rules);
+        assert_eq!(r.line(), "planner: rules (run 9001 planned too little)");
+        // Controls: `rules` without a reason, an unknown mode and an unknown key are refused.
+        assert!(planner(&doc("[planner]\nmode = \"rules\"\n")).unwrap_err().contains("reason"));
+        assert!(planner(&doc("[planner]\nmode = \"rule\"\n")).is_err());
+        assert!(planner(&doc("[planner]\nmode = \"graph\"\nmod = 1\n")).is_err());
+        // The inputs reader accepts the table.
+        assert!(parse(&doc("[planner]\nmode = \"graph\"\n")).is_ok());
+    }
+
+    #[test]
+    fn the_repository_plans_from_the_graph() {
+        // The user's decision of 2026-11-23: the graph decides CI plans from landing.
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        assert_eq!(load_planner(&root).unwrap().mode, PlannerMode::Graph);
     }
 
     #[test]

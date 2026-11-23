@@ -21,7 +21,14 @@
 #            lines run a node's phases), image_files (what pins the CI image): added to a node's input hash (§5, WP-7)
 # [ci]       setup_only (actions that stay plumbing in a release job), release_actions (actions that make a job a release job),
 #            release_gate_phases (the contract phases a check of a release job runs beside the smoke set)
+# [planner]  mode (graph | rules; no table: graph), reason (required for rules): which planner decides `./dev plan --ci`. The
+#            graph decides from the landing of ADR 0117's wiring (the user, 2026-11-23); `rules` is the emergency switch back to the
+#            rule tables, a commit that states its reason here. `--compare` and `--replay` read both whatever this says.
 version = 1
+
+[planner]
+mode = "graph"
+reason = "ADR 0117: the repository graph decides CI plans from landing (the user's decision of 2026-11-23)"
 
 [[project]]
 id = "crates"
