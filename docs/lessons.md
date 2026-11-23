@@ -3577,3 +3577,29 @@ logged with what the rule saw (ER-27). Lesson: an admission rule needs a cost, n
 - **Recurring:** ADR 0033's class (ending a bare pid read earlier, following parent pids without age): Chromium driver stale-snapshot
   kill (ADR 0033 regression test), Windows stale-pid kills (rule 53). Open: blanket `disallowed_methods` allows in test files hide the
   ban; a check that refuses the ADR 0033 entries under a file-wide allow is the follow-up.
+
+## A runner counted another holder's orphans as its job (run 8694, 2026-11-23)
+
+- **What happened.** In `app pitcrew (windows-latest)` (job 45770), `usage_follows_the_runner_and_the_processes_it_started` timed out
+  on try 1 waiting for "the exited child is no longer counted" (40 s of real time, 51.1 s in all) and passed on try 2 (11.6 s). The
+  status it printed showed the runner `Busy` with `usage.processes: 178` and `mem_bytes: 4211302400`: not the fake runner's one
+  exited child, but a large tree that was never the runner's.
+- **Hypotheses and what ruled them out (ER-28).** (1) The usage table keeps an exited pid until the next snapshot: the table is read
+  again every probe tick, and one stale child gives 3 processes, not 178. (2) Windows keeps an exited process visible while a handle is
+  open: the same count rules it out, and `Busy` needs a job-named child. (3) The refresh never re-ran: `until` pumps 20 s steps over
+  40 s of real time, several probe ticks; the job stayed `Busy`, which is a fresh `has_job_children` answer each tick. (4) The train's
+  paddock-proc snapshot change: Pitcrew's usage tree did not use paddock-proc's table at all. (5) Kept: the probe's `tree_members` and
+  `has_job_children` followed sysinfo's parent pid with no start-time check (ADR 0033 WP-6, open since 2026-10-30, waived in C53). On
+  Windows a parent pid outlives its process; the orphans of an earlier holder of the runner's pid (a detached server and everything it
+  runs, other slots compile on the same host) named the runner as their parent. Try 2's runner got another pid.
+- **Fix (fix/usage-exited-child-race).** paddock-proc gains `parent_of` (a link only from an older to a newer process, the rule
+  `descendants` and `tree_fold` use, now one function `follows`), and `listing_started` plus `table_of_listing`, so a caller that reads
+  its own list pairs each parent with an identity as `snapshot` does. Pitcrew's probe builds that table on every refresh; the usage
+  tree, `has_job_children` and the process metas take the parent only through `parent_of`. The two WP-6 waivers and three gone C53
+  baseline sites are removed. Regression tests fail on the old link: `a_parent_link_counts_only_when_the_child_started_after_its_parent`
+  and `a_runner_whose_pid_was_handed_on_does_not_count_the_old_holders_orphans` ("the exited child is no longer counted", left
+  `[10, 20, 21, 22]`). Identified from the job's own status line, not reproduced on Windows: Unix reparents orphans, so the link cannot
+  go stale there.
+- **Recurring:** ADR 0033's class, third time in two days (run 8674's harness kills, the paddock-proc pairing in 682208725, this). The
+  waived WP markers are the known sites; nothing finds a new parent-pid walk. A Clippy `disallowed-methods` entry for
+  `sysinfo::Process::parent` outside paddock-proc would make the class checked.

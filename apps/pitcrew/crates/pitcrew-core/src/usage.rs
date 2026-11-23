@@ -24,7 +24,9 @@ pub const MAX_TREE_PROCESSES: usize = 4096;
 pub struct ProcessInfo {
     /// Process id.
     pub pid: u32,
-    /// Parent process id, when known.
+    /// Parent process id, only through a sound link: the service sets it from `paddock_proc::parent_of`, which drops a
+    /// link to a parent that started after the child (on Windows the orphans of an earlier holder of a pid name its new
+    /// holder as their parent; ADR 0033).
     pub ppid: Option<u32>,
     /// Process group id (Unix), when known.
     pub pgid: Option<u32>,
@@ -36,7 +38,6 @@ pub struct ProcessInfo {
 
 /// The processes that belong to the runner with process id `root`: the root, its descendants and its process group,
 /// at most [`MAX_TREE_PROCESSES`]. Empty when `root` is not in the table (the runner is gone) or is a system pid.
-// ADR 0033 WP-6: a tree by parent pids without start times; skip a child older than its parent (paddock_proc::descendants)
 pub fn tree_members(root: u32, table: &[ProcessInfo]) -> Vec<ProcessInfo> {
     if root <= 1 || !table.iter().any(|p| p.pid == root) {
         return Vec::new();

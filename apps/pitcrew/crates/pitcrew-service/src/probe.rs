@@ -20,6 +20,8 @@ use sysinfo::{Disks, Pid, ProcessRefreshKind, ProcessesToUpdate, RefreshKind, Sy
 pub struct Probe {
     /// `None` when sysinfo could not start (logged once): the process table is then empty and the machine reads zero.
     sys: Option<System>,
+    /// The last listing as parents and identities (paddock_proc): which parent links are sound.
+    table: paddock_proc::Table,
     /// `None` when the volume list could not be read (logged): free space is then unknown.
     disks: Option<Disks>,
     space: SpaceCache,
@@ -47,6 +49,7 @@ impl Probe {
             .ok();
         let mut p = Probe {
             sys,
+            table: paddock_proc::Table::default(),
             disks,
             space: SpaceCache::default(),
             cpus: std::thread::available_parallelism().map_or(1, std::num::NonZero::get),
@@ -55,9 +58,11 @@ impl Probe {
         p
     }
 
-    /// Refreshes the process list (names, parents, executables, CPU).
+    /// Refreshes the process list (names, parents, executables, CPU) and reads each listed process's start time once, so
+    /// a parent link is followed only from an older process to a newer one ([`paddock_proc::parent_of`]).
     pub fn refresh_processes(&mut self) {
         let Some(sys) = self.sys.as_mut() else { return };
+        let listed_at = paddock_proc::listing_started();
         sys.refresh_processes_specifics(
             ProcessesToUpdate::All,
             true,
@@ -66,6 +71,16 @@ impl Probe {
                 .with_cpu()
                 .with_memory(),
         );
+        let listed: Vec<paddock_proc::Listed> = self
+            .processes()
+            .map(|(pid, p)| paddock_proc::Listed {
+                pid: pid.as_u32(),
+                parent: p.parent().map(Pid::as_u32),
+                rss: p.memory(),
+                is_thread: false,
+            })
+            .collect();
+        self.table = paddock_proc::table_of_listing(listed_at, listed);
     }
 
     /// The processes of the last refresh, without threads: on Linux sysinfo lists every thread (task) as an entry of
@@ -89,12 +104,14 @@ impl Probe {
     /// The process table as of the last refresh: ids, parents, process groups, CPU time and resident memory.
     pub fn process_table(&self) -> Vec<ProcessInfo> {
         self.processes()
-            .map(|(pid, p)| ProcessInfo {
-                pid: pid.as_u32(),
-                ppid: p.parent().map(Pid::as_u32),
-                pgid: process_group(pid.as_u32()),
-                cpu_time_ms: p.accumulated_cpu_time(),
-                rss_bytes: p.memory(),
+            .map(|(pid, p)| {
+                info_of(
+                    &self.table,
+                    pid.as_u32(),
+                    process_group(pid.as_u32()),
+                    p.accumulated_cpu_time(),
+                    p.memory(),
+                )
             })
             .collect()
     }
@@ -149,11 +166,12 @@ impl Probe {
     }
 
     /// Whether `pid` has child processes that belong to a job (its console host does not).
-    // ADR 0033 WP-6: children found by parent pid without start times; use paddock_proc::descendants
     pub fn has_job_children(&self, pid: u32) -> bool {
-        let parent = Pid::from_u32(pid);
-        self.processes()
-            .any(|(_, p)| p.parent() == Some(parent) && is_job_process(&p.name().to_string_lossy()))
+        has_job_children_in(
+            &self.table,
+            pid,
+            self.processes().map(|(child, p)| (child.as_u32(), p.name().to_string_lossy())),
+        )
     }
 
     /// A running process (other than `except`) whose executable is `exe`.
@@ -218,6 +236,27 @@ impl Probe {
     }
 }
 
+/// One listed process as the usage tree sees it. Its parent is the one `table` gives through a sound link only
+/// ([`paddock_proc::parent_of`]): a parent pid is only a number, and on Windows the orphans of an earlier holder of a
+/// runner's pid name the runner as their parent (CI run 8694 counted 178 such processes, 4.2 GB, as the runner's job).
+fn info_of(table: &paddock_proc::Table, pid: u32, pgid: Option<u32>, cpu_time_ms: u64, rss_bytes: u64) -> ProcessInfo {
+    ProcessInfo {
+        pid,
+        ppid: paddock_proc::parent_of(table, pid),
+        pgid,
+        cpu_time_ms,
+        rss_bytes,
+    }
+}
+
+/// Whether one of the `listed` processes (pid and name, from the listing `table` was made of) is a child of `pid` through a
+/// sound link and, by its name, a job's.
+fn has_job_children_in(table: &paddock_proc::Table, pid: u32, listed: impl IntoIterator<Item = (u32, impl AsRef<str>)>) -> bool {
+    listed
+        .into_iter()
+        .any(|(child, name)| paddock_proc::parent_of(table, child) == Some(pid) && is_job_process(name.as_ref()))
+}
+
 /// The process group of `pid` (Unix); `None` when it is gone or the platform has no groups.
 #[cfg(unix)]
 fn process_group(pid: u32) -> Option<u32> {
@@ -277,6 +316,55 @@ mod tests {
         if cfg!(unix) {
             assert!(mine.pgid.is_some());
         }
+    }
+
+    /// Regression (CI run 8694, Windows): the orphans of an earlier holder of the runner's pid still named it as their
+    /// parent, so the usage tree counted them (178 processes, 4.2 GB) and the runner stayed Busy with its own job child
+    /// gone; `usage_follows_the_runner_and_the_processes_it_started` waited 40 s for "the exited child is no longer counted".
+    #[test]
+    fn a_runner_whose_pid_was_handed_on_does_not_count_the_old_holders_orphans() {
+        use paddock_proc::{table_from, ProcEntry, StartTime};
+        let entry = |pid, parent, started: u64| ProcEntry {
+            pid,
+            parent: Some(parent),
+            rss: 1,
+            started: Some(StartTime::from_micros(started)),
+            is_thread: false,
+        };
+        let runner = 10;
+        // Pid 10 was a compiler client that started a server (20) and ended; the server and its compilers (21, 22) keep
+        // parent pid 10. The runner then got pid 10 and started its job (30).
+        let orphans = [entry(20, runner, 50), entry(21, 20, 60), entry(22, 20, 70)];
+        let mut rows = vec![entry(runner, 1, 100), entry(1, 0, 1)];
+        rows.extend(orphans);
+        let names = |table: &paddock_proc::Table| -> Vec<(u32, &'static str)> {
+            table.keys().map(|&pid| (pid, if pid == 1 { "init" } else { "job" })).collect()
+        };
+        let members = |table: &paddock_proc::Table| {
+            let infos: Vec<ProcessInfo> = table.keys().map(|&pid| info_of(table, pid, None, 0, 1)).collect();
+            let mut m: Vec<u32> = pitcrew_core::usage::tree_members(runner, &infos).iter().map(|p| p.pid).collect();
+            m.sort_unstable();
+            m
+        };
+
+        // After the job's child exited (the order the supervision test sees it fail in).
+        let after = table_from(rows.iter().copied());
+        assert_eq!(members(&after), vec![runner], "the exited child is no longer counted");
+        assert!(
+            !has_job_children_in(&after, runner, names(&after)),
+            "the old holder's orphans are not the runner's job"
+        );
+
+        let during = table_from(rows.iter().copied().chain([entry(30, runner, 200)]));
+        assert_eq!(
+            members(&during),
+            vec![runner, 30],
+            "the job's child counts with the runner, the orphans do not"
+        );
+        assert!(
+            has_job_children_in(&during, runner, names(&during)),
+            "the job's child makes the runner busy"
+        );
     }
 
     #[test]

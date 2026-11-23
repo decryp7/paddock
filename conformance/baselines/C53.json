@@ -137,21 +137,6 @@
    "hash": "ecca17297a744148"
   },
   {
-   "file": "apps/pitcrew/crates/pitcrew-service/src/probe.rs",
-   "line": 143,
-   "hash": "3c3dbe2e4f732c83"
-  },
-  {
-   "file": "apps/pitcrew/crates/pitcrew-service/src/probe.rs",
-   "line": 150,
-   "hash": "f027b71c43d6f655"
-  },
-  {
-   "file": "apps/pitcrew/crates/pitcrew-service/src/probe.rs",
-   "line": 157,
-   "hash": "6f233d14631e64b9"
-  },
-  {
    "file": "apps/pitcrew/crates/pitcrew-service/src/process.rs",
    "line": 374,
    "hash": "87cf7401d9f57119"
