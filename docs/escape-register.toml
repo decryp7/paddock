@@ -1,0 +1,14 @@
+# The D12 register (ADR 0117): one [[nightly]] per nightly the escape monitor judged (`dev plan --escapes` prints the row and
+# `dev plan --escapes --register` appends it through tools/paddock-dev/src/escape/register.rs, the one writer; ER-42: one accessor
+# reads it). The old planner's rule tables below may be deleted only after `required` (5, the ADR's number, never lower) consecutive
+# clean nightlies: no escape, nothing not measured, every selection record read. An escape starts the count again.
+# Checked by the paddock-dev test `escape_gate` on every run, so a change that deletes a table early fails.
+version = 1
+required = 5
+
+[[table]]
+file = "tools/paddock-dev/src/plan_gitea.rs"
+
+[[table]]
+file = "tools/paddock-dev/src/plan.rs"
+contains = "static GLOBAL: LazyLock"

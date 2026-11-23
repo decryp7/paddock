@@ -30,6 +30,7 @@ mod dev_bin;
 mod dev_tool_publish;
 mod dev_tool_workflow;
 mod gates_planner;
+mod escape_gate;
 mod generators;
 mod golden;
 mod heavy_install;
