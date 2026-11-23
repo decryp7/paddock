@@ -27,6 +27,12 @@ regex = "1"
 # ci_isolation: the {src} key of a kept build folder (ADR 0025 amendment); release_isolation: SHA-256 of the .crate archives.
 sha2 = "0.10"
 # C102 (ipc_endpoints): the syn pass over non-test code and the register/ratchet files.
+oxc_allocator = "0.159"
+oxc_ast = "0.159"
+oxc_ast_visit = "0.159"
+oxc_parser = "0.159"
+oxc_span = "0.159"
+oxc_resolver = { version = "11.24", default-features = false }
 syn = { version = "2", default-features = false, features = ["full", "parsing", "visit", "printing"] }
 proc-macro2 = { version = "1", features = ["span-locations"] }
 paddock-cli = { path = "../../crates/paddock-cli" }
@@ -35,7 +41,7 @@ paddock-proc = { path = "../../crates/paddock-proc" }
 paddock-git = { path = "../../crates/paddock-git" }
 # ci_s3_guard: the stall guard (a localhost proxy that cuts a request the store does not answer); no TLS stack without the `http` feature.
 paddock-net = { path = "../../crates/paddock-net", default-features = false }
-paddock-repo-graph = { path = "../../crates/paddock-repo-graph", features = ["git-history", "cargo-metadata", "content", "ts"] }
+paddock-repo-graph = { path = "../../crates/paddock-repo-graph", features = ["git-history", "cargo-metadata", "content"] }
 paddock-slots = { path = "../../crates/paddock-slots" }
 yaml-rust2 = "0.13"
 # disk: the usage index, as cargo's own global cache tracker is SQLite too (cargo clean gc). Bundled: no system library needed; MIT, SQLite is public domain.

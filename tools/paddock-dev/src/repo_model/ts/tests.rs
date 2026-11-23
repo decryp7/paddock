@@ -10,14 +10,8 @@ fn set(v: &[&str]) -> BTreeSet<String> {
 fn resolver(files: &[&str], texts: &[(&str, &str)], packages: &[(&str, &str)]) -> Resolver {
     Resolver::new(
         &set(files),
-        texts
-            .iter()
-            .map(|(p, t)| (p.to_string(), t.to_string()))
-            .collect(),
-        packages
-            .iter()
-            .map(|(n, d)| (n.to_string(), d.to_string()))
-            .collect(),
+        texts.iter().map(|(p, t)| (p.to_string(), t.to_string())).collect(),
+        packages.iter().map(|(n, d)| (n.to_string(), d.to_string())).collect(),
     )
 }
 
@@ -83,22 +77,10 @@ fn specifiers_resolve_over_tracked_files_extensions_indexes_and_the_js_alias() {
         &[],
     );
     let from = "app/e2e/a.spec.ts";
-    assert_eq!(
-        r.resolve(from, "./helper"),
-        Some(Target::File("app/e2e/helper.ts".into()))
-    );
-    assert_eq!(
-        r.resolve(from, "./helper.js"),
-        Some(Target::File("app/e2e/helper.ts".into()))
-    );
-    assert_eq!(
-        r.resolve(from, "./lib"),
-        Some(Target::File("app/e2e/lib/index.ts".into()))
-    );
-    assert_eq!(
-        r.resolve(from, "../src/x"),
-        Some(Target::File("app/src/x.ts".into()))
-    );
+    assert_eq!(r.resolve(from, "./helper"), Some(Target::File("app/e2e/helper.ts".into())));
+    assert_eq!(r.resolve(from, "./helper.js"), Some(Target::File("app/e2e/helper.ts".into())));
+    assert_eq!(r.resolve(from, "./lib"), Some(Target::File("app/e2e/lib/index.ts".into())));
+    assert_eq!(r.resolve(from, "../src/x"), Some(Target::File("app/src/x.ts".into())));
     assert_eq!(
         r.resolve("conformance/bin/cli.mjs", "../src/run.mjs"),
         Some(Target::File("conformance/src/run.mjs".into()))
@@ -111,28 +93,15 @@ fn specifiers_resolve_over_tracked_files_extensions_indexes_and_the_js_alias() {
 
 #[test]
 fn a_workspace_package_resolves_by_name_without_node_modules_and_an_outside_one_is_external() {
-    let r = resolver(
-        &["ui/package.json", "app/e2e/a.spec.ts"],
-        &[],
-        &[("@decryp7/paddock-ui", "ui")],
-    );
+    let r = resolver(&["ui/package.json", "app/e2e/a.spec.ts"], &[], &[("@decryp7/paddock-ui", "ui")]);
     let from = "app/e2e/a.spec.ts";
-    assert_eq!(
-        r.resolve(from, "@decryp7/paddock-ui"),
-        Some(Target::Package("ui".into()))
-    );
-    assert_eq!(
-        r.resolve(from, "@decryp7/paddock-ui/testing"),
-        Some(Target::Package("ui".into()))
-    );
+    assert_eq!(r.resolve(from, "@decryp7/paddock-ui"), Some(Target::Package("ui".into())));
+    assert_eq!(r.resolve(from, "@decryp7/paddock-ui/testing"), Some(Target::Package("ui".into())));
     assert_eq!(
         r.resolve(from, "@playwright/test"),
         Some(Target::External("@playwright/test".into()))
     );
-    assert_eq!(
-        r.resolve(from, "rxjs/operators"),
-        Some(Target::External("rxjs".into()))
-    );
+    assert_eq!(r.resolve(from, "rxjs/operators"), Some(Target::External("rxjs".into())));
     // Control: without the package in the npm graph the same name is external.
     let bare = resolver(&["ui/package.json", "app/e2e/a.spec.ts"], &[], &[]);
     assert_eq!(
@@ -143,13 +112,8 @@ fn a_workspace_package_resolves_by_name_without_node_modules_and_an_outside_one_
 
 #[test]
 fn tsconfig_paths_resolve_through_the_tracked_config() {
-    let tsconfig =
-        r#"{ "compilerOptions": { "baseUrl": ".", "paths": { "@app/*": ["src/app/*"] } } }"#;
-    let files = [
-        "app/tsconfig.json",
-        "app/src/app/shell.ts",
-        "app/src/main.ts",
-    ];
+    let tsconfig = r#"{ "compilerOptions": { "baseUrl": ".", "paths": { "@app/*": ["src/app/*"] } } }"#;
+    let files = ["app/tsconfig.json", "app/src/app/shell.ts", "app/src/main.ts"];
     let r = resolver(&files, &[("app/tsconfig.json", tsconfig)], &[]);
     assert_eq!(
         r.resolve("app/src/main.ts", "@app/shell"),
@@ -179,10 +143,7 @@ fn the_graph_is_the_same_with_and_without_node_modules_on_disk() {
     // Determinism (review P1-7): CI's plan job has no node_modules, a developer's checkout has them. The resolver sees only the
     // tracked files, so both give the same graph.
     let tracked: &[(&str, &str)] = &[
-        (
-            "package.json",
-            r#"{ "name": "root", "workspaces": ["ui", "app"] }"#,
-        ),
+        ("package.json", r#"{ "name": "root", "workspaces": ["ui", "app"] }"#),
         ("ui/package.json", r#"{ "name": "@decryp7/paddock-ui" }"#),
         (
             "app/e2e/a.spec.ts",
@@ -200,10 +161,7 @@ fn the_graph_is_the_same_with_and_without_node_modules_on_disk() {
             "node_modules/@decryp7/paddock-ui/package.json",
             r#"{ "name": "@decryp7/paddock-ui", "main": "x.js" }"#,
         ),
-        (
-            "node_modules/@decryp7/paddock-ui/x.js",
-            "module.exports = 1;\n",
-        ),
+        ("node_modules/@decryp7/paddock-ui/x.js", "module.exports = 1;\n"),
     ];
     let graph_of = |dir: &Path| {
         let files: BTreeSet<String> = tracked.iter().map(|(p, _)| p.to_string()).collect();
@@ -217,12 +175,7 @@ fn the_graph_is_the_same_with_and_without_node_modules_on_disk() {
             texts,
             BTreeMap::from([("@decryp7/paddock-ui".to_string(), "ui".to_string())]),
         );
-        let read = |paths: &[String]| {
-            paths
-                .iter()
-                .map(|p| std::fs::read_to_string(dir.join(p)).ok())
-                .collect()
-        };
+        let read = |paths: &[String]| paths.iter().map(|p| std::fs::read_to_string(dir.join(p)).ok()).collect();
         import_graph(&["app/e2e/a.spec.ts".to_string()], &r, &read, &|_| true)
     };
     let without = tree(tracked);
@@ -241,23 +194,15 @@ fn the_graph_is_the_same_with_and_without_node_modules_on_disk() {
     );
     // Positive control: oxc's resolver on the real disk does see node_modules, so the test above can tell the difference.
     let os = oxc_resolver::Resolver::new(ResolveOptions::default());
-    let disk = os
-        .resolve(with.path().join("app/e2e"), "left-pad")
-        .map(|r| r.path().to_path_buf());
+    let disk = os.resolve(with.path().join("app/e2e"), "left-pad").map(|r| r.path().to_path_buf());
     assert!(disk.is_ok_and(|p| p.ends_with("node_modules/left-pad/index.js")));
-    assert!(
-        os.resolve(without.path().join("app/e2e"), "left-pad")
-            .is_err()
-    );
+    assert!(os.resolve(without.path().join("app/e2e"), "left-pad").is_err());
 }
 
 #[test]
 fn the_walk_follows_imports_transitively_records_unresolved_and_the_control_drops_the_edge() {
     let texts: BTreeMap<&str, &str> = BTreeMap::from([
-        (
-            "e2e/a.spec.ts",
-            "import { h } from './fixtures';\nimport { g } from './gone';\n",
-        ),
+        ("e2e/a.spec.ts", "import { h } from './fixtures';\nimport { g } from './gone';\n"),
         ("e2e/fixtures.ts", "export * from './deep/h';"),
         ("e2e/deep/h.ts", "export const h = 1;"),
         ("e2e/broken.ts", "export const = ;;; {{{"),
@@ -265,37 +210,19 @@ fn the_walk_follows_imports_transitively_records_unresolved_and_the_control_drop
     ]);
     let files: BTreeSet<String> = texts.keys().map(|s| s.to_string()).collect();
     let r = Resolver::new(&files, BTreeMap::new(), BTreeMap::new());
-    let read = |paths: &[String]| {
-        paths
-            .iter()
-            .map(|p| texts.get(p.as_str()).map(|t| t.to_string()))
-            .collect()
-    };
-    let g = import_graph(
-        &["e2e/a.spec.ts".to_string(), "e2e/b.spec.ts".to_string()],
-        &r,
-        &read,
-        &|_| true,
-    );
+    let read = |paths: &[String]| paths.iter().map(|p| texts.get(p.as_str()).map(|t| t.to_string())).collect();
+    let g = import_graph(&["e2e/a.spec.ts".to_string(), "e2e/b.spec.ts".to_string()], &r, &read, &|_| true);
     assert!(g.edges["e2e/a.spec.ts"].contains(&Target::File("e2e/fixtures.ts".into())));
     assert!(g.edges["e2e/fixtures.ts"].contains(&Target::File("e2e/deep/h.ts".into())));
     assert_eq!(g.unresolved["e2e/a.spec.ts"], ["./gone"]);
     assert!(g.errors.contains_key("e2e/broken.ts"));
     assert_eq!(g.reads, 3);
     // `follow` stops the walk: a file it refuses is an edge target but is not read.
-    let shallow = import_graph(&["e2e/a.spec.ts".to_string()], &r, &read, &|p| {
-        !p.contains("fixtures")
-    });
+    let shallow = import_graph(&["e2e/a.spec.ts".to_string()], &r, &read, &|p| !p.contains("fixtures"));
     assert!(!shallow.edges.contains_key("e2e/fixtures.ts"));
     // Positive control: without the import line the edge is gone.
-    let texts2: BTreeMap<&str, &str> =
-        BTreeMap::from([("e2e/a.spec.ts", "const x = 1;"), ("e2e/fixtures.ts", "")]);
-    let read2 = |paths: &[String]| {
-        paths
-            .iter()
-            .map(|p| texts2.get(p.as_str()).map(|t| t.to_string()))
-            .collect()
-    };
+    let texts2: BTreeMap<&str, &str> = BTreeMap::from([("e2e/a.spec.ts", "const x = 1;"), ("e2e/fixtures.ts", "")]);
+    let read2 = |paths: &[String]| paths.iter().map(|p| texts2.get(p.as_str()).map(|t| t.to_string())).collect();
     let g2 = import_graph(&["e2e/a.spec.ts".to_string()], &r, &read2, &|_| true);
     assert!(g2.edges["e2e/a.spec.ts"].is_empty());
 }

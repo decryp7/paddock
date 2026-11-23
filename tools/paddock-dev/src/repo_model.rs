@@ -456,6 +456,7 @@ pub mod ci;
 pub mod code;
 pub mod decl;
 pub mod reads;
+pub mod ts;
 
 #[cfg(test)]
 mod tests;

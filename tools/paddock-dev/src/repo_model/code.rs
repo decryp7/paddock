@@ -10,7 +10,7 @@
 //!   reach (review P1-3). A required read (`include*!`, `#[path]`) of an untracked path is an unresolved reference. The candidate
 //!   files come from one `git grep -l` (one spawn); only they are read. [`CodeExtractor::base_reads`] reads the base tree too when
 //!   the change deleted a file, so a deleted read target still reaches its reader.
-//! - **imports**: `oxc_parser` and `oxc_resolver` over the tracked files only (`paddock_repo_graph::ts`; no `node_modules`, so
+//! - **imports**: `oxc_parser` and `oxc_resolver` over the tracked files only (`super::ts`; no `node_modules`, so
 //!   local and CI give the same graph). A script node (from the CI adapter) written in JS imports other files; each imported file
 //!   becomes a script node with an `imports` edge, transitively, so `conformance/src/*.mjs` reaches the CLI a contract's check line
 //!   runs (difference 4 of §8); a workspace package imported by name is an `imports` edge to that package's node. A relative
@@ -23,12 +23,12 @@
 //!   project with an unresolved import in its specs or helpers (the project runs in full on a test reach).
 
 use super::reads::{Parsed, rust_reads};
+use super::ts::{self, Target};
 use paddock_repo_graph::Graph;
 use paddock_repo_graph::model::Unresolved;
 use paddock_repo_graph::model::extract::{BulkRead, ExtractError, Extracted, Extractor};
 use paddock_repo_graph::model::glob;
 use paddock_repo_graph::model::nodes::{Edge, EdgeKind, ModelNode, NodeKind};
-use paddock_repo_graph::ts::{self, Target};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 

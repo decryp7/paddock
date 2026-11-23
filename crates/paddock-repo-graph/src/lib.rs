@@ -22,8 +22,6 @@ pub mod model;
 mod npm;
 mod paths;
 mod source;
-#[cfg(feature = "ts")]
-pub mod ts;
 
 #[cfg(feature = "cargo-metadata")]
 pub use cargo::CargoCli;

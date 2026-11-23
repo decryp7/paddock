@@ -1,4 +1,6 @@
-//! TypeScript and JavaScript imports through oxc (ADR 0117 §4 `imports`, §10; the `ts` feature): `oxc_parser` reads every import
+//! TypeScript and JavaScript imports through oxc (ADR 0117 §4 `imports`, §10; in paddock-dev, not the shared crate: `oxc_resolver`
+//! turns on serde_json's `preserve_order`, which a feature of the shared crate would put into every crate of that workspace under
+//! `--all-features`): `oxc_parser` reads every import
 //! form of a file (static `import`/`export ... from`, `import x = require(..)`, type imports, `import('..')` and `require('..')`),
 //! and `oxc_resolver` resolves the specifiers over the **tracked files only**: its file system is the tracked set and the texts
 //! the caller read in one bulk call, never the disk, so a checkout with `node_modules` (a developer's) and one without (CI's plan
@@ -13,36 +15,28 @@
 //!   not a string literal.
 //! - A file the parser cannot read is an error the caller turns into "full" for its project (§2, review round 2 P2-6).
 //!
-//! The text scanner [`crate::imports`] stays the fallback a build without this feature uses (§10).
+//! The text scanner `paddock_repo_graph::imports` stays the fallback for a user of the shared crate without this parser (§10).
 
-use crate::paths::{dirname, join_normalized};
 use oxc_allocator::Allocator;
-use oxc_ast::ast::{
-    Argument, CallExpression, Expression, ImportExpression, TSImportType, TSModuleReference,
-};
+use oxc_ast::ast::{Argument, CallExpression, Expression, ImportExpression, TSImportType, TSModuleReference};
 use oxc_ast_visit::Visit;
 use oxc_parser::Parser;
-use oxc_resolver::{
-    FileMetadata, FileSystem, ResolveError, ResolveOptions, ResolverGeneric, TsconfigDiscovery,
-};
+use oxc_resolver::{FileMetadata, FileSystem, ResolveError, ResolveOptions, ResolverGeneric, TsconfigDiscovery};
 use oxc_span::SourceType;
+use paddock_repo_graph::{dirname, join_normalized};
 use std::collections::{BTreeMap, BTreeSet};
 use std::io;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
 /// The extensions a specifier without one may name, in the order TypeScript's bundler resolution tries them.
-const EXTENSIONS: [&str; 9] = [
-    ".ts", ".tsx", ".mts", ".cts", ".d.ts", ".js", ".mjs", ".cjs", ".json",
-];
+const EXTENSIONS: [&str; 9] = [".ts", ".tsx", ".mts", ".cts", ".d.ts", ".js", ".mjs", ".cjs", ".json"];
 
 /// The files whose text the resolver itself reads (package manifests and TypeScript configs): [`Resolver::wants`] names them so the
 /// caller reads them in its one bulk call.
 pub fn resolver_reads(path: &str) -> bool {
     let name = path.rsplit('/').next().unwrap_or(path);
-    name == "package.json"
-        || (name.starts_with("tsconfig") && name.ends_with(".json"))
-        || name == "jsconfig.json"
+    name == "package.json" || (name.starts_with("tsconfig") && name.ends_with(".json")) || name == "jsconfig.json"
 }
 
 /// What one specifier names.
@@ -75,9 +69,7 @@ impl Collect<'_> {
     /// A literal specifier; `None` (a string oxc cannot give as UTF-8) counts as one that cannot be resolved.
     fn push(&mut self, s: Option<&str>) {
         match s {
-            Some(s) if !self.out.literal.iter().any(|x| x == s) => {
-                self.out.literal.push(s.to_string())
-            }
+            Some(s) if !self.out.literal.iter().any(|x| x == s) => self.out.literal.push(s.to_string()),
             Some(_) => {}
             None => self.out.dynamic += 1,
         }
@@ -96,13 +88,9 @@ impl Collect<'_> {
 fn fold(e: &Expression) -> Option<String> {
     match e {
         Expression::StringLiteral(s) => s.value.as_str().map(str::to_string),
-        Expression::TemplateLiteral(t) if t.expressions.is_empty() && t.quasis.len() == 1 => t
-            .quasis[0]
-            .value
-            .cooked
-            .as_ref()
-            .and_then(|c| c.as_str())
-            .map(str::to_string),
+        Expression::TemplateLiteral(t) if t.expressions.is_empty() && t.quasis.len() == 1 => {
+            t.quasis[0].value.cooked.as_ref().and_then(|c| c.as_str()).map(str::to_string)
+        }
         Expression::ParenthesizedExpression(p) => fold(&p.expression),
         Expression::BinaryExpression(b) if b.operator == oxc_ast::ast::BinaryOperator::Addition => {
             Some(format!("{}{}", fold(&b.left)?, fold(&b.right)?))
@@ -126,9 +114,7 @@ fn fold(e: &Expression) -> Option<String> {
                 .elements
                 .iter()
                 .map(|el| match el {
-                    oxc_ast::ast::ArrayExpressionElement::StringLiteral(s) => {
-                        s.value.as_str().map(str::to_string)
-                    }
+                    oxc_ast::ast::ArrayExpressionElement::StringLiteral(s) => s.value.as_str().map(str::to_string),
                     _ => None,
                 })
                 .collect();
@@ -160,10 +146,7 @@ impl<'a> Visit<'a> for Collect<'_> {
         self.push(it.source.value.as_str());
     }
 
-    fn visit_ts_import_equals_declaration(
-        &mut self,
-        it: &oxc_ast::ast::TSImportEqualsDeclaration<'a>,
-    ) {
+    fn visit_ts_import_equals_declaration(&mut self, it: &oxc_ast::ast::TSImportEqualsDeclaration<'a>) {
         if let TSModuleReference::ExternalModuleReference(r) = &it.module_reference {
             self.push(r.expression.value.as_str());
         }
@@ -176,12 +159,10 @@ impl<'a> Visit<'a> for Collect<'_> {
         {
             match &it.arguments[0] {
                 Argument::StringLiteral(s) => self.push(s.value.as_str()),
-                Argument::TemplateLiteral(t) if t.expressions.is_empty() && t.quasis.len() == 1 => {
-                    match &t.quasis[0].value.cooked {
-                        Some(c) => self.push(c.as_str()),
-                        None => self.out.dynamic += 1,
-                    }
-                }
+                Argument::TemplateLiteral(t) if t.expressions.is_empty() && t.quasis.len() == 1 => match &t.quasis[0].value.cooked {
+                    Some(c) => self.push(c.as_str()),
+                    None => self.out.dynamic += 1,
+                },
                 _ => self.out.dynamic += 1,
             }
         }
@@ -195,12 +176,7 @@ pub fn specifiers(path: &str, text: &str) -> Result<Specifiers, String> {
     let allocator = Allocator::default();
     let parsed = Parser::new(&allocator, text, source_type).parse();
     if parsed.fatal_error {
-        let first = parsed
-            .diagnostics
-            .iter()
-            .next()
-            .map(|d| d.to_string())
-            .unwrap_or_default();
+        let first = parsed.diagnostics.iter().next().map(|d| d.to_string()).unwrap_or_default();
         return Err(format!("oxc cannot parse it: {first}"));
     }
     let mut out = Specifiers::default();
@@ -243,10 +219,7 @@ impl Tracked {
     }
 
     fn missing(path: &Path) -> io::Error {
-        io::Error::new(
-            io::ErrorKind::NotFound,
-            format!("{} is not tracked", path.display()),
-        )
+        io::Error::new(io::ErrorKind::NotFound, format!("{} is not tracked", path.display()))
     }
 }
 
@@ -343,11 +316,7 @@ fn builtin(spec: &str) -> bool {
         "v8",
         "zlib",
     ];
-    spec.starts_with("node:")
-        || NODE.contains(&spec)
-        || NODE
-            .iter()
-            .any(|n| spec.strip_prefix(n).is_some_and(|r| r.starts_with('/')))
+    spec.starts_with("node:") || NODE.contains(&spec) || NODE.iter().any(|n| spec.strip_prefix(n).is_some_and(|r| r.starts_with('/')))
 }
 
 /// The package name of a bare specifier (`@scope/name/sub` is `@scope/name`, `name/sub` is `name`).
@@ -375,11 +344,7 @@ pub struct Resolver {
 impl Resolver {
     /// A resolver over `files` (every tracked file), `texts` (at least every file [`resolver_reads`] names) and `packages`
     /// (workspace package name to its folder).
-    pub fn new(
-        files: &BTreeSet<String>,
-        texts: BTreeMap<String, String>,
-        packages: BTreeMap<String, String>,
-    ) -> Resolver {
+    pub fn new(files: &BTreeSet<String>, texts: BTreeMap<String, String>, packages: BTreeMap<String, String>) -> Resolver {
         let mut dirs = BTreeSet::new();
         for f in files {
             let mut d = dirname(f);
@@ -397,20 +362,11 @@ impl Resolver {
             extensions: EXTENSIONS.iter().map(|e| e.to_string()).collect(),
             // TypeScript's ESM style: `./x.js` names `./x.ts`.
             extension_alias: vec![
-                (
-                    ".js".into(),
-                    vec![".ts".into(), ".tsx".into(), ".js".into()],
-                ),
+                (".js".into(), vec![".ts".into(), ".tsx".into(), ".js".into()]),
                 (".mjs".into(), vec![".mts".into(), ".mjs".into()]),
                 (".cjs".into(), vec![".cts".into(), ".cjs".into()]),
             ],
-            condition_names: vec![
-                "import".into(),
-                "require".into(),
-                "node".into(),
-                "types".into(),
-                "default".into(),
-            ],
+            condition_names: vec!["import".into(), "require".into(), "node".into(), "types".into(), "default".into()],
             main_fields: vec!["module".into(), "main".into(), "types".into()],
             builtin_modules: true,
             symlinks: false,
@@ -418,10 +374,7 @@ impl Resolver {
             ..ResolveOptions::default()
         };
         Resolver {
-            with_tsconfig: ResolverGeneric::new_with_file_system(
-                tracked.clone(),
-                options(Some(TsconfigDiscovery::Auto)),
-            ),
+            with_tsconfig: ResolverGeneric::new_with_file_system(tracked.clone(), options(Some(TsconfigDiscovery::Auto))),
             plain: ResolverGeneric::new_with_file_system(tracked.clone(), options(None)),
             tracked,
             packages,
@@ -434,11 +387,7 @@ impl Resolver {
         if builtin(spec) {
             return Some(Target::Builtin);
         }
-        let relative = spec.starts_with("./")
-            || spec.starts_with("../")
-            || spec == "."
-            || spec == ".."
-            || spec.starts_with('/');
+        let relative = spec.starts_with("./") || spec.starts_with("../") || spec == "." || spec == ".." || spec.starts_with('/');
         if !relative && let Some(dir) = self.packages.get(package_name(spec)) {
             return Some(Target::Package(dir.clone()));
         }
@@ -457,10 +406,7 @@ impl Resolver {
             Some(p) => self
                 .packages
                 .values()
-                .filter(|d| {
-                    p.strip_prefix(d.as_str())
-                        .is_some_and(|r| r.starts_with('/'))
-                })
+                .filter(|d| p.strip_prefix(d.as_str()).is_some_and(|r| r.starts_with('/')))
                 .max_by_key(|d| d.len())
                 .map(|d| Target::Package(d.clone()))
                 .or_else(|| (!relative).then(|| Target::External(package_name(spec).to_string()))),
@@ -530,10 +476,7 @@ pub fn import_graph(
             let mut to = BTreeSet::new();
             let mut bad: Vec<String> = Vec::new();
             if specs.dynamic > 0 {
-                bad.push(format!(
-                    "{} dynamic import(s) with a computed specifier",
-                    specs.dynamic
-                ));
+                bad.push(format!("{} dynamic import(s) with a computed specifier", specs.dynamic));
             }
             for s in &specs.literal {
                 match resolver.resolve(f, s) {
