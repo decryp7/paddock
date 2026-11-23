@@ -99,7 +99,7 @@ fn changed_files(root: &Path, base: &str) -> Option<Vec<String>> {
 
 /// The workspace folder relative to the repository root, `/` separated.
 fn workspace_of(root: &Path, dir: &Path) -> String {
-    let canon = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    let canon = |p: &Path| paddock_env::winpath::real(p).unwrap_or_else(|_| p.to_path_buf());
     canon(dir)
         .strip_prefix(canon(root))
         .map(|p| p.to_string_lossy().replace('\\', "/"))
