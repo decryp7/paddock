@@ -1,10 +1,9 @@
-//! The declared inputs and owners of the repository (ADR 0117 §3): the defaults this crate carries ([`Inputs::defaults`]),
-//! merged with the entries of `docs/repo-graph.toml` ([`Inputs::merged`]). The file is read by one accessor at the edge,
-//! `paddock-dev`'s `repo_inputs` (ER-42), so this crate stays free of a TOML reader and of a change to every app's lockfile.
+//! The declared inputs and owners of the repository (ADR 0117 §3): every one of them is data in `docs/repo-graph.toml`, read by
+//! one accessor at the edge, `paddock-dev`'s `repo_inputs` (ER-42), so this crate holds no path (§14, [`super::guard`]) and no
+//! TOML reader (which would change every app's lockfile through the workspace hack).
 //!
 //! A named input is a file set and what it reaches (Nx `namedInputs`, Turborepo `globalDependencies`); an owner rule says who owns
-//! a path no project claims (`none`: nothing builds it). A file entry replaces the default input of the same name; its owners
-//! come after the defaults and win a tie.
+//! a path no project claims (`none`: nothing builds it); the most specific owner pattern wins, a later rule a tie.
 
 use super::Reach;
 use super::glob;
@@ -47,416 +46,6 @@ impl Target {
     }
 }
 
-/// The default named inputs: (name, files, reaches, content extractor); every reach is `code`. A reach word as the inputs file
-/// spells it.
-/// One default input row: (name, files, reaches, content extractor).
-type InputRow = (
-    &'static str,
-    &'static [&'static str],
-    &'static [&'static str],
-    Option<&'static str>,
-);
-
-const DEFAULT_INPUTS: &[InputRow] = &[
-    (
-        "rust-toolchain",
-        &["/rust-toolchain", "/rust-toolchain.toml"],
-        &["all"],
-        None,
-    ),
-    (
-        "npm-root",
-        &["/package.json", "/.npmrc", "/.nvmrc", "tsconfig/**"],
-        &["all"],
-        None,
-    ),
-    // Narrowed by the lock's content: only the workspaces whose resolved packages changed (and their dependents).
-    ("npm-lock", &["/package-lock.json"], &[], Some("npm-lock")),
-    (
-        "cargo-config",
-        &[".cargo/**", "lint/**"],
-        &["cargo", "project:crates", "project:paddock-dev"],
-        None,
-    ),
-    (
-        "git-attributes",
-        &["/.gitattributes"],
-        &["project:conformance"],
-        Some("attributes"),
-    ),
-    (
-        "check-id-reservations",
-        &["conformance/reserved/**"],
-        &[],
-        None,
-    ),
-    (
-        "lessons",
-        &["docs/lessons.md", "docs/rules.md", "docs/blocks/**"],
-        &["project:conformance", "project:tools"],
-        None,
-    ),
-    (
-        "repo-graph",
-        &["docs/repo-graph.toml"],
-        &["project:paddock-dev", "project:conformance"],
-        None,
-    ),
-    (
-        "gates-register",
-        &["docs/gates.toml"],
-        &["project:paddock-dev", "project:conformance"],
-        None,
-    ),
-    (
-        "generators-register",
-        &["docs/generators.toml"],
-        &["project:paddock-dev"],
-        None,
-    ),
-    (
-        "known-copies",
-        &["docs/known-copies.toml"],
-        &["project:tools", "project:conformance"],
-        None,
-    ),
-    (
-        "harnesses",
-        &["docs/harnesses.toml"],
-        &["project:conformance"],
-        None,
-    ),
-    (
-        "ipc-endpoints",
-        &["docs/ipc-endpoints.toml", "docs/ipc-endpoint-ratchet.toml"],
-        &["project:conformance"],
-        None,
-    ),
-    (
-        "ci-scope-register",
-        &["docs/ci-scope-first-runs.toml"],
-        &["project:paddock-dev"],
-        None,
-    ),
-    (
-        "design-docs",
-        &[
-            "docs/design-guide.md",
-            "docs/benchmarks.md",
-            "docs/benchmarks/**",
-        ],
-        &["project:conformance"],
-        None,
-    ),
-    (
-        "doc-images",
-        &[
-            "docs/images/src/**",
-            "docs/design/**",
-            "**/*.drawio",
-            "docs/**/svg/*.svg",
-            "diagrams/**/svg/*.svg",
-            "docs/images/*.svg",
-        ],
-        &["project:tools"],
-        None,
-    ),
-    ("wiki", &["docs/wiki/**"], &["project:tools"], None),
-    (
-        "changelogs",
-        &[
-            "apps/*/CHANGELOG.md",
-            "crates/*/CHANGELOG.md",
-            "ui/projects/*/CHANGELOG.md",
-            "apps/*/vendor/**/*.md",
-        ],
-        &["owner"],
-        None,
-    ),
-    (
-        "prose-read-by-code",
-        &[
-            "**/resources/**/*.md",
-            "**/samples/**/*.md",
-            "**/src/**/*.md",
-            "**/tests/**/*.md",
-            "**/test/**/*.md",
-            "**/templates/**/*.md",
-            "**/e2e/**/*.md",
-            "**/fixtures/**/*.md",
-        ],
-        &["owner"],
-        None,
-    ),
-    (
-        "demo-readmes",
-        &["apps/shell-demo/README.md", "apps/workbench-demo/README.md"],
-        &["project:tools"],
-        None,
-    ),
-    (
-        "lint-wiring",
-        &[
-            "apps/*/app/eslint*.js",
-            "apps/*/app/eslint*.cjs",
-            "apps/*/app/eslint*.mjs",
-            "apps/*/app/eslint-suppressions.json",
-            "apps/*/app/angular.json",
-            "apps/*/app/package.json",
-            "apps/*/paddock.ci.json",
-            "ui/eslint*.js",
-            "ui/eslint*.cjs",
-            "ui/eslint*.mjs",
-            "ui/eslint-suppressions.json",
-            "ui/angular.json",
-            "ui/package.json",
-            "ui/paddock.ci.json",
-        ],
-        &["owner", "project:eslint"],
-        None,
-    ),
-    (
-        "conformance-config",
-        &[
-            "/paddock.conformance.json",
-            "/paddock.waivers.toml",
-            "/.gitleaks.toml",
-        ],
-        &["project:conformance"],
-        None,
-    ),
-    (
-        "dev-wrapper",
-        &["/dev", "/dev.cmd"],
-        &["project:paddock-dev"],
-        None,
-    ),
-    (
-        "scripts",
-        &["scripts/**"],
-        &["project:tools", "project:ui"],
-        None,
-    ),
-    (
-        "ci-image",
-        &["ci-image/**"],
-        &["project:ci-image", "project:ui", "project:tools"],
-        None,
-    ),
-    // The CI files no workflow or action owns: the label set (pr/labels.rs reads it) and the workflow templates (the bench
-    // template, read by paddock-bench and the CI-actions tests).
-    (
-        "gitea-labels",
-        &["/.gitea/labels.toml"],
-        &["project:paddock-dev"],
-        None,
-    ),
-    (
-        "workflow-templates",
-        &[".gitea/workflow-templates/**"],
-        &["project:conformance", "project:crates"],
-        None,
-    ),
-    // The diagram sources and their export script (the diagrams check renders them).
-    (
-        "diagram-sources",
-        &["diagrams/**/*.xml", "diagrams/scripts/**"],
-        &["project:tools"],
-        None,
-    ),
-    // brief_check.rs `include_str!`s a template (review round 3).
-    (
-        "templates",
-        &["templates/**"],
-        &["project:tools", "project:paddock-dev"],
-        None,
-    ),
-    (
-        "repo-tooling",
-        &[
-            "renovate/**",
-            "/renovate.json",
-            "/CODEOWNERS",
-            "/wiki-lint.json",
-            ".claude/hooks/**",
-            ".claude/settings.json",
-            "/lefthook.yml",
-        ],
-        &["project:tools"],
-        None,
-    ),
-];
-
-/// The additive inputs: a check or test that reads files other projects own (ADR 0117 §3, the planner's former `C99_INPUT`,
-/// `C100_INPUTS`, `PARITY_INPUT`, `HOOKS_PARITY_INPUT`, `APP_CAPABILITY_INPUT`, `PER_MACHINE_INPUT`, `E2E_GUARD_INPUTS`,
-/// `NOTICES_INPUTS`, `GENERATED` and the cause-code scan). The file keeps its owner; the input adds its targets. (name, files,
-/// reaches, except.)
-/// One additive input row: (name, files, reaches, except).
-type AddRow = (
-    &'static str,
-    &'static [&'static str],
-    &'static [&'static str],
-    &'static [&'static str],
-);
-
-const DEFAULT_ADDS: &[AddRow] = &[
-    (
-        "c99-reads",
-        &[
-            "apps/**/Cargo.toml",
-            "apps/**/Cargo.lock",
-            "crates/**/Cargo.toml",
-            "crates/**/Cargo.lock",
-            "apps/**/*.rs",
-            "crates/**/*.rs",
-            "apps/**/*.c",
-            "crates/**/*.c",
-            "apps/**/*.cc",
-            "crates/**/*.cc",
-            "apps/**/*.cpp",
-            "crates/**/*.cpp",
-            "apps/**/*.m",
-            "crates/**/*.m",
-            "apps/**/*.mm",
-            "crates/**/*.mm",
-            "apps/**/*.h",
-            "crates/**/*.h",
-            "apps/**/*.swift",
-            "crates/**/*.swift",
-            "**/app/src/**/*.ts",
-            "**/ui/projects/**/*.ts",
-            "**/src-tauri/capabilities/*.json",
-            "paddock.ci.json",
-            "conformance/src/**",
-            "conformance/bin/**",
-            ".cargo/config.toml",
-            "/paddock.waivers.toml",
-        ],
-        &["project:c99"],
-        &[],
-    ),
-    (
-        "cause-code-scan",
-        &["crates/**/*.rs", "apps/**/*.rs"],
-        &["project:ui"],
-        &[
-            "**/target/**",
-            "**/node_modules/**",
-            "**/tests/**",
-            "**/benches/**",
-            "tests.rs",
-        ],
-    ),
-    (
-        "c100-reads",
-        &[
-            "docs/gates.toml",
-            "apps/*/paddock.ci.json",
-            "package.json",
-            "/lefthook.yml",
-            "/AGENTS.md",
-            "apps/*/AGENTS.md",
-            "apps/*/docs/performance.md",
-            "README.md",
-            "docs/wiki/**/*.md",
-            "conformance/src/checks/**",
-            "conformance/src/cli.mjs",
-            "tools/paddock-dev/src/gates/**",
-            "scripts/**/check-*.mjs",
-            "scripts/**/check-*.sh",
-            "scripts/**/check-*.ps1",
-            "scripts/**/*.test.mjs",
-            "conformance/**/check-*.mjs",
-            "conformance/**/check-*.sh",
-            "conformance/**/check-*.ps1",
-            "conformance/**/*.test.mjs",
-            "tools/**/check-*.mjs",
-            "tools/**/check-*.sh",
-            "tools/**/check-*.ps1",
-            "tools/**/*.test.mjs",
-            "apps/*/scripts/**/check-*.mjs",
-            "apps/*/scripts/**/check-*.sh",
-            "apps/*/scripts/**/check-*.ps1",
-            "apps/*/scripts/**/*.test.mjs",
-        ],
-        &["project:conformance"],
-        &[],
-    ),
-    (
-        "conformance-parity",
-        &[
-            "conformance/src/**/*.mjs",
-            "conformance/src/**/*.json",
-            "conformance/bin/**/*.mjs",
-            "conformance/bin/**/*.json",
-            "conformance/baselines/**/*.mjs",
-            "conformance/baselines/**/*.json",
-        ],
-        &["project:paddock-dev"],
-        &[],
-    ),
-    (
-        "hooks-parity",
-        &["tools/paddock-dev/src/places.rs", "docs/known-copies.toml"],
-        &["project:tools"],
-        &[],
-    ),
-    (
-        "app-capabilities",
-        &[
-            "apps/*/src-tauri/Cargo.toml",
-            "apps/*/app/src-tauri/Cargo.toml",
-            "apps/*/src-tauri/capabilities/**",
-            "apps/*/app/src-tauri/capabilities/**",
-        ],
-        &["project:conformance"],
-        &[],
-    ),
-    (
-        "per-machine",
-        &[
-            "apps/*/app/src-tauri/tauri.conf.json",
-            "apps/*/app/src-tauri/tauri.windows.conf.json",
-            "apps/*/app/src-tauri/windows/**",
-            "crates/paddock-setup/nsis/paddock-per-machine.nsh",
-        ],
-        &["project:conformance", "project:crates"],
-        &[],
-    ),
-    // The icon tools render every app's icons (the planner's `icons/` rule; `icons/<app>/` is the app's own, an open gap).
-    (
-        "icon-tools",
-        &["icons/tools/**", "icons/package.json"],
-        &["apps"],
-        &[],
-    ),
-    (
-        "e2e-guards",
-        &[
-            "ui/projects/paddock-e2e/src/env.ts",
-            "ui/projects/paddock-e2e/src/build-guard.ts",
-        ],
-        &["apps"],
-        &[],
-    ),
-    (
-        "notices",
-        &[
-            "scripts/notices.sh",
-            "templates/repo/about.toml",
-            "conformance/src/notices/**",
-        ],
-        &["apps"],
-        &[],
-    ),
-    (
-        "generated-bindings",
-        &["ui/**/generated/*.ts", "ui/**/generated/*.json"],
-        &["project:crates"],
-        &["**/public-api.ts", "**/ng-package.json"],
-    ),
-];
-
 /// One named input.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Input {
@@ -496,7 +85,7 @@ pub struct OwnerRule {
     pub owner: Owner,
 }
 
-/// The declared inputs and owners, merged.
+/// The declared inputs and owners (an empty set owns nothing: every file is unowned and the plan answers everything).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Inputs {
     /// Named inputs.
@@ -508,131 +97,24 @@ pub struct Inputs {
     pub setup_only: Vec<String>,
     /// Local actions whose use makes a job a release job (bundling, signing, publishing).
     pub release_actions: Vec<String>,
+    /// What counts as prose (review round 3, P1-A).
+    pub prose: Prose,
 }
 
-/// The actions ADR 0117 §5 names setup-only: the Rust setup, the job split and the cache actions.
-pub const DEFAULT_SETUP_ONLY: [&str; 6] = [
-    "setup-rust",
-    "build-jobs",
-    "node-caches",
-    "dev-tool-cache",
-    "sccache-stats",
-    "cache-report",
-];
-
-/// The actions that bundle, sign or publish (ADR 0117 §5).
-pub const DEFAULT_RELEASE_ACTIONS: [&str; 5] = [
-    "tauri-bundle",
-    "publish-release",
-    "macos-verify",
-    "keychain",
-    "strip-signing-keys",
-];
+/// What counts as prose (ADR 0117 §2, review round 3 P1-A): globs over a file's name (no `/`) or path.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Prose {
+    /// Prose inside a project folder, by file name (`README*`, `CHANGELOG*`, `LICENSE*`).
+    pub project_names: Vec<String>,
+    /// A project's own folders whose files are prose (`docs`).
+    pub project_folders: Vec<String>,
+    /// Prose under a doc owner (`*.md`, `*.txt`, `LICENSE*`).
+    pub doc_owner: Vec<String>,
+    /// Documentation images under a doc owner, by name (`*.png`); content detection may override (D14).
+    pub doc_assets: Vec<String>,
+}
 
 impl Inputs {
-    /// The defaults: the former `GLOBAL` list of the planner narrowed (ADR 0117 §3, G2, G7, G8, G13), the declared doc inputs and
-    /// root-file owners it carried (`DOC_INPUTS`, `OWNERS`, `LINT_WIRING`), the registers under `docs/` with the checks that read
-    /// them (review round 2, P1-A), and the owners of the paths outside every project folder.
-    pub fn defaults() -> Inputs {
-        use Reach::Code;
-        let inputs = DEFAULT_INPUTS
-            .iter()
-            .map(|(name, files, reaches, extractor)| Input {
-                name: name.to_string(),
-                files: files.iter().map(|s| s.to_string()).collect(),
-                // The table is this crate's own literal; its words are checked by the tests below.
-                reaches: reaches
-                    .iter()
-                    .filter_map(|r| Target::parse(r).ok())
-                    .collect(),
-                reach: Code,
-                extractor: extractor.map(str::to_string),
-                adds: false,
-                except: Vec::new(),
-            })
-            .chain(DEFAULT_ADDS.iter().map(|(name, files, reaches, except)| {
-                Input {
-                    name: name.to_string(),
-                    files: files.iter().map(|s| s.to_string()).collect(),
-                    reaches: reaches
-                        .iter()
-                        .filter_map(|r| Target::parse(r).ok())
-                        .collect(),
-                    reach: Code,
-                    extractor: None,
-                    adds: true,
-                    except: except.iter().map(|s| s.to_string()).collect(),
-                }
-            }))
-            .chain(std::iter::once(Input {
-                // C100 reads the ignore attributes and environment guards of every test source: a changed guard adds conformance,
-                // the file keeps its owner.
-                name: "test-guards".to_string(),
-                files: vec!["*.rs".to_string(), "*.ts".to_string()],
-                reaches: vec![Target::Project("conformance".to_string())],
-                reach: Code,
-                extractor: Some("guards".to_string()),
-                adds: true,
-                except: vec!["**/node_modules/**".to_string()],
-            }))
-            .collect();
-        let owner = |paths: &[&str], owner: Owner| OwnerRule {
-            paths: paths.iter().map(|s| s.to_string()).collect(),
-            owner,
-        };
-        Inputs {
-            inputs,
-            owners: vec![
-                owner(
-                    &[
-                        "docs/**",
-                        "diagrams/**",
-                        "*.md",
-                        "LICENSE*",
-                        ".gitea/**/*.md",
-                    ],
-                    Owner::Doc,
-                ),
-                owner(&["spikes/**"], Owner::None),
-                // Editor and VCS metadata at the root and the issue templates: nothing builds or tests them (the planner's former
-                // `META`).
-                owner(
-                    &[
-                        ".gitignore",
-                        ".editorconfig",
-                        ".DS_Store",
-                        ".gitea/ISSUE_TEMPLATE/**",
-                    ],
-                    Owner::None,
-                ),
-            ],
-            setup_only: DEFAULT_SETUP_ONLY.iter().map(|s| s.to_string()).collect(),
-            release_actions: DEFAULT_RELEASE_ACTIONS
-                .iter()
-                .map(|s| s.to_string())
-                .collect(),
-        }
-    }
-
-    /// These inputs with `file`'s entries merged in: an input of the same name is replaced, owners are appended (they win a tie).
-    pub fn merged(mut self, file: Inputs) -> Inputs {
-        for i in file.inputs {
-            match self.inputs.iter_mut().find(|x| x.name == i.name) {
-                Some(x) => *x = i,
-                None => self.inputs.push(i),
-            }
-        }
-        self.owners.extend(file.owners);
-        // A list in the file replaces the default list.
-        if !file.setup_only.is_empty() {
-            self.setup_only = file.setup_only;
-        }
-        if !file.release_actions.is_empty() {
-            self.release_actions = file.release_actions;
-        }
-        self
-    }
-
     /// The named inputs `path` is one of.
     pub fn inputs_of(&self, path: &str) -> Vec<&Input> {
         self.inputs
@@ -659,92 +141,93 @@ impl Inputs {
         }
         best.map(|(_, o)| o)
     }
+
+    /// Prose under a doc owner.
+    pub fn is_prose(&self, path: &str) -> bool {
+        self.prose.doc_owner.iter().any(|g| glob::matches(g, path))
+    }
+
+    /// Prose inside the project folder `project_dir`: a declared name, or a file under one of the project's prose folders.
+    pub fn is_project_prose(&self, project_dir: &str, path: &str) -> bool {
+        let rel = path
+            .strip_prefix(project_dir)
+            .and_then(|r| r.strip_prefix('/'));
+        self.prose
+            .project_names
+            .iter()
+            .any(|g| glob::matches(g, path))
+            || rel.is_some_and(|r| {
+                self.prose.project_folders.iter().any(|d| {
+                    r.strip_prefix(d.as_str())
+                        .is_some_and(|x| x.starts_with('/'))
+                })
+            })
+    }
+
+    /// A documentation image by its name.
+    pub fn is_doc_asset(&self, path: &str) -> bool {
+        self.prose.doc_assets.iter().any(|g| glob::matches(g, path))
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn the_defaults_keep_the_global_list_short_and_own_the_root_folders() {
-        let i = Inputs::defaults();
-        let all: Vec<&str> = i
-            .inputs
-            .iter()
-            .filter(|x| x.reaches.contains(&Target::All))
-            .map(|x| x.name.as_str())
-            .collect();
-        // A .gitea file is reached through the CI adapter's nodes (WP-2), or, owned by none, fails closed.
-        assert_eq!(all, ["rust-toolchain", "npm-root"]);
-        assert!(
-            i.inputs_of(".gitea/actions/README.md")
-                .iter()
-                .all(|x| x.adds),
-            "G7: prose under .gitea is the doc owner's (C100 also reads a README)"
-        );
-        assert_eq!(
-            i.inputs_of(".gitattributes")[0].extractor.as_deref(),
-            Some("attributes")
-        );
-        assert_eq!(
-            i.owner_of(".gitea/actions/README.md"),
-            Some(&Owner::Doc),
-            "G7"
-        );
-        assert!(
-            i.inputs_of("conformance/reserved/C156-x")[0]
-                .reaches
-                .is_empty(),
-            "G8: claimed, reaches nothing"
-        );
-        assert_eq!(
-            i.owner_of("spikes/dialog-hidden/Cargo.lock"),
-            Some(&Owner::None),
-            "G3"
-        );
-        assert_eq!(i.owner_of("crates/a/src/lib.rs"), None);
+    fn owner(paths: &[&str], owner: Owner) -> OwnerRule {
+        OwnerRule {
+            paths: paths.iter().map(|s| s.to_string()).collect(),
+            owner,
+        }
     }
 
     #[test]
-    fn a_file_entry_replaces_the_default_of_its_name_and_its_owner_wins_a_tie() {
-        let file = Inputs {
-            inputs: vec![Input {
-                name: "npm-root".into(),
-                files: vec!["package.json".into()],
-                reaches: vec![Target::Npm],
-                reach: Reach::Code,
-                extractor: None,
-                adds: false,
-                except: Vec::new(),
-            }],
-            owners: vec![OwnerRule {
-                paths: vec!["spikes/**".into()],
-                owner: Owner::Project("tools".into()),
-            }],
+    fn the_most_specific_owner_wins_and_a_later_rule_wins_a_tie() {
+        let i = Inputs {
+            owners: vec![
+                owner(&["docs/**", "*.md"], Owner::Doc),
+                owner(&["docs/x/**"], Owner::None),
+                owner(&["spikes/**"], Owner::None),
+                owner(&["spikes/**"], Owner::Project("tools".into())),
+            ],
             ..Inputs::default()
         };
-        let i = Inputs::defaults().merged(file);
-        let npm = i.inputs.iter().find(|x| x.name == "npm-root").unwrap();
-        assert_eq!(npm.reaches, [Target::Npm]);
-        assert_eq!(i.inputs.len(), Inputs::defaults().inputs.len());
+        assert_eq!(i.owner_of("docs/a.md"), Some(&Owner::Doc));
+        assert_eq!(i.owner_of("docs/x/a.md"), Some(&Owner::None));
         assert_eq!(
-            i.owner_of("spikes/x"),
+            i.owner_of("spikes/a"),
             Some(&Owner::Project("tools".into()))
+        );
+        assert_eq!(i.owner_of("crates/a/src/lib.rs"), None);
+        assert_eq!(
+            Inputs::default().owner_of("anything"),
+            None,
+            "an empty set owns nothing (fail closed)"
         );
     }
 
     #[test]
-    fn every_default_reach_word_parses() {
-        for (name, _, reaches, _) in DEFAULT_INPUTS {
-            for r in *reaches {
-                assert!(Target::parse(r).is_ok(), "{name}: {r}");
-            }
-        }
-        for (name, _, reaches, _) in DEFAULT_ADDS {
-            for r in *reaches {
-                assert!(Target::parse(r).is_ok(), "{name}: {r}");
-            }
-        }
+    fn prose_comes_from_the_declared_globs() {
+        let i = Inputs {
+            prose: Prose {
+                project_names: vec!["README*".into()],
+                project_folders: vec!["docs".into()],
+                doc_owner: vec!["*.md".into()],
+                doc_assets: vec!["*.png".into()],
+            },
+            ..Inputs::default()
+        };
+        assert!(i.is_project_prose("crates/a", "crates/a/README.md"));
+        assert!(i.is_project_prose("apps/x", "apps/x/docs/guide/a.md"));
+        assert!(
+            !i.is_project_prose("apps/x", "apps/x/src/docs/a.md"),
+            "only the project's own docs folder"
+        );
+        assert!(!i.is_project_prose("crates/a", "crates/a/tests/data.txt"));
+        assert!(i.is_prose("diagrams/a.md") && !i.is_prose("diagrams/a.xml"));
+        assert!(i.is_doc_asset("docs/pictures/a.png"));
+        // Control: with nothing declared nothing is prose.
+        assert!(!Inputs::default().is_project_prose("crates/a", "crates/a/README.md"));
     }
 
     #[test]

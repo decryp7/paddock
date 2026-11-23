@@ -1,6 +1,7 @@
 //! The project level of the model against the audit's gaps (ADR 0117 §8): each case names the gap and what today's planner
 //! marked for it, so the difference is the documented one.
 
+use super::fixture;
 use super::*;
 use crate::Node;
 
@@ -88,7 +89,7 @@ fn run_detecting(w: &World, changed: &[&str], text: TextOf, detect: Option<Detec
         seeds: &[],
     };
     let changed: Vec<String> = changed.iter().map(|s| s.to_string()).collect();
-    reach(&changed, &facts, &Inputs::defaults(), text)
+    reach(&changed, &facts, &fixture::inputs(), text)
 }
 
 fn none(_: &str) -> (Option<String>, Option<String>) {
@@ -415,7 +416,7 @@ fn an_extractor_that_fails_or_is_unknown_fails_closed() {
         w.projects.len(),
         "a lock that cannot be read reaches every project"
     );
-    let mut inputs = Inputs::defaults();
+    let mut inputs = fixture::inputs();
     inputs.inputs.push(inputs::Input {
         name: "odd".into(),
         files: vec!["odd.cfg".into()],
@@ -513,7 +514,7 @@ fn run_model(
         seeds,
     };
     let changed: Vec<String> = changed.iter().map(|s| s.to_string()).collect();
-    reach(&changed, &facts, &Inputs::defaults(), &none)
+    reach(&changed, &facts, &fixture::inputs(), &none)
 }
 
 #[test]
@@ -613,7 +614,7 @@ fn each_migrated_additive_rule_adds_its_reader_and_the_control_removes_it() {
             model: None,
             seeds: &[],
         };
-        let all = Inputs::defaults();
+        let all = fixture::inputs();
         let by_input = |r: &Reached| {
             r.nodes.get(reader).is_some_and(|n| {
                 n.why
@@ -627,7 +628,7 @@ fn each_migrated_additive_rule_adds_its_reader_and_the_control_removes_it() {
             "{name}: {file} must reach {reader}: {:?}",
             r.nodes.get(reader)
         );
-        let mut without = Inputs::defaults();
+        let mut without = fixture::inputs();
         without.inputs.retain(|i| i.name != name);
         let c = reach(&[file.to_string()], &facts, &without, &none);
         assert!(

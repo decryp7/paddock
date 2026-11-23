@@ -8,7 +8,10 @@
 pub mod attributes;
 pub mod content;
 pub mod extract;
+#[cfg(test)]
+mod fixture;
 pub mod glob;
+pub mod guard;
 pub mod inputs;
 pub mod narrow;
 pub mod nodes;
@@ -186,27 +189,6 @@ fn halves(facts: &Facts, path: &str) -> (bool, bool) {
     }
 }
 
-/// Prose: read by people, not by a build or a test unless an input or a `reads` edge says so (review round 2, P1-A).
-pub fn is_prose(path: &str) -> bool {
-    let name = path.rsplit('/').next().unwrap_or(path);
-    name.starts_with("LICENSE") || [".md", ".txt"].iter().any(|e| name.ends_with(e))
-}
-
-/// Prose inside a project folder (review round 3, P1-A): only a file named `README*`, `CHANGELOG*` or `LICENSE*`, or a file under
-/// the project's own `docs/` folder. Every other file there, `*.txt` and other `*.md` included, is code: most `.txt` files in
-/// project folders are test data read by a folder path (`tests/recorded/*.txt`) or compiled in (`include_str!`).
-pub fn is_project_prose(project_dir: &str, path: &str) -> bool {
-    let name = path.rsplit('/').next().unwrap_or(path);
-    let in_docs = path
-        .strip_prefix(project_dir)
-        .and_then(|r| r.strip_prefix('/'))
-        .is_some_and(|r| r.starts_with("docs/"));
-    in_docs
-        || ["README", "CHANGELOG", "LICENSE"]
-            .iter()
-            .any(|p| name.starts_with(p))
-}
-
 /// The folder of a project id.
 fn dir_of<'a>(facts: &Facts<'a>, id: &str) -> Option<&'a str> {
     facts
@@ -216,19 +198,12 @@ fn dir_of<'a>(facts: &Facts<'a>, id: &str) -> Option<&'a str> {
         .map(|(_, d)| d.as_str())
 }
 
-/// Images that only documentation shows: prose-like under a doc owner, code inside a project folder (an icon is built).
-pub fn is_doc_asset(path: &str) -> bool {
-    [".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"]
-        .iter()
-        .any(|e| path.ends_with(e))
-}
-
 /// Whether a file under a doc owner is a documentation asset: by its detected content when a detector is given (a binary file
 /// is, a text file is not, whatever its name; D14), else by its image extension.
-fn doc_asset(facts: &Facts, path: &str) -> bool {
+fn doc_asset(facts: &Facts, inputs: &Inputs, path: &str) -> bool {
     match facts.detect.and_then(|d| d(path)) {
         Some(k) => k == Detected::Binary,
-        None => is_doc_asset(path),
+        None => inputs.is_doc_asset(path),
     }
 }
 
@@ -255,7 +230,7 @@ pub fn reach(changed: &[String], facts: &Facts, inputs: &Inputs, text: TextOf) -
         // A file a model node owns (a workflow, an action, a script) is reached through the model; outside every project folder
         // and every input, that is all it is.
         // Prose outside every project folder is the doc owner's even inside an action folder (G7).
-        let doc_prose = is_prose(f) && project_of(facts, f).is_none();
+        let doc_prose = inputs.is_prose(f) && project_of(facts, f).is_none();
         if let Some(m) = facts.model.filter(|_| !doc_prose) {
             let narrowed: Vec<&(String, String, String)> = facts
                 .seeds
@@ -400,7 +375,7 @@ pub fn reach(changed: &[String], facts: &Facts, inputs: &Inputs, text: TextOf) -
         // A project folder comes before the owner rules (§2): its prose (README, CHANGELOG, LICENSE, its docs/) is docs for the
         // project, everything else is code.
         if let Some(p) = project_of(facts, f) {
-            if dir_of(facts, p).is_some_and(|d| is_project_prose(d, f)) {
+            if dir_of(facts, p).is_some_and(|d| inputs.is_project_prose(d, f)) {
                 out.mark(p, Reach::Docs, false, false, f.clone());
                 continue;
             }
@@ -430,7 +405,7 @@ pub fn reach(changed: &[String], facts: &Facts, inputs: &Inputs, text: TextOf) -
         }
         match inputs.owner_of(f) {
             Some(Owner::None) => out.not_built.push(f.clone()),
-            Some(Owner::Doc) if is_prose(f) || doc_asset(facts, f) => {
+            Some(Owner::Doc) if inputs.is_prose(f) || doc_asset(facts, inputs, f) => {
                 out.mark("docs", Reach::Docs, false, false, f.clone())
             }
             Some(Owner::Project(p)) => out.mark(p, Reach::Code, true, true, f.clone()),
@@ -449,7 +424,7 @@ pub fn reach(changed: &[String], facts: &Facts, inputs: &Inputs, text: TextOf) -
                     .entry(p.to_string())
                     .or_default()
                     .insert(id.clone());
-                let (rust, ui) = halves(facts, &format!("{}/x", n.home.as_deref().unwrap_or("")));
+                let (rust, ui) = halves(facts, n.home.as_deref().unwrap_or_default());
                 out.mark(
                     p,
                     hit.reach,

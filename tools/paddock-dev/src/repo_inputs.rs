@@ -24,24 +24,24 @@
 //! ```
 
 use paddock_repo_graph::model::Reach;
-use paddock_repo_graph::model::inputs::{Input, Inputs, Owner, OwnerRule, Target};
+use paddock_repo_graph::model::inputs::{Input, Inputs, Owner, OwnerRule, Prose, Target};
 use std::path::Path;
 
 /// The inputs file, relative to the repository root.
 pub const FILE: &str = "docs/repo-graph.toml";
 
-/// The defaults merged with the repository's file; a missing file is the defaults alone, an unreadable one an error.
+/// The repository's declarations. A missing or unreadable file is an error: without it nothing is owned (the crate holds no
+/// defaults, ADR 0117 §14), so a caller that goes on must answer everything.
 pub fn load(root: &Path) -> Result<Inputs, String> {
     match std::fs::read_to_string(root.join(FILE)) {
         Ok(text) => parse(&text),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Inputs::defaults()),
         Err(e) => Err(format!("{FILE} cannot be read: {e}")),
     }
 }
 
-/// The defaults merged with `text`. `Err` names the entry that is wrong.
+/// The declarations in `text`. `Err` names the entry that is wrong.
 pub fn parse(text: &str) -> Result<Inputs, String> {
-    Ok(Inputs::defaults().merged(read(text).map_err(|e| format!("{FILE}: {e}"))?))
+    read(text).map_err(|e| format!("{FILE}: {e}"))
 }
 
 fn strings(v: Option<&toml::Value>, what: &str) -> Result<Vec<String>, String> {
@@ -71,6 +71,9 @@ fn read(text: &str) -> Result<Inputs, String> {
             .ok_or(format!("input #{} has no name", n + 1))?
             .to_string();
         let what = format!("input {name:?}");
+        if inputs.iter().any(|i: &Input| i.name == name) {
+            return Err(format!("{what} is declared twice"));
+        }
         let files = strings(e.get("files"), &format!("{what}.files"))?;
         if files.is_empty() {
             return Err(format!("{what} names no files"));
@@ -125,11 +128,20 @@ fn read(text: &str) -> Result<Inputs, String> {
     let ci = t.get("ci");
     let setup_only = strings(ci.and_then(|c| c.get("setup_only")), "ci.setup_only")?;
     let release_actions = strings(ci.and_then(|c| c.get("release_actions")), "ci.release_actions")?;
+    let prose_table = t.get("prose");
+    let list = |k: &str| strings(prose_table.and_then(|p| p.get(k)), &format!("prose.{k}"));
+    let prose = Prose {
+        project_names: list("project_names")?,
+        project_folders: list("project_folders")?,
+        doc_owner: list("doc_owner")?,
+        doc_assets: list("doc_assets")?,
+    };
     Ok(Inputs {
         inputs,
         owners,
         setup_only,
         release_actions,
+        prose,
     })
 }
 
@@ -138,15 +150,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn an_empty_file_is_the_defaults_and_an_entry_replaces_its_default() {
-        assert_eq!(parse("version = 1\n").unwrap(), Inputs::defaults());
+    fn an_empty_file_owns_nothing_and_an_entry_reads_with_its_prose() {
+        assert_eq!(parse("version = 1\n").unwrap(), Inputs::default());
         let i = parse(
-            "version = 1\n[[input]]\nname = \"npm-root\"\nfiles = [\"package.json\"]\nreaches = [\"npm\"]\n\
-             [[owner]]\npaths = [\"spikes/**\"]\nnode = \"project:tools\"\n",
+            "version = 1\n[[input]]\nname = \"npm-root\"\nfiles = [\"/package.json\"]\nreaches = [\"npm\"]\nadds = true\n\
+             [[owner]]\npaths = [\"spikes/**\"]\nnode = \"project:tools\"\n[prose]\nproject_names = [\"README*\"]\n",
         )
         .unwrap();
-        assert_eq!(i.inputs.iter().find(|x| x.name == "npm-root").unwrap().reaches, [Target::Npm]);
+        let npm = i.inputs.iter().find(|x| x.name == "npm-root").unwrap();
+        assert_eq!((npm.reaches.as_slice(), npm.adds), ([Target::Npm].as_slice(), true));
         assert_eq!(i.owner_of("spikes/x"), Some(&Owner::Project("tools".into())));
+        assert_eq!(i.prose.project_names, ["README*"]);
+        assert!(
+            parse("version = 1\n[[input]]\nname = \"a\"\nfiles = [\"x\"]\n[[input]]\nname = \"a\"\nfiles = [\"y\"]\n")
+                .unwrap_err()
+                .contains("declared twice")
+        );
     }
 
     #[test]
@@ -182,6 +201,9 @@ mod tests {
     fn the_repository_file_reads() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let i = load(&root).unwrap();
-        assert!(i.inputs.len() >= Inputs::defaults().inputs.len());
+        assert!(i.inputs.len() >= 40, "the declarations moved out of the crate (ADR 0117 §14)");
+        assert!(!i.owners.is_empty() && !i.prose.project_names.is_empty() && !i.setup_only.is_empty());
+        // A missing file is an error, never an empty set read as "nothing reaches anything".
+        assert!(load(&root.join("no-such-folder")).unwrap_err().contains("cannot be read"));
     }
 }
