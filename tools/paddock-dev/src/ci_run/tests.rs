@@ -470,8 +470,19 @@ fn the_golden_is_rewritten_only_on_request_and_never_under_ci() {
 #[test]
 fn adding_a_check_changes_no_golden_row_but_the_rest_of_the_conformance_line_does() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let src = crate::gates::edge::load_sources(&root).unwrap();
+    let full = crate::gates::edge::load_sources(&root).unwrap();
+    // Each model build walks every workflow (about 2 s of CPU in a debug build, measured 2026-11-23; docs/benchmarks.md "paddock-dev
+    // tests under load"), and four of them took this test past nextest's 60 s at a load of 50. The rows it compares are ci.yml's, so the
+    // three edits are built from ci.yml alone, once that narrowed model is shown to give exactly the full model's rows (a reusable
+    // workflow ci.yml starts calling turns this red instead of silently narrowing the probe).
+    let mut src = full.clone();
+    src.workflows.retain(|path, _| path == ".gitea/workflows/ci.yml");
     let rows = rows_of(&src);
+    assert_eq!(
+        rows,
+        rows_of(&full),
+        "ci.yml alone gives other rows than the whole tree: widen the narrowed sources"
+    );
     let line = |rows: &std::collections::BTreeSet<String>| {
         rows.iter()
             .find(|r| r.starts_with("job\tconformance\t") && r.contains("node conformance/bin/paddock-conformance.mjs --app "))
