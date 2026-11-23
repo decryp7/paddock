@@ -12,7 +12,7 @@ import { loadAction, stepsOf } from './lib/workflow.mjs';
 const rustStep = () => stepsOf(loadAction('app-gates')).find((s) => s.run?.includes('cargo nextest run'));
 
 /** Runs the Rust step with a fake `cargo` that logs its calls; `list` is what `cargo nextest list` prints (or "FAIL"). */
-function run({ filter = '', testsOnly = '', last = '', list = '', lastList = '' }) {
+function run({ filter = '', testsOnly = '', last = '', list = '', lastList = '', graph = '' }) {
   const dir = mkdtempSync(join(tmpdir(), 'app-gates-'));
   const calls = join(dir, 'calls');
   writeFileSync(
@@ -34,7 +34,7 @@ function run({ filter = '', testsOnly = '', last = '', list = '', lastList = '' 
     cwd: dir,
     env: {
       PATH: `${dir}:${process.env.PATH}`, RUNNER_OS: 'Linux', GITHUB_WORKSPACE: dir, FAKE_LIST: list, FAKE_LAST: lastList,
-      NEXTEST_CONFIG: '', FILTER: filter, TESTS_ONLY: testsOnly, DISPLAY_TESTS: '', LAST_PACKAGES: last, WINDOWS_CLIPPY: '',
+      NEXTEST_CONFIG: '', FILTER: filter, TESTS_ONLY: testsOnly, GRAPH_FILTER: graph, DISPLAY_TESTS: '', LAST_PACKAGES: last, WINDOWS_CLIPPY: '',
     },
   });
   let log = '';
@@ -85,4 +85,17 @@ test('a rerun of failed tests keeps its own filter and --no-tests=warn', () => {
   const r = run({ filter: 'test(=a::b)', testsOnly: 'true' });
   assert.equal(r.calls.filter((c) => c.startsWith('cargo nextest list')).length, 0, r.calls.join('\n'));
   assert.match(runs(r)[0], /--no-tests=warn/, r.calls.join('\n'));
+});
+
+test("the graph's filterset (graph-filter) that selects no test in either half fails, never passes (review round 2 P2-2)", () => {
+  const none = run({ filter: 'binary_id(=x-a::it)', graph: 'true', list: '' });
+  assert.equal(none.status, 1, none.stdout + none.stderr);
+  assert.match(none.stdout, /::error::the graph's selection \(binary_id\(=x-a::it\)\) selects no test of this workspace/);
+  // Positive control: a graph filterset that selects a test runs it and passes, with the gates (fmt, clippy) before it.
+  const one = run({ filter: 'binary_id(=x-a::it)', graph: 'true', list: 'x-a::it t\n' });
+  assert.equal(one.status, 0, one.stdout + one.stderr);
+  assert.equal(runs(one).length, 1, one.calls.join('\n'));
+  assert.ok(one.calls.some((c) => c.startsWith('cargo clippy')) && one.calls.some((c) => c.startsWith('cargo fmt')), one.calls.join('\n'));
+  // The same empty selection as a member filter (not the graph's) is skipped with a notice, as before.
+  assert.equal(run({ filter: 'binary_id(=x-a::it)', list: '' }).status, 0);
 });
