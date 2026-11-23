@@ -3624,3 +3624,35 @@ logged with what the rule saw (ER-27). Lesson: an admission rule needs a cost, n
 - **Class.** A whole-repository test whose cost is per file times per item, or a parser in an unoptimised build: C102's syn parse
   (2026-11-09, the syn `opt-level` in tools/paddock-dev/Cargo.toml), check_c122's quadratic walk (2026-11-18, .config/nextest.toml), this
   test's OS placement (e348851aa, 2026-11-23) and now its parsing and lookups.
+
+## Two Debrief vitest specs timed out: the frontend job ran 29 Vitest workers outside the lane budget (run 8753, 2026-11-24)
+
+- **What happened.** debrief.yml run 8753 (train/2026-11-23-graph, 27a7dd840), job 46355: `OutliersView > says so when nothing stands out,
+  and shows engine errors with Retry` (20.8 s) and `TracesView > reports a trace without spans and failures` (21.9 s) passed the 20 s
+  test timeout; the leak detector named `settle()`'s `setTimeout(0)` (helpers.ts:191) as live. Run 8695 on 727810fe9 was green, with no
+  change under `ui/` or `apps/debrief` between the two commits (`git diff --quiet`).
+- **Hypotheses and what ruled them out (ER-28).** (1) A wait that never re-checks (train 20's `until()`): neither spec uses `until` or
+  `settleUntil`, and `until.ts` was already in 8695's tree. (2) `settle()` looping: it runs a fixed number of rounds; the live timer is
+  that of a test still running, not of a hang. (3) Fake timers leaking from an earlier spec: the tests before and after each failing test
+  in the same file and worker passed through the same `settle()` (4 to 11 s); two shuffled full runs (seeds 8753 and 4242, 5 workers) had
+  neither test fail and no timeout. (4) A signal the stub never emits: both pass locally every run and took 7.8 s in 8695. (5) Kept:
+  CPU starvation from the job's own worker count. The frontend job has no build-jobs step, so `VITEST_MAX_WORKERS` was unset and Vitest
+  used `availableParallelism() - 1` = 29 workers on d-gtr9 (30 cores, 6 lanes; the other five ran rust tests and four e2e shards in both
+  runs). The whole suite slowed (median 1.15x, p99 4.4x, eight tests over 15 s, a third at 20.75 s); these two mount the analysis
+  workspace two and three times, so they sit closest to the bound.
+- **Measured (docs/benchmarks.md, 2026-11-24 under "Worker budget").** Full suite with coverage on the dev Mac: at 26 workers the two
+  tests took 4 to 6 times as long as at 5 (medians 4.96 and 5.49 s against 0.86 and 1.28 s), while the suite's wall time hardly changed.
+  20 runs at 5 workers: no failure, slowest test 3.5 s. Not reproduced at the real 20 s bound on the Mac (it would take about four times
+  the oversubscription of a shared machine); confirmed only at CI's headroom, scaled.
+- **Fix (fix/debrief-vitest-timeouts-8753).** build-jobs in debrief.yml `frontend` and `e2e` and nightly.yml `dialog-commands`, with the
+  tag rule for ./dev in their env. A conformance test (ci-actions.test.mjs, "every job that starts a Vitest or Playwright worker pool
+  takes the job's core share first") reads every workflow with the yaml package and fails on a pool step (`ng test`, `vitest`, `playwright
+  test`, `npm test`, `./dev ci run`, app-gates) with no unconditional build-jobs or setup-rust before it; it failed on exactly these three
+  jobs first. No timeout was raised and no spec changed.
+- **Why the logs did not show it.** The job prints neither its worker count nor the host's cores: build-jobs is the step that logs both.
+- **Class.** ER-48, a worker pool outside the lane budget: cargo per lane (runs 8335 against 8346, 2026-11-20), Windows 3 x 8 threads
+  (8335 against 8359), Vitest and Playwright defaults added to build-jobs (a080f848a, 2026-11-22) without a check that every pool job runs
+  it. The new test is that check, beside the cargo one ("every job that runs cargo sets its build jobs").
+- **Seen on the way (fix item, not this change).** Shuffled order (`sequence.shuffle`, seeds 8753 and 4242) fails 8 and 11 other Debrief
+  tests, all order-dependent (native-feel.spec.ts, app.spec.ts, palette.spec.ts, timeline-panel.spec.ts, testing/startup.spec.ts), none a
+  timeout. ER-29's nightly shuffled run would show them.

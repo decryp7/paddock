@@ -113,11 +113,17 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: dev.decryptology.net/decryp7/paddock-ci:v3
+    env:
+      # Read credential and tag rule for ./dev's prebuilt download, which build-jobs runs (ADR 0022 R0b).
+      PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+      PADDOCK_DEV_DOWNLOAD: ${{ startsWith(github.ref, 'refs/tags/') && '0' || '' }}
     defaults:
       run:
         working-directory: ui
     steps:
       - uses: actions/checkout@v4
+      # VITEST_MAX_WORKERS and PADDOCK_E2E_WORKERS: this job's share of the host's cores (ER-48).
+      - uses: ./.gitea/actions/build-jobs
       - uses: ./.gitea/actions/node-caches
         with:
           name: nightly-dialog-commands

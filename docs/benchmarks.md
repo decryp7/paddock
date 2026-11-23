@@ -2551,6 +2551,33 @@ Not measured: the run time of the Vitest jobs at the lower worker count (the fir
 turns out too low is raised only with that measurement recorded here). Playwright was already within the budget (workers 1, Debrief 2), so
 its row changes only where a host's share falls below a config's own count.
 
+### 2026-11-24: a job outside the budget (debrief.yml frontend, run 8753; fix/debrief-vitest-timeouts-8753)
+
+debrief.yml's `frontend` and `e2e` jobs and nightly.yml's `dialog-commands` ran no build-jobs step, so `VITEST_MAX_WORKERS` was never set:
+Vitest started 29 workers on d-gtr9 beside the run's five other lanes (rust tests, four e2e shards). Same tree in both runs (no change under
+`ui/` or `apps/debrief` between 727810fe9 and 27a7dd840), CI job logs:
+
+| Run (frontend job) | vitest Duration | per-test p90 / p99 / max | tests >= 15 s | the two failing tests |
+|---|---|---|---|---|
+| 8695 (45748), green | 134.2 s | 4.4 / 9.5 / 14.2 s | 0 | 7.8 s, 7.8 s |
+| 8753 (46355), red | 167.1 s | 6.2 / 13.8 / 21.9 s | 8 (3 over 20 s) | 20.8 s, 21.9 s (timeout 20 s) |
+
+Per-test ratio red/green over the 940 tests of 0.5 s or more: median 1.15, p90 2.29, p99 4.39. A third test ("evaluates every tile kind of
+the demo dashboard") ended at 20.75 s.
+
+Local, the dev Mac (14 cores, load 13 to 29 from the train's CI, so times not absolutes), the full Debrief suite with `--coverage`, the
+same tree, `VITEST_MAX_WORKERS` set:
+
+| Workers | Runs | outliers-view test, median (max) | traces test, median (max) | per-run slowest test, median (max) | suite wall |
+|---|---|---|---|---|---|
+| 5 (d-gtr9's share after this fix) | 20 | 0.86 s (1.53 s) | 1.28 s (2.71 s) | 2.07 s (3.50 s) | 82 to 151 s |
+| 26 (about twice the cores, as the 29 on d-gtr9 with its neighbours) | 5 | 4.96 s (5.66 s) | 5.49 s (7.27 s) | 7.54 s (9.37 s) | 78 to 108 s |
+
+More workers barely shorten the suite (the host has no free cores to give) but make each test 4 to 6 times longer, which is what a fixed
+per-test timeout sees. Scaled to CI's headroom (20 s / 7.8 s = 2.6 times the green time), all 20 runs at 5 workers stay inside the bound
+(the slowest of the two tests 2.71 s against 3.3 s) and none of the 5 at 26 do (3.4 to 7.3 s, every one of the ten over its bound). Not measured: the frontend job's time on d-gtr9 at 5 workers (the next debrief.yml run says; it is not the run's
+critical path, the e2e shards end 6 to 9 minutes after it in runs 8695 and 8753).
+
 ## Planner run time before the repository graph model (2026-11-23, docs/adr-repo-graph-model, base 803aed12d)
 
 The baseline ADR 0117 §9 holds the graph model to. Dev Mac (14 cores, load about 15 at the time, so the numbers are a ceiling), `./dev`

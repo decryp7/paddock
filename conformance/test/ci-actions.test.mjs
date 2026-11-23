@@ -13,6 +13,7 @@ import { isMain } from '../src/util/is-main.mjs';
 import { parseSteps } from '../src/util/workflows.mjs';
 import { conjuncts, expr, job as workflowJob, loadAction, loadWorkflow, needsOf, parseYaml, stepsOf } from './lib/workflow.mjs';
 import { PADDOCK } from './helpers.mjs';
+import { parse as parseYamlPackage } from 'yaml';
 
 const ACTIONS = join(PADDOCK, '.gitea', 'actions');
 const WORKFLOWS = join(PADDOCK, '.gitea', 'workflows');
@@ -2204,6 +2205,53 @@ test('no nextest profile says a CI job has its host to itself: the job\'s share 
 
 const workflowFiles = () => readdirSync(WORKFLOWS).filter((x) => /\.ya?ml$/.test(x));
 const uncommented = (text) => text.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
+
+// The worker share above only reaches a job that runs build-jobs (or setup-rust, which runs it when no step did). A job that starts
+// a Vitest or Playwright worker pool without it gets Vitest's default of cores - 1 workers: debrief.yml's frontend job ran 29 on
+// d-gtr9's 30 cores beside five other lanes, and two multi-mount specs ran past the 20 s test timeout (run 8753, job 46355: 20.8 s
+// and 21.9 s; 7.8 s each in the green run 8695 on the same tree). Read with the yaml package (ER-42).
+// `./dev ci run <project> <phase>` is the gate executor: it runs a project's paddock.ci.json commands (`ng test`, Playwright, cargo).
+const POOL = /\bng test\b|\bvitest\b|\bplaywright test\b|\bnpm (?:run )?test\b|\bdev ci run\b/;
+const SHARE = /^\.\/(?:\.?paddock\/)?\.gitea\/actions\/(?:build-jobs|setup-rust)\/?$/;
+const POOL_ACTION = /^\.\/(?:\.?paddock\/)?\.gitea\/actions\/app-gates\/?$/;
+
+/** `file job` of every job that starts a test worker pool before an unconditional build-jobs or setup-rust step; `seen` counts the pool jobs. */
+export function poolJobsWithoutShare(workflows) {
+  const missing = [];
+  let seen = 0;
+  for (const [file, text] of Object.entries(workflows)) {
+    const wf = parseYamlPackage(text) ?? {};
+    for (const [id, j] of Object.entries(wf.jobs ?? {})) {
+      // A caller of a reusable workflow: the called workflow's jobs are checked themselves.
+      if (j?.uses) continue;
+      const steps = j?.steps ?? [];
+      const first = steps.findIndex((s) => POOL.test(uncommented(String(s?.run ?? ''))) || POOL_ACTION.test(String(s?.uses ?? '')));
+      if (first < 0) continue;
+      seen++;
+      const share = steps.findIndex((s) => SHARE.test(String(s?.uses ?? '')) && s.if === undefined);
+      if (share < 0 || share > first) missing.push(`${file} ${id}`);
+    }
+  }
+  return { missing, seen };
+}
+
+test('every job that starts a Vitest or Playwright worker pool takes the job\'s core share first (build-jobs or setup-rust, ER-48)', () => {
+  // Positive control (ER-33), in memory: a pool without the share, one with the share after it, one with a conditional share.
+  const wf = (steps) => `on: push\njobs:\n  a:\n    runs-on: x\n    steps:\n${steps}`;
+  const probe = poolJobsWithoutShare({
+    'none.yml': wf('      - run: npx ng test --watch=false\n'),
+    'late.yml': wf('      - run: npx playwright test\n      - uses: ./.gitea/actions/build-jobs\n'),
+    'cond.yml': wf("      - uses: ./.gitea/actions/build-jobs\n        if: runner.os == 'Linux'\n      - run: npm test\n"),
+    'ok.yml': wf('      - uses: ./.gitea/actions/setup-rust\n      - run: |\n          # vitest in a comment is not a pool\n          npx vitest run\n'),
+    'comment.yml': wf('      - run: |\n          # npx vitest is run by the next job\n          echo none\n'),
+  });
+  assert.deepEqual(probe, { missing: ['none.yml a', 'late.yml a', 'cond.yml a'], seen: 4 });
+
+  const real = Object.fromEntries(workflowFiles().map((f) => [f, read(join(WORKFLOWS, f))]));
+  const { missing, seen } = poolJobsWithoutShare(real);
+  assert.ok(seen >= 10, `the test jobs are found (${seen})`);
+  assert.deepEqual(missing, [], 'these jobs start Vitest or Playwright workers without build-jobs or setup-rust before them (VITEST_MAX_WORKERS, PADDOCK_E2E_WORKERS)');
+});
 
 test('CI never pins the build jobs: only build-jobs sets CARGO_BUILD_JOBS, and no cargo command passes a fixed -j', () => {
   const files = [];
