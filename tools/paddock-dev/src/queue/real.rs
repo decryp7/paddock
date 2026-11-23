@@ -841,7 +841,8 @@ impl Ci for GiteaCi<'_> {
 
     fn verdict(&mut self, workflow: &str, head: &str) -> Verdict {
         let mut c = Client::new(self.http, &self.server, &self.repo, &self.token);
-        verdict::verdict(&mut c, workflow, head)
+        // The queue's own checkout: its register and its first-parent history, not the folder the tool was started in.
+        verdict::verdict_at(&mut c, workflow, head, &self.root)
     }
 
     fn dispatch(&mut self, workflow: &str, inputs: &[(String, String)]) -> Result<Sent, String> {

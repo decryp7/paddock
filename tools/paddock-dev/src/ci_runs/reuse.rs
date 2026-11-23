@@ -108,29 +108,35 @@ pub fn decide(client: &mut Client, workflow: &str, sha: &str, current: Option<u6
 /// [`decide`] with the basis given.
 pub fn decide_with(client: &mut Client, workflow: &str, sha: &str, current: Option<u64>, scope: bool) -> Reuse {
     let root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-    let first_parent = super::green::first_parent_before(&root, sha);
-    decide_with_touched(client, workflow, sha, current, scope, &first_parent, &mut |s| {
-        super::green::plan_touched(&root, s)
-    })
+    let v = verdict::verdict_in(client, workflow, sha, current, scope, &root);
+    reuse_of(client, v)
 }
 
-/// [`decide_with`] with the way to read what a commit's change touched given.
+/// [`decide_with`] with the way to read the first-parent commits and what a commit's change touched given.
 pub fn decide_with_touched(
     client: &mut Client,
     workflow: &str,
     sha: &str,
     current: Option<u64>,
     scope: bool,
-    first_parent: &[String],
-    touched: &mut dyn FnMut(&str) -> Option<super::green::Touched>,
+    first_parent: &mut dyn FnMut() -> Vec<String>,
+    touched: &mut dyn FnMut(&mut Client, &str) -> Option<super::green::Touched>,
 ) -> Reuse {
-    match verdict::verdict_with_touched(client, workflow, sha, current, scope, first_parent, touched) {
+    let v = verdict::verdict_with_touched(client, workflow, sha, current, scope, first_parent, touched);
+    reuse_of(client, v)
+}
+
+/// What a verdict means for the run that asks.
+fn reuse_of(client: &mut Client, v: Verdict) -> Reuse {
+    match v {
         Verdict::Green { run } => match clean_of_flaky(client, run) {
             Ok(logs) => Reuse::Skip { run, logs },
             Err(why) => Reuse::Run(why),
         },
         // ADR 0117 WP-4: a complete run whose only failures are FLAKY tests of untouched targets is green for a landing, so the push
-        // after it reuses it (its fix items are recorded); a tag asks for a run without them and takes its one retry (ER-49).
+        // after it reuses it. The landing queue recorded its fix items on the pull requests (queue/tick.rs). A tag asks for a run
+        // without them: its one allowed retry is a manual workflow_dispatch of ci.yml on that commit (tag.yml, ER-49), which this
+        // step never skips (it runs only for a push to main).
         Verdict::GreenWithFixItems { run, .. } => Reuse::Skip { run, logs: 0 },
         Verdict::Red { reason, .. } => Reuse::Run(reason),
         Verdict::NotMeasured(why) => Reuse::Run(why),
@@ -367,32 +373,29 @@ mod tests {
 
     #[test]
     fn a_failed_run_with_only_untouched_flaky_failures_is_reused_by_the_push_after_it() {
-        // ADR 0117 WP-4: the landing took it as green with fix items, so the push to main reuses it instead of testing again.
+        // ADR 0117 WP-4: the landing took it as green with fix items, so the push to main reuses it instead of testing again. The
+        // run is train 19's 8610 (its real, scrubbed job records and the crate job's log).
         let mut r = run(8610, "workflow_dispatch", "train/x", "failure");
         r["head_sha"] = json!(SHA);
         let mut f = server(vec![r], &[8610], 8610, &[]);
-        let step = json!([{"name": "s", "started_at": "2026-11-21T00:00:00Z", "completed_at": "2026-11-21T00:01:00Z"}]);
         f.json(
             &format!("{API}/runs/8610/jobs?limit=50&page=1"),
-            json!({"total_count": 3, "jobs": [
-                {"id": 13610, "name": "plan (affected projects)", "conclusion": "success", "runner_id": 1, "steps": step},
-                {"id": 17610, "name": "conformance (checks, release scripts)", "conclusion": "success", "runner_id": 1, "steps": step},
-                {"id": 18000, "name": "crate (windows-latest)", "conclusion": "failure", "runner_id": 1,
-                 "steps": [{"name": "Tests (workspace, every feature)", "number": 3, "status": "completed", "conclusion": "failure"}]}]}),
+            serde_json::from_str(include_str!("../../tests/ci-runs/run-8610-jobs.json")).unwrap(),
         );
-        f.log(
-            18000,
-            &format!("Job: crate\n{}", include_str!("../../tests/ci-runs/nextest-r1-flaky-only.log")),
-        );
+        f.log(44709, crate::run_scope::TEST_COMPLETE);
+        f.log(44761, include_str!("../../tests/ci-runs/nextest-run8610-crate-flaky-only.log"));
+        f.log(44768, include_str!("../../tests/ci-runs/nextest-run8610-app-gates-flaky-only.log"));
         let mut c = Client::new(&mut f, "https://gitea.invalid", "decryp7/paddock", "t");
         c.backoff_ms = 0;
-        let untouched = |_: &str| Some(crate::ci_runs::green::Touched::default());
-        let d = decide_with_touched(&mut c, "ci.yml", SHA, None, true, &[], &mut { untouched });
-        assert_eq!(d, Reuse::Skip { run: 8610, logs: 0 });
+        let mut ask = |flags: &[&str]| {
+            let t = crate::ci_runs::green::Touched {
+                flags: flags.iter().map(|a| a.to_string()).collect(),
+                ..Default::default()
+            };
+            decide_with_touched(&mut c, "ci.yml", SHA, None, true, &mut Vec::new, &mut |_, _| Some(t.clone()))
+        };
+        assert!(matches!(ask(&[]), Reuse::Skip { run: 8610, .. }));
         // Positive control: when the plan reached the crates, the FLAKY test is red and the push runs.
-        let mut touched = crate::ci_runs::green::Touched::default();
-        touched.flags.insert("crates".into());
-        let d = decide_with_touched(&mut c, "ci.yml", SHA, None, true, &[], &mut |_: &str| Some(touched.clone()));
-        assert!(matches!(d, Reuse::Run(_)), "{d:?}");
+        assert!(matches!(ask(&["crates"]), Reuse::Run(_)));
     }
 }

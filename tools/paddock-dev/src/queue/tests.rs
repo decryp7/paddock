@@ -199,6 +199,8 @@ struct Hooked<'a> {
     inner: GiteaLedger<'a>,
     reads: usize,
     on_read: Option<fn(usize, &mut Vec<Pull>)>,
+    /// Refuse every comment (the ledger cannot record).
+    fail_comment: bool,
 }
 
 impl Ledger for Hooked<'_> {
@@ -214,6 +216,9 @@ impl Ledger for Hooked<'_> {
         self.inner.relabel(n, c)
     }
     fn comment(&mut self, n: u64, t: &str) -> Result<(), String> {
+        if self.fail_comment {
+            return Err("HTTP 503".into());
+        }
         self.inner.comment(n, t)
     }
     fn approved_head(&mut self, pr: &Pull) -> Result<bool, String> {
@@ -247,6 +252,8 @@ struct World {
     /// The train's merge check: [`merges_clean`] unless the test is about the merge check or sets the real one.
     merge_check: MergeCheckFn,
     on_read: Option<fn(usize, &mut Vec<Pull>)>,
+    /// The ledger refuses comments.
+    fail_comment: bool,
     /// Run the tick on a real `GitTrain::open` (its own clone under this folder) instead of the table-driven one.
     real_train: Option<PathBuf>,
     /// The planner of the real train.
@@ -269,6 +276,7 @@ impl World {
             workflows: vec!["ci.yml".into()],
             merge_check: merges_clean,
             on_read: None,
+            fail_comment: false,
             real_train: None,
             planner: no_reach,
         }
@@ -337,6 +345,7 @@ impl World {
                 },
                 reads: 0,
                 on_read: self.on_read,
+                fail_comment: self.fail_comment,
             };
             let mut table = TestTrain {
                 inner: {
@@ -425,9 +434,19 @@ fn one_green_pull_request_is_built_dispatched_and_landed() {
     assert!(w.comments_of(1).iter().any(|c| c.contains("landed on main")));
 }
 
+fn fix_item() -> crate::ci_runs::green::FixItem {
+    crate::ci_runs::green::FixItem {
+        job: "crate (windows-latest)".into(),
+        job_id: 44761,
+        test: "paddock-chromium::it real_browser::a_browser_ended_by_force_leaves_nothing_behind".into(),
+        url: "https://gitea.invalid/example/paddock/actions/runs/8001/jobs/44761".into(),
+    }
+}
+
 #[test]
-fn a_failed_run_that_is_green_with_fix_items_lands() {
-    // ADR 0117 WP-4, train 19's 8610: the landing run failed only in FLAKY tests of untouched targets (ER-12); the one reader says so.
+fn a_failed_run_that_is_green_with_fix_items_lands_and_records_them() {
+    // ADR 0117 WP-4, train 19's 8610: the landing run failed only in FLAKY tests of untouched targets (ER-12); the one reader says
+    // so, and the queue writes the fix items (run, job, test, link) to the pull request before it lands, and again in the landing.
     let mut w = World::new();
     w.approved(1, "crates/x/new.rs", &["x"]);
     let Tick::Built { head, .. } = w.tick() else { panic!() };
@@ -437,7 +456,7 @@ fn a_failed_run_that_is_green_with_fix_items_lands() {
         ("ci.yml".to_string(), head.clone()),
         Verdict::GreenWithFixItems {
             run: 8001,
-            items: vec!["app dyno (ubuntu-latest): nxflaky t::flaky_once".into()],
+            items: vec![fix_item()],
         },
     );
     assert_eq!(
@@ -448,6 +467,45 @@ fn a_failed_run_that_is_green_with_fix_items_lands() {
         }
     );
     assert_eq!(w.repos.origin_ref("refs/heads/main"), head);
+    let comments = w.comments_of(1);
+    let recorded = comments
+        .iter()
+        .find(|c| c.contains("fix items"))
+        .expect("a fix-item comment before the landing");
+    for needle in [
+        "ci.yml",
+        "run 8001",
+        "crate (windows-latest)",
+        "44761",
+        "a_browser_ended_by_force",
+        "/actions/runs/8001/jobs/44761",
+    ] {
+        assert!(recorded.contains(needle), "{needle}: {recorded}");
+    }
+    let landed = comments.iter().find(|c| c.contains("landed on main")).expect("the landing comment");
+    assert!(landed.contains("run 8001") && landed.contains("44761"), "{landed}");
+    // A plain green records nothing.
+}
+
+#[test]
+fn nothing_lands_on_green_with_fix_items_that_could_not_be_recorded() {
+    let mut w = World::new();
+    w.approved(1, "crates/x/new.rs", &["x"]);
+    let Tick::Built { head, .. } = w.tick() else { panic!() };
+    w.tick();
+    w.run(&head, 8001, RunState::Failed("failure".into()));
+    w.ci.verdicts.insert(
+        ("ci.yml".to_string(), head.clone()),
+        Verdict::GreenWithFixItems {
+            run: 8001,
+            items: vec![fix_item()],
+        },
+    );
+    let before = w.repos.origin_ref("refs/heads/main");
+    w.fail_comment = true;
+    let e = w.try_tick_hour(Some(12)).expect_err("the tick fails");
+    assert!(e.contains("could not be recorded"), "{e}");
+    assert_eq!(w.repos.origin_ref("refs/heads/main"), before, "main did not move");
 }
 
 #[test]

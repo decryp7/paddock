@@ -1,0 +1,187 @@
+2026-11-22T00:00:00.0000000Z excerpt of run 8610 job 44761, read through the Actions API on 2026-11-23: the Job line, the Starting line, the first FAIL try through the passing retry of the flaky test, the nextest summary and its FLKY-FL line, and the failed-step annotations. Passing-test lines and the output of other commands are left out; runner paths are replaced by <runner-path>. Nothing else is edited.
+2026-11-22T12:32:33.3328887Z Job: crate
+2026-11-22T12:34:28.8007078Z [32;1m    Starting[0m [1m4825[0m tests across [1m118[0m binaries ([1m29[0m tests [33;1mskipped[0m)
+2026-11-22T12:34:57.0427630Z [35;1m  TRY 1 FAIL[0m [   6.991s] (─────────) [35;1mpaddock-chromium::it[0m [36mreal_browser[0m[36m::[0m[34;1ma_browser_ended_by_force_leaves_nothing_behind[0m
+2026-11-22T12:34:57.0427630Z [35;1m [0m [35;1mstdout[0m [35;1m───[0m
+2026-11-22T12:34:57.0427630Z 
+2026-11-22T12:34:57.0427630Z     running 1 test
+2026-11-22T12:34:57.0427630Z     test real_browser::a_browser_ended_by_force_leaves_nothing_behind ... FAILED
+2026-11-22T12:34:57.0427630Z 
+2026-11-22T12:34:57.0427630Z     failures:
+2026-11-22T12:34:57.0427630Z 
+2026-11-22T12:34:57.0427630Z     failures:
+2026-11-22T12:34:57.0427630Z         real_browser::a_browser_ended_by_force_leaves_nothing_behind
+2026-11-22T12:34:57.0427630Z 
+2026-11-22T12:34:57.0427630Z     test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 9 filtered out; finished in 6.91s
+2026-11-22T12:34:57.0427630Z     [0m
+2026-11-22T12:34:57.0445018Z [35;1m [0m [35;1mstderr[0m [35;1m───[0m
+2026-11-22T12:34:57.0445018Z 
+2026-11-22T12:34:57.0445018Z     [0m[31;1mthread 'real_browser::a_browser_ended_by_force_leaves_nothing_behind' (10776) panicked at paddock-chromium\tests\it\real_browser.rs:539:5:[0m
+2026-11-22T12:34:57.0445018Z     [31;1mthe profile folder is removed[0m
+2026-11-22T12:34:57.0445018Z     note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace[0m
+2026-11-22T12:34:57.0445018Z 
+2026-11-22T12:34:57.1654826Z [32;1m        PASS[0m [   0.287s] ( 573/4825) [35;1mpaddock-diag[0m [36mtauri::tests[0m[36m::[0m[34;1ma_preview_lists_redacted_files_and_a_later_one_reuses_the_collection[0m
+2026-11-22T12:34:57.2088489Z [32;1m        PASS[0m [   0.294s] ( 574/4825) [35;1mpaddock-diag[0m [36mtauri::tests[0m[36m::[0m[34;1ma_save_without_the_jobs_state_is_refused_and_a_panicking_picker_fails_the_save_not_the_app[0m
+2026-11-22T12:34:57.3006820Z [32;1m        PASS[0m [   0.344s] ( 575/4825) [35;1mpaddock-diag[0m [36mtauri::tests[0m[36m::[0m[34;1ma_stale_preview_a_missing_picker_and_a_bad_answer_are_refused_with_words[0m
+2026-11-22T12:34:57.4312531Z [32;1m        PASS[0m [   0.264s] ( 576/4825) [35;1mpaddock-diag[0m [36mtauri::tests[0m[36m::[0m[34;1mcancel_during_the_dialog_leaves_no_file[0m
+2026-11-22T12:34:57.4917122Z [32;1m        PASS[0m [   0.281s] ( 577/4825) [35;1mpaddock-diag[0m [36mtauri::tests[0m[36m::[0m[34;1mclosing_the_dialog_writes_nothing_and_says_so[0m
+2026-11-22T12:34:57.5163174Z [32;1m        PASS[0m [   0.085s] ( 578/4825) [35;1mpaddock-diag[0m [36mtauri::tests[0m[36m::[0m[34;1mnaming_the_settings_file_replaces_only_the_settings_section[0m
+2026-11-22T12:34:57.6026419Z [32;1m        PASS[0m [   0.301s] ( 579/4825) [35;1mpaddock-diag[0m [36mtauri::tests[0m[36m::[0m[34;1mevery_command_is_async_and_in_the_table[0m
+2026-11-22T12:34:57.7367418Z [32;1m        PASS[0m [   0.245s] ( 580/4825) [35;1mpaddock-diag[0m [36mtauri::tests[0m[36m::[0m[34;1mrequests_with_missing_or_mistyped_arguments_are_refused_before_they_run[0m
+2026-11-22T12:34:57.9394949Z [32;1m        PASS[0m [   0.337s] ( 581/4825) [35;1mpaddock-diag[0m [36mtauri::tests[0m[36m::[0m[34;1mthe_cancel_command_stops_the_running_save_and_is_a_no_op_otherwise[0m
+2026-11-22T12:34:57.9695070Z [32;1m        PASS[0m [   0.453s] ( 582/4825) [35;1mpaddock-diag[0m [36mtauri::tests[0m[36m::[0m[34;1msaving_asks_the_user_writes_a_job_and_reports_the_outcome[0m
+2026-11-22T12:34:58.0150385Z [32;1m        PASS[0m [   0.279s] ( 583/4825) [35;1mpaddock-diag[0m [36mtauri::tests[0m[36m::[0m[34;1mthe_log_handle_is_kept_for_the_logging_section_and_flushed_before_collecting[0m
+2026-11-22T12:34:58.1504747Z [32;1m        PASS[0m [   0.136s] ( 584/4825) [35;1mpaddock-diag[0m [36mwindow::tests[0m[36m::[0m[34;1ma_file_is_read_through_the_same_tail[0m
+2026-11-22T12:34:58.1695712Z [32;1m        PASS[0m [   0.201s] ( 585/4825) [35;1mpaddock-diag[0m [36mtauri::tests[0m[36m::[0m[34;1mwithout_the_state_the_report_commands_are_refused_and_log_lines_still_flow[0m
+2026-11-22T12:34:58.2823152Z [32;1m        PASS[0m [   0.112s] ( 586/4825) [35;1mpaddock-diag[0m [36mwindow::tests[0m[36m::[0m[34;1ma_small_file_is_whole_and_a_cut_starts_at_a_line[0m
+2026-11-22T12:34:58.3138147Z [32;1m        PASS[0m [   0.162s] ( 587/4825) [35;1mpaddock-diag[0m [36mwindow::tests[0m[36m::[0m[34;1ma_one_gigabyte_log_is_read_from_the_end_only[0m
+2026-11-22T12:34:58.3742642Z [32;1m        PASS[0m [   0.091s] ( 588/4825) [35;1mpaddock-diag[0m [36mwindow::tests[0m[36m::[0m[34;1man_unreadable_folder_or_file_is_reported_not_called_empty[0m
+2026-11-22T12:34:58.3782609Z [32;1m        PASS[0m [   0.438s] ( 589/4825) [35;1mpaddock-diag[0m [36mtauri::tests[0m[36m::[0m[34;1mthe_setups_clock_names_the_file_and_install_keeps_the_first_state[0m
+2026-11-22T12:34:58.4727706Z [32;1m        PASS[0m [   0.158s] ( 590/4825) [35;1mpaddock-diag[0m [36mwindow::tests[0m[36m::[0m[34;1meach_process_gets_a_share_of_the_window_and_a_chatty_one_cannot_push_another_out[0m
+2026-11-22T12:34:58.4739040Z [32;1m        PASS[0m [   0.101s] ( 591/4825) [35;1mpaddock-diag[0m [36mwindow::tests[0m[36m::[0m[34;1mlog_files_lists_matching_logs_and_an_unreadable_folder_is_an_empty_list[0m
+2026-11-22T12:34:58.5435281Z [32;1m        PASS[0m [   0.168s] ( 592/4825) [35;1mpaddock-diag[0m [36mwindow::tests[0m[36m::[0m[34;1mthe_window_takes_the_newest_files_within_the_budget[0m
+2026-11-22T12:34:58.6737360Z [32;1m        PASS[0m [   0.198s] ( 593/4825) [35;1mpaddock-diag::it[0m [36mhostile[0m[36m::[0m[34;1mopted_in_loopback_and_rfc1918_addresses_stay_in_every_form_and_the_rest_go[0m
+2026-11-22T12:34:58.7654492Z [32;1m        PASS[0m [   0.091s] ( 594/4825) [35;1mpaddock-diag::it[0m [36mhostile[0m[36m::[0m[34;1mthe_list_of_what_is_left_is_the_list_the_dialog_shows[0m
+2026-11-22T12:34:58.7780257Z [32;1m        PASS[0m [   0.234s] ( 595/4825) [35;1mpaddock-diag::it[0m [36mhostile[0m[36m::[0m[34;1msecret_keys_mask_any_value_type_and_settings_keys_pass_and_pw[0m
+2026-11-22T12:34:58.8064424Z [32;1m        PASS[0m [   0.334s] ( 596/4825) [35;1mpaddock-diag::it[0m [36mhostile[0m[36m::[0m[34;1mevery_hostile_line_is_judged_in_every_form[0m
+2026-11-22T12:34:58.8444364Z [32;1m        PASS[0m [   0.076s] ( 597/4825) [35;1mpaddock-diag::it[0m [36mnever_panics[0m[36m::[0m[34;1mthe_manifest_survives_hostile_bytes[0m
+2026-11-22T12:34:58.9462017Z [32;1m        PASS[0m [   0.105s] ( 598/4825) [35;1mpaddock-diag::it[0m [36mreport[0m[36m::[0m[34;1ma_destination_under_a_file_is_refused[0m
+2026-11-22T12:34:59.0173438Z [32;1m        PASS[0m [   0.212s] ( 599/4825) [35;1mpaddock-diag::it[0m [36mreport[0m[36m::[0m[34;1ma_cut_never_splits_a_character[0m
+2026-11-22T12:34:59.0466725Z [32;1m        PASS[0m [   0.269s] ( 600/4825) [35;1mpaddock-diag::it[0m [36mredacted_json[0m[36m::[0m[34;1mevery_json_file_of_every_builtin_section_parses_after_the_redactor[0m
+2026-11-22T12:34:59.0867305Z [32;1m        PASS[0m [   0.139s] ( 601/4825) [35;1mpaddock-diag::it[0m [36mreport[0m[36m::[0m[34;1ma_failing_section_costs_only_itself[0m
+2026-11-22T12:34:59.2538145Z [32;1m        PASS[0m [   0.194s] ( 602/4825) [35;1mpaddock-diag::it[0m [36mreport[0m[36m::[0m[34;1ma_log_longer_than_the_window_is_cut_to_it[0m
+2026-11-22T12:34:59.2538145Z [32;1m        PASS[0m [   0.166s] ( 603/4825) [35;1mpaddock-diag::it[0m [36mreport[0m[36m::[0m[34;1ma_named_settings_file_is_reported_and_the_default_one_is_left_alone[0m
+2026-11-22T12:34:59.2898701Z [32;1m        PASS[0m [   0.273s] ( 604/4825) [35;1mpaddock-diag::it[0m [36mreport[0m[36m::[0m[34;1ma_file_over_the_limit_is_cut_and_the_total_is_bounded[0m
+2026-11-22T12:34:59.3408355Z [32;1m        PASS[0m [   0.099s] ( 605/4825) [35;1mpaddock-diag::it[0m [36mreport[0m[36m::[0m[34;1man_app_can_add_up_the_counts_of_its_own_files[0m
+2026-11-22T12:34:59.5857042Z [32;1m        PASS[0m [   0.333s] ( 606/4825) [35;1mpaddock-diag::it[0m [36mreport[0m[36m::[0m[34;1man_unreadable_log_folder_is_not_reported_as_empty[0m
+2026-11-22T12:34:59.6261621Z [32;1m        PASS[0m [   0.283s] ( 607/4825) [35;1mpaddock-diag::it[0m [36mreport[0m[36m::[0m[34;1mcancel_leaves_no_partial_zip[0m
+2026-11-22T12:34:59.6485638Z [32;1m        PASS[0m [   0.356s] ( 608/4825) [35;1mpaddock-diag::it[0m [36mreport[0m[36m::[0m[34;1mbad_names_duplicates_and_limits_are_noted_not_fatal[0m
+2026-11-22T12:34:59.7570008Z [32;1m        PASS[0m [   0.171s] ( 609/4825) [35;1mpaddock-diag::it[0m [36mreport[0m[36m::[0m[34;1mdestinations_are_validated[0m
+2026-11-22T12:34:59.8979138Z [32;1m        PASS[0m [   0.250s] ( 610/4825) [35;1mpaddock-diag::it[0m [36mreport[0m[36m::[0m[34;1mmissing_and_damaged_inputs_become_notes[0m
+2026-11-22T12:34:59.8979138Z [32;1m        PASS[0m [   0.273s] ( 611/4825) [35;1mpaddock-diag::it[0m [36mreport[0m[36m::[0m[34;1mevery_crash_marker_is_reported_once_and_cleared_when_saved[0m
+2026-11-22T12:34:59.8995287Z [32;1m        PASS[0m [   0.143s] ( 612/4825) [35;1mpaddock-diag::it[0m [36mreport[0m[36m::[0m[34;1mnothing_private_survives_in_any_file[0m
+2026-11-22T12:34:59.8995287Z [32;1m        PASS[0m [   6.169s] ( 613/4825) [35;1mpaddock-diag[0m [36mperf::document::tests[0m[36m::[0m[34;1mthe_json_survives_the_redactor_for_any_time_and_size[0m
+2026-11-22T12:34:59.9719005Z [32;1m        PASS[0m [   0.074s] ( 614/4825) [35;1mpaddock-diag::it[0m [36mreport[0m[36m::[0m[34;1msuggested_names_carry_the_app_and_the_time[0m
+2026-11-22T12:34:59.9968817Z [32;1m        PASS[0m [   0.099s] ( 615/4825) [35;1mpaddock-diag::it[0m [36mreport[0m[36m::[0m[34;1mthe_crate_has_no_network_dependency[0m
+2026-11-22T12:35:00.0229563Z [32;1m        PASS[0m [   0.127s] ( 616/4825) [35;1mpaddock-diag::it[0m [36mreport[0m[36m::[0m[34;1msaving_writes_the_zip_and_counts_progress[0m
+2026-11-22T12:35:00.0960978Z [32;1m        PASS[0m [   0.196s] ( 617/4825) [35;1mpaddock-diag::it[0m [36mreport[0m[36m::[0m[34;1mthe_description_is_written_as_typed_and_capped[0m
+2026-11-22T12:35:00.1397234Z [32;1m        PASS[0m [   0.168s] ( 618/4825) [35;1mpaddock-diag::it[0m [36mreport[0m[36m::[0m[34;1mthe_preview_equals_the_zip[0m
+2026-11-22T12:35:00.1555034Z [32;1m        PASS[0m [   0.060s] ( 619/4825) [35;1mpaddock-diag::trail[0m [34;1man_hour_of_busy_use_costs_the_trail_under_a_hundred_kilobytes[0m
+2026-11-22T12:35:00.1643502Z [32;1m        PASS[0m [   0.166s] ( 620/4825) [35;1mpaddock-diag::it[0m [36mreport[0m[36m::[0m[34;1mthe_system_info_names_the_build_commit[0m
+2026-11-22T12:35:00.2080636Z [32;1m        PASS[0m [   0.184s] ( 621/4825) [35;1mpaddock-diag::perf[0m [34;1mrecording_to_a_bundle[0m
+2026-11-22T12:35:00.2425136Z [32;1m        PASS[0m [   0.078s] ( 622/4825) [35;1mpaddock-dialogs[0m [36mcontract::tests[0m[36m::[0m[34;1ma_contract_takes_its_sizes_from_the_kind_unless_declared[0m
+2026-11-22T12:35:00.2564896Z [32;1m        PASS[0m [   0.116s] ( 623/4825) [35;1mpaddock-diag::trail[0m [34;1mthe_latest_actions_are_in_the_report_without_values[0m
+2026-11-22T12:35:00.2597364Z [32;1m        PASS[0m [   0.103s] ( 624/4825) [35;1mpaddock-diag::webview[0m [34;1mwebview_lines_reach_the_log_with_their_window_and_are_bounded[0m
+2026-11-22T12:35:00.2671067Z [32;1m        PASS[0m [   0.057s] ( 625/4825) [35;1mpaddock-dialogs[0m [36mcontract::tests[0m[36m::[0m[34;1ma_dialog_may_call_the_base_commands_and_its_own_only[0m
+2026-11-22T12:35:00.3197216Z [32;1m        PASS[0m [   0.061s] ( 626/4825) [35;1mpaddock-dialogs[0m [36mcontract::tests[0m[36m::[0m[34;1mkinds_limit_modality_and_set_the_size_rules[0m
+2026-11-22T12:35:00.3247856Z [32;1m        PASS[0m [   0.079s] ( 627/4825) [35;1mpaddock-dialogs[0m [36mcontract::tests[0m[36m::[0m[34;1ma_grant_answers_for_its_dialog_only[0m
+2026-11-22T12:35:00.3276195Z [32;1m        PASS[0m [   0.069s] ( 628/4825) [35;1mpaddock-dialogs[0m [36mcontract::tests[0m[36m::[0m[34;1mcontracts_are_checked_against_the_command_table[0m
+2026-11-22T12:35:00.3303142Z [32;1m        PASS[0m [   0.062s] ( 629/4825) [35;1mpaddock-dialogs[0m [36mcontract::tests[0m[36m::[0m[34;1mnames_and_ids_follow_the_schemes[0m
+2026-11-22T12:35:00.3914250Z [32;1m        PASS[0m [   0.062s] ( 630/4825) [35;1mpaddock-dialogs[0m [36medge::tests[0m[36m::[0m[34;1mdpi_is_a_scale_and_zero_is_the_base[0m
+2026-11-22T12:35:00.3948929Z [32;1m        PASS[0m [   0.072s] ( 631/4825) [35;1mpaddock-dialogs[0m [36mcontract::tests[0m[36m::[0m[34;1mwhat_a_dialog_remembers_has_a_name_in_the_generated_typescript[0m
+2026-11-22T12:35:00.3993727Z [32;1m        PASS[0m [   0.078s] ( 632/4825) [35;1mpaddock-dialogs[0m [36mcontract::tests[0m[36m::[0m[34;1mtables_merge_their_dialogs_and_base_sets_and_never_one_id_twice[0m
+2026-11-22T12:35:00.4073311Z [32;1m        PASS[0m [   0.081s] ( 633/4825) [35;1mpaddock-dialogs[0m [36medge::tests[0m[36m::[0m[34;1ma_request_is_honoured_clamped_or_enlarged[0m
+2026-11-22T12:35:00.4551678Z [32;1m        PASS[0m [   0.063s] ( 634/4825) [35;1mpaddock-dialogs[0m [36medge::tests[0m[36m::[0m[34;1mlinux_metrics_take_the_frame_from_outer_minus_inner_and_guess_wayland_panels[0m
+2026-11-22T12:35:00.4798090Z [32;1m        PASS[0m [   0.072s] ( 635/4825) [35;1mpaddock-dialogs[0m [36medge::tests[0m[36m::[0m[34;1monly_windows_and_macos_signal_a_user_resize[0m
+2026-11-22T12:35:00.4822446Z [32;1m        PASS[0m [   0.087s] ( 636/4825) [35;1mpaddock-dialogs[0m [36medge::tests[0m[36m::[0m[34;1mmetrics_become_a_logical_env_and_a_bad_scale_is_one[0m
+2026-11-22T12:35:00.4899863Z [32;1m        PASS[0m [   0.091s] ( 637/4825) [35;1mpaddock-dialogs[0m [36medge::tests[0m[36m::[0m[34;1monly_sc_size_is_a_user_resize_whatever_started_it[0m
+2026-11-22T12:35:00.5393972Z [32;1m        PASS[0m [   0.058s] ( 638/4825) [35;1mpaddock-dialogs[0m [36medge::tests[0m[36m::[0m[34;1mthe_display_server_comes_from_gdk_then_the_session_then_the_socket[0m
+2026-11-22T12:35:00.5395469Z [32;1m        PASS[0m [   0.083s] ( 639/4825) [35;1mpaddock-dialogs[0m [36medge::tests[0m[36m::[0m[34;1mrect_size_never_goes_negative[0m
+2026-11-22T12:35:00.5398434Z [32;1m        PASS[0m [   0.057s] ( 640/4825) [35;1mpaddock-dialogs[0m [36medge::tests[0m[36m::[0m[34;1mthe_scaled_size_is_the_ceiled_client_plus_the_full_frame_at_the_new_dpi[0m
+2026-11-22T12:35:00.5693733Z [32;1m        PASS[0m [   0.078s] ( 641/4825) [35;1mpaddock-dialogs[0m [36medge::tests[0m[36m::[0m[34;1mvisible_frame_leaves_out_the_invisible_borders[0m
+2026-11-22T12:35:00.5814285Z [32;1m        PASS[0m [   0.044s] ( 642/4825) [35;1mpaddock-dialogs[0m [36medge::tests[0m[36m::[0m[34;1mwayland_cannot_place_and_guesses_the_panels[0m
+2026-11-22T12:35:00.6035927Z [32;1m        PASS[0m [   0.061s] ( 643/4825) [35;1mpaddock-dialogs[0m [36medge::windows::tests[0m[36m::[0m[34;1ma_reading_has_a_scale_a_work_area_and_a_frame_not_larger_than_the_full_one[0m
+2026-11-22T12:35:00.6265585Z [32;1m        PASS[0m [   0.088s] ( 644/4825) [35;1mpaddock-dialogs[0m [36medge::tests[0m[36m::[0m[34;1mwindows_and_linux_infer_a_user_resize_and_macos_does_not[0m
+2026-11-22T12:35:00.6379615Z [32;1m        PASS[0m [   0.067s] ( 645/4825) [35;1mpaddock-dialogs[0m [36medge::windows::tests[0m[36m::[0m[34;1mthe_dpi_scaled_size_is_the_wanted_inner_at_the_new_dpi_plus_the_frame_there[0m
+2026-11-22T12:35:00.6384321Z [32;1m        PASS[0m [   0.053s] ( 646/4825) [35;1mpaddock-dialogs[0m [36medge::windows::tests[0m[36m::[0m[34;1mthe_full_frame_grows_with_the_dpi_it_is_asked_at[0m
+2026-11-22T12:35:00.6839947Z [32;1m        PASS[0m [   0.081s] ( 647/4825) [35;1mpaddock-dialogs[0m [36medge::windows::tests[0m[36m::[0m[34;1mwithout_a_wanted_size_the_os_keeps_its_own[0m
+2026-11-22T12:35:00.6887539Z [32;1m        PASS[0m [   0.062s] ( 648/4825) [35;1mpaddock-dialogs[0m [36medge::windows::tests[0m[36m::[0m[34;1mwm_sizing_is_a_user_resize_and_the_end_of_a_move_is_reported[0m
+2026-11-22T12:35:00.7023964Z [32;1m        PASS[0m [   0.064s] ( 649/4825) [35;1mpaddock-dialogs[0m [36mexpect::tests[0m[36m::[0m[34;1ma_tool_opens_at_its_declared_height_capped_by_the_screen[0m
+2026-11-22T12:35:00.7154680Z [32;1m        PASS[0m [   0.079s] ( 650/4825) [35;1mpaddock-dialogs[0m [36mexpect::tests[0m[36m::[0m[34;1ma_short_decision_opens_at_the_floor_and_a_tall_one_at_its_content_up_to_the_cap[0m
+2026-11-22T12:35:00.7503164Z [32;1m        PASS[0m [   0.068s] ( 651/4825) [35;1mpaddock-dialogs[0m [36mexpect::tests[0m[36m::[0m[34;1ma_viewer_never_opens_below_its_floor[0m
+2026-11-22T12:35:00.7503164Z [32;1m        PASS[0m [   0.051s] ( 652/4825) [35;1mpaddock-dialogs[0m [36mexpect::tests[0m[36m::[0m[34;1mthe_range_covers_a_frame_that_counts_the_invisible_borders[0m
+2026-11-22T12:35:00.7520614Z [32;1m        PASS[0m [   0.064s] ( 653/4825) [35;1mpaddock-dialogs[0m [36mexpect::tests[0m[36m::[0m[34;1mon_a_small_screen_the_floor_gives_way_to_the_work_area_and_nothing_is_cut_off[0m
+2026-11-22T12:35:00.8139476Z [32;1m        PASS[0m [   0.062s] ( 654/4825) [35;1mpaddock-dialogs[0m [36mplacement::tests[0m[36m::[0m[34;1ma_dialog_bigger_than_the_work_area_is_shrunk_to_it_and_placed_inside[0m
+2026-11-22T12:35:00.8147602Z [32;1m        PASS[0m [   0.061s] ( 655/4825) [35;1mpaddock-dialogs[0m [36mplacement::tests[0m[36m::[0m[34;1ma_new_dialog_is_centred_on_its_parent_on_the_parents_monitor[0m
+2026-11-22T12:35:00.8153658Z [32;1m        PASS[0m [   0.100s] ( 656/4825) [35;1mpaddock-dialogs[0m [36mgenerated[0m[36m::[0m[34;1mgenerated_kind_table_is_current[0m
+2026-11-22T12:35:00.8214014Z [32;1m        PASS[0m [   0.068s] ( 657/4825) [35;1mpaddock-dialogs[0m [36mgenerated[0m[36m::[0m[34;1mgenerated_typescript_is_current[0m
+2026-11-22T12:35:00.8637966Z [32;1m        PASS[0m [   0.050s] ( 658/4825) [35;1mpaddock-dialogs[0m [36mplacement::tests[0m[36m::[0m[34;1ma_parent_on_a_display_above_the_primary_keeps_its_dialog_above[0m
+2026-11-22T12:35:00.8941504Z [32;1m        PASS[0m [   0.078s] ( 659/4825) [35;1mpaddock-dialogs[0m [36mplacement::tests[0m[36m::[0m[34;1ma_parent_on_a_secondary_display_left_of_the_primary_gets_its_dialog_there_at_that_displays_scale[0m
+2026-11-22T12:35:00.8994523Z [32;1m        PASS[0m [   0.078s] ( 660/4825) [35;1mpaddock-dialogs[0m [36mplacement::tests[0m[36m::[0m[34;1ma_placed_size_is_within_the_minimum_and_the_work_area_and_its_physical_size_never_rounds_down[0m
+2026-11-22T12:35:00.8994523Z [32;1m        PASS[0m [   0.084s] ( 661/4825) [35;1mpaddock-dialogs[0m [36mplacement::tests[0m[36m::[0m[34;1ma_parent_moved_to_another_display_since_the_size_was_remembered_takes_the_dialog_with_it[0m
+2026-11-22T12:35:00.9164668Z [32;1m        PASS[0m [   0.052s] ( 662/4825) [35;1mpaddock-dialogs[0m [36mplacement::tests[0m[36m::[0m[34;1ma_preferred_size_is_capped_with_the_frame_so_the_outer_window_never_exceeds_the_cap[0m
+2026-11-22T12:35:00.9459999Z [32;1m        PASS[0m [   0.047s] ( 663/4825) [35;1mpaddock-dialogs[0m [36mplacement::tests[0m[36m::[0m[34;1ma_remembered_offset_is_used_only_when_the_whole_dialog_stays_on_the_parents_monitor[0m
+2026-11-22T12:35:00.9563721Z [32;1m        PASS[0m [   0.063s] ( 664/4825) [35;1mpaddock-dialogs[0m [36mplacement::tests[0m[36m::[0m[34;1ma_refit_that_grows_past_the_bottom_moves_the_window_up_on_its_own_monitor[0m
+2026-11-22T12:35:00.9570420Z [32;1m        PASS[0m [   0.059s] ( 665/4825) [35;1mpaddock-dialogs[0m [36mplacement::tests[0m[36m::[0m[34;1man_offset_that_would_cross_into_the_neighbouring_display_is_not_used[0m
+2026-11-22T12:35:00.9671894Z [32;1m        PASS[0m [   0.050s] ( 666/4825) [35;1mpaddock-dialogs[0m [36mplacement::tests[0m[36m::[0m[34;1mnonsense_from_the_platform_or_the_ui_is_ignored[0m
+2026-11-22T12:35:01.0041079Z [32;1m        PASS[0m [   0.058s] ( 667/4825) [35;1mpaddock-dialogs[0m [36mplacement::tests[0m[36m::[0m[34;1mphysical_sizes_round_up_once_and_are_never_zero[0m
+2026-11-22T12:35:01.0150028Z [32;1m        PASS[0m [   0.059s] ( 668/4825) [35;1mpaddock-dialogs[0m [36mplacement::tests[0m[36m::[0m[34;1mplacement_table_over_mixed_scale_monitors[0m
+2026-11-22T12:35:01.0234504Z [32;1m        PASS[0m [   0.066s] ( 669/4825) [35;1mpaddock-dialogs[0m [36mplacement::tests[0m[36m::[0m[34;1mthe_kind_decides_what_of_a_remembered_place_is_kept[0m
+2026-11-22T12:35:01.0471844Z [32;1m        PASS[0m [   0.081s] ( 670/4825) [35;1mpaddock-dialogs[0m [36mplacement::tests[0m[36m::[0m[34;1mthe_parents_monitor_is_the_one_it_overlaps_most_or_the_nearest[0m
+2026-11-22T12:35:01.0625046Z [32;1m        PASS[0m [   0.058s] ( 671/4825) [35;1mpaddock-dialogs[0m [36mplacement::tests[0m[36m::[0m[34;1mthe_remembered_place_is_an_offset_from_the_parent[0m
+2026-11-22T12:35:01.0642318Z [32;1m        PASS[0m [   0.048s] ( 672/4825) [35;1mpaddock-dialogs[0m [36mplacement::tests[0m[36m::[0m[34;1mwithout_parent_bounds_it_centres_on_the_parents_monitor_never_the_primary[0m
+2026-11-22T12:35:01.0762399Z [32;1m        PASS[0m [   0.053s] ( 673/4825) [35;1mpaddock-dialogs[0m [36mregistry::tests[0m[36m::[0m[34;1ma_close_request_goes_to_the_dialog_first_and_a_hung_dialog_is_closed_on_the_next[0m
+2026-11-22T12:35:01.1107023Z [32;1m        PASS[0m [   0.061s] ( 674/4825) [35;1mpaddock-dialogs[0m [36mregistry::tests[0m[36m::[0m[34;1ma_required_choice_stays_until_answered_unless_its_page_hangs[0m
+2026-11-22T12:35:01.1156934Z [32;1m        PASS[0m [   0.053s] ( 675/4825) [35;1mpaddock-dialogs[0m [36mregistry::tests[0m[36m::[0m[34;1mbounds_exiting_and_a_poisoned_lock_are_handled[0m
+2026-11-22T12:35:01.1174270Z [32;1m        PASS[0m [   0.054s] ( 676/4825) [35;1mpaddock-dialogs[0m [36mregistry::tests[0m[36m::[0m[34;1mlabels_are_per_host_and_dialogs_are_found_by_opener_id_and_instance[0m
+2026-11-22T12:35:01.1227149Z [32;1m        PASS[0m [   0.047s] ( 677/4825) [35;1mpaddock-dialogs[0m [36mregistry::tests[0m[36m::[0m[34;1monly_top_level_windows_own_dialogs_and_at_most_eight_each[0m
+2026-11-22T12:35:01.1568384Z [32;1m        PASS[0m [   0.041s] ( 678/4825) [35;1mpaddock-dialogs[0m [36mregistry::tests[0m[36m::[0m[34;1mthe_grant_comes_from_the_record_never_from_the_webview[0m
+2026-11-22T12:35:01.1580437Z [32;1m        PASS[0m [   0.049s] ( 679/4825) [35;1mpaddock-dialogs[0m [36mregistry::tests[0m[36m::[0m[34;1mstatic_tables_build_the_dialogs_or_say_why_not[0m
+2026-11-22T12:35:01.1691449Z [32;1m        PASS[0m [   0.052s] ( 680/4825) [35;1mpaddock-dialogs[0m [36mregistry::tests[0m[36m::[0m[34;1mthe_size_state_is_taken_for_a_transition_and_put_back_and_the_epoch_counts_page_loads[0m
+2026-11-22T12:35:01.1857930Z [32;1m        PASS[0m [   0.061s] ( 681/4825) [35;1mpaddock-dialogs[0m [36msize::echo::tests[0m[36m::[0m[34;1ma_match_within_one_physical_px_is_an_echo[0m
+2026-11-22T12:35:01.1991188Z [32;1m        PASS[0m [   0.042s] ( 682/4825) [35;1mpaddock-dialogs[0m [36msize::echo::tests[0m[36m::[0m[34;1man_echo_equal_to_several_keeps_the_ones_after_the_oldest_as_maybe[0m
+2026-11-22T12:35:01.2081819Z [32;1m        PASS[0m [   0.050s] ( 683/4825) [35;1mpaddock-dialogs[0m [36msize::echo::tests[0m[36m::[0m[34;1man_echo_of_a_newer_request_proves_the_older_ones_merged[0m
+2026-11-22T12:35:01.2284991Z [32;1m        PASS[0m [   0.043s] ( 684/4825) [35;1mpaddock-dialogs[0m [36msize::echo::tests[0m[36m::[0m[34;1min_order_echoes_take_their_entries_and_prove_nothing_merged[0m
+2026-11-22T12:35:01.2382855Z [32;1m        PASS[0m [   0.069s] ( 685/4825) [35;1mpaddock-dialogs[0m [36msize::echo::tests[0m[36m::[0m[34;1mclear_forgets_every_request_and_turns_inference_back_on[0m
+2026-11-22T12:35:01.2435043Z [32;1m        PASS[0m [   0.044s] ( 686/4825) [35;1mpaddock-dialogs[0m [36msize::echo::tests[0m[36m::[0m[34;1mover_the_cap_inference_is_off_until_the_queue_drains_and_nothing_is_dropped[0m
+2026-11-22T12:35:01.2601302Z [32;1m        PASS[0m [   0.052s] ( 687/4825) [35;1mpaddock-dialogs[0m [36msize::echo::tests[0m[36m::[0m[34;1mpast_the_limit_inference_stays_off_after_the_queue_drains_until_it_is_cleared[0m
+2026-11-22T12:35:01.2903652Z [32;1m        PASS[0m [   0.051s] ( 688/4825) [35;1mpaddock-dialogs[0m [36msize::tests[0m[36m::[0m[34;1ma_form_follows_its_content_up_and_down_and_is_shown_after_its_resize[0m
+2026-11-22T12:35:01.2903652Z [32;1m        PASS[0m [   0.062s] ( 689/4825) [35;1mpaddock-dialogs[0m [36msize::echo::tests[0m[36m::[0m[34;1mthe_queue_is_bounded_and_drops_the_oldest_past_its_limit[0m
+2026-11-22T12:35:01.3117890Z [32;1m        PASS[0m [   0.051s] ( 690/4825) [35;1mpaddock-dialogs[0m [36msize::tests[0m[36m::[0m[34;1ma_move_never_changes_the_mode_and_a_matching_resize_is_not_the_user[0m
+2026-11-22T12:35:01.3119589Z [32;1m        PASS[0m [   0.067s] ( 691/4825) [35;1mpaddock-dialogs[0m [36msize::tests[0m[36m::[0m[34;1ma_monitor_with_a_smaller_work_area_clamps_the_window[0m
+2026-11-22T12:35:01.3282348Z [32;1m        PASS[0m [   0.039s] ( 692/4825) [35;1mpaddock-dialogs[0m [36msize::tests[0m[36m::[0m[34;1ma_scale_change_posts_one_refit_and_one_remeasure_at_the_new_scale[0m
+2026-11-22T12:35:01.3490375Z [32;1m        PASS[0m [   0.058s] ( 693/4825) [35;1mpaddock-dialogs[0m [36msize::tests[0m[36m::[0m[34;1ma_resized_equal_to_the_size_the_window_already_has_is_neither_unexplained_nor_the_user[0m
+2026-11-22T12:35:01.3559905Z [32;1m        PASS[0m [   0.045s] ( 694/4825) [35;1mpaddock-dialogs[0m [36msize::tests[0m[36m::[0m[34;1ma_snap_is_a_user_resize_but_the_resize_tao_makes_after_a_dpi_change_is_not[0m
+2026-11-22T12:35:01.3679093Z [32;1m        PASS[0m [   0.056s] ( 695/4825) [35;1mpaddock-dialogs[0m [36msize::tests[0m[36m::[0m[34;1ma_snap_that_changes_no_size_is_still_the_user[0m
+2026-11-22T12:35:01.3769898Z [32;1m        PASS[0m [   0.048s] ( 696/4825) [35;1mpaddock-dialogs[0m [36msize::tests[0m[36m::[0m[34;1ma_tool_keeps_its_size_and_only_the_minimum_raises_it[0m
+2026-11-22T12:35:01.3961844Z [32;1m        PASS[0m [   0.040s] ( 697/4825) [35;1mpaddock-dialogs[0m [36msize::tests[0m[36m::[0m[34;1ma_viewer_opens_at_its_floor_and_only_grows[0m
+2026-11-22T12:35:01.3995004Z [32;1m        PASS[0m [   0.049s] ( 698/4825) [35;1mpaddock-dialogs[0m [36msize::tests[0m[36m::[0m[34;1ma_user_resize_makes_a_height_window_manual_and_later_content_leaves_it[0m
+2026-11-22T12:35:01.4125844Z [32;1m        PASS[0m [   0.043s] ( 699/4825) [35;1mpaddock-dialogs[0m [36msize::tests[0m[36m::[0m[34;1man_echo_equal_to_a_late_request_and_a_pending_one_keeps_the_requests_between_them[0m
+2026-11-22T12:35:01.4216445Z [32;1m        PASS[0m [   0.042s] ( 700/4825) [35;1mpaddock-dialogs[0m [36msize::tests[0m[36m::[0m[34;1man_echo_of_a_newer_request_proves_the_older_ones_merged_and_a_drag_to_their_size_is_the_user[0m
+2026-11-22T12:35:01.4369346Z [32;1m        PASS[0m [   0.039s] ( 701/4825) [35;1mpaddock-dialogs[0m [36msize::tests[0m[36m::[0m[34;1man_older_seq_changes_nothing_and_a_new_epoch_is_accepted[0m
+2026-11-22T12:35:01.4573007Z [32;1m        PASS[0m [   0.046s] ( 702/4825) [35;1mpaddock-dialogs[0m [36msize::tests[0m[36m::[0m[34;1mover_the_cap_an_unmatched_resize_is_not_inferred_as_the_user_but_the_os_signal_still_counts[0m
+2026-11-22T12:35:01.4652748Z [32;1m        PASS[0m [   0.045s] ( 703/4825) [35;1mpaddock-dialogs[0m [36msize::tests[0m[36m::[0m[34;1mpast_the_cap_in_order_echoes_are_never_unexplained_and_inference_resumes_once_drained[0m
+2026-11-22T12:35:01.4786784Z [32;1m        PASS[0m [   0.042s] ( 704/4825) [35;1mpaddock-dialogs[0m [36msize::tests[0m[36m::[0m[34;1mright_after_a_merged_echo_a_drag_is_the_user_at_its_first_size_no_request_explains[0m
+2026-11-22T12:35:01.4975328Z [32;1m        PASS[0m [   0.040s] ( 705/4825) [35;1mpaddock-dialogs[0m [36msize::tests[0m[36m::[0m[34;1mthe_cap_limits_the_preferred_height_but_never_the_minimum[0m
+2026-11-22T12:35:01.5107956Z [32;1m        PASS[0m [   0.044s] ( 706/4825) [35;1mpaddock-dialogs[0m [36msize::tests[0m[36m::[0m[34;1mthe_late_echo_of_an_older_request_after_an_identical_newer_one_is_not_the_user[0m
+2026-11-22T12:35:01.5198230Z [32;1m        PASS[0m [   0.042s] ( 707/4825) [35;1mpaddock-dialogs[0m [36msize::tests[0m[36m::[0m[34;1mthe_queue_note_lists_pending_and_late_requests_oldest_first_and_bounded[0m
+2026-11-22T12:35:01.5426275Z [32;1m        PASS[0m [   0.046s] ( 708/4825) [35;1mpaddock-dialogs[0m [36msize::tests[0m[36m::[0m[34;1mthe_show_deadline_says_what_was_missing[0m
+2026-11-22T12:35:01.5585434Z [32;1m        PASS[0m [   0.049s] ( 709/4825) [35;1mpaddock-dialogs[0m [36msize::tests[0m[36m::[0m[34;1mwithout_an_os_signal_an_unexplained_resize_with_nothing_pending_is_the_user[0m
+2026-11-22T12:35:01.5648959Z [32;1m        PASS[0m [   0.045s] ( 710/4825) [35;1mpaddock-dialogs[0m [36mtable::tests[0m[36m::[0m[34;1ma_table_finds_its_entries_and_lists_its_plugin_commands[0m
+2026-11-22T12:35:01.5968274Z [32;1m        PASS[0m [   0.053s] ( 711/4825) [35;1mpaddock-dialogs[0m [36mtable::tests[0m[36m::[0m[34;1ma_table_that_breaks_a_rule_is_refused_with_the_entry[0m
+2026-11-22T12:35:01.6105687Z [32;1m        PASS[0m [   0.050s] ( 712/4825) [35;1mpaddock-dialogs[0m [36mtable::tests[0m[36m::[0m[34;1man_entry_defaults_its_size_by_kind[0m
+2026-11-22T12:35:01.6154527Z [32;1m        PASS[0m [   0.050s] ( 713/4825) [35;1mpaddock-dialogs[0m [36mtable::tests[0m[36m::[0m[34;1mshapes_fix_kind_and_modality[0m
+2026-11-22T12:35:01.6451295Z [32;1m        PASS[0m [   0.047s] ( 714/4825) [35;1mpaddock-dialogs[0m [36mtable::tests[0m[36m::[0m[34;1mthe_macro_writes_entries_over_the_defaults[0m
+2026-11-22T12:35:01.6608157Z [32;1m        PASS[0m [   0.051s] ( 715/4825) [35;1mpaddock-dialogs[0m [36mtable::tests[0m[36m::[0m[34;1mwidths_are_three_steps_and_a_tools_number[0m
+2026-11-22T12:35:01.6961902Z [32;1m        PASS[0m [   0.081s] ( 716/4825) [35;1mpaddock-dialogs[0m [36mtauri::tests[0m[36m::[0m[34;1ma_close_before_the_deadline_queues_nothing_and_the_late_deadline_shows_nothing[0m
+2026-11-22T12:35:01.7267623Z [32;1m        PASS[0m [   0.080s] ( 717/4825) [35;1mpaddock-dialogs[0m [36mtauri::tests[0m[36m::[0m[34;1ma_close_request_goes_to_the_dialog_first[0m
+2026-11-22T12:35:01.7461995Z [32;1m        PASS[0m [   0.082s] ( 718/4825) [35;1mpaddock-dialogs[0m [36mtauri::tests[0m[36m::[0m[34;1ma_close_whose_task_runs_before_the_queued_disable_still_ends_enabled[0m
+2026-11-22T12:35:01.7754928Z [32;1m        PASS[0m [   0.076s] ( 719/4825) [35;1mpaddock-dialogs[0m [36mtauri::tests[0m[36m::[0m[34;1ma_deadline_show_then_a_close_leaves_the_parent_enabled[0m
+2026-11-22T12:35:01.7895940Z [32;1m        PASS[0m [   0.066s] ( 720/4825) [35;1mpaddock-dialogs[0m [36mtauri::tests[0m[36m::[0m[34;1ma_deadline_that_arrives_after_the_close_never_locks_the_parent[0m
+2026-11-22T12:35:01.8076360Z [32;1m        PASS[0m [   0.065s] ( 721/4825) [35;1mpaddock-dialogs[0m [36mtauri::tests[0m[36m::[0m[34;1ma_destroyed_window_and_a_closed_host_are_forgotten_in_the_applied_state[0m
+2026-11-22T12:35:01.8386041Z [32;1m        PASS[0m [   0.063s] ( 722/4825) [35;1mpaddock-dialogs[0m [36mtauri::tests[0m[36m::[0m[34;1ma_dialog_is_not_shown_before_its_page_is_ready_and_is_shown_focused_once_it_is[0m
+2026-11-22T12:35:01.8616813Z [32;1m        PASS[0m [   0.071s] ( 723/4825) [35;1mpaddock-dialogs[0m [36mtauri::tests[0m[36m::[0m[34;1ma_dialog_opened_inside_a_plugin_hook_is_refused[0m
+2026-11-22T12:35:01.8647074Z [32;1m        PASS[0m [   0.056s] ( 724/4825) [35;1mpaddock-dialogs[0m [36mtauri::tests[0m[36m::[0m[34;1ma_measure_is_converted_to_logical_px_with_the_zoom_and_the_viewport_delta_every_time[0m
+2026-11-22T12:35:01.9116010Z [32;1m        PASS[0m [   0.073s] ( 725/4825) [35;1mpaddock-dialogs[0m [36mtauri::tests[0m[36m::[0m[34;1ma_measure_sizes_the_window_and_is_refused_when_it_is_not_a_size[0m
+2026-11-22T12:35:01.9406086Z [32;1m        PASS[0m [   0.074s] ( 726/4825) [35;1mpaddock-dialogs[0m [36mtauri::tests[0m[36m::[0m[34;1ma_page_that_never_reports_is_shown_at_the_deadline_and_a_late_ready_fits_it_once[0m
+2026-11-22T12:35:01.9522473Z [32;1m        PASS[0m [   0.089s] ( 727/4825) [35;1mpaddock-dialogs[0m [36mtauri::tests[0m[36m::[0m[34;1ma_modal_disables_its_parent_natively_except_on_macos_and_the_last_one_re_enables_it[0m
+2026-11-22T12:35:01.9770311Z [32;1m        PASS[0m [   0.065s] ( 728/4825) [35;1mpaddock-dialogs[0m [36mtauri::tests[0m[36m::[0m[34;1ma_required_choice_ignores_close_requests_unless_its_page_hangs[0m
+2026-11-22T12:35:02.0150836Z [32;1m        PASS[0m [   0.075s] ( 729/4825) [35;1mpaddock-dialogs[0m [36mtauri::tests[0m[36m::[0m[34;1ma_result_goes_to_the_opener_and_closing_reports_where_the_window_was[0m
+2026-11-22T12:35:02.0248894Z [32;1m        PASS[0m [   0.073s] ( 730/4825) [35;1mpaddock-dialogs[0m [36mtauri::tests[0m[36m::[0m[34;1ma_scale_change_posts_one_refit_and_tells_the_page_to_measure_again[0m
+2026-11-22T12:35:02.0316085Z [32;1m        PASS[0m [   0.053s] ( 731/4825) [35;1mpaddock-dialogs[0m [36mtauri::tests[0m[36m::[0m[34;1ma_show_that_ran_before_the_close_disables_then_enables_the_parent[0m
+2026-11-22T12:35:02.0586017Z [32;1m        PASS[0m [   0.659s] ( 732/4825) [35;1mpaddock-dialogs[0m [36msize::tests[0m[36m::[0m[34;1many_interleaving_keeps_the_size_rules[0m
+2026-11-22T12:35:02.0651486Z [32;1m        PASS[0m [   0.050s] ( 733/4825) [35;1mpaddock-dialogs[0m [36mtauri::tests[0m[36m::[0m[34;1ma_window_that_cannot_be_built_leaves_no_record[0m
+2026-11-22T12:35:02.0922417Z [31;1m  TRY 2 PASS[0m [   5.048s] ( 734/4825) [35;1mpaddock-chromium::it[0m [36mreal_browser[0m[36m::[0m[34;1ma_browser_ended_by_force_leaves_nothing_behind[0m
+2026-11-22T12:37:43.7971250Z [31;1m     Summary[0m [ 194.996s] [1m4825[0m tests run: [1m4824[0m [32;1mpassed[0m, [1m1[0m [31;1mfailed[0m, [1m29[0m [33;1mskipped[0m
+2026-11-22T12:37:43.7971250Z [31;1m FLKY-FL 2/2[0m [   5.048s] ( 734/4825) [35;1mpaddock-chromium::it[0m [36mreal_browser[0m[36m::[0m[34;1ma_browser_ended_by_force_leaves_nothing_behind[0m
+2026-11-22T12:37:43.9350327Z ##[error]Process completed with exit code 100.

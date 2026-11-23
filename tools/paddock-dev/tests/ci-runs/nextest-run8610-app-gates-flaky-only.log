@@ -1,0 +1,32 @@
+2026-11-22T00:00:00.0000000Z excerpt of run 8610 job 44768, read through the Actions API on 2026-11-23: the Job line, the Starting line, the first FAIL try through the passing retry of the flaky test, the nextest summary and its FLKY-FL line, and the failed-step annotations. Passing-test lines and the output of other commands are left out; runner paths are replaced by <runner-path>. Nothing else is edited.
+2026-11-22T12:48:33.6437790Z Job: app
+2026-11-22T12:48:53.9374420Z [32;1m    Starting[0m [1m545[0m tests across [1m23[0m binaries ([1m1[0m test [33;1mskipped[0m)
+2026-11-22T12:51:00.4852170Z [35;1m  TRY 1 FAIL[0m [ 120.308s] (───────) [35;1mspotter-render::real_browser[0m [34;1ma_download_address_is_reported_as_a_download[0m
+2026-11-22T12:51:00.4852350Z [35;1m [0m [35;1mstdout[0m [35;1m───[0m
+2026-11-22T12:51:00.4852370Z 
+2026-11-22T12:51:00.4852390Z     running 1 test
+2026-11-22T12:51:00.4852400Z     test a_download_address_is_reported_as_a_download has been running for over 60 seconds
+2026-11-22T12:51:00.4852680Z     test a_download_address_is_reported_as_a_download ... FAILED
+2026-11-22T12:51:00.4852710Z 
+2026-11-22T12:51:00.4852730Z     failures:
+2026-11-22T12:51:00.4852740Z 
+2026-11-22T12:51:00.4852750Z     failures:
+2026-11-22T12:51:00.4852760Z         a_download_address_is_reported_as_a_download
+2026-11-22T12:51:00.4852760Z 
+2026-11-22T12:51:00.4852780Z     test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 11 filtered out; finished in 120.29s
+2026-11-22T12:51:00.4852800Z     [0m
+2026-11-22T12:51:00.4852800Z [35;1m [0m [35;1mstderr[0m [35;1m───[0m
+2026-11-22T12:51:00.4852870Z     the first start of <runner-path> Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing took 0.2 s
+2026-11-22T12:51:00.4852890Z 
+2026-11-22T12:51:00.4852900Z     [0m[31;1mthread 'a_download_address_is_reported_as_a_download' (357172494) panicked at crates/spotter-render/tests/real_browser.rs:318:5:[0m
+2026-11-22T12:51:00.4852920Z     [31;1mFailed("the browser could not be started: the browser (pid 23419) was still running but not ready after 120 s (the start guard); it is ended now")[0m
+2026-11-22T12:51:00.4852940Z     net log: none written
+2026-11-22T12:51:00.4852980Z     note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace[0m
+2026-11-22T12:51:00.4852990Z 
+2026-11-22T12:51:02.4749890Z [31;1m  TRY 2 PASS[0m [   1.990s] (534/545) [35;1mspotter-render::real_browser[0m [34;1ma_download_address_is_reported_as_a_download[0m
+2026-11-22T12:51:55.3460500Z [31;1m     Summary[0m [ 181.409s] [1m545[0m tests run: [1m544[0m [32;1mpassed[0m, [1m1[0m [31;1mfailed[0m, [1m1[0m [33;1mskipped[0m
+2026-11-22T12:51:55.3460530Z [31;1m FLKY-FL 2/2[0m [   1.990s] (534/545) [35;1mspotter-render::real_browser[0m [34;1ma_download_address_is_reported_as_a_download[0m
+2026-11-22T12:51:55.3529470Z [31;1merror[0m: test run failed
+2026-11-22T12:51:55.3674630Z ::error::failed (exit 100): cargo nextest run --workspace --profile ci
+2026-11-22T12:51:58.0378910Z ##[error]Process completed with exit code 1.
+2026-11-22T12:51:58.0388710Z ##[error]Process completed with exit code 1.

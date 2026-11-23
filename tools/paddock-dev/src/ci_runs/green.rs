@@ -31,6 +31,8 @@ use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Pages of 50 runs the base search reads at most (all branches and events: a train's dispatch run names the commit that lands).
+/// Measured 2026-11-23: 37 runs a day on average, 44 at most, so 6 pages (300 runs) reach back about a week (docs/benchmarks.md, "The base
+/// search reads the run list in pages"). A base older than that plans everything.
 pub const MAX_PAGES: u32 = 6;
 
 /// First-parent commits of main the base search looks at, newest first.
@@ -45,13 +47,33 @@ pub enum Scope {
     Partial,
 }
 
+/// A FLAKY test of a run that landed or may land: what ER-12 asks to record as a fix item, with where to read it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FixItem {
+    /// The job's display name.
+    pub job: String,
+    /// The job's id (its log is `GET .../jobs/<id>/logs`).
+    pub job_id: u64,
+    /// The test, as nextest or Playwright names it.
+    pub test: String,
+    /// The job's page, from the jobs API's `html_url`.
+    pub url: String,
+}
+
+impl FixItem {
+    /// One line for a comment: the job, the test and the link.
+    pub fn line(&self, run: u64) -> String {
+        format!("run {run}, job {} (id {}): {} ({})", self.job, self.job_id, self.test, self.url)
+    }
+}
+
 /// What the run's jobs say.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GradedResult {
     /// Nothing failed.
     Green,
     /// Only FLAKY tests in untouched targets failed; each is a fix item.
-    GreenWithFixItems(Vec<String>),
+    GreenWithFixItems(Vec<FixItem>),
     /// What to fix.
     Red(String),
     /// What could not be read.
@@ -65,6 +87,25 @@ pub struct Outcome {
     pub scope: Scope,
     /// What it found.
     pub result: GradedResult,
+    /// Why the scope is partial, or what was not read (empty for a complete scope that was read).
+    pub note: String,
+    /// Set when the run's mode could not be read: it might be a newer complete run, so it blocks the commit's decision.
+    pub unreadable: bool,
+}
+
+impl Outcome {
+    fn of(scope: Scope, result: GradedResult) -> Outcome {
+        Outcome {
+            scope,
+            result,
+            note: String::new(),
+            unreadable: false,
+        }
+    }
+    fn noted(mut self, note: impl Into<String>) -> Outcome {
+        self.note = note.into();
+        self
+    }
 }
 
 impl Outcome {
@@ -90,6 +131,8 @@ pub struct Touched {
     pub flags: BTreeSet<String>,
     /// The apps the plan reached.
     pub apps: BTreeSet<String>,
+    /// The change cannot be bounded (no base to measure it from): every target counts as reached.
+    pub all: bool,
 }
 
 impl Touched {
@@ -108,11 +151,14 @@ impl Touched {
             .as_array()
             .map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect())
             .unwrap_or_default();
-        Touched { flags, apps }
+        Touched { flags, apps, all: false }
     }
 
     /// Whether the change reached what a CI job tests. A job this cannot place counts as touched: the safe side is red.
     pub fn reaches(&self, job: &str) -> bool {
+        if self.all {
+            return true;
+        }
         if let Some(rest) = job.strip_prefix("app ") {
             let app = rest.split(" (").next().unwrap_or(rest);
             return self.apps.contains(app);
@@ -137,6 +183,10 @@ impl Touched {
 pub struct FailedJob {
     /// Its display name.
     pub name: String,
+    /// Its id.
+    pub id: u64,
+    /// Its page (`html_url`).
+    pub url: String,
     /// The names of its failed steps (the jobs API's step conclusions).
     pub failed_steps: Vec<String>,
     /// Its log, `None` when it could not be read.
@@ -144,7 +194,7 @@ pub struct FailedJob {
 }
 
 /// Grades the failed jobs of a finished complete run of `workflow`. A job is test-only when every failed step is a test step
-/// ([`crate::plan_since::failed_steps_are_tests`]) and its log shows only FLAKY tests; any other failed step is red. `touched` is
+/// ([`crate::plan_since::failure_is_tests`]) and its log shows only FLAKY tests; any other failed step is red. `touched` is
 /// asked at most once, and only when a FLAKY test needs it.
 pub fn grade_failures(workflow: &str, jobs: &[FailedJob], touched: &mut dyn FnMut() -> Option<Touched>) -> GradedResult {
     use crate::plan_since::{StepProblem, failure_is_tests, job_key};
@@ -152,7 +202,10 @@ pub fn grade_failures(workflow: &str, jobs: &[FailedJob], touched: &mut dyn FnMu
     let mut unread = Vec::new();
     let mut items = Vec::new();
     let mut touch: Option<Option<Touched>> = None;
-    for FailedJob { name, failed_steps, log } in jobs {
+    for job in jobs {
+        let FailedJob {
+            name, failed_steps, log, ..
+        } = job;
         let Some(log) = log else {
             unread.push(format!("job {name:?} has no log"));
             continue;
@@ -192,10 +245,15 @@ pub fn grade_failures(workflow: &str, jobs: &[FailedJob], touched: &mut dyn FnMu
                 "the targets the change touched cannot be read (job {name:?} has a FLAKY test)"
             )),
             Some(t) if t.reaches(name) => red.push(format!(
-                "job {name:?}: a FLAKY test in a target the change touched ({})",
+                "job {name:?}: a FLAKY test in a crate or app the plan reached ({}); interim strict reading (user decision 2026-11-23)",
                 f.flaky.iter().next().cloned().unwrap_or_default()
             )),
-            Some(_) => items.extend(f.flaky.iter().map(|t| format!("{name}: {t}"))),
+            Some(_) => items.extend(f.flaky.iter().map(|t| FixItem {
+                job: name.clone(),
+                job_id: job.id,
+                test: t.clone(),
+                url: job.url.clone(),
+            })),
         }
     }
     if let Some(r) = red.into_iter().next() {
@@ -207,13 +265,21 @@ pub fn grade_failures(workflow: &str, jobs: &[FailedJob], touched: &mut dyn FnMu
     }
 }
 
-/// Reads the logs of the failed jobs of a run of `workflow` and grades them.
-pub fn read_failures(client: &mut Client, workflow: &str, jobs: &[TimedJob], touched: &mut dyn FnMut() -> Option<Touched>) -> GradedResult {
+/// Reads the logs of the failed jobs of a run of `workflow` and grades them. `touched` is given the client, because what a change
+/// touched can need the runs again (the last good commit it is measured from).
+pub fn read_failures(
+    client: &mut Client,
+    workflow: &str,
+    jobs: &[TimedJob],
+    touched: &mut dyn FnMut(&mut Client) -> Option<Touched>,
+) -> GradedResult {
     let failed: Vec<FailedJob> = jobs
         .iter()
         .filter(|j| j.conclusion == "failure" && !j.is_caller())
         .map(|j| FailedJob {
             name: j.name.clone(),
+            id: j.id,
+            url: j.html_url.clone(),
             failed_steps: j.failed_steps.clone(),
             log: client.log(j.id).ok().flatten(),
         })
@@ -221,86 +287,129 @@ pub fn read_failures(client: &mut Client, workflow: &str, jobs: &[TimedJob], tou
     if failed.is_empty() {
         return GradedResult::Red("the run failed and no job names a failure".into());
     }
-    grade_failures(workflow, &failed, touched)
+    grade_failures(workflow, &failed, &mut || touched(&mut *client))
 }
 
-/// The outcome of one run, or `None` for a run that is no evidence (unfinished). A cancelled or skipped run is `Partial` times
-/// `NotMeasured`: never a pass and never a failure (ER-33).
+/// The outcome of one run. A cancelled or skipped run is `Partial` times `NotMeasured`, and one still going is `NotMeasured` on
+/// the scope it declared: never a pass and never a failure (ER-33). The one function that grades a run: `ci verdict`, `ci reuse`,
+/// the landing queue and the planner's base all read its answer.
 pub fn grade_run(
     client: &mut Client,
     run: &RunInfo,
     scope_decisive: bool,
-    touched: &mut dyn FnMut() -> Option<Touched>,
-) -> Option<Outcome> {
-    if !run.finished() {
-        return None;
-    }
+    touched: &mut dyn FnMut(&mut Client) -> Option<Touched>,
+) -> Outcome {
     if matches!(run.conclusion.as_str(), "cancelled" | "skipped") {
-        return Some(Outcome {
-            scope: Scope::Partial,
-            result: GradedResult::NotMeasured(format!("run {} was {}", run.id, run.conclusion)),
-        });
+        let why = format!("run {} was {}", run.id, run.conclusion);
+        return Outcome::of(Scope::Partial, GradedResult::NotMeasured(why.clone())).noted(why);
     }
-    let (mode, jobs) = verdict::read_mode_jobs(client, run, scope_decisive);
+    let read = verdict::read_mode_jobs(client, run, scope_decisive);
+    let (scope, why) = match read.mode {
+        Mode::Full => (Scope::Complete, String::new()),
+        Mode::Partial(why) => (Scope::Partial, why),
+        Mode::Unknown(why) => {
+            let mut o = Outcome::of(Scope::Partial, GradedResult::NotMeasured(why.clone())).noted(why);
+            o.unreadable = true;
+            return o;
+        }
+    };
+    if !run.finished() {
+        let w = format!("run {} is {}", run.id, run.status);
+        return Outcome::of(scope, GradedResult::NotMeasured(w)).noted(why);
+    }
     let state = if run.conclusion.is_empty() {
         run.status.as_str()
     } else {
         run.conclusion.as_str()
     };
-    let (scope, why) = match mode {
-        Mode::Full => (Scope::Complete, String::new()),
-        Mode::Partial(why) => (Scope::Partial, why),
-        Mode::Unknown(why) => {
-            return Some(Outcome {
-                scope: Scope::Partial,
-                result: GradedResult::NotMeasured(why),
-            });
-        }
-    };
-    let result = if state == "success" {
-        match earlier_failure(client, run) {
-            Earlier::Clean => GradedResult::Green,
-            Earlier::Failed(w) => GradedResult::Red(format!("green only after a rerun of failed jobs ({w})")),
-            Earlier::Unknown(w) => GradedResult::NotMeasured(w),
-        }
-    } else if scope == Scope::Complete {
-        read_failures(client, run.workflow(), &jobs, touched)
-    } else {
-        GradedResult::Red(format!("{state}; {why}"))
-    };
-    Some(Outcome { scope, result })
-}
-
-fn earlier_failure(client: &mut Client, run: &RunInfo) -> Earlier {
-    if run.run_attempt > 1 {
-        verdict::read_earlier(client, run)
-    } else {
-        Earlier::Clean
+    if scope == Scope::Partial {
+        let result = if state == "success" {
+            GradedResult::Green
+        } else {
+            GradedResult::Red(format!("{state}; {why}"))
+        };
+        return Outcome::of(scope, result).noted(why);
     }
+    // A rerun in place keeps the run id: an earlier attempt's failed job makes it red, an unreadable one not measured.
+    if run.run_attempt > 1 {
+        match verdict::read_earlier(client, run) {
+            Earlier::Clean => {}
+            Earlier::Failed(w) => {
+                let r = GradedResult::Red(format!("it ended {state} after a rerun of failed jobs ({w})"));
+                return Outcome::of(scope, r);
+            }
+            Earlier::Unknown(w) => return Outcome::of(scope, GradedResult::NotMeasured(w)),
+        }
+    }
+    if state == "success" {
+        return Outcome::of(scope, GradedResult::Green);
+    }
+    // A job that was cancelled (or ended in no state) is neither a pass nor a failure; one the plan declared and that was skipped
+    // is caught by the declared scope below, and one it did not declare is off.
+    if let Some(j) = read
+        .jobs
+        .iter()
+        .find(|j| !j.is_caller() && !matches!(j.conclusion.as_str(), "success" | "failure" | "skipped"))
+    {
+        let w = format!(
+            "job {:?} ended {}",
+            j.name,
+            if j.conclusion.is_empty() { "in no state" } else { &j.conclusion }
+        );
+        return Outcome::of(scope, GradedResult::NotMeasured(w));
+    }
+    let result = read_failures(client, run.workflow(), &read.jobs, touched);
+    // Fix items are granted only on the declared scope that ran, whichever basis decides "complete" (ER-41's report-only phase).
+    if matches!(result, GradedResult::GreenWithFixItems(_)) {
+        match read.scope_view {
+            Mode::Full => {}
+            Mode::Partial(w) => {
+                let n = GradedResult::NotMeasured(format!("fix items need the declared scope to have run: {w}"));
+                return Outcome::of(Scope::Partial, n).noted(w);
+            }
+            Mode::Unknown(w) => return Outcome::of(scope, GradedResult::NotMeasured(format!("the declared scope cannot be read: {w}"))),
+        }
+    }
+    Outcome::of(scope, result)
 }
 
-/// The outcome of a commit from its runs: the newest run of the workflow that is evidence and complete decides (a newer red one
-/// beats an older green one; a newer cancelled run, or a push that only reused another run and so declared less, does not).
-/// Without a complete run, the newest run that is evidence.
+/// What decides a commit: its deciding run and outcome, and the runs that were partial on the way.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommitOutcome {
+    /// The run that decides.
+    pub run: u64,
+    /// Its outcome.
+    pub outcome: Outcome,
+    /// The partial runs met before it, `id (why)`, newest first.
+    pub partial: Vec<String>,
+}
+
+/// The outcome of a commit from its runs: the newest run of the workflow that is complete decides (a newer red one beats an older
+/// green one; a newer cancelled run, or a push that only reused another run and so declared less, does not), and a run whose mode
+/// cannot be read blocks it. Without a complete run, the newest partial one. `None`: no run.
 pub fn commit_outcome(
     client: &mut Client,
     runs: &[&RunInfo],
     scope_decisive: bool,
-    touched: &mut dyn FnMut() -> Option<Touched>,
-) -> Option<(u64, Outcome)> {
+    touched: &mut dyn FnMut(&mut Client) -> Option<Touched>,
+) -> Option<CommitOutcome> {
     let mut newest = runs.to_vec();
     newest.sort_by_key(|r| std::cmp::Reverse(r.id));
-    let mut fallback = None;
+    let mut partial = Vec::new();
+    let mut fallback: Option<(u64, Outcome)> = None;
     for r in newest {
-        let Some(o) = grade_run(client, r, scope_decisive, touched) else {
-            continue;
-        };
-        if o.scope == Scope::Complete {
-            return Some((r.id, o));
+        let o = grade_run(client, r, scope_decisive, touched);
+        if o.unreadable || o.scope == Scope::Complete {
+            return Some(CommitOutcome {
+                run: r.id,
+                outcome: o,
+                partial,
+            });
         }
+        partial.push(format!("{} ({})", r.id, o.note));
         fallback.get_or_insert((r.id, o));
     }
-    fallback
+    fallback.map(|(run, outcome)| CommitOutcome { run, outcome, partial })
 }
 
 /// The commit a plan or a landing is based on.
@@ -315,14 +424,14 @@ pub struct Base {
 }
 
 /// The last first-parent commit (`first_parent`: newest first, the asking commit itself left out) whose outcome is complete and green
-/// with or without fix items. The runs are read once, `MAX_PAGES` pages at most, and matched to commits in memory; `touched(sha)` is
-/// asked only for a commit with a FLAKY-only failure. `Ok(None)`: no such commit among them.
+/// with or without fix items. The runs are read once, `MAX_PAGES` pages at most, and matched to commits in memory; `touched(client,
+/// sha)` is asked only for a commit with a FLAKY-only failure. `Ok(None)`: no such commit among them.
 pub fn find_base(
     client: &mut Client,
     workflow: &str,
     first_parent: &[String],
     scope_decisive: bool,
-    touched: &mut dyn FnMut(&str) -> Option<Touched>,
+    touched: &mut dyn FnMut(&mut Client, &str) -> Option<Touched>,
 ) -> Result<Option<Base>, String> {
     let mut by_sha: BTreeMap<String, Vec<RunInfo>> = BTreeMap::new();
     for page in 1..=MAX_PAGES {
@@ -340,8 +449,8 @@ pub fn find_base(
     for sha in first_parent.iter().take(MAX_COMMITS) {
         let Some(runs) = by_sha.get(sha) else { continue };
         let refs: Vec<&RunInfo> = runs.iter().collect();
-        let mut t = || touched(sha);
-        if let Some((run, outcome)) = commit_outcome(client, &refs, scope_decisive, &mut t)
+        let mut t = |c: &mut Client| touched(c, sha);
+        if let Some(CommitOutcome { run, outcome, .. }) = commit_outcome(client, &refs, scope_decisive, &mut t)
             && outcome.is_base()
         {
             return Ok(Some(Base {
@@ -354,6 +463,30 @@ pub fn find_base(
     Ok(None)
 }
 
+/// What the change since the last good commit touched (ADR 0117 WP-4): the plan from the base the one definition of green finds in
+/// `first_parent` (the commits before `sha`, newest first) to `sha`. A train lands by fast-forward, so `sha^1` is only its last
+/// member; the last good commit before the whole train is the base of everything it added. With no such commit the change cannot
+/// be bounded and every target counts as reached. `plan_of(base, head)` plans a range (`None`: it cannot).
+pub fn touched_since_base(
+    client: &mut Client,
+    workflow: &str,
+    first_parent: &[String],
+    sha: &str,
+    scope_decisive: bool,
+    plan_of: &mut dyn FnMut(&str, &str) -> Option<Touched>,
+) -> Option<Touched> {
+    // The candidates are graded without touched targets, so a commit with a FLAKY is not a base here (no recursion): the range only
+    // grows, and a larger range reaches more, which is the safe side.
+    match find_base(client, workflow, first_parent, scope_decisive, &mut |_, _| None) {
+        Err(_) => None,
+        Ok(None) => Some(Touched {
+            all: true,
+            ..Touched::default()
+        }),
+        Ok(Some(base)) => plan_of(&base.sha, sha),
+    }
+}
+
 /// The first-parent commits before `sha`, newest first, at most [`MAX_COMMITS`] (`git rev-list --first-parent`); empty when git cannot
 /// say (then no base is found: everything runs, the safe side).
 pub fn first_parent_before(root: &std::path::Path, sha: &str) -> Vec<String> {
@@ -364,9 +497,9 @@ pub fn first_parent_before(root: &std::path::Path, sha: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// What the change of `sha` (its first parent to it) touched: the plan of that change. `None` when it cannot be planned (a commit
-/// that is not in this clone), which makes a FLAKY test not measured, never untouched.
-pub fn plan_touched(root: &std::path::Path, sha: &str) -> Option<Touched> {
+/// What the commits `base..head` touched: the plan of that range. `None` when it cannot be planned (a commit that is not in this
+/// clone), which makes a FLAKY test not measured, never untouched.
+pub fn plan_touched_range(root: &std::path::Path, base: &str, head: &str) -> Option<Touched> {
     use crate::plan::{Request, plan_with_graph};
     let history = paddock_repo_graph::GitHistory::new(root, std::time::Duration::from_secs(120));
     let req = Request {
@@ -374,12 +507,22 @@ pub fn plan_touched(root: &std::path::Path, sha: &str) -> Option<Touched> {
         all: false,
         explain: false,
         root: None,
-        base: Some(format!("{sha}^1")),
-        head: sha.to_string(),
+        base: Some(base.to_string()),
+        head: head.to_string(),
     };
     plan_with_graph(root, &history, &req)
         .ok()
         .map(|(_, plan)| Touched::from_plan(&plan))
+}
+
+/// The touched reader of the production paths (`ci verdict`, `ci reuse`, the queue, the planner): [`touched_since_base`] over the
+/// first-parent history of `root`, planned by [`plan_touched_range`]; with no good base, everything counts as reached, and a range
+/// that cannot be planned is `None` (not measured).
+pub fn touched_in(client: &mut Client, workflow: &str, root: &std::path::Path, sha: &str, scope_decisive: bool) -> Option<Touched> {
+    let first_parent = first_parent_before(root, sha);
+    touched_since_base(client, workflow, &first_parent, sha, scope_decisive, &mut |b, h| {
+        plan_touched_range(root, b, h)
+    })
 }
 
 #[cfg(test)]

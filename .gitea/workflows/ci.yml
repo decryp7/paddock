@@ -128,9 +128,12 @@ jobs:
             grep -Eq '^[[:space:]]*run: \./dev gates check( --warn)?$' "$f" || { echo "::error file=$f::C100 is not wired: no line runs ./dev gates check. Fix: restore the line (ADR 0060 section 4)."; exit 1; }
           done
 
-      # ER-49, test a commit once: a push to main of a commit that a complete green run of this workflow already tested (the train's
-      # dispatch, when main fast-forwards to its head) ends here, with that run named in the summary. Only a full green run with
-      # no FLAKY test counts (tag.yml's verdict reader needs one); anything unreadable runs the commit (./dev ci reuse fails open).
+      # ER-49, test a commit once: a push to main of a commit that a complete run of this workflow already tested (the train's
+      # dispatch, when main fast-forwards to its head) ends here, with that run named in the summary. The run counts when it is green,
+      # or red only through FLAKY tests of crates and apps its plan did not reach (green with fix items, ADR 0117 WP-4: the landing
+      # queue recorded them). A tag needs a run without them: its one retry (ER-49) is a manual workflow_dispatch of this workflow on
+      # that commit, which this step never skips (it runs for a push to main only). Anything unreadable runs the commit (./dev ci
+      # reuse fails open).
       - name: Reuse a full green run of this commit
         id: reuse
         if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}

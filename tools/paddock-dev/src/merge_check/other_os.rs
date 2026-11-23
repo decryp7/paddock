@@ -2442,6 +2442,7 @@ mod tests {
             start: None,
             end: None,
             steps: Vec::new(),
+            html_url: String::new(),
             failed_steps: Vec::new(),
             status: status.into(),
             labels: labels.iter().map(|l| l.to_string()).collect(),

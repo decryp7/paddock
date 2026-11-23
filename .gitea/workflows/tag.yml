@@ -20,6 +20,8 @@
 #     Report-only until docs/ci-scope-first-runs.toml names a producer (ER-41): the reader then still decides on that producer's old
 #     `plan verdict: complete=` line and prints the scope view as a notice. A push to main is included: a push whose plan skipped it tested nothing, and the refusal names the last fully tested commit. A since_run rerun or
 #     a base dispatch is never full, so it cannot clear a red full run; unreadable is not measured, never a pass;
+#     A run that is red only through FLAKY tests of untouched crates and apps is green with fix items for a landing but not for a tag
+#     (the reader exits 5): the one allowed retry (ER-49) is a manual workflow_dispatch of the gate workflow on that commit;
 #   - for an app tag, the tag gates the release workflows also run (`./dev gates ratchet`, `./dev check ipc-endpoints --tag`).
 # The ADR 0093 scheduled-CI gate (WP-5) is not built yet; it joins here when it is.
 # Not covered (TOCTOU): a run can change between the check and the push (a rerun going red); the tag's own release workflow runs

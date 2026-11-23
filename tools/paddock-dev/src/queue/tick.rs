@@ -22,6 +22,7 @@
 
 use super::blame;
 use super::ports::{Blame, Built, Ci, Failure, Ledger, Marker, RunState, Sent, TRAIN_BRANCH, Train, TrainMember, label};
+use crate::ci_runs::green::FixItem;
 use crate::ci_runs::verdict::Verdict;
 use crate::pr::gitea::Pull;
 
@@ -297,7 +298,8 @@ fn resume(p: &mut Ports, env: &Env, in_train: &[&Pull]) -> Result<Tick, String> 
         // Pushed to main, then the tick ended before the labels: finish the landing, when the head is the train the queue built
         // (a forged marker on an old commit must not label pull requests landed).
         if p.train.verify_train(None, h, &members(in_train), m)?.is_none() {
-            return finish_landing(p, h, in_train);
+            // The fix items of the runs it rested on were written to the pull requests before the push (record_fix_items).
+            return finish_landing(p, h, in_train, &FixRecord::new());
         }
     }
     let valid = match (&head, &marker) {
@@ -439,7 +441,40 @@ fn dispatch(p: &mut Ports, env: &Env, head: &str, workflow: &str, inputs: Vec<(S
     }
 }
 
+/// The FLAKY tests of the runs a landing rests on (ADR 0117 WP-4, ER-12): workflow, run, and the fix items of each run that is green
+/// with fix items. They are written to the pull requests before the fast-forward, and listed again in the landing comment.
+type FixRecord = Vec<(String, u64, Vec<FixItem>)>;
+
+fn fix_lines(fix: &FixRecord) -> String {
+    fix.iter()
+        .flat_map(|(wf, run, items)| items.iter().map(move |i| format!("- {wf}: {}", i.line(*run))))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Writes the fix items to every pull request of the train. A failed write stops the landing: nothing lands on a green with fix
+/// items that was not recorded.
+fn record_fix_items(p: &mut Ports, in_train: &[&Pull], fix: &FixRecord) -> Result<(), String> {
+    if fix.is_empty() {
+        return Ok(());
+    }
+    let text = format!(
+        "queue: landing on runs that are green with fix items. Their FLAKY tests (failed, then passed on the one retry), in crates and apps the change did not reach, are fix items for the next train (ER-12):\n{}",
+        fix_lines(fix)
+    );
+    for pr in in_train {
+        p.ledger.comment(pr.number, &text).map_err(|e| {
+            format!(
+                "the fix items could not be recorded on pull request {} ({e}); nothing lands on an unrecorded green with fix items",
+                pr.number
+            )
+        })?;
+    }
+    Ok(())
+}
+
 fn judge(p: &mut Ports, env: &Env, in_train: &[&Pull], head: &str, marker: &Marker, main: &str) -> Result<Tick, String> {
+    let mut fix: FixRecord = Vec::new();
     for wf in p.train.reached_workflows(main, head)? {
         let runs = p.ci.runs(&wf, head)?;
         let since = marker.since_workflow.as_deref().filter(|w| *w == wf).and(marker.since_run);
@@ -449,7 +484,8 @@ fn judge(p: &mut Ports, env: &Env, in_train: &[&Pull], head: &str, marker: &Mark
         match &newest.state {
             RunState::Running => return Ok(Tick::Waiting(newest.id)),
             RunState::Success => match p.ci.verdict(&wf, head) {
-                Verdict::Green { .. } | Verdict::GreenWithFixItems { .. } => {}
+                Verdict::Green { .. } => {}
+                Verdict::GreenWithFixItems { run, items } => fix.push((wf.clone(), run, items)),
                 Verdict::NotMeasured(why) => {
                     return Ok(Tick::Stuck {
                         why: format!(
@@ -477,7 +513,10 @@ fn judge(p: &mut Ports, env: &Env, in_train: &[&Pull], head: &str, marker: &Mark
                 let (id, how) = (newest.id, how.clone());
                 // The one definition of green (ADR 0117 WP-4): a failed run whose only failures are FLAKY tests of untouched targets
                 // is green with fix items, as ER-12 lets it land; the reader says so, not a second reading of the failures here.
-                if how != "cancelled" && matches!(p.ci.verdict(&wf, head), Verdict::GreenWithFixItems { .. }) {
+                if how != "cancelled"
+                    && let Verdict::GreenWithFixItems { run, items } = p.ci.verdict(&wf, head)
+                {
+                    fix.push((wf.clone(), run, items));
                     continue;
                 }
                 return failed_run(p, in_train, head, marker, main, &wf, id, &how);
@@ -493,8 +532,9 @@ fn judge(p: &mut Ports, env: &Env, in_train: &[&Pull], head: &str, marker: &Mark
     if let Some(h) = fresh.iter().find(|x| has(x, label::HOLD)) {
         return Ok(Tick::Held(h.number));
     }
+    record_fix_items(p, in_train, &fix)?;
     p.train.land(head)?;
-    finish_landing(p, head, in_train)
+    finish_landing(p, head, in_train, &fix)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -628,7 +668,7 @@ fn names(f: &[&Failure]) -> String {
 
 /// Labels what landed. A pull request whose head moved after the run (its fresh head is not in the landed commit) is not marked
 /// landed: its new commits did not land, so it goes back to review.
-fn finish_landing(p: &mut Ports, head: &str, in_train: &[&Pull]) -> Result<Tick, String> {
+fn finish_landing(p: &mut Ports, head: &str, in_train: &[&Pull], fix: &FixRecord) -> Result<Tick, String> {
     let fresh = p.ledger.open_pulls()?;
     let mut prs = Vec::new();
     for pr in in_train {
@@ -640,7 +680,15 @@ fn finish_landing(p: &mut Ports, head: &str, in_train: &[&Pull]) -> Result<Tick,
             p.ledger.relabel(pr.number, &["+state/landed"])?;
             p.ledger.comment(
                 pr.number,
-                &format!("queue: landed on main as {} (fast-forward of the tested train).", short(head)),
+                &if fix.is_empty() {
+                    format!("queue: landed on main as {} (fast-forward of the tested train).", short(head))
+                } else {
+                    format!(
+                        "queue: landed on main as {} (fast-forward of the tested train), on runs that are green with fix items:\n{}",
+                        short(head),
+                        fix_lines(fix)
+                    )
+                },
             )?;
             prs.push(pr.number);
         } else {
