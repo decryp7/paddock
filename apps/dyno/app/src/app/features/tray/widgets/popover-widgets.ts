@@ -80,7 +80,7 @@ const SK_ISSUE: IssueValue = { title: 'Disk write errors on disk4', app: '', kin
           <pd-sparkline [values]="c?.cpuMinute ?? []" scale="zero" [area]="true" [max]="100" [capacity]="sparkCapacity" [formatValue]="pct" [pad]="0" [dot]="false" [height]="20" color="var(--accent)" label="CPU over the last minute" />
         </div>
         <div class="dy-pw-half dy-pw-half--next" [attr.data-tone]="c?.memoryTone ?? 'ok'">
-          <span class="dy-pw-muted" pdSkeleton>Memory {{ memText(c) }}</span>
+          <span class="dy-pw-muted" [dyFullText]="memLabel(c)" pdSkeleton>{{ memLabel(c) }}</span>
           <span class="dy-pw-big" pdSkeleton>{{ big(c?.memoryPercent ?? 0) }}<small>%</small></span>
           <span class="dy-pw-meter dy-pw-tall" role="img" [attr.aria-label]="'Memory in use ' + big(c?.memoryPercent ?? 0) + '%'" pdSkeleton><i [style.width.%]="c?.memoryPercent ?? 0"></i></span>
         </div>
@@ -205,6 +205,10 @@ export class DynoPopoverWidgets {
   }
   protected word(l: Level): string {
     return LEVEL_WORD[l];
+  }
+  /** The memory label's whole text; its width follows the live value, so the label may be cut with an ellipsis and then says all of it (dyFullText). */
+  protected memLabel(c: { memoryUsed: number; memoryTotal: number } | null): string {
+    return `Memory ${this.memText(c)}`;
   }
   /** "16.3 of 32 GB": the used amount without its unit when the total has the same one. */
   protected memText(c: { memoryUsed: number; memoryTotal: number } | null): string {

@@ -181,6 +181,14 @@ describe('MockWidgets popup values', () => {
     expect(mockWidgetOptionsFromUrl('?popup=diskSpace:error,network:bogus,nope:empty&agent=stopped')).toEqual({ popup: { diskSpace: 'error' }, agentStopped: true });
     expect(mockWidgetOptionsFromUrl('')).toEqual({ popup: {}, agentStopped: false });
   });
+
+  it('pins the memory the CPU and memory widget shows from ?memory=used:total (GiB) and ignores nonsense', () => {
+    expect(mockWidgetOptionsFromUrl('?memory=88.8:99.9').memoryGiB).toEqual({ used: 88.8, total: 99.9 });
+    for (const bad of ['?memory=', '?memory=abc', '?memory=10', '?memory=50:20', '?memory=0:8']) expect(mockWidgetOptionsFromUrl(bad).memoryGiB).toBeUndefined();
+    const w = new MockWidgets({ memoryGiB: { used: 88.8, total: 99.9 } });
+    const value = w.values().placements.find((p) => p.id === 'cpu-memory')!.state;
+    expect(value).toMatchObject({ state: 'ready', value: { cpuMemory: { memoryUsed: 88.8 * 1024 ** 3, memoryTotal: 99.9 * 1024 ** 3, memoryPercent: 89 } } });
+  });
 });
 
 describe('mockMetricReading', () => {
