@@ -512,6 +512,10 @@ Amendments of the same date, no new number: the member gate runs each member's a
     the push gates. Agents and CI never run plain `cargo test` or an unbounded test command, a hook steers them to the runner, and
     a leftover child is ended by the handle its start gave back. *Why:* on 2026-11-22/23 `worktree::list_clean` hung 3.5 h and
     `ci_isolation` 18 min under plain `cargo test --test it`, and test-spawned `ci slot hold` processes were orphaned four times.
+90. **A landing may rest on a narrowed run** (ER-15, user, 2026-11-23): a smoke set or the affected tests that ran exactly the
+    selection the landing's own diff planned. Such a run counts for that landing only: it is never complete for a tag or a
+    release, never the base for later planning, and the nightly still runs everything. *Why:* in ADR 0117's review round 2,
+    narrowed runs were never complete, so a train whose change needed only a smoke set or its affected tests could never land.
 
 ## Monorepo (ADR 0014 §10; effective for an app from its import into `paddock/apps/<app>`, for Paddock from the first import)
 Until an app is imported, rules 2, 3, 8, 9, 39 and 42 above apply to it as written. From its import, these replace them:
