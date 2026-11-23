@@ -236,15 +236,41 @@ pub fn test_modules(src: &str) -> Vec<String> {
     out
 }
 
+/// The files the `#[cfg(test)]` modules of `src` load through `#[path = "..."]`, as written (relative to the declaring file's folder).
+pub fn test_paths(src: &str) -> Vec<String> {
+    let lines: Vec<&str> = src.lines().map(str::trim).collect();
+    let mut out = Vec::new();
+    for (i, l) in lines.iter().enumerate() {
+        if *l != "#[cfg(test)]" {
+            continue;
+        }
+        for n in lines[i + 1..].iter().take_while(|n| n.starts_with("#[")) {
+            if let Some(p) = n
+                .strip_prefix("#[path")
+                .map(str::trim_start)
+                .and_then(|r| r.strip_prefix('='))
+                .map(str::trim)
+                .and_then(|r| r.strip_suffix(']'))
+                .map(|r| r.trim().trim_matches('"'))
+            {
+                out.push(p.to_string());
+            }
+        }
+    }
+    out
+}
+
 /// A source folder's non-test Rust files, recursively, by path relative to `dir`: a file a sibling declares
-/// `#[cfg(test)] mod name;` (as `name.rs` or `name/mod.rs`, and the folder `name/`) is test code and left out.
+/// `#[cfg(test)] mod name;` (as `name.rs` or `name/mod.rs`, and the folder `name/`) is test code and left out, and so is a file a
+/// `#[cfg(test)]` module loads through `#[path = "..."]`.
 pub fn sources_under(dir: &std::path::Path) -> std::io::Result<Vec<(String, String)>> {
-    use std::collections::BTreeMap;
+    use std::collections::{BTreeMap, BTreeSet};
     fn walk(
         dir: &std::path::Path,
         rel: &str,
         test_only: bool,
         inherited: &[String],
+        excluded: &mut BTreeSet<String>,
         out: &mut Vec<(String, String)>,
     ) -> std::io::Result<()> {
         let mut entries: Vec<_> = std::fs::read_dir(dir)?.collect::<Result<_, _>>()?;
@@ -256,7 +282,15 @@ pub fn sources_under(dir: &std::path::Path) -> std::io::Result<Vec<(String, Stri
         for e in &entries {
             let p = e.path();
             if p.extension().is_some_and(|x| x == "rs") {
-                let mods = test_modules(&std::fs::read_to_string(&p)?);
+                let text = std::fs::read_to_string(&p)?;
+                for t in test_paths(&text) {
+                    excluded.insert(if rel.is_empty() {
+                        t
+                    } else {
+                        format!("{rel}/{t}")
+                    });
+                }
+                let mods = test_modules(&text);
                 tests.extend(mods.iter().cloned());
                 let stem = p
                     .file_stem()
@@ -274,10 +308,10 @@ pub fn sources_under(dir: &std::path::Path) -> std::io::Result<Vec<(String, Stri
             } else {
                 format!("{rel}/{name}")
             };
-            let is_test = test_only || tests.contains(&stem);
+            let is_test = test_only || tests.contains(&stem) || excluded.contains(&path);
             if p.is_dir() {
                 let down = declared.get(&stem).cloned().unwrap_or_default();
-                walk(&p, &path, is_test, &down, out)?;
+                walk(&p, &path, is_test, &down, excluded, out)?;
             } else if p.extension().is_some_and(|x| x == "rs") && !is_test {
                 out.push((path, std::fs::read_to_string(&p)?));
             }
@@ -285,7 +319,7 @@ pub fn sources_under(dir: &std::path::Path) -> std::io::Result<Vec<(String, Stri
         Ok(())
     }
     let mut out = Vec::new();
-    walk(dir, "", false, &[], &mut out)?;
+    walk(dir, "", false, &[], &mut BTreeSet::new(), &mut out)?;
     Ok(out)
 }
 
@@ -316,6 +350,14 @@ pub const ALLOWED: &[(&str, &str)] = &[
     ("os.rs", ".mjs"),
     ("os.rs", ".cjs"),
     ("os.rs", ".js"),
+    // os.rs reads a package's manifest and build script, and tells test files by Cargo's names (`tests.rs`, `*_tests.rs`); npm's
+    // manifest names a package folder. Format names, not places in this repository.
+    ("os.rs", "Cargo.toml"),
+    ("os.rs", "package.json"),
+    ("os.rs", "build.rs"),
+    ("os.rs", "tests.rs"),
+    // mod.rs loads a test module from its own folder through `#[path]` (test code, not a fact about the repository).
+    ("mod.rs", "union/tests.rs"),
 ];
 
 #[cfg(test)]
