@@ -56,7 +56,7 @@ pub fn relative_specifiers(text: &str) -> Vec<String> {
 }
 
 /// The text with `//` and `/* */` comments blanked (string literals are kept, so a `//` inside a quoted URL stays).
-fn strip_comments(text: &str) -> String {
+pub(crate) fn strip_comments(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut chars = text.chars().peekable();
     let mut quote: Option<char> = None;

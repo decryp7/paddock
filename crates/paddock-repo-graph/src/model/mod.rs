@@ -15,6 +15,7 @@ pub mod guard;
 pub mod inputs;
 pub mod narrow;
 pub mod nodes;
+pub mod os;
 
 use crate::Graph;
 #[cfg(feature = "content")]
