@@ -505,10 +505,28 @@ pub fn find_base(
     scope_decisive: bool,
     touched: &mut dyn FnMut(&mut Client, &str) -> Option<Touched>,
 ) -> Result<Option<Base>, String> {
+    find_base_for(client, workflow, first_parent, scope_decisive, false, touched)
+}
+
+/// [`find_base`] with the tag rule given (`tag`): a commit counts only when a run of it is complete on every OS and green without fix
+/// items ([`commit_outcome_for`] with `tag`; a tag needs a run without them), the rule `ci verdict --tag` applies to the commit itself.
+pub fn find_base_for(
+    client: &mut Client,
+    workflow: &str,
+    first_parent: &[String],
+    scope_decisive: bool,
+    tag: bool,
+    touched: &mut dyn FnMut(&mut Client, &str) -> Option<Touched>,
+) -> Result<Option<Base>, String> {
     let runs = Runs::read(client, workflow)?;
-    Ok(find_base_in(client, &runs, first_parent, scope_decisive, &mut |c, _, s| {
-        touched(c, s)
-    }))
+    Ok(find_base_in_for(
+        client,
+        &runs,
+        first_parent,
+        scope_decisive,
+        tag,
+        &mut |c, _, s| touched(c, s),
+    ))
 }
 
 /// [`find_base`] over runs already read; `touched` is given them too, so a measure of what a change touched searches the same list
@@ -520,12 +538,25 @@ pub fn find_base_in(
     scope_decisive: bool,
     touched: &mut dyn FnMut(&mut Client, &Runs, &str) -> Option<Touched>,
 ) -> Option<Base> {
+    find_base_in_for(client, runs, first_parent, scope_decisive, false, touched)
+}
+
+/// [`find_base_in`] with the tag rule given (see [`find_base_for`]).
+fn find_base_in_for(
+    client: &mut Client,
+    runs: &Runs,
+    first_parent: &[String],
+    scope_decisive: bool,
+    tag: bool,
+    touched: &mut dyn FnMut(&mut Client, &Runs, &str) -> Option<Touched>,
+) -> Option<Base> {
     for sha in first_parent.iter().take(MAX_COMMITS) {
         let Some(of_sha) = runs.0.get(sha) else { continue };
         let refs: Vec<&RunInfo> = of_sha.iter().collect();
         let mut t = |c: &mut Client| touched(c, runs, sha);
-        if let Some(CommitOutcome { run, outcome, .. }) = commit_outcome(client, &refs, scope_decisive, &mut t)
+        if let Some(CommitOutcome { run, outcome, .. }) = commit_outcome_for(client, &refs, scope_decisive, tag, &mut t)
             && outcome.is_base()
+            && (!tag || outcome.result == GradedResult::Green)
         {
             return Some(Base {
                 sha: sha.clone(),

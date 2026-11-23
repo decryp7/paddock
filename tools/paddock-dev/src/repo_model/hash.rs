@@ -103,7 +103,7 @@ pub fn node_hashes(
     for n in nodes {
         if model.node(n).is_none() {
             return Err(CliError::failure(format!(
-                "::error::input hash: the model has no node {n}. Next step: name a node of `./dev plan --compare`'s model (for example `crate:crates/paddock-proc`)."
+                "::error::input hash: the model has no node {n}. Next step: name a node of the model that `dev plan --compare` prints (a `crate:`, `app:` or project id)."
             )));
         }
     }

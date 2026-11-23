@@ -10,6 +10,15 @@
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 
+/// The file name of a contract, in its project's folder.
+pub const FILE: &str = "paddock.ci.json";
+
+/// The app whose contract the repository path `path` is (`apps/<app>/paddock.ci.json`), if it is one.
+pub fn app_of(path: &str) -> Option<&str> {
+    let app = path.strip_prefix("apps/")?.strip_suffix(FILE)?.strip_suffix('/')?;
+    (!app.is_empty() && !app.contains('/')).then_some(app)
+}
+
 /// The projects that are not apps: a folder of the repository root with its own contract.
 pub const ROOT_PROJECTS: [&str; 6] = ["crates", "ui", "conformance", "tools", "icons", "eslint"];
 

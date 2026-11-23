@@ -163,21 +163,21 @@ fn own_windows(model: &Model, id: &str) -> bool {
         .contains(&WINDOWS_MARK)
 }
 
-/// The workspaces whose contract declares `hostTests`, with the contract's path: the shared crates, paddock-dev and each app.
+/// The workspaces whose contract may declare `hostTests`, with the contract's path: each app's folder, each root project's (the
+/// shared crates), and each other folder whose contract sits beside the root manifest of a Cargo workspace (paddock-dev). Where a
+/// contract lives is the contract module's fact ([`crate::ci_run::contract`]), so this names no folder of its own (ADR 0117 §14,
+/// final review P2-1).
 pub fn workspaces(files: &[String]) -> Vec<(String, String)> {
-    let mut out: Vec<(String, String)> = Vec::new();
-    for (root, contract) in [
-        ("crates", "crates/paddock.ci.json"),
-        ("tools/paddock-dev", "tools/paddock-dev/paddock.ci.json"),
-    ] {
-        if files.iter().any(|f| f == contract) {
-            out.push((root.to_string(), contract.to_string()));
-        }
-    }
-    let apps: BTreeSet<&str> = files
+    let tracked: BTreeSet<&str> = files.iter().map(String::as_str).collect();
+    let mut out: Vec<(String, String)> = files
         .iter()
-        .filter_map(|f| f.strip_prefix("apps/")?.strip_suffix("/paddock.ci.json"))
+        .filter_map(|f| {
+            let dir = f.strip_suffix(crate::ci_run::contract::FILE)?.strip_suffix('/')?;
+            let cargo = tracked.contains(format!("{dir}/Cargo.toml").as_str());
+            let project = crate::ci_run::contract::app_of(f).is_some() || crate::ci_run::contract::ROOT_PROJECTS.contains(&dir);
+            (project || cargo).then(|| (dir.to_string(), f.clone()))
+        })
         .collect();
-    out.extend(apps.into_iter().map(|a| (format!("apps/{a}"), format!("apps/{a}/paddock.ci.json"))));
+    out.sort();
     out
 }

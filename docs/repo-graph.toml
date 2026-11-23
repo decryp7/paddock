@@ -92,7 +92,8 @@ root_spellings = [
 [prose]
 project_names = ["README*", "CHANGELOG*", "LICENSE*"]
 project_folders = ["docs"]
-doc_owner = ["*.md", "*.txt", "LICENSE*"]
+# An SVG under a doc owner is a text image: prose of the docs (content detection reads it as text, so `doc_assets` cannot claim it).
+doc_owner = ["*.md", "*.txt", "LICENSE*", "*.svg"]
 doc_assets = ["*.png", "*.jpg", "*.jpeg", "*.gif", "*.webp", "*.svg"]
 
 [[input]]
@@ -208,6 +209,8 @@ reaches = ["owner"]
 name = "prose-read-by-code"
 files = ["**/resources/**/*.md", "**/samples/**/*.md", "**/src/**/*.md", "**/tests/**/*.md", "**/test/**/*.md", "**/templates/**/*.md", "**/e2e/**/*.md", "**/fixtures/**/*.md"]
 reaches = ["owner"]
+# Root folders outside every project, whose own input names their readers (`templates`, `scripts`): `owner` finds no project there.
+except = ["templates/**", "scripts/**"]
 
 [[input]]
 name = "demo-readmes"
@@ -251,7 +254,8 @@ reaches = ["project:conformance", "project:crates"]
 
 [[input]]
 name = "diagram-sources"
-files = ["diagrams/**/*.xml", "diagrams/scripts/**"]
+# diagrams/tools: the generators the diagram sources import (Debrief's docs/diagrams/src, `node diagrams/tools/apply-accent.mjs`).
+files = ["diagrams/**/*.xml", "diagrams/scripts/**", "diagrams/tools/**"]
 reaches = ["project:tools"]
 
 [[input]]
