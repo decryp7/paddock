@@ -1,21 +1,26 @@
-# 0118. Every process is held by its handle and ends with its scope: start, hold, watch, end for tests, tools and agents
+# 0119. Every process is held by its handle and ends with its scope: start, hold, watch, end for tests, tools and agents
 
 - Status: Proposed 2026-11-23. The direction is the user's (approved 2026-11-23 through the coordinator, moved earlier in the
   queue): "every process is held by its handle and cleaned up on failure and cancel", for CI jobs, tests, agents' background work
   and tools. The decisions D1 to D7 are open.
 - Date: 2026-11-23
-- Related: **ER-51** (start, hold, watch, end), ER-32 (a real completion signal, always bounded), ER-14 (tests leave nothing
+- Related: **ADR 0118** (in design on `feat/test-results-artifact`: one CI wrapper, `./dev ci run` / `./dev ci step`, that every
+  step and command runs through, and one job record per job; the user's alignment of 2026-11-23 makes it CI's process owner, §7),
+  **ER-51** (start, hold, watch, end), ER-32 (a real completion signal, always bounded), ER-14 (tests leave nothing
   behind), ER-21 / rule 40 (a recurring class gets a redesign), ER-22 / rule 42 (share first), ER-27 (logs explain every failure),
   ER-33 (positive controls), ER-37 / rule 76 (common practice and cost), ER-41 (new checks report-only first), ER-46 (lists only
   shrink); rule 53 and ADR 0033 (processes by identity), rule 89 (every test run goes through the bounded runner), ADR 0031 (waits
   judged on progress, not wall clocks), ADR 0076 (owned background work; the orphan guardian), ADR 0103 (the test `Reaper`),
   **ADR 0112** (every CI job is a fixture that owns its processes; accepted 2026-11-21, not on main).
-- Number: 0118. The brief asked for 0112 if free. It is not: `docs/adr/0112-job-owns-its-processes.md` is on
+- Number: 0119. The brief asked for 0112 if free. It is not: `docs/adr/0112-job-owns-its-processes.md` is on
   `origin/docs/adr-job-owns-processes` (4a06ef26b, Accepted 2026-11-21) and on `origin/docs/adr-audit-2026-11-22` (02f8be6d1, the
-  copy to main). Searched on 2026-11-23 in every `origin` branch (`git ls-tree` of `docs/adr/` on each) and in every local worktree
-  under `<dev-targets>/wt`: 0109, 0110, 0111, 0112, 0113, 0114, 0115, 0116 and 0117 are taken; 0118 to 0120 appear nowhere. This
-  ADR **builds on 0112**: 0112 owns the CI job (its job action, its process ledger, its folder and log bundle); this ADR owns the
-  one in-process mechanism every tool, test and agent uses, the checks, and the migration.
+  copy to main). Searched on 2026-11-23 in every `origin` branch (`git ls-tree` of `docs/adr/` and `git grep "ADR 01xx"` on each)
+  and in every local worktree under `<dev-targets>/wt`: files 0109 to 0117 are taken, and **0118 is cited** (no file yet) by the
+  uncommitted job-record work in the worktree of `feat/test-results-artifact` (`tools/paddock-dev/src/test_results.rs`: "One
+  structured test-results file per CI test job (ADR 0118)"); 0119 and 0120 appear nowhere. This ADR **builds on 0112 and 0118**:
+  0112 owns the CI job as a fixture (its job action and post-step net, its folder and log bundle), 0118 owns the one CI wrapper and
+  its job record (§7); this ADR owns the one in-process mechanism every tool, test, agent and that wrapper uses, the checks, and the
+  migration.
 
 Evidence heads read (ADR 0091), re-read right before the commit: `origin/main` d04af7b46, `origin/train/2026-11-23-graph`
 64e01dd84 (this branch's base), `origin/fix/proc-tree-pid-reuse` 682208725, `origin/docs/adr-job-owns-processes` 4a06ef26b,
@@ -124,7 +129,8 @@ built on what exists, not beside it:
 | A panic with `panic = "abort"`, SIGKILL, a crash, OOM | Unix: the guardian (its pipe closes); Windows: the job handle closes (kill-on-close) |
 | A cancel (`scope.cancel()`, a tool's Ctrl+C handler) | the cancel ends the waits; `Drop` ends the processes |
 | A test timeout | nextest ends the test's group or job; children of the scope are in it or in the guardian's care; detached ones by their lifetime (2) |
-| A CI job cancel or timeout | the job action's post step (ADR 0112), then the runner |
+| A CI step's command fails, times out or is cancelled | the CI wrapper's scope (§7), which lists what it ended in the job record |
+| A CI job cancel or timeout past the wrapper | the job action's post step (ADR 0112), then the runner |
 
 `Supervised` stays for one long-lived child with a memory cap; it becomes what `Scope::start` returns when a cap is asked for
 (one implementation, rule 55). The test `Reaper` becomes a `Scope` in test mode (it already holds an `own::Unit` on the local
@@ -153,12 +159,12 @@ recorded (3), so `./dev held end` can end it early.
 - `./dev held list|wait|end --unit <folder>` reads a ledger and acts by identity after the table proves membership (rule 53: the
   ledger is a hint, the live identity decides).
 
-### 4. The checks
+### 4. The checks (the CI wrapper is §7)
 
 1. **Clippy bans `std::process::Command::spawn`** (and tokio's, `allow-invalid`) outside paddock-proc, with the reason "start
-   through `paddock_proc::Scope` (ADR 0118)". `output()` and `status()` stay allowed: they hold the child until it exits (their
+   through `paddock_proc::Scope` (ADR 0119)". `output()` and `status()` stay allowed: they hold the child until it exits (their
    bound is rule 89's and ADR 0031's business; D5). Clippy is exact where a text check is not. A justified site carries
-   `#[expect(clippy::disallowed_methods, reason = "ADR 0118: ...")]`; the list of such sites is generated and only shrinks
+   `#[expect(clippy::disallowed_methods, reason = "ADR 0119: ...")]`; the list of such sites is generated and only shrinks
    (ER-46). Because a Clippy ban blocks at once, it lands **with** the migration (6), not before: that is how ER-41's
    "report-only first" is met for a compiler lint (the migration's count is the report).
 2. **No file-wide allow of `disallowed_methods`**: the approved kill-lint ban, C159, built separately
@@ -212,6 +218,30 @@ next Pitcrew tag (pitcrew-v1.0.1 has the bare-pid form).
 build folder it names; `worktree remove` removes them with the worktree unless locked (ER-51). WP-11 first reads what
 `worktree remove` and `disk clean` do today and only adds what is missing.
 
+### 7. CI: the one wrapper is the process owner (user, 2026-11-23)
+
+CI gets no process mechanism of its own here. Every CI step and command runs through **one wrapper**, `./dev ci run` (today's gate
+executor, ADR 0038 §1) and a new `./dev ci step` for steps that are not a project's phase, which writes **one job record per job**.
+That design is ADR 0118's (being built on `feat/test-results-artifact`, first as the job's test-results file, widened by the user to
+a job record). For processes, the wrapper is the owner:
+
+- it opens one `Scope` per job (prepare at the first step, the job's folder as the unit folder) and runs each command with
+  `scope.start` or `scope.run`, so it **holds the handles**;
+- it **bounds the runs**: each command's bound comes from the declared data the wrapper already reads (`paddock.ci.json`), judged
+  on progress (ADR 0031), never a bare wall clock;
+- on a failing command, a bound reached, or a cancel (the runner's SIGINT/SIGTERM on Unix, Ctrl+Break on Windows, both turned
+  into `scope.cancel()`), it **ends everything** the step started through the scope, before the step returns;
+- it **lists the processes it ended** in the job record: handle (`pid:start`), program with secrets masked, step, how it ended
+  (asked, ended, already gone, not ours) and what it could not see. The record is the one place a reader looks; no second ledger
+  file is written in CI (`held.jsonl` of §3 is for agents and local tools, with the same line shape).
+
+ADR 0112's job action stays as the net under the wrapper, not beside it: its post step ends what escaped every wrapper call (a
+`setsid` child, a node action's process, a runner crash) and adds its findings to the same job record. Its `BASH_ENV` group
+ledger is then needed only for steps that do not yet run through the wrapper; when the migration of workflows onto `./dev ci step`
+is complete, the ledger is a candidate to retire (an amendment to ADR 0112, decided then, not here). The job objects on Windows and
+the process groups on Unix are as ADR 0112 reads them from the runner's source; the wrapper's scope adds its own kill-on-close job
+(nested) and groups inside them.
+
 ## Common practice (ER-37)
 
 | Software or platform | Practice | Source (read 2026-11-23) | Our cost to match |
@@ -237,10 +267,10 @@ Agent-days, raw.
 | Option | What | Days |
 | --- | --- | --- |
 | A, common practice | Clippy ban on `spawn` and migration of the 164 sites onto the existing `Supervised` / `run_bounded` (kill on drop, guardian); `ask_group` and `graceful_stop` by `ProcessId`; the background-guard hook; rule text. No `Scope`, no ledger, no lifetimes, no `./dev held`. | 4.0 |
-| **B, recommended (the approved design)** | A, plus `Scope` (one folder, one job, cancel, summary), `start_detached` with a required lifetime, handle text, ledger, `./dev wait` on a handle and `./dev held`, the Node and shell checks, build-folder ownership | **8.25** |
-| B with D4 (b) | B plus `./dev run --hold` and worktree removal ending held processes | 9.0 |
+| **B, recommended (the approved design)** | A, plus `Scope` (one folder, one job, cancel, summary), `start_detached` with a required lifetime, handle text, ledger, `./dev wait` on a handle and `./dev held`, the Node and shell checks, build-folder ownership, and the CI wrapper as the process owner (§7) | **8.75** |
+| B with D4 (b) | B plus `./dev run --hold` and worktree removal ending held processes | 9.5 |
 
-B is 4.25 days over A, above ER-37's 1-day line, so it needs the user's yes with both costs shown (D1). The user approved the
+B (including WP-13, the CI wrapper's scope, §7) is 8.75 days, 4.75 over A, above ER-37's 1-day line, so it needs the user's yes with both costs shown (D1). The user approved the
 direction; the number is new.
 
 ## Work packages
@@ -263,10 +293,11 @@ a train (it holds `Owned`, `own::Unit` and the starter-bound holder; today it is
 | WP-9 | Agents: measure whether the harness ends background tasks with their agent (a stand-in heartbeat after the agent ends); the `background-guard` hook with its `.test.sh` (positive control: `sleep 600 &` refused; `sleep 1 & wait` allowed). D4 (b) adds `./dev run --hold` and worktree removal ending held processes (+0.75). | `.claude/hooks/background-guard.{py,sh,test.sh}` (new), one line in `.claude/settings.json`; for D4 (b) `tools/paddock-dev/src/held.rs`, `worktree/ops.rs` | 0.5 (1.25) | WP-3 for (b) |
 | WP-10 | Node: the handle check of ADR 0112 WP-6 extended to `detached: true` outside tests. | that check's file and fixtures | 0.25 | ADR 0112 WP-6 |
 | WP-11 | Build folders: read what `worktree remove` and `disk clean` do today; owner records for build folders `worktree add` names; removal with the worktree. | `tools/paddock-dev/src/worktree/ops.rs`, `disk/record.rs`, tests | 0.5 | none |
+| WP-13 | The CI wrapper (ADR 0118's `./dev ci run` / `ci step`) runs every command in the job's `Scope`, maps the runner's cancel signals to `scope.cancel()`, and writes the ended processes into the job record. Failing test first: a step whose command leaves a child and then fails; the child must be ended and listed. Positive control: the same step outside the wrapper leaves the child, and ADR 0112's net reports it. | the wrapper's files on the ADR 0118 branch (`tools/paddock-dev/src/ci_run/`, the job-record writer), their tests | 0.5 | WP-1; ADR 0118's job record |
 | WP-12 | Docs: the rule (D7), AGENTS.md's working-practice line, this ADR's status, ADR 0103 and 0076 amendments (Reaper and guardian as parts of `Scope`). | `docs/rules.md`, `AGENTS.md`, `docs/adr/amendments/` | 0.25 | WP-1 |
 
-Total B: 7.5 (WP-1 to WP-12, WP-9 at its (a) size) plus 0.75 for the fix rounds of the three migration batches' reviews = **8.25**; with D4 (b)
-**9.0**. WP-4, WP-9 (hook) and WP-11 can start at once; WP-6 to WP-8 run in parallel after WP-1 and WP-2.
+Total B: 8.0 (WP-1 to WP-13, WP-9 at its (a) size) plus 0.75 for the fix rounds of the three migration batches' reviews = **8.75**; with D4 (b)
+**9.5**. WP-4, WP-9 (hook) and WP-11 can start at once; WP-6 to WP-8 run in parallel after WP-1 and WP-2.
 
 Parallelism and cost (ER-20): a scope adds no process on Windows (one job object per scope) and one guardian per owner process on
 Unix, as `Supervised` does today; the ledger is one appended line per start. The summary reads the table once per scope end
@@ -274,11 +305,12 @@ Unix, as `Supervised` does today; the ledger is one appended line per start. The
 
 ## Decisions for the user
 
-- **D1. Scope of the fix.** (a) Common practice, A: 4.0 days. (b) **Recommended**: B, the approved design, 8.25 days (4.25 more,
+- **D1. Scope of the fix.** (a) Common practice, A: 4.0 days. (b) **Recommended**: B, the approved design, 8.75 days (4.75 more,
   above ER-37's 1-day line). Why (b): re-attaching by handle and declared lifetimes are what the incidents lacked (the orphaned
   holders, the run 8674 stale pids), and A leaves them to each caller.
-- **D2. Number.** This ADR is 0118 because 0112 is taken by the accepted CI-job ADR. **Recommended**: keep both; 0112 the job,
-  0118 everything inside it and outside CI. Alternative: fold this text into 0112 as an amendment (no cost difference).
+- **D2. Number.** This ADR is 0119 because 0112 is taken by the accepted CI-job ADR and 0118 by the CI wrapper and job record.
+  **Recommended**: keep the three; 0112 the job's net, 0118 the CI wrapper and record, 0119 the one process mechanism under both
+  and everything outside CI. Alternative: fold this text into 0112 as an amendment (no cost difference).
 - **D3. The background guard.** (a) **Recommended**: blocking (it guards state, like the kill guard). (b) Common practice for
   text hooks here: warn-only (ER-36).
 - **D4. Agents' held work.** (a) Common practice: `run_in_background` plus the hook, 0.5 day. (b) Also `./dev run --hold` and
@@ -314,6 +346,7 @@ Unix, as `Supervised` does today; the ledger is one appended line per start. The
 | One-read table entries, logged ends, `processes_inside`, Pitcrew harness by identity | `origin/fix/proc-tree-pid-reuse` 682208725, prerequisite P2 |
 | `Owned`, `own::Unit`, starter-bound slot holder, ADR 0112's job action and ledger | local `feat/adr0112-wp1-owner-trait` b9970817d, not on origin: prerequisite P1 |
 | C159, the file-wide kill-allow guard | id reserved (`refs/paddock/check-ids/C159`, `feat/conformance-guards-2026-11-23-kill-allow`), branch not on origin: prerequisite P3 |
+| CI wrapper `./dev ci step` and the job record | ADR 0118, uncommitted in the `feat/test-results-artifact` worktree (no commit beyond 64e01dd84 on 2026-11-23): prerequisite for WP-13 |
 | `Scope`, `Held`, `Lifetime`, `start_detached`, handle text, `held.jsonl`, `./dev held`, `ask_group`, the spawn ban, `background-guard`, `./dev run --hold` | not built (this ADR) |
 
 Recurring: "something ends but does not end what it started" (ADR 0112's class), outside CI jobs. Earlier instances: run 8099
