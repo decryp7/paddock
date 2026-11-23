@@ -7,6 +7,7 @@ use super::lex::Script;
 mod no_force_push;
 mod no_kill_by_name;
 mod no_pgrep_wait;
+mod no_plain_cargo_test;
 mod no_unbounded_wait;
 mod no_unscoped_cleanup;
 
@@ -31,5 +32,6 @@ pub fn all() -> Vec<Box<dyn Rule>> {
         Box::new(no_unbounded_wait::NoUnboundedWait),
         Box::new(no_unscoped_cleanup::NoUnscopedCleanup),
         Box::new(no_kill_by_name::NoKillByName),
+        Box::new(no_plain_cargo_test::NoPlainCargoTest),
     ]
 }
