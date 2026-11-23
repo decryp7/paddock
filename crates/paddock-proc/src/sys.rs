@@ -200,6 +200,35 @@ mod unix {
         (rc == 0).then(|| unsafe { info.assume_init() }.ri_phys_footprint)
     }
 
+    /// The bytes `pid` has read from and written to disk (`ri_diskio_bytesread` + `ri_diskio_byteswritten` of the same
+    /// `proc_pid_rusage` call as [`phys_footprint`]), or `None` when the process is gone or not ours to look at.
+    #[cfg(target_os = "macos")]
+    pub fn disk_io_bytes(pid: u32) -> Option<u64> {
+        let pid = libc::c_int::try_from(pid).ok()?;
+        let mut info = std::mem::MaybeUninit::<libc::rusage_info_v2>::zeroed();
+        // SAFETY: as in `phys_footprint`: the buffer is the struct of the flavour asked for, read only when the call returned 0.
+        let rc =
+            unsafe { libc::proc_pid_rusage(pid, libc::RUSAGE_INFO_V2, info.as_mut_ptr().cast()) };
+        // SAFETY: zero-initialised plain integers, filled by the call on success.
+        let info = (rc == 0).then(|| unsafe { info.assume_init() })?;
+        info.ri_diskio_bytesread
+            .checked_add(info.ri_diskio_byteswritten)
+    }
+
+    /// `read_bytes` + `write_bytes` of `/proc/<pid>/io` (only the process's own user may read it: a refusal is `None`).
+    #[cfg(target_os = "linux")]
+    pub fn disk_io_bytes(pid: u32) -> Option<u64> {
+        crate::usage::disk_io_from_proc_io(
+            &std::fs::read_to_string(format!("/proc/{pid}/io")).ok()?,
+        )
+    }
+
+    /// Elsewhere: not read.
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    pub fn disk_io_bytes(_pid: u32) -> Option<u64> {
+        None
+    }
+
     /// Touches `bytes` of fresh pages and gives them back the way mimalloc does (tests).
     #[cfg(all(test, target_os = "macos"))]
     pub fn touch_and_free(bytes: usize) {
@@ -698,6 +727,30 @@ pub fn private_working_set(pid: u32) -> Option<u64> {
         let ok = GetProcessMemoryInfo(h, (&raw mut c).cast::<PROCESS_MEMORY_COUNTERS>(), cb);
         CloseHandle(h);
         (ok != 0).then_some(c.PrivateWorkingSetSize as u64)
+    }
+}
+
+/// The bytes `pid` has read and written (`GetProcessIoCounters`: every read and write operation, files and pipes alike), or `None`
+/// when the process is gone or cannot be opened.
+#[cfg(windows)]
+pub fn disk_io_bytes(pid: u32) -> Option<u64> {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{
+        GetProcessIoCounters, IO_COUNTERS, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+    // SAFETY: OpenProcess takes plain values; the handle is closed below. GetProcessIoCounters fills a zero-initialised struct and
+    // it is read only when the call succeeded.
+    unsafe {
+        let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if h.is_null() {
+            return None;
+        }
+        let mut c: IO_COUNTERS = std::mem::zeroed();
+        let ok = GetProcessIoCounters(h, &raw mut c);
+        CloseHandle(h);
+        (ok != 0)
+            .then(|| c.ReadTransferCount.checked_add(c.WriteTransferCount))
+            .flatten()
     }
 }
 

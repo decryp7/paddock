@@ -257,6 +257,11 @@ pub trait ProcessSource {
     fn cpu_micros(&self, pid: u32) -> Option<u64> {
         self.cpu_sample(pid).map(|s| s.micros)
     }
+    /// The bytes `pid` has read from and written to disk so far (see [`disk_io_bytes`]); `None` when there is no such process or the
+    /// OS did not say. Reads that pid only.
+    fn disk_io(&self, _pid: u32) -> Option<u64> {
+        None
+    }
     /// The whole process table (every process of the machine: the expensive read).
     fn table(&self) -> Table;
     /// The latest start time a child listed by [`ProcessSource::children`] may have: the time of the scan its listing came
@@ -345,6 +350,10 @@ impl ProcessSource for OsSource {
         crate::sys::cpu_sample(pid)
     }
 
+    fn disk_io(&self, pid: u32) -> Option<u64> {
+        disk_io_bytes(pid)
+    }
+
     fn table(&self) -> Table {
         snapshot()
     }
@@ -418,6 +427,15 @@ pub fn tree_cpu_time_from(
     .map(std::time::Duration::from_micros)
 }
 
+/// The disk bytes (read + written) of `root` and everything below it, by identity like [`tree_cpu_time_from`]. `None` when `root` is
+/// gone or the OS did not report its counters.
+///
+/// The sum grows while the tree does disk I/O, but it can also fall: a child that exits takes its bytes out of the sum. Two readings
+/// therefore tell that the tree did I/O in between only when the second is larger (growth is progress; a fall says nothing).
+pub fn tree_disk_io_from(source: &impl ProcessSource, root: ProcessId) -> Option<u64> {
+    tree_fold(source, root, |p, _| source.disk_io(p))
+}
+
 /// Adds `read(pid, expected start)` over `root` and its descendants (the walk of [`tree_memory_from`]); `None` when the root is not that
 /// process any more or `read` has nothing for it.
 fn tree_fold(
@@ -479,6 +497,32 @@ pub fn tree_memory(root: u32) -> u64 {
 /// The CPU time of the tree at `root` (see [`tree_cpu_time_from`]) on this OS, reading the pids of the tree only.
 pub fn tree_cpu_time(root: ProcessId) -> Option<std::time::Duration> {
     tree_cpu_time_from(&OsSource::default(), root)
+}
+
+/// The disk bytes of the tree at `root` (see [`tree_disk_io_from`]) on this OS, reading the pids of the tree only.
+pub fn tree_disk_io(root: ProcessId) -> Option<u64> {
+    tree_disk_io_from(&OsSource::default(), root)
+}
+
+/// The disk bytes `pid` has read and written so far: `ri_diskio_bytesread` + `ri_diskio_byteswritten` of `proc_pid_rusage` on macOS
+/// (the call that gives the physical footprint), `read_bytes` + `write_bytes` of `/proc/<pid>/io` on Linux, `ReadTransferCount` +
+/// `WriteTransferCount` of `GetProcessIoCounters` on Windows (every I/O operation, files included). `None` when there is no such
+/// process, the OS refuses the look (another user's process) or says nothing. Reads that pid only.
+pub fn disk_io_bytes(pid: u32) -> Option<u64> {
+    crate::sys::disk_io_bytes(pid)
+}
+
+/// `read_bytes` + `write_bytes` of a `/proc/<pid>/io` text; `None` when either is missing or malformed.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub(crate) fn disk_io_from_proc_io(text: &str) -> Option<u64> {
+    let field = |name: &str| -> Option<u64> {
+        text.lines()
+            .find_map(|l| l.strip_prefix(name)?.strip_prefix(':'))?
+            .trim()
+            .parse()
+            .ok()
+    };
+    field("read_bytes")?.checked_add(field("write_bytes")?)
 }
 
 /// The CPU time of the listed processes (a job object's members), `None` when none could be read.
@@ -671,10 +715,76 @@ mod tests {
                 stopped: None,
             })
         }
+        fn disk_io(&self, pid: u32) -> Option<u64> {
+            (1..=3).contains(&pid).then(|| u64::from(pid) * 4096)
+        }
         fn table(&self) -> Table {
             self.tables.set(self.tables.get() + 1);
             Table::new()
         }
+    }
+
+    /// The disk bytes of a tree are the sum over its processes, by identity, and a process the tree does not hold counts nothing.
+    #[test]
+    fn tree_disk_io_sums_the_tree_by_identity() {
+        let src = Fake::new();
+        let root = ProcessId::new(1, StartTime::from_micros(1));
+        assert_eq!(tree_disk_io_from(&src, root), Some((1 + 2 + 3) * 4096));
+        let other = ProcessId::new(1, StartTime::from_micros(99));
+        assert_eq!(
+            tree_disk_io_from(&src, other),
+            None,
+            "a pid held by someone else is not that process"
+        );
+        // Positive control: a source with no disk counters (the default method) gives nothing, never a zero that looks like "flat".
+        struct Blind;
+        impl ProcessSource for Blind {
+            fn memory(&self, _: u32) -> Option<u64> {
+                Some(0)
+            }
+            fn children(&self, _: u32) -> Vec<u32> {
+                vec![]
+            }
+            fn started(&self, _: u32) -> Option<StartTime> {
+                Some(StartTime::from_micros(1))
+            }
+            fn table(&self) -> Table {
+                Table::new()
+            }
+        }
+        assert_eq!(tree_disk_io_from(&Blind, root), None);
+    }
+
+    #[test]
+    fn the_linux_io_file_is_read_bytes_plus_write_bytes() {
+        let text = "rchar: 100\nwchar: 200\nsyscr: 1\nsyscw: 2\nread_bytes: 4096\nwrite_bytes: 8192\ncancelled_write_bytes: 0\n";
+        assert_eq!(disk_io_from_proc_io(text), Some(12288));
+        assert_eq!(
+            disk_io_from_proc_io("read_bytes: 1\n"),
+            None,
+            "a missing field is not zero"
+        );
+        assert_eq!(
+            disk_io_from_proc_io("read_bytes: x\nwrite_bytes: 1\n"),
+            None
+        );
+        assert_eq!(
+            disk_io_from_proc_io("read_bytes: 18446744073709551615\nwrite_bytes: 1\n"),
+            None,
+            "no overflow"
+        );
+        assert_eq!(disk_io_from_proc_io(""), None);
+    }
+
+    /// The OS reads this process's own counters (macOS, Linux, Windows), and they only grow while it writes through the disk.
+    #[cfg(any(target_os = "macos", target_os = "linux", windows))]
+    #[test]
+    fn this_process_has_disk_counters() {
+        assert!(
+            disk_io_bytes(std::process::id()).is_some(),
+            "the OS gave no disk counters for this process"
+        );
+        assert_eq!(disk_io_bytes(u32::MAX - 1), None, "no such process");
     }
 
     #[test]

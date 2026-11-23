@@ -137,10 +137,10 @@ pub use tree::{
     kill_tree, presence, processes_mentioning, processes_with_command_lines, terminate,
 };
 pub use usage::{
-    CpuSample, MAX_TREE, OsSource, ProcEntry, ProcessSource, Row, Table, descendants, identity,
-    parse_pss, process_memory, read_children, read_pss, snapshot, table_from, tree_cpu_time,
-    tree_cpu_time_from, tree_cpu_time_of, tree_memory, tree_memory_from, tree_memory_of,
-    tree_memory_with,
+    CpuSample, MAX_TREE, OsSource, ProcEntry, ProcessSource, Row, Table, descendants,
+    disk_io_bytes, identity, parse_pss, process_memory, read_children, read_pss, snapshot,
+    table_from, tree_cpu_time, tree_cpu_time_from, tree_cpu_time_of, tree_disk_io,
+    tree_disk_io_from, tree_memory, tree_memory_from, tree_memory_of, tree_memory_with,
 };
 pub use waited::{Sink, run_waited, run_waited_cancellable, run_waited_noting};
 pub use warm::warm_up;
