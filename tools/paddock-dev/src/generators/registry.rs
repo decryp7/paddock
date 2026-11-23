@@ -483,8 +483,8 @@ cost = "fast"
     #[test]
     fn text_that_is_not_toml_or_has_no_entry_is_an_error() {
         assert!(Registry::parse("[[generator").unwrap_err()[0].contains("docs/generators.toml:1"));
-        let colour = format!("version = 1\n[[generator]]\nid = \"a\"\ncolour = 1\n");
-        assert!(Registry::parse(&colour).unwrap_err()[0].contains("unknown field `colour`"));
+        let colour = "version = 1\n[[generator]]\nid = \"a\"\ncolour = 1\n";
+        assert!(Registry::parse(colour).unwrap_err()[0].contains("unknown field `colour`"));
         assert!(Registry::parse("version = 1").unwrap_err()[0].contains("no [[generator]] entry"));
     }
 }
