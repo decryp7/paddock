@@ -29,6 +29,9 @@ function run({ filter = '', testsOnly = '', last = '', list = '', lastList = '',
     ].join('\n'),
   );
   chmodSync(join(dir, 'cargo'), 0o755);
+  // The deny step runs `$GITHUB_WORKSPACE/dev audit deny` (ER-41: one helper decides what an advisory does); a stand-in logs it.
+  writeFileSync(join(dir, 'dev'), ['#!/bin/bash', `echo "dev $*" >> "${calls}"`, 'exit 0', ''].join('\n'));
+  chmodSync(join(dir, 'dev'), 0o755);
   const r = spawnSync('bash', ['--noprofile', '--norc', '-e', '-o', 'pipefail', '-c', rustStep().run], {
     encoding: 'utf8',
     cwd: dir,
@@ -50,6 +53,13 @@ test('a member filter that selects tests runs the workspace half with the filter
   assert.equal(runs(r).length, 1, r.calls.join('\n'));
   assert.match(runs(r)[0], /-E package\(=x-a\)/);
   assert.doesNotMatch(runs(r)[0], /no-tests/);
+});
+
+test('the deny step goes through the one helper, never cargo deny itself', () => {
+  const r = run({ filter: 'package(=x-a)', list: 'x-a tests::one\n' });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.ok(r.calls.includes('dev audit deny -- --all-features --workspace'), r.calls.join('\n'));
+  assert.ok(!r.calls.some((c) => c.startsWith('cargo deny')), r.calls.join('\n'));
 });
 
 test('a member filter that selects nothing skips that half with a notice, and is not run as a pass', () => {
