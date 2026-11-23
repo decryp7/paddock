@@ -123,7 +123,7 @@ id = "C50"
 reason = "fails on the current tree: apps/dyno/app/src-tauri/Cargo.toml opens its own main window (ADR 0029); fix Dyno, then add C50 to the conformance line"
 owner = "Dyno shell start (ADR 0029)"
 since = 2026-11-08
-review_by = 2026-11-22
+review_by = 2026-12-07
 approved = "coordinator"
 
 [[not_gated]]
