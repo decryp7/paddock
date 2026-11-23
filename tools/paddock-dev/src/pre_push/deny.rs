@@ -26,6 +26,14 @@ pub enum Scope {
 }
 
 impl Scope {
+    /// The check categories the blocking row names (empty: all four).
+    pub fn blocking_categories(&self) -> &'static [&'static str] {
+        match self {
+            Scope::All { .. } => &[],
+            Scope::WithoutAdvisories { .. } => &["licenses", "bans", "sources"],
+        }
+    }
+
     /// The `cargo deny` arguments of this scope.
     pub fn args(&self) -> Vec<String> {
         let mut a: Vec<String> = ["deny", "--workspace", "check"].iter().map(|s| s.to_string()).collect();
@@ -67,6 +75,18 @@ impl Scope {
             )),
         }
     }
+}
+
+/// The scope of a CI step or a push that runs `cargo deny` in `workspace` (ER-41, user 2026-11-23): the advisories block when the change
+/// touches the workspace's dependencies, when the base is unknown, and on a tag, a release or a scheduled run (`strict`); otherwise
+/// they only warn. The one decision both the push gate and CI's `./dev audit deny` step read.
+pub fn scope_of(change: &Change, workspace: &str, strict: bool) -> Scope {
+    if strict {
+        return Scope::All {
+            reason: "a tag, release or scheduled run takes every advisory".into(),
+        };
+    }
+    scope(change, workspace)
 }
 
 /// Whether `file` changes what `workspace` (a folder such as `apps/pitwall`) depends on: its own lockfile, any manifest below it, its

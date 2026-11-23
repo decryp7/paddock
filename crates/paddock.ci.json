@@ -19,7 +19,7 @@
   ],
   "deny": [
     "cd crates",
-    "cargo deny check"
+    "../dev audit deny"
   ],
   "graph": {
     "smoke": {

@@ -577,8 +577,13 @@ jobs:
 
       # The binary, not the Docker-based action: no image to pull on every run. Every workspace crate, not just
       # the root package.
+      # Licences, bans and sources block; an advisory blocks only a change to the dependencies, a tag or the nightly, else it warns
+      # (ER-41: ./dev audit deny, the one step every workflow uses).
       - name: Licences, advisories and sources
-        run: cargo deny --all-features --workspace check
+        env:
+          PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+          PADDOCK_DEV_DOWNLOAD: ${{ startsWith(github.ref, 'refs/tags/') && '0' || '' }}
+        run: ${PADDOCK_WORKSPACE:-$GITHUB_WORKSPACE}/dev audit deny -- --all-features --workspace
 
       - name: Third-party notices are up to date
         run: |

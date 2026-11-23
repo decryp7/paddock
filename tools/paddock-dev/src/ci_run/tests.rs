@@ -428,6 +428,41 @@ fn a_landing_run_runs_the_generator_check_in_the_conformance_job() {
     }
 }
 
+/// The commands of the CI model that start `cargo deny` themselves instead of going through `./dev audit deny` (ER-41, user 2026-11-23:
+/// advisories are a time-based condition, decided in one place).
+fn deny_outside_the_helper(commands: &[String]) -> Vec<String> {
+    commands
+        .iter()
+        .filter(|c| c.contains("cargo deny") && !c.contains("audit deny"))
+        .cloned()
+        .collect()
+}
+
+/// Every `cargo deny` the workflows, the shared actions and the contracts run goes through `./dev audit deny`, read from the CI model.
+#[test]
+fn every_cargo_deny_step_goes_through_the_one_helper() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let model = crate::gates::ci::build(&crate::gates::edge::load_sources(&root).unwrap());
+    let commands: Vec<String> = model.lines.iter().map(|l| l.text.clone()).collect();
+    let through: Vec<_> = commands.iter().filter(|c| c.contains("audit deny")).collect();
+    assert!(
+        through.len() >= 5,
+        "the model sees the helper's steps (the comparison would prove nothing otherwise): {through:?}"
+    );
+    assert_eq!(
+        deny_outside_the_helper(&commands),
+        Vec::<String>::new(),
+        "run `./dev audit deny` instead (ER-41)"
+    );
+    // Positive control: a step that starts cargo deny itself is found, the helper's is not.
+    let bad = [
+        "cargo deny check".to_string(),
+        "step cargo deny --all-features --workspace check".to_string(),
+    ];
+    assert_eq!(deny_outside_the_helper(&bad).len(), 2);
+    assert!(deny_outside_the_helper(&["./dev audit deny -- --workspace".to_string()]).is_empty());
+}
+
 #[test]
 fn the_contracts_run_exactly_the_commands_in_the_golden() {
     use paddock_testkit::golden::{GoldenMode, UPDATE_VAR, check_golden};

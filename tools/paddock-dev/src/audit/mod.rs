@@ -15,6 +15,7 @@
 //! and a deny.toml beside it) and `npm audit` (every package-lock.json).
 
 mod allow;
+pub mod deny_step;
 mod judge;
 mod parse;
 #[cfg(test)]
@@ -43,6 +44,27 @@ pub enum AuditCommand {
     Nightly(AuditArgs),
     /// Audit this tree and the merge base with `--base`: only an advisory the change adds fails, one main has too warns.
     Compare(CompareArgs),
+    /// The one `cargo deny` step of a workflow: licences, bans and sources block; advisories block only when the change touches this
+    /// workspace's dependencies, on an unknown base, and on a tag, release or scheduled run, else they warn (ER-41). Run it in the
+    /// workspace folder; arguments after `--` go before `check` (`-- --all-features --workspace`).
+    Deny(DenyArgs),
+}
+
+/// Arguments of `deny`.
+#[derive(Args)]
+pub struct DenyArgs {
+    /// The repository root (default: the folder containing .git, found from the current folder).
+    #[arg(long)]
+    pub root: Option<PathBuf>,
+    /// A release: every advisory blocks (a tag ref or a scheduled event counts without it).
+    #[arg(long)]
+    pub strict: bool,
+    /// The ref the change is measured from (default: PADDOCK_BASE_REF, else origin/main).
+    #[arg(long)]
+    pub base: Option<String>,
+    /// Arguments for `cargo deny` before `check`.
+    #[arg(last = true)]
+    pub extra: Vec<String>,
 }
 
 /// Arguments of both commands.
@@ -410,6 +432,7 @@ fn root_of(given: Option<PathBuf>) -> Result<PathBuf, CliError> {
 /// `audit nightly` and `audit compare`.
 pub fn command(c: AuditCommand) -> Result<Report, CliError> {
     match c {
+        AuditCommand::Deny(a) => deny_step::command(a.root, a.strict, a.base, a.extra),
         AuditCommand::Nightly(a) => {
             let npm = a.npm();
             let root = root_of(a.root)?;

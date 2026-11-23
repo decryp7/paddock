@@ -389,8 +389,8 @@ job	crates			then
 job	crates			unzip -q "$dl/$NAME.$EXT" -d "$dl"
 job	crates			{
 job	crates			} >> "$GITHUB_ENV"
+job	crates		crates	../dev audit deny
 job	crates		crates	bash ../conformance/ci/kit.sh host guardian-as-user
-job	crates		crates	cargo deny check
 job	crates		crates	cargo fmt --all --check
 job	crates		crates	cargo hakari generate --diff
 job	crates		crates	cargo hakari manage-deps --dry-run

@@ -50,7 +50,7 @@ jobs:
           cargo clippy --workspace --all-targets --all-features -- -D warnings
           cargo nextest run --workspace --all-features --profile ci
           cargo test --workspace --all-features --doc
-          cargo deny check
+          "$GITHUB_WORKSPACE/dev" audit deny --strict
 
       - name: UI (install, tokens, specs, script tests)
         working-directory: ui

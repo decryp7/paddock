@@ -81,7 +81,7 @@ jobs:
           cargo clippy --all-targets -- -D warnings
           cargo nextest run --workspace --config-file ../../../crates/.config/nextest-demos.toml --profile ci
           cargo test --workspace --doc
-          cargo deny check
+          "$GITHUB_WORKSPACE/dev" audit deny --strict
 
   bundle:
     name: bundle (${{ matrix.os }})

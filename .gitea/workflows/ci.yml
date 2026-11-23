@@ -720,7 +720,7 @@ jobs:
 
       - name: Deny
         if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' }}
-        run: cargo deny check
+        run: ${PADDOCK_WORKSPACE:-$GITHUB_WORKSPACE}/dev audit deny
 
       # The tool lints the wiki the way a person runs it (stale pages only warn).
       - name: Lint the wiki
@@ -824,7 +824,7 @@ jobs:
 
       - name: Deny
         if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' }}
-        run: cargo deny check
+        run: ${PADDOCK_WORKSPACE:-$GITHUB_WORKSPACE}/dev audit deny
 
       - uses: ./.gitea/actions/sccache-stats
         if: always()
@@ -1655,7 +1655,7 @@ jobs:
       - name: Deny
         if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && runner.os == 'Linux' && !matrix.filter }}
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/paddock-dev
-        run: cargo deny check
+        run: ${PADDOCK_WORKSPACE:-$GITHUB_WORKSPACE}/dev audit deny
 
       # The kept build folder stays within its cap (this job's own folder only, after the builds).
       - uses: ./.gitea/actions/prune-build-folder
