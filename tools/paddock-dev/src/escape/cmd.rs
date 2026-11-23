@@ -75,16 +75,13 @@ fn commit_time(root: &Path, rev: &str) -> Result<i64, String> {
         .map_err(|_| format!("git log {rev}: no commit time ({})", String::from_utf8_lossy(&o.stderr).trim()))
 }
 
+/// The model's reach of a commit with every project id and folder (what [`save_ci`] records beside the selection).
+pub type ReachOf<'a> = dyn FnMut(&str) -> Result<(paddock_repo_graph::model::Reached, Vec<(String, String)>), String> + 'a;
+
 /// What `dev plan --ci` does after planning in a workflow run: saves the selection record (`selected`, what this run's plan runs) with
 /// the model's reach and pushes it. Never fails the plan: a record that is not saved makes the nightly `not measured` for that commit,
 /// which says so (ER-27); the cause is a `::warning::`. `reach` gives the model's reach (the graph planner has it already).
-pub fn save_ci(
-    root: &Path,
-    req: &Request,
-    selected: BTreeMap<String, Sel>,
-    reach: &mut dyn FnMut(&str) -> Result<(paddock_repo_graph::model::Reached, Vec<(String, String)>), String>,
-    log: &mut dyn FnMut(&str),
-) {
+pub fn save_ci(root: &Path, req: &Request, selected: BTreeMap<String, Sel>, reach: &mut ReachOf, log: &mut dyn FnMut(&str)) {
     // Only a workflow run saves a record: a local `dev plan --ci` (and the golden harness, which removes GITHUB_*) writes no ref.
     if !std::env::var("GITHUB_ACTIONS").is_ok_and(|v| v == "true") {
         return;

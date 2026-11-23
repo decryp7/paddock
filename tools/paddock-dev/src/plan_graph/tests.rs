@@ -210,9 +210,11 @@ fn a_foundation_change_plans_no_app_and_an_app_change_plans_it_in_full() {
 
 #[test]
 fn an_unowned_file_plans_everything_in_full() {
-    let mut r = Reached::default();
-    r.everything = true;
-    r.unowned = vec!["Mystery".into()];
+    let mut r = Reached {
+        everything: true,
+        unowned: vec!["Mystery".into()],
+        ..Reached::default()
+    };
     for id in ["app:x", "app:y", "crates", "ui", "tools", "paddock-dev"] {
         r.nodes.insert(id.into(), NodeReach::full("fail closed"));
     }
