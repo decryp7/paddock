@@ -235,16 +235,10 @@ mod declared {
     }
 }
 
-/// The model's adapter code in paddock-dev: its non-test sources (ADR 0117 §14).
-const GUARDED: [&str; 7] = [
-    "repo_model.rs",
-    "repo_model/ci.rs",
-    "repo_model/code.rs",
-    "repo_model/decl.rs",
-    "repo_model/reads.rs",
-    "repo_model/ts.rs",
-    "repo_inputs.rs",
-];
+/// The model's code in paddock-dev outside `src/repo_model/` (every non-test source under it is walked, as the crate side's
+/// `sources_under` does, so a new module is guarded without a hand list; final review P2-1): the module root, the inputs accessor and
+/// the OS placement (ADR 0117 §14).
+const GUARDED_EXTRA: [&str; 3] = ["repo_model.rs", "repo_inputs.rs", "os_placement.rs"];
 
 /// Tokens the adapters read because a format names them, not because of this repository: the extensions of the languages and
 /// configuration files they parse.
@@ -292,12 +286,46 @@ const TS_TOKENS: [&str; 13] = [
     "/index",
 ];
 
+/// Cargo's and nextest's file names (see [`model_findings`]).
+const CARGO_TOKENS: [&str; 4] = ["Cargo.toml", "/build.rs", "/.config", ".config"];
+
+/// The old rule tables' path facts that the replay's categories match in their reasons, and test-file conventions the tables used.
+const REPLAY_TOKENS: [&str; 20] = [
+    "..",
+    ".test.js",
+    ".test.cjs",
+    ".e2e.ts",
+    "_test.rs",
+    "/e2e/",
+    "/tests/",
+    "/test/",
+    "/selftest/",
+    "/fixtures/",
+    "/testing/",
+    "conformance/test/",
+    "tests/",
+    "docs/",
+    "/generated/",
+    ".gitea/",
+    "conformance/ci/",
+    "conformance/release/",
+    ".gitattributes",
+    "conformance conformance/",
+];
+
 fn guarded_sources() -> Vec<(String, String)> {
     let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-    GUARDED
+    let mut out: Vec<(String, String)> = GUARDED_EXTRA
         .iter()
         .map(|f| (f.to_string(), std::fs::read_to_string(src.join(f)).unwrap()))
-        .collect()
+        .collect();
+    out.extend(
+        paddock_repo_graph::model::guard::sources_under(&src.join("repo_model"))
+            .unwrap()
+            .into_iter()
+            .map(|(f, text)| (format!("repo_model/{f}"), text)),
+    );
+    out
 }
 
 fn model_findings(files: &[(String, String)]) -> Vec<String> {
@@ -310,6 +338,16 @@ fn model_findings(files: &[(String, String)]) -> Vec<String> {
     // The TypeScript resolver's own format: the language's extensions and config files, Node's built-in module names and the
     // virtual root it resolves the tracked tree under.
     allowed.extend(TS_TOKENS.iter().map(|t| ("repo_model/ts.rs", *t)));
+    // Cargo's own file names (a package's manifest, its build script) and nextest's configuration folder: formats, not this
+    // repository's paths.
+    allowed.extend(
+        ["os_placement.rs", "repo_model/hash.rs"]
+            .iter()
+            .flat_map(|f| CARGO_TOKENS.iter().map(move |t| (*f, *t))),
+    );
+    // The replay is the migration net over the old rule tables (ADR 0117 §8): it sorts their reasons, which name the tables' own path
+    // facts (`plan.rs`), into categories, and the range separator. These leave with the tables (D12, WP-9); they decide no plan.
+    allowed.extend(REPLAY_TOKENS.iter().map(|t| ("repo_model/replay.rs", *t)));
     paddock_repo_graph::model::guard::findings(files, &allowed)
 }
 
@@ -470,7 +508,7 @@ fn the_guard_sees_a_path_fact_put_back_into_each_paddock_dev_module() {
     assert!(model_findings(&files).is_empty());
     for i in 0..files.len() {
         let mut changed = files.clone();
-        changed[i].1.push_str("\nfn late() -> &'static str { \"conformance/ci/\" }\n");
+        changed[i].1.push_str("\nfn late() -> &'static str { \"ui/projects/paddock-ui/\" }\n");
         let last = changed[i].1.lines().count();
         let found = model_findings(&changed);
         assert!(
@@ -481,7 +519,7 @@ fn the_guard_sees_a_path_fact_put_back_into_each_paddock_dev_module() {
         let mut test_only = files.clone();
         test_only[i]
             .1
-            .push_str("\n#[cfg(test)]\nmod late {\n    const X: &str = \"conformance/ci/\";\n}\n");
+            .push_str("\n#[cfg(test)]\nmod late {\n    const X: &str = \"ui/projects/paddock-ui/\";\n}\n");
         assert!(model_findings(&test_only).is_empty());
     }
 }

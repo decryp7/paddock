@@ -437,6 +437,10 @@ impl Check for C155 {
   "only": [{"os": "macos-latest", "name": "paddock-b", "reason": "claimed to be a dev Mac tool"}]
 }}"#,
                 ),
+                (
+                    "crates/Cargo.toml",
+                    "[workspace]\nmembers = [\"paddock-a\", \"paddock-b\", \"paddock-c\", \"paddock-d\"]\n",
+                ),
                 ("crates/paddock-a/Cargo.toml", "[package]\nname = \"paddock-a\"\n"),
                 ("crates/paddock-a/src/lib.rs", "mod model;\n"),
                 ("crates/paddock-a/src/model.rs", "fn pure() {}\n#[cfg(windows)]\nfn win() {}\n"),
