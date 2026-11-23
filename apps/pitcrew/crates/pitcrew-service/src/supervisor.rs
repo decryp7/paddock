@@ -450,7 +450,12 @@ impl Supervisor {
                     &format!("adopted the runner left running by the previous service (pid {pid}); its output is visible again after its next restart"),
                 );
                 runner.ctl.handle(Input::Tick, now);
-                runner.process = Some(Box::new(Adopted { pid }));
+                // Its identity is read now, while the pid was just seen running the runner's program: it is what a later
+                // stop ends, so a pid handed on after the runner exits is never ended (rule 53).
+                runner.process = Some(Box::new(Adopted {
+                    pid,
+                    id: paddock_proc::ProcessId::of(pid),
+                }));
                 runner.launched_as = Some(LaunchTarget::ServiceAccount);
                 runner.ctl.handle(Input::Launched, now);
                 runner.ctl.handle(Input::Log(RunnerLogEvent::Declared), now);
@@ -2030,6 +2035,8 @@ pub fn load_config(dir: &Path) -> Result<config::Loaded, crate::error::Error> {
 /// service). Pitcrew restarts it between jobs to get its output back.
 struct Adopted {
     pid: u32,
+    /// Its identity when it was adopted; `None` when its start time could not be read (it is then never ended by pid).
+    id: Option<paddock_proc::ProcessId>,
 }
 
 /// Whether the adopted runner `pid` has ended (`Some(None)`: gone, its code unknown) or still runs (`None`). Unknown counts
@@ -2066,7 +2073,12 @@ impl RunnerProcess for Adopted {
     }
 
     fn try_wait(&mut self) -> Option<Option<i32>> {
-        adopted_exit(self.pid, sysinfo::System::new).0
+        match self.id {
+            // Ended, or its pid now names another process: either way the adopted runner is gone.
+            Some(id) if id.has_ended() => Some(None),
+            Some(_) => None,
+            None => adopted_exit(self.pid, sysinfo::System::new).0,
+        }
     }
 
     fn stop_gracefully(&mut self) -> Result<(), String> {
@@ -2074,7 +2086,13 @@ impl RunnerProcess for Adopted {
     }
 
     fn kill(&mut self) {
-        kill_tree(self.pid);
+        match self.id {
+            Some(id) => kill_tree(id),
+            None => eprintln!(
+                "pitcrew-service: warning: the adopted runner (pid {}) was not ended: its start time could not be read when it was adopted, so its pid cannot be checked",
+                self.pid
+            ),
+        }
     }
 }
 

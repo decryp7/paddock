@@ -362,7 +362,8 @@ impl RunnerProcess for SessionProcess {
     }
 
     fn kill(&mut self) {
-        crate::launch::kill_tree(self.started.pid);
+        // The handle is held, so the pid still names the runner while its identity is read.
+        crate::launch::kill_child_tree(self.started.pid);
         // SAFETY: valid process handle; failure (already gone) is ignored.
         unsafe {
             // conformance: pid-kill — a process handle we own (the process object cannot be handed on while it is open)

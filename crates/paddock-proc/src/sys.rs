@@ -592,6 +592,53 @@ pub(crate) fn start_from_kinfo(
         .map(crate::StartTime::from_micros)
 }
 
+/// One read of `pid` for the process table: its start time and its parent, both from one `/proc/<pid>/stat` read, so they
+/// describe one process even if the pid was handed on after the list was read.
+#[cfg(target_os = "linux")]
+pub(crate) fn look(pid: u32) -> Option<crate::usage::Look> {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    let started = start_from_ticks(crate::identity::parse_stat_start(&stat)?)?;
+    Some(crate::usage::Look {
+        started,
+        parent: Some(crate::identity::parse_stat_parent(&stat)),
+    })
+}
+
+/// One read of `pid` for the process table: its start time only (the parent comes from the list, and
+/// [`crate::usage::entry_of`] keeps the pair only when the process started before the list was read).
+#[cfg(not(target_os = "linux"))]
+pub(crate) fn look(pid: u32) -> Option<crate::usage::Look> {
+    start_time(pid).map(|started| crate::usage::Look {
+        started,
+        parent: None,
+    })
+}
+
+/// The clock a process list is read against: a process whose start time is earlier than this reading, taken before the
+/// list, was in the list. Windows stamps a process's creation with the system time as of the last clock tick, so this is
+/// the same coarse clock (`GetSystemTimeAsFileTime`), not the precise one `SystemTime::now` reads: a process created after
+/// the reading can then not carry an earlier stamp.
+#[cfg(windows)]
+pub(crate) fn listing_clock() -> crate::StartTime {
+    use windows_sys::Win32::Foundation::FILETIME;
+    use windows_sys::Win32::System::SystemInformation::GetSystemTimeAsFileTime;
+    let mut t = FILETIME {
+        dwLowDateTime: 0,
+        dwHighDateTime: 0,
+    };
+    // SAFETY: one writable FILETIME; the call cannot fail.
+    unsafe { GetSystemTimeAsFileTime(&raw mut t) };
+    let ft = (u64::from(t.dwHighDateTime) << 32) | u64::from(t.dwLowDateTime);
+    crate::StartTime::from_micros(crate::identity::micros_from_filetime(ft).unwrap_or(0))
+}
+
+/// The clock a process list is read against (macOS start times are the precise wall clock; Linux takes the parent from the
+/// same read as the start time and does not use it).
+#[cfg(not(windows))]
+pub(crate) fn listing_clock() -> crate::StartTime {
+    crate::identity::now()
+}
+
 /// When `pid` started: the boot time plus its start tick (`/proc/<pid>/stat`), or `None` when there is no such process.
 #[cfg(target_os = "linux")]
 pub fn start_time(pid: u32) -> Option<crate::StartTime> {

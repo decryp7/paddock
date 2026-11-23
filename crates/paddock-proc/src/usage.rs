@@ -114,18 +114,75 @@ pub(crate) fn snapshot_with(make: impl FnOnce() -> Result<System, sysinfo::Error
     let Some(mut sys) = new_system_with(make) else {
         return Table::default();
     };
+    let listed_at = crate::sys::listing_clock();
     sys.refresh_processes_specifics(
         ProcessesToUpdate::All,
         true,
         ProcessRefreshKind::nothing().with_memory(),
     );
-    table_from(sys.processes().iter().map(|(pid, p)| ProcEntry {
-        pid: pid.as_u32(),
-        parent: p.parent().map(Pid::as_u32),
-        rss: p.memory(),
-        started: crate::sys::start_time(pid.as_u32()),
-        is_thread: p.thread_kind().is_some(),
+    table_from(sys.processes().iter().map(|(pid, p)| {
+        entry_of(
+            Listed {
+                pid: pid.as_u32(),
+                parent: p.parent().map(Pid::as_u32),
+                rss: p.memory(),
+                is_thread: p.thread_kind().is_some(),
+            },
+            crate::sys::look(pid.as_u32()),
+            listed_at,
+        )
     }))
+}
+
+/// One process as the OS list showed it, before its identity is read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Listed {
+    /// Process or thread id.
+    pub pid: u32,
+    /// The parent pid the list gave.
+    pub parent: Option<u32>,
+    /// Resident bytes.
+    pub rss: u64,
+    /// Linux thread entry.
+    pub is_thread: bool,
+}
+
+/// What one read of a single process gave, after the list: when the process that holds the pid now started, and its parent
+/// pid when the same read carries it (Linux `/proc/<pid>/stat`); `None` where it does not (Windows, macOS).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Look {
+    /// When the process that holds the pid now started.
+    pub started: StartTime,
+    /// Its parent pid from the same read, or `None` when the read did not carry it.
+    pub parent: Option<Option<u32>>,
+}
+
+/// The table entry of a listed process. Its parent link and its identity must describe one process: the list is read first
+/// and each start time after, and a pid the list showed may since have been handed on (Windows does so at once). The pair
+/// sysinfo's parent and a later start time would then name a stranger as a child of the listed parent, and a tree walk would
+/// end it (run 8674). So the parent comes from the read that gave the start time where that read carries one; otherwise the
+/// start time counts only if the process started before the list was read (`listed_at`, on [`crate::sys::listing_clock`]):
+/// such a process held the pid when it was listed, so the listed parent is its own. A later start is unknown, which no tree
+/// walk counts (a child born while the list was read is missed, never a stranger taken).
+pub(crate) fn entry_of(listed: Listed, look: Option<Look>, listed_at: StartTime) -> ProcEntry {
+    let (parent, started) = match look {
+        None => (listed.parent, None),
+        Some(Look {
+            started,
+            parent: Some(parent),
+        }) => (parent, Some(started)),
+        Some(Look {
+            started,
+            parent: None,
+        }) => (listed.parent, (started < listed_at).then_some(started)),
+    };
+    ProcEntry {
+        pid: listed.pid,
+        parent,
+        rss: listed.rss,
+        started,
+        is_thread: listed.is_thread,
+    }
 }
 
 /// The process in `table` with this pid, by identity.
@@ -1271,6 +1328,73 @@ Rss:              219040 kB\nPss:              131633 kB\nPss_Anon:          900
 
     fn broken() -> Result<System, sysinfo::Error> {
         Err(sysinfo::Error::Unsupported)
+    }
+
+    /// Regression (run 8674): the list said pid 11 is a child of the root (pid 10); by the time 11's start time was read the
+    /// child had ended and Windows had handed 11 to another job's process, started after the list. The parent link and the
+    /// identity then named two processes, the tree walk took the stranger as the root's child, and `kill_tree` ended it.
+    #[test]
+    fn a_pid_handed_on_between_the_list_and_its_start_time_is_not_a_child() {
+        let at = |us: u64| StartTime::from_micros(us);
+        let root = ProcessId::new(10, at(100));
+        let listed = |pid, parent| Listed {
+            pid,
+            parent: Some(parent),
+            rss: 1,
+            is_thread: false,
+        };
+        let listed_at = at(1_000);
+        let look = |pid: u32| match pid {
+            10 => Some(Look {
+                started: at(100),
+                parent: None,
+            }),
+            // The child that was listed started at 200 and ended; the stranger that holds 11 now started at 1_500.
+            11 => Some(Look {
+                started: at(1_500),
+                parent: None,
+            }),
+            // A real child, started before the list was read.
+            12 => Some(Look {
+                started: at(300),
+                parent: None,
+            }),
+            _ => None,
+        };
+        let table = table_from(
+            [listed(10, 1), listed(11, 10), listed(12, 10)]
+                .map(|l| entry_of(l, look(l.pid), listed_at)),
+        );
+        assert_eq!(
+            pids(descendants(&table, root)),
+            vec![12],
+            "11 now names a stranger"
+        );
+        assert_eq!(
+            table[&11].started, None,
+            "its identity is unknown, so nothing acts on it"
+        );
+
+        // Where one read gives both (Linux /proc/<pid>/stat), the parent is the new holder's own and the start time counts.
+        let same_read = entry_of(
+            listed(11, 10),
+            Some(Look {
+                started: at(1_500),
+                parent: Some(Some(77)),
+            }),
+            listed_at,
+        );
+        assert_eq!(
+            (same_read.parent, same_read.started),
+            (Some(77), Some(at(1_500)))
+        );
+        let t = table_from([entry_of(listed(10, 1), look(10), listed_at), same_read]);
+        assert!(
+            descendants(&t, root).is_empty(),
+            "the stranger's own parent is not the root"
+        );
+        // An unreadable process is unknown.
+        assert_eq!(entry_of(listed(13, 10), None, listed_at).started, None);
     }
 
     #[test]
