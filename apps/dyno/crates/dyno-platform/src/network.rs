@@ -123,20 +123,23 @@ fn socket_inode(inode: u32) -> Option<u64> {
 /// be read yet is listed on its own until the next listing.
 #[cfg(all(unix, not(target_os = "macos")))]
 pub fn parents_of(pids: impl Iterator<Item = u32>) -> std::collections::HashMap<u32, u32> {
-    use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
-    let pids: Vec<Pid> = pids.map(Pid::from_u32).collect();
+    let pids: Vec<u32> = pids.collect();
     if pids.is_empty() {
         return std::collections::HashMap::new();
     }
-    let Ok(mut sys) =
-        System::new().inspect_err(|why| log::warn!("the OS process table is unavailable (sysinfo): {why}; parent processes are unknown"))
-    else {
-        return std::collections::HashMap::new();
-    };
-    sys.refresh_processes_specifics(ProcessesToUpdate::Some(&pids), false, ProcessRefreshKind::nothing());
-    pids.iter()
-        .filter_map(|p| Some((p.as_u32(), sys.process(*p)?.parent()?.as_u32())))
-        .collect()
+    // The whole list: a parent link counts only when the parent is listed and started no later than the child (ADR 0033).
+    parents_in(&paddock_proc::snapshot(), &pids)
+}
+
+/// The parents of `pids` in `table`, through sound links only ([`paddock_proc::parent_of`]): a parent pid that names a newer
+/// process (on Windows the orphans of an earlier holder of a pid name its new holder) is no parent. Used on Linux, where orphans
+/// are re-parented; tested on every OS.
+#[cfg_attr(
+    not(all(unix, not(target_os = "macos"))),
+    allow(dead_code, reason = "parents_of is Linux-only; the rule is tested on every OS")
+)]
+fn parents_in(table: &paddock_proc::Table, pids: &[u32]) -> std::collections::HashMap<u32, u32> {
+    pids.iter().filter_map(|&p| Some((p, paddock_proc::parent_of(table, p)?))).collect()
 }
 
 /// Reverse DNS through the OS resolver (`getnameinfo`): the user's resolver, search domains and hosts file apply.
@@ -195,6 +198,23 @@ impl ProcessTraffic for OsTraffic {
 
 #[cfg(test)]
 mod tests {
+    /// Regression (ADR 0033): a socket holder whose parent pid was handed on to a newer process has no parent; the shared
+    /// holders were grouped under that stranger.
+    #[test]
+    fn a_holder_whose_parent_pid_was_handed_on_has_no_parent() {
+        use paddock_proc::{table_from, ProcEntry, StartTime};
+        let entry = |pid, parent, started: u64| ProcEntry {
+            pid,
+            parent: Some(parent),
+            rss: 1,
+            started: Some(StartTime::from_micros(started)),
+            is_thread: false,
+        };
+        let table = table_from([entry(10, 1, 100), entry(20, 10, 50), entry(30, 10, 200)]);
+        let parents = super::parents_in(&table, &[20, 30, 99]);
+        assert_eq!(parents, std::collections::HashMap::from([(30, 10)]));
+    }
+
     use super::*;
     use dyno_core::network::{Proto, SocketState};
     use std::net::{TcpListener, TcpStream, UdpSocket};

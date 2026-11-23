@@ -143,6 +143,10 @@ pub struct SysinfoProcesses {
     sub_ids: SubIds,
     probe: Box<dyn DetailsProbe>,
     nt: Option<NtDriver>,
+    /// The last listing as parents and identities (paddock_proc): which parent links are sound.
+    table: paddock_proc::Table,
+    /// macOS: what the short BSD info added for processes sysinfo could not describe, read once per listing.
+    fallbacks: std::collections::HashMap<Pid, BsdFallback>,
 }
 
 impl SysinfoProcesses {
@@ -170,6 +174,8 @@ impl SysinfoProcesses {
             sub_ids: sub_ids(),
             probe,
             nt: None,
+            table: paddock_proc::Table::default(),
+            fallbacks: std::collections::HashMap::new(),
         }
     }
 
@@ -245,7 +251,7 @@ impl SysinfoProcesses {
             start_secs: p.start_time(),
             user: self.user_name(p),
         };
-        let extra = bsd_fallback(p);
+        let extra = self.fallbacks.get(&p.pid().as_u32()).copied().unwrap_or_else(|| bsd_fallback(p));
         if raw.start_secs == 0 {
             raw.start_secs = extra.start_secs;
         }
@@ -263,7 +269,7 @@ impl SysinfoProcesses {
         }
         ProcessSample {
             pid: p.pid().as_u32(),
-            parent: p.parent().map(|pp| pp.as_u32()).or(extra.parent),
+            parent: sample_parent(&self.table, p.pid().as_u32()),
             name: p.name().to_string_lossy().into_owned(),
             exe: p.exe().map(|e| e.to_string_lossy().into_owned()).filter(|e| !e.is_empty()),
             user: m.user,
@@ -278,28 +284,19 @@ impl SysinfoProcesses {
     }
 
     fn parents(&self, p: &Process) -> Vec<ParentLink> {
-        let mut out = Vec::new();
-        let mut child_start = p.start_time();
-        let mut next = p.parent();
-        while let Some(pp) = next {
-            if out.len() >= MAX_PARENT_DEPTH || out.iter().any(|l: &ParentLink| l.pid == pp.as_u32()) {
-                break;
-            }
-            let Some(parent) = self.sys.as_ref().and_then(|s| s.process(pp)) else {
-                break;
-            };
-            // A "parent" that started after its child is a reused pid, not the real parent.
-            if parent.start_time() > child_start {
-                break;
-            }
-            out.push(ParentLink {
-                pid: pp.as_u32(),
-                name: parent.name().to_string_lossy().into_owned(),
-            });
-            child_start = parent.start_time();
-            next = parent.parent();
-        }
-        out
+        let chain = parent_chain(&self.table, p.pid().as_u32());
+        // Named from the same listing the table was made of, in one pass.
+        let mut names: std::collections::HashMap<Pid, String> = self
+            .sys
+            .iter()
+            .flat_map(|s| s.processes().values())
+            .filter(|q| chain.contains(&q.pid().as_u32()))
+            .map(|q| (q.pid().as_u32(), q.name().to_string_lossy().into_owned()))
+            .collect();
+        chain
+            .into_iter()
+            .map_while(|pid| names.remove(&pid).map(|name| ParentLink { pid, name }))
+            .collect()
     }
 }
 
@@ -311,7 +308,22 @@ impl ProcessSource for SysinfoProcesses {
         let Some(sys) = self.sys.as_mut() else {
             return Vec::new();
         };
+        let listed_at = paddock_proc::listing_started();
         sys.refresh_processes_specifics(ProcessesToUpdate::All, true, Self::tick_kind());
+        // Each process's start time is read once and paired with its listed parent (paddock_proc), so a parent link is
+        // followed only from an older process to a newer one: on Windows the orphans of an earlier holder of a pid name its
+        // new holder as their parent (ADR 0033, CI run 8694).
+        self.fallbacks = sys.processes().values().map(|p| (p.pid().as_u32(), bsd_fallback(p))).collect();
+        let fallbacks = &self.fallbacks;
+        self.table = paddock_proc::table_of_listing(
+            listed_at,
+            sys.processes().values().map(|p| {
+                let mut row = paddock_proc::Listed::of(p);
+                // macOS: another user's process, whose parent only the short BSD info gave.
+                row.parent = row.parent.or_else(|| fallbacks.get(&row.pid).and_then(|f| f.parent));
+                row
+            }),
+        );
         if let Some(nt) = &mut self.nt {
             let snapshot = nt.source.snapshot();
             let api = (*nt.tracker.state() == NtState::Unchecked)
@@ -402,6 +414,25 @@ impl ProcessSource for SysinfoProcesses {
     }
 }
 
+/// The parent a sample shows: the listed one only through a sound link ([`paddock_proc::parent_of`]).
+fn sample_parent(table: &paddock_proc::Table, pid: Pid) -> Option<Pid> {
+    paddock_proc::parent_of(table, pid)
+}
+
+/// The chain of parents of `pid` (nearest first) through sound links only, at most [`MAX_PARENT_DEPTH`].
+fn parent_chain(table: &paddock_proc::Table, pid: Pid) -> Vec<Pid> {
+    let mut out: Vec<Pid> = Vec::new();
+    let mut next = sample_parent(table, pid);
+    while let Some(pp) = next {
+        if out.len() >= MAX_PARENT_DEPTH || out.contains(&pp) {
+            break;
+        }
+        out.push(pp);
+        next = sample_parent(table, pp);
+    }
+    out
+}
+
 /// The error for a process that exited (or whose pid now belongs to another process).
 pub(crate) fn gone(pid: Pid) -> PlatformError {
     PlatformError::NotFound(format!("Process {pid} has exited."))
@@ -438,6 +469,33 @@ pub fn well_known_account(sid: &str) -> Option<&'static str> {
 
 #[cfg(test)]
 mod tests {
+    /// Regression (ADR 0033, the class of CI run 8694): on Windows a parent pid outlives its process, so the orphans of an
+    /// earlier holder of a pid named its new holder as their parent; Dyno showed them as that process's children (its
+    /// sample's parent took sysinfo's pid with no start-time check).
+    #[test]
+    fn a_process_whose_parent_pid_was_handed_on_shows_no_parent() {
+        use paddock_proc::{table_from, ProcEntry, StartTime};
+        let entry = |pid, parent, started: u64| ProcEntry {
+            pid,
+            parent: Some(parent),
+            rss: 1,
+            started: Some(StartTime::from_micros(started)),
+            is_thread: false,
+        };
+        // 10 holds a pid an earlier process (gone) had; 20 is that process's orphan, 30 is 10's own child, 40 is 30's.
+        let table = table_from([
+            entry(1, 0, 1),
+            entry(10, 1, 100),
+            entry(20, 10, 50),
+            entry(30, 10, 200),
+            entry(40, 30, 300),
+        ]);
+        assert_eq!(super::sample_parent(&table, 20), None, "the orphan is not 10's child");
+        assert_eq!(super::sample_parent(&table, 30), Some(10));
+        assert_eq!(super::parent_chain(&table, 40), vec![30, 10, 1]);
+        assert!(super::parent_chain(&table, 20).is_empty());
+    }
+
     use super::*;
 
     /// A process list that answers with a fixed table.

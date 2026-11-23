@@ -67,12 +67,6 @@ expires = "2026-12-31"
 # each a dated follow-up with its work package.
 [[waiver]]
 check = "C53"
-path = "apps/dyno/crates/dyno-platform/src/macos/procinfo.rs"
-reason = "ADR 0033 WP-9: the process tree view shows parent pids without a start-time check (display only)"
-expires = "2026-12-31"
-
-[[waiver]]
-check = "C53"
 path = "apps/pitcrew/crates/pitcrew-service/examples/fake_runner.rs"
 reason = "ADR 0033 WP-6: a file-wide allow of disallowed_methods; allow it on the items that start programs"
 expires = "2026-12-31"
