@@ -157,7 +157,11 @@ pub fn command(args: &[String], root: Option<PathBuf>) -> Result<Report, CliErro
         // The escape monitor of the nightly (ADR 0117 WP-9); exit 5 when it is not clean.
         let (data, text, clean) = crate::escape::cmd::command(&root, &args[1..], &env).map_err(fail)?;
         let report = Report::new(data, text);
-        return Ok(if clean { report } else { report.with_exit(paddock_cli::Exit::Findings) });
+        return Ok(if clean {
+            report
+        } else {
+            report.with_exit(paddock_cli::Exit::Findings)
+        });
     }
     if args.first().is_some_and(|a| a == "--hash") {
         return hash(&root, args.get(1).map(String::as_str));

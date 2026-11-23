@@ -69,9 +69,13 @@ fn commit_time(root: &Path, rev: &str) -> Result<i64, String> {
         .map_err(|_| format!("git log {rev}: no commit time ({})", String::from_utf8_lossy(&o.stderr).trim()))
 }
 
-/// What `dev plan --ci` does after planning: saves the selection record and, in CI, pushes it. Never fails the plan: a record that
+/// What `dev plan --ci` does after planning in a workflow run: saves the selection record and pushes it. Never fails the plan: a record that
 /// is not saved makes the nightly `not measured` for that commit, which says so (ER-27); the cause is a `::warning::`.
 pub fn save_ci(root: &Path, history: &dyn History, req: &Request, graph: &RepoGraph, plan: &Value, log: &mut dyn FnMut(&str)) {
+    // Only a workflow run saves a record: a local `dev plan --ci` (and the golden harness, which removes GITHUB_*) writes no ref.
+    if !std::env::var("GITHUB_ACTIONS").is_ok_and(|v| v == "true") {
+        return;
+    }
     let run = || -> Result<String, String> {
         let head = crate::git_env::git();
         let mut head = head;
@@ -95,9 +99,7 @@ pub fn save_ci(root: &Path, history: &dyn History, req: &Request, graph: &RepoGr
         let rec = record_for(&commit, base.as_deref(), commit_time(root, &commit)?, plan, &reached, graph);
         let refs = GitRefs { root };
         super::save(&refs, &rec)?;
-        if std::env::var("CI").is_ok_and(|v| v == "true") {
-            refs.push()?;
-        }
+        refs.push()?;
         Ok(commit)
     };
     match run() {
