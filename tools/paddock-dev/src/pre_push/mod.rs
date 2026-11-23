@@ -28,6 +28,7 @@ pub mod progress;
 pub mod stacks;
 pub mod stall;
 pub mod watchdog;
+pub mod watchdog_report;
 
 /// How many earlier runs' log folders are kept beside the current one.
 const KEEP_RUN_LOGS: usize = 20;

@@ -124,6 +124,8 @@ export async function main(argv, { log = console.log, err = console.error, env =
     }
     const result = await runChecks({
       registry,
+      // One line per check finished when the push gate asks for it: a row that prints only at its end has no countable progress.
+      onCheck: env.PADDOCK_PROGRESS_LINES?.trim() === '1' ? (id) => err(`progress: ${id} finished`) : null,
       root: resolve(o.root ?? '.'),
       app: o.app,
       only: o.only ? o.only.split(',').map((s) => s.trim().toUpperCase()) : null,

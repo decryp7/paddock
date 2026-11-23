@@ -177,6 +177,35 @@ cold/warm spread (85x) makes it fragile; C2 is covered for the known cycle by 7a
 - **The gap and K are measured once per workspace** (docs/benchmarks.md, "Push gate stall gap (WP-0)"): the report-only week also
   re-checks them against real pushes.
 
+### As built (2026-11-23, feat/watchdog-enforce-ready): what makes the watchdog safe to enforce
+
+The audit of 2026-11-23 found the report-only watchdog NOT safe to enforce: of 13 calls since 11-19, 11 were healthy passing steps
+(false alarms), 2 failed and ended on their own, 0 were true catches. Two causes, both fixed here:
+
+- **A, rows that print only at their end** (conformance, gates-register, fmt, ipc-endpoints; their longest silence was a median 0.86 to
+  0.91 of the run). Real progress lines first: every row is started with `PADDOCK_PROGRESS_LINES=1` (`progress_lines.rs`, ER-47: the
+  children inherit it); the JavaScript conformance host and the Rust one print one line per check finished, `gates check` one per
+  phase, `ipc-endpoints` one per 25 files, and the fmt row runs `cargo fmt --all --check -v` (one line per target;
+  `Progress::CargoFmt`, the failure tail drops those lines). CPU is NOT used as progress: where lines were feasible they are the better
+  signal, and counting CPU would hide a spinning hang (section 2: CPU grows with no progress), which the judge must still be able to call.
+- **B, heavy's load-gate wait counted as run time** (fixed by 03cca969e). Its records had biased `step-history.jsonl` (a warm clippy gap
+  of 230 s, a doctest gap of 456 s). Every record now carries its time, the tool version and a rule revision (`REV`, 2); a record of an
+  older revision, one with a gap longer than its own run, and one older than 60 days is never used; the file is owned by the gate,
+  bounded to about 2 MiB and evicted oldest first by rotation (ER-51).
+
+Beyond lines, the tree's own signals count as progress for a step whose work shows in its process tree (user-approved 2026-11-23): the
+tree's memory changing by more than 1 MiB between two samples (`paddock_proc::tree_memory_from`, physical footprint on macOS, PSS on
+Linux, private working set on Windows) and its disk bytes growing (`paddock_proc::tree_disk_io_from`: `ri_diskio_bytesread/written`
+of the `proc_pid_rusage` call that gives the footprint, `/proc/<pid>/io`, `GetProcessIoCounters`), sampled every 5 s. They are readings of
+the SAME progress counter the judge is fed, so a signal can only delay a stall verdict, never cause one; stuck is "no progress on any
+signal and not in a wait state". A step compiled through the local sccache (the compile runs in the cache server, outside the tree) and the
+Linux container row (the work runs in a VM) show nothing in the tree: they keep output events and the row cap and read no signals.
+A hung process that keeps allocating or writing is not called stuck by the watchdog (the row cap bounds it).
+
+Enforcement stays off. `./dev gate-watchdog report` summarises the window from `step-history.jsonl` (false alarms, catches, misses) and the
+`watchdog:` notes of `phases.log` (with the signal readings, ER-27); the flip is one line (see docs/benchmarks.md, "Push gate watchdog
+window") once the report says CLEAN.
+
 ### Decisions for the user
 
 1. **A (1 d) or B (3 d)?** Recommendation: B, ranked first; A is the fallback and is WP-1 of B anyway.

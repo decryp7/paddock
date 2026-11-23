@@ -2298,6 +2298,38 @@ save more, on each OS? And did the user's Defender process exclusions for git ch
   `FLOOR` stays 120 s (2.8 times the longest gap). One cold run per workspace is a small sample: the watchdog stays report-only
   (`PADDOCK_GATE_WATCHDOG=enforce` to kill) until a week of `step-history.jsonl` records of real pushes agrees (ER-12, ER-41).
 
+## Push gate watchdog window (2026-11-23, feat/watchdog-enforce-ready)
+
+- **Question:** does a row that prints only at its end show countable progress now (cause A of the audit of 2026-11-23), and what must the
+  report-only window show before the watchdog may enforce (ER-41)?
+- **Method:** the four rows run by their gate commands on this Mac mini (arm64, 15-minute load 14 to 19), one run each, output lines stamped
+  with a monotonic clock; the gap is the longest time between two counted events, start and end included, counted as the watchdog counts
+  them (every non-empty line; for fmt the `-v` target lines). "Without" is the old command with `PADDOCK_PROGRESS_LINES` unset; "with" sets
+  it (the gate does for every row). The script is a 25-line wrapper (scratch, not kept).
+
+| Row | Without: run s, events, longest gap s (share of run) | With: run s, events, longest gap s (share of run) |
+|---|---|---|
+| conformance (`./dev ci run conformance paddock`) | 31.7, 1239 (all at the end), 28.3 (0.89) | 52.1, 1298, 12.3 (0.24) |
+| gates-register (`./dev gates check`) | 78.0, 12, 78.0 (1.00) | 60.2, 42, 6.3 (0.10) |
+| ipc-endpoints | 4.4, 1, 4.4 (1.00) | 4.0, 119, 0.1 (0.03) |
+| fmt crates (`cargo fmt --all --check`, `-v` with) | 1.7, 0, 1.7 (1.00) | 1.7, 139, 1.6 (0.97; a 1.7 s run) |
+
+- **Result:** the share of a run spent silent falls from 0.89 to 1.00 down to 0.03 to 0.24 for the rows that take long enough to matter; fmt of
+  `crates` takes 1.7 s, far below any limit. The run times differ between the pairs because the machine's load did (conformance 31.7 against
+  52.1 s, gates-register 78 against 60 s). Not measured: Linux and Windows hosts, a repeat of each row, the gate's full row set at once.
+  A first look showed gates-register's evaluate phase as one 24 s silence; it now prints every 25 checks (longest gap 2.1 s in that run).
+- **The window that counts as clean** (`./dev gate-watchdog report`, constants `CLEAN_DAYS` = 7 and `CLEAN_STEPS` = 100 in
+  `pre_push/watchdog_report.rs`; first values, the audit saw 13 calls in 4 days and a week of pushes holds a few hundred steps): at least 7 days
+  of `step-history.jsonl` records, at least 100 watched steps, and 0 false alarms (a call on a step that passed). Record each window here:
+
+| Window (from, to) | Watched steps | Calls | False alarms | Catches | Misses | Verdict |
+|---|---:|---:|---:|---:|---:|---|
+| 2026-11-19 to 2026-11-23 (the audit, before this change, by hand) | not counted | 13 | 11 | 0 | not counted | not safe |
+
+- **The flip is one line:** when the report says CLEAN, add its row above and change `DEFAULT_MODE` in `tools/paddock-dev/src/pre_push/stall.rs` from
+  `Mode::ReportOnly` to `Mode::Enforce`, in the same tool step that records the row (ER-41). `PADDOCK_GATE_WATCHDOG=enforce` or `report` overrides it
+  per run.
+
 ## The sccache shim named `sccache`: native C stays cached (2026-11-19, fix/gate-tooling-env-select)
 
 - **Question:** a wrapper with another file name (`rustc-wrapper`) kept cc-rs from wrapping `clang-cl`, but also from wrapping every native C compile. The shim named `sccache` (`local_sccache::shim_text`) keeps native C cached and sends only the Windows C compiles past sccache. What does that cost or save on a cold build?

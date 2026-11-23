@@ -30,6 +30,10 @@ pub struct StepInfo<'a> {
     pub kind: &'a str,
     /// The workspace folder the step runs in (empty: the repository root).
     pub ws: &'a str,
+    /// Whether the step's tree memory and disk bytes show its work. False for a step compiled through the local sccache (the compiles run in the
+    /// cache server, outside the tree) and for the Linux container row (the work runs in a VM): their readings would be flat while the step
+    /// works, so they are never read and the step keeps its output events and the row cap.
+    pub signals: bool,
 }
 
 /// What the executor can see of a running step.
@@ -56,6 +60,11 @@ pub struct Observation<'a> {
     pub waiting_on: Option<&'a str>,
     /// The CPU time of the step's whole process tree, when the OS reports it.
     pub cpu: Option<Duration>,
+    /// The memory of the step's whole process tree in bytes ([`paddock_proc::tree_memory_from`]), sampled every few seconds (the last
+    /// sample is repeated between samples); `None` when the step has no signals ([`StepInfo::signals`]) or the OS did not say.
+    pub mem: Option<u64>,
+    /// The disk bytes (read + written) of the step's whole process tree ([`paddock_proc::tree_disk_io_from`]), sampled with `mem`.
+    pub disk: Option<u64>,
     /// The step's process (pid and start time).
     pub root: ProcessId,
 }
@@ -76,9 +85,10 @@ pub trait StepWatch: Send {
     /// Looks at the step; `Some` ends it. Called about once per [`WATCH_POLL`] while the step runs, never while it queues.
     fn check(&mut self, seen: &Observation<'_>) -> Option<Stuck>;
 
-    /// The step has ended (`ran` seconds, `ok` when it passed): the watch writes what it learned (history) and returns a note for the
-    /// step's phase line (for example "would have stopped at 912 s"), or `None`.
-    fn finish(&mut self, _ran: f64, _ok: bool) -> Option<String> {
+    /// The step has ended (`ran` seconds, `ok` when it passed, `ended_by` the guard that ended it: the row cap or a watchdog; `None`
+    /// when it ended by itself): the watch writes what it learned (history) and returns a note for the step's phase line (for example
+    /// "would have stopped at 912 s"), or `None`.
+    fn finish(&mut self, _ran: f64, _ok: bool, _ended_by: Option<&str>) -> Option<String> {
         None
     }
 }
@@ -153,6 +163,7 @@ mod tests {
             progress: Progress::Lines,
             kind: "x",
             ws: "",
+            signals: false,
         };
         assert!(Never.watch(&step).is_none());
     }

@@ -84,15 +84,25 @@ pub fn check(a: &CheckArgs) -> Result<Report, CliError> {
     if let Some(line) = edge::sparse_problem(&root) {
         return Err(CliError::failure(line));
     }
+    // One line per phase finished when the push gate asks for it (the row prints only at its end otherwise, ER-27).
+    let phase = |what: &str| crate::progress_lines::unit(&format!("gates check: {what}"));
     let tree = edge::GitTree::open(&root).map_err(CliError::failure)?;
+    phase("tree listed");
     let sources = edge::load_sources(&root).map_err(CliError::failure)?;
+    phase("sources loaded");
     let planner = edge::planner(&root);
+    phase("planner ready");
     let history = edge::register_history(&root, &a.base);
+    phase("register history read");
+    let conformance_list = edge::conformance_json(&root, "list");
+    phase("conformance list read");
+    let conformance_commands = edge::conformance_json(&root, "commands").ok();
+    phase("conformance commands read");
     let input = evaluate::Input {
         tree: &tree,
         sources: &sources,
-        conformance_list: edge::conformance_json(&root, "list"),
-        conformance_commands: edge::conformance_json(&root, "commands").ok(),
+        conformance_list,
+        conformance_commands,
         dev_commands: dev_command_paths(),
         register_text: std::fs::read_to_string(root.join("docs/gates.toml")).ok(),
         base_register_text: edge::base_register(&root, &a.base),
@@ -105,6 +115,7 @@ pub fn check(a: &CheckArgs) -> Result<Report, CliError> {
         shallow: edge::is_shallow(&root),
     };
     let out = evaluate::evaluate(&input);
+    phase("checks evaluated");
     let table = evaluate::summary(&out.rows);
     let mut text = String::new();
     for f in &out.findings {

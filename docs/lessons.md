@@ -3475,3 +3475,22 @@ about 45 ms a start on that runner plus a fork per command substitution. **Fix:*
   (job 44649; FLAKY: failed once, passed its retry; the class of the 900x600 item). Different Dyno specs time out at 5 s in each run
   (8576, 8601): the class the vitest retry and worker budget of feat/fixed-wait-checks address (6 lanes x 29 vitest workers on 30
   cores before, 6 x 5 after). Next: a failing reproduction for each first.
+
+## The progress watchdog was not safe to enforce: rows that print only at their end, and a history that counted a wait as run time (2026-11-23)
+
+- **What happened.** The audit of 2026-11-23 read the report-only watchdog's calls since 2026-11-19: 13 calls, 11 on healthy passing
+  steps, 2 on steps that failed by themselves, 0 true catches. Cause A: conformance, gates-register, fmt and ipc-endpoints print only
+  when they end, so their longest silence was a median 0.86 to 0.91 of the run and "no output" was their normal state. Cause B: heavy's
+  load-gate wait was counted as run time (fixed by 03cca969e), which had biased `step-history.jsonl` (a warm clippy gap of 230 s, a
+  doctest gap of 456 s) and so the limits derived from it.
+- **Rule.** A progress judge needs a progress signal in every row it judges, or it must say the row has none. Rows now print one line per
+  unit finished when `PADDOCK_PROGRESS_LINES=1` (`tools/paddock-dev/src/progress_lines.rs`, set by the gate for every row); a step whose
+  work shows in its process tree also counts tree memory moving by more than 1 MiB and disk bytes growing as progress (only ever delaying
+  a verdict); a step compiled through sccache and the container row keep output events and the row cap. A record of a measurement carries
+  its time, the tool version and the revision of the rule that made it, and a record of an older rule or with an impossible value (a gap
+  longer than its run) is never used. The watchdog stays report-only until `./dev gate-watchdog report` says CLEAN for a recorded window
+  (docs/benchmarks.md, "Push gate watchdog window"; ER-41).
+- **Recurring:** yes. Class "a judge fed a signal its subject does not produce" (a check that passes or fails on nothing it can see,
+  ER-33): earlier instances `a tray count matched the app's own window buttons` and `expectIdle passed before the stream had started`
+  (ER-33's Why); this is the gate's instance. The mechanism that makes it checked is the window report: no enforcement without a
+  recorded window with zero false alarms.

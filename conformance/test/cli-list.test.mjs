@@ -49,3 +49,20 @@ test('the printed report keeps its documented shape: the outcomes (with their ti
   const report = JSON.parse(lines.join('\n'));
   assert.deepEqual(Object.keys(report), ['app', 'checks', 'findings', 'waived', 'errors', 'warnings']);
 });
+
+// The push gate counts progress by output lines; a row that prints only at its end has none (watchdog audit 2026-11-23, cause A).
+// `PADDOCK_PROGRESS_LINES=1` (set by the gate for every row; tools/paddock-dev/src/progress_lines.rs) asks for one line per check finished.
+test('PADDOCK_PROGRESS_LINES=1 prints one line per check finished on stderr, and nothing without it', async () => {
+  const root = makeApp({ 'paddock.waivers.toml': '' });
+  const run = async (env) => {
+    const err = [];
+    // the exit status is not the point here (a check of the fixture app may find something): the lines are
+    await main(['--app', 'paddock', '--root', root, '--only', 'C57,C06', '--json'], { log() {}, err: (s) => err.push(s), env });
+    return err.filter((l) => l.startsWith('progress: '));
+  };
+  const asked = await run({ PADDOCK_PROGRESS_LINES: '1' });
+  assert.deepEqual(asked, ['progress: C06 finished', 'progress: C57 finished']);
+  // controls: unset and `0` print no line (the output of CI and of a person is unchanged)
+  assert.deepEqual(await run({}), []);
+  assert.deepEqual(await run({ PADDOCK_PROGRESS_LINES: '0' }), []);
+});

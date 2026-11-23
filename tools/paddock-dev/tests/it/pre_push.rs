@@ -166,7 +166,7 @@ fn heavy_off_without_the_test_variable_is_an_override_and_not_measured() {
 
 /// Every name a run of `./dev` started by a test may carry (ADR 0100): what the process builder lists, plus this file's own
 /// named additions (`PADDOCK_DEV_HOME`, `PADDOCK_HEAVY`, `PADDOCK_TEST_HEAVY_OFF`, `ENGINEERING_RULES`, and the sccache switch every
-/// started `./dev` carries through `dev_bin::command`) and what `dev` itself sets for its gates (`CARGO_BUILD_JOBS`).
+/// started `./dev` carries through `dev_bin::command`) and what `dev` itself sets for its gates (`CARGO_BUILD_JOBS`, `PADDOCK_PROGRESS_LINES`).
 fn listed(name: &str) -> bool {
     const NAMED: &[&str] = &[
         crate::dev_bin::OFF.0,
@@ -175,6 +175,8 @@ fn listed(name: &str) -> bool {
         "PADDOCK_TEST_HEAVY_OFF",
         "ENGINEERING_RULES",
         "CARGO_BUILD_JOBS",
+        // what `dev` sets for every gate so a tool that prints only at its end can print progress lines (progress_lines.rs)
+        "PADDOCK_PROGRESS_LINES",
         "PWD",
         "OLDPWD",
         "SHLVL",

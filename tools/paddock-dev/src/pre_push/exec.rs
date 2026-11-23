@@ -837,6 +837,10 @@ pub fn waiting_line(id: &str, waited: Duration, status: Option<&str>, stall: Dur
     )
 }
 
+/// How often the tree's memory and disk are sampled for the watchdog: a tree walk reads every process of the tree, and a hang is judged
+/// over minutes, so five seconds loses nothing.
+const SIGNAL_EVERY: Duration = Duration::from_secs(5);
+
 /// How often the push says that a step still waits for the slot.
 const WAITING_SAY: Duration = Duration::from_secs(60);
 
@@ -970,6 +974,8 @@ impl RealExec {
         // (`Gate::rerun`) has no such flag.
         let gate_args = if gate.progress == Progress::CargoJson && crate::cargo_target::is_cargo(&gate.program) {
             with_cargo_json(&gate.args)
+        } else if gate.progress == Progress::CargoFmt && crate::cargo_target::is_cargo(&gate.program) {
+            super::progress::with_fmt_verbose(&gate.args)
         } else {
             gate.args.clone()
         };
@@ -1006,8 +1012,7 @@ impl RealExec {
         }
         // A cargo gate that names its build folder as configuration never also gets it as a variable (the variable would win over
         // the configuration and sccache hashes it), and compiles through the local sccache when there is one.
-        let hands_folder = gate.env.iter().any(|(k, _)| k == crate::ci_run::GATE_TARGET_DIR);
-        if hands_folder || (crate::cargo_target::is_cargo(&gate.program) && crate::cargo_target::names_target_dir(&gate.args)) {
+        if Self::names_build_folder(gate) {
             call = call.without("CARGO_TARGET_DIR").without("CARGO_BUILD_TARGET_DIR");
             if gate.heavy
                 && let Some(w) = self.wrapper.get()
@@ -1015,10 +1020,28 @@ impl RealExec {
                 call = crate::local_sccache::apply(call, w);
             }
         }
+        // Every row may print one line per unit it finishes when asked (the shared mechanism of `crate::progress_lines`): a row that
+        // prints only at its end has no countable progress otherwise.
+        call = call.env(crate::progress_lines::ENV, "1");
         if let Some(l) = label {
             call = call.env("PADDOCK_LINUX_RUN_LABEL", format!("{RUN_LABEL}={l}"));
         }
         call.output(Output::File(log.to_path_buf()))
+    }
+
+    /// Whether the gate names its cargo build folder as configuration (the rows that compile).
+    fn names_build_folder(gate: &Gate) -> bool {
+        gate.env.iter().any(|(k, _)| k == crate::ci_run::GATE_TARGET_DIR)
+            || (crate::cargo_target::is_cargo(&gate.program) && crate::cargo_target::names_target_dir(&gate.args))
+    }
+
+    /// Whether the step's work shows in its process tree: not a step that compiles through the local sccache (the compiles run in the
+    /// cache server) and not the Linux container row (the work runs in a VM). Only such a step has its tree's memory and disk read as
+    /// progress ([`StepInfo::signals`]); the others keep their output events and the row cap.
+    fn work_shows_in_tree(&self, gate: &Gate) -> bool {
+        let compiles_through_cache = Self::names_build_folder(gate) && gate.heavy && self.wrapper.get().is_some();
+        let in_container = matches!(gate.need, Need::Docker | Need::LocalCiImage);
+        !compiles_through_cache && !in_container
     }
 
     fn docker(&self) -> String {
@@ -1204,7 +1227,9 @@ impl Exec for RealExec {
             progress: gate.progress,
             kind: gate.id.split(' ').next().unwrap_or(&gate.id),
             ws: &gate.cwd,
+            signals: self.work_shows_in_tree(gate),
         };
+        let signals = info.signals;
         let watch = self.watchdog.watch(&info);
         let root: Arc<Mutex<Option<paddock_proc::ProcessId>>> = Arc::default();
         let call = {
@@ -1246,7 +1271,7 @@ impl Exec for RealExec {
             // Always watched: the row cap is enforced here (so the stacks are written before the tree is ended), and the
             // watchdog, when there is one, judges the step.
             let (log, root, done, stuck, heavy, progress) = (&log, &root, &done, &stuck, gate.heavy, gate.progress);
-            let watcher = s.spawn(move || self.watch_step(watch, log, root, done, stuck, began, ours, heavy, progress));
+            let watcher = s.spawn(move || self.watch_step(watch, log, root, done, stuck, began, ours, heavy, progress, signals));
             let ran = call.run(&self.env, &mut std::io::sink());
             done.store(true, Ordering::SeqCst);
             (ran, watcher.join().ok().flatten())
@@ -1313,7 +1338,7 @@ impl Exec for RealExec {
             });
             t.queued += lock_wait.as_secs_f64();
         }
-        let note = watch.and_then(|mut w| w.finish(timing.map_or(wall, |t| t.ran), ran.success));
+        let note = watch.and_then(|mut w| w.finish(timing.map_or(wall, |t| t.ran), ran.success, ending.guard().as_deref()));
         let line = phase_line(
             &gate.id,
             timing.map(|t| t.queued),
@@ -1337,6 +1362,8 @@ impl Exec for RealExec {
             tail: tail(
                 &if gate.progress == Progress::CargoJson {
                     without_json(&ran.stderr)
+                } else if gate.progress == Progress::CargoFmt {
+                    super::progress::without_fmt_targets(&ran.stderr)
                 } else {
                     ran.stderr.clone()
                 },
@@ -1504,9 +1531,14 @@ impl RealExec {
         ours: bool,
         heavy: bool,
         progress: Progress,
+        signals: bool,
     ) -> Option<Box<dyn StepWatch>> {
         let mut counter = Counter::new(progress);
         let mut last_check = Instant::now();
+        // The tree's memory and disk, sampled every SIGNAL_EVERY (a tree walk reads each process; Linux's PSS is the dearest read) and
+        // repeated between samples.
+        let mut sampled: Option<Instant> = None;
+        let mut tree: (Option<u64>, Option<u64>) = (None, None);
         while !done.load(Ordering::SeqCst) {
             std::thread::sleep(Duration::from_millis(100));
             if last_check.elapsed() < WATCH_POLL {
@@ -1524,6 +1556,14 @@ impl RealExec {
             let last_line = tail.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("").to_string();
             let now = Instant::now();
             let active_for = now.saturating_duration_since(since);
+            if signals && judged && sampled.is_none_or(|t| now.saturating_duration_since(t) >= SIGNAL_EVERY) {
+                sampled = Some(now);
+                let os = paddock_proc::OsSource::default();
+                tree = (
+                    Some(paddock_proc::tree_memory_from(&os, id)).filter(|m| *m > 0),
+                    paddock_proc::tree_disk_io_from(&os, id),
+                );
+            }
             let verdict = if let Some(over) = row_cap_verdict(active_for, self.row_cap) {
                 Some(over)
             } else if !judged {
@@ -1541,6 +1581,8 @@ impl RealExec {
                         last_event: counter.last_event(),
                         waiting_on: counter.waiting_on(),
                         cpu: paddock_proc::tree_cpu_time(id),
+                        mem: tree.0,
+                        disk: tree.1,
                         root: id,
                     })
                 })
@@ -2495,6 +2537,112 @@ exit $rc
             let g = json_step(d.path(), &[UNIT_LINE, "    Blocking waiting for file lock on build directory"], 8);
             let r = decide(&g, &ex, &test_subject());
             assert_eq!((r.kind(), r.ended_by.clone()), (Kind::Passed, None), "{r:?}");
+        }
+
+        /// Cause A of the watchdog audit (2026-11-23): every row is asked for progress lines, so a tool that prints only at its end can
+        /// print one line per unit (`crate::progress_lines`). Positive control: without the variable the row would see none.
+        #[test]
+        fn every_row_is_asked_for_progress_lines() {
+            let d = tempfile::tempdir().unwrap();
+            let ex = real(d.path(), &d.path().join("l"));
+            let limits = Limits {
+                stall: Duration::from_secs(60),
+            };
+            let log = d.path().join("g.log");
+            for heavy in [false, true] {
+                let mut g = gate("conformance", "true");
+                g.heavy = heavy;
+                let env = ex.call(&g, limits, &log, None, "pre-push-1-1").child_env(&ex.env);
+                assert!(
+                    env.contains(&(crate::progress_lines::ENV.to_string(), "1".to_string())),
+                    "heavy {heavy}: {env:?}"
+                );
+            }
+            // the control: a call built without the executor's own additions does not carry it
+            let bare = ToolCall::new("true").child_env(&ex.env);
+            assert!(bare.iter().all(|(k, _)| k != crate::progress_lines::ENV), "{bare:?}");
+        }
+
+        /// `cargo fmt --check` is given `-v` (one line per target) and its failure tail shows the diff, not the targets.
+        #[test]
+        fn the_fmt_row_is_run_verbose_and_its_tail_drops_the_target_lines() {
+            let d = tempfile::tempdir().unwrap();
+            let ex = real(d.path(), &d.path().join("l"));
+            let limits = Limits {
+                stall: Duration::from_secs(60),
+            };
+            let mut g = gate("fmt crates", "");
+            g.program = "cargo".into();
+            g.args = ["fmt", "--all", "--check"].map(String::from).to_vec();
+            g.heavy = false;
+            g.progress = Progress::CargoFmt;
+            let shown = ex.call(&g, limits, &d.path().join("g.log"), None, "n").display();
+            assert!(shown.contains("--check -v") || shown.ends_with(" -v"), "{shown}");
+            g.progress = Progress::Lines;
+            let plain = ex.call(&g, limits, &d.path().join("g.log"), None, "n").display();
+            assert!(!plain.contains(" -v"), "only the fmt row is made verbose: {plain}");
+        }
+
+        /// Which steps have their tree's memory and disk read as progress: not the ones whose work the tree cannot show.
+        #[test]
+        fn a_step_compiled_through_sccache_or_run_in_the_container_has_no_signals() {
+            let d = tempfile::tempdir().unwrap();
+            let mut ex = real(d.path(), &d.path().join("l"));
+            let mut cargo = gate("clippy a", "");
+            cargo.program = "cargo".into();
+            cargo.args = crate::cargo_target::with_target_dir(&["clippy".to_string()], "/t");
+            let plain = gate("conformance", "true");
+            let container = Gate {
+                need: Need::LocalCiImage,
+                ..gate("clippy-linux", "true")
+            };
+            assert!(ex.work_shows_in_tree(&cargo), "no sccache: the tree compiles");
+            assert!(ex.work_shows_in_tree(&plain));
+            assert!(!ex.work_shows_in_tree(&container), "the work runs in a VM");
+            ex.wrapper = crate::local_sccache::Lazy::ready(crate::local_sccache::Ready {
+                bin: "/x/sccache".into(),
+                vars: vec![("RUSTC_WRAPPER".into(), "/x/sccache".into())],
+            });
+            assert!(!ex.work_shows_in_tree(&cargo), "the compiles run in the cache server");
+            assert!(
+                ex.work_shows_in_tree(&plain),
+                "a step that does not compile is not hidden by the wrapper"
+            );
+        }
+
+        /// A row whose tree grows its memory (a stand-in awk that keeps 4 MiB more every second) is alive and passes under the enforcing
+        /// watchdog, though it prints nothing; the same row that only sleeps (a blocked read: every signal flat) is stopped as stuck.
+        /// The two are the positive control of each other (ER-33). Unix only: the stand-in is awk.
+        #[cfg(unix)]
+        #[test]
+        fn a_silent_row_whose_memory_grows_is_not_stuck_and_one_whose_signals_are_flat_is() {
+            use crate::pre_push::stall::Mode;
+            let awk = |program: &str| Gate {
+                program: "awk".into(),
+                args: vec![program.into()],
+                heavy: false,
+                ..gate("tests silent", "")
+            };
+            let grows = awk(r#"BEGIN { c = sprintf("%4194304s", "x"); for (i = 0; i < 26; i++) { a[i] = c i; system("sleep 1") } }"#);
+            let flat = awk(r#"BEGIN { system("sleep 40") }"#);
+            let run = |g: &Gate| {
+                let d = tempfile::tempdir().unwrap();
+                let mut ex = real(d.path(), &d.path().join("l"));
+                ex.watchdog = stall_dog(Mode::Enforce, 8, None);
+                decide(g, &ex, &test_subject())
+            };
+            let (growing, blocked) = std::thread::scope(|s| {
+                let a = s.spawn(|| run(&grows));
+                let b = s.spawn(|| run(&flat));
+                (a.join().unwrap(), b.join().unwrap())
+            });
+            assert_eq!(growing.kind(), Kind::Passed, "memory growth is progress: {growing:?}");
+            assert_eq!(blocked.kind(), Kind::NotMeasured, "{blocked:?}");
+            assert!(
+                blocked.reason().contains("progress watchdog") && blocked.reason().contains("memory and disk were flat"),
+                "{}",
+                blocked.reason()
+            );
         }
 
         /// A finished step is written to the history, cold or warm by its build folder.

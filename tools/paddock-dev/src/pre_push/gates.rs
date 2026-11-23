@@ -345,14 +345,18 @@ pub fn plan_gates(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> 
             dependents.push(ws);
             continue;
         }
-        out.push(Planned::Run(gate(
+        // `cargo fmt --check` prints nothing until it finds a difference; the executor adds `-v` (one line per target) so a clean run of a
+        // big workspace shows progress ([`super::progress::Progress::CargoFmt`]).
+        let mut fmt = gate(
             format!("fmt {ws}"),
             &ws,
             "cargo",
             &["fmt", "--all", "--check"],
             0,
             "format your own files (`rustfmt --edition 2024 <file>`; never `cargo fmt --all` while others edit), then re-run `./dev check --pre-push`".to_string(),
-        )));
+        );
+        fmt.progress = super::progress::Progress::CargoFmt;
+        out.push(Planned::Run(fmt));
         let mut clippy: Vec<&str> = vec!["clippy", "--workspace", "--all-targets"];
         if all_features {
             clippy.push("--all-features");

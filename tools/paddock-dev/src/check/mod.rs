@@ -572,6 +572,8 @@ pub fn run_checks_in(tree: &Tree, opts: &RunOptions, registry: &[Box<dyn Check>]
     for check in &selected {
         let attempt = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| check.run(&ctx)));
         let control = control_holds(check.as_ref());
+        // One line per check finished when the push gate asks for it (the row prints only at its end otherwise).
+        crate::progress_lines::unit(&format!("{} finished", check.id()));
         let mut record = RunRecord {
             check: check.id().into(),
             ran: true,

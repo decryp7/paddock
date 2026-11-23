@@ -982,6 +982,8 @@ fn the_cargo_rows_read_json_progress_and_name_their_build_folder() {
     assert_eq!(get("clippy-windows crates").build_dir.as_deref(), Some("/kept/crates/xwin"));
     assert_eq!(get("conformance-tests").progress, Progress::Lines);
     assert_eq!(get("conformance-tests").build_dir, None);
+    // `cargo fmt --check` prints nothing when clean: its row reads the target lines of `-v` (cause A of the watchdog audit, 2026-11-23).
+    assert_eq!(get("fmt crates").progress, Progress::CargoFmt);
 }
 
 fn crates_gates() -> Vec<Planned> {

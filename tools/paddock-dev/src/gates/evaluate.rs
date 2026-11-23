@@ -255,7 +255,10 @@ pub fn evaluate(input: &Input) -> Outcome {
             "Fix the file, or the reference to it; a CI file the model cannot read gates nothing.",
         );
     }
+    // Progress lines for the push gate (crate::progress_lines): most of this function's seconds are in the three steps below.
+    crate::progress_lines::unit("gates check: CI model built");
     let index = gating::index(&model, input.tree);
+    crate::progress_lines::unit("gates check: gating index built");
     let apps = AppFacts::from_contracts(&src.contracts);
 
     // The checks.
@@ -320,6 +323,7 @@ pub fn evaluate(input: &Input) -> Outcome {
         .into_iter()
         .collect();
     input.planner.prefetch(&inputs);
+    crate::progress_lines::unit("gates check: planner answers fetched");
     if inputs.iter().any(|f| input.planner.marks(f).is_none()) {
         finding(
             &mut out,
@@ -343,7 +347,10 @@ pub fn evaluate(input: &Input) -> Outcome {
         .filter_map(|p| input.tree.read(p))
         .collect::<Vec<_>>()
         .join("\n");
-    for check in all {
+    for (n, check) in all.into_iter().enumerate() {
+        if n % 25 == 24 {
+            crate::progress_lines::unit(&format!("gates check: {} checks judged", n + 1));
+        }
         let g = gating::gating(&check, &env);
         let want = required(&check, &reg);
         let ok = g.not_applicable

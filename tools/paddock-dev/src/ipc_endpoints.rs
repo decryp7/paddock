@@ -1053,7 +1053,15 @@ pub fn command(root: Option<PathBuf>, tag: Option<String>) -> Result<Report, Cli
             PathBuf::from(out.trim())
         }
     };
-    let (sites, register, ratchet, found) = check(&root).map_err(|e| {
+    // One line per 25 files read when the push gate asks for it (the row prints only at its end otherwise).
+    let read = std::cell::Cell::new(0u32);
+    let tick = || {
+        read.set(read.get() + 1);
+        if read.get().is_multiple_of(25) {
+            crate::progress_lines::unit(&format!("ipc-endpoints read {} files", read.get()));
+        }
+    };
+    let (sites, register, ratchet, found) = check_with(&root, &tick).map_err(|e| {
         CliError::failure(format!("::error::C102 {e}")).with_hint("Fix the file named above and run `./dev check ipc-endpoints` again.")
     })?;
     if !found.is_empty() {

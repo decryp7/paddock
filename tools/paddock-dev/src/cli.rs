@@ -32,6 +32,13 @@ enum Command {
         #[command(subcommand)]
         command: CiCommand,
     },
+    /// The push gate's progress watchdog: `report` summarises its calls (false alarms, catches, misses) from the files the gate leaves,
+    /// and says whether the report-only window is clean enough to enforce (ER-41).
+    #[command(name = "gate-watchdog")]
+    GateWatchdog {
+        #[command(subcommand)]
+        command: pre_push::watchdog_report::WatchdogCommand,
+    },
     /// Wait, with a limit, for a plock job, a process, a line in a file or a CI run. Use it instead of `pgrep -f` loops.
     Wait(wait::WaitArgs),
     /// Run a command through the machine-wide heavy slot (ER-24), found the way `check --pre-push` finds it; git hooks use it.
@@ -872,6 +879,7 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
             Ok(Report::new(serde_json::json!({ "lines": lines }), lines.join("\n")))
         }
         Command::Disk { command } => disk::command(command),
+        Command::GateWatchdog { command } => pre_push::watchdog_report::command(command),
         Command::Pr { command } => pr::command(command),
         Command::Queue { command } => queue::command(command),
         Command::Merge {

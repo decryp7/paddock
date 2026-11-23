@@ -24,6 +24,10 @@ pub enum Progress {
     Lines,
     /// Cargo's JSON messages (`--message-format=json-render-diagnostics`): finished units and ran build scripts, and the doctests.
     CargoJson,
+    /// `cargo fmt --all --check -v`: one `[lib (2024)] "<file>"` line per target rustfmt looked at (stderr; a diff goes to stdout and
+    /// is not progress). Plain `cargo fmt --check` prints nothing until it finds a difference, so a clean run of a big workspace
+    /// showed no progress at all (the watchdog audit of 2026-11-23, cause A).
+    CargoFmt,
 }
 
 /// The flag a [`Progress::CargoJson`] step's cargo is given.
@@ -37,6 +41,37 @@ pub fn with_cargo_json(args: &[String]) -> Vec<String> {
     let at = args.iter().position(|a| a == "--").unwrap_or(args.len());
     let mut out = args.to_vec();
     out.insert(at, CARGO_JSON.to_string());
+    out
+}
+
+/// The flag a [`Progress::CargoFmt`] step's `cargo fmt` is given.
+pub const FMT_VERBOSE: &str = "-v";
+
+/// `args` (a `cargo fmt` command) with [`FMT_VERBOSE`] added before a `--` (the arguments for rustfmt), or at the end.
+pub fn with_fmt_verbose(args: &[String]) -> Vec<String> {
+    if args.iter().any(|a| a == FMT_VERBOSE || a == "--verbose") {
+        return args.to_vec();
+    }
+    let at = args.iter().position(|a| a == "--").unwrap_or(args.len());
+    let mut out = args.to_vec();
+    out.insert(at, FMT_VERBOSE.to_string());
+    out
+}
+
+/// Whether `line` is `cargo fmt -v`'s line for one target: `[lib (2024)] "/path/src/lib.rs"`.
+fn is_fmt_target(line: &str) -> bool {
+    let Some(rest) = line.strip_prefix('[') else { return false };
+    rest.split_once("] \"")
+        .is_some_and(|(kind, path)| !kind.is_empty() && path.ends_with('"'))
+}
+
+/// `text` without `cargo fmt -v`'s target lines: what a failing [`Progress::CargoFmt`] step's tail shows (the diff, not 140 targets).
+pub fn without_fmt_targets(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for l in text.lines().filter(|l| !is_fmt_target(l)) {
+        out.push_str(l);
+        out.push('\n');
+    }
     out
 }
 
@@ -82,6 +117,13 @@ pub fn classify(mode: Progress, line: &str) -> Line {
                 Line::Other
             } else {
                 Line::Progress
+            }
+        }
+        Progress::CargoFmt => {
+            if is_fmt_target(line) {
+                Line::Progress
+            } else {
+                Line::Other
             }
         }
         Progress::CargoJson => {
@@ -287,6 +329,36 @@ mod tests {
         assert_eq!(c.events(), 0);
         c.feed(&format!("{b}\n"));
         assert_eq!(c.events(), 1);
+    }
+
+    #[test]
+    fn a_cargo_fmt_target_line_is_progress_and_a_diff_is_not() {
+        let mut c = Counter::new(Progress::CargoFmt);
+        c.feed("[lib (2024)] \"/w/crates/a/src/lib.rs\"\n[test (2024)] \"/w/crates/a/tests/it/main.rs\"\nDiff in /w/x.rs:1:\n-old\n+new\n");
+        assert_eq!(c.events(), 2, "the two targets count, the diff does not");
+        // Positive control: the same text read as plain lines would count the diff too, so the mode is what separates them.
+        let mut l = Counter::new(Progress::Lines);
+        l.feed("[lib (2024)] \"/w/crates/a/src/lib.rs\"\nDiff in /w/x.rs:1:\n");
+        assert_eq!(l.events(), 2);
+        assert_eq!(classify(Progress::CargoFmt, "error: could not compile"), Line::Other);
+        assert_eq!(classify(Progress::CargoFmt, "[] \"x\""), Line::Other, "no kind: not a target line");
+    }
+
+    #[test]
+    fn the_fmt_flag_goes_before_the_rustfmt_arguments_and_only_once() {
+        let a = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(
+            with_fmt_verbose(&a(&["fmt", "--all", "--check"])),
+            a(&["fmt", "--all", "--check", "-v"])
+        );
+        assert_eq!(with_fmt_verbose(&a(&["fmt", "--", "--check"])), a(&["fmt", "-v", "--", "--check"]));
+        assert_eq!(with_fmt_verbose(&a(&["fmt", "-v"])), a(&["fmt", "-v"]));
+    }
+
+    #[test]
+    fn the_failure_tail_of_a_fmt_step_shows_the_diff_not_the_targets() {
+        let text = "[lib (2024)] \"/w/a.rs\"\nDiff in /w/a.rs:1:\n-x\n+y\n[bin (2024)] \"/w/b.rs\"\n";
+        assert_eq!(without_fmt_targets(text), "Diff in /w/a.rs:1:\n-x\n+y\n");
     }
 
     #[test]

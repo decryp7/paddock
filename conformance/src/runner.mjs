@@ -9,9 +9,10 @@ import { applyWaivers, parseWaivers } from './util/waivers.mjs';
 /**
  * Runs the selected checks over `root`. A check that throws (whatever it throws), returns no list, or returns an invalid finding is an unwaivable error finding: a run that did not finish never passes and
  * no waiver (not even `path = "*"`) covers it (ER-33, ADR 0089 D8). Waivers are applied last.
+ * `onCheck(id)` is called after each check has finished (the push gate's progress lines, PADDOCK_PROGRESS_LINES).
  * Returns { app, checks: [ids run], outcomes (one per check, made by `measure`), findings, waived, errors, warnings }.
  */
-export async function runChecks({ root, app, only = null, options = {}, registry = checks }) {
+export async function runChecks({ root, app, only = null, options = {}, registry = checks, onCheck = null }) {
   const config = loadConfig(root, app);
   const ctx = createContext({ root, config, options });
   const selected = only ? registry.filter((c) => only.includes(c.id)) : registry;
@@ -38,6 +39,7 @@ export async function runChecks({ root, app, only = null, options = {}, registry
       return found;
     });
     outcomes.push(outcome);
+    if (onCheck) onCheck(check.id);
     if (outcome.status === 'not-measured') {
       findings.push(unwaivable(error(check.id, check.rule, '', 1, outcome.reason, outcome.next), 'not-measured'));
     } else if (outcome.status === 'check-broken') {

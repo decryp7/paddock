@@ -7,6 +7,12 @@
 //! only from passed steps of the same kind, workspace and coldness, and only from [`MIN_SAMPLES`] of them; with fewer (or no) records the
 //! caller falls back to the fixed gap. The limit can tighten the fallback, never loosen it ([`limit_from`]). Pure: records in, a
 //! duration out; the file is read and appended by [`History`].
+//!
+//! Hygiene (the watchdog audit of 2026-11-23, cause B: heavy's load-gate wait had been counted as run time, so a record could hold a longest
+//! gap of 230 s inside a run that really worked for far less): every record carries the time it was written, the tool version and the
+//! revision of the rule that measured it ([`REV`]); a record of an older revision, one that claims a gap longer than its own run, and one older than
+//! [`MAX_AGE_SECS`] is never read. The file is owned by the push gate of this checkout (`<git common dir>/paddock-pre-push`), bounded by
+//! [`MAX_BYTES`] (two files, so about 2 MiB) and evicted oldest first by the rotation (ER-51).
 
 use serde_json::{Value, json};
 use std::io::Write;
@@ -32,6 +38,17 @@ pub const FLOOR: Duration = Duration::from_secs(120);
 /// weeks of pushes; the limit reads at most [`READ_LINES`] of them.
 pub const MAX_BYTES: u64 = 1 << 20;
 
+/// The revision of the rule that measures a step's gaps and run time. Bump it when what a record means changes: older records are then
+/// ignored (a fresh start), never mixed with the new meaning. 2: the gap counts every progress signal (output events, tree memory
+/// change, disk growth) and a step's run time excludes the heavy load-gate wait (03cca969e); revision 1 records had neither.
+pub const REV: u32 = 2;
+
+/// The oldest a record may be and still count: 60 days.
+pub const MAX_AGE_SECS: u64 = 60 * 24 * 3600;
+
+/// The tool version written into each record.
+pub const TOOL: &str = concat!("paddock-dev ", env!("CARGO_PKG_VERSION"));
+
 /// The most records read back (the newest): the file only grows, a limit needs the recent past.
 const READ_LINES: usize = 4000;
 
@@ -52,13 +69,34 @@ pub struct StepRecord {
     pub max_gap_secs: f64,
     /// How many progress events it showed.
     pub events: u64,
+    /// Whether the gap was judged with the tree's memory and disk signals as well as the output ([`super::watchdog::StepInfo::signals`]):
+    /// the gaps of the two kinds of step are not mixed in a limit.
+    pub signals: bool,
+    /// When the record was written: seconds since the Unix epoch.
+    pub at: u64,
+    /// The tool that wrote it ([`TOOL`]).
+    pub tool: String,
+    /// The revision of the rule that measured it ([`REV`]).
+    pub rev: u32,
+    /// The guard that ended the step (`row cap`, a watchdog's name); `None`: it ended by itself.
+    pub ended_by: Option<String>,
+    /// Seconds into the run at which the watchdog first said "would have stopped" (report-only mode); `None`: it never did.
+    pub would_stop_secs: Option<f64>,
+}
+
+/// Seconds since the Unix epoch now.
+pub fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs())
 }
 
 impl StepRecord {
     /// The record as its JSON line.
     fn to_json(&self) -> Value {
         json!({"kind": self.kind, "ws": self.ws, "cold": self.cold, "ok": self.ok, "ran_secs": self.ran_secs,
-               "max_gap_secs": self.max_gap_secs, "events": self.events})
+               "max_gap_secs": self.max_gap_secs, "events": self.events, "signals": self.signals, "at": self.at,
+               "tool": self.tool, "rev": self.rev, "ended_by": self.ended_by, "would_stop_secs": self.would_stop_secs})
     }
 
     /// A record from its line, `None` when it is not one (an older or foreign shape).
@@ -71,15 +109,29 @@ impl StepRecord {
             ran_secs: v["ran_secs"].as_f64()?,
             max_gap_secs: v["max_gap_secs"].as_f64()?,
             events: v["events"].as_u64()?,
+            signals: v["signals"].as_bool()?,
+            at: v["at"].as_u64()?,
+            tool: v["tool"].as_str()?.to_string(),
+            rev: u32::try_from(v["rev"].as_u64()?).ok()?,
+            ended_by: v["ended_by"].as_str().map(str::to_string),
+            would_stop_secs: v["would_stop_secs"].as_f64(),
         })
     }
 }
 
+impl StepRecord {
+    /// Whether the record may be used at `now` (seconds since the epoch): written by the current rule, not older than [`MAX_AGE_SECS`],
+    /// and not claiming a longer silence than its own run.
+    pub fn usable(&self, now: u64) -> bool {
+        self.rev >= REV && now.saturating_sub(self.at) <= MAX_AGE_SECS && self.max_gap_secs <= self.ran_secs + 1.0
+    }
+}
+
 /// The stall limit for a class from `records`, or `None` when there are too few passed steps of it. `fallback` is the most it can be.
-pub fn limit_from(records: &[StepRecord], kind: &str, ws: &str, cold: bool, fallback: Duration) -> Option<Duration> {
+pub fn limit_from(records: &[StepRecord], kind: &str, ws: &str, cold: bool, signals: bool, fallback: Duration) -> Option<Duration> {
     let gaps: Vec<f64> = records
         .iter()
-        .filter(|r| r.ok && r.kind == kind && r.ws == ws && r.cold == cold && r.events > 0)
+        .filter(|r| r.ok && r.kind == kind && r.ws == ws && r.cold == cold && r.signals == signals && r.events > 0)
         .map(|r| r.max_gap_secs)
         .collect();
     if gaps.len() < MIN_SAMPLES {
@@ -136,8 +188,18 @@ impl History {
             .and_then(|mut f| f.write_all(format!("{line}\n").as_bytes()));
     }
 
-    /// The newest records (a line that does not parse is skipped: the file may hold an older shape).
+    /// The newest usable records ([`StepRecord::usable`]; a line that does not parse is skipped: the file may hold an older shape).
     pub fn records(&self) -> Vec<StepRecord> {
+        self.records_at(now_secs())
+    }
+
+    /// [`History::records`] as of `now` (seconds since the epoch).
+    pub fn records_at(&self, now: u64) -> Vec<StepRecord> {
+        self.all_records().into_iter().filter(|r| r.usable(now)).collect()
+    }
+
+    /// Every record that parses, usable or not (the report counts what it dropped).
+    pub fn all_records(&self) -> Vec<StepRecord> {
         // The older file first, then the current one: the newest records are the last.
         let text = format!(
             "{}{}",
@@ -154,8 +216,8 @@ impl History {
     }
 
     /// The limit for a class ([`limit_from`]) from the file.
-    pub fn limit(&self, kind: &str, ws: &str, cold: bool, fallback: Duration) -> Option<Duration> {
-        limit_from(&self.records(), kind, ws, cold, fallback)
+    pub fn limit(&self, kind: &str, ws: &str, cold: bool, signals: bool, fallback: Duration) -> Option<Duration> {
+        limit_from(&self.records(), kind, ws, cold, signals, fallback)
     }
 
     /// Where the file is.
@@ -177,6 +239,12 @@ mod tests {
             ran_secs: 100.0,
             max_gap_secs: gap,
             events: 10,
+            signals: false,
+            at: now_secs(),
+            tool: TOOL.into(),
+            rev: REV,
+            ended_by: None,
+            would_stop_secs: None,
         }
     }
 
@@ -185,22 +253,22 @@ mod tests {
     #[test]
     fn with_too_few_passed_steps_there_is_no_limit_and_the_caller_falls_back() {
         let few: Vec<_> = (0..MIN_SAMPLES - 1).map(|_| rec("clippy", "crates", false, true, 3.0)).collect();
-        assert_eq!(limit_from(&few, "clippy", "crates", false, FALLBACK), None);
-        assert_eq!(limit_from(&[], "clippy", "crates", false, FALLBACK), None);
+        assert_eq!(limit_from(&few, "clippy", "crates", false, false, FALLBACK), None);
+        assert_eq!(limit_from(&[], "clippy", "crates", false, false, FALLBACK), None);
     }
 
     #[test]
     fn the_limit_is_a_multiple_of_the_longest_gap_between_the_floor_and_the_fallback() {
         let mk = |gap: f64| -> Vec<StepRecord> { (0..MIN_SAMPLES).map(|_| rec("clippy", "crates", false, true, gap)).collect() };
         // quick units: the floor
-        assert_eq!(limit_from(&mk(3.0), "clippy", "crates", false, FALLBACK), Some(FLOOR));
+        assert_eq!(limit_from(&mk(3.0), "clippy", "crates", false, false, FALLBACK), Some(FLOOR));
         // a slow unit: K times it
         assert_eq!(
-            limit_from(&mk(60.0), "clippy", "crates", false, FALLBACK),
+            limit_from(&mk(60.0), "clippy", "crates", false, false, FALLBACK),
             Some(Duration::from_secs(240))
         );
         // never above the fallback: the history only tightens
-        assert_eq!(limit_from(&mk(900.0), "clippy", "crates", false, FALLBACK), Some(FALLBACK));
+        assert_eq!(limit_from(&mk(900.0), "clippy", "crates", false, false, FALLBACK), Some(FALLBACK));
     }
 
     #[test]
@@ -209,16 +277,16 @@ mod tests {
         v.extend((0..MIN_SAMPLES).map(|_| rec("doctest", "apps/dyno", false, true, 2.0)));
         v.extend((0..MIN_SAMPLES).map(|_| rec("doctest", "crates", false, false, 500.0)));
         assert_eq!(
-            limit_from(&v, "doctest", "apps/dyno", true, FALLBACK),
+            limit_from(&v, "doctest", "apps/dyno", true, false, FALLBACK),
             Some(Duration::from_secs(800))
         );
-        assert_eq!(limit_from(&v, "doctest", "apps/dyno", false, FALLBACK), Some(FLOOR));
+        assert_eq!(limit_from(&v, "doctest", "apps/dyno", false, false, FALLBACK), Some(FLOOR));
         assert_eq!(
-            limit_from(&v, "doctest", "crates", false, FALLBACK),
+            limit_from(&v, "doctest", "crates", false, false, FALLBACK),
             None,
             "failed steps are no evidence"
         );
-        assert_eq!(limit_from(&v, "clippy", "apps/dyno", true, FALLBACK), None);
+        assert_eq!(limit_from(&v, "clippy", "apps/dyno", true, false, FALLBACK), None);
     }
 
     /// Review P2-4: the file never grows without bound: past the size it becomes the older file (replacing the one before), the records
@@ -226,13 +294,13 @@ mod tests {
     #[test]
     fn the_file_is_rotated_by_size_and_both_parts_are_read() {
         let d = tempfile::tempdir().unwrap();
-        let h = History::with_max(d.path().join("step-history.jsonl"), 600);
+        let h = History::with_max(d.path().join("step-history.jsonl"), 2000);
         for i in 0..40 {
             h.append(&rec("clippy", "crates", false, true, i as f64));
         }
         let size = |p: &Path| std::fs::metadata(p).map_or(0, |m| m.len());
         assert!(
-            size(h.path()) < 600 + 200,
+            size(h.path()) < 2000 + 450,
             "the current file stays near the limit: {}",
             size(h.path())
         );
@@ -254,6 +322,71 @@ mod tests {
         let mut f = std::fs::OpenOptions::new().append(true).open(h.path()).unwrap();
         std::io::Write::write_all(&mut f, b"not json\n").unwrap();
         assert_eq!(h.records().len(), MIN_SAMPLES);
-        assert_eq!(h.limit("clippy", "crates", false, FALLBACK), Some(Duration::from_secs(120)));
+        assert_eq!(h.limit("clippy", "crates", false, false, FALLBACK), Some(Duration::from_secs(120)));
+    }
+
+    /// The record carries the time it was written and the tool that wrote it, and they survive the file.
+    #[test]
+    fn a_record_carries_a_time_and_the_tool_version() {
+        let d = tempfile::tempdir().unwrap();
+        let h = History::new(d.path().join("step-history.jsonl"));
+        let before = now_secs();
+        h.append(&rec("clippy", "crates", false, true, 3.0));
+        let text = std::fs::read_to_string(h.path()).unwrap();
+        let v: Value = serde_json::from_str(text.lines().next().unwrap()).unwrap();
+        assert!(v["at"].as_u64().unwrap() >= before, "{text}");
+        assert!(v["tool"].as_str().unwrap().starts_with("paddock-dev "), "{text}");
+        assert_eq!(v["rev"].as_u64(), Some(u64::from(REV)));
+        let back = &h.records()[0];
+        assert_eq!((back.tool.as_str(), back.rev), (TOOL, REV));
+    }
+
+    /// Hygiene (cause B of the 2026-11-23 audit): a record of the old shape or revision, one that claims a gap longer than its own run
+    /// (heavy's wait counted as run time) and one past the age limit are never read; the same set with them kept would give a limit,
+    /// which is the positive control that they would have changed the answer.
+    #[test]
+    fn records_of_an_old_rule_an_impossible_gap_or_a_great_age_are_not_used() {
+        let d = tempfile::tempdir().unwrap();
+        let h = History::new(d.path().join("step-history.jsonl"));
+        // revision 1 had none of the new fields: it does not even parse
+        let old = r#"{"kind":"clippy","ws":"crates","cold":false,"ok":true,"ran_secs":100.0,"max_gap_secs":230.0,"events":10}"#;
+        std::fs::write(h.path(), format!("{old}\n")).unwrap();
+        for _ in 0..MIN_SAMPLES {
+            h.append(&StepRecord {
+                rev: REV - 1,
+                ..rec("clippy", "crates", false, true, 30.0)
+            });
+            h.append(&StepRecord {
+                ran_secs: 100.0,
+                ..rec("clippy", "crates", false, true, 230.0)
+            });
+            h.append(&StepRecord {
+                at: now_secs() - MAX_AGE_SECS - 10,
+                ..rec("clippy", "crates", false, true, 30.0)
+            });
+        }
+        assert!(h.records().is_empty(), "{:?}", h.records());
+        assert_eq!(h.all_records().len(), 3 * MIN_SAMPLES, "all of them parse, none is usable");
+        assert_eq!(h.limit("clippy", "crates", false, false, FALLBACK), None);
+        // control: the same records made good are used
+        for _ in 0..MIN_SAMPLES {
+            h.append(&rec("clippy", "crates", false, true, 30.0));
+        }
+        assert_eq!(h.limit("clippy", "crates", false, false, FALLBACK), Some(Duration::from_secs(120)));
+    }
+
+    /// Steps judged with the memory and disk signals and steps judged by their output alone have different gaps: never one limit for both.
+    #[test]
+    fn signal_and_output_only_steps_are_not_mixed() {
+        let mut v: Vec<StepRecord> = (0..MIN_SAMPLES).map(|_| rec("clippy", "crates", false, true, 200.0)).collect();
+        v.extend((0..MIN_SAMPLES).map(|_| StepRecord {
+            signals: true,
+            ..rec("clippy", "crates", false, true, 2.0)
+        }));
+        assert_eq!(
+            limit_from(&v, "clippy", "crates", false, false, FALLBACK),
+            Some(Duration::from_secs(800))
+        );
+        assert_eq!(limit_from(&v, "clippy", "crates", false, true, FALLBACK), Some(FLOOR));
     }
 }
