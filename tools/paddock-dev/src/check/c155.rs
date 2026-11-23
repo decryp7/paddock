@@ -19,7 +19,9 @@
 //!    runs there is the unsafe direction and needs the user's approval (ER-46): the check compares every `skip` and `only` entry with the
 //!    contract at the merge base (the one comparison [`super::baseline::growth`], the reader C53 and the allow lists use) and reports the
 //!    added ones as one unwaivable finding at the contract. `add` is free and is not compared. The comparison runs on a checkout only: an
-//!    in-memory tree has nothing to compare, and where git gives no merge base it warns (an error in CI), never silence.
+//!    in-memory tree has nothing to compare, and where git gives no merge base it warns (an error in CI), never silence. An entry the
+//!    user approved is recorded in [`APPROVALS`] (`docs/os-removals.toml`: the contract, the removal keys, `by = "user"`, the date and
+//!    why) and is not counted; an approval that is not the user's, or a register the check cannot read, is a finding of its own.
 //!
 //! Positive controls ([`Check::control`], ER-33): a `skip` over a module with an OS signal, an `only` over Windows code, a stale name
 //! and a redundant `add` each go red, and `tests/it/os_scoped.rs` shows the same on the real tree and sources, and that the derived
@@ -36,6 +38,7 @@ use crate::host_tests::{Derived, Exception, Exceptions, resolved_covers};
 use crate::os_placement::{self, Placement, RustcLex};
 use paddock_repo_graph::model::extract::BulkRead;
 use paddock_repo_graph::model::os::{is_test_file, rust_sites, src_module};
+use std::collections::{BTreeMap, BTreeSet};
 
 const RULE: u32 = 3;
 
@@ -94,6 +97,49 @@ fn removal_keys(ex: &Exceptions) -> Vec<String> {
     out
 }
 
+/// The register of the user's approvals of `skip` and `only` entries (os-removal, ER-46).
+pub const APPROVALS: &str = "docs/os-removals.toml";
+
+/// The removal keys the user approved, per contract, from the register's text; `Err` names what is wrong (an unknown key, an approval
+/// that is not the user's, a missing field), so a broken register approves nothing.
+fn approvals(text: &str) -> Result<BTreeMap<String, BTreeSet<String>>, String> {
+    let t: toml::Table = text.parse().map_err(|e| format!("not valid TOML: {e}"))?;
+    if let Some(k) = t.keys().find(|k| !["version", "approved"].contains(&k.as_str())) {
+        return Err(format!("unknown key {k:?} (version, approved)"));
+    }
+    let mut out: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    let list = t.get("approved").and_then(toml::Value::as_array).cloned().unwrap_or_default();
+    for (i, a) in list.iter().enumerate() {
+        let what = format!("approved #{}", i + 1);
+        let a = a.as_table().ok_or_else(|| format!("{what} is not a table"))?;
+        if let Some(k) = a.keys().find(|k| !["contract", "by", "date", "why", "entries"].contains(&k.as_str())) {
+            return Err(format!("{what} has an unknown key {k:?}"));
+        }
+        let text = |k: &str| {
+            a.get(k)
+                .and_then(toml::Value::as_str)
+                .filter(|v| !v.trim().is_empty())
+                .ok_or_else(|| format!("{what} has no {k}"))
+        };
+        let contract = text("contract")?;
+        let by = text("by")?;
+        text("date")?;
+        text("why")?;
+        if by != "user" {
+            return Err(format!("{what} is approved by {by:?}: taking an OS away needs the user (ER-46), `by = \"user\"`"));
+        }
+        let entries = a
+            .get("entries")
+            .and_then(toml::Value::as_array)
+            .ok_or_else(|| format!("{what} has no entries"))?;
+        let set = out.entry(contract.to_string()).or_default();
+        for e in entries {
+            set.insert(e.as_str().ok_or_else(|| format!("{what} holds an entry that is not a string"))?.to_string());
+        }
+    }
+    Ok(out)
+}
+
 /// One workspace under check.
 struct Workspace<'a> {
     root: &'a str,
@@ -104,7 +150,15 @@ struct Workspace<'a> {
 pub struct C155;
 
 impl C155 {
-    fn workspace(&self, ctx: &Ctx, w: &Workspace, ex: &Exceptions, out: &mut Vec<Finding>, probes: &mut usize) {
+    fn workspace(
+        &self,
+        ctx: &Ctx,
+        w: &Workspace,
+        ex: &Exceptions,
+        approved: &BTreeMap<String, BTreeSet<String>>,
+        out: &mut Vec<Finding>,
+        probes: &mut usize,
+    ) {
         let files = ctx.tree_files();
         let prefix = format!("{}/", w.root);
         *probes += files.iter().filter(|f| f.starts_with(&prefix) && f.ends_with(".rs")).count();
@@ -221,8 +275,10 @@ impl C155 {
                 ));
             }
         }
-        // Taking an OS away needs the user (ER-46): every `skip` and `only` entry the merge base lacks.
-        let current = removal_keys(ex);
+        // Taking an OS away needs the user (ER-46): every `skip` and `only` entry the merge base lacks and the user's register does not
+        // approve.
+        let approved = approved.get(w.contract).cloned().unwrap_or_default();
+        let current: Vec<String> = removal_keys(ex).into_iter().filter(|k| !approved.contains(k)).collect();
         if current.is_empty() || ctx.is_in_memory() || !baseline::is_work_tree(ctx.root()) {
             return;
         }
@@ -319,6 +375,25 @@ impl Check for C155 {
         let mut probes = 0;
         let files = ctx.tree_files();
         let mut declared = 0;
+        // The user's approvals; a register that cannot be read approves nothing and is a finding (fail closed).
+        let approved = match ctx.read(APPROVALS).map(|t| approvals(&t)) {
+            None => BTreeMap::new(),
+            Some(Ok(a)) => a,
+            Some(Err(why)) => {
+                findings.push(
+                    Finding::warn(
+                        "C155",
+                        RULE,
+                        APPROVALS,
+                        1,
+                        format!("[os-removal] the register of approvals cannot be used: {why}"),
+                        "Fix the register: each [[approved]] names contract, by = \"user\", date, why and entries (the keys C155 reports).",
+                    )
+                    .unwaivable(),
+                );
+                BTreeMap::new()
+            }
+        };
         for (root, contract) in os_placement::workspaces(&files) {
             let Some(text) = ctx.read(&contract) else { continue };
             let value: serde_json::Value = match serde_json::from_str(&text) {
@@ -351,6 +426,7 @@ impl Check for C155 {
                     contract: &contract,
                 },
                 &ex,
+                &approved,
                 &mut findings,
                 &mut probes,
             );

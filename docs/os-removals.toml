@@ -1,0 +1,47 @@
+# The user's approvals of `hostTests` entries that take an operating system away from code (`skip`, `only`): conformance C155's
+# os-removal compares every such entry with the contract at the merge base and counts the ones recorded here as approved (ER-46).
+# Each approval names its contract, the removal keys exactly as C155 reports them (`only <os> <name>`, `skip <package> [<module>]`),
+# `by = "user"`, the date and why. Adding an entry is the user's decision, never an agent's; an entry leaves with its exception.
+version = 1
+
+[[approved]]
+contract = "tools/paddock-dev/paddock.ci.json"
+by = "user"
+date = "2026-11-23"
+why = "the 24 only.macos-latest entries of the dev Mac's agent tools, carried over from feat/os-scoped-tests (user decision 2026-11-22: tested on macOS only, never on a Windows host); approved by the user for the repository graph on 2026-11-23"
+entries = [
+  "only macos-latest brief_check::",
+  "only macos-latest check::",
+  "only macos-latest check_allow_list::",
+  "only macos-latest check_c125::",
+  "only macos-latest check_c129::",
+  "only macos-latest check_ids::",
+  "only macos-latest ci_runs::reservation::",
+  "only macos-latest dev_tool_publish::",
+  "only macos-latest disk::measure::",
+  "only macos-latest gates::edge::",
+  "only macos-latest gates::yaml::",
+  "only macos-latest golden_cmd::",
+  "only macos-latest heavy_cmd::",
+  "only macos-latest heavy_install::",
+  "only macos-latest hook::",
+  "only macos-latest host_tests::",
+  "only macos-latest ipc_endpoints::",
+  "only macos-latest lessons_merge::",
+  "only macos-latest load::",
+  "only macos-latest plan_ci::",
+  "only macos-latest plan_cmd::",
+  "only macos-latest pre_push::",
+  "only macos-latest sparse::",
+  "only macos-latest worktree::",
+]
+
+[[approved]]
+contract = "crates/paddock.ci.json"
+by = "user"
+date = "2026-11-23"
+why = "paddock-service's pure-logic modules run on Linux only, carried over from feat/os-scoped-tests (user decision 2026-11-22); approved by the user for the repository graph on 2026-11-23"
+entries = [
+  "skip paddock-service resume_tests::",
+  "skip paddock-service scenarios::",
+]

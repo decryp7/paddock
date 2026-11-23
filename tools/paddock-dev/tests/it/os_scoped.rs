@@ -302,6 +302,51 @@ fn a_new_skip_or_only_entry_is_an_os_removal_that_needs_the_user_and_an_add_is_f
             .any(|(f, m)| f == "crates/paddock.ci.json" && m.contains("[os-removal]") && m.contains("1 `skip` or `only` entry")),
         "{findings:#?}"
     );
+    // The user's approval, recorded where the check reads it (docs/os-removals.toml): the entry is no finding any more.
+    let approve = |by: &str| {
+        std::fs::create_dir_all(root.join("docs")).unwrap();
+        std::fs::write(
+            root.join("docs/os-removals.toml"),
+            format!(
+                "version = 1\n[[approved]]\ncontract = \"crates/paddock.ci.json\"\nby = \"{by}\"\ndate = \"2026-11-23\"\nwhy = \"a control\"\nentries = [\"only macos-latest paddock-proc\"]\n"
+            ),
+        )
+        .unwrap();
+    };
+    approve("user");
+    git(root, &["add", "docs/os-removals.toml"]);
+    git(root, &["commit", "-qm", "chore: the user approves the removal"]);
+    let (findings, _) = run(root);
+    assert!(!findings.iter().any(|(_, m)| m.contains("[os-removal]")), "{findings:#?}");
+    // A new entry still needs the user: another `only` is a finding of its own.
+    edit_contract(root, "crates/paddock.ci.json", |v| {
+        v["hostTests"]["only"]
+            .as_array_mut()
+            .unwrap()
+            .push(serde_json::json!({"os": "macos-latest", "name": "paddock-env", "reason": "a second control for the unsafe direction"}));
+    });
+    git(root, &["commit", "-qam", "chore: a second only"]);
+    let (findings, _) = run(root);
+    assert!(
+        findings
+            .iter()
+            .any(|(_, m)| m.contains("[os-removal]") && m.contains("1 `skip` or `only` entry")),
+        "{findings:#?}"
+    );
+    // An approval that is not the user's approves nothing, and says so.
+    approve("coordinator");
+    git(root, &["commit", "-qam", "chore: a coordinator approval"]);
+    let (findings, _) = run(root);
+    assert!(
+        findings
+            .iter()
+            .any(|(_, m)| m.contains("[os-removal]") && m.contains("2 `skip` or `only` entries")),
+        "{findings:#?}"
+    );
+    assert!(
+        findings.iter().any(|(f, m)| f == "docs/os-removals.toml" && m.contains("user")),
+        "{findings:#?}"
+    );
 }
 
 #[test]

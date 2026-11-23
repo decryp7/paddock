@@ -160,6 +160,12 @@ name = "ci-scope-register"
 files = ["docs/ci-scope-first-runs.toml"]
 reaches = ["project:paddock-dev"]
 
+# The user's approvals of hostTests entries that take an OS away (C155 os-removal reads it; its tests are paddock-dev's).
+[[input]]
+name = "os-removals"
+files = ["docs/os-removals.toml"]
+reaches = ["project:paddock-dev"]
+
 [[input]]
 name = "design-docs"
 files = ["docs/design-guide.md", "docs/benchmarks.md", "docs/benchmarks/**"]
