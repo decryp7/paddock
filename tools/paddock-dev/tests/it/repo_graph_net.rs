@@ -436,3 +436,35 @@ mod generators {
         assert!(one.iter().all(|d| d.id != "ci-run-golden"), "{one:?}");
     }
 }
+
+/// Every register of the real tree (`docs/*.toml`) has an owner, a named input of docs/repo-graph.toml: an unowned file makes every
+/// plan that changes it answer everything (fail closed), so a new register is declared with the change that adds it (a merge of
+/// feat/shared-crate-dep-guard brought docs/shared-crate-features.toml without one). The positive control: the registers exist.
+#[test]
+fn every_register_under_docs_is_owned() {
+    use paddock_repo_graph::History;
+    let root = repo_root();
+    let history = GitHistory::new(&root, Duration::from_secs(120));
+    let graph = read_graph(&root, &history).unwrap();
+    let files: Vec<String> = history
+        .tracked_files()
+        .unwrap()
+        .into_iter()
+        .filter(|f| f.strip_prefix("docs/").is_some_and(|r| !r.contains('/') && r.ends_with(".toml")))
+        .collect();
+    assert!(files.len() >= 10, "the registers: {files:?}");
+    let req = Request {
+        files,
+        all: false,
+        explain: true,
+        root: None,
+        base: None,
+        head: "HEAD".into(),
+    };
+    let (_, reached) = paddock_dev::repo_model::reach_for(&root, &history, &req, &graph).unwrap();
+    assert!(
+        reached.unowned.is_empty(),
+        "unowned (declare them in docs/repo-graph.toml): {:?}",
+        reached.unowned
+    );
+}

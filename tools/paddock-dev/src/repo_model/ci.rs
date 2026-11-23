@@ -751,15 +751,16 @@ impl CiExtractor {
                 };
                 let mut env = env.clone();
                 env.extend(env_of(s));
-                // A variable that names the Paddock checkout itself (`[paths]` `checkout`) is the repository root.
+                // A variable that names the Paddock checkout itself (`[paths]` `checkout`) is the repository root, also when a
+                // caller's input value (`paddock: .paddock`) is what names it: checked after the inputs are put in.
                 let checkout = self.decl.paths.checkout.trim_end_matches('/');
-                for v in env.values_mut() {
-                    if !checkout.is_empty() && v.trim_matches('"').replace("${{ github.workspace }}/", "") == checkout {
-                        *v = ".".to_string();
-                    }
-                }
                 let mut inv = Invoked::default();
-                for (script, env) in input_variants(&script, &env, inputs) {
+                for (script, mut env) in input_variants(&script, &env, inputs) {
+                    for v in env.values_mut() {
+                        if !checkout.is_empty() && v.trim_matches('"').replace("${{ github.workspace }}/", "") == checkout {
+                            *v = ".".to_string();
+                        }
+                    }
                     // After the inputs are put in: a value a caller passes may spell the root too.
                     let one = invoked_env(
                         &rooted(&self.decl.paths, &script),

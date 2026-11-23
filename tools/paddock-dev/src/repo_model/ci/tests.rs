@@ -474,3 +474,22 @@ fn a_run_step_of_a_release_job_is_a_gate_not_a_release_step_and_an_action_step_s
     // Control: the bundle action itself is release.
     assert!(projects(&model, ".gitea/actions/tauri-bundle/action.yml")["app:dyno"].contains(&Reach::Release));
 }
+
+#[test]
+fn an_input_that_names_the_paddock_checkout_is_the_root_after_the_callers_value_is_put_in() {
+    // app-release.yml passes `paddock: .paddock` to the keychain action, whose step runs "$PADDOCK/conformance/bin/cli.mjs" with
+    // PADDOCK: ${{ inputs.paddock }}: the checkout folder ([paths] checkout) is the repository root, so the path resolves.
+    let action = "inputs:\n  paddock:\n    default: .\nruns:\n  using: composite\n  steps:\n    - shell: bash\n      env:\n        PADDOCK: ${{ inputs.paddock }}\n      run: node \"$PADDOCK/conformance/bin/cli.mjs\" --only C99\n";
+    let wf = "on: [push]\njobs:\n  bundle:\n    steps:\n      - uses: ./.paddock/.gitea/actions/keychain\n        with:\n          paddock: .paddock\n";
+    let m = MemoryRead::new()
+        .with(".gitea/workflows/app-release.yml", wf)
+        .with(".gitea/actions/keychain/action.yml", action)
+        .with("conformance/bin/cli.mjs", "export {};\n");
+    let model = model(&m);
+    assert!(model.unresolved().is_empty(), "{:?}", model.unresolved());
+    assert!(
+        model
+            .targets("action:keychain", EdgeKind::Runs)
+            .contains(&"script:conformance/bin/cli.mjs")
+    );
+}
