@@ -20,6 +20,8 @@
 //!
 //! [paths]                        # the folders and file names the adapters read
 //! workflows = ".gitea/workflows/"
+//! checkout = ".paddock/"         # the folder an app repository checks Paddock out to
+//! root_spellings = [["$GITHUB_WORKSPACE/", ""]]  # [from, to]: spellings of the repository root in a step, replaced in order
 //!
 //! [ci]                           # required
 //! setup_only = ["setup-rust"]    # actions that stay plumbing in a release job (adding one needs the user, ADR 0117 §14)
@@ -70,6 +72,19 @@ fn only_keys(table: &toml::Table, known: &[&str], what: &str) -> Result<(), Stri
         Some(k) => Err(format!("{what} has an unknown key {k:?} (known: {})", known.join(", "))),
         None => Ok(()),
     }
+}
+
+/// A list of `[from, to]` string pairs (absent: none).
+fn pairs(v: Option<&toml::Value>, what: &str) -> Result<Vec<(String, String)>, String> {
+    let Some(v) = v else { return Ok(Vec::new()) };
+    v.as_array()
+        .ok_or_else(|| format!("{what} is not a list"))?
+        .iter()
+        .map(|x| match x.as_array().map(|a| a.iter().map(toml::Value::as_str).collect::<Vec<_>>()).as_deref() {
+            Some([Some(from), Some(to)]) => Ok((from.to_string(), to.to_string())),
+            _ => Err(format!("{what} holds a value that is not a [from, to] pair of strings")),
+        })
+        .collect()
 }
 
 fn table<'a>(v: &'a toml::Value, what: &str) -> Result<&'a toml::Table, String> {
@@ -253,7 +268,17 @@ fn read(text: &str) -> Result<Inputs, String> {
     let p = table(t.get("paths").ok_or("the [paths] section is missing")?, "paths")?;
     only_keys(
         p,
-        &["workflows", "actions", "apps", "contract", "script_folders", "node_tests", "e2e"],
+        &[
+            "workflows",
+            "actions",
+            "apps",
+            "contract",
+            "script_folders",
+            "node_tests",
+            "e2e",
+            "checkout",
+            "root_spellings",
+        ],
         "[paths]",
     )?;
     let paths = Paths {
@@ -264,6 +289,8 @@ fn read(text: &str) -> Result<Inputs, String> {
         script_folders: strings(p.get("script_folders"), "paths.script_folders")?,
         node_tests: text_of(p, "node_tests", "[paths]")?,
         e2e: text_of(p, "e2e", "[paths]")?,
+        checkout: text_of(p, "checkout", "[paths]")?,
+        root_spellings: pairs(p.get("root_spellings"), "paths.root_spellings")?,
     };
     Ok(Inputs {
         inputs,
@@ -281,7 +308,7 @@ mod tests {
     use super::*;
 
     const HEAD: &str = "version = 1\n[[project]]\nid = \"tools\"\nfolder = \"tools\"\n[[project]]\nid = \"crates\"\nfolder = \"crates\"\n\
-        [paths]\nworkflows = \"w/\"\nactions = \"a/\"\napps = \"x/\"\ncontract = \"c.json\"\nscript_folders = [\"s/\"]\nnode_tests = \"t/\"\ne2e = \"e\"\n";
+        [paths]\nworkflows = \"w/\"\nactions = \"a/\"\napps = \"x/\"\ncontract = \"c.json\"\nscript_folders = [\"s/\"]\nnode_tests = \"t/\"\ne2e = \"e\"\ncheckout = \"k/\"\n";
 
     /// A valid file around `body`: the head, the body, and the `[prose]` and `[ci]` sections the body does not give.
     fn doc(body: &str) -> String {

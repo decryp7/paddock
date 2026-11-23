@@ -8,5 +8,14 @@
     "node scripts/demo-release.mjs workbench-demo icons",
     "node scripts/demo-release.mjs workbench-demo notes \"$RUNNER_TEMP/notes.md\""
   ],
-  "ui": []
+  "ui": [],
+  "graph": {
+    "smoke": {
+      "phases": [
+        "prepare",
+        "checks"
+      ],
+      "nextest": "package(=paddock-workbench-demo)"
+    }
+  }
 }

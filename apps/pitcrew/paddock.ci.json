@@ -18,5 +18,21 @@
     "npm run lint:report",
     "npx ng build",
     "npx ng test --watch=false --coverage"
-  ]
+  ],
+  "graph": {
+    "tests": {
+      "vitest": [
+        "app/src/**/*.spec.ts"
+      ],
+      "helpers": [
+        "app/src/testing/**"
+      ]
+    },
+    "smoke": {
+      "phases": [
+        "checks"
+      ],
+      "nextest": "package(=pitcrew-core)"
+    }
+  }
 }

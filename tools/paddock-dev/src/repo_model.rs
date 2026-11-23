@@ -301,16 +301,46 @@ pub fn reach_with(
         .flat_map(|n| n.files.iter().cloned())
         .collect();
     let spawned: std::rc::Rc<std::cell::Cell<usize>> = Default::default();
-    let code = code::CodeExtractor {
+    let decls = decl::load(root, graph, &inputs)?;
+    let code_adapter = code::CodeExtractor {
         root: root.to_path_buf(),
         cargo: graph.cargo.clone(),
         npm: graph.npm.clone(),
         scripts,
-        paths: inputs.paths.clone(),
+        tests: decls.values().map(|d| d.tests.clone()).collect(),
+        dynamic: decls.values().flat_map(|d| d.reads.clone()).collect(),
         rev: req.base.as_ref().map(|_| req.head.clone()),
         spawned: spawned.clone(),
     };
-    let mut second: Vec<Box<dyn paddock_repo_graph::model::extract::Extractor + '_>> = vec![Box::new(code)];
+    // A changed file the head no longer has: the reads of the base tree name its readers (review P1-3). Its tree and texts come
+    // from a reader at the base; a failed read fails closed below.
+    let tracked: BTreeSet<&String> = files.iter().collect();
+    let deleted: BTreeSet<String> = changed.iter().filter(|f| !tracked.contains(f)).cloned().collect();
+    let base_reads = match (&req.base, deleted.is_empty()) {
+        (Some(base), false) => {
+            let base_bulk = GitBulk::new(root, Some(base));
+            base_bulk
+                .tracked_at(base)
+                .map_err(|e| ExtractError {
+                    extractor: "code",
+                    file: format!("the tree of {base}"),
+                    reason: e,
+                })
+                .and_then(|base_files| {
+                    let base_files: BTreeSet<String> = base_files.into_iter().collect();
+                    code_adapter.base_reads(base, &base_files, &base_bulk, &deleted)
+                })
+        }
+        _ => Ok(Default::default()),
+    };
+    let base_reads = match base_reads {
+        Ok(x) => x,
+        Err(e) => {
+            errors.push(e);
+            Default::default()
+        }
+    };
+    let mut second: Vec<Box<dyn paddock_repo_graph::model::extract::Extractor + '_>> = vec![Box::new(code_adapter)];
     if !graph.metadata.is_empty() {
         second.insert(
             0,
@@ -326,6 +356,17 @@ pub fn reach_with(
     }
     for e in more.model.edges() {
         model.add_edge(e.clone());
+    }
+    for u in more.model.unresolved() {
+        model.add_unresolved(u.clone());
+    }
+    for n in base_reads.nodes {
+        if model.node(&n.id).is_none() {
+            model.add_node(n);
+        }
+    }
+    for e in base_reads.edges {
+        model.add_edge(e);
     }
     errors.extend(more.errors);
     let mut seeds: Vec<(String, String, String)> = Vec::new();
@@ -384,27 +425,16 @@ pub fn reach_with(
         for (id, _) in &projects {
             reached.nodes.insert(
                 id.clone(),
-                paddock_repo_graph::model::NodeReach {
-                    reach: Reach::Code,
-                    rust: true,
-                    ui: true,
-                    why: vec![format!("fail closed: {why}")],
-                },
+                paddock_repo_graph::model::NodeReach::full(&format!("fail closed: {why}")),
             );
         }
     }
     if req.all {
         reached.everything = true;
         for (id, _) in &projects {
-            reached.nodes.insert(
-                id.clone(),
-                paddock_repo_graph::model::NodeReach {
-                    reach: Reach::Code,
-                    rust: true,
-                    ui: true,
-                    why: vec!["everything (no base)".to_string()],
-                },
-            );
+            reached
+                .nodes
+                .insert(id.clone(), paddock_repo_graph::model::NodeReach::full("everything (no base)"));
         }
     }
     let spawns = Spawns {
@@ -479,24 +509,18 @@ fn new_runs(reached: &Reached) -> BTreeMap<String, String> {
             (id.clone(), h.to_string())
         })
         .collect();
+    // A project reached only through its contract phases runs those phases (difference 4 of §8).
+    for (id, phases) in &reached.phases {
+        out.entry(id.clone())
+            .or_insert_with(|| format!("phases:{}", phases.iter().cloned().collect::<Vec<_>>().join(",")));
+    }
     out.insert("conformance".to_string(), "all".to_string());
     out
 }
 
-/// The projects whose contract declares a smoke set (`smoke` in `apps/<app>/paddock.ci.json`, ADR 0117 §3): only they may run
-/// less than full on a plumbing reach.
-pub fn smoke_declared(graph: &RepoGraph) -> BTreeSet<String> {
-    graph
-        .configs
-        .iter()
-        .filter(|(_, c)| c.get("smoke").is_some())
-        .map(|(a, _)| format!("app:{a}"))
-        .collect()
-}
-
 /// `--compare`: the projects where the model and the rule tables differ, each with both answers and both reasons. `dropped` lists
 /// the projects the model runs less of (ADR 0117 §8: a narrowing names what it no longer runs).
-pub fn compare(plan: &Value, reached: &Reached, graph: &RepoGraph, inputs: &Inputs) -> Value {
+pub fn compare(plan: &Value, reached: &Reached, graph: &RepoGraph, inputs: &Inputs, smoke: &BTreeSet<String>) -> Value {
     let old = old_runs(plan, inputs, graph);
     let new = new_runs(reached);
     let mut differences = Vec::new();
@@ -510,6 +534,7 @@ pub fn compare(plan: &Value, reached: &Reached, graph: &RepoGraph, inputs: &Inpu
         let narrower = match (o.map(String::as_str), n.map(String::as_str)) {
             (Some(_), None) => true,
             (Some(_), Some("smoke" | "tests" | "release")) => true,
+            (Some(_), Some(h)) if h.starts_with("phases:") => true,
             (Some("all"), Some(h)) => h != "all",
             _ => false,
         };
@@ -534,6 +559,7 @@ pub fn compare(plan: &Value, reached: &Reached, graph: &RepoGraph, inputs: &Inpu
     out.insert("dropped".into(), Value::Array(dropped));
     out.insert("unowned".into(), json!(reached.unowned));
     out.insert("notBuilt".into(), json!(reached.not_built));
+    out.insert("unresolvedRefs".into(), json!(reached.unresolved_refs));
     let model: Map<String, Value> = reached
         .nodes
         .iter()
@@ -545,27 +571,60 @@ pub fn compare(plan: &Value, reached: &Reached, graph: &RepoGraph, inputs: &Inpu
         })
         .collect();
     out.insert("model".into(), Value::Object(model));
-    let sel: Map<String, Value> = paddock_repo_graph::model::selection(reached, &smoke_declared(graph))
+    let sel: Map<String, Value> = paddock_repo_graph::model::selection(reached, smoke)
         .into_iter()
         .map(|(id, s)| {
-            let v = match s {
-                paddock_repo_graph::model::Selection::Full => json!("full"),
-                paddock_repo_graph::model::Selection::Smoke => json!("smoke"),
-                paddock_repo_graph::model::Selection::Installers => json!("installers"),
-                paddock_repo_graph::model::Selection::Skip => json!("skip"),
-                paddock_repo_graph::model::Selection::Affected(t) => {
-                    json!({"affected": t, "files": reached.test_files.get(&id).cloned().unwrap_or_default()})
+            let mut v = Map::new();
+            if s.skip() {
+                v.insert("skip".into(), json!(true));
+            }
+            if s.full {
+                v.insert("full".into(), json!(true));
+                // G11: the reached packages of a workspace, unless something other than their own files reached the project.
+                let packages: Vec<&str> = reached
+                    .crates
+                    .iter()
+                    .filter(|c| crate::repo_model::project_dir_of(inputs, graph, &id).is_some_and(|d| c.starts_with(&format!("{d}/")) || **c == d))
+                    .filter_map(|c| graph.cargo.get(c).map(|n| n.name.as_str()))
+                    .collect();
+                if !reached.whole.contains(&id) && !reached.everything && !packages.is_empty() {
+                    v.insert("packages".into(), json!(packages));
                 }
-            };
-            (id, v)
+            }
+            if s.smoke {
+                v.insert("smoke".into(), json!(true));
+            }
+            if !s.affected.is_empty() {
+                v.insert("affected".into(), json!(s.affected));
+                v.insert("files".into(), json!(reached.test_files.get(&id).cloned().unwrap_or_default()));
+            }
+            if s.installers {
+                v.insert("installers".into(), json!(true));
+            }
+            if !s.phases.is_empty() {
+                v.insert("phases".into(), json!(s.phases));
+            }
+            (id, Value::Object(v))
         })
         .collect();
     out.insert("selection".into(), Value::Object(sel));
     Value::Object(out)
 }
 
+/// The folder of a project id (`app:dyno` is `apps/dyno`, a root project its own folder).
+pub fn project_dir_of(inputs: &Inputs, graph: &RepoGraph, id: &str) -> Option<String> {
+    projects(inputs, graph)
+        .into_iter()
+        .find(|(p, _)| p == id)
+        .map(|(_, d)| d)
+        .filter(|d| !d.is_empty())
+}
+
 pub mod ci;
 pub mod code;
+pub mod decl;
+pub mod reads;
+pub mod ts;
 
 #[cfg(test)]
 mod tests;

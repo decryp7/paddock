@@ -22,6 +22,7 @@ pub use content::detect;
 pub use content::{DetectOf, Detected};
 use inputs::{Inputs, Owner, Target};
 use narrow::Narrowing;
+pub use nodes::Unresolved;
 use std::collections::{BTreeMap, BTreeSet};
 
 /// A changed file's text before and after the change (`None`: the file does not exist there).
@@ -112,6 +113,8 @@ impl std::fmt::Debug for Facts<'_> {
 pub struct NodeReach {
     /// The strongest kind.
     pub reach: Reach,
+    /// Every kind that arrived (review P1-1: the selection is their union, not the strongest alone).
+    pub kinds: BTreeSet<Reach>,
     /// Its Rust half is reached.
     pub rust: bool,
     /// Its UI half is reached.
@@ -137,19 +140,46 @@ pub struct Reached {
     pub unowned_kind: BTreeMap<String, Detected>,
     /// Per project, the test targets the change reached (a `test` reach selects these, ADR 0117 §5).
     pub targets: BTreeMap<String, BTreeSet<String>>,
-    /// Per project, the changed test files (a spec runner is given these: Vitest `--include`, Playwright file arguments).
+    /// Per project, the changed test files (a spec runner is given these: Vitest `--include`, Playwright file arguments), and the
+    /// specs a changed helper reaches through `imports`.
     pub test_files: BTreeMap<String, BTreeSet<String>>,
+    /// The Cargo crates (folders) the change reaches: their own files, their Cargo dependents and readers (G11: a run names
+    /// these packages).
+    pub crates: BTreeSet<String>,
+    /// Projects reached in full by something other than their crates' own files (an input, a project file outside every crate, an
+    /// unowned file): their whole workspace runs, never a package list (G11).
+    pub whole: BTreeSet<String>,
+    /// The model's unresolved references, one line each: every plan runs their referrers' projects in full.
+    pub unresolved_refs: Vec<String>,
+    /// Per project, the contract phases a change reaches through their command lines (a shared script a phase runs, such as the
+    /// conformance CLI of an app's `checks`): those phases run, not the project's suite (ADR 0117 §6, difference 4 of §8).
+    pub phases: BTreeMap<String, BTreeSet<String>>,
+}
+
+impl NodeReach {
+    /// A project reached in full for `why` (the plan answers everything, or an extractor failed).
+    pub fn full(why: &str) -> NodeReach {
+        NodeReach {
+            reach: Reach::Code,
+            kinds: BTreeSet::from([Reach::Code]),
+            rust: true,
+            ui: true,
+            why: vec![why.to_string()],
+        }
+    }
 }
 
 impl Reached {
     fn mark(&mut self, id: &str, reach: Reach, rust: bool, ui: bool, why: String) {
         let n = self.nodes.entry(id.to_string()).or_insert(NodeReach {
             reach,
+            kinds: BTreeSet::new(),
             rust: false,
             ui: false,
             why: Vec::new(),
         });
         n.reach = n.reach.max(reach);
+        n.kinds.insert(reach);
         n.rust |= rust;
         n.ui |= ui;
         if !n.why.contains(&why) {
@@ -227,24 +257,33 @@ pub fn reach(changed: &[String], facts: &Facts, inputs: &Inputs, text: TextOf) -
     let mut model_seeds: Vec<(String, String)> = Vec::new();
     for f in changed {
         let named = inputs.inputs_of(f);
+        // A file a model node owns outside every project folder: its node reaches what it reaches, and additive inputs add to it.
+        let mut model_owned = false;
         // A file a model node owns (a workflow, an action, a script) is reached through the model; outside every project folder
         // and every input, that is all it is.
         // Prose outside every project folder is the doc owner's even inside an action folder (G7).
-        let doc_prose = inputs.is_prose(f) && project_of(facts, f).is_none();
+        // A read file (a `reads` edge names it) is code for its reader even when it is prose (§2).
+        let read = facts.model.and_then(|m| m.owner_of(f)).is_some_and(|n| {
+            facts
+                .model
+                .is_some_and(|m| !m.sources(&n.id, nodes::EdgeKind::Reads).is_empty())
+        });
+        let doc_prose = inputs.is_prose(f) && project_of(facts, f).is_none() && !read;
         if let Some(m) = facts.model.filter(|_| !doc_prose) {
             let narrowed: Vec<&(String, String, String)> = facts
                 .seeds
                 .iter()
                 .filter(|(file, _, _)| file == f)
                 .collect();
-            let owner = m.owner_of(f);
+            // Every node that owns the file (a test file and the data node a crate reads it through, P1-3) is a seed.
+            let owners = m.owners_of(f);
             // A test file in a project folder is test for its project: its targets, not the project's dependents (G12).
             if narrowed.is_empty()
                 && named.iter().all(|i| i.adds)
-                && let Some(n) = owner.filter(|n| n.kind == nodes::NodeKind::TestFile)
+                && owners.iter().any(|n| n.kind == nodes::NodeKind::TestFile)
                 && let Some(p) = project_of(facts, f)
             {
-                model_seeds.push((n.id.clone(), f.clone()));
+                model_seeds.extend(owners.iter().map(|n| (n.id.clone(), f.clone())));
                 let (rust, ui) = halves(facts, f);
                 out.mark(p, Reach::Test, rust, ui, f.clone());
                 out.test_files
@@ -261,9 +300,8 @@ pub fn reach(changed: &[String], facts: &Facts, inputs: &Inputs, text: TextOf) -
                 continue;
             }
             let owned = if narrowed.is_empty() {
-                owner
-                    .map(|n| model_seeds.push((n.id.clone(), f.clone())))
-                    .is_some()
+                model_seeds.extend(owners.iter().map(|n| (n.id.clone(), f.clone())));
+                !owners.is_empty()
             } else {
                 narrowed
                     .iter()
@@ -273,6 +311,7 @@ pub fn reach(changed: &[String], facts: &Facts, inputs: &Inputs, text: TextOf) -
             if owned && named.is_empty() && project_of(facts, f).is_none() {
                 continue;
             }
+            model_owned = owned;
         }
         let mut fail_closed: Vec<String> = Vec::new();
         for i in &named {
@@ -335,14 +374,26 @@ pub fn reach(changed: &[String], facts: &Facts, inputs: &Inputs, text: TextOf) -
                     Target::All => {
                         for (id, _) in facts.projects {
                             out.mark(id, i.reach, true, true, why.clone());
+                            out.whole.insert(id.clone());
                         }
                     }
-                    Target::Cargo => cargo_projects
-                        .iter()
-                        .for_each(|p| out.mark(p, i.reach, true, false, why.clone())),
-                    Target::Npm => npm_projects
-                        .iter()
-                        .for_each(|p| out.mark(p, i.reach, false, true, why.clone())),
+                    Target::AppSegment(n) => {
+                        let id = f.split('/').nth(*n).map(|seg| format!("app:{seg}"));
+                        if let Some(id) =
+                            id.filter(|id| facts.projects.iter().any(|(p, _)| p == id))
+                        {
+                            out.mark(&id, i.reach, true, true, why.clone());
+                            out.whole.insert(id);
+                        }
+                    }
+                    Target::Cargo => cargo_projects.iter().for_each(|p| {
+                        out.mark(p, i.reach, true, false, why.clone());
+                        out.whole.insert(p.to_string());
+                    }),
+                    Target::Npm => npm_projects.iter().for_each(|p| {
+                        out.mark(p, i.reach, false, true, why.clone());
+                        out.whole.insert(p.to_string());
+                    }),
                     Target::Apps => {
                         for (id, _) in facts
                             .projects
@@ -350,9 +401,13 @@ pub fn reach(changed: &[String], facts: &Facts, inputs: &Inputs, text: TextOf) -
                             .filter(|(id, _)| id.starts_with("app:"))
                         {
                             out.mark(id, i.reach, true, true, why.clone());
+                            out.whole.insert(id.clone());
                         }
                     }
-                    Target::Project(p) => out.mark(p, i.reach, true, true, why.clone()),
+                    Target::Project(p) => {
+                        out.mark(p, i.reach, true, true, why.clone());
+                        out.whole.insert(p.clone());
+                    }
                     Target::Owner => match project_of(facts, f) {
                         Some(p) => {
                             out.mark(p, i.reach, true, true, why.clone());
@@ -373,9 +428,10 @@ pub fn reach(changed: &[String], facts: &Facts, inputs: &Inputs, text: TextOf) -
         for why in fail_closed {
             for (id, _) in facts.projects {
                 out.mark(id, Reach::Code, true, true, why.clone());
+                out.whole.insert(id.clone());
             }
         }
-        if named.iter().any(|i| !i.adds) {
+        if named.iter().any(|i| !i.adds) || (model_owned && project_of(facts, f).is_none()) {
             continue;
         }
         // A project folder comes before the owner rules (§2): its prose (README, CHANGELOG, LICENSE, its docs/) is docs for the
@@ -394,6 +450,7 @@ pub fn reach(changed: &[String], facts: &Facts, inputs: &Inputs, text: TextOf) -
                 // A file of a Cargo workspace's own folder outside every member and every npm package (its Cargo.toml, its
                 // .config/) reaches every member.
                 None if facts.npm.node_of(f).is_none() => {
+                    out.whole.insert(p.to_string());
                     for (d, x) in facts.cargo.iter() {
                         let ws = x.workspace.as_str();
                         if !ws.is_empty() && f.strip_prefix(ws).is_some_and(|r| r.starts_with('/'))
@@ -414,68 +471,52 @@ pub fn reach(changed: &[String], facts: &Facts, inputs: &Inputs, text: TextOf) -
             Some(Owner::Doc) if inputs.is_prose(f) || doc_asset(facts, inputs, f) => {
                 out.mark("docs", Reach::Docs, false, false, f.clone())
             }
-            Some(Owner::Project(p)) => out.mark(p, Reach::Code, true, true, f.clone()),
+            Some(Owner::Project(p)) => {
+                out.mark(p, Reach::Code, true, true, f.clone());
+                out.whole.insert(p.clone());
+            }
             // Data under a doc owner that no input names, or a path nothing claims.
             Some(Owner::Doc) | None => out.unowned.push(f.clone()),
         }
     }
     if let Some(m) = facts.model {
         for (id, hit) in m.reach_from(&model_seeds) {
-            let node = m.node(&id);
-            // A reached test target: its project selects it (and is marked with the kind that arrived).
-            if let Some(n) = node.filter(|n| n.kind == nodes::NodeKind::TestTarget)
-                && let Some(p) = n.home.as_deref().and_then(|h| project_of(facts, h))
-            {
-                out.targets
-                    .entry(p.to_string())
-                    .or_default()
-                    .insert(id.clone());
-                let (rust, ui) = halves(facts, n.home.as_deref().unwrap_or_default());
-                out.mark(
-                    p,
-                    hit.reach,
-                    rust,
-                    ui,
-                    format!("{id} ({})", hit.why.join("; ")),
-                );
-                continue;
+            for &kind in &hit.kinds {
+                mark_hit(&mut out, &mut crates, facts, m, &id, kind, &hit.why);
             }
-            // A crate reached over a `reads` edge (it reads another crate's data at build or test time) is code for its project.
-            if let Some(dir) = id.strip_prefix("crate:")
-                && hit.reach == Reach::Code
-                && hit.why.iter().any(|w| w.starts_with("reads "))
-                && let Some(p) = project_of(facts, dir)
-            {
-                out.mark(
-                    p,
-                    Reach::Code,
-                    true,
-                    false,
-                    format!("{id} reads it ({})", hit.why.join("; ")),
-                );
-                crates.insert(dir.to_string());
-                continue;
-            }
-            // An action or script changed itself is plumbing for the projects it runs (its own code is its own); a job or step
-            // passes on the kind that reached it.
-            let own = m.node(&id).is_some_and(|n| {
-                matches!(n.kind, nodes::NodeKind::Action | nodes::NodeKind::Script)
-            });
-            let r = if own && hit.reach == Reach::Code {
-                Reach::Plumbing
-            } else {
-                hit.reach
-            };
-            for p in m.targets(&id, nodes::EdgeKind::Runs) {
-                if facts.projects.iter().any(|(pid, _)| pid == p) || p == "c99" {
-                    out.mark(
-                        p,
-                        r,
-                        true,
-                        true,
-                        format!("{id} runs it ({})", hit.why.join("; ")),
-                    );
+        }
+        // An unresolved reference (an import, a read, a script path no extractor could resolve) leaves the referrer's edges
+        // incomplete, so its projects run in full in every plan: one rule for every extractor (ADR 0117 §4, §14).
+        let unresolved: Vec<(String, Option<String>, String)> = m
+            .unresolved()
+            .iter()
+            .map(|u| {
+                (
+                    u.referrer.clone(),
+                    u.node.clone(),
+                    format!("unresolved {} in {} ({})", u.reference, u.referrer, u.why),
+                )
+            })
+            .collect();
+        out.unresolved_refs = unresolved.iter().map(|(_, _, why)| why.clone()).collect();
+        for (file, held_by, why) in &unresolved {
+            if let Some(p) = project_of(facts, file) {
+                out.mark(p, Reach::Code, true, true, why.clone());
+                out.whole.insert(p.to_string());
+                if let Some(c) = facts.cargo.node_of(file) {
+                    crates.insert(c.to_string());
                 }
+            }
+            let mut seeds: Vec<(String, String)> = m
+                .owners_of(file)
+                .into_iter()
+                .map(|n| (n.id.clone(), why.clone()))
+                .collect();
+            seeds.extend(held_by.iter().map(|n| (n.clone(), why.clone())));
+            for (id, hit) in m.reach_from(&seeds) {
+                let mut reasons = hit.why.clone();
+                reasons.push(why.clone());
+                mark_hit(&mut out, &mut crates, facts, m, &id, Reach::Code, &reasons);
             }
         }
     }
@@ -502,6 +543,7 @@ pub fn reach(changed: &[String], facts: &Facts, inputs: &Inputs, text: TextOf) -
         );
         for (id, _) in facts.projects {
             out.mark(id, Reach::Code, true, true, why.clone());
+            out.whole.insert(id.clone());
         }
     }
     for d in facts.cargo.dependents(&crates).difference(&crates) {
@@ -509,6 +551,12 @@ pub fn reach(changed: &[String], facts: &Facts, inputs: &Inputs, text: TextOf) -
             out.mark(p, Reach::Code, true, false, format!("cargo {d}"));
         }
     }
+    out.crates = facts
+        .cargo
+        .dependents(&crates)
+        .union(&crates)
+        .cloned()
+        .collect();
     // A package nested in another package's folder is part of what the outer one builds (ui builds ui/dist from ui/projects).
     let nested: Vec<String> = packages
         .iter()
@@ -529,44 +577,173 @@ pub fn reach(changed: &[String], facts: &Facts, inputs: &Inputs, text: TextOf) -
     out
 }
 
-/// What a project runs (ADR 0117 §5 `selection`).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Selection {
+/// Marks what one reached model node selects, for one kind that arrived at it (ADR 0117 §5).
+fn mark_hit(
+    out: &mut Reached,
+    crates: &mut BTreeSet<String>,
+    facts: &Facts,
+    m: &nodes::Model,
+    id: &str,
+    kind: Reach,
+    why: &[String],
+) {
+    let node = m.node(id);
+    let why = why.join("; ");
+    // A contract phase (a step node whose home is its project's folder): the phase runs, whatever kind arrived, unless the project
+    // runs in full for another reason.
+    if let Some(n) = node.filter(|n| n.kind == nodes::NodeKind::Step)
+        && let Some((_, phase)) = id.split_once("paddock.ci.json#")
+        && let Some(p) = n.home.as_deref().and_then(|h| project_of(facts, h))
+    {
+        out.phases
+            .entry(p.to_string())
+            .or_default()
+            .insert(phase.to_string());
+        out.mark(
+            p,
+            Reach::Docs,
+            false,
+            false,
+            format!("{id} runs it ({why})"),
+        );
+        return;
+    }
+    // A spec reached through a helper or spec it imports: its runner is given the spec.
+    if let Some(n) = node.filter(|n| n.kind == nodes::NodeKind::TestFile && kind == Reach::Test)
+        && !m.sources(id, nodes::EdgeKind::Tests).is_empty()
+        && let Some(p) = n.files.first().and_then(|f| project_of(facts, f))
+    {
+        for f in &n.files {
+            out.test_files
+                .entry(p.to_string())
+                .or_default()
+                .insert(f.clone());
+        }
+    }
+    // A reached test target: its project selects it (and is marked with the kind that arrived).
+    if let Some(n) = node.filter(|n| n.kind == nodes::NodeKind::TestTarget)
+        && let Some(p) = n.home.as_deref().and_then(|h| project_of(facts, h))
+    {
+        if kind == Reach::Test {
+            out.targets
+                .entry(p.to_string())
+                .or_default()
+                .insert(id.to_string());
+        }
+        let (rust, ui) = halves(facts, n.home.as_deref().unwrap_or_default());
+        out.mark(p, kind, rust, ui, format!("{id} ({why})"));
+        return;
+    }
+    // A crate reached over a `reads` edge (it reads data at build or test time) is code for its project.
+    if let Some(dir) = id.strip_prefix("crate:")
+        && kind >= Reach::Test
+        && why.contains("reads ")
+        && let Some(p) = project_of(facts, dir)
+    {
+        out.mark(
+            p,
+            Reach::Code,
+            true,
+            false,
+            format!("{id} reads it ({why})"),
+        );
+        crates.insert(dir.to_string());
+        return;
+    }
+    // A setup-only action changed itself is plumbing for the projects it runs; any other action or script is its users' code (the
+    // coordinator's decision of 2026-11-23: only declared setup-only actions are plumbing). A job or step passes on its kind.
+    let setup = node.is_some_and(|n| {
+        n.setup_only && matches!(n.kind, nodes::NodeKind::Action | nodes::NodeKind::Script)
+    });
+    let r = if setup && kind == Reach::Code {
+        Reach::Plumbing
+    } else {
+        kind
+    };
+    for p in m.targets(id, nodes::EdgeKind::Runs) {
+        if facts.projects.iter().any(|(pid, _)| pid == p) || p == "c99" {
+            if r >= Reach::Release {
+                out.whole.insert(p.to_string());
+            }
+            out.mark(p, r, true, true, format!("{id} runs it ({why})"));
+        }
+    }
+}
+
+/// What a project runs (ADR 0117 §5 `selection`): the union of what every kind that reached it asks (review P1-1). `full` absorbs
+/// `smoke` and `affected`; `installers` stands beside either (rule 54: a release change builds them, a code change runs the suite).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Selection {
     /// Its whole suite.
-    Full,
+    pub full: bool,
     /// Its declared smoke set.
-    Smoke,
+    pub smoke: bool,
     /// Only these test targets.
-    Affected(BTreeSet<String>),
-    /// Its installers (rule 54).
-    Installers,
+    pub affected: BTreeSet<String>,
+    /// Its installers.
+    pub installers: bool,
+    /// Only these contract phases (their command lines run a changed shared script).
+    pub phases: BTreeSet<String>,
+}
+
+impl Selection {
     /// Nothing beyond the docs checks.
-    Skip,
+    pub fn skip(&self) -> bool {
+        !self.full
+            && !self.smoke
+            && self.affected.is_empty()
+            && !self.installers
+            && self.phases.is_empty()
+    }
 }
 
 /// What each reached project runs: `code` its whole suite, `test` the reached test targets, `plumbing` its declared smoke set,
-/// `release` an app's installers, `docs` nothing. Never less than declared (§5): a `plumbing` reach of a project with no smoke set
-/// in `smoke`, or a `test` reach with no target the model can name, runs the whole suite; a plan that answers everything runs
-/// every project in full.
+/// `release` an app's installers, `docs` nothing, and the union of these over every kind that reached it. Never less than declared
+/// (§5): a `plumbing` reach of a project with no smoke set in `smoke`, a `test` reach with no target the model can name, or a
+/// `release` reach of a project that is not an app runs the whole suite; a plan that answers everything runs every project in full.
 pub fn selection(reached: &Reached, smoke: &BTreeSet<String>) -> BTreeMap<String, Selection> {
     reached
         .nodes
         .iter()
         .map(|(id, n)| {
-            let s = match n.reach {
-                _ if id == "docs" => Selection::Skip,
-                Reach::Docs => Selection::Skip,
-                _ if reached.everything => Selection::Full,
-                Reach::Code => Selection::Full,
-                Reach::Release if id.starts_with("app:") => Selection::Installers,
-                Reach::Release => Selection::Full,
-                Reach::Plumbing if smoke.contains(id) => Selection::Smoke,
-                Reach::Plumbing => Selection::Full,
-                Reach::Test => match reached.targets.get(id) {
-                    Some(t) if !t.is_empty() => Selection::Affected(t.clone()),
-                    _ => Selection::Full,
-                },
-            };
+            let mut s = Selection::default();
+            if id != "docs" {
+                for k in &n.kinds {
+                    match k {
+                        Reach::Docs => {}
+                        _ if reached.everything => s.full = true,
+                        Reach::Code => s.full = true,
+                        // Rule 54 builds the installers, and the app's own gates still run: its smoke set, or its suite
+                        // without one (never less than declared, §5; the WP-5 replay's 39 release-installers-only cases).
+                        Reach::Release if id.starts_with("app:") => {
+                            s.installers = true;
+                            if smoke.contains(id) {
+                                s.smoke = true;
+                            } else {
+                                s.full = true;
+                            }
+                        }
+                        Reach::Release => s.full = true,
+                        Reach::Plumbing if smoke.contains(id) => s.smoke = true,
+                        Reach::Plumbing => s.full = true,
+                        Reach::Test => match reached.targets.get(id) {
+                            Some(t) if !t.is_empty() => s.affected.extend(t.iter().cloned()),
+                            _ => s.full = true,
+                        },
+                    }
+                }
+            }
+            if let Some(p) = reached.phases.get(id) {
+                s.phases = p.clone();
+            }
+            if reached.everything {
+                s.full = true;
+            }
+            if s.full {
+                s.smoke = false;
+                s.affected.clear();
+                s.phases.clear();
+            }
             (id.clone(), s)
         })
         .collect()
@@ -574,3 +751,7 @@ pub fn selection(reached: &Reached, smoke: &BTreeSet<String>) -> BTreeMap<String
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+#[path = "union/tests.rs"]
+mod tests_union;

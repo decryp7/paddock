@@ -1,24 +1,35 @@
 //! The code adapter of the repository model (ADR 0117 §4, WP-3): `reads` edges from Rust sources, `imports` edges between JS/TS
 //! scripts, and the spec runners' test targets and test files.
 //!
-//! - **reads**: a Rust file that names a path with `include_str!`/`include_bytes!` (relative to the file), or with
-//!   `CARGO_MANIFEST_DIR` (`concat!(env!("CARGO_MANIFEST_DIR"), "/tests/x")`, `Path::new(env!(..)).join("tests/x")`, relative to its
-//!   crate), reads that file or folder. When the path lies in another crate, the reader's crate gets a `reads` edge to that crate,
-//!   so a change there selects the reader (ADR 0117 §4; `debrief-plugins` reading `debrief-plugin-windows` fixtures). The candidate
-//!   files come from one `git grep -l` (one spawn); only they are read. A text scan, the fallback §10 names, not `syn`.
-//! - **imports**: a script node (from the CI adapter) written in JS imports other files by relative specifiers; each imported file
+//! - **reads**: a Rust file reads a file or folder through `include_str!`/`include_bytes!`/`include!`, a module's `#[path]`, a
+//!   `CARGO_MANIFEST_DIR` join, `concat!` or `format!`, or a build script's `rerun-if-changed` (`super::reads`, `syn`;
+//!   a source `syn` cannot parse falls back to [`read_paths`], the text scan §10 names, and the fallback is counted). A path in
+//!   another crate gives the reader's crate a `reads` edge to that crate; a path outside every crate (a `docs/` register, a
+//!   template, an app's changelog, a .NET fixture project, another crate's test helper) becomes a data node owning exactly that file
+//!   or folder with a `reads` edge from the reader, so a change there selects the reader as code and the file's own owner keeps its
+//!   reach (review P1-3). A required read (`include*!`, `#[path]`) of an untracked path is an unresolved reference. The candidate
+//!   files come from one `git grep -l` (one spawn); only they are read. [`CodeExtractor::base_reads`] reads the base tree too when
+//!   the change deleted a file, so a deleted read target still reaches its reader.
+//! - **imports**: `oxc_parser` and `oxc_resolver` over the tracked files only (`super::ts`; no `node_modules`, so
+//!   local and CI give the same graph). A script node (from the CI adapter) written in JS imports other files; each imported file
 //!   becomes a script node with an `imports` edge, transitively, so `conformance/src/*.mjs` reaches the CLI a contract's check line
-//!   runs (difference 4 of §8). The scanner is `paddock_repo_graph::imports` (relative specifiers; no `node_modules`).
-//! - **spec targets**: `*.spec.ts`, `*.test.ts`, `*.spec.mjs` and `*.test.mjs` in an npm package are test files of that package's
-//!   Vitest target, or of its Playwright target under an `e2e/` folder; `conformance/test/*.test.mjs` of the conformance node
-//!   tests. A helper a spec imports stays code (a helper no spec proves narrows nothing, D6).
+//!   runs (difference 4 of §8); a workspace package imported by name is an `imports` edge to that package's node. A relative
+//!   import that resolves to no tracked file, a computed `import()`, or a file the parser cannot read is an unresolved reference
+//!   of its file (`Extracted::unresolved`): the plan runs the referrer's projects in full (ADR 0117 §4, the structural rule).
+//! - **test files**: a project contract declares its test files per runner and its helper globs (`graph.tests` in
+//!   `paddock.ci.json`, ADR 0117 §3); the runner comes from that declaration, never from the path (review P1-2), and an undeclared
+//!   file is no test file. A spec another spec imports, and a declared helper a spec imports (transitively, through other helpers),
+//!   get an `imports` edge from each importer, so their change selects the specs that import them. A helper no spec imports stays code (D6: cannot prove), and so does every helper of a
+//!   project with an unresolved import in its specs or helpers (the project runs in full on a test reach).
 
+use super::reads::{Parsed, rust_reads};
+use super::ts::{self, Target};
 use paddock_repo_graph::Graph;
-use paddock_repo_graph::imports::{relative_specifiers, resolve};
+use paddock_repo_graph::model::Unresolved;
 use paddock_repo_graph::model::extract::{BulkRead, ExtractError, Extracted, Extractor, texts_of};
-use paddock_repo_graph::model::inputs::Paths;
+use paddock_repo_graph::model::glob;
 use paddock_repo_graph::model::nodes::{Edge, EdgeKind, ModelNode, NodeKind};
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
@@ -32,18 +43,40 @@ pub struct CodeExtractor {
     pub npm: Graph,
     /// The scripts the CI adapter found (their imports are followed).
     pub scripts: BTreeSet<String>,
-    /// The declared folders (`docs/repo-graph.toml` `[paths]`).
-    pub paths: Paths,
+    /// The projects' declared test files and helpers (`graph.tests` of each contract).
+    pub tests: Vec<TestDecl>,
+    /// Declared runtime reads (`graph.reads`): a file to the globs of what its computed `import()` loads.
+    pub dynamic: BTreeMap<String, Vec<String>>,
     /// The revision the one `git grep` reads (`None`: the working tree, files mode), the revision every text is read at.
     pub rev: Option<String>,
     /// How many processes it started (the spawn-budget test reads it).
     pub spawned: std::rc::Rc<Cell<usize>>,
 }
 
-const JS: [&str; 5] = [".mjs", ".cjs", ".js", ".ts", ".mts"];
+/// One project's declared test files (`graph.tests` in its `paddock.ci.json`), globs over repository paths.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TestDecl {
+    /// The project id (`app:dyno`, `conformance`).
+    pub project: String,
+    /// The project folder.
+    pub dir: String,
+    /// Runner (`vitest`, `playwright`, `node-test`) to the globs of its test files.
+    pub runners: BTreeMap<String, Vec<String>>,
+    /// Helper globs: a matching file that a test file imports is test code.
+    pub helpers: Vec<String>,
+}
 
-fn is_spec(f: &str) -> bool {
-    [".spec.ts", ".test.ts", ".spec.mjs", ".test.mjs"].iter().any(|e| f.ends_with(e)) && !f.contains("/node_modules/")
+/// What [`CodeExtractor`] measured beside its edges (the fallback counts of §10).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CodeStats {
+    /// Rust sources read for `reads`.
+    pub rust_sources: usize,
+    /// Of them, sources `syn` could not parse (the text scan answered).
+    pub syn_fallbacks: usize,
+    /// JS/TS files parsed for imports.
+    pub parsed: usize,
+    /// Projects whose helpers stay code because an import of their tests did not resolve.
+    pub unprovable: BTreeSet<String>,
 }
 
 /// The string literals of a line (`"..."`, no escapes beyond `\"`).
@@ -151,9 +184,9 @@ pub fn grep_files(code: Option<i32>, stdout: &str, stderr: &str, truncated: bool
 }
 
 impl CodeExtractor {
-    /// The `.rs` files that may read a path: one `git grep -l` over the tracked tree at the revision (the working tree in files
+    /// The `.rs` files that may read a path: one `git grep -l` over the tracked tree at `rev` (`None`: the working tree, files
     /// mode).
-    fn read_candidates(&self) -> Result<Vec<String>, String> {
+    fn read_candidates(&self, rev: Option<&str>) -> Result<Vec<String>, String> {
         self.spawned.set(self.spawned.get() + 1);
         let mut cmd = crate::git_env::git();
         cmd.arg("-C").arg(&self.root).args([
@@ -162,9 +195,9 @@ impl CodeExtractor {
             "grep",
             "-l",
             "-E",
-            "include_(str|bytes)!|CARGO_MANIFEST_DIR",
+            r"include(_str|_bytes)?!|CARGO_MANIFEST_DIR|#\[path|rerun-if-changed",
         ]);
-        if let Some(rev) = &self.rev {
+        if let Some(rev) = rev {
             cmd.arg(rev);
         }
         cmd.args(["--", "*.rs"]);
@@ -177,11 +210,221 @@ impl CodeExtractor {
             paddock_proc::Outcome::Exited(s) => s.code(),
             _ => None,
         };
-        grep_files(code, &out.stdout_text(), &out.stderr_text(), out.truncated, self.rev.as_deref())
+        grep_files(code, &out.stdout_text(), &out.stderr_text(), out.truncated, rev)
     }
 
     fn crate_of<'a>(&'a self, path: &str) -> Option<&'a str> {
         self.cargo.node_of(path)
+    }
+
+    /// The `reads` edges and data nodes, with the fallback count; a required read (`include*!`, `#[path]`) of a path that is not
+    /// tracked is an unresolved reference of its source.
+    fn reads(&self, tracked: &BTreeSet<String>, read: &dyn BulkRead, x: &mut Extracted, stats: &mut CodeStats) -> Result<(), ExtractError> {
+        let candidates: Vec<String> = self
+            .read_candidates(self.rev.as_deref())
+            .map_err(|e| ExtractError {
+                extractor: "code",
+                file: "git grep".into(),
+                reason: e,
+            })?
+            .into_iter()
+            .filter(|f| tracked.contains(f))
+            .collect();
+        // A candidate that cannot be read is an error (fail closed); only a file that is not there is skipped.
+        let texts = in_order(&candidates, texts_of("code", read, &candidates)?);
+        self.reads_of(&candidates, texts, tracked, x, stats, true);
+        Ok(())
+    }
+
+    /// The reads of `candidates` (their texts in order) against `tracked`; `unresolved` records required reads that miss.
+    pub(crate) fn reads_of(
+        &self,
+        candidates: &[String],
+        texts: Vec<Option<String>>,
+        tracked: &BTreeSet<String>,
+        x: &mut Extracted,
+        stats: &mut CodeStats,
+        unresolved: bool,
+    ) {
+        let exists = |p: &str| {
+            tracked.contains(p)
+                || tracked
+                    .range(format!("{p}/")..)
+                    .next()
+                    .is_some_and(|f| f.starts_with(&format!("{p}/")))
+        };
+        let mut data: BTreeSet<String> = x
+            .nodes
+            .iter()
+            .filter_map(|n| n.id.strip_prefix("data:").map(str::to_string))
+            .collect();
+        for (f, text) in candidates.iter().zip(texts) {
+            let (Some(text), Some(reader)) = (text, self.crate_of(f)) else {
+                continue;
+            };
+            stats.rust_sources += 1;
+            let paths: BTreeSet<String> = match rust_reads(f, &text, reader) {
+                Parsed::Reads(r) => {
+                    let mut found = BTreeSet::new();
+                    for r in r {
+                        if exists(&r.path) {
+                            found.insert(r.path);
+                        } else if unresolved && r.how.required() {
+                            x.unresolved.push(Unresolved {
+                                referrer: f.clone(),
+                                node: None,
+                                reference: r.path,
+                                why: "a required read (include*!, #[path]) of a path that is not tracked".into(),
+                            });
+                        }
+                    }
+                    found
+                }
+                Parsed::Fallback(_) => {
+                    stats.syn_fallbacks += 1;
+                    read_paths(f, &text, reader, tracked)
+                }
+            };
+            for p in paths {
+                // A path of the reader's own crate is its own code already; any other path gets a data node owning exactly it (a
+                // folder: every file under it), so the node that owns the file itself (a test file, a package) keeps its own
+                // reach and the reader is reached too (review P1-3).
+                if self.crate_of(&p) == Some(reader) {
+                    continue;
+                }
+                let id = data_id(&p);
+                if data.insert(p.clone()) {
+                    let own = if tracked.contains(&p) { p.clone() } else { format!("{p}/") };
+                    x.nodes.push(ModelNode::new(&id, NodeKind::Project, &[own.as_str()]));
+                }
+                x.edges.push(Edge::new(format!("crate:{reader}"), id, EdgeKind::Reads));
+            }
+        }
+    }
+
+    /// The reads at the base revision, for the changed files the head no longer has (review P1-3: a deleted read target keeps its
+    /// reader). One `git grep` and one bulk read at the base, only when something was deleted; a failed grep or read is an error
+    /// (fail closed: the plan answers everything).
+    pub fn base_reads(
+        &self,
+        base: &str,
+        base_files: &BTreeSet<String>,
+        read: &dyn BulkRead,
+        deleted: &BTreeSet<String>,
+    ) -> Result<Extracted, ExtractError> {
+        let mut x = Extracted::default();
+        if deleted.is_empty() {
+            return Ok(x);
+        }
+        let candidates = self.read_candidates(Some(base)).map_err(|e| ExtractError {
+            extractor: "code",
+            file: format!("git grep at {base}"),
+            reason: e,
+        })?;
+        let candidates: Vec<String> = candidates.into_iter().filter(|f| base_files.contains(f)).collect();
+        let texts = in_order(&candidates, texts_of("code", read, &candidates)?);
+        let mut stats = CodeStats::default();
+        self.reads_of(&candidates, texts, base_files, &mut x, &mut stats, false);
+        // Keep only the data nodes that name a deleted file (or a folder holding one), owning exactly the deleted files.
+        let keep: BTreeSet<String> = x
+            .nodes
+            .iter()
+            .filter(|n| {
+                n.files.iter().any(|f| {
+                    deleted
+                        .iter()
+                        .any(|d| d == f || f.strip_suffix('/').is_some_and(|dir| d.starts_with(&format!("{dir}/"))))
+                })
+            })
+            .map(|n| n.id.clone())
+            .collect();
+        x.nodes.retain(|n| keep.contains(&n.id));
+        for n in &mut x.nodes {
+            let owned: Vec<String> = deleted
+                .iter()
+                .filter(|d| {
+                    n.files
+                        .iter()
+                        .any(|f| f == *d || f.strip_suffix('/').is_some_and(|dir| d.starts_with(&format!("{dir}/"))))
+                })
+                .cloned()
+                .collect();
+            n.files = owned;
+        }
+        x.edges.retain(|e| keep.contains(&e.to));
+        Ok(x)
+    }
+}
+
+/// The texts of `paths` in their order (absent files `None`), from the map [`texts_of`] answered.
+fn in_order(paths: &[String], mut texts: BTreeMap<String, String>) -> Vec<Option<String>> {
+    paths.iter().map(|p| texts.remove(p)).collect()
+}
+
+/// The id of a data node: a file or folder read at build or test time from outside every crate.
+pub fn data_id(path: &str) -> String {
+    format!("data:{path}")
+}
+
+/// The test runner and target of a file, or `None` when it is no test file: a declared runner glob first, else the naming rule
+/// (undeclared projects only).
+fn test_target(f: &str, decls: &[TestDecl], npm: &Graph) -> Option<(String, String)> {
+    let home = |runner: &str, project_dir: &str| -> (String, String) {
+        match npm.node_of(f).filter(|_| runner == "vitest" || runner == "playwright") {
+            Some(pkg) => (format!("{runner}:{pkg}"), pkg.to_string()),
+            None => (format!("{runner}:{project_dir}"), project_dir.to_string()),
+        }
+    };
+    let declared = decls
+        .iter()
+        .filter(|d| f.strip_prefix(d.dir.as_str()).is_some_and(|r| r.starts_with('/')))
+        .max_by_key(|d| d.dir.len());
+    // The runner comes from the contract, never from the path (review P1-2: paddock-e2e's selftest specs are Playwright); an
+    // undeclared test file is no test file, so its change runs its project in full (never less than declared, §5).
+    let d = declared?;
+    d.runners
+        .iter()
+        .find(|(_, globs)| globs.iter().any(|g| glob::matches(g, f)))
+        .map(|(runner, _)| home(runner, &d.dir))
+}
+
+/// The unresolved imports and unreadable files of an import walk, as unresolved references of their files (ADR 0117 §4, §14). A
+/// computed `import()` of a file whose contract declares what it loads (`graph.reads`) becomes edges to those files instead.
+fn unresolved_of(g: &ts::ImportGraph, x: &mut Extracted, dynamic: &BTreeMap<String, Vec<String>>, tracked: &BTreeSet<String>) {
+    for (f, specs) in &g.unresolved {
+        for s in specs {
+            if s.contains("dynamic import")
+                && let Some(globs) = dynamic.get(f)
+            {
+                let hits: Vec<&String> = tracked.iter().filter(|t| globs.iter().any(|gl| glob::matches(gl, t))).collect();
+                if !hits.is_empty() {
+                    for t in hits {
+                        let id = data_id(t);
+                        if !x.nodes.iter().any(|n| n.id == id) {
+                            x.nodes.push(ModelNode::new(&id, NodeKind::Project, &[t.as_str()]));
+                        }
+                        for from in [format!("script:{f}"), format!("test:{f}")] {
+                            x.edges.push(Edge::new(from, &id, EdgeKind::Imports));
+                        }
+                    }
+                    continue;
+                }
+            }
+            x.unresolved.push(Unresolved {
+                referrer: f.clone(),
+                node: None,
+                reference: s.clone(),
+                why: "an import that resolves to no tracked file".into(),
+            });
+        }
+    }
+    for (f, e) in &g.errors {
+        x.unresolved.push(Unresolved {
+            referrer: f.clone(),
+            node: None,
+            reference: "(the whole file)".into(),
+            why: e.clone(),
+        });
     }
 }
 
@@ -195,103 +438,143 @@ impl Extractor for CodeExtractor {
     }
 
     fn extract(&self, files: &[String], read: &dyn BulkRead) -> Result<Extracted, ExtractError> {
-        let tracked: BTreeSet<String> = files.iter().cloned().collect();
-        let bad = |file: &str, reason: String| ExtractError {
-            extractor: "code",
-            file: file.to_string(),
-            reason,
-        };
-        let mut x = Extracted::default();
-        // reads
-        let candidates: Vec<String> = self
-            .read_candidates()
-            .map_err(|e| bad("git grep", e))?
-            .into_iter()
-            .filter(|f| tracked.contains(f))
-            .collect();
-        // A candidate that cannot be read is an error (fail closed); only a file that is not there is skipped.
-        let candidate_texts = texts_of("code", read, &candidates)?;
-        for f in &candidates {
-            let (Some(text), Some(reader)) = (candidate_texts.get(f), self.crate_of(f)) else {
-                continue;
-            };
-            for p in read_paths(f, text, reader, &tracked) {
-                if let Some(owner) = self.crate_of(&p).filter(|o| *o != reader) {
-                    x.edges
-                        .push(Edge::new(format!("crate:{reader}"), format!("crate:{owner}"), EdgeKind::Reads));
-                }
-            }
-        }
-        // imports between JS scripts, transitively from the CI adapter's scripts
-        let js: BTreeSet<String> = files
-            .iter()
-            .filter(|f| JS.iter().any(|e| f.ends_with(e)) && !f.contains("/node_modules/"))
-            .cloned()
-            .collect();
-        let mut seen: BTreeSet<String> = BTreeSet::new();
-        let mut layer: Vec<String> = self.scripts.iter().filter(|s| js.contains(*s)).cloned().collect();
-        // The seed scripts' own nodes (the CI adapter has them too; the merge keeps its node).
-        for s in &layer {
-            x.nodes.push(ModelNode::new(format!("script:{s}"), NodeKind::Script, &[s.as_str()]));
-        }
-        let mut rounds = 0;
-        while !layer.is_empty() && rounds < 64 {
-            rounds += 1;
-            let texts: BTreeMap<String, String> = texts_of("code", read, &layer)?;
-            let set: BTreeSet<String> = layer.iter().cloned().collect();
-            seen.extend(set.iter().cloned());
-            let edges: BTreeMap<String, BTreeSet<String>> = set
-                .iter()
-                .map(|f| {
-                    let to = relative_specifiers(texts.get(f).map(String::as_str).unwrap_or(""))
-                        .iter()
-                        .filter_map(|s| resolve(f, s, &js))
-                        .collect();
-                    (f.clone(), to)
-                })
-                .collect();
-            let mut next = Vec::new();
-            for (from, tos) in edges {
-                for to in tos {
-                    if !self.scripts.contains(&to) && !seen.contains(&to) {
-                        x.nodes
-                            .push(ModelNode::new(format!("script:{to}"), NodeKind::Script, &[to.as_str()]));
-                    }
-                    x.edges
-                        .push(Edge::new(format!("script:{from}"), format!("script:{to}"), EdgeKind::Imports));
-                    if !seen.contains(&to) && !next.contains(&to) {
-                        next.push(to);
-                    }
-                }
-            }
-            layer = next;
-        }
-        // spec targets
-        for f in files.iter().filter(|f| is_spec(f)) {
-            let (target, home) = if f.starts_with(&self.paths.node_tests) {
-                ("node-test:conformance".to_string(), "conformance".to_string())
-            } else if let Some(pkg) = self.npm.node_of(f) {
-                let kind = if f.contains(&format!("/{}/", self.paths.e2e)) {
-                    "playwright"
-                } else {
-                    "vitest"
-                };
-                (format!("{kind}:{pkg}"), pkg.to_string())
-            } else {
-                continue;
-            };
-            if !x.nodes.iter().any(|n| n.id == target) {
-                x.nodes.push(ModelNode::new(&target, NodeKind::TestTarget, &[]).with_home(&home));
-            }
-            x.nodes
-                .push(ModelNode::new(format!("test:{f}"), NodeKind::TestFile, &[f.as_str()]).with_home(&home));
-            x.edges.push(Edge::new(&target, format!("test:{f}"), EdgeKind::Tests));
-        }
-        Ok(x)
+        self.extract_with_stats(files, read).map(|(x, _)| x)
     }
 
     fn spawn_budget(&self, _: &[String]) -> usize {
         1
+    }
+}
+
+impl CodeExtractor {
+    /// [`Extractor::extract`] with what it measured.
+    pub fn extract_with_stats(&self, files: &[String], read: &dyn BulkRead) -> Result<(Extracted, CodeStats), ExtractError> {
+        let tracked: BTreeSet<String> = files.iter().cloned().collect();
+        let mut x = Extracted::default();
+        let mut stats = CodeStats::default();
+        self.reads(&tracked, read, &mut x, &mut stats)?;
+
+        // The resolver over the tracked files and the texts it reads itself (package manifests, TypeScript configs): one bulk read.
+        let config_files: Vec<String> = files
+            .iter()
+            .filter(|f| ts::resolver_reads(f) && !f.contains("/node_modules/"))
+            .cloned()
+            .collect();
+        let texts: BTreeMap<String, String> = texts_of("code", read, &config_files)?;
+        let packages: BTreeMap<String, String> = self
+            .npm
+            .iter()
+            .filter(|(_, n)| !n.name.is_empty())
+            .map(|(d, n)| (n.name.clone(), d.to_string()))
+            .collect();
+        let resolver = ts::Resolver::new(&tracked, texts, packages);
+        // The import walks read through this: a failed read is remembered and fails the extractor (fail closed) after the walk;
+        // an absent file is `None` (an unresolved import).
+        let failed: RefCell<Option<ExtractError>> = RefCell::new(None);
+        let bulk = |paths: &[String]| -> Vec<Option<String>> {
+            paths
+                .iter()
+                .zip(read.read_all(paths))
+                .map(|(p, r)| match r {
+                    Ok(t) => t,
+                    Err(reason) => {
+                        failed.borrow_mut().get_or_insert(ExtractError {
+                            extractor: "code",
+                            file: p.clone(),
+                            reason,
+                        });
+                        None
+                    }
+                })
+                .collect()
+        };
+
+        // imports between JS scripts, transitively from the CI adapter's scripts
+        let seeds: Vec<String> = self
+            .scripts
+            .iter()
+            .filter(|s| ts::is_source(s) && tracked.contains(*s))
+            .cloned()
+            .collect();
+        for s in &seeds {
+            x.nodes.push(ModelNode::new(format!("script:{s}"), NodeKind::Script, &[s.as_str()]));
+        }
+        let g = ts::import_graph(&seeds, &resolver, &bulk, &|p| !p.contains("/node_modules/"));
+        if let Some(e) = failed.borrow_mut().take() {
+            return Err(e);
+        }
+        stats.parsed += g.edges.len() + g.errors.len();
+        unresolved_of(&g, &mut x, &self.dynamic, &tracked);
+        for (from, tos) in &g.edges {
+            for t in tos {
+                match t {
+                    Target::File(to) => {
+                        if !self.scripts.contains(to) {
+                            x.nodes
+                                .push(ModelNode::new(format!("script:{to}"), NodeKind::Script, &[to.as_str()]));
+                        }
+                        x.edges
+                            .push(Edge::new(format!("script:{from}"), format!("script:{to}"), EdgeKind::Imports));
+                    }
+                    Target::Package(dir) => {
+                        x.edges
+                            .push(Edge::new(format!("script:{from}"), format!("npm:{dir}"), EdgeKind::Imports));
+                    }
+                    Target::External(_) | Target::Builtin => {}
+                }
+            }
+        }
+
+        // test files and their targets
+        let mut specs: BTreeMap<String, (String, String)> = BTreeMap::new();
+        for f in files.iter().filter(|f| !f.contains("/node_modules/")) {
+            if let Some(t) = test_target(f, &self.tests, &self.npm) {
+                specs.insert(f.clone(), t);
+            }
+        }
+        for (f, (target, home)) in &specs {
+            if !x.nodes.iter().any(|n| &n.id == target) {
+                x.nodes.push(ModelNode::new(target, NodeKind::TestTarget, &[]).with_home(home));
+            }
+            x.nodes
+                .push(ModelNode::new(format!("test:{f}"), NodeKind::TestFile, &[f.as_str()]).with_home(home));
+            x.edges.push(Edge::new(target, format!("test:{f}"), EdgeKind::Tests));
+        }
+        // imports among a project's test files: spec to spec (review P1-2) and spec to its declared helpers
+        for d in &self.tests {
+            let mine: Vec<String> = specs
+                .keys()
+                .filter(|f| f.strip_prefix(d.dir.as_str()).is_some_and(|r| r.starts_with('/')) && ts::is_source(f))
+                .cloned()
+                .collect();
+            let helper = |p: &str| d.helpers.iter().any(|h| glob::matches(h, p)) && !specs.contains_key(p);
+            let g = ts::import_graph(&mine, &resolver, &bulk, &|p| helper(p));
+            if let Some(e) = failed.borrow_mut().take() {
+                return Err(e);
+            }
+            stats.parsed += g.edges.len() + g.errors.len();
+            if !g.unresolved.is_empty() || !g.errors.is_empty() {
+                stats.unprovable.insert(d.project.clone());
+                unresolved_of(&g, &mut x, &self.dynamic, &tracked);
+                continue;
+            }
+            for (from, tos) in &g.edges {
+                for to in tos.iter().filter_map(|t| match t {
+                    Target::File(p) if helper(p) || specs.contains_key(p) => Some(p),
+                    _ => None,
+                }) {
+                    if !specs.contains_key(to) {
+                        x.nodes
+                            .push(ModelNode::new(format!("test:{to}"), NodeKind::TestFile, &[to.as_str()]).with_home(&d.dir));
+                    }
+                    x.edges
+                        .push(Edge::new(format!("test:{from}"), format!("test:{to}"), EdgeKind::Imports));
+                }
+            }
+        }
+        x.nodes.sort_by(|a, b| a.id.cmp(&b.id));
+        x.nodes.dedup_by(|a, b| a.id == b.id);
+        Ok((x, stats))
     }
 }
 

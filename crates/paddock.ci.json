@@ -20,5 +20,13 @@
   "deny": [
     "cd crates",
     "cargo deny check"
-  ]
+  ],
+  "graph": {
+    "smoke": {
+      "phases": [
+        "fmt"
+      ],
+      "nextest": "package(=paddock-proc)"
+    }
+  }
 }

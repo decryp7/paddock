@@ -2507,6 +2507,24 @@ The model's processes: at most one `git cat-file --batch-command` per reader (tw
 `repo_model::tests::the_bulk_reader_starts_at_most_one_git_for_many_files_and_the_control_counts_one_per_reader`), one `git grep -l`,
 and no `cargo metadata` of its own (it replays what `read_graph` recorded). Not measured: the Linux runner, and a cold run per adapter.
 
+## Planner with oxc imports and syn reads (2026-11-23, feat/repo-graph-wp3, fa390b7ea)
+
+ADR 0117 §10 budgets the whole extraction at 3 s on the dev Mac. Dev Mac (14 cores) under other agents' load (1-minute load 25 to
+31), the tool binary run directly, two warm runs each, the shell's `time`:
+
+| Command | real | user | sys |
+|---|---|---|---|
+| `plan --files README.md --explain` (the rule tables alone) | 1.27 s, 0.87 s | 0.39 s, 0.34 s | 0.35 s, 0.28 s |
+| `plan --files README.md --compare` (the rules, then the model with the oxc, syn, CI, Cargo and code adapters) | 3.00 s, 4.58 s | 2.70 s, 2.81 s | 0.60 s, 0.63 s |
+| `plan 59e5f7ec3^ 59e5f7ec3 --explain` | 0.90 s, 1.29 s | 0.34 s, 0.43 s | 0.28 s, 0.40 s |
+| `plan 59e5f7ec3^ 59e5f7ec3 --compare` | 2.64 s, 5.09 s | 2.71 s, 3.04 s | 0.87 s, 1.04 s |
+
+The code adapter alone over the real tree (release build, `repo_model::code::tests::on_the_real_tree_every_read_candidate_parses_with_syn`,
+`--no-capture`): 1.13 s for one `git grep -l`, 420 Rust sources through `syn` (0 fell back to the text scan) and 1,810 JS/TS files
+through `oxc_parser` and `oxc_resolver`; the text scan of the same 421 read candidates took 0.20 s (472 reads). The model now costs
+about 2.4 s of user time over the rule tables, single-threaded: above the 3 s budget once the machine is loaded. Not done yet: the
+`parallel` feature (rayon over the parsers, §9), a cold run, and the Linux runner.
+
 ## Import and cfg scan of the whole repository (2026-11-23, docs/adr-repo-graph-model)
 
 The lower bound ADR 0117 §10 compares a parser with. Dev Mac under load (about 15), one run each, `/usr/bin/time -p`, over the tracked files:

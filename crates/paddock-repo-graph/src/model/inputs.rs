@@ -23,6 +23,9 @@ pub enum Target {
     Project(String),
     /// The project whose folder holds the changed file (a changelog compiled into its app).
     Owner,
+    /// The app named by the changed path's segment at this index (`app:{1}`: `icons/dyno/x.svg` reaches `app:dyno`); a segment
+    /// that names no app reaches nothing.
+    AppSegment(usize),
 }
 
 impl Target {
@@ -34,11 +37,18 @@ impl Target {
             "npm" => Target::Npm,
             "apps" => Target::Apps,
             "owner" => Target::Owner,
+            _ if s.starts_with("app:{") && s.ends_with('}') => {
+                let n = &s["app:{".len()..s.len() - 1];
+                Target::AppSegment(
+                    n.parse()
+                        .map_err(|_| format!("unknown target {s:?} (app:{{<segment index>}})"))?,
+                )
+            }
             _ => match s.strip_prefix("project:") {
                 Some(p) if !p.is_empty() => Target::Project(p.to_string()),
                 _ => {
                     return Err(format!(
-                        "unknown target {s:?} (all, cargo, npm, apps, owner or project:<id>)"
+                        "unknown target {s:?} (all, cargo, npm, apps, owner, app:{{<n>}} or project:<id>)"
                     ));
                 }
             },
@@ -132,6 +142,10 @@ pub struct Paths {
     pub node_tests: String,
     /// The folder name that marks a package's end-to-end specs (Playwright).
     pub e2e: String,
+    /// The folder an app repository checks Paddock out to (its reusable workflows name Paddock's actions through it).
+    pub checkout: String,
+    /// The spellings of the repository root in a step, `(from, to)`, replaced in order so a path under the root resolves.
+    pub root_spellings: Vec<(String, String)>,
 }
 
 /// What counts as prose (ADR 0117 §2, review round 3 P1-A): globs over a file's name (no `/`) or path.

@@ -5,7 +5,7 @@
 //! The reader is the spawn budget's other half (ER-20): every text goes through one [`BulkRead::read_all`] call per adapter, and an
 //! adapter declares the processes it may start ([`Extractor::spawn_budget`]); [`build`] sums both so a test can pin them.
 
-use super::nodes::{Edge, EdgeKind, Model, ModelNode, NodeKind};
+use super::nodes::{Edge, EdgeKind, Model, ModelNode, NodeKind, Unresolved};
 use crate::{CargoMetadata, FileSource, GraphError, cargo_graph, npm_graph};
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
@@ -128,6 +128,9 @@ pub struct Extracted {
     pub nodes: Vec<ModelNode>,
     /// Its edges.
     pub edges: Vec<Edge>,
+    /// The references it found and could not resolve: [`build`] keeps them in the model, and the plan runs each referrer's
+    /// projects in full (ADR 0117 §4, §14: resolved, unresolved or error, never silently no edge).
+    pub unresolved: Vec<Unresolved>,
 }
 
 /// An adapter could not read a file: that file's project goes on full (ADR 0117 §2, review round 2 P2-6).
@@ -191,6 +194,9 @@ pub fn build(files: &[String], read: &dyn BulkRead, adapters: &[Box<dyn Extracto
             Ok(x) => {
                 x.nodes.into_iter().for_each(|n| out.model.add_node(n));
                 x.edges.into_iter().for_each(|e| out.model.add_edge(e));
+                x.unresolved
+                    .into_iter()
+                    .for_each(|u| out.model.add_unresolved(u));
             }
             Err(e) => out.errors.push(e),
         }

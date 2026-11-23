@@ -170,6 +170,7 @@ fn recorded_model_compare_on_the_real_tree_samples() {
     let path = golden_dir().join("model-compare.json");
     let history = GitHistory::new(&root, Duration::from_secs(60));
     let graph = read_graph(&root, &history).unwrap();
+    let smoke = paddock_dev::repo_model::decl::smoke_declared(&paddock_dev::repo_model::decl::load(&root, &graph, &paddock_dev::repo_inputs::load(&root).unwrap()).unwrap());
     let mut recorded = Vec::new();
     for sample in &samples {
         let files: Vec<&str> = sample["files"].as_array().unwrap().iter().map(|f| f.as_str().unwrap()).collect();
@@ -177,7 +178,7 @@ fn recorded_model_compare_on_the_real_tree_samples() {
         let plan = plan_on_graph(&root, &history, &req, &graph).unwrap();
         let (_, reached) = paddock_dev::repo_model::reach_for(&root, &history, &req, &graph).unwrap();
         let inputs = paddock_dev::repo_inputs::load(&root).unwrap();
-        let c = paddock_dev::repo_model::compare(&plan, &reached, &graph, &inputs);
+        let c = paddock_dev::repo_model::compare(&plan, &reached, &graph, &inputs, &smoke);
         let diffs: Vec<Value> = c["differences"]
             .as_array()
             .unwrap()

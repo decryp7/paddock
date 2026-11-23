@@ -64,6 +64,19 @@ contract = "paddock.ci.json"
 script_folders = ["conformance/ci/", "conformance/release/", "conformance/src/util/", "scripts/"]
 node_tests = "conformance/test/"
 e2e = "e2e"
+checkout = ".paddock/"
+# [from, to], replaced in order: the checkout, the stable host-runner path, and the folder an app repository checks Paddock out to
+# for the reusable workflows.
+root_spellings = [
+  ["${{ env.PADDOCK_WORKSPACE || github.workspace }}/", ""],
+  ["${{ env.PADDOCK_WORKSPACE || github.workspace }}", "."],
+  ["${{ github.workspace }}/", ""],
+  ["${PADDOCK_WORKSPACE:-$GITHUB_WORKSPACE}/", ""],
+  ["$PADDOCK_WORKSPACE/", ""],
+  ["$GITHUB_WORKSPACE/", ""],
+  [" .paddock/", " "],
+  ["\".paddock/", "\""],
+]
 
 [prose]
 project_names = ["README*", "CHANGELOG*", "LICENSE*"]
@@ -264,6 +277,23 @@ adds = true
 name = "per-machine"
 files = ["apps/*/app/src-tauri/tauri.conf.json", "apps/*/app/src-tauri/tauri.windows.conf.json", "apps/*/app/src-tauri/windows/**", "crates/paddock-setup/nsis/paddock-per-machine.nsh"]
 reaches = ["project:conformance", "project:crates"]
+adds = true
+
+[[input]]
+# The planner reads every workflow, action and contract (its CI adapter and `--ci` outputs): a change to one is paddock-dev's code
+# too, so the planner's tests and goldens run (review of 59e5f7ec3, P1-3; G5).
+name = "ci-files-planner"
+files = [".gitea/workflows/**", ".gitea/actions/**", "apps/*/paddock.ci.json"]
+except = [".gitea/**/*.md"]
+reaches = ["project:paddock-dev"]
+adds = true
+
+[[input]]
+# An app's icon sources (icons/<app>/) are installed into that app (icons/tools/install.mjs): the app named by the second path
+# segment; a folder that names no app (icons/archive, icons/tools) reaches none through this input.
+name = "icon-sources"
+files = ["icons/*/**"]
+reaches = ["app:{1}"]
 adds = true
 
 [[input]]

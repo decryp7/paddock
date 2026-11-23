@@ -99,5 +99,20 @@
   "paddock": [
     "node conformance/bin/paddock-conformance.mjs $PADDOCK_CONFORMANCE_ARGS",
     "./dev conformance $PADDOCK_CONFORMANCE_RUST_ARGS"
-  ]
+  ],
+  "graph": {
+    "tests": {
+      "node-test": [
+        "test/**/*.test.mjs"
+      ],
+      "helpers": [
+        "test/**"
+      ]
+    },
+    "reads": {
+      "conformance/bin/paddock-check-lists.mjs": [
+        "conformance/src/checks/*.mjs"
+      ]
+    }
+  }
 }
