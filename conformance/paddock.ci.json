@@ -108,6 +108,11 @@
       "helpers": [
         "test/**"
       ]
+    },
+    "reads": {
+      "conformance/bin/paddock-check-lists.mjs": [
+        "conformance/src/checks/*.mjs"
+      ]
     }
   }
 }

@@ -273,6 +273,7 @@ fn every_extractor_reports_an_unresolvable_reference_and_the_plan_widens_to_its_
             npm: Graph::new(),
             scripts: ["conformance/bin/cli.mjs".to_string()].into_iter().collect(),
             tests: vec![],
+        dynamic: BTreeMap::new(),
         };
         let adapters: Vec<Box<dyn Extractor>> = vec![Box::new(a)];
         build(&r.paths(), &r, &adapters).model

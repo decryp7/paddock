@@ -1,7 +1,8 @@
 //! What only a project knows, declared in its contract (ADR 0117 §3): `graph.tests` (its test files per runner and its helper
 //! globs) and `graph.smoke` (the phases and the nextest filterset a plumbing-only change runs), read from every `paddock.ci.json`:
 //! the apps', the root projects' (`crates`, `ui`, `conformance`, `tools`, `icons`, `eslint`) and paddock-dev's
-//! (`tools/paddock-dev/paddock.ci.json`, which holds only this block). Globs are relative to the project folder.
+//! (`tools/paddock-dev/paddock.ci.json`, which holds only this block). `tests` and `smoke` globs are relative to the project folder;
+//! `graph.reads` (what a file loads through a computed `import()`) names repository paths from the root.
 //!
 //! ```json
 //! "graph": {
@@ -38,6 +39,10 @@ pub struct ProjectDecl {
     pub tests: TestDecl,
     /// Its smoke set, when declared.
     pub smoke: Option<Smoke>,
+    /// What a file loads at run time through a computed `import()` (`graph.reads`: a repository path to the globs, from the
+    /// repository root, of the files it may load): those files become its edges instead of an unresolved reference (ADR 0117 §4,
+    /// "declared runtime reads").
+    pub reads: BTreeMap<String, Vec<String>>,
 }
 
 fn strings(v: &Value, what: &str) -> Result<Vec<String>, String> {
@@ -61,6 +66,7 @@ pub fn parse(id: &str, dir: &str, file: &str, v: &Value) -> Result<ProjectDecl, 
             ..TestDecl::default()
         },
         smoke: None,
+        reads: BTreeMap::new(),
     };
     let Some(g) = v.get("graph") else {
         return Ok(d);
@@ -91,8 +97,14 @@ pub fn parse(id: &str, dir: &str, file: &str, v: &Value) -> Result<ProjectDecl, 
         }
         d.smoke = Some(Smoke { phases, nextest });
     }
-    for k in g.keys().filter(|k| !["tests", "smoke"].contains(&k.as_str())) {
-        return Err(format!("{file}: unknown field `graph.{k}` (tests, smoke)"));
+    if let Some(r) = g.get("reads") {
+        let r = r.as_object().ok_or_else(|| format!("{file}: `graph.reads` is not an object"))?;
+        for (f, globs) in r {
+            d.reads.insert(f.clone(), strings(globs, &format!("{file}: `graph.reads.{f}`"))?);
+        }
+    }
+    for k in g.keys().filter(|k| !["tests", "smoke", "reads"].contains(&k.as_str())) {
+        return Err(format!("{file}: unknown field `graph.{k}` (tests, smoke, reads)"));
     }
     Ok(d)
 }

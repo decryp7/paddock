@@ -154,6 +154,7 @@ pub fn reach_for(root: &Path, history: &dyn History, req: &Request, graph: &Repo
         npm: graph.npm.clone(),
         scripts,
         tests: decls.values().map(|d| d.tests.clone()).collect(),
+        dynamic: decls.values().flat_map(|d| d.reads.clone()).collect(),
     };
     // A changed file the head no longer has: the reads of the base tree name its readers (review P1-3).
     let tracked: BTreeSet<&String> = files.iter().collect();

@@ -44,6 +44,8 @@ pub struct CodeExtractor {
     pub scripts: BTreeSet<String>,
     /// The projects' declared test files and helpers (`graph.tests` of each contract).
     pub tests: Vec<TestDecl>,
+    /// Declared runtime reads (`graph.reads`): a file to the globs of what its computed `import()` loads.
+    pub dynamic: BTreeMap<String, Vec<String>>,
 }
 
 /// One project's declared test files (`graph.tests` in its `paddock.ci.json`), globs over repository paths.
@@ -331,10 +333,28 @@ fn test_target(f: &str, decls: &[TestDecl], npm: &Graph) -> Option<(String, Stri
         .map(|(runner, _)| home(runner, &d.dir))
 }
 
-/// The unresolved imports and unreadable files of an import walk, as unresolved references of their files (ADR 0117 §4, §14).
-fn unresolved_of(g: &ts::ImportGraph, x: &mut Extracted) {
+/// The unresolved imports and unreadable files of an import walk, as unresolved references of their files (ADR 0117 §4, §14). A
+/// computed `import()` of a file whose contract declares what it loads (`graph.reads`) becomes edges to those files instead.
+fn unresolved_of(g: &ts::ImportGraph, x: &mut Extracted, dynamic: &BTreeMap<String, Vec<String>>, tracked: &BTreeSet<String>) {
     for (f, specs) in &g.unresolved {
         for s in specs {
+            if s.contains("dynamic import")
+                && let Some(globs) = dynamic.get(f)
+            {
+                let hits: Vec<&String> = tracked.iter().filter(|t| globs.iter().any(|gl| glob::matches(gl, t))).collect();
+                if !hits.is_empty() {
+                    for t in hits {
+                        let id = data_id(t);
+                        if !x.nodes.iter().any(|n| n.id == id) {
+                            x.nodes.push(ModelNode::new(&id, NodeKind::Project, &[t.as_str()]));
+                        }
+                        for from in [format!("script:{f}"), format!("test:{f}")] {
+                            x.edges.push(Edge::new(from, &id, EdgeKind::Imports));
+                        }
+                    }
+                    continue;
+                }
+            }
             x.unresolved.push(Unresolved {
                 referrer: f.clone(),
                 node: None,
@@ -417,7 +437,7 @@ impl CodeExtractor {
         }
         let g = ts::import_graph(&seeds, &resolver, &bulk, &|p| !p.contains("/node_modules/"));
         stats.parsed += g.edges.len() + g.errors.len();
-        unresolved_of(&g, &mut x);
+        unresolved_of(&g, &mut x, &self.dynamic, &tracked);
         for (from, tos) in &g.edges {
             for t in tos {
                 match t {
@@ -465,7 +485,7 @@ impl CodeExtractor {
             stats.parsed += g.edges.len() + g.errors.len();
             if !g.unresolved.is_empty() || !g.errors.is_empty() {
                 stats.unprovable.insert(d.project.clone());
-                unresolved_of(&g, &mut x);
+                unresolved_of(&g, &mut x, &self.dynamic, &tracked);
                 continue;
             }
             for (from, tos) in &g.edges {

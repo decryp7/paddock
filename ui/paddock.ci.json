@@ -70,6 +70,12 @@
       "phases": [
         "build"
       ]
+    },
+    "reads": {
+      "ui/projects/paddock-e2e/src/global-setup.test.ts": [
+        "ui/projects/paddock-e2e/src/*.ts",
+        "ui/projects/paddock-e2e/tsconfig.json"
+      ]
     }
   }
 }

@@ -105,6 +105,11 @@
         "rustChecks"
       ],
       "nextest": "package(=dyno-core)"
+    },
+    "reads": {
+      "diagrams/tools/code-check.mjs": [
+        "apps/*/docs/diagrams/src/*.mjs"
+      ]
     }
   }
 }

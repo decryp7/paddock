@@ -87,6 +87,7 @@ fn code_model(cli: &str) -> paddock_repo_graph::model::nodes::Model {
         npm,
         scripts: ["x/bin/cli.mjs".to_string()].into_iter().collect(),
         tests: vec![ui_decl()],
+        dynamic: BTreeMap::new(),
     };
     let adapters: Vec<Box<dyn Extractor>> = vec![Box::new(adapter)];
     let b = build(&m.paths(), &m, &adapters);
@@ -134,6 +135,7 @@ fn model_of(
         npm,
         scripts: BTreeSet::new(),
         tests,
+        dynamic: BTreeMap::new(),
     };
     let adapters: Vec<Box<dyn Extractor>> = vec![Box::new(adapter)];
     let b = build(&m.paths(), m, &adapters);
@@ -264,6 +266,7 @@ fn p1_3_a_read_outside_the_readers_crate_is_a_data_node_owning_exactly_that_path
         npm: Graph::new(),
         scripts: BTreeSet::new(),
         tests: vec![],
+        dynamic: BTreeMap::new(),
     };
     let files: BTreeSet<String> = m.paths().into_iter().collect();
     let mut x = Extracted::default();
@@ -311,6 +314,7 @@ fn code_adapter_cost_on_the_real_tree() {
             .cloned()
             .collect(),
         tests: decls.values().map(|d| d.tests.clone()).collect(),
+        dynamic: decls.values().flat_map(|d| d.reads.clone()).collect(),
     };
     let t = std::time::Instant::now();
     let (x, stats) = a.extract_with_stats(&files, &read).unwrap();
@@ -344,4 +348,38 @@ fn code_adapter_cost_on_the_real_tree() {
         }
     }
     eprintln!("text scan: {:?}; {} reads over {} candidates", t.elapsed(), scan, cand.len());
+}
+
+#[test]
+fn a_declared_runtime_read_turns_a_computed_import_into_edges_and_undeclared_it_stays_unresolved() {
+    let mut g = ts::ImportGraph::default();
+    g.unresolved.insert(
+        "x/bin/check.mjs".into(),
+        vec!["1 dynamic import(s) with a computed specifier".into()],
+    );
+    let tracked: BTreeSet<String> = ["x/bin/check.mjs", "x/src/checks/a.mjs", "x/src/checks/b.mjs"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    let declared: BTreeMap<String, Vec<String>> = [("x/bin/check.mjs".to_string(), vec!["x/src/checks/*.mjs".to_string()])]
+        .into_iter()
+        .collect();
+    let mut x = Extracted::default();
+    unresolved_of(&g, &mut x, &declared, &tracked);
+    assert!(x.unresolved.is_empty(), "{:?}", x.unresolved);
+    assert!(
+        x.edges
+            .iter()
+            .any(|e| e.from == "script:x/bin/check.mjs" && e.to == "data:x/src/checks/a.mjs")
+    );
+    // Control: undeclared (or a declaration that matches no tracked file), the computed import is unresolved.
+    let mut y = Extracted::default();
+    unresolved_of(&g, &mut y, &BTreeMap::new(), &tracked);
+    assert_eq!(y.unresolved.len(), 1);
+    let mut z = Extracted::default();
+    let dangling: BTreeMap<String, Vec<String>> = [("x/bin/check.mjs".to_string(), vec!["x/gone.ts".to_string()])]
+        .into_iter()
+        .collect();
+    unresolved_of(&g, &mut z, &dangling, &tracked);
+    assert_eq!(z.unresolved.len(), 1);
 }
