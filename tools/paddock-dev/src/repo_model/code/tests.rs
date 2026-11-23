@@ -293,11 +293,10 @@ fn p1_3_a_read_outside_the_readers_crate_is_a_data_node_owning_exactly_that_path
     assert!(y.nodes.is_empty() && y.edges.is_empty() && y.unresolved.is_empty());
 }
 
-/// The measurement of §10 (`cargo nextest run --run-ignored only -E 'test(code_adapter_cost)' --no-capture`): the code adapter over
-/// the real tree, with the `syn` fallbacks counted beside the reads and the files parsed for imports.
+/// The code adapter over the real tree (ADR 0117 §10): every Rust read candidate parses with `syn` (the text scan is a fallback,
+/// never the answer), and what it costs is printed (`--no-capture`; the results block is in docs/benchmarks.md, rule 48).
 #[test]
-#[ignore = "a measurement, run by hand (rule 48)"]
-fn code_adapter_cost_on_the_real_tree() {
+fn on_the_real_tree_every_read_candidate_parses_with_syn() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let history = paddock_repo_graph::GitHistory::new(&root, std::time::Duration::from_secs(120));
     let graph = crate::plan::read_graph(&root, &history).unwrap();
@@ -332,6 +331,12 @@ fn code_adapter_cost_on_the_real_tree() {
     for u in &x.unresolved {
         eprintln!("unresolved: {} in {} ({})", u.reference, u.referrer, u.why);
     }
+    assert!(
+        stats.rust_sources > 100,
+        "only {} Rust sources read: the candidate search found too little",
+        stats.rust_sources
+    );
+    assert_eq!(stats.syn_fallbacks, 0, "a Rust source syn cannot parse falls back to the text scan");
     let t = std::time::Instant::now();
     let tracked: BTreeSet<String> = files.iter().cloned().collect();
     let cand: Vec<String> = a

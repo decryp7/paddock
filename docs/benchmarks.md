@@ -2519,8 +2519,8 @@ ADR 0117 §10 budgets the whole extraction at 3 s on the dev Mac. Dev Mac (14 co
 | `plan 59e5f7ec3^ 59e5f7ec3 --explain` | 0.90 s, 1.29 s | 0.34 s, 0.43 s | 0.28 s, 0.40 s |
 | `plan 59e5f7ec3^ 59e5f7ec3 --compare` | 2.64 s, 5.09 s | 2.71 s, 3.04 s | 0.87 s, 1.04 s |
 
-The code adapter alone over the real tree (release build, `repo_model::code::tests::code_adapter_cost_on_the_real_tree`, ignored,
-run by hand): 1.13 s for one `git grep -l`, 420 Rust sources through `syn` (0 fell back to the text scan) and 1,810 JS/TS files
+The code adapter alone over the real tree (release build, `repo_model::code::tests::on_the_real_tree_every_read_candidate_parses_with_syn`,
+`--no-capture`): 1.13 s for one `git grep -l`, 420 Rust sources through `syn` (0 fell back to the text scan) and 1,810 JS/TS files
 through `oxc_parser` and `oxc_resolver`; the text scan of the same 421 read candidates took 0.20 s (472 reads). The model now costs
 about 2.4 s of user time over the rule tables, single-threaded: above the 3 s budget once the machine is loaded. Not done yet: the
 `parallel` feature (rayon over the parsers, §9), a cold run, and the Linux runner.
