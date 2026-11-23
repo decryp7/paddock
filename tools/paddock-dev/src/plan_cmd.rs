@@ -669,9 +669,7 @@ fn os_legs(env: &dyn Fn(&str) -> Option<String>) -> Vec<String> {
 /// The workflow file a run names (`ci.yml`), from this checkout; `None` for a name that is not a plain file name.
 fn workflow_text(root: &Path, file: &str) -> Option<String> {
     let plain = !file.is_empty() && file.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'));
-    plain
-        .then(|| crate::gates::ci::workflow_text(&root, file))
-        .flatten()
+    plain.then(|| crate::gates::ci::workflow_text(&root, file)).flatten()
 }
 
 /// Reads a finished run of this repository and decides what of it reruns; its phases go to the log (standard error).

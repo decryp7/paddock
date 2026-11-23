@@ -430,10 +430,7 @@ mod tests {
             ("[[owner]]\npath = [\"a\"]\nnode = \"none\"\n", "unknown field `path`"),
             ("[ci]\nsetup_onlyy = []\n", "unknown field `setup_onlyy`"),
             ("[prose]\nproject_name = []\n", "unknown field `project_name`"),
-            (
-                "[[input]]\nname = \"x\"\nfiles = [\"a\"]\nadds = \"yes\"\n",
-                "expected a boolean",
-            ),
+            ("[[input]]\nname = \"x\"\nfiles = [\"a\"]\nadds = \"yes\"\n", "expected a boolean"),
         ] {
             let e = parse(&doc(body)).unwrap_err();
             assert!(e.contains(want) && e.starts_with(FILE), "{body:?}: {e}");

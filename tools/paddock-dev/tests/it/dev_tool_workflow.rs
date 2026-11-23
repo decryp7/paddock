@@ -29,7 +29,10 @@ fn the_publish_workflow_covers_every_runner_kind_ci_runs_on() {
     let publish = paddock_dev::gates::ci::workflow_text(&root, "dev-tool.yml").unwrap();
     let published = runner_labels(&publish);
     let mut used = BTreeSet::new();
-    for name in paddock_dev::gates::ci::workflow_files(&root).iter().filter(|n| *n != "dev-tool.yml") {
+    for name in paddock_dev::gates::ci::workflow_files(&root)
+        .iter()
+        .filter(|n| *n != "dev-tool.yml")
+    {
         used.extend(runner_labels(&paddock_dev::gates::ci::workflow_text_raw(&root, name).unwrap()));
     }
     assert!(!used.is_empty(), "no runner labels found in .gitea/workflows: the scan is broken");

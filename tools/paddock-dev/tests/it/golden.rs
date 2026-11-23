@@ -801,9 +801,7 @@ fn edits_on_a_copy(edits: &[(String, Option<String>)], narrowed: &std::sync::ato
     eprintln!("copy of the checked-out files: {:.1} s", started.elapsed().as_secs_f64());
     // LF checkout on every host: the workflow split reads LF text (a CRLF checkout cannot be split by either planner).
     assert!(
-        !paddock_dev::gates::ci::workflow_text_raw(&copy, "ci.yml")
-            .unwrap()
-            .contains('\r'),
+        !paddock_dev::gates::ci::workflow_text_raw(&copy, "ci.yml").unwrap().contains('\r'),
         "the copy's ci.yml has CRLF line endings: the workflow split reads LF text, so every edit would mark everything"
     );
     let history = GitHistory::new(&copy, Duration::from_secs(60));
