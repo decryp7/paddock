@@ -515,8 +515,8 @@ Amendments of the same date, no new number: the member gate runs each member's a
     workspace's `.config/nextest.toml`, which gives every test a per-test timeout (`slow-timeout` with `terminate-after`) and one
     process per test, as common practice does (nextest, Go's `go test -timeout`, Bazel's test sizes). The guard hook refuses plain
     `cargo test` (`cargo test --doc` and `--no-run` stay allowed), and a test in tools/paddock-dev reads every CI line through the CI
-    model and fails on one. Progress comes from the job record (ADR 0118) and ADR 0119's required bounds; there is no `./dev test`
-    watchdog wrapper. A helper a test leaves running ends with its test (`paddock_env::lifeline`), and a leftover child is ended by
+    model and fails on one. Progress comes from the job record (ADR 0118) and ADR 0119's required bounds; no watchdog wrapper
+    runs around nextest. A helper a test leaves running ends with its test (`paddock_env::lifeline`), and a leftover child is ended by
     the handle its start gave back. *Why:* on 2026-11-22/23 `worktree::list_clean` hung 3.5 h and `ci_isolation` 18 min under plain
     `cargo test --test it`: one test had moved the shared process into a temporary folder that was then removed, so every later git
     start read the whole temp folder; and test-spawned `ci slot hold` processes were orphaned four times.
