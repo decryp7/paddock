@@ -21,6 +21,8 @@ End with a clear verdict ("approve" / "not yet" or ship / fix / redo per item), 
 
 Check that the author ran the repository-wide gates, and run them yourself when the diff could affect them (without building in the author's worktree; use a scratch copy): `(cd conformance && npm test)`, the conformance line of `.gitea/workflows/ci.yml` (the `paddock-conformance.mjs --app paddock --root . --only ...` step) over the whole tree, `./dev gates check`, and for any change to a `Cargo.toml`, `cargo metadata --locked --format-version 1 >/dev/null` in that manifest's workspace and in each workspace whose Cargo.lock lists the changed crate (`grep -l`). A missing run is a P1.
 
+Mutation check: for a bug-fix change, run `cargo-mutants --in-diff` (or hand mutations on the changed lines) or ask the author for the run, and say which mutants survived; every new test is shown red without its fix (rule 5). A fix with no such evidence is a finding (user, 2026-10-30).
+
 Wait with `./dev wait`; never `pgrep -f` on a string your own command contains.
 
 For code, a loop that calls a command, port, process, query or HTTP endpoint once per item is a finding (rule 85, ER-20, PRINCIPLES "Bulk APIs"; ADR 0108) unless the code says why (`// per-item: <reason>`); a new bulk command needs its budget test (N items cost at most K starts, statements or invokes).

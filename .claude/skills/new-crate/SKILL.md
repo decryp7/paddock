@@ -10,6 +10,7 @@ here (rule 43), no `unwrap`/`expect` on user data or I/O, typed library errors. 
 Work in your own worktree with its own `CARGO_TARGET_DIR`; heavy steps through the build semaphore.
 
 ## Steps
+0. **Name it by the concept, not the first format or consumer** (rule 42: `paddock-diagrams`, not `paddock-drawio`).
 1. **Create `crates/paddock-<name>/`** with `Cargo.toml`:
    - `edition.workspace = true`, `license.workspace = true`, `repository.workspace = true` (workspace metadata, no own copies);
    - `publish = ["decryp7"]` (anything else makes `scripts/publish.mjs` and conformance C37 fail);
