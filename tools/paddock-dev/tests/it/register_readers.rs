@@ -117,3 +117,12 @@ fn the_scope_register_reader() {
             .contains("zz_unknown_key")
     );
 }
+
+#[test]
+fn the_maps_refuse_a_nested_value_of_the_wrong_shape() {
+    // The pins' `[features.<crate>]` and the scope register's `[first_green]` are maps whose keys are data; their shape is the check.
+    let pins = locks_guard::parse_pins("watch = []\n[features.x]\n\"apps/a\" = \"not a list\"\n").unwrap_err();
+    assert!(pins.contains("docs/shared-crate-features.toml"), "{pins}");
+    let scope = run_scope::recorded("[first_green]\n\"ci.yml\" = \"nine\"\n", "ci.yml").unwrap_err();
+    assert!(scope.contains("docs/ci-scope-first-runs.toml"), "{scope}");
+}

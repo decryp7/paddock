@@ -543,6 +543,16 @@ mod tests {
     }
 
     #[test]
+    fn the_approvals_register_refuses_an_unknown_key_inside_an_entry_and_reads_the_right_spelling() {
+        let ok = "version = 1\n[[approved]]\ncontract = \"c.json\"\nby = \"user\"\ndate = \"2026-11-23\"\nwhy = \"a reason\"\nentries = [\"only macos-latest a::\"]\n";
+        assert_eq!(approvals(ok).unwrap()["c.json"].len(), 1);
+        let e = approvals(&ok.replace("why =", "whyy =")).unwrap_err();
+        assert!(e.contains("whyy") && e.contains("docs/os-removals.toml"), "{e}");
+        let e = approvals(&format!("{ok}extra = 1\n")).unwrap_err();
+        assert!(e.contains("extra"), "{e}");
+    }
+
+    #[test]
     fn removal_keys_name_every_skip_and_only_entry_and_never_an_add() {
         let e = ex(json!({
             "add": [{"name": "a", "reason": "a reason here"}],
