@@ -117,6 +117,8 @@ pub fn allowed_names() -> Vec<&'static str> {
     let mut names: Vec<&'static str> = REDIRECTED.to_vec();
     names.push("PATH");
     names.extend(FIXED.iter().map(|(k, _)| *k));
+    // Set by the kit, never read from the machine: this test process's pid (ER-51, paddock_env::lifeline).
+    names.push(paddock_env::lifeline::VAR);
     names.extend(PASSED_THROUGH.iter().copied());
     names.extend(paddock_env::restricting_names());
     names.sort_unstable();
@@ -322,6 +324,9 @@ impl TestCommand {
             .chain(curated.tail.iter().cloned())
             .collect();
         cmd.env("PATH", join_paths(&path));
+        // ER-51: this test process is the lifeline of anything the child leaves running on purpose (a CI slot holder): such a helper
+        // ends when the test ends, also when nextest stopped the test before its clean-up ran (paddock_env::lifeline).
+        cmd.env(paddock_env::lifeline::VAR, std::process::id().to_string());
         let base = cmd
             .get_envs()
             .filter_map(|(k, v)| v.map(|v| (k.to_os_string(), v.to_os_string())))
@@ -1310,6 +1315,21 @@ mod tests {
 
     fn config_of(dir: &Path) -> String {
         std::fs::read_to_string(dir.join(".git/config")).unwrap()
+    }
+
+    /// ER-51: every child of a test command names this test process as its lifeline, also after `env_clear` (the kit's base).
+    #[test]
+    fn every_command_names_this_test_process_as_the_lifeline() {
+        let me = std::process::id().to_string();
+        let lifeline = |c: &TestCommand| {
+            c.get_envs()
+                .find(|(k, _)| *k == paddock_env::lifeline::VAR)
+                .and_then(|(_, v)| v.map(|v| v.to_string_lossy().into_owned()))
+        };
+        let mut c = TestCommand::new("git");
+        assert_eq!(lifeline(&c).as_deref(), Some(me.as_str()));
+        c.env_clear();
+        assert_eq!(lifeline(&c).as_deref(), Some(me.as_str()));
     }
 
     #[test]

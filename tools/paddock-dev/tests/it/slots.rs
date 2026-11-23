@@ -139,6 +139,42 @@ fn a_killed_holder_frees_its_slot_at_once() {
     assert!(job.exists());
 }
 
+/// ER-51: a holder started under a test (`PADDOCK_LIFELINE_PID`, which every TestCommand sets to the test process) lets go when that
+/// process ends, so a test that nextest ended before its `release` (its job folder, a temporary folder, is then never removed) leaves no
+/// holder behind. Before this the holder lived on for its whole `--max-hold-secs` (3.5 h by default): orphaned `ci slot hold --max 3`
+/// processes (ppid 1) were found four times after timed-out runs (rule 89). The lifeline here is a stand-in process the test ends.
+#[test]
+fn a_holder_lets_go_when_its_lifeline_process_ends() {
+    let d = tempfile::tempdir().unwrap();
+    let (root, job) = (d.path().join("ci"), d.path().join("job"));
+    std::fs::create_dir(&job).unwrap();
+    let mut life = TestCommand::new("sleep").arg("60").spawn().unwrap();
+    let pid = life.id().to_string();
+    let out = crate::dev_bin::command()
+        .args([
+            "--json",
+            "ci",
+            "slot",
+            "acquire",
+            "--max",
+            "1",
+            "--owner",
+            job.to_str().unwrap(),
+            "--root",
+            root.to_str().unwrap(),
+        ])
+        .args(["--poll-ms", POLL, "--max-hold-secs", "120", "--acquire-grace-ms", "50"])
+        .env(paddock_env::lifeline::VAR, &pid)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(!is_free(&root, 1), "the holder holds the slot while its lifeline runs");
+    life.kill().unwrap();
+    let _ = life.wait();
+    wait_until_free(&root, 1);
+    assert!(job.exists(), "the job folder is still there: only the lifeline ended the hold");
+}
+
 #[test]
 fn racing_acquirers_never_share_a_slot() {
     const SLOTS: usize = 3;

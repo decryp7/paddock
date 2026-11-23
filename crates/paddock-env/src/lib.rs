@@ -20,6 +20,7 @@
 //! - [`cargo_layout`]: the profile folder above a test program or `OUT_DIR`, in cargo's old and 1.100 build-folder layouts.
 //! - [`winpath`]: Windows paths without the verbatim `\\?\` prefix, in one place (`plain`, `for_tools`, `real*`, `same`).
 //! - [`home_guard`]: the one "is this folder inside the home folder" check (symlinks resolved), shared by `heavy` and `paddock-dev`.
+//! - [`lifeline`]: the variable that names the test process whose life bounds a helper a tested program leaves running (ER-51).
 //! - [`text_busy`]: the bounded retry of `ETXTBSY` for a program that was written or ended a moment ago (shared by `paddock-proc`
 //!   and the test kit).
 //!
@@ -36,6 +37,7 @@ mod error;
 pub mod file_identity;
 mod folder;
 pub mod home_guard;
+pub mod lifeline;
 pub mod private;
 mod process_vars;
 pub mod starts;
