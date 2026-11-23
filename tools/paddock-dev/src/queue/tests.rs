@@ -1,3 +1,4 @@
+// ci-runs-reader: the queue tests script verdicts and only compare a job-page link of the runs API in a fix item
 //! The queue's tick against an in-memory Gitea (the ledger's fake), real git in temporary repositories (a bare origin, the
 //! queue's checkout and an author's checkout) and a scripted CI and gates. No real server, no network (ER-14).
 
