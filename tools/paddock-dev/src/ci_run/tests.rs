@@ -383,6 +383,51 @@ fn golden_mode(ci: Option<&str>, update: Option<&str>) -> Result<paddock_testkit
     Ok(mode)
 }
 
+/// A landing run (`landing_base` set, no `base`) runs the generator check on the diff it tests (ER-40, user 2026-11-23): `train-gates`,
+/// which has the generator step for a member run, needs a `base`, so the conformance job carries the step for the landing. The steps
+/// that prepare it (the pinned libduckdb, the UI packages, cargo-about) are guarded the same way.
+#[test]
+fn a_landing_run_runs_the_generator_check_in_the_conformance_job() {
+    let ci = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.gitea/workflows/ci.yml")).unwrap();
+    let wf = crate::check::util::workflows::read(".gitea/workflows/ci.yml", &ci.replace("\r\n", "\n"));
+    let job = wf
+        .jobs
+        .iter()
+        .find(|j| j.id == "conformance")
+        .expect("ci.yml has a conformance job");
+    let steps = crate::check::util::workflows::parse_steps(&job.text);
+    let gen_steps: Vec<_> = steps
+        .iter()
+        .filter(|s| s.run.as_deref().is_some_and(|r| r.trim().starts_with("./dev gen check")))
+        .collect();
+    assert_eq!(gen_steps.len(), 1, "one generator step in the conformance job: {gen_steps:?}");
+    let g = gen_steps[0];
+    assert!(g.text.contains("landing_base != ''"), "only a landing run: {}", g.text);
+    assert!(
+        g.run.as_deref().unwrap().contains("--base \"$LANDING_BASE\""),
+        "diffed from the landing base: {:?}",
+        g.run
+    );
+    assert!(
+        g.env.iter().any(|(k, v)| k == "LANDING_BASE" && v.contains("inputs.landing_base")),
+        "{:?}",
+        g.env
+    );
+    // What the check reads is prepared in the same job, before it, under the same guard (a missing one is NOT MEASURED, never a pass).
+    let at = steps.iter().position(|s| s.line == g.line).unwrap();
+    for needle in [
+        "npm ci --ignore-scripts\n",
+        "libduckdb-env.sh",
+        "npm run build -w ui",
+        "cargo install cargo-about --version 0.9.2",
+    ] {
+        let prep = steps[..at]
+            .iter()
+            .find(|s| s.run.as_deref().is_some_and(|r| format!("{r}\n").contains(needle)) && s.text.contains("landing_base != ''"));
+        assert!(prep.is_some(), "a guarded step runs `{needle}` before the generator check");
+    }
+}
+
 #[test]
 fn the_contracts_run_exactly_the_commands_in_the_golden() {
     use paddock_testkit::golden::{GoldenMode, UPDATE_VAR, check_golden};
