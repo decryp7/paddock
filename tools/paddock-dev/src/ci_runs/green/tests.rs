@@ -193,6 +193,27 @@ fn grade(f: &mut Fake, r: &Run, t: Touched) -> Outcome {
     grade_on(f, r, t, true)
 }
 
+/// The runs are moved into the server: a copy of one, made from its parts.
+fn clone_run(r: &Run) -> Run {
+    Run {
+        id: r.id,
+        sha: r.sha.clone(),
+        event: r.event,
+        branch: r.branch,
+        conclusion: r.conclusion,
+        status: r.status,
+        attempt: r.attempt,
+        plan: r.plan.clone(),
+        jobs: r.jobs.clone(),
+        logs: r.logs.clone(),
+        earlier: r.earlier.clone(),
+    }
+}
+
+fn older_clone(r: &Run) -> Run {
+    clone_run(r)
+}
+
 fn fix_items(o: &Outcome) -> &[FixItem] {
     match &o.result {
         GradedResult::GreenWithFixItems(items) => items,
@@ -381,6 +402,59 @@ fn a_step_skipped_because_of_a_failure_makes_the_run_partial_not_green_on_either
 }
 
 #[test]
+fn a_newer_failed_full_run_blocks_an_older_green_one_even_when_it_is_graded_but_not_granted() {
+    // P1 of review round 2: the older run is complete and green; the newer one failed with only a FLAKY test but a declared job was
+    // skipped (or its declared scope cannot be shown). The newest full run decides (ER-15): the commit is not green.
+    let c = sha(2);
+    let older = Run::push(8600, &c, "success");
+    let skipped = Run::train(8601, &c, "failure")
+        .failing(CRATE, CRATE_FLAKY)
+        .edit("conformance", |j| j["conclusion"] = json!("skipped"));
+    // The report-only phase with a plan log that has the old line only (no declared scope): fix items are refused.
+    let no_scope = Run::train(8602, &c, "failure")
+        .failing(CRATE, CRATE_FLAKY)
+        .partial("plan verdict: complete=true\n");
+    for (newer, decisive) in [(&skipped, true), (&skipped, false), (&no_scope, false)] {
+        let runs = [older_clone(&older), clone_run(newer)];
+        let mut f = server(&runs);
+        let refs: Vec<RunInfo> = runs.iter().map(Run::info).collect();
+        let refs: Vec<&RunInfo> = refs.iter().collect();
+        let got = commit_outcome(&mut client(&mut f), &refs, decisive, &mut |_| Some(touched(&["debrief"]))).expect("an outcome");
+        assert_eq!(got.run, newer.id, "decisive={decisive}: the newer run decides");
+        assert!(got.outcome.blocking && !got.outcome.is_base(), "decisive={decisive}: {got:?}");
+        let found = find_base(&mut client(&mut f), "ci.yml", std::slice::from_ref(&c), decisive, &mut |_, _| {
+            Some(touched(&["debrief"]))
+        });
+        assert_eq!(found.unwrap(), None, "decisive={decisive}: no base");
+    }
+    // Positive control: a newer run that is only smaller (a smoke push) does not block: the older green decides.
+    let smoke = Run::push(8603, &c, "success").partial(run_scope::TEST_PARTIAL);
+    let runs = [older_clone(&older), smoke];
+    let mut f = server(&runs);
+    assert_eq!(base(&mut f, std::slice::from_ref(&c), touched(&[])).map(|b| b.run), Some(8600));
+}
+
+#[test]
+fn a_declared_job_that_did_not_run_makes_a_run_partial_on_both_bases() {
+    // P2-0: ER-41's report-only phase decides on the old line, which never checked the jobs. A skipped declared job is partial on
+    // either basis, green or not, until new runs carry the scope line and the first green scope run is recorded.
+    let c = sha(2);
+    for conclusion in ["success", "failure"] {
+        let r = Run::train(8610, &c, conclusion).edit("conformance", |j| j["conclusion"] = json!("skipped"));
+        for decisive in [true, false] {
+            let mut f = server(std::slice::from_ref(&r));
+            let o = grade_on(&mut f, &r, touched(&[]), decisive);
+            assert!(o.scope == Scope::Partial && !o.is_base(), "{conclusion} decisive={decisive}: {o:?}");
+        }
+        // The old line on its own (no scope line, as the runs before ADR 0113) still decides: complete and green.
+        let old = Run::train(8611, &c, conclusion).partial("plan verdict: complete=true\n");
+        let mut f = server(std::slice::from_ref(&old));
+        let o = grade_on(&mut f, &old, touched(&[]), false);
+        assert_eq!(o.scope, Scope::Complete, "{conclusion}: {o:?}");
+    }
+}
+
+#[test]
 fn a_cancelled_job_in_a_failed_run_is_not_measured_on_either_basis() {
     let c = sha(2);
     let r = Run::train(8610, &c, "failure")
@@ -530,7 +604,10 @@ fn the_change_of_a_train_is_measured_from_the_last_good_commit_not_from_its_last
             touched(&["dyno"])
         })
     };
-    let t = touched_since_base(&mut client(&mut f), "ci.yml", &[m1.clone(), b.clone()], &head, true, &mut plan_of).expect("planned");
+    let t = {
+        let runs = Runs::read(&mut client(&mut f), "ci.yml").unwrap();
+        touched_since_base(&mut client(&mut f), &runs, &[m1.clone(), b.clone()], &head, true, &mut plan_of).expect("planned")
+    };
     assert_eq!(
         *asked.borrow(),
         vec![(b.clone(), head.clone())],
@@ -539,12 +616,14 @@ fn the_change_of_a_train_is_measured_from_the_last_good_commit_not_from_its_last
     assert!(t.reaches(APP), "member 1's app is reached");
     // No good commit among the candidates: the change cannot be bounded, every target is reached.
     let mut f = server(&[]);
-    let all = touched_since_base(&mut client(&mut f), "ci.yml", &[m1], &head, true, &mut plan_of).expect("bounded as everything");
+    let runs = Runs::read(&mut client(&mut f), "ci.yml").unwrap();
+    let all = touched_since_base(&mut client(&mut f), &runs, &[m1], &head, true, &mut plan_of).expect("bounded as everything");
     assert!(all.all && all.reaches(APP) && all.reaches(CRATE));
     // A range that cannot be planned is not measured.
     let mut f = server(std::slice::from_ref(&good));
+    let runs = Runs::read(&mut client(&mut f), "ci.yml").unwrap();
     assert_eq!(
-        touched_since_base(&mut client(&mut f), "ci.yml", &[b], &head, true, &mut |_, _| None),
+        touched_since_base(&mut client(&mut f), &runs, &[b], &head, true, &mut |_, _| None),
         None
     );
 }
@@ -615,4 +694,42 @@ fn the_candidates_are_the_first_parent_commits_before_the_asking_one_newest_firs
         first_parent_before(dir.path(), &"f".repeat(40)).is_empty(),
         "an unknown commit gives no candidates, so everything runs"
     );
+}
+
+#[test]
+fn the_search_with_a_touched_measure_reads_the_run_list_once() {
+    // P2-2: a commit whose run failed with only FLAKY tests needs a measure of what its change touched, which searches for the last good
+    // commit in the same run list. 150 commits, runs on three pages; the newest candidate is a FLAKY-only landing (it asks the measure,
+    // which is not constant: it plans a range from the base it found), the last one the plain green base. The run list is read in three
+    // requests in all, however many measures run.
+    let commits: Vec<String> = (1..=150u32).rev().map(sha).collect();
+    let mut runs: Vec<Run> = vec![Run::train(9500, &commits[0], "failure").failing(CRATE, CRATE_FLAKY)];
+    for i in 1..139u32 {
+        runs.push(Run::push(9000 - u64::from(i), &commits[i as usize], "cancelled"));
+    }
+    runs.push(Run::train(8000, &commits[139], "success"));
+    let mut f = server(&runs);
+    let planned = std::cell::RefCell::new(Vec::new());
+    let found = {
+        let mut c = client(&mut f);
+        let list = Runs::read(&mut c, "ci.yml").unwrap();
+        find_base_in(&mut c, &list, &commits, true, &mut |c, list, sha| {
+            let at = commits.iter().position(|x| x == sha).unwrap();
+            touched_since_base(c, list, &commits[at + 1..], sha, true, &mut |b, h| {
+                planned.borrow_mut().push((b.to_string(), h.to_string()));
+                Some(touched(&["debrief"]))
+            })
+        })
+    };
+    // The FLAKY reaches nothing of the change, so the newest commit is the base, with fix items.
+    let base = found.expect("a base");
+    assert_eq!(base.sha, commits[0]);
+    assert!(matches!(base.outcome.result, GradedResult::GreenWithFixItems(_)));
+    assert_eq!(
+        *planned.borrow(),
+        vec![(commits[139].clone(), commits[0].clone())],
+        "the range starts at the last good commit"
+    );
+    let pages = f.requested().iter().filter(|u| u.contains("/runs?limit=50&page=")).count();
+    assert_eq!(pages, 3, "the run list is read once: {:?}", f.requested());
 }

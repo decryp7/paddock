@@ -123,6 +123,10 @@ impl Ledger for GiteaLedger<'_> {
         self.api.comment(number, text)
     }
 
+    fn comments(&mut self, number: u64) -> Result<Vec<String>, String> {
+        self.api.comments(number)
+    }
+
     fn approved_head(&mut self, pr: &Pull) -> Result<bool, String> {
         // Never the pull request's own author, even if review-bot opened it.
         let allowed: Vec<&str> = APPROVERS.iter().copied().filter(|a| *a != pr.author).collect();

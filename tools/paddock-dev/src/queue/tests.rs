@@ -222,6 +222,9 @@ impl Ledger for Hooked<'_> {
         }
         self.inner.comment(n, t)
     }
+    fn comments(&mut self, n: u64) -> Result<Vec<String>, String> {
+        self.inner.comments(n)
+    }
     fn approved_head(&mut self, pr: &Pull) -> Result<bool, String> {
         self.inner.approved_head(pr)
     }
@@ -489,6 +492,29 @@ fn a_failed_run_that_is_green_with_fix_items_lands_and_records_them() {
     let landed = comments.iter().find(|c| c.contains("landed on main")).expect("the landing comment");
     assert!(landed.contains("run 8001") && landed.contains("44761"), "{landed}");
     // A plain green records nothing.
+}
+
+#[test]
+fn a_retried_tick_does_not_write_the_fix_items_twice() {
+    // The first tick wrote the comment and ended before the landing; the retry finds it on the pull request and writes nothing again.
+    let mut w = World::new();
+    w.approved(1, "crates/x/new.rs", &["x"]);
+    let Tick::Built { head, .. } = w.tick() else { panic!() };
+    w.tick();
+    w.run(&head, 8001, RunState::Failed("failure".into()));
+    let items = vec![fix_item()];
+    w.ci.verdicts.insert(
+        ("ci.yml".to_string(), head.clone()),
+        Verdict::GreenWithFixItems {
+            run: 8001,
+            items: items.clone(),
+        },
+    );
+    let text = super::tick::fix_comment(&vec![("ci.yml".to_string(), 8001, items)]);
+    w.gitea.comments.push((1, text.clone()));
+    assert!(matches!(w.tick(), Tick::Landed { .. }));
+    let n = w.comments_of(1).iter().filter(|c| c.as_str() == text).count();
+    assert_eq!(n, 1, "{:?}", w.comments_of(1));
 }
 
 #[test]

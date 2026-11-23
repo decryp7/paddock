@@ -11,4 +11,8 @@
 # The tool refuses a run that is not finished and green, whose plan job declared another workflow or no scope, or whose declared scope
 # is not complete (not covering a push to main's, or a declared job skipped). After it names a producer, the producer's old line is
 # deleted in the same change (conformance `ci-verdict-reader.test.mjs` fails while a recorded producer still prints it).
+# 2026-11-23, CI stopped: no run carries the scope line yet, so the table stays empty. When CI resumes, record the first complete green ci.yml
+# run that carries the line, in one step, with `./dev ci scope-record --workflow ci.yml --run <id>` (ER-41). Until then a run without the
+# line is decided on the old line, but a declared job that did not run makes a run partial on both bases (`ci_runs::green`, ADR 0117 WP-4),
+# so such a run is planned from again; once the first run is recorded the declared scope decides everywhere.
 [first_green]

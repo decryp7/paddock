@@ -95,6 +95,18 @@ impl Http for FakeGitea {
         if path.starts_with("/labels?") {
             return Ok(self.page(self.labels.clone(), url));
         }
+        if let Some(rest) = path.strip_prefix("/issues/")
+            && let Some((n, _)) = rest.split_once("/comments")
+        {
+            let n: u64 = n.parse().map_err(|_| not_found(url))?;
+            let bodies: Vec<Value> = self
+                .comments
+                .iter()
+                .filter(|(c, _)| *c == n)
+                .map(|(_, t)| json!({"body": t}))
+                .collect();
+            return Ok(Value::Array(bodies));
+        }
         if let Some(rest) = path.strip_prefix("/issues/") {
             let n: u64 = rest.parse().map_err(|_| not_found(url))?;
             return self.pulls.iter().find(|p| p["number"] == n).cloned().ok_or_else(|| not_found(url));

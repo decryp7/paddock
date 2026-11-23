@@ -77,8 +77,11 @@ fn green_base_in(
     use crate::ci_runs::{green, verdict};
     let first_parent = green::first_parent_before(root, "HEAD");
     let scope = verdict::scope_decisive("ci.yml");
-    let found = green::find_base(client, "ci.yml", &first_parent, scope, &mut |c, s| {
-        green::touched_in(c, "ci.yml", root, s, scope)
+    // The run list is read once for the whole search, and handed to the measure of what each candidate touched.
+    let found = green::Runs::read(client, "ci.yml").map(|runs| {
+        green::find_base_in(client, &runs, &first_parent, scope, &mut |c, runs, s| {
+            green::touched_in(c, "ci.yml", root, s, scope, Some(runs))
+        })
     });
     match found {
         Ok(base) => Ok(base.map(|b| (b.sha, b.run))),

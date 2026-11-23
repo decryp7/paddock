@@ -443,13 +443,21 @@ fn dispatch(p: &mut Ports, env: &Env, head: &str, workflow: &str, inputs: Vec<(S
 
 /// The FLAKY tests of the runs a landing rests on (ADR 0117 WP-4, ER-12): workflow, run, and the fix items of each run that is green
 /// with fix items. They are written to the pull requests before the fast-forward, and listed again in the landing comment.
-type FixRecord = Vec<(String, u64, Vec<FixItem>)>;
+pub(super) type FixRecord = Vec<(String, u64, Vec<FixItem>)>;
 
 fn fix_lines(fix: &FixRecord) -> String {
     fix.iter()
-        .flat_map(|(wf, run, items)| items.iter().map(move |i| format!("- {wf}: {}", i.line(*run))))
+        .flat_map(|(wf, run, items)| crate::ci_runs::fix_items::lines(wf, *run, items))
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+/// The comment written to every pull request of a train that lands on runs that are green with fix items.
+pub(super) fn fix_comment(fix: &FixRecord) -> String {
+    format!(
+        "queue: landing on runs that are green with fix items. Their FLAKY tests (failed, then passed on the one retry), in crates and apps the change did not reach, are fix items for the next train (ER-12):\n{}",
+        fix_lines(fix)
+    )
 }
 
 /// Writes the fix items to every pull request of the train. A failed write stops the landing: nothing lands on a green with fix
@@ -458,11 +466,13 @@ fn record_fix_items(p: &mut Ports, in_train: &[&Pull], fix: &FixRecord) -> Resul
     if fix.is_empty() {
         return Ok(());
     }
-    let text = format!(
-        "queue: landing on runs that are green with fix items. Their FLAKY tests (failed, then passed on the one retry), in crates and apps the change did not reach, are fix items for the next train (ER-12):\n{}",
-        fix_lines(fix)
-    );
+    let text = fix_comment(fix);
     for pr in in_train {
+        // A tick that is retried after this wrote it (and before the landing) writes nothing twice.
+        let existing = p.ledger.comments(pr.number)?;
+        if crate::ci_runs::fix_items::already_commented(&existing, &text) {
+            continue;
+        }
         p.ledger.comment(pr.number, &text).map_err(|e| {
             format!(
                 "the fix items could not be recorded on pull request {} ({e}); nothing lands on an unrecorded green with fix items",
@@ -684,7 +694,7 @@ fn finish_landing(p: &mut Ports, head: &str, in_train: &[&Pull], fix: &FixRecord
                     format!("queue: landed on main as {} (fast-forward of the tested train).", short(head))
                 } else {
                     format!(
-                        "queue: landed on main as {} (fast-forward of the tested train), on runs that are green with fix items:\n{}",
+                        "queue: landed on main as {} (fast-forward of the tested train), on runs that are green with fix items:\n{}\nRecord them in docs/lessons.md: ./dev ci fix-items --workflow ci.yml --sha {head}",
                         short(head),
                         fix_lines(fix)
                     )

@@ -16,6 +16,7 @@
 pub mod cache_audit;
 pub mod client;
 pub mod dispatch;
+pub mod fix_items;
 pub mod flakes;
 pub mod green;
 pub mod logfind;
@@ -203,6 +204,26 @@ pub struct VerdictArgs {
     /// The full 40-hex commit id.
     #[arg(long)]
     sha: String,
+    /// The repository.
+    #[arg(long, default_value = "decryp7/paddock")]
+    repo: String,
+    /// The Gitea server.
+    #[arg(long, default_value = SERVER)]
+    server: String,
+}
+
+/// Arguments of `ci fix-items`.
+#[derive(Args)]
+pub struct FixItemsArgs {
+    /// The workflow file whose runs are read (`ci.yml`).
+    #[arg(long)]
+    workflow: String,
+    /// The full 40-hex commit id that landed.
+    #[arg(long)]
+    sha: String,
+    /// The checkout whose docs/lessons.md is written (default: the current folder).
+    #[arg(long)]
+    root: Option<std::path::PathBuf>,
     /// The repository.
     #[arg(long, default_value = "decryp7/paddock")]
     repo: String,
@@ -642,6 +663,55 @@ pub fn verdict(a: &VerdictArgs) -> Result<Report, CliError> {
         eprintln!("::error::ci verdict: {}", r.text);
     }
     Ok(r)
+}
+
+/// `ci fix-items`: records the fix items of the verdict on `--sha` in `docs/lessons.md` ([`fix_items::record`]). A plain green has none; a
+/// red or partial verdict or one that is not measured is reported with its exit code and writes nothing.
+pub fn fix_items_cmd(a: &FixItemsArgs) -> Result<Report, CliError> {
+    if a.sha.len() != 40 || !a.sha.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
+        return Err(CliError::usage(format!("--sha {:?} is not a full 40-hex commit id.", a.sha))
+            .with_hint("Pass the whole sha (`git rev-parse HEAD`)."));
+    }
+    let root = a
+        .root
+        .clone()
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")));
+    let v = match token() {
+        Err(_) => verdict::Verdict::NotMeasured("GITEA_TOKEN is not set, so the runs cannot be read".into()),
+        Ok(token) => {
+            let mut http = CurlHttp;
+            let mut client = Client::new(&mut http, &a.server, &a.repo, &token);
+            verdict::verdict_at(&mut client, &a.workflow, &a.sha, &root)
+        }
+    };
+    match v {
+        verdict::Verdict::GreenWithFixItems { run, items } => {
+            let done = fix_items::record(&root, &a.workflow, run, &a.sha, &items).map_err(|e| {
+                CliError::failure(format!("the fix items of run {run} could not be recorded: {e}"))
+                    .with_hint("Run it in a checkout of the repository (--root).")
+            })?;
+            let text = match done {
+                fix_items::Recorded::Added => format!("{} fix item(s) of run {run} added to {}", items.len(), fix_items::LESSONS),
+                fix_items::Recorded::Already => {
+                    format!("the {} fix item(s) of run {run} are in {} already", items.len(), fix_items::LESSONS)
+                }
+            };
+            Ok(Report::new(
+                serde_json::json!({"run": run, "items": items.len(), "recorded": done == fix_items::Recorded::Added}),
+                text,
+            ))
+        }
+        verdict::Verdict::Green { run } => Ok(Report::new(
+            serde_json::json!({"run": run, "items": 0}),
+            format!("run {run} is plain green: no fix items"),
+        )),
+        verdict::Verdict::Red { reason, .. } => {
+            Ok(Report::new(serde_json::json!({"verdict": "red"}), format!("not recorded: {reason}")).with_exit(Exit::Findings))
+        }
+        verdict::Verdict::NotMeasured(why) => {
+            Ok(Report::new(serde_json::json!({"verdict": "not_measured"}), format!("not recorded: {why}")).with_exit(Exit::NotMeasured))
+        }
+    }
 }
 
 /// `ci cache-audit`: the cache keys of the last runs that were never saved (ADR 0115). Report-only unless `--fail-on-never-saved`.

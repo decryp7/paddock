@@ -124,3 +124,10 @@ shared crate's manifest under `crates/`), measured from the same base as the res
 decides the arguments and the printed line). A push that skips them prints `advisories skipped` and names the nightly audit that covers
 them. A run with a file list the caller gave (`--files`) is not measured from the base, so it runs them (not measured never passes, ADR 0089). Reason: an outside advisory (lettre 0.11.23,
 2026-11-18) turned every push of every branch red, also those that touch no dependency.
+
+**Fix items of a landing (ADR 0117 WP-4, ER-12).** A commit may land on a run that is green with fix items: red only through FLAKY tests of crates and
+apps its plan did not reach (`ci_runs/green.rs`, the one definition of green that `./dev ci verdict`, `./dev ci reuse`, the queue and the planner's base
+read). The queue writes each fix item (run, job, test, job page) to the pull requests before it fast-forwards, once whatever the number of ticks, and
+refuses to land when it cannot. The project's home for them is `docs/lessons.md`: after a landing, the queue's or an integrator's by hand, run
+`./dev ci fix-items --workflow ci.yml --sha <the landed commit>` in the checkout; it adds one bullet, once, in the shape of the earlier ones. A tag
+needs plain green, so a commit with fix items takes the one allowed retry, a manual `workflow_dispatch` of ci.yml on that commit (ER-49).

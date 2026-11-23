@@ -73,6 +73,9 @@ pub enum Mode {
     Full,
     /// Not a full run (the plan job says so, or has no marker).
     Partial(String),
+    /// A full run that did not finish what it declared: a declared job was skipped or cancelled (usually after a failure). It is the
+    /// newest attempt at a full run, not a smaller run, so it blocks an older green run from deciding the commit.
+    Incomplete(String),
     /// Could not be told (an unreadable job list or log): it might be a newer full run.
     Unknown(String),
 }
@@ -123,7 +126,7 @@ fn scope_mode(run: &RunInfo, jobs: &[super::client::TimedJob], log: &str) -> Mod
                 let pairs: Vec<(String, String)> = jobs.iter().map(|j| (j.name.clone(), j.conclusion.clone())).collect();
                 match run_scope::check_ran(&d, &pairs) {
                     Ok(()) => Mode::Full,
-                    Err(run_scope::RanProblem::NotRun(why)) => Mode::Partial(format!("its declared scope was not run: {why}")),
+                    Err(run_scope::RanProblem::NotRun(why)) => Mode::Incomplete(format!("its declared scope was not run: {why}")),
                     Err(run_scope::RanProblem::Missing(why)) => {
                         Mode::Unknown(format!("its declared scope cannot be checked against its jobs: {why}"))
                     }
@@ -151,6 +154,7 @@ fn describe(m: &Mode) -> String {
     match m {
         Mode::Full => "declares a complete scope".into(),
         Mode::Partial(why) => format!("is partial on the declared scope: {why}"),
+        Mode::Incomplete(why) => format!("did not finish its declared scope: {why}"),
         Mode::Unknown(why) => format!("is not measured on the declared scope: {why}"),
     }
 }
@@ -204,8 +208,15 @@ pub(super) fn read_mode_jobs(client: &mut Client, run: &RunInfo, scope_decisive:
         run.id,
         describe(&scope)
     );
+    // A declared job that did not run is a failure of the run, whichever line says "complete": the check holds on both bases, so the
+    // report-only phase cannot count a run that skipped what it declared as complete (ER-41; the first green scope run is recorded
+    // when CI resumes, docs/ci-scope-first-runs.toml).
+    let mode = match (legacy_mode(&log), &scope) {
+        (Mode::Full, Mode::Incomplete(why)) => Mode::Incomplete(why.clone()),
+        (m, _) => m,
+    };
     ModeRead {
-        mode: legacy_mode(&log),
+        mode,
         scope_view: scope,
         jobs,
     }
@@ -260,7 +271,7 @@ pub fn verdict_in(client: &mut Client, workflow: &str, sha: &str, exclude: Optio
         exclude,
         scope,
         &mut || green::first_parent_before(root, sha),
-        &mut |c, s| green::touched_in(c, workflow, root, s, scope),
+        &mut |c, s| green::touched_in(c, workflow, root, s, scope, None),
     )
 }
 
@@ -341,7 +352,7 @@ fn verdict_core(
             decided.outcome.note
         ));
     }
-    if decided.outcome.scope == green::Scope::Partial {
+    if decided.outcome.scope == green::Scope::Partial && !decided.outcome.blocking {
         return Verdict::Red {
             run: None,
             reason: format!(
@@ -406,7 +417,7 @@ pub fn first_green_scope(client: &mut Client, workflow: &str, run_id: u64) -> Re
             "run {run_id} of {workflow} on {} is green and declared a complete scope that ran",
             short(&run.head_sha)
         )),
-        Mode::Partial(why) => Err(format!("run {run_id} is not a complete scope: {why}")),
+        Mode::Partial(why) | Mode::Incomplete(why) => Err(format!("run {run_id} is not a complete scope: {why}")),
         Mode::Unknown(why) => Err(format!("run {run_id} could not be measured: {why}")),
     }
 }
@@ -973,14 +984,14 @@ mod tests {
         assert_eq!(ask(&mut push_with_jobs(&line, &jobs("success"))), Verdict::Green { run: 5 });
         let skipped = ask(&mut push_with_jobs(&line, &jobs("skipped")));
         assert!(
-            matches!(&skipped, Verdict::Red { run: None, reason } if reason.contains("e2e-webkit") && reason.contains("skipped")),
+            matches!(&skipped, Verdict::Red { run: Some(5), reason } if reason.contains("e2e-webkit") && reason.contains("skipped")),
             "{skipped:?}"
         );
         assert_eq!(code(&skipped), 5);
         // Cancelled is the same; a failed job is the run's own red, not a partial scope.
         assert!(matches!(
             ask(&mut push_with_jobs(&line, &jobs("cancelled"))),
-            Verdict::Red { run: None, .. }
+            Verdict::Red { run: Some(5), .. }
         ));
         let failed_run = {
             let mut f = push_with_jobs(&line, &jobs("failure"));
@@ -1224,6 +1235,40 @@ mod tests {
             matches!(v, Verdict::Red { run: None, .. }),
             "a recorded producer: the declared scope decides: {v:?}"
         );
+    }
+
+    #[test]
+    fn a_newer_failed_full_run_with_a_skipped_declared_job_is_not_passed_over_for_an_older_green_run() {
+        // P1 of review round 2 (ER-15): the older push run is complete and green; the newer train run failed with only a FLAKY test and
+        // a declared job (conformance) was skipped. The newest full run decides, so the commit is not green and no tag passes.
+        for scope in [true, false] {
+            // The plan log carries both lines: the report-only phase reads the old one.
+            let plan = format!("{}plan verdict: complete=true\n", run_scope::TEST_COMPLETE);
+            let mut f = server(
+                vec![dispatch(9, "failure"), main_push(4, "success")],
+                &[(9, 44709, Some(plan.as_str()))],
+            );
+            let mut jobs: serde_json::Value = serde_json::from_str(JOBS_8610).unwrap();
+            for j in jobs["jobs"].as_array_mut().unwrap() {
+                if j["name"].as_str().unwrap().starts_with("conformance") {
+                    j["conclusion"] = json!("skipped");
+                }
+            }
+            f.json(&format!("{API}/runs/9/jobs?limit=50&page=1"), jobs);
+            f.log(44761, CRATE_FLAKY);
+            f.log(44768, include_str!("../../tests/ci-runs/nextest-run8610-app-gates-flaky-only.log"));
+            let mut c = Client::new(&mut f, "https://gitea.invalid", "decryp7/paddock", "t");
+            c.backoff_ms = 0;
+            let v = verdict_with_touched(&mut c, "ci.yml", SHA, None, scope, &mut Vec::new, &mut |_, _| {
+                Some(Touched::default())
+            });
+            assert!(
+                !matches!(v, Verdict::Green { .. } | Verdict::GreenWithFixItems { .. }),
+                "scope={scope}: {v:?}"
+            );
+            assert!(matches!(&v, Verdict::Red { run: Some(9), .. }), "scope={scope}: {v:?}");
+            assert_eq!(code(&v), 5);
+        }
     }
 
     #[test]

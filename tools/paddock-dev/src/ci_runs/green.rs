@@ -91,6 +91,10 @@ pub struct Outcome {
     pub note: String,
     /// Set when the run's mode could not be read: it might be a newer complete run, so it blocks the commit's decision.
     pub unreadable: bool,
+    /// Set when the run is graded but not granted: the newest attempt at a full run that did less than it declared, or whose fix
+    /// items were refused. It is no base, and it decides the commit anyway: a newer full run is never passed over for an older green
+    /// one (ER-15, "the newest full run decides"). A smaller run (`Partial` without this) is passed over.
+    pub blocking: bool,
 }
 
 impl Outcome {
@@ -100,7 +104,12 @@ impl Outcome {
             result,
             note: String::new(),
             unreadable: false,
+            blocking: false,
         }
+    }
+    fn blocking(mut self) -> Outcome {
+        self.blocking = true;
+        self
     }
     fn noted(mut self, note: impl Into<String>) -> Outcome {
         self.note = note.into();
@@ -307,6 +316,19 @@ pub fn grade_run(
     let (scope, why) = match read.mode {
         Mode::Full => (Scope::Complete, String::new()),
         Mode::Partial(why) => (Scope::Partial, why),
+        Mode::Incomplete(why) => {
+            let state = if run.conclusion.is_empty() {
+                run.status.as_str()
+            } else {
+                run.conclusion.as_str()
+            };
+            let result = if run.finished() {
+                GradedResult::Red(format!("{state}; {why}"))
+            } else {
+                GradedResult::NotMeasured(format!("run {} is {}", run.id, run.status))
+            };
+            return Outcome::of(Scope::Partial, result).noted(why).blocking();
+        }
         Mode::Unknown(why) => {
             let mut o = Outcome::of(Scope::Partial, GradedResult::NotMeasured(why.clone())).noted(why);
             o.unreadable = true;
@@ -365,7 +387,11 @@ pub fn grade_run(
             Mode::Full => {}
             Mode::Partial(w) => {
                 let n = GradedResult::NotMeasured(format!("fix items need the declared scope to have run: {w}"));
-                return Outcome::of(Scope::Partial, n).noted(w);
+                return Outcome::of(Scope::Partial, n).noted(w).blocking();
+            }
+            Mode::Incomplete(w) => {
+                let n = GradedResult::NotMeasured(format!("fix items need the declared scope to have run: {w}"));
+                return Outcome::of(Scope::Partial, n).noted(w).blocking();
             }
             Mode::Unknown(w) => return Outcome::of(scope, GradedResult::NotMeasured(format!("the declared scope cannot be read: {w}"))),
         }
@@ -386,7 +412,7 @@ pub struct CommitOutcome {
 
 /// The outcome of a commit from its runs: the newest run of the workflow that is complete decides (a newer red one beats an older
 /// green one; a newer cancelled run, or a push that only reused another run and so declared less, does not), and a run whose mode
-/// cannot be read blocks it. Without a complete run, the newest partial one. `None`: no run.
+/// cannot be read, or that was graded but not granted (`Outcome::blocking`), blocks it. Without a complete run, the newest partial one. `None`: no run.
 pub fn commit_outcome(
     client: &mut Client,
     runs: &[&RunInfo],
@@ -399,7 +425,7 @@ pub fn commit_outcome(
     let mut fallback: Option<(u64, Outcome)> = None;
     for r in newest {
         let o = grade_run(client, r, scope_decisive, touched);
-        if o.unreadable || o.scope == Scope::Complete {
+        if o.unreadable || o.blocking || o.scope == Scope::Complete {
             return Some(CommitOutcome {
                 run: r.id,
                 outcome: o,
@@ -423,9 +449,33 @@ pub struct Base {
     pub outcome: Outcome,
 }
 
+/// The runs of one workflow, by the commit they tested: the run list read once (up to [`MAX_PAGES`] pages, all branches and events),
+/// so a search matches runs to commits in memory and never asks the server per commit.
+pub struct Runs(BTreeMap<String, Vec<RunInfo>>);
+
+impl Runs {
+    /// Reads the list.
+    pub fn read(client: &mut Client, workflow: &str) -> Result<Runs, String> {
+        let mut by_sha: BTreeMap<String, Vec<RunInfo>> = BTreeMap::new();
+        for page in 1..=MAX_PAGES {
+            let p = client
+                .runs_page(page)
+                .map_err(|e| format!("the runs of {workflow} could not be listed: {e}"))?;
+            let n = p.runs.len();
+            for r in p.runs.into_iter().filter(|r| workflow_file(&r.path) == workflow) {
+                by_sha.entry(r.head_sha.clone()).or_default().push(r);
+            }
+            if n < 50 {
+                break;
+            }
+        }
+        Ok(Runs(by_sha))
+    }
+}
+
 /// The last first-parent commit (`first_parent`: newest first, the asking commit itself left out) whose outcome is complete and green
-/// with or without fix items. The runs are read once, `MAX_PAGES` pages at most, and matched to commits in memory; `touched(client,
-/// sha)` is asked only for a commit with a FLAKY-only failure. `Ok(None)`: no such commit among them.
+/// with or without fix items. The runs are read once ([`Runs`]); `touched(client, sha)` is asked only for a commit with a FLAKY-only
+/// failure. `Ok(None)`: no such commit among them.
 pub fn find_base(
     client: &mut Client,
     workflow: &str,
@@ -433,43 +483,46 @@ pub fn find_base(
     scope_decisive: bool,
     touched: &mut dyn FnMut(&mut Client, &str) -> Option<Touched>,
 ) -> Result<Option<Base>, String> {
-    let mut by_sha: BTreeMap<String, Vec<RunInfo>> = BTreeMap::new();
-    for page in 1..=MAX_PAGES {
-        let p = client
-            .runs_page(page)
-            .map_err(|e| format!("the runs of {workflow} could not be listed: {e}"))?;
-        let n = p.runs.len();
-        for r in p.runs.into_iter().filter(|r| workflow_file(&r.path) == workflow) {
-            by_sha.entry(r.head_sha.clone()).or_default().push(r);
-        }
-        if n < 50 {
-            break;
-        }
-    }
+    let runs = Runs::read(client, workflow)?;
+    Ok(find_base_in(client, &runs, first_parent, scope_decisive, &mut |c, _, s| {
+        touched(c, s)
+    }))
+}
+
+/// [`find_base`] over runs already read; `touched` is given them too, so a measure of what a change touched searches the same list
+/// instead of reading it again ([`touched_since_base`]).
+pub fn find_base_in(
+    client: &mut Client,
+    runs: &Runs,
+    first_parent: &[String],
+    scope_decisive: bool,
+    touched: &mut dyn FnMut(&mut Client, &Runs, &str) -> Option<Touched>,
+) -> Option<Base> {
     for sha in first_parent.iter().take(MAX_COMMITS) {
-        let Some(runs) = by_sha.get(sha) else { continue };
-        let refs: Vec<&RunInfo> = runs.iter().collect();
-        let mut t = |c: &mut Client| touched(c, sha);
+        let Some(of_sha) = runs.0.get(sha) else { continue };
+        let refs: Vec<&RunInfo> = of_sha.iter().collect();
+        let mut t = |c: &mut Client| touched(c, runs, sha);
         if let Some(CommitOutcome { run, outcome, .. }) = commit_outcome(client, &refs, scope_decisive, &mut t)
             && outcome.is_base()
         {
-            return Ok(Some(Base {
+            return Some(Base {
                 sha: sha.clone(),
                 run,
                 outcome,
-            }));
+            });
         }
     }
-    Ok(None)
+    None
 }
 
 /// What the change since the last good commit touched (ADR 0117 WP-4): the plan from the base the one definition of green finds in
 /// `first_parent` (the commits before `sha`, newest first) to `sha`. A train lands by fast-forward, so `sha^1` is only its last
 /// member; the last good commit before the whole train is the base of everything it added. With no such commit the change cannot
-/// be bounded and every target counts as reached. `plan_of(base, head)` plans a range (`None`: it cannot).
+/// be bounded and every target counts as reached. `plan_of(base, head)` plans a range (`None`: it cannot). The search reads `runs`,
+/// the list the caller already has: no second read of the run list.
 pub fn touched_since_base(
     client: &mut Client,
-    workflow: &str,
+    runs: &Runs,
     first_parent: &[String],
     sha: &str,
     scope_decisive: bool,
@@ -477,13 +530,12 @@ pub fn touched_since_base(
 ) -> Option<Touched> {
     // The candidates are graded without touched targets, so a commit with a FLAKY is not a base here (no recursion): the range only
     // grows, and a larger range reaches more, which is the safe side.
-    match find_base(client, workflow, first_parent, scope_decisive, &mut |_, _| None) {
-        Err(_) => None,
-        Ok(None) => Some(Touched {
+    match find_base_in(client, runs, first_parent, scope_decisive, &mut |_, _, _| None) {
+        None => Some(Touched {
             all: true,
             ..Touched::default()
         }),
-        Ok(Some(base)) => plan_of(&base.sha, sha),
+        Some(base) => plan_of(&base.sha, sha),
     }
 }
 
@@ -517,10 +569,26 @@ pub fn plan_touched_range(root: &std::path::Path, base: &str, head: &str) -> Opt
 
 /// The touched reader of the production paths (`ci verdict`, `ci reuse`, the queue, the planner): [`touched_since_base`] over the
 /// first-parent history of `root`, planned by [`plan_touched_range`]; with no good base, everything counts as reached, and a range
-/// that cannot be planned is `None` (not measured).
-pub fn touched_in(client: &mut Client, workflow: &str, root: &std::path::Path, sha: &str, scope_decisive: bool) -> Option<Touched> {
+/// that cannot be planned is `None` (not measured). `runs` is the list the caller already read (the planner's base search); without
+/// it the list is read here, once.
+pub fn touched_in(
+    client: &mut Client,
+    workflow: &str,
+    root: &std::path::Path,
+    sha: &str,
+    scope_decisive: bool,
+    runs: Option<&Runs>,
+) -> Option<Touched> {
     let first_parent = first_parent_before(root, sha);
-    touched_since_base(client, workflow, &first_parent, sha, scope_decisive, &mut |b, h| {
+    let own;
+    let runs = match runs {
+        Some(r) => r,
+        None => {
+            own = Runs::read(client, workflow).ok()?;
+            &own
+        }
+    };
+    touched_since_base(client, runs, &first_parent, sha, scope_decisive, &mut |b, h| {
         plan_touched_range(root, b, h)
     })
 }
