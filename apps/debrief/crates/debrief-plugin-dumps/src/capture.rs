@@ -61,6 +61,8 @@ impl DumpType {
 pub struct ProcessRow {
     pub pid: u32,
     pub name: String,
+    /// The parent's pid, 0 when there is none, or when the listed parent pid names a process that started after this one (the
+    /// parent ended and Windows handed its pid on: [`sound_parents`]).
     pub parent: u32,
     pub threads: u32,
 }
@@ -96,6 +98,14 @@ impl std::fmt::Display for CaptureError {
 }
 
 impl std::error::Error for CaptureError {}
+
+/// Keeps each row's parent only through a sound link of `table` ([`paddock_proc::parent_of`]), 0 otherwise: a Toolhelp parent
+/// pid outlives its process, and the orphans of an earlier holder of a pid would show under its new holder (ADR 0033).
+pub fn sound_parents(rows: &mut [ProcessRow], table: &paddock_proc::Table) {
+    for row in rows {
+        row.parent = paddock_proc::parent_of(table, row.pid).unwrap_or(0);
+    }
+}
 
 /// Most processes listed.
 pub const MAX_PROCESSES: usize = 8192;
@@ -171,6 +181,7 @@ mod win {
         let snap = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) }
             .map_err(|e| CaptureError::Failed(format!("cannot list processes: {e}")))?;
         let snap = Owned(snap);
+        let listed_at = paddock_proc::listing_started();
         let mut out = Vec::new();
         let mut entry = PROCESSENTRY32W {
             dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
@@ -182,12 +193,23 @@ mod win {
             out.push(ProcessRow {
                 pid: entry.th32ProcessID,
                 name: utf16_name(&entry.szExeFile),
+                // conformance: parent-pid — only the listed parent, judged by sound_parents through the paddock_proc table below
                 parent: entry.th32ParentProcessID,
                 threads: entry.cntThreads,
             });
             // SAFETY: as above.
             ok = unsafe { Process32NextW(snap.0, &mut entry) }.is_ok();
         }
+        let table = paddock_proc::table_of_listing(
+            listed_at,
+            out.iter().map(|r| paddock_proc::Listed {
+                pid: r.pid,
+                parent: Some(r.parent).filter(|&p| p != 0),
+                rss: 0,
+                is_thread: false,
+            }),
+        );
+        sound_parents(&mut out, &table);
         out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()).then(a.pid.cmp(&b.pid)));
         Ok(out)
     }
@@ -284,6 +306,33 @@ mod tests {
         assert_eq!(unused_path(dir.path(), "a.dmp"), dir.path().join("a-2.dmp"));
         assert_eq!(CaptureError::NotFound(3).to_string(), "process 3 is not running (any more)");
         assert!(CaptureError::Unsupported.to_string().contains("not available"));
+    }
+
+    /// Regression (ADR 0033, the class of CI run 8694): the process picker showed the orphans of an earlier holder of a pid under
+    /// its new holder (Toolhelp's parent pid, with no start-time check).
+    #[test]
+    fn a_process_whose_parent_pid_was_handed_on_shows_no_parent() {
+        use paddock_proc::{table_from, ProcEntry, StartTime};
+        let entry = |pid, parent, started: u64| ProcEntry {
+            pid,
+            parent: Some(parent),
+            rss: 0,
+            started: Some(StartTime::from_micros(started)),
+            is_thread: false,
+        };
+        let table = table_from([entry(10, 1, 100), entry(20, 10, 50), entry(30, 10, 200)]);
+        let row = |pid, parent| ProcessRow {
+            pid,
+            name: format!("p{pid}.exe"),
+            parent,
+            threads: 1,
+        };
+        let mut rows = vec![row(20, 10), row(30, 10), row(40, 10)];
+        sound_parents(&mut rows, &table);
+        assert_eq!(
+            rows.iter().map(|r| (r.pid, r.parent)).collect::<Vec<_>>(),
+            [(20, 0), (30, 10), (40, 0)]
+        );
     }
 
     #[cfg(not(windows))]

@@ -12,6 +12,8 @@ description = "Debrief plugin (ADR 0023): crash/memory dump and UMDH heap log re
 debrief-dump = { path = "../debrief-dump" }
 debrief-plugin-api = { path = "../debrief-plugin-api", optional = true }
 anyhow = { workspace = true, optional = true }
+# The process list's parents through the identity table (ADR 0033): the Create dump tool's process picker.
+paddock-proc = { path = "../../../../crates/paddock-proc", optional = true }
 serde.workspace = true
 serde_json.workspace = true
 # rust-minidump (MIT): stream parsing and stack walking (CFI from breakpad symbols when given, frame pointers, scans).
@@ -38,4 +40,4 @@ tempfile.workspace = true
 # The plugin adapter (debrief-plugin-api) and the Windows capture. Without it the crate is the pure readers, which is
 # what the fuzz targets build.
 default = ["plugin"]
-plugin = ["dep:debrief-plugin-api", "dep:anyhow", "dep:windows"]
+plugin = ["dep:debrief-plugin-api", "dep:anyhow", "dep:windows", "dep:paddock-proc"]

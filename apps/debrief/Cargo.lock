@@ -1997,6 +1997,7 @@ dependencies = [
  "debrief-symbols",
  "minidump",
  "minidump-unwind",
+ "paddock-proc",
  "pdb",
  "proptest",
  "serde",
