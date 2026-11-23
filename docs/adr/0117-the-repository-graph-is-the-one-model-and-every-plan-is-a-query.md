@@ -289,7 +289,10 @@ did not touch (ER-12 lets those land as recorded fix items, and nextest's `flaky
 `failure`), then the landing check and the verdict reader use two definitions of "green". That is the class ER-15 forbids ("one
 shared reader defines complete"). Not measured yet: whether every failed job of 8555, 8610 and 8626 was FLAKY-only; WP-4 reads it.
 
-WP-4 fixes the reader, failing tests first:
+WP-4 is built on `origin/feat/verdict-one-green` (`2ea0eaa96`, read 2026-11-23) in `tools/paddock-dev/src/ci_runs/green.rs`, to
+exactly the definition above: a cancelled or skipped run is `Partial × NotMeasured` and no evidence either way (ER-33); a whole-tree
+run (a nightly, a tag, a plan of `all`) is `Complete` without a base, so the base chain ends there; and `ci reuse` (ER-49) accepts
+`Complete × GreenWithFixItems` as well as `Complete × Green`. WP-4 fixes the reader, failing tests first:
 
 1. `last_full` over main's first-parent commits: a main whose push runs are all failed or cancelled, with a green complete train
    run on `67ac6d6ec` (the 8554 shape), names that commit (red today: it names `f7bbe2b86`).
