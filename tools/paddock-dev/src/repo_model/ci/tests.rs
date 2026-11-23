@@ -197,10 +197,18 @@ fn dev_ci_run_and_dev_plan_run_their_projects_and_a_contract_check_line_runs_the
         m.targets("action:plan", EdgeKind::Runs).contains(&"paddock-dev"),
         "G5: the plan job runs the planner"
     );
-    let r = projects(&m, "conformance/bin/paddock-conformance.mjs");
-    // The contract's check line is a step of the app: the CLI it runs is that app's input (in full: only declared setup-only
-    // actions are plumbing, the coordinator's decision of 2026-11-23).
-    assert!(r.get("app:dyno").is_some_and(|k| k.contains(&Reach::Code)), "{r:?}");
+    // The contract's check line is a step of the app (its home is the app's folder): the CLI it runs selects that phase, not
+    // the app's tests (difference 4 of §8).
+    let (hits, _) = m.reach(&["conformance/bin/paddock-conformance.mjs".to_string()]);
+    assert!(hits.contains_key("step:apps/dyno/paddock.ci.json#checks"), "{hits:?}");
+    assert_eq!(
+        m.node("step:apps/dyno/paddock.ci.json#checks").and_then(|n| n.home.as_deref()),
+        Some("apps/dyno")
+    );
+    assert!(
+        !projects(&m, "conformance/bin/paddock-conformance.mjs").contains_key("app:dyno"),
+        "no app suite"
+    );
 }
 
 #[test]
@@ -354,12 +362,16 @@ fn p14_model(ci: &str) -> paddock_repo_graph::model::nodes::Model {
 #[test]
 fn p1_4_defaults_env_source_substitutions_and_every_contract_phase_are_uses() {
     let m = p14_model(P14);
+    let (hits, _) = m.reach(&["conformance/ci/check-index.mjs".to_string()]);
+    assert!(
+        hits.contains_key("step:apps/dyno/paddock.ci.json#ui"),
+        "every contract phase is a step: {hits:?}"
+    );
     for script in [
         "apps/dyno/scripts/local.sh",
         "conformance/ci/kit.sh",
         "conformance/ci/inner.sh",
         "conformance/ci/ports.sh",
-        "conformance/ci/check-index.mjs",
     ] {
         assert!(
             projects(&m, script).contains_key("app:dyno"),
@@ -376,7 +388,10 @@ fn p1_4_defaults_env_source_substitutions_and_every_contract_phase_are_uses() {
     let mut r = p14_repo(P14);
     r = r.with("apps/dyno/paddock.ci.json", r#"{"ui": ["cd apps/dyno/app"]}"#);
     let adapters: Vec<Box<dyn Extractor>> = vec![Box::new(adapter())];
-    assert!(!projects(&build(&r.paths(), &r, &adapters).model, "conformance/ci/check-index.mjs").contains_key("app:dyno"));
+    let (hits, _) = build(&r.paths(), &r, &adapters)
+        .model
+        .reach(&["conformance/ci/check-index.mjs".to_string()]);
+    assert!(!hits.contains_key("step:apps/dyno/paddock.ci.json#ui"));
 }
 
 #[test]
@@ -384,4 +399,28 @@ fn p1_4_a_deleted_script_is_unresolved_and_held_by_its_step_and_runner_paths_are
     let m = p14_model(P14);
     let refs: Vec<(&str, Option<&str>)> = m.unresolved().iter().map(|u| (u.reference.as_str(), u.node.as_deref())).collect();
     assert_eq!(refs, [("conformance/ci/deleted.sh", Some("step:ci.yml#app/4"))], "{refs:?}");
+}
+
+#[test]
+fn a_caller_of_a_reusable_workflow_runs_its_app_only_when_the_callee_releases() {
+    // dyno-release.yml's gates job calls ci.yml: a change ci.yml's conformance job runs reaches conformance, not dyno's suite.
+    let caller =
+        "on: [push]\njobs:\n  gates:\n    uses: ./.gitea/workflows/ci.yml\n  installers:\n    uses: ./.gitea/workflows/app-release.yml\n";
+    let ci = "on: [workflow_call]\njobs:\n  conformance:\n    if: ${{ needs.plan.outputs.conformance == 'true' }}\n    steps:\n      - run: bash conformance/ci/kit.sh\n";
+    let release = "on: [workflow_call]\njobs:\n  bundle:\n    steps:\n      - uses: ./.gitea/actions/tauri-bundle\n";
+    let r = MemoryRead::new()
+        .with(".gitea/workflows/dyno-release.yml", caller)
+        .with(".gitea/workflows/ci.yml", ci)
+        .with(".gitea/workflows/app-release.yml", release)
+        .with(".gitea/actions/tauri-bundle/action.yml", "runs:\n  using: composite\n  steps: []\n")
+        .with("conformance/ci/kit.sh", "echo kit\n");
+    let m = model(&r);
+    assert!(
+        m.targets("job:dyno-release.yml#gates", EdgeKind::Runs).is_empty(),
+        "the non-releasing callee runs for its own jobs"
+    );
+    assert_eq!(m.targets("job:dyno-release.yml#installers", EdgeKind::Runs), ["app:dyno"]);
+    assert!(m.node("job:dyno-release.yml#installers").unwrap().release);
+    let p = projects(&m, "conformance/ci/kit.sh");
+    assert!(p.contains_key("conformance") && !p.contains_key("app:dyno"), "{p:?}");
 }

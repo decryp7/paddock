@@ -122,7 +122,88 @@ fn sel(full: bool, smoke: bool, affected: &[&str], installers: bool) -> Selectio
         smoke,
         affected: affected.iter().map(|s| s.to_string()).collect(),
         installers,
+        phases: BTreeSet::new(),
     }
+}
+
+#[test]
+fn a_release_reach_builds_the_installers_and_still_runs_the_apps_smoke_set_or_its_suite() {
+    // The WP-5 train replay's release-installers-only defect (39 cases): a release reach never drops the app's own gates.
+    let w = world();
+    let mut m = Model::new();
+    let mut a = ModelNode::new(
+        "action:sccache-stats",
+        NodeKind::Action,
+        &[".gitea/actions/sccache-stats/"],
+    );
+    a.setup_only = false;
+    m.add_node(a);
+    let mut bundle = ModelNode::new("job:dyno-release.yml#bundle", NodeKind::Job, &[]);
+    bundle.release = true;
+    m.add_node(bundle);
+    m.add_edge(Edge::new(
+        "job:dyno-release.yml#bundle",
+        "action:sccache-stats",
+        EdgeKind::Uses,
+    ));
+    m.add_edge(Edge::new(
+        "job:dyno-release.yml#bundle",
+        "app:dyno",
+        EdgeKind::Runs,
+    ));
+    let r = run(&w, &m, &[".gitea/actions/sccache-stats/action.yml"]);
+    assert_eq!(r.nodes["app:dyno"].kinds, BTreeSet::from([Reach::Release]));
+    assert_eq!(
+        selection(&r, &smoke())["app:dyno"],
+        sel(false, true, &[], true),
+        "declared: installers and smoke"
+    );
+    assert_eq!(
+        selection(&r, &BTreeSet::new())["app:dyno"],
+        sel(true, false, &[], true),
+        "undeclared: installers and full"
+    );
+}
+
+#[test]
+fn a_contract_phase_a_change_reaches_runs_that_phase_not_the_suite() {
+    // Difference 4 of §8: a conformance change runs each app's conformance step (its `checks` phase), not its tests.
+    let w = world();
+    let mut m = Model::new();
+    m.add_node(ModelNode::new(
+        "script:conformance/bin/cli.mjs",
+        NodeKind::Script,
+        &["conformance/bin/cli.mjs"],
+    ));
+    m.add_node(
+        ModelNode::new("step:apps/dyno/paddock.ci.json#checks", NodeKind::Step, &[])
+            .with_home("apps/dyno"),
+    );
+    m.add_edge(Edge::new(
+        "step:apps/dyno/paddock.ci.json#checks",
+        "script:conformance/bin/cli.mjs",
+        EdgeKind::Runs,
+    ));
+    let r = run(&w, &m, &["conformance/bin/cli.mjs"]);
+    let s = &selection(&r, &smoke())["app:dyno"];
+    assert_eq!(s.phases, BTreeSet::from(["checks".to_string()]));
+    assert!(!s.full && !s.smoke && s.affected.is_empty(), "{s:?}");
+    // Control: without the step's runs edge the app is not reached.
+    let mut c = Model::new();
+    c.add_node(ModelNode::new(
+        "script:conformance/bin/cli.mjs",
+        NodeKind::Script,
+        &["conformance/bin/cli.mjs"],
+    ));
+    c.add_node(
+        ModelNode::new("step:apps/dyno/paddock.ci.json#checks", NodeKind::Step, &[])
+            .with_home("apps/dyno"),
+    );
+    assert!(
+        !run(&w, &c, &["conformance/bin/cli.mjs"])
+            .nodes
+            .contains_key("app:dyno")
+    );
 }
 
 #[test]

@@ -883,6 +883,7 @@ impl Extractor for CiExtractor {
                 x.edges.push(Edge::new(action_id(&a), p, EdgeKind::Runs));
             }
         }
+        let mut reusers: Vec<(String, String, String)> = Vec::new();
         for f in &workflows {
             let Some(text) = texts.get(f) else { continue };
             let root = yaml::parse(text).map_err(|e| bad(f, e))?;
@@ -911,8 +912,9 @@ impl Extractor for CiExtractor {
                     &dir,
                     callers.get(&workflow_id(f)),
                 );
-                if let Some(w) = body.get_text("uses").and_then(|u| u.strip_prefix("./")) {
-                    x.edges.push(Edge::new(&jid, workflow_id(w), EdgeKind::Uses));
+                let callee = body.get_text("uses").and_then(|u| u.strip_prefix("./")).map(workflow_id);
+                if let Some(w) = &callee {
+                    x.edges.push(Edge::new(&jid, w, EdgeKind::Uses));
                 }
                 let mut node = ModelNode::new(&jid, NodeKind::Job, &[]);
                 node.release = used.iter().any(|a| self.decl.release_actions.contains(a));
@@ -929,12 +931,40 @@ impl Extractor for CiExtractor {
                 for out in plan_outputs(body.get_text("if").unwrap_or("")) {
                     runs.extend(self.output_projects(&out));
                 }
-                if let Some(a) = &app {
-                    runs.insert(a.clone());
+                // A job that calls a reusable workflow runs for its app through that workflow's own jobs (ci.yml's app job
+                // runs every app): it adds its app only when the callee releases (bundles, signs, publishes), and is then a
+                // release job itself (fixed up below, once every workflow's release jobs are known).
+                match (&app, &callee) {
+                    (Some(a), Some(w)) => reusers.push((jid.clone(), w.clone(), a.clone())),
+                    (Some(a), None) => {
+                        runs.insert(a.clone());
+                    }
+                    _ => {}
                 }
                 for p in runs {
                     x.edges.push(Edge::new(&jid, p, EdgeKind::Runs));
                 }
+            }
+        }
+        // The callers of a reusable workflow that has a release job: release jobs that run their app (its installers); the
+        // other callers add nothing of their own (a conformance change reaches ci.yml's conformance job, not every app's suite
+        // through dyno-release.yml's gates job, difference 4 of §8).
+        let releasing: BTreeSet<String> = x
+            .nodes
+            .iter()
+            .filter(|n| n.kind == NodeKind::Job && n.release)
+            .filter_map(|n| {
+                n.id.strip_prefix("job:")
+                    .and_then(|r| r.split_once('#'))
+                    .map(|(w, _)| workflow_id(w))
+            })
+            .collect();
+        for (jid, callee, app) in reusers {
+            if releasing.contains(&callee) {
+                if let Some(n) = x.nodes.iter_mut().find(|n| n.id == jid) {
+                    n.release = true;
+                }
+                x.edges.push(Edge::new(&jid, app, EdgeKind::Runs));
             }
         }
         // Every command list of every contract (its phases, run by app-gates or `./dev ci run`): a step node per phase that runs its
@@ -942,10 +972,6 @@ impl Extractor for CiExtractor {
         for c in &contracts {
             let Some(text) = texts.get(c) else { continue };
             let v: serde_json::Value = serde_json::from_str(text).map_err(|e| bad(c, e.to_string()))?;
-            let project = match c.strip_prefix("apps/").and_then(|r| r.strip_suffix("/paddock.ci.json")) {
-                Some(app) => format!("app:{app}"),
-                None => c.trim_end_matches("/paddock.ci.json").to_string(),
-            };
             for phase in crate::ci_run::contract::phases(&v) {
                 let lines: Vec<&str> = v[phase]
                     .as_array()
@@ -957,9 +983,11 @@ impl Extractor for CiExtractor {
                 if inv.scripts.is_empty() && inv.reads.is_empty() && inv.unresolved.is_empty() {
                     continue;
                 }
+                // The step's home is its project's folder: a change it reaches selects this phase of the project, not the
+                // project's suite (ADR 0117 §6, difference 4 of §8: a conformance change runs each app's conformance step).
                 let sid = format!("step:{c}#{phase}");
-                x.nodes.push(ModelNode::new(&sid, NodeKind::Step, &[]));
-                x.edges.push(Edge::new(&sid, &project, EdgeKind::Runs));
+                let home = c.trim_end_matches("/paddock.ci.json");
+                x.nodes.push(ModelNode::new(&sid, NodeKind::Step, &[]).with_home(home));
                 for p in &inv.scripts {
                     x.edges.push(Edge::new(&sid, script_id(p), EdgeKind::Runs));
                     scripts.insert(p.clone());

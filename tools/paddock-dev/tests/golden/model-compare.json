@@ -47,7 +47,7 @@
    {
     "project": "tools",
     "rules": null,
-    "model": "all"
+    "model": "phases:vm-smoke"
    }
   ],
   "unowned": []
@@ -112,7 +112,7 @@
    {
     "project": "tools",
     "rules": null,
-    "model": "all"
+    "model": "phases:vm-smoke"
    }
   ],
   "unowned": []
@@ -137,7 +137,7 @@
    {
     "project": "tools",
     "rules": null,
-    "model": "all"
+    "model": "phases:vm-smoke"
    }
   ],
   "unowned": []
@@ -162,7 +162,7 @@
    {
     "project": "tools",
     "rules": null,
-    "model": "all"
+    "model": "phases:vm-smoke"
    }
   ],
   "unowned": []
@@ -177,7 +177,7 @@
    {
     "project": "tools",
     "rules": null,
-    "model": "all"
+    "model": "phases:vm-smoke"
    }
   ],
   "unowned": []
@@ -197,7 +197,7 @@
    {
     "project": "tools",
     "rules": null,
-    "model": "all"
+    "model": "phases:vm-smoke"
    }
   ],
   "unowned": []
@@ -232,7 +232,7 @@
    {
     "project": "tools",
     "rules": null,
-    "model": "all"
+    "model": "phases:vm-smoke"
    }
   ],
   "unowned": []
@@ -265,22 +265,22 @@
    {
     "project": "app:dyno",
     "rules": null,
-    "model": "all"
+    "model": "release"
    },
    {
     "project": "app:pitcrew",
     "rules": null,
-    "model": "all"
+    "model": "release"
    },
    {
     "project": "app:pitwall",
     "rules": null,
-    "model": "all"
+    "model": "release"
    },
    {
     "project": "app:spotter",
     "rules": null,
-    "model": "all"
+    "model": "release"
    }
   ],
   "unowned": []
@@ -340,7 +340,7 @@
    {
     "project": "tools",
     "rules": null,
-    "model": "all"
+    "model": "phases:vm-smoke"
    }
   ],
   "unowned": []
@@ -400,7 +400,7 @@
    {
     "project": "tools",
     "rules": null,
-    "model": "all"
+    "model": "phases:vm-smoke"
    }
   ],
   "unowned": []
@@ -415,7 +415,7 @@
    {
     "project": "tools",
     "rules": null,
-    "model": "all"
+    "model": "phases:vm-smoke"
    }
   ],
   "unowned": []
@@ -570,6 +570,11 @@
     "model": null
    },
    {
+    "project": "tools",
+    "rules": "all",
+    "model": "phases:vm-smoke"
+   },
+   {
     "project": "ui",
     "rules": "all",
     "model": null
@@ -602,7 +607,7 @@
    {
     "project": "tools",
     "rules": null,
-    "model": "all"
+    "model": "phases:vm-smoke"
    }
   ],
   "unowned": []
@@ -623,7 +628,7 @@
    {
     "project": "tools",
     "rules": null,
-    "model": "all"
+    "model": "phases:vm-smoke"
    }
   ],
   "unowned": []
@@ -654,7 +659,7 @@
    {
     "project": "tools",
     "rules": null,
-    "model": "all"
+    "model": "phases:vm-smoke"
    }
   ],
   "unowned": []
@@ -669,7 +674,7 @@
    {
     "project": "tools",
     "rules": null,
-    "model": "all"
+    "model": "phases:vm-smoke"
    }
   ],
   "unowned": []
@@ -684,7 +689,7 @@
    {
     "project": "tools",
     "rules": null,
-    "model": "all"
+    "model": "phases:vm-smoke"
    }
   ],
   "unowned": []
@@ -699,7 +704,7 @@
    {
     "project": "tools",
     "rules": null,
-    "model": "all"
+    "model": "phases:vm-smoke"
    }
   ],
   "unowned": []
@@ -714,7 +719,7 @@
    {
     "project": "tools",
     "rules": null,
-    "model": "all"
+    "model": "phases:vm-smoke"
    }
   ],
   "unowned": []
@@ -734,7 +739,7 @@
    {
     "project": "tools",
     "rules": null,
-    "model": "all"
+    "model": "phases:vm-smoke"
    }
   ],
   "unowned": []
@@ -747,9 +752,19 @@
   "allModel": false,
   "differences": [
    {
+    "project": "app:dyno",
+    "rules": "all",
+    "model": "release"
+   },
+   {
     "project": "app:pacenotes",
     "rules": "all",
     "model": null
+   },
+   {
+    "project": "app:pitcrew",
+    "rules": "all",
+    "model": "release"
    },
    {
     "project": "app:shell-demo",
@@ -762,6 +777,11 @@
     "model": null
    },
    {
+    "project": "app:spotter",
+    "rules": "all",
+    "model": "release"
+   },
+   {
     "project": "app:workbench-demo",
     "rules": "all",
     "model": "release"
@@ -769,7 +789,7 @@
    {
     "project": "tools",
     "rules": null,
-    "model": "all"
+    "model": "phases:tests,vm-smoke"
    }
   ],
   "unowned": []
@@ -829,7 +849,7 @@
    {
     "project": "tools",
     "rules": null,
-    "model": "all"
+    "model": "phases:vm-smoke"
    }
   ],
   "unowned": []
@@ -889,7 +909,7 @@
    {
     "project": "tools",
     "rules": null,
-    "model": "all"
+    "model": "phases:vm-smoke"
    }
   ],
   "unowned": []
@@ -902,9 +922,19 @@
   "allModel": false,
   "differences": [
    {
+    "project": "app:dyno",
+    "rules": "all",
+    "model": "release"
+   },
+   {
     "project": "app:pacenotes",
     "rules": "all",
     "model": null
+   },
+   {
+    "project": "app:pitcrew",
+    "rules": "all",
+    "model": "release"
    },
    {
     "project": "app:shell-demo",
@@ -915,6 +945,11 @@
     "project": "app:sighter",
     "rules": "all",
     "model": null
+   },
+   {
+    "project": "app:spotter",
+    "rules": "all",
+    "model": "release"
    },
    {
     "project": "app:workbench-demo",
@@ -940,6 +975,11 @@
     "project": "icons",
     "rules": "all",
     "model": null
+   },
+   {
+    "project": "tools",
+    "rules": "all",
+    "model": "phases:tests,vm-smoke"
    },
    {
     "project": "ui",
@@ -974,7 +1014,7 @@
    {
     "project": "tools",
     "rules": null,
-    "model": "all"
+    "model": "phases:vm-smoke"
    }
   ],
   "unowned": []

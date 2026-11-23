@@ -151,6 +151,9 @@ pub struct Reached {
     pub whole: BTreeSet<String>,
     /// The model's unresolved references, one line each: every plan runs their referrers' projects in full.
     pub unresolved_refs: Vec<String>,
+    /// Per project, the contract phases a change reaches through their command lines (a shared script a phase runs, such as the
+    /// conformance CLI of an app's `checks`): those phases run, not the project's suite (ADR 0117 §6, difference 4 of §8).
+    pub phases: BTreeMap<String, BTreeSet<String>>,
 }
 
 impl NodeReach {
@@ -580,6 +583,25 @@ fn mark_hit(
 ) {
     let node = m.node(id);
     let why = why.join("; ");
+    // A contract phase (a step node whose home is its project's folder): the phase runs, whatever kind arrived, unless the project
+    // runs in full for another reason.
+    if let Some(n) = node.filter(|n| n.kind == nodes::NodeKind::Step)
+        && let Some((_, phase)) = id.split_once("paddock.ci.json#")
+        && let Some(p) = n.home.as_deref().and_then(|h| project_of(facts, h))
+    {
+        out.phases
+            .entry(p.to_string())
+            .or_default()
+            .insert(phase.to_string());
+        out.mark(
+            p,
+            Reach::Docs,
+            false,
+            false,
+            format!("{id} runs it ({why})"),
+        );
+        return;
+    }
     // A spec reached through a helper or spec it imports: its runner is given the spec.
     if let Some(n) = node.filter(|n| n.kind == nodes::NodeKind::TestFile && kind == Reach::Test)
         && !m.sources(id, nodes::EdgeKind::Tests).is_empty()
@@ -654,12 +676,18 @@ pub struct Selection {
     pub affected: BTreeSet<String>,
     /// Its installers.
     pub installers: bool,
+    /// Only these contract phases (their command lines run a changed shared script).
+    pub phases: BTreeSet<String>,
 }
 
 impl Selection {
     /// Nothing beyond the docs checks.
     pub fn skip(&self) -> bool {
-        !self.full && !self.smoke && self.affected.is_empty() && !self.installers
+        !self.full
+            && !self.smoke
+            && self.affected.is_empty()
+            && !self.installers
+            && self.phases.is_empty()
     }
 }
 
@@ -679,7 +707,16 @@ pub fn selection(reached: &Reached, smoke: &BTreeSet<String>) -> BTreeMap<String
                         Reach::Docs => {}
                         _ if reached.everything => s.full = true,
                         Reach::Code => s.full = true,
-                        Reach::Release if id.starts_with("app:") => s.installers = true,
+                        // Rule 54 builds the installers, and the app's own gates still run: its smoke set, or its suite
+                        // without one (never less than declared, §5; the WP-5 replay's 39 release-installers-only cases).
+                        Reach::Release if id.starts_with("app:") => {
+                            s.installers = true;
+                            if smoke.contains(id) {
+                                s.smoke = true;
+                            } else {
+                                s.full = true;
+                            }
+                        }
                         Reach::Release => s.full = true,
                         Reach::Plumbing if smoke.contains(id) => s.smoke = true,
                         Reach::Plumbing => s.full = true,
@@ -690,9 +727,16 @@ pub fn selection(reached: &Reached, smoke: &BTreeSet<String>) -> BTreeMap<String
                     }
                 }
             }
+            if let Some(p) = reached.phases.get(id) {
+                s.phases = p.clone();
+            }
+            if reached.everything {
+                s.full = true;
+            }
             if s.full {
                 s.smoke = false;
                 s.affected.clear();
+                s.phases.clear();
             }
             (id.clone(), s)
         })

@@ -445,7 +445,9 @@ pub fn carry(r: Reach, at: &ModelNode, kind: EdgeKind, up: &ModelNode, setup_onl
             Reach::Code
         };
     }
-    if r == Reach::Plumbing && release {
+    // Into a release job or step, a CI or script path is release (its installers, and the app's gates beside them, §5); an
+    // app's own code reaches the app at the project level, never through a release job.
+    if matches!(r, Reach::Plumbing | Reach::Code) && release {
         return Reach::Release;
     }
     r

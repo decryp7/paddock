@@ -838,7 +838,10 @@ fn selection_maps_each_kind_and_falls_back_to_full_without_a_declaration() {
     let s = selection(&r, &smoke);
     assert!(s["app:dyno"].smoke && !s["app:dyno"].full);
     assert!(s["ui"].full, "no smoke declared: full");
-    assert!(s["app:pitwall"].installers && !s["app:pitwall"].full);
+    assert!(
+        s["app:pitwall"].installers && s["app:pitwall"].full,
+        "release keeps the gates: no smoke declared, full"
+    );
     assert!(s["tools"].full);
     assert!(s["docs"].skip());
     assert!(s["crates"].full, "test reach without targets: full");

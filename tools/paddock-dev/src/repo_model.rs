@@ -341,6 +341,11 @@ fn new_runs(reached: &Reached) -> BTreeMap<String, String> {
             (id.clone(), h.to_string())
         })
         .collect();
+    // A project reached only through its contract phases runs those phases (difference 4 of §8).
+    for (id, phases) in &reached.phases {
+        out.entry(id.clone())
+            .or_insert_with(|| format!("phases:{}", phases.iter().cloned().collect::<Vec<_>>().join(",")));
+    }
     out.insert("conformance".to_string(), "all".to_string());
     out
 }
@@ -361,6 +366,7 @@ pub fn compare(plan: &Value, reached: &Reached, graph: &RepoGraph, smoke: &BTree
         let narrower = match (o.map(String::as_str), n.map(String::as_str)) {
             (Some(_), None) => true,
             (Some(_), Some("smoke" | "tests" | "release")) => true,
+            (Some(_), Some(h)) if h.starts_with("phases:") => true,
             (Some("all"), Some(h)) => h != "all",
             _ => false,
         };
@@ -426,6 +432,9 @@ pub fn compare(plan: &Value, reached: &Reached, graph: &RepoGraph, smoke: &BTree
             }
             if s.installers {
                 v.insert("installers".into(), json!(true));
+            }
+            if !s.phases.is_empty() {
+                v.insert("phases".into(), json!(s.phases));
             }
             (id, Value::Object(v))
         })
