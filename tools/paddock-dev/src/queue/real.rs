@@ -850,6 +850,14 @@ impl Ci for GiteaCi<'_> {
     }
 
     fn dispatch(&mut self, workflow: &str, inputs: &[(String, String)]) -> Result<Sent, String> {
+        // The landing dispatch (a full ci.yml run on the train) tests the train's diff from main's last complete commit (ADR 0117 WP-8).
+        let target = dispatch::Target {
+            server: &self.server,
+            repo: &self.repo,
+            token: &self.token,
+        };
+        let inputs =
+            crate::ci_runs::landing::with_real_landing_base(self.http, &target, &self.root, workflow, TRAIN_BRANCH, inputs.to_vec());
         let kv: Vec<String> = inputs.iter().map(|(k, v)| format!("{k}={v}")).collect();
         let req = dispatch::parse_request(workflow, TRAIN_BRANCH, &kv, &format!("{}s", self.max_wait.as_secs().max(1)), None)?;
         let root = self.root.clone();

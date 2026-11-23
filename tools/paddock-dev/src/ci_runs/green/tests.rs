@@ -733,3 +733,95 @@ fn the_search_with_a_touched_measure_reads_the_run_list_once() {
     let pages = f.requested().iter().filter(|u| u.contains("/runs?limit=50&page=")).count();
     assert_eq!(pages, 3, "the run list is read once: {:?}", f.requested());
 }
+
+// ---- ADR 0117 WP-8: the base of a train's landing dispatch (G1, G14) ----
+
+fn landing_inputs(f: &mut Fake, git_ref: &str, inputs: &[(&str, &str)], chain: &[String]) -> (Vec<(String, String)>, Vec<String>) {
+    let given: Vec<(String, String)> = inputs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
+    let mut said = Vec::new();
+    let got = super::super::landing::with_landing_base(
+        "ci.yml",
+        git_ref,
+        given,
+        &mut || Ok(base(f, chain, touched(&[])).map(|b| (b.sha, b.run))),
+        &mut |l| said.push(l.to_string()),
+    );
+    (got, said)
+}
+
+#[test]
+fn a_train_dispatch_carries_the_last_complete_commit_of_main_as_its_landing_base() {
+    // The 8554 shape: main's tip was tested by its train's run; a push after it was cancelled.
+    let (tip, older) = (sha(2), sha(1));
+    let mut f = server(&[
+        Run::push(8341, &tip, "cancelled"),
+        Run::train(8554, &tip, "success"),
+        Run::push(8045, &older, "success"),
+    ]);
+    let (got, said) = landing_inputs(&mut f, "train/2026-11-23-20", &[], &[tip.clone(), older]);
+    assert_eq!(got, vec![("landing_base".to_string(), tip)], "{said:?}");
+    assert!(said.iter().any(|l| l.contains("run 8554")), "{said:?}");
+}
+
+#[test]
+fn a_train_dispatch_without_a_complete_base_stays_as_it_was_and_the_run_tests_everything() {
+    // Fail closed: only a partial run, no run at all, and runs that cannot be read send no base.
+    let (a, b) = (sha(2), sha(1));
+    let mut f = server(&[Run::push(8700, &a, "success").partial(run_scope::TEST_PARTIAL)]);
+    let (got, said) = landing_inputs(&mut f, "train/x", &[], &[a.clone(), b.clone()]);
+    assert!(got.is_empty(), "{got:?}");
+    assert!(said.iter().any(|l| l.contains("tests everything")), "{said:?}");
+    let mut said = Vec::new();
+    let got = super::super::landing::with_landing_base("ci.yml", "train/x", vec![], &mut || Err("HTTP 500".into()), &mut |l| {
+        said.push(l.to_string())
+    });
+    assert!(got.is_empty() && said.iter().any(|l| l.contains("HTTP 500")), "{got:?} {said:?}");
+}
+
+#[test]
+fn only_a_full_ci_dispatch_on_a_train_is_a_landing_run_nightly_tags_and_the_other_kinds_stay_whole_tree() {
+    let tip = sha(2);
+    let mut f = server(&[Run::train(8554, &tip, "success")]);
+    // Positive control: the same world gives the full train dispatch a base.
+    assert_eq!(landing_inputs(&mut f, "train/x", &[], std::slice::from_ref(&tip)).0.len(), 1);
+    // Whole-tree runs (a tag, a manual run on main, the nightly's ref) and every other kind of run ask for nothing and change nothing.
+    for (git_ref, inputs) in [
+        ("refs/tags/v1.0.0", vec![]),
+        ("main", vec![]),
+        ("train/x", vec![("base", "origin/main")]),
+        ("train/x", vec![("since_run", "8001")]),
+        ("train/x", vec![("os", "linux")]),
+        ("train/x", vec![("app", "dyno")]),
+        ("train/x", vec![("landing_base", "abc")]),
+    ] {
+        let mut asked = false;
+        let given: Vec<(String, String)> = inputs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
+        let got = super::super::landing::with_landing_base(
+            "ci.yml",
+            git_ref,
+            given.clone(),
+            &mut || {
+                asked = true;
+                Ok(None)
+            },
+            &mut |_| {},
+        );
+        assert!(!asked && got == given, "{git_ref} {inputs:?}: asked={asked} got={got:?}");
+    }
+    // Another workflow (an app's own) is not ci.yml.
+    let got = super::super::landing::with_landing_base("dyno.yml", "train/x", vec![], &mut || Ok(Some(("a".into(), 1))), &mut |_| {});
+    assert!(got.is_empty());
+}
+
+#[test]
+fn a_smoke_push_followed_by_a_code_push_plans_from_the_last_complete_commit() {
+    // WP-4's golden: a plumbing-only push (smoke, partial) sits between the last complete commit and the new head, so the landing
+    // diffs from the commit before the smoke push (and runs the plumbing change's jobs too).
+    let (code, smoke, complete) = (sha(3), sha(2), sha(1));
+    let mut f = server(&[
+        Run::push(8802, &smoke, "success").partial(run_scope::TEST_PARTIAL),
+        Run::train(8801, &complete, "success"),
+    ]);
+    let (got, _) = landing_inputs(&mut f, "train/x", &[], &[code, smoke, complete.clone()]);
+    assert_eq!(got, vec![("landing_base".to_string(), complete)]);
+}
