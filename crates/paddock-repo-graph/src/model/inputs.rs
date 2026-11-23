@@ -243,6 +243,20 @@ const DEFAULT_INPUTS: &[InputRow] = &[
         &["project:ci-image", "project:ui", "project:tools"],
         None,
     ),
+    // The CI files no workflow or action owns: the label set (pr/labels.rs reads it) and the workflow templates (the bench
+    // template, read by paddock-bench and the CI-actions tests).
+    (
+        "gitea-labels",
+        &["/.gitea/labels.toml"],
+        &["project:paddock-dev"],
+        None,
+    ),
+    (
+        "workflow-templates",
+        &[".gitea/workflow-templates/**"],
+        &["project:conformance", "project:crates"],
+        None,
+    ),
     // The diagram sources and their export script (the diagrams check renders them).
     (
         "diagram-sources",

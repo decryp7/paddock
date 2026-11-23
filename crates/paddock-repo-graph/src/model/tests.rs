@@ -846,3 +846,19 @@ fn selection_maps_each_kind_and_falls_back_to_full_without_a_declaration() {
             .all(|x| *x == Selection::Full || *x == Selection::Skip)
     );
 }
+
+#[test]
+fn the_ci_files_outside_workflows_and_actions_are_declared_inputs() {
+    // From --compare on origin/main~20: .gitea/workflow-templates/bench-nightly.yml was unowned (the plan answered everything).
+    let w = world();
+    let r = run(
+        &w,
+        &[
+            ".gitea/workflow-templates/bench-nightly.yml",
+            ".gitea/labels.toml",
+        ],
+        &none,
+    );
+    assert!(!r.everything, "{:?}", r.unowned);
+    assert_eq!(ids(&r), ["conformance", "crates", "paddock-dev"]);
+}
