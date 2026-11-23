@@ -506,7 +506,7 @@ Amendments of the same date, no new number: the member gate runs each member's a
     of the text when both land). The installers stay for the bundle, sign, notarise and publish steps, app code, the Tauri config
     and tags. A smoke run never counts as a complete verdict.
 88. **Removing an OS from a test needs the user's approval.** The record is `docs/os-removals.toml`; growth of that register is a
-    finding of check C155 that no waiver clears (rule 83). *Why:* OS-scoped tests (ER-9) cut Windows time by 46%, and an OS
+    finding that no waiver clears (rule 83; the check is planned in ADR 0117). *Why:* OS-scoped tests (ER-9) cut Windows time by 46%, and an OS
     dropped without a reason is a hole in the net.
 89. **Every test run goes through the bounded runner** (ER-32, ER-51): nextest with its timeout, and the same progress watchdog as
     the push gates. Agents and CI never run plain `cargo test` or an unbounded test command, a hook steers them to the runner, and
