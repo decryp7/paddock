@@ -54,6 +54,9 @@ pub struct Gate {
     /// The cargo build folder it uses, relative to the repository root or absolute (`None`: not a cargo build, or not known): a step
     /// whose folder holds no build yet is COLD, and the history keeps cold and warm apart.
     pub build_dir: Option<String>,
+    /// A time-based condition (ER-41): a failure of this gate is a warning on this push, never a block (an advisory published
+    /// against a dependency the push does not touch). The row passes and its tail carries the finding.
+    pub warn_only: bool,
 }
 
 impl Gate {
@@ -210,6 +213,7 @@ fn gate(id: String, cwd: &str, program: &str, args: &[&str], rank: u8, next: Str
         notice: None,
         progress: super::progress::Progress::Lines,
         build_dir: None,
+        warn_only: false,
     }
 }
 
@@ -471,6 +475,24 @@ pub fn plan_gates(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> 
         d.notice = scope.notice("apps/pitwall");
         d.need = Need::Tool("cargo-deny".into());
         out.push(Planned::Run(d));
+        // A push that does not touch the dependencies still looks at the advisories, as a warning (ER-41, user 2026-11-23).
+        if let Some(args) = scope.warning_args() {
+            let mut w = gate(
+                "pitwall-deny-advisories (warning)".into(),
+                "apps/pitwall",
+                "cargo",
+                &[],
+                1,
+                format!(
+                    "`cargo {}` in apps/pitwall names the advisory; the nightly audit and a push that touches the dependencies block on it",
+                    args.join(" ")
+                ),
+            );
+            w.args = args;
+            w.need = Need::Tool("cargo-deny".into());
+            w.warn_only = true;
+            out.push(Planned::Run(w));
+        }
     } else {
         out.push(Planned::Skip {
             id: "pitwall-scripts, pitwall-deny".into(),

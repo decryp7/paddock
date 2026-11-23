@@ -1219,7 +1219,13 @@ pub fn render_timed(head: &str, rows: &[(String, Row)], timings: &std::collectio
         let (line, kind) = match v.kind() {
             Kind::Passed => {
                 ok += 1;
-                (format!("ok            {id:<34} {}", both(id, v.secs)), "passed")
+                // A passed row with something to say is a warning (a time-based gate, ER-41): shown as an annotation.
+                let warning = if v.tail.is_empty() {
+                    String::new()
+                } else {
+                    format!("\n  ::warning::{id}: {}", v.tail.replace('\n', " | "))
+                };
+                (format!("ok            {id:<34} {}{warning}", both(id, v.secs)), "passed")
             }
             Kind::Skipped => {
                 skip += 1;

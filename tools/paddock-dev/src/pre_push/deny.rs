@@ -5,7 +5,8 @@
 //! on chrono, run 8214; lettre 0.11.23 on 2026-11-18). Like Dependabot and a scheduled `cargo deny`, the push asks "does this change
 //! add one?" and the nightly audit (`./dev audit nightly`) asks "does main have one?". The scope is a value computed here from the
 //! change, and it alone decides the arguments of the command and the line printed; no caller adds or drops `advisories` by hand.
-//! A change whose base is unknown is not measured, so the advisories run (ADR 0089: not measured never passes).
+//! An advisory is a time-based condition (ER-41, user 2026-11-23): a push that does not change the dependencies still looks at them, in a
+//! row of its own that only warns; one that does, and the nightly, block. A change whose base is unknown is not measured, so the advisories run (ADR 0089: not measured never passes).
 
 use super::gates::Change;
 
@@ -34,6 +35,20 @@ impl Scope {
         a
     }
 
+    /// The arguments of the warning row (a push that does not touch the dependencies): the advisories alone, whose failure only
+    /// warns (ER-41). `None` when the advisories already run in the blocking row.
+    pub fn warning_args(&self) -> Option<Vec<String>> {
+        match self {
+            Scope::All { .. } => None,
+            Scope::WithoutAdvisories { .. } => Some(
+                ["deny", "--workspace", "check", "advisories"]
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect(),
+            ),
+        }
+    }
+
     /// The row label: the full command's row is plain, a row that leaves the advisories out says what it did check, so it does not
     /// read as a full pass.
     pub fn label(&self, id: &str) -> String {
@@ -48,7 +63,7 @@ impl Scope {
         match self {
             Scope::All { .. } => None,
             Scope::WithoutAdvisories { reason } => Some(format!(
-                "cargo deny in {workspace}: advisories skipped, {reason}; the nightly audit (`./dev audit nightly`) covers them"
+                "cargo deny in {workspace}: advisories only warn on this push, {reason}; a push that changes the dependencies and the nightly audit (`./dev audit nightly`) block on them"
             )),
         }
     }

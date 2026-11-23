@@ -504,6 +504,16 @@ pub fn decide_with(gate: &Gate, exec: &dyn Exec, limits: Limits, subject: &Subje
                 _ => gate.next.clone(),
             };
             let full = done.log.as_ref().map_or(String::new(), |l| format!(" Full output: {l}."));
+            // A time-based gate that fails only warns (ER-41): the row passes and its tail carries what it found.
+            if gate.warn_only && !done.success {
+                let ok = Done {
+                    success: true,
+                    ..done.clone()
+                };
+                let mut row = Row::from_run(&gate.id, subject, &ok, gate.rerun(), secs(&done));
+                row.tail = format!("{} ({}). Next: {}", done.tail.trim_end(), done.how, gate.next);
+                return row;
+            }
             let mut row = Row::from_run(&gate.id, subject, &done, format!("{} ({})", gate.rerun(), done.how), secs(&done));
             if !done.success {
                 row.tail = done.tail.trim_end().to_string();
@@ -1852,6 +1862,7 @@ mod tests {
             notice: None,
             progress: crate::pre_push::progress::Progress::Lines,
             build_dir: None,
+            warn_only: false,
         })
     }
 
@@ -1958,6 +1969,7 @@ exit $rc
                 notice: None,
                 progress: crate::pre_push::progress::Progress::Lines,
                 build_dir: None,
+                warn_only: false,
             }
         }
 

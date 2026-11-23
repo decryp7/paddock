@@ -2881,6 +2881,7 @@ fn heavy_gate(id: &str, rank: u8) -> Planned {
         notice: None,
         progress: crate::pre_push::progress::Progress::Lines,
         build_dir: None,
+        warn_only: false,
     })
 }
 
@@ -3527,6 +3528,21 @@ mod deny_row {
         (decide(&g, &ex, &test_subject()), planned)
     }
 
+    /// The warn-only advisory row of the same push, run on the stand-in (`None`: the push plans none).
+    fn advisory_row(d: &Path, files: &[&str]) -> Option<Row> {
+        let ex = stand_in(d);
+        let mut c = change(files);
+        c.base = Some("origin/main".into());
+        let planned = plan_gates(&plan(), &c, &facts());
+        let g = run_gates(&planned)
+            .into_iter()
+            .find(|g| g.id.starts_with("pitwall-deny-advisories"))
+            .cloned()?;
+        assert!(g.warn_only, "{g:?}");
+        assert_eq!(g.args.join(" "), "deny --workspace check advisories");
+        Some(decide(&g, &ex, &test_subject()))
+    }
+
     fn notice(planned: &[Planned]) -> Option<String> {
         run_gates(planned)
             .into_iter()
@@ -3545,14 +3561,23 @@ mod deny_row {
         assert_eq!(row.kind(), Kind::Passed, "{row:?}");
         let n = notice(&planned).expect("a skip prints its line");
         assert!(
-            n.contains("advisories skipped") && n.contains("nightly") && n.contains("apps/pitwall"),
+            n.contains("advisories only warn") && n.contains("nightly") && n.contains("apps/pitwall"),
             "{n}"
         );
         let calls = std::fs::read_to_string(d.path().join("calls")).unwrap();
         assert!(
             calls.contains("deny --workspace check licenses bans sources") && !calls.contains("advisories"),
-            "{calls}"
+            "the blocking row does not ask for advisories: {calls}"
         );
+        // The advisory is a warning on this push (ER-41, user 2026-11-23): its row passes and carries the advisory in its tail.
+        let adv = advisory_row(d.path(), &["apps/pitwall/src/a.rs"]).expect("an unrelated push still looks at advisories");
+        assert_eq!(adv.kind(), Kind::Passed, "{adv:?}");
+        assert!(adv.tail.contains("RUSTSEC-2026-9999"), "{adv:?}");
+        // Positive control: with no advisory published, the same row passes with nothing to say.
+        std::fs::remove_file(d.path().join("adv")).unwrap();
+        let clean = advisory_row(d.path(), &["apps/pitwall/src/a.rs"]).unwrap();
+        assert_eq!((clean.kind(), clean.tail.as_str()), (Kind::Passed, ""), "{clean:?}");
+        std::fs::write(d.path().join("adv"), "").unwrap();
         // Positive control: the same push with a licence violation is red.
         std::fs::write(d.path().join("lic"), "").unwrap();
         let (row, _) = push(d.path(), &["apps/pitwall/src/a.rs"], Some("origin/main"));
@@ -3577,6 +3602,8 @@ mod deny_row {
             let (row, _) = push(d.path(), &[file], Some("origin/main"));
             assert_eq!(row.kind(), Kind::Failed, "{file}: {row:?}");
             assert!(std::fs::read_to_string(d.path().join("calls")).unwrap().lines().last().unwrap() == "deny --workspace check");
+            // A push that touches the dependencies blocks on its own row; there is no separate warning row.
+            assert!(advisory_row(d.path(), &[file]).is_none(), "{file}");
         }
     }
 
