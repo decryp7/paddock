@@ -87,7 +87,7 @@ fn bsd_fallback(p: &Process) -> BsdFallback {
     #[cfg(target_os = "macos")]
     {
         let pid = p.pid().as_u32();
-        let missing = p.user_id().is_none() || p.parent().is_none() || p.start_time() == 0;
+        let missing = p.user_id().is_none() || paddock_proc::Listed::of(p).parent.is_none() || p.start_time() == 0;
         if !missing {
             return BsdFallback::default();
         }

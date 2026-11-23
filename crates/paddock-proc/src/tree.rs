@@ -61,6 +61,10 @@ const CHAIN_DEPTH: usize = 6;
 
 /// One look at the process list for [`Names`]: names and parent pids only (no memory, command lines or times), empty when
 /// the table cannot be read.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "names a parent chain in a log line only (chain_text); nothing is counted, followed for a decision or ended"
+)]
 fn read_names() -> Names {
     let Some(mut sys) = usage::new_system_with(sysinfo::System::new) else {
         return Names::default();

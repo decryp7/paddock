@@ -157,6 +157,10 @@ pub struct Listed {
 impl Listed {
     /// The row of a process in a refreshed sysinfo list (its memory read with it, or 0). Its parent pid is only a number: give
     /// the rows to [`table_of_listing`] and ask [`parent_of`] or [`descendants`], never follow it directly (ADR 0033).
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the one reader of sysinfo's parent pid: it goes into a table, where parent_of judges it"
+    )]
     pub fn of(p: &sysinfo::Process) -> Listed {
         Listed {
             pid: p.pid().as_u32(),

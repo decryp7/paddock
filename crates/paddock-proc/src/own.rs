@@ -42,6 +42,10 @@ pub struct Seen {
 /// The identities are read first, the facts after (as `processes_mentioning` does, ADR 0033): a pid handed on between the two
 /// keeps the identity of the process that had it first, so acting on the row finds the new holder and leaves it alone. A row whose
 /// identity no longer holds after its group was read is left out.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the reaper compares Seen::parent only with init (1) and its own live pid, for processes that started after it: no earlier holder of that pid can be their parent"
+)]
 pub fn look(carry: Option<(&str, &str)>, names: &[&str]) -> Vec<Seen> {
     let identities = crate::usage::snapshot();
     let Ok(mut sys) = System::new() else {

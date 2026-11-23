@@ -71,15 +71,7 @@ impl Probe {
                 .with_cpu()
                 .with_memory(),
         );
-        let listed: Vec<paddock_proc::Listed> = self
-            .processes()
-            .map(|(pid, p)| paddock_proc::Listed {
-                pid: pid.as_u32(),
-                parent: p.parent().map(Pid::as_u32),
-                rss: p.memory(),
-                is_thread: false,
-            })
-            .collect();
+        let listed: Vec<paddock_proc::Listed> = self.processes().map(|(_, p)| paddock_proc::Listed::of(p)).collect();
         self.table = paddock_proc::table_of_listing(listed_at, listed);
     }
 

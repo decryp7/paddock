@@ -115,10 +115,15 @@ impl SysinfoSource {
             if targets.matches(pid.as_u32(), &p.name().to_string_lossy(), exe.as_deref()) {
                 matched.insert(pid.as_u32());
             }
+            #[expect(
+                clippy::disallowed_methods,
+                reason = "age-checked: expand_children follows a link only when the child started no earlier than the parent, both from this one sysinfo read (ADR 0033)"
+            )]
+            let parent = p.parent().map(Pid::as_u32);
             links.insert(
                 pid.as_u32(),
                 Link {
-                    parent: p.parent().map(Pid::as_u32),
+                    parent,
                     started: p.start_time(),
                 },
             );
