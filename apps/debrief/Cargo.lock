@@ -1914,6 +1914,7 @@ dependencies = [
  "debrief-core",
  "globset",
  "log",
+ "paddock-proc",
  "paddock-testkit",
  "serde",
  "serde_json",
