@@ -1064,9 +1064,21 @@ pub fn since_run(
     workflow_text: &dyn Fn(&str) -> Option<String>,
     log: &mut dyn FnMut(&str),
 ) -> Result<SincePlan, String> {
+    since_run_with(runs, id, workflow_text, log, false)
+}
+
+/// [`since_run`], and with `running` a run still going is read too: the escape monitor's job runs inside the nightly it judges, after
+/// the jobs it needs, whose conclusions are final (a job that is not finished is not a failure and is never listed as one).
+pub fn since_run_with(
+    runs: &mut GiteaRuns,
+    id: u64,
+    workflow_text: &dyn Fn(&str) -> Option<String>,
+    log: &mut dyn FnMut(&str),
+    running: bool,
+) -> Result<SincePlan, String> {
     let run = runs.run(id).map_err(|e| format!("run {id} could not be read: {e}"))?;
     let status = run["status"].as_str().unwrap_or("unknown");
-    if !matches!(status, "completed" | "success" | "failure" | "cancelled" | "skipped") {
+    if !running && !matches!(status, "completed" | "success" | "failure" | "cancelled" | "skipped") {
         return Err(format!(
             "run {id} is {status}: wait until it finishes (`./dev wait --ci-run {id} --max 2h`), then plan its rerun"
         ));

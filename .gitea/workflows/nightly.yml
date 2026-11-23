@@ -75,6 +75,35 @@ jobs:
     secrets:
       BUILD_INPUTS_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
 
+  # ADR 0117 WP-9 (D12): the escape monitor. The night ran everything; a target that failed here but that the plan of a commit since
+  # the last green nightly dropped, though the change could reach it, is an escape (`::error::` with the commit, the dropped target and
+  # the graph's reason). The row it prints goes into docs/escape-register.toml; five consecutive clean rows free the old rule tables
+  # (the paddock-dev test escape_gate). Not measured (a missing record, an unmappable job, a bisect past its bound) is never clean.
+  escapes:
+    name: escapes (did a plan drop a target that fails tonight?)
+    needs: [gate, ci]
+    if: ${{ always() && needs.gate.outputs.run == 'true' && needs.ci.result != 'skipped' }}
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
+    env:
+      PADDOCK_DEV_DOWNLOAD: ${{ startsWith(github.ref, 'refs/tags/') && '0' || '' }}
+      PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: ./.gitea/actions/setup-rust
+        with:
+          sccache-s3-access-key-id: ${{ secrets.PADDOCK_SCCACHE_S3_ACCESS_KEY_ID }}
+          sccache-s3-secret-access-key: ${{ secrets.PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY }}
+      - name: Escape monitor
+        # Report-only until its first green run is recorded (ER-41): the night's verdict does not wait for it.
+        continue-on-error: true
+        env:
+          PLAN_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+        run: ./dev plan --escapes --head "$GITHUB_SHA" --run "${{ github.run_number }}"
+
   # ADR 0026 §3 (D4): every command a dialog contract declares was sent by some run, or is listed as unexercised with a
   # reason, and every dialog opened. It needs the union of the runs, so it runs here only, never in affected-only CI.
   dialog-commands:

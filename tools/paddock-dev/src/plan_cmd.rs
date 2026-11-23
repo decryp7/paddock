@@ -28,7 +28,7 @@ use crate::plan_ci::{
     package_filters, parse_args, summary, wants_webkit, workspace_legs,
 };
 use crate::plan_repo::git_text;
-use crate::plan_since::{APP_WORKFLOWS, GiteaRuns, SincePlan, since_run};
+use crate::plan_since::{APP_WORKFLOWS, GiteaRuns, SincePlan};
 use crate::run_scope::{DEFAULT_OS_LEGS, Scope, ci_scope, scope_of};
 use crate::wait::{CurlHttp, Http};
 use paddock_cli::{CliError, Report};
@@ -176,6 +176,16 @@ pub fn command(args: &[String], root: Option<PathBuf>) -> Result<Report, CliErro
             args.get(1).map(String::as_str),
             args.get(2).filter(|a| *a == "--out").and_then(|_| args.get(3)).map(PathBuf::from),
         );
+    }
+    if args.first().is_some_and(|a| a == "--escapes") {
+        // The escape monitor of the nightly (ADR 0117 WP-9); exit 5 when it is not clean.
+        let (data, text, clean) = crate::escape::cmd::command(&root, &args[1..], &env).map_err(fail)?;
+        let report = Report::new(data, text);
+        return Ok(if clean {
+            report
+        } else {
+            report.with_exit(paddock_cli::Exit::Findings)
+        });
     }
     if args.first().is_some_and(|a| a == "--hash") {
         return hash(&root, args.get(1).map(String::as_str));
@@ -338,6 +348,10 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
         head: "HEAD".into(),
     };
     let (graph, planned) = plan_with_graph(root, &history, &req).map_err(|e| fail(e.to_string()))?;
+    if plan_app.is_none() {
+        // The selection record of the escape monitor (ADR 0117 WP-9): never fails the plan.
+        crate::escape::cmd::save_ci(root, &history, &req, &graph, &planned, &mut |l| log(l));
+    }
     if let Some(p) = &plan_app
         && !graph.apps.contains(p)
     {
@@ -556,7 +570,12 @@ fn workflow_text(root: &Path, file: &str) -> Option<String> {
 }
 
 /// Reads a finished run of this repository and decides what of it reruns; its phases go to the log (standard error).
-fn read_since_run(root: &Path, env: &dyn Fn(&str) -> Option<String>, id: u64) -> Result<SincePlan, String> {
+pub(crate) fn read_since_run(root: &Path, env: &dyn Fn(&str) -> Option<String>, id: u64) -> Result<SincePlan, String> {
+    read_run(root, env, id, false)
+}
+
+/// [`read_since_run`]; with `running` a run still going is read (see [`crate::plan_since::since_run_with`]).
+pub(crate) fn read_run(root: &Path, env: &dyn Fn(&str) -> Option<String>, id: u64, running: bool) -> Result<SincePlan, String> {
     let server = env("GITHUB_SERVER_URL").unwrap_or_else(|| "https://dev.decryptology.net".into());
     let repo = env("GITHUB_REPOSITORY").unwrap_or_else(|| "decryp7/paddock".into());
     let token = env("PLAN_TOKEN")
@@ -565,7 +584,7 @@ fn read_since_run(root: &Path, env: &dyn Fn(&str) -> Option<String>, id: u64) ->
         .unwrap_or_default();
     let mut http = CurlHttp;
     let mut runs = GiteaRuns::new(&mut http, &server, &repo, token);
-    since_run(&mut runs, id, &|f| workflow_text(root, f), &mut |l| eprintln!("{l}"))
+    crate::plan_since::since_run_with(&mut runs, id, &|f| workflow_text(root, f), &mut |l| eprintln!("{l}"), running)
 }
 
 /// Appends the outputs and the summary of a `--ci` run to the files the workflow names.

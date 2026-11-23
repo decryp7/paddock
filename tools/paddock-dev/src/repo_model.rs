@@ -553,7 +553,7 @@ fn halves_of(rust: bool, ui: bool) -> &'static str {
 }
 
 /// The rule tables' answer, project by project: id to the halves it runs (`all` for a root project).
-fn old_runs(plan: &Value, inputs: &Inputs, graph: &RepoGraph) -> BTreeMap<String, String> {
+pub(crate) fn old_runs(plan: &Value, inputs: &Inputs, graph: &RepoGraph) -> BTreeMap<String, String> {
     let mut out = BTreeMap::new();
     for (id, _) in projects(inputs, graph).iter().filter(|(id, _)| !id.starts_with("app:")) {
         if plan[plan_key(id)] == true {
