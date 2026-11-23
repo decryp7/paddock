@@ -103,7 +103,7 @@ Licence expressions (packages):
 - combine 4.6.9 — MIT [MIT-161]
 - concurrent-queue 2.5.0 — Apache-2.0 OR MIT [MIT-47]
 - const-oid 0.10.2 — Apache-2.0 OR MIT [MIT-215]
-- cookie 0.18.2 — MIT OR Apache-2.0 [MIT-75]
+- cookie 0.18.3 — MIT OR Apache-2.0 [MIT-75]
 - core-foundation 0.10.1 — MIT OR Apache-2.0 [MIT-62]
 - core-foundation-sys 0.8.7 — MIT OR Apache-2.0 [MIT-62]
 - core-graphics 0.25.0 — MIT OR Apache-2.0 [MIT-62]
@@ -6063,7 +6063,7 @@ Used by (1):
 ### MIT-75
 
 Used by (1):
-  cookie 0.18.2
+  cookie 0.18.3
 
     Copyright (c) 2017 Sergio Benitez
     Copyright (c) 2014 Alex Crichton

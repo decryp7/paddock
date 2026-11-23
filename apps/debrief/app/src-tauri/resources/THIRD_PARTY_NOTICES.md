@@ -145,7 +145,7 @@ Licence expressions (packages):
 - const-oid 0.10.2 — Apache-2.0 OR MIT [MIT-282]
 - const-random 0.1.18 — MIT OR Apache-2.0 [MIT-213]
 - const-random-macro 0.1.16 — MIT OR Apache-2.0 [MIT-213]
-- cookie 0.18.2 — MIT OR Apache-2.0 [MIT-98]
+- cookie 0.18.3 — MIT OR Apache-2.0 [MIT-98]
 - core-foundation 0.10.1 — MIT OR Apache-2.0 [MIT-83]
 - core-foundation 0.9.4 — MIT OR Apache-2.0 [MIT-83]
 - core-foundation-sys 0.8.7 — MIT OR Apache-2.0 [MIT-83]
@@ -8070,7 +8070,7 @@ Used by (1):
 ### MIT-98
 
 Used by (1):
-  cookie 0.18.2
+  cookie 0.18.3
 
     Copyright (c) 2017 Sergio Benitez
     Copyright (c) 2014 Alex Crichton
