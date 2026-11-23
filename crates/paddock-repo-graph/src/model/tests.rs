@@ -424,6 +424,15 @@ fn a_content_extractor_fails_closed_when_before_equals_after() {
             "{file}: the reason names it"
         );
     }
+    // The guards extractor only asks whether its own targets (conformance) run: unchanged text reaches them and not every project.
+    let t = "#[test]\nfn a() {}\n".to_string();
+    let same_rs = move |_: &str| (Some(t.clone()), Some(t.clone()));
+    let r = run(&w, &["crates/a/src/lib.rs"], &same_rs);
+    assert!(
+        r.nodes.len() < w.projects.len() && r.nodes.contains_key("conformance"),
+        "{:?}",
+        ids(&r)
+    );
     // Control: the same file with a content change narrows as before.
     let moved = |_: &str| {
         (
