@@ -16,6 +16,11 @@ use serde_json::json;
 const API: &str = "https://gitea.invalid/api/v1/repos/decryp7/paddock/actions";
 const FLAKY_ONLY: &str = include_str!("../../../tests/ci-runs/nextest-r1-flaky-only.log");
 const BOTH_TRIES: &str = include_str!("../../../tests/ci-runs/nextest-r1-pass.log");
+/// The composite step of ci.yml's `app` job, whose failed commands are named by `::error::failed (exit N): <command>` annotations.
+const APP_GATES: &str = "Run ./.gitea/actions/app-gates";
+/// A real app job capture (`tests/since-run/app-dyno-macos.log`, a nextest failure inside app-gates): its annotation lines are the
+/// real shape.
+const APP_CAPTURE: &str = include_str!("../../../tests/since-run/app-dyno-macos.log");
 const DYNO: &str = "crate (windows-latest)";
 const TEST_STEP: &str = "Tests (workspace, every feature)";
 const CONFORMANCE: &str = "conformance (checks, release scripts)";
@@ -62,7 +67,7 @@ impl Run {
         self.failing_steps(job, log, &[(TEST_STEP, "failure")])
     }
     fn failing_steps(mut self, job: &'static str, log: Option<String>, steps: &[(&'static str, &'static str)]) -> Run {
-        let log = log.map(|l| format!("Job: crate\n{l}"));
+        let log = log.map(|l| if l.starts_with("Job: ") { l } else { format!("Job: crate\n{l}") });
         self.jobs.push((job, "failure", log, steps.to_vec()));
         self
     }
@@ -401,5 +406,46 @@ fn a_flaky_job_with_another_failed_step_is_red_and_one_with_no_listed_failed_ste
     let none = Run::train(8610, &c, "failure").failing_steps(DYNO, some(FLAKY_ONLY), &[(TEST_STEP, "success")]);
     let mut f = server(std::slice::from_ref(&none));
     let o = grade(&mut f, &none, touched(&["debrief"]));
+    assert!(matches!(o.result, GradedResult::NotMeasured(_)), "{o:?}");
+}
+
+/// The annotation lines of the real app-gates capture, and the log of an app job: the FLAKY-only nextest capture, then these lines.
+fn app_log(annotation: impl Fn(&str) -> String, completed: usize) -> String {
+    let plain = |l: &str| l.split_once("Z ").map_or(l.to_string(), |(_, r)| r.to_string());
+    let mut out = format!("Job: app\n{FLAKY_ONLY}");
+    let mut seen = 0;
+    for l in APP_CAPTURE.lines().map(plain) {
+        if l.contains("::error::failed (exit") {
+            out.push_str(&format!("{}\n", annotation(&l)));
+        } else if l.starts_with("##[error]Process completed") && seen < completed {
+            seen += 1;
+            out.push_str(&format!("{l}\n"));
+        }
+    }
+    out
+}
+
+#[test]
+fn a_flaky_app_job_with_a_lint_annotation_inside_app_gates_is_red_and_an_unreadable_composite_failure_is_not_measured() {
+    // ER-44: app-gates is one step in the API; which command failed inside it is only in the `::error::failed` annotations.
+    let c = sha(2);
+    let app = "app dyno (ubuntu-latest)";
+    let steps = [(APP_GATES, "failure")];
+    let grade_log = |log: String| {
+        let r = Run::train(8610, &c, "failure").failing_steps(app, Some(log), &steps);
+        let mut f = server(std::slice::from_ref(&r));
+        grade(&mut f, &r, touched(&["debrief"]))
+    };
+    // Control: the one failed command is the nextest run (the real annotation), and the app is not reached: fix items.
+    assert!(matches!(
+        grade_log(app_log(|l| l.to_string(), 2)).result,
+        GradedResult::GreenWithFixItems(_)
+    ));
+    // A lint annotation (the real line with its command replaced) is red, though the log also shows only FLAKY tests.
+    let lint = |_: &str| "::error::failed (exit 101): cargo clippy --workspace --all-targets -- -D warnings".to_string();
+    let o = grade_log(app_log(lint, 2));
+    assert!(matches!(&o.result, GradedResult::Red(why) if why.contains("clippy")), "{o:?}");
+    // A composite failure that does not show the failed command and the composite is not measured.
+    let o = grade_log(app_log(|l| l.to_string(), 1));
     assert!(matches!(o.result, GradedResult::NotMeasured(_)), "{o:?}");
 }

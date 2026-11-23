@@ -147,7 +147,7 @@ pub struct FailedJob {
 /// ([`crate::plan_since::failed_steps_are_tests`]) and its log shows only FLAKY tests; any other failed step is red. `touched` is
 /// asked at most once, and only when a FLAKY test needs it.
 pub fn grade_failures(workflow: &str, jobs: &[FailedJob], touched: &mut dyn FnMut() -> Option<Touched>) -> GradedResult {
-    use crate::plan_since::{StepProblem, failed_steps_are_tests, job_key};
+    use crate::plan_since::{StepProblem, failure_is_tests, job_key};
     let mut red = Vec::new();
     let mut unread = Vec::new();
     let mut items = Vec::new();
@@ -174,11 +174,11 @@ pub fn grade_failures(workflow: &str, jobs: &[FailedJob], touched: &mut dyn FnMu
         // The log shows only FLAKY tests: the job is test-only only when no other step failed (ER-33).
         match job_key(log)
             .ok_or_else(|| StepProblem::Unknown(format!("the log of job {name:?} names no workflow job")))
-            .and_then(|key| failed_steps_are_tests(workflow, &key, failed_steps))
+            .and_then(|key| failure_is_tests(workflow, &key, failed_steps, log))
         {
             Ok(()) => {}
             Err(StepProblem::Other(step)) => {
-                red.push(format!("job {name:?}: step {step:?} failed and is not a test step"));
+                red.push(format!("job {name:?}: {step:?} failed and is not a test step or test command"));
                 continue;
             }
             Err(StepProblem::Unknown(why)) => {
