@@ -11,6 +11,30 @@ fn repo_root() -> PathBuf {
     PathBuf::from(paddock_env::winpath::real_for_tools(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")).unwrap())
 }
 
+/// Rule 89: the registry is where agents read a regenerate command, and the guard hook refuses a plain `cargo test`, so every
+/// `regenerate` (and the line with its folder) must be one the hook lets through. The hook's own reading decides; the control is a
+/// plain `cargo test` line, which it refuses.
+#[test]
+fn every_regenerate_command_of_the_registry_passes_the_guard_hook() {
+    use paddock_dev::hook::rules::no_plain_cargo_test::runs_plain_cargo_test;
+    let reg = Registry::parse(&fs::read_to_string(repo_root().join("docs/generators.toml")).unwrap())
+        .unwrap_or_else(|e| panic!("{}", e.join("\n")));
+    let blocked: Vec<String> = reg
+        .generators
+        .iter()
+        .filter(|g| runs_plain_cargo_test(&g.regenerate) || runs_plain_cargo_test(&g.regenerate_line()))
+        .map(|g| format!("{}: {}", g.id, g.regenerate))
+        .collect();
+    assert!(
+        blocked.is_empty(),
+        "regenerate commands the hook refuses (use `cargo nextest run`):\n{}",
+        blocked.join("\n")
+    );
+    assert!(runs_plain_cargo_test(
+        "PADDOCK_WRITE_TS=1 cargo test -p x --lib generated   # in crates"
+    ));
+}
+
 #[test]
 fn the_registry_of_the_repository_is_well_formed_and_names_what_exists() {
     let root = repo_root();

@@ -278,7 +278,7 @@ id = "ts-debrief-wire"
 what = "Debrief's TypeScript wire types, generated from the Rust DTOs with ts-rs"
 check = ["cargo", "test", "-p", "debrief-app", "--lib", "generated_types"]
 build = ["cargo", "test", "--no-run", "-p", "debrief-app", "--lib"]
-regenerate = "DEBRIEF_WRITE_TYPES=1 cargo test -p debrief-app --lib generated_types   # in apps/debrief"
+regenerate = "DEBRIEF_WRITE_TYPES=1 cargo nextest run -p debrief-app --lib generated_types   # in apps/debrief"
 cwd = "apps/debrief"
 paths = ["apps/debrief/crates/**/*.rs", "apps/debrief/app/src-tauri/**/*.rs", "apps/debrief/**/Cargo.toml", "apps/debrief/Cargo.lock"]
 outputs = ["apps/debrief/app/src/app/core/generated/*.ts"]
@@ -300,7 +300,7 @@ id = "ts-dyno-widgets"
 what = "Dyno's widget wire types and golden tables for the UI, generated from dyno-core"
 check = ["cargo", "test", "-p", "dyno-core", "--lib", "widgets::"]
 build = ["cargo", "test", "--no-run", "-p", "dyno-core", "--lib"]
-regenerate = "PADDOCK_WRITE_TS=1 cargo test -p dyno-core --lib widgets::   # in apps/dyno"
+regenerate = "PADDOCK_WRITE_TS=1 cargo nextest run -p dyno-core --lib widgets::   # in apps/dyno"
 cwd = "apps/dyno"
 paths = ["apps/dyno/crates/dyno-core/**", "apps/dyno/Cargo.lock", "crates/paddock-widgets/**"]
 outputs = ["apps/dyno/app/src/app/core/generated/*.ts"]
@@ -312,7 +312,7 @@ id = "ts-pitwall-widgets"
 what = "Pitwall's widget wire types for the UI, generated from pitwall-core"
 check = ["cargo", "test", "-p", "pitwall-core", "--lib", "widgets::generated"]
 build = ["cargo", "test", "--no-run", "-p", "pitwall-core", "--lib"]
-regenerate = "PADDOCK_WRITE_TS=1 cargo test -p pitwall-core --lib widgets::generated   # in apps/pitwall"
+regenerate = "PADDOCK_WRITE_TS=1 cargo nextest run -p pitwall-core --lib widgets::generated   # in apps/pitwall"
 cwd = "apps/pitwall"
 paths = ["apps/pitwall/crates/pitwall-core/**", "apps/pitwall/Cargo.lock", "crates/paddock-widgets/**"]
 outputs = ["apps/pitwall/app/src/app/core/generated/*.ts"]
@@ -324,7 +324,7 @@ id = "ts-dyno-shell"
 what = "Dyno's command names and dialog contracts for the UI, generated from its command and dialog tables"
 check = ["cargo", "test", "--test", "shell"]
 build = ["cargo", "test", "--no-run", "--test", "shell"]
-regenerate = "PADDOCK_WRITE_TS=1 cargo test --test shell   # in apps/dyno/app/src-tauri"
+regenerate = "PADDOCK_WRITE_TS=1 cargo nextest run --test shell   # in apps/dyno/app/src-tauri"
 cwd = "apps/dyno/app/src-tauri"
 paths = ["apps/dyno/app/src-tauri/**", "apps/dyno/crates/**/*.rs", "crates/paddock-commands/**", "crates/paddock-dialogs/**", "crates/paddock-shell/**"]
 outputs = ["apps/dyno/app/src/app/generated/*.ts"]
@@ -336,7 +336,7 @@ id = "ts-pitwall-shell"
 what = "Pitwall's command names and dialog contracts for the UI, generated from its command and dialog tables"
 check = ["cargo", "test", "--test", "it", "shell"]
 build = ["cargo", "test", "--no-run", "--test", "it"]
-regenerate = "PADDOCK_WRITE_TS=1 cargo test --test it shell   # in apps/pitwall/app/src-tauri"
+regenerate = "PADDOCK_WRITE_TS=1 cargo nextest run --test it shell   # in apps/pitwall/app/src-tauri"
 cwd = "apps/pitwall/app/src-tauri"
 paths = ["apps/pitwall/app/src-tauri/**", "apps/pitwall/crates/**/*.rs", "crates/paddock-commands/**", "crates/paddock-dialogs/**", "crates/paddock-shell/**"]
 outputs = ["apps/pitwall/app/src/app/generated/*.ts"]
@@ -348,7 +348,7 @@ id = "ts-shell-demo"
 what = "The shell demo's command names and dialog contracts for the UI, generated from its tables"
 check = ["cargo", "test", "--test", "app"]
 build = ["cargo", "test", "--no-run", "--test", "app"]
-regenerate = "PADDOCK_WRITE_TS=1 cargo test --test app   # in apps/shell-demo/src-tauri"
+regenerate = "PADDOCK_WRITE_TS=1 cargo nextest run --test app   # in apps/shell-demo/src-tauri"
 cwd = "apps/shell-demo/src-tauri"
 paths = ["apps/shell-demo/src-tauri/**", "crates/paddock-commands/**", "crates/paddock-dialogs/**", "crates/paddock-shell/**"]
 outputs = ["ui/projects/shell-demo/src/app/generated/*.ts"]
@@ -360,7 +360,7 @@ id = "ts-workbench-demo"
 what = "The workbench demo's dialog contracts for the UI, generated from its table"
 check = ["cargo", "test", "--test", "app"]
 build = ["cargo", "test", "--no-run", "--test", "app"]
-regenerate = "PADDOCK_WRITE_TS=1 cargo test --test app   # in apps/workbench-demo/src-tauri"
+regenerate = "PADDOCK_WRITE_TS=1 cargo nextest run --test app   # in apps/workbench-demo/src-tauri"
 cwd = "apps/workbench-demo/src-tauri"
 paths = ["apps/workbench-demo/src-tauri/**", "crates/paddock-commands/**", "crates/paddock-dialogs/**", "crates/paddock-shell/**"]
 outputs = ["ui/projects/workbench-demo/src/app/generated/*.ts"]
@@ -372,7 +372,7 @@ id = "ts-shared-crates"
 what = "the shared crates' TypeScript (ts-rs types, command names, dialog contracts, fixtures), command_names.rs and window-classes.toml, each written by its crate's `generated` test"
 check = ["cargo", "test", "--workspace", "--all-features", "--lib", "generated"]
 build = ["cargo", "test", "--no-run", "--workspace", "--all-features", "--lib"]
-regenerate = "PADDOCK_WRITE_TS=1 cargo test -p <crate> --all-features --lib generated   # in crates; the failing test names the crate"
+regenerate = "PADDOCK_WRITE_TS=1 cargo nextest run -p <crate> --all-features --lib generated   # in crates; the failing test names the crate"
 cwd = "crates"
 paths = ["crates/**/*.rs", "crates/**/Cargo.toml", "crates/Cargo.lock", "ui/projects/paddock-ui/**/generated/**"]
 outputs = ["ui/projects/paddock-ui/**/generated/*.ts", "crates/*/permissions/window-classes.toml", "crates/*/src/command_names.rs"]
@@ -392,7 +392,7 @@ cost = "heavy"
 id = "service-files"
 what = "the per-app service and installer files that paddock-service writes from an app's ServiceSpec (a systemd unit, a launchd plist, an installer hook)"
 manual = "each app's own test writes its files; the first line of the file says which"
-regenerate = "run the command in the file's first line (an app's `cargo test` with PADDOCK_WRITE_TS=1)"
+regenerate = "run the command in the file's first line (an app's `cargo nextest run` with PADDOCK_WRITE_TS=1)"
 paths = ["apps/**/src-tauri/linux/*.service", "apps/**/src-tauri/macos/*.plist", "apps/**/src-tauri/windows/installer-hooks.nsh", "crates/paddock-service/**"]
 outputs = ["apps/**/src-tauri/linux/*.service", "apps/**/src-tauri/macos/*.plist", "apps/**/src-tauri/windows/installer-hooks.nsh"]
 cost = "heavy"
@@ -411,7 +411,7 @@ id = "per-machine-installer"
 what = "The Windows per-machine installer include and its stop-image list, generated by paddock-service from each app's Tauri config"
 check = ["cargo", "test", "-p", "paddock-service", "--lib", "per_machine"]
 build = ["cargo", "test", "--no-run", "-p", "paddock-service", "--lib"]
-regenerate = "PADDOCK_WRITE_TS=1 cargo test -p paddock-service --lib per_machine   # in crates"
+regenerate = "PADDOCK_WRITE_TS=1 cargo nextest run -p paddock-service --lib per_machine   # in crates"
 cwd = "crates"
 paths = ["crates/paddock-service/**", "crates/paddock-setup/nsis/**", "apps/*/app/src-tauri/tauri*.conf.json", "apps/*/app/src-tauri/windows/**"]
 outputs = ["apps/*/app/src-tauri/windows/paddock-per-machine*.nsh", "crates/paddock-setup/nsis/paddock-per-machine.nsh"]
