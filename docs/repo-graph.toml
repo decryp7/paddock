@@ -143,6 +143,11 @@ files = ["docs/gates.toml"]
 reaches = ["project:paddock-dev", "project:conformance"]
 
 [[input]]
+name = "escape-register"
+files = ["docs/escape-register.toml"]
+reaches = ["project:paddock-dev"]
+
+[[input]]
 name = "generators-register"
 files = ["docs/generators.toml"]
 reaches = ["project:paddock-dev"]
