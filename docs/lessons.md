@@ -3587,8 +3587,9 @@ logged with what the rule saw (ER-27). Lesson: an admission rule needs a cost, n
   nextest runs at 4 workers under load (15-minute load 21 to 30, 4 CPU burners, sweep run 1 of fix/bounded-test-runs), round 2 ended
   `[0, 1]`: one add won and the other failed instead of being refused. Stressed alone it passed 60 of 60 (4 workers, load about 17) and
   120 of 120 (8 workers, 6 burners, load 31 to 37), 720 rounds in all, so the cause is not confirmed (ER-28). The test discarded both
-  programs' output, so the loser's error was lost; it now prints both outputs in the failure. Next step: read the loser's message from
-  the next failure.
+  programs' output, so the loser's error was lost; it now prints both outputs in the failure. A further stress with that output in place
+  (fix/bounded-test-runs-2, 125 iterations x 4 rounds = 500 rounds, 8 workers, 6 CPU burners, load 15 to 31) passed 500 of 500, so 1,220
+  rounds alone have not caught it. Next step: read the loser's message from the next failure.
 - Sweep after the fixes (fix/bounded-test-runs, Dev Mac, 4 workers, 4 CPU burners, the run starting only at a 15-minute load under 30):
   6 full nextest runs of paddock-dev. 5 passed in full (2580 or 2587 tests, 277 to 544 s); 1 had the failure above. No slot holder
   of ours was left after any run (3 `ci slot hold` processes after run 3, while the train's CI shared the Mac, are not attributed).
