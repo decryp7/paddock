@@ -611,11 +611,19 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: dev.decryptology.net/decryp7/paddock-ci:v3
+    env:
+      # Read credential and tag rule for ./dev's prebuilt download, which build-jobs runs (ADR 0022 R0b; a tag run builds from source).
+      PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+      PADDOCK_DEV_DOWNLOAD: ${{ startsWith(github.ref, 'refs/tags/') && '0' || '' }}
     defaults:
       run:
         working-directory: apps/debrief/app
     steps:
       - uses: actions/checkout@v4
+
+      # VITEST_MAX_WORKERS: this job's share of the host's cores (ER-48). Without it Vitest starts cores - 1 workers, 29 on d-gtr9
+      # beside five other lanes, and the slowest specs ran past the 20 s test timeout (run 8753).
+      - uses: ./.gitea/actions/build-jobs
 
       # The job's own temp and socket folders (ER-14; on the host runners job-isolation's acquire makes the same): the tests
       # and the leak check never touch a folder other runs use. The socket folder goes with the job's last step.
@@ -714,11 +722,18 @@ jobs:
         # Every shard; a since_run rerun only the failed ones (the plan job writes all four otherwise). The `include` form of
         # ci.yml's crate legs, proven on this Gitea.
         include: ${{ fromJSON(needs.plan.outputs.e2e_shards) }}
+    env:
+      # Read credential and tag rule for ./dev's prebuilt download, which build-jobs runs (ADR 0022 R0b; a tag run builds from source).
+      PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+      PADDOCK_DEV_DOWNLOAD: ${{ startsWith(github.ref, 'refs/tags/') && '0' || '' }}
     defaults:
       run:
         working-directory: apps/debrief/app
     steps:
       - uses: actions/checkout@v4
+
+      # PADDOCK_E2E_WORKERS: this shard's share of the host's cores (ER-48); e2eWorkers takes the smaller of it and the config's 2.
+      - uses: ./.gitea/actions/build-jobs
 
       - uses: ./.gitea/actions/node-caches
         with:
