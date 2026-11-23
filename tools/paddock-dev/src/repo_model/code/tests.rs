@@ -395,7 +395,12 @@ fn on_the_real_tree_every_read_candidate_parses_with_syn() {
     let history = paddock_repo_graph::GitHistory::new(&root, std::time::Duration::from_secs(120));
     let graph = crate::plan::read_graph(&root, &history).unwrap();
     let files = paddock_repo_graph::History::tracked_files(&history).unwrap();
-    let decls = crate::repo_model::decl::load(&root, &graph, &crate::repo_inputs::load(&root).unwrap()).unwrap();
+    let decls = crate::repo_model::decl::load(
+        &crate::repo_model::decl::working_tree(&root),
+        &graph,
+        &crate::repo_inputs::load(&root).unwrap(),
+    )
+    .unwrap();
     let read = crate::repo_model::GitBulk::new(&root, None);
     let a = CodeExtractor {
         root: root.clone(),

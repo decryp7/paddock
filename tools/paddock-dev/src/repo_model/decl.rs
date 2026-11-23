@@ -110,38 +110,42 @@ pub fn parse(id: &str, dir: &str, file: &str, v: &Value) -> Result<ProjectDecl, 
     Ok(d)
 }
 
-/// Every project's declarations: project id to them. A contract that is not there declares nothing; one that cannot be read or
-/// parsed is an error (fail closed: the plan answers everything).
-pub fn load(root: &Path, graph: &RepoGraph, inputs: &Inputs) -> Result<BTreeMap<String, ProjectDecl>, String> {
+/// What a contract read gives: its text, `None` when the file is not there, or why it cannot be read.
+pub type ReadText<'a> = &'a dyn Fn(&str) -> Result<Option<String>, String>;
+
+/// Every project's declarations: project id to them, every contract read through `read` (the tree's revision, or the working tree
+/// in files mode: integrator item 4c, a plan of another revision never takes today's contracts). A contract that is not there
+/// declares nothing; one that cannot be read or parsed is an error (fail closed: the plan answers everything).
+pub fn load(read: ReadText, graph: &RepoGraph, inputs: &Inputs) -> Result<BTreeMap<String, ProjectDecl>, String> {
     let paths = &inputs.paths;
     let mut out = BTreeMap::new();
-    for (app, v) in &graph.configs {
-        let dir = format!("{}{app}", paths.apps);
-        out.insert(
-            format!("app:{app}"),
-            parse(&format!("app:{app}"), &dir, &format!("{dir}/{}", paths.contract), v)?,
-        );
+    let mut one = |id: &str, dir: &str| -> Result<(), String> {
+        let file = format!("{dir}/{}", paths.contract);
+        if let Some(text) = read(&file)? {
+            let v: Value = serde_json::from_str(&text).map_err(|e| format!("{file} is not valid JSON: {e}"))?;
+            out.insert(id.to_string(), parse(id, dir, &file, &v)?);
+        }
+        Ok(())
+    };
+    for app in &graph.apps {
+        one(&format!("app:{app}"), &format!("{}{app}", paths.apps))?;
     }
     for p in crate::ci_run::contract::ROOT_PROJECTS {
-        let file = crate::ci_run::contract::repo_path_of(p);
-        if !root.join(&file).exists() {
-            continue;
-        }
-        let v = crate::ci_run::contract::load(root, p)?;
-        out.insert(p.to_string(), parse(p, p, &file, &v)?);
+        one(p, p)?;
     }
     if let Some(dir) = inputs.projects.iter().find(|d| d.id == PADDOCK_DEV).map(|d| d.folder.clone()) {
-        let file = format!("{dir}/{}", paths.contract);
-        match std::fs::read_to_string(root.join(&file)) {
-            Ok(text) => {
-                let v: Value = serde_json::from_str(&text).map_err(|e| format!("{file} is not valid JSON: {e}"))?;
-                out.insert(PADDOCK_DEV.to_string(), parse(PADDOCK_DEV, &dir, &file, &v)?);
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => return Err(format!("{file} cannot be read: {e}")),
-        }
+        one(PADDOCK_DEV, &dir)?;
     }
     Ok(out)
+}
+
+/// A [`ReadText`] over the working tree under `root`.
+pub fn working_tree(root: &Path) -> impl Fn(&str) -> Result<Option<String>, String> + '_ {
+    move |file: &str| match std::fs::read_to_string(root.join(file)) {
+        Ok(t) => Ok(Some(t)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(format!("{file} cannot be read: {e}")),
+    }
 }
 
 /// The projects with a declared smoke set.

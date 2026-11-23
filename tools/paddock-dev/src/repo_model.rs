@@ -249,6 +249,8 @@ pub struct World {
     pub model: paddock_repo_graph::model::nodes::Model,
     /// The projects whose contract declares a smoke set (`graph.smoke`).
     pub smoke: BTreeSet<String>,
+    /// Every project's contract declarations (`graph.tests`, `graph.smoke`, `graph.reads`), read at the tree's revision.
+    pub decls: BTreeMap<String, decl::ProjectDecl>,
     /// An adapter that could not read a file (the plan fails closed on them).
     pub errors: Vec<ExtractError>,
 }
@@ -303,7 +305,11 @@ pub fn build_world_with(
         .flat_map(|n| n.files.iter().cloned())
         .collect();
     let spawned: std::rc::Rc<std::cell::Cell<usize>> = Default::default();
-    let decls = decl::load(root, graph, &inputs)?;
+    let at_rev = |f: &str| match head_rev {
+        Some(head) => text_of(f, bulk.bytes_at(head, f)),
+        None => text_of(f, bulk.working_bytes(f)),
+    };
+    let decls = decl::load(&at_rev, graph, &inputs)?;
     let code_adapter = code::CodeExtractor {
         root: root.to_path_buf(),
         cargo: graph.cargo.clone(),
@@ -340,6 +346,7 @@ pub fn build_world_with(
         files,
         model,
         smoke: decl::smoke_declared(&decls),
+        decls,
         errors,
     };
     Ok((world, spawned.get()))

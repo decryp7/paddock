@@ -324,6 +324,7 @@ mod tests {
             ],
             model,
             smoke: Default::default(),
+            decls: Default::default(),
             errors: Vec::new(),
         }
     }

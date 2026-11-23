@@ -573,7 +573,12 @@ fn every_declared_smoke_set_names_real_packages_and_phases() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let history = paddock_repo_graph::GitHistory::new(&root, std::time::Duration::from_secs(120));
     let graph = crate::plan::read_graph(&root, &history).unwrap();
-    let decls = decl::load(&root, &graph, &crate::repo_inputs::load(&root).unwrap()).unwrap();
+    let decls = decl::load(
+        &crate::repo_model::decl::working_tree(&root),
+        &graph,
+        &crate::repo_inputs::load(&root).unwrap(),
+    )
+    .unwrap();
     let packages = |id: &str| -> BTreeSet<String> {
         let dir = project_dir_of(&crate::repo_inputs::load(&root).unwrap(), &graph, id).unwrap_or_default();
         graph
@@ -640,6 +645,7 @@ mod dropped {
             files: Vec::new(),
             model,
             smoke: smoke.iter().map(|s| s.to_string()).collect(),
+            decls: BTreeMap::new(),
             errors: Vec::new(),
         }
     }
@@ -783,4 +789,43 @@ mod categories {
             assert!(!is_test_file(f), "{f}");
         }
     }
+}
+
+#[test]
+fn the_contracts_are_read_at_the_requested_revision_not_the_working_tree() {
+    // Failing first (integrator item 4c): decl::load read every contract from the working tree, so a replay or a plan of another
+    // revision took today's smoke sets and test globs. The revision declares a smoke set for `crates`; the working tree drops it.
+    let (d, base, head) = two_commits(1);
+    let git_in = |args: &[&str]| {
+        let mut c = crate::git_env::git();
+        c.arg("-C")
+            .arg(d.path())
+            .args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"])
+            .args(args);
+        let o = c.output().unwrap();
+        assert!(o.status.success(), "{args:?}");
+        String::from_utf8_lossy(&o.stdout).trim().to_string()
+    };
+    std::fs::create_dir_all(d.path().join("crates")).unwrap();
+    let declared = r#"{"graph": {"smoke": {"phases": ["fmt"], "nextest": "package(=a)"}}}"#;
+    std::fs::write(d.path().join("crates/paddock.ci.json"), declared).unwrap();
+    git_in(&["add", "-A"]);
+    git_in(&["commit", "-q", "-m", "contract"]);
+    let rev = git_in(&["rev-parse", "HEAD"]);
+    let _ = (base, head);
+    std::fs::write(d.path().join("crates/paddock.ci.json"), "{}").unwrap();
+    let history = paddock_repo_graph::GitHistory::new(d.path(), std::time::Duration::from_secs(60));
+    let at_rev = build_world(d.path(), &history, &RepoGraph::default(), Some(&rev)).unwrap();
+    assert!(
+        at_rev.smoke.contains("crates"),
+        "the revision's contract decides: {:?}",
+        at_rev.smoke
+    );
+    assert_eq!(
+        at_rev.decls["crates"].smoke.as_ref().map(|s| s.nextest.as_str()),
+        Some("package(=a)")
+    );
+    // Control: the working tree (no revision) reads the edited contract, which declares nothing.
+    let working = build_world(d.path(), &history, &RepoGraph::default(), None).unwrap();
+    assert!(!working.smoke.contains("crates"), "{:?}", working.smoke);
 }
