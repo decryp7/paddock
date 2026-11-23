@@ -468,10 +468,13 @@ fn a_failed_run_that_is_green_with_fix_items_lands_and_records_them() {
     );
     assert_eq!(w.repos.origin_ref("refs/heads/main"), head);
     let comments = w.comments_of(1);
-    let recorded = comments
-        .iter()
-        .find(|c| c.contains("fix items"))
-        .expect("a fix-item comment before the landing");
+    let at = |needle: &str| comments.iter().position(|c| c.contains(needle));
+    let (before, after) = (at("landing on runs that are green with fix items"), at("landed on main"));
+    assert!(
+        before.is_some() && before < after,
+        "the fix items are written before the landing comment: {comments:?}"
+    );
+    let recorded = &comments[before.unwrap()];
     for needle in [
         "ci.yml",
         "run 8001",
