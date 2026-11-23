@@ -366,7 +366,7 @@ changes here, every app's copy is updated in the same change.
     a check script) is not the release path. A change that reaches only such a step selects the app's smoke set and its
     `checks` phase, not the installers (ADR 0117's `gate` reach; `docs/repo-graph.toml` `[ci] release_gate_phases`). The
     installers stay for the bundle, sign, notarise and publish steps (the steps that use an action), the app's code, the
-    Tauri config and tags.
+    Tauri config and tags. A smoke run never counts as a complete verdict. Rule 87 points here.
     (a) The batch dispatches `<app>-release.yml` with gates on and the installers (bundle) built; passing tests alone is
     not enough.
     (a2) A train dispatches an app's release gate only when the plan (`./dev plan`, over the train's
@@ -507,9 +507,7 @@ Amendments of the same date, no new number: the member gate runs each member's a
     closed, ADR 0117). Nothing is plumbing by its folder or name. *Why:* `.gitea/actions/README.md` was on the planner's global list
     and train 20 spent six full rounds (runs 8610, 8635, 8647, about 700 to 730 job-minutes each) on plumbing changes.
 87. **A change to a conformance check, or to a check a release job runs, runs the app's smoke set and its checks phase, not the
-    installers** (user, 2026-11-23; the narrowing of rule 54, whose clause (a0) on the graph train says the same: keep one copy
-    of the text when both land). The installers stay for the bundle, sign, notarise and publish steps, app code, the Tauri config
-    and tags. A smoke run never counts as a complete verdict.
+    installers** (user, 2026-11-23). The text is rule 54 (a0), the one copy.
 88. **Removing an OS from a test needs the user's approval.** The record is `docs/os-removals.toml`; growth of that register is a
     finding that no waiver clears (rule 83; the check is planned in ADR 0117). *Why:* OS-scoped tests (ER-9) cut Windows time by 46%, and an OS
     dropped without a reason is a hole in the net.
