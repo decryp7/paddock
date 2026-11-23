@@ -517,6 +517,25 @@ pub fn reach(changed: &[String], facts: &Facts, inputs: &Inputs, text: TextOf) -
             .collect();
         out.unresolved_refs = unresolved.iter().map(|(_, _, why)| why.clone()).collect();
         for (file, held_by, why) in &unresolved {
+            // A referrer that no project folder, model node or held node places: nothing can say what the reference breaks, so
+            // the plan answers everything (fail closed, review P2-4).
+            if project_of(facts, file).is_none()
+                && held_by.is_none()
+                && m.owners_of(file).is_empty()
+            {
+                out.everything = true;
+                for (id, _) in facts.projects {
+                    out.mark(
+                        id,
+                        Reach::Code,
+                        true,
+                        true,
+                        format!("{why}: nothing places its referrer (fail closed)"),
+                    );
+                    out.whole.insert(id.clone());
+                }
+                continue;
+            }
             if let Some(p) = project_of(facts, file) {
                 out.mark(p, Reach::Code, true, true, why.clone());
                 out.whole.insert(p.to_string());

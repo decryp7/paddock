@@ -901,3 +901,34 @@ fn the_ci_files_outside_workflows_and_actions_are_declared_inputs() {
     assert!(!r.everything, "{:?}", r.unowned);
     assert_eq!(ids(&r), ["conformance", "crates", "paddock-dev"]);
 }
+
+#[test]
+fn an_unresolved_reference_from_a_file_no_project_or_node_holds_makes_the_plan_answer_everything() {
+    use nodes::Unresolved;
+    let w = world();
+    let unresolved = |referrer: &str| {
+        let mut m = nodes::Model::new();
+        m.add_unresolved(Unresolved {
+            referrer: referrer.into(),
+            node: None,
+            reference: "./gone.mjs".into(),
+            why: "a computed import".into(),
+        });
+        m
+    };
+    // Nothing places the referrer (no project folder, no model node, no held node): nobody can say what it breaks, so fail closed.
+    let r = run_model(&w, &unresolved("loose/x.mjs"), &[], &[]);
+    assert!(r.everything, "{:?}", r.nodes);
+    for (id, _) in &w.projects {
+        assert_eq!(
+            r.nodes.get(id).map(|n| n.reach),
+            Some(Reach::Code),
+            "{id}: {:?}",
+            r.nodes
+        );
+    }
+    // Positive control: a referrer in a project folder runs that project in full and nothing else.
+    let p = run_model(&w, &unresolved("ui/src/a.ts"), &[], &[]);
+    assert!(!p.everything);
+    assert_eq!(ids(&p), ["ui"]);
+}
