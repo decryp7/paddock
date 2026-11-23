@@ -1,0 +1,10 @@
+{
+  "$comment": "Frozen fixture contract for the rule goldens: the ui project's declared test files (ADR 0117 §3, `graph.tests`), so a spec change is a test-only reach (category 3).",
+  "graph": {
+    "tests": {
+      "vitest": [
+        "projects/**/*.spec.ts"
+      ]
+    }
+  }
+}

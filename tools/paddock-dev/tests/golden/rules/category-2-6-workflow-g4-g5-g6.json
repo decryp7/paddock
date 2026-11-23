@@ -5,6 +5,15 @@
    "file": ".gitea/actions/node-caches/action.yml",
    "differences": [
     {
+     "project": "app:x",
+     "rules": "all",
+     "model": null,
+     "category": "2-6-workflow-g4-g5-g6",
+     "dropped": [
+      "nextest:x::bin/x"
+     ]
+    },
+    {
      "project": "app:y",
      "rules": "all",
      "model": null,
