@@ -5,7 +5,7 @@
 //! test waits for what the supervisor has *seen* (a job's processes in its usage, not only the "task started" line),
 //! and every wait is on a condition. A real-time job length or a fixed number of fake-clock steps that must fit into
 //! one real job made these tests fail or time out on a loaded runner (CI run 6628).
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::disallowed_methods, missing_docs)]
+#![allow(clippy::unwrap_used, clippy::expect_used, missing_docs)]
 
 use paddock_testkit::TestCommand;
 use pitcrew_core::health::RunnerStatus;
@@ -80,10 +80,6 @@ impl Harness {
     }
 
     /// `state_json` is written as the service's `state.json` before it starts.
-    #[allow(
-        clippy::disallowed_methods,
-        reason = "a test builds its scratch path from the OS temp folder and removes it"
-    )]
     fn build(test: &str, fake: &str, registered: bool, runner_toml: &str, state_json: Option<&str>) -> Harness {
         pitcrew_service::launch::set_stop_helper(PathBuf::from(env!("CARGO_BIN_EXE_pitcrew-service")));
         let root = runner_temp_root().join(format!("pitcrew-it-{test}-{}", std::process::id()));
@@ -152,6 +148,10 @@ impl Harness {
     }
 
     /// Ends every process the test started: anything running from or inside the harness folder, and their descendants.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "ends the test's own leftovers, found by their folder and parent chain under this harness's root (ADR 0033 sweep of the harness folder): no ProcessId API sees a process by its exe or cwd"
+    )]
     fn kill_leftover_processes(&self) {
         use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
         let mut sys = System::new().expect("a System");
@@ -663,6 +663,7 @@ use pitcrew_core::runner_settings::RunnerSettings;
 
 /// Whether a process still runs (a zombie nobody reaped does not count).
 #[cfg(unix)]
+#[expect(clippy::disallowed_methods, reason = "runs `ps` on a pid the test holds, to read its state")]
 fn alive(pid: u32) -> bool {
     let out = std::process::Command::new("ps")
         .args(["-o", "stat=", "-p", &pid.to_string()])
@@ -948,6 +949,10 @@ fn nothing_is_stopped_while_a_job_runs() {
 fn a_stop_outside_the_runners_tree_is_refused() {
     let mut h = Harness::new("fence", "mode=leftover\njob_secs=hold\nleftovers=sleep:600\n", true);
     h.until_leftovers(1);
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "starts a stand-in process outside the runner's tree; the test ends it itself"
+    )]
     let stranger = std::process::Command::new("sleep").arg("120").spawn();
     let mut stranger = stranger.unwrap();
     let refuse = |h: &mut Harness, pid: u32, allow: bool| match h.ask(Request::StopProcess {
