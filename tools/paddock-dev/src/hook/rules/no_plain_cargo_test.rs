@@ -46,26 +46,47 @@ impl Rule for NoPlainCargoTest {
     }
 
     fn check(&self, _call: &ToolCall, script: Option<&Script>) -> Option<Denial> {
-        let plain = script?.commands().any(|cmd| {
-            cmd.words
-                .iter()
-                .enumerate()
-                .filter(|(_, w)| !w.quoted && basename(&w.text) == "cargo")
-                .any(|(k, _)| runs_plain_tests(&cmd.words[k + 1..]))
-        });
-        plain.then(|| self.denial())
+        plain_cargo_test(script?).then(|| self.denial())
     }
 
     fn legacy(&self, text: &str) -> Option<Denial> {
-        static PATTERN: OnceLock<Option<Regex>> = OnceLock::new();
-        let p = PATTERN
-            .get_or_init(|| Regex::new(r"(^|[\s;&|(`/])cargo(\s+(\+\S+|-\S+))*\s+(test|t)(\s|$|[;&|)])").ok())
-            .as_ref()?;
-        // Text only: `--doc` and `--no-run` anywhere after it let it through, as the reader does.
-        let hit = p.find(text)?;
-        let rest = &text[hit.start()..];
-        (!rest.contains("--doc") && !rest.contains("--no-run")).then(|| self.denial())
+        plain_cargo_test_text(text).then(|| self.denial())
     }
+}
+
+/// Whether a parsed command runs a plain `cargo test` (see the module): the one reading the hook and the CI check share (ER-22).
+pub fn plain_cargo_test(script: &Script) -> bool {
+    script.commands().any(|cmd| {
+        cmd.words
+            .iter()
+            .enumerate()
+            .filter(|(_, w)| !w.quoted && basename(&w.text) == "cargo")
+            .any(|(k, _)| runs_plain_tests(&cmd.words[k + 1..]))
+    })
+}
+
+/// Whether a command line runs a plain `cargo test`: read by the lexer, or by the text check when the lexer cannot read it. The CI
+/// model's lines are checked with this (`ci_run::tests::no_ci_line_runs_a_plain_cargo_test`).
+pub fn runs_plain_cargo_test(command: &str) -> bool {
+    match Script::parse(command) {
+        Ok(script) => plain_cargo_test(&script),
+        Err(_) => plain_cargo_test_text(command),
+    }
+}
+
+/// The text check of a command the lexer cannot read: `--doc` and `--no-run` anywhere after it let it through, as the reader does.
+fn plain_cargo_test_text(text: &str) -> bool {
+    static PATTERN: OnceLock<Option<Regex>> = OnceLock::new();
+    let Some(p) = PATTERN
+        .get_or_init(|| Regex::new(r"(^|[\s;&|(`/])cargo(\s+(\+\S+|-\S+))*\s+(test|t)(\s|$|[;&|)])").ok())
+        .as_ref()
+    else {
+        return false;
+    };
+    p.find(text).is_some_and(|hit| {
+        let rest = &text[hit.start()..];
+        !rest.contains("--doc") && !rest.contains("--no-run")
+    })
 }
 
 /// `words` follow a `cargo` word: a `+toolchain`, cargo's own options, then the subcommand and its arguments.

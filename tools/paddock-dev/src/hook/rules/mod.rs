@@ -7,7 +7,7 @@ use super::lex::Script;
 mod no_force_push;
 mod no_kill_by_name;
 mod no_pgrep_wait;
-mod no_plain_cargo_test;
+pub mod no_plain_cargo_test;
 mod no_unbounded_wait;
 mod no_unscoped_cleanup;
 

@@ -202,7 +202,7 @@ jobs:
         env:
           PADDOCK_REAL_WINDOWS: "1"
           PADDOCK_PROBE_DIST: ${{ github.workspace }}/ui/dist/shell-demo/browser
-        run: xvfb-run -a cargo test -p paddock-dialogs --features tauri --test show_probe -- --nocapture
+        run: xvfb-run -a cargo nextest run --profile ci -p paddock-dialogs --features probe --test show_probe --no-capture
 
       - name: Probe (macOS, Windows)
         if: runner.os != 'Linux'
@@ -210,7 +210,7 @@ jobs:
         env:
           PADDOCK_REAL_WINDOWS: "1"
           PADDOCK_PROBE_DIST: ${{ github.workspace }}/ui/dist/shell-demo/browser
-        run: cargo test -p paddock-dialogs --features tauri --test show_probe -- --nocapture
+        run: cargo nextest run --profile ci -p paddock-dialogs --features probe --test show_probe --no-capture
 
       - uses: ./.gitea/actions/sccache-stats
         if: always()
