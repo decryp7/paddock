@@ -238,7 +238,7 @@ fn p1a_every_non_prose_file_under_a_doc_owner_is_a_named_input_or_unowned() {
     assert_eq!(
         ids(&run(
             &w,
-            &["docs/plans/x.md", "docs/images/shot.png"],
+            &["docs/plans/x.md", "docs/pictures/shot.png"],
             &none
         )),
         ["docs"]
@@ -341,8 +341,8 @@ fn d14_detection_classes_binary_under_docs_as_an_asset_and_a_renamed_text_png_as
     let w = world();
     let detect = |p: &str| -> Option<Detected> {
         Some(match p {
-            "docs/shots/raw.bin" | "docs/images/a.png" => Detected::Binary,
-            "docs/images/fake.png" => Detected::Text,
+            "docs/shots/raw.bin" | "docs/pictures/a.png" => Detected::Binary,
+            "docs/pictures/fake.png" => Detected::Text,
             "docs/new.toml" => Detected::Toml,
             _ => Detected::Text,
         })
@@ -350,7 +350,7 @@ fn d14_detection_classes_binary_under_docs_as_an_asset_and_a_renamed_text_png_as
     // A binary file under a doc owner is a documentation asset without being listed.
     let bin = run_detecting(
         &w,
-        &["docs/shots/raw.bin", "docs/images/a.png"],
+        &["docs/shots/raw.bin", "docs/pictures/a.png"],
         &none,
         Some(&detect),
     );
@@ -358,13 +358,13 @@ fn d14_detection_classes_binary_under_docs_as_an_asset_and_a_renamed_text_png_as
     // Positive control: a `.png` that holds text is not an asset; the error names its detected kind.
     let fake = run_detecting(
         &w,
-        &["docs/images/fake.png", "docs/new.toml"],
+        &["docs/pictures/fake.png", "docs/new.toml"],
         &none,
         Some(&detect),
     );
-    assert_eq!(fake.unowned, ["docs/images/fake.png", "docs/new.toml"]);
+    assert_eq!(fake.unowned, ["docs/pictures/fake.png", "docs/new.toml"]);
     assert!(fake.everything);
-    assert_eq!(fake.unowned_kind["docs/images/fake.png"], Detected::Text);
+    assert_eq!(fake.unowned_kind["docs/pictures/fake.png"], Detected::Text);
     assert_eq!(fake.unowned_kind["docs/new.toml"], Detected::Toml);
     // Detection never narrows inside a project folder: binary data there is still code.
     let data = run_detecting(&w, &["apps/dyno/tests/blob.dat"], &none, Some(&detect));
