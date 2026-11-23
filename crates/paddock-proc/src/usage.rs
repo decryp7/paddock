@@ -114,29 +114,44 @@ pub(crate) fn snapshot_with(make: impl FnOnce() -> Result<System, sysinfo::Error
     let Some(mut sys) = new_system_with(make) else {
         return Table::default();
     };
-    let listed_at = crate::sys::listing_clock();
+    let listed_at = listing_started();
     sys.refresh_processes_specifics(
         ProcessesToUpdate::All,
         true,
         ProcessRefreshKind::nothing().with_memory(),
     );
-    table_from(sys.processes().iter().map(|(pid, p)| {
-        entry_of(
-            Listed {
-                pid: pid.as_u32(),
-                parent: p.parent().map(Pid::as_u32),
-                rss: p.memory(),
-                is_thread: p.thread_kind().is_some(),
-            },
-            crate::sys::look(pid.as_u32()),
-            listed_at,
-        )
-    }))
+    table_of_listing(
+        listed_at,
+        sys.processes().iter().map(|(pid, p)| Listed {
+            pid: pid.as_u32(),
+            parent: p.parent().map(Pid::as_u32),
+            rss: p.memory(),
+            is_thread: p.thread_kind().is_some(),
+        }),
+    )
+}
+
+/// The time to read just before a caller reads a process list itself (its own sysinfo `System`), for
+/// [`table_of_listing`]: a process that started before it was in the list.
+pub fn listing_started() -> StartTime {
+    crate::sys::listing_clock()
+}
+
+/// The [`Table`] of a process list the caller read itself, between [`listing_started`] (`listed_at`) and this call: each
+/// process's start time is read once now and paired with its listed parent as [`snapshot`] does, so a parent link and an
+/// identity always describe one process (a pid handed on after the list is unknown, never a stranger with the old parent).
+/// One bulk call per list; thread entries are skipped.
+pub fn table_of_listing(listed_at: StartTime, listed: impl IntoIterator<Item = Listed>) -> Table {
+    table_from(
+        listed
+            .into_iter()
+            .map(|l| entry_of(l, crate::sys::look(l.pid), listed_at)),
+    )
 }
 
 /// One process as the OS list showed it, before its identity is read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct Listed {
+pub struct Listed {
     /// Process or thread id.
     pub pid: u32,
     /// The parent pid the list gave.
@@ -185,6 +200,25 @@ pub(crate) fn entry_of(listed: Listed, look: Option<Look>, listed_at: StartTime)
     }
 }
 
+/// The parent of `pid` in `table` when the link is sound: both processes are in the table with known start times and
+/// the child started no earlier than the parent. A parent pid is only a number: on Windows it outlives its process, so a
+/// process whose parent ended names whatever holds that pid now, and that process's "children" would be strangers (an
+/// orphaned compiler server and everything it runs taken for a runner's job, CI run 8694). The same rule as
+/// [`descendants`], for a caller that walks or asks about direct children itself.
+pub fn parent_of(table: &Table, pid: u32) -> Option<u32> {
+    let row = table.get(&pid)?;
+    let parent = row.parent.filter(|&p| p != pid)?;
+    let started = row.started?;
+    let parent_started = table.get(&parent)?.started?;
+    follows(started, parent_started).then_some(parent)
+}
+
+/// Whether a process that started at `child` can be the child of one that started at `parent`: not before it (equal is
+/// allowed, Windows stamps both with one coarse clock tick).
+fn follows(child: StartTime, parent: StartTime) -> bool {
+    child >= parent
+}
+
 /// The process in `table` with this pid, by identity.
 pub fn identity(table: &Table, pid: u32) -> Option<ProcessId> {
     table.get(&pid)?.started.map(|s| ProcessId::new(pid, s))
@@ -214,7 +248,7 @@ pub fn descendants(table: &Table, root: ProcessId) -> Vec<ProcessId> {
     let mut frontier = vec![(root, root_until)];
     while let Some((p, until)) = frontier.pop() {
         for &kid in children.get(&p.pid()).into_iter().flatten() {
-            let after_parent = kid.started() >= p.started();
+            let after_parent = follows(kid.started(), p.started());
             let before_successor = until.is_none_or(|u| kid.started() < u);
             if after_parent && before_successor && seen.insert(kid.pid()) {
                 out.push(kid);
@@ -506,7 +540,7 @@ fn tree_fold(
             let listed_by = source.listed_by();
             let Some(started) = source
                 .started(kid)
-                .filter(|s| *s >= p.started() && listed_by.is_none_or(|t| *s <= t))
+                .filter(|s| follows(*s, p.started()) && listed_by.is_none_or(|t| *s <= t))
             else {
                 continue;
             };
@@ -944,6 +978,48 @@ Rss:              219040 kB\nPss:              131633 kB\nPss_Anon:          900
             started: started.map(StartTime::from_micros),
             is_thread: false,
         }
+    }
+
+    /// Regression (CI run 8694): a caller that asks for direct children by parent pid (Pitcrew's usage tree and its "the
+    /// runner has a job" check) took the orphans of an earlier holder of the runner's pid for the runner's job: 178
+    /// processes and 4.2 GB, the runner stayed Busy and its exited job child seemed never to leave the count.
+    #[test]
+    fn a_parent_link_counts_only_when_the_child_started_after_its_parent() {
+        let table = table_from([
+            row(10, 1, Some(100)),
+            // The runner's own child.
+            row(11, 10, Some(200)),
+            // Same clock tick as its parent (Windows' coarse clock): a child.
+            row(12, 10, Some(100)),
+            // An orphan of an earlier holder of pid 10, and its child.
+            row(13, 10, Some(50)),
+            row(14, 13, Some(60)),
+            // Start time unknown (handed on after the list, or unreadable).
+            row(15, 10, None),
+            // A parent that is not in the table (ended).
+            row(16, 99, Some(300)),
+            // Its own parent.
+            row(17, 17, Some(300)),
+        ]);
+        let sound: Vec<(u32, Option<u32>)> = (10..=17).map(|p| (p, parent_of(&table, p))).collect();
+        assert_eq!(
+            sound,
+            vec![
+                (10, None),
+                (11, Some(10)),
+                (12, Some(10)),
+                (13, None),
+                (14, Some(13)),
+                (15, None),
+                (16, None),
+                (17, None),
+            ],
+            "only links from an older to a newer process count"
+        );
+        assert_eq!(parent_of(&table, 42), None, "a pid not in the table");
+        // The same answer as the tree walk.
+        let root = ProcessId::new(10, StartTime::from_micros(100));
+        assert_eq!(pids(descendants(&table, root)), vec![11, 12]);
     }
 
     /// Regression (ADR 0033): on Windows a parent pid outlives its process. A process that started before its "parent" is
