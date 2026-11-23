@@ -99,6 +99,39 @@ pub struct Inputs {
     pub release_actions: Vec<String>,
     /// What counts as prose (review round 3, P1-A).
     pub prose: Prose,
+    /// The projects: the plan's project keys with their folders (`[[project]]`).
+    pub projects: Vec<ProjectDecl>,
+    /// The folders the adapters read (`[paths]`).
+    pub paths: Paths,
+}
+
+/// One declared project: its id (the plan's key) and its folder (empty: a check job that owns no path).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProjectDecl {
+    /// The id.
+    pub id: String,
+    /// The folder, relative to the repository root.
+    pub folder: String,
+}
+
+/// The folders and file names the adapters read, declared once in `docs/repo-graph.toml` `[paths]` (ADR 0117 §14: the adapters'
+/// code holds none).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Paths {
+    /// The workflows folder (`<folder>/<name>.yml`, one level).
+    pub workflows: String,
+    /// The local actions folder (`<folder>/<name>/action.yml`).
+    pub actions: String,
+    /// The apps folder (`<folder>/<app>/<contract>`).
+    pub apps: String,
+    /// The contract file name inside an app.
+    pub contract: String,
+    /// The folders whose files are script nodes even before a step runs them.
+    pub script_folders: Vec<String>,
+    /// The folder whose specs are the conformance node tests.
+    pub node_tests: String,
+    /// The folder name that marks a package's end-to-end specs (Playwright).
+    pub e2e: String,
 }
 
 /// What counts as prose (ADR 0117 §2, review round 3 P1-A): globs over a file's name (no `/`) or path.
