@@ -35,7 +35,7 @@ paddock-proc = { path = "../../crates/paddock-proc" }
 paddock-git = { path = "../../crates/paddock-git" }
 # ci_s3_guard: the stall guard (a localhost proxy that cuts a request the store does not answer); no TLS stack without the `http` feature.
 paddock-net = { path = "../../crates/paddock-net", default-features = false }
-paddock-repo-graph = { path = "../../crates/paddock-repo-graph", features = ["git-history", "cargo-metadata", "content", "ts", "rust-syn"] }
+paddock-repo-graph = { path = "../../crates/paddock-repo-graph", features = ["git-history", "cargo-metadata", "content", "ts"] }
 paddock-slots = { path = "../../crates/paddock-slots" }
 yaml-rust2 = "0.13"
 # disk: the usage index, as cargo's own global cache tracker is SQLite too (cargo clean gc). Bundled: no system library needed; MIT, SQLite is public domain.

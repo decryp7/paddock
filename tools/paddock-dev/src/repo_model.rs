@@ -446,6 +446,7 @@ pub fn project_dir_of(graph: &RepoGraph, id: &str) -> Option<String> {
 pub mod ci;
 pub mod code;
 pub mod decl;
+pub mod reads;
 
 #[cfg(test)]
 mod tests;

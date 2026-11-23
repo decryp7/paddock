@@ -4968,10 +4968,8 @@ dependencies = [
  "paddock-proc",
  "paddock-testkit",
  "paddock-workspace-hack",
- "proc-macro2",
  "regex",
  "serde_json",
- "syn 2.0.119",
  "tempfile",
 ]
 

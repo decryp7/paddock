@@ -249,7 +249,6 @@ pub fn invoked_env(
             text = text.replace(v, dir);
         }
     }
-    let mut text = text;
     for (from, to) in WORKSPACE_SPELLINGS {
         text = text.replace(from, to);
     }

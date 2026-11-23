@@ -103,7 +103,7 @@ pub fn parse(id: &str, dir: &str, file: &str, v: &Value) -> Result<ProjectDecl, 
             d.reads.insert(f.clone(), strings(globs, &format!("{file}: `graph.reads.{f}`"))?);
         }
     }
-    for k in g.keys().filter(|k| !["tests", "smoke", "reads"].contains(&k.as_str())) {
+    if let Some(k) = g.keys().find(|k| !["tests", "smoke", "reads"].contains(&k.as_str())) {
         return Err(format!("{file}: unknown field `graph.{k}` (tests, smoke, reads)"));
     }
     Ok(d)

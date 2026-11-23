@@ -15,6 +15,14 @@ platforms = ["aarch64-apple-darwin", "x86_64-unknown-linux-gnu", "x86_64-pc-wind
 # webview stack into every crate, the pure cores included.
 [traversal-excludes]
 third-party = [
+    # paddock-repo-graph's `ts` and `rust-syn` extractors (ADR 0117 §10): optional, enabled only by paddock-dev (its own workspace).
+    # Unified here they would put the parser stack and serde_json's `preserve_order` into every shared crate and every app lockfile.
+    { name = "oxc_allocator" },
+    { name = "oxc_ast" },
+    { name = "oxc_ast_visit" },
+    { name = "oxc_parser" },
+    { name = "oxc_span" },
+    { name = "oxc_resolver" },
     { name = "tauri" },
     { name = "tauri-utils" },
     { name = "tauri-runtime-wry" },

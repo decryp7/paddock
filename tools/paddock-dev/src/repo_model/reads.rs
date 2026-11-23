@@ -1,4 +1,5 @@
-//! The Rust `reads` extractor (ADR 0117 §4; the `rust-syn` feature): the data files and folders a Rust source reads at build or
+//! The Rust `reads` extractor (ADR 0117 §4; `syn`, already paddock-dev's dependency, so the shared crates' workspace hack and the
+//! apps' lockfiles do not change): the data files and folders a Rust source reads at build or
 //! test time, from its syntax tree, not its text.
 //!
 //! - `include_str!("x")`, `include_bytes!("x")` and `include!("x")` (a Rust source spliced in, review P1-2): relative to the source's folder; `include_str!(concat!(env!("CARGO_MANIFEST_DIR"),
@@ -70,18 +71,12 @@ struct Finder<'a> {
 }
 
 fn last_ident(m: &Macro) -> String {
-    m.path
-        .segments
-        .last()
-        .map(|s| s.ident.to_string())
-        .unwrap_or_default()
+    m.path.segments.last().map(|s| s.ident.to_string()).unwrap_or_default()
 }
 
 fn lit_str(e: &Expr) -> Option<String> {
     match e {
-        Expr::Lit(ExprLit {
-            lit: Lit::Str(s), ..
-        }) => Some(s.value()),
+        Expr::Lit(ExprLit { lit: Lit::Str(s), .. }) => Some(s.value()),
         Expr::Group(g) => lit_str(&g.expr),
         Expr::Paren(p) => lit_str(&p.expr),
         _ => None,
@@ -89,23 +84,17 @@ fn lit_str(e: &Expr) -> Option<String> {
 }
 
 fn args(tokens: &TokenStream) -> Option<Vec<Expr>> {
-    syn::parse::Parser::parse2(
-        Punctuated::<Expr, Token![,]>::parse_terminated,
-        tokens.clone(),
-    )
-    .ok()
-    .map(|p| p.into_iter().collect())
+    syn::parse::Parser::parse2(Punctuated::<Expr, Token![,]>::parse_terminated, tokens.clone())
+        .ok()
+        .map(|p| p.into_iter().collect())
 }
 
 /// `env!("CARGO_MANIFEST_DIR")`, also wrapped: `Path::new(env!(..))`, `PathBuf::from(env!(..))`, `&env!(..)`.
 fn is_manifest(e: &Expr) -> bool {
     match e {
-        Expr::Macro(ExprMacro { mac, .. }) if last_ident(mac) == "env" => args(&mac.tokens)
-            .is_some_and(|a| {
-                a.first()
-                    .and_then(lit_str)
-                    .is_some_and(|s| s == "CARGO_MANIFEST_DIR")
-            }),
+        Expr::Macro(ExprMacro { mac, .. }) if last_ident(mac) == "env" => {
+            args(&mac.tokens).is_some_and(|a| a.first().and_then(lit_str).is_some_and(|s| s == "CARGO_MANIFEST_DIR"))
+        }
         Expr::Group(g) => is_manifest(&g.expr),
         Expr::Paren(p) => is_manifest(&p.expr),
         Expr::Reference(r) => is_manifest(&r.expr),
@@ -134,10 +123,7 @@ fn pieces(e: &Expr) -> Option<Vec<Piece>> {
 /// `X.join("a")` (and `.to_path_buf()`, `.as_path()`: the same path).
 fn call_pieces(mc: &ExprMethodCall) -> Option<Vec<Piece>> {
     let ExprMethodCall {
-        receiver,
-        method,
-        args: a,
-        ..
+        receiver, method, args: a, ..
     } = mc;
     if method == "join" && a.len() == 1 {
         let mut p = pieces(receiver)?;
@@ -162,15 +148,12 @@ fn macro_pieces(mac: &Macro) -> Option<Vec<Piece>> {
                     out.push(Piece::Lit(lit_str(e)?));
                 }
             }
-            out.iter()
-                .any(|p| matches!(p, Piece::Manifest))
-                .then_some(out)
+            out.iter().any(|p| matches!(p, Piece::Manifest)).then_some(out)
         }
         "format" => {
             let fmt = lit_str(a.first()?)?;
             let rest = fmt.strip_prefix("{}")?;
-            (a.len() == 2 && is_manifest(&a[1]))
-                .then(|| vec![Piece::Manifest, Piece::Lit(rest.to_string())])
+            (a.len() == 2 && is_manifest(&a[1])).then(|| vec![Piece::Manifest, Piece::Lit(rest.to_string())])
         }
         _ => None,
     }
@@ -181,7 +164,7 @@ impl Finder<'_> {
         if rel.is_empty() || rel.contains('{') {
             return;
         }
-        if let Some(p) = crate::join_normalized(base, rel.trim_start_matches('/'))
+        if let Some(p) = paddock_repo_graph::join_normalized(base, rel.trim_start_matches('/'))
             && !p.is_empty()
         {
             let r = Read { path: p, how };
@@ -276,7 +259,7 @@ pub fn rust_reads(file: &str, text: &str, crate_dir: &str) -> Parsed {
         Ok(f) => f,
         Err(e) => return Parsed::Fallback(e.to_string()),
     };
-    let dir = crate::dirname(file);
+    let dir = paddock_repo_graph::dirname(file);
     let dir = if dir == "." { String::new() } else { dir };
     let mut f = Finder {
         dir: &dir,

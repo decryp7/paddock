@@ -2,7 +2,7 @@
 //! scripts, and the spec runners' test targets and test files.
 //!
 //! - **reads**: a Rust file reads a file or folder through `include_str!`/`include_bytes!`/`include!`, a module's `#[path]`, a
-//!   `CARGO_MANIFEST_DIR` join, `concat!` or `format!`, or a build script's `rerun-if-changed` (`paddock_repo_graph::reads`, `syn`;
+//!   `CARGO_MANIFEST_DIR` join, `concat!` or `format!`, or a build script's `rerun-if-changed` (`super::reads`, `syn`;
 //!   a source `syn` cannot parse falls back to [`read_paths`], the text scan §10 names, and the fallback is counted). A path in
 //!   another crate gives the reader's crate a `reads` edge to that crate; a path outside every crate (a `docs/` register, a
 //!   template, an app's changelog, a .NET fixture project, another crate's test helper) becomes a data node owning exactly that file
@@ -22,12 +22,12 @@
 //!   get an `imports` edge from each importer, so their change selects the specs that import them. A helper no spec imports stays code (D6: cannot prove), and so does every helper of a
 //!   project with an unresolved import in its specs or helpers (the project runs in full on a test reach).
 
+use super::reads::{Parsed, rust_reads};
 use paddock_repo_graph::Graph;
 use paddock_repo_graph::model::Unresolved;
 use paddock_repo_graph::model::extract::{BulkRead, ExtractError, Extracted, Extractor};
 use paddock_repo_graph::model::glob;
 use paddock_repo_graph::model::nodes::{Edge, EdgeKind, ModelNode, NodeKind};
-use paddock_repo_graph::reads::{Parsed, rust_reads};
 use paddock_repo_graph::ts::{self, Target};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;

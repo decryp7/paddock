@@ -2368,10 +2368,8 @@ dependencies = [
  "oxc_span",
  "paddock-proc",
  "paddock-workspace-hack",
- "proc-macro2",
  "regex",
  "serde_json",
- "syn 2.0.119",
 ]
 
 [[package]]

@@ -39,21 +39,12 @@ const S: &str = "include_str!(\"in-a-string.txt\")";
             ("crates/a/src/native/unix.rs".to_string(), How::ModPath),
             ("crates/a/src/words.txt".to_string(), How::Include),
             ("crates/a/templates/brief.md".to_string(), How::Include),
-            (
-                "crates/a/tests/ci-runs/timings".to_string(),
-                How::ManifestDir
-            ),
-            (
-                "crates/a/tests/fixtures/check".to_string(),
-                How::ManifestDir
-            ),
+            ("crates/a/tests/ci-runs/timings".to_string(), How::ManifestDir),
+            ("crates/a/tests/fixtures/check".to_string(), How::ManifestDir),
             ("crates/a/tests/inside-assert".to_string(), How::ManifestDir),
             ("crates/a/tests/recorded".to_string(), How::ManifestDir),
             ("crates/b/tests/fixtures/f.evtx".to_string(), How::Include),
-            (
-                "crates/b/tests/it/support/synth.rs".to_string(),
-                How::Include
-            ),
+            ("crates/b/tests/it/support/synth.rs".to_string(), How::Include),
             ("crates/ui/dist".to_string(), How::Rerun),
         ]
     );
@@ -72,8 +63,5 @@ const T: &str = concat!("a", "/templates/brief.md");
 
 #[test]
 fn a_source_syn_cannot_parse_falls_back() {
-    assert!(matches!(
-        rust_reads("x/src/lib.rs", "fn broken( {", "x"),
-        Parsed::Fallback(_)
-    ));
+    assert!(matches!(rust_reads("x/src/lib.rs", "fn broken( {", "x"), Parsed::Fallback(_)));
 }
