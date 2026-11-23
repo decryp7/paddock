@@ -12,11 +12,21 @@ fn with_unknown(rel: &str) -> String {
     format!("zz_unknown_key = 1\n{}", text(rel))
 }
 
+/// The real file with one key no table has, right after the first `[[table]]` header: inside a table, not at the top.
+fn with_unknown_in(rel: &str, table: &str) -> String {
+    let original = text(rel);
+    let header = format!("[[{table}]]\n");
+    let at = original.find(&header).unwrap_or_else(|| panic!("{rel} has a [[{table}]]")) + header.len();
+    format!("{}zz_unknown_key = 1\n{}", &original[..at], &original[at..])
+}
+
 #[test]
 fn the_escape_register_reader() {
     assert!(escape::register::parse(&text("docs/escape-register.toml")).is_ok());
     let e = escape::register::parse(&with_unknown("docs/escape-register.toml")).unwrap_err();
     assert!(e.contains("zz_unknown_key"), "{e}");
+    let e = escape::register::parse(&with_unknown_in("docs/escape-register.toml", "table")).unwrap_err();
+    assert!(e.contains("zz_unknown_key"), "inside [[table]]: {e}");
 }
 
 #[test]
@@ -26,6 +36,11 @@ fn the_gate_register_reader() {
     assert!(ok.is_empty(), "{ok:?}");
     let (_, errs) = gates::register::parse(&with_unknown("docs/gates.toml"));
     assert!(errs.iter().any(|e| e.contains("zz_unknown_key")), "{errs:?}");
+    let (_, errs) = gates::register::parse(&with_unknown_in("docs/gates.toml", "report_only"));
+    assert!(
+        errs.iter().any(|e| e.contains("zz_unknown_key")),
+        "inside [[report_only]]: {errs:?}"
+    );
 }
 
 #[test]
@@ -35,6 +50,10 @@ fn the_generator_registry_reader() {
         .unwrap_err()
         .join("\n");
     assert!(e.contains("zz_unknown_key"), "{e}");
+    let e = generators::registry::Registry::parse(&with_unknown_in("docs/generators.toml", "generator"))
+        .unwrap_err()
+        .join("\n");
+    assert!(e.contains("zz_unknown_key"), "inside [[generator]]: {e}");
 }
 
 #[test]
@@ -48,6 +67,16 @@ fn the_ipc_endpoint_readers() {
     );
     assert!(
         ipc_endpoints::parse_ratchet(&with_unknown("docs/ipc-endpoint-ratchet.toml"))
+            .unwrap_err()
+            .contains("zz_unknown_key")
+    );
+    assert!(
+        ipc_endpoints::parse_register(&with_unknown_in("docs/ipc-endpoints.toml", "endpoint"))
+            .unwrap_err()
+            .contains("zz_unknown_key")
+    );
+    assert!(
+        ipc_endpoints::parse_ratchet(&with_unknown_in("docs/ipc-endpoint-ratchet.toml", "ratchet"))
             .unwrap_err()
             .contains("zz_unknown_key")
     );
@@ -68,6 +97,11 @@ fn the_repository_graph_reader() {
     assert!(repo_inputs::planner(&text("docs/repo-graph.toml")).is_ok());
     assert!(
         repo_inputs::planner(&with_unknown("docs/repo-graph.toml"))
+            .unwrap_err()
+            .contains("zz_unknown_key")
+    );
+    assert!(
+        repo_inputs::planner(&with_unknown_in("docs/repo-graph.toml", "input"))
             .unwrap_err()
             .contains("zz_unknown_key")
     );
