@@ -391,8 +391,8 @@ cost = "heavy"
 [[generator]]
 id = "service-files"
 what = "the per-app service and installer files that paddock-service writes from an app's ServiceSpec (a systemd unit, a launchd plist, an installer hook)"
-manual = "each app's own test writes its files; the first line of the file says which"
-regenerate = "run the command in the file's first line (an app's `cargo nextest run` with PADDOCK_WRITE_TS=1)"
+manual = "each app's own tests write its files (they run in that app's workspace)"
+regenerate = "PADDOCK_WRITE_TS=1 cargo nextest run   # in the Cargo workspace that holds the file (apps/<app>, apps/<app>/app/src-tauri, apps/shell-demo/src-tauri): its tests rewrite every generated file they compare; use this, not a command an older file header names"
 paths = ["apps/**/src-tauri/linux/*.service", "apps/**/src-tauri/macos/*.plist", "apps/**/src-tauri/windows/installer-hooks.nsh", "crates/paddock-service/**"]
 outputs = ["apps/**/src-tauri/linux/*.service", "apps/**/src-tauri/macos/*.plist", "apps/**/src-tauri/windows/installer-hooks.nsh"]
 cost = "heavy"
