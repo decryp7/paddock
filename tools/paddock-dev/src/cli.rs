@@ -1,7 +1,7 @@
 use crate::{
     audit, brief_check, check, check_ids, ci_build_env, ci_build_jobs, ci_host, ci_isolation, ci_run, ci_runs, ci_rust_pin, ci_s3_guard,
     ci_setup_rust, disk, gates, generators, golden_cmd, heavy_cmd, heavy_install, hook, input_hash, ipc_endpoints, lessons_driver, load,
-    local_sccache, locks, merge_check, places, plan, plan_cmd, pr, pre_push, queue, release_isolation, slots, wait, worktree,
+    local_sccache, locks, locks_guard, merge_check, places, plan, plan_cmd, pr, pre_push, queue, release_isolation, slots, wait, worktree,
 };
 use clap::{Args, Parser, Subcommand};
 use paddock_cli::{CliError, Exit, Format, Report, finish};
@@ -442,6 +442,19 @@ enum LocksCommand {
     Check(LocksArgs),
     /// Regenerate them (ER-40: never by hand): cargo hakari (manage-deps, generate), `cargo update --workspace`, `npm install --package-lock-only`.
     Sync(LocksArgs),
+    /// The shared-crate dependency guard: the workspace hack, the resolved features of the watched crates (docs/shared-crate-features.toml)
+    /// and every Cargo.lock agree with the manifests. Report-only for now (warnings, exit 0). `--write` regenerates the pins file.
+    Guard(GuardArgs),
+}
+
+#[derive(Args)]
+struct GuardArgs {
+    /// The repository root (default: the folder containing .git, found from the current folder).
+    #[arg(long)]
+    root: Option<PathBuf>,
+    /// Rewrite the pins file from what Cargo resolves now (keeps the watch list).
+    #[arg(long)]
+    write: bool,
 }
 
 #[derive(Args)]
@@ -797,6 +810,9 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
         Command::Locks {
             command: LocksCommand::Sync(a),
         } => locks::sync(a.root),
+        Command::Locks {
+            command: LocksCommand::Guard(a),
+        } => locks_guard::command_guard(a.root, a.write),
         Command::Gates {
             command: GatesCommand::Model(a),
         } => gates::command::model(a.root.as_deref()),

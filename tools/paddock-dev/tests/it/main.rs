@@ -41,6 +41,7 @@ mod ipc_endpoints;
 mod isolation;
 mod lessons_merge;
 mod locks;
+mod locks_guard;
 mod member_audits;
 mod merge_check;
 mod parity_corpus;

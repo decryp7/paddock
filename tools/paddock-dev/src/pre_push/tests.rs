@@ -389,6 +389,7 @@ fn the_row_set_of_a_pass_record_is_every_fixed_row_the_planner_can_plan() {
     let c = Change {
         files: vec![
             "crates/paddock-proc/src/lib.rs".into(),
+            "crates/paddock-proc/Cargo.toml".into(),
             "apps/dyno/crates/dyno-core/src/a.rs".into(),
         ],
         ranges: vec!["abc..HEAD".into()],
@@ -403,6 +404,36 @@ fn the_row_set_of_a_pass_record_is_every_fixed_row_the_planner_can_plan() {
     let mut want: Vec<String> = super::gates::ROW_SET.iter().map(|s| s.to_string()).collect();
     want.sort();
     assert_eq!(fixed, want, "add the new row to gates::ROW_SET");
+}
+
+/// The shared-crate dependency guard runs when a manifest, a lockfile, the hack config or the pins file changed, with `./dev locks guard`
+/// (ER-41: the files that can bring in its class), and a push of anything else skips it with the reason.
+#[test]
+fn the_locks_guard_row_runs_for_a_manifest_a_lockfile_the_hack_config_or_the_pins_file() {
+    for file in [
+        "crates/paddock-repo-graph/Cargo.toml",
+        "apps/dyno/Cargo.lock",
+        "crates/.config/hakari.toml",
+        "docs/shared-crate-features.toml",
+    ] {
+        let planned = plan_gates(&plan(), &change(&[file]), &facts());
+        let row = planned
+            .iter()
+            .find_map(|p| match p {
+                Planned::Run(g) if g.id == "locks-guard" => Some(g),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("{file}: {:?}", ids(&planned)));
+        assert_eq!(row.args, ["locks", "guard"], "{file}");
+    }
+    let planned = plan_gates(&plan(), &change(&["crates/paddock-repo-graph/src/lib.rs", "docs/x.md"]), &facts());
+    assert!(
+        planned
+            .iter()
+            .any(|p| matches!(p, Planned::Skip { id, reason } if id == "locks-guard" && reason.contains("Cargo.toml"))),
+        "{:?}",
+        ids(&planned)
+    );
 }
 
 #[test]

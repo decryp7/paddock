@@ -3475,3 +3475,10 @@ about 45 ms a start on that runner plus a fork per command substitution. **Fix:*
   (job 44649; FLAKY: failed once, passed its retry; the class of the 900x600 item). Different Dyno specs time out at 5 s in each run
   (8576, 8601): the class the vitest retry and worker budget of feat/fixed-wait-checks address (6 lanes x 29 vitest workers on 30
   cores before, 6 x 5 after). Next: a failing reproduction for each first.
+
+## A dependency of a shared crate moved the workspace hack, serde_json's features and every lockfile, twice (2026-11-23)
+- `toml`, then `oxc` and `syn`, added to `crates/paddock-repo-graph`: `cargo hakari generate --diff` went non-empty, `oxc_resolver` forced
+  `serde_json/preserve_order`, every app's `Cargo.lock` changed and Clippy broke in paddock-mcp under `--all-features`. CI saw each one
+  after the push; the push gate had no hakari row (`NOT_RUN`) and no check of resolved features. Recurring class: a shared crate's
+  dependency graph is an input of every app, and nothing read it. `./dev locks guard` reads it (the hack, the pinned features of the
+  watched crates, the lockfiles) in the push gate and CI. Next: flip it to blocking after its first green CI run (`locks_guard::MODE`).

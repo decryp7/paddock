@@ -166,6 +166,7 @@ pub const ROW_SET: &[&str] = &[
     "dyno-wire-fixtures",
     "gates-register",
     "ipc-endpoints",
+    "locks-guard",
     "member-audits",
     "pitwall-deny",
     "pitwall-scripts",
@@ -497,6 +498,7 @@ pub fn plan_gates(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> 
             reason: "no Rust file or docs/ipc-endpoints.toml changed".into(),
         });
     }
+    out.push(locks_guard(change, facts));
     // C100 (ADR 0060) on every push, like the conformance row (ER-41; ER-42: a hand list of its inputs missed apps/*/paddock.ci.json,
     // so that is not kept). Checks landed unwired on 2026-11-12 (four) and 2026-11-17 (C138). `./dev gates check` is CI's own command;
     // 5 to 8 s, in parallel with the conformance tests (docs/benchmarks.md, "C100 in the push gate"). It blocks from its first run:
@@ -841,6 +843,38 @@ fn member_audits(facts: &Facts) -> Planned {
     Planned::Run(g)
 }
 
+/// The shared-crate dependency guard (`./dev locks guard`): the workspace hack, the resolved features of the watched crates and every
+/// lockfile agree with the manifests. A dependency added to a shared crate changed all three twice (`toml`, then `oxc` and `syn` in
+/// paddock-repo-graph), found only in CI each time. Runs when a manifest, a lockfile, the hack config or its pins file changed (the
+/// files that can bring in its class, ER-41); a push of other files skips it with the reason. Report-only until its first green run on
+/// the real tree (`locks_guard::MODE`, where its first green run is recorded): the guard prints warnings and exits 0, so this row passes.
+fn locks_guard(change: &Change, facts: &Facts) -> Planned {
+    let reaches = |f: &str| {
+        let name = f.rsplit('/').next().unwrap_or(f);
+        name == "Cargo.toml" || name == "Cargo.lock" || name == "hakari.toml" || f == crate::locks_guard::PINS_FILE
+    };
+    if !change.files.iter().any(|f| reaches(f)) {
+        return Planned::Skip {
+            id: "locks-guard".into(),
+            reason: "no Cargo.toml, Cargo.lock, hakari.toml or docs/shared-crate-features.toml changed".into(),
+        };
+    }
+    dev_run(
+        facts,
+        Gate {
+            args: strs(&["locks", "guard"]),
+            ..gate(
+                "locks-guard".into(),
+                "",
+                "",
+                &[],
+                1,
+                "read the warning it printed: a dependency added to a shared crate changed the workspace hack, a watched crate's features or a lockfile; regenerate with `./dev locks sync` and `./dev locks guard --write` and commit them with the change".into(),
+            )
+        },
+    )
+}
+
 fn commit_lint(change: &Change) -> Vec<Planned> {
     if change.ranges.is_empty() {
         return vec![Planned::Skip {
@@ -879,7 +913,7 @@ fn docs_only(path: &str) -> bool {
 pub const NOT_RUN: &[(&str, &str)] = &[
     (
         "cargo hakari verify (workspace hack)",
-        "needs the CI image's pinned cargo-hakari; WP-3 moves it into the contract",
+        "needs the CI image's pinned cargo-hakari; WP-3 moves it into the contract. The `locks-guard` row runs `cargo hakari generate --diff` when a manifest changed (report-only)",
     ),
     (
         "cargo machete (unused dependencies)",
