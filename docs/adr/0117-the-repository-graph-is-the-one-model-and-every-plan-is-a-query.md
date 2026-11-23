@@ -186,6 +186,36 @@ one by one, each with the golden cases that cover it (§8).
 | `os` | node → OS set | §7 |
 | `reads-script` | script → script it runs (a `.sh` calling another) | the shell lines' invoked programs, never a path inside other text (G4) |
 
+**Every reference is resolved, unresolved or an error; never silently no edge** (the structural rule for the recurring class "an
+unresolved reference becomes no edge", review of `59e5f7ec3`, 2026-11-23). Every extractor returns each reference it finds (an
+import, an `include*!` or `#[path]`, a script path a step, an action or a contract line runs) in one of three states: resolved (an
+edge), unresolved (`Extracted::unresolved`: the referrer file, the node that holds it when finer than the file, such as a step, the
+reference as written and why) or an extraction error. The registry (`model::extract::build`) keeps the unresolved ones in the model
+(`Model::add_unresolved`), and **one rule in `reach`** puts each referrer's projects on full in every plan, whatever the change: the
+referrer file's project, and every project the referrer's node runs (its reverse closure through the edges, at kind `code`).
+Extractors never decide this themselves. A property test feeds each extractor an unresolvable reference (a step running an untracked
+script, a script importing an untracked module) and asserts that the plan for an unrelated change widens to the referrer's project,
+with the resolved version as its control. What is not a repository reference is no finding: a runner or download folder (`$HOME`,
+`$RUNNER_TEMP`, `$(mktemp -d)`, `${X:-/abs}`), a caller's argument (`$1`), a here-document body, an assignment. A reusable workflow's
+or composite action's `${{ inputs.<name> }}` stands for each value its callers pass (`with:`); a name no caller passes stays
+unresolved. A file whose computed `import()` loads known files declares them in its contract (`graph.reads`, the declared runtime
+reads of the `reads` row above), which turns the reference into edges. Measured on `feat/repo-graph-wp3` over every workflow,
+action, contract and script of the tree (heads read 2026-11-23: `origin/main` `d04af7b46`, `origin/feat/repo-graph-model`
+`59e5f7ec3`): 2 unresolved references remain, both real: `scripts/vm-smoke/screenshot-rules.mjs` imports `RULES_PATH`, which names
+`ui/projects/paddock-e2e/src/screenshot-check.ts`, a file that is not tracked (a dangling path, so `tools` runs in full until it is
+fixed), and `scripts/shell-demo/smoke-service-update.sh` runs a built binary under a variable the reader cannot place (no job runs
+the script, so it widens nothing).
+
+**Only a declared setup-only action is plumbing** (the coordinator's ruling on the same review, fail closed, common practice). A
+path out of an action or script into a step, job or workflow is `plumbing` only when it passed an action that `docs/repo-graph.toml`
+`[ci]` declares setup-only; into a release job's steps it is `release`; any other action or script a job uses is an input of that job
+at kind `code` (its full suite). Selection is the **union** of the kinds that reach a project (`full` absorbs `smoke` and `affected`,
+`installers` stands beside either), not the strongest kind alone. A `release` reach builds an app's installers **and** runs its
+smoke set, or its suite without one (never less than declared, §5; the WP-5 train replay found 39 commit and app pairs where
+installers alone dropped the tests). A contract's command list is a step whose home is its project: a change it reaches (the
+conformance CLI an app's `checks` line runs, a shared check script of a `ui` line) selects that **phase** of the project, not its
+suite (difference 4 of §8, review round 1 P1-10).
+
 ### 5. Queries
 
 All bulk: each takes the whole changed-file set and answers per node (ER-20, PRINCIPLES "Bulk APIs").
@@ -490,6 +520,7 @@ literals (job names, output keys), with a positive control (review round 2, P2-5
 | G13 lessons file | checked | a declared input with its golden |
 | G14 a red push widens the next base | impossible | the base is the last first-parent commit with a green outcome by the one definition (§6) |
 | Data that selects nothing (round 2, P1-A) | checked | every non-prose file has a code-reaching owner: in a project folder it is `code`, under a doc owner it must be a named input or the owner check fails (control: an undeclared `.toml` under `docs/`) |
+| An unresolved reference becomes no edge (review of `59e5f7ec3`: `#[path]`/`include!` across crates, reads outside crates, unresolved script paths) | checked | the structural rule of §4: every extractor reports resolved, unresolved or error; `reach` puts an unresolved referrer's projects on full in one place; a property test over every extractor |
 
 Every row has its positive control in the §8 table and its golden; the escape monitor (D12) is the net for what no structure covers.
 
