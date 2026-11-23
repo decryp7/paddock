@@ -501,6 +501,27 @@ Amendments of the same date, no new number: the member gate runs each member's a
 ## Bulk APIs (user, 2026-11-18; ER-20, PRINCIPLES "Bulk APIs")
 85. **Bulk APIs: one call for many items** (ER-20; PRINCIPLES "Bulk APIs"; ADR 0108). A function, Tauri command, port method, IPC message or HTTP endpoint that works on items takes many at once (a slice, an iterator, a stream) and returns a result per item, so a caller with N items makes one call; a single-item form, where one is needed, is a thin wrapper over the bulk one; one bad item does not fail the batch unless the operation is atomic by design; large inputs are chunked or paged (ADR 0018, bounded loading). Work over many items is one bulk call or one long-lived process or connection: one SQL statement or one transaction, one bulk IPC request, one `git cat-file --batch` reader instead of a git start per object, an in-process library. A loop that calls a command, port, process, query or endpoint per item is a review finding unless the code says why (`// per-item: <reason>`). A command's count of process starts, statements or invokes is a budget a test guards: each bulk command lands with a test that N items cost at most K, failing first with the per-item code. Status: rule and review line in force; the shared batch git reader (`crates/paddock-git`) and the stdin-taking bounded run in paddock-proc in progress on `perf/git-heavy-tests-2`; the counting seams, the per-item result type and the ESLint rule `paddock/no-backend-call-in-loop` (report-only until its first green run, ER-41) planned (ADR 0108 WP-0). *Why:* on 2026-11-18 a git start cost about 45 ms on the Windows runner against about 6 ms on the Mac and the merge check started 33 to 75 gits per check (train 14); the inventory of that day found 65 more places across every app, the shared crates and the dev tools (docs/research/2026-11-18-bulk-api-inventory.md), after six earlier instances fixed one by one (ADR 0108).
 
+## CI selection and test runs (user, 2026-11-23; ADR 0117; ER-9, ER-32, ER-49)
+86. **Only setup-only actions declared in `docs/repo-graph.toml` are plumbing.** A change to an action, script or doc that the graph
+    does not declare as plumbing reaches the projects that use it, and an unowned or unresolvable reference selects everything (fail
+    closed, ADR 0117). Nothing is plumbing by its folder or name. *Why:* `.gitea/actions/README.md` was on the planner's global list
+    and train 20 spent six full rounds (runs 8610, 8635, 8647, about 700 to 730 job-minutes each) on plumbing changes.
+87. **A change to a conformance check, or to a check a release job runs, runs the app's smoke set and its checks phase, not the
+    installers** (user, 2026-11-23; the narrowing of rule 54, whose clause (a0) on the graph train says the same: keep one copy
+    of the text when both land). The installers stay for the bundle, sign, notarise and publish steps, app code, the Tauri config
+    and tags. A smoke run never counts as a complete verdict.
+88. **Removing an OS from a test needs the user's approval.** The record is `docs/os-removals.toml`; growth of that register is a
+    finding that no waiver clears (rule 83; the check is planned in ADR 0117). *Why:* OS-scoped tests (ER-9) cut Windows time by 46%, and an OS
+    dropped without a reason is a hole in the net.
+89. **Every test run goes through the bounded runner** (ER-32, ER-51): nextest with its timeout, and the same progress watchdog as
+    the push gates. Agents and CI never run plain `cargo test` or an unbounded test command, a hook steers them to the runner, and
+    a leftover child is ended by the handle its start gave back. *Why:* on 2026-11-22/23 `worktree::list_clean` hung 3.5 h and
+    `ci_isolation` 18 min under plain `cargo test --test it`, and test-spawned `ci slot hold` processes were orphaned four times.
+90. **A landing may rest on a narrowed run** (ER-15, user, 2026-11-23): a smoke set or the affected tests that ran exactly the
+    selection the landing's own diff planned. Such a run counts for that landing only: it is never complete for a tag or a
+    release, never the base for later planning, and the nightly still runs everything. *Why:* in ADR 0117's review round 2,
+    narrowed runs were never complete, so a train whose change needed only a smoke set or its affected tests could never land.
+
 ## Monorepo (ADR 0014 §10; effective for an app from its import into `paddock/apps/<app>`, for Paddock from the first import)
 Until an app is imported, rules 2, 3, 8, 9, 39 and 42 above apply to it as written. From its import, these replace them:
 - **Rule 2:** every agent works in its own git worktree of `paddock` (a full checkout: `./dev worktree add --profile gates`,
