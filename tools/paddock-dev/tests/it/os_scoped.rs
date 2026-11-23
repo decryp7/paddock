@@ -360,10 +360,31 @@ fn a_new_skip_or_only_entry_is_an_os_removal_that_needs_the_user_and_an_add_is_f
         findings.iter().any(|(f, m)| f == "docs/os-removals.toml" && m.contains("user")),
         "{findings:#?}"
     );
-    // The branch lands (main holds the contract and the register): the merge base now has the entry, so the approval is stale and
-    // the register shrinks; nothing grew.
-    approve("user");
-    git(root, &["commit", "-qam", "chore: the user's approval again"]);
+}
+
+/// The register's second half (ER-46): an approval the merge base already covers is stale, so after the branch lands the register
+/// shrinks. Its own test, so neither half runs more than five C155 runs (each derives the placement of the copied tree).
+#[test]
+fn an_approval_the_merge_base_already_covers_is_stale_after_landing() {
+    let d = scratch();
+    let root = d.path();
+    git(root, &["init", "-q", "-b", "work"]);
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-q", "-m", "chore: base"]);
+    git(root, &["update-ref", "refs/remotes/origin/main", "HEAD"]);
+    edit_contract(root, "crates/paddock.ci.json", |v| {
+        v["hostTests"]["only"] =
+            serde_json::json!([{"os": "macos-latest", "name": "paddock-proc", "reason": "a control for the unsafe direction"}]);
+    });
+    std::fs::create_dir_all(root.join("docs")).unwrap();
+    std::fs::write(
+        root.join("docs/os-removals.toml"),
+        "version = 1\n[[approved]]\ncontract = \"crates/paddock.ci.json\"\nby = \"user\"\ndate = \"2026-11-23\"\nwhy = \"a control\"\nentries = [\"only macos-latest paddock-proc\"]\n",
+    )
+    .unwrap();
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", "chore: an approved only"]);
+    // The branch lands (main holds the contract and the register): nothing grew, and the approval is stale.
     git(root, &["update-ref", "refs/remotes/origin/main", "HEAD"]);
     git(root, &["commit", "-q", "--allow-empty", "-m", "chore: after landing"]);
     let (findings, _) = run(root);

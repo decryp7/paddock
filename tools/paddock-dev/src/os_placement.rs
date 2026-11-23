@@ -163,9 +163,10 @@ fn own_windows(model: &Model, id: &str) -> bool {
         .contains(&WINDOWS_MARK)
 }
 
-/// The workspaces whose contract may declare `hostTests`, with the contract's path: each app's folder, and each folder whose contract
-/// sits beside the root manifest of a Cargo workspace (the shared crates, paddock-dev). Where a contract lives is the contract
-/// module's fact ([`crate::ci_run::contract`]), so this names no folder of its own (ADR 0117 §14, final review P2-1).
+/// The workspaces whose contract may declare `hostTests`, with the contract's path: each app's folder, each root project's (the
+/// shared crates), and each other folder whose contract sits beside the root manifest of a Cargo workspace (paddock-dev). Where a
+/// contract lives is the contract module's fact ([`crate::ci_run::contract`]), so this names no folder of its own (ADR 0117 §14,
+/// final review P2-1).
 pub fn workspaces(files: &[String]) -> Vec<(String, String)> {
     let tracked: BTreeSet<&str> = files.iter().map(String::as_str).collect();
     let mut out: Vec<(String, String)> = files
@@ -173,7 +174,8 @@ pub fn workspaces(files: &[String]) -> Vec<(String, String)> {
         .filter_map(|f| {
             let dir = f.strip_suffix(crate::ci_run::contract::FILE)?.strip_suffix('/')?;
             let cargo = tracked.contains(format!("{dir}/Cargo.toml").as_str());
-            (crate::ci_run::contract::app_of(f).is_some() || cargo).then(|| (dir.to_string(), f.clone()))
+            let project = crate::ci_run::contract::app_of(f).is_some() || crate::ci_run::contract::ROOT_PROJECTS.contains(&dir);
+            (project || cargo).then(|| (dir.to_string(), f.clone()))
         })
         .collect();
     out.sort();
