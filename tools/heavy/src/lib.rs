@@ -14,6 +14,7 @@ pub mod config;
 pub mod exit;
 pub mod gate;
 pub mod guard;
+pub mod history;
 pub mod lock;
 pub mod log;
 pub mod mask;

@@ -3508,3 +3508,10 @@ about 45 ms a start on that runner plus a fork per command substitution. **Fix:*
   after the push; the push gate had no hakari row (`NOT_RUN`) and no check of resolved features. Recurring class: a shared crate's
   dependency graph is an input of every app, and nothing read it. `./dev locks guard` reads it (the hack, the pinned features of the
   watched crates, the lockfiles) in the push gate and CI. Next: flip it to blocking after its first green CI run (`locks_guard::MODE`).
+
+## 2026-11-23: the heavy queue admitted one step whatever it cost (feat/heavy-queue-admission)
+Pre-push rows that ran in about 1 s on a warm compile cache waited 270 to 948 s behind long steps, and several pushes waited 15 to 85 min. The slot
+rule followed the 15-minute load only, and that load has been 16 to 48 on 14 cores for days, so it gave 1. Fix, in `tools/heavy`: memory is a limit
+beside the load (`MEMORY_RESERVE_MB`, `MEMORY_PER_SLOT_MB`), a row the history says takes under 10 s (`HEAVY_ROW`, `heavy-history.tsv`, bounded) takes a
+place in a quick lane beside the full slots, each step gets `CARGO_BUILD_JOBS` from cores / most steps at once (ER-48), and each admission is
+logged with what the rule saw (ER-27). Lesson: an admission rule needs a cost, not only a count; a row's key for history is the row, never the run's name.

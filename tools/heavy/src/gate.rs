@@ -12,6 +12,11 @@ pub trait LoadSource: Send + Sync {
     fn idle_percent(&self) -> Option<f64> {
         None
     }
+    /// Memory a new step could use now, in MiB: free plus what the system can reclaim (sysinfo's `available_memory`); `None` when the
+    /// platform cannot say. Unknown is never read as "plenty" (ER-24, ER-33).
+    fn available_memory_mb(&self) -> Option<u64> {
+        None
+    }
 }
 
 /// The operating system's load average and CPU idle share. The idle share is measured between two readings at least
@@ -66,16 +71,34 @@ impl LoadSource for SysLoad {
         }
         *idle
     }
+
+    fn available_memory_mb(&self) -> Option<u64> {
+        let mut sys = sysinfo::System::new().ok()?;
+        sys.refresh_memory();
+        let bytes = sys.available_memory();
+        // sysinfo answers 0 when it cannot read the figure: that is "unknown", not "no memory left".
+        (bytes > 0).then_some(bytes / (1024 * 1024))
+    }
 }
 
 /// A load made by hand, for tests.
 #[derive(Debug)]
-pub struct FakeLoad(Mutex<Option<[f64; 3]>>, Mutex<Option<f64>>);
+pub struct FakeLoad(Mutex<Option<[f64; 3]>>, Mutex<Option<f64>>, Mutex<Option<u64>>);
 
 impl FakeLoad {
-    /// A load of `one` (the other averages equal it).
+    /// A load of `one` (the other averages equal it), 100 % idle and 64 GiB of memory available.
     pub fn new(one: f64) -> FakeLoad {
-        FakeLoad(Mutex::new(Some([one, one, one])), Mutex::new(Some(100.0)))
+        FakeLoad(
+            Mutex::new(Some([one, one, one])),
+            Mutex::new(Some(100.0)),
+            Mutex::new(Some(64 * 1024)),
+        )
+    }
+    /// Changes the memory available, in MiB (None: unknown).
+    pub fn set_memory_mb(&self, mb: Option<u64>) {
+        if let Ok(mut m) = self.2.lock() {
+            *m = mb;
+        }
     }
     /// Changes the idle share (None: unknown).
     pub fn set_idle(&self, idle: Option<f64>) {
@@ -91,7 +114,7 @@ impl FakeLoad {
     }
     /// A platform without a load average.
     pub fn none() -> FakeLoad {
-        FakeLoad(Mutex::new(None), Mutex::new(None))
+        FakeLoad(Mutex::new(None), Mutex::new(None), Mutex::new(None))
     }
 }
 
@@ -101,6 +124,9 @@ impl LoadSource for FakeLoad {
     }
     fn idle_percent(&self) -> Option<f64> {
         self.1.lock().ok().and_then(|m| *m)
+    }
+    fn available_memory_mb(&self) -> Option<u64> {
+        self.2.lock().ok().and_then(|m| *m)
     }
 }
 
@@ -113,12 +139,27 @@ pub struct Pressure {
     pub load15: Option<f64>,
     /// The CPU idle share since the last reading, 0 to 100, when known.
     pub idle: Option<f64>,
+    /// Memory available (free plus reclaimable) in MiB, when known.
+    pub memory_mb: Option<u64>,
 }
 
 /// Cores one heavy step is counted to use (`CARGO_BUILD_JOBS=2` is the family's cap for a builder, ER-24).
 pub const CORES_PER_SLOT: f64 = 2.0;
 /// Below this CPU idle share no second step starts.
 pub const MIN_IDLE_PERCENT: f64 = 30.0;
+/// Memory one heavy step is counted to use, in MiB: a builder at `CARGO_BUILD_JOBS=2` (rustc with LTO off, a linker, a test binary).
+/// The one place this is decided; the admission rule and its tests read it from here (ER-22).
+pub const MEMORY_PER_SLOT_MB: u64 = 3072;
+/// Memory that must stay available after a step is admitted, in MiB. On 2026-11-22 free memory fell to about 1 GB with 16 GB compressed
+/// while load and CPU still looked acceptable (ER-24): twice that is kept back for the rest of the machine.
+pub const MEMORY_RESERVE_MB: u64 = 2048;
+/// The most rows expected to be quick (see [`CHEAP_SECS`]) that run beside the full slots at once.
+pub const CHEAP_LANE: u32 = 2;
+/// A row whose measured run time is under this many seconds goes first: it does not wait behind long steps.
+pub const CHEAP_SECS: f64 = 10.0;
+/// A quick row is admitted beside the full slots only while the CPU has at least this idle share: it adds `CORES_PER_SLOT` cores for
+/// seconds, so the 15-minute load is no reason to hold it, but a CPU with no idle left is.
+pub const CHEAP_MIN_IDLE_PERCENT: f64 = 15.0;
 
 /// How many heavy steps may run together now, between 1 and `max`: the cores the 15-minute load leaves free, `CORES_PER_SLOT` each,
 /// and only while the CPU has at least `MIN_IDLE_PERCENT` idle and the 1-minute load is under the core count. The count is of ALL
@@ -132,7 +173,9 @@ pub fn allowed_slots(max: u32, cpus: u32, p: &Pressure, container: bool) -> u32 
     if max <= 1 || container {
         return 1;
     }
-    let (Some(load15), Some(idle)) = (p.load15, p.idle) else { return 1 };
+    let (Some(load15), Some(idle), Some(memory)) = (p.load15, p.idle, p.memory_mb) else {
+        return 1;
+    };
     if idle < MIN_IDLE_PERCENT || p.load1.is_some_and(|l1| l1 >= f64::from(cpus)) {
         return 1;
     }
@@ -140,7 +183,29 @@ pub fn allowed_slots(max: u32, cpus: u32, p: &Pressure, container: bool) -> u32 
     if !free.is_finite() || free < 1.0 {
         return 1;
     }
-    (free.floor() as u32).clamp(1, max)
+    // The memory left after the reserve, `MEMORY_PER_SLOT_MB` a step: the second step is refused when it would not fit.
+    let by_memory = memory.saturating_sub(MEMORY_RESERVE_MB) / MEMORY_PER_SLOT_MB;
+    let by_memory = u32::try_from(by_memory).unwrap_or(u32::MAX);
+    (free.floor() as u32).min(by_memory).clamp(1, max)
+}
+
+/// Whether a quick row (expected under [`CHEAP_SECS`]) may start beside the full slots now: the machine has the idle CPU and the memory
+/// for a step more (the reserve stays), the 1-minute load is under twice the cores, and no container run is going. The 15-minute load
+/// does not decide it. Unknown readings say no (ER-33). Pure: numbers in, a verdict out.
+pub fn cheap_admitted(cpus: u32, p: &Pressure, container: bool) -> bool {
+    if container {
+        return false;
+    }
+    let (Some(load1), Some(idle), Some(memory)) = (p.load1, p.idle, p.memory_mb) else {
+        return false;
+    };
+    idle >= CHEAP_MIN_IDLE_PERCENT && load1 < 2.0 * f64::from(cpus) && memory >= MEMORY_RESERVE_MB + MEMORY_PER_SLOT_MB
+}
+
+/// `CARGO_BUILD_JOBS` for one step (ER-48): `CORES_PER_SLOT`, fewer when the most steps at once times it would pass the cores, so
+/// jobs per step times steps at once stays within the host's cores.
+pub fn jobs_per_step(cpus: u32, max_slots: u32) -> u32 {
+    (cpus / max_slots.max(1)).clamp(1, CORES_PER_SLOT as u32)
 }
 
 /// The default maximum of the "Auto" setting: about half the cores, at most 5 builders (ER-24).

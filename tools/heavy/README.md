@@ -46,8 +46,36 @@ command runs: a waiter does not break the lock of a SIGKILLed heavy whose comman
 - one while the **CPU idle share** is under 30 %, and one while the **1-minute load** is at or over the core count (the fast brake: a
   burst the 15-minute average has not seen). `make -l N` and `ninja -l N` are the same shape, a count of jobs and a load brake; they
   use the 1-minute load alone, which reacts at once and flaps; this opens on the 15-minute load and closes on either;
-- one when the load or the idle share is unknown (Windows has no load average; the first CPU reading needs a sampling interval, it
-  is taken when heavy starts and a second one 200 ms later).
+- the **memory available** (free plus reclaimable) after a reserve of 2 GiB, 3 GiB a step (`MEMORY_RESERVE_MB`, `MEMORY_PER_SLOT_MB` in `gate.rs`, the one
+  place they are decided): a second step is refused when it would not fit. On 2026-11-22 free memory fell to about 1 GB while load and CPU still looked
+  acceptable (ER-24). The first step always runs;
+- one when the load, the idle share or the memory is unknown (Windows has no load average; the first CPU reading needs a sampling interval, it
+  is taken when heavy starts and a second one 200 ms later). Unknown is never read as plenty (ER-33).
+
+Common practice: Bazel's `--local_resources` / `--jobs` and the cargo and make jobservers admit work by a resource budget (cores, RAM), not by one
+step at a time; `make -l` and `ninja -l` add a load brake. This rule is the same shape with the 15-minute load and a memory budget.
+
+**Each step's threads (ER-48).** The command gets `CARGO_BUILD_JOBS` = `min(2, cores / most steps at once)` unless the caller already set one (the
+caller's value wins, ER-47), so steps at once times jobs stay within the cores. It is logged once (`heavy.run`, `Jobs`).
+
+## Quick rows go first (the history)
+
+A row that takes seconds (a warm clippy: 1 s after 270 to 948 s in the queue on 2026-11-23) must not wait behind steps that take minutes. A caller names a
+row with `HEAVY_ROW` (its step plus its workspace, for example `clippy apps/dyno`; the run's agent name differs every run, so it cannot be the key).
+heavy keeps how long each row took when it passed (`heavy-history.tsv` in the lock folder, written only by heavy): the expected time is the slowest of
+its last 3 runs. A row expected under 10 s (`CHEAP_SECS`) is **quick**: when the machine has the idle CPU (15 %), the memory for a step more (the reserve
+stays) and a 1-minute load under twice the cores (`cheap_admitted`; the 15-minute load does not decide it), it takes a place in the **quick lane**
+(`pitcrew-heavy-v2.lock.cheapN`, at most 2 at once) beside the full slots, without waiting in the queue. The queued long steps are not delayed by it (the
+lane does not count against their slots) and a container run waits for the lane to empty and starts nothing beside it. No history, an unreadable history,
+a row at or over 10 s, or unknown readings: the row queues like any other (ER-33). A quick row that cannot get a place keeps its ticket and its place in
+the FIFO queue; a waiter holds a ticket, never a slot (ER-43).
+
+The history is bounded (ER-51): at most 5 lines a row and 512 in all, oldest first; a file over 256 KiB is read as no history. A failed run is not
+recorded. It is a hint: a writer that loses a race loses a line.
+
+**Why a stall explains itself (ER-27).** Every admission writes a `heavy.admit` event with the lane (`slot` or `quick`), how many steps ran, how many the
+rule allowed, the cores, the 1- and 15-minute load, the CPU idle share, the memory available and the row's expected seconds; the wait line carries the same
+numbers (`1 of at most 5 at once (14 cores, 15-minute load 15.0, CPU idle 80%, memory available 2100 MiB)`). `queue-stall` and `run-max` are unchanged.
 
 **What to expect on this Mac:** its 15-minute load has been 16 to 48 on 14 cores for days, so `auto` gives 1 (the old behaviour) at its usual
 loads, and more only when the machine is quiet (docs/benchmarks.md). The count stays at 1 for up to a quarter of an hour after a spike.
@@ -103,6 +131,7 @@ in the other slots, and a container run waiting for a drain is not waited for by
 | load gate threshold / poll | `HEAVY_GATE_LOAD` (`--gate-load`), `HEAVY_GATE_POLL` | 30 / 20 s |
 | priority bound (`--high` yields to nobody; others stop yielding after this) | `HEAVY_PRIORITY_MAX` | 1800 s |
 | most steps at once | `--slots N`, `HEAVY_SLOTS` (`auto` or 1..64) | auto: half the cores, at most 5 |
+| the row's key for the run-time history (quick rows go first) | `HEAVY_ROW` | none: no history is read or kept |
 | cores counted against the load | `HEAVY_CPUS` | the OS's count |
 | wait for the command's stderr pipe after it exited (ms) | `HEAVY_DRAIN_MS` | 500 |
 | correlation id | `DEVKIT_RUN_ID` is reused as the run id and passed to the command | made per run |
