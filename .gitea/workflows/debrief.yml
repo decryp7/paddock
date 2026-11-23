@@ -83,6 +83,10 @@ jobs:
       rerun_jobs: ${{ steps.plan.outputs.rerun_jobs }}
       rust_test_filter: ${{ steps.plan.outputs.rust_test_filter }}
       rust_test_macos_filter: ${{ steps.plan.outputs.rust_test_macos_filter }}
+      # OS-scoped tests (apps/debrief/paddock.ci.json `hostTests`, ./dev plan --ci --app debrief): the packages the macOS tests job builds
+      # and tests, those with OS-specific code; Linux tests every crate. Empty: every crate (and in a rerun, the failed tests name themselves).
+      host_packages_macos: ${{ steps.plan.outputs.host_packages_macos }}
+      host_filter_macos: ${{ steps.plan.outputs.host_filter_macos }}
       frontend_include: ${{ steps.plan.outputs.frontend_include }}
       e2e_shards: ${{ steps.plan.outputs.e2e_shards }}
       full: ${{ github.event_name == 'schedule' || startsWith(github.ref, 'refs/tags/debrief-v') || (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && (inputs.bundles == true || github.event.inputs.bundles == 'true')) }}
@@ -179,12 +183,20 @@ jobs:
             echo "::notice::a full green run already tested this commit; this run reuses it."
           fi
           echo "run=$run" >> "$GITHUB_OUTPUT"
-          # The line `./dev ci verdict` trusts (plan_since::COMPLETE_LINE), printed after every decision above: the plan ran its jobs,
-          # this is not a rerun of failures and the mode is full. The scope line at the top is logged before these decisions, so a
-          # run skipped for a train or an unchanged main, or a since_run dispatch, would pass for full on it.
+          # The scope this run declares, printed after every decision above (ADR 0113): what the run did against what a push to main
+          # does, which `./dev ci verdict` compares. A run skipped for a train, an unchanged main, a tagged commit or a reuse ran
+          # nothing (run=false); a since_run dispatch is a rerun; a run that is not full tests one engine, a full run both.
+          # REPORT-ONLY PHASE (ER-41, ADR 0113): until docs/ci-scope-first-runs.toml names debrief.yml, `./dev ci verdict` still decides on
+          # the line below and prints the scope view as a notice. Recording the first green scope run (`./dev ci scope-record`) switches
+          # the reader; the block is deleted in the same change.
           complete=false
           if [ "$run" = true ] && [ -z "$PLAN_SINCE_RUN" ] && [ "$PLAN_MODE_FULL" = true ]; then complete=true; fi
           echo "plan verdict: complete=$complete"
+          # OS-scoped tests (hostTests): this run's macOS tests covered only the packages with OS-specific code when the plan named some;
+          # a tag then cannot rest on it (`ci verdict --tag`).
+          os_scoped=false
+          if [ -n "$(sed -n 's/^host_packages_macos=//p' "$GITHUB_OUTPUT")" ]; then os_scoped=true; fi
+          ./dev ci scope --workflow debrief.yml --app debrief --full "$PLAN_MODE_FULL" --run "$run" --since-run "$PLAN_SINCE_RUN" --os-scoped "$os_scoped" --full-engines chromium,webkit
 
       # ADR 0060 3.2: the lint-adoption ratchet of Debrief (docs/gates.toml [[ratchet]] C13) must be empty before the release it names
       # (debrief-v1.2.0) or a later one is tagged. A tag run refuses at once, before anything is built. Only the ratchets of this
@@ -422,12 +434,26 @@ jobs:
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief
         env:
           RERUN_FILTER: ${{ needs.plan.outputs.rust_test_macos_filter }}
-        run: cargo nextest run --workspace --profile ci ${RERUN_FILTER:+-E "$RERUN_FILTER"}
+          HOST_PACKAGES: ${{ needs.plan.outputs.host_packages_macos }}
+          HOST_FILTER: ${{ needs.plan.outputs.host_filter_macos }}
+        run: |
+          # A rerun names its failed tests; otherwise only the packages with OS-specific code are built and tested here (hostTests).
+          sel=(--workspace); filter=()
+          if [ -n "$RERUN_FILTER" ]; then filter=(-E "$RERUN_FILTER")
+          else
+            if [ -n "$HOST_PACKAGES" ]; then echo "::notice::only the packages with OS-specific code are tested on this runner (hostTests): $HOST_PACKAGES"; sel=(); for p in $HOST_PACKAGES; do sel+=(-p "$p"); done; fi
+            if [ -n "$HOST_FILTER" ]; then filter=(-E "$HOST_FILTER"); fi
+          fi
+          cargo nextest run "${sel[@]}" --profile ci ${filter[@]+"${filter[@]}"}
 
       - name: Doc tests (workspace)
         if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && needs.plan.outputs.rust_test_macos_filter == '' }}
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief
-        run: cargo test --workspace --doc
+        env:
+          HOST_PACKAGES: ${{ needs.plan.outputs.host_packages_macos }}
+        run: |
+          sel=(--workspace); if [ -n "$HOST_PACKAGES" ]; then sel=(); for p in $HOST_PACKAGES; do sel+=(-p "$p"); done; fi
+          cargo test "${sel[@]}" --doc
 
       - name: No temp folders left behind
         if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' }}

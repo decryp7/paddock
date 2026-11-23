@@ -171,7 +171,7 @@ if (isMain(import.meta.url)) {
   // The verdict is `./dev ci verdict` of the trusted checkout (cwd = root); the job's read token reaches it as GITEA_TOKEN.
   const server = o.api.replace(/\/+$/, '').replace(/\/api\/v1$/, '');
   const verdict = async (workflow, sha) =>
-    spawnSync(resolve(root, 'dev'), ['ci', 'verdict', '--json', '--workflow', workflow, '--sha', sha, '--repo', o.repo, '--server', server], {
+    spawnSync(resolve(root, 'dev'), ['ci', 'verdict', '--json', '--tag', '--workflow', workflow, '--sha', sha, '--repo', o.repo, '--server', server], {
       cwd: root,
       encoding: 'utf8',
       maxBuffer: 16 << 20,

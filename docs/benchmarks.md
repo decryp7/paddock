@@ -2449,6 +2449,36 @@ Quoted by [docs/research/2026-11-20-ci-job-cost.md](research/2026-11-20-ci-job-c
   637 / 388 / 58; queue tests 7.3 s median on Windows.
 - **Fixed waits:** `waitForTimeout` 10 in Debrief's specs, 3 in Dyno's, 5 in `ui/e2e`, 0 in Pitwall's.
 
+## OS-scoped tests: minutes saved on the Windows and macOS legs (2026-11-22, feat/os-scoped-tests, WP-5)
+
+Rule: a test runs on Windows or macOS only when its code behaves differently there (`hostTests` in the CI contracts, conformance C155;
+docs/research/2026-11-22-os-scoped-tests.md). The note's estimates, from the job logs of run 8554 (train 18, full, green), before anything
+moved: Windows about 16 of 55 job-minutes (paddock-dev about 10, crate about 2.5, the apps about 3.5), macOS about 4.5 of 39 plus 4 to 8
+for the deleted `tools-macos` job and 3 to 5 per debrief.yml run; per train (two to three ci.yml runs) 35 to 50 Windows and 10 to 35 macOS
+minutes. These are estimates, not results.
+
+**Measured at landing: not yet.** Read the first CI run after this branch lands on main (a full run, not a member run: member runs also
+narrow by package) and record here, per job, the minutes of `crate (windows|macos)`, `paddock-dev (windows|macos)`, `app <app>
+(windows|macos)` and debrief.yml's `rust tests (macOS)` against run 8554 (and debrief 8547 for the macOS tests), and the Windows and macOS
+span of the run: the run id to read is `TBD` (the first ci.yml run on main after the landing; the integrator fills it in from
+`./dev ci verdict` in the same step that records C155's first green run in docs/gates.toml). Method: Gitea API job metadata, started to
+completed, as in the table of the note (`jobs.py` over `/actions/runs/<id>/jobs`), nextest wall and test count from each job log's
+summary line.
+
+| Job | run 8554 (before) | first run after landing | tests before | tests after |
+|---|---|---|---|---|
+| paddock-dev (windows) | 14.9 min | TBD | 1,871 | about 1,000 of 1,871 expected (1,264 of 2,319 listed on macOS) |
+| paddock-dev (macos) | 7.5 min | TBD | 2,285 | TBD |
+| crate (windows) | 11.4 min | TBD | 4,813 | TBD |
+| crate (macos) | 12.1 min | TBD | | TBD |
+| app dyno (windows) | 16.6 min | TBD | | TBD |
+| app dyno (macos) | 7.7 min | TBD | | TBD |
+| debrief `rust tests (macOS)` | 5.6 and 11.5 min (8496, 8547) | TBD | | TBD |
+| tools-macos (VM tooling tests) | 4 to 8 min | deleted | | |
+
+The test counts a host leg runs, listed from the tree before landing (what `cargo nextest list` selects with each leg's filter) are in the
+CHANGELOG entry of this change.
+
 ## Worker budget: Vitest and Playwright workers in the ER-48 lane budget (2026-11-22, feat/fixed-wait-checks)
 
 Cause: ER-48 counted cargo jobs and nextest threads per lane, not the other worker pools of a job. Vitest's default in a non-watch run is

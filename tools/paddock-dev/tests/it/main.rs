@@ -43,6 +43,7 @@ mod lessons_merge;
 mod locks;
 mod member_audits;
 mod merge_check;
+mod os_scoped;
 mod parity_corpus;
 mod pr;
 mod pre_push;

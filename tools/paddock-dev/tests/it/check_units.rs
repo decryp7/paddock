@@ -101,6 +101,7 @@ unit_parity! {
     c131_answers_every_input_of_the_js_tests_as_the_js_host_did: "C131",
     c141_answers_every_recorded_input_as_recorded: "C141",
     c154_answers_every_recorded_input_as_recorded: "C154",
+    c155_answers_every_recorded_input_as_recorded: "C155",
 }
 
 /// The positive control: a recorded answer that is changed is seen (a comparison that cannot fail proves nothing, ER-33).

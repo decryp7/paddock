@@ -13,5 +13,36 @@
     "out": [
       "app/src-tauri/resources"
     ]
+  },
+  "hostTests": {
+    "packages": [
+      "cargo-debrief-plugin",
+      "chromium-driver",
+      "debrief-agent",
+      "debrief-ai",
+      "debrief-app",
+      "debrief-cli",
+      "debrief-collect",
+      "debrief-core",
+      "debrief-etw",
+      "debrief-ipc",
+      "debrief-monitor",
+      "debrief-plugin-api",
+      "debrief-plugin-dotnet",
+      "debrief-plugin-dumps",
+      "debrief-plugin-host",
+      "debrief-plugin-native",
+      "debrief-plugin-package",
+      "debrief-plugin-test",
+      "debrief-plugin-tools",
+      "debrief-plugin-windows",
+      "debrief-plugins",
+      "debrief-store-client",
+      "debrief-store-duck",
+      "debrief-store-worker",
+      "debrief-symbols",
+      "debrief-video",
+      "xtask"
+    ]
   }
 }

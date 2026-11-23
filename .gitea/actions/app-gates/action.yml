@@ -22,6 +22,12 @@ inputs:
   host-rust-checks:
     description: "Commands from the repo root that run only when the Rust half does, on the Windows and macOS legs, after the Rust step (its clippy and tests), one per line. For a check that must see a build the tests do not make (a non-test `cargo check`, where dev-dependency features are not unified in). Host legs only."
     default: ""
+  host-packages:
+    description: "Space-separated packages a Windows or macOS leg builds and tests (paddock.ci.json `hostTests`, OS-scoped tests: ./dev plan --ci): clippy, tests and doc tests of that leg run `-p` these instead of the whole workspace. Empty (Linux, or an app with no `hostTests`): the whole workspace. A rerun of failed tests (`tests-only`) ignores it."
+    default: ""
+  host-filter:
+    description: "A nextest filterset a host leg adds to its selection (the modules of a host package that stay on Linux, `not (package(=p) & test(/^(?:model::)/))`); empty: none. Combined with `filter` (a member run) by `&`."
+    default: ""
   ui-checks:
     description: Commands from the repo root for the UI half, one per line (lint, unit tests, Chromium e2e).
     default: ""
@@ -111,6 +117,8 @@ runs:
         TESTS_ONLY: ${{ inputs.tests-only }}
         DISPLAY_TESTS: ${{ inputs.display }}
         LAST_PACKAGES: ${{ inputs.last-packages }}
+        HOST_PACKAGES: ${{ inputs.host-packages }}
+        HOST_FILTER: ${{ inputs.host-filter }}
         WINDOWS_CLIPPY: ${{ inputs.windows-clippy }}
       run: |
         set -uo pipefail
@@ -152,14 +160,28 @@ runs:
         exclude=(); last=()
         for pkg in $LAST_PACKAGES; do exclude+=(--exclude "$pkg"); last+=(-p "$pkg"); done
         hostexclude=(); if [ "$RUNNER_OS" != Linux ]; then hostexclude=(${exclude[@]+"${exclude[@]}"}); fi
+        # OS-scoped tests (hostTests): a host leg builds and tests only the packages with OS-specific code. The Linux leg runs everything;
+        # a rerun of failed tests names its tests itself. `scope` is what stands for `--workspace` below.
+        scope=(--workspace)
+        if [ "$RUNNER_OS" != Linux ] && [ "$TESTS_ONLY" != true ]; then
+          if [ -n "$HOST_PACKAGES" ]; then
+            echo "::notice::host leg: only the packages with OS-specific code are built and tested (hostTests): $HOST_PACKAGES"
+            # `--exclude` only goes with `--workspace`: the last-packages are simply not in a host list (they are left out of host legs anyway).
+            scope=(); for pkg in $HOST_PACKAGES; do scope+=(-p "$pkg"); done; exclude=(); hostexclude=()
+          fi
+          if [ -n "$HOST_FILTER" ]; then
+            echo "::notice::host leg: nextest filter (hostTests): $HOST_FILTER"
+            if [ -n "$FILTER" ]; then filter=(-E "($FILTER) & ($HOST_FILTER)"); else filter=(-E "$HOST_FILTER"); fi
+          fi
+        fi
         # Format, advisories and licences do not depend on the OS; clippy is skipped on Windows like the crates leg unless the app opts in (windowsClippy).
         if [ "$gates" = true ]; then
           if [ "$RUNNER_OS" = Linux ]; then step cargo fmt --all --check; fi
-          if [ "$RUNNER_OS" != Windows ] || [ "$WINDOWS_CLIPPY" = true ]; then step cargo clippy --workspace ${hostexclude[@]+"${hostexclude[@]}"} --all-targets -- -D warnings; fi
+          if [ "$RUNNER_OS" != Windows ] || [ "$WINDOWS_CLIPPY" = true ]; then step cargo clippy "${scope[@]}" ${hostexclude[@]+"${hostexclude[@]}"} --all-targets -- -D warnings; fi
         fi
         wrap=()
         if [ "$DISPLAY_TESTS" = true ] && [ "$RUNNER_OS" = Linux ]; then wrap=(xvfb-run --auto-servernum --server-args="-screen 0 1280x1024x24" dbus-run-session --); fi
-        sel=(--workspace ${exclude[@]+"${exclude[@]}"} ${config[@]+"${config[@]}"} ${filter[@]+"${filter[@]}"})
+        sel=("${scope[@]}" ${exclude[@]+"${exclude[@]}"} ${config[@]+"${config[@]}"} ${filter[@]+"${filter[@]}"})
         if [ "$member" = true ] && empty_selection "${sel[@]}"; then
           echo "::notice::nextest: no test of the workspace matches the member filter ($FILTER); this half is skipped, not passed"
         else
@@ -174,7 +196,7 @@ runs:
           fi
         fi
         if [ "$gates" = true ]; then
-          step cargo test --workspace ${hostexclude[@]+"${hostexclude[@]}"} --doc
+          step cargo test "${scope[@]}" ${hostexclude[@]+"${hostexclude[@]}"} --doc
           if [ "$RUNNER_OS" = Linux ]; then step cargo deny --all-features --workspace check; fi
         fi
         exit $status

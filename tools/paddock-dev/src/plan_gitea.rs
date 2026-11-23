@@ -26,7 +26,6 @@ pub const CI_JOBS: &[(&str, &[&str])] = &[
     ("ipc-endpoints", &["conformance"]),
     ("gitleaks", &["conformance"]),
     ("tools", &["tools"]),
-    ("tools-macos", &["tools"]),
     ("wiki", &["tools"]),
     ("heavy", &["tools"]),
     ("icons", &["icons"]),

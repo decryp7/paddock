@@ -407,6 +407,12 @@ enum CiCommand {
     /// Whether a scheduled run ends early because a train's dispatch run is queued or running (skip=true|false to
     /// GITHUB_OUTPUT). Fails open: an unreadable API lets the run proceed, with a warning.
     ScheduleSkip(ci_runs::ScheduleSkipArgs),
+    /// The scope line of an app's own workflow (`plan scope: {json}`, ADR 0113): what the run did and what a push to main does, which
+    /// `ci verdict` compares. ci.yml's plan prints its own (`dev plan --ci`).
+    Scope(ci_runs::ScopeArgs),
+    /// Records the first green run of a scope producer in docs/ci-scope-first-runs.toml, which switches `ci verdict` from the producer's
+    /// old line to its declared scope (ER-41, ADR 0113). Refuses a run that is not green, complete and run.
+    ScopeRecord(ci_runs::ScopeRecordArgs),
     /// Whether a push to main ends early because a full green run of the workflow, with no FLAKY test, already tested this exact
     /// commit (`reuse=true|false` and `run=<id>` to GITHUB_OUTPUT; ER-49). Fails open: anything unreadable lets the run proceed.
     Reuse(ci_runs::ReuseArgs),
@@ -772,6 +778,12 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
             command: CiCommand::Reuse(a),
         } => ci_runs::reuse(&a),
         Command::Ci {
+            command: CiCommand::Scope(a),
+        } => ci_runs::scope(&a),
+        Command::Ci {
+            command: CiCommand::ScopeRecord(a),
+        } => ci_runs::scope_record(&a),
+        Command::Ci {
             command: CiCommand::RustPin(a),
         } => ci_rust_pin::command(&a),
         Command::Ci {
@@ -808,15 +820,18 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
         } => gates::command::model(a.root.as_deref()),
         Command::Gates {
             command: GatesCommand::Check(a),
-        } => gates::command::check(&gates::command::CheckArgs {
-            root: a.root,
-            release_tag: a.release_tag,
-            warn: a.warn,
-            base: a.base,
-        }),
+        } => gates::command::check(
+            &gates::command::CheckArgs {
+                root: a.root,
+                release_tag: a.release_tag,
+                warn: a.warn,
+                base: a.base,
+            },
+            dev_command_paths(),
+        ),
         Command::Gates {
             command: GatesCommand::List(a),
-        } => gates::command::list(a.root.as_deref(), &a.base),
+        } => gates::command::list(a.root.as_deref(), &a.base, dev_command_paths()),
         Command::Gates {
             command: GatesCommand::Inputs,
         } => gates::command::inputs(),
@@ -922,4 +937,25 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
             head: a.head,
         }),
     }
+}
+
+/// Every visible subcommand path of `./dev` (`ci run`, `gates check`, ...), read from the command tree this module defines: what the gate
+/// register's `dev` rows are checked against. It lives here because only `cli` may name `Cli` without importing every command
+/// the other way round (`gates::command` is handed the set, so conformance C155 sees no edge from it to `cli`).
+fn dev_command_paths() -> std::collections::BTreeSet<String> {
+    use clap::CommandFactory;
+    fn walk(c: &clap::Command, prefix: &str, out: &mut std::collections::BTreeSet<String>) {
+        for s in c.get_subcommands().filter(|s| !s.is_hide_set()) {
+            let path = if prefix.is_empty() {
+                s.get_name().to_string()
+            } else {
+                format!("{prefix} {}", s.get_name())
+            };
+            out.insert(path.clone());
+            walk(s, &path, out);
+        }
+    }
+    let mut out = std::collections::BTreeSet::new();
+    walk(&Cli::command(), "", &mut out);
+    out
 }

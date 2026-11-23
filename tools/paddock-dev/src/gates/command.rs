@@ -58,26 +58,10 @@ pub struct CheckArgs {
     pub base: String,
 }
 
-fn dev_command_paths() -> std::collections::BTreeSet<String> {
-    use clap::CommandFactory;
-    fn walk(c: &clap::Command, prefix: &str, out: &mut std::collections::BTreeSet<String>) {
-        for s in c.get_subcommands().filter(|s| !s.is_hide_set()) {
-            let path = if prefix.is_empty() {
-                s.get_name().to_string()
-            } else {
-                format!("{prefix} {}", s.get_name())
-            };
-            out.insert(path.clone());
-            walk(s, &path, out);
-        }
-    }
-    let mut out = std::collections::BTreeSet::new();
-    walk(&crate::cli::Cli::command(), "", &mut out);
-    out
-}
-
 /// `dev gates check`.
-pub fn check(a: &CheckArgs) -> Result<Report, CliError> {
+/// `dev_commands` is the command tree of `./dev` (every visible subcommand path), handed in by the one place that owns it, `cli`: this
+/// module never imports `cli`, which imports every command (conformance C155 follows import edges).
+pub fn check(a: &CheckArgs, dev_commands: std::collections::BTreeSet<String>) -> Result<Report, CliError> {
     let root = repo_root(a.root.as_deref())?;
     let started = std::time::Instant::now();
     // First, so that a sparse checkout is named by one line before anything reads the tree.
@@ -93,7 +77,7 @@ pub fn check(a: &CheckArgs) -> Result<Report, CliError> {
         sources: &sources,
         conformance_list: edge::conformance_json(&root, "list"),
         conformance_commands: edge::conformance_json(&root, "commands").ok(),
-        dev_commands: dev_command_paths(),
+        dev_commands,
         register_text: std::fs::read_to_string(root.join("docs/gates.toml")).ok(),
         base_register_text: edge::base_register(&root, &a.base),
         history: history.clone().unwrap_or_default(),
@@ -131,7 +115,8 @@ pub fn check(a: &CheckArgs) -> Result<Report, CliError> {
 }
 
 /// `dev gates list --json`: every check with its gating.
-pub fn list(root: Option<&Path>, base: &str) -> Result<Report, CliError> {
+/// `dev_commands`: as for [`check`].
+pub fn list(root: Option<&Path>, base: &str, dev_commands: std::collections::BTreeSet<String>) -> Result<Report, CliError> {
     let root = repo_root(root)?;
     let tree = edge::GitTree::open(&root).map_err(CliError::failure)?;
     let sources = edge::load_sources(&root).map_err(CliError::failure)?;
@@ -141,7 +126,7 @@ pub fn list(root: Option<&Path>, base: &str) -> Result<Report, CliError> {
         sources: &sources,
         conformance_list: edge::conformance_json(&root, "list"),
         conformance_commands: None,
-        dev_commands: dev_command_paths(),
+        dev_commands,
         register_text: std::fs::read_to_string(root.join("docs/gates.toml")).ok(),
         base_register_text: edge::base_register(&root, base),
         history: Vec::new(),

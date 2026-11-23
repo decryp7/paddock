@@ -9,13 +9,13 @@
 //! - anything that cannot be read (the runs, the jobs, a log) means "run": the step fails open to the full run, never to a
 //!   skipped one.
 //!
-//! - "complete" has one meaning (ER-15), the scope of a push to main: ci.yml logs `complete=true` only for a push, a dispatch that
-//!   asked for WebKit (`webkit` input, the scope of `plan_ci::wants_webkit`) or an app's own gates. A train's full dispatch without
-//!   WebKit logs `complete=false`, so it is neither reused here nor counted by the verdict reader: the push to main runs, WebKit
-//!   included, and `tag.yml` never reads a green verdict that skipped it (run 8335; the 2026-11-12 schedule-skipped and
+//! - "complete" has one meaning (ER-15, ADR 0113): the run declared a scope that covers a push to main's (`run_scope`), engines
+//!   included. A train's full dispatch without WebKit declares an engine less, so it is neither reused here nor counted by the
+//!   verdict reader: the push to main runs, WebKit
+//!   included, and `tag.yml` never reads a green verdict that skipped it (the 2026-11-12 schedule-skipped and
 //!   rerun-only runs counted green were the same class).
 //!
-//! A run that reuses another ends with `plan verdict: complete=false`, so the reader never counts it; the reused run is the one
+//! A run that reuses another declares that it ran nothing (`PLAN_REUSE`, `dev plan --ci`), so the reader never counts it; the reused run is the one
 //! that decides the commit.
 
 use super::client::Client;
@@ -98,9 +98,15 @@ fn clean_of_flaky(client: &mut Client, run: u64) -> Result<usize, String> {
     Ok(read)
 }
 
-/// Decides for `workflow` on `sha`; `current` is the asking run's id (left out of the verdict).
+/// Decides for `workflow` on `sha`; `current` is the asking run's id (left out of the verdict). The basis is the verdict's: the declared
+/// scope once its producer is recorded, the old line before (ER-41).
 pub fn decide(client: &mut Client, workflow: &str, sha: &str, current: Option<u64>) -> Reuse {
-    match verdict::verdict_excluding(client, workflow, sha, current) {
+    decide_with(client, workflow, sha, current, verdict::scope_decisive(workflow))
+}
+
+/// [`decide`] with the basis given.
+pub fn decide_with(client: &mut Client, workflow: &str, sha: &str, current: Option<u64>, scope: bool) -> Reuse {
+    match verdict::verdict_with(client, workflow, sha, current, scope) {
         Verdict::Green { run } => match clean_of_flaky(client, run) {
             Ok(logs) => Reuse::Skip { run, logs },
             Err(why) => Reuse::Run(why),
@@ -136,8 +142,12 @@ mod tests {
         for r in &runs {
             let id = r["id"].as_u64().unwrap();
             let plan = id + 5000;
-            let mut list =
-                vec![json!({"id": plan, "name": "plan (affected projects)", "conclusion": "success", "runner_id": 1, "steps": step})];
+            let mut list = vec![
+                json!({"id": plan, "name": "plan (affected projects)", "conclusion": "success", "runner_id": 1, "steps": step}),
+                // The one job the declared scope names (run_scope::TEST_COMPLETE): it ran and has a log.
+                json!({"id": id + 9000, "name": "conformance (checks, release scripts)", "conclusion": "success", "runner_id": 1, "steps": step}),
+            ];
+            f.log(id + 9000, "ok\n");
             if id == jobs_of {
                 for (jid, _) in jobs {
                     list.push(json!({"id": jid, "name": format!("job {jid}"), "conclusion": "success", "runner_id": 1, "steps": step}));
@@ -152,9 +162,9 @@ mod tests {
             f.log(
                 plan,
                 if full.contains(&id) {
-                    "plan verdict: complete=true\n"
+                    crate::run_scope::TEST_COMPLETE
                 } else {
-                    "plan verdict: complete=false\n"
+                    crate::run_scope::TEST_PARTIAL
                 },
             );
         }
@@ -170,7 +180,7 @@ mod tests {
     fn ask(f: &mut Fake, current: Option<u64>) -> Reuse {
         let mut c = Client::new(f, "https://gitea.invalid", "decryp7/paddock", "t");
         c.backoff_ms = 0;
-        decide(&mut c, "ci.yml", SHA, current)
+        decide_with(&mut c, "ci.yml", SHA, current, true)
     }
 
     #[test]
@@ -185,7 +195,7 @@ mod tests {
             &[(71, Some("ok\n"))],
         );
         let r = ask(&mut f, Some(9));
-        assert_eq!(r, Reuse::Skip { run: 7, logs: 2 }, "{r:?}");
+        assert_eq!(r, Reuse::Skip { run: 7, logs: 3 }, "{r:?}");
         let note = r.annotation("ci.yml", SHA);
         assert!(
             note.contains("run 7") && note.contains("ends early") && note.contains("ER-49"),
@@ -196,7 +206,7 @@ mod tests {
 
     #[test]
     fn a_full_green_dispatch_without_webkit_is_not_reused_and_one_with_webkit_is() {
-        // ci.yml logs complete=false for a full dispatch that did not run WebKit (a smaller scope than a push to main): run 7 below.
+        // ci.yml declares a scope without the WebKit engine for a full dispatch that did not run it (a smaller scope than a push to main): run 7 below.
         let mut f = server(
             vec![run(7, "workflow_dispatch", "train/x", "success")],
             &[],
@@ -205,7 +215,7 @@ mod tests {
         );
         let r = ask(&mut f, Some(9));
         assert!(matches!(&r, Reuse::Run(why) if why.contains("full run")), "{r:?}");
-        // The same run with the WebKit scope logged complete=true is reused.
+        // The same run with the WebKit scope declared complete is reused.
         let mut f = server(
             vec![run(7, "workflow_dispatch", "train/x", "success")],
             &[7],
@@ -276,7 +286,7 @@ mod tests {
 
     #[test]
     fn a_partial_run_and_the_asking_run_itself_are_never_evidence() {
-        // Run 7 is a base dispatch (plan said complete=false); run 9 is this run, whose own plan log says complete=true already.
+        // Run 7 is a base dispatch (its scope is partial); run 9 is this run, whose own plan log already declares a complete scope.
         let mut f = server(
             vec![run(7, "workflow_dispatch", "feat/x", "success"), run(9, "push", "main", "success")],
             &[9],
@@ -287,6 +297,20 @@ mod tests {
         assert!(matches!(&r, Reuse::Run(_)), "{r:?}");
         // Without leaving itself out, the asking run would be its own proof.
         assert!(ask(&mut f, None).skip());
+    }
+
+    #[test]
+    fn an_earlier_full_run_still_going_runs_the_commit_with_a_notice_naming_it_never_a_warning() {
+        let mut going = run(7, "workflow_dispatch", "train/x", "");
+        going["status"] = json!("in_progress");
+        let mut f = server(vec![going], &[7], 7, &[(71, Some("ok\n"))]);
+        let r = ask(&mut f, Some(9));
+        assert!(
+            matches!(&r, Reuse::Run(why) if why.contains('7') && why.contains("in_progress")),
+            "{r:?}"
+        );
+        let line = r.annotation("ci.yml", SHA);
+        assert!(line.starts_with("::notice::") && !line.contains("token"), "{line}");
     }
 
     #[test]

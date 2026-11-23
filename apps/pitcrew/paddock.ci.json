@@ -18,5 +18,12 @@
     "npm run lint:report",
     "npx ng build",
     "npx ng test --watch=false --coverage"
-  ]
+  ],
+  "hostTests": {
+    "packages": [
+      "pitcrew-app",
+      "pitcrew-core",
+      "pitcrew-service"
+    ]
+  }
 }

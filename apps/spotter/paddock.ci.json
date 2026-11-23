@@ -42,5 +42,13 @@
     "npm run build -w ui",
     "cd apps/spotter/app",
     "PW_PORT=4372 npx playwright test --project=webkit --workers=1"
-  ]
+  ],
+  "hostTests": {
+    "packages": [
+      "spotter-app",
+      "spotter-engine",
+      "spotter-render",
+      "spotter-sources"
+    ]
+  }
 }

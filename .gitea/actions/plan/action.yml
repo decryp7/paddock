@@ -26,8 +26,11 @@ inputs:
     description: "'true' in a release workflow (a rule 54 dispatch counts as a release): ./dev never downloads its tool, whatever the ref (ADR 0022 section 3.3)."
     default: "false"
   full:
-    description: "'true' when this run tests everything its plan can reach (a tag, a gates dispatch), the scope of the `plan verdict: complete=` line `./dev ci verdict` reads (plan_since::COMPLETE_LINE). Default 'false': never full."
+    description: "'true' when this run tests everything its plan can reach (a tag, a gates dispatch), the scope of the `plan scope:` line `./dev ci verdict` reads (run_scope, ADR 0113). Default 'false': never full."
     default: "false"
+  workflow:
+    description: "The calling workflow's file (dyno-release.yml): the scope line names it, and `./dev ci verdict` ignores a line of another workflow. Empty: no scope line (the nightly)."
+    default: ""
 outputs:
   run:
     description: "'true' or 'false'; later jobs use if: needs.plan.outputs.run == 'true'."
@@ -66,6 +69,7 @@ runs:
         APP: ${{ inputs.app }}
         SCHEDULE_WORKFLOW: ${{ inputs.schedule-workflow }}
         PLAN_MODE_FULL: ${{ inputs.full }}
+        WORKFLOW: ${{ inputs.workflow }}
         TAG_PATTERN: ${{ inputs.tag-pattern }}
         PLAN_TOKEN: ${{ inputs.token }}
         PADDOCK_DEV_TOKEN: ${{ inputs.dev-token }}
@@ -95,10 +99,16 @@ runs:
         fi
         echo "run=$run" >> "$GITHUB_OUTPUT"
         echo "train-skip=$train_skip" >> "$GITHUB_OUTPUT"
-        # The line `./dev ci verdict` trusts (plan_since::COMPLETE_LINE), printed after every decision above: the plan ran its jobs,
-        # the caller says the mode is full.
-        # First real run that printed it from a release workflow (ER-33, ER-41): spotter-release.yml run 8122 on train 11 at
-        # 381e4758a, `plan verdict: complete=true`, 2026-11-15.
+        # The scope this run declares (ADR 0113), printed after every decision above: what the run did against what a push to main does,
+        # which `./dev ci verdict` compares. The caller names its workflow file and says whether the mode is full; a run that
+        # ran nothing (run=false) declares an empty scope. Without a workflow or an app (the nightly) there is no verdict to give.
+        # First real run that printed a scope line from a release workflow: not yet (ER-33, ER-41); the first run id goes here.
+        # REPORT-ONLY PHASE (ER-41, ADR 0113): until docs/ci-scope-first-runs.toml names `plan-action`, `./dev ci verdict` still decides on
+        # this line and prints the scope view as a notice; the first green release run is recorded with `./dev ci scope-record` and the
+        # block is deleted in the same change.
         complete=false
         if [ "$run" = true ] && [ "$PLAN_MODE_FULL" = true ]; then complete=true; fi
         echo "plan verdict: complete=$complete"
+        if [ -n "$WORKFLOW" ] && [ -n "$APP" ]; then
+          bash "${{ github.action_path }}/../../../dev" ci scope --workflow "$WORKFLOW" --app "$APP" --full "$PLAN_MODE_FULL" --run "$run"
+        fi

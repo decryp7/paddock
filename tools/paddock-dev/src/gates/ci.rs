@@ -403,6 +403,8 @@ pub const LEG_KEYS: &[&str] = &[
     "rust",
     "ui",
     "filter",
+    "host_packages",
+    "host_filter",
     "e2e_checks",
     "e2e_shard",
     "e2e_leg",
@@ -456,9 +458,12 @@ fn app_legs(app: &str, contract: &Json, webkit: bool) -> Result<Vec<BTreeMap<Str
             .to_string()
     };
     let flag = |b: bool| if b { "true" } else { "false" }.to_string();
+    // A malformed `hostTests` is an error here as in `plan_ci::matrix`, never a silent "not scoped".
+    let host = crate::host_tests::HostTests::parse(contract, &format!("apps/{app}/paddock.ci.json"))?;
     let mut legs: Vec<BTreeMap<String, String>> = Vec::new();
     for os in oses {
         let linux = os == LINUX;
+        let host_scope = host.as_ref().map(|h| h.scope(&os)).unwrap_or_default();
         let m: BTreeMap<String, String> = [
             ("app", app.to_string()),
             ("os", os.clone()),
@@ -479,6 +484,8 @@ fn app_legs(app: &str, contract: &Json, webkit: bool) -> Result<Vec<BTreeMap<Str
                     join_lines(contract, "hostRustChecks")
                 },
             ),
+            ("host_packages", host_scope.packages.join(" ")),
+            ("host_filter", host_scope.filter.clone()),
             ("ui_checks", if linux { join_lines(contract, "ui") } else { String::new() }),
             (
                 "angular_dir",
@@ -1437,6 +1444,18 @@ pub fn build(src: &Sources) -> CiModel {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_malformed_host_tests_is_an_error_of_the_model_not_a_silent_unscoped_leg() {
+        let ok = serde_json::json!({"cargo": ".", "hostTests": {"packages": ["a"]}});
+        assert!(app_legs("x", &ok, false).is_ok());
+        let bad = serde_json::json!({"cargo": ".", "hostTests": {"pakages": ["a"]}});
+        let e = app_legs("x", &bad, false).unwrap_err();
+        assert!(
+            e.contains("apps/x/paddock.ci.json") && e.contains("unknown `hostTests.pakages`"),
+            "{e}"
+        );
+    }
 
     fn sources(files: &[(&str, &str)]) -> Sources {
         let mut s = Sources::default();

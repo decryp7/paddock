@@ -71,6 +71,7 @@ pub mod health;
 pub mod heavy_cmd;
 pub mod heavy_install;
 pub mod hook;
+pub mod host_tests;
 pub mod input_hash;
 pub mod ipc_endpoints;
 pub mod lessons_driver;
@@ -95,6 +96,7 @@ pub mod queue;
 pub mod release_isolation;
 pub mod repo_inputs;
 pub mod repo_model;
+pub mod run_scope;
 pub mod safe_remove;
 pub mod slots;
 // Unix only: it starts the helper through a POSIX shell, and every test that uses it is `#[cfg(unix)]`.
