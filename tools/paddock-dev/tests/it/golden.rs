@@ -176,7 +176,8 @@ fn recorded_model_compare_on_the_real_tree_samples() {
         let req = request(&files);
         let plan = plan_on_graph(&root, &history, &req, &graph).unwrap();
         let (_, reached) = paddock_dev::repo_model::reach_for(&root, &history, &req, &graph).unwrap();
-        let c = paddock_dev::repo_model::compare(&plan, &reached, &graph);
+        let inputs = paddock_dev::repo_inputs::load(&root).unwrap();
+        let c = paddock_dev::repo_model::compare(&plan, &reached, &graph, &inputs);
         let diffs: Vec<Value> = c["differences"]
             .as_array()
             .unwrap()

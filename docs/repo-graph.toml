@@ -13,8 +13,57 @@
 # [[owner]]  paths (globs), node (none | doc | project:<id>); the most specific pattern wins, a later rule a tie
 # [prose]    project_names (prose in a project folder, by name), project_folders (a project's own prose folders), doc_owner
 #            (prose under a doc owner), doc_assets (documentation images under a doc owner; content detection may override, D14)
+# [[project]] id (the plan's key), folder (relative to the root; empty: a check job that owns no path); each app is also a project,
+#            `app:<name>` for `apps/<name>`, found by its contract file
+# [paths]    the folders and file names the adapters read: workflows, actions, apps, contract, script_folders, node_tests, e2e
 # [ci]       setup_only (actions that stay plumbing in a release job), release_actions (actions that make a job a release job)
 version = 1
+
+[[project]]
+id = "crates"
+folder = "crates"
+
+[[project]]
+id = "ui"
+folder = "ui"
+
+[[project]]
+id = "eslint"
+folder = "eslint"
+
+[[project]]
+id = "conformance"
+folder = "conformance"
+
+[[project]]
+id = "tools"
+folder = "tools"
+
+[[project]]
+id = "icons"
+folder = "icons"
+
+[[project]]
+id = "ci-image"
+folder = "ci-image"
+
+[[project]]
+id = "paddock-dev"
+folder = "tools/paddock-dev"
+
+# A check job with no folder (it owns no path); it is reached by named inputs and by a true global.
+[[project]]
+id = "c99"
+folder = ""
+
+[paths]
+workflows = ".gitea/workflows/"
+actions = ".gitea/actions/"
+apps = "apps/"
+contract = "paddock.ci.json"
+script_folders = ["conformance/ci/", "conformance/release/", "conformance/src/util/", "scripts/"]
+node_tests = "conformance/test/"
+e2e = "e2e"
 
 [prose]
 project_names = ["README*", "CHANGELOG*", "LICENSE*"]

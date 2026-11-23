@@ -89,6 +89,9 @@ fn adapter() -> CiExtractor {
         decl: CiDecl {
             setup_only: ["setup-rust".to_string()].into_iter().collect(),
             release_actions: ["tauri-bundle".to_string()].into_iter().collect(),
+            paths: crate::repo_inputs::load(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))
+                .unwrap()
+                .paths,
         },
     }
 }
@@ -289,4 +292,26 @@ fn on_the_real_tree_kit_sh_dispatches_to_build_folder_sh_and_a_shared_action_rea
     // Plumbing for an app's gates, release where a release job runs it (build-folder is not declared setup-only).
     assert_eq!(r.get("app:debrief"), Some(&Reach::Plumbing), "{r:?}");
     assert_eq!(r.get("app:dyno"), Some(&Reach::Release), "{r:?}");
+}
+
+#[test]
+fn an_unreadable_workflow_or_action_fails_the_adapter_and_an_absent_one_is_skipped() {
+    // Failing first (P1-5): `texts` dropped every unreadable file and the loops skipped it with `continue`.
+    let m = repo(true);
+    let broken = MemoryRead::new()
+        .with(".gitea/workflows/ci.yml", CI)
+        .failing(".gitea/workflows/release.yml", "I/O error");
+    let adapters: Vec<Box<dyn Extractor>> = vec![Box::new(adapter())];
+    let b = build(&broken.paths(), &broken, &adapters);
+    assert_eq!(b.errors.len(), 1, "{:?}", b.errors);
+    assert_eq!(
+        (b.errors[0].extractor, b.errors[0].file.as_str()),
+        ("ci", ".gitea/workflows/release.yml")
+    );
+    // Control: the same tree readable builds, and a tracked file that is not there is skipped.
+    assert!(build(&m.paths(), &m, &adapters).errors.is_empty());
+    let absent = MemoryRead::new().with(".gitea/workflows/ci.yml", CI);
+    let mut files = absent.paths();
+    files.push(".gitea/workflows/gone.yml".to_string());
+    assert!(build(&files, &absent, &adapters).errors.is_empty());
 }

@@ -15,8 +15,10 @@
 
 use paddock_repo_graph::Graph;
 use paddock_repo_graph::imports::{relative_specifiers, resolve};
-use paddock_repo_graph::model::extract::{BulkRead, ExtractError, Extracted, Extractor};
+use paddock_repo_graph::model::extract::{BulkRead, ExtractError, Extracted, Extractor, texts_of};
+use paddock_repo_graph::model::inputs::Paths;
 use paddock_repo_graph::model::nodes::{Edge, EdgeKind, ModelNode, NodeKind};
+use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
@@ -30,6 +32,12 @@ pub struct CodeExtractor {
     pub npm: Graph,
     /// The scripts the CI adapter found (their imports are followed).
     pub scripts: BTreeSet<String>,
+    /// The declared folders (`docs/repo-graph.toml` `[paths]`).
+    pub paths: Paths,
+    /// The revision the one `git grep` reads (`None`: the working tree, files mode), the revision every text is read at.
+    pub rev: Option<String>,
+    /// How many processes it started (the spawn-budget test reads it).
+    pub spawned: std::rc::Rc<Cell<usize>>,
 }
 
 const JS: [&str; 5] = [".mjs", ".cjs", ".js", ".ts", ".mts"];
@@ -112,10 +120,42 @@ pub fn read_paths(file: &str, text: &str, crate_dir: &str, tracked: &BTreeSet<St
     out
 }
 
+/// The files `git grep -l` named. It accepts exit 0, or exit 1 with empty output (nothing matched), and nothing else: any other
+/// status (128 is git's own error), or output cut at the cap, is an error and the plan answers everything (review P1-5). With a
+/// revision git prefixes each name with `<rev>:`.
+pub fn grep_files(code: Option<i32>, stdout: &str, stderr: &str, truncated: bool, rev: Option<&str>) -> Result<Vec<String>, String> {
+    let ok = match code {
+        Some(0) => true,
+        Some(1) => stdout.is_empty() && !truncated,
+        _ => false,
+    };
+    if !ok || truncated {
+        let why = if truncated {
+            "its output was cut at the cap".to_string()
+        } else {
+            format!("exit status {code:?}")
+        };
+        return Err(format!("git grep failed ({why}): {}", stderr.trim()));
+    }
+    let prefix = rev.map(|r| format!("{r}:"));
+    stdout
+        .lines()
+        .map(|l| match &prefix {
+            None => Ok(l.to_string()),
+            Some(p) => l
+                .strip_prefix(p.as_str())
+                .map(str::to_string)
+                .ok_or_else(|| format!("git grep named {l:?}, which does not start with {p:?}")),
+        })
+        .collect()
+}
+
 impl CodeExtractor {
-    /// The `.rs` files that may read a path: one `git grep -l` over the tracked tree.
+    /// The `.rs` files that may read a path: one `git grep -l` over the tracked tree at the revision (the working tree in files
+    /// mode).
     fn read_candidates(&self) -> Result<Vec<String>, String> {
-        let mut cmd = paddock_proc::command("git");
+        self.spawned.set(self.spawned.get() + 1);
+        let mut cmd = crate::git_env::git();
         cmd.arg("-C").arg(&self.root).args([
             "-c",
             "core.quotePath=false",
@@ -123,19 +163,21 @@ impl CodeExtractor {
             "-l",
             "-E",
             "include_(str|bytes)!|CARGO_MANIFEST_DIR",
-            "--",
-            "*.rs",
         ]);
+        if let Some(rev) = &self.rev {
+            cmd.arg(rev);
+        }
+        cmd.args(["--", "*.rs"]);
         let out = paddock_proc::run_bounded(
             cmd,
             paddock_proc::Limits::new(std::time::Duration::from_secs(60)).max_output(1 << 24),
         )
         .map_err(|e| e.to_string())?;
-        // `git grep` exits 1 when nothing matches.
-        if !out.success() && !out.stdout_text().is_empty() {
-            return Err(out.stderr_text());
-        }
-        Ok(out.stdout_text().lines().map(str::to_string).collect())
+        let code = match out.outcome {
+            paddock_proc::Outcome::Exited(s) => s.code(),
+            _ => None,
+        };
+        grep_files(code, &out.stdout_text(), &out.stderr_text(), out.truncated, self.rev.as_deref())
     }
 
     fn crate_of<'a>(&'a self, path: &str) -> Option<&'a str> {
@@ -167,11 +209,13 @@ impl Extractor for CodeExtractor {
             .into_iter()
             .filter(|f| tracked.contains(f))
             .collect();
-        for (f, text) in candidates.iter().zip(read.read_all(&candidates)) {
-            let (Some(text), Some(reader)) = (text, self.crate_of(f)) else {
+        // A candidate that cannot be read is an error (fail closed); only a file that is not there is skipped.
+        let candidate_texts = texts_of("code", read, &candidates)?;
+        for f in &candidates {
+            let (Some(text), Some(reader)) = (candidate_texts.get(f), self.crate_of(f)) else {
                 continue;
             };
-            for p in read_paths(f, &text, reader, &tracked) {
+            for p in read_paths(f, text, reader, &tracked) {
                 if let Some(owner) = self.crate_of(&p).filter(|o| *o != reader) {
                     x.edges
                         .push(Edge::new(format!("crate:{reader}"), format!("crate:{owner}"), EdgeKind::Reads));
@@ -193,12 +237,7 @@ impl Extractor for CodeExtractor {
         let mut rounds = 0;
         while !layer.is_empty() && rounds < 64 {
             rounds += 1;
-            let texts: BTreeMap<String, String> = layer
-                .iter()
-                .cloned()
-                .zip(read.read_all(&layer))
-                .filter_map(|(p, t)| t.map(|t| (p, t)))
-                .collect();
+            let texts: BTreeMap<String, String> = texts_of("code", read, &layer)?;
             let set: BTreeSet<String> = layer.iter().cloned().collect();
             seen.extend(set.iter().cloned());
             let edges: BTreeMap<String, BTreeSet<String>> = set
@@ -229,10 +268,14 @@ impl Extractor for CodeExtractor {
         }
         // spec targets
         for f in files.iter().filter(|f| is_spec(f)) {
-            let (target, home) = if f.starts_with("conformance/test/") {
+            let (target, home) = if f.starts_with(&self.paths.node_tests) {
                 ("node-test:conformance".to_string(), "conformance".to_string())
             } else if let Some(pkg) = self.npm.node_of(f) {
-                let kind = if f.contains("/e2e/") { "playwright" } else { "vitest" };
+                let kind = if f.contains(&format!("/{}/", self.paths.e2e)) {
+                    "playwright"
+                } else {
+                    "vitest"
+                };
                 (format!("{kind}:{pkg}"), pkg.to_string())
             } else {
                 continue;

@@ -17,15 +17,13 @@
 //!   `paddock.ci.json`) is a step node of that app: a change to the script reaches the app's conformance step, not its tests (§6).
 
 use crate::gates::{shell, yaml};
-use paddock_repo_graph::model::extract::{BulkRead, ExtractError, Extracted, Extractor};
+use paddock_repo_graph::model::extract::{BulkRead, ExtractError, Extracted, Extractor, texts_of};
+use paddock_repo_graph::model::inputs::Paths;
 use paddock_repo_graph::model::nodes::{Edge, EdgeKind, ModelNode, NodeKind};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// The interpreters whose first non-option argument is the script they run.
 const INTERPRETERS: [&str; 7] = ["bash", "sh", "node", "pwsh", "python3", "python", "zsh"];
-
-/// The folders whose files are script nodes even before a step runs them (ADR 0117 §2).
-const SCRIPT_FOLDERS: [&str; 4] = ["conformance/ci/", "conformance/release/", "conformance/src/util/", "scripts/"];
 
 /// The script extensions.
 const SCRIPT_EXT: [&str; 7] = [".sh", ".mjs", ".cjs", ".js", ".ps1", ".py", ".ts"];
@@ -37,6 +35,8 @@ pub struct CiDecl {
     pub setup_only: BTreeSet<String>,
     /// Actions whose use makes a job a release job.
     pub release_actions: BTreeSet<String>,
+    /// The declared folders and file names (`docs/repo-graph.toml` `[paths]`): the adapter holds none.
+    pub paths: Paths,
 }
 
 /// The CI adapter.
@@ -69,14 +69,25 @@ pub fn script_id(path: &str) -> String {
     format!("script:{path}")
 }
 
-fn is_workflow(f: &str) -> bool {
-    f.starts_with(".gitea/workflows/") && (f.ends_with(".yml") || f.ends_with(".yaml")) && f.matches('/').count() == 2
+fn is_workflow(p: &Paths, f: &str) -> bool {
+    f.starts_with(&p.workflows)
+        && (f.ends_with(".yml") || f.ends_with(".yaml"))
+        && f.matches('/').count() == p.workflows.matches('/').count()
 }
 
-fn action_of(f: &str) -> Option<&str> {
-    let rest = f.strip_prefix(".gitea/actions/")?;
+fn action_of<'a>(p: &Paths, f: &'a str) -> Option<&'a str> {
+    let rest = f.strip_prefix(&p.actions)?;
     let (name, _) = rest.split_once('/')?;
     Some(name)
+}
+
+/// The folder of a local action (`<actions>/<name>`, no trailing slash).
+fn action_dir(p: &Paths, name: &str) -> String {
+    format!("{}{name}", p.actions)
+}
+
+fn in_script_folder(p: &Paths, f: &str) -> bool {
+    p.script_folders.iter().any(|d| f.starts_with(d))
 }
 
 fn is_script(f: &str) -> bool {
@@ -327,8 +338,10 @@ fn is_name(k: &str) -> bool {
 }
 
 /// The local action a `uses:` names (`./.gitea/actions/<a>`).
-fn local_action(uses: &str) -> Option<String> {
-    uses.strip_prefix("./.gitea/actions/").map(|a| a.trim_end_matches('/').to_string())
+fn local_action(p: &Paths, uses: &str) -> Option<String> {
+    uses.strip_prefix("./")
+        .and_then(|u| u.strip_prefix(&p.actions))
+        .map(|a| a.trim_end_matches('/').to_string())
 }
 
 /// The plan outputs a job's `if:` reads.
@@ -395,7 +408,7 @@ impl CiExtractor {
             let sid = format!("step:{prefix}/{i}");
             x.nodes.push(ModelNode::new(&sid, NodeKind::Step, &[]));
             x.edges.push(Edge::new(owner, &sid, EdgeKind::Uses));
-            if let Some(a) = s.get_text("uses").and_then(local_action) {
+            if let Some(a) = s.get_text("uses").and_then(|u| local_action(&self.decl.paths, u)) {
                 x.edges.push(Edge::new(&sid, action_id(&a), EdgeKind::Uses));
                 used.insert(a);
             }
@@ -431,18 +444,19 @@ impl Extractor for CiExtractor {
 
     fn extract(&self, files: &[String], read: &dyn BulkRead) -> Result<Extracted, ExtractError> {
         let tracked: BTreeSet<String> = files.iter().cloned().collect();
-        let workflows: Vec<String> = files.iter().filter(|f| is_workflow(f)).cloned().collect();
+        let paths = &self.decl.paths;
+        let workflows: Vec<String> = files.iter().filter(|f| is_workflow(paths, f)).cloned().collect();
         let actions: Vec<String> = files
             .iter()
-            .filter(|f| action_of(f).is_some() && (f.ends_with("/action.yml") || f.ends_with("/action.yaml")))
+            .filter(|f| action_of(paths, f).is_some() && (f.ends_with("/action.yml") || f.ends_with("/action.yaml")))
             .cloned()
             .collect();
         let shell_scripts: Vec<String> = files
             .iter()
-            .filter(|f| f.ends_with(".sh") && (SCRIPT_FOLDERS.iter().any(|d| f.starts_with(d)) || action_of(f).is_some()))
+            .filter(|f| f.ends_with(".sh") && (in_script_folder(paths, f) || action_of(paths, f).is_some()))
             .cloned()
             .collect();
-        let contracts: Vec<String> = self.apps.iter().map(|a| format!("apps/{a}/paddock.ci.json")).collect();
+        let contracts: Vec<String> = self.apps.iter().map(|a| format!("{}{a}/{}", paths.apps, paths.contract)).collect();
         let wanted: Vec<String> = workflows
             .iter()
             .chain(&actions)
@@ -450,12 +464,8 @@ impl Extractor for CiExtractor {
             .chain(&contracts)
             .cloned()
             .collect();
-        let texts: BTreeMap<String, String> = wanted
-            .iter()
-            .cloned()
-            .zip(read.read_all(&wanted))
-            .filter_map(|(p, t)| t.map(|t| (p, t)))
-            .collect();
+        // A text that cannot be read is an error (fail closed, review P1-5); a file that is not there is skipped below.
+        let texts: BTreeMap<String, String> = texts_of("ci", read, &wanted)?;
         let bad = |file: &str, reason: String| ExtractError {
             extractor: "ci",
             file: file.to_string(),
@@ -464,26 +474,26 @@ impl Extractor for CiExtractor {
         let mut x = Extracted::default();
         let mut scripts: BTreeSet<String> = files
             .iter()
-            .filter(|f| SCRIPT_FOLDERS.iter().any(|d| f.starts_with(d)) && is_script(f))
+            .filter(|f| in_script_folder(paths, f) && is_script(f))
             .cloned()
             .collect();
         // Actions first: their own uses and runs, and their release and setup flags.
-        let mut action_names: BTreeSet<String> = files.iter().filter_map(|f| action_of(f)).map(str::to_string).collect();
+        let mut action_names: BTreeSet<String> = files.iter().filter_map(|f| action_of(paths, f)).map(str::to_string).collect();
         action_names.retain(|a| {
             tracked
                 .iter()
-                .any(|f| f.starts_with(&format!(".gitea/actions/{a}/")) && !f.ends_with(".md"))
+                .any(|f| f.starts_with(&format!("{}/", action_dir(paths, a))) && !f.ends_with(".md"))
         });
         for a in &action_names {
-            let mut n = ModelNode::new(action_id(a), NodeKind::Action, &[&format!(".gitea/actions/{a}/")]);
+            let mut n = ModelNode::new(action_id(a), NodeKind::Action, &[&format!("{}/", action_dir(paths, a))]);
             n.setup_only = self.decl.setup_only.contains(a);
             x.nodes.push(n);
         }
         for f in &actions {
             let Some(text) = texts.get(f) else { continue };
             let root = yaml::parse(text).map_err(|e| bad(f, e))?;
-            let a = action_of(f).unwrap_or_default().to_string();
-            let dir = format!(".gitea/actions/{a}");
+            let a = action_of(paths, f).unwrap_or_default().to_string();
+            let dir = action_dir(paths, &a);
             let steps = root
                 .get("runs")
                 .and_then(|r| r.get("steps"))
@@ -549,7 +559,10 @@ impl Extractor for CiExtractor {
         for c in &contracts {
             let Some(text) = texts.get(c) else { continue };
             let v: serde_json::Value = serde_json::from_str(text).map_err(|e| bad(c, e.to_string()))?;
-            let app = c.trim_start_matches("apps/").trim_end_matches("/paddock.ci.json");
+            let app = c
+                .strip_prefix(&paths.apps)
+                .and_then(|r| r.strip_suffix(&format!("/{}", paths.contract)))
+                .unwrap_or_default();
             let sid = format!("step:{c}#checks");
             let lines: Vec<&str> = v["checks"]
                 .as_array()
@@ -576,15 +589,15 @@ impl Extractor for CiExtractor {
         }
         for s in &scripts {
             // A script inside an action folder is the action's own file (the action node owns it).
-            if action_of(s).is_none() {
+            if action_of(paths, s).is_none() {
                 x.nodes.push(ModelNode::new(script_id(s), NodeKind::Script, &[s.as_str()]));
             }
             if let Some(text) = texts.get(s) {
                 let dir = s.rsplit_once('/').map(|(d, _)| d).unwrap_or("");
                 let inv = invoked(&script_dir_named(text, dir), None, &tracked, &|w| self.project_of(w));
                 for p in inv.scripts.iter().filter(|p| *p != s) {
-                    let from = if action_of(s).is_some() {
-                        action_id(action_of(s).unwrap_or_default())
+                    let from = if action_of(paths, s).is_some() {
+                        action_id(action_of(paths, s).unwrap_or_default())
                     } else {
                         script_id(s)
                     };
@@ -594,7 +607,7 @@ impl Extractor for CiExtractor {
         }
         // An edge to a script inside an action folder goes to the action.
         for e in &mut x.edges {
-            if let Some(a) = e.to.strip_prefix("script:").and_then(action_of) {
+            if let Some(a) = e.to.strip_prefix("script:").and_then(|s| action_of(paths, s)) {
                 e.to = action_id(a);
             }
         }
