@@ -2649,7 +2649,7 @@ load averages, which include the other agents and the graph train's CI.
 
 | What | Before | After | Load |
 |---|---|---|---|
-| full suite, nextest, 4 workers | 2574 passed in 328.5 s (2 slow) | see the sweep below | 15 to 33 / 18 to 22 / 18 to 20 |
+| full suite, nextest, 4 workers | 2574 passed in 328.5 s (2 slow) | 6 runs with 4 to 6 CPU burners: 5 all passed (327.6, 326.3, 542.7, 277.4, 294.4 s), 1 had one failure (`worktree::concurrent::two_adds...`, an open fix item in docs/lessons.md) | before: 15 to 33 / 18 to 22 / 18 to 20; after: started at a 15-minute load under 30 (21 to 30), peaks 57 / 48 while the train CI ran |
 | full `it` suite, plain libtest (the binary run directly, 14 threads) | stalled at 81 and at 142 finished tests; git children in disk wait 20 s to over 2 min each | 723 passed in 161 s | 19 to 25 / 21 to 22 / 24 |
 | `worktree::list_clean::clean_dry_run` after `check_c129::a_control_holds...`, plain, 1 thread | stopped at 300 s | 1.0 s (alone: 1.1 s) | 11 to 20 / 21 / 25 |
 | `os_scoped::a_new_skip_or_only_entry...` | 31.5 s | 9.4 s | about 21 to 27 / 22 to 25 |

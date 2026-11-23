@@ -3583,5 +3583,14 @@ logged with what the rule saw (ER-27). Lesson: an admission rule needs a cost, n
 - **Not done.** The temp folder still holds about a million stale entries. Removing old `x9-fixture-*` and other `paddock-*` folders
   is the user's housekeeping decision. Other suites still make temp folders that a killed run leaves behind (`paddock-isolation-*`
   about 17,000 in the sample, from the shell tests of job-isolation.sh).
+- **Open fix item: `worktree::concurrent::two_adds_of_one_path_make_it_once` lost a round with exit 1 instead of 4.** In 1 of 5 full
+  nextest runs at 4 workers under load (15-minute load 21 to 30, 4 CPU burners, sweep run 1 of fix/bounded-test-runs), round 2 ended
+  `[0, 1]`: one add won and the other failed instead of being refused. Stressed alone it passed 60 of 60 (4 workers, load about 17) and
+  120 of 120 (8 workers, 6 burners, load 31 to 37), 720 rounds in all, so the cause is not confirmed (ER-28). The test discarded both
+  programs' output, so the loser's error was lost; it now prints both outputs in the failure. Next step: read the loser's message from
+  the next failure.
+- Sweep after the fixes (fix/bounded-test-runs, Dev Mac, 4 workers, 4 CPU burners, the run starting only at a 15-minute load under 30):
+  6 full nextest runs of paddock-dev. 5 passed in full (2580 or 2587 tests, 277 to 544 s); 1 had the failure above. No slot holder
+  of ours was left after any run (3 `ci slot hold` processes after run 3, while the train's CI shared the Mac, are not attributed).
 - Class "process-wide state changed by one test reaches the others under the plain harness": 2nd instance (1st: `set_var`, ADR 0100
   amendment, 9ac185c24). Covered by the clippy bans on both and by rule 89's process per test.

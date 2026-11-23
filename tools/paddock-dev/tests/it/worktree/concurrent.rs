@@ -20,12 +20,19 @@ fn two_claims_started_together_give_exactly_one_winner() {
         let p = path.to_str().unwrap();
         let a = spawn(&fx, &["worktree", "claim", p, "--agent", "agent-A"]);
         let b = spawn(&fx, &["worktree", "claim", p, "--agent", "agent-B"]);
-        let codes: Vec<i32> = [a, b]
+        let outs: Vec<(i32, String)> = [a, b]
             .into_iter()
-            .map(|c| c.wait_with_output().unwrap().status.code().unwrap())
+            .map(|c| {
+                let o = c.wait_with_output().unwrap();
+                (
+                    o.status.code().unwrap(),
+                    format!("{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr)),
+                )
+            })
             .collect();
-        assert_eq!(codes.iter().filter(|c| **c == 0).count(), 1, "round {round}: {codes:?}");
-        assert_eq!(codes.iter().filter(|c| **c == 4).count(), 1, "round {round}: {codes:?}");
+        let codes: Vec<i32> = outs.iter().map(|(c, _)| *c).collect();
+        assert_eq!(codes.iter().filter(|c| **c == 0).count(), 1, "round {round}: {outs:?}");
+        assert_eq!(codes.iter().filter(|c| **c == 4).count(), 1, "round {round}: {outs:?}");
         let winner = fx.owner_of(&path).unwrap();
         assert!(winner == "agent-A" || winner == "agent-B");
         rounds_with_one_winner += 1;
@@ -98,12 +105,19 @@ fn two_adds_of_one_path_make_it_once() {
                 "agent-B",
             ],
         );
-        let codes: Vec<i32> = [a, b]
+        let outs: Vec<(i32, String)> = [a, b]
             .into_iter()
-            .map(|c| c.wait_with_output().unwrap().status.code().unwrap())
+            .map(|c| {
+                let o = c.wait_with_output().unwrap();
+                (
+                    o.status.code().unwrap(),
+                    format!("{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr)),
+                )
+            })
             .collect();
-        assert_eq!(codes.iter().filter(|c| **c == 0).count(), 1, "round {round}: {codes:?}");
-        assert_eq!(codes.iter().filter(|c| **c == 4).count(), 1, "round {round}: {codes:?}");
+        let codes: Vec<i32> = outs.iter().map(|(c, _)| *c).collect();
+        assert_eq!(codes.iter().filter(|c| **c == 0).count(), 1, "round {round}: {outs:?}");
+        assert_eq!(codes.iter().filter(|c| **c == 4).count(), 1, "round {round}: {outs:?}");
         let winner = fx.owner_of(&path).unwrap();
         let loser_branch = if winner == "agent-A" {
             format!("b{round}")
