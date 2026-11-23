@@ -1,0 +1,50 @@
+{
+ "rule": "category:3-test-only",
+ "probes": [
+  {
+   "file": "ui/projects/lib/src/a.spec.ts",
+   "differences": [
+    {
+     "project": "app:x",
+     "rules": "ui",
+     "model": null,
+     "category": "3-test-only",
+     "dropped": []
+    },
+    {
+     "project": "app:y",
+     "rules": "ui",
+     "model": null,
+     "category": "3-test-only",
+     "dropped": [
+      "app:y: no test target known to the model"
+     ]
+    },
+    {
+     "project": "app:z",
+     "rules": "all",
+     "model": null,
+     "category": "6-g9-half-split",
+     "dropped": [
+      "nextest:z::bin/z"
+     ]
+    },
+    {
+     "project": "ui",
+     "rules": "all",
+     "model": "tests",
+     "category": "3-test-only",
+     "dropped": []
+    }
+   ]
+  },
+  {
+   "file": "crates/a/tests/it/t.rs",
+   "differences": []
+  },
+  {
+   "file": "apps/y/app/e2e/a.e2e.ts",
+   "differences": []
+  }
+ ]
+}

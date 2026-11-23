@@ -1,0 +1,206 @@
+{
+ "rule": "category:2-6-workflow-g4-g5-g6",
+ "probes": [
+  {
+   "file": ".gitea/actions/node-caches/action.yml",
+   "differences": [
+    {
+     "project": "app:y",
+     "rules": "all",
+     "model": null,
+     "category": "2-6-workflow-g4-g5-g6",
+     "dropped": [
+      "app:y: no test target known to the model"
+     ]
+    },
+    {
+     "project": "app:z",
+     "rules": "all",
+     "model": null,
+     "category": "2-6-workflow-g4-g5-g6",
+     "dropped": [
+      "nextest:z::bin/z"
+     ]
+    },
+    {
+     "project": "c99",
+     "rules": "all",
+     "model": null,
+     "category": "2-6-workflow-g4-g5-g6",
+     "dropped": [
+      "c99: no test target known to the model"
+     ]
+    },
+    {
+     "project": "ci-image",
+     "rules": "all",
+     "model": null,
+     "category": "2-6-workflow-g4-g5-g6",
+     "dropped": [
+      "ci-image: no test target known to the model"
+     ]
+    },
+    {
+     "project": "crates",
+     "rules": "all",
+     "model": null,
+     "category": "2-6-workflow-g4-g5-g6",
+     "dropped": [
+      "nextest:fx-a",
+      "nextest:fx-b"
+     ]
+    },
+    {
+     "project": "eslint",
+     "rules": "all",
+     "model": null,
+     "category": "2-6-workflow-g4-g5-g6",
+     "dropped": [
+      "eslint: no test target known to the model"
+     ]
+    },
+    {
+     "project": "icons",
+     "rules": "all",
+     "model": null,
+     "category": "2-6-workflow-g4-g5-g6",
+     "dropped": [
+      "icons: no test target known to the model"
+     ]
+    },
+    {
+     "project": "paddock-dev",
+     "rules": "all",
+     "model": null,
+     "category": "2-6-workflow-g4-g5-g6",
+     "dropped": [
+      "paddock-dev: no test target known to the model"
+     ]
+    },
+    {
+     "project": "tools",
+     "rules": "all",
+     "model": null,
+     "category": "2-6-workflow-g4-g5-g6",
+     "dropped": [
+      "tools: no test target known to the model"
+     ]
+    },
+    {
+     "project": "ui",
+     "rules": "all",
+     "model": null,
+     "category": "2-6-workflow-g4-g5-g6",
+     "dropped": [
+      "vitest:ui"
+     ]
+    }
+   ]
+  },
+  {
+   "file": ".gitea/workflows/nightly.yml",
+   "differences": [
+    {
+     "project": "app:x",
+     "rules": "all",
+     "model": null,
+     "category": "2-6-workflow-g4-g5-g6",
+     "dropped": [
+      "nextest:x::bin/x"
+     ]
+    },
+    {
+     "project": "app:y",
+     "rules": "all",
+     "model": null,
+     "category": "2-6-workflow-g4-g5-g6",
+     "dropped": [
+      "app:y: no test target known to the model"
+     ]
+    },
+    {
+     "project": "app:z",
+     "rules": "all",
+     "model": null,
+     "category": "2-6-workflow-g4-g5-g6",
+     "dropped": [
+      "nextest:z::bin/z"
+     ]
+    },
+    {
+     "project": "c99",
+     "rules": "all",
+     "model": null,
+     "category": "2-6-workflow-g4-g5-g6",
+     "dropped": [
+      "c99: no test target known to the model"
+     ]
+    },
+    {
+     "project": "ci-image",
+     "rules": "all",
+     "model": null,
+     "category": "2-6-workflow-g4-g5-g6",
+     "dropped": [
+      "ci-image: no test target known to the model"
+     ]
+    },
+    {
+     "project": "crates",
+     "rules": "all",
+     "model": null,
+     "category": "2-6-workflow-g4-g5-g6",
+     "dropped": [
+      "nextest:fx-a",
+      "nextest:fx-b"
+     ]
+    },
+    {
+     "project": "eslint",
+     "rules": "all",
+     "model": null,
+     "category": "2-6-workflow-g4-g5-g6",
+     "dropped": [
+      "eslint: no test target known to the model"
+     ]
+    },
+    {
+     "project": "icons",
+     "rules": "all",
+     "model": null,
+     "category": "2-6-workflow-g4-g5-g6",
+     "dropped": [
+      "icons: no test target known to the model"
+     ]
+    },
+    {
+     "project": "paddock-dev",
+     "rules": "all",
+     "model": null,
+     "category": "2-6-workflow-g4-g5-g6",
+     "dropped": [
+      "paddock-dev: no test target known to the model"
+     ]
+    },
+    {
+     "project": "tools",
+     "rules": "all",
+     "model": null,
+     "category": "2-6-workflow-g4-g5-g6",
+     "dropped": [
+      "tools: no test target known to the model"
+     ]
+    },
+    {
+     "project": "ui",
+     "rules": "all",
+     "model": null,
+     "category": "2-6-workflow-g4-g5-g6",
+     "dropped": [
+      "vitest:ui"
+     ]
+    }
+   ]
+  }
+ ]
+}

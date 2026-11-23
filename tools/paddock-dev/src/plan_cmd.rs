@@ -159,6 +159,16 @@ pub fn command(args: &[String], root: Option<PathBuf>) -> Result<Report, CliErro
         };
         return Ok(Report::new(serde_json::json!({ "output": text }), text));
     }
+    if args.first().is_some_and(|a| a == "--replay") {
+        return replay(
+            &root,
+            args.get(1).map(String::as_str),
+            args.get(2).filter(|a| *a == "--out").and_then(|_| args.get(3)).map(PathBuf::from),
+        );
+    }
+    if args.first().is_some_and(|a| a == "--hash") {
+        return hash(&root, args.get(1).map(String::as_str));
+    }
     let a = parse_args(args).map_err(fail)?;
     if let Some(id) = a.since_run {
         let plan = read_since_run(&root, &env, id).map_err(fail)?;
@@ -188,13 +198,85 @@ pub fn command(args: &[String], root: Option<PathBuf>) -> Result<Report, CliErro
     let (graph, plan) = plan_with_graph(&root, &history, &req).map_err(|e| fail(e.to_string()))?;
     if compare {
         // The migration net (ADR 0117 §8): the model's answer beside the rule tables', which still decide the plan.
-        let (_, reached) = crate::repo_model::reach_for(&root, &history, &req, &graph).map_err(fail)?;
-        let inputs = crate::repo_inputs::load(&root).map_err(fail)?;
-        let smoke = crate::repo_model::decl::smoke_declared(&crate::repo_model::decl::load(&root, &graph, &inputs).map_err(fail)?);
-        let v = crate::repo_model::compare(&plan, &reached, &graph, &inputs, &smoke);
+        let world = crate::repo_model::build_world(&root, &history, &graph, req.base.as_ref().map(|_| req.head.as_str())).map_err(fail)?;
+        let changed = crate::repo_model::changed_files(&history, &req).map_err(fail)?;
+        let reached = crate::repo_model::reach_in(&world, &root, &req, &changed, &graph);
+        let v = crate::repo_model::compare_targets(&plan, &reached, &graph, &world);
         return Ok(Report::new(v.clone(), serde_json::to_string_pretty(&v).unwrap_or_default()));
     }
     Ok(Report::new(plan.clone(), plan.to_string()))
+}
+
+/// `dev plan --replay <from>..<to>`: every non-merge commit of the range planned against its parent by the rule tables and by the
+/// model, the differences with their category (ADR 0117 §8). Exit 5 when a narrowing no category explains.
+fn replay(root: &Path, range: Option<&str>, out: Option<PathBuf>) -> Result<Report, CliError> {
+    let range = range.ok_or_else(|| fail("--replay needs a range <from>..<to>".to_string()))?;
+    let history = GitHistory::new(root, TIMEOUT);
+    let members = crate::repo_model::replay::members(root, range).map_err(fail)?;
+    let graph = crate::plan::read_graph(root, &history).map_err(|e| fail(e.to_string()))?;
+    let world = crate::repo_model::build_world(root, &history, &graph, None).map_err(fail)?;
+    let subject = |sha: &str| {
+        git_text(root, &["log", "-1", "--format=%s", sha])
+            .map(|s| s.trim().to_string())
+            .unwrap_or_default()
+    };
+    let replayed = crate::repo_model::replay::replay(root, &history, &graph, &world, &members, &subject);
+    let bad = crate::repo_model::replay::unlisted(&replayed);
+    let v = crate::repo_model::replay::to_json(&replayed);
+    if let Some(path) = out {
+        std::fs::write(&path, serde_json::to_string_pretty(&v).unwrap_or_default())
+            .map_err(|e| fail(format!("{} cannot be written: {e}", path.display())))?;
+    }
+    let (old, new) = replayed
+        .iter()
+        .fold((0.0, 0.0), |a, r| (a.0 + r.took.0.as_secs_f64(), a.1 + r.took.1.as_secs_f64()));
+    eprintln!("replay: {} commits, rule tables {old:.1} s, model {new:.1} s", replayed.len());
+    let text = format!(
+        "replayed {} commits of {range}; {} unlisted\n{}",
+        replayed.len(),
+        bad.len(),
+        bad.iter().map(|l| format!("::error::{l}")).collect::<Vec<_>>().join("\n")
+    );
+    let report = Report::new(v, text);
+    Ok(if bad.is_empty() {
+        report
+    } else {
+        report.with_exit(paddock_cli::Exit::Findings)
+    })
+}
+
+/// `dev plan --hash <node>[,<node>...]`: the input hash of model nodes (ADR 0117 §5, WP-7), one bulk read for all of them.
+fn hash(root: &Path, nodes: Option<&str>) -> Result<Report, CliError> {
+    let nodes: Vec<String> = nodes
+        .ok_or_else(|| fail("--hash needs node ids, comma separated (for example crate:crates/paddock-proc)".to_string()))?
+        .split(',')
+        .filter(|n| !n.is_empty())
+        .map(str::to_string)
+        .collect();
+    let history = GitHistory::new(root, TIMEOUT);
+    let graph = crate::plan::read_graph(root, &history).map_err(|e| fail(e.to_string()))?;
+    let world = crate::repo_model::build_world(root, &history, &graph, None).map_err(fail)?;
+    let text = |f: &str| std::fs::read_to_string(root.join(f)).ok();
+    let tree = crate::repo_model::hash::Tree {
+        files: &world.files,
+        text: &text,
+    };
+    let vars: Vec<(String, String)> = crate::process_env::vars().collect();
+    let ctx = crate::repo_model::hash::HashEnv {
+        env: &env_var,
+        vars: &vars,
+        os: std::env::consts::OS,
+    };
+    let hashes = crate::repo_model::hash::node_hashes(&crate::input_hash::Real, &ctx, root, &world, &tree, &nodes)?;
+    let lines: Vec<String> = hashes
+        .values()
+        .map(|h| format!("{} {}{}", h.hash, h.node, if h.dirty { " (uncommitted changes)" } else { "" }))
+        .collect();
+    let data: serde_json::Map<String, serde_json::Value> = hashes
+        .values()
+        .map(|h| (h.node.clone(), serde_json::json!({"hash": h.hash, "dirty": h.dirty})))
+        .collect();
+    Ok(Report::new(serde_json::Value::Object(data), lines.join("\n")))
 }
 
 /// CI: the plan for this event. Without `app`, the ci.yml job outputs and summary; with `app` (an app's own workflow),

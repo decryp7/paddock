@@ -1,0 +1,271 @@
+{
+ "rule": "OWNERS",
+ "probes": [
+  {
+   "file": "crates/a/src/lib.rs",
+   "differences": []
+  },
+  {
+   "file": "ui/projects/lib/src/lib/a.ts",
+   "differences": [
+    {
+     "project": "app:z",
+     "rules": "all",
+     "model": "ui",
+     "category": "6-g9-half-split",
+     "dropped": [
+      "nextest:z::bin/z"
+     ]
+    }
+   ]
+  },
+  {
+   "file": "eslint/src/rules/a.cjs",
+   "differences": [
+    {
+     "project": "app:z",
+     "rules": "all",
+     "model": "ui",
+     "category": "6-g9-half-split",
+     "dropped": [
+      "nextest:z::bin/z"
+     ]
+    }
+   ]
+  },
+  {
+   "file": "conformance/src/a.mjs",
+   "differences": [
+    {
+     "project": "app:x",
+     "rules": "all",
+     "model": null,
+     "category": "4-conformance-split-g8",
+     "dropped": [
+      "nextest:x::bin/x"
+     ]
+    },
+    {
+     "project": "app:y",
+     "rules": "all",
+     "model": null,
+     "category": "4-conformance-split-g8",
+     "dropped": [
+      "app:y: no test target known to the model"
+     ]
+    },
+    {
+     "project": "app:z",
+     "rules": "all",
+     "model": null,
+     "category": "4-conformance-split-g8",
+     "dropped": [
+      "nextest:z::bin/z"
+     ]
+    }
+   ]
+  },
+  {
+   "file": "paddock.conformance.json",
+   "differences": []
+  },
+  {
+   "file": "tools/paddock-dev/src/plan.rs",
+   "differences": []
+  },
+  {
+   "file": "dev",
+   "differences": []
+  },
+  {
+   "file": "templates/repo/about.toml",
+   "differences": [
+    {
+     "project": "app:y",
+     "rules": null,
+     "model": "all",
+     "category": "wider",
+     "dropped": []
+    },
+    {
+     "project": "app:z",
+     "rules": null,
+     "model": "all",
+     "category": "wider",
+     "dropped": []
+    },
+    {
+     "project": "paddock-dev",
+     "rules": null,
+     "model": "all",
+     "category": "wider",
+     "dropped": []
+    }
+   ]
+  },
+  {
+   "file": "tools/heavy/src/main.rs",
+   "differences": []
+  },
+  {
+   "file": "scripts/notices.sh",
+   "differences": [
+    {
+     "project": "app:y",
+     "rules": null,
+     "model": "all",
+     "category": "wider",
+     "dropped": []
+    },
+    {
+     "project": "app:z",
+     "rules": null,
+     "model": "all",
+     "category": "wider",
+     "dropped": []
+    }
+   ]
+  },
+  {
+   "file": "icons/a.svg",
+   "differences": []
+  },
+  {
+   "file": "ci-image/Dockerfile",
+   "differences": []
+  },
+  {
+   "file": "renovate.json",
+   "differences": []
+  },
+  {
+   "file": "CODEOWNERS",
+   "differences": []
+  },
+  {
+   "file": "AGENTS.md",
+   "differences": []
+  },
+  {
+   "file": ".gitleaks.toml",
+   "differences": []
+  },
+  {
+   "file": "wiki-lint.json",
+   "differences": []
+  },
+  {
+   "file": ".claude/hooks/example.sh",
+   "differences": []
+  },
+  {
+   "file": ".claude/settings.json",
+   "differences": []
+  },
+  {
+   "file": "spikes/example/Cargo.lock",
+   "differences": [
+    {
+     "project": "app:x",
+     "rules": "all",
+     "model": null,
+     "category": "6-g3-root-folder",
+     "dropped": [
+      "nextest:x::bin/x"
+     ]
+    },
+    {
+     "project": "app:y",
+     "rules": "all",
+     "model": null,
+     "category": "6-g3-root-folder",
+     "dropped": [
+      "app:y: no test target known to the model"
+     ]
+    },
+    {
+     "project": "app:z",
+     "rules": "all",
+     "model": null,
+     "category": "6-g3-root-folder",
+     "dropped": [
+      "nextest:z::bin/z"
+     ]
+    },
+    {
+     "project": "c99",
+     "rules": "all",
+     "model": null,
+     "category": "6-g3-root-folder",
+     "dropped": [
+      "c99: no test target known to the model"
+     ]
+    },
+    {
+     "project": "ci-image",
+     "rules": "all",
+     "model": null,
+     "category": "6-g3-root-folder",
+     "dropped": [
+      "ci-image: no test target known to the model"
+     ]
+    },
+    {
+     "project": "crates",
+     "rules": "all",
+     "model": null,
+     "category": "6-g3-root-folder",
+     "dropped": [
+      "nextest:fx-a",
+      "nextest:fx-b"
+     ]
+    },
+    {
+     "project": "eslint",
+     "rules": "all",
+     "model": null,
+     "category": "6-g3-root-folder",
+     "dropped": [
+      "eslint: no test target known to the model"
+     ]
+    },
+    {
+     "project": "icons",
+     "rules": "all",
+     "model": null,
+     "category": "6-g3-root-folder",
+     "dropped": [
+      "icons: no test target known to the model"
+     ]
+    },
+    {
+     "project": "paddock-dev",
+     "rules": "all",
+     "model": null,
+     "category": "6-g3-root-folder",
+     "dropped": [
+      "paddock-dev: no test target known to the model"
+     ]
+    },
+    {
+     "project": "tools",
+     "rules": "all",
+     "model": null,
+     "category": "6-g3-root-folder",
+     "dropped": [
+      "tools: no test target known to the model"
+     ]
+    },
+    {
+     "project": "ui",
+     "rules": "all",
+     "model": null,
+     "category": "6-g3-root-folder",
+     "dropped": [
+      "vitest:ui"
+     ]
+    }
+   ]
+  }
+ ]
+}

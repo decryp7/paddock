@@ -27,13 +27,18 @@
 //! setup_only = ["setup-rust"]    # actions that stay plumbing in a release job (adding one needs the user, ADR 0117 §14)
 //! release_actions = ["tauri-bundle"]  # actions whose use makes a job a release job
 //!
+//! [hash]                         # what an input hash reads besides a node's files (ADR 0117 §5)
+//! runner_configs = ["**/.config/nextest.toml", "**/vitest.config.*", "**/playwright.config.*"]
+//! contracts = ["paddock.ci.json"]
+//! image_files = ["ci-image/VERSION"]
+//!
 //! [[owner]]                      # who owns a path no project claims
 //! paths = ["spikes/**"]
 //! node = "none"                  # none | doc | project:<id>
 //! ```
 
 use paddock_repo_graph::model::Reach;
-use paddock_repo_graph::model::inputs::{Input, Inputs, Owner, OwnerRule, Paths, ProjectDecl, Prose, Target};
+use paddock_repo_graph::model::inputs::{HashDecl, Input, Inputs, Owner, OwnerRule, Paths, ProjectDecl, Prose, Target};
 use std::path::Path;
 
 /// The inputs file, relative to the repository root.
@@ -150,7 +155,11 @@ pub fn check_apps(inputs: &Inputs, apps: &std::collections::BTreeSet<String>) ->
 
 fn read(text: &str) -> Result<Inputs, String> {
     let t: toml::Table = text.parse().map_err(|e| format!("not TOML: {e}"))?;
-    only_keys(&t, &["version", "input", "owner", "project", "paths", "prose", "ci"], "the file")?;
+    only_keys(
+        &t,
+        &["version", "input", "owner", "project", "paths", "prose", "ci", "hash"],
+        "the file",
+    )?;
     match t.get("version").and_then(toml::Value::as_integer) {
         Some(1) => {}
         other => return Err(format!("version is {other:?}, this reader knows 1")),
@@ -298,11 +307,22 @@ fn read(text: &str) -> Result<Inputs, String> {
         checkout: text_of(p, "checkout", "[paths]")?,
         root_spellings: pairs(p.get("root_spellings"), "paths.root_spellings")?,
     };
+    let hash_table = t.get("hash");
+    if let Some(h) = hash_table {
+        only_keys(table(h, "hash")?, &["runner_configs", "contracts", "image_files"], "[hash]")?;
+    }
+    let hlist = |k: &str| strings(hash_table.and_then(|p| p.get(k)), &format!("hash.{k}"));
+    let hash = HashDecl {
+        runner_configs: hlist("runner_configs")?,
+        contracts: hlist("contracts")?,
+        image_files: hlist("image_files")?,
+    };
     Ok(Inputs {
         inputs,
         owners,
         setup_only,
         release_actions,
+        hash,
         prose,
         projects,
         paths,

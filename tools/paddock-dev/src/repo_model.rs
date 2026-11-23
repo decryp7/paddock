@@ -9,7 +9,7 @@ use crate::plan::{RepoGraph, Request};
 use paddock_repo_graph::History;
 use paddock_repo_graph::model::extract::{BulkRead, ExtractError, Read};
 use paddock_repo_graph::model::inputs::Inputs;
-use paddock_repo_graph::model::{Detected, Facts, Reach, Reached, reach};
+use paddock_repo_graph::model::{Detected, Facts, Reached, reach};
 use serde_json::{Map, Value, json};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
@@ -237,47 +237,50 @@ pub struct Spawns {
     pub adapters: usize,
 }
 
-/// The model's reach for a planner request on a graph already read: the same changed files the rule tables see, the inputs file
-/// through its accessor, and every text through one batched reader, all at the requested revision (the working tree in files
-/// mode), so a replay of old commits does not depend on the checkout.
-pub fn reach_for(root: &Path, history: &dyn History, req: &Request, graph: &RepoGraph) -> Result<(Vec<String>, Reached), String> {
-    let bulk = GitBulk::new(root, req.base.as_ref().map(|_| req.head.as_str()));
-    reach_with(root, history, req, graph, &bulk).map(|(c, r, _)| (c, r))
+/// What the model is built from once per tree: the inputs file, the tracked files and the nodes and edges the adapters found, all
+/// read at one revision (the working tree in files mode). A replay of many changes against one tree builds it once
+/// ([`build_world`]) and asks [`reach_in`] per change.
+pub struct World {
+    /// The declared inputs and owners (`docs/repo-graph.toml` through its one accessor, at the tree's revision).
+    pub inputs: Inputs,
+    /// Every tracked file of the tree the model was built from.
+    pub files: Vec<String>,
+    /// The nodes and edges.
+    pub model: paddock_repo_graph::model::nodes::Model,
+    /// The projects whose contract declares a smoke set (`graph.smoke`).
+    pub smoke: BTreeSet<String>,
+    /// An adapter that could not read a file (the plan fails closed on them).
+    pub errors: Vec<ExtractError>,
 }
 
-/// [`reach_for`] over a given reader, with what it started.
-pub fn reach_with(
+/// The model of the tree at `head_rev` (a revision, or the working tree for `None`).
+pub fn build_world(root: &Path, history: &dyn History, graph: &RepoGraph, head_rev: Option<&str>) -> Result<World, String> {
+    let bulk = GitBulk::new(root, head_rev);
+    build_world_with(root, history, graph, head_rev, &bulk).map(|(w, _)| w)
+}
+
+/// [`build_world`] over a given reader, with the processes the adapters started.
+pub fn build_world_with(
     root: &Path,
     history: &dyn History,
-    req: &Request,
     graph: &RepoGraph,
+    head_rev: Option<&str>,
     bulk: &GitBulk,
-) -> Result<(Vec<String>, Reached, Spawns), String> {
-    let inputs = match &req.base {
-        Some(_) => {
-            let text = text_of(crate::repo_inputs::FILE, bulk.bytes_at(&req.head, crate::repo_inputs::FILE))?
-                .ok_or_else(|| format!("{} is not in {}", crate::repo_inputs::FILE, req.head))?;
+) -> Result<(World, usize), String> {
+    let inputs = match head_rev {
+        Some(head) => {
+            let text = text_of(crate::repo_inputs::FILE, bulk.bytes_at(head, crate::repo_inputs::FILE))?
+                .ok_or_else(|| format!("{} is not in {head}", crate::repo_inputs::FILE))?;
             crate::repo_inputs::parse(&text)?
         }
         None => crate::repo_inputs::load(root)?,
     };
     crate::repo_inputs::check_apps(&inputs, &graph.apps)?;
-    let files = match &req.base {
-        Some(_) => bulk.tracked_at(&req.head)?,
+    let files = match head_rev {
+        Some(head) => bulk.tracked_at(head)?,
         None => history.tracked_files().map_err(|e| e.to_string())?,
     };
-    let changed = if req.all {
-        Vec::new()
-    } else if let Some(base) = &req.base {
-        history.changed_files(base, &req.head).map_err(|e| e.to_string())?
-    } else {
-        req.files.clone()
-    };
-    let projects = projects(&inputs, graph);
-    // The changed files' texts, both sides, in one read (a failed read fails closed below).
-    let bytes = ChangedBytes::read(bulk, req, &changed);
-    let late: RefCell<Vec<ExtractError>> = RefCell::new(Vec::new());
-    // The CI adapter over the head's texts (the working tree in files mode), and the jobs a workflow edit changed (G5).
+    // The CI adapter over the head's texts (the working tree in files mode).
     let adapter = ci::CiExtractor {
         apps: graph.apps.clone(),
         projects: inputs.projects.iter().map(|p| p.id.clone()).collect(),
@@ -291,7 +294,6 @@ pub fn reach_with(
     let built = paddock_repo_graph::model::extract::build(&files, bulk, &adapters);
     let mut model = built.model;
     let mut errors = built.errors;
-    errors.extend(bytes.errors());
     // The Cargo adapter (test targets and files, replaying the metadata read_graph recorded) and the code adapter (reads, script
     // imports, spec targets), which follows the imports of the scripts the CI adapter found.
     let recorded = paddock_repo_graph::RecordedMetadata(graph.metadata.clone());
@@ -309,36 +311,8 @@ pub fn reach_with(
         scripts,
         tests: decls.values().map(|d| d.tests.clone()).collect(),
         dynamic: decls.values().flat_map(|d| d.reads.clone()).collect(),
-        rev: req.base.as_ref().map(|_| req.head.clone()),
+        rev: head_rev.map(str::to_string),
         spawned: spawned.clone(),
-    };
-    // A changed file the head no longer has: the reads of the base tree name its readers (review P1-3). Its tree and texts come
-    // from a reader at the base; a failed read fails closed below.
-    let tracked: BTreeSet<&String> = files.iter().collect();
-    let deleted: BTreeSet<String> = changed.iter().filter(|f| !tracked.contains(f)).cloned().collect();
-    let base_reads = match (&req.base, deleted.is_empty()) {
-        (Some(base), false) => {
-            let base_bulk = GitBulk::new(root, Some(base));
-            base_bulk
-                .tracked_at(base)
-                .map_err(|e| ExtractError {
-                    extractor: "code",
-                    file: format!("the tree of {base}"),
-                    reason: e,
-                })
-                .and_then(|base_files| {
-                    let base_files: BTreeSet<String> = base_files.into_iter().collect();
-                    code_adapter.base_reads(base, &base_files, &base_bulk, &deleted)
-                })
-        }
-        _ => Ok(Default::default()),
-    };
-    let base_reads = match base_reads {
-        Ok(x) => x,
-        Err(e) => {
-            errors.push(e);
-            Default::default()
-        }
     };
     let mut second: Vec<Box<dyn paddock_repo_graph::model::extract::Extractor + '_>> = vec![Box::new(code_adapter)];
     if !graph.metadata.is_empty() {
@@ -360,15 +334,127 @@ pub fn reach_with(
     for u in more.model.unresolved() {
         model.add_unresolved(u.clone());
     }
-    for n in base_reads.nodes {
-        if model.node(&n.id).is_none() {
-            model.add_node(n);
-        }
-    }
-    for e in base_reads.edges {
-        model.add_edge(e);
-    }
     errors.extend(more.errors);
+    let world = World {
+        inputs,
+        files,
+        model,
+        smoke: decl::smoke_declared(&decls),
+        errors,
+    };
+    Ok((world, spawned.get()))
+}
+
+/// The model's reach for a planner request on a graph already read: the same changed files the rule tables see, the inputs file
+/// through its accessor, and every text through one batched reader, all at the requested revision (the working tree in files
+/// mode), so a replay of old commits does not depend on the checkout.
+pub fn reach_for(root: &Path, history: &dyn History, req: &Request, graph: &RepoGraph) -> Result<(Vec<String>, Reached), String> {
+    let bulk = GitBulk::new(root, req.base.as_ref().map(|_| req.head.as_str()));
+    reach_with(root, history, req, graph, &bulk).map(|(c, r, _)| (c, r))
+}
+
+/// [`reach_for`] over a given reader, with what it started: the world and the change read through the same reader.
+pub fn reach_with(
+    root: &Path,
+    history: &dyn History,
+    req: &Request,
+    graph: &RepoGraph,
+    bulk: &GitBulk,
+) -> Result<(Vec<String>, Reached, Spawns), String> {
+    let (world, adapters) = build_world_with(root, history, graph, req.base.as_ref().map(|_| req.head.as_str()), bulk)?;
+    let changed = changed_files(history, req)?;
+    let (reached, base_spawns) = reach_in_with(&world, root, req, &changed, graph, bulk);
+    let spawns = Spawns {
+        reader: bulk.starts(),
+        adapters: adapters + base_spawns,
+    };
+    Ok((changed, reached, spawns))
+}
+
+/// The changed files of a request: none for `all`, the range's files for a base, else the given files.
+pub fn changed_files(history: &dyn History, req: &Request) -> Result<Vec<String>, String> {
+    Ok(if req.all {
+        Vec::new()
+    } else if let Some(base) = &req.base {
+        history.changed_files(base, &req.head).map_err(|e| e.to_string())?
+    } else {
+        req.files.clone()
+    })
+}
+
+/// The reach of `changed` (a request's files) in a built [`World`]: the texts before and after come from `req`'s base and head,
+/// read once for the whole set; a failed read fails closed.
+pub fn reach_in(world: &World, root: &Path, req: &Request, changed: &[String], graph: &RepoGraph) -> Reached {
+    let bulk = GitBulk::new(root, req.base.as_ref().map(|_| req.head.as_str()));
+    reach_in_with(world, root, req, changed, graph, &bulk).0
+}
+
+/// [`reach_in`] over a given reader, with the processes the base reads started.
+fn reach_in_with(world: &World, root: &Path, req: &Request, changed: &[String], graph: &RepoGraph, bulk: &GitBulk) -> (Reached, usize) {
+    let World {
+        inputs,
+        files,
+        model,
+        errors: world_errors,
+        ..
+    } = world;
+    let projects = projects(inputs, graph);
+    let mut errors: Vec<ExtractError> = world_errors.clone();
+    // The changed files' texts, both sides, in one read (a failed read fails closed below).
+    let bytes = ChangedBytes::read(bulk, req, changed);
+    errors.extend(bytes.errors());
+    let late: RefCell<Vec<ExtractError>> = RefCell::new(Vec::new());
+    // A changed file the head no longer has: the reads of the base tree name its readers (review P1-3). Its tree and texts come
+    // from a reader at the base; a failed read fails closed below.
+    let tracked: BTreeSet<&String> = files.iter().collect();
+    let deleted: BTreeSet<String> = changed.iter().filter(|f| !tracked.contains(f)).cloned().collect();
+    let spawned: std::rc::Rc<std::cell::Cell<usize>> = Default::default();
+    let base_reads = match (&req.base, deleted.is_empty()) {
+        (Some(base), false) => {
+            let reader = code::CodeExtractor {
+                root: root.to_path_buf(),
+                cargo: graph.cargo.clone(),
+                npm: graph.npm.clone(),
+                scripts: BTreeSet::new(),
+                tests: Vec::new(),
+                dynamic: BTreeMap::new(),
+                rev: Some(base.clone()),
+                spawned: spawned.clone(),
+            };
+            let base_bulk = GitBulk::new(root, Some(base));
+            base_bulk
+                .tracked_at(base)
+                .map_err(|e| ExtractError {
+                    extractor: "code",
+                    file: format!("the tree of {base}"),
+                    reason: e,
+                })
+                .and_then(|base_files| {
+                    let base_files: BTreeSet<String> = base_files.into_iter().collect();
+                    reader.base_reads(base, &base_files, &base_bulk, &deleted)
+                })
+        }
+        _ => Ok(Default::default()),
+    };
+    // The world's model, with the base reads' nodes and edges when the change deleted a read target (a copy only then).
+    let mut with_base: Option<paddock_repo_graph::model::nodes::Model> = None;
+    match base_reads {
+        Ok(x) if !x.nodes.is_empty() || !x.edges.is_empty() => {
+            let mut m = model.clone();
+            for n in x.nodes {
+                if m.node(&n.id).is_none() {
+                    m.add_node(n);
+                }
+            }
+            for e in x.edges {
+                m.add_edge(e);
+            }
+            with_base = Some(m);
+        }
+        Ok(_) => {}
+        Err(e) => errors.push(e),
+    }
+    let model = with_base.as_ref().unwrap_or(model);
     let mut seeds: Vec<(String, String, String)> = Vec::new();
     for f in changed
         .iter()
@@ -410,13 +496,13 @@ pub fn reach_with(
         cargo: &graph.cargo,
         npm: &graph.npm,
         projects: &projects,
-        files: &files,
+        files,
         detect: Some(&detect),
-        model: Some(&model),
+        model: Some(model),
         seeds: &seeds,
     };
     let text = |f: &str| (bytes.text(&bytes.before, f, &late), bytes.text(&bytes.after, f, &late));
-    let mut reached = reach(&changed, &facts, &inputs, &text);
+    let mut reached = reach(changed, &facts, inputs, &text);
     errors.extend(late.into_inner());
     // An adapter that cannot read a file fails closed (ADR 0117 §2, review round 2 P2-6).
     if !errors.is_empty() {
@@ -437,11 +523,7 @@ pub fn reach_with(
                 .insert(id.clone(), paddock_repo_graph::model::NodeReach::full("everything (no base)"));
         }
     }
-    let spawns = Spawns {
-        reader: bulk.starts(),
-        adapters: spawned.get(),
-    };
-    Ok((changed, reached, spawns))
+    (reached, spawned.get())
 }
 
 /// The plan key of a project id (`paddock-dev` is `paddockDev`, `ci-image` is `ciImage`); apps are listed under `apps`.
@@ -490,25 +572,39 @@ fn old_runs(plan: &Value, inputs: &Inputs, graph: &RepoGraph) -> BTreeMap<String
     out
 }
 
-/// The model's answer in the same shape: every project reached above `docs`, with its halves. Conformance is in every plan on both
+/// The model's answer in the same shape: what the selection runs for every project (ADR 0117 §5), with its halves: `all` (or an
+/// app's `rust`/`ui` half) for the whole suite, else the parts of the union, joined by `+`: `release` (the installers), `smoke` (the
+/// declared smoke set), `tests` (the reached test targets), `phases:<a,b>` (contract phases). Conformance is in every plan on both
 /// sides (a planner output fact, not a reach).
-fn new_runs(reached: &Reached) -> BTreeMap<String, String> {
-    let mut out: BTreeMap<String, String> = reached
-        .nodes
-        .iter()
-        .filter(|(id, n)| n.reach > Reach::Docs && id.as_str() != "docs")
-        .map(|(id, n)| {
-            // Less than full is named by what the selection will run (ADR 0117 §5): the smoke set, the reached tests, installers.
-            let h = match n.reach {
-                Reach::Plumbing => "smoke",
-                Reach::Test => "tests",
-                Reach::Release => "release",
-                _ if id.starts_with("app:") => halves_of(n.rust, n.ui),
-                _ => "all",
-            };
-            (id.clone(), h.to_string())
-        })
-        .collect();
+fn new_runs(reached: &Reached, smoke: &BTreeSet<String>) -> BTreeMap<String, String> {
+    let mut out = BTreeMap::new();
+    for (id, s) in paddock_repo_graph::model::selection(reached, smoke) {
+        if id == "docs" || s.skip() {
+            continue;
+        }
+        let h = if s.full {
+            match reached.nodes.get(&id) {
+                Some(n) if id.starts_with("app:") && !reached.everything => halves_of(n.rust, n.ui).to_string(),
+                _ => "all".to_string(),
+            }
+        } else {
+            let mut parts: Vec<String> = Vec::new();
+            if s.installers {
+                parts.push("release".into());
+            }
+            if s.smoke {
+                parts.push("smoke".into());
+            }
+            if !s.affected.is_empty() {
+                parts.push("tests".into());
+            }
+            if !s.phases.is_empty() {
+                parts.push(format!("phases:{}", s.phases.iter().cloned().collect::<Vec<_>>().join(",")));
+            }
+            parts.join("+")
+        };
+        out.insert(id, h);
+    }
     // A project reached only through its contract phases runs those phases (difference 4 of §8).
     for (id, phases) in &reached.phases {
         out.entry(id.clone())
@@ -522,7 +618,7 @@ fn new_runs(reached: &Reached) -> BTreeMap<String, String> {
 /// the projects the model runs less of (ADR 0117 §8: a narrowing names what it no longer runs).
 pub fn compare(plan: &Value, reached: &Reached, graph: &RepoGraph, inputs: &Inputs, smoke: &BTreeSet<String>) -> Value {
     let old = old_runs(plan, inputs, graph);
-    let new = new_runs(reached);
+    let new = new_runs(reached, smoke);
     let mut differences = Vec::new();
     let mut dropped = Vec::new();
     let ids: BTreeSet<&String> = old.keys().chain(new.keys()).collect();
@@ -531,10 +627,10 @@ pub fn compare(plan: &Value, reached: &Reached, graph: &RepoGraph, inputs: &Inpu
         if o == n {
             continue;
         }
+        // Anything but a whole suite or a half (`smoke`, `tests`, `release`, `phases:..` and their unions) runs less than any rule.
         let narrower = match (o.map(String::as_str), n.map(String::as_str)) {
             (Some(_), None) => true,
-            (Some(_), Some("smoke" | "tests" | "release")) => true,
-            (Some(_), Some(h)) if h.starts_with("phases:") => true,
+            (Some(_), Some(h)) if !matches!(h, "all" | "rust" | "ui") => true,
             (Some("all"), Some(h)) => h != "all",
             _ => false,
         };
@@ -622,10 +718,77 @@ pub fn project_dir_of(inputs: &Inputs, graph: &RepoGraph, id: &str) -> Option<St
         .filter(|d| !d.is_empty())
 }
 
+/// The test targets of a project: the target nodes whose home folder the project owns (the deepest project folder wins, so
+/// `tools/paddock-dev` is not part of `tools`).
+fn targets_of(model: &paddock_repo_graph::model::nodes::Model, projects: &[(String, String)], id: &str) -> BTreeSet<String> {
+    use paddock_repo_graph::model::nodes::NodeKind;
+    model
+        .nodes()
+        .filter(|n| n.kind == NodeKind::TestTarget)
+        .filter(|n| {
+            let Some(home) = n.home.as_deref() else { return false };
+            let owner = projects
+                .iter()
+                .filter(|(_, dir)| !dir.is_empty() && (home == dir || home.strip_prefix(dir.as_str()).is_some_and(|r| r.starts_with('/'))))
+                .max_by_key(|(_, dir)| dir.len());
+            owner.is_some_and(|(p, _)| p == id)
+        })
+        .map(|n| n.id.clone())
+        .collect()
+}
+
+/// The targets a run label names for a project: `all` every target, `rust` the nextest ones, `ui` the others, `tests` the reached
+/// ones. `smoke` and `release` name no enumerable target: every target of the project counts as dropped by them.
+fn run_targets(label: Option<&str>, all: &BTreeSet<String>, reached: &Reached, id: &str) -> BTreeSet<String> {
+    // A union (`release+smoke`) runs the targets of each of its parts.
+    let mut out = BTreeSet::new();
+    for part in label.into_iter().flat_map(|l| l.split('+')) {
+        match part {
+            "all" => out.extend(all.iter().cloned()),
+            "rust" => out.extend(all.iter().filter(|t| t.starts_with("nextest:")).cloned()),
+            "ui" => out.extend(all.iter().filter(|t| !t.starts_with("nextest:")).cloned()),
+            "tests" => out.extend(reached.targets.get(id).cloned().unwrap_or_default()),
+            _ => {}
+        }
+    }
+    out
+}
+
+/// [`compare`] plus `droppedTargets`: for every project the model selects less of, the targets it no longer runs (ADR 0117 §8,
+/// `--compare` prints what a narrowing drops). A project with no test target the model knows names itself, so no narrowing is silent.
+pub fn compare_targets(plan: &Value, reached: &Reached, graph: &RepoGraph, world: &World) -> Value {
+    let (inputs, smoke, model) = (&world.inputs, &world.smoke, &world.model);
+    let mut out = compare(plan, reached, graph, inputs, smoke);
+    let old = old_runs(plan, inputs, graph);
+    let new = new_runs(reached, smoke);
+    let projects = projects(inputs, graph);
+    let mut dropped = Map::new();
+    for id in out["dropped"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .iter()
+        .filter_map(Value::as_str)
+    {
+        let all = targets_of(model, &projects, id);
+        let ran = run_targets(old.get(id).map(String::as_str), &all, reached, id);
+        let runs = run_targets(new.get(id).map(String::as_str), &all, reached, id);
+        let mut gone: Vec<String> = ran.difference(&runs).cloned().collect();
+        if gone.is_empty() && all.is_empty() {
+            gone.push(format!("{id}: no test target known to the model"));
+        }
+        dropped.insert(id.to_string(), json!(gone));
+    }
+    out["droppedTargets"] = Value::Object(dropped);
+    out
+}
+
 pub mod ci;
 pub mod code;
 pub mod decl;
+pub mod hash;
 pub mod reads;
+pub mod replay;
 pub mod ts;
 
 #[cfg(test)]

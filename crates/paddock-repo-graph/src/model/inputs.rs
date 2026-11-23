@@ -107,6 +107,8 @@ pub struct Inputs {
     pub setup_only: Vec<String>,
     /// Local actions whose use makes a job a release job (bundling, signing, publishing).
     pub release_actions: Vec<String>,
+    /// What an input hash adds beyond a node's own files (ADR 0117 §5, WP-7).
+    pub hash: HashDecl,
     /// What counts as prose (review round 3, P1-A).
     pub prose: Prose,
     /// The projects: the plan's project keys with their folders (`[[project]]`).
@@ -146,6 +148,17 @@ pub struct Paths {
     pub checkout: String,
     /// The spellings of the repository root in a step, `(from, to)`, replaced in order so a path under the root resolves.
     pub root_spellings: Vec<(String, String)>,
+}
+
+/// The files an input hash reads besides a node's own (ADR 0117 §5): the runner configurations, the contracts, the CI image.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct HashDecl {
+    /// Globs of the nextest, Vitest and Playwright configuration files that select and run a node.
+    pub runner_configs: Vec<String>,
+    /// Globs of the contracts whose command lines run a node's phases.
+    pub contracts: Vec<String>,
+    /// The files that pin the CI image (its version and its Dockerfile).
+    pub image_files: Vec<String>,
 }
 
 /// What counts as prose (ADR 0117 §2, review round 3 P1-A): globs over a file's name (no `/`) or path.

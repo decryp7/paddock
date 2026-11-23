@@ -1,0 +1,103 @@
+{
+ "rule": "LINT_WIRING",
+ "probes": [
+  {
+   "file": "apps/x/app/eslint.config.js",
+   "differences": [
+    {
+     "project": "app:x",
+     "rules": "ui",
+     "model": "all",
+     "category": "wider",
+     "dropped": []
+    }
+   ]
+  },
+  {
+   "file": "apps/x/app/eslint-suppressions.json",
+   "differences": [
+    {
+     "project": "app:x",
+     "rules": "ui",
+     "model": "all",
+     "category": "wider",
+     "dropped": []
+    }
+   ]
+  },
+  {
+   "file": "apps/x/app/angular.json",
+   "differences": [
+    {
+     "project": "app:x",
+     "rules": "ui",
+     "model": "all",
+     "category": "wider",
+     "dropped": []
+    }
+   ]
+  },
+  {
+   "file": "apps/x/app/package.json",
+   "differences": [
+    {
+     "project": "app:x",
+     "rules": "ui",
+     "model": "all",
+     "category": "wider",
+     "dropped": []
+    }
+   ]
+  },
+  {
+   "file": "apps/x/paddock.ci.json",
+   "differences": []
+  },
+  {
+   "file": "ui/eslint.config.js",
+   "differences": [
+    {
+     "project": "app:z",
+     "rules": "all",
+     "model": "ui",
+     "category": "6-g9-half-split",
+     "dropped": [
+      "nextest:z::bin/z"
+     ]
+    }
+   ]
+  },
+  {
+   "file": "ui/paddock.ci.json",
+   "differences": [
+    {
+     "project": "app:z",
+     "rules": "all",
+     "model": "ui",
+     "category": "6-g9-half-split",
+     "dropped": [
+      "nextest:z::bin/z"
+     ]
+    }
+   ]
+  },
+  {
+   "file": "ui/package.json",
+   "differences": [
+    {
+     "project": "app:z",
+     "rules": "all",
+     "model": "ui",
+     "category": "6-g9-half-split",
+     "dropped": [
+      "nextest:z::bin/z"
+     ]
+    }
+   ]
+  },
+  {
+   "file": "apps/x/app/tsconfig.json",
+   "differences": []
+  }
+ ]
+}

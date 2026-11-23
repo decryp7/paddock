@@ -1,0 +1,54 @@
+[
+ {
+  "rule": "guards_changed",
+  "case": "an ignore is added",
+  "answer": true
+ },
+ {
+  "rule": "guards_changed",
+  "case": "an ignore moves to another test",
+  "answer": true
+ },
+ {
+  "rule": "guards_changed",
+  "case": "no guard changes",
+  "answer": false
+ },
+ {
+  "rule": "guards_changed",
+  "case": "a file is deleted",
+  "answer": true
+ },
+ {
+  "rule": "lock_diff",
+  "case": "a package version changes",
+  "answer": []
+ },
+ {
+  "rule": "lock_diff",
+  "case": "the lock is unchanged",
+  "answer": []
+ },
+ {
+  "rule": "lock_diff",
+  "case": "no lock before",
+  "answer": [
+   "ui"
+  ]
+ },
+ {
+  "rule": "attributes",
+  "case": "an eol attribute changes",
+  "answer": "Patterns([\"*.sh\"])"
+ },
+ {
+  "rule": "attributes",
+  "case": "only a merge driver changes",
+  "answer": "Patterns([])"
+ },
+ {
+  "rule": "attributes",
+  "case": "only a comment changes",
+  "answer": "Patterns([])"
+ }
+]

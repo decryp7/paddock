@@ -284,6 +284,30 @@ pub struct InputHash {
     pub inputs: Vec<String>,
 }
 
+/// The toolchain half of every hash this module builds: the `commit-hash:` and `release:` lines of the `rustc` cargo will use, run in
+/// `cwd`, and [`flag_lines`] (the hashed environment variables and a digest of each cargo config). The tool's own hash and the
+/// repository model's node hashes (ADR 0117 §5) share it.
+pub fn toolchain(
+    exec: &dyn Exec,
+    env: &dyn Fn(&str) -> Option<String>,
+    vars: &[(String, String)],
+    root: &Path,
+    cwd: &Path,
+) -> Result<(String, String), CliError> {
+    let configs: Vec<String> = config_files(root, env)
+        .iter()
+        .filter_map(|p| std::fs::read_to_string(p).ok())
+        .collect();
+    let rustc = resolve_rustc(env, &configs);
+    let compiler = compiler_lines(&exec.run(&rustc, &["-vV"], cwd, None)?);
+    let digests = configs
+        .iter()
+        .filter(|c| !only_names_build_folder(c))
+        .map(|c| config_digest(exec, root, c))
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok((compiler, flag_lines(vars, &digests)))
+}
+
 /// Computes the hash for the repository at `root`.
 pub fn compute(
     exec: &dyn Exec,
@@ -308,21 +332,10 @@ pub fn compute_for(
         CliError::failure(format!("{tool_dir}/inputs.txt could not be read: {e}.")).with_hint("Run ./dev inside the Paddock repository.")
     })?;
     let inputs = parse_inputs(&list)?;
-    let configs: Vec<String> = config_files(root, env)
-        .iter()
-        .filter_map(|p| std::fs::read_to_string(p).ok())
-        .collect();
-    let rustc = resolve_rustc(env, &configs);
-    let compiler = compiler_lines(&exec.run(&rustc, &["-vV"], &tool, None)?);
+    let (compiler, flags) = toolchain(exec, env, vars, root, &tool)?;
     let mut git_args: Vec<&str> = vec!["ls-tree", "HEAD", "--"];
     git_args.extend(inputs.iter().map(String::as_str));
     let tree = exec.run("git", &git_args, root, None)?;
-    let digests = configs
-        .iter()
-        .filter(|c| !only_names_build_folder(c))
-        .map(|c| config_digest(exec, root, c))
-        .collect::<Result<Vec<_>, _>>()?;
-    let flags = flag_lines(vars, &digests);
     let hash = exec
         .run(
             "git",

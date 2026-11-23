@@ -1,0 +1,91 @@
+{
+ "rule": "C99_INPUT",
+ "probes": [
+  {
+   "file": "crates/a/Cargo.toml",
+   "differences": []
+  },
+  {
+   "file": "apps/x/Cargo.lock",
+   "differences": []
+  },
+  {
+   "file": "apps/x/app/src-tauri/src/main.rs",
+   "differences": []
+  },
+  {
+   "file": "crates/a/src/lib.rs",
+   "differences": []
+  },
+  {
+   "file": "apps/x/app/src/app/app.component.ts",
+   "differences": []
+  },
+  {
+   "file": "ui/projects/lib/src/public-api.ts",
+   "differences": [
+    {
+     "project": "app:z",
+     "rules": "all",
+     "model": "ui",
+     "category": "6-g9-half-split",
+     "dropped": [
+      "nextest:z::bin/z"
+     ]
+    }
+   ]
+  },
+  {
+   "file": "apps/x/app/src-tauri/capabilities/main.json",
+   "differences": []
+  },
+  {
+   "file": "apps/x/paddock.ci.json",
+   "differences": []
+  },
+  {
+   "file": "conformance/src/checks/C99-no-keychain.mjs",
+   "differences": [
+    {
+     "project": "app:x",
+     "rules": "all",
+     "model": null,
+     "category": "4-conformance-split-g8",
+     "dropped": [
+      "nextest:x::bin/x"
+     ]
+    },
+    {
+     "project": "app:y",
+     "rules": "all",
+     "model": null,
+     "category": "4-conformance-split-g8",
+     "dropped": [
+      "app:y: no test target known to the model"
+     ]
+    },
+    {
+     "project": "app:z",
+     "rules": "all",
+     "model": null,
+     "category": "4-conformance-split-g8",
+     "dropped": [
+      "nextest:z::bin/z"
+     ]
+    }
+   ]
+  },
+  {
+   "file": ".cargo/config.toml",
+   "differences": []
+  },
+  {
+   "file": "paddock.waivers.toml",
+   "differences": []
+  },
+  {
+   "file": "docs/overview.md",
+   "differences": []
+  }
+ ]
+}

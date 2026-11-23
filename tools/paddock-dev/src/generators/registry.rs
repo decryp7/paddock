@@ -46,8 +46,12 @@ pub struct Generator {
     pub regenerate: String,
     /// The folder the commands run in, relative to the repository root.
     pub cwd: String,
-    /// Paths that mark it: a change to any of them (an input or an output) makes the check due.
+    /// Paths that mark it: a change to any of them (an input or an output) makes the check due. The hand list: what the graph
+    /// cannot derive (a lockfile, a data file); what `reads` names is not repeated here.
     pub paths: Vec<String>,
+    /// Model node ids it reads (`script:scripts/notices.sh`, `workflow:ci.yml`): the graph derives everything these import, run or
+    /// depend on, so a change to a module a script imports makes it due without a hand path (ADR 0117 §5, WP-7).
+    pub reads: Vec<String>,
     /// The files it writes: what the conformance check C116 matches generated files against. May be empty (a check only).
     pub outputs: Vec<String>,
     /// Fast or heavy.
@@ -166,6 +170,7 @@ impl Registry {
                 "manual",
                 "drift_marker",
                 "build",
+                "reads",
             ];
             for k in t.keys().filter(|k| !known.contains(&k.as_str())) {
                 errors.push(format!("{at}: unknown key `{k}` (known: {})", known.join(", ")));
@@ -202,8 +207,14 @@ impl Registry {
                 errors.push(format!("{at}: `what` is required: one line saying what it generates"));
             }
             let paths = strings_of(t, "paths");
-            if paths.is_empty() {
-                errors.push(format!("{at}: `paths` must name the paths that mark it (globs)"));
+            let reads = strings_of(t, "reads");
+            if paths.is_empty() && reads.is_empty() {
+                errors.push(format!("{at}: `paths` (globs) or `reads` (model node ids) must name what marks it"));
+            }
+            for r in reads.iter().filter(|r| !r.contains(':') || r.starts_with(':') || r.ends_with(':')) {
+                errors.push(format!(
+                    "{at}: `reads` entry {r:?} is not a model node id (`kind:name`, for example `script:scripts/notices.sh`)"
+                ));
             }
             let cost = match text_of(t, "cost").as_str() {
                 "fast" => Cost::Fast,
@@ -234,6 +245,7 @@ impl Registry {
                 regenerate,
                 cwd,
                 paths,
+                reads,
                 outputs,
                 cost,
                 requires: strings_of(t, "requires"),
@@ -476,6 +488,31 @@ cost = "fast"
         assert!(Registry::parse(&entry(r#"["cargo", "metadata", "--locked"]"#, "")).is_ok());
         assert!(Registry::parse(&entry(r#"["sh", "-c", "cargo hakari verify"]"#, "")).is_ok());
         assert!(Registry::parse(&entry(r#"["node", "x.mjs"]"#, "build = []")).is_ok());
+    }
+
+    #[test]
+    fn reads_name_model_nodes_and_stand_in_for_paths_and_a_bad_id_is_refused() {
+        let entry = |extra: &str| {
+            format!("version = 1\n[[generator]]\nid = \"a\"\nwhat = \"w\"\nregenerate = \"r\"\ncheck = [\"x\"]\ncost = \"fast\"\n{extra}\n")
+        };
+        let ok = Registry::parse(&entry("reads = [\"script:scripts/notices.sh\"]")).unwrap();
+        assert_eq!(ok.generators[0].reads, ["script:scripts/notices.sh"]);
+        assert!(ok.generators[0].paths.is_empty(), "reads alone is enough");
+        let both = Registry::parse(&entry("reads = [\"wf:ci.yml\"]\npaths = [\"a/**\"]")).unwrap();
+        assert!(both.generators[0].marks("a/b") && both.generators[0].reads == ["wf:ci.yml"]);
+        // controls: neither paths nor reads, and an id that is not `kind:name`, are refused
+        assert!(
+            Registry::parse(&entry(""))
+                .unwrap_err()
+                .join("\n")
+                .contains("`paths` (globs) or `reads`")
+        );
+        assert!(
+            Registry::parse(&entry("reads = [\"scripts/notices.sh\"]"))
+                .unwrap_err()
+                .join("\n")
+                .contains("not a model node id")
+        );
     }
 
     #[test]

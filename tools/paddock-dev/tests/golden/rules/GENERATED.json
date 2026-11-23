@@ -1,0 +1,93 @@
+{
+ "rule": "GENERATED",
+ "probes": [
+  {
+   "file": "ui/projects/lib/shell/generated/dialogs.ts",
+   "differences": [
+    {
+     "project": "app:x",
+     "rules": "all",
+     "model": "ui",
+     "category": "6-generated-input",
+     "dropped": [
+      "nextest:x::bin/x"
+     ]
+    },
+    {
+     "project": "app:z",
+     "rules": "all",
+     "model": "ui",
+     "category": "6-g9-half-split",
+     "dropped": [
+      "nextest:z::bin/z"
+     ]
+    }
+   ]
+  },
+  {
+   "file": "ui/projects/lib/shell/generated/public-api.ts",
+   "differences": [
+    {
+     "project": "app:z",
+     "rules": "all",
+     "model": "ui",
+     "category": "6-g9-half-split",
+     "dropped": [
+      "nextest:z::bin/z"
+     ]
+    }
+   ]
+  },
+  {
+   "file": "ui/projects/lib/shell/generated/ng-package.json",
+   "differences": [
+    {
+     "project": "app:z",
+     "rules": "all",
+     "model": "ui",
+     "category": "6-g9-half-split",
+     "dropped": [
+      "nextest:z::bin/z"
+     ]
+    }
+   ]
+  },
+  {
+   "file": "ui/projects/lib/shell/generated/messages.json",
+   "differences": [
+    {
+     "project": "app:x",
+     "rules": "all",
+     "model": "ui",
+     "category": "6-generated-input",
+     "dropped": [
+      "nextest:x::bin/x"
+     ]
+    },
+    {
+     "project": "app:z",
+     "rules": "all",
+     "model": "ui",
+     "category": "6-g9-half-split",
+     "dropped": [
+      "nextest:z::bin/z"
+     ]
+    }
+   ]
+  },
+  {
+   "file": "ui/projects/lib/shell/hand.ts",
+   "differences": [
+    {
+     "project": "app:z",
+     "rules": "all",
+     "model": "ui",
+     "category": "6-g9-half-split",
+     "dropped": [
+      "nextest:z::bin/z"
+     ]
+    }
+   ]
+  }
+ ]
+}

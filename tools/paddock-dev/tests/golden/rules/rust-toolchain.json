@@ -1,0 +1,21 @@
+{
+ "rule": "rust-toolchain",
+ "probes": [
+  {
+   "file": "rust-toolchain.toml",
+   "differences": []
+  },
+  {
+   "file": "rust-toolchain",
+   "differences": []
+  },
+  {
+   "file": "rust-toolchain.md",
+   "differences": []
+  },
+  {
+   "file": "crates/rust-toolchain.toml",
+   "differences": []
+  }
+ ]
+}

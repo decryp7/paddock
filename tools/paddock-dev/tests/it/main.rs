@@ -49,6 +49,7 @@ mod pr;
 mod pre_push;
 mod recorded;
 mod release_isolation;
+mod repo_graph_net;
 mod safe_remove_lint;
 mod sccache_eviction;
 mod setup_rust;
