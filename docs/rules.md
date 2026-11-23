@@ -511,10 +511,15 @@ Amendments of the same date, no new number: the member gate runs each member's a
 88. **Removing an OS from a test needs the user's approval.** The record is `docs/os-removals.toml`; growth of that register is a
     finding that no waiver clears (rule 83; the check is planned in ADR 0117). *Why:* OS-scoped tests (ER-9) cut Windows time by 46%, and an OS
     dropped without a reason is a hole in the net.
-89. **Every test run goes through the bounded runner** (ER-32, ER-51): nextest with its timeout, and the same progress watchdog as
-    the push gates. Agents and CI never run plain `cargo test` or an unbounded test command, a hook steers them to the runner, and
-    a leftover child is ended by the handle its start gave back. *Why:* on 2026-11-22/23 `worktree::list_clean` hung 3.5 h and
-    `ci_isolation` 18 min under plain `cargo test --test it`, and test-spawned `ci slot hold` processes were orphaned four times.
+89. **Every test run goes through the bounded runner** (ER-32, ER-51; amended (user, 2026-11-24)): `cargo nextest run` with the
+    workspace's `.config/nextest.toml`, which gives every test a per-test timeout (`slow-timeout` with `terminate-after`) and one
+    process per test, as common practice does (nextest, Go's `go test -timeout`, Bazel's test sizes). The guard hook refuses plain
+    `cargo test` (`cargo test --doc` and `--no-run` stay allowed), and a test in tools/paddock-dev reads every CI line through the CI
+    model and fails on one. Progress comes from the job record (ADR 0118) and ADR 0119's required bounds; there is no `./dev test`
+    watchdog wrapper. A helper a test leaves running ends with its test (`paddock_env::lifeline`), and a leftover child is ended by
+    the handle its start gave back. *Why:* on 2026-11-22/23 `worktree::list_clean` hung 3.5 h and `ci_isolation` 18 min under plain
+    `cargo test --test it`: one test had moved the shared process into a temporary folder that was then removed, so every later git
+    start read the whole temp folder; and test-spawned `ci slot hold` processes were orphaned four times.
 90. **A landing may rest on a narrowed run** (ER-15, user, 2026-11-23): a smoke set or the affected tests that ran exactly the
     selection the landing's own diff planned. Such a run counts for that landing only: it is never complete for a tag or a
     release, never the base for later planning, and the nightly still runs everything. *Why:* in ADR 0117's review round 2,
