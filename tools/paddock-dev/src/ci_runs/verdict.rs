@@ -215,7 +215,19 @@ fn read_mode_plain(client: &mut Client, run: &RunInfo, scope_decisive: bool) -> 
         Err(e) => return same(Mode::Unknown(format!("the plan job's log could not be read: {e}")), jobs),
     };
     let scope = scope_mode(run, &jobs, &log);
-    let tag_refusal = run_scope::read(&log).and_then(Result::ok).and_then(|d| d.complete_for_tag().err());
+    // A scope line that cannot be read refuses a tag on either basis (final review P2-2): a tag rests only on a run whose declared
+    // scope was read and covers every OS (ER-15).
+    let tag_refusal = match run_scope::read(&log) {
+        Some(Ok(d)) => d.complete_for_tag().err(),
+        Some(Err(e)) => {
+            eprintln!(
+                "::warning::run {}: its plan job's scope line cannot be read ({e}): a tag cannot rest on it",
+                run.id
+            );
+            Some(format!("its plan job's scope line cannot be read ({e})"))
+        }
+        None => None,
+    };
     if scope_decisive {
         return ModeRead {
             tag_refusal,
@@ -345,7 +357,7 @@ pub fn verdict_with_touched_for(
 ) -> Verdict {
     match verdict_core(client, workflow, sha, exclude, scope, tag, touched) {
         Verdict::Red { run: None, reason } => {
-            let next = match last_full(client, workflow, scope, &first_parent(), touched) {
+            let next = match last_full(client, workflow, scope, tag, &first_parent(), touched) {
                 Some(last) => {
                     format!("the last fully tested commit on main is {last}: tag that one, or dispatch a full run on this commit")
                 }
@@ -482,15 +494,17 @@ pub fn first_green_scope(client: &mut Client, workflow: &str, run_id: u64) -> Re
 
 /// The last of `first_parent` that the one definition of green accepts ([`green::find_base`]): complete, and
 /// green or green with fix items, whatever the conclusion of its push run (a train's dispatch run names the commit that lands, and
-/// the pushes after it were cancelled or reused it).
+/// the pushes after it were cancelled or reused it). For a tag (`tag`) the tag rule: complete on every OS and green without fix items
+/// ([`green::find_base_for`]), so the hint never names a commit a tag would refuse (brief item 4(d)).
 fn last_full(
     client: &mut Client,
     workflow: &str,
     scope: bool,
+    tag: bool,
     first_parent: &[String],
     touched: &mut dyn FnMut(&mut Client, &str) -> Option<Touched>,
 ) -> Option<String> {
-    green::find_base(client, workflow, first_parent, scope, touched)
+    green::find_base_for(client, workflow, first_parent, scope, tag, touched)
         .ok()
         .flatten()
         .map(|b| b.sha)
@@ -680,6 +694,82 @@ mod tests {
         // Positive control: the same run with a full every-OS scope is accepted for a tag.
         let mut full = server(vec![main_push(5, "success")], &[(5, 50, Some(run_scope::TEST_COMPLETE))]);
         assert_eq!(ask_tag(&mut full), Verdict::Green { run: 5 });
+    }
+
+    #[test]
+    fn a_scope_line_that_cannot_be_read_refuses_a_tag_on_either_basis() {
+        // Final review P2-2: on the old basis the legacy line said complete=true and an unreadable scope line was dropped, so a tag
+        // could rest on a run whose declared scope nobody could read.
+        let broken = "plan scope: {not json\nplan verdict: complete=true\n";
+        let ask_tag = |f: &mut Fake, scope: bool| {
+            let mut c = Client::new(f, "https://gitea.invalid", "decryp7/paddock", "t");
+            c.backoff_ms = 0;
+            let fp: Vec<String> = Vec::new();
+            verdict_with_touched_for(&mut c, "ci.yml", SHA, None, scope, true, &mut || fp.clone(), &mut |_, _| {
+                Some(Touched::default())
+            })
+        };
+        for scope in [false, true] {
+            let mut f = server(vec![main_push(5, "success")], &[(5, 50, Some(broken))]);
+            let v = ask_tag(&mut f, scope);
+            // The old basis refuses it (red); the scope basis cannot read the run's mode at all (not measured): neither is a tag's run.
+            assert!(
+                matches!(&v, Verdict::Red { reason, .. } | Verdict::NotMeasured(reason) if reason.contains("scope line")),
+                "scope basis {scope}: {v:?}"
+            );
+        }
+        // Positive control: the same run with a readable complete line is a tag's run on the old basis.
+        let good = format!("{}plan verdict: complete=true\n", run_scope::TEST_COMPLETE);
+        let mut f = server(vec![main_push(5, "success")], &[(5, 50, Some(good.as_str()))]);
+        assert_eq!(ask_tag(&mut f, false), Verdict::Green { run: 5 });
+    }
+
+    #[test]
+    fn for_a_tag_the_last_fully_tested_commit_is_one_a_tag_can_rest_on() {
+        // Brief 4(d): the hint used the landing rule, so for a tag it named a commit whose run was OS-scoped. The commit before (e)
+        // has an OS-scoped complete run; the one before that (d) a full every-OS one.
+        let (e, d) = ("e".repeat(40), "d".repeat(40));
+        let run_of = |id: u64, sha: &str| {
+            let mut r = main_push(id, "success");
+            r["head_sha"] = json!(sha);
+            r
+        };
+        let scoped = scoped_line();
+        let mut f = server(vec![main_push(8, "success")], &[(8, 80, Some(run_scope::TEST_PARTIAL))]);
+        f.json(
+            &format!("{API}/runs?limit=50&page=1"),
+            json!({"total_count": 3, "workflow_runs": [main_push(8, "success"), run_of(6, &e), run_of(4, &d)]}),
+        );
+        for (run, sha, job, log) in [(6, &e, 60, scoped.as_str()), (4, &d, 40, run_scope::TEST_COMPLETE)] {
+            f.json(
+                &format!("{API}/runs?head_sha={sha}&limit=50&page=1"),
+                json!({"total_count": 1, "workflow_runs": [run_of(run, sha)]}),
+            );
+            f.json(
+                &format!("{API}/runs/{run}/jobs?limit=50&page=1"),
+                json!({"total_count": 2, "jobs": [{"id": job, "name": "plan (affected projects)", "conclusion": "success"}, {"id": job + 1, "name": "conformance (checks, release scripts)", "conclusion": "success"}]}),
+            );
+            f.log(job, log);
+        }
+        let ask_hint = |f: &mut Fake, tag: bool| {
+            let mut c = Client::new(f, "https://gitea.invalid", "decryp7/paddock", "t");
+            c.backoff_ms = 0;
+            let fp = vec!["e".repeat(40), "d".repeat(40)];
+            verdict_with_touched_for(&mut c, "ci.yml", SHA, None, true, tag, &mut || fp.clone(), &mut |_, _| {
+                Some(Touched::default())
+            })
+        };
+        let v = ask_hint(&mut f, true);
+        assert!(
+            matches!(&v, Verdict::Red { run: None, reason } if reason.contains(&format!("is {d}")) && !reason.contains(&e)),
+            "a tag's hint names the every-OS commit: {v:?}"
+        );
+        // Positive control: for a landing the OS-scoped commit is the last fully tested one.
+        let v = ask_hint(&mut f, false);
+        assert!(
+            matches!(&v, Verdict::Red { run: None, reason } if reason.contains(&format!("is {e}"))),
+            "{v:?}"
+        );
     }
 
     #[test]
