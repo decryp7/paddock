@@ -62,6 +62,12 @@ jobs:
           sccache-s3-secret-access-key: ${{ secrets.PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY }}
       - name: C100
         run: ./dev gates check
+      # Time-based conditions (ER-41): the scheduled job blocks on every review date that has passed, whoever touched the entry, and
+      # warns a week before the next one (`::warning::`). A push only warns about an entry it does not touch.
+      - name: C100 review dates (strict)
+        run: ./dev gates check --strict
+      - name: C100 reminders (a week ahead)
+        run: ./dev gates check --upcoming
 
   ci:
     name: everything

@@ -415,12 +415,6 @@ pub struct Problem {
 }
 
 fn stamp_problems(kind: &str, id: &str, s: &Stamp, today: Date, out: &mut Vec<Problem>) {
-    if s.review_by < today {
-        out.push(Problem {
-            message: format!("[[{kind}]] {id}: review_by {} has passed", s.review_by),
-            fix: "Fix the cause and remove the entry, or move the date with a `Gates-date:` trailer in the commit message.".into(),
-        });
-    }
     if s.since > today {
         out.push(Problem {
             message: format!("[[{kind}]] {id}: since {} is in the future", s.since),
@@ -438,9 +432,10 @@ fn stamp_problems(kind: &str, id: &str, s: &Stamp, today: Date, out: &mut Vec<Pr
     }
 }
 
-/// The rules of §3.1 that need only the register and today's date.
-pub fn check_dates(r: &Register, today: Date) -> Vec<Problem> {
-    let mut out = Vec::new();
+/// Every dated entry as `(register key, table name, display id, stamp)`, in the date history's keys. An `[[ignored]]` entry that is
+/// not `not-gated` is left out when `reviewed` is set: only the others are reviewed by their date.
+fn all_stamped(r: &Register, reviewed: bool) -> Vec<(String, &'static str, String, &Stamp)> {
+    let mut v: Vec<(String, &'static str, String, &Stamp)> = Vec::new();
     for (kind, list) in [
         ("not_gated", &r.not_gated),
         ("conditional", &r.conditional),
@@ -448,21 +443,79 @@ pub fn check_dates(r: &Register, today: Date) -> Vec<Problem> {
         ("level", &r.level),
     ] {
         for e in list {
-            stamp_problems(kind, &e.id, &e.stamp, today, &mut out);
+            let key = if e.apps.is_empty() {
+                e.id.clone()
+            } else {
+                format!("{} [{}]", e.id, e.apps.join(","))
+            };
+            v.push((key, kind, e.id.clone(), &e.stamp));
         }
     }
     for p in &r.planned {
-        stamp_problems("planned", &p.id, &p.stamp, today, &mut out);
+        v.push((p.id.clone(), "planned", p.id.clone(), &p.stamp));
+    }
+    for e in r.ignored.iter().filter(|e| !reviewed || e.gate == Gate::NotGated) {
+        v.push((e.path.clone(), "ignored", e.path.clone(), &e.stamp));
     }
     for d in &r.defects {
-        stamp_problems("defect", &d.path, &d.stamp, today, &mut out);
+        v.push((format!("defect:{}", d.path), "defect", d.path.clone(), &d.stamp));
     }
-    for e in &r.ignored {
-        if e.gate == Gate::NotGated {
-            stamp_problems("ignored", &e.path, &e.stamp, today, &mut out);
-        }
+    v
+}
+
+fn stamped(r: &Register) -> Vec<(String, &'static str, String, &Stamp)> {
+    all_stamped(r, true)
+}
+
+/// The rules of §3.1 that need only the register and today's date, except the date that has passed (see [`expired`]).
+pub fn check_dates(r: &Register, today: Date) -> Vec<Problem> {
+    let mut out = Vec::new();
+    for (_, kind, id, stamp) in stamped(r) {
+        stamp_problems(kind, &id, stamp, today, &mut out);
     }
     out
+}
+
+/// An entry whose `review_by` has passed. A time-based condition (ER-41, user 2026-11-23): it never blocks an unrelated push; the
+/// caller decides by [`crate::gates::time_based`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct Expired {
+    /// The entry's key in the register (the key of [`Register`]'s date history: `C50`, `C13 [dyno]`, `defect:<path>`).
+    pub key: String,
+    /// What is wrong.
+    pub message: String,
+    /// The next step.
+    pub fix: String,
+}
+
+/// The entries whose `review_by` is before `today`.
+pub fn expired(r: &Register, today: Date) -> Vec<Expired> {
+    stamped(r)
+        .into_iter()
+        .filter(|(_, _, _, s)| s.review_by < today)
+        .map(|(key, kind, id, s)| Expired {
+            key,
+            message: format!("[[{kind}]] {id}: review_by {} has passed", s.review_by),
+            fix: "Fix the cause and remove the entry, or move the date with a `Gates-date:` trailer in the commit message.".into(),
+        })
+        .collect()
+}
+
+/// The entries whose `review_by` falls within `days` days from `today` (today included), with the days left: the reminder a week
+/// ahead (ER-41).
+pub fn upcoming(r: &Register, today: Date, days: i64) -> Vec<(String, Date, i64)> {
+    let mut v: Vec<(String, Date, i64)> = stamped(r)
+        .into_iter()
+        .filter(|(_, _, _, s)| s.review_by >= today && s.review_by.0 - today.0 <= days)
+        .map(|(key, _, _, s)| (key, s.review_by, s.review_by.0 - today.0))
+        .collect();
+    v.sort_by_key(|(k, d, _)| (*d, k.clone()));
+    v
+}
+
+/// The stamp of every dated entry by its key, to tell which entries a change touched.
+pub fn stamps(r: &Register) -> BTreeMap<String, Stamp> {
+    all_stamped(r, false).into_iter().map(|(k, _, _, s)| (k, s.clone())).collect()
 }
 
 /// One version of the register in the history: the commit, its message and the register text.
@@ -477,31 +530,7 @@ pub struct Version {
 }
 
 fn dated(r: &Register) -> BTreeMap<String, Date> {
-    let mut m = BTreeMap::new();
-    for e in r.not_gated.iter().chain(&r.conditional).chain(&r.report_only).chain(&r.level) {
-        m.insert(
-            format!(
-                "{}{}",
-                e.id,
-                if e.apps.is_empty() {
-                    String::new()
-                } else {
-                    format!(" [{}]", e.apps.join(","))
-                }
-            ),
-            e.stamp.review_by,
-        );
-    }
-    for p in &r.planned {
-        m.insert(p.id.clone(), p.stamp.review_by);
-    }
-    for e in &r.ignored {
-        m.insert(e.path.clone(), e.stamp.review_by);
-    }
-    for d in &r.defects {
-        m.insert(format!("defect:{}", d.path), d.stamp.review_by);
-    }
-    m
+    all_stamped(r, false).into_iter().map(|(k, _, _, s)| (k, s.review_by)).collect()
 }
 
 /// Each ratchet's target release and `blocks_tag`, keyed `<id> <app>`.
@@ -872,9 +901,12 @@ approved = "user"
     fn expired_and_overlong_entries_are_problems() {
         let (r, _) = parse(GOOD);
         assert!(check_dates(&r, Date::parse("2026-11-20").unwrap()).is_empty());
-        let late = check_dates(&r, Date::parse("2026-12-07").unwrap());
+        // A date that has passed is a time-based condition (see `expired`), not a rule of check_dates.
+        assert!(check_dates(&r, Date::parse("2026-12-07").unwrap()).is_empty());
+        let late = expired(&r, Date::parse("2026-12-07").unwrap());
         assert_eq!(late.len(), 2);
         assert!(late[0].message.contains("has passed"));
+        assert!(!late[0].key.is_empty());
         let long = GOOD.replace("review_by = 2026-12-06", "review_by = 2027-02-01");
         let (r, _) = parse(&long);
         assert!(

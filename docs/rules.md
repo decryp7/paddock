@@ -19,7 +19,9 @@ changes here, every app's copy is updated in the same change.
    sleeps or raised timeouts), never silently skipped. No limit (timeout, retry, wait, budget, tolerance, cap) is
    raised without a named, measured cause recorded next to it (ER-12); otherwise the cause is fixed. A new gate, CI job or
    check starts report-only and blocks only after its first green run on the real tree, recorded by run id where the
-   gate is defined (ER-41).
+   gate is defined (ER-41). A time-based condition (a review date in docs/gates.toml, an advisory, a delete-by tag) never
+   blocks an unrelated push: a push warns, a push that touches that entry blocks, tags, releases and the scheduled job
+   block, and `./dev gates check --upcoming` reminds a week ahead (ER-41, user, 2026-11-23).
    A FLAKY test (fails, then passes on its one retry) blocks a landing only when the change touches the test itself or the
    source it exercises (its feature or module); see rule 50 (k) (ER-12, user, 2026-11-19).
    A reviewer of a bug fix runs a mutation check on it (user, 2026-10-30), in their own worktree: for Rust,

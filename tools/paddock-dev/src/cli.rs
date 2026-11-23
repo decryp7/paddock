@@ -493,7 +493,7 @@ enum GatesCommand {
     List(GatesListArgs),
     /// The globs whose files change C100's answer (the planner's inputs).
     Inputs,
-    /// Refuse a release tag while the lint-adoption ratchets of its app are not empty (nothing else of C100 can refuse it).
+    /// Refuse a release tag while the lint-adoption ratchets of its app are not empty, or while a register review date has passed (ER-41).
     Ratchet(GatesRatchetArgs),
 }
 
@@ -521,6 +521,16 @@ struct GatesCheckArgs {
     /// Print every finding but exit 0 (the rollback of ADR 0060: the model counts a --warn line as report-only).
     #[arg(long)]
     warn: bool,
+    /// Time-based conditions (a review date that has passed) block everything, as for a release tag and the scheduled job. Without
+    /// it a push warns about an expired entry it does not touch and blocks one it does (ER-41).
+    #[arg(long)]
+    strict: bool,
+    /// Only the reminders: entries whose review date falls within `--within-days` (default 7), as `::warning::` lines. Exit 0.
+    #[arg(long)]
+    upcoming: bool,
+    /// How many days ahead `--upcoming` looks.
+    #[arg(long, default_value_t = 7, requires = "upcoming")]
+    within_days: i64,
     /// The revision the register may only shrink against.
     #[arg(long, default_value = "origin/main")]
     base: String,
@@ -848,6 +858,8 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
                 root: a.root,
                 release_tag: a.release_tag,
                 warn: a.warn,
+                strict: a.strict,
+                upcoming: a.upcoming.then_some(a.within_days),
                 base: a.base,
             },
             dev_command_paths(),

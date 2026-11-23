@@ -209,7 +209,9 @@ approved = "coordinator"
 
 **3.1 Rules on the register.**
 - `not_gated`, `planned`, `conditional` and `report_only` entries need `reason`, `owner`, `since`, `review_by` and
-  `approved` (`coordinator` or `user`). A `review_by` in the past is an error; it is at most 60 days after `since`.
+  `approved` (`coordinator` or `user`). A `review_by` in the past is a time-based condition (ER-41, amended 2026-11-23): `./dev gates check` warns about it
+  on a push that does not touch the entry, and it is an error for a push that adds or changes the entry, for
+  `--release-tag`, and for `--strict` (the scheduled job); `--upcoming` lists the entries due within 7 days. It is at most 60 days after `since`.
 - **Date history.** `review_by` moves only in a commit whose message carries `Gates-date: <id> <old> -> <new>; approved:
   <coordinator|user>` (C100 reads the register's `git log` and matches each change of a date to a trailer, the same
   discipline as ADR 0034's `Copies-date:`); a second move of the same entry needs `approved: user`.

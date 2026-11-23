@@ -54,6 +54,9 @@ pub struct Finding {
     pub message: String,
     /// The next step.
     pub fix: String,
+    /// The register key of the entry whose review date has passed, for a finding that is a time-based condition (ER-41): the
+    /// caller decides by [`super::time_based`] whether it blocks or warns. `None` for every other finding.
+    pub expired: Option<String>,
 }
 
 impl Finding {
@@ -65,6 +68,11 @@ impl Finding {
             _ => String::new(),
         };
         format!("::error{loc}::C100 {} {} Fix: {}", self.id, self.message, self.fix)
+    }
+
+    /// The same line as a warning, for a time-based condition that does not block this push (ER-41).
+    pub fn warning(&self) -> String {
+        self.annotation().replacen("::error", "::warning", 1)
     }
 }
 
@@ -184,6 +192,7 @@ pub fn evaluate(input: &Input) -> Outcome {
             id: id.to_string(),
             message,
             fix: fix.to_string(),
+            expired: None,
         });
     };
 
@@ -239,6 +248,13 @@ pub fn evaluate(input: &Input) -> Outcome {
     problems.extend(register::check_ratchets(&reg, base.as_ref(), input.release_tag.as_deref()));
     for p in problems {
         finding(&mut out, Some(REGISTER), None, "register", p.message, &p.fix);
+    }
+    // A review date that has passed is a time-based condition: marked with its entry, so the caller can warn or block (ER-41).
+    for e in register::expired(&reg, input.today) {
+        finding(&mut out, Some(REGISTER), None, "register", e.message, &e.fix);
+        if let Some(f) = out.findings.last_mut() {
+            f.expired = Some(e.key);
+        }
     }
 
     // The CI model.
