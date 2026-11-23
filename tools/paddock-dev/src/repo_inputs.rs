@@ -92,6 +92,12 @@ impl Planner {
 /// The `[planner]` table of the inputs file text: no table is the graph; `mode = "rules"` needs a non-empty `reason`; anything else
 /// is an error naming it (a typo never silently picks a planner).
 pub fn planner(text: &str) -> Result<Planner, String> {
+    let planner = planner_inner(text)?;
+    crate::register_schema::parse_file(FILE, text)?;
+    Ok(planner)
+}
+
+fn planner_inner(text: &str) -> Result<Planner, String> {
     let t: toml::Table = text.parse().map_err(|e| format!("{FILE}: not TOML: {e}"))?;
     let Some(p) = t.get("planner") else {
         return Ok(Planner {
@@ -224,6 +230,12 @@ pub fn check_apps(inputs: &Inputs, apps: &std::collections::BTreeSet<String>) ->
 }
 
 fn read(text: &str) -> Result<Inputs, String> {
+    let inputs = read_inner(text)?;
+    crate::register_schema::parse_file(FILE, text)?;
+    Ok(inputs)
+}
+
+fn read_inner(text: &str) -> Result<Inputs, String> {
     let t: toml::Table = text.parse().map_err(|e| format!("not TOML: {e}"))?;
     only_keys(
         &t,

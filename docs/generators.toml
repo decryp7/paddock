@@ -443,6 +443,18 @@ outputs = ["tools/paddock-dev/tests/golden/ci-run/commands.tsv"]
 cost = "heavy"
 drift_marker = ["test result: FAILED"]
 
+[[generator]]
+id = "register-fields"
+what = "the `fields` lists of docs/registers.toml, generated from the typed structs of tools/paddock-dev/src/register_schema.rs (one list per table, so a reader and its register cannot disagree); a field added to a struct or to a register by hand leaves it stale"
+check = ["cargo", "test", "--test", "it", "register_fields::the_fields_of_the_declaration_are_generated_from_the_structs"]
+build = ["cargo", "test", "--no-run", "--test", "it"]
+regenerate = "PADDOCK_GOLDEN_BLESS=1 cargo test --test it register_fields::the_fields_of_the_declaration_are_generated_from_the_structs   # in tools/paddock-dev; it rewrites the `fields` lines of docs/registers.toml (refused under CI=true)"
+cwd = "tools/paddock-dev"
+paths = ["docs/registers.toml", "tools/paddock-dev/src/register_schema.rs", "tools/paddock-dev/tests/it/register_fields.rs"]
+outputs = ["docs/registers.toml"]
+cost = "heavy"
+drift_marker = ["test result: FAILED"]
+
 # ---- icons and drawings --------------------------------------------------------------------------------------------------
 
 [[generator]]

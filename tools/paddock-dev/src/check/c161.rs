@@ -4,13 +4,12 @@
 //! the merge base, a new register had none, and a reader that ignored an unknown key hid a misspelt field).
 //!
 //! The declaration is `docs/registers.toml`: one `[[register]]` per table of a file with its `policy` (`shrink-only`,
-//! `approval-required`, `free`), the `reader` that parses it, `strict` (`serde`: the reader refuses unknown keys itself; `check`: this
-//! check's `fields` list is the one refusal) and the fields that name an entry (`key`, `members`). Flagged:
+//! `approval-required`, `free`), the `reader` that parses it, `strict` (`serde`, the one value: the reader parses the file into the typed structs of `register_schema`, which refuse unknown keys) and the fields that name an entry (`key`, `members`). Flagged:
 //!
 //! - a `docs/*.toml` the file does not declare (a register with no policy), a declared file that does not exist, a top-level key no
 //!   entry claims (neither a `table` nor in `scalars`), a declared reader that does not exist;
-//! - an unknown key in a declared table (`strict = "check"`: not in `fields`; `fields = ["*"]` for a table whose keys are data) and
-//!   in `docs/registers.toml` itself, and a `strict = "serde"` entry whose reader file has no `deny_unknown_fields`;
+//! - an unknown key in a declared table (not in `fields`, which `register_schema` generates; `fields = ["*"]` for a table whose keys are data) and
+//!   in `docs/registers.toml` itself, and a `strict = "serde"` entry whose reader file neither calls `register_schema::parse_file` nor has `deny_unknown_fields`, and a file that does not parse into its typed structs;
 //! - **growth**, measured on the registers with a `key` against the merge base ([`super::baseline::growth`], the one comparison): an
 //!   entry the base lacks in a `shrink-only` table is one unwaivable finding; one in an `approval-required` table without a non-empty
 //!   `approved` field likewise; a `free` table has no rule;
@@ -68,7 +67,7 @@ pub struct Reg {
     pub policy: Policy,
     /// The reader's file (empty: none yet).
     pub reader: String,
-    /// `true` for `strict = "serde"`.
+    /// `true` for `strict = "serde"`, the one value.
     pub serde: bool,
     /// The fields that name an entry.
     pub key: Vec<String>,
@@ -123,10 +122,14 @@ pub fn parse_registers(text: &str) -> Result<Vec<Reg>, String> {
             .as_deref()
             .and_then(Policy::parse)
             .ok_or_else(|| format!("register {file} {table}: `policy` is shrink-only, approval-required or free"))?;
+        // Every reader parses into the typed structs of `register_schema` (deny_unknown_fields): there is no other value.
         let serde = match text_of("strict").as_deref() {
             Some("serde") => true,
-            Some("check") => false,
-            _ => return Err(format!("register {file} {table}: `strict` is serde or check")),
+            _ => {
+                return Err(format!(
+                    "register {file} {table}: `strict` is serde (the reader parses into typed structs that refuse unknown keys)"
+                ));
+            }
         };
         if text_of("why").is_none_or(|w| w.trim().chars().count() < 8) {
             return Err(format!("register {file} {table}: `why` needs at least 8 characters"));
@@ -286,7 +289,7 @@ impl Check for C161 {
             files: vec![
                 (
                     REGISTERS,
-                    "version = 1\n\n[[register]]\nfile = \"docs/registers.toml\"\ntable = \"register\"\npolicy = \"free\"\nreader = \"\"\nstrict = \"check\"\nfields = [\"file\", \"table\", \"policy\", \"reader\", \"strict\", \"fields\", \"scalars\", \"why\"]\nscalars = [\"version\"]\nwhy = \"the control's own declaration\"\n\n[[register]]\nfile = \"docs/x.toml\"\ntable = \"t\"\npolicy = \"free\"\nreader = \"\"\nstrict = \"check\"\nfields = [\"a\"]\nwhy = \"a clean control table\"\n\n[[register]]\nfile = \"docs/z.toml\"\ntable = \"t\"\npolicy = \"free\"\nreader = \"\"\nstrict = \"check\"\nfields = [\"a\"]\nwhy = \"a control table with an unknown key\"\n",
+                    "version = 1\n\n[[register]]\nfile = \"docs/registers.toml\"\ntable = \"register\"\npolicy = \"free\"\nreader = \"\"\nstrict = \"serde\"\nfields = [\"file\", \"table\", \"policy\", \"reader\", \"strict\", \"fields\", \"scalars\", \"why\"]\nscalars = [\"version\"]\nwhy = \"the control's own declaration\"\n\n[[register]]\nfile = \"docs/x.toml\"\ntable = \"t\"\npolicy = \"free\"\nreader = \"\"\nstrict = \"serde\"\nfields = [\"a\"]\nwhy = \"a clean control table\"\n\n[[register]]\nfile = \"docs/z.toml\"\ntable = \"t\"\npolicy = \"free\"\nreader = \"\"\nstrict = \"serde\"\nfields = [\"a\"]\nwhy = \"a control table with an unknown key\"\n",
                 ),
                 ("docs/x.toml", "[[t]]\na = 1\n"),
                 ("docs/y.toml", "[[t]]\na = 1\n"),
@@ -376,6 +379,14 @@ impl Check for C161 {
                     "Declare the table (or list the scalar in `scalars`), or remove the key.",
                 ));
             }
+            if let Err(why) = crate::register_schema::parse_file(file, &ftext) {
+                findings.push(finding(
+                    file,
+                    1,
+                    why,
+                    "Remove or fix the key (a field the table accepts is added to its struct in register_schema.rs first).",
+                ));
+            }
             for r in rs {
                 for (line, message) in unknown_fields(&ftext, &doc, r) {
                     findings.push(finding(
@@ -393,14 +404,14 @@ impl Check for C161 {
                             format!("the reader {} of {} [{}] does not exist", r.reader, r.file, r.table),
                             "Name the file that parses the table.",
                         )),
-                        Some(src) if r.serde && !src.contains("deny_unknown_fields") => findings.push(finding(
+                        Some(src) if r.serde && !src.contains("register_schema::parse_file") && !src.contains("deny_unknown_fields") => findings.push(finding(
                             REGISTERS,
                             1,
                             format!(
-                                "{} [{}] says its reader {} is strict (serde), and that file has no `deny_unknown_fields`",
+                                "{} [{}] says its reader {} parses into typed structs, and that file calls neither `register_schema::parse_file` nor has `deny_unknown_fields`",
                                 r.file, r.table, r.reader
                             ),
-                            "Make the reader refuse unknown keys, or say `strict = \"check\"`.",
+                            "Call crate::register_schema::parse_file(FILE, text) where the reader parses the file (or give it a serde struct with deny_unknown_fields).",
                         )),
                         Some(_) => {}
                     }
@@ -503,7 +514,7 @@ impl Check for C161 {
 mod tests {
     use super::*;
 
-    const GOOD: &str = "version = 1\n[[register]]\nfile = \"docs/a.toml\"\ntable = \"t\"\npolicy = \"shrink-only\"\nreader = \"\"\nstrict = \"check\"\nkey = [\"id\"]\nfields = [\"id\", \"note\"]\nwhy = \"a register of the test\"\n";
+    const GOOD: &str = "version = 1\n[[register]]\nfile = \"docs/a.toml\"\ntable = \"t\"\npolicy = \"shrink-only\"\nreader = \"\"\nstrict = \"serde\"\nkey = [\"id\"]\nfields = [\"id\", \"note\"]\nwhy = \"a register of the test\"\n";
 
     #[test]
     fn the_declaration_refuses_what_it_does_not_know() {
@@ -534,7 +545,7 @@ mod tests {
                 .contains("needs `key`")
         );
         assert!(
-            parse_registers(&GOOD.replace("strict = \"check\"", "strict = \"maybe\""))
+            parse_registers(&GOOD.replace("strict = \"serde\"", "strict = \"maybe\""))
                 .unwrap_err()
                 .contains("strict")
         );

@@ -61,6 +61,7 @@ pub struct Pins {
 
 /// Reads the pins file. A watched crate with no table is an empty pin set; a malformed file is an error that names the key.
 pub fn parse_pins(text: &str) -> Result<Pins, String> {
+    crate::register_schema::parse_file(PINS_FILE, text)?;
     let table: toml::Table = text.parse().map_err(|e| format!("{PINS_FILE} is not valid TOML: {e}"))?;
     let watch = match table.get("watch") {
         Some(toml::Value::Array(a)) => a

@@ -57,6 +57,7 @@ pub struct Register {
 
 /// The register in `text`. A missing field or a wrong type is an error naming it.
 pub fn parse(text: &str) -> Result<Register, String> {
+    crate::register_schema::parse_file(FILE, text)?;
     let v: toml::Table = text.parse().map_err(|e| format!("{FILE}: {e}"))?;
     let err = |m: &str| format!("{FILE}: {m}");
     let required = match v.get("required") {

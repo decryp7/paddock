@@ -100,6 +100,7 @@ pub mod pre_push;
 pub mod process_env;
 pub mod queue;
 pub mod release_isolation;
+pub mod register_schema;
 pub mod repo_inputs;
 pub mod repo_model;
 pub mod run_scope;

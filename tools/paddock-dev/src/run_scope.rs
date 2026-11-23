@@ -532,6 +532,7 @@ pub fn producer_of(workflow: &str) -> &str {
 /// The run id recorded for `producer` in the register text, `None` when it is not recorded; `Err` for a text that is not the
 /// register's shape.
 pub fn recorded(text: &str, producer: &str) -> Result<Option<u64>, String> {
+    crate::register_schema::parse_file(REGISTER, text)?;
     let v: toml::Table = text.parse().map_err(|e| format!("{REGISTER} is not TOML: {e}"))?;
     let Some(table) = v.get("first_green") else {
         return Err(format!("{REGISTER} has no [first_green] table"));

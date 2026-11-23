@@ -676,6 +676,7 @@ fn tables<'a>(doc: &'a toml::Table, key: &str) -> Vec<&'a toml::Table> {
 /// # Errors
 /// The text is not TOML.
 pub fn parse_register(text: &str) -> Result<Register, String> {
+    crate::register_schema::parse_file("docs/ipc-endpoints.toml", text)?;
     let doc: toml::Table = text.parse().map_err(|e: toml::de::Error| e.to_string())?;
     let endpoints = tables(&doc, "endpoint")
         .into_iter()
@@ -747,6 +748,7 @@ pub struct RatchetEntry {
 /// # Errors
 /// The text is not TOML.
 pub fn parse_ratchet(text: &str) -> Result<Vec<RatchetEntry>, String> {
+    crate::register_schema::parse_file("docs/ipc-endpoint-ratchet.toml", text)?;
     let doc: toml::Table = text.parse().map_err(|e: toml::de::Error| e.to_string())?;
     Ok(tables(&doc, "ratchet")
         .into_iter()

@@ -105,6 +105,7 @@ pub const APPROVALS: &str = "docs/os-removals.toml";
 /// The removal keys the user approved, per contract, from the register's text; `Err` names what is wrong (an unknown key, an approval
 /// that is not the user's, a missing field), so a broken register approves nothing.
 fn approvals(text: &str) -> Result<BTreeMap<String, BTreeSet<String>>, String> {
+    crate::register_schema::parse_file(APPROVALS, text)?;
     let t: toml::Table = text.parse().map_err(|e| format!("not valid TOML: {e}"))?;
     if let Some(k) = t.keys().find(|k| !["version", "approved"].contains(&k.as_str())) {
         return Err(format!("unknown key {k:?} (version, approved)"));

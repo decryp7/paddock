@@ -21,6 +21,8 @@ mod check_c158;
 mod check_c159;
 mod check_c160;
 mod check_c161;
+mod register_fields;
+mod register_readers;
 mod check_engine;
 mod check_ids;
 mod check_lex;

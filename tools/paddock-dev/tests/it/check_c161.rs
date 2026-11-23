@@ -8,7 +8,7 @@ const REGISTERS: &str = "docs/registers.toml";
 
 fn registers(policy: &str, extra: &str) -> String {
     format!(
-        "version = 1\n\n[[register]]\nfile = \"docs/registers.toml\"\ntable = \"register\"\npolicy = \"free\"\nreader = \"\"\nstrict = \"check\"\nfields = [\"file\", \"table\", \"policy\", \"reader\", \"strict\", \"key\", \"members\", \"fields\", \"scalars\", \"why\"]\nscalars = [\"version\"]\nwhy = \"the declaration itself\"\n\n[[register]]\nfile = \"docs/list.toml\"\ntable = \"entry\"\npolicy = \"{policy}\"\nreader = \"\"\nstrict = \"check\"\nkey = [\"id\"]\nfields = [\"id\", \"approved\"]\nwhy = \"a list of the test\"\n{extra}"
+        "version = 1\n\n[[register]]\nfile = \"docs/registers.toml\"\ntable = \"register\"\npolicy = \"free\"\nreader = \"\"\nstrict = \"serde\"\nfields = [\"file\", \"table\", \"policy\", \"reader\", \"strict\", \"key\", \"members\", \"fields\", \"scalars\", \"why\"]\nscalars = [\"version\"]\nwhy = \"the declaration itself\"\n\n[[register]]\nfile = \"docs/list.toml\"\ntable = \"entry\"\npolicy = \"{policy}\"\nreader = \"\"\nstrict = \"serde\"\nkey = [\"id\"]\nfields = [\"id\", \"approved\"]\nwhy = \"a list of the test\"\n{extra}"
     )
 }
 

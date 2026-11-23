@@ -277,6 +277,9 @@ pub fn parse(src: &str) -> (Register, Vec<String>) {
         Ok(t) => t,
         Err(e) => return (r, vec![format!("docs/gates.toml is not valid TOML: {e}")]),
     };
+    if let Err(e) = crate::register_schema::parse_file("docs/gates.toml", src) {
+        errors.push(e);
+    }
     if table.get("version").and_then(|v| v.as_integer()) != Some(1) {
         errors.push("docs/gates.toml: version must be 1".into());
     }
@@ -810,7 +813,6 @@ paths = ["scripts/vm-smoke/**"]
 
 [[not_gated]]
 id = "C13"
-scope = "apps"
 apps = ["dyno"]
 reason = "missing disallowed-methods"
 owner = "ADR 0060 WP-4"

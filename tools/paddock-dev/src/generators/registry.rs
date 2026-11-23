@@ -131,6 +131,9 @@ impl Registry {
     pub fn parse(text: &str) -> Result<Registry, Vec<String>> {
         let doc: toml::Table = text.parse().map_err(|e| vec![format!("{PATH} is not valid TOML: {e}")])?;
         let mut errors = Vec::new();
+        if let Err(e) = crate::register_schema::parse_file(PATH, text) {
+            errors.push(e);
+        }
         match doc.get("version").and_then(toml::Value::as_integer) {
             Some(1) => {}
             _ => errors.push(format!("{PATH}: `version = 1` is required")),
