@@ -260,6 +260,11 @@ recorded (ADR 0113 §5) the old `plan verdict: complete=` line also says false w
 
 - scope: `Complete` (the selection was full for everything its plan reached, no step or test was skipped because of a failure, and
   its base was itself `Complete` with a green result) or `Partial` (anything less: smoke, affected tests, a rerun, a skipped step);
+  between them, `Landing` (the user's decision of 2026-11-23, review round 2 of the wiring, P1-A): a run whose plan was its own
+  diff (a landing run or a push, `need_whole` false) and that ran exactly that diff's selection, some projects only their smoke set
+  or affected tests, with every declared job run (`Declared::lands`, `green::Scope::Landing`). A train lands on it; it is never
+  complete, never a base for later planning (the base stays the last `Complete` x green commit) and never green for a tag; a push to
+  main reuses it only when the push's own diff is the same (its declared `base` is the push's base); the nightly stays whole-tree;
 - result: `Green` (every test passed on its first try), `GreenWithFixItems` (every failure is a FLAKY test that passed on its one
   retry, in a target the change did **not** touch, as defined below), `Red` (a test failed both tries, a FLAKY test sits in a target
   the change touched, or a non-test step failed) or `NotMeasured` (a report cannot be read).
@@ -609,6 +614,18 @@ The user decided the graph plans CI from landing; the rule tables stay for `--co
   the line states `need_whole`, and `complete_for_tag` refuses a need taken from a push's or a landing's diff (review P2-3). The old
   report-only lines of ci.yml and debrief.yml read `partial` and are never `complete=true` for a narrowed run. A golden of the plan job
   log under the graph (`tests/golden/expected/cli-graph.json`, `tests/it/plan_graph_ci.rs`) shows each kind of change end to end.
+- **Landing on a narrowed run** (review round 2, P1-A, the user's decision of 2026-11-23): the scope line names the commit a push's
+  or a landing's need was diffed from (`base`). The one grader (`ci_runs/green.rs`) gives such a run `Scope::Landing`
+  (`Outcome::lands`); the landing queue's verdict (`verdict::verdict_landing_at`, the `Ci::verdict` port of `queue/tick.rs`) and
+  `ci reuse` accept it, `is_base` and `is_tag_green` refuse it, and `ci reuse` skips the post-landing push only when the landing run's
+  base is that push's own base. A train touching only a Debrief spec lands on its first landing run; it no longer loops to
+  `MAX_RUNS_PER_HEAD` and `Stuck`. debrief.yml's queue dispatches carry no base, so they plan the whole tree and are complete.
+- **Review round 2 P2s**: a test-only change keeps its project's lint and format phases (`[planner] lint_phases`) and the apps'
+  gates (fmt, clippy; no rerun semantics); the graph's filtersets run through their own channel (`graph_filter` in app-gates,
+  `test_filter` on the `crate` and `paddock-dev` legs), where no test found fails, and a selection without Rust tests skips the test
+  step (`test_skip`) instead of a filter that selects none; debrief.yml's affected runs carry `rust-lint`, `rust-test` and, for
+  targets with OS-specific code, `rust-test-macos`, and run the frontend job whole (a runner it has no job for runs it in full);
+  `plan mode: full=` is printed after the partial reset.
 - **The escape monitor records what CI ran** (WP-9): the graph's selection (`plan_graph::escape_selected`), the rule tables' answer
   only under `rules`.
 - **Contracts are read at the planned revision** (`decl::load` through the world's reader), not the working tree.
@@ -687,7 +704,10 @@ cause once and for all: all nine work packages, in the order of §11.
   for CI.
 - **D11. The landing run's base** (user, 2026-11-23, from the CI audit). (a) The landing run tests the train's diff from main's
   tested head and the push to main reuses that run, as GitHub merge queues and GitLab merge trains do. (b) The landing run tests
-  the whole tree (today, ADR 0113). *Chosen: (a)*; the nightly and tags stay whole-tree on every OS.
+  the whole tree (today, ADR 0113). *Chosen: (a)*; the nightly and tags stay whole-tree on every OS. Amended 2026-11-23 (the
+  user, review round 2 of the wiring): a landing run that ran exactly its own diff's narrowed selection (smoke or affected tests)
+  lands the train (`Scope::Landing`, §6); it counts for the landing only, never for a tag or as a base, and the push to main reuses
+  it only for the same diff (ER-15 amendment recorded by the coordinator).
 - **D12. When the old rule tables go** (review P1-6). (a) After five consecutive nightlies with zero escapes (WP-9). (b) When the
   goldens match (WP-5). *Recommended: (a)*: Google TAP and Meta keep a full-run safety net and measure escapes before they trust
   a selection.
