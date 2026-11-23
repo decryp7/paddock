@@ -346,9 +346,8 @@ pub fn invoked_env(
                 .iter()
                 .filter_map(|d| shell::join(d, &pattern))
                 .flat_map(|p| {
-                    tracked
-                        .iter()
-                        .filter(move |f| paddock_repo_graph::model::glob::matches(&p, f))
+                    paddock_repo_graph::model::glob::matching(&p, tracked)
+                        .into_iter()
                         .cloned()
                         .collect::<Vec<_>>()
                 })

@@ -3577,3 +3577,24 @@ logged with what the rule saw (ER-27). Lesson: an admission rule needs a cost, n
 - **Recurring:** ADR 0033's class (ending a bare pid read earlier, following parent pids without age): Chromium driver stale-snapshot
   kill (ADR 0033 regression test), Windows stale-pid kills (rule 53). Open: blanket `disallowed_methods` allows in test files hide the
   ban; a check that refuses the ADR 0033 entries under a file-wide allow is the follow-up.
+
+## The ownership test timed out on Windows a second time: the work was parsing in a debug build, not process starts (run 8694, 2026-11-24)
+
+- **What happened.** `repo_model::tests::every_tracked_file_of_the_tree_has_an_owner_...` was FLAKY on the Windows runner (run 8694,
+  job 45791): try 1 stopped at 60 s, try 2 passed in 18.2 s. The first fix (e348851aa) had already removed the OS placement from it.
+- **First hypothesis, and what refuted it.** Process starts at about 45 ms each on Windows. Counted with `paddock_env::starts`: 29 starts
+  (25 `cargo metadata`, one per workspace, and 4 git), about 1.3-2.4 s on Windows, the same for any number of files. Not the bulk.
+- **Root cause (measured, docs/benchmarks.md 2026-11-24).** CPU work in the debug test build: oxc parsing about 2,200 JS/TS files without
+  optimisation (0.83 s), syn parsing 428 Rust sources with each macro's tokens parsed twice, owner lookups that visited all 4,628 model
+  nodes per changed file three times (0.30 s), and 137 dynamic script words matched against all 14,291 paths twice each (0.33 s).
+- **Contributing cause.** The test reads the repository graph (25 `cargo metadata` runs) but was not in the ci profile's `repo-graph`
+  group, so under load it ran beside the other tests that do the same.
+- **Fix (fix/owner-test-windows-cost).** oxc crates optimised in the dev profile as syn already was; a macro's tokens parsed once; syn
+  parses in 4 threads; a file index for the model's owners (shared crate, for every plan); glob matching over a sorted set by literal
+  prefix and literal run (shared crate). CPU 7.35 s to 5.10 s, wall 22.1 s to 10.9 s median on the loaded Mac. The test now pins the
+  start budget (workspaces + 4) and joins the `repo-graph` group. No limit was raised.
+- **Why the logs did not show it.** nextest gives one duration per test; the phases are not logged. The measurement needed temporary
+  timers. Not changed here: a whole-tree test has no phase log.
+- **Class.** A whole-repository test whose cost is per file times per item, or a parser in an unoptimised build: C102's syn parse
+  (2026-11-09, the syn `opt-level` in tools/paddock-dev/Cargo.toml), check_c122's quadratic walk (2026-11-18, .config/nextest.toml), this
+  test's OS placement (e348851aa, 2026-11-23) and now its parsing and lookups.

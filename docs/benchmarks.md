@@ -187,6 +187,38 @@ failing mode.
 - **Holders count while they live:** a holder whose record is inside the cap its own row lives under (the waiter's `--run-max`, `ROW_CAP` + grace, 3,675 s) is progress by itself, so a waiter behind a healthy 31 to 60 minute step is not stalled; past the cap it is not live, and the same picture ends the wait a stall limit later.
 - **Notes:** the basis of `QUEUE_STALL` (30 min, 1,800 s) in `tools/paddock-dev/src/pre_push/exec.rs`: over the longest gap seen, so a queue that moves is never ended. A holder that runs longer is ended by its own row cap. The per-push totals it replaces (15 min of run, 30 min of queue) were exceeded by three pushes on 2026-11-21 with no row running too long: 13, 14 and 15 rows, and 5 rows, were not measured. Not measured: the gaps of a quiet machine.
 
+### 2026-11-24, the repository model's ownership test: where the time goes, and the cut (fix/owner-test-windows-cost)
+
+- **Commit:** 727810fe9 (train/2026-11-23-graph) against the fix, both built as the test profile (debug), `CARGO_BUILD_JOBS=2`
+- **Machine:** Mac mini, Apple M4 Pro, 14 cores, 64 GB, macOS 27.2; the train's CI and other agents shared it: 1-minute load 69 to 147
+  during the A/B (not a quiet run, so CPU time is the measure of work and wall time an indication)
+- **Source:** the checkout's tracked files (14,291; 692 outside every project folder, which the test asks about)
+- **Method:** phase timers and counters added for the measurement only (not committed): `Instant` around each phase, a counter of
+  working-tree reads, `paddock_env::starts::count_starts()` for process starts. A/B: both test binaries run directly, interleaved, 8 rounds
+  each, `/usr/bin/time -p` (user and sys include the child processes)
+- **Work of one run:** 29 process starts (25 `cargo metadata`, one per Cargo workspace; 2 `git ls-files`; 1 `git grep`; 1 `git cat-file
+  --batch-command`); 3,354 working-tree file reads (2,662 to build the world, 692 for the reach) plus 692 blobs at HEAD (36.8 MB through the
+  one cat-file process); parses: 428 Rust sources with syn (2.5 MB), about 2,200 JS/TS files with oxc, 58 YAML files (27 workflows, 31
+  actions); 4,628 model nodes
+- **Phases before (quietest single run, load about 50):** `cargo metadata` x 25 0.60-0.70 s; CI adapter 0.71 s (of it 0.33 s matching 137
+  dynamic script words against all 14,291 paths, twice each); code adapter 2.07 s (syn parse and visit 0.84 s; oxc parse 0.83 s in a debug
+  build); reach 0.75 s (HEAD blobs 0.37 s; the owner lookups 0.30 s: every node visited per changed file, three times)
+- **Cuts:** oxc parser crates built with `opt-level = 3` in the dev profile as syn already is (oxc parse 0.83 s to 0.11 s); each macro's
+  tokens parsed once in the reads finder (`macro_pieces` parsed every macro a second time); syn parses in 4 threads (`PARSE_WORKERS`,
+  results in input order); the model's owner lookups through a file index (0.30 s to 0.003 s); glob matching over the tracked set by its
+  literal prefix and its longest literal run (0.33 s to 0.16 s)
+- **A/B (8 rounds each):** CPU user + sys: before 6.75-7.87 s (mean 7.35 s), after 4.59-5.48 s (mean 5.10 s), -31%. Wall: before
+  17.5-26.8 s (median 22.1 s), after 7.5-15.1 s (median 10.9 s). Process starts: 29 before and 29 after (pinned by the test now).
+  Stress: 10 of 10 passed in the ci profile at a load of 115 to 125 (5.9-11.4 s)
+- **Windows (estimated from the counts, not measured):** 29 starts at about 45 ms (54 with the rustup proxy in front of each `cargo`) are
+  about 1.3-2.4 s and unchanged; the rest is the parse work and the 3,354 file reads through Defender, which the cut reduces by the same
+  CPU share. Run 8694 try 2 took 18.2 s; at the Mac's ratio the fix would take about 9-12 s. Try 1's 60 s stop came under load beside the
+  other tests that run `cargo metadata` over every workspace; the test now joins their `repo-graph` group in the ci profile.
+- **Not cut, and why:** the 25 `cargo metadata` runs (one per workspace is the input the graph needs); the 36.8 MB of HEAD blobs (the
+  reach's content detection reads both sides of every changed file; answering them through gix in process took 2.0 s in a debug build
+  against 0.37 s through git, measured and reverted); pipelining cat-file requests (a pipelined shell run of the same reads took 0.33 s:
+  the cost is the bytes, not the round trips)
+
 ### 2026-11-23, the repository model's ownership test without the OS placement (fix/owner-test-batched-git)
 
 - **Commit:** 64e01dd84 (train/2026-11-23-graph) against the fix

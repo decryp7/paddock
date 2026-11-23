@@ -137,11 +137,20 @@ fn call_pieces(mc: &ExprMethodCall) -> Option<Vec<Piece>> {
 }
 
 fn macro_pieces(mac: &Macro) -> Option<Vec<Piece>> {
-    let a = args(&mac.tokens)?;
-    match last_ident(mac).as_str() {
+    let name = last_ident(mac);
+    // Only `concat!` and `format!` build a path: any other macro's tokens are not parsed here.
+    if name != "concat" && name != "format" {
+        return None;
+    }
+    args_pieces(&name, &args(&mac.tokens)?)
+}
+
+/// [`macro_pieces`] over arguments already parsed (a macro's tokens are parsed once).
+fn args_pieces(name: &str, a: &[Expr]) -> Option<Vec<Piece>> {
+    match name {
         "concat" => {
             let mut out = Vec::new();
-            for e in &a {
+            for e in a {
                 if is_manifest(e) {
                     out.push(Piece::Manifest);
                 } else {
@@ -214,7 +223,7 @@ impl Finder<'_> {
                 a.iter().for_each(|e| self.visit_expr(e));
             }
             _ => {
-                if let Some(p) = macro_pieces(mac) {
+                if let Some(p) = args_pieces(&name, &a) {
                     self.rooted(&p, How::ManifestDir);
                 }
                 // Any other macro's arguments are expressions too (`assert!`, `vec!`): a read inside one counts.
