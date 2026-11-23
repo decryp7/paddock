@@ -754,9 +754,11 @@ fn ci_yml_wires_the_plan_job_outputs_and_the_commits_job_asks_for_its_range() {
     let wf = paddock_dev::plan_gitea::workflow_jobs(&ci).unwrap();
     let plan_job = &wf.jobs.iter().find(|(k, _)| k == "plan").unwrap().1;
     let declared = regex::Regex::new(r"(?m)^ {6}([a-z0-9_]+): \$\{\{ steps\.plan\.outputs\.([a-z0-9_]+) \}\}").unwrap();
+    // The graph planner also writes its narrowed projects (`selection`) and `partial` (plan_graph::OUTPUTS).
     let written: Vec<String> = paddock_dev::plan_ci::ci_outputs(&json!({}), &[], None)
         .into_iter()
         .map(|(k, _)| k)
+        .chain(paddock_dev::plan_graph::OUTPUTS.iter().map(|k| k.to_string()))
         .collect();
     let declared: Vec<(String, String)> = declared
         .captures_iter(plan_job)

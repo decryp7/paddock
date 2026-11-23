@@ -72,7 +72,7 @@ fn probe(
 
 /// The fixture repository the rule goldens plan: the planner's own fixture (`tests/golden/fixture`) plus the frozen inputs file of
 /// `tests/golden/rules/extra`, committed on top. The real tree is never read, so a commit to it re-blesses nothing (ER-46).
-fn rules_fixture() -> (tempfile::TempDir, PathBuf) {
+pub(crate) fn rules_fixture() -> (tempfile::TempDir, PathBuf) {
     let (keep, root) = crate::golden::fixture_repo();
     copy_extra(&golden_dir().join("rules/extra"), &root.join(""));
     crate::golden::git(&root, &["add", "-A"]);

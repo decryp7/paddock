@@ -14,8 +14,10 @@ use std::collections::BTreeSet;
 /// The prefix of the scope line (after the colours and the timestamp).
 pub const SCOPE_LINE: &str = "plan scope: ";
 
-/// The version of the line's shape; a reader refuses another.
-pub const VERSION: u64 = 1;
+/// The version of the line's shape; a reader refuses another. Version 2 (ADR 0117 §6, the graph's wiring): `ran` names the projects
+/// that ran a smoke set or only affected tests, every scope states `os_full`, and the line states whether `need` came from the whole
+/// tree (`need_whole`).
+pub const VERSION: u64 = 2;
 
 /// The runners the `crate` and `paddock-dev` jobs run on when the plan names none of its own (ci.yml's `PLAN_OS_LEGS`).
 pub const DEFAULT_OS_LEGS: [&str; 3] = ["ubuntu-latest", "windows-latest", "macos-latest"];
@@ -39,6 +41,11 @@ pub struct Scope {
     /// an OS-scoped run, which tested only the packages with OS-specific code there (`hostTests`). A push to main's scope does not need
     /// it (a landing may be scoped); a tag does ([`Declared::complete_for_tag`]).
     pub os_full: bool,
+    /// The projects that ran their declared smoke set or only some contract phases (the graph's selection), not their suite: never
+    /// complete (ADR 0117 §6).
+    pub smoke: BTreeSet<String>,
+    /// The projects that ran only the tests the change reached (affected targets and spec files): never complete.
+    pub affected: BTreeSet<String>,
 }
 
 fn set(v: &Value) -> BTreeSet<String> {
@@ -50,11 +57,12 @@ fn set(v: &Value) -> BTreeSet<String> {
 impl Scope {
     /// The scope as JSON (sorted lists).
     pub fn json(&self) -> Value {
-        json!({"jobs": self.jobs, "engines": self.engines, "apps": self.apps, "whole": self.whole, "os_full": self.os_full})
+        json!({"jobs": self.jobs, "engines": self.engines, "apps": self.apps, "whole": self.whole, "os_full": self.os_full,
+               "smoke": self.smoke, "affected": self.affected})
     }
 
     fn parse(v: &Value, what: &str) -> Result<Scope, String> {
-        for key in ["jobs", "engines", "apps"] {
+        for key in ["jobs", "engines", "apps", "smoke", "affected"] {
             if !v[key].is_array() {
                 return Err(format!("{what}.{key} is missing or not a list"));
             }
@@ -67,8 +75,12 @@ impl Scope {
             engines: set(&v["engines"]),
             apps: set(&v["apps"]),
             whole,
-            // A line of an older planner has no key: it was written before OS-scoped tests, so it tested every OS.
-            os_full: v["os_full"].as_bool().unwrap_or(true),
+            // A missing key is an error, never "every OS" (review of 8cab10234, P2-2: fail closed).
+            os_full: v["os_full"]
+                .as_bool()
+                .ok_or_else(|| format!("{what}.os_full is missing or not a boolean"))?,
+            smoke: set(&v["smoke"]),
+            affected: set(&v["affected"]),
         })
     }
 
@@ -106,6 +118,9 @@ pub struct Declared {
     pub ran: Scope,
     /// What a push to main does for this tree.
     pub need: Scope,
+    /// Whether `need` is the whole tree's (a dispatch without a base, a tag, the nightly), not the diff of a push or a landing: a
+    /// tag counts only such a run (ER-15, review of 8cab10234 P2-3).
+    pub need_whole: bool,
 }
 
 impl Declared {
@@ -119,7 +134,8 @@ impl Declared {
 
     /// The scope line.
     pub fn line(&self) -> String {
-        let mut v = json!({"v": VERSION, "workflow": self.workflow, "rerun": self.rerun, "ran": self.ran.json(), "need": self.need.json()});
+        let mut v = json!({"v": VERSION, "workflow": self.workflow, "rerun": self.rerun, "ran": self.ran.json(), "need": self.need.json(),
+                           "need_whole": self.need_whole});
         if let Some(os) = &self.os {
             v["os"] = json!(os);
         }
@@ -135,6 +151,18 @@ impl Declared {
         if let Some(os) = &self.os {
             return Err(format!(
                 "it ran one operating system's part only (the os input: {os}), not every runner"
+            ));
+        }
+        if !self.ran.smoke.is_empty() {
+            return Err(format!(
+                "it ran a smoke set or some phases only, not the suite, of {} (the graph's selection)",
+                self.ran.smoke.iter().cloned().collect::<Vec<_>>().join(", ")
+            ));
+        }
+        if !self.ran.affected.is_empty() {
+            return Err(format!(
+                "it ran only the affected tests of {} (the graph's selection)",
+                self.ran.affected.iter().cloned().collect::<Vec<_>>().join(", ")
             ));
         }
         if self.need.jobs.is_empty() && self.need.apps.is_empty() {
@@ -154,6 +182,9 @@ impl Declared {
     /// never an OS-scoped one. A landing may be scoped (the nightly and the release gates are the full runs).
     pub fn complete_for_tag(&self) -> Result<(), String> {
         self.complete()?;
+        if !self.need_whole {
+            return Err("its need was the diff of a push or a landing, not the whole tree; a tag needs a run planned for the whole tree (a dispatch without a base, the nightly or a release's gates)".into());
+        }
         if self.ran.os_full {
             Ok(())
         } else {
@@ -192,6 +223,7 @@ fn parse(text: &str) -> Result<Declared, String> {
         },
         ran: Scope::parse(&v["ran"], "ran")?,
         need: Scope::parse(&v["need"], "need")?,
+        need_whole: v["need_whole"].as_bool().ok_or("the scope line has no need_whole flag")?,
     })
 }
 
@@ -240,6 +272,7 @@ pub fn scope_of(plan: &Value, legs: &[Value], webkit: bool, os_legs: &[String], 
         apps: legs.iter().map(leg_id).collect(),
         whole,
         os_full: true,
+        ..Scope::default()
     }
 }
 
@@ -339,13 +372,14 @@ pub fn check_ran(d: &Declared, jobs: &[(String, String)]) -> Result<(), RanProbl
 /// What a ci.yml plan job declares. `ran` is the scope the run's own plan switched on (empty for a reused run, which runs no job,
 /// and for a rerun); `need` the same planner's answer for a push to main, with every engine on and every test whole. A rerun is
 /// never complete, whatever it ran.
-pub fn ci_scope(ran: Scope, rerun: bool, need: Scope) -> Declared {
+pub fn ci_scope(ran: Scope, rerun: bool, need: Scope, need_whole: bool) -> Declared {
     Declared {
         workflow: "ci.yml".into(),
         rerun,
         os: None,
         ran,
         need,
+        need_whole,
     }
 }
 
@@ -360,6 +394,7 @@ pub fn app_scope(workflow: &str, app: &str, full: bool, run: bool, since_run: bo
         apps: [app.to_string()].into(),
         whole: true,
         os_full: true,
+        ..Scope::default()
     };
     let ran = if run && !since_run {
         // A run that is not full ran no gates job (its nightly or installer jobs are not the gates) and one engine.
@@ -376,12 +411,14 @@ pub fn app_scope(workflow: &str, app: &str, full: bool, run: bool, since_run: bo
     } else {
         Scope::default()
     };
+    // The app's need is its whole gates, whatever changed.
     Declared {
         workflow: workflow.into(),
         rerun: since_run,
         os: None,
         ran,
         need,
+        need_whole: true,
     }
 }
 
@@ -449,15 +486,15 @@ pub fn with_first_run(text: &str, producer: &str, run: u64) -> Result<String, St
 
 /// A complete ci.yml scope line, for the tests of the readers (`verdict`, `reuse`): a run that did what a push to main does.
 #[cfg(test)]
-pub const TEST_COMPLETE: &str = "plan scope: {\"v\":1,\"workflow\":\"ci.yml\",\"rerun\":false,\"ran\":{\"jobs\":[\"conformance\"],\"engines\":[\"chromium\",\"webkit\"],\"apps\":[],\"whole\":true},\"need\":{\"jobs\":[\"conformance\"],\"engines\":[\"chromium\",\"webkit\"],\"apps\":[],\"whole\":true}}\n";
+pub const TEST_COMPLETE: &str = "plan scope: {\"v\":2,\"workflow\":\"ci.yml\",\"rerun\":false,\"ran\":{\"jobs\":[\"conformance\"],\"engines\":[\"chromium\",\"webkit\"],\"apps\":[],\"whole\":true,\"os_full\":true,\"smoke\":[],\"affected\":[]},\"need\":{\"jobs\":[\"conformance\"],\"engines\":[\"chromium\",\"webkit\"],\"apps\":[],\"whole\":true,\"os_full\":true,\"smoke\":[],\"affected\":[]},\"need_whole\":true}\n";
 
 /// The line of [`TEST_COMPLETE`] from an `os=linux` run: it covers its `need` here, but it is one operating system's part only.
 #[cfg(test)]
-pub const TEST_OS_ONLY: &str = "plan scope: {\"v\":1,\"workflow\":\"ci.yml\",\"rerun\":false,\"os\":\"linux\",\"ran\":{\"jobs\":[\"conformance\"],\"engines\":[\"chromium\",\"webkit\"],\"apps\":[],\"whole\":true},\"need\":{\"jobs\":[\"conformance\"],\"engines\":[\"chromium\",\"webkit\"],\"apps\":[],\"whole\":true}}\n";
+pub const TEST_OS_ONLY: &str = "plan scope: {\"v\":2,\"workflow\":\"ci.yml\",\"rerun\":false,\"os\":\"linux\",\"ran\":{\"jobs\":[\"conformance\"],\"engines\":[\"chromium\",\"webkit\"],\"apps\":[],\"whole\":true,\"os_full\":true,\"smoke\":[],\"affected\":[]},\"need\":{\"jobs\":[\"conformance\"],\"engines\":[\"chromium\",\"webkit\"],\"apps\":[],\"whole\":true,\"os_full\":true,\"smoke\":[],\"affected\":[]},\"need_whole\":true}\n";
 
 /// A ci.yml scope line of a run that missed one engine (WebKit): not complete.
 #[cfg(test)]
-pub const TEST_PARTIAL: &str = "plan scope: {\"v\":1,\"workflow\":\"ci.yml\",\"rerun\":false,\"ran\":{\"jobs\":[\"conformance\"],\"engines\":[\"chromium\"],\"apps\":[],\"whole\":true},\"need\":{\"jobs\":[\"conformance\"],\"engines\":[\"chromium\",\"webkit\"],\"apps\":[],\"whole\":true}}\n";
+pub const TEST_PARTIAL: &str = "plan scope: {\"v\":2,\"workflow\":\"ci.yml\",\"rerun\":false,\"ran\":{\"jobs\":[\"conformance\"],\"engines\":[\"chromium\"],\"apps\":[],\"whole\":true,\"os_full\":true,\"smoke\":[],\"affected\":[]},\"need\":{\"jobs\":[\"conformance\"],\"engines\":[\"chromium\",\"webkit\"],\"apps\":[],\"whole\":true,\"os_full\":true,\"smoke\":[],\"affected\":[]},\"need_whole\":true}\n";
 
 #[cfg(test)]
 mod tests {
@@ -494,7 +531,7 @@ mod tests {
     fn declared(ran_webkit: bool, filters: &[&str]) -> Declared {
         let need = scope_of(&plan(), &legs(true), true, &os(), &[]);
         let ran = scope_of(&plan(), &legs(ran_webkit), ran_webkit, &os(), filters);
-        ci_scope(ran, false, need)
+        ci_scope(ran, false, need, true)
     }
 
     #[test]
@@ -538,11 +575,11 @@ mod tests {
         let need = scope_of(&plan(), &legs(true), true, &os(), &[]);
         let ran = scope_of(&plan(), &scoped, true, &os(), &["", ""]);
         assert_eq!(ran, need);
-        assert_eq!(ci_scope(ran, false, need.clone()).complete(), Ok(()));
+        assert_eq!(ci_scope(ran, false, need.clone(), true).complete(), Ok(()));
         // Positive control: the same legs with a member filter are partial.
         scoped[1]["filter"] = json!("package(=a)");
         let narrowed = scope_of(&plan(), &scoped, true, &os(), &["", ""]);
-        assert!(ci_scope(narrowed, false, need).complete().is_err());
+        assert!(ci_scope(narrowed, false, need, true).complete().is_err());
     }
 
     #[test]
@@ -552,11 +589,12 @@ mod tests {
         assert_eq!(scoped.complete(), Ok(()), "a landing may be scoped");
         let why = scoped.complete_for_tag().unwrap_err();
         assert!(why.contains("OS-scoped"), "{why}");
-        // Positive control: the same run with os_full is fine for a tag, and an older line without the key reads as full.
+        // Positive control: the same run with os_full is fine for a tag; a line without the key is an error, never "every OS"
+        // (review of 8cab10234, P2-2: fail closed).
         let full = declared(true, &["", ""]);
         assert_eq!(full.complete_for_tag(), Ok(()));
-        let old = parse(full.line().replace(",\"os_full\":true", "").trim_start_matches(SCOPE_LINE)).unwrap();
-        assert!(old.ran.os_full && old.need.os_full);
+        let old = parse(full.line().replace(",\"os_full\":true", "").trim_start_matches(SCOPE_LINE));
+        assert!(old.unwrap_err().contains("os_full"));
         assert!(!full.line().is_empty());
     }
 
@@ -600,7 +638,7 @@ mod tests {
     #[test]
     fn a_rerun_and_a_run_that_ran_nothing_are_never_complete() {
         let need = scope_of(&plan(), &legs(true), true, &os(), &[]);
-        let rerun = ci_scope(Scope::default(), true, need.clone());
+        let rerun = ci_scope(Scope::default(), true, need.clone(), true);
         assert!(rerun.complete().unwrap_err().contains("rerun"), "{:?}", rerun.complete());
         // Even a rerun that claims to have run everything is a rerun.
         let mut claims = declared(true, &[]);
@@ -627,8 +665,64 @@ mod tests {
                 os_full: true,
                 ..Scope::default()
             },
+            need_whole: true,
         };
         assert!(nothing.complete().unwrap_err().contains("empty"));
+    }
+
+    #[test]
+    fn a_smoke_or_affected_run_is_never_complete_and_a_tag_needs_a_whole_tree_need() {
+        // ADR 0117 §6, the wiring: the graph's narrowed projects are in the line, and the reader refuses them.
+        let need = Scope {
+            jobs: ["conformance".to_string(), "ui".to_string()].into(),
+            engines: ["chromium".to_string()].into(),
+            whole: true,
+            os_full: true,
+            ..Scope::default()
+        };
+        let full = ci_scope(need.clone(), false, need.clone(), true);
+        assert_eq!(full.complete(), Ok(()));
+        assert_eq!(full.complete_for_tag(), Ok(()));
+        let smoke = ci_scope(
+            Scope {
+                smoke: ["ui".to_string()].into(),
+                ..need.clone()
+            },
+            false,
+            need.clone(),
+            true,
+        );
+        assert!(smoke.complete().unwrap_err().contains("smoke set"));
+        let affected = ci_scope(
+            Scope {
+                affected: ["app:dyno".to_string()].into(),
+                ..need.clone()
+            },
+            false,
+            need.clone(),
+            true,
+        );
+        assert!(affected.complete().unwrap_err().contains("affected tests of app:dyno"));
+        // The line carries both, and reads back the same.
+        for d in [&smoke, &affected] {
+            assert_eq!(read(&d.line()).unwrap().unwrap(), *d);
+        }
+        // A push's or a landing's need is its own diff: complete for a landing, never for a tag (review of 8cab10234, P2-3).
+        let push = ci_scope(need.clone(), false, need.clone(), false);
+        assert_eq!(push.complete(), Ok(()));
+        assert!(push.complete_for_tag().unwrap_err().contains("whole tree"));
+        // A line without os_full, without the smoke list or need_whole is unreadable, never "every OS" (P2-2: fail closed); and v1
+        // is another version.
+        let line = full.line();
+        for (from, to) in [
+            (",\"os_full\":true", ""),
+            (",\"smoke\":[]", ""),
+            (",\"need_whole\":true", ""),
+            ("\"v\":2", "\"v\":1"),
+        ] {
+            assert!(line.contains(from), "{from}");
+            assert!(read(&line.replacen(from, to, 1)).unwrap().is_err(), "without {from}");
+        }
     }
 
     fn run_jobs(d: &Declared, conclusion: &str) -> Vec<(String, String)> {
@@ -796,9 +890,9 @@ mod tests {
         assert_eq!(read("plan mode: full=true\n"), None);
         assert!(matches!(read(&format!("{line}\n{line}\n")), Some(Err(e)) if e.contains("2 scope lines")));
         assert!(matches!(read("plan scope: nope\n"), Some(Err(_))));
-        assert!(matches!(read(&line.replace("\"v\":1", "\"v\":2").to_string()), Some(Err(e)) if e.contains("version")));
+        assert!(matches!(read(&line.replace("\"v\":2", "\"v\":3").to_string()), Some(Err(e)) if e.contains("version")));
         assert!(matches!(
-            read("plan scope: {\"v\":1,\"workflow\":\"ci.yml\",\"rerun\":false}\n"),
+            read("plan scope: {\"v\":2,\"workflow\":\"ci.yml\",\"rerun\":false}\n"),
             Some(Err(_))
         ));
         // The prefix counts only at the start of a line: a mention inside a message is not a declaration.

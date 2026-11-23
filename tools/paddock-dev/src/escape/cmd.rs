@@ -5,22 +5,13 @@
 use super::{Failure, GitRefs, Record, Sel, WHOLE_JOB, register};
 use crate::plan::{RepoGraph, Request};
 use crate::plan_ci::LINUX;
-use paddock_repo_graph::History;
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-/// The record of a plan: what ran (`plan`, the rule tables' answer, which decides CI until WP-5) and what the change could reach
-/// (the model's reach, the conservative one: every project when a file is unowned).
-pub fn record_for(
-    commit: &str,
-    base: Option<&str>,
-    at: i64,
-    plan: &Value,
-    reached: &paddock_repo_graph::model::Reached,
-    inputs: &paddock_repo_graph::model::inputs::Inputs,
-    graph: &RepoGraph,
-) -> Record {
+/// What the rule tables' plan runs, project by project (the record of a plan when the switch says `rules`): the halves of each project
+/// on the OS legs of its contract.
+pub fn rules_selected(plan: &Value, inputs: &paddock_repo_graph::model::inputs::Inputs, graph: &RepoGraph) -> BTreeMap<String, Sel> {
     let mut selected = BTreeMap::new();
     for (id, runs) in crate::repo_model::old_runs(plan, inputs, graph) {
         let os = match id.strip_prefix("app:") {
@@ -38,6 +29,20 @@ pub fn record_for(
         };
         selected.insert(id, Sel { os, runs, targets: None });
     }
+    selected
+}
+
+/// The record of a plan: what ran (`selected`: the graph's selection, what CI runs since the wiring, or the rule tables' answer when
+/// the switch says `rules`) and what the change could reach (the model's reach, the conservative one: every project when a file is
+/// unowned).
+pub fn record_for(
+    commit: &str,
+    base: Option<&str>,
+    at: i64,
+    selected: BTreeMap<String, Sel>,
+    reached: &paddock_repo_graph::model::Reached,
+    projects: &[(String, String)],
+) -> Record {
     let mut reach: BTreeMap<String, Vec<String>> = reached
         .nodes
         .iter()
@@ -46,8 +51,8 @@ pub fn record_for(
         .collect();
     if reached.everything {
         let why = format!("an unowned file ({}) makes the plan answer everything", reached.unowned.join(", "));
-        for (id, _) in crate::repo_model::projects(inputs, graph) {
-            reach.entry(id).or_insert_with(|| vec![why.clone()]);
+        for (id, _) in projects {
+            reach.entry(id.clone()).or_insert_with(|| vec![why.clone()]);
         }
     }
     Record {
@@ -70,16 +75,22 @@ fn commit_time(root: &Path, rev: &str) -> Result<i64, String> {
         .map_err(|_| format!("git log {rev}: no commit time ({})", String::from_utf8_lossy(&o.stderr).trim()))
 }
 
-/// What `dev plan --ci` does after planning in a workflow run: saves the selection record and pushes it. Never fails the plan: a record that
-/// is not saved makes the nightly `not measured` for that commit, which says so (ER-27); the cause is a `::warning::`.
-pub fn save_ci(root: &Path, history: &dyn History, req: &Request, graph: &RepoGraph, plan: &Value, log: &mut dyn FnMut(&str)) {
+/// What `dev plan --ci` does after planning in a workflow run: saves the selection record (`selected`, what this run's plan runs) with
+/// the model's reach and pushes it. Never fails the plan: a record that is not saved makes the nightly `not measured` for that commit,
+/// which says so (ER-27); the cause is a `::warning::`. `reach` gives the model's reach (the graph planner has it already).
+pub fn save_ci(
+    root: &Path,
+    req: &Request,
+    selected: BTreeMap<String, Sel>,
+    reach: &mut dyn FnMut(&str) -> Result<(paddock_repo_graph::model::Reached, Vec<(String, String)>), String>,
+    log: &mut dyn FnMut(&str),
+) {
     // Only a workflow run saves a record: a local `dev plan --ci` (and the golden harness, which removes GITHUB_*) writes no ref.
     if !std::env::var("GITHUB_ACTIONS").is_ok_and(|v| v == "true") {
         return;
     }
-    let run = || -> Result<String, String> {
-        let head = crate::git_env::git();
-        let mut head = head;
+    let mut run = || -> Result<String, String> {
+        let mut head = crate::git_env::git();
         head.arg("-C")
             .arg(root)
             .args(["rev-parse", "--verify", &format!("{}^{{commit}}", req.head)]);
@@ -94,17 +105,14 @@ pub fn save_ci(root: &Path, history: &dyn History, req: &Request, graph: &RepoGr
             }
             None => None,
         };
-        let world = crate::repo_model::build_world(root, history, graph, Some(&commit))?;
-        let changed = crate::repo_model::changed_files(history, req)?;
-        let reached = crate::repo_model::reach_in(&world, root, req, &changed, graph);
+        let (reached, projects) = reach(&commit)?;
         let rec = record_for(
             &commit,
             base.as_deref(),
             commit_time(root, &commit)?,
-            plan,
+            selected.clone(),
             &reached,
-            &world.inputs,
-            graph,
+            &projects,
         );
         let refs = GitRefs { root };
         super::save(&refs, &rec)?;

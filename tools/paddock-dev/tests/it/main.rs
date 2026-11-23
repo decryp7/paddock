@@ -48,6 +48,7 @@ mod merge_check;
 mod os_scoped;
 mod parity_corpus;
 mod pr;
+mod plan_graph_ci;
 mod pre_push;
 mod recorded;
 mod release_isolation;

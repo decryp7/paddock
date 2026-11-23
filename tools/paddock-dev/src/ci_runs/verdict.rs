@@ -655,7 +655,7 @@ mod tests {
 
     /// A TEST_COMPLETE scope line whose `ran` says it was OS-scoped (the Windows and macOS legs tested only the OS-specific packages).
     fn scoped_line() -> String {
-        run_scope::TEST_COMPLETE.replacen("\"whole\":true}", "\"whole\":true,\"os_full\":false}", 1)
+        run_scope::TEST_COMPLETE.replacen("\"os_full\":true", "\"os_full\":false", 1)
     }
 
     #[test]
@@ -1039,8 +1039,9 @@ mod tests {
             apps: Default::default(),
             whole: true,
             os_full: true,
+            ..Default::default()
         };
-        format!("{}\n", run_scope::ci_scope(scope(ran_jobs), false, scope(need_jobs)).line())
+        format!("{}\n", run_scope::ci_scope(scope(ran_jobs), false, scope(need_jobs), true).line())
     }
 
     /// Run 5 (a push to main) with the plan log `log` and these jobs besides its plan job: `(id, name, conclusion)`.

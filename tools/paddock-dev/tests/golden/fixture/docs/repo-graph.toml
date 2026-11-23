@@ -1,0 +1,7 @@
+# The planner fixture's inputs file: only the switch. Its recorded answers (tests/golden/expected) are the rule tables', so the
+# fixture plans from them; the graph's own goldens use tests/golden/rules/extra/docs/repo-graph.toml, which has no [planner] table.
+version = 1
+
+[planner]
+mode = "rules"
+reason = "the planner fixture's recorded answers are the rule tables' (ADR 0117 §8: the switch on rules reproduces them exactly)"

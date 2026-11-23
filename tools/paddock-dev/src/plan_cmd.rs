@@ -34,6 +34,7 @@ use crate::wait::{CurlHttp, Http};
 use paddock_cli::{CliError, Report};
 use paddock_repo_graph::GitHistory;
 use serde_json::Value;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -347,11 +348,34 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
         base: if plan_app.is_some() { None } else { base.clone() },
         head: "HEAD".into(),
     };
-    let (graph, planned) = plan_with_graph(root, &history, &req).map_err(|e| fail(e.to_string()))?;
-    if plan_app.is_none() {
-        // The selection record of the escape monitor (ADR 0117 WP-9): never fails the plan.
-        crate::escape::cmd::save_ci(root, &history, &req, &graph, &planned, &mut |l| log(l));
-    }
+    let (graph, rules_planned) = plan_with_graph(root, &history, &req).map_err(|e| fail(e.to_string()))?;
+    // Which planner decides (docs/repo-graph.toml [planner]): the graph's selection, or the rule tables (the emergency switch).
+    let planner = crate::repo_inputs::load_planner(root).map_err(fail)?;
+    let graph_mode = planner.mode == crate::repo_inputs::PlannerMode::Graph;
+    let model = if graph_mode {
+        Some(graph_reach(root, &history, &req, &graph))
+    } else {
+        None
+    };
+    let planned = match &model {
+        Some(Ok((world, reached))) => crate::plan_graph::plan(&rules_planned, reached, world, &graph, root),
+        // The model could not be built: every project in full (fail closed), said in the log.
+        Some(Err(e)) => {
+            log(&format!(
+                "::warning::the repository graph could not be read ({e}); this run plans everything. Next: fix the cause, or switch [planner] in docs/repo-graph.toml with a reason"
+            ));
+            let all = Request {
+                files: Vec::new(),
+                all: true,
+                explain: true,
+                root: None,
+                base: None,
+                head: req.head.clone(),
+            };
+            plan_with_graph(root, &history, &all).map_err(|e| fail(e.to_string()))?.1
+        }
+        None => rules_planned.clone(),
+    };
     if let Some(p) = &plan_app
         && !graph.apps.contains(p)
     {
@@ -378,10 +402,36 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
         },
     )
     .map_err(fail)?;
+    let legs = if graph_mode {
+        crate::plan_graph::narrow_app_legs(legs, &plan, &graph)
+    } else {
+        legs
+    };
+    // The selection record of the escape monitor (ADR 0117 WP-9): what this run's plan runs; never fails the plan.
+    if plan_app.is_none() {
+        let selected = if graph_mode {
+            crate::plan_graph::escape_selected(&plan, &legs, &os_legs(env))
+        } else {
+            crate::repo_inputs::load(root)
+                .map(|inputs| crate::escape::cmd::rules_selected(&plan, &inputs, &graph))
+                .unwrap_or_default()
+        };
+        let mut reach = |commit: &str| -> Result<(paddock_repo_graph::model::Reached, Vec<(String, String)>), String> {
+            if let Some(Ok((world, reached))) = &model {
+                return Ok((reached.clone(), crate::repo_model::projects(&world.inputs, &graph)));
+            }
+            let world = crate::repo_model::build_world(root, &history, &graph, Some(commit))?;
+            let changed = crate::repo_model::changed_files(&history, &req)?;
+            let reached = crate::repo_model::reach_in(&world, root, &req, &changed, &graph);
+            Ok((reached, crate::repo_model::projects(&world.inputs, &graph)))
+        };
+        crate::escape::cmd::save_ci(root, &req, selected, &mut reach, &mut |l| log(l));
+    }
     match &plan_app {
         Some(p) => log(&format!("base: only {p}, every leg (a tag's gates)")),
         None => log(&format!("base: {reason}")),
     }
+    log(&planner.line());
     log(&serde_json::to_string_pretty(&plan).unwrap_or_default());
     if let Some(app) = app {
         if !graph.apps.contains(app) {
@@ -428,6 +478,15 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
                     scope.filter
                 ),
             )?;
+            // The graph's selection of an app with its own workflow (debrief.yml): affected tests run alone, and the run says it was
+            // partial so its old report-only line and its declared scope never count it complete.
+            if graph_mode && runs_it {
+                let dir = format!("apps/{app}");
+                let mut extra = crate::plan_graph::app_workflow_outputs(&plan, app, &dir);
+                let partial = plan["graph"].get(format!("app:{app}")).is_some();
+                extra.push(("partial".into(), partial.to_string()));
+                append(&path, &extra.iter().map(|(k, v)| format!("{k}={v}\n")).collect::<String>())?;
+            }
         }
         return Ok(Report::new(serde_json::json!({ "affected": runs_it }), runs_it.to_string()));
     }
@@ -437,6 +496,7 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
     let mut outputs = ci_outputs(&plan, &legs, if plan_app.is_some() { None } else { base.as_deref() });
     // OS-scoped tests: the legs of the `crate` and `paddock-dev` jobs with what each runner tests (`hostTests` of their contracts).
     let os_runners = os_legs(env);
+    let mut workspace_oses: BTreeMap<&str, BTreeSet<String>> = BTreeMap::new();
     // Whether this run is OS-scoped: some leg tests only the packages with OS-specific code (declared in its scope line, `os_full`).
     let mut os_scoped = legs
         .iter()
@@ -459,10 +519,26 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
                 .unwrap_or_default()
         });
         let member = plan["filters"][key].as_str().unwrap_or("");
-        outputs.push((
-            name.into(),
-            serde_json::to_string(&workspace_legs(&os_runners, host.as_ref(), member, reached.as_deref())).unwrap_or_default(),
-        ));
+        let mut legs_of = workspace_legs(&os_runners, host.as_ref(), member, reached.as_deref());
+        if graph_mode {
+            let id = if key == "crates" { "crates" } else { "paddock-dev" };
+            legs_of = crate::plan_graph::narrow_workspace_legs(legs_of, &plan, &graph, id, workspace_dir);
+        }
+        workspace_oses.insert(
+            if key == "crates" { "crate" } else { "paddock-dev" },
+            legs_of
+                .iter()
+                .filter_map(|l| l["os"].as_str().map(str::to_string))
+                .collect::<BTreeSet<String>>(),
+        );
+        outputs.push((name.into(), serde_json::to_string(&legs_of).unwrap_or_default()));
+    }
+    if graph_mode {
+        // The graph's narrowed projects (ADR 0117 §5): `./dev ci run` reads them (`selection`), and the run is partial when any.
+        let (smoke, affected) = crate::plan_graph::partial_projects(&plan);
+        let [selection, partial] = crate::plan_graph::OUTPUTS;
+        outputs.push((selection.into(), crate::plan_graph::selection_output(&plan).to_string()));
+        outputs.push((partial.into(), (!smoke.is_empty() || !affected.is_empty()).to_string()));
     }
     // ADR 0113: the run declares its scope as data (what it ran, what a push to main does for this tree); `ci verdict` compares them.
     // A reused run (`PLAN_REUSE`, ci.yml's reuse step found a complete green run of this commit) runs no job: no job reads an empty
@@ -485,6 +561,16 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
         )
     };
     ran.os_full = !os_scoped;
+    if graph_mode && !reused {
+        let (smoke, affected) = crate::plan_graph::partial_projects(&plan);
+        ran.smoke = smoke;
+        ran.affected = affected;
+        // A narrowed `crate` or `paddock-dev` job runs on the legs the selection kept.
+        ran.jobs.retain(|j| match j.split_once('@') {
+            Some((job, os)) => workspace_oses.get(job).is_none_or(|o| o.contains(os)),
+            None => true,
+        });
+    }
 
     // A push to main is its own measure (its plan is the diff from the last green main), and so is a train's landing run (its plan is
     // the diff from main's last complete commit, ADR 0117 WP-8: the push to main reuses it); every other run is measured against the
@@ -492,10 +578,12 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
     let landing = event == "workflow_dispatch"
         && env("PLAN_BASE").unwrap_or_default().trim().is_empty()
         && !env("PLAN_LANDING_BASE").unwrap_or_default().trim().is_empty();
+    // The need is the whole tree's except for a push to main and a landing (their own plan): a tag needs the former (P2-3).
+    let need_whole = !((event == "push" || landing) && plan_app.is_none());
     let need_plan = if (event == "push" || landing) && plan_app.is_none() {
         plan.clone()
     } else if req.all {
-        planned.clone()
+        rules_planned.clone()
     } else {
         let all = Request {
             files: Vec::new(),
@@ -518,7 +606,7 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
     )
     .map_err(fail)?;
     let need = scope_of(&need_plan, &need_legs, true, &os_legs, &[]);
-    log(&ci_scope(ran, false, need).line());
+    log(&ci_scope(ran, false, need, need_whole).line());
     if narrow {
         log("narrowed to the packages the change reaches (a member run; the final head's full run tests the rest)");
     }
@@ -532,6 +620,19 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
         serde_json::json!({ "base": base, "reason": reason, "apps": legs.len() }),
         String::new(),
     ))
+}
+
+/// The repository graph's reach of a request (ADR 0117): the model of the head and the reach of its changed files.
+fn graph_reach(
+    root: &Path,
+    history: &GitHistory,
+    req: &Request,
+    graph: &crate::plan::RepoGraph,
+) -> Result<(crate::repo_model::World, paddock_repo_graph::model::Reached), String> {
+    let world = crate::repo_model::build_world(root, history, graph, req.base.as_ref().map(|_| req.head.as_str()))?;
+    let changed = crate::repo_model::changed_files(history, req)?;
+    let reached = crate::repo_model::reach_in(&world, root, req, &changed, graph);
+    Ok((world, reached))
 }
 
 /// The contract that declares the `hostTests` of the shared crates.
@@ -720,7 +821,7 @@ fn since_ci_with(root: &Path, env: &dyn Fn(&str) -> Option<String>, id: u64, rea
     )
     .map_err(fail)?;
     let need = scope_of(&everything, &need_legs, true, &os_legs(env), &[]);
-    eprintln!("{}", ci_scope(Scope::default(), true, need).line());
+    eprintln!("{}", ci_scope(Scope::default(), true, need, true).line());
     if let Some(why) = &plan.everything {
         println!("::warning::dev plan --since-run {id}: {why}; this run tests everything");
         let reason = format!("everything: the rerun of run {id} cannot be narrowed ({why})");

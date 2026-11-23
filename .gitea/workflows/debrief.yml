@@ -183,6 +183,8 @@ jobs:
             echo "::notice::a full green run already tested this commit; this run reuses it."
           fi
           echo "run=$run" >> "$GITHUB_OUTPUT"
+          # Only the affected tests (the graph planner's `partial`): never a full run.
+          if grep -q '^partial=true$' "$GITHUB_OUTPUT"; then PLAN_MODE_FULL=false; fi
           # The scope this run declares, printed after every decision above (ADR 0113): what the run did against what a push to main
           # does, which `./dev ci verdict` compares. A run skipped for a train, an unchanged main, a tagged commit or a reuse ran
           # nothing (run=false); a since_run dispatch is a rerun; a run that is not full tests one engine, a full run both.

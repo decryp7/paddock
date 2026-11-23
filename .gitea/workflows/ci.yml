@@ -115,6 +115,11 @@ jobs:
       webkit: ${{ steps.plan.outputs.webkit }}
       crates_filter: ${{ steps.plan.outputs.crates_filter }}
       paddock_dev_filter: ${{ steps.plan.outputs.paddock_dev_filter }}
+      # The repository graph's narrowed projects (ADR 0117 §5; docs/repo-graph.toml [planner] = graph): each one's kept phases and
+      # affected test files, passed to every job that runs `./dev ci run` as PADDOCK_PLAN_SELECTION; `partial` is true when any
+      # project runs a smoke set or affected tests only (the run is then never complete). Both are absent under `rules`.
+      selection: ${{ steps.plan.outputs.selection }}
+      partial: ${{ steps.plan.outputs.partial }}
     env:
       PADDOCK_DEV_DOWNLOAD: ${{ (inputs.release == true || startsWith(github.ref, 'refs/tags/')) && '0' || '' }}
     steps:
@@ -181,6 +186,8 @@ jobs:
         run: |
           echo "plan mode: full=$PLAN_MODE_FULL"
           ./dev plan --ci
+          # A smoke or affected-only selection (the graph planner's `partial`) is never a full run.
+          if grep -q '^partial=true$' "$GITHUB_OUTPUT"; then PLAN_MODE_FULL=false; fi
           grep -q '^crate_legs=' "$GITHUB_OUTPUT" || echo "crate_legs=$PLAN_OS_LEGS" >> "$GITHUB_OUTPUT"
           grep -q '^paddock_dev_legs=' "$GITHUB_OUTPUT" || echo "paddock_dev_legs=$PLAN_OS_LEGS" >> "$GITHUB_OUTPUT"
           # REPORT-ONLY PHASE (ER-41, ADR 0113): until docs/ci-scope-first-runs.toml names ci.yml, `./dev ci verdict` still decides on this
@@ -230,6 +237,9 @@ jobs:
     container:
       image: dev.decryptology.net/decryp7/paddock-ci:v3
     env:
+      # The graph's selection of this job's project (ADR 0117 §5): `./dev ci run` skips a phase it does not keep and gives a test
+      # runner only the affected files (tools/paddock-dev/src/ci_run/select.rs). Empty: every phase, every file.
+      PADDOCK_PLAN_SELECTION: ${{ needs.plan.outputs.selection }}
       # `./dev ci run` runs the job's commands from its project's paddock.ci.json (ADR 0038 §1): a tag or release run builds the tool from source.
       # The read credential is set on the ./dev steps only.
       PADDOCK_DEV_DOWNLOAD: ${{ (inputs.release == true || startsWith(github.ref, 'refs/tags/')) && '0' || '' }}
@@ -331,6 +341,9 @@ jobs:
       matrix:
         shard: [1, 2]
     env:
+      # The graph's selection of this job's project (ADR 0117 §5): `./dev ci run` skips a phase it does not keep and gives a test
+      # runner only the affected files (tools/paddock-dev/src/ci_run/select.rs). Empty: every phase, every file.
+      PADDOCK_PLAN_SELECTION: ${{ needs.plan.outputs.selection }}
       # `./dev ci run` runs the job's commands from its project's paddock.ci.json (ADR 0038 §1): a tag or release run builds the tool from source.
       # The read credential is set on the ./dev steps only.
       PADDOCK_DEV_DOWNLOAD: ${{ (inputs.release == true || startsWith(github.ref, 'refs/tags/')) && '0' || '' }}
@@ -377,6 +390,9 @@ jobs:
     if: ${{ needs.plan.outputs.ui == 'true' && (needs.plan.outputs.webkit == 'true' || contains(fromJSON(needs.plan.outputs.rerun_jobs || '[]'), 'e2e-webkit')) && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["e2e-webkit"]'), 'e2e-webkit') }}
     runs-on: macos-latest
     env:
+      # The graph's selection of this job's project (ADR 0117 §5): `./dev ci run` skips a phase it does not keep and gives a test
+      # runner only the affected files (tools/paddock-dev/src/ci_run/select.rs). Empty: every phase, every file.
+      PADDOCK_PLAN_SELECTION: ${{ needs.plan.outputs.selection }}
       # A run for a tag builds the tool from source (ADR 0022: release and tag jobs bypass every cache); other runs may download it.
       PADDOCK_DEV_DOWNLOAD: ${{ (inputs.release == true || startsWith(github.ref, 'refs/tags/')) && '0' || '' }}
       # Read credential for ./dev's prebuilt download (ADR 0022 R0b).
@@ -439,6 +455,9 @@ jobs:
     container:
       image: dev.decryptology.net/decryp7/paddock-ci:v3
     env:
+      # The graph's selection of this job's project (ADR 0117 §5): `./dev ci run` skips a phase it does not keep and gives a test
+      # runner only the affected files (tools/paddock-dev/src/ci_run/select.rs). Empty: every phase, every file.
+      PADDOCK_PLAN_SELECTION: ${{ needs.plan.outputs.selection }}
       PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
       PADDOCK_DEV_DOWNLOAD: ${{ (inputs.release == true || startsWith(github.ref, 'refs/tags/')) && '0' || '' }}
       # The ref the baselines' and allow lists' growth is measured against (ER-21; ADR 0098 amendment): the dispatch's `base` (the
@@ -524,6 +543,9 @@ jobs:
     container:
       image: dev.decryptology.net/decryp7/paddock-ci:v3
     env:
+      # The graph's selection of this job's project (ADR 0117 §5): `./dev ci run` skips a phase it does not keep and gives a test
+      # runner only the affected files (tools/paddock-dev/src/ci_run/select.rs). Empty: every phase, every file.
+      PADDOCK_PLAN_SELECTION: ${{ needs.plan.outputs.selection }}
       # `./dev ci run` runs the job's commands from its project's paddock.ci.json (ADR 0038 §1): a tag or release run builds the tool from source.
       # The read credential is set on the ./dev steps only.
       PADDOCK_DEV_DOWNLOAD: ${{ (inputs.release == true || startsWith(github.ref, 'refs/tags/')) && '0' || '' }}
@@ -789,6 +811,9 @@ jobs:
     container:
       image: dev.decryptology.net/decryp7/paddock-ci:v3
     env:
+      # The graph's selection of this job's project (ADR 0117 §5): `./dev ci run` skips a phase it does not keep and gives a test
+      # runner only the affected files (tools/paddock-dev/src/ci_run/select.rs). Empty: every phase, every file.
+      PADDOCK_PLAN_SELECTION: ${{ needs.plan.outputs.selection }}
       # `./dev ci run` runs the job's commands from its project's paddock.ci.json (ADR 0038 §1): a tag or release run builds the tool from source.
       # The read credential is set on the ./dev steps only.
       PADDOCK_DEV_DOWNLOAD: ${{ (inputs.release == true || startsWith(github.ref, 'refs/tags/')) && '0' || '' }}
@@ -832,6 +857,9 @@ jobs:
     container:
       image: dev.decryptology.net/decryp7/paddock-ci:v3
     env:
+      # The graph's selection of this job's project (ADR 0117 §5): `./dev ci run` skips a phase it does not keep and gives a test
+      # runner only the affected files (tools/paddock-dev/src/ci_run/select.rs). Empty: every phase, every file.
+      PADDOCK_PLAN_SELECTION: ${{ needs.plan.outputs.selection }}
       # `./dev ci run` runs the job's commands from its project's paddock.ci.json (ADR 0038 §1): a tag or release run builds the tool from source.
       # The read credential is set on the ./dev steps only.
       PADDOCK_DEV_DOWNLOAD: ${{ (inputs.release == true || startsWith(github.ref, 'refs/tags/')) && '0' || '' }}
@@ -871,6 +899,9 @@ jobs:
     container:
       image: dev.decryptology.net/decryp7/paddock-ci:v3
     env:
+      # The graph's selection of this job's project (ADR 0117 §5): `./dev ci run` skips a phase it does not keep and gives a test
+      # runner only the affected files (tools/paddock-dev/src/ci_run/select.rs). Empty: every phase, every file.
+      PADDOCK_PLAN_SELECTION: ${{ needs.plan.outputs.selection }}
       # setup-rust runs ./dev (docs/plans/ci-in-rust.md): the read credential, and a tag or release run builds the tool from source.
       PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
       PADDOCK_DEV_DOWNLOAD: ${{ (inputs.release == true || startsWith(github.ref, 'refs/tags/')) && '0' || '' }}
@@ -1087,7 +1118,7 @@ jobs:
           # A member run that reaches none of the host packages has nothing to test on this host (the plan says so, never an empty list).
           if [ -z "$FILTER" ] && [ "$TEST_SKIP" = true ]; then echo "::notice::this member run reaches no package with OS-specific code: nothing to test on this runner (hostTests)"; exit 0; fi
           filter=(); sel=(--workspace)
-          if [ -n "$FILTER" ]; then echo "::notice::nextest reruns only the failed tests: $FILTER"; filter=(-E "$FILTER" --no-tests=warn)
+          if [ -n "$FILTER" ]; then echo "::notice::nextest runs only the selected tests (a rerun's failed tests, or the plan's smoke set or affected targets): $FILTER"; filter=(-E "$FILTER" --no-tests=warn)
           else
             if [ -n "$TEST_PACKAGES" ]; then echo "::notice::nextest tests only the packages with OS-specific code on this runner (hostTests): $TEST_PACKAGES"; sel=(); for p in $TEST_PACKAGES; do sel+=(-p "$p"); done; fi
             if [ -n "$TEST_FILTER" ]; then echo "::notice::nextest filter (hostTests, and the packages this change reaches in a member run): $TEST_FILTER"; filter=(-E "$TEST_FILTER" --no-tests=fail); fi
@@ -1302,6 +1333,9 @@ jobs:
       matrix:
         include: ${{ fromJSON(needs.plan.outputs.apps) }}
     env:
+      # The graph's selection of this job's project (ADR 0117 §5): `./dev ci run` skips a phase it does not keep and gives a test
+      # runner only the affected files (tools/paddock-dev/src/ci_run/select.rs). Empty: every phase, every file.
+      PADDOCK_PLAN_SELECTION: ${{ needs.plan.outputs.selection }}
       # A run for a tag builds the tool from source (ADR 0022: release and tag jobs bypass every cache); other runs may download it.
       PADDOCK_DEV_DOWNLOAD: ${{ (inputs.release == true || startsWith(github.ref, 'refs/tags/')) && '0' || '' }}
       # Read credential for ./dev's prebuilt download (ADR 0022 R0b), only in the jobs that run ./dev (job-isolation).
@@ -1581,7 +1615,7 @@ jobs:
           TEST_FILTER: ${{ matrix.test_filter }}
         run: |
           filter=()
-          if [ -n "$FILTER" ]; then echo "::notice::nextest reruns only the failed tests: $FILTER"; filter=(-E "$FILTER" --no-tests=warn)
+          if [ -n "$FILTER" ]; then echo "::notice::nextest runs only the selected tests (a rerun's failed tests, or the plan's smoke set or affected targets): $FILTER"; filter=(-E "$FILTER" --no-tests=warn)
           elif [ -n "$TEST_FILTER" ]; then echo "::notice::nextest filter (hostTests, and the packages this change reaches in a member run): $TEST_FILTER"; filter=(-E "$TEST_FILTER" --no-tests=fail); fi
           cargo nextest run --profile ci --locked --no-fail-fast ${filter[@]+"${filter[@]}"}
 
