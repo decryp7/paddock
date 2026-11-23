@@ -823,6 +823,17 @@ fn graph_root(resolved: &Path, os: paddock_env::Os) -> Result<(PathBuf, String),
 
 /// Reads the graphs of the repository at `root` (tracked files only, as `git ls-files` lists them).
 pub fn read_graph(root: &Path, history: &dyn History) -> Result<RepoGraph, GraphError> {
+    read_graph_placing(root, history, true)
+}
+
+/// [`read_graph`] without the OS placement ([`RepoGraph::host`] stays empty): for a reader that never asks for it (the repository
+/// model's own checks). Deriving it lexes every Rust source of each workspace that declares `hostTests`, about 90% of the time of
+/// reading the graphs (docs/benchmarks.md, 2026-11-23), and no process starts for it.
+pub fn read_graph_unplaced(root: &Path, history: &dyn History) -> Result<RepoGraph, GraphError> {
+    read_graph_placing(root, history, false)
+}
+
+fn read_graph_placing(root: &Path, history: &dyn History, place: bool) -> Result<RepoGraph, GraphError> {
     let files = history.tracked_files()?;
     // The root in the spelling cargo prints its paths in (a temp folder's short name or a symlinked workspace is not).
     let resolved = paddock_env::winpath::real_verbatim(root).unwrap_or_else(|_| root.to_path_buf());
@@ -849,7 +860,7 @@ pub fn read_graph(root: &Path, history: &dyn History) -> Result<RepoGraph, Graph
     // OS placement (ADR 0117 §7): derived once per workspace that declares exceptions, from one bulk read of its sources.
     let bulk = crate::os_placement::DiskBulk(root.to_path_buf());
     let mut host = BTreeMap::new();
-    for (ws, contract) in crate::os_placement::workspaces(&files) {
+    for (ws, contract) in crate::os_placement::workspaces(&files).into_iter().filter(|_| place) {
         let declared = match ws.strip_prefix("apps/") {
             Some(app) => configs.get(app).is_some_and(|c: &Value| c.get("hostTests").is_some()),
             None => disk

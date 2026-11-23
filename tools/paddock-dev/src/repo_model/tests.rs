@@ -618,7 +618,7 @@ fn every_extractor_reports_an_unresolvable_reference_and_the_plan_widens_to_its_
 fn every_declared_smoke_set_names_real_packages_and_phases() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let history = paddock_repo_graph::GitHistory::new(&root, std::time::Duration::from_secs(120));
-    let graph = crate::plan::read_graph(&root, &history).unwrap();
+    let graph = crate::plan::read_graph_unplaced(&root, &history).unwrap();
     let decls = decl::load(
         &crate::repo_model::decl::working_tree(&root),
         &graph,
@@ -883,7 +883,7 @@ fn the_contracts_are_read_at_the_requested_revision_not_the_working_tree() {
 fn every_tracked_file_of_the_tree_has_an_owner_and_the_control_names_an_unclaimed_one() {
     let root = repo_root();
     let history = paddock_repo_graph::GitHistory::new(&root, std::time::Duration::from_secs(120));
-    let graph = crate::plan::read_graph(&root, &history).unwrap();
+    let graph = crate::plan::read_graph_unplaced(&root, &history).unwrap();
     let world = build_world(&root, &history, &graph, None).unwrap();
     let req = Request {
         files: world.files.clone(),
@@ -929,4 +929,72 @@ fn every_tracked_file_of_the_tree_has_an_owner_and_the_control_names_an_unclaime
         &graph,
     );
     assert_eq!(control.unowned, stray);
+}
+
+/// The repository model's own checks read the graphs without the OS placement (failing first: `every_tracked_file_of_the_tree...`
+/// spent about 90% of its 15 s lexing every Rust source of three workspaces for a placement it never reads, and ran 60 s on a loaded
+/// Windows runner, run 8674; it starts 5 git processes whatever the tree holds, so the cost is work, not process starts). The
+/// control: `read_graph` over the same tree derives it, and the two read the same cargo and npm graphs.
+#[test]
+fn the_unplaced_graph_skips_the_os_placement_and_reads_the_same_graphs() {
+    let d = tempfile::tempdir().unwrap();
+    let write = |path: &str, text: &str| {
+        let p = d.path().join(path);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, text).unwrap();
+    };
+    write("crates/Cargo.toml", "[workspace]\nmembers = [\"a\"]\nresolver = \"2\"\n");
+    write(
+        "crates/a/Cargo.toml",
+        "[package]\nname = \"a\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+    );
+    write("crates/a/src/lib.rs", "pub fn f() {}\n");
+    write("crates/paddock.ci.json", r#"{"hostTests": {"skip": []}}"#);
+    let git_in = |args: &[&str]| {
+        let mut c = crate::git_env::git();
+        c.arg("-C")
+            .arg(d.path())
+            .args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"])
+            .args(args);
+        let out = c.output().unwrap();
+        assert!(out.status.success(), "{args:?}: {}", String::from_utf8_lossy(&out.stderr));
+    };
+    git_in(&["init", "-q"]);
+    git_in(&["add", "-A"]);
+    git_in(&["commit", "-q", "-m", "one"]);
+    let history = paddock_repo_graph::GitHistory::new(d.path(), std::time::Duration::from_secs(60));
+    let placed = crate::plan::read_graph(d.path(), &history).unwrap();
+    let unplaced = crate::plan::read_graph_unplaced(d.path(), &history).unwrap();
+    assert!(
+        placed.host.contains_key("crates"),
+        "control: read_graph derives it: {:?}",
+        placed.host.keys()
+    );
+    assert!(unplaced.host.is_empty(), "{:?}", unplaced.host.keys());
+    assert_eq!(unplaced.cargo.iter().count(), placed.cargo.iter().count());
+    assert!(unplaced.cargo.iter().count() > 0);
+}
+
+/// The whole check starts a fixed number of readers whatever the tree holds (ER-20): the world over `n` tracked files and the reach
+/// of all of them start one `git cat-file` reader each and one `git grep`.
+#[test]
+fn the_world_and_the_reach_of_every_file_start_a_fixed_number_of_git_processes() {
+    for n in [3, 40] {
+        let (d, _base, head) = two_commits(n);
+        let history = paddock_repo_graph::GitHistory::new(d.path(), std::time::Duration::from_secs(60));
+        let world_bulk = GitBulk::through_git(d.path(), Some(&head));
+        let (world, adapters) = build_world_with(d.path(), &history, &RepoGraph::default(), Some(&head), &world_bulk).unwrap();
+        let files = world.files.clone();
+        assert!(files.len() >= n, "{n}: {}", files.len());
+        let req = Request {
+            files: files.clone(),
+            ..request("", &head)
+        };
+        let req = Request { base: None, ..req };
+        let bulk = GitBulk::through_git(d.path(), None);
+        let (_, grep) = reach_in_with(&world, d.path(), &req, &files, &RepoGraph::default(), &bulk);
+        assert_eq!(world_bulk.starts(), 1, "{n} files: the world's reader");
+        assert_eq!(bulk.starts(), 1, "{n} files: the reach's reader");
+        assert_eq!((adapters, grep), (1, 0), "{n} files: adapter processes");
+    }
 }
