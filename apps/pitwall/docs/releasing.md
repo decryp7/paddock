@@ -104,7 +104,7 @@ reinstall from the releases page and replace the secrets. Because the key is sha
 Installing and running on Windows and Linux, and CUDA and Vulkan engine builds, have not been verified on real
 machines yet; say so in the release notes of any early build. See [roadmap.md](roadmap.md).
 
-<!-- paddock:block releasing rev=b41eea16 -->
+<!-- paddock:block releasing rev=e4980ede -->
 ## Releasing from a tag
 
 Releases are made by CI from the tag `pitwall-vX.Y.Z`, never from a workstation (rule 9). A local build for you to try is
@@ -125,6 +125,10 @@ fine; it is never published.
    push to main, or a run whose plan job logged `plan mode: full=true`), and the commit must be on `main` or `release/*`. The tag workflow runs the gates
    again, builds the installers on all platforms, verifies the macOS bundle (`codesign --verify --deep --strict` on the .app
    and the DMG), publishes the release with its notes and `latest.json`.
+   Standing OK (user, 2026-10-29): once an app's release gates are green on the exact commit and its tag prerequisites
+   hold, the coordinator requests that app's tag through the `tag` workflow without asking per tag, and reports each tag. An
+   app with any failure that is not waived waits (rule 54, ER-31). `RELEASE_TOKEN` is a user-level Actions secret: the
+   repository secrets API does not list it, which is not a release blocker (user, 2026-10-23).
 4. After the release: install the published build (not the CI artifact) and run the app's installed-app verify script.
 <!-- /paddock:block releasing -->
 

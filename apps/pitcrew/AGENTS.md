@@ -4,7 +4,7 @@ Pitcrew is a runner manager for Gitea and Forgejo: a Rust core (`crates/pitcrew-
 (`crates/pitcrew-service`), a Tauri 2 shell (`app/src-tauri`) and an Angular UI (`app/src`). See README.md for what it
 does and `docs/adr/` for why it is built this way.
 
-<!-- paddock:block rules rev=ef5e655a -->
+<!-- paddock:block rules rev=8591779a -->
 ## Paddock rules (binding)
 
 The family's binding rules, copied from [paddock/docs/rules.md](https://dev.decryptology.net/decryp7/paddock/src/branch/main/docs/rules.md) (the source; update there first). Where an older rule in this file disagrees, these win.
@@ -13,6 +13,10 @@ The family's binding rules, copied from [paddock/docs/rules.md](https://dev.decr
 1. **One release at a time.** Release-critical work comes first. Other apps may progress in parallel only while load and
    CI capacity allow, and only if they don't change shared code (`crates/`, `ui/`) the release depends on; tags stay
    serialized (amended twice on 2026-10-28; ER-1).
+   Once a train carries a release, that train and the trains ahead of it are frozen: they take only fixes for their own CI
+   failures, and new tooling waits for the next train. Tooling work in progress is capped: finish the open branches before
+   starting new ones, while the next app's release prep keeps moving (user, 2026-11-20; ER-1). *Why:* Dyno was ready on
+   2026-11-19 and stood behind trains 15 and 16, which kept taking tooling members, with about 10 tooling branches in flight.
 2. **Every agent works in its own git worktree** with its own `CARGO_TARGET_DIR` and its own e2e port; the main checkout
    stays on `main` for the coordinator.
 3. **Tests in a branch: only the affected ones** (touched crates, touched specs, related Playwright files), with
@@ -102,7 +106,10 @@ The family's binding rules, copied from [paddock/docs/rules.md](https://dev.decr
 24. **Services survive updates:** re-register once per version change (unregister → `launchctl bootout` → wait →
     register) and repair a stale registration automatically.
 25. **Before tagging:** `cargo deny check advisories`, one CI build with bundles, the icon check, strip whitespace from
-    signing secrets, and the release notes' First launch section (until the apps are signed).
+    signing secrets, and the release notes' First launch section (until the apps are signed). The app's open diagnostic-bundle
+    P1 findings are fixed first: logs through the shared redactor, no window screenshots by default, a dead service still yields
+    a useful bundle (user, 2026-11-05; an audit's evidence is in the app's release plan, one row per P1). *Why:* Dyno 1.1.0's
+    bundle audit found 8 P1s, and Debrief 1.2 and Pitcrew 1.1 still wrote raw logs or empty zips.
 26. **Process memory is measured as real memory per OS:** Linux PSS (`smaps_rollup`, skipping thread entries), macOS physical footprint (`ri_phys_footprint`), Windows private working set; never RSS. Caps, budgets and displays use this one measure from `paddock-proc`.
 
 ### Angular and SignalStore (approved 2026-10-23; reasons: [research](https://dev.decryptology.net/decryp7/paddock/src/branch/main/docs/research/2026-10-angular-and-signalstore.md))
@@ -126,8 +133,8 @@ The family's binding rules, copied from [paddock/docs/rules.md](https://dev.decr
     or checked (a declared contract, one shared mechanism, a lint or test over every instance), and fix the instances
     through it. Until v1, check every batch of bug reports for such patterns.
     The coordinator proposes the redesign in the same reply that relays the report (a question to the user, or a start under
-    an earlier approval), never ending a turn with an unproposed class (ER-21; hook `.claude/hooks/recurring-guard.sh` planned).
-    Hooks that judge an agent's text (the recurring guard, hook `.claude/hooks/recurring-guard.sh` planned, advisory) only warn; hooks
+    an earlier approval), never ending a turn with an unproposed class (ER-21; the Stop hook `.claude/hooks/recurring-guard.sh`).
+    Hooks that judge an agent's text (the recurring guard, `.claude/hooks/recurring-guard.sh`, advisory) only warn; hooks
     that guard state (the cd guard, safe-remove) still block (user, 2026-11-12).
     A gate's "passed" is a value only the check can produce, and its tests show both a deleted check and a skipped gate fail (PRINCIPLES.md, robustness; 2026-11-12).
 
@@ -153,6 +160,10 @@ The family's binding rules, copied from [paddock/docs/rules.md](https://dev.decr
     call or an exported constant, and never re-typed. Reviews check for it (ER-22; user, 2026-11-17). *Why:* Debrief's
     Explorer width constant copied the layout plan's rule and caused a 920-934 px jump, and an earlier 51 px placeholder
     had copied the filter bar's height.
+    Shared crates, packages and `./dev` commands are named by the concept, not by the first format or consumer
+    (`paddock-diagrams` with draw.io as one backend, not `paddock-drawio`); the model stays neutral and formats sit behind it
+    (user, 2026-10-30). *Why:* a narrow name forces a rename when the second use arrives (`paddock-repo-rules` became
+    `paddock-rules`, `paddock-repo-files` became `paddock-walk`).
 
 **Testing shared code (user, 2026-10-24)**
 43. **Shared behaviour is tested once, in Paddock.** A shared crate or package carries the full tests of its behaviour
@@ -275,7 +286,10 @@ The family's binding rules, copied from [paddock/docs/rules.md](https://dev.decr
     train is assembled during the current train's CI: its integrator merges members on top of the running train's head, runs
     all local gates, and re-merges the running train's final head when it lands, so the next CI starts at once. (3) The
     train dispatches an app's release gate only when the plan marks it (rule 54 (a2)), and with `gates=false` once the counting
-    full `ci.yml` run is green on that exact commit (rule 54 (a3)).
+    full `ci.yml` run is green on that exact commit (rule 54 (a3)). (3a) After a second red round caused by one app's flakes,
+    that app's members are pulled out at once (a `git revert -m 1` of their merges), not after a third round; they return as a
+    revert of the revert once that app's full e2e sweep is clean locally (user, 2026-11-19; ER-9). *Why:* Debrief's WebKit
+    flakes held train 14 for two days, with trains 15 to 17 (the Dyno release) queued behind it.
     (4) A test that fails and then passes on its one retry (FLAKY) blocks the landing only when the train's change touches the test
     itself or the source it exercises (its feature or module: the files it drives, not any file of the same app package or crate;
     ER-12, user, 2026-11-19). Otherwise the landing goes ahead: the flake is recorded with its log as a
@@ -364,9 +378,15 @@ The family's binding rules, copied from [paddock/docs/rules.md](https://dev.decr
 
 ### Release path (user, 2026-10-30)
 54. **Every change that touches an app's release path builds that app's installers before it lands on main, once per
-    train or batch that touches it (user, 2026-11-12), not once per branch.** The release path is the release workflow,
-    the shared app-release workflow, the bundle and prepare steps, the Tauri config and the app's imports of shared
-    packages.
+    train or batch that touches it (user, 2026-11-12), not once per branch.** The release path is the bundle, sign,
+    notarise and publish steps of the release workflow and the shared app-release workflow (the steps that use an action),
+    the prepare steps, the Tauri config, the app's code and its imports of shared packages. A check a release job only
+    runs is not on it: (a0) decides where the two meet.
+    (a0) Narrowed (user, 2026-11-23): a check a release job runs (a `run:` step: the release preflight, a conformance check or
+    a check script) is not the release path. A change that reaches only such a step selects the app's smoke set and its
+    `checks` phase, not the installers (ADR 0117's `gate` reach; `docs/repo-graph.toml` `[ci] release_gate_phases`). The
+    installers stay for the bundle, sign, notarise and publish steps (the steps that use an action), the app's code, the
+    Tauri config and tags. A smoke run never counts as a complete verdict. Rule 87 points here.
     (a) The batch dispatches `<app>-release.yml` with gates on and the installers (bundle) built; passing tests alone is
     not enough.
     (a2) A train dispatches an app's release gate only when the plan (`./dev plan`, over the train's
@@ -500,6 +520,53 @@ Amendments of the same date, no new number: the member gate runs each member's a
 
 ### Bulk APIs (user, 2026-11-18; ER-20, PRINCIPLES "Bulk APIs")
 85. **Bulk APIs: one call for many items** (ER-20; PRINCIPLES "Bulk APIs"; ADR 0108). A function, Tauri command, port method, IPC message or HTTP endpoint that works on items takes many at once (a slice, an iterator, a stream) and returns a result per item, so a caller with N items makes one call; a single-item form, where one is needed, is a thin wrapper over the bulk one; one bad item does not fail the batch unless the operation is atomic by design; large inputs are chunked or paged (ADR 0018, bounded loading). Work over many items is one bulk call or one long-lived process or connection: one SQL statement or one transaction, one bulk IPC request, one `git cat-file --batch` reader instead of a git start per object, an in-process library. A loop that calls a command, port, process, query or endpoint per item is a review finding unless the code says why (`// per-item: <reason>`). A command's count of process starts, statements or invokes is a budget a test guards: each bulk command lands with a test that N items cost at most K, failing first with the per-item code. Status: rule and review line in force; the shared batch git reader (`crates/paddock-git`) and the stdin-taking bounded run in paddock-proc in progress on `perf/git-heavy-tests-2`; the counting seams, the per-item result type and the ESLint rule `paddock/no-backend-call-in-loop` (report-only until its first green run, ER-41) planned (ADR 0108 WP-0). *Why:* on 2026-11-18 a git start cost about 45 ms on the Windows runner against about 6 ms on the Mac and the merge check started 33 to 75 gits per check (train 14); the inventory of that day found 65 more places across every app, the shared crates and the dev tools (docs/research/2026-11-18-bulk-api-inventory.md), after six earlier instances fixed one by one (ADR 0108).
+
+### CI selection and test runs (user, 2026-11-23; ADR 0117; ER-9, ER-32, ER-49)
+86. **Only setup-only actions declared in `docs/repo-graph.toml` are plumbing.** A change to an action, script or doc that the graph
+    does not declare as plumbing reaches the projects that use it, and an unowned or unresolvable reference selects everything (fail
+    closed, ADR 0117). Nothing is plumbing by its folder or name. *Why:* `.gitea/actions/README.md` was on the planner's global list
+    and train 20 spent six full rounds (runs 8610, 8635, 8647, about 700 to 730 job-minutes each) on plumbing changes.
+87. **A change to a conformance check, or to a check a release job runs, runs the app's smoke set and its checks phase, not the
+    installers** (user, 2026-11-23). The text is rule 54 (a0), the one copy.
+88. **Removing an OS from a test needs the user's approval.** The record is `docs/os-removals.toml`; growth of that register is a
+    finding that no waiver clears (rule 83; the check is planned in ADR 0117). *Why:* OS-scoped tests (ER-9) cut Windows time by 46%, and an OS
+    dropped without a reason is a hole in the net.
+89. **Every test run goes through the bounded runner** (ER-32, ER-51): nextest with its timeout, and the same progress watchdog as
+    the push gates. Agents and CI never run plain `cargo test` or an unbounded test command, a hook steers them to the runner, and
+    a leftover child is ended by the handle its start gave back. *Why:* on 2026-11-22/23 `worktree::list_clean` hung 3.5 h and
+    `ci_isolation` 18 min under plain `cargo test --test it`, and test-spawned `ci slot hold` processes were orphaned four times.
+90. **A landing may rest on a narrowed run** (ER-15, user, 2026-11-23): a smoke set or the affected tests that ran exactly the
+    selection the landing's own diff planned. Such a run counts for that landing only: it is never complete for a tag or a
+    release, never the base for later planning, and the nightly still runs everything. *Why:* in ADR 0117's review round 2,
+    narrowed runs were never complete, so a train whose change needed only a smoke set or its affected tests could never land.
+
+### Approvals, captures, tool output, unstable apps and optional services (user; ER-5, ER-14, ER-39, ER-42)
+91. **Agents never write `approved: user`** (nor a `Gates-date:`, `Coverage-lowered:` or waiver approval, or a record that names the
+    user as approver) on the user's behalf. Only the user's own message is an approval, and the coordinator records it from that
+    message. Every review checks the trailers and records of the diff for it (user, 2026-11-04; honour system, since ADR 0097's
+    signed approvals were cut on 2026-11-11). Existing coverage minimums are never lowered at all. *Why:* approvals are the only
+    thing that lets a list grow (rule 83), so a forged one would defeat every ratchet.
+92. **A check that polices a tool's config, directives or output reads it through that tool's own parser or output format,** never a
+    home-made regex over its text: ESLint suppressions through ESLint, `cargo metadata` for Cargo, a YAML parser for workflows
+    (ER-42; user, 2026-11-18). New checks follow it; existing regex checks migrate when the queue reaches them. *Why:* seen
+    three times: C137 matched unrelated `ci.yml` text, a train-8 `sed` over `ci.yml`, and C139's regex missed three ESLint
+    directive forms.
+93. **No agent runs a capture of the host's tool output** (the capture tool of ADR 0090, or any one-off dump of registry, process,
+    service or config state taken to learn what a tool prints) without the user's OK for that capture (user, 2026-11-10; ADR 0090
+    is deferred and this binds meanwhile). Fixtures stay invented same-shape data (rule 7, ER-14). *Why:* host dumps carry names,
+    paths and hostnames the user has not released.
+94. **No migration or compatibility code for old data before v1** (user, 2026-10-18 and 2026-11-06). A store, settings file or
+    format the new version cannot read is rejected with a clear message and a next step ("import the files again"), never a crash
+    and never silent loss; the old files stay untouched. Tests cover the rejection message, not a legacy path. Not migrations, and so
+    kept: defaults for missing or corrupt settings, ignoring unknown keys, and wire or protocol version checks between processes.
+    *Why:* the apps' first versions are unstable and the user is the only user.
+95. **Useful network features are on by default, each with its own Settings switch** (user, 2026-11-03): map data, public-IP lookup,
+    list and update checks work out of the box, through `paddock-net` Egress with a host allow-list; a first-run note says what goes
+    online and to whom; caches keep source and date. There is no Offline mode. AI models stay local. A source the user adds (a URL
+    subscription) starts only when added. Release and CI tooling never use these features.
+96. **Pitwall is always optional** (user, 2026-10-23). Every app's core works without it; an AI feature shows a clear "Needs local
+    AI: set up Pitwall" state, never an error or a dead button. Debrief's AI features run only through Pitwall (user, 2026-11-08);
+    Debrief has no model engine of its own. Pitwall itself is local-only and has no cloud feature.
 
 ### Monorepo (ADR 0014 §10; effective for an app from its import into `paddock/apps/<app>`, for Paddock from the first import)
 Until an app is imported, rules 2, 3, 8, 9, 39 and 42 above apply to it as written. From its import, these replace them:

@@ -194,7 +194,7 @@ node apps/dyno/app/src-tauri/scripts/sidecar.mjs && (cd apps/dyno/app && npx tau
 The key must be the same for the signature and for the build that compiles `TAURI_UPDATER_PUBKEY` in, or the install says the
 helper does not match its signature. Unit tests use the fixtures in `crates/dyno-helper-service/tests/fixtures/` (a throwaway key).
 
-<!-- paddock:block releasing rev=b41eea16 -->
+<!-- paddock:block releasing rev=e4980ede -->
 ## Releasing from a tag
 
 Releases are made by CI from the tag `dyno-vX.Y.Z`, never from a workstation (rule 9). A local build for you to try is
@@ -215,6 +215,10 @@ fine; it is never published.
    push to main, or a run whose plan job logged `plan mode: full=true`), and the commit must be on `main` or `release/*`. The tag workflow runs the gates
    again, builds the installers on all platforms, verifies the macOS bundle (`codesign --verify --deep --strict` on the .app
    and the DMG), publishes the release with its notes and `latest.json`.
+   Standing OK (user, 2026-10-29): once an app's release gates are green on the exact commit and its tag prerequisites
+   hold, the coordinator requests that app's tag through the `tag` workflow without asking per tag, and reports each tag. An
+   app with any failure that is not waived waits (rule 54, ER-31). `RELEASE_TOKEN` is a user-level Actions secret: the
+   repository secrets API does not list it, which is not a release blocker (user, 2026-10-23).
 4. After the release: install the published build (not the CI artifact) and run the app's installed-app verify script.
 <!-- /paddock:block releasing -->
 

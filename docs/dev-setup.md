@@ -308,6 +308,20 @@ author or by `./dev brief` (not on main yet): that call belongs there. The Rust 
   for scripts. The limits are flags (`--start-below`, `--hold-above`, `--min-free-gib`, `--ci-hold`, `--disk <path>`, `--no-ci`).
   It decides nothing by itself: it does not start or stop agents, and `heavy.sh` still caps the heavy steps.
 
+## Runner and credential facts
+
+- **Full Disk Access (macOS runner).** Never grant it to `/bin/sh` or `bash`. The user keeps it for `pitcrew-service` and
+  `gitea-runner`; do not suggest revoking it (user, 2026-11-04). A disclaimed child or a `launchctl submit` job is its own
+  responsible process and lacks the Removable Volumes permission on a job `TMPDIR` placed on an external volume, so each job's
+  `TMPDIR` stays on the internal SSD while the work folder and caches sit on the dev disk. Expect a Removable Volumes dialog
+  after each ad-hoc-signed runner update.
+- **Gitea push credential.** `GITEA_TOKEN` (from the shell profile) reaches git only through the repo-local credential helper
+  in the Paddock repository's own git config (`credential.https://dev.decryptology.net.helper`, set to the empty string and
+  then to a `get`-only function that prints `username=decryp7` and `password=$GITEA_TOKEN`). Never write the token into a
+  config file, a note, the keychain or a log, and never pass `-c credential.helper=...` per command (the worktree guard refuses
+  it, ER-39). Why: on 2026-11-20 a 401 during a Gitea outage made git's osxkeychain helper erase the stored login, and every
+  push then failed with "could not read Username".
+
 ## Things that cost time when forgotten
 
 - Don't run macOS tests under `nice`: it is SIP-protected and strips `DYLD_*` variables, so libraries are not found.
