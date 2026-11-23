@@ -24,53 +24,7 @@
   ],
   "allRules": false,
   "allModel": false,
-  "differences": [
-   {
-    "project": "app:debrief",
-    "rules": "rust",
-    "model": null
-   },
-   {
-    "project": "app:dyno",
-    "rules": "rust",
-    "model": null
-   },
-   {
-    "project": "app:pitcrew",
-    "rules": "rust",
-    "model": null
-   },
-   {
-    "project": "app:pitwall",
-    "rules": "rust",
-    "model": null
-   },
-   {
-    "project": "app:shell-demo",
-    "rules": "rust",
-    "model": null
-   },
-   {
-    "project": "app:spotter",
-    "rules": "rust",
-    "model": null
-   },
-   {
-    "project": "app:workbench-demo",
-    "rules": "rust",
-    "model": null
-   },
-   {
-    "project": "paddock-dev",
-    "rules": "all",
-    "model": null
-   },
-   {
-    "project": "tools",
-    "rules": "all",
-    "model": null
-   }
-  ],
+  "differences": [],
   "unowned": []
  },
  {
@@ -81,39 +35,14 @@
   "allModel": false,
   "differences": [
    {
-    "project": "app:debrief",
-    "rules": "ui",
-    "model": null
-   },
-   {
-    "project": "app:dyno",
-    "rules": "ui",
-    "model": null
-   },
-   {
-    "project": "app:pitcrew",
-    "rules": "ui",
-    "model": null
-   },
-   {
-    "project": "app:pitwall",
-    "rules": "ui",
-    "model": null
-   },
-   {
     "project": "app:shell-demo",
     "rules": "all",
-    "model": null
-   },
-   {
-    "project": "app:spotter",
-    "rules": "ui",
-    "model": null
+    "model": "ui"
    },
    {
     "project": "app:workbench-demo",
     "rules": "all",
-    "model": null
+    "model": "ui"
    }
   ],
   "unowned": []
@@ -126,39 +55,14 @@
   "allModel": false,
   "differences": [
    {
-    "project": "app:debrief",
-    "rules": "ui",
-    "model": null
-   },
-   {
-    "project": "app:dyno",
-    "rules": "ui",
-    "model": null
-   },
-   {
-    "project": "app:pitcrew",
-    "rules": "ui",
-    "model": null
-   },
-   {
-    "project": "app:pitwall",
-    "rules": "ui",
-    "model": null
-   },
-   {
     "project": "app:shell-demo",
     "rules": "all",
-    "model": null
-   },
-   {
-    "project": "app:spotter",
-    "rules": "ui",
-    "model": null
+    "model": "ui"
    },
    {
     "project": "app:workbench-demo",
     "rules": "all",
-    "model": null
+    "model": "ui"
    }
   ],
   "unowned": []
@@ -173,37 +77,27 @@
    {
     "project": "app:debrief",
     "rules": "all",
-    "model": null
+    "model": "ui"
    },
    {
     "project": "app:dyno",
     "rules": "all",
-    "model": null
-   },
-   {
-    "project": "app:pitcrew",
-    "rules": "ui",
-    "model": null
+    "model": "ui"
    },
    {
     "project": "app:pitwall",
     "rules": "all",
-    "model": null
+    "model": "ui"
    },
    {
     "project": "app:shell-demo",
     "rules": "all",
-    "model": null
-   },
-   {
-    "project": "app:spotter",
-    "rules": "ui",
-    "model": null
+    "model": "ui"
    },
    {
     "project": "app:workbench-demo",
     "rules": "all",
-    "model": null
+    "model": "ui"
    }
   ],
   "unowned": []
@@ -216,64 +110,14 @@
   "allModel": false,
   "differences": [
    {
-    "project": "app:debrief",
-    "rules": "ui",
-    "model": "all"
+    "project": "app:shell-demo",
+    "rules": "all",
+    "model": "ui"
    },
    {
-    "project": "app:dyno",
-    "rules": "ui",
-    "model": "all"
-   },
-   {
-    "project": "app:pacenotes",
-    "rules": null,
-    "model": "all"
-   },
-   {
-    "project": "app:pitcrew",
-    "rules": "ui",
-    "model": "all"
-   },
-   {
-    "project": "app:pitwall",
-    "rules": "ui",
-    "model": "all"
-   },
-   {
-    "project": "app:sighter",
-    "rules": null,
-    "model": "all"
-   },
-   {
-    "project": "app:spotter",
-    "rules": "ui",
-    "model": "all"
-   },
-   {
-    "project": "ci-image",
-    "rules": null,
-    "model": "all"
-   },
-   {
-    "project": "crates",
-    "rules": null,
-    "model": "all"
-   },
-   {
-    "project": "icons",
-    "rules": null,
-    "model": "all"
-   },
-   {
-    "project": "paddock-dev",
-    "rules": null,
-    "model": "all"
-   },
-   {
-    "project": "tools",
-    "rules": null,
-    "model": "all"
+    "project": "app:workbench-demo",
+    "rules": "all",
+    "model": "ui"
    }
   ],
   "unowned": []
@@ -321,103 +165,24 @@
    ".gitea/workflows/ci.yml"
   ],
   "allRules": true,
-  "allModel": true,
-  "differences": [],
-  "unowned": [
-   ".gitea/workflows/ci.yml"
-  ]
+  "allModel": false,
+  "differences": [
+   {
+    "project": "ci-image",
+    "rules": "all",
+    "model": null
+   }
+  ],
+  "unowned": []
  },
  {
   "files": [
    ".gitea/workflows/debrief.yml"
   ],
   "allRules": false,
-  "allModel": true,
-  "differences": [
-   {
-    "project": "app:dyno",
-    "rules": null,
-    "model": "all"
-   },
-   {
-    "project": "app:pacenotes",
-    "rules": null,
-    "model": "all"
-   },
-   {
-    "project": "app:pitcrew",
-    "rules": null,
-    "model": "all"
-   },
-   {
-    "project": "app:pitwall",
-    "rules": null,
-    "model": "all"
-   },
-   {
-    "project": "app:shell-demo",
-    "rules": null,
-    "model": "all"
-   },
-   {
-    "project": "app:sighter",
-    "rules": null,
-    "model": "all"
-   },
-   {
-    "project": "app:spotter",
-    "rules": null,
-    "model": "all"
-   },
-   {
-    "project": "app:workbench-demo",
-    "rules": null,
-    "model": "all"
-   },
-   {
-    "project": "c99",
-    "rules": null,
-    "model": "all"
-   },
-   {
-    "project": "ci-image",
-    "rules": null,
-    "model": "all"
-   },
-   {
-    "project": "crates",
-    "rules": null,
-    "model": "all"
-   },
-   {
-    "project": "eslint",
-    "rules": null,
-    "model": "all"
-   },
-   {
-    "project": "icons",
-    "rules": null,
-    "model": "all"
-   },
-   {
-    "project": "paddock-dev",
-    "rules": null,
-    "model": "all"
-   },
-   {
-    "project": "tools",
-    "rules": null,
-    "model": "all"
-   },
-   {
-    "project": "ui",
-    "rules": null,
-    "model": "all"
-   }
-  ],
-  "unowned": [
-   ".gitea/workflows/debrief.yml"
-  ]
+  "allModel": false,
+  "differences": [],
+  "unowned": []
  },
  {
   "files": [
@@ -443,7 +208,28 @@
   ],
   "allRules": false,
   "allModel": false,
-  "differences": [],
+  "differences": [
+   {
+    "project": "app:dyno",
+    "rules": null,
+    "model": "smoke"
+   },
+   {
+    "project": "app:pitcrew",
+    "rules": null,
+    "model": "smoke"
+   },
+   {
+    "project": "app:pitwall",
+    "rules": null,
+    "model": "smoke"
+   },
+   {
+    "project": "app:spotter",
+    "rules": null,
+    "model": "smoke"
+   }
+  ],
   "unowned": []
  },
  {
@@ -456,47 +242,47 @@
    {
     "project": "app:debrief",
     "rules": "rust",
-    "model": null
+    "model": "all"
    },
    {
     "project": "app:dyno",
     "rules": "rust",
-    "model": null
+    "model": "all"
    },
    {
     "project": "app:pacenotes",
     "rules": "rust",
-    "model": null
+    "model": "all"
    },
    {
     "project": "app:pitcrew",
     "rules": "rust",
-    "model": null
+    "model": "all"
    },
    {
     "project": "app:pitwall",
     "rules": "rust",
-    "model": null
+    "model": "all"
    },
    {
     "project": "app:shell-demo",
     "rules": "rust",
-    "model": null
+    "model": "all"
    },
    {
     "project": "app:sighter",
     "rules": "rust",
-    "model": null
+    "model": "all"
    },
    {
     "project": "app:spotter",
     "rules": "rust",
-    "model": null
+    "model": "all"
    },
    {
     "project": "app:workbench-demo",
     "rules": "rust",
-    "model": null
+    "model": "all"
    }
   ],
   "unowned": []
@@ -623,13 +409,7 @@
   ],
   "allRules": true,
   "allModel": false,
-  "differences": [
-   {
-    "project": "c99",
-    "rules": "all",
-    "model": null
-   }
-  ],
+  "differences": [],
   "unowned": []
  },
  {
@@ -642,47 +422,47 @@
    {
     "project": "app:debrief",
     "rules": "all",
-    "model": null
+    "model": "smoke"
    },
    {
     "project": "app:dyno",
     "rules": "all",
-    "model": null
+    "model": "release"
    },
    {
     "project": "app:pacenotes",
     "rules": "all",
-    "model": null
+    "model": "smoke"
    },
    {
     "project": "app:pitcrew",
     "rules": "all",
-    "model": null
+    "model": "release"
    },
    {
     "project": "app:pitwall",
     "rules": "all",
-    "model": null
+    "model": "release"
    },
    {
     "project": "app:shell-demo",
     "rules": "all",
-    "model": null
+    "model": "smoke"
    },
    {
     "project": "app:sighter",
     "rules": "all",
-    "model": null
+    "model": "smoke"
    },
    {
     "project": "app:spotter",
     "rules": "all",
-    "model": null
+    "model": "release"
    },
    {
     "project": "app:workbench-demo",
     "rules": "all",
-    "model": null
+    "model": "smoke"
    },
    {
     "project": "c99",
@@ -697,32 +477,32 @@
    {
     "project": "crates",
     "rules": "all",
-    "model": null
+    "model": "smoke"
    },
    {
     "project": "eslint",
     "rules": "all",
-    "model": null
+    "model": "smoke"
    },
    {
     "project": "icons",
     "rules": "all",
-    "model": null
+    "model": "smoke"
    },
    {
     "project": "paddock-dev",
     "rules": "all",
-    "model": null
+    "model": "smoke"
    },
    {
     "project": "tools",
     "rules": "all",
-    "model": null
+    "model": "smoke"
    },
    {
     "project": "ui",
     "rules": "all",
-    "model": null
+    "model": "smoke"
    }
   ],
   "unowned": []
@@ -818,39 +598,76 @@
    ".gitea/workflows/nightly.yml"
   ],
   "allRules": true,
-  "allModel": true,
-  "differences": [],
-  "unowned": [
-   ".gitea/actions/app-gates/action.yml",
-   ".gitea/workflows/nightly.yml"
-  ]
- },
- {
-  "files": [
-   ".gitignore",
-   "crates/paddock-cli/CHANGELOG.md"
-  ],
-  "allRules": false,
   "allModel": false,
   "differences": [
    {
+    "project": "app:debrief",
+    "rules": "all",
+    "model": "smoke"
+   },
+   {
     "project": "app:dyno",
-    "rules": "rust",
-    "model": null
+    "rules": "all",
+    "model": "smoke"
+   },
+   {
+    "project": "app:pacenotes",
+    "rules": "all",
+    "model": "smoke"
+   },
+   {
+    "project": "app:pitcrew",
+    "rules": "all",
+    "model": "smoke"
    },
    {
     "project": "app:pitwall",
-    "rules": "rust",
-    "model": null
+    "rules": "all",
+    "model": "smoke"
    },
    {
     "project": "app:shell-demo",
-    "rules": "rust",
-    "model": null
+    "rules": "all",
+    "model": "smoke"
+   },
+   {
+    "project": "app:sighter",
+    "rules": "all",
+    "model": "smoke"
+   },
+   {
+    "project": "app:spotter",
+    "rules": "all",
+    "model": "smoke"
    },
    {
     "project": "app:workbench-demo",
-    "rules": "rust",
+    "rules": "all",
+    "model": "smoke"
+   },
+   {
+    "project": "c99",
+    "rules": "all",
+    "model": null
+   },
+   {
+    "project": "ci-image",
+    "rules": "all",
+    "model": null
+   },
+   {
+    "project": "crates",
+    "rules": "all",
+    "model": null
+   },
+   {
+    "project": "eslint",
+    "rules": "all",
+    "model": null
+   },
+   {
+    "project": "icons",
+    "rules": "all",
     "model": null
    },
    {
@@ -862,8 +679,23 @@
     "project": "tools",
     "rules": "all",
     "model": null
+   },
+   {
+    "project": "ui",
+    "rules": "all",
+    "model": null
    }
   ],
+  "unowned": []
+ },
+ {
+  "files": [
+   ".gitignore",
+   "crates/paddock-cli/CHANGELOG.md"
+  ],
+  "allRules": false,
+  "allModel": false,
+  "differences": [],
   "unowned": []
  },
  {

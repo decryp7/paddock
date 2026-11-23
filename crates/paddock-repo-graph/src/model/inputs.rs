@@ -60,18 +60,18 @@ type InputRow = (
 const DEFAULT_INPUTS: &[InputRow] = &[
     (
         "rust-toolchain",
-        &["rust-toolchain", "rust-toolchain.toml"],
+        &["/rust-toolchain", "/rust-toolchain.toml"],
         &["all"],
         None,
     ),
     (
         "npm-root",
-        &["package.json", ".npmrc", ".nvmrc", "tsconfig/**"],
+        &["/package.json", "/.npmrc", "/.nvmrc", "tsconfig/**"],
         &["all"],
         None,
     ),
     // Narrowed by the lock's content: only the workspaces whose resolved packages changed (and their dependents).
-    ("npm-lock", &["package-lock.json"], &[], Some("npm-lock")),
+    ("npm-lock", &["/package-lock.json"], &[], Some("npm-lock")),
     (
         "cargo-config",
         &[".cargo/**", "lint/**"],
@@ -80,7 +80,7 @@ const DEFAULT_INPUTS: &[InputRow] = &[
     ),
     (
         "git-attributes",
-        &[".gitattributes"],
+        &["/.gitattributes"],
         &["project:conformance"],
         Some("attributes"),
     ),
@@ -218,16 +218,16 @@ const DEFAULT_INPUTS: &[InputRow] = &[
     (
         "conformance-config",
         &[
-            "paddock.conformance.json",
-            "paddock.waivers.toml",
-            ".gitleaks.toml",
+            "/paddock.conformance.json",
+            "/paddock.waivers.toml",
+            "/.gitleaks.toml",
         ],
         &["project:conformance"],
         None,
     ),
     (
         "dev-wrapper",
-        &["dev", "dev.cmd"],
+        &["/dev", "/dev.cmd"],
         &["project:paddock-dev"],
         None,
     ),
@@ -261,12 +261,12 @@ const DEFAULT_INPUTS: &[InputRow] = &[
         "repo-tooling",
         &[
             "renovate/**",
-            "renovate.json",
-            "CODEOWNERS",
-            "wiki-lint.json",
+            "/renovate.json",
+            "/CODEOWNERS",
+            "/wiki-lint.json",
             ".claude/hooks/**",
             ".claude/settings.json",
-            "lefthook.yml",
+            "/lefthook.yml",
         ],
         &["project:tools"],
         None,
@@ -316,7 +316,7 @@ const DEFAULT_ADDS: &[AddRow] = &[
             "conformance/src/**",
             "conformance/bin/**",
             ".cargo/config.toml",
-            "paddock.waivers.toml",
+            "/paddock.waivers.toml",
         ],
         &["project:c99"],
         &[],
@@ -339,8 +339,8 @@ const DEFAULT_ADDS: &[AddRow] = &[
             "docs/gates.toml",
             "apps/*/paddock.ci.json",
             "package.json",
-            "lefthook.yml",
-            "AGENTS.md",
+            "/lefthook.yml",
+            "/AGENTS.md",
             "apps/*/AGENTS.md",
             "apps/*/docs/performance.md",
             "README.md",
@@ -407,6 +407,13 @@ const DEFAULT_ADDS: &[AddRow] = &[
             "crates/paddock-setup/nsis/paddock-per-machine.nsh",
         ],
         &["project:conformance", "project:crates"],
+        &[],
+    ),
+    // The icon tools render every app's icons (the planner's `icons/` rule; `icons/<app>/` is the app's own, an open gap).
+    (
+        "icon-tools",
+        &["icons/tools/**", "icons/package.json"],
+        &["apps"],
         &[],
     ),
     (
@@ -482,7 +489,31 @@ pub struct Inputs {
     pub inputs: Vec<Input>,
     /// Owner rules, in order (later wins a tie of specificity).
     pub owners: Vec<OwnerRule>,
+    /// Local actions declared setup-only: plumbing even when a release job uses them (rule 54). Narrowing the set of release
+    /// reaches, so adding a name is the unsafe direction (ADR 0117 §14).
+    pub setup_only: Vec<String>,
+    /// Local actions whose use makes a job a release job (bundling, signing, publishing).
+    pub release_actions: Vec<String>,
 }
+
+/// The actions ADR 0117 §5 names setup-only: the Rust setup, the job split and the cache actions.
+pub const DEFAULT_SETUP_ONLY: [&str; 6] = [
+    "setup-rust",
+    "build-jobs",
+    "node-caches",
+    "dev-tool-cache",
+    "sccache-stats",
+    "cache-report",
+];
+
+/// The actions that bundle, sign or publish (ADR 0117 §5).
+pub const DEFAULT_RELEASE_ACTIONS: [&str; 5] = [
+    "tauri-bundle",
+    "publish-release",
+    "macos-verify",
+    "keychain",
+    "strip-signing-keys",
+];
 
 impl Inputs {
     /// The defaults: the former `GLOBAL` list of the planner narrowed (ADR 0117 §3, G2, G7, G8, G13), the declared doc inputs and
@@ -561,6 +592,11 @@ impl Inputs {
                     Owner::None,
                 ),
             ],
+            setup_only: DEFAULT_SETUP_ONLY.iter().map(|s| s.to_string()).collect(),
+            release_actions: DEFAULT_RELEASE_ACTIONS
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
         }
     }
 
@@ -573,6 +609,13 @@ impl Inputs {
             }
         }
         self.owners.extend(file.owners);
+        // A list in the file replaces the default list.
+        if !file.setup_only.is_empty() {
+            self.setup_only = file.setup_only;
+        }
+        if !file.release_actions.is_empty() {
+            self.release_actions = file.release_actions;
+        }
         self
     }
 
@@ -664,6 +707,7 @@ mod tests {
                 paths: vec!["spikes/**".into()],
                 owner: Owner::Project("tools".into()),
             }],
+            ..Inputs::default()
         };
         let i = Inputs::defaults().merged(file);
         let npm = i.inputs.iter().find(|x| x.name == "npm-root").unwrap();

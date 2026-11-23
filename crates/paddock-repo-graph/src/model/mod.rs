@@ -156,11 +156,13 @@ pub fn project_of<'a>(facts: &Facts<'a>, path: &str) -> Option<&'a str> {
     facts
         .projects
         .iter()
+        // A project with an empty folder (a check job such as c99) owns no path; it is reached by inputs and edges only.
         .filter(|(_, d)| {
-            path == d
-                || path
-                    .strip_prefix(d.as_str())
-                    .is_some_and(|r| r.starts_with('/'))
+            !d.is_empty()
+                && (path == d
+                    || path
+                        .strip_prefix(d.as_str())
+                        .is_some_and(|r| r.starts_with('/')))
         })
         .max_by_key(|(_, d)| d.len())
         .map(|(id, _)| id.as_str())
@@ -248,7 +250,9 @@ pub fn reach(changed: &[String], facts: &Facts, inputs: &Inputs, text: TextOf) -
         let named = inputs.inputs_of(f);
         // A file a model node owns (a workflow, an action, a script) is reached through the model; outside every project folder
         // and every input, that is all it is.
-        if let Some(m) = facts.model {
+        // Prose outside every project folder is the doc owner's even inside an action folder (G7).
+        let doc_prose = is_prose(f) && project_of(facts, f).is_none();
+        if let Some(m) = facts.model.filter(|_| !doc_prose) {
             let narrowed: Vec<&(String, String, String)> = facts
                 .seeds
                 .iter()
@@ -264,7 +268,7 @@ pub fn reach(changed: &[String], facts: &Facts, inputs: &Inputs, text: TextOf) -
                     .for_each(|(_, id, why)| model_seeds.push((id.clone(), why.clone())));
                 true
             };
-            if owned && named.is_empty() && project_of(facts, f).is_none() && !is_prose(f) {
+            if owned && named.is_empty() && project_of(facts, f).is_none() {
                 continue;
             }
         }
@@ -342,7 +346,16 @@ pub fn reach(changed: &[String], facts: &Facts, inputs: &Inputs, text: TextOf) -
                     }
                     Target::Project(p) => out.mark(p, i.reach, true, true, why.clone()),
                     Target::Owner => match project_of(facts, f) {
-                        Some(p) => out.mark(p, i.reach, true, true, why.clone()),
+                        Some(p) => {
+                            out.mark(p, i.reach, true, true, why.clone());
+                            // The project's own file: its package's dependents follow, as for any file of the project.
+                            if let Some(c) = facts.cargo.node_of(f) {
+                                crates.insert(c.to_string());
+                            }
+                            if let Some(n) = facts.npm.node_of(f) {
+                                packages.insert(n.to_string());
+                            }
+                        }
                         None => out.unowned.push(f.clone()),
                     },
                 }
@@ -366,8 +379,22 @@ pub fn reach(changed: &[String], facts: &Facts, inputs: &Inputs, text: TextOf) -
             }
             let (rust, ui) = halves(facts, f);
             out.mark(p, Reach::Code, rust, ui, f.clone());
-            if let Some(c) = facts.cargo.node_of(f) {
-                crates.insert(c.to_string());
+            match facts.cargo.node_of(f) {
+                Some(c) => {
+                    crates.insert(c.to_string());
+                }
+                // A file of a Cargo workspace's own folder outside every member and every npm package (its Cargo.toml, its
+                // .config/) reaches every member.
+                None if facts.npm.node_of(f).is_none() => {
+                    for (d, x) in facts.cargo.iter() {
+                        let ws = x.workspace.as_str();
+                        if !ws.is_empty() && f.strip_prefix(ws).is_some_and(|r| r.starts_with('/'))
+                        {
+                            crates.insert(d.to_string());
+                        }
+                    }
+                }
+                None => {}
             }
             if let Some(n) = facts.npm.node_of(f) {
                 packages.insert(n.to_string());
@@ -386,11 +413,21 @@ pub fn reach(changed: &[String], facts: &Facts, inputs: &Inputs, text: TextOf) -
     }
     if let Some(m) = facts.model {
         for (id, hit) in m.reach_from(&model_seeds) {
+            // An action or script changed itself is plumbing for the projects it runs (its own code is its own); a job or step
+            // passes on the kind that reached it.
+            let own = m.node(&id).is_some_and(|n| {
+                matches!(n.kind, nodes::NodeKind::Action | nodes::NodeKind::Script)
+            });
+            let r = if own && hit.reach == Reach::Code {
+                Reach::Plumbing
+            } else {
+                hit.reach
+            };
             for p in m.targets(&id, nodes::EdgeKind::Runs) {
                 if facts.projects.iter().any(|(pid, _)| pid == p) || p == "c99" {
                     out.mark(
                         p,
-                        hit.reach,
+                        r,
                         true,
                         true,
                         format!("{id} runs it ({})", hit.why.join("; ")),
@@ -429,6 +466,18 @@ pub fn reach(changed: &[String], facts: &Facts, inputs: &Inputs, text: TextOf) -
             out.mark(p, Reach::Code, true, false, format!("cargo {d}"));
         }
     }
+    // A package nested in another package's folder is part of what the outer one builds (ui builds ui/dist from ui/projects).
+    let nested: Vec<String> = packages
+        .iter()
+        .flat_map(|n| {
+            facts
+                .npm
+                .iter()
+                .filter(move |(d, _)| n.strip_prefix(*d).is_some_and(|r| r.starts_with('/')))
+                .map(|(d, _)| d.to_string())
+        })
+        .collect();
+    packages.extend(nested);
     for d in facts.npm.dependents(&packages).difference(&packages) {
         if let Some(p) = project_of(facts, d) {
             out.mark(p, Reach::Code, false, true, format!("npm {d}"));

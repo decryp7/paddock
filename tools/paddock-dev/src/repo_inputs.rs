@@ -14,6 +14,10 @@
 //! adds = false                   # true: the file keeps its owner and this input adds its targets
 //! except = ["**/*.md"]           # globs taken back out of `files`
 //!
+//! [ci]                           # replaces the defaults when given
+//! setup_only = ["setup-rust"]    # actions that stay plumbing in a release job (adding one needs the user, ADR 0117 §14)
+//! release_actions = ["tauri-bundle"]  # actions whose use makes a job a release job
+//!
 //! [[owner]]                      # who owns a path no project claims
 //! paths = ["spikes/**"]
 //! node = "none"                  # none | doc | project:<id>
@@ -118,7 +122,15 @@ fn read(text: &str) -> Result<Inputs, String> {
         };
         owners.push(OwnerRule { paths, owner });
     }
-    Ok(Inputs { inputs, owners })
+    let ci = t.get("ci");
+    let setup_only = strings(ci.and_then(|c| c.get("setup_only")), "ci.setup_only")?;
+    let release_actions = strings(ci.and_then(|c| c.get("release_actions")), "ci.release_actions")?;
+    Ok(Inputs {
+        inputs,
+        owners,
+        setup_only,
+        release_actions,
+    })
 }
 
 #[cfg(test)]

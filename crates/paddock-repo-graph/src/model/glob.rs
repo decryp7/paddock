@@ -1,11 +1,12 @@
 //! Path globs of the inputs file (`docs/repo-graph.toml`): `/`-separated, `**` any number of whole segments, `*` any run within
 //! one segment, `?` one character within a segment. A pattern without a `/` matches the file name in any folder (as
-//! `.gitattributes` does); one with a `/` is anchored at the repository root.
+//! `.gitattributes` does); one with a `/` (a leading one included: `/package.json`) is anchored at the repository root.
 
 /// Whether `pattern` matches the repository path `path`.
 pub fn matches(pattern: &str, path: &str) -> bool {
+    let anchored = pattern.starts_with('/');
     let pattern = pattern.strip_prefix('/').unwrap_or(pattern);
-    if !pattern.contains('/') {
+    if !anchored && !pattern.contains('/') {
         let name = path.rsplit('/').next().unwrap_or(path);
         return segment(pattern.as_bytes(), name.as_bytes());
     }
@@ -61,6 +62,17 @@ mod tests {
         assert!(matches("/rust-toolchain.toml", "rust-toolchain.toml"));
         assert!(!matches("rust-toolchain.toml/x", "rust-toolchain.toml"));
         assert!(matches("a?c", "abc") && !matches("a?c", "a/c"));
+    }
+
+    #[test]
+    fn a_leading_slash_anchors_a_name_at_the_root() {
+        // From --compare: `package.json` in the npm-root input matched ui/package.json and made it a global.
+        assert!(matches("/package.json", "package.json"));
+        assert!(!matches("/package.json", "ui/package.json"));
+        assert!(
+            matches("package.json", "ui/package.json"),
+            "without the slash: any folder, as .gitattributes"
+        );
     }
 
     #[test]

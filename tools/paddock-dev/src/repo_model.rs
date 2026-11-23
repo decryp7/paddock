@@ -14,9 +14,9 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-/// The root projects and their folders: the plan's project keys that are folders. `c99` is a check job with no folder; it is
-/// reached only as a named input's target.
-pub const ROOT_PROJECTS: [(&str, &str); 8] = [
+/// The root projects and their folders: the plan's project keys. `c99` is a check job with no folder (an empty one owns no path);
+/// it is reached by named inputs and by a true global.
+pub const ROOT_PROJECTS: [(&str, &str); 9] = [
     ("crates", "crates"),
     ("ui", "ui"),
     ("eslint", "eslint"),
@@ -25,6 +25,7 @@ pub const ROOT_PROJECTS: [(&str, &str); 8] = [
     ("icons", "icons"),
     ("ci-image", "ci-image"),
     ("paddock-dev", "tools/paddock-dev"),
+    ("c99", ""),
 ];
 
 /// Every project id with its folder: the root projects and each app (`app:<name>` = `apps/<name>`).
@@ -124,6 +125,50 @@ pub fn reach_for(root: &Path, history: &dyn History, req: &Request, graph: &Repo
     };
     let projects = projects(graph);
     let bulk = GitBulk::new(root, None);
+    // The CI adapter over the head's texts (the working tree in files mode), and the jobs a workflow edit changed (G5).
+    let head_read = GitBulk::new(root, req.base.as_ref().map(|_| req.head.as_str()));
+    let adapter = ci::CiExtractor {
+        apps: graph.apps.clone(),
+        projects: ROOT_PROJECTS.iter().map(|(id, _)| id.to_string()).collect(),
+        decl: ci::CiDecl {
+            setup_only: inputs.setup_only.iter().cloned().collect(),
+            release_actions: inputs.release_actions.iter().cloned().collect(),
+        },
+    };
+    let adapters: Vec<Box<dyn paddock_repo_graph::model::extract::Extractor>> = vec![Box::new(adapter)];
+    let built = paddock_repo_graph::model::extract::build(&files, &head_read, &adapters);
+    let model = built.model;
+    let mut seeds: Vec<(String, String, String)> = Vec::new();
+    for f in changed
+        .iter()
+        .filter(|f| model.node(&ci::workflow_id(f)).is_some_and(|n| n.files.contains(f)))
+    {
+        let (before, after) = match &req.base {
+            Some(base) => (bulk.text_at(base, f), bulk.text_at(&req.head, f)),
+            None => (bulk.text_at("HEAD", f), std::fs::read_to_string(root.join(f)).ok()),
+        };
+        let wf = ci::workflow_id(f);
+        // The same text on both sides (files mode names a committed file): nothing can be narrowed, every job (fail closed).
+        let narrowed = if before == after {
+            None
+        } else {
+            ci::changed_jobs(before.as_deref(), after.as_deref())
+        };
+        let jobs: Vec<String> = match narrowed {
+            Some(jobs) => jobs.iter().map(|j| ci::job_id(f, j)).collect(),
+            // The header changed (or a side cannot be read): every job of the workflow.
+            None => model
+                .targets(&wf, paddock_repo_graph::model::nodes::EdgeKind::Uses)
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
+        };
+        for j in jobs {
+            seeds.push((f.clone(), j.clone(), format!("{j} changed in {f}")));
+        }
+        // An edit that changes no job (a moved line, a comment) still names the workflow, which runs nothing by itself.
+        seeds.push((f.clone(), wf.clone(), format!("{f} changed")));
+    }
     // Content detection is an aid only (D14): documentation assets under doc owners, and the kind of an unowned file.
     let detect = |f: &str| -> Option<Detected> {
         let bytes = match &req.base {
@@ -138,14 +183,30 @@ pub fn reach_for(root: &Path, history: &dyn History, req: &Request, graph: &Repo
         projects: &projects,
         files: &files,
         detect: Some(&detect),
-        model: None,
-        seeds: &[],
+        model: Some(&model),
+        seeds: &seeds,
     };
     let text = |f: &str| match &req.base {
         Some(base) => (bulk.text_at(base, f), bulk.text_at(&req.head, f)),
         None => (bulk.text_at("HEAD", f), std::fs::read_to_string(root.join(f)).ok()),
     };
     let mut reached = reach(&changed, &facts, &inputs, &text);
+    // An adapter that cannot read a file fails closed (ADR 0117 §2, review round 2 P2-6).
+    if !built.errors.is_empty() {
+        reached.everything = true;
+        let why = built.errors.iter().map(ToString::to_string).collect::<Vec<_>>().join("; ");
+        for (id, _) in &projects {
+            reached.nodes.insert(
+                id.clone(),
+                paddock_repo_graph::model::NodeReach {
+                    reach: Reach::Code,
+                    rust: true,
+                    ui: true,
+                    why: vec![format!("fail closed: {why}")],
+                },
+            );
+        }
+    }
     if req.all {
         reached.everything = true;
         for (id, _) in &projects {
@@ -190,9 +251,6 @@ fn old_runs(plan: &Value, graph: &RepoGraph) -> BTreeMap<String, String> {
             out.insert(id.clone(), "all".to_string());
         }
     }
-    if plan["c99"] == true {
-        out.insert("c99".to_string(), "all".to_string());
-    }
     for a in plan["apps"].as_array().into_iter().flatten().filter_map(Value::as_str) {
         let kinds: BTreeSet<&str> = plan["kinds"][a]
             .as_array()
@@ -220,13 +278,17 @@ fn new_runs(reached: &Reached) -> BTreeMap<String, String> {
         .iter()
         .filter(|(id, n)| n.reach > Reach::Docs && id.as_str() != "docs")
         .map(|(id, n)| {
-            let h = if id.starts_with("app:") { halves_of(n.rust, n.ui) } else { "all" };
+            // Less than full is named by what the selection will run (ADR 0117 §5): the smoke set, the reached tests, installers.
+            let h = match n.reach {
+                Reach::Plumbing => "smoke",
+                Reach::Test => "tests",
+                Reach::Release => "release",
+                _ if id.starts_with("app:") => halves_of(n.rust, n.ui),
+                _ => "all",
+            };
             (id.clone(), h.to_string())
         })
         .collect();
-    if reached.everything {
-        out.insert("c99".to_string(), "all".to_string());
-    }
     out.insert("conformance".to_string(), "all".to_string());
     out
 }
@@ -246,6 +308,7 @@ pub fn compare(plan: &Value, reached: &Reached, graph: &RepoGraph) -> Value {
         }
         let narrower = match (o.map(String::as_str), n.map(String::as_str)) {
             (Some(_), None) => true,
+            (Some(_), Some("smoke" | "tests" | "release")) => true,
             (Some("all"), Some(h)) => h != "all",
             _ => false,
         };
@@ -270,8 +333,21 @@ pub fn compare(plan: &Value, reached: &Reached, graph: &RepoGraph) -> Value {
     out.insert("dropped".into(), Value::Array(dropped));
     out.insert("unowned".into(), json!(reached.unowned));
     out.insert("notBuilt".into(), json!(reached.not_built));
+    let model: Map<String, Value> = reached
+        .nodes
+        .iter()
+        .map(|(id, n)| {
+            (
+                id.clone(),
+                json!({"reach": n.reach.name(), "rust": n.rust, "ui": n.ui, "why": n.why}),
+            )
+        })
+        .collect();
+    out.insert("model".into(), Value::Object(model));
     Value::Object(out)
 }
+
+pub mod ci;
 
 #[cfg(test)]
 mod tests;

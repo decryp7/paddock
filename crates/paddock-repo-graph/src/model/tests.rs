@@ -635,3 +635,67 @@ fn each_migrated_additive_rule_adds_its_reader_and_the_control_removes_it() {
         assert!(!c.everything, "{name}: the control must not fail closed");
     }
 }
+
+#[test]
+fn g7_a_readme_in_an_action_folder_is_docs_even_with_the_model() {
+    let w = world();
+    let r = run_model(
+        &w,
+        &ci_model(true),
+        &[".gitea/actions/cache/README.md"],
+        &[],
+    );
+    assert!(!r.nodes.contains_key("app:dyno"), "{:?}", r.nodes);
+    assert!(r.nodes.contains_key("docs"));
+}
+
+#[test]
+fn a_workspace_config_reaches_every_member_and_a_nested_package_reaches_its_containing_package() {
+    // From --compare on the real tree: crates/Cargo.toml reached no member, and ui/projects/paddock-ui/src/x.ts did not reach
+    // the apps (they read ui/dist, which the containing package `ui` builds from its projects).
+    let mut w = world();
+    let r = run(&w, &["crates/Cargo.toml"], &none);
+    assert!(
+        r.nodes.get("app:dyno").is_some_and(|n| n.rust),
+        "{:?}",
+        r.nodes.keys()
+    );
+    assert!(r.nodes.contains_key("paddock-dev"));
+    w.npm.insert("ui/projects/lib", node("@d/lib", "", &[]));
+    let n = run(&w, &["ui/projects/lib/src/a.ts"], &none);
+    assert!(
+        n.nodes.get("app:dyno").is_some_and(|n| n.ui),
+        "{:?}",
+        n.nodes.keys()
+    );
+    // From --compare: a UI file inside an app's Cargo workspace folder is no workspace config (it reached every Debrief crate).
+    w.cargo.insert(
+        "apps/dyno/fuzz",
+        node("dyno-fuzz", "apps/dyno", &["apps/dyno/app/src-tauri"]),
+    );
+    let ui = run(&w, &["apps/dyno/app/src/main.ts"], &none);
+    assert!(
+        ui.nodes.get("app:dyno").is_some_and(|n| !n.rust),
+        "{:?}",
+        ui.nodes.get("app:dyno")
+    );
+    // Control: a crate's own file reaches only its dependents, not its workspace siblings.
+    let c = run(&w, &["crates/paddock-watch/src/lib.rs"], &none);
+    assert!(
+        !c.nodes
+            .get("crates")
+            .is_some_and(|n| n.why.iter().any(|y| y.contains("paddock-proc")))
+    );
+}
+
+#[test]
+fn an_owner_input_is_its_projects_own_code_and_reaches_its_packages_dependents() {
+    // From --compare: ui/package.json (the lint-wiring input, target owner) reached ui and eslint but not the apps that use ui.
+    let w = world();
+    let r = run(&w, &["ui/package.json"], &none);
+    assert!(
+        r.nodes.get("app:dyno").is_some_and(|n| n.ui),
+        "{:?}",
+        r.nodes.keys()
+    );
+}
