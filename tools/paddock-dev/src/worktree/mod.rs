@@ -98,6 +98,10 @@ pub struct AddArgs {
     /// that runs the gates (conformance, `gates check`, `dev plan`) needs no --sparse: leave it out.
     #[arg(long, value_delimiter = ',')]
     sparse: Vec<String>,
+    /// Make the worktree ready to commit and run the gates: `npm ci --ignore-scripts` at its root (default: true; a failure is a
+    /// warning with the command, never a failed add). `--ready=false` skips it.
+    #[arg(long, default_value_t = true, action = clap::ArgAction::Set, num_args = 0..=1, require_equals = true, default_missing_value = "true")]
+    ready: bool,
     /// The folder all agent worktrees go under (default: git config paddock.worktreeRoot, then PADDOCK_WORKTREE_ROOT).
     /// The tool refuses a path inside the primary checkout or another worktree.
     #[arg(long)]
@@ -205,6 +209,7 @@ pub fn command(c: WorktreeCommand) -> Result<Report, CliError> {
                     base: &a.base,
                     owner: &a.owner,
                     sparse: &a.sparse,
+                    ready: a.ready,
                 },
             )
         }
