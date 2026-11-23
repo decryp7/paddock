@@ -1327,7 +1327,7 @@ reason = "ER-41: report-only until its first green run on the real tree, recorde
 owner = "OS-scoped tests (user decision 2026-11-22, docs/research/2026-11-22-os-scoped-tests.md): a test not listed in hostTests runs on Linux only, so OS code outside the list would silently lose its Windows and macOS tests (feat/os-scoped-tests)"
 since = 2026-11-22
 review_by = 2026-12-22
-approved = "coordinator"
+approved = "user"
 
 [[report_only]]
 id = "C156"
