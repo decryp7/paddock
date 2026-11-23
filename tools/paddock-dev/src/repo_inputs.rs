@@ -126,19 +126,6 @@ pub fn load_planner(root: &Path) -> Result<Planner, String> {
     planner(&text)
 }
 
-fn strings(v: Option<&toml::Value>, what: &str) -> Result<Vec<String>, String> {
-    let Some(v) = v else { return Ok(Vec::new()) };
-    v.as_array()
-        .ok_or_else(|| format!("{what} is not a list"))?
-        .iter()
-        .map(|x| {
-            x.as_str()
-                .map(str::to_string)
-                .ok_or_else(|| format!("{what} holds a value that is not a string"))
-        })
-        .collect()
-}
-
 /// A `[from, to]` pair of the typed `root_spellings` list.
 fn pairs(v: &[toml::Value], what: &str) -> Result<Vec<(String, String)>, String> {
     v.iter()
