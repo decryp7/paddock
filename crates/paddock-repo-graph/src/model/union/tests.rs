@@ -389,3 +389,102 @@ fn an_unresolved_reference_puts_its_referrers_projects_on_full_in_every_plan() {
     let c = run(&w, &ok, &["crates/paddock-dialogs/src/lib.rs"]);
     assert!(!c.nodes.contains_key("app:dyno"), "{:?}", c.nodes);
 }
+
+/// A release job of dyno-release.yml: a `run:` step that runs the conformance CLI (the release preflight, which imports a check) and
+/// a step that uses the bundle action (a release step); the job runs app:dyno.
+fn release_preflight() -> Model {
+    let mut m = Model::new();
+    for (id, f) in [
+        ("script:conformance/bin/cli.mjs", "conformance/bin/cli.mjs"),
+        (
+            "script:conformance/src/checks/C07.mjs",
+            "conformance/src/checks/C07.mjs",
+        ),
+    ] {
+        m.add_node(ModelNode::new(id, NodeKind::Script, &[f]));
+    }
+    m.add_node(ModelNode::new(
+        "action:tauri-bundle",
+        NodeKind::Action,
+        &[".gitea/actions/tauri-bundle/"],
+    ));
+    let mut job = ModelNode::new("job:dyno-release.yml#bundle", NodeKind::Job, &[]);
+    job.release = true;
+    m.add_node(job);
+    // The run step is no release step; the step that uses the bundle action is.
+    m.add_node(ModelNode::new(
+        "step:dyno-release.yml#bundle/3",
+        NodeKind::Step,
+        &[],
+    ));
+    let mut bundle_step = ModelNode::new("step:dyno-release.yml#bundle/4", NodeKind::Step, &[]);
+    bundle_step.release = true;
+    m.add_node(bundle_step);
+    for (from, to, k) in [
+        (
+            "job:dyno-release.yml#bundle",
+            "step:dyno-release.yml#bundle/3",
+            EdgeKind::Uses,
+        ),
+        (
+            "job:dyno-release.yml#bundle",
+            "step:dyno-release.yml#bundle/4",
+            EdgeKind::Uses,
+        ),
+        (
+            "step:dyno-release.yml#bundle/3",
+            "script:conformance/bin/cli.mjs",
+            EdgeKind::Runs,
+        ),
+        (
+            "job:dyno-release.yml#bundle",
+            "script:conformance/bin/cli.mjs",
+            EdgeKind::Runs,
+        ),
+        (
+            "script:conformance/bin/cli.mjs",
+            "script:conformance/src/checks/C07.mjs",
+            EdgeKind::Imports,
+        ),
+        (
+            "step:dyno-release.yml#bundle/4",
+            "action:tauri-bundle",
+            EdgeKind::Uses,
+        ),
+        (
+            "job:dyno-release.yml#bundle",
+            "action:tauri-bundle",
+            EdgeKind::Uses,
+        ),
+        ("job:dyno-release.yml#bundle", "app:dyno", EdgeKind::Runs),
+    ] {
+        m.add_edge(Edge::new(from, to, k));
+    }
+    m
+}
+
+#[test]
+fn a_conformance_check_reaching_a_release_preflight_selects_the_smoke_set_not_the_installers() {
+    // User decision 2026-11-23 (rule 54 narrowed): a conformance check change that reaches an app's release preflight runs the app's
+    // smoke set and its checks phase; the installers stay for the bundle, sign, notarise and publish steps.
+    let w = world();
+    let m = release_preflight();
+    let r = run(&w, &m, &["conformance/src/checks/C07.mjs"]);
+    assert_eq!(r.nodes["app:dyno"].kinds, BTreeSet::from([Reach::Gate]));
+    let s = &selection(&r, &smoke())["app:dyno"];
+    assert!(!s.installers && s.smoke && !s.full, "{s:?}");
+    assert_eq!(
+        s.phases,
+        BTreeSet::from(["checks".to_string()]),
+        "the declared gate phases"
+    );
+    // Without a declared smoke set the gate runs the app's suite (never less than declared), still without installers.
+    let s = &selection(&r, &BTreeSet::new())["app:dyno"];
+    assert!(s.full && !s.installers, "{s:?}");
+    // Control: the bundle action changed is a release step: the installers, beside the smoke set.
+    let r = run(&w, &m, &[".gitea/actions/tauri-bundle/action.yml"]);
+    assert_eq!(
+        selection(&r, &smoke())["app:dyno"],
+        sel(false, true, &[], true)
+    );
+}

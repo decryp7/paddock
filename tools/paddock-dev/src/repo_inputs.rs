@@ -26,6 +26,7 @@
 //! [ci]                           # required
 //! setup_only = ["setup-rust"]    # actions that stay plumbing in a release job (adding one needs the user, ADR 0117 §14)
 //! release_actions = ["tauri-bundle"]  # actions whose use makes a job a release job
+//! release_gate_phases = ["checks"]    # contract phases a check of a release job runs beside the smoke set (no installers)
 //!
 //! [hash]                         # what an input hash reads besides a node's files (ADR 0117 §5)
 //! runner_configs = ["**/.config/nextest.toml", "**/vitest.config.*", "**/playwright.config.*"]
@@ -264,9 +265,10 @@ fn read(text: &str) -> Result<Inputs, String> {
         t.get("ci").ok_or("the [ci] section is missing (setup_only and release_actions)")?,
         "ci",
     )?;
-    only_keys(ci, &["setup_only", "release_actions"], "[ci]")?;
+    only_keys(ci, &["setup_only", "release_actions", "release_gate_phases"], "[ci]")?;
     let setup_only = strings(ci.get("setup_only"), "ci.setup_only")?;
     let release_actions = strings(ci.get("release_actions"), "ci.release_actions")?;
+    let gate_phases = strings(ci.get("release_gate_phases"), "ci.release_gate_phases")?;
     let prose_table = table(t.get("prose").ok_or("the [prose] section is missing")?, "prose")?;
     only_keys(
         prose_table,
@@ -322,6 +324,7 @@ fn read(text: &str) -> Result<Inputs, String> {
         owners,
         setup_only,
         release_actions,
+        gate_phases,
         hash,
         prose,
         projects,

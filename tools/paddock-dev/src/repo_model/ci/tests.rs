@@ -449,3 +449,28 @@ fn an_unreadable_workflow_or_action_fails_the_adapter_and_an_absent_one_is_skipp
     files.push(".gitea/workflows/gone.yml".to_string());
     assert!(build(&files, &absent, &adapters).errors.is_empty());
 }
+
+#[test]
+fn a_run_step_of_a_release_job_is_a_gate_not_a_release_step_and_an_action_step_stays_release() {
+    // User decision 2026-11-23 (rule 54 narrowed): a check a release job runs (`run:` the conformance CLI or a check script, the
+    // release preflight) selects the app's smoke set and checks phase; the installers stay for the steps that use a release action.
+    let release = "on: [push]\njobs:\n  bundle:\n    steps:\n      - uses: ./.gitea/actions/tauri-bundle\n      - run: node conformance/ci/check-tag.mjs --tag x\n";
+    let m = MemoryRead::new()
+        .with(".gitea/workflows/dyno-release.yml", release)
+        .with(".gitea/actions/tauri-bundle/action.yml", "runs:\n  using: composite\n  steps: []\n")
+        .with("conformance/ci/check-tag.mjs", "export {};\n");
+    let model = model(&m);
+    assert!(model.node("job:dyno-release.yml#bundle").unwrap().release);
+    assert!(
+        model.node("step:dyno-release.yml#bundle/0").unwrap().release,
+        "the step that uses the bundle action"
+    );
+    assert!(
+        !model.node("step:dyno-release.yml#bundle/1").unwrap().release,
+        "a run step is a gate of the release"
+    );
+    let r = projects(&model, "conformance/ci/check-tag.mjs");
+    assert!(!r["app:dyno"].contains(&Reach::Release), "{r:?}");
+    // Control: the bundle action itself is release.
+    assert!(projects(&model, ".gitea/actions/tauri-bundle/action.yml")["app:dyno"].contains(&Reach::Release));
+}

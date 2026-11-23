@@ -107,6 +107,9 @@ pub struct Inputs {
     pub setup_only: Vec<String>,
     /// Local actions whose use makes a job a release job (bundling, signing, publishing).
     pub release_actions: Vec<String>,
+    /// The contract phases a check of a release job runs beside the app's smoke set (`[ci] release_gate_phases`, `checks`): a gate,
+    /// never the installers (rule 54 narrowed, user decision 2026-11-23).
+    pub gate_phases: Vec<String>,
     /// What an input hash adds beyond a node's own files (ADR 0117 §5, WP-7).
     pub hash: HashDecl,
     /// What counts as prose (review round 3, P1-A).

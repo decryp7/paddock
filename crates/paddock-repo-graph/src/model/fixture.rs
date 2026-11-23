@@ -514,6 +514,7 @@ pub fn inputs() -> Inputs {
             .iter()
             .map(|s| s.to_string())
             .collect(),
+        gate_phases: vec!["checks".to_string()],
         hash: Default::default(),
         prose: Prose {
             project_names: ["README*", "CHANGELOG*", "LICENSE*"]

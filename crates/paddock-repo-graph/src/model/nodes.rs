@@ -429,10 +429,20 @@ fn own_reach(kind: NodeKind) -> Reach {
 /// - Every other kind arrives as it left (a test file's `test` reaches its target as test; a read data file is code).
 pub fn carry(r: Reach, at: &ModelNode, kind: EdgeKind, up: &ModelNode, setup_only: bool) -> Reach {
     let script = |n: &ModelNode| matches!(n.kind, NodeKind::Action | NodeKind::Script);
-    let release = up.release
+    let ci = |n: &ModelNode| matches!(n.kind, NodeKind::Step | NodeKind::Job | NodeKind::Workflow);
+    let into_release = up.release
         && !setup_only
         && !at.setup_only
         && matches!(kind, EdgeKind::Uses | EdgeKind::Runs);
+    // A check a release job runs (rule 54 narrowed, user decision 2026-11-23): a script the job's `run:` steps run, and anything
+    // that arrives from one of its steps (or a callee's job) that is not a release step, is a gate of the release: the app's smoke
+    // set and its gate phases, never the installers. Only the steps that use an action (bundle, sign, notarise, publish) are release.
+    let gate = into_release
+        && ((script(at)
+            && at.kind == NodeKind::Script
+            && kind == EdgeKind::Runs
+            && up.kind == NodeKind::Job)
+            || (ci(at) && !at.release));
     if script(at)
         && !script(up)
         && matches!(
@@ -442,7 +452,9 @@ pub fn carry(r: Reach, at: &ModelNode, kind: EdgeKind, up: &ModelNode, setup_onl
     {
         // Only a path through a declared setup-only action is plumbing (the coordinator's decision of 2026-11-23, fail closed):
         // any other action or script a job uses is an input of that job in full, or of its installers in a release job.
-        return if release {
+        return if gate {
+            Reach::Gate
+        } else if into_release {
             Reach::Release
         } else if setup_only || at.setup_only {
             Reach::Plumbing
@@ -450,10 +462,11 @@ pub fn carry(r: Reach, at: &ModelNode, kind: EdgeKind, up: &ModelNode, setup_onl
             Reach::Code
         };
     }
-    // Into a release job or step, a CI or script path is release (its installers, and the app's gates beside them, §5); an
-    // app's own code reaches the app at the project level, never through a release job.
-    if matches!(r, Reach::Plumbing | Reach::Code) && release {
-        return Reach::Release;
+    // Into a release job or step, a CI or script path is release (its installers, and the app's gates beside them, §5), or a gate
+    // when it comes from a step that is no release step; an app's own code reaches the app at the project level, never through a
+    // release job.
+    if matches!(r, Reach::Plumbing | Reach::Code) && into_release {
+        return if gate { Reach::Gate } else { Reach::Release };
     }
     r
 }
@@ -625,7 +638,9 @@ mod tests {
             Reach::Code,
             "a script a job runs is that job's input in full"
         );
-        assert_eq!(r["job:dyno.yml#bundle"], Reach::Release);
+        // A script a release job's `run:` steps run is a check of the release: a gate (its smoke set and checks phase), not its
+        // installers (rule 54 narrowed, user decision 2026-11-23); an action a release step uses stays release.
+        assert_eq!(r["job:dyno.yml#bundle"], Reach::Gate);
         // A script run only through a setup-only action stays plumbing in the release job.
         m.add_node(ModelNode::new(
             "script:report.sh",

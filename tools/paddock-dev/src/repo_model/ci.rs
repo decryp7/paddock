@@ -927,11 +927,18 @@ impl Extractor for CiExtractor {
                 }
                 let mut node = ModelNode::new(&jid, NodeKind::Job, &[]);
                 node.release = used.iter().any(|a| self.decl.release_actions.contains(a));
-                // The steps of a release job are release steps: an action or script one of them runs reaches the job as release
-                // (its installers), not as the job's code.
+                // The steps of a release job that use an action (bundle, sign, notarise, publish, and the actions beside them) are
+                // release steps: an action one of them uses reaches the job as release (its installers). A `run:` step is a check
+                // of the release (a gate: the app's smoke set and checks phase, rule 54 narrowed, user decision 2026-11-23).
                 if node.release {
                     let prefix = format!("step:{}#{job}/", f.rsplit('/').next().unwrap_or(f));
-                    for n in x.nodes.iter_mut().filter(|n| n.id.starts_with(&prefix)) {
+                    let action_steps: BTreeSet<String> = x
+                        .edges
+                        .iter()
+                        .filter(|e| e.kind == EdgeKind::Uses && e.from.starts_with(&prefix) && e.to.starts_with("action:"))
+                        .map(|e| e.from.clone())
+                        .collect();
+                    for n in x.nodes.iter_mut().filter(|n| action_steps.contains(&n.id)) {
                         n.release = true;
                     }
                 }

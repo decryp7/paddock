@@ -362,6 +362,11 @@ changes here, every app's copy is updated in the same change.
     train or batch that touches it (user, 2026-11-12), not once per branch.** The release path is the release workflow,
     the shared app-release workflow, the bundle and prepare steps, the Tauri config and the app's imports of shared
     packages.
+    (a0) Narrowed (user, 2026-11-23): a check a release job runs (a `run:` step: the release preflight, a conformance check or
+    a check script) is not the release path. A change that reaches only such a step selects the app's smoke set and its
+    `checks` phase, not the installers (ADR 0117's `gate` reach; `docs/repo-graph.toml` `[ci] release_gate_phases`). The
+    installers stay for the bundle, sign, notarise and publish steps (the steps that use an action), the app's code, the
+    Tauri config and tags.
     (a) The batch dispatches `<app>-release.yml` with gates on and the installers (bundle) built; passing tests alone is
     not enough.
     (a2) A train dispatches an app's release gate only when the plan (`./dev plan`, over the train's

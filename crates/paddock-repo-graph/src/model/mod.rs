@@ -41,6 +41,9 @@ pub enum Reach {
     Docs,
     /// CI plumbing only (a setup or cache step): the node's declared smoke set.
     Plumbing,
+    /// A check a release job runs (a `run:` step of it: the release preflight, a conformance check): the app's declared smoke set
+    /// and its release gate phases (`[ci] release_gate_phases`), never the installers (rule 54 narrowed, user decision 2026-11-23).
+    Gate,
     /// Test code only: the test targets that import it.
     Test,
     /// A release step (bundling, signing, publishing): the installers.
@@ -55,6 +58,7 @@ impl Reach {
         match self {
             Reach::Docs => "docs",
             Reach::Plumbing => "plumbing",
+            Reach::Gate => "gate",
             Reach::Test => "test",
             Reach::Release => "release",
             Reach::Code => "code",
@@ -66,13 +70,14 @@ impl Reach {
         [
             Reach::Docs,
             Reach::Plumbing,
+            Reach::Gate,
             Reach::Test,
             Reach::Release,
             Reach::Code,
         ]
         .into_iter()
         .find(|r| r.name() == s)
-        .ok_or_else(|| format!("unknown reach {s:?} (code, release, test, plumbing or docs)"))
+        .ok_or_else(|| format!("unknown reach {s:?} (code, release, test, gate, plumbing or docs)"))
     }
 }
 
@@ -485,7 +490,16 @@ pub fn reach(changed: &[String], facts: &Facts, inputs: &Inputs, text: TextOf) -
     if let Some(m) = facts.model {
         for (id, hit) in m.reach_from(&model_seeds) {
             for &kind in &hit.kinds {
-                mark_hit(&mut out, &mut crates, facts, m, &id, kind, &hit.why);
+                mark_hit(
+                    &mut out,
+                    &mut crates,
+                    facts,
+                    m,
+                    &id,
+                    kind,
+                    &hit.why,
+                    &inputs.gate_phases,
+                );
             }
         }
         // An unresolved reference (an import, a read, a script path no extractor could resolve) leaves the referrer's edges
@@ -519,7 +533,16 @@ pub fn reach(changed: &[String], facts: &Facts, inputs: &Inputs, text: TextOf) -
             for (id, hit) in m.reach_from(&seeds) {
                 let mut reasons = hit.why.clone();
                 reasons.push(why.clone());
-                mark_hit(&mut out, &mut crates, facts, m, &id, Reach::Code, &reasons);
+                mark_hit(
+                    &mut out,
+                    &mut crates,
+                    facts,
+                    m,
+                    &id,
+                    Reach::Code,
+                    &reasons,
+                    &inputs.gate_phases,
+                );
             }
         }
     }
@@ -580,7 +603,9 @@ pub fn reach(changed: &[String], facts: &Facts, inputs: &Inputs, text: TextOf) -
     out
 }
 
-/// Marks what one reached model node selects, for one kind that arrived at it (ADR 0117 §5).
+/// Marks what one reached model node selects, for one kind that arrived at it (ADR 0117 §5); a gate (a check a release job runs)
+/// also runs the app's `gate_phases`.
+#[allow(clippy::too_many_arguments)]
 fn mark_hit(
     out: &mut Reached,
     crates: &mut BTreeSet<String>,
@@ -589,6 +614,7 @@ fn mark_hit(
     id: &str,
     kind: Reach,
     why: &[String],
+    gate_phases: &[String],
 ) {
     let node = m.node(id);
     let why = why.join("; ");
@@ -668,6 +694,12 @@ fn mark_hit(
             if r >= Reach::Release {
                 out.whole.insert(p.to_string());
             }
+            if r == Reach::Gate && p.starts_with("app:") {
+                out.phases
+                    .entry(p.to_string())
+                    .or_default()
+                    .extend(gate_phases.iter().cloned());
+            }
             out.mark(p, r, true, true, format!("{id} runs it ({why})"));
         }
     }
@@ -729,6 +761,12 @@ pub fn selection(reached: &Reached, smoke: &BTreeSet<String>) -> BTreeMap<String
                         Reach::Release => s.full = true,
                         Reach::Plumbing if smoke.contains(id) => s.smoke = true,
                         Reach::Plumbing => s.full = true,
+                        // A check of a release: the app's smoke set (its suite without one) and its gate phases (marked in
+                        // `phases`); no installers (user decision 2026-11-23).
+                        Reach::Gate if id.starts_with("app:") && smoke.contains(id) => {
+                            s.smoke = true
+                        }
+                        Reach::Gate => s.full = true,
                         Reach::Test => match reached.targets.get(id) {
                             Some(t) if !t.is_empty() => s.affected.extend(t.iter().cloned()),
                             _ => s.full = true,
