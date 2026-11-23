@@ -245,7 +245,7 @@ impl RunnerProcess for ChildProcess {
     }
 
     fn kill(&mut self) {
-        kill_tree(self.child.id());
+        kill_child_tree(self.child.id());
         self.child.kill();
     }
 }
@@ -301,26 +301,25 @@ pub fn graceful_stop(pid: u32, session: Option<u32>) -> Result<(), String> {
     }
 }
 
-/// Ends `pid` and every process it started.
-#[cfg_attr(
-    unix,
-    expect(
-        clippy::disallowed_methods,
-        reason = "ADR 0033 WP-6: kill_tree signals a recorded pid (adopted runners); kill by ProcessId"
-    )
-)]
-pub fn kill_tree(pid: u32) {
-    #[cfg(unix)]
-    {
-        if let Ok(p) = i32::try_from(pid) {
-            let _ = nix::sys::signal::killpg(nix::unistd::Pid::from_raw(p), nix::sys::signal::Signal::SIGKILL);
-        }
+/// Ends `pid`, a child this process still holds unreaped (so its pid cannot have been handed on), and every process below
+/// it: by identity through paddock-proc, which follows parent links only from older to newer processes and ends each
+/// process through a handle after checking its creation time (ADR 0033). Never `taskkill /T`, which takes every process
+/// whose parent pid matches, a stranger that inherited a parent pid that was handed on included (run 8674). When the
+/// child's start time can no longer be read, its process group is ended (Unix; on Windows the caller's handle or job ends
+/// it).
+pub fn kill_child_tree(pid: u32) {
+    match paddock_proc::ProcessId::of(pid) {
+        Some(id) => kill_tree(id),
+        None => paddock_proc::end_unreaped_group(pid),
     }
-    #[cfg(windows)]
-    {
-        let mut cmd = quiet_command(&crate::process::taskkill_exe());
-        cmd.args(["/PID", &pid.to_string(), "/T", "/F"]);
-        let _ = run_with_timeout(cmd, Duration::from_secs(20));
+}
+
+/// Ends `id` and every process below it, by identity (paddock-proc logs what it ended, with its program and parent chain).
+pub fn kill_tree(id: paddock_proc::ProcessId) {
+    for (p, ending) in paddock_proc::kill_tree(id) {
+        if ending == paddock_proc::Ending::Refused {
+            eprintln!("pitcrew-service: warning: the system refused to end {p} of the tree of {id}");
+        }
     }
 }
 

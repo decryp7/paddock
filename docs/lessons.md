@@ -3551,3 +3551,29 @@ logged with what the rule saw (ER-27). Lesson: an admission rule needs a cost, n
   the next complete run covers it. This is a recorded exception, not a precedent.
 - **Class: a default that fails open** (the global list, the base-less dispatch, the unowned file; 2nd instance) and **a gate that
   waits on a date nobody moved** (RUSTSEC-2026-0592, C50; 2nd instance).
+
+## A test cleanup ended other jobs' processes on the shared Windows host (run 8674, 2026-11-23)
+
+- **What happened.** Within 8.5 s on the Windows host (parallel slots s1 to s3), a Dyno test process (13:11:40.48), a Pitcrew test
+  process (13:11:41.06), the crate job's cargo/nextest (13:11:44.39) and Pitcrew's own nextest (about 13:11:49) ended with exit code 1
+  and no output: what `taskkill /F` gives (`TerminateProcess(h, 1)`).
+- **Cause (identified, not reproduced on Windows, ER-28).** Pitcrew's supervision harness (`tests/supervision.rs`,
+  `kill_leftover_processes`, run on every test's drop since 69a0c7cc7) took one look at the process table, added every process whose
+  parent pid was in its set (no start-time check), and then ended each pid through sysinfo's `Process::kill`, which on Windows runs
+  `taskkill.exe /PID <pid> /F` once per pid, serially. The set was mostly the fake runner's job processes, which `release_job()` had just
+  ended, and Windows hands a pid on at once; the other slots' nextests start a process per test. Each victim fell within about a second
+  before a supervision test ended (40.03, 41.08, 45.33, and the four tests still running at 49.0). The file's blanket
+  `#![allow(clippy::disallowed_methods)]` hid the ADR 0033 ban on `sysinfo::Process::kill`. Not seen before because the Windows jobs
+  only now run in parallel slots: a stale pid used to land on the same job's processes.
+- **Same class in shipped code.** Pitcrew's `launch::kill_tree` and its tool-tree fallback ran `taskkill /PID <pid> /T /F` (`/T` takes
+  every process whose parent pid matches, strangers that inherited a reused parent pid included), and an adopted runner was ended by a
+  bare pid recorded earlier. In paddock-proc, the table joined sysinfo's parent pid with a start time read later, so a pid handed on in
+  between paired a stranger's identity with the old parent link, and `kill_tree` would end it (the age check in `descendants` cannot see
+  that).
+- **Fix (fix/proc-tree-pid-reuse).** paddock-proc: a table entry's parent and identity describe one process (Linux: one `/proc/<pid>/stat`
+  read; Windows and macOS: a start time counts only if earlier than the list, read on Windows' coarse clock); every end logs pid, start
+  time, program and parent chain (ER-27); `processes_inside` finds a harness's processes by identity. Pitcrew: the harness, the runner and
+  tool trees and adopted runners end by identity through paddock-proc; `taskkill` is gone from pitcrew-service.
+- **Recurring:** ADR 0033's class (ending a bare pid read earlier, following parent pids without age): Chromium driver stale-snapshot
+  kill (ADR 0033 regression test), Windows stale-pid kills (rule 53). Open: blanket `disallowed_methods` allows in test files hide the
+  ban; a check that refuses the ADR 0033 entries under a file-wide allow is the follow-up.

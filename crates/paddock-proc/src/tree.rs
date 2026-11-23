@@ -45,6 +45,84 @@ pub(crate) trait Os {
     fn end(&self, id: ProcessId) -> Ending {
         check_then_kill(self, id)
     }
+    /// The programs and parent pids of the running processes, for the log lines of what is ended ([`Names`]).
+    fn names(&self) -> Names {
+        Names::default()
+    }
+}
+
+/// `pid -> (program name, parent pid)` of the running processes, from one look at the process list, read just before
+/// processes are ended. For log lines only (ER-27: the next stranger ended names its killer): bare pids from a list,
+/// which nothing acts on.
+pub(crate) type Names = std::collections::HashMap<u32, (String, Option<u32>)>;
+
+/// How many ancestors a log line names: enough to reach the job or test that started the process.
+const CHAIN_DEPTH: usize = 6;
+
+/// One look at the process list for [`Names`]: names and parent pids only (no memory, command lines or times), empty when
+/// the table cannot be read.
+fn read_names() -> Names {
+    let Some(mut sys) = usage::new_system_with(sysinfo::System::new) else {
+        return Names::default();
+    };
+    sys.refresh_processes_specifics(ProcessesToUpdate::All, true, ProcessRefreshKind::nothing());
+    sys.processes()
+        .iter()
+        .filter(|(_, p)| p.thread_kind().is_none())
+        .map(|(pid, p)| {
+            (
+                pid.as_u32(),
+                (
+                    p.name().to_string_lossy().into_owned(),
+                    p.parent().map(Pid::as_u32),
+                ),
+            )
+        })
+        .collect()
+}
+
+/// `pid 1234 "nextest.exe" <- 1200 "cargo.exe" <- 900 "bash.exe"`: a process and its parent chain, nearest first, as
+/// `names` showed them; a pid the list did not show is named `?` and ends the chain. Bounded by [`CHAIN_DEPTH`] and by
+/// cycles.
+pub(crate) fn chain_text(pid: u32, names: &Names) -> String {
+    let mut out = String::new();
+    let mut seen = std::collections::HashSet::new();
+    let mut next = Some(pid);
+    while let Some(p) = next.filter(|p| seen.insert(*p) && seen.len() <= CHAIN_DEPTH + 1) {
+        if !out.is_empty() {
+            out.push_str(" <- ");
+        }
+        match names.get(&p) {
+            Some((name, parent)) => {
+                out.push_str(&format!("{p} {name:?}"));
+                next = *parent;
+            }
+            None => {
+                out.push_str(&format!("{p} ?"));
+                next = None;
+            }
+        }
+    }
+    format!("pid {out}")
+}
+
+/// Logs what ending `id` found, with its program and parent chain (`names`, read before the end): `tree` names the root
+/// whose tree it was ended with. A process ended is logged at info, so a diagnostic bundle (or a CI log with a logger)
+/// shows who ended what; a skipped or refused one is a warning.
+pub(crate) fn log_ending(id: ProcessId, tree: Option<ProcessId>, e: Ending, names: &Names) {
+    let of = tree
+        .filter(|r| *r != id)
+        .map_or_else(String::new, |r| format!(" (tree of {r})"));
+    let chain = chain_text(id.pid(), names);
+    match e {
+        Ending::Ended => log::info!("Ended {id}{of}: {chain}"),
+        Ending::Gone => log::debug!("{id}{of} was gone before it was ended"),
+        Ending::NotOurs(now) => {
+            warn_not_ours(id, now);
+            log::warn!("{id}{of} not ended; the pid's holder now: {chain}");
+        }
+        Ending::Refused => log::warn!("Could not end {id}{of}: the system refused; {chain}"),
+    }
 }
 
 /// Ends `id` if the start time of its pid's holder is still its own: the check, then the kill (a gap of microseconds on
@@ -65,6 +143,10 @@ impl Os for RealOs {
 
     fn start_of(&self, pid: u32) -> Option<StartTime> {
         crate::sys::start_time(pid)
+    }
+
+    fn names(&self) -> Names {
+        read_names()
     }
 
     fn end_group(&self, root: u32) {
@@ -119,6 +201,8 @@ pub(crate) fn kill_tree_on(
         Some(m) => m.into_iter().filter(|p| p.pid() != root.pid()).collect(),
         None => usage::descendants(&os.table(), root),
     };
+    // Read before anything is ended, while the processes still run.
+    let names = os.names();
     let mut out = Vec::with_capacity(kids.len() + 1);
     let root_holder = if root_is_ours {
         Holder::Same
@@ -138,13 +222,7 @@ pub(crate) fn kill_tree_on(
     }
     out.extend(kids.into_iter().map(|kid| (kid, os.end(kid))));
     for (id, e) in &out {
-        match e {
-            Ending::NotOurs(now) => warn_not_ours(*id, *now),
-            Ending::Refused => {
-                log::warn!("Could not end {id} of the tree of {root}: the system refused")
-            }
-            Ending::Ended | Ending::Gone => {}
-        }
+        log_ending(*id, Some(root), *e, &names);
     }
     out
 }
@@ -308,10 +386,14 @@ fn ask_checked(id: ProcessId) -> (Holder, bool) {
 /// Ends one process now (SIGKILL, `TerminateProcess`), without touching its group or children, if its pid still belongs
 /// to it; a pid handed on is skipped with a warning.
 pub fn end(id: ProcessId) -> Ending {
-    let e = RealOs.end(id);
-    if let Ending::NotOurs(now) = e {
-        warn_not_ours(id, now);
-    }
+    end_on(&RealOs, id)
+}
+
+/// [`end`] on `os`, logged with the program and parent chain of what it ends.
+pub(crate) fn end_on(os: &dyn Os, id: ProcessId) -> Ending {
+    let names = os.names();
+    let e = os.end(id);
+    log_ending(id, None, e, &names);
     e
 }
 
@@ -504,6 +586,60 @@ pub(crate) fn processes_with_command_lines_with(
         .collect()
 }
 
+/// The processes whose program, working folder or command line is inside one of `folders` (a test harness's own folder:
+/// everything it started there, also what outlived its parent). Identities are read first and the attributes after, as in
+/// [`processes_with_command_lines`]: a pid handed on between the two keeps the identity of the process that had it first,
+/// so ending the result ([`kill_tree`]) leaves the new holder alone. Empty when the table cannot be read.
+pub fn processes_inside(folders: &[std::path::PathBuf]) -> Vec<ProcessId> {
+    processes_inside_with(folders, sysinfo::System::new)
+}
+
+/// [`processes_inside`] over a constructor.
+pub(crate) fn processes_inside_with(
+    folders: &[std::path::PathBuf],
+    make: impl Fn() -> Result<sysinfo::System, sysinfo::Error>,
+) -> Vec<ProcessId> {
+    let table: Table = usage::snapshot_with(&make);
+    let Some(mut sys) = usage::new_system_with(&make) else {
+        return Vec::new();
+    };
+    sys.refresh_processes_specifics(
+        ProcessesToUpdate::All,
+        true,
+        ProcessRefreshKind::nothing()
+            .with_exe(sysinfo::UpdateKind::Always)
+            .with_cwd(sysinfo::UpdateKind::Always)
+            .with_cmd(sysinfo::UpdateKind::Always),
+    );
+    sys.processes()
+        .iter()
+        .filter(|(_, p)| {
+            let line = p
+                .cmd()
+                .iter()
+                .map(|a| a.to_string_lossy())
+                .collect::<Vec<_>>()
+                .join(" ");
+            is_inside(p.exe(), p.cwd(), &line, folders)
+        })
+        .filter_map(|(pid, _)| usage::identity(&table, pid.as_u32()))
+        .collect()
+}
+
+/// Whether a process with this program, working folder and command line is inside one of `folders`.
+pub(crate) fn is_inside(
+    exe: Option<&std::path::Path>,
+    cwd: Option<&std::path::Path>,
+    line: &str,
+    folders: &[std::path::PathBuf],
+) -> bool {
+    folders.iter().any(|f| {
+        let under = |q: Option<&std::path::Path>| q.is_some_and(|q| q.starts_with(f));
+        let text = f.to_string_lossy();
+        under(exe) || under(cwd) || (!text.is_empty() && line.contains(&*text))
+    })
+}
+
 #[cfg(test)]
 mod port_tests {
     use super::*;
@@ -674,6 +810,108 @@ mod port_tests {
             ]
         );
         assert_eq!(gone.running(20), None, "the group was signalled");
+    }
+
+    #[test]
+    fn a_log_line_names_the_program_and_its_parent_chain() {
+        let names: Names = [
+            (30, ("test.exe".to_string(), Some(20))),
+            (20, ("cargo-nextest.exe".to_string(), Some(10))),
+            (10, ("bash.exe".to_string(), Some(5))),
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(
+            chain_text(30, &names),
+            r#"pid 30 "test.exe" <- 20 "cargo-nextest.exe" <- 10 "bash.exe" <- 5 ?"#
+        );
+        assert_eq!(
+            chain_text(99, &names),
+            "pid 99 ?",
+            "a pid the list did not show"
+        );
+        let cycle: Names = [
+            (1, ("a".to_string(), Some(2))),
+            (2, ("b".to_string(), Some(1))),
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(
+            chain_text(1, &cycle),
+            r#"pid 1 "a" <- 2 "b""#,
+            "a cycle ends the chain"
+        );
+        let long: Names = (1..=20)
+            .map(|p| (p, (format!("p{p}"), Some(p + 1))))
+            .collect();
+        assert_eq!(
+            chain_text(1, &long).matches(" <- ").count(),
+            CHAIN_DEPTH,
+            "bounded"
+        );
+    }
+
+    #[test]
+    fn a_process_is_inside_a_folder_by_its_program_working_folder_or_command_line() {
+        let root = std::path::PathBuf::from("/scratch/run-1");
+        let folders = [root.clone()];
+        let inside = |exe: Option<&str>, cwd: Option<&str>, line: &str| {
+            is_inside(
+                exe.map(std::path::Path::new),
+                cwd.map(std::path::Path::new),
+                line,
+                &folders,
+            )
+        };
+        assert!(inside(Some("/scratch/run-1/bin/runner"), None, ""));
+        assert!(inside(None, Some("/scratch/run-1/work"), "sleep 100"));
+        assert!(inside(None, None, "tail -f /scratch/run-1/log"));
+        assert!(!inside(Some("/usr/bin/sleep"), Some("/home"), "sleep 100"));
+        assert!(
+            !inside(Some("/scratch/run-10/x"), None, ""),
+            "a sibling folder whose name starts the same is not inside"
+        );
+        assert!(
+            !is_inside(None, None, "anything", &[std::path::PathBuf::new()]),
+            "an empty folder matches nothing"
+        );
+    }
+
+    /// Ending a tree reads the names for its log lines before anything is ended (while the processes still run).
+    #[test]
+    fn names_for_the_log_are_read_before_the_tree_is_ended() {
+        struct Named(FakeOs, Mutex<Option<usize>>);
+        impl Os for Named {
+            fn table(&self) -> Table {
+                self.0.table()
+            }
+            fn start_of(&self, pid: u32) -> Option<StartTime> {
+                self.0.start_of(pid)
+            }
+            fn end_group(&self, root: u32) {
+                self.0.end_group(root);
+            }
+            fn kill_pid(&self, pid: u32) -> bool {
+                self.0.kill_pid(pid)
+            }
+            fn names(&self) -> Names {
+                *self.1.lock().unwrap() = Some(self.0.killed.lock().unwrap().len());
+                Names::default()
+            }
+        }
+        let os = Named(
+            FakeOs::new(&[(10, Some(1), 100), (11, Some(10), 200)], unchanged),
+            Mutex::new(None),
+        );
+        let out = kill_tree_on(&os, ProcessId::new(10, at(100)), false, None);
+        assert_eq!(*os.1.lock().unwrap(), Some(0), "read before the first kill");
+        assert!(out.iter().all(|(_, e)| *e == Ending::Ended), "{out:?}");
+        let single = Named(
+            FakeOs::new(&[(12, Some(1), 300)], unchanged),
+            Mutex::new(None),
+        );
+        assert_eq!(end_on(&single, ProcessId::new(12, at(300))), Ending::Ended);
+        assert_eq!(*single.1.lock().unwrap(), Some(0));
     }
 
     /// Windows: the job's member list is the tree; no table is read and no parent pid followed, so a stranger that claims the

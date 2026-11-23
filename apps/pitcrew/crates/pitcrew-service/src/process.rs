@@ -105,13 +105,6 @@ pub(crate) fn run_until(mut cmd: Command, secs: u64, mut give_up: impl FnMut(u32
     })
 }
 
-/// `taskkill.exe` in the system folder, by full path (never whatever `taskkill` the `PATH` finds first).
-#[cfg(windows)]
-pub fn taskkill_exe() -> std::path::PathBuf {
-    let root = std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into());
-    std::path::PathBuf::from(root).join("System32").join("taskkill.exe")
-}
-
 /// A tool's process tree: its own session on Unix, a kill-on-close job object on Windows.
 mod tree {
     #![allow(unsafe_code)]
@@ -240,25 +233,12 @@ mod tree {
         Some(job)
     }
 
-    /// `taskkill /PID n /T /F`, run directly (not through `run_with_timeout`, which would recurse) and waited for a few
-    /// seconds at most.
+    /// Ends what is left of the tool's tree: the tool is a child this process holds unreaped, so its pid still names it,
+    /// and paddock-proc ends it and the processes below it by identity (never `taskkill /T`, which also takes strangers that
+    /// inherited a parent pid that was handed on; run 8674).
     #[cfg(windows)]
     fn taskkill_tree(pid: u32) {
-        use std::process::Stdio;
-        use std::time::{Duration, Instant};
-        let mut kill = super::quiet_command(&super::taskkill_exe());
-        kill.args(["/PID", &pid.to_string(), "/T", "/F"])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
-        if let Ok(mut k) = kill.spawn() {
-            let deadline = Instant::now() + Duration::from_secs(10);
-            while matches!(k.try_wait(), Ok(None)) && Instant::now() < deadline {
-                std::thread::sleep(Duration::from_millis(25));
-            }
-            let _ = k.kill();
-            let _ = k.wait();
-        }
+        crate::launch::kill_child_tree(pid);
     }
 }
 
@@ -324,7 +304,7 @@ pub(crate) mod tests {
             // Only processes that are still the tool's own: a pid reused by an unrelated process is never touched.
             for m in &members {
                 if running(*m) {
-                    kill_pid(m.pid);
+                    kill_member(*m);
                 }
             }
         }
@@ -356,31 +336,29 @@ pub(crate) mod tests {
             .collect()
     }
 
+    /// The tool's descendants by identity (paddock-proc follows parent links only from older to newer processes); the
+    /// mark is the start time in microseconds.
     #[cfg(windows)]
-    // ADR 0033 WP-6 (test): a tree by parent pids without start times; use paddock_proc::descendants
     fn tree_members(pid: u32) -> Vec<Member> {
         use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
+        let Some(root) = paddock_proc::ProcessId::of(pid) else {
+            return vec![];
+        };
+        let mut members = vec![root];
+        members.extend(paddock_proc::descendants_of(root));
+        // `cmd` gets a console host of its own, which is not one of the tool's programs (the name only filters what to
+        // count; what is ended is chosen by identity).
         let mut sys = System::new().expect("a System");
         sys.refresh_processes_specifics(ProcessesToUpdate::All, true, ProcessRefreshKind::nothing());
-        let mut tree = vec![Pid::from_u32(pid)];
-        loop {
-            let before = tree.len();
-            for (p, proc_) in sys.processes() {
-                if !tree.contains(p) && proc_.parent().is_some_and(|pp| tree.contains(&pp)) {
-                    tree.push(*p);
-                }
-            }
-            if tree.len() == before {
-                break;
-            }
-        }
-        // `cmd` gets a console host of its own, which is not one of the tool's programs.
-        tree.into_iter()
-            .filter_map(|p| sys.process(p).map(|q| (p, q)))
-            .filter(|(_, q)| !q.name().to_string_lossy().eq_ignore_ascii_case("conhost.exe"))
-            .map(|(p, q)| Member {
-                pid: p.as_u32(),
-                mark: q.start_time(),
+        members
+            .into_iter()
+            .filter(|id| {
+                sys.process(Pid::from_u32(id.pid()))
+                    .is_none_or(|q| !q.name().to_string_lossy().eq_ignore_ascii_case("conhost.exe"))
+            })
+            .map(|id| Member {
+                pid: id.pid(),
+                mark: id.started().as_micros(),
             })
             .collect()
     }
@@ -414,14 +392,15 @@ pub(crate) mod tests {
         }
     }
 
-    /// Whether the member still runs and is still the same process (same start time).
+    /// Whether the member still runs and is still the same process (same start time, to the microsecond).
     #[cfg(windows)]
     fn running(m: Member) -> bool {
-        use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
-        let mut sys = System::new().expect("a System");
-        let pid = Pid::from_u32(m.pid);
-        sys.refresh_processes_specifics(ProcessesToUpdate::Some(&[pid]), true, ProcessRefreshKind::nothing());
-        sys.process(pid).is_some_and(|p| p.start_time() == m.mark)
+        member_id(m).confirmed_running()
+    }
+
+    #[cfg(windows)]
+    fn member_id(m: Member) -> paddock_proc::ProcessId {
+        paddock_proc::ProcessId::new(m.pid, paddock_proc::StartTime::from_micros(m.mark))
     }
 
     #[cfg(unix)]
@@ -432,15 +411,15 @@ pub(crate) mod tests {
             reason = "ADR 0033 WP-6 (test): kills tree members found by parent pids; use paddock_proc"
         )
     )]
-    fn kill_pid(pid: u32) {
-        if let Ok(p) = i32::try_from(pid) {
+    fn kill_member(m: Member) {
+        if let Ok(p) = i32::try_from(m.pid) {
             let _ = nix::sys::signal::kill(nix::unistd::Pid::from_raw(p), nix::sys::signal::Signal::SIGKILL);
         }
     }
 
     #[cfg(windows)]
-    fn kill_pid(pid: u32) {
-        let _ = quiet_command(&taskkill_exe()).args(["/PID", &pid.to_string(), "/F"]).output();
+    fn kill_member(m: Member) {
+        paddock_proc::end(member_id(m));
     }
 
     #[test]

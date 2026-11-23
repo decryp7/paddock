@@ -318,6 +318,18 @@ pub(crate) fn parse_stat_start(stat: &str) -> Option<u64> {
     rest.split_ascii_whitespace().nth(19)?.parse().ok()
 }
 
+/// The parent pid (field 4, `ppid`) of a Linux `/proc/<pid>/stat` line, counted after the name's last `)`; `None` for 0
+/// (no parent) or a line that does not parse.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub(crate) fn parse_stat_parent(stat: &str) -> Option<u32> {
+    let rest = &stat[stat.rfind(')')? + 1..];
+    rest.split_ascii_whitespace()
+        .nth(1)?
+        .parse()
+        .ok()
+        .filter(|&p: &u32| p != 0)
+}
+
 /// The boot time in seconds since the Unix epoch from the text of Linux `/proc/stat` (the `btime` line).
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub(crate) fn parse_btime(proc_stat: &str) -> Option<u64> {
@@ -604,6 +616,19 @@ mod tests {
             parse_stat_start("1 (x) S 1 1 1 0 -1 0 0 0 0 0 0 0 0 0 20 0 1 0 lots 1"),
             None
         );
+    }
+
+    #[test]
+    fn the_parent_is_read_after_the_last_parenthesis() {
+        let stat = "1234 (a (weird) 99 name) S 77 1234 1234 0 -1 4194560 100 0 0 0 5 3 0 0 20 0 1 0 98765 1000000";
+        assert_eq!(parse_stat_parent(stat), Some(77));
+        assert_eq!(
+            parse_stat_parent("1 (init) S 0 1 1"),
+            None,
+            "pid 1 has no parent"
+        );
+        assert_eq!(parse_stat_parent("1234 (x) S"), None, "too few fields");
+        assert_eq!(parse_stat_parent("no parenthesis"), None);
     }
 
     #[test]

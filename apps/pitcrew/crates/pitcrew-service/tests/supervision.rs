@@ -5,7 +5,7 @@
 //! test waits for what the supervisor has *seen* (a job's processes in its usage, not only the "task started" line),
 //! and every wait is on a condition. A real-time job length or a fixed number of fake-clock steps that must fit into
 //! one real job made these tests fail or time out on a loaded runner (CI run 6628).
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::disallowed_methods, missing_docs)]
+#![allow(clippy::unwrap_used, clippy::expect_used, missing_docs)]
 
 use paddock_testkit::TestCommand;
 use pitcrew_core::health::RunnerStatus;
@@ -151,43 +151,18 @@ impl Harness {
         Timestamp(self.clock.load(Ordering::SeqCst))
     }
 
-    /// Ends every process the test started: anything running from or inside the harness folder, and their descendants.
+    /// Ends every process the test started: anything whose program, working folder or command line is in the harness
+    /// folder, with its descendants. Each is ended by identity through paddock-proc: identities are read before the
+    /// attributes, parent links are followed only from older to newer processes, and each end checks the creation time
+    /// through a handle. Never a bare pid from an earlier look: on run 8674 this cleanup ended other jobs' processes (a
+    /// nextest, a cargo and test processes on the same Windows host) whose pids were handed on after the look, through
+    /// `taskkill /F` (sysinfo's `Process::kill` on Windows).
     fn kill_leftover_processes(&self) {
-        use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
-        let mut sys = System::new().expect("a System");
-        sys.refresh_processes_specifics(
-            ProcessesToUpdate::All,
-            true,
-            ProcessRefreshKind::nothing()
-                .with_exe(sysinfo::UpdateKind::Always)
-                .with_cwd(sysinfo::UpdateKind::Always),
-        );
-        let root = self.root.canonicalize().unwrap_or_else(|_| self.root.clone());
-        let mut doomed: std::collections::HashSet<Pid> = sys
-            .processes()
-            .iter()
-            .filter(|(_, p)| {
-                let inside = |q: Option<&std::path::Path>| q.is_some_and(|q| q.starts_with(&self.root) || q.starts_with(&root));
-                let cmd = p.cmd().iter().map(|a| a.to_string_lossy()).collect::<Vec<_>>().join(" ");
-                inside(p.exe()) || inside(p.cwd()) || cmd.contains(&*self.root.to_string_lossy())
-            })
-            .map(|(pid, _)| *pid)
-            .collect();
-        loop {
-            let before = doomed.len();
-            for (pid, p) in sys.processes() {
-                if p.parent().is_some_and(|pp| doomed.contains(&pp)) {
-                    doomed.insert(*pid);
-                }
-            }
-            if doomed.len() == before {
-                break;
-            }
-        }
-        let me = Pid::from_u32(std::process::id());
-        for pid in doomed.into_iter().filter(|p| *p != me) {
-            if let Some(p) = sys.process(pid) {
-                p.kill();
+        let canonical = self.root.canonicalize().unwrap_or_else(|_| self.root.clone());
+        let me = std::process::id();
+        for id in paddock_proc::processes_inside(&[self.root.clone(), canonical]) {
+            if id.pid() != me {
+                paddock_proc::kill_tree(id);
             }
         }
     }
@@ -664,7 +639,7 @@ use pitcrew_core::runner_settings::RunnerSettings;
 /// Whether a process still runs (a zombie nobody reaped does not count).
 #[cfg(unix)]
 fn alive(pid: u32) -> bool {
-    let out = std::process::Command::new("ps")
+    let out = TestCommand::new("ps")
         .args(["-o", "stat=", "-p", &pid.to_string()])
         .output()
         .unwrap();
@@ -948,7 +923,7 @@ fn nothing_is_stopped_while_a_job_runs() {
 fn a_stop_outside_the_runners_tree_is_refused() {
     let mut h = Harness::new("fence", "mode=leftover\njob_secs=hold\nleftovers=sleep:600\n", true);
     h.until_leftovers(1);
-    let stranger = std::process::Command::new("sleep").arg("120").spawn();
+    let stranger = TestCommand::new("sleep").arg("120").spawn();
     let mut stranger = stranger.unwrap();
     let refuse = |h: &mut Harness, pid: u32, allow: bool| match h.ask(Request::StopProcess {
         runner: h.name.clone(),
