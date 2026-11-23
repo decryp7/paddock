@@ -92,7 +92,7 @@ expires = "2026-12-31"
 [[waiver]]
 check = "C53"
 path = "apps/pitcrew/crates/pitcrew-service/src/process.rs"
-reason = "ADR 0033 WP-6: the taskkill /T fallback, killpg before reaping, and test walks by parent pid; use paddock_proc::Supervised and descendants"
+reason = "ADR 0033 WP-6: the taskkill /T fallback and killpg before reaping; use paddock_proc::Supervised"
 expires = "2026-12-31"
 
 [[waiver]]
