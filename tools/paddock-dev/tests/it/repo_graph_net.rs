@@ -267,16 +267,13 @@ fn train_replay_has_no_unlisted_narrowing() {
         *by.entry(d.category.name()).or_default() += 1;
     }
     eprintln!("train replay: {} commits, differences by category {by:?}", r.len());
-    // The pinned defects only shrink (ER-46): this count may be lowered, never raised.
-    assert!(
-        replay::defects(&r) <= PINNED_DEFECTS,
-        "the release-installers-only defect grew: {} > {PINNED_DEFECTS}",
-        replay::defects(&r)
-    );
+    // The pinned defects only shrink (ER-46): at 0, none may come back.
+    assert_eq!(replay::defects(&r), PINNED_DEFECTS, "the release-installers-only defect came back");
 }
 
-/// How many (commit, project) differences the `ReleaseInstallersOnly` defect of WP-3's `selection` has in the replay today.
-const PINNED_DEFECTS: usize = 39;
+/// How many (commit, project) differences the `ReleaseInstallersOnly` defect of WP-3's `selection` has in the replay today: none
+/// since WP-3's union selection (a release reach keeps the app's smoke set or suite), measured on the combined tree on 2026-11-23.
+const PINNED_DEFECTS: usize = 0;
 
 #[test]
 fn control_a_narrowing_no_category_explains_is_listed_and_a_listed_one_is_not() {
