@@ -1,0 +1,21 @@
+{
+ "rule": "APP_CAPABILITY_INPUT",
+ "probes": [
+  {
+   "file": "apps/x/app/src-tauri/Cargo.toml",
+   "differences": []
+  },
+  {
+   "file": "apps/x/app/src-tauri/capabilities/main.json",
+   "differences": []
+  },
+  {
+   "file": "apps/z/app/src-tauri/Cargo.toml",
+   "differences": []
+  },
+  {
+   "file": "apps/x/app/src-tauri/build.rs",
+   "differences": []
+  }
+ ]
+}

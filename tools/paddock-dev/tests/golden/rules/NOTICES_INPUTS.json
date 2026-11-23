@@ -1,0 +1,58 @@
+{
+ "rule": "NOTICES_INPUTS",
+ "probes": [
+  {
+   "file": "scripts/notices.sh",
+   "differences": [
+    {
+     "project": "app:y",
+     "rules": null,
+     "model": "all",
+     "category": "wider",
+     "dropped": []
+    },
+    {
+     "project": "app:z",
+     "rules": null,
+     "model": "all",
+     "category": "wider",
+     "dropped": []
+    }
+   ]
+  },
+  {
+   "file": "templates/repo/about.toml",
+   "differences": [
+    {
+     "project": "app:y",
+     "rules": null,
+     "model": "all",
+     "category": "wider",
+     "dropped": []
+    },
+    {
+     "project": "app:z",
+     "rules": null,
+     "model": "all",
+     "category": "wider",
+     "dropped": []
+    },
+    {
+     "project": "paddock-dev",
+     "rules": null,
+     "model": "all",
+     "category": "wider",
+     "dropped": []
+    }
+   ]
+  },
+  {
+   "file": "conformance/src/notices/render.mjs",
+   "differences": []
+  },
+  {
+   "file": "scripts/other.sh",
+   "differences": []
+  }
+ ]
+}

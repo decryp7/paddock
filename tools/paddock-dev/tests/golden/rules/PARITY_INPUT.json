@@ -1,0 +1,109 @@
+{
+ "rule": "PARITY_INPUT",
+ "probes": [
+  {
+   "file": "conformance/src/checks/C1-example.mjs",
+   "differences": [
+    {
+     "project": "app:x",
+     "rules": "all",
+     "model": null,
+     "category": "4-conformance-split-g8",
+     "dropped": [
+      "nextest:x::bin/x"
+     ]
+    },
+    {
+     "project": "app:y",
+     "rules": "all",
+     "model": null,
+     "category": "4-conformance-split-g8",
+     "dropped": [
+      "app:y: no test target known to the model"
+     ]
+    },
+    {
+     "project": "app:z",
+     "rules": "all",
+     "model": null,
+     "category": "4-conformance-split-g8",
+     "dropped": [
+      "nextest:z::bin/z"
+     ]
+    }
+   ]
+  },
+  {
+   "file": "conformance/bin/paddock-conformance.mjs",
+   "differences": [
+    {
+     "project": "app:x",
+     "rules": "all",
+     "model": null,
+     "category": "4-conformance-split-g8",
+     "dropped": [
+      "nextest:x::bin/x"
+     ]
+    },
+    {
+     "project": "app:y",
+     "rules": "all",
+     "model": null,
+     "category": "4-conformance-split-g8",
+     "dropped": [
+      "app:y: no test target known to the model"
+     ]
+    },
+    {
+     "project": "app:z",
+     "rules": "all",
+     "model": null,
+     "category": "4-conformance-split-g8",
+     "dropped": [
+      "nextest:z::bin/z"
+     ]
+    }
+   ]
+  },
+  {
+   "file": "conformance/baselines/example.json",
+   "differences": [
+    {
+     "project": "app:x",
+     "rules": "all",
+     "model": null,
+     "category": "4-conformance-split-g8",
+     "dropped": [
+      "nextest:x::bin/x"
+     ]
+    },
+    {
+     "project": "app:y",
+     "rules": "all",
+     "model": null,
+     "category": "4-conformance-split-g8",
+     "dropped": [
+      "app:y: no test target known to the model"
+     ]
+    },
+    {
+     "project": "app:z",
+     "rules": "all",
+     "model": null,
+     "category": "4-conformance-split-g8",
+     "dropped": [
+      "nextest:z::bin/z"
+     ]
+    }
+   ]
+  },
+  {
+   "file": "conformance/README.md",
+   "differences": []
+  },
+  {
+   "file": "conformance/test/example.test.mjs",
+   "differences": []
+  }
+ ]
+}

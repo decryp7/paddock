@@ -10,8 +10,10 @@ pub mod content;
 pub mod extract;
 #[cfg(test)]
 mod fixture;
+pub mod generators;
 pub mod glob;
 pub mod guard;
+pub mod hash;
 pub mod inputs;
 pub mod narrow;
 pub mod nodes;

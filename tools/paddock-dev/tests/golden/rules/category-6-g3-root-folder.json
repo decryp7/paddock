@@ -1,0 +1,110 @@
+{
+ "rule": "category:6-g3-root-folder",
+ "probes": [
+  {
+   "file": "spikes/x/Cargo.lock",
+   "differences": [
+    {
+     "project": "app:x",
+     "rules": "all",
+     "model": null,
+     "category": "6-g3-root-folder",
+     "dropped": [
+      "nextest:x::bin/x"
+     ]
+    },
+    {
+     "project": "app:y",
+     "rules": "all",
+     "model": null,
+     "category": "6-g3-root-folder",
+     "dropped": [
+      "app:y: no test target known to the model"
+     ]
+    },
+    {
+     "project": "app:z",
+     "rules": "all",
+     "model": null,
+     "category": "6-g3-root-folder",
+     "dropped": [
+      "nextest:z::bin/z"
+     ]
+    },
+    {
+     "project": "c99",
+     "rules": "all",
+     "model": null,
+     "category": "6-g3-root-folder",
+     "dropped": [
+      "c99: no test target known to the model"
+     ]
+    },
+    {
+     "project": "ci-image",
+     "rules": "all",
+     "model": null,
+     "category": "6-g3-root-folder",
+     "dropped": [
+      "ci-image: no test target known to the model"
+     ]
+    },
+    {
+     "project": "crates",
+     "rules": "all",
+     "model": null,
+     "category": "6-g3-root-folder",
+     "dropped": [
+      "nextest:fx-a",
+      "nextest:fx-b"
+     ]
+    },
+    {
+     "project": "eslint",
+     "rules": "all",
+     "model": null,
+     "category": "6-g3-root-folder",
+     "dropped": [
+      "eslint: no test target known to the model"
+     ]
+    },
+    {
+     "project": "icons",
+     "rules": "all",
+     "model": null,
+     "category": "6-g3-root-folder",
+     "dropped": [
+      "icons: no test target known to the model"
+     ]
+    },
+    {
+     "project": "paddock-dev",
+     "rules": "all",
+     "model": null,
+     "category": "6-g3-root-folder",
+     "dropped": [
+      "paddock-dev: no test target known to the model"
+     ]
+    },
+    {
+     "project": "tools",
+     "rules": "all",
+     "model": null,
+     "category": "6-g3-root-folder",
+     "dropped": [
+      "tools: no test target known to the model"
+     ]
+    },
+    {
+     "project": "ui",
+     "rules": "all",
+     "model": null,
+     "category": "6-g3-root-folder",
+     "dropped": [
+      "vitest:ui"
+     ]
+    }
+   ]
+  }
+ ]
+}

@@ -22,17 +22,6 @@ fn repo_root() -> PathBuf {
     crate::full_tree(Path::new(env!("CARGO_MANIFEST_DIR")).ancestors().nth(2).unwrap())
 }
 
-fn request(files: &[&str]) -> Request {
-    Request {
-        files: files.iter().map(|s| s.to_string()).collect(),
-        all: false,
-        explain: true,
-        root: None,
-        base: None,
-        head: "HEAD".into(),
-    }
-}
-
 /// `why` lists reasons in the order the script visited its sets; the closure here is sorted, so compare them as sets.
 fn canonical(mut v: Value) -> Value {
     if let Some(why) = v.get_mut("why").and_then(Value::as_object_mut) {
@@ -97,114 +86,6 @@ pub(crate) fn record(path: &Path, value: &Value) {
         out.push('\n');
     }
     std::fs::write(path, out).unwrap();
-}
-
-/// The plan flags a real-tree sample records (the rest of a plan moves with every new project).
-const SAMPLE_KEYS: [&str; 12] = [
-    "all",
-    "crates",
-    "ui",
-    "eslint",
-    "conformance",
-    "c99",
-    "tools",
-    "icons",
-    "paddockDev",
-    "docs",
-    "apps",
-    "kinds",
-];
-
-/// The change sets of `tests/golden/real-tree-samples.json` on this repository: the flags the planner answers, as recorded from
-/// the retired `scripts/affected.mjs` on 2026-11-18 (a change of the tree that moves one is a reviewed bless, not a silent edit).
-#[test]
-fn recorded_real_tree_samples_match_the_planners_flags() {
-    let root = repo_root();
-    let path = golden_dir().join("real-tree-samples.json");
-    let samples: Vec<Value> = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-    assert!(samples.len() >= 40, "the recorded samples");
-    let history = GitHistory::new(&root, Duration::from_secs(60));
-    // The graphs depend only on the tree: read once (cargo metadata of every workspace), then one plan per sample.
-    let graph = read_graph(&root, &history).unwrap();
-    let mut narrowed = 0;
-    let mut recorded = Vec::new();
-    let mut failures = Vec::new();
-    for sample in &samples {
-        let files: Vec<&str> = sample["files"].as_array().unwrap().iter().map(|f| f.as_str().unwrap()).collect();
-        let plan = plan_on_graph(&root, &history, &request(&files), &graph).unwrap();
-        let flags: serde_json::Map<String, Value> = SAMPLE_KEYS.iter().map(|k| (k.to_string(), plan[k].clone())).collect();
-        narrowed += usize::from(plan["all"] == false);
-        if Value::Object(flags.clone()) != sample["plan"] {
-            failures.push(format!(
-                "{files:?}: recorded {}, planner {}",
-                sample["plan"],
-                Value::Object(flags.clone())
-            ));
-        }
-        recorded.push(json!({"files": files, "plan": flags}));
-    }
-    if bless() {
-        record(&path, &Value::Array(recorded));
-        return;
-    }
-    assert!(failures.is_empty(), "{}\n{REGENERATE}", failures.join("\n"));
-    // plan_for (what `dev graph affected` runs) is plan_on_graph over a fresh graph.
-    let first = request(&["crates/paddock-cli/src/lib.rs"]);
-    assert_eq!(
-        plan_for(&root, &history, &first).unwrap(),
-        plan_on_graph(&root, &history, &first, &graph).unwrap()
-    );
-    assert!(
-        narrowed > 0,
-        "a positive control: some sample narrows the plan, or a comparison of 'everything' with 'everything' proves nothing"
-    );
-}
-
-/// The migration net (ADR 0117 §8): the repository model's answer beside the rule tables' for every real-tree sample, recorded in
-/// `tests/golden/model-compare.json`. Every recorded difference is one of §8's listed differences or a defect; a changed difference
-/// is a reviewed bless. The positive control: some sample differs (a comparison that finds nothing proves nothing until WP-5).
-#[test]
-fn recorded_model_compare_on_the_real_tree_samples() {
-    let root = repo_root();
-    let samples: Vec<Value> = serde_json::from_str(&std::fs::read_to_string(golden_dir().join("real-tree-samples.json")).unwrap()).unwrap();
-    let path = golden_dir().join("model-compare.json");
-    let history = GitHistory::new(&root, Duration::from_secs(60));
-    let graph = read_graph(&root, &history).unwrap();
-    let mut recorded = Vec::new();
-    for sample in &samples {
-        let files: Vec<&str> = sample["files"].as_array().unwrap().iter().map(|f| f.as_str().unwrap()).collect();
-        let req = request(&files);
-        let plan = plan_on_graph(&root, &history, &req, &graph).unwrap();
-        let (_, reached) = paddock_dev::repo_model::reach_for(&root, &history, &req, &graph).unwrap();
-        let c = paddock_dev::repo_model::compare(&plan, &reached, &graph);
-        let diffs: Vec<Value> = c["differences"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|d| json!({"project": d["project"], "rules": d["rules"], "model": d["model"]}))
-            .collect();
-        recorded.push(
-            json!({"files": files, "allRules": c["allRules"], "allModel": c["allModel"], "differences": diffs, "unowned": c["unowned"]}),
-        );
-    }
-    let got = Value::Array(recorded);
-    if bless() {
-        record(&path, &got);
-        return;
-    }
-    let want: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap_or_else(|_| "null".into())).unwrap();
-    assert!(
-        got == want,
-        "the model's differences changed:\n{}\n{REGENERATE}",
-        serde_json::to_string_pretty(&got).unwrap()
-    );
-    assert!(
-        got.as_array()
-            .unwrap()
-            .iter()
-            .any(|s| !s["differences"].as_array().unwrap().is_empty()),
-        "a positive control: some sample differs"
-    );
 }
 
 // ---------------------------------------------------------------------------------------------------------------------

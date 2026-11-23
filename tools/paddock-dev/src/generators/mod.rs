@@ -17,6 +17,7 @@
 //! (exit 6: a tool is missing, a required file is not on this tree, a timeout, the checkout is not the merge result). A check
 //! that did not look is never a pass.
 
+pub mod graph;
 pub mod registry;
 pub mod run;
 
@@ -26,6 +27,7 @@ use paddock_cli::{Outcome, Verdict};
 use registry::{PATH, Registry};
 use run::{Checked, Runner};
 use serde_json::json;
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 /// Arguments of `./dev gen check`.
@@ -146,6 +148,22 @@ pub fn check_with(
     runner: &dyn Runner,
     log: &(dyn Fn(&str) + Sync),
 ) -> Result<Report, CliError> {
+    check_with_due(reg, root, changed, &BTreeSet::new(), all, only, runner, log)
+}
+
+/// [`check_with`] with the ids the repository model made due as well (`graph_due`, from [`graph::due_ids`]): what is due is what
+/// the hand paths mark and what the graph reaches.
+#[allow(clippy::too_many_arguments)]
+pub fn check_with_due(
+    reg: &Registry,
+    root: &Path,
+    changed: &[String],
+    graph_due: &BTreeSet<String>,
+    all: bool,
+    only: &[String],
+    runner: &dyn Runner,
+    log: &(dyn Fn(&str) + Sync),
+) -> Result<Report, CliError> {
     for id in only {
         if reg.get(id).is_none() {
             return Err(CliError::usage(format!("No generator `{id}` in {PATH}.")).with_hint(format!(
@@ -160,7 +178,11 @@ pub fn check_with(
     } else if all {
         reg.generators.iter().collect()
     } else {
-        reg.due(changed)
+        let hand = reg.due(changed);
+        reg.generators
+            .iter()
+            .filter(|g| graph_due.contains(&g.id) || hand.iter().any(|h| h.id == g.id))
+            .collect()
     };
     // A manual entry has no check: it is named, with what to do by hand, and does not change the exit.
     let (manual, due): (Vec<_>, Vec<_>) = due.into_iter().partition(|g| g.manual.is_some());
@@ -193,7 +215,19 @@ pub fn command(a: &CheckArgs) -> Result<Report, CliError> {
     } else {
         changed_since(&root, &a.base)?
     };
-    check_with(&reg, &root, &changed, a.all, &a.only, &run::Real::new(&root), &|l| eprintln!("{l}"))
+    // What the graph makes due (WP-7): when the model cannot be built, every generator is due (never fewer than the hand paths).
+    let graph_due = if a.all || !a.only.is_empty() || reg.generators.iter().all(|g| g.reads.is_empty()) {
+        BTreeSet::new()
+    } else {
+        let history = paddock_repo_graph::GitHistory::new(&root, std::time::Duration::from_secs(60));
+        graph::due_ids(&root, &history, &reg, &changed).unwrap_or_else(|why| {
+            eprintln!("::warning::gen check: the repository model could not be built ({why}), so every generator is due. Next step: fix the cause above; run `./dev plan --compare` to see the model.");
+            reg.generators.iter().map(|g| g.id.clone()).collect()
+        })
+    };
+    check_with_due(&reg, &root, &changed, &graph_due, a.all, &a.only, &run::Real::new(&root), &|l| {
+        eprintln!("{l}")
+    })
 }
 
 /// The paths changed in the working tree since the merge base of `base` and HEAD (committed, staged, unstaged and new files).

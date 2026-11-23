@@ -1,0 +1,17 @@
+{
+ "rule": "HOOKS_PARITY_INPUT",
+ "probes": [
+  {
+   "file": "tools/paddock-dev/src/places.rs",
+   "differences": []
+  },
+  {
+   "file": "docs/known-copies.toml",
+   "differences": []
+  },
+  {
+   "file": "tools/paddock-dev/src/plan.rs",
+   "differences": []
+  }
+ ]
+}

@@ -2517,3 +2517,18 @@ The lower bound ADR 0117 §10 compares a parser with. Dev Mac under load (about 
 | `*.rs` | 3,732 | 46.3 MB | `grep -oE` for `use crate::`, `mod x;`, OS `cfg` (8,115 hits) | 0.91 s |
 
 Not measured: `oxc_parser` and `syn` on the same files (WP-3, WP-6), and the Linux runner.
+
+## Train replay: rule tables against the model (2026-11-23, feat/repo-graph-wp57, ADR 0117 WP-5)
+
+`./dev plan --replay 9cbd77a63..803aed12d`: 392 non-merge commits (the member commits of trains 15 to 20), each planned against its
+parent by the rule tables and by the model, on a debug build of the tool, Dev Mac (14 cores, 15-minute load 27 to 35), one run each.
+
+| Run | rule tables | model | wall |
+|---|---|---|---|
+| one thread | 157.6 s, 185.9 s | 15.5 s, 18.0 s | 2 m 18 s and over 3 min |
+| four threads (`repo_model::replay::WORKERS`) | in the same total | in the same total | 77.9 s and 91.5 s (the test `repo_graph_net::train_replay_has_no_unlisted_narrowing`) |
+
+The rule tables are 90% of the time (git reads per commit); the model reads each tree once and each commit's texts through its batched
+reader. The replay test's nextest budget (`tools/paddock-dev/.config/nextest.toml`) cites this block. Not measured: the Linux runner and
+a release build. Node hashes (`./dev plan --hash crate:crates/paddock-proc,crate:crates/paddock-slots`): 2.7 s wall, one `git ls-tree`,
+one `git status`, one `rustc -vV`, same load.

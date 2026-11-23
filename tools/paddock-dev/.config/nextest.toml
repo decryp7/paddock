@@ -15,6 +15,13 @@ slow-timeout = { period = "30s", terminate-after = 4 }
 filter = "test(/^ipc_endpoints::the_repository_register_is_complete/) | test(/^check::live_/) | test(/^check_engine::this_working_tree_/) | test(/^check_c122::live_tree_/) | test(/^contracts::every_markdown_file_that_code_reads/) | test(/^golden::/)"
 slow-timeout = { period = "60s", terminate-after = 8 }
 
+# waiver: the train replay plans 392 commits by the rule tables and by the model (ADR 0117 §8). Measured 2026-11-23 on the 14-core Mac at a
+# 15-minute load of 27 to 35: 91.5 s in four worker threads (one thread: the rule tables 157.6-185.9 s, the model 15.5-18.0 s; recorded in
+# docs/benchmarks.md). The rule tables are git reads and are the thing the model retires, so the cost goes with them. Eight periods of 30 s.
+[[profile.default.overrides]]
+filter = "test(/^repo_graph_net::train_replay_/)"
+slow-timeout = { period = "30s", terminate-after = 8 }
+
 [profile.ci]
 # ADR 0103 (D2): a test whose child still holds its output 500 ms after the test ended is reported as LEAK. Report-only (ER-41):
 # result = "pass" until the first green CI run with it on main, recorded here by run id; then "fail" (nextest 0.9.95 or later).
@@ -111,3 +118,8 @@ fail-fast = false
 [[profile.member-audits.overrides]]
 filter = "test(/^(golden|tree|inputs|pre_push)::/) | test(/^cli::graph_affected/)"
 test-group = "repo-graph"
+
+# waiver: the train replay, measured as in the default profile above (91.5 s in four threads at a load of 27 to 35). Four periods of 60 s.
+[[profile.ci.overrides]]
+filter = "test(/^repo_graph_net::train_replay_/)"
+slow-timeout = { period = "60s", terminate-after = 4 }

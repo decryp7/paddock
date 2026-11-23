@@ -1,0 +1,274 @@
+# The declared inputs, owners and prose of the repository model (ADR 0117 §3): every path fact the planner knows that is not an
+# edge an extractor reads from the code. Read by one accessor, tools/paddock-dev/src/repo_inputs.rs (ER-42); the crate
+# crates/paddock-repo-graph holds no path (§14, its guard test model::guard). A file nothing here or in a project folder claims is
+# unowned: the plan answers everything and names it.
+#
+# Narrowing an entry (fewer files or targets, a new `none` or `doc` owner for a built path, a new setup-only action, less prose)
+# is the unsafe direction: it needs a golden diff in the same change and the user's approval (§14, ER-46). Widening needs neither.
+#
+# [[input]]  name, files (globs: no `/` matches a name in any folder, a leading `/` anchors at the root), reaches (all | cargo |
+#            npm | apps | owner | project:<id>), reach (code | release | test | plumbing | docs; default code), extractor (a
+#            content extractor that narrows it: attributes | npm-lock | guards), adds (true: the file keeps its owner and the input
+#            adds its targets), except (globs taken back out)
+# [[owner]]  paths (globs), node (none | doc | project:<id>); the most specific pattern wins, a later rule a tie
+# [prose]    project_names (prose in a project folder, by name), project_folders (a project's own prose folders), doc_owner
+#            (prose under a doc owner), doc_assets (documentation images under a doc owner; content detection may override, D14)
+# [hash]     runner_configs (the nextest, Vitest and Playwright files that select and run a node), contracts (the files whose command
+#            lines run a node's phases), image_files (what pins the CI image): added to a node's input hash (§5, WP-7)
+# [ci]       setup_only (actions that stay plumbing in a release job), release_actions (actions that make a job a release job)
+version = 1
+
+[prose]
+project_names = ["README*", "CHANGELOG*", "LICENSE*"]
+project_folders = ["docs"]
+doc_owner = ["*.md", "*.txt", "LICENSE*"]
+doc_assets = ["*.png", "*.jpg", "*.jpeg", "*.gif", "*.webp", "*.svg"]
+
+[[input]]
+name = "rust-toolchain"
+files = ["/rust-toolchain", "/rust-toolchain.toml"]
+reaches = ["all"]
+
+[[input]]
+name = "npm-root"
+files = ["/package.json", "/.npmrc", "/.nvmrc", "tsconfig/**"]
+reaches = ["all"]
+
+[[input]]
+name = "npm-lock"
+files = ["/package-lock.json"]
+reaches = []
+extractor = "npm-lock"
+
+[[input]]
+name = "cargo-config"
+files = [".cargo/**", "lint/**"]
+reaches = ["cargo", "project:crates", "project:paddock-dev"]
+
+[[input]]
+name = "git-attributes"
+files = ["/.gitattributes"]
+reaches = ["project:conformance"]
+extractor = "attributes"
+
+[[input]]
+name = "check-id-reservations"
+files = ["conformance/reserved/**"]
+reaches = []
+
+[[input]]
+name = "lessons"
+files = ["docs/lessons.md", "docs/rules.md", "docs/blocks/**"]
+reaches = ["project:conformance", "project:tools"]
+
+[[input]]
+name = "repo-graph"
+files = ["docs/repo-graph.toml"]
+reaches = ["project:paddock-dev", "project:conformance"]
+
+[[input]]
+name = "gates-register"
+files = ["docs/gates.toml"]
+reaches = ["project:paddock-dev", "project:conformance"]
+
+[[input]]
+name = "generators-register"
+files = ["docs/generators.toml"]
+reaches = ["project:paddock-dev"]
+
+[[input]]
+name = "known-copies"
+files = ["docs/known-copies.toml"]
+reaches = ["project:tools", "project:conformance"]
+
+[[input]]
+name = "harnesses"
+files = ["docs/harnesses.toml"]
+reaches = ["project:conformance"]
+
+[[input]]
+name = "ipc-endpoints"
+files = ["docs/ipc-endpoints.toml", "docs/ipc-endpoint-ratchet.toml"]
+reaches = ["project:conformance"]
+
+[[input]]
+name = "ci-scope-register"
+files = ["docs/ci-scope-first-runs.toml"]
+reaches = ["project:paddock-dev"]
+
+[[input]]
+name = "design-docs"
+files = ["docs/design-guide.md", "docs/benchmarks.md", "docs/benchmarks/**"]
+reaches = ["project:conformance"]
+
+[[input]]
+name = "doc-images"
+files = ["docs/images/src/**", "docs/design/**", "**/*.drawio", "docs/**/svg/*.svg", "diagrams/**/svg/*.svg", "docs/images/*.svg"]
+reaches = ["project:tools"]
+
+[[input]]
+name = "wiki"
+files = ["docs/wiki/**"]
+reaches = ["project:tools"]
+
+[[input]]
+name = "changelogs"
+files = ["apps/*/CHANGELOG.md", "crates/*/CHANGELOG.md", "ui/projects/*/CHANGELOG.md", "apps/*/vendor/**/*.md"]
+reaches = ["owner"]
+
+[[input]]
+name = "prose-read-by-code"
+files = ["**/resources/**/*.md", "**/samples/**/*.md", "**/src/**/*.md", "**/tests/**/*.md", "**/test/**/*.md", "**/templates/**/*.md", "**/e2e/**/*.md", "**/fixtures/**/*.md"]
+reaches = ["owner"]
+
+[[input]]
+name = "demo-readmes"
+files = ["apps/shell-demo/README.md", "apps/workbench-demo/README.md"]
+reaches = ["project:tools"]
+
+[[input]]
+name = "lint-wiring"
+files = ["apps/*/app/eslint*.js", "apps/*/app/eslint*.cjs", "apps/*/app/eslint*.mjs", "apps/*/app/eslint-suppressions.json", "apps/*/app/angular.json", "apps/*/app/package.json", "apps/*/paddock.ci.json", "ui/eslint*.js", "ui/eslint*.cjs", "ui/eslint*.mjs", "ui/eslint-suppressions.json", "ui/angular.json", "ui/package.json", "ui/paddock.ci.json"]
+reaches = ["owner", "project:eslint"]
+
+[[input]]
+name = "conformance-config"
+files = ["/paddock.conformance.json", "/paddock.waivers.toml", "/.gitleaks.toml"]
+reaches = ["project:conformance"]
+
+[[input]]
+name = "dev-wrapper"
+files = ["/dev", "/dev.cmd"]
+reaches = ["project:paddock-dev"]
+
+[[input]]
+name = "scripts"
+files = ["scripts/**"]
+reaches = ["project:tools", "project:ui"]
+
+[[input]]
+name = "ci-image"
+files = ["ci-image/**"]
+reaches = ["project:ci-image", "project:ui", "project:tools"]
+
+[[input]]
+name = "gitea-labels"
+files = ["/.gitea/labels.toml"]
+reaches = ["project:paddock-dev"]
+
+[[input]]
+name = "workflow-templates"
+files = [".gitea/workflow-templates/**"]
+reaches = ["project:conformance", "project:crates"]
+
+[[input]]
+name = "diagram-sources"
+files = ["diagrams/**/*.xml", "diagrams/scripts/**"]
+reaches = ["project:tools"]
+
+[[input]]
+name = "templates"
+files = ["templates/**"]
+reaches = ["project:tools", "project:paddock-dev"]
+
+[[input]]
+name = "repo-tooling"
+files = ["renovate/**", "/renovate.json", "/CODEOWNERS", "/wiki-lint.json", ".claude/hooks/**", ".claude/settings.json", "/lefthook.yml"]
+reaches = ["project:tools"]
+
+[[input]]
+name = "c99-reads"
+files = ["apps/**/Cargo.toml", "apps/**/Cargo.lock", "crates/**/Cargo.toml", "crates/**/Cargo.lock", "apps/**/*.rs", "crates/**/*.rs", "apps/**/*.c", "crates/**/*.c", "apps/**/*.cc", "crates/**/*.cc", "apps/**/*.cpp", "crates/**/*.cpp", "apps/**/*.m", "crates/**/*.m", "apps/**/*.mm", "crates/**/*.mm", "apps/**/*.h", "crates/**/*.h", "apps/**/*.swift", "crates/**/*.swift", "**/app/src/**/*.ts", "**/ui/projects/**/*.ts", "**/src-tauri/capabilities/*.json", "paddock.ci.json", "conformance/src/**", "conformance/bin/**", ".cargo/config.toml", "/paddock.waivers.toml"]
+reaches = ["project:c99"]
+adds = true
+
+[[input]]
+name = "cause-code-scan"
+files = ["crates/**/*.rs", "apps/**/*.rs"]
+reaches = ["project:ui"]
+adds = true
+except = ["**/target/**", "**/node_modules/**", "**/tests/**", "**/benches/**", "tests.rs"]
+
+[[input]]
+name = "c100-reads"
+files = ["docs/gates.toml", "apps/*/paddock.ci.json", "package.json", "/lefthook.yml", "/AGENTS.md", "apps/*/AGENTS.md", "apps/*/docs/performance.md", "README.md", "docs/wiki/**/*.md", "conformance/src/checks/**", "conformance/src/cli.mjs", "tools/paddock-dev/src/gates/**", "scripts/**/check-*.mjs", "scripts/**/check-*.sh", "scripts/**/check-*.ps1", "scripts/**/*.test.mjs", "conformance/**/check-*.mjs", "conformance/**/check-*.sh", "conformance/**/check-*.ps1", "conformance/**/*.test.mjs", "tools/**/check-*.mjs", "tools/**/check-*.sh", "tools/**/check-*.ps1", "tools/**/*.test.mjs", "apps/*/scripts/**/check-*.mjs", "apps/*/scripts/**/check-*.sh", "apps/*/scripts/**/check-*.ps1", "apps/*/scripts/**/*.test.mjs"]
+reaches = ["project:conformance"]
+adds = true
+
+[[input]]
+name = "conformance-parity"
+files = ["conformance/src/**/*.mjs", "conformance/src/**/*.json", "conformance/bin/**/*.mjs", "conformance/bin/**/*.json", "conformance/baselines/**/*.mjs", "conformance/baselines/**/*.json"]
+reaches = ["project:paddock-dev"]
+adds = true
+
+[[input]]
+name = "hooks-parity"
+files = ["tools/paddock-dev/src/places.rs", "docs/known-copies.toml"]
+reaches = ["project:tools"]
+adds = true
+
+[[input]]
+name = "app-capabilities"
+files = ["apps/*/src-tauri/Cargo.toml", "apps/*/app/src-tauri/Cargo.toml", "apps/*/src-tauri/capabilities/**", "apps/*/app/src-tauri/capabilities/**"]
+reaches = ["project:conformance"]
+adds = true
+
+[[input]]
+name = "per-machine"
+files = ["apps/*/app/src-tauri/tauri.conf.json", "apps/*/app/src-tauri/tauri.windows.conf.json", "apps/*/app/src-tauri/windows/**", "crates/paddock-setup/nsis/paddock-per-machine.nsh"]
+reaches = ["project:conformance", "project:crates"]
+adds = true
+
+[[input]]
+name = "icon-tools"
+files = ["icons/tools/**", "icons/package.json"]
+reaches = ["apps"]
+adds = true
+
+[[input]]
+name = "e2e-guards"
+files = ["ui/projects/paddock-e2e/src/env.ts", "ui/projects/paddock-e2e/src/build-guard.ts"]
+reaches = ["apps"]
+adds = true
+
+[[input]]
+name = "notices"
+files = ["scripts/notices.sh", "templates/repo/about.toml", "conformance/src/notices/**"]
+reaches = ["apps"]
+adds = true
+
+[[input]]
+name = "generated-bindings"
+files = ["ui/**/generated/*.ts", "ui/**/generated/*.json"]
+reaches = ["project:crates"]
+adds = true
+except = ["**/public-api.ts", "**/ng-package.json"]
+
+[[input]]
+name = "test-guards"
+files = ["*.rs", "*.ts"]
+reaches = ["project:conformance"]
+extractor = "guards"
+adds = true
+except = ["**/node_modules/**"]
+
+[[owner]]
+paths = ["docs/**", "diagrams/**", "*.md", "LICENSE*", ".gitea/**/*.md"]
+node = "doc"
+
+[[owner]]
+paths = ["spikes/**"]
+node = "none"
+
+[[owner]]
+paths = [".gitignore", ".editorconfig", ".DS_Store", ".gitea/ISSUE_TEMPLATE/**"]
+node = "none"
+
+[ci]
+setup_only = ["setup-rust", "build-jobs", "node-caches", "dev-tool-cache", "sccache-stats", "cache-report"]
+release_actions = ["tauri-bundle", "publish-release", "macos-verify", "keychain", "strip-signing-keys"]
+
+[hash]
+runner_configs = ["**/.config/nextest.toml", "**/vitest.config.*", "**/playwright.config.*", "**/angular.json"]
+contracts = ["paddock.ci.json"]
+image_files = ["ci-image/VERSION", "ci-image/Dockerfile"]

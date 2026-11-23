@@ -514,6 +514,7 @@ pub fn inputs() -> Inputs {
             .iter()
             .map(|s| s.to_string())
             .collect(),
+        hash: Default::default(),
         prose: Prose {
             project_names: ["README*", "CHANGELOG*", "LICENSE*"]
                 .map(String::from)

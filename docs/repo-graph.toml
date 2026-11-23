@@ -13,6 +13,8 @@
 # [[owner]]  paths (globs), node (none | doc | project:<id>); the most specific pattern wins, a later rule a tie
 # [prose]    project_names (prose in a project folder, by name), project_folders (a project's own prose folders), doc_owner
 #            (prose under a doc owner), doc_assets (documentation images under a doc owner; content detection may override, D14)
+# [hash]     runner_configs (the nextest, Vitest and Playwright files that select and run a node), contracts (the files whose command
+#            lines run a node's phases), image_files (what pins the CI image): added to a node's input hash (§5, WP-7)
 # [ci]       setup_only (actions that stay plumbing in a release job), release_actions (actions that make a job a release job)
 version = 1
 
@@ -265,3 +267,8 @@ node = "none"
 [ci]
 setup_only = ["setup-rust", "build-jobs", "node-caches", "dev-tool-cache", "sccache-stats", "cache-report"]
 release_actions = ["tauri-bundle", "publish-release", "macos-verify", "keychain", "strip-signing-keys"]
+
+[hash]
+runner_configs = ["**/.config/nextest.toml", "**/vitest.config.*", "**/playwright.config.*", "**/angular.json"]
+contracts = ["paddock.ci.json"]
+image_files = ["ci-image/VERSION", "ci-image/Dockerfile"]

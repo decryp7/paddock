@@ -1,0 +1,27 @@
+{
+ "rule": "category:6-g9-half-split",
+ "probes": [
+  {
+   "file": "ui/projects/lib/src/a.ts",
+   "differences": [
+    {
+     "project": "app:z",
+     "rules": "all",
+     "model": "ui",
+     "category": "6-g9-half-split",
+     "dropped": [
+      "nextest:z::bin/z"
+     ]
+    }
+   ]
+  },
+  {
+   "file": "apps/x/app/src-tauri/src/main.rs",
+   "differences": []
+  },
+  {
+   "file": "apps/y/app/src/main.ts",
+   "differences": []
+  }
+ ]
+}

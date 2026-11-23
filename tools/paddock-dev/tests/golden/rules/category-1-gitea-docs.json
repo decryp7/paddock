@@ -1,0 +1,110 @@
+{
+ "rule": "category:1-gitea-docs",
+ "probes": [
+  {
+   "file": ".gitea/actions/README.md",
+   "differences": [
+    {
+     "project": "app:x",
+     "rules": "all",
+     "model": null,
+     "category": "1-gitea-docs",
+     "dropped": [
+      "nextest:x::bin/x"
+     ]
+    },
+    {
+     "project": "app:y",
+     "rules": "all",
+     "model": null,
+     "category": "1-gitea-docs",
+     "dropped": [
+      "app:y: no test target known to the model"
+     ]
+    },
+    {
+     "project": "app:z",
+     "rules": "all",
+     "model": null,
+     "category": "1-gitea-docs",
+     "dropped": [
+      "nextest:z::bin/z"
+     ]
+    },
+    {
+     "project": "c99",
+     "rules": "all",
+     "model": null,
+     "category": "1-gitea-docs",
+     "dropped": [
+      "c99: no test target known to the model"
+     ]
+    },
+    {
+     "project": "ci-image",
+     "rules": "all",
+     "model": null,
+     "category": "1-gitea-docs",
+     "dropped": [
+      "ci-image: no test target known to the model"
+     ]
+    },
+    {
+     "project": "crates",
+     "rules": "all",
+     "model": null,
+     "category": "1-gitea-docs",
+     "dropped": [
+      "nextest:fx-a",
+      "nextest:fx-b"
+     ]
+    },
+    {
+     "project": "eslint",
+     "rules": "all",
+     "model": null,
+     "category": "1-gitea-docs",
+     "dropped": [
+      "eslint: no test target known to the model"
+     ]
+    },
+    {
+     "project": "icons",
+     "rules": "all",
+     "model": null,
+     "category": "1-gitea-docs",
+     "dropped": [
+      "icons: no test target known to the model"
+     ]
+    },
+    {
+     "project": "paddock-dev",
+     "rules": "all",
+     "model": null,
+     "category": "1-gitea-docs",
+     "dropped": [
+      "paddock-dev: no test target known to the model"
+     ]
+    },
+    {
+     "project": "tools",
+     "rules": "all",
+     "model": null,
+     "category": "1-gitea-docs",
+     "dropped": [
+      "tools: no test target known to the model"
+     ]
+    },
+    {
+     "project": "ui",
+     "rules": "all",
+     "model": null,
+     "category": "1-gitea-docs",
+     "dropped": [
+      "vitest:ui"
+     ]
+    }
+   ]
+  }
+ ]
+}

@@ -1,0 +1,28 @@
+{
+ "rule": "category:6-generated-input",
+ "probes": [
+  {
+   "file": "ui/projects/lib/shell/generated/dialogs.ts",
+   "differences": [
+    {
+     "project": "app:x",
+     "rules": "all",
+     "model": "ui",
+     "category": "6-generated-input",
+     "dropped": [
+      "nextest:x::bin/x"
+     ]
+    },
+    {
+     "project": "app:z",
+     "rules": "all",
+     "model": "ui",
+     "category": "6-g9-half-split",
+     "dropped": [
+      "nextest:z::bin/z"
+     ]
+    }
+   ]
+  }
+ ]
+}

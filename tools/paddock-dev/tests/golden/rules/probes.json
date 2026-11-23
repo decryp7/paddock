@@ -1,0 +1,126 @@
+{
+ "rust-toolchain": [
+  "rust-toolchain.toml",
+  "rust-toolchain",
+  "rust-toolchain.md",
+  "crates/rust-toolchain.toml"
+ ],
+ "PER_MACHINE_INPUT": [
+  "apps/x/app/src-tauri/tauri.conf.json",
+  "apps/x/app/src-tauri/tauri.windows.conf.json",
+  "apps/y/app/src-tauri/windows/installer.nsh",
+  "crates/a/nsis/paddock-per-machine.nsh",
+  "apps/x/app/src-tauri/src/lib.rs",
+  "crates/a/nsis/other.nsh"
+ ],
+ "APP_CAPABILITY_INPUT": [
+  "apps/x/app/src-tauri/Cargo.toml",
+  "apps/x/app/src-tauri/capabilities/main.json",
+  "apps/z/app/src-tauri/Cargo.toml",
+  "apps/x/app/src-tauri/build.rs"
+ ],
+ "NOTICES_INPUTS": [
+  "scripts/notices.sh",
+  "templates/repo/about.toml",
+  "conformance/src/notices/render.mjs",
+  "scripts/other.sh"
+ ],
+ "C99_INPUT": [
+  "crates/a/Cargo.toml",
+  "apps/x/Cargo.lock",
+  "apps/x/app/src-tauri/src/main.rs",
+  "crates/a/src/lib.rs",
+  "apps/x/app/src/app/app.component.ts",
+  "ui/projects/lib/src/public-api.ts",
+  "apps/x/app/src-tauri/capabilities/main.json",
+  "apps/x/paddock.ci.json",
+  "conformance/src/checks/C99-no-keychain.mjs",
+  ".cargo/config.toml",
+  "paddock.waivers.toml",
+  "docs/overview.md"
+ ],
+ "PARITY_INPUT": [
+  "conformance/src/checks/C1-example.mjs",
+  "conformance/bin/paddock-conformance.mjs",
+  "conformance/baselines/example.json",
+  "conformance/README.md",
+  "conformance/test/example.test.mjs"
+ ],
+ "HOOKS_PARITY_INPUT": [
+  "tools/paddock-dev/src/places.rs",
+  "docs/known-copies.toml",
+  "tools/paddock-dev/src/plan.rs"
+ ],
+ "GENERATED": [
+  "ui/projects/lib/shell/generated/dialogs.ts",
+  "ui/projects/lib/shell/generated/public-api.ts",
+  "ui/projects/lib/shell/generated/ng-package.json",
+  "ui/projects/lib/shell/generated/messages.json",
+  "ui/projects/lib/shell/hand.ts"
+ ],
+ "LINT_WIRING": [
+  "apps/x/app/eslint.config.js",
+  "apps/x/app/eslint-suppressions.json",
+  "apps/x/app/angular.json",
+  "apps/x/app/package.json",
+  "apps/x/paddock.ci.json",
+  "ui/eslint.config.js",
+  "ui/paddock.ci.json",
+  "ui/package.json",
+  "apps/x/app/tsconfig.json"
+ ],
+ "OWNERS": [
+  "crates/a/src/lib.rs",
+  "ui/projects/lib/src/lib/a.ts",
+  "eslint/src/rules/a.cjs",
+  "conformance/src/a.mjs",
+  "paddock.conformance.json",
+  "tools/paddock-dev/src/plan.rs",
+  "dev",
+  "templates/repo/about.toml",
+  "tools/heavy/src/main.rs",
+  "scripts/notices.sh",
+  "icons/a.svg",
+  "ci-image/Dockerfile",
+  "renovate.json",
+  "CODEOWNERS",
+  "AGENTS.md",
+  ".gitleaks.toml",
+  "wiki-lint.json",
+  ".claude/hooks/example.sh",
+  ".claude/settings.json",
+  "spikes/example/Cargo.lock"
+ ],
+ ".gitattributes": [
+  ".gitattributes"
+ ],
+ "category:1-gitea-docs": [
+  ".gitea/actions/README.md"
+ ],
+ "category:2-6-workflow-g4-g5-g6": [
+  ".gitea/actions/node-caches/action.yml",
+  ".gitea/workflows/nightly.yml"
+ ],
+ "category:3-test-only": [
+  "ui/projects/lib/src/a.spec.ts",
+  "crates/a/tests/it/t.rs",
+  "apps/y/app/e2e/a.e2e.ts"
+ ],
+ "category:4-conformance-split-g8": [
+  "conformance/src/a.mjs"
+ ],
+ "category:6-g2-attributes": [
+  ".gitattributes"
+ ],
+ "category:6-g3-root-folder": [
+  "spikes/x/Cargo.lock"
+ ],
+ "category:6-g9-half-split": [
+  "ui/projects/lib/src/a.ts",
+  "apps/x/app/src-tauri/src/main.rs",
+  "apps/y/app/src/main.ts"
+ ],
+ "category:6-generated-input": [
+  "ui/projects/lib/shell/generated/dialogs.ts"
+ ]
+}

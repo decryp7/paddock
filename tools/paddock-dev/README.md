@@ -149,7 +149,7 @@ or doubt; a run with `PADDOCK_DEV_DOWNLOAD=0` (release and tag jobs) never uses 
 ## The planner in CI
 
 `ci.yml`'s plan job runs `./dev plan --ci` for every run (the app workflows run `./dev plan --ci --app <app>`), and C100 (`./dev gates
-check`) asks the same planner in process. The recorded answers in `tests/golden/` (`expected/`, `ci-jobs.json`, `real-tree-samples.json`)
+check`) asks the same planner in process. The recorded answers in `tests/golden/` (`expected/`, `ci-jobs.json`; the rule goldens `rules/`, on fixture repositories, ADR 0117 §8)
 are its reference: they were first made by `scripts/affected.mjs`, and a changed answer is a reviewed rewrite with
 `PADDOCK_GOLDEN_BLESS=1 cargo nextest run -E 'test(golden::)'`. The planner covers C100's content rule (a test file that adds, moves
 or removes an ignore attribute or an environment guard marks conformance). The ADR 0022 R4 fallback (`PLAN_PLANNER=node`) is gone with the script.

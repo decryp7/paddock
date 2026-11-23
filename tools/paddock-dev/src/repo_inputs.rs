@@ -18,13 +18,18 @@
 //! setup_only = ["setup-rust"]    # actions that stay plumbing in a release job (adding one needs the user, ADR 0117 §14)
 //! release_actions = ["tauri-bundle"]  # actions whose use makes a job a release job
 //!
+//! [hash]                         # what an input hash reads besides a node's files (ADR 0117 §5)
+//! runner_configs = ["**/.config/nextest.toml", "**/vitest.config.*", "**/playwright.config.*"]
+//! contracts = ["paddock.ci.json"]
+//! image_files = ["ci-image/VERSION"]
+//!
 //! [[owner]]                      # who owns a path no project claims
 //! paths = ["spikes/**"]
 //! node = "none"                  # none | doc | project:<id>
 //! ```
 
 use paddock_repo_graph::model::Reach;
-use paddock_repo_graph::model::inputs::{Input, Inputs, Owner, OwnerRule, Prose, Target};
+use paddock_repo_graph::model::inputs::{HashDecl, Input, Inputs, Owner, OwnerRule, Prose, Target};
 use std::path::Path;
 
 /// The inputs file, relative to the repository root.
@@ -136,11 +141,19 @@ fn read(text: &str) -> Result<Inputs, String> {
         doc_owner: list("doc_owner")?,
         doc_assets: list("doc_assets")?,
     };
+    let hash_table = t.get("hash");
+    let hlist = |k: &str| strings(hash_table.and_then(|p| p.get(k)), &format!("hash.{k}"));
+    let hash = HashDecl {
+        runner_configs: hlist("runner_configs")?,
+        contracts: hlist("contracts")?,
+        image_files: hlist("image_files")?,
+    };
     Ok(Inputs {
         inputs,
         owners,
         setup_only,
         release_actions,
+        hash,
         prose,
     })
 }

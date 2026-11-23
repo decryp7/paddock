@@ -1,0 +1,62 @@
+{
+ "rule": "PER_MACHINE_INPUT",
+ "probes": [
+  {
+   "file": "apps/x/app/src-tauri/tauri.conf.json",
+   "differences": [
+    {
+     "project": "crates",
+     "rules": null,
+     "model": "all",
+     "category": "wider",
+     "dropped": []
+    }
+   ]
+  },
+  {
+   "file": "apps/x/app/src-tauri/tauri.windows.conf.json",
+   "differences": [
+    {
+     "project": "crates",
+     "rules": null,
+     "model": "all",
+     "category": "wider",
+     "dropped": []
+    }
+   ]
+  },
+  {
+   "file": "apps/y/app/src-tauri/windows/installer.nsh",
+   "differences": [
+    {
+     "project": "app:y",
+     "rules": "all",
+     "model": "ui",
+     "category": "6-g9-half-split",
+     "dropped": [
+      "app:y: no test target known to the model"
+     ]
+    },
+    {
+     "project": "crates",
+     "rules": null,
+     "model": "all",
+     "category": "wider",
+     "dropped": []
+    }
+   ]
+  },
+  {
+   "file": "crates/a/nsis/paddock-per-machine.nsh",
+   "differences": []
+  },
+  {
+   "file": "apps/x/app/src-tauri/src/lib.rs",
+   "differences": []
+  },
+  {
+   "file": "crates/a/nsis/other.nsh",
+   "differences": []
+  }
+ ]
+}

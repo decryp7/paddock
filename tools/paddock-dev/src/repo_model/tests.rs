@@ -225,3 +225,140 @@ mod declared {
         }
     }
 }
+
+mod dropped {
+    use super::*;
+    use paddock_repo_graph::model::nodes::{Model, ModelNode, NodeKind};
+
+    fn world() -> (RepoGraph, Model) {
+        let mut m = Model::new();
+        m.add_node(ModelNode::new("nextest:paddock-dyno::it", NodeKind::TestTarget, &[]).with_home("apps/dyno/crates/agent"));
+        m.add_node(ModelNode::new("vitest:apps/dyno/app", NodeKind::TestTarget, &[]).with_home("apps/dyno/app"));
+        (graph(), m)
+    }
+
+    #[test]
+    fn a_narrowing_names_the_targets_it_no_longer_runs() {
+        // The rule tables run all of dyno; the model reaches only its UI half: the nextest target is dropped, the vitest one is not.
+        let (g, m) = world();
+        let mut p = plan();
+        p["kinds"]["dyno"] = json!(["all"]);
+        let mut r = Reached::default();
+        r.nodes.insert("crates".into(), hit(Reach::Code, true, true));
+        r.nodes.insert("app:dyno".into(), hit(Reach::Code, false, true));
+        let c = compare_targets(&p, &r, &g, &m);
+        assert_eq!(c["droppedTargets"]["app:dyno"], json!(["nextest:paddock-dyno::it"]), "{c}");
+    }
+
+    #[test]
+    fn a_project_without_a_known_target_names_itself_so_no_narrowing_is_silent() {
+        let (g, _) = world();
+        let mut r = Reached::default();
+        r.nodes.insert("crates".into(), hit(Reach::Code, true, true));
+        let c = compare_targets(&plan(), &r, &g, &Model::new());
+        assert_eq!(
+            c["droppedTargets"]["app:dyno"],
+            json!(["app:dyno: no test target known to the model"]),
+            "{c}"
+        );
+    }
+
+    #[test]
+    fn control_a_widening_drops_nothing() {
+        // The model runs more than the rule tables (the app's whole suite where they ran its Rust half): nothing is dropped.
+        let (g, m) = world();
+        let mut r = Reached::default();
+        r.nodes.insert("crates".into(), hit(Reach::Code, true, true));
+        r.nodes.insert("app:dyno".into(), hit(Reach::Code, true, true));
+        let c = compare_targets(&plan(), &r, &g, &m);
+        assert_eq!(c["droppedTargets"], json!({}), "{c}");
+        assert_eq!(c["dropped"], json!([]));
+    }
+
+    #[test]
+    fn a_plumbing_reach_without_a_declared_smoke_set_runs_the_whole_suite_and_drops_nothing() {
+        // ADR 0117 §5: never less than declared. The old compare called this `smoke` and a narrowing.
+        let (g, m) = world();
+        let mut r = Reached::default();
+        r.nodes.insert("crates".into(), hit(Reach::Code, true, true));
+        r.nodes.insert("app:dyno".into(), hit(Reach::Plumbing, true, true));
+        let c = compare_targets(&plan(), &r, &g, &m);
+        assert_eq!(c["dropped"], json!([]), "{c}");
+        // control: the same reach with a smoke set declared is the smoke set, a narrowing that drops the targets
+        let mut g2 = graph();
+        g2.configs.insert("dyno".into(), json!({"smoke": {}}));
+        let c2 = compare_targets(&plan(), &r, &g2, &m);
+        assert_eq!(c2["dropped"], json!(["app:dyno"]), "{c2}");
+    }
+}
+
+mod categories {
+    use super::super::replay::{Category, diffs_of, is_test_file};
+    use super::*;
+
+    fn diff(project: &str, rules: &str, model: Option<&str>, why: &[&str]) -> Value {
+        json!({"differences": [{"project": project, "rules": rules, "model": model, "whyRules": why, "whyModel": []}],
+               "dropped": if model.is_none() || model != Some(rules) { json!([project]) } else { json!([]) },
+               "droppedTargets": {}})
+    }
+
+    fn category(c: &Value, changed: &[&str]) -> Category {
+        diffs_of(c, &changed.iter().map(|s| s.to_string()).collect::<Vec<_>>())[0].category
+    }
+
+    #[test]
+    fn each_listed_reason_has_its_category_and_an_unlisted_one_stays_unlisted() {
+        let c = diff("app:dyno", "all", None, &["conformance conformance/src/x.mjs"]);
+        assert_eq!(category(&c, &["conformance/src/x.mjs"]), Category::ConformanceSplit);
+        let c = diff("ci-image", "all", None, &["global .gitea/actions/README.md"]);
+        assert_eq!(category(&c, &[".gitea/actions/README.md"]), Category::GiteaDocs);
+        let c = diff("ci-image", "all", None, &["global .gitea/workflows/ci.yml"]);
+        assert_eq!(category(&c, &[".gitea/workflows/ci.yml"]), Category::Workflow);
+        let c = diff("crates", "all", None, &["global .gitattributes"]);
+        assert_eq!(category(&c, &[".gitattributes"]), Category::AttributesG2);
+        let c = diff("app:dyno", "all", None, &["unknown root file spikes/x/Cargo.lock"]);
+        assert_eq!(category(&c, &["spikes/x/Cargo.lock"]), Category::RootFolderG3);
+        let c = diff("app:dyno", "ui", None, &["npm apps/dyno/app"]);
+        assert_eq!(category(&c, &["ui/e2e/data.spec.ts"]), Category::TestOnly);
+        let c = diff("app:dyno", "all", Some("ui"), &["npm apps/dyno/src-tauri"]);
+        assert_eq!(category(&c, &["ui/projects/paddock-ui/src/a.ts"]), Category::HalfSplit);
+        // controls: the same shapes with a changed source file, or a reason nothing lists, are not explained
+        let c = diff("app:dyno", "ui", None, &["npm apps/dyno/app"]);
+        assert_eq!(
+            category(&c, &["ui/projects/paddock-ui/src/a.ts"]),
+            Category::Unlisted,
+            "a source change reaches its dependents"
+        );
+        let c = diff("app:dyno", "all", None, &["tools/paddock-dev/src/plan.rs"]);
+        assert_eq!(category(&c, &["tools/paddock-dev/src/plan.rs"]), Category::Unlisted);
+        let c = diff("app:dyno", "all", None, &[]);
+        assert_eq!(category(&c, &["x"]), Category::Unlisted, "no reason is no explanation");
+    }
+
+    #[test]
+    fn a_release_reach_that_selects_installers_only_is_the_pinned_defect_and_a_widening_is_wider() {
+        let c = diff("app:dyno", "all", Some("release"), &["conformance/ci/x.sh used by ci.yml, job app"]);
+        assert_eq!(category(&c, &["conformance/ci/x.sh"]), Category::ReleaseInstallersOnly);
+        let c = json!({"differences": [{"project": "ui", "rules": null, "model": "all", "whyRules": [], "whyModel": []}], "dropped": [], "droppedTargets": {}});
+        assert_eq!(category(&c, &["ui/a.ts"]), Category::Wider);
+    }
+
+    #[test]
+    fn test_files_are_specs_test_folders_and_stand_ins_and_not_sources() {
+        for f in [
+            "ui/e2e/data.spec.ts",
+            "crates/paddock-testkit/tests/it/stand_in.rs",
+            "conformance/test/c1.test.mjs",
+            "apps/a/app/e2e/x.e2e.ts",
+        ] {
+            assert!(is_test_file(f), "{f}");
+        }
+        for f in [
+            "crates/paddock-proc/src/lib.rs",
+            "ui/projects/paddock-ui/src/public-api.ts",
+            "conformance/src/a.mjs",
+        ] {
+            assert!(!is_test_file(f), "{f}");
+        }
+    }
+}

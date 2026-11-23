@@ -115,7 +115,7 @@ pub fn read_paths(file: &str, text: &str, crate_dir: &str, tracked: &BTreeSet<St
 impl CodeExtractor {
     /// The `.rs` files that may read a path: one `git grep -l` over the tracked tree.
     fn read_candidates(&self) -> Result<Vec<String>, String> {
-        let mut cmd = paddock_proc::command("git");
+        let mut cmd = crate::git_env::git();
         cmd.arg("-C").arg(&self.root).args([
             "-c",
             "core.quotePath=false",
