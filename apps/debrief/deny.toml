@@ -69,7 +69,6 @@ skip = [
   { crate = "toml_datetime@0.6.3", reason = "toml 0.8 / toml_edit 0.19-0.20 (gtk-rs)" },
   { crate = "serde_spanned@0.6.9", reason = "toml 0.8 (gtk-rs)" },
   { crate = "winnow@0.5.40", reason = "toml_edit 0.19-0.20 (gtk-rs)" },
-  { crate = "cargo_metadata@0.14.2", reason = "skeptic (build-time, via the gtk-rs/tauri stack)" },
   { crate = "indexmap@1.9.3", reason = "serde_with (Tauri)" },
   { crate = "hashbrown@0.12.3", reason = "indexmap 1" },
   { crate = "darling@0.20.11", reason = "derive_builder (Tauri)" },
