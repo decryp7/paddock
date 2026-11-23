@@ -75,6 +75,8 @@ pub struct Planner {
     pub mode: PlannerMode,
     /// Why (required for `rules`: flipping back is a commit whose reason is stated in the file).
     pub reason: String,
+    /// The contract phases that lint and format a project (`fmt`, `lint`): a test-only change keeps them (review round 2 P2-1).
+    pub lint_phases: Vec<String>,
 }
 
 impl Planner {
@@ -95,15 +97,18 @@ pub fn planner(text: &str) -> Result<Planner, String> {
         return Ok(Planner {
             mode: PlannerMode::Graph,
             reason: String::new(),
+            lint_phases: Vec::new(),
         });
     };
     let p = p.as_table().ok_or_else(|| format!("{FILE}: [planner] is not a table"))?;
-    only_keys(p, &["mode", "reason"], &format!("{FILE}: [planner]"))?;
+    only_keys(p, &["mode", "reason", "lint_phases"], &format!("{FILE}: [planner]"))?;
     let reason = p.get("reason").and_then(toml::Value::as_str).unwrap_or("").trim().to_string();
+    let lint_phases = strings(p.get("lint_phases"), &format!("{FILE}: [planner] lint_phases"))?;
     match p.get("mode").and_then(toml::Value::as_str) {
         Some("graph") => Ok(Planner {
             mode: PlannerMode::Graph,
             reason,
+            lint_phases,
         }),
         Some("rules") if reason.is_empty() => Err(format!(
             "{FILE}: [planner] mode = \"rules\" needs a `reason` (switching back to the rule tables is a commit that says why)"
@@ -111,6 +116,7 @@ pub fn planner(text: &str) -> Result<Planner, String> {
         Some("rules") => Ok(Planner {
             mode: PlannerMode::Rules,
             reason,
+            lint_phases,
         }),
         other => Err(format!("{FILE}: [planner] mode is {other:?}, not \"graph\" or \"rules\"")),
     }
@@ -436,7 +442,12 @@ mod tests {
     fn the_repository_plans_from_the_graph() {
         // The user's decision of 2026-11-23: the graph decides CI plans from landing.
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        assert_eq!(load_planner(&root).unwrap().mode, PlannerMode::Graph);
+        let p = load_planner(&root).unwrap();
+        assert_eq!(p.mode, PlannerMode::Graph);
+        assert!(
+            p.lint_phases.iter().any(|l| l == "fmt") && p.lint_phases.iter().any(|l| l == "lint"),
+            "{p:?}"
+        );
     }
 
     #[test]

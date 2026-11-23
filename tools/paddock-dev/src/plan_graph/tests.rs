@@ -80,6 +80,10 @@ fn hit(reach: Reach, rust: bool, ui: bool) -> NodeReach {
     }
 }
 
+fn lint() -> Vec<String> {
+    vec!["fmt".into(), "lint".into()]
+}
+
 fn rules() -> Value {
     json!({"docs": false})
 }
@@ -107,7 +111,7 @@ fn a_plumbing_change_plans_the_smoke_set_only() {
     let mut r = Reached::default();
     r.nodes.insert("app:x".into(), hit(Reach::Plumbing, true, true));
     let (g, w) = (graph(), world());
-    let p = plan(&rules(), &r, &w, &g, &root());
+    let p = plan(&rules(), &r, &w, &g, &root(), &lint());
     assert_eq!(p["apps"], json!(["x"]));
     assert_eq!(p["graph"]["app:x"]["modes"], json!(["smoke"]));
     let legs = legs_of(&p, &g);
@@ -118,6 +122,7 @@ fn a_plumbing_change_plans_the_smoke_set_only() {
         (false, "")
     );
     assert!(linux.get("tests_only").is_none(), "a smoke run keeps the gates");
+    assert_eq!(linux["graph_filter"], "true", "the graph's filterset fails on no test (P2-2)");
     assert!(
         legs.iter().all(|l| l["e2e_leg"] == ""),
         "no e2e leg: the smoke set keeps no e2e phase"
@@ -131,7 +136,7 @@ fn a_plumbing_change_plans_the_smoke_set_only() {
     // Control: without a declared smoke set the same reach runs the app in full.
     let mut w2 = world();
     w2.smoke.clear();
-    let p2 = plan(&rules(), &r, &w2, &g, &root());
+    let p2 = plan(&rules(), &r, &w2, &g, &root(), &lint());
     assert!(p2["graph"].get("app:x").is_none() && p2["apps"] == json!(["x"]));
 }
 
@@ -152,7 +157,7 @@ fn a_test_only_change_passes_only_the_affected_targets_and_spec_files() {
         .into(),
     );
     let (g, w) = (graph(), world());
-    let p = plan(&rules(), &r, &w, &g, &root());
+    let p = plan(&rules(), &r, &w, &g, &root(), &lint());
     let d = &p["graph"]["app:x"];
     assert_eq!(d["modes"], json!(["affected"]));
     assert_eq!(d["nextest"], "binary_id(=x-core::it)");
@@ -172,14 +177,20 @@ fn a_test_only_change_passes_only_the_affected_targets_and_spec_files() {
         1,
         "no e2e legs (no Playwright file), no macOS leg (x-core holds no host code): {legs:?}"
     );
+    // The gates (fmt, clippy) still run: no rerun semantics (review round 2 P2-1); the filterset goes through its own channel (P2-2).
+    assert!(legs[0].get("tests_only").is_none(), "{:?}", legs[0]);
     assert_eq!(
-        (legs[0]["tests_only"].as_str(), legs[0]["filter"].as_str()),
-        (Some("true"), Some("binary_id(=x-core::it)"))
+        (
+            legs[0]["graph_filter"].as_str(),
+            legs[0]["filter"].as_str(),
+            legs[0]["rust"].as_bool()
+        ),
+        (Some("true"), Some("binary_id(=x-core::it)"), Some(true))
     );
     assert_eq!(legs[0]["checks"], "", "the checks phase has no affected file");
     // Control: a reached target in a package with OS-specific code keeps the host leg.
     r.targets.get_mut("app:x").unwrap().insert("nextest:x-host".into());
-    let p = plan(&rules(), &r, &w, &g, &root());
+    let p = plan(&rules(), &r, &w, &g, &root(), &lint());
     assert!(legs_of(&p, &g).iter().any(|l| l["os"] == "macos-latest"));
     assert_eq!(partial_projects(&p).1, BTreeSet::from(["app:x".to_string()]));
 }
@@ -191,7 +202,7 @@ fn a_foundation_change_plans_no_app_and_an_app_change_plans_it_in_full() {
     r.nodes.insert("conformance".into(), hit(Reach::Code, true, true));
     r.nodes.insert("docs".into(), hit(Reach::Docs, false, false));
     let (g, w) = (graph(), world());
-    let p = plan(&rules(), &r, &w, &g, &root());
+    let p = plan(&rules(), &r, &w, &g, &root(), &lint());
     assert_eq!(p["apps"], json!([]));
     assert_eq!(
         (p["paddockDev"].as_bool(), p["crates"].as_bool(), p["ui"].as_bool()),
@@ -200,7 +211,7 @@ fn a_foundation_change_plans_no_app_and_an_app_change_plans_it_in_full() {
     assert!(legs_of(&p, &g).is_empty(), "no app leg");
     // An app's code: that app in full, its halves as reached; the other app does not run.
     r.nodes.insert("app:x".into(), hit(Reach::Code, true, false));
-    let p = plan(&rules(), &r, &w, &g, &root());
+    let p = plan(&rules(), &r, &w, &g, &root(), &lint());
     assert_eq!((p["apps"].clone(), p["kinds"]["x"].clone()), (json!(["x"]), json!(["rust"])));
     assert!(p["graph"].get("app:x").is_none(), "full: not narrowed");
     let legs = legs_of(&p, &g);
@@ -219,7 +230,7 @@ fn an_unowned_file_plans_everything_in_full() {
         r.nodes.insert(id.into(), NodeReach::full("fail closed"));
     }
     let (g, w) = (graph(), world());
-    let p = plan(&rules(), &r, &w, &g, &root());
+    let p = plan(&rules(), &r, &w, &g, &root(), &lint());
     assert_eq!(p["all"], true);
     assert_eq!(p["apps"], json!(["x", "y"]));
     assert!(p["graph"].as_object().unwrap().is_empty(), "nothing narrowed");
@@ -230,27 +241,97 @@ fn an_unowned_file_plans_everything_in_full() {
 fn the_workspace_legs_run_the_selected_tests_and_a_selection_without_rust_tests_keeps_one_leg() {
     let legs: Vec<Value> = ["ubuntu-latest", "windows-latest", "macos-latest"]
         .iter()
-        .map(|os| json!({"os": os}))
+        .map(|os| json!({"os": os, "test_packages": "", "test_filter": "", "test_skip": ""}))
         .collect();
-    let g = graph();
-    let p = json!({"graph": {"crates": {"nextest": "package(=paddock-proc)", "testsOnly": false, "targets": []}}});
+    let mut g = graph();
+    g.host.insert(
+        "crates".into(),
+        crate::host_tests::Derived {
+            packages: ["paddock-proc".to_string()].into(),
+            ..Default::default()
+        },
+    );
+    // A smoke set: the Linux leg, its filterset in `test_filter` (the member channel: no test found fails, P2-2).
+    let p = json!({"graph": {"crates": {"nextest": "package(=paddock-proc)", "affectedOnly": false, "targets": []}}});
     let out = narrow_workspace_legs(legs.clone(), &p, &g, "crates", "crates");
-    assert_eq!(out.len(), 3, "a smoke set runs on every OS");
-    assert!(out.iter().all(|l| l["filter"] == "package(=paddock-proc)"));
-    let p = json!({"graph": {"crates": {"nextest": "binary_id(=paddock-proc)", "testsOnly": true, "targets": ["nextest:paddock-proc"]}}});
+    assert_eq!(out.len(), 1);
+    assert_eq!(
+        (out[0]["test_filter"].as_str(), out[0].get("filter")),
+        (Some("package(=paddock-proc)"), None)
+    );
+    // Affected targets: a host leg only for a package with OS-specific code, testing that package.
+    let p =
+        json!({"graph": {"crates": {"nextest": "binary_id(=paddock-proc)", "affectedOnly": true, "targets": ["nextest:paddock-proc"]}}});
+    let out = narrow_workspace_legs(legs.clone(), &p, &g, "crates", "crates");
+    assert_eq!(out.len(), 3, "paddock-proc holds OS code: every OS");
+    assert_eq!(out[2]["test_packages"], "paddock-proc");
+    let p = json!({"graph": {"crates": {"nextest": "binary_id(=paddock-a)", "affectedOnly": true, "targets": ["nextest:paddock-a"]}}});
     assert_eq!(
         narrow_workspace_legs(legs.clone(), &p, &g, "crates", "crates").len(),
         1,
         "no host code: Linux only"
     );
-    let p = json!({"graph": {"crates": {"nextest": "", "testsOnly": false, "targets": []}}});
+    // No Rust test in the selection: the Linux leg keeps its gates and skips its tests, never a filter that selects none.
+    let p = json!({"graph": {"crates": {"nextest": "", "affectedOnly": false, "targets": []}}});
     let out = narrow_workspace_legs(legs.clone(), &p, &g, "crates", "crates");
-    assert_eq!((out.len(), out[0]["filter"].as_str()), (1, Some("none()")));
+    assert_eq!(
+        (out.len(), out[0]["test_skip"].as_str(), out[0]["test_filter"].as_str()),
+        (1, Some("true"), Some(""))
+    );
     // Control: a project in full keeps its legs as they are.
     assert_eq!(
         narrow_workspace_legs(legs.clone(), &json!({"graph": {}}), &g, "crates", "crates"),
         legs
     );
+}
+
+#[test]
+fn a_test_only_change_keeps_the_lint_and_format_phases() {
+    // Review round 2, P2-1: the reached project's lint and format phases run beside its affected tests.
+    let (g, mut w) = (graph(), world());
+    w.decls.insert("crates".into(), Default::default());
+    let mut r = Reached::default();
+    r.nodes.insert("crates".into(), hit(Reach::Test, true, false));
+    r.targets.insert("crates".into(), ["nextest:paddock-proc".to_string()].into());
+    let p = plan(&rules(), &r, &w, &g, &root(), &lint());
+    assert_eq!(
+        p["graph"]["crates"]["narrow"]["phases"],
+        json!(["fmt"]),
+        "the crates contract's lint phase: {}",
+        p["graph"]
+    );
+    // Control: without declared lint phases nothing of them is kept.
+    let p = plan(&rules(), &r, &w, &g, &root(), &[]);
+    assert_eq!(p["graph"]["crates"]["narrow"]["phases"], json!([]));
+}
+
+#[test]
+fn an_app_workflows_affected_run_carries_its_lint_its_tests_and_its_host_tests() {
+    // Review round 2, P2-1 and P2-3: debrief.yml runs its Rust lint, its Rust tests with the graph's filterset, and its macOS tests
+    // when a reached target holds OS-specific code; a spec runner it has no job for runs it in full.
+    let g = graph();
+    let p = json!({"graph": {"app:x": {"affectedOnly": true, "nextest": "binary_id(=x-host)", "targets": ["nextest:x-host"],
+                                       "narrow": {"files": {"vitest": ["apps/x/app/src/a.spec.ts"]}}}}});
+    let out: BTreeMap<String, String> = app_workflow_outputs(&p, "x", &g, "apps/x").unwrap().into_iter().collect();
+    assert_eq!(out["rerun_jobs"], r#"["rust-lint","rust-test","rust-test-macos","frontend"]"#);
+    assert_eq!(
+        (out["rust_test_filter"].as_str(), out["rust_test_macos_filter"].as_str()),
+        ("binary_id(=x-host)", "binary_id(=x-host)")
+    );
+    assert!(
+        !out.contains_key("frontend_include"),
+        "the frontend job runs whole, its lint with it"
+    );
+    // No host code: no macOS tests.
+    let p2 =
+        json!({"graph": {"app:x": {"affectedOnly": true, "nextest": "binary_id(=x-core)", "targets": ["nextest:x-core"], "narrow": {}}}});
+    let out: BTreeMap<String, String> = app_workflow_outputs(&p2, "x", &g, "apps/x").unwrap().into_iter().collect();
+    assert_eq!(out["rerun_jobs"], r#"["rust-lint","rust-test"]"#);
+    // A node test: in full (never less than declared); a smoke selection: in full.
+    let p3 = json!({"graph": {"app:x": {"affectedOnly": true, "nextest": "", "targets": [], "narrow": {"files": {"node-test": ["apps/x/s.test.mjs"]}}}}});
+    assert_eq!(app_workflow_outputs(&p3, "x", &g, "apps/x"), None);
+    let p4 = json!({"graph": {"app:x": {"affectedOnly": false, "nextest": "package(=x-core)", "narrow": {}}}});
+    assert_eq!(app_workflow_outputs(&p4, "x", &g, "apps/x"), None);
 }
 
 #[test]
@@ -260,7 +341,7 @@ fn the_escape_record_names_what_the_graph_runs_not_the_rule_tables() {
     r.nodes.insert("app:x".into(), hit(Reach::Test, true, true));
     r.targets.insert("app:x".into(), ["nextest:x-core::it".to_string()].into());
     let (g, w) = (graph(), world());
-    let p = plan(&rules(), &r, &w, &g, &root());
+    let p = plan(&rules(), &r, &w, &g, &root(), &lint());
     let legs = legs_of(&p, &g);
     let sel = escape_selected(&p, &legs, &["ubuntu-latest".to_string()]);
     let x = &sel["app:x"];
@@ -276,7 +357,7 @@ fn the_escape_record_names_what_the_graph_runs_not_the_rule_tables() {
     assert_eq!(sel["conformance"].runs, "all");
     // Control: a full selection records `all` with no target list.
     r.nodes.insert("app:x".into(), hit(Reach::Code, true, true));
-    let p = plan(&rules(), &r, &w, &g, &root());
+    let p = plan(&rules(), &r, &w, &g, &root(), &lint());
     let sel = escape_selected(&p, &legs_of(&p, &g), &[]);
     assert_eq!((sel["app:x"].runs.as_str(), sel["app:x"].targets.is_none()), ("all", true));
 }

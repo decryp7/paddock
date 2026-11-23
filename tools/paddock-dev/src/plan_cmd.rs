@@ -358,7 +358,7 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
         None
     };
     let planned = match &model {
-        Some(Ok((world, reached))) => crate::plan_graph::plan(&rules_planned, reached, world, &graph, root),
+        Some(Ok((world, reached))) => crate::plan_graph::plan(&rules_planned, reached, world, &graph, root, &planner.lint_phases),
         // The model could not be built: every project in full (fail closed), said in the log.
         Some(Err(e)) => {
             log(&format!(
@@ -482,9 +482,10 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
             // partial so its old report-only line and its declared scope never count it complete.
             if graph_mode && runs_it {
                 let dir = format!("apps/{app}");
-                let mut extra = crate::plan_graph::app_workflow_outputs(&plan, app, &dir);
-                let partial = plan["graph"].get(format!("app:{app}")).is_some();
-                extra.push(("partial".into(), partial.to_string()));
+                let narrowed = plan["graph"].get(format!("app:{app}")).is_some();
+                let mut extra = crate::plan_graph::app_workflow_outputs(&plan, app, &graph, &dir).unwrap_or_default();
+                // A narrowed selection this workflow cannot carry runs it in full; only the affected tests it carries are partial.
+                extra.push(("partial".into(), (narrowed && !extra.is_empty()).to_string()));
                 append(&path, &extra.iter().map(|(k, v)| format!("{k}={v}\n")).collect::<String>())?;
             }
         }
@@ -606,7 +607,10 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
     )
     .map_err(fail)?;
     let need = scope_of(&need_plan, &need_legs, true, &os_legs, &[]);
-    log(&ci_scope(ran, false, need, need_whole).line());
+    // A push's or a landing's need is its own diff: the line names the base it was diffed from (a push reuses a landing run of
+    // the same diff only, review round 2 P1-A).
+    let need_base = if need_whole { None } else { base.as_deref() };
+    log(&ci_scope(ran, false, need, need_whole).with_base(need_base).line());
     if narrow {
         log("narrowed to the packages the change reaches (a member run; the final head's full run tests the rest)");
     }

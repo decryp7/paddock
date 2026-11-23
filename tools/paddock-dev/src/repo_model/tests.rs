@@ -238,7 +238,13 @@ mod declared {
 /// The model's code in paddock-dev outside `src/repo_model/` (every non-test source under it is walked, as the crate side's
 /// `sources_under` does, so a new module is guarded without a hand list; final review P2-1): the module root, the inputs accessor and
 /// the OS placement (ADR 0117 §14).
-const GUARDED_EXTRA: [&str; 3] = ["repo_model.rs", "repo_inputs.rs", "os_placement.rs"];
+const GUARDED_EXTRA: [&str; 5] = [
+    "repo_model.rs",
+    "repo_inputs.rs",
+    "os_placement.rs",
+    "plan_graph.rs",
+    "ci_run/select.rs",
+];
 
 /// Tokens the adapters read because a format names them, not because of this repository: the extensions of the languages and
 /// configuration files they parse.

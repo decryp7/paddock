@@ -55,6 +55,9 @@ inputs:
   filter:
     description: "A nextest filterset for a member run (a dispatch with a base, or a pull request) that reaches only part of the workspace (package(=a) | package(=b)); empty runs every test, and so does every run on main, a tag and a manual run with no base."
     default: ""
+  graph-filter:
+    description: "'true': `filter` is the repository graph's selection (a smoke set or the affected test targets, ./dev plan --ci, ADR 0117 §16): every gate runs, and nextest fails when the filterset selects no test (never skipped: the filter names real targets)."
+    default: ""
   tests-only:
     description: "'true': a rerun of the failed tests of an earlier run (ci.yml's since_run input; `filter` names them): the Rust half runs only nextest, not fmt, clippy, doc tests or deny, which passed then. Empty or 'false': every gate."
     default: ""
@@ -115,6 +118,7 @@ runs:
         NEXTEST_CONFIG: ${{ inputs.nextest-config }}
         FILTER: ${{ inputs.filter }}
         TESTS_ONLY: ${{ inputs.tests-only }}
+        GRAPH_FILTER: ${{ inputs.graph-filter }}
         DISPLAY_TESTS: ${{ inputs.display }}
         LAST_PACKAGES: ${{ inputs.last-packages }}
         HOST_PACKAGES: ${{ inputs.host-packages }}
@@ -151,6 +155,10 @@ runs:
           echo "::notice::nextest runs only the crates this change reaches: $FILTER"; filter=(-E "$FILTER")
         fi
         member=false; if [ "$TESTS_ONLY" != true ] && [ -n "$FILTER" ]; then member=true; fi
+        # The graph's selection names real test targets: a half (the workspace or the last-packages) may select none of them, but a
+        # filterset that selects no test in either half is an error, never a pass (ER-33; checked after both halves, `ran_tests`).
+        ran_tests=false
+        if [ "$GRAPH_FILTER" = true ] && [ -n "$FILTER" ]; then echo "::notice::nextest runs the graph's selection: $FILTER"; fi
         # True only when `nextest list` succeeded and listed no test: a list that failed (a build error) is not an empty selection,
         # the run after it fails visibly.
         empty_selection() { local listed; if listed=$(cargo nextest list "$@" --message-format oneline 2>/dev/null); then [ -z "$listed" ]; else return 1; fi; }
@@ -185,6 +193,7 @@ runs:
         if [ "$member" = true ] && empty_selection "${sel[@]}"; then
           echo "::notice::nextest: no test of the workspace matches the member filter ($FILTER); this half is skipped, not passed"
         else
+          ran_tests=true
           step ${wrap[@]+"${wrap[@]}"} cargo nextest run "${sel[@]}" --profile ci ${notests[@]+"${notests[@]}"}
         fi
         if [ "$RUNNER_OS" = Linux ] && [ ${#last[@]} -gt 0 ]; then
@@ -192,8 +201,12 @@ runs:
           if [ "$member" = true ] && empty_selection "${sel[@]}"; then
             echo "::notice::nextest: no test of the last packages ($LAST_PACKAGES) matches the member filter ($FILTER); this half is skipped, not passed"
           else
+            ran_tests=true
             step ${wrap[@]+"${wrap[@]}"} cargo nextest run "${sel[@]}" --profile ci --no-tests=pass
           fi
+        fi
+        if [ "$GRAPH_FILTER" = true ] && [ -n "$FILTER" ] && [ "$ran_tests" != true ] && [ "$RUNNER_OS" = Linux ]; then
+          status=1; echo "::error::the graph's selection ($FILTER) selects no test of this workspace: the plan named a target that is not here. Next: check ./dev plan --ci's selection for this app"
         fi
         if [ "$gates" = true ]; then
           step cargo test "${scope[@]}" ${hostexclude[@]+"${hostexclude[@]}"} --doc
