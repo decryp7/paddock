@@ -1,8 +1,10 @@
 # 0119. Every process is held by its handle and ends with its scope: start, hold, watch, end for tests, tools and agents
 
-- Status: Proposed 2026-11-23. The direction is the user's (approved 2026-11-23 through the coordinator, moved earlier in the
-  queue): "every process is held by its handle and cleaned up on failure and cancel", for CI jobs, tests, agents' background work
-  and tools. The decisions D1 to D7 are open.
+- Status: Accepted 2026-11-23 (user, relayed by the coordinator). D1 = B, the complete option (now 11.75 days with D5); D2 =
+  keep 0112, 0118 and 0119 separate; D3 = the blocking agent hook; D4 = measure in WP-9, then (a) or (b) as laid out; D5 = ban
+  `output()` and `status()` too, so every child runs through a `Scope` with a bound (WP-14 to WP-16 added, about +3 days); D6 = the
+  order as recommended; D7 = the rule is number 97 (91 to 96 are taken by the rules batch on `docs/rules-from-memory-2026-11-23`).
+  Proposed earlier the same day (ab8faf338); the direction was the user's (approved 2026-11-23, moved earlier in the queue).
 - Date: 2026-11-23
 - Related: **ADR 0118** (in design on `feat/test-results-artifact`: one CI wrapper, `./dev ci run` / `./dev ci step`, that every
   step and command runs through, and one job record per job; the user's alignment of 2026-11-23 makes it CI's process owner, §7),
@@ -161,9 +163,10 @@ recorded (3), so `./dev held end` can end it early.
 
 ### 4. The checks (the CI wrapper is §7)
 
-1. **Clippy bans `std::process::Command::spawn`** (and tokio's, `allow-invalid`) outside paddock-proc, with the reason "start
-   through `paddock_proc::Scope` (ADR 0119)". `output()` and `status()` stay allowed: they hold the child until it exits (their
-   bound is rule 89's and ADR 0031's business; D5). Clippy is exact where a text check is not. A justified site carries
+1. **Clippy bans every unheld or unbounded start and wait** outside paddock-proc (D5, accepted): `std::process::Command::spawn`,
+   `Command::output`, `Command::status`, `Child::wait` and `Child::wait_with_output` (and tokio's, `allow-invalid`), with the reason
+   "start through `paddock_proc::Scope` with a bound (ADR 0119)". `Scope::run(cmd, limits)` requires a bound (`Limits`, judged on
+   progress, ADR 0031) and is the one replacement for `output()` and `status()`; `Held::wait(bound)` replaces `Child::wait`. Clippy is exact where a text check is not. A justified site carries
    `#[expect(clippy::disallowed_methods, reason = "ADR 0119: ...")]`; the list of such sites is generated and only shrinks
    (ER-46). Because a Clippy ban blocks at once, it lands **with** the migration (6), not before: that is how ER-41's
    "report-only first" is met for a compiler lint (the migration's count is the report).
@@ -267,17 +270,16 @@ Agent-days, raw.
 | Option | What | Days |
 | --- | --- | --- |
 | A, common practice | Clippy ban on `spawn` and migration of the 164 sites onto the existing `Supervised` / `run_bounded` (kill on drop, guardian); `ask_group` and `graceful_stop` by `ProcessId`; the background-guard hook; rule text. No `Scope`, no ledger, no lifetimes, no `./dev held`. | 4.0 |
-| **B, recommended (the approved design)** | A, plus `Scope` (one folder, one job, cancel, summary), `start_detached` with a required lifetime, handle text, ledger, `./dev wait` on a handle and `./dev held`, the Node and shell checks, build-folder ownership, and the CI wrapper as the process owner (§7) | **8.75** |
-| B with D4 (b) | B plus `./dev run --hold` and worktree removal ending held processes | 9.5 |
+| **B (accepted, D1)** | A, plus `Scope` (one folder, one job, cancel, summary), `start_detached` with a required lifetime, handle text, ledger, `./dev wait` on a handle and `./dev held`, the Node and shell checks, build-folder ownership, and the CI wrapper as the process owner (§7), plus the ban on `output()`, `status()` and unbounded waits with its migration (D5) | **11.75** |
+| B with D4 (b) | B plus `./dev run --hold` and worktree removal ending held processes | 12.5 |
 
-B (including WP-13, the CI wrapper's scope, §7) is 8.75 days, 4.75 over A, above ER-37's 1-day line, so it needs the user's yes with both costs shown (D1). The user approved the
-direction; the number is new.
+B (including WP-13, the CI wrapper's scope, §7, and WP-14 to WP-16 for D5) is 11.75 days, 7.75 over A, above ER-37's 1-day line; the user gave the yes with both costs shown (D1 and D5, 2026-11-23).
 
 ## Work packages
 
 Each owns its files. `crates/paddock-proc/src/lib.rs`, `lint/clippy.toml` and `.claude/settings.json` are shared integration
-points (one declared line each, via the integrator). Prerequisites: **P1** `feat/adr0112-wp1-owner-trait` (b9970817d) pushed and on
-a train (it holds `Owned`, `own::Unit` and the starter-bound holder; today it is on no remote); **P2** `fix/proc-tree-pid-reuse`
+points (one declared line each, via the integrator). Prerequisites: **P1** `feat/adr0112-wp1-owner-trait` (b9970817d), rebased on the graph train (`train/2026-11-23-graph`) when the build
+starts, then pushed and on a train (it holds `Owned`, `own::Unit` and the starter-bound holder; today it is on no remote); **P2** `fix/proc-tree-pid-reuse`
 (682208725) landed; **P3** C159 landed.
 
 | WP | What | Owns | Days | Needs |
@@ -294,35 +296,41 @@ a train (it holds `Owned`, `own::Unit` and the starter-bound holder; today it is
 | WP-10 | Node: the handle check of ADR 0112 WP-6 extended to `detached: true` outside tests. | that check's file and fixtures | 0.25 | ADR 0112 WP-6 |
 | WP-11 | Build folders: read what `worktree remove` and `disk clean` do today; owner records for build folders `worktree add` names; removal with the worktree. | `tools/paddock-dev/src/worktree/ops.rs`, `disk/record.rs`, tests | 0.5 | none |
 | WP-13 | The CI wrapper (ADR 0118's `./dev ci run` / `ci step`) runs every command in the job's `Scope`, maps the runner's cancel signals to `scope.cancel()`, and writes the ended processes into the job record. Failing test first: a step whose command leaves a child and then fails; the child must be ended and listed. Positive control: the same step outside the wrapper leaves the child, and ADR 0112's net reports it. | the wrapper's files on the ADR 0118 branch (`tools/paddock-dev/src/ci_run/`, the job-record writer), their tests | 0.5 | WP-1; ADR 0118's job record |
+| WP-14 | `Scope::run` requires `Limits` (no unbounded form); `paddock_testkit::TestCommand` runs through it, so its callers' `output()` and `status()` move with one change; the Clippy ban of D5 (`Command::output`, `status`, `Child::wait`, `wait_with_output`) with its generated, shrink-only `#[expect]` list. Failing test first: a child that never exits under `output()` hangs the test; through `Scope::run` it ends at its bound and is reported. | `crates/paddock-proc/src/scope.rs`, `crates/paddock-testkit/src/` (TestCommand), `lint/clippy.toml` (one line), the WP-5 list generator | 0.5 | WP-1, WP-5 |
+| WP-15 | Migration D5: `crates/` and `tools/paddock-dev`. A text count on the train (files that build a process, `.output()`/`.status()`): crates 89 sites in 24 files (67 in tests), tools 183 in 54 (161 in tests); most test sites move with `TestCommand` (WP-14). | those files | 1.5 | WP-14 |
+| WP-16 | Migration D5: `apps/` (146 sites in 49 files, 108 in tests, same count; some may be HTTP `status()` and drop out when Clippy reads them). | the apps' files | 1.0 | WP-14 |
 | WP-12 | Docs: the rule (D7), AGENTS.md's working-practice line, this ADR's status, ADR 0103 and 0076 amendments (Reaper and guardian as parts of `Scope`). | `docs/rules.md`, `AGENTS.md`, `docs/adr/amendments/` | 0.25 | WP-1 |
 
-Total B: 8.0 (WP-1 to WP-13, WP-9 at its (a) size) plus 0.75 for the fix rounds of the three migration batches' reviews = **8.75**; with D4 (b)
-**9.5**. WP-4, WP-9 (hook) and WP-11 can start at once; WP-6 to WP-8 run in parallel after WP-1 and WP-2.
+Total B: 11.0 (WP-1 to WP-16, WP-9 at its (a) size) plus 0.75 for the fix rounds of the migration batches' reviews = **11.75**;
+with D4 (b) **12.5**. WP-14 to WP-16 are D5's +3.0 days. WP-4, WP-9 (hook) and WP-11 can start at once; WP-6 to WP-8 run in parallel after WP-1 and WP-2.
 
 Parallelism and cost (ER-20): a scope adds no process on Windows (one job object per scope) and one guardian per owner process on
 Unix, as `Supervised` does today; the ledger is one appended line per start. The summary reads the table once per scope end
 (`own::look`), not per member.
 
-## Decisions for the user
+## Decisions (accepted, user, 2026-11-23)
 
-- **D1. Scope of the fix.** (a) Common practice, A: 4.0 days. (b) **Recommended**: B, the approved design, 8.75 days (4.75 more,
+Each decision below keeps its options as offered; the line "Accepted" records the user's choice.
+
+- **D1. Scope of the fix.** Accepted (user, 2026-11-23): (b), B, now 11.75 days with D5. (a) Common practice, A: 4.0 days. (b) **Recommended**: B, the approved design, 8.75 days before D5 (4.75 more,
   above ER-37's 1-day line). Why (b): re-attaching by handle and declared lifetimes are what the incidents lacked (the orphaned
   holders, the run 8674 stale pids), and A leaves them to each caller.
-- **D2. Number.** This ADR is 0119 because 0112 is taken by the accepted CI-job ADR and 0118 by the CI wrapper and job record.
+- **D2. Number.** Accepted (user, 2026-11-23): keep the three separate. This ADR is 0119 because 0112 is taken by the accepted CI-job ADR and 0118 by the CI wrapper and job record.
   **Recommended**: keep the three; 0112 the job's net, 0118 the CI wrapper and record, 0119 the one process mechanism under both
   and everything outside CI. Alternative: fold this text into 0112 as an amendment (no cost difference).
-- **D3. The background guard.** (a) **Recommended**: blocking (it guards state, like the kill guard). (b) Common practice for
+- **D3. The background guard.** Accepted (user, 2026-11-23): (a), blocking. (a) **Recommended**: blocking (it guards state, like the kill guard). (b) Common practice for
   text hooks here: warn-only (ER-36).
-- **D4. Agents' held work.** (a) Common practice: `run_in_background` plus the hook, 0.5 day. (b) Also `./dev run --hold` and
+- **D4. Agents' held work.** Accepted (user, 2026-11-23): measure in WP-9, then (a) or (b) as laid out. (a) Common practice: `run_in_background` plus the hook, 0.5 day. (b) Also `./dev run --hold` and
   worktree removal ending held processes, +0.75 day. **Recommended**: (a) if WP-9 measures that the harness ends background tasks
   with their agent, otherwise (b).
-- **D5. `output()` and `status()`.** (a) **Recommended**: stay allowed (they hold the child; a text count finds 881 `.output()`/`.status()` matches in 267 Rust files, some of them not processes). (b) Ban them
+- **D5. `output()` and `status()`.** Accepted (user, 2026-11-23): (b), ban them too; every child runs through a `Scope` with a bound (WP-14 to WP-16, +3.0 days). (a) **Recommended**: stay allowed (they hold the child; a text count finds 881 `.output()`/`.status()` matches in 267 Rust files, some of them not processes). (b) Ban them
   too and move every site to `run_bounded`, about +3 days.
-- **D6. Order.** **Recommended**: P1 (push the local 0112 branch), WP-4 and WP-2 first (they fix the two checked incidents' shapes
+- **D6. Order.** Accepted (user, 2026-11-23): as recommended. **Recommended**: P1 (push the local 0112 branch), WP-4 and WP-2 first (they fix the two checked incidents' shapes
   and the shipped Pitcrew stop), then the rest after the current release train ("release before tooling", 2026-11-20).
   Alternative: all at once.
-- **D7. The rule.** ADR 0112 proposed "new Paddock rule 90" for start, hold, watch, end, but rule 90 on the train is now "a landing
-  may rest on a narrowed run". **Recommended**: one rule, number 91, holding 0112's text widened to this ADR's scope, landed with
+- **D7. The rule.** Accepted (user, 2026-11-23): number 97, because 91 to 96 are taken by the rules batch on
+  `docs/rules-from-memory-2026-11-23` (not on origin on 2026-11-23, so not read here). ADR 0112 proposed "new Paddock rule 90" for start, hold, watch, end, but rule 90 on the train is now "a landing
+  may rest on a narrowed run". **Recommended** (number superseded by the accepted 97): one rule, number 91, holding 0112's text widened to this ADR's scope, landed with
   WP-12; ADR 0112's copy is corrected when it lands.
 
 ## Consequences
