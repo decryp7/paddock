@@ -135,44 +135,8 @@ static C100_INPUTS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
     .collect()
 });
 
-static GUARD: LazyLock<Regex> = LazyLock::new(|| re(r"#\[ignore|cfg_attr\([^)\n]*ignore|env::var|process\.env"));
-static RUST_FN: LazyLock<Regex> = LazyLock::new(|| re(r"(?-u:\b)fn\s+((?-u:\w)+)"));
-static TS_TEST: LazyLock<Regex> = LazyLock::new(|| re(r#"(?-u:\b)(?:test|it)(?:\.(?-u:\w)+)?\(\s*['"`]([^'"`]+)"#));
-
-/// The ignore attributes and environment guards of a test file, each paired with the Rust function or TypeScript test title it
-/// belongs to (`guardSet` of the retired scripts/affected.mjs): moving an ignore from one test to another changes the set though the count
-/// stays.
-pub fn guard_set(text: &str) -> BTreeSet<String> {
-    let lines: Vec<&str> = text.split('\n').collect();
-    let mut set = BTreeSet::new();
-    for (i, line) in lines.iter().enumerate() {
-        let Some(m) = GUARD.find(line) else {
-            continue;
-        };
-        let mut name = String::new();
-        for l in lines.iter().take((i + 8).min(lines.len())).skip(i) {
-            if let Some(c) = RUST_FN.captures(l) {
-                name = c[1].to_string();
-                break;
-            }
-        }
-        if name.is_empty() {
-            for k in (0..=i).rev().take_while(|k| *k + 40 > i) {
-                if let Some(c) = TS_TEST.captures(lines[k]) {
-                    name = c[1].to_string();
-                    break;
-                }
-            }
-        }
-        set.insert(format!("{}|{name}", m.as_str()));
-    }
-    set
-}
-
-/// Whether a file's guards differ between two texts (a missing file has none).
-pub fn guards_changed(before: Option<&str>, after: Option<&str>) -> bool {
-    guard_set(before.unwrap_or_default()) != guard_set(after.unwrap_or_default())
-}
+// The C100 content rule's one implementation is the model's `guards` content extractor (ADR 0117 §3).
+pub use paddock_repo_graph::model::narrow::{guard_set, guards_changed};
 
 /// The text of a changed file before and after the change (`None`: no such file at that end).
 pub type ContentOf<'a> = &'a dyn Fn(&str) -> (Option<String>, Option<String>);

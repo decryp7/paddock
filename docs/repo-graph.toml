@@ -4,6 +4,7 @@
 # of docs, conformance/reserved and spikes. An [[input]] here replaces the default of the same name; an [[owner]] here wins a tie.
 #
 # [[input]]  name, files (globs), reaches (all | cargo | npm | apps | project:<id>), reach (code | release | test | plumbing | docs),
-#            attributes (true for a .gitattributes file)
+#            extractor (a content extractor that narrows it: attributes | npm-lock | guards),
+#            adds (true: the file keeps its owner and the input adds its targets), except (globs taken back out)
 # [[owner]]  paths (globs), node (none | doc | project:<id>)
 version = 1

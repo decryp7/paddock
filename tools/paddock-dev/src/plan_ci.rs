@@ -334,18 +334,24 @@ pub fn is_ci_yml(path: &str) -> bool {
 
 // --------------------------------------------------------------------------------------------------------------- outputs
 
+/// The ci.yml job outputs that say whether a project runs: (output name, project id, plan key). The one table: [`ci_outputs`] writes
+/// them, and the repository model reads a job's `if:` through it to know which project the job runs for (ADR 0117 WP-2).
+pub const PROJECT_OUTPUTS: [(&str, &str, &str); 8] = [
+    ("crates", "crates", "crates"),
+    ("ui", "ui", "ui"),
+    ("eslint", "eslint", "eslint"),
+    ("conformance", "conformance", "conformance"),
+    ("c99", "c99", "c99"),
+    ("tools", "tools", "tools"),
+    ("icons", "icons", "icons"),
+    ("paddock_dev", "paddock-dev", "paddockDev"),
+];
+
 /// The ci.yml job outputs of a plan (the plan job declares and wires exactly these names), as `(name, value)` lines.
 pub fn ci_outputs(plan: &Value, legs: &[Value], base: Option<&str>) -> Vec<(String, String)> {
     let b = |k: &str| plan[k].as_bool().unwrap_or(false).to_string();
-    vec![
-        ("crates".into(), b("crates")),
-        ("ui".into(), b("ui")),
-        ("eslint".into(), b("eslint")),
-        ("conformance".into(), b("conformance")),
-        ("c99".into(), b("c99")),
-        ("tools".into(), b("tools")),
-        ("icons".into(), b("icons")),
-        ("paddock_dev".into(), b("paddockDev")),
+    let mut out: Vec<(String, String)> = PROJECT_OUTPUTS.iter().map(|(name, _, key)| (name.to_string(), b(key))).collect();
+    out.extend(vec![
         ("crates_filter".into(), plan["filters"]["crates"].as_str().unwrap_or("").to_string()),
         (
             "paddock_dev_filter".into(),
@@ -355,7 +361,8 @@ pub fn ci_outputs(plan: &Value, legs: &[Value], base: Option<&str>) -> Vec<(Stri
         ("any_app".into(), (!legs.is_empty()).to_string()),
         // The commit lint's range start (empty: no base, only the head commit is linted).
         ("base".into(), base.unwrap_or("").to_string()),
-    ]
+    ]);
+    out
 }
 
 /// A short Markdown summary of a plan for the job summary.
@@ -531,7 +538,7 @@ pub fn commit_lint_range(i: &LintInput, known: &dyn Fn(&str) -> bool) -> Result<
 // ------------------------------------------------------------------------------------------------------ command line
 
 /// The usage line printed under an argument error.
-pub const USAGE: &str = "usage: dev plan <base> [<head>] | --files a,b | --all | --ci [--app <app>]  [--explain] | --commit-range | --commit-flags | --since-run <run>";
+pub const USAGE: &str = "usage: dev plan <base> [<head>] | --files a,b | --all | --ci [--app <app>]  [--explain] [--compare] | --commit-range | --commit-flags | --since-run <run>";
 
 /// A parsed command line of `dev plan`.
 #[derive(Debug, PartialEq)]
@@ -552,13 +559,15 @@ pub struct PlanArgs {
     pub explain: bool,
     /// `--since-run <run>`: rerun only what failed in that CI run ([`crate::plan_since`]).
     pub since_run: Option<u64>,
+    /// `--compare`: the repository model's answer beside the rule tables' (ADR 0117 §8; [`crate::repo_model::compare`]).
+    pub compare: bool,
 }
 
 /// The command line: `--ci [--app x]`, `--files a,b`, `--all`, `--explain` and up to two positional commits, base then head.
 /// Errors (the caller prints the usage and the reason) for anything incomplete, unknown or contradictory, so a typo never plans
 /// nothing.
 pub fn parse_args(args: &[String]) -> Result<PlanArgs, String> {
-    let known = ["--files", "--all", "--ci", "--app", "--explain", "--since-run"];
+    let known = ["--files", "--all", "--ci", "--app", "--explain", "--since-run", "--compare"];
     let value_of = |name: &str| -> Result<(Option<usize>, Option<String>), String> {
         let Some(i) = args.iter().position(|a| a == name) else {
             return Ok((None, None));
@@ -635,6 +644,7 @@ pub fn parse_args(args: &[String]) -> Result<PlanArgs, String> {
         app,
         explain: args.iter().any(|a| a == "--explain"),
         since_run,
+        compare: args.iter().any(|a| a == "--compare"),
     })
 }
 

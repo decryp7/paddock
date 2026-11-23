@@ -47,86 +47,96 @@ impl Target {
     }
 }
 
-/// The default named inputs: (name, files, reaches, attributes); every reach is `code`. A reach word as the inputs file spells it.
-const DEFAULT_INPUTS: &[(&str, &[&str], &[&str], bool)] = &[
+/// The default named inputs: (name, files, reaches, content extractor); every reach is `code`. A reach word as the inputs file
+/// spells it.
+/// One default input row: (name, files, reaches, content extractor).
+type InputRow = (
+    &'static str,
+    &'static [&'static str],
+    &'static [&'static str],
+    Option<&'static str>,
+);
+
+const DEFAULT_INPUTS: &[InputRow] = &[
     (
         "rust-toolchain",
         &["rust-toolchain", "rust-toolchain.toml"],
         &["all"],
-        false,
+        None,
     ),
     (
         "npm-root",
         &["package.json", ".npmrc", ".nvmrc", "tsconfig/**"],
         &["all"],
-        false,
+        None,
     ),
-    ("npm-lock", &["package-lock.json"], &["npm"], false),
+    // Narrowed by the lock's content: only the workspaces whose resolved packages changed (and their dependents).
+    ("npm-lock", &["package-lock.json"], &[], Some("npm-lock")),
     (
         "cargo-config",
         &[".cargo/**", "lint/**"],
         &["cargo", "project:crates", "project:paddock-dev"],
-        false,
+        None,
     ),
     (
         "git-attributes",
         &[".gitattributes"],
         &["project:conformance"],
-        true,
+        Some("attributes"),
     ),
     (
         "check-id-reservations",
         &["conformance/reserved/**"],
         &[],
-        false,
+        None,
     ),
     (
         "lessons",
         &["docs/lessons.md", "docs/rules.md", "docs/blocks/**"],
         &["project:conformance", "project:tools"],
-        false,
+        None,
     ),
     (
         "repo-graph",
         &["docs/repo-graph.toml"],
         &["project:paddock-dev", "project:conformance"],
-        false,
+        None,
     ),
     (
         "gates-register",
         &["docs/gates.toml"],
         &["project:paddock-dev", "project:conformance"],
-        false,
+        None,
     ),
     (
         "generators-register",
         &["docs/generators.toml"],
         &["project:paddock-dev"],
-        false,
+        None,
     ),
     (
         "known-copies",
         &["docs/known-copies.toml"],
         &["project:tools", "project:conformance"],
-        false,
+        None,
     ),
     (
         "harnesses",
         &["docs/harnesses.toml"],
         &["project:conformance"],
-        false,
+        None,
     ),
     (
         "ipc-endpoints",
         &["docs/ipc-endpoints.toml", "docs/ipc-endpoint-ratchet.toml"],
         &["project:conformance"],
-        false,
+        None,
     ),
     (
         "ci-scope-register",
         &["docs/ci-scope-first-runs.toml"],
         &["project:paddock-dev"],
-        false,
+        None,
     ),
     (
         "design-docs",
@@ -136,7 +146,7 @@ const DEFAULT_INPUTS: &[(&str, &[&str], &[&str], bool)] = &[
             "docs/benchmarks/**",
         ],
         &["project:conformance"],
-        false,
+        None,
     ),
     (
         "doc-images",
@@ -149,9 +159,9 @@ const DEFAULT_INPUTS: &[(&str, &[&str], &[&str], bool)] = &[
             "docs/images/*.svg",
         ],
         &["project:tools"],
-        false,
+        None,
     ),
-    ("wiki", &["docs/wiki/**"], &["project:tools"], false),
+    ("wiki", &["docs/wiki/**"], &["project:tools"], None),
     (
         "changelogs",
         &[
@@ -161,7 +171,7 @@ const DEFAULT_INPUTS: &[(&str, &[&str], &[&str], bool)] = &[
             "apps/*/vendor/**/*.md",
         ],
         &["owner"],
-        false,
+        None,
     ),
     (
         "prose-read-by-code",
@@ -176,13 +186,13 @@ const DEFAULT_INPUTS: &[(&str, &[&str], &[&str], bool)] = &[
             "**/fixtures/**/*.md",
         ],
         &["owner"],
-        false,
+        None,
     ),
     (
         "demo-readmes",
         &["apps/shell-demo/README.md", "apps/workbench-demo/README.md"],
         &["project:tools"],
-        false,
+        None,
     ),
     (
         "lint-wiring",
@@ -203,7 +213,7 @@ const DEFAULT_INPUTS: &[(&str, &[&str], &[&str], bool)] = &[
             "ui/paddock.ci.json",
         ],
         &["owner", "project:eslint"],
-        false,
+        None,
     ),
     (
         "conformance-config",
@@ -213,30 +223,43 @@ const DEFAULT_INPUTS: &[(&str, &[&str], &[&str], bool)] = &[
             ".gitleaks.toml",
         ],
         &["project:conformance"],
-        false,
+        None,
     ),
     (
         "dev-wrapper",
         &["dev", "dev.cmd"],
         &["project:paddock-dev"],
-        false,
+        None,
     ),
     (
         "scripts",
         &["scripts/**"],
         &["project:tools", "project:ui"],
-        false,
+        None,
     ),
     (
         "ci-image",
         &["ci-image/**"],
         &["project:ci-image", "project:ui", "project:tools"],
-        false,
+        None,
+    ),
+    // The diagram sources and their export script (the diagrams check renders them).
+    (
+        "diagram-sources",
+        &["diagrams/**/*.xml", "diagrams/scripts/**"],
+        &["project:tools"],
+        None,
+    ),
+    // brief_check.rs `include_str!`s a template (review round 3).
+    (
+        "templates",
+        &["templates/**"],
+        &["project:tools", "project:paddock-dev"],
+        None,
     ),
     (
         "repo-tooling",
         &[
-            "templates/**",
             "renovate/**",
             "renovate.json",
             "CODEOWNERS",
@@ -246,11 +269,171 @@ const DEFAULT_INPUTS: &[(&str, &[&str], &[&str], bool)] = &[
             "lefthook.yml",
         ],
         &["project:tools"],
-        false,
+        None,
     ),
-    // Until the CI adapter (WP-2) reads workflows and actions, a non-prose file under .gitea reaches everything, as the planner
-    // without its revision reader does today.
-    ("ci-files", &[".gitea/**"], &["all"], false),
+];
+
+/// The additive inputs: a check or test that reads files other projects own (ADR 0117 §3, the planner's former `C99_INPUT`,
+/// `C100_INPUTS`, `PARITY_INPUT`, `HOOKS_PARITY_INPUT`, `APP_CAPABILITY_INPUT`, `PER_MACHINE_INPUT`, `E2E_GUARD_INPUTS`,
+/// `NOTICES_INPUTS`, `GENERATED` and the cause-code scan). The file keeps its owner; the input adds its targets. (name, files,
+/// reaches, except.)
+/// One additive input row: (name, files, reaches, except).
+type AddRow = (
+    &'static str,
+    &'static [&'static str],
+    &'static [&'static str],
+    &'static [&'static str],
+);
+
+const DEFAULT_ADDS: &[AddRow] = &[
+    (
+        "c99-reads",
+        &[
+            "apps/**/Cargo.toml",
+            "apps/**/Cargo.lock",
+            "crates/**/Cargo.toml",
+            "crates/**/Cargo.lock",
+            "apps/**/*.rs",
+            "crates/**/*.rs",
+            "apps/**/*.c",
+            "crates/**/*.c",
+            "apps/**/*.cc",
+            "crates/**/*.cc",
+            "apps/**/*.cpp",
+            "crates/**/*.cpp",
+            "apps/**/*.m",
+            "crates/**/*.m",
+            "apps/**/*.mm",
+            "crates/**/*.mm",
+            "apps/**/*.h",
+            "crates/**/*.h",
+            "apps/**/*.swift",
+            "crates/**/*.swift",
+            "**/app/src/**/*.ts",
+            "**/ui/projects/**/*.ts",
+            "**/src-tauri/capabilities/*.json",
+            "paddock.ci.json",
+            "conformance/src/**",
+            "conformance/bin/**",
+            ".cargo/config.toml",
+            "paddock.waivers.toml",
+        ],
+        &["project:c99"],
+        &[],
+    ),
+    (
+        "cause-code-scan",
+        &["crates/**/*.rs", "apps/**/*.rs"],
+        &["project:ui"],
+        &[
+            "**/target/**",
+            "**/node_modules/**",
+            "**/tests/**",
+            "**/benches/**",
+            "tests.rs",
+        ],
+    ),
+    (
+        "c100-reads",
+        &[
+            "docs/gates.toml",
+            "apps/*/paddock.ci.json",
+            "package.json",
+            "lefthook.yml",
+            "AGENTS.md",
+            "apps/*/AGENTS.md",
+            "apps/*/docs/performance.md",
+            "README.md",
+            "docs/wiki/**/*.md",
+            "conformance/src/checks/**",
+            "conformance/src/cli.mjs",
+            "tools/paddock-dev/src/gates/**",
+            "scripts/**/check-*.mjs",
+            "scripts/**/check-*.sh",
+            "scripts/**/check-*.ps1",
+            "scripts/**/*.test.mjs",
+            "conformance/**/check-*.mjs",
+            "conformance/**/check-*.sh",
+            "conformance/**/check-*.ps1",
+            "conformance/**/*.test.mjs",
+            "tools/**/check-*.mjs",
+            "tools/**/check-*.sh",
+            "tools/**/check-*.ps1",
+            "tools/**/*.test.mjs",
+            "apps/*/scripts/**/check-*.mjs",
+            "apps/*/scripts/**/check-*.sh",
+            "apps/*/scripts/**/check-*.ps1",
+            "apps/*/scripts/**/*.test.mjs",
+        ],
+        &["project:conformance"],
+        &[],
+    ),
+    (
+        "conformance-parity",
+        &[
+            "conformance/src/**/*.mjs",
+            "conformance/src/**/*.json",
+            "conformance/bin/**/*.mjs",
+            "conformance/bin/**/*.json",
+            "conformance/baselines/**/*.mjs",
+            "conformance/baselines/**/*.json",
+        ],
+        &["project:paddock-dev"],
+        &[],
+    ),
+    (
+        "hooks-parity",
+        &["tools/paddock-dev/src/places.rs", "docs/known-copies.toml"],
+        &["project:tools"],
+        &[],
+    ),
+    (
+        "app-capabilities",
+        &[
+            "apps/*/src-tauri/Cargo.toml",
+            "apps/*/app/src-tauri/Cargo.toml",
+            "apps/*/src-tauri/capabilities/**",
+            "apps/*/app/src-tauri/capabilities/**",
+        ],
+        &["project:conformance"],
+        &[],
+    ),
+    (
+        "per-machine",
+        &[
+            "apps/*/app/src-tauri/tauri.conf.json",
+            "apps/*/app/src-tauri/tauri.windows.conf.json",
+            "apps/*/app/src-tauri/windows/**",
+            "crates/paddock-setup/nsis/paddock-per-machine.nsh",
+        ],
+        &["project:conformance", "project:crates"],
+        &[],
+    ),
+    (
+        "e2e-guards",
+        &[
+            "ui/projects/paddock-e2e/src/env.ts",
+            "ui/projects/paddock-e2e/src/build-guard.ts",
+        ],
+        &["apps"],
+        &[],
+    ),
+    (
+        "notices",
+        &[
+            "scripts/notices.sh",
+            "templates/repo/about.toml",
+            "conformance/src/notices/**",
+        ],
+        &["apps"],
+        &[],
+    ),
+    (
+        "generated-bindings",
+        &["ui/**/generated/*.ts", "ui/**/generated/*.json"],
+        &["project:crates"],
+        &["**/public-api.ts", "**/ng-package.json"],
+    ),
 ];
 
 /// One named input.
@@ -264,8 +447,10 @@ pub struct Input {
     pub reaches: Vec<Target>,
     /// The kind of reach.
     pub reach: Reach,
-    /// A `.gitattributes` file: only the attribute lines that changed reach anything (G2).
-    pub attributes: bool,
+    /// The content extractor that narrows it (`attributes`, `npm-lock`, `guards`; [`super::narrow`]).
+    pub extractor: Option<String>,
+    /// An additive input: the file keeps its owner and the input adds its targets (a check that also reads a project's file).
+    pub adds: bool,
     /// Globs taken back out of `files` (the CI files' input leaves their prose to the doc owner).
     pub except: Vec<String>,
 }
@@ -307,7 +492,7 @@ impl Inputs {
         use Reach::Code;
         let inputs = DEFAULT_INPUTS
             .iter()
-            .map(|(name, files, reaches, attributes)| Input {
+            .map(|(name, files, reaches, extractor)| Input {
                 name: name.to_string(),
                 files: files.iter().map(|s| s.to_string()).collect(),
                 // The table is this crate's own literal; its words are checked by the tests below.
@@ -316,13 +501,35 @@ impl Inputs {
                     .filter_map(|r| Target::parse(r).ok())
                     .collect(),
                 reach: Code,
-                attributes: *attributes,
-                except: if *name == "ci-files" {
-                    vec!["**/*.md".to_string()]
-                } else {
-                    Vec::new()
-                },
+                extractor: extractor.map(str::to_string),
+                adds: false,
+                except: Vec::new(),
             })
+            .chain(DEFAULT_ADDS.iter().map(|(name, files, reaches, except)| {
+                Input {
+                    name: name.to_string(),
+                    files: files.iter().map(|s| s.to_string()).collect(),
+                    reaches: reaches
+                        .iter()
+                        .filter_map(|r| Target::parse(r).ok())
+                        .collect(),
+                    reach: Code,
+                    extractor: None,
+                    adds: true,
+                    except: except.iter().map(|s| s.to_string()).collect(),
+                }
+            }))
+            .chain(std::iter::once(Input {
+                // C100 reads the ignore attributes and environment guards of every test source: a changed guard adds conformance,
+                // the file keeps its owner.
+                name: "test-guards".to_string(),
+                files: vec!["*.rs".to_string(), "*.ts".to_string()],
+                reaches: vec![Target::Project("conformance".to_string())],
+                reach: Code,
+                extractor: Some("guards".to_string()),
+                adds: true,
+                except: vec!["**/node_modules/**".to_string()],
+            }))
             .collect();
         let owner = |paths: &[&str], owner: Owner| OwnerRule {
             paths: paths.iter().map(|s| s.to_string()).collect(),
@@ -342,6 +549,17 @@ impl Inputs {
                     Owner::Doc,
                 ),
                 owner(&["spikes/**"], Owner::None),
+                // Editor and VCS metadata at the root and the issue templates: nothing builds or tests them (the planner's former
+                // `META`).
+                owner(
+                    &[
+                        ".gitignore",
+                        ".editorconfig",
+                        ".DS_Store",
+                        ".gitea/ISSUE_TEMPLATE/**",
+                    ],
+                    Owner::None,
+                ),
             ],
         }
     }
@@ -399,13 +617,18 @@ mod tests {
             .filter(|x| x.reaches.contains(&Target::All))
             .map(|x| x.name.as_str())
             .collect();
-        // The CI files reach everything only until the CI adapter (WP-2) reads them.
-        assert_eq!(all, ["rust-toolchain", "npm-root", "ci-files"]);
+        // A .gitea file is reached through the CI adapter's nodes (WP-2), or, owned by none, fails closed.
+        assert_eq!(all, ["rust-toolchain", "npm-root"]);
         assert!(
-            i.inputs_of(".gitea/actions/README.md").is_empty(),
-            "G7: prose under .gitea is the doc owner's"
+            i.inputs_of(".gitea/actions/README.md")
+                .iter()
+                .all(|x| x.adds),
+            "G7: prose under .gitea is the doc owner's (C100 also reads a README)"
         );
-        assert!(i.inputs_of(".gitattributes")[0].attributes);
+        assert_eq!(
+            i.inputs_of(".gitattributes")[0].extractor.as_deref(),
+            Some("attributes")
+        );
         assert_eq!(
             i.owner_of(".gitea/actions/README.md"),
             Some(&Owner::Doc),
@@ -433,7 +656,8 @@ mod tests {
                 files: vec!["package.json".into()],
                 reaches: vec![Target::Npm],
                 reach: Reach::Code,
-                attributes: false,
+                extractor: None,
+                adds: false,
                 except: Vec::new(),
             }],
             owners: vec![OwnerRule {
@@ -454,6 +678,11 @@ mod tests {
     #[test]
     fn every_default_reach_word_parses() {
         for (name, _, reaches, _) in DEFAULT_INPUTS {
+            for r in *reaches {
+                assert!(Target::parse(r).is_ok(), "{name}: {r}");
+            }
+        }
+        for (name, _, reaches, _) in DEFAULT_ADDS {
             for r in *reaches {
                 assert!(Target::parse(r).is_ok(), "{name}: {r}");
             }

@@ -10,7 +10,8 @@
 //! files = ["rust-toolchain.toml"]
 //! reaches = ["all"]              # all | cargo | npm | apps | project:<id>
 //! reach = "code"                 # code | release | test | plumbing | docs
-//! attributes = false             # true: a .gitattributes file, reached by the attribute lines that changed
+//! extractor = "attributes"      # a content extractor narrows it: attributes | npm-lock | guards (ADR 0117 §3)
+//! adds = false                   # true: the file keeps its owner and this input adds its targets
 //! except = ["**/*.md"]           # globs taken back out of `files`
 //!
 //! [[owner]]                      # who owns a path no project claims
@@ -75,13 +76,27 @@ fn read(text: &str) -> Result<Inputs, String> {
             .map(|s| Target::parse(s).map_err(|m| format!("{what}: {m}")))
             .collect::<Result<Vec<_>, _>>()?;
         let reach = Reach::parse(e.get("reach").and_then(toml::Value::as_str).unwrap_or("code")).map_err(|m| format!("{what}: {m}"))?;
-        let attributes = e.get("attributes").and_then(toml::Value::as_bool).unwrap_or(false);
+        let extractor = match e.get("extractor") {
+            None => None,
+            Some(v) => {
+                let n = v.as_str().ok_or(format!("{what}.extractor is not a string"))?;
+                if !paddock_repo_graph::model::narrow::NAMES.contains(&n) {
+                    return Err(format!(
+                        "{what}: unknown extractor {n:?} ({})",
+                        paddock_repo_graph::model::narrow::NAMES.join(", ")
+                    ));
+                }
+                Some(n.to_string())
+            }
+        };
+        let adds = e.get("adds").and_then(toml::Value::as_bool).unwrap_or(false);
         inputs.push(Input {
             name,
             files,
             reaches,
             reach,
-            attributes,
+            extractor,
+            adds,
             except: strings(e.get("except"), &format!("{what}.except"))?,
         });
     }
@@ -136,6 +151,10 @@ mod tests {
                 "unknown reach",
             ),
             ("version = 1\n[[owner]]\npaths = [\"a\"]\n", "has no node"),
+            (
+                "version = 1\n[[input]]\nname = \"x\"\nfiles = [\"a\"]\nextractor = \"magic\"\n",
+                "unknown extractor",
+            ),
             (
                 "version = 1\n[[owner]]\npaths = [\"a\"]\nnode = \"somebody\"\n",
                 "not none, doc or project",

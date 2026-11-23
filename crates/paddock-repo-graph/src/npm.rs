@@ -133,6 +133,38 @@ pub fn npm_graph(files: &[String], source: &dyn FileSource) -> Result<Graph, Gra
     Ok(g)
 }
 
+/// The (dependent, dependency) folder pairs that package.json files declare between workspace packages: the `depends` edges of
+/// the model. The other edges of [`npm_graph`] are path references.
+pub(crate) fn declared_dependencies(
+    files: &[String],
+    source: &dyn FileSource,
+) -> Result<std::collections::BTreeSet<(String, String)>, GraphError> {
+    let mut raw: BTreeMap<String, Value> = BTreeMap::new();
+    for f in files
+        .iter()
+        .filter(|f| f.ends_with("package.json") && f.as_str() != "package.json")
+    {
+        raw.insert(dirname(f), parse(source, f)?);
+    }
+    let by_name: BTreeMap<String, String> = raw
+        .iter()
+        .filter_map(|(d, j)| {
+            j.get("name")
+                .and_then(Value::as_str)
+                .map(|n| (n.to_string(), d.clone()))
+        })
+        .collect();
+    let mut out = std::collections::BTreeSet::new();
+    for (dir, pkg) in &raw {
+        for n in dependency_names(pkg) {
+            if let Some(to) = by_name.get(&n).filter(|to| *to != dir) {
+                out.insert((dir.clone(), to.clone()));
+            }
+        }
+    }
+    Ok(out)
+}
+
 fn is_config(path: &str) -> bool {
     let name = path.rsplit('/').next().unwrap_or(path);
     let tsconfig = name.starts_with("tsconfig") && name.ends_with(".json");

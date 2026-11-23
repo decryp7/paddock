@@ -94,6 +94,7 @@ pub mod process_env;
 pub mod queue;
 pub mod release_isolation;
 pub mod repo_inputs;
+pub mod repo_model;
 pub mod safe_remove;
 pub mod slots;
 // Unix only: it starts the helper through a POSIX shell, and every test that uses it is `#[cfg(unix)]`.

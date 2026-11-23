@@ -13,9 +13,13 @@ publish = ["decryp7"]
 # when a manifest under apps/pacenotes/ enables `cargo-metadata` is planned (ADR 0022 §3.7), not written yet.
 cargo-metadata = ["dep:paddock-proc"]
 git-history = ["dep:paddock-proc"]
+# Content detection, an aid only (ADR 0117 D14): text or binary from a file's first kilobyte, as bat and ripgrep do.
+content = ["dep:content_inspector"]
 
 [dependencies]
 serde_json = "1"
+content_inspector = { version = "0.2", optional = true }
+regex = "1"
 paddock-proc = { workspace = true, optional = true }
 paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
 

@@ -160,6 +160,53 @@ fn recorded_real_tree_samples_match_the_planners_flags() {
     );
 }
 
+/// The migration net (ADR 0117 §8): the repository model's answer beside the rule tables' for every real-tree sample, recorded in
+/// `tests/golden/model-compare.json`. Every recorded difference is one of §8's listed differences or a defect; a changed difference
+/// is a reviewed bless. The positive control: some sample differs (a comparison that finds nothing proves nothing until WP-5).
+#[test]
+fn recorded_model_compare_on_the_real_tree_samples() {
+    let root = repo_root();
+    let samples: Vec<Value> = serde_json::from_str(&std::fs::read_to_string(golden_dir().join("real-tree-samples.json")).unwrap()).unwrap();
+    let path = golden_dir().join("model-compare.json");
+    let history = GitHistory::new(&root, Duration::from_secs(60));
+    let graph = read_graph(&root, &history).unwrap();
+    let mut recorded = Vec::new();
+    for sample in &samples {
+        let files: Vec<&str> = sample["files"].as_array().unwrap().iter().map(|f| f.as_str().unwrap()).collect();
+        let req = request(&files);
+        let plan = plan_on_graph(&root, &history, &req, &graph).unwrap();
+        let (_, reached) = paddock_dev::repo_model::reach_for(&root, &history, &req, &graph).unwrap();
+        let c = paddock_dev::repo_model::compare(&plan, &reached, &graph);
+        let diffs: Vec<Value> = c["differences"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|d| json!({"project": d["project"], "rules": d["rules"], "model": d["model"]}))
+            .collect();
+        recorded.push(
+            json!({"files": files, "allRules": c["allRules"], "allModel": c["allModel"], "differences": diffs, "unowned": c["unowned"]}),
+        );
+    }
+    let got = Value::Array(recorded);
+    if bless() {
+        record(&path, &got);
+        return;
+    }
+    let want: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap_or_else(|_| "null".into())).unwrap();
+    assert!(
+        got == want,
+        "the model's differences changed:\n{}\n{REGENERATE}",
+        serde_json::to_string_pretty(&got).unwrap()
+    );
+    assert!(
+        got.as_array()
+            .unwrap()
+            .iter()
+            .any(|s| !s["differences"].as_array().unwrap().is_empty()),
+        "a positive control: some sample differs"
+    );
+}
+
 // ---------------------------------------------------------------------------------------------------------------------
 // Recorded cases
 

@@ -9,7 +9,7 @@
 //! dev plan --ci --app <app>      `true` or `false` on stdout: whether the change reaches that app
 //! dev plan --commit-range        the commit lint's range (or `skip`) from EVENT, REF, BEFORE, SHA, PLAN_BASE, BASE_REF, INPUT_APP
 //! dev plan --since-run <run>     what of a finished CI run reruns: its failed jobs, or only their failed tests (JSON)
-//! options: --explain
+//! options: --explain, --compare (the repository model's answer beside the rule tables', ADR 0117 §8)
 //! ```
 //!
 //! `--ci` with `PLAN_SINCE_RUN` set (ci.yml's `since_run` input) writes the outputs of such a rerun instead: only the failed
@@ -167,7 +167,18 @@ pub fn command(args: &[String], root: Option<PathBuf>) -> Result<Report, CliErro
         base: a.base,
         head: a.head,
     };
-    let (_, plan) = plan_with_graph(&root, &history, &req).map_err(|e| fail(e.to_string()))?;
+    let compare = a.compare;
+    let req = Request {
+        explain: req.explain || compare,
+        ..req
+    };
+    let (graph, plan) = plan_with_graph(&root, &history, &req).map_err(|e| fail(e.to_string()))?;
+    if compare {
+        // The migration net (ADR 0117 §8): the model's answer beside the rule tables', which still decide the plan.
+        let (_, reached) = crate::repo_model::reach_for(&root, &history, &req, &graph).map_err(fail)?;
+        let v = crate::repo_model::compare(&plan, &reached, &graph);
+        return Ok(Report::new(v.clone(), serde_json::to_string_pretty(&v).unwrap_or_default()));
+    }
     Ok(Report::new(plan.clone(), plan.to_string()))
 }
 

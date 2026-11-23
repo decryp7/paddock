@@ -6,11 +6,19 @@
 //! Pure: the caller supplies the graphs, the tracked files and the texts it needs (one bulk read, ER-20).
 
 pub mod attributes;
+pub mod content;
+pub mod extract;
 pub mod glob;
 pub mod inputs;
+pub mod narrow;
+pub mod nodes;
 
 use crate::Graph;
+#[cfg(feature = "content")]
+pub use content::detect;
+pub use content::{DetectOf, Detected};
 use inputs::{Inputs, Owner, Target};
+use narrow::Narrowing;
 use std::collections::{BTreeMap, BTreeSet};
 
 /// A changed file's text before and after the change (`None`: the file does not exist there).
@@ -62,7 +70,7 @@ impl Reach {
 }
 
 /// What the model knows about the repository's projects, supplied by the caller.
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Copy)]
 pub struct Facts<'a> {
     /// Cargo crates and their path dependencies.
     pub cargo: &'a Graph,
@@ -73,6 +81,27 @@ pub struct Facts<'a> {
     pub projects: &'a [(String, String)],
     /// Every tracked file (what a `.gitattributes` pattern can match).
     pub files: &'a [String],
+    /// Content detection (D14, the `content` feature): only an aid under doc owners and for the owner check's error; `None`
+    /// classes documentation assets by extension alone.
+    pub detect: Option<DetectOf<'a>>,
+    /// The node and edge model the extractors built (CI, scripts, tests); `None` at the project level alone. A changed file a
+    /// model node owns is reached through it; a node that `runs` a project (a job, a step) passes its kind to that project.
+    pub model: Option<&'a nodes::Model>,
+    /// Narrowed seeds: (changed file, node id, why). A file listed here seeds these nodes instead of its owner (a workflow edit
+    /// seeds the jobs whose text changed).
+    pub seeds: &'a [(String, String, String)],
+}
+
+impl std::fmt::Debug for Facts<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Facts")
+            .field("projects", &self.projects)
+            .field("files", &self.files.len())
+            .field("detect", &self.detect.is_some())
+            .field("model", &self.model.is_some())
+            .field("seeds", &self.seeds.len())
+            .finish()
+    }
 }
 
 /// How one project is reached.
@@ -101,6 +130,8 @@ pub struct Reached {
     pub unowned: Vec<String>,
     /// The plan must answer everything because a file is unowned (fail closed).
     pub everything: bool,
+    /// The detected kind of each unowned file the detector could read (D14), for the owner check's error.
+    pub unowned_kind: BTreeMap<String, Detected>,
 }
 
 impl Reached {
@@ -155,11 +186,44 @@ pub fn is_prose(path: &str) -> bool {
     name.starts_with("LICENSE") || [".md", ".txt"].iter().any(|e| name.ends_with(e))
 }
 
+/// Prose inside a project folder (review round 3, P1-A): only a file named `README*`, `CHANGELOG*` or `LICENSE*`, or a file under
+/// the project's own `docs/` folder. Every other file there, `*.txt` and other `*.md` included, is code: most `.txt` files in
+/// project folders are test data read by a folder path (`tests/recorded/*.txt`) or compiled in (`include_str!`).
+pub fn is_project_prose(project_dir: &str, path: &str) -> bool {
+    let name = path.rsplit('/').next().unwrap_or(path);
+    let in_docs = path
+        .strip_prefix(project_dir)
+        .and_then(|r| r.strip_prefix('/'))
+        .is_some_and(|r| r.starts_with("docs/"));
+    in_docs
+        || ["README", "CHANGELOG", "LICENSE"]
+            .iter()
+            .any(|p| name.starts_with(p))
+}
+
+/// The folder of a project id.
+fn dir_of<'a>(facts: &Facts<'a>, id: &str) -> Option<&'a str> {
+    facts
+        .projects
+        .iter()
+        .find(|(i, _)| i == id)
+        .map(|(_, d)| d.as_str())
+}
+
 /// Images that only documentation shows: prose-like under a doc owner, code inside a project folder (an icon is built).
 pub fn is_doc_asset(path: &str) -> bool {
     [".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"]
         .iter()
         .any(|e| path.ends_with(e))
+}
+
+/// Whether a file under a doc owner is a documentation asset: by its detected content when a detector is given (a binary file
+/// is, a text file is not, whatever its name; D14), else by its image extension.
+fn doc_asset(facts: &Facts, path: &str) -> bool {
+    match facts.detect.and_then(|d| d(path)) {
+        Some(k) => k == Detected::Binary,
+        None => is_doc_asset(path),
+    }
 }
 
 /// Every project a change reaches, how and which half (ADR 0117 §5, the project level). `text(path)` gives a changed file's
@@ -179,63 +243,124 @@ pub fn reach(changed: &[String], facts: &Facts, inputs: &Inputs, text: TextOf) -
         .iter()
         .filter_map(|(d, _)| project_of(facts, d))
         .collect();
+    let mut model_seeds: Vec<(String, String)> = Vec::new();
     for f in changed {
         let named = inputs.inputs_of(f);
-        if !named.is_empty() {
-            for i in named {
-                let why = format!("input {} ({f})", i.name);
-                if i.attributes {
-                    let (before, after) = text(f);
-                    for pattern in attributes::changed_patterns(before.as_deref(), after.as_deref())
-                    {
-                        for hit in facts.files.iter().filter(|t| glob::matches(&pattern, t)) {
-                            if let Some(p) = project_of(facts, hit) {
+        // A file a model node owns (a workflow, an action, a script) is reached through the model; outside every project folder
+        // and every input, that is all it is.
+        if let Some(m) = facts.model {
+            let narrowed: Vec<&(String, String, String)> = facts
+                .seeds
+                .iter()
+                .filter(|(file, _, _)| file == f)
+                .collect();
+            let owned = if narrowed.is_empty() {
+                m.owner_of(f)
+                    .map(|n| model_seeds.push((n.id.clone(), f.clone())))
+                    .is_some()
+            } else {
+                narrowed
+                    .iter()
+                    .for_each(|(_, id, why)| model_seeds.push((id.clone(), why.clone())));
+                true
+            };
+            if owned && named.is_empty() && project_of(facts, f).is_none() && !is_prose(f) {
+                continue;
+            }
+        }
+        let mut fail_closed: Vec<String> = Vec::new();
+        for i in &named {
+            let why = format!("input {} ({f})", i.name);
+            let mut targets_reached = true;
+            if let Some(name) = &i.extractor {
+                let (before, after) = text(f);
+                match narrow::content_extractor(name)
+                    .map(|x| x.narrow(before.as_deref(), after.as_deref()))
+                {
+                    Some(Ok(Narrowing::Patterns(patterns))) => {
+                        for pattern in patterns {
+                            for hit in facts.files.iter().filter(|t| glob::matches(&pattern, t)) {
+                                if let Some(p) = project_of(facts, hit) {
+                                    out.mark(
+                                        p,
+                                        i.reach,
+                                        true,
+                                        true,
+                                        format!("{why}: the attributes of {pattern} changed"),
+                                    );
+                                }
+                            }
+                        }
+                    }
+                    Some(Ok(Narrowing::Packages(spaces))) => {
+                        for ws in spaces {
+                            if let Some(p) = project_of(facts, &ws) {
                                 out.mark(
                                     p,
                                     i.reach,
+                                    false,
                                     true,
-                                    true,
-                                    format!("{why}: the attributes of {pattern} changed"),
+                                    format!("{why}: the packages of {ws} changed"),
                                 );
                             }
-                        }
-                    }
-                }
-                for t in &i.reaches {
-                    match t {
-                        Target::All => {
-                            for (id, _) in facts.projects {
-                                out.mark(id, i.reach, true, true, why.clone());
+                            if facts.npm.contains(&ws) {
+                                packages.insert(ws);
                             }
                         }
-                        Target::Cargo => cargo_projects
-                            .iter()
-                            .for_each(|p| out.mark(p, i.reach, true, false, why.clone())),
-                        Target::Npm => npm_projects
-                            .iter()
-                            .for_each(|p| out.mark(p, i.reach, false, true, why.clone())),
-                        Target::Apps => {
-                            for (id, _) in facts
-                                .projects
-                                .iter()
-                                .filter(|(id, _)| id.starts_with("app:"))
-                            {
-                                out.mark(id, i.reach, true, true, why.clone());
-                            }
-                        }
-                        Target::Project(p) => out.mark(p, i.reach, true, true, why.clone()),
-                        Target::Owner => match project_of(facts, f) {
-                            Some(p) => out.mark(p, i.reach, true, true, why.clone()),
-                            None => out.unowned.push(f.clone()),
-                        },
                     }
+                    Some(Ok(Narrowing::Changed(c))) => targets_reached = c,
+                    Some(Err(e)) => fail_closed.push(format!(
+                        "{why}: the {name} extractor could not read it ({e})"
+                    )),
+                    None => fail_closed.push(format!("{why}: no {name} extractor in this build")),
                 }
             }
+            if !targets_reached {
+                continue;
+            }
+            for t in &i.reaches {
+                match t {
+                    Target::All => {
+                        for (id, _) in facts.projects {
+                            out.mark(id, i.reach, true, true, why.clone());
+                        }
+                    }
+                    Target::Cargo => cargo_projects
+                        .iter()
+                        .for_each(|p| out.mark(p, i.reach, true, false, why.clone())),
+                    Target::Npm => npm_projects
+                        .iter()
+                        .for_each(|p| out.mark(p, i.reach, false, true, why.clone())),
+                    Target::Apps => {
+                        for (id, _) in facts
+                            .projects
+                            .iter()
+                            .filter(|(id, _)| id.starts_with("app:"))
+                        {
+                            out.mark(id, i.reach, true, true, why.clone());
+                        }
+                    }
+                    Target::Project(p) => out.mark(p, i.reach, true, true, why.clone()),
+                    Target::Owner => match project_of(facts, f) {
+                        Some(p) => out.mark(p, i.reach, true, true, why.clone()),
+                        None => out.unowned.push(f.clone()),
+                    },
+                }
+            }
+        }
+        // An extractor that cannot read its input puts every project on full (ADR 0117 §2, review round 2 P2-6).
+        for why in fail_closed {
+            for (id, _) in facts.projects {
+                out.mark(id, Reach::Code, true, true, why.clone());
+            }
+        }
+        if named.iter().any(|i| !i.adds) {
             continue;
         }
-        // A project folder comes before the owner rules (§2): its prose is docs for the project, everything else is code.
+        // A project folder comes before the owner rules (§2): its prose (README, CHANGELOG, LICENSE, its docs/) is docs for the
+        // project, everything else is code.
         if let Some(p) = project_of(facts, f) {
-            if is_prose(f) {
+            if dir_of(facts, p).is_some_and(|d| is_project_prose(d, f)) {
                 out.mark(p, Reach::Docs, false, false, f.clone());
                 continue;
             }
@@ -251,7 +376,7 @@ pub fn reach(changed: &[String], facts: &Facts, inputs: &Inputs, text: TextOf) -
         }
         match inputs.owner_of(f) {
             Some(Owner::None) => out.not_built.push(f.clone()),
-            Some(Owner::Doc) if is_prose(f) || is_doc_asset(f) => {
+            Some(Owner::Doc) if is_prose(f) || doc_asset(facts, f) => {
                 out.mark("docs", Reach::Docs, false, false, f.clone())
             }
             Some(Owner::Project(p)) => out.mark(p, Reach::Code, true, true, f.clone()),
@@ -259,11 +384,41 @@ pub fn reach(changed: &[String], facts: &Facts, inputs: &Inputs, text: TextOf) -
             Some(Owner::Doc) | None => out.unowned.push(f.clone()),
         }
     }
+    if let Some(m) = facts.model {
+        for (id, hit) in m.reach_from(&model_seeds) {
+            for p in m.targets(&id, nodes::EdgeKind::Runs) {
+                if facts.projects.iter().any(|(pid, _)| pid == p) || p == "c99" {
+                    out.mark(
+                        p,
+                        hit.reach,
+                        true,
+                        true,
+                        format!("{id} runs it ({})", hit.why.join("; ")),
+                    );
+                }
+            }
+        }
+    }
     if !out.unowned.is_empty() {
         out.everything = true;
+        if let Some(d) = facts.detect {
+            for f in &out.unowned {
+                if let Some(k) = d(f) {
+                    out.unowned_kind.insert(f.clone(), k);
+                }
+            }
+        }
+        let named: Vec<String> = out
+            .unowned
+            .iter()
+            .map(|f| match out.unowned_kind.get(f) {
+                Some(k) => format!("{f} ({})", k.name()),
+                None => f.clone(),
+            })
+            .collect();
         let why = format!(
             "unowned {}: the plan answers everything (fail closed; declare an owner or an input)",
-            out.unowned.join(", ")
+            named.join(", ")
         );
         for (id, _) in facts.projects {
             out.mark(id, Reach::Code, true, true, why.clone());
