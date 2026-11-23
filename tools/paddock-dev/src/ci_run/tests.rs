@@ -438,6 +438,63 @@ fn deny_outside_the_helper(commands: &[String]) -> Vec<String> {
         .collect()
 }
 
+/// What a step that runs the deny helper needs (ER-41): the run's real base, so an advisory blocks only a change to the dependencies
+/// (a release step is `--strict` and needs none), and a way to start `./dev` (a read token or a build from source).
+fn deny_step_needs(step_run: &str, step_env: &[(String, String)], job_env: &[(String, String)]) -> Vec<String> {
+    let has = |k: &str| step_env.iter().chain(job_env).find(|(n, _)| n == k).map(|(_, v)| v.as_str());
+    let mut missing = Vec::new();
+    if !step_run.contains("--strict") && !has("PADDOCK_BASE_REF").is_some_and(|v| v.contains("base")) {
+        missing.push("PADDOCK_BASE_REF from the run's base".to_string());
+    }
+    if has("PADDOCK_DEV_TOKEN").is_none() && has("PADDOCK_DEV_DOWNLOAD") != Some("\"0\"") {
+        missing.push("PADDOCK_DEV_TOKEN, or PADDOCK_DEV_DOWNLOAD \"0\" (a build from source)".to_string());
+    }
+    missing
+}
+
+/// Every deny step of the workflows gets the run's base and a way to start `./dev`; the app-gates action gets its base from its caller.
+#[test]
+fn every_deny_step_gets_the_runs_base_and_can_start_dev() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let mut seen = 0;
+    for entry in std::fs::read_dir(root.join(".gitea/workflows")).unwrap().flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if !name.ends_with(".yml") {
+            continue;
+        }
+        let rel = format!(".gitea/workflows/{name}");
+        let text = std::fs::read_to_string(entry.path()).unwrap().replace("\r\n", "\n");
+        let wf = crate::check::util::workflows::read(&rel, &text);
+        for job in &wf.jobs {
+            let job_env = crate::check::util::workflows::job_env(job);
+            for step in crate::check::util::workflows::parse_steps(&job.text) {
+                let run = step.run.as_deref().unwrap_or("");
+                if !(run.contains("audit deny") || run.contains("./dev ci run crates deny")) {
+                    continue;
+                }
+                seen += 1;
+                let missing = deny_step_needs(run, &step.env, &job_env);
+                assert!(missing.is_empty(), "{rel} job {} step {:?} lacks {missing:?}", job.id, step.name);
+            }
+        }
+    }
+    assert!(seen >= 7, "the workflows' deny steps are seen ({seen})");
+    // The action reads its base from the input, and its one caller passes the plan's.
+    let action = std::fs::read_to_string(root.join(".gitea/actions/app-gates/action.yml")).unwrap();
+    assert!(
+        action.contains("PADDOCK_BASE_REF: ${{ inputs.base }}"),
+        "app-gates passes its base input to the deny helper"
+    );
+    let ci = std::fs::read_to_string(root.join(".gitea/workflows/ci.yml")).unwrap();
+    assert!(
+        ci.contains("base: ${{ needs.plan.outputs.base }}"),
+        "ci.yml's app job passes the plan's base to app-gates"
+    );
+    // Positive control: a step with neither is found; a strict release step needs no base.
+    assert_eq!(deny_step_needs("./dev audit deny", &[], &[]).len(), 2);
+    assert!(deny_step_needs("./dev audit deny --strict", &[], &[("PADDOCK_DEV_DOWNLOAD".into(), "\"0\"".into())]).is_empty());
+}
+
 /// Every `cargo deny` the workflows, the shared actions and the contracts run goes through `./dev audit deny`, read from the CI model.
 #[test]
 fn every_cargo_deny_step_goes_through_the_one_helper() {
@@ -453,6 +510,27 @@ fn every_cargo_deny_step_goes_through_the_one_helper() {
         deny_outside_the_helper(&commands),
         Vec::<String>::new(),
         "run `./dev audit deny` instead (ER-41)"
+    );
+    // Every site is seen, none by a stand-in exception: the files the model reads must each hold a helper line.
+    let files: std::collections::BTreeSet<&str> = model
+        .lines
+        .iter()
+        .filter(|l| l.text.contains("audit deny"))
+        .map(|l| l.file.as_str())
+        .collect();
+    for f in [
+        ".gitea/actions/app-gates/action.yml",
+        ".gitea/workflows/ci.yml",
+        ".gitea/workflows/debrief.yml",
+        ".gitea/workflows/publish.yml",
+        ".gitea/workflows/shell-demo-release.yml",
+        ".gitea/workflows/workbench-demo-release.yml",
+    ] {
+        assert!(files.contains(f), "the model sees no `./dev audit deny` in {f}: {files:?}");
+    }
+    assert!(
+        commands.iter().any(|c| c == "../dev audit deny"),
+        "the crates contract's deny phase goes through the helper"
     );
     // Positive control: a step that starts cargo deny itself is found, the helper's is not.
     let bad = [

@@ -61,6 +61,10 @@ inputs:
   tests-only:
     description: "'true': a rerun of the failed tests of an earlier run (ci.yml's since_run input; `filter` names them): the Rust half runs only nextest, not fmt, clippy, doc tests or deny, which passed then. Empty or 'false': every gate."
     default: ""
+  base:
+    description: "The run's real base (the plan job's `base`: landing_base, else base, else the last complete commit). The deny step's advisories block only a change that touches this workspace's dependencies (ER-41); empty: every advisory blocks."
+    required: false
+    default: ""
   display:
     description: "'true' runs the tests on Linux under a virtual display and a session bus (xvfb-run, dbus-run-session): an app whose tests open a real (off-screen) browser window."
     default: "false"
@@ -124,6 +128,7 @@ runs:
         HOST_PACKAGES: ${{ inputs.host-packages }}
         HOST_FILTER: ${{ inputs.host-filter }}
         WINDOWS_CLIPPY: ${{ inputs.windows-clippy }}
+        PADDOCK_BASE_REF: ${{ inputs.base }}
       run: |
         set -uo pipefail
         status=0

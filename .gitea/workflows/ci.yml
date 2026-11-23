@@ -720,6 +720,10 @@ jobs:
 
       - name: Deny
         if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' }}
+        env:
+          # The run's real base (landing_base, else base, else the last complete commit: plan_ci::choose_base), so an advisory blocks
+          # only a change that touches this workspace's dependencies (ER-41). Empty on a full run: every advisory blocks.
+          PADDOCK_BASE_REF: ${{ needs.plan.outputs.base }}
         run: ${PADDOCK_WORKSPACE:-$GITHUB_WORKSPACE}/dev audit deny
 
       # The tool lints the wiki the way a person runs it (stale pages only warn).
@@ -824,6 +828,10 @@ jobs:
 
       - name: Deny
         if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' }}
+        env:
+          # The run's real base (landing_base, else base, else the last complete commit: plan_ci::choose_base), so an advisory blocks
+          # only a change that touches this workspace's dependencies (ER-41). Empty on a full run: every advisory blocks.
+          PADDOCK_BASE_REF: ${{ needs.plan.outputs.base }}
         run: ${PADDOCK_WORKSPACE:-$GITHUB_WORKSPACE}/dev audit deny
 
       - uses: ./.gitea/actions/sccache-stats
@@ -989,7 +997,10 @@ jobs:
         if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && runner.os == 'Linux' }}
         working-directory: crates
         run: bash ../conformance/ci/kit.sh host guardian-as-user
-      - run: ./dev ci run crates deny
+      - name: Deny (licences, bans, sources; advisories by the change)
+        env:
+          PADDOCK_BASE_REF: ${{ needs.plan.outputs.base }}
+        run: ./dev ci run crates deny
       - uses: ./.gitea/actions/sccache-stats
         if: always()
 
@@ -1493,6 +1504,7 @@ jobs:
           tests-only: ${{ matrix.tests_only }}
           graph-filter: ${{ matrix.graph_filter }}
           display: ${{ matrix.display }}
+          base: ${{ needs.plan.outputs.base }}
           e2e-checks: ${{ matrix.e2e_checks }}
           e2e-shard: ${{ matrix.e2e_shard }}
 
@@ -1655,6 +1667,10 @@ jobs:
       - name: Deny
         if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && runner.os == 'Linux' && !matrix.filter }}
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/paddock-dev
+        env:
+          # The run's real base (landing_base, else base, else the last complete commit: plan_ci::choose_base), so an advisory blocks
+          # only a change that touches this workspace's dependencies (ER-41). Empty on a full run: every advisory blocks.
+          PADDOCK_BASE_REF: ${{ needs.plan.outputs.base }}
         run: ${PADDOCK_WORKSPACE:-$GITHUB_WORKSPACE}/dev audit deny
 
       # The kept build folder stays within its cap (this job's own folder only, after the builds).

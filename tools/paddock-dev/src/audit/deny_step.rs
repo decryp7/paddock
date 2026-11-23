@@ -117,12 +117,14 @@ pub fn command(root: Option<PathBuf>, strict: bool, base: Option<String>, extra:
     let dir = std::env::current_dir().map_err(|e| CliError::failure(format!("The current folder cannot be read: {e}.")))?;
     let workspace = workspace_of(&root, &dir);
     let strict = strict || strict_from_env(&|k| std::env::var(k).ok());
+    // The run's real base, from the workflow (the plan's `base`). No base, or one that cannot be resolved, is an unknown base: every
+    // advisory blocks (ER-33), never a guess such as origin/main.
     let base = base
-        .or_else(|| std::env::var("PADDOCK_BASE_REF").ok().filter(|b| !b.is_empty()))
-        .unwrap_or_else(|| "origin/main".into());
-    let files = changed_files(&root, &base);
+        .or_else(|| std::env::var("PADDOCK_BASE_REF").ok())
+        .filter(|b| !b.trim().is_empty());
+    let files = base.as_deref().and_then(|b| changed_files(&root, b));
     let change = Change {
-        base: files.as_ref().map(|_| base.clone()),
+        base: files.as_ref().and(base),
         files: files.unwrap_or_default(),
         ranges: Vec::new(),
     };

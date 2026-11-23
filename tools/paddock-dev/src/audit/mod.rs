@@ -59,7 +59,7 @@ pub struct DenyArgs {
     /// A release: every advisory blocks (a tag ref or a scheduled event counts without it).
     #[arg(long)]
     pub strict: bool,
-    /// The ref the change is measured from (default: PADDOCK_BASE_REF, else origin/main).
+    /// The ref the change is measured from (default: PADDOCK_BASE_REF; none or unresolvable: every advisory blocks).
     #[arg(long)]
     pub base: Option<String>,
     /// Arguments for `cargo deny` before `check`.

@@ -77,6 +77,8 @@ jobs:
         working-directory: .
     outputs:
       run: ${{ steps.plan.outputs.run }}
+      # The run's base (./dev plan --ci): the deny step's advisories block only a change to the dependencies (ER-41). Empty: all block.
+      base: ${{ steps.plan.outputs.base }}
       # A rerun of a run's failures (the since_run input; tools/paddock-dev/src/plan_since.rs): the jobs that rerun (empty
       # otherwise; each job's `if` reads an empty list as its own name), the nextest filter of a rust tests job narrowed to its
       # failed tests, the failed vitest files of the frontend job, and the e2e shards (every shard unless a rerun names some).
@@ -583,6 +585,7 @@ jobs:
         env:
           PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
           PADDOCK_DEV_DOWNLOAD: ${{ startsWith(github.ref, 'refs/tags/') && '0' || '' }}
+          PADDOCK_BASE_REF: ${{ needs.plan.outputs.base }}
         run: ${PADDOCK_WORKSPACE:-$GITHUB_WORKSPACE}/dev audit deny -- --all-features --workspace
 
       - name: Third-party notices are up to date
