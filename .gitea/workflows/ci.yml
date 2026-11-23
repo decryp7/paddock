@@ -892,6 +892,12 @@ jobs:
       - name: Workspace hack up to date
         run: ./dev ci run crates hakari
 
+      # A dependency added to a shared crate must not change the workspace hack, the features of a watched crate (serde_json:
+      # docs/shared-crate-features.toml) or a lockfile without that change in the same commit. Report-only until its first green run
+      # on the real tree (ER-41): warnings, exit 0; the record is at `MODE` in tools/paddock-dev/src/locks_guard.rs.
+      - name: Shared-crate dependency guard
+        run: ./dev locks guard
+
       # Unused dependencies. A false report goes into `ignored` of [workspace.metadata.cargo-machete] (Cargo.toml) or of the
       # crate's own [package.metadata.cargo-machete], with the reason; the workspace-hack crate is depended on for features.
       - name: Unused dependencies
@@ -1248,6 +1254,9 @@ jobs:
               echo "::error::$lock is stale or the workspace does not resolve (a dependency cycle or a merge of two lockfiles). Next step: cargo update -w in $dir and commit it"; exit 1; }
           done
 
+
+      - name: Shared-crate dependency guard (workspace hack, watched features, lockfiles; report-only)
+        run: ./dev locks guard
 
       - name: Publish dry run (a dependency cycle only the merged tree has)
         run: node scripts/publish.mjs --offline

@@ -27,6 +27,8 @@
 //!   ([`ci_build_jobs`]).
 //! - `audit nightly|compare`: advisory audits of every lockfile, main's nightly and a change's new findings only ([`audit`], ER-41).
 //! - `locks check|sync`: every lockfile and the workspace hack current, and the command that regenerates them ([`locks`]).
+//! - `locks guard [--write]`: a dependency added to a shared crate changes neither the workspace hack, the features of a watched crate
+//!   nor a lockfile without that change in the same commit ([`locks_guard`], report-only).
 //! - `ci stable-workspace|node-caches|host-tools|sccache-stats|build-folder|prune-build-folder|prune-folder|prune-agent-builds|
 //!   host-cleanup`: the host-runner steps of the kit, the ports of the actions of the same names and of `build-folder.sh`, the prune
 //!   scripts and `host-cleanup.sh` ([`ci_host`], docs/plans/ci-in-rust.md WP-4). Every deletion goes through its guarded remove.
@@ -78,6 +80,7 @@ pub mod lessons_driver;
 pub mod load;
 pub mod local_sccache;
 pub mod locks;
+pub mod locks_guard;
 pub mod log_text;
 pub mod merge_check;
 pub mod nextest_log;

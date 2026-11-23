@@ -215,6 +215,14 @@ shared backend on 2026-10-28 and again on 2026-11-17 (CI keeps its per-slot cach
   runtime). After adding or changing a dependency: `cargo hakari generate && cargo hakari manage-deps`; CI runs
   `cargo hakari generate --diff`, `cargo hakari manage-deps --dry-run` and `cargo hakari verify`. The crate is never
   published: `scripts/publish.mjs` publishes with `cargo hakari publish`, which drops the dependency for the upload.
+- **A dependency added to a shared crate (`./dev locks guard`).** Twice (`toml`, then `oxc` and `syn` in `paddock-repo-graph`) a new
+  dependency of a shared crate changed the workspace hack and the features Cargo resolves for `serde_json` (oxc_resolver forces
+  `preserve_order`), so every app's `Cargo.lock` changed and Clippy broke in paddock-mcp under `--all-features`. `./dev locks guard`
+  fails (report-only for now: warnings, exit 0) when the workspace hack is not what cargo-hakari generates, when the features of a
+  watched crate differ from `docs/shared-crate-features.toml`, or when a `Cargo.lock` would change. The watch list is that file's
+  `watch` array; the pins are generated: `./dev locks guard --write` after `./dev locks sync`, and the diff of the file is reviewed
+  with the change. The push gate runs it as the `locks-guard` row when a manifest, a lockfile, `hakari.toml` or the pins file changed,
+  and CI runs it in the `crates` job and in the train gates.
 - **Unused dependencies (cargo-machete).** CI runs `cargo machete` on every crate. A false report (a dependency used only
   by a macro, or for its features) goes into `ignored` of `[workspace.metadata.cargo-machete]` in `crates/Cargo.toml`, or
   of the crate's own `[package.metadata.cargo-machete]`, with a comment saying why.

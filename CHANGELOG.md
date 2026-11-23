@@ -73,6 +73,16 @@ Conventional Commits; one semver tag for the whole repo.
   `e2eWorkers` of `@decryp7/paddock-e2e` takes the smaller of the variable and a config's own count (paddockConfig and Debrief's config);
   Vitest reads `VITEST_MAX_WORKERS` itself. Before, Vitest ran cores - 1 workers in every job (6 x 29 on d-gtr9's 30 cores).
 
+### `paddock-dev`: the shared-crate dependency guard, `./dev locks guard` (report-only, user decision 2026-11-23)
+- New `./dev locks guard [--write]`, an extension of `locks check`'s plan: it reports (a) a workspace hack that is not what
+  `cargo hakari generate` writes, (b) a change in the features Cargo resolves for a watched crate (the list and the pins are data in
+  `docs/shared-crate-features.toml`, starting with `serde_json`; `--write` regenerates them) and (c) a `Cargo.lock` that
+  `cargo metadata --locked` would change. Twice a dependency added to `crates/paddock-repo-graph` (`toml`, then `oxc` and `syn`) did all
+  three, and only a later CI run saw it. It is the push gate's `locks-guard` row (planned when a manifest, a lockfile, `hakari.toml` or
+  the pins file changed) and a step of CI's `crates` job and train gates. Report-only (warnings, exit 0) until its first green CI run
+  is recorded at `locks_guard::MODE` (ER-41). Its positive control is a fixture repository whose forcing dependency turns it red
+  (`tests/it/locks_guard.rs`, ER-33).
+
 ### `paddock-dev`, CI: sccache on RustFS is the default everywhere it is allowed, and the dev-tool cache key reads the real wrapper output (user decision 2026-11-21)
 - `setup-rust`'s `sccache-backend` and `./dev ci setup-rust --sccache-backend` default to `s3` (the local disk first, RustFS behind it);
   the Gitea variable that switched it is gone, ci.yml's `sccache_backend` dispatch input stays as a one-run override. No secret, an

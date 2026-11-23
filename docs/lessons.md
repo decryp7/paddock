@@ -3501,3 +3501,10 @@ about 45 ms a start on that runner plus a fork per command substitution. **Fix:*
   (`data-dock-progress`, first wait = what is left of the load budget), and the dock logs `ui.layout` "Plan ran" / "Planned". Whether the
   dock was slow, stuck or looping in those runs is NOT confirmed (ER-28): the next failure's log, with those lines and the wait's
   "stuck" / "keeps re-planning" message, settles it. Close this item then.
+
+## A dependency of a shared crate moved the workspace hack, serde_json's features and every lockfile, twice (2026-11-23)
+- `toml`, then `oxc` and `syn`, added to `crates/paddock-repo-graph`: `cargo hakari generate --diff` went non-empty, `oxc_resolver` forced
+  `serde_json/preserve_order`, every app's `Cargo.lock` changed and Clippy broke in paddock-mcp under `--all-features`. CI saw each one
+  after the push; the push gate had no hakari row (`NOT_RUN`) and no check of resolved features. Recurring class: a shared crate's
+  dependency graph is an input of every app, and nothing read it. `./dev locks guard` reads it (the hack, the pinned features of the
+  watched crates, the lockfiles) in the push gate and CI. Next: flip it to blocking after its first green CI run (`locks_guard::MODE`).
