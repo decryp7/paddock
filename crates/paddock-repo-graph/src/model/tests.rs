@@ -400,10 +400,47 @@ fn npm_lock_reaches_only_the_workspaces_whose_packages_changed() {
     // ui changed, and its npm dependents (dyno's app, the demo and its shell) follow on their UI half.
     assert_eq!(ids(&r), ["app:dyno", "app:shell-demo", "ui"]);
     assert!(r.nodes.values().all(|n| n.ui && !n.rust));
-    // Control: the same lock reaches nothing.
+    // Control: a lock that differs only in layout reaches nothing.
     let same = lock("1");
-    let unchanged = move |_: &str| (Some(same.clone()), Some(same.clone()));
+    let spaced = format!("{same}\n");
+    let unchanged = move |_: &str| (Some(same.clone()), Some(spaced.clone()));
     assert!(run(&w, &["package-lock.json"], &unchanged).nodes.is_empty());
+}
+
+#[test]
+fn a_content_extractor_fails_closed_when_before_equals_after() {
+    // Failing first (review P2, files mode): `--files` names a committed file, so both sides are the same text and the
+    // extractor saw no change; every input narrowed by content now answers everything instead of nothing.
+    let w = world();
+    for file in ["package-lock.json", ".gitattributes"] {
+        let t = "{\"packages\":{}}".to_string();
+        let same = move |_: &str| (Some(t.clone()), Some(t.clone()));
+        let r = run(&w, &[file], &same);
+        assert_eq!(r.nodes.len(), w.projects.len(), "{file}: {:?}", ids(&r));
+        assert!(
+            r.nodes
+                .values()
+                .any(|n| n.why.iter().any(|y| y.contains("same text"))),
+            "{file}: the reason names it"
+        );
+    }
+    // The guards extractor only asks whether its own targets (conformance) run: unchanged text reaches them and not every project.
+    let t = "#[test]\nfn a() {}\n".to_string();
+    let same_rs = move |_: &str| (Some(t.clone()), Some(t.clone()));
+    let r = run(&w, &["crates/a/src/lib.rs"], &same_rs);
+    assert!(
+        r.nodes.len() < w.projects.len() && r.nodes.contains_key("conformance"),
+        "{:?}",
+        ids(&r)
+    );
+    // Control: the same file with a content change narrows as before.
+    let moved = |_: &str| {
+        (
+            Some("*.sh -text\n".to_string()),
+            Some("*.sh text\n".to_string()),
+        )
+    };
+    assert!(run(&w, &[".gitattributes"], &moved).nodes.len() < w.projects.len());
 }
 
 #[test]

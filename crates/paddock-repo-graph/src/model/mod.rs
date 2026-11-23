@@ -280,9 +280,15 @@ pub fn reach(changed: &[String], facts: &Facts, inputs: &Inputs, text: TextOf) -
             let mut targets_reached = true;
             if let Some(name) = &i.extractor {
                 let (before, after) = text(f);
-                match narrow::content_extractor(name)
-                    .map(|x| x.narrow(before.as_deref(), after.as_deref()))
-                {
+                // The same text on both sides (files mode names a committed file, or only the mode changed): nothing can be
+                // narrowed, so the extractor says what that reaches, by default a fail closed like a workflow's (review P2).
+                let extractor = narrow::content_extractor(name);
+                let narrowed = match &extractor {
+                    Some(x) if before.is_some() && before == after => Some(x.unchanged()),
+                    Some(x) => Some(x.narrow(before.as_deref(), after.as_deref())),
+                    None => None,
+                };
+                match narrowed {
                     Some(Ok(Narrowing::Patterns(patterns))) => {
                         for pattern in patterns {
                             for hit in facts.files.iter().filter(|t| glob::matches(&pattern, t)) {

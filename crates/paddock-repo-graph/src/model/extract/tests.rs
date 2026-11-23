@@ -237,3 +237,64 @@ fn cargo_emits_test_targets_their_root_files_and_helpers_with_tests_edges() {
             .is_none()
     );
 }
+
+#[test]
+fn a_failed_read_is_an_extract_error_and_an_absent_file_is_not() {
+    // Failing first (P1-5): a failed read was turned into "absent" and the adapter skipped the file.
+    let m = MemoryRead::new()
+        .with("crates/Cargo.toml", "[workspace]\n")
+        .failing("ui/package.json", "I/O error");
+    let t = texts_of(
+        "x",
+        &m,
+        &["crates/Cargo.toml".to_string(), "no/such".to_string()],
+    )
+    .unwrap();
+    assert_eq!(
+        t.keys().collect::<Vec<_>>(),
+        ["crates/Cargo.toml"],
+        "absent is left out, no error"
+    );
+    let e = texts_of("x", &m, &["ui/package.json".to_string()]).unwrap_err();
+    assert_eq!(
+        (e.extractor, e.file.as_str(), e.reason.as_str()),
+        ("x", "ui/package.json", "I/O error")
+    );
+    // The adapters report it (control: the same file readable gives no error).
+    let b = built(&m);
+    assert!(
+        b.errors.iter().any(|e| e.extractor == "npm"
+            && e.file == "ui/package.json"
+            && e.reason == "I/O error"),
+        "{:?}",
+        b.errors
+    );
+    assert!(
+        built(&MemoryRead::new().with("ui/package.json", r#"{"name":"@d/ui"}"#))
+            .errors
+            .is_empty()
+    );
+}
+
+#[test]
+fn the_cargo_adapter_counts_its_metadata_calls_and_stays_within_its_budget() {
+    // extract.rs's `Counting` was written and never read; the count is now asserted against the declared budget.
+    let m = repo(true, false);
+    let cargo = CargoExtractor::new(&FakeCargo, "/r");
+    let files = m.paths();
+    let mine: Vec<String> = files
+        .iter()
+        .filter(|f| cargo.claims().iter().any(|c| f.ends_with(c)))
+        .cloned()
+        .collect();
+    cargo.extract(&mine, &m).unwrap();
+    assert_eq!(
+        cargo.metadata_calls(),
+        1,
+        "one workspace root is asked, not its members"
+    );
+    assert!(cargo.metadata_calls() <= cargo.spawn_budget(&mine));
+    // Control: a repository with no workspace asks nothing, so the counter is reset per run, not accumulated.
+    cargo.extract(&[], &MemoryRead::new()).unwrap();
+    assert_eq!(cargo.metadata_calls(), 0);
+}

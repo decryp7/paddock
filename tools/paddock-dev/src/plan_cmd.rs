@@ -188,7 +188,8 @@ pub fn command(args: &[String], root: Option<PathBuf>) -> Result<Report, CliErro
     if compare {
         // The migration net (ADR 0117 §8): the model's answer beside the rule tables', which still decide the plan.
         let (_, reached) = crate::repo_model::reach_for(&root, &history, &req, &graph).map_err(fail)?;
-        let v = crate::repo_model::compare(&plan, &reached, &graph);
+        let inputs = crate::repo_inputs::load(&root).map_err(fail)?;
+        let v = crate::repo_model::compare(&plan, &reached, &graph, &inputs);
         return Ok(Report::new(v.clone(), serde_json::to_string_pretty(&v).unwrap_or_default()));
     }
     Ok(Report::new(plan.clone(), plan.to_string()))

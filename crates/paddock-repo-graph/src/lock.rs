@@ -10,10 +10,14 @@ fn packages(text: Option<&str>) -> Result<Map<String, Value>, GraphError> {
         path: "package-lock.json".into(),
         reason: e.to_string(),
     })?;
-    Ok(v.get("packages")
+    // A lock with no `packages` object is not a v2/v3 lock: nothing can be compared, so it is an error (fail closed).
+    v.get("packages")
         .and_then(Value::as_object)
         .cloned()
-        .unwrap_or_default())
+        .ok_or_else(|| GraphError::Parse {
+            path: "package-lock.json".into(),
+            reason: "no `packages` object (lockfile v2 or v3 expected)".into(),
+        })
 }
 
 /// What a workspace resolves to: every reachable package with its version and integrity, found the way node looks packages up
@@ -150,9 +154,23 @@ mod tests {
         let weird = r#"{"packages":{"w":{"version":1}}}"#;
         assert!(lock_diff(Some(weird), Some(weird)).unwrap().is_empty());
         assert!(
-            lock_diff(Some(r#"{"x":1}"#), Some(r#"{"packages":{"w":{}}}"#))
+            lock_diff(None, Some(r#"{"packages":{"w":{}}}"#))
                 .unwrap()
                 .contains(&"w".to_string())
+        );
+    }
+
+    #[test]
+    fn a_lock_without_packages_is_an_error_not_an_empty_lock() {
+        // Failing first (P2): a text with no `packages` object compared equal to an empty lock and narrowed everything away.
+        let e = lock_diff(Some(r#"{"x":1}"#), Some(r#"{"packages":{"w":{}}}"#)).unwrap_err();
+        assert!(e.to_string().contains("packages"), "{e}");
+        assert!(lock_diff(Some(r#"{"packages":{"w":{}}}"#), Some("{}")).is_err());
+        // Control: a lock with an empty `packages` object is fine.
+        assert!(
+            lock_diff(Some(r#"{"packages":{}}"#), Some(r#"{"packages":{}}"#))
+                .unwrap()
+                .is_empty()
         );
     }
 

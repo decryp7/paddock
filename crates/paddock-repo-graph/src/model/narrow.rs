@@ -27,6 +27,12 @@ pub trait ContentExtractor {
     /// What the change from `before` to `after` reaches (`None`: the file does not exist there). `Err` puts the input's targets
     /// and every project on full.
     fn narrow(&self, before: Option<&str>, after: Option<&str>) -> Result<Narrowing, String>;
+    /// What a file whose text is the same before and after reaches (files mode names a committed file, or only its mode
+    /// changed): nothing can be narrowed, so by default it fails closed. An extractor whose answer is only "do my own targets run"
+    /// says yes.
+    fn unchanged(&self) -> Result<Narrowing, String> {
+        Err("the same text before and after the change".to_string())
+    }
 }
 
 /// The names the registry knows (the accessor refuses others).
@@ -79,6 +85,10 @@ impl ContentExtractor for Guards {
 
     fn narrow(&self, before: Option<&str>, after: Option<&str>) -> Result<Narrowing, String> {
         Ok(Narrowing::Changed(guards_changed(before, after)))
+    }
+
+    fn unchanged(&self) -> Result<Narrowing, String> {
+        Ok(Narrowing::Changed(true))
     }
 }
 

@@ -4,7 +4,7 @@
 #![allow(dead_code)]
 
 use super::Reach;
-use super::inputs::{Input, Inputs, Owner, OwnerRule, Prose, Target};
+use super::inputs::{Input, Inputs, Owner, OwnerRule, Paths, Prose, Target};
 
 /// The default named inputs: (name, files, reaches, content extractor); every reach is `code`. A reach word as the inputs file
 /// spells it.
@@ -524,5 +524,7 @@ pub fn inputs() -> Inputs {
                 .map(String::from)
                 .to_vec(),
         },
+        projects: Vec::new(),
+        paths: Paths::default(),
     }
 }

@@ -15,6 +15,10 @@ fn graph() -> RepoGraph {
     }
 }
 
+fn declared_inputs() -> Inputs {
+    crate::repo_inputs::load(&repo_root()).unwrap()
+}
+
 fn hit(reach: Reach, rust: bool, ui: bool) -> NodeReach {
     NodeReach {
         reach,
@@ -35,7 +39,7 @@ fn the_same_answer_is_same() {
     let mut r = Reached::default();
     r.nodes.insert("crates".into(), hit(Reach::Code, true, true));
     r.nodes.insert("app:dyno".into(), hit(Reach::Code, true, false));
-    let c = compare(&plan(), &r, &graph());
+    let c = compare(&plan(), &r, &graph(), &declared_inputs());
     assert_eq!(c["same"], true, "{c}");
 }
 
@@ -44,7 +48,7 @@ fn compare_reports_a_rule_the_model_lacks_and_names_what_it_drops() {
     // Positive control (§8 "--compare"): take the app's edge out of the model's answer; --compare names the difference and the drop.
     let mut r = Reached::default();
     r.nodes.insert("crates".into(), hit(Reach::Code, true, true));
-    let c = compare(&plan(), &r, &graph());
+    let c = compare(&plan(), &r, &graph(), &declared_inputs());
     assert_eq!(c["same"], false);
     assert_eq!(c["dropped"], json!(["app:dyno"]));
     assert_eq!(c["differences"][0]["project"], "app:dyno");
@@ -57,13 +61,13 @@ fn a_docs_reach_runs_nothing_and_a_half_is_a_narrowing() {
     let mut r = Reached::default();
     r.nodes.insert("crates".into(), hit(Reach::Code, true, true));
     r.nodes.insert("app:dyno".into(), hit(Reach::Docs, false, false));
-    assert_eq!(compare(&plan(), &r, &graph())["dropped"], json!(["app:dyno"]));
+    assert_eq!(compare(&plan(), &r, &graph(), &declared_inputs())["dropped"], json!(["app:dyno"]));
     let mut p = plan();
     p["kinds"]["dyno"] = json!(["all"]);
     let mut r2 = Reached::default();
     r2.nodes.insert("crates".into(), hit(Reach::Code, true, true));
     r2.nodes.insert("app:dyno".into(), hit(Reach::Code, false, true));
-    let c = compare(&p, &r2, &graph());
+    let c = compare(&p, &r2, &graph(), &declared_inputs());
     assert_eq!(c["dropped"], json!(["app:dyno"]), "{c}");
 }
 
@@ -82,7 +86,7 @@ fn the_bulk_reader_starts_at_most_one_git_for_many_files_and_the_control_counts_
         .collect();
     let one = GitBulk::through_git(&root, Some("HEAD"));
     let texts = one.read_all(&files);
-    assert!(texts.iter().filter(|t| t.is_some()).count() >= 4, "the files are read");
+    assert!(texts.iter().filter(|t| matches!(t, Ok(Some(_)))).count() >= 4, "the files are read");
     assert_eq!(one.starts(), 1, "one process for every read");
     let per_file: usize = files
         .iter()
@@ -122,9 +126,10 @@ mod declared {
         let mut npm = Graph::new();
         npm.insert("ui", node("ui", "", &[]));
         npm.insert("apps/dyno/app", node("dyno-app", "", &["ui"]));
-        let projects: Vec<(String, String)> = ROOT_PROJECTS
+        let projects: Vec<(String, String)> = inputs
+            .projects
             .iter()
-            .map(|(a, b)| (a.to_string(), b.to_string()))
+            .map(|p| (p.id.clone(), p.folder.clone()))
             .chain([("app:dyno".to_string(), "apps/dyno".to_string())])
             .collect();
         let files: Vec<String> = ["apps/dyno/scripts/run.ps1", "crates/paddock-proc/src/lib.rs"]
@@ -184,7 +189,7 @@ mod declared {
         let readme = format!("crates/paddock-proc/{}", "README.md");
         assert_eq!(run(&[readme.as_str()], &i, &none).nodes["crates"].reach, Reach::Docs);
         // The true globals reach every project.
-        assert!(run(&["rust-toolchain.toml"], &i, &none).nodes.len() >= ROOT_PROJECTS.len());
+        assert!(run(&["rust-toolchain.toml"], &i, &none).nodes.len() >= i.projects.len());
         assert!(
             !run(&["ui/package.json"], &i, &none).nodes.contains_key("tools"),
             "a leading slash anchors package.json at the root"
@@ -223,5 +228,228 @@ mod declared {
             without.inputs.retain(|i| i.name != name);
             assert!(!by(&run(&[file], &without, &none)), "{name}: the control still reaches {reader}");
         }
+    }
+}
+
+/// The model's adapter code in paddock-dev: its non-test sources (ADR 0117 §14).
+const GUARDED: [&str; 4] = ["repo_model.rs", "repo_model/ci.rs", "repo_model/code.rs", "repo_inputs.rs"];
+
+/// Tokens the adapters read because a format names them, not because of this repository: the extensions of the languages and
+/// configuration files they parse.
+const FORMAT_TOKENS: [&str; 24] = [
+    ".sh",
+    ".mjs",
+    ".cjs",
+    ".js",
+    ".ps1",
+    ".py",
+    ".ts",
+    ".mts",
+    ".md",
+    ".yml",
+    ".yaml",
+    ".spec.ts",
+    ".test.ts",
+    ".spec.mjs",
+    ".test.mjs",
+    "*.rs",
+    "/node_modules/",
+    "/action.yml",
+    "/action.yaml",
+    "$GITHUB_WORKSPACE/",
+    ".files",
+    ".reaches",
+    ".except",
+    ".paths",
+];
+
+fn guarded_sources() -> Vec<(String, String)> {
+    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    GUARDED
+        .iter()
+        .map(|f| (f.to_string(), std::fs::read_to_string(src.join(f)).unwrap()))
+        .collect()
+}
+
+fn model_findings(files: &[(String, String)]) -> Vec<String> {
+    let mut allowed: Vec<(&str, &str)> = files
+        .iter()
+        .flat_map(|(n, _)| FORMAT_TOKENS.iter().map(move |t| (n.as_str(), *t)))
+        .collect();
+    // The accessor is the one place that names the inputs file (ER-42); the file's path is its constant.
+    allowed.push(("repo_inputs.rs", "docs/repo-graph.toml"));
+    paddock_repo_graph::model::guard::findings(files, &allowed)
+}
+
+#[test]
+fn the_paddock_dev_model_modules_hold_no_path_literal() {
+    let files = guarded_sources();
+    let found = model_findings(&files);
+    assert!(
+        found.is_empty(),
+        "path facts belong in docs/repo-graph.toml (read through repo_inputs): {found:#?}"
+    );
+}
+
+#[test]
+fn the_bulk_reader_keeps_absent_and_failed_apart() {
+    // Failing first (P1-5): `.ok().flatten()` turned every read error into "absent".
+    let d = tempfile::tempdir().unwrap();
+    std::fs::write(d.path().join("ok.txt"), "text").unwrap();
+    std::fs::write(d.path().join("bin.dat"), [0xff, 0xfe, 0x00]).unwrap();
+    std::fs::create_dir(d.path().join("folder")).unwrap();
+    let r = GitBulk::new(d.path(), None);
+    let got = r.read_all(&["ok.txt", "missing.txt", "bin.dat", "folder"].map(String::from));
+    assert_eq!(got[0], Ok(Some("text".to_string())));
+    assert_eq!(got[1], Ok(None), "a file that is not there is absent, not an error");
+    assert!(got[2].as_ref().unwrap_err().contains("not UTF-8"), "{:?}", got[2]);
+    assert!(got[3].is_err(), "a folder cannot be read as text: {:?}", got[3]);
+    // A revision git does not know is an error for every path, never absent.
+    let root = repo_root();
+    let rev = GitBulk::through_git(&root, Some("no-such-revision-0000"));
+    let got = rev.read_all(&["Cargo.toml".to_string(), "dev".to_string()]);
+    assert!(got.iter().all(Result::is_err), "{got:?}");
+    // Control: a real revision reads, and a missing path in it is absent.
+    let head = GitBulk::through_git(&root, Some("HEAD"));
+    let got = head.read_all(&["tools/paddock-dev/Cargo.toml".to_string(), "no/such/file.txt".to_string()]);
+    assert!(matches!(got[0], Ok(Some(_))) && got[1] == Ok(None), "{got:?}");
+}
+
+/// A throw-away repository with `docs/repo-graph.toml`, a workflow, and `n` source files changed by its second commit.
+fn two_commits(n: usize) -> (tempfile::TempDir, String, String) {
+    let d = tempfile::tempdir().unwrap();
+    let git_in = |args: &[&str]| {
+        let mut c = crate::git_env::git();
+        c.arg("-C")
+            .arg(d.path())
+            .args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"])
+            .args(args);
+        let out = c.output().unwrap();
+        assert!(out.status.success(), "{args:?}: {}", String::from_utf8_lossy(&out.stderr));
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    };
+    git_in(&["init", "-q"]);
+    std::fs::create_dir_all(d.path().join("docs")).unwrap();
+    std::fs::create_dir_all(d.path().join(".gitea/workflows")).unwrap();
+    std::fs::create_dir_all(d.path().join("tools/src")).unwrap();
+    std::fs::copy(repo_root().join("docs/repo-graph.toml"), d.path().join("docs/repo-graph.toml")).unwrap();
+    std::fs::write(
+        d.path().join(".gitea/workflows/ci.yml"),
+        "name: ci\non: [push]\njobs:\n  a:\n    steps:\n      - run: echo 1\n",
+    )
+    .unwrap();
+    for i in 0..n {
+        std::fs::write(d.path().join(format!("tools/src/f{i}.txt")), "one").unwrap();
+    }
+    git_in(&["add", "-A"]);
+    git_in(&["commit", "-q", "-m", "one"]);
+    let base = git_in(&["rev-parse", "HEAD"]);
+    for i in 0..n {
+        std::fs::write(d.path().join(format!("tools/src/f{i}.txt")), "two").unwrap();
+    }
+    git_in(&["add", "-A"]);
+    git_in(&["commit", "-q", "-m", "two"]);
+    let head = git_in(&["rev-parse", "HEAD"]);
+    (d, base, head)
+}
+
+fn request(base: &str, head: &str) -> Request {
+    Request {
+        files: Vec::new(),
+        all: false,
+        explain: false,
+        root: None,
+        base: Some(base.into()),
+        head: head.into(),
+    }
+}
+
+#[test]
+fn reach_for_starts_one_reader_and_one_grep_whatever_the_number_of_changed_files() {
+    // Failing first (P2 spawn budget): reach_for opened two readers (the working-tree one and the head one) and asked per item.
+    // The whole process count is pinned: one `git cat-file` reader for every read (the tracked files, the inputs file, both sides
+    // of every changed file, every adapter text) and the code adapter's one `git grep`; it does not grow with the change.
+    for n in [3, 40] {
+        let (d, base, head) = two_commits(n);
+        let history = paddock_repo_graph::GitHistory::new(d.path(), std::time::Duration::from_secs(60));
+        let bulk = GitBulk::through_git(d.path(), Some(&head));
+        let (changed, _, spawns) = reach_with(d.path(), &history, &request(&base, &head), &RepoGraph::default(), &bulk).unwrap();
+        assert_eq!(changed.len(), n);
+        assert_eq!(spawns, Spawns { reader: 1, adapters: 1 }, "{n} changed files");
+    }
+}
+
+#[test]
+fn reach_for_reads_the_requested_revision_not_the_checkout() {
+    // Failing first (P2 mixed revisions): the tracked files, git grep and the inputs file came from the working tree. A replay of
+    // old commits must answer the same whatever the checkout holds: the working tree here lost the inputs file and gained files.
+    let (d, base, head) = two_commits(3);
+    let history = paddock_repo_graph::GitHistory::new(d.path(), std::time::Duration::from_secs(60));
+    let run = || {
+        let bulk = GitBulk::new(d.path(), Some(&head));
+        let (_, r, _) = reach_with(d.path(), &history, &request(&base, &head), &RepoGraph::default(), &bulk).unwrap();
+        format!("{:?}", r.nodes)
+    };
+    let clean = run();
+    std::fs::remove_file(d.path().join("docs/repo-graph.toml")).unwrap();
+    std::fs::write(d.path().join("tools/src/f0.txt"), "dirty").unwrap();
+    std::fs::write(d.path().join("untracked.rs"), "include_str!(\"x\")").unwrap();
+    assert_eq!(run(), clean, "the answer does not depend on the checkout");
+    // Control: a revision without the inputs file is an error, not an empty set of declarations.
+    let e = reach_with(
+        d.path(),
+        &history,
+        &request(&base, &head),
+        &RepoGraph::default(),
+        &GitBulk::new(d.path(), Some(&base)),
+    );
+    assert!(e.is_ok(), "the base revision has the file too");
+    let (_, no_file_head) = {
+        let git_in = |args: &[&str]| {
+            let mut c = crate::git_env::git();
+            c.arg("-C")
+                .arg(d.path())
+                .args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"])
+                .args(args);
+            let o = c.output().unwrap();
+            assert!(o.status.success());
+            String::from_utf8_lossy(&o.stdout).trim().to_string()
+        };
+        git_in(&["rm", "-q", "docs/repo-graph.toml"]);
+        git_in(&["commit", "-q", "-m", "drop"]);
+        ((), git_in(&["rev-parse", "HEAD"]))
+    };
+    let err = reach_with(
+        d.path(),
+        &history,
+        &request(&head, &no_file_head),
+        &RepoGraph::default(),
+        &GitBulk::new(d.path(), Some(&no_file_head)),
+    )
+    .unwrap_err();
+    assert!(err.contains("repo-graph.toml"), "{err}");
+}
+
+#[test]
+fn the_guard_sees_a_path_fact_put_back_into_each_paddock_dev_module() {
+    // Positive control (ER-33): a path literal put back at the end of each guarded file, after its test module declaration, is found;
+    // and a literal in a `#[cfg(test)]` block is not.
+    let files = guarded_sources();
+    assert!(model_findings(&files).is_empty());
+    for i in 0..files.len() {
+        let mut changed = files.clone();
+        changed[i].1.push_str("\nfn late() -> &'static str { \"conformance/ci/\" }\n");
+        let last = changed[i].1.lines().count();
+        let found = model_findings(&changed);
+        assert!(
+            found.iter().any(|f| f.starts_with(&format!("{}:{last}:", changed[i].0))),
+            "{}: {found:?}",
+            changed[i].0
+        );
+        let mut test_only = files.clone();
+        test_only[i]
+            .1
+            .push_str("\n#[cfg(test)]\nmod late {\n    const X: &str = \"conformance/ci/\";\n}\n");
+        assert!(model_findings(&test_only).is_empty());
     }
 }

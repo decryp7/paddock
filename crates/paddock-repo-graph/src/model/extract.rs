@@ -10,16 +10,46 @@ use crate::{CargoMetadata, FileSource, GraphError, cargo_graph, npm_graph};
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
 
-/// The one bulk reader of file texts: many paths in one call, an answer per path (`None`: not there or not text).
+/// One read: the text, `None` when the file is not there, or why it could not be read (an I/O error, not UTF-8). Absent and
+/// failed stay apart: an absent file is a fact, a failed read is an [`ExtractError`] (ADR 0117 §2, fail closed).
+pub type Read = Result<Option<String>, String>;
+
+/// The one bulk reader of file texts: many paths in one call, an answer per path.
 pub trait BulkRead {
-    /// The texts of `paths`, in order.
-    fn read_all(&self, paths: &[String]) -> Vec<Option<String>>;
+    /// The reads of `paths`, in order.
+    fn read_all(&self, paths: &[String]) -> Vec<Read>;
+}
+
+/// The texts of `paths` in one bulk call, absent files left out; the first failed read is the adapter's [`ExtractError`].
+pub fn texts_of(
+    extractor: &'static str,
+    read: &dyn BulkRead,
+    paths: &[String],
+) -> Result<BTreeMap<String, String>, ExtractError> {
+    let mut out = BTreeMap::new();
+    for (p, r) in paths.iter().zip(read.read_all(paths)) {
+        match r {
+            Ok(Some(t)) => {
+                out.insert(p.clone(), t);
+            }
+            Ok(None) => {}
+            Err(reason) => {
+                return Err(ExtractError {
+                    extractor,
+                    file: p.clone(),
+                    reason,
+                });
+            }
+        }
+    }
+    Ok(out)
 }
 
 /// Files in memory, counting the bulk calls (tests, and callers that hold the texts).
 #[derive(Debug, Default)]
 pub struct MemoryRead {
     files: BTreeMap<String, String>,
+    failing: BTreeMap<String, String>,
     calls: Cell<usize>,
 }
 
@@ -35,9 +65,19 @@ impl MemoryRead {
         self
     }
 
+    /// A file whose read fails with `reason` (it is still listed by [`MemoryRead::paths`]).
+    pub fn failing(mut self, path: &str, reason: &str) -> MemoryRead {
+        self.failing.insert(path.to_string(), reason.to_string());
+        self
+    }
+
     /// Every path (what `git ls-files` would list).
     pub fn paths(&self) -> Vec<String> {
-        self.files.keys().cloned().collect()
+        self.files
+            .keys()
+            .chain(self.failing.keys())
+            .cloned()
+            .collect()
     }
 
     /// How many bulk calls were made.
@@ -47,9 +87,15 @@ impl MemoryRead {
 }
 
 impl BulkRead for MemoryRead {
-    fn read_all(&self, paths: &[String]) -> Vec<Option<String>> {
+    fn read_all(&self, paths: &[String]) -> Vec<Read> {
         self.calls.set(self.calls.get() + 1);
-        paths.iter().map(|p| self.files.get(p).cloned()).collect()
+        paths
+            .iter()
+            .map(|p| match self.failing.get(p) {
+                Some(why) => Err(why.clone()),
+                None => Ok(self.files.get(p).cloned()),
+            })
+            .collect()
     }
 }
 
@@ -57,15 +103,12 @@ impl BulkRead for MemoryRead {
 struct Prefetched(BTreeMap<String, String>);
 
 impl Prefetched {
-    fn of(read: &dyn BulkRead, paths: Vec<String>) -> Prefetched {
-        let texts = read.read_all(&paths);
-        Prefetched(
-            paths
-                .into_iter()
-                .zip(texts)
-                .filter_map(|(p, t)| t.map(|t| (p, t)))
-                .collect(),
-        )
+    fn of(
+        extractor: &'static str,
+        read: &dyn BulkRead,
+        paths: &[String],
+    ) -> Result<Prefetched, ExtractError> {
+        texts_of(extractor, read, paths).map(Prefetched)
     }
 }
 
@@ -170,6 +213,7 @@ pub fn extractors<'a>(ports: &Ports<'a>) -> Vec<Box<dyn Extractor + 'a>> {
         v.push(Box::new(CargoExtractor {
             metadata: cargo,
             root: ports.root.to_string(),
+            calls: Cell::new(0),
         }));
     }
     v.push(Box::new(NpmExtractor));
@@ -191,6 +235,7 @@ pub fn npm_id(dir: &str) -> String {
 pub struct CargoExtractor<'a> {
     metadata: &'a dyn CargoMetadata,
     root: String,
+    calls: Cell<usize>,
 }
 
 impl<'a> CargoExtractor<'a> {
@@ -199,7 +244,13 @@ impl<'a> CargoExtractor<'a> {
         CargoExtractor {
             metadata,
             root: root.to_string(),
+            calls: Cell::new(0),
         }
+    }
+
+    /// How many `cargo metadata` calls the last extraction made (the spawn-budget tests assert it).
+    pub fn metadata_calls(&self) -> usize {
+        self.calls.get()
     }
 }
 
@@ -228,8 +279,9 @@ impl Extractor for CargoExtractor<'_> {
             .filter(|f| f.ends_with("Cargo.toml"))
             .cloned()
             .collect();
-        let src = Prefetched::of(read, manifests.clone());
-        let calls = Cell::new(0);
+        let src = Prefetched::of("cargo", read, &manifests)?;
+        let calls = &self.calls;
+        calls.set(0);
         let recording = crate::Recording::new(self.metadata);
         let err = |e: GraphError| ExtractError {
             extractor: "cargo",
@@ -240,8 +292,20 @@ impl Extractor for CargoExtractor<'_> {
             },
             reason: e.to_string(),
         };
-        let g = cargo_graph(&manifests, &src, &Counting(&recording, &calls), &self.root)
-            .map_err(err)?;
+        let g =
+            cargo_graph(&manifests, &src, &Counting(&recording, calls), &self.root).map_err(err)?;
+        // The declared budget is a bound, not a hope: more calls than manifests fails closed.
+        if calls.get() > self.spawn_budget(files) {
+            return Err(ExtractError {
+                extractor: "cargo",
+                file: "Cargo.toml".to_string(),
+                reason: format!(
+                    "{} cargo metadata calls, budget {}",
+                    calls.get(),
+                    self.spawn_budget(files)
+                ),
+            });
+        }
         let mut x = from_graph(&g, crate_id, |_| EdgeKind::Depends);
         let mut targets = Vec::new();
         for json in recording.texts.borrow().values() {
@@ -332,7 +396,7 @@ impl Extractor for NpmExtractor {
             })
             .cloned()
             .collect();
-        let src = Prefetched::of(read, wanted.clone());
+        let src = Prefetched::of("npm", read, &wanted)?;
         let err = |e: GraphError| ExtractError {
             extractor: "npm",
             file: match &e {
@@ -394,7 +458,7 @@ impl<'a> Recording<'a> {
 }
 
 impl BulkRead for Recording<'_> {
-    fn read_all(&self, paths: &[String]) -> Vec<Option<String>> {
+    fn read_all(&self, paths: &[String]) -> Vec<Read> {
         self.calls.borrow_mut().push(paths.to_vec());
         self.inner.read_all(paths)
     }
