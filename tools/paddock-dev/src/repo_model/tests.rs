@@ -18,6 +18,7 @@ fn graph() -> RepoGraph {
 fn hit(reach: Reach, rust: bool, ui: bool) -> NodeReach {
     NodeReach {
         reach,
+        kinds: [reach].into_iter().collect(),
         rust,
         ui,
         why: vec!["model reason".into()],
@@ -35,7 +36,7 @@ fn the_same_answer_is_same() {
     let mut r = Reached::default();
     r.nodes.insert("crates".into(), hit(Reach::Code, true, true));
     r.nodes.insert("app:dyno".into(), hit(Reach::Code, true, false));
-    let c = compare(&plan(), &r, &graph());
+    let c = compare(&plan(), &r, &graph(), &BTreeSet::new());
     assert_eq!(c["same"], true, "{c}");
 }
 
@@ -44,7 +45,7 @@ fn compare_reports_a_rule_the_model_lacks_and_names_what_it_drops() {
     // Positive control (§8 "--compare"): take the app's edge out of the model's answer; --compare names the difference and the drop.
     let mut r = Reached::default();
     r.nodes.insert("crates".into(), hit(Reach::Code, true, true));
-    let c = compare(&plan(), &r, &graph());
+    let c = compare(&plan(), &r, &graph(), &BTreeSet::new());
     assert_eq!(c["same"], false);
     assert_eq!(c["dropped"], json!(["app:dyno"]));
     assert_eq!(c["differences"][0]["project"], "app:dyno");
@@ -57,13 +58,13 @@ fn a_docs_reach_runs_nothing_and_a_half_is_a_narrowing() {
     let mut r = Reached::default();
     r.nodes.insert("crates".into(), hit(Reach::Code, true, true));
     r.nodes.insert("app:dyno".into(), hit(Reach::Docs, false, false));
-    assert_eq!(compare(&plan(), &r, &graph())["dropped"], json!(["app:dyno"]));
+    assert_eq!(compare(&plan(), &r, &graph(), &BTreeSet::new())["dropped"], json!(["app:dyno"]));
     let mut p = plan();
     p["kinds"]["dyno"] = json!(["all"]);
     let mut r2 = Reached::default();
     r2.nodes.insert("crates".into(), hit(Reach::Code, true, true));
     r2.nodes.insert("app:dyno".into(), hit(Reach::Code, false, true));
-    let c = compare(&p, &r2, &graph());
+    let c = compare(&p, &r2, &graph(), &BTreeSet::new());
     assert_eq!(c["dropped"], json!(["app:dyno"]), "{c}");
 }
 
@@ -224,4 +225,134 @@ mod declared {
             assert!(!by(&run(&[file], &without, &none)), "{name}: the control still reaches {reader}");
         }
     }
+}
+
+/// The structural rule (ADR 0117 §4, §14; the coordinator's ruling on the review of 59e5f7ec3): every extractor reports a reference
+/// it cannot resolve, and the one rule in `reach` runs the referrer's projects in full whatever the change. Each extractor is fed
+/// an unresolvable reference; the plan for an unrelated change widens to the referrer's project, and the resolved control does not.
+#[test]
+fn every_extractor_reports_an_unresolvable_reference_and_the_plan_widens_to_its_referrer() {
+    use paddock_repo_graph::model::extract::{Extractor, MemoryRead, build};
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let inputs = crate::repo_inputs::load(&root).unwrap();
+    let projects: Vec<(String, String)> = [("conformance", "conformance"), ("tools", "tools"), ("app:dyno", "apps/dyno")]
+        .map(|(a, b)| (a.to_string(), b.to_string()))
+        .to_vec();
+    let plan_for = |m: &paddock_repo_graph::model::nodes::Model| {
+        let (cargo, npm) = (Graph::new(), Graph::new());
+        let facts = Facts {
+            cargo: &cargo,
+            npm: &npm,
+            projects: &projects,
+            files: &[],
+            detect: None,
+            model: Some(m),
+            seeds: &[],
+        };
+        reach(&["tools/notes.txt".to_string()], &facts, &inputs, &|_| (None, None))
+    };
+    let ci_with = |script: &str| {
+        let r = MemoryRead::new()
+            .with(".gitea/workflows/ci.yml", &format!("on: [push]\njobs:\n  app:\n    if: ${{{{ needs.plan.outputs.any_app == 'true' }}}}\n    steps:\n      - run: bash {script}\n"))
+            .with("conformance/ci/kit.sh", "echo kit\n");
+        let a = ci::CiExtractor {
+            apps: ["dyno".to_string()].into_iter().collect(),
+            projects: ["conformance".to_string(), "tools".to_string()].into_iter().collect(),
+            decl: ci::CiDecl::default(),
+        };
+        let adapters: Vec<Box<dyn Extractor>> = vec![Box::new(a)];
+        build(&r.paths(), &r, &adapters).model
+    };
+    let code_with = |import: &str| {
+        let r = MemoryRead::new()
+            .with("conformance/bin/cli.mjs", &format!("import x from '{import}';\n"))
+            .with("conformance/src/x.mjs", "export default 1;\n");
+        let a = code::CodeExtractor {
+            root: root.clone(),
+            cargo: Graph::new(),
+            npm: Graph::new(),
+            scripts: ["conformance/bin/cli.mjs".to_string()].into_iter().collect(),
+            tests: vec![],
+        };
+        let adapters: Vec<Box<dyn Extractor>> = vec![Box::new(a)];
+        build(&r.paths(), &r, &adapters).model
+    };
+    // ci: a step runs a script that is not tracked.
+    let r = plan_for(&ci_with("conformance/ci/deleted.sh"));
+    assert!(
+        r.nodes.get("app:dyno").is_some_and(|n| n.kinds.contains(&Reach::Code)),
+        "{:?}",
+        r.nodes
+    );
+    assert!(
+        !plan_for(&ci_with("conformance/ci/kit.sh")).nodes.contains_key("app:dyno"),
+        "control: resolved"
+    );
+    // code: a script imports a module that is not tracked.
+    let r = plan_for(&code_with("../src/gone.mjs"));
+    assert!(
+        r.nodes.get("conformance").is_some_and(|n| n.kinds.contains(&Reach::Code)),
+        "{:?}",
+        r.nodes
+    );
+    assert!(
+        !plan_for(&code_with("../src/x.mjs")).nodes.contains_key("conformance"),
+        "control: resolved"
+    );
+}
+
+/// Every declared smoke filterset names packages of its project's own Cargo workspace, and every declared smoke phase is a phase
+/// of its contract (a smoke set that names nothing would run nothing, ER-33). The control: a made-up package is found.
+#[test]
+fn every_declared_smoke_set_names_real_packages_and_phases() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let history = paddock_repo_graph::GitHistory::new(&root, std::time::Duration::from_secs(120));
+    let graph = crate::plan::read_graph(&root, &history).unwrap();
+    let decls = decl::load(&root, &graph).unwrap();
+    let packages = |id: &str| -> BTreeSet<String> {
+        let dir = project_dir_of(&graph, id).unwrap_or_default();
+        graph
+            .cargo
+            .iter()
+            .filter(|(d, _)| d.starts_with(&format!("{dir}/")) || *d == dir)
+            .map(|(_, n)| n.name.clone())
+            .collect()
+    };
+    let missing = |id: &str, filter: &str| -> Vec<String> {
+        let have = packages(id);
+        filter
+            .split("package(=")
+            .skip(1)
+            .filter_map(|r| r.split(')').next())
+            .filter(|p| !have.contains(*p))
+            .map(str::to_string)
+            .collect()
+    };
+    let mut checked = 0;
+    for (id, d) in &decls {
+        let Some(s) = &d.smoke else { continue };
+        assert!(
+            missing(id, &s.nextest).is_empty(),
+            "{id}: smoke names {:?}, not a package of its workspace",
+            missing(id, &s.nextest)
+        );
+        if !s.phases.is_empty() {
+            let contract = if let Some(app) = id.strip_prefix("app:") {
+                graph.config(app).clone()
+            } else {
+                crate::ci_run::contract::load(&root, id).unwrap()
+            };
+            let phases = crate::ci_run::contract::phases(&contract);
+            for p in &s.phases {
+                assert!(
+                    phases.contains(&p.as_str()),
+                    "{id}: smoke phase {p} is not a phase of its contract ({phases:?})"
+                );
+            }
+        }
+        checked += 1;
+    }
+    assert!(checked >= 8, "only {checked} smoke sets checked");
+    // Positive control: a package that does not exist is found.
+    assert_eq!(missing("crates", "package(=paddock-no-such-crate)"), ["paddock-no-such-crate"]);
 }

@@ -1,0 +1,8 @@
+{
+  "$comment": "paddock-dev's contract holds only its repository-graph declarations (ADR 0117 \u00a73): the `paddock-dev` job of ci.yml runs its own steps, so there are no phases here. `graph.smoke` is what a plumbing-only change runs (docs/repo-graph.toml declares which actions are setup-only); its Rust tests come from cargo metadata.",
+  "graph": {
+    "smoke": {
+      "nextest": "binary_id(paddock-dev::it) & test(/^contracts::/)"
+    }
+  }
+}

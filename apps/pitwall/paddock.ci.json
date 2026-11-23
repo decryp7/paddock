@@ -52,5 +52,28 @@
     "cd apps/pitwall/app",
     "npx ng build",
     "PW_E2E_PREBUILT=1 PW_E2E_PORT=4393 npx playwright test --project=webkit --workers=1"
-  ]
+  ],
+  "graph": {
+    "tests": {
+      "vitest": [
+        "app/src/**/*.spec.ts"
+      ],
+      "playwright": [
+        "app/e2e/**/*.e2e.ts"
+      ],
+      "node-test": [
+        "scripts/**/*.test.mjs"
+      ],
+      "helpers": [
+        "app/e2e/**",
+        "app/src/testing/**"
+      ]
+    },
+    "smoke": {
+      "phases": [
+        "checks"
+      ],
+      "nextest": "package(=pitwall-core)"
+    }
+  }
 }

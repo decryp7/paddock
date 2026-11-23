@@ -518,8 +518,7 @@ fn run_model(
 }
 
 #[test]
-fn g6_a_shared_action_reaches_the_projects_of_its_jobs_as_plumbing_and_the_control_drops_the_runs_edge()
- {
+fn g6_a_shared_action_reaches_the_projects_of_its_jobs_and_the_control_drops_the_runs_edge() {
     let w = world();
     let r = run_model(
         &w,
@@ -528,8 +527,15 @@ fn g6_a_shared_action_reaches_the_projects_of_its_jobs_as_plumbing_and_the_contr
         &[],
     );
     assert_eq!(ids(&r), ["app:dyno"]);
-    assert_eq!(r.nodes["app:dyno"].reach, Reach::Plumbing);
+    // Not declared setup-only: the job's input in full (the coordinator's decision of 2026-11-23); declared: plumbing.
+    assert_eq!(r.nodes["app:dyno"].reach, Reach::Code);
     assert!(!r.everything);
+    let mut setup = ci_model(true);
+    let mut n = setup.node("action:cache").cloned().unwrap();
+    n.setup_only = true;
+    setup.add_node(n);
+    let p = run_model(&w, &setup, &[".gitea/actions/cache/action.yml"], &[]);
+    assert_eq!(p.nodes["app:dyno"].reach, Reach::Plumbing);
     // Positive control: without the job's `runs` edge to the app nothing is reached.
     let c = run_model(
         &w,
@@ -541,11 +547,11 @@ fn g6_a_shared_action_reaches_the_projects_of_its_jobs_as_plumbing_and_the_contr
 }
 
 #[test]
-fn a_script_in_a_project_folder_is_code_for_its_project_and_plumbing_for_its_jobs() {
+fn a_script_in_a_project_folder_is_code_for_its_project_and_for_the_jobs_that_run_it() {
     let w = world();
     let r = run_model(&w, &ci_model(true), &["conformance/ci/x.sh"], &[]);
     assert_eq!(r.nodes["conformance"].reach, Reach::Code);
-    assert_eq!(r.nodes["ui"].reach, Reach::Plumbing);
+    assert_eq!(r.nodes["ui"].reach, Reach::Code);
 }
 
 #[test]
@@ -771,13 +777,12 @@ fn g12_a_test_file_reaches_its_target_as_test_and_not_the_crates_dependents() {
     );
     let s = selection(&r, &BTreeSet::new());
     assert_eq!(
-        s["crates"],
-        Selection::Affected(
-            ["nextest:paddock-proc::it".to_string()]
-                .into_iter()
-                .collect()
-        )
+        s["crates"].affected,
+        ["nextest:paddock-proc::it".to_string()]
+            .into_iter()
+            .collect::<BTreeSet<_>>()
     );
+    assert!(!s["crates"].full);
     // Positive control (tests edge): without it no target is reached and the selection cannot prove less than full.
     let c = run_model(
         &w,
@@ -786,7 +791,7 @@ fn g12_a_test_file_reaches_its_target_as_test_and_not_the_crates_dependents() {
         &[],
     );
     assert!(c.targets.get("crates").is_none_or(|t| t.is_empty()));
-    assert_eq!(selection(&c, &BTreeSet::new())["crates"], Selection::Full);
+    assert!(selection(&c, &BTreeSet::new())["crates"].full);
 }
 
 #[test]
@@ -818,6 +823,7 @@ fn selection_maps_each_kind_and_falls_back_to_full_without_a_declaration() {
     let mut r = Reached::default();
     let hit = |reach| NodeReach {
         reach,
+        kinds: BTreeSet::from([reach]),
         rust: true,
         ui: true,
         why: vec![],
@@ -830,22 +836,14 @@ fn selection_maps_each_kind_and_falls_back_to_full_without_a_declaration() {
     r.nodes.insert("crates".into(), hit(Reach::Test));
     let smoke: BTreeSet<String> = ["app:dyno".to_string()].into_iter().collect();
     let s = selection(&r, &smoke);
-    assert_eq!(s["app:dyno"], Selection::Smoke);
-    assert_eq!(s["ui"], Selection::Full, "no smoke declared: full");
-    assert_eq!(s["app:pitwall"], Selection::Installers);
-    assert_eq!(s["tools"], Selection::Full);
-    assert_eq!(s["docs"], Selection::Skip);
-    assert_eq!(
-        s["crates"],
-        Selection::Full,
-        "test reach without targets: full"
-    );
+    assert!(s["app:dyno"].smoke && !s["app:dyno"].full);
+    assert!(s["ui"].full, "no smoke declared: full");
+    assert!(s["app:pitwall"].installers && !s["app:pitwall"].full);
+    assert!(s["tools"].full);
+    assert!(s["docs"].skip());
+    assert!(s["crates"].full, "test reach without targets: full");
     r.everything = true;
-    assert!(
-        selection(&r, &smoke)
-            .values()
-            .all(|x| *x == Selection::Full || *x == Selection::Skip)
-    );
+    assert!(selection(&r, &smoke).values().all(|x| x.full || x.skip()));
 }
 
 #[test]

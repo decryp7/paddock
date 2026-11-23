@@ -45,5 +45,31 @@
     "cd ui",
     "npx playwright test --shard=$E2E_SHARD",
     "npx playwright test -c projects/paddock-e2e/selftest/playwright.config.ts --project=chromium --shard=$E2E_SHARD"
-  ]
+  ],
+  "graph": {
+    "tests": {
+      "playwright": [
+        "e2e/**/*.spec.ts",
+        "projects/paddock-e2e/selftest/**/*.spec.ts"
+      ],
+      "vitest": [
+        "projects/paddock-ui/**/*.spec.ts",
+        "projects/workbench-demo/**/*.spec.ts"
+      ],
+      "node-test": [
+        "scripts/*.test.mjs",
+        "projects/paddock-ui/bin/*.test.mjs",
+        "projects/paddock-e2e/src/*.test.ts"
+      ],
+      "helpers": [
+        "e2e/**",
+        "projects/paddock-e2e/selftest/**"
+      ]
+    },
+    "smoke": {
+      "phases": [
+        "build"
+      ]
+    }
+  }
 }

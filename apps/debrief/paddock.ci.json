@@ -13,5 +13,19 @@
     "out": [
       "app/src-tauri/resources"
     ]
+  },
+  "graph": {
+    "tests": {
+      "vitest": [
+        "app/src/**/*.spec.ts"
+      ],
+      "playwright": [
+        "app/e2e/**/*.e2e.ts"
+      ],
+      "helpers": [
+        "app/e2e/**",
+        "app/src/testing/**"
+      ]
+    }
   }
 }

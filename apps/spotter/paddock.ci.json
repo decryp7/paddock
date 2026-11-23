@@ -42,5 +42,25 @@
     "npm run build -w ui",
     "cd apps/spotter/app",
     "PW_PORT=4372 npx playwright test --project=webkit --workers=1"
-  ]
+  ],
+  "graph": {
+    "tests": {
+      "vitest": [
+        "app/src/**/*.spec.ts"
+      ],
+      "playwright": [
+        "app/e2e/**/*.spec.ts"
+      ],
+      "helpers": [
+        "app/e2e/**",
+        "app/src/testing/**"
+      ]
+    },
+    "smoke": {
+      "phases": [
+        "checks"
+      ],
+      "nextest": "package(=spotter-core)"
+    }
+  }
 }

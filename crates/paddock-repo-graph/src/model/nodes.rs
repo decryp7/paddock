@@ -187,11 +187,28 @@ impl Edge {
     }
 }
 
+/// A reference an extractor found and could not resolve (an import naming no tracked file, an `include_str!` of a missing file, a
+/// script path a step runs that does not exist). The model keeps it; [`super::reach`] puts the referrer's projects on full in
+/// every plan, one rule for every extractor (ADR 0117 §4, §14).
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Unresolved {
+    /// The file that holds the reference.
+    pub referrer: String,
+    /// The model node that holds it, when that is finer than the file (a step of a workflow): it is seeded too.
+    pub node: Option<String>,
+    /// The reference as written.
+    pub reference: String,
+    /// Why it did not resolve.
+    pub why: String,
+}
+
 /// How a node is reached, with the reasons.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Hit {
     /// The strongest kind over every path that arrives.
     pub reach: Reach,
+    /// Every kind that arrives (a node reached as code on one path and as plumbing on another selects both, review P1-1).
+    pub kinds: BTreeSet<Reach>,
     /// One line per path: the changed file, or the edge it came over.
     pub why: Vec<String>,
 }
@@ -202,6 +219,7 @@ pub struct Model {
     nodes: BTreeMap<String, ModelNode>,
     edges: BTreeSet<Edge>,
     rev: BTreeMap<String, BTreeSet<(String, EdgeKind)>>,
+    unresolved: BTreeSet<Unresolved>,
 }
 
 impl Model {
@@ -222,6 +240,16 @@ impl Model {
             .or_default()
             .insert((e.from.clone(), e.kind));
         self.edges.insert(e);
+    }
+
+    /// Records a reference an extractor could not resolve.
+    pub fn add_unresolved(&mut self, u: Unresolved) {
+        self.unresolved.insert(u);
+    }
+
+    /// Every unresolved reference, sorted.
+    pub fn unresolved(&self) -> Vec<&Unresolved> {
+        self.unresolved.iter().collect()
     }
 
     /// The node with this id.
@@ -257,6 +285,33 @@ impl Model {
         best.map(|(_, n)| n)
     }
 
+    /// Every node that owns `path` with the longest entry (a tie: all of them, by id): a file a test target tests and a crate reads
+    /// through a data node belongs to both (review P1-3).
+    pub fn owners_of(&self, path: &str) -> Vec<&ModelNode> {
+        let mut best = 0;
+        let mut out: Vec<&ModelNode> = Vec::new();
+        for n in self.nodes.values() {
+            let len = n
+                .files
+                .iter()
+                .filter(|f| match f.strip_suffix('/') {
+                    Some(dir) => path.strip_prefix(dir).is_some_and(|r| r.starts_with('/')),
+                    None => *f == path,
+                })
+                .map(String::len)
+                .max();
+            match len {
+                Some(l) if l > best => {
+                    best = l;
+                    out = vec![n];
+                }
+                Some(l) if l == best => out.push(n),
+                _ => {}
+            }
+        }
+        out
+    }
+
     /// Every node a change reaches (ADR 0117 §5): the owners of `changed`, then the reverse closure over the edges, with the kind
     /// [`carry`] gives each path. Bulk: one call for the whole changed set. Files no node owns are returned apart (the caller's
     /// project level and owner rules decide them).
@@ -284,9 +339,10 @@ impl Model {
         let put = |hits: &mut BTreeMap<String, Hit>, id: &str, r: Reach, why: String| -> bool {
             let h = hits.entry(id.to_string()).or_insert(Hit {
                 reach: r,
+                kinds: BTreeSet::new(),
                 why: Vec::new(),
             });
-            let grew = r > h.reach || h.why.is_empty();
+            let grew = h.kinds.insert(r);
             h.reach = h.reach.max(r);
             if !h.why.contains(&why) {
                 h.why.push(why);
@@ -323,6 +379,17 @@ impl Model {
             }
         }
         hits
+    }
+
+    /// The nodes with an edge of `kind` to `id` (backward: what needs it).
+    pub fn sources(&self, id: &str, kind: EdgeKind) -> Vec<&str> {
+        self.rev
+            .get(id)
+            .into_iter()
+            .flatten()
+            .filter(|(_, k)| *k == kind)
+            .map(|(f, _)| f.as_str())
+            .collect()
     }
 
     /// The nodes `id` has an edge of `kind` to (forward: what it needs).
@@ -368,10 +435,14 @@ pub fn carry(r: Reach, at: &ModelNode, kind: EdgeKind, up: &ModelNode, setup_onl
             EdgeKind::Uses | EdgeKind::Runs | EdgeKind::ReadsScript
         )
     {
+        // Only a path through a declared setup-only action is plumbing (the coordinator's decision of 2026-11-23, fail closed):
+        // any other action or script a job uses is an input of that job in full, or of its installers in a release job.
         return if release {
             Reach::Release
-        } else {
+        } else if setup_only || at.setup_only {
             Reach::Plumbing
+        } else {
+            Reach::Code
         };
     }
     if r == Reach::Plumbing && release {
@@ -441,13 +512,23 @@ mod tests {
     }
 
     #[test]
-    fn a_shared_action_is_plumbing_for_its_users_and_release_for_a_bundle_job() {
+    fn a_shared_action_not_declared_setup_only_is_code_for_its_users_and_release_for_a_bundle_job()
+    {
+        // The coordinator's decision of 2026-11-23 (fail closed): only a declared setup-only action is plumbing.
         let m = model();
         let r = reach_of(&m, &[".gitea/actions/cache/action.yml"]);
         assert_eq!(r["action:cache"], Reach::Code);
-        assert_eq!(r["job:ci.yml#crates"], Reach::Plumbing);
-        assert_eq!(r["wf:ci.yml"], Reach::Plumbing, "plumbing carries on");
+        assert_eq!(r["job:ci.yml#crates"], Reach::Code);
+        assert_eq!(r["wf:ci.yml"], Reach::Code, "the kind carries on");
         assert_eq!(r["job:dyno.yml#bundle"], Reach::Release);
+        // Control: declared setup-only, the same action is plumbing for both jobs.
+        let mut d = model();
+        let mut n = d.node("action:cache").cloned().unwrap();
+        n.setup_only = true;
+        d.add_node(n);
+        let r = reach_of(&d, &[".gitea/actions/cache/action.yml"]);
+        assert_eq!(r["job:ci.yml#crates"], Reach::Plumbing);
+        assert_eq!(r["job:dyno.yml#bundle"], Reach::Plumbing);
     }
 
     #[test]
@@ -497,8 +578,8 @@ mod tests {
     }
 
     #[test]
-    fn a_module_a_script_imports_is_plumbing_for_the_scripts_users_and_release_skips_setup_only_paths()
-     {
+    fn a_module_a_script_imports_is_code_for_the_scripts_users_and_release_skips_setup_only_paths()
+    {
         // From --compare: conformance/src/checks/C99 (imported by the CLI a step runs) reached the apps as code.
         let mut m = model();
         m.add_node(ModelNode::new(
@@ -532,7 +613,11 @@ mod tests {
             Reach::Code,
             "the importer's own code"
         );
-        assert_eq!(r["job:ci.yml#crates"], Reach::Plumbing);
+        assert_eq!(
+            r["job:ci.yml#crates"],
+            Reach::Code,
+            "a script a job runs is that job's input in full"
+        );
         assert_eq!(r["job:dyno.yml#bundle"], Reach::Release);
         // A script run only through a setup-only action stays plumbing in the release job.
         m.add_node(ModelNode::new(

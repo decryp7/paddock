@@ -21,7 +21,11 @@ mod lock;
 pub mod model;
 mod npm;
 mod paths;
+#[cfg(feature = "rust-syn")]
+pub mod reads;
 mod source;
+#[cfg(feature = "ts")]
+pub mod ts;
 
 #[cfg(feature = "cargo-metadata")]
 pub use cargo::CargoCli;

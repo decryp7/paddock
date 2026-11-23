@@ -14,5 +14,17 @@
   ],
   "svg-drift": [
     "node scripts/svg-drift.mjs"
-  ]
+  ],
+  "graph": {
+    "tests": {
+      "node-test": [
+        "test/*.test.mjs"
+      ]
+    },
+    "smoke": {
+      "phases": [
+        "tests"
+      ]
+    }
+  }
 }

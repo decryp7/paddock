@@ -80,5 +80,31 @@
     "out": [
       "app/src-tauri/resources"
     ]
+  },
+  "graph": {
+    "tests": {
+      "vitest": [
+        "app/src/**/*.spec.ts"
+      ],
+      "playwright": [
+        "app/e2e/**/*.spec.ts"
+      ],
+      "node-test": [
+        "scripts/*.test.mjs",
+        "docs/diagrams/src/*.test.mjs"
+      ],
+      "helpers": [
+        "app/e2e/**",
+        "app/src/testing/**"
+      ]
+    },
+    "smoke": {
+      "phases": [
+        "prepare",
+        "checks",
+        "rustChecks"
+      ],
+      "nextest": "package(=dyno-core)"
+    }
   }
 }
