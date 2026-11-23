@@ -258,12 +258,16 @@ impl CodeExtractor {
             .iter()
             .filter_map(|n| n.id.strip_prefix("data:").map(str::to_string))
             .collect();
-        for (f, text) in candidates.iter().zip(texts) {
-            let (Some(text), Some(reader)) = (text, self.crate_of(f)) else {
-                continue;
-            };
+        let sources: Vec<(&String, String, &str)> = candidates
+            .iter()
+            .zip(texts)
+            .filter_map(|(f, text)| Some((f, text?, self.crate_of(f)?)))
+            .collect();
+        let parsed = parse_all(&sources);
+        for ((f, text, reader), rr) in sources.iter().zip(parsed) {
+            let (f, reader) = (*f, *reader);
             stats.rust_sources += 1;
-            let paths: BTreeSet<String> = match rust_reads(f, &text, reader) {
+            let paths: BTreeSet<String> = match rr {
                 Parsed::Reads(r) => {
                     let mut found = BTreeSet::new();
                     for r in r {
@@ -282,7 +286,7 @@ impl CodeExtractor {
                 }
                 Parsed::Fallback(_) => {
                     stats.syn_fallbacks += 1;
-                    read_paths(f, &text, reader, tracked)
+                    read_paths(f, text, reader, tracked)
                 }
             };
             for p in paths {
@@ -354,6 +358,41 @@ impl CodeExtractor {
         x.edges.retain(|e| keep.contains(&e.to));
         Ok(x)
     }
+}
+
+/// How many threads parse the Rust sources at once. `syn` parses the about 430 candidate sources (2.5 MB) in about 0.7 s of one
+/// core in a debug build (2026-11-24, docs/benchmarks.md); the parse is pure, so a few workers cut the wait, and more than four would
+/// crowd the other tests of a run (ER-48), as the replay's [`super::replay::WORKERS`].
+pub const PARSE_WORKERS: usize = 4;
+
+/// [`rust_reads`] of each `(file, text, crate folder)`, in order, in up to [`PARSE_WORKERS`] threads (results do not depend on the
+/// thread count). A worker that panicked is parsed again on this thread, so its panic surfaces here as it did before.
+fn parse_all(sources: &[(&String, String, &str)]) -> Vec<Parsed> {
+    let workers = PARSE_WORKERS.min(sources.len()).max(1);
+    let mut out: Vec<Option<Parsed>> = vec![None; sources.len()];
+    std::thread::scope(|s| {
+        let handles: Vec<_> = (0..workers)
+            .map(|w| {
+                s.spawn(move || {
+                    sources
+                        .iter()
+                        .enumerate()
+                        .filter(|(i, _)| i % workers == w)
+                        .map(|(i, (f, text, dir))| (i, rust_reads(f, text, dir)))
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect();
+        for h in handles {
+            for (i, p) in h.join().unwrap_or_default() {
+                out[i] = Some(p);
+            }
+        }
+    });
+    out.into_iter()
+        .zip(sources)
+        .map(|(p, (f, text, dir))| p.unwrap_or_else(|| rust_reads(f, text, dir)))
+        .collect()
 }
 
 /// The texts of `paths` in their order (absent files `None`), from the map [`texts_of`] answered.

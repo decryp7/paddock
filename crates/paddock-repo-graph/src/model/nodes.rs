@@ -213,13 +213,17 @@ pub struct Hit {
     pub why: Vec<String>,
 }
 
-/// The model: nodes by id and edges, with the reverse index built on insert.
+/// The model: nodes by id and edges, with the reverse index and the file index built on insert.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Model {
     nodes: BTreeMap<String, ModelNode>,
     edges: BTreeSet<Edge>,
     rev: BTreeMap<String, BTreeSet<(String, EdgeKind)>>,
     unresolved: BTreeSet<Unresolved>,
+    /// Each file entry of a node (a file, or a folder with its trailing `/`) to the ids of the nodes that list it: a path's owners
+    /// are found by looking up the path and each folder above it, not by visiting every node (ER-20; a whole-tree reach visited
+    /// about 4,600 nodes per changed file, three times).
+    by_entry: BTreeMap<String, BTreeSet<String>>,
 }
 
 impl Model {
@@ -230,7 +234,43 @@ impl Model {
 
     /// Adds or replaces a node.
     pub fn add_node(&mut self, n: ModelNode) {
-        self.nodes.insert(n.id.clone(), n);
+        for f in &n.files {
+            self.by_entry
+                .entry(f.clone())
+                .or_default()
+                .insert(n.id.clone());
+        }
+        let id = n.id.clone();
+        let Some(old) = self.nodes.insert(id.clone(), n) else {
+            return;
+        };
+        // A replaced node's entries that the new one does not list leave the index.
+        let kept: BTreeSet<&String> = self.nodes[&id].files.iter().collect();
+        for f in old.files.iter().filter(|f| !kept.contains(f)) {
+            if let Some(ids) = self.by_entry.get_mut(f) {
+                ids.remove(&id);
+                if ids.is_empty() {
+                    self.by_entry.remove(f);
+                }
+            }
+        }
+    }
+
+    /// The longest file entry that owns `path` (the path itself, or a folder entry `<dir>/` with `path` below it) and the ids of
+    /// the nodes that list it, in id order. Every entry that owns `path` is the path or one of its prefixes ending at a `/`, so
+    /// two owning entries of the same length are the same entry.
+    fn owning_entry(&self, path: &str) -> Option<&BTreeSet<String>> {
+        // The prefixes ending at a `/`, longest first (a folder entry `d/` owns `d/x`; `path` itself when it ends with `/`).
+        let folders = path
+            .char_indices()
+            .rev()
+            .filter(|(_, c)| *c == '/')
+            .map(|(i, _)| &path[..=i]);
+        // The path itself as a file entry (an entry ending with `/` is a folder, found among the prefixes).
+        let file = (!path.ends_with('/')).then_some(path);
+        file.into_iter()
+            .chain(folders)
+            .find_map(|e| self.by_entry.get(e).filter(|ids| !ids.is_empty()))
     }
 
     /// Adds an edge (its ends need not exist yet; an edge to a missing node reaches nothing).
@@ -269,47 +309,17 @@ impl Model {
 
     /// The node that owns `path`: the longest file entry that equals it or is a folder holding it (a tie: the first id).
     pub fn owner_of(&self, path: &str) -> Option<&ModelNode> {
-        let mut best: Option<(usize, &ModelNode)> = None;
-        for n in self.nodes.values() {
-            for f in &n.files {
-                let hit = if let Some(dir) = f.strip_suffix('/') {
-                    path.strip_prefix(dir).is_some_and(|r| r.starts_with('/'))
-                } else {
-                    f == path
-                };
-                if hit && best.is_none_or(|(l, _)| f.len() > l) {
-                    best = Some((f.len(), n));
-                }
-            }
-        }
-        best.map(|(_, n)| n)
+        self.owning_entry(path)?
+            .iter()
+            .find_map(|id| self.nodes.get(id))
     }
 
     /// Every node that owns `path` with the longest entry (a tie: all of them, by id): a file a test target tests and a crate reads
     /// through a data node belongs to both (review P1-3).
     pub fn owners_of(&self, path: &str) -> Vec<&ModelNode> {
-        let mut best = 0;
-        let mut out: Vec<&ModelNode> = Vec::new();
-        for n in self.nodes.values() {
-            let len = n
-                .files
-                .iter()
-                .filter(|f| match f.strip_suffix('/') {
-                    Some(dir) => path.strip_prefix(dir).is_some_and(|r| r.starts_with('/')),
-                    None => *f == path,
-                })
-                .map(String::len)
-                .max();
-            match len {
-                Some(l) if l > best => {
-                    best = l;
-                    out = vec![n];
-                }
-                Some(l) if l == best => out.push(n),
-                _ => {}
-            }
-        }
-        out
+        self.owning_entry(path)
+            .map(|ids| ids.iter().filter_map(|id| self.nodes.get(id)).collect())
+            .unwrap_or_default()
     }
 
     /// Every node a change reaches (ADR 0117 §5): the owners of `changed`, then the reverse closure over the edges, with the kind
@@ -474,6 +484,90 @@ pub fn carry(r: Reach, at: &ModelNode, kind: EdgeKind, up: &ModelNode, setup_onl
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The owners as they were found before the file index: every node visited, its longest owning entry kept (the oracle).
+    fn owners_by_visit<'a>(m: &'a Model, path: &str) -> (Option<&'a str>, Vec<&'a str>) {
+        let owns = |f: &str| match f.strip_suffix('/') {
+            Some(dir) => path.strip_prefix(dir).is_some_and(|r| r.starts_with('/')),
+            None => f == path,
+        };
+        let mut first: Option<(usize, &str)> = None;
+        let mut best = 0;
+        let mut all: Vec<&str> = Vec::new();
+        for n in m.nodes() {
+            for f in n.files.iter().filter(|f| owns(f)) {
+                if first.is_none_or(|(l, _)| f.len() > l) {
+                    first = Some((f.len(), n.id.as_str()));
+                }
+            }
+            match n.files.iter().filter(|f| owns(f)).map(String::len).max() {
+                Some(l) if l > best => {
+                    best = l;
+                    all = vec![n.id.as_str()];
+                }
+                Some(l) if l == best => all.push(n.id.as_str()),
+                _ => {}
+            }
+        }
+        (first.map(|(_, id)| id), all)
+    }
+
+    /// The file index answers what visiting every node answered: nested folders, a file and a folder entry of one node, two nodes
+    /// with one entry (a tie), a replaced node that dropped an entry, the root folder entry and paths no entry owns.
+    #[test]
+    fn the_file_index_finds_the_owners_that_visiting_every_node_found() {
+        let mut m = Model::new();
+        m.add_node(ModelNode::new(
+            "a",
+            NodeKind::Project,
+            &["docs/", "docs/adr/0001.md"],
+        ));
+        m.add_node(ModelNode::new("b", NodeKind::Project, &["docs/adr/"]));
+        m.add_node(ModelNode::new(
+            "c",
+            NodeKind::TestFile,
+            &["docs/adr/0001.md"],
+        ));
+        m.add_node(ModelNode::new(
+            "d",
+            NodeKind::Project,
+            &["tools/", "tools/x/"],
+        ));
+        m.add_node(ModelNode::new("e", NodeKind::Project, &["/"]));
+        m.add_node(ModelNode::new("f", NodeKind::Project, &["gone/"]));
+        // Replaced: `f` no longer lists `gone/`, so the index must forget it.
+        m.add_node(ModelNode::new("f", NodeKind::Project, &["kept/"]));
+        let paths = [
+            "docs/adr/0001.md",
+            "docs/adr/0002.md",
+            "docs/readme.md",
+            "docs",
+            "docs/",
+            "tools/x/y.sh",
+            "tools/y",
+            "gone/a",
+            "kept/a",
+            "/abs",
+            "",
+            "x",
+            "docs/adr/0001.md/",
+            "tools//z",
+        ];
+        for p in paths {
+            let (first, all) = owners_by_visit(&m, p);
+            assert_eq!(
+                m.owner_of(p).map(|n| n.id.as_str()),
+                first,
+                "owner_of({p:?})"
+            );
+            let got: Vec<&str> = m.owners_of(p).iter().map(|n| n.id.as_str()).collect();
+            assert_eq!(got, all, "owners_of({p:?})");
+        }
+        // The control: the tie, the replaced entry and a nested folder are each seen.
+        assert_eq!(m.owners_of("docs/adr/0001.md").len(), 2);
+        assert!(m.owner_of("gone/a").is_none());
+        assert_eq!(m.owner_of("tools/x/y.sh").map(|n| n.id.as_str()), Some("d"));
+    }
 
     fn model() -> Model {
         let mut m = Model::new();

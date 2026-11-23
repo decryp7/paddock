@@ -881,6 +881,7 @@ fn the_contracts_are_read_at_the_requested_revision_not_the_working_tree() {
 /// file at a path nothing claims is unowned.
 #[test]
 fn every_tracked_file_of_the_tree_has_an_owner_and_the_control_names_an_unclaimed_one() {
+    let counter = paddock_env::starts::count_starts();
     let root = repo_root();
     let history = paddock_repo_graph::GitHistory::new(&root, std::time::Duration::from_secs(120));
     let graph = crate::plan::read_graph_unplaced(&root, &history).unwrap();
@@ -916,6 +917,17 @@ fn every_tracked_file_of_the_tree_has_an_owner_and_the_control_names_an_unclaime
         reached.unowned.is_empty(),
         "declare an owner in docs/repo-graph.toml for: {:#?}",
         reached.unowned
+    );
+    // The process budget of the whole read (ER-20): one `cargo metadata` per Cargo workspace (the graph records each once), and four
+    // git processes whatever the tree holds: `ls-files` for the graph and for the world, the code adapter's one `grep`, and the one
+    // `cat-file` reader of the reach. Measured 2026-11-24: 25 workspaces, 29 starts (each about 45 ms on the Windows runner).
+    let workspaces = graph.metadata.len();
+    assert!(workspaces > 10, "the workspaces read: {workspaces}");
+    assert_eq!(
+        counter.starts(),
+        workspaces + 4,
+        "processes started to read the graph, the world and the reach of {} files ({workspaces} workspaces)",
+        outside.len()
     );
     let stray = vec!["zz-unclaimed-root-folder/data.bin".to_string()];
     let control = reach_in(
