@@ -27,7 +27,7 @@ for (const { width, height } of SIZES) for (const { query, label: text } of WIDE
     const ctx = await newPinnedContext(browser, { baseURL, viewport: { width: Math.max(width, 900), height } });
     const page = await ctx.newPage();
     await page.goto(dialogWindowUrl('pd.settings', {}, { title: 'Settings', query: `?latency=0&${query}` }));
-    await page.locator('html[data-dialog-ready]').waitFor({ timeout: 15_000 });
+    await page.locator('html[data-dialog-ready]').waitFor();
     await page.locator('nav.pd-nav').getByText('Dyno', { exact: true }).click();
     const label = page.locator('dy-popup-widgets .dy-pw-half .dy-pw-muted', { hasText: text });
     await expect(label, 'the preview shows the pinned memory value').toBeVisible();
