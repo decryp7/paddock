@@ -210,13 +210,18 @@ pub struct TempArgs {
     pub root: Option<PathBuf>,
 }
 
-/// The OS temp folder from the environment.
-pub fn temp_root(env: &dyn Fn(&str) -> Option<String>) -> Option<PathBuf> {
+/// The OS temp folder the environment names (TMPDIR, then TEMP, then TMP), with no fallback: what `disk clean` sweeps, so a caller
+/// whose environment names none (a test's in-memory one) sweeps nothing rather than the machine's `/tmp`.
+pub fn named_root(env: &dyn Fn(&str) -> Option<String>) -> Option<PathBuf> {
     ["TMPDIR", "TEMP", "TMP"]
         .iter()
         .find_map(|k| env(k).filter(|v| !v.is_empty()))
         .map(PathBuf::from)
-        .or_else(|| cfg!(unix).then(|| PathBuf::from("/tmp")))
+}
+
+/// The OS temp folder from the environment: [`named_root`], else `/tmp` on Unix.
+pub fn temp_root(env: &dyn Fn(&str) -> Option<String>) -> Option<PathBuf> {
+    named_root(env).or_else(|| cfg!(unix).then(|| PathBuf::from("/tmp")))
 }
 
 /// Runs `disk temp` with the compiled-in declaration.

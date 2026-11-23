@@ -631,3 +631,24 @@ fn no_ci_line_runs_a_plain_cargo_test() {
     assert!(found.iter().any(|f| f.contains("--test planted")), "{found:?}");
     assert!(!found.iter().any(|f| f.contains("--doc")), "{found:?}");
 }
+
+/// ER-51: the nightly sweeps the host's user temp folder with `disk temp --apply` (its other call site, `disk clean`, is pinned by
+/// `disk::clean::tests::clean_sweeps_the_named_temp_folder_and_none_without_one`). Read through the CI model; the control removes the step.
+#[test]
+fn the_nightly_sweeps_the_hosts_temp_folder() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let src = crate::gates::edge::load_sources(&root).unwrap();
+    let sweeps = |src: &crate::gates::ci::Sources| {
+        crate::gates::ci::build(src)
+            .lines
+            .iter()
+            .filter(|l| l.root == ".gitea/workflows/nightly.yml" && l.text.starts_with("./dev disk temp --apply --root "))
+            .map(|l| l.job.clone())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(sweeps(&src), ["temp-sweep"]);
+    let mut without = src.clone();
+    let nightly = without.workflows.get_mut(".gitea/workflows/nightly.yml").unwrap();
+    *nightly = nightly.replace("./dev disk temp --apply", "echo no sweep");
+    assert!(sweeps(&without).is_empty(), "the probe sees the step go");
+}
