@@ -260,6 +260,16 @@ impl<'a> Api<'a> {
             .collect())
     }
 
+    /// The bodies of the comments of pull request (issue) `number`, oldest first (the first 50: the queue's own recent comments).
+    pub fn comments(&mut self, number: u64) -> Result<Vec<String>, String> {
+        let url = format!("{}/issues/{number}/comments?limit=50", self.root);
+        let body = self.http.get_json(&url, &self.token)?;
+        Ok(body
+            .as_array()
+            .map(|a| a.iter().filter_map(|c| c["body"].as_str().map(str::to_string)).collect())
+            .unwrap_or_default())
+    }
+
     /// Adds a comment to pull request (issue) `number`.
     pub fn comment(&mut self, number: u64, body: &str) -> Result<(), String> {
         let url = format!("{}/issues/{number}/comments", self.root);

@@ -123,6 +123,10 @@ impl Ledger for GiteaLedger<'_> {
         self.api.comment(number, text)
     }
 
+    fn comments(&mut self, number: u64) -> Result<Vec<String>, String> {
+        self.api.comments(number)
+    }
+
     fn approved_head(&mut self, pr: &Pull) -> Result<bool, String> {
         // Never the pull request's own author, even if review-bot opened it.
         let allowed: Vec<&str> = APPROVERS.iter().copied().filter(|a| *a != pr.author).collect();
@@ -841,7 +845,8 @@ impl Ci for GiteaCi<'_> {
 
     fn verdict(&mut self, workflow: &str, head: &str) -> Verdict {
         let mut c = Client::new(self.http, &self.server, &self.repo, &self.token);
-        verdict::verdict(&mut c, workflow, head)
+        // The queue's own checkout: its register and its first-parent history, not the folder the tool was started in.
+        verdict::verdict_at(&mut c, workflow, head, &self.root)
     }
 
     fn dispatch(&mut self, workflow: &str, inputs: &[(String, String)]) -> Result<Sent, String> {

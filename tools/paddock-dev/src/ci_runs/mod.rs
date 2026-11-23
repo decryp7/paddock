@@ -16,7 +16,9 @@
 pub mod cache_audit;
 pub mod client;
 pub mod dispatch;
+pub mod fix_items;
 pub mod flakes;
+pub mod green;
 pub mod logfind;
 pub mod members;
 pub mod preconditions;
@@ -199,6 +201,26 @@ pub struct VerdictArgs {
     server: String,
 }
 
+/// Arguments of `ci fix-items`.
+#[derive(Args)]
+pub struct FixItemsArgs {
+    /// The workflow file whose runs are read (`ci.yml`).
+    #[arg(long)]
+    workflow: String,
+    /// The full 40-hex commit id that landed.
+    #[arg(long)]
+    sha: String,
+    /// The checkout whose docs/lessons.md is written (default: the current folder).
+    #[arg(long)]
+    root: Option<std::path::PathBuf>,
+    /// The repository.
+    #[arg(long, default_value = "decryp7/paddock")]
+    repo: String,
+    /// The Gitea server.
+    #[arg(long, default_value = SERVER)]
+    server: String,
+}
+
 /// Arguments of `ci triage`.
 #[derive(Args)]
 pub struct TriageArgs {
@@ -284,6 +306,102 @@ pub fn schedule_skip(a: &ScheduleSkipArgs) -> Result<Report, CliError> {
         serde_json::json!({ "skip": d.skip(), "summary": d.summary() }),
         text.join("\n"),
     ))
+}
+
+/// Arguments of `ci scope`: the scope line of an app's own workflow (ADR 0113).
+#[derive(Args)]
+pub struct ScopeArgs {
+    /// The workflow file whose plan job declares the scope (`debrief.yml`, `dyno-release.yml`).
+    #[arg(long)]
+    workflow: String,
+    /// The app the workflow gates.
+    #[arg(long)]
+    app: String,
+    /// Whether the run has the workflow's full scope (`true` or `false`: a tag, a push to main, a dispatch with its full input).
+    #[arg(long)]
+    full: String,
+    /// Whether the plan ran its jobs at all (`true` or `false`; a schedule skipped for a train or an unchanged main ran none).
+    #[arg(long, default_value = "true")]
+    run: String,
+    /// The `since_run` input of a rerun of failures (empty: not a rerun).
+    #[arg(long, default_value = "")]
+    since_run: String,
+    /// The engines a full run tests, comma separated (a run that is not full tests the first only).
+    #[arg(long, default_value = "chromium")]
+    full_engines: String,
+}
+
+/// `ci scope`: prints the scope line (`plan scope: {json}`) of an app's own workflow; the one reader (`ci verdict`) compares it
+/// with a push to main's. A value other than `true` or `false` is a usage error, never a default (ER-33).
+pub fn scope(a: &ScopeArgs) -> Result<Report, CliError> {
+    let flag = |name: &str, v: &str| match v {
+        "true" => Ok(true),
+        "false" => Ok(false),
+        other => Err(CliError::usage(format!("--{name} {other:?} is not `true` or `false`."))
+            .with_hint("Pass the workflow's own expression for it.")),
+    };
+    let engines: Vec<String> = a
+        .full_engines
+        .split(',')
+        .map(str::trim)
+        .filter(|e| !e.is_empty())
+        .map(str::to_string)
+        .collect();
+    if engines.is_empty() {
+        return Err(CliError::usage("--full-engines names no engine.").with_hint("Pass `chromium` or `chromium,webkit`."));
+    }
+    let d = crate::run_scope::app_scope(
+        &a.workflow,
+        &a.app,
+        flag("full", &a.full)?,
+        flag("run", &a.run)?,
+        !a.since_run.trim().is_empty(),
+        &engines,
+    );
+    Ok(Report::new(serde_json::json!({ "complete": d.complete().is_ok() }), d.line()))
+}
+
+/// Arguments of `ci scope-record`: ER-41 for ADR 0113.
+#[derive(Args)]
+pub struct ScopeRecordArgs {
+    /// The workflow file whose run is recorded (`ci.yml`, `debrief.yml`, or one release workflow for the plan action).
+    #[arg(long)]
+    workflow: String,
+    /// The run: a finished, green run whose plan job declared a complete scope.
+    #[arg(long)]
+    run: u64,
+    /// The repository.
+    #[arg(long, default_value = "decryp7/paddock")]
+    repo: String,
+    /// The Gitea server.
+    #[arg(long, default_value = SERVER)]
+    server: String,
+}
+
+/// `ci scope-record`: records the first green scope run of a producer in `docs/ci-scope-first-runs.toml` (of the current repository)
+/// and so switches `ci verdict` from the old line to the declared scope for that producer, in the one step (ER-41). Refuses a run
+/// that is not a first green, complete, ran scope, and a producer already recorded. The token is read from `GITEA_TOKEN`.
+pub fn scope_record(a: &ScopeRecordArgs) -> Result<Report, CliError> {
+    let root = std::env::current_dir().map_err(|e| CliError::failure(format!("The current folder cannot be read: {e}.")))?;
+    let file = root.join(crate::run_scope::REGISTER);
+    let text = std::fs::read_to_string(&file)
+        .map_err(|e| CliError::failure(format!("{} cannot be read: {e}.", file.display())).with_hint("Run it from the repository root."))?;
+    let producer = crate::run_scope::producer_of(&a.workflow);
+    let updated = crate::run_scope::with_first_run(&text, producer, a.run).map_err(CliError::failure)?;
+    let token = token()?;
+    let mut http = CurlHttp;
+    let mut client = Client::new(&mut http, &a.server, &a.repo, &token);
+    let checked = verdict::first_green_scope(&mut client, &a.workflow, a.run).map_err(|why| {
+        CliError::failure(format!("run {} of {} cannot be recorded: {why}.", a.run, a.workflow))
+            .with_hint("Record a finished green run whose plan job printed a complete `plan scope:` line.")
+    })?;
+    std::fs::write(&file, updated).map_err(|e| CliError::failure(format!("{} cannot be written: {e}.", file.display())))?;
+    let text = format!(
+        "recorded {producer} at run {} in {}: {checked}. The reader now decides on the declared scope for it; delete the producer's old `plan verdict:` block in the same commit.",
+        a.run,
+        crate::run_scope::REGISTER
+    );
+    Ok(Report::new(serde_json::json!({ "producer": producer, "run": a.run }), text))
 }
 
 /// Arguments of `ci reuse` (the server, repository and token come from the CI environment: `GITHUB_SERVER_URL`,
@@ -534,6 +652,55 @@ pub fn verdict(a: &VerdictArgs) -> Result<Report, CliError> {
         eprintln!("::error::ci verdict: {}", r.text);
     }
     Ok(r)
+}
+
+/// `ci fix-items`: records the fix items of the verdict on `--sha` in `docs/lessons.md` ([`fix_items::record`]). A plain green has none; a
+/// red or partial verdict or one that is not measured is reported with its exit code and writes nothing.
+pub fn fix_items_cmd(a: &FixItemsArgs) -> Result<Report, CliError> {
+    if a.sha.len() != 40 || !a.sha.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
+        return Err(CliError::usage(format!("--sha {:?} is not a full 40-hex commit id.", a.sha))
+            .with_hint("Pass the whole sha (`git rev-parse HEAD`)."));
+    }
+    let root = a
+        .root
+        .clone()
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")));
+    let v = match token() {
+        Err(_) => verdict::Verdict::NotMeasured("GITEA_TOKEN is not set, so the runs cannot be read".into()),
+        Ok(token) => {
+            let mut http = CurlHttp;
+            let mut client = Client::new(&mut http, &a.server, &a.repo, &token);
+            verdict::verdict_at(&mut client, &a.workflow, &a.sha, &root)
+        }
+    };
+    match v {
+        verdict::Verdict::GreenWithFixItems { run, items } => {
+            let done = fix_items::record(&root, &a.workflow, run, &a.sha, &items).map_err(|e| {
+                CliError::failure(format!("the fix items of run {run} could not be recorded: {e}"))
+                    .with_hint("Run it in a checkout of the repository (--root).")
+            })?;
+            let text = match done {
+                fix_items::Recorded::Added => format!("{} fix item(s) of run {run} added to {}", items.len(), fix_items::LESSONS),
+                fix_items::Recorded::Already => {
+                    format!("the {} fix item(s) of run {run} are in {} already", items.len(), fix_items::LESSONS)
+                }
+            };
+            Ok(Report::new(
+                serde_json::json!({"run": run, "items": items.len(), "recorded": done == fix_items::Recorded::Added}),
+                text,
+            ))
+        }
+        verdict::Verdict::Green { run } => Ok(Report::new(
+            serde_json::json!({"run": run, "items": 0}),
+            format!("run {run} is plain green: no fix items"),
+        )),
+        verdict::Verdict::Red { reason, .. } => {
+            Ok(Report::new(serde_json::json!({"verdict": "red"}), format!("not recorded: {reason}")).with_exit(Exit::Findings))
+        }
+        verdict::Verdict::NotMeasured(why) => {
+            Ok(Report::new(serde_json::json!({"verdict": "not_measured"}), format!("not recorded: {why}")).with_exit(Exit::NotMeasured))
+        }
+    }
 }
 
 /// `ci cache-audit`: the cache keys of the last runs that were never saved (ADR 0115). Report-only unless `--fail-on-never-saved`.

@@ -72,6 +72,8 @@ pub trait Ledger {
     fn relabel(&mut self, number: u64, changes: &[&str]) -> Result<(), String>;
     /// Adds a comment.
     fn comment(&mut self, number: u64, text: &str) -> Result<(), String>;
+    /// The bodies of the comments on the pull request (a retried write checks them first).
+    fn comments(&mut self, number: u64) -> Result<Vec<String>, String>;
     /// The numbers of closed pull requests that still carry `queue/hold` (a hold must not outlive its pull request).
     fn closed_held(&mut self) -> Result<Vec<u64>, String>;
     /// Whether an approving review of the pull request exists for exactly its head commit, from an account that is not the pull

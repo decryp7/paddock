@@ -90,6 +90,10 @@ pub struct TimedJob {
     pub end: Option<f64>,
     /// Its steps: name and duration in seconds.
     pub steps: Vec<(String, Option<f64>)>,
+    /// The job's page (`html_url`), where its log reads.
+    pub html_url: String,
+    /// The names of its steps whose conclusion is `failure` (the jobs API lists each step with `name`, `number` and `conclusion`).
+    pub failed_steps: Vec<String>,
     /// `queued`, `waiting`, `in_progress`, `completed`... (empty when the server did not say).
     pub status: String,
     /// The runner labels it runs on (`macos-latest`): its `runs-on`, with a matrix value filled in.
@@ -139,6 +143,17 @@ impl TimedJob {
                             let secs = t(s, "started_at").zip(t(s, "completed_at")).map(|(a, b)| (b - a) / 1000.0);
                             (s["name"].as_str().unwrap_or("").to_string(), secs)
                         })
+                        .collect()
+                })
+                .unwrap_or_default(),
+            html_url: j["html_url"].as_str().unwrap_or("").to_string(),
+            failed_steps: j["steps"]
+                .as_array()
+                .map(|steps| {
+                    steps
+                        .iter()
+                        .filter(|s| s["conclusion"] == "failure")
+                        .filter_map(|s| s["name"].as_str().map(str::to_string))
                         .collect()
                 })
                 .unwrap_or_default(),

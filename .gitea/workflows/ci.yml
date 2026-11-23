@@ -98,6 +98,8 @@ jobs:
       # A member run (a dispatch with a base): the nextest filterset of the packages of that workspace the change reaches (empty: every
       # test, and always so on main, a tag and a manual run with no base: the final head's full run). The Linux crate tests run
       # whole under coverage in `crates`.
+      # Whether the WebKit tests run: the e2e-webkit job and the scope this run declares (ADR 0113) read the one value of the planner.
+      webkit: ${{ steps.plan.outputs.webkit }}
       crates_filter: ${{ steps.plan.outputs.crates_filter }}
       paddock_dev_filter: ${{ steps.plan.outputs.paddock_dev_filter }}
     env:
@@ -122,9 +124,12 @@ jobs:
             grep -Eq '^[[:space:]]*run: \./dev gates check( --warn)?$' "$f" || { echo "::error file=$f::C100 is not wired: no line runs ./dev gates check. Fix: restore the line (ADR 0060 section 4)."; exit 1; }
           done
 
-      # ER-49, test a commit once: a push to main of a commit that a complete green run of this workflow already tested (the train's
-      # dispatch, when main fast-forwards to its head) ends here, with that run named in the summary. Only a full green run with
-      # no FLAKY test counts (tag.yml's verdict reader needs one); anything unreadable runs the commit (./dev ci reuse fails open).
+      # ER-49, test a commit once: a push to main of a commit that a complete run of this workflow already tested (the train's
+      # dispatch, when main fast-forwards to its head) ends here, with that run named in the summary. The run counts when it is green,
+      # or red only through FLAKY tests of crates and apps its plan did not reach (green with fix items, ADR 0117 WP-4: the landing
+      # queue recorded them). A tag needs a run without them: its one retry (ER-49) is a manual workflow_dispatch of this workflow on
+      # that commit, which this step never skips (it runs for a push to main only). Anything unreadable runs the commit (./dev ci
+      # reuse fails open).
       - name: Reuse a full green run of this commit
         id: reuse
         if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
@@ -146,24 +151,25 @@ jobs:
           PLAN_SINCE_RUN: ${{ github.event.inputs.since_run }}
           # The crate and paddock-dev legs when the plan names none of its own (every run but a rerun of their failures).
           PLAN_OS_LEGS: '[{"os":"ubuntu-latest"},{"os":"windows-latest"},{"os":"macos-latest"}]'
-          # The scope of this run (tests everything its plan can reach, not a diff from a base or a rerun of failures): a push to
-          # main, an app's own gates, a manual run with no base. The line `plan verdict: complete=` at the end of the step is what
-          # `./dev ci verdict` reads (plan_since::COMPLETE_LINE); this one is only the scope.
+          # The scope of a rerun planner's reading of this run (plan_since::MODE_LINE). It is not the verdict: `./dev plan --ci` prints
+          # the line `plan scope: {json}` (ADR 0113), what the run does against what a push to main does, and `./dev ci verdict`
+          # compares them. No line of this workflow decides "complete".
           PLAN_MODE_FULL: ${{ github.event_name == 'push' || inputs.app != '' || (github.event_name == 'workflow_dispatch' && github.event.inputs.base == '' && github.event.inputs.since_run == '') }}
-          # A reused run (the step above): no job runs and the run is not complete; the reused run decides the commit.
+          # A reused run (the step above): the planner switches every job off and declares that it ran nothing; the reused run decides
+          # the commit.
           PLAN_REUSE: ${{ steps.reuse.outputs.reuse }}
           EVENT: ${{ github.event_name }}
         run: |
           echo "plan mode: full=$PLAN_MODE_FULL"
-          if [ "$PLAN_REUSE" = true ]; then echo 'rerun_jobs=[]' >> "$GITHUB_OUTPUT"; else ./dev plan --ci; fi
+          ./dev plan --ci
           grep -q '^crate_legs=' "$GITHUB_OUTPUT" || echo "crate_legs=$PLAN_OS_LEGS" >> "$GITHUB_OUTPUT"
           grep -q '^paddock_dev_legs=' "$GITHUB_OUTPUT" || echo "paddock_dev_legs=$PLAN_OS_LEGS" >> "$GITHUB_OUTPUT"
-          # After the plan decided: complete only for a full run that is not a rerun of failures (plan_since::COMPLETE_LINE).
+          # REPORT-ONLY PHASE (ER-41, ADR 0113): until docs/ci-scope-first-runs.toml names ci.yml, `./dev ci verdict` still decides on this
+          # line (and prints the scope view the planner declared above as a notice). `./dev ci scope-record --workflow ci.yml --run <id>`
+          # records the first green scope run and switches the reader; this block is deleted in the same change (conformance fails
+          # while a recorded producer still prints it). The condition is the one reviewed on 2026-11-21: a push to main's scope, WebKit
+          # included, never an app-only dispatch, a rerun or a reused run.
           complete=false
-          # One meaning of "complete" (ER-15): the scope of a push to main, WebKit included (plan_ci::wants_webkit). A full dispatch
-          # without the webkit input, or a rerun, is a smaller scope, so the tag gate never reads it as the tested commit, and a
-          # push to main is never skipped for it (ci_runs::reuse). A dispatch with `app` is that app only, with no exemption: it is a
-          # smaller scope than a push to main, whatever the webkit input says of the rest.
           if [ -z "$PLAN_SINCE_RUN" ] && [ "$PLAN_MODE_FULL" = true ] && [ "$PLAN_REUSE" != true ] && [ -z "$PLAN_APP" ] && { [ "$EVENT" = push ] || [ -n "$PLAN_WEBKIT" ]; }; then complete=true; fi
           echo "plan verdict: complete=$complete"
 
@@ -349,7 +355,7 @@ jobs:
   e2e-webkit:
     name: reference apps in WebKit (macOS)
     needs: [plan]
-    if: ${{ needs.plan.outputs.ui == 'true' && (inputs.webkit == true || (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))) || contains(fromJSON(needs.plan.outputs.rerun_jobs || '[]'), 'e2e-webkit')) && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["e2e-webkit"]'), 'e2e-webkit') }}
+    if: ${{ needs.plan.outputs.ui == 'true' && (needs.plan.outputs.webkit == 'true' || contains(fromJSON(needs.plan.outputs.rerun_jobs || '[]'), 'e2e-webkit')) && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["e2e-webkit"]'), 'e2e-webkit') }}
     runs-on: macos-latest
     env:
       # A run for a tag builds the tool from source (ADR 0022: release and tag jobs bypass every cache); other runs may download it.

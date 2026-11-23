@@ -2517,3 +2517,21 @@ The lower bound ADR 0117 §10 compares a parser with. Dev Mac under load (about 
 | `*.rs` | 3,732 | 46.3 MB | `grep -oE` for `use crate::`, `mod x;`, OS `cfg` (8,115 hits) | 0.91 s |
 
 Not measured: `oxc_parser` and `syn` on the same files (WP-3, WP-6), and the Linux runner.
+
+## The base search reads the run list in pages (2026-11-23, ADR 0117 WP-4)
+
+`ci_runs::green::find_base` reads the Actions run list (all branches and events, newest first, 50 a page) once and matches runs to
+main's first-parent commits in memory, so a base costs the pages plus two calls (the job list and the plan log) for each run that is
+evidence, never a call per commit. `MAX_PAGES` (6) bounds it; the measurement behind it (read-only API, no load on the runner):
+
+| Measure | Value |
+|---|---|
+| Runs listed on 2026-11-23 over 12 pages | 600, from 2026-11-07 11:43 to 2026-11-23 07:00 (16 days, 37 a day on average) |
+| Runs a day, newest 6 days (all workflows, all branches) | 29, 25, 21, 38, 33, 44 (ci.yml 7, 11, 7, 13, 4, 12) |
+| Position of the landing run 8610 (train 19, 11-22) in the list | index 38, page 1 |
+| `MAX_PAGES` 6 | 300 runs, 6.8 days at the busiest day measured (44 a day); about 8 days at the average |
+
+So a base up to about a week old is found; an older one plans everything (the safe side), which is what a base older than the pages
+means. Narrowing the request to ci.yml is not possible (the API's list takes `event`, `branch`, `status` and `head_sha`, not a
+workflow, and a train's run is a `workflow_dispatch` on a `train/*` branch, which a `branch=main` filter would drop). Raise `MAX_PAGES`
+only with a new measurement recorded here (ER-12).

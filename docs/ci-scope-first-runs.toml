@@ -1,0 +1,18 @@
+# ER-41 for ADR 0113: a new gate starts report-only and blocks only after its first green run on the real tree, recorded by run id
+# where the gate is defined. `./dev ci verdict` reads each run's declared scope (`plan scope: {json}`, run_scope.rs) and decides on it
+# only for a producer named here. For a producer not named, it still decides on the old line (`plan verdict: complete=`, which that
+# producer keeps printing) and prints the scope view as a notice, so `tag.yml` shows what the new basis would say.
+#
+# A producer is `ci.yml` (`./dev plan --ci`), `debrief.yml` (`./dev ci scope`) or `plan-action` (the shared plan action, used by the
+# four release workflows: any one of them counts). Record the first green run, in one step that also switches the producer:
+#
+#   ./dev ci scope-record --workflow <file> --run <id>
+#
+# The tool refuses a run that is not finished and green, whose plan job declared another workflow or no scope, or whose declared scope
+# is not complete (not covering a push to main's, or a declared job skipped). After it names a producer, the producer's old line is
+# deleted in the same change (conformance `ci-verdict-reader.test.mjs` fails while a recorded producer still prints it).
+# 2026-11-23, CI stopped: no run carries the scope line yet, so the table stays empty. When CI resumes, record the first complete green ci.yml
+# run that carries the line, in one step, with `./dev ci scope-record --workflow ci.yml --run <id>` (ER-41). Until then a run without the
+# line is decided on the old line, but a declared job that did not run makes a run partial on both bases (`ci_runs::green`, ADR 0117 WP-4),
+# so such a run is planned from again; once the first run is recorded the declared scope decides everywhere.
+[first_green]

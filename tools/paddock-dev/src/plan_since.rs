@@ -565,19 +565,7 @@ fn narrow(job: &RunJob, log: Result<&str, &str>, workflow: &str, key: Option<&st
     if *composite {
         // The step that failed inside the composite and the composite itself; a third (notices.sh, the cargo-about install,
         // which print no ::error:: line) or a missing one means another step failed too.
-        let failed = log
-            .lines()
-            .filter(|l| plain(l).starts_with("##[error]Process completed with exit code"))
-            .count();
-        if failed != 2 {
-            return Err(format!(
-                "{failed} failed steps in the log: app-gates is narrowed only when its Rust step alone failed"
-            ));
-        }
-        let errs = errors(log);
-        if errs.is_empty() {
-            return Err("the step failed without naming a failed command".into());
-        }
+        let errs = composite_annotations(log)?;
         static NEXTEST_ERROR: LazyLock<Regex> = LazyLock::new(|| re(r"^failed \(exit \d+\): (?:\S+ )*?cargo nextest run "));
         if let Some(e) = errs.iter().find(|e| !NEXTEST_ERROR.is_match(e)) {
             let short: String = e.chars().take(120).collect();
@@ -587,6 +575,85 @@ fn narrow(job: &RunJob, log: Result<&str, &str>, workflow: &str, key: Option<&st
     let tests = nextest_failures(log)?;
     let filter = filterset(&tests).ok_or("a test binary's name cannot be written in a filterset")?;
     Ok(Scope::Tests { filter, tests })
+}
+
+/// The `::error::failed (exit N): <command>` annotations of a failed composite step (app-gates), or why the failure cannot be read: the
+/// log must show exactly the failed command and the composite itself (two `##[error]Process completed` lines) and name the command.
+/// The one reader of a composite step's failures, for the narrowed rerun ([`classify`]) and the green definition
+/// (`ci_runs::green`).
+pub fn composite_annotations(log: &str) -> Result<Vec<String>, String> {
+    let failed = log
+        .lines()
+        .filter(|l| plain(l).starts_with("##[error]Process completed with exit code"))
+        .count();
+    if failed != 2 {
+        return Err(format!(
+            "{failed} failed steps in the log: app-gates is narrowed only when its Rust step alone failed"
+        ));
+    }
+    let errs = errors(log);
+    if errs.is_empty() {
+        return Err("the step failed without naming a failed command".into());
+    }
+    Ok(errs)
+}
+
+/// [`failed_steps_are_tests`] and, for a composite test step (app-gates, [`TEST_STEPS`]'s last field), the annotations of `log`: every
+/// failed command must be a test runner (`cargo nextest run`, Playwright, vitest); a lint, doc-test or other command is
+/// `StepProblem::Other`, an unreadable composite failure is `StepProblem::Unknown`.
+pub fn failure_is_tests(workflow: &str, key: &str, failed_steps: &[String], log: &str) -> Result<(), StepProblem> {
+    failed_steps_are_tests(workflow, key, failed_steps)?;
+    if !TEST_STEPS
+        .iter()
+        .any(|(w, k, _, composite)| *w == workflow && *k == key && *composite)
+    {
+        return Ok(());
+    }
+    static RUNNER: LazyLock<Regex> = LazyLock::new(|| re(r"^failed \(exit \d+\): (?:\S+ )*?(?:cargo nextest run |playwright test|vitest)"));
+    let errs = composite_annotations(log).map_err(StepProblem::Unknown)?;
+    match errs.iter().find(|e| !RUNNER.is_match(e)) {
+        Some(e) => Err(StepProblem::Other(e.chars().take(120).collect())),
+        None => Ok(()),
+    }
+}
+
+/// Whether a failed job's failure is its test step's alone (ADR 0117 WP-4, ER-33): the one reader of which steps of a workflow's job
+/// run tests is [`TEST_STEPS`] and [`VITEST_STEPS`] (the same table the narrowed rerun reads). `Err(Step::Other)` names a failed step
+/// that is no test step (a lint, a build, a setup step: the job is red whatever its log shows); `Err(Step::Unknown)` is a job this
+/// cannot judge (no failed step listed, a job with no known test step), which is not measured, never test-only.
+pub fn failed_steps_are_tests(workflow: &str, key: &str, failed_steps: &[String]) -> Result<(), StepProblem> {
+    let known: Vec<&str> = TEST_STEPS
+        .iter()
+        .filter(|(w, k, _, _)| *w == workflow && *k == key)
+        .flat_map(|(_, _, s, _)| s.iter().copied())
+        .chain(
+            VITEST_STEPS
+                .iter()
+                .filter(|(w, k, _)| *w == workflow && *k == key)
+                .flat_map(|(_, _, s)| s.iter().copied()),
+        )
+        .collect();
+    if failed_steps.is_empty() {
+        return Err(StepProblem::Unknown("the run lists no failed step for the job".into()));
+    }
+    if known.is_empty() {
+        return Err(StepProblem::Unknown(format!(
+            "job {key} of {workflow} has no step known to run tests"
+        )));
+    }
+    match failed_steps.iter().find(|s| !known.contains(&s.as_str())) {
+        Some(s) => Err(StepProblem::Other(s.clone())),
+        None => Ok(()),
+    }
+}
+
+/// Why [`failed_steps_are_tests`] refuses.
+#[derive(Debug, PartialEq, Eq)]
+pub enum StepProblem {
+    /// A failed step that is not a test step.
+    Other(String),
+    /// The steps cannot show that only tests failed.
+    Unknown(String),
 }
 
 /// The plan for a run: what reruns, and how ci.yml's plan job hands it to its jobs.
