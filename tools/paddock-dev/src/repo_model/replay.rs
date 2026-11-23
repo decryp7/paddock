@@ -299,6 +299,8 @@ fn reason_category(reason: &str, changed: &[String], half: bool) -> Option<Categ
         return match file {
             f if f.starts_with(".gitea/") && f.ends_with(".md") => Some(Category::GiteaDocs),
             f if f.starts_with(".gitea/") => Some(Category::Workflow),
+            // G6: a shared CI script reaches the jobs and actions that run it (as plumbing through a setup-only action).
+            f if f.starts_with("conformance/ci/") || f.starts_with("conformance/release/") => Some(Category::Workflow),
             ".gitattributes" => Some(Category::AttributesG2),
             _ => None,
         };

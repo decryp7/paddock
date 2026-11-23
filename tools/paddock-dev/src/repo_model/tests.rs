@@ -742,6 +742,22 @@ mod categories {
     }
 
     #[test]
+    fn a_shared_ci_script_the_rules_mark_global_is_the_workflow_category_and_another_global_stays_unlisted() {
+        // G6: a script of conformance/ci or conformance/release reaches the jobs and actions that run it, as plumbing where only a
+        // setup-only action runs it; the rule tables marked it global (the train replay's 31 unlisted on 2026-11-23).
+        for (reason, file) in [
+            ("global conformance/ci/build-jobs.sh", "conformance/ci/build-jobs.sh"),
+            ("global conformance/release/sign.sh", "conformance/release/sign.sh"),
+        ] {
+            let c = diff("crates", "all", Some("smoke"), &["global .gitea/actions/README.md", reason]);
+            assert_eq!(category(&c, &[file]), Category::Workflow, "{reason}");
+        }
+        // Control: a global that is no CI script is not explained.
+        let c = diff("crates", "all", Some("smoke"), &["global tools/notes.sh"]);
+        assert_eq!(category(&c, &["tools/notes.sh"]), Category::Unlisted);
+    }
+
+    #[test]
     fn a_release_reach_that_selects_installers_only_is_the_pinned_defect_and_a_widening_is_wider() {
         let c = diff("app:dyno", "all", Some("release"), &["conformance/ci/x.sh used by ci.yml, job app"]);
         assert_eq!(category(&c, &["conformance/ci/x.sh"]), Category::ReleaseInstallersOnly);
