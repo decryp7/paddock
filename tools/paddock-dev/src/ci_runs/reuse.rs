@@ -377,17 +377,21 @@ mod tests {
             json!({"total_count": 3, "jobs": [
                 {"id": 13610, "name": "plan (affected projects)", "conclusion": "success", "runner_id": 1, "steps": step},
                 {"id": 17610, "name": "conformance (checks, release scripts)", "conclusion": "success", "runner_id": 1, "steps": step},
-                {"id": 18000, "name": "app dyno (ubuntu-latest)", "conclusion": "failure", "runner_id": 1, "steps": step}]}),
+                {"id": 18000, "name": "crate (windows-latest)", "conclusion": "failure", "runner_id": 1,
+                 "steps": [{"name": "Tests (workspace, every feature)", "number": 3, "status": "completed", "conclusion": "failure"}]}]}),
         );
-        f.log(18000, include_str!("../../tests/ci-runs/nextest-r1-flaky-only.log"));
+        f.log(
+            18000,
+            &format!("Job: crate\n{}", include_str!("../../tests/ci-runs/nextest-r1-flaky-only.log")),
+        );
         let mut c = Client::new(&mut f, "https://gitea.invalid", "decryp7/paddock", "t");
         c.backoff_ms = 0;
         let untouched = |_: &str| Some(crate::ci_runs::green::Touched::default());
         let d = decide_with_touched(&mut c, "ci.yml", SHA, None, true, &[], &mut { untouched });
         assert_eq!(d, Reuse::Skip { run: 8610, logs: 0 });
-        // Positive control: when the change touched dyno, the FLAKY test is red and the push runs.
+        // Positive control: when the plan reached the crates, the FLAKY test is red and the push runs.
         let mut touched = crate::ci_runs::green::Touched::default();
-        touched.apps.insert("dyno".into());
+        touched.flags.insert("crates".into());
         let d = decide_with_touched(&mut c, "ci.yml", SHA, None, true, &[], &mut |_: &str| Some(touched.clone()));
         assert!(matches!(d, Reuse::Run(_)), "{d:?}");
     }

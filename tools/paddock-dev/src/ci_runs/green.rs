@@ -133,14 +133,26 @@ impl Touched {
     }
 }
 
-/// Grades the failed jobs of a finished complete run. `jobs` are the failed jobs with their logs (`None`: no log); `touched` is asked
-/// at most once, and only when a FLAKY test needs it.
-pub fn grade_failures(jobs: &[(String, Option<String>)], touched: &mut dyn FnMut() -> Option<Touched>) -> GradedResult {
+/// A failed job of a finished complete run, as the grading reads it.
+pub struct FailedJob {
+    /// Its display name.
+    pub name: String,
+    /// The names of its failed steps (the jobs API's step conclusions).
+    pub failed_steps: Vec<String>,
+    /// Its log, `None` when it could not be read.
+    pub log: Option<String>,
+}
+
+/// Grades the failed jobs of a finished complete run of `workflow`. A job is test-only when every failed step is a test step
+/// ([`crate::plan_since::failed_steps_are_tests`]) and its log shows only FLAKY tests; any other failed step is red. `touched` is
+/// asked at most once, and only when a FLAKY test needs it.
+pub fn grade_failures(workflow: &str, jobs: &[FailedJob], touched: &mut dyn FnMut() -> Option<Touched>) -> GradedResult {
+    use crate::plan_since::{StepProblem, failed_steps_are_tests, job_key};
     let mut red = Vec::new();
     let mut unread = Vec::new();
     let mut items = Vec::new();
     let mut touch: Option<Option<Touched>> = None;
-    for (name, log) in jobs {
+    for FailedJob { name, failed_steps, log } in jobs {
         let Some(log) = log else {
             unread.push(format!("job {name:?} has no log"));
             continue;
@@ -158,6 +170,21 @@ pub fn grade_failures(jobs: &[(String, Option<String>)], touched: &mut dyn FnMut
         if f.flaky.is_empty() {
             red.push(format!("job {name:?} failed in a step that is not a test"));
             continue;
+        }
+        // The log shows only FLAKY tests: the job is test-only only when no other step failed (ER-33).
+        match job_key(log)
+            .ok_or_else(|| StepProblem::Unknown(format!("the log of job {name:?} names no workflow job")))
+            .and_then(|key| failed_steps_are_tests(workflow, &key, failed_steps))
+        {
+            Ok(()) => {}
+            Err(StepProblem::Other(step)) => {
+                red.push(format!("job {name:?}: step {step:?} failed and is not a test step"));
+                continue;
+            }
+            Err(StepProblem::Unknown(why)) => {
+                unread.push(format!("job {name:?}: {why}"));
+                continue;
+            }
         }
         let t = touch.get_or_insert_with(&mut *touched);
         match t {
@@ -180,17 +207,21 @@ pub fn grade_failures(jobs: &[(String, Option<String>)], touched: &mut dyn FnMut
     }
 }
 
-/// Reads the logs of the failed jobs of `run` and grades them.
-pub fn read_failures(client: &mut Client, jobs: &[TimedJob], touched: &mut dyn FnMut() -> Option<Touched>) -> GradedResult {
-    let failed: Vec<(String, Option<String>)> = jobs
+/// Reads the logs of the failed jobs of a run of `workflow` and grades them.
+pub fn read_failures(client: &mut Client, workflow: &str, jobs: &[TimedJob], touched: &mut dyn FnMut() -> Option<Touched>) -> GradedResult {
+    let failed: Vec<FailedJob> = jobs
         .iter()
         .filter(|j| j.conclusion == "failure" && !j.is_caller())
-        .map(|j| (j.name.clone(), client.log(j.id).ok().flatten()))
+        .map(|j| FailedJob {
+            name: j.name.clone(),
+            failed_steps: j.failed_steps.clone(),
+            log: client.log(j.id).ok().flatten(),
+        })
         .collect();
     if failed.is_empty() {
         return GradedResult::Red("the run failed and no job names a failure".into());
     }
-    grade_failures(&failed, touched)
+    grade_failures(workflow, &failed, touched)
 }
 
 /// The outcome of one run, or `None` for a run that is no evidence (unfinished). A cancelled or skipped run is `Partial` times
@@ -233,7 +264,7 @@ pub fn grade_run(
             Earlier::Unknown(w) => GradedResult::NotMeasured(w),
         }
     } else if scope == Scope::Complete {
-        read_failures(client, &jobs, touched)
+        read_failures(client, run.workflow(), &jobs, touched)
     } else {
         GradedResult::Red(format!("{state}; {why}"))
     };

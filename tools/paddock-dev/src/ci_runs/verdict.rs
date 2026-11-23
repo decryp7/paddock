@@ -389,7 +389,7 @@ fn verdict_core(
     let mut failures = |r: &RunInfo| {
         let mut c = client.borrow_mut();
         match c.timed_jobs(r.id) {
-            Ok(Some(jobs)) => green::read_failures(&mut c, &jobs, &mut || (touched.borrow_mut())(sha)),
+            Ok(Some(jobs)) => green::read_failures(&mut c, workflow, &jobs, &mut || (touched.borrow_mut())(sha)),
             Ok(None) => GradedResult::NotMeasured("the server has no job list for the run".into()),
             Err(e) => GradedResult::NotMeasured(format!("the jobs could not be listed: {e}")),
         }
@@ -1135,26 +1135,30 @@ mod tests {
             json!({"total_count": 3, "jobs": [
                 {"id": 90, "name": "plan (affected projects)", "conclusion": "success"},
                 {"id": 91, "name": "conformance (checks, release scripts)", "conclusion": "success"},
-                {"id": 92, "name": "app dyno (ubuntu-latest)", "conclusion": "failure"}]}),
+                {"id": 92, "name": "crate (windows-latest)", "conclusion": "failure",
+                 "steps": [{"name": "Tests (workspace, every feature)", "number": 3, "status": "completed", "conclusion": "failure"}]}]}),
         );
-        f.log(92, include_str!("../../tests/ci-runs/nextest-r1-flaky-only.log"));
+        f.log(
+            92,
+            &format!("Job: crate\n{}", include_str!("../../tests/ci-runs/nextest-r1-flaky-only.log")),
+        );
         let mut ask_with = |apps: &[&str]| {
             let t = Touched {
-                apps: apps.iter().map(|a| a.to_string()).collect(),
+                flags: apps.iter().filter(|a| **a == "crates").map(|a| a.to_string()).collect(),
                 ..Touched::default()
             };
             let mut c = Client::new(&mut f, "https://gitea.invalid", "decryp7/paddock", "t");
             c.backoff_ms = 0;
             verdict_with_touched(&mut c, "ci.yml", SHA, None, true, &[], &mut |_: &str| Some(t.clone()))
         };
-        let v = ask_with(&["debrief"]);
+        let v = ask_with(&[]);
         assert!(
             matches!(&v, Verdict::GreenWithFixItems { run: 9, items } if items.len() == 1),
             "{v:?}"
         );
         assert_eq!(code(&v), 5, "a tag needs a run without fix items");
         assert!(report(&v, "ci.yml", SHA, &Knows(true)).text.contains("green with 1 fix items"));
-        let v = ask_with(&["dyno"]);
+        let v = ask_with(&["crates"]);
         assert!(
             matches!(&v, Verdict::Red { run: Some(9), reason } if reason.contains("touched")),
             "{v:?}"

@@ -589,6 +589,45 @@ fn narrow(job: &RunJob, log: Result<&str, &str>, workflow: &str, key: Option<&st
     Ok(Scope::Tests { filter, tests })
 }
 
+/// Whether a failed job's failure is its test step's alone (ADR 0117 WP-4, ER-33): the one reader of which steps of a workflow's job
+/// run tests is [`TEST_STEPS`] and [`VITEST_STEPS`] (the same table the narrowed rerun reads). `Err(Step::Other)` names a failed step
+/// that is no test step (a lint, a build, a setup step: the job is red whatever its log shows); `Err(Step::Unknown)` is a job this
+/// cannot judge (no failed step listed, a job with no known test step), which is not measured, never test-only.
+pub fn failed_steps_are_tests(workflow: &str, key: &str, failed_steps: &[String]) -> Result<(), StepProblem> {
+    let known: Vec<&str> = TEST_STEPS
+        .iter()
+        .filter(|(w, k, _, _)| *w == workflow && *k == key)
+        .flat_map(|(_, _, s, _)| s.iter().copied())
+        .chain(
+            VITEST_STEPS
+                .iter()
+                .filter(|(w, k, _)| *w == workflow && *k == key)
+                .flat_map(|(_, _, s)| s.iter().copied()),
+        )
+        .collect();
+    if failed_steps.is_empty() {
+        return Err(StepProblem::Unknown("the run lists no failed step for the job".into()));
+    }
+    if known.is_empty() {
+        return Err(StepProblem::Unknown(format!(
+            "job {key} of {workflow} has no step known to run tests"
+        )));
+    }
+    match failed_steps.iter().find(|s| !known.contains(&s.as_str())) {
+        Some(s) => Err(StepProblem::Other(s.clone())),
+        None => Ok(()),
+    }
+}
+
+/// Why [`failed_steps_are_tests`] refuses.
+#[derive(Debug, PartialEq, Eq)]
+pub enum StepProblem {
+    /// A failed step that is not a test step.
+    Other(String),
+    /// The steps cannot show that only tests failed.
+    Unknown(String),
+}
+
 /// The plan for a run: what reruns, and how ci.yml's plan job hands it to its jobs.
 #[derive(Debug)]
 pub struct SincePlan {

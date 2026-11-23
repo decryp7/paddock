@@ -16,12 +16,16 @@ use serde_json::json;
 const API: &str = "https://gitea.invalid/api/v1/repos/decryp7/paddock/actions";
 const FLAKY_ONLY: &str = include_str!("../../../tests/ci-runs/nextest-r1-flaky-only.log");
 const BOTH_TRIES: &str = include_str!("../../../tests/ci-runs/nextest-r1-pass.log");
-const DYNO: &str = "app dyno (ubuntu-latest)";
+const DYNO: &str = "crate (windows-latest)";
+const TEST_STEP: &str = "Tests (workspace, every feature)";
 const CONFORMANCE: &str = "conformance (checks, release scripts)";
 
 fn sha(n: u32) -> String {
     format!("{n:040x}")
 }
+
+/// A job besides the plan job: name, conclusion, log, steps (name, conclusion).
+type JobSpec = (&'static str, &'static str, Option<String>, Vec<(&'static str, &'static str)>);
 
 struct Run {
     id: u64,
@@ -31,7 +35,7 @@ struct Run {
     conclusion: &'static str,
     plan: &'static str,
     /// The jobs besides the plan job: name, conclusion, log.
-    jobs: Vec<(&'static str, &'static str, Option<String>)>,
+    jobs: Vec<JobSpec>,
 }
 
 impl Run {
@@ -43,7 +47,7 @@ impl Run {
             branch: "train/2026-11-21-18",
             conclusion,
             plan: run_scope::TEST_COMPLETE,
-            jobs: vec![(CONFORMANCE, "success", None)],
+            jobs: vec![(CONFORMANCE, "success", None, Vec::new())],
         }
     }
     fn push(id: u64, sha: &str, conclusion: &'static str) -> Run {
@@ -53,8 +57,13 @@ impl Run {
             ..Run::train(id, sha, conclusion)
         }
     }
-    fn failing(mut self, job: &'static str, log: Option<String>) -> Run {
-        self.jobs.push((job, "failure", log));
+    /// A failed job whose only failed step is its test step, with the log as the real CI prints it (a `Job: <key>` line first).
+    fn failing(self, job: &'static str, log: Option<String>) -> Run {
+        self.failing_steps(job, log, &[(TEST_STEP, "failure")])
+    }
+    fn failing_steps(mut self, job: &'static str, log: Option<String>, steps: &[(&'static str, &'static str)]) -> Run {
+        let log = log.map(|l| format!("Job: crate\n{l}"));
+        self.jobs.push((job, "failure", log, steps.to_vec()));
         self
     }
     fn partial(mut self, plan: &'static str) -> Run {
@@ -97,9 +106,14 @@ fn server(runs: &[Run]) -> Fake {
     for r in runs {
         let plan_job = r.id * 100;
         let mut jobs = vec![json!({"id": plan_job, "name": "plan (affected projects)", "conclusion": "success"})];
-        for (n, (name, conclusion, log)) in r.jobs.iter().enumerate() {
+        for (n, (name, conclusion, log, steps)) in r.jobs.iter().enumerate() {
             let id = plan_job + 1 + n as u64;
-            jobs.push(json!({"id": id, "name": name, "conclusion": conclusion}));
+            let steps: Vec<_> = steps
+                .iter()
+                .enumerate()
+                .map(|(i, (s, c))| json!({"name": s, "number": i, "status": "completed", "conclusion": c}))
+                .collect();
+            jobs.push(json!({"id": id, "name": name, "conclusion": conclusion, "steps": steps}));
             if let Some(l) = log {
                 f.log(id, l);
             }
@@ -111,6 +125,14 @@ fn server(runs: &[Run]) -> Fake {
         f.log(plan_job, r.plan);
     }
     f
+}
+
+/// The plan reached every crate (the strict interim reading: a FLAKY test of a reached crate is red).
+fn reached() -> Touched {
+    Touched {
+        flags: ["crates".to_string()].into(),
+        apps: BTreeSet::new(),
+    }
 }
 
 fn touched(apps: &[&str]) -> Touched {
@@ -180,11 +202,11 @@ fn a_flaky_test_in_a_touched_target_is_red() {
     let r = Run::train(8610, &c, "failure").failing(DYNO, some(FLAKY_ONLY));
     let mut f = server(std::slice::from_ref(&r));
     assert_eq!(
-        base(&mut f, &[c], touched(&["dyno"])),
+        base(&mut f, &[c], reached()),
         None,
         "the change touched dyno: its FLAKY is red, not a base"
     );
-    let o = grade(&mut f, &r, touched(&["dyno"]));
+    let o = grade(&mut f, &r, reached());
     assert!(matches!(&o.result, GradedResult::Red(why) if why.contains("touched")), "{o:?}");
     // Positive control: the same log is fix items when the change touched something else.
     assert!(matches!(
@@ -206,7 +228,11 @@ fn a_test_that_failed_both_tries_is_red_even_in_an_untouched_target() {
 #[test]
 fn a_step_that_is_not_a_test_failing_is_red() {
     let c = sha(2);
-    let r = Run::train(8610, &c, "failure").failing("clippy (ubuntu-latest)", some("error: could not compile `paddock-x`\n"));
+    let r = Run::train(8610, &c, "failure").failing_steps(
+        "clippy (ubuntu-latest)",
+        some("error: could not compile `paddock-x`\n"),
+        &[("Clippy", "failure")],
+    );
     let mut f = server(std::slice::from_ref(&r));
     assert_eq!(base(&mut f, &[c], touched(&["debrief"])), None);
     let o = grade(&mut f, &r, touched(&["debrief"]));
@@ -281,11 +307,7 @@ fn an_interim_strict_flaky_in_any_reached_crate_is_red_and_in_an_unreached_one_i
     let c = sha(2);
     let r = Run::train(8610, &c, "failure").failing("crate (windows-latest)", some(FLAKY_ONLY));
     let mut f = server(std::slice::from_ref(&r));
-    let reached = Touched {
-        flags: ["crates".to_string()].into(),
-        apps: BTreeSet::new(),
-    };
-    assert!(matches!(grade(&mut f, &r, reached).result, GradedResult::Red(_)));
+    assert!(matches!(grade(&mut f, &r, reached()).result, GradedResult::Red(_)));
     assert!(matches!(
         grade(&mut f, &r, touched(&["debrief"])).result,
         GradedResult::GreenWithFixItems(_)
@@ -353,4 +375,31 @@ fn the_candidates_are_the_first_parent_commits_before_the_asking_one_newest_firs
         first_parent_before(dir.path(), &"f".repeat(40)).is_empty(),
         "an unknown commit gives no candidates, so everything runs"
     );
+}
+
+#[test]
+fn a_flaky_job_with_another_failed_step_is_red_and_one_with_no_listed_failed_step_is_not_measured() {
+    // ER-33: the log shows a FLAKY test, but the API lists a second failed step in the same job (here a lint step after the tests).
+    let c = sha(2);
+    let both = [(TEST_STEP, "failure"), ("Clippy", "failure")];
+    let r = Run::train(8610, &c, "failure").failing_steps(DYNO, some(FLAKY_ONLY), &both);
+    let mut f = server(std::slice::from_ref(&r));
+    let o = grade(&mut f, &r, touched(&["debrief"]));
+    assert!(
+        matches!(&o.result, GradedResult::Red(why) if why.contains("Clippy") && why.contains("not a test step")),
+        "{o:?}"
+    );
+    assert_eq!(base(&mut f, std::slice::from_ref(&c), touched(&["debrief"])), None);
+    // The step list is the only thing that differs from the base case: with the test step alone it is fix items.
+    let ok = Run::train(8610, &c, "failure").failing_steps(DYNO, some(FLAKY_ONLY), &[("Clippy", "success"), (TEST_STEP, "failure")]);
+    let mut f = server(std::slice::from_ref(&ok));
+    assert!(matches!(
+        grade(&mut f, &ok, touched(&["debrief"])).result,
+        GradedResult::GreenWithFixItems(_)
+    ));
+    // A failed job whose steps list no failure cannot be shown to be test-only.
+    let none = Run::train(8610, &c, "failure").failing_steps(DYNO, some(FLAKY_ONLY), &[(TEST_STEP, "success")]);
+    let mut f = server(std::slice::from_ref(&none));
+    let o = grade(&mut f, &none, touched(&["debrief"]));
+    assert!(matches!(o.result, GradedResult::NotMeasured(_)), "{o:?}");
 }
