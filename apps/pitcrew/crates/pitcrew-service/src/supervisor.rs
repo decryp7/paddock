@@ -761,7 +761,7 @@ impl Supervisor {
             Some(failure(
                 "the runner is not registered with a server yet; register it from Pitcrew".into(),
             ))
-        } else if let Some(pid) = self.probe.running_binary(&bin.path, None) {
+        } else if let Some(pid) = self.probe.running_runner(&bin.path, None) {
             Some(failure(format!(
                 "a runner from this folder already runs outside Pitcrew (process {pid}); stop the old supervisor (e.g. the GiteaRunnerDesktop scheduled task) so Pitcrew can start its own"
             )))
