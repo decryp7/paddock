@@ -3,6 +3,7 @@
 //! ```text
 //! <root>/pitcrew-heavy-v2.lock/owner        the lock: a directory that appears atomically WITH its owner record
 //! <root>/pitcrew-heavy-v2.lock.slotN        slots 2.. (taken only while the load allows more than one step at a time)
+//! <root>/pitcrew-heavy-v2.lock.cheapN       the quick lane: rows expected under `CHEAP_SECS`, beside the full slots (at most `CHEAP_LANE`)
 //! <root>/pitcrew-heavy.lock                 the old-style lock (honoured while it exists)
 //! <root>/pitcrew-heavy.ticket.<us>-<pid>    FIFO queue tickets
 //! <root>/pitcrew-heavy.high.<pid>-<name>    --high markers
@@ -14,7 +15,7 @@
 
 use crate::clock::Clock;
 use crate::config::Config;
-use crate::gate::{LoadSource, Pressure, allowed_slots, is_container_command, load_text};
+use crate::gate::{CHEAP_LANE, LoadSource, Pressure, allowed_slots, cheap_admitted, is_container_command, load_text};
 use crate::log::{Level, Logger};
 use crate::probe::file_id;
 use crate::procs::{Presence, Procs, evidence, pid_alive};
@@ -33,6 +34,8 @@ use std::time::Duration;
 
 /// The lock directory's name.
 pub const LOCK_NAME: &str = "pitcrew-heavy-v2.lock";
+/// Slot indexes from here are the quick lane's: `CHEAP_BASE + j` is the folder `<lock>.cheap<j+1>`. Above the most slots a setting allows (64).
+pub const CHEAP_BASE: u32 = 64;
 /// The old-style lock directory's name.
 pub const OLD_NAME: &str = "pitcrew-heavy.lock";
 /// The breaks log's name.
@@ -102,6 +105,18 @@ pub struct Request {
     pub cmdline: String,
     /// Skip the queue and go first.
     pub high: bool,
+    /// How long this row usually runs, in seconds, from the history ([`crate::history`]); `None` when it has none. Under
+    /// `CHEAP_SECS` the row is quick and may run beside the full slots without waiting behind long steps.
+    pub expected_secs: Option<f64>,
+    /// The row's key in the history (`HEAVY_ROW`: the caller's name for the row plus its workspace); `None`: no history is read or kept.
+    pub row: Option<String>,
+}
+
+impl Request {
+    /// Whether this row is expected to be quick: it has a history and the history says under `CHEAP_SECS`. A container run never is.
+    pub fn is_quick(&self) -> bool {
+        self.expected_secs.is_some_and(|s| s < crate::gate::CHEAP_SECS) && !is_container_command(&self.cmdline)
+    }
 }
 
 /// The result of one attempt to take the lock.
@@ -172,7 +187,9 @@ impl Heavy {
 
     /// The lock directory of slot `i` (0-based; slot 0 is the plock-compatible lock).
     pub fn slot_dir(&self, i: u32) -> PathBuf {
-        if i == 0 {
+        if i >= CHEAP_BASE {
+            self.cfg.root.join(format!("{LOCK_NAME}.cheap{}", i - CHEAP_BASE + 1))
+        } else if i == 0 {
             self.cfg.root.join(LOCK_NAME)
         } else {
             self.cfg.root.join(format!("{LOCK_NAME}.slot{}", i + 1))
@@ -634,23 +651,55 @@ impl Heavy {
     /// How many steps may run together now for `req`, and what the rule saw (for the wait line and the log). A step that is a
     /// container run counts as holding the machine alone; so does any live container holder.
     pub fn allowed(&self, req: &Request, dirs: &[PathBuf]) -> (u32, String) {
-        let l = self.load.load();
-        let p = Pressure {
-            load1: l.map(|l| l[0]),
-            load15: l.map(|l| l[2]),
-            idle: self.load.idle_percent(),
-        };
+        let p = self.pressure();
         let container = is_container_command(&req.cmdline) || self.container_running(dirs);
         let n = allowed_slots(self.cfg.slots, self.cfg.cpus, &p, container);
         let seen = format!(
-            "{n} of at most {} at once ({} cores, 15-minute load {}, CPU idle {}{})",
+            "{n} of at most {} at once ({} cores, 15-minute load {}, CPU idle {}, memory available {}{})",
             self.cfg.slots,
             self.cfg.cpus,
             p.load15.map_or("unknown".into(), |x| format!("{x:.1}")),
             p.idle.map_or("unknown".into(), |x| format!("{x:.0}%")),
+            p.memory_mb.map_or("unknown".into(), |m| format!("{m} MiB")),
             if container { ", a container run alone" } else { "" }
         );
         (n, seen)
+    }
+
+    /// What the machine looks like now: the load averages, the CPU idle share and the memory available.
+    pub fn pressure(&self) -> Pressure {
+        let l = self.load.load();
+        Pressure {
+            load1: l.map(|l| l[0]),
+            load15: l.map(|l| l[2]),
+            idle: self.load.idle_percent(),
+            memory_mb: self.load.available_memory_mb(),
+        }
+    }
+
+    /// The live holders' quick-lane folders: those that exist.
+    pub fn held_cheap_dirs(&self) -> Vec<PathBuf> {
+        (0..CHEAP_LANE)
+            .map(|j| self.slot_dir(CHEAP_BASE + j))
+            .filter(|d| d.is_dir())
+            .collect()
+    }
+
+    /// The text of the admission decision, for the log and the wait line: what the rule saw and why a step was let in (or not).
+    fn admission_props(&self, req: &Request, lane: &str, running: usize, allowed: u32) -> Vec<(&'static str, Value)> {
+        let p = self.pressure();
+        vec![
+            ("Lane", json!(lane)),
+            ("Running", json!(running)),
+            ("Allowed", json!(allowed)),
+            ("MaxSlots", json!(self.cfg.slots)),
+            ("Cpus", json!(self.cfg.cpus)),
+            ("Load1", json!(p.load1)),
+            ("Load15", json!(p.load15)),
+            ("IdlePercent", json!(p.idle)),
+            ("MemoryAvailableMiB", json!(p.memory_mb)),
+            ("ExpectedSeconds", json!(req.expected_secs)),
+        ]
     }
 
     /// The load gate for one check: Ok(None) open, Ok(Some(text)) closed.
@@ -797,6 +846,18 @@ impl Heavy {
                 }
             } else {
                 out += &format!("{pre}free\n");
+            }
+        }
+        for j in 0..CHEAP_LANE {
+            let dir = self.slot_dir(CHEAP_BASE + j);
+            if let (true, OwnerRead::Ok(o)) = (dir.is_dir(), self.read_owner(&dir)) {
+                out += &format!(
+                    "quick lane {}: held by {} pid {} for {}\n",
+                    j + 1,
+                    o.name,
+                    o.pid,
+                    mins(self.now(), o.epoch)
+                );
             }
         }
         let old = self.cfg.root.join(OLD_NAME);
@@ -1080,6 +1141,15 @@ impl<'a> Acquirer<'a> {
             // A container run that asked for the drain goes by its own marker, not by its place in the queue: every other step waits for
             // the drain (above), so a head that waits for it would otherwise wait for a drain owner queued behind it, which waits for
             // the head (the deadlock of 2026-11-18). Its ticket stays until it holds a slot.
+            // A quick row (expected under `CHEAP_SECS` by the history) goes first when the machine has the idle CPU and the memory for a
+            // step more: it takes a place in the quick lane beside the full slots and does not queue behind long steps. It keeps its
+            // ticket meanwhile (a waiter holds a ticket, never a slot, ER-43) and falls back to the queue when the lane is not open.
+            let quick_ok = h.cfg.slots > 1
+                && self.req.is_quick()
+                && !h.container_running(&h.held_dirs())
+                && cheap_admitted(h.cfg.cpus, &h.pressure(), false)
+                && h.held_cheap_dirs().len() < CHEAP_LANE as usize;
+            let mut at_head = true;
             if waitfor::follows_queue(role, rules) {
                 if !self.ticket.is_file()
                     && let Err(e) = self.make_ticket()
@@ -1087,7 +1157,8 @@ impl<'a> Acquirer<'a> {
                     return Poll::GaveUp(e);
                 }
                 let (pos, len, head) = h.queue(&self.ticket, &name);
-                if pos != 1 {
+                at_head = pos == 1;
+                if pos != 1 && !quick_ok {
                     self.check_cycle();
                     self.wait_for(
                         "queue",
@@ -1116,7 +1187,8 @@ impl<'a> Acquirer<'a> {
             let mut busy: Option<PathBuf> = None;
             // A stale holder is broken first, so the count below is of live ones.
             let dirs = h.held_dirs();
-            for d in &dirs {
+            let cheap_dirs = h.held_cheap_dirs();
+            for d in dirs.iter().chain(&cheap_dirs) {
                 if h.break_if_stale(d, &name) {
                     continue 'again;
                 }
@@ -1128,14 +1200,19 @@ impl<'a> Acquirer<'a> {
             };
             // A waiter holds a ticket, never a slot (ER-43): the slot of a step that waits for the load stays free for whoever
             // the rule lets in.
-            let limited = dirs.len() >= allowed as usize;
-            for i in 0..h.cfg.slots {
+            // A container run also waits for the quick lane to empty: it runs alone.
+            let limited = dirs.len() >= allowed as usize || !at_head || (container_req && !cheap_dirs.is_empty());
+            let quick_lane = if quick_ok { CHEAP_BASE..CHEAP_BASE + CHEAP_LANE } else { 0..0 };
+            for i in (0..h.cfg.slots).chain(quick_lane) {
                 let dir = h.slot_dir(i);
+                let in_quick_lane = i >= CHEAP_BASE;
                 if dir.exists() {
-                    busy.get_or_insert(dir);
+                    if !in_quick_lane {
+                        busy.get_or_insert(dir);
+                    }
                     continue;
                 }
-                if limited {
+                if limited && !in_quick_lane {
                     continue;
                 }
                 let t = h.clock.now_micros();
@@ -1147,7 +1224,7 @@ impl<'a> Acquirer<'a> {
                         }
                         // Two takers can both have seen room (the load rose, a container run arrived, a high run came in beside the
                         // head): look again now that the slot is ours, and step back if the younger of too many. The ticket stays.
-                        if h.cfg.slots > 1 && h.over_allowed(&self.req, i, self.epoch) {
+                        if h.cfg.slots > 1 && !in_quick_lane && h.over_allowed(&self.req, i, self.epoch) {
                             self.release_slot();
                             h.log.info(
                                 "heavy.wait",
@@ -1162,6 +1239,11 @@ impl<'a> Acquirer<'a> {
                             return Poll::Waiting;
                         }
                         self.waited_micros = h.clock.now_micros().saturating_sub(self.t0_micros);
+                        // The admission decision, with what the rule saw: a stall explains itself from this line (ER-27).
+                        let lane = if in_quick_lane { "quick" } else { "slot" };
+                        let mut props = h.admission_props(&self.req, lane, dirs.len() + cheap_dirs.len() + 1, allowed);
+                        props.push(("WaitedSeconds", json!(self.waited_micros / 1_000_000)));
+                        h.log.info("heavy.admit", &format!("admitted to the {lane} lane: {seen}"), &props);
                         h.log.info(
                             "heavy.phase",
                             "took the lock",
@@ -1252,6 +1334,7 @@ impl<'a> Acquirer<'a> {
             .h
             .held_dirs()
             .iter()
+            .chain(&self.h.held_cheap_dirs())
             .filter_map(|d| match self.h.read_owner(d) {
                 OwnerRead::Ok(o) => Some(o),
                 _ => None,

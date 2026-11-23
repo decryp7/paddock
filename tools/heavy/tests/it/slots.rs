@@ -136,6 +136,7 @@ fn the_rule_in_numbers() {
         load1: Some(l),
         load15: Some(l),
         idle: Some(i),
+        memory_mb: Some(64 * 1024),
     };
     // 14 cores, 2 cores a step, at most 5
     assert_eq!(allowed_slots(5, 14, &p(0.0, 100.0), false), 5);
@@ -149,6 +150,7 @@ fn the_rule_in_numbers() {
         load1: Some(14.0),
         load15: Some(2.0),
         idle: Some(90.0),
+        memory_mb: Some(64 * 1024),
     };
     assert_eq!(allowed_slots(5, 14, &burst, false), 1);
     assert_eq!(allowed_slots(5, 14, &p(0.0, 100.0), true), 1);
@@ -160,7 +162,8 @@ fn the_rule_in_numbers() {
             &Pressure {
                 load1: None,
                 load15: None,
-                idle: Some(100.0)
+                idle: Some(100.0),
+                memory_mb: Some(64 * 1024)
             },
             false
         ),
@@ -173,7 +176,8 @@ fn the_rule_in_numbers() {
             &Pressure {
                 load1: Some(0.0),
                 load15: Some(0.0),
-                idle: None
+                idle: None,
+                memory_mb: Some(64 * 1024)
             },
             false
         ),

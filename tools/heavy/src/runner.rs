@@ -295,6 +295,17 @@ pub fn run(h: &Heavy, req: Request, args: &[String], opts: RunOpts, stop: Stop<'
     let (code, desc, tail) = exec(h, args, opts, stop, &mut acq);
     let ran = h.now().saturating_sub(t2);
     timing(queued, t_run.elapsed().as_secs_f64());
+    // A row that passed teaches the history how long it takes (a failure is not its usual time).
+    if code == 0
+        && let Some(row) = &req.row
+        && let Err(e) = crate::history::History::new(&h.cfg.root).record(row, t_run.elapsed().as_secs_f64(), h.now())
+    {
+        h.log.warn(
+            "heavy.history",
+            "could not record the run time; the next run has no history for it",
+            &[("Error", json!(e.to_string()))],
+        );
+    }
     let t3 = h.now();
     h.log.info(
         "heavy.phase",
@@ -359,6 +370,17 @@ fn exec(h: &Heavy, args: &[String], opts: RunOpts, stop: Stop<'_>, acq: &mut Acq
     cmd.args(&args[1..]);
     // The correlation id travels to the command, so its own logs can be matched to this run.
     cmd.env("DEVKIT_RUN_ID", h.log.run_id());
+    // ER-48: the threads a step may use are set so that steps at once times jobs each stay within the cores. The caller's own value wins
+    // (ER-47: children inherit the environment; a caller that set it chose it).
+    if std::env::var_os("CARGO_BUILD_JOBS").is_none() {
+        let jobs = crate::gate::jobs_per_step(h.cfg.cpus, h.cfg.slots);
+        cmd.env("CARGO_BUILD_JOBS", jobs.to_string());
+        h.log.info(
+            "heavy.run",
+            "CARGO_BUILD_JOBS set for the step",
+            &[("Jobs", json!(jobs)), ("MaxSlots", json!(h.cfg.slots)), ("Cpus", json!(h.cfg.cpus))],
+        );
+    }
     // The prompt policy (ER-47, named: paddock_env::command::no_prompts): no standard input and no toolchain auto-install, so a
     // tool that asks "install X? [Y/n]" cannot hold the slot for hours (cargo llvm-cov did, 2026-11-20). HEAVY_STDIN=inherit opts in.
     paddock_env::command::no_prompts(&mut cmd);

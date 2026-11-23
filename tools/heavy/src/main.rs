@@ -154,11 +154,18 @@ fn real_main() -> i32 {
                 }
             }
             let cwd_text = cwd.to_string_lossy().into_owned();
+            let row = env_get("HEAVY_ROW")
+                .map(|k| heavy::history::clean_key(&k))
+                .filter(|k| !k.is_empty());
             let req = Request {
                 name: heavy::timefmt::oneline(&r.name),
                 cwd: heavy::timefmt::oneline(&cwd_text),
                 cmdline: heavy::mask::mask_cmd(&r.command),
                 high: r.high,
+                expected_secs: row
+                    .as_deref()
+                    .and_then(|k| heavy::history::History::new(&h.cfg.root).expected_secs(k)),
+                row,
             };
             let (int, term, hup) = stop_flags();
             let stop = move || exit::stop_code(int.load(Ordering::SeqCst), term.load(Ordering::SeqCst), hup.load(Ordering::SeqCst));

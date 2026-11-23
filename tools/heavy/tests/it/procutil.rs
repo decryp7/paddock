@@ -159,13 +159,20 @@ pub fn heavy_in(w: &World, cwd: Option<&Path>, args: &[&str], env: &[(&str, &str
     base_env(&mut c, w);
     c.args(args).stdout(Stdio::piped()).stderr(Stdio::piped());
     for (k, v) in env {
-        c.env(k, v);
+        if *v == UNSET {
+            c.env_remove(k);
+        } else {
+            c.env(k, v);
+        }
     }
     Guard {
         child: c.spawn().expect("spawn heavy"),
         label: format!("heavy {args:?}"),
     }
 }
+
+/// As a value in the `env` of [`heavy_in`]: the variable is removed from heavy's environment instead of set.
+pub const UNSET: &str = "\u{0}unset";
 
 /// Runs `heavy <args>` to the end and returns (exit code, stdout, stderr).
 pub fn heavy_out(w: &World, args: &[&str], env: &[(&str, &str)]) -> (i32, String, String) {

@@ -688,3 +688,80 @@ fn heavy_stdin_inherit_is_the_explicit_opt_in_and_the_probe_sees_an_open_pipe() 
         "with HEAVY_STDIN=inherit the command should wait on the open pipe: {r:?}"
     );
 }
+
+#[test]
+fn a_passing_row_is_recorded_in_the_history_and_a_failing_one_is_not() {
+    let w = World::new();
+    let hist = w.root().join(heavy::history::FILE);
+    let (code, _o, e) = heavy_out(
+        &w,
+        &["run", "--no-gate", "R", "--", "sh", "-c", "exit 0"],
+        &[("HEAVY_ROW", "clippy apps/dyno")],
+    );
+    assert_eq!(code, 0, "{e}");
+    let text = w.read(&hist);
+    assert!(
+        text.lines().count() == 1 && text.trim_end().ends_with("\tclippy apps/dyno"),
+        "{text}"
+    );
+    // A failure is not the row's usual time.
+    let (code, _o, _e) = heavy_out(
+        &w,
+        &["run", "--no-gate", "R", "--", "sh", "-c", "exit 3"],
+        &[("HEAVY_ROW", "other row")],
+    );
+    assert_eq!(code, 3);
+    assert!(!w.read(&hist).contains("other row"));
+    // Control: without HEAVY_ROW nothing is kept.
+    let w2 = World::new();
+    let (code, _o, _e) = heavy_out(&w2, &["run", "--no-gate", "R", "--", "sh", "-c", "exit 0"], &[]);
+    assert_eq!(code, 0);
+    assert!(!w2.root().join(heavy::history::FILE).exists());
+}
+
+#[test]
+fn the_binary_reads_the_rows_expected_time_from_the_history_and_logs_the_admission() {
+    // A history that says the row takes a second: the binary reads it by HEAVY_ROW (which lane it takes depends on this machine's load;
+    // the lane rules are tested in admission.rs on a fake load).
+    let w = World::new();
+    std::fs::write(w.root().join(heavy::history::FILE), "1\t1000\tquick row\n").unwrap();
+    let env = [("HEAVY_ROW", "quick row"), ("HEAVY_SLOTS", "4"), ("HEAVY_CPUS", "16")];
+    let (code, _o, e) = heavy_out(&w, &["run", "--no-gate", "Q", "--", "sh", "-c", "exit 0"], &env);
+    assert_eq!(code, 0, "{e}");
+    // Whatever lane it took, the decision is in the log with the rule's numbers.
+    let logs = std::fs::read_dir(w.root().join("heavy-logs"))
+        .unwrap()
+        .filter_map(Result::ok)
+        .map(|d| w.read(d.path()))
+        .collect::<String>();
+    let admit = logs
+        .lines()
+        .find(|l| l.contains("heavy.admit"))
+        .expect("an admission line in the log");
+    assert!(
+        admit.contains("\"ExpectedSeconds\":1.0") && admit.contains("MemoryAvailableMiB"),
+        "{admit}"
+    );
+}
+
+#[test]
+fn the_step_gets_a_core_cap_unless_the_caller_set_one() {
+    let w = World::new();
+    let probe = ["run", "--no-gate", "J", "--", "sh", "-c", "echo jobs=${CARGO_BUILD_JOBS-unset}"];
+    let (code, o, e) = heavy_out(
+        &w,
+        &probe,
+        &[("CARGO_BUILD_JOBS", UNSET), ("HEAVY_CPUS", "14"), ("HEAVY_SLOTS", "5")],
+    );
+    assert_eq!(code, 0, "{e}");
+    assert!(o.contains("jobs=2"), "{o}");
+    let (_c, o, _e) = heavy_out(
+        &w,
+        &probe,
+        &[("CARGO_BUILD_JOBS", UNSET), ("HEAVY_CPUS", "4"), ("HEAVY_SLOTS", "8")],
+    );
+    assert!(o.contains("jobs=1"), "more steps than half the cores: one job each: {o}");
+    // The caller's own value wins (ER-47).
+    let (_c, o, _e) = heavy_out(&w, &probe, &[("CARGO_BUILD_JOBS", "7")]);
+    assert!(o.contains("jobs=7"), "{o}");
+}

@@ -1001,6 +1001,11 @@ impl RealExec {
         if gate.heavy && !self.env.contains_key("CARGO_BUILD_JOBS") {
             call = call.env("CARGO_BUILD_JOBS", "2");
         }
+        // The row's own name (its id: the step and its workspace), so heavy keeps how long it takes and lets a row that takes seconds
+        // go first (the run's agent name differs every run, so it cannot be the key). An older heavy ignores the variable.
+        if gate.heavy {
+            call = call.env("HEAVY_ROW", &gate.id);
+        }
         for (k, v) in &gate.env {
             call = call.env(k, v);
         }
@@ -2089,6 +2094,12 @@ exit $rc
             s.heavy = true;
             let sh = ex.call(&s, limits, &log, None, "pre-push-1-1").child_env(&ex.env);
             assert!(sh.iter().all(|(k, _)| k != "RUSTC_WRAPPER"), "{sh:?}");
+            // A heavy gate names its row for heavy's history; a gate that does not go through heavy has no such variable.
+            assert!(sh.contains(&("HEAVY_ROW".into(), "conformance".into())), "{sh:?}");
+            let mut light = gate("fmt crates", "true");
+            light.heavy = false;
+            let l = ex.call(&light, limits, &log, None, "pre-push-1-1").child_env(&ex.env);
+            assert!(l.iter().all(|(k, _)| k != "HEAVY_ROW"), "{l:?}");
         }
 
         /// The live queue state ([`Exec::slot`], ADR 0102 amendment 2026-11-18): queued from the start of a step through our

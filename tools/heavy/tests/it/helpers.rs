@@ -141,6 +141,8 @@ pub fn req(name: &str) -> Request {
         cwd: "/work".into(),
         cmdline: "cargo test".into(),
         high: false,
+        expected_secs: None,
+        row: None,
     }
 }
 
