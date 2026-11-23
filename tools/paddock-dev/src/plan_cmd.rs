@@ -287,7 +287,12 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
         // OS-scoped tests: the packages and filterset of the app's macOS leg of its own workflow (debrief.yml's `rust tests (macOS)`), from
         // its `hostTests`; empty when it declares none, so the job tests everything as before. A rerun writes its own filter instead.
         if let Some(path) = env("GITHUB_OUTPUT") {
-            let host = HostTests::parse(graph.config(app), &format!("apps/{app}/paddock.ci.json")).map_err(fail)?;
+            let host = crate::host_tests::read(
+                graph.config(app),
+                &format!("apps/{app}/paddock.ci.json"),
+                &graph.derived(&format!("apps/{app}")),
+            )
+            .map_err(fail)?;
             // A nightly or a tag run tests every package here too (`full_os` without PLAN_APP: the app's own workflow asks for it by name).
             let full = env("PLAN_FULL_OS").is_some_and(|v| v == "true")
                 || env("PLAN_FULL").is_some_and(|v| v == "true")
@@ -322,7 +327,7 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
         let host = if full_os(env) {
             None
         } else {
-            read_host_tests(root, contract).map_err(fail)?
+            read_host_tests(root, contract, &graph.derived(workspace_dir)).map_err(fail)?
         };
         os_scoped |= host.is_some();
         // The packages a member run reaches in this workspace (the plan's list, when the run is narrowed to it: the member filter is set).
@@ -410,12 +415,12 @@ const CRATES_CONTRACT: &str = "crates/paddock.ci.json";
 const PADDOCK_DEV_CONTRACT: &str = "tools/paddock-dev/paddock.ci.json";
 
 /// The `hostTests` of the contract at `path` (from the repository root); `None` when the file or the field is absent.
-fn read_host_tests(root: &Path, path: &str) -> Result<Option<HostTests>, String> {
+fn read_host_tests(root: &Path, path: &str, derived: &crate::host_tests::Derived) -> Result<Option<HostTests>, String> {
     let Ok(text) = std::fs::read_to_string(root.join(path)) else {
         return Ok(None);
     };
     let contract: Value = serde_json::from_str(&text).map_err(|e| format!("{path} is not valid JSON: {e}"))?;
-    HostTests::parse(&contract, path)
+    crate::host_tests::read(&contract, path, derived)
 }
 
 /// The runners of the `crate` and `paddock-dev` jobs: the `os` of each entry of `PLAN_OS_LEGS` (ci.yml's own default list), or the

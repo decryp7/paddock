@@ -81,18 +81,5 @@
       "app/src-tauri/resources"
     ]
   },
-  "hostTests": {
-    "packages": [
-      "dyno-agent",
-      "dyno-app",
-      "dyno-bench",
-      "dyno-bench-gpu",
-      "dyno-cli",
-      "dyno-core",
-      "dyno-helper",
-      "dyno-helper-service",
-      "dyno-platform",
-      "dyno-plugin-host"
-    ]
-  }
+  "hostTests": {}
 }

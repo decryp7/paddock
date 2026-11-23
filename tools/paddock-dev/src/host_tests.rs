@@ -1,24 +1,33 @@
 //! `hostTests`: which tests run on the Windows and macOS legs (OS-scoped tests, docs/research/2026-11-22-os-scoped-tests.md, user
 //! decision 2026-11-22: "a test runs on an OS only if its code behaves differently there").
 //!
-//! One declared field of a CI contract (`crates/paddock.ci.json`, `apps/<app>/paddock.ci.json`, `tools/paddock-dev/paddock.ci.json`),
-//! read through this one accessor by the planner ([`crate::plan_ci`]) and by the conformance check C155 ([`crate::check::c155`]),
-//! never by grepping the file (ER-42):
+//! `hostTests`: which tests run on the Windows and macOS legs (OS-scoped tests, docs/research/2026-11-22-os-scoped-tests.md, user
+//! decision 2026-11-22: "a test runs on an OS only if its code behaves differently there"; ADR 0117 §7, WP-6).
+//!
+//! The placement is **derived from the code** (`crate::os_placement`: OS `cfg`, OS-API crates, portable-layer entry points,
+//! `build.rs`, `env::consts::OS`, `process.platform`, OS-behaviour dependencies; the `os` edges of the repository graph). The field of
+//! a CI contract (`crates/paddock.ci.json`, `apps/<app>/paddock.ci.json`, `tools/paddock-dev/paddock.ci.json`) holds only the
+//! **exceptions**, each with a reason, read through this one accessor by the planner ([`crate::plan_ci`]) and by the conformance check
+//! C155 ([`crate::check::c155`]), never by grepping the file (ER-42):
 //!
 //! ```jsonc
 //! "hostTests": {
-//!   "packages": ["paddock-proc", "paddock-service"],           // Cargo packages compiled and tested on the Windows and macOS legs
-//!   "skip":     {"paddock-service": ["model::", "scenarios::"]}, // modules of a host package that are pure logic: Linux only
-//!   "modules":  ["ci_host::", "slots::"],                      // one-crate workspaces (paddock-dev): test-name prefixes
-//!   "only":     {"macos-latest": ["pre_push::"]}               // per-OS additions (a package name, or a prefix ending in `::`)
+//!   // os.add (free): tested on the hosts although no signal marks it (a package name, or a test-name prefix ending in `::`)
+//!   "add":  [{"name": "paddock-diag", "reason": "its tests drive a spawned helper"}],
+//!   // os.skip (the unsafe direction, needs the user, C155 enforces it against the merge base): kept on Linux although marked;
+//!   // a package or prefix, or only some modules of a host package (`modules`)
+//!   "skip": [{"name": "paddock-service", "modules": ["scenarios::"], "reason": "pure logic"}],
+//!   // os.skip of one host (also needs the user): tested on this host only
+//!   "only": [{"os": "macos-latest", "name": "pre_push::", "reason": "a tool of the dev Mac"}]
 //! }
 //! ```
 //!
-//! A workspace without the field keeps today's behaviour (every test on every OS); with it, the Linux leg still runs everything
-//! and a host leg runs only what the field names. The planner turns it into a `-p` list and a nextest filterset ([`HostScope`]).
+//! A workspace without the field keeps today's behaviour (every test on every OS); with it, the Linux leg still runs everything and a
+//! host leg runs the derived placement with the exceptions applied. The planner turns it into a `-p` list and a nextest filterset
+//! ([`HostScope`]). [`read`] is the one place the derived placement and the exceptions meet; [`HostTests`] is the resolved result.
 
-use serde_json::Value;
-use std::collections::BTreeMap;
+use serde_json::{Value, json};
+use std::collections::{BTreeMap, BTreeSet};
 
 /// The runner that runs every test (never scoped).
 pub const LINUX: &str = "ubuntu-latest";
@@ -140,7 +149,7 @@ impl HostTests {
                 "{what}: `hostTests` mixes `packages` with test-name prefixes (`modules` or an `only` entry ending in `::`); a workspace is scoped by one or the other"
             ));
         }
-        if h.packages.is_empty() && h.modules.is_empty() {
+        if h.packages.is_empty() && h.modules.is_empty() && h.only.is_empty() {
             return Err(format!(
                 "{what}: `hostTests` names no package and no module (a host leg would test nothing; delete the field to test everything)"
             ));
@@ -209,6 +218,225 @@ impl HostTests {
     pub fn lists_module(&self, module: &str) -> bool {
         self.modules.iter().any(|m| m == module) || self.only.values().flatten().any(|e| e == module)
     }
+}
+
+/// The shortest reason an exception may give (the same floor as the allow lists').
+pub const MIN_REASON: usize = 8;
+
+/// What the code says about a workspace: the packages (or, for a one-crate workspace, the test-name prefixes) whose tests behave
+/// differently per OS, and everything that exists (so a stale exception is told from a redundant one).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Derived {
+    /// The member packages with an OS mark.
+    pub packages: BTreeSet<String>,
+    /// The test-name prefixes (`ci_host::`) of the modules with an OS mark, for a one-crate workspace.
+    pub modules: BTreeSet<String>,
+    /// Every member package.
+    pub known_packages: BTreeSet<String>,
+    /// Every module prefix of a one-crate workspace.
+    pub known_modules: BTreeSet<String>,
+}
+
+/// One declared exception.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Exception {
+    /// A package name, or a test-name prefix ending in `::`.
+    pub name: String,
+    /// Modules of a host package kept on Linux (`skip` only).
+    pub modules: Vec<String>,
+    /// The one host it is tested on (`only` only).
+    pub os: Option<String>,
+    /// Why (at least [`MIN_REASON`] characters).
+    pub reason: String,
+}
+
+/// The declared `hostTests` exceptions of one workspace, by direction.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Exceptions {
+    /// os.add: free.
+    pub add: Vec<Exception>,
+    /// os.skip: needs the user.
+    pub skip: Vec<Exception>,
+    /// os.skip of one host: needs the user.
+    pub only: Vec<Exception>,
+}
+
+fn entries(v: &Value, at: &str, key: &str) -> Result<Vec<Exception>, String> {
+    let Some(list) = v.as_array() else {
+        return Err(format!("{at} must be an array of {{name, reason}} objects"));
+    };
+    let mut out = Vec::new();
+    for (i, e) in list.iter().enumerate() {
+        let here = format!("{at}[{i}]");
+        let Some(o) = e.as_object() else {
+            return Err(format!("{here} must be an object"));
+        };
+        for k in o.keys() {
+            let known: &[&str] = match key {
+                "skip" => &["name", "modules", "reason"],
+                "only" => &["name", "os", "reason"],
+                _ => &["name", "reason"],
+            };
+            if !known.contains(&k.as_str()) {
+                return Err(format!("{here}: unknown `{k}` (known: {})", known.join(", ")));
+            }
+        }
+        let name = o.get("name").and_then(Value::as_str).filter(|n| !n.is_empty());
+        let Some(name) = name else {
+            return Err(format!("{here}: `name` must be a non-empty string"));
+        };
+        if is_prefix(name) && !prefix_ok(name) {
+            return Err(format!("{here}: `{name}` is not a valid test-name prefix"));
+        }
+        let reason = o.get("reason").and_then(Value::as_str).map(str::trim).unwrap_or("");
+        if reason.chars().count() < MIN_REASON {
+            return Err(format!(
+                "{here}: `{name}` needs a `reason` of at least {MIN_REASON} characters (why this exception, not the derived placement)"
+            ));
+        }
+        let modules = match o.get("modules") {
+            None => Vec::new(),
+            Some(m) => {
+                let list = strings(m, &format!("{here}.modules"))?;
+                if let Some(bad) = list.iter().find(|p| !prefix_ok(p)) {
+                    return Err(format!("{here}.modules: `{bad}` must be a test-name prefix ending in `::`"));
+                }
+                list
+            }
+        };
+        let os = match o.get("os") {
+            None => None,
+            Some(v) => match v.as_str().filter(|s| HOST_OSES.contains(s)) {
+                Some(s) => Some(s.to_string()),
+                None => return Err(format!("{here}: `os` must be one of {}", HOST_OSES.join(", "))),
+            },
+        };
+        if key == "only" && os.is_none() {
+            return Err(format!("{here}: `only` needs an `os` ({})", HOST_OSES.join(", ")));
+        }
+        out.push(Exception {
+            name: name.to_string(),
+            modules,
+            os,
+            reason: reason.to_string(),
+        });
+    }
+    Ok(out)
+}
+
+impl Exceptions {
+    /// The declared exceptions of a parsed contract: `Ok(None)` when it has no `hostTests` (the workspace is not scoped), an error
+    /// naming `what` (the contract's path) when the field is malformed (a typo must never silently turn the scope off).
+    pub fn parse(contract: &Value, what: &str) -> Result<Option<Exceptions>, String> {
+        let Some(v) = contract.get("hostTests") else {
+            return Ok(None);
+        };
+        let Some(obj) = v.as_object() else {
+            return Err(format!("{what}: `hostTests` must be an object"));
+        };
+        let mut out = Exceptions::default();
+        for (k, val) in obj {
+            let at = format!("{what}: `hostTests.{k}`");
+            match k.as_str() {
+                "add" => out.add = entries(val, &at, "add")?,
+                "skip" => out.skip = entries(val, &at, "skip")?,
+                "only" => out.only = entries(val, &at, "only")?,
+                other => {
+                    return Err(format!(
+                        "{what}: unknown `hostTests.{other}` (the placement is derived from the code; known: add, skip, only)"
+                    ));
+                }
+            }
+        }
+        Ok(Some(out))
+    }
+
+    /// The resolved placement: the derived one with the exceptions applied, as the object [`HostTests::parse`] reads.
+    pub fn resolved(&self, derived: &Derived) -> Value {
+        let by_module = !derived.known_modules.is_empty();
+        let mut common: BTreeSet<String> = if by_module {
+            derived.modules.clone()
+        } else {
+            derived.packages.clone()
+        };
+        // `skip` without modules takes the whole entry off the hosts; `only` takes it off the common list and puts it on its host.
+        // A prefix entry takes everything below it (`pre_push::` covers `pre_push::exec::`), as it does in a nextest filterset.
+        let take_off = |common: &mut BTreeSet<String>, name: &str| {
+            if is_prefix(name) {
+                common.retain(|c| !c.starts_with(name));
+            } else {
+                common.remove(name);
+            }
+        };
+        for s in self.skip.iter().filter(|s| s.modules.is_empty()) {
+            take_off(&mut common, &s.name);
+        }
+        let mut only: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        for o in &self.only {
+            take_off(&mut common, &o.name);
+            if let Some(os) = &o.os {
+                only.entry(os.clone()).or_default().push(o.name.clone());
+            }
+        }
+        // `add` comes last: it puts a name back that a wider `skip` or `only` prefix took off (a module the host code calls inside a
+        // dev-Mac folder), and adds what no signal marks.
+        for a in &self.add {
+            common.insert(a.name.clone());
+        }
+        let skip: BTreeMap<String, Vec<String>> = self
+            .skip
+            .iter()
+            .filter(|s| !s.modules.is_empty())
+            .map(|s| (s.name.clone(), s.modules.clone()))
+            .collect();
+        let mut out = serde_json::Map::new();
+        out.insert(if by_module { "modules" } else { "packages" }.into(), json!(common));
+        if !skip.is_empty() {
+            out.insert("skip".into(), json!(skip));
+        }
+        if !only.is_empty() {
+            out.insert("only".into(), json!(only));
+        }
+        Value::Object(out)
+    }
+}
+
+/// Whether the resolved placement `resolved` (an [`Exceptions::resolved`] result) runs `name` (a package, or a test-name prefix) on every
+/// host: the name is listed, or a listed prefix is above it.
+pub fn resolved_covers(resolved: &Value, name: &str) -> bool {
+    ["packages", "modules"]
+        .iter()
+        .filter_map(|k| resolved.get(k)?.as_array())
+        .flatten()
+        .filter_map(Value::as_str)
+        .any(|l| l == name || (is_prefix(l) && name.starts_with(l)))
+}
+
+/// The `hostTests` of a contract as the planner uses them: the placement derived from the code with the declared exceptions applied.
+/// `Ok(None)` when the contract declares no `hostTests` (not scoped: every test everywhere) or when nothing is marked and nothing is
+/// added (a host leg with nothing to test would be read as "everything"; the Linux leg already tests it).
+pub fn read(contract: &Value, what: &str, derived: &Derived) -> Result<Option<HostTests>, String> {
+    let Some(ex) = Exceptions::parse(contract, what)? else {
+        return Ok(None);
+    };
+    // The packages the contract keeps off the host legs by an older decision (`lastPackages`: a Tauri shell whose build overwrites a
+    // binary the other tests start) are not host packages, whatever the code says.
+    let last: BTreeSet<String> = contract
+        .get("lastPackages")
+        .and_then(Value::as_array)
+        .map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect())
+        .unwrap_or_default();
+    let mut derived = derived.clone();
+    derived.packages.retain(|p| !last.contains(p));
+    let resolved = ex.resolved(&derived);
+    let empty = resolved.as_object().is_some_and(|o| {
+        o.values()
+            .all(|v| v.as_array().is_some_and(Vec::is_empty) || v.as_object().is_some_and(serde_json::Map::is_empty))
+    });
+    if empty {
+        return Ok(None);
+    }
+    HostTests::parse(&json!({ "hostTests": resolved }), what)
 }
 
 /// `a` and `b` as one nextest filterset that needs both (`(a) & (b)`); either may be empty.
@@ -286,6 +514,110 @@ mod tests {
             and_filters("package(=p)", &s.scope("macos-latest").filter),
             "(package(=p)) & (not ((package(=p) & test(/^(?:model::|x::y::)/))))"
         );
+    }
+
+    fn derived(packages: &[&str], modules: &[&str]) -> Derived {
+        Derived {
+            packages: packages.iter().map(|s| s.to_string()).collect(),
+            modules: modules.iter().map(|s| s.to_string()).collect(),
+            known_packages: packages.iter().map(|s| s.to_string()).collect(),
+            known_modules: modules.iter().map(|s| s.to_string()).collect(),
+        }
+    }
+
+    #[test]
+    fn exceptions_are_read_with_their_reasons_and_a_typo_or_a_missing_reason_is_refused() {
+        assert_eq!(Exceptions::parse(&json!({}), "x.json").unwrap(), None);
+        assert_eq!(
+            Exceptions::parse(&json!({"hostTests": {}}), "x.json").unwrap(),
+            Some(Exceptions::default())
+        );
+        let r = "a reason that is long enough";
+        for (bad, why) in [
+            (json!([]), "must be an object"),
+            (json!({"packages": ["a"]}), "unknown `hostTests.packages`"),
+            (json!({"add": "a"}), "array of {name, reason} objects"),
+            (json!({"add": ["a"]}), "must be an object"),
+            (json!({"add": [{"name": "a"}]}), "needs a `reason`"),
+            (json!({"add": [{"name": "a", "reason": "short"}]}), "at least 8 characters"),
+            (json!({"add": [{"name": "", "reason": r}]}), "`name` must be a non-empty string"),
+            (json!({"add": [{"name": "a b::", "reason": r}]}), "not a valid test-name prefix"),
+            (json!({"add": [{"name": "a", "reason": r, "os": "macos-latest"}]}), "unknown `os`"),
+            (json!({"skip": [{"name": "a", "modules": ["m"], "reason": r}]}), "ending in `::`"),
+            (json!({"only": [{"name": "a", "reason": r}]}), "`only` needs an `os`"),
+            (
+                json!({"only": [{"os": "ubuntu-latest", "name": "a", "reason": r}]}),
+                "`os` must be one of",
+            ),
+        ] {
+            let e = Exceptions::parse(&json!({ "hostTests": bad }), "x.json").unwrap_err();
+            assert!(e.contains(why) && e.starts_with("x.json"), "{bad}: {e}");
+        }
+    }
+
+    #[test]
+    fn the_derived_placement_with_the_exceptions_applied_is_what_the_hosts_test() {
+        let r = "a reason that is long enough";
+        let d = derived(&["a", "b", "c"], &[]);
+        // Derived alone: every marked package on every host.
+        let plain = read(&json!({"hostTests": {}}), "x.json", &d).unwrap().unwrap();
+        assert_eq!(plain.scope("windows-latest").packages, ["a", "b", "c"]);
+        assert_eq!(plain.scope(LINUX), HostScope::default());
+        // `add` is free, `skip` takes a package off both hosts, `only` leaves one host, a module `skip` stays a filter.
+        let h = read(
+            &json!({"hostTests": {
+                "add": [{"name": "z", "reason": r}],
+                "skip": [{"name": "b", "reason": r}, {"name": "a", "modules": ["pure::"], "reason": r}],
+                "only": [{"os": "macos-latest", "name": "c", "reason": r}]
+            }}),
+            "x.json",
+            &d,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(h.scope("windows-latest").packages, ["a", "z"]);
+        assert_eq!(h.scope("macos-latest").packages, ["a", "c", "z"]);
+        assert_eq!(h.scope("windows-latest").filter, "not ((package(=a) & test(/^(?:pure::)/)))");
+        // Positive control: without the exceptions the same code gives the plain placement again.
+        assert_eq!(plain.scope("macos-latest").packages, ["a", "b", "c"]);
+    }
+
+    #[test]
+    fn a_prefix_exception_takes_everything_below_it_and_an_add_puts_a_module_back() {
+        let r = "a reason that is long enough";
+        let d = derived(&[], &["pre::", "pre::exec::", "pre::kept::", "other::"]);
+        let h = read(
+            &json!({"hostTests": {
+                "add": [{"name": "pre::exec::", "reason": r}],
+                "only": [{"os": "macos-latest", "name": "pre::", "reason": r}]
+            }}),
+            "x.json",
+            &d,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(h.module_prefixes("windows-latest"), ["other::", "pre::exec::"]);
+        assert_eq!(h.module_prefixes("macos-latest"), ["other::", "pre::", "pre::exec::"]);
+    }
+
+    #[test]
+    fn a_workspace_with_nothing_marked_and_nothing_declared_is_not_scoped_and_last_packages_stay_off_the_hosts() {
+        assert_eq!(read(&json!({"hostTests": {}}), "x.json", &derived(&[], &[])).unwrap(), None);
+        assert_eq!(
+            read(&json!({}), "x.json", &derived(&["a"], &[])).unwrap(),
+            None,
+            "no field, not scoped"
+        );
+        let h = read(
+            &json!({"hostTests": {}, "lastPackages": ["shell"]}),
+            "x.json",
+            &derived(&["a", "shell"], &[]),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(h.scope("windows-latest").packages, ["a"], "the shell is tested last on Linux");
+        assert!(resolved_covers(&json!({"modules": ["a::"]}), "a::b::") && !resolved_covers(&json!({"modules": ["a::"]}), "b::"));
+        assert!(resolved_covers(&json!({"packages": ["p"]}), "p") && !resolved_covers(&json!({"packages": ["p"]}), "q"));
     }
 
     #[test]

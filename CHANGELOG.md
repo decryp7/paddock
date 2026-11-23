@@ -29,6 +29,30 @@ Conventional Commits; one semver tag for the whole repo.
 - `tools-macos` ("VM tooling tests", macOS) is deleted with the tests of the retired VM tooling (`scripts/vm-lock.test.mjs`,
   `vm-win.test.mjs`, `member-gate.test.mjs`, `vm-test-support.mjs` and its test); the scripts themselves stay until their own clean-up.
 
+### CI: OS placement derived from the code, `hostTests` cut to exceptions, `select_os` (ADR 0117 WP-6)
+- The repository graph has an OS extractor (`crates/paddock-repo-graph/src/model/os.rs`, behind the `Extractor` registry; the host's
+  lexer comes through the `RustLex` port) that emits `os` edges from the node that holds an OS signal to a mark node (`os:cfg`,
+  `os:api`, `os:layer`, `os:build-script`, `os:env-consts`, `os:node-platform`, `os:dependency`, and `os:windows` beside the kind when
+  the site names Windows). The signals are C155's detectors (an OS `cfg`, an OS-API crate, a portable-layer entry point in production
+  code) and the wider ones of ADR 0117 §7: `CARGO_CFG_TARGET_OS` in `build.rs`, `cfg!()`, `std::env::consts::OS`, `process.platform`
+  and `os.platform()` in TypeScript and `.mjs`, and `sysinfo`, `notify`, `tauri` and the OS-API crates as dependencies (also a
+  `[target.'cfg(..)']` table). Granularity is the package, and the module for paddock-dev, where a production `use crate::m` from a marked
+  module gives `m` the mark (host code calls it). `select_os(model, node, ignoring)` answers Linux always, and Windows and macOS when
+  a mark reaches the node. Positive control per signal (the file with the signal gives the edge, the same file without it gives none), for
+  comments and strings, test code, non-member crates, the module import edge and the signal an `ignoring` leaves out.
+- `hostTests` in each `paddock.ci.json` holds only exceptions, each with a reason of at least 8 characters: `add` (free), `skip` and
+  `only` (take an OS away: the unsafe direction). `host_tests::read` meets the derived placement (`os_placement::derive`, held in
+  `RepoGraph::host` by `read_graph`) and the exceptions; `lastPackages` stay off the host legs. Old shape (`packages`, `modules`) is
+  refused with a message. Derived against the hand lists and the cost: docs/benchmarks.md, "OS placement derived from the code". A
+  one-line `"hostTests": {}` scopes an app by derivation alone.
+- C155 (report-only, ER-41) is the consistency check between the derived placement and the exceptions: `[stale-entry]`,
+  `[redundant-exception]` (an `add` the code already derives, a `skip` of unmarked code), `[skipped-os-code]`, `[os-code-windows]`,
+  `[bad-contract]`, and `[os-removal]`: every `skip` and `only` entry that the contract at the merge base lacks is one unwaivable
+  finding that needs the user's approval (ER-46; `baseline::growth`, the comparison C53 and the allow lists use). That is how removing an
+  OS is enforced: not by a list that someone edits, but by a check that sees the entry is new. Controls: its own, `tests/it/os_scoped.rs`
+  (the real tree has no finding; a skip over a module with OS code, a stale and a redundant entry and a new `only` in a throwaway git
+  history each go red) and the recorded cases in `tests/fixtures/check/units/c155.json`.
+
 ### Conformance C154 (report-only), `until` in `@decryp7/paddock-ui/testing`, and workers in the ER-48 budget (ER-21 class: fixed-time waits and leaked fake clocks, user decision 2026-11-22)
 - `until(condition, { what, settle?, maxRounds? })` in `@decryp7/paddock-ui/testing`: waits on a condition (returns or stops throwing), runs
   one settle round between reads (default one event-loop turn), counts rounds instead of milliseconds, and fails naming `what` with the last

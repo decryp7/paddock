@@ -153,7 +153,7 @@ static BUILD_CFG: LazyLock<Regex> =
     LazyLock::new(|| re(r"CARGO_CFG_(?:TARGET_OS|TARGET_FAMILY|WINDOWS|UNIX)(?-u:\b)"));
 static NODE_PLATFORM: LazyLock<Regex> = LazyLock::new(|| {
     re(
-        r"(?-u:\b)process[ \t\r\n]*\.[ \t\r\n]*platform(?-u:\b)|(?-u:\b)os[ \t\r\n]*\.[ \t\r\n]*(?:platform|type)[ \t\r\n]*\(",
+        r"(?-u:\b)process[ \t\r\n]*[.][ \t\r\n]*platform(?-u:\b)|(?-u:\b)os[ \t\r\n]*[.][ \t\r\n]*(?:platform|type)[ \t\r\n]*\(",
     )
 });
 static CRATE_PATH: LazyLock<Regex> = LazyLock::new(|| {
@@ -185,6 +185,33 @@ const OS_DEPENDENCIES: [&str; 16] = [
     "fd-lock",
 ];
 
+/// Words one of which every Rust signal contains (a file without any has no site): `cfg`, the OS-API crate names, the portable layer's
+/// entry points, `consts::` (`env::consts::OS`) and `CARGO_CFG`.
+const SIGNAL_WORDS: [&str; 22] = [
+    "cfg",
+    "windows",
+    "libc",
+    "objc2",
+    "core_foundation",
+    "security_framework",
+    "zbus",
+    "nix",
+    "rustix",
+    "winreg",
+    "winapi",
+    "paddock_proc",
+    "paddock_env",
+    "process",
+    "fd_lock",
+    "fs2",
+    "try_lock",
+    "lock_exclusive",
+    "flock",
+    "consts",
+    "CARGO_CFG",
+    "Command",
+];
+
 fn line_of(s: &str, at: usize) -> usize {
     s[..at].bytes().filter(|b| *b == b'\n').count() + 1
 }
@@ -200,6 +227,11 @@ pub fn is_test_file(rel: &str) -> bool {
 /// process, a lock) counts only in production code: a test that starts `node` or `git` to run a check is not code that behaves
 /// differently per OS, the code it drives is judged where it is. `test_file`: [`is_test_file`]; `build_script`: the file is `build.rs`.
 pub fn rust_sites(text: &str, test_file: bool, build_script: bool, lex: &dyn RustLex) -> Vec<Site> {
+    // Most files hold none of the words a signal is made of: a substring test is far cheaper than lexing them (measured in
+    // docs/benchmarks.md, "OS placement derived from the code"). A file that holds a word is read in full.
+    if !SIGNAL_WORDS.iter().any(|w| text.contains(w)) {
+        return Vec::new();
+    }
     let m = lex.mask(text);
     let production = if test_file {
         String::new()
@@ -544,9 +576,11 @@ impl Extractor for OsExtractor<'_> {
             .iter()
             .filter(manifest)
             .filter(|f| {
+                // A one-crate workspace (paddock-dev) has a `[workspace]` of its own and is still the crate its modules belong to.
+                let one_crate = self.module_crates.iter().any(|c| c == manifest_dir(f));
                 text_of
                     .get(f.as_str())
-                    .is_some_and(|t| t.contains("[package]") && !non_member(f, t))
+                    .is_some_and(|t| t.contains("[package]") && (one_crate || !non_member(f, t)))
             })
             .map(|f| manifest_dir(f).to_string())
             .collect();
@@ -608,7 +642,10 @@ impl Extractor for OsExtractor<'_> {
                 acc.entry(d.as_str()).or_default().insert(m.as_str());
                 acc
             });
-        for (dir, id, text) in &importer_files {
+        for (dir, id, text) in importer_files
+            .iter()
+            .filter(|(_, _, t)| t.contains("crate::"))
+        {
             let masked = self.lex.mask(text);
             let known = by_crate.get(dir);
             for (_, path) in crate_paths(&masked, self.lex) {

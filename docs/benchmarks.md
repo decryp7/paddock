@@ -2547,3 +2547,47 @@ The lower bound ADR 0117 §10 compares a parser with. Dev Mac under load (about 
 | `*.rs` | 3,732 | 46.3 MB | `grep -oE` for `use crate::`, `mod x;`, OS `cfg` (8,115 hits) | 0.91 s |
 
 Not measured: `oxc_parser` and `syn` on the same files (WP-3, WP-6), and the Linux runner.
+
+## OS placement derived from the code: what `std::process::Command` decides, and the cost of deriving (2026-11-23, feat/repo-graph-wp6, ADR 0117 WP-6)
+
+`./dev` derives which packages and modules run on the Windows and macOS legs from the code (`tools/paddock-dev/src/os_placement.rs`
+over the repository graph's `os` edges, `crates/paddock-repo-graph/src/model/os.rs`); the `hostTests` of each contract hold only
+exceptions with a reason. ADR 0117 §7 asked to measure, before it is used, how much narrowing the marks by `std::process::Command`
+moves tests on or off a host OS.
+
+Method: `os_placement::derive` and `derive_without` over `git ls-files` of this branch (base `59e5f7ec3` merged with
+`origin/feat/os-scoped-tests` `9959bcb3f`), each workspace of a contract that declares `hostTests`, with every signal on, with
+the `layer` signal (portable-layer entry points: `std::process::Command`, `paddock_proc::command`, file locks) left out, and with the
+`dependency` signal left out. Counts are packages (module prefixes for paddock-dev) that a host leg tests. Dev Mac, debug build,
+load average about 21 (not a quiet machine: counts are exact, times are indications).
+
+| Workspace | Known | All signals | Without `layer` | Without `dependency` |
+|---|---|---|---|---|
+| `crates` (packages) | 58 | 49 | 47 (`paddock-git`, `paddock-siblings`; 31 `#[test]`s) | 49 |
+| `apps/debrief` | 47 | 27 | 27 | 27 |
+| `apps/dyno` | 12 | 10 | 10 | 10 |
+| `apps/pitcrew`, `pitwall`, `spotter` | 4, 6, 5 | 3, 6, 4 | 3, 6, 4 | 3, 6, 4 |
+| `tools/paddock-dev` (modules) | 298 | 125 | 116 (9 modules: `ci_runs::reservation`, `gates::shell`, `golden_cmd`, `load`, `pre_push::warm`, `release_isolation::ledger`, `repo_inputs`, `repo_model`, `repo_model::code`) | 125 |
+
+Result. Dropping `std::process::Command` narrows 2 of 49 crates (31 tests) and 9 of 125 modules; every app is unchanged. It would
+also take Windows and macOS tests away from code that starts `git`, `cargo` or a shell, where the per-process cost differs most per
+OS (about 45 ms a git start on the Windows runner against 6 ms on the Mac, ER-20, Paddock train 14). So the signal is kept: the saving
+is small and it is the unsafe direction. The `dependency` signal (`sysinfo`, `notify`, `tauri`, the OS-API crates) adds nothing to the
+placement on this tree (every package it marks has a code signal already); it stays as the net for a crate that gains such a
+dependency before it gains a call. `os:layer` is a mark of its own (`select_os(.., ignoring)` leaves it out), so the measurement can be
+repeated on any tree: `derive_without(root, files, read, &[Signal::Layer])`.
+
+Against the hand lists of `feat/os-scoped-tests`: every package of the old lists is derived (46 of 46 in `crates`, 27, 10, 3, 4, 4 in
+the apps); the derivation adds `paddock-bench` and `paddock-log` (`env::consts::OS`), `paddock-workspace-hack` (a `[target.'cfg(..)']` table;
+it has no tests), and `pitwall-core` (`env::consts::OS`) and, by the code, `pitwall-app`, which `lastPackages` keeps off the host
+legs. For paddock-dev 101 listed prefixes become 125 derived modules (the import edge now also carries through `ci_run`, `hook::install`,
+`merge_check::git` and others), 17 listed prefixes with no OS signal stay as `add` exceptions with a reason (host-runner production
+code of the CI kit and the callees of host code inside the dev-Mac folders), and the 24 `only.macos-latest` entries stay as `only`
+exceptions (user decision 2026-11-22).
+
+Cost of deriving, release build, load average about 21, all workspaces one after the other: 1.24 s for `crates` 257 ms,
+`apps/debrief` 492 ms, `apps/dyno` 210 ms, `tools/paddock-dev` 87 ms, the rest 230 ms; one bulk read of each workspace's `.rs` files and a
+substring prefilter that skips the lexer for a file with none of the signal words. The same derivation in a debug build without the
+prefilter took 5.6 to 6.5 s (the build and the prefilter were changed together, so the prefilter's share is not separated). The planner
+runs it once per plan, only for the workspaces whose contract declares `hostTests`.
+

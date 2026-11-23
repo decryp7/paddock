@@ -315,9 +315,17 @@ pub struct RepoGraph {
     pub metadata: BTreeMap<String, String>,
     /// The repository root in the spelling cargo prints its paths in.
     pub root_text: String,
+    /// The OS placement derived from the code of each workspace whose contract declares `hostTests` (`crates`, `tools/paddock-dev`,
+    /// `apps/<app>`), see [`crate::os_placement`]; empty where the graph was built by hand (nothing is marked).
+    pub host: BTreeMap<String, crate::host_tests::Derived>,
 }
 
 impl RepoGraph {
+    /// The placement derived for the workspace at `root` (empty when it declares no `hostTests`).
+    pub fn derived(&self, root: &str) -> crate::host_tests::Derived {
+        self.host.get(root).cloned().unwrap_or_default()
+    }
+
     /// An app's `paddock.ci.json` (JSON null when it has none).
     pub fn config(&self, app: &str) -> &Value {
         static NONE: Value = Value::Null;
@@ -838,6 +846,20 @@ pub fn read_graph(root: &Path, history: &dyn History) -> Result<RepoGraph, Graph
         }
         configs.insert(app.clone(), config);
     }
+    // OS placement (ADR 0117 §7): derived once per workspace that declares exceptions, from one bulk read of its sources.
+    let bulk = crate::os_placement::DiskBulk(root.to_path_buf());
+    let mut host = BTreeMap::new();
+    for (ws, contract) in crate::os_placement::workspaces(&files) {
+        let declared = match ws.strip_prefix("apps/") {
+            Some(app) => configs.get(app).is_some_and(|c: &Value| c.get("hostTests").is_some()),
+            None => disk
+                .read_to_string(&contract)
+                .is_ok_and(|t| serde_json::from_str::<Value>(&t).is_ok_and(|c| c.get("hostTests").is_some())),
+        };
+        if declared {
+            host.insert(ws.clone(), crate::os_placement::derive(&ws, &files, &bulk).derived);
+        }
+    }
     Ok(RepoGraph {
         cargo,
         npm: npm_graph(&files, &disk)?,
@@ -845,6 +867,7 @@ pub fn read_graph(root: &Path, history: &dyn History) -> Result<RepoGraph, Graph
         configs,
         metadata: recording.texts.into_inner(),
         root_text: root_text.clone(),
+        host,
     })
 }
 

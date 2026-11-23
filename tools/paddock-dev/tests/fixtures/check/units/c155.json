@@ -1,148 +1,12 @@
 [
  {
-  "name": "unlisted-package-with-an-os-cfg",
+  "name": "an-empty-hosttests-derives-everything-and-flags-nothing",
   "app": "paddock",
   "now": null,
   "files": [
    [
     "crates/paddock.ci.json",
-    "{\"hostTests\": {\"packages\": [\"paddock-a\"]}}"
-   ],
-   [
-    "crates/paddock-a/Cargo.toml",
-    "[package]\nname = \"paddock-a\"\n"
-   ],
-   [
-    "crates/paddock-a/src/lib.rs",
-    "fn a() {}\n"
-   ],
-   [
-    "crates/paddock-b/Cargo.toml",
-    "[package]\nname = \"paddock-b\"\n"
-   ],
-   [
-    "crates/paddock-b/src/lib.rs",
-    "fn x() {}\n#[cfg(windows)]\nfn w() {}\n"
-   ]
-  ],
-  "result": {
-   "findings": [
-    {
-     "check": "C155",
-     "severity": "warn",
-     "rule": 3,
-     "file": "crates/paddock-b/src/lib.rs",
-     "line": 2,
-     "message": "[os-code] `paddock-b` is not in `hostTests` but has 1 OS-specific site(s) in 1 file(s); first: crates/paddock-b/src/lib.rs:2 (cfg)",
-     "fix": "Add \"paddock-b\" to `hostTests.packages` in crates/paddock.ci.json (its tests behave differently per OS), or remove the OS code."
-    }
-   ],
-   "waived": [],
-   "errors": 0,
-   "warnings": 1
-  }
- },
- {
-  "name": "unlisted-package-with-an-os-api-and-a-layer-entry",
-  "app": "paddock",
-  "now": null,
-  "files": [
-   [
-    "crates/paddock.ci.json",
-    "{\"hostTests\": {\"packages\": [\"paddock-a\"]}}"
-   ],
-   [
-    "crates/paddock-a/Cargo.toml",
-    "[package]\nname = \"paddock-a\"\n"
-   ],
-   [
-    "crates/paddock-a/src/lib.rs",
-    "fn a() {}\n"
-   ],
-   [
-    "crates/paddock-b/Cargo.toml",
-    "[package]\nname = \"paddock-b\"\n"
-   ],
-   [
-    "crates/paddock-b/src/lib.rs",
-    "fn x() { let _ = libc::getpid(); }\n"
-   ],
-   [
-    "crates/paddock-c/Cargo.toml",
-    "[package]\nname = \"paddock-c\"\n"
-   ],
-   [
-    "crates/paddock-c/src/lib.rs",
-    "use std::process::Command;\n"
-   ]
-  ],
-  "result": {
-   "findings": [
-    {
-     "check": "C155",
-     "severity": "warn",
-     "rule": 3,
-     "file": "crates/paddock-b/src/lib.rs",
-     "line": 1,
-     "message": "[os-code] `paddock-b` is not in `hostTests` but has 1 OS-specific site(s) in 1 file(s); first: crates/paddock-b/src/lib.rs:1 (os-api)",
-     "fix": "Add \"paddock-b\" to `hostTests.packages` in crates/paddock.ci.json (its tests behave differently per OS), or remove the OS code."
-    },
-    {
-     "check": "C155",
-     "severity": "warn",
-     "rule": 3,
-     "file": "crates/paddock-c/src/lib.rs",
-     "line": 1,
-     "message": "[os-code] `paddock-c` is not in `hostTests` but has 1 OS-specific site(s) in 1 file(s); first: crates/paddock-c/src/lib.rs:1 (layer)",
-     "fix": "Add \"paddock-c\" to `hostTests.packages` in crates/paddock.ci.json (its tests behave differently per OS), or remove the OS code."
-    }
-   ],
-   "waived": [],
-   "errors": 0,
-   "warnings": 2
-  }
- },
- {
-  "name": "portable-unlisted-package-and-words-in-comments-and-strings",
-  "app": "paddock",
-  "now": null,
-  "files": [
-   [
-    "crates/paddock.ci.json",
-    "{\"hostTests\": {\"packages\": [\"paddock-a\"]}}"
-   ],
-   [
-    "crates/paddock-a/Cargo.toml",
-    "[package]\nname = \"paddock-a\"\n"
-   ],
-   [
-    "crates/paddock-a/src/lib.rs",
-    "#[cfg(unix)]\nfn u() {}\n"
-   ],
-   [
-    "crates/paddock-b/Cargo.toml",
-    "[package]\nname = \"paddock-b\"\n"
-   ],
-   [
-    "crates/paddock-b/src/lib.rs",
-    "// cfg(windows) std::process::Command\nfn x() { let _s = \"libc::getpid() cfg(unix)\"; }\n"
-   ]
-  ],
-  "result": {
-   "findings": [],
-   "waived": [],
-   "errors": 0,
-   "warnings": 0
-  }
- },
- {
-  "name": "a-skipped-module-that-has-os-code",
-  "app": "paddock",
-  "now": null,
-  "files": [
-   [
-    "crates/paddock.ci.json",
-    "{\"hostTests\": {\"packages\": [\"paddock-a\"], \"skip\": {\"paddock-a\": [\"model::\"]}}}"
+    "{\"hostTests\": {}}"
    ],
    [
     "crates/paddock-a/Cargo.toml",
@@ -153,59 +17,12 @@
     "#[cfg(windows)]\nfn w() {}\n"
    ],
    [
-    "crates/paddock-a/src/model.rs",
-    "#[cfg(unix)]\nfn u() {}\n"
+    "crates/paddock-b/Cargo.toml",
+    "[package]\nname = \"paddock-b\"\n"
    ],
    [
-    "crates/paddock-a/src/pure.rs",
-    "fn p() {}\n"
-   ]
-  ],
-  "result": {
-   "findings": [
-    {
-     "check": "C155",
-     "severity": "warn",
-     "rule": 3,
-     "file": "crates/paddock-a/src/model.rs",
-     "line": 1,
-     "message": "[skipped-os-code] `paddock-a` keeps `model::` on Linux (`hostTests.skip`) but it has an OS-specific site: crates/paddock-a/src/model.rs:1 (cfg)",
-     "fix": "Remove `model::` from `hostTests.skip.paddock-a` in crates/paddock.ci.json."
-    }
-   ],
-   "waived": [],
-   "errors": 0,
-   "warnings": 1
-  }
- },
- {
-  "name": "a-last-package-is-kept-off-the-host-legs-by-the-contract",
-  "app": "paddock",
-  "now": null,
-  "files": [
-   [
-    "apps/x/paddock.ci.json",
-    "{\"hostTests\": {\"packages\": [\"x-a\"]}, \"lastPackages\": [\"x-shell\"]}"
-   ],
-   [
-    "apps/x/Cargo.toml",
-    "[workspace]\nmembers = []\n"
-   ],
-   [
-    "apps/x/a/Cargo.toml",
-    "[package]\nname = \"x-a\"\n"
-   ],
-   [
-    "apps/x/a/src/lib.rs",
-    "fn a() {}\n"
-   ],
-   [
-    "apps/x/shell/Cargo.toml",
-    "[package]\nname = \"x-shell\"\n"
-   ],
-   [
-    "apps/x/shell/src/lib.rs",
-    "#[cfg(windows)]\nfn w() {}\n"
+    "crates/paddock-b/src/lib.rs",
+    "fn f() {}\n"
    ]
   ],
   "result": {
@@ -216,13 +33,13 @@
   }
  },
  {
-  "name": "a-stale-package-entry-and-a-malformed-contract",
+  "name": "a-stale-add-and-a-redundant-add",
   "app": "paddock",
   "now": null,
   "files": [
    [
     "crates/paddock.ci.json",
-    "{\"hostTests\": {\"packages\": [\"paddock-a\", \"paddock-gone\"]}}"
+    "{\"hostTests\": {\"add\": [{\"name\": \"paddock-gone\", \"reason\": \"a reason that is long enough\"}, {\"name\": \"paddock-a\", \"reason\": \"a reason that is long enough\"}, {\"name\": \"paddock-b\", \"reason\": \"a reason that is long enough\"}]}}"
    ],
    [
     "crates/paddock-a/Cargo.toml",
@@ -230,15 +47,15 @@
    ],
    [
     "crates/paddock-a/src/lib.rs",
-    "fn a() {}\n"
+    "#[cfg(windows)]\nfn w() {}\n"
    ],
    [
-    "apps/x/paddock.ci.json",
-    "{\"hostTests\": {\"pakages\": [\"x\"]}}"
+    "crates/paddock-b/Cargo.toml",
+    "[package]\nname = \"paddock-b\"\n"
    ],
    [
-    "apps/y/paddock.ci.json",
-    "not json"
+    "crates/paddock-b/src/lib.rs",
+    "fn f() {}\n"
    ]
   ],
   "result": {
@@ -249,65 +66,52 @@
      "rule": 3,
      "file": "crates/paddock.ci.json",
      "line": 1,
-     "message": "[stale-entry] `hostTests` lists the package `paddock-gone`, which is no member package under crates/ (a vendored, fuzz or research crate cannot be selected with `-p`)",
-     "fix": "Delete the entry or fix its spelling: a typo here silently drops that package's host tests."
+     "message": "[stale-entry] `hostTests.add` names `paddock-gone`, which is no member package of crates and no module of it",
+     "fix": "Delete the entry or fix its spelling: a typo here silently drops that code's host tests."
     },
     {
      "check": "C155",
      "severity": "warn",
      "rule": 3,
-     "file": "apps/x/paddock.ci.json",
+     "file": "crates/paddock.ci.json",
      "line": 1,
-     "message": "[bad-contract] apps/x/paddock.ci.json: unknown `hostTests.pakages` (known: packages, skip, modules, only)",
-     "fix": "Fix `hostTests` (docs/research/2026-11-22-os-scoped-tests.md)."
-    },
-    {
-     "check": "C155",
-     "severity": "warn",
-     "rule": 3,
-     "file": "apps/y/paddock.ci.json",
-     "line": 1,
-     "message": "[bad-contract] not valid JSON: expected ident at line 1 column 2",
-     "fix": "Fix the file."
+     "message": "[redundant-exception] `hostTests.add` lists `paddock-a`, which the code already marks as OS-specific",
+     "fix": "Delete the entry from crates/paddock.ci.json: the placement is derived, only what the code cannot say is declared."
     }
    ],
    "waived": [],
    "errors": 0,
-   "warnings": 3
+   "warnings": 2
   }
  },
  {
-  "name": "a-listed-module-imports-an-unlisted-one",
+  "name": "a-skip-of-a-module-with-os-code-and-one-without",
   "app": "paddock",
   "now": null,
   "files": [
    [
-    "tools/paddock-dev/paddock.ci.json",
-    "{\"hostTests\": {\"modules\": [\"ci_setup_rust::\", \"ci_run::\"]}}"
+    "crates/paddock.ci.json",
+    "{\"hostTests\": {\"skip\": [{\"name\": \"paddock-a\", \"modules\": [\"model::\", \"pure::\"], \"reason\": \"a reason that is long enough\"}]}}"
    ],
    [
-    "tools/paddock-dev/src/ci_setup_rust.rs",
-    "use crate::local_sccache::server_env;\nfn f() { server_env(); }\n"
+    "crates/paddock-a/Cargo.toml",
+    "[package]\nname = \"paddock-a\"\n"
    ],
    [
-    "tools/paddock-dev/src/local_sccache.rs",
-    "pub fn server_env() {}\n"
+    "crates/paddock-a/src/lib.rs",
+    "mod model;\nmod pure;\n"
    ],
    [
-    "tools/paddock-dev/src/ci_run/mod.rs",
-    "fn r() { crate::pre_push::exec::heavy_prefix(); crate::pre_push::stop_on_signals(); }\n"
+    "crates/paddock-a/src/model.rs",
+    "fn f() { let _ = libc::getpid(); }\n"
    ],
    [
-    "tools/paddock-dev/src/pre_push/mod.rs",
-    "pub fn stop_on_signals() {}\n"
+    "crates/paddock-a/src/pure.rs",
+    "fn p() {}\n"
    ],
    [
-    "tools/paddock-dev/src/pre_push/exec.rs",
-    "pub fn heavy_prefix() {}\n"
-   ],
-   [
-    "tools/paddock-dev/src/pre_push/gates.rs",
-    "fn g() {}\n"
+    "crates/paddock-a/src/cfg.rs",
+    "#[cfg(unix)]\nfn u() {}\n"
    ]
   ],
   "result": {
@@ -316,28 +120,233 @@
      "check": "C155",
      "severity": "warn",
      "rule": 3,
-     "file": "tools/paddock-dev/src/ci_run/mod.rs",
+     "file": "crates/paddock-a/src/model.rs",
      "line": 1,
-     "message": "[import-edge] `ci_run` is host code on windows-latest and calls `crate::pre_push::exec`, which that runner does not test: its tests would stop running there",
-     "fix": "Add \"pre_push::exec::\" to `hostTests.modules` in tools/paddock-dev/paddock.ci.json (or keep `ci_run` off the host legs)."
+     "message": "[skipped-os-code] `paddock-a` keeps `model::` on Linux (`hostTests.skip`) but it has an OS-specific site: crates/paddock-a/src/model.rs:1 (os-api)",
+     "fix": "Remove `model::` from `hostTests.skip` for `paddock-a` in crates/paddock.ci.json."
+    }
+   ],
+   "waived": [],
+   "errors": 0,
+   "warnings": 1
+  }
+ },
+ {
+  "name": "a-skip-of-an-unmarked-package-is-redundant",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/paddock.ci.json",
+    "{\"hostTests\": {\"skip\": [{\"name\": \"paddock-b\", \"reason\": \"a reason that is long enough\"}]}}"
+   ],
+   [
+    "crates/paddock-a/Cargo.toml",
+    "[package]\nname = \"paddock-a\"\n"
+   ],
+   [
+    "crates/paddock-a/src/lib.rs",
+    "#[cfg(unix)]\nfn u() {}\n"
+   ],
+   [
+    "crates/paddock-b/Cargo.toml",
+    "[package]\nname = \"paddock-b\"\n"
+   ],
+   [
+    "crates/paddock-b/src/lib.rs",
+    "// cfg(windows) in a comment\nfn f() { let _ = \"std::process::Command\"; }\n"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C155",
+     "severity": "warn",
+     "rule": 3,
+     "file": "crates/paddock.ci.json",
+     "line": 1,
+     "message": "[redundant-exception] `hostTests.skip` keeps `paddock-b` on Linux, which the code does not mark as OS-specific",
+     "fix": "Delete the entry from crates/paddock.ci.json: unmarked code runs on Linux only already."
+    }
+   ],
+   "waived": [],
+   "errors": 0,
+   "warnings": 1
+  }
+ },
+ {
+  "name": "an-only-macos-package-with-windows-code-and-one-without",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/paddock.ci.json",
+    "{\"hostTests\": {\"only\": [{\"os\": \"macos-latest\", \"name\": \"paddock-a\", \"reason\": \"a reason that is long enough\"}, {\"os\": \"macos-latest\", \"name\": \"paddock-b\", \"reason\": \"a reason that is long enough\"}]}}"
+   ],
+   [
+    "crates/paddock-a/Cargo.toml",
+    "[package]\nname = \"paddock-a\"\n"
+   ],
+   [
+    "crates/paddock-a/src/lib.rs",
+    "use windows_sys::Win32::Foundation::HANDLE;\n"
+   ],
+   [
+    "crates/paddock-b/Cargo.toml",
+    "[package]\nname = \"paddock-b\"\n"
+   ],
+   [
+    "crates/paddock-b/src/lib.rs",
+    "#[cfg(target_os = \"macos\")]\nfn m() {}\n"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C155",
+     "severity": "warn",
+     "rule": 3,
+     "file": "crates/paddock.ci.json",
+     "line": 1,
+     "message": "[os-code-windows] `paddock-a` is tested only on macOS (`hostTests.only`) but `paddock-a` holds Windows code: it would never run on Windows",
+     "fix": "Remove the `only` entry for `paddock-a` in crates/paddock.ci.json (it then runs on every host), or remove the Windows code."
+    }
+   ],
+   "waived": [],
+   "errors": 0,
+   "warnings": 1
+  }
+ },
+ {
+  "name": "an-old-shape-contract-and-an-exception-without-a-reason-are-refused",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "apps/x/paddock.ci.json",
+    "{\"hostTests\": {\"packages\": [\"a\"]}}"
+   ],
+   [
+    "apps/y/paddock.ci.json",
+    "{\"hostTests\": {\"add\": [{\"name\": \"a\", \"reason\": \"short\"}]}}"
+   ],
+   [
+    "apps/z/paddock.ci.json",
+    "{not json"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C155",
+     "severity": "warn",
+     "rule": 3,
+     "file": "apps/x/paddock.ci.json",
+     "line": 1,
+     "message": "[bad-contract] apps/x/paddock.ci.json: unknown `hostTests.packages` (the placement is derived from the code; known: add, skip, only)",
+     "fix": "Fix `hostTests` (docs/research/2026-11-22-os-scoped-tests.md; the shape is in tools/paddock-dev/src/host_tests.rs)."
     },
     {
      "check": "C155",
      "severity": "warn",
      "rule": 3,
-     "file": "tools/paddock-dev/src/ci_run/mod.rs",
+     "file": "apps/y/paddock.ci.json",
      "line": 1,
-     "message": "[import-edge] `ci_run` is host code on windows-latest and calls `crate::pre_push`, which that runner does not test: its tests would stop running there",
-     "fix": "Add \"pre_push::\" to `hostTests.modules` in tools/paddock-dev/paddock.ci.json (or keep `ci_run` off the host legs)."
+     "message": "[bad-contract] apps/y/paddock.ci.json: `hostTests.add`[0]: `a` needs a `reason` of at least 8 characters (why this exception, not the derived placement)",
+     "fix": "Fix `hostTests` (docs/research/2026-11-22-os-scoped-tests.md; the shape is in tools/paddock-dev/src/host_tests.rs)."
     },
     {
      "check": "C155",
      "severity": "warn",
      "rule": 3,
-     "file": "tools/paddock-dev/src/ci_setup_rust.rs",
+     "file": "apps/z/paddock.ci.json",
      "line": 1,
-     "message": "[import-edge] `ci_setup_rust` is host code on windows-latest and calls `crate::local_sccache`, which that runner does not test: its tests would stop running there",
-     "fix": "Add \"local_sccache::\" to `hostTests.modules` in tools/paddock-dev/paddock.ci.json (or keep `ci_setup_rust` off the host legs)."
+     "message": "[bad-contract] not valid JSON: key must be a string at line 1 column 2",
+     "fix": "Fix the file."
+    },
+    {
+     "check": "C155",
+     "severity": "error",
+     "rule": 3,
+     "file": "",
+     "line": 1,
+     "message": "not measured: C155 its precondition failed: 0 hostTests declared, 0 source files read; it looked at no file on a whole-tree run",
+     "fix": "Fix the check or its input; a run that did not look is not a pass.",
+     "unwaivable": true,
+     "outcome": "not-measured"
+    }
+   ],
+   "waived": [],
+   "errors": 1,
+   "warnings": 3
+  }
+ },
+ {
+  "name": "a-dependency-and-a-build-script-and-env-consts-derive-a-package",
+  "app": "paddock",
+  "now": null,
+  "files": [
+   [
+    "crates/paddock.ci.json",
+    "{\"hostTests\": {\"add\": [{\"name\": \"paddock-dep\", \"reason\": \"a reason that is long enough\"}, {\"name\": \"paddock-build\", \"reason\": \"a reason that is long enough\"}, {\"name\": \"paddock-consts\", \"reason\": \"a reason that is long enough\"}]}}"
+   ],
+   [
+    "crates/paddock-dep/Cargo.toml",
+    "[package]\nname = \"paddock-dep\"\n[dependencies]\nsysinfo = \"0.40\"\n"
+   ],
+   [
+    "crates/paddock-dep/src/lib.rs",
+    "fn f() {}\n"
+   ],
+   [
+    "crates/paddock-build/Cargo.toml",
+    "[package]\nname = \"paddock-build\"\n"
+   ],
+   [
+    "crates/paddock-build/src/lib.rs",
+    "fn f() {}\n"
+   ],
+   [
+    "crates/paddock-build/build.rs",
+    "fn main() { let _ = std::env::var(\"CARGO_CFG_TARGET_OS\"); }\n"
+   ],
+   [
+    "crates/paddock-consts/Cargo.toml",
+    "[package]\nname = \"paddock-consts\"\n"
+   ],
+   [
+    "crates/paddock-consts/src/lib.rs",
+    "fn o() -> &'static str { std::env::consts::OS }\n"
+   ]
+  ],
+  "result": {
+   "findings": [
+    {
+     "check": "C155",
+     "severity": "warn",
+     "rule": 3,
+     "file": "crates/paddock.ci.json",
+     "line": 1,
+     "message": "[redundant-exception] `hostTests.add` lists `paddock-dep`, which the code already marks as OS-specific",
+     "fix": "Delete the entry from crates/paddock.ci.json: the placement is derived, only what the code cannot say is declared."
+    },
+    {
+     "check": "C155",
+     "severity": "warn",
+     "rule": 3,
+     "file": "crates/paddock.ci.json",
+     "line": 1,
+     "message": "[redundant-exception] `hostTests.add` lists `paddock-build`, which the code already marks as OS-specific",
+     "fix": "Delete the entry from crates/paddock.ci.json: the placement is derived, only what the code cannot say is declared."
+    },
+    {
+     "check": "C155",
+     "severity": "warn",
+     "rule": 3,
+     "file": "crates/paddock.ci.json",
+     "line": 1,
+     "message": "[redundant-exception] `hostTests.add` lists `paddock-consts`, which the code already marks as OS-specific",
+     "fix": "Delete the entry from crates/paddock.ci.json: the placement is derived, only what the code cannot say is declared."
     }
    ],
    "waived": [],
@@ -346,74 +355,37 @@
   }
  },
  {
-  "name": "the-same-modules-all-listed-and-a-partly-listed-folder",
+  "name": "a-module-the-host-code-calls-is-derived-and-an-only-prefix-is-put-back-by-an-add",
   "app": "paddock",
   "now": null,
   "files": [
    [
     "tools/paddock-dev/paddock.ci.json",
-    "{\"hostTests\": {\"modules\": [\"ci_setup_rust::\", \"ci_run::\", \"local_sccache::\", \"pre_push::exec::\"]}}"
+    "{\"hostTests\": {\"add\": [{\"name\": \"pre::exec::\", \"reason\": \"a reason that is long enough\"}, {\"name\": \"callee::\", \"reason\": \"a reason that is long enough\"}, {\"name\": \"ghost::\", \"reason\": \"a reason that is long enough\"}], \"only\": [{\"os\": \"macos-latest\", \"name\": \"pre::\", \"reason\": \"a reason that is long enough\"}]}}"
    ],
    [
-    "tools/paddock-dev/src/ci_setup_rust.rs",
-    "use crate::local_sccache::server_env;\nfn f() { server_env(); }\n"
+    "tools/paddock-dev/Cargo.toml",
+    "[package]\nname = \"paddock-dev\"\n[workspace]\n"
    ],
    [
-    "tools/paddock-dev/src/local_sccache.rs",
-    "pub fn server_env() {}\n"
+    "tools/paddock-dev/src/host.rs",
+    "use crate::callee::go;\n#[cfg(windows)]\nfn w() { go(); }\n"
    ],
    [
-    "tools/paddock-dev/src/ci_run/mod.rs",
-    "fn r() { crate::pre_push::exec::heavy_prefix(); crate::pre_push::stop_on_signals(); }\n"
+    "tools/paddock-dev/src/callee.rs",
+    "pub fn go() {}\n"
    ],
    [
-    "tools/paddock-dev/src/pre_push/mod.rs",
-    "pub fn stop_on_signals() {}\n"
+    "tools/paddock-dev/src/pre/mod.rs",
+    "pub fn p() {}\n"
    ],
    [
-    "tools/paddock-dev/src/pre_push/exec.rs",
-    "pub fn heavy_prefix() {}\n"
-   ]
-  ],
-  "result": {
-   "findings": [],
-   "waived": [],
-   "errors": 0,
-   "warnings": 0
-  }
- },
- {
-  "name": "an-unlisted-module-with-os-code-and-a-stale-module-entry-and-test-imports-ignored",
-  "app": "paddock",
-  "now": null,
-  "files": [
-   [
-    "tools/paddock-dev/paddock.ci.json",
-    "{\"hostTests\": {\"modules\": [\"ci_run::\", \"gone::\"], \"only\": {\"macos-latest\": [\"hook::\"]}}}"
+    "tools/paddock-dev/src/pre/exec.rs",
+    "#[cfg(windows)]\nfn w() {}\n"
    ],
    [
-    "tools/paddock-dev/src/ci_run/mod.rs",
-    "fn r() {}\n#[cfg(test)]\nmod tests { use crate::audit::x; }\n"
-   ],
-   [
-    "tools/paddock-dev/src/ci_run/tests.rs",
-    "use crate::audit::y;\n"
-   ],
-   [
-    "tools/paddock-dev/src/audit.rs",
-    "use std::process::Command;\n"
-   ],
-   [
-    "tools/paddock-dev/src/hook.rs",
-    "#[cfg(unix)]\nfn h() {}\n"
-   ],
-   [
-    "tools/paddock-dev/tests/it/main.rs",
-    "mod wrapper;\n"
-   ],
-   [
-    "tools/paddock-dev/tests/it/wrapper.rs",
-    "#[cfg(windows)]\n#[test]\nfn w() {}\n"
+    "tools/paddock-dev/src/pre/kept.rs",
+    "#[cfg(unix)]\nfn u() {}\n"
    ]
   ],
   "result": {
@@ -424,279 +396,17 @@
      "rule": 3,
      "file": "tools/paddock-dev/paddock.ci.json",
      "line": 1,
-     "message": "[stale-entry] `hostTests` lists the module `gone::`, which names no file of tools/paddock-dev/src or tests/it",
-     "fix": "Delete the entry or fix its spelling: a typo here silently drops those tests from the host legs."
+     "message": "[stale-entry] `hostTests.add` names `ghost::`, which is no member package of tools/paddock-dev and no module of it",
+     "fix": "Delete the entry or fix its spelling: a typo here silently drops that code's host tests."
     },
     {
      "check": "C155",
      "severity": "warn",
      "rule": 3,
-     "file": "tools/paddock-dev/src/audit.rs",
+     "file": "tools/paddock-dev/paddock.ci.json",
      "line": 1,
-     "message": "[os-code] `audit::` is not in `hostTests` but has 1 OS-specific site(s) in 1 file(s); first: tools/paddock-dev/src/audit.rs:1 (layer)",
-     "fix": "Add \"audit::\" to `hostTests.modules` (or `only.macos-latest` for a dev-Mac tool) in tools/paddock-dev/paddock.ci.json."
-    },
-    {
-     "check": "C155",
-     "severity": "warn",
-     "rule": 3,
-     "file": "tools/paddock-dev/tests/it/wrapper.rs",
-     "line": 1,
-     "message": "[os-code] `wrapper::` is not in `hostTests` but has 1 OS-specific site(s) in 1 file(s); first: tools/paddock-dev/tests/it/wrapper.rs:1 (cfg)",
-     "fix": "Add \"wrapper::\" to `hostTests.modules` (or `only.macos-latest` for a dev-Mac tool) in tools/paddock-dev/paddock.ci.json."
-    }
-   ],
-   "waived": [],
-   "errors": 0,
-   "warnings": 3
-  }
- },
- {
-  "name": "a-listed-vendored-or-standalone-package-is-no-member",
-  "app": "paddock",
-  "now": null,
-  "files": [
-   [
-    "apps/x/paddock.ci.json",
-    "{\"hostTests\": {\"packages\": [\"x-a\", \"tray-icon\", \"quack-harness\"]}}"
-   ],
-   [
-    "apps/x/a/Cargo.toml",
-    "[package]\nname = \"x-a\"\n"
-   ],
-   [
-    "apps/x/a/src/lib.rs",
-    "fn a() {}\n"
-   ],
-   [
-    "apps/x/vendor/tray-icon/Cargo.toml",
-    "[package]\nname = \"tray-icon\"\n"
-   ],
-   [
-    "apps/x/docs/research/harness/Cargo.toml",
-    "[package]\nname = \"quack-harness\"\n\n[workspace]\n"
-   ]
-  ],
-  "result": {
-   "findings": [
-    {
-     "check": "C155",
-     "severity": "warn",
-     "rule": 3,
-     "file": "apps/x/paddock.ci.json",
-     "line": 1,
-     "message": "[stale-entry] `hostTests` lists the package `tray-icon`, which is no member package under apps/x/ (a vendored, fuzz or research crate cannot be selected with `-p`)",
-     "fix": "Delete the entry or fix its spelling: a typo here silently drops that package's host tests."
-    },
-    {
-     "check": "C155",
-     "severity": "warn",
-     "rule": 3,
-     "file": "apps/x/paddock.ci.json",
-     "line": 1,
-     "message": "[stale-entry] `hostTests` lists the package `quack-harness`, which is no member package under apps/x/ (a vendored, fuzz or research crate cannot be selected with `-p`)",
-     "fix": "Delete the entry or fix its spelling: a typo here silently drops that package's host tests."
-    }
-   ],
-   "waived": [],
-   "errors": 0,
-   "warnings": 2
-  }
- },
- {
-  "name": "grouped-process-import-windows-crate-and-multi-line-cfg-in-unlisted-packages",
-  "app": "paddock",
-  "now": null,
-  "files": [
-   [
-    "crates/paddock.ci.json",
-    "{\"hostTests\": {\"packages\": [\"paddock-a\"]}}"
-   ],
-   [
-    "crates/paddock-a/Cargo.toml",
-    "[package]\nname = \"paddock-a\"\n"
-   ],
-   [
-    "crates/paddock-a/src/lib.rs",
-    "fn a() {}\n"
-   ],
-   [
-    "crates/paddock-b/Cargo.toml",
-    "[package]\nname = \"paddock-b\"\n"
-   ],
-   [
-    "crates/paddock-b/src/lib.rs",
-    "use std::process::{Command, ExitCode};\n"
-   ],
-   [
-    "crates/paddock-c/Cargo.toml",
-    "[package]\nname = \"paddock-c\"\n"
-   ],
-   [
-    "crates/paddock-c/src/lib.rs",
-    "use windows::Win32::Foundation::HANDLE;\n"
-   ],
-   [
-    "crates/paddock-d/Cargo.toml",
-    "[package]\nname = \"paddock-d\"\n"
-   ],
-   [
-    "crates/paddock-d/src/lib.rs",
-    "#[cfg(any(\n    windows,\n    unix\n))]\nfn f() {}\n"
-   ],
-   [
-    "crates/paddock-e/Cargo.toml",
-    "[package]\nname = \"paddock-e\"\n"
-   ],
-   [
-    "crates/paddock-e/src/lib.rs",
-    "use nix::unistd::getpid;\nuse winreg::RegKey;\nfn r() { rustix::process::getpid(); }\n"
-   ]
-  ],
-  "result": {
-   "findings": [
-    {
-     "check": "C155",
-     "severity": "warn",
-     "rule": 3,
-     "file": "crates/paddock-b/src/lib.rs",
-     "line": 1,
-     "message": "[os-code] `paddock-b` is not in `hostTests` but has 1 OS-specific site(s) in 1 file(s); first: crates/paddock-b/src/lib.rs:1 (layer)",
-     "fix": "Add \"paddock-b\" to `hostTests.packages` in crates/paddock.ci.json (its tests behave differently per OS), or remove the OS code."
-    },
-    {
-     "check": "C155",
-     "severity": "warn",
-     "rule": 3,
-     "file": "crates/paddock-c/src/lib.rs",
-     "line": 1,
-     "message": "[os-code] `paddock-c` is not in `hostTests` but has 1 OS-specific site(s) in 1 file(s); first: crates/paddock-c/src/lib.rs:1 (os-api)",
-     "fix": "Add \"paddock-c\" to `hostTests.packages` in crates/paddock.ci.json (its tests behave differently per OS), or remove the OS code."
-    },
-    {
-     "check": "C155",
-     "severity": "warn",
-     "rule": 3,
-     "file": "crates/paddock-d/src/lib.rs",
-     "line": 1,
-     "message": "[os-code] `paddock-d` is not in `hostTests` but has 1 OS-specific site(s) in 1 file(s); first: crates/paddock-d/src/lib.rs:1 (cfg)",
-     "fix": "Add \"paddock-d\" to `hostTests.packages` in crates/paddock.ci.json (its tests behave differently per OS), or remove the OS code."
-    },
-    {
-     "check": "C155",
-     "severity": "warn",
-     "rule": 3,
-     "file": "crates/paddock-e/src/lib.rs",
-     "line": 1,
-     "message": "[os-code] `paddock-e` is not in `hostTests` but has 3 OS-specific site(s) in 1 file(s); first: crates/paddock-e/src/lib.rs:1 (os-api)",
-     "fix": "Add \"paddock-e\" to `hostTests.packages` in crates/paddock.ci.json (its tests behave differently per OS), or remove the OS code."
-    }
-   ],
-   "waived": [],
-   "errors": 0,
-   "warnings": 4
-  }
- },
- {
-  "name": "a-module-tests-file-with-os-code-is-read",
-  "app": "paddock",
-  "now": null,
-  "files": [
-   [
-    "tools/paddock-dev/paddock.ci.json",
-    "{\"hostTests\": {\"modules\": [\"ci_run::\"]}}"
-   ],
-   [
-    "tools/paddock-dev/src/ci_run/mod.rs",
-    "fn r() {}\n"
-   ],
-   [
-    "tools/paddock-dev/src/other/mod.rs",
-    "fn o() {}\n"
-   ],
-   [
-    "tools/paddock-dev/src/other/tests.rs",
-    "#[cfg(windows)]\n#[test]\nfn w() {}\n"
-   ]
-  ],
-  "result": {
-   "findings": [
-    {
-     "check": "C155",
-     "severity": "warn",
-     "rule": 3,
-     "file": "tools/paddock-dev/src/other/tests.rs",
-     "line": 1,
-     "message": "[os-code] `other::tests::` is not in `hostTests` but has 1 OS-specific site(s) in 1 file(s); first: tools/paddock-dev/src/other/tests.rs:1 (cfg)",
-     "fix": "Add \"other::tests::\" to `hostTests.modules` (or `only.macos-latest` for a dev-Mac tool) in tools/paddock-dev/paddock.ci.json."
-    }
-   ],
-   "waived": [],
-   "errors": 0,
-   "warnings": 1
-  }
- },
- {
-  "name": "windows-code-in-a-package-and-a-module-that-only-macos-tests",
-  "app": "paddock",
-  "now": null,
-  "files": [
-   [
-    "crates/paddock.ci.json",
-    "{\"hostTests\": {\"packages\": [\"paddock-a\"], \"only\": {\"macos-latest\": [\"paddock-m\"]}}}"
-   ],
-   [
-    "crates/paddock-a/Cargo.toml",
-    "[package]\nname = \"paddock-a\"\n"
-   ],
-   [
-    "crates/paddock-a/src/lib.rs",
-    "fn a() {}\n"
-   ],
-   [
-    "crates/paddock-m/Cargo.toml",
-    "[package]\nname = \"paddock-m\"\n"
-   ],
-   [
-    "crates/paddock-m/src/lib.rs",
-    "fn m() {}\n#[cfg(windows)]\nfn w() {}\n"
-   ],
-   [
-    "tools/paddock-dev/paddock.ci.json",
-    "{\"hostTests\": {\"modules\": [\"ci_run::\"], \"only\": {\"macos-latest\": [\"hook::\", \"disk::\"]}}}"
-   ],
-   [
-    "tools/paddock-dev/src/ci_run/mod.rs",
-    "fn r() {}\n"
-   ],
-   [
-    "tools/paddock-dev/src/hook/mod.rs",
-    "#[cfg(windows)]\nfn h() {}\n"
-   ],
-   [
-    "tools/paddock-dev/src/disk/mod.rs",
-    "#[cfg(unix)]\nfn d() {}\n"
-   ]
-  ],
-  "result": {
-   "findings": [
-    {
-     "check": "C155",
-     "severity": "warn",
-     "rule": 3,
-     "file": "crates/paddock-m/src/lib.rs",
-     "line": 2,
-     "message": "[os-code-windows] `paddock-m` is listed only for macos-latest but has Windows code at crates/paddock-m/src/lib.rs:2: it would never run on Windows",
-     "fix": "List \"paddock-m\" for every host (`hostTests.packages`), or remove the Windows code."
-    },
-    {
-     "check": "C155",
-     "severity": "warn",
-     "rule": 3,
-     "file": "tools/paddock-dev/src/hook/mod.rs",
-     "line": 1,
-     "message": "[os-code-windows] `hook::` is listed only for macos-latest but has Windows code at line 1: it would never run on Windows",
-     "fix": "List \"hook::\" for windows-latest too (`hostTests.modules`), or remove the Windows code."
+     "message": "[redundant-exception] `hostTests.add` lists `callee::`, which the code already marks as OS-specific",
+     "fix": "Delete the entry from tools/paddock-dev/paddock.ci.json: the placement is derived, only what the code cannot say is declared."
     }
    ],
    "waived": [],

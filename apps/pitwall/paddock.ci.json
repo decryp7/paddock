@@ -53,12 +53,5 @@
     "npx ng build",
     "PW_E2E_PREBUILT=1 PW_E2E_PORT=4393 npx playwright test --project=webkit --workers=1"
   ],
-  "hostTests": {
-    "packages": [
-      "pitwall-cli",
-      "pitwall-loopback",
-      "pitwall-server",
-      "pitwall-service"
-    ]
-  }
+  "hostTests": {}
 }

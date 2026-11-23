@@ -182,7 +182,11 @@ pub fn matrix(plan: &Value, graph: &RepoGraph, opts: MatrixOpts) -> Result<Vec<V
             package_filter(plan, graph, &cargo_dir, &format!("app:{name}"), opts.narrow)
         };
         // hostTests (OS-scoped tests): what each Windows and macOS leg of this app tests; none declared, every test on every OS.
-        let host = HostTests::parse(app, &format!("apps/{name}/paddock.ci.json"))?;
+        let host = crate::host_tests::read(
+            app,
+            &format!("apps/{name}/paddock.ci.json"),
+            &graph.derived(&format!("apps/{name}")),
+        )?;
         let kinds = kinds_of(plan, name);
         let rust = kinds.iter().any(|k| k == "rust");
         let ui = kinds.iter().any(|k| k == "ui");
@@ -976,12 +980,24 @@ mod tests {
     #[test]
     fn host_legs_of_an_app_with_host_tests_name_its_packages_and_linux_and_an_app_without_them_name_none() {
         let os = json!([LINUX, "windows-latest", "macos-latest"]);
-        let with = graph_with(
+        let mut with = graph_with(
             vec![(
                 "x",
-                json!({"cargo": ".", "os": os, "hostTests": {"packages": ["x-b", "x-a"], "skip": {"x-a": ["pure::"]}, "only": {"macos-latest": ["x-m"]}}}),
+                json!({"cargo": ".", "os": os, "hostTests": {
+                    "skip": [{"name": "x-a", "modules": ["pure::"], "reason": "pure logic only"}],
+                    "only": [{"os": "macos-latest", "name": "x-m", "reason": "a tool of the dev Mac"}]
+                }}),
             )],
             Graph::new(),
+        );
+        // The placement the code gives (two packages with OS marks); the contract holds only the exceptions.
+        with.host.insert(
+            "apps/x".into(),
+            crate::host_tests::Derived {
+                packages: ["x-b".to_string(), "x-a".to_string()].into(),
+                known_packages: ["x-a".to_string(), "x-b".to_string(), "x-m".to_string(), "x-l".to_string()].into(),
+                ..Default::default()
+            },
         );
         let legs = matrix(&plan(&["x"], json!({"x": ["rust"]}), json!({})), &with, MatrixOpts::default()).unwrap();
         let rows: Vec<Vec<Value>> = legs.iter().map(|l| row(l, &["os", "host_packages", "host_filter"])).collect();
@@ -1000,20 +1016,37 @@ mod tests {
                     json!("not ((package(=x-a) & test(/^(?:pure::)/)))")
                 ],
             ],
-            "Linux tests everything; a host leg tests the declared packages (and its own additions)"
+            "Linux tests everything; a host leg tests the derived packages with the exceptions applied (and its own additions)"
         );
+        // Positive control: with nothing derived the same exceptions name no host package, and nothing but the macOS-only one is left.
+        let mut none = graph_with(
+            vec![(
+                "x",
+                json!({"cargo": ".", "os": os, "hostTests": {"only": [{"os": "macos-latest", "name": "x-m", "reason": "a tool of the dev Mac"}]}}),
+            )],
+            Graph::new(),
+        );
+        none.host.insert("apps/x".into(), crate::host_tests::Derived::default());
+        let legs = matrix(&plan(&["x"], json!({"x": ["rust"]}), json!({})), &none, MatrixOpts::default()).unwrap();
+        let rows: Vec<Vec<Value>> = legs.iter().map(|l| row(l, &["os", "host_packages"])).collect();
+        assert_eq!(
+            rows[1],
+            vec![json!("windows-latest"), json!("")],
+            "no derived package: nothing is scoped on Windows"
+        );
+        assert_eq!(rows[2], vec![json!("macos-latest"), json!("x-m")]);
         // Positive control: the same app without the field has no scope on any leg.
         let without = graph_with(vec![("x", json!({"cargo": ".", "os": os}))], Graph::new());
         let legs = matrix(&plan(&["x"], json!({"x": ["rust"]}), json!({})), &without, MatrixOpts::default()).unwrap();
         assert!(legs.iter().all(|l| l["host_packages"] == "" && l["host_filter"] == ""));
         // A malformed field fails the plan, never turns the scope off.
         let bad = graph_with(
-            vec![("x", json!({"cargo": ".", "os": os, "hostTests": {"pakages": ["a"]}}))],
+            vec![("x", json!({"cargo": ".", "os": os, "hostTests": {"ad": ["a"]}}))],
             Graph::new(),
         );
         let err = matrix(&plan(&["x"], json!({"x": ["rust"]}), json!({})), &bad, MatrixOpts::default()).unwrap_err();
         assert!(
-            err.contains("apps/x/paddock.ci.json") && err.contains("unknown `hostTests.pakages`"),
+            err.contains("apps/x/paddock.ci.json") && err.contains("unknown `hostTests.ad`"),
             "{err}"
         );
     }

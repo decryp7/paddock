@@ -1,490 +1,245 @@
-//! C155: OS-specific code is only in packages and modules that `hostTests` runs on Windows and macOS (OS-scoped tests, user decision
-//! 2026-11-22: "a test runs on an OS only if its code behaves differently there"; docs/research/2026-11-22-os-scoped-tests.md).
+//! C155: the declared `hostTests` exceptions are consistent with the OS placement derived from the code (OS-scoped tests, user decision
+//! 2026-11-22: "a test runs on an OS only if its code behaves differently there"; ADR 0117 §7, WP-6).
 //!
-//! `hostTests` (`crates/paddock.ci.json`, `apps/<app>/paddock.ci.json`, `tools/paddock-dev/paddock.ci.json`, read through
-//! [`crate::host_tests`], ER-42) says which packages and which paddock-dev test-name prefixes the Windows and macOS legs test; every
-//! other test runs on Linux only. A package or module left out of the list while its code behaves differently per OS would silently
-//! lose its Windows and macOS tests, so this check reads the sources and reports:
+//! The placement is derived, not declared ([`crate::os_placement`] reads the `os` edges of the repository graph: an OS `cfg` and
+//! `cfg!`, an OS-API crate, an entry point of the portable layer, `CARGO_CFG_TARGET_OS` in a build script, `env::consts::OS`,
+//! `process.platform`, an OS-behaviour dependency, and the import edge from a host module to the module it calls). A package or module
+//! with a mark runs on the Windows and macOS legs, one without runs on Linux only, so "OS code that nobody listed" cannot happen any
+//! more. What is declared are the exceptions (`hostTests.add`, `skip`, `only` of `crates/paddock.ci.json`,
+//! `apps/<app>/paddock.ci.json`, `tools/paddock-dev/paddock.ci.json`, read through [`crate::host_tests`], ER-42), each with a reason,
+//! and this check reports where an exception contradicts the code:
 //!
-//! 1. **os-code**: a package of a scoped workspace (or a paddock-dev module, a file of `src/` or `tests/it/`) that is not in the list
-//!    and holds one of: an OS `cfg` (`cfg(windows)`, `cfg(unix)`, `target_os`, `target_family`, also `cfg!` and `cfg_attr`), a call into an
-//!    OS-API crate (`windows_sys`, `libc`, `objc2`, `core_foundation`, `security_framework`, `zbus`), or an entry point of the portable
-//!    layer of ADR 0109 (`paddock_proc::command`, `paddock_env::winpath`, `paddock_env::atomic`, `std::process::Command`, a file lock).
-//!    Comments and string contents are masked, so a word in a comment is not a use. One finding per package or module, naming its first
-//!    site and the number of sites, with the line to add.
-//! 2. **skipped-os-code**: a module that `hostTests.skip` keeps on Linux holds such a site: it is not pure logic.
-//! 3. **import-edge** (paddock-dev only): a source file that a listed module covers imports (`crate::<module>`, in code that is not a
-//!    test) a module that no listed prefix covers: that host code calls it, so its tests must run where the caller runs. The target
-//!    is the longest module path that names a file (`crate::pre_push::exec::heavy_prefix` is `pre_push::exec`); an item of a folder's
-//!    `mod.rs` (`crate::pre_push::stop_on_signals`) is covered when some module of that folder is listed. The cases that made this
-//!    rule: `ci_setup_rust` imports `local_sccache` and `ci_run` imports `pre_push::exec`, so those keep their Windows and macOS tests.
-//!    A package in the contract's `lastPackages` is kept off the host legs by that older decision and is not read.
-//!    A package or module that only macOS tests (`only.macos-latest`) and holds Windows code (a cfg naming `windows`, a Windows API crate) is an
-//!    **os-code-windows** finding: that code would never run on Windows.
-//! 4. **stale-entry**: a name in `hostTests` that is no package of the workspace and no module of paddock-dev (a typo or a deleted crate).
-//! 5. **bad-contract**: a `hostTests` the reader refuses.
+//! 1. **bad-contract**: a `hostTests` the reader refuses (an unknown key, an exception without a reason).
+//! 2. **stale-entry**: an exception that names no package of the workspace and no module of paddock-dev (a typo or a deleted crate).
+//! 3. **redundant-exception**: an `add` the code already derives, or a `skip` that names code with no OS mark: the entry can go, the list
+//!    only shrinks.
+//! 4. **skipped-os-code**: a module that `skip.modules` keeps on Linux holds an OS signal: it is not pure logic.
+//! 5. **os-code-windows**: a package or module that `only` gives to macOS holds Windows code: that code would never run on Windows.
+//! 6. **os-removal**: an entry of `skip` or `only` that the contract at the merge base does not have. Taking an OS away from code that
+//!    runs there is the unsafe direction and needs the user's approval (ER-46): the check compares every `skip` and `only` entry with the
+//!    contract at the merge base (the one comparison [`super::baseline::growth`], the reader C53 and the allow lists use) and reports the
+//!    added ones as one unwaivable finding at the contract. `add` is free and is not compared. The comparison runs on a checkout only: an
+//!    in-memory tree has nothing to compare, and where git gives no merge base it warns (an error in CI), never silence.
 //!
-//! Positive controls ([`Check::control`], ER-33): an unlisted package with `cfg(windows)` and an unlisted module that a listed one
-//! imports each go red; `tests/it/os_scoped.rs` unlists `paddock-proc` and `local_sccache` in the real contracts and shows the same.
+//! Positive controls ([`Check::control`], ER-33): a `skip` over a module with an OS signal, an `only` over Windows code, a stale name
+//! and a redundant `add` each go red, and `tests/it/os_scoped.rs` shows the same on the real tree and sources, and that the derived
+//! placement is exactly what the contracts resolve to.
 //!
 //! **Report-only (warnings) until its first green run on the real tree is recorded here and in docs/gates.toml (ER-41).** Recorded: not
-//! yet. First count on the real tree (this branch): see CHANGELOG. Lists only shrink in effect (ER-46): the check keeps no list of its
-//! own, an entry in `hostTests` is the list, and the lists are in the contracts under review.
+//! yet.
 
+use super::baseline::{self, Growth};
 use super::finding::Finding;
-use super::jsre::rx;
-use super::lex::rust::{mask, without_test_items};
 use super::record::Precondition;
 use super::{Check, CheckOutput, CheckScope, Control, Ctx, Mode};
-use crate::host_tests::{HOST_OSES, HostTests};
-use regex::Regex;
-use std::collections::{BTreeMap, BTreeSet};
-use std::sync::LazyLock;
+use crate::host_tests::{Derived, Exception, Exceptions, resolved_covers};
+use crate::os_placement::{self, Placement, RustcLex};
+use paddock_repo_graph::model::extract::BulkRead;
+use paddock_repo_graph::model::os::{is_test_file, rust_sites, src_module};
 
 const RULE: u32 = 3;
-const CRATES: &str = "crates/paddock.ci.json";
-const PADDOCK_DEV: &str = "tools/paddock-dev/paddock.ci.json";
-const PD_DIR: &str = "tools/paddock-dev/";
 
-// Over lines: `cfg(any(\n windows,\n unix))` is one site. The parentheses nest three deep.
-// Over lines: `cfg(any(\n windows,\n unix))` is one site. The span ends at `;`, a brace or the `]` that closes the attribute, so a
-// word of a following item is never read as part of it.
-static CFG: LazyLock<Regex> = LazyLock::new(|| rx(r"\bcfg(?:_attr)?!?\s*\([^;{}\]]{0,300}?\b(?:windows|unix|target_os|target_family)\b"));
-// `windows::` only as a crate (not after `::`, where it is one of our own `endpoint::windows` modules).
-static API: LazyLock<Regex> = LazyLock::new(|| {
-    rx(r"\b(?:windows_sys|libc|objc2|core_foundation|security_framework|zbus|nix|rustix|winreg)\s*::|(?:^|[^:A-Za-z0-9_])windows\s*::")
-});
-static LAYER: LazyLock<Regex> = LazyLock::new(|| {
-    rx(
-        r"\bpaddock_proc\s*::\s*command\b|\bpaddock_env\s*::\s*(?:winpath|atomic)\b|\bprocess\s*::\s*Command\b|\bprocess\s*::\s*\{[^}]*\bCommand\b|\bfd_lock\b|\bfs2\s*::|\b(?:try_lock|lock_exclusive|flock)\b",
-    )
-});
-static PACKAGE_NAME: LazyLock<Regex> = LazyLock::new(|| rx(r#"(?m)^name\s*=\s*"([^"]+)""#));
-static CRATE_PATH: LazyLock<Regex> = LazyLock::new(|| rx(r"\bcrate\s*::\s*([A-Za-z_][A-Za-z0-9_]*(?:\s*::\s*[A-Za-z_][A-Za-z0-9_]*)*)"));
+/// The files of a check's tree, in the one bulk call the extractor makes.
+struct CtxBulk<'a>(&'a Ctx<'a>);
 
-/// One OS-specific site: its 1-based line and what it is.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Site {
-    /// The 1-based line.
-    pub line: usize,
-    /// `cfg`, `os-api` or `layer`.
-    pub kind: &'static str,
-    /// The site is Windows code: a cfg that names `windows`, or a Windows API crate. Code only macOS tests never runs on Windows.
-    pub windows: bool,
-}
-
-/// Whether a file is test code: under a `tests/` folder, or named `tests.rs` or `*_tests.rs` (a module only `#[cfg(test)]` includes).
-pub fn is_test_file(rel: &str) -> bool {
-    let name = rel.rsplit('/').next().unwrap_or(rel);
-    rel.split('/').any(|s| s == "tests") || name == "tests.rs" || name.ends_with("_tests.rs")
-}
-
-/// The OS-specific sites of one source file, `text` with comments and string contents masked first. An OS `cfg` and a call into an OS-API
-/// crate count anywhere (a `cfg(windows)` test is an OS-specific test); an entry point of the portable layer (a process, a lock) counts
-/// only in production code: a test that starts `node` or `git` to run a check is not code that behaves differently per OS, the code it
-/// drives is judged where it is. `test_file`: [`is_test_file`].
-pub fn sites(text: &str, test_file: bool) -> Vec<Site> {
-    let m = mask(text);
-    let production = if test_file { String::new() } else { without_test_items(&m) };
-    let line = |s: &str, at: usize| s[..at].bytes().filter(|b| *b == b'\n').count() + 1;
-    let mut out = Vec::new();
-    for (re, kind, scanned) in [(&*CFG, "cfg", &m), (&*API, "os-api", &m), (&*LAYER, "layer", &production)] {
-        for hit in re.find_iter(scanned) {
-            // A match may start on the character before the word (the `windows::` form): the site is the word.
-            let word = hit.as_str().trim_start_matches(|c: char| !c.is_alphanumeric() && c != '_');
-            let at = hit.end() - word.len();
-            // Strings are blanked in `m`, so `target_os = "windows"` is read from the original (offsets are kept).
-            let original = text.get(hit.start()..hit.end()).unwrap_or("");
-            let windows = (kind == "cfg" && original.contains("windows"))
-                || (kind == "os-api" && (word.starts_with("windows") || word.starts_with("winreg")));
-            out.push(Site {
-                line: line(scanned, at),
-                kind,
-                windows,
-            });
-        }
+impl BulkRead for CtxBulk<'_> {
+    fn read_all(&self, paths: &[String]) -> Vec<Option<String>> {
+        paths.iter().map(|p| self.0.read(p).map(|t| (*t).clone())).collect()
     }
-    out.sort_by_key(|s| (s.line, s.kind));
+}
+
+/// Whether a test-name prefix (`ci_host::`) covers `module`, or `module` covers the prefix: the entry and the module are on one branch.
+fn on_branch(prefix: &str, module: &str) -> bool {
+    module.starts_with(prefix) || prefix.starts_with(module)
+}
+
+fn is_prefix(name: &str) -> bool {
+    name.ends_with("::")
+}
+
+/// Whether an entry's name belongs to the workspace: a member package, or a prefix of some module (or a module below it).
+fn known(name: &str, derived: &Derived) -> bool {
+    if is_prefix(name) {
+        derived.known_modules.iter().any(|m| on_branch(name, m))
+    } else {
+        derived.known_packages.contains(name)
+    }
+}
+
+/// The marks of the derived names an entry covers: a package itself, or every derived module on its branch.
+fn covered_marks<'a>(name: &str, p: &'a Placement) -> Vec<&'a (String, String)> {
+    let keys: Vec<&String> = if is_prefix(name) {
+        p.derived.modules.iter().filter(|m| m.starts_with(name)).collect()
+    } else {
+        p.derived.packages.iter().filter(|x| x.as_str() == name).collect()
+    };
+    keys.into_iter().flat_map(|k| p.why.get(k).into_iter().flatten()).collect()
+}
+
+/// The `skip` and `only` entries as the keys the merge-base comparison counts: an entry that is new takes an OS away.
+fn removal_keys(ex: &Exceptions) -> Vec<String> {
+    let mut out = Vec::new();
+    for s in &ex.skip {
+        if s.modules.is_empty() {
+            out.push(format!("skip {}", s.name));
+        }
+        out.extend(s.modules.iter().map(|m| format!("skip {} {m}", s.name)));
+    }
+    for o in &ex.only {
+        out.push(format!("only {} {}", o.os.as_deref().unwrap_or(""), o.name));
+    }
+    out.sort();
     out.dedup();
     out
 }
 
-/// The `crate::` paths a source file's production code names (test items removed), one per use: `crate::a::b` is `a::b`, and a group
-/// `crate::{a, b::c}` is `a` and `b::c`. With the line of each.
-pub fn crate_paths(text: &str) -> Vec<(usize, String)> {
-    let m = without_test_items(&mask(text));
-    let mut out = Vec::new();
-    let line_of = |at: usize| m[..at].bytes().filter(|b| *b == b'\n').count() + 1;
-    for cap in CRATE_PATH.captures_iter(&m) {
-        let Some(g) = cap.get(1) else { continue };
-        out.push((
-            line_of(g.start()),
-            g.as_str().split("::").map(str::trim).collect::<Vec<_>>().join("::"),
-        ));
-    }
-    // `use crate::{a, b::c, d::{e, f}};`
-    let mut from = 0;
-    while let Some(i) = m[from..].find("crate::{") {
-        let open = from + i + "crate::".len();
-        let Some(body) = braced(&m[open..]) else { break };
-        for p in group_paths(body, "") {
-            out.push((line_of(open), p));
-        }
-        from = open + body.len();
-    }
-    out
-}
-
-/// The text inside the `{ .. }` that starts `s` (without the braces), or `None` when it never closes.
-fn braced(s: &str) -> Option<&str> {
-    let mut depth = 0usize;
-    for (i, c) in s.char_indices() {
-        match c {
-            '{' => depth += 1,
-            '}' => {
-                depth -= 1;
-                if depth == 0 {
-                    return Some(&s[1..i]);
-                }
-            }
-            _ => {}
-        }
-    }
-    None
-}
-
-/// The leaf paths of a use group body (`a, b::c, d::{e, f}` under `prefix`): `a`, `b::c`, `d::e`, `d::f`. `self` leaves are the prefix.
-fn group_paths(body: &str, prefix: &str) -> Vec<String> {
-    let mut parts: Vec<&str> = Vec::new();
-    let (mut depth, mut start) = (0usize, 0usize);
-    for (i, c) in body.char_indices() {
-        match c {
-            '{' => depth += 1,
-            '}' => depth = depth.saturating_sub(1),
-            ',' if depth == 0 => {
-                parts.push(&body[start..i]);
-                start = i + 1;
-            }
-            _ => {}
-        }
-    }
-    parts.push(&body[start..]);
-    let mut out = Vec::new();
-    for p in parts.iter().map(|p| p.trim()).filter(|p| !p.is_empty()) {
-        let joined = |tail: &str| {
-            if prefix.is_empty() {
-                tail.to_string()
-            } else {
-                format!("{prefix}::{tail}")
-            }
-        };
-        if let Some(open) = p.find('{') {
-            let head = p[..open].trim_end_matches([':', ' ']);
-            let inner = braced(&p[open..]).unwrap_or("");
-            out.extend(group_paths(inner, &joined(head)));
-        } else {
-            let leaf = p.split(" as ").next().unwrap_or(p).trim();
-            out.push(if leaf == "self" { prefix.to_string() } else { joined(leaf) });
-        }
-    }
-    out.retain(|p| !p.is_empty());
-    out
-}
-
-/// The module path of a file of paddock-dev's `src/` (`ci_host/kept_clone.rs` is `ci_host::kept_clone`, `x/mod.rs` is `x`); `None` for
-/// `lib.rs`, `main.rs` and a test-only file (`tests.rs`, a `tests/` folder).
-fn src_module(rel: &str) -> Option<String> {
-    let inner = rel.strip_prefix(&format!("{PD_DIR}src/"))?.strip_suffix(".rs")?;
-    if inner == "lib" || inner == "main" || inner.rsplit('/').next() == Some("tests") || inner.split('/').any(|s| s == "tests") {
-        return None;
-    }
-    let inner = inner.strip_suffix("/mod").unwrap_or(inner);
-    Some(inner.replace('/', "::"))
-}
-
-/// [`src_module`], and also the test-only files (`tests.rs`, a `tests/` folder): the module a file belongs to when its OS code is looked for.
-fn src_module_any(rel: &str) -> Option<String> {
-    let inner = rel.strip_prefix(&format!("{PD_DIR}src/"))?.strip_suffix(".rs")?;
-    if inner == "lib" || inner == "main" {
-        return None;
-    }
-    Some(inner.strip_suffix("/mod").unwrap_or(inner).replace('/', "::"))
-}
-
-/// The test-name prefix of a file of `tests/it/` (`worktree/mod.rs` is `worktree`, `golden/planner.rs` is `golden::planner`).
-fn it_module(rel: &str) -> Option<String> {
-    let inner = rel.strip_prefix(&format!("{PD_DIR}tests/it/"))?.strip_suffix(".rs")?;
-    if inner == "main" {
-        return None;
-    }
-    Some(inner.strip_suffix("/mod").unwrap_or(inner).replace('/', "::"))
-}
-
-/// Whether `module` (`pre_push::exec`) is covered by the listed prefixes (`pre_push::exec::`): it is one of them or below one, or (an
-/// item of a folder's `mod.rs`) some listed prefix is below it.
-fn covered(module: &str, listed: &[String]) -> bool {
-    let with = format!("{module}::");
-    listed.iter().any(|l| with.starts_with(l.as_str()) || l.starts_with(&with))
-}
-
-/// Whether the file at module path `module` is below a listed prefix (its own tests run on the hosts).
-fn below(module: &str, listed: &[String]) -> bool {
-    let with = format!("{module}::");
-    listed.iter().any(|l| with.starts_with(l.as_str()))
-}
-
-/// Whether a manifest is no member of the workspace around it: it has a `[workspace]` of its own, or sits in a folder cargo's workspace
-/// excludes by convention here (`vendor`, `docs` research harnesses, `fuzz` crates). cargo cannot select such a package with `-p`
-/// (Dyno's vendored `tray-icon`, Debrief's `quack-harness`), so a `hostTests` entry for one would break every scoped leg.
-fn non_member(rel: &str, text: &str) -> bool {
-    text.contains("[workspace]") || rel.split('/').any(|s| matches!(s, "vendor" | "docs" | "fuzz"))
-}
-
-/// `(package name, dir)` of every member package of the tree under `prefix` (a folder with a `Cargo.toml` that has a `[package]`).
-fn packages(ctx: &Ctx, prefix: &str) -> Vec<(String, String)> {
-    let mut out = Vec::new();
-    for f in ctx
-        .tree_files()
-        .iter()
-        .filter(|f| f.starts_with(prefix) && f.ends_with("/Cargo.toml"))
-    {
-        let Some(text) = ctx.read(f) else { continue };
-        if !text.contains("[package]") || non_member(f, &text) {
-            continue;
-        }
-        let after = &text[text.find("[package]").unwrap_or(0)..];
-        if let Some(name) = PACKAGE_NAME.captures(after).and_then(|c| c.get(1)) {
-            out.push((name.as_str().to_string(), f.trim_end_matches("Cargo.toml").to_string()));
-        }
-    }
-    out
-}
-
-/// The package a source file belongs to: the one with the longest folder that holds it.
-fn owner<'a>(file: &str, pkgs: &'a [(String, String)]) -> Option<&'a (String, String)> {
-    pkgs.iter()
-        .filter(|(_, dir)| file.starts_with(dir.as_str()))
-        .max_by_key(|(_, dir)| dir.len())
-}
-
-fn first_site(file: &str, s: &[Site]) -> String {
-    format!("{file}:{} ({})", s[0].line, s[0].kind)
-}
-
-/// A Cargo workspace whose contract declares `hostTests`: where its packages are, the contract, the declaration and the packages the
-/// contract keeps off the host legs (`lastPackages`).
-#[derive(Clone, Copy)]
+/// One workspace under check.
 struct Workspace<'a> {
     root: &'a str,
     contract: &'a str,
-    host: &'a HostTests,
-    last: &'a [String],
 }
 
 /// The check.
 pub struct C155;
 
 impl C155 {
-    /// The findings of one Cargo-package workspace (`crates/` or an app) whose contract is `contract`.
-    fn packages_findings(&self, ctx: &Ctx, w: &Workspace, out: &mut Vec<Finding>, probes: &mut usize) {
-        let Workspace {
-            root,
-            contract,
-            host,
-            last,
-        } = *w;
-        let pkgs = packages(ctx, root);
-        let names: BTreeSet<&str> = pkgs.iter().map(|(n, _)| n.as_str()).collect();
-        for stale in host
-            .packages
+    fn workspace(&self, ctx: &Ctx, w: &Workspace, ex: &Exceptions, out: &mut Vec<Finding>, probes: &mut usize) {
+        let files = ctx.tree_files();
+        let prefix = format!("{}/", w.root);
+        *probes += files.iter().filter(|f| f.starts_with(&prefix) && f.ends_with(".rs")).count();
+        let placement = os_placement::derive(w.root, &files, &CtxBulk(ctx));
+        let d = &placement.derived;
+        let warn = |msg: String, fix: String| Finding::warn("C155", RULE, w.contract, 1, msg, fix);
+        let all: Vec<(&str, &Exception)> = ex
+            .add
             .iter()
-            .chain(host.only.values().flatten().filter(|e| !e.ends_with("::")))
-        {
-            if !names.contains(stale.as_str()) {
-                out.push(Finding::warn(
-                    "C155",
-                    RULE,
-                    contract,
-                    1,
-                    format!("[stale-entry] `hostTests` lists the package `{stale}`, which is no member package under {root} (a vendored, fuzz or research crate cannot be selected with `-p`)"),
-                    "Delete the entry or fix its spelling: a typo here silently drops that package's host tests.",
-                ));
-            }
-        }
-        let mut by_pkg: BTreeMap<&str, Vec<(String, Vec<Site>)>> = BTreeMap::new();
-        for f in ctx.tree_files().iter().filter(|f| f.starts_with(root) && f.ends_with(".rs")) {
-            let Some((name, _)) = owner(f, &pkgs) else { continue };
-            let Some(text) = ctx.read(f) else { continue };
-            *probes += 1;
-            let s = sites(&text, is_test_file(f));
-            if !s.is_empty() {
-                by_pkg.entry(name.as_str()).or_default().push((f.clone(), s));
-            }
-        }
-        for (name, files) in &by_pkg {
-            let count: usize = files.iter().map(|(_, s)| s.len()).sum();
-            if last.iter().any(|l| l == name) {
-                // `lastPackages`: kept off the host legs by the contract (a Tauri shell whose build overwrites a binary the other tests
-                // start), a decision older than hostTests; it is not a package that was forgotten.
-                continue;
-            }
-            if !host.lists_package(name) {
-                let (file, s) = &files[0];
-                out.push(Finding::warn(
-                    "C155",
-                    RULE,
-                    file,
-                    s[0].line,
-                    format!(
-                        "[os-code] `{name}` is not in `hostTests` but has {count} OS-specific site(s) in {} file(s); first: {}",
-                        files.len(),
-                        first_site(file, s)
-                    ),
-                    format!(
-                        "Add \"{name}\" to `hostTests.packages` in {contract} (its tests behave differently per OS), or remove the OS code."
-                    ),
-                ));
-            } else if !host.package_runs_on(name, "windows-latest") && files.iter().any(|(_, s)| s.iter().any(|x| x.windows)) {
-                // Listed for macos-latest only, but it has Windows code: that code would never run on Windows.
-                let (file, site) = files
-                    .iter()
-                    .find_map(|(f, s)| s.iter().find(|x| x.windows).map(|x| (f, x.line)))
-                    .unwrap_or((&files[0].0, 1));
-                out.push(Finding::warn(
-                    "C155",
-                    RULE,
-                    file,
-                    site,
-                    format!("[os-code-windows] `{name}` is listed only for macos-latest but has Windows code at {file}:{site}: it would never run on Windows"),
-                    format!("List \"{name}\" for every host (`hostTests.packages`), or remove the Windows code."),
-                ));
-            } else if let Some(skips) = host.skip.get(*name) {
-                let dir = owner(&files[0].0, &pkgs).map(|(_, d)| d.clone()).unwrap_or_default();
-                for (file, s) in files {
-                    let rel = file.strip_prefix(&format!("{dir}src/")).unwrap_or("");
-                    let module = rel.trim_end_matches(".rs").trim_end_matches("/mod").replace('/', "::");
-                    if skips.iter().any(|p| format!("{module}::").starts_with(p.as_str())) {
-                        out.push(Finding::warn(
-                            "C155",
-                            RULE,
-                            file,
-                            s[0].line,
-                            format!("[skipped-os-code] `{name}` keeps `{module}::` on Linux (`hostTests.skip`) but it has an OS-specific site: {}", first_site(file, s)),
-                            format!("Remove `{module}::` from `hostTests.skip.{name}` in {contract}."),
-                        ));
-                    }
-                }
-            }
-        }
-    }
-
-    /// The findings of paddock-dev: its modules and the import edges between them.
-    fn module_findings(&self, ctx: &Ctx, host: &HostTests, out: &mut Vec<Finding>, probes: &mut usize) {
-        let windows_on = host.module_prefixes("windows-latest");
-        let mac_on = host.module_prefixes("macos-latest");
-        let mut listed: Vec<String> = host.modules.clone();
-        listed.extend(host.only.values().flatten().filter(|e| e.ends_with("::")).cloned());
-        listed.sort();
-        listed.dedup();
-        let files: Vec<String> = ctx
-            .tree_files()
-            .iter()
-            .filter(|f| f.starts_with(PD_DIR) && f.ends_with(".rs"))
-            .cloned()
+            .map(|e| ("add", e))
+            .chain(ex.skip.iter().map(|e| ("skip", e)))
+            .chain(ex.only.iter().map(|e| ("only", e)))
             .collect();
-        let src_modules: BTreeSet<String> = files.iter().filter_map(|f| src_module(f)).collect();
-        let src_any: BTreeSet<String> = files.iter().filter_map(|f| src_module_any(f)).collect();
-        let it_modules: BTreeSet<String> = files.iter().filter_map(|f| it_module(f)).collect();
-        for l in &listed {
-            let m = l.trim_end_matches("::");
-            let known = src_any.iter().chain(it_modules.iter()).any(|x| format!("{x}::").starts_with(l.as_str()))
-                // a Windows-only module is not built on the machine that reads it, but its file is there
-                || src_modules.contains(m);
-            if !known {
-                out.push(Finding::warn(
-                    "C155",
-                    RULE,
-                    PADDOCK_DEV,
-                    1,
-                    format!("[stale-entry] `hostTests` lists the module `{l}`, which names no file of tools/paddock-dev/src or tests/it"),
-                    "Delete the entry or fix its spelling: a typo here silently drops those tests from the host legs.",
+        for (key, e) in &all {
+            if !known(&e.name, d) {
+                out.push(warn(
+                    format!(
+                        "[stale-entry] `hostTests.{key}` names `{}`, which is no member package of {} and no module of it",
+                        e.name, w.root
+                    ),
+                    "Delete the entry or fix its spelling: a typo here silently drops that code's host tests.".into(),
                 ));
             }
         }
-        // OS-specific code in a module that no listed prefix covers: one finding per module (a file's module path).
-        let mut unlisted: BTreeMap<String, Vec<(String, Vec<Site>)>> = BTreeMap::new();
-        for f in &files {
-            let module = src_module_any(f).or_else(|| it_module(f));
-            let Some(module) = module else { continue };
-            let Some(text) = ctx.read(f) else { continue };
-            *probes += 1;
-            let s = sites(&text, is_test_file(f));
-            // Windows code in a module only macOS tests: it never runs on Windows (the other direction is not looked for).
-            if below(&module, &listed) {
-                if s.iter().any(|x| x.windows) && !below(&module, &windows_on) && below(&module, &mac_on) {
-                    let site = s.iter().find(|x| x.windows).map_or(1, |x| x.line);
-                    out.push(Finding::warn(
-                        "C155",
-                        RULE,
-                        f,
-                        site,
-                        format!("[os-code-windows] `{module}::` is listed only for macos-latest but has Windows code at line {site}: it would never run on Windows"),
-                        format!("List \"{module}::\" for windows-latest too (`hostTests.modules`), or remove the Windows code."),
-                    ));
-                }
-                continue;
-            }
-            if !s.is_empty() {
-                unlisted.entry(module).or_default().push((f.clone(), s));
+        for (i, e) in ex.add.iter().enumerate() {
+            // Redundant: without this entry the resolved placement already runs the name on every host.
+            let mut without = ex.clone();
+            without.add.remove(i);
+            let derived_already = resolved_covers(&without.resolved(d), &e.name);
+            if known(&e.name, d) && derived_already {
+                out.push(warn(
+                    format!("[redundant-exception] `hostTests.add` lists `{}`, which the code already marks as OS-specific", e.name),
+                    format!(
+                        "Delete the entry from {}: the placement is derived, only what the code cannot say is declared.",
+                        w.contract
+                    ),
+                ));
             }
         }
-        for (module, hits) in &unlisted {
-            let count: usize = hits.iter().map(|(_, s)| s.len()).sum();
-            let (file, s) = &hits[0];
-            out.push(Finding::warn(
-                "C155",
-                RULE,
-                file,
-                s[0].line,
-                format!(
-                    "[os-code] `{module}::` is not in `hostTests` but has {count} OS-specific site(s) in {} file(s); first: {}",
-                    hits.len(),
-                    first_site(file, s)
-                ),
-                format!("Add \"{module}::\" to `hostTests.modules` (or `only.macos-latest` for a dev-Mac tool) in {PADDOCK_DEV}."),
-            ));
+        for e in ex.skip.iter().filter(|e| e.modules.is_empty()) {
+            if known(&e.name, d) && covered_marks(&e.name, &placement).is_empty() {
+                out.push(warn(
+                    format!(
+                        "[redundant-exception] `hostTests.skip` keeps `{}` on Linux, which the code does not mark as OS-specific",
+                        e.name
+                    ),
+                    format!("Delete the entry from {}: unmarked code runs on Linux only already.", w.contract),
+                ));
+            }
         }
-        // Imports from the code of a module a runner tests into a module that runner does not test: per runner, so a module that only
-        // macOS tests cannot be what a Windows-tested module calls.
-        let mut seen = BTreeSet::new();
-        for os in HOST_OSES {
-            let on = host.module_prefixes(os);
-            for f in &files {
-                let Some(module) = src_module(f) else { continue };
-                if !below(&module, &on) {
+        // `skip.modules`: a module of a host package that holds an OS signal is not pure logic.
+        for e in ex.skip.iter().filter(|e| !e.modules.is_empty()) {
+            let Some(dir) = placement.dirs.get(&e.name) else { continue };
+            for f in files.iter().filter(|f| f.starts_with(&format!("{dir}/")) && f.ends_with(".rs")) {
+                let Some(module) = src_module(f, dir, true) else { continue };
+                if !e.modules.iter().any(|p| format!("{module}::").starts_with(p.as_str())) {
                     continue;
                 }
                 let Some(text) = ctx.read(f) else { continue };
-                for (line, path) in crate_paths(&text) {
-                    let segs: Vec<&str> = path.split("::").collect();
-                    let target = (1..=segs.len())
-                        .rev()
-                        .map(|n| segs[..n].join("::"))
-                        .find(|p| src_modules.contains(p));
-                    let Some(target) = target else { continue };
-                    if covered(&target, &on) || !seen.insert((f.clone(), target.clone())) {
-                        continue;
-                    }
+                *probes += 1;
+                let sites = rust_sites(&text, is_test_file(f), f.ends_with("build.rs"), &RustcLex);
+                if let Some(s) = sites.first() {
                     out.push(Finding::warn(
                         "C155",
                         RULE,
                         f,
-                        line,
-                        format!("[import-edge] `{module}` is host code on {os} and calls `crate::{target}`, which that runner does not test: its tests would stop running there"),
-                        format!("Add \"{target}::\" to `hostTests.modules` in {PADDOCK_DEV} (or keep `{module}` off the host legs)."),
+                        s.line,
+                        format!(
+                            "[skipped-os-code] `{}` keeps `{module}::` on Linux (`hostTests.skip`) but it has an OS-specific site: {f}:{} ({})",
+                            e.name,
+                            s.line,
+                            s.kind.name()
+                        ),
+                        format!("Remove `{module}::` from `hostTests.skip` for `{}` in {}.", e.name, w.contract),
                     ));
                 }
             }
+        }
+        let resolved = ex.resolved(d);
+        for e in &ex.only {
+            if e.os.as_deref() == Some("windows-latest") {
+                continue;
+            }
+            // Windows code a more specific entry puts back on every host (an `add` of the module the host code calls) is tested there.
+            let on_windows = |m: &&String| !resolved_covers(&resolved, m);
+            let holder = if is_prefix(&e.name) {
+                placement.windows.iter().filter(on_windows).find(|m| m.starts_with(&e.name))
+            } else {
+                placement.windows.get(&e.name).filter(on_windows)
+            };
+            if let Some(holder) = holder {
+                out.push(warn(
+                    format!(
+                        "[os-code-windows] `{}` is tested only on macOS (`hostTests.only`) but `{holder}` holds Windows code: it would never run on Windows",
+                        e.name
+                    ),
+                    format!(
+                        "Remove the `only` entry for `{}` in {} (it then runs on every host), or remove the Windows code.",
+                        e.name, w.contract
+                    ),
+                ));
+            }
+        }
+        // Taking an OS away needs the user (ER-46): every `skip` and `only` entry the merge base lacks.
+        let current = removal_keys(ex);
+        if current.is_empty() || ctx.is_in_memory() || !baseline::is_work_tree(ctx.root()) {
+            return;
+        }
+        let entries_of = |text: &str| -> Option<Vec<String>> {
+            let v: serde_json::Value = serde_json::from_str(text).ok()?;
+            let old = Exceptions::parse(&v, w.contract).ok()?;
+            Some(old.map(|e| removal_keys(&e)).unwrap_or_default())
+        };
+        let exact = |k: &String| k.clone();
+        match baseline::growth(ctx.root(), &ctx.base_ref(), w.contract, &current, &entries_of, &exact, None) {
+            Growth::Unmeasured(why) => out.push(baseline::unmeasured_finding(
+                ctx.in_ci(),
+                "C155",
+                RULE,
+                w.contract,
+                "the OS removals of hostTests",
+                &why,
+            )),
+            Growth::Added { added: 0, .. } => {}
+            Growth::Added { base, added, .. } => out.push(
+                warn(
+                    format!(
+                        "[os-removal] {added} `skip` or `only` entr{} not in {} at the merge base {}: it takes an operating system away from code the derivation puts there",
+                        if added == 1 { "y is" } else { "ies are" },
+                        w.contract,
+                        &base[..base.len().min(9)]
+                    ),
+                    "Remove the entries, or get the user's approval for the removal (ER-46); `add` needs none.".into(),
+                )
+                .unwaivable(),
+            ),
         }
     }
 }
@@ -499,7 +254,7 @@ impl Check for C155 {
     }
 
     fn title(&self) -> &'static str {
-        "OS-specific code is in a package or module that hostTests runs on Windows and macOS"
+        "hostTests exceptions agree with the OS placement derived from the code"
     }
 
     fn scope(&self) -> CheckScope {
@@ -515,36 +270,32 @@ impl Check for C155 {
             files: vec![
                 (
                     "crates/paddock.ci.json",
-                    r#"{"hostTests": {"packages": ["paddock-a"], "skip": {"paddock-a": ["model::"]}}}"#,
+                    r#"{"hostTests": {
+  "add": [{"name": "paddock-ghost", "reason": "a name that is no package"}, {"name": "paddock-c", "reason": "already marked by its cfg"}],
+  "skip": [{"name": "paddock-a", "modules": ["model::"], "reason": "claimed to be pure logic"}],
+  "only": [{"os": "macos-latest", "name": "paddock-b", "reason": "claimed to be a dev Mac tool"}]
+}}"#,
                 ),
                 ("crates/paddock-a/Cargo.toml", "[package]\nname = \"paddock-a\"\n"),
-                ("crates/paddock-a/src/lib.rs", "#[cfg(windows)]\nfn win() {}\n"),
-                ("crates/paddock-a/src/model.rs", "fn pure() {}\n"),
+                ("crates/paddock-a/src/lib.rs", "mod model;\n"),
+                ("crates/paddock-a/src/model.rs", "fn pure() {}\n#[cfg(windows)]\nfn win() {}\n"),
                 ("crates/paddock-b/Cargo.toml", "[package]\nname = \"paddock-b\"\n"),
-                ("crates/paddock-b/src/lib.rs", "fn f() {\n    let _ = libc::getpid();\n}\n"),
+                ("crates/paddock-b/src/lib.rs", "fn f() {\n    let _ = windows_sys::Win32::Foundation::CloseHandle;\n}\n"),
                 ("crates/paddock-c/Cargo.toml", "[package]\nname = \"paddock-c\"\n"),
+                ("crates/paddock-c/src/lib.rs", "#[cfg(unix)]\nfn u() {}\n"),
+                ("crates/paddock-d/Cargo.toml", "[package]\nname = \"paddock-d\"\n"),
                 (
-                    "crates/paddock-c/src/lib.rs",
+                    "crates/paddock-d/src/lib.rs",
                     "// cfg(windows) in a comment\nfn f() { let _ = \"std::process::Command\"; }\n",
                 ),
-                (
-                    "tools/paddock-dev/paddock.ci.json",
-                    r#"{"hostTests": {"modules": ["ci_setup_rust::"]}}"#,
-                ),
-                (
-                    "tools/paddock-dev/src/ci_setup_rust.rs",
-                    "use crate::local_sccache::server_env;\nuse crate::plain::x;\nfn f() {}\n",
-                ),
-                ("tools/paddock-dev/src/local_sccache.rs", "pub fn server_env() {}\n"),
-                ("tools/paddock-dev/src/plain.rs", "pub fn x() {}\n"),
-                ("tools/paddock-dev/src/spawner.rs", "use std::process::Command;\n"),
             ],
-            // (file, line) of each finding: the libc call, the two imports of ci_setup_rust (local_sccache, plain) and the spawner.
+            // (file, line) of each finding: the module with a cfg (skipped-os-code), and at the contract the stale entry, the redundant
+            // add and the macOS-only package with Windows code.
             expect: vec![
-                ("crates/paddock-b/src/lib.rs", 2),
-                ("tools/paddock-dev/src/ci_setup_rust.rs", 1),
-                ("tools/paddock-dev/src/ci_setup_rust.rs", 2),
-                ("tools/paddock-dev/src/spawner.rs", 1),
+                ("crates/paddock-a/src/model.rs", 2),
+                ("crates/paddock.ci.json", 1),
+                ("crates/paddock.ci.json", 1),
+                ("crates/paddock.ci.json", 1),
             ],
         }
     }
@@ -552,68 +303,43 @@ impl Check for C155 {
     fn run(&self, ctx: &Ctx) -> CheckOutput {
         let mut findings = Vec::new();
         let mut probes = 0;
-        let mut contracts: Vec<(String, String, bool)> =
-            vec![(CRATES.into(), "crates/".into(), false), (PADDOCK_DEV.into(), PD_DIR.into(), true)];
-        for f in ctx.tree_files().iter() {
-            if let Some(app) = f.strip_prefix("apps/").and_then(|r| r.strip_suffix("/paddock.ci.json"))
-                && !app.contains('/')
-            {
-                contracts.push((f.clone(), format!("apps/{app}/"), false));
-            }
-        }
+        let files = ctx.tree_files();
         let mut declared = 0;
-        for (contract, root, modules) in &contracts {
-            let Some(text) = ctx.read(contract) else { continue };
+        for (root, contract) in os_placement::workspaces(&files) {
+            let Some(text) = ctx.read(&contract) else { continue };
             let value: serde_json::Value = match serde_json::from_str(&text) {
                 Ok(v) => v,
                 Err(e) => {
-                    findings.push(Finding::warn(
-                        "C155",
-                        RULE,
-                        contract,
-                        1,
-                        format!("[bad-contract] not valid JSON: {e}"),
-                        "Fix the file.",
-                    ));
+                    findings.push(Finding::warn("C155", RULE, &contract, 1, format!("[bad-contract] not valid JSON: {e}"), "Fix the file."));
                     continue;
                 }
             };
-            let host = match HostTests::parse(&value, contract) {
-                Ok(Some(h)) => h,
+            let ex = match Exceptions::parse(&value, &contract) {
+                Ok(Some(e)) => e,
                 Ok(None) => continue,
                 Err(e) => {
                     findings.push(Finding::warn(
                         "C155",
                         RULE,
-                        contract,
+                        &contract,
                         1,
                         format!("[bad-contract] {e}"),
-                        "Fix `hostTests` (docs/research/2026-11-22-os-scoped-tests.md).",
+                        "Fix `hostTests` (docs/research/2026-11-22-os-scoped-tests.md; the shape is in tools/paddock-dev/src/host_tests.rs).",
                     ));
                     continue;
                 }
             };
             declared += 1;
-            if *modules {
-                self.module_findings(ctx, &host, &mut findings, &mut probes);
-            } else {
-                let last: Vec<String> = value
-                    .get("lastPackages")
-                    .and_then(|v| v.as_array())
-                    .map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_string)).collect())
-                    .unwrap_or_default();
-                self.packages_findings(
-                    ctx,
-                    &Workspace {
-                        root,
-                        contract,
-                        host: &host,
-                        last: &last,
-                    },
-                    &mut findings,
-                    &mut probes,
-                );
-            }
+            self.workspace(
+                ctx,
+                &Workspace {
+                    root: &root,
+                    contract: &contract,
+                },
+                &ex,
+                &mut findings,
+                &mut probes,
+            );
         }
         CheckOutput {
             findings,
@@ -630,139 +356,34 @@ impl Check for C155 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
-    fn kinds(text: &str) -> Vec<&'static str> {
-        sites(text, false).into_iter().map(|s| s.kind).collect()
+    fn ex(v: serde_json::Value) -> Exceptions {
+        Exceptions::parse(&json!({ "hostTests": v }), "x.json").unwrap().unwrap()
     }
 
     #[test]
-    fn the_cfg_forms_the_os_api_crates_and_the_portable_layers_entry_points_are_sites() {
-        for text in [
-            "#[cfg(windows)]\nfn a() {}",
-            "#[cfg(not(unix))]\nfn a() {}",
-            "#[cfg(target_os = \"macos\")]\nfn a() {}",
-            "if cfg!(windows) { }",
-            "#[cfg_attr(unix, allow(dead_code))]\nfn a() {}",
-            "let p = libc::getpid();",
-            "use windows_sys::Win32::Foundation::HANDLE;",
-            "use objc2::rc::Retained;",
-            "let c = std::process::Command::new(\"x\");",
-            "use paddock_proc::command::run;",
-            "paddock_env::winpath::normalise(p);",
-            "paddock_env::atomic::write(p, b);",
-            "f.try_lock().unwrap();",
-        ] {
-            assert_eq!(sites(text, false).len(), 1, "{text}");
-        }
+    fn removal_keys_name_every_skip_and_only_entry_and_never_an_add() {
+        let e = ex(json!({
+            "add": [{"name": "a", "reason": "a reason here"}],
+            "skip": [{"name": "p", "modules": ["m::", "n::"], "reason": "pure logic"}, {"name": "q", "reason": "no tests at all"}],
+            "only": [{"os": "macos-latest", "name": "t::", "reason": "a dev Mac tool"}]
+        }));
+        assert_eq!(removal_keys(&e), ["only macos-latest t::", "skip p m::", "skip p n::", "skip q"]);
+        assert!(removal_keys(&ex(json!({"add": [{"name": "a", "reason": "a reason here"}]}))).is_empty());
     }
 
     #[test]
-    fn a_word_in_a_comment_or_a_string_and_a_plain_function_are_no_site() {
-        for text in [
-            "// cfg(windows) and std::process::Command\nfn a() {}",
-            "/* libc::getpid() */ fn a() {}",
-            "let s = \"cfg(unix) windows_sys::x\";",
-            "#[cfg(feature = \"tauri\")]\nfn a() {}",
-            "#[cfg(test)]\nmod tests {}",
-            "fn unix_time() {}",
-        ] {
-            assert!(sites(text, false).is_empty(), "{text}");
-        }
-        assert_eq!(kinds("#[cfg(windows)]\nlet p = libc::x();"), vec!["cfg", "os-api"]);
-    }
-
-    #[test]
-    fn grouped_process_imports_more_os_api_crates_and_multi_line_cfgs_are_sites() {
-        for text in [
-            "use std::process::{Command, ExitCode};",
-            "use std::process::{ExitCode,\n    Command};",
-            "use windows::Win32::Foundation::HANDLE;",
-            "use winreg::RegKey;",
-            "use nix::unistd::getpid;",
-            "let _ = rustix::process::getpid();",
-            "#[cfg(any(\n    windows,\n    unix\n))]\nfn a() {}",
-            "#[cfg(all(\n    not(feature = \"x\"),\n    target_os = \"macos\"\n))]\nfn a() {}",
-        ] {
-            assert!(!sites(text, false).is_empty(), "{text}");
-        }
-        // Positive controls for the new forms: a grouped import without Command, a module named windows reached through a path, and a
-        // cfg on a feature are no site.
-        for text in [
-            "use std::process::{ExitCode, Stdio};",
-            "use crate::endpoint::windows::open;",
-            "#[cfg(all(\n    feature = \"a\",\n    test\n))]\nfn a() {}",
-        ] {
-            assert!(sites(text, false).is_empty(), "{text}");
-        }
-    }
-
-    #[test]
-    fn a_process_or_a_lock_in_test_code_is_no_site_but_an_os_cfg_or_api_is() {
-        let in_tests = "fn p() {}\n#[cfg(test)]\nmod tests {\n    fn t() { std::process::Command::new(\"node\"); }\n}\n";
-        assert!(sites(in_tests, false).is_empty(), "a #[cfg(test)] item");
-        assert!(
-            sites("fn t() { std::process::Command::new(\"node\"); }", true).is_empty(),
-            "a test file"
-        );
-        assert_eq!(
-            sites("#[cfg(windows)]\nfn t() { let _ = libc::getpid(); }", true).len(),
-            2,
-            "cfg and an OS API still count in a test file"
-        );
-        assert!(
-            is_test_file("crates/x/tests/it.rs")
-                && is_test_file("tools/paddock-dev/src/ci_run/tests.rs")
-                && is_test_file("crates/paddock-service/src/resume_tests.rs")
-        );
-        assert!(!is_test_file("crates/x/src/lib.rs") && !is_test_file("crates/x/src/contests.rs"));
-    }
-
-    #[test]
-    fn crate_paths_read_plain_inline_and_grouped_uses_but_not_test_code() {
-        let text = "use crate::a::b;\nuse crate::{c, d::e, f::{g, h as i}};\nfn x() { crate::j::k(); }\n#[cfg(test)]\nmod tests { use crate::t::u; }\n";
-        let got: Vec<String> = crate_paths(text).into_iter().map(|(_, p)| p).collect();
-        for want in ["a::b", "c", "d::e", "f::g", "f::h", "j::k"] {
-            assert!(got.iter().any(|p| p == want), "{want} in {got:?}");
-        }
-        assert!(!got.iter().any(|p| p.starts_with('t')), "{got:?}");
-    }
-
-    #[test]
-    fn coverage_of_a_module_by_the_listed_prefixes() {
-        let listed = vec!["ci_host::".to_string(), "pre_push::exec::".to_string()];
-        assert!(covered("ci_host::kept_clone", &listed));
-        assert!(covered("pre_push::exec", &listed));
-        assert!(
-            covered("pre_push", &listed),
-            "an item of the folder's mod.rs: something of it is listed"
-        );
-        assert!(!covered("pre_push::gates", &listed));
-        assert!(!covered("local_sccache", &listed));
-        assert!(below("ci_host::x", &listed) && !below("pre_push", &listed));
-    }
-
-    #[test]
-    fn a_vendored_fuzz_research_or_standalone_manifest_is_no_member() {
-        assert!(non_member("apps/d/vendor/tray-icon/Cargo.toml", "[package]"));
-        assert!(non_member("apps/d/docs/research/h/Cargo.toml", "[package]"));
-        assert!(non_member("crates/x/fuzz/Cargo.toml", "[package]"));
-        assert!(non_member("apps/d/h/Cargo.toml", "[package]\n[workspace]"));
-        assert!(!non_member("apps/d/app/src-tauri/Cargo.toml", "[package]"));
-    }
-
-    #[test]
-    fn module_paths_of_source_and_test_files() {
-        assert_eq!(
-            src_module("tools/paddock-dev/src/ci_host/kept_clone.rs").as_deref(),
-            Some("ci_host::kept_clone")
-        );
-        assert_eq!(src_module("tools/paddock-dev/src/pre_push/mod.rs").as_deref(), Some("pre_push"));
-        assert_eq!(src_module("tools/paddock-dev/src/lib.rs"), None);
-        assert_eq!(src_module("tools/paddock-dev/src/ci_run/tests.rs"), None);
-        assert_eq!(
-            it_module("tools/paddock-dev/tests/it/golden/planner.rs").as_deref(),
-            Some("golden::planner")
-        );
-        assert_eq!(it_module("tools/paddock-dev/tests/it/main.rs"), None);
+    fn a_prefix_is_known_when_it_is_on_a_branch_with_a_module() {
+        let d = Derived {
+            known_modules: ["ci_host::kept_clone::".to_string()].into(),
+            known_packages: ["p".to_string()].into(),
+            ..Derived::default()
+        };
+        assert!(known("ci_host::", &d), "a folder prefix above a module");
+        assert!(known("ci_host::kept_clone::", &d));
+        assert!(known("ci_host::kept_clone::deep::", &d), "a prefix below a file module names its items");
+        assert!(!known("other::", &d));
+        assert!(known("p", &d) && !known("q", &d));
     }
 }

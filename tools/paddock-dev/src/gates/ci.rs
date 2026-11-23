@@ -459,7 +459,12 @@ fn app_legs(app: &str, contract: &Json, webkit: bool) -> Result<Vec<BTreeMap<Str
     };
     let flag = |b: bool| if b { "true" } else { "false" }.to_string();
     // A malformed `hostTests` is an error here as in `plan_ci::matrix`, never a silent "not scoped".
-    let host = crate::host_tests::HostTests::parse(contract, &format!("apps/{app}/paddock.ci.json"))?;
+    // The gate binds the leg keys and the workflow wiring, not the package lists: the placement derived from the code is not read here.
+    let host = crate::host_tests::read(
+        contract,
+        &format!("apps/{app}/paddock.ci.json"),
+        &crate::host_tests::Derived::default(),
+    )?;
     let mut legs: Vec<BTreeMap<String, String>> = Vec::new();
     for os in oses {
         let linux = os == LINUX;
@@ -1447,14 +1452,11 @@ mod tests {
 
     #[test]
     fn a_malformed_host_tests_is_an_error_of_the_model_not_a_silent_unscoped_leg() {
-        let ok = serde_json::json!({"cargo": ".", "hostTests": {"packages": ["a"]}});
+        let ok = serde_json::json!({"cargo": ".", "hostTests": {"add": [{"name": "a", "reason": "a reason here"}]}});
         assert!(app_legs("x", &ok, false).is_ok());
-        let bad = serde_json::json!({"cargo": ".", "hostTests": {"pakages": ["a"]}});
+        let bad = serde_json::json!({"cargo": ".", "hostTests": {"ad": []}});
         let e = app_legs("x", &bad, false).unwrap_err();
-        assert!(
-            e.contains("apps/x/paddock.ci.json") && e.contains("unknown `hostTests.pakages`"),
-            "{e}"
-        );
+        assert!(e.contains("apps/x/paddock.ci.json") && e.contains("unknown `hostTests.ad`"), "{e}");
     }
 
     fn sources(files: &[(&str, &str)]) -> Sources {
