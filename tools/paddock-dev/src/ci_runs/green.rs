@@ -45,6 +45,9 @@ pub enum Scope {
     Complete,
     /// Less than that.
     Partial,
+    /// Not complete, but it ran exactly its own diff's selection (some projects their smoke set or affected tests only) and every job
+    /// it declared: a landing may rest on it, never a base and never a tag (the user's decision of 2026-11-23, review round 2 P1-A).
+    Landing,
 }
 
 /// A FLAKY test of a run that landed or may land: what ER-12 asks to record as a fix item, with where to read it.
@@ -91,6 +94,8 @@ pub struct Outcome {
     pub note: String,
     /// Set when the run's mode could not be read: it might be a newer complete run, so it blocks the commit's decision.
     pub unreadable: bool,
+    /// For a [`Scope::Landing`] run: the commit its need was diffed from (a push to main reuses it only for the same diff).
+    pub landing_base: Option<String>,
     /// Set when the run is graded but not granted: the newest attempt at a full run that did less than it declared, or whose fix
     /// items were refused. It is no base, and it decides the commit anyway: a newer full run is never passed over for an older green
     /// one (ER-15, "the newest full run decides"). A smaller run (`Partial` without this) is passed over.
@@ -105,6 +110,7 @@ impl Outcome {
             note: String::new(),
             unreadable: false,
             blocking: false,
+            landing_base: None,
         }
     }
     fn blocking(mut self) -> Outcome {
@@ -126,6 +132,12 @@ impl Outcome {
     /// Whether a tag may be cut from it: complete and plainly green (a tag on fix items takes the one allowed retry, ER-49).
     pub fn is_tag_green(&self) -> bool {
         self.scope == Scope::Complete && self.result == GradedResult::Green
+    }
+
+    /// Whether a train may land on it: complete, or a landing run ([`Scope::Landing`]), and green with or without fix items.
+    pub fn lands(&self) -> bool {
+        matches!(self.scope, Scope::Complete | Scope::Landing)
+            && matches!(self.result, GradedResult::Green | GradedResult::GreenWithFixItems(_))
     }
 }
 
@@ -319,13 +331,34 @@ pub fn grade_run_for(
     tag: bool,
     touched: &mut dyn FnMut(&mut Client) -> Option<Touched>,
 ) -> Outcome {
+    let mut landing_base = None;
+    let mut o = grade_run_inner(client, run, scope_decisive, tag, touched, &mut landing_base);
+    if o.scope == Scope::Landing {
+        o.landing_base = landing_base;
+    }
+    o
+}
+
+fn grade_run_inner(
+    client: &mut Client,
+    run: &RunInfo,
+    scope_decisive: bool,
+    tag: bool,
+    touched: &mut dyn FnMut(&mut Client) -> Option<Touched>,
+    landing_base: &mut Option<String>,
+) -> Outcome {
     if matches!(run.conclusion.as_str(), "cancelled" | "skipped") {
         let why = format!("run {} was {}", run.id, run.conclusion);
         return Outcome::of(Scope::Partial, GradedResult::NotMeasured(why.clone())).noted(why);
     }
     let read = verdict::read_mode_jobs_for(client, run, scope_decisive, tag);
+    if let Some(b) = &read.landing {
+        landing_base.clone_from(b);
+    }
     let (scope, why) = match read.mode {
         Mode::Full => (Scope::Complete, String::new()),
+        // A narrowed run of its own diff's selection: graded in full, for a landing only.
+        Mode::Partial(why) if read.landing.is_some() => (Scope::Landing, why),
         Mode::Partial(why) => (Scope::Partial, why),
         Mode::Incomplete(why) => {
             let state = if run.conclusion.is_empty() {
@@ -396,6 +429,8 @@ pub fn grade_run_for(
     if matches!(result, GradedResult::GreenWithFixItems(_)) {
         match read.scope_view {
             Mode::Full => {}
+            // A landing run's declared scope ran (read.landing checked every declared job).
+            Mode::Partial(_) if scope == Scope::Landing => {}
             Mode::Partial(w) => {
                 let n = GradedResult::NotMeasured(format!("fix items need the declared scope to have run: {w}"));
                 return Outcome::of(Scope::Partial, n).noted(w).blocking();
@@ -430,15 +465,18 @@ pub fn commit_outcome(
     scope_decisive: bool,
     touched: &mut dyn FnMut(&mut Client) -> Option<Touched>,
 ) -> Option<CommitOutcome> {
-    commit_outcome_for(client, runs, scope_decisive, false, touched)
+    commit_outcome_for(client, runs, scope_decisive, false, false, touched)
 }
 
 /// [`commit_outcome`] with the tag rule given (`tag`: an OS-scoped run is partial, so an older every-OS run may decide).
+/// With `landing` a [`Scope::Landing`] run decides like a complete one (the landing queue and a push's reuse); without it, it is
+/// passed over like any partial run (a base, a tag).
 pub fn commit_outcome_for(
     client: &mut Client,
     runs: &[&RunInfo],
     scope_decisive: bool,
     tag: bool,
+    landing: bool,
     touched: &mut dyn FnMut(&mut Client) -> Option<Touched>,
 ) -> Option<CommitOutcome> {
     let mut newest = runs.to_vec();
@@ -447,7 +485,7 @@ pub fn commit_outcome_for(
     let mut fallback: Option<(u64, Outcome)> = None;
     for r in newest {
         let o = grade_run_for(client, r, scope_decisive, tag, touched);
-        if o.unreadable || o.blocking || o.scope == Scope::Complete {
+        if o.unreadable || o.blocking || o.scope == Scope::Complete || (landing && o.scope == Scope::Landing) {
             return Some(CommitOutcome {
                 run: r.id,
                 outcome: o,
@@ -554,7 +592,7 @@ fn find_base_in_for(
         let Some(of_sha) = runs.0.get(sha) else { continue };
         let refs: Vec<&RunInfo> = of_sha.iter().collect();
         let mut t = |c: &mut Client| touched(c, runs, sha);
-        if let Some(CommitOutcome { run, outcome, .. }) = commit_outcome_for(client, &refs, scope_decisive, tag, &mut t)
+        if let Some(CommitOutcome { run, outcome, .. }) = commit_outcome_for(client, &refs, scope_decisive, tag, false, &mut t)
             && outcome.is_base()
             && (!tag || outcome.result == GradedResult::Green)
         {

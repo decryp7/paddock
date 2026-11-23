@@ -177,6 +177,9 @@ pub(super) struct ModeRead {
     pub jobs: Vec<super::client::TimedJob>,
     /// Why a tag cannot rest on the run although a landing may (its declared scope was OS-scoped); `None`: no such reason was read.
     pub tag_refusal: Option<String>,
+    /// `Some(base)` when the run is not complete but a landing may rest on it: it ran exactly its own diff's narrowed selection and
+    /// every job it declared ran (`Declared::lands`, review round 2 P1-A); `base` is the commit its need was diffed from.
+    pub landing: Option<Option<String>>,
 }
 
 /// [`read_mode`] with the run's jobs it read for it (the failed ones are graded by [`super::green`]), and the tag rule: for a tag
@@ -200,6 +203,7 @@ fn read_mode_plain(client: &mut Client, run: &RunInfo, scope_decisive: bool) -> 
         mode: m,
         jobs,
         tag_refusal: None,
+        landing: None,
     };
     let jobs = match client.timed_jobs(run.id) {
         Ok(Some(j)) => j,
@@ -228,9 +232,11 @@ fn read_mode_plain(client: &mut Client, run: &RunInfo, scope_decisive: bool) -> 
         }
         None => None,
     };
+    let landing = landing_of(run, &jobs, &log);
     if scope_decisive {
         return ModeRead {
             tag_refusal,
+            landing,
             ..same(scope, jobs)
         };
     }
@@ -253,7 +259,22 @@ fn read_mode_plain(client: &mut Client, run: &RunInfo, scope_decisive: bool) -> 
         scope_view: scope,
         jobs,
         tag_refusal,
+        landing,
     }
+}
+
+/// `Some(base)` when the run's declared scope is not complete but a landing may rest on it (`Declared::lands`) and every job it
+/// declared ran (a run still going is not checked yet: the decision waits for it).
+fn landing_of(run: &RunInfo, jobs: &[super::client::TimedJob], log: &str) -> Option<Option<String>> {
+    let d = run_scope::read(log)?.ok()?;
+    if d.workflow != run.workflow() || d.complete().is_ok() || d.lands().is_err() {
+        return None;
+    }
+    if run.finished() {
+        let pairs: Vec<(String, String)> = jobs.iter().map(|j| (j.name.clone(), j.conclusion.clone())).collect();
+        run_scope::check_ran(&d, &pairs).ok()?;
+    }
+    Some(d.base)
 }
 
 /// Reads the runs listed for `sha` (up to four pages of 50) and decides.
@@ -313,6 +334,41 @@ pub fn verdict_for(client: &mut Client, workflow: &str, sha: &str, exclude: Opti
 /// recorded in its register.
 pub fn verdict_at(client: &mut Client, workflow: &str, sha: &str, root: &std::path::Path) -> Verdict {
     verdict_in(client, workflow, sha, None, scope_decisive_in(root, workflow), root)
+}
+
+/// The verdict a landing reads (the queue, review round 2 P1-A): a run that ran exactly its own diff's narrowed selection (smoke or
+/// affected tests, `green::Scope::Landing`) lands the train too. It is never complete, never a base and never for a tag; those read
+/// [`verdict_at`] and [`verdict_tag`].
+pub fn verdict_landing_at(client: &mut Client, workflow: &str, sha: &str, root: &std::path::Path) -> Verdict {
+    let scope = scope_decisive_in(root, workflow);
+    landing_verdict_in(client, workflow, sha, None, scope, root).0
+}
+
+/// [`verdict_landing_at`] without the asking run, with the commit a deciding landing run's need was diffed from (`None` when a complete
+/// run decided): `ci reuse` skips a push only when that is the push's own base.
+pub fn landing_verdict_in(
+    client: &mut Client,
+    workflow: &str,
+    sha: &str,
+    exclude: Option<u64>,
+    scope: bool,
+    root: &std::path::Path,
+) -> (Verdict, Option<String>) {
+    landing_verdict_with(client, workflow, sha, exclude, scope, &mut |c, s| {
+        green::touched_in(c, workflow, root, s, scope, None)
+    })
+}
+
+/// [`landing_verdict_in`] with what a commit's change touched given.
+pub fn landing_verdict_with(
+    client: &mut Client,
+    workflow: &str,
+    sha: &str,
+    exclude: Option<u64>,
+    scope: bool,
+    touched: &mut dyn FnMut(&mut Client, &str) -> Option<Touched>,
+) -> (Verdict, Option<String>) {
+    verdict_core_for(client, workflow, sha, exclude, scope, false, true, touched)
 }
 
 /// [`verdict_with`] over the checkout at `root`. The first-parent history is read only when a verdict needs its hint, and what a
@@ -383,6 +439,39 @@ fn verdict_core(
     tag: bool,
     touched: &mut dyn FnMut(&mut Client, &str) -> Option<Touched>,
 ) -> Verdict {
+    verdict_core_for(client, workflow, sha, exclude, scope, tag, false, touched).0
+}
+
+/// [`verdict_core`] with `landing`: a run that ran exactly its own diff's narrowed selection (`green::Scope::Landing`) decides too,
+/// and the second value is the commit its need was diffed from when such a run decided.
+#[allow(clippy::too_many_arguments)]
+fn verdict_core_for(
+    client: &mut Client,
+    workflow: &str,
+    sha: &str,
+    exclude: Option<u64>,
+    scope: bool,
+    tag: bool,
+    landing: bool,
+    touched: &mut dyn FnMut(&mut Client, &str) -> Option<Touched>,
+) -> (Verdict, Option<String>) {
+    let mut base = None;
+    let v = verdict_decide(client, workflow, sha, exclude, scope, tag, landing, touched, &mut base);
+    (v, base)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn verdict_decide(
+    client: &mut Client,
+    workflow: &str,
+    sha: &str,
+    exclude: Option<u64>,
+    scope: bool,
+    tag: bool,
+    landing: bool,
+    touched: &mut dyn FnMut(&mut Client, &str) -> Option<Touched>,
+    landing_base: &mut Option<String>,
+) -> Verdict {
     let query = format!("head_sha={sha}");
     let mut runs = Vec::new();
     for page in 1..=4 {
@@ -411,7 +500,7 @@ fn verdict_core(
             short(sha)
         ));
     }
-    let Some(decided) = green::commit_outcome_for(client, &mine, scope, tag, &mut |c| touched(c, sha)) else {
+    let Some(decided) = green::commit_outcome_for(client, &mine, scope, tag, landing, &mut |c| touched(c, sha)) else {
         return Verdict::NotMeasured(format!("no {workflow} run for {} could be graded", short(sha)));
     };
     let id = decided.run;
@@ -422,7 +511,11 @@ fn verdict_core(
             decided.outcome.note
         ));
     }
-    if decided.outcome.scope == green::Scope::Partial && !decided.outcome.blocking {
+    if decided.outcome.scope == green::Scope::Landing && landing {
+        landing_base.clone_from(&decided.outcome.landing_base);
+    }
+    let counts = decided.outcome.scope == green::Scope::Complete || (landing && decided.outcome.scope == green::Scope::Landing);
+    if !counts && !decided.outcome.blocking {
         return Verdict::Red {
             run: None,
             reason: format!(

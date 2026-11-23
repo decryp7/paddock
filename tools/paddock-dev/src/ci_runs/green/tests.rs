@@ -825,3 +825,121 @@ fn a_smoke_push_followed_by_a_code_push_plans_from_the_last_complete_commit() {
     let (got, _) = landing_inputs(&mut f, "train/x", &[], &[code, smoke, complete.clone()]);
     assert_eq!(got, vec![("landing_base".to_string(), complete)]);
 }
+
+/// The plan line of a landing run that ran exactly its own diff's narrowed selection: the diff from `base`, the conformance job, and
+/// `projects` that ran only their smoke set (the tools vm-smoke phase of a Debrief-spec-only train) or affected tests.
+fn landing_line(base: &str, smoke: &[&str], affected: &[&str]) -> String {
+    let need = run_scope::Scope {
+        jobs: ["conformance".to_string()].into(),
+        engines: ["chromium".to_string(), "webkit".to_string()].into(),
+        whole: true,
+        os_full: true,
+        ..run_scope::Scope::default()
+    };
+    let ran = run_scope::Scope {
+        smoke: smoke.iter().map(|s| s.to_string()).collect(),
+        affected: affected.iter().map(|s| s.to_string()).collect(),
+        ..need.clone()
+    };
+    format!("{}\n", run_scope::ci_scope(ran, false, need, false).with_base(Some(base)).line())
+}
+
+/// The server of [`server`], plus each run listed under its own commit (`runs?head_sha=`), as the verdict reader asks.
+fn server_by_sha(runs: &[Run]) -> Fake {
+    let mut f = server(runs);
+    let mut by: BTreeMap<String, Vec<Value>> = BTreeMap::new();
+    for r in runs {
+        by.entry(r.sha.clone()).or_default().push(r.json());
+    }
+    for (s, list) in by {
+        f.json(
+            &format!("{API}/runs?head_sha={s}&limit=50&page=1"),
+            json!({"total_count": list.len(), "workflow_runs": list}),
+        );
+    }
+    f
+}
+
+#[test]
+fn a_landing_run_of_its_own_narrowed_diff_lands_but_is_never_a_base_nor_tag_green() {
+    // Review round 2, P1-A (the user's decision of 2026-11-23): a train whose ci.yml landing run ran its own diff's selection (here
+    // the tools smoke phase, as for a train that touches only a Debrief spec) lands on it.
+    let (main, head) = (sha(1), sha(2));
+    let landing = Run::train(8801, &head, "success").partial(&landing_line(&main, &["tools"], &[]));
+    let mut f = server_by_sha(&[Run::push(8800, &main, "success"), clone_run(&landing)]);
+    let o = grade(&mut f, &landing, touched(&[]));
+    assert_eq!((o.scope, o.result.clone()), (Scope::Landing, GradedResult::Green), "{o:?}");
+    assert!(o.lands(), "it lands");
+    assert!(!o.is_base(), "never a base");
+    assert!(!o.is_tag_green(), "never for a tag");
+    assert_eq!(o.landing_base.as_deref(), Some(main.as_str()));
+    // The landing verdict accepts it; the verdict of a tag or a base does not.
+    let (v, from) = verdict::landing_verdict_with(&mut client(&mut f), "ci.yml", &head, None, true, &mut |_, _| Some(touched(&[])));
+    assert_eq!(v, verdict::Verdict::Green { run: 8801 });
+    assert_eq!(from.as_deref(), Some(main.as_str()));
+    let plain = verdict::verdict_with_touched(&mut client(&mut f), "ci.yml", &head, None, true, &mut Vec::new, &mut |_, _| {
+        Some(touched(&[]))
+    });
+    assert!(matches!(plain, verdict::Verdict::Red { .. }), "{plain:?}");
+    // Not a base: the search goes past it to the complete commit before it.
+    assert_eq!(
+        base(&mut f, &[head.clone(), main.clone()], touched(&[])).map(|b| b.sha),
+        Some(main.clone())
+    );
+    // Controls: the same run with a job of its need not run, or planned for the whole tree, does not land.
+    let short = Run::train(8802, &head, "success").edit("conformance", |j| j["conclusion"] = json!("skipped"));
+    let short = short.partial(&landing_line(&main, &["tools"], &[]));
+    let mut f2 = server_by_sha(&[clone_run(&short)]);
+    assert!(!grade(&mut f2, &short, touched(&[])).lands());
+    let whole = landing_line(&main, &["tools"], &[]).replace("\"need_whole\":false", "\"need_whole\":true");
+    let whole = Run::train(8803, &head, "success").partial(&whole);
+    let mut f3 = server_by_sha(&[clone_run(&whole)]);
+    assert_eq!(grade(&mut f3, &whole, touched(&[])).scope, Scope::Partial);
+}
+
+#[test]
+fn a_push_reuses_a_landing_run_only_when_it_tested_the_pushs_own_diff() {
+    let (main, head, other) = (sha(1), sha(2), sha(3));
+    let landing = |base: &str| {
+        let mut r = Run::train(8811, &head, "success").partial(&landing_line(base, &[], &["app:debrief"]));
+        // Every job that ran has a log (the reuse reads them for FLAKY tests).
+        r.logs.push((r.jobs[1]["id"].as_u64().unwrap(), "ok\n".into()));
+        r
+    };
+    let decide = |r: Run| {
+        let mut f = server_by_sha(&[Run::push(8810, &main, "success"), r]);
+        crate::ci_runs::reuse::decide_with_touched(
+            &mut client(&mut f),
+            "ci.yml",
+            &head,
+            None,
+            true,
+            &mut || vec![main.clone()],
+            &mut |_, _| Some(touched(&[])),
+        )
+    };
+    assert!(decide(landing(&main)).skip(), "the landing ran this push's diff (from {main})");
+    let other_diff = decide(landing(&other));
+    assert!(!other_diff.skip(), "another diff: the push runs its own ({other_diff:?})");
+}
+
+#[test]
+fn the_landing_queues_port_lands_a_train_on_its_narrowed_landing_run_without_a_second_run() {
+    // The queue's tick reads `Ci::verdict` (queue/tick.rs judge): through the real port, a train touching only a Debrief spec, whose
+    // ci.yml landing run ran the tools smoke phase, is green at once, so the tick lands instead of dispatching again up to
+    // MAX_RUNS_PER_HEAD and stopping as Stuck.
+    let (main, head) = (sha(1), sha(2));
+    let landing = Run::train(8821, &head, "success").partial(&landing_line(&main, &["tools"], &[]));
+    let mut f = server_by_sha(&[Run::push(8820, &main, "success"), landing]);
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let mut ci = crate::queue::real::GiteaCi {
+        server: "https://gitea.invalid".into(),
+        repo: "decryp7/paddock".into(),
+        token: "t".into(),
+        root,
+        max_wait: std::time::Duration::from_secs(1),
+        http: &mut f,
+    };
+    use crate::queue::ports::Ci;
+    assert_eq!(ci.verdict("ci.yml", &head), verdict::Verdict::Green { run: 8821 });
+}

@@ -121,6 +121,9 @@ pub struct Declared {
     /// Whether `need` is the whole tree's (a dispatch without a base, a tag, the nightly), not the diff of a push or a landing: a
     /// tag counts only such a run (ER-15, review of 8cab10234 P2-3).
     pub need_whole: bool,
+    /// The commit `need` was diffed from when it is not the whole tree's (a push's green base, a landing's base): a push to main may
+    /// reuse a landing run only when the landing ran the same diff (review round 2, P1-A).
+    pub base: Option<String>,
 }
 
 impl Declared {
@@ -136,6 +139,9 @@ impl Declared {
     pub fn line(&self) -> String {
         let mut v = json!({"v": VERSION, "workflow": self.workflow, "rerun": self.rerun, "ran": self.ran.json(), "need": self.need.json(),
                            "need_whole": self.need_whole});
+        if let Some(b) = &self.base {
+            v["base"] = json!(b);
+        }
         if let Some(os) = &self.os {
             v["os"] = json!(os);
         }
@@ -178,6 +184,36 @@ impl Declared {
 }
 
 impl Declared {
+    /// This declaration with the commit its `need` was diffed from (`None`: the whole tree).
+    pub fn with_base(self, base: Option<&str>) -> Declared {
+        Declared {
+            base: base.map(str::to_string),
+            ..self
+        }
+    }
+
+    /// Whether a landing may rest on the run (the user's decision of 2026-11-23, review round 2 P1-A): it is complete, or it ran
+    /// exactly its own diff's selection: its `need` is that diff's plan (not the whole tree) and `ran` covers it except that some
+    /// projects ran their smoke set or only their affected tests. Such a run lands; it is never complete, never a base and never
+    /// for a tag.
+    pub fn lands(&self) -> Result<(), String> {
+        if self.complete().is_ok() {
+            return Ok(());
+        }
+        if self.need_whole {
+            return Err("it was planned for the whole tree, so a narrowed selection is not its own diff's".into());
+        }
+        let whole = Declared {
+            ran: Scope {
+                smoke: BTreeSet::new(),
+                affected: BTreeSet::new(),
+                ..self.ran.clone()
+            },
+            ..self.clone()
+        };
+        whole.complete()
+    }
+
     /// [`Declared::complete`], and the run tested every package on every OS: a tag counts only a full every-OS run (ER-15, ADR 0113),
     /// never an OS-scoped one. A landing may be scoped (the nightly and the release gates are the full runs).
     pub fn complete_for_tag(&self) -> Result<(), String> {
@@ -224,6 +260,11 @@ fn parse(text: &str) -> Result<Declared, String> {
         ran: Scope::parse(&v["ran"], "ran")?,
         need: Scope::parse(&v["need"], "need")?,
         need_whole: v["need_whole"].as_bool().ok_or("the scope line has no need_whole flag")?,
+        base: match &v["base"] {
+            Value::Null => None,
+            Value::String(s) if !s.is_empty() => Some(s.clone()),
+            other => return Err(format!("the scope line's base is {other}, not a commit")),
+        },
     })
 }
 
@@ -380,6 +421,7 @@ pub fn ci_scope(ran: Scope, rerun: bool, need: Scope, need_whole: bool) -> Decla
         ran,
         need,
         need_whole,
+        base: None,
     }
 }
 
@@ -419,6 +461,7 @@ pub fn app_scope(workflow: &str, app: &str, full: bool, run: bool, since_run: bo
         ran,
         need,
         need_whole: true,
+        base: None,
     }
 }
 
@@ -666,6 +709,7 @@ mod tests {
                 ..Scope::default()
             },
             need_whole: true,
+            base: None,
         };
         assert!(nothing.complete().unwrap_err().contains("empty"));
     }
@@ -920,5 +964,38 @@ mod tests {
                 .unwrap_err()
                 .contains("jobs gates")
         );
+    }
+    #[test]
+    fn a_run_that_ran_its_own_diffs_narrowed_selection_lands_but_never_counts_for_a_tag() {
+        // User decision 2026-11-23 (review round 2, P1-A): a landing accepts a narrowed run that ran exactly its own diff's
+        // selection; it is never complete, never for a tag.
+        let need = Scope {
+            jobs: ["conformance".to_string()].into(),
+            apps: ["debrief@ubuntu-latest".to_string()].into(),
+            whole: true,
+            os_full: true,
+            ..Scope::default()
+        };
+        let ran = Scope {
+            affected: ["app:debrief".to_string()].into(),
+            ..need.clone()
+        };
+        let landing = ci_scope(ran.clone(), false, need.clone(), false).with_base(Some("abc123"));
+        assert!(landing.complete().is_err());
+        assert_eq!(landing.lands(), Ok(()));
+        assert!(landing.complete_for_tag().is_err());
+        assert_eq!(read(&landing.line()).unwrap().unwrap(), landing, "the base reads back");
+        assert_eq!(landing.base.as_deref(), Some("abc123"));
+        // Controls: a narrowed run planned for the whole tree does not land (its need is not its own diff), nor does a narrowed run
+        // that left out a job its need has, nor a rerun.
+        assert!(ci_scope(ran.clone(), false, need.clone(), true).lands().is_err());
+        let short = Scope {
+            jobs: BTreeSet::new(),
+            ..ran.clone()
+        };
+        assert!(ci_scope(short, false, need.clone(), false).lands().is_err());
+        assert!(ci_scope(ran, true, need.clone(), false).lands().is_err());
+        // A complete run lands too.
+        assert_eq!(ci_scope(need.clone(), false, need, false).lands(), Ok(()));
     }
 }

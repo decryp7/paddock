@@ -108,8 +108,15 @@ pub fn decide(client: &mut Client, workflow: &str, sha: &str, current: Option<u6
 /// [`decide`] with the basis given.
 pub fn decide_with(client: &mut Client, workflow: &str, sha: &str, current: Option<u64>, scope: bool) -> Reuse {
     let root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-    let v = verdict::verdict_in(client, workflow, sha, current, scope, &root);
-    reuse_of(client, v)
+    decide_with_touched(
+        client,
+        workflow,
+        sha,
+        current,
+        scope,
+        &mut || super::green::first_parent_before(&root, sha),
+        &mut |c, s| super::green::touched_in(c, workflow, &root, s, scope, None),
+    )
 }
 
 /// [`decide_with`] with the way to read the first-parent commits and what a commit's change touched given.
@@ -122,7 +129,22 @@ pub fn decide_with_touched(
     first_parent: &mut dyn FnMut() -> Vec<String>,
     touched: &mut dyn FnMut(&mut Client, &str) -> Option<super::green::Touched>,
 ) -> Reuse {
-    let v = verdict::verdict_with_touched(client, workflow, sha, current, scope, first_parent, touched);
+    // A landing run that ran exactly its own diff's narrowed selection is reused only when that diff is this push's: its need
+    // was diffed from this push's own base, the last complete green commit before it (review round 2 P1-A).
+    let (v, landing_base) = verdict::landing_verdict_with(client, workflow, sha, current, scope, touched);
+    if let Some(from) = landing_base {
+        let push_base = super::green::find_base(client, workflow, &first_parent(), scope, touched).map(|b| b.map(|b| b.sha));
+        match push_base {
+            Ok(Some(b)) if b == from => {}
+            Ok(b) => {
+                return Reuse::Run(format!(
+                    "the landing run tested the diff from {from}, this push's diff is from {} (the last complete green commit): it runs its own",
+                    b.as_deref().unwrap_or("no complete commit")
+                ));
+            }
+            Err(e) => return Reuse::Run(format!("this push's base could not be read ({e})")),
+        }
+    }
     reuse_of(client, v)
 }
 

@@ -845,8 +845,9 @@ impl Ci for GiteaCi<'_> {
 
     fn verdict(&mut self, workflow: &str, head: &str) -> Verdict {
         let mut c = Client::new(self.http, &self.server, &self.repo, &self.token);
-        // The queue's own checkout: its register and its first-parent history, not the folder the tool was started in.
-        verdict::verdict_at(&mut c, workflow, head, &self.root)
+        // The queue's own checkout: its register and its first-parent history, not the folder the tool was started in. A landing
+        // accepts a run that ran exactly its own diff's narrowed selection (review round 2 P1-A); a base and a tag never do.
+        verdict::verdict_landing_at(&mut c, workflow, head, &self.root)
     }
 
     fn dispatch(&mut self, workflow: &str, inputs: &[(String, String)]) -> Result<Sent, String> {
