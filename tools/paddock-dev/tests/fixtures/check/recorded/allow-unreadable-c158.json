@@ -1,0 +1,27 @@
+{
+ "findings": [
+  {
+   "check": "C158",
+   "severity": "error",
+   "rule": 79,
+   "file": "conformance/test/sed.sh",
+   "line": 1,
+   "message": "not measured: conformance/test/sed.sh could not be read, so a read of a workflow in it cannot be seen",
+   "fix": "Make the file readable (permissions) and run the check again.",
+   "unwaivable": true,
+   "outcome": "not-measured"
+  },
+  {
+   "check": "C158",
+   "severity": "warn",
+   "rule": 79,
+   "file": "scripts/bad.mjs",
+   "line": 2,
+   "message": "reads a workflow's text itself: it drifts from what the CI model says the workflow means",
+   "fix": "Ask the CI model instead of reading the file: `./dev gates model` (tools/paddock-dev/src/gates/ci.rs), or `Ctx::workflows()` in a check. A site that has to stay is listed in conformance/c158-allow.json (path, site, reason, count), which the user approves."
+  }
+ ],
+ "errors": 1,
+ "warnings": 1,
+ "waived": []
+}

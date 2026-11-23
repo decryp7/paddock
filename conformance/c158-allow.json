@@ -1,0 +1,348 @@
+{
+ "_comment": "Reads of a workflow's text outside the CI model (C158): each is to be converted to `./dev gates model` or Ctx::workflows and its entry deleted. Seeded 2026-11-23 from the first run on train/2026-11-23-graph (52 sites, 29 files; the list is the user's approved baseline for the guard). The list only shrinks (ER-46).",
+ "allow": [
+  {
+   "path": "conformance/src/checks/C137-e2e-kit-import.mjs",
+   "site": "const text = ctx.read(`.gitea/workflows/${contract.workflow}`);",
+   "reason": "predates C158 (2026-11-23): reads a workflow's text itself; convert it to the CI model (`./dev gates model`, Ctx::workflows) and delete this entry",
+   "count": 1,
+   "approved": "user"
+  },
+  {
+   "path": "conformance/test/c23-commit-lint.test.mjs",
+   "site": "const wf = readFileSync(new URL('../../.gitea/workflows/ci.yml', import.meta.url), 'utf8')",
+   "reason": "predates C158 (2026-11-23): reads a workflow's text itself; convert it to the CI model (`./dev gates model`, Ctx::workflows) and delete this entry",
+   "count": 1,
+   "approved": "user"
+  },
+  {
+   "path": "conformance/test/c85-features-register.test.mjs",
+   "site": "const yml = readFileSync(new URL('../../.gitea/workflows/pitwall-release.yml', import.meta",
+   "reason": "predates C158 (2026-11-23): reads a workflow's text itself; convert it to the CI model (`./dev gates model`, Ctx::workflows) and delete this entry",
+   "count": 1,
+   "approved": "user"
+  },
+  {
+   "path": "conformance/test/ci-actions.test.mjs",
+   "site": "const WORKFLOWS = join(PADDOCK, '.gitea', 'workflows');",
+   "reason": "predates C158 (2026-11-23): reads a workflow's text itself; convert it to the CI model (`./dev gates model`, Ctx::workflows) and delete this entry",
+   "count": 1,
+   "approved": "user"
+  },
+  {
+   "path": "conformance/test/ci-actions.test.mjs",
+   "site": "const dir = join(PADDOCK, '.gitea', 'workflows');",
+   "reason": "predates C158 (2026-11-23): reads a workflow's text itself; convert it to the CI model (`./dev gates model`, Ctx::workflows) and delete this entry",
+   "count": 1,
+   "approved": "user"
+  },
+  {
+   "path": "conformance/test/ci-actions.test.mjs",
+   "site": "const jobs = parseJobs(readFileSync(join(PADDOCK, '.gitea', 'workflows', 'dev-tool.yml'), ",
+   "reason": "predates C158 (2026-11-23): reads a workflow's text itself; convert it to the CI model (`./dev gates model`, Ctx::workflows) and delete this entry",
+   "count": 1,
+   "approved": "user"
+  },
+  {
+   "path": "conformance/test/ci-actions.test.mjs",
+   "site": "for (const f of readdirSync(join(root, 'workflows')).filter((n) => n.endsWith('.yml') && n",
+   "reason": "predates C158 (2026-11-23): reads a workflow's text itself; convert it to the CI model (`./dev gates model`, Ctx::workflows) and delete this entry",
+   "count": 1,
+   "approved": "user"
+  },
+  {
+   "path": "conformance/test/ci-reuse-wiring.test.mjs",
+   "site": "const text = (w) => readFileSync(join(PADDOCK, '.gitea', 'workflows', w), 'utf8');",
+   "reason": "predates C158 (2026-11-23): reads a workflow's text itself; convert it to the CI model (`./dev gates model`, Ctx::workflows) and delete this entry",
+   "count": 1,
+   "approved": "user"
+  },
+  {
+   "path": "conformance/test/ci-verdict-reader.test.mjs",
+   "site": "const text = (w) => readFileSync(join(PADDOCK, '.gitea', 'workflows', w), 'utf8');",
+   "reason": "predates C158 (2026-11-23): reads a workflow's text itself; convert it to the CI model (`./dev gates model`, Ctx::workflows) and delete this entry",
+   "count": 1,
+   "approved": "user"
+  },
+  {
+   "path": "conformance/test/first-release-notes.test.mjs",
+   "site": "const steps = parseSteps(readFileSync(join(PADDOCK, '.gitea/workflows/app-release.yml'), '",
+   "reason": "predates C158 (2026-11-23): reads a workflow's text itself; convert it to the CI model (`./dev gates model`, Ctx::workflows) and delete this entry",
+   "count": 1,
+   "approved": "user"
+  },
+  {
+   "path": "conformance/test/first-release-notes.test.mjs",
+   "site": "const dyno = readFileSync(join(PADDOCK, '.gitea/workflows/dyno-release.yml'), 'utf8');",
+   "reason": "predates C158 (2026-11-23): reads a workflow's text itself; convert it to the CI model (`./dev gates model`, Ctx::workflows) and delete this entry",
+   "count": 1,
+   "approved": "user"
+  },
+  {
+   "path": "conformance/test/gated-job-conditions.test.mjs",
+   "site": "const cond = jobIf(readFileSync(join(PADDOCK, '.gitea', 'workflows', file), 'utf8'), job);",
+   "reason": "predates C158 (2026-11-23): reads a workflow's text itself; convert it to the CI model (`./dev gates model`, Ctx::workflows) and delete this entry",
+   "count": 1,
+   "approved": "user"
+  },
+  {
+   "path": "conformance/test/lib/workflow.mjs",
+   "site": "export const loadWorkflow = (name) => loadYaml('.gitea', 'workflows', name);",
+   "reason": "predates C158 (2026-11-23): reads a workflow's text itself; convert it to the CI model (`./dev gates model`, Ctx::workflows) and delete this entry",
+   "count": 1,
+   "approved": "user"
+  },
+  {
+   "path": "conformance/test/request-tag.test.mjs",
+   "site": "const wf = readFileSync(join(PADDOCK, '.gitea', 'workflows', 'tag.yml'), 'utf8');",
+   "reason": "predates C158 (2026-11-23): reads a workflow's text itself; convert it to the CI model (`./dev gates model`, Ctx::workflows) and delete this entry",
+   "count": 1,
+   "approved": "user"
+  },
+  {
+   "path": "conformance/test/tag-rehearsal.test.mjs",
+   "site": "const text = (f) => readFileSync(join(HERE, '..', '..', '.gitea', 'workflows', f), 'utf8')",
+   "reason": "predates C158 (2026-11-23): reads a workflow's text itself; convert it to the CI model (`./dev gates model`, Ctx::workflows) and delete this entry",
+   "count": 1,
+   "approved": "user"
+  },
+  {
+   "path": "conformance/test/test-files-run.test.mjs",
+   "site": "const runners = git('ls-files', '--', '.gitea/workflows/*.yml', '.gitea/actions/*/action.y",
+   "reason": "predates C158 (2026-11-23): reads a workflow's text itself; convert it to the CI model (`./dev gates model`, Ctx::workflows) and delete this entry",
+   "count": 1,
+   "approved": "user"
+  },
+  {
+   "path": "conformance/test/windows-crt-imports.test.mjs",
+   "site": "for (const p of ['conformance/ci/tauri-bundle.sh', 'scripts/demo/bundle.sh', '.gitea/workf",
+   "reason": "predates C158 (2026-11-23): reads a workflow's text itself; convert it to the CI model (`./dev gates model`, Ctx::workflows) and delete this entry",
+   "count": 1,
+   "approved": "user"
+  },
+  {
+   "path": "scripts/demo-release.test.mjs",
+   "site": "const workflow = readFileSync(join(root, `.gitea/workflows/${app.id}-release.yml`), 'utf8'",
+   "reason": "predates C158 (2026-11-23): reads a workflow's text itself; convert it to the CI model (`./dev gates model`, Ctx::workflows) and delete this entry",
+   "count": 1,
+   "approved": "user"
+  },
+  {
+   "path": "scripts/publish.mjs",
+   "site": "const ciYaml = readFileSync(join(root, '.gitea/workflows/ci.yml'), 'utf8');",
+   "reason": "predates C158 (2026-11-23): reads a workflow's text itself; convert it to the CI model (`./dev gates model`, Ctx::workflows) and delete this entry",
+   "count": 1,
+   "approved": "user"
+  },
+  {
+   "path": "scripts/publish.test.mjs",
+   "site": "assert.deepEqual(crateStepsMissing(readFileSync(join(root, '.gitea/workflows/ci.yml'), 'ut",
+   "reason": "predates C158 (2026-11-23): reads a workflow's text itself; convert it to the CI model (`./dev gates model`, Ctx::workflows) and delete this entry",
+   "count": 1,
+   "approved": "user"
+  },
+  {
+   "path": "tools/paddock-dev/src/check/c121.rs",
+   "site": "static WORKFLOW: LazyLock<Regex> = LazyLock::new(|| rx(r#\"\\.gitea/workflows/|(?:^|[\\s\"'`/]",
+   "reason": "predates C158 (2026-11-23): reads a workflow's text itself; convert it to the CI model (`./dev gates model`, Ctx::workflows) and delete this entry",
+   "count": 1,
+   "approved": "user"
+  },
+  {
+   "path": "tools/paddock-dev/src/check/c121.rs",
+   "site": "\"[[g]]\\ncheck = [\\\"sh\\\", \\\"-c\\\", \\\"sed -n p .gitea/workflows/ci.yml\\\"]\\n\",",
+   "reason": "predates C158 (2026-11-23): reads a workflow's text itself; convert it to the CI model (`./dev gates model`, Ctx::workflows) and delete this entry",
+   "count": 1,
+   "approved": "user"
+  },
+  {
+   "path": "tools/paddock-dev/src/check/c121.rs",
+   "site": "\"# grep .gitea/workflows/ci.yml in a comment\\n[[g]]\\ncheck = [\\\"./dev\\\", \\\"ci\\\", \\\"conform",
+   "reason": "predates C158 (2026-11-23): reads a workflow's text itself; convert it to the CI model (`./dev gates model`, Ctx::workflows) and delete this entry",
+   "count": 1,
+   "approved": "user"
+  },
+  {
+   "path": "tools/paddock-dev/src/check/c121.rs",
+   "site": "\"fn b() {\\n    let ci = std::fs::read_to_string(\\\".gitea/workflows/ci.yml\\\");\\n}\\n\",",
+   "reason": "predates C158 (2026-11-23): reads a workflow's text itself; convert it to the CI model (`./dev gates model`, Ctx::workflows) and delete this entry",
+   "count": 1,
+   "approved": "user"
+  },
+  {
+   "path": "tools/paddock-dev/src/check/c121.rs",
+   "site": "\"Command::new(\\\"grep\\\"); // .gitea/workflows/ci.yml\\n\",",
+   "reason": "predates C158 (2026-11-23): reads a workflow's text itself; convert it to the CI model (`./dev gates model`, Ctx::workflows) and delete this entry",
+   "count": 1,
+   "approved": "user"
+  },
+  {
+   "path": "tools/paddock-dev/src/ci_run/tests.rs",
+   "site": "let ci = std::fs::read_to_string(Path::new(env!(\"CARGO_MANIFEST_DIR\")).join(\"../../.gitea/",
+   "reason": "predates C158 (2026-11-23): reads a workflow's text itself; convert it to the CI model (`./dev gates model`, Ctx::workflows) and delete this entry",
+   "count": 1,
+   "approved": "user"
+  },
+  {
+   "path": "tools/paddock-dev/src/ci_run/tests.rs",
+   "site": "let wf = crate::check::util::workflows::read(\".gitea/workflows/ci.yml\", &ci.replace(\"\\r\\n\"",
+   "reason": "predates C158 (2026-11-23): reads a workflow's text itself; convert it to the CI model (`./dev gates model`, Ctx::workflows) and delete this entry",
+   "count": 1,
+   "approved": "user"
+  },
+  {
+   "path": "tools/paddock-dev/src/ci_run/tests.rs",
+   "site": "let ci = std::fs::read_to_string(root.join(\".gitea/workflows/ci.yml\")).unwrap();",
+   "reason": "predates C158 (2026-11-23): reads a workflow's text itself; convert it to the CI model (`./dev gates model`, Ctx::workflows) and delete this entry",
+   "count": 1,
+   "approved": "user"
+  },
+  {
+   "path": "tools/paddock-dev/src/ci_runs/mod.rs",
+   "site": "let read = |name: &str| std::fs::read_to_string(root.join(\".gitea/workflows\").join(name)).",
+   "reason": "predates C158 (2026-11-23): reads a workflow's text itself; convert it to the CI model (`./dev gates model`, Ctx::workflows) and delete this entry",
+   "count": 2,
+   "approved": "user"
+  },
+  {
+   "path": "tools/paddock-dev/src/merge_check/other_os.rs",
+   "site": "let read = move |name: &str| std::fs::read_to_string(root.join(\".gitea/workflows\").join(na",
+   "reason": "predates C158 (2026-11-23): reads a workflow's text itself; convert it to the CI model (`./dev gates model`, Ctx::workflows) and delete this entry",
+   "count": 1,
+   "approved": "user"
+  },
+  {
+   "path": "tools/paddock-dev/src/plan_cmd.rs",
+   "site": ".then(|| std::fs::read_to_string(root.join(\".gitea/workflows\").join(file)).ok())",
+   "reason": "predates C158 (2026-11-23): reads a workflow's text itself; convert it to the CI model (`./dev gates model`, Ctx::workflows) and delete this entry",
+   "count": 1,
+   "approved": "user"
+  },
+  {
+   "path": "tools/paddock-dev/src/queue/real.rs",
+   "site": "let read = move |name: &str| std::fs::read_to_string(root.join(\".gitea/workflows\").join(na",
+   "reason": "predates C158 (2026-11-23): reads a workflow's text itself; convert it to the CI model (`./dev gates model`, Ctx::workflows) and delete this entry",
+   "count": 1,
+   "approved": "user"
+  },
+  {
+   "path": "tools/paddock-dev/src/run_scope.rs",
+   "site": "let text = std::fs::read_to_string(std::path::Path::new(env!(\"CARGO_MANIFEST_DIR\")).join(\"",
+   "reason": "predates C158 (2026-11-23): reads a workflow's text itself; convert it to the CI model (`./dev gates model`, Ctx::workflows) and delete this entry",
+   "count": 1,
+   "approved": "user"
+  },
+  {
+   "path": "tools/paddock-dev/tests/it/check_c121.rs",
+   "site": "\"{\\\"allow\\\":[{\\\"path\\\":\\\"conformance/test/x.test.mjs\\\",\\\"site\\\":\\\"a.match(/x/)\\\",\\\"reason\\",
+   "reason": "predates C158 (2026-11-23): reads a workflow's text itself; convert it to the CI model (`./dev gates model`, Ctx::workflows) and delete this entry",
+   "count": 1,
+   "approved": "user"
+  },
+  {
+   "path": "tools/paddock-dev/tests/it/check_c121.rs",
+   "site": "\"[[g]]\\ncheck = [\\\"sh\\\", \\\"-c\\\", \\\"sed -n p .gitea/workflows/ci.yml\\\"]\\n\",",
+   "reason": "predates C158 (2026-11-23): reads a workflow's text itself; convert it to the CI model (`./dev gates model`, Ctx::workflows) and delete this entry",
+   "count": 1,
+   "approved": "user"
+  },
+  {
+   "path": "tools/paddock-dev/tests/it/check_c121.rs",
+   "site": "\"# grep .gitea/workflows/ci.yml in a comment\\ncheck = [\\\"./dev\\\", \\\"ci\\\", \\\"conformance-ar",
+   "reason": "predates C158 (2026-11-23): reads a workflow's text itself; convert it to the CI model (`./dev gates model`, Ctx::workflows) and delete this entry",
+   "count": 1,
+   "approved": "user"
+  },
+  {
+   "path": "tools/paddock-dev/tests/it/check_c121.rs",
+   "site": "\"check = [\\\"sh\\\", \\\"-c\\\", \\\"rg -n x workflows/ci.yml | awk 1\\\"]\\nwhat = \\\"the sedate .gite",
+   "reason": "predates C158 (2026-11-23): reads a workflow's text itself; convert it to the CI model (`./dev gates model`, Ctx::workflows) and delete this entry",
+   "count": 1,
+   "approved": "user"
+  },
+  {
+   "path": "tools/paddock-dev/tests/it/check_c121.rs",
+   "site": "\"fn c() { Command::new(\\\"grep\\\").arg(\\\".gitea/workflows/x.yml\\\"); }\\n\",",
+   "reason": "predates C158 (2026-11-23): reads a workflow's text itself; convert it to the CI model (`./dev gates model`, Ctx::workflows) and delete this entry",
+   "count": 1,
+   "approved": "user"
+  },
+  {
+   "path": "tools/paddock-dev/tests/it/check_c121.rs",
+   "site": "\"sed .gitea/workflows/ci.yml\\nsed .gitea/workflows/ci.yml\\ngrep x .gitea/workflows/ci.yml\\",
+   "reason": "predates C158 (2026-11-23): reads a workflow's text itself; convert it to the CI model (`./dev gates model`, Ctx::workflows) and delete this entry",
+   "count": 1,
+   "approved": "user"
+  },
+  {
+   "path": "tools/paddock-dev/tests/it/check_c121.rs",
+   "site": "\"const r = new RegExp(\\\"x\\\").test(readFileSync('.gitea/workflows/ci.yml'));\\nconst m = t.m",
+   "reason": "predates C158 (2026-11-23): reads a workflow's text itself; convert it to the CI model (`./dev gates model`, Ctx::workflows) and delete this entry",
+   "count": 1,
+   "approved": "user"
+  },
+  {
+   "path": "tools/paddock-dev/tests/it/check_c121.rs",
+   "site": "\"Command::new(\\\"grep\\\"); // .gitea/workflows/ci.yml\\n\",",
+   "reason": "predates C158 (2026-11-23): reads a workflow's text itself; convert it to the CI model (`./dev gates model`, Ctx::workflows) and delete this entry",
+   "count": 1,
+   "approved": "user"
+  },
+  {
+   "path": "tools/paddock-dev/tests/it/dev_tool_workflow.rs",
+   "site": "let dir = repo_root().join(\".gitea/workflows\");",
+   "reason": "predates C158 (2026-11-23): reads a workflow's text itself; convert it to the CI model (`./dev gates model`, Ctx::workflows) and delete this entry",
+   "count": 1,
+   "approved": "user"
+  },
+  {
+   "path": "tools/paddock-dev/tests/it/dev_tool_workflow.rs",
+   "site": "let publish = std::fs::read_to_string(root.join(\".gitea/workflows/dev-tool.yml\")).unwrap()",
+   "reason": "predates C158 (2026-11-23): reads a workflow's text itself; convert it to the CI model (`./dev gates model`, Ctx::workflows) and delete this entry",
+   "count": 1,
+   "approved": "user"
+  },
+  {
+   "path": "tools/paddock-dev/tests/it/golden.rs",
+   "site": "let ci = std::fs::read_to_string(repo_root().join(\".gitea/workflows/ci.yml\")).unwrap();",
+   "reason": "predates C158 (2026-11-23): reads a workflow's text itself; convert it to the CI model (`./dev gates model`, Ctx::workflows) and delete this entry",
+   "count": 1,
+   "approved": "user"
+  },
+  {
+   "path": "tools/paddock-dev/tests/it/golden.rs",
+   "site": "!std::fs::read_to_string(copy.join(\".gitea/workflows/ci.yml\"))",
+   "reason": "predates C158 (2026-11-23): reads a workflow's text itself; convert it to the CI model (`./dev gates model`, Ctx::workflows) and delete this entry",
+   "count": 1,
+   "approved": "user"
+  },
+  {
+   "path": "tools/paddock-dev/tests/it/plan_graph_ci.rs",
+   "site": "let ci = root.join(\".gitea/workflows/ci.yml\");",
+   "reason": "predates C158 (2026-11-23): reads a workflow's text itself; convert it to the CI model (`./dev gates model`, Ctx::workflows) and delete this entry",
+   "count": 1,
+   "approved": "user"
+  },
+  {
+   "path": "tools/paddock-dev/tests/it/tree.rs",
+   "site": "let ci = std::fs::read_to_string(root().join(\".gitea/workflows/ci.yml\"))",
+   "reason": "predates C158 (2026-11-23): reads a workflow's text itself; convert it to the CI model (`./dev gates model`, Ctx::workflows) and delete this entry",
+   "count": 3,
+   "approved": "user"
+  },
+  {
+   "path": "tools/paddock-dev/tests/it/tree.rs",
+   "site": "let text = std::fs::read_to_string(root().join(\".gitea/workflows/debrief.yml\"))",
+   "reason": "predates C158 (2026-11-23): reads a workflow's text itself; convert it to the CI model (`./dev gates model`, Ctx::workflows) and delete this entry",
+   "count": 1,
+   "approved": "user"
+  },
+  {
+   "path": "tools/test/macos-vm-smoke.test.mjs",
+   "site": "const wf = readFileSync(join(TOOLS, '..', '.gitea', 'workflows', 'service-smoke.yml'), 'ut",
+   "reason": "predates C158 (2026-11-23): reads a workflow's text itself; convert it to the CI model (`./dev gates model`, Ctx::workflows) and delete this entry",
+   "count": 1,
+   "approved": "user"
+  }
+ ]
+}

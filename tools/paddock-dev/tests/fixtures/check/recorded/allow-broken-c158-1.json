@@ -1,0 +1,18 @@
+{
+ "findings": [
+  {
+   "check": "C158",
+   "severity": "warn",
+   "rule": 79,
+   "file": "conformance/c158-allow.json",
+   "line": 1,
+   "message": "the check cannot look: conformance/c158-allow.json",
+   "fix": "Restore conformance/c158-allow.json: {\"allow\": [{\"path\": \"...\", \"site\": \"ci.yml\", \"reason\": \"...\", \"count\": 1}]}.",
+   "unwaivable": true,
+   "outcome": "check-broken"
+  }
+ ],
+ "errors": 0,
+ "warnings": 1,
+ "waived": []
+}

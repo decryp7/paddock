@@ -22,5 +22,9 @@
  [
   "C135",
   "conformance/c135-allow.json"
+ ],
+ [
+  "C158",
+  "conformance/c158-allow.json"
  ]
 ]

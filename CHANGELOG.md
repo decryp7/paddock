@@ -4,6 +4,9 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### Conformance guards (2026-11-23): C158 (workflow text read outside the CI model), report-only
+- C158 (Rust, `tools/paddock-dev/src/check/c158.rs`, report-only, ER-41) flags code in `scripts/`, `conformance/` and `tools/` (tests included) that reads a workflow's text itself (a read of `.gitea/workflows/*.yml` by `readFileSync`, `read_to_string`, `ctx.read`, `grep`, `sed`, `git show` and the like) instead of asking the CI model (`./dev gates model`, `gates::ci`, `Ctx::workflows`). Exceptions are `conformance/c158-allow.json` (shrink-only, ER-46). First count on `train/2026-11-23-graph`: 52 sites in 29 files, all in the list.
+
 ### CI: OS-scoped tests, `hostTests`, conformance C155 (report-only), and `tools-macos` is gone (user decision 2026-11-22: D1 full, D2 "a test runs on an OS only if its code behaves differently there", D3, D4)
 - `hostTests` in a CI contract (`crates/paddock.ci.json`, `apps/<app>/paddock.ci.json`, the new `tools/paddock-dev/paddock.ci.json`) names the
   packages (or, for paddock-dev, the test-name prefixes) that the Windows and macOS legs build and test; `skip` keeps pure modules of a
