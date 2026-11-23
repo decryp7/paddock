@@ -178,6 +178,15 @@ outputs = ["crates/paddock-workspace-hack/Cargo.toml"]
 cost = "heavy"
 
 [[generator]]
+id = "shared-crate-features"
+what = "docs/shared-crate-features.toml: the features Cargo resolves for the watched crates (serde_json) in every workspace; a dependency added to a shared crate can force one (oxc_resolver: preserve_order) and change every app's lockfile. `./dev locks guard` is report-only until its first green CI run (ER-41), so this check does not fail yet"
+check = ["./dev", "locks", "guard"]
+regenerate = "./dev locks sync && ./dev locks guard --write   # review the diff of docs/shared-crate-features.toml, then commit it"
+paths = ["crates/**/Cargo.toml", "apps/**/Cargo.toml", "tools/**/Cargo.toml", "**/Cargo.lock", "crates/.config/hakari.toml", "docs/shared-crate-features.toml"]
+outputs = ["docs/shared-crate-features.toml"]
+cost = "heavy"
+
+[[generator]]
 id = "publish-dry-run"
 what = "the shared packages publish: versions, manifests and ui/dist agree (scripts/publish.mjs without --publish)"
 check = ["node", "scripts/publish.mjs", "--skip-build", "--offline"]
