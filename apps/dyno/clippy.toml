@@ -7,6 +7,7 @@ disallowed-methods = [
     # it through paddock_testkit::EnvLock (the one site that may), or a justified site carries #[expect(..., reason = "...")].
     { path = "std::env::set_var", reason = "the environment is process-wide: change it through paddock_testkit::EnvLock (ADR 0100), or justify the site with #[expect]" },
     { path = "std::env::remove_var", reason = "the environment is process-wide: change it through paddock_testkit::EnvLock (ADR 0100), or justify the site with #[expect]" },
+    { path = "std::env::set_current_dir", reason = "the working folder is process-wide: start the child in the folder (`current_dir`) instead; a test that moved its process left every later child of a plain test run in a deleted folder (rule 89)" },
     # ER-47 / rule 84 (ADR 0100): clearing a child's environment strips the variables that restrict it (a download ban, an install ban,
     # an offline switch). paddock_env::clear_env (paddock_proc::clean_env) is the one function that clears, and it passes them.
     { path = "std::process::Command::env_clear", reason = "clear a child's environment through paddock_proc::clean_env (paddock_env::clear_env): it keeps the restricting variables (ER-47)" },

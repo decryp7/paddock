@@ -324,8 +324,13 @@ fn c129_an_added_or_widened_exception_is_a_finding_against_the_merge_base() {
 }
 
 /// A control is hermetic (ER-21 class: a check's own control read the real repository): an in-memory tree has no git history, so the
-/// control must hold whatever base ref the process has and whatever repository it is in. Here the process stands in a repository
+/// control must hold whatever base ref the process has and whatever repository it is in. Here the program stands in a repository
 /// whose lists differ from the control's; reaching for git would report the control's entries as added and fail the control.
+///
+/// The program is the built binary, started in that repository, never this test process moved there: a test that changed the process's
+/// working folder (`std::env::set_current_dir`) left every later child of a plain `cargo test` run starting in a deleted temporary folder,
+/// and the C library's getcwd then reads the whole temp folder (about a million entries on the dev Mac) for each `git` start: 20 s to
+/// several minutes per start, the hangs of `worktree::list_clean` (3.5 h) and `ci_isolation` (18 min) (rule 89; clippy now forbids it).
 #[test]
 fn a_control_holds_in_a_repository_whose_lists_differ_from_its_own() {
     let repo = tree_of(&[
@@ -342,8 +347,6 @@ fn a_control_holds_in_a_repository_whose_lists_differ_from_its_own() {
     git(repo.path(), &["checkout", "-q", "-b", "work"]);
     std::fs::write(repo.path().join("other.sh"), "x\ny\n").unwrap();
     git(repo.path(), &["commit", "-q", "-am", "edit"]);
-    // The process's working folder is changed and not restored: nextest runs every test in its own process, so no other test sees it.
-    std::env::set_current_dir(repo.path()).unwrap();
     // the ref a control would compare with by default (origin/main) exists here, with lists that differ from the control's
     git(repo.path(), &["update-ref", "refs/remotes/origin/main", "main"]);
     let elsewhere = tree_of(&[
@@ -352,16 +355,20 @@ fn a_control_holds_in_a_repository_whose_lists_differ_from_its_own() {
         ("a.txt", "x\n".to_string()),
     ]);
     for id in ["C129", "C53"] {
-        let o = RunOptions {
-            only: Some(vec![id.into()]),
-            base_ref: None,
-            ..options(elsewhere.path(), "fixture")
-        };
-        let r = run_checks(&o, &registry()).unwrap();
+        let out = crate::dev_bin::command()
+            .args(["--json", "check", "run", "--app", "fixture", "--only", id, "--root"])
+            .arg(elsewhere.path())
+            .current_dir(repo.path())
+            .env_remove("PADDOCK_BASE_REF")
+            .output()
+            .unwrap();
+        let report: Value = serde_json::from_slice(&out.stdout)
+            .unwrap_or_else(|e| panic!("{id}: no report ({e}): {}", String::from_utf8_lossy(&out.stderr)));
+        assert_eq!(report["runs"][0]["check"], json!(id), "{report}");
         assert_eq!(
-            r.json()["runs"][0]["control"],
+            report["runs"][0]["control"],
             json!(true),
-            "{id}'s control read the repository the process stands in"
+            "{id}'s control read the repository the program stands in: {report}"
         );
     }
 }
