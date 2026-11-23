@@ -61,43 +61,24 @@ pub struct Pins {
 
 /// Reads the pins file. A watched crate with no table is an empty pin set; a malformed file is an error that names the key.
 pub fn parse_pins(text: &str) -> Result<Pins, String> {
-    crate::register_schema::parse_file(PINS_FILE, text)?;
-    let table: toml::Table = text.parse().map_err(|e| format!("{PINS_FILE} is not valid TOML: {e}"))?;
-    let watch = match table.get("watch") {
-        Some(toml::Value::Array(a)) => a
-            .iter()
-            .map(|v| {
-                v.as_str()
-                    .map(str::to_string)
-                    .ok_or_else(|| format!("{PINS_FILE}: `watch` holds only crate names"))
-            })
-            .collect::<Result<Vec<_>, _>>()?,
-        _ => return Err(format!("{PINS_FILE}: `watch` (the list of crate names) is missing")),
-    };
-    let mut features = BTreeMap::new();
-    if let Some(toml::Value::Table(all)) = table.get("features") {
-        for (krate, per_ws) in all {
-            let toml::Value::Table(per_ws) = per_ws else {
-                return Err(format!("{PINS_FILE}: `features.{krate}` is a table of workspace = [features]"));
-            };
-            let mut m = BTreeMap::new();
-            for (ws, list) in per_ws {
-                let toml::Value::Array(list) = list else {
-                    return Err(format!("{PINS_FILE}: `features.{krate}.{ws}` is a list of feature names"));
-                };
-                let set = list
-                    .iter()
-                    .map(|v| {
-                        v.as_str()
-                            .map(str::to_string)
-                            .ok_or_else(|| format!("{PINS_FILE}: `features.{krate}.{ws}` holds only names"))
-                    })
-                    .collect::<Result<BTreeSet<_>, _>>()?;
-                m.insert(ws.clone(), set);
-            }
-            features.insert(krate.clone(), m);
-        }
-    }
+    let file: crate::register_schema::SharedCrateFeaturesFile = crate::register_schema::parse(PINS_FILE, text)?;
+    let watch = file
+        .watch
+        .ok_or_else(|| format!("{PINS_FILE}: `watch` (the list of crate names) is missing"))?;
+    let features = file
+        .features
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(krate, per_ws)| {
+            (
+                krate,
+                per_ws
+                    .into_iter()
+                    .map(|(ws, list)| (ws, list.into_iter().collect::<BTreeSet<_>>()))
+                    .collect(),
+            )
+        })
+        .collect();
     Ok(Pins { watch, features })
 }
 
@@ -532,8 +513,8 @@ mod tests {
     #[test]
     fn a_pins_file_without_a_watch_list_is_refused_with_the_key_named() {
         assert!(parse_pins("[features.x]\n").unwrap_err().contains("`watch`"));
-        assert!(parse_pins("watch = [1]\n").unwrap_err().contains("only crate names"));
-        assert!(parse_pins("watch = [").unwrap_err().contains("not valid TOML"));
+        assert!(parse_pins("watch = [1]\n").unwrap_err().contains("expected a string"));
+        assert!(parse_pins("watch = [").unwrap_err().contains("docs/shared-crate-features.toml:1"));
     }
 
     fn doc() -> Value {

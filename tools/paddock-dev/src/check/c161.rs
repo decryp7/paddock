@@ -404,14 +404,14 @@ impl Check for C161 {
                             format!("the reader {} of {} [{}] does not exist", r.reader, r.file, r.table),
                             "Name the file that parses the table.",
                         )),
-                        Some(src) if r.serde && !src.contains("register_schema::parse_file") && !src.contains("deny_unknown_fields") => findings.push(finding(
+                        Some(src) if r.serde && !src.contains("register_schema::parse") && !src.contains("deny_unknown_fields") => findings.push(finding(
                             REGISTERS,
                             1,
                             format!(
-                                "{} [{}] says its reader {} parses into typed structs, and that file calls neither `register_schema::parse_file` nor has `deny_unknown_fields`",
+                                "{} [{}] says its reader {} parses into typed structs, and that file calls neither `register_schema::parse` nor has `deny_unknown_fields`",
                                 r.file, r.table, r.reader
                             ),
-                            "Call crate::register_schema::parse_file(FILE, text) where the reader parses the file (or give it a serde struct with deny_unknown_fields).",
+                            "Call crate::register_schema::parse::<TheStruct>(FILE, text) where the reader parses the file (or give it a serde struct with deny_unknown_fields).",
                         )),
                         Some(_) => {}
                     }

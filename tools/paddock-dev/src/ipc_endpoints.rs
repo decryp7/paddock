@@ -653,74 +653,46 @@ pub struct Register {
     pub not_applicable: Vec<NotApplicable>,
 }
 
-fn text_of(t: &toml::Table, key: &str) -> String {
-    t.get(key).and_then(toml::Value::as_str).unwrap_or_default().to_string()
-}
-
-fn strings_of(t: &toml::Table, key: &str) -> Vec<String> {
-    t.get(key)
-        .and_then(toml::Value::as_array)
-        .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
-        .unwrap_or_default()
-}
-
-fn tables<'a>(doc: &'a toml::Table, key: &str) -> Vec<&'a toml::Table> {
-    doc.get(key)
-        .and_then(toml::Value::as_array)
-        .map(|a| a.iter().filter_map(toml::Value::as_table).collect())
-        .unwrap_or_default()
-}
-
 /// Parses the register file.
 ///
 /// # Errors
 /// The text is not TOML.
 pub fn parse_register(text: &str) -> Result<Register, String> {
-    crate::register_schema::parse_file("docs/ipc-endpoints.toml", text)?;
-    let doc: toml::Table = text.parse().map_err(|e: toml::de::Error| e.to_string())?;
-    let endpoints = tables(&doc, "endpoint")
-        .into_iter()
-        .map(|t| Endpoint {
-            id: text_of(t, "id"),
-            file: text_of(t, "file"),
-            calls: t
-                .get("calls")
-                .and_then(toml::Value::as_array)
-                .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
-                .unwrap_or_default(),
-            sites: t
-                .get("sites")
-                .and_then(toml::Value::as_integer)
-                .map_or(0, |n| usize::try_from(n).unwrap_or(0)),
-            ending_test: text_of(t, "ending_test"),
-        })
-        .collect();
-    let out_of_scope = tables(&doc, "out_of_scope")
-        .into_iter()
-        .map(|t| OutOfScope {
-            path: text_of(t, "path"),
-            reason: text_of(t, "reason"),
-            owner: text_of(t, "owner"),
-            calls: strings_of(t, "calls"),
-            sites: t
-                .get("sites")
-                .and_then(toml::Value::as_integer)
-                .map_or(0, |n| usize::try_from(n).unwrap_or(0)),
-        })
-        .collect();
-    let not_applicable = tables(&doc, "not_applicable")
-        .into_iter()
-        .map(|t| NotApplicable {
-            endpoint: text_of(t, "endpoint"),
-            scenario: text_of(t, "scenario"),
-            reason: text_of(t, "reason"),
-            os: text_of(t, "os"),
-        })
-        .collect();
+    let file: crate::register_schema::IpcEndpointsFile = crate::register_schema::parse("docs/ipc-endpoints.toml", text)?;
+    let count = |n: Option<i64>| n.map_or(0, |n| usize::try_from(n).unwrap_or(0));
     Ok(Register {
-        endpoints,
-        out_of_scope,
-        not_applicable,
+        endpoints: file
+            .endpoint
+            .into_iter()
+            .map(|t| Endpoint {
+                id: t.id.unwrap_or_default(),
+                file: t.file.unwrap_or_default(),
+                calls: t.calls.unwrap_or_default(),
+                sites: count(t.sites),
+                ending_test: t.ending_test.unwrap_or_default(),
+            })
+            .collect(),
+        out_of_scope: file
+            .out_of_scope
+            .into_iter()
+            .map(|t| OutOfScope {
+                path: t.path.unwrap_or_default(),
+                reason: t.reason.unwrap_or_default(),
+                owner: t.owner.unwrap_or_default(),
+                calls: t.calls.unwrap_or_default(),
+                sites: count(t.sites),
+            })
+            .collect(),
+        not_applicable: file
+            .not_applicable
+            .into_iter()
+            .map(|t| NotApplicable {
+                endpoint: t.endpoint.unwrap_or_default(),
+                scenario: t.scenario.unwrap_or_default(),
+                reason: t.reason.unwrap_or_default(),
+                os: t.os.unwrap_or_default(),
+            })
+            .collect(),
     })
 }
 
@@ -748,18 +720,18 @@ pub struct RatchetEntry {
 /// # Errors
 /// The text is not TOML.
 pub fn parse_ratchet(text: &str) -> Result<Vec<RatchetEntry>, String> {
-    crate::register_schema::parse_file("docs/ipc-endpoint-ratchet.toml", text)?;
-    let doc: toml::Table = text.parse().map_err(|e: toml::de::Error| e.to_string())?;
-    Ok(tables(&doc, "ratchet")
+    let file: crate::register_schema::IpcRatchetFile = crate::register_schema::parse("docs/ipc-endpoint-ratchet.toml", text)?;
+    Ok(file
+        .ratchet
         .into_iter()
         .map(|t| RatchetEntry {
-            instance: text_of(t, "instance"),
-            endpoint: text_of(t, "endpoint"),
-            scenario: text_of(t, "scenario"),
-            fault: text_of(t, "fault"),
-            blocks_tag: text_of(t, "blocks_tag"),
-            app: text_of(t, "app"),
-            os: text_of(t, "os"),
+            instance: t.instance.unwrap_or_default(),
+            endpoint: t.endpoint.unwrap_or_default(),
+            scenario: t.scenario.unwrap_or_default(),
+            fault: t.fault.unwrap_or_default(),
+            blocks_tag: t.blocks_tag.unwrap_or_default(),
+            app: t.app.unwrap_or_default(),
+            os: t.os.unwrap_or_default(),
         })
         .collect())
 }

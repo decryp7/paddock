@@ -57,15 +57,11 @@ pub struct Register {
 
 /// The register in `text`. A missing field or a wrong type is an error naming it.
 pub fn parse(text: &str) -> Result<Register, String> {
-    crate::register_schema::parse_file(FILE, text)?;
-    let v: toml::Table = text.parse().map_err(|e| format!("{FILE}: {e}"))?;
+    let file: crate::register_schema::EscapeFile = crate::register_schema::parse(FILE, text)?;
     let err = |m: &str| format!("{FILE}: {m}");
-    let required = match v.get("required") {
+    let required = match file.required {
         None => REQUIRED,
-        Some(r) => r
-            .as_integer()
-            .and_then(|n| usize::try_from(n).ok())
-            .ok_or_else(|| err("required is not a count"))?,
+        Some(r) => usize::try_from(r).map_err(|_| err("required is not a count"))?,
     };
     // The file may not lower the count the ADR sets: a smaller number would open the gate by a data edit.
     if required < REQUIRED {
@@ -74,38 +70,27 @@ pub fn parse(text: &str) -> Result<Register, String> {
         )));
     }
     let mut tables = Vec::new();
-    for t in v.get("table").and_then(|t| t.as_array()).into_iter().flatten() {
+    for t in file.table {
         tables.push(Table {
-            file: t
-                .get("file")
-                .and_then(|f| f.as_str())
-                .ok_or_else(|| err("a [[table]] has no file"))?
-                .to_string(),
-            contains: t.get("contains").and_then(|c| c.as_str()).map(str::to_string),
+            file: t.file.ok_or_else(|| err("a [[table]] has no file"))?,
+            contains: t.contains,
         });
     }
     let mut nightly = Vec::new();
-    for n in v.get("nightly").and_then(|t| t.as_array()).into_iter().flatten() {
-        let num = |k: &str| {
-            n.get(k)
-                .and_then(|x| x.as_integer())
-                .and_then(|x| u64::try_from(x).ok())
+    for n in file.nightly {
+        let num = |k: &str, v: Option<i64>| {
+            v.and_then(|x| u64::try_from(x).ok())
                 .ok_or_else(|| err(&format!("a [[nightly]] has no count {k}")))
         };
-        let text = |k: &str| {
-            n.get(k)
-                .and_then(|x| x.as_str())
-                .map(str::to_string)
-                .ok_or_else(|| err(&format!("a [[nightly]] has no {k}")))
-        };
+        let text = |k: &str, v: Option<String>| v.ok_or_else(|| err(&format!("a [[nightly]] has no {k}")));
         nightly.push(Row {
-            run: num("run")?,
-            date: text("date")?,
-            head: text("head")?,
-            commits: num("commits")?,
-            escapes: num("escapes")?,
-            not_measured: num("not_measured")?,
-            unreadable: num("unreadable")?,
+            run: num("run", n.run)?,
+            date: text("date", n.date)?,
+            head: text("head", n.head)?,
+            commits: num("commits", n.commits)?,
+            escapes: num("escapes", n.escapes)?,
+            not_measured: num("not_measured", n.not_measured)?,
+            unreadable: num("unreadable", n.unreadable)?,
         });
     }
     Ok(Register { required, tables, nightly })

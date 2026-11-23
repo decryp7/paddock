@@ -211,29 +211,33 @@ pub struct Register {
     pub defects: Vec<Defect>,
 }
 
-fn text(t: &toml::Table, k: &str) -> Option<String> {
-    t.get(k).and_then(|v| v.as_str()).map(str::to_string)
-}
-
-fn strings(t: &toml::Table, k: &str) -> Vec<String> {
-    t.get(k)
-        .and_then(|v| v.as_array())
-        .map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_string)).collect())
-        .unwrap_or_default()
-}
-
-fn date(t: &toml::Table, k: &str) -> Option<Date> {
-    match t.get(k)? {
+fn date(v: Option<&toml::Value>) -> Option<Date> {
+    match v? {
         toml::Value::Datetime(d) => Date::parse(&d.to_string()),
         toml::Value::String(s) => Date::parse(s),
         _ => None,
     }
 }
 
-fn stamp(t: &toml::Table, ctx: &str, errors: &mut Vec<String>) -> Option<Stamp> {
+/// The stamp fields of one entry, as the typed table holds them.
+struct Fields<'a> {
+    reason: Option<&'a str>,
+    owner: Option<&'a str>,
+    since: Option<&'a toml::Value>,
+    review_by: Option<&'a toml::Value>,
+    approved: Option<&'a str>,
+}
+
+fn stamp(f: &Fields, ctx: &str, errors: &mut Vec<String>) -> Option<Stamp> {
     let mut missing = Vec::new();
-    for k in ["reason", "owner", "since", "review_by", "approved"] {
-        if !t.contains_key(k) {
+    for (k, present) in [
+        ("reason", f.reason.is_some()),
+        ("owner", f.owner.is_some()),
+        ("since", f.since.is_some()),
+        ("review_by", f.review_by.is_some()),
+        ("approved", f.approved.is_some()),
+    ] {
+        if !present {
             missing.push(k);
         }
     }
@@ -241,7 +245,7 @@ fn stamp(t: &toml::Table, ctx: &str, errors: &mut Vec<String>) -> Option<Stamp> 
         errors.push(format!("{ctx} lacks {}", missing.join(", ")));
         return None;
     }
-    let approved = match text(t, "approved").as_deref() {
+    let approved = match f.approved {
         Some("coordinator") => Approver::Coordinator,
         Some("user") => Approver::User,
         other => {
@@ -249,102 +253,128 @@ fn stamp(t: &toml::Table, ctx: &str, errors: &mut Vec<String>) -> Option<Stamp> 
             return None;
         }
     };
-    let (Some(since), Some(review_by)) = (date(t, "since"), date(t, "review_by")) else {
+    let (Some(since), Some(review_by)) = (date(f.since), date(f.review_by)) else {
         errors.push(format!("{ctx}: since and review_by must be dates (YYYY-MM-DD)"));
         return None;
     };
     Some(Stamp {
-        reason: text(t, "reason").unwrap_or_default(),
-        owner: text(t, "owner").unwrap_or_default(),
+        reason: f.reason.unwrap_or_default().to_string(),
+        owner: f.owner.unwrap_or_default().to_string(),
         since,
         review_by,
         approved,
     })
 }
 
-fn tables<'a>(t: &'a toml::Table, k: &str) -> Vec<&'a toml::Table> {
-    t.get(k)
-        .and_then(|v| v.as_array())
-        .map(|a| a.iter().filter_map(|x| x.as_table()).collect())
-        .unwrap_or_default()
+macro_rules! fields_of {
+    ($e:expr) => {
+        Fields {
+            reason: $e.reason.as_deref(),
+            owner: $e.owner.as_deref(),
+            since: $e.since.as_ref(),
+            review_by: $e.review_by.as_ref(),
+            approved: $e.approved.as_deref(),
+        }
+    };
 }
 
 /// Parses the register. Every problem is returned, none is skipped (fail closed).
 pub fn parse(src: &str) -> (Register, Vec<String>) {
     let mut errors = Vec::new();
     let mut r = Register::default();
-    let table: toml::Table = match src.parse() {
-        Ok(t) => t,
-        Err(e) => return (r, vec![format!("docs/gates.toml is not valid TOML: {e}")]),
+    // One parse into the typed structs: an unknown key, a wrong type or text that is not TOML ends here with its one message.
+    let file: crate::register_schema::GatesFile = match crate::register_schema::parse("docs/gates.toml", src) {
+        Ok(f) => f,
+        Err(e) => return (r, vec![e]),
     };
-    if let Err(e) = crate::register_schema::parse_file("docs/gates.toml", src) {
-        errors.push(e);
-    }
-    if table.get("version").and_then(|v| v.as_integer()) != Some(1) {
+    if file.version != Some(1) {
         errors.push("docs/gates.toml: version must be 1".into());
     }
-    if let Some(v) = table.get("vars").and_then(|v| v.as_table()) {
+    if let Some(v) = &file.vars {
         r.vars = v.iter().map(|(k, v)| (k.clone(), v.as_str().unwrap_or("").to_string())).collect();
     }
-    if let Some(d) = table.get("docs").and_then(|v| v.as_table()) {
-        r.docs_include = strings(d, "include");
-        r.docs_exclude = strings(d, "exclude");
+    if let Some(d) = &file.docs {
+        r.docs_include = d.include.clone().unwrap_or_default();
+        r.docs_exclude = d.exclude.clone().unwrap_or_default();
     }
-    if let Some(m) = table.get("measurements").and_then(|v| v.as_table()) {
-        r.measurements = strings(m, "files");
+    if let Some(m) = &file.measurements {
+        r.measurements = m.files.clone().unwrap_or_default();
     }
-    for h in tables(&table, "harness") {
+    for h in &file.harness {
         r.harness.push(Harness {
-            name: text(h, "name").unwrap_or_default(),
-            paths: strings(h, "paths"),
+            name: h.name.clone().unwrap_or_default(),
+            paths: h.paths.clone().unwrap_or_default(),
         });
     }
-    for (key, dst) in [("not_gated", 0), ("conditional", 1), ("report_only", 2), ("level", 3)] {
-        for (i, e) in tables(&table, key).into_iter().enumerate() {
-            let ctx = format!("[[{key}]] #{} ({})", i + 1, text(e, "id").unwrap_or_default());
-            let Some(id) = text(e, "id") else {
+    for (key, dst, list) in [
+        ("not_gated", 0, &file.not_gated),
+        ("conditional", 1, &file.conditional),
+        ("report_only", 2, &file.report_only),
+    ] {
+        for (i, e) in list.iter().enumerate() {
+            let ctx = format!("[[{key}]] #{} ({})", i + 1, e.id.clone().unwrap_or_default());
+            let Some(id) = e.id.clone() else {
                 errors.push(format!("{ctx} lacks id"));
                 continue;
             };
-            let Some(st) = stamp(e, &ctx, &mut errors) else { continue };
+            let Some(st) = stamp(&fields_of!(e), &ctx, &mut errors) else {
+                continue;
+            };
             let entry = Entry {
                 id,
-                apps: strings(e, "apps"),
-                level: text(e, "level"),
+                apps: e.apps.clone().unwrap_or_default(),
+                level: None,
                 stamp: st,
             };
             match dst {
                 0 => r.not_gated.push(entry),
                 1 => r.conditional.push(entry),
-                2 => r.report_only.push(entry),
-                _ => r.level.push(entry),
+                _ => r.report_only.push(entry),
             }
         }
     }
-    for (i, e) in tables(&table, "planned").into_iter().enumerate() {
-        let ctx = format!("[[planned]] #{} ({})", i + 1, text(e, "id").unwrap_or_default());
-        let (Some(id), Some(adr)) = (text(e, "id"), text(e, "adr")) else {
+    for (i, e) in file.level.iter().enumerate() {
+        let ctx = format!("[[level]] #{} ({})", i + 1, e.id.clone().unwrap_or_default());
+        let Some(id) = e.id.clone() else {
+            errors.push(format!("{ctx} lacks id"));
+            continue;
+        };
+        let Some(st) = stamp(&fields_of!(e), &ctx, &mut errors) else {
+            continue;
+        };
+        r.level.push(Entry {
+            id,
+            apps: Vec::new(),
+            level: e.level.clone(),
+            stamp: st,
+        });
+    }
+    for (i, e) in file.planned.iter().enumerate() {
+        let ctx = format!("[[planned]] #{} ({})", i + 1, e.id.clone().unwrap_or_default());
+        let (Some(id), Some(adr)) = (e.id.clone(), e.adr.clone()) else {
             errors.push(format!("{ctx} lacks id or adr"));
             continue;
         };
-        let mut e2 = e.clone();
-        e2.entry("reason".to_string())
-            .or_insert_with(|| toml::Value::String(format!("planned by ADR {adr}")));
-        if let Some(stamp) = stamp(&e2, &ctx, &mut errors) {
+        let reason = e.reason.clone().unwrap_or_else(|| format!("planned by ADR {adr}"));
+        let f = Fields {
+            reason: Some(&reason),
+            ..fields_of!(e)
+        };
+        if let Some(stamp) = stamp(&f, &ctx, &mut errors) {
             r.planned.push(Planned { id, adr, stamp });
         }
     }
-    for e in tables(&table, "retired") {
+    for e in &file.retired {
         r.retired.push(Retired {
-            id: text(e, "id").unwrap_or_default(),
-            commit: text(e, "commit").unwrap_or_default(),
-            moved_to: text(e, "moved_to").unwrap_or_default(),
+            id: e.id.clone().unwrap_or_default(),
+            commit: e.commit.clone().unwrap_or_default(),
+            moved_to: e.moved_to.clone().unwrap_or_default(),
         });
     }
-    for (i, e) in tables(&table, "ignored").into_iter().enumerate() {
-        let path = text(e, "path").unwrap_or_default();
+    for (i, e) in file.ignored.iter().enumerate() {
+        let path = e.path.clone().unwrap_or_default();
         let ctx = format!("[[ignored]] #{} ({path})", i + 1);
-        let gate = match text(e, "gate").as_deref() {
+        let gate = match e.gate.as_deref() {
             Some("not-gated") => Gate::NotGated,
             Some("measurement") => Gate::Measurement,
             Some(g) if g.starts_with("job:") => Gate::Job(g[4..].to_string()),
@@ -357,31 +387,31 @@ pub fn parse(src: &str) -> (Register, Vec<String>) {
                 continue;
             }
         };
-        let tests = strings(e, "tests");
+        let tests = e.tests.clone().unwrap_or_default();
         if tests.is_empty() {
             errors.push(format!("{ctx} lists no tests"));
             continue;
         }
-        if let Some(stamp) = stamp(e, &ctx, &mut errors) {
+        if let Some(stamp) = stamp(&fields_of!(e), &ctx, &mut errors) {
             r.ignored.push(IgnoredEntry { path, tests, gate, stamp });
         }
     }
-    for (i, e) in tables(&table, "ratchet").into_iter().enumerate() {
+    for (i, e) in file.ratchet.iter().enumerate() {
         let ctx = format!(
             "[[ratchet]] #{} ({} {})",
             i + 1,
-            text(e, "id").unwrap_or_default(),
-            text(e, "app").unwrap_or_default()
+            e.id.clone().unwrap_or_default(),
+            e.app.clone().unwrap_or_default()
         );
-        if text(e, "approved").as_deref() != Some("user") {
+        if e.approved.as_deref() != Some("user") {
             errors.push(format!("{ctx} needs approved = \"user\""));
             continue;
         }
-        let (Some(id), Some(app), Some(owner), Some(target)) = (text(e, "id"), text(e, "app"), text(e, "owner"), text(e, "target")) else {
+        let (Some(id), Some(app), Some(owner), Some(target)) = (e.id.clone(), e.app.clone(), e.owner.clone(), e.target.clone()) else {
             errors.push(format!("{ctx} lacks id, app, owner or target"));
             continue;
         };
-        let blocks_tag = text(e, "blocks_tag").unwrap_or_default();
+        let blocks_tag = e.blocks_tag.clone().unwrap_or_default();
         if !blocks_tag.is_empty() && blocks_tag != REPORT_ONLY {
             errors.push(format!(
                 "{ctx} has blocks_tag = \"{blocks_tag}\": the only value is \"{REPORT_ONLY}\" (omit the key for a ratchet that refuses the tag)"
@@ -391,17 +421,17 @@ pub fn parse(src: &str) -> (Register, Vec<String>) {
         r.ratchet.push(Ratchet {
             id,
             app,
-            not_yet: strings(e, "not_yet"),
-            clippy_not_yet: strings(e, "clippy_not_yet"),
+            not_yet: e.not_yet.clone().unwrap_or_default(),
+            clippy_not_yet: e.clippy_not_yet.clone().unwrap_or_default(),
             owner,
             target,
             blocks_tag,
         });
     }
-    for (i, e) in tables(&table, "defect").into_iter().enumerate() {
-        let path = text(e, "path").unwrap_or_default();
+    for (i, e) in file.defect.iter().enumerate() {
+        let path = e.path.clone().unwrap_or_default();
         let ctx = format!("[[defect]] #{} ({path})", i + 1);
-        if let Some(stamp) = stamp(e, &ctx, &mut errors) {
+        if let Some(stamp) = stamp(&fields_of!(e), &ctx, &mut errors) {
             r.defects.push(Defect { path, stamp });
         }
     }
@@ -859,7 +889,7 @@ approved = "user"
         let (_, errs) = parse(&bad);
         assert!(errs.iter().any(|e| e.contains("lacks owner")), "{errs:?}");
         assert!(errs.iter().any(|e| e.contains("needs approved = \"user\"")), "{errs:?}");
-        assert!(parse("not = toml = at all").1[0].contains("not valid TOML"));
+        assert!(parse("not = toml = at all").1[0].contains("docs/gates.toml:1"));
         assert!(parse("version = 2").1[0].contains("version must be 1"));
     }
 

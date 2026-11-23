@@ -546,31 +546,42 @@ pub struct SharedCrateFeaturesFile {
     pub features: Option<BTreeMap<String, BTreeMap<String, Strings>>>,
 }
 
-/// Parses `text` into `T`. Only an unknown key is this module's error: a value of the wrong type, or text that is not TOML, is the
-/// reader's own message (it names the entry and the next step), so it passes here and the reader reports it.
-fn read<T: for<'de> Deserialize<'de>>(text: &str) -> Result<(), String> {
-    match toml::from_str::<T>(text) {
-        Err(e) if e.message().contains("unknown field") => Err(e.message().to_string()),
-        _ => Ok(()),
-    }
+/// Parses the register `file`'s `text` into its typed root `T`: the one parse of a register, whose values the reader then uses. An
+/// unknown key, a value of the wrong type or text that is not TOML is one message with the file, the line, what is wrong and the next
+/// step (ER-27); the reader adds only what is its own (a missing required field, a value out of range).
+pub fn parse<T: for<'de> Deserialize<'de>>(file: &str, text: &str) -> Result<T, String> {
+    toml::from_str::<T>(text).map_err(|e| {
+        let line = e
+            .span()
+            .map(|s| format!(":{}", text[..s.start.min(text.len())].bytes().filter(|b| *b == b'\n').count() + 1))
+            .unwrap_or_default();
+        format!(
+            "{file}{line}: {}. Fix the key or the value there: the tables, keys and types a register accepts are the structs of tools/paddock-dev/src/register_schema.rs, listed in docs/registers.toml",
+            e.message()
+        )
+    })
 }
 
-/// Parses `text` as the register `file` (`docs/gates.toml`) into its typed structs: `Err` names an unknown key and the keys the table
-/// accepts. A file this module has no shape for passes (a control's invented file).
+fn read<T: for<'de> Deserialize<'de>>(file: &str, text: &str) -> Result<(), String> {
+    parse::<T>(file, text).map(|_| ())
+}
+
+/// Checks `text` against the typed structs of the register `file` (`docs/gates.toml`), for the callers that read no values (C161). A file
+/// this module has no shape for passes (a control's invented file).
 pub fn parse_file(file: &str, text: &str) -> Result<(), String> {
     match file {
-        "docs/gates.toml" => read::<GatesFile>(text),
-        "docs/escape-register.toml" => read::<EscapeFile>(text),
-        "docs/ci-scope-first-runs.toml" => read::<ScopeFirstRunsFile>(text),
-        "docs/generators.toml" => read::<GeneratorsFile>(text),
-        "docs/harnesses.toml" => read::<HarnessesFile>(text),
-        "docs/ipc-endpoint-ratchet.toml" => read::<IpcRatchetFile>(text),
-        "docs/ipc-endpoints.toml" => read::<IpcEndpointsFile>(text),
-        "docs/known-copies.toml" => read::<KnownCopiesFile>(text),
-        "docs/os-removals.toml" => read::<OsRemovalsFile>(text),
-        "docs/registers.toml" => read::<RegistersFile>(text),
-        "docs/repo-graph.toml" => read::<RepoGraphFile>(text),
-        "docs/shared-crate-features.toml" => read::<SharedCrateFeaturesFile>(text),
+        "docs/gates.toml" => read::<GatesFile>(file, text),
+        "docs/escape-register.toml" => read::<EscapeFile>(file, text),
+        "docs/ci-scope-first-runs.toml" => read::<ScopeFirstRunsFile>(file, text),
+        "docs/generators.toml" => read::<GeneratorsFile>(file, text),
+        "docs/harnesses.toml" => read::<HarnessesFile>(file, text),
+        "docs/ipc-endpoint-ratchet.toml" => read::<IpcRatchetFile>(file, text),
+        "docs/ipc-endpoints.toml" => read::<IpcEndpointsFile>(file, text),
+        "docs/known-copies.toml" => read::<KnownCopiesFile>(file, text),
+        "docs/os-removals.toml" => read::<OsRemovalsFile>(file, text),
+        "docs/registers.toml" => read::<RegistersFile>(file, text),
+        "docs/repo-graph.toml" => read::<RepoGraphFile>(file, text),
+        "docs/shared-crate-features.toml" => read::<SharedCrateFeaturesFile>(file, text),
         _ => Ok(()),
     }
 }
@@ -627,9 +638,17 @@ mod tests {
     }
 
     #[test]
-    fn a_wrong_type_or_bad_toml_is_the_readers_message_and_a_file_without_a_shape_passes() {
-        assert!(parse_file("docs/escape-register.toml", "required = \"five\"\n").is_ok());
-        assert!(parse_file("docs/escape-register.toml", "not toml [").is_ok());
+    fn a_wrong_type_or_bad_toml_names_the_file_the_line_and_the_next_step_and_a_file_without_a_shape_passes() {
+        let e = parse_file("docs/escape-register.toml", "version = 1\nrequired = \"five\"\n").unwrap_err();
+        assert!(
+            e.starts_with("docs/escape-register.toml:2:") && e.contains("Fix the key or the value"),
+            "{e}"
+        );
+        assert!(
+            parse_file("docs/escape-register.toml", "not toml [")
+                .unwrap_err()
+                .contains("docs/escape-register.toml")
+        );
         assert!(parse_file("docs/not-a-register.toml", "anything = 1\n").is_ok());
     }
 

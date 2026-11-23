@@ -129,27 +129,20 @@ pub struct Registry {
 impl Registry {
     /// Parses and validates the registry text. Every problem is listed (one run shows them all), none is skipped.
     pub fn parse(text: &str) -> Result<Registry, Vec<String>> {
-        let doc: toml::Table = text.parse().map_err(|e| vec![format!("{PATH} is not valid TOML: {e}")])?;
+        // One parse: a key the registry does not know, a value of the wrong type or text that is not TOML is the file's one problem.
+        let file: crate::register_schema::GeneratorsFile = crate::register_schema::parse(PATH, text).map_err(|e| vec![e])?;
         let mut errors = Vec::new();
-        if let Err(e) = crate::register_schema::parse_file(PATH, text) {
-            errors.push(e);
-        }
-        match doc.get("version").and_then(toml::Value::as_integer) {
+        match file.version {
             Some(1) => {}
             _ => errors.push(format!("{PATH}: `version = 1` is required")),
         }
         let mut generators = Vec::new();
         let mut seen = BTreeSet::new();
-        let entries = doc.get("generator").and_then(toml::Value::as_array).cloned().unwrap_or_default();
-        if entries.is_empty() {
+        if file.generator.is_empty() {
             errors.push(format!("{PATH}: no [[generator]] entry"));
         }
-        for (i, v) in entries.iter().enumerate() {
-            let Some(t) = v.as_table() else {
-                errors.push(format!("{PATH}: generator #{} is not a table", i + 1));
-                continue;
-            };
-            let id = text_of(t, "id");
+        for (i, t) in file.generator.into_iter().enumerate() {
+            let id = t.id.clone().unwrap_or_default();
             let at = if id.is_empty() {
                 format!("generator #{}", i + 1)
             } else {
@@ -160,26 +153,8 @@ impl Registry {
             } else if !seen.insert(id.clone()) {
                 errors.push(format!("{at}: the id is used twice"));
             }
-            let known = [
-                "id",
-                "what",
-                "check",
-                "regenerate",
-                "cwd",
-                "paths",
-                "outputs",
-                "cost",
-                "requires",
-                "manual",
-                "drift_marker",
-                "build",
-                "reads",
-            ];
-            for k in t.keys().filter(|k| !known.contains(&k.as_str())) {
-                errors.push(format!("{at}: unknown key `{k}` (known: {})", known.join(", ")));
-            }
-            let check = strings_of(t, "check");
-            let manual = Some(text_of(t, "manual")).filter(|m| !m.is_empty());
+            let check = t.check.clone().unwrap_or_default();
+            let manual = t.manual.clone().filter(|m| !m.is_empty());
             match (&manual, check.is_empty()) {
                 (None, true) => errors.push(format!(
                     "{at}: `check` must be a non-empty array (the program and its arguments), or `manual = \"<why there is no check>\"`"
@@ -187,7 +162,7 @@ impl Registry {
                 (Some(_), false) => errors.push(format!("{at}: `manual` and `check` exclude each other")),
                 _ => {}
             }
-            let build = strings_of(t, "build");
+            let build = t.build.clone().unwrap_or_default();
             if build.is_empty() && compiles(&check) {
                 errors.push(format!(
                     "{at}: `build` is required: `check` is a cargo command that compiles, so name the command that builds what it runs (for example [\"cargo\", \"test\", \"--no-run\", ...]); gen check runs it first with its own bound, so a cold build does not count against the check's hang guard"
@@ -199,18 +174,18 @@ impl Registry {
                     build, check
                 ));
             }
-            let regenerate = text_of(t, "regenerate");
+            let regenerate = t.regenerate.clone().unwrap_or_default();
             if regenerate.is_empty() {
                 errors.push(format!(
                     "{at}: `regenerate` is required: the command that fixes drift (or `none: <what to do instead>`)"
                 ));
             }
-            let what = text_of(t, "what");
+            let what = t.what.clone().unwrap_or_default();
             if what.is_empty() {
                 errors.push(format!("{at}: `what` is required: one line saying what it generates"));
             }
-            let paths = strings_of(t, "paths");
-            let reads = strings_of(t, "reads");
+            let paths = t.paths.clone().unwrap_or_default();
+            let reads = t.reads.clone().unwrap_or_default();
             if paths.is_empty() && reads.is_empty() {
                 errors.push(format!("{at}: `paths` (globs) or `reads` (model node ids) must name what marks it"));
             }
@@ -219,7 +194,7 @@ impl Registry {
                     "{at}: `reads` entry {r:?} is not a model node id (`kind:name`, for example `script:scripts/notices.sh`)"
                 ));
             }
-            let cost = match text_of(t, "cost").as_str() {
+            let cost = match t.cost.clone().unwrap_or_default().as_str() {
                 "fast" => Cost::Fast,
                 "heavy" => Cost::Heavy,
                 other => {
@@ -227,14 +202,14 @@ impl Registry {
                     Cost::Heavy
                 }
             };
-            let cwd = match text_of(t, "cwd") {
+            let cwd = match t.cwd.clone().unwrap_or_default() {
                 c if c.is_empty() => ".".to_string(),
                 c => c,
             };
             if cwd.starts_with('/') || cwd.split('/').any(|p| p == "..") {
                 errors.push(format!("{at}: `cwd` is a folder inside the repository, not {cwd:?}"));
             }
-            let outputs = strings_of(t, "outputs");
+            let outputs = t.outputs.clone().unwrap_or_default();
             let (path_res, bad_paths) = globs(&paths);
             let (output_res, bad_outputs) = globs(&outputs);
             for g in bad_paths.into_iter().chain(bad_outputs) {
@@ -251,9 +226,9 @@ impl Registry {
                 reads,
                 outputs,
                 cost,
-                requires: strings_of(t, "requires"),
+                requires: t.requires.clone().unwrap_or_default(),
                 manual,
-                drift_marker: strings_of(t, "drift_marker"),
+                drift_marker: t.drift_marker.clone().unwrap_or_default(),
                 path_res,
                 output_res,
             });
@@ -333,17 +308,6 @@ fn globs(list: &[String]) -> (Vec<Regex>, Vec<String>) {
     (good.iter().map(|g| glob_regex(g)).collect(), bad.into_iter().cloned().collect())
 }
 
-fn text_of(t: &toml::Table, key: &str) -> String {
-    t.get(key).and_then(toml::Value::as_str).unwrap_or_default().to_string()
-}
-
-fn strings_of(t: &toml::Table, key: &str) -> Vec<String> {
-    t.get(key)
-        .and_then(toml::Value::as_array)
-        .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
-        .unwrap_or_default()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -404,7 +368,6 @@ id = "Bad Id"
 check = []
 cost = "slow"
 paths = ["/abs"]
-colour = 1
 [[generator]]
 id = "icons"
 what = "x"
@@ -429,7 +392,6 @@ cost = "fast"
             "`regenerate` is required",
             "`what` is required",
             "`cost` must be",
-            "unknown key `colour`",
             "is not a repository-relative slash path",
             "`cwd` is a folder inside the repository",
             "the id is used twice",
@@ -520,7 +482,9 @@ cost = "fast"
 
     #[test]
     fn text_that_is_not_toml_or_has_no_entry_is_an_error() {
-        assert!(Registry::parse("[[generator").unwrap_err()[0].contains("not valid TOML"));
+        assert!(Registry::parse("[[generator").unwrap_err()[0].contains("docs/generators.toml:1"));
+        let colour = format!("version = 1\n[[generator]]\nid = \"a\"\ncolour = 1\n");
+        assert!(Registry::parse(&colour).unwrap_err()[0].contains("unknown field `colour`"));
         assert!(Registry::parse("version = 1").unwrap_err()[0].contains("no [[generator]] entry"));
     }
 }

@@ -105,49 +105,22 @@ pub const APPROVALS: &str = "docs/os-removals.toml";
 /// The removal keys the user approved, per contract, from the register's text; `Err` names what is wrong (an unknown key, an approval
 /// that is not the user's, a missing field), so a broken register approves nothing.
 fn approvals(text: &str) -> Result<BTreeMap<String, BTreeSet<String>>, String> {
-    crate::register_schema::parse_file(APPROVALS, text)?;
-    let t: toml::Table = text.parse().map_err(|e| format!("not valid TOML: {e}"))?;
-    if let Some(k) = t.keys().find(|k| !["version", "approved"].contains(&k.as_str())) {
-        return Err(format!("unknown key {k:?} (version, approved)"));
-    }
+    let file: crate::register_schema::OsRemovalsFile = crate::register_schema::parse(APPROVALS, text)?;
     let mut out: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
-    let list = t.get("approved").and_then(toml::Value::as_array).cloned().unwrap_or_default();
-    for (i, a) in list.iter().enumerate() {
+    for (i, a) in file.approved.into_iter().enumerate() {
         let what = format!("approved #{}", i + 1);
-        let a = a.as_table().ok_or_else(|| format!("{what} is not a table"))?;
-        if let Some(k) = a
-            .keys()
-            .find(|k| !["contract", "by", "date", "why", "entries"].contains(&k.as_str()))
-        {
-            return Err(format!("{what} has an unknown key {k:?}"));
-        }
-        let text = |k: &str| {
-            a.get(k)
-                .and_then(toml::Value::as_str)
-                .filter(|v| !v.trim().is_empty())
-                .ok_or_else(|| format!("{what} has no {k}"))
-        };
-        let contract = text("contract")?;
-        let by = text("by")?;
-        text("date")?;
-        text("why")?;
+        let text = |k: &str, v: Option<String>| v.filter(|v| !v.trim().is_empty()).ok_or_else(|| format!("{what} has no {k}"));
+        let contract = text("contract", a.contract)?;
+        let by = text("by", a.by)?;
+        text("date", a.date)?;
+        text("why", a.why)?;
         if by != "user" {
             return Err(format!(
                 "{what} is approved by {by:?}: taking an OS away needs the user (ER-46), `by = \"user\"`"
             ));
         }
-        let entries = a
-            .get("entries")
-            .and_then(toml::Value::as_array)
-            .ok_or_else(|| format!("{what} has no entries"))?;
-        let set = out.entry(contract.to_string()).or_default();
-        for e in entries {
-            set.insert(
-                e.as_str()
-                    .ok_or_else(|| format!("{what} holds an entry that is not a string"))?
-                    .to_string(),
-            );
-        }
+        let entries = a.entries.ok_or_else(|| format!("{what} has no entries"))?;
+        out.entry(contract).or_default().extend(entries);
     }
     Ok(out)
 }

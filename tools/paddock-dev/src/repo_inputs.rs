@@ -56,7 +56,7 @@ pub fn load(root: &Path) -> Result<Inputs, String> {
 
 /// The declarations in `text`. `Err` names the entry that is wrong.
 pub fn parse(text: &str) -> Result<Inputs, String> {
-    read(text).map_err(|e| format!("{FILE}: {e}"))
+    read(text).map_err(|e| if e.starts_with(FILE) { e } else { format!("{FILE}: {e}") })
 }
 
 /// Which planner decides the plans of `./dev plan --ci` (the ci.yml plan job and the app workflows' plan jobs).
@@ -92,25 +92,17 @@ impl Planner {
 /// The `[planner]` table of the inputs file text: no table is the graph; `mode = "rules"` needs a non-empty `reason`; anything else
 /// is an error naming it (a typo never silently picks a planner).
 pub fn planner(text: &str) -> Result<Planner, String> {
-    let planner = planner_inner(text)?;
-    crate::register_schema::parse_file(FILE, text)?;
-    Ok(planner)
-}
-
-fn planner_inner(text: &str) -> Result<Planner, String> {
-    let t: toml::Table = text.parse().map_err(|e| format!("{FILE}: not TOML: {e}"))?;
-    let Some(p) = t.get("planner") else {
+    let file: crate::register_schema::RepoGraphFile = crate::register_schema::parse(FILE, text)?;
+    let Some(p) = file.planner else {
         return Ok(Planner {
             mode: PlannerMode::Graph,
             reason: String::new(),
             lint_phases: Vec::new(),
         });
     };
-    let p = p.as_table().ok_or_else(|| format!("{FILE}: [planner] is not a table"))?;
-    only_keys(p, &["mode", "reason", "lint_phases"], &format!("{FILE}: [planner]"))?;
-    let reason = p.get("reason").and_then(toml::Value::as_str).unwrap_or("").trim().to_string();
-    let lint_phases = strings(p.get("lint_phases"), &format!("{FILE}: [planner] lint_phases"))?;
-    match p.get("mode").and_then(toml::Value::as_str) {
+    let reason = p.reason.as_deref().unwrap_or("").trim().to_string();
+    let lint_phases = p.lint_phases.unwrap_or_default();
+    match p.mode.as_deref() {
         Some("graph") => Ok(Planner {
             mode: PlannerMode::Graph,
             reason,
@@ -147,20 +139,9 @@ fn strings(v: Option<&toml::Value>, what: &str) -> Result<Vec<String>, String> {
         .collect()
 }
 
-/// Refuses every key of `table` that is not in `known`: a typo is an error naming it, never a silently ignored entry.
-fn only_keys(table: &toml::Table, known: &[&str], what: &str) -> Result<(), String> {
-    match table.keys().find(|k| !known.contains(&k.as_str())) {
-        Some(k) => Err(format!("{what} has an unknown key {k:?} (known: {})", known.join(", "))),
-        None => Ok(()),
-    }
-}
-
-/// A list of `[from, to]` string pairs (absent: none).
-fn pairs(v: Option<&toml::Value>, what: &str) -> Result<Vec<(String, String)>, String> {
-    let Some(v) = v else { return Ok(Vec::new()) };
-    v.as_array()
-        .ok_or_else(|| format!("{what} is not a list"))?
-        .iter()
+/// A `[from, to]` pair of the typed `root_spellings` list.
+fn pairs(v: &[toml::Value], what: &str) -> Result<Vec<(String, String)>, String> {
+    v.iter()
         .map(|x| {
             match x
                 .as_array()
@@ -174,31 +155,9 @@ fn pairs(v: Option<&toml::Value>, what: &str) -> Result<Vec<(String, String)>, S
         .collect()
 }
 
-fn table<'a>(v: &'a toml::Value, what: &str) -> Result<&'a toml::Table, String> {
-    v.as_table().ok_or_else(|| format!("{what} is not a table"))
-}
-
-fn tables<'a>(t: &'a toml::Table, key: &str) -> Result<Vec<&'a toml::Table>, String> {
-    match t.get(key) {
-        None => Ok(Vec::new()),
-        Some(v) => v
-            .as_array()
-            .ok_or_else(|| format!("{key} is not a list of [[{key}]] tables"))?
-            .iter()
-            .enumerate()
-            .map(|(n, e)| table(e, &format!("{key} #{}", n + 1)))
-            .collect(),
-    }
-}
-
-fn text_of(t: &toml::Table, key: &str, what: &str) -> Result<String, String> {
-    match t.get(key) {
-        None => Err(format!("{what} has no {key}")),
-        Some(v) => v
-            .as_str()
-            .map(str::to_string)
-            .ok_or_else(|| format!("{what}.{key} is not a string")),
-    }
+/// A required text field of a typed table.
+fn need(v: Option<String>, key: &str, what: &str) -> Result<String, String> {
+    v.ok_or_else(|| format!("{what} has no {key}"))
 }
 
 /// The projects a `project:<id>` may name: the declared ones, and any `app:<name>` (its app is checked against the apps found, see
@@ -230,32 +189,20 @@ pub fn check_apps(inputs: &Inputs, apps: &std::collections::BTreeSet<String>) ->
 }
 
 fn read(text: &str) -> Result<Inputs, String> {
-    let inputs = read_inner(text)?;
-    crate::register_schema::parse_file(FILE, text)?;
-    Ok(inputs)
-}
-
-fn read_inner(text: &str) -> Result<Inputs, String> {
-    let t: toml::Table = text.parse().map_err(|e| format!("not TOML: {e}"))?;
-    only_keys(
-        &t,
-        &["version", "input", "owner", "project", "paths", "prose", "ci", "hash", "planner"],
-        "the file",
-    )?;
-    match t.get("version").and_then(toml::Value::as_integer) {
+    let t: crate::register_schema::RepoGraphFile = crate::register_schema::parse(FILE, text)?;
+    match t.version {
         Some(1) => {}
         other => return Err(format!("version is {other:?}, this reader knows 1")),
     }
     let mut projects: Vec<ProjectDecl> = Vec::new();
-    for (n, e) in tables(&t, "project")?.into_iter().enumerate() {
+    for (n, e) in t.project.into_iter().enumerate() {
         let what = format!("project #{}", n + 1);
-        only_keys(e, &["id", "folder"], &what)?;
-        let id = text_of(e, "id", &what)?;
+        let id = need(e.id, "id", &what)?;
         if id.is_empty() || projects.iter().any(|p| p.id == id) {
             return Err(format!("{what}: id {id:?} is empty or declared twice"));
         }
         projects.push(ProjectDecl {
-            folder: text_of(e, "folder", &format!("project {id:?}"))?,
+            folder: need(e.folder, "folder", &format!("project {id:?}"))?,
             id,
         });
     }
@@ -263,26 +210,19 @@ fn read_inner(text: &str) -> Result<Inputs, String> {
         return Err("no [[project]] is declared (the plan's projects come from this file)".into());
     }
     let mut inputs = Vec::new();
-    for (n, e) in tables(&t, "input")?.into_iter().enumerate() {
-        only_keys(
-            e,
-            &["name", "files", "reaches", "reach", "extractor", "adds", "except"],
-            &format!("input #{}", n + 1),
-        )?;
-        let name = e
-            .get("name")
-            .and_then(toml::Value::as_str)
-            .ok_or(format!("input #{} has no name", n + 1))?
-            .to_string();
+    for (n, e) in t.input.into_iter().enumerate() {
+        let name = e.name.ok_or(format!("input #{} has no name", n + 1))?;
         let what = format!("input {name:?}");
         if inputs.iter().any(|i: &Input| i.name == name) {
             return Err(format!("{what} is declared twice"));
         }
-        let files = strings(e.get("files"), &format!("{what}.files"))?;
+        let files = e.files.unwrap_or_default();
         if files.is_empty() {
             return Err(format!("{what} names no files"));
         }
-        let reaches = strings(e.get("reaches"), &format!("{what}.reaches"))?
+        let reaches = e
+            .reaches
+            .unwrap_or_default()
             .iter()
             .map(|s| {
                 let t = Target::parse(s).map_err(|m| format!("{what}: {m}"))?;
@@ -294,23 +234,18 @@ fn read_inner(text: &str) -> Result<Inputs, String> {
                 }
             })
             .collect::<Result<Vec<_>, _>>()?;
-        let reach = Reach::parse(e.get("reach").and_then(toml::Value::as_str).unwrap_or("code")).map_err(|m| format!("{what}: {m}"))?;
-        let extractor = match e.get("extractor") {
+        let reach = Reach::parse(e.reach.as_deref().unwrap_or("code")).map_err(|m| format!("{what}: {m}"))?;
+        let extractor = match e.extractor {
             None => None,
-            Some(v) => {
-                let n = v.as_str().ok_or(format!("{what}.extractor is not a string"))?;
-                if !paddock_repo_graph::model::narrow::NAMES.contains(&n) {
+            Some(n) => {
+                if !paddock_repo_graph::model::narrow::NAMES.contains(&n.as_str()) {
                     return Err(format!(
                         "{what}: unknown extractor {n:?} ({})",
                         paddock_repo_graph::model::narrow::NAMES.join(", ")
                     ));
                 }
-                Some(n.to_string())
+                Some(n)
             }
-        };
-        let adds = match e.get("adds") {
-            None => false,
-            Some(v) => v.as_bool().ok_or(format!("{what}.adds is not true or false"))?,
         };
         inputs.push(Input {
             name,
@@ -318,19 +253,18 @@ fn read_inner(text: &str) -> Result<Inputs, String> {
             reaches,
             reach,
             extractor,
-            adds,
-            except: strings(e.get("except"), &format!("{what}.except"))?,
+            adds: e.adds.unwrap_or(false),
+            except: e.except.unwrap_or_default(),
         });
     }
     let mut owners = Vec::new();
-    for (n, e) in tables(&t, "owner")?.into_iter().enumerate() {
+    for (n, e) in t.owner.into_iter().enumerate() {
         let what = format!("owner #{}", n + 1);
-        only_keys(e, &["paths", "node"], &what)?;
-        let paths = strings(e.get("paths"), &format!("{what}.paths"))?;
+        let paths = e.paths.unwrap_or_default();
         if paths.is_empty() {
             return Err(format!("{what} names no paths"));
         }
-        let owner = match e.get("node").and_then(toml::Value::as_str) {
+        let owner = match e.node.as_deref() {
             Some("none") => Owner::None,
             Some("doc") => Owner::Doc,
             Some(p) => match p.strip_prefix("project:") {
@@ -342,70 +276,38 @@ fn read_inner(text: &str) -> Result<Inputs, String> {
         };
         owners.push(OwnerRule { paths, owner });
     }
-    let ci = table(
-        t.get("ci").ok_or("the [ci] section is missing (setup_only and release_actions)")?,
-        "ci",
-    )?;
-    only_keys(ci, &["setup_only", "release_actions", "release_gate_phases"], "[ci]")?;
-    let setup_only = strings(ci.get("setup_only"), "ci.setup_only")?;
-    let release_actions = strings(ci.get("release_actions"), "ci.release_actions")?;
-    let gate_phases = strings(ci.get("release_gate_phases"), "ci.release_gate_phases")?;
-    let prose_table = table(t.get("prose").ok_or("the [prose] section is missing")?, "prose")?;
-    only_keys(
-        prose_table,
-        &["project_names", "project_folders", "doc_owner", "doc_assets"],
-        "[prose]",
-    )?;
-    let list = |k: &str| strings(prose_table.get(k), &format!("prose.{k}"));
+    let ci = t.ci.ok_or("the [ci] section is missing (setup_only and release_actions)")?;
+    let pr = t.prose.ok_or("the [prose] section is missing")?;
     let prose = Prose {
-        project_names: list("project_names")?,
-        project_folders: list("project_folders")?,
-        doc_owner: list("doc_owner")?,
-        doc_assets: list("doc_assets")?,
+        project_names: pr.project_names.unwrap_or_default(),
+        project_folders: pr.project_folders.unwrap_or_default(),
+        doc_owner: pr.doc_owner.unwrap_or_default(),
+        doc_assets: pr.doc_assets.unwrap_or_default(),
     };
-    let p = table(t.get("paths").ok_or("the [paths] section is missing")?, "paths")?;
-    only_keys(
-        p,
-        &[
-            "workflows",
-            "actions",
-            "apps",
-            "contract",
-            "script_folders",
-            "node_tests",
-            "e2e",
-            "checkout",
-            "root_spellings",
-        ],
-        "[paths]",
-    )?;
+    let p = t.paths.ok_or("the [paths] section is missing")?;
     let paths = Paths {
-        workflows: text_of(p, "workflows", "[paths]")?,
-        actions: text_of(p, "actions", "[paths]")?,
-        apps: text_of(p, "apps", "[paths]")?,
-        contract: text_of(p, "contract", "[paths]")?,
-        script_folders: strings(p.get("script_folders"), "paths.script_folders")?,
-        node_tests: text_of(p, "node_tests", "[paths]")?,
-        e2e: text_of(p, "e2e", "[paths]")?,
-        checkout: text_of(p, "checkout", "[paths]")?,
-        root_spellings: pairs(p.get("root_spellings"), "paths.root_spellings")?,
+        workflows: need(p.workflows, "workflows", "[paths]")?,
+        actions: need(p.actions, "actions", "[paths]")?,
+        apps: need(p.apps, "apps", "[paths]")?,
+        contract: need(p.contract, "contract", "[paths]")?,
+        script_folders: p.script_folders.unwrap_or_default(),
+        node_tests: need(p.node_tests, "node_tests", "[paths]")?,
+        e2e: need(p.e2e, "e2e", "[paths]")?,
+        checkout: need(p.checkout, "checkout", "[paths]")?,
+        root_spellings: pairs(&p.root_spellings.unwrap_or_default(), "paths.root_spellings")?,
     };
-    let hash_table = t.get("hash");
-    if let Some(h) = hash_table {
-        only_keys(table(h, "hash")?, &["runner_configs", "contracts", "image_files"], "[hash]")?;
-    }
-    let hlist = |k: &str| strings(hash_table.and_then(|p| p.get(k)), &format!("hash.{k}"));
+    let h = t.hash.unwrap_or_default();
     let hash = HashDecl {
-        runner_configs: hlist("runner_configs")?,
-        contracts: hlist("contracts")?,
-        image_files: hlist("image_files")?,
+        runner_configs: h.runner_configs.unwrap_or_default(),
+        contracts: h.contracts.unwrap_or_default(),
+        image_files: h.image_files.unwrap_or_default(),
     };
     Ok(Inputs {
         inputs,
         owners,
-        setup_only,
-        release_actions,
-        gate_phases,
+        setup_only: ci.setup_only.unwrap_or_default(),
+        release_actions: ci.release_actions.unwrap_or_default(),
+        gate_phases: ci.release_gate_phases.unwrap_or_default(),
         hash,
         prose,
         projects,
@@ -505,7 +407,7 @@ mod tests {
             let e = parse(&doc(body)).unwrap_err();
             assert!(e.contains(want) && e.starts_with(FILE), "{body:?}: {e}");
         }
-        for (text, want) in [("version = 2", "version"), ("not toml [", "not TOML")] {
+        for (text, want) in [("version = 2", "version"), ("not toml [", "Fix the key or the value there")] {
             let e = parse(text).unwrap_err();
             assert!(e.contains(want) && e.starts_with(FILE), "{text:?}: {e}");
         }
@@ -518,26 +420,26 @@ mod tests {
         for (body, want) in [
             (
                 "[[input]]\nname = \"x\"\nfiles = [\"a\"]\nextractr = \"guards\"\n",
-                "unknown key \"extractr\"",
+                "unknown field `extractr`",
             ),
             (
                 "[[input]]\nname = \"x\"\nfiles = [\"a\"]\nreaches = [\"project:crate\"]\n",
                 "project:crate",
             ),
             ("[[owner]]\npaths = [\"a\"]\nnode = \"project:tool\"\n", "project:tool"),
-            ("[[owner]]\npath = [\"a\"]\nnode = \"none\"\n", "unknown key \"path\""),
-            ("[ci]\nsetup_onlyy = []\n", "unknown key \"setup_onlyy\""),
-            ("[prose]\nproject_name = []\n", "unknown key \"project_name\""),
+            ("[[owner]]\npath = [\"a\"]\nnode = \"none\"\n", "unknown field `path`"),
+            ("[ci]\nsetup_onlyy = []\n", "unknown field `setup_onlyy`"),
+            ("[prose]\nproject_name = []\n", "unknown field `project_name`"),
             (
                 "[[input]]\nname = \"x\"\nfiles = [\"a\"]\nadds = \"yes\"\n",
-                "adds is not true or false",
+                "expected a boolean",
             ),
         ] {
             let e = parse(&doc(body)).unwrap_err();
             assert!(e.contains(want) && e.starts_with(FILE), "{body:?}: {e}");
         }
         let e = parse(&format!("{HEAD}[prose]\n[ci]\n").replace("[paths]", "[pathz]")).unwrap_err();
-        assert!(e.contains("unknown key \"pathz\""), "{e}");
+        assert!(e.contains("unknown field `pathz`"), "{e}");
         // Control: the right spellings read.
         let ok = parse(&doc(
             "[[input]]\nname = \"x\"\nfiles = [\"a\"]\nextractor = \"guards\"\nreaches = [\"project:crates\", \"project:app:dyno\"]\n\
