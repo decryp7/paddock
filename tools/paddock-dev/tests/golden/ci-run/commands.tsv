@@ -243,6 +243,7 @@ job	crates			*) echo "::error::sccache-backend must be auto, redis, local or s3 
 job	crates			*) echo "::warning::no pinned sccache release for $RUNNER_OS $(uname -m); building without the shared compile cache."
 job	crates			*[!0-9]*) TOTAL=40
 job	crates			*[!0-9]*) TOTAL=60
+job	crates			./dev locks guard
 job	crates			BACKEND=local
 job	crates			BIN=sccache
 job	crates			BIN=sccache.exe
