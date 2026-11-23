@@ -271,6 +271,9 @@ pub struct BaseInput<'a> {
     pub reference: &'a str,
     /// The `base` input of a manual run.
     pub input_base: &'a str,
+    /// The `landing_base` input of a train's landing run (ADR 0117 WP-8): main's last complete commit, which the run's diff starts at.
+    /// Unlike `input_base` it does not make the run a member run.
+    pub landing_base: &'a str,
     /// `GITHUB_BASE_REF`.
     pub base_ref: &'a str,
     /// The base of a push to main from the one definition of green (`ci_runs::green::find_base`: the last first-parent commit whose
@@ -291,10 +294,15 @@ pub fn choose_base(i: &BaseInput) -> (Option<String>, String) {
         };
     }
     if i.event == "workflow_dispatch" {
-        return if i.input_base.is_empty() {
-            (None, "a manual run without a base: everything".to_string())
-        } else {
+        return if !i.input_base.is_empty() {
             (Some(i.input_base.to_string()), format!("the base input {}", i.input_base))
+        } else if !i.landing_base.is_empty() {
+            (
+                Some(i.landing_base.to_string()),
+                format!("a landing run: main's last complete green commit {}", i.landing_base),
+            )
+        } else {
+            (None, "a manual run without a base: everything".to_string())
         };
     }
     if i.event == "push" && i.reference == main {
@@ -1062,10 +1070,34 @@ mod tests {
             event,
             reference,
             input_base,
+            landing_base: "",
             base_ref,
             green,
             merge_base: &|b| (b == "main").then(|| "mb123".to_string()),
         })
+    }
+
+    #[test]
+    fn a_landing_base_makes_a_dispatch_a_diff_run_and_only_when_no_member_base_is_given() {
+        let with = |input_base: &str, landing_base: &str, event: &str| {
+            choose_base(&BaseInput {
+                event,
+                reference: "refs/heads/train/x",
+                input_base,
+                landing_base,
+                base_ref: "",
+                green: None,
+                merge_base: &|_| None,
+            })
+        };
+        let (b, why) = with("", "land1", "workflow_dispatch");
+        assert_eq!(b.as_deref(), Some("land1"));
+        assert!(why.contains("landing"), "{why}");
+        // The member base wins (a member run is not a landing run), and with neither the run is everything (fail closed).
+        assert_eq!(with("mem1", "land1", "workflow_dispatch").0.as_deref(), Some("mem1"));
+        assert_eq!(with("", "", "workflow_dispatch").0, None);
+        // Positive control: another event never reads it (a push to a branch, a schedule).
+        assert_eq!(with("", "land1", "schedule").0, None);
     }
 
     #[test]

@@ -2,7 +2,8 @@
 # npm graphs plus the frontendDist and config-path edges), then only those run: the shared UI package and its entry points,
 # the reference apps, the Rust crates, the conformance, tools and ESLint packages, and one matrix leg per affected app
 # (apps/<app>/paddock.ci.json, through .gitea/actions/app-gates). The base of the diff: the last green push run of main for a
-# push to main, the `base` input of a manual run; tags and manual runs without a base run everything. No pull_request trigger:
+# push to main, the `base` input of a manual run, the `landing_base` input of a train's landing run (main's last complete commit); tags
+# and manual runs without a base run everything. No pull_request trigger:
 # pull requests are the branch ledger (`./dev pr`, docs/plans/merge-queue.md) and opening one starts no run (the contract test
 # no_workflow_runs_on_a_pull_request); branches and trains run by dispatch.
 # nightly.yml runs everything, Chromium and WebKit, every night (the safety net for a wrong filter).
@@ -22,6 +23,10 @@ on:
     inputs:
       base:
         description: "Diff from this commit (empty: run everything)"
+        required: false
+        default: ""
+      landing_base:
+        description: "A train's landing run: diff from this commit, main's last complete green one (./dev ci dispatch and the queue fill it in for a full train dispatch; ADR 0117 WP-8). Unlike base it is not a member run: every test of what the diff reaches runs, with WebKit, and a push to main reuses the run. Empty: no diff, everything"
         required: false
         default: ""
       webkit:
@@ -149,6 +154,8 @@ jobs:
           PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
           PADDOCK_DEV_DOWNLOAD: ${{ (inputs.release == true || startsWith(github.ref, 'refs/tags/')) && '0' || '' }}
           PLAN_BASE: ${{ github.event.inputs.base }}
+          # A train's landing run plans the diff from this commit and stays a full run (plan_ci::choose_base, ADR 0117 WP-8).
+          PLAN_LANDING_BASE: ${{ github.event.inputs.landing_base }}
           PLAN_APP: ${{ inputs.app }}
           PLAN_WEBKIT: ${{ (inputs.webkit == true || inputs.webkit == 'true') && '1' || '' }}
           # The rerun reads the earlier run's jobs and logs through the API (tools/paddock-dev/src/plan_since.rs).

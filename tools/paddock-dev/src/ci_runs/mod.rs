@@ -19,6 +19,7 @@ pub mod dispatch;
 pub mod fix_items;
 pub mod flakes;
 pub mod green;
+pub mod landing;
 pub mod logfind;
 pub mod members;
 pub mod preconditions;
@@ -887,6 +888,21 @@ pub fn dispatch(a: &DispatchArgs) -> Result<Report, CliError> {
         git_ref = trial_ref.clone();
         inputs.push(format!("base={base}"));
         trial = Some((g, trial_ref));
+    }
+    // A full train dispatch of ci.yml tests the train's diff from main's last complete commit (ADR 0117 WP-8, G1): the base is asked
+    // before the request is built. Everything else (a member, a rerun, a tag, another workflow) is left as given.
+    if trial.is_none() {
+        let target = dispatch::Target {
+            server: &a.server,
+            repo: &a.repo,
+            token: &token,
+        };
+        let pairs: Vec<(String, String)> = inputs
+            .iter()
+            .filter_map(|i| i.split_once('=').map(|(k, v)| (k.to_string(), v.to_string())))
+            .collect();
+        let with = landing::with_real_landing_base(&mut CurlHttp, &target, &root, &a.workflow, &git_ref, pairs.clone());
+        inputs.extend(with[pairs.len()..].iter().map(|(k, v)| format!("{k}={v}")));
     }
     let mut req = dispatch::parse_request(&a.workflow, &git_ref, &inputs, &a.max, a.interval.as_deref())
         .map_err(|e| CliError::usage(e).with_hint(hint))?;

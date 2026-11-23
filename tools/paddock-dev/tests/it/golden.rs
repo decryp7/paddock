@@ -441,6 +441,11 @@ fn recorded_command_line_cases_match_the_planners_answers_on_the_fixture_reposit
 /// The `crates_filter` and `paddock_dev_filter` lines `./dev plan --ci` wrote for `event` with `base`, on the fixture after one more
 /// commit that touches only the leaf crate `crates/b`.
 fn package_filters(event: &str, base: &str, app: Option<&str>) -> (String, String, String) {
+    package_filters_with(event, base, app, None)
+}
+
+/// [`package_filters`] with a `landing_base` input.
+fn package_filters_with(event: &str, base: &str, app: Option<&str>, landing_base: Option<&str>) -> (String, String, String) {
     let (_keep, root) = fixture_with_origin();
     std::fs::write(root.join("crates/b/src/lib.rs"), "// a member's one change\npub fn b() {}\n").unwrap();
     git(&root, &["add", "-A"]);
@@ -457,6 +462,9 @@ fn package_filters(event: &str, base: &str, app: Option<&str>) -> (String, Strin
     }
     if let Some(app) = app {
         env.insert("PLAN_APP".into(), json!(app));
+    }
+    if let Some(b) = landing_base {
+        env.insert("PLAN_LANDING_BASE".into(), json!(b));
     }
     let mut program = crate::dev_bin::command();
     program.arg("plan");
@@ -478,6 +486,9 @@ fn a_member_run_narrows_nextest_to_the_reached_packages_and_a_full_run_never_doe
     let (crates, _, out) = package_filters("workflow_dispatch", "fixture-head", None);
     assert_eq!(crates, "package(=fx-b)", "{out}");
     // Positive control: the same change, the full runs. A missing narrowing would show here as the filter on a run that must be whole.
+    // A landing run narrows nothing either: it plans the diff but tests the whole of what it reaches.
+    let (crates, paddock_dev, out) = package_filters_with("workflow_dispatch", "", None, Some("fixture-head"));
+    assert_eq!((crates.as_str(), paddock_dev.as_str()), ("", ""), "landing: {out}");
     for (event, base, app) in [
         ("push", "", None),
         ("schedule", "", None),
@@ -550,6 +561,33 @@ fn ci_plan_declares_a_scope_that_is_complete_only_when_it_covers_a_push_to_main(
     // A member run (a base) covers less than the whole tree even with WebKit.
     let member = dispatch(&[("PLAN_BASE", "fixture-head"), ("PLAN_WEBKIT", "1")]);
     assert!(member.complete().is_err(), "{}", member.line());
+    // A landing run (ADR 0117 WP-8): the train's diff from main's last complete commit, WebKit on, no member base. It needs what a
+    // push to main does for this change, so it is complete; the same diff as a member run (`base`) is not, and a landing run that
+    // lost its WebKit is not either (positive controls).
+    let (landing, landing_out) = declared_scope(&[
+        ("GITHUB_EVENT_NAME", "workflow_dispatch"),
+        ("GITHUB_REF", "refs/heads/topic"),
+        ("PLAN_LANDING_BASE", "fixture-base"),
+        ("PLAN_WEBKIT", "1"),
+    ]);
+    assert_eq!(landing.complete(), Ok(()), "{}", landing.line());
+    // It planned the diff (the base is the planner's, which the commit lint also reads), not everything (G1).
+    assert!(landing_out.lines().any(|l| l == "base=fixture-base"), "{landing_out}");
+    assert!(
+        dispatch(&[("PLAN_LANDING_BASE", "fixture-base")])
+            .complete()
+            .unwrap_err()
+            .contains("engines webkit")
+    );
+    assert!(
+        dispatch(&[
+            ("PLAN_LANDING_BASE", "fixture-base"),
+            ("PLAN_BASE", "fixture-head"),
+            ("PLAN_WEBKIT", "1")
+        ])
+        .complete()
+        .is_err()
+    );
     // A reused run ran nothing; it also switches every job off.
     let (reused, outputs) = declared_scope(&[
         ("GITHUB_EVENT_NAME", "push"),

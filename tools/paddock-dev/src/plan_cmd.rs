@@ -74,12 +74,23 @@ fn green_base_in(
     root: &Path,
     warn: &mut dyn FnMut(&str),
 ) -> Result<Option<(String, u64)>, String> {
+    let first_parent = crate::ci_runs::green::first_parent_before(root, "HEAD");
+    green_base_over(client, root, &first_parent, warn)
+}
+
+/// The base over the commits given (`first_parent`: newest first): the last one the one definition of green accepts. A push to main
+/// asks it over the commits before its head; a train's landing dispatch over main's own commits (`ci_runs::landing`, ADR 0117 WP-8).
+pub(crate) fn green_base_over(
+    client: &mut crate::ci_runs::client::Client,
+    root: &Path,
+    first_parent: &[String],
+    warn: &mut dyn FnMut(&str),
+) -> Result<Option<(String, u64)>, String> {
     use crate::ci_runs::{green, verdict};
-    let first_parent = green::first_parent_before(root, "HEAD");
     let scope = verdict::scope_decisive("ci.yml");
     // The run list is read once for the whole search, and handed to the measure of what each candidate touched.
     let found = green::Runs::read(client, "ci.yml").map(|runs| {
-        green::find_base_in(client, &runs, &first_parent, scope, &mut |c, runs, s| {
+        green::find_base_in(client, &runs, first_parent, scope, &mut |c, runs, s| {
             green::touched_in(c, "ci.yml", root, s, scope, Some(runs))
         })
     });
@@ -211,6 +222,7 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
         event: &event,
         reference: &reference,
         input_base: &env("PLAN_BASE").unwrap_or_default(),
+        landing_base: &env("PLAN_LANDING_BASE").unwrap_or_default(),
         base_ref: &env("GITHUB_BASE_REF").unwrap_or_default(),
         green: green.as_ref(),
         merge_base: &merge_base,
@@ -333,9 +345,13 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
             &[filter_of(&plan, "crates").as_str(), filter_of(&plan, "paddockDev").as_str()],
         )
     };
-    // A push to main is its own measure (its plan is the diff from the last green main); every other run is measured against the
-    // whole tree, which is what a run with a base, an app only or a rerun is not.
-    let need_plan = if event == "push" && plan_app.is_none() {
+    // A push to main is its own measure (its plan is the diff from the last green main), and so is a train's landing run (its plan is
+    // the diff from main's last complete commit, ADR 0117 WP-8: the push to main reuses it); every other run is measured against the
+    // whole tree, which is what a run with a member base, an app only or a rerun is not.
+    let landing = event == "workflow_dispatch"
+        && env("PLAN_BASE").unwrap_or_default().trim().is_empty()
+        && !env("PLAN_LANDING_BASE").unwrap_or_default().trim().is_empty();
+    let need_plan = if (event == "push" || landing) && plan_app.is_none() {
         plan.clone()
     } else if req.all {
         planned.clone()
