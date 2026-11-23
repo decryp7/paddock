@@ -19,7 +19,7 @@ impl Sleeper {
     fn id(&self) -> ProcessId {
         ProcessId::of(self.0.id()).unwrap()
     }
-    #[allow(
+    #[expect(
         clippy::disallowed_methods,
         reason = "stopping (not ending) our own unreaped child, which has no ProcessId API"
     )]
