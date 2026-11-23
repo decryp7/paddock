@@ -373,7 +373,7 @@ pub fn liveness_findings(ctx: &Ctx) -> LivenessRun {
                 "the baseline",
                 &why,
             )),
-            Growth::Added { base, added, moved } => {
+            Growth::Added { base, added, moved, .. } => {
                 for m in &moved {
                     let (hash, from, to) = (&m.from.hash, &m.from.file, &entries[m.current].file);
                     out.push(Finding::warn(

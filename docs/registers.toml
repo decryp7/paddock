@@ -1,0 +1,317 @@
+# The register of registers (ER-46, ER-42; C161): every file under docs/ that holds a list the family keeps (a register, an allow list, a
+# ratchet, a set of declared inputs) says here, in one place, how it may change and which reader parses it.
+#
+# One [[register]] per table of a file (a top-level array of tables or a table):
+#   file     the repository path; every docs/*.toml is declared here, or C161 reports a register with no policy
+#   table    the top-level key of the table
+#   policy   shrink-only: no entry the merge base lacks (an addition is a finding, the user approves growth, ER-46);
+#            approval-required: a new entry carries a non-empty `approved` field; free: no growth rule (the reason says why)
+#   key      the fields whose values name one entry (growth is measured on them); members: a list field whose strings each count
+#   reader   the Rust file that parses the table (empty: none yet)
+#   strict   "serde": the reader refuses an unknown key itself (`deny_unknown_fields` in the reader's file); "check": it does not,
+#            and `fields` is the one refusal, applied by C161 (a table field not in `fields` is a finding). A reader moves from
+#            check to serde and never back; `fields = ["*"]` is for a table whose keys are data (a map)
+#   why      at least 8 characters
+# A policy may only tighten against the merge base: free to approval-required to shrink-only (a loosened policy is a finding).
+# The top-level keys of a file that are not tables (version, required, watch) are listed in `scalars` on its first entry.
+version = 1
+
+[[register]]
+file = "docs/ci-scope-first-runs.toml"
+table = "first_green"
+policy = "free"
+reader = "tools/paddock-dev/src/run_scope.rs"
+strict = "check"
+fields = ["*"]
+why = "written only by `./dev ci scope-record`, which refuses a run that is not finished, green and complete; a producer is named once"
+
+[[register]]
+file = "docs/escape-register.toml"
+table = "table"
+policy = "shrink-only"
+reader = "tools/paddock-dev/src/escape/register.rs"
+strict = "check"
+key = ["file", "contains"]
+fields = ["file", "contains"]
+scalars = ["version", "required"]
+why = "the old planner tables that may be deleted after the required clean nightlies; an entry leaves, none is added"
+
+[[register]]
+file = "docs/escape-register.toml"
+table = "nightly"
+policy = "free"
+reader = "tools/paddock-dev/src/escape/register.rs"
+strict = "check"
+fields = ["run", "date", "head", "commits", "escapes", "not_measured", "unreadable"]
+why = "one row per judged nightly, appended by the one writer (`dev plan --escapes --register`)"
+
+[[register]]
+file = "docs/gates.toml"
+table = "report_only"
+policy = "approval-required"
+reader = "tools/paddock-dev/src/gates/register.rs"
+strict = "check"
+key = ["id"]
+fields = ["id", "reason", "owner", "since", "review_by", "approved"]
+scalars = ["version"]
+why = "a new report-only check carries its owner, dates and `approved` (ER-41); the dates are checked by `./dev gates check` (C100)"
+
+[[register]]
+file = "docs/gates.toml"
+table = "not_gated"
+policy = "approval-required"
+reader = "tools/paddock-dev/src/gates/register.rs"
+strict = "check"
+key = ["id"]
+fields = ["id", "apps", "reason", "owner", "since", "review_by", "approved"]
+why = "a check that is deliberately not gated carries its reason, owner and `approved` (ADR 0060)"
+
+[[register]]
+file = "docs/gates.toml"
+table = "ignored"
+policy = "approval-required"
+reader = "tools/paddock-dev/src/gates/register.rs"
+strict = "check"
+key = ["path", "tests"]
+fields = ["path", "tests", "gate", "reason", "owner", "since", "review_by", "approved"]
+why = "an ignored test carries its gate, reason, owner and `approved`"
+
+[[register]]
+file = "docs/gates.toml"
+table = "level"
+policy = "approval-required"
+reader = "tools/paddock-dev/src/gates/register.rs"
+strict = "check"
+key = ["id"]
+fields = ["id", "level", "reason", "owner", "since", "review_by", "approved"]
+why = "a check at a lowered level carries its reason and `approved`"
+
+[[register]]
+file = "docs/gates.toml"
+table = "planned"
+policy = "approval-required"
+reader = "tools/paddock-dev/src/gates/register.rs"
+strict = "check"
+key = ["id"]
+fields = ["id", "adr", "reason", "owner", "since", "review_by", "approved"]
+why = "a planned gate carries its ADR and `approved`"
+
+[[register]]
+file = "docs/gates.toml"
+table = "ratchet"
+policy = "approval-required"
+reader = "tools/paddock-dev/src/gates/register.rs"
+strict = "check"
+key = ["id"]
+fields = ["id", "app", "not_yet", "clippy_not_yet", "owner", "target", "blocks_tag", "approved"]
+why = "a coverage ratchet carries its target and `approved`"
+
+[[register]]
+file = "docs/gates.toml"
+table = "harness"
+policy = "free"
+reader = "tools/paddock-dev/src/gates/register.rs"
+strict = "check"
+fields = ["name", "paths"]
+why = "a harness outside CI that runs checks; read by `./dev gates check`"
+
+[[register]]
+file = "docs/gates.toml"
+table = "docs"
+policy = "free"
+reader = "tools/paddock-dev/src/gates/register.rs"
+strict = "check"
+fields = ["include", "exclude"]
+why = "a setting of the gate register (rule-bearing docs, repository variables, measurement files)"
+
+[[register]]
+file = "docs/gates.toml"
+table = "vars"
+policy = "free"
+reader = "tools/paddock-dev/src/gates/register.rs"
+strict = "check"
+fields = ["*"]
+why = "a setting of the gate register (rule-bearing docs, repository variables, measurement files)"
+
+[[register]]
+file = "docs/gates.toml"
+table = "measurements"
+policy = "free"
+reader = "tools/paddock-dev/src/gates/register.rs"
+strict = "check"
+fields = ["files"]
+why = "a setting of the gate register (rule-bearing docs, repository variables, measurement files)"
+
+[[register]]
+file = "docs/generators.toml"
+table = "generator"
+policy = "free"
+reader = "tools/paddock-dev/src/generators/registry.rs"
+strict = "check"
+fields = ["id", "what", "check", "regenerate", "cwd", "paths", "outputs", "cost", "drift_marker", "requires", "reads", "build", "manual"]
+scalars = ["version"]
+why = "each generator is added with its own check and outputs (ER-40); the register is the list `./dev gen check` runs"
+
+[[register]]
+file = "docs/harnesses.toml"
+table = "harness"
+policy = "free"
+reader = ""
+strict = "check"
+fields = ["id", "title", "paths", "home", "mode", "lands", "note", "exceptions", "users"]
+scalars = ["version"]
+why = "a harness is added with its home branch (ADR 0042); no reader exists yet (C72, C73 are planned)"
+
+[[register]]
+file = "docs/ipc-endpoint-ratchet.toml"
+table = "ratchet"
+policy = "shrink-only"
+reader = "tools/paddock-dev/src/ipc_endpoints.rs"
+strict = "check"
+key = ["instance", "endpoint", "scenario", "fault", "os"]
+fields = ["instance", "endpoint", "scenario", "fault", "blocks_tag", "app", "note", "os"]
+why = "what fails today per instance of ADR 0072; the file only shrinks (a fault not listed is a new failure)"
+
+[[register]]
+file = "docs/ipc-endpoints.toml"
+table = "endpoint"
+policy = "free"
+reader = "tools/paddock-dev/src/ipc_endpoints.rs"
+strict = "check"
+fields = ["id", "file", "calls", "sites", "ending_test", "consumers"]
+why = "every place that listens or accepts, registered with its ending test (C102 fails on an unlisted site)"
+
+[[register]]
+file = "docs/ipc-endpoints.toml"
+table = "out_of_scope"
+policy = "shrink-only"
+reader = "tools/paddock-dev/src/ipc_endpoints.rs"
+strict = "check"
+key = ["path"]
+fields = ["path", "reason", "owner", "delete_by", "calls", "sites"]
+why = "files waived from the endpoint scan; each carries a reason and an owner and leaves with its files"
+
+[[register]]
+file = "docs/ipc-endpoints.toml"
+table = "not_applicable"
+policy = "shrink-only"
+reader = "tools/paddock-dev/src/ipc_endpoints.rs"
+strict = "check"
+key = ["endpoint", "scenario", "os"]
+fields = ["endpoint", "scenario", "reason", "os"]
+why = "scenarios that do not apply to an endpoint; an entry leaves when the scenario applies"
+
+[[register]]
+file = "docs/known-copies.toml"
+table = "mechanism"
+policy = "free"
+reader = "tools/paddock-dev/src/merge_check/reland.rs"
+strict = "check"
+fields = ["id", "title", "canonical", "paths", "status", "copy", "adr", "symbols"]
+scalars = ["version"]
+why = "rule 55: a new copy needs its entry and a delete-by tag (C58 is planned, the steward checks by hand); the date moves only with a `Copies-date:` trailer"
+
+[[register]]
+file = "docs/os-removals.toml"
+table = "approved"
+policy = "shrink-only"
+reader = "tools/paddock-dev/src/check/c155.rs"
+strict = "check"
+key = ["contract"]
+members = "entries"
+fields = ["contract", "by", "date", "why", "entries"]
+scalars = ["version"]
+why = "rule 88: removing an OS from a test needs the user; growth is one finding no waiver clears (C155)"
+
+[[register]]
+file = "docs/repo-graph.toml"
+table = "planner"
+policy = "free"
+reader = "tools/paddock-dev/src/repo_inputs.rs"
+strict = "check"
+fields = ["mode", "reason", "lint_phases"]
+scalars = ["version"]
+why = "which planner decides (graph or rules)"
+
+[[register]]
+file = "docs/repo-graph.toml"
+table = "project"
+policy = "free"
+reader = "tools/paddock-dev/src/repo_inputs.rs"
+strict = "check"
+fields = ["id", "folder"]
+why = "the plan keys; widening needs no approval, narrowing needs a golden diff and the user (ADR 0117 section 14)"
+
+[[register]]
+file = "docs/repo-graph.toml"
+table = "paths"
+policy = "free"
+reader = "tools/paddock-dev/src/repo_inputs.rs"
+strict = "check"
+fields = ["workflows", "actions", "apps", "contract", "script_folders", "node_tests", "e2e", "checkout", "root_spellings"]
+why = "declared inputs of the repository model; widening needs no approval, narrowing needs a golden diff and the user (ADR 0117 section 14)"
+
+[[register]]
+file = "docs/repo-graph.toml"
+table = "prose"
+policy = "free"
+reader = "tools/paddock-dev/src/repo_inputs.rs"
+strict = "check"
+fields = ["project_names", "project_folders", "doc_owner", "doc_assets"]
+why = "declared inputs of the repository model; widening needs no approval, narrowing needs a golden diff and the user (ADR 0117 section 14)"
+
+[[register]]
+file = "docs/repo-graph.toml"
+table = "ci"
+policy = "free"
+reader = "tools/paddock-dev/src/repo_inputs.rs"
+strict = "check"
+fields = ["setup_only", "release_actions", "release_gate_phases"]
+why = "declared inputs of the repository model; widening needs no approval, narrowing needs a golden diff and the user (ADR 0117 section 14)"
+
+[[register]]
+file = "docs/repo-graph.toml"
+table = "hash"
+policy = "free"
+reader = "tools/paddock-dev/src/repo_inputs.rs"
+strict = "check"
+fields = ["runner_configs", "contracts", "image_files"]
+why = "declared inputs of the repository model; widening needs no approval, narrowing needs a golden diff and the user (ADR 0117 section 14)"
+
+[[register]]
+file = "docs/repo-graph.toml"
+table = "input"
+policy = "free"
+reader = "tools/paddock-dev/src/repo_inputs.rs"
+strict = "check"
+fields = ["name", "files", "reaches", "extractor", "except", "adds"]
+why = "declared inputs of the repository model; widening needs no approval, narrowing needs a golden diff and the user (ADR 0117 section 14)"
+
+[[register]]
+file = "docs/repo-graph.toml"
+table = "owner"
+policy = "free"
+reader = "tools/paddock-dev/src/repo_inputs.rs"
+strict = "check"
+fields = ["paths", "node"]
+why = "declared inputs of the repository model; widening needs no approval, narrowing needs a golden diff and the user (ADR 0117 section 14)"
+
+[[register]]
+file = "docs/shared-crate-features.toml"
+table = "features"
+policy = "free"
+reader = "tools/paddock-dev/src/locks_guard.rs"
+strict = "check"
+fields = ["*"]
+scalars = ["watch"]
+why = "generated by `./dev locks guard --write` (ER-40), never by hand"
+
+[[register]]
+file = "docs/registers.toml"
+table = "register"
+policy = "free"
+reader = "tools/paddock-dev/src/check/c161.rs"
+strict = "check"
+fields = ["file", "table", "policy", "reader", "strict", "key", "members", "fields", "scalars", "why"]
+scalars = ["version"]
+why = "a register is declared with the file it describes; the policy may only tighten, which C161 compares with the merge base (a loosened one is a finding)"

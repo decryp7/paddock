@@ -249,6 +249,9 @@ pub enum Growth<T> {
         added: usize,
         /// Entries it has under another exact key.
         moved: Vec<Moved<T>>,
+        /// The current entries the merge base does not have, in the current order (what the count `added` counts), so a caller that
+        /// judges the additions by their content (a register whose growth needs an approval field) sees which ones they are.
+        fresh: Vec<T>,
     },
     /// Not measurable here: a warning (an error in CI for [`Unmeasured::NoBase`]), never silence.
     Unmeasured(Unmeasured),
@@ -331,6 +334,7 @@ pub fn growth<T: Clone>(
     Growth::Added {
         base,
         added: r.fresh.len(),
+        fresh: r.fresh.iter().map(|&n| current[n].clone()).collect(),
         moved: r
             .moved
             .iter()
@@ -513,6 +517,10 @@ mod tests {
             growth(d.path(), "main", "l.txt", &current, &of, &exact, None),
             Growth::Added { added: 3, .. }
         ));
+        let Growth::Added { fresh, .. } = growth(d.path(), "main", "l.txt", &current, &of, &exact, None) else {
+            panic!("a list absent at the base is measured");
+        };
+        assert_eq!(fresh, keys(&["a", "b", "b"]), "the additions themselves, not only their count");
         assert!(
             matches!(
                 growth(d.path(), "main", "l.txt", &[], &of, &exact, None),

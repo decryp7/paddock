@@ -1376,3 +1376,12 @@ owner = "ER-21 class: an input narrowed a run and the scope line did not say so 
 since = 2026-11-23
 review_by = 2026-12-22
 approved = "user"
+
+[[report_only]]
+id = "C161"
+reason = "ER-41: report-only until its first green run on the real tree, recorded by run id here and in tools/paddock-dev/src/check/c161.rs, then flip the mode to Gate. docs/registers.toml declares every table under docs/*.toml with its policy (shrink-only, approval-required, free), its reader and its fields; the check flags a docs/*.toml with no declared policy, an unknown key (the shared field list, for the readers that do not refuse unknown keys themselves), growth against the merge base by policy (the one comparison, baseline::growth, which now also returns the added entries), and a policy that loosened. No baseline or allow list of its own (ER-46): the declaration is the list. First count at 64e01dd84 (train/2026-11-23-graph, merge base origin/train/2026-11-23-graph): 0 findings in 31 declared tables of 12 files; against origin/main it reports the entries the train adds (os-removals 26, escape-register 2). Strict readers: 0 of 31 tables have a serde reader that refuses unknown keys (all use toml::Table lookups); each is `strict = check` in the register, which is the list of follow-ups. C155 keeps its own older comparison of docs/os-removals.toml (rule 88) until this check is a gate. Positive controls: the check's own control (an undeclared file, an unknown key) and tests/it/check_c161.rs (growth, an unapproved entry, a loosened policy, an unreadable declaration; each goes red when the rule is removed)"
+owner = "ER-21 class: a register with no growth rule and a reader that ignores an unknown key (C121, C124, C125, C130, C139, C155 each compared one list; feat/conformance-guards-2026-11-23)"
+since = 2026-11-23
+review_by = 2026-12-22
+approved = "user"
+

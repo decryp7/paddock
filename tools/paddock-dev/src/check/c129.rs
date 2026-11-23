@@ -480,7 +480,7 @@ impl Check for C129 {
                     "the baseline",
                     &why,
                 )),
-                Growth::Added { base, added, moved } => {
+                Growth::Added { base, added, moved, .. } => {
                     for m in &moved {
                         let now = &baseline[m.current];
                         if now.lines > m.from.lines {

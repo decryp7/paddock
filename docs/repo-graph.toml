@@ -188,6 +188,12 @@ name = "os-removals"
 files = ["docs/os-removals.toml"]
 reaches = ["project:paddock-dev"]
 
+# The register of registers (C161): which policy each table under docs/ has and which reader parses it.
+[[input]]
+name = "registers"
+files = ["docs/registers.toml"]
+reaches = ["project:paddock-dev", "project:conformance"]
+
 [[input]]
 name = "design-docs"
 files = ["docs/design-guide.md", "docs/benchmarks.md", "docs/benchmarks/**"]
