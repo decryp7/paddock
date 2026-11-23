@@ -446,7 +446,12 @@ file reads batched. Extractors run in parallel over files (rayon, cores minus on
 - **Features** (review P2-7): the extractors sit behind crate features (`ci-yaml`, `ts` for oxc, `rust-syn`, `parallel` for rayon);
   paddock-dev enables them, other users of the crate do not. Measured during WP-1: adding one dependency (`toml`) to
   `paddock-repo-graph` regenerated `paddock-workspace-hack` and changed all five app `Cargo.lock` files (which would mark every
-  app's Rust half), so the TOML accessor moved to paddock-dev instead (`tools/paddock-dev/src/repo_inputs.rs`).
+  app's Rust half), so the TOML accessor moved to paddock-dev instead (`tools/paddock-dev/src/repo_inputs.rs`). Measured again in WP-3
+  (`feat/repo-graph-wp3`): the crate's optional `syn` (`visit`) and oxc dependencies changed `paddock-workspace-hack`
+  (`cargo hakari generate --diff`), and `oxc_resolver` turns on serde_json's `preserve_order`, which a crate feature unifies into
+  every shared crate under `--all-features` (clippy's `result_large_err` failed in `paddock-mcp`). So both parsers live in
+  paddock-dev (`tools/paddock-dev/src/repo_model/ts.rs` and `reads.rs`), which already enables both, and the crate keeps the
+  text scanner as the fallback for its other users.
 - **Granularity limit**: Rust tests are selected by test binary (`binary_id`), TypeScript tests by spec file, Playwright by spec file
   and project. No test-function level, as Bazel's target-level practice.
 - **Budget (ER-20)**: one `git cat-file --batch` for every text, one `cargo metadata` per Cargo workspace, no other spawn; the whole
