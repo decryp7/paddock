@@ -186,6 +186,10 @@ impl Extractor for CodeExtractor {
             .collect();
         let mut seen: BTreeSet<String> = BTreeSet::new();
         let mut layer: Vec<String> = self.scripts.iter().filter(|s| js.contains(*s)).cloned().collect();
+        // The seed scripts' own nodes (the CI adapter has them too; the merge keeps its node).
+        for s in &layer {
+            x.nodes.push(ModelNode::new(format!("script:{s}"), NodeKind::Script, &[s.as_str()]));
+        }
         let mut rounds = 0;
         while !layer.is_empty() && rounds < 64 {
             rounds += 1;
