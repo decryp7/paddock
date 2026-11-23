@@ -174,11 +174,26 @@ export function tagProblems(env, version) {
 }
 
 /**
- * Workspace crates that ci.yml does not clippy and test (nextest) with every feature: neither a `-p <crate>` command nor a
- * `--workspace` one that leaves it out with `--exclude`.
+ * The commands the crate workspace's gates run on a branch, from the CI model (`./dev gates model --json`, ADR 0060 §2): the one
+ * accessor that reads ci.yml, its actions and its matrices (ER-42; this file never slices ci.yml text). A line counts when it runs
+ * in the `crates` folder outside an app leg and is gated at the branch level (a conditional or report-only line proves nothing).
  */
-export function crateStepsMissing(ciYaml, names) {
-  const lines = (re) => ciYaml.split('\n').filter((l) => re.test(l));
+export function crateCommands(model) {
+  return model.lines.filter((l) => l.cwd === 'crates' && !l.app && l.levels?.branch === 'Gated').map((l) => l.text);
+}
+
+/** The CI model, read through the one accessor (`./dev gates model --json`). */
+export function readCiModel(rootDir) {
+  const out = execFileSync(join(rootDir, 'dev'), ['gates', 'model', '--json'], { cwd: rootDir, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  return JSON.parse(out);
+}
+
+/**
+ * Workspace crates that no gated command clippies and tests (nextest) with every feature: neither a `-p <crate>` command nor a
+ * `--workspace` one that leaves it out with `--exclude`. `commands` are the lines [`crateCommands`] returns.
+ */
+export function crateStepsMissing(commands, names) {
+  const lines = (re) => commands.flatMap((c) => c.split('\n')).filter((l) => re.test(l));
   const clippy = lines(/cargo clippy .*--all-features/);
   const nextest = lines(/cargo (?:llvm-cov )?nextest(?: run)? .*--all-features/);
   const covers = (line, n) => {
@@ -390,12 +405,12 @@ async function main() {
   const crateList = publishOrder(workspaceCrates(metadata));
   const packages = npmPackages(join(ui, 'projects'), join(ui, 'dist'));
   const lead = packages.find((p) => p.name === '@decryp7/paddock-ui');
-  const ciYaml = readFileSync(join(root, '.gitea/workflows/ci.yml'), 'utf8');
+  const ciCommands = crateCommands(readCiModel(root));
   const problems = [
     ...crateProblems(crateList),
     ...lockstepProblems(packages),
     ...shellVersionProblems(crateList, packages),
-    ...crateStepsMissing(ciYaml, crateList.map((c) => c.name)).map((n) => `${n} is not linted and tested with every feature in .gitea/workflows/ci.yml (job crate)`),
+    ...crateStepsMissing(ciCommands, crateList.map((c) => c.name)).map((n) => `${n} is not linted and tested with every feature by a gated command in crates/ (./dev gates model)`),
     ...(opts.publish ? tagProblems(env, lead?.version) : []),
   ];
   if (problems.length) throw new Error(`refusing to continue:\n  ${problems.join('\n  ')}`);
