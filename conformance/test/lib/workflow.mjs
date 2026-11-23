@@ -6,7 +6,7 @@
 // The reader is a small YAML subset (block maps and lists, flow lists and maps, quoted and plain scalars, `|` and `>` block
 // scalars, comments); the repo has no YAML dependency, and conformance/src/util/workflows.mjs is line based and has no `if`,
 // `with` or outputs. Anchors, aliases and merge keys throw, so a file that uses them is never read wrongly.
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { PADDOCK } from '../helpers.mjs';
 
@@ -123,6 +123,12 @@ export function parseYaml(text) {
 /** A workflow or action file of the repository, parsed. */
 export const loadYaml = (...rel) => parseYaml(readFileSync(join(PADDOCK, ...rel), 'utf8'));
 export const loadWorkflow = (name) => loadYaml('.gitea', 'workflows', name);
+/** The text of a workflow file (`ci.yml`): the one place a test reads it (conformance C158). Prefer `loadWorkflow`: fields, not text. */
+export const workflowText = (name) => readFileSync(join(PADDOCK, '.gitea', 'workflows', name), 'utf8');
+/** The path of a workflow file, for a test that lists paths (`workflowPath('')` is the folder). */
+export const workflowPath = (name) => join(PADDOCK, '.gitea', 'workflows', name);
+/** The workflow files, sorted (`['app-fuzz.yml', ...]`). */
+export const workflowFiles = () => readdirSync(join(PADDOCK, '.gitea', 'workflows')).filter((f) => /\.ya?ml$/.test(f)).sort();
 export const loadAction = (name) => loadYaml('.gitea', 'actions', name, 'action.yml');
 
 /** An expression without its `${{ }}` wrapper and with single spaces: `${{ a  &&  b }}` and `a && b` compare equal. */

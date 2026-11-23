@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import C137, { kitImportLine } from '../src/checks/C137-e2e-kit-import.mjs';
 
-const ctxOf = (files) => ({ files: () => Object.keys(files), read: (f) => files[f] ?? null });
+const ctxOf = (files) => ({ files: () => Object.keys(files), read: (f) => files[f] ?? null, workflowText: (n) => files[`.gitea/workflows/${n}`] ?? null });
 const SPEC = 'apps/debrief/app/e2e/dock.e2e.ts';
 const IMPORT = "import { settledLayout } from '@decryp7/paddock-e2e';\n";
 const wf = (run) => `jobs:\n  e2e:\n    steps:\n      - name: x\n        run: ${run}\n      - name: t\n        run: npx playwright test\n`;

@@ -51,6 +51,8 @@ export function createContext({ root, config, options = {} }) {
     tree,
     files: () => tree.files(),
     read: (p) => tree.read(p),
+    /** The text of a workflow file of this tree (`ci.yml`), or null: the one reader of a workflow for a check (conformance C158). */
+    workflowText: (name) => tree.read(`${config.workflowsDir}/${name}`),
     exists: (p) => tree.exists(p),
     /** Workflow files: [{ file, text, jobs, steps }]. */
     workflows() {

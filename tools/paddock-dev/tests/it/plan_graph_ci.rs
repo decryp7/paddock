@@ -31,7 +31,7 @@ fn fixture() -> (tempfile::TempDir, PathBuf) {
     .unwrap();
     // The app job runs the apps the plan names (its `if` reads `any_app`, as ci.yml's does).
     let ci = root.join(".gitea/workflows/ci.yml");
-    let text = std::fs::read_to_string(&ci).unwrap();
+    let text = paddock_dev::gates::ci::workflow_text_raw(&root, "ci.yml").unwrap();
     let text = text.replace(
         "  app:\n    needs: [plan]\n",
         "  app:\n    needs: [plan]\n    if: ${{ needs.plan.outputs.any_app == 'true' }}\n",

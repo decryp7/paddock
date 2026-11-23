@@ -889,7 +889,7 @@ mod tests {
     fn every_job_name_the_scope_maps_is_a_job_of_the_real_ci_yml() {
         // The mapping from declared keys to display names is read against ci.yml through the planner's own accessor of its jobs, so a
         // renamed job fails here and not in a tag gate (ER-42).
-        let text = std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.gitea/workflows/ci.yml")).unwrap();
+        let text = crate::gates::ci::workflow_text(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."), "ci.yml").unwrap();
         let wf = crate::plan_gitea::workflow_jobs(&text).unwrap();
         let name_of = |id: &str| -> String {
             let job = &wf

@@ -11,11 +11,10 @@ import { test } from 'node:test';
 import { executableIn, platformId } from '../ci/install-test-browser.mjs';
 import { isMain } from '../src/util/is-main.mjs';
 import { parseSteps } from '../src/util/workflows.mjs';
-import { conjuncts, expr, job as workflowJob, loadAction, loadWorkflow, needsOf, parseYaml, stepsOf } from './lib/workflow.mjs';
+import { conjuncts, expr, job as workflowJob, loadAction, loadWorkflow, needsOf, parseYaml, stepsOf, workflowFiles, workflowPath, workflowText } from './lib/workflow.mjs';
 import { PADDOCK } from './helpers.mjs';
 
 const ACTIONS = join(PADDOCK, '.gitea', 'actions');
-const WORKFLOWS = join(PADDOCK, '.gitea', 'workflows');
 const names = readdirSync(ACTIONS, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name).sort();
 const read = (p) => readFileSync(p, 'utf8');
 
@@ -85,12 +84,12 @@ test('the scripts the actions run are executable programs of this package', () =
   for (const f of ['host-cleanup.sh']) assert.ok(existsSync(join(PADDOCK, 'tools', f)), f);
 });
 
-const workflows = readdirSync(WORKFLOWS).filter((f) => f.startsWith('app-') && f.endsWith('.yml')).sort();
+const workflows = workflowFiles().filter((f) => f.startsWith('app-') && f.endsWith('.yml')).sort();
 
 test('the reusable workflows are workflow_call workflows that use only actions, inputs and secrets that exist', () => {
   assert.deepEqual(workflows, ['app-fuzz.yml', 'app-release.yml']);
   for (const w of workflows) {
-    const text = read(join(WORKFLOWS, w));
+    const text = workflowText(w);
     assert.match(text, /^on:\n {2}workflow_call:/m, `${w}: workflow_call`);
     const declared = declaredInputs(text.slice(text.indexOf('workflow_call:')));
     assert.ok(declared.includes('paddock-ref'), `${w}: paddock-ref is an input`);
@@ -109,7 +108,7 @@ test('the reusable workflows are workflow_call workflows that use only actions, 
 });
 
 test('the release workflow cannot publish from anything but its own v* tag, and signs only with the secrets it declares', () => {
-  const text = read(join(WORKFLOWS, 'app-release.yml'));
+  const text = workflowText('app-release.yml');
   assert.match(text, /release:\n(?:.*\n)*?\s+if: startsWith\(github\.ref, format\('refs\/tags\/\{0\}v', inputs\.tag-prefix\)\)/);
   const action = read(join(ACTIONS, 'publish-release', 'action.yml'));
   assert.match(action, /refs\/tags\/\$\{PREFIX\}v/);
@@ -122,8 +121,8 @@ test('the release workflow cannot publish from anything but its own v* tag, and 
 test('in a job that moves the checkout (stable-workspace), every upload-artifact path starts at PADDOCK_WORKSPACE', () => {
   const stable = /uses: \.\/(?:\.paddock\/)?\.gitea\/actions\/(?:stable-workspace|kept-clone)/;
   let checked = 0;
-  for (const file of readdirSync(WORKFLOWS).filter((x) => /\.ya?ml$/.test(x))) {
-    for (const job of parseJobs(read(join(WORKFLOWS, file)))) {
+  for (const file of workflowFiles().filter((x) => /\.ya?ml$/.test(x))) {
+    for (const job of parseJobs(workflowText(file))) {
       if (!stable.test(job.text)) continue;
       for (const step of parseSteps(job.text).filter((st) => /actions\/upload-artifact@/.test(st.uses ?? ''))) {
         const path = /^\s+path: (.+)$/m.exec(step.text)?.[1] ?? '';
@@ -139,7 +138,7 @@ test('in a job that moves the checkout (stable-workspace), every upload-artifact
 });
 
 test('the shared actions follow the repo rules: no AI attribution text, Gitea-compatible artifact actions', () => {
-  for (const f of [...names.map((n) => join(ACTIONS, n, 'action.yml')), ...workflows.map((w) => join(WORKFLOWS, w))]) {
+  for (const f of [...names.map((n) => join(ACTIONS, n, 'action.yml')), ...workflows.map((w) => workflowPath(w))]) {
     const text = read(f);
     assert.doesNotMatch(text, /Co-Authored-By|Generated with/i, f);
     assert.doesNotMatch(text, /actions\/(?:upload|download)-artifact@v4/, `${f}: Gitea supports v3 only`);
@@ -152,7 +151,7 @@ test('no workflow, action or doc switches the compile cache by a repository vari
   const hits = files.filter((f) => !/\.test\.mjs$/.test(f) && /\.(ya?ml|md|rs|mjs|sh|tsv|toml)$/.test(f) && read(join(PADDOCK, f)).includes('PADDOCK_CI_SCCACHE_BACKEND'));
   assert.deepEqual(hits, [], 'PADDOCK_CI_SCCACHE_BACKEND is gone: the default is s3, ci.yml\'s sccache_backend input overrides one run');
   // The override stays, and only as ci.yml's dispatch input.
-  assert.match(read(join(WORKFLOWS, 'ci.yml')), /\n {6}sccache_backend:\n {8}description: /);
+  assert.match(workflowText('ci.yml'), /\n {6}sccache_backend:\n {8}description: /);
 });
 
 test('setup-rust declares the sccache backend inputs: s3 by default, Redis only when asked for', () => {
@@ -171,7 +170,7 @@ test('setup-rust declares the sccache backend inputs: s3 by default, Redis only 
   assert.match(text, /REDIS_ENDPOINT: \$\{\{ inputs\.sccache-redis-endpoint \}\}/);
   assert.match(text, /sccache-backend must be auto, redis, local or s3/);
   assert.match(text, /sccache-backend is redis but sccache-redis-endpoint is empty/);
-  const ci = read(join(WORKFLOWS, 'ci.yml'));
+  const ci = workflowText('ci.yml');
   assert.doesNotMatch(ci, /sccache-redis|SCCACHE_REDIS|sccache-backend/, 'Paddock CI no longer uses the shared Redis backend');
 });
 
@@ -327,16 +326,16 @@ test('setup-rust settles the toolchain every later step runs through RUSTUP_TOOL
 test('the dated-nightly fuzz workflow names its toolchain in the fuzz job only; no workflow sets RUSTUP_TOOLCHAIN for every job', () => {
   const wf = loadWorkflow('debrief-fuzz.yml');
   assert.match(String(wf.jobs.fuzz.env.RUSTUP_TOOLCHAIN), /^nightly-\d{4}-\d{2}-\d{2}$/);
-  const wide = readdirSync(WORKFLOWS).filter((f) => /\.ya?ml$/.test(f)).filter((f) => loadWorkflow(f).env?.RUSTUP_TOOLCHAIN);
+  const wide = workflowFiles().filter((f) => /\.ya?ml$/.test(f)).filter((f) => loadWorkflow(f).env?.RUSTUP_TOOLCHAIN);
   assert.deepEqual(wide, [], 'a workflow-level RUSTUP_TOOLCHAIN reaches the jobs that run ./dev (they would build it under that toolchain)');
 });
 
 // rust-toolchain.toml outranks the `rustup default` that dtolnay/rust-toolchain sets, and names a version the garage image does not have
 // (it would be downloaded on every run). A workflow that sets up Rust that way states which toolchain runs: RUSTUP_TOOLCHAIN.
 test('every workflow that uses dtolnay/rust-toolchain also sets RUSTUP_TOOLCHAIN (the repo pins a toolchain file)', () => {
-  const bad = readdirSync(WORKFLOWS)
+  const bad = workflowFiles()
     .filter((f) => /\.ya?ml$/.test(f))
-    .filter((f) => /dtolnay\/rust-toolchain/.test(read(join(WORKFLOWS, f))) && !/RUSTUP_TOOLCHAIN/.test(read(join(WORKFLOWS, f))));
+    .filter((f) => /dtolnay\/rust-toolchain/.test(workflowText(f)) && !/RUSTUP_TOOLCHAIN/.test(workflowText(f)));
   assert.deepEqual(bad, [], 'set RUSTUP_TOOLCHAIN (`stable` for the garage image, the dated nightly for fuzzing) after dtolnay/rust-toolchain, or use setup-rust');
 });
 
@@ -348,7 +347,7 @@ test('a job in the garage image sets RUSTUP_TOOLCHAIN for the whole job, or in a
     /\bcargo\b|(^|[\s;&|])(\.\/)?dev(\s|$)|kit\.sh/.test(st.run ?? '');
   const sets = (st) => /RUSTUP_TOOLCHAIN=/.test(st.run ?? '');
   const bad = [];
-  for (const f of readdirSync(WORKFLOWS).filter((x) => /\.ya?ml$/.test(x))) {
+  for (const f of workflowFiles().filter((x) => /\.ya?ml$/.test(x))) {
     const wf = loadWorkflow(f);
     for (const [id, j] of Object.entries(wf.jobs ?? {})) {
       const image = typeof j.container === 'string' ? j.container : j.container?.image ?? '';
@@ -404,8 +403,8 @@ test('setup-rust uses ./dev only off the release path, and never a stored tool b
 test('every job that uses setup-rust sets the tag rule for ./dev (it runs ./dev ci setup-rust)', () => {
   const missing = [];
   let seen = 0;
-  for (const file of readdirSync(WORKFLOWS).filter((f) => /\.ya?ml$/.test(f))) {
-    for (const job of parseJobs(read(join(WORKFLOWS, file)))) {
+  for (const file of workflowFiles().filter((f) => /\.ya?ml$/.test(f))) {
+    for (const job of parseJobs(workflowText(file))) {
       if (!/uses: \.\/(?:\.paddock\/)?\.gitea\/actions\/setup-rust\b/.test(job.text)) continue;
       seen++;
       if (!TAG_RULE.test(job.text.split('\n    steps:')[0])) missing.push(`${file}:${job.id}`);
@@ -423,8 +422,8 @@ test('every job that uses setup-rust sets the tag rule for ./dev (it runs ./dev 
 test('every job of a tag-triggered workflow that uses build-jobs, job-isolation or setup-rust sets the tag rule for ./dev', () => {
   const missing = [];
   let seen = 0;
-  for (const file of readdirSync(WORKFLOWS).filter((f) => /\.ya?ml$/.test(f))) {
-    const text = read(join(WORKFLOWS, file));
+  for (const file of workflowFiles().filter((f) => /\.ya?ml$/.test(f))) {
+    const text = workflowText(file);
     if (!/^on:\n(?:(?:  .*)?\n)*?\s+tags:/m.test(text)) continue;
     for (const job of parseJobs(text)) {
       if (!/uses: \.\/(?:\.paddock\/)?\.gitea\/actions\/(?:build-jobs|job-isolation|setup-rust)\b/.test(job.text)) continue;
@@ -457,7 +456,7 @@ export function kitCallers(actions, workflows) {
 // see it. The workflow-level env hands the variable to every step of every job, including the steps of the composite actions.
 test('every workflow with a step that calls kit.sh (directly or through an action) hands it ${{ vars.PADDOCK_CI_KIT }}', () => {
   const actions = Object.fromEntries(names.map((n) => [n, read(join(ACTIONS, n, 'action.yml'))]));
-  const workflows = Object.fromEntries(readdirSync(WORKFLOWS).filter((f) => /\.ya?ml$/.test(f)).map((f) => [f, read(join(WORKFLOWS, f))]));
+  const workflows = Object.fromEntries(workflowFiles().filter((f) => /\.ya?ml$/.test(f)).map((f) => [f, workflowText(f)]));
   const callers = kitCallers(actions, workflows);
   assert.ok(callers.length >= 10 && callers.includes('ci.yml') && callers.includes('debrief.yml'), `the callers are found (${callers})`);
   const missing = callers.filter((f) => !/^env:\n(?:(?:  .*)?\n)*?  PADDOCK_CI_KIT: \$\{\{ vars\.PADDOCK_CI_KIT \}\}/m.test(workflows[f]));
@@ -488,7 +487,7 @@ test('the sccache-stats action prints the statistics and tolerates a missing scc
   assert.match(stats, /sccache --show-stats/);
   assert.match(stats, /command -v sccache/);
   assert.match(read(join(ACTIONS, 'sccache-stats', 'action.yml')), /kit\.sh" host sccache-stats/, 'through the kit shim (Rust, or this script on the release path)');
-  const ci = read(join(WORKFLOWS, 'ci.yml'));
+  const ci = workflowText('ci.yml');
   // The jobs that build Rust, by name (a new job that builds Rust joins this list; a count would hide which one).
   const jobsUsing = (action) => {
     const found = [];
@@ -536,7 +535,7 @@ export function strictPlainScalarProblem(text) {
 test('every action and workflow parses under a strict YAML reader (no ": " inside an unquoted value)', () => {
   const files = [
     ...names.map((n) => join(ACTIONS, n, 'action.yml')),
-    ...readdirSync(WORKFLOWS).filter((f) => /\.ya?ml$/.test(f)).map((f) => join(WORKFLOWS, f)),
+    ...workflowFiles().filter((f) => /\.ya?ml$/.test(f)).map((f) => workflowPath(f)),
   ];
   assert.ok(files.length >= 20);
   for (const f of files) assert.equal(strictPlainScalarProblem(read(f)), null, f);
@@ -588,7 +587,7 @@ test('no script sits between cargo and rustc: RUSTC_WRAPPER is sccache itself, w
   };
   walk(ACTIONS);
   assert.deepEqual(scripts, [], 'no cmd.exe script in the shared actions');
-  const files = [...names.map((n) => join(ACTIONS, n, 'action.yml')), ...readdirSync(WORKFLOWS).filter((f) => /\.ya?ml$/.test(f)).map((f) => join(WORKFLOWS, f))];
+  const files = [...names.map((n) => join(ACTIONS, n, 'action.yml')), ...workflowFiles().filter((f) => /\.ya?ml$/.test(f)).map((f) => workflowPath(f))];
   for (const f of files) {
     // sccache itself, the action's $WRAPPER, or an expression that picks sccache or nothing (`${{ ... && 'sccache' || '' }}`).
     for (const m of read(f).matchAll(/RUSTC_WRAPPER\s*[=:]\s*("?)(\$\{\{[^}]*\}\}|[^"\s>]*)/g)) {
@@ -634,8 +633,8 @@ test('every job that builds Rust on a host sets its build folder with the build-
   const uses = [];
   // Still on CARGO_TARGET_DIR, to move next: the release and smoke workflows of the reference apps. No other workflow may join them.
   const notYet = ['service-smoke.yml', 'shell-demo-release.yml', 'workbench-demo-release.yml'];
-  for (const file of readdirSync(WORKFLOWS).filter((x) => /\.ya?ml$/.test(x))) {
-    const text = read(join(WORKFLOWS, file));
+  for (const file of workflowFiles().filter((x) => /\.ya?ml$/.test(x))) {
+    const text = workflowText(file);
     const body = text.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
     if (notYet.includes(file)) {
       assert.match(body, /CARGO_TARGET_DIR/, `${file} moved onto the build-folder action: take it off the not-yet list`);
@@ -901,7 +900,7 @@ test('stable-workspace leaves Linux containers alone and never fails a job it ca
 });
 
 test('CI moves the checkout to a stable path on the host runners only, after Git bash is on PATH on Windows', () => {
-  const ci = read(join(WORKFLOWS, 'ci.yml'));
+  const ci = workflowText('ci.yml');
   const jobs = parseJobs(ci).filter((j) => j.text.includes('uses: ./.gitea/actions/kept-clone'));
   assert.deepEqual(jobs.map((j) => j.id), ['crate', 'app', 'paddock-dev'], 'the crate job, the apps\' host legs and the developer tool');
   for (const job of jobs) {
@@ -914,7 +913,7 @@ test('CI moves the checkout to a stable path on the host runners only, after Git
 });
 
 test('the test browser of a host job lives in a kept folder of its job slot, outside the checkout that stable-workspace moves', () => {
-  const ci = read(join(WORKFLOWS, 'ci.yml'));
+  const ci = workflowText('ci.yml');
   const dirs = [...ci.matchAll(/PADDOCK_TEST_BROWSER_DIR=(\S+)/g)].map((m) => m[1]);
   assert.equal(dirs.length, 2, 'the crate job\'s and the app leg\'s own (per app)');
   for (const d of dirs) assert.equal(d, '$dir"', 'the folder job-isolation.sh gives');
@@ -923,7 +922,7 @@ test('the test browser of a host job lives in a kept folder of its job slot, out
 });
 
 test('the WebKit job runs on the Mac runner when the planner says so (a push to main, a v* tag, the webkit input) and runs the three WebKit projects', () => {
-  const ci = read(join(WORKFLOWS, 'ci.yml'));
+  const ci = workflowText('ci.yml');
   const on = ci.match(/^on:\n((?:[ \t]+.*\n|\n)+)/m)?.[1] ?? '';
   assert.match(on, /push:\n\s+branches: \[main\]\n\s+tags: \["v\*"\]/, 'a push is only main or a v* tag');
   const job = ci.match(/^  e2e-webkit:\n((?:    .*\n|\n)+)/m)?.[1] ?? '';
@@ -1098,7 +1097,7 @@ test('every e2e job of every kit app, ci.yml and debrief.yml runs on a port no o
     }
   }
   for (const file of ['ci.yml', 'debrief.yml']) {
-    for (const m of read(join(WORKFLOWS, file)).matchAll(/^\s*\w*PORT: (.+)$/gm)) {
+    for (const m of workflowText(file).matchAll(/^\s*\w*PORT: (.+)$/gm)) {
       for (const n of m[1].matchAll(/['"](\d{4})['"]/g)) ports.push([`${file} ${m[0].trim()}`, Number(n[1])]);
       for (const n of m[1].matchAll(/"(\d{3})\$\{\{ matrix\.shard \}\}"/g)) for (const sh of [1, 2]) ports.push([`${file} ${m[0].trim()} shard ${sh}`, Number(`${n[1]}${sh}`)]);
     }
@@ -1119,24 +1118,24 @@ test('app-gates tests last-packages apart on Linux only, and a host leg leaves t
   assert.match(gates, /if \[ "\$RUNNER_OS" = Linux \] && \[ \$\{#last\[@\]\} -gt 0 \]; then\n\s+sel=\(\$\{last\[@\]\+"\$\{last\[@\]\}"\}/, 'Linux runs them after the rest');
   assert.match(gates, /step cargo clippy "\$\{scope\[@\]\}" \$\{hostexclude\[@\]\+"\$\{hostexclude\[@\]\}"\}/, 'clippy: excluded on a host only');
   assert.match(gates, /step cargo test "\$\{scope\[@\]\}" \$\{hostexclude\[@\]\+"\$\{hostexclude\[@\]\}"\} --doc/, 'doc tests: excluded on a host only');
-  assert.match(read(join(WORKFLOWS, 'ci.yml')), /rust-checks: \$\{\{ matrix\.rust_checks \}\}/, 'ci.yml hands rustChecks to app-gates');
-  assert.match(read(join(WORKFLOWS, 'ci.yml')), /host-rust-checks: \$\{\{ matrix\.host_rust_checks \}\}/, 'ci.yml hands hostRustChecks to app-gates');
-  assert.match(read(join(WORKFLOWS, 'ci.yml')), /notices: \$\{\{ matrix\.notices \}\}/, 'ci.yml hands the notices check to app-gates');
-  assert.match(read(join(WORKFLOWS, 'ci.yml')), /last-packages: \$\{\{ matrix\.last_packages \}\}/, 'ci.yml hands the contract field to app-gates');
+  assert.match(workflowText('ci.yml'), /rust-checks: \$\{\{ matrix\.rust_checks \}\}/, 'ci.yml hands rustChecks to app-gates');
+  assert.match(workflowText('ci.yml'), /host-rust-checks: \$\{\{ matrix\.host_rust_checks \}\}/, 'ci.yml hands hostRustChecks to app-gates');
+  assert.match(workflowText('ci.yml'), /notices: \$\{\{ matrix\.notices \}\}/, 'ci.yml hands the notices check to app-gates');
+  assert.match(workflowText('ci.yml'), /last-packages: \$\{\{ matrix\.last_packages \}\}/, 'ci.yml hands the contract field to app-gates');
 });
 
 test('hostTests (OS-scoped tests): a host leg builds and tests only its packages, Linux never does, and the nightly runs everything', () => {
   const gates = read(join(ACTIONS, 'app-gates', 'action.yml'));
   assert.match(gates, /if \[ "\$RUNNER_OS" != Linux \] && \[ "\$TESTS_ONLY" != true \]; then\n\s+if \[ -n "\$HOST_PACKAGES" \]/, 'only a host leg that is not a rerun of failed tests is scoped');
   assert.match(gates, /for pkg in \$HOST_PACKAGES; do scope\+=\(-p "\$pkg"\); done; exclude=\(\); hostexclude=\(\)/, '--exclude only goes with --workspace');
-  const ci = read(join(WORKFLOWS, 'ci.yml'));
+  const ci = workflowText('ci.yml');
   assert.match(ci, /host-packages: \$\{\{ matrix\.host_packages \}\}/, 'ci.yml hands the packages to app-gates');
   assert.match(ci, /host-filter: \$\{\{ matrix\.host_filter \}\}/, 'ci.yml hands the filterset to app-gates');
   assert.match(ci, /TEST_PACKAGES: \$\{\{ matrix\.test_packages \}\}/, 'the crate leg reads its packages from the plan');
   assert.equal((ci.match(/TEST_FILTER: \$\{\{ matrix\.test_filter \}\}/g) ?? []).length, 2, 'the crate and paddock-dev legs read their filterset from the plan');
   assert.match(ci, /PLAN_FULL_OS: /, 'the plan knows when a run is a full every-OS run');
-  assert.match(read(join(WORKFLOWS, 'nightly.yml')), /os_full: true/, 'the nightly asks for every package on every OS');
-  assert.doesNotMatch(read(join(WORKFLOWS, 'ci.yml')), /tools-macos/, 'the VM tooling job is gone');
+  assert.match(workflowText('nightly.yml'), /os_full: true/, 'the nightly asks for every package on every OS');
+  assert.doesNotMatch(workflowText('ci.yml'), /tools-macos/, 'the VM tooling job is gone');
 });
 
 test('app-gates reports every failed check: the steps after a failed check still run', () => {
@@ -1160,11 +1159,11 @@ test('a kit app lists the OS legs its old workflow had, keeps its build folder o
       assert.match(read(join(PADDOCK, 'apps', app, '.gitignore')), /^\.cargo\/ci\.toml$/m, `${app}: the job's ci.toml is never committed`);
     }
     assert.match(read(join(PADDOCK, 'apps', app, 'app', 'angular.json')), /"cache": \{ "enabled": true, "environment": "all" \}/, `${app}: Angular keeps its cache in CI`);
-    assert.equal(existsSync(join(WORKFLOWS, `${app}.yml`)), false, `${app}: no copy of the gates beside ci.yml`);
+    assert.equal(existsSync(workflowPath(`${app}.yml`)), false, `${app}: no copy of the gates beside ci.yml`);
     for (const copy of ['scripts/release', 'scripts/ci/macos-verify-bundle.sh', 'scripts/commit-lint.mjs', 'scripts/export-diagrams.sh', 'scripts/check-index.mjs']) {
       assert.equal(existsSync(join(PADDOCK, 'apps', app, copy)), false, `${app}: ${copy} is the kit's (rule 42/43)`);
     }
-    const wf = read(join(WORKFLOWS, `${app}-release.yml`));
+    const wf = workflowText(`${app}-release.yml`);
     // A release never publishes past red or skipped gates on a tag; the installers of a push or a dispatch wait on nothing that can be skipped
     // (Gitea 28.2 skips a job whose need was skipped, whatever its `if`).
     assert.match(wf, new RegExp(`\\n  release:\\n(?:.*\\n)*?    needs: \\[plan, gates\\]\\n    if: \\$\\{\\{ needs\\.plan\\.outputs\\.run == 'true' && startsWith\\(github\\.ref, 'refs/tags/${app}-v'\\) && needs\\.gates\\.result == 'success' \\}\\}`), `${app}: the release job needs green gates on a tag`);
@@ -1201,7 +1200,7 @@ test("Spotter's real-browser tests use the image's Chrome for Testing on Linux: 
   assert.deepEqual(contract.testBrowser, { envPrefix: 'SPOTTER', catalogue: 'apps/spotter/crates/spotter-render/src/chromium-manifest.toml', noSandboxOnLinux: true }, 'the leg installs Spotter\'s pin on the hosts and points SPOTTER_TEST_BROWSER at it');
   assert.ok(existsSync(join(PADDOCK, contract.testBrowser.catalogue)));
   assert.equal(contract.display, true, 'the renderer\'s window is a real off-screen one: a virtual display on Linux');
-  const ci = read(join(WORKFLOWS, 'ci.yml'));
+  const ci = workflowText('ci.yml');
   assert.match(ci, /echo "\$\{PREFIX\}_TEST_BROWSER=\$CHROMIUM_TEST_PATH"/, 'the tests launch the pinned build');
   assert.match(ci, /echo "\$\{PREFIX\}_REQUIRE_TEST_BROWSER=1"/, 'a missing browser fails the run');
   assert.match(ci, /kit\.sh isolation path browser "\$APP"/, 'a kept host folder of the app and the job slot (two jobs may run on a host at once)');
@@ -1232,7 +1231,7 @@ test('the real-browser tests of the crates and of Debrief take turns under nexte
 });
 
 test("a kit app's end-to-end legs and failure report: ci.yml forwards the shard, the webkit input and uploads the report from the stable workspace", () => {
-  const ci = read(join(WORKFLOWS, 'ci.yml'));
+  const ci = workflowText('ci.yml');
   assert.match(ci, /e2e-checks: \$\{\{ matrix\.e2e_checks \}\}\n\s+e2e-shard: \$\{\{ matrix\.e2e_shard \}\}/);
   const step = /- uses: actions\/upload-artifact@\S+ # v3\n\s+if: failure\(\) && matrix\.e2e_artifacts != ''\n[\s\S]*?\n\n/.exec(ci)?.[0] ?? '';
   assert.match(step, /path: \$\{\{ env\.PADDOCK_WORKSPACE \|\| github\.workspace \}\}\/\$\{\{ matrix\.e2e_artifacts \}\}/, 'under the stable workspace');
@@ -1243,12 +1242,12 @@ test("a kit app's end-to-end legs and failure report: ci.yml forwards the shard,
 });
 
 test('a manual ci.yml run can ask for WebKit (workflow_dispatch input), compared as a boolean or a string, and the release dispatch asks for it', () => {
-  const ci = read(join(WORKFLOWS, 'ci.yml'));
+  const ci = workflowText('ci.yml');
   const dispatch = /^  workflow_dispatch:\n((?:    .*\n|\n)+)/m.exec(ci)?.[1] ?? '';
   assert.match(dispatch, /^      webkit:\n(?:        .*\n)*?        type: boolean\n        default: false/m, 'workflow_dispatch has a webkit input');
   assert.match(ci, /PLAN_WEBKIT: \$\{\{ \(inputs\.webkit == true \|\| inputs\.webkit == 'true'\) && '1' \|\| '' \}\}/, 'the plan job turns the input into the WebKit leg');
   assert.match(ci, /name: app-\$\{\{ matrix\.app \}\}\$\{\{ matrix\.e2e_leg != '' && format\('-\{0\}', matrix\.e2e_leg\) \|\| '' \}\}/, 'parallel legs of one app never share an Angular cache');
-  const gates = /^  gates:\n(?:    .*\n|\n)+/m.exec(read(join(WORKFLOWS, 'spotter-release.yml')))?.[0] ?? '';
+  const gates = /^  gates:\n(?:    .*\n|\n)+/m.exec(workflowText('spotter-release.yml'))?.[0] ?? '';
   assert.match(gates, /webkit: \$\{\{ github\.event_name == 'workflow_dispatch' \}\}/, "the pre-tag dispatch covers WebKit like the old bundles run");
 });
 
@@ -1291,7 +1290,7 @@ test('the node-caches action keys npm by OS, Node and the lockfile and Angular b
 });
 
 // Debrief's workflow (.gitea/workflows/debrief.yml) on the same speed rules as ci.yml (Paddock lessons, "Test and build speed").
-const debriefYml = () => read(join(WORKFLOWS, 'debrief.yml'));
+const debriefYml = () => workflowText('debrief.yml');
 /** A job's block (its lines indented under `  <name>:`) in a workflow. */
 const jobBlock = (text, name) => text.match(new RegExp(`^  ${name}:\\n((?:    .*\\n|\\n)+)`, 'm'))?.[1] ?? '';
 /** The non-comment lines of a workflow (a comment may name what is not done). */
@@ -1433,7 +1432,7 @@ test('Debrief\'s heavy DuckDB store suites run at most two at a time, in the ove
 });
 
 test('ci.yml runs the icon tests and `install.mjs --check` in an icons job that the plan feeds', () => {
-  const ci = read(join(WORKFLOWS, 'ci.yml'));
+  const ci = workflowText('ci.yml');
   assert.match(ci, /icons: \$\{\{ steps\.plan\.outputs\.icons \}\}/, 'the plan job exports the icons output');
   const at = ci.indexOf('\n  icons:\n');
   assert.ok(at > 0, 'ci.yml has an icons job');
@@ -1450,7 +1449,7 @@ test('ci.yml runs the icon tests and `install.mjs --check` in an icons job that 
 // `CARGO_BUILD_JOBS=`). A digit directly before `>>` must be written `(echo NAME=8)>>file`.
 test('no cmd echo puts a digit directly before a redirect in a workflow or an action', () => {
   const files = [
-    ...readdirSync(WORKFLOWS).filter((f) => /\.ya?ml$/.test(f)).map((f) => join(WORKFLOWS, f)),
+    ...workflowFiles().filter((f) => /\.ya?ml$/.test(f)).map((f) => workflowPath(f)),
     ...readdirSync(ACTIONS, { withFileTypes: true })
       .filter((d) => d.isDirectory() && existsSync(join(ACTIONS, d.name, 'action.yml')))
       .map((d) => join(ACTIONS, d.name, 'action.yml')),
@@ -1465,20 +1464,20 @@ test('no cmd echo puts a digit directly before a redirect in a workflow or an ac
 });
 
 test("app-release runs an app's own bundle check on Linux and macOS, after the installers and before the seal check, with the bundle folder", () => {
-  const wf = read(join(WORKFLOWS, 'app-release.yml'));
+  const wf = workflowText('app-release.yml');
   const at = wf.indexOf("- name: The app's own bundle check");
   assert.ok(at > wf.indexOf('actions/tauri-bundle') && at < wf.indexOf('actions/macos-verify'), 'between the build and the seal check');
   const step = wf.slice(at, wf.indexOf('\n\n', at));
   assert.match(step, /if: inputs\.bundle-check != '' && runner\.os != 'Windows'/, 'Windows has no run paths to check');
   assert.match(step, /run: bash "\$CHECK" "\$PADDOCK_BUILD_FOLDER\/dist\/bundle"/, 'the folder the installers were built in');
-  const dyno = read(join(WORKFLOWS, 'dyno-release.yml'));
+  const dyno = workflowText('dyno-release.yml');
   const script = /bundle-check: (\S+)/.exec(dyno)?.[1];
   assert.ok(script && existsSync(join(PADDOCK, script)), "Dyno's check script exists");
 });
 
 test('every host job that keeps a build folder caps it at the end, with the shared prune action, in its own folder only', () => {
-  const ci = read(join(WORKFLOWS, 'ci.yml'));
-  const rel = read(join(WORKFLOWS, 'app-release.yml'));
+  const ci = workflowText('ci.yml');
+  const rel = workflowText('app-release.yml');
   assert.match(ci, /- uses: \.\/\.gitea\/actions\/prune-build-folder\n\s+if: always\(\) && runner\.os != 'Linux'\n\n/, "ci.yml's app job prunes on the hosts, even after a failure");
   assert.ok(ci.indexOf('actions/prune-build-folder') > ci.indexOf('actions/host-cleanup'), 'after the clean-up of the job');
   assert.match(rel, /- uses: \.\/\.gitea\/actions\/prune-build-folder\n\s+if: always\(\) && runner\.os != 'Linux'\n\s+with:\n\s+drop-bundles: "true"/, "app-release's bundle job prunes on the hosts after the upload");
@@ -1514,8 +1513,8 @@ function runtimeTempPrefixes(app) {
 }
 
 test("a kit app's host-cleanup temp sweep is <app>-it- and is a prefix of no temp folder its product creates at run time", () => {
-  assert.match(read(join(WORKFLOWS, 'ci.yml')), /uses: \.\/\.gitea\/actions\/host-cleanup\n(?:.*\n)*?\s+temp-prefix: \$\{\{ matrix\.app \}\}-it-\n/, 'ci.yml sweeps <app>-it-');
-  assert.match(read(join(WORKFLOWS, 'app-release.yml')), /actions\/host-cleanup\n(?:.*\n)*?\s+temp-prefix: \$\{\{ inputs\.app-id \}\}-it-\n/, 'app-release.yml sweeps <app>-it-');
+  assert.match(workflowText('ci.yml'), /uses: \.\/\.gitea\/actions\/host-cleanup\n(?:.*\n)*?\s+temp-prefix: \$\{\{ matrix\.app \}\}-it-\n/, 'ci.yml sweeps <app>-it-');
+  assert.match(workflowText('app-release.yml'), /actions\/host-cleanup\n(?:.*\n)*?\s+temp-prefix: \$\{\{ inputs\.app-id \}\}-it-\n/, 'app-release.yml sweeps <app>-it-');
   const dyno = runtimeTempPrefixes('dyno').map(([, p]) => p);
   assert.ok(dyno.includes('dyno-bench-'), `the scan finds Dyno's own scratch folders (${dyno})`);
   for (const app of KIT_APPS) {
@@ -1695,8 +1694,8 @@ test('job-tmpdir: sweep removes the socket folders of jobs whose folder is gone,
 /** The jobs of every workflow with the OS they run on: 'container' (a Linux container), 'host' (macOS or Windows) or 'none'. */
 function jobsWithHost() {
   const out = [];
-  for (const file of readdirSync(WORKFLOWS).filter((f) => f.endsWith('.yml'))) {
-    for (const job of parseJobs(read(join(WORKFLOWS, file)))) {
+  for (const file of workflowFiles().filter((f) => f.endsWith('.yml'))) {
+    for (const job of parseJobs(workflowText(file))) {
       const runsOn = /^ {4}runs-on: (.+)$/m.exec(job.text)?.[1] ?? '';
       const kind = !runsOn ? 'none' : /macos|windows|matrix\.os|inputs\./.test(runsOn) ? 'host' : 'container';
       out.push({ file, job, kind, where: `${file}:${job.id}` });
@@ -1989,7 +1988,7 @@ test('the CI scripts and macOS run blocks parse under macOS\' bash 3.2: neither 
 });
 
 test('every release workflow whose app imports @decryp7/paddock-ui builds the shared UI (prepare) before the app build', () => {
-  const callers = readdirSync(WORKFLOWS).filter((f) => f !== 'app-release.yml' && /-release\.yml$/.test(f) && read(join(WORKFLOWS, f)).includes('./.gitea/workflows/app-release.yml'));
+  const callers = workflowFiles().filter((f) => f !== 'app-release.yml' && /-release\.yml$/.test(f) && workflowText(f).includes('./.gitea/workflows/app-release.yml'));
   assert.ok(callers.includes('dyno-release.yml'), 'the callers of app-release.yml are found');
   const importsShared = (dir) => {
     // The app build's own imports: the specs and the test setup are not built into the installer (Pitcrew's specs use the shared test kit only).
@@ -2000,7 +1999,7 @@ test('every release workflow whose app imports @decryp7/paddock-ui builds the sh
     return false;
   };
   for (const f of callers) {
-    const text = read(join(WORKFLOWS, f));
+    const text = workflowText(f);
     const appDir = /^\s*app-dir:\s*(apps\/\S+)/m.exec(text)?.[1];
     assert.ok(appDir, `${f} names its app-dir`);
     if (!importsShared(join(PADDOCK, appDir, 'src'))) continue;
@@ -2202,7 +2201,6 @@ test('no nextest profile says a CI job has its host to itself: the job\'s share 
   }
 });
 
-const workflowFiles = () => readdirSync(WORKFLOWS).filter((x) => /\.ya?ml$/.test(x));
 const uncommented = (text) => text.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
 
 test('CI never pins the build jobs: only build-jobs sets CARGO_BUILD_JOBS, and no cargo command passes a fixed -j', () => {
@@ -2218,7 +2216,7 @@ test('CI never pins the build jobs: only build-jobs sets CARGO_BUILD_JOBS, and n
   walk('conformance/ci');
   // The repo scripts the workflows run.
   for (const f of workflowFiles()) {
-    for (const m of read(join(WORKFLOWS, f)).matchAll(/\b(scripts\/[\w./-]+\.(?:sh|mjs))\b/g)) if (existsSync(join(PADDOCK, m[1]))) files.push(m[1]);
+    for (const m of workflowText(f).matchAll(/\b(scripts\/[\w./-]+\.(?:sh|mjs))\b/g)) if (existsSync(join(PADDOCK, m[1]))) files.push(m[1]);
   }
   const offenders = [];
   for (const f of [...new Set(files)]) {
@@ -2242,7 +2240,7 @@ test('CI never pins the build jobs: only build-jobs sets CARGO_BUILD_JOBS, and n
 test('a job that builds several mutants at once splits its build jobs between them first', () => {
   let seen = 0;
   for (const file of workflowFiles()) {
-    for (const job of parseJobs(read(join(WORKFLOWS, file)))) {
+    for (const job of parseJobs(workflowText(file))) {
       const t = uncommented(job.text);
       const m = /cargo mutants[^\n]*--jobs\s+"?(\$\w+|\d+)"?/.exec(t);
       if (!m) continue;
@@ -2262,7 +2260,7 @@ test('every job that runs cargo sets its build jobs (build-jobs or setup-rust); 
   const builds = /\bcargo\s+(build|test|nextest|clippy|check|llvm-cov|mutants|fuzz|install|rustc|run|bench|doc|tauri)\b|\btauri build\b|actions\/(app-gates|tauri-bundle)\b|\bcargo\s+"\$\{[^}]+\}"\s+(clippy|test)\b/;
   const missing = [];
   for (const file of workflowFiles()) {
-    for (const job of parseJobs(read(join(WORKFLOWS, file)))) {
+    for (const job of parseJobs(workflowText(file))) {
       const t = uncommented(job.text);
       // A caller of a reusable workflow: the called workflow's jobs are checked themselves.
       if (/^\s{4}uses: \.\//m.test(t)) continue;
@@ -2288,8 +2286,8 @@ test('every workflow step that runs the ui Playwright config provides every port
   const required = [...config.matchAll(/e2ePort\('([A-Z_]+)'/g)].map((m) => m[1]);
   assert.ok(required.length >= 3, 'ui/playwright.config.ts names its port variables with e2ePort');
   let checked = 0;
-  for (const f of readdirSync(WORKFLOWS).filter((n) => n.endsWith('.yml'))) {
-    const text = read(join(WORKFLOWS, f));
+  for (const f of workflowFiles().filter((n) => n.endsWith('.yml'))) {
+    const text = workflowText(f);
     const uiShard = /^\s*working-directory: ui\s*$/m;
     for (const step of text.split(/\n\s*- (?=name:|uses:|run:)/)) {
       if (!/playwright test/.test(step) || !uiShard.test(step)) continue;
@@ -2303,7 +2301,7 @@ test('every workflow step that runs the ui Playwright config provides every port
 });
 
 test('the plan job guard keeps CI green under the documented C100 rollback (--warn) and fails when the line is gone', () => {
-  const ci = read(join(WORKFLOWS, 'ci.yml'));
+  const ci = workflowText('ci.yml');
   const at = ci.indexOf('- name: C100 stays wired');
   assert.ok(at > 0, 'the guard step exists');
   const block = /run: \|\n((?: {10}.*\n|\n)+)/.exec(ci.slice(at))[1].replace(/^ {10}/gm, '');
@@ -2325,7 +2323,7 @@ test('the plan job guard keeps CI green under the documented C100 rollback (--wa
 // libFuzzer writes the inputs it finds to the FIRST corpus folder; the cached folder must come first or the corpus never grows.
 // Two fuzz dirs with the same lock hash (or none) must not restore each other's caches: both keys name the fuzz dir.
 test('app-fuzz.yml writes new inputs to the cached corpus and keys its caches by fuzz dir', () => {
-  const text = read(join(WORKFLOWS, 'app-fuzz.yml'));
+  const text = workflowText('app-fuzz.yml');
   const run = text.match(/cargo fuzz run "\$target" (\S+) (\S+) --/);
   assert.ok(run, 'the fuzz run step is found');
   assert.equal(run[1], '"corpus/$target"', 'the first corpus folder is the cached one (libFuzzer writes new inputs there)');
@@ -2335,21 +2333,19 @@ test('app-fuzz.yml writes new inputs to the cached corpus and keys its caches by
 });
 
 test('no workflow passes every secret on (`secrets: inherit`): a called workflow gets the secrets it names, nothing else', () => {
-  const dir = join(PADDOCK, '.gitea', 'workflows');
-  const files = readdirSync(dir).filter((f) => f.endsWith('.yml'));
+  const files = workflowFiles().filter((f) => f.endsWith('.yml'));
   assert.ok(files.length > 10, `found the workflows (${files.length})`);
   for (const f of files) {
-    const lines = readFileSync(join(dir, f), 'utf8').split('\n').filter((l) => !l.trim().startsWith('#'));
+    const lines = workflowText(f).split('\n').filter((l) => !l.trim().startsWith('#'));
     assert.ok(!lines.some((l) => /^\s*secrets:\s*inherit\b/.test(l)), `${f}: \`secrets: inherit\` hands the signing keys to every called job; name each secret`);
   }
 });
 
 test('a release or installer job never runs a downloaded ./dev: PADDOCK_DEV_DOWNLOAD is "0" in each, and in ci.yml on a tag', () => {
-  const dir = join(PADDOCK, '.gitea', 'workflows');
-  const jobsOf = (file) => parseJobs(readFileSync(join(dir, file), 'utf8'));
+  const jobsOf = (file) => parseJobs(workflowText(file));
   // Every job of a *-release.yml that takes a host slot (builds installers), plus the named ones.
   const named = { 'app-release.yml': ['bundle', 'release'], 'shell-demo-release.yml': ['bundle'], 'workbench-demo-release.yml': ['bundle'], 'debrief.yml': ['bundle'] };
-  for (const file of readdirSync(dir).filter((f) => f.endsWith('-release.yml'))) {
+  for (const file of workflowFiles().filter((f) => f.endsWith('-release.yml'))) {
     for (const job of jobsOf(file)) if (job.text.includes('actions/job-isolation')) (named[file] ??= []).push(job.id);
   }
   let checked = 0;
@@ -2371,7 +2367,7 @@ test('a release or installer job never runs a downloaded ./dev: PADDOCK_DEV_DOWN
 });
 
 test('dev-tool.yml publishes only from main, in every job (ADR 0022: the store is written only by main)', () => {
-  const jobs = parseJobs(readFileSync(join(PADDOCK, '.gitea', 'workflows', 'dev-tool.yml'), 'utf8'));
+  const jobs = parseJobs(workflowText('dev-tool.yml'));
   assert.ok(jobs.length >= 2, 'the publish jobs');
   for (const job of jobs) assert.match(job.text, /\n    if: \$\{\{ github\.ref == 'refs\/heads\/main'/, `dev-tool.yml:${job.id}: runs only on refs/heads/main`);
 });
@@ -2405,9 +2401,8 @@ function tagRuleProblems(file, text, isAction = false) {
 }
 
 function workflowTexts() {
-  const root = join(PADDOCK, '.gitea');
   const out = new Map();
-  for (const f of readdirSync(join(root, 'workflows')).filter((n) => n.endsWith('.yml') && n !== 'dev-tool.yml')) out.set(join('workflows', f), readFileSync(join(root, 'workflows', f), 'utf8'));
+  for (const f of workflowFiles().filter((n) => n.endsWith('.yml') && n !== 'dev-tool.yml')) out.set(join('workflows', f), workflowText(f));
   return out;
 }
 
@@ -2451,8 +2446,8 @@ import { bashBeforeGitBash } from '../src/util/windows-bash.mjs';
 
 test('no Windows host job runs a bash step before Git bash is on PATH (there bash is WSL: run 7880)', () => {
   const bad = [];
-  for (const f of readdirSync(WORKFLOWS).filter((n) => n.endsWith('.yml'))) {
-    for (const v of bashBeforeGitBash(read(join(WORKFLOWS, f)))) bad.push(`${f}: job ${v.job}, step "${v.step}" (${v.why})`);
+  for (const f of workflowFiles().filter((n) => n.endsWith('.yml'))) {
+    for (const v of bashBeforeGitBash(workflowText(f))) bad.push(`${f}: job ${v.job}, step "${v.step}" (${v.why})`);
   }
   assert.deepEqual(bad, []);
 });
@@ -2481,7 +2476,7 @@ test('the dev-disk matcher knows every spelling of the tool', () => {
 
 test('no workflow or composite action step runs ./dev disk scan or ./dev disk report (a runner has no dev-targets folder)', () => {
   const found = [];
-  for (const f of readdirSync(WORKFLOWS).filter((x) => /\.ya?ml$/.test(x))) {
+  for (const f of workflowFiles().filter((x) => /\.ya?ml$/.test(x))) {
     for (const [id, j] of Object.entries(loadWorkflow(f).jobs ?? {})) {
       for (const s of stepsOf(j)) if (DEV_DISK.test(String(s.run ?? ''))) found.push(`${f}: ${id}`);
     }
@@ -2506,7 +2501,7 @@ test('a workflow that runs runner-wait runs it in a first job that every macOS o
     return /macos|windows/i.test(JSON.stringify([j['runs-on'] ?? '', j.strategy?.matrix ?? null]));
   };
   const users = [];
-  for (const f of readdirSync(WORKFLOWS).filter((x) => /\.ya?ml$/.test(x))) {
+  for (const f of workflowFiles().filter((x) => /\.ya?ml$/.test(x))) {
     const jobs = loadWorkflow(f).jobs ?? {};
     const waiters = Object.entries(jobs).filter(([, j]) => stepsOf(j).some((s) => s.uses === './.gitea/actions/runner-wait')).map(([id]) => id);
     if (!waiters.length) continue;
@@ -2610,7 +2605,7 @@ const reports = (st, id) => (st.uses === './.gitea/actions/cache-report' || /^Ca
 /** Every list of steps of the repository's workflows, templates and actions: [file, steps]. */
 function stepLists() {
   const out = [];
-  const dirs = [[WORKFLOWS, 'jobs'], [join(PADDOCK, '.gitea', 'workflow-templates'), 'jobs']];
+  const dirs = [[workflowPath(''), 'jobs'], [join(PADDOCK, '.gitea', 'workflow-templates'), 'jobs']];
   for (const [dir] of dirs) {
     for (const f of readdirSync(dir).filter((x) => /\.ya?ml$/.test(x))) {
       const doc = parseYaml(read(join(dir, f)));

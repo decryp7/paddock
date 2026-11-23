@@ -12,7 +12,7 @@ import { isRehearsal, isTagRun } from '../src/util/is-tag-run.mjs';
 import { rehearse, requireRehearsal } from '../ci/rehearse-release.mjs';
 import { runChecks, summary } from '../ci/request-tag.mjs';
 import { makeApp } from './helpers.mjs';
-import { expr, job, loadAction, loadWorkflow, needsOf, stepsOf } from './lib/workflow.mjs';
+import { expr, job, loadAction, loadWorkflow, needsOf, stepsOf, workflowText } from './lib/workflow.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CI = join(HERE, '..', 'ci');
@@ -188,7 +188,7 @@ test('tag checks in dry-run mode: the same checks; only "tag does not exist" is 
 const APPS = ['dyno', 'pitcrew', 'pitwall', 'spotter'];
 const rehearsal = loadWorkflow('tag-rehearsal.yml');
 const appRelease = loadWorkflow('app-release.yml');
-const text = (f) => readFileSync(join(HERE, '..', '..', '.gitea', 'workflows', f), 'utf8');
+const text = workflowText;
 
 test('tag-rehearsal.yml: a schedule and a dispatch, main only, and it publishes nothing: no secret, no token, no push, no release step', () => {
   const on = rehearsal.on ?? rehearsal.true;

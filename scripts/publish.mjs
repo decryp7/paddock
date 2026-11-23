@@ -174,11 +174,12 @@ export function tagProblems(env, version) {
 }
 
 /**
+ * `commands` are the command lines ci.yml runs, as the CI model lists them (`ciCommands`), never the workflow's text (ER-42, C158).
  * Workspace crates that ci.yml does not clippy and test (nextest) with every feature: neither a `-p <crate>` command nor a
  * `--workspace` one that leaves it out with `--exclude`.
  */
-export function crateStepsMissing(ciYaml, names) {
-  const lines = (re) => ciYaml.split('\n').filter((l) => re.test(l));
+export function crateStepsMissing(commands, names) {
+  const lines = (re) => commands.filter((l) => re.test(l));
   const clippy = lines(/cargo clippy .*--all-features/);
   const nextest = lines(/cargo (?:llvm-cov )?nextest(?: run)? .*--all-features/);
   const covers = (line, n) => {
@@ -187,6 +188,13 @@ export function crateStepsMissing(ciYaml, names) {
     return /\s--workspace\b/.test(line) && !new RegExp(`\\s--exclude(?:\\s+|=)${esc}(?=\\s|$)`).test(line);
   };
   return names.filter((n) => !clippy.some((l) => covers(l, n)) || !nextest.some((l) => covers(l, n)));
+}
+
+/** The command lines ci.yml runs, from the CI model (`./dev gates model --json`: the one reader of a workflow, C158). */
+export function ciCommands(root) {
+  const out = execFileSync(join(root, 'dev'), ['gates', 'model', '--json', '--root', root], { cwd: root, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
+  const model = JSON.parse(out);
+  return model.lines.filter((l) => l.root === '.gitea/workflows/ci.yml').map((l) => l.text);
 }
 
 /** What a run does with each crate and npm package. `published` maps a name to the versions the registry has, or is null (not asked). */
@@ -390,12 +398,12 @@ async function main() {
   const crateList = publishOrder(workspaceCrates(metadata));
   const packages = npmPackages(join(ui, 'projects'), join(ui, 'dist'));
   const lead = packages.find((p) => p.name === '@decryp7/paddock-ui');
-  const ciYaml = readFileSync(join(root, '.gitea/workflows/ci.yml'), 'utf8');
+  const ciLines = ciCommands(root);
   const problems = [
     ...crateProblems(crateList),
     ...lockstepProblems(packages),
     ...shellVersionProblems(crateList, packages),
-    ...crateStepsMissing(ciYaml, crateList.map((c) => c.name)).map((n) => `${n} is not linted and tested with every feature in .gitea/workflows/ci.yml (job crate)`),
+    ...crateStepsMissing(ciLines, crateList.map((c) => c.name)).map((n) => `${n} is not linted and tested with every feature in .gitea/workflows/ci.yml (job crate)`),
     ...(opts.publish ? tagProblems(env, lead?.version) : []),
   ];
   if (problems.length) throw new Error(`refusing to continue:\n  ${problems.join('\n  ')}`);

@@ -8,7 +8,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { test } from 'node:test';
 import { PADDOCK } from './helpers.mjs';
-import { conjuncts, expr, job as workflowJob, loadWorkflow, parseYaml, stepsUsing } from './lib/workflow.mjs';
+import { conjuncts, expr, job as workflowJob, loadWorkflow, parseYaml, stepsUsing, workflowText } from './lib/workflow.mjs';
 
 // ---- the scope declaration ----------------------------------------------------------------------------------------------------
 // `./dev ci verdict` trusts the line `plan scope: {json}` (run_scope::SCOPE_LINE): what the run did (`ran`) against what a push to main
@@ -54,7 +54,7 @@ const actionText = () => readFileSync(join(PADDOCK, '.gitea', ACTION), 'utf8');
 /** Release workflows whose plan job is the shared plan action (it declares the scope; the workflow passes `full` and its own file). */
 const ACTION_WORKFLOWS = { 'dyno-release.yml': 'dyno', 'pitcrew-release.yml': 'pitcrew', 'pitwall-release.yml': 'pitwall', 'spotter-release.yml': 'spotter' };
 
-const text = (w) => readFileSync(join(PADDOCK, '.gitea', 'workflows', w), 'utf8');
+const text = workflowText;
 
 const RUN_OUTPUT = 'echo "run=$run" >> "$GITHUB_OUTPUT"';
 const OLD_LINE = /plan verdict:|complete=(?:true|false|\$complete)/;

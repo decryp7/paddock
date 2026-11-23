@@ -7,9 +7,9 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { PADDOCK } from './helpers.mjs';
 import { codeLines, jobText } from './ci-verdict-reader.test.mjs';
-import { loadWorkflow } from './lib/workflow.mjs';
+import { loadWorkflow, workflowText } from './lib/workflow.mjs';
 
-const text = (w) => readFileSync(join(PADDOCK, '.gitea', 'workflows', w), 'utf8');
+const text = workflowText;
 const PUSH_TO_MAIN = "if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}";
 
 /** Why a workflow's plan job does not ask `./dev ci reuse` for a push to main only, or null. */

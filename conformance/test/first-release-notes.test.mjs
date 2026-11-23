@@ -8,9 +8,10 @@ import { dirname, join, resolve } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { parseSteps } from '../src/util/workflows.mjs';
+import { workflowText } from './lib/workflow.mjs';
 
 const PADDOCK = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
-const steps = parseSteps(readFileSync(join(PADDOCK, '.gitea/workflows/app-release.yml'), 'utf8'));
+const steps = parseSteps(workflowText('app-release.yml'));
 const notesStep = steps.find((s) => s.name === 'Changelog of this release');
 const failFastStep = steps.find((s) => s.name === "The first release's CHANGELOG section is ready");
 
@@ -146,7 +147,7 @@ for (const [what, text, message] of [
 test('the workflow passes notes-from-changelog to both steps, and Dyno switches it on in both of its release jobs', () => {
   assert.match(notesStep.text, /NOTES_FROM_CHANGELOG: \$\{\{ inputs\.notes-from-changelog \}\}/);
   assert.match(failFastStep.text, /NOTES_FROM_CHANGELOG: \$\{\{ inputs\.notes-from-changelog \}\}/);
-  const dyno = readFileSync(join(PADDOCK, '.gitea/workflows/dyno-release.yml'), 'utf8');
+  const dyno = workflowText('dyno-release.yml');
   assert.equal((dyno.match(/^ {6}notes-from-changelog: true$/gm) ?? []).length, 2);
   assert.equal((dyno.match(/first-release-changelog: apps\/dyno\/CHANGELOG\.md/g) ?? []).length, 2);
 });

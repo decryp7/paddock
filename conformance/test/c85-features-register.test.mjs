@@ -8,6 +8,7 @@ import { judge, owedSummary, parseDate, rustProduction, sources, testExists, unt
 import C85 from '../src/checks/C85-features-register.mjs';
 import { main } from '../src/cli.mjs';
 import { findingsOf, makeApp } from './helpers.mjs';
+import { workflowText } from './lib/workflow.mjs';
 
 const now = new Date('2026-11-12T12:00:00Z');
 const NAV = `export const NAV = [\n  { id: 'models', label: 'Models' },\n  { id: 'chat', label: 'Chat' },\n];\n`;
@@ -385,7 +386,7 @@ test('na = ["tauri"] never hides the real-engine test: a warning in a branch run
 });
 
 test('pitwall-release.yml runs C85 without swallowing its exit code: only the owed warnings are report-only (ADR 0089)', () => {
-  const yml = readFileSync(new URL('../../.gitea/workflows/pitwall-release.yml', import.meta.url), 'utf8');
+  const yml = workflowText('pitwall-release.yml');
   const step = yml.split('\n').filter((l) => /paddock-conformance\.mjs .*--only C85/.test(l));
   assert.equal(step.length, 1, 'one C85 line');
   assert.doesNotMatch(step[0], /\|\||;\s*true|\|\s*true/, 'a failure of C85 (not measured, broken, usage) fails the plan');

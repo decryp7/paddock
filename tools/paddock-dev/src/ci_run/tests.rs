@@ -393,7 +393,7 @@ fn the_contracts_run_exactly_the_commands_in_the_golden() {
         assert!(rows > 0, "job {job} has no row in the model: the comparison would prove nothing");
     }
     // train-gates is not modelled: its executor call is read through the workflow accessor, not out of the YAML text (ER-42).
-    let ci = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.gitea/workflows/ci.yml")).unwrap();
+    let ci = crate::gates::ci::workflow_text(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."), "ci.yml").unwrap();
     let wf = crate::check::util::workflows::read(".gitea/workflows/ci.yml", &ci.replace("\r\n", "\n"));
     let train = wf
         .jobs
@@ -526,7 +526,7 @@ fn the_conformance_list_has_one_copy_the_contract() {
         args.contains(&"--strict".to_string()) && args.iter().any(|a| a.starts_with("C06,")),
         "{args:?}"
     );
-    let ci = std::fs::read_to_string(root.join(".gitea/workflows/ci.yml")).unwrap();
+    let ci = crate::gates::ci::workflow_text(&root, "ci.yml").unwrap();
     assert!(!ci.contains("--only C06"), "ci.yml holds no copy of the list");
     assert!(!ci.contains("PADDOCK_CONFORMANCE_ARGS:"), "ci.yml sets no copy of the list");
 }

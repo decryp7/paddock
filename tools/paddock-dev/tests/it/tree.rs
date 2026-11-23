@@ -748,9 +748,7 @@ fn files_mode_an_uncommitted_change_is_narrowed_a_committed_one_marks_everything
 
 #[test]
 fn ci_yml_wires_the_plan_job_outputs_and_the_commits_job_asks_for_its_range() {
-    let ci = std::fs::read_to_string(root().join(".gitea/workflows/ci.yml"))
-        .unwrap()
-        .replace("\r\n", "\n");
+    let ci = paddock_dev::gates::ci::workflow_text(&root(), "ci.yml").unwrap();
     let wf = paddock_dev::plan_gitea::workflow_jobs(&ci).unwrap();
     let plan_job = &wf.jobs.iter().find(|(k, _)| k == "plan").unwrap().1;
     let declared = regex::Regex::new(r"(?m)^ {6}([a-z0-9_]+): \$\{\{ steps\.plan\.outputs\.([a-z0-9_]+) \}\}").unwrap();
@@ -851,9 +849,7 @@ fn since_outputs() -> Vec<String> {
 /// planner's job table (or a rerun of it plans everything), and every job but the plan asks `rerun_jobs` for itself.
 #[test]
 fn every_ci_yml_job_is_in_the_job_table_and_asks_rerun_jobs() {
-    let ci = std::fs::read_to_string(root().join(".gitea/workflows/ci.yml"))
-        .unwrap()
-        .replace("\r\n", "\n");
+    let ci = paddock_dev::gates::ci::workflow_text(&root(), "ci.yml").unwrap();
     let wf = paddock_dev::plan_gitea::workflow_jobs(&ci).unwrap();
     for (key, text) in &wf.jobs {
         assert!(
@@ -888,9 +884,7 @@ fn every_ci_yml_job_is_in_the_job_table_and_asks_rerun_jobs() {
 
 #[test]
 fn ci_yml_passes_every_field_of_a_matrix_leg_to_app_gates() {
-    let ci = std::fs::read_to_string(root().join(".gitea/workflows/ci.yml"))
-        .unwrap()
-        .replace("\r\n", "\n");
+    let ci = paddock_dev::gates::ci::workflow_text(&root(), "ci.yml").unwrap();
     let gates = std::fs::read_to_string(root().join(".gitea/actions/app-gates/action.yml"))
         .unwrap()
         .replace("\r\n", "\n");
@@ -929,9 +923,7 @@ fn ci_yml_passes_every_field_of_a_matrix_leg_to_app_gates() {
 #[test]
 fn debrief_yml_takes_a_rerun_of_its_failures() {
     use paddock_dev::plan_since::{APP_WORKFLOWS, TEST_STEPS, VITEST_STEPS, job_needs, name_templates};
-    let text = std::fs::read_to_string(root().join(".gitea/workflows/debrief.yml"))
-        .unwrap()
-        .replace("\r\n", "\n");
+    let text = paddock_dev::gates::ci::workflow_text(&root(), "debrief.yml").unwrap();
     let wf = paddock_dev::plan_gitea::workflow_jobs(&text).expect("debrief.yml splits into jobs (no YAML-anchor look-alikes)");
     let templates = name_templates(&text);
     let needs = job_needs(&text);
@@ -1014,16 +1006,13 @@ fn debrief_yml_takes_a_rerun_of_its_failures() {
 /// action, which runs the same command), and no green mark is written for a run that was skipped.
 #[test]
 fn every_scheduled_workflow_skips_while_a_train_is_in_ci_and_never_marks_a_skipped_run() {
-    let dir = root().join(".gitea/workflows");
     let mut scheduled = 0;
-    for e in std::fs::read_dir(&dir).unwrap() {
-        let path = e.unwrap().path();
-        let text = std::fs::read_to_string(&path).unwrap().replace("\r\n", "\n");
+    for name in paddock_dev::gates::ci::workflow_files(&root()) {
+        let text = paddock_dev::gates::ci::workflow_text(&root(), &name).unwrap();
         if !text.contains("\n  schedule:\n") {
             continue;
         }
         scheduled += 1;
-        let name = path.file_name().unwrap().to_string_lossy().to_string();
         assert!(
             text.contains(&format!(
                 "uses: ./.gitea/actions/schedule-skip\n        with:\n          workflow: {name}\n"

@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { workflowText } from '../../conformance/test/lib/workflow.mjs';
 import { calls, fakeDev, run, scratch, shim, systemFolder, TOOLS, write } from './helpers.mjs';
 
 /**
@@ -118,7 +119,7 @@ test('a CI job names its VMs with its own prefix, so its leftover check never se
   assert.equal(res.status, 0, res.out);
   assert.ok(calls(r.bin).some((l) => /^tart clone \S+ paddock-smoke-77-1-macos-/.test(l)));
   assert.equal(go(r, args(r), { PADDOCK_VM_PREFIX: '../x' }).status, 2);
-  const wf = readFileSync(join(TOOLS, '..', '.gitea', 'workflows', 'service-smoke.yml'), 'utf8');
+  const wf = workflowText('service-smoke.yml');
   assert.match(wf, /PADDOCK_VM_PREFIX: paddock-smoke-\$\{\{ github\.run_id \}\}-\$\{\{ github\.run_attempt \}\}-/);
   assert.match(wf, /grep "\^\$PADDOCK_VM_PREFIX"/, 'the leftover check looks only at this job\'s VMs');
   assert.doesNotMatch(wf, /grep '\^paddock-smoke-'/);

@@ -6,6 +6,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { describe, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { workflowText } from '../conformance/test/lib/workflow.mjs';
 import { APPS, appConfig, appVersion, cargoVersion, changelogSection, firstLaunch, iconProblems, releaseNotes, tagPrefix, tagProblems } from './demo-release.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -59,7 +60,7 @@ describe('the tag', () => {
     test(`of ${app.id} never matches the packages' v* tags or another demo's, and its workflow is on it only`, () => {
       assert.ok(!tagPrefix(app).startsWith('v'));
       for (const other of Object.values(APPS)) if (other !== app) assert.match(tagProblems(app, `${tagPrefix(other)}1.2.3`, '1.2.3')[0], /not a/);
-      const workflow = readFileSync(join(root, `.gitea/workflows/${app.id}-release.yml`), 'utf8');
+      const workflow = workflowText(`${app.id}-release.yml`);
       assert.match(workflow, new RegExp(`tags: \\["${app.id}-v\\*"\\]`));
       assert.match(workflow, new RegExp(`scripts/demo/bundle\\.sh ${app.id} `));
       assert.match(workflow, new RegExp(`scripts/demo/verify-macos\\.sh ${app.id}`));

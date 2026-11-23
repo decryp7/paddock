@@ -6,6 +6,7 @@ import { test } from 'node:test';
 import { commitLintMain, isRelandSubject, lint, revertsTargets } from '../src/commit-lint.mjs';
 import { runChecks } from '../src/runner.mjs';
 import { findingsOf, makeApp, messages } from './helpers.mjs';
+import { workflowText } from './lib/workflow.mjs';
 
 test('lint good: Conventional Commits, scope, breaking mark, merge commits', () => {
   for (const m of ['feat: add x', 'fix(core): y\n\nBody text.', 'fix(spotter,debrief): both apps', 'chore!: drop z', 'Merge branch main', 'docs: a [skip ci]']) assert.deepEqual(lint(m), [], m);
@@ -288,7 +289,7 @@ test('commit-lint --range and C23 judge a re-land that descends from the rule co
 });
 
 test('CI: every job that runs commit-lint --range or C23 checks out full history (a shallow clone would make the re-land rule not measured)', () => {
-  const wf = readFileSync(new URL('../../.gitea/workflows/ci.yml', import.meta.url), 'utf8');
+  const wf = workflowText('ci.yml');
   const job = (name) => wf.split(/^  (?=[a-z0-9-]+:\n)/m).find((j) => j.startsWith(`${name}:`)) ?? '';
   for (const name of ['conformance', 'commits', 'train-gates']) {
     const j = job(name);

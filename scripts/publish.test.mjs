@@ -10,6 +10,7 @@ import {
   cargoToken,
   crateProblems,
   crateStepsMissing,
+  ciCommands,
   entryPoints,
   formatTable,
   indexPath,
@@ -198,27 +199,27 @@ describe('tagProblems (rule 9)', () => {
 });
 
 describe('crateStepsMissing', () => {
-  const yaml = (name) => `      - name: ${name}\n        run: cargo clippy -p ${name} --all-targets --all-features -- -D warnings && cargo nextest run -p ${name} --all-features --profile ci\n`;
+  const yaml = (name) => [`cargo clippy -p ${name} --all-targets --all-features -- -D warnings`, `cargo nextest run -p ${name} --all-features --profile ci`];
   test('names crates without both steps', () => {
-    const ci = yaml('paddock-a') + '        run: cargo clippy -p paddock-b --all-targets --all-features -- -D warnings\n';
+    const ci = [...yaml('paddock-a'), 'cargo clippy -p paddock-b --all-targets --all-features -- -D warnings'];
     assert.deepEqual(crateStepsMissing(ci, ['paddock-a', 'paddock-b', 'paddock-c']), ['paddock-b', 'paddock-c']);
   });
   test('a prefix does not count for a longer name', () => {
     assert.deepEqual(crateStepsMissing(yaml('paddock-a'), ['paddock-ab']), ['paddock-ab']);
   });
   test('a --workspace step covers every crate it does not exclude', () => {
-    const ws = '        run: cargo clippy --workspace --all-targets --all-features -- -D warnings\n        run: cargo nextest run --workspace --all-features --profile ci --exclude paddock-b\n';
+    const ws = ['cargo clippy --workspace --all-targets --all-features -- -D warnings', 'cargo nextest run --workspace --all-features --profile ci --exclude paddock-b'];
     assert.deepEqual(crateStepsMissing(ws, ['paddock-a', 'paddock-b']), ['paddock-b']);
-    const cov = '        run: cargo clippy --workspace --all-targets --all-features -- -D warnings\n          cargo llvm-cov nextest --profile ci --workspace --all-features --lcov\n';
+    const cov = ['cargo clippy --workspace --all-targets --all-features -- -D warnings', 'cargo llvm-cov nextest --profile ci --workspace --all-features --lcov'];
     assert.deepEqual(crateStepsMissing(cov, ['paddock-a']), []);
-    const noFeatures = '        run: cargo clippy --workspace --all-targets -- -D warnings\n        run: cargo nextest run --workspace --profile ci\n';
+    const noFeatures = ['cargo clippy --workspace --all-targets -- -D warnings', 'cargo nextest run --workspace --profile ci'];
     assert.deepEqual(crateStepsMissing(noFeatures, ['paddock-a']), ['paddock-a'], 'without --all-features the adapters are not built');
   });
   test('the real ci.yml has a step for every workspace member', () => {
     const metadata = JSON.parse(execFileSync('cargo', ['metadata', '--format-version', '1', '--no-deps'], { cwd: join(root, 'crates'), encoding: 'utf8' }));
     const names = workspaceCrates(metadata).map((c) => c.name);
     assert.ok(names.includes('paddock-jobs'));
-    assert.deepEqual(crateStepsMissing(readFileSync(join(root, '.gitea/workflows/ci.yml'), 'utf8'), names), []);
+    assert.deepEqual(crateStepsMissing(ciCommands(root), names), []);
     assert.deepEqual(crateProblems(workspaceCrates(metadata)), []);
   });
   // ci.yml 7989: paddock-testkit's `start` feature (an optional dependency on paddock-proc) and paddock-proc's versioned

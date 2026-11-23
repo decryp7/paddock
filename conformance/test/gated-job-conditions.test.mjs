@@ -5,6 +5,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { PADDOCK } from './helpers.mjs';
+import { workflowText } from './lib/workflow.mjs';
 
 const GATED = [
   ['canary.yml', 'app'],
@@ -26,7 +27,7 @@ function jobIf(text, job) {
 
 for (const [file, job] of GATED) {
   test(`${file} ${job} is gated with !cancelled() and the gate's results, never always()`, () => {
-    const cond = jobIf(readFileSync(join(PADDOCK, '.gitea', 'workflows', file), 'utf8'), job);
+    const cond = jobIf(workflowText(file), job);
     assert.doesNotMatch(cond, /always\(\)/, cond);
     assert.match(cond, /!cancelled\(\)/);
     assert.match(cond, /needs\.gate\.result != 'failure'/);

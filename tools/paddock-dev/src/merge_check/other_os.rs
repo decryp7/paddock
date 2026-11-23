@@ -492,7 +492,7 @@ impl Runs for Gitea {
         }
         let req = dispatch::parse_request(WORKFLOW, git_ref, &[format!("base={base}")], MAX_DISPATCH_WAIT, None)?;
         let root = self.root.clone();
-        let read = move |name: &str| std::fs::read_to_string(root.join(".gitea/workflows").join(name)).ok();
+        let read = move |name: &str| crate::gates::ci::workflow_text(&root, name);
         let mut clock = dispatch::system_clock();
         let target = dispatch::Target {
             server: &self.server,

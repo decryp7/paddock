@@ -1,8 +1,9 @@
 //! C158: no code reads a workflow's text outside the CI model (rule 79, ER-42; ER-21 class "a script, a check or a test slices
 //! `.gitea/workflows/*.yml` itself and drifts from what the workflow means": `scripts/publish.mjs` `crateStepsMissing`, conformance C137
 //! (it passed on the text of an unrelated job), the train-8 `sed` over ci.yml in a registry entry). The one reader of a workflow is the
-//! CI model: `./dev gates model` (`tools/paddock-dev/src/gates/`, `gates::ci`), the YAML reader behind it, and `Ctx::workflows`
-//! (`check/util/workflows.rs`) for checks. Everything else asks the model.
+//! CI model: `./dev gates model` (`tools/paddock-dev/src/gates/`, `gates::ci`: `workflow_text`, `workflow_files`, `workflow_inputs`), the YAML reader
+//! behind it, `Ctx::workflows` (`check/util/workflows.rs`), and the JavaScript side's accessors (`conformance/test/lib/workflow.mjs` for
+//! tests, `ctx.workflowText` in `conformance/src/context.mjs` for checks). Everything else asks the model.
 //!
 //! Read: Rust, JavaScript, TypeScript and shell sources in `scripts/`, `conformance/` and `tools/` (tests included), outside
 //! `node_modules`, `target`, fixtures and recorded goldens. A site is a line that names a workflow file (`.gitea/workflows`,
@@ -28,7 +29,9 @@ use std::sync::LazyLock;
 pub const ALLOW: &str = "conformance/c158-allow.json";
 
 /// The CI model: the only code that may read a workflow's text (prefixes of paths).
-pub const MODEL: [&str; 4] = [
+pub const MODEL: [&str; 6] = [
+    "conformance/test/lib/workflow.mjs",
+    "conformance/src/context.mjs",
     "tools/paddock-dev/src/gates/",
     "tools/paddock-dev/src/check/util/workflows.rs",
     "tools/paddock-dev/src/repo_model/ci.rs",
@@ -36,8 +39,11 @@ pub const MODEL: [&str; 4] = [
 ];
 
 /// The check's own files: they name the patterns.
-pub const IMPLEMENTATION: [&str; 3] = [
+pub const IMPLEMENTATION: [&str; 5] = [
     "tools/paddock-dev/src/check/c158.rs",
+    // C121 polices the same pattern in registry entries and tests; its sources and tests hold invented lines that name a workflow.
+    "tools/paddock-dev/src/check/c121.rs",
+    "tools/paddock-dev/tests/it/check_c121.rs",
     "tools/paddock-dev/tests/it/check_c158.rs",
     ALLOW,
 ];
@@ -73,7 +79,7 @@ pub fn sites(text: &str) -> Vec<(usize, String)> {
     };
     let mut out = Vec::new();
     for (i, line) in lines.iter().enumerate() {
-        if is_comment(line) || !NAMES_WORKFLOW.is_match(line) {
+        if is_comment(line) || line.contains("ls-files") || !NAMES_WORKFLOW.is_match(line) {
             continue;
         }
         let from = i.saturating_sub(1);
@@ -213,6 +219,18 @@ mod tests {
         assert!(lines("const doc = 'see .gitea/workflows/ci.yml';").is_empty());
         assert!(lines("// readFileSync('.gitea/workflows/ci.yml')\nconst a = 1;").is_empty());
         assert!(lines("readFileSync('package.json')").is_empty());
+    }
+
+    #[test]
+    fn a_listing_of_paths_is_not_a_read_of_text() {
+        assert!(lines("const r = git('ls-files', '--', '.gitea/workflows/*.yml');").is_empty());
+    }
+
+    #[test]
+    fn c121_which_polices_the_same_pattern_keeps_its_invented_lines_to_itself() {
+        assert!(!readable("tools/paddock-dev/src/check/c121.rs"));
+        assert!(!readable("tools/paddock-dev/tests/it/check_c121.rs"));
+        assert!(readable("tools/paddock-dev/src/check/c122.rs"));
     }
 
     #[test]

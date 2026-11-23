@@ -862,7 +862,7 @@ impl Ci for GiteaCi<'_> {
         let kv: Vec<String> = inputs.iter().map(|(k, v)| format!("{k}={v}")).collect();
         let req = dispatch::parse_request(workflow, TRAIN_BRANCH, &kv, &format!("{}s", self.max_wait.as_secs().max(1)), None)?;
         let root = self.root.clone();
-        let read = move |name: &str| std::fs::read_to_string(root.join(".gitea/workflows").join(name)).ok();
+        let read = move |name: &str| crate::gates::ci::workflow_text(&root, name);
         let mut clock = dispatch::system_clock();
         let target = dispatch::Target {
             server: &self.server,

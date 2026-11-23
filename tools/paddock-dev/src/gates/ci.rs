@@ -268,6 +268,33 @@ pub fn workflow_events(path: &str, text: &str) -> Result<BTreeSet<String>, Strin
     parse_workflow(path, text).map(|w| w.events)
 }
 
+/// The folder of the workflows, relative to a checkout.
+pub const WORKFLOWS_DIR: &str = ".gitea/workflows";
+
+/// The text of the workflow file `name` (`ci.yml`) of the checkout `root`, as the file holds it (conformance C158: the CI model is the one
+/// reader of a workflow's text, so a tool or test that needs the text asks here and never joins the path itself).
+pub fn workflow_text_raw(root: &std::path::Path, name: &str) -> Option<String> {
+    std::fs::read_to_string(root.join(WORKFLOWS_DIR).join(name)).ok()
+}
+
+/// [`workflow_text_raw`] with LF line endings: the workflow split reads LF text (a CRLF checkout cannot be split by either planner).
+pub fn workflow_text(root: &std::path::Path, name: &str) -> Option<String> {
+    workflow_text_raw(root, name).map(|t| t.replace("\r\n", "\n"))
+}
+
+/// The names of the workflow files (`*.yml`) of the checkout `root`, sorted.
+pub fn workflow_files(root: &std::path::Path) -> Vec<String> {
+    let mut out: Vec<String> = std::fs::read_dir(root.join(WORKFLOWS_DIR))
+        .map(|d| {
+            d.filter_map(|e| e.ok()?.file_name().into_string().ok())
+                .filter(|n| n.ends_with(".yml"))
+                .collect()
+        })
+        .unwrap_or_default();
+    out.sort();
+    out
+}
+
 /// The input names of a workflow's `workflow_dispatch` and `workflow_call` triggers, read by the same parser as the model (C160
 /// asks it which inputs `ci.yml` has, in file order).
 pub fn workflow_inputs(path: &str, text: &str) -> Result<WorkflowInputs, String> {

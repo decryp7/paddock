@@ -5,6 +5,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { workflowText } from './lib/workflow.mjs';
 import { cargoBinaryNames, check, collect, mergePatch, needsRedist, peImports, shippedFiles } from '../release/windows-crt-imports.mjs';
 import { makeApp, pe } from './helpers.mjs';
 
@@ -210,8 +211,8 @@ test('every app turns Tauri\'s partial static VC runtime off, so +crt-static alo
 });
 
 test('every build of Windows installers runs the check', () => {
-  const read = (p) => readFileSync(join(REPO, p), 'utf8');
-  for (const p of ['conformance/ci/tauri-bundle.sh', 'scripts/demo/bundle.sh', '.gitea/workflows/debrief.yml']) {
+  const read = (p) => (p.endsWith('.yml') ? workflowText(p) : readFileSync(join(REPO, p), 'utf8'));
+  for (const p of ['conformance/ci/tauri-bundle.sh', 'scripts/demo/bundle.sh', 'debrief.yml']) {
     assert.match(read(p), /windows-crt-imports\.mjs"? --src-tauri /, `${p} checks the shipped list, not a glob`);
   }
 });

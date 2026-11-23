@@ -754,7 +754,7 @@ fn the_repository_copy_reuses_the_source_objects_instead_of_hashing_every_file()
 fn workflow_action_and_script_edits_narrow_the_plan() {
     // The jobs of ci.yml that CI_JOBS names; one action, one reusable workflow, one script of conformance/ci and a helper it imports.
     let jobs: Vec<&str> = paddock_dev::plan_gitea::CI_JOBS.iter().map(|(j, _)| *j).collect();
-    let ci = std::fs::read_to_string(repo_root().join(".gitea/workflows/ci.yml")).unwrap();
+    let ci = paddock_dev::gates::ci::workflow_text_raw(&repo_root(), "ci.yml").unwrap();
     let mut edits: Vec<(String, Option<String>)> = jobs
         .iter()
         .filter(|j| ci.contains(&format!("\n  {j}:")))
@@ -801,7 +801,7 @@ fn edits_on_a_copy(edits: &[(String, Option<String>)], narrowed: &std::sync::ato
     eprintln!("copy of the checked-out files: {:.1} s", started.elapsed().as_secs_f64());
     // LF checkout on every host: the workflow split reads LF text (a CRLF checkout cannot be split by either planner).
     assert!(
-        !std::fs::read_to_string(copy.join(".gitea/workflows/ci.yml"))
+        !paddock_dev::gates::ci::workflow_text_raw(&copy, "ci.yml")
             .unwrap()
             .contains('\r'),
         "the copy's ci.yml has CRLF line endings: the workflow split reads LF text, so every edit would mark everything"

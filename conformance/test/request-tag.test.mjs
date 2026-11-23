@@ -7,7 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { test } from 'node:test';
 import { checkNotSkipCi, checkVerdict, checkVersion, gateWorkflow, parseTag, runChecks, summary } from '../ci/request-tag.mjs';
 import { PADDOCK } from './helpers.mjs';
-import { job as jobOf, loadWorkflow, needsOf } from './lib/workflow.mjs';
+import { job as jobOf, loadWorkflow, needsOf, workflowText } from './lib/workflow.mjs';
 
 const SHA = 'a'.repeat(40);
 const files = (o) => (p) => o[p] ?? null;
@@ -193,7 +193,7 @@ test('a bad tag or sha stops early with the input failure', async () => {
 });
 
 // ---- the workflow's structure -------------------------------------------------------------------------------------------------
-const wf = readFileSync(join(PADDOCK, '.gitea', 'workflows', 'tag.yml'), 'utf8');
+const wf = workflowText('tag.yml');
 const code = wf.split('\n').filter((l) => !l.trim().startsWith('#')).join('\n');
 /** The text of one job (`  check:` up to the next job). */
 const job = (id) => {

@@ -670,7 +670,7 @@ fn os_legs(env: &dyn Fn(&str) -> Option<String>) -> Vec<String> {
 fn workflow_text(root: &Path, file: &str) -> Option<String> {
     let plain = !file.is_empty() && file.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'));
     plain
-        .then(|| std::fs::read_to_string(root.join(".gitea/workflows").join(file)).ok())
+        .then(|| crate::gates::ci::workflow_text(&root, file))
         .flatten()
 }
 

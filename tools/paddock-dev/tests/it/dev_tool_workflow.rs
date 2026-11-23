@@ -25,15 +25,12 @@ fn runner_labels(text: &str) -> BTreeSet<String> {
 
 #[test]
 fn the_publish_workflow_covers_every_runner_kind_ci_runs_on() {
-    let dir = repo_root().join(".gitea/workflows");
-    let publish = std::fs::read_to_string(dir.join("dev-tool.yml")).unwrap();
+    let root = repo_root();
+    let publish = paddock_dev::gates::ci::workflow_text(&root, "dev-tool.yml").unwrap();
     let published = runner_labels(&publish);
     let mut used = BTreeSet::new();
-    for entry in std::fs::read_dir(&dir).unwrap() {
-        let p = entry.unwrap().path();
-        if p.extension().is_some_and(|e| e == "yml") && p.file_name().unwrap() != "dev-tool.yml" {
-            used.extend(runner_labels(&std::fs::read_to_string(&p).unwrap()));
-        }
+    for name in paddock_dev::gates::ci::workflow_files(&root).iter().filter(|n| *n != "dev-tool.yml") {
+        used.extend(runner_labels(&paddock_dev::gates::ci::workflow_text_raw(&root, name).unwrap()));
     }
     assert!(!used.is_empty(), "no runner labels found in .gitea/workflows: the scan is broken");
     assert_eq!(
@@ -45,7 +42,7 @@ fn the_publish_workflow_covers_every_runner_kind_ci_runs_on() {
 #[test]
 fn the_publish_workflow_runs_when_an_input_of_the_tool_changes() {
     let root = repo_root();
-    let publish = std::fs::read_to_string(root.join(".gitea/workflows/dev-tool.yml")).unwrap();
+    let publish = paddock_dev::gates::ci::workflow_text(&root, "dev-tool.yml").unwrap();
     let paths: Vec<String> = publish
         .lines()
         .skip_while(|l| l.trim() != "paths:")

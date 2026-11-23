@@ -28,7 +28,7 @@ export function appBuildsKit(ctx, app) {
     return null;
   }
   if (typeof contract.workflow === 'string') {
-    const text = ctx.read(`.gitea/workflows/${contract.workflow}`);
+    const text = ctx.workflowText(contract.workflow);
     if (text === null || text === undefined) return null;
     // Only the jobs that run Playwright count, each by its own steps (a build in another job is on another runner and does not carry over).
     const e2eJobs = parseJobs(text).filter((j) => parseSteps(j.text).some((st) => /\bplaywright\b/i.test(st.run ?? '')));

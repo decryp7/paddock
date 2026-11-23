@@ -791,7 +791,7 @@ pub fn runner_wait(a: &RunnerWaitArgs) -> Result<Report, CliError> {
         .clone()
         .or_else(|| std::env::current_dir().ok().and_then(|d| find_root(&d)))
         .ok_or_else(|| CliError::usage("not inside a repository checkout.").with_hint("Pass --root <checkout>."))?;
-    let read = |name: &str| std::fs::read_to_string(root.join(".gitea/workflows").join(name)).ok();
+    let read = |name: &str| crate::gates::ci::workflow_text(&root, name);
     let mut http = CurlHttp;
     let mut clock = dispatch::system_clock();
     let target = dispatch::Target {
@@ -834,7 +834,7 @@ pub fn dispatch(a: &DispatchArgs) -> Result<Report, CliError> {
         .clone()
         .or_else(|| std::env::current_dir().ok().and_then(|d| find_root(&d)))
         .ok_or_else(|| CliError::usage("not inside a repository checkout.").with_hint("Pass --root <checkout>."))?;
-    let read = |name: &str| std::fs::read_to_string(root.join(".gitea/workflows").join(name)).ok();
+    let read = |name: &str| crate::gates::ci::workflow_text(&root, name);
     let mut inputs = a.inputs.clone();
     let mut git_ref = a.git_ref.clone().unwrap_or_default();
     let mut trial = None;
