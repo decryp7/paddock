@@ -15,6 +15,7 @@
 pub mod allow_list;
 pub mod baseline;
 pub mod c53_liveness;
+pub mod c53_parents;
 pub mod config;
 pub mod conformance;
 pub mod finding;

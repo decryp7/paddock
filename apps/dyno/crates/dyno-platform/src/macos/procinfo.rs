@@ -30,6 +30,7 @@ pub fn short_info(pid: Pid) -> Option<ShortInfo> {
     };
     (got == size && info.pbsi_pid == pid).then_some(ShortInfo {
         uid: info.pbsi_uid,
+        // conformance: parent-pid — only the listed parent: it fills the paddock_proc table, where parent_of judges it
         parent: info.pbsi_ppid,
     })
 }

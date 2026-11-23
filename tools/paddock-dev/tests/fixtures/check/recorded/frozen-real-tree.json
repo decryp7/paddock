@@ -2596,7 +2596,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (.claude/hooks/docker-guard.py): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -2605,7 +2605,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (.claude/hooks/docker-guard.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -2614,7 +2614,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (.claude/hooks/docker-guard.test.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -2623,7 +2623,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (.claude/hooks/git-output-filter-warn.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -2632,7 +2632,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (.claude/hooks/git-output-filter-warn.test.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -2641,7 +2641,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (.claude/hooks/kill-guard.py): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -2650,7 +2650,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (.claude/hooks/kill-guard.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -2659,7 +2659,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (.claude/hooks/kill-guard.test.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -2668,7 +2668,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (.claude/hooks/lib/paddockpaths.py): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -2677,7 +2677,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (.claude/hooks/lib/shell-forms.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -2686,7 +2686,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (.claude/hooks/lib/shellscan.py): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -2695,7 +2695,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (.claude/hooks/no-force-push.py): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -2704,7 +2704,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (.claude/hooks/no-force-push.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -2713,7 +2713,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (.claude/hooks/no-force-push.test.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -2722,7 +2722,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (.claude/hooks/no-pgrep-wait.py): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -2731,7 +2731,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (.claude/hooks/no-pgrep-wait.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -2740,7 +2740,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (.claude/hooks/no-pgrep-wait.test.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -2749,7 +2749,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (.claude/hooks/paddockpaths-parity.test.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -2758,7 +2758,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (.claude/hooks/recurring-guard.py): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -2767,7 +2767,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (.claude/hooks/recurring-guard.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -2776,7 +2776,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (.claude/hooks/recurring-guard.test.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -2785,7 +2785,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (.claude/hooks/run-tests.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -2794,7 +2794,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (.claude/hooks/scratch-root-guard.py): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -2803,7 +2803,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (.claude/hooks/scratch-root-guard.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -2812,7 +2812,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (.claude/hooks/scratch-root-guard.test.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -2821,7 +2821,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (.claude/hooks/shellscan.test.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -2830,7 +2830,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (.claude/hooks/worktree-guard.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -2839,7 +2839,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (apps/debrief/crates/debrief-ai/evals/make_cases.py): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -2848,7 +2848,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (apps/debrief/crates/debrief-pdf/fonts/build-fonts.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -2857,7 +2857,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (apps/debrief/crates/debrief-store-duck/scripts/fetch-libduckdb.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -2866,7 +2866,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (apps/debrief/docs/diagrams/src/generate.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -2875,7 +2875,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (apps/debrief/docs/research/2026-10-28-duckdb-server-mode/harness/bench.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -2884,7 +2884,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (apps/debrief/docs/research/2026-10-28-llm-use-and-names/adr_eval.py): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -2893,7 +2893,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (apps/debrief/docs/research/2026-10-28-llm-use-and-names/synonyms.py): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -2902,7 +2902,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (apps/debrief/docs/research/img/src/duckdb-write-paths.py): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -2911,7 +2911,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (apps/debrief/samples/generate.py): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -2920,7 +2920,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (apps/debrief/samples/live/append.py): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -2929,7 +2929,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (apps/debrief/scripts/build-plugins.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -2938,7 +2938,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (apps/debrief/scripts/ci/check-workflows.py): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -2947,7 +2947,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (apps/debrief/scripts/ci/e2e-linux-local.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -2956,7 +2956,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (apps/debrief/scripts/ci/libduckdb-env.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -2965,7 +2965,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (apps/debrief/scripts/ci/macos-smoke.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -2974,7 +2974,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (apps/debrief/scripts/ci/macos-verify-bundle.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -2983,7 +2983,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (apps/debrief/scripts/ci/smoke-linux-docker.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -2992,7 +2992,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (apps/debrief/scripts/ci/windows-node-modules.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3001,7 +3001,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (apps/debrief/scripts/clean-build-dirs.ps1): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3010,7 +3010,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (apps/debrief/scripts/export-diagrams.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3019,7 +3019,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (apps/debrief/scripts/macos/build-app.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3028,7 +3028,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (apps/debrief/scripts/macos/dev-signing.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3037,7 +3037,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (apps/debrief/scripts/perf/gen_large.py): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3046,7 +3046,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (apps/debrief/scripts/perf/perf-import.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3055,7 +3055,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (apps/debrief/scripts/perf/perfsum.py): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3064,7 +3064,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (apps/debrief/scripts/perf/procsample.py): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3073,7 +3073,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (apps/debrief/scripts/update-ffmpeg-runtimes.py): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3082,7 +3082,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (apps/dyno/crates/dyno-platform/tests/fixtures/mac_pcblist/make.py): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3091,7 +3091,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (apps/dyno/docs/diagrams/src/build.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3100,7 +3100,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (apps/dyno/docs/diagrams/src/export.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3109,7 +3109,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (apps/dyno/docs/perf/disk_cache_sqlite_bench.py): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3118,7 +3118,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (apps/dyno/scripts/bench-smoke.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3127,7 +3127,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (apps/dyno/scripts/check-bundle.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3136,7 +3136,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (apps/dyno/scripts/linux-container.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3145,7 +3145,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (apps/dyno/scripts/linux-units-check.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3154,7 +3154,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (apps/dyno/scripts/linux-verify.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3163,7 +3163,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (apps/dyno/scripts/regen-wire-fixtures.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3172,7 +3172,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (apps/dyno/scripts/verify-tool-pin.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3181,7 +3181,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (apps/dyno/scripts/wp0/held.ps1): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3190,7 +3190,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (apps/dyno/scripts/wp0/launch-held.ps1): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3199,7 +3199,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (apps/dyno/scripts/wp0/wp0-collect.ps1): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3208,7 +3208,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (apps/dyno/scripts/wp0/wp0-run.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3217,7 +3217,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (apps/pacenotes/scripts/export-diagrams.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3226,7 +3226,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (apps/pitcrew/scripts/linux-bootstrap.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3235,7 +3235,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (apps/pitcrew/scripts/linux-verify.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3244,7 +3244,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (apps/pitcrew/scripts/macos-bootstrap.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3253,7 +3253,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (apps/pitcrew/scripts/macos-verify.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3262,7 +3262,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (apps/pitcrew/scripts/windows-retire-legacy-runner.ps1): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3271,7 +3271,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (apps/pitwall/scripts/ci/privacy-check.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3280,7 +3280,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (apps/pitwall/scripts/linux-bootstrap.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3289,7 +3289,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (apps/pitwall/scripts/linux-container-inner.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3298,7 +3298,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (apps/pitwall/scripts/linux-container-verify.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3307,7 +3307,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (apps/pitwall/scripts/linux-verify.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3316,7 +3316,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (apps/pitwall/scripts/macos-verify.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3325,7 +3325,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (apps/sighter/scripts/export-diagrams.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3334,7 +3334,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (ci-image/verify.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3343,7 +3343,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (conformance/ci/boot-volume.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3352,7 +3352,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (conformance/ci/bounded.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3361,7 +3361,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (conformance/ci/build-folder.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3370,7 +3370,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (conformance/ci/build-jobs.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3379,7 +3379,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (conformance/ci/ci-home.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3388,7 +3388,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (conformance/ci/dev-tool-publish.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3397,7 +3397,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (conformance/ci/first-release-notes.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3406,7 +3406,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (conformance/ci/guardian-as-user.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3415,7 +3415,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (conformance/ci/host/host-tools.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3424,7 +3424,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (conformance/ci/host/node-caches.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3433,7 +3433,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (conformance/ci/host/sccache-stats.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3442,7 +3442,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (conformance/ci/host/stable-workspace.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3451,7 +3451,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (conformance/ci/job-tmpdir.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3460,7 +3460,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (conformance/ci/kept-clone.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3469,7 +3469,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (conformance/ci/safe-rm.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3478,7 +3478,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (conformance/ci/tag-node-caches.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3487,7 +3487,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (conformance/ci/tauri-bundle.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3496,7 +3496,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (conformance/ci/updater-key.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3505,7 +3505,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (conformance/release/macos-verify-bundle.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3514,7 +3514,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (crates/paddock-setup/nsis/test/build.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3523,7 +3523,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (crates/paddock-setup/nsis/test/run-dyno-e2e.ps1): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3532,7 +3532,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (crates/paddock-setup/nsis/test/run-harness.ps1): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3541,7 +3541,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (diagrams/scripts/export-diagrams.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3550,7 +3550,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (scripts/demo/bundle.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3559,7 +3559,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (scripts/demo/check-agent-version.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3568,7 +3568,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (scripts/demo/verify-macos.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3577,7 +3577,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (scripts/disk-record.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3586,7 +3586,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (scripts/notices.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3595,7 +3595,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (scripts/perf/link-time/cc-timed.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3604,7 +3604,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (scripts/perf/link-time/classify.py): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3613,7 +3613,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (scripts/perf/link-time/disfn.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3622,7 +3622,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (scripts/setup-dev.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3631,7 +3631,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (scripts/shell-demo/build-linux-arm64.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3640,7 +3640,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (scripts/shell-demo/smoke-desktop-linux.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3649,7 +3649,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (scripts/shell-demo/smoke-service-update-linux.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3658,7 +3658,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (scripts/shell-demo/smoke-service-update.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3667,7 +3667,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (scripts/vm-lock-run.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3676,7 +3676,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (scripts/vm-lock.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3685,7 +3685,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (scripts/vm-smoke/chain-release.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3694,7 +3694,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (scripts/vm-smoke/guest/atspi.py): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3703,7 +3703,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (scripts/vm-smoke/login-probe-linux.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3712,7 +3712,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (scripts/vm-smoke/login-probe-mac.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3721,7 +3721,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (scripts/vm-smoke/make-no-dyno-snapshot.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3730,7 +3730,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (scripts/vm-smoke/vm-smoke.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3739,7 +3739,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (scripts/vm-smoke/win-act.ps1): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3748,7 +3748,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (scripts/vm-smoke/win-gui-probe.ps1): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3757,7 +3757,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (scripts/vm-smoke/win-menu-control.ps1): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3766,7 +3766,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (scripts/vm-smoke/win-suite.ps1): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3775,7 +3775,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (scripts/vm-win/prepare.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3784,7 +3784,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (templates/repo/scripts/export-diagrams.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3793,7 +3793,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (tools/bootstrap.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3802,7 +3802,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (tools/host-cleanup.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3811,7 +3811,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (tools/macos-vm-smoke.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3820,7 +3820,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (tools/prune-ci-build-folder.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -3829,7 +3829,7 @@
    "file": "conformance/baselines/C129-shell.json",
    "line": 1,
    "message": "stale baseline entry (tools/verify-installed.sh): the file is gone or is no longer shell",
-   "fix": "Remove it: `node conformance/bin/paddock-shell-baseline.mjs --shrink`."
+   "fix": "Remove it: `./dev check shell-baseline --shrink`."
   },
   {
    "check": "C129",
@@ -4921,6 +4921,19 @@
    "fix": "Remove the entry.",
    "waiver": {
     "reason": "ADR 0033 WP-6: has_job_children follows parent pids without start times",
+    "expires": "2026-12-31"
+   }
+  },
+  {
+   "check": "C53",
+   "severity": "error",
+   "rule": 53,
+   "file": "apps/dyno/crates/dyno-platform/src/macos/procinfo.rs",
+   "line": 33,
+   "message": "reads the raw parent pid `pbsi_ppid`: its parent may have ended and the pid been handed on (Windows does so at once)",
+   "fix": "Put the rows into a paddock_proc table (paddock_proc::Listed, table_of_listing) and ask paddock_proc::parent_of or descendants, which follow a link only from an older process to a newer one (ADR 0033). A read that only feeds that table, or checks the parent's start time itself, carries `// conformance: parent-pid — <reason>`.",
+   "waiver": {
+    "reason": "ADR 0033 WP-9: the process tree view shows parent pids without a start-time check (display only)",
     "expires": "2026-12-31"
    }
   },
