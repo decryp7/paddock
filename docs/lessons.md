@@ -3475,3 +3475,39 @@ about 45 ms a start on that runner plus a fork per command substitution. **Fix:*
   (job 44649; FLAKY: failed once, passed its retry; the class of the 900x600 item). Different Dyno specs time out at 5 s in each run
   (8576, 8601): the class the vitest retry and worker budget of feat/fixed-wait-checks address (6 lanes x 29 vitest workers on 30
   cores before, 6 x 5 after). Next: a failing reproduction for each first.
+
+## The CI night of 2026-11-22/23: the planner marked everything, and nine more causes (2026-11-23)
+- **The planner marked everything for plumbing changes** (runs 8610, 8635, 8647; about 700 to 730 job-minutes a train round).
+  Train 20 spent six full rounds, each rerunning every app's suite. Two causes: `.gitea/actions/README.md` was on the planner's
+  global list, and a train dispatch has no base, so `plan_ci::choose_base` planned the whole tree (ADR 0113's whole-tree landing).
+  The user stopped all CI (runs 8654 to 8661 cancelled), paused the nightly and chose graph first. **Covered by:** ADR 0117 (one
+  repo graph with declared inputs per node, an unowned or unresolvable reference selects everything, and a landing run that tests
+  the train's diff from main's last complete commit). Class "default owner or reach fails open" (2nd instance).
+- **The verdict reader found no complete base, so every push to main planned everything** (push run 8664 cancelled). `last_full`
+  needed a successful push run, and there was none since 8045 on f7bbe2b86 (2026-11-12); landings accept a FLAKY-only red (ER-12)
+  while the reader needs success, so two definitions of green existed (ER-15). **Covered by:** ADR 0117 WP-4, one typed outcome
+  shared by the landing and the reader; tags still need Green.
+- **Local sccache was off for every agent from train 19 to 2026-11-23.** `local_sccache.rs` `level()` took the first "L0 (disk)"
+  line, which is a counter line ("hits 0"), so the tiered stats never matched. CI was fine (run 8647: sccache-backend s3, 293 of 293
+  hits). **Fix:** d04af7b46 (the reader takes a level's description line). **Covered by:** ADR 0090 revived, so a parser of another
+  program's output is tested against captured real output (register `docs/captured-output.toml`, check C104).
+- **An expired review date blocked every push.** The C50 `review_by` (Dyno shell start, ADR 0029) passed on 2026-11-22, and
+  RUSTSEC-2026-0592 had done the same the day before. Each moved by a `Gates-date:` trailer to 2026-12-07 by the user's approval.
+  **Covered by:** the approved time-based gates item (ER-12 amendment): a date warns on push, blocks only a push that touches that
+  entry, tags and releases, and is reminded a week ahead.
+- **The heavy queue held 1 s rows behind 15 to 60 minute waits** (push gates stalled 30 to 85 minutes, three times that night).
+  **Covered by:** heavy admission by load and memory, with a quick lane for rows under 10 s (feat/heavy-queue-admission e6e5bfaed;
+  it needs a `heavy-v*` tag and `./dev heavy-install` to take effect).
+- **Long test hangs came from plain `cargo test`.** `worktree::list_clean` hung 3.5 h at 0% CPU, `ci_isolation` 18 min, and test-spawned
+  `ci slot hold` processes were orphaned four times. Agents had run `cargo test --test it`, which has no nextest timeout and no
+  progress watchdog (both exist). **Covered by:** rule 89, every test run goes through the bounded runner, with a hook that steers
+  agents off plain `cargo test`.
+- **Generated files went stale after text merges** (3 instances: train 20 ci-run golden, runs 8633 and 8634 cancelled; train 19
+  `tools/paddock-dev/Cargo.lock` conflict 73f151535; train 19 notices after the notify 9 bump, 96ee947c5). **Covered by:** merge-time
+  regeneration (feat/merge-regenerates) and, in ADR 0117 WP-7, generators as graph nodes with an input hash.
+- **Members based on an old main conflicted** (4 times). **Covered by:** `./dev worktree add -b` bases on the open train head by
+  default (feat/worktree-base-open-train 8ce4c9327).
+- **d04af7b46 landed on scoped run 8663 by the user's exception.** No complete verdict exists for it and nothing is tagged from it;
+  the next complete run covers it. This is a recorded exception, not a precedent.
+- **Class: a default that fails open** (the global list, the base-less dispatch, the unowned file; 2nd instance) and **a gate that
+  waits on a date nobody moved** (RUSTSEC-2026-0592, C50; 2nd instance).
