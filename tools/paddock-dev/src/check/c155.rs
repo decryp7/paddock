@@ -21,7 +21,9 @@
 //!    added ones as one unwaivable finding at the contract. `add` is free and is not compared. The comparison runs on a checkout only: an
 //!    in-memory tree has nothing to compare, and where git gives no merge base it warns (an error in CI), never silence. An entry the
 //!    user approved is recorded in [`APPROVALS`] (`docs/os-removals.toml`: the contract, the removal keys, `by = "user"`, the date and
-//!    why) and is not counted; an approval that is not the user's, or a register the check cannot read, is a finding of its own.
+//!    why) and is not counted; an approval that is not the user's, or a register the check cannot read, is a finding of its own. The
+//!    register is itself shrink-only (ER-46): an approval its merge-base copy lacks is one unwaivable finding (so writing `by = "user"`
+//!    approves nothing unseen), and an approval of an entry the merge base already has, or the contract no longer has, is stale.
 //!
 //! Positive controls ([`Check::control`], ER-33): a `skip` over a module with an OS signal, an `only` over Windows code, a stale name
 //! and a redundant `add` each go red, and `tests/it/os_scoped.rs` shows the same on the real tree and sources, and that the derived
@@ -112,7 +114,10 @@ fn approvals(text: &str) -> Result<BTreeMap<String, BTreeSet<String>>, String> {
     for (i, a) in list.iter().enumerate() {
         let what = format!("approved #{}", i + 1);
         let a = a.as_table().ok_or_else(|| format!("{what} is not a table"))?;
-        if let Some(k) = a.keys().find(|k| !["contract", "by", "date", "why", "entries"].contains(&k.as_str())) {
+        if let Some(k) = a
+            .keys()
+            .find(|k| !["contract", "by", "date", "why", "entries"].contains(&k.as_str()))
+        {
             return Err(format!("{what} has an unknown key {k:?}"));
         }
         let text = |k: &str| {
@@ -126,7 +131,9 @@ fn approvals(text: &str) -> Result<BTreeMap<String, BTreeSet<String>>, String> {
         text("date")?;
         text("why")?;
         if by != "user" {
-            return Err(format!("{what} is approved by {by:?}: taking an OS away needs the user (ER-46), `by = \"user\"`"));
+            return Err(format!(
+                "{what} is approved by {by:?}: taking an OS away needs the user (ER-46), `by = \"user\"`"
+            ));
         }
         let entries = a
             .get("entries")
@@ -134,7 +141,11 @@ fn approvals(text: &str) -> Result<BTreeMap<String, BTreeSet<String>>, String> {
             .ok_or_else(|| format!("{what} has no entries"))?;
         let set = out.entry(contract.to_string()).or_default();
         for e in entries {
-            set.insert(e.as_str().ok_or_else(|| format!("{what} holds an entry that is not a string"))?.to_string());
+            set.insert(
+                e.as_str()
+                    .ok_or_else(|| format!("{what} holds an entry that is not a string"))?
+                    .to_string(),
+            );
         }
     }
     Ok(out)
@@ -203,7 +214,10 @@ impl C155 {
             let derived_already = resolved_covers(&without.resolved(d), &e.name);
             if known(&e.name, d) && derived_already {
                 out.push(warn(
-                    format!("[redundant-exception] `hostTests.add` lists `{}`, which the code already marks as OS-specific", e.name),
+                    format!(
+                        "[redundant-exception] `hostTests.add` lists `{}`, which the code already marks as OS-specific",
+                        e.name
+                    ),
                     format!(
                         "Delete the entry from {}: the placement is derived, only what the code cannot say is declared.",
                         w.contract
@@ -276,16 +290,20 @@ impl C155 {
             }
         }
         // Taking an OS away needs the user (ER-46): every `skip` and `only` entry the merge base lacks and the user's register does not
-        // approve.
+        // approve. The merge base's entries come from the one comparison (`baseline::growth`); an approval the merge base already
+        // covers, or of an entry the contract no longer has, is stale: the register only shrinks.
         let approved = approved.get(w.contract).cloned().unwrap_or_default();
-        let current: Vec<String> = removal_keys(ex).into_iter().filter(|k| !approved.contains(k)).collect();
-        if current.is_empty() || ctx.is_in_memory() || !baseline::is_work_tree(ctx.root()) {
+        let current = removal_keys(ex);
+        if (current.is_empty() && approved.is_empty()) || ctx.is_in_memory() || !baseline::is_work_tree(ctx.root()) {
             return;
         }
+        let old: std::cell::RefCell<BTreeSet<String>> = Default::default();
         let entries_of = |text: &str| -> Option<Vec<String>> {
             let v: serde_json::Value = serde_json::from_str(text).ok()?;
-            let old = Exceptions::parse(&v, w.contract).ok()?;
-            Some(old.map(|e| removal_keys(&e)).unwrap_or_default())
+            let parsed = Exceptions::parse(&v, w.contract).ok()?;
+            let keys = parsed.map(|e| removal_keys(&e)).unwrap_or_default();
+            *old.borrow_mut() = keys.iter().cloned().collect();
+            Some(keys)
         };
         let exact = |k: &String| k.clone();
         match baseline::growth(ctx.root(), &ctx.base_ref(), w.contract, &current, &entries_of, &exact, None) {
@@ -297,20 +315,93 @@ impl C155 {
                 "the OS removals of hostTests",
                 &why,
             )),
-            Growth::Added { added: 0, .. } => {}
-            Growth::Added { base, added, .. } => out.push(
-                warn(
-                    format!(
-                        "[os-removal] {added} `skip` or `only` entr{} not in {} at the merge base {}: it takes an operating system away from code the derivation puts there",
-                        if added == 1 { "y is" } else { "ies are" },
-                        w.contract,
-                        &base[..base.len().min(9)]
-                    ),
-                    "Remove the entries, or get the user's approval for the removal (ER-46); `add` needs none.".into(),
-                )
-                .unwaivable(),
-            ),
+            Growth::Added { base, .. } => {
+                let old = old.into_inner();
+                let short = &base[..base.len().min(9)];
+                let added = current.iter().filter(|k| !old.contains(*k) && !approved.contains(*k)).count();
+                if added > 0 {
+                    out.push(
+                        warn(
+                            format!(
+                                "[os-removal] {added} `skip` or `only` entr{} not in {} at the merge base {short}: it takes an operating system away from code the derivation puts there",
+                                if added == 1 { "y is" } else { "ies are" },
+                                w.contract,
+                            ),
+                            "Remove the entries, or get the user's approval for the removal (ER-46); `add` needs none.".into(),
+                        )
+                        .unwaivable(),
+                    );
+                }
+                for k in &approved {
+                    let why = if old.contains(k) {
+                        format!("the merge base {short} already has it in {}", w.contract)
+                    } else if !current.contains(k) {
+                        format!("{} has no such entry", w.contract)
+                    } else {
+                        continue;
+                    };
+                    out.push(stale_approval(w.contract, k, &why));
+                }
+            }
         }
+    }
+}
+
+/// The finding for an approval the register no longer needs (it only shrinks, ER-46).
+fn stale_approval(contract: &str, key: &str, why: &str) -> Finding {
+    Finding::warn(
+        "C155",
+        RULE,
+        APPROVALS,
+        1,
+        format!("[os-removal] stale approval `{key}` of {contract}: {why}"),
+        format!("Remove `{key}` from {APPROVALS} (the register only shrinks; an approval leaves once the merge base has its entry)."),
+    )
+}
+
+/// The register's approvals as one key each (`<contract> <removal key>`), for its own shrink-only comparison.
+fn approval_keys(approved: &BTreeMap<String, BTreeSet<String>>) -> Vec<String> {
+    approved
+        .iter()
+        .flat_map(|(c, keys)| keys.iter().map(move |k| format!("{c} {k}")))
+        .collect()
+}
+
+/// The register is itself a shrink-only list (ER-46, final review P1-2): an approval the merge base's register lacks is growth, one
+/// unwaivable finding, so no agent can approve a removal by writing `by = "user"`. The user's approval of growth is recorded as for
+/// the other lists (the check's entry in docs/gates.toml names it with its date).
+fn register_growth(ctx: &Ctx, approved: &BTreeMap<String, BTreeSet<String>>) -> Option<Finding> {
+    let current = approval_keys(approved);
+    if current.is_empty() || ctx.is_in_memory() || !baseline::is_work_tree(ctx.root()) {
+        return None;
+    }
+    let entries_of = |text: &str| approvals(text).ok().map(|a| approval_keys(&a));
+    let exact = |k: &String| k.clone();
+    match baseline::growth(ctx.root(), &ctx.base_ref(), APPROVALS, &current, &entries_of, &exact, None) {
+        Growth::Unmeasured(why) => Some(baseline::unmeasured_finding(
+            ctx.in_ci(),
+            "C155",
+            RULE,
+            APPROVALS,
+            "the register of OS-removal approvals",
+            &why,
+        )),
+        Growth::Added { added: 0, .. } => None,
+        Growth::Added { base, added, .. } => Some(
+            Finding::warn(
+                "C155",
+                RULE,
+                APPROVALS,
+                1,
+                format!(
+                    "[os-removal] the register of approvals grew: {added} approval{} not in {APPROVALS} at the merge base {}; only the user approves a removal",
+                    if added == 1 { " is" } else { "s are" },
+                    &base[..base.len().min(9)]
+                ),
+                "Remove the added approvals, or record the user's approval of them (ER-46; the check's entry in docs/gates.toml).",
+            )
+            .unwaivable(),
+        ),
     }
 }
 
@@ -350,7 +441,10 @@ impl Check for C155 {
                 ("crates/paddock-a/src/lib.rs", "mod model;\n"),
                 ("crates/paddock-a/src/model.rs", "fn pure() {}\n#[cfg(windows)]\nfn win() {}\n"),
                 ("crates/paddock-b/Cargo.toml", "[package]\nname = \"paddock-b\"\n"),
-                ("crates/paddock-b/src/lib.rs", "fn f() {\n    let _ = windows_sys::Win32::Foundation::CloseHandle;\n}\n"),
+                (
+                    "crates/paddock-b/src/lib.rs",
+                    "fn f() {\n    let _ = windows_sys::Win32::Foundation::CloseHandle;\n}\n",
+                ),
                 ("crates/paddock-c/Cargo.toml", "[package]\nname = \"paddock-c\"\n"),
                 ("crates/paddock-c/src/lib.rs", "#[cfg(unix)]\nfn u() {}\n"),
                 ("crates/paddock-d/Cargo.toml", "[package]\nname = \"paddock-d\"\n"),
@@ -394,12 +488,21 @@ impl Check for C155 {
                 BTreeMap::new()
             }
         };
+        findings.extend(register_growth(ctx, &approved));
+        let mut seen: BTreeSet<String> = BTreeSet::new();
         for (root, contract) in os_placement::workspaces(&files) {
             let Some(text) = ctx.read(&contract) else { continue };
             let value: serde_json::Value = match serde_json::from_str(&text) {
                 Ok(v) => v,
                 Err(e) => {
-                    findings.push(Finding::warn("C155", RULE, &contract, 1, format!("[bad-contract] not valid JSON: {e}"), "Fix the file."));
+                    findings.push(Finding::warn(
+                        "C155",
+                        RULE,
+                        &contract,
+                        1,
+                        format!("[bad-contract] not valid JSON: {e}"),
+                        "Fix the file.",
+                    ));
                     continue;
                 }
             };
@@ -419,6 +522,7 @@ impl Check for C155 {
                 }
             };
             declared += 1;
+            seen.insert(contract.clone());
             self.workspace(
                 ctx,
                 &Workspace {
@@ -430,6 +534,14 @@ impl Check for C155 {
                 &mut findings,
                 &mut probes,
             );
+        }
+        // An approval of a contract that declares no hostTests approves nothing any more.
+        if !ctx.is_in_memory() {
+            for (contract, keys) in approved.iter().filter(|(c, _)| !seen.contains(*c)) {
+                for k in keys {
+                    findings.push(stale_approval(contract, k, "the contract declares no hostTests"));
+                }
+            }
         }
         CheckOutput {
             findings,
@@ -472,7 +584,10 @@ mod tests {
         };
         assert!(known("ci_host::", &d), "a folder prefix above a module");
         assert!(known("ci_host::kept_clone::", &d));
-        assert!(known("ci_host::kept_clone::deep::", &d), "a prefix below a file module names its items");
+        assert!(
+            known("ci_host::kept_clone::deep::", &d),
+            "a prefix below a file module names its items"
+        );
         assert!(!known("other::", &d));
         assert!(known("p", &d) && !known("q", &d));
     }

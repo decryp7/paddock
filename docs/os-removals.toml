@@ -1,7 +1,9 @@
 # The user's approvals of `hostTests` entries that take an operating system away from code (`skip`, `only`): conformance C155's
 # os-removal compares every such entry with the contract at the merge base and counts the ones recorded here as approved (ER-46).
 # Each approval names its contract, the removal keys exactly as C155 reports them (`only <os> <name>`, `skip <package> [<module>]`),
-# `by = "user"`, the date and why. Adding an entry is the user's decision, never an agent's; an entry leaves with its exception.
+# `by = "user"`, the date and why. Adding an entry is the user's decision, never an agent's: the register is shrink-only, so C155 reports
+# an approval the merge base lacks as one unwaivable finding (the user's approval of growth is named in the C155 entry of docs/gates.toml),
+# and an approval the merge base already covers as stale. An entry leaves once its exception is on the target branch, or with it.
 version = 1
 
 [[approved]]
