@@ -16,7 +16,7 @@
 # Limits: a root that is itself a link is not resolved (the shared parity table names it); the links are checked, then removed,
 # so a link made in between (a race with another process writing below the root) is not seen, as in the Rust guard; and a root
 # must be two folders deep and not the home folder, so `/tmp/x` on Linux has no usable root (`/tmp` is top-level) and neither has
-# a folder directly in $HOME: such a caller waives the site (C127) or picks a deeper root. On Windows (Git Bash, MSYS, Cygwin) every path, $HOME included, is first spelled as `C:/x` by `cygpath -m`
+# a folder directly in $HOME: such a caller picks a deeper root. On Windows (Git Bash, MSYS, Cygwin) every path, $HOME included, is first spelled as `C:/x` by `cygpath -m`
 # (without cygpath only `\` becomes `/`), so `D:\a\_temp`, `D:/a/_temp` and `/d/a/_temp` are one folder; the drive is not a
 # folder name (`C:/x` is a top-level folder).
 # Variables are prefixed `_safe_rm_` (POSIX sh has no `local`); the function changes no option and no IFS.

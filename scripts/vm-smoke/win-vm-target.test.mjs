@@ -1,5 +1,5 @@
 // Review P1-1 (2026-11-08): the harness can only ever drive the one test VM, <dev disk>/vm-data/paddock-win11-test, derived from the
-// repository's git config alone; there is no override. The folders here are invented (C125: no machine's disk is named).
+// repository's git config alone; there is no override. The folders here are invented (rule 40: no machine's disk is named).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';

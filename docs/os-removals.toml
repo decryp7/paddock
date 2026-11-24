@@ -15,8 +15,6 @@ entries = [
   "only macos-latest brief_check::",
   "only macos-latest check::",
   "only macos-latest check_allow_list::",
-  "only macos-latest check_c125::",
-  "only macos-latest check_c129::",
   "only macos-latest check_ids::",
   "only macos-latest ci_runs::reservation::",
   "only macos-latest dev_tool_publish::",

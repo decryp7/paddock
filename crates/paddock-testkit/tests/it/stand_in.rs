@@ -407,7 +407,7 @@ fn echoing_stdin_in_a_case_reads_stdin_without_asking_for_it_twice() {
     assert_eq!(out(&child.wait_with_output().unwrap()), "piped text");
 }
 
-// What the shell-script fixtures needed (C130 conversion): output filled from the call, conditions, wrappers, pipes, installs.
+// What the shell-script fixtures needed (the 2026-11-19 conversion): output filled from the call, conditions, wrappers, pipes, installs.
 
 use paddock_testkit::{Case, Exec};
 

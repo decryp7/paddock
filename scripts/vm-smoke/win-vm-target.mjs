@@ -1,6 +1,6 @@
 // The one Windows VM the harness may ever drive (ADR 0040 §1; review P1-1, 2026-11-08). There is no override: the user's own
 // Fusion VMs must be impossible to target. vm-win.sh enforces the same folder on its side (scripts/vm-win/target.sh). The folder is
-// derived from the repository's git config alone, through `./dev places --pinned` (C125: no disk is named here).
+// derived from the repository's git config alone, through `./dev places --pinned` (rule 40: no disk is named here).
 //
 //   node scripts/vm-smoke/win-vm-target.mjs --vmx    prints the checked .vmx path, or exits 2 with an ::error:: line
 import { execFileSync } from 'node:child_process';

@@ -13,7 +13,7 @@
 //! Partly checked, said out loud: slicing another file's text by anchors and hard-coded paths into another crate (`11c365fc4`,
 //! `0308201b4`) have no cheap low-noise lint; the rule, review and the train's test run cover them. A test of a check of workflows
 //! may read them: each such site goes in `conformance/c121-allow.json` with its path, a `site` (a piece of the flagged line), a reason
-//! and, for a line the file repeats, a `count`; the shared [`super::allow_list`] (also C124's) warns on a stale entry, reports a site
+//! and, for a line the file repeats, a `count`; the shared [`super::allow_list`] (also C131's) warns on a stale entry, reports a site
 //! beyond an entry's count at its own line and never allows a whole file or folder.
 //!
 //! Not read: the check's own files ([`IMPLEMENTATION`], as C120's): their invented lines are test data, not reads.

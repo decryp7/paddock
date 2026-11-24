@@ -1,8 +1,8 @@
 //! `./dev conformance`: the command line of `paddock-conformance` (`conformance/src/cli.mjs`) on the Rust host, option for option,
 //! with the same output and exit codes, so a CI step can switch hosts without changing a line of its annotations: 0 clean, 1
 //! findings, 2 usage, 6 a check did not look, 7 a check is broken (ADR 0089). It runs the checks registered in [`super::registry`];
-//! the rest still run in the JavaScript host (`node conformance/bin/paddock-conformance.mjs`), which keeps `window-weight`, `sync`,
-//! `commit-lint` and `run` as well. The parity tests (`tests/it/check_engine.rs`) hold both hosts to the same findings.
+//! the rest still run in the JavaScript host (`node conformance/bin/paddock-conformance.mjs`), which keeps `window-weight`, `sync`
+//! and `commit-lint` as well. The parity tests (`tests/it/check_engine.rs`) hold both hosts to the same findings.
 
 use super::config::Config;
 use super::outcome::{self, exit_status};
@@ -20,12 +20,12 @@ const USAGE: &str = "usage: paddock-conformance --app <name> [--root <dir>] [--o
        paddock-conformance commands --json      # the subcommands, for docs that name them (ADR 0060)";
 
 /// The subcommands the JavaScript host has, in one place (`COMMANDS` in `cli.mjs`).
-pub const COMMANDS: [&str; 6] = ["list", "commands", "window-weight", "sync", "commit-lint", "run"];
+pub const COMMANDS: [&str; 5] = ["list", "commands", "window-weight", "sync", "commit-lint"];
 
 /// The subcommands only the JavaScript host has so far.
-const JS_ONLY: [&str; 4] = ["window-weight", "sync", "commit-lint", "run"];
+const JS_ONLY: [&str; 3] = ["window-weight", "sync", "commit-lint"];
 
-const VALUE: [&str; 18] = [
+const VALUE: [&str; 17] = [
     "stats",
     "max",
     "app",
@@ -40,12 +40,11 @@ const VALUE: [&str; 18] = [
     "preflight",
     "api",
     "repo",
-    "allow-home",
     "strict",
     "scope",
     "rules-md",
 ];
-const FLAGS: [&str; 6] = ["json", "keep", "write", "blocks-only", "record", "no-graph"];
+const FLAGS: [&str; 5] = ["json", "write", "blocks-only", "record", "no-graph"];
 
 /// The parsed `--key value` / `--flag` options.
 #[derive(Debug, Default, PartialEq, Eq)]

@@ -8,15 +8,15 @@
 // diverge on an error path": C125 in 865498235, then C121 and C124): an allow file that is missing, not JSON, without its list or with
 // a malformed entry is one unwaivable check-broken finding and nothing else (`readAllowList`), and a file the check cannot read is a
 // not-measured error at that file (`AllowList.read`).
-// The list only ever shrinks (ER-12, ER-21; C129's baseline has the same rule): `warnings` compares every entry, counted `count` times, with the list at
+// The list only ever shrinks (ER-12, ER-21): `warnings` compares every entry, counted `count` times, with the list at
 // the merge base (`baselineGrowth`, the one comparison C53 and C115 use), and an entry the merge base lacks, or a raised `count`, is one unwaivable finding
 // at the allow file that needs the user's approval. It runs only on a checkout (a folder git accepts as a work tree): a fixture folder has nothing to compare, and says
 // nothing; in a checkout where git cannot give a merge base it warns that the rule is not enforced (in CI a not-measured error, ADR 0089), never silence.
-// The base is the target ref (`targetRef` in baseline.mjs, the one reader of PADDOCK_BASE_REF). The growth finding is a warning only because the checks
-// that use this reader (C121, C124, C125, C130) are report-only themselves (ER-41); the blocking baselines (C53, C71, C104, C115) use the same ref and stay errors.
+// The base is the target ref (`targetRef` in baseline.mjs, the one reader of PADDOCK_BASE_REF). The growth finding is a warning for a report-only check
+// (ER-41) and an error for a blocking one (below); the blocking baselines (C53, C71, C104, C115) use the same ref and stay errors.
 // A check that blocks sets `growth: 'error'` in its spec (C30 and C140; JavaScript only, since neither has a Rust twin: a twinned check that sets it
 // must set it on both hosts, as the Rust reader's `Spec::growth_blocks` does for C131).
-// Used by C30, C121, C124, C125 and C130, each declaring the spec it reads with as `allowList` (Rust: `Check::allow_list`). Rust host: tools/paddock-dev/src/check/allow_list.rs (same
+// Used by C30, C135 and C140 here and C121 and C131 on the Rust host, each declaring the spec it reads with as `allowList` (Rust: `Check::allow_list`). Rust host: tools/paddock-dev/src/check/allow_list.rs (same
 // entries, same findings; tools/paddock-dev/tests/it/check_allow_list.rs compares the error paths of every user on both hosts).
 import { error, unwaivable, warn } from '../finding.mjs';
 import { baselineGrowth, isWorkTree, targetRef, unmeasuredFinding } from './baseline.mjs';
@@ -80,14 +80,14 @@ export class AllowList {
     return { text };
   }
 
-  /** Passes over `path` after reading it (C125: a file with a NUL byte is not text): it is not scanned, so an entry for it names a file the check does not read. */
+  /** Passes over `path` after reading it (C131: a file with a NUL byte is not text): it is not scanned, so an entry for it names a file the check does not read. */
   skip(path) {
     this.scanned.delete(path);
   }
 
   /**
-   * What the list says about one flagged site at `path`: `matches(site)` says whether an entry's `site` names it (C121 and C124: the
-   * flagged line holds the site's text; C125: the literal starts with the site's whole path components). 'allowed' counts the site on
+   * What the list says about one flagged site at `path`: `matches(site)` says whether an entry's `site` names it (C121 and C131: the
+   * flagged line holds the site's text). 'allowed' counts the site on
    * the first matching entry with room left; 'beyond' means entries name it but every one is at its count, and the caller reports it at
    * its own file and line; 'unlisted' means no entry names it.
    */

@@ -30,7 +30,7 @@ pub(crate) fn expect(case: &str, ours: &Value) -> Value {
 pub(crate) fn write(p: &std::path::Path, v: &Value) {
     std::fs::create_dir_all(p.parent().unwrap()).unwrap();
     crate::golden::record(p, v);
-    // C125 reads every file of the tree for a stale disk name, and a recording quotes the fixtures that plant one: the file spells
+    // A recording quotes fixtures that plant a disk path (rule 40: no file names a machine's disk): the file spells
     // the slash of `/Volumes/` as the JSON escape `\u002f` (the same value once read), so it names no disk; that lean-profile folder is spelled so
     // too, because the checkout profiles' test fails a file that names a path the lean profile leaves out.
     let text = std::fs::read_to_string(p)
@@ -130,7 +130,7 @@ pub(crate) fn frozen() -> (tempfile::TempDir, Value) {
     (tree, v)
 }
 
-/// The wording the hosts own differently, made equal on both sides: the command that regenerates a list (the JS tool is retired), the
+/// The wording the hosts own differently, made equal on both sides: the
 /// JSON parsers' own error text (serde_json and V8), the git error behind "no merge base" (a bare temporary folder), and a check that
 /// could not look at all, which the JS host calls "check broken: no <file> was found to read" and the Rust host "not measured": both
 /// are an unwaivable error that never passes (ER-33).
@@ -139,17 +139,13 @@ pub(crate) fn normal(report: &Value) -> Value {
     for list in ["findings", "waived"] {
         for f in v[list].as_array_mut().unwrap() {
             let mut m = f["message"].as_str().unwrap().to_string();
-            m = m.replace("node conformance/bin/paddock-shell-baseline.mjs", "./dev check shell-baseline");
             if let Some(i) = m.find(" is not JSON: ") {
                 m.truncate(i + " is not JSON: ".len());
             }
             if let Some(i) = m.find("no merge base (") {
                 m.truncate(i + "no merge base (".len());
             }
-            let fix = f["fix"]
-                .as_str()
-                .unwrap_or_default()
-                .replace("node conformance/bin/paddock-shell-baseline.mjs", "./dev check shell-baseline");
+            let fix = f["fix"].as_str().unwrap_or_default();
             let fix = fix.split(" is not JSON: ").next().unwrap_or_default().to_string();
             let refused = f["unwaivable"] == true
                 && f["severity"] == "error"
@@ -179,7 +175,7 @@ fn a_commit_in_a_message_is_scrubbed_and_nothing_else() {
     );
 }
 
-/// P1-1's positive control, both ways. A report with a new site the recorded answer never had (a planted shell script is a C129
+/// P1-1's positive control, both ways. A report with a new site the recorded answer never had (a planted site is a C121
 /// warning) is sound, so a later unrelated change cannot fail the live tests; a report whose control failed, that looked at nothing,
 /// that did not complete or that has an error is not.
 #[test]
@@ -187,17 +183,17 @@ fn a_new_site_in_the_live_tree_is_sound_and_a_broken_control_is_not() {
     let run = |check: &str, control: bool, probes: u64, completed: bool, met: bool| serde_json::json!({"check": check, "ran": true, "completed": completed, "control": control, "probes": probes, "precondition": {"met": met}});
     let report =
         |errors: u64, findings: Vec<Value>, runs: Vec<Value>| serde_json::json!({"errors": errors, "findings": findings, "runs": runs});
-    let planted = serde_json::json!({"check": "C129", "file": "apps/debrief/scripts/new.sh", "severity": "warn"});
+    let planted = serde_json::json!({"check": "C121", "file": "tools/paddock-dev/tests/it/new.rs", "severity": "warn"});
     assert!(
-        live_tree_problems(&report(0, vec![planted], vec![run("C129", true, 40, true, true)])).is_empty(),
+        live_tree_problems(&report(0, vec![planted], vec![run("C121", true, 40, true, true)])).is_empty(),
         "a new warning does not fail"
     );
     for (what, bad) in [
-        ("a failed control", report(0, vec![], vec![run("C129", false, 40, true, true)])),
-        ("nothing looked at", report(0, vec![], vec![run("C129", true, 0, true, true)])),
-        ("not completed", report(0, vec![], vec![run("C129", true, 40, false, true)])),
-        ("a failed precondition", report(0, vec![], vec![run("C129", true, 40, true, false)])),
-        ("an error", report(1, vec![], vec![run("C129", true, 40, true, true)])),
+        ("a failed control", report(0, vec![], vec![run("C121", false, 40, true, true)])),
+        ("nothing looked at", report(0, vec![], vec![run("C121", true, 0, true, true)])),
+        ("not completed", report(0, vec![], vec![run("C121", true, 40, false, true)])),
+        ("a failed precondition", report(0, vec![], vec![run("C121", true, 40, true, false)])),
+        ("an error", report(1, vec![], vec![run("C121", true, 40, true, true)])),
         ("no run record", report(0, vec![], vec![])),
     ] {
         assert!(!live_tree_problems(&bad).is_empty(), "{what} fails");

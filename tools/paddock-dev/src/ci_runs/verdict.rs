@@ -604,7 +604,7 @@ fn last_full(
 }
 
 /// The verdict as the shared outcome (ADR 0089 amendment, WP-T4): a green full run is [`Outcome::KnownCommit`] with the run as its
-/// evidence, made only by `Evidence::adopt` after `live` has re-read the commit (the one caller of `Evidence::ci_run`, held by C124);
+/// evidence, made only by `Evidence::adopt` after `live` has re-read the commit (the one caller of `Evidence::ci_run`);
 /// red is failing findings; anything else is not measured. The exit comes from this outcome, never from the enum.
 pub fn outcome(v: &Verdict, workflow: &str, sha: &str, live: &dyn LiveRepo) -> Outcome {
     let tool = || ToolVersion::new(concat!("paddock-dev ci verdict ", env!("CARGO_PKG_VERSION")));

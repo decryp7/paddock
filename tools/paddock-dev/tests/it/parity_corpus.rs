@@ -220,15 +220,15 @@ pub(crate) fn assert_known_divergence(id: &str, seeds: &[Seed], cause: &str) {
     );
 }
 
-/// The corpus sees a planted difference: giving the Rust host the text without its byte order mark removes C124's `bom` divergence.
+/// The corpus sees a planted difference: giving the Rust host the text without its byte order mark removes C121's `bom` divergence.
 #[test]
 fn the_corpus_sees_a_planted_byte_order_mark_difference() {
-    let real = divergences("C124", &[]);
+    let real = divergences("C121", &[]);
     assert!(
         real.iter().any(|d| d.contains("`bom`")),
-        "C124 diverges on the bom variant today: {real:?}"
+        "C121 diverges on the bom variant today: {real:?}"
     );
-    let planted = divergences_with("C124", &[], |t| t.trim_start_matches('\u{feff}').to_string());
+    let planted = divergences_with("C121", &[], |t| t.trim_start_matches('\u{feff}').to_string());
     assert!(
         !planted.iter().any(|d| d.contains("`bom`")),
         "a Rust host given the text without its BOM sees what JavaScript sees: {planted:?}"
@@ -270,32 +270,7 @@ fn c120_hosts_agree_on_the_corpus() {
     assert_no_divergence("C120", &[seed]);
 }
 
-#[test]
-fn c122_hosts_agree_on_the_corpus() {
-    assert_no_divergence(
-        "C122",
-        &[("crates/c/tests/it/first.rs", "let e = format!(\"{}/x\", p.display());\n")],
-    );
-}
-
-#[test]
-fn c125_hosts_agree_on_the_corpus() {
-    assert_no_divergence("C125", &[("scripts/first.sh", "x=/Volumes/d7sst7\n")]);
-}
-
 // Known divergences, found by this corpus on 2026-11-16 and fixed in train 14. Each fails once the hosts agree: remove the marker.
-
-/// C119 (measured 2026-11-16): on `crlf` the `waived` finding set differs (Rust keeps `\r` in the waiver's reason, so the waiver reads
-/// differently); with a line prepended (astral, case-fold, separators) Rust loses waived.yml's waiver (an extra finding at waived.yml);
-/// with a BOM the bad.yml site is not found. A YAML file has no line-1 site, so no seed.
-#[test]
-fn c119_known_divergence_crlf_in_the_waiver_and_a_prepended_line() {
-    assert_known_divergence(
-        "C119",
-        &[],
-        "Rust keeps \\r in the waiver reason; waived.yml's waiver is lost when lines are prepended",
-    );
-}
 
 /// C121 (measured 2026-11-16): on the `bom` variant the two hosts flag different sites: Rust warns 3 times where JavaScript warns 2.
 #[test]
@@ -303,9 +278,3 @@ fn c121_known_divergence_with_a_byte_order_mark() {
     assert_known_divergence("C121", &[], "the BOM variant warns 3 in Rust against 2 in JavaScript");
 }
 
-/// C124 (measured 2026-11-16): on the `bom` variant JavaScript's `trim()` strips U+FEFF and Rust's does not, so the JSON-object site
-/// on line 1 is read differently (2 findings in Rust, 1 in JavaScript).
-#[test]
-fn c124_known_divergence_trim_and_the_byte_order_mark() {
-    assert_known_divergence("C124", &[], "JS trim() strips U+FEFF, Rust's does not");
-}

@@ -1920,14 +1920,14 @@ scratch.finish()?;                                  // or just drop it: anything
   scratch whose `tmp()` is not empty panics with the names (not while the test is already failing); `finish()` returns them as an
   error to assert on. An unreadable `tmp()` counts as a leftover. `PADDOCK_TESTKIT_KEEP=1` keeps the folder of a failed test.
 - `env_lock()`: a process-wide lock (a lock poisoned by a failed test is recovered); `set`/`remove` restore the original values in
-  reverse order when the guard drops. `hermetic(&scratch)` is the in-process half of C14 (the wrapper `paddock-conformance run --`
-  is the other half).
+  reverse order when the guard drops. `hermetic(&scratch)` points HOME, the XDG folders, APPDATA and TMPDIR into the
+  scratch folder for the test process (rule 7).
 - Golden files: line endings normalised; the failure names the file, the first differing line and the update variable.
 - `FakeRunner`: `on("launchctl", &["print"]).reply(Reply::ok("..."))`, replies queue (`.then(...)`, the last repeats), the first
   matching rule answers, an unscripted command is an error reply, `calls()`/`lines()`/`count()` record. An app implements its own
   runner trait for it in its test module (Dyno's `Runner`).
 - `StandIn`: one stand-in program for any program a test plants (`cargo`, `git`, `npm`, `smartctl`, `df`), the same on every OS, instead of a
-  `#!/bin/sh` fixture (C130 lists the old ones). `StandIn::new(dir, "cargo").stdout("added 3 packages").exit(0).records_args().install()?`
+  `#!/bin/sh` fixture. `StandIn::new(dir, "cargo").stdout("added 3 packages").exit(0).records_args().install()?`
   hard-links the kit's std-only `paddock-stand-in` binary (compiled once per build folder with `rustc`, the one beside `$CARGO`; `PADDOCK_STAND_IN_BIN` names a
   prebuilt one built from the same sources, which the kit checks: the Windows test VM has no compiler, `docs/testing/windows-test-vm.md`) under the program's name, writes `<name>.stand-in.json` beside it and returns an `Installed`:
   `program()`, `dir()`, `calls()` / `invocations()` (arguments with spaces and non-ASCII as given, chosen env vars, stdin). Actions:

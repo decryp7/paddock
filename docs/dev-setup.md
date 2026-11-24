@@ -29,7 +29,7 @@ scripts/setup-dev.sh --install  # macOS: installs the missing tools, then report
 
 ## Where things live
 
-Code, scripts and docs never name a disk (C125, rule 40): a disk gets renamed or replaced, and a hard-coded path then goes
+Code, scripts and docs never name a disk (rule 40): a disk gets renamed or replaced, and a hard-coded path then goes
 stale without a sound (on 2026-11-14 the dev data moved disks, and the guards, the VM scripts and the dev tool's defaults all
 pointed at disks that were gone). Tools derive every folder from one setting per machine, `git config paddock.worktreeRoot`
 in the main checkout (repo-local, so every worktree sees it), and fail with an `::error::` and this next step when it is not

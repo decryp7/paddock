@@ -25,7 +25,6 @@ pub mod mask;
 pub mod outcome;
 pub mod record;
 pub mod report;
-pub mod shell_baseline;
 pub mod tree;
 pub mod util;
 pub mod waivers;
@@ -51,15 +50,9 @@ macro_rules! register_checks {
 register_checks! {
     c39::C39,
     c53::C53,
-    c119::C119,
     c120::C120,
     c121::C121,
-    c122::C122,
     c123::C123,
-    c124::C124,
-    c125::C125,
-    c129::C129,
-    c130::C130,
     c131::C131,
     c139::C139,
     c141::C141,
@@ -221,7 +214,7 @@ pub struct CheckOutput {
 }
 
 impl CheckOutput {
-    /// A check that does not apply to this run (C119 judges the Paddock repository only): no findings, and no error for having
+    /// A check that does not apply to this run (a check that judges the Paddock repository only): no findings, and no error for having
     /// looked at nothing. It counts as one probe so the host does not call the run empty; the precondition says why it is empty.
     pub fn not_applicable(why: &str) -> CheckOutput {
         CheckOutput {

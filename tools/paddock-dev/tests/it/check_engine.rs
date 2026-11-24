@@ -88,7 +88,7 @@ fn same(case: &str, args: &[&str]) -> Ran {
     rust
 }
 
-const PORTED: &str = "C39,C53,C119,C120";
+const PORTED: &str = "C39,C53,C120";
 
 fn tree(files: &[(&str, &str)]) -> tempfile::TempDir {
     let d = tempfile::tempdir().unwrap();
@@ -120,9 +120,9 @@ fn tree_this_working_tree_gives_a_sound_report() {
         ci: Some(false),
     };
     crate::recorded::assert_live_tree_sound("engine", &run_checks(&opts, &check::registry()).unwrap().json());
-    assert!(r.stdout.contains("paddock: 4 checks"), "{}", r.stdout);
+    assert!(r.stdout.contains("paddock: 3 checks"), "{}", r.stdout);
     let out: Value = serde_json::from_str(r.out.as_deref().unwrap()).unwrap();
-    assert_eq!(out["checks"], json!(["C39", "C53", "C119", "C120"]));
+    assert_eq!(out["checks"], json!(["C39", "C53", "C120"]));
     assert!(
         out["waived"].as_array().unwrap().iter().any(|w| w["waiver"]["expires"] == "inline"),
         "the inline waivers of the tree are listed under waived"
@@ -135,7 +135,7 @@ fn json_mode_strict_and_the_exit_statuses_agree() {
     let root = root.to_str().unwrap();
     let scratch = tempfile::tempdir().unwrap();
     let json_run = run_host(
-        &["--app", "paddock", "--root", root, "--only", "C119,C120", "--json"],
+        &["--app", "paddock", "--root", root, "--only", "C120", "--json"],
         scratch.path(),
     );
     assert!(json_run.stdout.trim_start().starts_with('{'));
@@ -229,10 +229,6 @@ fn a_marker_in_a_string_literal_is_no_waiver_in_either_host() {
             "crates/a/src/l.rs",
             "// conformance: file-layout-guess — \"filler data\"\n#[cfg(test)]\nmod tests {\n    const M: &str = \"// conformance: layout-guess — pinned layout\";\n    fn a() { let q = base.join(\"deps\"); }\n}\n",
         ),
-        (
-            ".gitea/workflows/w.yml",
-            "jobs:\n  a:\n    steps:\n      - run: echo \"# conformance: dev-before-toolchain — the image has the only compiler\" && ./dev x\n",
-        ),
     ]);
     let r = same(
         "engine-string-markers",
@@ -256,12 +252,12 @@ fn a_marker_in_a_string_literal_is_no_waiver_in_either_host() {
         .iter()
         .map(|f| format!("{}:{}", f["file"].as_str().unwrap(), f["line"]))
         .collect();
-    for want in ["crates/a/tests/s.rs:3", "crates/a/src/k.rs:3", ".gitea/workflows/w.yml:4"] {
+    for want in ["crates/a/tests/s.rs:3", "crates/a/src/k.rs:3"] {
         assert!(sites.iter().any(|s| s == want), "{want} stays a finding: {sites:?}");
     }
 }
 
-/// Every kind of inline waiver of the four ported checks, the bare ones, and a dated waiver beside them.
+/// Every kind of inline waiver of the three ported checks, the bare ones, and a dated waiver beside them.
 fn waiver_tree() -> tempfile::TempDir {
     tree(&[
         (
@@ -271,10 +267,6 @@ fn waiver_tree() -> tempfile::TempDir {
         (
             "crates/a/src/k.rs",
             "fn a(h: HANDLE) {\n    // conformance: pid-kill — a handle this process owns\n    unsafe { TerminateProcess(h, 1) };\n}\nfn b(h: HANDLE) {\n    unsafe { TerminateProcess(h, 1) }; // conformance: pid-kill\n}\nfn c(p: Pid, s: &System) {\n    // conformance: pid-liveness — the pid came from our own child handle\n    let _ = s.process(Pid::from(p));\n}\n",
-        ),
-        (
-            ".gitea/workflows/w.yml",
-            "jobs:\n  a:\n    steps:\n      # conformance: dev-before-toolchain — the image has the only compiler\n      - run: ./dev x\n  b:\n    steps:\n      # conformance: dev-before-toolchain\n      - run: ./dev y\n  c:\n    steps:\n      - run: ./dev z\n",
         ),
         (
             "crates/a/src/l.rs",
@@ -290,7 +282,6 @@ fn waiver_tree() -> tempfile::TempDir {
 #[test]
 fn inline_waivers_are_listed_under_waived_identically_by_both_hosts() {
     let d = waiver_tree();
-    // C119 judges the Paddock repository only (the JavaScript check returns nothing for another app): the same app name in both.
     let r = same(
         "engine-inline-waivers",
         &["--app", "paddock", "--root", d.path().to_str().unwrap(), "--only", PORTED, "--json"],
@@ -310,14 +301,13 @@ fn inline_waivers_are_listed_under_waived_identically_by_both_hosts() {
         .collect();
     assert_eq!(
         listed.len(),
-        6,
-        "freed-port, pid-kill, pid-liveness, dev-before-toolchain and both layout-guess forms: {listed:?}"
+        5,
+        "freed-port, pid-kill, pid-liveness and both layout-guess forms: {listed:?}"
     );
     for (check, reason) in [
         ("C39", "handed to a child that retries"),
         ("C53", "a handle this process owns"),
         ("C53", "the pid came from our own child handle"),
-        ("C119", "the image has the only compiler"),
         ("C120", "filler data only"),
         ("C120", "pinned layout"),
     ] {
@@ -518,9 +508,9 @@ fn the_contracts_rust_list_is_the_registry_less_what_the_javascript_host_still_l
 
 #[test]
 fn a_new_rust_check_file_is_named_in_the_registry_message() {
-    let modules: Vec<String> = ["c119", "c39", "c53", "c999", "c1000"].map(String::from).to_vec();
+    let modules: Vec<String> = ["c120", "c39", "c53", "c999", "c1000"].map(String::from).to_vec();
     let want = expected_registry(&modules);
-    assert_eq!(want, ["C39", "C53", "C119", "C999", "C1000"]);
+    assert_eq!(want, ["C39", "C53", "C120", "C999", "C1000"]);
     assert_eq!(
         macro_lines(&want[3..]),
         "    c999::C999,\n    c1000::C1000,",

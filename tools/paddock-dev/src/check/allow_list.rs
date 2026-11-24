@@ -7,11 +7,11 @@
 //! The reader also owns the error paths, so every check that uses it has the same ones on both hosts (ER-21 class "the two hosts
 //! diverge on an error path": C125 in 865498235, then C121 and C124): an allow file that is missing, not JSON, without its list or
 //! with a malformed entry is one unwaivable check-broken finding and nothing else ([`read`]), and a file the check cannot read is a
-//! not-measured error at that file ([`AllowList::read`]). Used by C121, C124 and C125, each declaring the [`Spec`] it reads with in
+//! not-measured error at that file ([`AllowList::read`]). Used by C121 and C131, each declaring the [`Spec`] it reads with in
 //! [`super::Check::allow_list`]. The port of `conformance/src/util/allow-list.mjs`; `tests/it/check_allow_list.rs` compares the error
 //! paths of every user on both hosts.
 //!
-//! The list only ever shrinks (ER-12, ER-21; C129's baseline has the same rule): the reader compares every entry, counted `count` times,
+//! The list only ever shrinks (ER-12, ER-21): the reader compares every entry, counted `count` times,
 //! with the list at the merge base (`baseline::growth`, the one comparison C53 and C115 use), and an entry the merge base lacks, or a
 //! raised `count`, is one unwaivable finding at the allow file that needs the user's approval. The comparison runs only on a checkout
 //! (a folder git accepts as a work tree): a tree in memory (a control) or a fixture folder has nothing to compare, and says nothing. In a checkout
@@ -230,7 +230,7 @@ impl AllowList {
         ))
     }
 
-    /// Passes over `path` after reading it (C125: a file with a NUL byte is not text): it is not scanned, so an entry for it names a
+    /// Passes over `path` after reading it (C131: a file with a NUL byte is not text): it is not scanned, so an entry for it names a
     /// file the check does not read, and it is no probe.
     pub fn skip(&mut self, path: &str) {
         self.scanned.remove(path);
@@ -250,8 +250,8 @@ impl AllowList {
         }
     }
 
-    /// What the list says about one flagged site at `path`: `matches(site)` says whether an entry's `site` names it (C121 and C124:
-    /// the flagged line holds the site's text; C125: the literal starts with the site's whole path components). The site counts on the
+    /// What the list says about one flagged site at `path`: `matches(site)` says whether an entry's `site` names it (C121 and C131:
+    /// the flagged line holds the site's text). The site counts on the
     /// first matching entry with room left; when every matching entry is at its count it is [`Admit::Beyond`], and the caller reports
     /// it at its own file and line.
     pub fn admit(&mut self, path: &str, matches: impl Fn(&str) -> bool) -> Admit {

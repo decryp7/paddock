@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { findingsOf, makeApp, messages } from './helpers.mjs';
+import { makeApp } from './helpers.mjs';
 import { main } from '../src/cli.mjs';
 import { budgetKb, chunkOf, indexOutputs, measure, packageOf, report, staticClosure, windowEntries } from '../src/window-weight/measure.mjs';
 
@@ -55,31 +55,6 @@ test('helpers: packages, closure with cycles and unknown files, chunk lookup, bu
   assert.match(report(measure(outputs, 'main')), /1030\.0 kB in 6 chunks[\s\S]*heaviest packages:/);
 });
 
-test('C29 good: within budget and tight', async () => {
-  assert.deepEqual(await findingsOf('C29', app({ main: { maxKb: budgetKb(MAIN_KB * KB) } })), []);
-});
-
-test('C29 bad: over budget is an error; a loose budget and a missing budget warn', async () => {
-  const over = await findingsOf('C29', app({ main: { maxKb: 1000 } }));
-  assert.equal(over[0].severity, 'error');
-  assert.match(over[0].message, /loads 1030\.0 kB .* over its 1000 kB budget/);
-  const loose = await findingsOf('C29', app({ main: { maxKb: 5000 } }));
-  assert.deepEqual(loose.map((f) => f.severity), ['warn']);
-  assert.match(loose[0].fix, /Tighten it to 1133 kB/);
-  assert.match(messages(await findingsOf('C29', app({ main: {} }))), /no maxKb/);
-});
-
-test('C29 bad: a window that is not in the build, a broken metafile, no stats, no configuration', async () => {
-  assert.match(messages(await findingsOf('C29', app({ ghost: { maxKb: 1 } }))), /"ghost" window's entry chunks are not in the build stats/);
-  assert.match(messages(await findingsOf('C29', app({ main: { maxKb: 1 } }, { 'app/dist/app/browser-stats.json': '{"x":1}' }))), /not an esbuild metafile/);
-  assert.match(messages(await findingsOf('C29', app({ main: { maxKb: 1 } }, { 'app/dist/app/browser-stats.json': 'nope' }))), /not an esbuild metafile/);
-  const noStats = await findingsOf('C29', makeApp({ 'paddock.conformance.json': JSON.stringify({ windowWeight: { windows: { main: { maxKb: 1 } } } }) }));
-  assert.deepEqual(noStats.map((f) => f.severity), ['warn']);
-  assert.deepEqual((await findingsOf('C29', makeApp({ 'a.txt': 'x' }))).map((f) => f.severity), ['warn']);
-  const custom = makeApp({ 'paddock.conformance.json': JSON.stringify({ windowWeight: { stats: 'out/stats.json', windows: { main: { maxKb: budgetKb(MAIN_KB * KB) } } } }), 'out/stats.json': JSON.stringify({ outputs }) });
-  assert.deepEqual(await findingsOf('C29', custom), []);
-});
-
 test('window-weight CLI: report, --max, configured windows, --record writes measured + 10% and keeps other keys', async () => {
   const root = app({ main: { maxKb: 2000 } }, { 'paddock.conformance.json': JSON.stringify({ app: 'demo', windowWeight: { windows: { main: { maxKb: 2000 } } }, sidecars: [] }) });
   const lines = [];
@@ -94,7 +69,6 @@ test('window-weight CLI: report, --max, configured windows, --record writes meas
   assert.equal(saved.windowWeight.windows.about.maxKb, 386);
   assert.deepEqual(saved.sidecars, []);
   assert.equal(saved.app, 'demo');
-  assert.deepEqual(await findingsOf('C29', root), [], 'recorded budgets satisfy the check');
 });
 
 test('window-weight CLI: unreadable stats, unknown window and no windows are usage errors', async () => {

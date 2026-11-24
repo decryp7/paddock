@@ -193,7 +193,7 @@ impl Evidence {
         self.at
     }
 
-    /// Evidence of a complete CI run on `sha`. Public, with one allowed caller (`ci_runs::verdict`), held by check C124.
+    /// Evidence of a complete CI run on `sha`. Public, with one allowed caller (`ci_runs::verdict`).
     pub fn ci_run(
         check: CheckId,
         workflow: &str,

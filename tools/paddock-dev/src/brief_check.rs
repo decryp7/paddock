@@ -34,7 +34,7 @@ pub struct CheckArgs {
 /// The longest commit subject the commit-msg hook accepts.
 pub const MAX_SUBJECT: usize = 100;
 
-/// Where a brief's agent may work, derived from the repository ([`crate::places`]), never a disk named in the code (C125): the
+/// Where a brief's agent may work, derived from the repository ([`crate::places`]), never a disk named in the code (rule 40): the
 /// dev-targets folder (worktrees and scratch go below it) and the main checkout (no git writes there).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Places {
