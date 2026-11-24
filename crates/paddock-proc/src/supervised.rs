@@ -282,6 +282,22 @@ impl Supervised {
         Supervised::spawn_identified(global_registry(), cmd, cap, ProcessId::of, Some(folder))
     }
 
+    /// [`Supervised::spawn_in`] for a child of a [`crate::scope::Scope`]: `folder` (the scope's) is removed by the orphan
+    /// guardian if this process dies without ending the child (Unix), as [`Supervised::spawn_owning_folder`] does.
+    pub(crate) fn spawn_scoped(
+        registry: &Registry,
+        cmd: Command,
+        folder: Option<&std::path::Path>,
+    ) -> std::io::Result<Supervised> {
+        Supervised::spawn_identified(registry, cmd, None, ProcessId::of, folder)
+    }
+
+    /// The held child while it has not been killed or waited for (Windows: a scope's job takes it in by its handle).
+    #[cfg(windows)]
+    pub(crate) fn child(&self) -> Option<&Child> {
+        self.child.as_ref()
+    }
+
     /// [`Supervised::spawn_in`] with the way the child's identity is read (tests: a child whose start time is unknown).
     fn spawn_identified(
         registry: &Registry,

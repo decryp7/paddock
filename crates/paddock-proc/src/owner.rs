@@ -27,6 +27,8 @@ pub enum Waited {
     Gone,
     /// The bound passed first; something the owner holds still runs.
     Bound,
+    /// The owner's cancel ended the wait first (ADR 0119); what it holds may still run until the owner ends it.
+    Cancelled,
 }
 
 /// What an owner of started things offers (see the module). The owner holds the handles; nothing here finds a process again by

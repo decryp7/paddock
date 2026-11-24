@@ -67,6 +67,7 @@ mod owner;
 pub mod queue_stall;
 mod run;
 mod runstate;
+pub mod scope;
 pub mod self_test;
 mod session;
 mod stall;

@@ -184,6 +184,16 @@ impl KillOnClose {
         crate::job::Job::assign(child, None).map(KillOnClose)
     }
 
+    /// A new, empty kill-on-close job: a [`crate::scope::Scope`]'s one job, which each of its children joins ([`KillOnClose::add`]).
+    pub fn new() -> std::io::Result<KillOnClose> {
+        crate::job::Job::create(None).map(KillOnClose)
+    }
+
+    /// Puts `child` into this job too; what it starts afterwards joins as well (nested jobs, Windows 8 and later).
+    pub fn add(&self, child: &std::process::Child) -> std::io::Result<()> {
+        self.0.add(child)
+    }
+
     /// Ends every process in the job now, through the job's handle.
     pub fn terminate(&self) {
         self.0.terminate();

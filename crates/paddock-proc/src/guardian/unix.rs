@@ -34,6 +34,16 @@ pub(crate) const MARKER: &str = ".paddock-proc-guardian";
 /// How often, and how many times, the guardian looks whether an ended group has emptied before it removes the folder.
 const EMPTY_LOOK: Duration = Duration::from_millis(50);
 const EMPTY_LOOKS: u32 = 200;
+/// The line the guardian writes on its standard error once it has checked its owner and serves it (ADR 0119 WP-1): the
+/// owner waits for it before its first registration counts, so an owner killed right after its first start is still
+/// served (a guardian that had not checked yet found pid 1 as its parent and refused).
+const SERVING: &str = "paddock-proc-guardian: serving";
+/// The longest the owner waits for [`SERVING`]: the guardian is this executable run again, and a refused guardian ends at
+/// once (end of file), so the bound only meets a guardian stopped before its check (App Tamer, a debugger). Measured
+/// 2026-11-24 on the Mac mini at a 1-minute load of 27 to 35: a first start including the guardian's answer took 6 ms at the
+/// median and 28 ms at the worst of 50 (docs/benchmarks.md, "scope grace: from the stop request to the exit"); ten seconds
+/// is far above that and still ends a start whose guardian never answers (it then goes on unguarded until the answer).
+const SERVING_BOUND: Duration = Duration::from_secs(10);
 /// The longest line the guardian takes (a folder of 4096 bytes is 8192 hex digits).
 const MAX_LINE: usize = 16 << 10;
 
@@ -192,6 +202,7 @@ fn start(args: &[OsString], me: ProcessId) -> std::io::Result<Running> {
     let exe = std::env::current_exe()?;
     let (from_owner, to) = std::io::pipe()?;
     let (keeper_input, keeper_hold) = std::io::pipe()?;
+    let (ready, ready_tx) = std::io::pipe()?;
     let mut cmd = plumbing(exe);
     cmd.args(args)
         .env(GUARDIAN_ENV, "1")
@@ -199,7 +210,7 @@ fn start(args: &[OsString], me: ProcessId) -> std::io::Result<Running> {
         .env_remove(LOG_ENV)
         .stdin(from_owner)
         .stdout(keeper_hold)
-        .stderr(Stdio::null())
+        .stderr(ready_tx)
         .process_group(0);
     let log = log_path();
     if let Some(l) = &log {
@@ -210,12 +221,31 @@ fn start(args: &[OsString], me: ProcessId) -> std::io::Result<Running> {
         // The guardian is a process of its own: it acts as the user too.
         cmd.env(ACT_AS_USER_ENV, "1");
     }
-    let child = cmd.spawn()?;
-    log::info!(
-        "Started the orphan guardian (pid {}) for this process's supervised children; its log is {}",
-        child.id(),
-        log_text(log.as_deref())
-    );
+    let began = std::time::Instant::now();
+    let mut child = cmd.spawn()?;
+    // Our copy of the ready pipe's write end goes with the command, so a guardian that ends gives end of file.
+    drop(cmd);
+    match serving(ready, SERVING_BOUND) {
+        Serving::Yes => log::info!(
+            "Started the orphan guardian (pid {}) for this process's supervised children; it serves after {} ms; its log is {}",
+            child.id(),
+            began.elapsed().as_millis(),
+            log_text(log.as_deref())
+        ),
+        Serving::Refused => {
+            crate::cleanup::logged("reaping a guardian that refused", child.wait());
+            return Err(std::io::Error::other(format!(
+                "it refused to serve (its log, {}, says why)",
+                log_text(log.as_deref())
+            )));
+        }
+        Serving::NoAnswer => log::warn!(
+            "The orphan guardian (pid {}) did not say it serves within {} s; this process's children are registered with \
+             it anyway, and are guarded once it does",
+            child.id(),
+            SERVING_BOUND.as_secs()
+        ),
+    }
     Ok(Running {
         child,
         to,
@@ -695,6 +725,53 @@ impl Ends for OsEnds {
     }
 }
 
+/// What the owner learned from the guardian's ready pipe.
+enum Serving {
+    Yes,
+    /// End of file before [`SERVING`]: it refused (or died) before it served.
+    Refused,
+    /// Nothing within the bound.
+    NoAnswer,
+}
+
+/// Reads the guardian's standard error up to [`SERVING`] or its end, on a thread of its own, for at most `bound`. Other lines
+/// (a test harness's) are skipped. A thread left reading after the bound ends when the guardian writes or ends.
+fn serving(ready: std::io::PipeReader, bound: Duration) -> Serving {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut ok = false;
+        for line in std::io::BufReader::new(ready).lines() {
+            match line {
+                Ok(l) if l.trim() == SERVING => {
+                    ok = true;
+                    break;
+                }
+                Ok(_) => {}
+                Err(_) => break,
+            }
+        }
+        // silent: the owner stopped waiting after its bound, and nothing reads the answer then
+        #[allow(clippy::let_underscore_must_use)]
+        let _: Result<(), _> = tx.send(ok);
+    });
+    match rx.recv_timeout(bound) {
+        Ok(true) => Serving::Yes,
+        Ok(false) => Serving::Refused,
+        Err(_) => Serving::NoAnswer,
+    }
+}
+
+/// Tells the owner that this guardian serves it ([`SERVING`] on standard error, the owner's ready pipe), then lets go of the
+/// pipe: standard error is not used after this.
+fn say_serving() {
+    let mut err = std::io::stderr().lock();
+    crate::cleanup::logged(
+        "telling the owner that the guardian serves",
+        err.write_all(format!("{SERVING}\n").as_bytes())
+            .and_then(|()| err.flush()),
+    );
+}
+
 /// The guardian process: checks who started it, serves the owner on `input` and returns the exit code.
 fn serve(input: impl BufRead) -> i32 {
     if runs_as_root() {
@@ -748,6 +825,7 @@ fn serve(input: impl BufRead) -> i32 {
         ends.log(&format!("refused to serve: {why}"));
         return 2;
     }
+    say_serving();
     guard(input, &mut ends, EMPTY_LOOKS);
     // The keepers' pipe closes with this process, so the keepers of groups that were not ended end too.
     0
