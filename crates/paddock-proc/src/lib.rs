@@ -63,6 +63,7 @@ mod instance;
 mod job;
 mod login;
 pub mod own;
+mod owner;
 pub mod queue_stall;
 mod run;
 mod runstate;

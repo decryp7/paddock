@@ -3656,3 +3656,17 @@ logged with what the rule saw (ER-27). Lesson: an admission rule needs a cost, n
 - **Seen on the way (fix item, not this change).** Shuffled order (`sequence.shuffle`, seeds 8753 and 4242) fails 8 and 11 other Debrief
   tests, all order-dependent (native-feel.spec.ts, app.spec.ts, palette.spec.ts, timeline-panel.spec.ts, testing/startup.spec.ts), none a
   timeout. ER-29's nightly shuffled run would show them.
+
+## The runner does give a Windows job a job object; macOS is the gap (2026-11-21, ADR 0112)
+- **What was wrong:** the lesson "Job processes (ER-14)" of 2026-11-21 (`feat/lessons-check-and-job-cleanup`) says the host runner
+  gives a job no process group or job object that its end closes, and that a Windows job object per job "needs the runner's
+  cooperation, which it does not give". Read at the tags we run (v5.4.1 on the Mac, v6.0.1 on Windows, from job logs 43808 and
+  43703), the runner puts every step of a job into one job object per job and terminates it in `Remove` at the job's end
+  (`internal/pkg/process/group_windows.go`, gitea/runner #1080). So on Windows a job's processes already end with the job. The
+  marker cleanup's "not measured" there stays until a positive control on the real runner measures it (ADR 0112 WP-1).
+- **The real gap is macOS:** each step leads its own process group, which the runner signals only on cancel; at the job's end it
+  kills by `RUNNER_TRACKING_ID` in the environment, and macOS shows no environment of a program Apple ships (measured on 27.2.1:
+  `/bin/sleep` hides it, an ad-hoc signed copy shows it). A bash script left by a step that ended normally lives on.
+- **Lesson:** read the other program's source at the version that runs before writing what it does not do; the claim came from a
+  note about the step's own job object (`slots.rs`, whose note names only that one; ADR 0112 WP-7 adds the job's), not from the job's.
+- **Class: an owner ends but not what it started** (82d5ee496, ADR 0103, c528dbfb1): ADR 0112 makes the job the unit.
