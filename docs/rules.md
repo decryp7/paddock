@@ -24,6 +24,8 @@ The Paddock incidents, run ids and ADR numbers behind each ER rule are in
    raised without a named, measured cause recorded next to it (ER-12); otherwise the cause is fixed. A new gate, CI job or
    check starts report-only and blocks only after its first green run on the real tree, recorded by run id where the
    gate is defined (ER-41). Every report-only check, register and hook carries a review date; if it caught nothing real by then it is deleted, not extended, and extending needs the user (ER-41, 2026-11-24).
+   A report-only gate reports in the job summary, a `::warning::` per finding and the terminal, with a test
+   that a planted finding appears there (ER-41, user, 2026-11-24).
    A FLAKY test (fails, then passes on its one retry) blocks a landing only when the change touches the test itself or the
    source it exercises (its feature or module); see rule 50 (k) (ER-12, user, 2026-11-19).
    A reviewer of a bug fix runs a mutation check on it (user, 2026-10-30), in their own worktree: for Rust,
@@ -213,7 +215,7 @@ The Paddock incidents, run ids and ADR numbers behind each ER rule are in
     zero rows and failed 31 of 240 runs under the pinned clock).
     (e) A claim that a timing-sensitive spec passes or is stable states its runs, workers and engines (or OS). An e2e timing fix
     needs at least 20 runs per engine at 4 workers, or more when the measured failure rate requires it; a bare "N of N green" is
-    rejected in review (ER-28, user, 2026-11-17). *Why:* on 2026-11-16 a Debrief live-tail fix was reported "3 of 3" and was 3 of 7
+    rejected in review (ER-28, user, 2026-11-17). A speed claim made on a shared machine compares CPU time or interleaved A/B runs and states the load, never elapsed time alone (ER-28, user, 2026-11-24). *Why:* on 2026-11-16 a Debrief live-tail fix was reported "3 of 3" and was 3 of 7
     red, and "12 of 12" was 4 of 150 red (`fix/debrief-events-grid-live-tail`, `fix/debrief-live-tail-adr`).
 
 ## CI economy (user, 2026-10-29)

@@ -3877,3 +3877,10 @@ made generic. The generic rule text stays in that repository; its incident detai
 ### PRINCIPLES.md: clause
 
 - **State another program owns.** An adapter that writes a config file, OS object or resource another program owns names that owner and the spec it follows, and either preserves everything it does not model (comments, order, unknown keys) or touches only items it marked as its own, refusing unmarked ones with a next step. An open-ended external format also gets a raw view, with secrets masked and the mask never saved. Why: on 2026-11-20 a partial settings form hid a runner's cache server and its raw view showed secrets, and a PerfMon install deleted any same-named collector set (Paddock ADR 0110).
+Measuring and reporting (2026-11-24)
+- Compare CPU time or interleaved A/B runs on a shared machine, never elapsed time alone, and state the load. A graph train was
+  reported to make a test 40% slower: that was elapsed time at load 42 to 121; CPU time over 5 interleaved rounds showed 11%
+  (docs/benchmarks.md; ER-28).
+- A report-only gate must report where people look: the job summary, one `::warning::` per finding in CI, the terminal locally, with a
+  test that a planted finding appears there. The test-cost check (ADR 0121) first wrote into passing tests' stderr, which nextest
+  hides (ER-41).
