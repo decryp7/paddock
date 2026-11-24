@@ -74,17 +74,6 @@ cost = "heavy"
 drift_marker = ["needs to be updated", "duplicate key", "cannot update the lock file"]
 
 [[generator]]
-id = "cargo-lock-tools-wiki"
-what = "tools/wiki/Cargo.lock resolves with --locked (a manifest change, a duplicate key or a shared crate's new dependency leaves it stale)"
-check = ["sh", "-c", "cargo metadata --locked --format-version 1 >/dev/null"]
-regenerate = "cargo metadata --format-version 1 >/dev/null   # without --locked cargo rewrites Cargo.lock; commit it"
-cwd = "tools/wiki"
-paths = ["tools/wiki/Cargo.toml", "tools/wiki/Cargo.lock", "crates/*/Cargo.toml"]
-outputs = ["tools/wiki/Cargo.lock"]
-cost = "heavy"
-drift_marker = ["needs to be updated", "duplicate key", "cannot update the lock file"]
-
-[[generator]]
 id = "cargo-lock-debrief"
 what = "apps/debrief/Cargo.lock resolves with --locked (a manifest change, a duplicate key or a shared crate's new dependency leaves it stale)"
 check = ["sh", "-c", "cargo metadata --locked --format-version 1 >/dev/null"]

@@ -111,8 +111,8 @@ enum Command {
         #[command(subcommand)]
         command: queue::QueueCommand,
     },
-    /// The CI planner: which projects a change reaches, the CI matrix and the commit lint's range (the port of
-    /// the retired scripts/affected.mjs; the arguments are its: <base> [<head>], --files a,b, --all, --ci [--app x], --commit-range, --commit-flags, --explain).
+    /// The CI planner: which projects a change reaches and the CI matrix (the port of the retired scripts/affected.mjs; the
+    /// arguments are its: <base> [<head>], --files a,b, --all, --ci [--app x], --explain, and --since-run <run>).
     /// It prints no JSON object: `--json` is refused.
     Plan(PlanArgs),
     /// Merge checks.

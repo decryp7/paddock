@@ -290,7 +290,7 @@ test('commit-lint --range and C23 judge a re-land that descends from the rule co
 test('CI: every job that runs commit-lint --range or C23 checks out full history (a shallow clone would make the re-land rule not measured)', () => {
   const wf = readFileSync(new URL('../../.gitea/workflows/ci.yml', import.meta.url), 'utf8');
   const job = (name) => wf.split(/^  (?=[a-z0-9-]+:\n)/m).find((j) => j.startsWith(`${name}:`)) ?? '';
-  for (const name of ['conformance', 'commits', 'train-gates']) {
+  for (const name of ['conformance']) {
     const j = job(name);
     assert.ok(j.length > 100, `${name} job found`);
     assert.match(j, /actions\/checkout@v4[\s\S]*?fetch-depth: 0/, `${name} checks out with fetch-depth: 0`);

@@ -501,7 +501,7 @@ test('the sccache-stats action prints the statistics and tolerates a missing scc
     }
     return found;
   };
-  const rustJobs = ['ipc-endpoints', 'ui', 'e2e', 'conformance', 'tools', 'wiki', 'heavy', 'icons', 'eslint-preset', 'crates', 'crate', 'audit', 'train-gates', 'app', 'paddock-dev']; // audit: ./dev audit compare; conformance: ./dev gates check (C100, ADR 0060)
+  const rustJobs = ['ui', 'e2e', 'conformance', 'tools', 'heavy', 'crates', 'crate', 'audit', 'app', 'paddock-dev']; // audit: ./dev audit compare; conformance: ./dev gates check (C100, ADR 0060)
   assert.deepEqual(jobsUsing('setup-rust'), rustJobs, 'setup-rust in every job that builds Rust');
   assert.deepEqual(jobsUsing('sccache-stats'), rustJobs, 'stats after each');
   assert.doesNotMatch(ci, /setup-rust\n\s+if: runner\.os/, 'no OS leg is left out');
@@ -923,18 +923,22 @@ test('the test browser of a host job lives in a kept folder of its job slot, out
   assert.ok(ci.indexOf('PADDOCK_TEST_BROWSER_DIR') < ci.indexOf('uses: ./.gitea/actions/install-test-browser'), 'the folder is chosen before the browser is installed');
 });
 
-test('the WebKit job runs on the Mac runner when the planner says so (a push to main, a v* tag, the webkit input) and runs the three WebKit projects', () => {
+test('the WebKit job runs on the Mac runner when the planner says so (a v* tag, the nightly, the webkit input) and runs the three WebKit projects', () => {
   const ci = read(join(WORKFLOWS, 'ci.yml'));
   const on = ci.match(/^on:\n((?:[ \t]+.*\n|\n)+)/m)?.[1] ?? '';
   assert.match(on, /push:\n\s+branches: \[main\]\n\s+tags: \["v\*"\]/, 'a push is only main or a v* tag');
   const job = ci.match(/^  e2e-webkit:\n((?:    .*\n|\n)+)/m)?.[1] ?? '';
   assert.notEqual(job, '', 'the e2e-webkit job exists');
   assert.match(job, /runs-on: macos-latest/);
-  // One expression for WebKit (ADR 0113): the planner's `webkit` output (plan_ci::wants_webkit: a push to main or a tag, the nightly, the
-  // webkit input), which the scope the run declares also reads. The workflow keeps no second condition that could drift from it.
-  const cond = job.match(/^    if: (.*)$/m)?.[1] ?? '';
-  assert.match(cond, /needs\.plan\.outputs\.webkit == 'true'/, 'the planner decides whether WebKit runs');
-  assert.doesNotMatch(cond, /pull_request|inputs\.webkit|github\.ref/);
+  // One expression for WebKit (ADR 0113): the planner's `webkit` output (plan_ci::wants_webkit: a tag, the nightly, the webkit input),
+  // which the scope the run declares also reads. The workflow keeps no second condition that could drift from it. The Chromium reference
+  // job reads the same value (user, 2026-11-24: the reference apps' browser jobs are the nightly's, never a branch's or a train's).
+  for (const id of ['e2e-webkit', 'e2e']) {
+    const block = ci.match(new RegExp(`^  ${id}:\\n((?:    .*\\n|\\n)+)`, 'm'))?.[1] ?? '';
+    const cond = block.match(/^    if: (.*)$/m)?.[1] ?? '';
+    assert.match(cond, /needs\.plan\.outputs\.webkit == 'true'/, `${id}: the planner decides whether it runs`);
+    assert.doesNotMatch(cond, /pull_request|inputs\.webkit|github\.ref/);
+  }
   for (const project of ['gallery-webkit', 'shell-demo-webkit', 'workbench-demo-webkit']) assert.match(job, new RegExp(`--project=${project}`));
   assert.match(job, /PADDOCK_WEBKIT: "1"/, 'the projects exist only with PADDOCK_WEBKIT');
 });
@@ -1433,15 +1437,16 @@ test('Debrief\'s heavy DuckDB store suites run at most two at a time, in the ove
   assert.match(mine[0], /terminate-after = 6 \}/, 'the same override as their waiver, its limit unchanged');
 });
 
-test('ci.yml runs the icon tests and `install.mjs --check` in an icons job that the plan feeds', () => {
+test('ci.yml runs the icon tests and `install.mjs --check` in steps of the ui job that the plan feeds', () => {
   const ci = read(join(WORKFLOWS, 'ci.yml'));
   assert.match(ci, /icons: \$\{\{ steps\.plan\.outputs\.icons \}\}/, 'the plan job exports the icons output');
-  const at = ci.indexOf('\n  icons:\n');
-  assert.ok(at > 0, 'ci.yml has an icons job');
+  const at = ci.indexOf('\n  ui:\n');
+  assert.ok(at > 0, 'ci.yml has a ui job');
   const job = ci.slice(at + 1, ci.indexOf('\n  # ', at + 1) > 0 ? ci.indexOf('\n  # ', at + 1) : undefined);
-  assert.match(job, /needs\.plan\.outputs\.icons == 'true'/, 'the icons job runs when the plan says icons');
-  assert.match(job, /run: \.\/dev ci run icons tests/, 'it runs the icon tests');
-  assert.match(job, /run: \.\/dev ci run icons installed/, 'it runs install.mjs --check');
+  assert.match(job.match(/^    if: (.*)$/m)?.[1] ?? '', /needs\.plan\.outputs\.icons == 'true'/, 'the ui job runs when the plan says icons');
+  for (const phase of ['tests', 'installed']) {
+    assert.match(job, new RegExp(`if: needs\\.plan\\.outputs\\.icons == 'true'\\n        run: \\./dev ci run icons ${phase}`), `the icons ${phase} step runs when the plan says icons`);
+  }
   const contract = JSON.parse(read(join(PADDOCK, 'icons', 'paddock.ci.json')));
   assert.deepEqual(contract.tests, ['cd icons', 'npm test'], 'the contract holds the icon tests');
   assert.deepEqual(contract.installed, ['node icons/tools/install.mjs --check'], 'and install.mjs --check');
@@ -2415,7 +2420,7 @@ test('a release or installer job never runs a downloaded ./dev: PADDOCK_DEV_DOWN
     assert.match(job.text, /PADDOCK_DEV_DOWNLOAD: \$\{\{ \(inputs\.release == true \|\| startsWith\(github\.ref, 'refs\/tags\/'\)\) && '0' \|\| '' \}\}/, `ci.yml:${job.id}: a run for a tag builds the tool from source`);
     tagJobs += 1;
   }
-  assert.equal(tagJobs, 10, 'the ci.yml jobs that read the prebuilt tool with the credential at job level: the four that take a host slot, ipc-endpoints, conformance, and wiki, heavy, crates and audit (setup-rust runs ./dev); ui, e2e, tools, icons and eslint-preset (`./dev ci run`) set it on their ./dev steps only (WP-3 review)');
+  assert.equal(tagJobs, 8, 'the ci.yml jobs that read the prebuilt tool with the credential at job level: the four that take a host slot, conformance, and heavy, crates and audit (setup-rust runs ./dev); ui (with the ESLint preset and icons steps), e2e and tools (`./dev ci run`) set it on their ./dev steps only (WP-3 review)');
 });
 
 test('dev-tool.yml publishes only from main, in every job (ADR 0022: the store is written only by main)', () => {
@@ -2490,8 +2495,8 @@ test('the tag-rule check sees a mutated workflow: a token without the rule, and 
   const shell = texts.get(join('workflows', 'shell-demo-release.yml'));
   const usageProblems = tagRuleProblems('shell-demo-release.yml', shell.replaceAll('      PADDOCK_DEV_DOWNLOAD: "0"\n', ''));
   assert.ok(usageProblems.some((p) => p.includes('job-isolation runs ./dev')), `usage rule reports: ${usageProblems.join(' | ')}`);
-  // And a direct `./dev` step without the rule.
-  const plan = ci.replace(/^ {10}PADDOCK_DEV_DOWNLOAD:.*\n/gm, '');
+  // And a direct `./dev` step without the rule (the plan job's: its job and its step set it).
+  const plan = ci.replace(/^ {6}(?: {4})?PADDOCK_DEV_DOWNLOAD:.*\n/gm, '');
   assert.ok(tagRuleProblems('ci.yml', plan).some((p) => p.includes('runs ./dev')), 'a ./dev step without the rule is reported');
 });
 

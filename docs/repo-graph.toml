@@ -199,11 +199,6 @@ files = ["docs/images/src/**", "docs/design/**", "**/*.drawio", "docs/**/svg/*.s
 reaches = ["project:tools"]
 
 [[input]]
-name = "wiki"
-files = ["docs/wiki/**"]
-reaches = ["project:tools"]
-
-[[input]]
 name = "changelogs"
 files = ["apps/*/CHANGELOG.md", "crates/*/CHANGELOG.md", "ui/projects/*/CHANGELOG.md", "apps/*/vendor/**/*.md"]
 reaches = ["owner"]
@@ -268,7 +263,7 @@ reaches = ["project:tools", "project:paddock-dev"]
 
 [[input]]
 name = "repo-tooling"
-files = ["renovate/**", "/renovate.json", "/CODEOWNERS", "/wiki-lint.json", ".claude/hooks/**", ".claude/settings.json", "/lefthook.yml"]
+files = ["renovate/**", "/renovate.json", "/CODEOWNERS", ".claude/hooks/**", ".claude/settings.json", "/lefthook.yml"]
 reaches = ["project:tools"]
 
 [[input]]

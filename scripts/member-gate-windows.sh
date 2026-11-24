@@ -105,7 +105,7 @@ while IFS= read -r spec; do
   read -r kind ws pkg filter <<<"$spec"
   echo "::group::nextest $ws $pkg"
   # The other tools whose cargo metadata the paddock-dev tests read offline (ci.yml: "Fetch the other tools dependencies").
-  if [ "$pkg" = paddock-dev ]; then for tl in heavy wiki; do (cd "tools/$tl" && cargo fetch --locked >/dev/null 2>&1) || echo "other-os-warn: cargo fetch --locked failed in tools/$tl"; done; fi
+  if [ "$pkg" = paddock-dev ]; then for tl in heavy; do (cd "tools/$tl" && cargo fetch --locked >/dev/null 2>&1) || echo "other-os-warn: cargo fetch --locked failed in tools/$tl"; done; fi
   (cd "$ws" && cargo nextest run -p "$pkg" --profile ci --locked --no-fail-fast ${filter:+-E "$filter"} 2>&1)
   c=$?
   echo "::endgroup::"

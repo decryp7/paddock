@@ -117,7 +117,6 @@ fn a_crates_change_reaches_every_gate_of_ci_er_9() {
         "clippy-linux apps/dyno (left out: dyno-app) + apps/pitwall (left out: pitwall-app) + crates",
         "conformance",
         "commit-lint",
-        "ipc-endpoints",
         "fmt apps/dyno",
         "clippy-windows apps/dyno",
         "pitwall-scripts",
@@ -186,7 +185,6 @@ fn a_crates_change_reaches_every_gate_of_ci_er_9() {
         by("commit-lint").args.join(" "),
         "conformance/bin/paddock-conformance.mjs commit-lint --range abc..HEAD"
     );
-    assert_eq!(by("ipc-endpoints").program, "/x/dev");
 }
 
 #[test]
@@ -259,7 +257,7 @@ fn the_rows_dev_runs_itself_are_not_measured_when_this_program_is_a_test_program
     };
     let unrelated = json!({"conformance": false, "apps": [], "packages": {}});
     let planned = plan_gates(&unrelated, &change(&["crates/paddock-proc/src/lib.rs"]), &f);
-    let rows = ["gates-register", "ipc-endpoints", "conformance", "conformance-tests"];
+    let rows = ["gates-register", "conformance", "conformance-tests"];
     assert!(!ids(&planned).iter().any(|i| rows.contains(&i.as_str())), "{planned:?}");
     for id in rows {
         assert!(
@@ -269,7 +267,7 @@ fn the_rows_dev_runs_itself_are_not_measured_when_this_program_is_a_test_program
             "{id} is not 'not measured' with the reason: {planned:?}"
         );
     }
-    // Positive control: with the program known, the same plan runs all four.
+    // Positive control: with the program known, the same plan runs all three.
     let known = plan_gates(&unrelated, &change(&["crates/paddock-proc/src/lib.rs"]), &facts());
     for id in rows {
         assert!(ids(&known).contains(&id.to_string()), "{id}: {known:?}");
@@ -1173,7 +1171,6 @@ fn the_table_names_what_ci_runs_that_this_gate_does_not() {
         "hakari",
         "machete",
         "cargo deny outside Pitwall",
-        "wiki lint",
         "TypeScript",
         "Linux Clippy of the apps' Tauri crates",
         "reached only through dependencies",

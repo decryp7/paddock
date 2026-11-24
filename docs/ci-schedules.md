@@ -24,11 +24,11 @@ read (the list, a job, a log, the token) runs the commit (fail open to running, 
 `plan scope: {json}`: what the run did (`ran`: jobs, the crate and paddock-dev jobs on each runner, app legs, browser engines, whole
 or narrowed tests) and what a push to main does for the same tree (`need`), both written by the planner (`./dev plan --ci` for
 ci.yml, `./dev ci scope` for debrief.yml and the shared plan action). `./dev ci verdict` counts a run only when `ran` covers `need`
-and the run is not a rerun; `ci reuse` asks it, so nothing else decides. A full dispatch without WebKit is an engine short, a dispatch
-with `app` is one app only, a member run is narrowed, a reused or skipped run ran nothing: none is complete. The reason is printed
-("it did not cover what a push to main does: engines webkit; apps ..."). `./dev ci dispatch ci.yml --ref train/...` adds
-`webkit=true` itself for a full dispatch (no `base`, no `since_run`); an explicit `--input webkit=false` wins, and a member run or a
-rerun is sent as asked. That is what lets a landed train's push to main reuse the train's run (ER-49). `./dev ci verdict`'s hint
+and the run is not a rerun; `ci reuse` asks it, so nothing else decides. A dispatch with `app` is one app only, a member run is
+narrowed, a reused or skipped run ran nothing: none is complete. The reason is printed ("it did not cover what a push to main does:
+apps ..."). A push to main's scope has no WebKit and no reference-app browser jobs since 2026-11-24 (the user's cut: the nightly runs
+them, as a `v*` tag and a manual run with `webkit` do), so a train's full dispatch is complete without them. That is what lets a
+landed train's push to main reuse the train's run (ER-49). `./dev ci verdict`'s hint
 of the last fully tested commit asks the same reader about each of main's newest commits, so a push that reused a train run
 (partial itself) still names the commit the train tested. The reader also checks that the run **ran what it declared** ("ran means ran", as GitHub's required checks:
 a skipped one blocks): each declared job and app leg has a job of its name that succeeded; a skipped or cancelled one makes the run

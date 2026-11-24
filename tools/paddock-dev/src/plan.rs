@@ -214,7 +214,6 @@ static DOC_INPUTS: LazyLock<Vec<(Regex, Marks)>> = LazyLock::new(|| {
         (re(r"^docs/lessons\.md$"), Marks::Projects(&["conformance", "tools"])),
         (re(r"^docs/blocks/"), Marks::Projects(&["conformance", "tools"])),
         (re(r"^docs/(design-guide|benchmarks)\.md$"), Marks::Projects(&["conformance"])),
-        (re(r"^docs/wiki/"), Marks::Projects(&["tools"])),
         (re(r"^apps/(shell-demo|workbench-demo)/README\.md$"), Marks::Projects(&["tools"])),
         (re(r"(^|/)REVIEWED\.md$"), Marks::Reviewed),
         (
@@ -250,7 +249,6 @@ static OWNERS: LazyLock<Vec<(Regex, &'static [&'static str])>> = LazyLock::new(|
         (re(r"^ci-image/"), &["ci-image", "ui", "tools"]),
         (re(r"^(renovate/|renovate\.json$|CODEOWNERS$|AGENTS\.md$)"), &["tools"]),
         (re(r"^\.gitleaks\.toml$"), &["conformance"]),
-        (re(r"^wiki-lint\.json$"), &["tools"]),
         (re(r"^\.claude/(hooks/|settings\.json$)"), &["tools"]),
     ]
 });
@@ -1312,15 +1310,9 @@ mod tests {
         assert_eq!(w["apps"], json!(["dyno"]));
         assert_eq!(plan(&["docs/rules.md"])["conformance"], true);
         assert_eq!(plan(&["docs/rules.md"])["docs"], false);
-        // the project wiki is linted by tools/wiki on every wiki change (ER-30), as is its settings file
-        for f in ["docs/wiki/index.md", "wiki-lint.json"] {
-            let p = plan(&[f]);
-            assert_eq!(
-                (&p["tools"], &p["docs"], &p["crates"], &p["all"]),
-                (&json!(true), &json!(false), &json!(false), &json!(false)),
-                "{f}"
-            );
-        }
+        // the retired wiki's pages (ER-30) are prose: no tool lints them, so they mark no tool job
+        let p = plan(&["docs/wiki/index.md"]);
+        assert_eq!((&p["tools"], &p["crates"], &p["all"]), (&json!(false), &json!(false), &json!(false)));
         // the hooks' tests run in the tools job: a hook, places.rs (their parity test) or the copies register marks it, and no more
         for f in [
             ".claude/hooks/worktree-guard.py",

@@ -62,7 +62,7 @@ commit-msg:
 
 # One command, so the hook cannot drift from CI (ADR 0038, docs/plans/ci-in-rust.md WP-2): `./dev check --pre-push` runs ER-9's fast
 # gates for what the push changes (fmt, host and Windows Clippy of the workspaces with a changed file, conformance with ci.yml's own
-# list, commit-lint, lockfiles, Pitwall's script tests and deny, C102; the Linux Clippy with --linux). It reads the planner; a gate
+# list, commit-lint, lockfiles, Pitwall's script tests and deny; the Linux Clippy with --linux). It reads the planner; a gate
 # that cannot run, or runs out of the 15-minute budget, is "not measured" and blocks the push.
 pre-push:
   commands:

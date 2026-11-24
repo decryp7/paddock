@@ -5,7 +5,7 @@
 //!   side branch, tagged `step-<folder>`: the `.gitea` and shared-script edits); the answers are in `tests/golden/expected/`.
 //!   They were first recorded from `scripts/affected.mjs` (retired 2026-11-18, ADR 0022 R4); the planner itself now writes them:
 //!   a changed answer is a reviewed edit made with `PADDOCK_GOLDEN_BLESS=1 cargo nextest run -E 'test(golden::)'`, never by hand and never in CI.
-//! - `recorded_command_line_*`: the same for the command line (`--ci`, `--commit-range`, the argument forms) in
+//! - `recorded_command_line_*`: the same for the command line (`--ci`, the argument forms) in
 //!   `tests/golden/ci-cases.json`, recorded into `tests/golden/expected/cli/`.
 //! - `the_ci_jobs_table_*`: `plan_gitea::CI_JOBS` against `tests/golden/ci-jobs.json`.
 //! - The narrowing tests: edits to a copy of this repository, answered by the planner alone, with positive controls.

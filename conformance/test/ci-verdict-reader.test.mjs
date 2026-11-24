@@ -264,10 +264,11 @@ test('the register of first scope runs: a recorded producer prints no old line, 
 });
 
 test('while it is printed the old line still decides tags, so its conditions hold (the report-only phase, run in bash)', () => {
-  // ci.yml: a push to main's scope, WebKit included, never an app-only dispatch, a rerun or a reused run.
+  // ci.yml: a push to main's scope (WebKit not needed since 2026-11-24, the nightly runs it), never an app-only dispatch, a rerun or a
+  // reused run.
   const ci = verdictSnippet(planCode(text('ci.yml')));
   const sayCi = (env) => runSnippet(ci, { PLAN_SINCE_RUN: '', PLAN_MODE_FULL: 'true', PLAN_REUSE: '', PLAN_WEBKIT: '', PLAN_APP: '', EVENT: 'workflow_dispatch', ...env });
-  assert.equal(sayCi({}), 'plan verdict: complete=false');
+  assert.equal(sayCi({}), 'plan verdict: complete=true', 'a full train dispatch without WebKit is complete');
   assert.equal(sayCi({ PLAN_WEBKIT: '1' }), 'plan verdict: complete=true');
   assert.equal(sayCi({ EVENT: 'push' }), 'plan verdict: complete=true');
   assert.equal(sayCi({ PLAN_APP: 'dyno', PLAN_WEBKIT: '1' }), 'plan verdict: complete=false');

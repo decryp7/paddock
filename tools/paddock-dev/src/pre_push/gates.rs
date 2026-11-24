@@ -200,7 +200,6 @@ pub const ROW_SET: &[&str] = &[
     "conformance-tests",
     "dyno-wire-fixtures",
     "gates-register",
-    "ipc-endpoints",
     "locks-guard",
     "member-audits",
     "pitwall-deny",
@@ -528,27 +527,6 @@ pub fn plan_gates(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> 
         out.push(Planned::Skip {
             id: "pitwall-scripts, pitwall-deny".into(),
             reason: "the change does not reach Pitwall".into(),
-        });
-    }
-    if change.files.iter().any(|f| f.ends_with(".rs") || f == "docs/ipc-endpoints.toml") {
-        out.push(dev_run(
-            facts,
-            Gate {
-                args: strs(&["check", "ipc-endpoints"]),
-                ..gate(
-                    "ipc-endpoints".into(),
-                    "",
-                    "",
-                    &[],
-                    0,
-                    "add the listen site to docs/ipc-endpoints.toml with an ending test or a reason (C102)".into(),
-                )
-            },
-        ));
-    } else {
-        out.push(Planned::Skip {
-            id: "ipc-endpoints".into(),
-            reason: "no Rust file or docs/ipc-endpoints.toml changed".into(),
         });
     }
     out.push(locks_guard(change, facts));
@@ -1016,7 +994,6 @@ pub const NOT_RUN: &[(&str, &str)] = &[
         "cargo deny outside Pitwall",
         "each workspace's deny.toml is checked by CI only; WP-3",
     ),
-    ("wiki lint (tools/wiki)", "runs in CI's paddock-dev job against the ER text"),
     (
         "lint and type-check of touched TypeScript (eslint, tsc)",
         "per-project commands live in YAML until WP-3's contracts",

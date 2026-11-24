@@ -960,7 +960,8 @@ impl Walker<'_> {
         }
         out.extend(m.include.iter().cloned());
         if m.app_legs {
-            let webkit = ctx.level != Level::Branch;
+            // The WebKit legs: a tag, the nightly and a manual ask (plan_ci::wants_webkit), never a branch or a push to main.
+            let webkit = !matches!(ctx.level, Level::Branch | Level::Main);
             for (name, c) in self.contracts {
                 match app_legs(name, c, webkit) {
                     Ok(legs) => out.extend(legs),

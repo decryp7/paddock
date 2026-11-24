@@ -96,7 +96,7 @@ Extra checks that CI runs:
 - Cross-target type checks: `cargo clippy -p pitwall-core -p pitwall-server --target x86_64-pc-windows-msvc` and
   `--target x86_64-apple-darwin`.
 
-Commit messages are Conventional Commits, checked by the shared `paddock-conformance commit-lint` (`ci.yml`'s `commits` job on pull requests). Never add
+Commit messages are Conventional Commits, checked by the shared `paddock-conformance commit-lint` (the push gate, and C23 in `ci.yml`'s conformance job). Never add
 Co-Authored-By or AI attribution lines.
 
 ## Tests

@@ -1,11 +1,12 @@
 # Paddock wiki
 
-**Retired 2026-11-12 (user, ER-30 retired): kept for history; no ingest, no lint, no `Wiki notes:` hand-offs.**
+**Retired 2026-11-12 (user, ER-30 retired): kept for history; no ingest, no lint, no `Wiki notes:` hand-offs. The `wiki` tool
+(tools/wiki) and its CI job were removed on 2026-11-24; the operations below describe how the pages were kept.**
 
 A small, sourced summary of how things work **today**, so an agent can read a page instead of re-deriving the state from
 the lessons, the ADRs and the hand-off logs. It started on 2026-10-31 as a two-week pilot of the LLM Wiki pattern; the user
 concluded the pilot and made it official the same day (ER-30 and `skills/wiki` on engineering-rules `docs/er-30-wiki`, Paddock rule 59 on `docs/rule-wiki`).
-The tooling is one Rust `wiki` CLI, [tools/wiki](../../tools/wiki/README.md), which replaced `scripts/wiki-lint.mjs`. The
+The tooling was one Rust `wiki` CLI, tools/wiki (removed 2026-11-24), which replaced `scripts/wiki-lint.mjs`. The
 design and the evaluation plan are in the research note `research-llm-wiki-2026-10-31.md` (hand-off folder, outside this
 repository), and the pattern's primary source is Karpathy's
 [LLM Wiki gist](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) (read as data, adapted, not adopted as
@@ -62,7 +63,7 @@ Summary in three to five lines.
   clock's date); run `wiki lint`; commit `docs(wiki): ...` as its own commit.
 - **Query**: read `index.md`, then the pages it points to, and answer with the sources of the page. If the answer was
   missing or wrong, leave a wiki note for the next ingest.
-- **Lint**: `wiki lint` (the [wiki tool](../../tools/wiki/README.md), installed with `cargo install --path tools/wiki --locked`; settings in `wiki-lint.json`; `wiki new <slug> --title ...` creates a page and its index line) (links resolve and their anchors exist; no clock-time citation of the steward log; every page is in the index; no orphan; every
+- **Lint**: `wiki lint` (the wiki tool, removed 2026-11-24; its settings were in `wiki-lint.json`; `wiki new <slug> --title ...` creates a page and its index line) (links resolve and their anchors exist; no clock-time citation of the steward log; every page is in the index; no orphan; every
   page has `verified:` and `sources:`; every bullet names a source; pages with an old `verified:` date draw a warning; no run of 8 or more
   words is shared with any rules source: `docs/rules.md`, `origin/main`, the open rule branches and engineering-rules
   `RULES.md`, given with `--rules`). A second, reading pass by a reviewer checks pages against the rules and ADRs they
