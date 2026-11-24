@@ -84,6 +84,34 @@ uses it, results in
 
 ## Results of shared tooling
 
+### 2026-11-24, pre-push row reuse on an unchanged tree (feat/check-result-reuse-v2)
+
+- **Commit:** `285c68695` (one commit over train 2026-11-25-b `cfe8a8592`); the change under test is paddock-dev only
+- **Machine:** Mac mini, Apple M4 Pro, 14 cores, macOS 27.2.1; other agents' builds and pre-push runs shared the machine
+- **Load:** 1-minute load about 30 to 130 during runs A and B (heavy's load gate held the compiles); queued time is reported apart
+- **Build:** the dev binary `./dev` built for that commit (release); `CARGO_BUILD_JOBS=2`
+- **Command:** in the branch's worktree, clean tree, one after the other: A `./dev check --pre-push --no-reuse` (before), B
+  `./dev check --pre-push` (runs every row and stores the green ones), C `./dev check --pre-push` again (after)
+- **Runs:** single, not repeated
+- **Numbers:**
+
+  | Row | A, reuse off (run / queued) | B, stores (run / queued) | C, unchanged tree |
+  |---|---|---|---|
+  | lockfile, fmt tools/paddock-dev | 0.2 s, 2.5 s | 1.1 s, 8.7 s | reused |
+  | clippy tools/paddock-dev | 265.4 s / 194.1 s | 0.8 s / 650.2 s (warm build folder) | reused |
+  | clippy-linux tools/paddock-dev | 24.3 s / 947.5 s | 32.7 s / 5.2 s | reused |
+  | conformance, gates-register | 25.5 s, 4.8 s | 62.0 s, 12.7 s | reused |
+  | commit-lint, locks-guard | 0.1 s, 4.0 s | 0.2 s, 12.2 s | ran again: 0.2 s, 4.9 s (never reused: they read commits and the base) |
+  | **Whole command** | **1,439 s** | **794 s** | **9 s** |
+
+- **Notes:** most of A and B is waiting for the heavy slot under the load gate, so the saving on a quiet machine is smaller: the
+  row run times of B add up to about 130 s, all but about 5 s of which C did not repeat. C's 9 s include the planner, the two rows
+  that always run, the version probes (`cargo --version`, `rustc -vV`, `docker --version`, `node --version`) and hashing the dev
+  binary. The records are `<git common dir>/paddock-pre-push/reuse/<key>.json`, beside `step-history.jsonl`. Not measured: a push
+  through the hook (a throw-away worktree of the same commit; the key leaves the checkout path and the build folder out, which
+  `the_checkout_path_and_build_folder_are_not_in_the_key` checks), a member gate, and other machines. Raw output was kept only in the
+  agent's scratch folder.
+
 ### 2026-11-16, unit suites with the test leak detector (feat/test-leak-detector)
 
 - **Commit:** the tip of `feat/test-leak-detector`; base `3585bcab1` (train 13) plus `fix/debrief-startup-loads-drain`
