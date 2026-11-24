@@ -252,7 +252,8 @@ pub struct Supervised {
 }
 
 impl Supervised {
-    /// Starts `cmd` in its own process group (Unix), registered in the [`global_registry`].
+    /// Starts `cmd` in a process group (Unix: the guard's, led by its keeper, when the orphan guardian is on; else its own),
+    /// registered in the [`global_registry`].
     pub fn spawn(cmd: Command) -> std::io::Result<Supervised> {
         Supervised::spawn_in(global_registry(), cmd, None)
     }
@@ -325,14 +326,16 @@ impl Supervised {
         // starts inside it, so an owner killed at any point of this start leaves no unguarded child (ADR 0119 WP-1, review
         // round 2). Without a guard the child leads a group of its own.
         #[cfg(unix)]
-        let guard = crate::guardian::prepare(folder);
-        #[cfg(unix)]
-        match guard.as_ref() {
-            Some(g) => {
+        let mut guard = crate::guardian::prepare(folder)
+            .and_then(|g| i32::try_from(g.group()).ok().map(|pgid| (g, pgid)))
+            .map(|(g, pgid)| {
                 use std::os::unix::process::CommandExt;
-                cmd.process_group(i32::try_from(g.group()).unwrap_or(0));
-            }
-            None => crate::sys::own_group(&mut cmd),
+                cmd.process_group(pgid);
+                g
+            });
+        #[cfg(unix)]
+        if guard.is_none() {
+            crate::sys::own_group(&mut cmd);
         }
         #[cfg(not(unix))]
         crate::sys::own_group(&mut cmd);
@@ -342,6 +345,11 @@ impl Supervised {
         let pid = child.id();
         // Not reaped yet, so the pid is still this child's.
         let process = identify(pid);
+        // Ending this child by identity (`kill_tree`, from any caller) ends its guarded group too.
+        #[cfg(unix)]
+        if let (Some(g), Some(id)) = (guard.as_mut(), process) {
+            g.bind(id);
+        }
         // Windows: the kill-on-close job ends the tree when this process dies; the folder is the caller's to sweep.
         #[cfg(not(unix))]
         let _: Option<&std::path::Path> = folder;
@@ -581,11 +589,6 @@ impl Supervised {
                 }
                 None => {}
             }
-            // The guarded group (its keeper leads it): helpers that left the tree but not the group end with it.
-            #[cfg(unix)]
-            if let Some(g) = self.guard.as_ref() {
-                g.end_group();
-            }
             crate::cleanup::logged("killing the child", c.kill());
             crate::cleanup::logged("reaping the child", c.wait());
         }
@@ -593,9 +596,13 @@ impl Supervised {
     }
 
     fn release(&mut self) {
-        // After the tree was ended (or the child ended by itself): the guardian forgets the group and its keeper ends.
+        // After the tree was ended (or the child ended by itself): what is left of the guarded group (a helper that left the
+        // tree but not the group) ends through its keeper, then the guardian forgets the group and the keeper ends.
         #[cfg(unix)]
-        drop(self.guard.take());
+        if let Some(g) = self.guard.take() {
+            g.end_group();
+            drop(g);
+        }
         // Windows: closing the job ends whatever of the tree is left (helpers that left it included).
         #[cfg(windows)]
         drop(self.job.take());

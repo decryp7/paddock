@@ -21,9 +21,13 @@
 //! into a private folder of the user's (`O_NOFOLLOW`, mode 0600), and is off for root (amendment §1a).
 //!
 //! N guarded children cost N + 1 processes. Since ADR 0119 WP-1 (review round 2) the order is keeper first: the owner makes
-//! sure the guardian serves (`ensure`), starts the keeper leading a new group, registers that group, and only
-//! then starts the child into it, so the child is in a guarded group from its first instruction and no point of its start
-//! leaves it unguarded if the owner is killed. Not done: a `pre_exec` gate that holds the child's exec until its registration
+//! sure the guardian serves (`ensure`), starts the keeper leading a new group, registers that group, and only then starts the
+//! child into it. Why no moment of the start leaves the child unguarded if the owner is killed: when std starts it with
+//! `posix_spawn`, the group is set by the spawn itself (`POSIX_SPAWN_SETPGROUP`), so the child is in the group from its first
+//! instruction; on the fork path the child joins the group between `fork` and `exec`, and until its `exec` it holds a copy of
+//! the owner's close-on-exec write end of the registration pipe, so the guardian cannot see end of file (the owner gone)
+//! before the child has joined the group. Ending the child by identity ([`crate::kill_tree`], from any caller) ends the group
+//! through the keeper (a process-wide map of guarded children), and the owner's release of the child ends it too. Not done: a `pre_exec` gate that holds the child's exec until its registration
 //! (std's `spawn` waits for the exec, so the owner could not register while the child waits: a deadlock), and
 //! `PR_SET_PDEATHSIG` (Linux), which needs the same hook and fires when the *thread* that started the child ends (prctl(2));
 //! the keeper-first order needs neither.
@@ -50,7 +54,7 @@ pub(crate) use unix::{
     ACT_AS_USER_ENV, CRASH_ENV, REFUSE_ENV, guardians_started, hold_after_spawn,
 };
 #[cfg(unix)]
-pub(crate) use unix::{Registration, ensure, prepare};
+pub(crate) use unix::{Registration, ensure, pinned, prepare};
 #[cfg(unix)]
 pub use unix::{enable_in_test_binary, run_if_requested, serve_if_guardian, set_log};
 

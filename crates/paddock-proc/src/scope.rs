@@ -35,7 +35,9 @@
 //! `env -i`) is outside every net (Windows jobs have no such escape). The guardian is off for root (ADR 0076 amendment
 //! 2026-11-09) and in a binary that does not call [`crate::guardian::run_if_requested`]; it says so once in the log, and each
 //! [`Report`] says whether its member was guarded. On Unix a guarded child is started inside a group the guardian already
-//! holds (keeper first), so no moment of its start leaves it unguarded. On Windows a child joins the scope's job only after
+//! holds (keeper first): with `posix_spawn` it is in the group from its first instruction, and on the fork path it holds the
+//! owner's close-on-exec registration pipe until its `exec`, so the guardian cannot see the owner gone before the child has
+//! joined the group ([`crate::guardian`]). On Windows a child joins the scope's job only after
 //! `CreateProcess` returned (no `CREATE_SUSPENDED` start yet): an owner killed in that moment, or a grandchild started in it,
 //! is outside the job. A run ([`Scope::run`]) is ended by its bound, a cancel and the end, but it does not join the Windows
 //! job yet (ADR 0119 WP-14 moves runs onto the scope's own start).

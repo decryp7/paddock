@@ -60,10 +60,10 @@ fn run_if_requested_marks_a_plain_process_and_serves_in_the_guardian_process() {
         String::from_utf8_lossy(&plain.stdout).contains("hook-empty=true"),
         "{plain:?}"
     );
-    // As the guardian, with no owner named, it refuses to serve and exits (2, or 3 for root) before printing.
+    // As the guardian, with no owner named, it refuses to serve and exits (REFUSED_EXIT, or 3 for root) before printing.
     let guardian = probe(true);
     assert!(
-        matches!(guardian.status.code(), Some(2 | 3)),
+        matches!(guardian.status.code(), Some(REFUSED_EXIT | 3)),
         "{guardian:?}"
     );
     assert!(!String::from_utf8_lossy(&guardian.stdout).contains("hook-empty"));
@@ -909,7 +909,7 @@ fn refused_guardian(owner_env: Option<String>, stdin: Stdio) -> (Option<i32>, St
 #[test]
 fn a_guardian_without_an_owner_refuses_and_says_so() {
     let (code, text) = refused_guardian(None, Stdio::null());
-    assert_eq!(code, Some(2));
+    assert_eq!(code, Some(REFUSED_EXIT));
     assert!(text.contains("names no owner"), "{text}");
 }
 
@@ -917,7 +917,7 @@ fn a_guardian_without_an_owner_refuses_and_says_so() {
 fn a_guardian_whose_input_is_not_a_pipe_refuses_and_says_so() {
     // The owner is right (this process, which started it), but its standard input is a null device, not the owner's pipe.
     let (code, text) = refused_guardian(Some(identity_text(me())), Stdio::null());
-    assert_eq!(code, Some(2));
+    assert_eq!(code, Some(REFUSED_EXIT));
     assert!(text.contains("standard input is not a pipe"), "{text}");
 }
 
@@ -1125,4 +1125,84 @@ fn an_owner_killed_right_after_its_child_exists_leaves_no_child() {
         &left,
         "the child started just before its owner was killed ran on: it was not yet in a guarded group",
     );
+}
+
+// ---- a guarded child's group is ended through its keeper (review round 3, P1-1) ----
+
+/// The child is guarded (so its group is the keeper's, not its own), leaves a helper in that group and exits. Ending the
+/// child by identity and waiting for it must also end the helper: callers (Dyno's cancel, the browser watchdogs, the memory
+/// cap, the registry) end a child with `kill_tree(id)`, and `Supervised::wait` forgets the group.
+#[test]
+fn ending_a_guarded_child_that_left_a_helper_in_its_group_ends_the_helper() {
+    enable_in_test_binary(ENTRY);
+    let _acting = ActAsUser::here();
+    let mut cmd = crate::testchild::child(crate::testchild::Mode::Leave);
+    cmd.stdout(Stdio::piped());
+    let mut s = Supervised::spawn(cmd).unwrap();
+    let child = s.process().unwrap();
+    assert!(s.guard.is_some(), "the child is guarded");
+    // libtest prints its own lines first: read up to the child's line naming its helper.
+    let mut reader = BufReader::new(s.take_stdout().unwrap());
+    let mut line = String::new();
+    let helper_pid: u32 = loop {
+        line.clear();
+        if reader.read_line(&mut line).unwrap_or(0) == 0 {
+            fail(&[child], "the child ended before it named its helper");
+        }
+        if let Some(pid) = crate::testchild::lines(&line)
+            .first()
+            .and_then(|l| l.strip_prefix("pid "))
+            .and_then(|p| p.trim().parse().ok())
+        {
+            break pid;
+        }
+    };
+    // conformance: recorded-pid — the helper sleeps in the child's group for its lifetime; paddock-proc's tests cannot use paddock-testkit-start (a cycle)
+    let helper =
+        ProcessId::of(helper_pid).unwrap_or_else(|| fail(&[child], "the helper has no identity"));
+    let exited =
+        paddock_testkit::wait::poll_until_within(paddock_testkit::wait::HANG_GUARD, || {
+            s.exit_status().is_some()
+        });
+    fail_unless(
+        exited,
+        &[child, helper],
+        "the child did not exit after starting its helper",
+    );
+    kill_tree(child);
+    s.wait();
+    let gone = paddock_testkit::wait::poll_until_within(paddock_testkit::wait::HANG_GUARD, || {
+        run_state(helper) == RunState::Exited
+    });
+    fail_unless(
+        gone,
+        &[helper],
+        "the helper the guarded child left in its group runs on",
+    );
+}
+
+/// The reap of a guardian that lost a start race is bounded (review round 3, P2-2): one that ends is reaped, one that does not
+/// is ended through its handle at the bound.
+#[test]
+fn a_reap_is_bounded_and_ends_a_process_that_does_not_end() {
+    let mut quick = crate::testchild::child(crate::testchild::Mode::Exit3)
+        .stdout(Stdio::null())
+        .spawn()
+        .unwrap();
+    assert!(reap_within(
+        &mut quick,
+        paddock_testkit::wait::HANG_GUARD,
+        "a quick child"
+    ));
+    let mut stays = crate::testchild::child(crate::testchild::Mode::Sleep)
+        .spawn()
+        .unwrap();
+    let id = ProcessId::of(stays.id()).unwrap();
+    // conformance: expiry-under-test — the bound itself is what this test examines
+    assert!(!reap_within(
+        &mut stays,
+        Duration::from_millis(100),
+        "a child that stays"
+    ));
+    assert_eq!(run_state(id), RunState::Exited);
 }

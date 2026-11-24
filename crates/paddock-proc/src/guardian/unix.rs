@@ -2,6 +2,7 @@
 
 use super::{GUARDIAN_ENV, LOG_ENV};
 use crate::ProcessId;
+use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::io::{BufRead, Write};
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
@@ -78,6 +79,9 @@ const SERVING: &str = "paddock-proc-guardian: serving";
 /// about 350 times the worst measured, so a slow but working start under load is never cut, and a stopped guardian costs
 /// one bounded wait: the start goes on unguarded and says so.
 const SERVING_BOUND: Duration = Duration::from_secs(10);
+/// The guardian's exit code when it refuses to serve (it checked its owner and said no): an unusual code of its own, not 2
+/// (clap's usage error) or 1, so the owner never reads another failure as a lasting refusal (review round 3, P2-6).
+pub(crate) const REFUSED_EXIT: i32 = 87;
 /// The longest line the guardian takes (a folder of 4096 bytes is 8192 hex digits).
 const MAX_LINE: usize = 16 << 10;
 
@@ -277,9 +281,9 @@ fn start(args: &[OsString], me: ProcessId) -> std::io::Result<Running> {
             log_text(log.as_deref())
         ),
         Serving::Refused => {
-            // Exit code 2 is the guardian's own refusal (it checked and said no): that lasts for this process. Any other end (a
+            // REFUSED_EXIT is the guardian's own refusal (it checked and said no): that lasts for this process. Any other end (a
             // kill, a crash) is not a refusal, and the next start tries again (review round 2, P2-A).
-            let refused = child.wait().is_ok_and(|s| s.code() == Some(2));
+            let refused = child.wait().is_ok_and(|s| s.code() == Some(REFUSED_EXIT));
             let why = format!("its log, {}, says why", log_text(log.as_deref()));
             return Err(if refused {
                 std::io::Error::new(
@@ -294,7 +298,7 @@ fn start(args: &[OsString], me: ProcessId) -> std::io::Result<Running> {
             "The orphan guardian (pid {}) did not say it serves within {} s; this process's children are registered with \
              it anyway, and are guarded once it does",
             child.id(),
-            SERVING_BOUND.as_secs()
+            bound.as_secs()
         ),
     }
     Ok(Running {
@@ -324,6 +328,22 @@ pub(crate) struct Registration {
     group: u32,
     pub(crate) keeper: Child,
     keeper_id: ProcessId,
+    /// The child started into the group, once [`Registration::bind`] named it: its entry in [`PINNED`].
+    child: Option<ProcessId>,
+}
+
+/// The guarded children of this process by identity, each with its group and the keeper that leads it (review round 3,
+/// P1-1). A guarded child does not lead its group, so [`crate::kill_tree`] looks its group up here instead of signalling a
+/// group by the child's pid; every caller that ends a child by identity then ends its whole group too.
+static PINNED: Mutex<BTreeMap<ProcessId, (u32, ProcessId)>> = Mutex::new(BTreeMap::new());
+
+fn pinned_lock() -> MutexGuard<'static, BTreeMap<ProcessId, (u32, ProcessId)>> {
+    PINNED.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// The group a guarded child of this process runs in and the keeper that leads it; `None` for any other process.
+pub(crate) fn pinned(child: ProcessId) -> Option<(u32, ProcessId)> {
+    pinned_lock().get(&child).copied()
 }
 
 impl Registration {
@@ -341,10 +361,19 @@ impl Registration {
     pub(crate) fn end_group(&self) -> bool {
         crate::tree::end_pinned_group(self.group, self.keeper_id)
     }
+
+    /// Names the child started into the group, so [`crate::kill_tree`] of that child ends the group too ([`pinned`]).
+    pub(crate) fn bind(&mut self, child: ProcessId) {
+        self.child = Some(child);
+        pinned_lock().insert(child, (self.group, self.keeper_id));
+    }
 }
 
 impl Drop for Registration {
     fn drop(&mut self) {
+        if let Some(child) = self.child {
+            pinned_lock().remove(&child);
+        }
         if let Some(r) = lock().as_mut() {
             crate::cleanup::logged(
                 "unregistering a child from the orphan guardian",
@@ -499,10 +528,35 @@ pub(crate) fn ensure() -> bool {
     }) = lost
     {
         drop((to, keeper_input));
-        // Reaped outside the lock (review round 2, P2-B): it ends at the end of file it now reads.
-        crate::cleanup::logged("reaping a guardian that lost a start race", child.wait());
+        // Reaped outside the lock (review round 2, P2-B), bounded (round 3, P2-2): it ends at the end of file it now reads.
+        reap_within(
+            &mut child,
+            SERVING_BOUND,
+            "a guardian that lost a start race",
+        );
     }
     true
+}
+
+/// Reaps `child`, a process of this one that is expected to end by itself, waiting at most `bound` (polled through its
+/// handle); one that is still there is ended through its handle and then reaped. True when it ended by itself.
+pub(crate) fn reap_within(child: &mut Child, bound: Duration, what: &str) -> bool {
+    let began = std::time::Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => return true,
+            Ok(None) if began.elapsed() < bound => std::thread::sleep(Duration::from_millis(5)),
+            Ok(None) | Err(_) => break,
+        }
+    }
+    log::warn!(
+        "{what} (pid {}) did not end within {} s; it is ended",
+        child.id(),
+        bound.as_secs_f32()
+    );
+    crate::cleanup::logged("ending a process that did not end by itself", child.kill());
+    crate::cleanup::logged("reaping a process that did not end by itself", child.wait());
+    false
 }
 
 /// Prepares a guarded group for a child that is not started yet (ADR 0119 WP-1, review round 2): starts the keeper leading a
@@ -560,6 +614,7 @@ pub(crate) fn prepare(folder: Option<&Path>) -> Option<Registration> {
         group,
         keeper,
         keeper_id: id,
+        child: None,
     })
 }
 
@@ -944,7 +999,7 @@ fn serve(input: impl BufRead) -> i32 {
             cat: None,
         };
         ends.log(&format!("refused to serve: {OWNER_ENV} names no owner"));
-        return 2;
+        return REFUSED_EXIT;
     };
     #[expect(
         clippy::disallowed_methods,
@@ -998,7 +1053,7 @@ fn serve(input: impl BufRead) -> i32 {
     }
     if let Err(why) = checked {
         ends.log(&format!("refused to serve: {why}"));
-        return 2;
+        return REFUSED_EXIT;
     }
     say_serving();
     guard(input, &mut ends, EMPTY_LOOKS);

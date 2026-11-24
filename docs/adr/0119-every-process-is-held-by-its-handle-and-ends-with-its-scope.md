@@ -214,7 +214,10 @@ By area, one implementer each, in parallel after WP-1 and WP-2 (one package per 
 | file-wide allows | 7 C53 waivers | per-site `#[expect]` with a reason, or removed |
 
 **`graceful_stop` by bare pid** (the follow-up from fix/proc-tree-pid-reuse): paddock-proc gets `ask_group(leader: ProcessId)`:
-SIGTERM to the group only while its leader is still the process named (as `kill_tree` signals a group today); on Windows the
+SIGTERM to the group only while its leader is still the process named (as `kill_tree` signals a group today). Amended
+2026-11-24 (WP-1 review round 3): a guarded child does not lead its group (its guard's keeper does), so `ask_group` takes the
+child and asks the group through the leader `paddock_proc` records for it (the keeper of a guarded child, the child itself
+otherwise), never by the child's pid; on Windows the
 Ctrl+Break helper takes the handle text and re-checks the identity before `GenerateConsoleCtrlEvent`. Pitcrew's `RunnerProcess`
 gives `id() -> ProcessId` instead of `pid() -> u32`; `graceful_stop` and `kill_tree` take it; the `#[expect(.. "ADR 0033 WP-6")]`
 lines go. Failing test first (ER-11): a runner whose pid is handed on to a stand-in; the stop must reach nobody. It ships with the
@@ -343,9 +346,14 @@ Each decision below keeps its options as offered; the line "Accepted" records th
 - A later process (a CI step, the coordinator, an agent's next turn) can wait on or end a process by its handle, never by a search.
 - Escapes stay possible on Unix: a program we start that calls `setsid` leaves its group, so neither the group signal nor the
   guardian reaches it (Windows jobs have no such escape: breakaway is not allowed); the scope's summary reports what it could not see (as ADR 0112's job summary does).
-- Amended 2026-11-24 (WP-1 review round 2): on Unix a guarded child starts inside a group the guardian already holds (the keeper
-  leads it and is registered first), so an owner killed at any point of a start leaves no unguarded child. A `pre_exec` gate
-  was not used: std's `spawn` waits for the child's exec, so the owner could not register while the child waits. On Windows a
+- Amended 2026-11-24 (WP-1 review rounds 2 and 3): on Unix a guarded child starts inside a group the guardian already holds (the
+  keeper leads it and is registered first), so an owner killed at any point of a start leaves no unguarded child. Why: with
+  `posix_spawn` the group is set by the spawn itself; on the fork path the child joins the group before its `exec`, and until
+  that `exec` it holds a copy of the owner's close-on-exec write end of the registration pipe, so the guardian cannot see the
+  owner gone before the child is in the group. A `pre_exec` gate was not used: std's `spawn` waits for the child's exec, so
+  the owner could not register while the child waits. The group leader of a guarded child is its keeper, not the child:
+  `kill_tree` of the child ends the group through the keeper (paddock-proc keeps a process-wide map of guarded children), never
+  by the child's pid, and the owner's release of a child (`wait`, `kill`, drop) ends what is left of the group. On Windows a
   child joins its jobs only after `CreateProcess` returned (no `CREATE_SUSPENDED` start yet): a grandchild started in that
   moment, or an owner killed in it, leaves a process outside the jobs. A suspended start (create suspended, join the jobs,
   resume) closes it and is left for the migration's Windows work.
@@ -364,7 +372,8 @@ Each decision below keeps its options as offered; the line "Accepted" records th
 | `Owned`, `own::Unit`, starter-bound slot holder, ADR 0112's job action and ledger | local `feat/adr0112-wp1-owner-trait` b9970817d, not on origin: prerequisite P1 |
 | C159, the file-wide kill-allow guard | id reserved (`refs/paddock/check-ids/C159`, `feat/conformance-guards-2026-11-23-kill-allow`), branch not on origin: prerequisite P3 |
 | CI wrapper `./dev ci step` and the job record | ADR 0118, uncommitted in the `feat/test-results-artifact` worktree (no commit beyond 64e01dd84 on 2026-11-23): prerequisite for WP-13 |
-| `Scope`, `Held`, `Lifetime`, `start_detached`, handle text, `held.jsonl`, `./dev held`, `ask_group`, the spawn ban, `background-guard`, `./dev run --hold` | not built (this ADR) |
+| `Scope`, `Held`, `Summary`, the scope's grace (measured), the guardian's serving answer and keeper-first groups | built by WP-1 on `feat/adr-0119-wp1-scope` (not on a train yet) |
+| `Lifetime`, `start_detached`, handle text, `held.jsonl`, `./dev held`, `ask_group`, the spawn ban, `background-guard`, `./dev run --hold` | not built (WP-2 onward) |
 
 Recurring: "something ends but does not end what it started" (ADR 0112's class), outside CI jobs. Earlier instances: run 8099
 (a detached `slot hold` left by a failed test, 82d5ee496), ADR 0103 (test processes outlived tests), run 8674 (a harness ended

@@ -1573,11 +1573,11 @@ adr = "0119"
 
   [[mechanism.copy]]
   paths = ["crates/paddock-proc/src/supervised.rs"]
-  symbols = ["item:Supervised"]
+  symbols = ["item:spawn", "item:spawn_capped", "item:spawn_in", "item:spawn_owning_folder"]
   kind = "wiring"
   owner = "paddock"
   delete_by = "v0.5.0"
-  note = "One long-lived child whose tree ends on drop, with a memory cap; Scope::start holds its children as Supervised values. ADR 0119 §1 makes Supervised what Scope::start returns when a cap is asked for, so after the migration (WP-6 to WP-8) no caller starts one outside a Scope; the entry tracks that migration, and Supervised stays as Scope's child holder."
+  note = "What goes by v0.5.0: the public start constructors Supervised::spawn, spawn_capped, spawn_in and spawn_owning_folder, which start a child outside any Scope; they become crate-private once the migration (ADR 0119 WP-6 to WP-8) has moved every caller onto Scope::start. Supervised itself stays: it is the child holder Scope::start returns (with a memory cap when one is asked for), not a copy."
 
   [[mechanism.copy]]
   paths = ["crates/paddock-testkit-start/src/reap.rs"]
