@@ -918,6 +918,144 @@ fn graph_ci_yml_passes_every_field_of_a_matrix_leg_to_app_gates() {
     }
 }
 
+/// Every step ci.yml's entries of `plan_since::TEST_STEPS` name is a step of that job, read through the workflow accessor
+/// (`plan_gitea::workflow_jobs`), so a renamed step cannot leave the graders and the narrowed rerun reading a name that no longer runs.
+/// Positive control: a name that is not a step of the job is not found.
+#[test]
+fn ci_yml_test_steps_are_steps_of_their_jobs() {
+    use paddock_dev::plan_since::TEST_STEPS;
+    let text = std::fs::read_to_string(root().join(".gitea/workflows/ci.yml"))
+        .unwrap()
+        .replace("\r\n", "\n");
+    let wf = paddock_dev::plan_gitea::workflow_jobs(&text).expect("ci.yml splits into jobs");
+    let has = |job: &str, step: &str| {
+        wf.jobs
+            .iter()
+            .find(|(k, _)| k == job)
+            .unwrap_or_else(|| panic!("ci.yml has no job {job}"))
+            .1
+            .lines()
+            .any(|l| l.trim_start().strip_prefix("- name: ").is_some_and(|n| n.trim() == step))
+    };
+    let mut seen = 0;
+    for (_, job, steps, ..) in TEST_STEPS.iter().filter(|t| t.0 == "ci.yml") {
+        for s in *steps {
+            if s.starts_with("Run ./.gitea/actions/") {
+                continue; // a `uses:` step: the API names it after the action
+            }
+            assert!(has(job, s), "ci.yml job {job} has no step named {s:?}");
+            seen += 1;
+        }
+    }
+    assert!(seen >= 3, "the entries were read: {seen}");
+    assert!(!has("crates", "Coverage (renamed)"));
+}
+
+/// The steps of a job's text (`plan_gitea::workflow_jobs`): each step's name (its `name:`, or `Run <uses or run>` as the API names
+/// it), its `if:` and its `run:` line.
+fn job_steps(body: &str) -> Vec<(String, String, String)> {
+    let mut out: Vec<(String, String, String)> = Vec::new();
+    for l in body.lines() {
+        let t = l.trim_start();
+        let indent = l.len() - t.len();
+        if indent == 6 && t.starts_with("- ") {
+            out.push((String::new(), String::new(), String::new()));
+        }
+        let Some(step) = out.last_mut() else { continue };
+        let t = t.strip_prefix("- ").unwrap_or(t);
+        if let Some(n) = t.strip_prefix("name: ") {
+            step.0 = n.trim().to_string();
+        } else if let Some(u) = t.strip_prefix("uses: ").filter(|_| step.0.is_empty()) {
+            step.0 = format!("Run {}", u.split_whitespace().next().unwrap_or(u));
+        } else if let Some(c) = t.strip_prefix("if: ") {
+            step.1 = c.trim().to_string();
+        } else if let Some(r) = t.strip_prefix("run: ") {
+            step.2 = r.trim().to_string();
+            if step.0.is_empty() {
+                step.0 = format!("Run {}", step.2);
+            }
+        }
+    }
+    out
+}
+
+/// Every step after a `TEST_STEPS` test step of a ci.yml job runs after a failed test step too (`!cancelled()`, `always()` or
+/// `failure()` in its `if:`): a test-only failure is graded (`ci verdict`), so a check after it must not be skipped by it (run 9001
+/// skipped the crates job's `cargo deny`). Positive control: the deny step without its `if:` is found.
+#[test]
+fn ci_yml_steps_after_a_test_step_run_after_a_test_failure() {
+    use paddock_dev::plan_since::TEST_STEPS;
+    let text = std::fs::read_to_string(root().join(".gitea/workflows/ci.yml"))
+        .unwrap()
+        .replace("\r\n", "\n");
+    let unguarded = |text: &str| -> Vec<String> {
+        let wf = paddock_dev::plan_gitea::workflow_jobs(text).expect("ci.yml splits into jobs");
+        let mut bad = Vec::new();
+        for (_, job, steps, ..) in TEST_STEPS.iter().filter(|t| t.0 == "ci.yml") {
+            let body = &wf.jobs.iter().find(|(k, _)| k == job).unwrap_or_else(|| panic!("no job {job}")).1;
+            let all = job_steps(body);
+            let first = all
+                .iter()
+                .position(|(n, ..)| steps.contains(&n.as_str()))
+                .unwrap_or_else(|| panic!("job {job} has none of its test steps {steps:?}"));
+            for (name, cond, _) in &all[first + 1..] {
+                if !steps.contains(&name.as_str()) && !["!cancelled()", "always()", "failure()"].iter().any(|g| cond.contains(g)) {
+                    bad.push(format!("{job}: {name}"));
+                }
+            }
+        }
+        bad
+    };
+    assert_eq!(unguarded(&text), Vec::<String>::new(), "steps a failed test step would skip");
+    let cut = text.replacen(
+        "      - name: Dependency policy (cargo deny)\n        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' }}\n",
+        "      - name: Dependency policy (cargo deny)\n",
+        1,
+    );
+    assert_ne!(cut, text, "the control found the deny step");
+    assert_eq!(unguarded(&cut), vec!["crates: Dependency policy (cargo deny)".to_string()]);
+}
+
+/// The commands a `StepFilter::Whole` step must have run after its tests are commands of that step's own phase (the step's
+/// `./dev ci run <project> <phase>` line, read through `ci_run::contract::phase_lines`), after its nextest command: a moved or
+/// renamed floor fails here, not as a run that can never be graded.
+#[test]
+fn whole_test_steps_name_commands_of_their_own_phase_after_the_tests() {
+    use paddock_dev::plan_since::{StepFilter, TEST_STEPS};
+    let text = std::fs::read_to_string(root().join(".gitea/workflows/ci.yml"))
+        .unwrap()
+        .replace("\r\n", "\n");
+    let wf = paddock_dev::plan_gitea::workflow_jobs(&text).expect("ci.yml splits into jobs");
+    let mut seen = 0;
+    for (_, job, steps, _, filter) in TEST_STEPS.iter().filter(|t| t.0 == "ci.yml") {
+        let StepFilter::Whole { after } = filter else { continue };
+        let body = &wf.jobs.iter().find(|(k, _)| k == job).unwrap().1;
+        let run = job_steps(body)
+            .into_iter()
+            .find(|(n, ..)| steps.contains(&n.as_str()))
+            .map(|(.., r)| r)
+            .unwrap();
+        let mut words = run
+            .strip_prefix("./dev ci run ")
+            .unwrap_or_else(|| panic!("{job}: {run}"))
+            .split_whitespace();
+        let (project, phase) = (words.next().unwrap(), words.next().unwrap());
+        let contract = paddock_dev::ci_run::contract::load(&root(), project).unwrap();
+        let lines = paddock_dev::ci_run::contract::phase_lines(&contract, project, phase).unwrap();
+        let tests = lines.iter().position(|l| l.contains("nextest")).expect("the phase runs nextest");
+        for a in *after {
+            assert!(
+                lines[tests + 1..].iter().any(|l| l.starts_with(a)),
+                "{job}: `{a}` is no command of {project} {phase} after its tests: {lines:?}"
+            );
+            seen += 1;
+        }
+        // Positive control: a command before the tests is not accepted.
+        assert!(!lines[tests + 1..].iter().any(|l| l.starts_with("cd crates")));
+    }
+    assert!(seen >= 1, "a Whole step was read");
+}
+
 /// A rerun of a debrief.yml run's failures (its `since_run` input): the planner can split the file into jobs and read their
 /// names and needs, every job but the plan and the tag-only and schedule-only ones asks `rerun_jobs` for itself, the plan job
 /// declares every output the planner writes, and the steps the planner narrows are the file's.
@@ -982,7 +1120,7 @@ fn debrief_yml_takes_a_rerun_of_its_failures() {
         "PLAN_MODE_FULL is the full output's expression"
     );
     assert!(plan.contains(&format!("echo \"{}$PLAN_MODE_FULL\"", paddock_dev::plan_since::MODE_LINE)));
-    for (w, job, steps, _) in TEST_STEPS.iter().filter(|t| t.0 == "debrief.yml") {
+    for (w, job, steps, ..) in TEST_STEPS.iter().filter(|t| t.0 == "debrief.yml") {
         let body = &wf.jobs.iter().find(|(k, _)| k == job).unwrap_or_else(|| panic!("{w} {job}")).1;
         for s in *steps {
             assert!(body.contains(&format!("- name: {s}\n")), "{job} has the step {s}");

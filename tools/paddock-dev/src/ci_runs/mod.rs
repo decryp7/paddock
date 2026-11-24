@@ -16,6 +16,7 @@
 pub mod cache_audit;
 pub mod client;
 pub mod dispatch;
+pub mod dispatch_guards;
 pub mod fix_items;
 pub mod flakes;
 pub mod green;
@@ -269,6 +270,127 @@ pub struct DispatchArgs {
     /// The checkout whose `.gitea/workflows` is read (default: the folder containing .git, found from the current folder).
     #[arg(long)]
     root: Option<PathBuf>,
+    /// Coordinator override of the failed-first guard (ER-10): dispatch a full train run although the last full run is red and no
+    /// failed-only round is green on the head. The reason is logged.
+    #[arg(long, value_name = "REASON")]
+    full_anyway: Option<String>,
+    /// Coordinator override of the green-main guard: dispatch a train although main's nightly or push run is red in the foundation
+    /// or an active app (a train that carries the fix). The reason is logged.
+    #[arg(long, value_name = "REASON")]
+    red_main_anyway: Option<String>,
+}
+
+/// Arguments of `ci rerun-check`: guard 3 of the failed-only rounds (ER-10, ER-33).
+#[derive(Args)]
+pub struct RerunCheckArgs {
+    /// The rerun's nextest filterset (written by `./dev plan --since-run`).
+    #[arg(long)]
+    filter: String,
+    /// The output of `cargo nextest list --message-format json -E <filter>` (same selection as the run), a file.
+    #[arg(long, value_name = "FILE")]
+    listed: PathBuf,
+}
+
+/// `ci rerun-check`: every failed test a failed-only round names must select a test at this commit; one that matches nothing (renamed or
+/// removed since the run that failed) fails the step with an `::error::` naming it, never a warning (run 8868 passed on an empty
+/// selection). Exit 5 with the names, 1 when the filter or the listing cannot be read.
+pub fn rerun_check(a: &RerunCheckArgs) -> Result<Report, CliError> {
+    let fail = |e: String| {
+        println!("::error::rerun-check: {e}");
+        CliError::failure(e).with_hint("Check that the step lists with the same filter and selection it runs.")
+    };
+    let text = std::fs::read_to_string(&a.listed).map_err(|e| fail(format!("{} cannot be read: {e}", a.listed.display())))?;
+    let listing: serde_json::Value = serde_json::from_str(&text).map_err(|e| fail(format!("{} is not JSON: {e}", a.listed.display())))?;
+    let atoms = crate::plan_since::filterset_atoms(&a.filter).map_err(fail)?;
+    let missing = crate::plan_since::rerun_unmatched(&a.filter, &listing).map_err(fail)?;
+    if missing.is_empty() {
+        return Ok(Report::new(
+            serde_json::json!({"named": atoms.len(), "missing": []}),
+            format!(
+                "rerun-check: each of the {} failed test(s) the round names selects a test at this commit",
+                atoms.len()
+            ),
+        ));
+    }
+    for m in &missing {
+        println!(
+            "::error::rerun-check: the failed test {m} matches no test at this commit (renamed or removed since the run that failed): a failed-only round must run every test it names (ER-10, ER-33). Next: rename it back, or let the next failed-only round of this run rerun this job whole (its failed step is not a test step)"
+        );
+    }
+    let names: Vec<String> = missing.iter().map(ToString::to_string).collect();
+    Ok(Report::new(
+        serde_json::json!({"named": atoms.len(), "missing": names}),
+        format!(
+            "rerun-check: {} of {} failed test(s) match nothing: {}",
+            names.len(),
+            atoms.len(),
+            names.join("; ")
+        ),
+    )
+    .with_exit(Exit::Findings))
+}
+
+/// Arguments of `ci guard-record`: ER-41 for the dispatch guards.
+#[derive(Args)]
+pub struct GuardRecordArgs {
+    /// The guard: `failed-first` or `green-main`.
+    #[arg(long)]
+    guard: String,
+    /// The run of its first green use: a finished, green run of a train dispatched through `./dev ci dispatch` (its title carries the
+    /// dispatch token) after the guard measured and let it go.
+    #[arg(long)]
+    run: u64,
+    /// The repository.
+    #[arg(long, default_value = "decryp7/paddock")]
+    repo: String,
+    /// The Gitea server.
+    #[arg(long, default_value = SERVER)]
+    server: String,
+}
+
+/// `ci guard-record`: records a dispatch guard's first green use in `docs/ci-dispatch-guards.toml` (of the current repository), which
+/// switches it from report-only to blocking in the one step (ER-41). Refuses a run that is not finished and green, not a train's, or not
+/// dispatched through `./dev ci dispatch`, and a guard already recorded.
+pub fn guard_record(a: &GuardRecordArgs) -> Result<Report, CliError> {
+    let guard = dispatch_guards::Guard::parse(&a.guard)
+        .ok_or_else(|| CliError::usage(format!("unknown guard {:?}", a.guard)).with_hint("Use failed-first or green-main."))?;
+    let root = std::env::current_dir().map_err(|e| CliError::failure(format!("The current folder cannot be read: {e}.")))?;
+    let file = root.join(dispatch_guards::REGISTER);
+    let text = std::fs::read_to_string(&file)
+        .map_err(|e| CliError::failure(format!("{} cannot be read: {e}.", file.display())).with_hint("Run it from the repository root."))?;
+    let updated = dispatch_guards::with_first_green(&text, guard, a.run).map_err(CliError::failure)?;
+    let token = token()?;
+    let mut http = CurlHttp;
+    let mut client = Client::new(&mut http, &a.server, &a.repo, &token);
+    let run = client
+        .run(a.run)
+        .map_err(CliError::failure)?
+        .ok_or_else(|| CliError::failure(format!("the server has no run {}.", a.run)))?;
+    let why = if !run.finished() || run.conclusion != "success" {
+        Some(format!("it is {} {}, not finished and green", run.status, run.conclusion))
+    } else if !dispatch::is_train(run.git_ref()) {
+        Some(format!("it ran on {}, not on a train", run.git_ref()))
+    } else if dispatch::DispatchTag::of_title(&run.title).is_none() {
+        Some("its title carries no dispatch token: it was not dispatched through `./dev ci dispatch`".into())
+    } else {
+        None
+    };
+    if let Some(why) = why {
+        return Err(
+            CliError::failure(format!("run {} cannot be recorded for {}: {why}.", a.run, guard.name()))
+                .with_hint("Record a green train run that `./dev ci dispatch` sent after this guard measured and let it go."),
+        );
+    }
+    std::fs::write(&file, updated).map_err(|e| CliError::failure(format!("{} cannot be written: {e}.", file.display())))?;
+    Ok(Report::new(
+        serde_json::json!({"guard": guard.name(), "run": a.run}),
+        format!(
+            "recorded {} at run {} in {}: the guard now refuses (ER-41). Commit the file.",
+            guard.name(),
+            a.run,
+            dispatch_guards::REGISTER
+        ),
+    ))
 }
 
 /// Arguments of `ci runner-wait` (the `runner-wait` action, the first job of a train run). The run, server and repository
@@ -311,12 +433,16 @@ pub struct VerdictArgs {
     #[arg(long, default_value = SERVER)]
     server: String,
     /// The answer is for a tag: only a run that tested every package on every OS counts, never an OS-scoped one (ER-15).
-    #[arg(long)]
+    #[arg(long, conflicts_with = "landing")]
     tag: bool,
     /// The app the tag releases: the deciding run must have planned it (it was active, or the run planned every app); a run whose
     /// declared scope lists it as inactive (docs/ci-active-apps.toml) is not its full green run (ER-15).
     #[arg(long)]
     app: Option<String>,
+    /// The answer is for a landing: a run that ran exactly its own diff's selection counts, and green with fix items (FLAKY
+    /// tests in untouched code, each a fix item) is landable (exit 0). Never for a tag.
+    #[arg(long)]
+    landing: bool,
 }
 
 /// Arguments of `ci fix-items`.
@@ -673,6 +799,8 @@ pub fn verdict(a: &VerdictArgs) -> Result<Report, CliError> {
             let mut client = Client::new(&mut http, &a.server, &a.repo, &token);
             let v = if a.tag {
                 verdict::verdict_tag(&mut client, &a.workflow, &a.sha)
+            } else if a.landing {
+                verdict::verdict_landing_at(&mut client, &a.workflow, &a.sha, &root)
             } else {
                 verdict::verdict(&mut client, &a.workflow, &a.sha)
             };
@@ -682,10 +810,18 @@ pub fn verdict(a: &VerdictArgs) -> Result<Report, CliError> {
             }
         }
     };
-    let r = verdict::report(&v, &a.workflow, &a.sha, &crate::pre_push::outcome::GitRepo(&root));
+    let r = verdict::report_for(&v, &a.workflow, &a.sha, &crate::pre_push::outcome::GitRepo(&root), a.landing);
     if r.exit != Exit::Ok {
         eprintln!("::error::ci verdict: {}", r.text);
+    } else if matches!(v, verdict::Verdict::GreenWithFixItems { .. }) {
+        eprintln!("::notice::ci verdict: {}", r.text);
     }
+    let mut lines = green::take_notices();
+    lines.push(r.text.clone());
+    green::write_summary(
+        &format!("ci verdict: {} on {}", a.workflow, a.sha.get(..10).unwrap_or(&a.sha)),
+        &lines,
+    );
     Ok(r)
 }
 
@@ -918,6 +1054,22 @@ pub fn dispatch(a: &DispatchArgs) -> Result<Report, CliError> {
     }
     let mut req = dispatch::parse_request(&a.workflow, &git_ref, &inputs, &a.max, a.interval.as_deref())
         .map_err(|e| CliError::usage(e).with_hint(hint))?;
+    for (flag, reason) in [("--full-anyway", &a.full_anyway), ("--red-main-anyway", &a.red_main_anyway)] {
+        if reason.as_deref().is_some_and(|r| r.trim().is_empty()) {
+            return Err(
+                CliError::usage(format!("{flag} needs a reason.")).with_hint("Say why, for example --full-anyway \"test renamed\".")
+            );
+        }
+    }
+    // The train guards (failed-first, green-main): before anything waits or is sent.
+    let guards = if trial.is_none() && dispatch::is_train(&req.git_ref) {
+        train_guards(a, &root, &read, &token, &req)?
+    } else {
+        Vec::new()
+    };
+    // Guard A6 (ER-51): the run is found by the token this dispatch sends, never as "the newest run".
+    let (with_id, dispatch_id) = dispatch::with_dispatch_id(&req.workflow, &read, std::mem::take(&mut req.inputs));
+    req.inputs = with_id;
     if waits && trial.is_none() {
         wait_for_trains()?;
     }
@@ -930,6 +1082,11 @@ pub fn dispatch(a: &DispatchArgs) -> Result<Report, CliError> {
     let mut clock = dispatch::system_clock();
     let mut reach = crate::health::CurlReach;
     let mut health = crate::health::Health::new(crate::health::real_services(&a.server, "dispatch", false), &mut reach);
+    // ER-51: one of the two callers of the raw dispatch; the run it starts is then found by its dispatch token (find_run below).
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "`./dev ci dispatch` holds the run it starts: find_run by the dispatch token"
+    )]
     let result = dispatch::run(
         &mut http,
         &dispatch::Target {
@@ -951,15 +1108,58 @@ pub fn dispatch(a: &DispatchArgs) -> Result<Report, CliError> {
         eprintln!("::warning::trial: {trial_ref} could not be deleted after the dispatch failed ({e}); run `./dev ci trial-prune`");
     }
     match result {
-        Ok(dispatch::Dispatched::Yes { waited }) => Ok(Report::new(
-            serde_json::json!({"dispatched": true, "waitedMs": waited.as_millis() as u64}),
-            format!(
+        Ok(dispatch::Dispatched::Yes { waited }) => {
+            let sent = format!(
                 "Dispatched {} on {} after waiting {}.",
                 req.workflow,
                 req.git_ref,
                 crate::wait::fmt_duration(waited)
-            ),
-        )),
+            );
+            let Some(id) = dispatch_id else {
+                eprintln!(
+                    "::warning::dispatch: {} declares no {} input, so its run cannot be found by a token; add the input and its run-name line (guard A6)",
+                    req.workflow,
+                    dispatch::DISPATCH_ID
+                );
+                return Ok(Report::new(
+                    serde_json::json!({"dispatched": true, "waitedMs": waited.as_millis() as u64, "run": null, "guards": guards}),
+                    sent,
+                ));
+            };
+            let target = dispatch::Target {
+                server: &a.server,
+                repo: &a.repo,
+                token: &token,
+            };
+            let found = dispatch::find_run(
+                &mut http,
+                &target,
+                &req.workflow,
+                &id,
+                &mut clock,
+                dispatch::FIND_MAX,
+                dispatch::FIND_INTERVAL,
+                &mut std::io::stderr(),
+            );
+            match found {
+                Ok(Some(run)) => Ok(Report::new(
+                    serde_json::json!({"dispatched": true, "waitedMs": waited.as_millis() as u64, "run": run, "dispatchId": id, "guards": guards}),
+                    format!("{sent}\nrun {run}"),
+                )),
+                Ok(None) | Err(_) => {
+                    let why = match found {
+                        Err(e) => e,
+                        _ => format!("no run showed it within {}", crate::wait::fmt_duration(dispatch::FIND_MAX)),
+                    };
+                    eprintln!("::error::dispatch: {sent} Its run with dispatch id {id} was not found: {why}. Do not dispatch again.");
+                    Err(CliError::new(
+                        Exit::NotMeasured,
+                        format!("dispatched, but the run with dispatch id {id} was not found ({why})."),
+                    )
+                    .with_hint("Do not dispatch again: find the run in Gitea's Actions list by `[dispatch <id>]` in its title."))
+                }
+            }
+        }
         Ok(dispatch::Dispatched::ServiceDown { last }) => Err(CliError::failure(format!("not dispatched: {last}."))
             .with_hint("Wait until Gitea answers (the ::error:: line above names it), then dispatch again.")),
         Ok(dispatch::Dispatched::StillBusy { last }) => Err(CliError::failure(format!("not dispatched: the runner stayed busy ({last})."))
@@ -969,6 +1169,40 @@ pub fn dispatch(a: &DispatchArgs) -> Result<Report, CliError> {
             Err(CliError::failure(e).with_hint("Check the workflow name, GITEA_TOKEN's scope and the network."))
         }
     }
+}
+
+/// The guards of a train dispatch ([`dispatch_guards::check_train`]) with the coordinator's overrides; a blocking refusal ends the command
+/// (exit 4, or 6 when the guard could not look).
+fn train_guards(
+    a: &DispatchArgs,
+    root: &std::path::Path,
+    read: dispatch::ReadWorkflow<'_>,
+    token: &str,
+    req: &dispatch::Request,
+) -> Result<Vec<serde_json::Value>, CliError> {
+    let target = dispatch::Target {
+        server: &a.server,
+        repo: &a.repo,
+        token,
+    };
+    let overrides = dispatch_guards::Overrides {
+        full_anyway: a.full_anyway.as_deref(),
+        red_main_anyway: a.red_main_anyway.as_deref(),
+    };
+    dispatch_guards::check_train(
+        &mut CurlHttp,
+        &target,
+        root,
+        read,
+        req,
+        overrides,
+        time::now_secs() as f64 * 1000.0,
+        &mut std::io::stderr(),
+    )
+    .map_err(|s| {
+        CliError::new(if s.not_measured { Exit::NotMeasured } else { Exit::Refused }, s.message)
+            .with_hint("The ::error:: line above names the next step.")
+    })
 }
 
 /// The trial merge of `--trial`: the ref to dispatch and the `base` input. A conflict or a merge-check finding is a failure with

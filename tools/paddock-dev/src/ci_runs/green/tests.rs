@@ -9,6 +9,9 @@
 //!   header of each file says what was left out). Each shows one FLAKY test, `FLKY-FL 2/2`, and nothing else; the app log carries
 //!   app-gates' real `::error::failed (exit 100): cargo nextest run` and `##[error]` lines.
 //! - `nextest-r1-pass.log`: a test that failed both tries beside a FLAKY one (cargo-nextest 0.9.149).
+//! - `tests/ci-runs/run-9001-jobs.json` and `nextest-run9001-crates-coverage-flaky-only.log`: the crates job of train 2026-11-26-c's
+//!   run 9001 (its coverage step, `cargo llvm-cov nextest`, failed on one FLAKY paddock-ipc test) and an excerpt of its log, read
+//!   through the Actions API on 2026-11-25 and scrubbed like the 8610 ones (the header of the log says what was left out).
 //! - the plan logs are `run_scope::TEST_COMPLETE`, `TEST_PARTIAL` and `TEST_OS_ONLY` (the line `./dev plan --ci` prints), with the
 //!   old `plan verdict: complete=true` line beside it where a test asks for the report-only phase.
 
@@ -22,6 +25,9 @@ const JOBS_8610: &str = include_str!("../../../tests/ci-runs/run-8610-jobs.json"
 const CRATE_FLAKY: &str = include_str!("../../../tests/ci-runs/nextest-run8610-crate-flaky-only.log");
 const APP_FLAKY: &str = include_str!("../../../tests/ci-runs/nextest-run8610-app-gates-flaky-only.log");
 const BOTH_TRIES: &str = include_str!("../../../tests/ci-runs/nextest-r1-pass.log");
+const JOBS_9001: &str = include_str!("../../../tests/ci-runs/run-9001-jobs.json");
+const CRATES_COVERAGE_FLAKY: &str = include_str!("../../../tests/ci-runs/nextest-run9001-crates-coverage-flaky-only.log");
+const CRATES: &str = "crates (fmt, workspace hack, unused deps, coverage, deny)";
 const CRATE: &str = "crate (windows-latest)";
 const APP: &str = "app spotter (macos-latest)";
 
@@ -36,7 +42,12 @@ fn complete() -> String {
 
 /// A job of the real run 8610 by name, given another id and page.
 fn real_job(name: &str, run: u64, n: u64) -> Value {
-    let all: Value = serde_json::from_str(JOBS_8610).unwrap();
+    real_job_in(JOBS_8610, name, run, n)
+}
+
+/// A job of a recorded run's jobs (`fixture`) by name, given another id and page.
+fn real_job_in(fixture: &str, name: &str, run: u64, n: u64) -> Value {
+    let all: Value = serde_json::from_str(fixture).unwrap();
     let mut job = all["jobs"]
         .as_array()
         .unwrap()
@@ -90,8 +101,12 @@ impl Run {
         }
     }
     /// The real failed job `name` with the log it carries.
-    fn failing(mut self, name: &str, log: &str) -> Run {
-        let job = real_job(name, self.id, 2 + self.jobs.len() as u64);
+    fn failing(self, name: &str, log: &str) -> Run {
+        self.failing_in(JOBS_8610, name, log)
+    }
+    /// The failed job `name` of the recorded jobs `fixture`, with the log it carries.
+    fn failing_in(mut self, fixture: &str, name: &str, log: &str) -> Run {
+        let job = real_job_in(fixture, name, self.id, 2 + self.jobs.len() as u64);
         self.logs.push((job["id"].as_u64().unwrap(), log.to_string()));
         self.jobs.push(job);
         self
@@ -126,6 +141,7 @@ impl Run {
             head_branch: self.branch.into(),
             created_at: "2026-11-22T00:00:00Z".into(),
             run_attempt: self.attempt,
+            title: String::new(),
         }
     }
 }
@@ -880,7 +896,12 @@ fn a_landing_run_of_its_own_narrowed_diff_lands_but_is_never_a_base_nor_tag_gree
     let plain = verdict::verdict_with_touched(&mut client(&mut f), "ci.yml", &head, None, true, &mut Vec::new, &mut |_, _| {
         Some(touched(&[]))
     });
-    assert!(matches!(plain, verdict::Verdict::Red { .. }), "{plain:?}");
+    // Run 8983: the reason named the landing run with an empty cause, "8983 ()". It says why the run is not complete here.
+    assert!(
+        matches!(&plain, verdict::Verdict::Red { reason, .. }
+            if reason.contains("8801 (a landing run") && reason.contains("smoke set") && reason.contains("tools") && !reason.contains("8801 ()")),
+        "{plain:?}"
+    );
     // Not a base: the search goes past it to the complete commit before it.
     assert_eq!(
         base(&mut f, &[head.clone(), main.clone()], touched(&[])).map(|b| b.sha),
@@ -942,4 +963,160 @@ fn the_landing_queues_port_lands_a_train_on_its_narrowed_landing_run_without_a_s
     };
     use crate::queue::ports::Ci;
     assert_eq!(ci.verdict("ci.yml", &head), verdict::Verdict::Green { run: 8821 });
+}
+
+/// The package level (user decision 2026-11-24): the plan reached the crates workspace through Cargo alone, at the packages `reached`;
+/// the workspace holds paddock-chromium (the 8610 FLAKY test's package) and paddock-core. `narrow`: the package level decides.
+fn packages(reached: &[&str], narrow: bool) -> Touched {
+    Touched {
+        flags: ["crates".to_string()].into(),
+        cargo_only: ["crates".to_string()].into(),
+        packages: [("crates".to_string(), reached.iter().map(|p| p.to_string()).collect())].into(),
+        members: [("crates".to_string(), ["paddock-chromium", "paddock-core"].map(String::from).into())].into(),
+        narrow,
+        ..Touched::default()
+    }
+}
+
+#[test]
+fn a_flaky_test_in_an_untouched_package_is_a_fix_item_and_landable_once_the_package_level_decides() {
+    // The 8610 log: a FLAKY test of paddock-chromium. The change reached the crates workspace, but only paddock-core.
+    let c = sha(2);
+    let r = Run::train(8610, &c, "failure").failing(CRATE, CRATE_FLAKY);
+    let mut f = server(std::slice::from_ref(&r));
+    let o = grade(&mut f, &r, packages(&["paddock-core"], true));
+    assert!(o.lands() && !o.is_tag_green(), "{o:?}");
+    let items = fix_items(&o);
+    assert_eq!(items.len(), 1);
+    assert!(items[0].test.starts_with("paddock-chromium::it "), "{items:?}");
+    // Positive control (ER-33): the same run in the report-only phase is red on the job level: the package level is what lands it.
+    let o = grade(&mut f, &r, packages(&["paddock-core"], false));
+    assert!(matches!(&o.result, GradedResult::Red(why) if why.contains("reached")), "{o:?}");
+    assert!(!o.lands());
+}
+
+/// The plan reached the crates workspace through Cargo, at paddock-core only; the workspace holds paddock-ipc (the 9001 FLAKY test's
+/// package) and paddock-core.
+fn ipc_untouched() -> Touched {
+    Touched {
+        flags: ["crates".to_string()].into(),
+        cargo_only: ["crates".to_string()].into(),
+        packages: [("crates".to_string(), ["paddock-core".to_string()].into())].into(),
+        members: [("crates".to_string(), ["paddock-ipc", "paddock-core"].map(String::from).into())].into(),
+        narrow: true,
+        ..Touched::default()
+    }
+}
+
+#[test]
+fn a_flaky_test_in_the_crates_coverage_step_is_graded_only_when_the_coverage_floor_ran_after_it() {
+    // Run 9001: the crates job's coverage step (cargo llvm-cov nextest, then the coverage floor) failed on one FLAKY paddock-ipc
+    // test. The executor stopped at nextest's exit 100, so the floor never ran: not measured, naming it (before the fix the job had
+    // "no step known to run tests").
+    let c = sha(3);
+    let r = Run::train(9001, &c, "failure").failing_in(JOBS_9001, CRATES, CRATES_COVERAGE_FLAKY);
+    let mut f = server(std::slice::from_ref(&r));
+    let o = grade(&mut f, &r, ipc_untouched());
+    assert!(
+        matches!(&o.result, GradedResult::NotMeasured(why) if why.contains("coverage-gate.mjs") && why.contains("not measured")),
+        "{o:?}"
+    );
+    assert!(!o.lands());
+    // With the floor run after the tests and passed, the FLAKY test in an untouched package is a fix item and the run lands.
+    let floored = format!(
+        "{CRATES_COVERAGE_FLAKY}2026-11-24T17:53:44.0000000Z ran: node ../scripts/coverage-gate.mjs lcov.info 90 (exit 0, 0.4 s)\n"
+    );
+    let r = Run::train(9001, &c, "failure").failing_in(JOBS_9001, CRATES, &floored);
+    let mut f = server(std::slice::from_ref(&r));
+    let o = grade(&mut f, &r, ipc_untouched());
+    assert!(o.lands() && !o.is_tag_green(), "{o:?}");
+    let items = fix_items(&o);
+    assert_eq!(items.len(), 1);
+    assert!(items[0].test.starts_with("paddock-ipc::it endings::"), "{items:?}");
+    // Positive control (ER-12, ER-33): the same log with the test failing both tries blocks, floor or not.
+    let both = floored.replace("TRY 2 PASS", "TRY 2 FAIL").replace("FLKY-FL 2/2", "TRY 2 FAIL");
+    assert_ne!(both, floored);
+    let r = Run::train(9001, &c, "failure").failing_in(JOBS_9001, CRATES, &both);
+    let mut f = server(std::slice::from_ref(&r));
+    let o = grade(&mut f, &r, ipc_untouched());
+    assert!(matches!(&o.result, GradedResult::Red(why) if why.contains("both tries")), "{o:?}");
+    assert!(!o.lands());
+}
+
+#[test]
+fn the_same_flaky_test_in_a_touched_package_blocks() {
+    let c = sha(2);
+    let r = Run::train(8610, &c, "failure").failing(CRATE, CRATE_FLAKY);
+    let mut f = server(std::slice::from_ref(&r));
+    let o = grade(&mut f, &r, packages(&["paddock-chromium", "paddock-core"], true));
+    assert!(matches!(&o.result, GradedResult::Red(why) if why.contains("touched code")), "{o:?}");
+    assert!(!o.lands());
+    // A project reached for a reason that is not a Cargo reach (a UI file, a lockfile) touches every test of it.
+    let mut whole = packages(&["paddock-core"], true);
+    whole.cargo_only.clear();
+    assert!(matches!(grade(&mut f, &r, whole).result, GradedResult::Red(_)));
+}
+
+#[test]
+fn a_test_that_failed_both_tries_blocks_on_the_package_level_too() {
+    let c = sha(2);
+    let r = Run::train(8610, &c, "failure").failing(CRATE, &format!("Job: crate\n{BOTH_TRIES}"));
+    let mut f = server(std::slice::from_ref(&r));
+    let o = grade(&mut f, &r, packages(&[], true));
+    assert!(matches!(&o.result, GradedResult::Red(why) if why.contains("both tries")), "{o:?}");
+}
+
+#[test]
+fn a_flaky_test_the_graph_cannot_place_blocks() {
+    let c = sha(2);
+    let r = Run::train(8610, &c, "failure").failing(CRATE, CRATE_FLAKY);
+    let mut f = server(std::slice::from_ref(&r));
+    // The crate is no package of the job's workspace (a renamed crate, a log of another workspace): fail closed.
+    let mut unknown = packages(&["paddock-core"], true);
+    unknown.members.insert("crates".into(), ["paddock-core".to_string()].into());
+    let o = grade(&mut f, &r, unknown);
+    assert!(matches!(&o.result, GradedResult::Red(why) if why.contains("cannot place")), "{o:?}");
+    // The workspace's packages were not read at all: fail closed too.
+    let mut unread = packages(&["paddock-core"], true);
+    unread.members.clear();
+    assert!(matches!(grade(&mut f, &r, unread).result, GradedResult::Red(_)));
+    // Positive control: with the package known the same run lands.
+    assert!(grade(&mut f, &r, packages(&["paddock-core"], true)).lands());
+}
+
+#[test]
+fn the_package_level_reads_the_job_test_and_plan() {
+    let t = packages(&["paddock-core"], true);
+    assert!(matches!(t.reaches_test(CRATE, "paddock-core::it a::b"), Reach::Touched(_)));
+    assert!(matches!(t.reaches_test(CRATE, "paddock-chromium a::b"), Reach::Untouched(_)));
+    // Not reached at the job level: untouched whatever the package.
+    assert!(matches!(t.reaches_test(APP, "spotter-render::real_browser a"), Reach::Untouched(_)));
+    // A Playwright test of a reached project has no package level: touched.
+    assert!(matches!(
+        t.reaches_test("crates (ubuntu-latest)", "[chromium] › a.spec.ts:1:2 › t"),
+        Reach::Touched(_)
+    ));
+    // An app's Rust tests narrow in the app's own workspace.
+    let mut app = Touched {
+        apps: ["spotter".to_string()].into(),
+        cargo_only: ["app:spotter".to_string()].into(),
+        app_cargo: [("spotter".to_string(), "apps/spotter/app/src-tauri".to_string())].into(),
+        members: [("apps/spotter/app/src-tauri".to_string(), ["spotter-render".to_string()].into())].into(),
+        narrow: true,
+        ..Touched::default()
+    };
+    assert!(matches!(
+        app.reaches_test(APP, "spotter-render::real_browser a"),
+        Reach::Untouched(_)
+    ));
+    app.packages
+        .insert("apps/spotter/app/src-tauri".into(), ["spotter-render".to_string()].into());
+    assert!(matches!(app.reaches_test(APP, "spotter-render::real_browser a"), Reach::Touched(_)));
+    // The plan's JSON gives the packages and cargoOnly.
+    let p = Touched::from_plan(&json!({"crates": true, "apps": [], "packages": {"crates": ["paddock-core"]}, "cargoOnly": ["crates"]}));
+    assert_eq!(p.packages["crates"], ["paddock-core".to_string()].into());
+    assert!(p.cargo_only.contains("crates") && !p.narrow);
+    // `all`: the change cannot be bounded, everything is touched.
+    let all = Touched { all: true, ..t };
+    assert!(matches!(all.reaches_test(CRATE, "paddock-chromium a::b"), Reach::Touched(_)));
 }

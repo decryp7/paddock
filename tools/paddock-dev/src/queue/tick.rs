@@ -54,7 +54,7 @@ pub enum Tick {
         /// Dropped on the way, with the reason.
         dropped: Vec<(u64, String)>,
     },
-    /// A run was dispatched on the train head.
+    /// A run was dispatched on the train head, and the queue holds it.
     Dispatched {
         /// The head.
         head: String,
@@ -62,6 +62,8 @@ pub enum Tick {
         workflow: String,
         /// The inputs.
         inputs: Vec<(String, String)>,
+        /// The run it started (recorded on the train's pull requests, [`run_record`]).
+        run: u64,
     },
     /// A run is going.
     Waiting(u64),
@@ -111,8 +113,13 @@ impl Tick {
                     )
                 }
             ),
-            Tick::Dispatched { head, workflow, inputs } => format!(
-                "queue: dispatched {workflow} on {} ({})",
+            Tick::Dispatched {
+                head,
+                workflow,
+                inputs,
+                run,
+            } => format!(
+                "queue: dispatched {workflow} on {} as run {run} ({})",
                 short(head),
                 if inputs.is_empty() {
                     "full run".to_string()
@@ -427,18 +434,110 @@ pub fn inputs_for(workflow: &str, full: bool, since: Option<u64>, main: &str) ->
     v
 }
 
-fn dispatch(p: &mut Ports, env: &Env, head: &str, workflow: &str, inputs: Vec<(String, String)>) -> Result<Tick, String> {
+/// The first words of the record the queue writes on each pull request of the train when it starts a run: the run's handle (ER-51).
+/// The next tick follows the run the newest record names, read by its id, never a run found by searching the runs of the head.
+const RECORD: &str = "queue: dispatched ";
+const LOST: &str = "; its run was not found.";
+
+/// The record of a run the queue started for `workflow` on `head` (`None`: sent, but its run was not found). The first line is the
+/// record; [`parse_record`] is its one reader.
+pub(super) fn run_record(workflow: &str, head: &str, run: Option<u64>) -> String {
+    match run {
+        Some(id) => format!("{RECORD}{workflow} on {head} as run {id}."),
+        None => format!("{RECORD}{workflow} on {head}{LOST}"),
+    }
+}
+
+/// The workflow, head and run of a record ([`run_record`]), from a comment's first line; `None` for any other comment.
+pub(super) fn parse_record(text: &str) -> Option<(String, String, Option<u64>)> {
+    let rest = text.lines().next()?.strip_prefix(RECORD)?;
+    let (workflow, rest) = rest.split_once(" on ")?;
+    if let Some(head) = rest.strip_suffix(LOST) {
+        return Some((workflow.to_string(), head.to_string(), None));
+    }
+    let (head, id) = rest.split_once(" as run ")?;
+    let id = id.strip_suffix('.')?.parse().ok()?;
+    (!head.contains(' ')).then(|| (workflow.to_string(), head.to_string(), Some(id)))
+}
+
+/// The runs the queue recorded for `workflow` on `head`, newest first, from the comments of the train's pull requests (each holds the
+/// same records); a `None` is a dispatch whose run was not found.
+fn held_runs(p: &mut Ports, in_train: &[&Pull], workflow: &str, head: &str) -> Result<Vec<Option<u64>>, String> {
+    let mut out: Vec<Option<u64>> = Vec::new();
+    for pr in in_train {
+        for c in p.ledger.comments(pr.number)? {
+            if let Some((w, h, run)) = parse_record(&c)
+                && w == workflow
+                && h == head
+                && !out.contains(&run)
+            {
+                out.push(run);
+            }
+        }
+    }
+    out.reverse();
+    Ok(out)
+}
+
+/// Writes a record to every pull request of the train.
+fn record(p: &mut Ports, in_train: &[&Pull], text: &str) -> Result<(), String> {
+    for pr in in_train {
+        p.ledger.comment(pr.number, text)?;
+    }
+    Ok(())
+}
+
+fn dispatch(
+    p: &mut Ports,
+    env: &Env,
+    in_train: &[&Pull],
+    head: &str,
+    workflow: &str,
+    inputs: Vec<(String, String)>,
+) -> Result<Tick, String> {
     if let Some(t) = window_guard(env) {
         return Ok(t);
     }
     match p.ci.dispatch(workflow, &inputs)? {
-        Sent::Yes => Ok(Tick::Dispatched {
-            head: head.to_string(),
-            workflow: workflow.to_string(),
-            inputs,
-        }),
+        Sent::Yes { run } => {
+            if let Err(e) = record(p, in_train, &run_record(workflow, head, Some(run))) {
+                return Ok(Tick::Stuck {
+                    why: format!(
+                        "run {run} of {workflow} on {} was started but could not be recorded ({e}). Next step: comment `{}` on the train's pull requests, so the queue follows it instead of starting another",
+                        short(head),
+                        run_record(workflow, head, Some(run))
+                    ),
+                    measured: false,
+                });
+            }
+            Ok(Tick::Dispatched {
+                head: head.to_string(),
+                workflow: workflow.to_string(),
+                inputs,
+                run,
+            })
+        }
         Sent::Busy(who) => Ok(Tick::RunnerBusy(who)),
+        Sent::Refused { why, measured } => Ok(Tick::Stuck {
+            why: format!("the dispatch of {workflow} on {} was refused: {why}", short(head)),
+            measured,
+        }),
+        Sent::Lost(why) => {
+            record(p, in_train, &format!("{}\n{why}", run_record(workflow, head, None)))?;
+            Ok(Tick::Stuck {
+                why: lost_why(workflow, head),
+                measured: false,
+            })
+        }
     }
+}
+
+fn lost_why(workflow: &str, head: &str) -> String {
+    format!(
+        "a dispatch of {workflow} on {} was sent but its run was not found; the queue never sends it again nor guesses the run (ER-51). Next step: find the run by `[dispatch` in its title in Gitea's Actions list and comment `{}` with its id on the train's pull requests",
+        short(head),
+        run_record(workflow, head, Some(0)).replace(" 0.", " <id>.")
+    )
 }
 
 /// The FLAKY tests of the runs a landing rests on (ADR 0117 WP-4, ER-12): workflow, run, and the fix items of each run that is green
@@ -486,11 +585,30 @@ fn record_fix_items(p: &mut Ports, in_train: &[&Pull], fix: &FixRecord) -> Resul
 fn judge(p: &mut Ports, env: &Env, in_train: &[&Pull], head: &str, marker: &Marker, main: &str) -> Result<Tick, String> {
     let mut fix: FixRecord = Vec::new();
     for wf in p.train.reached_workflows(main, head)? {
-        let runs = p.ci.runs(&wf, head)?;
+        let held = held_runs(p, in_train, &wf, head)?;
         let since = marker.since_workflow.as_deref().filter(|w| *w == wf).and(marker.since_run);
-        let Some(newest) = runs.first() else {
-            return dispatch(p, env, head, &wf, inputs_for(&wf, false, since, main));
+        let Some(&newest_id) = held.first() else {
+            return dispatch(p, env, in_train, head, &wf, inputs_for(&wf, false, since, main));
         };
+        let Some(newest_id) = newest_id else {
+            return Ok(Tick::Stuck {
+                why: lost_why(&wf, head),
+                measured: false,
+            });
+        };
+        let newest = match p.ci.run(&wf, head, newest_id) {
+            Ok(r) => r,
+            Err(e) => {
+                return Ok(Tick::Stuck {
+                    why: format!(
+                        "the run the queue holds for {wf} on {} cannot be followed: {e}. Next step: check the queue's records on the train's pull requests",
+                        short(head)
+                    ),
+                    measured: false,
+                });
+            }
+        };
+        let runs = &held;
         match &newest.state {
             RunState::Running => return Ok(Tick::Waiting(newest.id)),
             RunState::Success => match p.ci.verdict(&wf, head) {
@@ -516,7 +634,7 @@ fn judge(p: &mut Ports, env: &Env, in_train: &[&Pull], head: &str, marker: &Mark
                             measured: true,
                         });
                     }
-                    return dispatch(p, env, head, &wf, inputs_for(&wf, true, None, main));
+                    return dispatch(p, env, in_train, head, &wf, inputs_for(&wf, true, None, main));
                 }
             },
             RunState::Failed(how) => {

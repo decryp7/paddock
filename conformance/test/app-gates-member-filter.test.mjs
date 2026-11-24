@@ -11,10 +11,15 @@ import { loadAction, stepsOf } from './lib/workflow.mjs';
 
 const rustStep = () => stepsOf(loadAction('app-gates')).find((s) => s.run?.includes('cargo nextest run'));
 
-/** Runs the Rust step with a fake `cargo` that logs its calls; `list` is what `cargo nextest list` prints (or "FAIL"). */
-function run({ filter = '', testsOnly = '', last = '', list = '', lastList = '', graph = '' }) {
+/**
+ * Runs the Rust step with a fake `cargo` that logs its calls; `list` is what `cargo nextest list` prints (or "FAIL"). A fake `dev`
+ * at the workspace root logs its calls too and exits with `devExit` (the rerun check's verdict).
+ */
+function run({ filter = '', testsOnly = '', last = '', list = '', lastList = '', graph = '', devExit = 0 }) {
   const dir = mkdtempSync(join(tmpdir(), 'app-gates-'));
   const calls = join(dir, 'calls');
+  writeFileSync(join(dir, 'dev'), ['#!/bin/bash', `echo "dev $*" >> "${calls}"`, `exit ${devExit}`, ''].join('\n'));
+  chmodSync(join(dir, 'dev'), 0o755);
   writeFileSync(
     join(dir, 'cargo'),
     [
@@ -33,7 +38,7 @@ function run({ filter = '', testsOnly = '', last = '', list = '', lastList = '',
     encoding: 'utf8',
     cwd: dir,
     env: {
-      PATH: `${dir}:${process.env.PATH}`, RUNNER_OS: 'Linux', GITHUB_WORKSPACE: dir, FAKE_LIST: list, FAKE_LAST: lastList,
+      PATH: `${dir}:${process.env.PATH}`, RUNNER_OS: 'Linux', GITHUB_WORKSPACE: dir, RUNNER_TEMP: dir, FAKE_LIST: list, FAKE_LAST: lastList,
       NEXTEST_CONFIG: '', FILTER: filter, TESTS_ONLY: testsOnly, GRAPH_FILTER: graph, DISPLAY_TESTS: '', LAST_PACKAGES: last, WINDOWS_CLIPPY: '',
     },
   });
@@ -81,10 +86,26 @@ test('without a member filter nothing is listed and the full run is not narrowed
   assert.doesNotMatch(runs(r)[0], /-E /);
 });
 
-test('a rerun of failed tests keeps its own filter and --no-tests=warn', () => {
-  const r = run({ filter: 'test(=a::b)', testsOnly: 'true' });
-  assert.equal(r.calls.filter((c) => c.startsWith('cargo nextest list')).length, 0, r.calls.join('\n'));
-  assert.match(runs(r)[0], /--no-tests=warn/, r.calls.join('\n'));
+test('a rerun of failed tests checks each named test before it runs them, and a name that selects nothing fails (run 8868)', () => {
+  const filter = '(binary_id(=a) & test(=m::b))';
+  const r = run({ filter, testsOnly: 'true', list: '{}' });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const list = r.calls.filter((c) => c.startsWith('cargo nextest list'));
+  assert.equal(list.length, 1, r.calls.join('\n'));
+  assert.match(list[0], /--workspace .*-E \(binary_id\(=a\) & test\(=m::b\)\) --message-format json/);
+  assert.ok(r.calls.some((c) => c.startsWith(`dev ci rerun-check --filter ${filter} --listed `)), r.calls.join('\n'));
+  assert.match(runs(r)[0], /--no-tests=fail/, r.calls.join('\n'));
+  // A named test that selects nothing (renamed since the failed run): the step fails before nextest runs, never a warning.
+  const gone = run({ filter, testsOnly: 'true', list: '{}', devExit: 5 });
+  assert.equal(gone.status, 1, gone.stdout + gone.stderr);
+  assert.equal(runs(gone).length, 0, gone.calls.join('\n'));
+  // A listing that fails cannot be checked: the step fails with the cause, nothing runs.
+  const broken = run({ filter, testsOnly: 'true', list: 'FAIL' });
+  assert.equal(broken.status, 1);
+  assert.match(broken.stdout, /::error::rerun-check: cargo nextest list failed/);
+  assert.equal(runs(broken).length, 0);
+  // Positive control: a full run (no rerun) neither lists nor checks.
+  assert.ok(!run({}).calls.some((c) => c.startsWith('dev ')));
 });
 
 test("the graph's filterset (graph-filter) that selects no test in either half fails, never passes (review round 2 P2-2)", () => {

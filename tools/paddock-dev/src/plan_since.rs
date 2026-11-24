@@ -8,7 +8,10 @@
 //! - nextest: every run in the log (`Starting N tests` ... `Summary [..] N tests run: ...`) must have ended with its summary,
 //!   run every test it started and have no fewer `FAIL`/`TIMEOUT`/`SIG*` lines than its summary counts failures; otherwise the
 //!   whole job reruns with the reason (ER-27). The filterset names each failed test exactly (`binary_id(=b) & test(=t)`), or its
-//!   whole test binary when the name has characters a filterset would have to escape: never fewer tests than failed.
+//!   whole test binary when the name has characters a filterset would have to escape: never fewer tests than failed. Before it
+//!   runs, each test step lists its workspace with the filter and `./dev ci rerun-check` ([`rerun_unmatched`]) fails it with an
+//!   `::error::` naming every failed test that selects nothing (renamed or removed since: run 8868 passed on an empty selection);
+//!   the next round of that run then reruns the job whole. A rename is not mapped: the name alone cannot prove which test it became.
 //! - a job that failed in any other step (a build, clippy, a doc test, a check, the end-to-end tests) reruns whole.
 //! - vitest: the failed spec files are read and reported (`vitest`). A job whose only failed step is a vitest step that takes a
 //!   file list ([`VITEST_STEPS`]: Debrief's `frontend`) reruns only those spec files, when the log's `Test Files` summary counts
@@ -35,20 +38,96 @@ fn re(pattern: &str) -> Regex {
     Regex::new(pattern).expect("a valid pattern")
 }
 
-/// The steps of a workflow's job that run nextest and take a filterset (ci.yml: `matrix.filter`; debrief.yml: the plan job's
-/// `<job>_filter` output), as `(workflow, job, steps, composite)`. A job whose failed steps are all listed here, and whose
-/// failures are all read from its log, reruns only its failed tests. `composite`: the step is a composite action that runs
+/// The steps of a workflow's job that run nextest, as `(workflow, job, steps, composite, filter)`: the one table of test steps, read
+/// by the graders (`ci verdict`, through [`failure_is_tests`]) and by the narrowed rerun. `filter` says whether the steps take a
+/// filterset (ci.yml: `matrix.filter`; debrief.yml: the plan job's `<job>_filter` output): a job whose failed steps are all listed
+/// here with [`StepFilter::Filterset`], and whose failures are all read from its log, reruns only its failed tests; a
+/// [`StepFilter::Whole`] step (the crates job's coverage step, `cargo llvm-cov nextest`, which runs every crate test and reads no
+/// filter) reruns its job whole. Its FLAKY tests are graded only when the commands that follow the tests in the same step (the
+/// coverage floor) ran after them and passed; otherwise the job is not measured (run 9001: the floor never ran after the FLAKY
+/// test, ER-33). `composite`: the step is a composite action that runs
 /// several commands and names each failed one in an `::error::failed (exit N): <command>` line (app-gates), so every such line
 /// must be a nextest run. Debrief's `Memory budget` is `continue-on-error` (it never fails the job, but the API may list it as
 /// failed); the narrowed rerun skips it. A failed `No temp folders left behind` check is not listed: the leaked folder may be
 /// any test's, not only a failed one's, so the whole job reruns (run 7961 failed both steps and reruns whole).
-pub const TEST_STEPS: &[(&str, &str, &[&str], bool)] = &[
-    ("ci.yml", "crate", &["Tests (workspace, every feature)"], false),
-    ("ci.yml", "paddock-dev", &["Tests"], false),
-    ("ci.yml", "app", &["Run ./.gitea/actions/app-gates"], true),
-    ("debrief.yml", "rust-test", &["Tests (workspace)", "Memory budget"], false),
-    ("debrief.yml", "rust-test-macos", &["Tests (workspace)"], false),
+pub const TEST_STEPS: &[(&str, &str, &[&str], bool, StepFilter)] = &[
+    (
+        "ci.yml",
+        "crate",
+        &["Tests (workspace, every feature)"],
+        false,
+        StepFilter::Filterset,
+    ),
+    ("ci.yml", "paddock-dev", &["Tests"], false, StepFilter::Filterset),
+    ("ci.yml", "app", &["Run ./.gitea/actions/app-gates"], true, StepFilter::Filterset),
+    (
+        "ci.yml",
+        "crates",
+        &["Coverage (>= 90 % lines; 99 % security target report-only)"],
+        false,
+        StepFilter::Whole {
+            after: &["node ../scripts/coverage-gate.mjs"],
+        },
+    ),
+    (
+        "debrief.yml",
+        "rust-test",
+        &["Tests (workspace)", "Memory budget"],
+        false,
+        StepFilter::Filterset,
+    ),
+    (
+        "debrief.yml",
+        "rust-test-macos",
+        &["Tests (workspace)"],
+        false,
+        StepFilter::Filterset,
+    ),
 ];
+
+/// Whether a [`TEST_STEPS`] step takes a filterset of the tests to run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StepFilter {
+    /// It runs only the tests of the filterset it is given (a rerun narrows to the failed tests).
+    Filterset,
+    /// It runs all its tests whatever it is given: a rerun takes its job whole. `after`: the commands of the same step that follow
+    /// the tests (crates/paddock.ci.json `coverage`, the gate executor's `ran: <command> (exit N, ...)` lines): a test-only failure
+    /// is graded only when each of them ran after the tests' summary and passed.
+    Whole {
+        /// The command prefixes that must have run after the tests.
+        after: &'static [&'static str],
+    },
+}
+
+/// Whether the commands a [`StepFilter::Whole`] step runs after its tests ran after the last nextest summary of `log` and passed:
+/// the executor stops at its first failed command, so a failed test run leaves them unrun, and what they check is not measured.
+pub fn ran_after_tests(log: &str, after: &[&str]) -> Result<(), StepProblem> {
+    let lines: Vec<String> = log.lines().map(plain).collect();
+    let Some(summary) = lines.iter().rposition(|l| l.trim_start().starts_with("Summary [")) else {
+        return Err(StepProblem::Unknown("the step's log has no nextest summary".into()));
+    };
+    static EXIT: LazyLock<Regex> = LazyLock::new(|| re(r"\(exit (\d+)"));
+    for prefix in after {
+        let Some(ran) = lines[summary..]
+            .iter()
+            .find(|l| l.strip_prefix("ran: ").is_some_and(|c| c.starts_with(prefix)))
+        else {
+            return Err(StepProblem::Unknown(format!(
+                "`{prefix}` did not run after the tests (the step stops at its first failed command), so what it checks is not measured"
+            )));
+        };
+        match EXIT.captures(ran).map(|m| m[1].to_string()) {
+            Some(code) if code == "0" => {}
+            Some(code) => return Err(StepProblem::Other(format!("`{prefix}` failed after the tests (exit {code})"))),
+            None => {
+                return Err(StepProblem::Unknown(format!(
+                    "`{prefix}` ran but its exit status is not in the log"
+                )));
+            }
+        }
+    }
+    Ok(())
+}
 
 /// The steps of a workflow's job that run vitest and take a list of spec files (the plan job's `<job>_include` output), as
 /// `(workflow, job, steps)`. A job whose only failed steps are these reruns only the failed spec files.
@@ -92,7 +171,7 @@ pub fn app_output_names() -> Vec<String> {
         out.extend(
             TEST_STEPS
                 .iter()
-                .filter(|t| t.0 == a.file)
+                .filter(|t| t.0 == a.file && t.4 == StepFilter::Filterset)
                 .map(|t| format!("{}_filter", t.1.replace('-', "_"))),
         );
         out.extend(
@@ -234,6 +313,106 @@ pub fn filterset(tests: &[FailedTest]) -> Option<String> {
         }
     }
     (!parts.is_empty()).then(|| parts.join(" | "))
+}
+
+/// One selector of a rerun's filterset ([`filterset`]): a named test of a binary, or a whole binary.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct FilterAtom {
+    /// The binary id.
+    pub binary: String,
+    /// The test; `None` for the whole binary.
+    pub test: Option<String>,
+}
+
+impl std::fmt::Display for FilterAtom {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.test {
+            Some(t) => write!(f, "{} {t}", self.binary),
+            None => write!(f, "{} (the whole binary)", self.binary),
+        }
+    }
+}
+
+/// Splits `s` at `sep` outside parentheses.
+fn split_top(s: &str, sep: &str) -> Vec<String> {
+    let (mut out, mut depth, mut cur) = (Vec::new(), 0i32, String::new());
+    let mut rest = s;
+    while let Some(c) = rest.chars().next() {
+        if depth == 0 && rest.starts_with(sep) {
+            out.push(std::mem::take(&mut cur));
+            rest = &rest[sep.len()..];
+            continue;
+        }
+        depth += match c {
+            '(' => 1,
+            ')' => -1,
+            _ => 0,
+        };
+        cur.push(c);
+        rest = &rest[c.len_utf8()..];
+    }
+    out.push(cur);
+    out
+}
+
+/// The selectors of a rerun's filterset: the inverse of [`filterset`], the one writer of that format. `Err` for any other text (a
+/// smoke set, a host filter, a hand-written filter), which is never taken for a rerun's.
+pub fn filterset_atoms(filter: &str) -> Result<Vec<FilterAtom>, String> {
+    let bad = || format!("{filter:?} is not a rerun filterset (`./dev plan --since-run` writes `(binary_id(=b) & test(=t)) | ...`)");
+    let inner = |s: &str, pre: &str| s.strip_prefix(pre).and_then(|r| r.strip_suffix(')')).map(str::to_string);
+    let binary_of = |s: &str| inner(s, "binary_id(=").filter(|b| PLAIN_BINARY.is_match(b));
+    let mut atoms = Vec::new();
+    for part in split_top(filter.trim(), " | ") {
+        if let Some(binary) = binary_of(&part) {
+            atoms.push(FilterAtom { binary, test: None });
+            continue;
+        }
+        let body = part.strip_prefix('(').and_then(|p| p.strip_suffix(')')).ok_or_else(bad)?;
+        let [b, tests]: [String; 2] = split_top(body, " & ").try_into().map_err(|_| bad())?;
+        let binary = binary_of(&b).ok_or_else(bad)?;
+        let names = split_top(tests.strip_prefix('(').and_then(|t| t.strip_suffix(')')).unwrap_or(&tests), " | ");
+        // `(test(=a) | test(=b))` has two names; one name is written without the parentheses.
+        if names.len() > 1 && !tests.starts_with('(') {
+            return Err(bad());
+        }
+        for t in names {
+            let test = inner(&t, "test(=").filter(|t| PLAIN_TEST.is_match(t)).ok_or_else(bad)?;
+            atoms.push(FilterAtom {
+                binary: binary.clone(),
+                test: Some(test),
+            });
+        }
+    }
+    if atoms.is_empty() {
+        return Err(bad());
+    }
+    Ok(atoms)
+}
+
+/// The selectors of a rerun's filterset that match no test of a `cargo nextest list --message-format json` listing made with that
+/// filter: a failed test renamed or removed since the run that failed. Run 8868 passed on an empty selection after ADR 0121 renamed
+/// a test, because nextest only warned. `Err` when the filter is not a rerun filterset or the listing is not nextest's JSON.
+pub fn rerun_unmatched(filter: &str, listing: &Value) -> Result<Vec<FilterAtom>, String> {
+    let atoms = filterset_atoms(filter)?;
+    let suites = listing["rust-suites"]
+        .as_object()
+        .ok_or("the listing has no `rust-suites`: it is not `cargo nextest list --message-format json` output")?;
+    let mut tests: BTreeSet<(String, String)> = BTreeSet::new();
+    for (id, suite) in suites {
+        let id = suite["binary-id"].as_str().unwrap_or(id);
+        for (name, case) in suite["testcases"].as_object().into_iter().flatten() {
+            if case["filter-match"]["status"].as_str() == Some("matches") {
+                tests.insert((id.to_string(), name.clone()));
+            }
+        }
+    }
+    Ok(atoms
+        .into_iter()
+        .filter(|a| match &a.test {
+            Some(t) => !tests.contains(&(a.binary.clone(), t.clone())),
+            None => !tests.iter().any(|(b, _)| *b == a.binary),
+        })
+        .collect())
 }
 
 static VITEST_FAIL: LazyLock<Regex> = LazyLock::new(|| re(r"^\s*FAIL\s+(?:\S+\s+)??(\S+\.(?:spec|test)\.[cm]?[jt]sx?)(?:\s|$)"));
@@ -555,12 +734,16 @@ fn narrow(job: &RunJob, log: Result<&str, &str>, workflow: &str, key: Option<&st
         }
         return vitest_failures(log).map(Scope::Specs);
     }
-    let entry = TEST_STEPS.iter().find(|(w, k, _, _)| *w == workflow && *k == key);
-    let Some((_, _, steps, composite)) = entry else {
+    let entry = TEST_STEPS.iter().find(|(w, k, ..)| *w == workflow && *k == key);
+    let Some((_, _, steps, composite, filter)) = entry else {
         return Err(format!("job {key} has no step that takes a test filter"));
     };
     if let Some(s) = job.failed_steps.iter().find(|s| !steps.contains(&s.as_str())) {
         return Err(format!("step \"{s}\" failed and takes no test filter"));
+    }
+    if matches!(filter, StepFilter::Whole { .. }) {
+        let s = job.failed_steps.first().map_or(steps[0], String::as_str);
+        return Err(format!("step \"{s}\" runs tests but takes no test filter"));
     }
     if *composite {
         // The step that failed inside the composite and the composite itself; a third (notices.sh, the cargo-about install,
@@ -603,9 +786,12 @@ pub fn composite_annotations(log: &str) -> Result<Vec<String>, String> {
 /// `StepProblem::Other`, an unreadable composite failure is `StepProblem::Unknown`.
 pub fn failure_is_tests(workflow: &str, key: &str, failed_steps: &[String], log: &str) -> Result<(), StepProblem> {
     failed_steps_are_tests(workflow, key, failed_steps)?;
+    if let Some((.., StepFilter::Whole { after })) = TEST_STEPS.iter().find(|t| t.0 == workflow && t.1 == key) {
+        ran_after_tests(log, after)?;
+    }
     if !TEST_STEPS
         .iter()
-        .any(|(w, k, _, composite)| *w == workflow && *k == key && *composite)
+        .any(|(w, k, _, composite, _)| *w == workflow && *k == key && *composite)
     {
         return Ok(());
     }
@@ -624,8 +810,8 @@ pub fn failure_is_tests(workflow: &str, key: &str, failed_steps: &[String], log:
 pub fn failed_steps_are_tests(workflow: &str, key: &str, failed_steps: &[String]) -> Result<(), StepProblem> {
     let known: Vec<&str> = TEST_STEPS
         .iter()
-        .filter(|(w, k, _, _)| *w == workflow && *k == key)
-        .flat_map(|(_, _, s, _)| s.iter().copied())
+        .filter(|(w, k, ..)| *w == workflow && *k == key)
+        .flat_map(|(_, _, s, ..)| s.iter().copied())
         .chain(
             VITEST_STEPS
                 .iter()
@@ -1255,6 +1441,72 @@ mod tests {
         assert_eq!(filterset(&[t("b c)", "x")]), None);
     }
 
+    fn atom(b: &str, t: Option<&str>) -> FilterAtom {
+        FilterAtom {
+            binary: b.into(),
+            test: t.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn a_rerun_filterset_reads_back_into_the_tests_it_names_and_nothing_else_is_taken_for_one() {
+        let many = [t("b::it", "m::one"), t("a", "z"), t("b::it", "m::two")];
+        assert_eq!(
+            filterset_atoms(&filterset(&many).unwrap()).unwrap(),
+            [atom("a", Some("z")), atom("b::it", Some("m::one")), atom("b::it", Some("m::two"))]
+        );
+        assert_eq!(
+            filterset_atoms(&filterset(&[t("b", "x::y")]).unwrap()).unwrap(),
+            [atom("b", Some("x::y"))]
+        );
+        let whole = filterset(&[t("b", "case(1, 2)"), t("a", "z")]).unwrap();
+        assert_eq!(filterset_atoms(&whole).unwrap(), [atom("a", Some("z")), atom("b", None)]);
+        // A smoke set, a host filter or a hand-written filter is not a rerun's: never read as one.
+        for other in [
+            "",
+            "package(paddock-dev)",
+            "test(/plan/)",
+            "binary_id(=a) & test(=z)",
+            "(binary_id(=a) & test(=z)) | package(x)",
+            "(binary_id(=a) & test(=z) | test(=y))",
+            "(binary_id(=a) & test(~z))",
+        ] {
+            assert!(filterset_atoms(other).is_err(), "{other}");
+        }
+    }
+
+    const LISTING: &str = include_str!("../tests/since-run/nextest-list-rerun.json");
+
+    #[test]
+    fn a_failed_test_renamed_since_the_failed_run_matches_nothing_and_is_named_not_warned_about() {
+        // Run 8868: ADR 0121 renamed a test; the round's filter named the old name, nextest selected nothing, warned, and the round
+        // passed. The listing is `cargo nextest list --message-format json -E <filter>` at the new head.
+        let listing: Value = serde_json::from_str(LISTING).unwrap();
+        let renamed = filterset(&[
+            t("paddock-dev", "test_cost::tests::each_class_has_a_stop"),
+            t("paddock-dev::it", "plan::the_plan_names_every_job"),
+        ])
+        .unwrap();
+        let missing = rerun_unmatched(&renamed, &listing).unwrap();
+        assert_eq!(missing, [atom("paddock-dev", Some("test_cost::tests::each_class_has_a_stop"))]);
+        assert_eq!(missing[0].to_string(), "paddock-dev test_cost::tests::each_class_has_a_stop");
+        // Positive control: the names the head has all match.
+        let kept = filterset(&[
+            t("paddock-dev", "test_cost::tests::each_class_has_its_stop"),
+            t("paddock-dev::it", "plan::the_plan_names_every_job"),
+        ])
+        .unwrap();
+        assert!(rerun_unmatched(&kept, &listing).unwrap().is_empty());
+        // A listed test the filter did not select (mismatch) does not count, and a whole binary needs one selected test.
+        let unselected = filterset(&[t("paddock-dev::it", "plan::the_plan_reads_the_graph")]).unwrap();
+        assert_eq!(rerun_unmatched(&unselected, &listing).unwrap().len(), 1);
+        assert!(rerun_unmatched("binary_id(=paddock-dev::it)", &listing).unwrap().is_empty());
+        assert_eq!(rerun_unmatched("binary_id(=gone::it)", &listing).unwrap(), [atom("gone::it", None)]);
+        // Not a listing, or not a rerun filter: an error, never "nothing missing".
+        assert!(rerun_unmatched(&kept, &json!({"tests": []})).is_err());
+        assert!(rerun_unmatched("package(paddock-dev)", &listing).is_err());
+    }
+
     #[test]
     fn vitest_failed_files_come_from_the_failed_tests_list_and_the_job_key_from_the_header() {
         assert_eq!(
@@ -1278,6 +1530,55 @@ mod tests {
     fn templates() -> Vec<(String, String)> {
         let ci = "name: ci\non:\n  push:\njobs:\n  plan:\n    name: plan (affected projects)\n  ui:\n    name: ui (tokens, contrast, components, entry points, publish dry run)\n  e2e:\n    name: reference apps (shard ${{ matrix.shard }}/2)\n  conformance:\n    name: conformance (checks, release scripts)\n  crates:\n    name: crates (fmt, workspace hack, unused deps, coverage, deny)\n  crate:\n    name: crate (${{ matrix.os }})\n  app:\n    name: app ${{ matrix.app }} (${{ matrix.os }}${{ matrix.e2e_leg != '' && format(', {0}', matrix.e2e_leg) || '' }})\n  paddock-dev:\n    name: paddock-dev (${{ matrix.os }})\n";
         name_templates(ci)
+    }
+
+    /// The crates job's coverage step runs every crate test (`cargo llvm-cov nextest`, the same nextest output) but reads no filter. Its
+    /// failure is a test step's for the graders (run 9001: one FLAKY paddock-ipc test made the verdict "not measured", job crates had
+    /// "no step known to run tests"), and a rerun of the job takes it whole.
+    #[test]
+    fn the_crates_coverage_step_runs_tests_but_takes_no_filter_so_a_rerun_takes_its_job_whole() {
+        const COVERAGE: &str = "Coverage (>= 90 % lines; 99 % security target report-only)";
+        assert_eq!(failed_steps_are_tests("ci.yml", "crates", &[COVERAGE.to_string()]), Ok(()));
+        // Positive control: another failed step of the job is no test step.
+        assert!(matches!(
+            failed_steps_are_tests("ci.yml", "crates", &["Unused dependencies".to_string()]),
+            Err(StepProblem::Other(_))
+        ));
+        let log = include_str!("../tests/ci-runs/nextest-run9001-crates-coverage-flaky-only.log");
+        let jobs: Value = serde_json::from_str(include_str!("../tests/ci-runs/run-9001-jobs.json")).unwrap();
+        let job = RunJob::list(&jobs).into_iter().next().unwrap();
+        assert_eq!(job.failed_steps, vec![COVERAGE.to_string()]);
+        // The floor never ran after the FLAKY test (the executor stopped at nextest's exit 100): not measured, naming it.
+        assert!(
+            matches!(failure_is_tests("ci.yml", "crates", &job.failed_steps, log), Err(StepProblem::Unknown(ref w)) if w.contains("coverage-gate.mjs")),
+            "{:?}",
+            failure_is_tests("ci.yml", "crates", &job.failed_steps, log)
+        );
+        // With the floor's line after the summary the failure is test-only; a failed floor is red.
+        let floor = |exit: u32| {
+            format!("{log}2026-11-24T17:53:44.0000000Z ran: node ../scripts/coverage-gate.mjs lcov.info 90 (exit {exit}, 0.4 s)\n")
+        };
+        assert_eq!(failure_is_tests("ci.yml", "crates", &job.failed_steps, &floor(0)), Ok(()));
+        assert!(matches!(
+            failure_is_tests("ci.yml", "crates", &job.failed_steps, &floor(1)),
+            Err(StepProblem::Other(_))
+        ));
+        // Before the summary it does not count.
+        let early = log.replacen(
+            "     Summary",
+            "ran: node ../scripts/coverage-gate.mjs lcov.info 90 (exit 0, 0.4 s)\n     Summary",
+            1,
+        );
+        assert!(matches!(
+            failure_is_tests("ci.yml", "crates", &job.failed_steps, &early),
+            Err(StepProblem::Unknown(_))
+        ));
+        let r = classify(&job, Ok(log), "ci.yml", &templates());
+        assert_eq!(r.key.as_deref(), Some("crates"));
+        assert_eq!(
+            r.scope,
+            Scope::Job(format!("step \"{COVERAGE}\" runs tests but takes no test filter"))
+        );
     }
 
     #[test]
@@ -1325,6 +1626,26 @@ mod tests {
         assert!(matches!(
             classify(&job(33271), Ok(CRATE_MACOS), "debrief.yml", &templates()).scope,
             Scope::Job(_)
+        ));
+    }
+
+    #[test]
+    fn a_round_that_failed_because_a_named_test_was_gone_reruns_its_job_whole_next_time() {
+        // `./dev ci rerun-check` failed the test step before nextest ran: the log names the missing test and holds no nextest run, so the
+        // next failed-only round of this run cannot narrow the job to tests and reruns it whole (the renamed test is then run).
+        let log = "2026-11-24T07:30:27.2207850Z ::group::Run cargo nextest list --workspace --all-features --message-format json\n\
+                   2026-11-24T07:31:00.0000000Z ::error::rerun-check: the failed test paddock-service per_machine::tests::gone matches no test at this commit (renamed or removed since the run that failed)\n\
+                   2026-11-24T07:31:00.1000000Z ##[error]Process completed with exit code 1.\n";
+        let r = classify(&job(33271), Ok(log), "ci.yml", &templates());
+        assert!(
+            matches!(r.scope, Scope::Job(ref why) if why.contains("no nextest run")),
+            "{:?}",
+            r.scope
+        );
+        // Positive control: the same job with its nextest failures narrows to them.
+        assert!(matches!(
+            classify(&job(33271), Ok(CRATE_MACOS), "ci.yml", &templates()).scope,
+            Scope::Tests { .. }
         ));
     }
 

@@ -370,7 +370,8 @@ enum CiCommand {
     TestCost(ci_runs::TestCostArgs),
     /// Is there a full green run of a workflow on a commit? The one reader of the runs for that verdict (the tag workflow asks
     /// it). A run counts if it is a push to main or its plan job logged `plan mode: full=true`; the newest full run decides.
-    /// Exit 0 full green, 5 red or only partial runs, 6 not measured (never a pass).
+    /// Exit 0 full green (with `--landing` also green with fix items: FLAKY tests in untouched code), 5 red, only partial runs, or
+    /// fix items without `--landing` (a tag needs a run without them), 6 not measured (never a pass).
     Verdict(ci_runs::VerdictArgs),
     /// Records the fix items of a run that is green with fix items (FLAKY tests of crates and apps the change did not reach, ER-12) in
     /// docs/lessons.md, once whatever the number of calls: the call a landing makes on the landed commit, the queue's or an
@@ -400,6 +401,12 @@ enum CiCommand {
     RunnerWait(ci_runs::RunnerWaitArgs),
     /// Delete the `trial/*` refs (`ci dispatch --trial`) of branches that are gone or landed on main (ADR 0098 WP-4).
     TrialPrune(ci_runs::TrialPruneArgs),
+    /// In a failed-only round's test step: every failed test the rerun filter names must select a test at this commit (a renamed or
+    /// removed one fails with an `::error::` naming it, never a warning; ER-10, ER-33). Exit 5 with the names.
+    RerunCheck(ci_runs::RerunCheckArgs),
+    /// Records a dispatch guard's first green use (failed-first, green-main) in docs/ci-dispatch-guards.toml, which switches it from
+    /// report-only to blocking (ER-41). Refuses a run that is not a green train run dispatched through `ci dispatch`.
+    GuardRecord(ci_runs::GuardRecordArgs),
 }
 
 #[derive(Subcommand)]
@@ -752,6 +759,12 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
         Command::Ci {
             command: CiCommand::TrialPrune(a),
         } => ci_runs::trial_prune(&a),
+        Command::Ci {
+            command: CiCommand::RerunCheck(a),
+        } => ci_runs::rerun_check(&a),
+        Command::Ci {
+            command: CiCommand::GuardRecord(a),
+        } => ci_runs::guard_record(&a),
         Command::Wait(a) => wait::command(&a),
         Command::Heavy(a) => heavy_cmd::command(&a),
         Command::HeavyInstall(a) => heavy_install::command(&a),

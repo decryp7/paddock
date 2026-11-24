@@ -20,6 +20,8 @@
 # updater key (PADDOCK_TAURI_SIGNING_PRIVATE_KEY, _PASSWORD and PADDOCK_TAURI_UPDATER_PUBKEY).
 
 name: debrief
+# A run dispatched through ./dev ci dispatch shows its dispatch_id in its title, so the tool finds that exact run (guard A6, ER-51).
+run-name: ${{ github.event.inputs.dispatch_id && format('{0} [dispatch {1}]', github.workflow, github.event.inputs.dispatch_id) || '' }}
 
 on:
   push:
@@ -37,6 +39,10 @@ on:
         default: false
       since_run:
         description: "Rerun only what failed in this finished debrief.yml run (its API id, as ./dev ci dispatch and ./dev wait --ci-run print it; not its run number): the failed jobs, the failed e2e shards, inside rust tests only the failed nextest tests and inside the frontend job only the failed vitest files (./dev plan --ci --app debrief; ER-10). A full run's failures need bundles: true too. A full run before landing catches the rest."
+        required: false
+        default: ""
+      dispatch_id:
+        description: "Set by ./dev ci dispatch: the token it finds this run by (shown in the run's title). Leave empty."
         required: false
         default: ""
 
@@ -323,7 +329,13 @@ jobs:
       - name: Tests (workspace)
         env:
           RERUN_FILTER: ${{ needs.plan.outputs.rust_test_filter }}
-        run: xvfb-run -a cargo nextest run --workspace --profile ci ${RERUN_FILTER:+-E "$RERUN_FILTER"}
+        run: |
+          # Each failed test the rerun names must still select a test (./dev ci rerun-check): a renamed one fails here, never a warning.
+          if [ -n "$RERUN_FILTER" ]; then
+            cargo nextest list --workspace -E "$RERUN_FILTER" --message-format json > "$RUNNER_TEMP/rerun-listed.json" || { echo "::error::rerun-check: cargo nextest list failed. Next: read the build error above"; exit 1; }
+            "${PADDOCK_WORKSPACE:-$GITHUB_WORKSPACE}/dev" ci rerun-check --filter "$RERUN_FILTER" --listed "$RUNNER_TEMP/rerun-listed.json" || exit 1
+          fi
+          xvfb-run -a cargo nextest run --workspace --profile ci ${RERUN_FILTER:+-E "$RERUN_FILTER"}
 
       - name: Test report (JUnit)
         if: always()
@@ -437,7 +449,11 @@ jobs:
         run: |
           # A rerun names its failed tests; otherwise only the packages with OS-specific code are built and tested here (hostTests).
           sel=(--workspace); filter=()
-          if [ -n "$RERUN_FILTER" ]; then filter=(-E "$RERUN_FILTER")
+          if [ -n "$RERUN_FILTER" ]; then
+            # Each failed test the rerun names must still select a test (./dev ci rerun-check): a renamed one fails here, never a warning.
+            cargo nextest list "${sel[@]}" -E "$RERUN_FILTER" --message-format json > "$RUNNER_TEMP/rerun-listed.json" || { echo "::error::rerun-check: cargo nextest list failed. Next: read the build error above"; exit 1; }
+            "${PADDOCK_WORKSPACE:-$GITHUB_WORKSPACE}/dev" ci rerun-check --filter "$RERUN_FILTER" --listed "$RUNNER_TEMP/rerun-listed.json" || exit 1
+            filter=(-E "$RERUN_FILTER")
           else
             if [ -n "$HOST_PACKAGES" ]; then echo "::notice::only the packages with OS-specific code are tested on this runner (hostTests): $HOST_PACKAGES"; sel=(); for p in $HOST_PACKAGES; do sel+=(-p "$p"); done; fi
             if [ -n "$HOST_FILTER" ]; then filter=(-E "$HOST_FILTER"); fi

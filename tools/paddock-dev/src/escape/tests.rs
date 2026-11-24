@@ -300,6 +300,55 @@ fn records_older_than_fourteen_days_are_pruned_and_newer_are_kept() {
     assert!(matches!(m.get(&c(2)), Load::Ok(_)) && matches!(m.get(&c(3)), Load::Unreadable(_)));
 }
 
+/// CI run 8976: the plan job checks out with `persist-credentials: false`, so the push of the records asked for a user name and
+/// failed. The push and the fetch send the job's token the way actions/checkout does (an `http.extraheader` of basic
+/// `x-access-token:<token>`), in git's environment only: never on the command line.
+#[test]
+fn the_records_push_and_fetch_carry_the_jobs_token_as_checkouts_header() {
+    let d = tempfile::tempdir().unwrap();
+    let s = GitRefs { root: d.path() };
+    let env = |c: &std::process::Command| {
+        c.get_envs()
+            .filter_map(|(k, v)| Some((k.to_string_lossy().to_string(), v?.to_string_lossy().to_string())))
+            .collect::<BTreeMap<_, _>>()
+    };
+    let with = s.remote(Some("t"));
+    let e = env(&with);
+    assert_eq!(e.get("GIT_CONFIG_COUNT").map(String::as_str), Some("1"), "{e:?}");
+    assert_eq!(e.get("GIT_CONFIG_KEY_0").map(String::as_str), Some("http.extraheader"));
+    // base64("x-access-token:t")
+    assert_eq!(
+        e.get("GIT_CONFIG_VALUE_0").map(String::as_str),
+        Some("AUTHORIZATION: basic eC1hY2Nlc3MtdG9rZW46dA==")
+    );
+    assert_eq!(
+        e.get("GIT_TERMINAL_PROMPT").map(String::as_str),
+        Some("0"),
+        "never a prompt for a user name"
+    );
+    assert!(
+        with.get_args().all(|a| !a.to_string_lossy().contains("eC1hY2Nlc3MtdG9rZW46dA")),
+        "never on the command line"
+    );
+    // Control: no token, no header (a local `dev plan --ci` or a clone with its own credentials).
+    let without = s.remote(None);
+    assert!(!env(&without).contains_key("GIT_CONFIG_VALUE_0"));
+    assert_eq!(
+        super::job_token(&|k| (k == "GITEA_TOKEN").then(|| "g".to_string())).as_deref(),
+        Some("g")
+    );
+    assert_eq!(
+        super::job_token(&|k| match k {
+            "PLAN_TOKEN" => Some("p".into()),
+            "GITEA_TOKEN" => Some("g".into()),
+            _ => None,
+        })
+        .as_deref(),
+        Some("p")
+    );
+    assert_eq!(super::job_token(&|_| Some("  ".into())), None);
+}
+
 #[test]
 fn the_git_ref_store_saves_reads_lists_and_removes() {
     let d = tempfile::tempdir().unwrap();

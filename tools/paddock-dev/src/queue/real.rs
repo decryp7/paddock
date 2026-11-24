@@ -14,7 +14,7 @@ use super::ports::{Blame, Built, Ci, CiRun, Failure, Ledger, Marker, RunState, S
 use crate::ci_runs::client::Client;
 use crate::ci_runs::triage::{self, Status, Test};
 use crate::ci_runs::verdict::{self, Verdict};
-use crate::ci_runs::{dispatch, time};
+use crate::ci_runs::{dispatch, dispatch_guards, time};
 use crate::pr::gitea::{Api, Pull, approved_at};
 use crate::pr::labels::{self, LabelSpec};
 use crate::wait::Http;
@@ -146,13 +146,14 @@ pub fn blame_of(status: &Status) -> Blame {
         Status::Flaky {
             also_on_baseline: true, ..
         }
+        | Status::FlakyThisRun { also_on_baseline: true }
         | Status::Failed {
             also_on_baseline: true, ..
         }
         | Status::OnBaseline => Blame::OnMain,
         // Failed on every attempt: the flake history beside it does not make it anyone else's.
         Status::Failed { .. } => Blame::New,
-        Status::Flaky { .. } => Blame::Flaky,
+        Status::Flaky { .. } | Status::FlakyThisRun { .. } => Blame::Flaky,
         Status::Unknown(_) => Blame::Unknown,
     }
 }
@@ -815,32 +816,31 @@ pub struct GiteaCi<'a> {
 }
 
 impl Ci for GiteaCi<'_> {
-    fn runs(&mut self, workflow: &str, head: &str) -> Result<Vec<CiRun>, String> {
+    fn run(&mut self, workflow: &str, head: &str, id: u64) -> Result<CiRun, String> {
         let mut c = Client::new(self.http, &self.server, &self.repo, &self.token);
-        let page = c.runs_page_where(1, &format!("head_sha={head}"))?;
-        let mut runs: Vec<_> = page
-            .runs
-            .into_iter()
-            .filter(|r| r.workflow() == workflow && r.head_sha == head)
-            .collect();
-        runs.sort_by_key(|r| std::cmp::Reverse(r.id));
-        Ok(runs
-            .into_iter()
-            .map(|r| CiRun {
-                id: r.id,
-                state: if !r.finished() {
-                    RunState::Running
-                } else if r.conclusion == "success" || r.status == "success" {
-                    RunState::Success
+        let r = c.run(id)?.ok_or_else(|| format!("the server has no run {id}"))?;
+        // The identity read from the record is verified before it is acted on (rule 53): its workflow and commit.
+        if r.workflow() != workflow || r.head_sha != head {
+            return Err(format!(
+                "run {id} is {} on {}, not {workflow} on {head}",
+                r.workflow(),
+                if r.head_sha.is_empty() { "an unknown commit" } else { &r.head_sha }
+            ));
+        }
+        Ok(CiRun {
+            id: r.id,
+            state: if !r.finished() {
+                RunState::Running
+            } else if r.conclusion == "success" || r.status == "success" {
+                RunState::Success
+            } else {
+                RunState::Failed(if r.conclusion.is_empty() {
+                    r.status.clone()
                 } else {
-                    RunState::Failed(if r.conclusion.is_empty() {
-                        r.status.clone()
-                    } else {
-                        r.conclusion.clone()
-                    })
-                },
-            })
-            .collect())
+                    r.conclusion.clone()
+                })
+            },
+        })
     }
 
     fn verdict(&mut self, workflow: &str, head: &str) -> Verdict {
@@ -851,39 +851,30 @@ impl Ci for GiteaCi<'_> {
     }
 
     fn dispatch(&mut self, workflow: &str, inputs: &[(String, String)]) -> Result<Sent, String> {
-        // The landing dispatch (a full ci.yml run on the train) tests the train's diff from main's last complete commit (ADR 0117 WP-8).
-        let target = dispatch::Target {
-            server: &self.server,
-            repo: &self.repo,
-            token: &self.token,
+        let d = HeldDispatch {
+            target: dispatch::Target {
+                server: &self.server,
+                repo: &self.repo,
+                token: &self.token,
+            },
+            root: &self.root,
+            git_ref: TRAIN_BRANCH,
+            max_wait: self.max_wait,
+            find_max: dispatch::FIND_MAX,
+            find_interval: dispatch::FIND_INTERVAL,
         };
-        let inputs =
-            crate::ci_runs::landing::with_real_landing_base(self.http, &target, &self.root, workflow, TRAIN_BRANCH, inputs.to_vec());
-        let kv: Vec<String> = inputs.iter().map(|(k, v)| format!("{k}={v}")).collect();
-        let req = dispatch::parse_request(workflow, TRAIN_BRANCH, &kv, &format!("{}s", self.max_wait.as_secs().max(1)), None)?;
-        let root = self.root.clone();
-        let read = move |name: &str| std::fs::read_to_string(root.join(".gitea/workflows").join(name)).ok();
         let mut clock = dispatch::system_clock();
-        let target = dispatch::Target {
-            server: &self.server,
-            repo: &self.repo,
-            token: &self.token,
-        };
         let mut reach = crate::health::CurlReach;
         let mut health = crate::health::Health::new(crate::health::real_services(&self.server, "dispatch", false), &mut reach);
-        // A service that stays down is a busy answer: the caller tries again on its next turn, nothing was sent.
-        match dispatch::run(
+        dispatch_held(
             self.http,
-            &target,
-            &req,
-            &read,
+            &d,
+            workflow,
+            inputs,
             &mut clock,
-            &mut std::io::stderr(),
             Some(&mut health),
-        )? {
-            dispatch::Dispatched::Yes { .. } => Ok(Sent::Yes),
-            dispatch::Dispatched::StillBusy { last } | dispatch::Dispatched::ServiceDown { last } => Ok(Sent::Busy(last)),
-        }
+            &mut std::io::stderr(),
+        )
     }
 
     fn failures(&mut self, run: u64) -> Result<Vec<Failure>, String> {
@@ -902,6 +893,77 @@ impl Ci for GiteaCi<'_> {
         };
         Ok(failures_of(&report, run, self.http, &self.server, &self.repo, &self.token))
     }
+}
+
+/// Where and how the queue dispatches: the server, its checkout (the workflow files and the guards' register) and the bounds.
+pub struct HeldDispatch<'a> {
+    /// Gitea, the repository and the token.
+    pub target: dispatch::Target<'a>,
+    /// The checkout.
+    pub root: &'a Path,
+    /// The branch to run on (the train branch, a member's scratch ref).
+    pub git_ref: &'a str,
+    /// How long a dispatch waits for a busy runner.
+    pub max_wait: Duration,
+    /// How long the run that carries the dispatch's token is looked for ([`dispatch::FIND_MAX`]).
+    pub find_max: Duration,
+    /// How often it is looked for.
+    pub find_interval: Duration,
+}
+
+/// The dispatch of the queue and of the other-OS member gate, the same path as `./dev ci dispatch`: the landing base, the dispatch guards ([`dispatch_guards::check_train`],
+/// with no override), a `dispatch_id` token, the wait for a free runner, the send, and the run that carries the token
+/// ([`dispatch::find_run`]): the handle the tick records. A service that stays down or a busy runner is a busy answer (nothing sent).
+pub fn dispatch_held(
+    http: &mut dyn Http,
+    d: &HeldDispatch<'_>,
+    workflow: &str,
+    inputs: &[(String, String)],
+    clock: &mut dyn crate::wait::Clock,
+    health: Option<&mut crate::health::Health<'_>>,
+    log: &mut dyn std::io::Write,
+) -> Result<Sent, String> {
+    // The landing dispatch (a full ci.yml run on the train) tests the train's diff from main's last complete commit (ADR 0117 WP-8).
+    let inputs = crate::ci_runs::landing::with_real_landing_base(http, &d.target, d.root, workflow, d.git_ref, inputs.to_vec());
+    let kv: Vec<String> = inputs.iter().map(|(k, v)| format!("{k}={v}")).collect();
+    let mut req = dispatch::parse_request(workflow, d.git_ref, &kv, &format!("{}s", d.max_wait.as_secs().max(1)), None)?;
+    let root = d.root.to_path_buf();
+    let read = move |name: &str| std::fs::read_to_string(root.join(".gitea/workflows").join(name)).ok();
+    let now_ms = time::now_secs() as f64 * 1000.0;
+    if let Err(stop) = dispatch_guards::check_train(http, &d.target, d.root, &read, &req, Default::default(), now_ms, log) {
+        return Ok(Sent::Refused {
+            why: stop.message,
+            measured: !stop.not_measured,
+        });
+    }
+    let (with_id, id) = dispatch::with_dispatch_id(&req.workflow, &read, std::mem::take(&mut req.inputs));
+    req.inputs = with_id;
+    let Some(id) = id else {
+        return Err(format!(
+            "{workflow} declares no {} input: the queue would not find the run it starts (ER-51); nothing was sent. Next step: add the input and its run-name line",
+            dispatch::DISPATCH_ID
+        ));
+    };
+    // ER-51: the other caller of the raw dispatch; the run it starts is found by its dispatch token below.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "dispatch_held holds the run it starts: find_run by the dispatch token"
+    )]
+    let sent = dispatch::run(http, &d.target, &req, &read, clock, log, health)?;
+    match sent {
+        dispatch::Dispatched::Yes { .. } => {}
+        dispatch::Dispatched::StillBusy { last } | dispatch::Dispatched::ServiceDown { last } => return Ok(Sent::Busy(last)),
+    }
+    Ok(
+        match dispatch::find_run(http, &d.target, workflow, &id, clock, d.find_max, d.find_interval, log) {
+            Ok(Some(run)) => Sent::Yes { run },
+            Ok(None) => Sent::Lost(format!(
+                "no run showed dispatch id {id} within {}",
+                crate::wait::fmt_duration(d.find_max)
+            )),
+            Err(e) => Sent::Lost(format!("the run with dispatch id {id} could not be found: {e}")),
+        },
+    )
 }
 
 /// The failures of a triaged run as the queue and `ci triage --members` blame them: the projects each row belongs to and, for a

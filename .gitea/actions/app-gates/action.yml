@@ -146,8 +146,9 @@ runs:
         if [ -n "$NEXTEST_CONFIG" ]; then config=(--config-file "${PADDOCK_WORKSPACE:-$GITHUB_WORKSPACE}/$NEXTEST_CONFIG"); fi
         filter=(); notests=()
         if [ "$TESTS_ONLY" = true ]; then
-          # A rerun of failed tests: the filter names them; a test the fix renamed matches nothing, which warns, not fails.
-          echo "::notice::nextest reruns only the failed tests: $FILTER"; filter=(-E "$FILTER"); notests=(--no-tests=warn)
+          # A rerun of failed tests: the filter names them, and each must still select a test here (`./dev ci rerun-check` below): a test
+          # renamed or removed since the failed run fails the step with its name, never a warning (run 8868 passed on an empty selection).
+          echo "::notice::nextest reruns only the failed tests: $FILTER"; filter=(-E "$FILTER"); notests=(--no-tests=fail)
         elif [ -n "$FILTER" ]; then
           # A member run (a dispatch with a base; ./dev plan --ci): the packages the change reaches. One of the two nextest runs below
           # can select none (the change reached only a last-package, or only the others); that half is skipped with a notice, never
@@ -181,6 +182,14 @@ runs:
             echo "::notice::host leg: nextest filter (hostTests): $HOST_FILTER"
             if [ -n "$FILTER" ]; then filter=(-E "($FILTER) & ($HOST_FILTER)"); else filter=(-E "$HOST_FILTER"); fi
           fi
+        fi
+        # A rerun's failed tests, each checked against the listing of this workspace (both halves) before anything runs.
+        if [ "$TESTS_ONLY" = true ]; then
+          listed="$RUNNER_TEMP/rerun-listed.json"
+          if ! cargo nextest list --workspace ${hostexclude[@]+"${hostexclude[@]}"} ${config[@]+"${config[@]}"} -E "$FILTER" --message-format json > "$listed"; then
+            echo "::error::rerun-check: cargo nextest list failed, so the rerun's failed tests cannot be checked. Next: read the build error above"; exit 1
+          fi
+          "${PADDOCK_WORKSPACE:-$GITHUB_WORKSPACE}/dev" ci rerun-check --filter "$FILTER" --listed "$listed" || exit 1
         fi
         # Format, advisories and licences do not depend on the OS; clippy is skipped on Windows like the crates leg unless the app opts in (windowsClippy).
         if [ "$gates" = true ]; then

@@ -1,0 +1,19 @@
+# ER-41 for the guards of `./dev ci dispatch` on a train (tools/paddock-dev/src/ci_runs/dispatch_guards.rs; user, 2026-11-24):
+#
+# - failed-first (ER-10): a full dispatch of ci.yml or debrief.yml on a `train/*` ref while the train's last full run of it is red and no
+#   failed-only round is green on the branch head. The refusal prints the exact `--input since_run=<run>` command; the coordinator's
+#   override is `--full-anyway "<reason>"`, logged.
+# - green-main: a train dispatch (a failed-only round excepted) while main's newest finished nightly or push run of ci.yml failed in the
+#   foundation or an app active at that run's commit (docs/ci-active-apps.toml). An inactive app's failures are printed as its fix items
+#   and never refuse. The override is `--red-main-anyway "<reason>"` (a train that carries the fix), logged.
+#
+# A guard not named below is report-only: it prints what it would refuse as a `::warning::` and the dispatch goes on. Record its first
+# green use (a green train run that `./dev ci dispatch` sent after the guard measured and let it go) in one step that also switches it to
+# blocking, from the repository root:
+#
+#   ./dev ci guard-record --guard <failed-first|green-main> --run <id>
+#
+# The tool refuses a run that is not finished and green, not on a train, or not dispatched through `./dev ci dispatch` (no dispatch token
+# in its title), and a guard already recorded. green-main is not measured while the nightly is disabled in Gitea (no finished nightly on
+# main): re-enable it first.
+[first_green]

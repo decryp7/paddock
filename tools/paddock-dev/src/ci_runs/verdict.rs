@@ -28,7 +28,12 @@
 //! - Unknown or unreadable is not measured, never a pass: the run list or a newer run's log cannot be read, no run is listed,
 //!   or the deciding run has not finished.
 //!
-//! Exit codes: 0 full green, 5 red, green with fix items (for a tag), or only partial runs exist, 6 not measured.
+//! - `--landing` ([`report_for`]): green with fix items (FLAKY tests in untouched code, [`Verdict::GreenWithFixItems`]) is landable,
+//!   exit 0, and lists them; `--tag` and the default stay strict (ER-15). The grades are printed as `::notice::` lines and to the job
+//!   summary ([`green::notice`]).
+//!
+//! Exit codes: 0 full green (with `--landing` also green with fix items), 5 red, green with fix items (for a tag or without
+//! `--landing`), or only partial runs exist, 6 not measured.
 
 use super::client::{Client, RunInfo};
 use super::green::{self, GradedResult, Touched};
@@ -659,13 +664,27 @@ fn last_full(
 /// evidence, made only by `Evidence::adopt` after `live` has re-read the commit (the one caller of `Evidence::ci_run`);
 /// red is failing findings; anything else is not measured. The exit comes from this outcome, never from the enum.
 pub fn outcome(v: &Verdict, workflow: &str, sha: &str, live: &dyn LiveRepo) -> Outcome {
+    outcome_for(v, workflow, sha, live, false)
+}
+
+/// [`outcome`] for a landing (`landing`, `ci verdict --landing`): a run green with fix items (FLAKY tests in untouched code,
+/// [`Verdict::GreenWithFixItems`]) is landable evidence too, adopted like a green one. Never for a tag: `--tag` and the default stay
+/// strict (ER-15).
+pub fn outcome_for(v: &Verdict, workflow: &str, sha: &str, live: &dyn LiveRepo, landing: bool) -> Outcome {
     let tool = || ToolVersion::new(concat!("paddock-dev ci verdict ", env!("CARGO_PKG_VERSION")));
     let check = || CheckId::new(format!("ci-verdict:{workflow}"));
+    let landable = match v {
+        Verdict::Green { run } => Some(*run),
+        Verdict::GreenWithFixItems { run, .. } if landing => Some(*run),
+        _ => None,
+    };
+    if let Some(run) = landable {
+        let evidence = Evidence::ci_run(check(), workflow, RunId(run), Sha::new(sha), tool(), UnixSeconds::now());
+        return Evidence::adopt(evidence, live);
+    }
     match v {
-        Verdict::Green { run } => {
-            let evidence = Evidence::ci_run(check(), workflow, RunId(*run), Sha::new(sha), tool(), UnixSeconds::now());
-            Evidence::adopt(evidence, live)
-        }
+        // Always landable, adopted above.
+        Verdict::Green { .. } => Outcome::NotMeasured(Reason::new("a green verdict that was not adopted".to_string())),
         Verdict::Red { run, reason } => {
             let subject = match run {
                 Some(run) => Subject::CiRun {
@@ -693,7 +712,7 @@ pub fn outcome(v: &Verdict, workflow: &str, sha: &str, live: &dyn LiveRepo) -> O
             UnixSeconds::now(),
             || {
                 Ok(vec![Finding::failing(format!(
-                    "run {run} is green with fix items ({}): a landing accepts it, a tag needs a run without them: run ci.yml once more on this commit",
+                    "run {run} is green with fix items ({}): a landing accepts it (`ci verdict --landing`), a tag needs a run without them: run ci.yml once more on this commit",
                     items.iter().map(|i| i.line(*run)).collect::<Vec<_>>().join("; ")
                 ))])
             },
@@ -704,10 +723,26 @@ pub fn outcome(v: &Verdict, workflow: &str, sha: &str, live: &dyn LiveRepo) -> O
 
 /// The report of a verdict: data, one line, and the exit code, all read from its shared [`outcome`].
 pub fn report(v: &Verdict, workflow: &str, sha: &str, live: &dyn LiveRepo) -> Report {
+    report_for(v, workflow, sha, live, false)
+}
+
+/// [`report`] for a landing (`landing`): green with fix items is landable (exit 0) and lists them ([`outcome_for`]).
+pub fn report_for(v: &Verdict, workflow: &str, sha: &str, live: &dyn LiveRepo, landing: bool) -> Report {
     let head = format!("{workflow} on {}", short(sha));
-    let o = outcome(v, workflow, sha, live);
+    let o = outcome_for(v, workflow, sha, live, landing);
+    let listed = |run: u64, items: &[green::FixItem]| items.iter().map(|i| i.line(run)).collect::<Vec<_>>().join("; ");
     let (kind, run, text, exit) = match (&o, v) {
         (Outcome::KnownCommit(_), Verdict::Green { run }) => ("green", Some(*run), format!("{head}: full green (run {run})"), Exit::Ok),
+        (Outcome::KnownCommit(_), Verdict::GreenWithFixItems { run, items }) => (
+            "green_with_fix_items_landable",
+            Some(*run),
+            format!(
+                "{head}: landable: green with {} fix items (run {run}; FLAKY tests in untouched code): {}. A tag needs a run without them",
+                items.len(),
+                listed(*run, items)
+            ),
+            Exit::Ok,
+        ),
         (Outcome::Clean(_) | Outcome::KnownCommit(_), _) => (
             "not_measured",
             None,
@@ -718,7 +753,11 @@ pub fn report(v: &Verdict, workflow: &str, sha: &str, live: &dyn LiveRepo) -> Re
         (Outcome::Findings(_), Verdict::GreenWithFixItems { run, items }) => (
             "green_with_fix_items",
             Some(*run),
-            format!("{head}: green with {} fix items (run {run}); a tag needs none", items.len()),
+            format!(
+                "{head}: green with {} fix items (run {run}): {}; a tag needs none, a landing asks `--landing`",
+                items.len(),
+                listed(*run, items)
+            ),
             Exit::Findings,
         ),
         (other, _) => (
@@ -728,7 +767,14 @@ pub fn report(v: &Verdict, workflow: &str, sha: &str, live: &dyn LiveRepo) -> Re
             Exit::NotMeasured,
         ),
     };
-    let data = serde_json::json!({"verdict": kind, "workflow": workflow, "sha": sha, "run": run, "detail": text, "outcome": o.json()});
+    let fix_items: Vec<serde_json::Value> = match v {
+        Verdict::GreenWithFixItems { items, .. } => items
+            .iter()
+            .map(|i| serde_json::json!({"job": i.job, "job_id": i.job_id, "test": i.test, "url": i.url}))
+            .collect(),
+        _ => Vec::new(),
+    };
+    let data = serde_json::json!({"verdict": kind, "workflow": workflow, "sha": sha, "run": run, "landing": landing, "fix_items": fix_items, "detail": text, "outcome": o.json()});
     Report::new(data, text).with_exit(exit)
 }
 
@@ -1511,6 +1557,41 @@ mod tests {
         assert!(
             matches!(&v, Verdict::Red { run: Some(9), reason } if reason.contains("reached")),
             "{v:?}"
+        );
+    }
+
+    #[test]
+    fn green_with_fix_items_is_landable_for_a_landing_and_never_for_a_tag() {
+        let mut f = run_8610("failure");
+        let v = ask_touching(&mut f, &[]);
+        assert!(matches!(v, Verdict::GreenWithFixItems { .. }), "{v:?}");
+        // The landing: exit 0, adopted as evidence of the commit, the FLAKY tests listed.
+        let landing = report_for(&v, "ci.yml", SHA, &Knows(true), true);
+        assert_eq!(landing.exit, Exit::Ok, "{}", landing.text);
+        assert_eq!(landing.data["verdict"], "green_with_fix_items_landable");
+        assert_eq!(landing.data["outcome"]["status"], "known-commit");
+        assert_eq!(landing.data["fix_items"].as_array().map(Vec::len), Some(2));
+        assert!(
+            landing.text.contains("landable") && landing.text.contains("44761"),
+            "{}",
+            landing.text
+        );
+        // The tag path and the default stay strict (ER-15): exit 5, and a failing finding.
+        let strict = report(&v, "ci.yml", SHA, &Knows(true));
+        assert_eq!(strict.exit, Exit::Findings, "{}", strict.text);
+        assert_eq!(strict.data["outcome"]["status"], "findings");
+        assert!(strict.text.contains("a tag needs none"), "{}", strict.text);
+        // A landing on a commit the repository lacks is not measured: landable evidence is adopted like green.
+        assert_eq!(report_for(&v, "ci.yml", SHA, &Knows(false), true).exit, Exit::NotMeasured);
+        // Positive control: red and not measured are never landable.
+        let red = Verdict::Red {
+            run: Some(9),
+            reason: "x".into(),
+        };
+        assert_eq!(report_for(&red, "ci.yml", SHA, &Knows(true), true).exit, Exit::Findings);
+        assert_eq!(
+            report_for(&Verdict::NotMeasured("x".into()), "ci.yml", SHA, &Knows(true), true).exit,
+            Exit::NotMeasured
         );
     }
 

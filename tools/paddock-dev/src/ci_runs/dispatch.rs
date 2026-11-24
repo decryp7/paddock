@@ -785,6 +785,209 @@ pub fn runner_wait(
     })
 }
 
+/// The workflow input that carries a dispatch's own token (guard A6, ER-51): the workflow's `run-name` shows it as
+/// `<name> [dispatch <token>]`, so the dispatcher finds the one run it made by that exact token, never "the newest run".
+pub const DISPATCH_ID: &str = "dispatch_id";
+
+/// What a dispatch asks a workflow to run, carried in its token (after the last `.`) so a reader of the run list tells a full run from
+/// a failed-only round without reading logs (guard 2).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RunKind {
+    /// No `base`, `since_run`, `os` or `app`: the whole plan of the ref (a train's landing run).
+    Full,
+    /// A failed-only round (`since_run=<run>`, ER-10).
+    Since(u64),
+    /// A member run (`base`): narrowed, never complete.
+    Member,
+    /// One part only (`os`, `app`, or a `since_run` that is not a run id).
+    Part,
+}
+
+impl RunKind {
+    /// The kind of a dispatch from its inputs.
+    pub fn of(inputs: &[(String, String)]) -> RunKind {
+        let get = |k: &str| {
+            inputs
+                .iter()
+                .find(|(key, v)| key == k && !v.trim().is_empty())
+                .map(|(_, v)| v.trim())
+        };
+        if let Some(s) = get("since_run") {
+            return s.parse().map_or(RunKind::Part, RunKind::Since);
+        }
+        if get("base").is_some() {
+            return RunKind::Member;
+        }
+        if get("os").is_some() || get("app").is_some() {
+            return RunKind::Part;
+        }
+        RunKind::Full
+    }
+
+    fn tag(&self) -> String {
+        match self {
+            RunKind::Full => "full".into(),
+            RunKind::Since(n) => format!("since-{n}"),
+            RunKind::Member => "member".into(),
+            RunKind::Part => "part".into(),
+        }
+    }
+
+    fn parse(s: &str) -> Option<RunKind> {
+        match s {
+            "full" => Some(RunKind::Full),
+            "member" => Some(RunKind::Member),
+            "part" => Some(RunKind::Part),
+            _ => s.strip_prefix("since-")?.parse().ok().map(RunKind::Since),
+        }
+    }
+}
+
+/// The dispatch token a run's title carries (`ci [dispatch 1a2b3c4d5e6f7a8b.full]`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DispatchTag {
+    /// The whole token, as sent in [`DISPATCH_ID`].
+    pub id: String,
+    /// The kind of run it asked for.
+    pub kind: RunKind,
+}
+
+impl DispatchTag {
+    /// The tag of a run title; `None` for a run that was not dispatched through `./dev ci dispatch` (a push, a schedule, a run from
+    /// before the `run-name` line, or a title that does not hold one well-formed tag).
+    pub fn of_title(title: &str) -> Option<DispatchTag> {
+        let start = title.find("[dispatch ")? + "[dispatch ".len();
+        let rest = &title[start..];
+        let id = &rest[..rest.find(']')?];
+        let (nonce, kind) = id.rsplit_once('.')?;
+        (nonce.len() >= 12 && nonce.chars().all(|c| c.is_ascii_hexdigit())).then_some(())?;
+        Some(DispatchTag {
+            id: id.to_string(),
+            kind: RunKind::parse(kind)?,
+        })
+    }
+}
+
+/// A new dispatch token for `kind`: 16 hex digits from the time, the process and a counter (unique per call), then the kind.
+pub fn new_dispatch_id(kind: &RunKind) -> String {
+    use sha2::{Digest, Sha256};
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos());
+    let mut h = Sha256::new();
+    h.update(format!(
+        "{nanos}:{}:{}",
+        std::process::id(),
+        COUNTER.fetch_add(1, Ordering::Relaxed)
+    ));
+    let hex: String = h.finalize().iter().take(8).map(|b| format!("{b:02x}")).collect();
+    format!("{hex}.{}", kind.tag())
+}
+
+/// Whether `workflow` declares the [`DISPATCH_ID`] input of `workflow_dispatch` (only then is it sent: a server may refuse an
+/// input the workflow does not declare).
+pub fn declares_dispatch_id(workflow: &str, read: ReadWorkflow<'_>) -> bool {
+    let Some(text) = read(workflow) else { return false };
+    let Ok(docs) = YamlLoader::load_from_str(&text) else { return false };
+    docs.iter()
+        .any(|d| !d["on"]["workflow_dispatch"]["inputs"][DISPATCH_ID].is_badvalue())
+}
+
+/// The inputs with a new [`DISPATCH_ID`] added when the workflow declares it (a caller's own non-empty one is kept); the token, if any.
+pub fn with_dispatch_id(
+    workflow: &str,
+    read: ReadWorkflow<'_>,
+    mut inputs: Vec<(String, String)>,
+) -> (Vec<(String, String)>, Option<String>) {
+    if let Some(id) = inputs
+        .iter()
+        .find(|(k, v)| k == DISPATCH_ID && !v.is_empty())
+        .map(|(_, v)| v.clone())
+    {
+        return (inputs, Some(id));
+    }
+    if !declares_dispatch_id(workflow, read) {
+        return (inputs, None);
+    }
+    let id = new_dispatch_id(&RunKind::of(&inputs));
+    inputs.retain(|(k, _)| k != DISPATCH_ID);
+    inputs.push((DISPATCH_ID.into(), id.clone()));
+    (inputs, Some(id))
+}
+
+/// How long [`find_run`] looks for the run a dispatch made: the server lists a dispatched run within seconds.
+pub const FIND_MAX: Duration = Duration::from_secs(120);
+/// How often [`find_run`] looks.
+pub const FIND_INTERVAL: Duration = Duration::from_secs(5);
+
+/// Looks for the run whose title carries exactly `id` among the newest dispatch runs of `workflow`.
+struct RunFinder<'a, 'b> {
+    client: &'a mut Client<'b>,
+    workflow: &'a str,
+    id: &'a str,
+    found: Option<u64>,
+}
+
+impl Probe for RunFinder<'_, '_> {
+    fn describe(&self) -> String {
+        format!("the run of {} with dispatch id {}", self.workflow, self.id)
+    }
+    fn poll(&mut self) -> Result<Poll, String> {
+        let page = self.client.runs_page_where(1, "event=workflow_dispatch")?;
+        let ids: Vec<u64> = page
+            .runs
+            .iter()
+            .filter(|r| r.workflow() == self.workflow && DispatchTag::of_title(&r.title).is_some_and(|t| t.id == self.id))
+            .map(|r| r.id)
+            .collect();
+        Ok(match ids.as_slice() {
+            [] => Poll::Pending(format!("no run of {} shows dispatch id {} yet", self.workflow, self.id)),
+            [one] => {
+                self.found = Some(*one);
+                Poll::Done(format!("run {one}"))
+            }
+            many => Poll::Failed(format!("runs {many:?} all show dispatch id {}: the token is not unique", self.id)),
+        })
+    }
+    fn next_step(&self) -> String {
+        format!(
+            "find the run in Gitea's Actions list by its title `[dispatch {}]`; do not dispatch again (the dispatch was sent)",
+            self.id
+        )
+    }
+}
+
+/// The run a dispatch made, found by its exact token (guard A6): `Ok(Some(id))`, `Ok(None)` when no listed run showed it within
+/// `max` (the dispatch was sent; it is never sent again), `Err` when the list could not be read or two runs show the token.
+#[allow(clippy::too_many_arguments)]
+pub fn find_run(
+    http: &mut dyn Http,
+    target: &Target<'_>,
+    workflow: &str,
+    id: &str,
+    clock: &mut dyn Clock,
+    max: Duration,
+    interval: Duration,
+    log: &mut dyn Write,
+) -> Result<Option<u64>, String> {
+    let mut client = Client::new(http, target.server, target.repo, target.token);
+    client.backoff_ms = 0;
+    let mut probe = RunFinder {
+        client: &mut client,
+        workflow,
+        id,
+        found: None,
+    };
+    match wait_for(&mut probe, clock, max, interval, log) {
+        Outcome::Done { .. } => Ok(probe.found),
+        Outcome::TimedOut { .. } => Ok(None),
+        Outcome::Broken { error, .. } => Err(format!("the run list could not be read: {error}")),
+        Outcome::Failed { detail, .. } => Err(detail),
+    }
+}
+
 /// The real clock, for the command.
 pub fn system_clock() -> SystemClock {
     SystemClock::new()
@@ -921,6 +1124,9 @@ mod tests {
                     .into(),
             ),
             "comment.yml" => Some("# runs-on: macos-latest\njobs:\n  t:\n    runs-on: ubuntu-latest\n".into()),
+            "tagged.yml" => Some(
+                "on:\n  workflow_dispatch:\n    inputs:\n      dispatch_id:\n        default: \"\"\njobs:\n  t:\n    runs-on: ubuntu-latest\n".into(),
+            ),
             "step-text.yml" => Some(
                 "jobs:\n  t:\n    runs-on: ubuntu-latest\n    steps:\n      - if: runner.os != 'Windows'\n        run: echo macOS\n".into(),
             ),
@@ -936,6 +1142,7 @@ mod tests {
 
     fn go(http: &mut Script, wf: &str, max: &str) -> (Result<Dispatched, String>, String, Duration) {
         let (mut clock, mut log) = (FakeClock(Duration::ZERO), Vec::new());
+        #[expect(clippy::disallowed_methods, reason = "the tests of the raw dispatch itself")]
         let r = run(
             http,
             &Target {
@@ -960,6 +1167,7 @@ mod tests {
     ) -> (Result<Dispatched, String>, String, Duration) {
         let (mut clock, mut log) = (FakeClock(Duration::ZERO), Vec::new());
         let mut health = Health::new(crate::health::tests::both(), reach);
+        #[expect(clippy::disallowed_methods, reason = "the tests of the raw dispatch itself")]
         let r = run(
             http,
             &Target {
@@ -1078,6 +1286,7 @@ mod tests {
         let (mut clock, mut log) = (FakeClock(Duration::ZERO), Vec::new());
         let mut req = parse_request(wf, git_ref, &[], "10m", Some("15s")).unwrap();
         req.train_waiters = train_waiters(&repo_root()).unwrap();
+        #[expect(clippy::disallowed_methods, reason = "the tests of the raw dispatch itself")]
         let r = run(
             http,
             &Target {
@@ -1169,6 +1378,7 @@ mod tests {
         let (mut clock, mut log) = (FakeClock(Duration::ZERO), Vec::new());
         let req = parse_request("waits.yml", "train/t", &[], "1h", Some("15s")).unwrap();
         assert_eq!(req.train_waiters, 0);
+        #[expect(clippy::disallowed_methods, reason = "the tests of the raw dispatch itself")]
         let r = run(
             &mut http,
             &Target {
@@ -1201,6 +1411,7 @@ mod tests {
         let (mut clock, mut log) = (FakeClock(Duration::ZERO), Vec::new());
         let mut req = parse_request("waits.yml", "train/t", &[], "1m", Some("15s")).unwrap();
         req.train_waiters = 2;
+        #[expect(clippy::disallowed_methods, reason = "the tests of the raw dispatch itself")]
         let r = run(
             &mut http,
             &Target {
@@ -1502,6 +1713,7 @@ mod tests {
             head_branch: "train/t".into(),
             created_at: String::new(),
             run_attempt: 1,
+            title: String::new(),
         };
         assert_eq!(train_identity(&r), Some(("train/t".into(), "aaa".into())));
         r.head_branch = "train/other".into();
@@ -1731,5 +1943,123 @@ mod tests {
         );
         assert!(parse_request("a.yml", "main", &[], "0s", None).is_err());
         assert!(parse_request("../a.yml", "main", &[], "1m", None).is_err());
+    }
+
+    fn titled(list: &[(u64, &str, &str)]) -> Value {
+        json!({"total_count": list.len(), "workflow_runs": list.iter().map(|(id, wf, title)| json!({
+            "id": id, "path": format!("{wf}@refs/heads/train/t"), "status": "queued", "event": "workflow_dispatch",
+            "display_title": title
+        })).collect::<Vec<_>>()})
+    }
+
+    fn find(http: &mut Script, id: &str) -> (Result<Option<u64>, String>, Duration) {
+        let mut clock = FakeClock(Duration::ZERO);
+        let target = Target {
+            server: SERVER,
+            repo: REPO,
+            token: "secret-token",
+        };
+        let r = find_run(http, &target, "ci.yml", id, &mut clock, FIND_MAX, FIND_INTERVAL, &mut Vec::new());
+        (r, clock.0)
+    }
+
+    #[test]
+    fn a_dispatch_finds_its_own_run_by_its_token_never_the_newest_run() {
+        let mine = "0123456789abcdef.full";
+        let other = "fedcba9876543210.full";
+        // First look: only another dispatch's run (the newest). Second: ours appears, older than a newer stranger.
+        let mut http = Script::new(vec![
+            titled(&[(9001, "ci.yml", &format!("ci [dispatch {other}]"))]),
+            titled(&[
+                (9002, "ci.yml", "chore(train): merge x"),
+                (9001, "ci.yml", &format!("ci [dispatch {other}]")),
+                (9000, "ci.yml", &format!("ci [dispatch {mine}]")),
+            ]),
+        ]);
+        let (r, t) = find(&mut http, mine);
+        assert_eq!(r.unwrap(), Some(9000));
+        assert_eq!(t, FIND_INTERVAL, "found on the second look");
+        // Positive control: when no run shows the token the finder never takes the newest run; it ends at its limit with none.
+        let mut http = Script::new(vec![titled(&[(9002, "ci.yml", &format!("ci [dispatch {other}]"))])]);
+        let (r, t) = find(&mut http, mine);
+        assert_eq!(r.unwrap(), None);
+        assert!(t >= FIND_MAX);
+        // Another workflow's run with the token does not count, and two runs with it are an error, not a pick.
+        let mut http = Script::new(vec![titled(&[(9003, "debrief.yml", &format!("debrief [dispatch {mine}]"))])]);
+        assert_eq!(find(&mut http, mine).0.unwrap(), None);
+        let mut http = Script::new(vec![titled(&[
+            (9005, "ci.yml", &format!("ci [dispatch {mine}]")),
+            (9004, "ci.yml", &format!("ci [dispatch {mine}]")),
+        ])]);
+        assert!(find(&mut http, mine).0.unwrap_err().contains("not unique"));
+    }
+
+    #[test]
+    fn a_dispatch_token_carries_the_run_kind_and_reads_back_from_a_title() {
+        let kv = |i: &[(&str, &str)]| i.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect::<Vec<_>>();
+        assert_eq!(RunKind::of(&kv(&[("webkit", "true")])), RunKind::Full);
+        assert_eq!(RunKind::of(&kv(&[("base", ""), ("landing_base", "abc")])), RunKind::Full);
+        assert_eq!(RunKind::of(&kv(&[("since_run", "8868")])), RunKind::Since(8868));
+        assert_eq!(RunKind::of(&kv(&[("base", "abc")])), RunKind::Member);
+        assert_eq!(RunKind::of(&kv(&[("os", "linux")])), RunKind::Part);
+        for kind in [RunKind::Full, RunKind::Since(8868), RunKind::Member, RunKind::Part] {
+            let id = new_dispatch_id(&kind);
+            let tag = DispatchTag::of_title(&format!("ci [dispatch {id}]")).unwrap();
+            assert_eq!((tag.id.as_str(), &tag.kind), (id.as_str(), &kind));
+        }
+        assert_ne!(
+            new_dispatch_id(&RunKind::Full),
+            new_dispatch_id(&RunKind::Full),
+            "each dispatch has its own token"
+        );
+        // Positive controls: a commit subject, a cut tag or an unknown kind is no tag.
+        for title in [
+            "chore(train): merge feat/x",
+            "ci [dispatch 0123456789abcdef.full",
+            "ci [dispatch 0123.full]",
+            "ci [dispatch 0123456789abcdef.later]",
+            "ci [dispatch zz23456789abcdef.full]",
+        ] {
+            assert_eq!(DispatchTag::of_title(title), None, "{title}");
+        }
+    }
+
+    #[test]
+    fn the_token_is_sent_only_to_a_workflow_that_declares_it() {
+        let (inputs, id) = with_dispatch_id("tagged.yml", &files, vec![("since_run".into(), "8868".into())]);
+        let id = id.unwrap();
+        assert!(id.ends_with(".since-8868"), "{id}");
+        assert_eq!(inputs.last(), Some(&(DISPATCH_ID.to_string(), id)));
+        // Positive control: a workflow without the input gets nothing it would refuse.
+        let (inputs, id) = with_dispatch_id("linux.yml", &files, vec![]);
+        assert!(inputs.is_empty() && id.is_none());
+        // A caller's own token is kept.
+        let (_, id) = with_dispatch_id("tagged.yml", &files, vec![(DISPATCH_ID.into(), "0123456789abcdef.full".into())]);
+        assert_eq!(id.as_deref(), Some("0123456789abcdef.full"));
+    }
+
+    #[test]
+    fn every_workflow_dispatched_through_ci_dispatch_declares_the_token_and_shows_it_in_its_run_name() {
+        let read = |name: &str| std::fs::read_to_string(repo_root().join(".gitea/workflows").join(name)).ok();
+        for wf in [
+            "ci.yml",
+            "debrief.yml",
+            "dyno-release.yml",
+            "pitcrew-release.yml",
+            "pitwall-release.yml",
+            "spotter-release.yml",
+            "shell-demo-release.yml",
+            "workbench-demo-release.yml",
+        ] {
+            assert!(declares_dispatch_id(wf, &read), "{wf} declares no {DISPATCH_ID} input");
+            let docs = YamlLoader::load_from_str(&read(wf).unwrap()).unwrap();
+            let run_name = docs[0]["run-name"].as_str().unwrap_or_default().to_string();
+            assert!(
+                run_name.contains("[dispatch {1}]") && run_name.contains("github.event.inputs.dispatch_id"),
+                "{wf}: run-name {run_name:?} does not show the token as `[dispatch <id>]`"
+            );
+        }
+        // Positive control: a workflow without it is seen.
+        assert!(!declares_dispatch_id("nightly.yml", &read));
     }
 }

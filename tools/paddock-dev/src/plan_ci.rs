@@ -45,6 +45,16 @@ fn text(v: &Value, key: &str) -> String {
     v.get(key).and_then(Value::as_str).unwrap_or("").to_string()
 }
 
+/// The Cargo workspace folder of an app's CI contract (`dir` joined with `cargo`), empty for an app without Rust: the one reading of it,
+/// for the app's package filter here and for the grading of a FLAKY test ([`crate::ci_runs::green::Touched`]).
+pub fn app_cargo_dir(app: &Value) -> String {
+    if truthy(app.get("cargo")) {
+        join_normalized(&text(app, "dir"), &text(app, "cargo")).unwrap_or_default()
+    } else {
+        String::new()
+    }
+}
+
 fn flag(b: bool) -> Value {
     json!(if b { "true" } else { "false" })
 }
@@ -171,11 +181,7 @@ pub fn matrix(plan: &Value, graph: &RepoGraph, opts: MatrixOpts) -> Result<Vec<V
             ));
         }
         let dir = text(app, "dir");
-        let cargo_dir = if truthy(app.get("cargo")) {
-            join_normalized(&dir, &text(app, "cargo")).unwrap_or_default()
-        } else {
-            String::new()
-        };
+        let cargo_dir = app_cargo_dir(app);
         let filter = if cargo_dir.is_empty() {
             String::new()
         } else {
