@@ -200,6 +200,8 @@ pub struct Row {
     pub excused_by: Option<String>,
     /// The guard that ended the step: the watchdog's name, or `row cap` (the summary names it).
     pub ended_by: Option<String>,
+    /// The earlier green run this row rests on instead of a run of its own ([`super::reuse`]); `None` for a row that ran.
+    pub reused: Option<super::reuse::Reused>,
 }
 
 /// The kind of a row, for the table and its JSON.
@@ -232,7 +234,23 @@ impl Row {
             next,
             excused_by: None,
             ended_by: None,
+            reused: None,
         }
+    }
+
+    /// A pass that rests on an earlier green run with the same key ([`super::reuse`]): a pass like any other for the verdict, made
+    /// by [`measure`] for `subject`, and the table says when it was green.
+    pub fn reused(id: &str, subject: &Subject, green: super::reuse::Reused) -> Row {
+        let o = measure(check_id(id), subject.clone(), tool(), UnixSeconds::now(), || Ok(Vec::new()));
+        let mut r = Row::plain(o, 0.0, String::new(), String::new());
+        r.reused = Some(green);
+        r
+    }
+
+    /// A pass this run measured itself: the only kind stored for reuse (never a reused row, a failure, a skipped, not-measured,
+    /// broken or excused row).
+    pub fn is_fresh_pass(&self) -> bool {
+        matches!(self.outcome, Outcome::Clean(_)) && self.reused.is_none() && self.excused_by.is_none()
     }
 
     /// The row with the guard that ended its step named.
@@ -524,6 +542,8 @@ pub struct RunOpts<'a> {
     pub stop: &'a AtomicBool,
     /// What the run is about (the commit and its tree): the evidence of every pass.
     pub subject: &'a Subject,
+    /// The reuse of green results ([`super::reuse`]); `None`: off (`--no-reuse`, `PADDOCK_NO_REUSE`) or a test without it.
+    pub reuse: Option<&'a super::reuse::Reuse>,
 }
 
 /// Every planned row decided, `workers` at a time, lowest rank first; the result keeps the planned order. The default stall limit,
@@ -537,6 +557,7 @@ pub fn run_all(planned: &[Planned], exec: &dyn Exec, workers: usize, subject: &S
             queue_stall: QUEUE_STALL,
             stop: &AtomicBool::new(false),
             subject,
+            reuse: None,
         },
     )
 }
@@ -650,6 +671,17 @@ pub fn run_all_timed(planned: &[Planned], exec: &dyn Exec, opts: &RunOpts) -> (V
                                 format!("re-run `./dev check --pre-push --only {}`", first_word(&g.id)),
                             ),
                             Start::Go(limits) => {
+                                let key = match opts.reuse.map(|r| r.lookup(g)) {
+                                    Some(super::reuse::Lookup::Hit(green)) => {
+                                        turns.end(g.heavy);
+                                        if let Ok(mut slot) = results[i].lock() {
+                                            *slot = Some(Row::reused(&g.id, opts.subject, green));
+                                        }
+                                        continue;
+                                    }
+                                    Some(super::reuse::Lookup::Miss(k)) => k,
+                                    None => None,
+                                };
                                 let mut seen = |d: &Done| {
                                     if let Some(t) = d.timing
                                         && let Ok(mut m) = timings.lock()
@@ -666,6 +698,9 @@ pub fn run_all_timed(planned: &[Planned], exec: &dyn Exec, opts: &RunOpts) -> (V
                                         "report this with the command that ran; re-run it alone",
                                     )
                                 });
+                                if let (Some(r), Some(k)) = (opts.reuse, &key) {
+                                    r.store(g, k, &row);
+                                }
                                 turns.end(g.heavy);
                                 row
                             }

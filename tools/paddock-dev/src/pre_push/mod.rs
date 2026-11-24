@@ -24,6 +24,9 @@
 //! listed under it ([`gates::NOT_RUN`]). One named override exists so nobody reaches for `LEFTHOOK=0`:
 //! `PADDOCK_ACCEPT_NOT_MEASURED=<full row ids>` (or `--accept-not-measured`) lets those not-measured rows pass the push; it is
 //! announced at the top of every run it is set in, shown in the table and logged next to the gate logs.
+//!
+//! A row whose key (its input hash plus the tool version) matches an earlier green run of that row on this machine is not run again:
+//! the table says `reused (green at <time>)` ([`reuse`]; `--no-reuse` or `PADDOCK_NO_REUSE=1` runs everything).
 
 pub mod budget;
 pub mod history;
@@ -42,6 +45,7 @@ pub mod kept;
 pub mod known;
 pub mod linux_inputs;
 pub mod outcome;
+pub mod reuse;
 pub mod warm;
 
 use crate::plan::{Request, plan_with_graph};
@@ -101,6 +105,9 @@ pub struct PrePushArgs {
     /// Also read from PADDOCK_ACCEPT_NOT_MEASURED (comma separated).
     #[arg(long, value_delimiter = ',')]
     pub accept_not_measured: Vec<String>,
+    /// Run every row even when an earlier green run with the same key is on record ([`reuse`]; `PADDOCK_NO_REUSE=1` is the same switch).
+    #[arg(long)]
+    pub no_reuse: bool,
 }
 
 const GIT_TIMEOUT: Duration = Duration::from_secs(120);
@@ -558,6 +565,12 @@ fn command_in(
     // What the run is about (the commit and its tree) is the evidence of every pass, so it is known before the first gate runs.
     let checked = pushed.first().cloned().or_else(|| if clean { head_sha.clone() } else { None });
     let subject = outcome::subject_of(&root, checked.as_deref());
+    // A test's executor runs no real gate, so it never reads or writes the machine's records.
+    let reuse = if given.is_none() {
+        reuse_for(&work, &state, &env, &graph.cargo, args.no_reuse)
+    } else {
+        None
+    };
     let (mut rows, timings) = run_all_timed(
         &planned,
         ex,
@@ -566,8 +579,15 @@ fn command_in(
             queue_stall,
             stop: &stop,
             subject: &subject,
+            reuse: reuse.as_ref(),
         },
     );
+    if let Some(r) = &reuse {
+        let gone = r.evict();
+        if gone > 0 {
+            eprintln!("pre-push: result reuse: {gone} old record(s) evicted");
+        }
+    }
     rows.extend(extra_ref_rows(&extra));
     accept_not_measured(&mut rows, &accept, &state);
     log_queue_times(&state, checked.as_deref(), &base, &timings);
@@ -609,6 +629,25 @@ fn command_in(
         }
     }
     Ok(report)
+}
+
+/// Reuse of green results for the checkout `work`, records in `state` beside the step history ([`reuse::DIR`]); `None` when it is
+/// switched off. The tool version is the hash of this binary ([`crate::tool_cache::self_exe`]); when it cannot be read, no row is
+/// reused and every row says why.
+fn reuse_for(
+    work: &Path,
+    state: &Path,
+    env: &HashMap<String, String>,
+    cargo: &paddock_repo_graph::Graph,
+    off: bool,
+) -> Option<reuse::Reuse> {
+    if off {
+        return None;
+    }
+    let dev = crate::tool_cache::self_exe()
+        .map_err(|e| e.to_string())
+        .and_then(|p| reuse::Dev::of(&p));
+    reuse::Reuse::new(work, state.join(reuse::DIR), env, exec::run_token(), dev, cargo.clone(), off)
 }
 
 /// One line per run in `queue-times.log` beside the gate logs: the whole push's heavy queue and run time, the measurement the
@@ -1233,7 +1272,10 @@ pub fn render_timed(head: &str, rows: &[(String, Row)], timings: &std::collectio
         let (line, kind) = match v.kind() {
             Kind::Passed => {
                 ok += 1;
-                (format!("ok            {id:<34} {}", both(id, v.secs)), "passed")
+                match &v.reused {
+                    Some(green) => (format!("ok            {id:<34} {}", green.text()), "passed"),
+                    None => (format!("ok            {id:<34} {}", both(id, v.secs)), "passed"),
+                }
             }
             Kind::Skipped if reason.starts_with(&inactive_label) => {
                 inactive += 1;
@@ -1283,6 +1325,9 @@ pub fn render_timed(head: &str, rows: &[(String, Row)], timings: &std::collectio
         if let Some(t) = timings.get(id) {
             row["run_secs"] = json!(t.ran);
             row["queued_secs"] = json!(t.queued);
+        }
+        if let Some(green) = &v.reused {
+            row["reused"] = json!({"green_at": green.time(), "run": green.run});
         }
         if let Some(g) = &v.ended_by {
             row["ended_by"] = json!(g);
