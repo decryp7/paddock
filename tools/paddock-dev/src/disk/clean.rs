@@ -206,25 +206,6 @@ mod tests {
         assert!(refusal(&found(Some(Kind::Slot)), State::Merged).unwrap().contains("CI kit"));
     }
 
-    /// A folder opened so its time can be set: Windows refuses that on a plain `File::open` (access denied) and needs write access
-    /// and the backup-semantics flag to open a directory at all.
-    fn open_dir_for_write(dir: &Path) -> std::fs::File {
-        #[cfg(windows)]
-        {
-            use std::os::windows::fs::OpenOptionsExt;
-            const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
-            std::fs::OpenOptions::new()
-                .write(true)
-                .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
-                .open(dir)
-                .unwrap()
-        }
-        #[cfg(not(windows))]
-        {
-            std::fs::File::open(dir).unwrap()
-        }
-    }
-
     fn old_record(dir: &Path, kind: Kind, link: &str) {
         let mut r = Record::new(kind, "implementer:t");
         r.created = 1_000_000;
@@ -233,7 +214,7 @@ mod tests {
         record::write(dir, &r).unwrap();
         // The folder's own time counts as use too: age it.
         let old = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000);
-        open_dir_for_write(dir).set_modified(old).unwrap();
+        crate::disk::test_support::set_folder_time(dir, old);
     }
 
     fn setup() -> (tempfile::TempDir, CleanArgs) {
@@ -310,10 +291,7 @@ mod tests {
             .map(|i| {
                 let p = tmp.join(format!("x9-fixture-{i:06}"));
                 std::fs::create_dir(&p).unwrap();
-                std::fs::File::open(&p)
-                    .unwrap()
-                    .set_modified(old + std::time::Duration::from_secs(i as u64))
-                    .unwrap();
+                crate::disk::test_support::set_folder_time(&p, old + std::time::Duration::from_secs(i as u64));
                 p
             })
             .collect();

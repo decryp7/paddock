@@ -1094,7 +1094,7 @@ pub fn triage(a: &TriageArgs) -> Result<Report, CliError> {
         repo: a.repo.clone(),
         now_secs: time::now_secs(),
     };
-    let report = triage::collect(&mut client, &req, &mut |l| eprintln!("{l}")).map_err(|e| {
+    let report = triage::collect(&mut client, &req, &mut |l| crate::log_text::eline(l)).map_err(|e| {
         CliError::failure(format!("run {} could not be triaged: {e}", a.run))
             .with_hint("Check the network, that GITEA_TOKEN can read the repository, and that the run has finished.")
     })?;

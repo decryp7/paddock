@@ -275,7 +275,7 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
             Some(app) => since_app(root, env, app, run.trim()),
         };
     }
-    let log = |l: &str| eprintln!("{l}");
+    let log = |l: &str| crate::log_text::eline(l);
     let merge_base = |b: &str| git_text(root, &["merge-base", "HEAD", &format!("origin/{b}")]).map(|s| s.trim().to_string());
     let event = env("GITHUB_EVENT_NAME").unwrap_or_default();
     let reference = env("GITHUB_REF").unwrap_or_default();
@@ -426,7 +426,11 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
     // A workflow command is read from standard output; with `--app` standard output is the answer, so there it goes to the log (the
     // app's job summary says it).
     if let Some(l) = crate::active_apps::line(&inactive) {
-        if app.is_some() { log(&l) } else { println!("::notice::{l}") }
+        if app.is_some() {
+            log(&l)
+        } else {
+            crate::log_text::oline(&format!("::notice::{l}"))
+        }
     }
     log(&serde_json::to_string_pretty(&plan).unwrap_or_default());
     if let Some(app) = app {
@@ -701,7 +705,13 @@ pub(crate) fn read_run(root: &Path, env: &dyn Fn(&str) -> Option<String>, id: u6
         .unwrap_or_default();
     let mut http = CurlHttp;
     let mut runs = GiteaRuns::new(&mut http, &server, &repo, token);
-    crate::plan_since::since_run_with(&mut runs, id, &|f| workflow_text(root, f), &mut |l| eprintln!("{l}"), running)
+    crate::plan_since::since_run_with(
+        &mut runs,
+        id,
+        &|f| workflow_text(root, f),
+        &mut |l| crate::log_text::eline(l),
+        running,
+    )
 }
 
 /// Appends the outputs and the summary of a `--ci` run to the files the workflow names.

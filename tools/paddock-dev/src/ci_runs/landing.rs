@@ -68,7 +68,7 @@ pub fn with_real_landing_base(
     git_ref: &str,
     inputs: Vec<(String, String)>,
 ) -> Vec<(String, String)> {
-    let mut warn = |l: &str| eprintln!("{l}");
+    let mut warn = |l: &str| crate::log_text::eline(l);
     with_landing_base(
         workflow,
         git_ref,

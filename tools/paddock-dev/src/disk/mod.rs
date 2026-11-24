@@ -20,6 +20,8 @@ pub mod report;
 pub mod scan;
 pub mod state;
 pub mod temp;
+#[cfg(test)]
+mod test_support;
 
 use clap::{Args, Subcommand};
 use paddock_cli::{CliError, Report};

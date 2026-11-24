@@ -177,7 +177,7 @@ pub fn record(
 pub fn command(a: &super::RecordArgs) -> Result<paddock_cli::Report, paddock_cli::CliError> {
     let token = super::token()?;
     let mut http = CurlHttp;
-    let files = record(&mut http, &a.server, &a.repo, &token, &a.runs, &mut |l| eprintln!("{l}")).map_err(|e| {
+    let files = record(&mut http, &a.server, &a.repo, &token, &a.runs, &mut |l| crate::log_text::eline(l)).map_err(|e| {
         paddock_cli::CliError::failure(format!("the runs could not be recorded: {e}")).with_hint("Check the network and GITEA_TOKEN.")
     })?;
     std::fs::create_dir_all(&a.out).map_err(|e| paddock_cli::CliError::failure(format!("cannot create {}: {e}", a.out.display())))?;

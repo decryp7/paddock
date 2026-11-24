@@ -3838,3 +3838,13 @@ first and records the second (`ci fix-items`) is part of the queued green-main w
   the merged tree only).
 - **Skipped:** feat/check-result-reuse (f67b7f6a1, based before the push gate's rework) conflicts in `pre_push/exec.rs`: its reuse hook
   calls the BudgetClock model that the train's push gate no longer has. It goes to train c after its branch merges main.
+  - Train 2026-11-25-a's landing run ci.yml 8976 (plan job 48889) could not save the escape monitor's selection record:
+    `::warning::the selection record of this plan was not saved (git push origin refs/paddock/plan-records/*:refs/paddock/plan-records/*:
+    fatal: could not read Username for 'http://172.16.1.220:7400': No such device or address); the next nightly counts this commit as
+    not measured`. The plan job pushes the refs with no credentials over the http remote; likely fix: push with the job token, the way
+    checkout authenticates (to be fixed with the dispatch guards, train c).
+  - The same plan printed its `::notice::inactive:` glued to the end of that warning: `eprintln!` writes a line's text and its newline
+    as two writes, and the runner merged the notice from standard output between them. Fixed in this train (`log_text::write_line`,
+    one write per line, for the plan and the eleven `|l| eprintln!("{l}")` log closures). Still open: the other `eprintln!` calls with
+    inline formatting have the same two-write shape; a clippy `disallowed-macros` ban of `eprintln!` in paddock-dev's sources, with
+    `log_text::eline` as the replacement, would cover them.
