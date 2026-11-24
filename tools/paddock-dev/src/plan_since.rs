@@ -38,20 +38,57 @@ fn re(pattern: &str) -> Regex {
     Regex::new(pattern).expect("a valid pattern")
 }
 
-/// The steps of a workflow's job that run nextest and take a filterset (ci.yml: `matrix.filter`; debrief.yml: the plan job's
-/// `<job>_filter` output), as `(workflow, job, steps, composite)`. A job whose failed steps are all listed here, and whose
-/// failures are all read from its log, reruns only its failed tests. `composite`: the step is a composite action that runs
+/// The steps of a workflow's job that run nextest, as `(workflow, job, steps, composite, filter)`: the one table of test steps, read
+/// by the graders (`ci verdict`, through [`failure_is_tests`]) and by the narrowed rerun. `filter` says whether the steps take a
+/// filterset (ci.yml: `matrix.filter`; debrief.yml: the plan job's `<job>_filter` output): a job whose failed steps are all listed
+/// here with [`StepFilter::Filterset`], and whose failures are all read from its log, reruns only its failed tests; a
+/// [`StepFilter::Whole`] step (the crates job's coverage step, `cargo llvm-cov nextest`, which runs every crate test and reads no
+/// filter) reruns its job whole, and its FLAKY tests are graded like any other (run 9001). `composite`: the step is a composite action that runs
 /// several commands and names each failed one in an `::error::failed (exit N): <command>` line (app-gates), so every such line
 /// must be a nextest run. Debrief's `Memory budget` is `continue-on-error` (it never fails the job, but the API may list it as
 /// failed); the narrowed rerun skips it. A failed `No temp folders left behind` check is not listed: the leaked folder may be
 /// any test's, not only a failed one's, so the whole job reruns (run 7961 failed both steps and reruns whole).
-pub const TEST_STEPS: &[(&str, &str, &[&str], bool)] = &[
-    ("ci.yml", "crate", &["Tests (workspace, every feature)"], false),
-    ("ci.yml", "paddock-dev", &["Tests"], false),
-    ("ci.yml", "app", &["Run ./.gitea/actions/app-gates"], true),
-    ("debrief.yml", "rust-test", &["Tests (workspace)", "Memory budget"], false),
-    ("debrief.yml", "rust-test-macos", &["Tests (workspace)"], false),
+pub const TEST_STEPS: &[(&str, &str, &[&str], bool, StepFilter)] = &[
+    (
+        "ci.yml",
+        "crate",
+        &["Tests (workspace, every feature)"],
+        false,
+        StepFilter::Filterset,
+    ),
+    ("ci.yml", "paddock-dev", &["Tests"], false, StepFilter::Filterset),
+    ("ci.yml", "app", &["Run ./.gitea/actions/app-gates"], true, StepFilter::Filterset),
+    (
+        "ci.yml",
+        "crates",
+        &["Coverage (>= 90 % lines; 99 % security target report-only)"],
+        false,
+        StepFilter::Whole,
+    ),
+    (
+        "debrief.yml",
+        "rust-test",
+        &["Tests (workspace)", "Memory budget"],
+        false,
+        StepFilter::Filterset,
+    ),
+    (
+        "debrief.yml",
+        "rust-test-macos",
+        &["Tests (workspace)"],
+        false,
+        StepFilter::Filterset,
+    ),
 ];
+
+/// Whether a [`TEST_STEPS`] step takes a filterset of the tests to run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StepFilter {
+    /// It runs only the tests of the filterset it is given (a rerun narrows to the failed tests).
+    Filterset,
+    /// It runs all its tests whatever it is given: a rerun takes its job whole.
+    Whole,
+}
 
 /// The steps of a workflow's job that run vitest and take a list of spec files (the plan job's `<job>_include` output), as
 /// `(workflow, job, steps)`. A job whose only failed steps are these reruns only the failed spec files.
@@ -95,7 +132,7 @@ pub fn app_output_names() -> Vec<String> {
         out.extend(
             TEST_STEPS
                 .iter()
-                .filter(|t| t.0 == a.file)
+                .filter(|t| t.0 == a.file && t.4 == StepFilter::Filterset)
                 .map(|t| format!("{}_filter", t.1.replace('-', "_"))),
         );
         out.extend(
@@ -658,12 +695,16 @@ fn narrow(job: &RunJob, log: Result<&str, &str>, workflow: &str, key: Option<&st
         }
         return vitest_failures(log).map(Scope::Specs);
     }
-    let entry = TEST_STEPS.iter().find(|(w, k, _, _)| *w == workflow && *k == key);
-    let Some((_, _, steps, composite)) = entry else {
+    let entry = TEST_STEPS.iter().find(|(w, k, ..)| *w == workflow && *k == key);
+    let Some((_, _, steps, composite, filter)) = entry else {
         return Err(format!("job {key} has no step that takes a test filter"));
     };
     if let Some(s) = job.failed_steps.iter().find(|s| !steps.contains(&s.as_str())) {
         return Err(format!("step \"{s}\" failed and takes no test filter"));
+    }
+    if *filter == StepFilter::Whole {
+        let s = job.failed_steps.first().map_or(steps[0], String::as_str);
+        return Err(format!("step \"{s}\" runs tests but takes no test filter"));
     }
     if *composite {
         // The step that failed inside the composite and the composite itself; a third (notices.sh, the cargo-about install,
@@ -708,7 +749,7 @@ pub fn failure_is_tests(workflow: &str, key: &str, failed_steps: &[String], log:
     failed_steps_are_tests(workflow, key, failed_steps)?;
     if !TEST_STEPS
         .iter()
-        .any(|(w, k, _, composite)| *w == workflow && *k == key && *composite)
+        .any(|(w, k, _, composite, _)| *w == workflow && *k == key && *composite)
     {
         return Ok(());
     }
@@ -727,8 +768,8 @@ pub fn failure_is_tests(workflow: &str, key: &str, failed_steps: &[String], log:
 pub fn failed_steps_are_tests(workflow: &str, key: &str, failed_steps: &[String]) -> Result<(), StepProblem> {
     let known: Vec<&str> = TEST_STEPS
         .iter()
-        .filter(|(w, k, _, _)| *w == workflow && *k == key)
-        .flat_map(|(_, _, s, _)| s.iter().copied())
+        .filter(|(w, k, ..)| *w == workflow && *k == key)
+        .flat_map(|(_, _, s, ..)| s.iter().copied())
         .chain(
             VITEST_STEPS
                 .iter()
@@ -1447,6 +1488,33 @@ mod tests {
     fn templates() -> Vec<(String, String)> {
         let ci = "name: ci\non:\n  push:\njobs:\n  plan:\n    name: plan (affected projects)\n  ui:\n    name: ui (tokens, contrast, components, entry points, publish dry run)\n  e2e:\n    name: reference apps (shard ${{ matrix.shard }}/2)\n  conformance:\n    name: conformance (checks, release scripts)\n  crates:\n    name: crates (fmt, workspace hack, unused deps, coverage, deny)\n  crate:\n    name: crate (${{ matrix.os }})\n  app:\n    name: app ${{ matrix.app }} (${{ matrix.os }}${{ matrix.e2e_leg != '' && format(', {0}', matrix.e2e_leg) || '' }})\n  paddock-dev:\n    name: paddock-dev (${{ matrix.os }})\n";
         name_templates(ci)
+    }
+
+    /// The crates job's coverage step runs every crate test (`cargo llvm-cov nextest`, the same nextest output) but reads no filter. Its
+    /// failure is a test step's for the graders (run 9001: one FLAKY paddock-ipc test made the verdict "not measured", job crates had
+    /// "no step known to run tests"), and a rerun of the job takes it whole.
+    #[test]
+    fn the_crates_coverage_step_runs_tests_but_takes_no_filter_so_a_rerun_takes_its_job_whole() {
+        const COVERAGE: &str = "Coverage (>= 90 % lines; 99 % security target report-only)";
+        assert_eq!(failed_steps_are_tests("ci.yml", "crates", &[COVERAGE.to_string()]), Ok(()));
+        // Positive control: another failed step of the job is no test step.
+        assert!(matches!(
+            failed_steps_are_tests("ci.yml", "crates", &["Unused dependencies".to_string()]),
+            Err(StepProblem::Other(_))
+        ));
+        let log = include_str!("../tests/ci-runs/nextest-run9001-crates-coverage-flaky-only.log");
+        let jobs: Value = serde_json::from_str(include_str!("../tests/ci-runs/run-9001-jobs.json")).unwrap();
+        let job = RunJob::list(&jobs).into_iter().next().unwrap();
+        assert_eq!(job.failed_steps, vec![COVERAGE.to_string()]);
+        assert_eq!(failure_is_tests("ci.yml", "crates", &job.failed_steps, log), Ok(()));
+        let r = classify(&job, Ok(log), "ci.yml", &templates());
+        assert_eq!(r.key.as_deref(), Some("crates"));
+        assert_eq!(
+            r.scope,
+            Scope::Job(format!("step \"{COVERAGE}\" runs tests but takes no test filter"))
+        );
+        // No plan output is asked for a filter the step would not read.
+        assert!(!app_output_names().iter().any(|o| o.starts_with("crates")));
     }
 
     #[test]

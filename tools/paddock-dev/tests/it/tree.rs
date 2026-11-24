@@ -918,6 +918,39 @@ fn graph_ci_yml_passes_every_field_of_a_matrix_leg_to_app_gates() {
     }
 }
 
+/// Every step ci.yml's entries of `plan_since::TEST_STEPS` name is a step of that job, read through the workflow accessor
+/// (`plan_gitea::workflow_jobs`), so a renamed step cannot leave the graders and the narrowed rerun reading a name that no longer runs.
+/// Positive control: a name that is not a step of the job is not found.
+#[test]
+fn ci_yml_test_steps_are_steps_of_their_jobs() {
+    use paddock_dev::plan_since::TEST_STEPS;
+    let text = std::fs::read_to_string(root().join(".gitea/workflows/ci.yml"))
+        .unwrap()
+        .replace("\r\n", "\n");
+    let wf = paddock_dev::plan_gitea::workflow_jobs(&text).expect("ci.yml splits into jobs");
+    let has = |job: &str, step: &str| {
+        wf.jobs
+            .iter()
+            .find(|(k, _)| k == job)
+            .unwrap_or_else(|| panic!("ci.yml has no job {job}"))
+            .1
+            .lines()
+            .any(|l| l.trim_start().strip_prefix("- name: ").is_some_and(|n| n.trim() == step))
+    };
+    let mut seen = 0;
+    for (_, job, steps, ..) in TEST_STEPS.iter().filter(|t| t.0 == "ci.yml") {
+        for s in *steps {
+            if s.starts_with("Run ./.gitea/actions/") {
+                continue; // a `uses:` step: the API names it after the action
+            }
+            assert!(has(job, s), "ci.yml job {job} has no step named {s:?}");
+            seen += 1;
+        }
+    }
+    assert!(seen >= 3, "the entries were read: {seen}");
+    assert!(!has("crates", "Coverage (renamed)"));
+}
+
 /// A rerun of a debrief.yml run's failures (its `since_run` input): the planner can split the file into jobs and read their
 /// names and needs, every job but the plan and the tag-only and schedule-only ones asks `rerun_jobs` for itself, the plan job
 /// declares every output the planner writes, and the steps the planner narrows are the file's.
@@ -982,7 +1015,7 @@ fn debrief_yml_takes_a_rerun_of_its_failures() {
         "PLAN_MODE_FULL is the full output's expression"
     );
     assert!(plan.contains(&format!("echo \"{}$PLAN_MODE_FULL\"", paddock_dev::plan_since::MODE_LINE)));
-    for (w, job, steps, _) in TEST_STEPS.iter().filter(|t| t.0 == "debrief.yml") {
+    for (w, job, steps, ..) in TEST_STEPS.iter().filter(|t| t.0 == "debrief.yml") {
         let body = &wf.jobs.iter().find(|(k, _)| k == job).unwrap_or_else(|| panic!("{w} {job}")).1;
         for s in *steps {
             assert!(body.contains(&format!("- name: {s}\n")), "{job} has the step {s}");

@@ -8,8 +8,9 @@
 //!
 //! The order of the answer for one failed test:
 //!
-//! 1. **FLAKY (n of m runs)**: the flake history lists it as flaky or as failed-then-passed in the window. If it also failed on the baseline
-//!    run the row says so.
+//! 1. **FLAKY (n of m runs)**: it passed on its retry in this run and the flake history lists it as flaky or as failed-then-passed in
+//!    the window; **FLAKY (passed on its retry in this run)** when the history does not list it (shared jobs have none). If it also
+//!    failed on the baseline run the row says so.
 //! 2. **ALREADY FAILING ON MAIN**: the job of the same name failed in the baseline run and its log names this test (or, for a job
 //!    that failed outside any test runner, the job failed there too).
 //! 3. **NEW**: the job of the same name passed in the baseline run, or failed there without this test.
@@ -93,6 +94,11 @@ pub enum Status {
         /// Whether it also failed on the baseline run.
         also_on_baseline: bool,
     },
+    /// It passed on its retry in this run and the flake history does not list it (a shared job has none): the run's own outcome.
+    FlakyThisRun {
+        /// Whether it also failed on the baseline run.
+        also_on_baseline: bool,
+    },
     /// It failed on every attempt in this run. The flake history, when the flake history lists the test, is shown beside it and never
     /// turns the failure into FLAKY: only a pass on a retry in this run does.
     Failed {
@@ -149,6 +155,12 @@ pub fn status_of(job: &str, test: &Test, baseline: Option<&Baseline>, flaky: &Fl
             }
         };
     }
+    // The run's own outcome: a pass on the retry is FLAKY even where no flake history exists (shared jobs, run 9001).
+    if passed_on_retry && name.is_some() {
+        return Status::FlakyThisRun {
+            also_on_baseline: matches!(on_baseline, Ok(true)),
+        };
+    }
     match on_baseline {
         Ok(true) => Status::OnBaseline,
         Ok(false) => Status::New,
@@ -202,6 +214,10 @@ impl Status {
                     if *also_on_baseline { ", also failed on the baseline" } else { "" }
                 )
             }
+            Status::FlakyThisRun { also_on_baseline } => format!(
+                "FLAKY (passed on its retry in this run; no flake history){}",
+                if *also_on_baseline { ", also failed on the baseline" } else { "" }
+            ),
             Status::Failed { history, also_on_baseline } => {
                 let hist = history.map_or(String::new(), |(c, r)| format!(" (flaky history: {c} of {r} runs)"));
                 format!(
@@ -217,7 +233,7 @@ impl Status {
         match self {
             Status::New => "new",
             Status::OnBaseline => "already-failing",
-            Status::Flaky { .. } => "flaky",
+            Status::Flaky { .. } | Status::FlakyThisRun { .. } => "flaky",
             Status::Failed { .. } => "failed",
             Status::Unknown(_) => "unknown",
         }
@@ -326,6 +342,9 @@ impl Report {
                 });
                 if let Status::Flaky { count, runs, also_on_baseline } = &r.status {
                     v["flaky"] = json!({"count": count, "runs": runs, "also_on_baseline": also_on_baseline});
+                }
+                if let Status::FlakyThisRun { also_on_baseline } = &r.status {
+                    v["flaky"] = json!({"this_run": true, "also_on_baseline": also_on_baseline});
                 }
                 if let Status::Failed { history: Some((count, runs)), also_on_baseline } = &r.status {
                     v["flaky_history"] = json!({"count": count, "runs": runs, "also_on_baseline": also_on_baseline});
@@ -743,6 +762,22 @@ mod tests {
             status_of("j", &named("t"), Some(&b), &flaky, true),
             Status::Flaky { count: 3, runs: 154, .. }
         ));
+    }
+
+    #[test]
+    fn a_test_that_passed_on_its_retry_in_this_run_is_flaky_without_a_flake_history() {
+        // Run 9001's crates job: a shared crate has no flake history, and its FLAKY test (FLKY-FL 2/2) was reported NEW.
+        let log = include_str!("../../tests/ci-runs/nextest-run9001-crates-coverage-flaky-only.log");
+        let f = logfind::read(log);
+        let name = "paddock-ipc::it endings::ipc_host_ends_every_connection_right_or_is_in_the_ratchet".to_string();
+        assert_eq!(retried_ok(&f), BTreeSet::from([name.clone()]));
+        let b = base(&[("j", JobState::Passed)]);
+        let s = status_of("j", &named(&name), Some(&b), &Flaky::new(), true);
+        assert_eq!(s, Status::FlakyThisRun { also_on_baseline: false });
+        assert_eq!(s.kind(), "flaky");
+        assert_eq!(s.word(true, None), "FLAKY (passed on its retry in this run; no flake history)");
+        // Positive control: the same test without the passing retry is NEW.
+        assert_eq!(status_of("j", &named(&name), Some(&b), &Flaky::new(), false), Status::New);
     }
 
     #[test]

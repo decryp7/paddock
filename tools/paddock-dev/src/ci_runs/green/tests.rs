@@ -9,6 +9,9 @@
 //!   header of each file says what was left out). Each shows one FLAKY test, `FLKY-FL 2/2`, and nothing else; the app log carries
 //!   app-gates' real `::error::failed (exit 100): cargo nextest run` and `##[error]` lines.
 //! - `nextest-r1-pass.log`: a test that failed both tries beside a FLAKY one (cargo-nextest 0.9.149).
+//! - `tests/ci-runs/run-9001-jobs.json` and `nextest-run9001-crates-coverage-flaky-only.log`: the crates job of train 2026-11-26-c's
+//!   run 9001 (its coverage step, `cargo llvm-cov nextest`, failed on one FLAKY paddock-ipc test) and an excerpt of its log, read
+//!   through the Actions API on 2026-11-25 and scrubbed like the 8610 ones (the header of the log says what was left out).
 //! - the plan logs are `run_scope::TEST_COMPLETE`, `TEST_PARTIAL` and `TEST_OS_ONLY` (the line `./dev plan --ci` prints), with the
 //!   old `plan verdict: complete=true` line beside it where a test asks for the report-only phase.
 
@@ -22,6 +25,9 @@ const JOBS_8610: &str = include_str!("../../../tests/ci-runs/run-8610-jobs.json"
 const CRATE_FLAKY: &str = include_str!("../../../tests/ci-runs/nextest-run8610-crate-flaky-only.log");
 const APP_FLAKY: &str = include_str!("../../../tests/ci-runs/nextest-run8610-app-gates-flaky-only.log");
 const BOTH_TRIES: &str = include_str!("../../../tests/ci-runs/nextest-r1-pass.log");
+const JOBS_9001: &str = include_str!("../../../tests/ci-runs/run-9001-jobs.json");
+const CRATES_COVERAGE_FLAKY: &str = include_str!("../../../tests/ci-runs/nextest-run9001-crates-coverage-flaky-only.log");
+const CRATES: &str = "crates (fmt, workspace hack, unused deps, coverage, deny)";
 const CRATE: &str = "crate (windows-latest)";
 const APP: &str = "app spotter (macos-latest)";
 
@@ -36,7 +42,12 @@ fn complete() -> String {
 
 /// A job of the real run 8610 by name, given another id and page.
 fn real_job(name: &str, run: u64, n: u64) -> Value {
-    let all: Value = serde_json::from_str(JOBS_8610).unwrap();
+    real_job_in(JOBS_8610, name, run, n)
+}
+
+/// A job of a recorded run's jobs (`fixture`) by name, given another id and page.
+fn real_job_in(fixture: &str, name: &str, run: u64, n: u64) -> Value {
+    let all: Value = serde_json::from_str(fixture).unwrap();
     let mut job = all["jobs"]
         .as_array()
         .unwrap()
@@ -90,8 +101,12 @@ impl Run {
         }
     }
     /// The real failed job `name` with the log it carries.
-    fn failing(mut self, name: &str, log: &str) -> Run {
-        let job = real_job(name, self.id, 2 + self.jobs.len() as u64);
+    fn failing(self, name: &str, log: &str) -> Run {
+        self.failing_in(JOBS_8610, name, log)
+    }
+    /// The failed job `name` of the recorded jobs `fixture`, with the log it carries.
+    fn failing_in(mut self, fixture: &str, name: &str, log: &str) -> Run {
+        let job = real_job_in(fixture, name, self.id, 2 + self.jobs.len() as u64);
         self.logs.push((job["id"].as_u64().unwrap(), log.to_string()));
         self.jobs.push(job);
         self
@@ -977,6 +992,43 @@ fn a_flaky_test_in_an_untouched_package_is_a_fix_item_and_landable_once_the_pack
     // Positive control (ER-33): the same run in the report-only phase is red on the job level: the package level is what lands it.
     let o = grade(&mut f, &r, packages(&["paddock-core"], false));
     assert!(matches!(&o.result, GradedResult::Red(why) if why.contains("reached")), "{o:?}");
+    assert!(!o.lands());
+}
+
+/// The plan reached the crates workspace through Cargo, at paddock-core only; the workspace holds paddock-ipc (the 9001 FLAKY test's
+/// package) and paddock-core.
+fn ipc_untouched() -> Touched {
+    Touched {
+        flags: ["crates".to_string()].into(),
+        cargo_only: ["crates".to_string()].into(),
+        packages: [("crates".to_string(), ["paddock-core".to_string()].into())].into(),
+        members: [("crates".to_string(), ["paddock-ipc", "paddock-core"].map(String::from).into())].into(),
+        narrow: true,
+        ..Touched::default()
+    }
+}
+
+#[test]
+fn a_flaky_test_in_the_crates_coverage_step_is_graded_like_any_test_step() {
+    // Run 9001: the crates job's coverage step (cargo llvm-cov nextest) failed on one FLAKY paddock-ipc test, and the verdict was
+    // "not measured" (job crates had no step known to run tests).
+    let c = sha(3);
+    let r = Run::train(9001, &c, "failure").failing_in(JOBS_9001, CRATES, CRATES_COVERAGE_FLAKY);
+    let mut f = server(std::slice::from_ref(&r));
+    let o = grade(&mut f, &r, ipc_untouched());
+    assert!(o.lands() && !o.is_tag_green(), "{o:?}");
+    let items = fix_items(&o);
+    assert_eq!(items.len(), 1);
+    assert!(items[0].test.starts_with("paddock-ipc::it endings::"), "{items:?}");
+    // Positive control (ER-12, ER-33): the same log with the test failing both tries blocks.
+    let both = CRATES_COVERAGE_FLAKY
+        .replace("TRY 2 PASS", "TRY 2 FAIL")
+        .replace("FLKY-FL 2/2", "TRY 2 FAIL");
+    assert_ne!(both, CRATES_COVERAGE_FLAKY);
+    let r = Run::train(9001, &c, "failure").failing_in(JOBS_9001, CRATES, &both);
+    let mut f = server(std::slice::from_ref(&r));
+    let o = grade(&mut f, &r, ipc_untouched());
+    assert!(matches!(&o.result, GradedResult::Red(why) if why.contains("both tries")), "{o:?}");
     assert!(!o.lands());
 }
 

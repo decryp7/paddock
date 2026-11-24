@@ -1,0 +1,55 @@
+2026-11-24T00:00:00.0000000Z excerpt of run 9001 job 49240 (ci.yml crates, its coverage step: cargo llvm-cov nextest), read through the Actions API on 2026-11-25: the Job line, the Starting line, the first FAIL try through the passing retry of the flaky test, the nextest summary and its FLKY-FL line, and the failed step's ::error:: and ##[error] lines. Passing-test lines and the output of other commands are left out; runner paths are replaced by <runner-path> and the uid by <uid>. Nothing else is edited.
+2026-11-24T17:50:04.1533433Z Job: crates
+2026-11-24T17:52:20.3502207Z     Starting 5219 tests across 118 binaries (1 test skipped)
+2026-11-24T17:52:39.3299571Z   TRY 1 FAIL [   1.645s] (─────────) paddock-ipc::it endings::ipc_host_ends_every_connection_right_or_is_in_the_ratchet
+2026-11-24T17:52:39.3299970Z   stdout ───
+2026-11-24T17:52:39.3300009Z 
+2026-11-24T17:52:39.3300039Z     running 1 test
+2026-11-24T17:52:39.3300083Z     test endings::ipc_host_ends_every_connection_right_or_is_in_the_ratchet ... FAILED
+2026-11-24T17:52:39.3300116Z 
+2026-11-24T17:52:39.3300175Z     failures:
+2026-11-24T17:52:39.3300199Z 
+2026-11-24T17:52:39.3300220Z     failures:
+2026-11-24T17:52:39.3300282Z         endings::ipc_host_ends_every_connection_right_or_is_in_the_ratchet
+2026-11-24T17:52:39.3300306Z 
+2026-11-24T17:52:39.3300334Z     test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 137 filtered out; finished in 1.64s
+2026-11-24T17:52:39.3300372Z 
+2026-11-24T17:52:39.3301226Z   stderr ───
+2026-11-24T17:52:39.3301302Z 
+2026-11-24T17:52:39.3301337Z     thread 'endings::ipc_host_ends_every_connection_right_or_is_in_the_ratchet' (28226) panicked at paddock-ipc/tests/it/endings.rs:174:9:
+2026-11-24T17:52:39.3301377Z     stale ratchet entry I10: ipc-host / client-keeps-writing: reset no longer happens (remove the entry; the ratchet only shrinks)
+2026-11-24T17:52:39.3301422Z 
+2026-11-24T17:52:39.3301454Z     ipc-host wrong-token: drain-not-eof
+2026-11-24T17:52:39.3301511Z         | INFO connection ended id=a1 conn="app" phase=hello code=auth flush=none reason=sent drain=none bytes=0 open_ms=0 pending=0 served=0 detail="authentication failed (the client presented a wrong token)"
+2026-11-24T17:52:39.3301582Z     ipc-host wrong-version: drain-not-eof
+2026-11-24T17:52:39.3301631Z         | INFO connection ended id=a2 conn="app" phase=hello code=version flush=none reason=sent drain=none bytes=0 open_ms=0 pending=0 served=0 detail="the other side uses frame version 3, this side 2; update the older one"
+2026-11-24T17:52:39.3301699Z     ipc-host wrong-account: reset, drain-not-eof
+2026-11-24T17:52:39.3301730Z         | INFO connection ended id=a3 conn="app" phase=hello code=auth flush=none reason=sent drain=none bytes=0 open_ms=0 pending=0 served=0 detail="authentication failed (the client runs as another user (uid <uid>; this side runs as 0))"
+2026-11-24T17:52:39.3301805Z     ipc-host busy: reset, drain-not-eof
+2026-11-24T17:52:39.3301941Z         | INFO connection ended id=a4 conn="app" phase=hello code=busy flush=none reason=sent drain=none bytes=0 open_ms=0 pending=0 served=0 detail="too many connections; try again"
+2026-11-24T17:52:39.3302048Z     ipc-host silent-client: no-reason, drain-not-eof
+2026-11-24T17:52:39.3302107Z         | INFO connection ended id=a5 conn="app" phase=hello code=timeout flush=none reason=unsent drain=none bytes=0 open_ms=0 pending=0 served=0 detail="it stopped responding"
+2026-11-24T17:52:39.3302213Z     ipc-host malformed-first-frame: drain-not-eof
+2026-11-24T17:52:39.3302302Z         | INFO connection ended id=a6 conn="app" phase=hello code=protocol flush=none reason=sent drain=none bytes=0 open_ms=0 pending=0 served=0 detail="it sent an invalid message (the first frame was not a hello)"
+2026-11-24T17:52:39.3302373Z     ipc-host client-keeps-writing: drain-not-eof
+2026-11-24T17:52:39.3302406Z         | INFO connection ended id=a7 conn="app" phase=hello code=auth flush=none reason=sent drain=none bytes=0 open_ms=0 pending=0 served=0 detail="authentication failed (the client presented a wrong token)"
+2026-11-24T17:52:39.3302502Z     ipc-host owner-close-with-calls-in-flight: no-reason, typed-transport, drain-not-eof, drain-not-eof, drain-not-eof
+2026-11-24T17:52:39.3302602Z         | INFO connection ended id=p1 conn="owner" phase=open code=closed flush=none reason=unsent drain=none bytes=0 open_ms=0 pending=0 served=1 detail="the connection ended (owner closed the connection)"
+2026-11-24T17:52:39.3302760Z         | INFO connection ended id=p2 conn="owner" phase=open code=stopping flush=none reason=unsent drain=none bytes=0 open_ms=0 pending=0 served=1 detail="the connection ended (the connection to owner was closed by this side)"
+2026-11-24T17:52:39.3302834Z         | INFO connection ended id=p3 conn="caller" phase=open code=closed flush=none reason=unsent drain=none bytes=0 open_ms=0 pending=1 served=0 detail="the connection ended (caller closed the connection)"
+2026-11-24T17:52:39.3302890Z     ipc-host owner-close-while-peer-not-reading: drain-not-eof
+2026-11-24T17:52:39.3302975Z         | INFO connection ended id=p4 conn="owner" phase=open code=stopping flush=none reason=unsent drain=none bytes=0 open_ms=435 pending=0 served=0 detail="the connection ended (the connection to owner was closed by this side)"
+2026-11-24T17:52:39.3303033Z     ipc-host stall: drain-not-eof
+2026-11-24T17:52:39.3303111Z         | INFO connection ended id=p5 conn="owner" phase=open code=stalled flush=none reason=unsent drain=none bytes=0 open_ms=53 pending=0 served=0 detail="the connection ended (owner stopped reading for 30 s)"
+2026-11-24T17:52:39.3303205Z     ipc-host listener-stop-with-client-in-backlog: reset, no-reason
+2026-11-24T17:52:39.3303255Z     ipc-host stop-with-open-connection: no-reason, drain-not-eof
+2026-11-24T17:52:39.3303289Z         | INFO connection ended id=p6 conn="owner" phase=open code=stopping flush=none reason=unsent drain=none bytes=0 open_ms=0 pending=0 served=0 detail="the connection ended (the connection to owner was closed by this side)"
+2026-11-24T17:52:39.3303332Z     ipc-host mixed-version-peer-ignores-fail0: ok
+2026-11-24T17:52:39.3303361Z 
+2026-11-24T17:52:39.3303387Z     note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+2026-11-24T17:52:39.3303423Z 
+2026-11-24T17:52:41.0049323Z   TRY 2 PASS [   1.673s] (1900/5219) paddock-ipc::it endings::ipc_host_ends_every_connection_right_or_is_in_the_ratchet
+2026-11-24T17:53:43.1176399Z      Summary [  82.767s] 5219 tests run: 5218 passed, 1 failed, 1 skipped
+2026-11-24T17:53:43.1178327Z  FLKY-FL 2/2 [   1.673s] (1900/5219) paddock-ipc::it endings::ipc_host_ends_every_connection_right_or_is_in_the_ratchet
+2026-11-24T17:53:43.1408630Z ::error::command failed (exit 100): cargo llvm-cov nextest --profile ci --workspace --all-features --ignore-filename-regex '(paddock-window/src/tauri|paddock-panels/src/tauri|paddock-updater/src/tauri|paddock-secrets/src/os|paddock-diag/src/tauri|paddock-files/src/tauri|paddock-service/src|paddock-watch/src|paddock-metrics/src|paddock-health/src/tauri|paddock-siblings/src|paddock-power/src)/native\.rs$|paddock-proc/src/testchild\.rs$|paddock-setup/src/(main\.rs|native/.*)$|paddock-chromium/src/fake\.rs$|paddock-ipc/src/bin/test_child\.rs$|paddock-ipc/src/testing/.*\.rs$|paddock-dialogs/src/probe\.rs$|paddock-plugin-test/src/bin/(fixture|fixture_v1|misbehaving)\.rs$|paddock-plugin-api/src/entry\.rs$|paddock-plugin-test/src/process\.rs$|cargo-paddock-plugin/src/main\.rs$|paddock-ipc/src/endpoint/(unix|windows)\.rs$|paddock-service/src/privileged/trust_real/windows\.rs$' --lcov --output-path lcov.info (in crates) Next step: run `cargo llvm-cov nextest --profile ci --workspace --all-features --ignore-filename-regex '(paddock-window/src/tauri|paddock-panels/src/tauri|paddock-updater/src/tauri|paddock-secrets/src/os|paddock-diag/src/tauri|paddock-files/src/tauri|paddock-service/src|paddock-watch/src|paddock-metrics/src|paddock-health/src/tauri|paddock-siblings/src|paddock-power/src)/native\.rs$|paddock-proc/src/testchild\.rs$|paddock-setup/src/(main\.rs|native/.*)$|paddock-chromium/src/fake\.rs$|paddock-ipc/src/bin/test_child\.rs$|paddock-ipc/src/testing/.*\.rs$|paddock-dialogs/src/probe\.rs$|paddock-plugin-test/src/bin/(fixture|fixture_v1|misbehaving)\.rs$|paddock-plugin-api/src/entry\.rs$|paddock-plugin-test/src/process\.rs$|cargo-paddock-plugin/src/main\.rs$|paddock-ipc/src/endpoint/(unix|windows)\.rs$|paddock-service/src/privileged/trust_real/windows\.rs$' --lcov --output-path lcov.info` in crates to reproduce, or `./dev ci run crates coverage`
+2026-11-24T17:53:43.1700364Z ##[error]Process completed with exit code 100.
