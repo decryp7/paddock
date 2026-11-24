@@ -1187,6 +1187,7 @@ fn ending_a_guarded_child_that_left_a_helper_in_its_group_ends_the_helper() {
 fn a_reap_is_bounded_and_ends_a_process_that_does_not_end() {
     let mut quick = crate::testchild::child(crate::testchild::Mode::Exit3)
         .stdout(Stdio::null())
+        // conformance: test-steps — reap_within, the call under test, waits for it and ends it at its bound on every path
         .spawn()
         .unwrap();
     assert!(reap_within(
@@ -1195,6 +1196,7 @@ fn a_reap_is_bounded_and_ends_a_process_that_does_not_end() {
         "a quick child"
     ));
     let mut stays = crate::testchild::child(crate::testchild::Mode::Sleep)
+        // conformance: test-steps — reap_within, the call under test, ends it through its handle at the bound and reaps it
         .spawn()
         .unwrap();
     let id = ProcessId::of(stays.id()).unwrap();
