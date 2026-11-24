@@ -343,6 +343,12 @@ Each decision below keeps its options as offered; the line "Accepted" records th
 - A later process (a CI step, the coordinator, an agent's next turn) can wait on or end a process by its handle, never by a search.
 - Escapes stay possible on Unix: a program we start that calls `setsid` leaves its group, so neither the group signal nor the
   guardian reaches it (Windows jobs have no such escape: breakaway is not allowed); the scope's summary reports what it could not see (as ADR 0112's job summary does).
+- Amended 2026-11-24 (WP-1 review round 2): on Unix a guarded child starts inside a group the guardian already holds (the keeper
+  leads it and is registered first), so an owner killed at any point of a start leaves no unguarded child. A `pre_exec` gate
+  was not used: std's `spawn` waits for the child's exec, so the owner could not register while the child waits. On Windows a
+  child joins its jobs only after `CreateProcess` returned (no `CREATE_SUSPENDED` start yet): a grandchild started in that
+  moment, or an owner killed in it, leaves a process outside the jobs. A suspended start (create suspended, join the jobs,
+  resume) closes it and is left for the migration's Windows work.
 - Migration touches about 164 sites in 94 files; reviews of those batches are mechanical.
 
 ## Status of the mechanisms (ADR 0096)

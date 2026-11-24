@@ -708,10 +708,11 @@ fn an_owner_that_ends_its_child_itself_keeps_the_folder_and_ends_the_keeper() {
     let Some(keeper) = keeper else {
         fail(&[child], "the child was not registered");
     };
+    // Keeper first (ADR 0119 WP-1, review round 2): the keeper leads the registered group and the child starts inside it.
     assert_eq!(
-        crate::sys::group_of(keeper.pid()),
-        Some(child.pid()),
-        "the keeper holds the child's group"
+        crate::sys::group_of(child.pid()),
+        Some(keeper.pid()),
+        "the child starts in the keeper's registered group"
     );
     s.kill();
     assert_eq!(run_state(child), RunState::Exited);
@@ -1048,4 +1049,80 @@ fn a_guardian_that_never_answers_ends_the_wait_at_its_bound() {
     let bound = Duration::from_millis(100);
     assert_eq!(serving(r, bound), Serving::NoAnswer);
     drop(w);
+}
+
+// ---- no window between a child's start and its registration (review round 2, P1-A) ----
+
+const HOLD_OWNER_ENV: &str = "PADDOCK_GUARD_TEST_HOLD_OWNER";
+const HOLD_OWNER_TEST: &str = "guardian::unix::tests::hold_owner_process";
+
+/// Not a test: an owner whose supervised start holds right after its child exists ([`HOLD_ENV`]).
+#[test]
+fn hold_owner_process() {
+    let Ok(token) = std::env::var(HOLD_OWNER_ENV) else {
+        return;
+    };
+    enable_in_test_binary(ENTRY);
+    let mut cmd = crate::testchild::child(crate::testchild::Mode::Sleep);
+    cmd.env(GATE_MARK, &token);
+    let s = Supervised::spawn(cmd);
+    println!("started {}", s.is_ok());
+    let _ = std::io::stdin().read_line(&mut String::new());
+    std::process::exit(0);
+}
+
+/// The owner is killed after its child exists and before its start returned: the child must already be in a group the
+/// guardian holds, so the guardian ends it. A child that was registered only after its start ran on (review round 2, P1-A).
+#[test]
+fn an_owner_killed_right_after_its_child_exists_leaves_no_child() {
+    let dir = tempfile::tempdir().unwrap();
+    let hold = dir.path().join("hold");
+    let token = format!(
+        "hold-{}-{}",
+        std::process::id(),
+        crate::own::now().as_micros()
+    );
+    let mut owner = crate::command(std::env::current_exe().unwrap())
+        .args([HOLD_OWNER_TEST, "--exact", "--nocapture"])
+        .env(ACT_AS_USER_ENV, "1")
+        .env(HOLD_ENV, &hold)
+        .env(HOLD_OWNER_ENV, &token)
+        .env(LOG_ENV, dir.path().join("guardian.log"))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        // conformance: test-steps — every failure path below ends the owner and what carries its mark before it fails
+        .spawn()
+        .unwrap();
+    let owner_id = ProcessId::of(owner.id()).unwrap();
+    let waiting = dir.path().join("hold.waiting");
+    if !paddock_testkit::wait::poll_until_within(paddock_testkit::wait::HANG_GUARD, || {
+        waiting.exists()
+    }) {
+        fail(
+            &[owner_id],
+            "the owner's start never reached the hold point",
+        );
+    }
+    owner.kill().unwrap();
+    owner.wait().unwrap();
+    let since =
+        crate::StartTime::from_micros(owner_id.started().as_micros().saturating_sub(1_000_000));
+    let mut unit = crate::own::Unit::new(since, std::process::id());
+    unit.set_marker(GATE_MARK, &token);
+    let marked = || -> Vec<ProcessId> {
+        crate::own::members(&unit.look(), &unit)
+            .iter()
+            .map(|m| m.id)
+            .collect()
+    };
+    let gone = paddock_testkit::wait::poll_until_within(paddock_testkit::wait::HANG_GUARD, || {
+        marked().is_empty()
+    });
+    let left = marked();
+    fail_unless(
+        gone,
+        &left,
+        "the child started just before its owner was killed ran on: it was not yet in a guarded group",
+    );
 }

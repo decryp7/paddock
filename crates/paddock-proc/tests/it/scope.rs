@@ -78,8 +78,8 @@ fn stand_in() {
     }
 }
 
-/// Lives until it is ended, or its life is over: a wait on a condition nobody sets, bounded by [`STAND_IN_LIFE`] (a stand-in
-/// never outlives a failed test by more, ER-14).
+/// Lives until it is ended, or its life is over. Not a synchronisation pattern: nothing ever sets the condition, so this is only
+/// a lifetime bound of [`STAND_IN_LIFE`] (a stand-in never outlives a failed test by more, ER-14), written as a bounded wait.
 fn live() {
     let never = std::sync::Condvar::new();
     let held = std::sync::Mutex::new(());
@@ -341,7 +341,11 @@ fn a_polite_child_is_asked_and_one_that_ignores_the_request_is_ended_after_the_g
         .unwrap();
     assert_eq!(ready.trim(), "ready");
     let deaf = deaf.process().unwrap();
+    // The deaf child is ended only after the grace: the end cannot return before this instant (a lower bound, which load
+    // only makes later, never earlier).
+    let not_before = Instant::now() + grace;
     let summary = scope.finish();
+    let ended_at = Instant::now();
     let how = |id| {
         summary
             .reports
@@ -350,6 +354,10 @@ fn a_polite_child_is_asked_and_one_that_ignores_the_request_is_ended_after_the_g
             .map(|r| r.how)
     };
     assert_eq!(how(polite), Some(HowEnded::Asked), "{summary:?}");
+    assert!(
+        ended_at >= not_before,
+        "the deaf child was ended before its grace"
+    );
     assert_eq!(how(deaf), Some(HowEnded::Ended), "{summary:?}");
     assert!(ends(polite) && ends(deaf));
 }

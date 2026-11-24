@@ -321,17 +321,27 @@ impl Supervised {
         folder: Option<&std::path::Path>,
         #[cfg(windows)] outer: Option<&crate::job::Job>,
     ) -> std::io::Result<Supervised> {
-        crate::sys::own_group(&mut cmd);
-        // The guardian serves before the child exists, so an owner killed from here on leaves no unguarded child (ADR 0119).
+        // Unix: the guarded group exists before the child (a keeper leads it, registered with the guardian), and the child
+        // starts inside it, so an owner killed at any point of this start leaves no unguarded child (ADR 0119 WP-1, review
+        // round 2). Without a guard the child leads a group of its own.
         #[cfg(unix)]
-        crate::guardian::ensure();
+        let guard = crate::guardian::prepare(folder);
+        #[cfg(unix)]
+        match guard.as_ref() {
+            Some(g) => {
+                use std::os::unix::process::CommandExt;
+                cmd.process_group(i32::try_from(g.group()).unwrap_or(0));
+            }
+            None => crate::sys::own_group(&mut cmd),
+        }
+        #[cfg(not(unix))]
+        crate::sys::own_group(&mut cmd);
         let child = crate::command::spawn_retrying(&mut cmd)?;
+        #[cfg(all(test, unix))]
+        crate::guardian::hold_after_spawn();
         let pid = child.id();
         // Not reaped yet, so the pid is still this child's.
         let process = identify(pid);
-        // Not reaped yet, so its group is still its own.
-        #[cfg(unix)]
-        let guard = crate::guardian::register(pid, folder);
         // Windows: the kill-on-close job ends the tree when this process dies; the folder is the caller's to sweep.
         #[cfg(not(unix))]
         let _: Option<&std::path::Path> = folder;
@@ -528,6 +538,16 @@ impl Supervised {
         }
     }
 
+    /// The leader of the child's process group by identity (Unix): the keeper of its guarded group, or the child itself when
+    /// it is not guarded.
+    pub(crate) fn group_leader(&self) -> Option<ProcessId> {
+        #[cfg(unix)]
+        if let Some(g) = self.guard.as_ref() {
+            return Some(g.keeper_id());
+        }
+        self.process
+    }
+
     /// [`Supervised::kill`] over `os` (a scope's end shares one look at the table among its children, ER-20).
     pub(crate) fn kill_on(&mut self, os: &dyn tree::Os) {
         if let Some(mut c) = self.child.take() {
@@ -560,6 +580,11 @@ impl Supervised {
                     crate::tree::end_unreaped_group(self.pid);
                 }
                 None => {}
+            }
+            // The guarded group (its keeper leads it): helpers that left the tree but not the group end with it.
+            #[cfg(unix)]
+            if let Some(g) = self.guard.as_ref() {
+                g.end_group();
             }
             crate::cleanup::logged("killing the child", c.kill());
             crate::cleanup::logged("reaping the child", c.wait());

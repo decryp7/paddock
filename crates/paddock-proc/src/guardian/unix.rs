@@ -21,6 +21,30 @@ pub(crate) const ACT_AS_USER_ENV: &str = "PADDOCK_PROC_TEST_ACT_AS_USER";
 /// the test kit's hang guard), so a test can end the owner while the guardian starts.
 #[cfg(test)]
 pub(crate) const GATE_ENV: &str = "PADDOCK_PROC_TEST_GUARDIAN_GATE";
+/// In a test binary: a supervised start holds right after its child exists, writing `<path>.waiting` and waiting until `<path>`
+/// exists (bounded by the test kit's hang guard), so a test can end the owner there.
+#[cfg(test)]
+pub(crate) const HOLD_ENV: &str = "PADDOCK_PROC_TEST_HOLD_AFTER_SPAWN";
+
+/// The hold point of [`HOLD_ENV`] (a supervised start calls it right after its child exists).
+#[cfg(test)]
+pub(crate) fn hold_after_spawn() {
+    if let Some(hold) = std::env::var_os(HOLD_ENV).map(PathBuf::from) {
+        let mut waiting = hold.clone().into_os_string();
+        waiting.push(".waiting");
+        crate::cleanup::logged("marking the test hold", std::fs::write(&waiting, b""));
+        if !paddock_testkit::wait::poll_until_within(paddock_testkit::wait::HANG_GUARD, || {
+            hold.exists()
+        }) {
+            log::warn!("the test hold never opened");
+        }
+    }
+}
+
+/// In a test binary: the guardian ends with exit code 3 before its owner check, as a killed or crashed one does.
+#[cfg(test)]
+pub(crate) const CRASH_ENV: &str = "PADDOCK_PROC_TEST_GUARDIAN_CRASH";
+
 /// In a test binary: the guardian refuses to serve, as one that found the wrong parent does.
 #[cfg(test)]
 pub(crate) const REFUSE_ENV: &str = "PADDOCK_PROC_TEST_GUARDIAN_REFUSE";
@@ -235,7 +259,17 @@ fn start(args: &[OsString], me: ProcessId) -> std::io::Result<Running> {
     let mut child = cmd.spawn()?;
     // Our copy of the ready pipe's write end goes with the command, so a guardian that ends gives end of file.
     drop(cmd);
-    match serving(ready, SERVING_BOUND) {
+    // A test that holds the guardian at its gate waits as long as the kit's hang guard, so a loaded machine cannot end the wait
+    // first and make the test pass for the wrong reason (review round 2, P2-F).
+    #[cfg(test)]
+    let bound = if std::env::var_os(GATE_ENV).is_some() {
+        paddock_testkit::wait::HANG_GUARD
+    } else {
+        SERVING_BOUND
+    };
+    #[cfg(not(test))]
+    let bound = SERVING_BOUND;
+    match serving(ready, bound) {
         Serving::Yes => log::info!(
             "Started the orphan guardian (pid {}) for this process's supervised children; it serves after {} ms; its log is {}",
             child.id(),
@@ -243,14 +277,18 @@ fn start(args: &[OsString], me: ProcessId) -> std::io::Result<Running> {
             log_text(log.as_deref())
         ),
         Serving::Refused => {
-            crate::cleanup::logged("reaping a guardian that refused", child.wait());
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::PermissionDenied,
-                format!(
-                    "it refused to serve (its log, {}, says why)",
-                    log_text(log.as_deref())
-                ),
-            ));
+            // Exit code 2 is the guardian's own refusal (it checked and said no): that lasts for this process. Any other end (a
+            // kill, a crash) is not a refusal, and the next start tries again (review round 2, P2-A).
+            let refused = child.wait().is_ok_and(|s| s.code() == Some(2));
+            let why = format!("its log, {}, says why", log_text(log.as_deref()));
+            return Err(if refused {
+                std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    format!("it refused to serve ({why})"),
+                )
+            } else {
+                std::io::Error::other(format!("it ended before it served ({why})"))
+            });
         }
         Serving::NoAnswer => log::warn!(
             "The orphan guardian (pid {}) did not say it serves within {} s; this process's children are registered with \
@@ -285,6 +323,24 @@ fn send(to: &mut std::io::PipeWriter, line: &str) -> std::io::Result<()> {
 pub(crate) struct Registration {
     group: u32,
     pub(crate) keeper: Child,
+    keeper_id: ProcessId,
+}
+
+impl Registration {
+    /// The registered process group: the keeper leads it, and the child is started into it ([`prepare`]).
+    pub(crate) fn group(&self) -> u32 {
+        self.group
+    }
+
+    /// The keeper by identity: the group's leader while it runs, so the group id cannot be handed on (rule 53).
+    pub(crate) fn keeper_id(&self) -> ProcessId {
+        self.keeper_id
+    }
+
+    /// Ends every process of the group while the keeper still holds it (the owner's own end of its child's group).
+    pub(crate) fn end_group(&self) -> bool {
+        crate::tree::end_pinned_group(self.group, self.keeper_id)
+    }
 }
 
 impl Drop for Registration {
@@ -425,28 +481,43 @@ pub(crate) fn ensure() -> bool {
         }
     };
     let mut guard = lock();
-    if guard
+    let lost = if guard
         .as_mut()
         .is_some_and(|r| matches!(r.child.try_wait(), Ok(None)))
     {
         // Another thread started one meanwhile: ours sees end of file with nothing registered and ends.
-        drop(running);
+        Some(running)
     } else {
         *guard = Some(running);
+        None
+    };
+    drop(guard);
+    if let Some(Running {
+        mut child,
+        to,
+        keeper_input,
+    }) = lost
+    {
+        drop((to, keeper_input));
+        // Reaped outside the lock (review round 2, P2-B): it ends at the end of file it now reads.
+        crate::cleanup::logged("reaping a guardian that lost a start race", child.wait());
     }
     true
 }
 
-/// Registers the child leading process group `group` (just started and not reaped: the group is still its own), with
-/// `folder` to remove after the group if this process dies first. The guardian already serves ([`ensure`], called before the
-/// child was started). `None` when the guard is off or could not be set up for this child; the reason is logged.
-pub(crate) fn register(group: u32, folder: Option<&Path>) -> Option<Registration> {
+/// Prepares a guarded group for a child that is not started yet (ADR 0119 WP-1, review round 2): starts the keeper leading a
+/// new process group, and registers that group with the guardian (which serves already, [`ensure`]), with `folder` to remove
+/// after the group if this process dies first. The caller then starts the child into [`Registration::group`]: from its first
+/// instruction the child is in a group the guardian ends, so an owner killed at any point after this leaves no unguarded child
+/// (registering the child's own group after its start left a window: the identity read, the keeper's start, the marker and
+/// the line). `None` when the guard is off or could not be set up; the reason is logged, and the caller starts the child in a
+/// group of its own, unguarded.
+pub(crate) fn prepare(folder: Option<&Path>) -> Option<Registration> {
     if !ensure() {
         return None;
     }
     let cat = cat()?;
     let me = ProcessId::of(std::process::id())?;
-    let pgid = i32::try_from(group).ok()?;
     let mut guard = lock();
     let r = guard.as_mut()?;
     let started = r.keeper_input.try_clone().and_then(|input| {
@@ -454,15 +525,13 @@ pub(crate) fn register(group: u32, folder: Option<&Path>) -> Option<Registration
             .stdin(input)
             .stdout(Stdio::null())
             .stderr(Stdio::null())
-            .process_group(pgid)
+            .process_group(0)
             .spawn()
     });
     let keeper = match started {
         Ok(k) => k,
         Err(e) => {
-            log::warn!(
-                "The keeper of child group {group} could not be started ({e}): the child is not guarded"
-            );
+            log::warn!("A keeper could not be started ({e}): the child is not guarded");
             return None;
         }
     };
@@ -470,10 +539,9 @@ pub(crate) fn register(group: u32, folder: Option<&Path>) -> Option<Registration
         crate::cleanup::logged("ending an unregistered keeper", keeper.kill());
         crate::cleanup::logged("reaping an unregistered keeper", keeper.wait());
     };
-    let Some(id) = ProcessId::of(keeper.id()) else {
-        log::warn!(
-            "The keeper of child group {group} has no readable start time: the child is not guarded"
-        );
+    let group = keeper.id();
+    let Some(id) = ProcessId::of(group) else {
+        log::warn!("The keeper (pid {group}) has no readable start time: the child is not guarded");
         end(keeper);
         return None;
     };
@@ -481,14 +549,18 @@ pub(crate) fn register(group: u32, folder: Option<&Path>) -> Option<Registration
     let line = add_line(group, id, folder.as_deref());
     if let Err(e) = send(&mut r.to, &line) {
         log::warn!(
-            "Child group {group} could not be registered with the orphan guardian ({e}): the child is not guarded, and a new \
+            "Group {group} could not be registered with the orphan guardian ({e}): the child is not guarded, and a new \
              guardian is started for the next one"
         );
         *guard = None;
         end(keeper);
         return None;
     }
-    Some(Registration { group, keeper })
+    Some(Registration {
+        group,
+        keeper,
+        keeper_id: id,
+    })
 }
 
 /// `add <group> <keeper pid> <keeper start µs> <hex length> <folder as hex | ->`.
@@ -890,6 +962,10 @@ fn serve(input: impl BufRead) -> i32 {
     let me = std::env::current_exe()
         .ok()
         .and_then(|e| std::fs::canonicalize(e).ok());
+    #[cfg(test)]
+    if std::env::var_os(CRASH_ENV).is_some() {
+        return 3;
+    }
     #[cfg(test)]
     if let Some(gate) = std::env::var_os(GATE_ENV).map(PathBuf::from) {
         let mut waiting = gate.clone().into_os_string();

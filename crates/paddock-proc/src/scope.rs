@@ -34,8 +34,11 @@
 //! Limits: on Unix a program that leaves its process group and drops the marker from its environment (`setsid` plus
 //! `env -i`) is outside every net (Windows jobs have no such escape). The guardian is off for root (ADR 0076 amendment
 //! 2026-11-09) and in a binary that does not call [`crate::guardian::run_if_requested`]; it says so once in the log, and each
-//! [`Report`] says whether its member was guarded. A run ([`Scope::run`]) is ended by its bound, a cancel and the end, but it
-//! does not join the Windows job yet (ADR 0119 WP-14 moves runs onto the scope's own start).
+//! [`Report`] says whether its member was guarded. On Unix a guarded child is started inside a group the guardian already
+//! holds (keeper first), so no moment of its start leaves it unguarded. On Windows a child joins the scope's job only after
+//! `CreateProcess` returned (no `CREATE_SUSPENDED` start yet): an owner killed in that moment, or a grandchild started in it,
+//! is outside the job. A run ([`Scope::run`]) is ended by its bound, a cancel and the end, but it does not join the Windows
+//! job yet (ADR 0119 WP-14 moves runs onto the scope's own start).
 
 use crate::identity::{ProcessId, StartTime};
 use crate::own::{Owned, Unit, Waited};
@@ -411,6 +414,7 @@ impl Scope {
         let pid = child.id().unwrap_or_default();
         let id = child.process();
         let guarded = child.guarded();
+        let leader = child.group_leader();
         if !guarded {
             log::warn!(
                 "Scope {}: {program} (pid {pid}) is not guarded: if this process dies, it runs on",
@@ -420,9 +424,10 @@ impl Scope {
         if let Some(id) = id {
             let mut unit = lock(&self.inner.unit);
             unit.add_root(id);
-            // The child leads its own process group (Unix): the group is the unit's while its leader is this child.
-            if cfg!(unix) {
-                unit.add_group(id);
+            // The child's process group (Unix: led by its guard's keeper, or by the child) is the unit's while its leader is the
+            // process recorded.
+            if let (true, Some(leader)) = (cfg!(unix), leader) {
+                unit.add_group(leader);
             }
         }
         let mut slots = lock(&self.inner.slots);
@@ -969,7 +974,36 @@ mod unix_tests {
         );
     }
 
-    /// N members cost a fixed number of whole-table reads at the end, not N (review P2-3, ER-20).
+    /// A guardian that ended without refusing (killed, crashed: any exit code but 2) is started again at the next start (review
+    /// round 2, P2-A): the prepare and each of the two starts try once, three guardians in all.
+    #[test]
+    fn a_guardian_that_crashed_is_started_again_at_the_next_start() {
+        let dir = tempfile::tempdir().unwrap();
+        let out = crate::run_bounded(
+            {
+                let mut c = crate::command(std::env::current_exe().unwrap());
+                c.args([
+                    "scope::unix_tests::refused_owner_process",
+                    "--exact",
+                    "--nocapture",
+                ])
+                .env(ACT_AS_USER_ENV, "1")
+                .env(crate::guardian::CRASH_ENV, "1")
+                .env(REFUSE_OWNER_ENV, dir.path());
+                c
+            },
+            crate::Limits::new(HANG_GUARD),
+        )
+        .unwrap();
+        let text = out.stdout_text();
+        assert!(
+            text.contains("guardians 3 guarded false false reports 2"),
+            "{text}"
+        );
+    }
+
+    /// N members cost a fixed number of whole-table reads at the end, not N (review P2-3, ER-20). The counter is process-wide:
+    /// this needs one process per test (nextest's model; plain `cargo test` threads would count each other's reads).
     #[test]
     fn the_end_of_a_scope_reads_the_table_a_fixed_number_of_times_whatever_its_size() {
         let reads = |n: usize| {
