@@ -770,7 +770,11 @@ jobs:
         if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && runner.os == 'Linux' }}
         working-directory: crates
         run: bash ../conformance/ci/kit.sh host guardian-as-user
-      - run: ./dev ci run crates deny
+      # Runs after a failed test step too (a FLAKY test of the coverage run): a test-only failure is graded, so the checks after it
+      # must have run (run 9001 skipped deny; tests/it/tree.rs checks every TEST_STEPS job keeps this guard).
+      - name: Dependency policy (cargo deny)
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' }}
+        run: ./dev ci run crates deny
       - uses: ./.gitea/actions/sccache-stats
         if: always()
 

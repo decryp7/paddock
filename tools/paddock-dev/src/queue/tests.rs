@@ -1333,6 +1333,8 @@ fn a_flaky_failure_is_still_red_and_blamed_unless_it_also_failed_on_main() {
         }),
         Blame::OnMain
     );
+    assert_eq!(real::blame_of(&Status::FlakyThisRun { also_on_baseline: false }), Blame::Flaky);
+    assert_eq!(real::blame_of(&Status::FlakyThisRun { also_on_baseline: true }), Blame::OnMain);
     assert_eq!(real::blame_of(&Status::OnBaseline), Blame::OnMain);
     assert_eq!(
         real::blame_of(&Status::Failed {

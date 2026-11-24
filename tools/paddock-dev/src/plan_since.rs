@@ -43,7 +43,9 @@ fn re(pattern: &str) -> Regex {
 /// filterset (ci.yml: `matrix.filter`; debrief.yml: the plan job's `<job>_filter` output): a job whose failed steps are all listed
 /// here with [`StepFilter::Filterset`], and whose failures are all read from its log, reruns only its failed tests; a
 /// [`StepFilter::Whole`] step (the crates job's coverage step, `cargo llvm-cov nextest`, which runs every crate test and reads no
-/// filter) reruns its job whole, and its FLAKY tests are graded like any other (run 9001). `composite`: the step is a composite action that runs
+/// filter) reruns its job whole. Its FLAKY tests are graded only when the commands that follow the tests in the same step (the
+/// coverage floor) ran after them and passed; otherwise the job is not measured (run 9001: the floor never ran after the FLAKY
+/// test, ER-33). `composite`: the step is a composite action that runs
 /// several commands and names each failed one in an `::error::failed (exit N): <command>` line (app-gates), so every such line
 /// must be a nextest run. Debrief's `Memory budget` is `continue-on-error` (it never fails the job, but the API may list it as
 /// failed); the narrowed rerun skips it. A failed `No temp folders left behind` check is not listed: the leaked folder may be
@@ -63,7 +65,9 @@ pub const TEST_STEPS: &[(&str, &str, &[&str], bool, StepFilter)] = &[
         "crates",
         &["Coverage (>= 90 % lines; 99 % security target report-only)"],
         false,
-        StepFilter::Whole,
+        StepFilter::Whole {
+            after: &["node ../scripts/coverage-gate.mjs"],
+        },
     ),
     (
         "debrief.yml",
@@ -86,8 +90,43 @@ pub const TEST_STEPS: &[(&str, &str, &[&str], bool, StepFilter)] = &[
 pub enum StepFilter {
     /// It runs only the tests of the filterset it is given (a rerun narrows to the failed tests).
     Filterset,
-    /// It runs all its tests whatever it is given: a rerun takes its job whole.
-    Whole,
+    /// It runs all its tests whatever it is given: a rerun takes its job whole. `after`: the commands of the same step that follow
+    /// the tests (crates/paddock.ci.json `coverage`, the gate executor's `ran: <command> (exit N, ...)` lines): a test-only failure
+    /// is graded only when each of them ran after the tests' summary and passed.
+    Whole {
+        /// The command prefixes that must have run after the tests.
+        after: &'static [&'static str],
+    },
+}
+
+/// Whether the commands a [`StepFilter::Whole`] step runs after its tests ran after the last nextest summary of `log` and passed:
+/// the executor stops at its first failed command, so a failed test run leaves them unrun, and what they check is not measured.
+pub fn ran_after_tests(log: &str, after: &[&str]) -> Result<(), StepProblem> {
+    let lines: Vec<String> = log.lines().map(plain).collect();
+    let Some(summary) = lines.iter().rposition(|l| l.trim_start().starts_with("Summary [")) else {
+        return Err(StepProblem::Unknown("the step's log has no nextest summary".into()));
+    };
+    static EXIT: LazyLock<Regex> = LazyLock::new(|| re(r"\(exit (\d+)"));
+    for prefix in after {
+        let Some(ran) = lines[summary..]
+            .iter()
+            .find(|l| l.strip_prefix("ran: ").is_some_and(|c| c.starts_with(prefix)))
+        else {
+            return Err(StepProblem::Unknown(format!(
+                "`{prefix}` did not run after the tests (the step stops at its first failed command), so what it checks is not measured"
+            )));
+        };
+        match EXIT.captures(ran).map(|m| m[1].to_string()) {
+            Some(code) if code == "0" => {}
+            Some(code) => return Err(StepProblem::Other(format!("`{prefix}` failed after the tests (exit {code})"))),
+            None => {
+                return Err(StepProblem::Unknown(format!(
+                    "`{prefix}` ran but its exit status is not in the log"
+                )));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// The steps of a workflow's job that run vitest and take a list of spec files (the plan job's `<job>_include` output), as
@@ -702,7 +741,7 @@ fn narrow(job: &RunJob, log: Result<&str, &str>, workflow: &str, key: Option<&st
     if let Some(s) = job.failed_steps.iter().find(|s| !steps.contains(&s.as_str())) {
         return Err(format!("step \"{s}\" failed and takes no test filter"));
     }
-    if *filter == StepFilter::Whole {
+    if matches!(filter, StepFilter::Whole { .. }) {
         let s = job.failed_steps.first().map_or(steps[0], String::as_str);
         return Err(format!("step \"{s}\" runs tests but takes no test filter"));
     }
@@ -747,6 +786,9 @@ pub fn composite_annotations(log: &str) -> Result<Vec<String>, String> {
 /// `StepProblem::Other`, an unreadable composite failure is `StepProblem::Unknown`.
 pub fn failure_is_tests(workflow: &str, key: &str, failed_steps: &[String], log: &str) -> Result<(), StepProblem> {
     failed_steps_are_tests(workflow, key, failed_steps)?;
+    if let Some((.., StepFilter::Whole { after })) = TEST_STEPS.iter().find(|t| t.0 == workflow && t.1 == key) {
+        ran_after_tests(log, after)?;
+    }
     if !TEST_STEPS
         .iter()
         .any(|(w, k, _, composite, _)| *w == workflow && *k == key && *composite)
@@ -1506,15 +1548,37 @@ mod tests {
         let jobs: Value = serde_json::from_str(include_str!("../tests/ci-runs/run-9001-jobs.json")).unwrap();
         let job = RunJob::list(&jobs).into_iter().next().unwrap();
         assert_eq!(job.failed_steps, vec![COVERAGE.to_string()]);
-        assert_eq!(failure_is_tests("ci.yml", "crates", &job.failed_steps, log), Ok(()));
+        // The floor never ran after the FLAKY test (the executor stopped at nextest's exit 100): not measured, naming it.
+        assert!(
+            matches!(failure_is_tests("ci.yml", "crates", &job.failed_steps, log), Err(StepProblem::Unknown(ref w)) if w.contains("coverage-gate.mjs")),
+            "{:?}",
+            failure_is_tests("ci.yml", "crates", &job.failed_steps, log)
+        );
+        // With the floor's line after the summary the failure is test-only; a failed floor is red.
+        let floor = |exit: u32| {
+            format!("{log}2026-11-24T17:53:44.0000000Z ran: node ../scripts/coverage-gate.mjs lcov.info 90 (exit {exit}, 0.4 s)\n")
+        };
+        assert_eq!(failure_is_tests("ci.yml", "crates", &job.failed_steps, &floor(0)), Ok(()));
+        assert!(matches!(
+            failure_is_tests("ci.yml", "crates", &job.failed_steps, &floor(1)),
+            Err(StepProblem::Other(_))
+        ));
+        // Before the summary it does not count.
+        let early = log.replacen(
+            "     Summary",
+            "ran: node ../scripts/coverage-gate.mjs lcov.info 90 (exit 0, 0.4 s)\n     Summary",
+            1,
+        );
+        assert!(matches!(
+            failure_is_tests("ci.yml", "crates", &job.failed_steps, &early),
+            Err(StepProblem::Unknown(_))
+        ));
         let r = classify(&job, Ok(log), "ci.yml", &templates());
         assert_eq!(r.key.as_deref(), Some("crates"));
         assert_eq!(
             r.scope,
             Scope::Job(format!("step \"{COVERAGE}\" runs tests but takes no test filter"))
         );
-        // No plan output is asked for a filter the step would not read.
-        assert!(!app_output_names().iter().any(|o| o.starts_with("crates")));
     }
 
     #[test]

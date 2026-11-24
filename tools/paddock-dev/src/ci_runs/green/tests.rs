@@ -1009,22 +1009,33 @@ fn ipc_untouched() -> Touched {
 }
 
 #[test]
-fn a_flaky_test_in_the_crates_coverage_step_is_graded_like_any_test_step() {
-    // Run 9001: the crates job's coverage step (cargo llvm-cov nextest) failed on one FLAKY paddock-ipc test, and the verdict was
-    // "not measured" (job crates had no step known to run tests).
+fn a_flaky_test_in_the_crates_coverage_step_is_graded_only_when_the_coverage_floor_ran_after_it() {
+    // Run 9001: the crates job's coverage step (cargo llvm-cov nextest, then the coverage floor) failed on one FLAKY paddock-ipc
+    // test. The executor stopped at nextest's exit 100, so the floor never ran: not measured, naming it (before the fix the job had
+    // "no step known to run tests").
     let c = sha(3);
     let r = Run::train(9001, &c, "failure").failing_in(JOBS_9001, CRATES, CRATES_COVERAGE_FLAKY);
+    let mut f = server(std::slice::from_ref(&r));
+    let o = grade(&mut f, &r, ipc_untouched());
+    assert!(
+        matches!(&o.result, GradedResult::NotMeasured(why) if why.contains("coverage-gate.mjs") && why.contains("not measured")),
+        "{o:?}"
+    );
+    assert!(!o.lands());
+    // With the floor run after the tests and passed, the FLAKY test in an untouched package is a fix item and the run lands.
+    let floored = format!(
+        "{CRATES_COVERAGE_FLAKY}2026-11-24T17:53:44.0000000Z ran: node ../scripts/coverage-gate.mjs lcov.info 90 (exit 0, 0.4 s)\n"
+    );
+    let r = Run::train(9001, &c, "failure").failing_in(JOBS_9001, CRATES, &floored);
     let mut f = server(std::slice::from_ref(&r));
     let o = grade(&mut f, &r, ipc_untouched());
     assert!(o.lands() && !o.is_tag_green(), "{o:?}");
     let items = fix_items(&o);
     assert_eq!(items.len(), 1);
     assert!(items[0].test.starts_with("paddock-ipc::it endings::"), "{items:?}");
-    // Positive control (ER-12, ER-33): the same log with the test failing both tries blocks.
-    let both = CRATES_COVERAGE_FLAKY
-        .replace("TRY 2 PASS", "TRY 2 FAIL")
-        .replace("FLKY-FL 2/2", "TRY 2 FAIL");
-    assert_ne!(both, CRATES_COVERAGE_FLAKY);
+    // Positive control (ER-12, ER-33): the same log with the test failing both tries blocks, floor or not.
+    let both = floored.replace("TRY 2 PASS", "TRY 2 FAIL").replace("FLKY-FL 2/2", "TRY 2 FAIL");
+    assert_ne!(both, floored);
     let r = Run::train(9001, &c, "failure").failing_in(JOBS_9001, CRATES, &both);
     let mut f = server(std::slice::from_ref(&r));
     let o = grade(&mut f, &r, ipc_untouched());
