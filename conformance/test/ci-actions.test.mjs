@@ -1112,14 +1112,14 @@ test('every e2e job of every kit app, ci.yml and debrief.yml runs on a port no o
   }
 });
 
-test('app-gates tests last-packages apart on Linux only, and a host leg leaves them out of clippy, tests and doc tests', () => {
+test('app-gates tests last-packages apart on Linux only, and a host leg leaves them out of clippy and tests; no doc tests run', () => {
   const gates = read(join(ACTIONS, 'app-gates', 'action.yml'));
   assert.match(gates, /for pkg in \$LAST_PACKAGES; do exclude\+=\(--exclude "\$pkg"\); last\+=\(-p "\$pkg"\); done/, 'one list feeds the exclusions and the separate run');
   assert.match(gates, /scope=\(--workspace\)/, 'the default scope is the whole workspace');
   assert.match(gates, /sel=\("\$\{scope\[@\]\}" \$\{exclude\[@\]\+"\$\{exclude\[@\]\}"\}/, 'the workspace run never includes them');
   assert.match(gates, /if \[ "\$RUNNER_OS" = Linux \] && \[ \$\{#last\[@\]\} -gt 0 \]; then\n\s+sel=\(\$\{last\[@\]\+"\$\{last\[@\]\}"\}/, 'Linux runs them after the rest');
   assert.match(gates, /step cargo clippy "\$\{scope\[@\]\}" \$\{hostexclude\[@\]\+"\$\{hostexclude\[@\]\}"\}/, 'clippy: excluded on a host only');
-  assert.match(gates, /step cargo test "\$\{scope\[@\]\}" \$\{hostexclude\[@\]\+"\$\{hostexclude\[@\]\}"\} --doc/, 'doc tests: excluded on a host only');
+  assert.doesNotMatch(gates, /cargo test\b[^\n]*--doc/, 'doc tests are off (crates/README.md, "Doctests")');
   assert.match(read(join(WORKFLOWS, 'ci.yml')), /rust-checks: \$\{\{ matrix\.rust_checks \}\}/, 'ci.yml hands rustChecks to app-gates');
   assert.match(read(join(WORKFLOWS, 'ci.yml')), /host-rust-checks: \$\{\{ matrix\.host_rust_checks \}\}/, 'ci.yml hands hostRustChecks to app-gates');
   assert.match(read(join(WORKFLOWS, 'ci.yml')), /notices: \$\{\{ matrix\.notices \}\}/, 'ci.yml hands the notices check to app-gates');

@@ -2,6 +2,7 @@
 //! `cargo metadata` (the planner's recorded answers, ER-42). A member audit (tools/paddock-dev/.config/nextest.toml, `member-audits`), so
 //! a new crate without it is found on the merged tree whatever the member changed. The runnable doc examples are checked on every push by
 //! `contracts::doc_examples` (the conformance tests).
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use paddock_dev::plan::read_graph_unplaced;
 use paddock_repo_graph::{GitHistory, parse_targets};
@@ -32,7 +33,7 @@ fn graph_every_library_target_has_doctests_off() {
     let root = root();
     let history = GitHistory::new(&root, Duration::from_secs(120));
     let graph = read_graph_unplaced(&root, &history).unwrap();
-    let abs = std::fs::canonicalize(&root).unwrap().to_string_lossy().replace('\\', "/");
+    let abs = paddock_env::winpath::real(&root).unwrap().to_string_lossy().replace('\\', "/");
     assert!(
         graph.metadata.len() >= 5,
         "the planner read too few workspaces: {:?}",

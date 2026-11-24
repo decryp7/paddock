@@ -285,6 +285,7 @@ fn a_prefix_entry_names_its_commands_and_one_matching_none_panics() {
         Query [MAIN | DIALOG] => app::app_status,
         Mutation [MAIN] => app::app_quit,
     }
+    assert_eq!(PREFIXED.specs().len(), 2);
     assert_eq!(
         dialog_callable::app_status,
         crate::DialogCallable::__command("app_status")
