@@ -19,7 +19,7 @@ changes here, every app's copy is updated in the same change.
    sleeps or raised timeouts), never silently skipped. No limit (timeout, retry, wait, budget, tolerance, cap) is
    raised without a named, measured cause recorded next to it (ER-12); otherwise the cause is fixed. A new gate, CI job or
    check starts report-only and blocks only after its first green run on the real tree, recorded by run id where the
-   gate is defined (ER-41).
+   gate is defined (ER-41). Every report-only check, register and hook carries a review date; if it caught nothing real by then it is deleted, not extended, and extending needs the user (ER-41, 2026-11-24).
    A FLAKY test (fails, then passes on its one retry) blocks a landing only when the change touches the test itself or the
    source it exercises (its feature or module); see rule 50 (k) (ER-12, user, 2026-11-19).
    A reviewer of a bug fix runs a mutation check on it (user, 2026-10-30), in their own worktree: for Rust,
@@ -121,7 +121,7 @@ changes here, every app's copy is updated in the same change.
     or checked (a declared contract, one shared mechanism, a lint or test over every instance), and fix the instances
     through it. Until v1, check every batch of bug reports for such patterns.
     The coordinator proposes the redesign in the same reply that relays the report (a question to the user, or a start under
-    an earlier approval), never ending a turn with an unproposed class (ER-21; hook `.claude/hooks/recurring-guard.sh` planned).
+    an earlier approval), never ending a turn with an unproposed class (ER-21; hook `.claude/hooks/recurring-guard.sh` planned). Simpler first (2026-11-24): a repeat first asks whether the failing thing can be deleted or simplified, or common practice used; a new mechanism or ADR comes only when that cannot hold long term, and the proposal states what it removes.
     Hooks that judge an agent's text (the recurring guard, hook `.claude/hooks/recurring-guard.sh` planned, advisory) only warn; hooks
     that guard state (the cd guard, safe-remove) still block (user, 2026-11-12).
     A gate's "passed" is a value only the check can produce, and its tests show both a deleted check and a skipped gate fail (PRINCIPLES.md, robustness; 2026-11-12).
@@ -430,7 +430,7 @@ changes here, every app's copy is updated in the same change.
     A design, mechanism or fix costing more than 1 agent-day beyond the common-practice option needs the user's yes, with
     both costs shown; a standing "build everything" OK does not cover it. Each release plan states its budget in raw
     agent-days when its scope is agreed, and growth beyond 20% goes back to the user. Each release gets one cut review, at
-    scope freeze, by one reviewer, against this rule (ER-37, amended 2026-11-12).
+    scope freeze, by one reviewer, against this rule (ER-37, amended 2026-11-12). One in, one out (2026-11-24): a new check, register, hook, gate or ADR mechanism removes or replaces something of similar cost, or names a recurring real failure and the comparison; a proposal states what it adds and removes.
     *Why:* on 2026-11-11 a 23-31-day elevated-helper design for Debrief went through four review rounds before the user
     compared it with Visual Studio and VS Code and chose a half-day risk warning instead; several accepted process ADRs
     (signed approvals, decision registers, extra gates) were then cut as more than a personal tool needs.
@@ -491,7 +491,7 @@ changes here, every app's copy is updated in the same change.
 ## Waiting, fixes, checks, lists and environments (user, 2026-11-15 and 2026-11-16; ER-43 to ER-47)
 Status is as of train 14 planning: "planned" is not built, "in progress" is on a branch. Rules 80 to 84 map the engineering rules to Paddock's mechanisms.
 80. **A waiter never holds the capacity the work it waits for needs** (ER-43). Paddock: `./dev wait` and the heavy-slot queue take no slot for the wait; the waiter guard (duplicate waits, grep polling) and the scheduled-runs-yield rule follow. Status: planned, train 14.
-81. **A complete fix, not a quick one** (ER-44). A review's or incident's cause, its fix and its copies in `docs/known-copies.toml` (rule 55) land in one round; ask the user only above 1 agent-day beyond common practice (rule 76). Status: in force.
+81. **A complete fix, not a quick one** (ER-44). The principle (user, 2026-11-24): the minimum simplest complete fix, and a redesign only if it is necessary for the long term; rules 76, 83 and ER-21, ER-36, ER-41 enforce it. A review's or incident's cause, its fix and its copies in `docs/known-copies.toml` (rule 55) land in one round; ask the user only above 1 agent-day beyond common practice (rule 76). Status: in force.
 82. **Checks have no side effects** (ER-45). Paddock: launcher probes and `setup-rust` set `RUSTUP_AUTO_INSTALL=0`, shell checks print the cause before exiting under `set -e`, and a check's positive control runs on in-memory data (planned: the check that reads the exceptions list). Container runs go through `tools/linux-container.sh` only (ER-14); tests use `StandIn` programs, never installed apps or `~/.rustup`. Status: in progress, train 14.
 83. **Lists only shrink; goldens hold no machine** (ER-46). Paddock: planned growth checks compare each list with the merge base and fail on growth without the user's approval (one each for the exceptions list, the allow list and the baselines; the ids are reserved with `./dev check new-id`); goldens are normalised (uid, names, paths, sizes) and the e2e suites use the fixed clock. Status: the three checks are planned (report-only first, ER-41); fixed e2e clock in progress.
 84. **Children inherit the environment** (ER-47). Paddock: production children inherit: `paddock_proc::clean_env` keeps its kept list and every restricting variable the caller has, as the caller has it. `TestCommand` is an allow-list on purpose (ADR 0100): it clears only through `paddock_env::clear_env_pinned_from` and keeps a restricting variable only in a restricting value (a developer's `PADDOCK_DEV_DOWNLOAD=1` is dropped), and sets `RUSTUP_AUTO_INSTALL=0` when the caller's value does not restrict. Clearing needs a named policy with a kept list and never strips a restricting value. The restricting variables are the one typed list `paddock_env::RESTRICTING` (`RUSTUP_AUTO_INSTALL=0`, `CARGO_NET_OFFLINE=true|1`, `PADDOCK_DEV_DOWNLOAD=0`, `PADDOCK_TOOLCHAIN_FAILED=1`), and the only function that clears a child's environment is `paddock_env::clear_env_from` and its pinned twin: Clippy forbids `Command::env_clear` elsewhere (ADR 0100, ER-47 section). Status: in progress, train 14.

@@ -3712,3 +3712,10 @@ logged with what the rule saw (ER-27). Lesson: an admission rule needs a cost, n
   its stop from nextest's own output.
 - **Lesson.** A list of test names is a record of the last failure, not a rule: declare the property on the test, put the policy in one
   place, and check the declaration by what makes it true (the lock's group at run time, the cost from the run's own timings).
+
+## Mechanisms grew back after the cuts of 2026-11-11 (2026-11-24)
+
+- **Class (ER-21).** Over a dozen new mechanisms were proposed or approved in one day: quarantine, C167, C168, dispatch guards, guards A1-A7 and B1-B2, train-first priority, worktree leases, host inventory, nightly issue filing, test cost classes and a CPU watchdog. The cuts of 2026-11-11 (plain ADRs, one review round) had grown back.
+- **Cause.** The rules only ever added: ER-21 redesigns, ER-37's complete option for foundation work, and shrink-only lists for exceptions but not for checks.
+- **Rule.** The minimum simplest complete fix, and a redesign only if it is necessary for the long term (ER-44). Four brakes enforce it: one in, one out (ER-37), sunset by default with a review date (ER-41, ER-46), simpler first (ER-21) and a monthly independent cut review with a drop list (ER-36).
+- **Lesson.** A rule set that can only add will grow. A new mechanism names what it removes, and every report-only one expires unless it caught something real.
