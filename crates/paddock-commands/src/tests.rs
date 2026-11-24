@@ -276,6 +276,28 @@ fn a_bad_name_panics_at_build() {
     let _ = Table::new(&SPECS);
 }
 
+/// Moved from the crate's doc examples when doctests were turned off (2026-11-24): a `prefix*` entry over a table's
+/// dialog-callable commands, and a prefix that matches none of them refused (a compile error in a contract table).
+#[test]
+fn a_prefix_entry_names_its_commands_and_one_matching_none_panics() {
+    crate::command_table! {
+        pub static PREFIXED;
+        Query [MAIN | DIALOG] => app::app_status,
+        Mutation [MAIN] => app::app_quit,
+    }
+    assert_eq!(
+        dialog_callable::app_status,
+        crate::DialogCallable::__command("app_status")
+    );
+    assert_eq!(dialog_callable::ALL, ["app_status"]);
+    assert_eq!(crate::prefix(dialog_callable::ALL, "app_").wire(), "app_*");
+    let none = std::panic::catch_unwind(|| crate::prefix(dialog_callable::ALL, "settings_"));
+    assert!(
+        none.is_err(),
+        "a prefix matching no dialog-callable command is refused"
+    );
+}
+
 #[test]
 fn labels_follow_the_shell_scheme() {
     assert_eq!(Label::parse("main"), Some(Label::Main));

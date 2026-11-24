@@ -7,6 +7,9 @@ license.workspace = true
 repository.workspace = true
 publish = ["decryp7"]
 
+[lib]
+doctest = false # doctests are off (crates/README.md, "Doctests")
+
 [features]
 # The Tauri adapter (`paddock_settings::tauri`: the `paddock://settings` event, the commands and their table, the start-up
 # problem notice through `paddock-health`); the core never depends on Tauri.

@@ -111,6 +111,7 @@ default-filter = '''
     | test(/^ipc_endpoints::(tree_)?the_repository_register_is_complete/)
     | test(/^contracts::every_markdown_file_that_code_reads/)
     | test(/^generators::the_registry_of_the_repository/)
+    | test(/^doctests_off::graph_every_library_target_has_doctests_off/)
 ))
 | test(/::no_source_file_/)
 '''

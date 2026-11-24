@@ -7,6 +7,9 @@ license.workspace = true
 repository.workspace = true
 publish = ["decryp7"]
 
+[lib]
+doctest = false # doctests are off (crates/README.md, "Doctests")
+
 [features]
 # The Tauri adapter (`paddock_service::tauri`): the managed `ServiceControl`, the commands `service_status`,
 # `service_repair`, `service_install` and `open_login_items`, the `paddock://service` event and the health wiring. The

@@ -9,6 +9,9 @@ publish = ["decryp7"]
 # The fuzz target is its own workspace and is not published.
 exclude = ["fuzz"]
 
+[lib]
+doctest = false # doctests are off (crates/README.md, "Doctests")
+
 [dependencies]
 paddock-limits = { workspace = true }
 paddock-ipc = { workspace = true }

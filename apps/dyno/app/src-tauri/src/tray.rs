@@ -252,7 +252,7 @@ mod windows_dpi {
 ///
 /// The guard: a `MainToken` must never become `Send` (this fails to compile if it does).
 ///
-/// ```compile_fail
+/// ```text
 /// fn needs_send<T: Send>() {}
 /// needs_send::<dyno_app_lib::tray::MainToken>();
 /// ```
@@ -296,7 +296,7 @@ pub fn dispatch<R: Runtime>(app: &AppHandle<R>, f: impl FnOnce(&MainToken) + Sen
 /// The one handle to a native tray icon. It is not `Send` and every method takes a [`MainToken`], so the agent link's thread can
 /// neither hold nor call one: it sends [`TrayCommand`]s and the main thread applies them. Dropping it checks the thread too.
 ///
-/// ```compile_fail
+/// ```text
 /// fn needs_send<T: Send>() {}
 /// needs_send::<dyno_app_lib::tray::NativeIcon>();
 /// ```

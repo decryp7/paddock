@@ -7,6 +7,9 @@ license.workspace = true
 repository.workspace = true
 publish = ["decryp7"]
 
+[lib]
+doctest = false # doctests are off (crates/README.md, "Doctests")
+
 [features]
 # The Tauri adapter (`paddock_window::tauri`); the core above it never depends on Tauri.
 tauri = ["dep:tauri", "paddock-commands/tauri", "paddock-dialogs/tauri", "dep:windows"]

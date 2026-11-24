@@ -9,6 +9,9 @@ publish = ["decryp7"]
 # The fuzz targets are their own workspace and are not published.
 exclude = ["fuzz"]
 
+[lib]
+doctest = false # doctests are off (crates/README.md, "Doctests")
+
 [dependencies]
 paddock-env = { workspace = true }
 # The one `ProtocolVersion` rule (paddock-ipc owns it) and the one `GrantRef` (paddock-view owns it).

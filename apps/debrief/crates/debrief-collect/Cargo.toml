@@ -9,6 +9,7 @@ publish = false
 description = "Diagnostics collector for Debrief: gathers logs, event logs, system info and environment into a redacted .debriefz bundle"
 
 [lib]
+doctest = false # doctests are off (crates/README.md, "Doctests")
 name = "debrief_collect"
 path = "src/lib.rs"
 

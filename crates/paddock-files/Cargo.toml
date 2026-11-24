@@ -7,6 +7,9 @@ license.workspace = true
 repository.workspace = true
 publish = ["decryp7"]
 
+[lib]
+doctest = false # doctests are off (crates/README.md, "Doctests")
+
 [features]
 # The Tauri adapter (`paddock_files::tauri`): managed state, the `WindowGrants` command argument, the picker, recent, reveal, open
 # and URL commands, the drag-and-drop grants and the recent event. The core never depends on Tauri.

@@ -7,6 +7,9 @@ license.workspace = true
 repository.workspace = true
 publish = ["decryp7"]
 
+[lib]
+doctest = false # doctests are off (crates/README.md, "Doctests")
+
 [features]
 # Adapters that run programs (ADR 0022 §6). Off by default: Pacenotes opens hostile repositories and must never run
 # cargo there (it reads .cargo/config.toml, which can name the compiler and wrapper programs). A conformance check that fails

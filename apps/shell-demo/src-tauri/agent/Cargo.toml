@@ -11,6 +11,7 @@ repository = "https://dev.decryptology.net/decryp7/paddock"
 publish = false
 
 [lib]
+doctest = false # doctests are off (crates/README.md, "Doctests")
 name = "shell_demo_agent"
 
 [[bin]]

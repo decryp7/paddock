@@ -11,6 +11,9 @@ publish = ["decryp7"]
 # Tauri plugins name themselves through `links` (the app's build reads the plugin's permissions through it).
 links = "paddock-shell"
 
+[lib]
+doctest = false # doctests are off (crates/README.md, "Doctests")
+
 [features]
 # Dialogs are not parented to a native window and nothing is shown natively: for tests on Tauri's mock runtime only.
 mock-runtime = ["paddock-dialogs/mock-runtime", "tauri/test"]

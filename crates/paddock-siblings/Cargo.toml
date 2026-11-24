@@ -7,6 +7,9 @@ license.workspace = true
 repository.workspace = true
 publish = ["decryp7"]
 
+[lib]
+doctest = false # doctests are off (crates/README.md, "Doctests")
+
 [features]
 default = ["native"]
 # The real process start (`ProcessSpawner`, `Siblings::native`); tests and apps with their own spawner turn it off.
@@ -25,5 +28,3 @@ paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
 [dev-dependencies]
 tempfile = "3"
 serde_json = "1"
-# The doctest uses the fakes.
-paddock-siblings = { path = ".", features = ["testing"] }

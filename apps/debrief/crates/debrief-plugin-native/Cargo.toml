@@ -8,6 +8,9 @@ rust-version.workspace = true
 publish = false
 description = "Debrief plugin: native (C/C++) profiling by ETW (elevated) or suspend-and-sample (no rights), written as NetTrace with symbols; .etl import (ADR 0022). Nothing is loaded into the target."
 
+[lib]
+doctest = false # doctests are off (crates/README.md, "Doctests")
+
 [dependencies]
 tempfile.workspace = true
 debrief-plugin-api = { path = "../debrief-plugin-api" }

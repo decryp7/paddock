@@ -15,6 +15,9 @@ repository = "https://dev.decryptology.net/decryp7/paddock"
 publish = false
 build = "build.rs"
 
+[lib]
+doctest = false # doctests are off (crates/README.md, "Doctests")
+
 [[bin]]
 name = "paddock-dev"
 path = "src/main.rs"

@@ -19,7 +19,7 @@
 //! - `tauri` (feature `tauri`): the builder, `on_page_load`, the ticker, the commands and their table; feature
 //!   `dialog` adds the native question through `tauri-plugin-dialog`.
 //!
-//! ```
+//! ```text
 //! use paddock_startup::{Action, Watchdog};
 //! use std::time::{Duration, Instant};
 //!

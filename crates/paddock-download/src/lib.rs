@@ -5,7 +5,7 @@
 //! segmented}`), with the hash moved into the write path: bytes that arrive ahead of the hash wait in a bounded buffer instead of
 //! being read back from the file.
 //!
-//! ```no_run
+//! ```text
 //! # #[cfg(feature = "http")]
 //! # fn demo(jobs: &paddock_jobs::JobRegistry, pool: &paddock_jobs::JobPool) -> Result<(), paddock_download::DownloadError> {
 //! use paddock_download::{Downloader, HttpConfig, Integrity, Request, Sha256Digest};

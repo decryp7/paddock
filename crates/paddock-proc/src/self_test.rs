@@ -1,7 +1,7 @@
 //! The `--self-test` every sidecar answers (rule 23, plan X34). CI starts each sidecar from the built app with this flag: it
 //! must load (every library found, no `Different Team IDs`), run its checks, touch nothing of the user's and exit 0.
 //!
-//! ```no_run
+//! ```text
 //! // The first thing `main` does, before any state is opened:
 //! fn early_exit() {
 //!     if let Some(code) = paddock_proc::self_test::handle("my-worker", env!("CARGO_PKG_VERSION"), &[

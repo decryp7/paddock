@@ -8,6 +8,9 @@ repository.workspace = true
 publish = ["decryp7"]
 
 # The sample plugin for tests: the host crate's tests start it as a real process. Never shipped by an app.
+[lib]
+doctest = false # doctests are off (crates/README.md, "Doctests")
+
 [[bin]]
 name = "paddock-plugin-fixture"
 path = "src/bin/fixture.rs"

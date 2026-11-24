@@ -7,6 +7,9 @@ license.workspace = true
 repository.workspace = true
 publish = ["decryp7"]
 
+[lib]
+doctest = false # doctests are off (crates/README.md, "Doctests")
+
 [features]
 # `Build::run` calls tauri-build; the pure core (directives, placeholders, the manifest) never depends on it.
 tauri-build = ["dep:tauri-build"]

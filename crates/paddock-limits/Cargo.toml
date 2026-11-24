@@ -7,6 +7,9 @@ license.workspace = true
 repository.workspace = true
 publish = ["decryp7"]
 
+[lib]
+doctest = false # doctests are off (crates/README.md, "Doctests")
+
 [features]
 # The wire types' TypeScript declarations (ts-rs), for the generators of the apps and the test that checks them.
 ts = ["dep:ts-rs"]

@@ -7,6 +7,9 @@ license.workspace = true
 repository.workspace = true
 publish = ["decryp7"]
 
+[lib]
+doctest = false # doctests are off (crates/README.md, "Doctests")
+
 [features]
 # The real-folder watcher (`paddock_packs::watch::NotifySource`): `paddock-watch`'s adapter over the `notify` crate.
 watch = ["paddock-watch/notify"]

@@ -8,6 +8,9 @@ repository.workspace = true
 publish = false
 description = "Debrief's side of the store worker (ADR 0014): the protocol, the supervised worker process and RemoteStore, which implements the store ports over debrief-ipc. Links no database, so the app does not load libduckdb"
 
+[lib]
+doctest = false # doctests are off (crates/README.md, "Doctests")
+
 [dependencies]
 debrief-core = { path = "../debrief-core" }
 debrief-ipc = { path = "../debrief-ipc" }

@@ -7,6 +7,9 @@ license.workspace = true
 repository.workspace = true
 publish = ["decryp7"]
 
+[lib]
+doctest = false # doctests are off (crates/README.md, "Doctests")
+
 [features]
 # The Tauri adapter (`paddock_mcp::tauri`): the managed `McpControl`, the commands `mcp_get`, `mcp_save`, `mcp_issue_key`,
 # `mcp_revoke_key`, `mcp_audit`, `mcp_audit_clear` and the `paddock://mcp` event. The core never depends on Tauri.

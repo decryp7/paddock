@@ -7,6 +7,9 @@ license.workspace = true
 repository.workspace = true
 publish = ["decryp7"]
 
+[lib]
+doctest = false # doctests are off (crates/README.md, "Doctests")
+
 [features]
 # `paddock_pitwall::testing`: a fake Pitwall on an ephemeral loopback port that mirrors Pitwall's routes (contract tests of
 # this crate and of the apps that use it). Never needed in a release build.

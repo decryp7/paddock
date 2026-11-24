@@ -7,6 +7,9 @@ license.workspace = true
 repository.workspace = true
 publish = ["decryp7"]
 
+[lib]
+doctest = false # doctests are off (crates/README.md, "Doctests")
+
 [features]
 # The Tauri adapter (`paddock_storage::tauri`): managed state, the scan, clear, cancel, last-usage and reveal commands, the jobs, and
 # the `paddock://storage` outcome event. The core never depends on Tauri.

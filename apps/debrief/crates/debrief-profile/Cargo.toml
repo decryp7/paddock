@@ -8,6 +8,9 @@ rust-version.workspace = true
 publish = false
 description = "Debrief profiling engine: the common profile model (CPU, allocation, wall clock, heap snapshots) and every analysis over it"
 
+[lib]
+doctest = false # doctests are off (crates/README.md, "Doctests")
+
 [dependencies]
 # The app-wide memory budget the open captures are kept within, and released from (MEM-2).
 debrief-budget = { path = "../debrief-budget" }

@@ -16,6 +16,8 @@ Work in your own worktree with its own `CARGO_TARGET_DIR`; heavy steps through t
    - a `description`; `version = "0.1.0"`;
    - `[package.metadata.paddock] scaffold = true` while the crate is unfinished (keeps the publish job from uploading it);
      remove it in the work package that fills the crate;
+   - `[lib] doctest = false` (doctests are off, crates/README.md "Doctests"; tools/paddock-dev's `doctests_off` audit fails
+     without it), and doc examples as ```text blocks;
    - other shared crates as `paddock-x = { workspace = true }`; Tauri only behind an optional `tauri` feature
      (`tauri = { workspace = true, optional = true }`), the core stays pure.
 2. **Add the member** to `members` in `crates/Cargo.toml` (alphabetical).

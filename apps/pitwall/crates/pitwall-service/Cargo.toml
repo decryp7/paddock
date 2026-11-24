@@ -9,6 +9,9 @@ rust-version.workspace = true
 authors = ["decryp7"]
 publish = false
 
+[lib]
+doctest = false # doctests are off (crates/README.md, "Doctests")
+
 [dependencies]
 # The shared service crate (core only): the spec type and its renderers.
 paddock-service = { path = "../../../../crates/paddock-service" }

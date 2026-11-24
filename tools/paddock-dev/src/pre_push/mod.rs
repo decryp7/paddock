@@ -41,7 +41,6 @@ pub mod heavy_tool;
 pub mod kept;
 pub mod known;
 pub mod linux_inputs;
-pub mod members;
 pub mod outcome;
 pub mod warm;
 
@@ -75,7 +74,7 @@ pub struct PrePushArgs {
     /// The remote being pushed to (git's first pre-push argument; the hook passes it): the only remote evidence and bases are read from.
     #[arg(long)]
     pub remote: Option<String>,
-    /// Only the gates named by these selectors, each a whole row name (`doctest crates`) or a row's first word (`fmt,clippy`); the hook always runs them all. A selector that matches no row is an error that lists the valid row names.
+    /// Only the gates named by these selectors, each a whole row name (`clippy crates`) or a row's first word (`fmt,clippy`); the hook always runs them all. A selector that matches no row is an error that lists the valid row names.
     #[arg(long, value_delimiter = ',')]
     pub only: Vec<String>,
     /// Print the gates and their commands; run nothing.
@@ -93,7 +92,7 @@ pub struct PrePushArgs {
     #[arg(long)]
     pub member_gate: bool,
     /// Run every app's rows, whatever `docs/ci-active-apps.toml` says: for a release, or for the person bringing an app back. Without
-    /// it an inactive app's own build checks (format, Clippy, doctests, the Windows and Linux lints, Pitwall's scripts and deny) are
+    /// it an inactive app's own build checks (format, Clippy, the Windows and Linux lints, Pitwall's scripts and deny) are
     /// not run and are shown as `inactive (docs/ci-active-apps.toml)`, never as passed; the foundation's rows and the generators
     /// (lockfiles, Dyno's wire fixtures) always run. It also turns off the known-commit shortcut.
     #[arg(long)]
@@ -511,7 +510,6 @@ fn command_in(
             (ws, l)
         })
         .collect();
-    facts.crates_members = Some(members::read_members(&work, "crates"));
     facts.member_gate = args.member_gate;
     facts.kept_targets = kept_targets;
     let mut planned = gates::plan_gates(&plan, &change, &facts);
@@ -1482,7 +1480,6 @@ fn read_facts(root: &Path, plan: &Value, env: &HashMap<String, String>, ex: &dyn
         windows_clippy: windows,
         ci_version: Some(version),
         left_out: Default::default(),
-        crates_members: None,
         member_gate: false,
         kept_targets: None,
         pitwall_tests: tests,

@@ -9,6 +9,9 @@ rust-version.workspace = true
 authors = ["decryp7"]
 publish = false
 
+[lib]
+doctest = false # doctests are off (crates/README.md, "Doctests")
+
 [dependencies]
 base64.workspace = true
 serde.workspace = true

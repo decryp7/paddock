@@ -9,6 +9,9 @@ rust-version.workspace = true
 publish = false
 
 # A misbehaving plugin for this crate's own tests (panics, hangs, exits, garbage, memory hog, wrong id). Never shipped.
+[lib]
+doctest = false # doctests are off (crates/README.md, "Doctests")
+
 [[bin]]
 name = "dyno-test-plugin"
 path = "src/bin/test_plugin.rs"

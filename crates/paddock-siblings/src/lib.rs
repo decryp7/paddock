@@ -19,7 +19,7 @@
 //!
 //! Tests use [`testing`] (feature `testing`): a file system and a spawner that start nothing (rule 7).
 //!
-//! ```
+//! ```text
 //! use paddock_siblings::{Siblings, Handoff, Item, Outcome, testing::{FakeFiles, FakeSpawner}};
 //! use paddock_env::Os;
 //! use std::sync::Arc;

@@ -9,6 +9,7 @@ publish = false
 description = "The headless command line: import files into a store, run query-language queries and analyses, build the incident report (docs/cli.md)"
 
 [lib]
+doctest = false # doctests are off (crates/README.md, "Doctests")
 name = "debrief_cli"
 path = "src/lib.rs"
 

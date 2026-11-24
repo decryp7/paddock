@@ -25,6 +25,14 @@ Rules for a crate here:
   job's workspace-wide steps (and the coverage job) test every member; `scripts/publish.test.mjs` and conformance C37 fail
   when a member is left out (an `--exclude`). A crate whose code changes with an optional feature off joins the job's
   "Tests with the optional features off" step.
+- **Doctests are off** (user, 2026-11-24): every library target in the repository, apps and tools included, has
+  `[lib] doctest = false`, and a doc comment's example is a ```` ```text ```` block (or `ignore` where Rust highlighting is
+  needed), never runnable code. No `cargo test --doc` runs anywhere: not in the push or member gate, not in CI, not in the
+  nightly. Behaviour an example showed is tested by a unit test. This stays so after v1: turn doctests back on for one crate
+  only when that crate is published for others to use, or when its docs become a real user guide. Two checks keep it so:
+  `doctests_off` in tools/paddock-dev's tests (every library target in `cargo metadata` has doctests off; a member audit, so
+  the member gate runs it whatever changed) and `contracts::doc_examples` (no runnable example in a tracked doc comment; in
+  the conformance tests, so every push runs it).
 - Published to the Gitea cargo registry by the tag workflow only (`.gitea/workflows/publish.yml`, rule 9). One repo tag
   `vX.Y.Z` releases everything; each crate bumps its own `version` only when it changes, and a version the registry
   already has is skipped. `node scripts/publish.mjs` is the local dry run (lists every crate and npm package with what a

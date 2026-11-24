@@ -7,6 +7,9 @@ license.workspace = true
 repository.workspace = true
 publish = ["decryp7"]
 
+[lib]
+doctest = false # doctests are off (crates/README.md, "Doctests")
+
 [features]
 # FakePower and FakeEvents, for tests only. Enable it in [dev-dependencies] only (Dyno ADR 0033).
 test-support = []

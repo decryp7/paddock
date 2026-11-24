@@ -9,6 +9,9 @@ publish = false
 description = "Video sources (ADR 0033): the downloadable FFmpeg runtime (pinned LGPL builds, verified, self-tested, updated with rollback), sandboxed ffmpeg/ffprobe runs, frame selection, alignment to the logs and the video records kept in the project"
 
 # A fake ffmpeg/ffprobe (scripted output, hang, memory hog, bad output) used only by the tests. Never bundled.
+[lib]
+doctest = false # doctests are off (crates/README.md, "Doctests")
+
 [[bin]]
 name = "debrief-video-fake-ffmpeg"
 path = "src/bin/fake_ffmpeg.rs"
