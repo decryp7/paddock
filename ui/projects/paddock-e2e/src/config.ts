@@ -3,6 +3,7 @@ import { assertChromeForTesting, pinnedChrome } from './browser.ts';
 import { assertFreshBuilds, reuseServer, type BuildGuard } from './build-guard.ts';
 import { e2ePort, e2eWorkers, isOn } from './env.ts';
 import { paddockServers } from './servers.ts';
+import { paddockTrace } from './trace.ts';
 
 export { isOn };
 export { paddockServers };
@@ -93,7 +94,7 @@ export function paddockConfig(options: PaddockConfigOptions): PlaywrightTestConf
     use: { baseURL: `http://localhost:${port}`, viewport, trace: 'retain-on-failure' },
     projects: [
       { name: 'chromium', testIgnore: shots, use: chromium },
-      ...(options.webkit === false ? [] : [{ name: 'webkit', testIgnore: shots, use: { ...devices['Desktop Safari'], viewport } }]),
+      ...(options.webkit === false ? [] : [{ name: 'webkit', testIgnore: shots, use: { ...devices['Desktop Safari'], viewport, trace: paddockTrace('webkit') } }]),
       // Only on request, so a plain `npx playwright test` never rewrites the documentation images.
       ...(isOn(env['SCREENSHOTS'])
         ? [{ name: 'screenshots', testMatch: shots, use: { ...chromium, viewport: DOC_SCREEN_VIEWPORT, deviceScaleFactor: 2 } }]

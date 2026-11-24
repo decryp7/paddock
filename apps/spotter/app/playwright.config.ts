@@ -1,6 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
 import { resolve } from 'node:path';
 import { appBuildGuard, reuseServer } from '../../../ui/projects/paddock-e2e/src/build-guard.ts';
+import { paddockTrace } from '../../../ui/projects/paddock-e2e/src/trace.ts';
 import { paddockServers } from '../../../ui/projects/paddock-e2e/src/servers.ts';
 import { e2ePortOrCiDefault } from '../../../ui/projects/paddock-e2e/src/env.ts';
 
@@ -32,7 +33,7 @@ export default defineConfig({
   },
   projects: [
     { name: 'chromium', testIgnore: /screenshots\.spec\.ts/, use: { ...devices['Desktop Chrome'], viewport: { width: 1280, height: 800 } } },
-    { name: 'webkit', testIgnore: /screenshots\.spec\.ts/, use: { ...devices['Desktop Safari'], viewport: { width: 1280, height: 800 } } },
+    { name: 'webkit', testIgnore: /screenshots\.spec\.ts/, use: { ...devices['Desktop Safari'], viewport: { width: 1280, height: 800 }, trace: paddockTrace('webkit') } },
     // Only on request, so a plain `npx playwright test` never rewrites the documentation images.
     ...(process.env['SCREENSHOTS']
       ? [{ name: 'screenshots', testMatch: /screenshots\.spec\.ts/, use: { ...devices['Desktop Chrome'], viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2 } }]

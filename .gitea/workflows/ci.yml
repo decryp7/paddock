@@ -439,6 +439,10 @@ jobs:
         env:
           PADDOCK_WEBKIT: "1"
         run: |
+          # The display stays awake for the step (ADR 0120 WP-0, H2; Playwright #43066: WebKit work on a sleeping display fills
+          # the WindowServer). The handle is kept and the assertion ends with the step (ER-51).
+          caffeinate -d -i -w $$ & caffeinate_pid=$!
+          trap 'kill "$caffeinate_pid" 2>/dev/null || true' EXIT
           # The job slot's own block of three ports (conformance/ci/ports.txt `webkit`: 4320-4322 for s1).
           port=$(bash ../conformance/ci/kit.sh isolation port webkit)
           export PW_PORT=$port SHELL_DEMO_PORT=$((port + 1)) WORKBENCH_DEMO_PORT=$((port + 2))
