@@ -40,7 +40,7 @@ and links here.
 | --- | --- | --- |
 | `<dev-targets>` | worktrees (`wt/`), build folders, agent scratch (`scratch/<agent id>`), `sccache`, `paddock-dev-home`, the disk index `.paddock-disk.sqlite` | `PADDOCK_DEV_TARGETS`, else the parent of `paddock.worktreeRoot`, else of `PADDOCK_WORKTREE_ROOT` |
 | `<dev disk>` | the folder that holds `<dev-targets>` | the parent of `<dev-targets>` |
-| `<dev disk>/vm-data` | the test VMs: the Windows test VM `paddock-win11-test`, the Tart images `tart-from-home` | `PADDOCK_VM_DATA`, else derived; the Windows VM's guard reads git config only, with an empty environment |
+| `<dev disk>/vm-data` | the Tart images `tart-from-home` of the service smoke | `PADDOCK_VM_DATA`, else derived |
 | `<dev disk>/ci/locks/test-machines` | the lock of the test machines (`scripts/vm-lock.sh`) | `PADDOCK_VM_LOCK_ROOT`, else derived |
 | the main checkout | `paddock`, with `engineering-rules` next to it | the folder that holds the git common directory |
 
@@ -253,8 +253,7 @@ A folder a tool creates for an agent (a cargo or cargo-xwin target folder, a tes
 owner record, `./dev disk record <dir> --kind <build|scratch|...> --link <worktree>` (on branch `feat/dev-disk` until it
 lands), so a cleanup knows whose it is. Callers: engineering-rules `scripts/heavy.sh` records `CARGO_TARGET_DIR` (so every
 `cargo`, `cargo xwin` and `llvm-cov` run through it is covered; the xwin target folder is whatever `CARGO_TARGET_DIR` names,
-no script here makes one), and `scripts/vm-smoke/run*.mjs` record their scratch folder through `scripts/disk-record.sh`,
-which skips quietly where `./dev disk` does not exist. The scratch folder an agent's brief names is made by the brief's
+no script here makes one). The scratch folder an agent's brief names is made by the brief's
 author: that call belongs there. The Rust `heavy` tool (`tools/heavy`) makes no folder.
 
 ## Tests

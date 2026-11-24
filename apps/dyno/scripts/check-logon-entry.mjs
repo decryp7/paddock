@@ -3,8 +3,8 @@
 // (`dyno-app.exe --hidden`, which starts the agent itself) and no entry that starts only `dyno-agent.exe` (Dyno 1.0.0 left
 // `Dyno = dyno-agent.exe run`: no tray icon, no window, a console).
 //   node scripts/check-logon-entry.mjs <file with the reg query output>
-// VM-only check: it runs in no CI workflow (the Run key is the user's, set by the app at run time); the Windows VM runbook
-// (docs/testing/windows-gui-session.md) runs it on the `reg query` output after Start at login is switched on and after a restart.
+// Manual check: it runs in no CI workflow (the Run key is the user's, set by the app at run time); run it on the `reg query`
+// output after Start at login is switched on and after a restart.
 import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 

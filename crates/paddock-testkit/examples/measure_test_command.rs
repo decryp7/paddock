@@ -1,5 +1,5 @@
 //! How long `TestCommand::new` takes, and its parts (docs/benchmarks.md, "TestCommand construction"; ADR 0100). Not a test:
-//! run it by hand, on the machine whose numbers you want (the Windows test VM through `scripts/vm-win.sh run --ci-like`).
+//! run it by hand, on the machine whose numbers you want (a Windows machine, for the Windows numbers).
 //!
 //!     measure_test_command [--fake-toolchain <empty folder>] [--saturate] [--runs <n>] [--git-calls <n>] [--ab <n>] [--first]
 //!

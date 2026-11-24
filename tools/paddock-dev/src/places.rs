@@ -8,7 +8,7 @@
 //!   machines' lock (`PADDOCK_VM_LOCK_ROOT`, else `<dev disk>/ci/locks/test-machines`) are below it.
 //! - The main checkout: the folder that holds the git common directory ([`Repo::discover`]).
 //!
-//! `./dev places` prints them for the scripts (vm-lock, vm-win, the vm-smoke harness, wp0-run); `--pinned` reads only the
+//! `./dev places` prints them for the scripts (vm-lock, wp0-run); `--pinned` reads only the
 //! repository's own git config (`git config --local`) and ignores every variable `./dev places` itself reads. Its trust, said
 //! plainly: on Unix git runs with an otherwise empty environment and a fixed PATH of `/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin`,
 //! so no variable picks the git or the config it reads; `/usr/local/bin` and `/opt/homebrew/bin` are writable by the user, so a

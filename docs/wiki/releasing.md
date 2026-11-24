@@ -1,7 +1,7 @@
 ---
 title: Releasing
 verified: 2026-10-31
-sources: [apps/dyno/docs/releasing.md, .gitea/workflows/app-release.yml, scripts/vm-smoke/README.md, rule 54, rule 9, rule 25, rule 55, handoff/merge-steward.md]
+sources: [apps/dyno/docs/releasing.md, .gitea/workflows/app-release.yml, rule 54, rule 9, rule 25, rule 55, handoff/merge-steward.md]
 ---
 How an app release goes from a green batch to a tag today, the VM checks that sit before the tag, the order of the apps, and
 what the Dyno 1.0 tag still waits for. Rules 9, 25, 54 and 55 are authoritative and linked, not restated. Steward-log
@@ -17,11 +17,6 @@ citations are `merge-steward.md:<line>`.
   that same commit. Source: [Dyno releasing, Before tagging](../../apps/dyno/docs/releasing.md#before-tagging).
 - The release-path proof (nightly installers, a verdict, a scripted VM check) is on main as `5262ceb03`; what must be proved before a
   release-path change lands is [rule 54](../rules.md#release-path-user-2026-10-30). Source: src: `git log origin/main` (commit `5262ceb03`).
-- The VM check `scripts/vm-smoke/vm-smoke.sh --app <app> --run <run id>` installs the CI macOS installer in a fresh Tart VM clone,
-  cold-starts it and judges the process tree, the discovery files and Quit; it runs locally only, CI never starts a VM. It enables
-  Gatekeeper first (`spctl --global-enable`), because the pinned base image ships with it off. Source: [vm-smoke README](../../scripts/vm-smoke/README.md); [checks.mjs](../../scripts/vm-smoke/checks.mjs).
-- The GUI automation (`--gui`: Safari download, Gatekeeper, Login Items) is on branch `origin/feat/vm-smoke-gui` (still moving), not on
-  main. Source: src: `git branch -r` (`origin/feat/vm-smoke-gui`); src: `merge-steward.md:367, 452`.
 - VM runs are recorded as result files in the hand-off folder (Dyno round 3: 12 smoke steps passed; login findings B3 and B4 blocked the
   tag and were then root-caused). Source: src: `dyno-1.0-vm-results-3.md`; src: `merge-steward.md:399` (results) and `merge-steward.md:415` (root causes).
 - The steward also runs the copies check before a tag; the register and its trailers are [rule 55](../rules.md#copies-user-2026-10-31-adr-0034-rule-40) and [ADR 0034](../adr/0034-one-implementation-per-mechanism.md); the C58 command is a follow-up of that ADR. Source: [ADR 0034](../adr/0034-one-implementation-per-mechanism.md).

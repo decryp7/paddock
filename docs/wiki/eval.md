@@ -54,5 +54,5 @@ Expected: no, and no. Pid reuse was disproved by run 7158. The cause was Chrome 
 Sources: [ci-and-runners](ci-and-runners.md); [process-starts](process-starts.md); [lesson](../lessons.md#read-the-failing-environments-own-logs-before-building-a-reproduction-2026-10-30); src: `merge-steward.md:188, 210`.
 
 ### 10. Do CI runs include a VM check, and where does it run?
-Expected: no. `scripts/vm-smoke/vm-smoke.sh` runs locally in a fresh Tart VM clone on the installers of a CI run; CI never starts a VM; the result file is attached before the tag.
-Sources: [releasing](releasing.md); [vm-smoke README](../../scripts/vm-smoke/README.md).
+Expected: no. CI never starts a VM; the local VM start check was retired on 2026-11-24.
+Sources: [releasing](releasing.md).
