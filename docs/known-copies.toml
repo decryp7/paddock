@@ -1524,3 +1524,54 @@ status = "built"
   owner = "dyno"
   delete_by = "dyno-v1.2.0"
   note = "A benchmark scratch folder's identity as text: dev:ino on Unix (symlink_metadata), volume:index from dyno-platform's fileid on Windows."
+
+# =====================================================================================================================
+# Ending the processes a unit of work started (ADR 0112, rule 90)
+# =====================================================================================================================
+
+[[mechanism]]
+id = "unit-owned-processes"
+title = "Which processes belong to one unit of work, and ending them by held identity (ER-51, rule 53)"
+canonical = "paddock-proc"
+paths = ["crates/paddock-proc/src/owner.rs"]
+symbols = ["item:Unit", "item:members"]
+status = "built"
+adr = "0112"
+
+  [[mechanism.copy]]
+  paths = ["crates/paddock-testkit-start/src/reap.rs"]
+  kind = "wiring"
+  owner = "paddock"
+  delete_by = "v0.5.0"
+  note = "ADR 0103's Reaper holds its Unit and implements Owned over it (ADR 0112 WP-2); what stays here is its sampler, its kill-on-close job (Windows) and its words for each reason. The job ledger (WP-3, conformance/ci/job-group.sh and tools/paddock-dev/src/ci_isolation/ledger.rs) and the slot holder (WP-7) join it as wiring when they land."
+
+  [[mechanism.copy]]
+  paths = ["tools/host-cleanup.sh"]
+  owner = "paddock"
+  delete_by = "v0.5.0"
+  note = "Ends a job's leftovers by `pkill -f` on a folder pattern (Windows: Get-CimInstance and a name match), found again by name, not held by identity. The job action's cleanup (ADR 0112 WP-4) replaces it with the ledger's members, and the pattern net stays only as the second net (WP-3)."
+
+[[mechanism]]
+id = "process-scope"
+title = "A unit of work's processes held in one value that ends them all: prepare, start, run, cancel, end with a grace (ER-51)"
+canonical = "paddock-proc"
+paths = ["crates/paddock-proc/src/scope.rs"]
+symbols = ["item:Scope", "item:Held"]
+status = "built"
+adr = "0119"
+
+  [[mechanism.copy]]
+  paths = ["crates/paddock-proc/src/supervised.rs"]
+  symbols = ["item:spawn", "item:spawn_capped", "item:spawn_in", "item:spawn_owning_folder"]
+  kind = "wiring"
+  owner = "paddock"
+  delete_by = "v0.5.0"
+  note = "What goes by v0.5.0: the public start constructors Supervised::spawn, spawn_capped, spawn_in and spawn_owning_folder, which start a child outside any Scope; they become crate-private once the migration (ADR 0119 WP-6 to WP-8) has moved every caller onto Scope::start. Supervised itself stays: it is the child holder Scope::start returns (with a memory cap when one is asked for), not a copy."
+
+  [[mechanism.copy]]
+  paths = ["crates/paddock-testkit-start/src/reap.rs"]
+  symbols = ["item:Reaper"]
+  kind = "wiring"
+  owner = "paddock"
+  delete_by = "v0.5.0"
+  note = "ADR 0103's test Reaper holds what a test spawned through its own Unit and job. ADR 0119 §1 makes it a Scope in test mode (its sampler and its words stay); until then it is a second holder of a unit's processes (WP-6)."

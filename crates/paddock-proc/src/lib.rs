@@ -46,7 +46,9 @@
 //! Processes are named by identity ([`ProcessId`]: pid plus start time), never by a bare pid, because the OS hands a freed
 //! pid on (Windows at once): anything ended is first checked to still be the process that was meant (ADR 0033).
 //!
-//! Unix children lead their own process group (killed with `killpg`); every supervised Windows child runs in a kill-on-close
+//! A supervised Unix child runs in a process group: the group of its guard's keeper when the orphan guardian is on (the keeper
+//! leads it, [`guardian`]), else a group of its own; [`kill_tree`] of the child ends that group (through the keeper, by
+//! identity, for a guarded child; with `killpg` of the child's pid otherwise). Every supervised Windows child runs in a kill-on-close
 //! job object, which ends the whole tree by handle, so its helpers end with it even when they left its tree or the app
 //! crashed. Both are backed by a walk of the process table, by identity, for helpers that left the group or the job.
 
@@ -63,9 +65,11 @@ mod instance;
 mod job;
 mod login;
 pub mod own;
+mod owner;
 pub mod queue_stall;
 mod run;
 mod runstate;
+pub mod scope;
 pub mod self_test;
 mod session;
 mod stall;
@@ -140,8 +144,8 @@ pub use tree::{
 pub use usage::{
     CpuSample, Listed, MAX_TREE, OsSource, ProcEntry, ProcessSource, Row, Table, descendants,
     identity, listing_started, parent_of, parse_pss, process_memory, read_children, read_pss,
-    snapshot, table_from, table_of_listing, tree_cpu_time, tree_cpu_time_from, tree_cpu_time_of,
-    tree_memory, tree_memory_from, tree_memory_of, tree_memory_with,
+    snapshot, table_from, table_of_listing, table_reads, tree_cpu_time, tree_cpu_time_from,
+    tree_cpu_time_of, tree_memory, tree_memory_from, tree_memory_of, tree_memory_with,
 };
 pub use waited::{Sink, run_waited, run_waited_cancellable, run_waited_noting};
 pub use warm::warm_up;
