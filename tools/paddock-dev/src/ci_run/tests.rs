@@ -283,13 +283,7 @@ fn rows_of_model(model: &crate::gates::ci::CiModel, src: &crate::gates::ci::Sour
     // The Rust host's list is hand-kept (conformance.rust; a test holds it to the registry): its value is `$RUST_ONLY` here too.
     let rust_args = contract::conformance_rust_args(&contract).unwrap();
     let rust_only = format!("--only {}", rust_args[rust_args.iter().position(|a| a == "--only").unwrap() + 1]);
-    let jobs = [
-        "ui",
-        "e2e",
-        "conformance",
-        "tools",
-        "crates",
-    ];
+    let jobs = ["ui", "e2e", "conformance", "tools", "crates"];
     let mut out = std::collections::BTreeSet::new();
     for l in model.lines.iter().filter(|l| l.root == CI_YML) {
         let text = match l.text.find(&only) {

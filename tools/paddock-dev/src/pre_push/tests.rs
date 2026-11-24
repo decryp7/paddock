@@ -3907,6 +3907,9 @@ fn the_conformance_tests_run_in_a_push_only_when_the_change_reaches_conformance_
     let reached = json!({"conformance": true, "apps": [], "packages": {},
         "why": {"conformance": ["conformance/src/checks/C79-orphan-guard-hooks.mjs", crate::plan::CONFORMANCE_ALWAYS]}});
     assert!(ids(&plan_gates(&reached, &change, &push)).contains(&"conformance-tests".to_string()));
-    assert!(ids(&plan_gates(&always, &change, &facts())).contains(&"conformance-tests".to_string()), "the member gate");
+    assert!(
+        ids(&plan_gates(&always, &change, &facts())).contains(&"conformance-tests".to_string()),
+        "the member gate"
+    );
     assert!(ids(&plan_gates(&plan(), &change, &push)).contains(&"conformance-tests".to_string()));
 }

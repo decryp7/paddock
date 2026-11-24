@@ -446,7 +446,9 @@ pub const CONFORMANCE_ALWAYS: &str = "conformance always runs";
 /// only because conformance is in every plan. Needs a plan made with `explain` (its `why`); without one it answers true (fail closed).
 pub fn reaches_conformance(plan: &Value) -> bool {
     match plan.get("why") {
-        Some(why) => why["conformance"].as_array().is_some_and(|a| a.iter().any(|x| x != CONFORMANCE_ALWAYS)),
+        Some(why) => why["conformance"]
+            .as_array()
+            .is_some_and(|a| a.iter().any(|x| x != CONFORMANCE_ALWAYS)),
         None => true,
     }
 }

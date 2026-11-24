@@ -496,7 +496,8 @@ pub fn summary(plan: &Value, reason: &str, legs: &[Value]) -> String {
 // ------------------------------------------------------------------------------------------------------ command line
 
 /// The usage line printed under an argument error.
-pub const USAGE: &str = "usage: dev plan <base> [<head>] | --files a,b | --all | --ci [--app <app>]  [--explain] [--compare] | --since-run <run>";
+pub const USAGE: &str =
+    "usage: dev plan <base> [<head>] | --files a,b | --all | --ci [--app <app>]  [--explain] [--compare] | --since-run <run>";
 
 /// A parsed command line of `dev plan`.
 #[derive(Debug, PartialEq)]
@@ -1260,10 +1261,7 @@ mod tests {
             ("true", "false", "true", "true")
         );
         assert!(get("apps").starts_with(r#"[{"app":"x","os":"ubuntu-latest""#));
-        assert_eq!(
-            ci_outputs(&json!({}), &[]).iter().find(|(n, _)| n == "any_app").unwrap().1,
-            "false"
-        );
+        assert_eq!(ci_outputs(&json!({}), &[]).iter().find(|(n, _)| n == "any_app").unwrap().1, "false");
         let md = summary(&plan, "the reason", &legs);
         assert!(
             md.starts_with("### Affected\n\nBase: the reason\n\n| Project | Runs |\n|---|---|\n| crates | yes |\n| ui | no |"),
