@@ -126,6 +126,7 @@ impl Run {
             head_branch: self.branch.into(),
             created_at: "2026-11-22T00:00:00Z".into(),
             run_attempt: self.attempt,
+            title: String::new(),
         }
     }
 }

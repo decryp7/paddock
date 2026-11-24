@@ -331,6 +331,7 @@ mod tests {
             head_branch: String::new(),
             created_at: created.into(),
             run_attempt: 1,
+            title: String::new(),
         }
     }
 

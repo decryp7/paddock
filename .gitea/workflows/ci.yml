@@ -15,6 +15,8 @@
 # installed), as in Debrief and Pitwall.
 
 name: ci
+# A run dispatched through ./dev ci dispatch shows its dispatch_id in its title, so the tool finds that exact run (guard A6, ER-51).
+run-name: ${{ github.event.inputs.dispatch_id && format('{0} [dispatch {1}]', github.workflow, github.event.inputs.dispatch_id) || '' }}
 
 on:
   push:
@@ -22,6 +24,10 @@ on:
     tags: ["v*"]
   workflow_dispatch:
     inputs:
+      dispatch_id:
+        description: "Set by ./dev ci dispatch: the token it finds this run by (shown in the run's title). Leave empty."
+        required: false
+        default: ""
       base:
         description: "Diff from this commit (empty: run everything)"
         required: false
@@ -917,10 +923,16 @@ jobs:
           TEST_PACKAGES: ${{ matrix.test_packages }}
           TEST_FILTER: ${{ matrix.test_filter }}
           TEST_SKIP: ${{ matrix.test_skip }}
+          # A failed-only round (since_run): each failed test of FILTER must still select a test (./dev ci rerun-check), never a warning.
+          RERUN: ${{ github.event.inputs.since_run }}
         run: |
           # A member run that reaches none of the host packages has nothing to test on this host (the plan says so, never an empty list).
           if [ -z "$FILTER" ] && [ "$TEST_SKIP" = true ]; then echo "::notice::this member run reaches no package with OS-specific code: nothing to test on this runner (hostTests)"; exit 0; fi
           filter=(); sel=(--workspace)
+          if [ -n "$FILTER" ] && [ -n "$RERUN" ]; then
+            cargo nextest list "${sel[@]}" --all-features -E "$FILTER" --message-format json > "$RUNNER_TEMP/rerun-listed.json" || { echo "::error::rerun-check: cargo nextest list failed. Next: read the build error above"; exit 1; }
+            "${PADDOCK_WORKSPACE:-$GITHUB_WORKSPACE}/dev" ci rerun-check --filter "$FILTER" --listed "$RUNNER_TEMP/rerun-listed.json" || exit 1
+          fi
           if [ -n "$FILTER" ]; then echo "::notice::nextest runs only the selected tests (a rerun's failed tests, or the plan's smoke set or affected targets): $FILTER"; filter=(-E "$FILTER" --no-tests=warn)
           else
             if [ -n "$TEST_PACKAGES" ]; then echo "::notice::nextest tests only the packages with OS-specific code on this runner (hostTests): $TEST_PACKAGES"; sel=(); for p in $TEST_PACKAGES; do sel+=(-p "$p"); done; fi
@@ -1298,9 +1310,15 @@ jobs:
           TEST_FILTER: ${{ matrix.test_filter }}
           TEST_SKIP: ${{ matrix.test_skip }}
           PADDOCK_TEST_COST_REPORT: ${{ runner.temp }}/test-cost-${{ github.run_id }}-${{ github.run_attempt }}.jsonl
+          # A failed-only round (since_run): each failed test of FILTER must still select a test (./dev ci rerun-check), never a warning.
+          RERUN: ${{ github.event.inputs.since_run }}
         run: |
           # The plan's selection has no test of this workspace (its gates still run above): nothing to test, said, never a filter that selects none.
           if [ -z "$FILTER" ] && [ "$TEST_SKIP" = true ]; then echo "::notice::this run's selection holds no test of paddock-dev: nothing to test here"; exit 0; fi
+          if [ -n "$FILTER" ] && [ -n "$RERUN" ]; then
+            cargo nextest list --locked -E "$FILTER" --message-format json > "$RUNNER_TEMP/rerun-listed.json" || { echo "::error::rerun-check: cargo nextest list failed. Next: read the build error above"; exit 1; }
+            "${PADDOCK_WORKSPACE:-$GITHUB_WORKSPACE}/dev" ci rerun-check --filter "$FILTER" --listed "$RUNNER_TEMP/rerun-listed.json" || exit 1
+          fi
           filter=()
           if [ -n "$FILTER" ]; then echo "::notice::nextest runs only the selected tests (a rerun's failed tests, or the plan's smoke set or affected targets): $FILTER"; filter=(-E "$FILTER" --no-tests=warn)
           elif [ -n "$TEST_FILTER" ]; then echo "::notice::nextest filter (hostTests, and the packages this change reaches in a member run): $TEST_FILTER"; filter=(-E "$TEST_FILTER" --no-tests=fail); fi

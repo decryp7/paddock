@@ -147,10 +147,17 @@ impl Train for TestTrain {
 }
 
 struct FakeCi {
-    runs: BTreeMap<(String, String), Vec<CiRun>>,
+    /// The runs the server has: id to `(workflow, head, state)`. A run the queue started and no test scripted is running.
+    runs: BTreeMap<u64, (String, String, RunState)>,
     verdicts: BTreeMap<(String, String), Verdict>,
     workflows_dispatched: Vec<String>,
     busy: Option<String>,
+    /// A guard refuses the dispatch: why, and whether it measured.
+    refused: Option<(String, bool)>,
+    /// The dispatch is sent but its run is not found.
+    lost: Option<String>,
+    /// The id the server gives the next dispatched run.
+    next_run: u64,
     dispatched: Vec<Vec<(String, String)>>,
     failures: BTreeMap<u64, Vec<Failure>>,
 }
@@ -162,6 +169,9 @@ impl FakeCi {
             verdicts: BTreeMap::new(),
             workflows_dispatched: Vec::new(),
             busy: None,
+            refused: None,
+            lost: None,
+            next_run: 8001,
             dispatched: Vec::new(),
             failures: BTreeMap::new(),
         }
@@ -169,8 +179,15 @@ impl FakeCi {
 }
 
 impl Ci for FakeCi {
-    fn runs(&mut self, wf: &str, head: &str) -> Result<Vec<CiRun>, String> {
-        Ok(self.runs.get(&(wf.to_string(), head.to_string())).cloned().unwrap_or_default())
+    fn run(&mut self, wf: &str, head: &str, id: u64) -> Result<CiRun, String> {
+        match self.runs.get(&id) {
+            Some((w, h, state)) if w == wf && h == head => Ok(CiRun { id, state: state.clone() }),
+            Some((w, h, _)) => Err(format!("run {id} is {w} on {h}, not {wf} on {head}")),
+            None => Ok(CiRun {
+                id,
+                state: RunState::Running,
+            }),
+        }
     }
     fn verdict(&mut self, wf: &str, head: &str) -> Verdict {
         self.verdicts
@@ -182,9 +199,20 @@ impl Ci for FakeCi {
         if let Some(who) = &self.busy {
             return Ok(Sent::Busy(who.clone()));
         }
+        if let Some((why, measured)) = &self.refused {
+            return Ok(Sent::Refused {
+                why: why.clone(),
+                measured: *measured,
+            });
+        }
         self.workflows_dispatched.push(wf.to_string());
         self.dispatched.push(inputs.to_vec());
-        Ok(Sent::Yes)
+        if let Some(why) = &self.lost {
+            return Ok(Sent::Lost(why.clone()));
+        }
+        let run = self.next_run;
+        self.next_run += 1;
+        Ok(Sent::Yes { run })
     }
     fn failures(&mut self, run: u64) -> Result<Vec<Failure>, String> {
         self.failures
@@ -323,6 +351,14 @@ impl World {
             .collect()
     }
 
+    /// The comments of a pull request other than the queue's run records.
+    fn notes_of(&self, number: u64) -> Vec<String> {
+        self.comments_of(number)
+            .into_iter()
+            .filter(|c| super::tick::parse_record(c).is_none())
+            .collect()
+    }
+
     fn main(&self) -> String {
         self.repos.origin_ref("refs/heads/main")
     }
@@ -388,8 +424,36 @@ impl World {
         self.run_of("ci.yml", head, id, state);
     }
 
+    /// The run the queue holds for `wf` on `head` is `id` (the server numbered it so), in `state`: the newest record the queue wrote
+    /// for them names `id` from now on, or, when it wrote none (a run started by an earlier tick), a record is added to the train's pull
+    /// requests as that tick would have.
     fn run_of(&mut self, wf: &str, head: &str, id: u64, state: RunState) {
-        self.ci.runs.insert((wf.to_string(), head.to_string()), vec![CiRun { id, state }]);
+        self.ci.runs.insert(id, (wf.to_string(), head.to_string(), state));
+        let mine = |t: &str| super::tick::parse_record(t).filter(|(w, h, _)| w == wf && h == head);
+        let newest = self.gitea.comments.iter().rev().find_map(|(_, t)| mine(t).map(|r| r.2));
+        let record = super::tick::run_record(wf, head, Some(id));
+        match newest {
+            Some(Some(n)) if n == id => {}
+            Some(old) => {
+                for (_, t) in self.gitea.comments.iter_mut() {
+                    if mine(t).is_some_and(|r| r.2 == old) {
+                        *t = record.clone();
+                    }
+                }
+            }
+            None => {
+                let in_train: Vec<u64> = self
+                    .gitea
+                    .pulls
+                    .iter()
+                    .filter(|p| p["labels"].as_array().unwrap().iter().any(|l| l["name"] == label::IN_TRAIN))
+                    .map(|p| p["number"].as_u64().unwrap())
+                    .collect();
+                for n in in_train {
+                    self.gitea.comments.push((n, record.clone()));
+                }
+            }
+        }
     }
 
     fn green(&mut self, wf: &str, head: &str, id: u64) {
@@ -1060,7 +1124,10 @@ fn every_reached_workflow_must_be_full_green_before_main_moves() {
     assert!(matches!(w.tick(), Tick::Dispatched { .. }));
     assert_eq!(w.ci.dispatched.last().unwrap(), &vec![("bundles".to_string(), "true".to_string())]);
     assert_eq!(w.repos.origin_ref("refs/heads/main"), before);
+    // The queue holds the full run it just started (8003), not the older partial one: until it ends, it waits.
+    assert_eq!(w.tick(), Tick::Waiting(8003));
     // Not measured for the second workflow: never lands.
+    w.run_of("debrief.yml", &head, 8003, RunState::Success);
     w.ci.verdicts
         .insert(("debrief.yml".into(), head.clone()), Verdict::NotMeasured("log".into()));
     assert!(matches!(w.tick(), Tick::Stuck { measured: false, .. }));
@@ -1311,11 +1378,12 @@ fn an_unknown_row_blames_nobody_and_stops_the_queue() {
 fn the_queue_stops_asking_for_runs_after_three_on_one_head() {
     let mut w = World::new();
     let head = dispatched_train(&mut w, &[(1, "crates/x/a.rs", &["x"])]);
-    let run = |id| CiRun {
-        id,
-        state: RunState::Success,
-    };
-    w.ci.runs.insert(("ci.yml".into(), head.clone()), vec![run(3), run(2), run(1)]);
+    // The dispatch of `dispatched_train` is the first run; two more are held, all three finished.
+    w.run(&head, 1, RunState::Success);
+    for id in [2, 3] {
+        w.gitea.comments.push((1, super::tick::run_record("ci.yml", &head, Some(id))));
+        w.ci.runs.insert(id, ("ci.yml".into(), head.clone(), RunState::Success));
+    }
     w.ci.verdicts.insert(
         ("ci.yml".into(), head.clone()),
         Verdict::Red {
@@ -1326,7 +1394,9 @@ fn the_queue_stops_asking_for_runs_after_three_on_one_head() {
     let n = w.ci.dispatched.len();
     assert!(matches!(w.tick(), Tick::Stuck { measured: true, .. }));
     assert_eq!(w.ci.dispatched.len(), n, "no fourth run");
-    w.ci.runs.insert(("ci.yml".into(), head), vec![run(2), run(1)]);
+    w.gitea
+        .comments
+        .retain(|(_, t)| super::tick::parse_record(t).is_none_or(|r| r.2 != Some(3)));
     assert!(
         matches!(w.tick(), Tick::Dispatched { .. }),
         "two runs: the full one is still asked for"
@@ -1889,14 +1959,14 @@ fn a_train_that_fails_only_on_mains_own_tests_is_blocked_not_triaged_again_and_a
     w.ci.failures.insert(9100, vec![failure("x t", &["x"], Blame::OnMain)]);
     assert!(matches!(w.tick(), Tick::Stuck { measured: true, .. }));
     assert_eq!(w.labels_of(1), vec!["state/in-train", "queue/blocked"]);
-    assert_eq!(w.comments_of(1).len(), 1);
+    assert_eq!(w.notes_of(1).len(), 1);
     // The next ticks do not triage (the failures are no longer even scripted) and do not comment again.
     w.ci.failures.clear();
     for _ in 0..3 {
         let t = w.tick();
         assert!(matches!(&t, Tick::Stuck { why, .. } if why.contains("blocked")), "{t:?}");
     }
-    assert_eq!(w.comments_of(1).len(), 1);
+    assert_eq!(w.notes_of(1).len(), 1);
     // A pull request that fixes main is approved: the train is released and everything is built together.
     w.approved(2, "docs/fix.md", &["docs"]);
     assert!(matches!(w.tick(), Tick::Idle(_)));
@@ -2657,4 +2727,222 @@ fn the_planner_runs_cargo_only_in_the_checkout_of_main_never_in_the_merge_clone(
         assert_eq!(d, &scratch.path().join("trusted"), "the planner runs in the checkout of main only");
     }
     assert!(!sentinel.exists(), "cargo never ran a pull request's code");
+}
+
+// ---- the run the queue started is held, never searched for (ER-51) ------------------------------------------------------------
+
+#[test]
+fn the_queue_records_the_run_it_started_and_follows_that_run_only() {
+    let mut w = World::new();
+    w.approved(1, "crates/x/a.rs", &["x"]);
+    w.approved(2, "crates/x/b.rs", &["x"]);
+    let Tick::Built { head, .. } = w.tick() else { panic!("built") };
+    let t = w.tick();
+    assert!(matches!(&t, Tick::Dispatched { run: 8001, .. }), "{t:?}");
+    assert!(t.text().contains("as run 8001"), "{}", t.text());
+    // The handle is written to every pull request of the train, and read back by the next tick.
+    let record = super::tick::run_record("ci.yml", &head, Some(8001));
+    for n in [1, 2] {
+        assert!(w.comments_of(n).contains(&record), "{:?}", w.comments_of(n));
+    }
+    assert_eq!(
+        super::tick::parse_record(&record),
+        Some(("ci.yml".to_string(), head.clone(), Some(8001)))
+    );
+    assert_eq!(w.tick(), Tick::Waiting(8001));
+    // Another run on the same head, which the queue did not start, is not followed: no record names it.
+    w.ci.runs.insert(9999, ("ci.yml".into(), head.clone(), RunState::Success));
+    assert_eq!(w.tick(), Tick::Waiting(8001));
+    // A record that names a run of another commit (a forged or stale comment) is refused before anything acts on it.
+    w.ci.runs.insert(8001, ("ci.yml".into(), "f".repeat(40), RunState::Success));
+    let t = w.tick();
+    assert!(matches!(&t, Tick::Stuck { measured: false, why } if why.contains("8001")), "{t:?}");
+    // Positive control: without the record the queue holds nothing and starts a run again (the server numbers it 8002).
+    w.gitea.comments.clear();
+    let n = w.ci.dispatched.len();
+    assert!(matches!(w.tick(), Tick::Dispatched { run: 8002, .. }));
+    assert_eq!(w.ci.dispatched.len(), n + 1);
+}
+
+#[test]
+fn a_dispatch_whose_run_is_not_found_is_recorded_and_never_sent_again() {
+    let mut w = World::new();
+    w.approved(1, "crates/x/a.rs", &["x"]);
+    let Tick::Built { head, .. } = w.tick() else { panic!("built") };
+    w.ci.lost = Some("no run showed dispatch id 0123456789abcdef.member within 2m".into());
+    let t = w.tick();
+    assert!(
+        matches!(&t, Tick::Stuck { measured: false, why } if why.contains("not found")),
+        "{t:?}"
+    );
+    assert!(
+        w.comments_of(1)
+            .iter()
+            .any(|c| super::tick::parse_record(c) == Some(("ci.yml".into(), head.clone(), None))),
+        "{:?}",
+        w.comments_of(1)
+    );
+    // The next ticks do not dispatch again: a person finds the run and records it.
+    w.ci.lost = None;
+    for _ in 0..2 {
+        assert!(matches!(w.tick(), Tick::Stuck { measured: false, .. }));
+    }
+    assert_eq!(w.ci.dispatched.len(), 1, "sent once");
+    // Positive control: a person records the run (the line the queue would have written); the queue follows it.
+    w.gitea.comments.push((1, super::tick::run_record("ci.yml", &head, Some(8123))));
+    w.gitea
+        .comments
+        .retain(|(_, t)| super::tick::parse_record(t).is_none_or(|r| r.2.is_some()));
+    assert_eq!(w.tick(), Tick::Waiting(8123));
+}
+
+#[test]
+fn a_dispatch_a_guard_refuses_records_nothing_and_stops_the_tick() {
+    let mut w = World::new();
+    w.approved(1, "crates/x/a.rs", &["x"]);
+    let Tick::Built { .. } = w.tick() else { panic!("built") };
+    w.ci.refused = Some(("dispatch: refused by guard green-main: main is red".into(), true));
+    let t = w.tick();
+    assert!(
+        matches!(&t, Tick::Stuck { measured: true, why } if why.contains("green-main")),
+        "{t:?}"
+    );
+    assert!(w.comments_of(1).iter().all(|c| super::tick::parse_record(c).is_none()));
+    // A guard that could not look stops it as not measured.
+    w.ci.refused = Some(("not measured".into(), false));
+    assert!(matches!(w.tick(), Tick::Stuck { measured: false, .. }));
+    // Positive control: once the guard lets it go, the run is started and held.
+    w.ci.refused = None;
+    assert!(matches!(w.tick(), Tick::Dispatched { run: 8001, .. }));
+}
+
+/// The real adapter's dispatch over a scripted server: a run is listed with the dispatch token only after the dispatch was posted.
+struct Server {
+    posted: Vec<serde_json::Value>,
+    /// Whether the server ever lists the run.
+    lists_run: bool,
+}
+
+impl crate::wait::Http for Server {
+    fn get_json(&mut self, url: &str, _token: &str) -> Result<serde_json::Value, String> {
+        if url.contains("/branches/") {
+            return Ok(serde_json::json!({"commit": {"id": "a".repeat(40)}}));
+        }
+        if url.contains("/actions/runs?") {
+            let token = self
+                .posted
+                .last()
+                .and_then(|b| b["inputs"]["dispatch_id"].as_str().map(str::to_string));
+            let runs: Vec<serde_json::Value> = match token {
+                Some(t) if self.lists_run && url.contains("event=workflow_dispatch") && !url.contains("branch=") => vec![
+                    serde_json::json!({"id": 9002, "path": "ci.yml@refs/heads/train/queue", "status": "queued", "event": "workflow_dispatch",
+                                       "display_title": "chore(train): the newest run, not ours"}),
+                    serde_json::json!({"id": 9001, "path": "ci.yml@refs/heads/train/queue", "status": "queued", "event": "workflow_dispatch",
+                                       "display_title": format!("ci [dispatch {t}]")}),
+                ],
+                _ => Vec::new(),
+            };
+            return Ok(serde_json::json!({"total_count": runs.len(), "workflow_runs": runs}));
+        }
+        Err(format!("HTTP 404 ({url})"))
+    }
+    fn send_json(&mut self, method: &str, url: &str, _token: &str, body: Option<&serde_json::Value>) -> Result<serde_json::Value, String> {
+        assert!(
+            method == "POST" && url.ends_with("/actions/workflows/ci.yml/dispatches"),
+            "{method} {url}"
+        );
+        self.posted.push(body.cloned().unwrap_or_default());
+        Ok(serde_json::Value::Null)
+    }
+}
+
+struct StepClock(std::time::Duration);
+impl crate::wait::Clock for StepClock {
+    fn elapsed(&self) -> std::time::Duration {
+        self.0
+    }
+    fn sleep(&mut self, d: std::time::Duration) {
+        self.0 += d;
+    }
+}
+
+fn adapter_root(register: Option<&str>) -> tempfile::TempDir {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(tmp.path().join(".gitea/workflows")).unwrap();
+    std::fs::write(
+        tmp.path().join(".gitea/workflows/ci.yml"),
+        "on:\n  workflow_dispatch:\n    inputs:\n      dispatch_id:\n        default: \"\"\n      since_run:\n        default: \"\"\n      base:\n        default: \"\"\njobs:\n  t:\n    runs-on: ubuntu-latest\n",
+    )
+    .unwrap();
+    if let Some(text) = register {
+        std::fs::create_dir_all(tmp.path().join("docs")).unwrap();
+        std::fs::write(tmp.path().join(crate::ci_runs::dispatch_guards::REGISTER), text).unwrap();
+    }
+    tmp
+}
+
+fn adapter_dispatch(server: &mut Server, root: &Path) -> (Result<Sent, String>, String) {
+    let target = crate::ci_runs::dispatch::Target {
+        server: "https://gitea.invalid",
+        repo: "decryp7/paddock",
+        token: "t",
+    };
+    let d = real::HeldDispatch {
+        target,
+        root,
+        git_ref: TRAIN_BRANCH,
+        max_wait: std::time::Duration::from_secs(60),
+        find_max: std::time::Duration::from_secs(30),
+        find_interval: std::time::Duration::from_secs(5),
+    };
+    let mut log = Vec::new();
+    let mut clock = StepClock(std::time::Duration::ZERO);
+    let base = vec![("base".to_string(), "b".repeat(40))];
+    let r = real::dispatch_held(server, &d, "ci.yml", &base, &mut clock, None, &mut log);
+    (r, String::from_utf8(log).unwrap())
+}
+
+#[test]
+fn the_real_adapter_sends_a_token_runs_the_guards_and_returns_the_run_that_carries_it() {
+    let root = adapter_root(None);
+    let mut server = Server {
+        posted: Vec::new(),
+        lists_run: true,
+    };
+    let (r, log) = adapter_dispatch(&mut server, root.path());
+    assert_eq!(
+        r.unwrap(),
+        Sent::Yes { run: 9001 },
+        "the run with the token, not the newest (9002): {log}"
+    );
+    let token = server.posted[0]["inputs"]["dispatch_id"].as_str().unwrap().to_string();
+    assert!(token.ends_with(".member"), "{token}");
+    assert_eq!(server.posted[0]["ref"], TRAIN_BRANCH);
+    // The guards ran (report-only here: no register): green-main could not see a nightly and said so.
+    assert!(log.contains("::warning::dispatch guard green-main (report-only"), "{log}");
+    // A server that never lists the run: the dispatch was sent once and is lost, never "the newest run".
+    let mut silent = Server {
+        posted: Vec::new(),
+        lists_run: false,
+    };
+    let (r, _) = adapter_dispatch(&mut silent, root.path());
+    assert!(
+        matches!(r.unwrap(), Sent::Lost(why) if why.contains(&silent.posted[0]["inputs"]["dispatch_id"].as_str().unwrap().to_string()))
+    );
+    assert_eq!(silent.posted.len(), 1);
+}
+
+#[test]
+fn a_blocking_guard_stops_the_real_adapter_before_anything_is_sent() {
+    let root = adapter_root(Some("[first_green]\n\"green-main\" = 1\n"));
+    let mut server = Server {
+        posted: Vec::new(),
+        lists_run: true,
+    };
+    let (r, log) = adapter_dispatch(&mut server, root.path());
+    assert!(
+        matches!(r.unwrap(), Sent::Refused { measured: false, ref why } if why.contains("green-main")),
+        "{log}"
+    );
+    assert!(server.posted.is_empty(), "nothing sent");
 }
