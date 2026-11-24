@@ -105,8 +105,10 @@ fn every_clause_of_the_profile_selects_at_least_one_test() {
     // A rename cannot silently drop a live or working-tree audit: every check module's `live_` and `this_working_tree_` test is selected.
     let audit_name = Regex::new(r"^check(_[a-z0-9]+)?::(live_|this_working_tree_)").unwrap();
     let check_audits: Vec<&String> = all.iter().filter(|n| audit_name.is_match(n)).collect();
+    // The floor only proves the name pattern still finds the audits (a non-empty set, ER-12), not how many checks exist: dropping a
+    // check removes its live test with it. Seven remain since the drop of C119, C122, C124, C125, C129 and C130 (2ff2d766f; 14 before).
     assert!(
-        check_audits.len() >= 10,
+        check_audits.len() >= 5,
         "the check modules' live and working-tree tests were not found: {check_audits:?}"
     );
     let dropped: Vec<&&String> = check_audits.iter().filter(|n| !selected(n.as_str())).collect();
