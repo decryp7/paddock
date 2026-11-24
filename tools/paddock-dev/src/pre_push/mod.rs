@@ -521,6 +521,29 @@ fn command_in(
             Some((ws.clone(), crate::plan_ci::package_filter(&plan, &graph, &ws, &project, true)))
         })
         .collect();
+    facts.reached = facts
+        .test_filters
+        .iter()
+        .filter(|(_, f)| !f.trim().is_empty())
+        .map(|(ws, _)| {
+            let hit = plan["packages"][ws.as_str()]
+                .as_array()
+                .map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect())
+                .unwrap_or_default();
+            (ws.clone(), hit)
+        })
+        .collect();
+    // The Linux run tests only the code that behaves differently per OS: the placement CI's host legs use (`hostTests`, derived from
+    // the code by the planner's graph), read through its one accessor (ER-22, ER-42).
+    if args.member_gate {
+        facts.os_scope = gates::linux_candidates(&plan, &change)
+            .into_iter()
+            .map(|ws| {
+                let scope = os_scope_of(&work, &graph, &ws);
+                (ws, scope)
+            })
+            .collect();
+    }
     let mut planned = gates::plan_gates(&plan, &change, &facts);
     planned = select_rows(planned, &args.only)?;
     notes.extend(
@@ -1464,6 +1487,23 @@ fn discover(root: &Path, base: &str, files: &[String], pushed: &[String]) -> Res
 }
 
 /// What the repository says that the plan does not: the conformance contract's check list, the apps that lint Windows, the CI image.
+/// The [`gates::OsScope`] of the Cargo workspace `ws`: its CI contract (an app's `apps/<app>/paddock.ci.json`, another workspace's own)
+/// with the placement the planner's graph derived for it. No contract is [`gates::OsScope::Unscoped`] (every test, fail closed).
+fn os_scope_of(root: &Path, graph: &crate::plan::RepoGraph, ws: &str) -> Result<gates::OsScope, String> {
+    let unit = match gates::app_of_workspace(ws) {
+        Some(app) => format!("apps/{app}"),
+        None => ws.to_string(),
+    };
+    let path = format!("{unit}/{}", crate::ci_run::contract::FILE);
+    let text = match std::fs::read_to_string(root.join(&path)) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(gates::OsScope::Unscoped),
+        Err(e) => return Err(format!("{path}: {e}")),
+    };
+    let contract: Value = serde_json::from_str(&text).map_err(|e| format!("{path}: not valid JSON: {e}"))?;
+    gates::OsScope::of(&contract, &path, &graph.derived(&unit))
+}
+
 fn read_facts(root: &Path, plan: &Value, env: &HashMap<String, String>, ex: &dyn exec::Exec) -> Facts {
     let ci = crate::ci_run::contract::conformance_args_at(root);
     let mut windows = std::collections::BTreeSet::new();
@@ -1507,6 +1547,8 @@ fn read_facts(root: &Path, plan: &Value, env: &HashMap<String, String>, ex: &dyn
         inactive: Ok(Default::default()),
         test_filters: Default::default(),
         nextest_config,
+        reached: Default::default(),
+        os_scope: Default::default(),
     }
 }
 

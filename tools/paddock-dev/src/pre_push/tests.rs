@@ -55,6 +55,8 @@ fn facts() -> Facts {
         inactive: Ok(BTreeSet::new()),
         test_filters: Default::default(),
         nextest_config: Default::default(),
+        reached: Default::default(),
+        os_scope: Default::default(),
     }
 }
 
@@ -4126,5 +4128,150 @@ mod member_tests {
         let rows = run_all(&planned, &Fake::default(), 2);
         let v = verdicts(&rows);
         assert!(passed(&v["tests crates"]) && passed(&v["tests-linux crates + tools/paddock-dev"]));
+    }
+
+    /// The Linux run tests only the code that behaves differently per OS (user, 2026-11-25), as CI's host legs place it (`hostTests`,
+    /// derived from the code): a pure workspace or a change that reaches no OS-conditional package pays nothing beyond its macOS run.
+    mod os_scope {
+        use super::*;
+        use crate::host_tests::{Derived, HostScope};
+        use crate::pre_push::gates::OsScope;
+
+        fn marked(packages: &[&str], filter: &str) -> Result<OsScope, String> {
+            Ok(OsScope::Marked(HostScope {
+                packages: packages.iter().map(|p| p.to_string()).collect(),
+                filter: filter.into(),
+            }))
+        }
+
+        fn with(scopes: &[(&str, Result<OsScope, String>)]) -> Facts {
+            let mut f = member();
+            f.reached.insert(
+                "crates".into(),
+                BTreeSet::from(["paddock-proc".to_string(), "paddock-chromium".to_string()]),
+            );
+            for (ws, s) in scopes {
+                f.os_scope.insert(ws.to_string(), s.clone());
+            }
+            f
+        }
+
+        fn skip_reason(planned: &[Planned], id: &str) -> Option<String> {
+            planned.iter().find_map(|p| match p {
+                Planned::Skip { id: i, reason } if i == id => Some(reason.clone()),
+                _ => None,
+            })
+        }
+
+        #[test]
+        fn only_the_reached_packages_with_os_conditional_code_run_in_the_container() {
+            let facts = with(&[
+                ("crates", marked(&["paddock-proc", "paddock-env"], "")),
+                ("tools/paddock-dev", Ok(OsScope::Unmarked)),
+            ]);
+            let planned = plan_gates(&plan2(), &change(FILES), &facts);
+            let linux = by(&planned, "tests-linux ");
+            assert_eq!(linux.id, "tests-linux crates", "the pure workspace left the container run");
+            let command = linux.args.last().unwrap();
+            assert!(
+                command.contains("--all-features -E 'package(=paddock-proc)')"),
+                "paddock-chromium is reached but pure; paddock-env is marked but not reached: {command}"
+            );
+            let why = skip_reason(&planned, "tests-linux tools/paddock-dev").expect("the pure workspace is named");
+            assert!(why.contains("no OS-conditional code"), "{why}");
+            // Its macOS run is unchanged: every reached package.
+            assert!(
+                by(&planned, "tests crates")
+                    .args
+                    .join(" ")
+                    .ends_with("package(=paddock-proc) | package(=paddock-chromium)")
+            );
+            assert!(ids(&planned).contains(&"tests tools/paddock-dev".to_string()));
+        }
+
+        #[test]
+        fn a_change_that_reaches_no_marked_package_runs_no_container() {
+            let facts = with(&[
+                ("crates", marked(&["paddock-env"], "")),
+                ("tools/paddock-dev", Ok(OsScope::Unmarked)),
+            ]);
+            let planned = plan_gates(&plan2(), &change(FILES), &facts);
+            assert!(!ids(&planned).iter().any(|i| i.starts_with("tests-linux")), "{:?}", ids(&planned));
+            let why = skip_reason(&planned, "tests-linux crates").expect("named");
+            assert!(
+                why.contains("reaches no package with OS-conditional code") && why.contains("paddock-proc"),
+                "{why}"
+            );
+            // The positive control: the same change with paddock-proc marked starts the container.
+            let facts = with(&[
+                ("crates", marked(&["paddock-proc"], "")),
+                ("tools/paddock-dev", Ok(OsScope::Unmarked)),
+            ]);
+            assert_eq!(
+                by(&plan_gates(&plan2(), &change(FILES), &facts), "tests-linux ").id,
+                "tests-linux crates"
+            );
+        }
+
+        #[test]
+        fn a_module_placed_workspace_runs_its_marked_modules_and_an_unscoped_one_runs_everything() {
+            let facts = with(&[("tools/paddock-dev", marked(&[], "test(/^(?:pre_push::)/)"))]);
+            let planned = plan_gates(&plan2(), &change(FILES), &facts);
+            let command = by(&planned, "tests-linux ").args.last().unwrap().clone();
+            assert!(command.contains("--workspace -E 'test(/^(?:pre_push::)/)')"), "{command}");
+            // crates has no entry: unscoped, fail closed, every reached package (CI's member filter).
+            assert!(
+                command.contains("--all-features -E 'package(=paddock-proc) | package(=paddock-chromium)')"),
+                "{command}"
+            );
+        }
+
+        #[test]
+        fn an_unreadable_contract_is_a_broken_row_and_a_changed_guardian_still_runs_as_uid_65534() {
+            let facts = with(&[
+                ("crates", Err("crates/paddock.ci.json: `hostTests` must be an object".into())),
+                ("tools/paddock-dev", Ok(OsScope::Unmarked)),
+            ]);
+            let planned = plan_gates(&plan2(), &change(FILES), &facts);
+            assert!(
+                planned
+                    .iter()
+                    .any(|p| matches!(p, Planned::Broken { id, cause, .. } if id == "tests-linux crates" && cause.contains("hostTests"))),
+                "{planned:?}"
+            );
+            let facts = with(&[("crates", Ok(OsScope::Unmarked))]);
+            let planned = plan_gates(&plan2(), &change(&["crates/paddock-proc/src/guardian/unix.rs"]), &facts);
+            let linux = by(&planned, "tests-linux ");
+            assert_eq!(linux.id, "tests-linux guardian-as-user");
+            let command = linux.args.last().unwrap();
+            assert!(!command.contains("nextest run"), "{command}");
+            assert!(command.contains("guardian-as-user.sh"), "{command}");
+        }
+
+        #[test]
+        fn the_scope_comes_from_the_contract_and_the_derived_placement() {
+            let derived = Derived {
+                packages: BTreeSet::from(["paddock-proc".to_string()]),
+                known_packages: BTreeSet::from(["paddock-proc".to_string(), "paddock-text".to_string()]),
+                ..Derived::default()
+            };
+            let none = Derived {
+                known_packages: derived.known_packages.clone(),
+                ..Derived::default()
+            };
+            assert_eq!(OsScope::of(&json!({}), "c.json", &derived), Ok(OsScope::Unscoped));
+            assert_eq!(
+                OsScope::of(&json!({"hostTests": {}}), "c.json", &derived),
+                marked(&["paddock-proc"], "")
+            );
+            assert_eq!(OsScope::of(&json!({"hostTests": {}}), "c.json", &none), Ok(OsScope::Unmarked));
+            // A host's own `only` entry is not the second OS's.
+            let only = json!({"hostTests": {"only": [{"os": "macos-latest", "name": "paddock-proc", "reason": "a tool of the dev Mac"}]}});
+            assert_eq!(OsScope::of(&only, "c.json", &derived), Ok(OsScope::Unmarked));
+            assert!(
+                OsScope::of(&json!({"hostTests": []}), "c.json", &derived).is_err(),
+                "never unscoped by a typo"
+            );
+        }
     }
 }

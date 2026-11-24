@@ -57,6 +57,20 @@ pub struct HostScope {
     pub filter: String,
 }
 
+impl HostScope {
+    /// The scope as one nextest filterset (its packages as `package(=a) | package(=b)`, and its filter); empty when it selects
+    /// nothing in particular (every test).
+    pub fn filterset(&self) -> String {
+        let packages = self
+            .packages
+            .iter()
+            .map(|p| format!("package(={p})"))
+            .collect::<Vec<_>>()
+            .join(" | ");
+        and_filters(&packages, &self.filter)
+    }
+}
+
 fn is_prefix(entry: &str) -> bool {
     entry.ends_with("::")
 }
@@ -162,7 +176,16 @@ impl HostTests {
         if os == LINUX {
             return HostScope::default();
         }
-        let extra = self.only.get(os).map(Vec::as_slice).unwrap_or(&[]);
+        self.scope_with(self.only.get(os).map(Vec::as_slice).unwrap_or(&[]))
+    }
+
+    /// The packages and filterset of the code that behaves differently per OS, without any one host's own `only` entries: what the
+    /// member gate's Linux container run tests beside its macOS run (user, 2026-11-25).
+    pub fn common_scope(&self) -> HostScope {
+        self.scope_with(&[])
+    }
+
+    fn scope_with(&self, extra: &[String]) -> HostScope {
         let mut packages = self.packages.clone();
         let mut modules = self.modules.clone();
         for e in extra {

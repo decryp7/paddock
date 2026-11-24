@@ -150,6 +150,40 @@ pub struct Facts {
     pub test_filters: std::collections::BTreeMap<String, String>,
     /// The nextest configuration file an app's contract names (`nextestConfig`, repository-relative), by workspace.
     pub nextest_config: std::collections::BTreeMap<String, String>,
+    /// The packages each workspace's change reaches, where [`Facts::test_filters`] narrows to them (absent: every package).
+    pub reached: std::collections::BTreeMap<String, BTreeSet<String>>,
+    /// What the member gate's Linux run tests of each workspace: the code that behaves differently per OS, as the CI contract's
+    /// `hostTests` places it (derived from the code, [`crate::os_placement`]). Absent: [`OsScope::Unscoped`] (fail closed: every test);
+    /// `Err`: the contract cannot be read (the row is broken).
+    pub os_scope: std::collections::BTreeMap<String, Result<OsScope, String>>,
+}
+
+/// What the code of one workspace says about its tests on a second OS (user, 2026-11-25: the Linux run covers only crates with
+/// OS-conditional code, found from the code, never a hand list, ER-42).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OsScope {
+    /// The contract declares no `hostTests`: every test is placed on every OS, so the Linux run tests them all.
+    Unscoped,
+    /// The packages and test-name prefixes whose code behaves differently per OS (`hostTests` with its exceptions, without any one
+    /// host's own `only` entries).
+    Marked(crate::host_tests::HostScope),
+    /// Nothing in the workspace behaves differently per OS: its macOS run is its only local run.
+    Unmarked,
+}
+
+impl OsScope {
+    /// The scope of a workspace from its CI contract and the placement derived from its code ([`crate::host_tests::read`], the one place
+    /// the two meet). A malformed contract is an error, never "unscoped" or "unmarked".
+    pub fn of(contract: &Value, what: &str, derived: &crate::host_tests::Derived) -> Result<OsScope, String> {
+        if crate::host_tests::Exceptions::parse(contract, what)?.is_none() {
+            return Ok(OsScope::Unscoped);
+        }
+        // A placement of one host's own entries alone selects nothing for the second OS (an empty scope would read as "every test").
+        Ok(match crate::host_tests::read(contract, what, derived)?.map(|h| h.common_scope()) {
+            Some(scope) if !scope.filterset().is_empty() => OsScope::Marked(scope),
+            _ => OsScope::Unmarked,
+        })
+    }
 }
 
 /// The files of the orphan guardian (paddock-proc): a change to one adds the guardian's acting tests as uid 65534 to the member gate's
@@ -905,10 +939,10 @@ fn member_audits(facts: &Facts) -> Planned {
 /// itself; here a test row runs beside up to two other rows, and the Linux container has `PADDOCK_LINUX_CPUS` (4) cores.
 const MEMBER_TEST_THREADS: &str = "4";
 
-/// `nextest run` with CI's `ci` profile for workspace `ws`: every test of the workspace, or the plan's reached packages as CI's member
-/// run narrows them ([`Facts::test_filters`]); every feature in `crates`, as CI's crates job; an app's own nextest configuration.
-/// `--no-tests=fail`: a selection of nothing is a failure, never a pass (ER-33).
-fn nextest_args(ws: &str, facts: &Facts, exclude: &[String]) -> Vec<String> {
+/// `nextest run` with CI's `ci` profile for workspace `ws`: the tests `filter` selects (empty: every test of the workspace); every
+/// feature in `crates`, as CI's crates job; an app's own nextest configuration. `--no-tests=fail`: a selection of nothing is a failure,
+/// never a pass (ER-33).
+fn nextest_args(ws: &str, facts: &Facts, exclude: &[String], filter: &str) -> Vec<String> {
     let mut args = strs(&[
         "nextest",
         "run",
@@ -929,10 +963,53 @@ fn nextest_args(ws: &str, facts: &Facts, exclude: &[String]) -> Vec<String> {
         let up = "../".repeat(ws.split('/').filter(|p| !p.is_empty()).count());
         args.extend(["--config-file".to_string(), format!("{up}{cfg}")]);
     }
-    if let Some(f) = facts.test_filters.get(ws).filter(|f| !f.trim().is_empty()) {
-        args.extend(["-E".to_string(), f.clone()]);
+    if !filter.trim().is_empty() {
+        args.extend(["-E".to_string(), filter.to_string()]);
     }
     args
+}
+
+/// The tests of `ws` its host run selects: the plan's reached packages as CI's member run narrows them ([`Facts::test_filters`]).
+fn reached_filter<'a>(ws: &str, facts: &'a Facts) -> &'a str {
+    facts.test_filters.get(ws).map(String::as_str).unwrap_or("")
+}
+
+/// Why the Linux run leaves a workspace out.
+enum LinuxOff {
+    /// Nothing there to test a second time (the reason).
+    Skip(String),
+    /// Its contract cannot be read (the cause).
+    Broken(String),
+}
+
+/// What the Linux run tests of `ws`: `Ok(filter)` (empty: every test), or why it leaves the workspace out: nothing there behaves
+/// differently per OS, or the change reaches none of what does.
+fn linux_selection(ws: &str, facts: &Facts) -> Result<String, LinuxOff> {
+    let reached = reached_filter(ws, facts);
+    let scope = match facts.os_scope.get(ws) {
+        None | Some(Ok(OsScope::Unscoped)) => return Ok(reached.to_string()),
+        Some(Ok(OsScope::Unmarked)) => {
+            return Err(LinuxOff::Skip(
+                "no OS-conditional code: the OS placement derived from its code (`hostTests`) marks nothing, so its macOS run covers it"
+                    .into(),
+            ));
+        }
+        Some(Ok(OsScope::Marked(scope))) => scope,
+        Some(Err(e)) => return Err(LinuxOff::Broken(e.clone())),
+    };
+    let mut scope = scope.clone();
+    if let Some(hit) = facts.reached.get(ws).filter(|_| !scope.packages.is_empty()) {
+        // A workspace placed by package: only the reached packages with OS-conditional code; the reached filter is then implied.
+        scope.packages.retain(|p| hit.contains(p));
+        if scope.packages.is_empty() {
+            return Err(LinuxOff::Skip(format!(
+                "the change reaches no package with OS-conditional code (reached: {}); their macOS run covers it",
+                hit.iter().cloned().collect::<Vec<_>>().join(" ")
+            )));
+        }
+        return Ok(scope.filterset());
+    }
+    Ok(crate::host_tests::and_filters(reached, &scope.filterset()))
 }
 
 fn guardian_touched(change: &Change) -> bool {
@@ -942,7 +1019,9 @@ fn guardian_touched(change: &Change) -> bool {
 /// The member gate's tests (user, 2026-11-25): the full nextest `ci` profile of every Cargo workspace the member touches (the Linux
 /// Clippy's candidates: a workspace with a changed file of its own, documentation aside), on this host (`tests <ws>`) and in the Linux
 /// CI image (`tests-linux ...`, one container run, `--rm` with CPU and memory limits, the Linux Clippy's kept build folders), plus the
-/// orphan guardian's acting tests as uid 65534 when the guardian changed. Six members passed their own checks and failed on another OS
+/// orphan guardian's acting tests as uid 65534 when the guardian changed. The Linux run covers only the reached code that behaves
+/// differently per OS ([`Facts::os_scope`]: the `hostTests` placement CI's host legs use, derived from the code); a pure workspace,
+/// or a change that reaches no OS-conditional package, is named and pays nothing beyond its macOS run. Six members passed their own checks and failed on another OS
 /// in CI (train 12, run 7485, trains b, c and d twice); this replaces the report-only other-OS row, which needed a scratch folder and
 /// never ran. Windows stays CI's. Only in the member gate (`--member-gate`): a developer's push skips them with the reason. An
 /// inactive app's rows are skipped and named. A missing nextest, container runtime or local CI image is not measured, never a pass.
@@ -993,7 +1072,7 @@ fn member_tests(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> {
                 "fix the test it names (its failed tests and first panic are above), then re-run the member gate".into(),
             )
         };
-        g.args = nextest_args(ws, facts, &[]);
+        g.args = nextest_args(ws, facts, &[], reached_filter(ws, facts));
         // The build folder goes in as cargo configuration after `run` (sccache hashes CARGO_* variables; nextest takes `--config`).
         if facts.target_dir.is_some() || facts.kept_targets.is_some() {
             g.args.splice(
@@ -1027,20 +1106,39 @@ fn member_tests(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> {
             ),
         });
     }
-    if targets.is_empty() {
+    // Only the code that behaves differently per OS is tested a second time; the rest is named with the reason (user, 2026-11-25).
+    let mut chosen: Vec<(LinuxTarget, String)> = Vec::new();
+    for t in targets {
+        match linux_selection(&t.ws, facts) {
+            Ok(filter) => chosen.push((t, filter)),
+            Err(LinuxOff::Skip(reason)) => out.push(Planned::Skip {
+                id: format!("tests-linux {}", t.ws),
+                reason,
+            }),
+            Err(LinuxOff::Broken(cause)) => out.push(Planned::Broken {
+                id: format!("tests-linux {}", t.ws),
+                cause,
+                next: "fix the `hostTests` of the workspace's paddock.ci.json (`./dev plan --explain` reads the same field)".into(),
+            }),
+        }
+    }
+    if chosen.is_empty() && !guardian {
         return out;
     }
-    out.push(Planned::Run(linux_tests_gate(&targets, &version, facts, guardian)));
+    out.push(Planned::Run(linux_tests_gate(&chosen, &version, facts, guardian)));
     out
 }
 
 /// The one container run of the member gate's Linux tests: each workspace's `ci` profile in `/target/v<version>/<workspace>` (the
 /// Linux Clippy's folder, so its dependencies are reused), then the guardian's acting tests as uid 65534 when `guardian`. A failing
 /// workspace does not hide the next one's tests.
-pub fn linux_tests_gate(targets: &[LinuxTarget], version: &str, facts: &Facts, guardian: bool) -> Gate {
+pub fn linux_tests_gate(chosen: &[(LinuxTarget, String)], version: &str, facts: &Facts, guardian: bool) -> Gate {
     let mut command = String::from("cargo nextest --version || exit 1; rc=0");
-    for t in targets {
-        let args: Vec<String> = nextest_args(&t.ws, facts, &t.left_out).iter().map(|a| shell_quote(a)).collect();
+    for (t, filter) in chosen {
+        let args: Vec<String> = nextest_args(&t.ws, facts, &t.left_out, filter)
+            .iter()
+            .map(|a| shell_quote(a))
+            .collect();
         command.push_str(&format!(
             "; (cd {ws} && CARGO_TARGET_DIR=/target/v{version}/{slug} NEXTEST_TEST_THREADS={MEMBER_TEST_THREADS} cargo {args}) || rc=1",
             ws = t.ws,
@@ -1056,10 +1154,15 @@ pub fn linux_tests_gate(targets: &[LinuxTarget], version: &str, facts: &Facts, g
         ));
     }
     command.push_str("; exit $rc");
-    let mut id = format!("tests-linux {}", targets_label(targets));
-    if guardian {
-        id.push_str(" + guardian-as-user");
+    let targets: Vec<LinuxTarget> = chosen.iter().map(|(t, _)| t.clone()).collect();
+    let mut parts: Vec<String> = Vec::new();
+    if !targets.is_empty() {
+        parts.push(targets_label(&targets));
     }
+    if guardian {
+        parts.push("guardian-as-user".into());
+    }
+    let id = format!("tests-linux {}", parts.join(" + "));
     let mut g = gate(
         id,
         "",
