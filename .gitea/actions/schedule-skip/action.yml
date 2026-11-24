@@ -20,6 +20,14 @@ outputs:
 runs:
   using: composite
   steps:
+    # ./dev's own binary first (ADR 0115): the call below builds the tool from source when it is not there (130-176 s, run 8576), and the
+    # plan job every other job needs is the job that seeds the cache, so the other jobs of a run on a new hash restore it. The restore
+    # sees the same token and download rule as the call below (conformance/test/ci-actions.test.mjs, the order over every job).
+    - name: ./dev tool cache
+      uses: ./.gitea/actions/dev-tool-cache
+      env:
+        PADDOCK_DEV_TOKEN: ${{ inputs.dev-token }}
+        PADDOCK_DEV_DOWNLOAD: ${{ startsWith(github.ref, 'refs/tags/') && '0' || '' }}
     - id: check
       shell: bash
       env:
