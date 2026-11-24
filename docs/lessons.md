@@ -3816,3 +3816,25 @@ first and records the second (`ci fix-items`) is part of the queued green-main w
   - Member 3's gate took about 4.5 hours, most of it queue time in the heavy queue (doctest rows queued up to 1624 s each, behind another
     agent's pre-push), and its gen row `notices-dyno` was NOT MEASURED because the train worktree had no `node_modules`: `./dev worktree
     add` does not run `npm ci`, so an integrator must run it before the first gate.
+
+## Assembling train 2026-11-25-b: fix items (2026-11-24)
+
+- **A fresh worktree lacks what the gates need (third instance, class).** Train 2026-11-25-a's gen row `notices-dyno` was NOT MEASURED
+  for want of `node_modules`; train 2026-11-25-b's `ts-debrief-wire` failed to link (`ld: library 'duckdb' not found`: no
+  `apps/debrief/.cargo/libduckdb.toml`, written by `cargo xtask libduckdb`), and `publish-dry-run` was NOT MEASURED for want of
+  `ui/dist/paddock-ui` and then `ui/dist/paddock-e2e`; the graph train had the libduckdb miss too (section above). Fix: `./dev worktree
+  add --profile gates` prepares them itself (`npm ci`, `cargo xtask libduckdb`, `npm run build -w ui`, `npm run build:e2e -w ui`), or each
+  gen row names the exact setup command in its NOT MEASURED line.
+- **A gate row that runs nextest keeps only its exit code.** Both `member-audits` failures on this train (`exit 100`) named no test in
+  the gate's log or JSON, so the profile had to run again to learn which test failed. Fix: the row keeps nextest's failed test names and
+  their panic lines in its output and JSON.
+- **A build folder inside the checkout.** A gate built tools/wiki into `tools/wiki/target` inside train 2026-11-25-b's worktree (319 MB);
+  it showed as untracked once chore/cut-ci-and-gates deleted tools/wiki with its `.gitignore`. Builds never write inside the checkout
+  (ER-51): the row that builds a workspace passes it a build folder outside.
+- **Members fixed on the train (by the coordinator's call, small and deterministic):** feat/gates-active-apps failed C122 rule B in its
+  new `tests/it/doctests_off.rs` (a `.replace('\\', "/")` path fold, both tries), fixed with `paddock_testkit::path::text`;
+  chore/conformance-flip-and-drop's new C123 sample named the binary's env name as text, so the dev_bin audit failed, fixed by joining
+  the name as C123's own samples do. Both were the members' own code, which their branch pre-push did not run (member-audits runs on
+  the merged tree only).
+- **Skipped:** feat/check-result-reuse (f67b7f6a1, based before the push gate's rework) conflicts in `pre_push/exec.rs`: its reuse hook
+  calls the BudgetClock model that the train's push gate no longer has. It goes to train c after its branch merges main.
