@@ -1191,17 +1191,6 @@ adr = "docs/adr/0022-rust-developer-and-ci-tool.md"
   note = "CI-in-Rust WP-3 (docs/plans/ci-in-rust.md): the script stays for tag, release and rule 54 runs (conformance/ci/kit.sh `build-env` picks the implementation by the kit's rule, as for the other kit steps) and for conformance check C56, which reads the two names from its `buildEnv` function (conformance/src/checks/C56-build-env-names.mjs), until the conformance engine (WP-10) and the release path (WP-11) are ported; tools/paddock-dev/tests/it/build_env.rs runs both on the same inputs."
 
 # =====================================================================================================================
-# CI run readers (RT-8)
-# =====================================================================================================================
-
-[[mechanism]]
-id = "ci-timings"
-title = "CI timings from the Gitea Actions API: wall time, delay, runners, step categories, critical path, log phases"
-canonical = "tools/paddock-dev"
-paths = ["tools/paddock-dev/src/ci_runs/timings.rs"]
-status = "built"
-
-# =====================================================================================================================
 # Environment overrides in a shipped build
 # =====================================================================================================================
 

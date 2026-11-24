@@ -162,11 +162,6 @@ files = ["docs/known-copies.toml"]
 reaches = ["project:tools", "project:conformance"]
 
 [[input]]
-name = "harnesses"
-files = ["docs/harnesses.toml"]
-reaches = ["project:conformance"]
-
-[[input]]
 name = "ipc-endpoints"
 files = ["docs/ipc-endpoints.toml", "docs/ipc-endpoint-ratchet.toml"]
 reaches = ["project:conformance"]
@@ -203,11 +198,6 @@ reaches = ["project:conformance"]
 [[input]]
 name = "doc-images"
 files = ["docs/images/src/**", "docs/design/**", "**/*.drawio", "docs/**/svg/*.svg", "diagrams/**/svg/*.svg", "docs/images/*.svg"]
-reaches = ["project:tools"]
-
-[[input]]
-name = "wiki"
-files = ["docs/wiki/**"]
 reaches = ["project:tools"]
 
 [[input]]
@@ -275,7 +265,7 @@ reaches = ["project:tools", "project:paddock-dev"]
 
 [[input]]
 name = "repo-tooling"
-files = ["renovate/**", "/renovate.json", "/CODEOWNERS", "/wiki-lint.json", ".claude/hooks/**", ".claude/settings.json", "/lefthook.yml"]
+files = ["renovate/**", "/renovate.json", "/CODEOWNERS", ".claude/hooks/**", ".claude/settings.json", "/lefthook.yml"]
 reaches = ["project:tools"]
 
 [[input]]

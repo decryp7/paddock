@@ -1,7 +1,7 @@
 use crate::{
-    audit, brief_check, check, check_ids, ci_build_env, ci_build_jobs, ci_host, ci_isolation, ci_run, ci_runs, ci_rust_pin, ci_s3_guard,
-    ci_setup_rust, disk, gates, generators, golden_cmd, heavy_cmd, heavy_install, hook, input_hash, ipc_endpoints, lessons_driver, load,
-    local_sccache, locks, locks_guard, merge_check, places, plan, plan_cmd, pr, pre_push, queue, release_isolation, slots, wait, worktree,
+    audit, check, check_ids, ci_build_env, ci_build_jobs, ci_host, ci_isolation, ci_run, ci_runs, ci_rust_pin, ci_s3_guard, ci_setup_rust,
+    disk, gates, generators, golden_cmd, heavy_cmd, heavy_install, hook, input_hash, ipc_endpoints, lessons_driver, load, local_sccache,
+    locks, locks_guard, merge_check, places, plan_cmd, pr, pre_push, queue, release_isolation, slots, wait, worktree,
 };
 use clap::{Args, Parser, Subcommand};
 use paddock_cli::{CliError, Exit, Format, Report, finish};
@@ -48,11 +48,6 @@ enum Command {
     /// The machine's dev folders, derived from `git config paddock.worktreeRoot` (docs/dev-setup.md): dev-targets, dev-disk,
     /// vm-data, lock-root and main-checkout; `--get <name>` prints one, `--pinned` ignores every environment variable.
     Places(places::PlacesArgs),
-    /// Briefs to agents: check one for the required fields and the known-bad patterns (templates/agents/brief-template.md).
-    Brief {
-        #[command(subcommand)]
-        command: brief_check::BriefCommand,
-    },
     /// C100 and the gate register (ADR 0060): is every check run somewhere?
     Gates {
         #[command(subcommand)]
@@ -111,8 +106,8 @@ enum Command {
         #[command(subcommand)]
         command: queue::QueueCommand,
     },
-    /// The CI planner: which projects a change reaches, the CI matrix and the commit lint's range (the port of
-    /// the retired scripts/affected.mjs; the arguments are its: <base> [<head>], --files a,b, --all, --ci [--app x], --commit-range, --commit-flags, --explain).
+    /// The CI planner: which projects a change reaches and the CI matrix (the port of the retired scripts/affected.mjs; the
+    /// arguments are its: <base> [<head>], --files a,b, --all, --ci [--app x], --explain, and --since-run <run>).
     /// It prints no JSON object: `--json` is refused.
     Plan(PlanArgs),
     /// Merge checks.
@@ -124,11 +119,6 @@ enum Command {
     Gen {
         #[command(subcommand)]
         command: GenCommand,
-    },
-    /// The project graph.
-    Graph {
-        #[command(subcommand)]
-        command: GraphCommand,
     },
     /// Claude Code hooks (ADR 0083). Run by the installed copy, never through `./dev`.
     Hook {
@@ -156,8 +146,6 @@ enum HooksCommand {
 
 #[derive(Subcommand)]
 enum CheckCommand {
-    /// The probe of the primary checkout (ADR 0083): on main, no local-only commit, no tracked change, owners match locks. Exit 5: a problem; exit 6: only checks that could not run (not measured). Liveness is measured only with --live.
-    Primary(worktree::PrimaryArgs),
     /// The repository checks ported to Rust so far (C39, C53; RT-5): findings, expiring waivers from paddock.waivers.toml, a run
     /// record per check (`not measured` is told from `clean`). The report JSON has the shape of paddock-conformance's, plus `runs`.
     Run {
@@ -380,23 +368,16 @@ enum CiCommand {
         #[command(subcommand)]
         command: release_isolation::Command,
     },
-    /// The tests CI marked flaky (nextest, Playwright), vitest's failed specs and tests that failed and then passed on a
-    /// rerun of the same commit, over a window of runs. An incomplete measurement ("not measured") exits 1 for now;
-    /// flaky tests found exit 5 only with --fail-on-flakes;
-    /// cancelled runs are counted and listed but never change the exit code.
-    Flakes(ci_runs::FlakesArgs),
     /// The arguments of CI's conformance line (`--app paddock ... --only ...`, after `node conformance/bin/paddock-conformance.mjs`... as
     /// one line), read from .gitea/workflows/ci.yml by the one reader the push gate uses (ADR 0098 WP-2). Exit 6 when the
     /// workflow has no single such line.
     ConformanceArgs(ConformanceArgsArgs),
     /// For each failed test of a finished run: NEW, ALREADY FAILING ON MAIN (the last main run of the same workflow) or FLAKY (its
-    /// `ci flakes` history). UNKNOWN when nothing proves either way. Read-only: it never quarantines or marks anything green (ER-12).
+    /// flake history). UNKNOWN when nothing proves either way. Read-only: it never quarantines or marks anything green (ER-12).
     Triage(ci_runs::TriageArgs),
     /// Record finished runs as test fixtures (run, jobs, failed-job logs), with people, e-mail addresses, avatars and runner names
     /// replaced by invented values on capture. Conformance C110 fails a fixture that holds a real one.
     RecordFixture(ci_runs::RecordArgs),
-    /// Real CI timings of the family from the Gitea API (the script scripts/ci-timings.mjs it replaced is retired; the recorded golden is the reference).
-    Timings(ci_runs::TimingsArgs),
     /// The cost classes of paddock-dev's tests against what they took (ADR 0121): per class the longest test, and every unclassed test
     /// over a quarter of its stop, from a run's job logs or a saved nextest output. Report-only (exit 0) unless --fail-on-findings (5);
     /// 6 when no whole nextest run of paddock-dev was read.
@@ -454,9 +435,6 @@ enum SlotCommand {
 
 #[derive(Subcommand)]
 enum LocksCommand {
-    /// Every Cargo.lock resolves `--locked`, the npm lockfile is in sync with its package.json and the workspace hack is
-    /// current. One `::error::` per stale file with the fix; exits 5 (findings) when any is stale.
-    Check(LocksArgs),
     /// Regenerate them (ER-40: never by hand): cargo hakari (manage-deps, generate), `cargo update --workspace`, `npm install --package-lock-only`.
     Sync(LocksArgs),
     /// The shared-crate dependency guard: the workspace hack, the resolved features of the watched crates (docs/shared-crate-features.toml)
@@ -547,12 +525,6 @@ struct GatesRootArgs {
     root: Option<PathBuf>,
 }
 
-#[derive(Subcommand)]
-enum GraphCommand {
-    /// The projects a change reaches (the core of the retired scripts/affected.mjs).
-    Affected(AffectedArgs),
-}
-
 #[derive(Args)]
 struct PlanArgs {
     /// The repository root (default: the folder containing .git, found from the current folder).
@@ -561,27 +533,6 @@ struct PlanArgs {
     /// The planner's own arguments, as the retired scripts/affected.mjs took them.
     #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
     args: Vec<String>,
-}
-
-#[derive(Args)]
-struct AffectedArgs {
-    /// Changed files, comma separated (instead of a base).
-    #[arg(long, value_delimiter = ',', conflicts_with_all = ["all", "base"])]
-    files: Vec<String>,
-    /// Everything (what a tag or nightly runs).
-    #[arg(long, conflicts_with = "base")]
-    all: bool,
-    /// Give the reason for every project.
-    #[arg(long)]
-    explain: bool,
-    /// The repository root (default: the folder containing .git, found from the current folder).
-    #[arg(long)]
-    root: Option<PathBuf>,
-    /// The base revision.
-    base: Option<String>,
-    /// The head revision.
-    #[arg(default_value = "HEAD", requires = "base")]
-    head: String,
 }
 
 /// Runs the tool: `args` are the command line without the program name. Returns the exit code.
@@ -711,14 +662,7 @@ pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
         other => other,
     };
     let result = dispatch(command);
-    // A probe whose only problems are checks that could not run ends with `worktree::EXIT_NOT_MEASURED` (ER-33).
-    let not_measured_only = result.as_ref().is_ok_and(|r| r.data["not_measured_only"] == true);
-    let code = finish(if cli.json { Format::Json } else { Format::Text }, result, out, err);
-    if not_measured_only && code == Exit::Findings {
-        worktree::EXIT_NOT_MEASURED
-    } else {
-        code.code()
-    }
+    finish(if cli.json { Format::Json } else { Format::Text }, result, out, err).code()
 }
 
 fn dispatch(command: Command) -> Result<Report, CliError> {
@@ -762,9 +706,6 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
             command: CiCommand::ReleaseIsolation { command },
         } => release_isolation::command(command),
         Command::Ci {
-            command: CiCommand::Flakes(a),
-        } => ci_runs::flakes(&a),
-        Command::Ci {
             command: CiCommand::RecordFixture(a),
         } => ci_runs::record::command(&a),
         Command::Ci {
@@ -789,9 +730,6 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
         Command::Ci {
             command: CiCommand::Triage(a),
         } => ci_runs::triage(&a),
-        Command::Ci {
-            command: CiCommand::Timings(a),
-        } => ci_runs::timings(&a),
         Command::Ci {
             command: CiCommand::TestCost(a),
         } => ci_runs::test_cost(&a),
@@ -834,11 +772,7 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
         Command::Golden { command } => golden_cmd::command(command),
         Command::Load(a) => load::command(&a),
         Command::Places(a) => places::command(&a),
-        Command::Brief { command } => brief_check::command(command),
         Command::Audit { command } => audit::command(command),
-        Command::Locks {
-            command: LocksCommand::Check(a),
-        } => locks::check(a.root),
         Command::Locks {
             command: LocksCommand::Sync(a),
         } => locks::sync(a.root),
@@ -908,9 +842,6 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
         Command::Check {
             command: CheckCommand::IpcEndpoints { tag, root },
         } => ipc_endpoints::command(root, tag),
-        Command::Check {
-            command: CheckCommand::Primary(a),
-        } => worktree::check_primary(&a),
         Command::Worktree { command } => worktree::command(command),
         Command::Sccache {
             command: SccacheCommand::Env,
@@ -956,16 +887,6 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
         Command::Hooks {
             command: HooksCommand::Install(a),
         } => hook::install::command(&a),
-        Command::Graph {
-            command: GraphCommand::Affected(a),
-        } => plan::command(&plan::Request {
-            files: a.files,
-            all: a.all,
-            explain: a.explain,
-            root: a.root,
-            base: a.base,
-            head: a.head,
-        }),
     }
 }
 

@@ -1,5 +1,5 @@
-// ci-runs-reader: ci flakes: flaky tests over a window of runs
-//! `ci flakes`: the tests CI marked flaky or saw fail, over a window of runs (ADR 0082 D6).
+// ci-runs-reader: flaky tests over a window of runs (the history of ci triage)
+//! The tests CI marked flaky or saw fail, over a window of runs (ADR 0082 D6): the flake history that `ci triage` reads.
 //!
 //! What counts, per test and per run (a run counts once however many jobs, attempts or retries show the test):
 //!
@@ -17,7 +17,6 @@
 use super::client::{Client, RunInfo, TimedJob};
 use super::logfind;
 use super::time::{date_of, parse_ms};
-use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 /// The most pages of the run list read (50 runs a page); a window that needs more is reported incomplete.
@@ -34,17 +33,6 @@ pub enum Kind {
     VitestFailed,
     /// Failed, then passed on a later attempt or a rerun of the same commit.
     FailedThenPassed,
-}
-
-impl Kind {
-    fn name(self) -> &'static str {
-        match self {
-            Kind::Flaky => "flaky",
-            Kind::Failed => "failed",
-            Kind::VitestFailed => "vitest-failed",
-            Kind::FailedThenPassed => "failed-then-passed",
-        }
-    }
 }
 
 /// One test of the report.
@@ -73,7 +61,7 @@ pub struct NotMeasured {
     pub why: String,
 }
 
-/// Where the window ends (`--until`).
+/// Where the window ends.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Until {
     /// Now.
@@ -82,21 +70,6 @@ pub enum Until {
     Date(String),
     /// The newest run whose commit starts with this.
     Commit(String),
-}
-
-impl Until {
-    /// `--until` as typed: a date, else a commit prefix (at least 7 hex digits).
-    pub fn parse(s: &str) -> Result<Until, String> {
-        if s.len() == 10 && parse_ms(&format!("{s}T00:00:00Z")).is_some() {
-            Ok(Until::Date(s.to_string()))
-        } else if s.len() >= 7 && s.chars().all(|c| c.is_ascii_hexdigit()) {
-            Ok(Until::Commit(s.to_ascii_lowercase()))
-        } else {
-            Err(format!(
-                "--until \"{s}\" is neither a date (YYYY-MM-DD) nor a commit of at least 7 hex digits"
-            ))
-        }
-    }
 }
 
 /// What to measure.
@@ -157,62 +130,6 @@ impl Report {
         self.not_measured.is_empty() && self.gaps.is_empty() && self.runs > 0
     }
 
-    /// The report as text for people.
-    pub fn text(&self) -> String {
-        let mut l = vec![format!(
-            "{}: flaky and failed tests {} to {} ({} days, {}); {} runs, {} failed job logs read",
-            self.app, self.since, self.until, self.days, self.repo, self.runs, self.logs_read
-        )];
-        if self.rows.is_empty() {
-            l.push(if self.complete() {
-                "no flaky or failed test found in the measured runs".into()
-            } else {
-                "no flaky or failed test found in the runs that could be measured (see below)".into()
-            });
-        } else {
-            let width = self.rows.iter().map(|r| r.name.chars().count()).max().unwrap_or(4).min(110);
-            l.push(format!(
-                "{:<width$}  {:<28}  {:>5}  {:>5}  last seen",
-                "test", "kinds", "count", "runs"
-            ));
-            for r in &self.rows {
-                let kinds = r.kinds.iter().map(|k| k.name()).collect::<Vec<_>>().join(",");
-                l.push(format!(
-                    "{:<width$}  {:<28}  {:>5}  {:>5}  {}",
-                    r.name, kinds, r.count, r.runs, r.last_seen
-                ));
-            }
-        }
-        if self.non_test_failures > 0 {
-            l.push(format!(
-                "{} failed job(s) failed outside any test runner (build, lint, setup) and are not counted",
-                self.non_test_failures
-            ));
-        }
-        if self.cancelled_not_read > 0 {
-            l.push(format!(
-                "{} cancelled run(s) not read (counted and listed here; they do not change the exit code)",
-                self.cancelled_not_read
-            ));
-        }
-        if !self.config_source.is_empty() {
-            l.push(format!("settings read from {}", self.config_source));
-        }
-        if self.runs == 0 {
-            l.push("NOT MEASURED: no finished run of this app in the window, so this says nothing about flakes".into());
-        }
-        for g in &self.gaps {
-            l.push(format!("NOT MEASURED: {g}"));
-        }
-        for n in &self.not_measured {
-            l.push(format!("NOT MEASURED: run {} job {}: {}", n.run, n.job, n.why));
-        }
-        if !self.complete() {
-            l.push("The list is incomplete: a gap above is not evidence of no flakes (ER-33).".into());
-        }
-        l.join("\n")
-    }
-
     /// The text of the `::error::` annotation of an incomplete measurement: the cause and the next step.
     pub fn error_line(&self) -> String {
         let mut causes: Vec<String> = Vec::new();
@@ -230,38 +147,11 @@ impl Report {
             ));
         }
         format!(
-            "ci flakes {}: not measured: {}. Next step: fix the cause or widen --days, then run it again; \
+            "flake history of {}: not measured: {}. Next step: fix the cause or widen the window (`ci triage --days`), then run it again; \
              an incomplete list is not evidence of no flakes.",
             self.app,
             causes.join("; ")
         )
-    }
-
-    /// The report as JSON.
-    pub fn json(&self) -> Value {
-        json!({
-            "app": self.app,
-            "repo": self.repo,
-            "days": self.days,
-            "since": self.since,
-            "until": self.until,
-            "runs": self.runs,
-            "logsRead": self.logs_read,
-            "complete": self.complete(),
-            "flakes": self.rows.iter().map(|r| json!({
-                "name": r.name,
-                "kinds": r.kinds.iter().map(|k| k.name()).collect::<Vec<_>>(),
-                "count": r.count,
-                "runs": r.runs,
-                "lastSeen": r.last_seen,
-            })).collect::<Vec<_>>(),
-            "nonTestFailures": self.non_test_failures,
-            "neverRan": self.never_ran,
-            "cancelledNotRead": self.cancelled_not_read,
-            "configSource": self.config_source,
-            "notMeasured": self.not_measured.iter().map(|n| json!({"run": n.run, "job": n.job, "why": n.why})).collect::<Vec<_>>(),
-            "gaps": self.gaps,
-        })
     }
 }
 
@@ -592,9 +482,8 @@ fn rerun_passed(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ci_runs::exit_of;
     use crate::ci_runs::testutil::Fake;
-    use paddock_cli::Exit;
+    use serde_json::{Value, json};
 
     // Real captured output of cargo-nextest 0.9.151 and @playwright/test 1.64.1 (see each file's first line).
     const R1_FAIL: &str = include_str!("../../tests/ci-runs/nextest-r1-fail.log");
@@ -846,11 +735,6 @@ mod tests {
             r.gaps
         );
         assert!(!r.complete());
-        assert!(
-            r.text().contains("NOT MEASURED: 1 failed job(s) have no step timings"),
-            "{}",
-            r.text()
-        );
     }
 
     #[test]
@@ -927,27 +811,16 @@ mod tests {
         f.json(&jobs_url(116), jobs(&[(1161, "crate (macos-latest)", "cancelled")]));
         let r = measure(&mut f);
         assert_eq!(r.cancelled_not_read, 2, "runs 108 (own) and 115 (shared, with an app job)");
-        assert!(r.text().contains("2 cancelled run(s) not read"), "{}", r.text());
-        assert_eq!(r.json()["cancelledNotRead"], 2);
     }
 
     #[test]
-    fn the_exit_code_follows_completeness_first_and_findings_only_on_request() {
+    fn an_incomplete_report_has_an_error_line_with_the_cause_and_the_next_step() {
         let mut f = scenario();
         let incomplete = measure(&mut f);
         assert!(!incomplete.rows.is_empty() && !incomplete.complete());
-        assert_eq!(exit_of(&incomplete, true), Exit::Failure);
-        assert_eq!(exit_of(&incomplete, false), Exit::Failure);
-        let mut complete = incomplete.clone();
-        complete.not_measured.clear();
-        complete.gaps.clear();
-        assert_eq!(exit_of(&complete, true), Exit::Findings);
-        assert_eq!(exit_of(&complete, false), Exit::Ok);
-        complete.rows.clear();
-        assert_eq!(exit_of(&complete, true), Exit::Ok);
         let line = incomplete.error_line();
         assert!(
-            line.starts_with("ci flakes dyno: not measured: ") && line.contains("Next step: "),
+            line.starts_with("flake history of dyno: not measured: ") && line.contains("Next step: "),
             "{line}"
         );
     }
@@ -960,10 +833,6 @@ mod tests {
         assert_eq!(r.not_measured[0].run, 106);
         assert!(r.not_measured[0].why.contains("log could not be read"), "{:?}", r.not_measured);
         assert!(!r.complete());
-        let text = r.text();
-        assert!(text.contains("NOT MEASURED: run 106"), "{text}");
-        assert!(text.contains("not evidence of no flakes"), "{text}");
-        assert_eq!(r.json()["complete"], false);
         let e = r.error_line();
         assert!(e.contains("run 106") && e.contains("Next step"), "{e}");
         assert_eq!(r.non_test_failures, 1, "the lint failure is outside the tests");
@@ -991,7 +860,7 @@ mod tests {
         c.backoff_ms = 0;
         let msg = "Playwright flakes in passing jobs are not visible (no failOnFlakyTests)";
         let r = collect(&mut c, &request(vec![msg.into()]), &mut |_| {}).unwrap();
-        assert!(r.text().contains(&format!("NOT MEASURED: {msg}")));
+        assert!(r.gaps.contains(&msg.to_string()));
         assert!(!r.complete());
     }
 
@@ -1005,7 +874,6 @@ mod tests {
         let r = measure(&mut f);
         assert_eq!(r.runs, 0);
         assert!(!r.complete());
-        assert!(r.text().contains("NOT MEASURED: no finished run"), "{}", r.text());
     }
 
     #[test]
@@ -1018,11 +886,6 @@ mod tests {
         );
         let r = measure(&mut f);
         assert!(r.complete());
-        assert!(
-            r.text().contains("no flaky or failed test found in the measured runs"),
-            "{}",
-            r.text()
-        );
     }
 
     #[test]
@@ -1077,7 +940,7 @@ mod tests {
         c.backoff_ms = 0;
         // Until the end of 2026-11-05 (UTC), three days: runs 106 (02:00 UTC on the 5th) and 107 (the 4th).
         let mut req = request(Vec::new());
-        req.until = Until::parse("2026-11-05").unwrap();
+        req.until = Until::Date("2026-11-05".into());
         req.days = 3;
         let r = collect(&mut c, &req, &mut |_| {}).unwrap();
         assert_eq!((r.since.as_str(), r.until.as_str()), ("2026-11-03", "2026-11-05"));
@@ -1093,15 +956,5 @@ mod tests {
                 .unwrap_err()
                 .contains("no run of a commit starting with deadbeef")
         );
-        assert!(Until::parse("tomorrow").is_err());
-        assert_eq!(Until::parse("2026-11-05").unwrap(), Until::Date("2026-11-05".into()));
-        assert_eq!(Until::parse("67A633EF3").unwrap(), Until::Commit("67a633ef3".into()));
-    }
-
-    #[test]
-    fn the_token_is_never_in_the_text_or_the_json() {
-        let mut f = scenario();
-        let r = measure(&mut f);
-        assert!(!r.text().contains("s3cr3t") && !r.json().to_string().contains("s3cr3t"));
     }
 }

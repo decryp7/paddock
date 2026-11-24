@@ -3,7 +3,7 @@
 //!
 //! - [`gates`]: the plan and the changed files become gates (pure).
 //! - the conformance command comes from `conformance/paddock.ci.json` ([`crate::ci_run::contract::conformance_args_at`]): the one copy
-//!   of the check list, which CI's conformance and train-gates jobs run through `./dev ci run conformance paddock` (ADR 0038 §1).
+//!   of the check list, which CI's conformance job runs through `./dev ci run conformance paddock` (ADR 0038 §1).
 //! - [`exec`]: running them, with a fake for tests.
 //!
 //! What is checked. With `--refs-from-stdin` (the hook) exactly the commit being pushed: it is checked out in a throw-away worktree
@@ -481,10 +481,11 @@ fn command_in(
     };
     let queue_stall = queue_stall(&env);
     let history = GitHistory::new(&work, GIT_TIMEOUT);
+    // `explain`: the conformance-tests row reads why the change reaches conformance (plan::reaches_conformance).
     let req = Request {
         files: change.files.clone(),
         all: false,
-        explain: false,
+        explain: true,
         root: None,
         base: None,
         head: "HEAD".into(),

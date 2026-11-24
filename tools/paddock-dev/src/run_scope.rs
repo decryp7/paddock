@@ -320,12 +320,11 @@ pub fn scope_of(plan: &Value, legs: &[Value], webkit: bool, os_legs: &[String], 
             jobs.extend(os_legs.iter().map(|os| format!("{job}@{os}")));
         }
     }
-    // The reference-app jobs of ci.yml: Chromium whenever a UI is reached, WebKit with it when the planner says so.
-    if plan["ui"].as_bool() == Some(true) {
+    // The reference-app jobs of ci.yml (Chromium and WebKit) run when a UI is reached and the planner wants them (`webkit`: a tag,
+    // the nightly, a manual ask).
+    if plan["ui"].as_bool() == Some(true) && webkit {
         jobs.insert("e2e".to_string());
-        if webkit {
-            jobs.insert("e2e-webkit".to_string());
-        }
+        jobs.insert("e2e-webkit".to_string());
     }
     let ui_leg = legs
         .iter()
@@ -368,16 +367,16 @@ impl JobName {
 }
 
 /// The display names of the ci.yml jobs each project flag of a plan switches on (`plan_gitea::CI_JOBS` lists them by id; a test reads
-/// ci.yml and checks each prefix names a job there). Jobs whose `if` reads more than the plan (`commits`, `train-gates`, `audit`) are
+/// ci.yml and checks each prefix names a job there). Jobs whose `if` reads more than the plan (`audit`) are
 /// not here: a skipped one is not a scope that was not covered.
 pub const PROJECT_JOBS: &[(&str, &[&str])] = &[
     ("crates", &["crates ("]),
     ("ui", &["ui ("]),
-    ("eslint", &["eslint preset"]),
+    ("eslint", &["ui ("]),
     ("conformance", &["conformance ("]),
     ("c99", &["C99 ("]),
-    ("tools", &["tools and shared scripts", "wiki tool", "heavy tool"]),
-    ("icons", &["icons ("]),
+    ("tools", &["tools and shared scripts", "heavy tool"]),
+    ("icons", &["ui ("]),
     ("e2e", &["reference apps (shard"]),
     ("e2e-webkit", &["reference apps in WebKit"]),
 ];

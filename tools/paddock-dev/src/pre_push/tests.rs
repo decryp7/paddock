@@ -91,7 +91,6 @@ fn a_crates_change_reaches_every_gate_of_ci_er_9() {
         "clippy-linux apps/dyno (left out: dyno-app) + apps/pitwall (left out: pitwall-app) + crates",
         "conformance",
         "commit-lint",
-        "ipc-endpoints",
         "fmt apps/dyno",
         "clippy-windows apps/dyno",
         "pitwall-scripts",
@@ -160,7 +159,6 @@ fn a_crates_change_reaches_every_gate_of_ci_er_9() {
         by("commit-lint").args.join(" "),
         "conformance/bin/paddock-conformance.mjs commit-lint --range abc..HEAD"
     );
-    assert_eq!(by("ipc-endpoints").program, "/x/dev");
 }
 
 #[test]
@@ -233,7 +231,7 @@ fn the_rows_dev_runs_itself_are_not_measured_when_this_program_is_a_test_program
     };
     let unrelated = json!({"conformance": false, "apps": [], "packages": {}});
     let planned = plan_gates(&unrelated, &change(&["crates/paddock-proc/src/lib.rs"]), &f);
-    let rows = ["gates-register", "ipc-endpoints", "conformance", "conformance-tests"];
+    let rows = ["gates-register", "conformance", "conformance-tests"];
     assert!(!ids(&planned).iter().any(|i| rows.contains(&i.as_str())), "{planned:?}");
     for id in rows {
         assert!(
@@ -243,7 +241,7 @@ fn the_rows_dev_runs_itself_are_not_measured_when_this_program_is_a_test_program
             "{id} is not 'not measured' with the reason: {planned:?}"
         );
     }
-    // Positive control: with the program known, the same plan runs all four.
+    // Positive control: with the program known, the same plan runs all three.
     let known = plan_gates(&unrelated, &change(&["crates/paddock-proc/src/lib.rs"]), &facts());
     for id in rows {
         assert!(ids(&known).contains(&id.to_string()), "{id}: {known:?}");
@@ -1094,7 +1092,6 @@ fn the_table_names_what_ci_runs_that_this_gate_does_not() {
         "hakari",
         "machete",
         "cargo deny outside Pitwall",
-        "wiki lint",
         "TypeScript",
         "Linux Clippy of the apps' Tauri crates",
         "reached only through dependencies",
@@ -3804,4 +3801,34 @@ mod active_apps {
         let all = run_all(&plan_gates(&plan(), &change(FILES), &facts()), &Fake::default(), 2);
         assert_eq!(render("h", &all).data["inactive"], json!(0));
     }
+}
+
+#[test]
+fn the_conformance_tests_run_in_a_push_only_when_the_change_reaches_conformance_and_always_in_the_member_gate() {
+    let always = json!({"conformance": true, "apps": [], "packages": {}, "why": {"conformance": [crate::plan::CONFORMANCE_ALWAYS]}});
+    let change = change(&["apps/dyno/src/a.rs"]);
+    let push = Facts {
+        member_gate: false,
+        ..facts()
+    };
+    let skipped = plan_gates(&always, &change, &push);
+    assert!(!ids(&skipped).contains(&"conformance-tests".to_string()), "{skipped:?}");
+    assert!(
+        skipped
+            .iter()
+            .any(|p| matches!(p, Planned::Skip { id, .. } if id == "conformance-tests")),
+        "the row says why it did not run: {skipped:?}"
+    );
+    // The conformance row itself still runs on every push (ER-41).
+    assert!(ids(&skipped).contains(&"conformance".to_string()));
+    // Positive controls: a change the planner says reaches conformance runs them; the member gate runs them whatever changed; a plan
+    // without `why` (not made with explain) runs them too (fail closed).
+    let reached = json!({"conformance": true, "apps": [], "packages": {},
+        "why": {"conformance": ["conformance/src/checks/C79-orphan-guard-hooks.mjs", crate::plan::CONFORMANCE_ALWAYS]}});
+    assert!(ids(&plan_gates(&reached, &change, &push)).contains(&"conformance-tests".to_string()));
+    assert!(
+        ids(&plan_gates(&always, &change, &facts())).contains(&"conformance-tests".to_string()),
+        "the member gate"
+    );
+    assert!(ids(&plan_gates(&plan(), &change, &push)).contains(&"conformance-tests".to_string()));
 }

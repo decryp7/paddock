@@ -2,11 +2,11 @@
  "all": false,
  "crates": false,
  "ui": true,
- "eslint": false,
+ "eslint": true,
  "conformance": true,
  "c99": false,
  "tools": true,
- "icons": false,
+ "icons": true,
  "ciImage": false,
  "paddockDev": false,
  "docs": false,
@@ -28,6 +28,12 @@
   "conformance": [
    "ci files .gitea/actions/node-caches/action.yml",
    "conformance always runs"
+  ],
+  "eslint": [
+   ".gitea/actions/node-caches/action.yml used by ci.yml, job ui"
+  ],
+  "icons": [
+   ".gitea/actions/node-caches/action.yml used by ci.yml, job ui"
   ],
   "tools": [
    ".gitea/actions/node-caches/action.yml used by .gitea/workflows/nightly.yml, which runs only on a schedule, a tag or a manual run (not a pull request)"

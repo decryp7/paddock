@@ -72,9 +72,8 @@ tell users to reinstall from the releases page, and revoke the old secrets.
 ## Before tagging (rule 54)
 
 - [ ] **`pitcrew-release.yml` dispatch with bundles green** (Actions > pitcrew-release > Run workflow, `gates` on): open the run and check that the three `bundle (...)` jobs ran and passed and that the verdict job says `installers: built`. A green run that says `installers: not built` proves nothing about the release path (rule 54).
-- [ ] **`scripts/vm-smoke` passes on a fresh clone**: `source ~/.zshenv; scripts/vm-smoke/vm-smoke.sh --app pitcrew --run <the run id above>` (one VM at a time, local only). Attach its result file to the release notes or the tagging PR; a failed step blocks the tag.
 
-See [scripts/vm-smoke/README.md](../../../scripts/vm-smoke/README.md) for what the check covers and what stays a manual row.
+
 
 ## First launch note
 

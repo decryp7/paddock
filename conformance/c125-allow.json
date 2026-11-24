@@ -467,16 +467,6 @@
       "reason": "Test data: an installer image (DMG) mounted under /Volumes, the place a user could run the app from"
     },
     {
-      "path": "scripts/vm-smoke/login-probe-mac.sh",
-      "site": "/Volumes/My",
-      "reason": "The guest-side mount point of the VM's shared folder (macOS Virtualization framework), not a host disk"
-    },
-    {
-      "path": "scripts/vm-smoke/run.mjs",
-      "site": "/Volumes/My",
-      "reason": "The guest-side mount point of the VM's shared folder (macOS Virtualization framework), not a host disk"
-    },
-    {
       "path": "tools/macos-vm-smoke.sh",
       "site": "/Volumes/My",
       "reason": "The guest-side mount point of the VM's shared folder (macOS Virtualization framework), not a host disk"

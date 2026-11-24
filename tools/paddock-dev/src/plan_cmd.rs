@@ -7,7 +7,6 @@
 //! dev plan --all                 everything
 //! dev plan --ci                  CI: picks the base from the event, writes GITHUB_OUTPUT and GITHUB_STEP_SUMMARY
 //! dev plan --ci --app <app>      `true` or `false` on stdout: whether the change reaches that app
-//! dev plan --commit-range        the commit lint's range (or `skip`) from EVENT, REF, BEFORE, SHA, PLAN_BASE, BASE_REF, INPUT_APP
 //! dev plan --since-run <run>     what of a finished CI run reruns: its failed jobs, or only their failed tests (JSON)
 //! options: --explain, --compare (the repository model's answer beside the rule tables', ADR 0117 §8)
 //! ```
@@ -24,8 +23,8 @@
 use crate::host_tests::HostTests;
 use crate::plan::{Request, plan_with_graph};
 use crate::plan_ci::{
-    BaseInput, LintInput, MatrixOpts, USAGE, choose_base, ci_outputs, commit_lint_range, full_os, matrix, member_run, only_app,
-    package_filters, parse_args, summary, wants_webkit, workspace_legs,
+    BaseInput, MatrixOpts, USAGE, choose_base, ci_outputs, full_os, matrix, member_run, only_app, package_filters, parse_args, summary,
+    wants_webkit, workspace_legs,
 };
 use crate::plan_repo::git_text;
 use crate::plan_since::{APP_WORKFLOWS, GiteaRuns, SincePlan};
@@ -134,42 +133,8 @@ pub fn command(args: &[String], root: Option<PathBuf>) -> Result<Report, CliErro
     let root = repo_root(root)?;
     let env = env_var;
     // A sparse checkout makes the planner read a tree with folders missing and answer for it; say so first (local runs only).
-    if !matches!(args.first().map(String::as_str), Some("--commit-range" | "--commit-flags"))
-        && let Some(line) = crate::gates::edge::sparse_problem(&root)
-    {
+    if let Some(line) = crate::gates::edge::sparse_problem(&root) {
         return Err(CliError::failure(line));
-    }
-    if let Some(mode) = args.first().filter(|a| *a == "--commit-range" || *a == "--commit-flags") {
-        let lint = |name: &str| env(name).unwrap_or_default();
-        let (event, reference, before, base, base_ref, app) = (
-            lint("EVENT"),
-            lint("REF"),
-            lint("BEFORE"),
-            lint("PLAN_BASE"),
-            lint("BASE_REF"),
-            lint("INPUT_APP"),
-        );
-        let sha = env("SHA");
-        let known = |c: &str| git_text(&root, &["cat-file", "-e", &format!("{c}^{{commit}}")]).is_some();
-        let range = commit_lint_range(
-            &LintInput {
-                event: &event,
-                reference: &reference,
-                before: &before,
-                sha: sha.as_deref(),
-                base: &base,
-                base_ref: &base_ref,
-                app: &app,
-            },
-            &known,
-        )
-        .map_err(fail)?;
-        let text = if mode == "--commit-flags" {
-            range.map(|r| r.flags.join(" ")).unwrap_or_default()
-        } else {
-            range.map(|r| r.range).unwrap_or_else(|| "skip".into())
-        };
-        return Ok(Report::new(serde_json::json!({ "output": text }), text));
     }
     if args.first().is_some_and(|a| a == "--replay") {
         return replay(
@@ -534,7 +499,7 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
     let mut plan = plan;
     plan["filters"] = package_filters(&plan, &graph, narrow);
     plan["webkit"] = serde_json::json!(wants_webkit(env));
-    let mut outputs = ci_outputs(&plan, &legs, if plan_app.is_some() { None } else { base.as_deref() });
+    let mut outputs = ci_outputs(&plan, &legs);
     // OS-scoped tests: the legs of the `crate` and `paddock-dev` jobs with what each runner tests (`hostTests` of their contracts).
     let os_runners = os_legs(env);
     let mut workspace_oses: BTreeMap<&str, BTreeSet<String>> = BTreeMap::new();
@@ -643,12 +608,14 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
         &graph,
         MatrixOpts {
             narrow: false,
-            webkit: true,
+            webkit: false,
             full_os: true,
         },
     )
     .map_err(fail)?;
-    let need = scope_of(&need_plan, &need_legs, true, &os_legs, &[]);
+    // A push to main's scope has no WebKit and no reference-app end-to-end jobs (the nightly's), so a train's full run is complete
+    // without them (user, 2026-11-24).
+    let need = scope_of(&need_plan, &need_legs, false, &os_legs, &[]);
     // A push's or a landing's need is its own diff: the line names the base it was diffed from (a push reuses a landing run of
     // the same diff only, review round 2 P1-A).
     let need_base = if need_whole { None } else { base.as_deref() };
@@ -897,7 +864,7 @@ fn since_ci_with(root: &Path, env: &dyn Fn(&str) -> Option<String>, id: u64, rea
         println!("::warning::dev plan --since-run {id}: {why}; this run tests everything");
         let reason = format!("everything: the rerun of run {id} cannot be narrowed ({why})");
         eprintln!("base: {reason}");
-        write_ci(env, &ci_outputs(&everything, &legs, None), &summary(&everything, &reason, &legs))?;
+        write_ci(env, &ci_outputs(&everything, &legs), &summary(&everything, &reason, &legs))?;
         return Ok(Report::new(serde_json::json!({ "sinceRun": id, "everything": why }), String::new()));
     }
     let outputs = plan.ci_outputs(&legs, &mut |w| println!("{w}"));

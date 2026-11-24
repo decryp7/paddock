@@ -12,7 +12,6 @@ by = "user"
 date = "2026-11-23"
 why = "the 24 only.macos-latest entries of the dev Mac's agent tools, carried over from feat/os-scoped-tests (user decision 2026-11-22: tested on macOS only, never on a Windows host); approved by the user for the repository graph on 2026-11-23"
 entries = [
-  "only macos-latest brief_check::",
   "only macos-latest check::",
   "only macos-latest check_allow_list::",
   "only macos-latest check_c125::",

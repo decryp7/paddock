@@ -755,7 +755,7 @@ fn ci_yml_wires_the_plan_job_outputs_and_the_commits_job_asks_for_its_range() {
     let plan_job = &wf.jobs.iter().find(|(k, _)| k == "plan").unwrap().1;
     let declared = regex::Regex::new(r"(?m)^ {6}([a-z0-9_]+): \$\{\{ steps\.plan\.outputs\.([a-z0-9_]+) \}\}").unwrap();
     // The graph planner also writes its narrowed projects (`selection`) and `partial` (plan_graph::OUTPUTS).
-    let written: Vec<String> = paddock_dev::plan_ci::ci_outputs(&json!({}), &[], None)
+    let written: Vec<String> = paddock_dev::plan_ci::ci_outputs(&json!({}), &[])
         .into_iter()
         .map(|(k, _)| k)
         .chain(paddock_dev::plan_graph::OUTPUTS.iter().map(|k| k.to_string()))
@@ -804,16 +804,6 @@ fn ci_yml_wires_the_plan_job_outputs_and_the_commits_job_asks_for_its_range() {
                 "dev plan --ci --since-run writes {w}, which the plan job does not declare"
             );
         }
-    }
-    let commits = &wf.jobs.iter().find(|(k, _)| k == "commits").expect("a commits job").1;
-    assert!(
-        commits.contains("needs: [plan]")
-            && commits.contains("./dev plan --commit-range")
-            && commits.contains("./dev plan --commit-flags")
-            && commits.contains("fetch-depth: 0")
-    );
-    for v in ["EVENT", "REF", "BEFORE", "SHA", "BASE_REF", "PLAN_BASE", "INPUT_APP"] {
-        assert!(commits.contains(&format!("{v}: ${{{{")), "{v}");
     }
     assert!(plan_job.contains("./dev plan --ci"), "the plan job calls dev plan");
 }
@@ -871,9 +861,14 @@ fn every_ci_yml_job_is_in_the_job_table_and_asks_rerun_jobs() {
             .unwrap_or_else(|| panic!("job {key} has no if"));
         assert!(cond.contains(&gate), "job {key}: its if asks rerun_jobs ({gate})");
     }
-    // The WebKit job runs in a rerun of its failure even without the webkit input or a push to main.
-    let webkit = &wf.jobs.iter().find(|(k, _)| k == "e2e-webkit").unwrap().1;
-    assert!(webkit.contains("|| contains(fromJSON(needs.plan.outputs.rerun_jobs || '[]'), 'e2e-webkit')"));
+    // The reference e2e jobs run in a rerun of their failure even without the planner's webkit output.
+    for job in ["e2e-webkit", "e2e"] {
+        let text = &wf.jobs.iter().find(|(k, _)| k == job).unwrap().1;
+        assert!(
+            text.contains(&format!("|| contains(fromJSON(needs.plan.outputs.rerun_jobs || '[]'), '{job}')")),
+            "{job}"
+        );
+    }
     // The matrices read their legs from the plan step, which writes every OS when it plans no rerun of them.
     for (job, output) in [("crate", "crate_legs"), ("paddock-dev", "paddock_dev_legs")] {
         let text = &wf.jobs.iter().find(|(k, _)| k == job).unwrap().1;

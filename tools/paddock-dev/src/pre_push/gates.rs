@@ -198,7 +198,6 @@ pub const ROW_SET: &[&str] = &[
     "conformance-tests",
     "dyno-wire-fixtures",
     "gates-register",
-    "ipc-endpoints",
     "locks-guard",
     "member-audits",
     "pitwall-deny",
@@ -433,7 +432,7 @@ pub fn plan_gates(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> 
     out.extend(active_apps_row(facts));
     out.extend(linux_clippy(plan, change, facts));
     out.push(conformance(facts));
-    out.push(conformance_tests(facts));
+    out.push(conformance_tests(plan, facts));
     out.extend(commit_lint(change));
     out.push(member_audits(facts));
     let reaches_pitwall = plan["apps"].as_array().is_some_and(|a| a.iter().any(|x| x == "pitwall"));
@@ -478,27 +477,6 @@ pub fn plan_gates(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> 
         out.push(Planned::Skip {
             id: "pitwall-scripts, pitwall-deny".into(),
             reason: "the change does not reach Pitwall".into(),
-        });
-    }
-    if change.files.iter().any(|f| f.ends_with(".rs") || f == "docs/ipc-endpoints.toml") {
-        out.push(dev_run(
-            facts,
-            Gate {
-                args: strs(&["check", "ipc-endpoints"]),
-                ..gate(
-                    "ipc-endpoints".into(),
-                    "",
-                    "",
-                    &[],
-                    0,
-                    "add the listen site to docs/ipc-endpoints.toml with an ending test or a reason (C102)".into(),
-                )
-            },
-        ));
-    } else {
-        out.push(Planned::Skip {
-            id: "ipc-endpoints".into(),
-            reason: "no Rust file or docs/ipc-endpoints.toml changed".into(),
         });
     }
     out.push(locks_guard(change, facts));
@@ -759,10 +737,12 @@ fn conformance(facts: &Facts) -> Planned {
     }
 }
 
-/// The conformance package's own tests (`cd conformance && npm test`), on every push like the row above (ER-41): a test there reads
-/// the whole tree (lib-usage.test.mjs failed on fix/spotter-release-plan-verdict, 2026-11-14, while its touched-file tests passed).
-/// Run through the executor, as CI's conformance job does (`./dev ci run conformance tests`, the `tests` list of
-/// conformance/paddock.ci.json).
+/// The conformance package's own tests (`cd conformance && npm test`), run through the executor as CI's conformance job does
+/// (`./dev ci run conformance tests`, the `tests` list of conformance/paddock.ci.json). In a developer's push only when the change
+/// reaches the conformance project for a reason of its own (the planner's reach, [`crate::plan::reaches_conformance`]: conformance/**,
+/// a check's declared input, a workflow); the member gate runs them whatever changed, because a test there reads the whole tree
+/// (lib-usage.test.mjs failed on fix/spotter-release-plan-verdict, 2026-11-14, while its touched-file tests passed). User,
+/// 2026-11-24: the row was 154 of the push gate's ~575 row-minutes a day.
 ///
 /// Blocking since its first green run on the real tree (ER-41): `./dev check --pre-push --refs-from-stdin --remote origin` on
 /// ci/conformance-every-change, 2026-11-14 (6002697d3: 71.1 s; the hook's run on the push of c84694951: 70.6 s), recorded in
@@ -773,8 +753,14 @@ fn conformance(facts: &Facts) -> Planned {
 /// (about 13 on the 14-core Mac mini) beside the Clippy rows; the gate runs at most three rows at a time.
 const CONFORMANCE_TEST_CONCURRENCY: &str = "4";
 
-fn conformance_tests(facts: &Facts) -> Planned {
+fn conformance_tests(plan: &Value, facts: &Facts) -> Planned {
     let id = "conformance-tests";
+    if !facts.member_gate && !crate::plan::reaches_conformance(plan) {
+        return Planned::Skip {
+            id: id.into(),
+            reason: "the change does not reach the conformance project (the member gate runs them whatever changed)".into(),
+        };
+    }
     // The phase also compiles paddock-dev's contracts tests: the executor puts this build folder on that line as cargo configuration
     // (never a CARGO_* variable) and the gate runs through heavy (ER-24), compiling through the local sccache.
     let mut env: Vec<(String, String)> = vec![("PADDOCK_TEST_CONCURRENCY".into(), CONFORMANCE_TEST_CONCURRENCY.into())];
@@ -958,7 +944,6 @@ pub const NOT_RUN: &[(&str, &str)] = &[
         "cargo deny outside Pitwall",
         "each workspace's deny.toml is checked by CI only; WP-3",
     ),
-    ("wiki lint (tools/wiki)", "runs in CI's paddock-dev job against the ER text"),
     (
         "lint and type-check of touched TypeScript (eslint, tsc)",
         "per-project commands live in YAML until WP-3's contracts",

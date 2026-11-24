@@ -13,7 +13,7 @@ const MAX_HEADER = 100;
 /** What an agent does when the subject is too long: a rejected commit changes nothing, and amending an earlier one is the wrong fix. */
 /** Advice for a commit being made now (commit-msg hook, `--subject`). */
 export const LONG_SUBJECT_ADVICE = `Shorten the subject to ${MAX_HEADER} characters or fewer; put the detail in the body. Nothing was committed; your staged files are unchanged. Do not amend an earlier commit.`;
-/** Advice for a commit that already exists (CI's commits job, C23): committing again changes nothing, the commit is reworded. */
+/** Advice for a commit that already exists (C23 in CI's conformance job): committing again changes nothing, the commit is reworded. */
 export const REWORD_ADVICE = `Reword the commit before it lands (git commit --amend for the last one, an interactive rebase for an earlier one), then push again.`;
 const SHAPE_ADVICE = 'Start the subject with "<type>: " or "<type>(<scope>): " using one of the types above, then a short subject.';
 

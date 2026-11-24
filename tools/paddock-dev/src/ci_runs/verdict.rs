@@ -8,8 +8,8 @@
 //!   tests) and what a push to main does for the same tree (`need`), both written by the planner, and [`Declared::complete`] compares
 //!   them: `ran` covers `need`, the run is not a rerun of failures, and `need` is not empty. No workflow decides "complete" with
 //!   a line of its own, so a smaller scope (a skipped or reused run that ran nothing, a `since_run` dispatch, a base dispatch, a
-//!   full run without WebKit, an app-only dispatch) is never written as complete (the schedule-skipped and rerun-only
-//!   runs counted green on 2026-11-12; the WebKit hole of the D4 reuse). A line of another workflow, two lines, an unreadable one
+//!   an app-only dispatch) is never written as complete (the schedule-skipped and rerun-only runs counted green on 2026-11-12;
+//!   the WebKit hole of the D4 reuse, before a push to main's scope dropped WebKit on 2026-11-24). A line of another workflow, two lines, an unreadable one
 //!   or another version is not measured, never a pass. "Ran means ran" (as GitHub's required checks: a skipped one blocks): every job
 //!   the run declared has a job of its name in the run, and none was skipped or cancelled ([`run_scope::check_ran`]: a skipped or
 //!   cancelled one makes it partial, a missing one not measured; a failed one is the run's own red).

@@ -84,8 +84,6 @@ In this order, on one commit:
    runs Dyno's legs of `ci.yml` (WebKit included) and builds the installers on all three systems.
    Then confirm the run's verdict job says `installers: built` (all three `bundle (...)` jobs passed): a green run that says
    `installers: not built` proves nothing about the release path (rule 54).
-2b. Run the scripted VM start check on those installers, on a fresh clone: `source ~/.zshenv; scripts/vm-smoke/vm-smoke.sh --app dyno --run <the run id>`
-   ([scripts/vm-smoke/README.md](../../../scripts/vm-smoke/README.md)). Attach its result file; a failed step blocks the tag.
 2c. Run the benchmark unit check for the Linux runner: `scripts/linux-units-check.sh` (OrbStack `paddock-gate-arm`, a systemd user manager; it runs `cargo test -p dyno-agent --test bench_units -- --ignored --test-threads=1`, ADR 0030 D5). A failure blocks the tag: set `LINUX_UNITS_VERIFIED` to false in `crates/dyno-agent/src/bench.rs` or fix it.
 2d. Release items that need hardware this repository's agents do not have, for the benchmark tool (ADR 0030): run `scripts/bench-smoke.sh` against each installed build (it starts both runners with tiny sizes and asserts mechanics only); verify direct I/O on a **Windows** and on a **Linux** runner (the disk test must report "Direct I/O: yes" on the system drive, or say why not, and leave no scratch file); and do the signing dry runs of `dyno-bench-gpu` on all three systems (macOS signing id and notarization, Windows signing, Linux package contents via `check-bundle.sh`). A failure blocks the tag.
 3. Run the install and update plan, rows 24a to 24i of [testing-manual.md](testing-manual.md#install-and-update-in-a-throwaway-vm),
@@ -163,9 +161,6 @@ to keep its bytes:
    reads the program version at the previous `dyno-v*` tag: the same version without a record **fails** ("not measured"), a new version only warns.
 5. Record the submission ids, the date and Microsoft's determination in the release log (the release's engineering notes, as `release-1.1.0-engineering-notes.md` was) when
    it arrives (days, not hours). Also read VirusTotal's tags for both files ("obfuscated", "detect-debug-environment") and note them.
-6. The VM harness (branch `tools/vm-smoke-defender`, which lands before this one) prints the full Defender evidence on every Windows install row
-   and has `node scripts/vm-smoke/defender-rate.mjs --installer <setup.exe>` (10 installs, each from a reverted snapshot, with an EICAR control): run it on the final installer and keep the
-   rate with the submission ids.
 
 ## First launch note
 

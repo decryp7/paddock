@@ -105,7 +105,7 @@ Dyno is on Paddock's shared CI kit (WP-C4): its gates are legs of `.gitea/workfl
 | `app dyno (ubuntu-latest)` | Linux container | the capability/CSP guard and its tests; `cargo fmt --check`, clippy `-D warnings`, nextest (the Linux adapters and parsers against the container's real `/proc` included), doc tests, `cargo deny`; then `npm audit`, lint, build, the `index.html` check, unit tests with coverage and once more under another time zone |
 | `app dyno (windows-latest)`, `(macos-latest)` | host runners | clippy (also on Windows: `windowsClippy`), nextest, doc tests for the OS adapters; tests act only on dummies they spawn; a kept build folder, host clean-up of this job's test programs |
 | `e2e-1`, `e2e-2` | Linux container | Playwright against the mock, Chromium, two shards, one worker each |
-| `e2e-webkit` | Linux container | Playwright, WebKit: main, tags, the nightly and a manual run with `webkit` |
+| `e2e-webkit` | Linux container | Playwright, WebKit: tags, the nightly and a manual run with `webkit` |
 | `bundle` (`dyno-release.yml`) | Windows, macOS, Linux | on `dyno-v*` tags, manual runs and the nightly (`nightly.yml`); not on a push to main: `tauri build` (NSIS, `.dmg`, `.deb` + AppImage), the run-path check (`scripts/check-bundle.sh`; on macOS the agent also measures once from the built app), the seal check and the start of every sidecar (`macos-verify`), artifacts |
 | `release` | Linux container | on `dyno-v*` tags: release notes (git-cliff), `latest.json`, the Gitea release |
 

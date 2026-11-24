@@ -1,4 +1,4 @@
-//! `dev graph affected`: which projects a change reaches. The port of the core of the retired `scripts/affected.mjs`
+//! Which projects a change reaches (`./dev plan`'s core). The port of the core of the retired `scripts/affected.mjs`
 //! (`affected()`, `owners()`, `appOfWorkflow()` and the rule tables); the graph itself comes from `paddock-repo-graph`.
 //! The CI matrix, the nextest narrowing and `--ci` are in `plan_ci` and `plan_cmd`.
 //!
@@ -6,8 +6,7 @@
 //! in `paddock-repo-graph`: they are this repository's, the graph crate is generic (ADR 0022 §6, "CI-only").
 
 use crate::plan_gitea::{GiteaSource, TRACED_SCRIPT, gitea_targets};
-use paddock_cli::{CliError, Report};
-use paddock_repo_graph::{CargoCli, FileSource, GitHistory, Graph, GraphError, History, cargo_graph, lock_diff, npm_graph};
+use paddock_repo_graph::{CargoCli, FileSource, Graph, GraphError, History, cargo_graph, lock_diff, npm_graph};
 use regex::Regex;
 use serde_json::{Map, Value, json};
 use std::collections::{BTreeMap, BTreeSet};
@@ -214,7 +213,6 @@ static DOC_INPUTS: LazyLock<Vec<(Regex, Marks)>> = LazyLock::new(|| {
         (re(r"^docs/lessons\.md$"), Marks::Projects(&["conformance", "tools"])),
         (re(r"^docs/blocks/"), Marks::Projects(&["conformance", "tools"])),
         (re(r"^docs/(design-guide|benchmarks)\.md$"), Marks::Projects(&["conformance"])),
-        (re(r"^docs/wiki/"), Marks::Projects(&["tools"])),
         (re(r"^apps/(shell-demo|workbench-demo)/README\.md$"), Marks::Projects(&["tools"])),
         (re(r"(^|/)REVIEWED\.md$"), Marks::Reviewed),
         (
@@ -250,7 +248,6 @@ static OWNERS: LazyLock<Vec<(Regex, &'static [&'static str])>> = LazyLock::new(|
         (re(r"^ci-image/"), &["ci-image", "ui", "tools"]),
         (re(r"^(renovate/|renovate\.json$|CODEOWNERS$|AGENTS\.md$)"), &["tools"]),
         (re(r"^\.gitleaks\.toml$"), &["conformance"]),
-        (re(r"^wiki-lint\.json$"), &["tools"]),
         (re(r"^\.claude/(hooks/|settings\.json$)"), &["tools"]),
     ]
 });
@@ -438,6 +435,21 @@ impl State {
                 set.insert("ui");
             }
         }
+    }
+}
+
+/// The reason every plan gives conformance (it is in every plan, user decision 2026-11-12), so the `conformance` flag alone does not
+/// say whether the change reaches it: [`reaches_conformance`] does.
+pub const CONFORMANCE_ALWAYS: &str = "conformance always runs";
+
+/// Whether the change reaches the conformance project for a reason of its own (its files, a declared input, a check's input), not
+/// only because conformance is in every plan. Needs a plan made with `explain` (its `why`); without one it answers true (fail closed).
+pub fn reaches_conformance(plan: &Value) -> bool {
+    match plan.get("why") {
+        Some(why) => why["conformance"]
+            .as_array()
+            .is_some_and(|a| a.iter().any(|x| x != CONFORMANCE_ALWAYS)),
+        None => true,
     }
 }
 
@@ -736,7 +748,7 @@ pub fn affected(files: &[String], graph: &RepoGraph, opts: &Options) -> Result<V
     }
 
     // The conformance job is in every plan, whatever changed (user decision 2026-11-12); as `affected` of the retired scripts/affected.mjs did.
-    st.mark(Some("conformance".to_string()), "conformance always runs".to_string());
+    st.mark(Some("conformance".to_string()), CONFORMANCE_ALWAYS.to_string());
     let has = |p: &str| st.why.contains_key(p);
     let mut packages: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for d in &crates {
@@ -903,7 +915,7 @@ fn read_graph_placing(root: &Path, history: &dyn History, place: bool) -> Result
     })
 }
 
-/// What `dev graph affected` was asked.
+/// What a plan is asked for.
 pub struct Request {
     /// Explicit changed files.
     pub files: Vec<String>,
@@ -985,28 +997,6 @@ pub fn plan_on_graph(root: &Path, history: &dyn History, req: &Request, graph: &
     affected(&changed, graph, &opts)
 }
 
-fn cli_error(e: GraphError) -> CliError {
-    CliError::failure(e.to_string())
-}
-
-/// `dev graph affected`.
-pub fn command(req: &Request) -> Result<Report, CliError> {
-    if req.files.is_empty() && req.base.is_none() && !req.all {
-        return Err(CliError::usage("No base, --files or --all given.").with_hint("Pass a base revision, --files a,b or --all."));
-    }
-    let root = match &req.root {
-        Some(r) => r.clone(),
-        None => {
-            let cwd = std::env::current_dir().map_err(|e| CliError::failure(format!("The current folder cannot be read: {e}.")))?;
-            let out = crate::input_hash::Exec::run(&crate::input_hash::Real, "git", &["rev-parse", "--show-toplevel"], &cwd, None)?;
-            PathBuf::from(out.trim())
-        }
-    };
-    let history = GitHistory::new(&root, TIMEOUT);
-    let plan = plan_for(&root, &history, req).map_err(cli_error)?;
-    Ok(Report::new(plan.clone(), plan.to_string()))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1055,9 +1045,7 @@ mod tests {
     /// Whether conformance is marked for a reason of the change: it is in every plan (user decision 2026-11-12), so the plain
     /// `conformance` flag no longer tells.
     fn because(p: &Value) -> bool {
-        p["why"]["conformance"]
-            .as_array()
-            .is_some_and(|a| a.iter().any(|x| x != "conformance always runs"))
+        reaches_conformance(p)
     }
 
     fn plan(files: &[&str]) -> Value {
@@ -1301,15 +1289,6 @@ mod tests {
         assert_eq!(w["apps"], json!(["dyno"]));
         assert_eq!(plan(&["docs/rules.md"])["conformance"], true);
         assert_eq!(plan(&["docs/rules.md"])["docs"], false);
-        // the project wiki is linted by tools/wiki on every wiki change (ER-30), as is its settings file
-        for f in ["docs/wiki/index.md", "wiki-lint.json"] {
-            let p = plan(&[f]);
-            assert_eq!(
-                (&p["tools"], &p["docs"], &p["crates"], &p["all"]),
-                (&json!(true), &json!(false), &json!(false), &json!(false)),
-                "{f}"
-            );
-        }
         // the hooks' tests run in the tools job: a hook, places.rs (their parity test) or the copies register marks it, and no more
         for f in [
             ".claude/hooks/worktree-guard.py",
@@ -1630,19 +1609,6 @@ mod tests {
         )
         .unwrap();
         assert_eq!(none["all"], true, "--all ignores the base");
-    }
-
-    #[test]
-    fn a_request_needs_something_to_plan() {
-        let req = Request {
-            files: vec![],
-            all: false,
-            explain: false,
-            root: None,
-            base: None,
-            head: "HEAD".into(),
-        };
-        assert_eq!(command(&req).err().map(|e| e.exit), Some(paddock_cli::Exit::Usage));
     }
 
     // ---- .gitea changes are narrowed to the jobs they reach (the cases of the retired scripts/affected.test.mjs, on synthetic trees) ----

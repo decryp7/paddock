@@ -1,6 +1,11 @@
 //! `queue tick|hold|unhold`: one step of the merge queue (docs/plans/merge-queue.md, slices 1 to 4 without rule 54, plan-status and the
 //! tags). Reads `GITEA_TOKEN` (queue-bot's, with write on the repository; the queue never pushes tags).
 //!
+//! **Parked (user, 2026-11-24).** Trains are built by hand (the integrator's member gate); nothing runs `queue`. The code stays, but no
+//! CI path keeps it maintained: the tick's tests (`queue::tests`) are left out of the `ci` nextest profile
+//! (`.config/nextest.toml`). The adapters in [`real`] and [`blame`] are still used by `ci dispatch --trial` and `ci triage --members`
+//! and stay tested.
+//!
 //! - [`ports`]: the three ports (ledger, train repository, CI); the tick runs no code of any pull request, so there are no local
 //!   gates: they are the first jobs of the dispatched workflow;
 //! - [`tick`]: the pure state machine over them;

@@ -241,9 +241,8 @@ fn a_set_stop_flag_ends_the_phase_before_the_next_line() {
 
 // ---- parity with what CI ran before the executor (golden from the YAML and scripts at 11c365fc4) ----
 
-/// The root jobs of ci.yml the golden covers. `train-gates` is not modelled (its `if` needs a dispatch with a `base` input, which the
-/// model's contexts do not give), so its call of the executor is asserted as text below.
-const JOBS: [&str; 7] = ["ui", "e2e", "conformance", "tools", "icons", "eslint-preset", "crates"];
+/// The root jobs of ci.yml the golden covers.
+const JOBS: [&str; 5] = ["ui", "e2e", "conformance", "tools", "crates"];
 
 /// The commands of the root jobs of ci.yml and of the app legs' contract lists, as the CI model reads them from the real tree.
 fn modelled_commands() -> std::collections::BTreeSet<String> {
@@ -284,16 +283,7 @@ fn rows_of_model(model: &crate::gates::ci::CiModel, src: &crate::gates::ci::Sour
     // The Rust host's list is hand-kept (conformance.rust; a test holds it to the registry): its value is `$RUST_ONLY` here too.
     let rust_args = contract::conformance_rust_args(&contract).unwrap();
     let rust_only = format!("--only {}", rust_args[rust_args.iter().position(|a| a == "--only").unwrap() + 1]);
-    let jobs = [
-        "ui",
-        "e2e",
-        "conformance",
-        "tools",
-        "icons",
-        "eslint-preset",
-        "crates",
-        "train-gates",
-    ];
+    let jobs = ["ui", "e2e", "conformance", "tools", "crates"];
     let mut out = std::collections::BTreeSet::new();
     for l in model.lines.iter().filter(|l| l.root == CI_YML) {
         let text = match l.text.find(&only) {
@@ -408,20 +398,6 @@ fn tree_the_contracts_run_exactly_the_commands_in_the_golden() {
         let rows = got.iter().filter(|r| r.starts_with(&format!("job\t{job}\t"))).count();
         assert!(rows > 0, "job {job} has no row in the model: the comparison would prove nothing");
     }
-    // train-gates is not modelled: its executor call is read through the workflow accessor, not out of the YAML text (ER-42).
-    let ci = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.gitea/workflows/ci.yml")).unwrap();
-    let wf = crate::check::util::workflows::read(".gitea/workflows/ci.yml", &ci.replace("\r\n", "\n"));
-    let train = wf
-        .jobs
-        .iter()
-        .find(|j| j.id == "train-gates")
-        .expect("ci.yml has a train-gates job");
-    assert!(
-        crate::check::util::workflows::parse_steps(&train.text)
-            .iter()
-            .any(|s| s.run.as_deref().map(str::trim) == Some("./dev ci run conformance paddock")),
-        "train-gates runs the conformance contract"
-    );
     let mode =
         golden_mode(std::env::var("CI").ok().as_deref(), std::env::var(UPDATE_VAR).ok().as_deref()).unwrap_or_else(|e| panic!("{e}"));
     // The Windows runner checks out with core.autocrlf true.

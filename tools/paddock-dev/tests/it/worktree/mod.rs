@@ -1,4 +1,4 @@
-//! `dev worktree` and `dev check primary` end to end with the real binary against throw-away repositories (ER-14): a bare
+//! `dev worktree` end to end with the real binary against throw-away repositories (ER-14): a bare
 //! `origin`, a primary clone on `main`, and worktrees under one temporary folder. No test touches a real repository.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 // Unix only: the tests start `sleep` and bash, and the in-use probe of `clean` reads other processes' folders, which is
@@ -10,7 +10,6 @@ mod disk;
 mod list_clean;
 mod ops;
 mod oracle;
-mod primary;
 
 use paddock_testkit::{Actions, Case, Exec, StandIn, TestCommand};
 use serde_json::Value;

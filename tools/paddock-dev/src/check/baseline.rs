@@ -167,7 +167,7 @@ fn git(root: &Path, args: &[&str]) -> Result<String, (String, String)> {
 /// The ref every baseline's and allow list's growth is measured against: `explicit` (the run's own), else `PADDOCK_BASE_REF`, else
 /// `origin/main`; an empty value is unset. The ONE place that reads `PADDOCK_BASE_REF` (ER-21: C53, C71, C115, C104 and the shared
 /// allow-list reader each read it or forgot it, and a member branch of a train was measured against main, so the train's own entries
-/// counted as its growth). CI's conformance and train-gates jobs and `./dev check --pre-push` set it to the branch's target (the train
+/// counted as its growth). CI's conformance job and `./dev check --pre-push` set it to the branch's target (the train
 /// before, for a train member). A deliberate change of meaning for the blocking baselines (C53, C71, C104, C115): the target branch
 /// instead of `origin/main` (ADR 0098, amendment). JavaScript host: `targetRef` in `conformance/src/util/baseline.mjs`.
 pub fn target_ref(explicit: Option<&str>) -> String {

@@ -1,9 +1,9 @@
-//! `locks check` and `locks sync`: every lockfile of the repository is current, and one command makes them so.
+//! `locks sync`: one command makes every lockfile of the repository current.
 //!
 //! What goes stale after a shared change is always the same three things: a `Cargo.lock` that `--locked` no longer resolves,
-//! the root `package-lock.json`, and the workspace hack that cargo-hakari generates. `check` runs the same commands CI does
+//! the root `package-lock.json`, and the workspace hack that cargo-hakari generates. [`check_all`] runs the same commands CI does
 //! (`cargo metadata --locked` per workspace, `npm ci --dry-run`, `cargo hakari generate --diff`, `manage-deps --dry-run` and
-//! `verify`) and prints one `::error::` per stale file with the fix. `sync` runs only cargo, cargo-hakari and npm to regenerate
+//! `verify`; `locks guard` uses it). `sync` runs only cargo, cargo-hakari and npm to regenerate
 //! them; a lockfile is never edited by hand (ER-40). The commands run through a [`Runner`], so the plan is tested without them.
 
 use crate::release_isolation::pathfind::{extensions, find_program};
@@ -68,17 +68,6 @@ const TEST_DATA: &str = "tools/paddock-dev/tests/golden/fixture/";
 
 pub(crate) fn is_test_data(file: &str) -> bool {
     file.starts_with(TEST_DATA)
-}
-
-/// The tracked lockfiles and hack configs that [`plan`] leaves out as test data, so a run can say what it did not look at.
-pub fn skipped(tracked: &[String]) -> Vec<String> {
-    let mut v: Vec<String> = tracked
-        .iter()
-        .filter(|f| is_test_data(f) && (f.ends_with("Cargo.lock") || f.ends_with("package-lock.json")))
-        .cloned()
-        .collect();
-    v.sort();
-    v
 }
 
 /// The targets for a list of tracked files (paths relative to the root, `/` separated).
@@ -299,22 +288,6 @@ pub(crate) fn tracked(root: &Path) -> Result<Vec<String>, CliError> {
     Ok(out.stdout_text().lines().map(str::to_string).collect())
 }
 
-fn annotation(s: &Stale) -> String {
-    format!(
-        "::error file={}::{} is stale: `{}` failed ({}). Fix: ./dev locks sync (or `{}`), then commit the result.",
-        s.target.file,
-        s.target.file.rsplit('/').next().unwrap_or(&s.target.file),
-        s.command,
-        s.tail,
-        s.target.fix_text()
-    )
-}
-
-/// `locks check`.
-pub fn check(root: Option<PathBuf>) -> Result<Report, CliError> {
-    run_check(&Real, &root_of(root)?)
-}
-
 /// `locks sync`.
 pub fn sync(root: Option<PathBuf>) -> Result<Report, CliError> {
     run_sync(&Real, &root_of(root)?)
@@ -322,42 +295,6 @@ pub fn sync(root: Option<PathBuf>) -> Result<Report, CliError> {
 
 fn root_of(given: Option<PathBuf>) -> Result<PathBuf, CliError> {
     crate::gates::command::repo_root(given.as_deref())
-}
-
-/// [`check`] with the runner and root given.
-pub fn run_check(runner: &dyn Runner, root: &Path) -> Result<Report, CliError> {
-    let files = tracked(root)?;
-    let targets = plan(&files);
-    let skipped = skipped(&files);
-    if targets.is_empty() {
-        return Err(CliError::failure(format!("No lockfile found under {}.", root.display()))
-            .with_hint("Run it in the repository root, or pass --root."));
-    }
-    let started = std::time::Instant::now();
-    let stale = check_all(runner, root, &targets);
-    let mut text: String = stale.iter().map(|s| annotation(s) + "\n").collect();
-    text.push_str(&format!(
-        "locks: {} checked, {} stale, {} skipped as test data ({} ms)\n",
-        targets.len(),
-        stale.len(),
-        skipped.len(),
-        started.elapsed().as_millis()
-    ));
-    for f in &skipped {
-        text.push_str(&format!("locks: skipped {f} (test data of the planner's golden repository)\n"));
-    }
-    let data = json!({
-        "checked": targets.len(),
-        "skipped": skipped,
-        "annotations": stale.iter().map(annotation).collect::<Vec<String>>(),
-        "stale": stale.iter().map(|s| json!({"file": s.target.file, "command": s.command, "fix": s.target.fix_text()})).collect::<Vec<Value>>(),
-    });
-    let report = Report::new(data, text);
-    Ok(if stale.is_empty() {
-        report
-    } else {
-        report.with_exit(Exit::Findings)
-    })
 }
 
 /// [`sync`] with the runner and root given.
@@ -378,7 +315,7 @@ pub fn run_sync(runner: &dyn Runner, root: &Path) -> Result<Report, CliError> {
         })
         .collect();
     text.push_str(&format!(
-        "locks: {} synced, {} failed. Review the diff and commit it (never edit a lockfile by hand, ER-40); run `./dev locks check` to confirm.\n",
+        "locks: {} synced, {} failed. Review the diff and commit it (never edit a lockfile by hand, ER-40); CI's lockfile checks confirm.\n",
         targets.len() - failed.len(),
         failed.len()
     ));

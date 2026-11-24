@@ -3,7 +3,9 @@
   "everything"
  ],
  "ui": [
-  "ui"
+  "ui",
+  "eslint",
+  "icons"
  ],
  "e2e": [
   "ui"
@@ -17,26 +19,14 @@
  "c99": [
   "c99"
  ],
- "ipc-endpoints": [
-  "conformance"
- ],
  "gitleaks": [
   "conformance"
  ],
  "tools": [
   "tools"
  ],
- "wiki": [
-  "tools"
- ],
  "heavy": [
   "tools"
- ],
- "icons": [
-  "icons"
- ],
- "eslint-preset": [
-  "eslint"
  ],
  "crates": [
   "crates"
@@ -44,14 +34,8 @@
  "crate": [
   "crates"
  ],
- "commits": [
-  "tools"
- ],
  "audit": [
   "paddock-dev"
- ],
- "train-gates": [
-  "tools"
  ],
  "app": [
   "apps"
