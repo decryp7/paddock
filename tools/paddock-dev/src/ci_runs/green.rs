@@ -6,12 +6,11 @@
 //! - [`Scope`]: `Complete` when the run's declared scope covers a push to main's (ADR 0113, `Declared::complete`, read by
 //!   `verdict::read_mode`) and every job it declared ran, else `Partial`. A run's base is complete by construction: the base of a
 //!   push is picked by [`find_base`], which takes only complete runs, and a run with an explicit base declares less than it needs.
-//! - [`GradedResult`]: `Green`; `GreenWithFixItems` ("green with quarantined flakes") when the only failures are FLAKY tests (failed,
-//!   then passed on the one retry) in code the change did not touch (each a fix item, recorded in the quarantine register by `ci
-//!   fix-items`, [`super::quarantine`]); `Red` when a test failed both tries, a FLAKY test is in touched code or cannot be placed (fail
-//!   closed), or a step that is not a test failed; `NotMeasured` when a test report cannot be read (ER-33). "Touched" is the job's
-//!   crate workspace or app until the package level's first green use is recorded, then the Cargo package that holds the test
-//!   ([`Touched`], [`grade_flaky`]; user decision 2026-11-24, ER-41).
+//! - [`GradedResult`]: `Green`; `GreenWithFixItems` when the only failures are FLAKY tests (failed, then passed on the one retry) in
+//!   code the change did not touch (each a fix item, recorded in docs/lessons.md by `ci fix-items`); `Red` when a test failed both
+//!   tries, a FLAKY test is in touched code or cannot be placed (fail closed), or a step that is not a test failed; `NotMeasured` when
+//!   a test report cannot be read (ER-33). "Touched" is the job's crate workspace or app until [`PACKAGE_LEVEL_FIRST_GREEN_RUN`] is
+//!   set, then the Cargo package that holds the test ([`Touched`], [`grade_flaky`]; user decision 2026-11-24, ER-41).
 //!
 //! A skipped or cancelled job is never a pass and never a failure: a declared job that did not run makes the scope `Partial`
 //! (`run_scope::check_ran`), and a cancelled run is `Partial` times `NotMeasured` (ER-33); an unfinished run is no evidence.
@@ -148,7 +147,8 @@ impl Outcome {
 ///
 /// Two levels (ER-12, user decision 2026-11-24: Google TAP's and Chromium's practice, graded by the reader):
 /// - the job level ([`Touched::reaches`]): a FLAKY test in a crate workspace or app the plan reached. The interim strict reading of
-///   2026-11-23, and the one that decides until the package level's first green use is recorded (ER-41, [`Touched::narrow`]);
+///   2026-11-23, and the one that decides until the package level's first green run is recorded (ER-41,
+///   [`PACKAGE_LEVEL_FIRST_GREEN_RUN`], [`Touched::narrow`]);
 /// - the package level ([`Touched::reaches_test`]): the Cargo package that holds the test, the narrowest level the planner's graph has.
 ///   A test exercises its own package and what that package depends on, so the package is touched when it changed or depends on a
 ///   changed crate (the plan's `packages`, the reverse-dependency closure). Only a project the plan reached through Cargo alone
@@ -171,9 +171,51 @@ pub struct Touched {
     pub members: BTreeMap<String, BTreeSet<String>>,
     /// Each app's Cargo workspace folder ([`crate::plan_ci::app_cargo_dir`]).
     pub app_cargo: BTreeMap<String, String>,
-    /// Whether the package level decides: its first green use is recorded in the quarantine register (ER-41,
-    /// [`super::quarantine::Register::first_use`]). Without it the package level is printed as a `::notice::` and the job level decides.
+    /// Whether the package level decides ([`PACKAGE_LEVEL_FIRST_GREEN_RUN`] is set, ER-41). Without it the package level is printed as a
+    /// `::notice::` and the job level decides.
     pub narrow: bool,
+}
+
+/// ER-41 for the package level of the FLAKY grade: `None` while it is report-only (the job level decides and the package level is printed
+/// as `::notice::` lines); set it by hand to the id of the first green ci.yml run whose notices show the package level graded right,
+/// which makes the package level decide. Recorded: not yet.
+pub const PACKAGE_LEVEL_FIRST_GREEN_RUN: Option<u64> = None;
+
+thread_local! {
+    static NOTICES: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Prints one grade as a `::notice::` line and keeps it for the job summary ([`take_notices`]).
+pub fn notice(line: &str) {
+    eprintln!("::notice::{line}");
+    NOTICES.with(|n| n.borrow_mut().push(line.to_string()));
+}
+
+/// The notices printed since the last call; a command appends them to its job summary ([`write_summary`]).
+pub fn take_notices() -> Vec<String> {
+    NOTICES.with(|n| std::mem::take(&mut *n.borrow_mut()))
+}
+
+/// Appends `lines` to `$GITHUB_STEP_SUMMARY` when it is set (a CI step); an unwritable file is a warning, never an error.
+pub fn write_summary(heading: &str, lines: &[String]) {
+    if lines.is_empty() {
+        return;
+    }
+    let Some(path) = std::env::var_os("GITHUB_STEP_SUMMARY").filter(|p| !p.is_empty()) else {
+        return;
+    };
+    let mut text = format!("\n### {heading}\n\n");
+    for l in lines {
+        text.push_str(&format!("- {l}\n"));
+    }
+    let res = std::fs::OpenOptions::new()
+        .append(true)
+        .create(true)
+        .open(&path)
+        .and_then(|mut f| std::io::Write::write_all(&mut f, text.as_bytes()));
+    if let Err(e) = res {
+        eprintln!("::warning::the job summary cannot be written ({e}); the notices above are the record");
+    }
 }
 
 /// Where a FLAKY test stands against a change, with the reason in words.
@@ -181,7 +223,7 @@ pub struct Touched {
 pub enum Reach {
     /// The change touched the test or what it exercises: a FLAKY test blocks.
     Touched(String),
-    /// It did not: a FLAKY test is quarantined, a fix item.
+    /// It did not: a FLAKY test is a fix item and does not block.
     Untouched(String),
     /// The graph cannot place the test: it blocks (fail closed).
     Unknown(String),
@@ -404,23 +446,23 @@ pub fn grade_failures(workflow: &str, jobs: &[FailedJob], touched: &mut dyn FnMu
     }
 }
 
-/// The grade of one FLAKY test of job `job`: `Ok` quarantines it (a fix item), `Err` blocks with the reason. The level that decides is
-/// [`Touched::narrow`]'s: the job level until the package level's first green use is recorded (ER-41), the package level after it.
+/// The grade of one FLAKY test of job `job`: `Ok` makes it a fix item that does not block, `Err` blocks with the reason. The level that
+/// decides is [`Touched::narrow`]'s: the job level until [`PACKAGE_LEVEL_FIRST_GREEN_RUN`] is set (ER-41), the package level after it.
 /// Both are printed as `::notice::` lines and to the job summary, so the report-only phase shows what the package level would say.
 pub fn grade_flaky(t: &Touched, job: &str, test: &str) -> Result<(), String> {
     let job_level = t.reaches(job);
     let package = t.reaches_test(job, test);
     let (word, why) = match &package {
         Reach::Touched(w) => ("blocks (touched)", w),
-        Reach::Untouched(w) => ("quarantined (untouched)", w),
+        Reach::Untouched(w) => ("fix item (untouched)", w),
         Reach::Unknown(w) => ("blocks (cannot be placed)", w),
     };
     let phase = if t.narrow {
         "decides"
     } else {
-        "report-only, ER-41: the job level decides until the first green use is recorded"
+        "report-only, ER-41: the job level decides until PACKAGE_LEVEL_FIRST_GREEN_RUN is set"
     };
-    super::quarantine::notice(&format!("flaky grade ({phase}): job {job:?}, {test}: {word}: {why}"));
+    notice(&format!("flaky grade ({phase}): job {job:?}, {test}: {word}: {why}"));
     if t.narrow {
         return match package {
             Reach::Untouched(_) => Ok(()),
@@ -812,8 +854,8 @@ pub fn plan_touched_range(root: &std::path::Path, base: &str, head: &str) -> Opt
 }
 
 /// The touched reader of the production paths (`ci verdict`, `ci reuse`, the queue, the planner): [`touched_since_base`] over the
-/// first-parent history of `root`, planned by [`plan_touched_range`], at the level the quarantine register of `root` says decides
-/// ([`super::quarantine::narrow_in`]); with no good base, everything counts as reached, and a range
+/// first-parent history of `root`, planned by [`plan_touched_range`], at the level [`PACKAGE_LEVEL_FIRST_GREEN_RUN`] says decides;
+/// with no good base, everything counts as reached, and a range
 /// that cannot be planned is `None` (not measured). `runs` is the list the caller already read (the planner's base search); without
 /// it the list is read here, once.
 pub fn touched_in(
@@ -833,7 +875,7 @@ pub fn touched_in(
             &own
         }
     };
-    let narrow = super::quarantine::narrow_in(root);
+    let narrow = PACKAGE_LEVEL_FIRST_GREEN_RUN.is_some();
     touched_since_base(client, runs, &first_parent, sha, scope_decisive, &mut |b, h| {
         plan_touched_range(root, b, h)
     })

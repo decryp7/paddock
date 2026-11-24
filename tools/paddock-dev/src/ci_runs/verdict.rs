@@ -28,11 +28,11 @@
 //! - Unknown or unreadable is not measured, never a pass: the run list or a newer run's log cannot be read, no run is listed,
 //!   or the deciding run has not finished.
 //!
-//! - `--landing` ([`report_for`]): green with quarantined flakes (FLAKY tests in untouched code, [`Verdict::GreenWithFixItems`]) is
-//!   landable, exit 0, and lists them; `--tag` and the default stay strict (ER-15). The grades are printed as `::notice::` lines and
-//!   to the job summary ([`super::quarantine::notice`]).
+//! - `--landing` ([`report_for`]): green with fix items (FLAKY tests in untouched code, [`Verdict::GreenWithFixItems`]) is landable,
+//!   exit 0, and lists them; `--tag` and the default stay strict (ER-15). The grades are printed as `::notice::` lines and to the job
+//!   summary ([`green::notice`]).
 //!
-//! Exit codes: 0 full green (with `--landing` also green with quarantined flakes), 5 red, green with fix items (for a tag or without
+//! Exit codes: 0 full green (with `--landing` also green with fix items), 5 red, green with fix items (for a tag or without
 //! `--landing`), or only partial runs exist, 6 not measured.
 
 use super::client::{Client, RunInfo};
@@ -615,7 +615,7 @@ pub fn outcome(v: &Verdict, workflow: &str, sha: &str, live: &dyn LiveRepo) -> O
     outcome_for(v, workflow, sha, live, false)
 }
 
-/// [`outcome`] for a landing (`landing`, `ci verdict --landing`): a run green with quarantined flakes (FLAKY tests in untouched code,
+/// [`outcome`] for a landing (`landing`, `ci verdict --landing`): a run green with fix items (FLAKY tests in untouched code,
 /// [`Verdict::GreenWithFixItems`]) is landable evidence too, adopted like a green one. Never for a tag: `--tag` and the default stay
 /// strict (ER-15).
 pub fn outcome_for(v: &Verdict, workflow: &str, sha: &str, live: &dyn LiveRepo, landing: bool) -> Outcome {
@@ -660,7 +660,7 @@ pub fn outcome_for(v: &Verdict, workflow: &str, sha: &str, live: &dyn LiveRepo, 
             UnixSeconds::now(),
             || {
                 Ok(vec![Finding::failing(format!(
-                    "run {run} is green with quarantined flakes ({}): a landing accepts it (`ci verdict --landing`), a tag needs a run without them: run ci.yml once more on this commit",
+                    "run {run} is green with fix items ({}): a landing accepts it (`ci verdict --landing`), a tag needs a run without them: run ci.yml once more on this commit",
                     items.iter().map(|i| i.line(*run)).collect::<Vec<_>>().join("; ")
                 ))])
             },
@@ -674,7 +674,7 @@ pub fn report(v: &Verdict, workflow: &str, sha: &str, live: &dyn LiveRepo) -> Re
     report_for(v, workflow, sha, live, false)
 }
 
-/// [`report`] for a landing (`landing`): green with quarantined flakes is landable (exit 0) and lists them ([`outcome_for`]).
+/// [`report`] for a landing (`landing`): green with fix items is landable (exit 0) and lists them ([`outcome_for`]).
 pub fn report_for(v: &Verdict, workflow: &str, sha: &str, live: &dyn LiveRepo, landing: bool) -> Report {
     let head = format!("{workflow} on {}", short(sha));
     let o = outcome_for(v, workflow, sha, live, landing);
@@ -682,10 +682,10 @@ pub fn report_for(v: &Verdict, workflow: &str, sha: &str, live: &dyn LiveRepo, l
     let (kind, run, text, exit) = match (&o, v) {
         (Outcome::KnownCommit(_), Verdict::Green { run }) => ("green", Some(*run), format!("{head}: full green (run {run})"), Exit::Ok),
         (Outcome::KnownCommit(_), Verdict::GreenWithFixItems { run, items }) => (
-            "green_with_quarantined_flakes",
+            "green_with_fix_items_landable",
             Some(*run),
             format!(
-                "{head}: landable: green with {} quarantined flakes (run {run}; FLAKY tests in untouched code, each a fix item): {}. A tag needs a run without them",
+                "{head}: landable: green with {} fix items (run {run}; FLAKY tests in untouched code): {}. A tag needs a run without them",
                 items.len(),
                 listed(*run, items)
             ),
@@ -702,7 +702,7 @@ pub fn report_for(v: &Verdict, workflow: &str, sha: &str, live: &dyn LiveRepo, l
             "green_with_fix_items",
             Some(*run),
             format!(
-                "{head}: green with {} fix items (quarantined flakes, run {run}): {}; a tag needs none, a landing asks `--landing`",
+                "{head}: green with {} fix items (run {run}): {}; a tag needs none, a landing asks `--landing`",
                 items.len(),
                 listed(*run, items)
             ),
@@ -715,14 +715,14 @@ pub fn report_for(v: &Verdict, workflow: &str, sha: &str, live: &dyn LiveRepo, l
             Exit::NotMeasured,
         ),
     };
-    let quarantined: Vec<serde_json::Value> = match v {
+    let fix_items: Vec<serde_json::Value> = match v {
         Verdict::GreenWithFixItems { items, .. } => items
             .iter()
             .map(|i| serde_json::json!({"job": i.job, "job_id": i.job_id, "test": i.test, "url": i.url}))
             .collect(),
         _ => Vec::new(),
     };
-    let data = serde_json::json!({"verdict": kind, "workflow": workflow, "sha": sha, "run": run, "landing": landing, "quarantined": quarantined, "detail": text, "outcome": o.json()});
+    let data = serde_json::json!({"verdict": kind, "workflow": workflow, "sha": sha, "run": run, "landing": landing, "fix_items": fix_items, "detail": text, "outcome": o.json()});
     Report::new(data, text).with_exit(exit)
 }
 
@@ -1483,16 +1483,16 @@ mod tests {
     }
 
     #[test]
-    fn green_with_quarantined_flakes_is_landable_for_a_landing_and_never_for_a_tag() {
+    fn green_with_fix_items_is_landable_for_a_landing_and_never_for_a_tag() {
         let mut f = run_8610("failure");
         let v = ask_touching(&mut f, &[]);
         assert!(matches!(v, Verdict::GreenWithFixItems { .. }), "{v:?}");
-        // The landing: exit 0, adopted as evidence of the commit, the quarantined tests listed.
+        // The landing: exit 0, adopted as evidence of the commit, the FLAKY tests listed.
         let landing = report_for(&v, "ci.yml", SHA, &Knows(true), true);
         assert_eq!(landing.exit, Exit::Ok, "{}", landing.text);
-        assert_eq!(landing.data["verdict"], "green_with_quarantined_flakes");
+        assert_eq!(landing.data["verdict"], "green_with_fix_items_landable");
         assert_eq!(landing.data["outcome"]["status"], "known-commit");
-        assert_eq!(landing.data["quarantined"].as_array().map(Vec::len), Some(2));
+        assert_eq!(landing.data["fix_items"].as_array().map(Vec::len), Some(2));
         assert!(
             landing.text.contains("landable") && landing.text.contains("44761"),
             "{}",

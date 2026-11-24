@@ -9,9 +9,6 @@
 //! - the project's fix-item home, `docs/lessons.md` ([`record`]: the bullet of [`lessons_entry`], in the shape of the earlier ones,
 //!   for example f707a4965, added once whatever the number of calls). The queue cannot commit, so a landing, the queue's or an
 //!   integrator's by hand, records here with `./dev ci fix-items --workflow <file> --sha <sha>` on the landed commit.
-//!
-//! The same step quarantines each test in `docs/flaky-quarantine.toml` ([`super::quarantine::record_in`]): the register grows only here,
-//! and its growth check finds the bullet this module writes in the same diff.
 
 use super::green::FixItem;
 use std::path::Path;

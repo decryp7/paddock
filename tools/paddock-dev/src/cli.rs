@@ -403,22 +403,13 @@ enum CiCommand {
     TestCost(ci_runs::TestCostArgs),
     /// Is there a full green run of a workflow on a commit? The one reader of the runs for that verdict (the tag workflow asks
     /// it). A run counts if it is a push to main or its plan job logged `plan mode: full=true`; the newest full run decides.
-    /// Exit 0 full green (with `--landing` also green with quarantined flakes: FLAKY tests in untouched code), 5 red, only partial
-    /// runs, or quarantined flakes without `--landing` (a tag needs a run without them), 6 not measured (never a pass).
+    /// Exit 0 full green (with `--landing` also green with fix items: FLAKY tests in untouched code), 5 red, only partial runs, or
+    /// fix items without `--landing` (a tag needs a run without them), 6 not measured (never a pass).
     Verdict(ci_runs::VerdictArgs),
     /// Records the fix items of a run that is green with fix items (FLAKY tests of crates and apps the change did not reach, ER-12) in
-    /// docs/lessons.md and quarantines them in docs/flaky-quarantine.toml, once whatever the number of calls: the call a landing makes on the landed commit, the queue's or an
+    /// docs/lessons.md, once whatever the number of calls: the call a landing makes on the landed commit, the queue's or an
     /// integrator's by hand. Exit 0 recorded or already recorded (or nothing to record on a plain green), 5 red or partial, 6 not measured.
     FixItems(ci_runs::FixItemsArgs),
-    /// The flaky-test quarantine register (docs/flaky-quarantine.toml) grows only through `ci fix-items` (ER-46): an entry the merge
-    /// base lacks needs the lessons bullet of its run in the same diff. Report-only (exit 0) until its first green run is recorded
-    /// (ER-41); 6 when the merge base cannot be read in CI.
-    QuarantineCheck(ci_runs::QuarantineCheckArgs),
-    /// Releases quarantined flaky tests whose jobs all passed in `release_after` (5) consecutive nightlies, and reports every streak.
-    QuarantineRelease(ci_runs::QuarantineReleaseArgs),
-    /// Records the first green use of the package-level flaky grade in docs/flaky-quarantine.toml, which makes it decide (ER-41).
-    /// Refuses a run whose package-level grade is not landable green with quarantined flakes.
-    QuarantineRecord(ci_runs::QuarantineRecordArgs),
     /// The cache keys of the last runs that no job ever saved, read from the `cache-report:` lines of the job logs (ADR 0115).
     /// Report-only (exit 0) unless `--fail-on-never-saved` (5); no report line in the window exits 6, check broken.
     CacheAudit(ci_runs::CacheAuditArgs),
@@ -826,15 +817,6 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
         Command::Ci {
             command: CiCommand::FixItems(a),
         } => ci_runs::fix_items_cmd(&a),
-        Command::Ci {
-            command: CiCommand::QuarantineCheck(a),
-        } => ci_runs::quarantine_check(&a),
-        Command::Ci {
-            command: CiCommand::QuarantineRelease(a),
-        } => ci_runs::quarantine_release(&a),
-        Command::Ci {
-            command: CiCommand::QuarantineRecord(a),
-        } => ci_runs::quarantine_record(&a),
         Command::Ci {
             command: CiCommand::CacheAudit(a),
         } => ci_runs::cache_audit(&a),

@@ -945,7 +945,7 @@ fn the_landing_queues_port_lands_a_train_on_its_narrowed_landing_run_without_a_s
 }
 
 /// The package level (user decision 2026-11-24): the plan reached the crates workspace through Cargo alone, at the packages `reached`;
-/// the workspace holds paddock-chromium (the 8610 FLAKY test's package) and paddock-core. `narrow`: the first use is recorded.
+/// the workspace holds paddock-chromium (the 8610 FLAKY test's package) and paddock-core. `narrow`: the package level decides.
 fn packages(reached: &[&str], narrow: bool) -> Touched {
     Touched {
         flags: ["crates".to_string()].into(),
@@ -958,7 +958,7 @@ fn packages(reached: &[&str], narrow: bool) -> Touched {
 }
 
 #[test]
-fn a_flaky_test_in_an_untouched_package_is_quarantined_and_landable_once_the_package_level_decides() {
+fn a_flaky_test_in_an_untouched_package_is_a_fix_item_and_landable_once_the_package_level_decides() {
     // The 8610 log: a FLAKY test of paddock-chromium. The change reached the crates workspace, but only paddock-core.
     let c = sha(2);
     let r = Run::train(8610, &c, "failure").failing(CRATE, CRATE_FLAKY);
