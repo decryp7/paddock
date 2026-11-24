@@ -560,6 +560,46 @@ fn the_member_gate_runs_the_source_audits_by_their_name_rule() {
     );
 }
 
+/// Every `kind(lib) & test(/regex/)` clause of the member-audits filter selects at least one test of this very binary (the lib's tests),
+/// so a renamed lib audit (the ownership test, train 2026-11-26-c) cannot drop out of the member gate silently: `--no-tests=fail` only
+/// sees an empty selection as a whole (ER-33). The control: a clause whose regex names no test is found empty.
+#[test]
+fn every_lib_clause_of_the_member_audits_selects_a_test_of_the_lib() {
+    use super::gates::split_audit_filter;
+    let text = std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(".config/nextest.toml")).unwrap();
+    let doc: toml::Table = text.parse().unwrap();
+    let whole = doc["profile"][AUDIT_PROFILE]["default-filter"].as_str().unwrap().to_string();
+    let (_, rest) = split_audit_filter(&whole).expect("the filter starts with its binary(it) group");
+    let clauses: Vec<String> = rest
+        .split("kind(lib)")
+        .skip(1)
+        .filter_map(|c| c.split("test(/").nth(1).and_then(|r| r.split("/)").next()).map(str::to_string))
+        .collect();
+    assert!(!clauses.is_empty(), "the filter has a kind(lib) clause: {rest}");
+    let exe = std::env::current_exe().unwrap();
+    let out = paddock_proc::command(exe).args(["--list", "--format", "terse"]).output().unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let names: Vec<String> = String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter_map(|l| l.strip_suffix(": test").map(str::to_string))
+        .collect();
+    assert!(names.len() > 100, "the lib's tests were listed: {}", names.len());
+    let selects = |re: &str| {
+        let re = regex::Regex::new(re).unwrap_or_else(|e| panic!("`{re}` is not a regex: {e}"));
+        names.iter().any(|n| re.is_match(n))
+    };
+    for c in &clauses {
+        assert!(
+            selects(c),
+            "the {AUDIT_PROFILE} lib clause `{c}` matches no test of the lib: renamed or removed (.config/nextest.toml)"
+        );
+    }
+    assert!(
+        !selects("^repo_model::tests::graph_every_tracked_file_renamed_away"),
+        "the control finds an empty clause"
+    );
+}
+
 /// A developer's push does not run the audits (minutes would be added to every push); it says why. The member gate does.
 #[test]
 fn a_developers_push_skips_the_member_audits_with_a_reason_and_the_member_gate_runs_them() {
