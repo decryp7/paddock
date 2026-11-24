@@ -260,7 +260,7 @@ fn read_mode_plain(client: &mut Client, run: &RunInfo, scope_decisive: bool) -> 
     );
     // A declared job that did not run is a failure of the run, whichever line says "complete": the check holds on both bases, so the
     // report-only phase cannot count a run that skipped what it declared as complete (ER-41; the first green scope run is recorded
-    // when CI resumes, docs/ci-scope-first-runs.toml).
+    // per producer in docs/ci-scope-first-runs.toml).
     let mode = match (legacy_mode(&log), &scope) {
         (Mode::Full, Mode::Incomplete(why)) => Mode::Incomplete(why.clone()),
         (m, _) => m,
