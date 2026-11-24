@@ -449,7 +449,7 @@ mod tests {
             std::fs::create_dir(&p).unwrap();
             std::fs::write(p.join("f"), "x").unwrap();
             if let Some(t) = age {
-                std::fs::File::open(&p).unwrap().set_modified(t).unwrap();
+                crate::disk::test_support::set_folder_time(&p, t);
             }
             p
         };
@@ -498,10 +498,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let p = dir.path().join("x9-fixture-old001");
         std::fs::create_dir(&p).unwrap();
-        std::fs::File::open(&p)
-            .unwrap()
-            .set_modified(SystemTime::now() - Duration::from_secs(48 * 3600))
-            .unwrap();
+        crate::disk::test_support::set_folder_time(&p, SystemTime::now() - Duration::from_secs(48 * 3600));
         let dry = TempArgs {
             apply: false,
             dry_run: true,
