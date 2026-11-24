@@ -8,6 +8,9 @@ rust-version.workspace = true
 publish = false
 description = "The contract of Debrief plugins (ADR 0017): plugin traits, the values plugins build (records, timestamps, configuration trees, settings, tools, marker kinds, annotations), the manifest, the plugin protocol over debrief-ipc frames, and serve(). No dependency on debrief-core."
 
+[lib]
+doctest = false # doctests are off (crates/README.md, "Doctests")
+
 [dependencies]
 debrief-ipc = { path = "../debrief-ipc" }
 anyhow.workspace = true

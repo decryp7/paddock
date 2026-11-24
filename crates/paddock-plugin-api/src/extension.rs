@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 /// An app's contract: a namespace, its newest known minor version and the request and reply types.
 ///
-/// ```
+/// ```text
 /// use paddock_plugin_api::extension::Contract;
 /// use serde::{Deserialize, Serialize};
 ///

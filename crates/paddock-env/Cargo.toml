@@ -7,6 +7,9 @@ license.workspace = true
 repository.workspace = true
 publish = ["decryp7"]
 
+[lib]
+doctest = false # doctests are off (crates/README.md, "Doctests")
+
 [features]
 # The `create_all_as` and `open_as` seams of `paddock_env::private`, which name the account that is trusted. Never enabled in a
 # shipped build (ADR 0073).

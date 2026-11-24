@@ -333,11 +333,7 @@ jobs:
           path: apps/debrief/target/nextest/ci/junit.xml
           if-no-files-found: ignore
 
-      # nextest does not run doc tests. This step and the next ones run even after the tests failed (each names what broke).
-      - name: Doc tests (workspace)
-        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && needs.plan.outputs.rust_test_filter == '' }}
-        run: cargo test --workspace --doc
-
+      # The next steps run even after the tests failed (each names what broke). No doc tests: they are off (crates/README.md, "Doctests").
       # Tests clean up after themselves (docs/testing/temp-leaks.md): a debrief-* / imt-* folder left behind fails the job.
       - name: No temp folders left behind
         if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' }}
@@ -447,15 +443,6 @@ jobs:
             if [ -n "$HOST_FILTER" ]; then filter=(-E "$HOST_FILTER"); fi
           fi
           cargo nextest run "${sel[@]}" --profile ci ${filter[@]+"${filter[@]}"}
-
-      - name: Doc tests (workspace)
-        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && needs.plan.outputs.rust_test_macos_filter == '' }}
-        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief
-        env:
-          HOST_PACKAGES: ${{ needs.plan.outputs.host_packages_macos }}
-        run: |
-          sel=(--workspace); if [ -n "$HOST_PACKAGES" ]; then sel=(); for p in $HOST_PACKAGES; do sel+=(-p "$p"); done; fi
-          cargo test "${sel[@]}" --doc
 
       - name: No temp folders left behind
         if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' }}

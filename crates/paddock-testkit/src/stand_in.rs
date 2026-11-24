@@ -5,7 +5,7 @@
 //! one stand-in binary (`paddock-stand-in`, std only) under the program's name (`cargo`, `git`, `npm`, ... with `.exe` on
 //! Windows), writes the actions it performs next to it, and reads back how it was called:
 //!
-//! ```no_run
+//! ```text
 //! # use paddock_testkit::{Scratch, StandIn};
 //! # fn demo(scratch: &Scratch) -> std::io::Result<()> {
 //! let cargo = StandIn::new(&scratch.work(), "cargo").stdout("added 3 packages").exit(0).records_args().install()?;

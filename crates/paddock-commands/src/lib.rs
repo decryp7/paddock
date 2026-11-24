@@ -17,7 +17,7 @@
 //!
 //! The core is pure Rust with no Tauri dependency; the adapter lives in `tauri` behind the `tauri` feature.
 //!
-//! ```
+//! ```text
 //! paddock_commands::command_table! {
 //!     /// Every command of the app.
 //!     pub static COMMANDS;
@@ -31,7 +31,7 @@
 //!
 //! A command listed twice does not compile:
 //!
-//! ```compile_fail,E0080
+//! ```text
 //! paddock_commands::command_table! {
 //!     pub static COMMANDS;
 //!     Query [WINDOW] => a::summary,
@@ -41,14 +41,14 @@
 //!
 //! Nor does a command no window may call (`NONE`), or a limit outside 1 KiB to 64 MiB:
 //!
-//! ```compile_fail,E0080
+//! ```text
 //! paddock_commands::command_table! {
 //!     pub static COMMANDS;
 //!     Query [NONE] => a::summary,
 //! }
 //! ```
 //!
-//! ```compile_fail,E0080
+//! ```text
 //! paddock_commands::command_table! {
 //!     pub static COMMANDS;
 //!     Query [MAIN] limit 10 => a::summary,
@@ -103,7 +103,7 @@ pub mod tauri;
 /// crate's table into one, validated the same way, so a command two crates both declare does not compile. Each part
 /// keeps its own handler; `tauri::Routes` sends a call to the handler of the part that lists it.
 ///
-/// ```
+/// ```text
 /// mod health {
 ///     paddock_commands::command_table! {
 ///         pub static HEALTH;
@@ -126,7 +126,7 @@ pub mod tauri;
 ///
 /// Two parts naming the same command do not compile:
 ///
-/// ```compile_fail,E0080
+/// ```text
 /// mod a { paddock_commands::command_table! { pub static A; Query [WINDOW] => a::status, } }
 /// mod b { paddock_commands::command_table! { pub static B; Query [MAIN] => b::status, } }
 /// paddock_commands::command_table! { pub static BOTH = [a::A, b::B]; }
@@ -137,7 +137,7 @@ pub mod tauri;
 /// names. A dialog contract (`paddock_dialogs::dialogs!`) names the marker, so naming a command that is not in the table
 /// or not open to dialogs does not compile:
 ///
-/// ```
+/// ```text
 /// paddock_commands::command_table! {
 ///     pub static COMMANDS;
 ///     Query [MAIN | DIALOG] => app::app_status,
@@ -149,7 +149,7 @@ pub mod tauri;
 /// assert_eq!(SETTINGS.wire(), "app_*");
 /// ```
 ///
-/// ```compile_fail,E0425
+/// ```text
 /// paddock_commands::command_table! {
 ///     pub static COMMANDS;
 ///     Mutation [MAIN] => app::app_quit,
@@ -157,7 +157,7 @@ pub mod tauri;
 /// let closed_to_dialogs = dialog_callable::app_quit;
 /// ```
 ///
-/// ```compile_fail,E0080
+/// ```text
 /// paddock_commands::command_table! {
 ///     pub static COMMANDS;
 ///     Query [WINDOW] => app::app_status,

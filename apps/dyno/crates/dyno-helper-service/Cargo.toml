@@ -8,6 +8,9 @@ repository.workspace = true
 rust-version.workspace = true
 publish = false
 
+[lib]
+doctest = false # doctests are off (crates/README.md, "Doctests")
+
 [dependencies]
 dyno-core.workspace = true
 # The registration, the protected copy and the OS prompt are the family's one implementation (rule 55, ER-22).

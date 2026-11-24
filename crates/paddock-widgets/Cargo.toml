@@ -7,6 +7,9 @@ license.workspace = true
 repository.workspace = true
 publish = ["decryp7"]
 
+[lib]
+doctest = false # doctests are off (crates/README.md, "Doctests")
+
 [features]
 # TypeScript for apps that generate their own catalogue types against these (ADR 0035 §3).
 ts = ["dep:ts-rs"]

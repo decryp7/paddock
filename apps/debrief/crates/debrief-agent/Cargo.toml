@@ -9,6 +9,7 @@ publish = false
 description = "Headless Debrief agent: scheduled and triggered diagnostics collection, as a CLI or an OS service"
 
 [lib]
+doctest = false # doctests are off (crates/README.md, "Doctests")
 name = "debrief_agent"
 path = "src/lib.rs"
 

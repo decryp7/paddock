@@ -4,7 +4,7 @@
 //! cap, keeps the last of the child's error output for messages (ER-27), and ends the child's whole tree when it is finished or
 //! dropped (rule 53: by the identity taken at the start, never a pid read later).
 //!
-//! ```no_run
+//! ```text
 //! # use std::time::Duration;
 //! # fn demo() -> Result<(), paddock_proc::SessionError> {
 //! let mut cmd = paddock_proc::command("git");

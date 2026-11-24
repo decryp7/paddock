@@ -8,6 +8,9 @@ rust-version.workspace = true
 publish = false
 description = "Debrief tools plugin: Performance Monitor collector sets, the process monitor, the Event Log follower, the diagnostics collector and elevation info"
 
+[lib]
+doctest = false # doctests are off (crates/README.md, "Doctests")
+
 [dependencies]
 tempfile.workspace = true
 debrief-core = { path = "../debrief-core" }

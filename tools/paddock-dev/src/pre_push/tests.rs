@@ -32,31 +32,6 @@ fn crates_of(left_out: &[&str], lintable: usize) -> super::linux_inputs::WsCrate
     }
 }
 
-/// The `crates` workspace as `cargo metadata` would list it: ipc and cli depend on proc (cli through ipc too), solo on nothing.
-fn members() -> Vec<super::members::Member> {
-    let m = |name: &str, deps: &[&str]| super::members::Member {
-        name: name.to_string(),
-        dir: format!("crates/{name}"),
-        deps: deps.iter().map(|d| d.to_string()).collect(),
-    };
-    vec![
-        m("paddock-proc", &[]),
-        m("paddock-ipc", &["paddock-proc", "serde"]),
-        m("paddock-cli", &["paddock-ipc"]),
-        m("paddock-solo", &[]),
-    ]
-}
-
-fn doctest_args(files: &[&str]) -> String {
-    let planned = plan_gates(&plan(), &change(files), &facts());
-    let g = run_gates(&planned)
-        .into_iter()
-        .find(|g| g.id == "doctest crates")
-        .cloned()
-        .expect("the doctest row is planned");
-    g.args.join(" ")
-}
-
 fn facts() -> Facts {
     Facts {
         conformance: Some(Ok(["conformance/bin/paddock-conformance.mjs", "--app", "paddock", "--only", "C06"]
@@ -72,12 +47,12 @@ fn facts() -> Facts {
             ("apps/debrief".to_string(), Ok(crates_of(&["debrief-app"], 2))),
         ]
         .into(),
-        crates_members: Some(Ok(members())),
         member_gate: true,
         kept_targets: None,
         pitwall_tests: vec!["scripts/ci/a.test.mjs".into()],
         dev_exe: Ok("/x/dev".into()),
         target_dir: Some("/t/".into()),
+        inactive: Ok(BTreeSet::new()),
     }
 }
 
@@ -275,111 +250,58 @@ fn the_rows_dev_runs_itself_are_not_measured_when_this_program_is_a_test_program
     }
 }
 
-/// nextest does not run doctests, so a broken example in a crate's docs passed the member gate and failed CI (paddock-testkit's
-/// `StandIn` doctest, E0308, 2026-11-18). The push gate runs `cargo test --doc` for the crates a change reaches.
+/// Doctests are off (user 2026-11-24; crates/README.md, "Doctests"): no push or member gate plans `cargo test --doc` for any workspace,
+/// the foundation's included, and the table names the row as off, a skip, never a pass.
 #[test]
-fn a_change_to_a_crates_source_plans_its_doctests() {
-    let planned = plan_gates(
-        &plan(),
-        &change(&["crates/paddock-proc/src/lib.rs", "crates/paddock-ipc/fuzz/src/a.rs"]),
-        &facts(),
-    );
-    let g = run_gates(&planned)
-        .into_iter()
-        .find(|g| g.id == "doctest crates")
-        .cloned()
-        .expect("the doctest row is planned");
-    assert_eq!(g.program, "cargo");
-    assert_eq!(g.cwd, "crates");
-    // The build folder is configuration right after the subcommand; only the touched crates, never the whole workspace.
-    assert_eq!(
-        g.args.join(" "),
-        "test --config build.target-dir='/t' --doc --all-features --locked -p paddock-cli -p paddock-ipc -p paddock-proc"
-    );
-    assert_eq!(g.env, vec![("RUSTUP_AUTO_INSTALL".to_string(), "0".to_string())]);
-    assert!(g.heavy);
-}
-
-/// A file under `crates/` that is no member's (`.config/nextest.toml`, `.cargo/config.toml`) is not a package: `-p .config` is a cargo
-/// error. It, and the workspace manifest and lockfile, widen the row to the workspace (review of 1be287647, P1-1).
-#[test]
-fn a_file_outside_every_member_widens_the_doctests_to_the_workspace() {
-    let ws = "test --config build.target-dir='/t' --doc --all-features --locked --workspace";
-    for f in [
-        "crates/.config/nextest.toml",
-        "crates/.cargo/config.toml",
-        "crates/Cargo.lock",
+fn no_doctest_row_is_planned_and_the_doctests_row_says_they_are_off() {
+    let files = [
+        "crates/paddock-proc/src/lib.rs",
+        "apps/dyno/src/a.rs",
+        "apps/pitwall/src/a.rs",
         "crates/Cargo.toml",
+    ];
+    for f in [
+        facts(),
+        Facts {
+            member_gate: false,
+            ..facts()
+        },
     ] {
-        assert_eq!(doctest_args(&[f]), ws, "{f}");
-    }
-    assert_eq!(
-        doctest_args(&["crates/paddock-solo/src/lib.rs", "crates/.config/nextest.toml"]),
-        ws,
-        "one stray file widens the lot"
-    );
-}
-
-/// A deleted or renamed crate's files are in the change but its folder is no member any more: `-p <gone>` is a cargo error, so the
-/// row widens to the workspace (P1-2).
-#[test]
-fn a_deleted_crate_widens_the_doctests_to_the_workspace() {
-    assert_eq!(
-        doctest_args(&["crates/paddock-gone/src/lib.rs"]),
-        "test --config build.target-dir='/t' --doc --all-features --locked --workspace"
-    );
-    // A folder that merely starts with a member's name is not that member.
-    assert!(doctest_args(&["crates/paddock-proc-old/src/lib.rs"]).ends_with("--workspace"));
-}
-
-/// A public API change in a crate breaks a dependent's doctest, so the dependents (transitively) run too, and only they (P2-2).
-#[test]
-fn the_doctest_row_adds_the_dependents_of_a_touched_crate() {
-    assert!(doctest_args(&["crates/paddock-ipc/src/lib.rs"]).ends_with("-p paddock-cli -p paddock-ipc"));
-    assert!(doctest_args(&["crates/paddock-solo/src/lib.rs"]).ends_with("--locked -p paddock-solo"));
-    // Nothing read from cargo: the whole workspace, never a guess.
-    let blind = Facts {
-        crates_members: Some(Err("cargo metadata for crates failed".into())),
-        ..facts()
-    };
-    let planned = plan_gates(&plan(), &change(&["crates/paddock-solo/src/lib.rs"]), &blind);
-    let g = run_gates(&planned).into_iter().find(|g| g.id == "doctest crates").cloned().unwrap();
-    assert!(g.args.join(" ").ends_with("--workspace"));
-}
-
-/// Positive control for the row above: it is planned from the change, not always. A change that reaches no crate source of the
-/// workspace has no row for it, and a file outside any crate (the workspace manifest) widens it to the workspace.
-#[test]
-fn the_doctest_row_follows_the_change() {
-    let got = ids(&plan_gates(&plan(), &change(&["apps/dyno/src/a.rs"]), &facts()));
-    assert!(!got.iter().any(|g| g == "doctest crates"), "{got:?}");
-    assert!(got.iter().any(|g| g == "doctest apps/dyno"), "{got:?}");
-    // A developer's push (no member gate) skips an app workspace's doctests with a reason, and still runs the crates' own.
-    let dev = Facts {
-        member_gate: false,
-        ..facts()
-    };
-    let planned = plan_gates(&plan(), &change(&["apps/dyno/src/a.rs", "crates/paddock-proc/src/lib.rs"]), &dev);
-    let got = ids(&planned);
-    assert!(
-        got.iter().any(|g| g == "doctest crates") && !got.iter().any(|g| g == "doctest apps/dyno"),
-        "{got:?}"
-    );
-    assert!(
-        planned
+        let planned = plan_gates(&plan(), &change(&files), &f);
+        for g in run_gates(&planned) {
+            assert!(
+                !g.id.starts_with("doctest") && !(g.args.iter().any(|a| a == "--doc")),
+                "{} runs doctests: {}",
+                g.id,
+                g.rerun()
+            );
+        }
+        let reason = planned
             .iter()
-            .any(|p| matches!(p, Planned::Skip { id, reason } if id == "doctest apps/dyno" && reason.contains("--member-gate"))),
+            .find_map(|p| match p {
+                Planned::Skip { id, reason } if id == "doctests" => Some(reason.clone()),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("no doctests row: {planned:?}"));
+        assert_eq!(reason, super::gates::DOCTESTS_OFF);
+        let rows = run_all(&planned, &Fake::default(), 2);
+        let report = render("h", &rows);
+        let row = report.data["gates"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["id"] == "doctests")
+            .cloned()
+            .unwrap();
+        assert_eq!(row["verdict"], "skipped", "{row}");
+    }
+    // Positive control: a change that reaches no Cargo workspace has no doctests row (it is named only where a workspace is reached).
+    let none = json!({"conformance": false, "apps": [], "packages": {}});
+    let planned = plan_gates(&none, &change(&["docs/x.md"]), &facts());
+    assert!(
+        !planned.iter().any(|p| matches!(p, Planned::Skip { id, .. } if id == "doctests")),
         "{planned:?}"
     );
-    let planned = plan_gates(&plan(), &change(&["crates/Cargo.toml"]), &facts());
-    let g = run_gates(&planned).into_iter().find(|g| g.id == "doctest crates").cloned().unwrap();
-    assert_eq!(
-        g.args.join(" "),
-        "test --config build.target-dir='/t' --doc --all-features --locked --workspace"
-    );
-    let none = json!({"conformance": false, "apps": [], "packages": {}});
-    let got = ids(&plan_gates(&none, &change(&["docs/x.md"]), &facts()));
-    assert!(!got.iter().any(|g| g.starts_with("doctest")), "{got:?}");
 }
 
 /// ROW_SET is what a pass record is compared with: it must list every row the planner can add besides the per-workspace ones, so a
@@ -988,7 +910,7 @@ fn the_conformance_gate_runs_the_contracts_list_and_a_broken_contract_is_broken_
     );
 }
 
-/// The host and xwin Clippy and the doctests read cargo's JSON messages for progress and name the build folder they use (so a cold one is
+/// The host and xwin Clippy read cargo's JSON messages for progress and name the build folder they use (so a cold one is
 /// told from a warm one); every other row reads output lines. The folder is the one the row is given (`--config build.target-dir`).
 #[test]
 fn the_cargo_rows_read_json_progress_and_name_their_build_folder() {
@@ -1006,7 +928,7 @@ fn the_cargo_rows_read_json_progress_and_name_their_build_folder() {
             })
             .unwrap_or_else(|| panic!("no row {id}"))
     };
-    for id in ["clippy crates", "doctest crates", "clippy-windows crates"] {
+    for id in ["clippy crates", "clippy-windows crates"] {
         assert_eq!(get(id).progress, Progress::CargoJson, "{id}");
     }
     assert_eq!(get("clippy crates").build_dir.as_deref(), Some("/kept/crates"));
@@ -1697,6 +1619,7 @@ mod known_commit {
             files: vec![],
             refs_from_stdin: true,
             member_gate: false,
+            all_apps: false,
             accept_not_measured: vec![],
         }
     }
@@ -2341,6 +2264,7 @@ mod base_choice {
             files: vec![],
             refs_from_stdin: true,
             member_gate: false,
+            all_apps: false,
             accept_not_measured: vec![],
         };
         let line = format!("refs/heads/x {two} refs/heads/main {}\n", "0".repeat(40));
@@ -3640,7 +3564,7 @@ fn the_conformance_tests_row_passes_the_build_folder_to_the_executor_and_runs_he
 }
 
 /// Rule 50 for the member gate: `./dev merge check --gates` plans the rows from the first parent's diff (`--base <merge>^1`), so a
-/// docs-only member plans no per-workspace test, doctest, Clippy or fmt row. The only test-time rows left are the two repository-wide
+/// docs-only member plans no per-workspace test, Clippy or fmt row. The only test-time rows left are the two repository-wide
 /// ones the user put on every change (ER-41, 2026-11-14 and 2026-11-17): `conformance-tests` and `member-audits`. They are the
 /// named exceptions; a third one would fail this test.
 #[test]
@@ -3657,9 +3581,7 @@ fn a_docs_only_change_plans_no_per_workspace_test_clippy_or_fmt_row_in_the_membe
     // The positive control (ER-33): the same probe sees the rows a code change plans.
     let code = ids(&plan_gates(&plan(), &change(&["crates/paddock-proc/src/lib.rs"]), &facts()));
     assert!(
-        code.iter().any(|id| id.contains("clippy"))
-            && code.iter().any(|id| id.contains("doctest"))
-            && code.iter().any(|id| id.starts_with("fmt")),
+        code.iter().any(|id| id.contains("clippy")) && code.iter().any(|id| id.starts_with("fmt")),
         "{code:?}"
     );
 }
@@ -3668,7 +3590,7 @@ mod only_selection {
     use super::super::{gates::Planned, select_rows};
 
     fn rows() -> Vec<Planned> {
-        ["doctest crates", "clippy crates", "fmt"]
+        ["lockfile crates", "clippy crates", "fmt"]
             .iter()
             .map(|id| Planned::Skip {
                 id: (*id).into(),
@@ -3689,8 +3611,8 @@ mod only_selection {
     /// Positive control: the same rows with a selector that names them are kept, so the error below is the selection's, not the rows'.
     #[test]
     fn a_whole_row_name_and_a_first_word_both_select() {
-        let got = select_rows(rows(), &["doctest crates".into()]).unwrap();
-        assert_eq!(ids(&got), ["doctest crates"]);
+        let got = select_rows(rows(), &["lockfile crates".into()]).unwrap();
+        assert_eq!(ids(&got), ["lockfile crates"]);
         let got = select_rows(rows(), &["clippy".into(), "fmt".into()]).unwrap();
         assert_eq!(ids(&got), ["clippy crates", "fmt"]);
         assert_eq!(select_rows(rows(), &[]).unwrap().len(), 3, "no selector keeps every row");
@@ -3701,12 +3623,185 @@ mod only_selection {
         let e = select_rows(rows(), &["no such gate".into()]).unwrap_err();
         let shown = e.text();
         assert!(shown.contains("no such gate"), "{shown}");
-        for valid in ["doctest crates", "clippy crates", "fmt"] {
+        for valid in ["lockfile crates", "clippy crates", "fmt"] {
             assert!(shown.contains(valid), "{valid} missing from {shown}");
         }
         assert!(
             select_rows(Vec::new(), &["fmt".into()]).is_err(),
             "no rows at all is also not a pass"
         );
+    }
+}
+
+/// The active apps (docs/ci-active-apps.toml, user 2026-11-24): the push and member gate run the foundation's rows and the active
+/// apps' rows; an inactive app's own build checks are named as inactive, never run and never a pass.
+mod active_apps {
+    use super::*;
+    use crate::pre_push::gates::{inactive_label, inactive_reason};
+    use crate::pre_push::{inactive_apps, inactive_note};
+
+    fn off(apps: &[&str]) -> Facts {
+        Facts {
+            inactive: Ok(apps.iter().map(|a| a.to_string()).collect()),
+            ..facts()
+        }
+    }
+
+    const FILES: &[&str] = &["crates/paddock-proc/src/lib.rs", "apps/dyno/src/a.rs", "apps/pitwall/src/a.rs"];
+
+    fn skipped<'a>(planned: &'a [Planned], id: &str) -> Option<&'a str> {
+        planned.iter().find_map(|p| match p {
+            Planned::Skip { id: i, reason } if i == id => Some(reason.as_str()),
+            _ => None,
+        })
+    }
+
+    #[test]
+    fn an_inactive_apps_own_rows_are_skipped_and_named_as_inactive() {
+        let planned = plan_gates(&plan(), &change(FILES), &off(&["dyno", "pitwall", "debrief"]));
+        let ran = ids(&planned);
+        for ws in ["apps/dyno", "apps/pitwall"] {
+            for kind in ["fmt", "clippy", "clippy-windows", "clippy-linux"] {
+                let id = format!("{kind} {ws}");
+                assert!(!ran.iter().any(|r| r == &id), "{id} ran: {ran:?}");
+                let reason = skipped(&planned, &id).unwrap_or_else(|| panic!("{id} is not named: {planned:?}"));
+                assert!(reason.starts_with(&inactive_label()), "{id}: {reason}");
+            }
+            // The lockfile is a generated file: it stays current whether the app is active or not (ER-40).
+            assert!(ran.contains(&format!("lockfile {ws}")), "{ran:?}");
+        }
+        assert_eq!(inactive_label(), "inactive (docs/ci-active-apps.toml)");
+        assert_eq!(
+            skipped(&planned, "pitwall-scripts, pitwall-deny"),
+            Some(inactive_reason("pitwall").as_str())
+        );
+        assert!(!ran.iter().any(|r| r.starts_with("pitwall-")), "{ran:?}");
+        // The Linux Clippy keeps the active workspaces in its one container run.
+        assert!(ran.contains(&"clippy-linux crates".to_string()), "{ran:?}");
+    }
+
+    /// Positive control: the same change with the apps active runs their rows (the skip above is the set's, not the plan's).
+    #[test]
+    fn an_active_apps_rows_run() {
+        let planned = plan_gates(&plan(), &change(FILES), &off(&["debrief", "pitwall"]));
+        let ran = ids(&planned);
+        for id in ["fmt apps/dyno", "clippy apps/dyno", "clippy-windows apps/dyno"] {
+            assert!(ran.contains(&id.to_string()), "{id} did not run: {ran:?}");
+        }
+        assert!(
+            ran.contains(&"clippy-linux apps/dyno (left out: dyno-app) + crates".to_string()),
+            "{ran:?}"
+        );
+        assert!(skipped(&planned, "clippy-linux apps/pitwall").is_some(), "{planned:?}");
+        assert!(skipped(&planned, "clippy apps/pitwall").is_some_and(|r| r.starts_with(&inactive_label())));
+    }
+
+    #[test]
+    fn the_foundation_rows_and_the_generators_always_run() {
+        let files = ["crates/paddock-proc/src/lib.rs", "apps/dyno/crates/dyno-core/src/a.rs"];
+        let planned = plan_gates(&plan(), &change(&files), &off(&["dyno", "pitwall", "debrief"]));
+        let ran = ids(&planned);
+        for id in [
+            "fmt crates",
+            "clippy crates",
+            "clippy-windows crates",
+            "clippy-linux crates",
+            "conformance",
+            "conformance-tests",
+            "member-audits",
+            "gates-register",
+            "dyno-wire-fixtures",
+        ] {
+            assert!(ran.contains(&id.to_string()), "{id} did not run: {ran:?}");
+        }
+    }
+
+    #[test]
+    fn a_set_that_cannot_be_read_runs_every_row_and_breaks_the_active_apps_row() {
+        let f = Facts {
+            inactive: Err("docs/ci-active-apps.toml cannot be read".into()),
+            ..facts()
+        };
+        let planned = plan_gates(&plan(), &change(FILES), &f);
+        assert!(ids(&planned).contains(&"clippy apps/dyno".to_string()));
+        assert!(
+            planned
+                .iter()
+                .any(|p| matches!(p, Planned::Broken { id, .. } if id == "active-apps")),
+            "{planned:?}"
+        );
+        // Positive control: a set that was read has no such row.
+        assert!(!format!("{:?}", plan_gates(&plan(), &change(FILES), &facts())).contains("active-apps"));
+    }
+
+    fn tree(active: &str) -> tempfile::TempDir {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(d.path().join("docs")).unwrap();
+        std::fs::write(
+            d.path().join(crate::active_apps::FILE),
+            format!("decided = \"2026-11-24\"\nby = \"user\"\nreason = \"foundation first\"\nactive = {active}\nnext = []\n"),
+        )
+        .unwrap();
+        d
+    }
+
+    #[test]
+    fn the_set_is_read_through_its_accessor_and_all_apps_runs_every_app() {
+        let apps: BTreeSet<String> = ["dyno", "pitwall"].map(String::from).into();
+        let d = tree("[\"dyno\"]");
+        assert_eq!(inactive_apps(d.path(), &apps, false).unwrap(), ["pitwall".to_string()].into());
+        assert!(
+            inactive_apps(d.path(), &apps, true).unwrap().is_empty(),
+            "--all-apps leaves no app out"
+        );
+        let planned = plan_gates(
+            &plan(),
+            &change(FILES),
+            &Facts {
+                inactive: inactive_apps(d.path(), &apps, true),
+                ..facts()
+            },
+        );
+        assert!(
+            ids(&planned).contains(&"clippy apps/pitwall".to_string()),
+            "--all-apps runs an inactive app's rows"
+        );
+        assert!(inactive_note(&Ok(BTreeSet::new()), true).unwrap().contains("--all-apps"));
+        let note = inactive_note(&inactive_apps(d.path(), &apps, false), false).unwrap();
+        assert!(note.contains("pitwall") && note.contains("not passes"), "{note}");
+        // A typo or an unreadable file is an error, never "no app" or "every app".
+        assert!(inactive_apps(tree("[\"dyon\"]").path(), &apps, false).unwrap_err().contains("dyon"));
+        assert!(inactive_apps(tempfile::tempdir().unwrap().path(), &apps, false).is_err());
+    }
+
+    #[test]
+    fn the_summary_counts_inactive_rows_apart_and_never_as_passed() {
+        let planned = plan_gates(&plan(), &change(FILES), &off(&["dyno", "pitwall", "debrief"]));
+        let rows = run_all(&planned, &Fake::default(), 2);
+        let n = rows.iter().filter(|(_, r)| r.reason().starts_with(&inactive_label())).count();
+        // fmt, clippy and clippy-windows of apps/dyno and apps/pitwall, their two Linux Clippy rows, and Pitwall's scripts and deny.
+        assert_eq!(n, 9, "{rows:?}");
+        let report = render("h", &rows);
+        let last = report.text.lines().find(|l| l.starts_with("pre-push: ")).unwrap_or_default();
+        assert!(last.contains(&format!(", {n} inactive (not checked")), "{last}");
+        assert_eq!(report.data["inactive"], json!(n));
+        let passed = rows.iter().filter(|(_, r)| r.kind() == Kind::Passed).count();
+        assert_eq!(report.data["passed"], json!(passed));
+        for row in report.data["gates"].as_array().unwrap() {
+            if row["id"] == "clippy apps/dyno" {
+                assert_eq!(row["verdict"], "inactive");
+            }
+        }
+        assert!(report.text.contains("inactive      clippy apps/dyno"), "{}", report.text);
+        // A run of nothing but inactive rows proved nothing: its outcome is not a pass (ADR 0089).
+        let only: Vec<(String, Row)> = rows
+            .into_iter()
+            .filter(|(_, r)| r.reason().starts_with(&inactive_label()))
+            .collect();
+        let (_, run) = super::super::outcome::fold(&only, &test_subject());
+        assert!(!super::super::outcome::leaves_record(&run), "{run:?}");
+        // Positive control: with every app active nothing is counted inactive.
+        let all = run_all(&plan_gates(&plan(), &change(FILES), &facts()), &Fake::default(), 2);
+        assert_eq!(render("h", &all).data["inactive"], json!(0));
     }
 }

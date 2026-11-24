@@ -7,6 +7,9 @@ license.workspace = true
 repository.workspace = true
 publish = ["decryp7"]
 
+[lib]
+doctest = false # doctests are off (crates/README.md, "Doctests")
+
 [features]
 # A fake DevTools browser (Unix) for tests of this crate and of the apps that drive it (it writes its program through
 # `paddock_testkit::exe`, which needs the test kit as a normal dependency while this feature is on).

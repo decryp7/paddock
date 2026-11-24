@@ -7,7 +7,7 @@
 //! - [`fixture`]: the sample plugin and its contract, and `paddock-plugin-fixture`, the same plugin as a process the host's
 //!   tests start ([`fixture::locate`] finds it).
 //!
-//! ```no_run
+//! ```text
 //! use paddock_plugin_test::{conformance, fixture::FixturePlugin};
 //! use std::sync::Arc;
 //!

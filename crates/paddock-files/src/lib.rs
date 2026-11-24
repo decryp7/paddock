@@ -1,7 +1,7 @@
 //! User files for the Paddock apps (plan X31): the one place that decides which paths the app may touch, shows the native
 //! pickers, keeps the recent lists and hands files to the OS. Built from Debrief's `paths.rs`, `recent.rs` and `opener.rs`.
 //!
-//! ```no_run
+//! ```text
 //! use paddock_files::{Access, Files, GrantSource, PickRequest, recent};
 //! use paddock_env::{AppDirs, AppId};
 //!

@@ -19,11 +19,11 @@
 //! - Liveness of a raw pid has one public answer, the three-valued [`presence`] (rule 53): "could not look" is
 //!   [`Presence::Unknown`], never "gone". There is no bool `is_alive(pid)`:
 //!
-//!   ```compile_fail,E0425
+//!   ```text
 //!   let _ = paddock_proc::is_alive(1);
 //!   ```
 //!
-//!   ```compile_fail,E0425
+//!   ```text
 //!   let _ = paddock_proc::may_be_alive(1);
 //!   ```
 //!

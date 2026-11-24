@@ -62,6 +62,7 @@ serde = [
 ]
 
 [lib]
+doctest = false # doctests are off (crates/README.md, "Doctests")
 name = "tray_icon"
 path = "src/lib.rs"
 

@@ -80,7 +80,13 @@ pub trait Lookups {
 
 /// Whether this run may use evidence at all: the hook's push of commits, with no override of what is measured.
 pub fn applicable(args: &PrePushArgs, pushed: &[String]) -> bool {
-    args.refs_from_stdin && args.files.is_empty() && args.base.is_none() && args.only.is_empty() && !args.dry_run && !pushed.is_empty()
+    args.refs_from_stdin
+        && args.files.is_empty()
+        && args.base.is_none()
+        && args.only.is_empty()
+        && !args.dry_run
+        && !args.all_apps
+        && !pushed.is_empty()
 }
 
 fn record_path(state: &Path, sha: &str) -> std::path::PathBuf {

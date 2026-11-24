@@ -10,6 +10,7 @@ publish = false
 build = "build.rs"
 
 [lib]
+doctest = false # doctests are off (crates/README.md, "Doctests")
 name = "dyno_helper"
 path = "src/lib.rs"
 

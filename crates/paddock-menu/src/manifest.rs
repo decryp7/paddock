@@ -2,7 +2,7 @@
 //! at build/test time: every menu item routes to a command, every key converts to a native accelerator, and a command
 //! is placed in one menu only (the native menu bar shows an id once). Run [`check`] in a test of the app.
 //!
-//! ```
+//! ```text
 //! let manifest = r#"{
 //!   "version": 1,
 //!   "commands": [{ "id": "pw.models.refresh", "title": "pw.models.refresh" }],

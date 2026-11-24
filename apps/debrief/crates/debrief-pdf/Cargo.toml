@@ -8,6 +8,9 @@ rust-version.workspace = true
 publish = false
 description = "PDF output for Debrief incident reports: selectable Unicode text (embedded font subsets) and charts embedded as vector graphics"
 
+[lib]
+doctest = false # doctests are off (crates/README.md, "Doctests")
+
 [dependencies]
 debrief-core = { path = "../debrief-core" }
 anyhow.workspace = true

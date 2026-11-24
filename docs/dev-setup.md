@@ -261,7 +261,7 @@ author or by `./dev brief` (not on main yet): that call belongs there. The Rust 
 
 - **Rust:** `cargo nextest run` (each app's `.config/nextest.toml`: one test per core but one, slow-test warnings after
   30 s, and a `ci` profile without retries that stops a test after its 60 s budget, waivers in the file with a reason, because a flaky test is fixed rather than retried, with a JUnit report).
-  nextest does not run doc tests: `cargo test --doc` runs them.
+  Doctests are off everywhere (`[lib] doctest = false`; crates/README.md, "Doctests"): doc examples are text, behaviour is in unit tests.
 - **One integration-test binary per crate:** `tests/it/main.rs` declares one module per test file (`mod pool;` for
   `tests/it/pool.rs`), shared helpers in `tests/it/common/` or `tests/it/support/`. Linking one binary per file cost more
   than running the tests (Debrief went from 239 test binaries to 99). A new test file is a new `mod` line, never a new

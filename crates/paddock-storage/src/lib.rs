@@ -2,7 +2,7 @@
 //! categories, plan, bounded walk), Dyno's bounded size walk and its re-check before every delete (`cleanup/walk.rs`, `guard.rs`),
 //! Pitwall's "never deletes by itself" leftovers and Pitcrew's cache clean.
 //!
-//! ```no_run
+//! ```text
 //! use paddock_storage::{Category, ClearChoice, ClearRequest, Kind, Storage, Item};
 //! use paddock_env::{AppDirs, AppId};
 //!

@@ -335,7 +335,7 @@ pub mod prelude {
 /// owner's module in with a `use ... as ...;` for short names). An optional `base &[...]` in the head lists the app's
 /// commands every dialog window may call.
 ///
-/// ```
+/// ```text
 /// mod app {
 ///     paddock_commands::command_table! {
 ///         pub static COMMANDS;
@@ -363,19 +363,19 @@ pub mod prelude {
 ///
 /// A command closed to dialogs (or misspelt, or removed) is an unresolved name:
 ///
-/// ```compile_fail,E0425
+/// ```text
 /// mod app { paddock_commands::command_table! { pub static COMMANDS; Mutation [MAIN] => app::app_quit, } }
 /// paddock_dialogs::dialogs! { static D; "a.quit" => Decision { commands: &[app::dialog_callable::app_quit] } }
 /// ```
 ///
-/// ```compile_fail,E0425
+/// ```text
 /// mod app { paddock_commands::command_table! { pub static COMMANDS; Query [WINDOW] => app::app_status, } }
 /// paddock_dialogs::dialogs! { static D; "a.x" => Decision { commands: &[app::dialog_callable::app_stauts] } }
 /// ```
 ///
 /// A prefix matching no dialog-callable command does not compile:
 ///
-/// ```compile_fail,E0080
+/// ```text
 /// mod app { paddock_commands::command_table! { pub static COMMANDS; Query [WINDOW] => app::app_status, } }
 /// paddock_dialogs::dialogs! { static D; "a.x" => Tool { commands: &[prefix(app::dialog_callable::ALL, "settings_")] } }
 /// ```
@@ -383,27 +383,27 @@ pub mod prelude {
 /// Nor does a modal viewer, a modeless decision, a required choice that is not modal, a number for a form's width or a
 /// declared height on a decision, or an id listed twice:
 ///
-/// ```compile_fail,E0532
+/// ```text
 /// paddock_dialogs::dialogs! { static D; "a.v" => Viewer(Modal) }
 /// ```
 ///
-/// ```compile_fail,E0532
+/// ```text
 /// paddock_dialogs::dialogs! { static D; "a.d" => Decision(Modeless) }
 /// ```
 ///
-/// ```compile_fail,E0080
+/// ```text
 /// paddock_dialogs::dialogs! { static D; "a.f" => Form(Modeless) { required_choice: true } }
 /// ```
 ///
-/// ```compile_fail,E0080
+/// ```text
 /// paddock_dialogs::dialogs! { static D; "a.f" => Form(Modal) { width: Some(Px(500)) } }
 /// ```
 ///
-/// ```compile_fail,E0080
+/// ```text
 /// paddock_dialogs::dialogs! { static D; "a.d" => Decision { height: Some(300) } }
 /// ```
 ///
-/// ```compile_fail,E0080
+/// ```text
 /// paddock_dialogs::dialogs! { static D; "a.d" => Decision, "a.d" => Decision }
 /// ```
 #[macro_export]

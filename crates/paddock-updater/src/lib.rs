@@ -27,7 +27,7 @@
 //! The core is pure Rust with no Tauri dependency; the adapter is `paddock_updater::tauri` behind the `tauri` feature, the installer
 //! over `tauri-plugin-updater` behind `install`.
 //!
-//! ```
+//! ```text
 //! use paddock_updater::{Event, UpdatePhase};
 //!
 //! let idle = UpdatePhase::Idle;

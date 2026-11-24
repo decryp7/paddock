@@ -2,7 +2,7 @@
 //! Rust only, out of process only, one IPC (`paddock-ipc`), no web code from plugins. A plugin depends on this crate
 //! alone; its `main` is one line:
 //!
-//! ```no_run
+//! ```text
 //! use paddock_plugin_api::prelude::*;
 //! use std::sync::Arc;
 //!

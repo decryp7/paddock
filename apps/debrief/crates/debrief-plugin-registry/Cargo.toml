@@ -8,6 +8,9 @@ rust-version.workspace = true
 publish = false
 description = "Debrief plugin: imports Windows registry exports (.reg)"
 
+[lib]
+doctest = false # doctests are off (crates/README.md, "Doctests")
+
 [dependencies]
 debrief-plugin-api = { path = "../debrief-plugin-api" }
 anyhow.workspace = true

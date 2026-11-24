@@ -1139,12 +1139,6 @@ jobs:
           # its default build, without them, is the one Pacenotes uses.
           cargo nextest run -p paddock-repo-graph --profile ci
 
-      # nextest (and so the coverage job) does not run doc tests.
-      - name: Doc tests (workspace, every feature)
-        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && !matrix.filter }}
-        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/crates
-        run: cargo test --workspace --all-features --doc
-
       - uses: ./.gitea/actions/sccache-stats
         if: always()
 

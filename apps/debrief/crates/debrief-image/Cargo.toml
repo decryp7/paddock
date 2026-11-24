@@ -8,6 +8,9 @@ rust-version.workspace = true
 publish = false
 description = "Untrusted images made safe for a model and the webview (ADR 0025): bounded decoding of five formats, downscaling, re-encoding without metadata, the EXIF capture time. Pure."
 
+[lib]
+doctest = false # doctests are off (crates/README.md, "Doctests")
+
 [dependencies]
 serde.workspace = true
 thiserror.workspace = true

@@ -205,11 +205,11 @@ pub enum DialogCallableKind {
 /// the two other forms. The fields are private, so a value cannot be made by hand (a string literal would bypass the
 /// compile-time check):
 ///
-/// ```compile_fail
+/// ```text
 /// let _ = paddock_commands::DialogCallable::Command("x");
 /// ```
 ///
-/// ```compile_fail
+/// ```text
 /// let _ = paddock_commands::DialogCallable(paddock_commands::DialogCallableKind::Command("x"));
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

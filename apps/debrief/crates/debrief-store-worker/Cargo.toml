@@ -9,6 +9,7 @@ publish = false
 description = "Debrief's store worker (ADR 0014): hosts the DuckDB stores and their full-text indexes in a supervised child process (the client is debrief-store-client)"
 
 [lib]
+doctest = false # doctests are off (crates/README.md, "Doctests")
 name = "debrief_store_worker"
 path = "src/lib.rs"
 
