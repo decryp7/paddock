@@ -200,6 +200,10 @@ pub struct Row {
     pub excused_by: Option<String>,
     /// The guard that ended the step: the watchdog's name, or `row cap` (the summary names it).
     pub ended_by: Option<String>,
+    /// A failed step that ran nextest: the tests that ended failed, as nextest names them (binary and test).
+    pub failed_tests: Vec<String>,
+    /// A failed step that ran nextest: the first panic line of its output, with the panic's message.
+    pub first_panic: Option<String>,
 }
 
 /// The kind of a row, for the table and its JSON.
@@ -232,6 +236,8 @@ impl Row {
             next,
             excused_by: None,
             ended_by: None,
+            failed_tests: Vec::new(),
+            first_panic: None,
         }
     }
 
@@ -504,7 +510,28 @@ pub fn decide_with(gate: &Gate, exec: &dyn Exec, limits: Limits, subject: &Subje
                 _ => gate.next.clone(),
             };
             let full = done.log.as_ref().map_or(String::new(), |l| format!(" Full output: {l}."));
-            let mut row = Row::from_run(&gate.id, subject, &done, format!("{} ({})", gate.rerun(), done.how), secs(&done));
+            // A failed step that ran nextest names its failed tests and first panic, read from its whole output by the one nextest
+            // reader (ER-42): the tail alone often ends in the summary, and the exit code says nothing (member gates, 2026-11-24).
+            let seen = done
+                .log
+                .as_ref()
+                .filter(|_| !done.success)
+                .and_then(|l| std::fs::read(l).ok())
+                .and_then(|b| crate::nextest_log::seen(&String::from_utf8_lossy(&b)));
+            let mut cause = format!("{} ({})", gate.rerun(), done.how);
+            if let Some(s) = &seen {
+                if !s.failed.is_empty() {
+                    cause.push_str(&format!("; failed tests: {}", s.failed.join(", ")));
+                }
+                if let Some(p) = &s.first_panic {
+                    cause.push_str(&format!("; first panic: {p}"));
+                }
+            }
+            let mut row = Row::from_run(&gate.id, subject, &done, cause, secs(&done));
+            if let Some(s) = seen {
+                row.failed_tests = s.failed;
+                row.first_panic = s.first_panic;
+            }
             if !done.success {
                 row.tail = done.tail.trim_end().to_string();
                 row.next = format!("{hint}. Re-run alone: {}.{full}", gate.rerun());
@@ -2000,6 +2027,61 @@ exit $rc
             let row = decide(&g, &ex, &test_subject());
             assert_eq!(row.kind(), Kind::Failed);
             assert!(row.tail.contains("C100 conformance C999 is run by no reachable"), "{}", row.tail);
+        }
+
+        /// A failed nextest row said only "exit 100": its failed tests and first panic line are in the row's cause and its JSON, read
+        /// from the step's whole output by the one nextest reader (ER-42), not only from the tail.
+        #[test]
+        fn a_failed_nextest_row_names_its_failed_tests_and_first_panic() {
+            let d = tempfile::tempdir().unwrap();
+            let ex = real(d.path(), &d.path().join("lock"));
+            let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/ci-runs/nextest-r0-fail.log");
+            // Forty lines after the run push the panic out of the 12-line tail.
+            let cmd = format!(
+                "cat '{}' >&2; i=0; while [ $i -lt 40 ]; do echo \"after $i\" >&2; i=$((i+1)); done; exit 100",
+                fixture.display()
+            );
+            let g = Gate {
+                heavy: false,
+                ..gate("member-audits", &cmd)
+            };
+            let row = decide(&g, &ex, &test_subject());
+            assert_eq!(row.kind(), Kind::Failed);
+            assert!(
+                !row.tail.contains("panicked"),
+                "the control: the tail alone has no panic: {}",
+                row.tail
+            );
+            assert_eq!(row.failed_tests, ["nxflaky t::always_fails", "nxflaky t::flaky_once"]);
+            assert_eq!(
+                row.first_panic.as_deref(),
+                Some("thread 't::always_fails' (163) panicked at src/lib.rs:7:9: no")
+            );
+            let reason = row.reason();
+            assert!(
+                reason.contains("failed tests: nxflaky t::always_fails, nxflaky t::flaky_once")
+                    && reason.contains("first panic: thread 't::always_fails' (163) panicked at src/lib.rs:7:9: no"),
+                "{reason}"
+            );
+            let r = crate::pre_push::render("h", &[("member-audits".to_string(), row)]);
+            let j = &r.data["gates"][0];
+            assert_eq!(
+                j["failed_tests"],
+                serde_json::json!(["nxflaky t::always_fails", "nxflaky t::flaky_once"]),
+                "{}",
+                r.data
+            );
+            assert_eq!(j["first_panic"], "thread 't::always_fails' (163) panicked at src/lib.rs:7:9: no");
+            // Control: a failed row that ran no nextest names no tests.
+            let plain = decide(
+                &Gate {
+                    heavy: false,
+                    ..gate("lint", "echo bad >&2; exit 1")
+                },
+                &ex,
+                &test_subject(),
+            );
+            assert!(plain.failed_tests.is_empty() && plain.first_panic.is_none());
         }
 
         /// A row naming many workspaces has an id longer than a file name may be (255 bytes): the log still gets written under a short

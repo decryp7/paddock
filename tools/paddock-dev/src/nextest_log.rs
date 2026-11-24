@@ -103,6 +103,69 @@ impl Block {
     }
 }
 
+/// How a status line ended its test: the label, and whether it was a retry (`TRY n`).
+fn last_of(m: &regex::Captures) -> Last {
+    let label = &m[2];
+    if label.starts_with("FLAKY") || label.starts_with("FLKY") {
+        Last::Flaky
+    } else if label == "PASS" {
+        if m.get(1).is_some() { Last::PassedOnRetry } else { Last::Passed }
+    } else {
+        Last::Failed
+    }
+}
+
+static PANIC: LazyLock<Regex> = LazyLock::new(|| re(r"^\s*(thread '.*' (?:\(\d+\) )?panicked at .*?):?\s*$"));
+
+/// What a failed step's nextest output shows so far: for the one-line cause of a push gate's row, never for a decision (that is
+/// [`read`]'s, which refuses a run that was cut short).
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Seen {
+    /// The tests whose last status line is a failure, `binary test`, in the order nextest names them (sorted).
+    pub failed: Vec<String>,
+    /// The first panic line with its message (`thread 't' (163) panicked at src/lib.rs:7:9: no`).
+    pub first_panic: Option<String>,
+}
+
+/// [`Seen`] for a step's output, also when the run was cut short (nextest's fail-fast prints `Cancelling due to test failure`, which
+/// [`read`] refuses). `None` when the output has no nextest run.
+pub fn seen(log: &str) -> Option<Seen> {
+    let mut states: BTreeMap<TestId, Last> = BTreeMap::new();
+    let (mut ran, mut first_panic, mut panic_at) = (false, None, None::<String>);
+    for raw in log.lines() {
+        let l = plain(raw);
+        if let Some(head) = panic_at.take() {
+            // The panic's message is the line after it; the backtrace note is not a message.
+            let msg = l.trim();
+            first_panic = Some(if msg.is_empty() || msg.starts_with("note:") {
+                head
+            } else {
+                format!("{head}: {msg}")
+            });
+        }
+        if STARTING.is_match(&l) {
+            ran = true;
+        } else if let Some(m) = LINE.captures(&l) {
+            states.insert((m[4].to_string(), m[5].to_string()), last_of(&m));
+        } else if first_panic.is_none()
+            && let Some(m) = PANIC.captures(&l)
+        {
+            panic_at = Some(m[1].trim().to_string());
+        }
+    }
+    if let Some(head) = panic_at {
+        first_panic.get_or_insert(head);
+    }
+    ran.then(|| Seen {
+        failed: states
+            .into_iter()
+            .filter(|(_, s)| *s == Last::Failed)
+            .map(|((b, t), _)| format!("{b} {t}"))
+            .collect(),
+        first_panic,
+    })
+}
+
 /// Reads every nextest run of a job log.
 pub fn read(log: &str) -> Result<Nextest, NextestError> {
     let partial = |s: String| NextestError::Partial(s);
@@ -152,15 +215,7 @@ pub fn read(log: &str) -> Result<Nextest, NextestError> {
             continue;
         }
         if let Some(m) = LINE.captures(&l) {
-            let label = &m[2];
-            let state = if label.starts_with("FLAKY") || label.starts_with("FLKY") {
-                Last::Flaky
-            } else if label == "PASS" {
-                if m.get(1).is_some() { Last::PassedOnRetry } else { Last::Passed }
-            } else {
-                Last::Failed
-            };
-            b.states.insert((m[4].to_string(), m[5].to_string()), state);
+            b.states.insert((m[4].to_string(), m[5].to_string()), last_of(&m));
         }
     }
     match block {
@@ -241,6 +296,35 @@ mod tests {
             .take_while(|l| !plain(l).trim_start().starts_with(needle))
             .map(|l| format!("{l}\n"))
             .collect()
+    }
+
+    /// A push gate's failed nextest row (member-audits, fail-fast on): the names and the first panic, also when the run was cut short.
+    #[test]
+    fn seen_names_the_failed_tests_and_first_panic_also_of_a_run_cut_short() {
+        let r0 = include_str!("../tests/ci-runs/nextest-r0-fail.log");
+        let s = seen(r0).unwrap();
+        assert_eq!(s.failed, ["nxflaky t::always_fails", "nxflaky t::flaky_once"]);
+        assert_eq!(
+            s.first_panic.as_deref(),
+            Some("thread 't::always_fails' (163) panicked at src/lib.rs:7:9: no")
+        );
+        let cut = r0
+            .lines()
+            .take_while(|l| !l.contains("(3/3)"))
+            .chain([
+                "  Cancelling due to test failure: 1 test still running",
+                "     Summary [   0.100s] 2/3 tests run: 1 passed, 1 failed",
+                "warning: 1/3 tests were not run due to test failure",
+            ])
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(read(&cut).is_err(), "the control: the decision reader refuses a cut run");
+        assert_eq!(seen(&cut).unwrap().failed, ["nxflaky t::always_fails"]);
+        // No nextest run: nothing is named, whatever panicked.
+        assert_eq!(
+            seen("error: could not compile `x`\nthread 'main' panicked at a.rs:1:1:\nboom\n"),
+            None
+        );
     }
 
     #[test]

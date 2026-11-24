@@ -1266,6 +1266,12 @@ pub fn render_timed(head: &str, rows: &[(String, Row)], timings: &std::collectio
             row["run_secs"] = json!(t.ran);
             row["queued_secs"] = json!(t.queued);
         }
+        if !v.failed_tests.is_empty() {
+            row["failed_tests"] = json!(v.failed_tests);
+        }
+        if let Some(p) = &v.first_panic {
+            row["first_panic"] = json!(p);
+        }
         if let Some(g) = &v.ended_by {
             row["ended_by"] = json!(g);
             ended.push(format!("{id}: {g}"));
