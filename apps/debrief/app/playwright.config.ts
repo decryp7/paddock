@@ -1,6 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
 import { resolve } from 'node:path';
 import { appBuildGuard } from '../../../ui/projects/paddock-e2e/src/build-guard.ts';
+import { paddockTrace } from '../../../ui/projects/paddock-e2e/src/trace.ts';
 import { paddockServers } from '../../../ui/projects/paddock-e2e/src/servers.ts';
 import { e2ePortOrCiDefault, e2eWorkers } from '../../../ui/projects/paddock-e2e/src/env.ts';
 
@@ -48,7 +49,7 @@ export default defineConfig({
   },
   projects: [
     { name: 'chromium', testIgnore: SHELL_BASELINE, use: { ...devices['Desktop Chrome'], viewport: { width: 1440, height: 900 } } },
-    { name: 'webkit', testIgnore: [PROD_CSP, SHELL_BASELINE], use: { ...devices['Desktop Safari'], viewport: { width: 1440, height: 900 } } },
+    { name: 'webkit', testIgnore: [PROD_CSP, SHELL_BASELINE], use: { ...devices['Desktop Safari'], viewport: { width: 1440, height: 900 }, trace: paddockTrace('webkit') } },
     ...(BASELINE
       ? [
           {
@@ -61,7 +62,7 @@ export default defineConfig({
             name: 'shell-baseline-webkit',
             testMatch: SHELL_BASELINE,
             snapshotPathTemplate: baselineSnapshots('webkit'),
-            use: { ...devices['Desktop Safari'], viewport: { width: 1440, height: 900 } },
+            use: { ...devices['Desktop Safari'], viewport: { width: 1440, height: 900 }, trace: paddockTrace('webkit') },
           },
         ]
       : []),

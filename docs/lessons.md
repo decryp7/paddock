@@ -3693,3 +3693,18 @@ logged with what the rule saw (ER-27). Lesson: an admission rule needs a cost, n
   - The demo release workflows (`shell-demo-release.yml`, `workbench-demo-release.yml`) have no runner-wait first job, so a train's
     dispatch of them waits in `./dev ci dispatch` instead of in the run.
   - The train's worktree lacked `apps/debrief/.cargo/libduckdb.toml`, so the gen check needed `fetch-libduckdb.sh` by hand first.
+
+## WebKit traces on macOS take screenshots that can fill the WindowServer (ADR 0120 H2, WP-0, 2026-11-24)
+
+- **What.** ADR 0120's H2 reads Playwright issue #43066: WebKit trace screenshots taken while the display sleeps fill the
+  WindowServer until it aborts, and every process connected to it ends (TN2083). The runner shares the user's WindowServer, so one
+  CI trace could end the user's session. H2 does not exclude H1 (the browser count); the cap bounds H1, WP-0 removes H2's trigger.
+  Not confirmed as the cause of the incident: the logs of a repeat (WP-3) decide that.
+- **Fix.** `paddockTrace(browserName, platform)` in `@decryp7/paddock-e2e` (`ui/projects/paddock-e2e/src/trace.ts`) returns
+  `{ mode: 'retain-on-failure', screenshots: false, snapshots: true }` for WebKit on darwin and `'retain-on-failure'` everywhere else.
+  The `webkit` project of the preset and of the Debrief, Dyno, Pitwall and Spotter configs use it. CI's `e2e-webkit` job (the
+  macOS host) holds `caffeinate -d -i -w $$` for its Playwright step, with the pid kept and killed on exit (ER-51).
+- **Rule of thumb.** A new Playwright config gets its WebKit trace from `paddockTrace`, never its own `trace:` line for WebKit.
+- **Class (ER-21).** Recorded as an instance of: a CI step on the user's shared macOS session that can take the whole session down
+  (ADR 0120). Earlier instances: the 2026-11-23 session crash (hdiutil failure after the Mac runner's desktop session crashed, train
+  18's fix item).
