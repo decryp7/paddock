@@ -7,7 +7,7 @@
 use paddock_ipc::endpoint::Stream;
 use paddock_ipc::testing::endings::applicability::Applicability;
 use paddock_ipc::testing::endings::ratchet::Ratchet;
-use paddock_ipc::testing::endings::raw::{read_to_end, write_junk};
+use paddock_ipc::testing::endings::raw::{read_to_end, send_then_keep_writing};
 use paddock_ipc::testing::endings::{failure_text, run_all, Decoded, Expect, Observed, Scenario, KEEP_WRITING_BYTES};
 use pitcrew_core::protocol::{decode_body, encode_frame, frame_len, read_frame, write_frame, Request, Response, PROTOCOL_VERSION};
 use pitcrew_service::host::Host;
@@ -118,9 +118,10 @@ fn scenario(s: Scenario) -> Result<(Observed, Expect), &'static str> {
     let result = match s {
         Scenario::WrongVersion | Scenario::ClientKeepsWriting => {
             let mut c = connect(&data);
-            c.write_all(&hello(PROTOCOL_VERSION + 1)).unwrap();
             if s == Scenario::ClientKeepsWriting {
-                write_junk(&mut c, KEEP_WRITING_BYTES);
+                send_then_keep_writing(&mut c, &hello(PROTOCOL_VERSION + 1), KEEP_WRITING_BYTES).unwrap();
+            } else {
+                c.write_all(&hello(PROTOCOL_VERSION + 1)).unwrap();
             }
             let expect = Expect::reason(&["protocolMismatch"]);
             observe(

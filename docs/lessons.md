@@ -3858,3 +3858,23 @@ first and records the second (`ci fix-items`) is part of the queued green-main w
     one write per line, for the plan and the eleven `|l| eprintln!("{l}")` log closures). Still open: the other `eprintln!` calls with
     inline formatting have the same two-write shape; a clippy `disallowed-macros` ban of `eprintln!` in paddock-dev's sources, with
     `log_text::eline` as the replacement, would cover them.
+
+## A refused client's junk arrived after the close: `client-keeps-writing` depended on thread order (2026-11-25, run 9001)
+Symptom (crates job, llvm-cov step, Linux container; FLAKY, green on its retry): `paddock-ipc` `endings::ipc_host_ends_every_connection_right_or_is_in_the_ratchet`
+panicked with "stale ratchet entry I10: ipc-host / client-keeps-writing: reset no longer happens". The crate had not changed.
+**Causes listed.** (1) The junk was not yet in the host's receive queue when the host closed: the harness wrote the hello and the junk
+in separate writes, so the host could read the hello, refuse and close first, and Linux ends a stream in order when nothing is unread
+(confirmed, below). (2) The kernel set the reset but the read ended in `eof` (no: Linux's `unix_release_sock` sets `ECONNRESET` on the
+peer under its state lock whenever the closing side's queue is not empty, and `unix_stream_read_generic` reports the error before the
+end). (3) The host read part of the junk with the hello (no: `frame::read_body` reads exactly the frame, no buffered reader). (4) A
+drain on the host (no: the host has none, the end line says `drain=none`, ratchet entry WP-2).
+**Evidence.** Unforced, the old order did not fail in 400 of 400 runs (1 test x 400 iterations, Linux arm64 CI image, 4 CPUs, 4 CPU
+spinners, host load 18 to 40): p is below about 0.75 %, too low to count. Forced (a temporary gate: the client writes the hello, waits
+for the host's end line, then the junk) it failed 20 of 20 with the CI message, the report then reading `client-keeps-writing:
+drain-not-eof` (no reset). With the fix and the same gate after the first write: 200 of 200 green.
+**Fix, one mechanism.** `raw::send_then_keep_writing` writes the hello and the first 1 KiB of junk in one write, then the rest; every
+`client-keeps-writing` client uses it (paddock-ipc's black-box suite, which also drives ipc-link-server and dyno-agent; paddock-mcp;
+pitcrew-service). The mini rig already wrote everything before it let its endpoint accept. `write_junk` no longer overshoots `total`.
+**Class: a test or harness whose outcome depended on which thread ran first** (earlier: run 8174's `owner-close-while-peer-not-reading`
+in the same harness, the Debrief Stop-button probe and the row-menu e2e, all above). Second instance in the endings harness: a scenario's
+precondition (here, input unread at the close) was assumed, not established before the endpoint acted.

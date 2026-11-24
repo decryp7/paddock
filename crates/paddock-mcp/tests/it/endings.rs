@@ -6,7 +6,7 @@ use crate::common::rig;
 use paddock_ipc::testing::endings::applicability::Applicability;
 use paddock_ipc::testing::endings::log::LogCapture;
 use paddock_ipc::testing::endings::ratchet::Ratchet;
-use paddock_ipc::testing::endings::raw::{READ_GUARD, read_to_end, write_junk};
+use paddock_ipc::testing::endings::raw::{READ_GUARD, read_to_end, send_then_keep_writing};
 use paddock_ipc::testing::endings::{
     Decoded, Expect, KEEP_WRITING_BYTES, Observed, Scenario, failure_text, run_all,
 };
@@ -151,9 +151,10 @@ fn scenario(s: Scenario) -> Result<(Observed, Expect), &'static str> {
             } else {
                 (b"{\"key\":\"pmk_wrong\"}\n", "key")
             };
-            c.write_all(first).map_err(|_| "write")?;
             if s == Scenario::ClientKeepsWriting {
-                write_junk(&mut c, KEEP_WRITING_BYTES);
+                send_then_keep_writing(&mut c, first, KEEP_WRITING_BYTES).map_err(|_| "write")?;
+            } else {
+                c.write_all(first).map_err(|_| "write")?;
             }
             let expect = Expect::reason(&[code, "handshake"]);
             observe(
