@@ -44,8 +44,6 @@ oxc_resolver = { version = "11.24", default-features = false }
 # C102 (ipc_endpoints): the syn pass over non-test code and the register/ratchet files; the repository graph's Rust reads (repo_model/reads.rs).
 syn = { version = "2", default-features = false, features = ["full", "parsing", "visit", "printing"] }
 proc-macro2 = { version = "1", features = ["span-locations"] }
-# pre_push/reuse: the time a reused row was green, in RFC 3339 (jiff is the one date and time crate).
-jiff = { version = "0.2", default-features = false, features = ["std"] }
 paddock-cli = { path = "../../crates/paddock-cli" }
 paddock-env = { path = "../../crates/paddock-env" }
 paddock-proc = { path = "../../crates/paddock-proc" }

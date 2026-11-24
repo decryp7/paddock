@@ -1040,7 +1040,6 @@ fn a_crashed_runner_and_a_row_that_never_ran_are_not_measured() {
             queue_stall: QUEUE_STALL,
             stop: &AtomicBool::new(true),
             subject: &test_subject(),
-            reuse: None,
         },
     );
     assert!(fake.ran.lock().unwrap().is_empty());
@@ -1686,7 +1685,6 @@ mod known_commit {
             member_gate: false,
             all_apps: false,
             accept_not_measured: vec![],
-            no_reuse: false,
         }
     }
 
@@ -2332,7 +2330,6 @@ mod base_choice {
             member_gate: false,
             all_apps: false,
             accept_not_measured: vec![],
-            no_reuse: false,
         };
         let line = format!("refs/heads/x {two} refs/heads/main {}\n", "0".repeat(40));
         let got = command_in(
@@ -2592,7 +2589,6 @@ fn queue_time_and_run_time_are_reported_apart_and_the_pass_counts_only_the_run()
             queue_stall: QUEUE_STALL,
             stop: &AtomicBool::new(false),
             subject: &test_subject(),
-            reuse: None,
         },
     );
     assert!(
@@ -2632,7 +2628,6 @@ fn a_step_that_never_got_a_slot_is_not_measured_with_its_queue_time_never_passed
             queue_stall: QUEUE_STALL,
             stop: &AtomicBool::new(false),
             subject: &test_subject(),
-            reuse: None,
         },
     );
     let v = verdicts(&rows);
@@ -2666,7 +2661,6 @@ fn a_long_queue_wait_followed_by_a_short_run_passes() {
             queue_stall: QUEUE_STALL,
             stop: &AtomicBool::new(false),
             subject: &test_subject(),
-            reuse: None,
         },
     );
     assert!(
@@ -2694,7 +2688,6 @@ fn rows_that_together_run_far_longer_than_the_old_total_all_pass() {
             queue_stall: QUEUE_STALL,
             stop: &AtomicBool::new(false),
             subject: &test_subject(),
-            reuse: None,
         },
     );
     assert_eq!(rows.len(), 16);
@@ -2725,7 +2718,6 @@ fn a_queue_with_no_progress_is_not_measured_and_names_the_holder() {
             queue_stall: QUEUE_STALL,
             stop: &AtomicBool::new(false),
             subject: &test_subject(),
-            reuse: None,
         },
     );
     let v = verdicts(&rows);
@@ -2894,7 +2886,6 @@ fn a_push_has_one_heavy_step_in_flight_at_a_time() {
             queue_stall: Duration::from_secs(60),
             stop: &AtomicBool::new(false),
             subject: &test_subject(),
-            reuse: None,
         },
     );
     assert!(rows.iter().all(|(_, v)| v.kind() == Kind::Passed), "{rows:?}");
@@ -3056,7 +3047,6 @@ fn a_free_worker_runs_light_rows_while_a_heavy_step_is_in_flight() {
             queue_stall: Duration::from_secs(60),
             stop: &AtomicBool::new(false),
             subject: &test_subject(),
-            reuse: None,
         },
     );
     assert!(rows.iter().all(|(_, v)| v.kind() == Kind::Passed), "{rows:?}");

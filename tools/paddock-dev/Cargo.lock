@@ -2247,7 +2247,6 @@ dependencies = [
  "base64",
  "clap",
  "ctrlc",
- "jiff",
  "libc",
  "oxc_allocator",
  "oxc_ast",
