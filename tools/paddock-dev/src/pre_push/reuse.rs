@@ -35,7 +35,6 @@ use super::exec::Row;
 use super::gates::Gate;
 use crate::input_hash::is_hashed_var;
 use crate::plan_repo::git_text;
-use paddock_proc::{Limits, command as proc_command, run_bounded};
 use paddock_repo_graph::Graph;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -303,6 +302,8 @@ pub struct Reuse {
     run: String,
     dev: Result<Dev, String>,
     cargo: Graph,
+    /// The run's variables: a probe's child gets them through the gates' own policy ([`super::exec::PASS`], ER-47).
+    env: HashMap<String, String>,
     build_vars: Vec<String>,
     base_ref: String,
     whole_vars: Vec<String>,
@@ -348,6 +349,7 @@ impl Reuse {
             run,
             dev,
             cargo,
+            env: env.clone(),
             build_vars,
             base_ref,
             whole_vars,
@@ -365,11 +367,17 @@ impl Reuse {
         if let Some(r) = self.probes.lock().ok().and_then(|m| m.get(&name).cloned()) {
             return r;
         }
-        let mut cmd = proc_command(&cmdline[0]);
-        cmd.args(&cmdline[1..]).current_dir(&self.root).env("RUSTUP_AUTO_INSTALL", "0");
-        let r = match run_bounded(cmd, Limits::new(PROBE_LIMIT)) {
-            Ok(o) if o.success() => Ok(o.stdout_text().trim().to_string()),
-            Ok(o) => Err(format!("`{name}` exited with an error: {}", o.stderr_text().trim())),
+        // The probe's child sees what the row's child sees: the run's variables through the gates' named policy, never this
+        // process's own environment (on macOS CoreFoundation adds `__CF_USER_TEXT_ENCODING` to it; ER-47, ADR 0100).
+        let call = crate::ci_tool::ToolCall::new(&cmdline[0])
+            .args(&cmdline[1..])
+            .pass(super::exec::PASS.iter().copied())
+            .env("RUSTUP_AUTO_INSTALL", "0")
+            .cwd(&self.root)
+            .timeout(PROBE_LIMIT);
+        let r = match call.run(&self.env, &mut std::io::sink()) {
+            Ok(o) if o.success => Ok(o.stdout.trim().to_string()),
+            Ok(o) => Err(format!("`{name}` exited with an error: {}", o.stderr.trim())),
             Err(e) => Err(format!("`{name}` could not run: {e}")),
         };
         if let Ok(mut m) = self.probes.lock() {
@@ -508,7 +516,9 @@ impl Reuse {
             },
             secs: row.secs,
         };
-        if let Err(e) = write_atomic(&self.path_of(&prep.key), &rec.json(&prep.key, &prep.inputs).to_string()) {
+        // The shared atomic write: parallel workers store at the same moment, so each needs its own temporary file.
+        let text = rec.json(&prep.key, &prep.inputs).to_string();
+        if let Err(e) = paddock_env::write_atomic(&self.path_of(&prep.key), text.as_bytes(), false) {
             eprintln!("::warning::pre-push: the green result of {} was not stored for reuse: {e}", g.id);
         }
     }
@@ -519,24 +529,19 @@ impl Reuse {
     }
 }
 
-fn write_atomic(path: &Path, text: &str) -> std::io::Result<()> {
-    let dir = path.parent().unwrap_or(Path::new("."));
-    std::fs::create_dir_all(dir)?;
-    let tmp = dir.join(format!(".tmp-{}-{}", std::process::id(), paddock_cli::UnixSeconds::now().0));
-    std::fs::write(&tmp, text)?;
-    std::fs::rename(&tmp, path).inspect_err(|_| {
-        let _ = std::fs::remove_file(&tmp);
-    })
-}
-
-/// Evicts by age and count from `store`; `.tmp-*` files of crashed writers go with the old ones. Returns how many files went.
+/// Evicts by age and count from `store`; the temporary files of crashed writers (`.<name>.<pid>.<n>.tmp`, from
+/// [`paddock_env::write_atomic`]) go with the old ones. Returns how many files went.
 pub fn evict(store: &Path, now: std::time::SystemTime, max_age: Duration, keep: usize) -> usize {
     let Ok(rd) = std::fs::read_dir(store) else { return 0 };
     let mut files: Vec<(std::time::SystemTime, PathBuf)> = rd
         .flatten()
         .filter_map(|e| Some((e.metadata().ok()?.modified().ok()?, e.path())))
         .filter(|(_, p)| {
-            p.extension().is_some_and(|x| x == "json") || p.file_name().is_some_and(|n| n.to_string_lossy().starts_with(".tmp-"))
+            p.extension().is_some_and(|x| x == "json")
+                || p.file_name().is_some_and(|n| {
+                    let n = n.to_string_lossy();
+                    n.starts_with('.') && n.ends_with(".tmp")
+                })
         })
         .collect();
     files.sort_by_key(|(m, _)| std::cmp::Reverse(*m));
