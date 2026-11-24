@@ -111,10 +111,9 @@ pub trait Runs {
     fn reaches(&mut self, base: &str, head: &str) -> Result<Reach, String>;
     /// Pushes `commit` to `git_ref` (a short-lived scratch ref).
     fn publish(&mut self, commit: &str, git_ref: &str) -> Result<(), String>;
-    /// Dispatches [`WORKFLOW`] on `git_ref` with `base`.
+    /// Dispatches [`WORKFLOW`] on `git_ref` with `base`; `Sent::Yes` holds the run that carries the dispatch's token (ER-51: the run is
+    /// never found again by searching the commit's runs).
     fn dispatch(&mut self, git_ref: &str, base: &str) -> Result<Sent, String>;
-    /// The id of the run on `commit`, once it exists.
-    fn find_run(&mut self, commit: &str) -> Result<Option<u64>, String>;
     /// Waits for the run, at most [`MAX_RUN_WAIT`].
     fn wait(&mut self, run: u64) -> Result<RunEnd, String>;
     /// The jobs of the run.
@@ -374,7 +373,7 @@ fn measure_on_runners(runs: &mut dyn Runs, commit: &str, base: &str, git_ref: &s
     if let Err(e) = runs.publish(commit, git_ref) {
         return unmeasured(enforced, &format!("the merge could not be pushed to {git_ref}: {e}"));
     }
-    match runs.dispatch(git_ref, base) {
+    let run = match runs.dispatch(git_ref, base) {
         Err(e) => return unmeasured(enforced, &format!("ci.yml could not be dispatched on {git_ref}: {e}")),
         Ok(Sent::Busy(last)) => {
             return unmeasured(
@@ -382,12 +381,14 @@ fn measure_on_runners(runs: &mut dyn Runs, commit: &str, base: &str, git_ref: &s
                 &format!("the runner stayed busy for {MAX_DISPATCH_WAIT} ({last}); one train's CI per runner class at a time (ER-24)"),
             );
         }
-        Ok(Sent::Yes) => {}
-    }
-    let run = match runs.find_run(commit) {
-        Ok(Some(id)) => id,
-        Ok(None) => return unmeasured(enforced, &format!("no run of ci.yml appeared for {git_ref}")),
-        Err(e) => return unmeasured(enforced, &format!("the run could not be found: {e}")),
+        Ok(Sent::Refused { why, .. }) => return unmeasured(enforced, &format!("the dispatch was refused: {why}")),
+        Ok(Sent::Lost(why)) => {
+            return unmeasured(
+                enforced,
+                &format!("ci.yml was dispatched on {git_ref} but its run was not found: {why}"),
+            );
+        }
+        Ok(Sent::Yes { run }) => run,
     };
     match runs.wait(run) {
         Err(e) => return unmeasured(enforced, &format!("run {run} could not be waited for: {e}")),
@@ -490,51 +491,32 @@ impl Runs for Gitea {
             reservation::Free::Yes { .. } => {}
             reservation::Free::StillHeld { holder } => return Ok(Sent::Busy(format!("a train's CI sequence holds the runners: {holder}"))),
         }
-        let req = dispatch::parse_request(WORKFLOW, git_ref, &[format!("base={base}")], MAX_DISPATCH_WAIT, None)?;
-        let root = self.root.clone();
-        let read = move |name: &str| std::fs::read_to_string(root.join(".gitea/workflows").join(name)).ok();
-        let mut clock = dispatch::system_clock();
-        let target = dispatch::Target {
-            server: &self.server,
-            repo: &self.repo,
-            token: &self.token,
+        let d = crate::queue::real::HeldDispatch {
+            target: dispatch::Target {
+                server: &self.server,
+                repo: &self.repo,
+                token: &self.token,
+            },
+            root: &self.root,
+            git_ref,
+            max_wait: crate::wait::parse_duration(MAX_DISPATCH_WAIT)?,
+            find_max: dispatch::FIND_MAX,
+            find_interval: dispatch::FIND_INTERVAL,
         };
+        let mut clock = dispatch::system_clock();
         let mut reach = crate::health::CurlReach;
         let mut health = crate::health::Health::new(crate::health::real_services(&self.server, "dispatch", false), &mut reach);
-        // A service that stays down is a busy answer: the caller tries again on its next turn, nothing was sent.
-        match dispatch::run(
+        // The shared dispatch: the token, the wait for a free runner and the run that carries the token. A service that stays down
+        // is a busy answer: nothing was sent.
+        crate::queue::real::dispatch_held(
             &mut self.http,
-            &target,
-            &req,
-            &read,
+            &d,
+            WORKFLOW,
+            &[("base".to_string(), base.to_string())],
             &mut clock,
-            &mut std::io::stderr(),
             Some(&mut health),
-        )? {
-            dispatch::Dispatched::Yes { .. } => Ok(Sent::Yes),
-            dispatch::Dispatched::StillBusy { last } | dispatch::Dispatched::ServiceDown { last } => Ok(Sent::Busy(last)),
-        }
-    }
-
-    fn find_run(&mut self, commit: &str) -> Result<Option<u64>, String> {
-        // The run exists within seconds of the dispatch; ask for up to two minutes (bounded: ER-32).
-        for attempt in 0..12 {
-            let mut c = Client::new(&mut self.http, &self.server, &self.repo, &self.token);
-            let page = c.runs_page_where(1, &format!("head_sha={commit}"))?;
-            if let Some(r) = page
-                .runs
-                .iter()
-                .filter(|r| r.workflow() == WORKFLOW && r.head_sha == commit)
-                .map(|r| r.id)
-                .max()
-            {
-                return Ok(Some(r));
-            }
-            if attempt < 11 {
-                std::thread::sleep(Duration::from_secs(10));
-            }
-        }
-        Ok(None)
+            &mut std::io::stderr(),
+        )
     }
 
     fn wait(&mut self, run: u64) -> Result<RunEnd, String> {
@@ -692,7 +674,6 @@ mod tests {
     struct Fake {
         reach: Result<Reach, String>,
         sent: Result<Sent, String>,
-        run: Option<u64>,
         end: RunEnd,
         jobs: Vec<JobRow>,
         failures: Vec<Failure>,
@@ -703,8 +684,7 @@ mod tests {
         fn green() -> Fake {
             Fake {
                 reach: Ok(Reach::Projects),
-                sent: Ok(Sent::Yes),
-                run: Some(9),
+                sent: Ok(Sent::Yes { run: 9 }),
                 end: RunEnd::Finished,
                 jobs: vec![job("crates (ubuntu-latest)", "success"), job("crates (windows-latest)", "success")],
                 failures: Vec::new(),
@@ -725,9 +705,6 @@ mod tests {
         fn dispatch(&mut self, git_ref: &str, base: &str) -> Result<Sent, String> {
             self.asked.push(format!("dispatch {git_ref} base={base}"));
             self.sent.clone()
-        }
-        fn find_run(&mut self, _commit: &str) -> Result<Option<u64>, String> {
-            Ok(self.run)
         }
         fn wait(&mut self, _run: u64) -> Result<RunEnd, String> {
             Ok(self.end)
@@ -813,9 +790,12 @@ mod tests {
         let mut f = Fake::green();
         f.end = RunEnd::StillRunning;
         assert_eq!(run(&merge(), &mut f, true).exit, Exit::NotMeasured);
+        // A dispatch whose run was not found by its token is not measured: no run of the commit is taken instead (ER-51).
         let mut f = Fake::green();
-        f.run = None;
-        assert_eq!(run(&merge(), &mut f, true).data["outcome"], "not measured");
+        f.sent = Ok(Sent::Lost("no run showed dispatch id 0123456789abcdef.member within 2m".into()));
+        let s = run(&merge(), &mut f, true);
+        assert_eq!(s.data["outcome"], "not measured");
+        assert!(s.data["why"].as_str().unwrap().contains("dispatch id"), "{}", s.data);
         let mut f = Fake::green();
         f.reach = Err("no plan".into());
         assert_eq!(run(&merge(), &mut f, true).data["outcome"], "not measured");

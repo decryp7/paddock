@@ -129,7 +129,7 @@ pub enum RunState {
     Failed(String),
 }
 
-/// One run of `ci.yml` on the train head.
+/// One run the queue started (and holds by its id), as the server reads it now.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CiRun {
     /// The run's id.
@@ -167,19 +167,32 @@ pub struct Failure {
 /// How a dispatch ended.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Sent {
-    /// Dispatched.
-    Yes,
+    /// Dispatched, and the run that carries this dispatch's token is `run`: the handle the queue holds (ER-51).
+    Yes {
+        /// The run's id.
+        run: u64,
+    },
     /// A shared runner stayed busy: nothing was dispatched (`./dev ci dispatch`'s wait).
     Busy(String),
+    /// A blocking dispatch guard stopped it before anything was sent (`measured: false`: the guard could not look).
+    Refused {
+        /// The guard's message, with the next step.
+        why: String,
+        /// Whether the guard looked.
+        measured: bool,
+    },
+    /// Dispatched, but no run showed its token: it must never be sent again blindly, nor its run guessed.
+    Lost(String),
 }
 
 /// CI: the train's runs.
 pub trait Ci {
-    /// The runs of `workflow` on `head`, newest first.
-    fn runs(&mut self, workflow: &str, head: &str) -> Result<Vec<CiRun>, String>;
+    /// The run `id` the queue started for `workflow` on `head`, read by its id; `Err` when the server has no such run or it is of
+    /// another workflow or commit (a record the queue did not write is not acted on, rule 53).
+    fn run(&mut self, workflow: &str, head: &str, id: u64) -> Result<CiRun, String>;
     /// Whether there is a full green run of `workflow` on `head` (`./dev ci verdict`).
     fn verdict(&mut self, workflow: &str, head: &str) -> Verdict;
-    /// Dispatches `workflow` on the train branch with these inputs.
+    /// Dispatches `workflow` on the train branch with these inputs, through the dispatch guards, and returns the run it started.
     fn dispatch(&mut self, workflow: &str, inputs: &[(String, String)]) -> Result<Sent, String>;
     /// The failures of a finished run.
     fn failures(&mut self, run: u64) -> Result<Vec<Failure>, String>;

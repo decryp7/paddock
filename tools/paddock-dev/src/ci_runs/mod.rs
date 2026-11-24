@@ -1318,9 +1318,8 @@ pub fn dispatch(a: &DispatchArgs) -> Result<Report, CliError> {
     }
 }
 
-/// The guards of a train dispatch (dispatch_guards): failed-first for a full run of a workflow that takes `since_run`, green-main for
-/// every train dispatch but a failed-only round of a train already in CI. Each is decided by its mode in docs/ci-dispatch-guards.toml
-/// and the coordinator's override; a blocking refusal ends the command (exit 4, or 6 when the guard could not look).
+/// The guards of a train dispatch ([`dispatch_guards::check_train`]) with the coordinator's overrides; a blocking refusal ends the command
+/// (exit 4, or 6 when the guard could not look).
 fn train_guards(
     a: &DispatchArgs,
     root: &std::path::Path,
@@ -1328,80 +1327,29 @@ fn train_guards(
     token: &str,
     req: &dispatch::Request,
 ) -> Result<Vec<serde_json::Value>, CliError> {
-    use dispatch::RunKind;
-    use dispatch_guards::{Decision, Finding, Guard};
-    let register = std::fs::read_to_string(root.join(dispatch_guards::REGISTER)).map_err(|e| e.to_string());
-    let mode = |g: Guard| dispatch_guards::mode_of(register.as_deref().map_err(String::as_str), g);
-    let kind = RunKind::of(&req.inputs);
-    let branch = req.git_ref.strip_prefix("refs/heads/").unwrap_or(&req.git_ref).to_string();
-    let mut http = CurlHttp;
-    let mut log = std::io::stderr();
-    let mut rows = Vec::new();
-    let stop = |d: Decision, rows: &mut Vec<serde_json::Value>| -> Result<(), CliError> {
-        match d {
-            Decision::Go(row) => {
-                rows.push(row);
-                Ok(())
-            }
-            Decision::Stop { not_measured, message } => {
-                Err(CliError::new(if not_measured { Exit::NotMeasured } else { Exit::Refused }, message)
-                    .with_hint("The ::error:: line above names the next step."))
-            }
-        }
+    let target = dispatch::Target {
+        server: &a.server,
+        repo: &a.repo,
+        token,
     };
-    if kind == RunKind::Full && dispatch_guards::takes_since_run(&req.workflow, read) {
-        let mut client = Client::new(&mut http, &a.server, &a.repo, token);
-        let finding = match client.branch_head(&branch) {
-            Ok(Some(head)) => match dispatch_guards::read_train(&mut client, &req.workflow, &branch) {
-                Ok(runs) => dispatch_guards::failed_first(&runs, &head, &req.workflow, &branch),
-                Err(e) => Finding::NotMeasured(format!("the runs of {} on {branch} cannot be read: {e}", req.workflow)),
-            },
-            Ok(None) => Finding::NotMeasured(format!("branch {branch} is not on the server")),
-            Err(e) => Finding::NotMeasured(format!("the head of {branch} cannot be read: {e}")),
-        };
-        let d = dispatch_guards::decide(
-            Guard::FailedFirst,
-            &mode(Guard::FailedFirst),
-            &finding,
-            a.full_anyway.as_deref(),
-            &mut log,
-        );
-        stop(d, &mut rows)?;
-    }
-    if !matches!(kind, RunKind::Since(_)) {
-        let apps = dispatch_guards::apps_in(root);
-        let read_main = {
-            let mut client = Client::new(&mut http, &a.server, &a.repo, token);
-            dispatch_guards::read_main(&mut client)
-        };
-        let green = match read_main {
-            Ok((nightly, push)) => dispatch_guards::green_main(
-                nightly.as_ref(),
-                push.as_ref(),
-                &apps,
-                time::now_secs() as f64 * 1000.0,
-                &mut |sha| dispatch_guards::active_at_remote(&mut http, &a.server, &a.repo, token, sha, &apps),
-            ),
-            Err(e) => dispatch_guards::GreenMain {
-                finding: Finding::NotMeasured(format!("main's runs cannot be read: {e}")),
-                fix_items: Default::default(),
-            },
-        };
-        for (app, items) in &green.fix_items {
-            for item in items {
-                eprintln!("::notice::green-main: fix item of {app} (inactive, does not stop the train): {item}");
-            }
-        }
-        let d = dispatch_guards::decide(
-            Guard::GreenMain,
-            &mode(Guard::GreenMain),
-            &green.finding,
-            a.red_main_anyway.as_deref(),
-            &mut log,
-        );
-        stop(d, &mut rows)?;
-    }
-    Ok(rows)
+    let overrides = dispatch_guards::Overrides {
+        full_anyway: a.full_anyway.as_deref(),
+        red_main_anyway: a.red_main_anyway.as_deref(),
+    };
+    dispatch_guards::check_train(
+        &mut CurlHttp,
+        &target,
+        root,
+        read,
+        req,
+        overrides,
+        time::now_secs() as f64 * 1000.0,
+        &mut std::io::stderr(),
+    )
+    .map_err(|s| {
+        CliError::new(if s.not_measured { Exit::NotMeasured } else { Exit::Refused }, s.message)
+            .with_hint("The ::error:: line above names the next step.")
+    })
 }
 
 /// The trial merge of `--trial`: the ref to dispatch and the `base` input. A conflict or a merge-check finding is a failure with

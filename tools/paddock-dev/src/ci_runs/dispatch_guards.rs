@@ -20,7 +20,7 @@
 //! run, anything else is not a full run and never counts as a failed-only round.
 
 use super::client::{Client, RunInfo, TimedJob, encode_path};
-use super::dispatch::{DispatchTag, RunKind};
+use super::dispatch::{DispatchTag, ReadWorkflow, Request, RunKind, Target, is_train};
 use crate::active_apps;
 use crate::plan_since::read_marker;
 use crate::wait::Http;
@@ -196,6 +196,106 @@ pub fn decide(guard: Guard, mode: &Mode, finding: &Finding, override_reason: Opt
             }
         }
     }
+}
+
+/// The coordinator's overrides, each with its logged reason (the queue has none).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Overrides<'a> {
+    /// `--full-anyway`: the failed-first guard.
+    pub full_anyway: Option<&'a str>,
+    /// `--red-main-anyway`: the green-main guard.
+    pub red_main_anyway: Option<&'a str>,
+}
+
+/// A blocking guard stopped the dispatch.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Stopped {
+    /// Whether the guard could not look (exit 6) rather than refused (exit 4).
+    pub not_measured: bool,
+    /// The message, the next step included (also logged as an `::error::`).
+    pub message: String,
+}
+
+/// The guards of one dispatch, the one entry point of `ci dispatch` and the landing queue: nothing for a ref that is not a train's;
+/// failed-first for a full run of a workflow that takes `since_run`; green-main for every train dispatch but a failed-only round. Each
+/// is decided by its mode in [`REGISTER`] under `root` and its override. The JSON rows of the guards that let it go, or the stop.
+#[allow(clippy::too_many_arguments)]
+pub fn check_train(
+    http: &mut dyn Http,
+    target: &Target<'_>,
+    root: &std::path::Path,
+    read: ReadWorkflow<'_>,
+    req: &Request,
+    overrides: Overrides<'_>,
+    now_ms: f64,
+    log: &mut dyn std::io::Write,
+) -> Result<Vec<serde_json::Value>, Stopped> {
+    if !is_train(&req.git_ref) {
+        return Ok(Vec::new());
+    }
+    let register = std::fs::read_to_string(root.join(REGISTER)).map_err(|e| e.to_string());
+    let mode = |g: Guard| mode_of(register.as_deref().map_err(String::as_str), g);
+    let kind = RunKind::of(&req.inputs);
+    let branch = req.git_ref.strip_prefix("refs/heads/").unwrap_or(&req.git_ref).to_string();
+    let Target { server, repo, token } = *target;
+    let mut rows = Vec::new();
+    let mut go = |d: Decision| match d {
+        Decision::Go(row) => {
+            rows.push(row);
+            Ok(())
+        }
+        Decision::Stop { not_measured, message } => Err(Stopped { not_measured, message }),
+    };
+    if kind == RunKind::Full && takes_since_run(&req.workflow, read) {
+        let mut client = Client::new(http, server, repo, token);
+        let finding = match client.branch_head(&branch) {
+            Ok(Some(head)) => match read_train(&mut client, &req.workflow, &branch) {
+                Ok(runs) => failed_first(&runs, &head, &req.workflow, &branch),
+                Err(e) => Finding::NotMeasured(format!("the runs of {} on {branch} cannot be read: {e}", req.workflow)),
+            },
+            Ok(None) => Finding::NotMeasured(format!("branch {branch} is not on the server")),
+            Err(e) => Finding::NotMeasured(format!("the head of {branch} cannot be read: {e}")),
+        };
+        go(decide(
+            Guard::FailedFirst,
+            &mode(Guard::FailedFirst),
+            &finding,
+            overrides.full_anyway,
+            log,
+        ))?;
+    }
+    if !matches!(kind, RunKind::Since(_)) {
+        let apps = apps_in(root);
+        let main = {
+            let mut client = Client::new(http, server, repo, token);
+            read_main(&mut client)
+        };
+        let green = match main {
+            Ok((nightly, push)) => green_main(nightly.as_ref(), push.as_ref(), &apps, now_ms, &mut |sha| {
+                active_at_remote(http, server, repo, token, sha, &apps)
+            }),
+            Err(e) => GreenMain {
+                finding: Finding::NotMeasured(format!("main's runs cannot be read: {e}")),
+                fix_items: BTreeMap::new(),
+            },
+        };
+        for (app, items) in &green.fix_items {
+            for item in items {
+                let _ = writeln!(
+                    log,
+                    "::notice::green-main: fix item of {app} (inactive, does not stop the train): {item}"
+                );
+            }
+        }
+        go(decide(
+            Guard::GreenMain,
+            &mode(Guard::GreenMain),
+            &green.finding,
+            overrides.red_main_anyway,
+            log,
+        ))?;
+    }
+    Ok(rows)
 }
 
 /// One run of a train's workflow, newest first, as the failed-first guard needs it.
@@ -542,7 +642,7 @@ fn kind_from_plan_log(client: &mut Client, run: u64) -> Option<RunKind> {
 }
 
 /// Whether `workflow` takes the `since_run` input (its failures can be rerun alone): only such a workflow has the failed-first guard.
-pub fn takes_since_run(workflow: &str, read: super::dispatch::ReadWorkflow<'_>) -> bool {
+pub fn takes_since_run(workflow: &str, read: ReadWorkflow<'_>) -> bool {
     let Some(text) = read(workflow) else { return false };
     let Ok(docs) = yaml_rust2::YamlLoader::load_from_str(&text) else {
         return false;
