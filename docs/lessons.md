@@ -3693,3 +3693,11 @@ logged with what the rule saw (ER-27). Lesson: an admission rule needs a cost, n
   - The demo release workflows (`shell-demo-release.yml`, `workbench-demo-release.yml`) have no runner-wait first job, so a train's
     dispatch of them waits in `./dev ci dispatch` instead of in the run.
   - The train's worktree lacked `apps/debrief/.cargo/libduckdb.toml`, so the gen check needed `fetch-libduckdb.sh` by hand first.
+
+Measuring and reporting (2026-11-24)
+- Compare CPU time or interleaved A/B runs on a shared machine, never elapsed time alone, and state the load. A graph train was
+  reported to make a test 40% slower: that was elapsed time at load 42 to 121; CPU time over 5 interleaved rounds showed 11%
+  (docs/benchmarks.md; ER-28). A `./dev bench` helper for interleaved A/B runs is planned.
+- A report-only gate must report where people look: the job summary, one `::warning::` per finding in CI, the terminal locally, with a
+  test that a planted finding appears there. The test-cost check (ADR 0121) first wrote into passing tests' stderr, which nextest
+  hides (ER-41).
