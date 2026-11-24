@@ -277,4 +277,3 @@ fn c120_hosts_agree_on_the_corpus() {
 fn c121_known_divergence_with_a_byte_order_mark() {
     assert_known_divergence("C121", &[], "the BOM variant warns 3 in Rust against 2 in JavaScript");
 }
-

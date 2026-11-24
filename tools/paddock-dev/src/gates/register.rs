@@ -522,7 +522,10 @@ pub fn sunset_limits(r: &Register, base: Option<&Register>, today: Date) -> Vec<
                     "[[report_only]] {} is new and its review_by {} is more than {SUNSET_DAYS} days away (sunset rule)",
                     e.id, s.review_by
                 ),
-                fix: format!("Set review_by to {} at the latest, and since to the day the entry is made.", Date(today.0 + SUNSET_DAYS)),
+                fix: format!(
+                    "Set review_by to {} at the latest, and since to the day the entry is made.",
+                    Date(today.0 + SUNSET_DAYS)
+                ),
             });
         }
     }
@@ -1019,7 +1022,10 @@ approved = "user"
         let base = parse("version = 1\n").0;
         let p = sunset_limits(&backdated, Some(&base), d("2026-11-26"));
         assert!(p.iter().any(|x| x.message.contains("is new")), "{p:?}");
-        assert!(sunset_limits(&backdated, Some(&backdated), d("2026-11-26")).is_empty(), "an entry the base has is not new");
+        assert!(
+            sunset_limits(&backdated, Some(&backdated), d("2026-11-26")).is_empty(),
+            "an entry the base has is not new"
+        );
     }
 
     /// The sunset rule's dates: within a week of the expiry date is a reminder, after it overdue; a passed report-only date is the
@@ -1033,7 +1039,10 @@ approved = "user"
         assert!(!near[0].overdue && near[0].message().contains("is near"), "{near:?}");
         assert!(!sunset(&r, d("2026-12-08"))[0].overdue, "the expiry date is the last day");
         let late = sunset(&r, d("2026-12-09"));
-        assert!(late[0].overdue && late[0].message().contains("review_by 2026-12-08 has passed"), "{late:?}");
+        assert!(
+            late[0].overdue && late[0].message().contains("review_by 2026-12-08 has passed"),
+            "{late:?}"
+        );
         assert!(check_dates(&r, d("2026-12-09")).is_empty(), "not a plain problem");
         let ng = parse(&report_only("C900", "", "2026-11-25", "2026-12-08").replace("[[report_only]]", "[[not_gated]]")).0;
         assert!(check_dates(&ng, d("2026-12-09")).iter().any(|p| p.message.contains("has passed")));
@@ -1047,7 +1056,10 @@ approved = "user"
         assert!(release_refusals(Some(&all), Some(&all), "dyno-v1.2.0", d("2026-12-08")).is_empty());
         let r = release_refusals(Some(&all), Some(&all), "dyno-v1.2.0", d("2026-12-09"));
         assert_eq!(r.len(), 1, "{r:?}");
-        assert!(r[0].starts_with("tag dyno-v1.2.0 is refused: [[report_only]] C900: review_by 2026-12-08 has passed"), "{r:?}");
+        assert!(
+            r[0].starts_with("tag dyno-v1.2.0 is refused: [[report_only]] C900: review_by 2026-12-08 has passed"),
+            "{r:?}"
+        );
         let dyno = report_only("C900", "apps = [\"dyno\"]\n", "2026-11-25", "2026-12-08");
         assert!(release_refusals(Some(&dyno), Some(&dyno), "pitwall-v1.1.0", d("2026-12-09")).is_empty());
         assert_eq!(release_refusals(Some(&dyno), Some(&dyno), "dyno-v1.2.0", d("2026-12-09")).len(), 1);
@@ -1180,7 +1192,10 @@ approved = "user"
             "target = \"debrief-v1.2.0\"\nblocks_tag = \"report-only\"\n",
         );
         for tag in ["debrief-v1.2.0", "debrief-v1.2.1", "debrief-v2.0.0"] {
-            assert!(release_refusals(Some(&report_only), Some(&report_only), tag, today()).is_empty(), "{tag}");
+            assert!(
+                release_refusals(Some(&report_only), Some(&report_only), tag, today()).is_empty(),
+                "{tag}"
+            );
             let rep = release_reports(Some(&report_only), tag);
             assert_eq!(rep.len(), 1, "{tag}: {rep:?}");
             assert!(rep[0].contains("report-only") && rep[0].contains("xtask"), "{rep:?}");

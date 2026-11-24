@@ -272,7 +272,13 @@ impl AllowList {
 
     /// The one finding about growth against the merge base (see the module): empty when nothing was added or it cannot apply here.
     fn growth_findings(&self, ctx: &Ctx) -> Vec<Finding> {
-        let Spec { id, rule, file, growth_blocks, .. } = *self.spec;
+        let Spec {
+            id,
+            rule,
+            file,
+            growth_blocks,
+            ..
+        } = *self.spec;
         let severity = |id: &str, rule: u32, file: &str, line: usize, message: String, fix: &str| {
             if growth_blocks {
                 Finding::error(id, rule, file, line, message, fix)

@@ -1005,7 +1005,13 @@ mod tests {
         let o = run_sunset(&reg, Some(&reg), "2026-12-02", None);
         assert!(sunset(&o).is_empty() && warned(&o) == 1, "{:?}", o.warnings);
         assert!(o.warnings[0].message.contains("is near"), "{:?}", o.warnings);
-        assert!(o.warnings[0].warning().starts_with("::warning file=docs/gates.toml::C100 register "), "{:?}", o.warnings);
+        assert!(
+            o.warnings[0]
+                .warning()
+                .starts_with("::warning file=docs/gates.toml::C100 register "),
+            "{:?}",
+            o.warnings
+        );
         // overdue, untouched: a warning, never a finding on an unrelated push
         let o = run_sunset(&reg, Some(&reg), "2026-12-09", None);
         assert!(sunset(&o).is_empty() && warned(&o) == 1, "{:?} {:?}", messages(&o), o.warnings);

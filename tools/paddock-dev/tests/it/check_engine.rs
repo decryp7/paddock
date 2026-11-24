@@ -134,10 +134,7 @@ fn json_mode_strict_and_the_exit_statuses_agree() {
     let root = repo();
     let root = root.to_str().unwrap();
     let scratch = tempfile::tempdir().unwrap();
-    let json_run = run_host(
-        &["--app", "paddock", "--root", root, "--only", "C120", "--json"],
-        scratch.path(),
-    );
+    let json_run = run_host(&["--app", "paddock", "--root", root, "--only", "C120", "--json"], scratch.path());
     assert!(json_run.stdout.trim_start().starts_with('{'));
     // C123 is report-only: a warning never fails the run, `--strict` makes the named check's warnings fail.
     let bad = tree(&[(

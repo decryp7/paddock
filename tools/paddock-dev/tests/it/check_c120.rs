@@ -76,7 +76,10 @@ fn every_shape_gives_the_same_findings_in_both_hosts() {
     );
     assert_eq!(at("scripts/c120_bad.sh"), [3, 4, 5, 8, 9]);
     assert!(at("scripts/c120_good.sh").is_empty());
-    assert_eq!(a["errors"], 28, "blocking since ci.yml 8869 (ER-41): every unwaived site is an error");
+    assert_eq!(
+        a["errors"], 28,
+        "blocking since ci.yml 8869 (ER-41): every unwaived site is an error"
+    );
     assert_eq!(a["warnings"], 0);
     // A waived site is counted as waived (with its reason), not as a finding: the site's own reason beats the file's, the file's
     // reason covers `#[cfg(test)]` modules and files under tests/, and production code of the same file is still reported.
