@@ -10,6 +10,7 @@ disallowed-methods = [
     # it through paddock_testkit::EnvLock (the one site that may), or a justified site carries #[expect(..., reason = "...")].
     { path = "std::env::set_var", reason = "the environment is process-wide: change it through paddock_testkit::EnvLock (ADR 0100), or justify the site with #[expect]" },
     { path = "std::env::remove_var", reason = "the environment is process-wide: change it through paddock_testkit::EnvLock (ADR 0100), or justify the site with #[expect]" },
+    { path = "std::env::set_current_dir", reason = "the working folder is process-wide: start the child in the folder (`current_dir`) instead; a test that moved its process left every later child of a plain test run in a deleted folder (rule 89)" },
     # ADR 0021 amendment 2026-11-11 (D-P2): a canonical path keeps Windows' verbatim `\\?\` prefix and later meets git, cargo, text or a plain path. Go through paddock_env::winpath.
     { path = "std::fs::canonicalize", reason = "use paddock_env::winpath::real_for_tools (programs), real (display, Rust file APIs) or real_verbatim (Win32 long paths, compared only with verbatim paths); ADR 0021 amendment 2026-11-11" },
     { path = "std::path::Path::canonicalize", reason = "use paddock_env::winpath::real_for_tools (programs), real (display, Rust file APIs) or real_verbatim (Win32 long paths, compared only with verbatim paths); ADR 0021 amendment 2026-11-11" },

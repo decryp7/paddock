@@ -329,7 +329,7 @@ const GOLDEN: &str = "tests/golden/ci-run/commands.tsv";
 
 /// The command that rewrites the golden from the model (paddock-testkit's golden mechanism), as the failure prints it
 /// (`docs/generators.toml`, `ci-run-golden`). `--nocapture` shows the rows it adds and removes.
-const REGENERATE_GOLDEN: &str = "PADDOCK_UPDATE_GOLDEN=1 cargo test --lib ci_run::tests::tree_the_contracts_run_exactly_the_commands_in_the_golden -- --nocapture   # in tools/paddock-dev";
+const REGENERATE_GOLDEN: &str = "PADDOCK_UPDATE_GOLDEN=1 cargo nextest run --lib --no-capture ci_run::tests::tree_the_contracts_run_exactly_the_commands_in_the_golden   # in tools/paddock-dev";
 
 /// The golden's header: written by the regenerate, so the file holds no hand-written part.
 const GOLDEN_HEADER: &str = "\
@@ -339,7 +339,7 @@ const GOLDEN_HEADER: &str = "\
 # conformance line's `--only` value is `$ONLY` (that list is generated from the check modules; the rest of the line is literal). It began as the commands
 # CI ran before the gate executor (11c365fc4, CI-in-Rust WP-3); it is now a reviewed snapshot: a change to a contract or a job shows
 # here as added and removed rows in the same commit. Regenerate:
-#   PADDOCK_UPDATE_GOLDEN=1 cargo test --lib ci_run::tests::tree_the_contracts_run_exactly_the_commands_in_the_golden -- --nocapture   # in tools/paddock-dev
+#   PADDOCK_UPDATE_GOLDEN=1 cargo nextest run --lib --no-capture ci_run::tests::tree_the_contracts_run_exactly_the_commands_in_the_golden   # in tools/paddock-dev
 # kind<TAB>job or app<TAB>os<TAB>folder<TAB>command
 ";
 
@@ -599,4 +599,67 @@ fn a_cargo_nextest_line_gets_the_gates_build_folder_as_configuration_and_other_l
         with_build_folder("cargo clippy --all-targets", "/t/pd"),
         "cargo clippy --all-targets"
     );
+}
+
+/// Rule 89 (amended 2026-11-24): every test step CI runs goes through nextest (its per-test bound, one process per test). Read through
+/// the CI model, so a workflow line, an action's line and an app contract's command are all seen, with their variables expanded; the
+/// reading is the guard hook's own (`hook::rules::no_plain_cargo_test`). Doctests (`cargo test --doc`) and builds (`--no-run`) pass.
+#[test]
+fn no_ci_line_runs_a_plain_cargo_test() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let src = crate::gates::edge::load_sources(&root).unwrap();
+    let plain = |src: &crate::gates::ci::Sources| -> Vec<String> {
+        crate::gates::ci::build(src)
+            .lines
+            .iter()
+            .filter(|l| crate::hook::rules::no_plain_cargo_test::runs_plain_cargo_test(&l.text))
+            .map(|l| format!("{}:{} ({}): {}", l.origin.as_deref().unwrap_or(&l.file), l.line, l.job, l.text))
+            .collect()
+    };
+    let found = plain(&src);
+    assert!(
+        found.is_empty(),
+        "plain `cargo test` in CI (use `cargo nextest run` with the workspace's profile, rule 89):\n{}",
+        found.join("\n")
+    );
+    // The control (ER-33): a plain `cargo test` planted in an app contract's command list is found, and a doctest beside it is not.
+    let mut planted = src.clone();
+    let dyno = planted.contracts.get_mut("dyno").expect("the Dyno contract");
+    let mut v: serde_json::Value = serde_json::from_str(dyno).unwrap();
+    let list = v
+        .as_object_mut()
+        .unwrap()
+        .values_mut()
+        .find_map(|x| {
+            x.as_array_mut()
+                .filter(|a| a.iter().any(|c| c == "node scripts/check-capabilities.mjs"))
+        })
+        .expect("the contract's command list");
+    list.push("cargo test --locked -p dyno-agent --test planted".into());
+    list.push("cargo test --locked -p dyno-agent --doc".into());
+    *dyno = v.to_string();
+    let found = plain(&planted);
+    assert!(found.iter().any(|f| f.contains("--test planted")), "{found:?}");
+    assert!(!found.iter().any(|f| f.contains("--doc")), "{found:?}");
+}
+
+/// ER-51: the nightly sweeps the host's user temp folder with `disk temp --apply` (its other call site, `disk clean`, is pinned by
+/// `disk::clean::tests::clean_sweeps_the_named_temp_folder_and_none_without_one`). Read through the CI model; the control removes the step.
+#[test]
+fn the_nightly_sweeps_the_hosts_temp_folder() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let src = crate::gates::edge::load_sources(&root).unwrap();
+    let sweeps = |src: &crate::gates::ci::Sources| {
+        crate::gates::ci::build(src)
+            .lines
+            .iter()
+            .filter(|l| l.root == ".gitea/workflows/nightly.yml" && l.text.starts_with("./dev disk temp --apply --root "))
+            .map(|l| l.job.clone())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(sweeps(&src), ["temp-sweep"]);
+    let mut without = src.clone();
+    let nightly = without.workflows.get_mut(".gitea/workflows/nightly.yml").unwrap();
+    *nightly = nightly.replace("./dev disk temp --apply", "echo no sweep");
+    assert!(sweeps(&without).is_empty(), "the probe sees the step go");
 }

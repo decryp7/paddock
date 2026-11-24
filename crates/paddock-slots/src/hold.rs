@@ -16,6 +16,9 @@ pub enum HoldEnd {
     /// The slot's lock file was deleted or replaced while the holder held it (a cache cleanup of an old job): the lock no longer
     /// keeps other jobs out, so the holder says so and ends.
     LockLost,
+    /// The process whose life bounds the holder (its lifeline: the test that started it, `paddock_env::lifeline`) has ended, so
+    /// nobody is left to release the slot or remove the job folder (ER-51).
+    LifelineGone,
 }
 
 /// What a holder watches. Injected so the loop is testable without files or sleeping.
@@ -28,6 +31,10 @@ pub trait HoldProbe {
     fn expired(&mut self) -> bool;
     /// The lock file is still the one this holder locked.
     fn lock_intact(&mut self) -> bool {
+        true
+    }
+    /// The lifeline process (if the holder has one) still runs.
+    fn lifeline_alive(&mut self) -> bool {
         true
     }
     /// Wait until the next look.
@@ -46,6 +53,9 @@ pub fn hold_until(probe: &mut impl HoldProbe) -> HoldEnd {
         if !probe.owner_present() {
             return HoldEnd::OwnerGone;
         }
+        if !probe.lifeline_alive() {
+            return HoldEnd::LifelineGone;
+        }
         if probe.expired() {
             return HoldEnd::Expired;
         }
@@ -61,6 +71,7 @@ struct FsProbe<'a> {
     poll: Duration,
     until: Option<Instant>,
     guard: &'a crate::FsGuard,
+    alive: &'a mut dyn FnMut() -> bool,
 }
 
 impl HoldProbe for FsProbe<'_> {
@@ -72,6 +83,9 @@ impl HoldProbe for FsProbe<'_> {
     }
     fn owner_present(&mut self) -> bool {
         self.owner.exists()
+    }
+    fn lifeline_alive(&mut self) -> bool {
+        (self.alive)()
     }
     fn expired(&mut self) -> bool {
         self.until.is_some_and(|t| Instant::now() >= t)
@@ -179,6 +193,31 @@ pub fn hold_with(
     grace: Duration,
     announce: &mut dyn Write,
 ) -> Result<Option<(SlotId, HoldEnd)>, SlotError> {
+    hold_while(
+        locks,
+        max,
+        owner,
+        poll,
+        max_hold,
+        grace,
+        &mut || true,
+        announce,
+    )
+}
+
+/// [`hold_with`] that also lets go when `alive` answers false ([`HoldEnd::LifelineGone`]): asked once per look, it says whether the
+/// process whose life bounds the holder still runs (the caller reads its identity; this crate reads no processes).
+#[allow(clippy::too_many_arguments)]
+pub fn hold_while(
+    locks: &FsLocks,
+    max: u32,
+    owner: &Path,
+    poll: Duration,
+    max_hold: Option<Duration>,
+    grace: Duration,
+    alive: &mut dyn FnMut() -> bool,
+    announce: &mut dyn Write,
+) -> Result<Option<(SlotId, HoldEnd)>, SlotError> {
     let Some((id, guard)) = acquire_within(locks, max, grace, ACQUIRE_PAUSE)? else {
         let _ = announce
             .write_all(Announcement::None.line().as_bytes())
@@ -207,6 +246,7 @@ pub fn hold_with(
         poll,
         until: max_hold.map(|d| Instant::now() + d),
         guard: &guard,
+        alive,
     });
     locks.clear_owner(id);
     locks.withdraw_release(id, &token);
@@ -355,6 +395,7 @@ mod tests {
         release_after: Option<u32>,
         owner_gone_after: Option<u32>,
         expires_after: Option<u32>,
+        lifeline_gone_after: Option<u32>,
         looks: u32,
     }
 
@@ -368,6 +409,9 @@ mod tests {
         fn expired(&mut self) -> bool {
             self.expires_after.is_some_and(|n| self.looks >= n)
         }
+        fn lifeline_alive(&mut self) -> bool {
+            !self.lifeline_gone_after.is_some_and(|n| self.looks >= n)
+        }
         fn pause(&mut self) {
             self.looks += 1;
         }
@@ -379,6 +423,7 @@ mod tests {
             release_after: r,
             owner_gone_after: o,
             expires_after: None,
+            lifeline_gone_after: None,
             looks: 0,
         };
         assert_eq!(hold_until(&mut s(Some(2), None)), HoldEnd::Released);
@@ -388,5 +433,32 @@ mod tests {
         capped.expires_after = Some(4);
         assert_eq!(hold_until(&mut capped), HoldEnd::Expired);
         assert_eq!(capped.looks, 4);
+    }
+
+    /// ER-51: a holder whose lifeline ended lets go at its next look; a release or a vanished job folder on the same look still wins
+    /// (they say more), and without a lifeline (the control: it answers alive) only the other ends end it.
+    #[test]
+    fn the_loop_ends_when_the_lifeline_ends_and_not_before() {
+        let s = |lifeline, release, expires| Script {
+            release_after: release,
+            owner_gone_after: None,
+            expires_after: expires,
+            lifeline_gone_after: lifeline,
+            looks: 0,
+        };
+        let mut gone = s(Some(3), None, None);
+        assert_eq!(hold_until(&mut gone), HoldEnd::LifelineGone);
+        assert_eq!(gone.looks, 3, "at the first look after it ended");
+        assert_eq!(
+            hold_until(&mut s(Some(2), Some(2), None)),
+            HoldEnd::Released
+        );
+        let mut alive = s(None, None, Some(50));
+        assert_eq!(
+            hold_until(&mut alive),
+            HoldEnd::Expired,
+            "a live lifeline never ends the hold"
+        );
+        assert_eq!(alive.looks, 50);
     }
 }

@@ -275,14 +275,14 @@ jobs:
         # 0.5 s / 300 MB budgets (DEBRIEF_BENCH_STRICT=1 enforces them once the known misses in ADR 0014 are fixed).
         run: |
           export DEBRIEF_BENCH_DIR="$HOME/.cache/debrief-bench-corpus" DEBRIEF_BENCH_STORE="${RUNNER_TEMP:-/tmp}/debrief-bench-store"
-          cargo test --release -p debrief-store-duck --test bench -- --nocapture
-          cargo test --release -p debrief-store-duck --test bench_reads -- --nocapture
+          cargo nextest run --profile bench --release -p debrief-store-duck --test bench --no-capture
+          cargo nextest run --profile bench --release -p debrief-store-duck --test bench_reads --no-capture
 
       - name: The worker's memory budgets (20 copies of the samples)
         env:
           DEBRIEF_BENCH_COPIES: "20"
         run: |
-          cargo test --release -p debrief-store-worker --test it worker:: -- --nocapture
+          cargo nextest run --profile bench --release -p debrief-store-worker --test it --no-capture worker::
 
   # Records a fully green scheduled run for this commit; `plan` skips the next scheduled run while main is unchanged.
   # Never runs when anything failed, so a red commit is retried every night.

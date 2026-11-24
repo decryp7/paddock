@@ -35,9 +35,17 @@ fn copy_tree(from: &Path, to: &Path, rel: &str) {
 }
 
 fn scratch() -> tempfile::TempDir {
+    scratch_of(&["crates", "apps", "tools/paddock-dev"])
+}
+
+/// [`scratch`] with only the workspaces `tops`: a test about one contract copies and derives that workspace alone. Each C155 run
+/// derives every workspace it finds, and the five runs of the register test over all three tops took 31.5 s at a load of about 25
+/// (2026-11-23) and were stopped at 120 s at a load of 50; `crates` alone is about a third of the files (docs/benchmarks.md
+/// "paddock-dev tests under load").
+fn scratch_of(tops: &[&str]) -> tempfile::TempDir {
     let d = tempfile::tempdir().unwrap();
     let root = root();
-    for top in ["crates", "apps", "tools/paddock-dev"] {
+    for top in tops {
         copy_tree(&root, d.path(), top);
     }
     d
@@ -225,7 +233,7 @@ fn a_tauri_shell_in_last_packages_stays_off_the_host_legs_though_the_code_marks_
 
 #[test]
 fn tree_a_skip_over_a_module_with_os_code_goes_red_and_a_skip_over_pure_logic_does_not() {
-    let d = scratch();
+    let d = scratch_of(&["crates"]);
     std::fs::write(d.path().join("crates/paddock-proc/src/zz_probe.rs"), "#[cfg(windows)]\nfn w() {}\n").unwrap();
     std::fs::write(d.path().join("crates/paddock-proc/src/zz_pure.rs"), "fn p() {}\n").unwrap();
     let skip = |modules: &[&str]| {
@@ -251,7 +259,7 @@ fn tree_a_skip_over_a_module_with_os_code_goes_red_and_a_skip_over_pure_logic_do
 
 #[test]
 fn tree_a_stale_and_a_redundant_exception_go_red() {
-    let d = scratch();
+    let d = scratch_of(&["crates"]);
     edit_contract(d.path(), "crates/paddock.ci.json", |v| {
         let add = serde_json::json!([
             {"name": "paddock-no-such-crate", "reason": "a typo the control makes"},
@@ -276,7 +284,7 @@ fn tree_a_stale_and_a_redundant_exception_go_red() {
 
 #[test]
 fn tree_a_new_skip_or_only_entry_is_an_os_removal_that_needs_the_user_and_an_add_is_free() {
-    let d = scratch();
+    let d = scratch_of(&["crates"]);
     let root = d.path();
     git(root, &["init", "-q", "-b", "work"]);
     git(root, &["add", "-A"]);
@@ -366,7 +374,7 @@ fn tree_a_new_skip_or_only_entry_is_an_os_removal_that_needs_the_user_and_an_add
 /// shrinks. Its own test, so neither half runs more than five C155 runs (each derives the placement of the copied tree).
 #[test]
 fn tree_an_approval_the_merge_base_already_covers_is_stale_after_landing() {
-    let d = scratch();
+    let d = scratch_of(&["crates"]);
     let root = d.path();
     git(root, &["init", "-q", "-b", "work"]);
     git(root, &["add", "-A"]);

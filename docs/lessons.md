@@ -3728,3 +3728,47 @@ commit (`ci verdict --tag --app`). debrief.yml's own nightly run already counts 
 **Open fix item: the train dispatch guard does not read the nightly yet.** `active_apps::classify_nightly` sorts a red nightly into
 train-stopping failures (foundation, active apps) and inactive apps' fix items; the green-main guard that refuses a dispatch on the
 first and records the second (`ci fix-items`) is part of the queued green-main work.
+
+## The long paddock-dev test hangs had one cause: a test moved its process into a temporary folder (2026-11-23, fix/bounded-test-runs)
+
+- **Cause.** `check_c129::a_control_holds_in_a_repository_whose_lists_differ_from_its_own` called `std::env::set_current_dir` into a
+  temporary repository (since 91db3611f, 2026-11-16), relying on nextest's process per test. Under a plain `cargo test --test it`
+  every test shares one process, so once that folder was removed every later child (git, node, bash, the tool itself) started in a
+  deleted folder. git's start-up calls getcwd, and macOS's libc then falls back to reading the parent folder entry by entry and
+  `fstatat`-ing each one, looking for an inode that no longer exists. The parent is the user temp folder, which held about 992,000
+  entries (about 71% of a 400,000-entry sample are `x9-fixture-*` folders from before the conformance helper fix, dated 2026-11-20).
+  Each git start took 20 s to over 2 min of disk work, 14 at once (disk0 at about 32,000 operations a second, 125 MB/s of 4 KB
+  reads). That was `worktree::list_clean` at 3.5 h (the test process waits at 0% CPU while its git children are in disk wait),
+  `ci_isolation` at 18 min, and the live-tree checks, `build_jobs` and C130's git-repository tests failing together.
+- **Reproduced** (plain libtest harness, 14 threads, the it binary run directly): the full suite stalled at 81 and at 142 finished
+  tests, with 14 `git rev-parse` children in state U and `sample` showing `init_git -> strbuf_getcwd -> __private_getcwd -> fstatat`.
+  A/B with `--test-threads 1`: `worktree::list_clean::clean_dry_run` alone took 1.1 s; after the C129 test it was stopped at 300 s;
+  with the fixed test it took 1.0 s. The full plain run with the fix finished in 161 s (723 passed; the 8 `pre_push` failures are the
+  missing `CARGO` variable of a binary started without cargo, not a hang).
+- **Fix.** The test runs the built binary with `current_dir` set to the repository and reads the control from its JSON report.
+  `std::env::set_current_dir` is now a disallowed method in `lint/clippy.toml` and every copy (positive control: a planted call fails
+  clippy). Rule 89's hook (`no-plain-cargo-test`) refuses plain `cargo test` (except `--doc` and `--no-run`), so a test's process-wide
+  change cannot reach another test.
+- **Orphaned slot holders.** `ci slot hold` processes started by a test lived on after nextest stopped the test, because their job
+  folder (a temporary folder) was never removed and their cap is 3.5 h. Every TestCommand now sets `PADDOCK_LIFELINE_PID` to its test
+  process (`paddock_env::lifeline`), and the holder ends at its next look when that process has ended (`HoldEnd::LifelineGone`). The new
+  test was red first (60 s, "slot s1 never became free") and is green in 0.6 s.
+- **Two tests that were too expensive under load.** `os_scoped::a_new_skip_or_only_entry...` ran C155 five times over a copy of
+  `crates`, `apps` and `tools/paddock-dev`. It now copies only `crates`, as do its three siblings that only touch `crates`: 31.5 s to
+  9.4 s at load about 25. `ci_run::tests::adding_a_check_changes_no_golden_row...` built the whole CI model four times (2.2 s each in
+  a debug build). It now builds the edits from ci.yml alone, after checking that this gives the full model's rows: 8.7 s to 5.0 s.
+- **Not done.** The temp folder still holds about a million stale entries. Removing old `x9-fixture-*` and other `paddock-*` folders
+  is the user's housekeeping decision. Other suites still make temp folders that a killed run leaves behind (`paddock-isolation-*`
+  about 17,000 in the sample, from the shell tests of job-isolation.sh).
+- **Open fix item: `worktree::concurrent::two_adds_of_one_path_make_it_once` lost a round with exit 1 instead of 4.** In 1 of 5 full
+  nextest runs at 4 workers under load (15-minute load 21 to 30, 4 CPU burners, sweep run 1 of fix/bounded-test-runs), round 2 ended
+  `[0, 1]`: one add won and the other failed instead of being refused. Stressed alone it passed 60 of 60 (4 workers, load about 17) and
+  120 of 120 (8 workers, 6 burners, load 31 to 37), 720 rounds in all, so the cause is not confirmed (ER-28). The test discarded both
+  programs' output, so the loser's error was lost; it now prints both outputs in the failure. A further stress with that output in place
+  (fix/bounded-test-runs-2, 125 iterations x 4 rounds = 500 rounds, 8 workers, 6 CPU burners, load 15 to 31) passed 500 of 500, so 1,220
+  rounds alone have not caught it. Next step: read the loser's message from the next failure.
+- Sweep after the fixes (fix/bounded-test-runs, Dev Mac, 4 workers, 4 CPU burners, the run starting only at a 15-minute load under 30):
+  6 full nextest runs of paddock-dev. 5 passed in full (2580 or 2587 tests, 277 to 544 s); 1 had the failure above. No slot holder
+  of ours was left after any run (3 `ci slot hold` processes after run 3, while the train's CI shared the Mac, are not attributed).
+- Class "process-wide state changed by one test reaches the others under the plain harness": 2nd instance (1st: `set_var`, ADR 0100
+  amendment, 9ac185c24). Covered by the clippy bans on both and by rule 89's process per test.

@@ -352,7 +352,7 @@ jobs:
       - name: Memory budget
         if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && needs.plan.outputs.rust_test_filter == '' }}
         continue-on-error: true
-        run: cargo test --release -p debrief-store-duck --test analysis_memory -- --nocapture
+        run: cargo nextest run --profile bench --release -p debrief-store-duck --test analysis_memory --no-capture
 
       - uses: ./.gitea/actions/sccache-stats
         if: always()

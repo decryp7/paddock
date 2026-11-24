@@ -4,7 +4,7 @@
 # conformance line's `--only` value is `$ONLY` (that list is generated from the check modules; the rest of the line is literal). It began as the commands
 # CI ran before the gate executor (11c365fc4, CI-in-Rust WP-3); it is now a reviewed snapshot: a change to a contract or a job shows
 # here as added and removed rows in the same commit. Regenerate:
-#   PADDOCK_UPDATE_GOLDEN=1 cargo test --lib ci_run::tests::tree_the_contracts_run_exactly_the_commands_in_the_golden -- --nocapture   # in tools/paddock-dev
+#   PADDOCK_UPDATE_GOLDEN=1 cargo nextest run --lib --no-capture ci_run::tests::tree_the_contracts_run_exactly_the_commands_in_the_golden   # in tools/paddock-dev
 # kind<TAB>job or app<TAB>os<TAB>folder<TAB>command
 app	dyno	macos-latest	apps/dyno	cargo check --locked --lib --bins -p dyno-platform -p dyno-agent -p dyno-app -p dyno-helper
 app	dyno	ubuntu-latest		node conformance/bin/paddock-conformance.mjs --app dyno --root apps/dyno --only C13 --paddock .
@@ -14,8 +14,8 @@ app	dyno	ubuntu-latest	apps/dyno	cargo check --locked --lib --bins -p dyno-platf
 app	dyno	ubuntu-latest	apps/dyno	cargo fetch --locked --target aarch64-apple-darwin
 app	dyno	ubuntu-latest	apps/dyno	cargo fetch --locked --target x86_64-apple-darwin
 app	dyno	ubuntu-latest	apps/dyno	cargo fetch --locked --target x86_64-pc-windows-msvc
-app	dyno	ubuntu-latest	apps/dyno	cargo test --locked -p dyno-agent --test helper_wiring
-app	dyno	ubuntu-latest	apps/dyno	cargo test --locked -p dyno-platform --test no_ungated_doubles
+app	dyno	ubuntu-latest	apps/dyno	cargo nextest run --locked --profile ci -p dyno-agent --test helper_wiring
+app	dyno	ubuntu-latest	apps/dyno	cargo nextest run --locked --profile ci -p dyno-platform --test no_ungated_doubles
 app	dyno	ubuntu-latest	apps/dyno	node --test docs/diagrams/src/*.test.mjs
 app	dyno	ubuntu-latest	apps/dyno	node --test scripts/check-capabilities.test.mjs
 app	dyno	ubuntu-latest	apps/dyno	node --test scripts/check-logon-entry.test.mjs
