@@ -62,6 +62,7 @@ const CHAIN_DEPTH: usize = 6;
 /// One look at the process list for [`Names`]: names and parent pids only (no memory, command lines or times), empty when
 /// the table cannot be read.
 fn read_names() -> Names {
+    usage::note_table_read();
     let Some(mut sys) = usage::new_system_with(sysinfo::System::new) else {
         return Names::default();
     };
@@ -178,6 +179,55 @@ impl Os for RealOs {
         crate::sys::signal_by_pidfd(id, crate::sys::SIGKILL)
             .unwrap_or_else(|| check_then_kill(self, id))
     }
+}
+
+/// The operating system with one look at the table and at the names, taken once and shared by several tree ends (a scope's
+/// end: N members cost two reads, not 2N; ER-20). The look is taken before anything is ended, as each single end does; a pid
+/// handed on since is still caught by the identity check of each end.
+pub(crate) struct OnceRead {
+    table: Table,
+    names: Names,
+}
+
+impl OnceRead {
+    /// Reads the table and the names now.
+    pub(crate) fn now() -> OnceRead {
+        OnceRead {
+            table: usage::snapshot(),
+            names: read_names(),
+        }
+    }
+}
+
+impl Os for OnceRead {
+    fn table(&self) -> Table {
+        self.table.clone()
+    }
+
+    fn start_of(&self, pid: u32) -> Option<StartTime> {
+        RealOs.start_of(pid)
+    }
+
+    fn end_group(&self, root: u32) {
+        RealOs.end_group(root);
+    }
+
+    fn kill_pid(&self, pid: u32) -> bool {
+        RealOs.kill_pid(pid)
+    }
+
+    fn end(&self, id: ProcessId) -> Ending {
+        RealOs.end(id)
+    }
+
+    fn names(&self) -> Names {
+        self.names.clone()
+    }
+}
+
+/// [`kill_tree`] over a shared look ([`OnceRead`]).
+pub(crate) fn kill_tree_with(os: &dyn Os, root: ProcessId) -> TreeEnding {
+    kill_tree_on(os, root, false, None)
 }
 
 /// What ending one process of a tree found, root first.
@@ -318,11 +368,6 @@ pub(crate) fn group_runs_in_proc(proc_root: &std::path::Path, group: u32) -> Opt
 /// pids). Safe to call for a process that is already gone. Returns what it found for each process, root first.
 pub fn kill_tree(root: ProcessId) -> TreeEnding {
     kill_tree_on(&RealOs, root, false, None)
-}
-
-/// [`kill_tree`] for a child of this process that has not been reaped, with its job's members on Windows.
-pub(crate) fn kill_child_tree(root: ProcessId, members: Option<Vec<ProcessId>>) -> TreeEnding {
-    kill_tree_on(&RealOs, root, true, members)
 }
 
 /// Ends the process group led by `pid`, a child of this process that has not been reaped and whose start time could not

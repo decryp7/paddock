@@ -3,20 +3,22 @@
 //! form of ADR 0112's job fixture, built on what this crate has:
 //!
 //! - **Prepare** ([`Scope::new`]): one folder of its own under a folder the caller names, an [`own::Unit`](crate::own::Unit)
-//!   that records what it starts (and a marker its children carry in their environment, [`MARKER_ENV`]), and the means that
-//!   end everything later: on Unix a process group per child registered with the orphan guardian ([`crate::guardian`],
-//!   ADR 0076), so an owner ended by SIGKILL or a crash still has its children's groups ended and the folder removed; on
-//!   Windows one kill-on-close job ([`own::KillOnClose`](crate::own)) that every child joins, whose handle closes with the
-//!   owner. A child gets the folder as its working folder and `TMPDIR`/`TMP`/`TEMP` unless its command names its own.
+//!   that records what it starts (and a marker variable of its own its children carry, [`MARKER_PREFIX`]), and the means that
+//!   end everything later: on Unix the orphan guardian ([`crate::guardian`], ADR 0076), made to serve before the first child
+//!   exists, and a process group per child registered with it, so an owner ended by SIGKILL or a crash still has its
+//!   children's groups ended and the folder removed; on Windows one kill-on-close job ([`own::KillOnClose`](crate::own)) that
+//!   every child joins first (its own job nests under it), whose handle closes with the owner. A child gets the folder as its
+//!   working folder and `TMPDIR`/`TMP`/`TEMP` unless its command names its own.
 //! - **Execute**: [`Scope::start`] gives a [`Held`] (the child by its handle and identity; [`Owned`]: wait with a bound,
 //!   result, end), [`Scope::run`] runs to completion under [`Limits`] ([`crate::run_bounded`]). [`Scope::cancel`] (or a
 //!   [`Cancel`] handed to another thread) ends every wait in the scope with [`Waited::Cancelled`] and the tree of a run in
 //!   progress; nothing starts after it.
 //! - **Clean-up** ([`Drop`], or [`Scope::finish`] for the [`Summary`]): asks each live child to stop, waits up to the
-//!   scope's grace ([`GRACE`], measured), then ends what is left by identity, tree and group included; reads the process
-//!   table once ([`own::members`](crate::own::members)) for members that left their group (found by the marker or the
-//!   folder) and ends them; removes the folder unless it was kept ([`Scope::keep_folder`]); logs one line per member: pid,
-//!   start time, program (its file name, never its arguments) and how it ended (ER-27).
+//!   scope's grace ([`GRACE`], measured), then ends what is left by identity, tree and group included, from one look at the
+//!   process table for all children (ER-20); on Unix reads the table once more ([`own::members`](crate::own::members)) for
+//!   members that left their group (found by the marker or the folder) and ends them; on Windows ends the job and waits for it
+//!   to empty; removes the folder unless it was kept ([`Scope::keep_folder`]); logs one line per member: pid, start time,
+//!   program (its file name, never its arguments), how it ended and whether it was guarded against a crash (ER-27).
 //!
 //! | How the scope ends | What ends its processes |
 //! | --- | --- |
@@ -25,17 +27,25 @@
 //! | `panic = "abort"`, SIGKILL, a crash | Unix: the orphan guardian; Windows: the job handle closes |
 //! | a cancel | the cancel ends the waits; the end ends the processes |
 //!
-//! Limits: a program that leaves its process group and drops the marker from its environment (`setsid` plus `env -i`) is
-//! outside every net on Unix (Windows jobs have no such escape). The guardian is off for root (ADR 0076 amendment
-//! 2026-11-09) and in a binary that does not call [`crate::guardian::run_if_requested`]; it says so once in the log. A run
-//! ([`Scope::run`]) is ended by its bound, a cancel and the end, but it does not join the Windows job yet (ADR 0119 WP-14
-//! moves runs onto the scope's own start).
+//! Waits ([`Held::wait`], `Scope`'s [`Owned::wait`]) take the [`Owned`] trait's bound (ADR 0112): they end at the child's
+//! exit, a cancel or the bound. Judging a start on progress is [`crate::StartWatch`]'s, on the child's identity
+//! ([`Held::process`]); ADR 0119 §1 says so since the review of WP-1.
+//!
+//! Limits: on Unix a program that leaves its process group and drops the marker from its environment (`setsid` plus
+//! `env -i`) is outside every net (Windows jobs have no such escape). The guardian is off for root (ADR 0076 amendment
+//! 2026-11-09) and in a binary that does not call [`crate::guardian::run_if_requested`]; it says so once in the log, and each
+//! [`Report`] says whether its member was guarded. A run ([`Scope::run`]) is ended by its bound, a cancel and the end, but it
+//! does not join the Windows job yet (ADR 0119 WP-14 moves runs onto the scope's own start).
 
 use crate::identity::{ProcessId, StartTime};
-use crate::own::{Owned, Unit, Waited, Why, members};
+use crate::own::{Owned, Unit, Waited};
+#[cfg(unix)]
+use crate::own::{Why, members};
 use crate::run::{Limits, Outcome, Output, RunError, program_name, run_bounded_noting};
 use crate::supervised::{Registry, Supervised};
-use crate::tree::{self, kill_tree};
+#[cfg(unix)]
+use crate::tree::kill_tree_with;
+use crate::tree::{self, OnceRead, kill_tree};
 use std::path::{Path, PathBuf};
 use std::process::{ChildStderr, ChildStdin, ChildStdout, Command, ExitStatus};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -43,17 +53,18 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 /// How long the end of a scope waits for the children it asked to stop before it ends them (ADR 0119; a limit with its
-/// measured cause, ER-12). Measured 2026-11-24 on the Mac mini at a 1-minute load of 27 to 35 (docs/benchmarks.md, "scope
-/// grace: from the stop request to the exit"): a Rust program, `sh` and node with the default SIGTERM action exit within
-/// 45 ms at the worst (p99 at most 21 ms, 200 asks each); a shell script that traps SIGTERM to clean up exits when its
-/// current foreground command ends, 1.02 s at the worst for one-second steps (50 asks). The grace is twice that worst kind
-/// and equals [`crate::FINISH_GRACE`]; a child that ignores the request costs one grace per scope end, not one per child
-/// (all are asked at once).
-pub const GRACE: Duration = Duration::from_secs(2);
+/// measured cause, ER-12): [`crate::FINISH_GRACE`], the crate's one grace. Measured 2026-11-24 on the Mac mini at a 1-minute
+/// load of 27 to 35 (docs/benchmarks.md, "2026-11-24, scope grace: from the stop request to the exit"): a Rust program, `sh`
+/// and node with the default SIGTERM action exit within 45 ms at the worst (p99 at most 21 ms, 200 asks each); a shell script
+/// that traps SIGTERM to clean up exits when its current foreground command ends, 1.02 s at the worst for one-second steps
+/// (50 asks). The grace is twice that worst kind; a child that ignores the request costs one grace per scope end, not one per
+/// child (all are asked at once).
+pub const GRACE: Duration = crate::session::FINISH_GRACE;
 
-/// The variable every child of a scope carries, `<owner pid>-<start µs>-<sequence>`: the end finds a member that left its
-/// process group by it ([`Why::Marker`]).
-pub const MARKER_ENV: &str = "PADDOCK_SCOPE";
+/// The start of the variable every child of a scope carries, `PADDOCK_SCOPE_<owner pid>_<start µs>_<sequence>=1`: one
+/// variable per scope, so a scope started inside another scope's child keeps the outer marker too. The end finds a member
+/// that left its process group by it ([`Why::Marker`], Unix).
+pub const MARKER_PREFIX: &str = "PADDOCK_SCOPE_";
 
 /// The pace of the waits for a child's exit (a cancel wakes a wait at once).
 const TICK: Duration = Duration::from_millis(5);
@@ -79,6 +90,8 @@ pub enum HowEnded {
     Escaped,
     /// It was still there after the scope ended it (the OS refused).
     Remains,
+    /// A run whose program could not be started.
+    NotStarted,
 }
 
 impl std::fmt::Display for HowEnded {
@@ -90,6 +103,7 @@ impl std::fmt::Display for HowEnded {
             HowEnded::Ended => write!(f, "was ended"),
             HowEnded::Escaped => write!(f, "had left its group and was ended"),
             HowEnded::Remains => write!(f, "could not be ended"),
+            HowEnded::NotStarted => write!(f, "never started"),
         }
     }
 }
@@ -105,6 +119,9 @@ pub struct Report {
     pub program: String,
     /// How it ended.
     pub how: HowEnded,
+    /// Whether it would have been ended had this process died (registered with the orphan guardian on Unix, in a
+    /// kill-on-close job on Windows). False for a run, an escaped member, and a child started while the guard was off.
+    pub guarded: bool,
 }
 
 /// What the end of a scope did: one report per member, in the order they started, escaped members last.
@@ -125,6 +142,7 @@ struct Slot {
     child: Option<Supervised>,
     /// Set once it has ended.
     how: Option<HowEnded>,
+    guarded: bool,
 }
 
 /// What a scope shares with its [`Held`] children and its [`Cancel`] handles.
@@ -193,6 +211,17 @@ fn wait_on(inner: &Inner, bound: Duration, mut gone: impl FnMut() -> bool) -> Wa
     }
 }
 
+/// Whether `cmd` sets `var` itself (Windows compares names without case, as its environment does).
+fn sets(cmd: &Command, var: &str) -> bool {
+    cmd.get_envs().any(|(k, _)| {
+        if cfg!(windows) {
+            k.to_string_lossy().eq_ignore_ascii_case(var)
+        } else {
+            k == var
+        }
+    })
+}
+
 /// Ends the waits of a scope from another thread (a tool's Ctrl+C handler): the same as [`Scope::cancel`]. Cheap to clone.
 #[derive(Clone)]
 pub struct Cancel(Arc<Inner>);
@@ -210,13 +239,16 @@ pub struct Scope {
     folder: PathBuf,
     keep: bool,
     grace: Duration,
-    token: String,
+    marker: String,
     summary: Option<Summary>,
+    /// The end has run ([`Scope::finish`] takes the summary, so it is not the flag).
+    ended: bool,
 }
 
 impl Scope {
     /// Prepares a scope named `name`: makes its folder inside `under` (made if missing; the scope's folder itself is new),
-    /// its unit and (Windows) its job.
+    /// its unit, and the means that end its children if this process dies (Unix: the orphan guardian, serving before this
+    /// returns; Windows: the scope's job).
     ///
     /// # Errors
     ///
@@ -225,8 +257,8 @@ impl Scope {
         static SEQUENCE: AtomicU64 = AtomicU64::new(0);
         let me = std::process::id();
         let began = crate::own::now();
-        let token = format!(
-            "{me}-{}-{}",
+        let marker = format!(
+            "{MARKER_PREFIX}{me}_{}_{}",
             began.as_micros(),
             SEQUENCE.fetch_add(1, Ordering::Relaxed)
         );
@@ -242,13 +274,17 @@ impl Scope {
             .take(NAME_MAX)
             .collect();
         std::fs::create_dir_all(under)?;
-        let folder = under.join(format!("scope-{safe}-{token}"));
+        let folder = under.join(format!("scope-{safe}-{}", &marker[MARKER_PREFIX.len()..]));
         std::fs::create_dir(&folder)?;
         // Linux reads a start time from a boot time in whole seconds: one second of slack, as the Reaper takes.
         let since = StartTime::from_micros(began.as_micros().saturating_sub(1_000_000));
         let mut unit = Unit::new(since, me);
-        unit.set_marker(MARKER_ENV, &token);
+        unit.set_marker(&marker, "1");
         unit.add_folder(&folder.to_string_lossy());
+        // The guardian serves before the first child exists (review P1-4): an owner killed from here on leaves no unguarded
+        // child. Off is logged once by the guardian; each report says whether its member was guarded.
+        #[cfg(unix)]
+        crate::guardian::ensure();
         #[cfg(windows)]
         let job = match crate::own::KillOnClose::new() {
             Ok(j) => Some(j),
@@ -275,8 +311,9 @@ impl Scope {
             folder,
             keep: false,
             grace: GRACE,
-            token,
+            marker,
             summary: None,
+            ended: false,
         })
     }
 
@@ -300,7 +337,7 @@ impl Scope {
 
     /// The `(name, value)` every child carries in its environment.
     pub fn marker(&self) -> (&str, &str) {
-        (MARKER_ENV, &self.token)
+        (&self.marker, "1")
     }
 
     /// A handle that cancels this scope from another thread.
@@ -336,11 +373,11 @@ impl Scope {
             cmd.current_dir(&self.folder);
         }
         for var in ["TMPDIR", "TMP", "TEMP"] {
-            if !cmd.get_envs().any(|(k, _)| k == var) {
+            if !sets(cmd, var) {
                 cmd.env(var, &self.folder);
             }
         }
-        cmd.env(MARKER_ENV, &self.token);
+        cmd.env(&self.marker, "1");
     }
 
     fn refused(&self) -> std::io::Error {
@@ -362,15 +399,21 @@ impl Scope {
         self.prepare(&mut cmd);
         let program = program_name(&cmd);
         let folder = (!self.keep).then_some(self.folder.as_path());
+        #[cfg(windows)]
+        let child = Supervised::spawn_scoped(
+            &self.inner.registry,
+            cmd,
+            folder,
+            self.inner.job.as_ref().map(crate::own::KillOnClose::job),
+        )?;
+        #[cfg(not(windows))]
         let child = Supervised::spawn_scoped(&self.inner.registry, cmd, folder)?;
         let pid = child.id().unwrap_or_default();
         let id = child.process();
-        #[cfg(windows)]
-        if let (Some(job), Some(c)) = (self.inner.job.as_ref(), child.child())
-            && let Err(e) = job.add(c)
-        {
+        let guarded = child.guarded();
+        if !guarded {
             log::warn!(
-                "Scope {}: child {pid} ({program}) could not join the scope's job ({e}); its own job still ends it",
+                "Scope {}: {program} (pid {pid}) is not guarded: if this process dies, it runs on",
                 self.inner.name
             );
         }
@@ -389,6 +432,7 @@ impl Scope {
             program,
             child: Some(child),
             how: None,
+            guarded,
         });
         Ok(Held {
             inner: self.inner.clone(),
@@ -418,6 +462,7 @@ impl Scope {
                 program,
                 child: None,
                 how: None,
+                guarded: false,
             });
             slots.len() - 1
         };
@@ -442,7 +487,8 @@ impl Scope {
                 Outcome::Exited(s) => HowEnded::Exited(Some(s)),
                 Outcome::TimedOut | Outcome::OutputCap => HowEnded::Ended,
             },
-            Err(_) => HowEnded::Exited(None),
+            Err(RunError::Wait(..)) => HowEnded::Exited(None),
+            Err(_) => HowEnded::NotStarted,
         };
         inner.slot(index, |s| s.how = Some(how));
         result
@@ -456,22 +502,25 @@ impl Scope {
 
     /// The clean-up (see the module); runs once.
     fn end_all(&mut self) {
-        if self.summary.is_some() {
+        if self.ended {
             return;
         }
+        self.ended = true;
         let began = Instant::now();
         // Waits in other threads end (a wait whose child is gone still says so first), and nothing starts any more.
         self.inner.set_cancelled();
-        let mut reports = self.end_children(began);
+        let reports = self.end_children(began);
         // A scope that started nothing has nothing that could have escaped: no table read.
-        if !reports.is_empty() {
-            self.end_escaped(&mut reports);
-        }
-        // Windows: the job ends whatever joined it (helpers that left the tree included); closing it is the last net.
+        #[cfg(unix)]
+        let reports = if reports.is_empty() {
+            reports
+        } else {
+            self.end_escaped(reports)
+        };
+        // Windows: the job ends whatever joined it (helpers that left the tree included; a job has no escape, so no marker
+        // look is needed there), and the folder goes only once the job is empty.
         #[cfg(windows)]
-        if let Some(job) = self.inner.job.as_ref() {
-            job.terminate();
-        }
+        self.end_job(began);
         self.inner.registry.end_all();
         if !self.keep {
             crate::cleanup::logged(
@@ -490,9 +539,10 @@ impl Scope {
                 &r.program
             };
             log::info!(
-                "Scope {}: {program} (pid {}, started {started} µs) {}",
+                "Scope {}: {program} (pid {}, started {started} µs{}) {}",
                 self.inner.name,
                 r.pid,
+                if r.guarded { "" } else { ", unguarded" },
                 r.how
             );
         }
@@ -513,12 +563,12 @@ impl Scope {
         });
     }
 
-    /// Asks every live child to stop at once, waits up to the grace, then ends each one's tree and group (also of a child
-    /// that had ended by itself: helpers it left behind). One report per member.
+    /// Asks every live child to stop at once, waits up to the grace (the members lock is taken per look, never across the
+    /// wait), then ends each one's tree and group from one look at the table (also of a child that had ended by itself:
+    /// helpers it left behind). One report per member.
     fn end_children(&self, began: Instant) -> Vec<Report> {
-        let mut slots = lock(&self.inner.slots);
         let mut asked = Vec::new();
-        for (i, slot) in slots.iter_mut().enumerate() {
+        for (i, slot) in lock(&self.inner.slots).iter_mut().enumerate() {
             let (Some(child), None) = (slot.child.as_mut(), slot.how) else {
                 continue;
             };
@@ -529,17 +579,24 @@ impl Scope {
             }
         }
         let deadline = began.checked_add(self.grace);
-        while asked.iter().any(|i| {
-            slots[*i]
-                .child
-                .as_mut()
-                .is_some_and(|c| c.exit_status().is_none())
-        }) && deadline.is_some_and(|d| Instant::now() < d)
-        {
+        let waiting = || {
+            lock(&self.inner.slots)
+                .iter_mut()
+                .enumerate()
+                .any(|(i, s)| {
+                    asked.contains(&i)
+                        && s.child.as_mut().is_some_and(|c| c.exit_status().is_none())
+                })
+        };
+        while !asked.is_empty() && waiting() && deadline.is_some_and(|d| Instant::now() < d) {
+            // The end has set the cancel flag, so a cancel-woken pause would not wait: a plain tick, bounded by the grace.
             std::thread::sleep(TICK);
         }
+        let mut slots = lock(&self.inner.slots);
+        let any_child = slots.iter().any(|s| s.child.is_some());
+        let os = any_child.then(OnceRead::now);
         for (i, slot) in slots.iter_mut().enumerate() {
-            let Some(mut child) = slot.child.take() else {
+            let (Some(mut child), Some(os)) = (slot.child.take(), os.as_ref()) else {
                 continue;
             };
             if slot.how.is_none() {
@@ -550,7 +607,7 @@ impl Scope {
                     None => HowEnded::Ended,
                 });
             }
-            child.kill();
+            child.kill_on(os);
         }
         slots
             .iter()
@@ -559,6 +616,7 @@ impl Scope {
                 pid: s.pid,
                 program: s.program.clone(),
                 how: s.how.unwrap_or(HowEnded::Exited(None)),
+                guarded: s.guarded,
             })
             .collect()
     }
@@ -566,16 +624,22 @@ impl Scope {
     /// One read of the process table: members that are still there after [`Scope::end_children`] (they left their group:
     /// found by the marker, or as an orphan naming the folder) are ended by identity and reported. A SIGKILL is not seen at
     /// once, so their end is waited for, all together, up to the grace before one is called [`HowEnded::Remains`].
-    fn end_escaped(&self, reports: &mut Vec<Report>) {
+    #[cfg(unix)]
+    fn end_escaped(&self, mut reports: Vec<Report>) -> Vec<Report> {
         let unit = lock(&self.inner.unit).clone();
         let found = members(&unit.look(), &unit);
+        if found.is_empty() {
+            return reports;
+        }
+        let os = OnceRead::now();
         for m in &found {
-            kill_tree(m.id);
+            kill_tree_with(&os, m.id);
         }
         let deadline = Instant::now().checked_add(self.grace);
         while !found.iter().all(|m| crate::own::has_ended(m.id))
             && deadline.is_some_and(|d| Instant::now() < d)
         {
+            // The end has set the cancel flag, so a cancel-woken pause would not wait: a plain tick, bounded by the grace.
             std::thread::sleep(TICK);
         }
         for m in found {
@@ -596,8 +660,35 @@ impl Scope {
                     } else {
                         HowEnded::Remains
                     },
+                    guarded: false,
                 }),
             }
+        }
+        reports
+    }
+
+    /// Windows: ends every process in the scope's job and waits, up to the grace, for the job to empty before the folder is
+    /// removed (a process ended through the job lets go of its files only when it has exited).
+    #[cfg(windows)]
+    fn end_job(&self, began: Instant) {
+        let Some(job) = self.inner.job.as_ref() else {
+            return;
+        };
+        job.terminate();
+        let deadline = Instant::now().checked_add(self.grace);
+        while job.job().pids().is_some_and(|p| !p.is_empty())
+            && deadline.is_some_and(|d| Instant::now() < d)
+        {
+            // The end has set the cancel flag, so a cancel-woken pause would not wait: a plain tick, bounded by the grace.
+            std::thread::sleep(TICK);
+        }
+        if let Some(left) = job.job().pids().filter(|p| !p.is_empty()) {
+            log::warn!(
+                "Scope {}: {} process(es) still in its job {} ms after the end: {left:?}",
+                self.inner.name,
+                left.len(),
+                began.elapsed().as_millis()
+            );
         }
     }
 }
@@ -646,6 +737,11 @@ impl Held {
         self.inner
             .slot(self.index, |s| s.child.as_mut().and_then(f))
             .flatten()
+    }
+
+    /// Whether the child would be ended if this process died (see [`Report::guarded`]).
+    pub fn guarded(&self) -> bool {
+        self.inner.slot(self.index, |s| s.guarded).unwrap_or(false)
     }
 
     /// The exit status once the child has ended by itself; `None` while it runs or after it was ended.
@@ -717,32 +813,233 @@ impl Owned for Held {
     }
 }
 
+/// The owner tests run here, in the crate's own test binary, so the Linux CI containers (root) exercise the guardian through
+/// the act-as-user path (review P2-5) instead of only its root refusal.
+#[cfg(all(test, unix))]
+mod unix_tests {
+    use super::*;
+    use crate::guardian::{ACT_AS_USER_ENV, LOG_ENV};
+    use crate::testchild::{Mode, child};
+    use paddock_testkit::wait::{HANG_GUARD, poll_until_within};
+    use std::io::{BufRead, BufReader};
+    use std::process::Stdio;
+
+    const ENTRY: &str = "guardian::unix::tests::guardian_entry";
+    const OWNER_ENV: &str = "PADDOCK_SCOPE_TEST_OWNER_UNDER";
+    const REFUSE_OWNER_ENV: &str = "PADDOCK_SCOPE_TEST_REFUSE_OWNER_UNDER";
+
+    /// Not a test: the owner of a scope with one child that has a grandchild in its group; names both and the folder, then
+    /// blocks until it is killed (or its standard input ends).
+    #[test]
+    fn scope_owner_process() {
+        let Some(under) = std::env::var_os(OWNER_ENV).map(PathBuf::from) else {
+            return;
+        };
+        crate::guardian::enable_in_test_binary(ENTRY);
+        let scope = Scope::new("owner", &under).unwrap();
+        let mut cmd = child(Mode::Tree);
+        cmd.stdout(Stdio::piped());
+        let mut held = scope.start(cmd).unwrap();
+        let mut out = BufReader::new(held.take_stdout().unwrap());
+        let mut line = String::new();
+        let grandchild = loop {
+            line.clear();
+            assert!(out.read_line(&mut line).unwrap() > 0);
+            if let Some(i) = line.find("CHILD:pid ") {
+                break line[i + 10..].trim().to_owned();
+            }
+        };
+        println!("child {}", held.process().unwrap().pid());
+        println!("grandchild {grandchild}");
+        println!("guarded {}", held.guarded());
+        println!("folder {}", scope.folder().display());
+        println!("ready");
+        let _ = std::io::stdin().read_line(&mut String::new());
+        std::process::exit(0);
+    }
+
+    /// The owner is SIGKILLed through its handle, so none of its own clean-up runs: the guardian ends the child's group and
+    /// removes the folder.
+    #[test]
+    fn an_owner_ended_by_sigkill_leaves_no_process_and_no_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("guardian.log");
+        let mut owner = crate::command(std::env::current_exe().unwrap())
+            .args([
+                "scope::unix_tests::scope_owner_process",
+                "--exact",
+                "--nocapture",
+            ])
+            .env(ACT_AS_USER_ENV, "1")
+            .env(OWNER_ENV, dir.path())
+            .env(LOG_ENV, &log)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            // conformance: test-steps — every failure path below ends the owner (and what it started) by identity before it fails
+            .spawn()
+            .unwrap();
+        let owner_id = ProcessId::of(owner.id()).unwrap();
+        let mut out = BufReader::new(owner.stdout.take().unwrap());
+        let (mut ids, mut folder, mut guarded) = (Vec::new(), None, None);
+        let mut line = String::new();
+        while line.trim() != "ready" {
+            line.clear();
+            if out.read_line(&mut line).unwrap() == 0 {
+                kill_tree(owner_id);
+                panic!("the owner ended before its children were ready");
+            }
+            match line.trim().split_once(' ') {
+                Some(("child" | "grandchild", pid)) => {
+                    // conformance: recorded-pid — the owner blocks on stdin and holds both; paddock-proc's tests cannot use paddock-testkit-start (a cycle)
+                    ids.push(ProcessId::of(pid.parse().unwrap()).unwrap());
+                }
+                Some(("folder", f)) => folder = Some(PathBuf::from(f)),
+                Some(("guarded", g)) => guarded = Some(g == "true"),
+                _ => {}
+            }
+        }
+        let folder = folder.expect("the owner named its folder");
+        owner.kill().unwrap();
+        owner.wait().unwrap();
+        let gone = poll_until_within(HANG_GUARD, || {
+            ids.iter().all(|id| crate::own::has_ended(*id)) && !folder.exists()
+        });
+        if !gone {
+            let left: Vec<u32> = ids
+                .iter()
+                .filter(|id| !crate::own::has_ended(**id))
+                .map(|id| id.pid())
+                .collect();
+            for id in &ids {
+                kill_tree(*id);
+            }
+            panic!(
+                "the killed owner's scope left processes {left:?} or its folder (there: {}); guardian log:\n{}",
+                folder.exists(),
+                std::fs::read_to_string(&log).unwrap_or_default()
+            );
+        }
+        assert_eq!(guarded, Some(true), "the owner's child was guarded");
+    }
+
+    /// Not a test: an owner whose guardian refuses; starts two children and says how many guardians it started and whether
+    /// each child was guarded.
+    #[test]
+    fn refused_owner_process() {
+        let Some(under) = std::env::var_os(REFUSE_OWNER_ENV).map(PathBuf::from) else {
+            return;
+        };
+        crate::guardian::enable_in_test_binary(ENTRY);
+        let scope = Scope::new("refused", &under).unwrap();
+        let a = scope.start(child(Mode::Sleep)).unwrap().guarded();
+        let b = scope.start(child(Mode::Sleep)).unwrap().guarded();
+        let summary = scope.finish();
+        println!(
+            "guardians {} guarded {a} {b} reports {}",
+            crate::guardian::guardians_started(),
+            summary.reports.iter().filter(|r| !r.guarded).count()
+        );
+    }
+
+    /// A guardian that refused is not started again for every child (review P2-1), and each unguarded start says so.
+    #[test]
+    fn a_refused_guardian_is_not_retried_and_the_starts_are_marked_unguarded() {
+        let dir = tempfile::tempdir().unwrap();
+        let out = crate::run_bounded(
+            {
+                let mut c = crate::command(std::env::current_exe().unwrap());
+                c.args([
+                    "scope::unix_tests::refused_owner_process",
+                    "--exact",
+                    "--nocapture",
+                ])
+                .env(ACT_AS_USER_ENV, "1")
+                .env(crate::guardian::REFUSE_ENV, "1")
+                .env(REFUSE_OWNER_ENV, dir.path());
+                c
+            },
+            crate::Limits::new(HANG_GUARD),
+        )
+        .unwrap();
+        let text = out.stdout_text();
+        assert!(
+            text.contains("guardians 1 guarded false false reports 2"),
+            "{text}"
+        );
+    }
+
+    /// N members cost a fixed number of whole-table reads at the end, not N (review P2-3, ER-20).
+    #[test]
+    fn the_end_of_a_scope_reads_the_table_a_fixed_number_of_times_whatever_its_size() {
+        let reads = |n: usize| {
+            let dir = tempfile::tempdir().unwrap();
+            let scope = Scope::new("budget", dir.path()).unwrap();
+            let held: Vec<ProcessId> = (0..n)
+                .map(|_| scope.start(child(Mode::Sleep)).unwrap().process().unwrap())
+                .collect();
+            let before = crate::table_reads();
+            let summary = scope.finish();
+            let after = crate::table_reads();
+            assert_eq!(summary.reports.len(), n);
+            assert!(
+                held.iter()
+                    .all(|id| poll_until_within(HANG_GUARD, || crate::own::has_ended(*id)))
+            );
+            after - before
+        };
+        let (one, five) = (reads(1), reads(5));
+        // A look at the table and the names for the ends, and the marker look (a snapshot and its environment read).
+        assert!(one <= 4, "one member cost {one} table reads");
+        assert_eq!(
+            one, five,
+            "five members cost {five} table reads, one cost {one}"
+        );
+    }
+}
+
 #[cfg(all(test, windows))]
 mod windows_tests {
     use super::*;
     use crate::testchild::{Mode, child};
 
-    /// The scope's own job, not each child's: the child's own job is leaked (never closed, never terminated), so only closing
-    /// the scope's job, as Windows does when the owner dies, can end it.
+    /// Every child joins the scope's job, not only the first (review P1-3: a job a process joins must be empty or already in
+    /// its chain of jobs, so each child joins the scope's job before its own). The children's own jobs are leaked (never
+    /// closed, never terminated), so only closing the scope's job, as Windows does when the owner dies, can end them.
     #[test]
-    fn a_windows_child_ends_when_the_scopes_job_closes() {
+    fn every_windows_child_ends_when_the_scopes_job_closes() {
         let dir = tempfile::tempdir().unwrap();
         let mut scope = Scope::new("job", dir.path()).unwrap();
-        let held = scope.start(child(Mode::Sleep)).unwrap();
-        let id = held.process().unwrap();
-        drop(held);
-        let own = lock(&scope.inner.slots)[0].child.take().unwrap();
-        std::mem::forget(own);
+        let ids: Vec<ProcessId> = (0..2)
+            .map(|_| scope.start(child(Mode::Sleep)).unwrap().process().unwrap())
+            .collect();
+        let in_job = scope
+            .inner
+            .job
+            .as_ref()
+            .unwrap()
+            .job()
+            .pids()
+            .unwrap_or_default();
+        for id in &ids {
+            assert!(
+                in_job.contains(&id.pid()),
+                "child {} is not in the scope's job: {in_job:?}",
+                id.pid()
+            );
+        }
+        for slot in lock(&scope.inner.slots).iter_mut() {
+            std::mem::forget(slot.child.take());
+        }
         let job = Arc::get_mut(&mut scope.inner)
             .expect("no other handle")
             .job
             .take();
-        assert!(job.is_some(), "the scope made its job");
         drop(job);
         let gone =
             paddock_testkit::wait::poll_until_within(paddock_testkit::wait::HANG_GUARD, || {
-                crate::own::has_ended(id)
+                ids.iter().all(|id| crate::own::has_ended(*id))
             });
-        assert!(gone, "the child outlived the scope's job");
+        assert!(gone, "a child outlived the scope's job");
     }
 }

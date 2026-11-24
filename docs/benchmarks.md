@@ -206,7 +206,18 @@ failing mode.
   | `sh` script that traps SIGTERM to clean up, one-second steps | 50 | 1.01 s | 1.02 s | 1.02 s | the worst kind: the trap runs when the current foreground command ends |
   | first start of a process with the orphan guardian (start, guardian check, `serving` answer, child start) | 50 | 6.0 ms | 28.0 ms | 28.0 ms | far inside the 10 s `SERVING_BOUND` |
 
-- **Notes:** the scope's `GRACE` is 2 s: twice the worst kind measured (a script whose step is one second), equal to `paddock_proc::FINISH_GRACE`, and paid once per scope end, since every child is asked at once. A script with longer foreground steps is ended after the grace (reported as `ended`, not `asked`). The guardian's `SERVING_BOUND` (10 s) only meets a guardian stopped before its owner check (App Tamer, a debugger); a refused guardian answers at once with end of file. Windows is not measured: `ask` sends WM_CLOSE to a program's windows and a console program refuses it, so the end there is immediate for console children. Raw output: the test's `grace:` lines, not kept.
+- **Second run** after the WP-1 review (commit 460e7d60d plus the review round; the guardian now starts in `Scope::new`, so the
+  first-start row measures `Scope::new` plus the first start), 1-minute load 9.5 to 16.5:
+
+  | Measure | n | Median | p99 | Worst |
+  |---|---|---|---|---|
+  | Rust program, default SIGTERM action | 200 | 0.46 ms | 0.91 ms | 3.1 ms |
+  | `sh` running `sleep`, default action | 200 | 0.45 ms | 1.7 ms | 2.7 ms |
+  | node program, default action | 200 | 1.1 ms | 6.8 ms | 8.8 ms |
+  | `sh` script that traps SIGTERM, one-second steps | 50 | 1.01 s | 1.01 s | 1.01 s |
+  | `Scope::new` plus the first start, guardian included | 50 | 4.6 ms | 5.3 ms | 5.3 ms |
+
+- **Notes:** the scope's `GRACE` is 2 s (`paddock_proc::FINISH_GRACE` itself since the WP-1 review): twice the worst kind measured (a script whose step is one second), equal to `paddock_proc::FINISH_GRACE`, and paid once per scope end, since every child is asked at once. A script with longer foreground steps is ended after the grace (reported as `ended`, not `asked`). The guardian's `SERVING_BOUND` (10 s) only meets a guardian stopped before its owner check (App Tamer, a debugger); a refused guardian answers at once with end of file. Windows is not measured: `ask` sends WM_CLOSE to a program's windows and a console program refuses it, so the end there is immediate for console children. Raw output: the test's `grace:` lines, not kept.
 
 ### 2026-11-24, the repository model's ownership test: where the time goes, and the cut (fix/owner-test-windows-cost)
 

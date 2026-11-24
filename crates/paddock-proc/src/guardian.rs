@@ -38,8 +38,10 @@ pub const LOG_ENV: &str = "PADDOCK_PROC_GUARDIAN_LOG";
 
 #[cfg(unix)]
 mod unix;
+#[cfg(all(test, unix))]
+pub(crate) use unix::{ACT_AS_USER_ENV, REFUSE_ENV, guardians_started};
 #[cfg(unix)]
-pub(crate) use unix::{Registration, register};
+pub(crate) use unix::{Registration, ensure, register};
 #[cfg(unix)]
 pub use unix::{enable_in_test_binary, run_if_requested, serve_if_guardian, set_log};
 

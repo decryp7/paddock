@@ -953,3 +953,99 @@ fn the_guardians_plumbing_is_not_counted_as_the_callers_starts() {
     let _ = crate::command("true");
     assert_eq!(counter.starts(), 1, "only the caller's own command counts");
 }
+
+// ---- the guardian serves before the first child exists (ADR 0119 WP-1, review P1-4) ----
+
+const GATE_OWNER_ENV: &str = "PADDOCK_GUARD_TEST_GATE_OWNER";
+const GATE_OWNER_TEST: &str = "guardian::unix::tests::gate_owner_process";
+const GATE_MARK: &str = "PADDOCK_GUARD_TEST_GATE_MARK";
+
+/// Not a test: an owner that starts one guarded child carrying [`GATE_MARK`], while its guardian is held at the test gate.
+#[test]
+fn gate_owner_process() {
+    let Ok(token) = std::env::var(GATE_OWNER_ENV) else {
+        return;
+    };
+    enable_in_test_binary(ENTRY);
+    let mut cmd = crate::testchild::child(crate::testchild::Mode::Sleep);
+    cmd.env(GATE_MARK, &token);
+    let s = Supervised::spawn(cmd);
+    println!("started {}", s.is_ok());
+    let _ = std::io::stdin().read_line(&mut String::new());
+    std::process::exit(0);
+}
+
+/// The owner is killed while its first guarded start waits for the guardian (held at the gate, before its owner check). The
+/// guardian then finds pid 1 as its parent and refuses: a child started before the guardian served would run on unguarded.
+/// The guardian must serve before any child exists, so nothing carrying the owner's mark is left.
+#[test]
+fn an_owner_killed_while_its_guardian_starts_has_started_no_child() {
+    let dir = tempfile::tempdir().unwrap();
+    let gate = dir.path().join("gate");
+    let token = format!(
+        "gate-{}-{}",
+        std::process::id(),
+        crate::own::now().as_micros()
+    );
+    let mut owner = crate::command(std::env::current_exe().unwrap())
+        .args([GATE_OWNER_TEST, "--exact", "--nocapture"])
+        .env(ACT_AS_USER_ENV, "1")
+        .env(GATE_ENV, &gate)
+        .env(GATE_OWNER_ENV, &token)
+        .env(LOG_ENV, dir.path().join("guardian.log"))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let owner_id = ProcessId::of(owner.id()).unwrap();
+    let waiting = dir.path().join("gate.waiting");
+    let held = paddock_testkit::wait::poll_until_within(paddock_testkit::wait::HANG_GUARD, || {
+        waiting.exists()
+    });
+    if !held {
+        fail(&[owner_id], "the owner's guardian never reached the gate");
+    }
+    owner.kill().unwrap();
+    owner.wait().unwrap();
+    std::fs::write(&gate, b"").unwrap();
+    let since =
+        crate::StartTime::from_micros(owner_id.started().as_micros().saturating_sub(1_000_000));
+    let mut unit = crate::own::Unit::new(since, std::process::id());
+    unit.set_marker(GATE_MARK, &token);
+    let left: Vec<ProcessId> = crate::own::members(&unit.look(), &unit)
+        .iter()
+        .map(|m| m.id)
+        .collect();
+    fail_unless(
+        left.is_empty(),
+        &left,
+        "a child was started before the guardian served, and ran on after the owner was killed",
+    );
+}
+
+// ---- the owner's wait for the guardian's answer (review P2-2) ----
+
+#[test]
+fn the_owner_reads_serving_past_other_lines_and_end_of_file_as_a_refusal() {
+    let (r, mut w) = std::io::pipe().unwrap();
+    w.write_all(format!("running 1 test\n{SERVING}\n").as_bytes())
+        .unwrap();
+    assert_eq!(serving(r, paddock_testkit::wait::HANG_GUARD), Serving::Yes);
+    let (r, mut w) = std::io::pipe().unwrap();
+    w.write_all(b"refused, no answer\n").unwrap();
+    drop(w);
+    assert_eq!(
+        serving(r, paddock_testkit::wait::HANG_GUARD),
+        Serving::Refused
+    );
+}
+
+#[test]
+fn a_guardian_that_never_answers_ends_the_wait_at_its_bound() {
+    let (r, w) = std::io::pipe().unwrap();
+    // conformance: expiry-under-test — the bound itself is what this test examines
+    let bound = Duration::from_millis(100);
+    assert_eq!(serving(r, bound), Serving::NoAnswer);
+    drop(w);
+}

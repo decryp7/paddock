@@ -47,6 +47,7 @@ pub struct Seen {
 /// identity no longer holds after its group was read is left out.
 pub fn look(carry: Option<(&str, &str)>, names: &[&str]) -> Vec<Seen> {
     let identities = crate::usage::snapshot();
+    crate::usage::note_table_read();
     let Ok(mut sys) = System::new() else {
         return Vec::new();
     };
@@ -192,6 +193,11 @@ impl KillOnClose {
     /// Puts `child` into this job too; what it starts afterwards joins as well (nested jobs, Windows 8 and later).
     pub fn add(&self, child: &std::process::Child) -> std::io::Result<()> {
         self.0.add(child)
+    }
+
+    /// The job itself, for this crate's starts that join it.
+    pub(crate) fn job(&self) -> &crate::job::Job {
+        &self.0
     }
 
     /// Ends every process in the job now, through the job's handle.

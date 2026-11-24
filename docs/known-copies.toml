@@ -1564,20 +1564,12 @@ adr = "0112"
 
 [[mechanism]]
 id = "process-scope"
-title = "A unit of work's processes held in one value that ends them all: prepare, start, run, cancel, end with a grace (ER-51)"
+title = "A unit of work's processes held in one value that ends them all: prepare, start, run, cancel, end with a grace (ER-51); Supervised is the child holder Scope is built on, not a copy"
 canonical = "paddock-proc"
 paths = ["crates/paddock-proc/src/scope.rs"]
 symbols = ["item:Scope", "item:Held"]
 status = "built"
 adr = "0119"
-
-  [[mechanism.copy]]
-  paths = ["crates/paddock-proc/src/supervised.rs"]
-  symbols = ["item:Supervised"]
-  kind = "wiring"
-  owner = "paddock"
-  delete_by = "v0.5.0"
-  note = "One long-lived child whose tree ends on drop, with a memory cap. Scope::start holds its children as Supervised values (process group, guardian, per-child job); ADR 0119 §1 makes Supervised what Scope::start returns when a cap is asked for, so a capped child is started through a Scope, not on its own (the migration, WP-6 to WP-8)."
 
   [[mechanism.copy]]
   paths = ["crates/paddock-testkit-start/src/reap.rs"]

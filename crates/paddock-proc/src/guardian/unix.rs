@@ -17,6 +17,14 @@ use std::time::Duration;
 #[cfg(test)]
 pub(crate) const ACT_AS_USER_ENV: &str = "PADDOCK_PROC_TEST_ACT_AS_USER";
 
+/// In a test binary: the guardian writes `<path>.waiting` and holds before its owner check until `<path>` exists (bounded by
+/// the test kit's hang guard), so a test can end the owner while the guardian starts.
+#[cfg(test)]
+pub(crate) const GATE_ENV: &str = "PADDOCK_PROC_TEST_GUARDIAN_GATE";
+/// In a test binary: the guardian refuses to serve, as one that found the wrong parent does.
+#[cfg(test)]
+pub(crate) const REFUSE_ENV: &str = "PADDOCK_PROC_TEST_GUARDIAN_REFUSE";
+
 /// Whether the root policy applies to this process: root binaries do not use the guardian (ADR 0076 amendment 2026-11-09).
 fn runs_as_root() -> bool {
     #[cfg(test)]
@@ -38,11 +46,13 @@ const EMPTY_LOOKS: u32 = 200;
 /// owner waits for it before its first registration counts, so an owner killed right after its first start is still
 /// served (a guardian that had not checked yet found pid 1 as its parent and refused).
 const SERVING: &str = "paddock-proc-guardian: serving";
-/// The longest the owner waits for [`SERVING`]: the guardian is this executable run again, and a refused guardian ends at
-/// once (end of file), so the bound only meets a guardian stopped before its check (App Tamer, a debugger). Measured
-/// 2026-11-24 on the Mac mini at a 1-minute load of 27 to 35: a first start including the guardian's answer took 6 ms at the
-/// median and 28 ms at the worst of 50 (docs/benchmarks.md, "scope grace: from the stop request to the exit"); ten seconds
-/// is far above that and still ends a start whose guardian never answers (it then goes on unguarded until the answer).
+/// The longest the owner waits for [`SERVING`] (ER-12: a bound with its measured cause). Measured 2026-11-24 on the Mac mini
+/// at a 1-minute load of 27 to 35 (docs/benchmarks.md, heading "2026-11-24, scope grace: from the stop request to the
+/// exit", row "first start of a process with the orphan guardian"): a scope's prepare plus its first start, the guardian's
+/// start and answer included, took 6 ms at the median and 28 ms at the worst of 50. A refused guardian answers at once (end of
+/// file), so the bound only meets a guardian that was stopped before its owner check (App Tamer, a debugger); ten seconds is
+/// about 350 times the worst measured, so a slow but working start under load is never cut, and a stopped guardian costs
+/// one bounded wait: the start goes on unguarded and says so.
 const SERVING_BOUND: Duration = Duration::from_secs(10);
 /// The longest line the guardian takes (a folder of 4096 bytes is 8192 hex digits).
 const MAX_LINE: usize = 16 << 10;
@@ -234,10 +244,13 @@ fn start(args: &[OsString], me: ProcessId) -> std::io::Result<Running> {
         ),
         Serving::Refused => {
             crate::cleanup::logged("reaping a guardian that refused", child.wait());
-            return Err(std::io::Error::other(format!(
-                "it refused to serve (its log, {}, says why)",
-                log_text(log.as_deref())
-            )));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                format!(
+                    "it refused to serve (its log, {}, says why)",
+                    log_text(log.as_deref())
+                ),
+            ));
         }
         Serving::NoAnswer => log::warn!(
             "The orphan guardian (pid {}) did not say it serves within {} s; this process's children are registered with \
@@ -317,54 +330,124 @@ fn mark(folder: &Path, me: ProcessId) -> Option<PathBuf> {
     }
 }
 
-/// Registers the child leading process group `group` (just started and not reaped: the group is still its own), with
-/// `folder` to remove after the group if this process dies first. `None` when this executable has no guardian (it does
-/// not call [`run_if_requested`], or it runs as root) or the guard could not be set up; the reason is logged (once when
-/// the guard is off).
-pub(crate) fn register(group: u32, folder: Option<&Path>) -> Option<Registration> {
-    static OFF: OnceLock<()> = OnceLock::new();
-    let off = |why: &str| {
-        OFF.get_or_init(|| {
-            log::warn!(
-                "The orphan guard is off: {why}; if this process is killed, its supervised children's trees are left running"
-            );
-        });
-        None
-    };
+/// Why the guard is off for this process, once decided for good (no `cat`, no identity, a guardian that refused): later
+/// starts do not try again (review P2-1 of ADR 0119 WP-1), and the reason was logged once.
+static OFF_FOR_GOOD: OnceLock<String> = OnceLock::new();
+
+/// How many guardians this process started (a test reads it: a refusal is not retried).
+static STARTED: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// How many guardians this process has started.
+#[cfg(test)]
+pub(crate) fn guardians_started() -> u32 {
+    STARTED.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Logs once that the guard is off for a reason that may change in this process (a test binary sets its hook late, a test
+/// thread acts as a user); the next start looks again.
+fn off_now(why: &str) -> bool {
+    static SAID: OnceLock<()> = OnceLock::new();
+    SAID.get_or_init(|| {
+        log::warn!(
+            "The orphan guard is off: {why}; if this process is killed, its supervised children's trees are left running"
+        );
+    });
+    false
+}
+
+fn off_for_good(why: String) -> bool {
+    let first = OFF_FOR_GOOD.set(why.clone()).is_ok();
+    if first {
+        log::warn!(
+            "The orphan guard is off: {why}; if this process is killed, its supervised children's trees are left running"
+        );
+    }
+    false
+}
+
+/// Whether the guard is off for this process for good.
+pub(crate) fn is_off() -> bool {
+    OFF_FOR_GOOD.get().is_some()
+}
+
+/// Makes sure this process's guardian runs and serves (it has checked its owner) before the caller starts a child (ADR 0119
+/// WP-1, review P1-4): an owner killed while its guardian started then has no child yet. Starts one when none runs, or when the
+/// last one ended; waits for its answer outside the lock, so other threads' registrations are not held by the wait. False when
+/// the guard is off (logged once); a guardian that refused is not started again for this process.
+pub(crate) fn ensure() -> bool {
+    if is_off() {
+        return false;
+    }
     let Some(args) = HOOK.get() else {
-        return off(
+        return off_now(
             "this executable does not call paddock_proc::guardian::run_if_requested() in main",
         );
     };
     if runs_as_root() {
-        return off(
+        return off_now(
             "this process runs as root, and root binaries do not use the guardian (ADR 0076 amendment 2026-11-09)",
         );
     }
-    let Some(cat) = cat() else {
-        return off("there is no /bin/cat for the keepers");
-    };
-    let Some(me) = ProcessId::of(std::process::id()) else {
-        return off("this process's start time cannot be read");
-    };
-    let pgid = i32::try_from(group).ok()?;
-    let mut guard = lock();
-    // A guardian that ended (killed by someone) is started again; its registrations ended with it.
-    if let Some(r) = guard.as_mut()
-        && !matches!(r.child.try_wait(), Ok(None))
-    {
-        log::warn!(
-            "The orphan guardian (pid {}) had ended; a new one is started",
-            r.child.id()
-        );
-        *guard = None;
+    if cat().is_none() {
+        return off_for_good("there is no /bin/cat for the keepers".into());
     }
-    if guard.is_none() {
-        match start(args, me) {
-            Ok(r) => *guard = Some(r),
-            Err(e) => return off(&format!("the guardian could not be started ({e})")),
+    let Some(me) = ProcessId::of(std::process::id()) else {
+        return off_for_good("this process's start time cannot be read".into());
+    };
+    {
+        let mut guard = lock();
+        match guard.as_mut().map(|r| r.child.try_wait()) {
+            Some(Ok(None)) => return true,
+            // A guardian that ended (killed by someone) is started again; its registrations ended with it.
+            Some(_) => {
+                if let Some(r) = guard.as_ref() {
+                    log::warn!(
+                        "The orphan guardian (pid {}) had ended; a new one is started",
+                        r.child.id()
+                    );
+                }
+                *guard = None;
+            }
+            None => {}
         }
     }
+    STARTED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let running = match start(args, me) {
+        Ok(r) => r,
+        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+            return off_for_good(format!("the guardian refused to serve this process ({e})"));
+        }
+        Err(e) => {
+            log::warn!(
+                "The orphan guardian could not be started ({e}): this child is not guarded; the next start tries again"
+            );
+            return false;
+        }
+    };
+    let mut guard = lock();
+    if guard
+        .as_mut()
+        .is_some_and(|r| matches!(r.child.try_wait(), Ok(None)))
+    {
+        // Another thread started one meanwhile: ours sees end of file with nothing registered and ends.
+        drop(running);
+    } else {
+        *guard = Some(running);
+    }
+    true
+}
+
+/// Registers the child leading process group `group` (just started and not reaped: the group is still its own), with
+/// `folder` to remove after the group if this process dies first. The guardian already serves ([`ensure`], called before the
+/// child was started). `None` when the guard is off or could not be set up for this child; the reason is logged.
+pub(crate) fn register(group: u32, folder: Option<&Path>) -> Option<Registration> {
+    if !ensure() {
+        return None;
+    }
+    let cat = cat()?;
+    let me = ProcessId::of(std::process::id())?;
+    let pgid = i32::try_from(group).ok()?;
+    let mut guard = lock();
     let r = guard.as_mut()?;
     let started = r.keeper_input.try_clone().and_then(|input| {
         plumbing(cat)
@@ -726,7 +809,8 @@ impl Ends for OsEnds {
 }
 
 /// What the owner learned from the guardian's ready pipe.
-enum Serving {
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Serving {
     Yes,
     /// End of file before [`SERVING`]: it refused (or died) before it served.
     Refused,
@@ -736,7 +820,7 @@ enum Serving {
 
 /// Reads the guardian's standard error up to [`SERVING`] or its end, on a thread of its own, for at most `bound`. Other lines
 /// (a test harness's) are skipped. A thread left reading after the bound ends when the guardian writes or ends.
-fn serving(ready: std::io::PipeReader, bound: Duration) -> Serving {
+pub(crate) fn serving(ready: std::io::PipeReader, bound: Duration) -> Serving {
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
         let mut ok = false;
@@ -806,6 +890,17 @@ fn serve(input: impl BufRead) -> i32 {
     let me = std::env::current_exe()
         .ok()
         .and_then(|e| std::fs::canonicalize(e).ok());
+    #[cfg(test)]
+    if let Some(gate) = std::env::var_os(GATE_ENV).map(PathBuf::from) {
+        let mut waiting = gate.clone().into_os_string();
+        waiting.push(".waiting");
+        crate::cleanup::logged("marking the test gate", std::fs::write(&waiting, b""));
+        if !paddock_testkit::wait::poll_until_within(paddock_testkit::wait::HANG_GUARD, || {
+            gate.exists()
+        }) {
+            ends.log("the test gate never opened");
+        }
+    }
     let mut checked = check_owner(
         owner,
         crate::sys::parent_pid(),
@@ -813,6 +908,10 @@ fn serve(input: impl BufRead) -> i32 {
         crate::sys::exe_of(owner.pid()).as_deref(),
         me.as_deref(),
     );
+    #[cfg(test)]
+    if std::env::var_os(REFUSE_ENV).is_some() {
+        checked = Err("a test asked it to refuse".into());
+    }
     let pipe = crate::sys::stdin_pipe();
     if checked.is_ok() && pipe.is_none() {
         checked = Err("its standard input is not a pipe".into());

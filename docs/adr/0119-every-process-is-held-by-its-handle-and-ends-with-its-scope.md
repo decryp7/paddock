@@ -117,8 +117,11 @@ built on what exists, not beside it:
   joins (nested jobs, Windows 8 and later, so it works inside the runner's job). Children get the folder as their working folder
   and `TMPDIR`/`TMP`/`TEMP` unless the caller says otherwise (ER-51's one folder).
 - **Execute**: `scope.start(cmd) -> Held` and `scope.run(cmd, limits) -> Output` (the existing `run_bounded`). `Held` keeps the
-  `Child` and its `ProcessId`, records the start in the unit, and offers `Owned`: `wait(bound)` (judged on progress through
-  `StartWatch`/`Patience`, ADR 0031, never a bare wall clock), `result()`, `end()`. A cancel token (`scope.cancel()`) ends every
+  `Child` and its `ProcessId`, records the start in the unit, and offers `Owned`: `wait(bound)`, `result()`, `end()`.
+  Amended 2026-11-24 (WP-1 review, P2-4): `wait` takes the `Owned` trait's bound (ADR 0112), as `Owned` is defined, and ends at
+  the child's exit, a cancel or the bound. A held child is long-lived and has no progress signal of its own to judge; a start
+  that needs judging on progress (ADR 0031) runs `StartWatch`/`Patience` on the child's identity (`Held::process`), and the
+  bound of a run to completion is `Scope::run`'s `Limits` (WP-14 makes it progress-judged). A cancel token (`scope.cancel()`) ends every
   wait in the scope with `Waited::Cancelled`.
 - **Clean-up** (`Drop`, also `scope.finish()` for the outcome): asks each live member to stop, waits the scope's grace (one named
   constant, measured in WP-1 before it is chosen, ER-12), then ends the rest by identity through `kill_tree`; removes the folder
@@ -286,7 +289,7 @@ starts, then pushed and on a train (it holds `Owned`, `own::Unit` and the starte
 | --- | --- | --- | --- | --- |
 | WP-1 | `Scope` and `Held`: prepare (folder, `Unit`, guardian or per-scope `KillOnClose`), start, run, cancel, drop with a measured grace, summary log. Failing tests first: a panic inside a scope ends its child; an owner ended by SIGKILL leaves nothing (guardian); a Windows child ends when the scope's job closes; a cancel ends a wait; positive control: a child started outside the scope survives and is reported. | `crates/paddock-proc/src/scope.rs` (new), `crates/paddock-proc/tests/it/scope.rs`, one line in `lib.rs`, `docs/known-copies.toml` (Supervised and Reaper as views of Scope) | 1.5 | P1 |
 | WP-2 | `start_detached` with `Lifetime`; `spawn_detached` private; the slot holder on `Lifetime::Starter` (test from d31c74d94: a starter ends, its holder follows). | `crates/paddock-proc/src/detach.rs`, `crates/paddock-slots/src/hold.rs`, `tools/paddock-dev/src/slots.rs`, their tests | 0.5 | WP-1 |
-| WP-3 | Handle text, `held.jsonl` ledger (one reader with ADR 0112's), `./dev wait --pid <pid>:<start>`, `./dev held list|wait|end`. | `crates/paddock-proc/src/identity.rs` (Display/FromStr), `crates/paddock-proc/src/ledger.rs` (new), `tools/paddock-dev/src/wait.rs`, `tools/paddock-dev/src/held.rs` (new), tests | 0.75 | WP-1 |
+| WP-3 | Handle text, `held.jsonl` ledger (one reader with ADR 0112's), `./dev wait --pid <pid>:<start>`, `./dev held list\|wait\|end`. | `crates/paddock-proc/src/identity.rs` (Display/FromStr), `crates/paddock-proc/src/ledger.rs` (new), `tools/paddock-dev/src/wait.rs`, `tools/paddock-dev/src/held.rs` (new), tests | 0.75 | WP-1 |
 | WP-4 | `ask_group(ProcessId)`; Pitcrew `RunnerProcess::id`, `graceful_stop` and `kill_tree` by identity, the Ctrl+Break helper re-checks; failing test first (pid handed on). | `crates/paddock-proc/src/tree.rs`, `apps/pitcrew/crates/pitcrew-service/src/{launch,supervisor}.rs`, `platform/win_session.rs`, their tests | 0.75 | P2 |
 | WP-5 | Clippy ban on `Command::spawn`; the generated, shrink-only list of `#[expect]` sites and its growth check against the merge base. | `lint/clippy.toml` (one line), the list generator in `tools/paddock-dev/src/check/` (id from `./dev check new-id`) | 0.25 | WP-6 to WP-8 ready to merge together |
 | WP-6 | Migration: `crates/` (65 sites) and the seven file-wide allows' crates. | the crates' files | 0.75 | WP-1, WP-2, P3 |

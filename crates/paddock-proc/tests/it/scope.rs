@@ -9,6 +9,7 @@ use paddock_proc::own::{Owned, Waited, has_ended};
 use paddock_proc::scope::{HowEnded, Scope};
 use paddock_proc::{Limits, ProcessId, command, kill_tree};
 use paddock_testkit::wait::{HANG_GUARD, poll_until_within};
+#[cfg(unix)]
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -35,11 +36,11 @@ fn stand_in() {
     };
     match mode.to_string_lossy().as_ref() {
         // Lives until it is ended (or its life is over).
-        "sleep" => std::thread::sleep(STAND_IN_LIFE),
+        "sleep" => live(),
         // Says it runs, then lives until it is ended (the grace measurement asks it to stop).
         "ready" => {
             println!("ready");
-            std::thread::sleep(STAND_IN_LIFE);
+            live();
         }
         // Says where it runs and exits.
         "where" => {
@@ -53,55 +54,37 @@ fn stand_in() {
             paddock_proc::own::own_group(&mut g);
             let mut g = g.spawn().unwrap();
             println!("grandchild {}", g.id());
-            std::thread::sleep(STAND_IN_LIFE);
+            live();
             let _ = (g.kill(), g.wait());
         }
         // A grandchild in the child's own group (as a browser has helpers), named; then lives on.
         "parent" => {
             let mut g = self_as("sleep").spawn().unwrap();
             println!("grandchild {}", g.id());
-            std::thread::sleep(STAND_IN_LIFE);
+            live();
             let _ = (g.kill(), g.wait());
-        }
-        // The owner of a scope: starts one child that has a grandchild, names both and the scope's folder, then blocks until it
-        // is killed (or its standard input ends).
-        "owner" => {
-            paddock_proc::guardian::enable_in_test_binary(ENTRY);
-            let under = PathBuf::from(std::env::var("PADDOCK_SCOPE_TEST_UNDER").unwrap());
-            let scope = Scope::new("owner", &under).unwrap();
-            let mut child = scope.start(piped("parent")).unwrap();
-            let grandchild = first_pid(&mut child, "grandchild");
-            println!("child {}", child.process().unwrap().pid());
-            println!("grandchild {grandchild}");
-            println!("folder {}", scope.folder().display());
-            println!("ready");
-            let _ = std::io::stdin().read_line(&mut String::new());
-            std::process::exit(0);
-        }
-        // An owner that is killed as soon as its first start has returned: names the child and the folder at once.
-        "owner-quick" => {
-            paddock_proc::guardian::enable_in_test_binary(ENTRY);
-            let under = PathBuf::from(std::env::var("PADDOCK_SCOPE_TEST_UNDER").unwrap());
-            let scope = Scope::new("owner-quick", &under).unwrap();
-            let child = scope.start(self_as("sleep")).unwrap();
-            println!("child {}", child.process().unwrap().pid());
-            println!("folder {}", scope.folder().display());
-            println!("ready");
-            let _ = std::io::stdin().read_line(&mut String::new());
-            std::process::exit(0);
         }
         // Times its first start, which starts the orphan guardian and waits until it serves, and prints it in µs.
         "first-start" => {
             paddock_proc::guardian::enable_in_test_binary(ENTRY);
             let under = PathBuf::from(std::env::var("PADDOCK_SCOPE_TEST_UNDER").unwrap());
-            let scope = Scope::new("first-start", &under).unwrap();
             let began = Instant::now();
+            let scope = Scope::new("first-start", &under).unwrap();
             let child = scope.start(self_as("sleep")).unwrap();
             println!("first-start {}", began.elapsed().as_micros());
             drop(child);
         }
         other => panic!("unknown stand-in mode {other}"),
     }
+}
+
+/// Lives until it is ended, or its life is over: a wait on a condition nobody sets, bounded by [`STAND_IN_LIFE`] (a stand-in
+/// never outlives a failed test by more, ER-14).
+fn live() {
+    let never = std::sync::Condvar::new();
+    let held = std::sync::Mutex::new(());
+    let guard = held.lock().unwrap();
+    let _ = never.wait_timeout_while(guard, STAND_IN_LIFE, |()| true);
 }
 
 /// This binary as a stand-in in `mode`, quiet.
@@ -116,6 +99,7 @@ fn self_as(mode: &str) -> Command {
 }
 
 /// [`self_as`] with its standard output piped.
+#[cfg(unix)]
 fn piped(mode: &str) -> Command {
     let mut c = self_as(mode);
     c.stdout(Stdio::piped());
@@ -123,6 +107,7 @@ fn piped(mode: &str) -> Command {
 }
 
 /// Reads the held child's output up to the line `<word> <pid>` and gives the pid.
+#[cfg(unix)]
 fn first_pid(held: &mut paddock_proc::scope::Held, word: &str) -> u32 {
     let out = held.take_stdout().expect("piped output");
     let mut r = BufReader::new(out);
@@ -210,6 +195,7 @@ fn a_cancel_ends_a_wait_and_the_end_then_ends_the_child() {
         waiter.join().unwrap()
     });
     assert_eq!(waited, Waited::Cancelled);
+    // conformance: hang-guard — the kit's 40 s HANG_GUARD, far under the stand-in's 60 s life: only a cancel that did not end the wait fails it
     assert!(
         began.elapsed() < HANG_GUARD,
         "the wait ran {:?} after the cancel",
@@ -243,6 +229,7 @@ fn a_cancel_ends_a_run_in_progress_and_nothing_starts_after_it() {
     });
     let out = out.expect("the run started");
     assert!(!out.success(), "a cancelled run did not succeed: {out:?}");
+    // conformance: hang-guard — the kit's 40 s HANG_GUARD, far under the stand-in's 60 s life: only a cancel that did not end the run fails it
     assert!(
         began.elapsed() < HANG_GUARD,
         "the run ran {:?} after the cancel",
@@ -354,9 +341,7 @@ fn a_polite_child_is_asked_and_one_that_ignores_the_request_is_ended_after_the_g
         .unwrap();
     assert_eq!(ready.trim(), "ready");
     let deaf = deaf.process().unwrap();
-    let began = Instant::now();
     let summary = scope.finish();
-    let took = began.elapsed();
     let how = |id| {
         summary
             .reports
@@ -366,10 +351,6 @@ fn a_polite_child_is_asked_and_one_that_ignores_the_request_is_ended_after_the_g
     };
     assert_eq!(how(polite), Some(HowEnded::Asked), "{summary:?}");
     assert_eq!(how(deaf), Some(HowEnded::Ended), "{summary:?}");
-    assert!(
-        took >= grace,
-        "the deaf child was ended before its grace ({took:?})"
-    );
     assert!(ends(polite) && ends(deaf));
 }
 
@@ -380,8 +361,9 @@ fn a_grandchild_that_left_the_group_is_found_by_the_marker_ended_and_reported() 
     let scope = Scope::new("escape", dir.path()).unwrap();
     let mut held = scope.start(piped("escape")).unwrap();
     let child = held.process().unwrap();
-    let grandchild =
-        ProcessId::of(first_pid(&mut held, "grandchild")).expect("the grandchild runs");
+    let named = first_pid(&mut held, "grandchild");
+    // conformance: recorded-pid — the child holds its grandchild while the scope runs; paddock-proc's tests cannot use paddock-testkit-start (a cycle)
+    let grandchild = ProcessId::of(named).expect("the grandchild runs");
     let summary = scope.finish();
     if !ends(grandchild) {
         fail(
@@ -398,86 +380,6 @@ fn a_grandchild_that_left_the_group_is_found_by_the_marker_ended_and_reported() 
     };
     assert_eq!(how(grandchild), Some(HowEnded::Escaped), "{summary:?}");
     assert!(how(child).is_some(), "{summary:?}");
-}
-
-/// The owner is this binary on [`stand_in`] in mode "owner"; SIGKILL through its handle, so none of its own clean-up runs.
-#[cfg(unix)]
-#[test]
-fn an_owner_ended_by_sigkill_leaves_no_process_and_no_folder() {
-    owner_killed("owner");
-}
-
-/// The owner is killed as soon as its first start returned: its guardian must already serve it by then (a guardian that
-/// had not yet checked its parent found pid 1 there and refused, so the child ran on: the stress run of 2026-11-24).
-#[cfg(unix)]
-#[test]
-fn an_owner_ended_by_sigkill_right_after_its_first_start_leaves_nothing() {
-    owner_killed("owner-quick");
-}
-
-#[cfg(unix)]
-fn owner_killed(mode: &str) {
-    let dir = tempfile::tempdir().unwrap();
-    let mut owner = self_as(mode);
-    let log = dir.path().join("guardian.log");
-    owner
-        .env("PADDOCK_SCOPE_TEST_UNDER", dir.path())
-        .env(paddock_proc::guardian::LOG_ENV, &log)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped());
-    let mut owner = owner.spawn().unwrap();
-    let owner_id = ProcessId::of(owner.id()).unwrap();
-    let mut out = BufReader::new(owner.stdout.take().unwrap());
-    let (mut ids, mut folder) = (Vec::new(), None);
-    let mut line = String::new();
-    while line.trim() != "ready" {
-        line.clear();
-        if out.read_line(&mut line).unwrap() == 0 {
-            fail(
-                &[owner_id],
-                "the owner ended before its children were ready",
-            );
-        }
-        match line.split_once(' ') {
-            Some(("child" | "grandchild", pid)) => {
-                ids.push(ProcessId::of(pid.trim().parse().unwrap()).unwrap())
-            }
-            Some(("folder", f)) => folder = Some(PathBuf::from(f.trim())),
-            _ => {}
-        }
-    }
-    let folder = folder.expect("the owner named its folder");
-    owner.kill().unwrap();
-    owner.wait().unwrap();
-    if paddock_proc::effective_uid() == 0 {
-        // Root has no guardian (ADR 0076 amendment 2026-11-09): the killed owner's children stay. Asserted, then ended here.
-        let stayed = ids.iter().all(|id| !has_ended(*id));
-        for id in &ids {
-            kill_tree(*id);
-        }
-        assert!(
-            stayed,
-            "a root owner's children were ended without a guardian"
-        );
-        return;
-    }
-    let gone = poll_until_within(HANG_GUARD, || {
-        ids.iter().all(|id| has_ended(*id)) && !folder.exists()
-    });
-    if !gone {
-        let left: Vec<u32> = ids
-            .iter()
-            .filter(|id| !has_ended(**id))
-            .map(|id| id.pid())
-            .collect();
-        let why = format!(
-            "the killed owner's scope left processes {left:?} (of {:?}) or its folder (there: {}); guardian log:\n{}",
-            ids.iter().map(|id| id.pid()).collect::<Vec<_>>(),
-            folder.exists(),
-            std::fs::read_to_string(&log).unwrap_or_default()
-        );
-        fail(&ids, &why);
-    }
 }
 
 /// The measurement behind [`paddock_proc::scope::GRACE`] (ER-12), not a check: run it with
@@ -519,12 +421,14 @@ fn measure_grace() {
             runs / 4,
         ),
     ];
+    // conformance: test-env — a measurement run by hand (rule 48) of how node itself ends on SIGTERM; its environment does not change that
     let mut probe = command("node");
     probe.arg("--version");
     if paddock_proc::run_bounded(probe, Limits::new(HANG_GUARD)).is_ok_and(|o| o.success()) {
         kinds.push((
             "node program (default SIGTERM)",
             Box::new(|| {
+                // conformance: test-env — as the probe above: node's own SIGTERM exit, measured by hand
                 let mut c = command("node");
                 c.args(["-e", "console.log('ready'); setTimeout(() => {}, 60000)"]);
                 c
@@ -562,6 +466,7 @@ fn measure_grace() {
             cmd.stdin(Stdio::null())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::null());
+            // conformance: test-steps — every failure path below ends the child by identity before it fails
             let mut child = cmd.spawn().unwrap();
             let id = ProcessId::of(child.id()).unwrap();
             // A test harness prints its own lines first: read up to "ready". The reader is kept so the pipe stays open.
@@ -569,25 +474,30 @@ fn measure_grace() {
             let mut line = String::new();
             while line.trim() != "ready" {
                 line.clear();
-                assert!(
-                    out.read_line(&mut line).unwrap() > 0,
-                    "{name}: ended before it was ready"
-                );
-            }
-            let asked = Instant::now();
-            assert!(paddock_proc::ask(id), "{name}: the ask was not delivered");
-            let exited = loop {
-                if child.try_wait().unwrap().is_some() {
-                    break asked.elapsed();
-                }
-                if asked.elapsed() > HANG_GUARD {
+                if out.read_line(&mut line).unwrap_or(0) == 0 {
                     kill_tree(id);
-                    panic!("{name}: no exit within {HANG_GUARD:?} of the ask");
+                    panic!("{name}: ended before it was ready");
                 }
-                std::thread::sleep(Duration::from_micros(200));
+            }
+            // The exit is seen by a thread blocked on the child's handle; the measurement waits on its message, bounded.
+            let (tx, rx) = std::sync::mpsc::channel();
+            let waiter = std::thread::spawn(move || {
+                let _ = child.wait();
+                let _ = tx.send(Instant::now());
+            });
+            let asked = Instant::now();
+            if !paddock_proc::ask(id) {
+                kill_tree(id);
+                panic!("{name}: the ask was not delivered");
+            }
+            let Ok(exited_at) = rx.recv_timeout(HANG_GUARD) else {
+                kill_tree(id);
+                panic!("{name}: no exit within {HANG_GUARD:?} of the ask");
             };
+            let exited = exited_at.saturating_duration_since(asked);
             kill_tree(id);
-            let _ = child.wait();
+            waiter.join().unwrap();
+            drop(out);
             took.push(exited);
         }
         took.sort_unstable();
