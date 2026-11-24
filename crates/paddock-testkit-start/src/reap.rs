@@ -1,5 +1,5 @@
 //! Every process a test started ends with the test, and nothing else does (ADR 0103, ER-14, rule 53). [`Reaper`] acts only on
-//! processes it can prove the test created (the rule is `paddock_proc::own::members` over a `Unit`, ADR 0112 WP-2):
+//! processes it can prove the test created:
 //!
 //! - the children it started ([`Reaper::spawn`]): each carries the reaper's token, `PADDOCK_REAPER_ID=<random>`, in its
 //!   environment and joins a kill-on-close job (Windows). A test helper never makes a new group or session while the test leads
@@ -22,9 +22,10 @@
 //! child subreaper, so orphans stay in its tree. [`Reaper::reap`] (or drop, also when the test panics partway) ends them, waits
 //! until they are gone and returns what it had to end; a test that must leave nothing running asserts that the list is empty.
 
-use paddock_proc::own::{self, Owned, Unit, Waited, Why, members};
+use paddock_proc::own::{self, Seen as Row};
 use paddock_proc::{ProcessId, StartTime};
 use paddock_testkit::wait::{FIRST, LAST};
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -41,20 +42,26 @@ pub const SAMPLE_EVERY: Duration = Duration::from_millis(500);
 /// How long [`Reaper::reap`] waits for what it ended to be gone: a bound that only stops a process the OS does not end.
 pub const GONE_WITHIN: Duration = Duration::from_secs(15);
 
+#[derive(Default)]
+struct Seen {
+    roots: Vec<ProcessId>,
+    below: BTreeSet<ProcessId>,
+    /// The leaders of the process groups the reaper made (its children's) or saw a descendant make, by identity.
+    groups: BTreeSet<ProcessId>,
+}
+
 /// The guard for the processes of one test (see the module). Not `Clone`: one per test, dropped at its end.
 pub struct Reaper {
     what: String,
     token: String,
+    created: StartTime,
     folders: Vec<PathBuf>,
-    /// What the reaper holds, by identity: the children, the descendants and groups the sampler saw, the token and the folders
-    /// (the pure rule is `paddock_proc::own::members`, ADR 0112).
-    unit: Arc<Mutex<Unit>>,
+    seen: Arc<Mutex<Seen>>,
     stop: Arc<AtomicBool>,
     sampler: Option<std::thread::JoinHandle<()>>,
     #[cfg(windows)]
     jobs: Mutex<Vec<own::KillOnClose>>,
-    /// What ending reported; `None` until the reaper has ended its processes.
-    ended: Option<Vec<Ended>>,
+    reaped: bool,
 }
 
 /// One process the reaper had to end: it was still running when the test ended.
@@ -78,21 +85,16 @@ impl Reaper {
         // second earlier: one second of slack. The token and the folders are random and made after this, so the slack can only admit
         // a process of this user in one of the reaper's groups.
         let created = StartTime::from_micros(own::now().as_micros().saturating_sub(1_000_000));
-        let token = token();
-        let unit = {
-            let mut unit = Unit::new(created, std::process::id());
-            unit.set_marker(TOKEN_VAR, &token);
-            Arc::new(Mutex::new(unit))
-        };
+        let seen = Arc::new(Mutex::new(Seen::default()));
         let stop = Arc::new(AtomicBool::new(false));
         let sampler = {
-            let (unit, stop) = (unit.clone(), stop.clone());
+            let (seen, stop) = (seen.clone(), stop.clone());
             std::thread::Builder::new()
                 .name("reaper-sampler".into())
                 .spawn(move || {
                     let mut pause = SAMPLE_FIRST;
                     while !stop.load(Ordering::Relaxed) {
-                        sample(&unit);
+                        sample(&seen);
                         std::thread::park_timeout(pause);
                         pause = (pause * 2).min(SAMPLE_EVERY);
                     }
@@ -101,14 +103,15 @@ impl Reaper {
         };
         Reaper {
             what: what.into(),
-            token,
+            token: token(),
+            created,
             folders: Vec::new(),
-            unit,
+            seen,
             stop,
             sampler,
             #[cfg(windows)]
             jobs: Mutex::new(Vec::new()),
-            ended: None,
+            reaped: false,
         }
     }
 
@@ -134,13 +137,13 @@ impl Reaper {
                 .push(job);
         }
         if let Some(id) = ProcessId::of(child.id()) {
-            let mut unit = self.unit.lock().unwrap_or_else(PoisonError::into_inner);
-            unit.add_root(id);
+            let mut seen = self.seen.lock().unwrap_or_else(PoisonError::into_inner);
+            seen.roots.push(id);
             if own::group_of(id.pid()) == Some(id.pid()) {
-                unit.add_group(id);
+                seen.groups.insert(id);
             }
         }
-        sample(&self.unit);
+        sample(&self.seen);
         Ok(child)
     }
 
@@ -162,10 +165,6 @@ impl Reaper {
     pub fn scratch_in(&mut self, parent: &Path) -> std::io::Result<PathBuf> {
         let dir = parent.join(format!("reaper-{}-{}", self.token, self.folders.len()));
         std::fs::create_dir(&dir)?;
-        self.unit
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .add_folder(&dir.to_string_lossy());
         self.folders.push(dir.clone());
         Ok(dir)
     }
@@ -173,38 +172,48 @@ impl Reaper {
     /// Looks at the process table now (the sampler does so on its own; a test calls this right before a step that ends a parent,
     /// so a grandchild it started is known).
     pub fn observe(&self) {
-        sample(&self.unit);
+        sample(&self.seen);
     }
 
     /// Ends everything still running that the test created, waits until it is gone (at most [`GONE_WITHIN`]) and returns what it
     /// had to end. Panics when a process outlives that wait, unless the thread is already panicking.
     pub fn reap(mut self) -> Vec<Ended> {
-        self.end().clone()
+        self.reap_now()
     }
 
     /// The processes [`Reaper::reap`] would end now, and why, without ending them.
     pub fn candidates(&self) -> Vec<Ended> {
-        let unit = self
-            .unit
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone();
-        members(&unit.look(), &unit)
-            .into_iter()
-            .map(|m| Ended {
-                id: m.id,
-                how: how(m.why),
-            })
-            .collect()
+        let (roots, below, groups) = {
+            let seen = self.seen.lock().unwrap_or_else(PoisonError::into_inner);
+            (seen.roots.clone(), seen.below.clone(), seen.groups.clone())
+        };
+        let folders: Vec<String> = self
+            .folders
+            .iter()
+            .map(|f| f.to_string_lossy().into_owned())
+            .collect();
+        let names: Vec<&str> = folders.iter().map(String::as_str).collect();
+        let table = own::look(Some((TOKEN_VAR, &self.token)), &names);
+        choose(
+            &table,
+            &Facts {
+                roots: &roots,
+                below: &below,
+                groups: &groups,
+                created: self.created,
+                me: std::process::id(),
+            },
+        )
     }
 
     fn reap_now(&mut self) -> Vec<Ended> {
+        self.reaped = true;
         self.stop.store(true, Ordering::Relaxed);
         if let Some(s) = self.sampler.take() {
             s.thread().unpark();
             let _ = s.join();
         }
-        sample(&self.unit);
+        sample(&self.seen);
         let todo = self.candidates();
         for e in &todo {
             if e.how == "child" {
@@ -230,11 +239,11 @@ impl Reaper {
             job.terminate();
         }
         let roots = self
-            .unit
+            .seen
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .roots()
-            .to_vec();
+            .roots
+            .clone();
         let began = Instant::now();
         let mut pause = FIRST;
         let left = loop {
@@ -266,64 +275,72 @@ impl Reaper {
     }
 }
 
-/// The reaper as an owner (ADR 0112): `wait` ends when nothing of the test is running, `end` is [`Reaper::reap`] by reference.
-impl Owned for Reaper {
-    type Ended = Vec<Ended>;
-
-    fn wait(&mut self, bound: Duration) -> Waited {
-        let began = Instant::now();
-        let mut pause = FIRST;
-        loop {
-            if self.candidates().iter().all(|e| own::has_ended(e.id)) {
-                return Waited::Gone;
-            }
-            if began.elapsed() >= bound {
-                return Waited::Bound;
-            }
-            std::thread::sleep(pause.min(bound.saturating_sub(began.elapsed())));
-            pause = (pause * 2).min(LAST);
-        }
-    }
-
-    fn result(&self) -> Option<&Vec<Ended>> {
-        self.ended.as_ref()
-    }
-
-    fn end(&mut self) -> &Vec<Ended> {
-        if self.ended.is_none() {
-            let ended = self.reap_now();
-            self.ended = Some(ended);
-        }
-        self.ended.get_or_insert_with(Vec::new)
-    }
-}
-
-/// The reaper's words for [`Why`] (the strings its callers and tests read).
-fn how(why: Why) -> &'static str {
-    match why {
-        Why::Root => "child",
-        Why::Below => "below a child",
-        Why::Group => "in a group the reaper made",
-        Why::Marker => "carries the reaper's token",
-        Why::Folder => "names a folder the reaper made",
-    }
-}
-
 impl Drop for Reaper {
     fn drop(&mut self) {
-        if self.ended.is_none() {
-            let _ = self.end();
+        if !self.reaped {
+            let _ = self.reap_now();
         }
     }
+}
+
+/// What the reaper knows, for [`choose`].
+struct Facts<'a> {
+    roots: &'a [ProcessId],
+    below: &'a BTreeSet<ProcessId>,
+    groups: &'a BTreeSet<ProcessId>,
+    created: StartTime,
+    me: u32,
+}
+
+/// The rows of `table` that are the test's, each once, with the first reason that holds (the pure rule of the module).
+fn choose(table: &[Row], f: &Facts<'_>) -> Vec<Ended> {
+    // A group counts while its leader is still the process seen leading it, or while no process holds the leader's pid (the
+    // group keeps its id while it has members, and its id is not handed on before it is empty).
+    let groups: BTreeSet<u32> = f
+        .groups
+        .iter()
+        .filter(
+            |leader| match table.iter().find(|r| r.id.pid() == leader.pid()) {
+                Some(r) => r.id == **leader,
+                None => true,
+            },
+        )
+        .map(|leader| leader.pid())
+        .collect();
+    let mut out: Vec<Ended> = Vec::new();
+    for row in table.iter().filter(|r| !r.zombie && r.id.pid() != f.me) {
+        let since = row.id.started() >= f.created;
+        let ours = row.same_user || cfg!(windows);
+        let orphan_or_mine = row.parent.is_some_and(|p| p == 1 || p == f.me);
+        let how = if f.roots.contains(&row.id) {
+            Some("child")
+        } else if f.below.contains(&row.id) {
+            Some("below a child")
+        } else if !ours || !since {
+            None
+        } else if row.group.is_some_and(|g| groups.contains(&g)) {
+            Some("in a group the reaper made")
+        } else if row.carries {
+            Some("carries the reaper's token")
+        } else if row.names && orphan_or_mine {
+            Some("names a folder the reaper made")
+        } else {
+            None
+        };
+        if let Some(how) = how {
+            out.push(Ended { id: row.id, how });
+        }
+    }
+    out
 }
 
 /// Adds every running descendant of every running child to `seen.below`, and the group of each one that leads a group of its own.
-fn sample(unit: &Mutex<Unit>) {
-    let roots = unit
+fn sample(seen: &Mutex<Seen>) {
+    let roots = seen
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
-        .roots()
-        .to_vec();
+        .roots
+        .clone();
     let mut found = Vec::new();
     for root in roots {
         if root.confirmed_running() {
@@ -335,11 +352,9 @@ fn sample(unit: &Mutex<Unit>) {
         .filter(|d| own::group_of(d.pid()) == Some(d.pid()))
         .copied()
         .collect();
-    let mut unit = unit.lock().unwrap_or_else(PoisonError::into_inner);
-    unit.add_below(found);
-    for leader in leaders {
-        unit.add_group(leader);
-    }
+    let mut seen = seen.lock().unwrap_or_else(PoisonError::into_inner);
+    seen.below.extend(found);
+    seen.groups.extend(leaders);
 }
 
 /// A token no other reaper on the machine has: this process's pid, the time and a counter, as hex.
@@ -358,39 +373,134 @@ fn token() -> String {
 
 #[cfg(test)]
 mod rule_tests {
-    //! The membership rule is `paddock_proc::own::members` and is tested there (`tests/it/owner.rs`, ADR 0112 WP-1); these
-    //! tests hold the reaper's own words for it and its ending of a result.
     use super::*;
 
-    #[test]
-    fn every_reason_has_its_own_words_and_the_words_callers_read() {
-        let all = [
-            (Why::Root, "child"),
-            (Why::Below, "below a child"),
-            (Why::Group, "in a group the reaper made"),
-            (Why::Marker, "carries the reaper's token"),
-            (Why::Folder, "names a folder the reaper made"),
-        ];
-        for (why, words) in all {
-            assert_eq!(how(why), words);
+    fn row(pid: u32, started: u64) -> Row {
+        Row {
+            id: ProcessId::new(pid, StartTime::from_micros(started)),
+            parent: Some(500),
+            group: Some(pid),
+            same_user: true,
+            zombie: false,
+            carries: false,
+            names: false,
         }
-        let distinct: std::collections::BTreeSet<_> = all.iter().map(|(w, _)| how(*w)).collect();
-        assert_eq!(distinct.len(), all.len());
+    }
+
+    fn facts<'a>(
+        roots: &'a [ProcessId],
+        below: &'a BTreeSet<ProcessId>,
+        groups: &'a BTreeSet<ProcessId>,
+    ) -> Facts<'a> {
+        Facts {
+            roots,
+            below,
+            groups,
+            created: StartTime::from_micros(1_000),
+            me: 42,
+        }
     }
 
     #[test]
-    fn a_reaper_has_no_result_until_it_ends_and_ending_twice_reports_the_first_ending_again() {
-        let mut r = Reaper::new("owner result");
-        assert!(r.result().is_none());
-        assert_eq!(
-            r.wait(Duration::from_secs(5)),
-            Waited::Gone,
-            "nothing was started"
+    fn a_process_that_only_names_the_folder_is_left_alone_unless_it_is_an_orphan() {
+        let (b, g) = (BTreeSet::new(), BTreeSet::new());
+        let mut named = row(7, 2_000);
+        named.names = true;
+        assert!(
+            choose(std::slice::from_ref(&named), &facts(&[], &b, &g)).is_empty(),
+            "its parent is alive and it carries no token"
         );
-        let first = r.end().clone();
-        assert!(first.is_empty());
-        assert_eq!(r.result(), Some(&first));
-        assert_eq!(r.end(), &first);
+        named.parent = Some(1);
+        assert_eq!(
+            choose(&[named], &facts(&[], &b, &g))[0].how,
+            "names a folder the reaper made"
+        );
+    }
+
+    #[test]
+    fn nothing_started_before_the_reaper_or_of_another_user_is_chosen_by_token_group_or_folder() {
+        let (b, g) = (
+            BTreeSet::new(),
+            BTreeSet::from([ProcessId::new(9, StartTime::from_micros(999))]),
+        );
+        let mut old = row(9, 999);
+        old.carries = true;
+        old.names = true;
+        old.parent = Some(1);
+        assert!(
+            choose(&[old], &facts(&[], &b, &g)).is_empty(),
+            "started before the reaper"
+        );
+        let mut other = row(9, 2_000);
+        other.same_user = false;
+        other.carries = true;
+        if cfg!(unix) {
+            assert!(
+                choose(&[other], &facts(&[], &b, &g)).is_empty(),
+                "another user's process"
+            );
+        }
+    }
+
+    #[test]
+    fn a_group_counts_while_its_leader_is_the_process_seen_or_no_process_holds_its_pid() {
+        let leader = row(10, 2_000);
+        let mut member = row(12, 2_200);
+        member.group = Some(10);
+        let (b, groups) = (BTreeSet::new(), BTreeSet::from([leader.id]));
+        let chosen = |table: &[Row]| {
+            choose(table, &facts(&[], &b, &groups))
+                .iter()
+                .map(|e| e.id.pid())
+                .collect::<Vec<_>>()
+        };
+        // The leader runs: the group is the reaper's (the leader itself is chosen as a member of its own group too).
+        assert_eq!(chosen(&[leader.clone(), member.clone()]), [10, 12]);
+        // The leader is gone and nobody holds pid 10: the group keeps its id while it has members.
+        assert_eq!(chosen(std::slice::from_ref(&member)), [12]);
+        // Pid 10 is another process now: the group id may be someone else's, so nothing is chosen by it.
+        let mut other = row(10, 9_000);
+        other.group = Some(10);
+        assert!(chosen(&[other, member]).is_empty());
+    }
+
+    #[test]
+    fn zombies_and_this_process_are_never_chosen() {
+        let (b, g) = (BTreeSet::new(), BTreeSet::new());
+        let mut z = row(7, 2_000);
+        z.carries = true;
+        z.zombie = true;
+        let mut me = row(42, 2_000);
+        me.carries = true;
+        assert!(choose(&[z, me], &facts(&[], &b, &g)).is_empty());
+    }
+
+    #[test]
+    fn children_their_descendants_groups_and_token_carriers_are_chosen_once_each() {
+        let root = row(10, 2_000);
+        let mut desc = row(11, 2_100);
+        desc.group = Some(10);
+        let mut grouped = row(12, 2_200);
+        grouped.group = Some(10);
+        let mut carrier = row(13, 2_300);
+        carrier.carries = true;
+        let below = BTreeSet::from([desc.id]);
+        let groups = BTreeSet::from([root.id]);
+        let roots = [root.id];
+        let chosen = choose(
+            &[root, desc, grouped, carrier],
+            &facts(&roots, &below, &groups),
+        );
+        let hows: Vec<&str> = chosen.iter().map(|e| e.how).collect();
+        assert_eq!(
+            hows,
+            [
+                "child",
+                "below a child",
+                "in a group the reaper made",
+                "carries the reaper's token"
+            ]
+        );
     }
 }
 
@@ -402,25 +512,6 @@ mod tests {
     use super::*;
     use std::io::{BufRead, BufReader, Write};
     use std::process::Stdio;
-
-    #[test]
-    fn wait_ends_at_its_bound_while_a_child_runs_and_reports_gone_after_the_end() {
-        let mut r = Reaper::new("owned wait");
-        let mut cmd = paddock_proc::command("sleep");
-        cmd.arg("20");
-        let mut child = r.spawn(&mut cmd).expect("sleep starts");
-        let began = Instant::now();
-        assert_eq!(r.wait(Duration::from_millis(100)), Waited::Bound);
-        assert!(
-            began.elapsed() < Duration::from_secs(5),
-            "ends at the bound"
-        );
-        let ended = r.end().clone();
-        assert_eq!(ended.len(), 1);
-        assert_eq!(ended[0].how, "child");
-        assert_eq!(r.wait(Duration::from_secs(5)), Waited::Gone);
-        let _ = child.wait();
-    }
 
     /// A shell that starts a grandchild (`sleep 20` under a second shell whose `$0` is `arg`) in its own process group, detached
     /// from the shell's output, prints its pid, then waits for a line on stdin before it exits.

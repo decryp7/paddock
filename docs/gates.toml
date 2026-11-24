@@ -541,16 +541,6 @@ review_by = 2027-01-10
 approved = "coordinator"
 
 [[ignored]]
-path = "crates/paddock-proc/tests/it/scope.rs"
-tests = ["measure_grace"]
-gate = "measurement"
-reason = "the measurement behind paddock_proc::scope::GRACE and the guardian's SERVING_BOUND (ER-12), run by hand with --run-ignored only --no-capture; its results block is in docs/benchmarks.md (2026-11-24, scope grace)"
-owner = "ADR 0119"
-since = 2026-11-24
-review_by = 2027-01-24
-approved = "coordinator"
-
-[[ignored]]
 path = "apps/debrief/crates/debrief-store-duck/tests/it/regress_1_2.rs"
 tests = ["a_gz_of_1_5_gb_uncompressed_imports_under_the_import_budget", "an_exceptions_view_with_50_000_groups_returns_at_most_its_limit_and_says_truncated"]
 gate = "not-gated"

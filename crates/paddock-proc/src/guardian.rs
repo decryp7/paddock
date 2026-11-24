@@ -20,25 +20,14 @@
 //! one the owner holds). It removes only a canonical folder holding the owner's marker, takes only whole lines, logs only
 //! into a private folder of the user's (`O_NOFOLLOW`, mode 0600), and is off for root (amendment §1a).
 //!
-//! N guarded children cost N + 1 processes. Since ADR 0119 WP-1 (review round 2) the order is keeper first: the owner makes
-//! sure the guardian serves (`ensure`), starts the keeper leading a new group, registers that group, and only then starts the
-//! child into it. Why no moment of the start leaves the child unguarded if the owner is killed: when std starts it with
-//! `posix_spawn`, the group is set by the spawn itself (`POSIX_SPAWN_SETPGROUP`), so the child is in the group from its first
-//! instruction; on the fork path the child joins the group between `fork` and `exec`, and until its `exec` it holds a copy of
-//! the owner's close-on-exec write end of the registration pipe, so the guardian cannot see end of file (the owner gone)
-//! before the child has joined the group. Ending the child by identity ([`crate::kill_tree`], from any caller) ends the group
-//! through the keeper (a process-wide map of guarded children), and the owner's release of the child ends it too. Not done: a `pre_exec` gate that holds the child's exec until its registration
-//! (std's `spawn` waits for the exec, so the owner could not register while the child waits: a deadlock), and
-//! `PR_SET_PDEATHSIG` (Linux), which needs the same hook and fires when the *thread* that started the child ends (prctl(2));
-//! the keeper-first order needs neither.
+//! N guarded children cost N + 1 processes. Not done: `PR_SET_PDEATHSIG` (Linux) needs a `pre_exec` hook, which the family
+//! bans (lint/clippy.toml), and it fires when the *thread* that started the child ends (prctl(2)).
 //!
-//! Limits: a child that leaves its process group (`setsid`) is outside the guard, as it is outside the owner's tree kill. An
-//! owner killed while it prepares a group (before the child starts) leaves only the keeper's group, which the guardian ends.
+//! Limits: a child that leaves its process group (`setsid`) is outside the guard, as it is outside the owner's tree kill.
+//! An owner killed between the child's start and its registration is not covered; a caller's start-up sweep is the
+//! backstop for its folder.
 //!
 //! **Windows** needs no guardian: each child's job object is kill-on-close, and the job handle closes when the owner dies.
-//! Remaining escape there: a child joins its jobs only after `CreateProcess` returned (this crate does not start it with
-//! `CREATE_SUSPENDED`), so a grandchild it starts in that moment is outside the jobs, and an owner killed in that moment
-//! leaves the child outside them.
 //! The functions below do nothing there, so every `main` calls them the same way.
 
 /// Reserved: set to `1` in the environment of the guardian process this executable starts.
@@ -49,12 +38,8 @@ pub const LOG_ENV: &str = "PADDOCK_PROC_GUARDIAN_LOG";
 
 #[cfg(unix)]
 mod unix;
-#[cfg(all(test, unix))]
-pub(crate) use unix::{
-    ACT_AS_USER_ENV, CRASH_ENV, REFUSE_ENV, guardians_started, hold_after_spawn,
-};
 #[cfg(unix)]
-pub(crate) use unix::{Registration, ensure, pinned, prepare, was_guarded};
+pub(crate) use unix::{Registration, register};
 #[cfg(unix)]
 pub use unix::{enable_in_test_binary, run_if_requested, serve_if_guardian, set_log};
 

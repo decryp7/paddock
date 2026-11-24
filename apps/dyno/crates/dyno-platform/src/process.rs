@@ -147,9 +147,8 @@ fn stream(
     use std::io::BufRead;
     let program = program_name(&cmd);
     cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
-    // Supervised (ER-22): its process group ended as a whole (the orphan guard's group, led by its keeper, when the guard is on;
-    // else its own; `kill_tree` of the tool ends either), a kill-on-close job object on Windows, so a tool's helpers end with it
-    // and nothing outlives Dyno.
+    // Supervised (ER-22): its own process group ended as a whole, a kill-on-close job object on Windows, so a tool's helpers end
+    // with it and nothing outlives Dyno.
     let mut tool = paddock_proc::Supervised::spawn(cmd).map_err(|e| match e.kind() {
         std::io::ErrorKind::NotFound => PlatformError::Unsupported(format!("{program} is not available on this computer.")),
         std::io::ErrorKind::PermissionDenied => PlatformError::AccessDenied(format!("Not allowed to run {program}.")),

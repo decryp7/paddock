@@ -109,22 +109,8 @@ pub fn snapshot() -> Table {
     snapshot_with(System::new)
 }
 
-static TABLE_READS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-
-/// Counts one read of the whole process table (a snapshot, the names for a log line, [`crate::own::look`]).
-pub(crate) fn note_table_read() {
-    TABLE_READS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-}
-
-/// How many times this process has read the whole process table, for budget tests (ER-20: N members of a scope cost a fixed
-/// number of reads, not N).
-pub fn table_reads() -> u64 {
-    TABLE_READS.load(std::sync::atomic::Ordering::Relaxed)
-}
-
 /// [`snapshot`] over a constructor; an empty table when it fails.
 pub(crate) fn snapshot_with(make: impl FnOnce() -> Result<System, sysinfo::Error>) -> Table {
-    note_table_read();
     let Some(mut sys) = new_system_with(make) else {
         return Table::default();
     };

@@ -99,23 +99,6 @@ impl Job {
     /// Puts `child` into a new kill-on-close job. Processes it starts afterwards join the job too (nested jobs: Windows 8
     /// and later, also when the app itself runs in a job).
     pub(crate) fn assign(child: &Child, commit_limit: Option<u64>) -> io::Result<Job> {
-        let job = Job::create(commit_limit)?;
-        job.add(child)?;
-        Ok(job)
-    }
-
-    /// Puts `child` into this job too (a process may be in several jobs: nested jobs, Windows 8 and later). A scope's one
-    /// job takes in each of its children this way (ADR 0119).
-    pub(crate) fn add(&self, child: &Child) -> io::Result<()> {
-        // SAFETY: both handles are valid; the child's stays open while `child` lives.
-        if unsafe { AssignProcessToJobObject(self.0.as_raw_handle(), child.as_raw_handle()) } == 0 {
-            return Err(io::Error::last_os_error());
-        }
-        Ok(())
-    }
-
-    /// A new, empty kill-on-close job, optionally with a per-process commit limit.
-    pub(crate) fn create(commit_limit: Option<u64>) -> io::Result<Job> {
         // SAFETY: no attributes, no name; the handle is owned below.
         let h = unsafe { CreateJobObjectW(null(), null()) };
         if h.is_null() {
@@ -142,6 +125,10 @@ impl Job {
             )
         };
         if set == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        // SAFETY: both handles are valid; the child's stays open while `child` lives.
+        if unsafe { AssignProcessToJobObject(job.as_raw_handle(), child.as_raw_handle()) } == 0 {
             return Err(io::Error::last_os_error());
         }
         Ok(Job(job))
