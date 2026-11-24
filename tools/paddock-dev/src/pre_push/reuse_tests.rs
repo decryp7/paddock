@@ -374,7 +374,9 @@ fn passes_stored_at_once_by_parallel_workers_all_land() {
         Row::from_run(id, &test_subject(), &done, "", 1.0)
     };
     for round in 0..20 {
-        let _ = std::fs::remove_dir_all(&s.store);
+        for f in std::fs::read_dir(&s.store).into_iter().flatten().flatten() {
+            std::fs::remove_file(f.path()).unwrap();
+        }
         let start = std::sync::Barrier::new(gates.len());
         std::thread::scope(|t| {
             for (g, prep) in gates.iter().zip(&preps) {
