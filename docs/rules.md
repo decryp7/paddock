@@ -232,7 +232,7 @@ The Paddock incidents, run ids and ADR numbers behind each ER rule are in
     (g) Before landing a branch (a merge into main), the integrator lints its commits locally:
     `node conformance/bin/paddock-conformance.mjs commit-lint --range origin/main..<branch>`. A push to main lints only what main
     itself gets (`--first-parent`), so this is where a branch's own subjects and trailers are checked; C23 is the backstop.
-    (h) Local checks and CI overlap; a local failure cancels the run (ER-9). Before dispatch, run the fast static gates locally,
+    (h) Local checks and CI overlap; a local failure cancels the run (ER-53). Before dispatch, run the fast static gates locally,
     in parallel and bounded by the machine's load: `./dev check --pre-push` (the pre-push hook runs it): `cargo fmt --check`,
     clippy on the host and, for Windows, `cargo xwin clippy --target x86_64-pc-windows-msvc --workspace --all-targets -- -D warnings`
     (an import or helper used only by a unix-gated test is dead code there; ADR 0021, lessons.md "Windows-only assumptions in
@@ -285,7 +285,7 @@ The Paddock incidents, run ids and ADR numbers behind each ER rule are in
     waits with nothing running (their minutes are not yet measured; the landing report records them from the next train).
     The gate that decides on a branch runs on the same kind of machine as CI (the real runners, as merge queues and merge trains
     do); a run on another architecture, under emulation or as another user counts only as not measured, or as a finding only when
-    compared with the base's own result on that machine (ER-9; 2026-11-16: the Windows-on-Arm VM and an amd64 container failed 22
+    compared with the base's own result on that machine (ER-53; 2026-11-16: the Windows-on-Arm VM and an amd64 container failed 22
     paddock-dev tests on a base the real runner passed).
     A member the train pulled out with a revert keeps its work when its author catches up: before `git merge <train>`, run
     `./dev merge sync-member <train>` (read-only); it prints a `git revert <sha>` for each live train revert of a merge of this
@@ -500,12 +500,12 @@ Status is as of train 14 planning: "planned" is not built, "in progress" is on a
 83. **Lists only shrink; goldens hold no machine** (ER-46). Paddock: planned growth checks compare each list with the merge base and fail on growth without the user's approval (one each for the exceptions list, the allow list and the baselines; the ids are reserved with `./dev check new-id`); goldens are normalised (uid, names, paths, sizes) and the e2e suites use the fixed clock. Status: the three checks are planned (report-only first, ER-41); fixed e2e clock in progress.
 84. **Children inherit the environment** (ER-47). Paddock: production children inherit: `paddock_proc::clean_env` keeps its kept list and every restricting variable the caller has, as the caller has it. `TestCommand` is an allow-list on purpose (ADR 0100): it clears only through `paddock_env::clear_env_pinned_from` and keeps a restricting variable only in a restricting value (a developer's `PADDOCK_DEV_DOWNLOAD=1` is dropped), and sets `RUSTUP_AUTO_INSTALL=0` when the caller's value does not restrict. Clearing needs a named policy with a kept list and never strips a restricting value. The restricting variables are the one typed list `paddock_env::RESTRICTING` (`RUSTUP_AUTO_INSTALL=0`, `CARGO_NET_OFFLINE=true|1`, `PADDOCK_DEV_DOWNLOAD=0`, `PADDOCK_TOOLCHAIN_FAILED=1`), and the only function that clears a child's environment is `paddock_env::clear_env_from` and its pinned twin: Clippy forbids `Command::env_clear` elsewhere (ADR 0100, ER-47 section). Status: in progress, train 14.
 
-Amendments of the same date, no new number: the member gate runs each member's affected Linux tests in a fresh CI-like clone before it joins a train, and Windows and macOS tests run on their own runners in the train's CI, with no separate Windows member check (ER-9, 2026-11-24); agents start on the 15-minute load and CPU idle, count container runs and run at most 5 builders while containers run (ER-24); agents never start the user's installed apps or touch `~/.rustup` and `~/.cargo` (ER-14).
+Amendments of the same date, no new number: the member gate runs each member's affected Linux tests in a fresh CI-like clone before it joins a train, and Windows and macOS tests run on their own runners in the train's CI, with no separate Windows member check (ER-52, 2026-11-24); agents start on the 15-minute load and CPU idle, count container runs and run at most 5 builders while containers run (ER-24); agents never start the user's installed apps or touch `~/.rustup` and `~/.cargo` (ER-14).
 
 ## Bulk APIs (user, 2026-11-18; ER-20, PRINCIPLES "Bulk APIs")
 85. **Bulk APIs: one call for many items** (ER-20; PRINCIPLES "Bulk APIs"; ADR 0108). A function, Tauri command, port method, IPC message or HTTP endpoint that works on items takes many at once (a slice, an iterator, a stream) and returns a result per item, so a caller with N items makes one call; a single-item form, where one is needed, is a thin wrapper over the bulk one; one bad item does not fail the batch unless the operation is atomic by design; large inputs are chunked or paged (ADR 0018, bounded loading). Work over many items is one bulk call or one long-lived process or connection: one SQL statement or one transaction, one bulk IPC request, one `git cat-file --batch` reader instead of a git start per object, an in-process library. A loop that calls a command, port, process, query or endpoint per item is a review finding unless the code says why (`// per-item: <reason>`). A command's count of process starts, statements or invokes is a budget a test guards: each bulk command lands with a test that N items cost at most K, failing first with the per-item code. Status: rule and review line in force; the shared batch git reader (`crates/paddock-git`) and the stdin-taking bounded run in paddock-proc in progress on `perf/git-heavy-tests-2`; the counting seams, the per-item result type (ADR 0108). *Why:* on 2026-11-18 a git start cost about 45 ms on the Windows runner against about 6 ms on the Mac and the merge check started 33 to 75 gits per check (train 14); the inventory of that day found 65 more places across every app, the shared crates and the dev tools (docs/research/2026-11-18-bulk-api-inventory.md), after six earlier instances fixed one by one (ADR 0108).
 
-## CI selection and test runs (user, 2026-11-23; ADR 0117; ER-9, ER-32, ER-49)
+## CI selection and test runs (user, 2026-11-23; ADR 0117; ER-9, ER-32, ER-49, ER-52)
 86. **Only setup-only actions declared in `docs/repo-graph.toml` are plumbing.** A change to an action, script or doc that the graph
     does not declare as plumbing reaches the projects that use it, and an unowned or unresolvable reference selects everything (fail
     closed, ADR 0117). Nothing is plumbing by its folder or name. *Why:* `.gitea/actions/README.md` was on the planner's global list
@@ -513,7 +513,7 @@ Amendments of the same date, no new number: the member gate runs each member's a
 87. **A change to a conformance check, or to a check a release job runs, runs the app's smoke set and its checks phase, not the
     installers** (user, 2026-11-23). The text is rule 54 (a0), the one copy.
 88. **Removing an OS from a test needs the user's approval.** The record is `docs/os-removals.toml`; growth of that register is a
-    finding that no waiver clears (rule 83; ADR 0117). *Why:* OS-scoped tests (ER-9) cut Windows time by 46%, and an OS
+    finding that no waiver clears (rule 83; ADR 0117). *Why:* OS-scoped tests (ER-52) cut Windows time by 46%, and an OS
     dropped without a reason is a hole in the net.
 89. **Every test run goes through the bounded runner** (ER-32, ER-51): nextest with its timeout, and the same progress watchdog as
     the push gates. Agents and CI never run plain `cargo test` or an unbounded test command, a hook steers them to the runner, and
@@ -540,7 +540,7 @@ Until an app is imported, rules 2, 3, 8, 9, 39 and 42 above apply to it as writt
   no publish-and-consume step. "Consume the published version" becomes "use the in-tree version".
 - Rule 1 is about attention, load, CI capacity and shared-code conflicts, not repos (amended 2026-10-28: one release at a
   time; other apps only within those limits).
-91. **In a repository with several products, CI failures in code an app does not ship do not block its release** (was ER-31, moved here from the generic rules 2026-11-24). Judge failing tests and skipped steps, not jobs.
+98. **In a repository with several products, CI failures in code an app does not ship do not block its release** (was ER-31, moved here from the generic rules 2026-11-24). Judge failing tests and skipped steps, not jobs.
     (a) Tag the app in CI on its release branch's tested commit, and land the branch on main afterwards, when every failing test is in other products' own code or in shared code the app does not depend on, and every step a failure skipped has been re-run green or is shown not to touch the app's dependency set. List the dependency set from the lockfile or the package manager, and from the app's imports of shared packages where the manager cannot see them.
     (b) These always block: failures in shared code the app ships; an aggregate coverage failure, until a per-crate gate shows the failing crates are not the app's; another aggregate gate (dependency audit) unless its output clears the app's crates; and anything on the release path (the build and publish steps and the shared actions).
     (c) ER-8, ER-15 and ER-16 still hold: the full suite ran to completion on the tagged tree, the tag is made for CI to build from and never on a `[skip ci]` commit, and it is the commit the gates tested.
