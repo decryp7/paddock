@@ -20,6 +20,8 @@ tray = ["tauri", "tauri/tray-icon"]
 wry = ["tauri", "tauri/wry", "dep:webview2-com"]
 
 [dependencies]
+# The shared atomic file replace (a temporary name of its own per write).
+paddock-env = { workspace = true }
 paddock-commands = { workspace = true }
 # The clock of the exit limits (`paddock_jobs::time`), so tests run them out without waiting.
 paddock-jobs = { workspace = true }

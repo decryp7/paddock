@@ -12,9 +12,8 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
-use std::io::{Read, Write};
+use std::io::Read;
 use std::path::Path;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 /// The settings file's usual name in the app's config folder.
 pub const FILE_NAME: &str = "settings.json";
@@ -206,41 +205,9 @@ pub fn save(path: &Path, file: &SettingsFile) -> std::io::Result<()> {
     write_atomic(path, &bytes)
 }
 
-static NEXT_TMP: AtomicU64 = AtomicU64::new(0);
-
-/// Writes `bytes` to `path` atomically (see [`save`]).
+/// Writes `bytes` to `path` atomically (see [`save`]): the shared `paddock_env::write_atomic`.
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    let dir = path.parent().unwrap_or(Path::new(""));
-    std::fs::create_dir_all(dir)?;
-    let n = NEXT_TMP.fetch_add(1, Ordering::Relaxed);
-    let tmp = dir.join(format!(
-        ".{}.{}.{n}.tmp",
-        file_name(path),
-        std::process::id()
-    ));
-    let result = (|| {
-        let mut f = std::fs::File::create(&tmp)?;
-        f.write_all(bytes)?;
-        f.sync_all()?;
-        drop(f);
-        std::fs::rename(&tmp, path)?;
-        sync_dir(dir);
-        Ok(())
-    })();
-    if result.is_err() {
-        let _ = std::fs::remove_file(&tmp);
-    }
-    result
-}
-
-/// Makes the rename durable where the platform needs it (best effort: the data itself is already flushed).
-fn sync_dir(dir: &Path) {
-    #[cfg(unix)]
-    if let Ok(d) = std::fs::File::open(dir) {
-        let _ = d.sync_all();
-    }
-    #[cfg(not(unix))]
-    let _ = dir;
+    Ok(paddock_env::write_atomic(path, bytes, false)?)
 }
 
 #[cfg(test)]

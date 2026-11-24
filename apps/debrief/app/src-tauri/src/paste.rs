@@ -22,13 +22,9 @@ fn store_text(dir: &Path, name: Option<&str>, text: &str) -> CmdResult<PathBuf> 
         .unwrap_or_default();
     let pasted = prepare(name, text, &taken).map_err(|e| CmdError::invalid(e.to_string()).field("text"))?;
     let file = folder.join(&pasted.file_name);
-    let tmp = folder.join(format!("{}.part", pasted.file_name));
-    std::fs::write(&tmp, &pasted.bytes)
-        .and_then(|_| std::fs::rename(&tmp, &file))
-        .map_err(|e| {
-            let _ = std::fs::remove_file(&tmp);
-            io("save the pasted text", e)
-        })?;
+    paddock_env::write_atomic(&file, &pasted.bytes, false)
+        .map_err(std::io::Error::from)
+        .map_err(|e| io("save the pasted text", e))?;
     Ok(file)
 }
 

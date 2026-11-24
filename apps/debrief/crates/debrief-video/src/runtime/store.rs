@@ -229,10 +229,8 @@ impl FfmpegStore {
     }
 
     fn save(&self, s: &State) -> Result<()> {
-        std::fs::create_dir_all(&self.root)?;
-        let tmp = self.root.join(format!("{STATE_FILE}.tmp"));
-        std::fs::write(&tmp, serde_json::to_vec_pretty(s).map_err(|e| VideoError::Io(e.to_string()))?)?;
-        std::fs::rename(&tmp, self.root.join(STATE_FILE))?;
+        let bytes = serde_json::to_vec_pretty(s).map_err(|e| VideoError::Io(e.to_string()))?;
+        paddock_env::write_atomic(&self.root.join(STATE_FILE), &bytes, false).map_err(std::io::Error::from)?;
         Ok(())
     }
 

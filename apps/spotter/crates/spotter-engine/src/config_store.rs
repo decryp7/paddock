@@ -3,7 +3,6 @@
 use crate::error::{EngineError, Result};
 use spotter_core::config::{self, ConfigDoc};
 use spotter_core::limits::MAX_CONFIG_BYTES;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 
 /// What loading the configuration found.
@@ -86,19 +85,16 @@ pub fn save(path: &Path, doc: &ConfigDoc) -> Result<()> {
             path.display()
         ))
     };
-    let tmp = sibling(path, ".tmp");
-    let mut f = std::fs::File::create(&tmp).map_err(fail)?;
-    f.write_all(config::render(doc).as_bytes()).map_err(fail)?;
-    f.sync_all().map_err(fail)?;
-    drop(f);
+    // The configuration's folder is the user's to make: a missing one is reported, not created.
+    let folder = path.parent().filter(|d| !d.as_os_str().is_empty());
+    if folder.is_some_and(|d| !d.is_dir()) {
+        return Err(fail(std::io::Error::from(std::io::ErrorKind::NotFound)));
+    }
     if path.exists() {
         // A failed backup does not stop the save; the new file is what matters.
         let _ = std::fs::copy(path, sibling(path, ".bak"));
     }
-    std::fs::rename(&tmp, path).map_err(|e| {
-        let _ = std::fs::remove_file(&tmp);
-        fail(e)
-    })
+    paddock_env::write_atomic(path, config::render(doc).as_bytes(), false).map_err(|e| fail(e.into()))
 }
 
 #[cfg(test)]

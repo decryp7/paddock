@@ -205,13 +205,21 @@ async fn an_unwritable_configuration_is_reported_by_every_command_that_saves() {
     assert!(s.engine.delete_watch(&s.id).is_err());
 }
 
+/// The folder cannot be written (a file cannot be created in it), so the migrated configuration cannot be saved. Root writes
+/// anywhere, so the test is only meaningful for a user that is stopped.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_configuration_that_cannot_be_saved_after_a_migration_stops_the_start() {
+    use std::os::unix::fs::PermissionsExt;
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("spotter.toml"), "path = \"/drops\"\nfile_regex = \".*\\\\.zip\"\n").unwrap();
-    // The backup the migration keeps is a folder, and so is the temporary file name: the save cannot complete.
-    std::fs::create_dir(dir.path().join("spotter.toml.tmp")).unwrap();
+    std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o555)).unwrap();
+    let stopped = std::fs::write(dir.path().join("probe"), b"x").is_err();
     let svc = Services::new(Arc::new(MemorySecrets::new()));
-    let e = Engine::open(cfg(dir.path()), svc).err().expect("opening must fail");
-    assert!(is_internal(e));
+    let opened = stopped.then(|| Engine::open(cfg(dir.path()), svc));
+    std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
+    if let Some(opened) = opened {
+        let e = opened.err().expect("opening must fail");
+        assert!(is_internal(e));
+    }
 }

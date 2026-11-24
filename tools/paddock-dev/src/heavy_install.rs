@@ -329,9 +329,7 @@ pub fn install(i: &Install) -> Result<Done, String> {
             sha256: got,
             asset: asset.clone(),
         };
-        let tmp = i.dir.join(format!("VERSION.part.{}", std::process::id()));
-        std::fs::write(&tmp, rec.format())
-            .and_then(|()| std::fs::rename(&tmp, &record_path))
+        paddock_env::write_atomic(&record_path, rec.format().as_bytes(), false)
             .map_err(|e| error(&format!("cannot record the version: {e}."), "run it again."))?;
         Ok(Done::Installed(bin.clone()))
     })();

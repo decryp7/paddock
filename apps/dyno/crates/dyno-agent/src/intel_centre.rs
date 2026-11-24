@@ -60,9 +60,11 @@ pub fn load_lists(dirs: &Dirs) -> UserLists {
 
 fn save_lists(dirs: &Dirs, lists: &UserLists) -> std::io::Result<()> {
     let path = dirs.intel_lists();
-    let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, serde_json::to_vec_pretty(lists).map_err(std::io::Error::other)?)?;
-    crate::intel_fetch::replace(&tmp, &path)
+    Ok(paddock_env::write_atomic(
+        &path,
+        &serde_json::to_vec_pretty(lists).map_err(std::io::Error::other)?,
+        false,
+    )?)
 }
 
 /// What the home location says before any lookup ran.

@@ -160,9 +160,7 @@ fn write_marker(dir: &Path, m: &Marker) -> anyhow::Result<()> {
         pid: m.pid,
         started_at: m.started_at,
     };
-    let tmp = dir.join(format!("{MARKER}.tmp"));
-    std::fs::write(&tmp, serde_json::to_vec(&json)?)?;
-    std::fs::rename(tmp, dir.join(MARKER))?;
+    paddock_env::write_atomic(&dir.join(MARKER), &serde_json::to_vec(&json)?, false)?;
     Ok(())
 }
 
@@ -460,13 +458,11 @@ impl SessionStore {
     fn write_manifest(&self, folder: &str, windows: Vec<String>) -> anyhow::Result<()> {
         let root = self.dir.join(folder);
         std::fs::create_dir_all(&root)?;
-        let tmp = root.join(format!("{MANIFEST}.tmp"));
         let manifest = SessionManifest {
             version: SESSIONS_VERSION,
             windows,
         };
-        std::fs::write(&tmp, serde_json::to_vec_pretty(&manifest)?)?;
-        std::fs::rename(tmp, root.join(MANIFEST))?;
+        paddock_env::write_atomic(&root.join(MANIFEST), &serde_json::to_vec_pretty(&manifest)?, false)?;
         Ok(())
     }
 

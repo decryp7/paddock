@@ -105,6 +105,7 @@ The check index (generated from each module's id, title, scope, mode and needs):
 | C144 | An e2e spec waits for a stream to finish only through expectStreamDone | root | report-only | all |
 | C156 | An axe scan in an e2e spec runs with the page held still (withPageStill or axeViolations) | root | gate | all |
 | C167 | A workflow job that runs the merge-base growth tests checks out the history and names the base ref | root | report-only | all |
+| C169 | A file is written whole through paddock_env::write_atomic, never a hand-written temporary file and rename | root | report-only | all |
 <!-- checks:end -->
 
 Notes per check (written by hand; the index above is the complete list):

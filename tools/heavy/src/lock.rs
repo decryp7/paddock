@@ -290,6 +290,7 @@ impl Heavy {
             return Take::WriteFailed;
         }
         // rename(2) of a directory onto an existing NON-EMPTY directory fails; the lock dir is never empty.
+        // conformance: write-atomic — the rename claims a name in the lock protocol (it fails when the name exists); the marker is a few bytes written under this holder's own name
         if !dir.exists() && fs::rename(&tmp, dir).is_ok() {
             *epoch_out = epoch;
             return Take::Taken;
@@ -470,6 +471,7 @@ impl Heavy {
         let tmp = self.tmp_name("high.");
         // The holder started before this call: its record epoch is now.
         let body = record::format_marker(pid, "ci", self.now());
+        // conformance: write-atomic — the rename claims a name in the lock protocol (it fails when the name exists); the marker is a few bytes written under this holder's own name
         if fs::write(&tmp, body).is_err() || fs::rename(&tmp, &m).is_err() {
             let _ = fs::remove_file(&tmp);
             return Err(format!(
@@ -945,6 +947,7 @@ impl<'a> Acquirer<'a> {
                 .root
                 .join(format!("{HIGH_PREFIX}{}-{}", h.pid, record::sanitize_name(&a.req.name)));
             let tmp = h.tmp_name("high.");
+            // conformance: write-atomic — the rename claims a name in the lock protocol (it fails when the name exists); the marker is a few bytes written under this holder's own name
             let ok = fs::write(&tmp, record::format_marker(h.pid, &h.start_text(), h.now())).is_ok() && fs::rename(&tmp, &m).is_ok();
             if !ok {
                 let _ = fs::remove_file(&tmp);
@@ -985,6 +988,7 @@ impl<'a> Acquirer<'a> {
         let ok = !h.faults.ticket_fail.load(Ordering::SeqCst)
             && fs::write(&tmp, body).is_ok()
             && Heavy::non_empty(&tmp)
+            // conformance: write-atomic — the rename claims a name in the lock protocol (it fails when the name exists); the marker is a few bytes written under this holder's own name
             && fs::rename(&tmp, &ticket).is_ok();
         if !ok {
             let _ = fs::remove_file(&tmp);
@@ -1087,6 +1091,7 @@ impl<'a> Acquirer<'a> {
             if container_req && self.drain.is_none() && waited_now >= h.cfg.drain_after.as_secs() && !h.held_dirs().is_empty() {
                 let m = h.cfg.root.join(format!("{DRAIN_PREFIX}{}-{}", h.pid, record::sanitize_name(&name)));
                 let tmp = h.tmp_name("drain.");
+                // conformance: write-atomic — the rename claims a name in the lock protocol (it fails when the name exists); the marker is a few bytes written under this holder's own name
                 if fs::write(&tmp, record::format_marker(h.pid, &h.start_text(), h.now())).is_ok() && fs::rename(&tmp, &m).is_ok() {
                     h.log.info(
                         "heavy.wait",
@@ -1368,6 +1373,7 @@ impl<'a> Acquirer<'a> {
         }
         o.child = Some((pid, start_micros));
         let tmp = dir.join("owner.tmp");
+        // conformance: write-atomic — the rename claims a name in the lock protocol (it fails when the name exists); the marker is a few bytes written under this holder's own name
         let ok = fs::write(&tmp, record::format_owner(&o, self.epoch)).is_ok() && fs::rename(&tmp, dir.join("owner")).is_ok();
         if !ok {
             let _ = fs::remove_file(&tmp);

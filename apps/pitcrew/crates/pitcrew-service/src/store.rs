@@ -3,7 +3,7 @@
 //! power loss leaves either the old or the new file, never half of one (ADR 0001).
 
 use crate::error::Error;
-use std::io::{Read, Write};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 /// Reads a text file of at most `max` bytes (+1, so the caller's parser sees that it is too large); `None` when
@@ -46,13 +46,7 @@ pub fn write_atomic(path: &Path, text: &str) -> Result<(), Error> {
     if path.exists() {
         std::fs::copy(path, sibling(path, ".bak")).map_err(io)?;
     }
-    let tmp = sibling(path, ".tmp");
-    {
-        let mut f = std::fs::File::create(&tmp).map_err(io)?;
-        f.write_all(text.as_bytes()).map_err(io)?;
-        f.sync_all().map_err(io)?;
-    }
-    std::fs::rename(&tmp, path).map_err(io)
+    paddock_env::write_atomic(path, text.as_bytes(), false).map_err(|e| io(e.into()))
 }
 
 /// Moves a damaged file aside as `<path>.damaged-<stamp>` (kept for the user).

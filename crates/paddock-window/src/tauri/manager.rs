@@ -486,9 +486,7 @@ impl<R: Runtime> Windows<R> {
             return Ok(());
         };
         let text = bounds::to_text(&lock(&self.bounds));
-        let tmp = path.with_extension("tmp");
-        std::fs::write(&tmp, text)
-            .and_then(|()| std::fs::rename(&tmp, path))
+        paddock_env::write_atomic(path, text.as_bytes(), false)
             .map_err(|e| format!("could not save the window bounds: {e}"))
     }
 }

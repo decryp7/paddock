@@ -12,6 +12,8 @@ description = "Log and file analysis engine for Debrief: importers, parsing prof
 doctest = false # doctests are off (crates/README.md, "Doctests")
 
 [dependencies]
+# The shared atomic file replace (a temporary name of its own per write).
+paddock-env = { path = "../../../../crates/paddock-env" }
 anyhow.workspace = true
 base64.workspace = true
 jiff.workspace = true

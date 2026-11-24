@@ -673,15 +673,15 @@ fn write_shim(bin: &Path) -> std::io::Result<()> {
     if std::fs::read_to_string(&target).is_ok_and(|t| t == text) {
         return Ok(());
     }
-    std::fs::create_dir_all(target.parent().unwrap_or(Path::new(".")))?;
-    let tmp = target.with_extension(format!("tmp{}", std::process::id()));
-    std::fs::write(&tmp, &text)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755))?;
-    }
-    std::fs::rename(&tmp, &target)
+    Ok(paddock_env::write_atomic_created(&target, text.as_bytes(), &mut |tmp| {
+        let f = std::fs::OpenOptions::new().write(true).create_new(true).open(tmp)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            f.set_permissions(std::fs::Permissions::from_mode(0o755))?;
+        }
+        Ok(f)
+    })?)
 }
 
 /// A gate's path (`Install::Never`) writes nothing (ER-45): a missing or stale shim is a reason with its next step.

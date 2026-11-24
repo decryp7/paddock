@@ -19,9 +19,6 @@ use std::time::Duration;
 /// Largest configuration file read (a bigger one is not a configuration file).
 pub const MAX_FILE_BYTES: u64 = 4 * 1024 * 1024;
 
-/// Serialises every write (one writer).
-static WRITER: Mutex<()> = Mutex::new(());
-
 /// A document with its format version.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Versioned<T> {
@@ -146,27 +143,10 @@ pub fn read_json(path: &Path) -> Result<serde_json::Value, ReadError> {
     serde_json::from_str(&text).map_err(|e| ReadError::Damaged(e.to_string()))
 }
 
-/// Writes `bytes` to `path` atomically (a temporary file next to it, flushed, then renamed), one writer at
-/// a time; creates the folder.
+/// Writes `bytes` to `path` atomically (the shared `paddock_env::write_atomic`: its own temporary name per write, flushed, then
+/// renamed); creates the folder.
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    use std::io::Write;
-    let _one = crate::sync::lock(&WRITER);
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir)?;
-    }
-    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    let tmp = path.with_file_name(format!(".{name}.{}.tmp", std::process::id()));
-    let result = (|| {
-        let mut f = std::fs::File::create(&tmp)?;
-        f.write_all(bytes)?;
-        f.sync_all()?;
-        drop(f);
-        std::fs::rename(&tmp, path)
-    })();
-    if result.is_err() {
-        let _ = std::fs::remove_file(&tmp);
-    }
-    result
+    Ok(paddock_env::write_atomic(path, bytes, false)?)
 }
 
 /// A cached document: read once, changed in memory, persisted after each change (outside its lock).
