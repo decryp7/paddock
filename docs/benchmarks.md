@@ -231,6 +231,19 @@ failing mode.
   workflows were about 70% of each build. Alone on the CI Mac runner the test took 12.6 s (run 8838); beside two heavy jobs it was stopped
   at 60 s on both tries (jobs 47411, 47644)
 
+### 2026-11-24, test time tiers (feat/test-hang-by-progress, ADR 0121 amendment)
+
+- **Inputs:** the final run of "test cost classes" below (8 test threads, median 1-minute load 38.9 on the shared Mac): wall times are
+  upper bounds of each test's own work. Contention: 5 to 15 times the local time for whole-tree tests in jobs 47411 (run 8830 macOS) and
+  47644 (the coordinator's reading of both job logs); 15 is used. The train replay's rule tables: 157.6 to 185.9 s of one thread
+  (2026-11-23, below)
+- **Tiers (longest test x 15, rounded up to Bazel's tiers):** unclassed 16.3 s -> 245 s, moderate 300 s (ci profile); `tree` 41.4 s ->
+  621 s, long 900 s; `graph` without the replay 26.9 s -> 404 s, long 900 s; the train replay 186 s -> 2790 s, eternal 3600 s
+- **Check:** `./dev ci test-cost --wall-asserts --log <that run>` with the tiers: 0 tests whose time x 15 passes their stop; 19 asserts on
+  elapsed wall time in 15 tests (ci_run, input_hash, load, local_sccache, pre_push::exec 8, heavy_tool, stall 2 asserts, worktree::ops),
+  report-only, each a fix item: an injected clock or a CPU bound
+- **Not measured:** CPU time per test (it comes with `./dev test-guard`); Linux and Windows
+
 ### 2026-11-24, test cost classes (feat/test-cost-classes, ADR 0121)
 
 - **Commit:** train/2026-11-23-graph at fe331ca55 with this change; before = the train's `tools/paddock-dev/.config/nextest.toml`

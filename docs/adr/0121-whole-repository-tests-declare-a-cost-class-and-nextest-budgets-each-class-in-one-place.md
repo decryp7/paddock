@@ -1,7 +1,8 @@
 # 0121. Whole-repository tests declare a cost class, and nextest budgets each class in one place
 
 - Status: Accepted 2026-11-24 by the user (D1 (a) the name prefix, D2 (a) the tree class by measured cost, D3 (a) report-only first,
-  blocking only in the step that records the first green CI run id; building approved the same day; ER-21).
+  blocking only in the step that records the first green CI run id; building approved the same day; ER-21). Amended 2026-11-24 by the
+  user's rule "Test should run no matter the load" (D4 (b), the complete option): see the amendment at the end.
 - Date: 2026-11-24
 - Related: ER-12 (no limit raised without a measured cause next to it), ER-20 (cheaper or more parallel, measured), ER-21 (a recurring
   class gets a redesign), ER-28 (a cause is measured), ER-33 (a check needs a positive control), ER-37 (common practice and cost), ER-41
@@ -92,7 +93,7 @@ selected by lists of test names.
    is empty). Every judged charge, placed or not, is appended as one JSON line (test, binary, class, group, profile, call, placed) to a
    report the run owns: the file `PADDOCK_TEST_COST_REPORT` names (CI sets it on the paddock-dev Tests step, per run and attempt under
    `runner.temp`), else `<target>/nextest/test-cost/<NEXTEST_RUN_ID>.jsonl` in the build folder nextest ran from (found from
-   `NEXTEST_BIN_EXE_dev`, never the checkout). A misplaced charge also goes to the
+   `NEXTEST_BIN_EXE_paddock-dev`, never the checkout). A misplaced charge also goes to the
    test's stderr. The next step, `./dev ci test-cost --report <file>`, prints a `::warning::` per misplaced test and a table in the job
    summary, and exits 0; a report with no charge is "not measured", said, never "clean" (ER-33: nextest hides a passing test's output, so
    stderr alone would be a report nobody sees). The step that records the first green CI run on the real tree, by run id next to the
@@ -151,3 +152,44 @@ agent-day, already done on fix/graph-train-r5-repo-graph-group. This design: abo
 cost report 0.5, the class table and ER-48 layout 0.25, migration of the sites 0.5, measurements and this ADR 0.25), so about 1.75 days
 beyond common practice. It is foundation work (ER-37: the complete option is recommended) and the user approved building it on
 2026-11-24; the cheaper option is D1 (b).
+
+## Amendment 2026-11-24: tests run no matter the load
+
+The user's rule, 2026-11-24: **"Test should run no matter the load."** Scheduling the classes (above) lowers contention but does not
+make a busy host harmless: a 60 s stop still fails a test that a host slows down 15 times. A wall-clock stop has to become what Bazel's
+and Chromium's are: a detector of hangs, not a limit on performance.
+
+### Common practice
+
+- **Bazel**: a test's timeout comes from its `size` or `timeout` attribute in four tiers, `short` 60 s, `moderate` 300 s, `long` 900 s,
+  `eternal` 3600 s; it is there to stop a test that hangs, and `--test_verbose_timeout_warnings` reports a test whose real time is far
+  under its tier so the tier can shrink. A test's resources (`cpu:N`, `exclusive`) are declared separately from its time
+  (bazel.build/reference/be/common-definitions#test.size; bazel.build/reference/test-encyclopedia, read 2026-11-24).
+- **Chromium**: `TestTimeouts` gives a few named timeouts (`tiny_timeout` 100 ms, `action_timeout` 10 s, `action_max_timeout` 30 s,
+  `test_launcher_timeout` 45 s) that are multiplied for slow configurations (debug, sanitizers, a timeout multiplier on the command line)
+  instead of each test choosing a number; a test waits on conditions and uses these only as the bound of a hang
+  (base/test/test_timeouts.h, read 2026-11-24).
+- **Hang by progress**: neither runner judges CPU. nextest has a wall-clock `slow-timeout` per test and runs a test through a wrapper
+  program when asked (`[scripts.wrapper]`, experimental, nextest 0.9.98 and later; the CI pin is 0.9.149). Paddock's push gates already
+  judge a step by progress (rule 89's watchdog, src/pre_push/stall.rs), and `paddock_proc` reads a process tree's CPU time on all three OS.
+
+### Decision
+
+- **D4 (b), accepted by the user 2026-11-24: tiers plus a progress guard.**
+  1. **Time tiers** (`.config/nextest.toml`): a stop is at least the test's own time times the worst measured contention, 15 (whole-tree
+     tests ran 5 to 15 times their local time in jobs 47411 and 47644; `test_cost::CONTENTION`), rounded up to Bazel's tiers. Unclassed
+     tests in CI: moderate, 300 s. `tree` and `graph`: long, 900 s. The train replay: eternal, 3600 s. The measurements are next to the
+     numbers. The default profile keeps C114's 120 s for a run by hand; C114's override cap moves from 480 s to 3600 s (Bazel's
+     `eternal`), the cap on an override and still never on the default.
+  2. **`ci test-cost` judges each test against its own stop** (read from the configuration with the TOML parser): a test whose time
+     times 15 passes its stop is a finding, in a class or not. This replaces "a quarter of the stop".
+  3. **Asserts on elapsed wall time are listed** (`ci test-cost --wall-asserts`, report-only, in the CI step): an `assert` in a `#[test]`
+     function that reads `.elapsed()`, `duration_since` or `Instant::now()`, or a local bound from them. The next step for each is an
+     injected clock or a bound on CPU time. The list is a fix list, not a gate.
+  4. **`./dev test-guard`** (nextest's wrapper for every test of paddock-dev): runs the test, forwards its output, and samples the CPU
+     time of its process tree. A test that spends no CPU time and prints nothing for the guard's gap is a hang. Report-only first (ER-41):
+     a hang is a line of the run's report (the same file as the charges) and a `::warning::`; nothing is stopped until the step that
+     records the first green CI run with it. Each test's CPU time and longest idle stretch go into the report too, which measures the
+     tiers' inputs on the CI hosts and sets the gap (ER-12). Once it enforces, the tiers can widen to backstops.
+- **Cost** against the baseline (Bazel's tiers alone, which is item 1 and about 0.5 day): items 1 to 3 about 1 to 1.25 agent-days, item 4
+  about 1.5 more; about 2.5 to 3 in all. The user chose the complete option on 2026-11-24.

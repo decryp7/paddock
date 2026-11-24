@@ -1332,7 +1332,7 @@ jobs:
       - name: Test cost report
         if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' }}
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}
-        run: ./dev ci test-cost --report "$RUNNER_TEMP/test-cost-${{ github.run_id }}-${{ github.run_attempt }}.jsonl"
+        run: ./dev ci test-cost --wall-asserts --report "$RUNNER_TEMP/test-cost-${{ github.run_id }}-${{ github.run_attempt }}.jsonl"
 
       # Licences, advisories, sources (tools/paddock-dev/deny.toml, the crates' rules); the image has cargo-deny.
       - name: Deny

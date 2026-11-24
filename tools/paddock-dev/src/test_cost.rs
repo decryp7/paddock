@@ -148,14 +148,14 @@ pub fn judge_with(class: Class, get: &dyn Fn(&str) -> Option<String>, enforcing:
 pub const REPORT_ENV: &str = "PADDOCK_TEST_COST_REPORT";
 
 /// Where this process's charges are recorded: [`REPORT_ENV`], else the cargo build folder nextest ran from (the nearest ancestor of
-/// `NEXTEST_BIN_EXE_dev` with cargo's `CACHEDIR.TAG`), else nowhere.
+/// `NEXTEST_BIN_EXE_paddock-dev` with cargo's `CACHEDIR.TAG`), else nowhere.
 pub fn report_path(get: &dyn Fn(&str) -> Option<String>) -> Option<PathBuf> {
     if let Some(p) = get(REPORT_ENV) {
         return Some(PathBuf::from(p));
     }
-    // nextest names the workspace's binaries in the build folder (`NEXTEST_BIN_EXE_dev`): the report goes beside them, never into
+    // nextest names the workspace's binaries in the build folder (`NEXTEST_BIN_EXE_paddock-dev`): the report goes beside them, never into
     // the checkout.
-    let exe = PathBuf::from(get("NEXTEST_BIN_EXE_dev")?);
+    let exe = PathBuf::from(get("NEXTEST_BIN_EXE_paddock-dev").or_else(|| get("NEXTEST_BIN_EXE_paddock_dev"))?);
     let target = exe.ancestors().skip(1).find(|d| d.join("CACHEDIR.TAG").is_file())?;
     let run = get("NEXTEST_RUN_ID").unwrap_or_else(|| "run".into());
     Some(target.join("nextest").join("test-cost").join(format!("{run}.jsonl")))
@@ -355,14 +355,14 @@ pub struct CostReport {
     pub tests: usize,
     /// Per class (graph, tree, unclassed): count and longest test.
     pub classes: Vec<ClassStat>,
-    /// Unclassed tests that used more than a quarter of their stop, longest first: name and seconds.
+    /// Tests whose time times [`CONTENTION`] passes their stop, longest first: name and seconds.
     pub findings: Vec<(String, f64)>,
 }
 
-/// Judges the durations of this workspace's tests: an unclassed test that took more than `stop_secs / 4` is a finding (it has no margin
-/// for a loaded host, where whole-tree tests ran 5 to 15 times slower, run 8830; Bazel warns the same way when a test's time does not match
-/// its size). Other workspaces' tests in the same log are ignored.
-pub fn report(timed: &[crate::nextest_log::Timed], stop_secs: f64) -> CostReport {
+/// Judges the durations of this workspace's tests against their stops (ADR 0121's time tiers): a test whose time times [`CONTENTION`]
+/// passes its stop is a finding, for it has no margin on a loaded host (whole-tree tests ran 5 to 15 times slower in jobs 47411 and
+/// 47644). Bazel warns the same way when a test's time does not match its size. Other workspaces' tests in the same log are ignored.
+pub fn report(timed: &[crate::nextest_log::Timed], stops: &Stops) -> CostReport {
     let mine: Vec<_> = timed.iter().filter(|t| ours(&t.id.0)).collect();
     let mut classes = Vec::new();
     for c in [Some(Class::Graph), Some(Class::Tree), None] {
@@ -376,7 +376,7 @@ pub fn report(timed: &[crate::nextest_log::Timed], stop_secs: f64) -> CostReport
     }
     let mut findings: Vec<(String, f64)> = mine
         .iter()
-        .filter(|t| declared(&t.id.1).is_none() && t.secs > stop_secs / 4.0)
+        .filter(|t| t.secs * CONTENTION > stops.of(&t.id.1))
         .map(|t| (t.id.1.clone(), t.secs))
         .collect();
     findings.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
@@ -385,6 +385,216 @@ pub fn report(timed: &[crate::nextest_log::Timed], stop_secs: f64) -> CostReport
         classes,
         findings,
     }
+}
+
+/// The worst contention measured on a shared host: whole-tree tests ran 5 to 15 times their local time in jobs 47411 (run 8830 macOS,
+/// two heavy jobs on the host) and 47644 (ADR 0121, the time tiers). A test's stop is at least its own time times this.
+pub const CONTENTION: f64 = 15.0;
+
+/// The stops of a nextest profile, read from `.config/nextest.toml` with the TOML parser: the profile's own `slow-timeout` (else the
+/// default profile's), and each override with a `test(/regex/)` filter that sets one, in order (the first match wins, as in nextest; the
+/// profile's own overrides first, then the default profile's). Overrides with other filters are not modelled and are listed.
+#[derive(Debug, Clone)]
+pub struct Stops {
+    /// The stop of a test no override names, in seconds.
+    pub base: f64,
+    /// (filter regex, stop in seconds), in nextest's order.
+    pub overrides: Vec<(regex::Regex, f64)>,
+    /// Filters of overrides that set a stop but are not a single `test(/regex/)`.
+    pub unmodelled: Vec<String>,
+}
+
+fn stop_secs(v: &toml::Value) -> Option<f64> {
+    let t = v.as_table()?;
+    let after = t.get("terminate-after")?.as_integer()?;
+    let period = t.get("period")?.as_str()?;
+    let n: f64 = period.trim_end_matches(char::is_alphabetic).parse().ok()?;
+    let unit = match period.trim_start_matches(|c: char| c.is_ascii_digit() || c == '.') {
+        "ms" => 0.001,
+        "s" => 1.0,
+        "m" | "min" => 60.0,
+        "h" => 3600.0,
+        _ => return None,
+    };
+    Some(n * unit * after as f64)
+}
+
+/// Reads [`Stops`] for `profile` from a nextest configuration text.
+pub fn stops(config: &str, profile: &str) -> Result<Stops, String> {
+    let doc: toml::Table = toml::from_str(config).map_err(|e| format!("the nextest configuration does not parse: {e}"))?;
+    let profiles = doc
+        .get("profile")
+        .and_then(|p| p.as_table())
+        .ok_or("the configuration has no [profile] table")?;
+    let own = profiles.get(profile).and_then(|p| p.as_table());
+    let default = profiles.get("default").and_then(|p| p.as_table());
+    let base = own
+        .and_then(|p| p.get("slow-timeout"))
+        .or_else(|| default.and_then(|p| p.get("slow-timeout")))
+        .and_then(stop_secs)
+        .ok_or_else(|| format!("profile {profile} has no bounded slow-timeout"))?;
+    let mut overrides = Vec::new();
+    let mut unmodelled = Vec::new();
+    let tables: Vec<_> = if profile == "default" { vec![default] } else { vec![own, default] };
+    for t in tables.into_iter().flatten() {
+        for o in t.get("overrides").and_then(|o| o.as_array()).into_iter().flatten() {
+            let Some(secs) = o.get("slow-timeout").and_then(stop_secs) else {
+                continue;
+            };
+            let filter = o.get("filter").and_then(|f| f.as_str()).unwrap_or_default();
+            let inner = filter.strip_prefix("test(/").and_then(|f| f.strip_suffix("/)"));
+            match inner.and_then(|r| regex::Regex::new(r).ok()) {
+                Some(re) if !inner.unwrap_or_default().contains("/)") => overrides.push((re, secs)),
+                _ => unmodelled.push(filter.to_string()),
+            }
+        }
+    }
+    Ok(Stops {
+        base,
+        overrides,
+        unmodelled,
+    })
+}
+
+impl Stops {
+    /// The stop of a test, in seconds.
+    pub fn of(&self, test: &str) -> f64 {
+        self.overrides
+            .iter()
+            .find(|(re, _)| re.is_match(test))
+            .map_or(self.base, |(_, s)| *s)
+    }
+}
+
+/// One `assert` in a test that compares elapsed wall time: a test a busy host can fail without a bug.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WallAssert {
+    /// The file, as given.
+    pub file: String,
+    /// The line of the assert.
+    pub line: usize,
+    /// The test function.
+    pub test: String,
+}
+
+/// The asserts on elapsed wall time inside the `#[test]` functions of one Rust source: an assert macro whose tokens read `.elapsed()`,
+/// `duration_since(` or `Instant::now()`, or a local bound from one of those. A source that does not parse gives none (a parse error is
+/// the compiler's finding). Helpers outside the test function are not followed.
+pub fn wall_asserts(file: &str, source: &str) -> Vec<WallAssert> {
+    use syn::visit::Visit;
+    fn timed(text: &str) -> bool {
+        let t: String = text.chars().filter(|c| !c.is_whitespace()).collect();
+        t.contains(".elapsed()") || t.contains("duration_since(") || t.contains("Instant::now()")
+    }
+    /// Whether an expression reads the wall clock: `.elapsed()`, `.duration_since(..)` or `Instant::now()`.
+    fn reads_clock(e: &syn::Expr) -> bool {
+        struct Clock(bool);
+        impl<'ast> Visit<'ast> for Clock {
+            fn visit_expr_method_call(&mut self, m: &'ast syn::ExprMethodCall) {
+                if m.method == "elapsed" || m.method == "duration_since" {
+                    self.0 = true;
+                }
+                syn::visit::visit_expr_method_call(self, m);
+            }
+            fn visit_expr_call(&mut self, c: &'ast syn::ExprCall) {
+                if let syn::Expr::Path(p) = &*c.func {
+                    let segs: Vec<String> = p.path.segments.iter().map(|s| s.ident.to_string()).collect();
+                    if segs.ends_with(&["Instant".to_string(), "now".to_string()]) {
+                        self.0 = true;
+                    }
+                }
+                syn::visit::visit_expr_call(self, c);
+            }
+        }
+        let mut c = Clock(false);
+        c.visit_expr(e);
+        c.0
+    }
+    fn is_test(attrs: &[syn::Attribute]) -> bool {
+        attrs.iter().any(|a| a.path().segments.last().is_some_and(|s| s.ident == "test"))
+    }
+    struct InTest<'a> {
+        file: &'a str,
+        test: String,
+        bound: Vec<String>,
+        out: Vec<WallAssert>,
+    }
+    impl<'ast> Visit<'ast> for InTest<'_> {
+        fn visit_local(&mut self, l: &'ast syn::Local) {
+            if let (syn::Pat::Ident(id), Some(init)) = (&l.pat, &l.init)
+                && reads_clock(&init.expr)
+            {
+                self.bound.push(id.ident.to_string());
+            }
+            syn::visit::visit_local(self, l);
+        }
+        fn visit_macro(&mut self, m: &'ast syn::Macro) {
+            let name = m.path.segments.last().map(|s| s.ident.to_string()).unwrap_or_default();
+            if name.contains("assert") {
+                let text = m.tokens.to_string();
+                let words: Vec<&str> = text.split(|c: char| !(c.is_alphanumeric() || c == '_')).collect();
+                if timed(&text) || self.bound.iter().any(|b| words.contains(&b.as_str())) {
+                    self.out.push(WallAssert {
+                        file: self.file.to_string(),
+                        line: m.path.segments.first().map_or(0, |s| s.ident.span().start().line),
+                        test: self.test.clone(),
+                    });
+                }
+            }
+            syn::visit::visit_macro(self, m);
+        }
+    }
+    struct Find<'a> {
+        file: &'a str,
+        out: Vec<WallAssert>,
+    }
+    impl<'ast> Visit<'ast> for Find<'_> {
+        fn visit_item_fn(&mut self, f: &'ast syn::ItemFn) {
+            if is_test(&f.attrs) {
+                let mut v = InTest {
+                    file: self.file,
+                    test: f.sig.ident.to_string(),
+                    bound: Vec::new(),
+                    out: Vec::new(),
+                };
+                v.visit_block(&f.block);
+                self.out.extend(v.out);
+            }
+            syn::visit::visit_item_fn(self, f);
+        }
+    }
+    let Ok(parsed) = syn::parse_file(source) else { return Vec::new() };
+    let mut f = Find { file, out: Vec::new() };
+    f.visit_file(&parsed);
+    f.out
+}
+
+/// [`wall_asserts`] over every `.rs` file under `dirs` (sorted, so the list is stable).
+pub fn wall_asserts_in(root: &Path, dirs: &[&str]) -> Vec<WallAssert> {
+    fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
+        let Ok(rd) = std::fs::read_dir(dir) else { return };
+        for e in rd.flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                walk(&p, out);
+            } else if p.extension().is_some_and(|x| x == "rs") {
+                out.push(p);
+            }
+        }
+    }
+    let mut files = Vec::new();
+    for d in dirs {
+        walk(&root.join(d), &mut files);
+    }
+    files.sort();
+    let mut out = Vec::new();
+    for f in files {
+        if let Ok(text) = std::fs::read_to_string(&f) {
+            let rel = f.strip_prefix(root).unwrap_or(&f).to_string_lossy().replace('\\', "/");
+            out.extend(wall_asserts(&rel, &text));
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -515,34 +725,119 @@ mod tests {
         }
     }
 
-    // Positive control (ER-33): an unclassed test over a quarter of its stop is a finding; the same time in a class, below the
-    // threshold, or in another workspace is not.
+    const CONFIG: &str = r#"
+[profile.default]
+slow-timeout = { period = "30s", terminate-after = 4 }
+[[profile.default.overrides]]
+filter = "test(/^net::graph_replay_/)"
+slow-timeout = { period = "300s", terminate-after = 12 }
+[[profile.default.overrides]]
+filter = "test(/(^|::)graph_[^:]*$/)"
+slow-timeout = { period = "60s", terminate-after = 15 }
+[[profile.default.overrides]]
+filter = "binary(it) & test(/x/)"
+slow-timeout = { period = "60s", terminate-after = 15 }
+[profile.ci]
+slow-timeout = { period = "60s", terminate-after = 5 }
+"#;
+
     #[test]
-    fn an_unclassed_test_over_a_quarter_of_its_stop_is_a_finding() {
+    fn stops_follow_the_profile_and_the_first_matching_override() {
+        let st = stops(CONFIG, "ci").unwrap();
+        assert_eq!(st.base, 300.0);
+        assert_eq!(st.of("net::graph_replay_all"), 3600.0, "the named row wins over the class row");
+        assert_eq!(st.of("golden::graph_plans"), 900.0);
+        assert_eq!(st.of("queue::tests::fast"), 300.0);
+        assert_eq!(st.unmodelled, vec!["binary(it) & test(/x/)".to_string()]);
+        assert_eq!(stops(CONFIG, "default").unwrap().base, 120.0);
+        assert!(
+            stops("[profile.default]\n", "ci").is_err(),
+            "an unbounded profile is an error, never a guess"
+        );
+    }
+
+    // Positive control (ER-33): a test whose time times the contention passes its stop is a finding, in a class or not; the same time
+    // under a longer stop, or in another workspace, is not.
+    #[test]
+    fn a_test_without_margin_for_the_measured_contention_is_a_finding() {
+        let st = stops(CONFIG, "ci").unwrap();
         let r = report(
             &[
                 timed("paddock-dev::it", "check::live_tree_is_clean", 48.0),
-                timed("paddock-dev", "ci_run::tests::the_line_runs", 15.1),
-                timed("paddock-dev::it", "check::tree_live_tree_is_clean", 48.0),
+                timed("paddock-dev", "ci_run::tests::the_line_runs", 20.1),
                 timed("paddock-dev::it", "golden::graph_plans", 61.0),
+                timed("paddock-dev::it", "net::graph_replay_all", 200.0),
                 timed("paddock-dev", "queue::tests::fast", 0.2),
-                timed("paddock-dev", "queue::tests::just_under", 15.0),
+                timed("paddock-dev", "queue::tests::just_under", 20.0),
                 timed("paddock-chromium::it", "real_browser::slow", 50.0),
             ],
-            60.0,
+            &st,
         );
         assert_eq!(r.tests, 6);
         assert_eq!(
             r.findings,
             vec![
+                ("golden::graph_plans".to_string(), 61.0),
                 ("check::live_tree_is_clean".to_string(), 48.0),
-                ("ci_run::tests::the_line_runs".to_string(), 15.1)
+                ("ci_run::tests::the_line_runs".to_string(), 20.1),
             ]
         );
         assert_eq!(r.classes[0].class, "graph");
-        assert_eq!(r.classes[0].longest, Some(("golden::graph_plans".to_string(), 61.0)));
-        assert_eq!(r.classes[1].tests, 1);
+        assert_eq!(r.classes[0].longest, Some(("net::graph_replay_all".to_string(), 200.0)));
         assert_eq!(r.classes[2].tests, 4);
+    }
+
+    /// The real configuration parses into stops, and every class row and the named rows are modelled (a filter the reader cannot read
+    /// would silently fall back to the base stop).
+    #[test]
+    fn the_real_configuration_has_a_stop_for_every_class() {
+        let text = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join(".config/nextest.toml")).unwrap();
+        let st = stops(&text, "ci").unwrap();
+        assert!(st.unmodelled.is_empty(), "{:?}", st.unmodelled);
+        for c in Class::ALL {
+            let name = format!("m::{}x", c.prefix());
+            assert!(st.of(&name) >= st.base, "{c:?}: {}", st.of(&name));
+        }
+    }
+
+    // Positive control (ER-33): planted sources with each way of asserting on wall time are found, with the test and the line; a
+    // timed helper outside a test, a test without a clock and a clock read that no assert uses are not.
+    #[test]
+    fn asserts_on_elapsed_wall_time_inside_tests_are_found() {
+        let src = r#"
+fn helper() { let t = std::time::Instant::now(); assert!(t.elapsed() < D); }
+#[test]
+fn direct() {
+    let t = Instant::now();
+    work();
+    assert!(t.elapsed() < Duration::from_secs(5), "too slow");
+}
+#[test]
+fn bound_first() {
+    let started = Instant::now();
+    work();
+    let took = started.elapsed();
+    assert!(took < LIMIT);
+}
+#[tokio::test]
+async fn since() {
+    assert!(Instant::now().duration_since(start) <= Duration::from_millis(10));
+}
+#[test]
+fn no_clock() { assert_eq!(1 + 1, 2); }
+#[test]
+fn unused_clock() { let t = Instant::now(); work(); println!("{:?}", t.elapsed()); assert!(ok()); }
+"#;
+        let found: Vec<(usize, String)> = wall_asserts("x.rs", src).into_iter().map(|w| (w.line, w.test)).collect();
+        assert_eq!(
+            found,
+            vec![
+                (7, "direct".to_string()),
+                (14, "bound_first".to_string()),
+                (18, "since".to_string())
+            ]
+        );
+        assert!(wall_asserts("x.rs", "fn broken(").is_empty());
     }
 
     // Positive control (ER-33): a planted misplaced charge lands in the report file as a JSON line, a placed one is counted, and the

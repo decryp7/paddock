@@ -90,7 +90,8 @@ test('C114 judges every override that sets a slow-timeout: waiver comment, termi
   const apart = `${BOUNDED}\n# waiver: why\n\n[[profile.ci.overrides]]\nslow-timeout = { period = "30s", terminate-after = 2 }\n`;
   assert.match(overrideProblems(apart)[0][1], /waiver/, 'a blank line separates the comment from the header');
   assert.match(overrideProblems(WAIVED('slow-timeout = "30s"'))[0][1], /no terminate-after/);
-  assert.match(overrideProblems(WAIVED('slow-timeout = { period = "60s", terminate-after = 30 }'))[0][1], /1800 s/);
+  assert.deepEqual(overrideProblems(WAIVED('slow-timeout = { period = "60s", terminate-after = 60 }')), [], 'the eternal tier, 3600 s, is allowed');
+  assert.match(overrideProblems(WAIVED('slow-timeout = { period = "60s", terminate-after = 61 }'))[0][1], /3660 s/);
   const bench = '# waiver: benchmarks\n[[profile.bench.overrides]]\nfilter = "all()"\nslow-timeout = { period = "60s", terminate-after = 30 }\n';
   assert.deepEqual(overrideProblems(bench), []);
   assert.match(overrideProblems(bench.replace('terminate-after = 30 ', ''))[0][1], /no terminate-after/);

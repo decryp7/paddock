@@ -78,9 +78,17 @@ pub struct TestCostArgs {
     /// `cargo metadata` call is a `::warning::` and a row of the job summary (`GITHUB_STEP_SUMMARY`).
     #[arg(long)]
     report: Option<PathBuf>,
-    /// The stop of an unclassed test in seconds (the ci profile's 60 s; the default profile's is 120).
-    #[arg(long, default_value_t = 60, value_parser = clap::value_parser!(u32).range(1..=3600))]
-    stop: u32,
+    /// The nextest configuration whose stops the times are judged against (default: tools/paddock-dev/.config/nextest.toml of this
+    /// repository), read with the TOML parser.
+    #[arg(long)]
+    config: Option<PathBuf>,
+    /// The nextest profile of the run.
+    #[arg(long, default_value = "ci")]
+    profile: String,
+    /// Also list every assert on elapsed wall time inside paddock-dev's tests (`src`, `tests`): a test a busy host can fail without a bug.
+    /// Report-only: a `::warning::` each, with the next step.
+    #[arg(long)]
+    wall_asserts: bool,
     /// Exit 5 when an unclassed test is over a quarter of its stop (default: exit 0, report-only, ER-41).
     #[arg(long)]
     fail_on_findings: bool,
@@ -135,8 +143,24 @@ pub fn test_cost(a: &TestCostArgs) -> Result<Report, CliError> {
         }
     }
     let timings = a.run.is_some() || !a.log.is_empty();
-    if !timings && a.report.is_none() {
-        return Err(CliError::usage("nothing to read").with_hint("Pass --run <id>, --log <file> or --report <file>."));
+    if !timings && a.report.is_none() && !a.wall_asserts {
+        return Err(CliError::usage("nothing to read").with_hint("Pass --run <id>, --log <file>, --report <file> or --wall-asserts."));
+    }
+    let root = std::env::current_dir().ok().and_then(|d| find_root(&d));
+    let mut wall = String::new();
+    if a.wall_asserts {
+        let Some(root) = &root else {
+            return Err(CliError::usage("--wall-asserts reads the repository").with_hint("Run it inside the checkout."));
+        };
+        let found = crate::test_cost::wall_asserts_in(&root.join("tools/paddock-dev"), &["src", "tests"]);
+        wall.push_str(&format!("\n{} assert(s) on elapsed wall time in paddock-dev's tests", found.len()));
+        for w in &found {
+            wall.push_str(&format!(
+                "\n::warning file=tools/paddock-dev/{},line={}::ci test-cost: {} asserts on elapsed wall time, which a busy host can fail \
+                 without a bug (ADR 0121). Next step: inject a clock (pass time in) or bound the CPU time it spends, not the wall time.",
+                w.file, w.line, w.test
+            ));
+        }
     }
     let level = if a.fail_on_findings { "error" } else { "warning" };
     let mut text = String::new();
@@ -188,10 +212,23 @@ pub fn test_cost(a: &TestCostArgs) -> Result<Report, CliError> {
         } else {
             Exit::Ok
         };
+        text.push_str(&wall);
         let data = serde_json::json!({"misplaced": charges_found, "measured": charges_measured});
-        return Ok(Report::new(data, text).with_exit(exit));
+        return Ok(Report::new(data, text.trim_start().to_string()).with_exit(exit));
     }
-    let r = crate::test_cost::report(&timed, f64::from(a.stop));
+    let config_path = a
+        .config
+        .clone()
+        .or_else(|| root.as_ref().map(|r| r.join("tools/paddock-dev/.config/nextest.toml")))
+        .ok_or_else(|| CliError::usage("no nextest configuration").with_hint("Pass --config <file>, or run it inside the checkout."))?;
+    let stops = std::fs::read_to_string(&config_path)
+        .map_err(|e| e.to_string())
+        .and_then(|t| crate::test_cost::stops(&t, &a.profile))
+        .map_err(|e| {
+            CliError::failure(format!("the stops of {} could not be read: {e}", config_path.display()))
+                .with_hint("Point --config at the nextest configuration of the run.")
+        })?;
+    let r = crate::test_cost::report(&timed, &stops);
     if !text.is_empty() {
         text.push('\n');
     }
@@ -205,11 +242,18 @@ pub fn test_cost(a: &TestCostArgs) -> Result<Report, CliError> {
             None => text.push_str(&format!("\n{}: no test", c.class)),
         }
     }
-    for (name, secs) in &r.findings {
+    for f in &stops.unmodelled {
         text.push_str(&format!(
-            "\n::{level}::ci test-cost: {name} has no cost class and took {secs:.1} s, over a quarter of its {} s stop. Next step: if it reads the \
-             whole tree or runs cargo metadata, rename it with the class prefix (`tree_` or `graph_`, ADR 0121); otherwise make it cheaper.",
-            a.stop
+            "\n::warning::ci test-cost: an override's filter is not modelled, its tests are judged by the base stop: {f}"
+        ));
+    }
+    for (name, secs) in &r.findings {
+        let stop = stops.of(name);
+        text.push_str(&format!(
+            "\n::{level}::ci test-cost: {name} took {secs:.1} s; times the measured contention of {} that passes its {stop:.0} s stop, so a busy \
+             host can stop it (ADR 0121). Next step: give it the class and tier its work needs (`tree_` or `graph_`, or a longer tier in \
+             .config/nextest.toml with its measurement), or make it cheaper.",
+            crate::test_cost::CONTENTION
         ));
     }
     let exit = if r.tests == 0 {
@@ -232,6 +276,7 @@ pub fn test_cost(a: &TestCostArgs) -> Result<Report, CliError> {
         "findings": r.findings,
         "misplaced": charges_found,
     });
+    text.push_str(&wall);
     Ok(Report::new(data, text).with_exit(exit))
 }
 

@@ -3858,3 +3858,6 @@ first and records the second (`ci fix-items`) is part of the queued green-main w
     one write per line, for the plan and the eleven `|l| eprintln!("{l}")` log closures). Still open: the other `eprintln!` calls with
     inline formatting have the same two-write shape; a clippy `disallowed-macros` ban of `eprintln!` in paddock-dev's sources, with
     `log_text::eline` as the replacement, would cover them.
+- **Amendment (the user, 2026-11-24: "Test should run no matter the load").** A wall-clock stop is a hang backstop, never a performance
+  limit: tiers of 300, 900 and 3600 s set from a test's own time times the worst measured contention (15, jobs 47411 and 47644), asserts
+  on elapsed wall time listed as fix items, and a per-test progress guard (no CPU time and no output) as the hang detector.
