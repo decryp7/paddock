@@ -58,6 +58,10 @@ pub struct Generator {
     pub cost: Cost,
     /// Files that must exist for the check to be possible on this tree; a missing one is NOT MEASURED ("not on this tree").
     pub requires: Vec<String>,
+    /// The command, run from the repository root, that installs or builds what the check needs (`npm ci`, `npm run build -w ui`): a
+    /// NOT MEASURED result prints it as the next step, so a fresh worktree's missing prerequisite names its fix (seen three times:
+    /// no `node_modules`, no libduckdb, no `ui/dist`).
+    pub setup: Option<String>,
     /// Text a failing check prints when the files really are stale (any one of them, searched in all its output). When the entry
     /// names some, a failure without one is NOT MEASURED: a build error or a crash is not drift. Empty: any plain failure is drift.
     pub drift_marker: Vec<String>,
@@ -171,6 +175,7 @@ impl Registry {
                 "drift_marker",
                 "build",
                 "reads",
+                "setup",
             ];
             for k in t.keys().filter(|k| !known.contains(&k.as_str())) {
                 errors.push(format!("{at}: unknown key `{k}` (known: {})", known.join(", ")));
@@ -249,6 +254,7 @@ impl Registry {
                 outputs,
                 cost,
                 requires: strings_of(t, "requires"),
+                setup: Some(text_of(t, "setup")).filter(|s| !s.is_empty()),
                 manual,
                 drift_marker: strings_of(t, "drift_marker"),
                 path_res,

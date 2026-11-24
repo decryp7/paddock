@@ -135,10 +135,11 @@ pub enum Outcome {
 pub fn wait_for(probe: &mut dyn Probe, clock: &mut dyn Clock, max: Duration, interval: Duration, log: &mut dyn Write) -> Outcome {
     let _ = writeln!(
         log,
-        "wait: waiting for {} (max {}, every {})",
+        "wait: waiting for {} (max {} from now, every {}; waiter pid {})",
         probe.describe(),
         fmt_duration(max),
-        fmt_duration(interval)
+        fmt_duration(interval),
+        std::process::id()
     );
     let mut last: String;
     let mut errors = 0u32;
@@ -853,7 +854,13 @@ fn finish(kind: &str, (outcome, next): (Outcome, String), log: &mut dyn Write) -
             Err(CliError::failure(format!("{detail}.")).with_hint("Read the run's log for the failing step."))
         }
         Outcome::TimedOut { last, max } => {
-            let msg = format!("::error::wait: gave up after {} (--max); last seen: {last}.", fmt_duration(max));
+            // --max counts from this waiter's start, never from the start of what it waits for: the line names the waiter, so an
+            // older waiter's ending is not read as this one's (2026-11-24).
+            let msg = format!(
+                "::error::wait: gave up after {} (--max) of this wait (waiter pid {}); last seen: {last}.",
+                fmt_duration(max),
+                std::process::id()
+            );
             let _ = writeln!(log, "{msg} Next: {next}");
             Err(CliError::failure(msg).with_hint(format!("Next: {next}.")))
         }
@@ -977,7 +984,11 @@ mod tests {
             }
         );
         assert_eq!(clock.sleeps, [Duration::from_secs(2), Duration::from_secs(2)]);
-        assert!(log.starts_with("wait: waiting for a scripted thing (max 10m, every 2s)\n"), "{log}");
+        let first = format!(
+            "wait: waiting for a scripted thing (max 10m from now, every 2s; waiter pid {})\n",
+            std::process::id()
+        );
+        assert!(log.starts_with(&first), "{log}");
         assert!(log.contains("wait: done after 4s: it happened"), "{log}");
     }
 
@@ -1374,6 +1385,19 @@ mod tests {
         let e = r.unwrap_err();
         assert!(e.message.starts_with("::error::wait: gave up after 10s (--max)"), "{}", e.message);
         assert!(e.hint.contains("--include-past"), "{}", e.hint);
+        // 2026-11-24: a `--max 2h` wait on a gate that had run 1 h 51 min was read as ending 8 minutes later. --max counts from this
+        // waiter's own start (the clock starts in `command`); the line says so and names the waiter, so a second waiter's or an older
+        // waiter's ending is not taken for this one's.
+        let me = std::process::id();
+        assert!(
+            e.message.contains("of this wait") && e.message.contains(&format!("waiter pid {me}")),
+            "{}",
+            e.message
+        );
+        assert!(
+            log.contains(&format!("waiter pid {me}")) && log.starts_with("wait: waiting for"),
+            "{log}"
+        );
         assert!(log.contains("::error::wait: gave up"), "{log}");
         assert_eq!(log.matches("::error::").count(), 1, "{log}");
     }

@@ -129,6 +129,63 @@ fn drift_is_stale_with_the_regenerate_command_and_exit_5() {
     );
 }
 
+/// Seen three times (train 2026-11-25-a and before): a fresh worktree had no `node_modules`, no libduckdb or no `ui/dist`, and the row
+/// said only NOT MEASURED. An entry's `setup` is the command that makes the check runnable; a not-measured row prints it.
+#[test]
+fn a_not_measured_check_prints_its_setup_command() {
+    let reg = Registry::parse(
+        r#"
+version = 1
+[[generator]]
+id = "notices"
+what = "notices"
+check = ["node", "notices.mjs", "--check"]
+regenerate = "node notices.mjs"
+paths = ["package-lock.json"]
+cost = "fast"
+requires = ["node_modules/@angular/core/package.json"]
+setup = "npm ci"
+[[generator]]
+id = "plain"
+what = "no setup"
+check = ["node", "plain.mjs"]
+regenerate = "node plain.mjs --write"
+paths = ["package-lock.json"]
+cost = "fast"
+requires = ["plain.mjs"]
+"#,
+    )
+    .unwrap();
+    let fake = Fake::default();
+    let r = check_with(
+        &reg,
+        Path::new("/r"),
+        &["package-lock.json".to_string()],
+        false,
+        &[],
+        &fake,
+        &|_| {},
+    )
+    .unwrap();
+    assert_eq!(r.exit, Exit::NotMeasured, "{}", r.text);
+    assert!(
+        r.text.contains("::error::gen notices: NOT MEASURED")
+            && r.text
+                .contains("Next step: run `npm ci` (from the repository root), then `./dev gen check --only notices`"),
+        "{}",
+        r.text
+    );
+    let results = r.data["results"].as_array().unwrap();
+    assert_eq!(results[0]["setup"], "npm ci");
+    // Control: an entry without `setup` keeps the general next step.
+    assert!(
+        r.text.contains("::error::gen plain: NOT MEASURED") && r.text.contains("make the check runnable"),
+        "{}",
+        r.text
+    );
+    assert!(results[1]["setup"].is_null());
+}
+
 #[test]
 fn a_missing_tool_a_timeout_and_a_file_not_on_this_tree_are_not_measured_never_a_pass() {
     let mut fake = Fake::default();
@@ -554,6 +611,7 @@ fn a_deleted_check_and_a_skipped_worker_are_exit_6_not_a_pass() {
         outcome: paddock_cli::Outcome::NotMeasured(paddock_cli::Reason::new("the check did not run (a worker ended early)")),
         took: std::time::Duration::ZERO,
         built: None,
+        setup: None,
     };
     assert_eq!(super::exit_of(&[lost]), Exit::NotMeasured);
 }

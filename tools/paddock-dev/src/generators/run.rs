@@ -393,6 +393,8 @@ pub struct Checked {
     pub took: Duration,
     /// How long its build phase took (`None`: the entry has no build, or it never started).
     pub built: Option<Duration>,
+    /// The entry's `setup` command: the next step of a NOT MEASURED result.
+    pub setup: Option<String>,
 }
 
 /// Runs the checks of `due` in `root`: the fast ones up to [`PARALLEL`] at a time, then the heavy ones one by one. Results are
@@ -428,6 +430,7 @@ pub fn execute(root: &Path, due: &[&Generator], runner: &dyn Runner, log: &(dyn 
                 outcome: Outcome::NotMeasured(Reason::new("the check did not run (a worker ended early)")),
                 took: Duration::ZERO,
                 built: None,
+                setup: g.setup.clone(),
             })
         })
         .collect()
@@ -472,6 +475,7 @@ fn one(root: &Path, g: &Generator, runner: &dyn Runner, subject: &Subject, log: 
         outcome,
         took,
         built,
+        setup: g.setup.clone(),
     };
     if let Some(missing) = g.requires.iter().find(|r| !runner.exists(&root.join(r))) {
         let c = done(

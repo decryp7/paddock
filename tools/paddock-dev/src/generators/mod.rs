@@ -96,12 +96,20 @@ pub fn lines_of(results: &[Checked]) -> Vec<String> {
                 r.regenerate,
                 r.id
             )),
-            other => out.push(format!(
-                "::error::gen {}: NOT MEASURED: {}. Next step: make the check runnable ([{}]); an unmeasured generator is not a current one.",
-                r.id,
-                tail_of(other),
-                r.line
-            )),
+            other => out.push(match &r.setup {
+                Some(setup) => format!(
+                    "::error::gen {}: NOT MEASURED: {}. Next step: run `{setup}` (from the repository root), then `./dev gen check --only {}`; an unmeasured generator is not a current one.",
+                    r.id,
+                    tail_of(other),
+                    r.id
+                ),
+                None => format!(
+                    "::error::gen {}: NOT MEASURED: {}. Next step: make the check runnable ([{}]); an unmeasured generator is not a current one.",
+                    r.id,
+                    tail_of(other),
+                    r.line
+                ),
+            }),
         }
     }
     out
@@ -124,7 +132,7 @@ pub fn json_of(results: &[Checked]) -> serde_json::Value {
             };
             json!({"id": r.id, "verdict": verdict, "detail": detail, "check": r.line, "regenerate": r.regenerate,
                    "cost": r.cost.name(), "seconds": r.took.as_secs_f64(), "outcome": r.outcome.json(),
-                   "build_seconds": r.built.map(|b| b.as_secs_f64())})
+                   "build_seconds": r.built.map(|b| b.as_secs_f64()), "setup": r.setup})
         })
         .collect()
 }

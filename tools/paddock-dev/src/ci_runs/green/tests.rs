@@ -881,7 +881,12 @@ fn a_landing_run_of_its_own_narrowed_diff_lands_but_is_never_a_base_nor_tag_gree
     let plain = verdict::verdict_with_touched(&mut client(&mut f), "ci.yml", &head, None, true, &mut Vec::new, &mut |_, _| {
         Some(touched(&[]))
     });
-    assert!(matches!(plain, verdict::Verdict::Red { .. }), "{plain:?}");
+    // Run 8983: the reason named the landing run with an empty cause, "8983 ()". It says why the run is not complete here.
+    assert!(
+        matches!(&plain, verdict::Verdict::Red { reason, .. }
+            if reason.contains("8801 (a landing run") && reason.contains("smoke set") && reason.contains("tools") && !reason.contains("8801 ()")),
+        "{plain:?}"
+    );
     // Not a base: the search goes past it to the complete commit before it.
     assert_eq!(
         base(&mut f, &[head.clone(), main.clone()], touched(&[])).map(|b| b.sha),
