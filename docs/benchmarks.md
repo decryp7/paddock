@@ -187,6 +187,24 @@ failing mode.
 - **Holders count while they live:** a holder whose record is inside the cap its own row lives under (the waiter's `--run-max`, `ROW_CAP` + grace, 3,675 s) is progress by itself, so a waiter behind a healthy 31 to 60 minute step is not stalled; past the cap it is not live, and the same picture ends the wait a stall limit later.
 - **Notes:** the basis of `QUEUE_STALL` (30 min, 1,800 s) in `tools/paddock-dev/src/pre_push/exec.rs`: over the longest gap seen, so a queue that moves is never ended. A holder that runs longer is ended by its own row cap. The per-push totals it replaces (15 min of run, 30 min of queue) were exceeded by three pushes on 2026-11-21 with no row running too long: 13, 14 and 15 rows, and 5 rows, were not measured. Not measured: the gaps of a quiet machine.
 
+### 2026-11-24, which paddock-dev tests run `cargo metadata`, and the repo-graph group (fix/graph-train-r5-repo-graph-group)
+
+- **Commit:** 47a27bf1f (train/2026-11-23-graph) before, the same with the new `tools/paddock-dev/.config/nextest.toml` after
+- **Machine:** Mac mini, Apple M4 Pro, 14 cores, 64 GB, macOS 27.2; shared with other agents and CI. 1-minute load 8 to 13 during the
+  run before, 29 to 36 during the run after, so the wall times are an indication, not an A/B
+- **Command:** `cargo nextest run --profile ci --test-threads 6 --no-fail-fast` (paddock-dev, every binary, debug build,
+  `CARGO_BUILD_JOBS=2`) with a `cargo` first on PATH that logged each `metadata` call (manifest, the test that started it, found as the
+  ancestor process started with `--exact`, and the test's `NEXTEST_TEST_GROUP`), then ran the real cargo unchanged
+- **Runs:** 1 before, 1 after
+- **Numbers:** 2576 tests, all passed both times; 1028 `cargo metadata` calls both times, none from an unknown test. Before: 15 tests
+  outside the group made calls: 7 over the real tree's 25 workspaces (`repo_model::code::tests::on_the_real_tree_` 9.7 s,
+  `repo_model::tests::every_declared_smoke_set_` 1.3 s, `repo_graph_net::every_register_under_docs_is_owned` 9.1 s, its three
+  `generators::` tests 8.1 to 11.1 s, `repo_graph_net::train_replay_` 98.4 s) and 8 over fixture trees (2 to 16 calls, 0.2 to 5.4 s).
+  After: 0 calls outside the group. Those 15 tests took 417 s in all before and 499 s after (the load was about three times higher);
+  `on_the_real_tree_` 9.7 s to 7.5 s. Suite wall time 297.8 s before, 389.9 s after (load, and the group's two slots)
+- **Not measured:** Windows, where the test was FLAKY (job 47457: stopped at 60 s, then 23.4 s); the landing run on the new head is the
+  check
+
 ### 2026-11-24, the repository model's ownership test: where the time goes, and the cut (fix/owner-test-windows-cost)
 
 - **Commit:** 727810fe9 (train/2026-11-23-graph) against the fix, both built as the test profile (debug), `CARGO_BUILD_JOBS=2`
