@@ -144,6 +144,41 @@ pub struct Facts {
     pub kept_targets: Option<String>,
     /// The caller's `CARGO_TARGET_DIR`: the Windows lint gets `<it>/xwin` (ADR 0021 §3).
     pub target_dir: Option<String>,
+    /// The apps whose own build checks this run leaves out ([`crate::active_apps`]: the apps `docs/ci-active-apps.toml` does not
+    /// name; none with `--all-apps`), or why the set cannot be read (then every row runs and the `active-apps` row is broken).
+    pub inactive: Result<BTreeSet<String>, String>,
+}
+
+/// The reason of every row an inactive app's set leaves out: a skip with this reason is never a pass ([`super::render_timed`]
+/// counts it apart).
+pub fn inactive_reason(app: &str) -> String {
+    format!(
+        "{}: {app} is not an active app; its own build checks run in the nightly (and in `./dev check --pre-push --all-apps`)",
+        inactive_label()
+    )
+}
+
+/// The first words of [`inactive_reason`], `inactive (docs/ci-active-apps.toml)`: how the table and its tests tell an inactive app's
+/// row from another skip. The file's name comes from its one accessor ([`crate::active_apps::FILE`]).
+pub fn inactive_label() -> String {
+    format!("inactive ({})", crate::active_apps::FILE)
+}
+
+/// The app a Cargo workspace belongs to (`apps/<app>` and every workspace below it), `None` for the foundation (`crates`,
+/// `tools/...`).
+pub fn app_of_workspace(ws: &str) -> Option<&str> {
+    ws.strip_prefix("apps/").and_then(|r| r.split('/').next()).filter(|a| !a.is_empty())
+}
+
+/// The inactive app `ws` belongs to, when this run leaves that app out.
+pub fn inactive_app(facts: &Facts, ws: &str) -> Option<String> {
+    let app = app_of_workspace(ws)?;
+    facts.inactive.as_ref().ok().filter(|s| s.contains(app)).map(|_| app.to_string())
+}
+
+/// Whether an app's own rows are left out of this run.
+fn app_inactive(facts: &Facts, app: &str) -> bool {
+    facts.inactive.as_ref().is_ok_and(|s| s.contains(app))
 }
 
 /// The push: its changed files and the commits to lint.
@@ -346,6 +381,17 @@ pub fn plan_gates(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> 
             dependents.push(ws);
             continue;
         }
+        // An inactive app's own build checks (format, Clippy, doctests, the Windows lint) are left out and named; its lockfile row
+        // above still runs: Cargo.lock is a generated file and stays current (ER-40), in seconds.
+        if let Some(app) = inactive_app(facts, &ws) {
+            for kind in ["fmt", "clippy", "doctest", "clippy-windows"] {
+                out.push(Planned::Skip {
+                    id: format!("{kind} {ws}"),
+                    reason: inactive_reason(&app),
+                });
+            }
+            continue;
+        }
         out.push(Planned::Run(gate(
             format!("fmt {ws}"),
             &ws,
@@ -434,12 +480,19 @@ pub fn plan_gates(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> 
             ),
         });
     }
-    out.push(linux_clippy(plan, change, facts));
+    out.extend(active_apps_row(facts));
+    out.extend(linux_clippy(plan, change, facts));
     out.push(conformance(facts));
     out.push(conformance_tests(facts));
     out.extend(commit_lint(change));
     out.push(member_audits(facts));
-    if plan["apps"].as_array().is_some_and(|a| a.iter().any(|x| x == "pitwall")) {
+    let reaches_pitwall = plan["apps"].as_array().is_some_and(|a| a.iter().any(|x| x == "pitwall"));
+    if reaches_pitwall && app_inactive(facts, "pitwall") {
+        out.push(Planned::Skip {
+            id: "pitwall-scripts, pitwall-deny".into(),
+            reason: inactive_reason("pitwall"),
+        });
+    } else if reaches_pitwall {
         let mut args = vec!["--test".to_string()];
         args.extend(facts.pitwall_tests.iter().cloned());
         let mut g = gate(
@@ -519,7 +572,8 @@ pub fn plan_gates(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> 
         },
     ));
     // Dyno's wire fixtures (the UI contract) are regenerated from the Rust types when dyno-core's sources changed; a stale one
-    // fails the push with the files named (apps/dyno/scripts/regen-wire-fixtures.sh runs cargo test).
+    // fails the push with the files named (apps/dyno/scripts/regen-wire-fixtures.sh runs cargo test). A generator: it runs whether
+    // Dyno is active or not, as generated files stay current (ER-40).
     if change
         .files
         .iter()
@@ -576,14 +630,32 @@ pub struct LinuxTarget {
 /// (feat/pre-push-linux-clippy, 2026-11-16: `ok clippy-linux tools/paddock-dev`, 15.1 s, native, warm), recorded with the cold and
 /// warm numbers in docs/benchmarks.md, "Pre-push Linux Clippy, native". A local gate has no CI run id; the benchmark section is its
 /// record.
-fn linux_clippy(plan: &Value, change: &Change, facts: &Facts) -> Planned {
-    let candidates = linux_candidates(plan, change);
+fn linux_clippy(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> {
+    let (candidates, off): (BTreeSet<String>, BTreeSet<String>) = linux_candidates(plan, change)
+        .into_iter()
+        .partition(|ws| inactive_app(facts, ws).is_none());
+    let mut out: Vec<Planned> = off
+        .iter()
+        .map(|ws| Planned::Skip {
+            id: format!("clippy-linux {ws}"),
+            reason: inactive_reason(app_of_workspace(ws).unwrap_or(ws)),
+        })
+        .collect();
     if candidates.is_empty() {
-        return Planned::Skip {
-            id: "clippy-linux".into(),
-            reason: "nothing but documentation, or no Cargo workspace of its own, changed".into(),
-        };
+        if off.is_empty() {
+            out.push(Planned::Skip {
+                id: "clippy-linux".into(),
+                reason: "nothing but documentation, or no Cargo workspace of its own, changed".into(),
+            });
+        }
+        return out;
     }
+    out.push(linux_clippy_of(&candidates, facts));
+    out
+}
+
+/// The Linux Clippy row of the active candidate workspaces (not empty).
+fn linux_clippy_of(candidates: &BTreeSet<String>, facts: &Facts) -> Planned {
     let id = format!("clippy-linux {}", candidates.iter().cloned().collect::<Vec<_>>().join(" + "));
     let version = match &facts.ci_version {
         Some(Ok(v)) => v.clone(),
@@ -605,7 +677,7 @@ fn linux_clippy(plan: &Value, change: &Change, facts: &Facts) -> Planned {
     let mut targets = Vec::new();
     // Workspaces with nothing left once the Tauri crates are out: cargo would stop with "no packages to compile".
     let mut skipped: Vec<(String, Vec<String>)> = Vec::new();
-    for ws in &candidates {
+    for ws in candidates {
         match facts.left_out.get(ws) {
             Some(Ok(l)) if l.lintable == 0 => skipped.push((ws.clone(), l.left_out.clone())),
             Some(Ok(l)) => targets.push(LinuxTarget {
@@ -693,6 +765,19 @@ pub fn linux_gate(targets: &[LinuxTarget], version: &str) -> Gate {
     g.need = Need::LocalCiImage;
     g.workspaces = targets.iter().map(|t| t.ws.clone()).collect();
     g
+}
+
+/// The active set cannot be read (or names an app the tree does not have): every app's rows run (nothing is left out on a guess),
+/// and this row is broken, so the push does not pass on it (ER-33). `None` when the set was read.
+fn active_apps_row(facts: &Facts) -> Option<Planned> {
+    facts.inactive.as_ref().err().map(|why| Planned::Broken {
+        id: "active-apps".into(),
+        cause: why.clone(),
+        next: format!(
+            "fix {} (`./dev plan --ci` reads the same file and stops on it too); every app's rows ran meanwhile",
+            crate::active_apps::FILE
+        ),
+    })
 }
 
 /// Conformance's npm install is not usable: the row did not look (exit 6), which is not a finding in the change.

@@ -78,6 +78,7 @@ fn facts() -> Facts {
         pitwall_tests: vec!["scripts/ci/a.test.mjs".into()],
         dev_exe: Ok("/x/dev".into()),
         target_dir: Some("/t/".into()),
+        inactive: Ok(BTreeSet::new()),
     }
 }
 
@@ -1697,6 +1698,7 @@ mod known_commit {
             files: vec![],
             refs_from_stdin: true,
             member_gate: false,
+            all_apps: false,
             accept_not_measured: vec![],
         }
     }
@@ -2341,6 +2343,7 @@ mod base_choice {
             files: vec![],
             refs_from_stdin: true,
             member_gate: false,
+            all_apps: false,
             accept_not_measured: vec![],
         };
         let line = format!("refs/heads/x {two} refs/heads/main {}\n", "0".repeat(40));
@@ -3708,5 +3711,178 @@ mod only_selection {
             select_rows(Vec::new(), &["fmt".into()]).is_err(),
             "no rows at all is also not a pass"
         );
+    }
+}
+
+/// The active apps (docs/ci-active-apps.toml, user 2026-11-24): the push and member gate run the foundation's rows and the active
+/// apps' rows; an inactive app's own build checks are named as inactive, never run and never a pass.
+mod active_apps {
+    use super::*;
+    use crate::pre_push::gates::{inactive_label, inactive_reason};
+    use crate::pre_push::{inactive_apps, inactive_note};
+
+    fn off(apps: &[&str]) -> Facts {
+        Facts {
+            inactive: Ok(apps.iter().map(|a| a.to_string()).collect()),
+            ..facts()
+        }
+    }
+
+    const FILES: &[&str] = &["crates/paddock-proc/src/lib.rs", "apps/dyno/src/a.rs", "apps/pitwall/src/a.rs"];
+
+    fn skipped<'a>(planned: &'a [Planned], id: &str) -> Option<&'a str> {
+        planned.iter().find_map(|p| match p {
+            Planned::Skip { id: i, reason } if i == id => Some(reason.as_str()),
+            _ => None,
+        })
+    }
+
+    #[test]
+    fn an_inactive_apps_own_rows_are_skipped_and_named_as_inactive() {
+        let planned = plan_gates(&plan(), &change(FILES), &off(&["dyno", "pitwall", "debrief"]));
+        let ran = ids(&planned);
+        for ws in ["apps/dyno", "apps/pitwall"] {
+            for kind in ["fmt", "clippy", "doctest", "clippy-windows", "clippy-linux"] {
+                let id = format!("{kind} {ws}");
+                assert!(!ran.iter().any(|r| r == &id), "{id} ran: {ran:?}");
+                let reason = skipped(&planned, &id).unwrap_or_else(|| panic!("{id} is not named: {planned:?}"));
+                assert!(reason.starts_with(&inactive_label()), "{id}: {reason}");
+            }
+            // The lockfile is a generated file: it stays current whether the app is active or not (ER-40).
+            assert!(ran.contains(&format!("lockfile {ws}")), "{ran:?}");
+        }
+        assert_eq!(inactive_label(), "inactive (docs/ci-active-apps.toml)");
+        assert_eq!(
+            skipped(&planned, "pitwall-scripts, pitwall-deny"),
+            Some(inactive_reason("pitwall").as_str())
+        );
+        assert!(!ran.iter().any(|r| r.starts_with("pitwall-")), "{ran:?}");
+        // The Linux Clippy keeps the active workspaces in its one container run.
+        assert!(ran.contains(&"clippy-linux crates".to_string()), "{ran:?}");
+    }
+
+    /// Positive control: the same change with the apps active runs their rows (the skip above is the set's, not the plan's).
+    #[test]
+    fn an_active_apps_rows_run() {
+        let planned = plan_gates(&plan(), &change(FILES), &off(&["debrief", "pitwall"]));
+        let ran = ids(&planned);
+        for id in ["fmt apps/dyno", "clippy apps/dyno", "doctest apps/dyno", "clippy-windows apps/dyno"] {
+            assert!(ran.contains(&id.to_string()), "{id} did not run: {ran:?}");
+        }
+        assert!(
+            ran.contains(&"clippy-linux apps/dyno (left out: dyno-app) + crates".to_string()),
+            "{ran:?}"
+        );
+        assert!(skipped(&planned, "clippy-linux apps/pitwall").is_some(), "{planned:?}");
+        assert!(skipped(&planned, "clippy apps/pitwall").is_some_and(|r| r.starts_with(&inactive_label())));
+    }
+
+    #[test]
+    fn the_foundation_rows_and_the_generators_always_run() {
+        let files = ["crates/paddock-proc/src/lib.rs", "apps/dyno/crates/dyno-core/src/a.rs"];
+        let planned = plan_gates(&plan(), &change(&files), &off(&["dyno", "pitwall", "debrief"]));
+        let ran = ids(&planned);
+        for id in [
+            "fmt crates",
+            "clippy crates",
+            "doctest crates",
+            "clippy-windows crates",
+            "clippy-linux crates",
+            "conformance",
+            "conformance-tests",
+            "member-audits",
+            "gates-register",
+            "dyno-wire-fixtures",
+        ] {
+            assert!(ran.contains(&id.to_string()), "{id} did not run: {ran:?}");
+        }
+    }
+
+    #[test]
+    fn a_set_that_cannot_be_read_runs_every_row_and_breaks_the_active_apps_row() {
+        let f = Facts {
+            inactive: Err("docs/ci-active-apps.toml cannot be read".into()),
+            ..facts()
+        };
+        let planned = plan_gates(&plan(), &change(FILES), &f);
+        assert!(ids(&planned).contains(&"clippy apps/dyno".to_string()));
+        assert!(
+            planned
+                .iter()
+                .any(|p| matches!(p, Planned::Broken { id, .. } if id == "active-apps")),
+            "{planned:?}"
+        );
+        // Positive control: a set that was read has no such row.
+        assert!(!format!("{:?}", plan_gates(&plan(), &change(FILES), &facts())).contains("active-apps"));
+    }
+
+    fn tree(active: &str) -> tempfile::TempDir {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(d.path().join("docs")).unwrap();
+        std::fs::write(
+            d.path().join(crate::active_apps::FILE),
+            format!("decided = \"2026-11-24\"\nby = \"user\"\nreason = \"foundation first\"\nactive = {active}\nnext = []\n"),
+        )
+        .unwrap();
+        d
+    }
+
+    #[test]
+    fn the_set_is_read_through_its_accessor_and_all_apps_runs_every_app() {
+        let apps: BTreeSet<String> = ["dyno", "pitwall"].map(String::from).into();
+        let d = tree("[\"dyno\"]");
+        assert_eq!(inactive_apps(d.path(), &apps, false).unwrap(), ["pitwall".to_string()].into());
+        assert!(
+            inactive_apps(d.path(), &apps, true).unwrap().is_empty(),
+            "--all-apps leaves no app out"
+        );
+        let planned = plan_gates(
+            &plan(),
+            &change(FILES),
+            &Facts {
+                inactive: inactive_apps(d.path(), &apps, true),
+                ..facts()
+            },
+        );
+        assert!(
+            ids(&planned).contains(&"clippy apps/pitwall".to_string()),
+            "--all-apps runs an inactive app's rows"
+        );
+        assert!(inactive_note(&Ok(BTreeSet::new()), true).unwrap().contains("--all-apps"));
+        let note = inactive_note(&inactive_apps(d.path(), &apps, false), false).unwrap();
+        assert!(note.contains("pitwall") && note.contains("not passes"), "{note}");
+        // A typo or an unreadable file is an error, never "no app" or "every app".
+        assert!(inactive_apps(tree("[\"dyon\"]").path(), &apps, false).unwrap_err().contains("dyon"));
+        assert!(inactive_apps(tempfile::tempdir().unwrap().path(), &apps, false).is_err());
+    }
+
+    #[test]
+    fn the_summary_counts_inactive_rows_apart_and_never_as_passed() {
+        let planned = plan_gates(&plan(), &change(FILES), &off(&["dyno", "pitwall", "debrief"]));
+        let rows = run_all(&planned, &Fake::default(), 2);
+        let n = rows.iter().filter(|(_, r)| r.reason().starts_with(&inactive_label())).count();
+        assert!(n >= 10, "{rows:?}");
+        let report = render("h", &rows);
+        let last = report.text.lines().find(|l| l.starts_with("pre-push: ")).unwrap_or_default();
+        assert!(last.contains(&format!(", {n} inactive (not checked")), "{last}");
+        assert_eq!(report.data["inactive"], json!(n));
+        let passed = rows.iter().filter(|(_, r)| r.kind() == Kind::Passed).count();
+        assert_eq!(report.data["passed"], json!(passed));
+        for row in report.data["gates"].as_array().unwrap() {
+            if row["id"] == "clippy apps/dyno" {
+                assert_eq!(row["verdict"], "inactive");
+            }
+        }
+        assert!(report.text.contains("inactive      clippy apps/dyno"), "{}", report.text);
+        // A run of nothing but inactive rows proved nothing: its outcome is not a pass (ADR 0089).
+        let only: Vec<(String, Row)> = rows
+            .into_iter()
+            .filter(|(_, r)| r.reason().starts_with(&inactive_label()))
+            .collect();
+        let (_, run) = super::super::outcome::fold(&only, &test_subject());
+        assert!(!super::super::outcome::leaves_record(&run), "{run:?}");
+        // Positive control: with every app active nothing is counted inactive.
+        let all = run_all(&plan_gates(&plan(), &change(FILES), &facts()), &Fake::default(), 2);
+        assert_eq!(render("h", &all).data["inactive"], json!(0));
     }
 }

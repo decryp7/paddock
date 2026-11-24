@@ -110,6 +110,16 @@ The file is read only through `tools/paddock-dev/src/active_apps.rs` (ER-42).
 - **The nightly ignores the set** (a `schedule` event, or the `os_full` input of the nightly's manual run): every app, the full check.
 - An app's own gates (`PLAN_APP`, a release workflow's tag gates) and an app's own workflow on a tag of the app run that app whatever
   the set says.
+- **The push gate and the member gate** (`./dev check --pre-push`, and `./dev merge check --gates`, which runs it with
+  `--member-gate`) read the same set through the same accessor. An inactive app's own build checks are not run: format, Clippy,
+  doctests, the Windows (xwin) and Linux Clippy of its workspaces, and Pitwall's script tests and `cargo deny`. Each such row is
+  printed as `inactive      <row>  inactive (docs/ci-active-apps.toml): <app> is not an active app ...`, counted apart in the
+  summary (`N inactive (not checked ...)`, `"inactive"` in the JSON), and never counted as passed. The foundation's rows (crates,
+  tools/paddock-dev and the other tools, conformance and its tests, the member audits, the gates register, commit-lint) always
+  run, and so do the generators that write into an app's folder (its `Cargo.lock`, Dyno's wire fixtures), because generated files
+  stay current (ER-40). A set that cannot be read, or that names an unknown app, runs every row and breaks the `active-apps` row.
+  `./dev check --pre-push --all-apps` runs every app's rows (for a release, or for the person bringing an app back; it also skips
+  the known-commit shortcut). The nightly is still the full check.
 - **Tags:** a tag of an app needs a full green run that planned the app (ER-15). tag.yml asks `./dev ci verdict --tag --app <app>`,
   which refuses a green run whose scope lists the app as inactive ("make it active, or tag after a nightly that ran it").
 
