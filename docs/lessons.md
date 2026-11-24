@@ -3676,11 +3676,16 @@ logged with what the rule saw (ER-27). Lesson: an admission rule needs a cost, n
   reader then fails on its first run on every OS, with the next step named, instead of flaking under load. About half a day with its
   tests and positive control. Open design points for the coordinator: it puts a test-profile condition into the tool's code; and it
   must start report-only (ER-41), but nextest does not show a passing test's output, so a report-only warning would go unseen.
+- **The macOS timeout, blocking (fix/graph-train-conformance-line-test-cost).** `ci_run::tests::adding_a_check_changes_no_golden_row_
+  but_the_rest_of_the_conformance_line_does` was stopped at 60 s on both tries in job 47411 (H') and again in the full run 8843 (job 47644,
+  fe331ca55), each time beside two heavy jobs on the same Mac (47415 and 47396; then 8843's WebKit reference apps and 8844's macOS rust
+  tests). Alone on the same runner it took 12.6 s (run 8838). C167 ruled out. Two parts: the host layout (8 test threads on a 4-core share,
+  heavy jobs beside each other; feat/test-cost-classes, ADR 0121) and the test's own work. Its work, measured by CPU time (docs/benchmarks.md,
+  2026-11-24): 91% building the CI model, four whole builds, though it reads ci.yml's rows only; the train made each build 11% dearer
+  (the steps it added to the workflows, times the matrix legs: real work, nothing repeated). The cut builds from ci.yml alone, with one full
+  build kept as the control that no row is lost (positive control: the control fails when the narrowing keeps no workflow): CPU 8.7 s to
+  4.9 s median, below main's 10.5 s. No limit raised.
 - **Fix items from the same runs, not blocking:**
-  - macOS `ci_run::tests::adding_a_check_changes_no_golden_row_but_the_rest_of_the_conformance_line_does` stopped at 60 s on both tries
-    (job 47411). Locally main 7.7 to 8.0 s, the train 10.8 to 12.1 s; in 47411 every whole-tree test ran 5 to 15 times slower, with the
-    heavy jobs 47415 and 47396 on the same host. C167 ruled out. Whole-tree paddock-dev tests on the shared Mac lose their margin when heavy
-    jobs are scheduled beside them. No limit raised; the next landing run decides.
   - Debrief `[chromium] e2e/annotations.e2e.ts:92` "plugin marker kinds are listed read-only with their owner, can be switched off and
     restyled", FLAKY (job 47419): `toHaveClass(/off/)` on the `net.decryptology.windows/app-crash` row of the "Plugin marker kinds" table
     found no element (line 102), 27.7 s; the retry passed in 23.0 s. Markers manager and MarkerProfile, which the train does not touch.

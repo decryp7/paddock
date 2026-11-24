@@ -254,8 +254,24 @@ fn modelled_commands() -> std::collections::BTreeSet<String> {
 /// The golden rows of a CI model's sources. Only the value of the conformance line's `--only` (every check Paddock runs, from
 /// conformance/paddock.ci.json) is written as `$ONLY`: that list has its own generator (`conformance-check-lists`), so adding a
 /// check changes no row here, while the rest of the line (`--app`, `--root`, `--strict`) stays literal and a change to it does.
+/// The rows are ci.yml's only, so the model is built from ci.yml alone (with every action and contract): walking the other workflows
+/// was about 70% of each build and added no row (docs/benchmarks.md, 2026-11-24; `adding_a_check_...` keeps one full build as the
+/// control).
 fn rows_of(src: &crate::gates::ci::Sources) -> std::collections::BTreeSet<String> {
-    let model = crate::gates::ci::build(src);
+    rows_of_model(&crate::gates::ci::build(&ci_yml_only(src)), src)
+}
+
+/// The sources with ci.yml as their only workflow (it calls no reusable workflow).
+fn ci_yml_only(src: &crate::gates::ci::Sources) -> crate::gates::ci::Sources {
+    let mut s = src.clone();
+    s.workflows.retain(|path, _| path == CI_YML);
+    s
+}
+
+const CI_YML: &str = ".gitea/workflows/ci.yml";
+
+/// [`rows_of`] for a model already built.
+fn rows_of_model(model: &crate::gates::ci::CiModel, src: &crate::gates::ci::Sources) -> std::collections::BTreeSet<String> {
     assert!(model.problems.is_empty(), "{:?}", model.problems);
     let contract: serde_json::Value = serde_json::from_str(src.root_contracts.get("conformance").expect("a conformance contract")).unwrap();
     let args = contract::conformance_args(&contract).unwrap();
@@ -279,7 +295,7 @@ fn rows_of(src: &crate::gates::ci::Sources) -> std::collections::BTreeSet<String
         "train-gates",
     ];
     let mut out = std::collections::BTreeSet::new();
-    for l in model.lines.iter().filter(|l| l.root == ".gitea/workflows/ci.yml") {
+    for l in model.lines.iter().filter(|l| l.root == CI_YML) {
         let text = match l.text.find(&only) {
             Some(i) if l.text[i + only.len()..].is_empty() || l.text[i + only.len()..].starts_with(' ') => {
                 format!("{}--only $ONLY{}", &l.text[..i], &l.text[i + only.len()..])
@@ -472,6 +488,12 @@ fn adding_a_check_changes_no_golden_row_but_the_rest_of_the_conformance_line_doe
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let src = crate::gates::edge::load_sources(&root).unwrap();
     let rows = rows_of(&src);
+    // Control for the narrowing in rows_of: the full model (every workflow) gives the same ci.yml rows.
+    assert_eq!(
+        rows_of_model(&crate::gates::ci::build(&src), &src),
+        rows,
+        "ci.yml alone gives every ci.yml row"
+    );
     let line = |rows: &std::collections::BTreeSet<String>| {
         rows.iter()
             .find(|r| r.starts_with("job\tconformance\t") && r.contains("node conformance/bin/paddock-conformance.mjs --app "))
