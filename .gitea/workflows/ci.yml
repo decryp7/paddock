@@ -203,8 +203,9 @@ jobs:
   ui:
     needs: [plan]
     # Also the ESLint preset's tests and the family icons' checks, as steps of their own projects (one job instead of three, user
-    # 2026-11-24): each step runs when the planner marks its project.
-    if: ${{ (needs.plan.outputs.ui == 'true' || needs.plan.outputs.eslint == 'true' || needs.plan.outputs.icons == 'true') && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["ui"]'), 'ui') }}
+    # 2026-11-24). Each check step runs when the planner marks its own project, and the setup steps when it marks any of the three; the
+    # job itself asks only rerun_jobs, so each check is gated by its own project alone (C100 reads a job condition into every line).
+    if: ${{ contains(fromJSON(needs.plan.outputs.rerun_jobs || '["ui"]'), 'ui') }}
     name: ui (tokens, contrast, components, entry points, publish dry run, ESLint preset, icons)
     runs-on: ubuntu-latest
     container:
@@ -235,9 +236,11 @@ jobs:
           sccache-s3-secret-access-key: ${{ secrets.PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY }}
 
       - uses: ./.gitea/actions/node-caches
+        if: needs.plan.outputs.ui == 'true' || needs.plan.outputs.eslint == 'true' || needs.plan.outputs.icons == 'true'
 
       # One npm workspace for the repo (ADR 0014 §1): the root lock installs every package.
       - name: Install
+        if: needs.plan.outputs.ui == 'true' || needs.plan.outputs.eslint == 'true' || needs.plan.outputs.icons == 'true'
         working-directory: .
         run: npm ci
 

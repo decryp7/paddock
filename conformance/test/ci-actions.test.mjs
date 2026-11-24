@@ -1443,7 +1443,7 @@ test('ci.yml runs the icon tests and `install.mjs --check` in steps of the ui jo
   const at = ci.indexOf('\n  ui:\n');
   assert.ok(at > 0, 'ci.yml has a ui job');
   const job = ci.slice(at + 1, ci.indexOf('\n  # ', at + 1) > 0 ? ci.indexOf('\n  # ', at + 1) : undefined);
-  assert.match(job.match(/^    if: (.*)$/m)?.[1] ?? '', /needs\.plan\.outputs\.icons == 'true'/, 'the ui job runs when the plan says icons');
+  assert.doesNotMatch(job.match(/^    if: (.*)$/m)?.[1] ?? '', /outputs\.(ui|eslint|icons)/, 'the job asks no project: each check step asks its own (C100)');
   for (const phase of ['tests', 'installed']) {
     assert.match(job, new RegExp(`if: needs\\.plan\\.outputs\\.icons == 'true'\\n        run: \\./dev ci run icons ${phase}`), `the icons ${phase} step runs when the plan says icons`);
   }
