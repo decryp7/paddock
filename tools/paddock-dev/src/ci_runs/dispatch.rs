@@ -1159,6 +1159,7 @@ mod tests {
 
     fn go(http: &mut Script, wf: &str, max: &str) -> (Result<Dispatched, String>, String, Duration) {
         let (mut clock, mut log) = (FakeClock(Duration::ZERO), Vec::new());
+        #[expect(clippy::disallowed_methods, reason = "the tests of the raw dispatch itself")]
         let r = run(
             http,
             &Target {
@@ -1183,6 +1184,7 @@ mod tests {
     ) -> (Result<Dispatched, String>, String, Duration) {
         let (mut clock, mut log) = (FakeClock(Duration::ZERO), Vec::new());
         let mut health = Health::new(crate::health::tests::both(), reach);
+        #[expect(clippy::disallowed_methods, reason = "the tests of the raw dispatch itself")]
         let r = run(
             http,
             &Target {
@@ -1301,6 +1303,7 @@ mod tests {
         let (mut clock, mut log) = (FakeClock(Duration::ZERO), Vec::new());
         let mut req = parse_request(wf, git_ref, &[], "10m", Some("15s")).unwrap();
         req.train_waiters = train_waiters(&repo_root()).unwrap();
+        #[expect(clippy::disallowed_methods, reason = "the tests of the raw dispatch itself")]
         let r = run(
             http,
             &Target {
@@ -1392,6 +1395,7 @@ mod tests {
         let (mut clock, mut log) = (FakeClock(Duration::ZERO), Vec::new());
         let req = parse_request("waits.yml", "train/t", &[], "1h", Some("15s")).unwrap();
         assert_eq!(req.train_waiters, 0);
+        #[expect(clippy::disallowed_methods, reason = "the tests of the raw dispatch itself")]
         let r = run(
             &mut http,
             &Target {
@@ -1424,6 +1428,7 @@ mod tests {
         let (mut clock, mut log) = (FakeClock(Duration::ZERO), Vec::new());
         let mut req = parse_request("waits.yml", "train/t", &[], "1m", Some("15s")).unwrap();
         req.train_waiters = 2;
+        #[expect(clippy::disallowed_methods, reason = "the tests of the raw dispatch itself")]
         let r = run(
             &mut http,
             &Target {

@@ -1234,6 +1234,11 @@ pub fn dispatch(a: &DispatchArgs) -> Result<Report, CliError> {
     let mut clock = dispatch::system_clock();
     let mut reach = crate::health::CurlReach;
     let mut health = crate::health::Health::new(crate::health::real_services(&a.server, "dispatch", false), &mut reach);
+    // ER-51: one of the two callers of the raw dispatch; the run it starts is then found by its dispatch token (find_run below).
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "`./dev ci dispatch` holds the run it starts: find_run by the dispatch token"
+    )]
     let result = dispatch::run(
         &mut http,
         &dispatch::Target {

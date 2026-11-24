@@ -943,7 +943,13 @@ pub fn dispatch_held(
             dispatch::DISPATCH_ID
         ));
     };
-    match dispatch::run(http, &d.target, &req, &read, clock, log, health)? {
+    // ER-51: the other caller of the raw dispatch; the run it starts is found by its dispatch token below.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "dispatch_held holds the run it starts: find_run by the dispatch token"
+    )]
+    let sent = dispatch::run(http, &d.target, &req, &read, clock, log, health)?;
+    match sent {
         dispatch::Dispatched::Yes { .. } => {}
         dispatch::Dispatched::StillBusy { last } | dispatch::Dispatched::ServiceDown { last } => return Ok(Sent::Busy(last)),
     }
