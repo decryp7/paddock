@@ -372,7 +372,7 @@ Each decision below keeps its options as offered; the line "Accepted" records th
 | `Owned`, `own::Unit`, starter-bound slot holder, ADR 0112's job action and ledger | local `feat/adr0112-wp1-owner-trait` b9970817d, not on origin: prerequisite P1 |
 | C159, the file-wide kill-allow guard | id reserved (`refs/paddock/check-ids/C159`, `feat/conformance-guards-2026-11-23-kill-allow`), branch not on origin: prerequisite P3 |
 | CI wrapper `./dev ci step` and the job record | ADR 0118, uncommitted in the `feat/test-results-artifact` worktree (no commit beyond 64e01dd84 on 2026-11-23): prerequisite for WP-13 |
-| `Scope`, `Held`, `Summary`, the scope's grace (measured), the guardian's serving answer and keeper-first groups | built by WP-1 on `feat/adr-0119-wp1-scope` (not on a train yet) |
+| `Scope`, `Held`, `Summary`, the scope's grace (measured), the guardian's serving answer and keeper-first groups | built by WP-1 on `feat/adr-0119-wp1-scope`, approved in review round 4 at 7a976b606 plus its P2 commit (not on a train yet) |
 | `Lifetime`, `start_detached`, handle text, `held.jsonl`, `./dev held`, `ask_group`, the spawn ban, `background-guard`, `./dev run --hold` | not built (WP-2 onward) |
 
 Recurring: "something ends but does not end what it started" (ADR 0112's class), outside CI jobs. Earlier instances: run 8099

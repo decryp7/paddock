@@ -58,6 +58,10 @@ pub(crate) trait Os {
     fn end_pinned(&self, _group: u32, _keeper: ProcessId) -> bool {
         false
     }
+    /// Whether `root` was a guarded child that has been released: its group was never its own pid's (Unix).
+    fn was_guarded(&self, _root: ProcessId) -> bool {
+        false
+    }
 }
 
 /// `pid -> (program name, parent pid)` of the running processes, from one look at the process list, read just before
@@ -188,6 +192,11 @@ impl Os for RealOs {
         end_pinned_group(group, keeper)
     }
 
+    #[cfg(unix)]
+    fn was_guarded(&self, root: ProcessId) -> bool {
+        crate::guardian::was_guarded(root)
+    }
+
     #[cfg(windows)]
     fn end(&self, id: ProcessId) -> Ending {
         crate::sys::end_if(id)
@@ -250,6 +259,10 @@ impl Os for OnceRead {
     fn end_pinned(&self, group: u32, keeper: ProcessId) -> bool {
         RealOs.end_pinned(group, keeper)
     }
+
+    fn was_guarded(&self, root: ProcessId) -> bool {
+        RealOs.was_guarded(root)
+    }
 }
 
 /// [`kill_tree`] over a shared look ([`OnceRead`]).
@@ -292,7 +305,8 @@ pub(crate) fn kill_tree_on(
     if let Some((group, keeper)) = pinned {
         os.end_pinned(group, keeper);
     }
-    let own_group = pinned.is_none();
+    // A released guarded child (a caller held its identity past the release) never had its own group either.
+    let own_group = pinned.is_none() && !os.was_guarded(root);
     match root_holder {
         Holder::Same => {
             if own_group {

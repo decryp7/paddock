@@ -54,7 +54,7 @@ pub(crate) use unix::{
     ACT_AS_USER_ENV, CRASH_ENV, REFUSE_ENV, guardians_started, hold_after_spawn,
 };
 #[cfg(unix)]
-pub(crate) use unix::{Registration, ensure, pinned, prepare};
+pub(crate) use unix::{Registration, ensure, pinned, prepare, was_guarded};
 #[cfg(unix)]
 pub use unix::{enable_in_test_binary, run_if_requested, serve_if_guardian, set_log};
 

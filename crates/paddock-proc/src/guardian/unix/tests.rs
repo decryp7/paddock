@@ -1129,11 +1129,18 @@ fn an_owner_killed_right_after_its_child_exists_leaves_no_child() {
 
 // ---- a guarded child's group is ended through its keeper (review round 3, P1-1) ----
 
-/// The child is guarded (so its group is the keeper's, not its own), leaves a helper in that group and exits. Ending the
-/// child by identity and waiting for it must also end the helper: callers (Dyno's cancel, the browser watchdogs, the memory
-/// cap, the registry) end a child with `kill_tree(id)`, and `Supervised::wait` forgets the group.
-#[test]
-fn ending_a_guarded_child_that_left_a_helper_in_its_group_ends_the_helper() {
+/// A guarded child (its group is the keeper's, not its own) that left a helper in that group and exited, with the helper's
+/// identity. `bound` false takes the child out of the map of guarded children (the control: a child `kill_tree` cannot map
+/// to its group). The reader of the child's output comes back too: the helper shares that pipe, and a closed pipe would end
+/// it (its harness's first write fails), which is not the end under test.
+fn guarded_child_with_a_helper(
+    bound: bool,
+) -> (
+    Supervised,
+    ProcessId,
+    ProcessId,
+    BufReader<std::process::ChildStdout>,
+) {
     enable_in_test_binary(ENTRY);
     let _acting = ActAsUser::here();
     let mut cmd = crate::testchild::child(crate::testchild::Mode::Leave);
@@ -1141,6 +1148,9 @@ fn ending_a_guarded_child_that_left_a_helper_in_its_group_ends_the_helper() {
     let mut s = Supervised::spawn(cmd).unwrap();
     let child = s.process().unwrap();
     assert!(s.guard.is_some(), "the child is guarded");
+    if !bound {
+        s.guard.as_mut().unwrap().unbind();
+    }
     // libtest prints its own lines first: read up to the child's line naming its helper.
     let mut reader = BufReader::new(s.take_stdout().unwrap());
     let mut line = String::new();
@@ -1169,7 +1179,34 @@ fn ending_a_guarded_child_that_left_a_helper_in_its_group_ends_the_helper() {
         &[child, helper],
         "the child did not exit after starting its helper",
     );
+    (s, child, helper, reader)
+}
+
+/// The map path (review rounds 3 and 4): `kill_tree` of a guarded child ends the helper it left in its group by itself,
+/// before the owner's release runs. Callers (Dyno's cancel, the browser watchdogs, the memory cap, the registry) end a child
+/// with `kill_tree(id)`.
+#[test]
+fn kill_tree_of_a_guarded_child_ends_the_helper_it_left_in_its_group() {
+    let (mut s, child, helper, _out) = guarded_child_with_a_helper(true);
     kill_tree(child);
+    let gone = paddock_testkit::wait::poll_until_within(paddock_testkit::wait::HANG_GUARD, || {
+        run_state(helper) == RunState::Exited
+    });
+    fail_unless(
+        gone,
+        &[helper],
+        "kill_tree of the guarded child left its helper running",
+    );
+    s.wait();
+}
+
+/// The control: a child the map does not know keeps its helper through `kill_tree` (its pid names no group), and the
+/// owner's release (`wait`) ends it through the keeper.
+#[test]
+fn a_child_kill_tree_cannot_map_keeps_its_helper_until_the_release_ends_the_group() {
+    let (mut s, child, helper, _out) = guarded_child_with_a_helper(false);
+    kill_tree(child);
+    let survived = run_state(helper) == RunState::Running;
     s.wait();
     let gone = paddock_testkit::wait::poll_until_within(paddock_testkit::wait::HANG_GUARD, || {
         run_state(helper) == RunState::Exited
@@ -1177,7 +1214,66 @@ fn ending_a_guarded_child_that_left_a_helper_in_its_group_ends_the_helper() {
     fail_unless(
         gone,
         &[helper],
-        "the helper the guarded child left in its group runs on",
+        "the release did not end the helper in the guarded group",
+    );
+    assert!(
+        survived,
+        "without the map, kill_tree reached the helper: the test above would prove nothing"
+    );
+}
+
+/// A recorder of group signals over the real OS (the guardian's map and tombstones included).
+struct Recorder(Mutex<Vec<u32>>);
+
+impl crate::tree::Os for Recorder {
+    fn table(&self) -> crate::Table {
+        crate::tree::RealOs.table()
+    }
+    fn start_of(&self, pid: u32) -> Option<crate::StartTime> {
+        crate::tree::RealOs.start_of(pid)
+    }
+    fn end_group(&self, root: u32) {
+        self.0.lock().unwrap().push(root);
+    }
+    fn kill_pid(&self, _pid: u32) -> bool {
+        false
+    }
+    fn pinned_group(&self, root: ProcessId) -> Option<(u32, ProcessId)> {
+        crate::tree::RealOs.pinned_group(root)
+    }
+    fn was_guarded(&self, root: ProcessId) -> bool {
+        crate::tree::RealOs.was_guarded(root)
+    }
+}
+
+/// Rule 53 (round 4, P2-2): a caller that still holds a guarded child's identity after the child was reaped and released
+/// never gets the child's pid signalled as a group: that pid may name a stranger's group by then. The control is the same
+/// end of an identity that was never guarded, which does signal it.
+#[test]
+fn a_released_guarded_child_is_never_signalled_as_a_group() {
+    enable_in_test_binary(ENTRY);
+    let _acting = ActAsUser::here();
+    let mut cmd = crate::testchild::child(crate::testchild::Mode::Exit3);
+    cmd.stdout(Stdio::null());
+    let mut s = Supervised::spawn(cmd).unwrap();
+    let id = s.process().unwrap();
+    assert!(s.guard.is_some(), "the child is guarded");
+    s.wait();
+    let rec = Recorder(Mutex::new(Vec::new()));
+    crate::tree::kill_tree_on(&rec, id, false, None);
+    assert!(
+        rec.0.lock().unwrap().is_empty(),
+        "a released guarded child's pid was signalled as a group"
+    );
+    let stranger = ProcessId::new(
+        id.pid(),
+        crate::StartTime::from_micros(id.started().as_micros() + 1),
+    );
+    crate::tree::kill_tree_on(&rec, stranger, false, None);
+    assert_eq!(
+        *rec.0.lock().unwrap(),
+        vec![id.pid()],
+        "the control: an unguarded gone root's group is signalled"
     );
 }
 

@@ -346,6 +346,30 @@ pub(crate) fn pinned(child: ProcessId) -> Option<(u32, ProcessId)> {
     pinned_lock().get(&child).copied()
 }
 
+/// How many released guarded children [`was_guarded`] remembers (oldest forgotten first): a caller outside paddock-proc may
+/// hold a child's identity after the child was reaped and released, and end it by identity later.
+const TOMBSTONES: usize = 1024;
+
+static RELEASED: Mutex<std::collections::VecDeque<ProcessId>> =
+    Mutex::new(std::collections::VecDeque::new());
+
+/// Whether `child` was a guarded child of this process that has been released (its group was the keeper's, never its own),
+/// within the last [`TOMBSTONES`] releases: its pid is then never signalled as a group (rule 53, round 4 P2-2).
+pub(crate) fn was_guarded(child: ProcessId) -> bool {
+    RELEASED
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .contains(&child)
+}
+
+fn remember_released(child: ProcessId) {
+    let mut r = RELEASED.lock().unwrap_or_else(|e| e.into_inner());
+    if r.len() >= TOMBSTONES {
+        r.pop_front();
+    }
+    r.push_back(child);
+}
+
 impl Registration {
     /// The registered process group: the keeper leads it, and the child is started into it ([`prepare`]).
     pub(crate) fn group(&self) -> u32 {
@@ -362,6 +386,14 @@ impl Registration {
         crate::tree::end_pinned_group(self.group, self.keeper_id)
     }
 
+    /// Takes the child out of the map again (tests: a child that was never bound, the control of the map path).
+    #[cfg(test)]
+    pub(crate) fn unbind(&mut self) {
+        if let Some(child) = self.child.take() {
+            pinned_lock().remove(&child);
+        }
+    }
+
     /// Names the child started into the group, so [`crate::kill_tree`] of that child ends the group too ([`pinned`]).
     pub(crate) fn bind(&mut self, child: ProcessId) {
         self.child = Some(child);
@@ -373,6 +405,7 @@ impl Drop for Registration {
     fn drop(&mut self) {
         if let Some(child) = self.child {
             pinned_lock().remove(&child);
+            remember_released(child);
         }
         if let Some(r) = lock().as_mut() {
             crate::cleanup::logged(
@@ -545,6 +578,7 @@ pub(crate) fn reap_within(child: &mut Child, bound: Duration, what: &str) -> boo
     loop {
         match child.try_wait() {
             Ok(Some(_)) => return true,
+            // pace: how often the handle is looked at; the bound is `bound`
             Ok(None) if began.elapsed() < bound => std::thread::sleep(Duration::from_millis(5)),
             Ok(None) | Err(_) => break,
         }

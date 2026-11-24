@@ -53,8 +53,12 @@ impl Registry {
     /// values still reap their children when they are dropped or waited for.
     pub fn end_all(&self) -> usize {
         let roots = std::mem::take(&mut *lock(&self.0));
-        for root in &roots {
-            kill_tree(*root);
+        if !roots.is_empty() {
+            // One look at the table for every tree (ER-20), as a scope's end takes.
+            let os = tree::OnceRead::now();
+            for root in &roots {
+                tree::kill_tree_with(&os, *root);
+            }
         }
         roots.len()
     }
@@ -585,6 +589,15 @@ impl Supervised {
                         "Ending child {} without its identity: through its handle and its process group only",
                         self.pid
                     );
+                    // A guarded child does not lead its group: its group is ended through the keeper (round 4, P2-3).
+                    #[cfg(unix)]
+                    match self.guard.as_ref() {
+                        Some(g) => {
+                            g.end_group();
+                        }
+                        None => crate::tree::end_unreaped_group(self.pid),
+                    }
+                    #[cfg(not(unix))]
                     crate::tree::end_unreaped_group(self.pid);
                 }
                 None => {}
@@ -596,6 +609,14 @@ impl Supervised {
     }
 
     fn release(&mut self) {
+        // The memory watcher ends first: it ends the child by identity (`kill_tree`), which needs the guarded group's entry
+        // (round 4, P2-2); then the registry forgets the root.
+        if let Some(w) = self.watcher.take() {
+            w.finish();
+        }
+        if let Some(id) = self.process {
+            self.registry.remove(id);
+        }
         // After the tree was ended (or the child ended by itself): what is left of the guarded group (a helper that left the
         // tree but not the group) ends through its keeper, then the guardian forgets the group and the keeper ends.
         #[cfg(unix)]
@@ -606,12 +627,6 @@ impl Supervised {
         // Windows: closing the job ends whatever of the tree is left (helpers that left it included).
         #[cfg(windows)]
         drop(self.job.take());
-        if let Some(id) = self.process {
-            self.registry.remove(id);
-        }
-        if let Some(w) = self.watcher.take() {
-            w.finish();
-        }
     }
 }
 
