@@ -1181,6 +1181,12 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
 
+      # ./dev's own binary from the cache, not built here (130-176 s): the plan job saved it under this hash.
+      - uses: ./.gitea/actions/dev-tool-cache
+        env:
+          PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+          PADDOCK_DEV_DOWNLOAD: ${{ (inputs.release == true || startsWith(github.ref, 'refs/tags/')) && '0' || '' }}
+
       - name: Lint the commit messages
         env:
           EVENT: ${{ github.event_name }}

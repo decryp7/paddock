@@ -2639,6 +2639,72 @@ test('the order check sees a ./dev call before the restore (positive control)', 
   assert.equal(devOrder([{ uses: './.gitea/actions/dev-tool-cache' }, ...bad.slice(0, 1)]).restore, 0);
 });
 
+// The same order, over every Linux job of every workflow (the three tests above read three actions): a job's first ./dev call
+// builds the tool from source (130-176 s) unless the tool cache restored it first, and the plan job that every other job needs
+// is the one that seeds the cache, so a run on a new hash builds it once, not 30 times in parallel (download audit 2026-11-24:
+// the plan, commits and licence jobs never used the cache; a hash's first run missed in every job at once). Local actions are
+// expanded in order; a step's `env:` and a `dev-token` input reach the actions it calls, as on the runner.
+const ACTION_REF = /^\.\/\.gitea\/actions\/(.+)$/;
+const DEV_CALL = /kit\.sh"? (?:build-jobs|host|isolation|build-env)|\/dev"? ci |\.\/dev[ "]|\bbash "[^"]*\/dev" /;
+/** The ordered ./dev calls and tool-cache uses of a job, with whether a download token reaches each (the job's, a step's or an input). */
+export function toolOrder(steps, token, load, depth = 0) {
+  const out = [];
+  for (const s of steps) {
+    const reach = s.env?.PADDOCK_DEV_TOKEN || s.with?.['dev-token'] || token;
+    if (usesToolCache(s)) { out.push({ kind: 'cache', token: Boolean(reach), step: s.name || s.uses }); continue; }
+    const m = typeof s.uses === 'string' ? ACTION_REF.exec(s.uses) : null;
+    if (m && depth < 4) { out.push(...toolOrder(stepsOf(load(m[1])), reach, load, depth + 1)); continue; }
+    if (typeof s.run === 'string' && DEV_CALL.test(s.run)) out.push({ kind: 'dev', token: Boolean(reach), step: s.name || s.run.split('\n')[0].slice(0, 60) });
+  }
+  return out;
+}
+/** Why a job does not use the tool cache before its first ./dev call, or '' when it does (or never could: it builds from source). */
+export function toolCacheProblem(job, wfEnv, load) {
+  const env = { ...wfEnv, ...job.env };
+  if (String(env.PADDOCK_DEV_DOWNLOAD ?? '').replace(/["']/g, '') === '0') return '';   // builds from source by contract (ADR 0022 section 3.3)
+  const order = toolOrder(stepsOf(job), env.PADDOCK_DEV_TOKEN, load);
+  const dev = order.findIndex((x) => x.kind === 'dev');
+  if (dev < 0 || !order[dev].token) return '';                                          // no ./dev call, or no download credential at all
+  const cache = order.findIndex((x) => x.kind === 'cache');
+  if (cache < 0 || cache > dev) return `the first ./dev call (${order[dev].step}) comes ${cache < 0 ? 'with no tool cache in the job' : 'before the tool cache'}`;
+  if (!order[cache].token) return `the tool cache (${order[cache].step}) gets no download token, so it reports usable=false and nothing is restored or saved`;
+  return '';
+}
+const RELEASE_PATH = new Set(['tag.yml', 'tag-rehearsal.yml', 'heavy-release.yml']);   // a tag's own gates and a release build the tool from source
+test('every Linux job restores the dev tool, with a download token, before its first ./dev call', () => {
+  const problems = [];
+  let jobs = 0;
+  for (const file of readdirSync(WORKFLOWS).filter((f) => f.endsWith('.yml') && !RELEASE_PATH.has(f))) {
+    const wf = loadWorkflow(file);
+    for (const [id, job] of Object.entries(wf.jobs ?? {})) {
+      const runsOn = String(job['runs-on'] ?? '');
+      if (!job.steps || /macos|windows/.test(runsOn)) continue;
+      jobs++;
+      const why = toolCacheProblem(job, wf.env, loadAction);
+      if (why) problems.push(`${file} job ${id}: ${why}`);
+    }
+  }
+  assert.ok(jobs >= 30, `the check saw ${jobs} Linux jobs: one that sees none passes on nothing (ER-12)`);
+  assert.deepEqual(problems, [], 'a ./dev call before the restore builds the tool in this job (130-176 s) and leaves nothing to save: put the dev-tool-cache use (env PADDOCK_DEV_TOKEN) first');
+});
+test('the job order check sees a ./dev call before the restore, a restore with no token, and passes a correct job (positive controls)', () => {
+  const load = () => ({ runs: { steps: [] } });
+  const tc = { uses: './.gitea/actions/dev-tool-cache' };
+  const dev = { run: './dev plan --ci' };
+  const tok = { PADDOCK_DEV_TOKEN: 'x' };
+  assert.match(toolCacheProblem({ env: tok, steps: [dev, tc] }, {}, load), /before the tool cache/);
+  assert.match(toolCacheProblem({ env: tok, steps: [dev] }, {}, load), /no tool cache in the job/);
+  assert.match(toolCacheProblem({ steps: [{ ...tc, name: 'c' }, { ...dev, env: tok }] }, {}, load), /gets no download token/);
+  assert.equal(toolCacheProblem({ env: tok, steps: [tc, dev] }, {}, load), '');
+  assert.equal(toolCacheProblem({ env: { ...tok, PADDOCK_DEV_DOWNLOAD: '0' }, steps: [dev] }, {}, load), '', 'a source-built job needs no cache');
+  // a call inside a local action is found in order
+  const nested = (n) => (n === 'a' ? { runs: { steps: [dev] } } : { runs: { steps: [] } });
+  assert.match(toolCacheProblem({ env: tok, steps: [{ uses: './.gitea/actions/a' }, tc] }, {}, nested), /before the tool cache/);
+  assert.match(toolCacheProblem({ steps: [{ uses: './.gitea/actions/a', env: tok }] }, {}, nested), /no tool cache/, 'a step env token reaches the call inside the action');
+  const cached = (n) => (n === 'a' ? { runs: { steps: [tc, dev] } } : { runs: { steps: [] } });
+  assert.equal(toolCacheProblem({ steps: [{ uses: './.gitea/actions/a', env: tok }] }, {}, cached), '', 'an action that restores first is fine');
+});
+
 test('the dev-tool-cache action restores, verifies, saves and reports from the restore step\'s own outputs', () => {
   const steps = stepsOf(loadAction('dev-tool-cache'));
   const text = JSON.stringify(steps);
