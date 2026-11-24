@@ -86,7 +86,7 @@ fn live_fixture_findings_equal_the_recorded_js_answer() {
 }
 
 #[test]
-fn live_tree_run_is_sound_and_no_rule_a_or_b_site_is_left() {
+fn tree_live_tree_run_is_sound_and_no_rule_a_or_b_site_is_left() {
     let root = repo_root();
     let r = paddock_testkit::guarded("the Rust C122 over the live tree", LIVE_STALL, {
         let root = root.clone();

@@ -63,7 +63,7 @@ fn dev_heavy(path: &str, args: &[&str], heavy: Option<&str>, test_off: bool) -> 
 }
 
 #[test]
-fn the_dry_run_lists_the_gates_ci_runs_for_a_crates_change_and_why_others_are_left_out() {
+fn tree_the_dry_run_lists_the_gates_ci_runs_for_a_crates_change_and_why_others_are_left_out() {
     let d = tempfile::tempdir().unwrap();
     let path = fake_bin(d.path(), Actions::new());
     let (code, out, err) = dev(&path, &["--dry-run"]);
@@ -89,7 +89,7 @@ fn the_dry_run_lists_the_gates_ci_runs_for_a_crates_change_and_why_others_are_le
 
 /// The gates-register row runs on every push (ER-41), including one that changes only a file C100 reads through its own globs.
 #[test]
-fn the_gates_check_is_planned_for_a_crates_change_and_for_an_app_contract_change() {
+fn tree_the_gates_check_is_planned_for_a_crates_change_and_for_an_app_contract_change() {
     let d = tempfile::tempdir().unwrap();
     let path = fake_bin(d.path(), Actions::new());
     for files in [CHANGE, "apps/dyno/paddock.ci.json"] {
@@ -100,7 +100,7 @@ fn the_gates_check_is_planned_for_a_crates_change_and_for_an_app_contract_change
 }
 
 #[test]
-fn a_failing_fmt_is_exit_5_with_one_error_line_and_the_rerun_command() {
+fn tree_a_failing_fmt_is_exit_5_with_one_error_line_and_the_rerun_command() {
     let d = tempfile::tempdir().unwrap();
     let path = fake_bin(d.path(), Actions::new().stderr("Diff in lib.rs").exit(1));
     let (code, out, err) = dev(&path, &["--only", "fmt"]);
@@ -117,7 +117,7 @@ fn a_failing_fmt_is_exit_5_with_one_error_line_and_the_rerun_command() {
 }
 
 #[test]
-fn without_xwin_the_windows_lint_is_not_measured_exit_6_never_a_pass() {
+fn tree_without_xwin_the_windows_lint_is_not_measured_exit_6_never_a_pass() {
     let d = tempfile::tempdir().unwrap();
     let path = fake_bin(d.path(), Actions::new());
     let (code, out, err) = dev(&path, &["--only", "clippy-windows"]);
@@ -130,7 +130,7 @@ fn without_xwin_the_windows_lint_is_not_measured_exit_6_never_a_pass() {
 }
 
 #[test]
-fn everything_that_runs_green_is_exit_0() {
+fn tree_everything_that_runs_green_is_exit_0() {
     let d = tempfile::tempdir().unwrap();
     let path = fake_bin(d.path(), Actions::new());
     let (code, out, err) = dev(&path, &["--only", "fmt,clippy"]);
@@ -142,7 +142,7 @@ fn everything_that_runs_green_is_exit_0() {
 }
 
 #[test]
-fn when_heavy_cannot_be_built_the_compiles_are_not_measured_exit_6_never_a_pass() {
+fn tree_when_heavy_cannot_be_built_the_compiles_are_not_measured_exit_6_never_a_pass() {
     let d = tempfile::tempdir().unwrap();
     let path = fake_bin(d.path(), Actions::new());
     let (code, out, err) = dev_heavy(&path, &["--only", "clippy"], None, false);
@@ -155,7 +155,7 @@ fn when_heavy_cannot_be_built_the_compiles_are_not_measured_exit_6_never_a_pass(
 }
 
 #[test]
-fn heavy_off_without_the_test_variable_is_an_override_and_not_measured() {
+fn tree_heavy_off_without_the_test_variable_is_an_override_and_not_measured() {
     let d = tempfile::tempdir().unwrap();
     let path = fake_bin(d.path(), Actions::new());
     let (code, out, err) = dev_heavy(&path, &["--only", "clippy"], Some("off"), false);
@@ -187,7 +187,7 @@ fn listed(name: &str) -> bool {
 /// (`ENGINEERING_RULES`, `HEAVY_LOCK_DIR`) and an ambient variable; the child must not see any of them, so no slot is taken
 /// and the fake cargo's environment holds only listed names.
 #[test]
-fn a_run_never_sees_the_machines_environment_or_takes_a_real_slot() {
+fn tree_a_run_never_sees_the_machines_environment_or_takes_a_real_slot() {
     let mut env = paddock_testkit::env_lock();
     let d = tempfile::tempdir().unwrap();
     let rules = d.path().join("rules");

@@ -101,7 +101,7 @@ fn tree(files: &[(&str, &str)]) -> tempfile::TempDir {
 }
 
 #[test]
-fn this_working_tree_gives_a_sound_report() {
+fn tree_this_working_tree_gives_a_sound_report() {
     let root = repo();
     // The tree changes under the tests: only what holds whatever it holds is asserted (`recorded::assert_live_tree_sound`); the report
     // files and exit code are compared with the JS host's on fixture trees above.

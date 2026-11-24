@@ -70,7 +70,7 @@ static CANCELLING: LazyLock<Regex> = LazyLock::new(|| re(r"Cancelling due to"));
 static LINE: LazyLock<Regex> = LazyLock::new(|| {
     re(concat!(
         r"^\s*(TRY \d+ )?(PASS|FAIL|TIMEOUT|TMT|SIG[A-Z]+|ABORT|LEAK-FAIL|(?:FLAKY|FLKY)[-A-Z]*)(?: \d+/\d+)?",
-        r"\s+\[[^\]]*\]\s+(?:\([^)]*\)\s+)?(\S+)\s+(\S+)\s*$"
+        r"\s+\[([^\]]*)\]\s+(?:\([^)]*\)\s+)?(\S+)\s+(\S+)\s*$"
     ))
 });
 
@@ -160,7 +160,7 @@ pub fn read(log: &str) -> Result<Nextest, NextestError> {
             } else {
                 Last::Failed
             };
-            b.states.insert((m[3].to_string(), m[4].to_string()), state);
+            b.states.insert((m[4].to_string(), m[5].to_string()), state);
         }
     }
     match block {
@@ -169,6 +169,58 @@ pub fn read(log: &str) -> Result<Nextest, NextestError> {
         None => {}
     }
     Ok(out)
+}
+
+/// The time nextest gives a test on its last status line (`PASS [  12.345s]`, a timeout's `TMT [  60.003s]`): the try that decided.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Timed {
+    /// The test.
+    pub id: TestId,
+    /// Seconds of its last try.
+    pub secs: f64,
+    /// It ended failed (a failure, a timeout or a signal) rather than passed or flaky.
+    pub failed: bool,
+}
+
+/// The duration of every test of a log's nextest runs, read only from runs [`read`] accepts as whole (a partial log is the same error,
+/// never a shorter list). A test that runs in several runs of the log keeps its longest time.
+pub fn durations(log: &str) -> Result<Vec<Timed>, NextestError> {
+    let decided = read(log)?;
+    let mut out: BTreeMap<TestId, Timed> = BTreeMap::new();
+    let mut last: BTreeMap<TestId, f64> = BTreeMap::new();
+    let mut in_run = false;
+    for raw in log.lines() {
+        let l = plain(raw);
+        if STARTING.is_match(&l) {
+            for (id, secs) in std::mem::take(&mut last) {
+                keep(&mut out, &decided, id, secs);
+            }
+            in_run = true;
+            continue;
+        }
+        if !in_run {
+            continue;
+        }
+        if let Some(m) = LINE.captures(&l) {
+            let secs = m[3].trim().trim_start_matches('>').trim().trim_end_matches('s').parse::<f64>();
+            if let Ok(secs) = secs {
+                last.insert((m[4].to_string(), m[5].to_string()), secs);
+            }
+        }
+    }
+    for (id, secs) in last {
+        keep(&mut out, &decided, id, secs);
+    }
+    Ok(out.into_values().collect())
+}
+
+fn keep(out: &mut BTreeMap<TestId, Timed>, decided: &Nextest, id: TestId, secs: f64) {
+    let failed = decided.failed.contains(&id);
+    let e = out.entry(id.clone()).or_insert(Timed { id, secs, failed });
+    if secs > e.secs {
+        e.secs = secs;
+    }
+    e.failed |= failed;
 }
 
 #[cfg(test)]
@@ -212,6 +264,28 @@ mod tests {
         );
         let cut = cut_before(R0_PASS, "FAIL");
         assert!(matches!(read(&cut), Err(NextestError::Partial(_))));
+    }
+
+    #[test]
+    fn durations_are_the_last_try_of_each_test_and_a_partial_log_gives_none() {
+        let d = durations(R1_FAIL).unwrap();
+        let of = |t: &str| d.iter().find(|x| x.id == id(t)).cloned().unwrap();
+        assert_eq!(of("t::passes").secs, 0.063);
+        assert!(!of("t::passes").failed);
+        assert_eq!(of("t::flaky_once").secs, 0.057);
+        assert!(of("t::always_fails").failed);
+        assert_eq!(of("t::always_fails").secs, 0.060);
+        let t = durations(TIMEOUT_R1).unwrap();
+        assert_eq!(
+            t,
+            vec![Timed {
+                id: id("slow::hangs"),
+                secs: 1.017,
+                failed: true
+            }]
+        );
+        assert!(matches!(durations(&cut_before(R1_FAIL, "Summary")), Err(NextestError::Partial(_))));
+        assert_eq!(durations("clippy output\n"), Err(NextestError::NoRun));
     }
 
     #[test]

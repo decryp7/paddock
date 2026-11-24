@@ -32,7 +32,7 @@ Exit status: 0 no unwaived error, 1 findings, 2 usage. `GITHUB_STEP_SUMMARY` rec
 
 Adding a check changes no row of the CI golden (`tools/paddock-dev/tests/golden/ci-run/commands.tsv` writes the conformance line's
 `--only` value as `$ONLY`). When CI gains or loses a command (a contract line, a job step), regenerate that golden:
-`PADDOCK_UPDATE_GOLDEN=1 cargo test --lib ci_run::tests::the_contracts_run_exactly_the_commands_in_the_golden` in
+`PADDOCK_UPDATE_GOLDEN=1 cargo test --lib ci_run::tests::tree_the_contracts_run_exactly_the_commands_in_the_golden` in
 `tools/paddock-dev` (it prints the rows it adds and removes; refused when `CI=true`).
 
 Never edit generated files by hand (ER-40): `./dev gen check` runs both checks (`conformance-check-lists`, `ci-run-golden` in

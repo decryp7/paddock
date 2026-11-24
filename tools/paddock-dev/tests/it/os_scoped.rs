@@ -102,7 +102,7 @@ fn real_files() -> (PathBuf, Vec<String>) {
 }
 
 #[test]
-fn the_real_tree_has_no_exception_that_contradicts_the_code_and_the_check_read_many_files() {
+fn tree_the_real_tree_has_no_exception_that_contradicts_the_code_and_the_check_read_many_files() {
     let d = scratch();
     let (findings, probes) = run(d.path());
     assert!(findings.is_empty(), "C155 on the real tree:\n{findings:#?}");
@@ -113,7 +113,7 @@ fn the_real_tree_has_no_exception_that_contradicts_the_code_and_the_check_read_m
 }
 
 #[test]
-fn the_derived_placement_holds_the_packages_and_modules_the_hand_lists_named() {
+fn tree_the_derived_placement_holds_the_packages_and_modules_the_hand_lists_named() {
     let (root, files) = real_files();
     let bulk = DiskBulk(root.clone());
     let crates = derive("crates", &files, &bulk).unwrap();
@@ -145,7 +145,7 @@ fn the_derived_placement_holds_the_packages_and_modules_the_hand_lists_named() {
 }
 
 #[test]
-fn a_module_that_a_host_module_calls_is_derived_and_a_pure_one_nobody_calls_is_not() {
+fn tree_a_module_that_a_host_module_calls_is_derived_and_a_pure_one_nobody_calls_is_not() {
     let d = scratch();
     let src = d.path().join("tools/paddock-dev/src");
     std::fs::write(src.join("zz_callee.rs"), "pub fn f() {}\n").unwrap();
@@ -194,7 +194,7 @@ fn tracked_plus(scratch: &Path, extra: &[&str]) -> Vec<String> {
 }
 
 #[test]
-fn a_new_package_with_an_os_cfg_is_derived_and_without_it_is_not() {
+fn tree_a_new_package_with_an_os_cfg_is_derived_and_without_it_is_not() {
     let d = scratch();
     let dir = d.path().join("crates/zz-new");
     std::fs::create_dir_all(dir.join("src")).unwrap();
@@ -224,7 +224,7 @@ fn a_tauri_shell_in_last_packages_stays_off_the_host_legs_though_the_code_marks_
 }
 
 #[test]
-fn a_skip_over_a_module_with_os_code_goes_red_and_a_skip_over_pure_logic_does_not() {
+fn tree_a_skip_over_a_module_with_os_code_goes_red_and_a_skip_over_pure_logic_does_not() {
     let d = scratch();
     std::fs::write(d.path().join("crates/paddock-proc/src/zz_probe.rs"), "#[cfg(windows)]\nfn w() {}\n").unwrap();
     std::fs::write(d.path().join("crates/paddock-proc/src/zz_pure.rs"), "fn p() {}\n").unwrap();
@@ -250,7 +250,7 @@ fn a_skip_over_a_module_with_os_code_goes_red_and_a_skip_over_pure_logic_does_no
 }
 
 #[test]
-fn a_stale_and_a_redundant_exception_go_red() {
+fn tree_a_stale_and_a_redundant_exception_go_red() {
     let d = scratch();
     edit_contract(d.path(), "crates/paddock.ci.json", |v| {
         let add = serde_json::json!([
@@ -275,7 +275,7 @@ fn a_stale_and_a_redundant_exception_go_red() {
 }
 
 #[test]
-fn a_new_skip_or_only_entry_is_an_os_removal_that_needs_the_user_and_an_add_is_free() {
+fn tree_a_new_skip_or_only_entry_is_an_os_removal_that_needs_the_user_and_an_add_is_free() {
     let d = scratch();
     let root = d.path();
     git(root, &["init", "-q", "-b", "work"]);
@@ -365,7 +365,7 @@ fn a_new_skip_or_only_entry_is_an_os_removal_that_needs_the_user_and_an_add_is_f
 /// The register's second half (ER-46): an approval the merge base already covers is stale, so after the branch lands the register
 /// shrinks. Its own test, so neither half runs more than five C155 runs (each derives the placement of the copied tree).
 #[test]
-fn an_approval_the_merge_base_already_covers_is_stale_after_landing() {
+fn tree_an_approval_the_merge_base_already_covers_is_stale_after_landing() {
     let d = scratch();
     let root = d.path();
     git(root, &["init", "-q", "-b", "work"]);
@@ -403,7 +403,7 @@ fn an_approval_the_merge_base_already_covers_is_stale_after_landing() {
 }
 
 #[test]
-fn every_declared_scope_is_unscoped_on_linux_and_scoped_on_the_hosts() {
+fn tree_every_declared_scope_is_unscoped_on_linux_and_scoped_on_the_hosts() {
     let (root, files) = real_files();
     let bulk = DiskBulk(root.clone());
     let mut declared = 0;

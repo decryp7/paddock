@@ -126,7 +126,7 @@ fn run(r: &Path, runner: &dyn Runner, write: bool, mode: Mode) -> paddock_cli::R
 }
 
 #[test]
-fn a_dependency_that_forces_a_feature_on_a_watched_crate_turns_the_guard_red_and_the_wanted_path_turns_it_green() {
+fn graph_a_dependency_that_forces_a_feature_on_a_watched_crate_turns_the_guard_red_and_the_wanted_path_turns_it_green() {
     let d = repo();
     let r = d.path();
     // The tree as committed: pin what Cargo resolves, then nothing is found.
@@ -174,7 +174,7 @@ fn a_dependency_that_forces_a_feature_on_a_watched_crate_turns_the_guard_red_and
 }
 
 #[test]
-fn a_lockfile_the_change_did_not_regenerate_is_found_by_part_c() {
+fn graph_a_lockfile_the_change_did_not_regenerate_is_found_by_part_c() {
     let d = repo();
     let r = d.path();
     run(r, &Fake(vec![]), true, Mode::Gate);
@@ -189,7 +189,7 @@ fn a_lockfile_the_change_did_not_regenerate_is_found_by_part_c() {
 }
 
 #[test]
-fn a_stale_workspace_hack_is_found_by_part_a() {
+fn graph_a_stale_workspace_hack_is_found_by_part_a() {
     let d = repo();
     let r = d.path();
     run(r, &Fake(vec![]), true, Mode::Gate);
@@ -202,7 +202,7 @@ fn a_stale_workspace_hack_is_found_by_part_a() {
 }
 
 #[test]
-fn the_control_cannot_pass_by_watching_nothing_or_without_a_pins_file() {
+fn graph_the_control_cannot_pass_by_watching_nothing_or_without_a_pins_file() {
     let d = repo();
     let r = d.path();
     run(r, &Fake(vec![]), true, Mode::Gate);
