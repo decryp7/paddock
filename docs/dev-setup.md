@@ -255,7 +255,7 @@ lands), so a cleanup knows whose it is. Callers: engineering-rules `scripts/heav
 `cargo`, `cargo xwin` and `llvm-cov` run through it is covered; the xwin target folder is whatever `CARGO_TARGET_DIR` names,
 no script here makes one), and `scripts/vm-smoke/run*.mjs` record their scratch folder through `scripts/disk-record.sh`,
 which skips quietly where `./dev disk` does not exist. The scratch folder an agent's brief names is made by the brief's
-author or by `./dev brief` (not on main yet): that call belongs there. The Rust `heavy` tool (`tools/heavy`) makes no folder.
+author: that call belongs there. The Rust `heavy` tool (`tools/heavy`) makes no folder.
 
 ## Tests
 

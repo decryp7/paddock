@@ -1,5 +1,5 @@
 // A test that passes only on a retry fails the run (ER-12): every nextest `[profile.ci]` allows exactly one retry and sets
-// `flaky-result = "fail"` (cargo-nextest >= 0.9.131), so the run stays red and the report marks the test FLAKY for `./dev ci flakes`.
+// `flaky-result = "fail"` (cargo-nextest >= 0.9.131), so the run stays red and the report marks the test FLAKY for `./dev ci triage`.
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';

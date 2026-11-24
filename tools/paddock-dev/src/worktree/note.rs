@@ -1,6 +1,6 @@
 //! The lock note of an agent worktree and the UTC time it carries.
 //!
-//! `git worktree add --lock --reason <note>` stores the note; `list` and `check primary` read it back. The note says what
+//! `git worktree add --lock --reason <note>` stores the note; `list` reads it back. The note says what
 //! the worktree is for (`owner=<role>:<task>`); the owner map says which agent may write in it (ADR 0083 §1).
 
 use std::time::{SystemTime, UNIX_EPOCH};

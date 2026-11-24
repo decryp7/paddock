@@ -1,5 +1,5 @@
 //! Where this machine keeps its development folders, derived and never named (C125, rule 40). On 2026-11-14 the dev data moved to
-//! another disk and every hard-coded disk path went stale: the brief check refused the new scratch folders, `./dev disk` and
+//! another disk and every hard-coded disk path went stale: `./dev disk` and
 //! `./dev load` looked at disks that were gone.
 //!
 //! - The dev-targets folder (worktrees, build folders, scratch, the disk index): `PADDOCK_DEV_TARGETS`, else the parent of the
@@ -259,8 +259,7 @@ pub fn command(a: &PlacesArgs) -> Result<Report, CliError> {
 }
 
 /// Test helper: an invented folder that is absolute on this platform, the path itself on Unix and on drive `C:` on Windows (`/srv`
-/// is not absolute there). Tests name invented folders only (C125). Shared by the places and brief_check tests; train 14 moves it
-/// to `paddock_testkit::path`.
+/// is not absolute there). Tests name invented folders only (C125). Train 14 moves it to `paddock_testkit::path`.
 #[cfg(test)]
 pub(crate) fn test_abs(unix: &str) -> String {
     if cfg!(windows) { format!("C:{unix}") } else { unix.to_string() }

@@ -83,11 +83,6 @@
     "only": [
       {
         "os": "macos-latest",
-        "name": "brief_check::",
-        "reason": "a tool or check of the developer's Mac: tested on macOS only, never on a Windows host (user decision 2026-11-22, docs/research/2026-11-22-os-scoped-tests.md section 1)"
-      },
-      {
-        "os": "macos-latest",
         "name": "check::",
         "reason": "a tool or check of the developer's Mac: tested on macOS only, never on a Windows host (user decision 2026-11-22, docs/research/2026-11-22-os-scoped-tests.md section 1)"
       },

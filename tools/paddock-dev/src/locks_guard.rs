@@ -407,7 +407,7 @@ pub fn measure(runner: &dyn Runner, meta: &dyn Metadata, root: &Path, tracked: &
     }
 }
 
-/// A runner that runs nothing and says it passed: `--write` pins what Cargo resolves and leaves the hack to `locks check`.
+/// A runner that runs nothing and says it passed: `--write` pins what Cargo resolves and leaves the hack to CI's lockfile checks.
 struct NoRunner;
 
 impl Runner for NoRunner {
