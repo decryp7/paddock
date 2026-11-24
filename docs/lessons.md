@@ -3712,3 +3712,19 @@ logged with what the rule saw (ER-27). Lesson: an admission rule needs a cost, n
   its stop from nextest's own output.
 - **Lesson.** A list of test names is a record of the last failure, not a rule: declare the property on the test, put the policy in one
   place, and check the declaration by what makes it true (the lock's group at run time, the cost from the run's own timings).
+
+## Active apps: train and branch CI run the foundation only (feat/app-ci-pause, 2026-11-24)
+
+The user chose to run the foundation first and bring the apps back one at a time (docs/ci-active-apps.toml, docs/ci-schedules.md
+"Active apps"). The first design paused apps per tier in each `paddock.ci.json`. On the same day it was replaced by one active set
+that the nightly ignores: one file the coordinator edits, and no tier `if:` lines in five workflows (KISS). **Lesson:** a switch that
+many readers need lives in one file with one accessor; a per-app field would have been read by every reader through every contract.
+
+**Open fix item: the nightly does not count as an app's full green run for its tag.** `ci verdict` reads only the named workflow's runs
+(ci.yml for a leg app), and the nightly's ci.yml call runs inside nightly.yml. Until the reader also reads the nightly's called
+ci.yml jobs (or the nightly writes a verdict of its own), a tag of a ci.yml-leg app needs the app active and a green ci.yml run on the
+commit (`ci verdict --tag --app`). debrief.yml's own nightly run already counts for Debrief.
+
+**Open fix item: the train dispatch guard does not read the nightly yet.** `active_apps::classify_nightly` sorts a red nightly into
+train-stopping failures (foundation, active apps) and inactive apps' fix items; the green-main guard that refuses a dispatch on the
+first and records the second (`ci fix-items`) is part of the queued green-main work.

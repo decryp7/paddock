@@ -87,7 +87,43 @@ nightly and debrief cannot be capped by `max-parallel` (many unrelated jobs); on
 limit them. Gitea counts runner slots per caller, so `max-parallel` inside the reusable `app-fuzz.yml` does not cap
 five separate callers: nightly chains them with `needs:` instead.
 
-## Tag rehearsal
+## Active apps
+
+**Foundation first (user, 2026-11-24):** "Focus on foundation first then slowly turn the products on one by one." Train and branch
+CI (ci.yml, debrief.yml and the release workflows' plans) run the foundation, that is the shared crates, the ui packages,
+paddock-dev, conformance, icons, eslint and the workflow and gates checks, plus only the apps named in `docs/ci-active-apps.toml`:
+
+```toml
+active = []                                       # foundation only; later e.g. ["dyno"]
+next = ["dyno", "pitwall", "debrief", "pitcrew"]  # the planned order, for people
+```
+
+The file is read only through `tools/paddock-dev/src/active_apps.rs` (ER-42).
+
+- `./dev plan --ci` takes every inactive app out of the plan: no leg of it is dispatched, so nothing of it queues on the shared
+  runners. It prints `::notice::inactive: <apps> ...`, lists them under "Inactive" in the job summary, and its `plan scope:` line
+  names them (`"inactive": [...]`) with both `ran` and `need` leaving them out. A foundation run is therefore complete for the
+  foundation and the active apps, never for an inactive one. A push to main reuses a landing run of the same commit as before
+  (ER-49): the set is data in the tree, so both read the same one.
+- `./dev plan --ci --app <app>` (debrief.yml, the release workflows' plan action) answers `false` for an inactive app, writes
+  `inactive=true` and says "Inactive" in the job summary; a release workflow's verdict reports it as a notice, not as a red run.
+- **The nightly ignores the set** (a `schedule` event, or the `os_full` input of the nightly's manual run): every app, the full check.
+- An app's own gates (`PLAN_APP`, a release workflow's tag gates) and an app's own workflow on a tag of the app run that app whatever
+  the set says.
+- **Tags:** a tag of an app needs a full green run that planned the app (ER-15). tag.yml asks `./dev ci verdict --tag --app <app>`,
+  which refuses a green run whose scope lists the app as inactive ("make it active, or tag after a nightly that ran it").
+
+**A red nightly** (the green-main rule): a failure in the foundation or in an active app stops the next train; a failure in an
+inactive app is that app's fix item (it blocks that app's tag through the rule above, never a train).
+`active_apps::classify_nightly` sorts a nightly's failed jobs that way (an app's own workflow, a ci.yml `app <name> (...)` leg, a
+nightly `installers (<App>, ...)` job); the train dispatch guard that acts on it is part of the queued green-main work.
+
+**Making an app active** is one line: add it to `active`. The planner reads the set at the run's base too: an app active here and
+not at the base is planned in full, every leg and both halves, whatever else the change reached, so the activating commit's own run
+is the app's first full run. Land it as its own member, watch that run, and fix what it finds before the next app comes back.
+Taking an app out again is the same line removed.
+
+
 
 `tag-rehearsal.yml` (user, 2026-11-20) runs a tag's release path every day on main's head, and by hand, with no tag, no release and
 nothing published: the tag checks in dry-run mode (`request-tag.mjs --dry-run true`, the tag gates), then each app's installers with

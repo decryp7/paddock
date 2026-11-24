@@ -14,6 +14,7 @@ use paddock_dev::plan::{Request, plan_for, plan_on_graph, read_graph};
 use paddock_repo_graph::GitHistory;
 use paddock_testkit::TestCommand;
 use serde_json::{Value, json};
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
@@ -916,5 +917,137 @@ fn graph_guard_edits_mark_conformance() {
             .any(|r| r.as_str().is_some_and(|r| r.starts_with("C100: an ignore attribute")));
         assert_eq!(marked, marks, "the content rule on {rel} with {add:?}");
         std::fs::write(&path, original).unwrap();
+    }
+}
+
+/// `./dev plan --ci` on `root` with `env`: (GITHUB_OUTPUT, job summary, stdout, stderr); the run must succeed.
+fn plan_ci_in(root: &Path, env: &[(&str, &str)]) -> (String, String, String, String) {
+    let dir = tempfile::tempdir().unwrap();
+    let mut program = crate::dev_bin::command();
+    program.arg("plan").current_dir(root);
+    for (k, _) in paddock_dev::process_env::vars() {
+        if k.starts_with("GITHUB_") || k.starts_with("PLAN_") {
+            program.env_remove(k);
+        }
+    }
+    program
+        .env("GITHUB_OUTPUT", dir.path().join("out"))
+        .env("GITHUB_STEP_SUMMARY", dir.path().join("summary"));
+    for (k, v) in env {
+        program.env(k, v);
+    }
+    let out = program.arg("--ci").output().unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+    assert!(out.status.success(), "{stderr}");
+    let read = |f: &str| std::fs::read_to_string(dir.path().join(f)).unwrap_or_default();
+    (
+        read("out"),
+        read("summary"),
+        String::from_utf8_lossy(&out.stdout).to_string(),
+        stderr,
+    )
+}
+
+/// The app legs (`app@os` or `app@os:e2e-leg`) of a plan's `apps` output.
+fn app_legs(outputs: &str) -> BTreeSet<String> {
+    let apps = outputs.lines().find_map(|l| l.strip_prefix("apps=")).expect("the apps output");
+    let legs: Vec<Value> = serde_json::from_str(apps).unwrap();
+    legs.iter()
+        .map(|l| {
+            let e2e = l["e2e_leg"].as_str().unwrap_or("");
+            let id = format!("{}@{}", l["app"].as_str().unwrap(), l["os"].as_str().unwrap());
+            if e2e.is_empty() { id } else { format!("{id}:{e2e}") }
+        })
+        .collect()
+}
+
+/// The active apps (active_apps, user 2026-11-24): an app the set does not name plans no leg and is named in the log, the summary and
+/// the declared scope (which stays complete for the rest); naming it again plans it (ER-33 positive control), in full when the run's
+/// base did not have it active.
+#[test]
+fn an_inactive_app_plans_no_leg_is_named_and_comes_back_in_full_when_made_active() {
+    let (_keep, root) = fixture_with_origin();
+    let file = root.join("docs/ci-active-apps.toml");
+    let all = std::fs::read_to_string(&file).unwrap();
+    assert!(all.contains("active = [\"x\", \"y\", \"z\"]"), "the fixture plans every app: {all}");
+    std::fs::write(&file, all.replace("active = [\"x\", \"y\", \"z\"]", "active = [\"y\", \"z\"]")).unwrap();
+    git(&root, &["commit", "-qam", "x inactive"]);
+    let inactive_at = String::from_utf8(
+        Command::new("git")
+            .arg("-C")
+            .arg(&root)
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .unwrap()
+            .stdout,
+    )
+    .unwrap()
+    .trim()
+    .to_string();
+    let full = [
+        ("GITHUB_EVENT_NAME", "workflow_dispatch"),
+        ("GITHUB_REF", "refs/heads/topic"),
+        ("PLAN_WEBKIT", "1"),
+    ];
+    let (out, summary, stdout, stderr) = plan_ci_in(&root, &full);
+    let legs = app_legs(&out);
+    assert!(!legs.iter().any(|l| l.starts_with("x@")), "no leg of the inactive app: {legs:?}");
+    assert!(
+        legs.iter().any(|l| l.starts_with("z@")),
+        "a positive control: an active app still plans: {legs:?}"
+    );
+    assert!(
+        stdout.contains("::notice::inactive: x (docs/ci-active-apps.toml does not name them"),
+        "{stdout}"
+    );
+    assert!(
+        summary.contains("Inactive (not in docs/ci-active-apps.toml; no job runs, not green; the nightly runs them): x"),
+        "{summary}"
+    );
+    let scope = paddock_dev::run_scope::read(&stderr).unwrap().unwrap();
+    assert_eq!(scope.inactive, ["x".to_string()].into());
+    assert!(
+        !scope.need.apps.iter().any(|a| a.starts_with("x@")),
+        "a landing never claims the app: {:?}",
+        scope.need.apps
+    );
+    assert_eq!(scope.complete(), Ok(()), "complete for the rest: {}", scope.line());
+    assert!(scope.covers_app("x").is_err() && scope.covers_app("z").is_ok());
+    // The nightly ignores the set.
+    let (out, _, _, _) = plan_ci_in(&root, &[("GITHUB_EVENT_NAME", "schedule"), ("GITHUB_REF", "refs/heads/main")]);
+    assert!(app_legs(&out).contains("x@ubuntu-latest:e2e-webkit"), "the nightly runs every app");
+
+    // Made active again: one line. The whole tree plans x (ER-33: the switch is seen) ...
+    std::fs::write(&file, &all).unwrap();
+    git(&root, &["commit", "-qam", "x active"]);
+    let (out, _, _, stderr) = plan_ci_in(&root, &full);
+    let legs = app_legs(&out);
+    for leg in [
+        "x@ubuntu-latest",
+        "x@macos-latest",
+        "x@ubuntu-latest:e2e-1",
+        "x@ubuntu-latest:e2e-webkit",
+    ] {
+        assert!(legs.contains(leg), "{leg}: {legs:?}");
+    }
+    assert!(paddock_dev::run_scope::read(&stderr).unwrap().unwrap().inactive.is_empty());
+    // ... and a run diffed from a base where it was inactive plans it in full: its first full run (the change touches no file of x).
+    let member = [
+        ("GITHUB_EVENT_NAME", "workflow_dispatch"),
+        ("GITHUB_REF", "refs/heads/topic"),
+        ("PLAN_WEBKIT", "1"),
+        ("PLAN_BASE", inactive_at.as_str()),
+    ];
+    let (out, _, _, stderr) = plan_ci_in(&root, &member);
+    let legs = app_legs(&out);
+    assert!(stderr.contains("resumed: x is active here and was not at the base"), "{stderr}");
+    for leg in [
+        "x@ubuntu-latest",
+        "x@macos-latest",
+        "x@ubuntu-latest:e2e-1",
+        "x@ubuntu-latest:e2e-2",
+        "x@ubuntu-latest:e2e-webkit",
+    ] {
+        assert!(legs.contains(leg), "{leg}: {legs:?}");
     }
 }

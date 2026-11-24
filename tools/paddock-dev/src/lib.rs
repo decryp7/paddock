@@ -46,6 +46,7 @@
 
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
+pub mod active_apps;
 pub mod audit;
 pub mod brief_check;
 pub mod cargo_target;

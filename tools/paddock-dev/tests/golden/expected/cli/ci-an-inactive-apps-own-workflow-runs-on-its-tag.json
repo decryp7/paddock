@@ -1,0 +1,7 @@
+{
+ "code": 0,
+ "stdout": "true",
+ "outputs": "host_packages_macos=\nhost_filter_macos=\ninactive=false\n",
+ "summary": "### y\n\nBase: push refs/tags/y-v1.0.0: everything\n\nAffected: every job runs.\n",
+ "error": null
+}

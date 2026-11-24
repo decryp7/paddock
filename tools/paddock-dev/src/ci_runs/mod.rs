@@ -373,6 +373,10 @@ pub struct VerdictArgs {
     /// The answer is for a tag: only a run that tested every package on every OS counts, never an OS-scoped one (ER-15).
     #[arg(long)]
     tag: bool,
+    /// The app the tag releases: the deciding run must have planned it (it was active, or the run planned every app); a run whose
+    /// declared scope lists it as inactive (docs/ci-active-apps.toml) is not its full green run (ER-15).
+    #[arg(long)]
+    app: Option<String>,
 }
 
 /// Arguments of `ci fix-items`.
@@ -537,6 +541,16 @@ pub fn scope(a: &ScopeArgs) -> Result<Report, CliError> {
         flag("os-scoped", &a.os_scoped)?,
         &engines,
     );
+    // The active apps (crate::active_apps): an inactive app's run names it, so its verdict never reads as the app's (`--app`).
+    let root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let set = crate::active_apps::ActiveApps::load(&root).map_err(CliError::failure)?;
+    let env = |k: &str| std::env::var(k).ok();
+    let tag = env("GITHUB_REF").is_some_and(|r| r.starts_with("refs/tags/"));
+    let d = if !crate::active_apps::every_app(&env) && !tag && !set.active.contains(&a.app) {
+        d.with_inactive([a.app.clone()].into())
+    } else {
+        d
+    };
     Ok(Report::new(serde_json::json!({ "complete": d.complete().is_ok() }), d.line()))
 }
 
@@ -823,10 +837,14 @@ pub fn verdict(a: &VerdictArgs) -> Result<Report, CliError> {
         Ok(token) => {
             let mut http = CurlHttp;
             let mut client = Client::new(&mut http, &a.server, &a.repo, &token);
-            if a.tag {
+            let v = if a.tag {
                 verdict::verdict_tag(&mut client, &a.workflow, &a.sha)
             } else {
                 verdict::verdict(&mut client, &a.workflow, &a.sha)
+            };
+            match &a.app {
+                Some(app) => verdict::for_app(&mut client, v, app),
+                None => v,
             }
         }
     };

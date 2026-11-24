@@ -165,6 +165,16 @@ test('all checks pass on a good request', async () => {
   assert.match(summary('dyno-v1.1.0', SHA, r), /All checks passed/);
 });
 
+test('an app tag asks the verdict for that app (docs/ci-active-apps.toml: the run must have planned it); a package tag asks for none', async () => {
+  const asked = [];
+  const ask = async (wf, sha, app) => (asked.push([wf, app]), res(0, { verdict: 'green', run: 1 }));
+  assert.ok((await runChecks(world({ verdict: ask }))).every((x) => x.ok));
+  assert.deepEqual(asked, [['dyno.yml', 'dyno']]);
+  // Positive control: the reader's refusal of a run that left the app inactive fails the check with its words.
+  const refused = await runChecks(world({ verdict: async () => res(5, { verdict: 'red', detail: 'run 5 is green but not dyno\'s: dyno was inactive in it' }) }));
+  assert.match(refused.find((x) => !x.ok)?.detail ?? '', /dyno was inactive/);
+});
+
 test('P1-3: a commit only on a feature branch is refused; main and release/* are accepted', async () => {
   const on = (b) => world({ git: (a) => (a[0] === 'branch' ? b : a[0] === 'log' ? 'feat: x' : '') });
   for (const b of ['  origin/feature/x\n', '  origin/fix/y\n  origin/mainline\n', '  origin/release\n']) {

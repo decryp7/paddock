@@ -1,0 +1,13 @@
+# The apps that train and branch CI plan beside the foundation (ci.yml, the app workflows, debrief.yml). Read only through
+# tools/paddock-dev/src/active_apps.rs; docs/ci-schedules.md, "Active apps", says what it does and how to change it.
+#
+# The foundation always runs: the shared crates, the ui packages, paddock-dev, conformance, icons, eslint and the workflow and gates
+# checks. An app not named in `active` gets no job (nothing is dispatched for it, and the plan lists it as inactive, never green); the
+# nightly ignores this list and runs every app. Making an app active is one line here; the run of that commit plans it in full.
+
+decided = "2026-11-24"
+by = "user"
+reason = "Foundation first, then the apps one at a time (user, 2026-11-24: \"Focus on foundation first then slowly turn the products on one by one\")."
+active = []
+# The planned order (for people; the planner reads only `active`).
+next = ["dyno", "pitwall", "debrief", "pitcrew"]

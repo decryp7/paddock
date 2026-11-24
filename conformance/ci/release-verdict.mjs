@@ -16,7 +16,8 @@ import { isMain } from '../src/util/is-main.mjs';
 /**
  * @param {{app:string, event:string, ref?:string, planRun?:string, skipReason?:string, releaseResult?:string, gatesResult?:string, failedGates?:string[]}} i planRun and releaseResult are the
  *   `needs.*` values ('true'/'false'; 'success'/'skipped'/'failure'/'cancelled'; empty when the job did not exist). skipReason
- *   'train': the gate ended a scheduled run early because a train was in CI (./dev ci schedule-skip).
+ *   'train': the gate ended a scheduled run early because a train was in CI (./dev ci schedule-skip); 'inactive': the app is not
+ *   in docs/ci-active-apps.toml's `active`, so the plan ran none of its jobs.
  * @returns {{ok:boolean, level:'notice'|'warning'|'error', line:string}}
  */
 export function verdict({ app, event, ref = '', planRun = '', skipReason = '', releaseResult = '', gatesResult = '', failedGates = [] }) {
@@ -30,6 +31,9 @@ export function verdict({ app, event, ref = '', planRun = '', skipReason = '', r
     const names = failedGates.length ? `: ${failedGates.join(', ')}` : '';
     return { ok: false, level: 'error', line: `installers: not built (${app}): the gates were ${gatesResult}${names}, so the tag was not released` };
   }
+  // The app is inactive (docs/ci-active-apps.toml): its plan ran nothing and nothing was asked of it, which a notice says (not green). A
+  // tag is never excused: its plan runs the app whatever the set says.
+  if (skipReason === 'inactive' && !isTag) return { ok: true, level: 'notice', line: `installers: not built (${app}): ${app} is inactive (docs/ci-active-apps.toml \`active\` does not name it); not green, the nightly builds them` };
   // A nightly ended early because a train was in CI: nothing was measured, which a warning says (it is not a green night).
   if (planRun === 'false' && event === 'schedule' && skipReason === 'train') return { ok: true, level: 'warning', line: `installers: not built (${app}): a train was in CI, so this night measured nothing (not measured, not green); the next scheduled night builds them` };
   // A nightly whose gate found main and the toolchain image unchanged since the last nightly that built the installers (rule 50).
