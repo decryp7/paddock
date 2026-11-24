@@ -441,6 +441,19 @@ impl State {
     }
 }
 
+/// The reason every plan gives conformance (it is in every plan, user decision 2026-11-12), so the `conformance` flag alone does not
+/// say whether the change reaches it: [`reaches_conformance`] does.
+pub const CONFORMANCE_ALWAYS: &str = "conformance always runs";
+
+/// Whether the change reaches the conformance project for a reason of its own (its files, a declared input, a check's input), not
+/// only because conformance is in every plan. Needs a plan made with `explain` (its `why`); without one it answers true (fail closed).
+pub fn reaches_conformance(plan: &Value) -> bool {
+    match plan.get("why") {
+        Some(why) => why["conformance"].as_array().is_some_and(|a| a.iter().any(|x| x != CONFORMANCE_ALWAYS)),
+        None => true,
+    }
+}
+
 /// The plan for a list of changed files, in the JSON shape the retired `scripts/affected.mjs` printed.
 pub fn affected(files: &[String], graph: &RepoGraph, opts: &Options) -> Result<Value, GraphError> {
     let mut st = State::default();
@@ -736,7 +749,7 @@ pub fn affected(files: &[String], graph: &RepoGraph, opts: &Options) -> Result<V
     }
 
     // The conformance job is in every plan, whatever changed (user decision 2026-11-12); as `affected` of the retired scripts/affected.mjs did.
-    st.mark(Some("conformance".to_string()), "conformance always runs".to_string());
+    st.mark(Some("conformance".to_string()), CONFORMANCE_ALWAYS.to_string());
     let has = |p: &str| st.why.contains_key(p);
     let mut packages: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for d in &crates {
@@ -1055,9 +1068,7 @@ mod tests {
     /// Whether conformance is marked for a reason of the change: it is in every plan (user decision 2026-11-12), so the plain
     /// `conformance` flag no longer tells.
     fn because(p: &Value) -> bool {
-        p["why"]["conformance"]
-            .as_array()
-            .is_some_and(|a| a.iter().any(|x| x != "conformance always runs"))
+        reaches_conformance(p)
     }
 
     fn plan(files: &[&str]) -> Value {

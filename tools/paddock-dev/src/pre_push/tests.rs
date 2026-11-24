@@ -3886,3 +3886,30 @@ mod active_apps {
         assert_eq!(render("h", &all).data["inactive"], json!(0));
     }
 }
+
+#[test]
+fn the_conformance_tests_run_in_a_push_only_when_the_change_reaches_conformance_and_always_in_the_member_gate() {
+    let always = json!({"conformance": true, "apps": [], "packages": {}, "why": {"conformance": [crate::plan::CONFORMANCE_ALWAYS]}});
+    let change = change(&["apps/dyno/src/a.rs"]);
+    let push = Facts {
+        member_gate: false,
+        ..facts()
+    };
+    let skipped = plan_gates(&always, &change, &push);
+    assert!(!ids(&skipped).contains(&"conformance-tests".to_string()), "{skipped:?}");
+    assert!(
+        skipped
+            .iter()
+            .any(|p| matches!(p, Planned::Skip { id, .. } if id == "conformance-tests")),
+        "the row says why it did not run: {skipped:?}"
+    );
+    // The conformance row itself still runs on every push (ER-41).
+    assert!(ids(&skipped).contains(&"conformance".to_string()));
+    // Positive controls: a change the planner says reaches conformance runs them; the member gate runs them whatever changed; a plan
+    // without `why` (not made with explain) runs them too (fail closed).
+    let reached = json!({"conformance": true, "apps": [], "packages": {},
+        "why": {"conformance": ["conformance/src/checks/C79-orphan-guard-hooks.mjs", crate::plan::CONFORMANCE_ALWAYS]}});
+    assert!(ids(&plan_gates(&reached, &change, &push)).contains(&"conformance-tests".to_string()));
+    assert!(ids(&plan_gates(&always, &change, &facts())).contains(&"conformance-tests".to_string()), "the member gate");
+    assert!(ids(&plan_gates(&plan(), &change, &push)).contains(&"conformance-tests".to_string()));
+}
