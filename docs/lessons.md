@@ -3772,3 +3772,47 @@ first and records the second (`ci fix-items`) is part of the queued green-main w
   of ours was left after any run (3 `ci slot hold` processes after run 3, while the train's CI shared the Mac, are not attributed).
 - Class "process-wide state changed by one test reaches the others under the plain harness": 2nd instance (1st: `set_var`, ADR 0100
   amendment, 9ac185c24). Covered by the clippy bans on both and by rule 89's process per test.
+
+## The graph train's landing (ci.yml 8869 on cdd4c3d10, push run 8888 reused it): landing notes and fix items (2026-11-24)
+
+- **Landed.** ci.yml run 8869 on cdd4c3d10 was full green, and the push to main (run 8888) reused it (ER-49). Train 2026-11-25-a records
+  8869 as ci.yml's first green scope run (`./dev ci scope-record --workflow ci.yml --run 8869`, docs/ci-scope-first-runs.toml) and deletes
+  the plan job's old `plan verdict:` block in the same commit, so `./dev ci verdict` now decides ci.yml runs on the declared scope (ADR
+  0113, ER-41). The first `scope-record` at 15:15 was run outside the train's tree and was lost; it was run again in the train.
+- **A since_run round never reruns a job whose `needs` passed in the original run, nor anything that depends on it (class; fix item).**
+  The plan job of debrief.yml 8839 (on fe331ca55) selected `bundle (macos-latest)` ("the whole job reruns"), but `bundle` needs
+  `rust-lint`, which a round skips because it passed in 8831, and a job with a skipped need is skipped, so the bundle never ran (all three
+  legs skipped). A survey with the YAML parser of every workflow that takes `since_run` (ci.yml, debrief.yml): ci.yml has no job that
+  needs more than `plan`; in debrief.yml `bundle` is the one selectable job with that shape (`tauri-smoke` has the same kind of needs, but
+  its `if` already tolerates a skipped need, the model for the fix); `release` and `nightly-mark` run only on tags and schedules. The
+  full run 8844 gave the bundle verdict instead.
+- **A since_run filter that selects nothing must fail closed, not warn (class; fix item).** The round ci.yml 8868 (since_run=8843, on
+  cdd4c3d10) reran `paddock-dev (macos-latest)` with `test(=ci_run::tests::adding_a_check_...)`, but ADR 0121 (9a4d16f9b, in the same
+  round) had renamed it `tree_adding_a_check_...`. The workflow warns on a filter that matches nothing, so the leg would have passed
+  without running the test. 8868 was cancelled and the full run used instead. Fix: map failed tests through renames, or refuse the round
+  with an `::error::` naming the missing test; the queued failed-only dispatch guard checks that the round ran each failed test.
+- **Fix items, not blocking:**
+  - `repo_model::code::tests::on_the_real_tree_every_read_candidate_parses_with_syn` took 29.8 s alone on the Windows runner (ci.yml 8838,
+    job 47580) against its 60 s budget: half the budget with no neighbour. For the test-cost work (ADR 0121).
+  - `./dev ci dispatch` prints no run id, with `--json` either; a caller finds its run again by head sha and workflow, against ER-51.
+  - App failures in the landing runs, non-blocking by the user's decision of 2026-11-24 (app CI off until the foundation is done):
+    `app spotter (windows-latest)` FLAKY `spotter-render::real_browser a_missing_element_times_out_as_failed` (8843, job 47674: panic at
+    real_browser.rs:179 after 20.3 s, the retry passed in 17.4 s; the train does not touch spotter-render); Debrief WebKit
+    `e2e/context-actions.e2e.ts:76` "mask dialog previews the replacement and saves" FLAKY (debrief.yml 8844, job 47663: the first row
+    still unmasked within 5 s at line 90, 38.2 s; the retry passed in 26.5 s; the train touches only the dock and navigation services).
+    debrief.yml 8844 was cancelled once it was no longer required; no installer runs.
+  - The landing was judged on foundation jobs only: `./dev ci dispatch` and the plan had no switch to leave app legs out, so the normal
+    ci.yml run was dispatched and its `app *` and WebKit reference-app jobs were not judged. feat/app-ci-pause (train 2026-11-25-a) adds
+    that switch (docs/ci-active-apps.toml).
+- **Seen while assembling train 2026-11-25-a (fix items):**
+  - The lessons merge driver (`./dev merge lessons-driver`) puts back the blank line that union merge drops only before a `## ` heading.
+    A section that starts with a plain paragraph heading (docs/rules-timing-and-report-visibility's "Measuring and reporting
+    (2026-11-24)") lost its blank line in its merge into train 2026-11-25-a (the member was then taken out for C100: its rule text names
+    `./dev bench`, which does not exist yet). Third instance of the class "the lessons file loses blank lines in a union merge" (2026-11-21
+    section above; the driver fixed the `## ` shape only). Fix: restore the blank line before any block the union appended, or require
+    every appended block to start with `## ` (conformance).
+  - `./dev wait --pid <p> --max <d>` counts `--max` from the process's start, not from the wait's start: a wait with `--max 2h` on a gate
+    that had run 1 h 51 min ended after about 8 minutes with "gave up after 2h".
+  - Member 3's gate took about 4.5 hours, most of it queue time in the heavy queue (doctest rows queued up to 1624 s each, behind another
+    agent's pre-push), and its gen row `notices-dyno` was NOT MEASURED because the train worktree had no `node_modules`: `./dev worktree
+    add` does not run `npm ci`, so an integrator must run it before the first gate.

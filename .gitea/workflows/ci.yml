@@ -190,14 +190,6 @@ jobs:
           echo "plan mode: full=$PLAN_MODE_FULL"
           grep -q '^crate_legs=' "$GITHUB_OUTPUT" || echo "crate_legs=$PLAN_OS_LEGS" >> "$GITHUB_OUTPUT"
           grep -q '^paddock_dev_legs=' "$GITHUB_OUTPUT" || echo "paddock_dev_legs=$PLAN_OS_LEGS" >> "$GITHUB_OUTPUT"
-          # REPORT-ONLY PHASE (ER-41, ADR 0113): until docs/ci-scope-first-runs.toml names ci.yml, `./dev ci verdict` still decides on this
-          # line (and prints the scope view the planner declared above as a notice). `./dev ci scope-record --workflow ci.yml --run <id>`
-          # records the first green scope run and switches the reader; this block is deleted in the same change (conformance fails
-          # while a recorded producer still prints it). The condition is the one reviewed on 2026-11-21: a push to main's scope, WebKit
-          # included, never an app-only dispatch, a rerun or a reused run.
-          complete=false
-          if [ -z "$PLAN_SINCE_RUN" ] && [ "$PLAN_MODE_FULL" = true ] && [ "$PLAN_REUSE" != true ] && [ -z "$PLAN_APP" ] && { [ "$EVENT" = push ] || [ -n "$PLAN_WEBKIT" ]; }; then complete=true; fi
-          echo "plan verdict: complete=$complete"
 
   # C102 (ADR 0072): every listen site of the Rust sources is in docs/ipc-endpoints.toml with an ending test or a reason, and the
   # ratchet of connection endings is well formed. Always runs (./dev builds paddock-dev from source here, about a minute; the scan itself takes about 3 s): a listener added anywhere must not
