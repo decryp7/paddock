@@ -219,7 +219,7 @@ jobs:
           # The base of the allow list growth test (PADDOCK_BASE_REF) and its merge base.
           fetch-depth: 0
 
-      # Before the first ./dev of the job: it hashes and builds itself with the job's pinned compiler (C119).
+      # Before the first ./dev of the job: it hashes and builds itself with the job's pinned compiler.
       - env:
           PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
         uses: ./.gitea/actions/setup-rust
@@ -352,7 +352,7 @@ jobs:
         with:
           persist-credentials: false
 
-      # Before the first ./dev of the job: it hashes and builds itself with the job's pinned compiler (C119).
+      # Before the first ./dev of the job: it hashes and builds itself with the job's pinned compiler.
       - env:
           PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
         uses: ./.gitea/actions/setup-rust
@@ -559,7 +559,7 @@ jobs:
           # The base of the allow list growth test (PADDOCK_BASE_REF) and its merge base.
           fetch-depth: 0
 
-      # Before the first ./dev of the job: it hashes and builds itself with the job's pinned compiler (C119).
+      # Before the first ./dev of the job: it hashes and builds itself with the job's pinned compiler.
       - env:
           PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
         uses: ./.gitea/actions/setup-rust
