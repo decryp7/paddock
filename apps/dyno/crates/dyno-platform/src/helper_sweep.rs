@@ -273,7 +273,11 @@ impl ProcessSweeper for SystemSweeper {
             .with_disk_usage()
             .with_user(UpdateKind::Always)
             .with_exe(UpdateKind::Always);
+        let listed_at = paddock_proc::listing_started();
         sys.refresh_processes_specifics(ProcessesToUpdate::All, true, what);
+        // A parent only through a sound link (paddock_proc::parent_of): on Windows the orphans of an earlier holder of a pid
+        // name its new holder as their parent (ADR 0033).
+        let table = paddock_proc::table_of_listing(listed_at, sys.processes().values().map(paddock_proc::Listed::of));
         let users = Users::new_with_refreshed_list().map_err(|why| {
             log::warn!("the user list is unavailable (sysinfo): {why}; the sweep is refused");
             PlatformError::Failed(format!("The OS user list could not be read ({why})."))
@@ -292,7 +296,7 @@ impl ProcessSweeper for SystemSweeper {
                 RawProcess {
                     pid: p.pid().as_u32(),
                     started: i64::try_from(p.start_time()).ok().filter(|s| *s > 0),
-                    parent: p.parent().map(|p| p.as_u32()),
+                    parent: paddock_proc::parent_of(&table, p.pid().as_u32()),
                     name: p.name().to_string_lossy().into_owned(),
                     path: p.exe().map(|e| e.to_string_lossy().into_owned()),
                     owner,

@@ -34,6 +34,7 @@ fn parent_pid() -> Option<u32> {
         let mut more = Process32FirstW(snap.0, &mut entry);
         while more != 0 {
             if entry.th32ProcessID == me {
+                // conformance: parent-pid — hold() checks that this parent started before this process and holds its handle by identity
                 return Some(entry.th32ParentProcessID);
             }
             more = Process32NextW(snap.0, &mut entry);

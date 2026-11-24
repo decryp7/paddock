@@ -204,9 +204,18 @@ impl Harness {
     fn until_job_processes_seen(&mut self) {
         // The line itself, not only a job: a look at the processes can find the job before its line is read (CI job
         // 21879), and the job is named only by the line.
+        // The runner starts on the first try: Pitcrew's own `--version` look at the binary (started beside the first launch) is
+        // never "a runner from this folder already running outside Pitcrew", which refused the launch and waited the 10 s
+        // backoff (Windows run 8765: 21 of 60 runs took 10.4-10.7 s instead of 0.6-1.0 s).
+        let mut refused = None;
         self.until_real("the job's line is read", |h| {
-            h.status().current_job.is_some_and(|j| j.info.repository.is_some())
+            let s = h.status();
+            if refused.is_none() {
+                refused = s.problem.clone().filter(|p| p.contains("already runs outside Pitcrew"));
+            }
+            s.current_job.is_some_and(|j| j.info.repository.is_some())
         });
+        assert_eq!(refused, None, "the first launch was refused");
         let started = self.status().current_job.unwrap().started_at;
         let ahead = started.0.saturating_sub(pitcrew_service::cleanup::now().0);
         assert!(

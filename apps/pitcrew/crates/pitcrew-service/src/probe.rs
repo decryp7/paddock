@@ -71,15 +71,7 @@ impl Probe {
                 .with_cpu()
                 .with_memory(),
         );
-        let listed: Vec<paddock_proc::Listed> = self
-            .processes()
-            .map(|(pid, p)| paddock_proc::Listed {
-                pid: pid.as_u32(),
-                parent: p.parent().map(Pid::as_u32),
-                rss: p.memory(),
-                is_thread: false,
-            })
-            .collect();
+        let listed: Vec<paddock_proc::Listed> = self.processes().map(|(_, p)| paddock_proc::Listed::of(p)).collect();
         self.table = paddock_proc::table_of_listing(listed_at, listed);
     }
 
@@ -183,6 +175,40 @@ impl Probe {
             .map(|(pid, _)| pid.as_u32())
     }
 
+    /// A runner (`exe` running as `daemon`) other than `except`: the processes of the last listing with that executable, looked
+    /// at again now with their command lines. One that has ended since the listing is no runner, and neither are the service's
+    /// own short looks at the binary (`--version`, `register`), so one that ran beside a launch never refuses it (run 8765). A
+    /// command line that cannot be read counts as a runner: a second copy is never started on a failed read.
+    pub fn running_runner(&mut self, exe: &Path, except: Option<u32>) -> Option<u32> {
+        let want = normalise(exe);
+        let candidates: Vec<Pid> = self
+            .processes()
+            .filter(|(pid, _)| Some(pid.as_u32()) != except)
+            .filter(|(_, p)| p.exe().is_some_and(|e| normalise(e) == want))
+            .map(|(pid, _)| *pid)
+            .collect();
+        if candidates.is_empty() {
+            return None;
+        }
+        let sys = self.sys.as_mut()?;
+        sys.refresh_processes_specifics(
+            ProcessesToUpdate::Some(&candidates),
+            // A candidate that has ended since the listing (the service's own `--version`, which lasts milliseconds) drops out.
+            true,
+            ProcessRefreshKind::nothing().with_cmd(UpdateKind::Always),
+        );
+        let processes = sys.processes();
+        candidates
+            .into_iter()
+            .find(|pid| {
+                processes.get(pid).is_some_and(|p| {
+                    let cmd: Vec<String> = p.cmd().iter().map(|a| a.to_string_lossy().into_owned()).collect();
+                    is_runner_daemon(&cmd)
+                })
+            })
+            .map(|pid| pid.as_u32())
+    }
+
     /// A machine sample (without the runners' share, which the supervisor adds); `disk_of` names a folder on the disk to report.
     pub fn machine(&mut self, now: Timestamp, disk_of: &Path) -> MachineSample {
         let (cpu, mem_used_bytes, mem_total_bytes) = match self.sys.as_mut() {
@@ -247,6 +273,12 @@ fn info_of(table: &paddock_proc::Table, pid: u32, pgid: Option<u32>, cpu_time_ms
         cpu_time_ms,
         rss_bytes,
     }
+}
+
+/// Whether a process of the runner binary with this command line is a runner: its `daemon` subcommand (the arguments
+/// [`pitcrew_core::layout::daemon_args`] gives), or a command line that could not be read (unknown counts as a runner).
+fn is_runner_daemon(cmd: &[String]) -> bool {
+    cmd.is_empty() || cmd.iter().skip(1).any(|a| a == "daemon")
 }
 
 /// Whether one of the `listed` processes (pid and name, from the listing `table` was made of) is a child of `pid` through a
@@ -364,6 +396,33 @@ mod tests {
         assert!(
             has_job_children_in(&during, runner, names(&during)),
             "the job's child makes the runner busy"
+        );
+    }
+
+    /// Regression (Windows run 8765, 21 of 60 runs 10 s slow): the service's own `--version` look at the runner binary, started
+    /// beside the first launch, was taken for "a runner from this folder already runs outside Pitcrew"; the launch was refused
+    /// and waited the 10 s backoff.
+    #[test]
+    fn the_services_own_look_at_the_binary_is_not_a_runner_outside_pitcrew() {
+        let cmd = |a: &[&str]| a.iter().map(|s| (*s).to_string()).collect::<Vec<_>>();
+        assert!(
+            !is_runner_daemon(&cmd(&["gitea-runner", "--version"])),
+            "the version check this service started"
+        );
+        assert!(!is_runner_daemon(&cmd(&[
+            "gitea-runner",
+            "--config",
+            "c.yaml",
+            "register",
+            "--no-interactive"
+        ])));
+        assert!(
+            is_runner_daemon(&cmd(&["gitea-runner", "daemon", "--config", "c.yaml"])),
+            "a runner another supervisor started"
+        );
+        assert!(
+            is_runner_daemon(&[]),
+            "unknown counts as a runner: never start a second copy on a failed read"
         );
     }
 

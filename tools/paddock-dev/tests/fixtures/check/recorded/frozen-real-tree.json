@@ -671,6 +671,19 @@
    }
   },
   {
+   "check": "C53",
+   "severity": "error",
+   "rule": 53,
+   "file": "apps/dyno/crates/dyno-platform/src/macos/procinfo.rs",
+   "line": 33,
+   "message": "reads the raw parent pid `pbsi_ppid`: its parent may have ended and the pid been handed on (Windows does so at once)",
+   "fix": "Put the rows into a paddock_proc table (paddock_proc::Listed, table_of_listing) and ask paddock_proc::parent_of or descendants, which follow a link only from an older process to a newer one (ADR 0033). A read that only feeds that table, or checks the parent's start time itself, carries `// conformance: parent-pid — <reason>`.",
+   "waiver": {
+    "reason": "ADR 0033 WP-9: the process tree view shows parent pids without a start-time check (display only)",
+    "expires": "2026-12-31"
+   }
+  },
+  {
    "check": "C39",
    "severity": "error",
    "rule": 40,
