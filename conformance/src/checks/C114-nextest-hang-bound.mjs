@@ -4,7 +4,7 @@
 // or the file a `paddock.ci.json` names in `nextestConfig` (the demos share one). `[profile.default]` must set
 // `slow-timeout = { period = "...", terminate-after = N }` and period * N must be at most 120 s. A test that legitimately needs longer is a
 // named `[[profile.default.overrides]]` with a `# waiver:` line, never a longer default. Every `[[profile.<p>.overrides]]` that sets a
-// `slow-timeout` (the `ci` profile's included) needs a `terminate-after` with period * N at most 480 s and a `# waiver:` comment in the
+// `slow-timeout` (the `ci` profile's included) needs a `terminate-after` with period * N at most 3600 s and a `# waiver:` comment in the
 // comment block directly above its header; the `bench` profile (ignored benchmarks, `--profile bench`) is exempt from the cap but not
 // from the `terminate-after`. Workspaces are found among tracked and untracked files (`git ls-files -co --exclude-standard`); outside a git
 // checkout the check reports "not measured" (ER-33), which fails.
@@ -15,8 +15,10 @@ import { error } from '../finding.mjs';
 
 /** The most a test may run in the default profile before nextest stops it and fails it, in seconds. */
 export const MAX_DEFAULT_SECONDS = 120;
-/** The most an override of a non-bench profile may allow, in seconds (the longest waiver today is 8 periods of 60 s). */
-export const MAX_OVERRIDE_SECONDS = 480;
+/** The most an override of a non-bench profile may allow, in seconds: Bazel's longest test timeout tier, `eternal` (ADR 0121: wall-clock
+ * limits are hang backstops in tiers of 60, 300, 900 and 3600 s, set from a test's measured time times the worst measured contention, so a
+ * busy host does not fail a test; the user, 2026-11-24: "Test should run no matter the load"). */
+export const MAX_OVERRIDE_SECONDS = 3600;
 const EXCLUDED = /(?:^|\/)(?:fuzz|vendor|spikes|research|fixture|fixtures|node_modules|target)\//;
 const UNITS = { ms: 0.001, s: 1, m: 60, min: 60, h: 3600 };
 
@@ -128,7 +130,7 @@ export default {
       }
       const text = readFileSync(join(ctx.root, config), 'utf8');
       for (const [line, what] of overrideProblems(text)) {
-        findings.push(error('C114', 5, config, line, `${config}: ${what}`, 'Put a `# waiver: <why this test needs longer>` comment directly above the `[[profile.<p>.overrides]]` header and give its slow-timeout a `terminate-after` (period * N at most 480 s); a benchmark goes in the `bench` profile. Never raise the default.'));
+        findings.push(error('C114', 5, config, line, `${config}: ${what}`, 'Put a `# waiver: <why this test needs longer>` comment directly above the `[[profile.<p>.overrides]]` header and give its slow-timeout a `terminate-after` (period * N at most 3600 s); a benchmark goes in the `bench` profile. Never raise the default.'));
       }
       const problem = boundProblem(text);
       if (problem) findings.push(error('C114', 5, config, 1, `${config} ${problem}: a test that waits on something that never comes hangs the run`, next));

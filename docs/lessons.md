@@ -3707,3 +3707,6 @@ logged with what the rule saw (ER-27). Lesson: an admission rule needs a cost, n
   its stop from nextest's own output.
 - **Lesson.** A list of test names is a record of the last failure, not a rule: declare the property on the test, put the policy in one
   place, and check the declaration by what makes it true (the lock's group at run time, the cost from the run's own timings).
+- **Amendment (the user, 2026-11-24: "Test should run no matter the load").** A wall-clock stop is a hang backstop, never a performance
+  limit: tiers of 300, 900 and 3600 s set from a test's own time times the worst measured contention (15, jobs 47411 and 47644), asserts
+  on elapsed wall time listed as fix items, and a per-test progress guard (no CPU time and no output) as the hang detector.

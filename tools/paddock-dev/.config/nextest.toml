@@ -23,11 +23,26 @@ slow-timeout = { period = "30s", terminate-after = 4 }
 # so they are held to at most four per job, the Mac lane's core share of 4, and to two at a time where a lane has 5 threads (2 x 2 = 4
 # <= 5). Before this, every whole-tree test of a job could run at once beside the heavy jobs on the host: run 8830 macOS (job 47411)
 # ran every whole-tree test 5 to 15 times slower than locally.
+# Time tiers (ADR 0121; the user, 2026-11-24: "Test should run no matter the load"). A wall-clock stop is a hang backstop, not a
+# performance limit, in Bazel's tiers: moderate 300 s, long 900 s, eternal 3600 s. A tier is at least a test's measured time times the
+# worst measured contention, 15: in jobs 47411 (run 8830 macOS, two heavy jobs on the host) and 47644 the whole-tree tests ran 5 to 15
+# times their local time. The times are upper bounds of the tests' own work: their wall time in a full ci-profile run at 8 test threads on
+# the shared 14-core Mac at a median 1-minute load of 39 (2026-11-24, docs/benchmarks.md "test cost classes"); `./dev test-guard` replaces
+# them with measured CPU time (docs/benchmarks.md "test time tiers"). Unclassed (ci profile): longest 16.3 s x 15 = 245 s, moderate 300 s.
+# tree: 41.4 s x 15 = 621 s, long 900 s. graph: 26.9 s x 15 = 404 s without the train replay, long 900 s. The train replay: 79.2 s there,
+# and its rule tables alone took 157.6 to 185.9 s of one thread (2026-11-23): 186 s x 15 = 2790 s, eternal 3600 s. The default profile
+# keeps C114's 120 s for unclassed tests run by hand.
 [test-groups.repo-graph]
 max-threads = 4
 
 [test-groups.whole-tree]
 max-threads = 4
+
+# waiver: the train replay's tier, eternal (12 periods of 300 s): its rule tables alone took 157.6 to 185.9 s of one thread (2026-11-23,
+# docs/benchmarks.md), times the contention of 15 is 2790 s (the time tiers above). Before the class rows, so it wins over the graph tier.
+[[profile.default.overrides]]
+filter = "test(/^repo_graph_net::graph_train_replay_/)"
+slow-timeout = { period = "300s", terminate-after = 12 }
 
 # Class graph. Group: the runs of `cargo metadata` queue on cargo's package-cache lock, and readers started together on a loaded host
 # runner passed 60 s while they waited (run 7787 macOS; the ownership test on Windows, run 8694 job 45791: stopped at 60 s, then 18.2 s;
@@ -41,12 +56,12 @@ max-threads = 4
 # classes").
 # With the class (2026-11-24, 8 test threads at a median 1-minute load of 39 on the 14-core Mac, docs/benchmarks.md "test cost classes"):
 # the 44 graph tests' longest 79.2 s (the train replay; 146.9 s before, at a median load of 42), median 7.3 s, one over 30 s.
-# waiver: the graph class budget below, four periods of 60 s, with its measurements above (ER-12; not raised for the tests it held).
+# waiver: the graph class's tier, long (15 periods of 60 s), from the measurements above and the time tiers (ER-12).
 [[profile.default.overrides]]
 filter = "test(/(^|::)graph_[^:]*$/)"
 test-group = "repo-graph"
 threads-required = 2
-slow-timeout = { period = "60s", terminate-after = 4 }
+slow-timeout = { period = "60s", terminate-after = 15 }
 
 # Class tree. The class budget, four periods of 60 s, the budget the whole-repository live tests had as waivers, not raised for
 # them. Measured 2026-11-11: 42 to 49 s quiet against over 240 s under I/O load, files finishing all along (each live test also judges
@@ -59,12 +74,12 @@ slow-timeout = { period = "60s", terminate-after = 4 }
 # With the class (same runs): the 29 tree tests' longest 41.4 s (os_scoped's removal test, FLAKY at the 60 s stop before), median 7.8 s;
 # ci_run's conformance-line test 11.6 s (59.1 s before). The eight tests/it pre_push:: tests that start `./dev check --pre-push` over the
 # real tree are in the class: out of any group they took 22 to 52 s.
-# waiver: the tree class budget below, four periods of 60 s, with its measurements above (ER-12; not raised for the tests it held).
+# waiver: the tree class's tier, long (15 periods of 60 s), from the measurements above and the time tiers (ER-12).
 [[profile.default.overrides]]
 filter = "test(/(^|::)tree_[^:]*$/)"
 test-group = "whole-tree"
 threads-required = 2
-slow-timeout = { period = "60s", terminate-after = 4 }
+slow-timeout = { period = "60s", terminate-after = 15 }
 
 [profile.ci]
 # ADR 0103 (D2): a test whose child still holds its output 500 ms after the test ended is reported as LEAK. Report-only (ER-41):
@@ -77,10 +92,10 @@ failure-output = "immediate-final"
 # Every core, where a CI job has its host to itself. On a shared host (three macOS runners on one Mac) build-jobs.sh
 # sets NEXTEST_TEST_THREADS to the job's core share, which overrides this (conformance/ci/build-jobs.sh).
 test-threads = "num-cpus"
-# Reported SLOW after 30 s and stopped, failing the run, after 60 s, so a test that waits on a timeout fails CI instead of
-# slowing it down. A test that needs longer is in a cost class (the default profile's class table above, which this profile
-# inherits) or a named override with a `# waiver:` line saying why.
-slow-timeout = { period = "30s", terminate-after = 2 }
+# The moderate tier (the time tiers above): reported SLOW every 60 s and stopped, failing the run, after 300 s, the backstop for a test
+# that hangs. A hang is found sooner by `./dev test-guard` (no CPU time and no output); a test that needs longer is in a cost class
+# (the class table above, which this profile inherits) or a named override with a `# waiver:` line saying why.
+slow-timeout = { period = "60s", terminate-after = 5 }
 
 [profile.ci.junit]
 # Written to <target>/nextest/ci/junit.xml.
