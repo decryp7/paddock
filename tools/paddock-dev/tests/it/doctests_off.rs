@@ -33,7 +33,7 @@ fn graph_every_library_target_has_doctests_off() {
     let root = root();
     let history = GitHistory::new(&root, Duration::from_secs(120));
     let graph = read_graph_unplaced(&root, &history).unwrap();
-    let abs = paddock_env::winpath::real(&root).unwrap().to_string_lossy().replace('\\', "/");
+    let abs = paddock_testkit::path::text(paddock_env::winpath::real(&root).unwrap());
     assert!(
         graph.metadata.len() >= 5,
         "the planner read too few workspaces: {:?}",
