@@ -560,13 +560,16 @@ fn the_member_gate_runs_the_source_audits_by_their_name_rule() {
     );
 }
 
-/// Every `kind(lib) & test(/regex/)` clause of the member-audits filter selects at least one test of this very binary (the lib's tests),
-/// so a renamed lib audit (the ownership test, train 2026-11-26-c) cannot drop out of the member gate silently: `--no-tests=fail` only
-/// sees an empty selection as a whole (ER-33). The control: a clause whose regex names no test is found empty.
+/// Every `kind(lib) & test(/regex/)` clause of the member-audits filter selects at least one test of the lib, so a renamed lib audit
+/// (the ownership test, train 2026-11-26-c) cannot drop out of the member gate silently: `--no-tests=fail` only sees an empty selection
+/// as a whole (ER-33). The lib's test names are read from its sources (a test never starts its own test program: tool_cache's
+/// `no_source_file_reads_its_own_path_except_through_self_exe`): each `#[test]` function as `<module path>::<name>` and
+/// `<module path>::tests::<name>`. The control: a clause whose regex names no test is found empty.
 #[test]
 fn every_lib_clause_of_the_member_audits_selects_a_test_of_the_lib() {
     use super::gates::split_audit_filter;
-    let text = std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(".config/nextest.toml")).unwrap();
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let text = std::fs::read_to_string(root.join(".config/nextest.toml")).unwrap();
     let doc: toml::Table = text.parse().unwrap();
     let whole = doc["profile"][AUDIT_PROFILE]["default-filter"].as_str().unwrap().to_string();
     let (_, rest) = split_audit_filter(&whole).expect("the filter starts with its binary(it) group");
@@ -576,14 +579,34 @@ fn every_lib_clause_of_the_member_audits_selects_a_test_of_the_lib() {
         .filter_map(|c| c.split("test(/").nth(1).and_then(|r| r.split("/)").next()).map(str::to_string))
         .collect();
     assert!(!clauses.is_empty(), "the filter has a kind(lib) clause: {rest}");
-    let exe = std::env::current_exe().unwrap();
-    let out = paddock_proc::command(exe).args(["--list", "--format", "terse"]).output().unwrap();
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
-    let names: Vec<String> = String::from_utf8_lossy(&out.stdout)
-        .lines()
-        .filter_map(|l| l.strip_suffix(": test").map(str::to_string))
-        .collect();
-    assert!(names.len() > 100, "the lib's tests were listed: {}", names.len());
+    let src = root.join("src");
+    let test_fn = regex::Regex::new(r"#\[test\]\s*(?:#\[[^\]]*\]\s*)*fn ([a-z0-9_]+)\(").unwrap();
+    let mut names = Vec::new();
+    let mut stack = vec![src.clone()];
+    while let Some(d) = stack.pop() {
+        for e in std::fs::read_dir(&d).unwrap().flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                stack.push(p);
+                continue;
+            }
+            if p.extension().is_none_or(|x| x != "rs") {
+                continue;
+            }
+            let rel = p.strip_prefix(&src).unwrap().with_extension("");
+            let mut parts: Vec<String> = rel.iter().map(|c| c.to_string_lossy().to_string()).collect();
+            if parts.last().is_some_and(|l| l == "mod" || l == "lib" || l == "main") {
+                parts.pop();
+            }
+            let module = parts.join("::");
+            for c in test_fn.captures_iter(&std::fs::read_to_string(&p).unwrap()) {
+                let prefix = if module.is_empty() { String::new() } else { format!("{module}::") };
+                names.push(format!("{prefix}{}", &c[1]));
+                names.push(format!("{prefix}tests::{}", &c[1]));
+            }
+        }
+    }
+    assert!(names.len() > 200, "the lib's tests were read: {}", names.len());
     let selects = |re: &str| {
         let re = regex::Regex::new(re).unwrap_or_else(|e| panic!("`{re}` is not a regex: {e}"));
         names.iter().any(|n| re.is_match(n))
@@ -594,6 +617,10 @@ fn every_lib_clause_of_the_member_audits_selects_a_test_of_the_lib() {
             "the {AUDIT_PROFILE} lib clause `{c}` matches no test of the lib: renamed or removed (.config/nextest.toml)"
         );
     }
+    assert!(
+        selects("^repo_model::tests::graph_every_tracked_file_of_the_tree_has_an_owner"),
+        "the reader finds the ownership test"
+    );
     assert!(
         !selects("^repo_model::tests::graph_every_tracked_file_renamed_away"),
         "the control finds an empty clause"
