@@ -3838,6 +3838,16 @@ first and records the second (`ci fix-items`) is part of the queued green-main w
   the merged tree only).
 - **Skipped:** feat/check-result-reuse (f67b7f6a1, based before the push gate's rework) conflicts in `pre_push/exec.rs`: its reuse hook
   calls the BudgetClock model that the train's push gate no longer has. It goes to train c after its branch merges main.
+- **Train 2026-11-25-a landed on a narrowed run (ER-15; the coordinator's call, option A).** Its full ci.yml run 8983 on 627b28afc was
+  green, but its plan declared `"ran":{...,"whole":true,"os_full":false,"smoke":["icons"],"affected":[]}` against
+  `"need":{...,"whole":true,"os_full":true,"smoke":[],"affected":[]}` (inactive: every app): the train changed shared steps of ci.yml's
+  `icons` job (`step:ci.yml#icons/1,2,6`), so the graph planner ran icons in smoke mode (phase `installed`). Main was fast-forwarded
+  to 627b28afc on 8983 and the push run (8984) plans icons whole; `ci reuse` does not reuse 8983, and `ci fix-items` recorded nothing
+  (8983 had no FLAKY test). Two fix items, queued for train c with the dispatch guards:
+  1. `./dev ci verdict` prints an empty reason for a smoke-narrowed run: "only partial: 8983 ()".
+  2. The landing run's scope and a push to main's need disagree for a job reached only through its steps (smoke in the run, whole in
+     the need), so a landing run that ran exactly what its diff planned is never complete and the push to main runs again. That breaks
+     ER-49's one definition of "complete" shared by the landing and the reader.
   - Train 2026-11-25-a's landing run ci.yml 8976 (plan job 48889) could not save the escape monitor's selection record:
     `::warning::the selection record of this plan was not saved (git push origin refs/paddock/plan-records/*:refs/paddock/plan-records/*:
     fatal: could not read Username for 'http://172.16.1.220:7400': No such device or address); the next nightly counts this commit as
