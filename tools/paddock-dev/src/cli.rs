@@ -370,7 +370,8 @@ enum CiCommand {
     TestCost(ci_runs::TestCostArgs),
     /// Is there a full green run of a workflow on a commit? The one reader of the runs for that verdict (the tag workflow asks
     /// it). A run counts if it is a push to main or its plan job logged `plan mode: full=true`; the newest full run decides.
-    /// Exit 0 full green, 5 red or only partial runs, 6 not measured (never a pass).
+    /// Exit 0 full green (with `--landing` also green with fix items: FLAKY tests in untouched code), 5 red, only partial runs, or
+    /// fix items without `--landing` (a tag needs a run without them), 6 not measured (never a pass).
     Verdict(ci_runs::VerdictArgs),
     /// Records the fix items of a run that is green with fix items (FLAKY tests of crates and apps the change did not reach, ER-12) in
     /// docs/lessons.md, once whatever the number of calls: the call a landing makes on the landed commit, the queue's or an

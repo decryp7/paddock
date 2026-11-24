@@ -433,12 +433,16 @@ pub struct VerdictArgs {
     #[arg(long, default_value = SERVER)]
     server: String,
     /// The answer is for a tag: only a run that tested every package on every OS counts, never an OS-scoped one (ER-15).
-    #[arg(long)]
+    #[arg(long, conflicts_with = "landing")]
     tag: bool,
     /// The app the tag releases: the deciding run must have planned it (it was active, or the run planned every app); a run whose
     /// declared scope lists it as inactive (docs/ci-active-apps.toml) is not its full green run (ER-15).
     #[arg(long)]
     app: Option<String>,
+    /// The answer is for a landing: a run that ran exactly its own diff's selection counts, and green with fix items (FLAKY
+    /// tests in untouched code, each a fix item) is landable (exit 0). Never for a tag.
+    #[arg(long)]
+    landing: bool,
 }
 
 /// Arguments of `ci fix-items`.
@@ -795,6 +799,8 @@ pub fn verdict(a: &VerdictArgs) -> Result<Report, CliError> {
             let mut client = Client::new(&mut http, &a.server, &a.repo, &token);
             let v = if a.tag {
                 verdict::verdict_tag(&mut client, &a.workflow, &a.sha)
+            } else if a.landing {
+                verdict::verdict_landing_at(&mut client, &a.workflow, &a.sha, &root)
             } else {
                 verdict::verdict(&mut client, &a.workflow, &a.sha)
             };
@@ -804,10 +810,18 @@ pub fn verdict(a: &VerdictArgs) -> Result<Report, CliError> {
             }
         }
     };
-    let r = verdict::report(&v, &a.workflow, &a.sha, &crate::pre_push::outcome::GitRepo(&root));
+    let r = verdict::report_for(&v, &a.workflow, &a.sha, &crate::pre_push::outcome::GitRepo(&root), a.landing);
     if r.exit != Exit::Ok {
         eprintln!("::error::ci verdict: {}", r.text);
+    } else if matches!(v, verdict::Verdict::GreenWithFixItems { .. }) {
+        eprintln!("::notice::ci verdict: {}", r.text);
     }
+    let mut lines = green::take_notices();
+    lines.push(r.text.clone());
+    green::write_summary(
+        &format!("ci verdict: {} on {}", a.workflow, a.sha.get(..10).unwrap_or(&a.sha)),
+        &lines,
+    );
     Ok(r)
 }
 
