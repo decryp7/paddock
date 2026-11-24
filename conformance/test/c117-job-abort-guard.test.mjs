@@ -18,7 +18,7 @@ test('C117: guarded steps and steps without !cancelled() pass', async () => {
   assert.deepEqual(await findingsOf('C117', root), []);
 });
 
-test('C117: an unguarded !cancelled() step in a job with build-jobs or job-isolation is a warning with file, line and next step', async () => {
+test('C117: an unguarded !cancelled() step in a job with build-jobs or job-isolation is an error with file, line and next step', async () => {
   const root = makeApp({
     '.gitea/workflows/ci.yml': wf(
       job('a', `${SETUP}      - run: echo a\n        if: \${{ !cancelled() }}\n`),
@@ -27,7 +27,7 @@ test('C117: an unguarded !cancelled() step in a job with build-jobs or job-isola
   });
   const f = await findingsOf('C117', root);
   assert.equal(f.length, 2);
-  assert.ok(f.every((x) => x.severity === 'warn' && x.file === '.gitea/workflows/ci.yml'), JSON.stringify(f));
+  assert.ok(f.every((x) => x.severity === 'error' && x.file === '.gitea/workflows/ci.yml'), JSON.stringify(f));
   assert.deepEqual(f.map((x) => x.line), [10, 16]);
   assert.match(f[0].message, /job a/);
   assert.match(f[0].fix, /PADDOCK_JOB_ABORTED != '1'/);

@@ -34,7 +34,7 @@ test('C156 run: e2e specs, ui specs and the kit naming AxeBuilder are read; othe
     'docs/x.md': BARE,
   }));
   assert.deepEqual(found.map((f) => f.file).sort(), ['apps/debrief/app/e2e/a11y.e2e.ts', 'ui/e2e/gallery.spec.ts', 'ui/projects/paddock-e2e/src/other.ts']);
-  assert.equal(found[0].severity, 'warn');
+  assert.equal(found[0].severity, 'error');
   assert.equal(found[0].line, 2);
   assert.match(found[0].fix, /axeViolations|withPageStill/);
 });

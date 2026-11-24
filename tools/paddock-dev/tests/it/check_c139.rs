@@ -136,7 +136,7 @@ fn c139_reads_the_two_places_and_calls_a_malformed_list_check_broken() {
             ("apps/pitwall/app/eslint-suppressions.json", true, Some("check-broken")),
         ]
     );
-    assert_eq!(r.errors(), 0, "report-only until its first green CI run (ER-41)");
+    assert_eq!(r.errors(), 2, "blocking since ci.yml 8869 (ER-41): a list the check cannot read is an error");
 }
 
 #[test]

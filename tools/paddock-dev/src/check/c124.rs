@@ -69,6 +69,7 @@ static SPEC: Spec = Spec {
     file: ALLOW,
     unseen: "a gate result made by hand",
     restore: "Restore conformance/c124-allow.json: {\"allow\": [{\"path\": \"...\", \"site\": \"...\", \"reason\": \"...\"}]}.",
+    growth_blocks: false,
 };
 const FIX: &str = "Build the result with `paddock_cli::measure` (or `Evidence::adopt`) and print it with `Outcome::json()`; read another gate's result with `Outcome::from_wire`, never its exit code (ADR 0089 amendment 2026-11-13).";
 

@@ -33,7 +33,7 @@ test('C139 growth: an unchanged or shrunk list says nothing, a raised count, a n
   assert.deepEqual(await run(repo(supp(2), supp(2))), []);
   assert.deepEqual(await run(repo(supp(2), supp(1))), [], 'a lowered count is shrinking');
   const raised = await run(repo(supp(1), supp(2)));
-  assert.deepEqual(raised.map((f) => [f.file, f.line, f.severity, f.unwaivable]), [['ui/eslint-suppressions.json', 1, 'warn', true]]);
+  assert.deepEqual(raised.map((f) => [f.file, f.line, f.severity, f.unwaivable]), [['ui/eslint-suppressions.json', 1, 'error', true]]);
   assert.match(raised[0].message, /the exception list grew: 1 entry is \(counting each `count`\) not in ui\/eslint-suppressions\.json at the merge base [0-9a-f]{9}; it may only shrink/);
   assert.match(raised[0].fix, /user's approval/);
   const added = await run(repo(supp(1), JSON.stringify({ 'e2e/a.spec.ts': { [R]: { count: 1 } }, 'e2e/b.spec.ts': { [R]: { count: 2 } } })));
@@ -50,7 +50,7 @@ test('C139 growth: a file new at the merge base, and a checkout where git cannot
   sh(first, 'add', '.');
   sh(first, 'commit', '-q', '-m', 'the list is introduced');
   const intro = await run(first);
-  assert.deepEqual(intro.map((f) => [f.file, f.severity, f.unwaivable]), [['ui/eslint-suppressions.json', 'warn', true]], 'a list new at the merge base is an empty base: its 3 entries are growth');
+  assert.deepEqual(intro.map((f) => [f.file, f.severity, f.unwaivable]), [['ui/eslint-suppressions.json', 'error', true]], 'a list new at the merge base is an empty base: its 3 entries are growth');
   assert.match(intro[0].message, /grew: 3 entries are/);
   // The same for a list in another app (a new apps/pitwall/app/eslint-suppressions.json with count 5 gave no finding).
   const other = makeApp(SPEC);

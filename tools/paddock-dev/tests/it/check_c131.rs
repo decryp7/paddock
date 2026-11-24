@@ -76,7 +76,7 @@ fn both(case: &str, root: &Path) -> (Value, Value) {
 }
 
 #[test]
-fn c131_flags_the_planted_uid_and_the_other_machine_values_as_warnings() {
+fn c131_flags_the_planted_uid_and_the_other_machine_values_as_errors() {
     let tree = fixture_tree();
     let r = run_checks(&options(tree.path(), "fixture"), &registry()).unwrap();
     let got: Vec<(&str, usize)> = r.findings.iter().map(|f| (f.file.as_str(), f.line)).collect();
@@ -120,7 +120,8 @@ fn c131_flags_the_planted_uid_and_the_other_machine_values_as_warnings() {
         "{got:?}"
     );
     assert_eq!(got.len(), 16, "{got:?}");
-    assert_eq!(r.errors(), 0, "report-only until its first green run (ER-41)");
+    assert_eq!(r.errors(), 15, "blocking since ci.yml 8869 (ER-41): every site is an error");
+    assert_eq!(r.warnings(), 1, "the stale allow entry stays a warning");
 }
 
 /// The positive control (ER-33): the host ran the check over its own planted tree and it saw the planted uid.

@@ -6,8 +6,8 @@
 // allow list), and one whose reason has fewer than three words (the lint refuses it too). The shared allow list holds it to shrink-only against
 // the merge base with the target branch (`util/allow-list.mjs`, through `util/baseline.mjs`): an entry added by a branch is a finding. A file that cannot be read is not
 // measured; an allow file that cannot be read makes the check broken (one finding, nothing else).
-// Report-only (warnings) until its first green run on the real tree is recorded here (ER-41). Recorded: not yet.
-import { warn } from '../finding.mjs';
+// Blocking (mode gate) since its first green run on the real tree, ci.yml run 8869 (cdd4c3d10, 2026-11-24; ER-41).
+import { error } from '../finding.mjs';
 import { parseAllowList, readAllowList } from '../util/allow-list.mjs';
 
 export const ALLOW = 'conformance/c140-allow.json';
@@ -33,12 +33,12 @@ export function optOuts(text) {
 
 /** The allow list: [{ path, site, reason, count }], or throws why it cannot be read. */
 export const parseAllow = (text) => parseAllowList(text, ALLOW);
-const SPEC = { id: 'C140', rule: 21, file: ALLOW, unseen: 'a per-item opt-out', restore: 'Restore conformance/c140-allow.json: {"allow": [{"path": "...", "site": "per-item", "reason": "...", "count": 1}]}.' };
+const SPEC = { id: 'C140', rule: 21, file: ALLOW, growth: 'error', unseen: 'a per-item opt-out', restore: 'Restore conformance/c140-allow.json: {"allow": [{"path": "...", "site": "per-item", "reason": "...", "count": 1}]}.' };
 
 export default {
   id: 'C140',
   scope: 'root',
-  mode: 'report-only',
+  mode: 'gate',
   allowList: SPEC,
   title: 'Every per-item opt-out of the bulk-call lint is counted in a list that only shrinks',
   rule: 21,
@@ -54,9 +54,9 @@ export default {
         continue;
       }
       for (const { line, reason, short } of optOuts(text)) {
-        if (short) out.push(warn('C140', 21, f, line, `a per-item opt-out with a reason of fewer than ${MIN_WORDS} words (\`${reason}\`)`, 'Say why this call must stay one per item, in a sentence.'));
+        if (short) out.push(error('C140', 21, f, line, `a per-item opt-out with a reason of fewer than ${MIN_WORDS} words (\`${reason}\`)`, 'Say why this call must stay one per item, in a sentence.'));
         if (allow.admit(f, (s) => s === 'per-item') === 'allowed') continue;
-        out.push(warn('C140', 21, f, line, `keeps a backend call per item (\`// per-item:\`) and is not in ${ALLOW}`, FIX));
+        out.push(error('C140', 21, f, line, `keeps a backend call per item (\`// per-item:\`) and is not in ${ALLOW}`, FIX));
       }
     }
     // The shared allow list compares the list with the merge base itself (its growth findings come with `warnings()`).

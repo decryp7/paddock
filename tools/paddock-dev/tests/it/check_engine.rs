@@ -139,12 +139,14 @@ fn json_mode_strict_and_the_exit_statuses_agree() {
         scratch.path(),
     );
     assert!(json_run.stdout.trim_start().starts_with('{'));
-    // C120 and C119 are report-only: a warning never fails the run, `--strict` makes the named check's warnings fail.
-    // conformance: stand-in — the shell file is the data of the C120 layout check, never run; conformance: layout-guess — a shell fixture for the strict-mode test, not a layout this code computes
-    let bad = tree(&[("scripts/x.sh", "#!/bin/sh\nd=$(dirname \"$0\")/../deps\ncd \"$d\"\n")]);
+    // C123 is report-only: a warning never fails the run, `--strict` makes the named check's warnings fail.
+    let bad = tree(&[(
+        "crates/x/tests/bad.rs",
+        "#[test]\nfn t() {\n    let _ = std::process::Command::new(env!(\"CARGO_BIN_EXE_paddock-dev\")).output();\n}\n",
+    )]);
     let loose = same(
         "engine-loose",
-        &["--app", "t", "--root", bad.path().to_str().unwrap(), "--only", "C120"],
+        &["--app", "t", "--root", bad.path().to_str().unwrap(), "--only", "C123"],
     );
     let strict = same(
         "engine-strict",
@@ -154,13 +156,21 @@ fn json_mode_strict_and_the_exit_statuses_agree() {
             "--root",
             bad.path().to_str().unwrap(),
             "--only",
-            "C120",
+            "C123",
             "--strict",
-            "C120",
+            "C123",
         ],
     );
     assert_eq!(loose.code, Some(check::outcome::CLEAN), "{}", loose.stdout);
     assert_eq!(strict.code, Some(check::outcome::FINDINGS), "{}", strict.stdout);
+    // C120 blocks since its first green run (ci.yml 8869, ER-41): its site fails the run without `--strict`.
+    // conformance: stand-in — the shell file is the data of the C120 layout check, never run; conformance: layout-guess — a shell fixture for the blocking test, not a layout this code computes
+    let guess = tree(&[("scripts/x.sh", "#!/bin/sh\nd=$(dirname \"$0\")/../deps\ncd \"$d\"\n")]);
+    let blocking = same(
+        "engine-c120-blocks",
+        &["--app", "t", "--root", guess.path().to_str().unwrap(), "--only", "C120"],
+    );
+    assert_eq!(blocking.code, Some(check::outcome::FINDINGS), "{}", blocking.stdout);
 }
 
 #[test]

@@ -17,7 +17,7 @@
 //! (a folder git accepts as a work tree): a tree in memory (a control) or a fixture folder has nothing to compare, and says nothing. In a checkout
 //! where git cannot give a merge base it warns that the rule is not enforced, and in CI it is a not-measured error (ADR 0089), never
 //! silence. The base is the target ref ([`baseline::target_ref`], the one reader of `PADDOCK_BASE_REF`). The growth finding is a
-//! warning only because the checks that use this reader (C121, C124, C125, C130) are report-only themselves (ER-41); the blocking
+//! warning for a report-only user (ER-41) and an error for a blocking one ([`Spec::growth_blocks`]: C131); the blocking
 //! baselines (C53, C71, C104, C115) use the same target ref and stay errors.
 
 use super::baseline::{self, Growth};
@@ -43,6 +43,9 @@ pub struct Spec {
     pub unseen: &'static str,
     /// The fix of the check-broken finding: how the allow file looks.
     pub restore: &'static str,
+    /// Whether growth against the merge base is an error (a blocking check, ER-41) rather than a warning (a report-only one); the
+    /// JavaScript reader's `growth: 'error'`.
+    pub growth_blocks: bool,
 }
 
 /// The allow list of check `spec` read through `ctx`, with what `parse` reads beside its entries; or, when the file is missing, not
@@ -269,7 +272,14 @@ impl AllowList {
 
     /// The one finding about growth against the merge base (see the module): empty when nothing was added or it cannot apply here.
     fn growth_findings(&self, ctx: &Ctx) -> Vec<Finding> {
-        let Spec { id, rule, file, .. } = *self.spec;
+        let Spec { id, rule, file, growth_blocks, .. } = *self.spec;
+        let severity = |id: &str, rule: u32, file: &str, line: usize, message: String, fix: &str| {
+            if growth_blocks {
+                Finding::error(id, rule, file, line, message, fix)
+            } else {
+                Finding::warn(id, rule, file, line, message, fix)
+            }
+        };
         if ctx.is_in_memory() || !baseline::is_work_tree(ctx.root()) {
             return Vec::new();
         }
@@ -280,7 +290,7 @@ impl AllowList {
             Growth::Unmeasured(why) => vec![baseline::unmeasured_finding(ctx.in_ci(), id, rule, file, "the allow list", &why)],
             Growth::Added { added: 0, .. } => Vec::new(),
             Growth::Added { base, added, .. } => vec![
-                Finding::warn(
+                severity(
                     id,
                     rule,
                     file,
@@ -353,6 +363,7 @@ mod tests {
         file: FILE,
         unseen: "a site",
         restore: "Restore it.",
+        growth_blocks: false,
     };
 
     fn list(entries: &str) -> AllowList {

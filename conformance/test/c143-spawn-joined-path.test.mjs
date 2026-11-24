@@ -49,6 +49,6 @@ test('C143 run: findings carry file and line; non-source files are skipped', () 
   assert.equal(found.length, 1);
   assert.equal(found[0].file, 'scripts/a.mjs');
   assert.equal(found[0].line, 3);
-  assert.equal(found[0].severity, 'warn');
+  assert.equal(found[0].severity, 'error');
   assert.match(found[0].fix, /resolve/);
 });

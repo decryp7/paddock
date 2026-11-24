@@ -7,11 +7,11 @@
 // Read in every tracked .mjs/.cjs/.js/.mts/.cts/.ts file that mentions child_process, comments and string contents masked (`maskTs`, the
 // one JavaScript masker). No parser or type checker: limits are a variable assigned in another file or by a later `=`, a join built from
 // a spread or an alias of `join` (`import { join as j }`), and a program passed through a helper.
-// ER-41: report-only (warnings) until its first green run on the real tree, recorded by run id here. Recorded: not yet.
-import { warn } from '../finding.mjs';
+// ER-41: blocking (mode gate) since its first green run on the real tree, ci.yml run 8869 (cdd4c3d10, 2026-11-24).
+import { error } from '../finding.mjs';
 import { maskTs } from './C71-test-timing.mjs';
 
-export const SEVERITY = warn;
+export const SEVERITY = error;
 const SOURCE = /\.(?:mjs|cjs|js|mts|cts|ts)$/;
 const CALL = /(?<![\w$])(?:(?:child_process|cp|childProcess)\s*\.\s*)?(spawn|spawnSync|execFile|execFileSync|fork)\s*\(/g;
 const JOIN = /^\s*(?:await\s+)?(?:(?:node:)?path\s*\.\s*(?:posix\s*\.\s*|win32\s*\.\s*)?)?join\s*\(/;
@@ -78,7 +78,7 @@ export function joinedProgramCalls(text) {
 export default {
   id: 'C143',
   scope: 'root',
-  mode: 'report-only',
+  mode: 'gate',
   title: 'A spawned program is never a join with a relative first part',
   rule: 21,
   run(ctx) {

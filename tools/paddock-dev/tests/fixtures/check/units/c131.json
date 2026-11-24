@@ -17,7 +17,7 @@
    "findings": [
     {
      "check": "C131",
-     "severity": "warn",
+     "severity": "error",
      "rule": 40,
      "file": "x/tests/golden/a.json",
      "line": 2,
@@ -26,7 +26,7 @@
     },
     {
      "check": "C131",
-     "severity": "warn",
+     "severity": "error",
      "rule": 40,
      "file": "x/tests/golden/a.json",
      "line": 3,
@@ -35,8 +35,8 @@
     }
    ],
    "waived": [],
-   "errors": 0,
-   "warnings": 2
+   "errors": 2,
+   "warnings": 0
   }
  },
  {
@@ -57,7 +57,7 @@
    "findings": [
     {
      "check": "C131",
-     "severity": "warn",
+     "severity": "error",
      "rule": 40,
      "file": "x/tests/golden/a.json",
      "line": 1,
@@ -66,7 +66,7 @@
     },
     {
      "check": "C131",
-     "severity": "warn",
+     "severity": "error",
      "rule": 40,
      "file": "x/tests/golden/a.json",
      "line": 2,
@@ -75,8 +75,8 @@
     }
    ],
    "waived": [],
-   "errors": 0,
-   "warnings": 2
+   "errors": 2,
+   "warnings": 0
   }
  },
  {
@@ -97,7 +97,7 @@
    "findings": [
     {
      "check": "C131",
-     "severity": "warn",
+     "severity": "error",
      "rule": 40,
      "file": "x/tests/golden/a.json",
      "line": 1,
@@ -106,8 +106,8 @@
     }
    ],
    "waived": [],
-   "errors": 0,
-   "warnings": 1
+   "errors": 1,
+   "warnings": 0
   }
  },
  {
@@ -128,7 +128,7 @@
    "findings": [
     {
      "check": "C131",
-     "severity": "warn",
+     "severity": "error",
      "rule": 40,
      "file": "x/tests/golden/a.json",
      "line": 1,
@@ -137,7 +137,7 @@
     },
     {
      "check": "C131",
-     "severity": "warn",
+     "severity": "error",
      "rule": 40,
      "file": "x/tests/golden/a.json",
      "line": 2,
@@ -146,8 +146,8 @@
     }
    ],
    "waived": [],
-   "errors": 0,
-   "warnings": 2
+   "errors": 2,
+   "warnings": 0
   }
  },
  {
@@ -168,7 +168,7 @@
    "findings": [
     {
      "check": "C131",
-     "severity": "warn",
+     "severity": "error",
      "rule": 40,
      "file": "x/tests/golden/a.json",
      "line": 1,
@@ -177,8 +177,8 @@
     }
    ],
    "waived": [],
-   "errors": 0,
-   "warnings": 1
+   "errors": 1,
+   "warnings": 0
   }
  },
  {
@@ -199,7 +199,7 @@
    "findings": [
     {
      "check": "C131",
-     "severity": "warn",
+     "severity": "error",
      "rule": 40,
      "file": "x/tests/golden/a.json",
      "line": 1,
@@ -208,7 +208,7 @@
     },
     {
      "check": "C131",
-     "severity": "warn",
+     "severity": "error",
      "rule": 40,
      "file": "x/tests/golden/a.json",
      "line": 2,
@@ -217,7 +217,7 @@
     },
     {
      "check": "C131",
-     "severity": "warn",
+     "severity": "error",
      "rule": 40,
      "file": "x/tests/golden/a.json",
      "line": 3,
@@ -226,7 +226,7 @@
     },
     {
      "check": "C131",
-     "severity": "warn",
+     "severity": "error",
      "rule": 40,
      "file": "x/tests/golden/a.json",
      "line": 4,
@@ -235,7 +235,7 @@
     },
     {
      "check": "C131",
-     "severity": "warn",
+     "severity": "error",
      "rule": 40,
      "file": "x/tests/golden/a.json",
      "line": 4,
@@ -244,8 +244,8 @@
     }
    ],
    "waived": [],
-   "errors": 0,
-   "warnings": 5
+   "errors": 5,
+   "warnings": 0
   }
  },
  {
@@ -266,7 +266,7 @@
    "findings": [
     {
      "check": "C131",
-     "severity": "warn",
+     "severity": "error",
      "rule": 40,
      "file": "x/tests/golden/a.json",
      "line": 1,
@@ -275,7 +275,7 @@
     },
     {
      "check": "C131",
-     "severity": "warn",
+     "severity": "error",
      "rule": 40,
      "file": "x/tests/golden/a.json",
      "line": 2,
@@ -284,7 +284,7 @@
     },
     {
      "check": "C131",
-     "severity": "warn",
+     "severity": "error",
      "rule": 40,
      "file": "x/tests/golden/a.json",
      "line": 3,
@@ -293,8 +293,8 @@
     }
    ],
    "waived": [],
-   "errors": 0,
-   "warnings": 3
+   "errors": 3,
+   "warnings": 0
   }
  },
  {
@@ -315,7 +315,7 @@
    "findings": [
     {
      "check": "C131",
-     "severity": "warn",
+     "severity": "error",
      "rule": 40,
      "file": "x/tests/golden/a.json",
      "line": 1,
@@ -324,7 +324,7 @@
     },
     {
      "check": "C131",
-     "severity": "warn",
+     "severity": "error",
      "rule": 40,
      "file": "x/tests/golden/a.json",
      "line": 3,
@@ -333,8 +333,8 @@
     }
    ],
    "waived": [],
-   "errors": 0,
-   "warnings": 2
+   "errors": 2,
+   "warnings": 0
   }
  },
  {
@@ -438,7 +438,7 @@
    "findings": [
     {
      "check": "C131",
-     "severity": "warn",
+     "severity": "error",
      "rule": 40,
      "file": "x/tests/f.snap",
      "line": 1,
@@ -447,7 +447,7 @@
     },
     {
      "check": "C131",
-     "severity": "warn",
+     "severity": "error",
      "rule": 40,
      "file": "x/tests/golden/a.json",
      "line": 1,
@@ -456,7 +456,7 @@
     },
     {
      "check": "C131",
-     "severity": "warn",
+     "severity": "error",
      "rule": 40,
      "file": "x/tests/golden/b.json",
      "line": 3,
@@ -465,8 +465,8 @@
     }
    ],
    "waived": [],
-   "errors": 0,
-   "warnings": 3
+   "errors": 3,
+   "warnings": 0
   }
  },
  {
@@ -520,7 +520,7 @@
      "rule": 40,
      "file": "conformance/c131-allow.json",
      "line": 1,
-     "message": "the check cannot look: conformance/c131-allow.json is not JSON: Unexpected token 'o', \"nope\" is not valid JSON",
+     "message": "the check cannot look: conformance/c131-allow.json is not JSON: expected ident at line 1 column 2",
      "fix": "Restore conformance/c131-allow.json: {\"allow\": [{\"path\": \"...\", \"site\": \"...\", \"reason\": \"...\", \"count\": 1}]}.",
      "unwaivable": true,
      "outcome": "check-broken"
@@ -613,7 +613,7 @@
    "findings": [
     {
      "check": "C131",
-     "severity": "warn",
+     "severity": "error",
      "rule": 40,
      "file": "x/tests/golden/a.json",
      "line": 1,
@@ -622,8 +622,8 @@
     }
    ],
    "waived": [],
-   "errors": 0,
-   "warnings": 1
+   "errors": 1,
+   "warnings": 0
   }
  }
 ]

@@ -95,6 +95,7 @@ static SPEC: Spec = Spec {
     file: ALLOW,
     unseen: "a shell fixture",
     restore: "Restore conformance/c130-allow.json: {\"allow\": [{\"path\": \"...\", \"site\": \"#!/bin/sh\", \"reason\": \"...\", \"count\": 1}]}.",
+    growth_blocks: false,
 };
 
 /// The check.

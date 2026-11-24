@@ -10,8 +10,8 @@
 //! Read: the `eslint-suppressions.json` of an app (`apps/<app>/app/`) and of the ui. A malformed file is one check-broken finding at it.
 //! A run that finds no e2e spec at all (`apps/<app>/app/e2e/*.ts`, `ui/e2e/*.ts`) did not look at anything: one not-measured error, never a pass (ER-33).
 //!
-//! **Report-only (warnings) until its first green CI run that includes it (ER-41); it turns blocking then (mode `Gate`, `--strict C139`),
-//! with that run id recorded here, in `C139-e2e-ready-directives.mjs` and in docs/gates.toml.** Recorded: ci.yml run 8335 (train 15, 2026-11-20).
+//! **Errors (mode `Gate`, ER-41): its first green CI run that included it was ci.yml run 8335 (train 15, 2026-11-20), and ci.yml run 8869
+//! (cdd4c3d10, 2026-11-24) ran it clean on the real tree; switched on 2026-11-24 (user), here and in `C139-e2e-ready-directives.mjs`.**
 //! The lint rule itself is an error already: it had its report-only phase, and the real tree is at 0 sites outside the suppressions files.
 //! Rust host; `conformance/src/checks/C139-e2e-ready-directives.mjs` is the port and `tests/it/check_c139.rs` compares them.
 
@@ -73,7 +73,7 @@ impl Check for C139 {
     }
 
     fn mode(&self) -> super::Mode {
-        super::Mode::ReportOnly
+        super::Mode::Gate
     }
 
     fn control(&self) -> Control {
@@ -143,7 +143,7 @@ impl Check for C139 {
             };
             let Some(current) = entries_of(&text) else {
                 findings.push(
-                    Finding::warn(
+                    Finding::error(
                         "C139",
                         49,
                         f,
@@ -166,7 +166,7 @@ impl Check for C139 {
                 Growth::Unmeasured(why) => findings.push(baseline::unmeasured_finding(ctx.in_ci(), "C139", 49, f, "the exception list", &why)),
                 Growth::Added { added: 0, .. } => {}
                 Growth::Added { base, added, .. } => findings.push(
-                    Finding::warn(
+                    Finding::error(
                         "C139",
                         49,
                         f,

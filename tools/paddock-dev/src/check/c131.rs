@@ -7,8 +7,7 @@
 //! fixed patterns only, so the result is the same on every machine: ids (`uid`, `gid`, `euid`, `egid`, `user_id`, `group_id` followed
 //! by a number), home paths (`/Users/<name>`, `/home/<name>`, `C:\Users\<name>`) and temp paths (`/tmp/<x>`, `/private/tmp/<x>`,
 //! `/var/folders/`, `\Temp\`). Allowed: per-site entries of `conformance/c131-allow.json`, read by the shared [`super::allow_list`].
-//! **Report-only (warnings) until its first green run on the real tree (ER-41); it may not block before the shared allow-list reader has
-//! its merge-base growth guard (docs/gates.toml).**
+//! **Errors, blocking (mode gate) since its first green run on the real tree, ci.yml run 8869 (cdd4c3d10, 2026-11-24; ER-41); the shared allow-list reader's merge-base growth guard is an error for it (`Spec::growth_blocks`).**
 //!
 //! The JavaScript check (`conformance/src/checks/C131-*.mjs`) was the original; it was retired with pair P3 (ADR 0022 amendment 2026-11-19) and the Rust host is the only one. The answers it gave are recorded in `tests/fixtures/check/recorded` and `units` and ``tests/it/check_c131.rs`` holds the check to them. Patterns never use a look-around (the `regex` crate has none): the text around a site is matched as a character.
 
@@ -100,6 +99,7 @@ static SPEC: allow_list::Spec = allow_list::Spec {
     file: ALLOW,
     unseen: "a machine-specific value",
     restore: BROKEN_FIX,
+    growth_blocks: true,
 };
 
 /// The check.
@@ -123,7 +123,7 @@ impl Check for C131 {
     }
 
     fn mode(&self) -> Mode {
-        Mode::ReportOnly
+        Mode::Gate
     }
 
     fn allow_list(&self) -> Option<&'static allow_list::Spec> {
@@ -171,7 +171,7 @@ impl Check for C131 {
                 let (kind, site) = (s.kind, &s.site);
                 let finding = match allow.admit(f, |entry| s.text.contains(entry)) {
                     Admit::Allowed => continue,
-                    Admit::Beyond => Finding::warn(
+                    Admit::Beyond => Finding::error(
                         "C131",
                         40,
                         f,
@@ -181,7 +181,7 @@ impl Check for C131 {
                         ),
                         FIX,
                     ),
-                    Admit::Unlisted => Finding::warn(
+                    Admit::Unlisted => Finding::error(
                         "C131",
                         40,
                         f,

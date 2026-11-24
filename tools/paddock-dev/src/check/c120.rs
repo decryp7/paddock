@@ -2,11 +2,11 @@
 //! in one cargo layout and a wrong folder in the other; it broke three times (Pitcrew's supervision tests, CI run 8027; Debrief's
 //! plugins tests, run 8028; paddock-build). The one reader of both layouts is `paddock_env::cargo_layout`. In Rust and shell under
 //! `crates/`, `tools/`, `apps/` and `scripts/`, outside that module, this flags `current_exe()` or `OUT_DIR` followed by two or more
-//! parent or `..` hops, and a literal `deps` folder segment. Report-only (warnings) until its first green run (ER-41).
+//! parent or `..` hops, and a literal `deps` folder segment. Errors, blocking (mode gate) since its first green run on the real tree, ci.yml run 8869 (cdd4c3d10, 2026-11-24; ER-41).
 //!
 //! The JavaScript check (`C120-layout-guess.mjs`) was retired with pair P3 (ADR 0022 amendment 2026-11-19); `tests/it/check_c120.rs` holds this one to the answers it recorded. Lines that start with a
 //! comment are not read; a justified site carries `// conformance: layout-guess — <reason>` on the line or the line above.
-//! A waiver that waives no site is a warning of its own, at the comment ([`unused_waivers`]).
+//! A waiver that waives no site is a finding of its own, at the comment ([`unused_waivers`]).
 
 use super::finding::Finding;
 use super::inline_waiver::{CommentView, InlineWaiver, Kind};
@@ -211,7 +211,7 @@ impl Check for C120 {
     }
 
     fn mode(&self) -> super::Mode {
-        super::Mode::ReportOnly
+        super::Mode::Gate
     }
 
     fn title(&self) -> &'static str {
@@ -260,7 +260,7 @@ impl Check for C120 {
                 continue;
             }
             for g in layout_guesses(&text, shell, f) {
-                let site = Finding::warn(
+                let site = Finding::error(
                     "C120",
                     40,
                     f,
@@ -269,7 +269,7 @@ impl Check for C120 {
                     fix,
                 );
                 findings.push(g.waived.apply(site, || {
-                    Finding::warn(
+                    Finding::error(
                         "C120",
                         40,
                         f,
@@ -280,7 +280,7 @@ impl Check for C120 {
                 }));
             }
             for line in unused_waivers(&text, shell, f) {
-                findings.push(Finding::warn(
+                findings.push(Finding::error(
                     "C120",
                     40,
                     f,

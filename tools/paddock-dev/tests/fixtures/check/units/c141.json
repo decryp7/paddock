@@ -13,7 +13,7 @@
    "findings": [
     {
      "check": "C141",
-     "severity": "warn",
+     "severity": "error",
      "rule": 79,
      "file": ".gitea/workflows/ci.yml",
      "line": 4,
@@ -22,8 +22,8 @@
     }
    ],
    "waived": [],
-   "errors": 0,
-   "warnings": 1
+   "errors": 1,
+   "warnings": 0
   }
  },
  {
@@ -74,7 +74,7 @@
    "findings": [
     {
      "check": "C141",
-     "severity": "warn",
+     "severity": "error",
      "rule": 79,
      "file": ".gitea/workflows/ci.yml",
      "line": 6,
@@ -83,8 +83,8 @@
     }
    ],
    "waived": [],
-   "errors": 0,
-   "warnings": 1
+   "errors": 1,
+   "warnings": 0
   }
  },
  {
@@ -101,7 +101,7 @@
    "findings": [
     {
      "check": "C141",
-     "severity": "warn",
+     "severity": "error",
      "rule": 79,
      "file": ".gitea/workflows/ci.yml",
      "line": 4,
@@ -110,8 +110,8 @@
     }
    ],
    "waived": [],
-   "errors": 0,
-   "warnings": 1
+   "errors": 1,
+   "warnings": 0
   }
  },
  {
@@ -128,7 +128,7 @@
    "findings": [
     {
      "check": "C141",
-     "severity": "warn",
+     "severity": "error",
      "rule": 79,
      "file": ".gitea/workflows/nightly.yml",
      "line": 3,
@@ -137,8 +137,8 @@
     }
    ],
    "waived": [],
-   "errors": 0,
-   "warnings": 1
+   "errors": 1,
+   "warnings": 0
   }
  },
  {
@@ -166,7 +166,7 @@
     },
     {
      "check": "C141",
-     "severity": "warn",
+     "severity": "error",
      "rule": 79,
      "file": ".gitea/actions/setup-rust/action.yml",
      "line": 10,
@@ -175,8 +175,8 @@
     }
    ],
    "waived": [],
-   "errors": 1,
-   "warnings": 1
+   "errors": 2,
+   "warnings": 0
   }
  },
  {

@@ -139,6 +139,7 @@ static SPEC: allow_list::Spec = allow_list::Spec {
     file: ALLOW,
     unseen: "a disk path",
     restore: BROKEN_FIX,
+    growth_blocks: false,
 };
 
 /// The check.

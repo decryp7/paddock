@@ -101,6 +101,7 @@ static SPEC: Spec = Spec {
     file: ALLOW,
     unseen: "a read of a workflow's text",
     restore: "Restore conformance/c121-allow.json: {\"allow\": [{\"path\": \"...\", \"site\": \"...\", \"reason\": \"...\"}]}.",
+    growth_blocks: false,
 };
 
 const FIX: &str = "Read the data through the one accessor that owns it (`./dev ci conformance-args`, `cargo metadata`, the register's parser, a constant the owner exports; rule 79). A test of a check of workflows may read them: list the site (its path, a piece of the line and a reason) in conformance/c121-allow.json.";
