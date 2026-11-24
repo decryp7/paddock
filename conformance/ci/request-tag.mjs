@@ -129,7 +129,8 @@ export async function runChecks({ tag, sha, read, git, verdict, dryRun = false }
   await step('version matches the tag', () => `version ${checkVersion(parsed.app, tag, read)}`);
   await step('CI is green on exactly this commit', async () => {
     const wf = gateWorkflow(parsed.app, read);
-    return `${wf} full run ${checkVerdict(await verdict(wf, sha))}`;
+    // An app's tag names the app: the deciding run must have planned it (docs/ci-active-apps.toml; `./dev ci verdict --app`).
+    return `${wf} full run ${checkVerdict(await verdict(wf, sha, parsed.app))}`;
   });
   return results;
 }
@@ -170,8 +171,8 @@ if (isMain(import.meta.url)) {
   };
   // The verdict is `./dev ci verdict` of the trusted checkout (cwd = root); the job's read token reaches it as GITEA_TOKEN.
   const server = o.api.replace(/\/+$/, '').replace(/\/api\/v1$/, '');
-  const verdict = async (workflow, sha) =>
-    spawnSync(resolve(root, 'dev'), ['ci', 'verdict', '--json', '--tag', '--workflow', workflow, '--sha', sha, '--repo', o.repo, '--server', server], {
+  const verdict = async (workflow, sha, app) =>
+    spawnSync(resolve(root, 'dev'), ['ci', 'verdict', '--json', '--tag', ...(app ? ['--app', app] : []), '--workflow', workflow, '--sha', sha, '--repo', o.repo, '--server', server], {
       cwd: root,
       encoding: 'utf8',
       maxBuffer: 16 << 20,

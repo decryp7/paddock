@@ -1,0 +1,7 @@
+# The fixture's active apps (tools/paddock-dev/src/active_apps.rs): every app, so the recorded plans keep every leg; the cases with an
+# inactive app edit this file.
+decided = "2026-11-24"
+by = "user"
+reason = "the fixture plans every app"
+active = ["x", "y", "z"]
+next = []

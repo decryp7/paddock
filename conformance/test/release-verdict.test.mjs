@@ -66,6 +66,7 @@ test('the verdict of every release workflow also gets the gates result, and none
     assert.equal(more.length, 0, `${app}: one verdict step`);
     assert.equal(call.with.app, app);
     assert.equal(expr(call.with['plan-run']), 'needs.plan.outputs.run', app);
+    assert.equal(expr(call.with['skip-reason']), "needs.plan.outputs.inactive == 'true' && 'inactive' || ''", `${app}: an inactive app is said`);
     assert.equal(expr(call.with['release-result']), "needs.release.result != 'skipped' && needs.release.result || needs.installers.result", app);
     assert.equal(expr(call.with['gates-result']), 'needs.gates.result', app);
     // A tag push only: the nightly builds the installers, and a scheduled run here skipped them.
@@ -116,6 +117,17 @@ test('a night ended early for a train in CI warns that it measured nothing, and 
   const reasons = withs(loadWorkflow('nightly.yml')).filter((w) => w.with['skip-reason'] !== undefined);
   assert.equal(reasons.length, 4);
   for (const r of reasons) assert.equal(expr(r.with['skip-reason']), "needs.gate.outputs.train_skip == 'true' && 'train' || ''", r.where);
+});
+
+test('an inactive app is a notice, never a red run, and a tag is never excused by it', () => {
+  for (const event of ['workflow_dispatch', 'push']) {
+    const v = verdict({ app: 'dyno', event, ref: 'refs/heads/main', planRun: 'false', skipReason: 'inactive', releaseResult: 'skipped' });
+    assert.deepEqual([v.ok, v.level], [true, 'notice'], event);
+    assert.match(v.line, /dyno is inactive \(docs\/ci-active-apps\.toml/);
+  }
+  // Positive controls: the same manual run without the reason is red, and a tag with it is not excused.
+  assert.equal(verdict({ app: 'dyno', event: 'workflow_dispatch', planRun: 'false', releaseResult: 'skipped' }).ok, false);
+  assert.equal(verdict({ app: 'dyno', event: 'push', ref: 'refs/tags/dyno-v1.2.0', planRun: 'false', skipReason: 'inactive', releaseResult: 'skipped' }).ok, false);
 });
 
 test('the release-verdict action is documented and runs the script', () => {

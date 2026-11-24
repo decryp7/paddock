@@ -1,7 +1,7 @@
 {
  "code": 0,
  "stdout": "true",
- "outputs": "host_packages_macos=\nhost_filter_macos=\n",
+ "outputs": "host_packages_macos=\nhost_filter_macos=\ninactive=false\n",
  "summary": "### y\n\nBase: the base input fixture-base\n\nAffected: every job runs.\n",
  "error": null
 }

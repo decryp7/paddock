@@ -42,6 +42,8 @@ jobs:
       image: dev.decryptology.net/decryp7/paddock-ci:v3
     outputs:
       run: ${{ steps.plan.outputs.run }}
+      # 'true' when the app is not active (docs/ci-active-apps.toml): the verdict says so instead of failing a manual run.
+      inactive: ${{ steps.plan.outputs.inactive }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -166,5 +168,6 @@ jobs:
         with:
           app: spotter
           plan-run: ${{ needs.plan.outputs.run }}
+          skip-reason: ${{ needs.plan.outputs.inactive == 'true' && 'inactive' || '' }}
           release-result: ${{ needs.release.result != 'skipped' && needs.release.result || needs.installers.result }}
           gates-result: ${{ needs.gates.result }}

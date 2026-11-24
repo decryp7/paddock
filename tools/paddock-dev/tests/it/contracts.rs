@@ -693,3 +693,21 @@ fn the_checks_the_rust_host_runs_in_ci_are_in_the_plan_for_every_input_they_read
         );
     }
 }
+
+/// The active apps (docs/ci-active-apps.toml, tools/paddock-dev/src/active_apps.rs) read through the one accessor and name only apps
+/// that have a CI contract; the how-to is documented.
+#[test]
+fn the_active_apps_name_only_apps_with_a_contract_and_are_documented() {
+    let set = paddock_dev::active_apps::ActiveApps::parse(&read(paddock_dev::active_apps::FILE)).unwrap_or_else(|e| panic!("{e}"));
+    let apps: BTreeSet<String> = configs().into_iter().map(|(a, _)| a).collect();
+    assert!(apps.len() >= 5, "a positive control: the apps were listed ({apps:?})");
+    set.check_known(&apps).unwrap_or_else(|e| panic!("{e}"));
+    // Positive control: a name that is not an app is refused.
+    let mut typo = set.clone();
+    typo.active.insert("not-an-app".into());
+    assert!(typo.check_known(&apps).is_err());
+    assert!(
+        read("docs/ci-schedules.md").contains("## Active apps"),
+        "docs/ci-schedules.md documents the set"
+    );
+}

@@ -472,6 +472,16 @@ pub fn summary(plan: &Value, reason: &str, legs: &[Value]) -> String {
             }
         ));
     }
+    // The active apps (crate::active_apps): every inactive app is named, never shown as unaffected or green.
+    if let Some(off) = plan["inactive"].as_array().filter(|a| !a.is_empty()) {
+        let names: Vec<&str> = off.iter().filter_map(Value::as_str).collect();
+        lines.push(String::new());
+        lines.push(format!(
+            "Inactive (not in {}; no job runs, not green; the nightly runs them): {}",
+            crate::active_apps::FILE,
+            names.join(", ")
+        ));
+    }
     if plan["docs"].as_bool().unwrap_or(false)
         && legs.is_empty()
         && !plan["crates"].as_bool().unwrap_or(false)

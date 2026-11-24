@@ -38,6 +38,9 @@ outputs:
   train-skip:
     description: "'true' when a scheduled run ends early because a train is in CI (a job reuses this answer instead of asking again)."
     value: ${{ steps.decide.outputs.train-skip }}
+  inactive:
+    description: "With `app`: 'true' when the app is not in docs/ci-active-apps.toml's `active` (./dev plan --ci --app): the run plans none of its jobs. Empty when the plan did not ask."
+    value: ${{ steps.decide.outputs.inactive }}
 runs:
   using: composite
   steps:

@@ -354,5 +354,89 @@
    "PLAN_BASE": "--output=x",
    "SHA": "bbbbbbb"
   }
+ },
+ {
+  "name": "ci-an-inactive-app-plans-no-leg",
+  "args": [
+   "--ci"
+  ],
+  "env": {
+   "GITHUB_EVENT_NAME": "workflow_dispatch",
+   "GITHUB_REF": "refs/heads/topic",
+   "PLAN_WEBKIT": "1"
+  },
+  "edit": {
+   "docs/ci-active-apps.toml": "# The fixture's active apps (tools/paddock-dev/src/active_apps.rs): every app, so the recorded plans keep every leg; the cases with an\n# inactive app edit this file.\ndecided = \"2026-11-24\"\nby = \"user\"\nreason = \"the fixture plans every app\"\nactive = [\"y\", \"z\"]\nnext = []\n"
+  }
+ },
+ {
+  "name": "ci-the-nightly-plans-every-app-whatever-the-set",
+  "args": [
+   "--ci"
+  ],
+  "env": {
+   "GITHUB_EVENT_NAME": "schedule",
+   "GITHUB_REF": "refs/heads/main"
+  },
+  "edit": {
+   "docs/ci-active-apps.toml": "# The fixture's active apps (tools/paddock-dev/src/active_apps.rs): every app, so the recorded plans keep every leg; the cases with an\n# inactive app edit this file.\ndecided = \"2026-11-24\"\nby = \"user\"\nreason = \"the fixture plans every app\"\nactive = []\nnext = []\n"
+  }
+ },
+ {
+  "name": "ci-an-inactive-apps-own-workflow-runs-nothing",
+  "args": [
+   "--ci",
+   "--app",
+   "y"
+  ],
+  "env": {
+   "GITHUB_EVENT_NAME": "workflow_dispatch",
+   "GITHUB_REF": "refs/heads/topic"
+  },
+  "edit": {
+   "docs/ci-active-apps.toml": "# The fixture's active apps (tools/paddock-dev/src/active_apps.rs): every app, so the recorded plans keep every leg; the cases with an\n# inactive app edit this file.\ndecided = \"2026-11-24\"\nby = \"user\"\nreason = \"the fixture plans every app\"\nactive = []\nnext = []\n"
+  }
+ },
+ {
+  "name": "ci-an-inactive-apps-own-workflow-runs-on-its-tag",
+  "args": [
+   "--ci",
+   "--app",
+   "y"
+  ],
+  "env": {
+   "GITHUB_EVENT_NAME": "push",
+   "GITHUB_REF": "refs/tags/y-v1.0.0"
+  },
+  "edit": {
+   "docs/ci-active-apps.toml": "# The fixture's active apps (tools/paddock-dev/src/active_apps.rs): every app, so the recorded plans keep every leg; the cases with an\n# inactive app edit this file.\ndecided = \"2026-11-24\"\nby = \"user\"\nreason = \"the fixture plans every app\"\nactive = []\nnext = []\n"
+  }
+ },
+ {
+  "name": "ci-the-gates-of-an-inactive-app-run-it",
+  "args": [
+   "--ci"
+  ],
+  "env": {
+   "GITHUB_EVENT_NAME": "push",
+   "GITHUB_REF": "refs/tags/x-v1.0.0",
+   "PLAN_APP": "x"
+  },
+  "edit": {
+   "docs/ci-active-apps.toml": "# The fixture's active apps (tools/paddock-dev/src/active_apps.rs): every app, so the recorded plans keep every leg; the cases with an\n# inactive app edit this file.\ndecided = \"2026-11-24\"\nby = \"user\"\nreason = \"the fixture plans every app\"\nactive = []\nnext = []\n"
+  }
+ },
+ {
+  "name": "ci-an-unknown-app-in-the-active-set-is-an-error",
+  "args": [
+   "--ci"
+  ],
+  "env": {
+   "GITHUB_EVENT_NAME": "workflow_dispatch",
+   "GITHUB_REF": "refs/heads/topic"
+  },
+  "edit": {
+   "docs/ci-active-apps.toml": "# The fixture's active apps (tools/paddock-dev/src/active_apps.rs): every app, so the recorded plans keep every leg; the cases with an\n# inactive app edit this file.\ndecided = \"2026-11-24\"\nby = \"user\"\nreason = \"the fixture plans every app\"\nactive = [\"dyon\"]\nnext = []\n"
+  }
  }
 ]
