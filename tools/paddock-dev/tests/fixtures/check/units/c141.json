@@ -49,8 +49,8 @@
   "now": null,
   "files": [
    [
-    ".gitea/workflows/ci.yml",
-    "jobs:\n  train-gates:\n    steps:\n      - uses: ./.gitea/actions/setup-rust\n"
+    ".gitea/workflows/dyno-release.yml",
+    "jobs:\n  gates:\n    steps:\n      - uses: ./.gitea/actions/setup-rust\n"
    ]
   ],
   "result": {
@@ -66,8 +66,8 @@
   "now": null,
   "files": [
    [
-    ".gitea/workflows/ci.yml",
-    "jobs:\n  train-gates:\n    steps:\n      - uses: ./.gitea/actions/setup-rust\n        with:\n          sccache-s3-access-key-id: ${{ secrets.PADDOCK_SCCACHE_S3_ACCESS_KEY_ID }}\n"
+    ".gitea/workflows/dyno-release.yml",
+    "jobs:\n  gates:\n    steps:\n      - uses: ./.gitea/actions/setup-rust\n        with:\n          sccache-s3-access-key-id: ${{ secrets.PADDOCK_SCCACHE_S3_ACCESS_KEY_ID }}\n"
    ]
   ],
   "result": {
@@ -76,7 +76,7 @@
      "check": "C141",
      "severity": "warn",
      "rule": 79,
-     "file": ".gitea/workflows/ci.yml",
+     "file": ".gitea/workflows/dyno-release.yml",
      "line": 6,
      "message": "names an S3 key secret outside a setup-rust step's `with:` or a reusable workflow's `secrets:`",
      "fix": "Remove it here: the key reaches only the setup-rust step (least privilege; docs/research/2026-11-19-sccache.md section 8)."

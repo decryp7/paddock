@@ -21,7 +21,8 @@ use serde_json::json;
 use std::path::Path;
 use std::time::Duration;
 
-/// Whether a failing member gate changes the exit code: true since the user's decision of 2026-11-24 (ADR 0098's status).
+/// Whether a failing member gate changes the exit code: true since the user's decision of 2026-11-24 (ADR 0098's status). No first
+/// green run on a real train was recorded (ER-41's record, D3 (a)): the user flipped it on the check-value audit's evidence instead.
 pub const ENFORCED: bool = true;
 
 /// An outer bound on the gate run (ER-32). `check --pre-push` has no total of its own: each row has its own cap on its own run time
