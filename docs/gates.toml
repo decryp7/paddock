@@ -23,11 +23,6 @@ SCCACHE_REDIS_DB = "5"
 [measurements]
 files = ["docs/benchmarks.md", "apps/*/docs/performance.md"]
 
-# Harnesses outside CI that run checks (VM rows never run in CI: memory local-test-vms).
-[[harness]]
-name = "vm-smoke"
-paths = ["scripts/vm-smoke/**"]
-
 [[not_gated]]
 id = "C03"
 apps = ["debrief", "dyno", "pitcrew", "pitwall", "shell-demo", "spotter", "workbench-demo"]

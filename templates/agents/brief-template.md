@@ -1,8 +1,6 @@
 # Brief template
 
-Copy this file, fill every field, delete nothing, and run `./dev brief check <file>` before sending the brief. The check
-only looks for the fields below and for the known-bad patterns of the misses listed under "Why"; it does not judge the
-task. The shared rules every agent gets are in the engineering-rules `templates/BRIEF.md`; this template adds what a
+Copy this file, fill every field and delete nothing before sending the brief. The shared rules every agent gets are in the engineering-rules `templates/BRIEF.md`; this template adds what a
 Paddock brief has to say each time.
 
 ## Task
@@ -42,7 +40,7 @@ Heavy steps: through the Rust `heavy` (`heavy run <agent> -- <command>`, or `./d
 - Never filter `git commit` or `git push` output (no grep, head or tail): a hook rejection hidden by a filter went unseen 3 times on 2026-11-13.
 - Base shared-tooling branches on the newest train head, not main, and name the in-flight mechanisms (branches that touch the same tool) in the brief.
 - Check IDs come from `./dev check new-id`, never picked by hand.
-- Scratch files only under <dev-targets>/ (the parent of `git config paddock.worktreeRoot`; `./dev brief check` derives it, and docs/dev-setup.md says where it is). Never /tmp, /var/folders or the internal disk.
+- Scratch files only under <dev-targets>/ (the parent of `git config paddock.worktreeRoot`; docs/dev-setup.md says where it is). Never /tmp, /var/folders or the internal disk.
 - Never `git stash`. Push your branch once; do not dispatch CI unless this brief says so.
 
 ## Report

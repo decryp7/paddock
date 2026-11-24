@@ -1,8 +1,7 @@
-//! `./dev locks check|sync`: the plan from tracked files, the order and the findings with a fake runner, and the real cargo and
+//! `./dev locks sync`: the plan from tracked files, the order and the findings with a fake runner, and the real cargo and
 //! npm on temporary workspaces (no dependencies from a registry, so nothing needs the network).
 #![allow(clippy::unwrap_used, clippy::expect_used)]
-use paddock_cli::Exit;
-use paddock_dev::locks::{Kind, Ran, Runner, check_all, plan, skipped, sync_all};
+use paddock_dev::locks::{Kind, Ran, Runner, check_all, plan, sync_all};
 use serde_json::Value;
 use std::path::Path;
 use std::process::Command;
@@ -178,38 +177,13 @@ fn stale_repo() -> tempfile::TempDir {
 }
 
 #[test]
-fn stale_cargo_and_npm_lockfiles_are_found_one_finding_each_and_sync_fixes_them() {
+fn sync_regenerates_a_stale_cargo_lockfile_and_an_npm_lockfile() {
     let repo = stale_repo();
     let home = tempfile::tempdir().unwrap();
-    let (code, v, err) = dev(repo.path(), home.path(), "check");
-    assert_eq!(code, Exit::Findings as i32, "{v} {err}");
-    let text = v["annotations"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|a| a.as_str().unwrap())
-        .collect::<Vec<_>>()
-        .join("\n");
-    assert!(text.contains("::error file=ws/Cargo.lock::"), "{text}");
-    assert!(text.contains("::error file=package-lock.json::"), "{text}");
-    assert!(text.contains("./dev locks sync"), "{text}");
-    assert_eq!(text.matches("::error").count(), 2, "{text}");
-    assert!(
-        !text.contains("A complete log of this run"),
-        "npm's log-path line hides the cause: {text}"
-    );
-    assert!(
-        text.contains("in sync") || text.contains("Missing:"),
-        "the finding names why npm refused: {text}"
-    );
-
     let (code, v, err) = dev(repo.path(), home.path(), "sync");
     assert_eq!(code, 0, "{v} {err}");
     let lock = std::fs::read_to_string(repo.path().join("ws/Cargo.lock")).unwrap();
     assert!(lock.contains("version = \"0.2.0\""), "{lock}");
-
-    let (code, v, err) = dev(repo.path(), home.path(), "check");
-    assert_eq!(code, 0, "{v} {err}");
 }
 
 #[test]
@@ -217,14 +191,14 @@ fn a_folder_without_lockfiles_is_an_error_that_says_what_to_do() {
     let d = tempfile::tempdir().unwrap();
     run(d.path(), "git", &["init", "-q"]);
     let home = tempfile::tempdir().unwrap();
-    let (code, v, err) = dev(d.path(), home.path(), "check");
+    let (code, v, err) = dev(d.path(), home.path(), "sync");
     assert_ne!(code, 0, "{v}");
     assert!(format!("{v}{err}").contains("No lockfile found"), "{v} {err}");
 }
 
 #[test]
 #[allow(clippy::disallowed_methods)] // git on this repository
-fn the_real_tracked_list_skips_only_the_golden_fixture_and_every_other_lockfile_is_a_target() {
+fn every_tracked_lockfile_outside_the_golden_fixture_is_a_target() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).ancestors().nth(2).unwrap();
     let out = Command::new("git")
         .args(["-C"])
@@ -235,18 +209,14 @@ fn the_real_tracked_list_skips_only_the_golden_fixture_and_every_other_lockfile_
     assert!(out.status.success());
     let tracked: Vec<String> = String::from_utf8(out.stdout).unwrap().lines().map(str::to_string).collect();
     let targets = plan(&tracked);
-    let skipped = skipped(&tracked);
-    assert!(
-        !skipped.is_empty() && skipped.iter().all(|f| f.starts_with("tools/paddock-dev/tests/golden/fixture/")),
-        "{skipped:?}"
-    );
+    let in_fixture = |f: &str| f.starts_with("tools/paddock-dev/tests/golden/fixture/");
     let locks: Vec<&String> = tracked.iter().filter(|f| f.ends_with("Cargo.lock")).collect();
     for l in &locks {
         let is_target = targets.iter().any(|t| &t.file == *l);
         assert_eq!(
             is_target,
-            !skipped.contains(l),
-            "{l}: every tracked Cargo.lock is a target unless it was reported as skipped"
+            !in_fixture(l),
+            "{l}: every tracked Cargo.lock is a target unless it is test data of the planner's golden repository"
         );
     }
     assert!(targets.iter().any(|t| t.kind == Kind::Npm && t.file == "package-lock.json"));

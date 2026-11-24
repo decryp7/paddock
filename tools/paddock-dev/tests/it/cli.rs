@@ -69,50 +69,6 @@ fn self_hash_prints_one_object_with_the_hash_and_the_compiler() {
 }
 
 #[test]
-fn graph_affected_prints_the_plan_for_the_repository_it_runs_in_or_is_pointed_at() {
-    // The golden fixture repository, built in a scratch folder: no dependence on the checkout this test runs from.
-    let (_keep, fixture) = crate::golden::fixture_repo();
-    let root = fixture.display().to_string();
-    let file = "crates/a/src/lib.rs";
-    for (dir, args) in [
-        (
-            Some(fixture.as_path()),
-            vec!["--json", "graph", "affected", "--files", file, "--explain"],
-        ),
-        (None, vec!["--json", "graph", "affected", "--root", &root, "--files", file]),
-    ] {
-        let (code, out, err) = dev_in(dir, &args);
-        assert_eq!(code, 0, "{err}");
-        let v: Value = serde_json::from_str(out.trim()).unwrap();
-        assert_eq!(
-            (v["ok"].clone(), v["crates"].clone(), v["all"].clone()),
-            (true.into(), true.into(), false.into())
-        );
-        assert_eq!(v.get("why").is_some(), args.contains(&"--explain"));
-    }
-    let (code, out, _) = dev_in(Some(&fixture), &["graph", "affected", "--all"]);
-    assert_eq!(code, 0);
-    assert!(out.contains("\"all\":true"));
-}
-
-#[test]
-fn graph_affected_outside_a_repository_fails_with_exit_1_and_names_the_problem() {
-    let d = tempfile::tempdir().unwrap();
-    let (code, out, err) = dev(&["--json", "graph", "affected", "--root", d.path().to_str().unwrap(), "--files", "a"]);
-    assert_eq!(code, 1);
-    let v: Value = serde_json::from_str(out.trim()).unwrap();
-    assert_eq!(v["ok"], false);
-    assert!(err.contains("git repository"), "{err}");
-}
-
-#[test]
-fn graph_affected_with_nothing_to_plan_is_usage() {
-    let (code, _, err) = dev(&["graph", "affected"]);
-    assert_eq!(code, 2);
-    assert!(err.contains("--files"));
-}
-
-#[test]
 fn self_hash_outside_a_repository_or_without_an_input_list_names_the_next_step() {
     let d = tempfile::tempdir().unwrap();
     let run = |dir: &std::path::Path| {

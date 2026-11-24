@@ -6,9 +6,6 @@
   "scripts": [
     "node --test scripts/new-app.test.mjs scripts/npm-audit.test.mjs scripts/coverage-gate.test.mjs scripts/demo/*.test.mjs scripts/shell-demo/*.test.mjs"
   ],
-  "vm-smoke": [
-    "node --test scripts/vm-smoke/*.test.mjs"
-  ],
   "hooks": [
     "bash .claude/hooks/run-tests.sh"
   ],

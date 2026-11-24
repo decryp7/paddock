@@ -162,11 +162,6 @@ files = ["docs/known-copies.toml"]
 reaches = ["project:tools", "project:conformance"]
 
 [[input]]
-name = "harnesses"
-files = ["docs/harnesses.toml"]
-reaches = ["project:conformance"]
-
-[[input]]
 name = "ipc-endpoints"
 files = ["docs/ipc-endpoints.toml", "docs/ipc-endpoint-ratchet.toml"]
 reaches = ["project:conformance"]

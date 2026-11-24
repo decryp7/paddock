@@ -174,11 +174,6 @@
       "path": "tools/paddock-dev/src/release_isolation/verify.rs",
       "site": "pub fn passed(&self) -> bool {",
       "reason": "Seed 2026-11-13 (shrink only): release isolation (ADR 0089 section 8), its own Leak/Probe types"
-    },
-    {
-      "path": "tools/paddock-dev/src/worktree/primary.rs",
-      "site": "pub enum Severity { NotMeasured,",
-      "reason": "Seed 2026-11-13 (shrink only): the primary checkout probe (RT-3), its own not-measured state"
     }
   ]
 }

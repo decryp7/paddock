@@ -1,4 +1,4 @@
-//! `dev graph affected`: which projects a change reaches. The port of the core of the retired `scripts/affected.mjs`
+//! Which projects a change reaches (`./dev plan`'s core). The port of the core of the retired `scripts/affected.mjs`
 //! (`affected()`, `owners()`, `appOfWorkflow()` and the rule tables); the graph itself comes from `paddock-repo-graph`.
 //! The CI matrix, the nextest narrowing and `--ci` are in `plan_ci` and `plan_cmd`.
 //!
@@ -6,8 +6,7 @@
 //! in `paddock-repo-graph`: they are this repository's, the graph crate is generic (ADR 0022 §6, "CI-only").
 
 use crate::plan_gitea::{GiteaSource, TRACED_SCRIPT, gitea_targets};
-use paddock_cli::{CliError, Report};
-use paddock_repo_graph::{CargoCli, FileSource, GitHistory, Graph, GraphError, History, cargo_graph, lock_diff, npm_graph};
+use paddock_repo_graph::{CargoCli, FileSource, Graph, GraphError, History, cargo_graph, lock_diff, npm_graph};
 use regex::Regex;
 use serde_json::{Map, Value, json};
 use std::collections::{BTreeMap, BTreeSet};
@@ -914,7 +913,7 @@ fn read_graph_placing(root: &Path, history: &dyn History, place: bool) -> Result
     })
 }
 
-/// What `dev graph affected` was asked.
+/// What a plan is asked for.
 pub struct Request {
     /// Explicit changed files.
     pub files: Vec<String>,
@@ -994,28 +993,6 @@ pub fn plan_on_graph(root: &Path, history: &dyn History, req: &Request, graph: &
         }
     }
     affected(&changed, graph, &opts)
-}
-
-fn cli_error(e: GraphError) -> CliError {
-    CliError::failure(e.to_string())
-}
-
-/// `dev graph affected`.
-pub fn command(req: &Request) -> Result<Report, CliError> {
-    if req.files.is_empty() && req.base.is_none() && !req.all {
-        return Err(CliError::usage("No base, --files or --all given.").with_hint("Pass a base revision, --files a,b or --all."));
-    }
-    let root = match &req.root {
-        Some(r) => r.clone(),
-        None => {
-            let cwd = std::env::current_dir().map_err(|e| CliError::failure(format!("The current folder cannot be read: {e}.")))?;
-            let out = crate::input_hash::Exec::run(&crate::input_hash::Real, "git", &["rev-parse", "--show-toplevel"], &cwd, None)?;
-            PathBuf::from(out.trim())
-        }
-    };
-    let history = GitHistory::new(&root, TIMEOUT);
-    let plan = plan_for(&root, &history, req).map_err(cli_error)?;
-    Ok(Report::new(plan.clone(), plan.to_string()))
 }
 
 #[cfg(test)]
@@ -1633,19 +1610,6 @@ mod tests {
         )
         .unwrap();
         assert_eq!(none["all"], true, "--all ignores the base");
-    }
-
-    #[test]
-    fn a_request_needs_something_to_plan() {
-        let req = Request {
-            files: vec![],
-            all: false,
-            explain: false,
-            root: None,
-            base: None,
-            head: "HEAD".into(),
-        };
-        assert_eq!(command(&req).err().map(|e| e.exit), Some(paddock_cli::Exit::Usage));
     }
 
     // ---- .gitea changes are narrowed to the jobs they reach (the cases of the retired scripts/affected.test.mjs, on synthetic trees) ----
