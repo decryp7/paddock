@@ -84,7 +84,6 @@ export const ADOPTING = new Map(
     ['crates/paddock-setup/src/main.rs', 'shared tool: adopts with the next shared batch'],
     ['tools/heavy/src/main.rs', 'heavy tool: adopts with the next tooling batch'],
     ['tools/paddock-dev/src/main.rs', 'paddock-dev: adopts with the next shared batch'],
-    ['tools/wiki/src/main.rs', 'wiki tool: adopts with the next tooling batch'],
   ],
 );
 

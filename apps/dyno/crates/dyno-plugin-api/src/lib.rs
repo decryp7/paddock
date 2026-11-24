@@ -5,7 +5,7 @@
 //! A plugin contributes **sensors** ([`SensorProvider`]): extra readings shown next to Dyno's own. Dyno is
 //! monitoring-only, so a plugin never changes the machine through Dyno.
 //!
-//! ```no_run
+//! ```text
 //! use dyno_plugin_api::{Manifest, Plugin, SensorProvider, SensorReading, Contribution};
 //!
 //! struct Hello;

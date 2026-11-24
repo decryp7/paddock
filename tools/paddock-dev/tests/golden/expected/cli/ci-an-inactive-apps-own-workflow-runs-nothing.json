@@ -1,0 +1,7 @@
+{
+ "code": 0,
+ "stdout": "false",
+ "outputs": "host_packages_macos=\nhost_filter_macos=\ninactive=true\n",
+ "summary": "### y\n\nBase: a manual run without a base: everything\n\nInactive: nothing runs (docs/ci-active-apps.toml `active` does not name this app; the nightly runs it). Not green.\n",
+ "error": null
+}

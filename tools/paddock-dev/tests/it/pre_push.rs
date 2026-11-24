@@ -77,7 +77,6 @@ fn tree_the_dry_run_lists_the_gates_ci_runs_for_a_crates_change_and_why_others_a
         "skip  commit-lint",
         // Conformance is in every plan (fix/lint-no-fixed-test-waits, b013e1142).
         "run   conformance",
-        "run   ipc-endpoints",
     ] {
         assert!(out.contains(want), "{want} missing:\n{out}");
     }

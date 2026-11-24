@@ -8,6 +8,7 @@ repository.workspace = true
 publish = ["decryp7"]
 
 [lib]
+doctest = false # doctests are off (crates/README.md, "Doctests")
 # Behaviour is tested through the public API in tests/ (an empty unit-test binary only adds unexecuted generic instances to coverage).
 test = false
 

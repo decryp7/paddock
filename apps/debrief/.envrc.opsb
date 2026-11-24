@@ -1,6 +1,6 @@
 # A second build environment for Debrief ("ops B"): its own target folder in <dev-targets> (`./dev places`, never $HOME, ER-14;
 # docs/dev-setup.md), and the pinned libduckdb from the fetch script, which keeps it in that target folder. No disk is named here
-# (C125). Source it from apps/debrief; it stops when the dev-targets folder cannot be derived.
+# (rule 40). Source it from apps/debrief; it stops when the dev-targets folder cannot be derived.
 _opsb_dt="$(../../dev places --get dev-targets --repo ../..)" || return 1
 export CARGO_TARGET_DIR="$_opsb_dt/debrief-target-opsB" CARGO_BUILD_JOBS=2
 unset _opsb_dt

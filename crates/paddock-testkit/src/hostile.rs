@@ -55,7 +55,7 @@ pub fn never_panics<I: AsRef<[u8]>, R>(
 /// The test of a parser in one line: runs `parse` over the [`corpus`] of every seed (and of the empty seed) and panics, naming the
 /// first input that made it panic (lossy text, so the message is readable). A parser returning an error for hostile input is fine.
 ///
-/// ```
+/// ```text
 /// paddock_testkit::assert_never_panics(&[b"key = value\n"], |bytes| String::from_utf8_lossy(bytes).contains('='));
 /// ```
 pub fn assert_never_panics<R>(seeds: &[&[u8]], mut parse: impl FnMut(&[u8]) -> R) {

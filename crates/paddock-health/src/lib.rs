@@ -17,7 +17,7 @@
 //! - `tauri` (feature `tauri`): the `paddock://service-health` and `paddock://notifications` events to
 //!   every window, the commands (`health_snapshot`, `health_repair`, `notifications_*`) and their table.
 //!
-//! ```
+//! ```text
 //! use paddock_health::{Cause, Health, RepairAction, ServiceSpec, ServiceState};
 //!
 //! let health = Health::new(

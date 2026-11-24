@@ -7,6 +7,9 @@ license.workspace = true
 repository.workspace = true
 publish = ["decryp7"]
 
+[lib]
+doctest = false # doctests are off (crates/README.md, "Doctests")
+
 [features]
 # The Tauri adapter (`paddock_diag::tauri`): managed state, the preview/save/cancel commands, the save job and its event, the
 # webview log command and the "Diagnostics > Logging" section applied to the log. The core never depends on Tauri.

@@ -1,7 +1,7 @@
 //! The Debrief plugin SDK (ADR 0017, ADR 0027): the contract between Debrief and its plugins. A plugin depends on this
 //! crate alone, and its `main` is one line:
 //!
-//! ```no_run
+//! ```text
 //! use debrief_plugin_api::prelude::*;
 //!
 //! struct MyPlugin;

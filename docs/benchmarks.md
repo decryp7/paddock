@@ -365,12 +365,12 @@ corpora are in each app's file.
 | [`crates/paddock-download/benches/segmented.rs`](../crates/paddock-download/benches/segmented.rs) | One stream against 2, 4 and 8 segmented connections, each connection rate-limited | `cargo bench -p paddock-download --features http`; `PADDOCK_BENCH_MIB` (32), `PADDOCK_BENCH_RATE_MIB` (8) | An in-process server; no network | none | No | [lessons](lessons.md) |
 | [`crates/paddock-bench`](../crates/paddock-bench) + [`bench-nightly.yml` template](../.gitea/workflow-templates/bench-nightly.yml) | The harness for rule 16: `Recorder`, `bench/<app>.results.json`, `bench/budgets.toml` (limit, tolerance, regression), `paddock-bench check` | see [crates/README.md](../crates/README.md#paddock-bench-plan-x26) | — | Whatever an app's `budgets.toml` says | **No app uses it yet** | — |
 | `perf/proc-per-pid`: `crates/paddock-proc/examples/watch_cpu.rs` (branch, not on main) | A process watcher's own CPU: whole process table against one pid | `cargo run --release -p paddock-proc --example watch_cpu -- 60` (Unix) | A `sleep` child | none (ADR 0024 D7: ≤ 0.5% of a core) | No | branch CHANGELOG |
-| C29 window weight ([`conformance/src/window-weight`](../conformance/src/window-weight)) | JS each window loads before first paint (rule 35) | `ng build --stats-json`, then `paddock-conformance window-weight [kind] [--max kB] [--record]` | The build | `windowWeight` in `paddock.conformance.json`, **not configured anywhere** (C29 warns) | `ci.yml` conformance (warns) | — |
+| Window weight ([`conformance/src/window-weight`](../conformance/src/window-weight)) | JS each window loads before first paint (rule 35) | `ng build --stats-json`, then `paddock-conformance window-weight [kind] [--max kB] [--record]` | The build | `windowWeight` in `paddock.conformance.json`, **not configured anywhere** | none (its check C29 was retired on 2026-11-24, configured nowhere) | — |
 | `./dev hook pre-tool-use` (RT-4, [ADR 0083](adr/0083-agents-cannot-write-outside-their-own-worktree.md) §2) | Per-call time of the installed guard binary on a PreToolUse call, the shim around it, and the binary's size growth | 300 runs of `<git-common-dir>/paddock/hooks/paddock-dev hook pre-tool-use` with a JSON call on stdin, as described in the section below (the script is not kept) | A short, a 6 KB and a malformed call | none yet (the plan expects about 4 to 6 ms) | No | [results](#hook-per-call-cost-and-binary-size-rt-4-2026-11-10) |
 | `./dev gates check` (C100, [ADR 0060](adr/0060-every-check-runs-somewhere.md)) | Run time of the meta-check: 328 checks, the CI model, 3,192 Rust files scanned, the docs | `./dev gates check` (release build of `tools/paddock-dev`) | This repository | none (ADR 0060: quote it only from here; a few seconds at most) | `ci.yml` conformance job, `nightly.yml` c100 job | [results](#2026-11-08-dev-gates-check) |
 | Angular build budgets in `ui/angular.json` | Initial chunk size | `npm run build -w ui` (and each demo's build) | — | gallery 1.5 MB / 3 MB; shell-demo 500 kB / 1 MB; workbench-demo 580 kB / 1 MB (warn / error) | `ci.yml` ui jobs, through `ng build` | — |
 | `paddock_proc::scope::GRACE` ([`crates/paddock-proc/tests/it/scope.rs`](../crates/paddock-proc/tests/it/scope.rs), `measure_grace`, [ADR 0119](adr/0119-every-process-is-held-by-its-handle-and-ends-with-its-scope.md) WP-1) | Time from a stop request (SIGTERM by identity) to the exit, per kind of child; the first start with the orphan guardian | `cd crates && cargo nextest run -p paddock-proc --test it --run-ignored only -E 'test(measure_grace)' --no-capture -j 1` (Unix) | Stand-in children | none (it sets the grace constant, ER-12) | No | [2026-11-24](#2026-11-24-scope-grace-from-the-stop-request-to-the-exit-featadr-0119-wp1-scope) |
-| `./dev ci timings` ([`tools/paddock-dev/src/ci_runs/timings.rs`](../tools/paddock-dev/src/ci_runs/timings.rs); the script `scripts/ci-timings.mjs` that made its recorded golden was deleted on 2026-11-18) | CI wall time, queueing, runners, per-step and compile/test phases, critical path (Gitea API, read-only) | `GITEA_TOKEN=… ./dev ci timings [--repos paddock] [--limit 30] [--cache DIR] [--out docs/research/2026-10-ci-timings.md] [--json-file F]` (default repo: `paddock`; the script defaulted to the old per-app repos) | Gitea run history | none | No (manual) | [research/2026-10-ci-timings.md](research/2026-10-ci-timings.md) |
+| `./dev ci timings` (`tools/paddock-dev/src/ci_runs/timings.rs`, removed on 2026-11-24 with the command; the script `scripts/ci-timings.mjs` that made its recorded golden was deleted on 2026-11-18) | CI wall time, queueing, runners, per-step and compile/test phases, critical path (Gitea API, read-only) | `GITEA_TOKEN=… ./dev ci timings [--repos paddock] [--limit 30] [--cache DIR] [--out docs/research/2026-10-ci-timings.md] [--json-file F]` (default repo: `paddock`; the script defaulted to the old per-app repos) | Gitea run history | none | No (manual) | [research/2026-10-ci-timings.md](research/2026-10-ci-timings.md) |
 
 Not benchmarks, though the names suggest it:
 - `ui/e2e/shell-demo-startup.spec.ts` checks the start-up contract (splash, ready, pings). Its 1.5 s busy loop simulates
@@ -417,7 +417,7 @@ Not benchmarks, though the names suggest it:
 | Debrief plugin memory | cap 1024 MB; import ≤ 512 MB (proposed) | Debrief ADR 0031; [plugins research](research/2026-10-plugins-memory-and-manager.md) | `evtx_memory.rs` (ignored, fails today) |
 | Debrief profile operations | 100–2000 ms each | Debrief [profiling.md](../apps/debrief/docs/profiling.md#performance) | `debrief-profile` `perf.rs` (CI, debug, budgets × 20) |
 | Debrief start-up (macOS) | fails over tree CPU 600 ms (host idle median 30% or more) or 875 ms (busy), or a mark over 5 times its baseline (firstInteractive 3100 ms); baselines windowCreated 208 … firstInteractive 620 ms (2026-11-17) | Rule 16, Debrief ADR 0058 | `startup-bench.mjs` (nightly, manual and every `debrief-v` tag) |
-| First-paint JS | Debrief main 1355 kB, About 480 kB; other apps not set | Rule 35 | `window-weight.mjs` (Debrief); C29 (not configured) |
+| First-paint JS | Debrief main 1355 kB, About 480 kB; other apps not set | Rule 35 | `window-weight.mjs` (Debrief) |
 | Angular initial bundle | Debrief 185/192 kB; Dyno 900 kB/1.5 MB; Pitcrew 1/2 MB; Pitwall 1.2/2 MB; Spotter 1/2 MB; gallery 1.5/3 MB; shell-demo 500 kB/1 MB; workbench-demo 580 kB/1 MB | Rule 35 | `ng build` in CI |
 | Idle process | ≤ 0.5% of a core, ≤ 1 wake-up/s | [ADR 0024](adr/0024-background-work-contract.md) D7 | **nothing** shared; Debrief's gate is planned |
 | Cancel latency | 250 ms target (`CANCEL_LATENCY_TARGET_MS`); progress at most every 100 ms | [ADR 0008](adr/0008-long-operations.md) | mechanism constants, no wall-clock test (by design) |
@@ -636,6 +636,9 @@ Quoted by `conformance/ci/build-jobs.sh` (the macOS layout) and the fix/main-aft
 
 - **Used for:** the macOS class defaults in `conformance/ci/build-jobs.sh`: 3 jobs per host, 2 cores kept (4 build
   jobs per job) and 8 test threads (`NEXTEST_TEST_THREADS`), the fewest threads that matched 14 in the dyno lib run.
+- **Superseded 2026-11-24:** the 8 test threads were removed (3 jobs × 8 threads on 12 usable cores broke ER-48, and this block measured one project's
+  lib tests alone, single runs, never three lanes at once, so it does not support an exception). macOS now takes the core share, 4. The cost the
+  block shows for it, 47.8 s against 15.7 s for the dyno lib tests, is accepted by the user's decision of 2026-11-24 ("cut the Mac now").
 - **Notes:** 3 jobs × 4 rustc plus about 10 agent threads is 22 busy threads, which slowed the probe by about 1.5 times, not
   the 20 times seen in run 7775; so the share is not what timed it out, and that timeout is not reproduced here. In the
   job logs the probe took 15–26 s every time its run overlapped dyno-bench's all-core tests (4 of 4) and about 7 s when it
@@ -1148,7 +1151,7 @@ These are ordered by impact.
    - Family: ADR 0024's idle budget for every app.
    - ADR 0018's frame and scroll budgets.
    - Dyno's 1% overhead.
-   - C29 window weight outside Debrief.
+   - Window weight outside Debrief.
    - The palette and menu budget in [plans/workbench.md](plans/workbench.md).
 3. **Benchmarks that are missing:**
    - Start-up for every app except Debrief, which rule 16 names first.
@@ -2811,3 +2814,23 @@ The rule tables are 90% of the time (git reads per commit); the model reads each
 reader. The replay test's nextest budget (`tools/paddock-dev/.config/nextest.toml`) cites this block. Not measured: the Linux runner and
 a release build. Node hashes (`./dev plan --hash crate:crates/paddock-proc,crate:crates/paddock-slots`): 2.7 s wall, one `git ls-tree`,
 one `git status`, one `rustc -vV`, same load.
+
+## paddock-dev tests under load (2026-11-23, fix/bounded-test-runs, base 64e01dd84)
+
+Dev Mac (14 cores), debug build, `cargo nextest run` default profile with 4 workers unless stated. The load figures are the 1/5/15-minute
+load averages, which include the other agents and the graph train's CI.
+
+| What | Before | After | Load |
+|---|---|---|---|
+| full suite, nextest, 4 workers | 2574 passed in 328.5 s (2 slow) | 6 runs with 4 to 6 CPU burners: 5 all passed (327.6, 326.3, 542.7, 277.4, 294.4 s), 1 had one failure (`worktree::concurrent::two_adds...`, an open fix item in docs/lessons.md) | before: 15 to 33 / 18 to 22 / 18 to 20; after: started at a 15-minute load under 30 (21 to 30), peaks 57 / 48 while the train CI ran |
+| full `it` suite, plain libtest (the binary run directly, 14 threads) | stalled at 81 and at 142 finished tests; git children in disk wait 20 s to over 2 min each | 723 passed in 161 s | 19 to 25 / 21 to 22 / 24 |
+| `worktree::list_clean::clean_dry_run` after `check_c129::a_control_holds...`, plain, 1 thread | stopped at 300 s | 1.0 s (alone: 1.1 s) | 11 to 20 / 21 / 25 |
+| `os_scoped::a_new_skip_or_only_entry...` | 31.5 s | 9.4 s | about 21 to 27 / 22 to 25 |
+| `os_scoped::an_approval_the_merge_base_already_covers...` | 10.5 s | 3.4 s | same |
+| `ci_run::tests::adding_a_check_changes_no_golden_row...` | 8.7 s | 5.0 s | same |
+| one `gates::ci::build` of the real tree (debug) | 2.15 to 2.2 s; 6 to 13 s while the plain run held the disk | (unchanged) | 18 / 22 / 24 |
+| `slots::a_holder_lets_go_when_its_lifeline_process_ends` | red: 60.8 s, "slot s1 never became free" | 0.59 s | about 28 / 37 / 28 |
+
+The cause of the plain-harness stall: a deleted working folder makes macOS's getcwd read the user temp folder (about 992,000 entries)
+for every git start, with disk0 at about 32,000 operations a second (`iostat`, 4 KB transfers). See docs/lessons.md, 2026-11-23,
+"The long paddock-dev test hangs had one cause".

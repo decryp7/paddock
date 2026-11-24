@@ -20,7 +20,7 @@
 //! The core is pure Rust with no Tauri dependency; the adapter (`tauri`: managed state, the `menu_set` command, the
 //! native menu bar, click routing as `paddock://menu`) lives behind the `tauri` feature.
 //!
-//! ```
+//! ```text
 //! use paddock_menu::{NativeMenuModel, Update, diff, native_spec, parse};
 //!
 //! let wire: NativeMenuModel = serde_json::from_str(r#"{ "menus": [

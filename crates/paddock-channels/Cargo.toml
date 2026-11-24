@@ -7,6 +7,9 @@ license.workspace = true
 repository.workspace = true
 publish = ["decryp7"]
 
+[lib]
+doctest = false # doctests are off (crates/README.md, "Doctests")
+
 [features]
 default = ["smtp"]
 # The real SMTP sender (`LettreSender`: lettre with rustls and the platform verifier). Without it the app brings its own `MailSender`.

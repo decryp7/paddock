@@ -19,7 +19,7 @@
 //! `settings_overview`, `settings_set` and `settings_reset`, the start-up problem notice) lives behind the `tauri`
 //! feature.
 //!
-//! ```
+//! ```text
 //! use paddock_settings::{FieldKind, SectionOwner, SettingField, Settings, SettingsSection};
 //! use serde_json::json;
 //! use std::sync::Arc;

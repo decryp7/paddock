@@ -1,1 +1,0 @@
-The coordinator watches load and free disk continuously and keeps the machine busy but not overloaded: start more agents.

@@ -5,7 +5,7 @@
 //! one stand-in binary (`paddock-stand-in`, std only) under the program's name (`cargo`, `git`, `npm`, ... with `.exe` on
 //! Windows), writes the actions it performs next to it, and reads back how it was called:
 //!
-//! ```no_run
+//! ```text
 //! # use paddock_testkit::{Scratch, StandIn};
 //! # fn demo(scratch: &Scratch) -> std::io::Result<()> {
 //! let cargo = StandIn::new(&scratch.work(), "cargo").stdout("added 3 packages").exit(0).records_args().install()?;
@@ -34,7 +34,7 @@
 //! Realistic defaults are opt-in: [`StandIn::npm_like`] and [`StandIn::git_like`] answer the common calls with the shape the real
 //! program prints; override any call with [`StandIn::when_args`] (rules added later are matched first).
 //!
-//! Where the binary comes from (once per build folder, not per test): the variable `PADDOCK_STAND_IN_BIN` when it is set (the Windows test VM, which has no compiler: `docs/testing/windows-test-vm.md`; the binary must be built from the same sources, which is checked), else the kit compiles the
+//! Where the binary comes from (once per build folder, not per test): the variable `PADDOCK_STAND_IN_BIN` when it is set (a machine with no compiler; the binary must be built from the same sources, which is checked), else the kit compiles the
 //! binary's one source file with `rustc` (std only, about a second) into the build folder the test program is in, under a name
 //! that holds a hash of the source, so an edited stand-in is rebuilt and an unchanged one is found by every later test process.
 //! The stand-in finds its script beside itself, so install it where the code under test will look for the program; copying or moving

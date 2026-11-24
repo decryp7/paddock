@@ -54,6 +54,13 @@ path = "junit.xml"
 filter = "package(paddock-chromium) & binary(it) & test(/^real_browser::/)"
 slow-timeout = { period = "30s", terminate-after = 6 }
 
+# waiver: the real-window probe (nightly.yml, `--test show_probe`) waits for a real webview and gives up by itself after 90 s
+# (`GIVE_UP` in paddock-dialogs/src/probe.rs, exit 2); 60 s would stop it before its own verdict. Four periods (120 s) leave the start
+# of the process and Tauri around that bound. It ran under plain `cargo test` with no bound at all before rule 89.
+[[profile.ci.overrides]]
+filter = "package(paddock-dialogs) & binary(show_probe)"
+slow-timeout = { period = "30s", terminate-after = 4 }
+
 # waiver: not a longer time budget, only output: the crash model's probe (paddock-service tests/it/model.rs) prints what the
 # pieces of one edge cost on the machine, and a passing test's output is hidden by default, so the numbers would never reach
 # the job log (the Windows runner's clock reads are what made the model slow, CI runs 7642 to 7646).

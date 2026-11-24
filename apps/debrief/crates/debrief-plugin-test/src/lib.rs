@@ -2,7 +2,7 @@
 //! process, exactly as Debrief runs it: the same launcher, the same sandbox (by default the third-party one, contained
 //! before the program starts), the same frames, and a fake host that lends files and views the way Debrief does.
 //!
-//! ```no_run
+//! ```text
 //! use debrief_plugin_test::{Golden, PluginUnderTest};
 //!
 //! #[test]

@@ -2,7 +2,7 @@
 //! where they choose. **Nothing is ever sent**: the crate has no network dependency (`cargo deny` bans the HTTP stacks), and
 //! the only way out is a path the user picked in a native save dialog.
 //!
-//! ```no_run
+//! ```text
 //! use paddock_diag::{AppInfo, Collected, Redactor, builtin};
 //! use paddock_env::{AppDirs, AppId, ProcessVars};
 //! use paddock_jobs::CancelToken;

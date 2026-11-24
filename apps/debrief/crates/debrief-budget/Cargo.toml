@@ -8,6 +8,9 @@ rust-version.workspace = true
 publish = false
 description = "One byte budget for what the app keeps in memory for the user's open captures and documents (MEM-2): least-recently-used release, reload from the file, and a report per structure"
 
+[lib]
+doctest = false # doctests are off (crates/README.md, "Doctests")
+
 [dependencies]
 log.workspace = true
 

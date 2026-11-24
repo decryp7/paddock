@@ -1426,8 +1426,7 @@ mod member_gate {
     }
 
     /// Row 7 of the ADR 0089 amendment, through the real binary: a stand-in gate that exits 0 and prints no outcome, or an outcome
-    /// whose evidence is for another commit, is not a pass; enforced it would be exit 6. (Report-only here, so the exit is 0 and
-    /// the step says NOT MEASURED, never "passed".)
+    /// whose evidence is for another commit, is not a pass: exit 6 (the gate blocks since 2026-11-24) and NOT MEASURED, never "passed".
     #[test]
     fn a_gate_that_exits_0_without_an_outcome_for_this_merge_is_not_a_pass() {
         let t = train(false);
@@ -1435,21 +1434,24 @@ mod member_gate {
         for body in ["fine", r#"{"outcome":{"status":"clean"}}"#, stale] {
             StandIn::new(t.gates.path(), "gates").stdout(body).install().unwrap();
             let (code, out) = t.run(&["--gates", "--json", "HEAD"], "0");
-            assert_eq!(code, 0, "report-only keeps the exit: {out}");
+            assert_eq!(code, 6, "not measured is never a pass: {out}");
             assert!(out.contains("NOT MEASURED") || out.contains("not measured"), "{body}: {out}");
             assert!(!out.contains("member gate: passed"), "{body}: {out}");
         }
     }
 
     #[test]
-    fn two_members_that_only_fail_together_are_named_at_the_merge_that_joins_them_and_stay_report_only() {
+    fn two_members_that_only_fail_together_are_named_at_the_merge_that_joins_them_and_the_gate_refuses() {
         let t = train(true);
         let (code, out) = t.run(&["--gates", "HEAD"], "5");
-        // Report-only until the first green run (ER-41, ADR 0098 D3 (a)): the rows and the warning are printed, the exit is not.
-        assert_eq!(code, 0, "{out}");
+        // Enforced since 2026-11-24 (ADR 0098's status): the rows and the error are printed and the exit is the findings exit.
+        assert_eq!(code, 5, "{out}");
         assert!(out.contains("clippy FAILED: a.txt and b.txt together"), "{out}");
-        assert!(out.contains("::warning::member gate FAILED"), "{out}");
-        assert!(out.contains("REPORT-ONLY"), "{out}");
+        assert!(out.contains("::error::member gate FAILED"), "{out}");
+        assert!(
+            !out.lines().any(|l| l.contains("member gate FAILED") && l.contains("REPORT-ONLY")),
+            "{out}"
+        );
         assert!(out.contains("take the member out") && out.contains("send it back"), "{out}");
         assert!(
             out.contains("`check --pre-push --member-gate --base") && !out.contains("`check --pre-push --base"),
@@ -1485,7 +1487,7 @@ mod member_gate {
         t.repo.git(&["checkout", "-q", "a"]);
         let merge = t.repo.git(&["rev-parse", "main"]);
         let (code, out) = t.run(&["--gates", &merge], "5");
-        assert_eq!(code, 0, "report-only: {out}");
+        assert_eq!(code, 6, "not measured: {out}");
         assert!(
             out.contains("member gate NOT MEASURED") && out.contains("not the merge result"),
             "{out}"
@@ -1497,7 +1499,7 @@ mod member_gate {
     fn a_gate_that_could_not_look_is_never_reported_as_a_pass() {
         let t = train(true);
         let (code, out) = t.run(&["--gates", "HEAD"], "6");
-        assert_eq!(code, 0, "{out}");
+        assert_eq!(code, 6, "{out}");
         assert!(out.contains("member gate NOT MEASURED"), "{out}");
         assert!(!out.contains("member gate: passed"), "{out}");
     }
@@ -1506,10 +1508,10 @@ mod member_gate {
     fn json_carries_the_gate_result_under_its_own_key() {
         let t = train(true);
         let (code, out) = t.run(&["--gates", "HEAD", "--json"], "5");
-        assert_eq!(code, 0, "{out}");
+        assert_eq!(code, 5, "{out}");
         let v: serde_json::Value = serde_json::from_str(out.lines().find(|l| l.starts_with('{')).unwrap()).unwrap();
         assert_eq!(v["gates"]["outcome"], "failed", "{out}");
-        assert_eq!(v["gates"]["enforced"], false, "{out}");
+        assert_eq!(v["gates"]["enforced"], true, "{out}");
     }
 
     #[test]

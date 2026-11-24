@@ -8,6 +8,9 @@ rust-version.workspace = true
 publish = false
 description = "AI assistant for Debrief on Pitwall: engine-validated proposals, chat, tools and the Pitwall client (ADR 0070)"
 
+[lib]
+doctest = false # doctests are off (crates/README.md, "Doctests")
+
 [dependencies]
 debrief-core = { path = "../debrief-core" }
 debrief-collect = { path = "../debrief-collect" }

@@ -1,0 +1,7 @@
+{
+ "code": 1,
+ "stdout": null,
+ "outputs": null,
+ "summary": null,
+ "error": "affected: docs/ci-active-apps.toml names dyon, which is not an app (no apps/dyon/paddock.ci.json)"
+}

@@ -11,10 +11,10 @@
 //!   skipped one.
 //!
 //! - "complete" has one meaning (ER-15, ADR 0113): the run declared a scope that covers a push to main's (`run_scope`), engines
-//!   included. A train's full dispatch without WebKit declares an engine less, so it is neither reused here nor counted by the
-//!   verdict reader: the push to main runs, WebKit
-//!   included, and `tag.yml` never reads a green verdict that skipped it (the 2026-11-12 schedule-skipped and
-//!   rerun-only runs counted green were the same class).
+//!   included. A run that declares less than that (an engine, an app, a job) is neither reused here nor counted by the verdict
+//!   reader, and `tag.yml` never reads a green verdict that skipped it (the 2026-11-12 schedule-skipped and rerun-only runs counted
+//!   green were the same class). A push to main's scope has no WebKit since 2026-11-24 (the nightly's), so a train's full dispatch
+//!   covers it.
 //!
 //! A run that reuses another declares that it ran nothing (`PLAN_REUSE`, `dev plan --ci`), so the reader never counts it; the reused run is the one
 //! that decides the commit.
@@ -276,8 +276,8 @@ mod tests {
     }
 
     #[test]
-    fn a_full_green_dispatch_without_webkit_is_not_reused_and_one_with_webkit_is() {
-        // ci.yml declares a scope without the WebKit engine for a full dispatch that did not run it (a smaller scope than a push to main): run 7 below.
+    fn a_full_green_dispatch_that_declares_less_than_a_push_to_main_is_not_reused_and_one_that_covers_it_is() {
+        // Run 7 below declares a scope smaller than a push to main's (an engine or a job less).
         let mut f = server(
             vec![run(7, "workflow_dispatch", "train/x", "success")],
             &[],
@@ -286,7 +286,7 @@ mod tests {
         );
         let r = ask(&mut f, Some(9));
         assert!(matches!(&r, Reuse::Run(why) if why.contains("full run")), "{r:?}");
-        // The same run with the WebKit scope declared complete is reused.
+        // The same run with its scope declared complete is reused.
         let mut f = server(
             vec![run(7, "workflow_dispatch", "train/x", "success")],
             &[7],

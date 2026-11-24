@@ -21,7 +21,7 @@ test('C135 allow file: a path, a site, a reason and a count', () => {
   assert.throws(() => parseAllow(list([{ path: 'a.ts', reason: 'long enough' }])), /site/);
 });
 
-test('C135 through the runner: listed opt-outs pass, others are warnings, the list may not grow against the merge base', async () => {
+test('C135 through the runner: listed opt-outs pass, others are errors, the list may not grow against the merge base', async () => {
   const files = {
     [ALLOW]: list([entry('apps/a/src/leaky.spec.ts')]),
     'apps/a/src/leaky.spec.ts': "describe('x', () => {\n  installLeakDetector({ mode: 'off' });\n});\n",
@@ -31,7 +31,7 @@ test('C135 through the runner: listed opt-outs pass, others are warnings, the li
   const base = (text) => ({ git: (args) => (args[0] === 'show' ? text : 'abc123') });
   // the merge base has the same list: only the unlisted opt-out is reported
   const same = await findingsOf('C135', makeApp(files), { options: base(list([entry('apps/a/src/leaky.spec.ts')])) });
-  assert.deepEqual(same.map((f) => [f.file, f.line, f.severity]), [['apps/a/src/other.spec.ts', 1, 'warn']]);
+  assert.deepEqual(same.map((f) => [f.file, f.line, f.severity]), [['apps/a/src/other.spec.ts', 1, 'error']]);
   // the merge base has an empty list: the entry was added by this branch
   const grown = await findingsOf('C135', makeApp(files), { options: base(list()) });
   assert.ok(grown.some((f) => f.severity === 'error' && /the list grew/.test(f.message)));
@@ -51,5 +51,5 @@ test('C135 flags a spec that fakes a TestBed root with ng-version, and nothing e
   assert.deepEqual(fakedRoots("tab.setAttribute('ng-version', 'x');\nconst a = 1;\nhtml = '<div ng-version=\"0\">';\n"), [{ line: 1 }, { line: 3 }]);
   assert.deepEqual(fakedRoots("el.closest('[ng-version]')\n"), []);
   const found = await findingsOf('C135', makeApp({ [ALLOW]: list(), 'apps/a/src/x.spec.ts': "tab.setAttribute('ng-version', 'leftover');\n", 'apps/a/src/x.ts': "el.setAttribute('ng-version', 'y');\n" }));
-  assert.deepEqual(found.map((f) => [f.file, f.line, f.severity]), [['apps/a/src/x.spec.ts', 1, 'warn']]);
+  assert.deepEqual(found.map((f) => [f.file, f.line, f.severity]), [['apps/a/src/x.spec.ts', 1, 'error']]);
 });

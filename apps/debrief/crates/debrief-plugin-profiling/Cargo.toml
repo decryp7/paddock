@@ -8,6 +8,9 @@ rust-version.workspace = true
 publish = false
 description = "Debrief plugin: profile and heap snapshot importers (speedscope, folded stacks, Chrome, pprof, perf script, nettrace, V8 heap snapshots) and the profiling.importers extension point"
 
+[lib]
+doctest = false # doctests are off (crates/README.md, "Doctests")
+
 [dependencies]
 debrief-plugin-api = { path = "../debrief-plugin-api", optional = true }
 debrief-profile = { path = "../debrief-profile" }

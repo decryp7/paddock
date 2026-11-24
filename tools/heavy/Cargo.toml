@@ -15,6 +15,7 @@ readme = "README.md"
 publish = ["decryp7"]
 
 [lib]
+doctest = false # doctests are off (crates/README.md, "Doctests")
 name = "heavy"
 path = "src/lib.rs"
 

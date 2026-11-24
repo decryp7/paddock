@@ -8,6 +8,9 @@ rust-version.workspace = true
 publish = false
 description = "cargo debrief-plugin: start (new), test (the harness's conformance checks, then cargo test), package and sign (.debriefplugin) Debrief plugins (ADR 0027)"
 
+[lib]
+doctest = false # doctests are off (crates/README.md, "Doctests")
+
 [[bin]]
 name = "cargo-debrief-plugin"
 path = "src/main.rs"

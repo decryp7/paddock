@@ -1,14 +1,14 @@
 // ci-runs-reader: ci triage: names the failed tests of one run and compares with main's last run
 //! `ci triage <run>`: for each test that failed in a CI run, is the failure NEW, ALREADY FAILING ON MAIN, or FLAKY?
 //!
-//! It reads, and never writes: the failed jobs of the run and their logs (through [`logfind`], the reader `ci flakes` uses, which
+//! It reads, and never writes: the failed jobs of the run and their logs (through [`logfind`], the reader the flake history uses, which
 //! sits on the nextest, Playwright and vitest readers of `plan --since-run`), the last finished run of the same workflow on
-//! `refs/heads/main` (or the run named with `--against`), and the flake history of `ci flakes`. It never quarantines a test and
+//! `refs/heads/main` (or the run named with `--against`), and the flake history ([`flakes`]). It never quarantines a test and
 //! never turns a red run green (ER-12): it only says what the evidence is.
 //!
 //! The order of the answer for one failed test:
 //!
-//! 1. **FLAKY (n of m runs)**: `ci flakes` lists it as flaky or as failed-then-passed in the window. If it also failed on the baseline
+//! 1. **FLAKY (n of m runs)**: the flake history lists it as flaky or as failed-then-passed in the window. If it also failed on the baseline
 //!    run the row says so.
 //! 2. **ALREADY FAILING ON MAIN**: the job of the same name failed in the baseline run and its log names this test (or, for a job
 //!    that failed outside any test runner, the job failed there too).
@@ -16,7 +16,7 @@
 //! 4. **UNKNOWN**: nothing proves either way (no baseline run, the job did not run or its log cannot be read, a log the reader
 //!    cannot account for). Never "new" and never "old" (ER-33).
 //!
-//! `ci flakes` reads one app at a time, so the history covers the app of the run's workflow and of its `app <name>` jobs. Failures
+//! The flake history reads one app at a time, so the history covers the app of the run's workflow and of its `app <name>` jobs. Failures
 //! of shared jobs (`crate`, `paddock-dev`) have no flake history; the report says so.
 //!
 //! The classification ([`status_of`]) is pure; [`collect`] reads the server.
@@ -84,7 +84,7 @@ pub enum Status {
     New,
     /// It failed on the baseline run too.
     OnBaseline,
-    /// `ci flakes` lists it: `count` of `runs` runs in the window.
+    /// The flake history lists it: `count` of `runs` runs in the window.
     Flaky {
         /// Runs it was listed in.
         count: usize,
@@ -93,10 +93,10 @@ pub enum Status {
         /// Whether it also failed on the baseline run.
         also_on_baseline: bool,
     },
-    /// It failed on every attempt in this run. The flake history, when `ci flakes` lists the test, is shown beside it and never
+    /// It failed on every attempt in this run. The flake history, when the flake history lists the test, is shown beside it and never
     /// turns the failure into FLAKY: only a pass on a retry in this run does.
     Failed {
-        /// `ci flakes` history: runs it was listed in and runs examined.
+        /// Flake history: runs it was listed in and runs examined.
         history: Option<(usize, usize)>,
         /// Whether it also failed on the baseline run.
         also_on_baseline: bool,
@@ -467,7 +467,7 @@ fn history_apps(req: &Request, workflow: &str, failed_jobs: &[String]) -> (Vec<S
     (apps.into_iter().collect(), shared.into_iter().collect())
 }
 
-/// The flake evidence of a `ci flakes` report: the tests listed as flaky or as failed-then-passed (a test that only failed is not
+/// The flake evidence of a flake-history report: the tests listed as flaky or as failed-then-passed (a test that only failed is not
 /// flaky).
 pub fn flaky_from(r: &flakes::Report) -> Flaky {
     r.rows
@@ -548,7 +548,7 @@ pub fn collect(client: &mut Client, req: &Request, log: &mut dyn FnMut(&str)) ->
         let names: Vec<String> = failed.iter().map(|(j, _, _)| j.name.clone()).collect();
         let (apps, shared) = history_apps(req, run.workflow(), &names);
         if apps.is_empty() {
-            gaps.push("flake history: none (ci flakes reads one app at a time, and this run's failures belong to no app); pass --app to choose one".into());
+            gaps.push("flake history: none (the flake history reads one app at a time, and this run's failures belong to no app); pass --app to choose one".into());
         } else if !shared.is_empty() {
             gaps.push(format!(
                 "flake history covers {}; shared jobs ({}) have none, so their NEW is not checked against it",

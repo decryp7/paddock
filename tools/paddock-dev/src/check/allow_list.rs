@@ -7,17 +7,17 @@
 //! The reader also owns the error paths, so every check that uses it has the same ones on both hosts (ER-21 class "the two hosts
 //! diverge on an error path": C125 in 865498235, then C121 and C124): an allow file that is missing, not JSON, without its list or
 //! with a malformed entry is one unwaivable check-broken finding and nothing else ([`read`]), and a file the check cannot read is a
-//! not-measured error at that file ([`AllowList::read`]). Used by C121, C124 and C125, each declaring the [`Spec`] it reads with in
+//! not-measured error at that file ([`AllowList::read`]). Used by C121 and C131, each declaring the [`Spec`] it reads with in
 //! [`super::Check::allow_list`]. The port of `conformance/src/util/allow-list.mjs`; `tests/it/check_allow_list.rs` compares the error
 //! paths of every user on both hosts.
 //!
-//! The list only ever shrinks (ER-12, ER-21; C129's baseline has the same rule): the reader compares every entry, counted `count` times,
+//! The list only ever shrinks (ER-12, ER-21): the reader compares every entry, counted `count` times,
 //! with the list at the merge base (`baseline::growth`, the one comparison C53 and C115 use), and an entry the merge base lacks, or a
 //! raised `count`, is one unwaivable finding at the allow file that needs the user's approval. The comparison runs only on a checkout
 //! (a folder git accepts as a work tree): a tree in memory (a control) or a fixture folder has nothing to compare, and says nothing. In a checkout
 //! where git cannot give a merge base it warns that the rule is not enforced, and in CI it is a not-measured error (ADR 0089), never
 //! silence. The base is the target ref ([`baseline::target_ref`], the one reader of `PADDOCK_BASE_REF`). The growth finding is a
-//! warning only because the checks that use this reader (C121, C124, C125, C130) are report-only themselves (ER-41); the blocking
+//! warning for a report-only user (ER-41) and an error for a blocking one ([`Spec::growth_blocks`]: C131); the blocking
 //! baselines (C53, C71, C104, C115) use the same target ref and stay errors.
 
 use super::baseline::{self, Growth};
@@ -43,6 +43,9 @@ pub struct Spec {
     pub unseen: &'static str,
     /// The fix of the check-broken finding: how the allow file looks.
     pub restore: &'static str,
+    /// Whether growth against the merge base is an error (a blocking check, ER-41) rather than a warning (a report-only one); the
+    /// JavaScript reader's `growth: 'error'`.
+    pub growth_blocks: bool,
 }
 
 /// The allow list of check `spec` read through `ctx`, with what `parse` reads beside its entries; or, when the file is missing, not
@@ -227,7 +230,7 @@ impl AllowList {
         ))
     }
 
-    /// Passes over `path` after reading it (C125: a file with a NUL byte is not text): it is not scanned, so an entry for it names a
+    /// Passes over `path` after reading it (C131: a file with a NUL byte is not text): it is not scanned, so an entry for it names a
     /// file the check does not read, and it is no probe.
     pub fn skip(&mut self, path: &str) {
         self.scanned.remove(path);
@@ -247,8 +250,8 @@ impl AllowList {
         }
     }
 
-    /// What the list says about one flagged site at `path`: `matches(site)` says whether an entry's `site` names it (C121 and C124:
-    /// the flagged line holds the site's text; C125: the literal starts with the site's whole path components). The site counts on the
+    /// What the list says about one flagged site at `path`: `matches(site)` says whether an entry's `site` names it (C121 and C131:
+    /// the flagged line holds the site's text). The site counts on the
     /// first matching entry with room left; when every matching entry is at its count it is [`Admit::Beyond`], and the caller reports
     /// it at its own file and line.
     pub fn admit(&mut self, path: &str, matches: impl Fn(&str) -> bool) -> Admit {
@@ -269,7 +272,20 @@ impl AllowList {
 
     /// The one finding about growth against the merge base (see the module): empty when nothing was added or it cannot apply here.
     fn growth_findings(&self, ctx: &Ctx) -> Vec<Finding> {
-        let Spec { id, rule, file, .. } = *self.spec;
+        let Spec {
+            id,
+            rule,
+            file,
+            growth_blocks,
+            ..
+        } = *self.spec;
+        let severity = |id: &str, rule: u32, file: &str, line: usize, message: String, fix: &str| {
+            if growth_blocks {
+                Finding::error(id, rule, file, line, message, fix)
+            } else {
+                Finding::warn(id, rule, file, line, message, fix)
+            }
+        };
         if ctx.is_in_memory() || !baseline::is_work_tree(ctx.root()) {
             return Vec::new();
         }
@@ -280,7 +296,7 @@ impl AllowList {
             Growth::Unmeasured(why) => vec![baseline::unmeasured_finding(ctx.in_ci(), id, rule, file, "the allow list", &why)],
             Growth::Added { added: 0, .. } => Vec::new(),
             Growth::Added { base, added, .. } => vec![
-                Finding::warn(
+                severity(
                     id,
                     rule,
                     file,
@@ -353,6 +369,7 @@ mod tests {
         file: FILE,
         unseen: "a site",
         restore: "Restore it.",
+        growth_blocks: false,
     };
 
     fn list(entries: &str) -> AllowList {

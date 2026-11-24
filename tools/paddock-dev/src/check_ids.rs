@@ -26,7 +26,7 @@ use std::time::Instant;
 const CHECKS_DIR: &str = "conformance/src/checks";
 /// The folder of the reservation files, one per reservation.
 pub const RESERVED_DIR: &str = "conformance/reserved";
-/// The Rust-hosted checks (`c119.rs`).
+/// The Rust-hosted checks (`c120.rs`).
 const RUST_DIR: &str = "tools/paddock-dev/src/check";
 /// The gate register, whose `id = "C<n>"` lines name checks too.
 const GATES: &str = "docs/gates.toml";

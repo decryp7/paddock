@@ -4,7 +4,8 @@
 //! - [`record`]: the `.paddock-owner.toml` in every folder the tooling makes (the source of truth);
 //! - [`index`]: the SQLite cache of folders and size history (rebuilt from the records when missing or corrupt);
 //! - [`scan`], [`measure`], [`state`]: find the folders, measure them in parallel, work out what state each is in;
-//! - [`report`], [`clean`], [`adopt`]: the commands built on them.
+//! - [`report`], [`clean`], [`adopt`]: the commands built on them;
+//! - [`temp`]: the OS temp folder entries our tests and tools leave, declared in `temp-prefixes.toml` and swept past their limits.
 //!
 //! Nothing here deletes without `clean --apply`, and `clean` never touches a folder without a record.
 
@@ -18,6 +19,9 @@ pub mod record;
 pub mod report;
 pub mod scan;
 pub mod state;
+pub mod temp;
+#[cfg(test)]
+mod test_support;
 
 use clap::{Args, Subcommand};
 use paddock_cli::{CliError, Report};
@@ -41,6 +45,9 @@ pub enum DiskCommand {
     Adopt(adopt::AdoptArgs),
     /// Write (or, when there is one, touch) the owner record of a folder a tool made, for example a CARGO_TARGET_DIR.
     Record(RecordArgs),
+    /// The OS temp folder: our declared leftovers (src/disk/temp-prefixes.toml) past their count or size limit, oldest first, never
+    /// a young or used one or anything not ours; a warning when the folder holds too many entries. A dry run unless --apply.
+    Temp(temp::TempArgs),
 }
 
 /// `disk scan`'s arguments.
@@ -95,6 +102,7 @@ pub fn command(c: DiskCommand) -> Result<Report, CliError> {
         DiskCommand::Adopt(a) => adopt::run(&a, &env),
         DiskCommand::Scan(a) => scan_command(&a),
         DiskCommand::Record(a) => record_command(&a),
+        DiskCommand::Temp(a) => temp::run(&a, &env, &mut say),
     }
 }
 

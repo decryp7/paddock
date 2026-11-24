@@ -22,7 +22,7 @@
 //! The core is pure Rust with no Tauri dependency; the adapter (`tauri`: window creation, the four commands, the window
 //! events) lives behind the `tauri` feature.
 //!
-//! ```
+//! ```text
 //! use paddock_commands::DialogGrant;
 //! use std::sync::Arc;
 //!

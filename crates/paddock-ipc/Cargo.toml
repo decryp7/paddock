@@ -11,6 +11,9 @@ exclude = ["fuzz"]
 
 # A child process for this crate's own tests (echo, exit at once, never connect, wrong token, a link companion). Never shipped
 # by an app; it only exists so the tests start real processes.
+[lib]
+doctest = false # doctests are off (crates/README.md, "Doctests")
+
 [[bin]]
 name = "paddock-ipc-test-child"
 path = "src/bin/test_child.rs"

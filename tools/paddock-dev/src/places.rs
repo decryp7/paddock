@@ -1,5 +1,5 @@
-//! Where this machine keeps its development folders, derived and never named (C125, rule 40). On 2026-11-14 the dev data moved to
-//! another disk and every hard-coded disk path went stale: the brief check refused the new scratch folders, `./dev disk` and
+//! Where this machine keeps its development folders, derived and never named (rule 40). On 2026-11-14 the dev data moved to
+//! another disk and every hard-coded disk path went stale: `./dev disk` and
 //! `./dev load` looked at disks that were gone.
 //!
 //! - The dev-targets folder (worktrees, build folders, scratch, the disk index): `PADDOCK_DEV_TARGETS`, else the parent of the
@@ -8,7 +8,7 @@
 //!   machines' lock (`PADDOCK_VM_LOCK_ROOT`, else `<dev disk>/ci/locks/test-machines`) are below it.
 //! - The main checkout: the folder that holds the git common directory ([`Repo::discover`]).
 //!
-//! `./dev places` prints them for the scripts (vm-lock, vm-win, the vm-smoke harness, wp0-run); `--pinned` reads only the
+//! `./dev places` prints them for the scripts (vm-lock, wp0-run); `--pinned` reads only the
 //! repository's own git config (`git config --local`) and ignores every variable `./dev places` itself reads. Its trust, said
 //! plainly: on Unix git runs with an otherwise empty environment and a fixed PATH of `/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin`,
 //! so no variable picks the git or the config it reads; `/usr/local/bin` and `/opt/homebrew/bin` are writable by the user, so a
@@ -259,8 +259,7 @@ pub fn command(a: &PlacesArgs) -> Result<Report, CliError> {
 }
 
 /// Test helper: an invented folder that is absolute on this platform, the path itself on Unix and on drive `C:` on Windows (`/srv`
-/// is not absolute there). Tests name invented folders only (C125). Shared by the places and brief_check tests; train 14 moves it
-/// to `paddock_testkit::path`.
+/// is not absolute there). Tests name invented folders only (rule 40). Train 14 moves it to `paddock_testkit::path`.
 #[cfg(test)]
 pub(crate) fn test_abs(unix: &str) -> String {
     if cfg!(windows) { format!("C:{unix}") } else { unix.to_string() }

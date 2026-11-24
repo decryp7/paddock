@@ -11,6 +11,9 @@ description = "Debrief's DuckDB store (ADR 0014): events as zstd Parquet segment
 # It links the official prebuilt libduckdb (never `bundled`, which needs several GB of RAM to compile):
 #   eval "$(crates/debrief-store-duck/scripts/fetch-libduckdb.sh "$HOME/.cache/debrief-libduckdb")"
 
+[lib]
+doctest = false # doctests are off (crates/README.md, "Doctests")
+
 [dependencies]
 debrief-core = { path = "../debrief-core" }
 # Gives freed memory back to the OS when an import or an index build ends (`debrief_alloc::release`).

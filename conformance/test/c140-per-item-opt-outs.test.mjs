@@ -21,7 +21,7 @@ test('C140 allow file: a path, the site per-item, a reason and a count', () => {
   assert.throws(() => parseAllow(list([{ path: 'a.ts', reason: 'long enough' }])), /site/);
 });
 
-test('C140 through the runner: listed opt-outs pass, unlisted ones and short reasons are warnings', async () => {
+test('C140 through the runner: listed opt-outs pass, unlisted ones and short reasons are errors', async () => {
   const files = {
     [ALLOW]: list([entry('apps/a/app/src/listed.store.ts')]),
     'apps/a/app/src/listed.store.ts': '// per-item: each runner answers on its own pipe\nfor (const r of rs) await backend.ping(r);\n',
@@ -33,9 +33,9 @@ test('C140 through the runner: listed opt-outs pass, unlisted ones and short rea
   const base = (text) => ({ git: (args) => (args[0] === 'show' ? text : 'abc123') });
   const same = await findingsOf('C140', makeApp(files), { options: base(list([entry('apps/a/app/src/listed.store.ts')])) });
   assert.deepEqual(same.map((f) => [f.file, f.line, f.severity]).sort(), [
-    ['apps/a/app/src/new.store.ts', 1, 'warn'],
-    ['apps/a/app/src/short.store.ts', 1, 'warn'],
-    ['apps/a/app/src/short.store.ts', 1, 'warn'],
+    ['apps/a/app/src/new.store.ts', 1, 'error'],
+    ['apps/a/app/src/short.store.ts', 1, 'error'],
+    ['apps/a/app/src/short.store.ts', 1, 'error'],
   ]);
   // Growth against the merge base is the shared allow list's own finding, tested once with C140's sample in allow-list.test.mjs (ER-22).
 });

@@ -365,19 +365,35 @@ fn holder_pid(root: &Path, id: SlotId) -> Value {
     FsLocks::new(root).read_owner(id).map_or(Value::Null, |o| json!(o.pid))
 }
 
+/// Whether the holder's lifeline still runs, asked once per look (ER-51, rule 89): `pid` is `paddock_env::lifeline`'s, the test process
+/// that started this holder through the programs above it (every test command names it; production never does, and then this always
+/// answers yes). Its identity is taken here, once, while it is waiting on the command that started this holder; a pid already gone
+/// means the test ended first, so the hold ends at its first look. From then on the identity decides, never the bare pid (rule 53):
+/// only a confirmed end counts (`has_ended`), so a process table that cannot be read keeps the slot.
+fn lifeline(pid: Option<u32>) -> impl FnMut() -> bool {
+    let id = pid.map(paddock_proc::ProcessId::of);
+    move || match id {
+        None => true,
+        Some(None) => false,
+        Some(Some(id)) => !id.has_ended(),
+    }
+}
+
 /// `dev ci slot hold` (the holder).
 pub fn hold(a: &HoldArgs) -> Result<Report, CliError> {
     check_max(a.max)?;
     // Before anything else: descriptors inherited from the job (a pipe the runner waits on) must not outlive the step.
     paddock_proc::close_inherited();
     let locks = FsLocks::new(&a.root);
-    let end = paddock_slots::hold_with(
+    let mut alive = lifeline(paddock_env::lifeline::from_env());
+    let end = paddock_slots::hold_while(
         &locks,
         a.max,
         &a.owner,
         Duration::from_millis(a.poll_ms.max(1)),
         (a.max_hold_secs > 0).then(|| Duration::from_secs(a.max_hold_secs)),
         Duration::from_millis(a.acquire_grace_ms),
+        &mut alive,
         &mut std::io::stdout(),
     )
     .map_err(failure)?;
@@ -530,6 +546,22 @@ mod tests {
         assert_eq!(parse_announcement("none\n").unwrap(), Announcement::None);
         assert!(parse_announcement("s3").is_err(), "a slot without its token is refused");
         assert!(parse_announcement("hello").is_err());
+    }
+
+    /// The lifeline answers: none is always alive (production), this very process is alive, and a pid nobody holds is gone at once.
+    #[test]
+    fn the_lifeline_is_alive_while_its_process_runs_and_absent_means_always() {
+        assert!(lifeline(None)(), "no lifeline: the other ends decide");
+        assert!(lifeline(Some(std::process::id()))(), "this test process runs");
+        // A child that ran and was reaped: its pid names nobody now (a new process would need the pid space to wrap meanwhile).
+        let mut done = paddock_proc::command(if cfg!(windows) { "cmd" } else { "true" });
+        if cfg!(windows) {
+            done.args(["/C", "exit"]);
+        }
+        let mut child = done.spawn().unwrap();
+        let pid = child.id();
+        child.wait().unwrap();
+        assert!(!lifeline(Some(pid))(), "a pid nobody holds: the starter is gone");
     }
 
     #[test]

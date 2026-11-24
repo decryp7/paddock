@@ -17,7 +17,7 @@
 //! Labels are the shell's (`paddock_commands::labels`): a pop-out is `p-<host>-<n>`, class `POPOUT`, and works for its
 //! host (it never outlives it). The adapter (`tauri` feature) applies it all to Tauri windows.
 //!
-//! ```
+//! ```text
 //! use paddock_panels::panel::Panel;
 //! use paddock_panels::sync::recipients;
 //! use paddock_panels::wire::SyncScope;

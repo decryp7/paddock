@@ -1,6 +1,6 @@
 //! The app and service log of the Paddock apps (plan X1, decision D1 and D2).
 //!
-//! ```no_run
+//! ```text
 //! use paddock_env::{AppDirs, AppId};
 //! use paddock_log::{LogConfig, Logging};
 //!

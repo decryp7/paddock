@@ -3,10 +3,11 @@
 # the reference apps, the Rust crates, the conformance, tools and ESLint packages, and one matrix leg per affected app
 # (apps/<app>/paddock.ci.json, through .gitea/actions/app-gates). The base of the diff: the last green push run of main for a
 # push to main, the `base` input of a manual run, the `landing_base` input of a train's landing run (main's last complete commit); tags
-# and manual runs without a base run everything. No pull_request trigger:
-# pull requests are the branch ledger (`./dev pr`, docs/plans/merge-queue.md) and opening one starts no run (the contract test
-# no_workflow_runs_on_a_pull_request); branches and trains run by dispatch.
-# nightly.yml runs everything, Chromium and WebKit, every night (the safety net for a wrong filter).
+# and manual runs without a base run everything. No pull_request trigger (the contract test no_workflow_runs_on_a_pull_request);
+# branches and trains run by dispatch.
+# nightly.yml runs everything, Chromium and WebKit, every night (the safety net for a wrong filter). The reference apps' browser
+# jobs (e2e, e2e-webkit) and the apps' WebKit legs run only there, on a v* tag and on a manual run with `webkit`: never on a branch,
+# a train or a push to main (user, 2026-11-24).
 # Publishing is not here: a v* tag runs publish.yml (gates, then the cargo and npm registries and the Gitea release); this
 # workflow ends with the publish dry run, so a tag never meets a packaging problem first.
 #
@@ -26,11 +27,11 @@ on:
         required: false
         default: ""
       landing_base:
-        description: "A train's landing run: diff from this commit, main's last complete green one (./dev ci dispatch and the queue fill it in for a full train dispatch; ADR 0117 WP-8). Unlike base it is not a member run: every test of what the diff reaches runs, with WebKit, and a push to main reuses the run. Empty: no diff, everything"
+        description: "A train's landing run: diff from this commit, main's last complete green one (./dev ci dispatch and the queue fill it in for a full train dispatch; ADR 0117 WP-8). Unlike base it is not a member run: every test of what the diff reaches runs, and a push to main reuses the run. Empty: no diff, everything"
         required: false
         default: ""
       webkit:
-        description: "Also run the WebKit tests (the WebKit job, and an app's WebKit lines)"
+        description: "Also run the reference apps' browser jobs (Chromium and WebKit) and the apps' WebKit lines, as the nightly does"
         type: boolean
         default: false
       os_full:
@@ -74,7 +75,7 @@ permissions:
   actions: read
 
 # The conformance checks Paddock runs on itself are the `conformance` field of conformance/paddock.ci.json (ADR 0038 §1): one list,
-# run by the conformance job and the train-gates job as `./dev ci run conformance paddock`, and read by `./dev check --pre-push`.
+# run by the conformance job as `./dev ci run conformance paddock`, and read by `./dev check --pre-push`.
 env:
   # The fallback switch of conformance/ci/kit.sh (WP-1): set the repository variable to shell and every kit step runs its script.
   PADDOCK_CI_KIT: ${{ vars.PADDOCK_CI_KIT }}
@@ -101,7 +102,6 @@ jobs:
       paddock_dev: ${{ steps.plan.outputs.paddock_dev }}
       apps: ${{ steps.plan.outputs.apps }}
       any_app: ${{ steps.plan.outputs.any_app }}
-      base: ${{ steps.plan.outputs.base }}
       # A rerun of a run's failures (the since_run input): the jobs that rerun (empty otherwise; each job's `if` reads an empty
       # list as its own name, so a normal run gates on the projects alone). The crate and paddock-dev legs: in a rerun of their
       # failures the failed ones, each with the nextest filter of its failed tests (empty: the whole leg); otherwise every OS.
@@ -111,7 +111,8 @@ jobs:
       # A member run (a dispatch with a base): the nextest filterset of the packages of that workspace the change reaches (empty: every
       # test, and always so on main, a tag and a manual run with no base: the final head's full run). The Linux crate tests run
       # whole under coverage in `crates`.
-      # Whether the WebKit tests run: the e2e-webkit job and the scope this run declares (ADR 0113) read the one value of the planner.
+      # Whether the WebKit tests and the reference apps' browser jobs run: the e2e and e2e-webkit jobs and the scope this run declares
+      # (ADR 0113) read the one value of the planner.
       webkit: ${{ steps.plan.outputs.webkit }}
       crates_filter: ${{ steps.plan.outputs.crates_filter }}
       paddock_dev_filter: ${{ steps.plan.outputs.paddock_dev_filter }}
@@ -190,49 +191,14 @@ jobs:
           echo "plan mode: full=$PLAN_MODE_FULL"
           grep -q '^crate_legs=' "$GITHUB_OUTPUT" || echo "crate_legs=$PLAN_OS_LEGS" >> "$GITHUB_OUTPUT"
           grep -q '^paddock_dev_legs=' "$GITHUB_OUTPUT" || echo "paddock_dev_legs=$PLAN_OS_LEGS" >> "$GITHUB_OUTPUT"
-          # REPORT-ONLY PHASE (ER-41, ADR 0113): until docs/ci-scope-first-runs.toml names ci.yml, `./dev ci verdict` still decides on this
-          # line (and prints the scope view the planner declared above as a notice). `./dev ci scope-record --workflow ci.yml --run <id>`
-          # records the first green scope run and switches the reader; this block is deleted in the same change (conformance fails
-          # while a recorded producer still prints it). The condition is the one reviewed on 2026-11-21: a push to main's scope, WebKit
-          # included, never an app-only dispatch, a rerun or a reused run.
-          complete=false
-          if [ -z "$PLAN_SINCE_RUN" ] && [ "$PLAN_MODE_FULL" = true ] && [ "$PLAN_REUSE" != true ] && [ -z "$PLAN_APP" ] && { [ "$EVENT" = push ] || [ -n "$PLAN_WEBKIT" ]; }; then complete=true; fi
-          echo "plan verdict: complete=$complete"
-
-  # C102 (ADR 0072): every listen site of the Rust sources is in docs/ipc-endpoints.toml with an ending test or a reason, and the
-  # ratchet of connection endings is well formed. Always runs (./dev builds paddock-dev from source here, about a minute; the scan itself takes about 3 s): a listener added anywhere must not
-  # land unregistered, whatever the plan thinks it reaches.
-  ipc-endpoints:
-    name: endpoint register (C102)
-    needs: [plan]
-    if: ${{ contains(fromJSON(needs.plan.outputs.rerun_jobs || '["ipc-endpoints"]'), 'ipc-endpoints') }}
-    runs-on: ubuntu-latest
-    container:
-      image: dev.decryptology.net/decryp7/paddock-ci:v3
-    env:
-      PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
-      PADDOCK_DEV_DOWNLOAD: ${{ (inputs.release == true || startsWith(github.ref, 'refs/tags/')) && '0' || '' }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-
-      # Before the first ./dev of the job: it hashes and builds itself with the job's pinned compiler (C119).
-      - uses: ./.gitea/actions/setup-rust
-        with:
-          sccache-s3-access-key-id: ${{ secrets.PADDOCK_SCCACHE_S3_ACCESS_KEY_ID }}
-          sccache-s3-secret-access-key: ${{ secrets.PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY }}
-
-      - name: Every listen site is registered
-        run: ./dev check ipc-endpoints
-
-      - uses: ./.gitea/actions/sccache-stats
-        if: always()
 
   ui:
     needs: [plan]
-    if: ${{ needs.plan.outputs.ui == 'true' && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["ui"]'), 'ui') }}
-    name: ui (tokens, contrast, components, entry points, publish dry run)
+    # Also the ESLint preset's tests and the family icons' checks, as steps of their own projects (one job instead of three, user
+    # 2026-11-24). Each check step runs when the planner marks its own project, and the setup steps when it marks any of the three; the
+    # job itself asks only rerun_jobs, so each check is gated by its own project alone (C100 reads a job condition into every line).
+    if: ${{ contains(fromJSON(needs.plan.outputs.rerun_jobs || '["ui"]'), 'ui') }}
+    name: ui (tokens, contrast, components, entry points, publish dry run, ESLint preset, icons)
     runs-on: ubuntu-latest
     container:
       image: dev.decryptology.net/decryp7/paddock-ci:v3
@@ -253,7 +219,7 @@ jobs:
           # The base of the allow list growth test (PADDOCK_BASE_REF) and its merge base.
           fetch-depth: 0
 
-      # Before the first ./dev of the job: it hashes and builds itself with the job's pinned compiler (C119).
+      # Before the first ./dev of the job: it hashes and builds itself with the job's pinned compiler.
       - env:
           PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
         uses: ./.gitea/actions/setup-rust
@@ -262,9 +228,11 @@ jobs:
           sccache-s3-secret-access-key: ${{ secrets.PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY }}
 
       - uses: ./.gitea/actions/node-caches
+        if: needs.plan.outputs.ui == 'true' || needs.plan.outputs.eslint == 'true' || needs.plan.outputs.icons == 'true'
 
       # One npm workspace for the repo (ADR 0014 §1): the root lock installs every package.
       - name: Install
+        if: needs.plan.outputs.ui == 'true' || needs.plan.outputs.eslint == 'true' || needs.plan.outputs.icons == 'true'
         working-directory: .
         run: npm ci
 
@@ -272,67 +240,99 @@ jobs:
       - env:
           PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
         name: Contrast and CVD checks
+        if: needs.plan.outputs.ui == 'true'
         run: ./dev ci run ui tokens
 
       # The Paddock ESLint preset (rules 27 to 39 and the angular-eslint template and accessibility rules) over every ui project.
       - env:
           PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
         name: Lint
+        if: needs.plan.outputs.ui == 'true'
         run: ./dev ci run ui lint
 
       - env:
           PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
         name: Component specs
+        if: needs.plan.outputs.ui == 'true'
         run: ./dev ci run ui specs
 
       - env:
           PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
         name: Script tests
+        if: needs.plan.outputs.ui == 'true'
         run: ./dev ci run ui scripts
 
       # Every entry point (root, /shell/*, /workbench/*) is built by ng-packagr; the dry run below checks each is exported.
       - env:
           PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
         name: Build the library (all entry points)
+        if: needs.plan.outputs.ui == 'true'
         run: ./dev ci run ui build
 
       # The shell's message catalog and the pseudo-locale files match the build (plan S15: `npm run i18n` to refresh).
       - env:
           PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
         name: Translation files up to date
+        if: needs.plan.outputs.ui == 'true'
         run: ./dev ci run ui i18n
 
       - env:
           PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
         name: Build @decryp7/paddock-e2e
+        if: needs.plan.outputs.ui == 'true'
         run: ./dev ci run ui build-e2e
 
       - env:
           PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
         name: Build the shell demo
+        if: needs.plan.outputs.ui == 'true'
         run: ./dev ci run ui shell-demo
 
       - env:
           PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
         name: Build the workbench demo
+        if: needs.plan.outputs.ui == 'true'
         run: ./dev ci run ui workbench-demo
 
       # Lists every npm package, entry point and crate with what a tag would publish; publishes nothing.
       - env:
           PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
         name: Publish dry run
+        if: needs.plan.outputs.ui == 'true'
         run: ./dev ci run ui publish-dry-run
+
+      # @decryp7/paddock-eslint (eslint/, plan X11): RuleTester cases per rule and the preset run through ESLint on temp files.
+      - env:
+          PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+        name: ESLint preset (rules 27 to 39)
+        if: needs.plan.outputs.eslint == 'true'
+        run: ./dev ci run eslint tests
+
+      # The family icons (icons/): the pipeline's tests (seam scan, coverage, tray shapes, .icns frames, docs copies) and the check that
+      # every installed copy in the apps and the docs equals the build. Without the second step a hand edit of an app's icons goes unnoticed.
+      - env:
+          PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+        name: Icon tests
+        if: needs.plan.outputs.icons == 'true'
+        run: ./dev ci run icons tests
+
+      - env:
+          PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+        name: Installed icon copies match the build
+        if: needs.plan.outputs.icons == 'true'
+        run: ./dev ci run icons installed
 
       - uses: ./.gitea/actions/sccache-stats
         if: always()
 
   # The reference apps in the browser (gallery and shell demo; axe, keyboard, CSP, 320 px), in two shards that run at the
   # same time: the specs run one at a time within a shard (playwright.config.ts), so splitting the files halves the wait.
-  # The apps compile from source (tsconfig paths), so a shard needs no library build.
+  # The apps compile from source (tsconfig paths), so a shard needs no library build. Only when the planner wants the browser jobs
+  # (`webkit`: the nightly, a v* tag before publish.yml, a manual ask), never on a branch, a train or a push to main (user, 2026-11-24).
   e2e:
     name: reference apps (shard ${{ matrix.shard }}/2)
     needs: [plan]
-    if: ${{ needs.plan.outputs.ui == 'true' && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["e2e"]'), 'e2e') }}
+    if: ${{ needs.plan.outputs.ui == 'true' && (needs.plan.outputs.webkit == 'true' || contains(fromJSON(needs.plan.outputs.rerun_jobs || '[]'), 'e2e')) && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["e2e"]'), 'e2e') }}
     runs-on: ubuntu-latest
     container:
       image: dev.decryptology.net/decryp7/paddock-ci:v3
@@ -352,7 +352,7 @@ jobs:
         with:
           persist-credentials: false
 
-      # Before the first ./dev of the job: it hashes and builds itself with the job's pinned compiler (C119).
+      # Before the first ./dev of the job: it hashes and builds itself with the job's pinned compiler.
       - env:
           PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
         uses: ./.gitea/actions/setup-rust
@@ -383,7 +383,7 @@ jobs:
         if: always()
 
   # WebKit is the engine of WKWebView, which the macOS apps render in: the three ui Playwright projects run in it on the Mac host runner
-  # (Playwright's own WebKit build), for pushes to main, v* tags and nightly.yml only. Branch runs stay Chromium-only (rule 3).
+  # (Playwright's own WebKit build), for v* tags, nightly.yml and a manual ask only (the planner's `webkit`, as the e2e job).
   e2e-webkit:
     name: reference apps in WebKit (macOS)
     needs: [plan]
@@ -462,7 +462,7 @@ jobs:
       PADDOCK_DEV_DOWNLOAD: ${{ (inputs.release == true || startsWith(github.ref, 'refs/tags/')) && '0' || '' }}
       # The ref the baselines' and allow lists' growth is measured against (ER-21; ADR 0098 amendment): the dispatch's `base` (the
       # queue passes the commit of main the train is built on), else origin/main. This workflow has no pull_request trigger. One reader:
-      # check::baseline::target_ref (tools/paddock-dev/tests/it/growth_target.rs pins this line and the train-gates one).
+      # check::baseline::target_ref.
       PADDOCK_BASE_REF: ${{ inputs.base || 'origin/main' }}
     steps:
       - uses: actions/checkout@v4
@@ -559,7 +559,7 @@ jobs:
           # The base of the allow list growth test (PADDOCK_BASE_REF) and its merge base.
           fetch-depth: 0
 
-      # Before the first ./dev of the job: it hashes and builds itself with the job's pinned compiler (C119).
+      # Before the first ./dev of the job: it hashes and builds itself with the job's pinned compiler.
       - env:
           PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
         uses: ./.gitea/actions/setup-rust
@@ -576,12 +576,6 @@ jobs:
           PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
         name: new-app templates
         run: ./dev ci run tools scripts
-
-      # The VM start check's evidence parsers and judges (scripts/vm-smoke): a fake guest, no VM.
-      - env:
-          PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
-        name: VM start check
-        run: ./dev ci run tools vm-smoke
 
       # The agent hooks' tests (.claude/hooks/*.test.sh, with the rule-55 parity test of places.rs against lib/paddockpaths.py).
       # Report-only (ER-41): registered as `step:tools/hooks` in docs/gates.toml (review_by, first green run id); `./dev gates check`
@@ -613,135 +607,6 @@ jobs:
           PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
         name: SVG drift (ER-40)
         run: ./dev ci run tools svg-drift
-
-      - uses: ./.gitea/actions/sccache-stats
-        if: always()
-
-  # `wiki` (tools/wiki, the LLM-wiki lint, log and page tool): its own Cargo workspace; Linux only (it reads text and runs git).
-  # Its tests include a lint of this repository's docs/wiki, so the pilot wiki is checked whenever the tool changes.
-  wiki:
-    name: wiki tool
-    needs: [plan]
-    if: ${{ needs.plan.outputs.tools == 'true' && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["wiki"]'), 'wiki') }}
-    runs-on: ubuntu-latest
-    container:
-      image: dev.decryptology.net/decryp7/paddock-ci:v3
-    defaults:
-      run:
-        working-directory: tools/wiki
-        shell: bash
-    env:
-      # setup-rust runs ./dev (docs/plans/ci-in-rust.md): the read credential, and a tag or release run builds the tool from source.
-      PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
-      PADDOCK_DEV_DOWNLOAD: ${{ (inputs.release == true || startsWith(github.ref, 'refs/tags/')) && '0' || '' }}
-      CARGO_TERM_COLOR: always
-    steps:
-      # The whole history: the lint reads the rules on origin/main and on the open rule branches (origin/docs/*).
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-          fetch-depth: 0
-
-      # The engineering rules, one more rules source for the copied-text check. Optional: when the runner's token cannot read
-      # that repository the step fails softly and the lint skips the missing file.
-      - uses: actions/checkout@v4
-        continue-on-error: true
-        with:
-          persist-credentials: false
-          repository: decryp7/engineering-rules
-          path: engineering-rules
-
-      # A Linux container: one job per host and no kept folders or ports, so no job-isolation slot is taken (the action does
-      # nothing there, ADR 0025).
-      - uses: ./.gitea/actions/build-jobs
-
-      # No build-folder action: the job is Linux-container only, so the build folder is tools/wiki/target in the container (git-ignored).
-      - uses: ./.gitea/actions/setup-rust
-        with:
-          components: clippy,rustfmt
-          sccache-s3-access-key-id: ${{ secrets.PADDOCK_SCCACHE_S3_ACCESS_KEY_ID }}
-          sccache-s3-secret-access-key: ${{ secrets.PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY }}
-
-      # The engineering rules are optional input of the lint; say loudly when they are missing instead of skipping quietly.
-      - name: Engineering rules present
-        working-directory: .
-        run: |
-          if [ -f engineering-rules/RULES.md ]; then
-            echo "- wiki lint: engineering-rules checked out, so its RULES.md is a rules source" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
-          else
-            echo "::warning::wiki lint: engineering-rules is not checked out (the runner's token cannot read decryp7/engineering-rules?), so the copied-rule check skips the ER text. Give the job a token that can read it."
-            echo "- wiki lint: engineering-rules NOT checked out; the ER text was not a rules source" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
-          fi
-
-      - name: Lockfile is current
-        run: |
-          cargo metadata --locked --format-version 1 > /dev/null || {
-            echo "::error::tools/wiki/Cargo.lock is stale, run cargo update -w in tools/wiki and commit it"; exit 1; }
-
-      - name: Format
-        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' }}
-        run: cargo fmt --check
-
-      - name: Clippy
-        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' }}
-        run: cargo clippy --all-targets --locked -- -D warnings
-
-      - name: Tests
-        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' }}
-        run: cargo nextest run --profile ci --locked --no-fail-fast
-
-      - name: Deny
-        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' }}
-        run: cargo deny check
-
-      # The tool lints the wiki the way a person runs it (stale pages only warn).
-      - name: Lint the wiki
-        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' }}
-        env:
-          # The run log in the workspace, not the container's home, so a failed run's log survives the job (uploaded below).
-          WIKI_LOG_DIR: ${{ github.workspace }}/wiki-logs
-        run: |
-          # The summary line is written whether the lint passes or fails; the step then ends with the lint's own exit code.
-          set +e
-          cargo run --locked -- --repo ../.. lint --er ../../engineering-rules/RULES.md 2>&1 | tee wiki-lint.out
-          rc=${PIPESTATUS[0]}
-          echo "- wiki lint (exit $rc): $(tail -1 wiki-lint.out)" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
-          exit "$rc"
-
-      - uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v3
-        if: failure()
-        with:
-          name: wiki-logs
-          path: wiki-logs
-          if-no-files-found: ignore
-
-      # The tools build with a plain Rust toolchain: no GTK -sys crate may reach them through the shared crates (the workspace
-      # hack once pulled gtk-sys into paddock-proc on x86_64 Linux, so `cargo install` of wiki and heavy needed GTK headers). The
-      # check reads the dependency graph for the Linux target, so it holds on an image that happens to have GTK installed.
-      - name: No GTK in the tools' Linux build
-        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' }}
-        working-directory: .
-        run: |
-          # bash -e -o pipefail: every command that may legitimately fail is handled by hand. grep exits 1 when it finds nothing,
-          # which is the success case here.
-          rc=0
-          for tool in wiki heavy; do
-            tree=$(cd "tools/$tool" && cargo tree --locked --target x86_64-unknown-linux-gnu -e normal,build --prefix none) || {
-              echo "::error::cargo tree failed for tools/$tool (see the lines above). Run it in tools/$tool with the same arguments."
-              rc=1; continue; }
-            # ER-33: the probe must be able to see the thing. Both tools link paddock-proc, where the hack's GTK crates arrived.
-            echo "$tree" | grep -q '^paddock-proc ' || {
-              echo "::error::check broken: the dependency graph of tools/$tool has no paddock-proc, so a GTK crate there would not be seen."
-              rc=1; continue; }
-            hits=$(echo "$tree" | grep -E '^(gtk|gdk|gio|glib|gobject|pango|cairo|atk|gdk-pixbuf|soup|webkit2gtk|javascriptcore-rs)[a-z0-9-]*-(sys|sys-rs) ' | sort -u || true)
-            if [ -n "$hits" ]; then
-              echo "::error::tools/$tool depends on GTK -sys crates on x86_64 Linux: $(echo "$hits" | tr '\n' ' '). Add them to crates/.config/hakari.toml traversal-excludes, run cargo hakari generate and refresh the lockfiles."
-              rc=1
-            else
-              echo "tools/$tool: no GTK -sys crate in the x86_64 Linux graph"
-            fi
-          done
-          exit "$rc"
 
       - uses: ./.gitea/actions/sccache-stats
         if: always()
@@ -798,95 +663,33 @@ jobs:
         if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' }}
         run: cargo deny check
 
-      - uses: ./.gitea/actions/sccache-stats
-        if: always()
-
-  # The family icons (icons/): the pipeline's tests (seam scan, coverage, tray shapes, .icns frames, docs copies) and the check that every
-  # installed copy in the apps and the docs equals the build. Without the second step a hand edit of an app's icons goes unnoticed.
-  icons:
-    name: icons (tests, installed copies)
-    needs: [plan]
-    if: ${{ needs.plan.outputs.icons == 'true' && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["icons"]'), 'icons') }}
-    runs-on: ubuntu-latest
-    container:
-      image: dev.decryptology.net/decryp7/paddock-ci:v3
-    env:
-      # The graph's selection of this job's project (ADR 0117 §5): `./dev ci run` skips a phase it does not keep and gives a test
-      # runner only the affected files (tools/paddock-dev/src/ci_run/select.rs). Empty: every phase, every file.
-      PADDOCK_PLAN_SELECTION: ${{ needs.plan.outputs.selection }}
-      # `./dev ci run` runs the job's commands from its project's paddock.ci.json (ADR 0038 §1): a tag or release run builds the tool from source.
-      # The read credential is set on the ./dev steps only.
-      PADDOCK_DEV_DOWNLOAD: ${{ (inputs.release == true || startsWith(github.ref, 'refs/tags/')) && '0' || '' }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-
-      # Before the first ./dev of the job: it hashes and builds itself with the job's pinned compiler (C119).
-      - env:
-          PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
-        uses: ./.gitea/actions/setup-rust
-        with:
-          sccache-s3-access-key-id: ${{ secrets.PADDOCK_SCCACHE_S3_ACCESS_KEY_ID }}
-          sccache-s3-secret-access-key: ${{ secrets.PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY }}
-
-      - uses: ./.gitea/actions/node-caches
-
-      - name: Install
-        run: npm ci
-
-      - env:
-          PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
-        name: Icon tests
-        run: ./dev ci run icons tests
-
-      - env:
-          PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
-        name: Installed icon copies match the build
-        run: ./dev ci run icons installed
-
-      - uses: ./.gitea/actions/sccache-stats
-        if: always()
-
-  # @decryp7/paddock-eslint (eslint/, plan X11): RuleTester cases per rule and the preset run through ESLint on temp files.
-  eslint-preset:
-    name: eslint preset (rules 27 to 39)
-    needs: [plan]
-    if: ${{ needs.plan.outputs.eslint == 'true' && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["eslint-preset"]'), 'eslint-preset') }}
-    runs-on: ubuntu-latest
-    container:
-      image: dev.decryptology.net/decryp7/paddock-ci:v3
-    env:
-      # The graph's selection of this job's project (ADR 0117 §5): `./dev ci run` skips a phase it does not keep and gives a test
-      # runner only the affected files (tools/paddock-dev/src/ci_run/select.rs). Empty: every phase, every file.
-      PADDOCK_PLAN_SELECTION: ${{ needs.plan.outputs.selection }}
-      # `./dev ci run` runs the job's commands from its project's paddock.ci.json (ADR 0038 §1): a tag or release run builds the tool from source.
-      # The read credential is set on the ./dev steps only.
-      PADDOCK_DEV_DOWNLOAD: ${{ (inputs.release == true || startsWith(github.ref, 'refs/tags/')) && '0' || '' }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-
-      # Before the first ./dev of the job: it hashes and builds itself with the job's pinned compiler (C119).
-      - env:
-          PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
-        uses: ./.gitea/actions/setup-rust
-        with:
-          sccache-s3-access-key-id: ${{ secrets.PADDOCK_SCCACHE_S3_ACCESS_KEY_ID }}
-          sccache-s3-secret-access-key: ${{ secrets.PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY }}
-
-      - uses: ./.gitea/actions/node-caches
-        with:
-          angular-dir: ''
-
-      - name: Install
+      # The tool builds with a plain Rust toolchain: no GTK -sys crate may reach it through the shared crates (the workspace
+      # hack once pulled gtk-sys into paddock-proc on x86_64 Linux, so `cargo install` of heavy needed GTK headers). The
+      # check reads the dependency graph for the Linux target, so it holds on an image that happens to have GTK installed.
+      - name: No GTK in the tool's Linux build
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' }}
         working-directory: .
-        run: npm ci
-
-      - env:
-          PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
-        run: ./dev ci run eslint tests
+        run: |
+          # bash -e -o pipefail: every command that may legitimately fail is handled by hand. grep exits 1 when it finds nothing,
+          # which is the success case here.
+          rc=0
+          for tool in heavy; do
+            tree=$(cd "tools/$tool" && cargo tree --locked --target x86_64-unknown-linux-gnu -e normal,build --prefix none) || {
+              echo "::error::cargo tree failed for tools/$tool (see the lines above). Run it in tools/$tool with the same arguments."
+              rc=1; continue; }
+            # ER-33: the probe must be able to see the thing. The tool links paddock-proc, where the hack's GTK crates arrived.
+            echo "$tree" | grep -q '^paddock-proc ' || {
+              echo "::error::check broken: the dependency graph of tools/$tool has no paddock-proc, so a GTK crate there would not be seen."
+              rc=1; continue; }
+            hits=$(echo "$tree" | grep -E '^(gtk|gdk|gio|glib|gobject|pango|cairo|atk|gdk-pixbuf|soup|webkit2gtk|javascriptcore-rs)[a-z0-9-]*-(sys|sys-rs) ' | sort -u || true)
+            if [ -n "$hits" ]; then
+              echo "::error::tools/$tool depends on GTK -sys crates on x86_64 Linux: $(echo "$hits" | tr '\n' ' '). Add them to crates/.config/hakari.toml traversal-excludes, run cargo hakari generate and refresh the lockfiles."
+              rc=1
+            else
+              echo "tools/$tool: no GTK -sys crate in the x86_64 Linux graph"
+            fi
+          done
+          exit "$rc"
 
       - uses: ./.gitea/actions/sccache-stats
         if: always()
@@ -1147,12 +950,6 @@ jobs:
           # its default build, without them, is the one Pacenotes uses.
           cargo nextest run -p paddock-repo-graph --profile ci
 
-      # nextest (and so the coverage job) does not run doc tests.
-      - name: Doc tests (workspace, every feature)
-        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && !matrix.filter }}
-        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/crates
-        run: cargo test --workspace --all-features --doc
-
       - uses: ./.gitea/actions/sccache-stats
         if: always()
 
@@ -1162,44 +959,6 @@ jobs:
           mode: release
 
   # Conventional Commits and no AI attribution (rules 4, 8) for every commit of a change, whichever project it touches.
-  # Only the commits a change adds are linted (./dev plan commit_lint_range): a push `before..sha`, a manual run from the
-  # plan's base. On a push to main that is `--first-parent`: only the commits main
-  # itself gets (the landing merge, a direct commit), not the ones a merge brought in. A branch's commits are linted by the
-  # integrator before landing (`commit-lint --range origin/main..<branch>`, docs/rules.md rule 50(g)); C23 in the conformance
-  # run is the backstop for a branch that landed without that. Tags and an app's tag gates skip it (ER-15).
-  commits:
-    name: commit messages
-    needs: [plan]
-    if: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["commits"]'), 'commits') }}
-    runs-on: ubuntu-latest
-    container:
-      image: dev.decryptology.net/decryp7/paddock-ci:v3
-    steps:
-      # Full history so the range from the base can be read.
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-          fetch-depth: 0
-
-      - name: Lint the commit messages
-        env:
-          EVENT: ${{ github.event_name }}
-          REF: ${{ github.ref }}
-          BEFORE: ${{ github.event.before }}
-          SHA: ${{ github.sha }}
-          BASE_REF: ${{ github.base_ref }}
-          PLAN_BASE: ${{ needs.plan.outputs.base }}
-          INPUT_APP: ${{ inputs.app }}
-          PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
-          PADDOCK_DEV_DOWNLOAD: ${{ (inputs.release == true || startsWith(github.ref, 'refs/tags/')) && '0' || '' }}
-        run: |
-          range="$(./dev plan --commit-range)"
-          flags="$(./dev plan --commit-flags)"
-          echo "commit-lint range: $flags $range"
-          if [ "$range" = "skip" ]; then exit 0; fi
-          # shellcheck disable=SC2086 # the flags are zero or one fixed option
-          node conformance/bin/paddock-conformance.mjs commit-lint $flags --range "$range"
-
   # Dependency audits judged against main (docs/ci-schedules.md "Dependency audits"): an advisory that appeared outside the change
   # (RUSTSEC-2026-0543 run 8214, GHSA-fc5q-39xc-vjpf run 8225) is a warning here, decided on main by the nightly `audit` job; only an
   # advisory this change adds fails. `./dev audit compare` audits the merge base's lockfiles with the same tools (no list is kept, ER-46).
@@ -1233,83 +992,6 @@ jobs:
           enforce=()
           if [ "${PADDOCK_AUDIT_ENFORCE:-}" = "1" ]; then enforce=(--enforce); fi
           ./dev audit compare --base "$PADDOCK_BASE_REF" ${enforce[@]+"${enforce[@]}"}
-      - uses: ./.gitea/actions/sccache-stats
-        if: always()
-
-  # The merge queue's local gates (docs/plans/merge-queue.md). The queue's tick runs no code of any pull request, so what a train
-  # needs checked on the merged tree runs here, in a job without the queue's token, as part of the train's dispatch run (a base
-  # is set; a normal push or a full run has these gates in the jobs above). A failure is an ordinary CI failure, triaged like any
-  # other. It catches what only a later gate saw on a merged train: a gate register gap, a conformance finding, a workspace-hack
-  # drift, a stale lockfile, a dependency cycle in the publish dry run, a stale generated file. The commit lint is the `commits` job.
-  train-gates:
-    name: train gates (gate register, conformance, workspace hack, cargo metadata, publish dry run, generated files)
-    needs: [plan]
-    if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.base != '' && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["train-gates"]'), 'train-gates') }}
-    runs-on: ubuntu-latest
-    container:
-      image: dev.decryptology.net/decryp7/paddock-ci:v3
-    env:
-      # No secret at all in this job (the queue's contract): ./dev is built from the checkout, never downloaded, so it needs no
-      # download credential either (conformance/test/ci-action-env.test.mjs exempts a job whose download is "0").
-      PADDOCK_DEV_DOWNLOAD: "0"
-      # The dispatch's `base`: the commit of main the queue built the train on (ADR 0098), so the train's own entries are the train's, not the
-      # growth of the member under test. Pinned by tools/paddock-dev/tests/it/growth_target.rs.
-      PADDOCK_BASE_REF: ${{ inputs.base }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-          fetch-depth: 0
-      - uses: ./.gitea/actions/setup-rust
-
-      - name: Gate register (C100)
-        run: ./dev gates check
-
-      # Installed before the conformance line (C111 loads the yaml package, conformance/package.json) and the publish dry run,
-      # which builds the npm packages itself (no --skip-build: there is no ui/dist here).
-      - name: Install npm packages
-        run: npm ci
-      - name: Paddock conformance (the list of the conformance job)
-        run: ./dev ci run conformance paddock
-
-      - name: Workspace hack up to date
-        working-directory: crates
-        run: cargo hakari generate --diff
-
-      - name: Lockfiles are current (cargo metadata of every workspace)
-        run: |
-          # The golden fixture of paddock-dev is a repository inside the repository, not a workspace of ours.
-          for lock in $(git ls-files '*Cargo.lock' | grep -v '^tools/paddock-dev/tests/golden/fixture/'); do
-            dir=$(dirname "$lock")
-            (cd "$dir" && cargo metadata --locked --format-version 1 > /dev/null) || {
-              echo "::error::$lock is stale or the workspace does not resolve (a dependency cycle or a merge of two lockfiles). Next step: cargo update -w in $dir and commit it"; exit 1; }
-          done
-
-
-      - name: Shared-crate dependency guard (workspace hack, watched features, lockfiles; report-only)
-        run: ./dev locks guard
-
-      - name: Publish dry run (a dependency cycle only the merged tree has)
-        run: node scripts/publish.mjs --offline
-
-      # The generator checks the merged train makes due (docs/generators.toml, ER-40): the queue's own merge check runs with
-      # generators off because the tick runs no code of any pull request, so they run here, without its credentials. They read
-      # the built UI packages, the pinned libduckdb (the Debrief store crates) and cargo-about (the notices); a missing one is
-      # NOT MEASURED (exit 6), never a pass.
-      - name: libduckdb (for the generator checks)
-        working-directory: apps/debrief
-        run: bash scripts/ci/libduckdb-env.sh
-      - name: Build the UI packages (for the generator checks)
-        run: npm run build -w ui && npm run build:e2e -w ui
-      - name: cargo-about (for the notices checks)
-        run: cargo install cargo-about --version 0.9.2 --locked --features cli
-      - name: Generated files of the train are current (./dev gen check)
-        env:
-          TRAIN_BASE: ${{ github.event.inputs.base }}
-          # Generator builds go outside the checkout and the home folder (tools/paddock-dev generators/run.rs), as in nightly.yml.
-          PADDOCK_DEV_TARGET_DIR: /var/tmp/paddock-gen-builds
-        run: ./dev gen check --base "$TRAIN_BASE"
-
       - uses: ./.gitea/actions/sccache-stats
         if: always()
 
@@ -1595,13 +1277,13 @@ jobs:
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/paddock-dev
         run: cargo clippy --all-targets --locked -- -D warnings
 
-      # The inputs and generator tests read the cargo metadata of tools/heavy and tools/wiki offline: their packages must be in
+      # The inputs and generator tests read the cargo metadata of tools/heavy offline: its packages must be in
       # the job's cargo home, not only paddock-dev's (heavy's paddock-env dependency was missing on 2026-11-13, run 8050).
       - name: Fetch the other tools' dependencies
         if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' }}
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools
         run: |
-          for t in heavy wiki; do
+          for t in heavy; do
             (cd "$t" && cargo fetch --locked) || {
               echo "::error::cargo fetch --locked failed in tools/$t, so the offline metadata tests cannot read it. Next step: run it on the runner to see why"; exit 1; }
           done

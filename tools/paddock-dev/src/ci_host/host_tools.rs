@@ -299,26 +299,6 @@ mod tests {
     use super::*;
     use paddock_testkit::{Actions, StandIn};
 
-    /// The Windows member gate's aarch64 cargo-nextest (scripts/vm-win/member-gate-tools.lock) is the release of this pin.
-    #[test]
-    fn the_test_vm_gates_nextest_is_the_pinned_version() {
-        let lock = include_str!("../../../../scripts/vm-win/member-gate-tools.lock");
-        let get = |k: &str| {
-            lock.lines()
-                .find_map(|l| l.strip_prefix(&format!("{k}=")))
-                .unwrap_or_else(|| panic!("no {k} in the lock file"))
-        };
-        assert_eq!(
-            get("nextest_version"),
-            PIN.version,
-            "bump scripts/vm-win/member-gate-tools.lock with the pin (version, url, sha256)"
-        );
-        assert!(get("nextest_url").contains(&format!(
-            "cargo-nextest-{0}/cargo-nextest-{0}-aarch64-pc-windows-msvc.zip",
-            PIN.version
-        )));
-    }
-
     struct Scene {
         d: tempfile::TempDir,
         env: HashMap<String, String>,

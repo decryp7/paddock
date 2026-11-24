@@ -19,7 +19,10 @@ changes here, every app's copy is updated in the same change.
    sleeps or raised timeouts), never silently skipped. No limit (timeout, retry, wait, budget, tolerance, cap) is
    raised without a named, measured cause recorded next to it (ER-12); otherwise the cause is fixed. A new gate, CI job or
    check starts report-only and blocks only after its first green run on the real tree, recorded by run id where the
-   gate is defined (ER-41).
+   gate is defined (ER-41). Its report-only phase is short: a report-only check, register or port registered after
+   2026-11-24 carries an expiry date (`review_by` of its `[[report_only]]` entry in docs/gates.toml) at most 14 days
+   later, and by then it is flipped to blocking, switched over (the old side deleted) or removed. C100 warns a week
+   before; after the date it blocks release tags and the entry's own changes, and warns on any other push (user, 2026-11-24).
    A FLAKY test (fails, then passes on its one retry) blocks a landing only when the change touches the test itself or the
    source it exercises (its feature or module); see rule 50 (k) (ER-12, user, 2026-11-19).
    A reviewer of a bug fix runs a mutation check on it (user, 2026-10-30), in their own worktree: for Rust,
@@ -512,10 +515,15 @@ Amendments of the same date, no new number: the member gate runs each member's a
 88. **Removing an OS from a test needs the user's approval.** The record is `docs/os-removals.toml`; growth of that register is a
     finding that no waiver clears (rule 83; the check is planned in ADR 0117). *Why:* OS-scoped tests (ER-9) cut Windows time by 46%, and an OS
     dropped without a reason is a hole in the net.
-89. **Every test run goes through the bounded runner** (ER-32, ER-51): nextest with its timeout, and the same progress watchdog as
-    the push gates. Agents and CI never run plain `cargo test` or an unbounded test command, a hook steers them to the runner, and
-    a leftover child is ended by the handle its start gave back. *Why:* on 2026-11-22/23 `worktree::list_clean` hung 3.5 h and
-    `ci_isolation` 18 min under plain `cargo test --test it`, and test-spawned `ci slot hold` processes were orphaned four times.
+89. **Every test run goes through the bounded runner** (ER-32, ER-51; amended (user, 2026-11-24)): `cargo nextest run` with the
+    workspace's `.config/nextest.toml`, which gives every test a per-test timeout (`slow-timeout` with `terminate-after`) and one
+    process per test, as common practice does (nextest, Go's `go test -timeout`, Bazel's test sizes). The guard hook refuses plain
+    `cargo test` (`cargo test --doc` and `--no-run` stay allowed), and a test in tools/paddock-dev reads every CI line through the CI
+    model and fails on one. Progress comes from the job record (ADR 0118) and ADR 0119's required bounds; no watchdog wrapper
+    runs around nextest. A helper a test leaves running ends with its test (`paddock_env::lifeline`), and a leftover child is ended by
+    the handle its start gave back. *Why:* on 2026-11-22/23 `worktree::list_clean` hung 3.5 h and `ci_isolation` 18 min under plain
+    `cargo test --test it`: one test had moved the shared process into a temporary folder that was then removed, so every later git
+    start read the whole temp folder; and test-spawned `ci slot hold` processes were orphaned four times.
 90. **A landing may rest on a narrowed run** (ER-15, user, 2026-11-23): a smoke set or the affected tests that ran exactly the
     selection the landing's own diff planned. Such a run counts for that landing only: it is never complete for a tag or a
     release, never the base for later planning, and the nightly still runs everything. *Why:* in ADR 0117's review round 2,

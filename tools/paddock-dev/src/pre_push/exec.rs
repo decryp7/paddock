@@ -2416,7 +2416,7 @@ exit $rc
             assert!(r.reason().contains("OVERRIDE SET"), "{}", r.reason());
         }
 
-        /// A stand-in step (paddock-testkit's `StandIn`, C130: no shell fixture) that prints one line and then sleeps `sleep` seconds.
+        /// A stand-in step (paddock-testkit's `StandIn`: no shell fixture) that prints one line and then sleeps `sleep` seconds.
         fn quiet_step(dir: &Path, sleep: u64) -> Gate {
             let step = paddock_testkit::StandIn::new(dir, "quiet-step")
                 .stdout("compiling x")

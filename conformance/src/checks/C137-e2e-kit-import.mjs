@@ -7,11 +7,11 @@
 // data, never by grepping a workflow that may belong to another job): its `workflow` names the app's own workflow file, whose steps' `run` text
 // must run `build:e2e` in each of its jobs that run Playwright (a build in another job, or a comment, does not count; a workflow with no Playwright job cannot be judged and is reported); an app without one is a leg of ci.yml, and each of its `e2e*` command lists (`e2e`, `e2eWebkit`) must run it.
 // An app with no readable contract is reported (the check cannot tell).
-// ER-41: report-only (warnings) until its first green run on the real tree, recorded by run id here. Recorded: not yet.
-import { warn } from '../finding.mjs';
+// ER-41: blocking (mode gate) since its first green run on the real tree, ci.yml run 8869 (cdd4c3d10, 2026-11-24).
+import { error } from '../finding.mjs';
 import { parseJobs, parseSteps } from '../util/workflows.mjs';
 
-export const SEVERITY = warn;
+export const SEVERITY = error;
 const SPEC = /^apps\/([^/]+)\/app\/e2e\/.+\.ts$/;
 const KIT_IMPORT = /^\s*(?:import|export)\s+(?!type\b)[^;]*?\bfrom\s*['"]@decryp7\/paddock-e2e(?:\/[^'"]*)?['"]/m;
 const BUILD_STEP = /\bbuild:e2e\b/;
@@ -49,7 +49,7 @@ export function kitImportLine(text) {
 export default {
   id: 'C137',
   scope: 'root',
-  mode: 'report-only',
+  mode: 'gate',
   title: 'An app e2e spec imports the kit by package name only when its CI job builds it',
   rule: 21,
   run(ctx) {

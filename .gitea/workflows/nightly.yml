@@ -63,6 +63,29 @@ jobs:
       - name: C100
         run: ./dev gates check
 
+  # C102 (ADR 0072): every listen site of the Rust sources is in docs/ipc-endpoints.toml with an ending test or a reason, and the
+  # ratchet of connection endings is well formed. Nightly (the scan reads every Rust file of the repository): a listener added during
+  # the day is found by the next night, and the tag paths refuse on it before a release (tag.yml, tag-rehearsal.yml and the release
+  # workflows run `./dev check ipc-endpoints --tag`).
+  ipc-endpoints:
+    name: endpoint register (C102)
+    needs: [gate]
+    if: ${{ needs.gate.outputs.run == 'true' }}
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
+    env:
+      PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+      PADDOCK_DEV_DOWNLOAD: ${{ startsWith(github.ref, 'refs/tags/') && '0' || '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.gitea/actions/setup-rust
+        with:
+          sccache-s3-access-key-id: ${{ secrets.PADDOCK_SCCACHE_S3_ACCESS_KEY_ID }}
+          sccache-s3-secret-access-key: ${{ secrets.PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY }}
+      - name: Every listen site is registered
+        run: ./dev check ipc-endpoints
+
   ci:
     name: everything
     needs: [gate]
@@ -208,7 +231,7 @@ jobs:
         env:
           PADDOCK_REAL_WINDOWS: "1"
           PADDOCK_PROBE_DIST: ${{ github.workspace }}/ui/dist/shell-demo/browser
-        run: xvfb-run -a cargo test -p paddock-dialogs --features tauri --test show_probe -- --nocapture
+        run: xvfb-run -a cargo nextest run --profile ci -p paddock-dialogs --features probe --test show_probe --no-capture
 
       - name: Probe (macOS, Windows)
         if: runner.os != 'Linux'
@@ -216,7 +239,7 @@ jobs:
         env:
           PADDOCK_REAL_WINDOWS: "1"
           PADDOCK_PROBE_DIST: ${{ github.workspace }}/ui/dist/shell-demo/browser
-        run: cargo test -p paddock-dialogs --features tauri --test show_probe -- --nocapture
+        run: cargo nextest run --profile ci -p paddock-dialogs --features probe --test show_probe --no-capture
 
       - uses: ./.gitea/actions/sccache-stats
         if: always()
@@ -634,6 +657,32 @@ jobs:
           enforce=()
           if [ "${PADDOCK_AUDIT_ENFORCE:-}" = "1" ]; then enforce=(--enforce); fi
           ./dev audit nightly ${enforce[@]+"${enforce[@]}"}
+
+  # ER-51: the host's OS temp folder keeps only what docs say we may leave there (tools/paddock-dev/src/disk/temp-prefixes.toml): our
+  # prefixes past their count or size limit go oldest first, never a young or used entry or anything not ours, and the folder's entry
+  # count is warned about past its threshold. 992,000 entries there made every git start of a test run take minutes (2026-11-23,
+  # docs/lessons.md). It does not wait for the gate: the folder fills whether or not main changed. The user temp folder, not the job's
+  # (job isolation points TMPDIR at the job's own), so the root is named. macOS only: the sweep needs the processes' folders, which
+  # Windows cannot list (it refuses there), and a Linux job runs in a fresh container.
+  temp-sweep:
+    name: temp sweep (the host's temp folder, our leftovers)
+    runs-on: macos-latest
+    defaults:
+      run:
+        shell: bash
+    env:
+      PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+      PADDOCK_DEV_DOWNLOAD: ${{ startsWith(github.ref, 'refs/tags/') && '0' || '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.gitea/actions/build-jobs
+      - uses: ./.gitea/actions/job-isolation
+      - name: Sweep the user temp folder
+        run: ./dev disk temp --apply --root "$(getconf DARWIN_USER_TEMP_DIR)"
+      - uses: ./.gitea/actions/job-isolation
+        if: always()
+        with:
+          mode: release
 
   # `generators` and `audit` join this list after their first green nightly run (docs/ci-schedules.md).
   # A night the gate skipped (main unchanged, or a train in CI) measured nothing and is never marked.

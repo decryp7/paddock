@@ -8,6 +8,12 @@
   does not apply (no drawings). Revision 2 (2026-11-13) answers the one review round: the mechanism moved from "a trial
   before approval" to "a gate on each member at merge time", the instance timing is counted, and the conflicted trial
   merge is stated (see "Review answers").
+  Enforced 2026-11-24 (user, cuts of the check-value audit): the member gate blocks (`ENFORCED = true` in
+  `tools/paddock-dev/src/merge_check/gates.rs`), and its duplicate conformance run, the generator entry `conformance-line`, is
+  gone (the gate's `conformance` row runs the same line). D3 (a) asked for a recorded first green run on a real train; none was
+  recorded by train head, and the user flipped it on the audit's evidence instead (report-only since 2026-11-13). The same cut
+  removed ci.yml's `train-gates` job: the member gate runs its rows (gate register, conformance, lockfiles, workspace hack,
+  generators with the publish dry run) on every merge.
 - Date: 2026-11-13
 - Related: ER-8 (checks that fail only on combined code run at merge time), ER-9 / rule 50 (h), ER-10 (failed-only fix
   rounds), ER-21 / rule 40, ER-24 (machine load; one train's CI per runner class), ER-37 / rule 76, ER-41 (a new check starts

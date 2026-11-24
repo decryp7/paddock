@@ -158,7 +158,7 @@ reason = "shell demo: the heartbeat agent's plist (ProcessType Background, LowPr
 expires = "2026-12-31"
 
 # Two `wip:` commits of the Debrief 1.2 branches. They will land on main as they are: history is not rewritten (no force).
-# commit-lint (the ci.yml commits job) and C23 both honour these. Once the 200-commit window of C23 has moved past them (about
+# commit-lint (the push gate) and C23 both honour these. Once the 200-commit window of C23 has moved past them (about
 # 12 days of commits on main at the recent pace) the lines can go.
 [[waiver]]
 check = "C23"

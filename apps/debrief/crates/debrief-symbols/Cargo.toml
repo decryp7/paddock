@@ -8,6 +8,9 @@ rust-version.workspace = true
 publish = false
 description = "Native symbols for Debrief (ADR 0022): PE/PDB identities, symbol paths and cache, optional symbol-server downloads, DbgHelp symbolisation and stack walking; shared by the native profiler and dump analysis"
 
+[lib]
+doctest = false # doctests are off (crates/README.md, "Doctests")
+
 [dependencies]
 thiserror.workspace = true
 ureq = { version = "3", default-features = false, features = ["rustls", "platform-verifier"], optional = true }

@@ -10,6 +10,9 @@ description = "Debrief's event batch: stable ids, the fixed Arrow schema of an e
 
 # Arrow 60 is the version duckdb-rs 1.20000 (DuckDB 2.0.0) links against, so batches reach the store's
 # Arrow appender without a conversion. The plugin SDK is on Arrow 60 as well.
+[lib]
+doctest = false # doctests are off (crates/README.md, "Doctests")
+
 [dependencies]
 arrow-array = { version = "60", default-features = false }
 arrow-buffer = { version = "60", default-features = false }

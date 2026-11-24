@@ -1,5 +1,5 @@
-//! The CI half of the planner: the matrix legs of the affected apps, the base of a run, the `--ci` outputs and summary, the
-//! commit lint's range and the command line. The port of the rest of the retired `scripts/affected.mjs` (`matrix`, `onlyApp`, `wantsWebkit`,
+//! The CI half of the planner: the matrix legs of the affected apps, the base of a run, the `--ci` outputs and summary and
+//! the command line. The port of the rest of the retired `scripts/affected.mjs` (`matrix`, `onlyApp`, `wantsWebkit`,
 //! `chooseBase`, `ciOutputs`, `summary`, `commitLintRange`, `parseArgs` and `ci`); the rules that decide which projects a change
 //! reaches are in [`crate::plan`].
 
@@ -282,15 +282,16 @@ pub fn matrix(plan: &Value, graph: &RepoGraph, opts: MatrixOpts) -> Result<Vec<V
     Ok(legs_out)
 }
 
-/// Whether this run wants the WebKit tests: a push to main or a tag, the nightly, or a manual run that asked for them
-/// (`PLAN_WEBKIT`, from ci.yml's `webkit` input). Never a plain pull request.
+/// Whether this run wants the WebKit tests and the reference apps' end-to-end jobs: a tag, the nightly, or a manual run that asked for
+/// them (`PLAN_WEBKIT`, from ci.yml's `webkit` input). Never a branch, a train or a push to main (user, 2026-11-24: the nightly is
+/// their net; a complete train run does not need them).
 pub fn wants_webkit(env: &dyn Fn(&str) -> Option<String>) -> bool {
     if env("PLAN_WEBKIT").is_some_and(|v| !v.is_empty()) {
         return true;
     }
     let reference = env("GITHUB_REF").unwrap_or_default();
     let event = env("GITHUB_EVENT_NAME").unwrap_or_default();
-    event == "schedule" || (event != "pull_request" && (reference == "refs/heads/main" || reference.starts_with("refs/tags/")))
+    event == "schedule" || (event != "pull_request" && reference.starts_with("refs/tags/"))
 }
 
 /// The plan of one app only (`--ci` with PLAN_APP, from ci.yml's `app` input): that app's legs with both halves and no other
@@ -402,11 +403,12 @@ pub const PROJECT_OUTPUTS: [(&str, &str, &str); 8] = [
 ];
 
 /// The ci.yml job outputs of a plan (the plan job declares and wires exactly these names), as `(name, value)` lines.
-pub fn ci_outputs(plan: &Value, legs: &[Value], base: Option<&str>) -> Vec<(String, String)> {
+pub fn ci_outputs(plan: &Value, legs: &[Value]) -> Vec<(String, String)> {
     let b = |k: &str| plan[k].as_bool().unwrap_or(false).to_string();
     let mut out: Vec<(String, String)> = PROJECT_OUTPUTS.iter().map(|(name, _, key)| (name.to_string(), b(key))).collect();
     out.extend(vec![
-        // Whether the WebKit tests run (plan_ci::wants_webkit): the `e2e-webkit` job and the declared scope's engines read this one value.
+        // Whether the WebKit tests and the reference apps' end-to-end jobs run (plan_ci::wants_webkit): the `e2e` and `e2e-webkit` jobs
+        // and the declared scope read this one value.
         ("webkit".into(), plan["webkit"].as_bool().unwrap_or(false).to_string()),
         ("crates_filter".into(), plan["filters"]["crates"].as_str().unwrap_or("").to_string()),
         (
@@ -415,8 +417,6 @@ pub fn ci_outputs(plan: &Value, legs: &[Value], base: Option<&str>) -> Vec<(Stri
         ),
         ("apps".into(), serde_json::to_string(legs).unwrap_or_default()),
         ("any_app".into(), (!legs.is_empty()).to_string()),
-        // The commit lint's range start (empty: no base, only the head commit is linted).
-        ("base".into(), base.unwrap_or("").to_string()),
     ]);
     out
 }
@@ -472,6 +472,16 @@ pub fn summary(plan: &Value, reason: &str, legs: &[Value]) -> String {
             }
         ));
     }
+    // The active apps (crate::active_apps): every inactive app is named, never shown as unaffected or green.
+    if let Some(off) = plan["inactive"].as_array().filter(|a| !a.is_empty()) {
+        let names: Vec<&str> = off.iter().filter_map(Value::as_str).collect();
+        lines.push(String::new());
+        lines.push(format!(
+            "Inactive (not in {}; no job runs, not green; the nightly runs them): {}",
+            crate::active_apps::FILE,
+            names.join(", ")
+        ));
+    }
     if plan["docs"].as_bool().unwrap_or(false)
         && legs.is_empty()
         && !plan["crates"].as_bool().unwrap_or(false)
@@ -483,118 +493,11 @@ pub fn summary(plan: &Value, reason: &str, legs: &[Value]) -> String {
     format!("{}\n", lines.join("\n"))
 }
 
-// ---------------------------------------------------------------------------------------------------------- commit lint
-
-/// The inputs of [`commit_lint_range`].
-#[derive(Default)]
-pub struct LintInput<'a> {
-    /// The event name.
-    pub event: &'a str,
-    /// The ref.
-    pub reference: &'a str,
-    /// The commit before a push.
-    pub before: &'a str,
-    /// The pushed commit; `None` (the variable is not set) means `HEAD`.
-    pub sha: Option<&'a str>,
-    /// The plan's base of a manual run.
-    pub base: &'a str,
-    /// The pull request's target branch.
-    pub base_ref: &'a str,
-    /// The `app` input of a tag's gates.
-    pub app: &'a str,
-}
-
-/// What the commit lint is asked: `git log` options and one revision range, kept apart so no value is ever split into arguments.
-#[derive(Debug, PartialEq)]
-pub struct LintRange {
-    /// Zero or one fixed option (`--first-parent`).
-    pub flags: Vec<String>,
-    /// The revision range.
-    pub range: String,
-}
-
-fn lint_range(flags: &[&str], range: String) -> Option<LintRange> {
-    Some(LintRange {
-        flags: flags.iter().map(|f| f.to_string()).collect(),
-        range,
-    })
-}
-
-/// A commit id of the event: `HEAD` or 7 to 40 lower-case hex digits (it ends up as a git argument).
-fn commit_id(value: &str, what: &str) -> Result<(), String> {
-    let hex = (7..=40).contains(&value.len()) && value.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
-    if value != "HEAD" && !hex {
-        return Err(format!(
-            "commit range: {what} \"{value}\" is not a commit id (7 to 40 lower-case hex digits)"
-        ));
-    }
-    Ok(())
-}
-
-/// A branch name of the event: the same shape as `/^[A-Za-z0-9_][A-Za-z0-9._/-]*$/`.
-fn branch_name(value: &str) -> bool {
-    let mut chars = value.chars();
-    chars.next().is_some_and(|c| c.is_ascii_alphanumeric() || c == '_')
-        && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '/' | '-'))
-}
-
-/// The commits the commit lint checks, as flags and a git revision range, or `None` to skip it. (From branch
-/// `ci/commit-lint-first-parent`, inside `debrief/1.2-batch1`; compatible with the script on main for every valid input.)
-/// Only what a change adds is linted, so an old bad commit never keeps main red: a pull request lints since its target branch, a
-/// push the commits it added (`before..sha`; a new branch, an all-zero `before`, lints the head commit only), a manual run from the
-/// plan's base (the head commit alone without one). On main a push lints only the first-parent commits (`--first-parent`: what main
-/// itself adds, the landing merge included; the commits a merge brought in from a branch were linted when the branch landed).
-/// `known(commit)` says whether a commit is in the clone. Tags and a call with an `app` (an app's tag gates, ER-15) and every
-/// other event skip it: a release must not fail on an old commit's subject. `before`, `sha` and `base` must be commit ids and
-/// `base_ref` a branch name: they come from the event and end up as git arguments.
-pub fn commit_lint_range(i: &LintInput, known: &dyn Fn(&str) -> bool) -> Result<Option<LintRange>, String> {
-    if !i.app.is_empty() || i.reference.starts_with("refs/tags/") {
-        return Ok(None);
-    }
-    let tip = i.sha.unwrap_or("HEAD");
-    commit_id(tip, "sha")?;
-    let head = || lint_range(&[], format!("{tip}^!"));
-    match i.event {
-        "pull_request" => {
-            if i.base_ref.is_empty() {
-                return Ok(None);
-            }
-            if !branch_name(i.base_ref) {
-                return Err(format!("commit range: base ref \"{}\" is not a branch name", i.base_ref));
-            }
-            Ok(lint_range(&[], format!("origin/{}..HEAD", i.base_ref)))
-        }
-        // A `before` missing from the history (after a force push) lints the head commit only.
-        "push" => {
-            if i.before.is_empty() || i.before.chars().all(|c| c == '0') {
-                return Ok(head());
-            }
-            commit_id(i.before, "before")?;
-            if !known(i.before) {
-                return Ok(head());
-            }
-            let flags: &[&str] = if i.reference == "refs/heads/main" {
-                &["--first-parent"]
-            } else {
-                &[]
-            };
-            Ok(lint_range(flags, format!("{}..{tip}", i.before)))
-        }
-        "workflow_dispatch" => {
-            if i.base.is_empty() {
-                return Ok(head());
-            }
-            commit_id(i.base, "base")?;
-            Ok(lint_range(&[], format!("{}..{tip}", i.base)))
-        }
-        _ => Ok(None),
-    }
-}
-
 // ------------------------------------------------------------------------------------------------------ command line
 
 /// The usage line printed under an argument error.
-pub const USAGE: &str = "usage: dev plan <base> [<head>] | --files a,b | --all | --ci [--app <app>]  [--explain] [--compare] | --commit-range | --commit-flags | --since-run <run>";
+pub const USAGE: &str =
+    "usage: dev plan <base> [<head>] | --files a,b | --all | --ci [--app <app>]  [--explain] [--compare] | --since-run <run>";
 
 /// A parsed command line of `dev plan`.
 #[derive(Debug, PartialEq)]
@@ -800,11 +703,11 @@ mod tests {
         assert_eq!(package_filter(&some, &g, "tools/paddock-dev", "paddock-dev", true), "");
         let mut with = some.clone();
         with["filters"] = package_filters(&some, &g, true);
-        let out: std::collections::BTreeMap<String, String> = ci_outputs(&with, &[], None).into_iter().collect();
+        let out: std::collections::BTreeMap<String, String> = ci_outputs(&with, &[]).into_iter().collect();
         assert_eq!(out["crates_filter"], "package(=p-a) | package(=p-c)");
         assert_eq!(out["paddock_dev_filter"], "");
         // Without a `filters` object (a rerun, an app's gates) both outputs are still written, empty.
-        let bare: std::collections::BTreeMap<String, String> = ci_outputs(&some, &[], None).into_iter().collect();
+        let bare: std::collections::BTreeMap<String, String> = ci_outputs(&some, &[]).into_iter().collect();
         assert_eq!((bare["crates_filter"].as_str(), bare["paddock_dev_filter"].as_str()), ("", ""));
     }
 
@@ -1216,7 +1119,7 @@ mod tests {
     }
 
     #[test]
-    fn webkit_is_wanted_on_main_tags_the_nightly_and_a_manual_ask_never_on_a_plain_pull_request() {
+    fn webkit_is_wanted_on_tags_the_nightly_and_a_manual_ask_never_on_main_or_a_plain_pull_request() {
         let env =
             |pairs: &'static [(&'static str, &'static str)]| move |k: &str| pairs.iter().find(|(n, _)| *n == k).map(|(_, v)| v.to_string());
         assert!(!wants_webkit(&env(&[
@@ -1232,7 +1135,7 @@ mod tests {
             ("GITHUB_REF", "refs/heads/topic"),
             ("PLAN_WEBKIT", "1")
         ])));
-        assert!(wants_webkit(&env(&[
+        assert!(!wants_webkit(&env(&[
             ("GITHUB_EVENT_NAME", "push"),
             ("GITHUB_REF", "refs/heads/main")
         ])));
@@ -1336,139 +1239,6 @@ mod tests {
         assert!(is_ci_yml("ci.yml@refs/heads/main") && is_ci_yml("ci.yaml@x") && !is_ci_yml("canary.yml@x"));
     }
 
-    fn lint(i: LintInput, known: bool) -> Result<Option<(Vec<String>, String)>, String> {
-        commit_lint_range(&i, &move |_| known).map(|r| r.map(|r| (r.flags, r.range)))
-    }
-
-    fn event<'a>(event: &'a str, reference: &'a str, before: &'a str, sha: &'a str) -> LintInput<'a> {
-        LintInput {
-            event,
-            reference,
-            before,
-            sha: Some(sha),
-            ..LintInput::default()
-        }
-    }
-
-    fn just(range: &str) -> Result<Option<(Vec<String>, String)>, String> {
-        Ok(Some((vec![], range.to_string())))
-    }
-
-    #[test]
-    fn the_commit_lint_range_covers_only_what_a_change_adds_and_skips_tags_and_app_gates() {
-        let zero = "0".repeat(40);
-        let (a, b, c) = ("aaaaaaa", "bbbbbbb", "ccccccc");
-        let pr = LintInput {
-            event: "pull_request",
-            base_ref: "main",
-            ..LintInput::default()
-        };
-        assert_eq!(lint(pr, true), just("origin/main..HEAD"));
-        let no_target = LintInput {
-            event: "pull_request",
-            ..LintInput::default()
-        };
-        assert_eq!(lint(no_target, true), Ok(None));
-        assert_eq!(
-            lint(event("push", "refs/heads/main", a, b), true),
-            Ok(Some((vec!["--first-parent".to_string()], format!("{a}..{b}")))),
-            "main: what main itself adds"
-        );
-        assert_eq!(
-            lint(event("push", "refs/heads/x", a, b), true),
-            just(&format!("{a}..{b}")),
-            "another branch: every commit it adds"
-        );
-        assert_eq!(
-            lint(event("push", "refs/heads/x", &zero, b), true),
-            just(&format!("{b}^!")),
-            "a new branch: the head commit"
-        );
-        assert_eq!(lint(event("push", "refs/heads/x", "", b), true), just(&format!("{b}^!")));
-        assert_eq!(
-            lint(event("push", "refs/heads/main", "abcdef0", b), false),
-            just(&format!("{b}^!")),
-            "a force push: before is not in the clone"
-        );
-        let manual = LintInput {
-            event: "workflow_dispatch",
-            base: c,
-            sha: Some(b),
-            ..LintInput::default()
-        };
-        assert_eq!(lint(manual, true), just(&format!("{c}..{b}")));
-        let manual_no_base = LintInput {
-            event: "workflow_dispatch",
-            sha: Some(b),
-            ..LintInput::default()
-        };
-        assert_eq!(lint(manual_no_base, true), just(&format!("{b}^!")));
-        assert_eq!(lint(event("push", "refs/tags/v1.0.0", &zero, b), true), Ok(None), "a tag");
-        assert_eq!(lint(event("push", "refs/tags/dyno-v1.0.0", a, b), true), Ok(None));
-        let gates = LintInput {
-            app: "dyno",
-            ..event("push", "refs/heads/main", a, b)
-        };
-        assert_eq!(lint(gates, true), Ok(None), "an app tag call");
-        assert_eq!(lint(event("schedule", "", "", b), true), Ok(None));
-        assert_eq!(
-            lint(
-                LintInput {
-                    event: "push",
-                    reference: "refs/heads/main",
-                    before: a,
-                    sha: None,
-                    ..LintInput::default()
-                },
-                true
-            ),
-            Ok(Some((vec!["--first-parent".to_string()], format!("{a}..HEAD")))),
-            "an unset SHA is HEAD"
-        );
-    }
-
-    #[test]
-    fn values_that_are_not_commits_or_branch_names_are_refused_because_they_become_git_arguments() {
-        let b = "bbbbbbb";
-        for bad in ["HEAD --output=/tmp/x", "--output=/tmp/x", "abc", "zzzzzzz", "a..b"] {
-            let manual = LintInput {
-                event: "workflow_dispatch",
-                base: bad,
-                sha: Some(b),
-                ..LintInput::default()
-            };
-            assert!(lint(manual, true).unwrap_err().contains("is not a commit id"), "{bad}");
-            assert!(
-                lint(event("push", "refs/heads/main", bad, b), true)
-                    .unwrap_err()
-                    .contains("is not a commit id"),
-                "{bad}"
-            );
-            assert!(
-                lint(event("push", "refs/heads/main", b, bad), true)
-                    .unwrap_err()
-                    .contains("is not a commit id"),
-                "{bad}"
-            );
-        }
-        for bad in ["--output=/tmp/x", "a b"] {
-            let pr = LintInput {
-                event: "pull_request",
-                base_ref: bad,
-                ..LintInput::default()
-            };
-            assert!(lint(pr, true).unwrap_err().contains("is not a branch name"), "{bad}");
-        }
-        let full = "a".repeat(40);
-        let manual = LintInput {
-            event: "workflow_dispatch",
-            base: &full,
-            sha: Some("HEAD"),
-            ..LintInput::default()
-        };
-        assert_eq!(lint(manual, true), just(&format!("{full}..HEAD")));
-    }
-
     #[test]
     fn the_job_outputs_and_summary_name_every_leg() {
         let plan = json!({"crates": true, "ui": false, "eslint": false, "conformance": true, "tools": false, "icons": false, "paddockDev": true, "docs": false});
@@ -1479,7 +1249,7 @@ mod tests {
             json!({"app": "y", "os": LINUX, "rust": false, "ui": false, "filter": "", "e2e_leg": "e2e-1", "e2e_shard": "1/2"}),
             json!({"app": "z", "os": LINUX, "rust": false, "ui": false, "filter": "", "e2e_leg": "", "e2e_shard": ""}),
         ];
-        let out = ci_outputs(&plan, &legs, Some("abc"));
+        let out = ci_outputs(&plan, &legs);
         let get = |k: &str| out.iter().find(|(n, _)| n == k).map(|(_, v)| v.clone()).unwrap();
         assert_eq!(
             (
@@ -1487,15 +1257,11 @@ mod tests {
                 get("ui").as_str(),
                 get("paddock_dev").as_str(),
                 get("any_app").as_str(),
-                get("base").as_str()
             ),
-            ("true", "false", "true", "true", "abc")
+            ("true", "false", "true", "true")
         );
         assert!(get("apps").starts_with(r#"[{"app":"x","os":"ubuntu-latest""#));
-        assert_eq!(
-            ci_outputs(&json!({}), &[], None).iter().find(|(n, _)| n == "any_app").unwrap().1,
-            "false"
-        );
+        assert_eq!(ci_outputs(&json!({}), &[]).iter().find(|(n, _)| n == "any_app").unwrap().1, "false");
         let md = summary(&plan, "the reason", &legs);
         assert!(
             md.starts_with("### Affected\n\nBase: the reason\n\n| Project | Runs |\n|---|---|\n| crates | yes |\n| ui | no |"),

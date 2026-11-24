@@ -8,6 +8,9 @@ rust-version.workspace = true
 publish = false
 description = "Log and file analysis engine for Debrief: importers, parsing profiles, query, timeline and chart aggregation"
 
+[lib]
+doctest = false # doctests are off (crates/README.md, "Doctests")
+
 [dependencies]
 anyhow.workspace = true
 base64.workspace = true

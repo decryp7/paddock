@@ -15,10 +15,9 @@
 //! - `merge check`: did a merge silently drop one side's hunks or tests? ([`merge_check`], ADR 0089 outcomes);
 //! - `gen check`: the checks of the generated and pinned files a change touches, from `docs/generators.toml`
 //!   ([`generators`], ER-40); `merge check` runs the ones a merge makes due;
-//! - `graph affected`: the affected closure of a change set, the first consumer of `paddock-repo-graph` ([`plan`], with the
-//!   `.gitea` narrowing in [`plan_gitea`] and the git reader in [`plan_repo`]);
 //! - `plan`: the CI planner, the whole command line of the retired `scripts/affected.mjs` (`<base> [<head>]`, `--files`, `--all`, `--ci
-//!   [--app]`, `--commit-range`, `--explain`): the matrix, the base of a run and the commit lint's range in [`plan_ci`], the
+//!   [--app]`, `--explain`): the affected closure of a change set, the first consumer of `paddock-repo-graph` ([`plan`], with the
+//!   `.gitea` narrowing in [`plan_gitea`] and the git reader in [`plan_repo`]), the matrix and the base of a run in [`plan_ci`], the
 //!   command in [`plan_cmd`]. Tested against recorded answers (the script was retired 2026-11-18, ADR 0022 R4). `plan --since-run <run>`
 //!   reruns only what failed in a finished run ([`plan_since`]).
 //! - `ci setup-rust`: the compile cache and the Tauri Linux libraries of a CI job, the port of the setup-rust action's shell steps
@@ -26,7 +25,7 @@
 //! - `ci build-jobs [<split>]`: CARGO_BUILD_JOBS and NEXTEST_TEST_THREADS for a job, the port of `conformance/ci/build-jobs.sh`
 //!   ([`ci_build_jobs`]).
 //! - `audit nightly|compare`: advisory audits of every lockfile, main's nightly and a change's new findings only ([`audit`], ER-41).
-//! - `locks check|sync`: every lockfile and the workspace hack current, and the command that regenerates them ([`locks`]).
+//! - `locks sync`: the command that regenerates every lockfile and the workspace hack ([`locks`]).
 //! - `locks guard [--write]`: a dependency added to a shared crate changes neither the workspace hack, the features of a watched crate
 //!   nor a lockfile without that change in the same commit ([`locks_guard`], report-only).
 //! - `ci stable-workspace|node-caches|host-tools|sccache-stats|build-folder|prune-build-folder|prune-folder|prune-agent-builds|
@@ -37,17 +36,16 @@
 //!   of merged and stale-pushed folders ([`disk`]).
 //! - `load`: start, hold or stop for new agents, from the load, the free disk and the CI queue ([`load`], ER-24).
 //! - `places`: the machine's dev folders, derived from `paddock.worktreeRoot` for the scripts, `--pinned` for the VM guards ([`places`]).
-//! - `brief check`: the fields and known-bad patterns of a brief to an agent ([`brief_check`], templates/agents/brief-template.md).
 //! - `ci triage <run>`: NEW, ALREADY FAILING ON MAIN or FLAKY for each failed test of a run ([`ci_runs::triage`]).
-//! - `worktree add|claim|reassign|release|drop|list|clean` and `check primary`: agent worktrees locked with an owner note and
-//!   bound to their agent, and the probe of the primary checkout ([`worktree`], ADR 0083).
+//! - `worktree add|claim|reassign|release|drop|list|clean`: agent worktrees locked with an owner note and
+//!   bound to their agent ([`worktree`], ADR 0083).
 //! - `pr open|label|list|sync|plan-status`: the branch ledger on Gitea draft pull requests with labels, and plan rows checked
 //!   against it ([`pr`], docs/plans/merge-queue.md).
 
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
+pub mod active_apps;
 pub mod audit;
-pub mod brief_check;
 pub mod cargo_target;
 pub mod check;
 pub mod check_ids;

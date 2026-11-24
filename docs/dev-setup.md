@@ -29,7 +29,7 @@ scripts/setup-dev.sh --install  # macOS: installs the missing tools, then report
 
 ## Where things live
 
-Code, scripts and docs never name a disk (C125, rule 40): a disk gets renamed or replaced, and a hard-coded path then goes
+Code, scripts and docs never name a disk (rule 40): a disk gets renamed or replaced, and a hard-coded path then goes
 stale without a sound (on 2026-11-14 the dev data moved disks, and the guards, the VM scripts and the dev tool's defaults all
 pointed at disks that were gone). Tools derive every folder from one setting per machine, `git config paddock.worktreeRoot`
 in the main checkout (repo-local, so every worktree sees it), and fail with an `::error::` and this next step when it is not
@@ -40,7 +40,7 @@ and links here.
 | --- | --- | --- |
 | `<dev-targets>` | worktrees (`wt/`), build folders, agent scratch (`scratch/<agent id>`), `sccache`, `paddock-dev-home`, the disk index `.paddock-disk.sqlite` | `PADDOCK_DEV_TARGETS`, else the parent of `paddock.worktreeRoot`, else of `PADDOCK_WORKTREE_ROOT` |
 | `<dev disk>` | the folder that holds `<dev-targets>` | the parent of `<dev-targets>` |
-| `<dev disk>/vm-data` | the test VMs: the Windows test VM `paddock-win11-test`, the Tart images `tart-from-home` | `PADDOCK_VM_DATA`, else derived; the Windows VM's guard reads git config only, with an empty environment |
+| `<dev disk>/vm-data` | the Tart images `tart-from-home` of the service smoke | `PADDOCK_VM_DATA`, else derived |
 | `<dev disk>/ci/locks/test-machines` | the lock of the test machines (`scripts/vm-lock.sh`) | `PADDOCK_VM_LOCK_ROOT`, else derived |
 | the main checkout | `paddock`, with `engineering-rules` next to it | the folder that holds the git common directory |
 
@@ -253,15 +253,14 @@ A folder a tool creates for an agent (a cargo or cargo-xwin target folder, a tes
 owner record, `./dev disk record <dir> --kind <build|scratch|...> --link <worktree>` (on branch `feat/dev-disk` until it
 lands), so a cleanup knows whose it is. Callers: engineering-rules `scripts/heavy.sh` records `CARGO_TARGET_DIR` (so every
 `cargo`, `cargo xwin` and `llvm-cov` run through it is covered; the xwin target folder is whatever `CARGO_TARGET_DIR` names,
-no script here makes one), and `scripts/vm-smoke/run*.mjs` record their scratch folder through `scripts/disk-record.sh`,
-which skips quietly where `./dev disk` does not exist. The scratch folder an agent's brief names is made by the brief's
-author or by `./dev brief` (not on main yet): that call belongs there. The Rust `heavy` tool (`tools/heavy`) makes no folder.
+no script here makes one). The scratch folder an agent's brief names is made by the brief's
+author: that call belongs there. The Rust `heavy` tool (`tools/heavy`) makes no folder.
 
 ## Tests
 
 - **Rust:** `cargo nextest run` (each app's `.config/nextest.toml`: one test per core but one, slow-test warnings after
   30 s, and a `ci` profile without retries that stops a test after its 60 s budget, waivers in the file with a reason, because a flaky test is fixed rather than retried, with a JUnit report).
-  nextest does not run doc tests: `cargo test --doc` runs them.
+  Doctests are off everywhere (`[lib] doctest = false`; crates/README.md, "Doctests"): doc examples are text, behaviour is in unit tests.
 - **One integration-test binary per crate:** `tests/it/main.rs` declares one module per test file (`mod pool;` for
   `tests/it/pool.rs`), shared helpers in `tests/it/common/` or `tests/it/support/`. Linking one binary per file cost more
   than running the tests (Debrief went from 239 test binaries to 99). A new test file is a new `mod` line, never a new
@@ -272,7 +271,7 @@ author or by `./dev brief` (not on main yet): that call belongs there. The Rust 
 - **Golden files (`paddock_testkit::golden`):** a golden is captured on one machine and checked on all of them (the Mac, the
   Linux CI image, which runs as root, and Windows). A value of the capturing machine (a uid, a home folder, a temp path) makes it
   fail elsewhere; normalise it in the test before the comparison (for example `norm()` in
-  `tools/paddock-dev/tests/it/host_steps.rs`), so the file says `<uid>`. Conformance C131 (report-only, ER-41) reads the golden
+  `tools/paddock-dev/tests/it/host_steps.rs`), so the file says `<uid>`. Conformance C131 (blocking since ci.yml 8869, ER-41) reads the golden
   folders (and `*.golden` and `*.snap` files) for uid and gid numbers, `/Users`, `/home` and `C:\Users` paths and temp paths, by
   fixed patterns, so it gives the same result on every machine; it walks the working folder today (reading git's tracked list is
   the approved train-14 item). A value that is fine (an invented user) gets an entry with a reason in `conformance/c131-allow.json`.

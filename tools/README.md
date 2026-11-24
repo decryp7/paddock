@@ -46,7 +46,7 @@ cargo will use), uses the per-user cache `~/.paddock-dev/bin/<hash>/` (`PADDOCK_
 `tools/paddock-dev/target/` (`PADDOCK_DEV_TARGET_DIR`; agents put it outside `~`) on a miss or when an input has
 uncommitted changes. `PADDOCK_DEV_FRESH=1` builds from source in a fresh folder without a compiler wrapper (release jobs).
 The prebuilt download (the `dev-tool.yml` package) is not wired yet. Commands today: `self hash`, `ci slot
-acquire|release|status|idle-run`, `graph affected`; the rest arrives with R1 and later. When a path dependency in `crates/` changes its
+acquire|release|status|idle-run`, `plan`; the rest arrives with R1 and later. When a path dependency in `crates/` changes its
 dependencies, regenerate the tool's lockfile in the same change (`cd tools/paddock-dev && cargo update -w`).
 
 ## heavy

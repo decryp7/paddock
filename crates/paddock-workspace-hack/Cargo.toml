@@ -14,6 +14,9 @@ publish = false
 # The parts of the file between the BEGIN HAKARI SECTION and END HAKARI SECTION comments
 # are managed by hakari.
 
+[lib]
+doctest = false # doctests are off (crates/README.md, "Doctests")
+
 ### BEGIN HAKARI SECTION
 [dependencies]
 aho-corasick = { version = "1" }

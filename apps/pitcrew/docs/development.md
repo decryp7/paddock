@@ -118,8 +118,8 @@ revert the family icon. To change the icon, change it in Paddock (`icons/tools/i
 
 Pitcrew is a leg of the monorepo's `ci.yml` (`apps/pitcrew/paddock.ci.json`, the shared `app-gates` action): on Linux format,
 clippy, nextest, doc tests, `cargo deny`, then the frontend (npm audit, lint, build, unit tests with coverage); on Windows and
-macOS the Rust gates (clippy not on Windows) for the code that differs there. Commit messages of pull requests are checked by
-`ci.yml`'s `commits` job. `.gitea/workflows/pitcrew-release.yml` builds the installers (three OS, macOS seal and sidecar
+macOS the Rust gates (clippy not on Windows) for the code that differs there. Commit messages are checked by the push gate
+and by C23 in `ci.yml`'s conformance job. `.gitea/workflows/pitcrew-release.yml` builds the installers (three OS, macOS seal and sidecar
 check) and publishes `pitcrew-v*` tags through the shared `app-release.yml`. See [releasing.md](releasing.md).
 
 ## Architecture documents and diagrams

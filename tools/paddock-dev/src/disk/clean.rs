@@ -154,8 +154,30 @@ pub fn run_with(
             let _ = scan(&s, Sizes::Skip, Some(&mut i), &mut |_| {});
         }
     }
+    // The temp folder's declared leftovers go with the same command (ER-51, one clean-up): only the folder the environment names, never
+    // a fallback (a caller whose environment names none, a test, sweeps nothing).
+    let temp = match super::temp::named_root(env) {
+        Some(root) => {
+            let t = super::temp::TempArgs {
+                apply: a.apply,
+                dry_run: !a.apply,
+                root: Some(root),
+            };
+            match super::temp::run(&t, env, note) {
+                Ok(r) => {
+                    text.push_str(&format!("{}\n", r.text));
+                    r.data
+                }
+                Err(e) => {
+                    note(&format!("::warning::disk clean: the temp folder was not swept: {e}"));
+                    json!({"error": e.to_string()})
+                }
+            }
+        }
+        None => json!({"skipped": "no TMPDIR, TEMP or TMP: the temp folder is not swept here (`./dev disk temp --root <folder>`)"}),
+    };
     Ok(Report::new(
-        json!({"apply": a.apply, "removed": removed, "kept": kept, "bytes": total}),
+        json!({"apply": a.apply, "removed": removed, "kept": kept, "bytes": total, "temp": temp}),
         text,
     ))
 }
@@ -184,25 +206,6 @@ mod tests {
         assert!(refusal(&found(Some(Kind::Slot)), State::Merged).unwrap().contains("CI kit"));
     }
 
-    /// A folder opened so its time can be set: Windows refuses that on a plain `File::open` (access denied) and needs write access
-    /// and the backup-semantics flag to open a directory at all.
-    fn open_dir_for_write(dir: &Path) -> std::fs::File {
-        #[cfg(windows)]
-        {
-            use std::os::windows::fs::OpenOptionsExt;
-            const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
-            std::fs::OpenOptions::new()
-                .write(true)
-                .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
-                .open(dir)
-                .unwrap()
-        }
-        #[cfg(not(windows))]
-        {
-            std::fs::File::open(dir).unwrap()
-        }
-    }
-
     fn old_record(dir: &Path, kind: Kind, link: &str) {
         let mut r = Record::new(kind, "implementer:t");
         r.created = 1_000_000;
@@ -211,7 +214,7 @@ mod tests {
         record::write(dir, &r).unwrap();
         // The folder's own time counts as use too: age it.
         let old = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000);
-        open_dir_for_write(dir).set_modified(old).unwrap();
+        crate::disk::test_support::set_folder_time(dir, old);
     }
 
     fn setup() -> (tempfile::TempDir, CleanArgs) {
@@ -271,6 +274,46 @@ mod tests {
             "{logged:?}"
         );
         assert_eq!(r.data["removed"].as_array().unwrap().len(), 1);
+    }
+
+    /// ER-51, one clean-up: `disk clean` also sweeps the temp folder the environment names (`disk temp`), dry run and apply alike, and
+    /// a caller whose environment names none sweeps nothing (the control: the in-memory environment of the tests above).
+    #[cfg(not(windows))]
+    #[test]
+    fn clean_sweeps_the_named_temp_folder_and_none_without_one() {
+        let (d, mut a) = setup();
+        let tmp = d.path().join("os-tmp");
+        std::fs::create_dir(&tmp).unwrap();
+        // The declared limit of the prefix plus two: the two oldest are past it.
+        let limit = crate::disk::temp::declared().unwrap().claim("x9-fixture-aaaaaa").unwrap().max_count;
+        let old = std::time::SystemTime::now() - std::time::Duration::from_secs(48 * 3600);
+        let planted: Vec<_> = (0..limit + 2)
+            .map(|i| {
+                let p = tmp.join(format!("x9-fixture-{i:06}"));
+                std::fs::create_dir(&p).unwrap();
+                crate::disk::test_support::set_folder_time(&p, old + std::time::Duration::from_secs(i as u64));
+                p
+            })
+            .collect();
+        std::fs::write(tmp.join("not-ours"), "x").unwrap();
+        let named = tmp.display().to_string();
+        let env = move |k: &str| (k == "TMPDIR").then(|| named.clone());
+        let none = run(&a, &|_| None, &mut |_| {}).unwrap();
+        assert!(none.data["temp"]["skipped"].is_string(), "{}", none.data);
+        let dry = run(&a, &env, &mut |_| {}).unwrap();
+        assert_eq!(dry.data["temp"]["entries"], limit + 3, "{}", dry.data);
+        assert!(planted.iter().all(|p| p.exists()), "a dry run removes nothing");
+        a.apply = true;
+        let applied = run(&a, &env, &mut |_| {}).unwrap();
+        let gone: Vec<&str> = applied.data["temp"]["removed"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|x| x["name"].as_str().unwrap())
+            .collect();
+        assert_eq!(gone, ["x9-fixture-000000", "x9-fixture-000001"], "{}", applied.data);
+        assert!(!planted[0].exists() && !planted[1].exists() && planted[2].exists());
+        assert!(tmp.join("not-ours").exists());
     }
 
     // Reading other processes' folders is not implemented on Windows (ADR 0083 §1), so it never judges a folder unused: see the test below.

@@ -3,7 +3,7 @@
 //! folders or HKLM values; the tests touch only folders, values and processes they make, inside throw-away folders under
 //! `%ProgramFiles%` of the Windows test VM and its temporary folder, and remove them.
 //!
-//! Run on the Windows test VM as an administrator (`docs/testing/windows-test-vm.md`):
+//! Run on a disposable Windows machine as an administrator:
 //! `PADDOCK_SETUP_EXE` is a build with `PADDOCK_SETUP_IDENTIFIER=net.decryptology.paddock-setup-test`,
 //! `PADDOCK_SETUP_PRODUCT=PaddockSetupTest`, `PADDOCK_SETUP_MAIN=paddock-setup.exe`, `PADDOCK_SETUP_TEST_VERSION=0.1.0` and
 //! `PADDOCK_SETUP_UPDATE_KEY` = the text of `paddock-updater/tests/fixtures/key.pub`;

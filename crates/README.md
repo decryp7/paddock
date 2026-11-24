@@ -25,6 +25,14 @@ Rules for a crate here:
   job's workspace-wide steps (and the coverage job) test every member; `scripts/publish.test.mjs` and conformance C37 fail
   when a member is left out (an `--exclude`). A crate whose code changes with an optional feature off joins the job's
   "Tests with the optional features off" step.
+- **Doctests are off** (user, 2026-11-24): every library target in the repository, apps and tools included, has
+  `[lib] doctest = false`, and a doc comment's example is a ```` ```text ```` block (or `ignore` where Rust highlighting is
+  needed), never runnable code. No `cargo test --doc` runs anywhere: not in the push or member gate, not in CI, not in the
+  nightly. Behaviour an example showed is tested by a unit test. This stays so after v1: turn doctests back on for one crate
+  only when that crate is published for others to use, or when its docs become a real user guide. Two checks keep it so:
+  `doctests_off` in tools/paddock-dev's tests (every library target in `cargo metadata` has doctests off; a member audit, so
+  the member gate runs it whatever changed) and `contracts::doc_examples` (no runnable example in a tracked doc comment; in
+  the conformance tests, so every push runs it).
 - Published to the Gitea cargo registry by the tag workflow only (`.gitea/workflows/publish.yml`, rule 9). One repo tag
   `vX.Y.Z` releases everything; each crate bumps its own `version` only when it changes, and a version the registry
   already has is skipped. `node scripts/publish.mjs` is the local dry run (lists every crate and npm package with what a
@@ -1920,16 +1928,16 @@ scratch.finish()?;                                  // or just drop it: anything
   scratch whose `tmp()` is not empty panics with the names (not while the test is already failing); `finish()` returns them as an
   error to assert on. An unreadable `tmp()` counts as a leftover. `PADDOCK_TESTKIT_KEEP=1` keeps the folder of a failed test.
 - `env_lock()`: a process-wide lock (a lock poisoned by a failed test is recovered); `set`/`remove` restore the original values in
-  reverse order when the guard drops. `hermetic(&scratch)` is the in-process half of C14 (the wrapper `paddock-conformance run --`
-  is the other half).
+  reverse order when the guard drops. `hermetic(&scratch)` points HOME, the XDG folders, APPDATA and TMPDIR into the
+  scratch folder for the test process (rule 7).
 - Golden files: line endings normalised; the failure names the file, the first differing line and the update variable.
 - `FakeRunner`: `on("launchctl", &["print"]).reply(Reply::ok("..."))`, replies queue (`.then(...)`, the last repeats), the first
   matching rule answers, an unscripted command is an error reply, `calls()`/`lines()`/`count()` record. An app implements its own
   runner trait for it in its test module (Dyno's `Runner`).
 - `StandIn`: one stand-in program for any program a test plants (`cargo`, `git`, `npm`, `smartctl`, `df`), the same on every OS, instead of a
-  `#!/bin/sh` fixture (C130 lists the old ones). `StandIn::new(dir, "cargo").stdout("added 3 packages").exit(0).records_args().install()?`
+  `#!/bin/sh` fixture. `StandIn::new(dir, "cargo").stdout("added 3 packages").exit(0).records_args().install()?`
   hard-links the kit's std-only `paddock-stand-in` binary (compiled once per build folder with `rustc`, the one beside `$CARGO`; `PADDOCK_STAND_IN_BIN` names a
-  prebuilt one built from the same sources, which the kit checks: the Windows test VM has no compiler, `docs/testing/windows-test-vm.md`) under the program's name, writes `<name>.stand-in.json` beside it and returns an `Installed`:
+  prebuilt one built from the same sources, which the kit checks: a machine with no compiler) under the program's name, writes `<name>.stand-in.json` beside it and returns an `Installed`:
   `program()`, `dir()`, `calls()` / `invocations()` (arguments with spaces and non-ASCII as given, chosen env vars, stdin). Actions:
   `stdout`, `stderr`, `writes`, `appends`, `sleeps` (at most two minutes), `spawns(&Spawn::new("child").pid_file(..))`, `echoes_stdin`,
   `exit`; `when_args(&["--scan"], Actions::new()...)` and `when_arg_contains("usb-", ..)` answer a call differently (later rules win);

@@ -10,14 +10,12 @@ locked worktree, never in the main checkout (rule 2).
    conflicting files.
 3. **The member gate.** `./dev merge check --gates HEAD` on the merge: the detectors (dropped hunks, lost tests, workspace-hack,
    generated files), then the fast gates of `./dev check --pre-push` on the combined tree with `--base HEAD^1`. Load the machine
-   lightly: `CARGO_BUILD_JOBS=2`, one member at a time.
+   lightly: `CARGO_BUILD_JOBS=2`, one member at a time. Only the foundation and the active apps (`docs/ci-active-apps.toml`) get
+   their build checks; an inactive app's rows are shown as `inactive`, never as passed (docs/ci-schedules.md, "Active apps").
 4. **A member that fails is taken out, not fixed on the train.** Reset the train branch to `HEAD^1` in your own worktree
    before merging anything else, and send the member back to its author with the failing rows. While the gate is report-only
    (until ADR 0098 records its first green run on a real train) a failure is printed with `::warning::` and the exit code stays
    0: read the output anyway and send the member back for a real failure.
-   A member that changes the test kit's process start (`crates/paddock-testkit/src/process.rs`, `ambient.rs`) or how CI makes build
-   folders (`tools/paddock-dev/src/ci_isolation/`) also runs `testcommand-ab.yml` on its trial ref and reads the Windows runner's
-   cells before it joins a train; a VM or Mac number is `not measured` (ADR 0107 D5, ER-9).
 5. **One CI run per train round**, through `./dev ci dispatch` (the run is queued at once and its first job waits while an older run holds a shared runner). Tests run
    once per train, not once per member (ER-8).
 6. **A red train run.** `./dev ci triage <run> --members <train-base>` lists the members, each with the projects its own change

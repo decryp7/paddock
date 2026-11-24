@@ -70,6 +70,9 @@ pub struct CargoTarget {
     pub kinds: Vec<String>,
     /// Its root source file (repository-relative).
     pub src_path: String,
+    /// Whether `cargo test` runs its documentation examples (`doctest`, true by default for a library; the family sets it false,
+    /// crates/README.md "Doctests").
+    pub doctest: bool,
 }
 
 impl CargoTarget {
@@ -138,6 +141,7 @@ pub fn parse_targets(json: &str, root: &str) -> Result<Vec<CargoTarget>, GraphEr
                 name,
                 kinds,
                 src_path: relative(root, &src.replace('\\', "/")),
+                doctest: t.get("doctest").and_then(Value::as_bool).unwrap_or(false),
             });
         }
     }

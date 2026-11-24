@@ -6,11 +6,11 @@
 // (code only: comments and string contents are masked). A site that must scan a moving page on purpose carries
 // `// conformance: axe-still — <why>` on its line or the line above. Limit: no parser; a builder passed to a function that calls `.analyze()`
 // elsewhere is judged where `.analyze(` stands.
-// ER-41: report-only (warnings) until its first green run on the real tree, recorded by run id here. Recorded: not yet.
-import { warn } from '../finding.mjs';
+// ER-41: blocking (mode gate) since its first green run on the real tree, ci.yml run 8869 (cdd4c3d10, 2026-11-24).
+import { error } from '../finding.mjs';
 import { maskTs } from './C71-test-timing.mjs';
 
-export const SEVERITY = warn;
+export const SEVERITY = error;
 const FILE = /^(?:apps\/[^/]+\/app\/e2e\/.+|ui\/e2e\/.+|ui\/projects\/paddock-e2e\/.+)\.ts$/;
 const WAIVER = /conformance:\s*axe-still\s*[—–-]+\s*\S.{2,}/;
 const STILL = 'withPageStill(';
@@ -47,7 +47,7 @@ export function scansNotHeldStill(text) {
 export default {
   id: 'C156',
   scope: 'root',
-  mode: 'report-only',
+  mode: 'gate',
   title: 'An axe scan in an e2e spec runs with the page held still (withPageStill or axeViolations)',
   rule: 21,
   run(ctx) {

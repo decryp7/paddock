@@ -3,8 +3,7 @@
 //! A test that builds an expected path as text, or compares path text, in the spelling of the OS it was written on fails on
 //! another OS although the product is right: Windows spells one place with `\` or `/`, with or without `\\?\`, as `C:` or `c:`,
 //! and Git bash prints it as `/c/...`. Compare with [`same_path`] or [`assert_same_path!`], build expected text with [`text`]
-//! and expected paths with [`under`]; never with `format!("{}/x", p.display())` or `.replace('\\', "/")` (the check C122 refuses
-//! both in test code).
+//! and expected paths with [`under`]; never with `format!("{}/x", p.display())` or `.replace('\\', "/")`.
 //!
 //! A `PATH`-like list is not covered: build it with `std::env::join_paths`, never by hand with `:` (Windows uses `;`).
 

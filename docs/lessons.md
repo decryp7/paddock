@@ -3726,3 +3726,149 @@ logged with what the rule saw (ER-27). Lesson: an admission rule needs a cost, n
   its stop from nextest's own output.
 - **Lesson.** A list of test names is a record of the last failure, not a rule: declare the property on the test, put the policy in one
   place, and check the declaration by what makes it true (the lock's group at run time, the cost from the run's own timings).
+
+## Active apps: train and branch CI run the foundation only (feat/app-ci-pause, 2026-11-24)
+
+The user chose to run the foundation first and bring the apps back one at a time (docs/ci-active-apps.toml, docs/ci-schedules.md
+"Active apps"). The first design paused apps per tier in each `paddock.ci.json`. On the same day it was replaced by one active set
+that the nightly ignores: one file the coordinator edits, and no tier `if:` lines in five workflows (KISS). **Lesson:** a switch that
+many readers need lives in one file with one accessor; a per-app field would have been read by every reader through every contract.
+
+**Open fix item: the nightly does not count as an app's full green run for its tag.** `ci verdict` reads only the named workflow's runs
+(ci.yml for a leg app), and the nightly's ci.yml call runs inside nightly.yml. Until the reader also reads the nightly's called
+ci.yml jobs (or the nightly writes a verdict of its own), a tag of a ci.yml-leg app needs the app active and a green ci.yml run on the
+commit (`ci verdict --tag --app`). debrief.yml's own nightly run already counts for Debrief.
+
+**Open fix item: the train dispatch guard does not read the nightly yet.** `active_apps::classify_nightly` sorts a red nightly into
+train-stopping failures (foundation, active apps) and inactive apps' fix items; the green-main guard that refuses a dispatch on the
+first and records the second (`ci fix-items`) is part of the queued green-main work.
+
+## The long paddock-dev test hangs had one cause: a test moved its process into a temporary folder (2026-11-23, fix/bounded-test-runs)
+
+- **Cause.** `check_c129::a_control_holds_in_a_repository_whose_lists_differ_from_its_own` called `std::env::set_current_dir` into a
+  temporary repository (since 91db3611f, 2026-11-16), relying on nextest's process per test. Under a plain `cargo test --test it`
+  every test shares one process, so once that folder was removed every later child (git, node, bash, the tool itself) started in a
+  deleted folder. git's start-up calls getcwd, and macOS's libc then falls back to reading the parent folder entry by entry and
+  `fstatat`-ing each one, looking for an inode that no longer exists. The parent is the user temp folder, which held about 992,000
+  entries (about 71% of a 400,000-entry sample are `x9-fixture-*` folders from before the conformance helper fix, dated 2026-11-20).
+  Each git start took 20 s to over 2 min of disk work, 14 at once (disk0 at about 32,000 operations a second, 125 MB/s of 4 KB
+  reads). That was `worktree::list_clean` at 3.5 h (the test process waits at 0% CPU while its git children are in disk wait),
+  `ci_isolation` at 18 min, and the live-tree checks, `build_jobs` and C130's git-repository tests failing together.
+- **Reproduced** (plain libtest harness, 14 threads, the it binary run directly): the full suite stalled at 81 and at 142 finished
+  tests, with 14 `git rev-parse` children in state U and `sample` showing `init_git -> strbuf_getcwd -> __private_getcwd -> fstatat`.
+  A/B with `--test-threads 1`: `worktree::list_clean::clean_dry_run` alone took 1.1 s; after the C129 test it was stopped at 300 s;
+  with the fixed test it took 1.0 s. The full plain run with the fix finished in 161 s (723 passed; the 8 `pre_push` failures are the
+  missing `CARGO` variable of a binary started without cargo, not a hang).
+- **Fix.** The test runs the built binary with `current_dir` set to the repository and reads the control from its JSON report.
+  `std::env::set_current_dir` is now a disallowed method in `lint/clippy.toml` and every copy (positive control: a planted call fails
+  clippy). Rule 89's hook (`no-plain-cargo-test`) refuses plain `cargo test` (except `--doc` and `--no-run`), so a test's process-wide
+  change cannot reach another test.
+- **Orphaned slot holders.** `ci slot hold` processes started by a test lived on after nextest stopped the test, because their job
+  folder (a temporary folder) was never removed and their cap is 3.5 h. Every TestCommand now sets `PADDOCK_LIFELINE_PID` to its test
+  process (`paddock_env::lifeline`), and the holder ends at its next look when that process has ended (`HoldEnd::LifelineGone`). The new
+  test was red first (60 s, "slot s1 never became free") and is green in 0.6 s.
+- **Two tests that were too expensive under load.** `os_scoped::a_new_skip_or_only_entry...` ran C155 five times over a copy of
+  `crates`, `apps` and `tools/paddock-dev`. It now copies only `crates`, as do its three siblings that only touch `crates`: 31.5 s to
+  9.4 s at load about 25. `ci_run::tests::adding_a_check_changes_no_golden_row...` built the whole CI model four times (2.2 s each in
+  a debug build). It now builds the edits from ci.yml alone, after checking that this gives the full model's rows: 8.7 s to 5.0 s.
+- **Not done.** The temp folder still holds about a million stale entries. Removing old `x9-fixture-*` and other `paddock-*` folders
+  is the user's housekeeping decision. Other suites still make temp folders that a killed run leaves behind (`paddock-isolation-*`
+  about 17,000 in the sample, from the shell tests of job-isolation.sh).
+- **Open fix item: `worktree::concurrent::two_adds_of_one_path_make_it_once` lost a round with exit 1 instead of 4.** In 1 of 5 full
+  nextest runs at 4 workers under load (15-minute load 21 to 30, 4 CPU burners, sweep run 1 of fix/bounded-test-runs), round 2 ended
+  `[0, 1]`: one add won and the other failed instead of being refused. Stressed alone it passed 60 of 60 (4 workers, load about 17) and
+  120 of 120 (8 workers, 6 burners, load 31 to 37), 720 rounds in all, so the cause is not confirmed (ER-28). The test discarded both
+  programs' output, so the loser's error was lost; it now prints both outputs in the failure. A further stress with that output in place
+  (fix/bounded-test-runs-2, 125 iterations x 4 rounds = 500 rounds, 8 workers, 6 CPU burners, load 15 to 31) passed 500 of 500, so 1,220
+  rounds alone have not caught it. Next step: read the loser's message from the next failure.
+- Sweep after the fixes (fix/bounded-test-runs, Dev Mac, 4 workers, 4 CPU burners, the run starting only at a 15-minute load under 30):
+  6 full nextest runs of paddock-dev. 5 passed in full (2580 or 2587 tests, 277 to 544 s); 1 had the failure above. No slot holder
+  of ours was left after any run (3 `ci slot hold` processes after run 3, while the train's CI shared the Mac, are not attributed).
+- Class "process-wide state changed by one test reaches the others under the plain harness": 2nd instance (1st: `set_var`, ADR 0100
+  amendment, 9ac185c24). Covered by the clippy bans on both and by rule 89's process per test.
+
+## The graph train's landing (ci.yml 8869 on cdd4c3d10, push run 8888 reused it): landing notes and fix items (2026-11-24)
+
+- **Landed.** ci.yml run 8869 on cdd4c3d10 was full green, and the push to main (run 8888) reused it (ER-49). Train 2026-11-25-a records
+  8869 as ci.yml's first green scope run (`./dev ci scope-record --workflow ci.yml --run 8869`, docs/ci-scope-first-runs.toml) and deletes
+  the plan job's old `plan verdict:` block in the same commit, so `./dev ci verdict` now decides ci.yml runs on the declared scope (ADR
+  0113, ER-41). The first `scope-record` at 15:15 was run outside the train's tree and was lost; it was run again in the train.
+- **A since_run round never reruns a job whose `needs` passed in the original run, nor anything that depends on it (class; fix item).**
+  The plan job of debrief.yml 8839 (on fe331ca55) selected `bundle (macos-latest)` ("the whole job reruns"), but `bundle` needs
+  `rust-lint`, which a round skips because it passed in 8831, and a job with a skipped need is skipped, so the bundle never ran (all three
+  legs skipped). A survey with the YAML parser of every workflow that takes `since_run` (ci.yml, debrief.yml): ci.yml has no job that
+  needs more than `plan`; in debrief.yml `bundle` is the one selectable job with that shape (`tauri-smoke` has the same kind of needs, but
+  its `if` already tolerates a skipped need, the model for the fix); `release` and `nightly-mark` run only on tags and schedules. The
+  full run 8844 gave the bundle verdict instead.
+- **A since_run filter that selects nothing must fail closed, not warn (class; fix item).** The round ci.yml 8868 (since_run=8843, on
+  cdd4c3d10) reran `paddock-dev (macos-latest)` with `test(=ci_run::tests::adding_a_check_...)`, but ADR 0121 (9a4d16f9b, in the same
+  round) had renamed it `tree_adding_a_check_...`. The workflow warns on a filter that matches nothing, so the leg would have passed
+  without running the test. 8868 was cancelled and the full run used instead. Fix: map failed tests through renames, or refuse the round
+  with an `::error::` naming the missing test; the queued failed-only dispatch guard checks that the round ran each failed test.
+- **Fix items, not blocking:**
+  - `repo_model::code::tests::on_the_real_tree_every_read_candidate_parses_with_syn` took 29.8 s alone on the Windows runner (ci.yml 8838,
+    job 47580) against its 60 s budget: half the budget with no neighbour. For the test-cost work (ADR 0121).
+  - `./dev ci dispatch` prints no run id, with `--json` either; a caller finds its run again by head sha and workflow, against ER-51.
+  - App failures in the landing runs, non-blocking by the user's decision of 2026-11-24 (app CI off until the foundation is done):
+    `app spotter (windows-latest)` FLAKY `spotter-render::real_browser a_missing_element_times_out_as_failed` (8843, job 47674: panic at
+    real_browser.rs:179 after 20.3 s, the retry passed in 17.4 s; the train does not touch spotter-render); Debrief WebKit
+    `e2e/context-actions.e2e.ts:76` "mask dialog previews the replacement and saves" FLAKY (debrief.yml 8844, job 47663: the first row
+    still unmasked within 5 s at line 90, 38.2 s; the retry passed in 26.5 s; the train touches only the dock and navigation services).
+    debrief.yml 8844 was cancelled once it was no longer required; no installer runs.
+  - The landing was judged on foundation jobs only: `./dev ci dispatch` and the plan had no switch to leave app legs out, so the normal
+    ci.yml run was dispatched and its `app *` and WebKit reference-app jobs were not judged. feat/app-ci-pause (train 2026-11-25-a) adds
+    that switch (docs/ci-active-apps.toml).
+- **Seen while assembling train 2026-11-25-a (fix items):**
+  - The lessons merge driver (`./dev merge lessons-driver`) puts back the blank line that union merge drops only before a `## ` heading.
+    A section that starts with a plain paragraph heading (docs/rules-timing-and-report-visibility's "Measuring and reporting
+    (2026-11-24)") lost its blank line in its merge into train 2026-11-25-a (the member was then taken out for C100: its rule text names
+    `./dev bench`, which does not exist yet). Third instance of the class "the lessons file loses blank lines in a union merge" (2026-11-21
+    section above; the driver fixed the `## ` shape only). Fix: restore the blank line before any block the union appended, or require
+    every appended block to start with `## ` (conformance).
+  - `./dev wait --pid <p> --max <d>` counts `--max` from the process's start, not from the wait's start: a wait with `--max 2h` on a gate
+    that had run 1 h 51 min ended after about 8 minutes with "gave up after 2h".
+  - Member 3's gate took about 4.5 hours, most of it queue time in the heavy queue (doctest rows queued up to 1624 s each, behind another
+    agent's pre-push), and its gen row `notices-dyno` was NOT MEASURED because the train worktree had no `node_modules`: `./dev worktree
+    add` does not run `npm ci`, so an integrator must run it before the first gate.
+
+## Assembling train 2026-11-25-b: fix items (2026-11-24)
+
+- **A fresh worktree lacks what the gates need (third instance, class).** Train 2026-11-25-a's gen row `notices-dyno` was NOT MEASURED
+  for want of `node_modules`; train 2026-11-25-b's `ts-debrief-wire` failed to link (`ld: library 'duckdb' not found`: no
+  `apps/debrief/.cargo/libduckdb.toml`, written by `cargo xtask libduckdb`), and `publish-dry-run` was NOT MEASURED for want of
+  `ui/dist/paddock-ui` and then `ui/dist/paddock-e2e`; the graph train had the libduckdb miss too (section above). Fix: `./dev worktree
+  add --profile gates` prepares them itself (`npm ci`, `cargo xtask libduckdb`, `npm run build -w ui`, `npm run build:e2e -w ui`), or each
+  gen row names the exact setup command in its NOT MEASURED line.
+- **A gate row that runs nextest keeps only its exit code.** Both `member-audits` failures on this train (`exit 100`) named no test in
+  the gate's log or JSON, so the profile had to run again to learn which test failed. Fix: the row keeps nextest's failed test names and
+  their panic lines in its output and JSON.
+- **A build folder inside the checkout.** A gate built tools/wiki into `tools/wiki/target` inside train 2026-11-25-b's worktree (319 MB);
+  it showed as untracked once chore/cut-ci-and-gates deleted tools/wiki with its `.gitignore`. Builds never write inside the checkout
+  (ER-51): the row that builds a workspace passes it a build folder outside.
+- **Members fixed on the train (by the coordinator's call, small and deterministic):** feat/gates-active-apps failed C122 rule B in its
+  new `tests/it/doctests_off.rs` (a `.replace('\\', "/")` path fold, both tries), fixed with `paddock_testkit::path::text`;
+  chore/conformance-flip-and-drop's new C123 sample named the binary's env name as text, so the dev_bin audit failed, fixed by joining
+  the name as C123's own samples do. Both were the members' own code, which their branch pre-push did not run (member-audits runs on
+  the merged tree only).
+- **Skipped:** feat/check-result-reuse (f67b7f6a1, based before the push gate's rework) conflicts in `pre_push/exec.rs`: its reuse hook
+  calls the BudgetClock model that the train's push gate no longer has. It goes to train c after its branch merges main.
+- **Train 2026-11-25-a landed on a narrowed run (ER-15; the coordinator's call, option A).** Its full ci.yml run 8983 on 627b28afc was
+  green, but its plan declared `"ran":{...,"whole":true,"os_full":false,"smoke":["icons"],"affected":[]}` against
+  `"need":{...,"whole":true,"os_full":true,"smoke":[],"affected":[]}` (inactive: every app): the train changed shared steps of ci.yml's
+  `icons` job (`step:ci.yml#icons/1,2,6`), so the graph planner ran icons in smoke mode (phase `installed`). Main was fast-forwarded
+  to 627b28afc on 8983 and the push run (8984) plans icons whole; `ci reuse` does not reuse 8983, and `ci fix-items` recorded nothing
+  (8983 had no FLAKY test). Two fix items, queued for train c with the dispatch guards:
+  1. `./dev ci verdict` prints an empty reason for a smoke-narrowed run: "only partial: 8983 ()".
+  2. The landing run's scope and a push to main's need disagree for a job reached only through its steps (smoke in the run, whole in
+     the need), so a landing run that ran exactly what its diff planned is never complete and the push to main runs again. That breaks
+     ER-49's one definition of "complete" shared by the landing and the reader.
+  - Train 2026-11-25-a's landing run ci.yml 8976 (plan job 48889) could not save the escape monitor's selection record:
+    `::warning::the selection record of this plan was not saved (git push origin refs/paddock/plan-records/*:refs/paddock/plan-records/*:
+    fatal: could not read Username for 'http://172.16.1.220:7400': No such device or address); the next nightly counts this commit as
+    not measured`. The plan job pushes the refs with no credentials over the http remote; likely fix: push with the job token, the way
+    checkout authenticates (to be fixed with the dispatch guards, train c).
+  - The same plan printed its `::notice::inactive:` glued to the end of that warning: `eprintln!` writes a line's text and its newline
+    as two writes, and the runner merged the notice from standard output between them. Fixed in this train (`log_text::write_line`,
+    one write per line, for the plan and the eleven `|l| eprintln!("{l}")` log closures). Still open: the other `eprintln!` calls with
+    inline formatting have the same two-write shape; a clippy `disallowed-macros` ban of `eprintln!` in paddock-dev's sources, with
+    `log_text::eline` as the replacement, would cover them.

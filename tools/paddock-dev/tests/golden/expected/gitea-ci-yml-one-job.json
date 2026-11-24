@@ -2,11 +2,11 @@
  "all": false,
  "crates": false,
  "ui": true,
- "eslint": false,
+ "eslint": true,
  "conformance": true,
  "c99": false,
  "tools": false,
- "icons": false,
+ "icons": true,
  "ciImage": false,
  "paddockDev": false,
  "docs": false,
@@ -18,6 +18,12 @@
   "conformance": [
    "ci files .gitea/workflows/ci.yml",
    "conformance always runs"
+  ],
+  "eslint": [
+   ".gitea/workflows/ci.yml, job ui"
+  ],
+  "icons": [
+   ".gitea/workflows/ci.yml, job ui"
   ],
   "ui": [
    ".gitea/workflows/ci.yml, job ui"

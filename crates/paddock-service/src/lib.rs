@@ -27,7 +27,7 @@
 //! - [`verbs`]: the words every background program understands (`install`, `uninstall`, `status`, `stop`,
 //!   `print-unit`, `print-plist`, `--service`).
 //!
-//! ```
+//! ```text
 //! use paddock_service::{ServiceSpec, ProcessType, render};
 //!
 //! let spec = ServiceSpec::builder("net.decryptology.pitwall.service", "Pitwall", "pitwall-server")
@@ -43,7 +43,7 @@
 //!
 //! In the app (on a background thread, rule 10):
 //!
-//! ```no_run
+//! ```text
 //! # use paddock_service::*;
 //! # fn spec() -> ServiceSpec { unimplemented!() }
 //! # let (program, data_dir) = (std::path::PathBuf::new(), std::path::PathBuf::new());

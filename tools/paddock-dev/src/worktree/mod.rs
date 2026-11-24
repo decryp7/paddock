@@ -1,24 +1,22 @@
-//! `dev worktree` and `dev check primary` (ADR 0083, RT-3): one tool makes, claims and removes agent worktrees, so that a
+//! `dev worktree` (ADR 0083, RT-3): one tool makes, claims and removes agent worktrees, so that a
 //! worktree is always locked with an owner note and bound to its agent, and no cleanup removes a locked one.
 //!
 //! - [`ops`]: `add`, `claim`, `reassign`, `release`, `drop`, each under the owner map's lock;
 //! - [`inventory`]: `list` and `clean` (only unlocked, merged, clean, unused worktrees; `git worktree remove` without force);
-//! - [`primary`]: the probe of the primary checkout;
 //! - [`owners`]: the owner map `<git-common-dir>/paddock/owners.json`, which the guard hook (RT-7) reuses;
 //! - [`note`], [`git`], [`procs`]: the lock note and UTC time, git and the repository, and the folders processes are in.
 //!
-//! The engine reads no Paddock path: the base ref and the main branch are the constants of [`primary`] and the default of
+//! The engine reads no Paddock path: the base ref is the default of
 //! `--base`, so it can move to a generic tool (RT plan, "Generic code stays generic").
 
-/// The exit code of `check primary` when its only problems are checks that could not run (5 is a found problem).
-pub const EXIT_NOT_MEASURED: i32 = 6;
+/// The remote branch `main` may only trail: what "merged" means by default.
+pub const REMOTE_MAIN: &str = "origin/main";
 
 pub mod git;
 pub mod inventory;
 pub mod note;
 pub mod ops;
 pub mod owners;
-pub mod primary;
 pub mod procs;
 
 use clap::{Args, Subcommand};
@@ -119,7 +117,7 @@ pub struct PathArgs {
 #[derive(Args)]
 pub struct ListArgs {
     /// What "merged" means.
-    #[arg(long, default_value = primary::REMOTE_MAIN)]
+    #[arg(long, default_value = REMOTE_MAIN)]
     base: String,
     #[command(flatten)]
     common: Common,
@@ -129,34 +127,13 @@ pub struct ListArgs {
 #[derive(Args)]
 pub struct CleanArgs {
     /// What "merged" means.
-    #[arg(long, default_value = primary::REMOTE_MAIN)]
+    #[arg(long, default_value = REMOTE_MAIN)]
     base: String,
     /// Say what would be removed and remove nothing.
     #[arg(long)]
     dry_run: bool,
     #[command(flatten)]
     common: Common,
-}
-
-/// `dev check primary`'s arguments.
-#[derive(Args)]
-pub struct PrimaryArgs {
-    /// A file with one live agent_id per line (from the coordinator's own list); without it liveness is not measured.
-    #[arg(long)]
-    live: Option<PathBuf>,
-    /// An untracked path prefix that may live in the primary (repeatable).
-    #[arg(long)]
-    allow_untracked: Vec<String>,
-    /// The file of known untracked entries (default: paddock-primary-untracked.txt in the git directory). An untracked
-    /// entry in neither it nor the allow-list is an error.
-    #[arg(long)]
-    baseline: Option<PathBuf>,
-    /// Write the current untracked entries to the baseline (the coordinator does this after looking at them).
-    #[arg(long)]
-    accept_untracked: bool,
-    /// The repository (default: the current folder's).
-    #[arg(long)]
-    repo: Option<PathBuf>,
 }
 
 fn env(name: &str) -> Option<String> {
@@ -215,18 +192,4 @@ pub fn command(c: WorktreeCommand) -> Result<Report, CliError> {
         WorktreeCommand::List(a) => inventory::list(&repo, &a.base),
         WorktreeCommand::Clean(a) => inventory::clean(&repo, &a.base, a.dry_run),
     }
-}
-
-/// `check primary`.
-pub fn check_primary(a: &PrimaryArgs) -> Result<Report, CliError> {
-    let repo = repo_of(a.repo.as_ref())?;
-    primary::check(
-        &repo,
-        &primary::Options {
-            live: a.live.as_deref(),
-            allow_untracked: &a.allow_untracked,
-            baseline: a.baseline.as_deref(),
-            accept_untracked: a.accept_untracked,
-        },
-    )
 }

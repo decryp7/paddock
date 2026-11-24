@@ -14,7 +14,8 @@ on:
 
 env:
   APP_ID: myapp                       # the app's id (results file bench/<id>.results.json)
-  BENCH_COMMAND: cargo test --release -p myapp-core --test bench -- --nocapture
+  # Bounded (rule 89): the app's .config/nextest.toml needs a `bench` profile with its measured bound (see apps/debrief).
+  BENCH_COMMAND: cargo nextest run --profile bench --release -p myapp-core --test bench --no-capture
   PADDOCK_BENCH_VERSION: "0.1"        # the paddock-bench crate (registry decryp7)
 
 concurrency:

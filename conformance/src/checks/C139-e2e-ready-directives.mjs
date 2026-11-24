@@ -10,11 +10,11 @@
 // Read: the `eslint-suppressions.json` of an app (apps/<app>/app/) and of the ui. A malformed file is one check-broken finding at it. A run that
 // finds no e2e spec at all (apps/<app>/app/e2e/*.ts, ui/e2e/*.ts) did not look at anything: one not-measured error, never a pass (ER-33).
 //
-// Report-only (warnings) until its first green CI run that includes it (ER-41); it turns blocking then (mode gate, `--strict C139`), with that run id
-// recorded here, in c139.rs and in docs/gates.toml. Recorded: ci.yml run 8335 (train 15, 2026-11-20). The lint rule itself is an error already: it
+// Blocking (mode gate, ER-41): its first green CI run that included it was ci.yml run 8335 (train 15, 2026-11-20), and ci.yml run 8869
+// (cdd4c3d10, 2026-11-24) ran it clean on the real tree; the switch was made on 2026-11-24 (user), here and in c139.rs. The lint rule itself is an error already: it
 // had its report-only phase, and the real tree is at 0 sites outside the suppressions files.
 // JavaScript port of tools/paddock-dev/src/check/c139.rs (same findings, line for line; tests/it/check_c139.rs compares them).
-import { error, unwaivable, warn } from '../finding.mjs';
+import { error, unwaivable } from '../finding.mjs';
 import { baselineGrowth, isWorkTree, targetRef, unmeasuredFinding } from '../util/baseline.mjs';
 
 export const RULE_ID = 'paddock/e2e-ready-reads';
@@ -42,7 +42,7 @@ export function entriesOf(json) {
 export default {
   id: 'C139',
   scope: 'root',
-  mode: 'report-only',
+  mode: 'gate',
   title: 'the exceptions to paddock/e2e-ready-reads (eslint-suppressions.json) only shrink',
   rule: 49,
   run(ctx) {
@@ -65,7 +65,7 @@ export default {
         current = null;
       }
       if (current === null) {
-        out.push(unwaivable(warn('C139', 49, f, 1, 'the check cannot look: not ESLint bulk suppressions (an object of files, rules and counts of at least 1)', FIX_BROKEN), 'check-broken'));
+        out.push(unwaivable(error('C139', 49, f, 1, 'the check cannot look: not ESLint bulk suppressions (an object of files, rules and counts of at least 1)', FIX_BROKEN), 'check-broken'));
         continue;
       }
       if (!ctx.root || !isWorkTree(ctx.root)) continue;
@@ -88,7 +88,7 @@ export default {
       }
       if (g.added.length === 0) continue;
       const n = g.added.length;
-      out.push({ ...warn('C139', 49, f, 1, `the exception list grew: ${n} entr${n === 1 ? 'y is' : 'ies are'} (counting each \`count\`) not in ${f} at the merge base ${g.base.slice(0, 9)}; it may only shrink`, FIX_GROW), unwaivable: true });
+      out.push({ ...error('C139', 49, f, 1, `the exception list grew: ${n} entr${n === 1 ? 'y is' : 'ies are'} (counting each \`count\`) not in ${f} at the merge base ${g.base.slice(0, 9)}; it may only shrink`, FIX_GROW), unwaivable: true });
     }
     return out;
   },

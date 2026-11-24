@@ -3,7 +3,6 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { commitLintMain } from './commit-lint.mjs';
 import { checks } from './checks/index.mjs';
-import { runHermetic } from './hermetic.mjs';
 import { fullCheckoutProblem } from './util/full-checkout.mjs';
 import { formatText, writeOutputs } from './report.mjs';
 import { runChecks } from './runner.mjs';
@@ -15,15 +14,14 @@ import { windowWeightMain } from './window-weight/cli.mjs';
 const USAGE = `usage: paddock-conformance --app <name> [--root <dir>] [--only C04,C06] [--json] [--out file] [--summary file]
                            [--strict C30,C36] [--no-graph] [--scope apps/<app>] [--bundle <dir>] [--artifacts <dir>] [--paddock <dir>] [--version vX.Y.Z] [--rules-md <file>]
                            [--preflight vX.Y.Z]
-       paddock-conformance run [--allow-home a,b] [--keep] -- <command> [args]
        paddock-conformance commit-lint --subject <text> | --file <path> | --range <rev-range>
        paddock-conformance sync --app <name> [--root <dir>] [--paddock <dir>] [--write] [--blocks-only]   # C28 baseline files and C23 doc blocks
-       paddock-conformance window-weight [kind...] [--root <dir>] [--stats <file>] [--max <kB>] [--record]   # C29, rule 35
+       paddock-conformance window-weight [kind...] [--root <dir>] [--stats <file>] [--max <kB>] [--record]   # rule 35
        paddock-conformance list [--json]       # --json: id, scope, mode, needs, file of every check (ADR 0060)
        paddock-conformance commands --json      # the subcommands, for docs that name them (ADR 0060)`;
 
 /** The subcommands, in one place: USAGE, `commands --json` and the docs check read this list. */
-export const COMMANDS = ['list', 'commands', 'window-weight', 'sync', 'commit-lint', 'run'];
+export const COMMANDS = ['list', 'commands', 'window-weight', 'sync', 'commit-lint'];
 
 const CHECKS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), 'checks');
 
@@ -41,7 +39,7 @@ export function listChecks(registry = checks, dir = CHECKS_DIR) {
   }));
 }
 
-const VALUE = new Set(['stats', 'max', 'app', 'root', 'only', 'out', 'summary', 'bundle', 'artifacts', 'paddock', 'version', 'preflight', 'api', 'repo', 'allow-home', 'strict', 'scope', 'rules-md']);
+const VALUE = new Set(['stats', 'max', 'app', 'root', 'only', 'out', 'summary', 'bundle', 'artifacts', 'paddock', 'version', 'preflight', 'api', 'repo', 'strict', 'scope', 'rules-md']);
 
 /** Parses `--key value` / `--flag` into an object; throws on anything unknown. */
 export function parseArgs(argv) {
@@ -50,7 +48,7 @@ export function parseArgs(argv) {
     const a = argv[i];
     if (!a.startsWith('--')) throw new Error(`unexpected argument: ${a}`);
     const k = a.slice(2);
-    if (k === 'json' || k === 'keep' || k === 'write' || k === 'blocks-only' || k === 'record' || k === 'no-graph') o[k] = true;
+    if (k === 'json' || k === 'write' || k === 'blocks-only' || k === 'record' || k === 'no-graph') o[k] = true;
     else if (VALUE.has(k)) {
       if (argv[i + 1] === undefined) throw new Error(`--${k} needs a value`);
       o[k] = argv[++i];
@@ -107,15 +105,6 @@ export async function main(argv, { log = console.log, err = console.error, env =
       return syncMain(o, { log, err });
     }
     if (cmd === 'commit-lint') return commitLintMain(rest, process.cwd(), err);
-    if (cmd === 'run') {
-      const dash = rest.indexOf('--');
-      if (dash < 0 || dash === rest.length - 1) throw new Error('run needs a command after --');
-      const o = parseArgs(rest.slice(0, dash));
-      const [c, ...a] = rest.slice(dash + 1);
-      const r = await runHermetic(c, a, { allowHome: (o['allow-home'] ?? '').split(',').filter(Boolean), keep: !!o.keep });
-      for (const f of r.findings) err(`::error::${f.check} ${f.message} Fix: ${f.fix}`);
-      return r.status !== 0 ? r.status : r.findings.length ? 1 : 0;
-    }
     const o = parseArgs(argv);
     const sparse = fullCheckoutProblem(resolve(o.root ?? '.'), env);
     if (sparse) {

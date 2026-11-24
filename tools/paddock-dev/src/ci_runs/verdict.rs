@@ -8,8 +8,8 @@
 //!   tests) and what a push to main does for the same tree (`need`), both written by the planner, and [`Declared::complete`] compares
 //!   them: `ran` covers `need`, the run is not a rerun of failures, and `need` is not empty. No workflow decides "complete" with
 //!   a line of its own, so a smaller scope (a skipped or reused run that ran nothing, a `since_run` dispatch, a base dispatch, a
-//!   full run without WebKit, an app-only dispatch) is never written as complete (the schedule-skipped and rerun-only
-//!   runs counted green on 2026-11-12; the WebKit hole of the D4 reuse). A line of another workflow, two lines, an unreadable one
+//!   an app-only dispatch) is never written as complete (the schedule-skipped and rerun-only runs counted green on 2026-11-12;
+//!   the WebKit hole of the D4 reuse, before a push to main's scope dropped WebKit on 2026-11-24). A line of another workflow, two lines, an unreadable one
 //!   or another version is not measured, never a pass. "Ran means ran" (as GitHub's required checks: a skipped one blocks): every job
 //!   the run declared has a job of its name in the run, and none was skipped or cancelled ([`run_scope::check_ran`]: a skipped or
 //!   cancelled one makes it partial, a missing one not measured; a failed one is the run's own red).
@@ -232,6 +232,17 @@ fn read_mode_plain(client: &mut Client, run: &RunInfo, scope_decisive: bool) -> 
         }
         None => None,
     };
+    // The active apps (crate::active_apps): a run that left apps out says which, so its verdict never reads as theirs.
+    if let Some(Ok(d)) = run_scope::read(&log)
+        && !d.inactive.is_empty()
+    {
+        eprintln!(
+            "::notice::run {}: its declared scope leaves out the inactive apps {} ({}): complete for the rest, never for them",
+            run.id,
+            d.inactive.iter().cloned().collect::<Vec<_>>().join(", "),
+            crate::active_apps::FILE
+        );
+    }
     let landing = landing_of(run, &jobs, &log);
     if scope_decisive {
         return ModeRead {
@@ -249,7 +260,7 @@ fn read_mode_plain(client: &mut Client, run: &RunInfo, scope_decisive: bool) -> 
     );
     // A declared job that did not run is a failure of the run, whichever line says "complete": the check holds on both bases, so the
     // report-only phase cannot count a run that skipped what it declared as complete (ER-41; the first green scope run is recorded
-    // when CI resumes, docs/ci-scope-first-runs.toml).
+    // per producer in docs/ci-scope-first-runs.toml).
     let mode = match (legacy_mode(&log), &scope) {
         (Mode::Full, Mode::Incomplete(why)) => Mode::Incomplete(why.clone()),
         (m, _) => m,
@@ -308,6 +319,47 @@ pub fn verdict_excluding(client: &mut Client, workflow: &str, sha: &str, exclude
 pub fn verdict_with(client: &mut Client, workflow: &str, sha: &str, exclude: Option<u64>, scope: bool) -> Verdict {
     let root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     verdict_in(client, workflow, sha, exclude, scope, &root)
+}
+
+/// A verdict for an app (`ci verdict --app`): a green verdict stands only when its deciding run planned `app`; a run whose declared
+/// scope lists the app as inactive (docs/ci-active-apps.toml) is red for it, with the next step. A run whose plan log cannot be read
+/// is not measured. Any other verdict is returned as it is.
+pub fn for_app(client: &mut Client, v: Verdict, app: &str) -> Verdict {
+    let run = match &v {
+        Verdict::Green { run } | Verdict::GreenWithFixItems { run, .. } => *run,
+        _ => return v,
+    };
+    match plan_scope_of(client, run) {
+        Err(why) => Verdict::NotMeasured(format!("run {run}: whether it planned {app} cannot be read ({why})")),
+        Ok(None) => v,
+        Ok(Some(d)) => match d.covers_app(app) {
+            Ok(()) => v,
+            Err(why) => Verdict::Red {
+                run: Some(run),
+                reason: format!(
+                    "run {run} is green but not {app}'s: {why}. Next: make {app} active ({}) and land it, or tag after a nightly that ran it",
+                    crate::active_apps::FILE
+                ),
+            },
+        },
+    }
+}
+
+/// The declared scope of a run's plan job: `Ok(None)` when it logged no scope line (an older run: every app was planned then).
+fn plan_scope_of(client: &mut Client, run: u64) -> Result<Option<run_scope::Declared>, String> {
+    let jobs = client
+        .timed_jobs(run)
+        .map_err(|e| format!("the jobs could not be listed: {e}"))?
+        .ok_or("the server has no job list for the run")?;
+    let plan = jobs
+        .iter()
+        .find(|j| j.name == "plan" || j.name.starts_with("plan "))
+        .ok_or("the run has no plan job")?;
+    let log = client
+        .log(plan.id)
+        .map_err(|e| format!("the plan job's log could not be read: {e}"))?
+        .ok_or("the plan job has no log")?;
+    run_scope::read(&log).transpose()
 }
 
 /// [`verdict`] for a tag (`ci verdict --tag`): a run counts only when it tested every package on every OS, never an OS-scoped one.
@@ -604,7 +656,7 @@ fn last_full(
 }
 
 /// The verdict as the shared outcome (ADR 0089 amendment, WP-T4): a green full run is [`Outcome::KnownCommit`] with the run as its
-/// evidence, made only by `Evidence::adopt` after `live` has re-read the commit (the one caller of `Evidence::ci_run`, held by C124);
+/// evidence, made only by `Evidence::adopt` after `live` has re-read the commit (the one caller of `Evidence::ci_run`);
 /// red is failing findings; anything else is not measured. The exit comes from this outcome, never from the enum.
 pub fn outcome(v: &Verdict, workflow: &str, sha: &str, live: &dyn LiveRepo) -> Outcome {
     let tool = || ToolVersion::new(concat!("paddock-dev ci verdict ", env!("CARGO_PKG_VERSION")));
@@ -787,6 +839,32 @@ mod tests {
         // Positive control: the same run with a full every-OS scope is accepted for a tag.
         let mut full = server(vec![main_push(5, "success")], &[(5, 50, Some(run_scope::TEST_COMPLETE))]);
         assert_eq!(ask_tag(&mut full), Verdict::Green { run: 5 });
+    }
+
+    #[test]
+    fn a_tag_of_an_app_refuses_a_green_run_that_left_the_app_inactive_and_accepts_one_that_planned_it() {
+        let ask_app = |f: &mut Fake, app: &str| {
+            let mut c = Client::new(f, "https://gitea.invalid", "decryp7/paddock", "t");
+            c.backoff_ms = 0;
+            let v = verdict_for(&mut c, "ci.yml", SHA, None, true, true);
+            for_app(&mut c, v, app)
+        };
+        // The foundation-only line: complete, with pitwall inactive (docs/ci-active-apps.toml).
+        let line = run_scope::TEST_COMPLETE.replacen("\"need_whole\":true}", "\"need_whole\":true,\"inactive\":[\"pitwall\"]}", 1);
+        assert!(line.contains("inactive"), "the control line names pitwall: {line}");
+        let mut f = server(vec![main_push(5, "success")], &[(5, 50, Some(line.as_str()))]);
+        assert_eq!(ask(&mut f), Verdict::Green { run: 5 }, "the run is complete for the foundation");
+        let mut f = server(vec![main_push(5, "success")], &[(5, 50, Some(line.as_str()))]);
+        let refused = ask_app(&mut f, "pitwall");
+        assert!(
+            matches!(&refused, Verdict::Red { run: Some(5), reason } if reason.contains("pitwall was inactive") && reason.contains("make pitwall active")),
+            "{refused:?}"
+        );
+        // Positive controls: an app the run planned is accepted, and so is any app on a run that planned every app (no list).
+        let mut f = server(vec![main_push(5, "success")], &[(5, 50, Some(line.as_str()))]);
+        assert_eq!(ask_app(&mut f, "dyno"), Verdict::Green { run: 5 });
+        let mut f = server(vec![main_push(5, "success")], &[(5, 50, Some(run_scope::TEST_COMPLETE))]);
+        assert_eq!(ask_app(&mut f, "pitwall"), Verdict::Green { run: 5 });
     }
 
     #[test]

@@ -35,6 +35,6 @@ pub use error::SlotError;
 pub use fs::{FsGuard, FsLocks, OwnerInfo};
 pub use hold::{
     ACQUIRE_GRACE, Announcement, HoldEnd, HoldProbe, ReleaseLocks, acquire_within, fresh_token,
-    hold, hold_until, hold_with, release, wait_free,
+    hold, hold_until, hold_while, hold_with, release, wait_free,
 };
 pub use slot::{SlotId, SlotLocks, SlotState, acquire_first, slot_states, with_idle};

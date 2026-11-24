@@ -412,7 +412,7 @@ pub fn settings_of(a: &LoadArgs, cores: usize) -> Result<Settings, CliError> {
     Ok(s)
 }
 
-/// The folders whose free space is checked: the `--disk` flags, else the derived dev-targets folder (never a disk named here, C125).
+/// The folders whose free space is checked: the `--disk` flags, else the derived dev-targets folder (never a disk named here, rule 40).
 pub fn disks_of(a: &LoadArgs, dev_targets: &dyn Fn() -> Result<std::path::PathBuf, CliError>) -> Result<Vec<String>, CliError> {
     if !a.disks.is_empty() {
         return Ok(a.disks.clone());

@@ -10,6 +10,7 @@ authors = ["decryp7"]
 publish = false
 
 [lib]
+doctest = false # doctests are off (crates/README.md, "Doctests")
 name = "pitwall_app_lib"
 # rlib only: the desktop binary links the rlib. Tauri's template also builds a staticlib (iOS) and a cdylib (Android) on
 # every build, which cost 25-38% of an incremental debug rebuild (docs/research/2026-10-29-link-time.md). Add them back

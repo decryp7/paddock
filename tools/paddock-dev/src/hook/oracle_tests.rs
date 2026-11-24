@@ -205,7 +205,8 @@ fn the_rules_are_registered_in_this_order() {
             "no-force-push",
             "no-unbounded-wait",
             "no-unscoped-cleanup",
-            "no-kill-by-name"
+            "no-kill-by-name",
+            "no-plain-cargo-test"
         ]
     );
 }

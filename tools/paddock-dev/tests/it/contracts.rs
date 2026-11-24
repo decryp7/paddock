@@ -662,7 +662,7 @@ fn the_checks_the_rust_host_runs_in_ci_are_in_the_plan_for_every_input_they_read
     );
     let args = paddock_dev::ci_run::contract::conformance_rust_args_at(&root).unwrap();
     let ids: Vec<&str> = args[args.iter().position(|a| a == "--only").unwrap() + 1].split(',').collect();
-    assert!(ids.len() >= 12, "the 12 checks of pair P3: {ids:?}");
+    assert!(ids.len() >= 8, "the Rust-only checks (pair P3 and later): {ids:?}");
     // An empty graph: no `cargo metadata` (this test runs in the conformance job), and the conformance job does not depend on it.
     let graph = paddock_dev::plan::RepoGraph {
         cargo: paddock_repo_graph::Graph::new(),
@@ -691,5 +691,117 @@ fn the_checks_the_rust_host_runs_in_ci_are_in_the_plan_for_every_input_they_read
             plan["conformance"], true,
             "a change to {path} (read by a check of the Rust host) must run the conformance job"
         );
+    }
+}
+
+/// The active apps (docs/ci-active-apps.toml, tools/paddock-dev/src/active_apps.rs) read through the one accessor and name only apps
+/// that have a CI contract; the how-to is documented.
+#[test]
+fn the_active_apps_name_only_apps_with_a_contract_and_are_documented() {
+    let set = paddock_dev::active_apps::ActiveApps::parse(&read(paddock_dev::active_apps::FILE)).unwrap_or_else(|e| panic!("{e}"));
+    let apps: BTreeSet<String> = configs().into_iter().map(|(a, _)| a).collect();
+    assert!(apps.len() >= 5, "a positive control: the apps were listed ({apps:?})");
+    set.check_known(&apps).unwrap_or_else(|e| panic!("{e}"));
+    // Positive control: a name that is not an app is refused.
+    let mut typo = set.clone();
+    typo.active.insert("not-an-app".into());
+    assert!(typo.check_known(&apps).is_err());
+    assert!(
+        read("docs/ci-schedules.md").contains("## Active apps"),
+        "docs/ci-schedules.md documents the set"
+    );
+}
+
+/// Doctests are off (user 2026-11-24; crates/README.md, "Doctests"): no Rust doc comment holds a runnable example, so one does not come
+/// back silently. In the conformance tests (`contracts::`), so it runs on every push and in CI's conformance job whatever changed (ER-41).
+mod doc_examples {
+    use std::path::Path;
+
+    fn fixture(path: &str) -> bool {
+        path.starts_with("tools/paddock-dev/tests/") || path.contains("/fixtures/") || path.contains("/vendor/")
+    }
+
+    /// The fence info strings rustdoc runs or compiles: empty, `rust`, and its test attributes. `text`, `ignore` and any other language
+    /// are not code rustdoc touches.
+    fn runnable(info: &str) -> bool {
+        let words: Vec<&str> = info.split([',', ' ', '\t']).filter(|w| !w.is_empty()).collect();
+        if words.iter().any(|w| *w == "ignore" || *w == "text") {
+            return false;
+        }
+        words.iter().all(|w| {
+            matches!(
+                *w,
+                "rust" | "no_run" | "should_panic" | "compile_fail" | "test_harness" | "standalone_crate"
+            ) || w.starts_with("edition")
+                || (w.len() == 5 && w.starts_with('E') && w[1..].bytes().all(|b| b.is_ascii_digit()))
+        })
+    }
+
+    /// The 1-based lines of the runnable examples in the doc comments (`///`, `//!`) of one Rust source.
+    fn runnable_examples(text: &str) -> Vec<usize> {
+        let mut out = Vec::new();
+        let mut open: Option<String> = None;
+        for (i, line) in text.lines().enumerate() {
+            let t = line.trim_start();
+            let Some(doc) = t.strip_prefix("///").or_else(|| t.strip_prefix("//!")) else {
+                open = None;
+                continue;
+            };
+            let doc = doc.trim_start();
+            let fence: String = doc.chars().take_while(|c| *c == '`' || *c == '~').collect();
+            if fence.len() < 3 || fence.chars().any(|c| c != fence.chars().next().unwrap_or('`')) {
+                continue;
+            }
+            match &open {
+                None => {
+                    if runnable(doc[fence.len()..].trim()) {
+                        out.push(i + 1);
+                    }
+                    open = Some(fence);
+                }
+                Some(o) if fence.starts_with(o.as_str()) && doc[fence.len()..].trim().is_empty() => open = None,
+                Some(_) => {}
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn no_rust_doc_comment_holds_a_runnable_example() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let ls = paddock_proc::command("git")
+            .current_dir(&root)
+            .args(["ls-files", "-z", "--", "*.rs"])
+            .output()
+            .unwrap();
+        assert!(ls.status.success(), "git ls-files failed: {}", String::from_utf8_lossy(&ls.stderr));
+        let files: Vec<String> = String::from_utf8_lossy(&ls.stdout)
+            .split('\0')
+            .filter(|f| !f.is_empty())
+            .map(String::from)
+            .collect();
+        assert!(files.len() > 500, "too few Rust files tracked: {}", files.len());
+        let mut found = Vec::new();
+        for f in files.iter().filter(|f| !fixture(f)) {
+            let Ok(text) = std::fs::read_to_string(root.join(f)) else {
+                continue;
+            };
+            found.extend(runnable_examples(&text).into_iter().map(|l| format!("{f}:{l}")));
+        }
+        assert!(
+            found.is_empty(),
+            "runnable doc examples (doctests are off: make them ```text, crates/README.md \"Doctests\"):\n{}",
+            found.join("\n")
+        );
+    }
+
+    /// Positive control: a bare, a `rust`, a `no_run` and a `compile_fail` example are found; `text`, `ignore`, another language and a
+    /// fence in a plain comment are not.
+    #[test]
+    fn a_runnable_example_is_found_and_a_text_block_is_not() {
+        let text = "/// ```\n/// let a = 1;\n/// ```\n//! ```rust\n//! x\n//! ```\n/// ```no_run\n/// ```\n/// ```compile_fail,E0080\n/// ```\n\
+                    /// ```text\n/// ```\n/// ```ignore\n/// ```\n/// ```toml\n/// ```\n// ```\n// ```\n";
+        assert_eq!(runnable_examples(text), [1, 4, 7, 9]);
+        assert!(runnable_examples("/// ```text\n/// ```\n").is_empty());
     }
 }

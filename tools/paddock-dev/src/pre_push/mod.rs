@@ -3,7 +3,7 @@
 //!
 //! - [`gates`]: the plan and the changed files become gates (pure).
 //! - the conformance command comes from `conformance/paddock.ci.json` ([`crate::ci_run::contract::conformance_args_at`]): the one copy
-//!   of the check list, which CI's conformance and train-gates jobs run through `./dev ci run conformance paddock` (ADR 0038 §1).
+//!   of the check list, which CI's conformance job runs through `./dev ci run conformance paddock` (ADR 0038 §1).
 //! - [`exec`]: running them, with a fake for tests.
 //!
 //! What is checked. With `--refs-from-stdin` (the hook) exactly the commit being pushed: it is checked out in a throw-away worktree
@@ -13,6 +13,9 @@
 //! and every gate runs there, so a dirty tree or another checked-out commit cannot change the answer. Without it, the working tree
 //! as it is (a person's run). Only workspaces that hold a changed file themselves get Clippy and format; the ones reached through
 //! dependencies are CI's (ER-9 overlap), and the Linux Clippy in the CI image (native architecture) runs for every touched workspace.
+//! Only the foundation and the active apps ([`crate::active_apps`], `docs/ci-active-apps.toml`) get their build checks: an inactive
+//! app's rows are shown as `inactive (docs/ci-active-apps.toml)` and counted apart, never as passed; the generators that write into
+//! its folder (its lockfile, Dyno's wire fixtures) still run (ER-40), and `--all-apps` runs every app's rows.
 //!
 //! One table at the end: what ran, what was skipped and why, what could not be measured (ER-33: never a pass), and for each
 //! failure one line with its cause and the next step. Exit 0 all passed, accepted or skipped; 5 something failed; 6 only "not
@@ -38,7 +41,6 @@ pub mod heavy_tool;
 pub mod kept;
 pub mod known;
 pub mod linux_inputs;
-pub mod members;
 pub mod outcome;
 pub mod warm;
 
@@ -72,7 +74,7 @@ pub struct PrePushArgs {
     /// The remote being pushed to (git's first pre-push argument; the hook passes it): the only remote evidence and bases are read from.
     #[arg(long)]
     pub remote: Option<String>,
-    /// Only the gates named by these selectors, each a whole row name (`doctest crates`) or a row's first word (`fmt,clippy`); the hook always runs them all. A selector that matches no row is an error that lists the valid row names.
+    /// Only the gates named by these selectors, each a whole row name (`clippy crates`) or a row's first word (`fmt,clippy`); the hook always runs them all. A selector that matches no row is an error that lists the valid row names.
     #[arg(long, value_delimiter = ',')]
     pub only: Vec<String>,
     /// Print the gates and their commands; run nothing.
@@ -89,6 +91,12 @@ pub struct PrePushArgs {
     /// on the merge commit, not by a developer's push, whose time budget it would grow.
     #[arg(long)]
     pub member_gate: bool,
+    /// Run every app's rows, whatever `docs/ci-active-apps.toml` says: for a release, or for the person bringing an app back. Without
+    /// it an inactive app's own build checks (format, Clippy, the Windows and Linux lints, Pitwall's scripts and deny) are
+    /// not run and are shown as `inactive (docs/ci-active-apps.toml)`, never as passed; the foundation's rows and the generators
+    /// (lockfiles, Dyno's wire fixtures) always run. It also turns off the known-commit shortcut.
+    #[arg(long)]
+    pub all_apps: bool,
     /// Let these not-measured rows (their full ids, for example `clippy-windows apps/dyno`) pass the push; each use is logged.
     /// Also read from PADDOCK_ACCEPT_NOT_MEASURED (comma separated).
     #[arg(long, value_delimiter = ',')]
@@ -473,19 +481,22 @@ fn command_in(
     };
     let queue_stall = queue_stall(&env);
     let history = GitHistory::new(&work, GIT_TIMEOUT);
+    // `explain`: the conformance-tests row reads why the change reaches conformance (plan::reaches_conformance).
     let req = Request {
         files: change.files.clone(),
         all: false,
-        explain: false,
+        explain: true,
         root: None,
         base: None,
         head: "HEAD".into(),
     };
-    let (_, plan) = plan_with_graph(&work, &history, &req).map_err(|e| {
+    let (graph, plan) = plan_with_graph(&work, &history, &req).map_err(|e| {
         CliError::failure(format!("The planner could not plan this change: {e}."))
             .with_hint("Run `./dev plan --files <a,b>` to see the same error.")
     })?;
     let mut facts = read_facts(&work, &plan, &env, given.unwrap_or(&real));
+    facts.inactive = inactive_apps(&work, &graph.apps, args.all_apps);
+    notes.extend(inactive_note(&facts.inactive, args.all_apps));
     // A dry run lists and runs nothing, so it needs no install; a real run in a throw-away tree on Windows has no node_modules.
     facts.conformance_env = if args.dry_run {
         None
@@ -494,12 +505,12 @@ fn command_in(
     };
     facts.left_out = gates::linux_candidates(&plan, &change)
         .into_iter()
+        .filter(|ws| gates::inactive_app(&facts, ws).is_none())
         .map(|ws| {
             let l = linux_inputs::left_out(&work, &ws);
             (ws, l)
         })
         .collect();
-    facts.crates_members = Some(members::read_members(&work, "crates"));
     facts.member_gate = args.member_gate;
     facts.kept_targets = kept_targets;
     let mut planned = gates::plan_gates(&plan, &change, &facts);
@@ -1211,6 +1222,9 @@ pub fn render_timed(head: &str, rows: &[(String, Row)], timings: &std::collectio
     };
     let mut text = format!("{head}\n");
     let (mut ok, mut fail, mut skip, mut unmeasured, mut broken, mut accepted) = (0, 0, 0, 0, 0, 0);
+    // An inactive app's rows (gates::inactive_reason) are counted apart from passes and from other skips: they checked nothing.
+    let inactive_label = gates::inactive_label();
+    let mut inactive = 0;
     let mut data = Vec::new();
     let mut ended: Vec<String> = Vec::new();
     let (mut unmeasured_ids, mut failed_ids): (Vec<&str>, Vec<&str>) = (Vec::new(), Vec::new());
@@ -1220,6 +1234,10 @@ pub fn render_timed(head: &str, rows: &[(String, Row)], timings: &std::collectio
             Kind::Passed => {
                 ok += 1;
                 (format!("ok            {id:<34} {}", both(id, v.secs)), "passed")
+            }
+            Kind::Skipped if reason.starts_with(&inactive_label) => {
+                inactive += 1;
+                (format!("inactive      {id:<34} {reason}"), "inactive")
             }
             Kind::Skipped => {
                 skip += 1;
@@ -1283,7 +1301,15 @@ pub fn render_timed(head: &str, rows: &[(String, Row)], timings: &std::collectio
         text.push_str(&format!("  - {what}: {why}\n"));
     }
     text.push_str(&format!(
-        "pre-push: {ok} passed, {fail} failed, {unmeasured} not measured, {accepted} accepted, {broken} broken, {skip} skipped. {}",
+        "pre-push: {ok} passed, {fail} failed, {unmeasured} not measured, {accepted} accepted, {broken} broken, {skip} skipped{}. {}",
+        if inactive > 0 {
+            format!(
+                ", {inactive} inactive (not checked: {}; the nightly checks them)",
+                crate::active_apps::FILE
+            )
+        } else {
+            String::new()
+        },
         if fail + unmeasured + broken > 0 {
             "Not proven: do not push.".to_string()
         } else if accepted > 0 {
@@ -1311,7 +1337,7 @@ pub fn render_timed(head: &str, rows: &[(String, Row)], timings: &std::collectio
     };
     let not_run: Vec<&str> = gates::NOT_RUN.iter().map(|(w, _)| *w).collect();
     Report::new(
-        json!({ "gates": data, "passed": ok, "failed": fail, "not_measured": unmeasured, "accepted": accepted, "broken": broken, "skipped": skip, "ci_only": not_run }),
+        json!({ "gates": data, "passed": ok, "failed": fail, "not_measured": unmeasured, "accepted": accepted, "broken": broken, "skipped": skip, "inactive": inactive, "ci_only": not_run }),
         text,
     )
     .with_exit(exit)
@@ -1455,12 +1481,48 @@ fn read_facts(root: &Path, plan: &Value, env: &HashMap<String, String>, ex: &dyn
         windows_clippy: windows,
         ci_version: Some(version),
         left_out: Default::default(),
-        crates_members: None,
         member_gate: false,
         kept_targets: None,
         pitwall_tests: tests,
         dev_exe: ex.dev_program(),
         target_dir: env.get("CARGO_TARGET_DIR").cloned(),
+        inactive: Ok(Default::default()),
+    }
+}
+
+/// The apps whose own rows this run leaves out: the apps of the tree (`apps/<app>/paddock.ci.json`) that the checked tree's
+/// `docs/ci-active-apps.toml` does not name, read through its one accessor ([`crate::active_apps`], ER-42); none with `--all-apps`.
+/// A set that cannot be read, or that names an app the tree does not have, is an error (the `active-apps` row is broken), never "no
+/// app" and never "every app off".
+pub fn inactive_apps(
+    root: &Path,
+    apps: &std::collections::BTreeSet<String>,
+    all_apps: bool,
+) -> Result<std::collections::BTreeSet<String>, String> {
+    if all_apps {
+        return Ok(Default::default());
+    }
+    let set = crate::active_apps::ActiveApps::load(root)?;
+    set.check_known(apps)?;
+    Ok(crate::active_apps::inactive(&set, apps, false, &[]))
+}
+
+/// The header line that names the apps left out (or says `--all-apps` runs them all).
+pub fn inactive_note(inactive: &Result<std::collections::BTreeSet<String>, String>, all_apps: bool) -> Option<String> {
+    match inactive {
+        _ if all_apps => Some(format!(
+            "--all-apps: every app's rows run, whatever {} says",
+            crate::active_apps::FILE
+        )),
+        Ok(off) if !off.is_empty() => Some(format!(
+            "{}: {}; their own build checks are not run here and are not passes (the nightly runs them; `--all-apps` runs them here)",
+            gates::inactive_label(),
+            off.iter().cloned().collect::<Vec<_>>().join(", ")
+        )),
+        Ok(_) => None,
+        Err(why) => Some(format!(
+            "the active apps cannot be read ({why}): every app's rows run, and the active-apps row is broken"
+        )),
     }
 }
 

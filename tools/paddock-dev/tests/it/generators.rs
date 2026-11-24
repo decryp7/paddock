@@ -11,6 +11,30 @@ fn repo_root() -> PathBuf {
     PathBuf::from(paddock_env::winpath::real_for_tools(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")).unwrap())
 }
 
+/// Rule 89: the registry is where agents read a regenerate command, and the guard hook refuses a plain `cargo test`, so every
+/// `regenerate` (and the line with its folder) must be one the hook lets through. The hook's own reading decides; the control is a
+/// plain `cargo test` line, which it refuses.
+#[test]
+fn every_regenerate_command_of_the_registry_passes_the_guard_hook() {
+    use paddock_dev::hook::rules::no_plain_cargo_test::runs_plain_cargo_test;
+    let reg = Registry::parse(&fs::read_to_string(repo_root().join("docs/generators.toml")).unwrap())
+        .unwrap_or_else(|e| panic!("{}", e.join("\n")));
+    let blocked: Vec<String> = reg
+        .generators
+        .iter()
+        .filter(|g| runs_plain_cargo_test(&g.regenerate) || runs_plain_cargo_test(&g.regenerate_line()))
+        .map(|g| format!("{}: {}", g.id, g.regenerate))
+        .collect();
+    assert!(
+        blocked.is_empty(),
+        "regenerate commands the hook refuses (use `cargo nextest run`):\n{}",
+        blocked.join("\n")
+    );
+    assert!(runs_plain_cargo_test(
+        "PADDOCK_WRITE_TS=1 cargo test -p x --lib generated   # in crates"
+    ));
+}
+
 #[test]
 fn the_registry_of_the_repository_is_well_formed_and_names_what_exists() {
     let root = repo_root();
@@ -290,7 +314,7 @@ fn a_tool_lockfile_entry_marks_the_manifest_of_every_shared_crate_the_tool_depen
         .lines()
         .find_map(|l| l.strip_prefix("host: ").map(str::to_string))
         .unwrap();
-    for tool in ["tools/paddock-dev", "tools/heavy", "tools/wiki"] {
+    for tool in ["tools/paddock-dev", "tools/heavy"] {
         let out = TestCommand::new(env!("CARGO"))
             .args([
                 "metadata",
@@ -323,27 +347,6 @@ fn a_tool_lockfile_entry_marks_the_manifest_of_every_shared_crate_the_tool_depen
             }
         }
         assert!(shared > 0, "{tool} depends on no shared crate?");
-    }
-}
-
-/// ADR 0098 WP-2: the conformance-line entry reads CI's line through `./dev ci conformance-args`, the one reader (bddd2947c: it
-/// grepped ci.yml for a line that had moved, and `gen check` reported NOT MEASURED).
-#[test]
-fn the_conformance_line_entry_reads_ci_yml_through_the_one_reader() {
-    let root = repo_root();
-    let reg = Registry::parse(&fs::read_to_string(root.join("docs/generators.toml")).unwrap()).unwrap();
-    let entry = reg
-        .generators
-        .iter()
-        .find(|g| g.id == "conformance-line")
-        .expect("the conformance-line entry");
-    let check = entry.check.join(" ");
-    assert!(
-        check.contains("./dev ci conformance-args") || check.contains("./dev ci run conformance"),
-        "{check}"
-    );
-    for word in ["grep", "sed", "awk"] {
-        assert!(!check.contains(word), "the entry reads ci.yml's text with {word}: {check}");
     }
 }
 

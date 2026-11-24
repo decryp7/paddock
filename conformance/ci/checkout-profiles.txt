@@ -44,13 +44,12 @@ exclude bundle apps/*/docs/images each app's diagrams and posters
 exclude bundle apps/*/docs/design each app's design sheets
 
 mention conformance/src/ C24 and its context read the screenshot folders in the conformance job (Linux, full checkout)
-mention conformance/c125-allow.json C125's allow list names a design mock (apps/pitcrew/docs/design) by path; C125 runs in the conformance job (Linux, full checkout) and locally, never on a lean clone
 mention docs/generators.toml the icons entry names docs/images paths its check reads (the icons generator's own outputs; its check needs a full checkout and runs locally, not on a lean clone)
 mention tools/paddock-dev/src/check/config.rs the conformance run's default `screenshotDirs`, the same default as conformance/src/context.mjs (a string in the Rust host, read from no folder; the host runs in the conformance job on Linux)
 mention paddock.conformance.json names the screenshot folder C24 checks (conformance job, Linux)
 mention docs/repo-graph.toml the repository model's declared inputs (ADR 0117 §3) name docs/design as a glob matched against the tracked list (`git ls-files`), never read from the working tree
 mention .gitea/workflows/dyno-screenshots.yml its trigger paths and its check read apps/dyno/docs/screenshots from a full actions/checkout on the Mac runner, never a lean clone
-mention icons/tools/ the icons job (Linux) and the icon install scripts, run by hand
+mention icons/tools/ the icons steps of the ui job (Linux) and the icon install scripts, run by hand
 mention ui/ the shared UI's e2e specs and config run on Linux (the ui and e2e jobs), where they write the folders
 mention apps/debrief/app/scripts/screenshots/ the screenshot capture, run by hand
 mention apps/dyno/app/playwright.config.ts names the folder the screenshots project writes (SCREENSHOTS=1, by hand)

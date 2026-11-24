@@ -16,6 +16,7 @@ publish = false
 default-run = "paddock-workbench-demo"
 
 [lib]
+doctest = false # doctests are off (crates/README.md, "Doctests")
 name = "paddock_workbench_demo"
 
 [[bin]]

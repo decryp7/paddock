@@ -4,6 +4,28 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### Tests: doctests are off (user, 2026-11-24)
+- Every library target has `[lib] doctest = false` and every runnable doc example is now a ```` ```text ```` block; no `cargo test --doc`
+  runs in the push or member gate (a `doctests` row says so, a skip, never a pass), in ci.yml's crate job, the app-gates action,
+  debrief.yml, publish.yml or the demo release workflows. They stay off after v1 too: re-enable them for a crate only when it is
+  published for others, or when its docs become a real user guide (crates/README.md, "Doctests"). `doctests_off` (member audit) and
+  `contracts::doc_examples` (conformance tests) keep it so.
+
+### CI: the push and member gates check the foundation plus the active apps (user decision 2026-11-24)
+- `./dev check --pre-push` and the member gate read `docs/ci-active-apps.toml` through `active_apps`: an inactive app's own build checks
+  (fmt, Clippy, the Windows and Linux lints, Pitwall's scripts and deny) are shown as `inactive (docs/ci-active-apps.toml)`, counted apart,
+  never as passed; the foundation's rows and the generators (lockfiles, Dyno's wire fixtures) always run. `--all-apps` runs every app's rows.
+
+### CI: the active apps; train and branch CI run the foundation only (user decision 2026-11-24: "Focus on foundation first then slowly turn the products on one by one")
+- `docs/ci-active-apps.toml` (`active`, read only through `tools/paddock-dev/src/active_apps.rs`) names the apps train and branch CI plan
+  beside the foundation; it starts empty (`next`: Dyno, Pitwall, Debrief, Pitcrew). `./dev plan --ci` dispatches no job of an inactive app,
+  names them (`::notice::inactive: ...`, the job summary, `"inactive"` in the `plan scope:` line, which leaves them out of `ran` and
+  `need`), and plans an app made active since the run's base in full. The nightly ignores the set. `--app` answers `false` and
+  `inactive=true` for an inactive app (debrief.yml, the release workflows, whose verdict then says so as a notice).
+- A tag of an app needs a green run that planned it: `./dev ci verdict --tag --app <app>` (tag.yml passes the app) refuses a run whose
+  scope lists the app as inactive. `active_apps::classify_nightly` sorts a red nightly into train-stopping failures (foundation, active
+  apps) and inactive apps' fix items, for the green-main guard. docs/ci-schedules.md, "Active apps", has the how-to.
+
 ### CI: OS-scoped tests, `hostTests`, conformance C155 (report-only), and `tools-macos` is gone (user decision 2026-11-22: D1 full, D2 "a test runs on an OS only if its code behaves differently there", D3, D4)
 - `hostTests` in a CI contract (`crates/paddock.ci.json`, `apps/<app>/paddock.ci.json`, the new `tools/paddock-dev/paddock.ci.json`) names the
   packages (or, for paddock-dev, the test-name prefixes) that the Windows and macOS legs build and test; `skip` keeps pure modules of a

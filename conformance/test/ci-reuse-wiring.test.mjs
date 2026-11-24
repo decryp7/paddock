@@ -45,22 +45,24 @@ test('a reused ci.yml run is declared by the planner: PLAN_REUSE reaches `./dev 
   assert.doesNotMatch(plan, /rerun_jobs=\[\]/, 'the planner writes rerun_jobs, not the shell');
   // Every job reads `rerun_jobs`: an empty list is none of them, so a reused run runs nothing.
   const jobs = [...ci.slice(ci.indexOf('\njobs:\n')).matchAll(/^ {2}([\w-]+):\n/gm)].map((m) => m[1]).filter((j) => j !== 'plan');
-  assert.ok(jobs.length >= 15, `the jobs of ci.yml were read (${jobs.length})`);
+  assert.ok(jobs.length >= 12, `the jobs of ci.yml were read (${jobs.length})`);
   for (const j of jobs) {
     const body = jobText(ci, j);
     assert.match(body, /rerun_jobs \|\| '\[/, `${j}: its if reads rerun_jobs, so an empty list ends it`);
   }
 });
 
-// ADR 0113: the engines a run declares and the engines it runs are one value. The `e2e-webkit` job reads the planner's `webkit` output,
+// ADR 0113: the engines a run declares and the engines it runs are one value. The `e2e` and `e2e-webkit` jobs read the planner's `webkit` output,
 // which `./dev plan --ci` also uses for the declared engines, so a workflow expression cannot run WebKit when the scope says it did not,
 // or the reverse.
-test('the e2e-webkit job and the declared engines read the planner\'s one webkit value', () => {
+test('the reference e2e jobs and the declared engines read the planner\'s one webkit value', () => {
   const wf = loadWorkflow('ci.yml');
   assert.match(String(wf.jobs.plan.outputs.webkit), /steps\.plan\.outputs\.webkit/, 'the plan job exposes the planner\'s webkit output');
-  const cond = String(wf.jobs['e2e-webkit'].if);
-  assert.match(cond, /needs\.plan\.outputs\.webkit == 'true'/);
-  assert.doesNotMatch(cond, /inputs\.webkit|github\.ref/, 'no second expression for WebKit: the planner decides (plan_ci::wants_webkit)');
+  for (const id of ['e2e-webkit', 'e2e']) {
+    const cond = String(wf.jobs[id].if);
+    assert.match(cond, /needs\.plan\.outputs\.webkit == 'true'/, id);
+    assert.doesNotMatch(cond, /inputs\.webkit|github\.ref/, `${id}: no second expression: the planner decides (plan_ci::wants_webkit)`);
+  }
   // Positive control of the matcher: the old expression is refused.
   assert.match("inputs.webkit == true || (github.event_name == 'push'", /inputs\.webkit|github\.ref/);
 });

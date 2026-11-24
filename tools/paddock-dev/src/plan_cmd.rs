@@ -7,7 +7,6 @@
 //! dev plan --all                 everything
 //! dev plan --ci                  CI: picks the base from the event, writes GITHUB_OUTPUT and GITHUB_STEP_SUMMARY
 //! dev plan --ci --app <app>      `true` or `false` on stdout: whether the change reaches that app
-//! dev plan --commit-range        the commit lint's range (or `skip`) from EVENT, REF, BEFORE, SHA, PLAN_BASE, BASE_REF, INPUT_APP
 //! dev plan --since-run <run>     what of a finished CI run reruns: its failed jobs, or only their failed tests (JSON)
 //! options: --explain, --compare (the repository model's answer beside the rule tables', ADR 0117 §8)
 //! ```
@@ -24,8 +23,8 @@
 use crate::host_tests::HostTests;
 use crate::plan::{Request, plan_with_graph};
 use crate::plan_ci::{
-    BaseInput, LintInput, MatrixOpts, USAGE, choose_base, ci_outputs, commit_lint_range, full_os, matrix, member_run, only_app,
-    package_filters, parse_args, summary, wants_webkit, workspace_legs,
+    BaseInput, MatrixOpts, USAGE, choose_base, ci_outputs, full_os, matrix, member_run, only_app, package_filters, parse_args, summary,
+    wants_webkit, workspace_legs,
 };
 use crate::plan_repo::git_text;
 use crate::plan_since::{APP_WORKFLOWS, GiteaRuns, SincePlan};
@@ -134,42 +133,8 @@ pub fn command(args: &[String], root: Option<PathBuf>) -> Result<Report, CliErro
     let root = repo_root(root)?;
     let env = env_var;
     // A sparse checkout makes the planner read a tree with folders missing and answer for it; say so first (local runs only).
-    if !matches!(args.first().map(String::as_str), Some("--commit-range" | "--commit-flags"))
-        && let Some(line) = crate::gates::edge::sparse_problem(&root)
-    {
+    if let Some(line) = crate::gates::edge::sparse_problem(&root) {
         return Err(CliError::failure(line));
-    }
-    if let Some(mode) = args.first().filter(|a| *a == "--commit-range" || *a == "--commit-flags") {
-        let lint = |name: &str| env(name).unwrap_or_default();
-        let (event, reference, before, base, base_ref, app) = (
-            lint("EVENT"),
-            lint("REF"),
-            lint("BEFORE"),
-            lint("PLAN_BASE"),
-            lint("BASE_REF"),
-            lint("INPUT_APP"),
-        );
-        let sha = env("SHA");
-        let known = |c: &str| git_text(&root, &["cat-file", "-e", &format!("{c}^{{commit}}")]).is_some();
-        let range = commit_lint_range(
-            &LintInput {
-                event: &event,
-                reference: &reference,
-                before: &before,
-                sha: sha.as_deref(),
-                base: &base,
-                base_ref: &base_ref,
-                app: &app,
-            },
-            &known,
-        )
-        .map_err(fail)?;
-        let text = if mode == "--commit-flags" {
-            range.map(|r| r.flags.join(" ")).unwrap_or_default()
-        } else {
-            range.map(|r| r.range).unwrap_or_else(|| "skip".into())
-        };
-        return Ok(Report::new(serde_json::json!({ "output": text }), text));
     }
     if args.first().is_some_and(|a| a == "--replay") {
         return replay(
@@ -310,7 +275,7 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
             Some(app) => since_app(root, env, app, run.trim()),
         };
     }
-    let log = |l: &str| eprintln!("{l}");
+    let log = |l: &str| crate::log_text::eline(l);
     let merge_base = |b: &str| git_text(root, &["merge-base", "HEAD", &format!("origin/{b}")]).map(|s| s.trim().to_string());
     let event = env("GITHUB_EVENT_NAME").unwrap_or_default();
     let reference = env("GITHUB_REF").unwrap_or_default();
@@ -381,10 +346,36 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
     {
         return Err(fail(format!("unknown app {p} (no apps/{p}/paddock.ci.json)")));
     }
-    let plan = match &plan_app {
+    // The active apps (crate::active_apps, docs/ci-active-apps.toml): train and branch CI plan the foundation and the apps the set
+    // names; the nightly plans every app. An app's own gates (PLAN_APP) and an app's own workflow on a tag of it run that app.
+    let set = crate::active_apps::ActiveApps::load(root).map_err(fail)?;
+    set.check_known(&graph.apps).map_err(fail)?;
+    let every = crate::active_apps::every_app(env);
+    let mut asked: Vec<&str> = plan_app.as_deref().into_iter().collect();
+    if reference.starts_with("refs/tags/") {
+        asked.extend(app);
+    }
+    let inactive = crate::active_apps::inactive(&set, &graph.apps, every, &asked);
+    let mut plan = match &plan_app {
         Some(p) => only_app(&planned, p),
         None => planned.clone(),
     };
+    if plan_app.is_none()
+        && !every
+        && let Some(b) = req.base.as_deref()
+    {
+        let base_active = crate::active_apps::active_at(&graph.apps, &|p: &str| {
+            paddock_repo_graph::History::file_at(&history, b, p).map_err(|e| e.to_string())
+        })
+        .map_err(fail)?;
+        for a in crate::active_apps::resume(&mut plan, &base_active, &inactive, &graph.apps) {
+            log(&format!(
+                "resumed: {a} is active here and was not at the base {b}; it is planned in full"
+            ));
+        }
+    }
+    crate::active_apps::apply(&mut plan, &inactive);
+    let plan = plan;
     let narrow = (event == "pull_request" && plan_app.is_none())
         || member_run(
             &event,
@@ -432,12 +423,28 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
         None => log(&format!("base: {reason}")),
     }
     log(&planner.line());
+    // A workflow command is read from standard output; with `--app` standard output is the answer, so there it goes to the log (the
+    // app's job summary says it).
+    if let Some(l) = crate::active_apps::line(&inactive) {
+        if app.is_some() {
+            log(&l)
+        } else {
+            crate::log_text::oline(&format!("::notice::{l}"))
+        }
+    }
     log(&serde_json::to_string_pretty(&plan).unwrap_or_default());
     if let Some(app) = app {
         if !graph.apps.contains(app) {
             return Err(fail(format!("unknown app {app} (no apps/{app}/paddock.ci.json)")));
         }
         let runs_it = plan["apps"].as_array().is_some_and(|a| a.iter().any(|x| x == app));
+        let off = inactive.contains(app);
+        if off {
+            log(&format!(
+                "{app}: inactive ({} `active` does not name it): this run runs none of its jobs; the nightly runs them",
+                crate::active_apps::FILE
+            ));
+        }
         let kinds: Vec<&str> = plan["kinds"][app]
             .as_array()
             .map(|k| k.iter().filter_map(Value::as_str).collect())
@@ -448,7 +455,9 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
             format!("{app}: not affected by this change")
         });
         if let Some(path) = env("GITHUB_STEP_SUMMARY") {
-            let verdict = if runs_it {
+            let verdict = if off {
+                "Inactive: nothing runs (docs/ci-active-apps.toml `active` does not name this app; the nightly runs it). Not green."
+            } else if runs_it {
                 "Affected: every job runs."
             } else {
                 "Not affected: nothing to run."
@@ -473,7 +482,7 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
             append(
                 &path,
                 &format!(
-                    "host_packages_macos={}\nhost_filter_macos={}\n",
+                    "host_packages_macos={}\nhost_filter_macos={}\ninactive={off}\n",
                     scope.packages.join(" "),
                     scope.filter
                 ),
@@ -494,7 +503,7 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
     let mut plan = plan;
     plan["filters"] = package_filters(&plan, &graph, narrow);
     plan["webkit"] = serde_json::json!(wants_webkit(env));
-    let mut outputs = ci_outputs(&plan, &legs, if plan_app.is_some() { None } else { base.as_deref() });
+    let mut outputs = ci_outputs(&plan, &legs);
     // OS-scoped tests: the legs of the `crate` and `paddock-dev` jobs with what each runner tests (`hostTests` of their contracts).
     let os_runners = os_legs(env);
     let mut workspace_oses: BTreeMap<&str, BTreeSet<String>> = BTreeMap::new();
@@ -596,21 +605,28 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
         };
         plan_with_graph(root, &history, &all).map_err(|e| fail(e.to_string()))?.1
     };
+    let mut need_plan = need_plan;
+    crate::active_apps::apply(&mut need_plan, &inactive);
     let need_legs = matrix(
         &need_plan,
         &graph,
         MatrixOpts {
             narrow: false,
-            webkit: true,
+            webkit: false,
             full_os: true,
         },
     )
     .map_err(fail)?;
-    let need = scope_of(&need_plan, &need_legs, true, &os_legs, &[]);
+    // A push to main's scope has no WebKit and no reference-app end-to-end jobs (the nightly's), so a train's full run is complete
+    // without them (user, 2026-11-24).
+    let need = scope_of(&need_plan, &need_legs, false, &os_legs, &[]);
     // A push's or a landing's need is its own diff: the line names the base it was diffed from (a push reuses a landing run of
     // the same diff only, review round 2 P1-A).
     let need_base = if need_whole { None } else { base.as_deref() };
-    log(&ci_scope(ran, false, need, need_whole).with_base(need_base).line());
+    log(&ci_scope(ran, false, need, need_whole)
+        .with_base(need_base)
+        .with_inactive(inactive.clone())
+        .line());
     if narrow {
         log("narrowed to the packages the change reaches (a member run; the final head's full run tests the rest)");
     }
@@ -689,7 +705,13 @@ pub(crate) fn read_run(root: &Path, env: &dyn Fn(&str) -> Option<String>, id: u6
         .unwrap_or_default();
     let mut http = CurlHttp;
     let mut runs = GiteaRuns::new(&mut http, &server, &repo, token);
-    crate::plan_since::since_run_with(&mut runs, id, &|f| workflow_text(root, f), &mut |l| eprintln!("{l}"), running)
+    crate::plan_since::since_run_with(
+        &mut runs,
+        id,
+        &|f| workflow_text(root, f),
+        &mut |l| crate::log_text::eline(l),
+        running,
+    )
 }
 
 /// Appends the outputs and the summary of a `--ci` run to the files the workflow names.
@@ -738,6 +760,24 @@ fn since_app(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: &str, run: 
             "{app} is a leg of ci.yml, not its own workflow: rerun ci.yml with since_run"
         ))
     })?;
+    // An inactive app reruns nothing (crate::active_apps), like its plan.
+    let set = crate::active_apps::ActiveApps::load(root).map_err(fail)?;
+    let tag = env("GITHUB_REF").is_some_and(|r| r.starts_with("refs/tags/"));
+    if !crate::active_apps::every_app(env) && !tag && !set.active.contains(app) {
+        eprintln!(
+            "{app}: inactive ({} `active` does not name it): the rerun runs none of its jobs",
+            crate::active_apps::FILE
+        );
+        write_ci(
+            env,
+            &[("inactive".into(), "true".into())],
+            &format!("### Rerun of run {id} ({workflow})\n\nInactive: nothing runs (docs/ci-active-apps.toml).\n"),
+        )?;
+        return Ok(Report::new(
+            serde_json::json!({ "sinceRun": id, "inactive": true }),
+            "false".to_string(),
+        ));
+    }
     since_app_with(env, app, &workflow, id, read_since_run(root, env, id))
 }
 
@@ -802,7 +842,11 @@ fn since_ci_with(root: &Path, env: &dyn Fn(&str) -> Option<String>, id: u64, rea
         base: None,
         head: "HEAD".into(),
     };
-    let (graph, everything) = plan_with_graph(root, &history, &all).map_err(|e| fail(e.to_string()))?;
+    let (graph, mut everything) = plan_with_graph(root, &history, &all).map_err(|e| fail(e.to_string()))?;
+    // A rerun never runs an inactive app either (crate::active_apps).
+    let set = crate::active_apps::ActiveApps::load(root).map_err(fail)?;
+    let inactive = crate::active_apps::inactive(&set, &graph.apps, crate::active_apps::every_app(env), &[]);
+    crate::active_apps::apply(&mut everything, &inactive);
     let legs = matrix(
         &everything,
         &graph,
@@ -825,12 +869,12 @@ fn since_ci_with(root: &Path, env: &dyn Fn(&str) -> Option<String>, id: u64, rea
     )
     .map_err(fail)?;
     let need = scope_of(&everything, &need_legs, true, &os_legs(env), &[]);
-    eprintln!("{}", ci_scope(Scope::default(), true, need, true).line());
+    eprintln!("{}", ci_scope(Scope::default(), true, need, true).with_inactive(inactive).line());
     if let Some(why) = &plan.everything {
         println!("::warning::dev plan --since-run {id}: {why}; this run tests everything");
         let reason = format!("everything: the rerun of run {id} cannot be narrowed ({why})");
         eprintln!("base: {reason}");
-        write_ci(env, &ci_outputs(&everything, &legs, None), &summary(&everything, &reason, &legs))?;
+        write_ci(env, &ci_outputs(&everything, &legs), &summary(&everything, &reason, &legs))?;
         return Ok(Report::new(serde_json::json!({ "sinceRun": id, "everything": why }), String::new()));
     }
     let outputs = plan.ci_outputs(&legs, &mut |w| println!("{w}"));

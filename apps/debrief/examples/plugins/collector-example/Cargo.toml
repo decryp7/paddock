@@ -8,6 +8,9 @@ description = "An example Debrief collector plugin"
 
 # What `cargo debrief-plugin package` puts in the package manifest (name, version and description come from above;
 # permissions from the plugin itself).
+[lib]
+doctest = false # doctests are off (crates/README.md, "Doctests")
+
 [package.metadata.debrief-plugin]
 id = "net.decryptology.example.collector"
 publisher = "Debrief examples"

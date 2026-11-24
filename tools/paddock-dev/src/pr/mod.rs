@@ -1,5 +1,8 @@
 //! `pr`: the branch ledger on Gitea pull requests (user decision 2026-11-12; docs/plans/merge-queue.md).
 //!
+//! **Parked (user, 2026-11-24)** with the merge queue ([`crate::queue`]): nothing runs `pr`; the code stays, and its tests (`pr::` here
+//! and in `tests/it/pr.rs`) are left out of the `ci` nextest profile (`.config/nextest.toml`).
+//!
 //! - `pr open <branch> [--labels a,b]`: a draft pull request (`WIP:` title, Gitea's draft prefix) against main, its body the
 //!   branch's commits, labelled `state/built` unless a `state/` label is given;
 //! - `pr label <branch> +x -y`: changes the labels of the branch's open pull request (an exclusive scope keeps one label);

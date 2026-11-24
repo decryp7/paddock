@@ -91,7 +91,7 @@ fn twinned_differences(rust: &[(String, String)], js: &[(String, String)], rust_
 #[test]
 fn the_checks_that_name_an_allow_list_are_the_ones_the_js_host_recorded() {
     let rust: Vec<(String, String)> = users().iter().map(|(c, f)| (c.id().to_string(), f.to_string())).collect();
-    assert!(rust.len() >= 3, "C121, C124 and C125 read an allow list: {rust:?}");
+    assert!(rust.len() >= 2, "C121 and C131 read an allow list: {rust:?}");
     // The users the JS host had (recorded before it was retired): a Rust-only check that reads an allow list is a reviewed bless.
     let js: Vec<(String, String)> = serde_json::from_value(crate::recorded::expect("allow-list-users", &json!(rust))).unwrap();
     // The twins are the checks the Rust registry has (the registry is the one accessor of that list, ER-42).
@@ -103,21 +103,21 @@ fn the_checks_that_name_an_allow_list_are_the_ones_the_js_host_recorded() {
 #[test]
 fn a_javascript_only_allow_list_is_not_asked_for_on_rust_but_a_twin_missing_one_side_fails() {
     let pair = |id: &str, f: &str| (id.to_string(), f.to_string());
-    let rust_ids = vec!["C121".to_string(), "C124".to_string()];
+    let rust_ids = vec!["C121".to_string(), "C131".to_string()];
     // C135 has no Rust twin: its JavaScript allow list is not required on Rust.
     let rust = vec![pair("C121", "a.json")];
     let js = vec![pair("C121", "a.json"), pair("C135", "c.json")];
     assert!(twinned_differences(&rust, &js, &rust_ids).is_empty());
-    // C124 is twinned: an allow list on one host only, either way, or under another file, is a difference.
-    let js_only = vec![pair("C121", "a.json"), pair("C124", "b.json")];
+    // C131 is twinned: an allow list on one host only, either way, or under another file, is a difference.
+    let js_only = vec![pair("C121", "a.json"), pair("C131", "b.json")];
     assert_eq!(
         twinned_differences(&rust, &js_only, &rust_ids),
-        ["C124 reads b.json on the JavaScript host only"]
+        ["C131 reads b.json on the JavaScript host only"]
     );
-    let rust_only = vec![pair("C121", "a.json"), pair("C124", "b.json")];
+    let rust_only = vec![pair("C121", "a.json"), pair("C131", "b.json")];
     assert_eq!(
         twinned_differences(&rust_only, &[pair("C121", "a.json")], &rust_ids),
-        ["C124 reads b.json on the Rust host only"]
+        ["C131 reads b.json on the Rust host only"]
     );
     let other_file = vec![pair("C121", "z.json")];
     assert_eq!(twinned_differences(&rust, &other_file, &rust_ids).len(), 2);
@@ -170,8 +170,8 @@ fn an_unreadable_file_is_not_measured_at_that_file_on_both_hosts() {
         std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
         if std::fs::read(&locked).is_ok() {
             std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o644)).unwrap();
-            // CI's Linux container runs as root, which reads a 000 file: the case cannot be made there. A note, as C125's and
-            // C129's tests do; `skip` would fail the Linux CI leg (run 8208), which is for a comparison that cannot run at all.
+            // CI's Linux container runs as root, which reads a 000 file: the case cannot be made there. A note, not a
+            // `skip`: `skip` would fail the Linux CI leg (run 8208), which is for a comparison that cannot run at all.
             eprintln!("not measured: running as root, which reads a 000 file");
             return;
         }

@@ -9,6 +9,9 @@ publish = ["decryp7"]
 # Tauri plugins name themselves through `links` (the app's build reads the plugin's permissions through it).
 links = "paddock-workbench"
 
+[lib]
+doctest = false # doctests are off (crates/README.md, "Doctests")
+
 [features]
 # The Tauri adapter and the plugin: the managed layout store and its commands, the composed command table and the
 # `Builder` that folds the pop-out panels and the assistant behind one guard.

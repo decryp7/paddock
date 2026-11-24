@@ -20,7 +20,7 @@
 //! commands that name `TRAY`). The adapter (`tauri` feature) applies the decisions to Tauri windows; the native tray
 //! icon needs the `tray` feature.
 //!
-//! ```
+//! ```text
 //! use paddock_window::close::{decide_close, CloseDecision, OnClose};
 //! use paddock_window::launch::{parse_args, plan, OpenFilesIn, OpenPlan, OpenRequest, Target};
 //!

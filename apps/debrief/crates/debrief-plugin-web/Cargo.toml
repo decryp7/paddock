@@ -7,6 +7,9 @@ edition.workspace = true
 rust-version.workspace = true
 publish = false
 
+[lib]
+doctest = false # doctests are off (crates/README.md, "Doctests")
+
 [dependencies]
 debrief-plugin-api = { path = "../debrief-plugin-api" }
 anyhow.workspace = true

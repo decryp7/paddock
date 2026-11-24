@@ -22,7 +22,7 @@
 //! Each finding is one spot, with the exact text to paste and where (after which line, at which indentation). A part the reader finds
 //! but cannot place lines in (a flow mapping, a `uses:` not on its own line) is a finding that says so. No workflow read is not measured.
 //!
-//! **Report-only (warnings) until its first green run on the real tree is recorded here (ER-41).** Recorded: not yet. First count
+//! **Errors, blocking (mode gate) since its first green run on the real tree, ci.yml run 8869 (cdd4c3d10, 2026-11-24; ER-41).** First count
 //! (1ee61a03c, before the integrator pastes the lines): 34 setup-rust steps, 8 calls of the reusable workflows, 2 declarations.
 //!
 //! Rust host only.
@@ -52,8 +52,7 @@ const RULE: u32 = 79;
 
 /// The workflows (`file.yml`) and jobs (`file.yml:job`) that hold no S3 key. Only ever shrinks: a new entry is a decision of the
 /// user (ER-46), and the test `the_no_secret_list_only_shrinks` pins its content so a growing list shows in a diff.
-pub const NO_SECRET: [&str; 7] = [
-    "ci.yml:train-gates",
+pub const NO_SECRET: [&str; 6] = [
     "app-release.yml",
     "heavy-release.yml",
     "dyno-release.yml",
@@ -346,7 +345,7 @@ fn spot(file: &str, e: &Edit) -> Finding {
         ),
         Edit::Replace(i, l) => (i + 1, format!("this line passes another value: replace it with:\n{l}")),
     };
-    Finding::warn(
+    Finding::error(
         "C141",
         RULE,
         file,
@@ -377,7 +376,7 @@ impl Check for C141 {
     }
 
     fn mode(&self) -> super::Mode {
-        super::Mode::ReportOnly
+        super::Mode::Gate
     }
 
     fn control(&self) -> Control {
@@ -464,7 +463,7 @@ impl Check for C141 {
                 Ok((edits, owned)) => {
                     findings.extend(edits.iter().map(|e| spot(f, e)));
                     for i in stray_lines(&text, &owned) {
-                        findings.push(Finding::warn(
+                        findings.push(Finding::error(
                             "C141",
                             RULE,
                             f,
@@ -474,7 +473,7 @@ impl Check for C141 {
                         ));
                     }
                 }
-                Err(e) => findings.push(Finding::warn(
+                Err(e) => findings.push(Finding::error(
                     "C141",
                     RULE,
                     f,
@@ -486,7 +485,7 @@ impl Check for C141 {
         }
         if let Some(text) = ctx.read(ACTION) {
             for (line, message) in action_leaks(&text) {
-                findings.push(Finding::warn(
+                findings.push(Finding::error(
                     "C141",
                     RULE,
                     ACTION,
@@ -502,7 +501,7 @@ impl Check for C141 {
         {
             let Some(text) = ctx.read(f) else { continue };
             for i in stray_lines(&text, &BTreeSet::new()) {
-                findings.push(Finding::warn(
+                findings.push(Finding::error(
                     "C141",
                     RULE,
                     f,
@@ -624,16 +623,21 @@ mod tests {
         // Pinned: a longer list shows in this diff and needs the user's yes (ER-46).
         assert_eq!(
             NO_SECRET,
-            ["ci.yml:train-gates", "app-release.yml", "heavy-release.yml", "dyno-release.yml", "pitcrew-release.yml", "pitwall-release.yml", "spotter-release.yml"]
+            ["app-release.yml", "heavy-release.yml", "dyno-release.yml", "pitcrew-release.yml", "pitwall-release.yml", "spotter-release.yml"]
         );
     }
 
     #[test]
     fn a_job_on_the_no_secret_list_is_not_asked_for_the_key_and_a_key_there_is_a_stray_line() {
-        let (edits, _) = plan("ci.yml", "jobs:\n  train-gates:\n    steps:\n      - uses: ./.gitea/actions/setup-rust\n  other:\n    steps:\n      - uses: ./.gitea/actions/setup-rust\n").unwrap();
-        assert_eq!(edits.len(), 1, "only `other` is told to pass the key: {edits:?}");
-        let with_key = "jobs:\n  train-gates:\n    steps:\n      - uses: ./.gitea/actions/setup-rust\n        with:\n          sccache-s3-access-key-id: ${{ secrets.PADDOCK_SCCACHE_S3_ACCESS_KEY_ID }}\n";
-        let (edits, owned) = plan("ci.yml", with_key).unwrap();
+        // The list names whole workflows since ci.yml's train-gates job was removed (chore/cut-ci-and-gates): every job of one is a
+        // no-secret job; the same jobs in a workflow off the list are each told to pass the key.
+        let two = "jobs:\n  gates:\n    steps:\n      - uses: ./.gitea/actions/setup-rust\n  other:\n    steps:\n      - uses: ./.gitea/actions/setup-rust\n";
+        let (edits, _) = plan("dyno-release.yml", two).unwrap();
+        assert!(edits.is_empty(), "no job of a no-secret workflow is told to pass the key: {edits:?}");
+        let (edits, _) = plan("ci.yml", two).unwrap();
+        assert_eq!(edits.len(), 2, "both jobs of a workflow off the list are told to pass the key: {edits:?}");
+        let with_key = "jobs:\n  gates:\n    steps:\n      - uses: ./.gitea/actions/setup-rust\n        with:\n          sccache-s3-access-key-id: ${{ secrets.PADDOCK_SCCACHE_S3_ACCESS_KEY_ID }}\n";
+        let (edits, owned) = plan("dyno-release.yml", with_key).unwrap();
         assert!(edits.is_empty());
         assert_eq!(stray_lines(with_key, &owned), vec![5], "the key in a no-secret job is a stray line");
     }

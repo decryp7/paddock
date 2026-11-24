@@ -5,7 +5,7 @@
 //!   side branch, tagged `step-<folder>`: the `.gitea` and shared-script edits); the answers are in `tests/golden/expected/`.
 //!   They were first recorded from `scripts/affected.mjs` (retired 2026-11-18, ADR 0022 R4); the planner itself now writes them:
 //!   a changed answer is a reviewed edit made with `PADDOCK_GOLDEN_BLESS=1 cargo nextest run -E 'test(golden::)'`, never by hand and never in CI.
-//! - `recorded_command_line_*`: the same for the command line (`--ci`, `--commit-range`, the argument forms) in
+//! - `recorded_command_line_*`: the same for the command line (`--ci`, the argument forms) in
 //!   `tests/golden/ci-cases.json`, recorded into `tests/golden/expected/cli/`.
 //! - `the_ci_jobs_table_*`: `plan_gitea::CI_JOBS` against `tests/golden/ci-jobs.json`.
 //! - The narrowing tests: edits to a copy of this repository, answered by the planner alone, with positive controls.
@@ -14,6 +14,7 @@ use paddock_dev::plan::{Request, plan_for, plan_on_graph, read_graph};
 use paddock_repo_graph::GitHistory;
 use paddock_testkit::TestCommand;
 use serde_json::{Value, json};
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
@@ -455,8 +456,9 @@ fn declared_scope(env: &[(&str, &str)]) -> (paddock_dev::run_scope::Declared, St
     (declared, std::fs::read_to_string(dir.path().join("out")).unwrap_or_default())
 }
 
-/// ADR 0113: what a ci.yml plan declares for each kind of run, read back by the one reader. A push to main, a full dispatch with
-/// WebKit and a tag are complete; every smaller scope is not, each missing one dimension (positive controls: the same tree).
+/// ADR 0113: what a ci.yml plan declares for each kind of run, read back by the one reader. A push to main, a full dispatch (with
+/// or without WebKit: a push to main's scope has none since 2026-11-24) and a tag are complete; every smaller scope is not, each
+/// missing one dimension (positive controls: the same tree).
 #[test]
 fn ci_plan_declares_a_scope_that_is_complete_only_when_it_covers_a_push_to_main() {
     let push = [("GITHUB_EVENT_NAME", "push"), ("GITHUB_REF", "refs/heads/main")];
@@ -465,56 +467,43 @@ fn ci_plan_declares_a_scope_that_is_complete_only_when_it_covers_a_push_to_main(
         e.extend_from_slice(extra);
         declared_scope(&e).0
     };
-    // Complete: a push to main (WebKit always), a full dispatch with the webkit input, a tag.
+    // Complete: a push to main (no WebKit, no reference-app browser jobs: the nightly's), a full dispatch, a tag (which runs them).
     let main = declared_scope(&push).0;
     assert_eq!(main.complete(), Ok(()), "{}", main.line());
     assert!(
-        main.need.engines.contains("webkit") && main.ran.engines.contains("webkit"),
+        !main.need.engines.contains("webkit") && !main.ran.engines.contains("webkit") && !main.ran.jobs.contains("e2e"),
         "{}",
         main.line()
     );
+    assert_eq!(dispatch(&[]).complete(), Ok(()), "a train's full dispatch without WebKit");
     assert_eq!(dispatch(&[("PLAN_WEBKIT", "1")]).complete(), Ok(()));
-    assert_eq!(
-        declared_scope(&[("GITHUB_EVENT_NAME", "push"), ("GITHUB_REF", "refs/tags/v1.0.0")])
-            .0
-            .complete(),
-        Ok(())
+    let tag = declared_scope(&[("GITHUB_EVENT_NAME", "push"), ("GITHUB_REF", "refs/tags/v1.0.0")]).0;
+    assert_eq!(tag.complete(), Ok(()));
+    assert!(
+        tag.ran.engines.contains("webkit") && tag.ran.jobs.contains("e2e-webkit"),
+        "{}",
+        tag.line()
     );
-    // One engine missing: the same full dispatch without the webkit input (the D4 hole).
-    let no_webkit = dispatch(&[]);
-    assert!(no_webkit.complete().unwrap_err().contains("engines webkit"), "{}", no_webkit.line());
     // One app (and its legs) missing: a dispatch with `app` is that app only, with or without WebKit.
     let app_only = dispatch(&[("PLAN_APP", "x"), ("PLAN_WEBKIT", "1")]);
     assert!(app_only.complete().unwrap_err().contains("apps "), "{}", app_only.line());
     // A member run (a base) covers less than the whole tree even with WebKit.
     let member = dispatch(&[("PLAN_BASE", "fixture-head"), ("PLAN_WEBKIT", "1")]);
     assert!(member.complete().is_err(), "{}", member.line());
-    // A landing run (ADR 0117 WP-8): the train's diff from main's last complete commit, WebKit on, no member base. It needs what a
-    // push to main does for this change, so it is complete; the same diff as a member run (`base`) is not, and a landing run that
-    // lost its WebKit is not either (positive controls).
-    let (landing, landing_out) = declared_scope(&[
+    // A landing run (ADR 0117 WP-8): the train's diff from main's last complete commit, no member base. It needs what a push to main
+    // does for this change, so it is complete; the same diff as a member run (`base`) is not (positive control).
+    let (landing, _) = declared_scope(&[
         ("GITHUB_EVENT_NAME", "workflow_dispatch"),
         ("GITHUB_REF", "refs/heads/topic"),
         ("PLAN_LANDING_BASE", "fixture-base"),
-        ("PLAN_WEBKIT", "1"),
     ]);
     assert_eq!(landing.complete(), Ok(()), "{}", landing.line());
-    // It planned the diff (the base is the planner's, which the commit lint also reads), not everything (G1).
-    assert!(landing_out.lines().any(|l| l == "base=fixture-base"), "{landing_out}");
+    // It planned the diff (its need names the base it was diffed from), not everything (G1).
+    assert_eq!(landing.base.as_deref(), Some("fixture-base"), "{}", landing.line());
     assert!(
-        dispatch(&[("PLAN_LANDING_BASE", "fixture-base")])
+        dispatch(&[("PLAN_LANDING_BASE", "fixture-base"), ("PLAN_BASE", "fixture-head")])
             .complete()
-            .unwrap_err()
-            .contains("engines webkit")
-    );
-    assert!(
-        dispatch(&[
-            ("PLAN_LANDING_BASE", "fixture-base"),
-            ("PLAN_BASE", "fixture-head"),
-            ("PLAN_WEBKIT", "1")
-        ])
-        .complete()
-        .is_err()
+            .is_err()
     );
     // A reused run ran nothing; it also switches every job off.
     let (reused, outputs) = declared_scope(&[
@@ -916,5 +905,137 @@ fn graph_guard_edits_mark_conformance() {
             .any(|r| r.as_str().is_some_and(|r| r.starts_with("C100: an ignore attribute")));
         assert_eq!(marked, marks, "the content rule on {rel} with {add:?}");
         std::fs::write(&path, original).unwrap();
+    }
+}
+
+/// `./dev plan --ci` on `root` with `env`: (GITHUB_OUTPUT, job summary, stdout, stderr); the run must succeed.
+fn plan_ci_in(root: &Path, env: &[(&str, &str)]) -> (String, String, String, String) {
+    let dir = tempfile::tempdir().unwrap();
+    let mut program = crate::dev_bin::command();
+    program.arg("plan").current_dir(root);
+    for (k, _) in paddock_dev::process_env::vars() {
+        if k.starts_with("GITHUB_") || k.starts_with("PLAN_") {
+            program.env_remove(k);
+        }
+    }
+    program
+        .env("GITHUB_OUTPUT", dir.path().join("out"))
+        .env("GITHUB_STEP_SUMMARY", dir.path().join("summary"));
+    for (k, v) in env {
+        program.env(k, v);
+    }
+    let out = program.arg("--ci").output().unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+    assert!(out.status.success(), "{stderr}");
+    let read = |f: &str| std::fs::read_to_string(dir.path().join(f)).unwrap_or_default();
+    (
+        read("out"),
+        read("summary"),
+        String::from_utf8_lossy(&out.stdout).to_string(),
+        stderr,
+    )
+}
+
+/// The app legs (`app@os` or `app@os:e2e-leg`) of a plan's `apps` output.
+fn app_legs(outputs: &str) -> BTreeSet<String> {
+    let apps = outputs.lines().find_map(|l| l.strip_prefix("apps=")).expect("the apps output");
+    let legs: Vec<Value> = serde_json::from_str(apps).unwrap();
+    legs.iter()
+        .map(|l| {
+            let e2e = l["e2e_leg"].as_str().unwrap_or("");
+            let id = format!("{}@{}", l["app"].as_str().unwrap(), l["os"].as_str().unwrap());
+            if e2e.is_empty() { id } else { format!("{id}:{e2e}") }
+        })
+        .collect()
+}
+
+/// The active apps (active_apps, user 2026-11-24): an app the set does not name plans no leg and is named in the log, the summary and
+/// the declared scope (which stays complete for the rest); naming it again plans it (ER-33 positive control), in full when the run's
+/// base did not have it active.
+#[test]
+fn an_inactive_app_plans_no_leg_is_named_and_comes_back_in_full_when_made_active() {
+    let (_keep, root) = fixture_with_origin();
+    let file = root.join("docs/ci-active-apps.toml");
+    let all = std::fs::read_to_string(&file).unwrap();
+    assert!(all.contains("active = [\"x\", \"y\", \"z\"]"), "the fixture plans every app: {all}");
+    std::fs::write(&file, all.replace("active = [\"x\", \"y\", \"z\"]", "active = [\"y\", \"z\"]")).unwrap();
+    git(&root, &["commit", "-qam", "x inactive"]);
+    let inactive_at = String::from_utf8(
+        Command::new("git")
+            .arg("-C")
+            .arg(&root)
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .unwrap()
+            .stdout,
+    )
+    .unwrap()
+    .trim()
+    .to_string();
+    let full = [
+        ("GITHUB_EVENT_NAME", "workflow_dispatch"),
+        ("GITHUB_REF", "refs/heads/topic"),
+        ("PLAN_WEBKIT", "1"),
+    ];
+    let (out, summary, stdout, stderr) = plan_ci_in(&root, &full);
+    let legs = app_legs(&out);
+    assert!(!legs.iter().any(|l| l.starts_with("x@")), "no leg of the inactive app: {legs:?}");
+    assert!(
+        legs.iter().any(|l| l.starts_with("z@")),
+        "a positive control: an active app still plans: {legs:?}"
+    );
+    assert!(
+        stdout.contains("::notice::inactive: x (docs/ci-active-apps.toml does not name them"),
+        "{stdout}"
+    );
+    assert!(
+        summary.contains("Inactive (not in docs/ci-active-apps.toml; no job runs, not green; the nightly runs them): x"),
+        "{summary}"
+    );
+    let scope = paddock_dev::run_scope::read(&stderr).unwrap().unwrap();
+    assert_eq!(scope.inactive, ["x".to_string()].into());
+    assert!(
+        !scope.need.apps.iter().any(|a| a.starts_with("x@")),
+        "a landing never claims the app: {:?}",
+        scope.need.apps
+    );
+    assert_eq!(scope.complete(), Ok(()), "complete for the rest: {}", scope.line());
+    assert!(scope.covers_app("x").is_err() && scope.covers_app("z").is_ok());
+    // The nightly ignores the set.
+    let (out, _, _, _) = plan_ci_in(&root, &[("GITHUB_EVENT_NAME", "schedule"), ("GITHUB_REF", "refs/heads/main")]);
+    assert!(app_legs(&out).contains("x@ubuntu-latest:e2e-webkit"), "the nightly runs every app");
+
+    // Made active again: one line. The whole tree plans x (ER-33: the switch is seen) ...
+    std::fs::write(&file, &all).unwrap();
+    git(&root, &["commit", "-qam", "x active"]);
+    let (out, _, _, stderr) = plan_ci_in(&root, &full);
+    let legs = app_legs(&out);
+    for leg in [
+        "x@ubuntu-latest",
+        "x@macos-latest",
+        "x@ubuntu-latest:e2e-1",
+        "x@ubuntu-latest:e2e-webkit",
+    ] {
+        assert!(legs.contains(leg), "{leg}: {legs:?}");
+    }
+    assert!(paddock_dev::run_scope::read(&stderr).unwrap().unwrap().inactive.is_empty());
+    // ... and a run diffed from a base where it was inactive plans it in full: its first full run (the change touches no file of x).
+    let member = [
+        ("GITHUB_EVENT_NAME", "workflow_dispatch"),
+        ("GITHUB_REF", "refs/heads/topic"),
+        ("PLAN_WEBKIT", "1"),
+        ("PLAN_BASE", inactive_at.as_str()),
+    ];
+    let (out, _, _, stderr) = plan_ci_in(&root, &member);
+    let legs = app_legs(&out);
+    assert!(stderr.contains("resumed: x is active here and was not at the base"), "{stderr}");
+    for leg in [
+        "x@ubuntu-latest",
+        "x@macos-latest",
+        "x@ubuntu-latest:e2e-1",
+        "x@ubuntu-latest:e2e-2",
+        "x@ubuntu-latest:e2e-webkit",
+    ] {
+        assert!(legs.contains(leg), "{leg}: {legs:?}");
     }
 }

@@ -24,11 +24,11 @@ read (the list, a job, a log, the token) runs the commit (fail open to running, 
 `plan scope: {json}`: what the run did (`ran`: jobs, the crate and paddock-dev jobs on each runner, app legs, browser engines, whole
 or narrowed tests) and what a push to main does for the same tree (`need`), both written by the planner (`./dev plan --ci` for
 ci.yml, `./dev ci scope` for debrief.yml and the shared plan action). `./dev ci verdict` counts a run only when `ran` covers `need`
-and the run is not a rerun; `ci reuse` asks it, so nothing else decides. A full dispatch without WebKit is an engine short, a dispatch
-with `app` is one app only, a member run is narrowed, a reused or skipped run ran nothing: none is complete. The reason is printed
-("it did not cover what a push to main does: engines webkit; apps ..."). `./dev ci dispatch ci.yml --ref train/...` adds
-`webkit=true` itself for a full dispatch (no `base`, no `since_run`); an explicit `--input webkit=false` wins, and a member run or a
-rerun is sent as asked. That is what lets a landed train's push to main reuse the train's run (ER-49). `./dev ci verdict`'s hint
+and the run is not a rerun; `ci reuse` asks it, so nothing else decides. A dispatch with `app` is one app only, a member run is
+narrowed, a reused or skipped run ran nothing: none is complete. The reason is printed ("it did not cover what a push to main does:
+apps ..."). A push to main's scope has no WebKit and no reference-app browser jobs since 2026-11-24 (the user's cut: the nightly runs
+them, as a `v*` tag and a manual run with `webkit` do), so a train's full dispatch is complete without them. That is what lets a
+landed train's push to main reuse the train's run (ER-49). `./dev ci verdict`'s hint
 of the last fully tested commit asks the same reader about each of main's newest commits, so a push that reused a train run
 (partial itself) still names the commit the train tested. The reader also checks that the run **ran what it declared** ("ran means ran", as GitHub's required checks:
 a skipped one blocks): each declared job and app leg has a job of its name that succeeded; a skipped or cancelled one makes the run
@@ -87,7 +87,53 @@ nightly and debrief cannot be capped by `max-parallel` (many unrelated jobs); on
 limit them. Gitea counts runner slots per caller, so `max-parallel` inside the reusable `app-fuzz.yml` does not cap
 five separate callers: nightly chains them with `needs:` instead.
 
-## Tag rehearsal
+## Active apps
+
+**Foundation first (user, 2026-11-24):** "Focus on foundation first then slowly turn the products on one by one." Train and branch
+CI (ci.yml, debrief.yml and the release workflows' plans) run the foundation, that is the shared crates, the ui packages,
+paddock-dev, conformance, icons, eslint and the workflow and gates checks, plus only the apps named in `docs/ci-active-apps.toml`:
+
+```toml
+active = []                                       # foundation only; later e.g. ["dyno"]
+next = ["dyno", "pitwall", "debrief", "pitcrew"]  # the planned order, for people
+```
+
+The file is read only through `tools/paddock-dev/src/active_apps.rs` (ER-42).
+
+- `./dev plan --ci` takes every inactive app out of the plan: no leg of it is dispatched, so nothing of it queues on the shared
+  runners. It prints `::notice::inactive: <apps> ...`, lists them under "Inactive" in the job summary, and its `plan scope:` line
+  names them (`"inactive": [...]`) with both `ran` and `need` leaving them out. A foundation run is therefore complete for the
+  foundation and the active apps, never for an inactive one. A push to main reuses a landing run of the same commit as before
+  (ER-49): the set is data in the tree, so both read the same one.
+- `./dev plan --ci --app <app>` (debrief.yml, the release workflows' plan action) answers `false` for an inactive app, writes
+  `inactive=true` and says "Inactive" in the job summary; a release workflow's verdict reports it as a notice, not as a red run.
+- **The nightly ignores the set** (a `schedule` event, or the `os_full` input of the nightly's manual run): every app, the full check.
+- An app's own gates (`PLAN_APP`, a release workflow's tag gates) and an app's own workflow on a tag of the app run that app whatever
+  the set says.
+- **The push gate and the member gate** (`./dev check --pre-push`, and `./dev merge check --gates`, which runs it with
+  `--member-gate`) read the same set through the same accessor. An inactive app's own build checks are not run: format, Clippy,
+  the Windows (xwin) and Linux Clippy of its workspaces, and Pitwall's script tests and `cargo deny`. Each such row is
+  printed as `inactive      <row>  inactive (docs/ci-active-apps.toml): <app> is not an active app ...`, counted apart in the
+  summary (`N inactive (not checked ...)`, `"inactive"` in the JSON), and never counted as passed. The foundation's rows (crates,
+  tools/paddock-dev and the other tools, conformance and its tests, the member audits, the gates register, commit-lint) always
+  run, and so do the generators that write into an app's folder (its `Cargo.lock`, Dyno's wire fixtures), because generated files
+  stay current (ER-40). A set that cannot be read, or that names an unknown app, runs every row and breaks the `active-apps` row.
+  `./dev check --pre-push --all-apps` runs every app's rows (for a release, or for the person bringing an app back; it also skips
+  the known-commit shortcut). The nightly is still the full check.
+- **Tags:** a tag of an app needs a full green run that planned the app (ER-15). tag.yml asks `./dev ci verdict --tag --app <app>`,
+  which refuses a green run whose scope lists the app as inactive ("make it active, or tag after a nightly that ran it").
+
+**A red nightly** (the green-main rule): a failure in the foundation or in an active app stops the next train; a failure in an
+inactive app is that app's fix item (it blocks that app's tag through the rule above, never a train).
+`active_apps::classify_nightly` sorts a nightly's failed jobs that way (an app's own workflow, a ci.yml `app <name> (...)` leg, a
+nightly `installers (<App>, ...)` job); the train dispatch guard that acts on it is part of the queued green-main work.
+
+**Making an app active** is one line: add it to `active`. The planner reads the set at the run's base too: an app active here and
+not at the base is planned in full, every leg and both halves, whatever else the change reached, so the activating commit's own run
+is the app's first full run. Land it as its own member, watch that run, and fix what it finds before the next app comes back.
+Taking an app out again is the same line removed.
+
+
 
 `tag-rehearsal.yml` (user, 2026-11-20) runs a tag's release path every day on main's head, and by hand, with no tag, no release and
 nothing published: the tag checks in dry-run mode (`request-tag.mjs --dry-run true`, the tag gates), then each app's installers with

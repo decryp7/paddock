@@ -124,6 +124,10 @@ pub struct Declared {
     /// The commit `need` was diffed from when it is not the whole tree's (a push's green base, a landing's base): a push to main may
     /// reuse a landing run only when the landing ran the same diff (review round 2, P1-A).
     pub base: Option<String>,
+    /// The apps the tree's active set left out of both `ran` and `need` ([`crate::active_apps`]): a complete run is complete for the
+    /// foundation and the active apps, never for these ([`Declared::covers_app`]). Written only when some are inactive; a line without
+    /// the key (written before the set existed, or by a run that planned every app) has none.
+    pub inactive: BTreeSet<String>,
 }
 
 impl Declared {
@@ -144,6 +148,9 @@ impl Declared {
         }
         if let Some(os) = &self.os {
             v["os"] = json!(os);
+        }
+        if !self.inactive.is_empty() {
+            v["inactive"] = json!(self.inactive);
         }
         format!("{SCOPE_LINE}{v}")
     }
@@ -229,6 +236,26 @@ impl Declared {
     }
 }
 
+impl Declared {
+    /// This declaration with the apps its tree's active set left out.
+    pub fn with_inactive(self, inactive: BTreeSet<String>) -> Declared {
+        Declared { inactive, ..self }
+    }
+
+    /// `Ok` when the run planned `app` (it was active, or every app ran: the nightly); `Err` names the set. A tag of an app rests only
+    /// on a run that covered it (ER-15).
+    pub fn covers_app(&self, app: &str) -> Result<(), String> {
+        if self.inactive.contains(app) {
+            Err(format!(
+                "{app} was inactive in it ({} `active` did not name it), so it ran none of {app}'s jobs",
+                crate::active_apps::FILE
+            ))
+        } else {
+            Ok(())
+        }
+    }
+}
+
 /// The declaration a plan job's log holds: `None` when no line starts with [`SCOPE_LINE`], `Err` for a line that cannot be read
 /// (not JSON, another version, a missing field) or a second line (ambiguous: only one plan job prints one).
 pub fn read(log: &str) -> Option<Result<Declared, String>> {
@@ -265,6 +292,11 @@ fn parse(text: &str) -> Result<Declared, String> {
             Value::String(s) if !s.is_empty() => Some(s.clone()),
             other => return Err(format!("the scope line's base is {other}, not a commit")),
         },
+        inactive: match &v["inactive"] {
+            Value::Null => BTreeSet::new(),
+            Value::Array(a) if a.iter().all(|x| x.as_str().is_some_and(|s| !s.is_empty())) => set(&v["inactive"]),
+            other => return Err(format!("the scope line's inactive is {other}, not a list of apps")),
+        },
     })
 }
 
@@ -288,12 +320,11 @@ pub fn scope_of(plan: &Value, legs: &[Value], webkit: bool, os_legs: &[String], 
             jobs.extend(os_legs.iter().map(|os| format!("{job}@{os}")));
         }
     }
-    // The reference-app jobs of ci.yml: Chromium whenever a UI is reached, WebKit with it when the planner says so.
-    if plan["ui"].as_bool() == Some(true) {
+    // The reference-app jobs of ci.yml (Chromium and WebKit) run when a UI is reached and the planner wants them (`webkit`: a tag,
+    // the nightly, a manual ask).
+    if plan["ui"].as_bool() == Some(true) && webkit {
         jobs.insert("e2e".to_string());
-        if webkit {
-            jobs.insert("e2e-webkit".to_string());
-        }
+        jobs.insert("e2e-webkit".to_string());
     }
     let ui_leg = legs
         .iter()
@@ -336,16 +367,16 @@ impl JobName {
 }
 
 /// The display names of the ci.yml jobs each project flag of a plan switches on (`plan_gitea::CI_JOBS` lists them by id; a test reads
-/// ci.yml and checks each prefix names a job there). Jobs whose `if` reads more than the plan (`commits`, `train-gates`, `audit`) are
+/// ci.yml and checks each prefix names a job there). Jobs whose `if` reads more than the plan (`audit`) are
 /// not here: a skipped one is not a scope that was not covered.
 pub const PROJECT_JOBS: &[(&str, &[&str])] = &[
     ("crates", &["crates ("]),
     ("ui", &["ui ("]),
-    ("eslint", &["eslint preset"]),
+    ("eslint", &["ui ("]),
     ("conformance", &["conformance ("]),
     ("c99", &["C99 ("]),
-    ("tools", &["tools and shared scripts", "wiki tool", "heavy tool"]),
-    ("icons", &["icons ("]),
+    ("tools", &["tools and shared scripts", "heavy tool"]),
+    ("icons", &["ui ("]),
     ("e2e", &["reference apps (shard"]),
     ("e2e-webkit", &["reference apps in WebKit"]),
 ];
@@ -422,6 +453,7 @@ pub fn ci_scope(ran: Scope, rerun: bool, need: Scope, need_whole: bool) -> Decla
         need,
         need_whole,
         base: None,
+        inactive: BTreeSet::new(),
     }
 }
 
@@ -462,6 +494,7 @@ pub fn app_scope(workflow: &str, app: &str, full: bool, run: bool, since_run: bo
         need,
         need_whole: true,
         base: None,
+        inactive: BTreeSet::new(),
     }
 }
 
@@ -666,6 +699,29 @@ mod tests {
     }
 
     #[test]
+    fn a_scope_with_inactive_apps_names_them_is_complete_for_the_rest_and_never_covers_them() {
+        // The planner leaves the inactive apps out of both `ran` and `need`: the foundation run is complete, and its line names them.
+        let d = declared(true, &[]).with_inactive(["pitwall".to_string()].into());
+        assert_eq!(d.complete(), Ok(()));
+        let line = d.line();
+        assert!(line.contains(r#""inactive":["pitwall"]"#), "{line}");
+        let back = read(&line).unwrap().unwrap();
+        assert_eq!(back, d);
+        let why = back.covers_app("pitwall").unwrap_err();
+        assert!(
+            why.contains("pitwall was inactive") && why.contains("docs/ci-active-apps.toml"),
+            "{why}"
+        );
+        // Positive controls: an active app is covered, and a line without the key (every app planned) covers every app.
+        assert_eq!(back.covers_app("dyno"), Ok(()));
+        let old = read(TEST_COMPLETE).unwrap().unwrap();
+        assert!(old.inactive.is_empty() && old.covers_app("pitwall").is_ok());
+        // A malformed list is refused, never read as "none inactive".
+        assert!(read_err(&line.replace(r#"["pitwall"]"#, "7")).contains("inactive"));
+        assert!(read_err(&line.replace(r#"["pitwall"]"#, r#"[""]"#)).contains("inactive"));
+    }
+
+    #[test]
     fn a_member_run_narrowed_to_packages_is_not_whole() {
         let d = declared(true, &["package(=fx-b)", ""]);
         assert!(d.complete().unwrap_err().contains("whole-workspace tests"), "{:?}", d.complete());
@@ -710,6 +766,7 @@ mod tests {
             },
             need_whole: true,
             base: None,
+            inactive: BTreeSet::new(),
         };
         assert!(nothing.complete().unwrap_err().contains("empty"));
     }

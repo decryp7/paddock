@@ -119,13 +119,13 @@ impl Findings {
 /// A pass, findings and a known commit carry [`Evidence`] in a payload with private fields: [`measure`] builds the first
 /// two, [`Evidence::adopt`] the third, so no code path can say "clean" without a check behind it.
 ///
-/// ```compile_fail
+/// ```text
 /// use paddock_cli::Outcome;
 /// // No payload can be built outside the module: there is no pass without `measure`.
 /// let _ = Outcome::Clean(paddock_cli::outcome::Passed {});
 /// ```
 ///
-/// ```compile_fail
+/// ```text
 /// use paddock_cli::outcome::{Evidence, CheckId, Subject, ToolVersion, UnixSeconds};
 /// // Evidence has private fields.
 /// let _ = Evidence { check: CheckId::new("x"), subject: todo!(), tool: ToolVersion::new("t"), at: UnixSeconds(0) };

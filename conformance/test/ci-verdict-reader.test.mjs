@@ -87,6 +87,23 @@ export const legacyPhase = (producer, recorded = recordedProducers()) => !(produ
 
 const VERDICT_ECHO = 'echo "plan verdict: complete=$complete"';
 
+/**
+ * Each producer's old decision as its plan code prints it in the report-only phase: the fixtures of the register test's positive
+ * controls, put back onto the real plan code (less any old line), so recording a producer and deleting its block needs no test edit.
+ * ci.yml's is the block its plan job printed until run 8869 was recorded.
+ */
+const CI_OLD_BLOCK = [
+  'complete=false',
+  'if [ -z "$PLAN_SINCE_RUN" ] && [ "$PLAN_MODE_FULL" = true ] && [ "$PLAN_REUSE" != true ] && [ -z "$PLAN_APP" ] && { [ "$EVENT" = push ] || [ -n "$PLAN_WEBKIT" ]; }; then complete=true; fi',
+  VERDICT_ECHO,
+];
+const DEBRIEF_OLD_BLOCK = [
+  'complete=false',
+  'if [ "$run" = true ] && [ -z "$PLAN_SINCE_RUN" ] && [ "$PLAN_MODE_FULL" = true ]; then complete=true; fi',
+  VERDICT_ECHO,
+];
+const ACTION_OLD_BLOCK = ['complete=false', 'if [ "$run" = true ] && [ "$PLAN_MODE_FULL" = true ]; then complete=true; fi', VERDICT_ECHO];
+
 /** Why the old line is not printed after the decision with the right condition, or null (the report-only phase's check). */
 export function markerProblem(code, { sinceRun = true } = {}) {
   if (code.length === 0) return 'it has no plan code';
@@ -254,39 +271,49 @@ test('the register of first scope runs: a recorded producer prints no old line, 
   assert.equal(legacyPhase('ci.yml', rec), false);
   assert.equal(legacyPhase('debrief.yml', rec), true);
   assert.equal(producerOf('dyno-release.yml'), 'plan-action');
-  const ci = text('ci.yml');
   // While unrecorded the old line is required and checked; once recorded it must be gone (the switch and the deletion are one change).
-  assert.equal(ciProblem(ci, undefined, { legacy: true }), null);
-  assert.match(ciProblem(ci, undefined, { legacy: false }), /recorded in docs\/ci-scope-first-runs\.toml/);
-  const without = planCode(ci).filter((l) => !OLD_LINE.test(l));
-  assert.equal(ciProblem(null, without, { legacy: false }), null);
-  assert.match(ciProblem(null, without, { legacy: true }), /report-only phase/);
+  // Each producer's real plan code without its old line, and with its old block (the fixture) put back, in either phase.
+  const pair = (code, block) => {
+    const without = code.filter((l) => !OLD_LINE.test(l));
+    return { without, withOld: [...without, ...block] };
+  };
+  const ci = pair(planCode(text('ci.yml')), CI_OLD_BLOCK);
+  assert.equal(ciProblem(null, ci.withOld, { legacy: true }), null);
+  assert.match(ciProblem(null, ci.withOld, { legacy: false }), /recorded in docs\/ci-scope-first-runs\.toml/);
+  assert.equal(ciProblem(null, ci.without, { legacy: false }), null);
+  assert.match(ciProblem(null, ci.without, { legacy: true }), /report-only phase/);
+  const producers = [
+    [pair(planCode(text('debrief.yml')), DEBRIEF_OLD_BLOCK), { file: 'debrief.yml', app: 'debrief', sinceRun: true }],
+    [pair(codeLines(actionText()), ACTION_OLD_BLOCK), { file: 'x', app: '"$APP"', workflowArg: '"$WORKFLOW"', full: '"$PLAN_MODE_FULL"', runOutput: RUN_OUTPUT }],
+  ];
+  for (const [{ without, withOld }, opts] of producers) {
+    assert.equal(scopeProblem(withOld, { ...opts, legacy: true }), null, opts.file);
+    assert.match(scopeProblem(withOld, { ...opts, legacy: false }), /still writes a verdict/, opts.file);
+    assert.equal(scopeProblem(without, { ...opts, legacy: false }), null, opts.file);
+    assert.match(scopeProblem(without, { ...opts, legacy: true }), /report-only phase/, opts.file);
+  }
 });
 
 test('while it is printed the old line still decides tags, so its conditions hold (the report-only phase, run in bash)', () => {
-  // ci.yml: a push to main's scope, WebKit included, never an app-only dispatch, a rerun or a reused run.
-  const ci = verdictSnippet(planCode(text('ci.yml')));
-  const sayCi = (env) => runSnippet(ci, { PLAN_SINCE_RUN: '', PLAN_MODE_FULL: 'true', PLAN_REUSE: '', PLAN_WEBKIT: '', PLAN_APP: '', EVENT: 'workflow_dispatch', ...env });
-  assert.equal(sayCi({}), 'plan verdict: complete=false');
-  assert.equal(sayCi({ PLAN_WEBKIT: '1' }), 'plan verdict: complete=true');
-  assert.equal(sayCi({ EVENT: 'push' }), 'plan verdict: complete=true');
-  assert.equal(sayCi({ PLAN_APP: 'dyno', PLAN_WEBKIT: '1' }), 'plan verdict: complete=false');
-  assert.equal(sayCi({ PLAN_WEBKIT: '1', PLAN_SINCE_RUN: '8001' }), 'plan verdict: complete=false');
-  assert.equal(sayCi({ EVENT: 'push', PLAN_REUSE: 'true' }), 'plan verdict: complete=false');
-  assert.equal(sayCi({ EVENT: 'push', PLAN_MODE_FULL: 'false' }), 'plan verdict: complete=false');
+  // Each producer only while it prints the line (it is not in docs/ci-scope-first-runs.toml); a recorded one has deleted it and the
+  // declared scope decides (ci.yml since run 8869).
   // debrief.yml: it decided `run` itself, so run=false (a skip, a tagged commit, a reuse) and a rerun are not complete.
-  const debrief = verdictSnippet(planCode(text('debrief.yml')));
-  const sayDebrief = (env) => runSnippet(debrief, { run: 'true', PLAN_MODE_FULL: 'true', PLAN_SINCE_RUN: '', ...env });
-  assert.equal(sayDebrief({}), 'plan verdict: complete=true');
-  assert.equal(sayDebrief({ run: 'false' }), 'plan verdict: complete=false');
-  assert.equal(sayDebrief({ PLAN_SINCE_RUN: '8001' }), 'plan verdict: complete=false');
-  assert.equal(sayDebrief({ PLAN_MODE_FULL: 'false' }), 'plan verdict: complete=false');
+  if (legacyPhase('debrief.yml')) {
+    const debrief = verdictSnippet(planCode(text('debrief.yml')));
+    const sayDebrief = (env) => runSnippet(debrief, { run: 'true', PLAN_MODE_FULL: 'true', PLAN_SINCE_RUN: '', ...env });
+    assert.equal(sayDebrief({}), 'plan verdict: complete=true');
+    assert.equal(sayDebrief({ run: 'false' }), 'plan verdict: complete=false');
+    assert.equal(sayDebrief({ PLAN_SINCE_RUN: '8001' }), 'plan verdict: complete=false');
+    assert.equal(sayDebrief({ PLAN_MODE_FULL: 'false' }), 'plan verdict: complete=false');
+  }
   // The plan action: complete only for a run with run and full both true.
-  const action = verdictSnippet(codeLines(actionText()));
-  const sayAction = (env) => runSnippet(action, { run: 'true', PLAN_MODE_FULL: 'true', ...env });
-  assert.equal(sayAction({}), 'plan verdict: complete=true');
-  assert.equal(sayAction({ run: 'false' }), 'plan verdict: complete=false');
-  assert.equal(sayAction({ PLAN_MODE_FULL: 'false' }), 'plan verdict: complete=false');
+  if (legacyPhase('plan-action')) {
+    const action = verdictSnippet(codeLines(actionText()));
+    const sayAction = (env) => runSnippet(action, { run: 'true', PLAN_MODE_FULL: 'true', ...env });
+    assert.equal(sayAction({}), 'plan verdict: complete=true');
+    assert.equal(sayAction({ run: 'false' }), 'plan verdict: complete=false');
+    assert.equal(sayAction({ PLAN_MODE_FULL: 'false' }), 'plan verdict: complete=false');
+  }
 });
 
 test('the old-line check sees a missing, early or unguarded line (positive control)', () => {

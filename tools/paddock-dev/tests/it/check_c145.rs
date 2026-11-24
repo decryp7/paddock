@@ -34,15 +34,15 @@ const GOOD: &str = "# Paddock lessons\n\nIntro.\n\n## One (2026-11-20)\n- a\n\n#
 const GLUED: &str = "# Paddock lessons\n\nIntro.\n\n## One (2026-11-20)\n- a\n## Two\n- b\n";
 
 #[test]
-fn c145_flags_a_heading_glued_to_the_section_above_as_a_warning() {
+fn c145_flags_a_heading_glued_to_the_section_above_as_an_error() {
     let tree = tree_of(&[("docs/lessons.md", GLUED)]);
     let r = run_checks(&options(tree.path(), "fixture"), &registry()).unwrap();
     let got: Vec<(&str, usize, &str)> = r.findings.iter().map(|f| (f.file.as_str(), f.line, f.message.as_str())).collect();
     assert_eq!(got.len(), 1, "{got:?}");
     assert_eq!((got[0].0, got[0].1), ("docs/lessons.md", 7), "{got:?}");
     assert!(got[0].2.contains("not preceded by a blank line"), "{got:?}");
-    assert_eq!(r.errors(), 0, "report-only until its first green run (ER-41)");
-    assert_eq!(r.warnings(), 1);
+    assert_eq!(r.errors(), 1, "blocking since ci.yml 8869 (ER-41)");
+    assert_eq!(r.warnings(), 0);
 }
 
 #[test]

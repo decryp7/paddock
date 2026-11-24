@@ -3,7 +3,7 @@
 //! `Command`, and both note every command they make here; a test asserts the count in one line, after Django's
 //! `assertNumQueries`:
 //!
-//! ```
+//! ```text
 //! use paddock_env::starts::{assert_starts, at_most};
 //! # fn delete_all(ids: &[&str]) { let _ = paddock_env::command::command("git").args(ids); }
 //! assert_starts(1, || delete_all(&["a", "b", "c"])); // N items, one process

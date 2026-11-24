@@ -9,10 +9,9 @@
 //! The checkout must be the merge result (the gates run in it, as the generator step does): the integrator has just merged the
 //! member in their own worktree, so HEAD is the merge. Any other checkout is NOT MEASURED, never a pass (ER-33).
 //!
-//! **Report-only until the first green run (ER-41, D3 (a)).** While [`ENFORCED`] is false the result is printed and the exit code
-//! is unchanged, with a `::warning::` line that says the member would be sent back. The first green run on a real train is
-//! recorded in ADR 0098 (WP-1) by the train's head; the change that records it flips [`ENFORCED`], and a failing gate then
-//! exits 5 (a gate that could not look, 6), which is the integrator's cue to take the member out and send it back.
+//! **Blocking since 2026-11-24 (user, recorded in ADR 0098's status).** A failing gate exits 5 (a gate that could not look, 6),
+//! which is the integrator's cue to take the member out and send it back. It was report-only from 2026-11-13 (ER-41, D3 (a)): the
+//! result printed with a `::warning::` and the exit code unchanged; [`ENFORCED`] false restores that.
 
 use super::generator_step::{Step, checkout_problem};
 use super::{Merge, git::Git, short};
@@ -22,8 +21,9 @@ use serde_json::json;
 use std::path::Path;
 use std::time::Duration;
 
-/// Whether a failing member gate changes the exit code. False until ADR 0098 records the first green run on a real train.
-pub const ENFORCED: bool = false;
+/// Whether a failing member gate changes the exit code: true since the user's decision of 2026-11-24 (ADR 0098's status). No first
+/// green run on a real train was recorded (ER-41's record, D3 (a)): the user flipped it on the check-value audit's evidence instead.
+pub const ENFORCED: bool = true;
 
 /// An outer bound on the gate run (ER-32). `check --pre-push` has no total of its own: each row has its own cap on its own run time
 /// ([`ROW_CAP`](crate::pre_push::exec::ROW_CAP) and the grace beyond it for the stack capture), and a wait for the heavy slot goes on
@@ -214,9 +214,9 @@ fn interpret(answer: Result<GateRun, String>, base: &str, enforced: bool, subjec
     }
 }
 
-// Flip ENFORCED only in the change that records the first green train run in ADR 0098 (this fails the build until it is decided).
+// ENFORCED is the user's decision recorded in ADR 0098's status (2026-11-24); turning it off again is a change of that record too.
 #[cfg(test)]
-const _: () = assert!(!ENFORCED);
+const _: () = assert!(ENFORCED);
 
 #[cfg(test)]
 mod tests {
