@@ -45,18 +45,18 @@ fn host<'a>(os: &'a str, cores: &'a str, ram: &'a str) -> Vec<(&'a str, &'a str)
 }
 
 #[test]
-fn the_shared_mac_gets_a_third_of_its_cores_and_eight_test_threads() {
+fn the_shared_mac_gets_a_third_of_its_cores_and_four_test_threads() {
     let r = build_jobs(&host("macOS", "14", "65536"), None, true);
     assert_eq!(r.code, 0, "{}", r.stderr);
     assert_eq!(
         r.env_file,
-        "CARGO_BUILD_JOBS=4\nNEXTEST_TEST_THREADS=8\nPADDOCK_E2E_WORKERS=4\nVITEST_MAX_WORKERS=4\n"
+        "CARGO_BUILD_JOBS=4\nNEXTEST_TEST_THREADS=4\nPADDOCK_E2E_WORKERS=4\nVITEST_MAX_WORKERS=4\n"
     );
     assert_eq!(
         r.stderr,
         "build-jobs: this host: 14 cores, 65536 MB of RAM, runner class macOS\n\
          build-jobs: CARGO_BUILD_JOBS=4 ((14 cores - 2 kept) / 3 jobs per host; the macOS class default of 3 jobs per host / 1 builds at once)\n\
-         build-jobs: NEXTEST_TEST_THREADS=8 (the macOS class's measured test threads / 1 test runs at once)\n\
+         build-jobs: NEXTEST_TEST_THREADS=4 ((14 cores - 2 kept) / 3 jobs per host / 1 test runs at once)\n\
          build-jobs: PADDOCK_E2E_WORKERS=4 ((14 cores - 2 kept) / 3 jobs per host / 1 test runs at once)\n\
          build-jobs: VITEST_MAX_WORKERS=4 ((14 cores - 2 kept) / 3 jobs per host / 1 test runs at once)\n"
     );
@@ -84,7 +84,7 @@ fn memory_is_the_ceiling_when_it_is_smaller_than_the_cores() {
     let r = build_jobs(&vars, None, true);
     assert_eq!(
         r.env_file,
-        "CARGO_BUILD_JOBS=1\nNEXTEST_TEST_THREADS=8\nPADDOCK_E2E_WORKERS=4\nVITEST_MAX_WORKERS=4\n"
+        "CARGO_BUILD_JOBS=1\nNEXTEST_TEST_THREADS=4\nPADDOCK_E2E_WORKERS=4\nVITEST_MAX_WORKERS=4\n"
     );
     assert!(
         r.stderr
@@ -128,7 +128,7 @@ fn without_a_github_env_the_assignments_are_printed() {
     let r = build_jobs(&host("macOS", "14", "65536"), None, false);
     assert!(
         r.stdout
-            .starts_with("CARGO_BUILD_JOBS=4\nNEXTEST_TEST_THREADS=8\nPADDOCK_E2E_WORKERS=4\nVITEST_MAX_WORKERS=4\n"),
+            .starts_with("CARGO_BUILD_JOBS=4\nNEXTEST_TEST_THREADS=4\nPADDOCK_E2E_WORKERS=4\nVITEST_MAX_WORKERS=4\n"),
         "{}",
         r.stdout
     );

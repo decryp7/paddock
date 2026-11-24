@@ -19,7 +19,7 @@
 //!    share, `(RAM - PADDOCK_CI_RESERVED_RAM_MB) / (PADDOCK_CI_JOBS_PER_HOST x PADDOCK_CI_RUSTC_MB)`, divided by the split, at
 //!    least 1. Without the `runner.envs` the runner class's known layout decides ([`class_default`]); Linux is d-gtr9's layout (6 jobs
 //!    on 30 cores, [`layout_cores`]; a different core count is a warning).
-//! 3. NEXTEST_TEST_THREADS: the runner's `PADDOCK_CI_TEST_THREADS`, else the class's measured number, else the job's core share.
+//! 3. NEXTEST_TEST_THREADS: the runner's `PADDOCK_CI_TEST_THREADS`, else the job's core share (no class has a fixed number).
 //! 4. PADDOCK_E2E_WORKERS (Playwright's workers, read by `e2eWorkers` of `@decryp7/paddock-e2e`) and VITEST_MAX_WORKERS (Vitest reads
 //!    it itself): the runner's `PADDOCK_CI_TEST_WORKERS`, else the job's core share. Both are browsers or test processes that each
 //!    use a core, so lanes x workers must stay within the host's cores (ER-48); with the runner's number a host where that does not
@@ -178,12 +178,11 @@ pub fn class_default(os: &str, what: Setting) -> &'static str {
         // compile in ci.yml 9.4 -> 17.6 job-min): docs/benchmarks.md, "CI job cost, step by step".
         ("Linux", Setting::Share) => "6",
         ("Windows", Setting::Share) => "3",
-        // macOS measured 8 (the tests mostly wait). Windows has no measured number: it takes the job's core share (16 / 3 = 5),
-        // because 3 jobs x 8 threads plus a 5-job build oversubscribed the 16 vCPUs and git-heavy tests ran 2-8 times slower
-        // (runs 8335 against 8359).
-        // ER-48 exception, measured: 3 jobs x 8 threads on 12 usable cores. The tests mostly wait; 4 threads made a dyno run 2.3
-        // times longer than 14 and 8 matched 14 (2026-11-09, docs/benchmarks.md, "CI share on the shared Mac").
-        ("macOS", Setting::Threads) => "8",
+        // No class has a measured test-thread number: each takes the job's core share ((cores - kept) / jobs per host), so
+        // lanes x threads stays within the cores (ER-48). Windows: 16 / 3 = 5, because 3 jobs x 8 threads plus a 5-job build
+        // oversubscribed the 16 vCPUs and git-heavy tests ran 2-8 times slower (runs 8335 against 8359). macOS: (14 - 2) / 3 = 4;
+        // its former 8 threads (3 x 8 = 24 on 12 usable cores) rested on one dyno lib run alone, not on three lanes at once, and
+        // is gone (2026-11-24, user: "cut the Mac now"; the cost of 4 threads there is the 47.8 s against 15.7 s in docs/benchmarks.md).
         ("macOS", Setting::Share) => "3",
         ("macOS", Setting::Cores) => "2",
         ("macOS", Setting::Ram) => "32768",
@@ -525,12 +524,12 @@ mod tests {
     }
 
     #[test]
-    fn the_shared_mac_gets_a_third_of_its_cores_and_the_measured_test_threads() {
+    fn the_shared_mac_gets_a_third_of_its_usable_cores_for_builds_and_for_test_threads() {
         let (code, out, err) = go("1", &Fixed("14", "65536"), &[("RUNNER_OS", "macOS")]);
         assert_eq!(code, 0);
         assert_eq!(
             out,
-            "CARGO_BUILD_JOBS=4\nNEXTEST_TEST_THREADS=8\nPADDOCK_E2E_WORKERS=4\nVITEST_MAX_WORKERS=4\n"
+            "CARGO_BUILD_JOBS=4\nNEXTEST_TEST_THREADS=4\nPADDOCK_E2E_WORKERS=4\nVITEST_MAX_WORKERS=4\n"
         );
         assert!(
             err.contains("build-jobs: this host: 14 cores, 65536 MB of RAM, runner class macOS"),
@@ -641,17 +640,11 @@ mod tests {
                 !oversubscribed(share, workers, cores_n - kept),
                 "{os}: {share} jobs x {workers} e2e and vitest workers on {cores} cores"
             );
-            // macOS is a recorded, measured exception: 8 test threads in each of 3 jobs on 12 usable cores, because its tests
-            // mostly wait (2026-11-09, docs/benchmarks.md, "CI share on the shared Mac": 4 threads made a dyno run 2.3 times
-            // longer, 8 matched 14).
-            if os == "macOS" {
-                assert_eq!(threads, 8, "the recorded exception changed: update the measurement note");
-            } else {
-                assert!(
-                    !oversubscribed(share, threads, cores_n - kept),
-                    "{os}: {share} jobs x {threads} test threads on {cores} cores"
-                );
-            }
+            // No exception: macOS's former 8 threads (3 x 8 on 12 usable cores) were removed on 2026-11-24.
+            assert!(
+                !oversubscribed(share, threads, cores_n - kept),
+                "{os}: {share} jobs x {threads} test threads on {cores} cores"
+            );
         }
     }
 
@@ -660,6 +653,25 @@ mod tests {
         // Positive control: Windows before 2026-11-20 ran 3 jobs x 8 threads on 16 cores (runs 8335 against 8359).
         assert!(oversubscribed(3, 8, 16));
         assert!(!oversubscribed(3, 5, 16));
+        // The same for the shared Mac before 2026-11-24: 3 jobs x 8 threads on the 12 cores left after the 2 kept for agents.
+        assert!(oversubscribed(3, 8, 14 - 2));
+        assert!(!oversubscribed(3, 4, 14 - 2));
+    }
+
+    /// The layout data, not a copy of it: every class's lanes x build jobs and lanes x test threads fit its usable cores, and a
+    /// class table that gave a class a fixed thread count above its share would fail here (positive control below).
+    #[test]
+    fn the_class_table_has_no_fixed_test_threads_that_break_the_core_share() {
+        for (os, cores) in [("Linux", 30), ("Windows", 16), ("macOS", 14)] {
+            let fixed = class_default(os, Setting::Threads);
+            if fixed != "-" {
+                let share: i64 = class_default(os, Setting::Share).parse().unwrap();
+                let kept: i64 = class_default(os, Setting::Cores).parse().unwrap();
+                let t: i64 = fixed.parse().unwrap();
+                assert!(!oversubscribed(share, t, cores - kept), "{os}: fixed {t} test threads x {share} jobs on {cores} cores");
+            }
+            assert_eq!(layout_cores(os), Some(cores), "{os}: the cores this test assumes are the layout's");
+        }
     }
 
     #[test]
@@ -716,7 +728,7 @@ mod tests {
     fn a_negative_share_still_gives_one_job() {
         let (_, out, _) = go("1", &Fixed("2", "8192"), &[("RUNNER_OS", "macOS")]);
         assert!(
-            out.contains("CARGO_BUILD_JOBS=1\n") && out.contains("NEXTEST_TEST_THREADS=8"),
+            out.contains("CARGO_BUILD_JOBS=1\n") && out.contains("NEXTEST_TEST_THREADS=1"),
             "{out}"
         );
     }
