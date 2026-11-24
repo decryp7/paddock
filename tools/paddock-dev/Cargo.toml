@@ -26,6 +26,8 @@ serde_json = { version = "1", features = ["preserve_order"] }
 regex = "1"
 # ci_isolation: the {src} key of a kept build folder (ADR 0025 amendment); release_isolation: SHA-256 of the .crate archives.
 sha2 = "0.10"
+# escape: the job token as the basic `http.extraheader` actions/checkout sends, for the push of the plan records.
+base64 = "0.23"
 # The repository graph's TypeScript and JavaScript import edges (repo_model/ts.rs, ADR 0117 §10): oxc's parser and resolver resolve
 # tsconfig paths and package exports, which a text scan cannot. They live here, not in paddock-repo-graph: as optional crate deps
 # they changed paddock-workspace-hack, and oxc_resolver turns on serde_json's preserve_order, which --all-features unified into

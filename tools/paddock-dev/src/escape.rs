@@ -187,6 +187,15 @@ pub fn prune(store: &dyn Store, now: i64) -> Result<Vec<String>, String> {
 /// The prefix of the refs that hold the records.
 pub const REF_PREFIX: &str = "refs/paddock/plan-records/";
 
+/// The job's token for git over http: `PLAN_TOKEN`, then `GITEA_TOKEN` (the plan step has the first; empty means none).
+pub fn job_token(env: &dyn Fn(&str) -> Option<String>) -> Option<String> {
+    ["PLAN_TOKEN", "GITEA_TOKEN"]
+        .iter()
+        .filter_map(|k| env(k))
+        .map(|t| t.trim().to_string())
+        .find(|t| !t.is_empty())
+}
+
 /// Records as blobs under [`REF_PREFIX`] in a repository: a ref per commit, so a fetch of the prefix brings them all and a push
 /// shares them (best effort; a record that was not pushed is `Missing` to the nightly, which is `not measured`).
 pub struct GitRefs<'a> {
@@ -201,9 +210,28 @@ impl GitRefs<'_> {
         c
     }
 
+    /// A git command that talks to `origin`: with a token, the header actions/checkout sends (`AUTHORIZATION: basic` of
+    /// `x-access-token:<token>`) as `http.extraheader` in git's environment only, never on the command line. The plan job checks out
+    /// with `persist-credentials: false`, so without it the push asked for a user name and failed (ci.yml 8976). Never a prompt.
+    fn remote(&self, token: Option<&str>) -> std::process::Command {
+        use base64::Engine;
+        let mut c = self.git();
+        c.env("GIT_TERMINAL_PROMPT", "0");
+        if let Some(t) = token {
+            let basic = base64::engine::general_purpose::STANDARD.encode(format!("x-access-token:{t}"));
+            c.env("GIT_CONFIG_COUNT", "1")
+                .env("GIT_CONFIG_KEY_0", "http.extraheader")
+                .env("GIT_CONFIG_VALUE_0", format!("AUTHORIZATION: basic {basic}"));
+        }
+        c
+    }
+
     fn run(&self, args: &[&str], stdin: Option<&[u8]>) -> Result<std::process::Output, String> {
+        self.run_in(self.git(), args, stdin)
+    }
+
+    fn run_in(&self, mut cmd: std::process::Command, args: &[&str], stdin: Option<&[u8]>) -> Result<std::process::Output, String> {
         use std::io::Write;
-        let mut cmd = self.git();
         cmd.args(args).stdin(if stdin.is_some() {
             std::process::Stdio::piped()
         } else {
@@ -223,7 +251,8 @@ impl GitRefs<'_> {
     /// Pushes every record ref to `origin`; the error says what to do (a record that is not pushed is not measured, never clean).
     pub fn push(&self) -> Result<(), String> {
         let spec = format!("{REF_PREFIX}*:{REF_PREFIX}*");
-        let o = self.run(&["push", "--quiet", "origin", &spec], None)?;
+        let token = job_token(&|k| std::env::var(k).ok());
+        let o = self.run_in(self.remote(token.as_deref()), &["push", "--quiet", "origin", &spec], None)?;
         if o.status.success() {
             Ok(())
         } else {
@@ -234,7 +263,8 @@ impl GitRefs<'_> {
     /// Fetches every record ref of `origin`.
     pub fn fetch(&self) -> Result<(), String> {
         let spec = format!("+{REF_PREFIX}*:{REF_PREFIX}*");
-        let o = self.run(&["fetch", "--quiet", "origin", &spec], None)?;
+        let token = job_token(&|k| std::env::var(k).ok());
+        let o = self.run_in(self.remote(token.as_deref()), &["fetch", "--quiet", "origin", &spec], None)?;
         if o.status.success() {
             Ok(())
         } else {
