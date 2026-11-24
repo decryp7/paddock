@@ -30,6 +30,8 @@
 #               outputs as covered. Keep these few: each one is a known gap.
 #   requires    files that must exist for the check to be possible on this tree (a script that is on another branch, an installed
 #               tool folder). A missing one is NOT MEASURED ("not on this tree"), never a pass (ER-33).
+#   setup       the command, run from the repository root, that installs or builds what the check needs: a NOT MEASURED result
+#               prints it as the next step (a fresh worktree has no node_modules, ui/dist or libduckdb; seen three times).
 #
 # Comparable practice (ER-37): Nx and turborepo declare each task's inputs and outputs and run what a change touches; Bazel
 # checks each generated file with a diff_test; `cargo hakari verify` and `cargo metadata --locked` are each one tool's own check.
@@ -198,6 +200,7 @@ regenerate = "none: fix what it names (a version, a manifest), then `npm run bui
 paths = ["crates/*/Cargo.toml", "crates/Cargo.lock", "ui/projects/paddock-ui/**", "ui/package.json", "scripts/publish.mjs"]
 outputs = []
 cost = "heavy"
+setup = "npm ci && npm run build -w ui && npm run build:e2e -w ui"
 requires = ["ui/dist/paddock-ui/package.json", "ui/dist/paddock-e2e/package.json"]
 
 # ---- the conformance run and its baselines -----------------------------------------------------------------------------
@@ -223,6 +226,7 @@ cwd = "ui"
 paths = ["ui/projects/paddock-ui/**", "ui/projects/shell-demo/**", "ui/paddock-i18n.json", "ui/package.json"]
 outputs = ["ui/projects/paddock-ui/i18n/*", "ui/projects/shell-demo/src/locale/*"]
 cost = "fast"
+setup = "npm ci && npm run build -w ui"
 requires = ["node_modules/.bin/ng", "ui/dist/paddock-ui/package.json"]
 
 [[generator]]
@@ -234,6 +238,7 @@ cwd = "apps/debrief/app"
 paths = ["apps/debrief/app/src/**", "apps/debrief/app/scripts/i18n/**", "ui/projects/paddock-ui/**"]
 outputs = ["apps/debrief/app/src/locale/*"]
 cost = "heavy"
+setup = "npm ci && npm run build -w ui"
 requires = ["node_modules/.bin/ng", "ui/dist/paddock-ui/package.json"]
 
 # ---- notices ---------------------------------------------------------------------------------------------------------------
@@ -248,6 +253,7 @@ requires = ["node_modules/@angular/core/package.json"]   # a full root `npm ci`:
 paths = ["apps/debrief/Cargo.lock", "apps/debrief/paddock.ci.json", "apps/debrief/app/src-tauri/resources/THIRD_PARTY_NOTICES.md", "package-lock.json", "conformance/src/notices/**", "conformance/bin/paddock-notices.mjs"]
 outputs = ["apps/debrief/app/src-tauri/resources/THIRD_PARTY_NOTICES.md"]
 cost = "heavy"
+setup = "npm ci && cargo install cargo-about --version 0.9.2 --locked --features cli"
 
 [[generator]]
 id = "notices-dyno"
@@ -259,6 +265,7 @@ requires = ["node_modules/@angular/core/package.json"]   # a full root `npm ci`:
 paths = ["apps/dyno/Cargo.lock", "apps/dyno/paddock.ci.json", "apps/dyno/app/src-tauri/resources/THIRD_PARTY_NOTICES.md", "package-lock.json", "conformance/src/notices/**", "conformance/bin/paddock-notices.mjs"]
 outputs = ["apps/dyno/app/src-tauri/resources/THIRD_PARTY_NOTICES.md"]
 cost = "heavy"
+setup = "npm ci && cargo install cargo-about --version 0.9.2 --locked --features cli"
 
 [[generator]]
 id = "notices-pitwall"
@@ -270,6 +277,7 @@ requires = ["node_modules/@angular/core/package.json"]   # a full root `npm ci`:
 paths = ["apps/pitwall/Cargo.lock", "apps/pitwall/paddock.ci.json", "apps/pitwall/app/src-tauri/resources/THIRD_PARTY_NOTICES.md", "package-lock.json", "conformance/src/notices/**", "conformance/bin/paddock-notices.mjs"]
 outputs = ["apps/pitwall/app/src-tauri/resources/THIRD_PARTY_NOTICES.md"]
 cost = "heavy"
+setup = "npm ci && cargo install cargo-about --version 0.9.2 --locked --features cli"
 
 # ---- code generated from Rust (ts-rs, tables, specs) -------------------------------------------------------------------
 
@@ -283,6 +291,7 @@ cwd = "apps/debrief"
 paths = ["apps/debrief/crates/**/*.rs", "apps/debrief/app/src-tauri/**/*.rs", "apps/debrief/**/Cargo.toml", "apps/debrief/Cargo.lock"]
 outputs = ["apps/debrief/app/src/app/core/generated/*.ts"]
 cost = "heavy"
+setup = "cd apps/debrief && cargo xtask libduckdb"
 drift_marker = ["test result: FAILED"]
 
 [[generator]]
@@ -428,6 +437,7 @@ regenerate = "node conformance/bin/paddock-check-lists.mjs   # then commit what 
 paths = ["conformance/src/checks/*", "conformance/paddock.ci.json", "conformance/README.md", "conformance/src/derived-lists.mjs", "conformance/bin/paddock-check-lists.mjs"]
 outputs = ["conformance/src/checks/index.mjs", "conformance/paddock.ci.json", "conformance/README.md"]   # the last two in part: `conformance.only` and the README's check index
 cost = "fast"
+setup = "npm ci"
 requires = ["node_modules/.package-lock.json"]   # the modules are imported to check their ids (they import yaml)
 
 [[generator]]
