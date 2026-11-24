@@ -176,6 +176,13 @@ name = "ci-scope-register"
 files = ["docs/ci-scope-first-runs.toml"]
 reaches = ["project:paddock-dev"]
 
+[[input]]
+# The active apps of train and branch CI (tools/paddock-dev/src/active_apps.rs, its one accessor): the planner, `ci scope` and
+# `ci verdict` read it, and so do the tag scripts of conformance/ci (release-verdict.mjs, request-tag.mjs).
+name = "ci-active-apps"
+files = ["docs/ci-active-apps.toml"]
+reaches = ["project:paddock-dev", "project:conformance"]
+
 # The pins of the features Cargo resolves for watched crates (`./dev locks guard`, run by the crates job and train gates).
 [[input]]
 name = "shared-crate-features"
