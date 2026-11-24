@@ -28,8 +28,7 @@ by naming one test: a waiver with a longer budget, or one more name in the `repo
 
 The integrator's measured run on 2026-11-24 (fix/graph-train-r5-repo-graph-group, docs/benchmarks.md) found 15 tests that ran
 `cargo metadata` outside the group, 7 of them over the real tree. Two causes are mixed in the table: **contention** (cargo's lock: 1, 5,
-6) and **CPU under a shared host** (2, 3, 7: on the shared Mac a job has 8 test threads on a 4-core share, the ER-48 exception measured
-for tests that mostly wait; whole-tree tests do not wait, they compute, so eight of them at once over-subscribe the share). Making single
+6) and **CPU under a shared host** (2, 3, 7: on the shared Mac a job had 8 test threads on a 4-core share, the ER-48 exception removed on 2026-11-24; whole-tree tests do not wait, they compute, so eight of them at once over-subscribe the share). Making single
 tests cheaper (4, 5) is right and stays right (ER-20), but does not stop the next one.
 
 ## Common practice
@@ -123,10 +122,10 @@ selected by lists of test names.
      the class's threads, and `ci test-cost` reports any of them that grows past a quarter of its stop. The member-audits filter keeps
      its clauses with an optional `tree_`; the ci-run golden's regenerate command names the renamed test (ER-40: regenerated, not
      edited). No baseline list.
-10. **ER-48 on the shared Mac, stated.** build-jobs gives a macOS job 8 test threads on a 4-core share, the measured exception for tests
-   that mostly wait. The class tests are the ones that compute: with two threads each and two per group, at most four of them run in a
-   job (8 threads), which is the job's 4 cores; three Mac jobs then keep their busy tests within the 12 usable cores. On Linux and Windows
-   (5 threads, the core share) at most two run. The exception for waiting tests is unchanged; nothing per machine is set by hand.
+10. **ER-48 on the shared Mac, stated.** build-jobs gives a macOS job 4 test threads, its share of the 12 usable cores (the former 8-thread
+   exception was removed on 2026-11-24). The class tests are the ones that compute: with two threads each and two per group, at most
+   two of them run in a job (4 threads), the job's 4 cores; three Mac jobs then keep their busy tests within the 12 usable cores. On Linux and Windows
+   (5 threads, the core share) at most two run. There is no exception for waiting tests any more; nothing per machine is set by hand.
 
 ## Consequences
 

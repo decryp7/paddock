@@ -35,7 +35,10 @@
 #                                                 old 8-core, 16 GB host: 2 build jobs and 2 test threads.
 #        macOS    3          2           32 GB    d7-mac-mini, -2 and -3 (2026-11-08), three runners of capacity 1 on the
 #                                                 developer Mac its agents share: (14 - 2) / 3 = 4 build jobs per job,
-#                                                 the 4 each job had before, and 8 test threads (below). Measured
+#                                                 the 4 each job had before, and 4 test threads (below; 8 until 2026-11-24). Reserve: 2 cores for the agents' own
+#                                                 work and the system, a choice (agents cap themselves at 2 build jobs each, so
+#                                                 more than 1 busy agent still oversubscribes; the lane count is the runner's).
+#                                                 Measured
 #                                                 2026-11-09 (docs/benchmarks.md, "CI share on the shared Mac"): 23 busy
 #                                                 threads besides a CPU-bound test (3 x 4 rustc plus 10 for the agents)
 #                                                 slowed it from 2.7 to 4.0 s, so the share does not explain the 60 s
@@ -44,8 +47,9 @@
 #                                                 reproduced (ER-28), and the cause is still open.
 #
 # NEXTEST_TEST_THREADS, written with CARGO_BUILD_JOBS and divided by <split>: a runner's PADDOCK_CI_TEST_THREADS
-# (runner.envs), else the class's measured number (macOS 8: the tests mostly wait, so the 4 cores of the share made a dyno
-# run 2.3 times longer than 14 threads, and 8 matched 14; Windows has no measured number and takes the job's core share (3 jobs x 8 threads oversubscribed its 16 vCPUs, runs 8335 against 8359); docs/benchmarks.md, "CI share on the shared Mac"), else the job's
+# (runner.envs), else the job's core share, no class has a fixed number (macOS had 8 until 2026-11-24: 3 jobs x 8 threads on 12
+# usable cores; its measurement was one dyno lib run alone, 47.8 s at 4 threads against 15.7 s at 8, not three lanes at once, docs/benchmarks.md,
+# "CI share on the shared Mac"; Windows: 3 jobs x 8 threads oversubscribed its 16 vCPUs, runs 8335 against 8359), i.e. the job's
 # core share ((cores - kept) / jobs per host, not capped by RAM: that ceiling is per rustc; PADDOCK_CI_BUILD_JOBS stands in
 # for it). Left unset where CARGO_BUILD_JOBS is (nextest then runs the profile's num-cpus).
 #
@@ -116,9 +120,6 @@ class_default() { # <share|cores|ram>
     macOS:doc_cores) echo 14 ;;
     *:doc_cores) echo - ;;
     Windows:share) echo 3 ;;
-    # ER-48 exception, measured: 3 jobs x 8 threads on 12 usable cores. The tests mostly wait; 4 threads made a dyno run 2.3 times
-    # longer than 14 and 8 matched 14 (2026-11-09, docs/benchmarks.md, "CI share on the shared Mac").
-    macOS:threads) echo 8 ;;
     macOS:share) echo 3 ;;
     macOS:cores) echo 2 ;;
     macOS:ram) echo 32768 ;;
@@ -135,7 +136,7 @@ put() { # <name> <value> <why>
 }
 emit() { put CARGO_BUILD_JOBS "$@"; }
 # emit_threads <threads> <why>: nextest's test threads (NEXTEST_TEST_THREADS overrides the profile's num-cpus): the
-# runner's PADDOCK_CI_TEST_THREADS, else the class's measured number, else the given share; divided by the split.
+# runner's PADDOCK_CI_TEST_THREADS, else the given share; divided by the split.
 emit_threads() {
   local t="$1" why="$2" class
   class="$(class_default threads)"

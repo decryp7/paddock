@@ -603,6 +603,9 @@ Quoted by `conformance/ci/build-jobs.sh` (the macOS layout) and the fix/main-aft
 
 - **Used for:** the macOS class defaults in `conformance/ci/build-jobs.sh`: 3 jobs per host, 2 cores kept (4 build
   jobs per job) and 8 test threads (`NEXTEST_TEST_THREADS`), the fewest threads that matched 14 in the dyno lib run.
+- **Superseded 2026-11-24:** the 8 test threads were removed (3 jobs × 8 threads on 12 usable cores broke ER-48, and this block measured one project's
+  lib tests alone, single runs, never three lanes at once, so it does not support an exception). macOS now takes the core share, 4. The cost the
+  block shows for it, 47.8 s against 15.7 s for the dyno lib tests, is accepted by the user's decision of 2026-11-24 ("cut the Mac now").
 - **Notes:** 3 jobs × 4 rustc plus about 10 agent threads is 22 busy threads, which slowed the probe by about 1.5 times, not
   the 20 times seen in run 7775; so the share is not what timed it out, and that timeout is not reproduced here. In the
   job logs the probe took 15–26 s every time its run overlapped dyno-bench's all-core tests (4 of 4) and about 7 s when it

@@ -2118,13 +2118,13 @@ test('build-jobs rejects nonsense and leading zeros (bash would read 010 as 8 an
 
 test('build-jobs logs on stderr, prints only the assignments, appends it to GITHUB_ENV, and probes this machine', () => {
   const r = buildJobs(MAC);
-  assert.equal(r.stdout, 'CARGO_BUILD_JOBS=4\nNEXTEST_TEST_THREADS=8\nPADDOCK_E2E_WORKERS=4\nVITEST_MAX_WORKERS=4\n');
+  assert.equal(r.stdout, 'CARGO_BUILD_JOBS=4\nNEXTEST_TEST_THREADS=4\nPADDOCK_E2E_WORKERS=4\nVITEST_MAX_WORKERS=4\n');
   assert.match(r.stderr, /^build-jobs: this host: 14 cores, 65536 MB of RAM/m);
   const dir = mkdtempSync(join(tmpdir(), 'build-jobs-'));
   const envFile = join(dir, 'env');
   writeFileSync(envFile, '');
   assert.equal(buildJobs({ ...MAC, GITHUB_ENV: envFile }).status, 0);
-  assert.equal(read(envFile), 'CARGO_BUILD_JOBS=4\nNEXTEST_TEST_THREADS=8\nPADDOCK_E2E_WORKERS=4\nVITEST_MAX_WORKERS=4\n');
+  assert.equal(read(envFile), 'CARGO_BUILD_JOBS=4\nNEXTEST_TEST_THREADS=4\nPADDOCK_E2E_WORKERS=4\nVITEST_MAX_WORKERS=4\n');
   rmSync(dir, { recursive: true, force: true });
   // The real probes count something on this machine.
   const real = buildJobs({ RUNNER_OS: 'macOS', PADDOCK_CI_RESERVED_CORES: '0' });
@@ -2133,21 +2133,24 @@ test('build-jobs logs on stderr, prints only the assignments, appends it to GITH
 });
 
 // Three macOS runners share one 14-core Mac, but every job's nextest ran num-cpus (14) tests at once, as if it had the
-// host to itself (seen while investigating run 7775's dyno link::model timeouts, which this does not explain: their cause
-// is still open). NEXTEST_TEST_THREADS (which overrides the profile's
-// test-threads) is now the runner class's measured number (macOS: 8), else the job's core share, the share that sets
-// CARGO_BUILD_JOBS (docs/benchmarks.md, "CI share on the shared Mac": the tests mostly wait, so 4 threads made a run 2.3
-// times longer than 14, and 8 matched 14).
+// host to itself. NEXTEST_TEST_THREADS (which overrides the profile's test-threads) is the runner's number, else the job's
+// core share, the share that sets CARGO_BUILD_JOBS. No class has a fixed number: macOS had 8 until 2026-11-24 (3 jobs x 8 on
+// 12 usable cores, ER-48; one dyno lib run alone, not three lanes at once, docs/benchmarks.md, "CI share on the shared Mac").
 const threadsOf = (r) => /^NEXTEST_TEST_THREADS=(\d+)$/m.exec(r.stdout)?.[1];
-test('build-jobs gives nextest the class\'s measured test threads on the shared Mac, else the job\'s core share', () => {
+test('build-jobs gives nextest the job\'s core share on every class, the runner\'s number winning', () => {
   const r = buildJobs(MAC);
   assert.equal(r.status, 0, r.stderr);
   assert.equal(jobsOf(r), '4', '(14 cores - 2 kept) / 3 jobs per host');
-  assert.equal(threadsOf(r), '8', 'the macOS class measured 8, not the 4 cores of its share');
-  assert.match(r.stderr, /NEXTEST_TEST_THREADS=8 \(the macOS class's measured test threads/);
-  assert.equal(threadsOf(buildJobs({ ...MAC, PADDOCK_CI_JOBS_PER_HOST: '1', PADDOCK_CI_RESERVED_CORES: '0' })), '8');
+  assert.equal(threadsOf(r), '4', '(14 cores - 2 kept) / 3 jobs per host, no fixed class number');
+  assert.match(r.stderr, /NEXTEST_TEST_THREADS=4 \(\(14 cores - 2 kept\) \/ 3 jobs per host/);
+  assert.equal(threadsOf(buildJobs({ ...MAC, PADDOCK_CI_JOBS_PER_HOST: '1', PADDOCK_CI_RESERVED_CORES: '0' })), '14');
+  // ER-48: lanes x threads fit the usable cores on every class (positive control: 3 x 8 on the Mac's 12 would not).
+  for (const [env, lanes, usable] of [[MAC, 3, 12], [LINUX, 6, 30], [{ ...LINUX, RUNNER_OS: 'Windows', PADDOCK_CI_CORES: '16', PADDOCK_CI_RAM_MB: '32768' }, 3, 16]]) {
+    assert.ok(lanes * Number(threadsOf(buildJobs(env))) <= usable, `${env.RUNNER_OS}: lanes x threads within ${usable} cores`);
+  }
+  assert.ok(3 * 8 > 12, 'control: the former macOS layout oversubscribed');
   // A split job (cargo mutants --jobs N) runs N test runs at once: each gets 1/N.
-  assert.equal(threadsOf(buildJobs(MAC, ['2'])), '4');
+  assert.equal(threadsOf(buildJobs(MAC, ['2'])), '2');
   assert.equal(threadsOf(buildJobs(MAC, ['16'])), '1', 'never below one');
   // Elsewhere the job's core share: (8 cores - 0 kept) / 2 jobs per host.
   const shared = { ...LINUX, PADDOCK_CI_CORES: '8', PADDOCK_CI_RAM_MB: '16316', PADDOCK_CI_JOBS_PER_HOST: '2' };
@@ -2168,17 +2171,16 @@ test('build-jobs gives nextest the class\'s measured test threads on the shared 
   const envFile = join(dir, 'env');
   writeFileSync(envFile, '');
   assert.equal(buildJobs({ ...MAC, GITHUB_ENV: envFile }).status, 0);
-  assert.equal(read(envFile), 'CARGO_BUILD_JOBS=4\nNEXTEST_TEST_THREADS=8\nPADDOCK_E2E_WORKERS=4\nVITEST_MAX_WORKERS=4\n');
+  assert.equal(read(envFile), 'CARGO_BUILD_JOBS=4\nNEXTEST_TEST_THREADS=4\nPADDOCK_E2E_WORKERS=4\nVITEST_MAX_WORKERS=4\n');
   rmSync(dir, { recursive: true, force: true });
 });
 
 // ER-48: Playwright's and Vitest's workers each use a core, so lanes x workers stay within the host's cores. PADDOCK_E2E_WORKERS is
-// read by e2eWorkers (ui/projects/paddock-e2e/src/env.ts); Vitest reads VITEST_MAX_WORKERS itself. No class exception: the macOS 8
-// threads are nextest's, measured, and not carried over to browsers.
+// read by e2eWorkers (ui/projects/paddock-e2e/src/env.ts); Vitest reads VITEST_MAX_WORKERS itself. No class exception.
 const workersOf = (r, name) => new RegExp(`^${name}=(\\d+)$`, 'm').exec(r.stdout)?.[1];
 test('build-jobs gives the e2e and unit-test workers the job\'s core share, the runner\'s number winning, and warns when lanes x workers exceed the cores', () => {
   const r = buildJobs(MAC);
-  assert.equal(workersOf(r, 'PADDOCK_E2E_WORKERS'), '4', '(14 - 2) / 3, not the 8 threads of nextest');
+  assert.equal(workersOf(r, 'PADDOCK_E2E_WORKERS'), '4', '(14 - 2) / 3');
   assert.equal(workersOf(r, 'VITEST_MAX_WORKERS'), '4');
   assert.equal(workersOf(buildJobs(LINUX), 'VITEST_MAX_WORKERS'), '5');
   assert.equal(workersOf(buildJobs(MAC, ['2']), 'PADDOCK_E2E_WORKERS'), '2', 'a split job halves it');
