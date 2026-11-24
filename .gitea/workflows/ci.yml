@@ -648,7 +648,7 @@ jobs:
         continue-on-error: true
         with:
           persist-credentials: false
-          repository: decryp7/engineering-rules
+          repository: decryp7/engineering-playbook
           path: engineering-rules
 
       # A Linux container: one job per host and no kept folders or ports, so no job-isolation slot is taken (the action does
