@@ -292,7 +292,8 @@ pub fn app_of_workflow<'a>(path: &str, apps: &'a BTreeSet<String>) -> Option<&'a
         .map(String::as_str)
 }
 
-fn project_of_dir(dir: &str) -> Option<String> {
+/// The project that owns a folder (`crates`, `paddock-dev`, `app:<name>`, `tools`), by the planner's owner rules.
+pub(crate) fn project_of_dir(dir: &str) -> Option<String> {
     owners(&format!("{dir}/x")).and_then(|o| o.into_iter().next())
 }
 

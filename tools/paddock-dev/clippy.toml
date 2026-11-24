@@ -2,7 +2,7 @@
 disallowed-methods = [
     # ER-51 (start, hold, watch, end): a dispatch keeps the run it starts. The raw dispatch sends and returns no run, so it is called
     # only by the two paths that then find the run by its dispatch token: `./dev ci dispatch` (ci_runs::dispatch) and
-    # queue::real::dispatch_held (the landing queue and the other-OS member gate). Each carries #[expect(clippy::disallowed_methods)];
+    # queue::real::dispatch_held (the landing queue). Each carries #[expect(clippy::disallowed_methods)];
     # a new caller goes through dispatch_held. Its positive control: conformance/test/dispatch-handle-clippy.test.mjs.
     { path = "paddock_dev::ci_runs::dispatch::run", reason = "the raw dispatch returns no run: dispatch through queue::real::dispatch_held, which holds the run it starts by its dispatch token (ER-51)" },
     { path = "std::env::vars", reason = "panics on a variable that is not valid Unicode: read the environment through paddock_env::vars (skips and names it)" },

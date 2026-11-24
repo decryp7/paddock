@@ -513,6 +513,14 @@ fn command_in(
         .collect();
     facts.member_gate = args.member_gate;
     facts.kept_targets = kept_targets;
+    // The member gate's tests narrow each workspace to the packages the change reaches, exactly as CI's member run does (one copy).
+    facts.test_filters = gates::workspaces(&plan)
+        .into_iter()
+        .filter_map(|ws| {
+            let project = crate::plan::project_of_dir(&ws)?;
+            Some((ws.clone(), crate::plan_ci::package_filter(&plan, &graph, &ws, &project, true)))
+        })
+        .collect();
     let mut planned = gates::plan_gates(&plan, &change, &facts);
     planned = select_rows(planned, &args.only)?;
     notes.extend(
@@ -1459,6 +1467,7 @@ fn discover(root: &Path, base: &str, files: &[String], pushed: &[String]) -> Res
 fn read_facts(root: &Path, plan: &Value, env: &HashMap<String, String>, ex: &dyn exec::Exec) -> Facts {
     let ci = crate::ci_run::contract::conformance_args_at(root);
     let mut windows = std::collections::BTreeSet::new();
+    let mut nextest_config = std::collections::BTreeMap::new();
     for ws in gates::workspaces(plan) {
         let Some(app) = ws.strip_prefix("apps/").and_then(|r| r.split('/').next()) else {
             continue;
@@ -1466,6 +1475,9 @@ fn read_facts(root: &Path, plan: &Value, env: &HashMap<String, String>, ex: &dyn
         let contract = std::fs::read_to_string(root.join(format!("apps/{app}/paddock.ci.json")))
             .ok()
             .and_then(|t| serde_json::from_str::<Value>(&t).ok());
+        if let Some(cfg) = contract.as_ref().and_then(|c| c["nextestConfig"].as_str()) {
+            nextest_config.insert(ws.clone(), cfg.to_string());
+        }
         if contract.is_some_and(|c| c["windowsClippy"] == true) {
             windows.insert(ws);
         }
@@ -1493,6 +1505,8 @@ fn read_facts(root: &Path, plan: &Value, env: &HashMap<String, String>, ex: &dyn
         dev_exe: ex.dev_program(),
         target_dir: env.get("CARGO_TARGET_DIR").cloned(),
         inactive: Ok(Default::default()),
+        test_filters: Default::default(),
+        nextest_config,
     }
 }
 

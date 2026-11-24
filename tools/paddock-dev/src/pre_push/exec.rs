@@ -499,7 +499,7 @@ pub fn decide_with(gate: &Gate, exec: &dyn Exec, limits: Limits, subject: &Subje
         )
         .ended_by_guard(done.ended_by()),
         Ok(done) => {
-            let hint = match (gate.id.starts_with("clippy-linux"), done.how.as_str()) {
+            let hint = match (gate.need == Need::LocalCiImage, done.how.as_str()) {
                 (true, "exit 125") => {
                     "docker could not start the container or build the local CI image (read the output above; `docker login dev.decryptology.net` if a base image cannot be pulled)"
                         .to_string()
