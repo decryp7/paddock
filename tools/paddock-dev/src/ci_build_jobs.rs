@@ -668,7 +668,10 @@ mod tests {
                 let share: i64 = class_default(os, Setting::Share).parse().unwrap();
                 let kept: i64 = class_default(os, Setting::Cores).parse().unwrap();
                 let t: i64 = fixed.parse().unwrap();
-                assert!(!oversubscribed(share, t, cores - kept), "{os}: fixed {t} test threads x {share} jobs on {cores} cores");
+                assert!(
+                    !oversubscribed(share, t, cores - kept),
+                    "{os}: fixed {t} test threads x {share} jobs on {cores} cores"
+                );
             }
             assert_eq!(layout_cores(os), Some(cores), "{os}: the cores this test assumes are the layout's");
         }
