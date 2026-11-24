@@ -4,7 +4,7 @@
   gated on its before-release work packages, in the release order; the guard A + C + D; the recommended option on every
   sub-decision. Growth of more than 20% goes back to the user (ER-37).
 - Date: 2026-11-18
-- Related: engineering-rules PRINCIPLES "Bulk APIs" and ER-20 (commit 7fcacee, 2026-11-18); ER-21 / rule 40 (a recurring
+- Related: engineering-playbook PRINCIPLES "Bulk APIs" and ER-20 (commit 7fcacee, 2026-11-18); ER-21 / rule 40 (a recurring
   class gets a redesign); ER-22 / rule 42 (share first); ER-33 (positive controls); ER-37 / rule 76 (common practice and
   cost); ER-41 (new checks start report-only); rule 55 (`docs/known-copies.toml`); ADR 0095 (one cheap repository copy for
   tests; its D2 graph cache is accepted and not built); rule 85 (this ADR's rule).

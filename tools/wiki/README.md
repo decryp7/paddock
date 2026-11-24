@@ -31,7 +31,7 @@ wiki new <slug> --title "..." [--summary "..."] [--source ...]...   # page from 
   branch (open rule branches). A listed ref that does not exist here, or a file a branch lacks, is a **warning**; any other
   unreadable source is an **error** with the cause and the next step. With no rules listed in the flags or the settings the
   defaults are `docs/rules.md` and `origin/main:docs/rules.md` under the settings folder (each when readable). The engineering
-  rules are one more source: `--er` / `er` (a **warning** if that file does not exist), else `../engineering-rules/RULES.md`
+  rules are one more source: `--er` / `er` (a **warning** if that file does not exist), else `../engineering-playbook/RULES.md`
   next to the settings folder when it exists. One copied span is one finding, naming up to three of the rules sources that
   contain it and counting the rest.
 - **`--cite-by-line <name>`** (or `citeByLine`): a line that mentions the log `name` and a clock time like 14:33 is an error;

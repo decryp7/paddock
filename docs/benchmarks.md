@@ -151,7 +151,7 @@ failing mode.
 - **Load:** 1-minute load 9.0 to 9.8 at the start and end of the runs (other agents' builds were running)
 - **Build:** the `./dev` wrapper's binary, unchanged by the measurement
 - **Corpus:** this repository: 13,163 tracked files; the cone is `crates,ui,scripts,docs,tools,apps/spotter`
-- **Command:** `HEAVY_LOCK_DIR=/Volumes/d8sst7/dev-targets/heavy-slots engineering-rules/scripts/heavy.sh ./dev worktree add <name> --base origin/main -b <branch> --owner implementer:meas --root /Volumes/d8sst7/dev-targets/wt --agent <id> [--sparse crates,ui,scripts,docs,tools,apps/spotter]`, then `du -sk <folder>`
+- **Command:** `HEAVY_LOCK_DIR=/Volumes/d8sst7/dev-targets/heavy-slots engineering-playbook/scripts/heavy.sh ./dev worktree add <name> --base origin/main -b <branch> --owner implementer:meas --root /Volumes/d8sst7/dev-targets/wt --agent <id> [--sparse crates,ui,scripts,docs,tools,apps/spotter]`, then `du -sk <folder>`
 - **Runs:** 3 runs of each, interleaved; median and range of the wall time as `date` differences; disk is the same every run
 - **Numbers:**
 

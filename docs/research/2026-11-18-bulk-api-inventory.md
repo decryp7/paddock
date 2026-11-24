@@ -8,7 +8,7 @@ the ADR wins.
 `51a5a617e2efd08baa68d167d786025ec6c1c276` (read for its scope only). All `file:line` references are at origin/main
 f5f08f71e. Nothing here claims shipped behaviour of a tag; no `git tag --contains` claim is made.
 
-**The principle.** engineering-rules commit 7fcacee (2026-11-18): PRINCIPLES.md "Bulk APIs" (an API on items takes many
+**The principle.** engineering-playbook commit 7fcacee (2026-11-18): PRINCIPLES.md "Bulk APIs" (an API on items takes many
 at once and returns a result per item; a single-item form is a thin wrapper; errors per item; bulk calls stay bounded) and
 ER-20 (work over many items is one bulk call or one long-lived process or connection, through one shared mechanism; a
 command's count of processes or round trips is a measured budget that a test guards).

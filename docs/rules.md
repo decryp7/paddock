@@ -4,9 +4,9 @@ Binding rules for every Paddock app and for everyone (people and agents) working
 decision or a lesson; the reasons are in [lessons.md](lessons.md). Each app's `AGENTS.md` carries these rules; when a rule
 changes here, every app's copy is updated in the same change.
 
-The rules marked ER-n come from the generic engineering-rules repository, which keeps only the generic rule and a short reason.
+The rules marked ER-n come from the generic engineering-playbook repository, which keeps only the generic rule and a short reason.
 The Paddock incidents, run ids and ADR numbers behind each ER rule are in
-[lessons.md](lessons.md#incidents-behind-the-engineering-rules-er-1-to-er-51-moved-from-the-generic-rules-repo-2026-11-24).
+[lessons.md](lessons.md#incidents-behind-the-engineering-playbook-er-1-to-er-51-moved-from-the-generic-rules-repo-2026-11-24).
 
 ## Way of working
 1. **One release at a time.** Release-critical work comes first. Other apps may progress in parallel only while load and

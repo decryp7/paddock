@@ -20,7 +20,7 @@ not restated. Status as of origin/main `233c1339b`. Steward-log citations are `m
   approved but was not the cause (`merge-steward.md:678`). Source: src: `merge-steward.md:678, 685`.
 - Earlier members of the same family: the lazy-dialog wait counted event-loop turns and a prototype patch was not restored. Source: [lesson, Test isolation](../lessons.md#test-isolation-debrief-2026-10-29).
 - Rules 57 and 58 are on `origin/docs/rca-rules` at `9fba4291f`, and the CI flaky-is-red change is `origin/ci/flaky-is-red` at `10ab50d10`; both are in
-  review and neither is on main. The user decided them with ER-28 and ER-29, which are on engineering-rules main. Source: src: `git show origin/docs/rca-rules:docs/rules.md`; src: `merge-steward.md:710, 713, 716`.
+  review and neither is on main. The user decided them with ER-28 and ER-29, which are on engineering-playbook main. Source: src: `git show origin/docs/rca-rules:docs/rules.md`; src: `merge-steward.md:710, 713, 716`.
 - Waits in the product and in tests are designed in [ADR 0031](../adr/0031-patience-not-wall-clocks.md).
 
 ## See also

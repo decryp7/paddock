@@ -52,4 +52,4 @@ dependencies, regenerate the tool's lockfile in the same change (`cd tools/paddo
 ## heavy
 
 `tools/heavy` (package `paddock-heavy`, binary `heavy`): the machine-wide heavy-step lock that replaces the shell `plock`
-and engineering-rules `scripts/heavy.sh` (ER-24). Its own Cargo workspace; see [tools/heavy/README.md](heavy/README.md).
+and engineering-playbook `scripts/heavy.sh` (ER-24). Its own Cargo workspace; see [tools/heavy/README.md](heavy/README.md).

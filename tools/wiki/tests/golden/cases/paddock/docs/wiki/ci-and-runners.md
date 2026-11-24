@@ -38,7 +38,7 @@ does not restate them. Steward-log citations are `merge-steward.md:<line>` in `/
   The family doc says sccache gives almost nothing across worktrees. Source: [AGENTS.md](../../AGENTS.md) (Build folders).
 - Linux jobs leave `CARGO_BUILD_JOBS` unset, so each job starts one rustc per core; an A/B of 16, 8 and 4 jobs per job is
   planned and not run. Source: src: `linux-ci-share-ab.md` (branch `ci/build-parallelism`, head `eb2acadcc`).
-- The OS update channel of CI machines is ER-26 (engineering-rules). The incident behind it: [lesson, dwState 0](../lessons.md#2026-10-30-newer-windows-11-builds-list-a-listener-with-dwstate-0-the-table-says-it-listens-dyno). The policy that keeps optional updates off the CI PC was prepared; its application is not recorded. Source: src: `windows-runner-update-policy.md` (header).
+- The OS update channel of CI machines is ER-26 (engineering-playbook). The incident behind it: [lesson, dwState 0](../lessons.md#2026-10-30-newer-windows-11-builds-list-a-listener-with-dwstate-0-the-table-says-it-listens-dyno). The policy that keeps optional updates off the CI PC was prepared; its application is not recorded. Source: src: `windows-runner-update-policy.md` (header).
 
 ## Machine load and the heavy-step lock (agents on the Mac)
 - Agents gate heavy steps on a 1-minute load below 30; the load rule is [Throughput, rule 41](../rules.md#throughput-user-2026-10-24). Source: src: `merge-steward.md:533` (gate stated in the entry).

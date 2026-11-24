@@ -718,7 +718,7 @@ pub fn parse_load(uptime: &str) -> Option<f64> {
 }
 
 /// The command that puts a heavy step through the machine-wide slot (ER-24): `PADDOCK_HEAVY` as given, else `heavy` on PATH (the
-/// shell `heavy.sh` is retired: engineering-rules' script is a thin wrapper of `heavy`). Empty when there is none (the caller says so).
+/// shell `heavy.sh` is retired: engineering-playbook's script is a thin wrapper of `heavy`). Empty when there is none (the caller says so).
 pub fn heavy_prefix(env: &HashMap<String, String>, has: &dyn Fn(&str) -> bool) -> Vec<String> {
     if let Some(h) = env.get("PADDOCK_HEAVY").filter(|h| !h.trim().is_empty()) {
         if h.trim() == "off" {

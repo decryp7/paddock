@@ -204,7 +204,7 @@ files and new findings fail from WP-2 on.
   `cargo xwin clippy --target x86_64-pc-windows-msvc --workspace --all-targets -- -D warnings` for each affected Cargo
   workspace (`node scripts/affected.mjs --files` on the branch's changed files → `crates/` and `apps/<app>/...`), with its
   own target folder (`$CARGO_TARGET_DIR/xwin`), `CARGO_BUILD_JOBS=2`, through the machine-wide slot of
-  `engineering-rules/scripts/heavy.sh`. It catches the compile half of pattern 5 (Unix-only APIs used ungated,
+  `engineering-playbook/scripts/heavy.sh`. It catches the compile half of pattern 5 (Unix-only APIs used ungated,
   `cfg(windows)` code that rotted, Windows-only clippy findings as in 1f701932b). It runs no tests and links nothing for
   the target (build scripts are built for the host), so the `rust-lld.exe` linker setting of `.cargo/config.toml` does
   not apply. A missing `cargo-xwin` is a loud message with the install line, never a silent pass.

@@ -2,7 +2,7 @@
 
 Copy this file, fill every field, delete nothing, and run `./dev brief check <file>` before sending the brief. The check
 only looks for the fields below and for the known-bad patterns of the misses listed under "Why"; it does not judge the
-task. The shared rules every agent gets are in the engineering-rules `templates/BRIEF.md`; this template adds what a
+task. The shared rules every agent gets are in the engineering-playbook `templates/BRIEF.md`; this template adds what a
 Paddock brief has to say each time.
 
 ## Task

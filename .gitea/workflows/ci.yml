@@ -648,8 +648,8 @@ jobs:
         continue-on-error: true
         with:
           persist-credentials: false
-          repository: decryp7/engineering-rules
-          path: engineering-rules
+          repository: decryp7/engineering-playbook
+          path: engineering-playbook
 
       # A Linux container: one job per host and no kept folders or ports, so no job-isolation slot is taken (the action does
       # nothing there, ADR 0025).
@@ -666,11 +666,11 @@ jobs:
       - name: Engineering rules present
         working-directory: .
         run: |
-          if [ -f engineering-rules/RULES.md ]; then
-            echo "- wiki lint: engineering-rules checked out, so its RULES.md is a rules source" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+          if [ -f engineering-playbook/RULES.md ]; then
+            echo "- wiki lint: engineering-playbook checked out, so its RULES.md is a rules source" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
           else
-            echo "::warning::wiki lint: engineering-rules is not checked out (the runner's token cannot read decryp7/engineering-rules?), so the copied-rule check skips the ER text. Give the job a token that can read it."
-            echo "- wiki lint: engineering-rules NOT checked out; the ER text was not a rules source" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+            echo "::warning::wiki lint: engineering-playbook is not checked out (the runner's token cannot read decryp7/engineering-playbook?), so the copied-rule check skips the ER text. Give the job a token that can read it."
+            echo "- wiki lint: engineering-playbook NOT checked out; the ER text was not a rules source" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
           fi
 
       - name: Lockfile is current
@@ -703,7 +703,7 @@ jobs:
         run: |
           # The summary line is written whether the lint passes or fails; the step then ends with the lint's own exit code.
           set +e
-          cargo run --locked -- --repo ../.. lint --er ../../engineering-rules/RULES.md 2>&1 | tee wiki-lint.out
+          cargo run --locked -- --repo ../.. lint --er ../../engineering-playbook/RULES.md 2>&1 | tee wiki-lint.out
           rc=${PIPESTATUS[0]}
           echo "- wiki lint (exit $rc): $(tail -1 wiki-lint.out)" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
           exit "$rc"

@@ -1,7 +1,7 @@
 # heavy
 
 One heavy step (cargo, npm, ng, playwright, llvm-cov, xwin) at a time per machine. Replaces the shell `plock`
-(Paddock agents) and engineering-rules `scripts/heavy.sh` (ER-24). Package `paddock-heavy`, binary `heavy`; its own Cargo
+(Paddock agents) and engineering-playbook `scripts/heavy.sh` (ER-24). Package `paddock-heavy`, binary `heavy`; its own Cargo
 workspace and lockfile (`tools/heavy/`, ADR 0014's third kind).
 
 ```sh
@@ -106,10 +106,10 @@ the old rule is put back.
 
 ## The shell heavy.sh
 
-**Today** (until the wrapper below lands in engineering-rules) `scripts/heavy.sh` there is still the shell semaphore, with its own 5 slots in its
+**Today** (until the wrapper below lands in engineering-playbook) `scripts/heavy.sh` there is still the shell semaphore, with its own 5 slots in its
 own folder (`HEAVY_LOCK_DIR`), and does not exclude Rust `heavy` holders: both run, up to 5 of each. Only Paddock's own tools are moved to `heavy`.
 The wrapper (a patch prepared with this change: same arguments, the command's exit codes, 2 for usage, a refused build folder or a lock that could
-not be taken, 127 with an `::error::` when `heavy` is not installed) makes engineering-rules' script a thin caller of this binary; **landing it is a
+not be taken, 127 with an `::error::` when `heavy` is not installed) makes engineering-playbook's script a thin caller of this binary; **landing it is a
 prerequisite** of calling the shell retired, and it lands only once the binary can be installed for every project (a release from the registry that
 the user installs, or a stable path the wrapper finds). `HEAVY_LOCK_DIR` is ignored with a warning.
 
@@ -193,7 +193,7 @@ release's `SHA256SUMS` from the repository's Gitea release `heavy-vX.Y.Z` (`PADD
 (`::error::heavy-install: the downloaded ... SHA256SUMS says ...`, nothing installed), renames the binary atomically into
 `<dev-targets>/heavy/bin/heavy` and records the version in `<dev-targets>/heavy/VERSION`. Run again, it downloads nothing while the same
 version is there and unchanged. It never touches `~/.cargo` or `~/.rustup`. Then `heavy --version` and `heavy status` check it, and
-engineering-rules' `scripts/heavy.sh` wrapper finds it (`HEAVY_BIN`, then PATH, then `$PADDOCK_DEV_TARGETS/heavy/bin/heavy`; when it is missing
+engineering-playbook's `scripts/heavy.sh` wrapper finds it (`HEAVY_BIN`, then PATH, then `$PADDOCK_DEV_TARGETS/heavy/bin/heavy`; when it is missing
 the wrapper prints this one command and exits 127: it never downloads by itself).
 
 **Requirements:** `curl` and a release over `https` (a plain `http` `PADDOCK_HEAVY_RELEASES` is refused unless it is on this machine's loopback, so the

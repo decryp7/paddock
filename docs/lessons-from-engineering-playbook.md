@@ -1,6 +1,6 @@
-# Lessons moved out of the generic engineering-rules repo
+# Lessons moved out of the generic engineering-playbook repo
 
-These passages held Paddock names, run ids, train numbers or machine paths, so they left the generic engineering-rules repo. Each section names its source file and holds the original text verbatim (moved 2026-11-24). The generic repo keeps a project-neutral version of each.
+These passages held Paddock names, run ids, train numbers or machine paths, so they left the generic engineering-playbook repo. Each section names its source file and holds the original text verbatim (moved 2026-11-24). The generic repo keeps a project-neutral version of each.
 
 ## From LESSONS.md
 
@@ -8,7 +8,7 @@ These passages held Paddock names, run ids, train numbers or machine paths, so t
 
 **Agents filled the home folder with build folders and worktrees (2026-10-28).** Symptom: about 160 GB of `.debrief-*` and `.paddock-*` build folders and worktrees in `~` on a Mac with a small system disk. Cause: agents chose their own `CARGO_TARGET_DIR` and worktree paths and nothing checked them. Rule: build folders, worktrees and logs live on the work disk, never in `~`; `scripts/heavy.sh` refuses a command whose `CARGO_TARGET_DIR` or `--target-dir` / `build.target-dir` is inside `$HOME` (`HEAVY_ALLOW_HOME_TARGET=1` opts out) ([ER-14](RULES.md), [ER-24](RULES.md)).
 
-**A new wiki was wrong on day one; only an independent fact-check caught it (2026-10-31).** Symptom: the first Paddock wiki pages (an ER-30 pilot) held a missed release blocker the writer had not noticed and four wrong facts, including log entries cited by a typed time and rule text restated as paraphrase. Cause: one agent wrote the pages from its own reading, so nothing compared them with the sources, the rules on open branches or the ER text. Rule: fact-check every claim independently before pages land, cite log entries by file:line with dates from the clock, lint against rules on main and on open rule branches, link rules instead of restating them, and age facts out with `verified:` and a re-verify on each ingest ([ER-30](RULES.md), wiki (engineering-rules/skills/wiki/SKILL.md)).
+**A new wiki was wrong on day one; only an independent fact-check caught it (2026-10-31).** Symptom: the first Paddock wiki pages (an ER-30 pilot) held a missed release blocker the writer had not noticed and four wrong facts, including log entries cited by a typed time and rule text restated as paraphrase. Cause: one agent wrote the pages from its own reading, so nothing compared them with the sources, the rules on open branches or the ER text. Rule: fact-check every claim independently before pages land, cite log entries by file:line with dates from the clock, lint against rules on main and on open rule branches, link rules instead of restating them, and age facts out with `verified:` and a re-verify on each ingest ([ER-30](RULES.md), wiki (engineering-playbook/skills/wiki/SKILL.md)).
 
 **Stuck waiters piled up because a `pgrep -f` loop matches its own command line (2026-11-03, Paddock).** Symptom: 36 stuck or stacked waiters stopped by
 hand over two days (14, 18 stacked on one event, then 4); the machine's load and the agents' attention went to them. Cause: the loop's
@@ -26,11 +26,11 @@ The shared rules in this repo are numbered **ER-1 to ER-51** and are always cite
 `AGENTS.md`, or a family file such as Paddock's `docs/rules.md`) keeps its own numbers; those do not match these, so a bare "rule 21"
 is ambiguous and is never used. Numbers are append-only: a rule is never renumbered, so a citation stays valid.
 ## Where this repo lives
-On this Mac the clone is at `/Volumes/d8sst7/dev.decryptology.net/engineering-rules` (canonical), and `~/engineering-rules` is a
-symlink to it. Every document and skill refers to `~/engineering-rules/...`, so that path must resolve on every machine:
-- **Other machines:** clone straight into `~/engineering-rules`, or clone anywhere and run `ln -s <clone> ~/engineering-rules`.
-1. Clone: `git clone https://dev.decryptology.net/decryp7/engineering-rules.git ~/engineering-rules` (on this Mac:
-   clone to `/Volumes/d8sst7/dev.decryptology.net/engineering-rules` and `link /Volumes/d8sst7/dev.decryptology.net/engineering-rules ~/engineering-rules`).
+On this Mac the clone is at `/Volumes/d8sst7/dev.decryptology.net/engineering-playbook` (canonical), and `~/engineering-playbook` is a
+symlink to it. Every document and skill refers to `~/engineering-playbook/...`, so that path must resolve on every machine:
+- **Other machines:** clone straight into `~/engineering-playbook`, or clone anywhere and run `ln -s <clone> ~/engineering-playbook`.
+1. Clone: `git clone https://dev.decryptology.net/decryp7/engineering-playbook.git ~/engineering-playbook` (on this Mac:
+   clone to `/Volumes/d8sst7/dev.decryptology.net/engineering-playbook` and `link /Volumes/d8sst7/dev.decryptology.net/engineering-playbook ~/engineering-playbook`).
 `node --test scripts/ci-timings.test.mjs`, `node --test scripts/wiki-lint.test.mjs`, the wiki lint `node scripts/wiki-lint.mjs` (settings in `wiki-lint.json`), and `shellcheck scripts/*.sh`. CI (`.gitea/workflows/ci.yml`, copy in
 `.github/workflows/ci.yml`) runs the same. The Gitea job runs in `paddock-ci:v2`; both install shellcheck as a pinned
 release binary (v0.11.0, SHA-256 verified, skipped when that version is already installed); the GitHub copy stays generic on `ubuntu-latest`.
@@ -42,7 +42,7 @@ Project rules (for example Paddock's `docs/rules.md`) add to these and win on co
 ## Worked example (Paddock)
 Stable checkout path + local sccache + pinned host tools + one workspace-wide nextest run + image-baked browsers were
 **estimated** to take the Windows leg from about 23 to about 7 minutes. That figure is an estimate, not a measurement; measure
-your own before and after with `node ~/engineering-rules/scripts/ci-timings.mjs` (median and p90 over the last 30 runs). The plan job (`scripts/affected.mjs`) skips unaffected projects, WebKit and
+your own before and after with `node ~/engineering-playbook/scripts/ci-timings.mjs` (median and p90 over the last 30 runs). The plan job (`scripts/affected.mjs`) skips unaffected projects, WebKit and
 bundles run on main, tags and nightly only.
 
 ## From skills/icon-family/SKILL.md
@@ -86,11 +86,11 @@ and `release-<app>.yml` per app, old repos frozen as pointers.
 
 ## From checklists/new-machine.md and prompts/new-machine.md (machine layout)
 
-- [ ] `git clone <host>/engineering-rules.git ~/engineering-rules`; on the Mac the canonical clone is `/Volumes/d8sst7/dev.decryptology.net/engineering-rules` with `~/engineering-rules` as a symlink to it (other machines: clone straight to `~/engineering-rules`)
+- [ ] `git clone <host>/engineering-playbook.git ~/engineering-playbook`; on the Mac the canonical clone is `/Volumes/d8sst7/dev.decryptology.net/engineering-playbook` with `~/engineering-playbook` as a symlink to it (other machines: clone straight to `~/engineering-playbook`)
 
-1. The rules repo must be reachable as ~/engineering-rules. If it is missing: `git clone https://dev.decryptology.net/decryp7/engineering-rules.git ~/engineering-rules`
-   (otherwise `git -C ~/engineering-rules pull --ff-only`). If I keep the clone elsewhere (on my Mac:
-   /Volumes/d8sst7/dev.decryptology.net/engineering-rules), make ~/engineering-rules a symlink to it and point every ~/.claude
+1. The rules repo must be reachable as ~/engineering-playbook. If it is missing: `git clone https://dev.decryptology.net/decryp7/engineering-playbook.git ~/engineering-playbook`
+   (otherwise `git -C ~/engineering-playbook pull --ff-only`). If I keep the clone elsewhere (on my Mac:
+   /Volumes/d8sst7/dev.decryptology.net/engineering-playbook), make ~/engineering-playbook a symlink to it and point every ~/.claude
 
 ## From wiki/README.md (whole file, removed from the generic repo)
 

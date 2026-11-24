@@ -541,13 +541,13 @@ fn with_no_rules_listed_the_defaults_are_docs_rules_and_the_sibling_engineering_
     assert_eq!(code, 5, "{out}");
     assert!(err.contains("shared with docs/rules.md"), "{err}");
     assert!(out.contains("wiki-lint: 1 error(s), 0 warning(s); 1 rules source(s)"), "{out}");
-    // ../engineering-rules/RULES.md next to the settings folder is added when it exists
+    // ../engineering-playbook/RULES.md next to the settings folder is added when it exists
     let outer = tempfile::tempdir().unwrap();
     let project = outer.path().join("project");
     std::fs::create_dir_all(project.join("w")).unwrap();
-    std::fs::create_dir_all(outer.path().join("engineering-rules")).unwrap();
+    std::fs::create_dir_all(outer.path().join("engineering-playbook")).unwrap();
     std::fs::write(
-        outer.path().join("engineering-rules/RULES.md"),
+        outer.path().join("engineering-playbook/RULES.md"),
         "Siblings rule: always check the engineering rules folder next to the repository root before anything else happens.\n",
     )
     .unwrap();
@@ -569,7 +569,7 @@ fn with_no_rules_listed_the_defaults_are_docs_rules_and_the_sibling_engineering_
     }
     let (code, _, err) = cli(&["lint", "--repo", project.to_str().unwrap(), "--today", "2026-10-31"]);
     assert_eq!(code, 5, "{err}");
-    assert!(err.contains("engineering-rules/RULES.md"), "{err}");
+    assert!(err.contains("engineering-playbook/RULES.md"), "{err}");
     // an --er that is named but missing is a warning (a ::warning:: in CI), not silence
     let missing = outer.path().join("nowhere/RULES.md");
     let (code, out, _) = cli_in(

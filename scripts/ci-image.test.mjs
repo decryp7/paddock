@@ -50,7 +50,7 @@ describe('pins', () => {
     assert.ok(action.includes(arg('SCCACHE_SHA256_ARM64')), 'arm64 checksum differs from the action');
   });
 
-  test('shellcheck is the v0.11.0 release pin shared with engineering-rules, fetched only through the verified download', () => {
+  test('shellcheck is the v0.11.0 release pin shared with engineering-playbook, fetched only through the verified download', () => {
     assert.equal(arg('SHELLCHECK_VERSION'), '0.11.0');
     assert.equal(arg('SHELLCHECK_SHA256_AMD64'), '8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198');
     assert.match(dockerfile, /fetch-verified "https:\/\/github\.com\/koalaman\/shellcheck\/releases\/download\/v\$\{SHELLCHECK_VERSION\}\//);

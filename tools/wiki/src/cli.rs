@@ -56,7 +56,7 @@ struct LintArgs {
     /// With none given anywhere: docs/rules.md and origin/main:docs/rules.md under the settings folder, each if readable.
     #[arg(long = "rules")]
     rules: Vec<String>,
-    /// One more rules file (the engineering rules); a warning if it does not exist. Default: ../engineering-rules/RULES.md next
+    /// One more rules file (the engineering rules); a warning if it does not exist. Default: ../engineering-playbook/RULES.md next
     /// to the settings folder, when that exists.
     #[arg(long)]
     er: Option<PathBuf>,
@@ -581,10 +581,10 @@ fn lint_command(
             (None, None) => None,
         };
         // The engineering rules are one more source: the file named by `--er` / `er` (a warning when it is missing), else
-        // `../engineering-rules/RULES.md` next to the settings folder when that exists. One that exists but cannot be read is
+        // `../engineering-playbook/RULES.md` next to the settings folder when that exists. One that exists but cannot be read is
         // an error.
         let explicit = er.is_some();
-        let er = er.unwrap_or_else(|| layout.root.join("../engineering-rules/RULES.md"));
+        let er = er.unwrap_or_else(|| layout.root.join("../engineering-playbook/RULES.md"));
         if er.exists() {
             let name = er.to_string_lossy();
             rules.push(read_logged(&name, &name, git_dir, trace).map_err(|e| read_error(&e))?);
@@ -593,7 +593,7 @@ fn lint_command(
             notes.push(Finding {
                 file: er.to_string_lossy().into_owned(),
                 line: 0,
-                message: "the engineering rules file does not exist, so the copied-rule check skips it. Check out engineering-rules there, or fix --er / `er`."
+                message: "the engineering rules file does not exist, so the copied-rule check skips it. Check out engineering-playbook there, or fix --er / `er`."
                     .to_string(),
             });
         }

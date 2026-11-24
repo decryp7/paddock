@@ -4,7 +4,7 @@
 
 A small, sourced summary of how things work **today**, so an agent can read a page instead of re-deriving the state from
 the lessons, the ADRs and the hand-off logs. It started on 2026-10-31 as a two-week pilot of the LLM Wiki pattern; the user
-concluded the pilot and made it official the same day (ER-30 and `skills/wiki` on engineering-rules `docs/er-30-wiki`, Paddock rule 59 on `docs/rule-wiki`).
+concluded the pilot and made it official the same day (ER-30 and `skills/wiki` on engineering-playbook `docs/er-30-wiki`, Paddock rule 59 on `docs/rule-wiki`).
 The tooling is one Rust `wiki` CLI, [tools/wiki](../../tools/wiki/README.md), which replaced `scripts/wiki-lint.mjs`. The
 design and the evaluation plan are in the research note `research-llm-wiki-2026-10-31.md` (hand-off folder, outside this
 repository), and the pattern's primary source is Karpathy's
@@ -64,7 +64,7 @@ Summary in three to five lines.
   missing or wrong, leave a wiki note for the next ingest.
 - **Lint**: `wiki lint` (the [wiki tool](../../tools/wiki/README.md), installed with `cargo install --path tools/wiki --locked`; settings in `wiki-lint.json`; `wiki new <slug> --title ...` creates a page and its index line) (links resolve and their anchors exist; no clock-time citation of the steward log; every page is in the index; no orphan; every
   page has `verified:` and `sources:`; every bullet names a source; pages with an old `verified:` date draw a warning; no run of 8 or more
-  words is shared with any rules source: `docs/rules.md`, `origin/main`, the open rule branches and engineering-rules
+  words is shared with any rules source: `docs/rules.md`, `origin/main`, the open rule branches and engineering-playbook
   `RULES.md`, given with `--rules`). A second, reading pass by a reviewer checks pages against the rules and ADRs they
   cite, a few pages at a time.
 
