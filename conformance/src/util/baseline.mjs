@@ -50,6 +50,8 @@ export function reconcile(current, base, exact, loose, canMove = () => true) {
  * instead of `origin/main` (ADR 0098, amendment). Rust host: `check::baseline::target_ref`.
  */
 export const targetRef = (options) => options?.baseRef || process.env.PADDOCK_BASE_REF || 'origin/main';
+/** The variable's name, for a check that reads a workflow (declared data) for it; the value is read only by `targetRef`. */
+export const BASE_REF_VAR = 'PADDOCK_' + 'BASE_REF';
 
 /** Whether the run is a CI run (`CI`, `GITEA_ACTIONS` or `GITHUB_ACTIONS` set and not false/0): a target that cannot be seen is then not measured. */
 export const isCi = (env = process.env) => ['CI', 'GITEA_ACTIONS', 'GITHUB_ACTIONS'].some((k) => env[k] && !/^(?:false|0)$/i.test(env[k]));

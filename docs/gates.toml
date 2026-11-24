@@ -1338,6 +1338,14 @@ review_by = 2026-12-22
 approved = "coordinator"
 
 [[report_only]]
+id = "C167"
+reason = "ER-41: report-only until its first green run on the real tree, recorded by run id in C167-growth-test-history.mjs, then flip SEVERITY to error and the mode to gate. A workflow job that runs scripts/npm-audit.test.mjs's ER-46 growth test (npm run test:scripts, or a ./dev ci run phase that does) needs fetch-depth 0 and PADDOCK_BASE_REF, or it fails as not measured: no merge base."
+owner = "ER-21 class: a test that needs the git history in a one-commit checkout (ci.yml ui and tools run 8327, fixed by 138f8b879; shell-demo-release.yml run 8807)"
+since = 2026-11-24
+review_by = 2026-12-24
+approved = "coordinator"
+
+[[report_only]]
 id = "C145"
 reason = "ER-41: report-only until its first green run on the real tree, recorded by run id here; then flip `mode` in tools/paddock-dev/src/check/c145.rs to Gate. It reads docs/lessons.md, which is merged with git's union driver: twice a merge dropped the blank line before a `## ` heading (9ec43be3c, b9bf5fc4b). The real tree is at 0 findings (the 35 headings that sat under a non-blank line were given their blank line in the commit that added the check)."
 owner = "ER-41"
