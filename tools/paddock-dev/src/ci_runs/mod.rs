@@ -23,6 +23,7 @@ pub mod landing;
 pub mod logfind;
 pub mod members;
 pub mod preconditions;
+pub mod quarantine;
 pub mod record;
 pub mod reservation;
 pub mod reuse;
@@ -371,8 +372,12 @@ pub struct VerdictArgs {
     #[arg(long, default_value = SERVER)]
     server: String,
     /// The answer is for a tag: only a run that tested every package on every OS counts, never an OS-scoped one (ER-15).
-    #[arg(long)]
+    #[arg(long, conflicts_with = "landing")]
     tag: bool,
+    /// The answer is for a landing: a run that ran exactly its own diff's selection counts, and green with quarantined flakes (FLAKY
+    /// tests in untouched code, each a fix item) is landable (exit 0). Never for a tag.
+    #[arg(long)]
+    landing: bool,
 }
 
 /// Arguments of `ci fix-items`.
@@ -825,15 +830,25 @@ pub fn verdict(a: &VerdictArgs) -> Result<Report, CliError> {
             let mut client = Client::new(&mut http, &a.server, &a.repo, &token);
             if a.tag {
                 verdict::verdict_tag(&mut client, &a.workflow, &a.sha)
+            } else if a.landing {
+                verdict::verdict_landing_at(&mut client, &a.workflow, &a.sha, &root)
             } else {
                 verdict::verdict(&mut client, &a.workflow, &a.sha)
             }
         }
     };
-    let r = verdict::report(&v, &a.workflow, &a.sha, &crate::pre_push::outcome::GitRepo(&root));
+    let r = verdict::report_for(&v, &a.workflow, &a.sha, &crate::pre_push::outcome::GitRepo(&root), a.landing);
     if r.exit != Exit::Ok {
         eprintln!("::error::ci verdict: {}", r.text);
+    } else if matches!(v, verdict::Verdict::GreenWithFixItems { .. }) {
+        eprintln!("::notice::ci verdict: {}", r.text);
     }
+    let mut lines = quarantine::take_notices();
+    lines.push(r.text.clone());
+    quarantine::write_summary(
+        &format!("ci verdict: {} on {}", a.workflow, a.sha.get(..10).unwrap_or(&a.sha)),
+        &lines,
+    );
     Ok(r)
 }
 
@@ -853,23 +868,46 @@ pub fn fix_items_cmd(a: &FixItemsArgs) -> Result<Report, CliError> {
         Ok(token) => {
             let mut http = CurlHttp;
             let mut client = Client::new(&mut http, &a.server, &a.repo, &token);
-            verdict::verdict_at(&mut client, &a.workflow, &a.sha, &root)
+            // The verdict the landing rested on: a landing run of its own narrowed diff decides too.
+            verdict::verdict_landing_at(&mut client, &a.workflow, &a.sha, &root)
         }
     };
     match v {
         verdict::Verdict::GreenWithFixItems { run, items } => {
+            // The register is read before anything is written: an unreadable one writes neither file.
+            quarantine::read_in(&root).map_err(|e| {
+                CliError::failure(format!("the quarantine of run {run} could not be recorded: {e}"))
+                    .with_hint(format!("Repair {} (`git checkout` it), then run it again.", quarantine::REGISTER))
+            })?;
             let done = fix_items::record(&root, &a.workflow, run, &a.sha, &items).map_err(|e| {
                 CliError::failure(format!("the fix items of run {run} could not be recorded: {e}"))
                     .with_hint("Run it in a checkout of the repository (--root).")
             })?;
-            let text = match done {
+            let today = crate::gates::register::Date::today().to_string();
+            let q = quarantine::record_in(&root, &a.workflow, run, &a.sha, &items, &today).map_err(|e| {
+                CliError::failure(format!("the quarantine of run {run} could not be recorded: {e}"))
+                    .with_hint("Run it in a checkout of the repository (--root).")
+            })?;
+            let mut text = match done {
                 fix_items::Recorded::Added => format!("{} fix item(s) of run {run} added to {}", items.len(), fix_items::LESSONS),
                 fix_items::Recorded::Already => {
                     format!("the {} fix item(s) of run {run} are in {} already", items.len(), fix_items::LESSONS)
                 }
             };
+            text.push_str(&format!(
+                "; {}: {} quarantined, {} updated ({})",
+                quarantine::REGISTER,
+                q.added.len(),
+                q.updated.len(),
+                q.added.iter().chain(&q.updated).cloned().collect::<Vec<_>>().join("; ")
+            ));
+            for id in &q.added {
+                quarantine::notice(&format!("quarantined (run {run}): {id}"));
+            }
+            quarantine::write_summary("ci fix-items: flaky quarantine", &quarantine::take_notices());
             Ok(Report::new(
-                serde_json::json!({"run": run, "items": items.len(), "recorded": done == fix_items::Recorded::Added}),
+                serde_json::json!({"run": run, "items": items.len(), "recorded": done == fix_items::Recorded::Added,
+                    "quarantined": q.added, "updated": q.updated}),
                 text,
             ))
         }
@@ -883,6 +921,258 @@ pub fn fix_items_cmd(a: &FixItemsArgs) -> Result<Report, CliError> {
         verdict::Verdict::NotMeasured(why) => {
             Ok(Report::new(serde_json::json!({"verdict": "not_measured"}), format!("not recorded: {why}")).with_exit(Exit::NotMeasured))
         }
+    }
+}
+
+/// Arguments of `ci quarantine-check`.
+#[derive(Args)]
+pub struct QuarantineCheckArgs {
+    /// The checkout (default: the current folder).
+    #[arg(long)]
+    root: Option<PathBuf>,
+    /// The ref the growth is measured against (default: PADDOCK_BASE_REF, then origin/main).
+    #[arg(long)]
+    base: Option<String>,
+}
+
+/// `ci quarantine-check`: the quarantine register grows only through `ci fix-items` (ER-46, [`quarantine::growth`]), the comparison
+/// conformance C168 makes, by hand. Report-only (warnings, exit 0) while C168 is (ER-41), then exit 5 on growth.
+/// Not measured (no merge base, an unreadable register) is exit 6 in CI and a warning elsewhere, never a pass.
+pub fn quarantine_check(a: &QuarantineCheckArgs) -> Result<Report, CliError> {
+    let root = a
+        .root
+        .clone()
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+    let base = crate::check::baseline::target_ref(a.base.as_deref());
+    let blocking = {
+        use crate::check::Check;
+        crate::check::c168::C168.mode() != crate::check::Mode::ReportOnly
+    };
+    let ci = crate::check::baseline::is_ci(&|k| std::env::var(k).ok());
+    match quarantine::growth_in(&root, &base) {
+        Ok(found) if found.is_empty() => Ok(Report::new(
+            serde_json::json!({"grown": 0, "base": base}),
+            format!("{}: no growth against {base}", quarantine::REGISTER),
+        )),
+        Ok(found) => {
+            let level = if blocking { "error" } else { "warning" };
+            for f in &found {
+                eprintln!("::{level}::{f}");
+            }
+            let text = format!(
+                "{}: {} entr(ies) not recorded by `ci fix-items`{}",
+                quarantine::REGISTER,
+                found.len(),
+                if blocking { "" } else { " (report-only while C168 is, ER-41)" }
+            );
+            let r = Report::new(serde_json::json!({"grown": found.len(), "base": base, "findings": found}), text);
+            Ok(if blocking { r.with_exit(Exit::Findings) } else { r })
+        }
+        Err(why) => {
+            let text = format!("{}: growth not measured: {why}", quarantine::REGISTER);
+            if ci {
+                eprintln!("::error::{text}");
+                Ok(Report::new(serde_json::json!({"not_measured": why}), text).with_exit(Exit::NotMeasured))
+            } else {
+                eprintln!("::warning::{text}");
+                Ok(Report::new(serde_json::json!({"not_measured": why}), text))
+            }
+        }
+    }
+}
+
+/// Arguments of `ci quarantine-release`.
+#[derive(Args)]
+pub struct QuarantineReleaseArgs {
+    /// The nightly workflow whose runs are read.
+    #[arg(long, default_value = "nightly.yml")]
+    workflow: String,
+    /// The checkout whose register is written (default: the current folder).
+    #[arg(long)]
+    root: Option<PathBuf>,
+    /// Report the streaks without writing the register.
+    #[arg(long)]
+    dry_run: bool,
+    /// The repository.
+    #[arg(long, default_value = "decryp7/paddock")]
+    repo: String,
+    /// The Gitea server.
+    #[arg(long, default_value = SERVER)]
+    server: String,
+}
+
+/// `ci quarantine-release`: removes the entries whose test's jobs all passed in `release_after` consecutive finished nightlies
+/// ([`quarantine::release`]) and reports every entry's streak. Exit 0; 6 when the runs cannot be read (nothing is written).
+pub fn quarantine_release(a: &QuarantineReleaseArgs) -> Result<Report, CliError> {
+    let root = a
+        .root
+        .clone()
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+    let mut reg = quarantine::read_in(&root)
+        .map_err(|e| CliError::failure(e).with_hint(format!("Repair {}, then run it again.", quarantine::REGISTER)))?;
+    if reg.entries.is_empty() {
+        return Ok(Report::new(
+            serde_json::json!({"released": []}),
+            "nothing is quarantined".to_string(),
+        ));
+    }
+    let token = token()?;
+    let mut http = CurlHttp;
+    let mut client = Client::new(&mut http, &a.server, &a.repo, &token);
+    let nightlies = match read_nightlies(&mut client, &a.workflow) {
+        Ok(n) => n,
+        Err(why) => {
+            let text = format!("not measured: the {} runs cannot be read ({why}); nothing released", a.workflow);
+            eprintln!("::error::{text}");
+            return Ok(Report::new(serde_json::json!({"not_measured": why}), text).with_exit(Exit::NotMeasured));
+        }
+    };
+    let done = quarantine::release(&mut reg, &nightlies);
+    let released: Vec<&str> = done.iter().filter(|(_, _, r)| *r).map(|(id, _, _)| id.as_str()).collect();
+    if !released.is_empty() && !a.dry_run {
+        std::fs::write(root.join(quarantine::REGISTER), reg.render())
+            .map_err(|e| CliError::failure(format!("{} cannot be written: {e}", quarantine::REGISTER)))?;
+    }
+    let mut lines = Vec::new();
+    for (id, n, r) in &done {
+        let line = if *r {
+            format!("released after {n} consecutive green nightlies: {id}")
+        } else {
+            format!("kept ({n} of {} consecutive green nightlies): {id}", reg.release_after)
+        };
+        quarantine::notice(&line);
+        lines.push(line);
+    }
+    quarantine::write_summary("ci quarantine-release", &quarantine::take_notices());
+    let text = format!(
+        "{} nightly run(s) read; {} released{}; {}",
+        nightlies.len(),
+        released.len(),
+        if a.dry_run { " (dry run, not written)" } else { "" },
+        lines.join("; ")
+    );
+    Ok(Report::new(
+        serde_json::json!({"released": released, "streaks": done.iter().map(|(id, n, _)| serde_json::json!({"id": id, "streak": n})).collect::<Vec<_>>()}),
+        text,
+    ))
+}
+
+/// The finished runs of the nightly workflow, newest first, with their jobs (up to [`green::MAX_PAGES`] pages of the run list).
+fn read_nightlies(client: &mut Client, workflow: &str) -> Result<Vec<quarantine::Nightly>, String> {
+    let mut runs = Vec::new();
+    for page in 1..=green::MAX_PAGES {
+        let p = client.runs_page(page)?;
+        let n = p.runs.len();
+        runs.extend(
+            p.runs
+                .into_iter()
+                .filter(|r| crate::plan_since::workflow_file(&r.path) == workflow && r.finished()),
+        );
+        if n < 50 {
+            break;
+        }
+    }
+    runs.sort_by_key(|r| std::cmp::Reverse(r.id));
+    let mut out = Vec::new();
+    for r in runs {
+        let jobs = client.timed_jobs(r.id)?.ok_or_else(|| format!("run {} has no job list", r.id))?;
+        out.push(quarantine::Nightly {
+            run: r.id,
+            jobs: jobs
+                .into_iter()
+                .filter(|j| !j.is_caller())
+                .map(|j| quarantine::NightlyJob {
+                    name: j.name,
+                    conclusion: j.conclusion,
+                })
+                .collect(),
+        });
+    }
+    Ok(out)
+}
+
+/// Arguments of `ci quarantine-record`: ER-41 for the package-level grade.
+#[derive(Args)]
+pub struct QuarantineRecordArgs {
+    /// The workflow file of the run (`ci.yml`).
+    #[arg(long)]
+    workflow: String,
+    /// The run: finished, complete (or a landing run), and green with quarantined flakes on the package level.
+    #[arg(long)]
+    run: u64,
+    /// The repository.
+    #[arg(long, default_value = "decryp7/paddock")]
+    repo: String,
+    /// The Gitea server.
+    #[arg(long, default_value = SERVER)]
+    server: String,
+}
+
+/// `ci quarantine-record`: records the first green use of the package-level grade in the register's `[first_use]` (of the current
+/// repository), which makes it decide, in one step (ER-41). Refuses a run whose package-level grade is not landable green with
+/// quarantined flakes (a plain green run never used the grader), and a register that records one already.
+pub fn quarantine_record(a: &QuarantineRecordArgs) -> Result<Report, CliError> {
+    let root = std::env::current_dir().map_err(|e| CliError::failure(format!("The current folder cannot be read: {e}.")))?;
+    let file = root.join(quarantine::REGISTER);
+    let text = match std::fs::read_to_string(&file) {
+        Ok(t) => Some(t),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(e) => return Err(CliError::failure(format!("{} cannot be read: {e}.", file.display()))),
+    };
+    let today = crate::gates::register::Date::today().to_string();
+    let updated = quarantine::with_first_use(text.as_deref(), &a.workflow, a.run, &today).map_err(CliError::failure)?;
+    // C168 accepts a new first use only for a run whose fix items `ci fix-items` recorded: refuse here what the check would refuse.
+    let lessons = std::fs::read_to_string(root.join(fix_items::LESSONS)).unwrap_or_default();
+    if !quarantine::has_fix_items_of(&lessons, &a.workflow, a.run) {
+        return Err(CliError::failure(format!(
+            "run {} of {} has no fix-item bullet in {}: record its quarantined flakes first",
+            a.run,
+            a.workflow,
+            fix_items::LESSONS
+        ))
+        .with_hint(format!(
+            "Run `./dev ci fix-items --workflow {} --sha <the run's commit>`, then this again.",
+            a.workflow
+        )));
+    }
+    let token = token()?;
+    let mut http = CurlHttp;
+    let mut client = Client::new(&mut http, &a.server, &a.repo, &token);
+    let refuse = |why: String| {
+        CliError::failure(format!("run {} of {} cannot be recorded: {why}.", a.run, a.workflow)).with_hint(
+            "Record a finished run whose package-level grade quarantined a FLAKY test and is landable (its ::notice:: lines say so).",
+        )
+    };
+    let run = match client.run(a.run) {
+        Ok(Some(r)) => r,
+        Ok(None) => return Err(refuse("it does not exist on the server".into())),
+        Err(e) => return Err(refuse(format!("it could not be read: {e}"))),
+    };
+    if run.workflow() != a.workflow {
+        return Err(refuse(format!("it is a run of {}", run.workflow())));
+    }
+    if !run.finished() {
+        return Err(refuse(format!("it is {}", run.status)));
+    }
+    let scope = verdict::scope_decisive_in(&root, &a.workflow);
+    let workflow = a.workflow.clone();
+    let o = green::grade_run(&mut client, &run, scope, &mut |c| {
+        green::touched_in(c, &workflow, &root, &run.head_sha, scope, None).map(|t| green::Touched { narrow: true, ..t })
+    });
+    match &o.result {
+        green::GradedResult::GreenWithFixItems(items) if o.lands() => {
+            std::fs::write(&file, updated).map_err(|e| CliError::failure(format!("{} cannot be written: {e}.", file.display())))?;
+            let text = format!(
+                "recorded run {} of {} in {} as the first green use of the package-level grade ({} quarantined flake(s)); it decides from now on",
+                a.run,
+                a.workflow,
+                quarantine::REGISTER,
+                items.len()
+            );
+            Ok(Report::new(serde_json::json!({"run": a.run, "quarantined": items.len()}), text))
+        }
+        green::GradedResult::Green => Err(refuse("its package-level grade is plain green: the grader was not used".into())),
+        other => Err(refuse(format!("its package-level grade is not landable ({other:?}, {})", o.note))),
     }
 }
 

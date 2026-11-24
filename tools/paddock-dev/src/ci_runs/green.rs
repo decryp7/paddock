@@ -6,9 +6,12 @@
 //! - [`Scope`]: `Complete` when the run's declared scope covers a push to main's (ADR 0113, `Declared::complete`, read by
 //!   `verdict::read_mode`) and every job it declared ran, else `Partial`. A run's base is complete by construction: the base of a
 //!   push is picked by [`find_base`], which takes only complete runs, and a run with an explicit base declares less than it needs.
-//! - [`GradedResult`]: `Green`; `GreenWithFixItems` when the only failures are FLAKY tests (failed, then passed on the one retry) in
-//!   crates and apps the change did not reach (each a fix item; interim strict reading of ER-12, see [`Touched`]); `Red` when a test failed both tries, a FLAKY test is in a touched
-//!   target, or a step that is not a test failed; `NotMeasured` when a test report cannot be read (ER-33).
+//! - [`GradedResult`]: `Green`; `GreenWithFixItems` ("green with quarantined flakes") when the only failures are FLAKY tests (failed,
+//!   then passed on the one retry) in code the change did not touch (each a fix item, recorded in the quarantine register by `ci
+//!   fix-items`, [`super::quarantine`]); `Red` when a test failed both tries, a FLAKY test is in touched code or cannot be placed (fail
+//!   closed), or a step that is not a test failed; `NotMeasured` when a test report cannot be read (ER-33). "Touched" is the job's
+//!   crate workspace or app until the package level's first green use is recorded, then the Cargo package that holds the test
+//!   ([`Touched`], [`grade_flaky`]; user decision 2026-11-24, ER-41).
 //!
 //! A skipped or cancelled job is never a pass and never a failure: a declared job that did not run makes the scope `Partial`
 //! (`run_scope::check_ran`), and a cancelled run is `Partial` times `NotMeasured` (ER-33); an unfinished run is no evidence.
@@ -141,11 +144,17 @@ impl Outcome {
     }
 }
 
-/// The targets a change touched, read from the plan of the change (its marked projects, until the graph lands).
+/// The targets a change touched, read from the plan of the change.
 ///
-/// INTERIM, strict (user decision 2026-11-23): a FLAKY test in ANY crate or app the plan reached is red, because the plan cannot yet say
-/// which feature a test drives; a FLAKY test in a crate or app the plan did not reach is fix items. It becomes feature-level, as ER-12
-/// words it, when ADR 0117's module edges land.
+/// Two levels (ER-12, user decision 2026-11-24: Google TAP's and Chromium's practice, graded by the reader):
+/// - the job level ([`Touched::reaches`]): a FLAKY test in a crate workspace or app the plan reached. The interim strict reading of
+///   2026-11-23, and the one that decides until the package level's first green use is recorded (ER-41, [`Touched::narrow`]);
+/// - the package level ([`Touched::reaches_test`]): the Cargo package that holds the test, the narrowest level the planner's graph has.
+///   A test exercises its own package and what that package depends on, so the package is touched when it changed or depends on a
+///   changed crate (the plan's `packages`, the reverse-dependency closure). Only a project the plan reached through Cargo alone
+///   (`cargoOnly`) narrows: a UI file, a lockfile or a script reaches tests no package list names, so every test of it is touched. A
+///   Playwright or vitest test has no package level: its job's project decides. A test the graph cannot place (a crate that is no
+///   package of its job's workspace, a workspace whose packages were not read) is [`Reach::Unknown`]: it blocks (fail closed).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Touched {
     /// The project flags that were true (`crates`, `ui`, `paddockDev`...).
@@ -154,6 +163,37 @@ pub struct Touched {
     pub apps: BTreeSet<String>,
     /// The change cannot be bounded (no base to measure it from): every target counts as reached.
     pub all: bool,
+    /// The reached packages of each Cargo workspace folder (`packages` of the plan: the changed crates and their dependents).
+    pub packages: BTreeMap<String, BTreeSet<String>>,
+    /// The projects the plan reached through Cargo alone (`cargoOnly`: `crates`, `paddock-dev`, `app:<name>`); only these narrow.
+    pub cargo_only: BTreeSet<String>,
+    /// Every package of each Cargo workspace folder, from the graph; a workspace missing here cannot place a test (fail closed).
+    pub members: BTreeMap<String, BTreeSet<String>>,
+    /// Each app's Cargo workspace folder ([`crate::plan_ci::app_cargo_dir`]).
+    pub app_cargo: BTreeMap<String, String>,
+    /// Whether the package level decides: its first green use is recorded in the quarantine register (ER-41,
+    /// [`super::quarantine::Register::first_use`]). Without it the package level is printed as a `::notice::` and the job level decides.
+    pub narrow: bool,
+}
+
+/// Where a FLAKY test stands against a change, with the reason in words.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Reach {
+    /// The change touched the test or what it exercises: a FLAKY test blocks.
+    Touched(String),
+    /// It did not: a FLAKY test is quarantined, a fix item.
+    Untouched(String),
+    /// The graph cannot place the test: it blocks (fail closed).
+    Unknown(String),
+}
+
+/// `(binary id, test name)` of a nextest test as the log reader names it (`paddock-chromium::it real_browser::a_test`); `None` for a
+/// Playwright or vitest name (`[chromium] › e2e/x.spec.ts:3:5 › title`).
+pub fn nextest_parts(test: &str) -> Option<(&str, &str)> {
+    if test.contains(" › ") {
+        return None;
+    }
+    test.split_once(' ').filter(|(b, n)| !b.is_empty() && !n.is_empty())
 }
 
 impl Touched {
@@ -168,11 +208,87 @@ impl Touched {
                     .collect()
             })
             .unwrap_or_default();
-        let apps = plan["apps"]
-            .as_array()
-            .map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect())
+        let strings = |v: &Value| -> BTreeSet<String> {
+            v.as_array()
+                .map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect())
+                .unwrap_or_default()
+        };
+        let packages = plan["packages"]
+            .as_object()
+            .map(|o| o.iter().map(|(w, l)| (w.clone(), strings(l))).collect())
             .unwrap_or_default();
-        Touched { flags, apps, all: false }
+        Touched {
+            flags,
+            apps: strings(&plan["apps"]),
+            all: false,
+            packages,
+            cargo_only: strings(&plan["cargoOnly"]),
+            ..Touched::default()
+        }
+    }
+
+    /// With the packages of every Cargo workspace and each app's workspace folder, read from the graph the plan was made on.
+    pub fn with_graph(mut self, graph: &crate::plan::RepoGraph) -> Touched {
+        for (_, n) in graph.cargo.iter() {
+            self.members.entry(n.workspace.clone()).or_default().insert(n.name.clone());
+        }
+        for (app, config) in &graph.configs {
+            let dir = crate::plan_ci::app_cargo_dir(config);
+            if !dir.is_empty() {
+                self.app_cargo.insert(app.clone(), dir);
+            }
+        }
+        self
+    }
+
+    /// Where the FLAKY test `test` of CI job `job` stands (the package level, see [`Touched`]).
+    pub fn reaches_test(&self, job: &str, test: &str) -> Reach {
+        if self.all {
+            return Reach::Touched("the change cannot be bounded (no good base to measure it from)".into());
+        }
+        if !self.reaches(job) {
+            return Reach::Untouched(format!("the plan did not reach the project of job {job:?}"));
+        }
+        let Some((binary, _)) = nextest_parts(test) else {
+            return Reach::Touched(format!(
+                "{test:?} is not a nextest test: its job's project is the narrowest level, and it was reached"
+            ));
+        };
+        let (project, workspace) = if job.starts_with("crate (") || job.starts_with("crates (") {
+            ("crates".to_string(), "crates".to_string())
+        } else if job.starts_with("paddock-dev (") {
+            ("paddock-dev".to_string(), "tools/paddock-dev".to_string())
+        } else if let Some(rest) = job.strip_prefix("app ") {
+            let app = rest.split(" (").next().unwrap_or(rest);
+            match self.app_cargo.get(app) {
+                Some(dir) => (format!("app:{app}"), dir.clone()),
+                None if self.members.is_empty() => {
+                    return Reach::Unknown(format!("the Cargo workspace of app {app} was not read"));
+                }
+                None => return Reach::Touched(format!("app {app} has no Cargo workspace: the app is the narrowest level")),
+            }
+        } else {
+            return Reach::Touched(format!("job {job:?} has no package level and its project was reached"));
+        };
+        let krate = binary.split("::").next().unwrap_or(binary);
+        if !self.cargo_only.contains(&project) {
+            return Reach::Touched(format!(
+                "the plan reached {project} for a reason that is not a Cargo reach (a UI file, a lockfile, a script): every test of it"
+            ));
+        }
+        let Some(members) = self.members.get(&workspace) else {
+            return Reach::Unknown(format!("the packages of the Cargo workspace {workspace} were not read"));
+        };
+        if !members.contains(krate) {
+            return Reach::Unknown(format!("{krate} is not a package of the Cargo workspace {workspace}"));
+        }
+        if self.packages.get(&workspace).is_some_and(|p| p.contains(krate)) {
+            Reach::Touched(format!("package {krate} changed or depends on a changed crate"))
+        } else {
+            Reach::Untouched(format!(
+                "package {krate} of {workspace} neither changed nor depends on a changed crate"
+            ))
+        }
     }
 
     /// Whether the change reached what a CI job tests. A job this cannot place counts as touched: the safe side is red.
@@ -261,20 +377,22 @@ pub fn grade_failures(workflow: &str, jobs: &[FailedJob], touched: &mut dyn FnMu
             }
         }
         let t = touch.get_or_insert_with(&mut *touched);
-        match t {
-            None => unread.push(format!(
+        let Some(t) = t else {
+            unread.push(format!(
                 "the targets the change touched cannot be read (job {name:?} has a FLAKY test)"
-            )),
-            Some(t) if t.reaches(name) => red.push(format!(
-                "job {name:?}: a FLAKY test in a crate or app the plan reached ({}); interim strict reading (user decision 2026-11-23)",
-                f.flaky.iter().next().cloned().unwrap_or_default()
-            )),
-            Some(_) => items.extend(f.flaky.iter().map(|t| FixItem {
-                job: name.clone(),
-                job_id: job.id,
-                test: t.clone(),
-                url: job.url.clone(),
-            })),
+            ));
+            continue;
+        };
+        for test in &f.flaky {
+            match grade_flaky(t, name, test) {
+                Ok(()) => items.push(FixItem {
+                    job: name.clone(),
+                    job_id: job.id,
+                    test: test.clone(),
+                    url: job.url.clone(),
+                }),
+                Err(why) => red.push(why),
+            }
         }
     }
     if let Some(r) = red.into_iter().next() {
@@ -283,6 +401,41 @@ pub fn grade_failures(workflow: &str, jobs: &[FailedJob], touched: &mut dyn FnMu
         GradedResult::NotMeasured(u)
     } else {
         GradedResult::GreenWithFixItems(items)
+    }
+}
+
+/// The grade of one FLAKY test of job `job`: `Ok` quarantines it (a fix item), `Err` blocks with the reason. The level that decides is
+/// [`Touched::narrow`]'s: the job level until the package level's first green use is recorded (ER-41), the package level after it.
+/// Both are printed as `::notice::` lines and to the job summary, so the report-only phase shows what the package level would say.
+pub fn grade_flaky(t: &Touched, job: &str, test: &str) -> Result<(), String> {
+    let job_level = t.reaches(job);
+    let package = t.reaches_test(job, test);
+    let (word, why) = match &package {
+        Reach::Touched(w) => ("blocks (touched)", w),
+        Reach::Untouched(w) => ("quarantined (untouched)", w),
+        Reach::Unknown(w) => ("blocks (cannot be placed)", w),
+    };
+    let phase = if t.narrow {
+        "decides"
+    } else {
+        "report-only, ER-41: the job level decides until the first green use is recorded"
+    };
+    super::quarantine::notice(&format!("flaky grade ({phase}): job {job:?}, {test}: {word}: {why}"));
+    if t.narrow {
+        return match package {
+            Reach::Untouched(_) => Ok(()),
+            Reach::Touched(w) => Err(format!("job {job:?}: a FLAKY test in touched code ({test}): {w}")),
+            Reach::Unknown(w) => Err(format!(
+                "job {job:?}: a FLAKY test the graph cannot place ({test}): {w}; it blocks (fail closed)"
+            )),
+        };
+    }
+    if job_level {
+        Err(format!(
+            "job {job:?}: a FLAKY test in a crate or app the plan reached ({test}); interim strict reading (user decision 2026-11-23)"
+        ))
+    } else {
+        Ok(())
     }
 }
 
@@ -655,11 +808,12 @@ pub fn plan_touched_range(root: &std::path::Path, base: &str, head: &str) -> Opt
     };
     plan_with_graph(root, &history, &req)
         .ok()
-        .map(|(_, plan)| Touched::from_plan(&plan))
+        .map(|(graph, plan)| Touched::from_plan(&plan).with_graph(&graph))
 }
 
 /// The touched reader of the production paths (`ci verdict`, `ci reuse`, the queue, the planner): [`touched_since_base`] over the
-/// first-parent history of `root`, planned by [`plan_touched_range`]; with no good base, everything counts as reached, and a range
+/// first-parent history of `root`, planned by [`plan_touched_range`], at the level the quarantine register of `root` says decides
+/// ([`super::quarantine::narrow_in`]); with no good base, everything counts as reached, and a range
 /// that cannot be planned is `None` (not measured). `runs` is the list the caller already read (the planner's base search); without
 /// it the list is read here, once.
 pub fn touched_in(
@@ -679,9 +833,11 @@ pub fn touched_in(
             &own
         }
     };
+    let narrow = super::quarantine::narrow_in(root);
     touched_since_base(client, runs, &first_parent, sha, scope_decisive, &mut |b, h| {
         plan_touched_range(root, b, h)
     })
+    .map(|t| Touched { narrow, ..t })
 }
 
 #[cfg(test)]
