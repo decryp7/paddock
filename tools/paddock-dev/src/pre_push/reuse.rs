@@ -508,7 +508,9 @@ impl Reuse {
             },
             secs: row.secs,
         };
-        if let Err(e) = write_atomic(&self.path_of(&prep.key), &rec.json(&prep.key, &prep.inputs).to_string()) {
+        // The shared atomic write: parallel workers store at the same moment, so each needs its own temporary file.
+        let text = rec.json(&prep.key, &prep.inputs).to_string();
+        if let Err(e) = paddock_env::write_atomic(&self.path_of(&prep.key), text.as_bytes(), false) {
             eprintln!("::warning::pre-push: the green result of {} was not stored for reuse: {e}", g.id);
         }
     }
@@ -519,24 +521,19 @@ impl Reuse {
     }
 }
 
-fn write_atomic(path: &Path, text: &str) -> std::io::Result<()> {
-    let dir = path.parent().unwrap_or(Path::new("."));
-    std::fs::create_dir_all(dir)?;
-    let tmp = dir.join(format!(".tmp-{}-{}", std::process::id(), paddock_cli::UnixSeconds::now().0));
-    std::fs::write(&tmp, text)?;
-    std::fs::rename(&tmp, path).inspect_err(|_| {
-        let _ = std::fs::remove_file(&tmp);
-    })
-}
-
-/// Evicts by age and count from `store`; `.tmp-*` files of crashed writers go with the old ones. Returns how many files went.
+/// Evicts by age and count from `store`; the temporary files of crashed writers (`.<name>.<pid>.<n>.tmp`, from
+/// [`paddock_env::write_atomic`]) go with the old ones. Returns how many files went.
 pub fn evict(store: &Path, now: std::time::SystemTime, max_age: Duration, keep: usize) -> usize {
     let Ok(rd) = std::fs::read_dir(store) else { return 0 };
     let mut files: Vec<(std::time::SystemTime, PathBuf)> = rd
         .flatten()
         .filter_map(|e| Some((e.metadata().ok()?.modified().ok()?, e.path())))
         .filter(|(_, p)| {
-            p.extension().is_some_and(|x| x == "json") || p.file_name().is_some_and(|n| n.to_string_lossy().starts_with(".tmp-"))
+            p.extension().is_some_and(|x| x == "json")
+                || p.file_name().is_some_and(|n| {
+                    let n = n.to_string_lossy();
+                    n.starts_with('.') && n.ends_with(".tmp")
+                })
         })
         .collect();
     files.sort_by_key(|(m, _)| std::cmp::Reverse(*m));

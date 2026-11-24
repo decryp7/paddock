@@ -348,6 +348,48 @@ fn only_a_fresh_pass_is_stored() {
     assert_eq!(s.records(), 0, "nothing was written");
 }
 
+/// Parallel workers store their passes at the same moment: every record lands. Two writers in one process in the same second used
+/// one temporary file name, so one rename found no file ("No such file or directory") and that pass was lost (macOS, 2026-11-25).
+#[test]
+fn passes_stored_at_once_by_parallel_workers_all_land() {
+    let s = Scratch::new();
+    let r = s.reuse();
+    let gates = [gate("fmt app", "app"), gate("fmt other", "other"), gate("conformance", "")];
+    let preps: Vec<Prepared> = gates
+        .iter()
+        .map(|g| match r.lookup(g) {
+            Lookup::Miss(Some(p)) => p,
+            _ => panic!("{}: an empty store misses with a key", g.id),
+        })
+        .collect();
+    let pass = |id: &str| {
+        let done = Done {
+            success: true,
+            how: "exit 0".into(),
+            tail: String::new(),
+            log: None,
+            timing: None,
+            ending: Ending::Exited,
+        };
+        Row::from_run(id, &test_subject(), &done, "", 1.0)
+    };
+    for round in 0..20 {
+        let _ = std::fs::remove_dir_all(&s.store);
+        let start = std::sync::Barrier::new(gates.len());
+        std::thread::scope(|t| {
+            for (g, prep) in gates.iter().zip(&preps) {
+                let (r, start, row) = (&r, &start, pass(&g.id));
+                t.spawn(move || {
+                    start.wait();
+                    r.store(g, prep, &row);
+                });
+            }
+        });
+        let stored = gates.iter().filter(|g| matches!(r.lookup(g), Lookup::Hit(_))).count();
+        assert_eq!(stored, gates.len(), "round {round}: every pass stored at once lands");
+    }
+}
+
 /// Positive control: with reuse switched off (`--no-reuse` or `PADDOCK_NO_REUSE`), everything runs although green records exist.
 #[test]
 fn with_reuse_off_everything_runs() {
@@ -520,7 +562,9 @@ fn eviction_drops_old_records_and_keeps_the_newest() {
     std::fs::write(d.path().join("notes.txt"), "kept: not ours").unwrap();
     assert_eq!(evict(d.path(), std::time::SystemTime::now(), MAX_AGE, 3), 2, "count");
     assert!(d.path().join("k4.json").exists() && !d.path().join("k0.json").exists());
+    // A crashed writer's temporary file (paddock_env::write_atomic's name) goes with the old records.
+    std::fs::write(d.path().join(".k9.json.123.0.tmp"), "{").unwrap();
     let later = std::time::SystemTime::now() + MAX_AGE + Duration::from_secs(60);
-    assert_eq!(evict(d.path(), later, MAX_AGE, 100), 3, "age");
+    assert_eq!(evict(d.path(), later, MAX_AGE, 100), 4, "age");
     assert!(d.path().join("notes.txt").exists());
 }
