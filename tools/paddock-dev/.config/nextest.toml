@@ -78,8 +78,14 @@ max-threads = 2
 # `cargo metadata` runs of the real tree): it timed out at 60 s on try 1 of run 8694 (Windows) and took 18.2 s on try 2. Its own cost was
 # cut first (fix/owner-test-windows-cost, docs/benchmarks.md 2026-11-24: CPU 7.3 s to 5.1 s, wall 22 s to 11 s median on the loaded Mac);
 # it joins the group so it does not queue on cargo's lock beside the others.
+# The rule: every test that runs `cargo metadata` is in this group. The list below was read on 2026-11-24 from a full ci-profile run
+# under a `cargo` on PATH that logged each `metadata` call with the test that started it and the test's NEXTEST_TEST_GROUP (2576 tests,
+# 1028 calls; fix/graph-train-r5-repo-graph-group). Outside the group it found the real-tree readers (25 workspaces each)
+# repo_model::code::tests::on_the_real_tree_ (FLAKY on the Windows runner, job 47457: stopped at 60 s, then 23.4 s, beside the
+# ownership test), repo_model::tests::every_declared_smoke_set_, repo_graph_net's generators, register and train-replay tests, and the
+# fixture-tree callers gates_planner::, locks_guard:: (tests/it) and repo_model::tests::the_unplaced_graph_ (2 to 16 calls each).
 [[profile.ci.overrides]]
-filter = "test(/^(golden|tree|inputs|pre_push)::/) | test(/^cli::graph_affected/) | test(/^repo_model::tests::every_tracked_file_of_the_tree_/)"
+filter = "test(/^(golden|tree|inputs|pre_push|repo_graph_net|gates_planner)::/) | test(/^cli::graph_affected/) | (binary(it) & test(/^locks_guard::/)) | test(/^repo_model::tests::(every_tracked_file_of_the_tree_|every_declared_smoke_set_|the_unplaced_graph_)/) | test(/^repo_model::code::tests::on_the_real_tree_/)"
 test-group = "repo-graph"
 
 [profile.ci.junit]

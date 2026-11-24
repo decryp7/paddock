@@ -3656,3 +3656,40 @@ logged with what the rule saw (ER-27). Lesson: an admission rule needs a cost, n
 - **Seen on the way (fix item, not this change).** Shuffled order (`sequence.shuffle`, seeds 8753 and 4242) fails 8 and 11 other Debrief
   tests, all order-dependent (native-feel.spec.ts, app.spec.ts, palette.spec.ts, timeline-panel.spec.ts, testing/startup.spec.ts), none a
   timeout. ER-29's nightly shuffled run would show them.
+
+## The graph train's landing runs (ci.yml 8830, debrief.yml 8831 on 47a27bf1f): a graph reader outside the repo-graph group again, and fix items (2026-11-24)
+
+- **What happened.** `repo_model::code::tests::on_the_real_tree_every_read_candidate_parses_with_syn` was FLAKY on the Windows runner
+  (job 47457): try 1 stopped at 60 s while the ownership test, which reads the same graph, was running beside it; try 2 passed in 23.4 s.
+  It blocks: repo_model is new in the train (ER-12).
+- **Cause.** It reads the repository graph (`plan::read_graph`: 25 `cargo metadata` runs, one per workspace) but was not in the ci
+  profile's `repo-graph` group, so under load it queued on cargo's lock beside the other readers. The ownership test's identical failure
+  in run 8694 was fixed by joining the group, one test by name; nothing found the others.
+- **Fix (fix/graph-train-r5-repo-graph-group).** Every test that runs `cargo metadata` joins the group, found by measurement, not by
+  reading call chains (`read_graph` is reached through `plan_for`, the generators, the gates and the `./dev` binary): a full ci-profile run
+  under a logging `cargo` found 15 tests outside the group, 7 of them over the real tree (docs/benchmarks.md, 2026-11-24, "which
+  paddock-dev tests run cargo metadata"). After the change, 0 of 1028 calls come from outside the group. No limit was raised.
+- **Class (ER-21, second instance).** A test that reads the repository graph but is outside the `repo-graph` group: the ownership test
+  (run 8694, fix/owner-test-windows-cost) and this one (job 47457). Proposed check, not built here: nextest exports `NEXTEST_TEST_GROUP`
+  and `NEXTEST_PROFILE` to every test (and a `./dev` the test starts inherits them, ER-47), so the one place that reads the graph
+  (`read_graph_placing`) can refuse to run under the ci or member-audits profile of paddock-dev unless the group is `repo-graph`. A new
+  reader then fails on its first run on every OS, with the next step named, instead of flaking under load. About half a day with its
+  tests and positive control. Open design points for the coordinator: it puts a test-profile condition into the tool's code; and it
+  must start report-only (ER-41), but nextest does not show a passing test's output, so a report-only warning would go unseen.
+- **Fix items from the same runs, not blocking:**
+  - macOS `ci_run::tests::adding_a_check_changes_no_golden_row_but_the_rest_of_the_conformance_line_does` stopped at 60 s on both tries
+    (job 47411). Locally main 7.7 to 8.0 s, the train 10.8 to 12.1 s; in 47411 every whole-tree test ran 5 to 15 times slower, with the
+    heavy jobs 47415 and 47396 on the same host. C167 ruled out. Whole-tree paddock-dev tests on the shared Mac lose their margin when heavy
+    jobs are scheduled beside them. No limit raised; the next landing run decides.
+  - Debrief `[chromium] e2e/annotations.e2e.ts:92` "plugin marker kinds are listed read-only with their owner, can be switched off and
+    restyled", FLAKY (job 47419): `toHaveClass(/off/)` on the `net.decryptology.windows/app-crash` row of the "Plugin marker kinds" table
+    found no element (line 102), 27.7 s; the retry passed in 23.0 s. Markers manager and MarkerProfile, which the train does not touch.
+  - Debrief WebKit FLAKYs (job 47430, 1 of 133 runs each in the flake history): `e2e/about.e2e.ts:43` "Help menu opens it too" failed in
+    `openApp` (e2e/app.ts:45, the timeline lane not visible within the 5000 ms floor of the load budget; 20.8 s, retry 15.0 s), and
+    `e2e/home-narrow.e2e.ts:70` "nothing overflows at 320 px" failed in `openHome` (no `.finding` within 5 s; 13.3 s, retry 10.3 s). The
+    train changes `openApp` only after line 46 (the dock wait), not the wait that failed.
+  - Debrief `bundle (macos-latest)` failed in `hdiutil` (job 47424) after the Mac runner's desktop session crashed at 02:33Z; rerun on the
+    final head.
+  - The demo release workflows (`shell-demo-release.yml`, `workbench-demo-release.yml`) have no runner-wait first job, so a train's
+    dispatch of them waits in `./dev ci dispatch` instead of in the run.
+  - The train's worktree lacked `apps/debrief/.cargo/libduckdb.toml`, so the gen check needed `fetch-libduckdb.sh` by hand first.
