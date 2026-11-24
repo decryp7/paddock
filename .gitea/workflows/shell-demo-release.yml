@@ -10,12 +10,19 @@
 # published. Secrets: RELEASE_TOKEN (a Gitea token with write:repository) for the release.
 
 name: shell-demo-release
+# A run dispatched through ./dev ci dispatch shows its dispatch_id in its title, so the tool finds that exact run (guard A6, ER-51).
+run-name: ${{ github.event.inputs.dispatch_id && format('{0} [dispatch {1}]', github.workflow, github.event.inputs.dispatch_id) || '' }}
 
 on:
   push:
     tags: ["shell-demo-v*"]
   # Builds and verifies the installers without releasing (the "one CI build with bundles" before a tag).
   workflow_dispatch:
+    inputs:
+      dispatch_id:
+        description: "Set by ./dev ci dispatch: the token it finds this run by (shown in the run's title). Leave empty."
+        required: false
+        default: ""
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

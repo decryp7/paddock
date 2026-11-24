@@ -8,7 +8,10 @@
 //! - nextest: every run in the log (`Starting N tests` ... `Summary [..] N tests run: ...`) must have ended with its summary,
 //!   run every test it started and have no fewer `FAIL`/`TIMEOUT`/`SIG*` lines than its summary counts failures; otherwise the
 //!   whole job reruns with the reason (ER-27). The filterset names each failed test exactly (`binary_id(=b) & test(=t)`), or its
-//!   whole test binary when the name has characters a filterset would have to escape: never fewer tests than failed.
+//!   whole test binary when the name has characters a filterset would have to escape: never fewer tests than failed. Before it
+//!   runs, each test step lists its workspace with the filter and `./dev ci rerun-check` ([`rerun_unmatched`]) fails it with an
+//!   `::error::` naming every failed test that selects nothing (renamed or removed since: run 8868 passed on an empty selection);
+//!   the next round of that run then reruns the job whole. A rename is not mapped: the name alone cannot prove which test it became.
 //! - a job that failed in any other step (a build, clippy, a doc test, a check, the end-to-end tests) reruns whole.
 //! - vitest: the failed spec files are read and reported (`vitest`). A job whose only failed step is a vitest step that takes a
 //!   file list ([`VITEST_STEPS`]: Debrief's `frontend`) reruns only those spec files, when the log's `Test Files` summary counts
@@ -234,6 +237,106 @@ pub fn filterset(tests: &[FailedTest]) -> Option<String> {
         }
     }
     (!parts.is_empty()).then(|| parts.join(" | "))
+}
+
+/// One selector of a rerun's filterset ([`filterset`]): a named test of a binary, or a whole binary.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct FilterAtom {
+    /// The binary id.
+    pub binary: String,
+    /// The test; `None` for the whole binary.
+    pub test: Option<String>,
+}
+
+impl std::fmt::Display for FilterAtom {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.test {
+            Some(t) => write!(f, "{} {t}", self.binary),
+            None => write!(f, "{} (the whole binary)", self.binary),
+        }
+    }
+}
+
+/// Splits `s` at `sep` outside parentheses.
+fn split_top(s: &str, sep: &str) -> Vec<String> {
+    let (mut out, mut depth, mut cur) = (Vec::new(), 0i32, String::new());
+    let mut rest = s;
+    while let Some(c) = rest.chars().next() {
+        if depth == 0 && rest.starts_with(sep) {
+            out.push(std::mem::take(&mut cur));
+            rest = &rest[sep.len()..];
+            continue;
+        }
+        depth += match c {
+            '(' => 1,
+            ')' => -1,
+            _ => 0,
+        };
+        cur.push(c);
+        rest = &rest[c.len_utf8()..];
+    }
+    out.push(cur);
+    out
+}
+
+/// The selectors of a rerun's filterset: the inverse of [`filterset`], the one writer of that format. `Err` for any other text (a
+/// smoke set, a host filter, a hand-written filter), which is never taken for a rerun's.
+pub fn filterset_atoms(filter: &str) -> Result<Vec<FilterAtom>, String> {
+    let bad = || format!("{filter:?} is not a rerun filterset (`./dev plan --since-run` writes `(binary_id(=b) & test(=t)) | ...`)");
+    let inner = |s: &str, pre: &str| s.strip_prefix(pre).and_then(|r| r.strip_suffix(')')).map(str::to_string);
+    let binary_of = |s: &str| inner(s, "binary_id(=").filter(|b| PLAIN_BINARY.is_match(b));
+    let mut atoms = Vec::new();
+    for part in split_top(filter.trim(), " | ") {
+        if let Some(binary) = binary_of(&part) {
+            atoms.push(FilterAtom { binary, test: None });
+            continue;
+        }
+        let body = part.strip_prefix('(').and_then(|p| p.strip_suffix(')')).ok_or_else(bad)?;
+        let [b, tests]: [String; 2] = split_top(body, " & ").try_into().map_err(|_| bad())?;
+        let binary = binary_of(&b).ok_or_else(bad)?;
+        let names = split_top(tests.strip_prefix('(').and_then(|t| t.strip_suffix(')')).unwrap_or(&tests), " | ");
+        // `(test(=a) | test(=b))` has two names; one name is written without the parentheses.
+        if names.len() > 1 && !tests.starts_with('(') {
+            return Err(bad());
+        }
+        for t in names {
+            let test = inner(&t, "test(=").filter(|t| PLAIN_TEST.is_match(t)).ok_or_else(bad)?;
+            atoms.push(FilterAtom {
+                binary: binary.clone(),
+                test: Some(test),
+            });
+        }
+    }
+    if atoms.is_empty() {
+        return Err(bad());
+    }
+    Ok(atoms)
+}
+
+/// The selectors of a rerun's filterset that match no test of a `cargo nextest list --message-format json` listing made with that
+/// filter: a failed test renamed or removed since the run that failed. Run 8868 passed on an empty selection after ADR 0121 renamed
+/// a test, because nextest only warned. `Err` when the filter is not a rerun filterset or the listing is not nextest's JSON.
+pub fn rerun_unmatched(filter: &str, listing: &Value) -> Result<Vec<FilterAtom>, String> {
+    let atoms = filterset_atoms(filter)?;
+    let suites = listing["rust-suites"]
+        .as_object()
+        .ok_or("the listing has no `rust-suites`: it is not `cargo nextest list --message-format json` output")?;
+    let mut tests: BTreeSet<(String, String)> = BTreeSet::new();
+    for (id, suite) in suites {
+        let id = suite["binary-id"].as_str().unwrap_or(id);
+        for (name, case) in suite["testcases"].as_object().into_iter().flatten() {
+            if case["filter-match"]["status"].as_str() == Some("matches") {
+                tests.insert((id.to_string(), name.clone()));
+            }
+        }
+    }
+    Ok(atoms
+        .into_iter()
+        .filter(|a| match &a.test {
+            Some(t) => !tests.contains(&(a.binary.clone(), t.clone())),
+            None => !tests.iter().any(|(b, _)| *b == a.binary),
+        })
+        .collect())
 }
 
 static VITEST_FAIL: LazyLock<Regex> = LazyLock::new(|| re(r"^\s*FAIL\s+(?:\S+\s+)??(\S+\.(?:spec|test)\.[cm]?[jt]sx?)(?:\s|$)"));
@@ -1257,6 +1360,72 @@ mod tests {
         assert_eq!(filterset(&[t("b c)", "x")]), None);
     }
 
+    fn atom(b: &str, t: Option<&str>) -> FilterAtom {
+        FilterAtom {
+            binary: b.into(),
+            test: t.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn a_rerun_filterset_reads_back_into_the_tests_it_names_and_nothing_else_is_taken_for_one() {
+        let many = [t("b::it", "m::one"), t("a", "z"), t("b::it", "m::two")];
+        assert_eq!(
+            filterset_atoms(&filterset(&many).unwrap()).unwrap(),
+            [atom("a", Some("z")), atom("b::it", Some("m::one")), atom("b::it", Some("m::two"))]
+        );
+        assert_eq!(
+            filterset_atoms(&filterset(&[t("b", "x::y")]).unwrap()).unwrap(),
+            [atom("b", Some("x::y"))]
+        );
+        let whole = filterset(&[t("b", "case(1, 2)"), t("a", "z")]).unwrap();
+        assert_eq!(filterset_atoms(&whole).unwrap(), [atom("a", Some("z")), atom("b", None)]);
+        // A smoke set, a host filter or a hand-written filter is not a rerun's: never read as one.
+        for other in [
+            "",
+            "package(paddock-dev)",
+            "test(/plan/)",
+            "binary_id(=a) & test(=z)",
+            "(binary_id(=a) & test(=z)) | package(x)",
+            "(binary_id(=a) & test(=z) | test(=y))",
+            "(binary_id(=a) & test(~z))",
+        ] {
+            assert!(filterset_atoms(other).is_err(), "{other}");
+        }
+    }
+
+    const LISTING: &str = include_str!("../tests/since-run/nextest-list-rerun.json");
+
+    #[test]
+    fn a_failed_test_renamed_since_the_failed_run_matches_nothing_and_is_named_not_warned_about() {
+        // Run 8868: ADR 0121 renamed a test; the round's filter named the old name, nextest selected nothing, warned, and the round
+        // passed. The listing is `cargo nextest list --message-format json -E <filter>` at the new head.
+        let listing: Value = serde_json::from_str(LISTING).unwrap();
+        let renamed = filterset(&[
+            t("paddock-dev", "test_cost::tests::each_class_has_a_stop"),
+            t("paddock-dev::it", "plan::the_plan_names_every_job"),
+        ])
+        .unwrap();
+        let missing = rerun_unmatched(&renamed, &listing).unwrap();
+        assert_eq!(missing, [atom("paddock-dev", Some("test_cost::tests::each_class_has_a_stop"))]);
+        assert_eq!(missing[0].to_string(), "paddock-dev test_cost::tests::each_class_has_a_stop");
+        // Positive control: the names the head has all match.
+        let kept = filterset(&[
+            t("paddock-dev", "test_cost::tests::each_class_has_its_stop"),
+            t("paddock-dev::it", "plan::the_plan_names_every_job"),
+        ])
+        .unwrap();
+        assert!(rerun_unmatched(&kept, &listing).unwrap().is_empty());
+        // A listed test the filter did not select (mismatch) does not count, and a whole binary needs one selected test.
+        let unselected = filterset(&[t("paddock-dev::it", "plan::the_plan_reads_the_graph")]).unwrap();
+        assert_eq!(rerun_unmatched(&unselected, &listing).unwrap().len(), 1);
+        assert!(rerun_unmatched("binary_id(=paddock-dev::it)", &listing).unwrap().is_empty());
+        assert_eq!(rerun_unmatched("binary_id(=gone::it)", &listing).unwrap(), [atom("gone::it", None)]);
+        // Not a listing, or not a rerun filter: an error, never "nothing missing".
+        assert!(rerun_unmatched(&kept, &json!({"tests": []})).is_err());
+        assert!(rerun_unmatched("package(paddock-dev)", &listing).is_err());
+    }
+
     #[test]
     fn vitest_failed_files_come_from_the_failed_tests_list_and_the_job_key_from_the_header() {
         assert_eq!(
@@ -1327,6 +1496,26 @@ mod tests {
         assert!(matches!(
             classify(&job(33271), Ok(CRATE_MACOS), "debrief.yml", &templates()).scope,
             Scope::Job(_)
+        ));
+    }
+
+    #[test]
+    fn a_round_that_failed_because_a_named_test_was_gone_reruns_its_job_whole_next_time() {
+        // `./dev ci rerun-check` failed the test step before nextest ran: the log names the missing test and holds no nextest run, so the
+        // next failed-only round of this run cannot narrow the job to tests and reruns it whole (the renamed test is then run).
+        let log = "2026-11-24T07:30:27.2207850Z ::group::Run cargo nextest list --workspace --all-features --message-format json\n\
+                   2026-11-24T07:31:00.0000000Z ::error::rerun-check: the failed test paddock-service per_machine::tests::gone matches no test at this commit (renamed or removed since the run that failed)\n\
+                   2026-11-24T07:31:00.1000000Z ##[error]Process completed with exit code 1.\n";
+        let r = classify(&job(33271), Ok(log), "ci.yml", &templates());
+        assert!(
+            matches!(r.scope, Scope::Job(ref why) if why.contains("no nextest run")),
+            "{:?}",
+            r.scope
+        );
+        // Positive control: the same job with its nextest failures narrows to them.
+        assert!(matches!(
+            classify(&job(33271), Ok(CRATE_MACOS), "ci.yml", &templates()).scope,
+            Scope::Tests { .. }
         ));
     }
 

@@ -29,6 +29,9 @@ pub struct RunInfo {
     /// Which attempt the run is on: a rerun in Gitea is another attempt of the same run, so the run's `conclusion` is the
     /// last attempt's and earlier attempts are read through [`Client::attempt_jobs`].
     pub run_attempt: u64,
+    /// The run's title as the list shows it (`display_title`): the commit subject, or the workflow's `run-name` (a dispatch through
+    /// `./dev ci dispatch` names its `dispatch_id` there, [`super::dispatch::DispatchTag`]).
+    pub title: String,
 }
 
 impl RunInfo {
@@ -59,6 +62,7 @@ impl RunInfo {
             head_branch: s("head_branch"),
             created_at: s("created_at"),
             run_attempt: v["run_attempt"].as_u64().filter(|n| *n >= 1).unwrap_or(1),
+            title: s("display_title"),
         }
     }
 }

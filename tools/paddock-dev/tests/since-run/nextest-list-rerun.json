@@ -1,0 +1,60 @@
+{
+  "rust-build-meta": {
+    "target-directory": "/build/target",
+    "base-output-directories": ["debug"],
+    "non-test-binaries": {},
+    "build-script-out-dirs": {},
+    "linked-paths": [],
+    "target-platforms": [{"triple": "x86_64-unknown-linux-gnu", "target-features": "unknown"}],
+    "target-platform": null
+  },
+  "test-count": 4,
+  "rust-suites": {
+    "paddock-dev": {
+      "package-name": "paddock-dev",
+      "binary-id": "paddock-dev",
+      "binary-name": "paddock_dev",
+      "package-id": "path+file:///build/tools/paddock-dev#0.1.0",
+      "kind": "lib",
+      "binary-path": "/build/target/debug/deps/paddock_dev-0000000000000000",
+      "build-platform": "target",
+      "cwd": "/build/tools/paddock-dev",
+      "status": "listed",
+      "testcases": {
+        "test_cost::tests::each_class_has_its_stop": {
+          "kind": "test",
+          "ignored": false,
+          "filter-match": {"status": "matches"}
+        },
+        "test_cost::tests::a_test_outside_its_class_is_reported": {
+          "kind": "test",
+          "ignored": false,
+          "filter-match": {"status": "mismatch", "reason": "expression"}
+        }
+      }
+    },
+    "paddock-dev::it": {
+      "package-name": "paddock-dev",
+      "binary-id": "paddock-dev::it",
+      "binary-name": "it",
+      "package-id": "path+file:///build/tools/paddock-dev#0.1.0",
+      "kind": "test",
+      "binary-path": "/build/target/debug/deps/it-0000000000000000",
+      "build-platform": "target",
+      "cwd": "/build/tools/paddock-dev",
+      "status": "listed",
+      "testcases": {
+        "plan::the_plan_names_every_job": {
+          "kind": "test",
+          "ignored": false,
+          "filter-match": {"status": "matches"}
+        },
+        "plan::the_plan_reads_the_graph": {
+          "kind": "test",
+          "ignored": false,
+          "filter-match": {"status": "mismatch", "reason": "expression"}
+        }
+      }
+    }
+  }
+}
