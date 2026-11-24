@@ -123,7 +123,7 @@ fn every_shape_gives_the_same_findings_in_both_hosts() {
 }
 
 #[test]
-fn this_working_tree_run_is_sound() {
+fn tree_this_working_tree_run_is_sound() {
     let root = repo();
     crate::recorded::assert_live_tree_sound("c120", &full(&root));
     assert_eq!(rust(&root)["warnings"], 0, "every site carries a waiver with a reason, or is fixed");

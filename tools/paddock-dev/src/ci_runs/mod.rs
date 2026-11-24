@@ -98,6 +98,176 @@ pub struct CacheAuditArgs {
     server: String,
 }
 
+/// Arguments of `ci test-cost`.
+#[derive(Args)]
+pub struct TestCostArgs {
+    /// A finished run whose job logs are read (every job; the ones with no nextest run are skipped).
+    #[arg(long, conflicts_with = "log")]
+    run: Option<u64>,
+    /// A file holding nextest's output (a saved job log, or a local `cargo nextest run` captured with `2>&1`). Repeatable.
+    #[arg(long)]
+    log: Vec<PathBuf>,
+    /// The charge report the tests wrote (`PADDOCK_TEST_COST_REPORT`, or `<target>/nextest/test-cost/<run id>.jsonl`): every misplaced
+    /// `cargo metadata` call is a `::warning::` and a row of the job summary (`GITHUB_STEP_SUMMARY`).
+    #[arg(long)]
+    report: Option<PathBuf>,
+    /// The stop of an unclassed test in seconds (the ci profile's 60 s; the default profile's is 120).
+    #[arg(long, default_value_t = 60, value_parser = clap::value_parser!(u32).range(1..=3600))]
+    stop: u32,
+    /// Exit 5 when an unclassed test is over a quarter of its stop (default: exit 0, report-only, ER-41).
+    #[arg(long)]
+    fail_on_findings: bool,
+    /// The repository.
+    #[arg(long, default_value = "decryp7/paddock")]
+    repo: String,
+    /// The Gitea server.
+    #[arg(long, default_value = SERVER)]
+    server: String,
+}
+
+/// `ci test-cost`: the cost classes of paddock-dev's tests against what they took, and the charges the tests recorded (ADR 0121).
+/// Report-only: exit 0, with a `::warning::` per finding and a job-summary table. With `--fail-on-findings` (only from the step that
+/// records the first green run): 5 with findings, 6 when nothing was measured (no whole nextest run read, or an empty charge report).
+pub fn test_cost(a: &TestCostArgs) -> Result<Report, CliError> {
+    use crate::nextest_log::{NextestError, durations};
+    let mut texts: Vec<(String, String)> = Vec::new();
+    let mut unreadable = Vec::new();
+    if let Some(run) = a.run {
+        let token = token()?;
+        let mut http = CurlHttp;
+        let mut client = Client::new(&mut http, &a.server, &a.repo, &token);
+        let fail = |e: String| {
+            CliError::failure(format!("run {run} could not be read: {e}"))
+                .with_hint("Check GITEA_TOKEN, the server and the run id, then run it again.")
+        };
+        let jobs = client.timed_jobs(run).map_err(fail)?.ok_or_else(|| fail("no such run".into()))?;
+        for job in jobs {
+            match client.log(job.id) {
+                Ok(Some(text)) => texts.push((format!("job {} ({})", job.id, job.name), text)),
+                Ok(None) => unreadable.push(format!("job {} ({}): no log", job.id, job.name)),
+                Err(e) => unreadable.push(format!("job {} ({}): {e}", job.id, job.name)),
+            }
+        }
+    }
+    for path in &a.log {
+        match std::fs::read(path) {
+            Ok(bytes) => texts.push((path.display().to_string(), String::from_utf8_lossy(&bytes).into_owned())),
+            Err(e) => unreadable.push(format!("{}: {e}", path.display())),
+        }
+    }
+    let mut timed = Vec::new();
+    let mut read = Vec::new();
+    for (name, text) in texts {
+        match durations(&text) {
+            Ok(t) => {
+                read.push(name);
+                timed.extend(t);
+            }
+            Err(NextestError::NoRun) => {}
+            Err(e) => unreadable.push(format!("{name}: {e}")),
+        }
+    }
+    let timings = a.run.is_some() || !a.log.is_empty();
+    if !timings && a.report.is_none() {
+        return Err(CliError::usage("nothing to read").with_hint("Pass --run <id>, --log <file> or --report <file>."));
+    }
+    let level = if a.fail_on_findings { "error" } else { "warning" };
+    let mut text = String::new();
+    let mut summary = String::new();
+    let mut charges_found = 0;
+    let mut charges_measured = true;
+    if let Some(path) = &a.report {
+        match std::fs::read_to_string(path) {
+            Ok(body) => {
+                let rr = crate::test_cost::read_report(&body);
+                charges_found = rr.misplaced.len();
+                charges_measured = rr.charges > 0;
+                let (t, md) = crate::test_cost::render_report(&rr, &path.display().to_string(), level);
+                text.push_str(&t);
+                summary.push_str(&md);
+            }
+            Err(e) => {
+                charges_measured = false;
+                text.push_str(&format!(
+                    "::{level}::ci test-cost: not measured: the charge report {} could not be read ({e}): no test of this run charged a cost class, or {} did not reach the tests. Next step: check the variable on the Tests step.",
+                    path.display(),
+                    crate::test_cost::REPORT_ENV
+                ));
+                summary.push_str("### Test cost classes (ADR 0121)\n\nNot measured: no charge report was written.\n");
+            }
+        }
+    }
+    if let Some(path) = std::env::var("GITHUB_STEP_SUMMARY")
+        .ok()
+        .filter(|p| !p.is_empty() && !summary.is_empty())
+    {
+        use std::io::Write;
+        let wrote = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+            .and_then(|mut f| f.write_all(summary.as_bytes()));
+        if let Err(e) = wrote {
+            text.push_str(&format!(
+                "\n::warning::ci test-cost: the job summary {path} could not be written: {e}"
+            ));
+        }
+    }
+    if !timings {
+        let exit = if a.fail_on_findings && charges_found > 0 {
+            Exit::Findings
+        } else if a.fail_on_findings && !charges_measured {
+            Exit::NotMeasured
+        } else {
+            Exit::Ok
+        };
+        let data = serde_json::json!({"misplaced": charges_found, "measured": charges_measured});
+        return Ok(Report::new(data, text).with_exit(exit));
+    }
+    let r = crate::test_cost::report(&timed, f64::from(a.stop));
+    if !text.is_empty() {
+        text.push('\n');
+    }
+    text.push_str(&format!("{} nextest log(s) read, {} paddock-dev test(s)", read.len(), r.tests));
+    for u in &unreadable {
+        text.push_str(&format!("\n::warning::ci test-cost: {u} (not read, so not counted)"));
+    }
+    for c in &r.classes {
+        match &c.longest {
+            Some((name, secs)) => text.push_str(&format!("\n{}: {} test(s), longest {name} {secs:.1} s", c.class, c.tests)),
+            None => text.push_str(&format!("\n{}: no test", c.class)),
+        }
+    }
+    for (name, secs) in &r.findings {
+        text.push_str(&format!(
+            "\n::{level}::ci test-cost: {name} has no cost class and took {secs:.1} s, over a quarter of its {} s stop. Next step: if it reads the \
+             whole tree or runs cargo metadata, rename it with the class prefix (`tree_` or `graph_`, ADR 0121); otherwise make it cheaper.",
+            a.stop
+        ));
+    }
+    let exit = if r.tests == 0 {
+        text.push_str(&format!(
+            "\n::{level}::ci test-cost: not measured: no whole nextest run of paddock-dev was read. Next step: point it at the paddock-dev job's log."
+        ));
+        if a.fail_on_findings { Exit::NotMeasured } else { Exit::Ok }
+    } else if a.fail_on_findings && (!r.findings.is_empty() || charges_found > 0) {
+        Exit::Findings
+    } else if a.fail_on_findings && !charges_measured {
+        Exit::NotMeasured
+    } else {
+        Exit::Ok
+    };
+    let data = serde_json::json!({
+        "logs_read": read.len(),
+        "tests": r.tests,
+        "unreadable": unreadable,
+        "classes": r.classes.iter().map(|c| serde_json::json!({"class": c.class, "tests": c.tests, "longest": c.longest})).collect::<Vec<_>>(),
+        "findings": r.findings,
+        "misplaced": charges_found,
+    });
+    Ok(Report::new(data, text).with_exit(exit))
+}
+
 /// Arguments of `ci dispatch`.
 #[derive(Args)]
 pub struct DispatchArgs {

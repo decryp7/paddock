@@ -1979,7 +1979,7 @@ mod known_commit {
     }
 
     #[test]
-    fn a_delete_only_push_and_an_explicit_base_never_use_evidence() {
+    fn graph_a_delete_only_push_and_an_explicit_base_never_use_evidence() {
         let (_d, r, _one, two) = repo();
         known::write_record(&r, &state(&r), &two, "origin/main", &[], 5, &pass_for(&r, &two)).unwrap();
         let l = fake(None, Err("x"));
@@ -2329,7 +2329,7 @@ mod base_choice {
     }
 
     #[test]
-    fn a_push_already_on_the_remote_without_evidence_runs_the_checks_instead_of_nothing_to_check() {
+    fn graph_a_push_already_on_the_remote_without_evidence_runs_the_checks_instead_of_nothing_to_check() {
         let (_d, r) = repo();
         let two = sha(&r, "origin/train/t");
         let args = PrePushArgs {

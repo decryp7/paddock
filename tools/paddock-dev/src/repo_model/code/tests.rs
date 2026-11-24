@@ -390,7 +390,7 @@ fn p1_3_a_read_outside_the_readers_crate_is_a_data_node_owning_exactly_that_path
 /// The code adapter over the real tree (ADR 0117 §10): every Rust read candidate parses with `syn` (the text scan is a fallback,
 /// never the answer), and what it costs is printed (`--no-capture`; the results block is in docs/benchmarks.md, rule 48).
 #[test]
-fn on_the_real_tree_every_read_candidate_parses_with_syn() {
+fn graph_on_the_real_tree_every_read_candidate_parses_with_syn() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let history = paddock_repo_graph::GitHistory::new(&root, std::time::Duration::from_secs(120));
     let graph = crate::plan::read_graph(&root, &history).unwrap();

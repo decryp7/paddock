@@ -5,22 +5,66 @@
 # something that never comes is stopped after 120 s and fails, instead of hanging the run (the slots probe test hung 23 minutes).
 [profile.default]
 # Bounded: a test still running after two minutes (four periods) is stopped and fails (ER-21, conformance C114); a test
-# that needs longer is a named override with a `# waiver:` line, not a longer default.
+# that needs longer is in a cost class below, or a named override with a `# waiver:` line, not a longer default.
 test-threads = -1
 slow-timeout = { period = "30s", terminate-after = 4 }
 
-# waiver: the same whole-repository tests as the ci profile's overrides below (measured 2026-11-11: 42-49 s quiet, over 240 s under
-# I/O load); eight periods of 60 s there, the same here, for the same named tests (the two measured 2026-11-18 below included).
-[[profile.default.overrides]]
-filter = "test(/^ipc_endpoints::the_repository_register_is_complete/) | test(/^check::live_/) | test(/^check_engine::this_working_tree_/) | test(/^check_c122::live_tree_/) | test(/^contracts::every_markdown_file_that_code_reads/) | test(/^golden::/)"
-slow-timeout = { period = "60s", terminate-after = 8 }
+# ---- Test cost classes (ADR 0121): the one place for the concurrency and the time budget of whole-repository tests ----
+# A test declares its class by the prefix of its function's name (src/test_cost.rs, `Class`): `graph_` runs `cargo metadata`, `tree_`
+# reads the whole real tree (every tracked file, a parse of every source, the conformance line). These overrides are in the default
+# profile, so every profile (ci, member-audits) inherits them after its own (nextest's per-test overrides). No other override sets a test
+# group or threads (src/test_cost.rs checks the table with the TOML parser). The graph class is checked at run time (`test_cost::charge`
+# at every place that starts `cargo metadata`), the tree class by its cost (`./dev ci test-cost` over nextest's output).
+#
+# Concurrency (ER-48): each class test takes two of the run's test threads and each class group holds at most two of them, so at most
+# four class tests run at once in a run, on at most 8 of its threads. A CI job's test threads are its core share (build-jobs: Linux
+# 30 cores / 6 lanes = 5, Windows 16 / 3 = 5) or, on the shared Mac, the measured 8 for tests that mostly wait (3 lanes x 8 on 12 usable
+# cores, the ER-48 exception in build-jobs). The class tests are the ones that do not mostly wait (one core each, busy: syn, node, cargo),
+# so they are held to at most four per job, the Mac lane's core share of 4, and to two at a time where a lane has 5 threads (2 x 2 = 4
+# <= 5). Before this, every whole-tree test of a job could run at once beside the heavy jobs on the host: run 8830 macOS (job 47411)
+# ran every whole-tree test 5 to 15 times slower than locally.
+[test-groups.repo-graph]
+max-threads = 4
 
-# waiver: the train replay plans 392 commits by the rule tables and by the model (ADR 0117 §8). Measured 2026-11-23 on the 14-core Mac at a
-# 15-minute load of 27 to 35: 91.5 s in four worker threads (one thread: the rule tables 157.6-185.9 s, the model 15.5-18.0 s; recorded in
-# docs/benchmarks.md). The rule tables are git reads and are the thing the model retires, so the cost goes with them. Eight periods of 30 s.
+[test-groups.whole-tree]
+max-threads = 4
+
+# Class graph. Group: the runs of `cargo metadata` queue on cargo's package-cache lock, and readers started together on a loaded host
+# runner passed 60 s while they waited (run 7787 macOS; the ownership test on Windows, run 8694 job 45791: stopped at 60 s, then 18.2 s;
+# repo_model::code's syn test, run 8830 job 47457: stopped at 60 s beside the ownership test, then 23.4 s; the same test took 29.8 s
+# running alone on the Windows runner, run 8838, half the old unclassed 60 s stop, so it has no margin there without the class). The
+# class budget, four periods of 60 s, the budget the graph readers had as waivers (golden:: and the train replay), not raised.
+# Measured: the golden tests took about a minute on a loaded Windows host runner (2026-11-18); the train replay took 98.4 s at six threads
+# on the 14-core Mac at a 1-minute load of 8 to 13 (docs/benchmarks.md 2026-11-24, "which paddock-dev tests run cargo metadata") and 91.5
+# s in four threads at a 15-minute load of 27 to 35 (2026-11-23); the rest of the class 0.2 to 22 s on the same Mac. Re-measured on the CI
+# hosts from every landing run with `./dev ci test-cost --run <id>` (per-class longest test; docs/benchmarks.md 2026-11-24, "test cost
+# classes").
+# With the class (2026-11-24, 8 test threads at a median 1-minute load of 39 on the 14-core Mac, docs/benchmarks.md "test cost classes"):
+# the 44 graph tests' longest 79.2 s (the train replay; 146.9 s before, at a median load of 42), median 7.3 s, one over 30 s.
+# waiver: the graph class budget below, four periods of 60 s, with its measurements above (ER-12; not raised for the tests it held).
 [[profile.default.overrides]]
-filter = "test(/^repo_graph_net::train_replay_/)"
-slow-timeout = { period = "30s", terminate-after = 8 }
+filter = "test(/(^|::)graph_[^:]*$/)"
+test-group = "repo-graph"
+threads-required = 2
+slow-timeout = { period = "60s", terminate-after = 4 }
+
+# Class tree. The class budget, four periods of 60 s, the budget the whole-repository live tests had as waivers, not raised for
+# them. Measured 2026-11-11: 42 to 49 s quiet against over 240 s under I/O load, files finishing all along (each live test also judges
+# itself on progress, ADR 0071: 120 s with no file finished is its own failure); 2026-11-18 at a 15-minute load of 50 to 80 on the 14-core
+# Mac (full ci-profile runs): check_engine::this_working_tree_ 58.8 s, 59.1 s, stopped at 60 s, then 45.8 s; check_c122::live_tree_ 52.5
+# to 55.3 s; check::live_tree_ 46.5 to 48.4 s. Tests that had the unclassed 60 s stop and join the class by measurement (their cost is a
+# whole-tree read; the class's group and threads are what keeps them inside it): ci_run's conformance-line test, 7.7 to 12.1 s locally and
+# stopped at 60 s on both tries of run 8830 macOS (job 47411, with heavy jobs 47415 and 47396 on the same host); the others are listed by
+# name with their local times in docs/benchmarks.md 2026-11-24, "test cost classes".
+# With the class (same runs): the 29 tree tests' longest 41.4 s (os_scoped's removal test, FLAKY at the 60 s stop before), median 7.8 s;
+# ci_run's conformance-line test 11.6 s (59.1 s before). The eight tests/it pre_push:: tests that start `./dev check --pre-push` over the
+# real tree are in the class: out of any group they took 22 to 52 s.
+# waiver: the tree class budget below, four periods of 60 s, with its measurements above (ER-12; not raised for the tests it held).
+[[profile.default.overrides]]
+filter = "test(/(^|::)tree_[^:]*$/)"
+test-group = "whole-tree"
+threads-required = 2
+slow-timeout = { period = "60s", terminate-after = 4 }
 
 [profile.ci]
 # ADR 0103 (D2): a test whose child still holds its output 500 ms after the test ended is reported as LEAK. Report-only (ER-41):
@@ -34,87 +78,37 @@ failure-output = "immediate-final"
 # sets NEXTEST_TEST_THREADS to the job's core share, which overrides this (conformance/ci/build-jobs.sh).
 test-threads = "num-cpus"
 # Reported SLOW after 30 s and stopped, failing the run, after 60 s, so a test that waits on a timeout fails CI instead of
-# slowing it down. A test that needs longer is a waiver below (an override with a `# waiver:` line saying why).
+# slowing it down. A test that needs longer is in a cost class (the default profile's class table above, which this profile
+# inherits) or a named override with a `# waiver:` line saying why.
 slow-timeout = { period = "30s", terminate-after = 2 }
-
-# waiver: the whole-repository "live" tests read every tracked file (git ls-files, a syn parse of every .rs file, node over every file);
-# measured 2026-11-11: 42-49 s quiet against over 240 s under I/O load, with files finishing all along. Each one also judges itself on
-# progress (ADR 0071, `paddock_testkit::guarded`): it fails with its own message when it finishes no file for 120 s, so a hang is named
-# and a slow disk is not called one. Four periods of 60 s are nextest's bound on the whole run, kept at the old size (not raised): a
-# run over 240 s in total is still stopped here and is a finding about the host (ER-12).
-# Two more tests by name, each measured on its own (2026-11-18, full ci-profile runs at a 15-minute load of 50 to 80 on the 14-core Mac,
-# fix/paddock-dev-load-flakes; check::live_tree_, already here, took 46.5-48.4 s in the same runs):
-# - check_engine::this_working_tree_: 58.8 s, 59.1 s, and stopped at 60.0 s then 45.8 s. It does not judge its own progress yet, so for
-#   it the 240 s bound is the stop.
-# - check_c122::live_tree_: 52.5-55.3 s after its quadratic walk was removed (stopped at 60 s on both tries in 3 of 3 runs before); on
-#   train 15's member gate at a load of about 50 it was stopped at 120 s (before the fix).
-# Another whole-tree test joins this list only when it is measured timing out, by name, with its numbers here.
-[[profile.ci.overrides]]
-filter = "test(/^ipc_endpoints::the_repository_register_is_complete/) | test(/^check::live_/) | test(/^check_engine::this_working_tree_/) | test(/^check_c122::live_tree_/)"
-slow-timeout = { period = "60s", terminate-after = 4 }
-
-# waiver: the whole-repository reads of the documentation contract; measured 2026-11-11 like the live tests above (waiting on disk, git
-# and node, not computing), and without a unit of work to count. Four periods of 60 s.
-[[profile.ci.overrides]]
-filter = "test(/^contracts::every_markdown_file_that_code_reads/)"
-slow-timeout = { period = "60s", terminate-after = 4 }
-
-# waiver: the golden tests plan the fixture repository for every recorded case and the real tree for the recorded change sets and the
-# workflow, action and script edits (a copy of the tree each); on a loaded Windows host runner that took about a minute. Old cause: the
-# node runs of affected.mjs (gone with the script, 2026-11-18); the budget stays until the real Windows and Mac legs are measured (ER-9,
-# ER-12: not decided on one Mac). Mac measurement 2026-11-19: 20 golden tests in 11 s. Fix item (docs/lessons.md, 2026-11-19): read the
-# golden:: durations from the next train CI run and drop this waiver (and the golden:: entry in the default profile) then.
-[[profile.ci.overrides]]
-filter = "test(/^golden::/)"
-slow-timeout = { period = "60s", terminate-after = 4 }
-
-# Every test that reads the repository graph runs `cargo metadata` over every workspace, and those runs queue on cargo's
-# package-cache lock; started together on a loaded host runner (run 7787, macOS) they pass the 60 s budget while they wait.
-[test-groups.repo-graph]
-max-threads = 2
-
-# waiver: not a longer budget. At most two of the tests that read the repository graph run at a time (the group above), which keeps
-# each of them far inside the 60 s budget on a loaded host runner. The repository model's ownership test reads the graph too (25
-# `cargo metadata` runs of the real tree): it timed out at 60 s on try 1 of run 8694 (Windows) and took 18.2 s on try 2. Its own cost was
-# cut first (fix/owner-test-windows-cost, docs/benchmarks.md 2026-11-24: CPU 7.3 s to 5.1 s, wall 22 s to 11 s median on the loaded Mac);
-# it joins the group so it does not queue on cargo's lock beside the others.
-# The rule: every test that runs `cargo metadata` is in this group. The list below was read on 2026-11-24 from a full ci-profile run
-# under a `cargo` on PATH that logged each `metadata` call with the test that started it and the test's NEXTEST_TEST_GROUP (2576 tests,
-# 1028 calls; fix/graph-train-r5-repo-graph-group). Outside the group it found the real-tree readers (25 workspaces each)
-# repo_model::code::tests::on_the_real_tree_ (FLAKY on the Windows runner, job 47457: stopped at 60 s, then 23.4 s, beside the
-# ownership test), repo_model::tests::every_declared_smoke_set_, repo_graph_net's generators, register and train-replay tests, and the
-# fixture-tree callers gates_planner::, locks_guard:: (tests/it) and repo_model::tests::the_unplaced_graph_ (2 to 16 calls each).
-[[profile.ci.overrides]]
-filter = "test(/^(golden|tree|inputs|pre_push|repo_graph_net|gates_planner)::/) | test(/^cli::graph_affected/) | (binary(it) & test(/^locks_guard::/)) | test(/^repo_model::tests::(every_tracked_file_of_the_tree_|every_declared_smoke_set_|the_unplaced_graph_)/) | test(/^repo_model::code::tests::on_the_real_tree_/)"
-test-group = "repo-graph"
 
 [profile.ci.junit]
 # Written to <target>/nextest/ci/junit.xml.
 path = "junit.xml"
 
 # The member audits: the repository-wide tests of tests/it, run by the member gate of `./dev merge check --gates` (`--member-gate`) on the
-# merged tree (src/pre_push/gates.rs, `member_audits`). This filter is the one list of them (ER-42); `--no-tests=fail` makes a selection of
-# nothing a failure, and tests/it/member_audits.rs checks that every clause below selects at least one test of the binary (the replay
+# merged tree (src/pre_push/gates.rs, `member_audits`). This filter is the one list of them (ER-42); `--no-tests=fail` makes a selection
+# of nothing a failure, and tests/it/member_audits.rs checks that every clause below selects at least one test of the binary (the replay
 # exclusion included), so a renamed audit shrinks nothing silently. They read every tracked file, so a clash between two members' changes
-# shows here and not first in the train-wide run (ER-8).
-# Measured 2026-11-17 (docs/benchmarks.md): the whole `it` binary minus the replay takes 130 s warm on the merged tree (over the 2 minutes
-# the user was told to expect, with a 120 s stop on one test under load), so the list stays positive.
-# The source audits are selected by one rule, a test name (the last clause, outside the `binary(it)` group): every test of the tool's own
-# modules named `no_source_file_*` reads the tool's `src` and fails on a source file that breaks a rule of the tool (the program
-# names itself only through `self_exe`, git starts only through the builder). A member's own run never shows a guard from one branch
-# meeting code from another; the combined tree does (train 15: the self_exe guard against the load-flakes member's tests). A new audit of
-# the same kind takes the prefix and is in; no list here to forget (ER-42). tests/it/member_audits.rs and the gate's tests check the clause.
-# Left out on purpose: the fixture goldens (build_jobs_golden, host_steps_golden) read no tracked tree. (The first-parent history replay
-# against affected.mjs, which was left out too, was removed with the script, 2026-11-18.)
+# shows here and not first in the train-wide run (ER-8). Measured 2026-11-17 (docs/benchmarks.md): the whole `it` binary minus the replay
+# takes 130 s warm on the merged tree (over the 2 minutes the user was told to expect, with a 120 s stop on one test under load), so the
+# list stays positive. The source audits are selected by one rule, a test name (the last clause, outside the `binary(it)` group): every
+# test of the tool's own modules named `no_source_file_*` reads the tool's `src` and fails on a source file that breaks a rule of the tool
+# (the program names itself only through `self_exe`, git starts only through the builder). A member's own run never shows a guard from one
+# branch meeting code from another; the combined tree does (train 15: the self_exe guard against the load-flakes member's tests). A new
+# audit of the same kind takes the prefix and is in; no list here to forget (ER-42). tests/it/member_audits.rs and the gate's tests check
+# the clause. A test renamed into a cost class keeps its clause with an optional `tree_` (ADR 0121). Left out on purpose: the fixture
+# goldens (build_jobs_golden, host_steps_golden) read no tracked tree. (The first-parent history replay against affected.mjs, which was
+# left out too, was removed with the script, 2026-11-18.)
 [profile.member-audits]
 default-filter = '''
 (binary(it) & (
     (test(/^(dev_bin|cargo_target_lint|parity_corpus|tree|golden|check_allow_list|safe_remove_lint)::/))
-    | test(/^check::live_/)
-    | test(/^check_c1[0-9]{2}::(live_|this_working_tree_)/)
-    | test(/^check_engine::this_working_tree_/)
+    | test(/^check::(tree_)?live_/)
+    | test(/^check_c1[0-9]{2}::(tree_)?(live_|this_working_tree_)/)
+    | test(/^check_engine::(tree_)?this_working_tree_/)
     | test(/^inputs::(heavy_)?inputs_txt_matches_cargo_metadata/)
-    | test(/^ipc_endpoints::the_repository_register_is_complete/)
+    | test(/^ipc_endpoints::(tree_)?the_repository_register_is_complete/)
     | test(/^contracts::every_markdown_file_that_code_reads/)
     | test(/^generators::the_registry_of_the_repository/)
 ))
@@ -123,12 +117,3 @@ default-filter = '''
 # Every failure of the run is listed, as in the ci profile.
 fail-fast = false
 
-# waiver: not a longer budget; the same group as the ci profile, at most two of the tests that read the repository graph at a time.
-[[profile.member-audits.overrides]]
-filter = "test(/^(golden|tree|inputs|pre_push)::/) | test(/^cli::graph_affected/)"
-test-group = "repo-graph"
-
-# waiver: the train replay, measured as in the default profile above (91.5 s in four threads at a load of 27 to 35). Four periods of 60 s.
-[[profile.ci.overrides]]
-filter = "test(/^repo_graph_net::train_replay_/)"
-slow-timeout = { period = "60s", terminate-after = 4 }

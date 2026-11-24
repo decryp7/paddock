@@ -3693,3 +3693,17 @@ logged with what the rule saw (ER-27). Lesson: an admission rule needs a cost, n
   - The demo release workflows (`shell-demo-release.yml`, `workbench-demo-release.yml`) have no runner-wait first job, so a train's
     dispatch of them waits in `./dev ci dispatch` instead of in the run.
   - The train's worktree lacked `apps/debrief/.cargo/libduckdb.toml`, so the gen check needed `fetch-libduckdb.sh` by hand first.
+
+## Whole-repository tests on a loaded host: a cost class per test instead of names in lists (ADR 0121, 2026-11-24)
+
+- **Class (ER-21, seven instances).** A paddock-dev test that runs `cargo metadata` or reads the whole real tree fails a landing run on a
+  loaded shared host with no product bug: runs 7787, 8138, 8694 and 8830 (two jobs), and the live-test waivers of 2026-11-11 and
+  2026-11-18. Each was fixed by naming one test (a waiver, one more name in the `repo-graph` filter), and nothing found the next.
+- **Two causes.** Cargo's package-cache lock (graph readers queue on it) and CPU: on the shared Mac a job has 8 test threads on a 4-core
+  share (the ER-48 exception, measured for tests that mostly wait); whole-tree tests compute, so eight at once over-subscribe it.
+- **Mechanism.** The test function's name declares its class (`graph_`, `tree_`); one class table in `.config/nextest.toml` gives each
+  class its group, two threads per test and its budget; every `cargo metadata` start charges the graph class at run time (reported under
+  every profile; it refuses only from the step that records its first green CI run, ADR 0121 D3); `./dev ci test-cost` reports an unclassed test over a quarter of
+  its stop from nextest's own output.
+- **Lesson.** A list of test names is a record of the last failure, not a rule: declare the property on the test, put the policy in one
+  place, and check the declaration by what makes it true (the lock's group at run time, the cost from the run's own timings).

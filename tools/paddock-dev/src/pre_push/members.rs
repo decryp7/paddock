@@ -54,6 +54,7 @@ pub fn parse_members(metadata: &str, root: &str) -> Result<Vec<Member>, String> 
 
 /// The members of workspace `ws` (repository-relative) under `root`, or why cargo could not say.
 pub fn read_members(root: &Path, ws: &str) -> Result<Vec<Member>, String> {
+    crate::test_cost::charge(crate::test_cost::Class::Graph, "pre_push::members::read_members")?;
     let json = CargoCli::new(root, Duration::from_secs(120))
         .metadata(&format!("{ws}/Cargo.toml"))
         .map_err(|e| format!("cargo metadata for {ws} failed: {e}"))?;

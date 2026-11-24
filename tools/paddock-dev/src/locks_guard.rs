@@ -269,6 +269,7 @@ pub struct RealMetadata;
 
 impl Metadata for RealMetadata {
     fn metadata(&self, dir: &Path) -> Result<Value, String> {
+        crate::test_cost::charge(crate::test_cost::Class::Graph, "locks_guard::RealMetadata")?;
         let mut cmd = command(program_for(
             "cargo",
             &std::env::var("PATH").unwrap_or_default(),

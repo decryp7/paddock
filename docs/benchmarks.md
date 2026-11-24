@@ -187,6 +187,41 @@ failing mode.
 - **Holders count while they live:** a holder whose record is inside the cap its own row lives under (the waiter's `--run-max`, `ROW_CAP` + grace, 3,675 s) is progress by itself, so a waiter behind a healthy 31 to 60 minute step is not stalled; past the cap it is not live, and the same picture ends the wait a stall limit later.
 - **Notes:** the basis of `QUEUE_STALL` (30 min, 1,800 s) in `tools/paddock-dev/src/pre_push/exec.rs`: over the longest gap seen, so a queue that moves is never ended. A holder that runs longer is ended by its own row cap. The per-push totals it replaces (15 min of run, 30 min of queue) were exceeded by three pushes on 2026-11-21 with no row running too long: 13, 14 and 15 rows, and 5 rows, were not measured. Not measured: the gaps of a quiet machine.
 
+### 2026-11-24, test cost classes (feat/test-cost-classes, ADR 0121)
+
+- **Commit:** train/2026-11-23-graph at fe331ca55 with this change; before = the train's `tools/paddock-dev/.config/nextest.toml`
+  (per-name waivers and the `repo-graph` filter, `--config-file`), after = the class table. The same build and binaries for both
+  (debug test profile, `CARGO_BUILD_JOBS=2`)
+- **Machine:** Mac mini, Apple M4 Pro, 14 cores, 64 GB, macOS 27.2, shared with the graph train's CI jobs and other agents. Load sampled
+  every 30 s during each run (1-minute load average): before min 30.5, median 41.9, max 57.3 (19 samples); after min 32.0, median 38.9,
+  max 47.2 (11 samples). A first after run with an earlier inventory ran at median 59.5 (max 105.6) and is used only for the inventory
+- **Command:** `NEXTEST_TEST_THREADS=8 cargo nextest run --profile ci --locked --no-fail-fast` (8 = the macOS runner's test threads,
+  build-jobs) in tools/paddock-dev, with a `cargo` first on PATH that logged each `metadata` call with its test and `NEXTEST_TEST_GROUP`,
+  and `PADDOCK_TEST_COST_REPORT` set (the charge report)
+- **Runs:** 1 before, 1 after (final tree); n = 1 each, so the numbers are an indication of the shape, not a distribution
+- **Numbers:**
+
+| | before | after |
+|---|---|---|
+| suite wall time | 556 s (2588 tests; 2 FLAKY whole-tree tests that hit the 60 s stop on try 1, plus 3 failures of this change's own new tests and audit under the old config) | 306 s, 2588 passed, 0 FLAKY |
+| graph class (44 tests): sum, max, median, over 30 s | 754 s, 146.9 s, 8.5 s, 8 | 408 s, 79.2 s, 7.3 s, 1 |
+| tree class (29 tests): sum, max, median, over 30 s | 655 s, 59.1 s, 18.3 s, 7 | 269 s, 41.4 s, 7.8 s, 1 |
+| unclassed (2501): sum, max | 1158 s, 23.3 s | 902 s, 16.3 s |
+| `ci_run::tests::..._conformance_line_does` (runs 8830, 8843) | 59.1 s (1 s from its stop) | 11.6 s (12.6 s alone, per the coordinator) |
+| `repo_model::code::tests::on_the_real_tree_...` | 32.5 s | 10.1 s |
+| `check_engine::this_working_tree_...` | 54.0 s | 11.1 s |
+| `repo_graph_net::train_replay_...` | 146.9 s | 79.2 s |
+| `cargo metadata` calls outside `repo-graph` (shim) | 0 of 1028 | 0 of 1028 |
+| charges recorded / outside their group | n/a | 1032 / 0 (4 more than the shim: two `pre_push::tests` run cargo in a child whose environment the test replaces) |
+
+- **Inventory (the first after run, median load 59.5):** the class table without the `pre_push::` module in a group: the eight
+  `tests/it` `pre_push::` tests that start `./dev check --pre-push` over the real tree took 22 to 52 s (6 to 30 s before, in the old
+  group), so they joined the tree class; the charge named the two `src` `pre_push::tests` above. `./dev ci test-cost` on the final run:
+  one unclassed test over a quarter of its stop, `golden::ci_plan_declares_a_scope_...` 16.3 s (a fixture plan, not the real tree; a
+  fix item, not a class).
+- **Not measured:** Linux and Windows (the landing run of the train with this change, read with `./dev ci test-cost --run <id>`, is the
+  first; run 8838 Windows had `on_the_real_tree_` at 29.8 s alone); more than one run per side.
+
 ### 2026-11-24, which paddock-dev tests run `cargo metadata`, and the repo-graph group (fix/graph-train-r5-repo-graph-group)
 
 - **Commit:** 47a27bf1f (train/2026-11-23-graph) before, the same with the new `tools/paddock-dev/.config/nextest.toml` after

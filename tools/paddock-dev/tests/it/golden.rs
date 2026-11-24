@@ -186,7 +186,7 @@ pub(crate) fn fixture_repo() -> (tempfile::TempDir, PathBuf) {
 }
 
 #[test]
-fn recorded_plans_match_the_planners_answers_on_the_fixture_repository() {
+fn graph_recorded_plans_match_the_planners_answers_on_the_fixture_repository() {
     let (_keep, root) = fixture_repo();
     let cases: Vec<Value> = serde_json::from_str(&std::fs::read_to_string(golden_dir().join("cases.json")).unwrap()).unwrap();
     assert!(cases.len() >= 20, "the recorded cases");
@@ -714,7 +714,7 @@ fn own_objects(repo: &Path) -> usize {
 /// 7893). The copy borrows the source's objects instead and hashes only files that differ from them: its own store holds the
 /// trees a sparse checkout changes, the commit and those few files.
 #[test]
-fn the_repository_copy_reuses_the_source_objects_instead_of_hashing_every_file() {
+fn tree_the_repository_copy_reuses_the_source_objects_instead_of_hashing_every_file() {
     let dir = tempfile::tempdir().unwrap();
     let copy = dir.path().join("copy");
     copy_checked_out_files(&repo_root(), &copy);
@@ -751,7 +751,7 @@ fn the_repository_copy_reuses_the_source_objects_instead_of_hashing_every_file()
 // copies that run side by side (`run_cases`); one copy, one edit after the other, took 21 s at load 27 and 80-121 s on the loaded CI
 // Mac (runs 8060, 8066, 8099, SLOW lines).
 #[test]
-fn workflow_action_and_script_edits_narrow_the_plan() {
+fn graph_workflow_action_and_script_edits_narrow_the_plan() {
     // The jobs of ci.yml that CI_JOBS names; one action, one reusable workflow, one script of conformance/ci and a helper it imports.
     let jobs: Vec<&str> = paddock_dev::plan_gitea::CI_JOBS.iter().map(|(j, _)| *j).collect();
     let ci = std::fs::read_to_string(repo_root().join(".gitea/workflows/ci.yml")).unwrap();
@@ -791,7 +791,7 @@ fn workflow_action_and_script_edits_narrow_the_plan() {
     );
 }
 
-/// One case of [`workflow_action_and_script_edits_narrow_the_plan`]: a copy of its own, then each edit
+/// One case of [`graph_workflow_action_and_script_edits_narrow_the_plan`]: a copy of its own, then each edit
 /// in turn (the edits share the copy, so they run one after the other here), counting the plans that narrowed.
 fn edits_on_a_copy(edits: &[(String, Option<String>)], narrowed: &std::sync::atomic::AtomicUsize) {
     let dir = tempfile::tempdir().unwrap();
@@ -870,7 +870,7 @@ fn edits_on_a_copy(edits: &[(String, Option<String>)], narrowed: &std::sync::ato
 }
 
 #[test]
-fn guard_edits_mark_conformance() {
+fn graph_guard_edits_mark_conformance() {
     let dir = tempfile::tempdir().unwrap();
     let copy = dir.path().join("copy");
     let started = Instant::now();

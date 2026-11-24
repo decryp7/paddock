@@ -59,6 +59,7 @@ pub fn split_crates(metadata: &str) -> Result<WsCrates, String> {
 /// The crates of workspace `ws` (repository-relative) the container leaves out and how many remain, or why cargo could not say
 /// (the row is then broken, not skipped: ER-45).
 pub fn left_out(root: &Path, ws: &str) -> Result<WsCrates, String> {
+    crate::test_cost::charge(crate::test_cost::Class::Graph, "pre_push::linux_inputs::left_out")?;
     let json = CargoCli::new(root, Duration::from_secs(120))
         .metadata(&format!("{ws}/Cargo.toml"))
         .map_err(|e| format!("cargo metadata for {ws} failed: {e}"))?;

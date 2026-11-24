@@ -313,17 +313,17 @@ const GOLDEN: &str = "tests/golden/ci-run/commands.tsv";
 
 /// The command that rewrites the golden from the model (paddock-testkit's golden mechanism), as the failure prints it
 /// (`docs/generators.toml`, `ci-run-golden`). `--nocapture` shows the rows it adds and removes.
-const REGENERATE_GOLDEN: &str = "PADDOCK_UPDATE_GOLDEN=1 cargo test --lib ci_run::tests::the_contracts_run_exactly_the_commands_in_the_golden -- --nocapture   # in tools/paddock-dev";
+const REGENERATE_GOLDEN: &str = "PADDOCK_UPDATE_GOLDEN=1 cargo test --lib ci_run::tests::tree_the_contracts_run_exactly_the_commands_in_the_golden -- --nocapture   # in tools/paddock-dev";
 
 /// The golden's header: written by the regenerate, so the file holds no hand-written part.
 const GOLDEN_HEADER: &str = "\
 # Generated from the CI model by the regenerate command below; do not edit (ER-40). The commands CI runs: `job` rows are every command
 # of a root job of ci.yml, `app` rows the commands an app contract adds to its legs, as the CI model reads them from the contracts
-# (the paddock.ci.json files) and the workflows (src/ci_run/tests.rs, `the_contracts_run_exactly_the_commands_in_the_golden`). The
+# (the paddock.ci.json files) and the workflows (src/ci_run/tests.rs, `tree_the_contracts_run_exactly_the_commands_in_the_golden`). The
 # conformance line's `--only` value is `$ONLY` (that list is generated from the check modules; the rest of the line is literal). It began as the commands
 # CI ran before the gate executor (11c365fc4, CI-in-Rust WP-3); it is now a reviewed snapshot: a change to a contract or a job shows
 # here as added and removed rows in the same commit. Regenerate:
-#   PADDOCK_UPDATE_GOLDEN=1 cargo test --lib ci_run::tests::the_contracts_run_exactly_the_commands_in_the_golden -- --nocapture   # in tools/paddock-dev
+#   PADDOCK_UPDATE_GOLDEN=1 cargo test --lib ci_run::tests::tree_the_contracts_run_exactly_the_commands_in_the_golden -- --nocapture   # in tools/paddock-dev
 # kind<TAB>job or app<TAB>os<TAB>folder<TAB>command
 ";
 
@@ -384,7 +384,7 @@ fn golden_mode(ci: Option<&str>, update: Option<&str>) -> Result<paddock_testkit
 }
 
 #[test]
-fn the_contracts_run_exactly_the_commands_in_the_golden() {
+fn tree_the_contracts_run_exactly_the_commands_in_the_golden() {
     use paddock_testkit::golden::{GoldenMode, UPDATE_VAR, check_golden};
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(GOLDEN);
     let got = modelled_commands();
@@ -468,7 +468,7 @@ fn the_golden_is_rewritten_only_on_request_and_never_under_ci() {
 }
 
 #[test]
-fn adding_a_check_changes_no_golden_row_but_the_rest_of_the_conformance_line_does() {
+fn tree_adding_a_check_changes_no_golden_row_but_the_rest_of_the_conformance_line_does() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let src = crate::gates::edge::load_sources(&root).unwrap();
     let rows = rows_of(&src);
@@ -500,7 +500,7 @@ fn adding_a_check_changes_no_golden_row_but_the_rest_of_the_conformance_line_doe
 
 /// The probe can see a difference (ER-33): a contract line that was changed shows up as a missing and an extra command.
 #[test]
-fn the_parity_probe_sees_a_changed_contract_line() {
+fn tree_the_parity_probe_sees_a_changed_contract_line() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let mut src = crate::gates::edge::load_sources(&root).unwrap();
     let ui = src.root_contracts.get_mut("ui").unwrap();
@@ -511,7 +511,7 @@ fn the_parity_probe_sees_a_changed_contract_line() {
 }
 
 #[test]
-fn every_phase_the_workflows_call_exists_in_its_contract() {
+fn tree_every_phase_the_workflows_call_exists_in_its_contract() {
     // The model turns an unknown phase into a problem; the real tree has none.
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let src = crate::gates::edge::load_sources(&root).unwrap();

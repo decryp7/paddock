@@ -6,7 +6,7 @@ use paddock_dev::gates::edge;
 use paddock_dev::gates::gating::Planner;
 
 #[test]
-fn a_script_that_answers_differently_does_not_decide_what_c100_reads() {
+fn graph_a_script_that_answers_differently_does_not_decide_what_c100_reads() {
     let (_keep, root) = crate::golden::fixture_repo();
     // A script of the old kind that disagrees with the planner on purpose: it says a change of crates/a marks only the ui.
     std::fs::create_dir_all(root.join("scripts")).unwrap();
@@ -27,7 +27,7 @@ fn a_script_that_answers_differently_does_not_decide_what_c100_reads() {
 }
 
 #[test]
-fn the_planner_needs_no_script_and_no_node() {
+fn graph_the_planner_needs_no_script_and_no_node() {
     let (_keep, root) = crate::golden::fixture_repo();
     assert!(
         !root.join("scripts/affected-marks.mjs").exists(),

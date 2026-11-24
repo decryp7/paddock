@@ -98,7 +98,7 @@ fn a_tree_without_rust_tests_is_check_broken_in_both_never_a_pass() {
 }
 
 #[test]
-fn this_working_tree_run_is_sound() {
+fn tree_this_working_tree_run_is_sound() {
     let root = repo();
     crate::recorded::assert_live_tree_sound("c123", &full(&root));
 }

@@ -215,7 +215,7 @@ pub(crate) fn node_ticking(driver: &str, env: &[(&str, String)], progress: &padd
 }
 
 #[test]
-fn live_tree_run_is_sound() {
+fn tree_live_tree_run_is_sound() {
     let root = repo_root();
     // The Rust host reports every file it reads: a slow disk passes, a run that reads nothing for LIVE_STALL does not.
     let r = paddock_testkit::guarded("the Rust check host over the live tree", LIVE_STALL, {
@@ -242,7 +242,7 @@ fn live_tree_run_is_sound() {
     clippy::disallowed_methods,
     reason = "a test spawns node, git or the built binary; it ends them itself"
 )]
-fn live_mask_equals_the_js_mask_on_every_tracked_rust_file() {
+fn tree_live_mask_equals_the_js_mask_on_every_tracked_rust_file() {
     if !has_node() {
         return skip("node is not installed");
     }
