@@ -921,8 +921,35 @@ fn a_guardian_whose_input_is_not_a_pipe_refuses_and_says_so() {
     assert!(text.contains("standard input is not a pipe"), "{text}");
 }
 
+const RESTART_OWNER_ENV: &str = "PADDOCK_GUARD_TEST_RESTART_OWNER";
+const RESTART_OWNER_TEST: &str = "guardian::unix::tests::restart_owner_process";
+/// What [`restart_owner_process`] prints when every check passed.
+const RESTART_OK: &str = "restart-owner: ok";
+
+/// A guardian that ended is started again for the next child. The guardian is killed in an owner process of its own: in
+/// the test process it is the one guardian every guarded test there shares, and its end closes its keepers' input, so
+/// the keepers of other tests' children end with it and their groups can no longer be ended (CI run 9011, guardian-as-user:
+/// the three keeper tests failed while this one ran beside them in one libtest process).
 #[test]
 fn a_guardian_that_ended_is_started_again_for_the_next_child() {
+    let out = crate::command(std::env::current_exe().unwrap())
+        .args([RESTART_OWNER_TEST, "--exact", "--nocapture"])
+        .env(RESTART_OWNER_ENV, "1")
+        .env_remove(GUARDIAN_ENV)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success() && String::from_utf8_lossy(&out.stdout).contains(RESTART_OK),
+        "the owner that killed its guardian did not get a new one for its next child: {out:?}"
+    );
+}
+
+/// Not a test: the owner of [`a_guardian_that_ended_is_started_again_for_the_next_child`], which kills its own guardian.
+#[test]
+fn restart_owner_process() {
+    if std::env::var_os(RESTART_OWNER_ENV).is_none() {
+        return;
+    }
     enable_in_test_binary(ENTRY);
     let _acting = ActAsUser::here();
     let mut first = crate::command("/bin/sh");
@@ -944,6 +971,7 @@ fn a_guardian_that_ended_is_started_again_for_the_next_child() {
     assert_ne!(again, Some(guardian), "a new guardian serves it");
     second.kill();
     first.kill();
+    println!("{RESTART_OK}");
 }
 
 #[test]
