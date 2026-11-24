@@ -3816,3 +3816,13 @@ first and records the second (`ci fix-items`) is part of the queued green-main w
   - Member 3's gate took about 4.5 hours, most of it queue time in the heavy queue (doctest rows queued up to 1624 s each, behind another
     agent's pre-push), and its gen row `notices-dyno` was NOT MEASURED because the train worktree had no `node_modules`: `./dev worktree
     add` does not run `npm ci`, so an integrator must run it before the first gate.
+  - Train 2026-11-25-a's landing run ci.yml 8976 (plan job 48889) could not save the escape monitor's selection record:
+    `::warning::the selection record of this plan was not saved (git push origin refs/paddock/plan-records/*:refs/paddock/plan-records/*:
+    fatal: could not read Username for 'http://172.16.1.220:7400': No such device or address); the next nightly counts this commit as
+    not measured`. The plan job pushes the refs with no credentials over the http remote; likely fix: push with the job token, the way
+    checkout authenticates (to be fixed with the dispatch guards, train c).
+  - The same plan printed its `::notice::inactive:` glued to the end of that warning: `eprintln!` writes a line's text and its newline
+    as two writes, and the runner merged the notice from standard output between them. Fixed in this train (`log_text::write_line`,
+    one write per line, for the plan and the eleven `|l| eprintln!("{l}")` log closures). Still open: the other `eprintln!` calls with
+    inline formatting have the same two-write shape; a clippy `disallowed-macros` ban of `eprintln!` in paddock-dev's sources, with
+    `log_text::eline` as the replacement, would cover them.
