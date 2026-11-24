@@ -66,6 +66,11 @@ impl Finding {
         };
         format!("::error{loc}::C100 {} {} Fix: {}", self.id, self.message, self.fix)
     }
+
+    /// The annotation line of a warning: printed, never failing the run (ER-41's time rule: a date never blocks an unrelated push).
+    pub fn warning(&self) -> String {
+        self.annotation().replacen("::error", "::warning", 1)
+    }
 }
 
 /// How one check came out.
@@ -84,6 +89,8 @@ pub struct Row {
 pub struct Outcome {
     /// Findings.
     pub findings: Vec<Finding>,
+    /// Warnings: the sunset rule's reminders and its overdue entries that this change does not touch (they never fail the run).
+    pub warnings: Vec<Finding>,
     /// One row per check.
     pub rows: Vec<Row>,
     /// Register problems, kept apart for the summary.
@@ -205,6 +212,33 @@ pub fn evaluate(input: &Input) -> Outcome {
     out.register_errors = reg_errors.len();
     let mut problems = register::check_dates(&reg, input.today);
     problems.extend(register::date_history(&input.history));
+    // The sunset rule (user, 2026-11-24; ER-41's time rule): an overdue report-only entry blocks a release tag of an app it concerns
+    // and a change that touches the entry (or a run whose base register cannot be read: not measured never passes, ER-33); on any
+    // other push it is a warning, as is the reminder before the date.
+    let base_reg = input.base_register_text.as_deref().map(|t| register::parse(t).0);
+    problems.extend(register::sunset_limits(&reg, base_reg.as_ref(), input.today));
+    let tag_app = input
+        .release_tag
+        .as_deref()
+        .map(|t| t.rsplit_once("-v").map(|(a, _)| a.to_string()));
+    for due in register::sunset(&reg, input.today) {
+        let touched = base_reg
+            .as_ref()
+            .is_none_or(|b| b.report_only.iter().find(|e| e.id == due.entry.id) != Some(&due.entry));
+        let tagged = tag_app.as_ref().is_some_and(|app| due.concerns(app.as_deref()));
+        let f = Finding {
+            file: Some(REGISTER.to_string()),
+            line: None,
+            id: "register".to_string(),
+            message: due.message(),
+            fix: due.fix().to_string(),
+        };
+        if due.overdue && (touched || tagged) {
+            out.findings.push(f);
+        } else {
+            out.warnings.push(f);
+        }
+    }
     if let Some(why) = &input.history_error {
         finding(
             &mut out,
@@ -225,7 +259,7 @@ pub fn evaluate(input: &Input) -> Outcome {
             "Check out with fetch-depth: 0 (git fetch --unshallow).",
         );
     }
-    let base = input.base_register_text.as_deref().map(|t| register::parse(t).0);
+    let base = base_reg;
     if !reg.ratchet.is_empty() && base.is_none() && !input.shallow {
         finding(
             &mut out,
@@ -930,6 +964,59 @@ mod tests {
         let bad = step_register("2026-12-06").replace("step:tools/hooks", "step:tools");
         let m = messages(&run_step(&bad, STEP_CI, Some(STEP_CONTRACT)));
         assert!(m.iter().any(|x| x.contains("is not `step:<project>/<phase>`")), "{m:?}");
+    }
+
+    /// C100 over the wired `step:tools/hooks` entry with an expiry date, on `today`, against `base` and for `tag`.
+    fn run_sunset(register: &str, base: Option<&str>, today: &str, tag: Option<&str>) -> Outcome {
+        let tree = MemTree::new(&[]);
+        let mut sources = Sources::default();
+        sources.workflows.insert(".gitea/workflows/ci.yml".into(), STEP_CI.into());
+        sources.root_contracts.insert("tools".into(), STEP_CONTRACT.into());
+        evaluate(&Input {
+            tree: &tree,
+            sources: &sources,
+            conformance_list: Ok(LIST.into()),
+            conformance_commands: Some(r#"["list","commands"]"#.into()),
+            dev_commands: ["gates", "gates check"].iter().map(|s| s.to_string()).collect(),
+            register_text: Some(register.to_string()),
+            base_register_text: base.map(str::to_string),
+            history: Vec::new(),
+            today: Date::parse(today).unwrap(),
+            release_tag: tag.map(str::to_string),
+            planner: &AllMarks,
+            history_error: None,
+            warn: false,
+            shallow: false,
+        })
+    }
+
+    /// The sunset rule in C100 (ER-41's time rule), with its positive controls: an overdue report-only entry is a warning on a push
+    /// that does not touch it, and a finding when the push touches it, when the base register cannot be read and on a release tag;
+    /// the week before the date is a reminder warning; before that, nothing.
+    #[test]
+    fn an_overdue_report_only_entry_blocks_only_its_own_change_and_a_tag() {
+        let reg = step_register("2026-12-08");
+        let sunset = |o: &Outcome| messages(o).into_iter().filter(|m| m.contains("sunset rule")).collect::<Vec<_>>();
+        let warned = |o: &Outcome| o.warnings.iter().filter(|w| w.message.contains("sunset rule")).count();
+        // before the reminder: nothing
+        let o = run_sunset(&reg, Some(&reg), "2026-11-30", None);
+        assert!(sunset(&o).is_empty() && warned(&o) == 0, "{:?}", o.warnings);
+        // the reminder week: a warning only
+        let o = run_sunset(&reg, Some(&reg), "2026-12-02", None);
+        assert!(sunset(&o).is_empty() && warned(&o) == 1, "{:?}", o.warnings);
+        assert!(o.warnings[0].message.contains("is near"), "{:?}", o.warnings);
+        assert!(o.warnings[0].warning().starts_with("::warning file=docs/gates.toml::C100 register "), "{:?}", o.warnings);
+        // overdue, untouched: a warning, never a finding on an unrelated push
+        let o = run_sunset(&reg, Some(&reg), "2026-12-09", None);
+        assert!(sunset(&o).is_empty() && warned(&o) == 1, "{:?} {:?}", messages(&o), o.warnings);
+        // overdue and touched by this change (the entry differs from the base's): a finding
+        let touched = reg.replace("reason = \"x\"", "reason = \"x, reworded\"");
+        let m = sunset(&run_sunset(&touched, Some(&reg), "2026-12-09", None));
+        assert!(m.iter().any(|x| x.contains("review_by 2026-12-08 has passed")), "{m:?}");
+        // overdue, the base register unreadable: not measured never passes
+        assert_eq!(sunset(&run_sunset(&reg, None, "2026-12-09", None)).len(), 1);
+        // overdue, a release tag: a finding
+        assert_eq!(sunset(&run_sunset(&reg, Some(&reg), "2026-12-09", Some("dyno-v1.2.0"))).len(), 1);
     }
 
     #[test]

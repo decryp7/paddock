@@ -95,10 +95,15 @@ pub fn check(a: &CheckArgs, dev_commands: std::collections::BTreeSet<String>) ->
         text.push_str(&f.annotation());
         text.push('\n');
     }
+    for w in &out.warnings {
+        text.push_str(&w.warning());
+        text.push('\n');
+    }
     text.push_str(&format!(
-        "\nC100: {} checks, {} findings ({} ms)\n\n{table}",
+        "\nC100: {} checks, {} findings, {} warnings ({} ms)\n\n{table}",
         out.rows.len(),
         out.findings.len(),
+        out.warnings.len(),
         started.elapsed().as_millis()
     ));
     let findings: Vec<Value> = out
@@ -106,7 +111,15 @@ pub fn check(a: &CheckArgs, dev_commands: std::collections::BTreeSet<String>) ->
         .iter()
         .map(|f| json!({"file": f.file, "line": f.line, "id": f.id, "message": f.message, "fix": f.fix}))
         .collect();
-    let report = Report::new(json!({"findings": findings, "checks": out.rows.len(), "warn": a.warn}), text);
+    let warnings: Vec<Value> = out
+        .warnings
+        .iter()
+        .map(|f| json!({"file": f.file, "line": f.line, "id": f.id, "message": f.message, "fix": f.fix}))
+        .collect();
+    let report = Report::new(
+        json!({"findings": findings, "warnings": warnings, "checks": out.rows.len(), "warn": a.warn}),
+        text,
+    );
     Ok(if out.findings.is_empty() || a.warn {
         report
     } else {
@@ -161,12 +174,13 @@ pub fn inputs() -> Result<Report, CliError> {
     Ok(Report::new(json!({"globs": globs}), globs.join("\n")))
 }
 
-/// `dev gates ratchet --release-tag <tag>`: only the lint-adoption ratchets of the tag's app, nothing else of C100 (ER-31).
+/// `dev gates ratchet --release-tag <tag>`: the lint-adoption ratchets of the tag's app and the report-only entries past their expiry
+/// date that concern it (the sunset rule), nothing else of C100 (ER-31).
 pub fn ratchet(root: Option<&Path>, base: &str, tag: &str) -> Result<Report, CliError> {
     let root = repo_root(root)?;
     let register = std::fs::read_to_string(root.join("docs/gates.toml")).ok();
     let base_text = edge::base_register(&root, base);
-    let refusals = super::register::release_refusals(register.as_deref(), base_text.as_deref(), tag);
+    let refusals = super::register::release_refusals(register.as_deref(), base_text.as_deref(), tag, Date::today());
     let mut text = String::new();
     for r in &refusals {
         text.push_str(&format!("::error file=docs/gates.toml::C100 ratchet {r}\n"));
