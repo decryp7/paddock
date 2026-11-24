@@ -402,13 +402,13 @@ fn grade_run_inner(
             Earlier::Clean => {}
             Earlier::Failed(w) => {
                 let r = GradedResult::Red(format!("it ended {state} after a rerun of failed jobs ({w})"));
-                return Outcome::of(scope, r);
+                return Outcome::of(scope, r).noted(why);
             }
-            Earlier::Unknown(w) => return Outcome::of(scope, GradedResult::NotMeasured(w)),
+            Earlier::Unknown(w) => return Outcome::of(scope, GradedResult::NotMeasured(w)).noted(why),
         }
     }
     if state == "success" {
-        return Outcome::of(scope, GradedResult::Green);
+        return Outcome::of(scope, GradedResult::Green).noted(why);
     }
     // A job that was cancelled (or ended in no state) is neither a pass nor a failure; one the plan declared and that was skipped
     // is caught by the declared scope below, and one it did not declare is off.
@@ -422,7 +422,7 @@ fn grade_run_inner(
             j.name,
             if j.conclusion.is_empty() { "in no state" } else { &j.conclusion }
         );
-        return Outcome::of(scope, GradedResult::NotMeasured(w));
+        return Outcome::of(scope, GradedResult::NotMeasured(w)).noted(why);
     }
     let result = read_failures(client, run.workflow(), &read.jobs, touched);
     // Fix items are granted only on the declared scope that ran, whichever basis decides "complete" (ER-41's report-only phase).
@@ -439,10 +439,13 @@ fn grade_run_inner(
                 let n = GradedResult::NotMeasured(format!("fix items need the declared scope to have run: {w}"));
                 return Outcome::of(Scope::Partial, n).noted(w).blocking();
             }
-            Mode::Unknown(w) => return Outcome::of(scope, GradedResult::NotMeasured(format!("the declared scope cannot be read: {w}"))),
+            Mode::Unknown(w) => {
+                return Outcome::of(scope, GradedResult::NotMeasured(format!("the declared scope cannot be read: {w}"))).noted(why);
+            }
         }
     }
-    Outcome::of(scope, result)
+    // A landing run keeps why it is not complete (`note`), so a reader that passes it over says why (run 8983: "8983 ()").
+    Outcome::of(scope, result).noted(why)
 }
 
 /// What decides a commit: its deciding run and outcome, and the runs that were partial on the way.
@@ -492,7 +495,14 @@ pub fn commit_outcome_for(
                 partial,
             });
         }
-        partial.push(format!("{} ({})", r.id, o.note));
+        partial.push(if o.scope == Scope::Landing {
+            format!(
+                "{} (a landing run: it ran its own diff's selection, which counts for its landing and the push to main after it, never as a full run: {})",
+                r.id, o.note
+            )
+        } else {
+            format!("{} ({})", r.id, o.note)
+        });
         fallback.get_or_insert((r.id, o));
     }
     fallback.map(|(run, outcome)| CommitOutcome { run, outcome, partial })
