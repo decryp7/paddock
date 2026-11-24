@@ -137,10 +137,12 @@ fn json_mode_strict_and_the_exit_statuses_agree() {
     let json_run = run_host(&["--app", "paddock", "--root", root, "--only", "C120", "--json"], scratch.path());
     assert!(json_run.stdout.trim_start().starts_with('{'));
     // C123 is report-only: a warning never fails the run, `--strict` makes the named check's warnings fail.
-    let bad = tree(&[(
-        "crates/x/tests/bad.rs",
-        "#[test]\nfn t() {\n    let _ = std::process::Command::new(env!(\"CARGO_BIN_EXE_paddock-dev\")).output();\n}\n",
-    )]);
+    // The binary's name is joined here, as in C123's own samples, so the dev_bin audit does not take this sample for a spawn.
+    let sample = format!(
+        "#[test]\nfn t() {{\n    let _ = std::process::Command::new(env!(\"{}\")).output();\n}}\n",
+        ["CARGO_BIN_EXE", "paddock-dev"].join("_")
+    );
+    let bad = tree(&[("crates/x/tests/bad.rs", &sample)]);
     let loose = same(
         "engine-loose",
         &["--app", "t", "--root", bad.path().to_str().unwrap(), "--only", "C123"],
