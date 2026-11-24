@@ -187,6 +187,22 @@ failing mode.
 - **Holders count while they live:** a holder whose record is inside the cap its own row lives under (the waiter's `--run-max`, `ROW_CAP` + grace, 3,675 s) is progress by itself, so a waiter behind a healthy 31 to 60 minute step is not stalled; past the cap it is not live, and the same picture ends the wait a stall limit later.
 - **Notes:** the basis of `QUEUE_STALL` (30 min, 1,800 s) in `tools/paddock-dev/src/pre_push/exec.rs`: over the longest gap seen, so a queue that moves is never ended. A holder that runs longer is ended by its own row cap. The per-push totals it replaces (15 min of run, 30 min of queue) were exceeded by three pushes on 2026-11-21 with no row running too long: 13, 14 and 15 rows, and 5 rows, were not measured. Not measured: the gaps of a quiet machine.
 
+### 2026-11-24, the conformance-line test of the CI model: main, the graph train and the cut (fix/graph-train-conformance-line-test-cost)
+
+- **Commits:** main d04af7b46, train/2026-11-23-graph fe331ca55, and the fix on top of it; debug test builds, `CARGO_BUILD_JOBS=2`
+- **Machine:** Mac mini, Apple M4 Pro, 14 cores, 64 GB, macOS 27.2, shared with two train CI runs: 1-minute load 42 to 121 (main
+  against train) and 24 to 32 (train against fix), so CPU time (user + sys, children included) is the measure and wall time an indication
+- **Command:** the lib test binary run directly, `--exact ci_run::tests::adding_a_check_changes_no_golden_row_but_the_rest_of_the_conformance_line_does --test-threads 1`, under `/usr/bin/time -p`, 5 interleaved rounds per pair; a `sample` of one train run for where the time goes
+- **Where the time goes (train):** 91% of the test thread in `gates::ci::build` (the walk of every step of every job, per matrix leg);
+  the test built the whole model four times and reads only ci.yml's rows
+- **Main against train:** CPU 10.1-11.8 s (median 10.5) against 11.4-12.4 s (median 11.7), +11%. The train's model code adds two leg keys
+  and a `hostTests` read per app; the rest is real new work, the steps the train added to the workflows (text +6.3%, 494 to 525 KB of
+  workflows and actions; ci.yml +160 lines, debrief.yml +86), multiplied by the matrix legs. No repeated parse, `cargo metadata` or git start
+- **Train against fix:** CPU 8.3-9.4 s (median 8.7) against 4.7-5.1 s (median 4.9), -44%: `rows_of` builds the model from ci.yml alone
+  (every action and contract kept) and the test keeps one full build as the control that the narrowing loses no row. So the other
+  workflows were about 70% of each build. Alone on the CI Mac runner the test took 12.6 s (run 8838); beside two heavy jobs it was stopped
+  at 60 s on both tries (jobs 47411, 47644)
+
 ### 2026-11-24, which paddock-dev tests run `cargo metadata`, and the repo-graph group (fix/graph-train-r5-repo-graph-group)
 
 - **Commit:** 47a27bf1f (train/2026-11-23-graph) before, the same with the new `tools/paddock-dev/.config/nextest.toml` after
