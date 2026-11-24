@@ -326,27 +326,6 @@ fn a_tool_lockfile_entry_marks_the_manifest_of_every_shared_crate_the_tool_depen
     }
 }
 
-/// ADR 0098 WP-2: the conformance-line entry reads CI's line through `./dev ci conformance-args`, the one reader (bddd2947c: it
-/// grepped ci.yml for a line that had moved, and `gen check` reported NOT MEASURED).
-#[test]
-fn the_conformance_line_entry_reads_ci_yml_through_the_one_reader() {
-    let root = repo_root();
-    let reg = Registry::parse(&fs::read_to_string(root.join("docs/generators.toml")).unwrap()).unwrap();
-    let entry = reg
-        .generators
-        .iter()
-        .find(|g| g.id == "conformance-line")
-        .expect("the conformance-line entry");
-    let check = entry.check.join(" ");
-    assert!(
-        check.contains("./dev ci conformance-args") || check.contains("./dev ci run conformance"),
-        "{check}"
-    );
-    for word in ["grep", "sed", "awk"] {
-        assert!(!check.contains(word), "the entry reads ci.yml's text with {word}: {check}");
-    }
-}
-
 #[test]
 #[allow(clippy::disallowed_methods, reason = "a test starts the built binary; it ends it itself")]
 fn ci_conformance_args_prints_the_line_ci_runs_and_is_not_measured_without_one() {

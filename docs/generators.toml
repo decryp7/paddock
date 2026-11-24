@@ -200,18 +200,6 @@ outputs = []
 cost = "heavy"
 requires = ["ui/dist/paddock-ui/package.json", "ui/dist/paddock-e2e/package.json"]
 
-# ---- the conformance run and its baselines -----------------------------------------------------------------------------
-
-[[generator]]
-id = "conformance-line"
-what = "every conformance check CI runs on the tree, the list read from conformance/paddock.ci.json (`./dev ci run conformance paddock`, the one line the conformance and train-gates jobs run); includes the C71 baseline (it may only shrink)"
-check = ["./dev", "ci", "run", "conformance", "paddock"]
-regenerate = "none: fix the findings it prints; `node conformance/bin/paddock-timing-baseline.mjs --write` rewrites conformance/baselines/C71.json (shrink only)"
-paths = ["**"]
-outputs = ["conformance/baselines/*.json"]
-cost = "heavy"
-requires = ["conformance/paddock.ci.json", "conformance/bin/paddock-conformance.mjs"]
-
 # ---- message catalogues -------------------------------------------------------------------------------------------------
 
 [[generator]]
