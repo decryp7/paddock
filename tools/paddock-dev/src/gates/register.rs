@@ -415,7 +415,8 @@ pub struct Problem {
 }
 
 fn stamp_problems(kind: &str, id: &str, s: &Stamp, today: Date, out: &mut Vec<Problem>) {
-    if s.review_by < today {
+    // A report-only entry's passed date is the sunset rule's ([`sunset`]): ER-41's time rule, not a finding on every push.
+    if s.review_by < today && kind != "report_only" {
         out.push(Problem {
             message: format!("[[{kind}]] {id}: review_by {} has passed", s.review_by),
             fix: "Fix the cause and remove the entry, or move the date with a `Gates-date:` trailer in the commit message.".into(),
@@ -436,6 +437,99 @@ fn stamp_problems(kind: &str, id: &str, s: &Stamp, today: Date, out: &mut Vec<Pr
             fix: "Use a review date within 60 days of since; a longer adoption belongs in a [[ratchet]].".into(),
         });
     }
+}
+
+/// The first day of the sunset rule (user, 2026-11-24): a `[[report_only]]` entry made on or after it expires at most
+/// [`SUNSET_DAYS`] after its `since`.
+pub const SUNSET_FROM: &str = "2026-11-25";
+/// How long a new report-only check, register or port may stay report-only: on its `review_by` (the expiry date) it is flipped to
+/// blocking, switched over (the old side deleted) or removed.
+pub const SUNSET_DAYS: i64 = 14;
+/// How many days before the expiry date the reminder warning starts (ER-41: a reminder a week before).
+pub const REMINDER_DAYS: i64 = 7;
+const SUNSET_FIX: &str = "Flip the check to blocking (mode gate, its first green run id recorded where it is defined) and remove the entry, switch it over (delete the old side), or remove the check and the entry. A later date needs a `Gates-date:` trailer approved by the user.";
+
+fn sunset_from() -> Date {
+    Date::parse(SUNSET_FROM).unwrap_or(Date(i64::MAX))
+}
+
+/// A `[[report_only]]` entry the sunset rule names: past its expiry date (`overdue`) or within [`REMINDER_DAYS`] of it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Due {
+    /// The entry.
+    pub entry: Entry,
+    /// Its expiry date has passed.
+    pub overdue: bool,
+}
+
+impl Due {
+    /// What the finding or the warning says.
+    pub fn message(&self) -> String {
+        let (id, by) = (&self.entry.id, self.entry.stamp.review_by);
+        if self.overdue {
+            format!("[[report_only]] {id}: review_by {by} has passed: the report-only phase is over (sunset rule)")
+        } else {
+            format!("[[report_only]] {id}: review_by {by} is near: the report-only phase ends then (sunset rule)")
+        }
+    }
+
+    /// The next step.
+    pub fn fix(&self) -> &'static str {
+        SUNSET_FIX
+    }
+
+    /// Whether a release tag of `app` (None: a tag of no app, such as the shared packages' `v*`) is held to this entry: an entry
+    /// without `apps` concerns every app.
+    pub fn concerns(&self, app: Option<&str>) -> bool {
+        self.entry.apps.is_empty() || app.is_none_or(|a| self.entry.apps.iter().any(|x| x == a))
+    }
+}
+
+/// The sunset rule (user, 2026-11-24; ER-41's time rule): every `[[report_only]]` entry whose expiry date (`review_by`) has passed or
+/// comes within [`REMINDER_DAYS`]. The caller decides what blocks: an overdue entry blocks a release tag and a change that touches the
+/// entry, and is a warning on any other push; a near one is a warning (the reminder).
+pub fn sunset(r: &Register, today: Date) -> Vec<Due> {
+    r.report_only
+        .iter()
+        .filter(|e| e.stamp.review_by.0 - today.0 <= REMINDER_DAYS)
+        .map(|e| Due {
+            entry: e.clone(),
+            overdue: e.stamp.review_by < today,
+        })
+        .collect()
+}
+
+/// The sunset rule's limit for new entries: a `[[report_only]]` entry made on or after [`SUNSET_FROM`] expires at most [`SUNSET_DAYS`]
+/// after its `since`, and one the register at the base lacks (new on this branch, whatever its `since` says) at most [`SUNSET_DAYS`]
+/// after today. `base` is None when the base register could not be read: then only the first half is judged.
+pub fn sunset_limits(r: &Register, base: Option<&Register>, today: Date) -> Vec<Problem> {
+    let mut out = Vec::new();
+    for e in &r.report_only {
+        let s = &e.stamp;
+        if s.since >= sunset_from() && s.review_by.0 - s.since.0 > SUNSET_DAYS {
+            out.push(Problem {
+                message: format!(
+                    "[[report_only]] {}: review_by {} is more than {SUNSET_DAYS} days after since {} (sunset rule)",
+                    e.id, s.review_by, s.since
+                ),
+                fix: format!("A new report-only check, register or port expires within {SUNSET_DAYS} days of its registration: set review_by to {} at the latest.", Date(s.since.0 + SUNSET_DAYS)),
+            });
+        }
+        let new = base.is_some_and(|b| !b.report_only.iter().any(|x| x.id == e.id));
+        if new && s.review_by.0 - today.0 > SUNSET_DAYS {
+            out.push(Problem {
+                message: format!(
+                    "[[report_only]] {} is new and its review_by {} is more than {SUNSET_DAYS} days away (sunset rule)",
+                    e.id, s.review_by
+                ),
+                fix: format!(
+                    "Set review_by to {} at the latest, and since to the day the entry is made.",
+                    Date(today.0 + SUNSET_DAYS)
+                ),
+            });
+        }
+    }
+    out
 }
 
 /// The rules of §3.1 that need only the register and today's date.
@@ -756,10 +850,11 @@ pub fn release_reports(register: Option<&str>, tag: &str) -> Vec<String> {
         .collect()
 }
 
-/// Whether the release tag is refused by the ratchets, from the register text and the register at the base (ADR 0060 3.2). Only the
-/// ratchets of the tag's app count; an unrelated expired entry, another app's gap or a docs finding never refuses a release (ER-31).
-/// Returns the reasons it is refused; empty means the tag may be made.
-pub fn release_refusals(register: Option<&str>, base: Option<&str>, tag: &str) -> Vec<String> {
+/// Whether the release tag is refused, from the register text and the register at the base (ADR 0060 3.2): by the ratchets of the
+/// tag's app, and by a `[[report_only]]` entry past its expiry date that concerns the app (the sunset rule; ER-41: a time condition
+/// blocks tags). Another expired entry, another app's gap or a docs finding never refuses a release (ER-31). Returns the reasons it
+/// is refused; empty means the tag may be made.
+pub fn release_refusals(register: Option<&str>, base: Option<&str>, tag: &str, today: Date) -> Vec<String> {
     let line = |p: Problem| format!("{} Fix: {}", p.message, p.fix);
     let Some(text) = register else {
         return vec![format!(
@@ -773,30 +868,43 @@ pub fn release_refusals(register: Option<&str>, base: Option<&str>, tag: &str) -
             .map(|e| format!("tag {tag} is refused: the register does not parse: {e}. Fix: repair docs/gates.toml."))
             .collect();
     }
-    let Some((app, _)) = parse_tag(tag) else {
-        return ratchet_release_problems(&reg, tag).into_iter().map(line).collect();
+    let app = parse_tag(tag).map(|(a, _)| a);
+    let mut sunset_refusals: Vec<String> = sunset(&reg, today)
+        .into_iter()
+        .filter(|d| d.overdue && d.concerns(app.as_deref()))
+        .map(|d| format!("tag {tag} is refused: {} Fix: {}", d.message(), d.fix()))
+        .collect();
+    let Some(app) = app else {
+        sunset_refusals.extend(ratchet_release_problems(&reg, tag).into_iter().map(line));
+        return sunset_refusals;
     };
     let mine = Register {
         ratchet: reg.ratchet.iter().filter(|r| r.app == app).cloned().collect(),
         ..Register::default()
     };
     if mine.ratchet.is_empty() {
-        return Vec::new();
+        return sunset_refusals;
     }
     let Some(base_text) = base else {
-        return vec![format!(
+        sunset_refusals.push(format!(
             "tag {tag} is refused: not measured, the register at the base revision could not be read, so a ratchet list cannot be compared. Fix: fetch the full history (fetch-depth: 0)."
-        )];
+        ));
+        return sunset_refusals;
     };
     let base_reg = parse(base_text).0;
     let mut out = check_ratchets(&mine, Some(&base_reg), None);
     out.extend(ratchet_release_problems(&mine, tag));
-    out.into_iter().map(line).collect()
+    sunset_refusals.extend(out.into_iter().map(line));
+    sunset_refusals
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn today() -> Date {
+        Date::parse("2026-11-20").unwrap()
+    }
 
     const GOOD: &str = r#"
 version = 1
@@ -882,6 +990,79 @@ approved = "user"
                 .iter()
                 .any(|p| p.message.contains("more than 60 days"))
         );
+    }
+
+    fn report_only(id: &str, apps: &str, since: &str, review_by: &str) -> String {
+        format!(
+            "version = 1\n\n[[report_only]]\nid = \"{id}\"\n{apps}reason = \"r\"\nowner = \"o\"\nsince = {since}\nreview_by = {review_by}\napproved = \"user\"\n"
+        )
+    }
+
+    fn d(s: &str) -> Date {
+        Date::parse(s).unwrap()
+    }
+
+    /// The sunset rule's limit, with its positive control: a new entry may stay report-only 14 days, one day more is a problem; an
+    /// entry made before the rule keeps the 60-day limit; a new entry cannot dodge it by backdating `since`.
+    #[test]
+    fn a_report_only_entry_made_after_the_sunset_start_expires_within_14_days() {
+        let reg = |since: &str, by: &str| parse(&report_only("C900", "", since, by)).0;
+        let fourteen = reg("2026-11-25", "2026-12-09");
+        assert!(sunset_limits(&fourteen, None, d("2026-11-25")).is_empty());
+        assert!(check_dates(&fourteen, d("2026-11-25")).is_empty());
+        let fifteen = reg("2026-11-25", "2026-12-10");
+        let p = sunset_limits(&fifteen, None, d("2026-11-25"));
+        assert_eq!(p.len(), 1, "{p:?}");
+        assert!(p[0].message.contains("more than 14 days after since 2026-11-25"), "{p:?}");
+        assert!(p[0].fix.contains("2026-12-09"), "the fix names the last allowed day: {p:?}");
+        // made before the rule: only the 60-day limit of every entry
+        assert!(sunset_limits(&reg("2026-11-24", "2027-01-20"), None, d("2026-11-25")).is_empty());
+        // new on this branch (the base lacks it) with a backdated since: held to today + 14
+        let backdated = reg("2026-11-20", "2027-01-10");
+        let base = parse("version = 1\n").0;
+        let p = sunset_limits(&backdated, Some(&base), d("2026-11-26"));
+        assert!(p.iter().any(|x| x.message.contains("is new")), "{p:?}");
+        assert!(
+            sunset_limits(&backdated, Some(&backdated), d("2026-11-26")).is_empty(),
+            "an entry the base has is not new"
+        );
+    }
+
+    /// The sunset rule's dates: within a week of the expiry date is a reminder, after it overdue; a passed report-only date is the
+    /// sunset rule's, not a plain problem (ER-41: it must not block every push); other kinds keep theirs.
+    #[test]
+    fn an_expired_report_only_entry_is_due_not_a_plain_problem() {
+        let r = parse(&report_only("C900", "", "2026-11-25", "2026-12-08")).0;
+        assert!(sunset(&r, d("2026-11-30")).is_empty(), "eight days before: nothing");
+        let near = sunset(&r, d("2026-12-01"));
+        assert_eq!(near.len(), 1);
+        assert!(!near[0].overdue && near[0].message().contains("is near"), "{near:?}");
+        assert!(!sunset(&r, d("2026-12-08"))[0].overdue, "the expiry date is the last day");
+        let late = sunset(&r, d("2026-12-09"));
+        assert!(
+            late[0].overdue && late[0].message().contains("review_by 2026-12-08 has passed"),
+            "{late:?}"
+        );
+        assert!(check_dates(&r, d("2026-12-09")).is_empty(), "not a plain problem");
+        let ng = parse(&report_only("C900", "", "2026-11-25", "2026-12-08").replace("[[report_only]]", "[[not_gated]]")).0;
+        assert!(check_dates(&ng, d("2026-12-09")).iter().any(|p| p.message.contains("has passed")));
+    }
+
+    /// A tag is refused by an overdue report-only entry that concerns its app, and by nothing else of the rule (positive control: the
+    /// same register a day earlier lets it through).
+    #[test]
+    fn an_overdue_report_only_entry_refuses_a_tag_of_an_app_it_concerns() {
+        let all = report_only("C900", "", "2026-11-25", "2026-12-08");
+        assert!(release_refusals(Some(&all), Some(&all), "dyno-v1.2.0", d("2026-12-08")).is_empty());
+        let r = release_refusals(Some(&all), Some(&all), "dyno-v1.2.0", d("2026-12-09"));
+        assert_eq!(r.len(), 1, "{r:?}");
+        assert!(
+            r[0].starts_with("tag dyno-v1.2.0 is refused: [[report_only]] C900: review_by 2026-12-08 has passed"),
+            "{r:?}"
+        );
+        let dyno = report_only("C900", "apps = [\"dyno\"]\n", "2026-11-25", "2026-12-08");
+        assert!(release_refusals(Some(&dyno), Some(&dyno), "pitwall-v1.1.0", d("2026-12-09")).is_empty());
+        assert_eq!(release_refusals(Some(&dyno), Some(&dyno), "dyno-v1.2.0", d("2026-12-09")).len(), 1);
     }
 
     fn version(sha: &str, message: &str, text: &str) -> Version {
@@ -985,12 +1166,12 @@ approved = "user"
     #[test]
     fn a_tag_is_refused_only_by_the_ratchets_of_its_app() {
         // an unrelated entry that expired long ago does not refuse a patch tag below the target
-        assert!(release_refusals(Some(RATCHET), Some(RATCHET), "debrief-v1.1.5").is_empty());
+        assert!(release_refusals(Some(RATCHET), Some(RATCHET), "debrief-v1.1.5", today()).is_empty());
         // another app's tag is not looked at
-        assert!(release_refusals(Some(RATCHET), None, "dyno-v9.0.0").is_empty());
+        assert!(release_refusals(Some(RATCHET), None, "dyno-v9.0.0", today()).is_empty());
         // the target release and later ones are refused while a list is not empty, naming what is left
         for tag in ["debrief-v1.2.0", "debrief-v1.2.0-rc.1", "debrief-v1.2.1", "debrief-v2.0.0"] {
-            let r = release_refusals(Some(RATCHET), Some(RATCHET), tag);
+            let r = release_refusals(Some(RATCHET), Some(RATCHET), tag, today());
             assert_eq!(r.len(), 1, "{tag}: {r:?}");
             assert!(
                 r[0].contains("xtask") && r[0].contains("crates/a") && r[0].contains("clippy path std::env::temp_dir"),
@@ -1001,7 +1182,7 @@ approved = "user"
         let empty = RATCHET
             .replace("not_yet = [\"xtask\", \"crates/a\"]", "not_yet = []")
             .replace("clippy_not_yet = [\"std::env::temp_dir\"]", "clippy_not_yet = []");
-        assert!(release_refusals(Some(&empty), Some(RATCHET), "debrief-v1.2.0").is_empty());
+        assert!(release_refusals(Some(&empty), Some(RATCHET), "debrief-v1.2.0", today()).is_empty());
     }
 
     #[test]
@@ -1011,14 +1192,17 @@ approved = "user"
             "target = \"debrief-v1.2.0\"\nblocks_tag = \"report-only\"\n",
         );
         for tag in ["debrief-v1.2.0", "debrief-v1.2.1", "debrief-v2.0.0"] {
-            assert!(release_refusals(Some(&report_only), Some(&report_only), tag).is_empty(), "{tag}");
+            assert!(
+                release_refusals(Some(&report_only), Some(&report_only), tag, today()).is_empty(),
+                "{tag}"
+            );
             let rep = release_reports(Some(&report_only), tag);
             assert_eq!(rep.len(), 1, "{tag}: {rep:?}");
             assert!(rep[0].contains("report-only") && rep[0].contains("xtask"), "{rep:?}");
         }
         // below the target nothing is reported; without the value the tag is still refused and nothing is only reported
         assert!(release_reports(Some(&report_only), "debrief-v1.1.5").is_empty());
-        assert!(!release_refusals(Some(RATCHET), Some(RATCHET), "debrief-v1.2.0").is_empty());
+        assert!(!release_refusals(Some(RATCHET), Some(RATCHET), "debrief-v1.2.0", today()).is_empty());
         assert!(release_reports(Some(RATCHET), "debrief-v1.2.0").is_empty());
     }
 
@@ -1126,7 +1310,7 @@ approved = "user"
     #[test]
     fn a_broken_ratchet_is_named_with_its_app() {
         let broken = RATCHET.replace("target = \"debrief-v1.2.0\"\n", "");
-        let r = release_refusals(Some(&broken), Some(RATCHET), "debrief-v1.1.5");
+        let r = release_refusals(Some(&broken), Some(RATCHET), "debrief-v1.1.5", today());
         assert!(
             r[0].contains("[[ratchet]] #1 (C13 debrief)") && r[0].contains("does not parse"),
             "{r:?}"
@@ -1135,20 +1319,20 @@ approved = "user"
 
     #[test]
     fn what_cannot_be_read_refuses_the_tag() {
-        assert!(release_refusals(None, Some(RATCHET), "debrief-v1.1.5")[0].contains("could not be read"));
-        assert!(release_refusals(Some("not = toml = at all"), Some(RATCHET), "debrief-v1.1.5")[0].contains("does not parse"));
+        assert!(release_refusals(None, Some(RATCHET), "debrief-v1.1.5", today())[0].contains("could not be read"));
+        assert!(release_refusals(Some("not = toml = at all"), Some(RATCHET), "debrief-v1.1.5", today())[0].contains("does not parse"));
         // a ratchet of the app and no base: not measured
-        assert!(release_refusals(Some(RATCHET), None, "debrief-v1.1.5")[0].contains("not measured"));
+        assert!(release_refusals(Some(RATCHET), None, "debrief-v1.1.5", today())[0].contains("not measured"));
         // a tag that is not <app>-v<numbers>, or whose version is not numeric
         for tag in ["v1.2.0", "debrief-vx.y", "debrief"] {
             assert!(
-                release_refusals(Some(RATCHET), Some(RATCHET), tag)[0].contains("not of the form"),
+                release_refusals(Some(RATCHET), Some(RATCHET), tag, today())[0].contains("not of the form"),
                 "{tag}"
             );
         }
         // growth against the base refuses too
         let grown = RATCHET.replace("\"crates/a\"]", "\"crates/a\", \"crates/new\"]");
-        assert!(release_refusals(Some(&grown), Some(RATCHET), "debrief-v1.1.5")[0].contains("was added to not_yet"));
+        assert!(release_refusals(Some(&grown), Some(RATCHET), "debrief-v1.1.5", today())[0].contains("was added to not_yet"));
     }
 
     #[test]

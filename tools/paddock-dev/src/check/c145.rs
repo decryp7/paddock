@@ -15,7 +15,7 @@
 //! the defect is only visible in the merged text, which this check reads on the combined tree in the conformance job that every
 //! train member's gate and the train run (ER-8, ER-41).
 //!
-//! **Report-only (warnings) until its first green CI run on the real tree (ER-41), recorded in docs/gates.toml.**
+//! **Errors, blocking (mode gate) since its first green run on the real tree, ci.yml run 8869 (cdd4c3d10, 2026-11-24; ER-41).**
 
 use super::finding::Finding;
 use super::outcome::Outcome;
@@ -135,7 +135,7 @@ impl Check for C145 {
     }
 
     fn mode(&self) -> Mode {
-        Mode::ReportOnly
+        Mode::Gate
     }
 
     fn control(&self) -> Control {
@@ -157,7 +157,7 @@ impl Check for C145 {
             Some(text) => {
                 probes = 1;
                 for s in lessons_sites(&text) {
-                    findings.push(Finding::warn("C145", 8, LESSONS, s.line, s.message, FIX));
+                    findings.push(Finding::error("C145", 8, LESSONS, s.line, s.message, FIX));
                 }
             }
             None if in_run => findings.push(

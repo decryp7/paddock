@@ -23,7 +23,6 @@ crates/.* @decryp7
 ui/.* @decryp7
 eslint/.* @decryp7
 conformance/.* @decryp7
-conformance/shell-exceptions\.json @decryp7
 tsconfig/.* @decryp7
 lint/.* @decryp7
 icons/.* @decryp7

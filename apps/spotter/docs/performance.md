@@ -19,7 +19,7 @@ The elapsed-time asserts in `crates/spotter-engine/tests` (`engine_robustness.rs
   The lessons record that idle Chrome on Linux was measured as about 17 GB against about 0.4 GB in use (bea504150), with
   a 2 GiB watchdog. A Windows cold start of 8 Edge browsers took about 20 s (97a0f34d4). Neither is a repeatable
   benchmark.
-- C29 window weight is not configured.
+- Window weight is not configured (its check C29 was retired on 2026-11-24).
 
 ## Results (newest first)
 

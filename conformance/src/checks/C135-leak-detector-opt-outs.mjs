@@ -7,8 +7,8 @@
 // added by a branch is an error. A file that cannot be read is not measured (an error finding at that file); an allow file that cannot be
 // read makes the check broken (one finding, nothing else).
 // Also flagged, with no allow entry: a spec line that sets the `ng-version` attribute by hand (a node faking a TestBed root).
-// Report-only (warnings) until its first green run on the real tree is recorded here (ER-41). Recorded: not yet.
-import { error, warn } from '../finding.mjs';
+// Blocking (mode gate) since its first green run on the real tree, ci.yml run 8869 (cdd4c3d10, 2026-11-24; ER-41).
+import { error } from '../finding.mjs';
 import { baselineGrowth, unmeasuredFinding } from '../util/baseline.mjs';
 import { parseAllowList, readAllowList } from '../util/allow-list.mjs';
 
@@ -55,7 +55,7 @@ const SPEC = { id: 'C135', rule: 21, file: ALLOW, unseen: 'a leak detector opt-o
 export default {
   id: 'C135',
   scope: 'root',
-  mode: 'report-only',
+  mode: 'gate',
   allowList: SPEC,
   title: 'The test leak detector is switched off only where listed',
   rule: 21,
@@ -71,11 +71,11 @@ export default {
         continue;
       }
       if (f.endsWith('.spec.ts')) {
-        for (const { line } of fakedRoots(text)) out.push(warn('C135', 21, f, line, 'sets `ng-version` by hand: a node that fakes a TestBed root slips past the leak detector (it only exempts roots carrying Angular\'s own version)', 'Leave the node to the detector (a local LeakDetector shows it named and removed), or use a real TestBed fixture.'));
+        for (const { line } of fakedRoots(text)) out.push(error('C135', 21, f, line, 'sets `ng-version` by hand: a node that fakes a TestBed root slips past the leak detector (it only exempts roots carrying Angular\'s own version)', 'Leave the node to the detector (a local LeakDetector shows it named and removed), or use a real TestBed fixture.'));
       }
       for (const { line, site } of optOuts(text)) {
         if (allow.admit(f, (s) => s === site) === 'allowed') continue;
-        out.push(warn('C135', 21, f, line, `switches the leak detector off with \`${site}\` and is not in ${ALLOW}`, FIX));
+        out.push(error('C135', 21, f, line, `switches the leak detector off with \`${site}\` and is not in ${ALLOW}`, FIX));
       }
     }
     // An empty list cannot have grown: nothing to measure.

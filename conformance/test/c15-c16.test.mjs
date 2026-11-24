@@ -1,52 +1,9 @@
 import assert from 'node:assert/strict';
-import { existsSync } from 'node:fs';
 import { test } from 'node:test';
-import { runHermetic } from '../src/hermetic.mjs';
 import { findingsOf, makeApp, messages, TAURI_CONF } from './helpers.mjs';
 
 const wf = (run, env = '') => `jobs:\n  t:\n    steps:\n      - name: Tests\n${env}        run: ${run}\n`;
 const W = '.gitea/workflows/build.yml';
-
-test('C14 static good/bad: wrapper or own HOME/TMPDIR vs bare cargo test', async () => {
-  assert.deepEqual(await findingsOf('C14', makeApp({ [W]: wf('npx paddock-conformance run -- cargo test') })), []);
-  assert.deepEqual(await findingsOf('C14', makeApp({ [W]: wf('cargo test', '        env:\n          HOME: /x\n          TMPDIR: /y\n') })), []);
-  const f = await findingsOf('C14', makeApp({ [W]: wf('cargo test --workspace') }));
-  assert.equal(f.length, 1);
-  assert.equal(f[0].severity, 'warn');
-});
-
-const node = process.execPath;
-const quiet = { ps: () => '' };
-
-test('C14 hermetic run good: environment redirected, nothing left', async () => {
-  const code = `const fs=require('fs');const o=process.env;if(!o.HOME.includes('paddock-hermetic-')||!o.TMPDIR.includes('paddock-hermetic-'))process.exit(9);const d=fs.mkdtempSync(o.TMPDIR+'/t-');fs.rmSync(d,{recursive:true})`;
-  const r = await runHermetic(node, ['-e', code], quiet);
-  assert.equal(r.status, 0);
-  assert.deepEqual(r.findings, []);
-  assert.equal(existsSync(r.scratch), false);
-});
-
-test('C14 hermetic run bad: temp leak, home write, and the exit status is passed through', async () => {
-  const code = `const fs=require('fs');fs.writeFileSync(process.env.TMPDIR+'/leak.txt','x');fs.writeFileSync(process.env.HOME+'/.stray','x');process.exit(4)`;
-  const r = await runHermetic(node, ['-e', code], quiet);
-  assert.equal(r.status, 4);
-  assert.match(messages(r.findings), /temp leak: 1 item/);
-  assert.match(messages(r.findings), /wrote into the \(scratch\) home: \.stray/);
-  const allowed = await runHermetic(node, ['-e', `require('fs').writeFileSync(process.env.HOME+'/.ok','x')`], { ...quiet, allowHome: ['.ok'] });
-  assert.deepEqual(allowed.findings, []);
-});
-
-test('C14 hermetic run bad: a process left behind is reported and killed', { skip: process.platform === 'win32' }, async () => {
-  const code = `require('child_process').spawn(process.execPath,['-e','setTimeout(()=>{},60000)'],{stdio:'ignore',detached:false}).unref()`;
-  const r = await runHermetic(node, ['-e', code], quiet);
-  assert.match(messages(r.findings), /still alive: process group/);
-});
-
-test('C14 a command that cannot start is a finding', async () => {
-  const r = await runHermetic('/nonexistent/binary', [], quiet);
-  assert.equal(r.status, 127);
-  assert.match(messages(r.findings), /cannot start/);
-});
 
 test('C15 good/bad: pinned browser vs installed Chrome in specs and scripts', async () => {
   assert.deepEqual(await findingsOf('C15', makeApp({ 'app/e2e/a.spec.ts': "const p = process.env.DEMO_TEST_BROWSER;\n", 'app/src/p.spec.ts': "expect(name).toBe('chrome.exe');\n" })), []);

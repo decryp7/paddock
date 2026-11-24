@@ -46,7 +46,7 @@ package.json     the one npm workspace and package-lock.json (ui, eslint, icons,
   `RUSTC_WRAPPER` for that shell only ([docs/dev-setup.md](docs/dev-setup.md#local-sccache)); it warns and builds without
   it when sccache cannot be used. Worktrees and build folders go in
   `<dev-targets>` (the parent of the worktree root; this machine's folders are in
-  [docs/dev-setup.md](docs/dev-setup.md#where-things-live), the one place that names a disk, C125). The worktree root is
+  [docs/dev-setup.md](docs/dev-setup.md#where-things-live), the one place that names a disk, rule 40). The worktree root is
   machine config, not code: `git config paddock.worktreeRoot <dev-targets>/wt` (repo-local, so it covers every worktree), or
   `PADDOCK_WORKTREE_ROOT`, or `--root`; the flag wins, then git config, then the variable.
 - **Cargo.** There is no root Cargo workspace: `crates/` and each app are their own workspaces, so each app builds with

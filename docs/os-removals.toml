@@ -14,8 +14,6 @@ why = "the 24 only.macos-latest entries of the dev Mac's agent tools, carried ov
 entries = [
   "only macos-latest check::",
   "only macos-latest check_allow_list::",
-  "only macos-latest check_c125::",
-  "only macos-latest check_c129::",
   "only macos-latest check_ids::",
   "only macos-latest ci_runs::reservation::",
   "only macos-latest dev_tool_publish::",

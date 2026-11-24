@@ -22,7 +22,7 @@
 //! Each finding is one spot, with the exact text to paste and where (after which line, at which indentation). A part the reader finds
 //! but cannot place lines in (a flow mapping, a `uses:` not on its own line) is a finding that says so. No workflow read is not measured.
 //!
-//! **Report-only (warnings) until its first green run on the real tree is recorded here (ER-41).** Recorded: not yet. First count
+//! **Errors, blocking (mode gate) since its first green run on the real tree, ci.yml run 8869 (cdd4c3d10, 2026-11-24; ER-41).** First count
 //! (1ee61a03c, before the integrator pastes the lines): 34 setup-rust steps, 8 calls of the reusable workflows, 2 declarations.
 //!
 //! Rust host only.
@@ -345,7 +345,7 @@ fn spot(file: &str, e: &Edit) -> Finding {
         ),
         Edit::Replace(i, l) => (i + 1, format!("this line passes another value: replace it with:\n{l}")),
     };
-    Finding::warn(
+    Finding::error(
         "C141",
         RULE,
         file,
@@ -376,7 +376,7 @@ impl Check for C141 {
     }
 
     fn mode(&self) -> super::Mode {
-        super::Mode::ReportOnly
+        super::Mode::Gate
     }
 
     fn control(&self) -> Control {
@@ -463,7 +463,7 @@ impl Check for C141 {
                 Ok((edits, owned)) => {
                     findings.extend(edits.iter().map(|e| spot(f, e)));
                     for i in stray_lines(&text, &owned) {
-                        findings.push(Finding::warn(
+                        findings.push(Finding::error(
                             "C141",
                             RULE,
                             f,
@@ -473,7 +473,7 @@ impl Check for C141 {
                         ));
                     }
                 }
-                Err(e) => findings.push(Finding::warn(
+                Err(e) => findings.push(Finding::error(
                     "C141",
                     RULE,
                     f,
@@ -485,7 +485,7 @@ impl Check for C141 {
         }
         if let Some(text) = ctx.read(ACTION) {
             for (line, message) in action_leaks(&text) {
-                findings.push(Finding::warn(
+                findings.push(Finding::error(
                     "C141",
                     RULE,
                     ACTION,
@@ -501,7 +501,7 @@ impl Check for C141 {
         {
             let Some(text) = ctx.read(f) else { continue };
             for i in stray_lines(&text, &BTreeSet::new()) {
-                findings.push(Finding::warn(
+                findings.push(Finding::error(
                     "C141",
                     RULE,
                     f,

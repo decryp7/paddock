@@ -23,7 +23,7 @@ behaviour, not measured budgets. Rule 16's budgets (start-up, request latency, q
 - No start-up, request latency, queueing, idle CPU or server memory benchmark exists.
 - The model-load memory Debrief depends on (about 7–8 GB for the 9B model, estimated in Debrief's
   [cpu-memory research](../../debrief/docs/research/2026-10-28-cpu-memory.md)) has never been measured.
-- C29 window weight is not configured.
+- Window weight is not configured (its check C29 was retired on 2026-11-24).
 
 ## Results (newest first)
 

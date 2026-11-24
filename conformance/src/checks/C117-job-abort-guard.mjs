@@ -7,10 +7,10 @@
 // Reads `.gitea/workflows/*.yml|yaml` and `.gitea/actions/**/action.yml|yaml` (the `yaml` package, as C111). A job is isolated when one
 // of its steps uses ./.gitea/actions/build-jobs or ./.gitea/actions/job-isolation; the composite actions such a job uses are held to the
 // same rule in their own steps. A job-level `if:` is not a step and is not read (the `env` context does not exist there, and a job
-// starts with its own setup). Report-only (a warning) until its first green run (ER-41); then `mode: 'gate'`.
+// starts with its own setup). Blocking (mode gate) since its first green run on the real tree, ci.yml run 8869 (cdd4c3d10, 2026-11-24; ER-41).
 // Positive controls (ER-33): no workflow found, or no `yaml` package, is "check broken", never a pass; a repository with workflows
 // but no isolated job at all also means the check saw nothing it was built for, so it is "check broken" too.
-import { error, unwaivable, warn } from '../finding.mjs';
+import { error, unwaivable } from '../finding.mjs';
 
 const WORKFLOW = /^\.gitea\/workflows\/[^/]+\.ya?ml$/;
 const ACTION = /^\.gitea\/actions\/((?:.+\/)?[^/]+)\/action\.ya?ml$/;
@@ -65,7 +65,7 @@ export default {
   title: 'steps that run after a failure also stop when the job setup failed',
   rule: 3,
   scope: 'root',
-  mode: 'report-only',
+  mode: 'gate',
   async run(ctx) {
     if (ctx.app !== 'paddock') return [];
     let yaml;
@@ -85,7 +85,7 @@ export default {
     const check = (file, label, steps) => {
       for (const s of steps) {
         if (s.condition.includes('!cancelled()') && !s.condition.includes(GUARD)) {
-          out.push(warn('C117', 3, file, s.line, `${label}: this step runs after a failed step (!cancelled()) but not after the job's setup failed (no ${GUARD} test)`, NEXT));
+          out.push(error('C117', 3, file, s.line, `${label}: this step runs after a failed step (!cancelled()) but not after the job's setup failed (no ${GUARD} test)`, NEXT));
         }
       }
     };

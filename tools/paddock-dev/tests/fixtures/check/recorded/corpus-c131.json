@@ -3,7 +3,7 @@
   "findings": [
    {
     "check": "C131",
-    "severity": "warn",
+    "severity": "error",
     "rule": 40,
     "file": "x/tests/golden/first.json",
     "line": 1,
@@ -12,7 +12,7 @@
    },
    {
     "check": "C131",
-    "severity": "warn",
+    "severity": "error",
     "rule": 40,
     "file": "x/tests/golden/guardian.json",
     "line": 2,
@@ -20,15 +20,15 @@
     "fix": "Normalise it in the test's norm() (replace the value with a placeholder before the comparison) and regenerate the golden; a value that is fine here (invented data) gets an entry in conformance/c131-allow.json with a reason."
    }
   ],
-  "errors": 0,
-  "warnings": 2,
+  "errors": 2,
+  "warnings": 0,
   "waived": []
  },
  "bom": {
   "findings": [
    {
     "check": "C131",
-    "severity": "warn",
+    "severity": "error",
     "rule": 40,
     "file": "x/tests/golden/first.json",
     "line": 1,
@@ -37,7 +37,7 @@
    },
    {
     "check": "C131",
-    "severity": "warn",
+    "severity": "error",
     "rule": 40,
     "file": "x/tests/golden/guardian.json",
     "line": 2,
@@ -45,15 +45,15 @@
     "fix": "Normalise it in the test's norm() (replace the value with a placeholder before the comparison) and regenerate the golden; a value that is fine here (invented data) gets an entry in conformance/c131-allow.json with a reason."
    }
   ],
-  "errors": 0,
-  "warnings": 2,
+  "errors": 2,
+  "warnings": 0,
   "waived": []
  },
  "crlf": {
   "findings": [
    {
     "check": "C131",
-    "severity": "warn",
+    "severity": "error",
     "rule": 40,
     "file": "x/tests/golden/first.json",
     "line": 1,
@@ -62,7 +62,7 @@
    },
    {
     "check": "C131",
-    "severity": "warn",
+    "severity": "error",
     "rule": 40,
     "file": "x/tests/golden/guardian.json",
     "line": 2,
@@ -70,15 +70,15 @@
     "fix": "Normalise it in the test's norm() (replace the value with a placeholder before the comparison) and regenerate the golden; a value that is fine here (invented data) gets an entry in conformance/c131-allow.json with a reason."
    }
   ],
-  "errors": 0,
-  "warnings": 2,
+  "errors": 2,
+  "warnings": 0,
   "waived": []
  },
  "astral-and-emoji": {
   "findings": [
    {
     "check": "C131",
-    "severity": "warn",
+    "severity": "error",
     "rule": 40,
     "file": "x/tests/golden/first.json",
     "line": 2,
@@ -87,7 +87,7 @@
    },
    {
     "check": "C131",
-    "severity": "warn",
+    "severity": "error",
     "rule": 40,
     "file": "x/tests/golden/guardian.json",
     "line": 3,
@@ -95,15 +95,15 @@
     "fix": "Normalise it in the test's norm() (replace the value with a placeholder before the comparison) and regenerate the golden; a value that is fine here (invented data) gets an entry in conformance/c131-allow.json with a reason."
    }
   ],
-  "errors": 0,
-  "warnings": 2,
+  "errors": 2,
+  "warnings": 0,
   "waived": []
  },
  "case-fold-letters": {
   "findings": [
    {
     "check": "C131",
-    "severity": "warn",
+    "severity": "error",
     "rule": 40,
     "file": "x/tests/golden/first.json",
     "line": 2,
@@ -112,7 +112,7 @@
    },
    {
     "check": "C131",
-    "severity": "warn",
+    "severity": "error",
     "rule": 40,
     "file": "x/tests/golden/first.json",
     "line": 4,
@@ -121,7 +121,7 @@
    },
    {
     "check": "C131",
-    "severity": "warn",
+    "severity": "error",
     "rule": 40,
     "file": "x/tests/golden/guardian.json",
     "line": 3,
@@ -130,7 +130,7 @@
    },
    {
     "check": "C131",
-    "severity": "warn",
+    "severity": "error",
     "rule": 40,
     "file": "x/tests/golden/guardian.json",
     "line": 6,
@@ -139,7 +139,7 @@
    },
    {
     "check": "C131",
-    "severity": "warn",
+    "severity": "error",
     "rule": 40,
     "file": "x/tests/golden/norm.json",
     "line": 4,
@@ -148,7 +148,7 @@
    },
    {
     "check": "C131",
-    "severity": "warn",
+    "severity": "error",
     "rule": 40,
     "file": "x/tests/golden/ok.json",
     "line": 4,
@@ -156,15 +156,15 @@
     "fix": "Normalise it in the test's norm() (replace the value with a placeholder before the comparison) and regenerate the golden; a value that is fine here (invented data) gets an entry in conformance/c131-allow.json with a reason."
    }
   ],
-  "errors": 0,
-  "warnings": 6,
+  "errors": 6,
+  "warnings": 0,
   "waived": []
  },
  "no-break-space": {
   "findings": [
    {
     "check": "C131",
-    "severity": "warn",
+    "severity": "error",
     "rule": 40,
     "file": "x/tests/golden/first.json",
     "line": 1,
@@ -173,7 +173,7 @@
    },
    {
     "check": "C131",
-    "severity": "warn",
+    "severity": "error",
     "rule": 40,
     "file": "x/tests/golden/guardian.json",
     "line": 2,
@@ -181,15 +181,15 @@
     "fix": "Normalise it in the test's norm() (replace the value with a placeholder before the comparison) and regenerate the golden; a value that is fine here (invented data) gets an entry in conformance/c131-allow.json with a reason."
    }
   ],
-  "errors": 0,
-  "warnings": 2,
+  "errors": 2,
+  "warnings": 0,
   "waived": []
  },
  "line-separators": {
   "findings": [
    {
     "check": "C131",
-    "severity": "warn",
+    "severity": "error",
     "rule": 40,
     "file": "x/tests/golden/first.json",
     "line": 2,
@@ -198,7 +198,7 @@
    },
    {
     "check": "C131",
-    "severity": "warn",
+    "severity": "error",
     "rule": 40,
     "file": "x/tests/golden/guardian.json",
     "line": 3,
@@ -206,15 +206,15 @@
     "fix": "Normalise it in the test's norm() (replace the value with a placeholder before the comparison) and regenerate the golden; a value that is fine here (invented data) gets an entry in conformance/c131-allow.json with a reason."
    }
   ],
-  "errors": 0,
-  "warnings": 2,
+  "errors": 2,
+  "warnings": 0,
   "waived": []
  },
  "long-line": {
   "findings": [
    {
     "check": "C131",
-    "severity": "warn",
+    "severity": "error",
     "rule": 40,
     "file": "x/tests/golden/first.json",
     "line": 1,
@@ -223,7 +223,7 @@
    },
    {
     "check": "C131",
-    "severity": "warn",
+    "severity": "error",
     "rule": 40,
     "file": "x/tests/golden/guardian.json",
     "line": 2,
@@ -231,15 +231,15 @@
     "fix": "Normalise it in the test's norm() (replace the value with a placeholder before the comparison) and regenerate the golden; a value that is fine here (invented data) gets an entry in conformance/c131-allow.json with a reason."
    }
   ],
-  "errors": 0,
-  "warnings": 2,
+  "errors": 2,
+  "warnings": 0,
   "waived": []
  },
  "no-final-newline": {
   "findings": [
    {
     "check": "C131",
-    "severity": "warn",
+    "severity": "error",
     "rule": 40,
     "file": "x/tests/golden/first.json",
     "line": 1,
@@ -248,7 +248,7 @@
    },
    {
     "check": "C131",
-    "severity": "warn",
+    "severity": "error",
     "rule": 40,
     "file": "x/tests/golden/guardian.json",
     "line": 2,
@@ -256,8 +256,8 @@
     "fix": "Normalise it in the test's norm() (replace the value with a placeholder before the comparison) and regenerate the golden; a value that is fine here (invented data) gets an entry in conformance/c131-allow.json with a reason."
    }
   ],
-  "errors": 0,
-  "warnings": 2,
+  "errors": 2,
+  "warnings": 0,
   "waived": []
  }
 }

@@ -1,8 +1,8 @@
-//! Every input the JavaScript tests of the 12 retired check modules fed their detection functions or the runner (pair P3, ADR 0022
+//! Every input the JavaScript tests of the retired check modules fed their detection functions or the runner (pair P3, ADR 0022
 //! amendment 2026-11-19), recorded with the JS host's answer: `tests/fixtures/check/units/c<n>.json`. Each case is a small tree; the
 //! Rust check must answer it as the JS one did (findings, waived, errors, warnings). The inputs were harvested by running the JS
 //! test files with their exported functions and `runChecks` wrapped; a case that needs a git history or an unreadable file is not here
-//! (the Rust tests of those, `check_c129.rs`, `check_c130.rs` and `check.rs`, build them).
+//! (the Rust tests of those, such as `check.rs`, build them).
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 use crate::recorded::normal;
 use paddock_dev::check::{RunOptions, registry, run_checks};
@@ -31,7 +31,7 @@ fn differences(id: &str) -> Vec<String> {
             std::fs::write(to, text).unwrap();
         }
         // The Rust host calls a whole-tree run that looked at nothing "not measured" (ER-33); the JS host answered `[]` for an input its
-        // check skips by path. A file every check reads (C124 reads only `tools/paddock-dev/src`) and flags nothing in gives the Rust run something to have looked at.
+        // check skips by path. A file every check reads (some read only `tools/paddock-dev/src`) and flags nothing in gives the Rust run something to have looked at.
         for rel in ["crates/filler/src/filler.rs", "tools/paddock-dev/src/filler.rs"] {
             let filler = dir.path().join(rel);
             if !filler.exists() {
@@ -89,15 +89,9 @@ macro_rules! unit_parity {
 unit_parity! {
     c39_answers_every_input_of_the_js_tests_as_the_js_host_did: "C39",
     c53_answers_every_input_of_the_js_tests_as_the_js_host_did: "C53",
-    c119_answers_every_input_of_the_js_tests_as_the_js_host_did: "C119",
     c120_answers_every_input_of_the_js_tests_as_the_js_host_did: "C120",
     c121_answers_every_input_of_the_js_tests_as_the_js_host_did: "C121",
-    c122_answers_every_input_of_the_js_tests_as_the_js_host_did: "C122",
     c123_answers_every_input_of_the_js_tests_as_the_js_host_did: "C123",
-    c124_answers_every_input_of_the_js_tests_as_the_js_host_did: "C124",
-    c125_answers_every_input_of_the_js_tests_as_the_js_host_did: "C125",
-    c129_answers_every_input_of_the_js_tests_as_the_js_host_did: "C129",
-    c130_answers_every_input_of_the_js_tests_as_the_js_host_did: "C130",
     c131_answers_every_input_of_the_js_tests_as_the_js_host_did: "C131",
     c141_answers_every_recorded_input_as_recorded: "C141",
     c154_answers_every_recorded_input_as_recorded: "C154",
@@ -135,11 +129,7 @@ fn a_changed_recorded_answer_is_a_difference() {
 fn the_frozen_real_tree_answers_as_the_js_host_did() {
     let (tree, frozen) = crate::recorded::frozen();
     assert!(frozen["files"].as_array().unwrap().len() > 100, "the frozen tree has its files");
-    let ids: Vec<String> = [
-        "C39", "C53", "C119", "C120", "C121", "C122", "C123", "C124", "C125", "C129", "C130", "C131",
-    ]
-    .map(String::from)
-    .to_vec();
+    let ids: Vec<String> = ["C39", "C53", "C120", "C121", "C123", "C131"].map(String::from).to_vec();
     let opts = RunOptions {
         root: tree.path().to_path_buf(),
         config: paddock_dev::check::config::Config::bare("paddock"),

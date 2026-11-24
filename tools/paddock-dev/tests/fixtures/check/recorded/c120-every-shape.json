@@ -2,7 +2,7 @@
  "findings": [
   {
    "check": "C120",
-   "severity": "warn",
+   "severity": "error",
    "rule": 40,
    "file": "crates/a/src/c120_bad.rs",
    "line": 2,
@@ -11,7 +11,7 @@
   },
   {
    "check": "C120",
-   "severity": "warn",
+   "severity": "error",
    "rule": 40,
    "file": "crates/a/src/c120_bad.rs",
    "line": 6,
@@ -20,7 +20,7 @@
   },
   {
    "check": "C120",
-   "severity": "warn",
+   "severity": "error",
    "rule": 40,
    "file": "crates/a/src/c120_bad.rs",
    "line": 14,
@@ -29,7 +29,7 @@
   },
   {
    "check": "C120",
-   "severity": "warn",
+   "severity": "error",
    "rule": 40,
    "file": "crates/a/src/c120_bad.rs",
    "line": 15,
@@ -38,7 +38,7 @@
   },
   {
    "check": "C120",
-   "severity": "warn",
+   "severity": "error",
    "rule": 40,
    "file": "crates/a/src/c120_bad.rs",
    "line": 19,
@@ -47,7 +47,7 @@
   },
   {
    "check": "C120",
-   "severity": "warn",
+   "severity": "error",
    "rule": 40,
    "file": "crates/a/src/c120_bad.rs",
    "line": 20,
@@ -56,7 +56,7 @@
   },
   {
    "check": "C120",
-   "severity": "warn",
+   "severity": "error",
    "rule": 40,
    "file": "crates/a/src/c120_bad.rs",
    "line": 21,
@@ -65,7 +65,7 @@
   },
   {
    "check": "C120",
-   "severity": "warn",
+   "severity": "error",
    "rule": 40,
    "file": "crates/a/src/c120_bad.rs",
    "line": 23,
@@ -74,7 +74,7 @@
   },
   {
    "check": "C120",
-   "severity": "warn",
+   "severity": "error",
    "rule": 40,
    "file": "crates/a/src/c120_bad.rs",
    "line": 27,
@@ -83,7 +83,7 @@
   },
   {
    "check": "C120",
-   "severity": "warn",
+   "severity": "error",
    "rule": 40,
    "file": "crates/a/src/c120_bad.rs",
    "line": 28,
@@ -92,7 +92,7 @@
   },
   {
    "check": "C120",
-   "severity": "warn",
+   "severity": "error",
    "rule": 40,
    "file": "crates/a/src/c120_bad.rs",
    "line": 29,
@@ -101,7 +101,7 @@
   },
   {
    "check": "C120",
-   "severity": "warn",
+   "severity": "error",
    "rule": 40,
    "file": "crates/a/src/c120_bad.rs",
    "line": 30,
@@ -110,7 +110,7 @@
   },
   {
    "check": "C120",
-   "severity": "warn",
+   "severity": "error",
    "rule": 40,
    "file": "crates/a/src/c120_bare_file_waiver.rs",
    "line": 3,
@@ -119,7 +119,7 @@
   },
   {
    "check": "C120",
-   "severity": "warn",
+   "severity": "error",
    "rule": 40,
    "file": "crates/a/src/c120_file_waiver.rs",
    "line": 3,
@@ -128,7 +128,7 @@
   },
   {
    "check": "C120",
-   "severity": "warn",
+   "severity": "error",
    "rule": 40,
    "file": "crates/a/src/c120_file_waiver.rs",
    "line": 18,
@@ -137,7 +137,7 @@
   },
   {
    "check": "C120",
-   "severity": "warn",
+   "severity": "error",
    "rule": 40,
    "file": "crates/a/src/c120_unicode.rs",
    "line": 3,
@@ -146,7 +146,7 @@
   },
   {
    "check": "C120",
-   "severity": "warn",
+   "severity": "error",
    "rule": 40,
    "file": "crates/a/src/c120_unicode.rs",
    "line": 4,
@@ -155,7 +155,7 @@
   },
   {
    "check": "C120",
-   "severity": "warn",
+   "severity": "error",
    "rule": 40,
    "file": "crates/a/src/c120_unused_waivers.rs",
    "line": 10,
@@ -164,7 +164,7 @@
   },
   {
    "check": "C120",
-   "severity": "warn",
+   "severity": "error",
    "rule": 40,
    "file": "crates/a/src/c120_unused_waivers.rs",
    "line": 1,
@@ -173,7 +173,7 @@
   },
   {
    "check": "C120",
-   "severity": "warn",
+   "severity": "error",
    "rule": 40,
    "file": "crates/a/src/c120_unused_waivers.rs",
    "line": 3,
@@ -182,7 +182,7 @@
   },
   {
    "check": "C120",
-   "severity": "warn",
+   "severity": "error",
    "rule": 40,
    "file": "crates/a/src/c120_unused_waivers.rs",
    "line": 8,
@@ -191,7 +191,7 @@
   },
   {
    "check": "C120",
-   "severity": "warn",
+   "severity": "error",
    "rule": 40,
    "file": "crates/a/src/c120_waivers.rs",
    "line": 6,
@@ -200,7 +200,7 @@
   },
   {
    "check": "C120",
-   "severity": "warn",
+   "severity": "error",
    "rule": 40,
    "file": "crates/a/src/c120_waivers.rs",
    "line": 7,
@@ -209,7 +209,7 @@
   },
   {
    "check": "C120",
-   "severity": "warn",
+   "severity": "error",
    "rule": 40,
    "file": "scripts/c120_bad.sh",
    "line": 3,
@@ -218,7 +218,7 @@
   },
   {
    "check": "C120",
-   "severity": "warn",
+   "severity": "error",
    "rule": 40,
    "file": "scripts/c120_bad.sh",
    "line": 4,
@@ -227,7 +227,7 @@
   },
   {
    "check": "C120",
-   "severity": "warn",
+   "severity": "error",
    "rule": 40,
    "file": "scripts/c120_bad.sh",
    "line": 5,
@@ -236,7 +236,7 @@
   },
   {
    "check": "C120",
-   "severity": "warn",
+   "severity": "error",
    "rule": 40,
    "file": "scripts/c120_bad.sh",
    "line": 8,
@@ -245,7 +245,7 @@
   },
   {
    "check": "C120",
-   "severity": "warn",
+   "severity": "error",
    "rule": 40,
    "file": "scripts/c120_bad.sh",
    "line": 9,
@@ -256,7 +256,7 @@
  "waived": [
   {
    "check": "C120",
-   "severity": "warn",
+   "severity": "error",
    "rule": 40,
    "file": "crates/a/src/c120_file_waiver.rs",
    "line": 10,
@@ -269,7 +269,7 @@
   },
   {
    "check": "C120",
-   "severity": "warn",
+   "severity": "error",
    "rule": 40,
    "file": "crates/a/src/c120_file_waiver.rs",
    "line": 12,
@@ -282,7 +282,7 @@
   },
   {
    "check": "C120",
-   "severity": "warn",
+   "severity": "error",
    "rule": 40,
    "file": "crates/a/src/c120_file_waiver.rs",
    "line": 13,
@@ -295,7 +295,7 @@
   },
   {
    "check": "C120",
-   "severity": "warn",
+   "severity": "error",
    "rule": 40,
    "file": "crates/a/src/c120_unused_waivers.rs",
    "line": 14,
@@ -308,7 +308,7 @@
   },
   {
    "check": "C120",
-   "severity": "warn",
+   "severity": "error",
    "rule": 40,
    "file": "crates/a/src/c120_waivers.rs",
    "line": 3,
@@ -321,7 +321,7 @@
   },
   {
    "check": "C120",
-   "severity": "warn",
+   "severity": "error",
    "rule": 40,
    "file": "crates/a/src/c120_waivers.rs",
    "line": 4,
@@ -334,7 +334,7 @@
   },
   {
    "check": "C120",
-   "severity": "warn",
+   "severity": "error",
    "rule": 40,
    "file": "crates/a/tests/c120_tests_dir.rs",
    "line": 3,
@@ -347,7 +347,7 @@
   },
   {
    "check": "C120",
-   "severity": "warn",
+   "severity": "error",
    "rule": 40,
    "file": "scripts/c120_bad.sh",
    "line": 7,
@@ -359,6 +359,6 @@
    }
   }
  ],
- "errors": 0,
- "warnings": 28
+ "errors": 28,
+ "warnings": 0
 }

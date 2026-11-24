@@ -160,7 +160,7 @@ test('every row of the README notes table names a check that exists (no stale ro
   const notes = text.slice(text.indexOf(README_END));
   // A check with no module here may be one the Rust host runs alone (`conformance.rust` of the contract, pair P3).
   const rust = JSON.parse(read(CONTRACT_PATH)).conformance.rust;
-  assert.ok(rust.length >= 12, 'the contract names the Rust-only checks: the probe sees them');
+  assert.ok(rust.length >= 8, 'the contract names the Rust-only checks: the probe sees them');
   const ids = new Set([...checks.map((c) => c.id), ...rust]);
   const rows = [...notes.matchAll(/^\| (C\d+) \|/gm)].map((m) => m[1]);
   assert.ok(rows.length > 0, 'the notes table has rows: the probe sees them');

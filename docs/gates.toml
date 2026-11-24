@@ -2,6 +2,11 @@
 # `./dev gates check` (C100) fails on a check that no reachable CI line runs and that is not listed here, on an entry that
 # is no longer needed, on a review_by that has passed (at most 60 days after since) and on a moved date without a
 # `Gates-date:` trailer. Fix the cause and remove the entry; do not extend the date.
+# Sunset rule (user, 2026-11-24; docs/rules.md rule 5): a [[report_only]] entry is a report-only check, register or port, and its
+# review_by is its expiry date. One registered after 2026-11-24 expires at most 14 days after since (and, new on a branch, at most
+# 14 days after the day C100 runs). On that date it is flipped to blocking (remove the entry), switched over (the old side deleted)
+# or removed. C100 warns a week before; an overdue entry is a warning on any other push and blocks only a release tag
+# (`./dev gates ratchet --release-tag`) and a change that touches the entry (ER-41's time rule).
 # ER-41 checklist for a new check with a list (an allow list, a baseline, ESLint bulk suppressions): the list lands on main while the check is still report-only,
 # because a list that does not exist at the merge base is an empty base and every entry of a list created on a branch is growth (ER-46).
 
@@ -155,67 +160,11 @@ review_by = 2026-12-27
 approved = "coordinator"
 
 [[report_only]]
-id = "C122"
-reason = "ER-41: report-only until its first green run on the real tree, recorded by run id here; then flip SEVERITY in tools/paddock-dev/src/check/c122.rs and the mode to gate. Rules A and B start with no sites on the tree (all 63 migrated onto paddock_testkit::path in the same change, ADR 0099 WP-3b); rule C only ever warns"
-owner = "ADR 0099"
-since = 2026-11-13
-review_by = 2026-12-13
-approved = "user"
-
-[[report_only]]
-id = "C126"
-reason = "ER-41: report-only until its first green run on the real tree, recorded by run id here. Rule A (serial steps) is never gated; rules B and C are gated only after that green run (flip SEVERITY for them in C126-test-steps.mjs). 60 sites in 41 files on this branch (24 A, 0 B, 36 C); the rest are fixed when their test next fails (ADR 0103, D3 b, D4)"
-owner = "ADR 0103"
-since = 2026-11-14
-review_by = 2026-12-14
-approved = "coordinator"
-
-[[report_only]]
-id = "C127"
-reason = "ER-41: report-only until its first green run on the real tree, recorded by run id here; then migrate or waive the sites left and flip SEVERITY in C127-computed-rm.mjs and the mode to gate. First count 2026-11-15: 31 warnings in 15 files (after the review rows: if, while, env, a path, find -exec) after migrating the prune (both deletes), host-cleanup, node-caches, stable-workspace, kept-clone and vm-win prepare sites onto safe_rm (conformance/ci/safe-rm.sh); left: the dev wrapper, job-tmpdir, job-isolation, tag-node-caches, tauri-bundle, the shell-demo smoke scripts and app scripts"
-owner = "ER-21 class: computed deletes that reached beyond their folder (fix/small-foundation-2026-11-15)"
-since = 2026-11-15
-review_by = 2026-12-15
-approved = "user"
-
-[[report_only]]
 id = "C138"
 reason = "ER-41: report-only until its first green run on the real tree, recorded by run id here; then flip SEVERITY in C138-owned-scroll.mjs and the mode to gate. 0 sites on this branch (21 on origin/main 97176067c, each moved onto pdOwnedScroll or waived with a reason: dockview elements, the widget grid's drag auto-scroll, Pitcrew's config editor, and the chat and assistant logs, which keep anchoring on purpose)"
 owner = "ADR 0105"
 since = 2026-11-17
-review_by = 2026-12-17
-approved = "coordinator"
-
-[[report_only]]
-id = "C140"
-reason = "ER-41: report-only until its first green run on the real tree, recorded by run id here; then flip SEVERITY in C140-per-item-opt-outs.mjs and the mode to gate. It counts the `// per-item:` opt-outs of the report-only lint paddock/no-backend-call-in-loop (bulk-API redesign G5); 0 opt-outs on this branch"
-owner = "ADR 0108"
-since = 2026-11-18
-review_by = 2026-12-18
-approved = "coordinator"
-
-[[report_only]]
-id = "C118"
-reason = "ER-41: report-only until its first green run on main, then flip SEVERITY in C118-floating-tools.mjs and the mode to gate. 16 floating-tool warnings today (7 cargo install without a pinned version, 5 dtolnay/rust-toolchain at a channel ref, 2 taiki-e/install-action refs without a digest, 1 install-action tool without @x.y.z, 1 npx --yes of a package that is not in the lockfile); an npx of a binary of a top-level package-lock.json package is not a finding"
-owner = "ER-26 (2026-11-13)"
-since = 2026-11-12
-review_by = 2026-12-10
-approved = "user"
-
-[[report_only]]
-id = "C119"
-reason = "ER-41: report-only until its first green run on main, then flip SEVERITY in tools/paddock-dev/src/check/c119.rs and the mode to gate. Today's findings are the plan jobs of ci.yml, debrief.yml, dyno-release.yml and pitcrew-release.yml, the commits job and tag.yml's check job (they run ./dev before any setup-rust; their compiler is the image's)"
-owner = "CI-in-Rust WP-3 review (2026-11-13)"
-since = 2026-11-13
-review_by = 2026-12-13
-approved = "coordinator"
-
-[[report_only]]
-id = "C120"
-reason = "ER-41: report-only until its first green run on main, then change warn to error in tools/paddock-dev/src/check/c120.rs and the mode to gate. 0 warnings today: the 24 sites found (prune test data, cargo-output samples, old-layout tests) are waived with a reason and counted as waived"
-owner = "build-folder layout (ER-21, paddock_env::cargo_layout)"
-since = 2026-11-13
-review_by = 2026-12-13
+review_by = 2026-12-08
 approved = "coordinator"
 
 [[report_only]]
@@ -223,15 +172,7 @@ id = "C121"
 reason = "ER-41: report-only until its first green run on the real tree is recorded in ADR 0098 (WP-2), then flip the findings to errors in tools/paddock-dev/src/check/c121.rs. first count 2026-11-13: 10 findings, all the parity fixtures of C121 (now in tools/paddock-dev/tests/it/check_c121.rs, one of the check's own files it does not read since 2026-11-15); it flags a registry entry or test that runs grep, sed, awk or a regular expression over a workflow file"
 owner = "ADR 0098 WP-2"
 since = 2026-11-13
-review_by = 2027-01-07
-approved = "user"
-
-[[report_only]]
-id = "C124"
-reason = "ER-41: report-only until its first green run on the real tree is recorded in ADR 0089 (amendment 2026-11-13, WP-T6), then flip the warnings to errors in tools/paddock-dev/src/check/c124.rs and the mode to gate. First count 2026-11-13: 18 files, every one listed with a reason in conformance/c124-allow.json (a shrink-only seed that empties as each gate migrates); it flags a gate result built by hand outside paddock_cli::Outcome"
-owner = "ADR 0089 amendment WP-T6"
-since = 2026-11-13
-review_by = 2027-01-07
+review_by = 2026-12-08
 approved = "user"
 
 [[report_only]]
@@ -239,39 +180,15 @@ id = "C123"
 reason = "ER-41: report-only until its first green run on main, then flip SEVERITY in tools/paddock-dev/src/check/c123.rs and the mode to gate. Every existing Rust test spawn of ./dev, cargo or node is migrated onto paddock_testkit::TestCommand in the same change (no baseline); JavaScript tests are not judged (ADR 0100 follow-up)"
 owner = "ADR 0100 (2026-11-13)"
 since = 2026-11-13
-review_by = 2026-12-13
+review_by = 2026-12-08
 approved = "user"
-
-[[report_only]]
-id = "C125"
-reason = "ER-41: report-only until its first green run on the real tree, recorded by run id in tools/paddock-dev/src/check/c125.rs, then flip the warnings to errors and the mode to gate. First count 2026-11-14: 105 warnings in 40 files (92 in 34 after the review of 2026-11-15), every one a path on the d7sst7 or d8sst7 disk (stale disk names: guards, VM scripts, dev-tool defaults, briefs, dev docs); invented test volumes are listed per site in conformance/c125-allow.json, history documents are skipped by path there. Even while report-only, a file C125 cannot read is an unwaivable not-measured error at that file (ER-33), not a warning"
-owner = "ER-21 class: stale machine paths after a disk move (fix/guard-paths-derived)"
-since = 2026-11-14
-review_by = 2026-12-14
-approved = "coordinator"
 
 [[report_only]]
 id = "C128"
 reason = "ER-41: report-only until its first green run on the real tree, recorded by run id here and in C128-recorded-pid.mjs. It flags a test that takes the identity of a pid it parsed from a file or a child's output with ProcessId::of (rule 53; Spotter's run 8118 and the review of f224dd0b4): the fix is paddock_testkit_start::recorded. First count 2026-11-15 on fix/test-pid-reader: 12 sites before the branch, 0 after (5 migrated, 6 waived with a reason, 1 rewritten in paddock-proc, whose tests cannot use the kit). Known gap: a pid parsed in another function is not followed"
 owner = "ER-21 class: a test observes a recorded pid after the code under test may have ended it (fix/test-pid-reader)"
 since = 2026-11-15
-review_by = 2026-12-15
-approved = "coordinator"
-
-[[report_only]]
-id = "C130"
-reason = "ER-41: report-only until its first green run on the real tree, recorded by run id here and in tools/paddock-dev/src/check/c130.rs. It flags a Rust test that plants a #!/bin/sh (bash, zsh) fixture program instead of installing paddock_testkit::StandIn (a script cannot run on Windows; ER-21 class: train 12's planner control, run 8138, WP-7's windows-twin waivers). The allow list conformance/c130-allow.json (shrink-only) held 73 sites in 41 entries on 2026-11-16; on 2026-11-19 every site was converted to StandIn and the 11 that remain are shebangs that are data or the product under test, each carrying a stand-in waiver, approved by the user on 2026-11-19. It reads the Rust text that C129 (no new shell, shell files) names as its known gap, so the two never report the same line. Allow-list growth is compared with the merge base through the shared reader (ADR 0098 amendment of 2026-11-16); a shebang built from pieces is not seen First green run on the real tree: pending 2026-11-19 (the train integrator records its run id here; the check blocks only after it, ER-41)."
-owner = "ER-21 class: a fixture program that exists only on Unix (feat/testkit-stand-in)"
-since = 2026-11-16
-review_by = 2026-12-16
-approved = "user"
-
-[[report_only]]
-id = "C131"
-reason = "ER-41: report-only until its first green run on the real tree, recorded by run id here and in tools/paddock-dev/src/check/c131.rs. It may not block before the shared allow-list reader has its merge-base growth guard (being added on origin/feat/testkit-stand-in: reuse it when it lands, do not copy C129's, rule 55). It reads the golden folders (and *.golden and *.snap files) for fixed patterns only: uid and gid numbers, /Users, /home and C:\\Users paths and temp paths, so it gives the same result on every machine; the ER-21 class 'a golden captured on one machine fails on another' (train 14 WP-2: six goldens, among them the Mac's uid 501 in a guardian golden). It walks the working folder today; reading git's tracked list is the approved train-14 item. First count 2026-11-16 on feat/golden-checked-when-made: 7 sites in 310 files, the same on the Mac and as root in the CI image (the test check_c131 runs on both through ./dev golden confirm), all invented users, waived with a reason in conformance/c131-allow.json. It found no real value; a real host name in a wiki fixture was replaced as housekeeping, not as a catch. Known gap: this machine's own user, host, RAM and CPU count are not read (they made the result differ per machine)"
-owner = "ER-21 class: a golden holds a value of its capturing machine (feat/golden-checked-when-made)"
-since = 2026-11-15
-review_by = 2026-12-15
+review_by = 2026-12-08
 approved = "coordinator"
 
 [[report_only]]
@@ -279,23 +196,7 @@ id = "step:tools/hooks"
 reason = "ER-41: report-only until its first green run on the real tree, recorded by run id here; then remove continue-on-error from ci.yml's `Hooks tests (report-only)` step (the tools job, `./dev ci run tools hooks`) and this entry; C100 fails when review_by passes or when the step already blocks. It runs every .claude/hooks/*.test.sh (python3, jq and git are in paddock-ci:v3, checked 2026-11-15) with PADDOCK_DEV set to the built tool, so the rule-55 parity test of places.rs against lib/paddockpaths.py runs in CI. First green run id: none yet"
 owner = "fix/hooks-ci-and-config-guard"
 since = 2026-11-14
-review_by = 2026-12-14
-approved = "coordinator"
-
-[[report_only]]
-id = "C14"
-reason = "the hermetic-wrapper check only reports warnings (static part); the root conformance line runs it"
-owner = "Rule 40 follow-up"
-since = 2026-11-08
-review_by = 2026-12-06
-approved = "coordinator"
-
-[[report_only]]
-id = "C117"
-reason = "report-only until its first green run (ER-41): a step that runs after a failure in an isolated job must also stop when the job's setup failed (PADDOCK_JOB_ABORTED); the root conformance line runs it, 0 warnings today; then mode gate"
-owner = "run 8027, fix/dev-wrapper-build-race"
-since = 2026-11-12
-review_by = 2026-12-12
+review_by = 2026-12-08
 approved = "coordinator"
 
 [[not_gated]]
@@ -1129,14 +1030,6 @@ since = 2026-11-08
 review_by = 2026-12-20
 approved = "coordinator"
 
-[[report_only]]
-id = "C29"
-reason = "every outcome on the repository's own run is a warning: windowWeight is configured nowhere and the conformance job builds no stats (docs/benchmarks.md)"
-owner = "ADR 0060 WP-6"
-since = 2026-11-08
-review_by = 2027-01-07
-approved = "coordinator"
-
 [[ignored]]
 path = "apps/dyno/app/e2e/dashboard-grid.spec.ts"
 tests = ["dashboard grid screenshots"]
@@ -1245,75 +1138,27 @@ review_by = 2026-12-20
 approved = "coordinator"
 
 [[report_only]]
-id = "C135"
-reason = "ER-41: report-only until its first green run on the real tree, recorded by run id in C135-leak-detector-opt-outs.mjs, then flip the warnings to errors and the mode to gate. First count 2026-11-16: one listed file (the test kit's own spec, four suites that leak on purpose); conformance/c135-allow.json is held to shrink-only against the merge base by the check itself (ER-46)"
-owner = "ER-21 class: a test fails for what an earlier test left behind (feat/test-leak-detector)"
-since = 2026-11-16
-review_by = 2026-12-16
-approved = "coordinator"
-
-[[report_only]]
 id = "C133"
 reason = "ER-41: report-only until its first green run on the real tree, recorded by run id in C133-e2e-pinned-clock.mjs, then flip its three rules to errors. What a linter can say is the linter's (ER-37): the ESLint rule paddock/e2e-pinned-clock (eslint/src/rules/e2e-pinned-clock.cjs, block e2ePinnedClock in every app's and the ui eslint.config, e2e/**/*.ts in every lint target) refuses a value, default, namespace or subpath import or a re-export of test from Playwright or the kit, a dynamic import() or require() of them (also by template literal or variable), clock.install with no time in any form, .newContext( on any receiver and browser.newPage(; one rule of its own, so an app's no-restricted-syntax in the same files cannot replace it. eslint/test/wiring.test.cjs checks, for every app and the ui, that the lint command covers e2e, that the rule fires with the app's real config, and that the app's other e2e rules still fire (Debrief raw-row selectors, no-debugger). C133 keeps three rules over the specs: rule 1 (pinnedClock false or pin false carries `pinned-clock: off — <why>`), rule 2 (in a spec that imports the live helpers the first interaction of a test is inside withLivePaused or after pauseLive), rule 3 (ER-12, no wait over an empty set of boxes that must exist: waitForFunction over .every( with no length check outside the callback; an empty set that IS the settled state, document.getAnimations(), carries `conformance: e2e-wait — <why>`). First count 2026-11-16: 0 findings in all three rules (Dyno reports-disks.spec.ts moved to settledLayout; the two getAnimations waits in Debrief axe.ts and Dyno axe.spec.ts carry the waiver). No spec imports the live helpers yet; Debrief clickWithTimePaused and pauseAhead on fix/main-webkit-e2e (a91a5ac78) move onto the kit helpers when that branch lands. Limit of rule 3: a function passed to waitForFunction by name is not read. JS host only: no Rust mock backends. Out of scope (their own Playwright configs outside the e2e folders): Debrief scripts/screenshots/capture.ts and scripts/visual-qa/sweep.ts. A mock backend reading the wall clock is not checked: in the page Date.now and new Date are the pinned clock (review 2026-11-16)."
 owner = "ER-21 class: time-of-day-dependent e2e on a clock-relative mock (CI run 8154)"
 since = 2026-11-16
-review_by = 2026-12-16
+review_by = 2026-12-08
 approved = "coordinator"
-
-[[report_only]]
-id = "C137"
-reason = "ER-41: report-only until its first green run on the real tree, recorded by run id in C137-e2e-kit-import.mjs, then flip SEVERITY to error. An app e2e spec that imports @decryp7/paddock-e2e by package name needs its workflow to build it (build:e2e) or a relative source import (the Debrief dock spec ran no test in any shard)."
-owner = "ER-21 class: a spec imports what its CI job never builds"
-since = 2026-11-17
-review_by = 2026-12-17
-approved = "coordinator"
-
-[[report_only]]
-id = "C129"
-reason = "ER-41: report-only until its first green run on the real tree, recorded by run id here and in tools/paddock-dev/src/check/c129.rs, then flip the warnings to errors and the mode to gate. It keeps new shell and Python files out (shell-to-rust plan WP-0): a file not in the shrink-only baseline conformance/baselines/C129-shell.json or in the exceptions conformance/shell-exceptions.json is a finding, so is one that grew; it also reports callers of scripts the tree lacks and the count of inline run lines in .gitea. First count 2026-11-15: 149 baselined files (15,559 lines) and 20 exact exceptions, 1 warning (inline shell in .gitea: 1269 lines in 333 blocks); no caller names a missing script. Recorded: not yet"
-owner = "shell-to-rust plan WP-0, approved by the user 2026-11-15 (ER-21 class: a shell script behaves differently on macOS, Linux and Git Bash, run 8138)"
-since = 2026-11-15
-review_by = 2026-12-15
-approved = "user"
 
 [[report_only]]
 id = "C136"
 reason = "ER-41: report-only until its first green run on the real tree, recorded by run id in C136-unit-live-feeds.mjs, then flip the warnings to errors and the mode to gate. First count 2026-11-16: 3 findings in 1 file (mock-backend.spec.ts), fixed through ManualClock, 0 after (no allow list)"
 owner = "ER-21 class: a unit test asserts a value while a live mock feed keeps changing it (run 8191; feat/unit-live-helper)"
 since = 2026-11-16
-review_by = 2026-12-16
+review_by = 2026-12-08
 approved = "coordinator"
-
-[[report_only]]
-id = "C139"
-reason = "ER-41: report-only until its first green CI run that includes it, recorded by run id here and in C139-e2e-ready-directives.mjs and c139.rs: ci.yml run 8335 (train 15, 2026-11-20). It checks that the exceptions to paddock/e2e-ready-reads, the eslint-suppressions.json of each app and the ui (ESLint bulk suppressions), only shrink against the merge base, through the shared baseline reader, and that a run reads at least one e2e spec. The lint rule itself is an error (it had its report-only phase; the real tree is at 0 sites outside the suppressions files), and the e2e lint block sets noInlineConfig, so no inline comment can switch it off. The six existing entries (Debrief 3, Dyno 3) were approved by the user on 2026-11-18."
-owner = "ER-21 class: a read on 'it is in the DOM' (feat/e2e-ready-gating)"
-since = 2026-11-18
-review_by = 2026-12-18
-approved = "user"
-
-[[report_only]]
-id = "C141"
-reason = "ER-41: report-only until its first green run on the real tree, recorded by run id here and in tools/paddock-dev/src/check/c141.rs. It reads every workflow with the YAML reader (gates::yaml) and checks that each setup-rust use passes the S3 cache key in its own with: (sccache-s3-access-key-id and sccache-s3-secret-access-key from the repository secrets PADDOCK_SCCACHE_S3_ACCESS_KEY_ID and PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY), that callers of app-fuzz.yml and app-release.yml pass them and those two declare them, and that no other workflow line or action names them; each finding prints the exact lines to paste. First count at 1ee61a03c: 34 setup-rust steps, 8 reusable-workflow calls, 2 declarations to paste (the integrator pastes them once, docs/research/2026-11-19-sccache.md section 8)"
-owner = "WP-8 of docs/research/2026-11-19-sccache.md: CI's sccache on RustFS, the key given to the setup step only (perf/sccache-hit-rate)"
-since = 2026-11-19
-review_by = 2026-12-19
-approved = "user"
-
-[[report_only]]
-id = "C143"
-reason = "ER-41: report-only until its first green run on the real tree, recorded by run id in C143-spawn-joined-path.mjs, then flip SEVERITY to error and the mode to gate. First count 2026-11-20: 0 findings on train/2026-11-19-17 (3d776b605), no allow list"
-owner = "ER-21 class: a spawned program that is a relative join and so is looked up on PATH (tag.yml checker, fixed in 774eea41c; feat/conformance-spawn-stream-checks)"
-since = 2026-11-20
-review_by = 2026-12-20
-approved = "user"
 
 [[report_only]]
 id = "C144"
 reason = "ER-41: report-only until its first green run on the real tree, recorded by run id in C144-bare-stream-wait.mjs, then flip SEVERITY to error and the mode to gate. First count 2026-11-20: 2 sites in 1 file on train/2026-11-19-17 (3d776b605): apps/debrief/app/e2e/ai-chat.e2e.ts lines 122 and 126 (narrowed to waits for aria-busy being false; busy-true asserts and skeleton counts are not read); each gets expectStreamDone or `// conformance: stream-wait` with a reason in its owner change"
 owner = "ER-21 class: a whole streamed answer bounded by one expect timeout (debrief.yml runs 8300 and 8377, ADR 0103; feat/conformance-spawn-stream-checks)"
 since = 2026-11-20
-review_by = 2026-12-20
+review_by = 2026-12-08
 approved = "user"
 
 [[report_only]]
@@ -1321,37 +1166,80 @@ id = "C155"
 reason = "ER-41: report-only until its first green run on the real tree, recorded by run id here and in tools/paddock-dev/src/check/c155.rs, then flip the mode to Gate in the same step. Reads the sources of every workspace that declares `hostTests` (crates, the apps, tools/paddock-dev): OS code (an OS cfg, an OS-API crate, a portable-layer entry point in production code) in a package or paddock-dev module that hostTests does not run on Windows and macOS, a skipped module with OS code, a stale entry, and the import edges between paddock-dev modules (ci_setup_rust imports local_sccache, ci_run imports pre_push::exec). No baseline or allow list of its own (ER-46): hostTests is the list. Positive controls: its own control and tests/it/os_scoped.rs (unlisting paddock-proc, local_sccache and pre_push::exec each goes red). Count on the real tree: see the CHANGELOG entry. The register of OS-removal approvals (docs/os-removals.toml) is itself shrink-only (ER-46): an approval the merge base lacks is one unwaivable finding, an approval the merge base already covers is stale. Its first 26 approvals (24 only.macos-latest of tools/paddock-dev, 2 skip of paddock-service) were approved by the user on 2026-11-23 for the repository-graph train; after that train lands they are stale and the register shrinks to empty"
 owner = "OS-scoped tests (user decision 2026-11-22, docs/research/2026-11-22-os-scoped-tests.md): a test not listed in hostTests runs on Linux only, so OS code outside the list would silently lose its Windows and macOS tests (feat/os-scoped-tests)"
 since = 2026-11-22
-review_by = 2026-12-22
+review_by = 2026-12-08
 approved = "user"
-
-[[report_only]]
-id = "C156"
-reason = "ER-41: report-only until its first green run on the real tree, recorded by run id in C156-axe-scan-held-still.mjs, then flip SEVERITY to error and the mode to gate. First count 2026-11-22: 0 sites on fix/debrief-webkit-flakes-t20; the same check finds 12 sites in 10 files on main 67ac6d6ec (positive control on the real tree, ER-33), all moved onto withPageStill or axeViolations in that branch"
-owner = "ER-21 class: axe read colours mid-motion (Pitwall run 8134; Debrief a11y.e2e.ts:6 in debrief.yml runs 8297 to 8643; fix/debrief-webkit-flakes-t20)"
-since = 2026-11-22
-review_by = 2026-12-22
-approved = "coordinator"
 
 [[report_only]]
 id = "C167"
 reason = "ER-41: report-only until its first green run on the real tree, recorded by run id in C167-growth-test-history.mjs, then flip SEVERITY to error and the mode to gate. A workflow job that runs scripts/npm-audit.test.mjs's ER-46 growth test (npm run test:scripts, or a ./dev ci run phase that does) needs fetch-depth 0 and PADDOCK_BASE_REF, or it fails as not measured: no merge base."
 owner = "ER-21 class: a test that needs the git history in a one-commit checkout (ci.yml ui and tools run 8327, fixed by 138f8b879; shell-demo-release.yml run 8807)"
 since = 2026-11-24
-review_by = 2026-12-24
+review_by = 2026-12-08
 approved = "coordinator"
-
-[[report_only]]
-id = "C145"
-reason = "ER-41: report-only until its first green run on the real tree, recorded by run id here; then flip `mode` in tools/paddock-dev/src/check/c145.rs to Gate. It reads docs/lessons.md, which is merged with git's union driver: twice a merge dropped the blank line before a `## ` heading (9ec43be3c, b9bf5fc4b). The real tree is at 0 findings (the 35 headings that sat under a non-blank line were given their blank line in the commit that added the check)."
-owner = "ER-41"
-since = 2026-11-21
-review_by = 2026-12-21
-approved = "user"
 
 [[report_only]]
 id = "C154"
 reason = "ER-41: report-only until its first green run on the real tree, recorded by run id here and in tools/paddock-dev/src/check/c154.rs, then flip the mode to Gate. Three rules over *.spec.ts and *.e2e.ts (comments and strings masked): fake-timers (vi.useFakeTimers with no afterEach, afterAll or onTestFinished that restores the real clock and no test-setup that does), fixed-wait (flush(CONSTANT + n)) and lazy-wait (vi.waitFor or expect.poll that only imports, or a sync advanceTimersByTime followed by a DOM assertion). waitForTimeout and setTimeout-promise sleeps stay C71's. No baseline file (ER-46); a baseline needs the user's approval. First count at 67ac6d6ec: see the CHANGELOG entry"
 owner = "ER-21 class: a fixed-time wait or a leaked fake clock fails a spec on a loaded runner (Dyno extras-page leak c249b271c, Spotter flush(TEST_DEBOUNCE_MS + 20) ad0221ac1, Pitcrew flush(PREVIEW_DEBOUNCE_MS + 50); feat/fixed-wait-checks)"
 since = 2026-11-22
-review_by = 2026-12-22
+review_by = 2026-12-08
 approved = "user"
+
+# Retired check ids (ADR 0060 section 5): an id that existed, the commit that removed it and where its job went. Docs may still name
+# them, and `./dev check new-id` never hands them out again. Dropped on 2026-11-24 (user): report-only checks whose standing warnings
+# nobody fixed, and C29, configured nowhere; the evidence is the conformance log of ci.yml run 8869 (cdd4c3d10).
+
+[[retired]]
+id = "C14"
+commit = "2ff2d766f"
+moved_to = "nothing: the hermetic wrapper (`paddock-conformance run --`) was used by no workflow; tests keep their own temp folders (rule 7)"
+
+[[retired]]
+id = "C29"
+commit = "2ff2d766f"
+moved_to = "nothing: no app configured window budgets; Debrief's frontend job keeps its own `window-weight.mjs` budget step, and `paddock-conformance window-weight` stays as a tool"
+
+[[retired]]
+id = "C118"
+commit = "2ff2d766f"
+moved_to = "nothing: tool pins stay a review rule (ER-26)"
+
+[[retired]]
+id = "C119"
+commit = "2ff2d766f"
+moved_to = "nothing: ./dev before setup-rust stays a review rule (ER-9)"
+
+[[retired]]
+id = "C122"
+commit = "2ff2d766f"
+moved_to = "nothing: paddock_testkit::path stays the way to compare paths in tests (ADR 0099)"
+
+[[retired]]
+id = "C124"
+commit = "2ff2d766f"
+moved_to = "nothing: paddock_cli::Outcome stays the way to build a gate result (ADR 0089)"
+
+[[retired]]
+id = "C125"
+commit = "2ff2d766f"
+moved_to = "nothing: rule 40 (no disk named in code) stays a review rule; ./dev places derives the folders"
+
+[[retired]]
+id = "C126"
+commit = "2ff2d766f"
+moved_to = "nothing: ADR 0103's step bounds stay a review rule"
+
+[[retired]]
+id = "C127"
+commit = "2ff2d766f"
+moved_to = "nothing: conformance/ci/safe-rm.sh stays the helper for computed deletes"
+
+[[retired]]
+id = "C129"
+commit = "2ff2d766f"
+moved_to = "nothing: no new shell scripts stays a review rule; the baseline and the exceptions list are gone"
+
+[[retired]]
+id = "C130"
+commit = "2ff2d766f"
+moved_to = "nothing: paddock_testkit::StandIn stays the way to plant a fixture program"

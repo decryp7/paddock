@@ -16,7 +16,7 @@ pub const DEFAULT_FOLDER_TIMEOUT_SECS: u64 = 60;
 /// Sizes measured less than this many hours ago are not measured again by `scan`.
 pub const DEFAULT_SIZE_MAX_AGE_HOURS: u64 = 6;
 /// The usage index's file name in the dev-targets folder. The default root is the dev-targets folder itself, derived
-/// ([`crate::places::dev_targets`]: the parent of `paddock.worktreeRoot`), never a disk named here (C125). Folders directly
+/// ([`crate::places::dev_targets`]: the parent of `paddock.worktreeRoot`), never a disk named here (rule 40). Folders directly
 /// under a root, and those under its `wt` folder, are what the tooling tracks.
 pub const INDEX_FILE: &str = ".paddock-disk.sqlite";
 /// Folders under a root that hold other tracked folders (worktrees).

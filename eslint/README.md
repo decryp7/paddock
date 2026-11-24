@@ -30,8 +30,8 @@ as Debrief's two accessibility rules), `dialogStores` (globs of the stores a dia
 | `paddock/template-no-inner-html` | security | no `[innerHTML]` / `[outerHTML]` binding |
 | angular-eslint (preset) | 33 | `prefer-inject`, `prefer-signals`, `prefer-signal-model`, `template/prefer-control-flow`, `template/prefer-class-binding` |
 
-Not lintable (kept as review rules or other checks): 34 (window bootstrap shape), 35 (lazy panels: conformance C29 measures the
-initial chunk), 36 (prefer `resource`), 38 (each lifecycle effect has a failing test), 39 (shared code in Paddock). The
+Not lintable (kept as review rules or other checks): 34 (window bootstrap shape), 35 (lazy panels: `paddock-conformance window-weight`
+measures the initial chunk), 36 (prefer `resource`), 38 (each lifecycle effect has a failing test), 39 (shared code in Paddock). The
 "unknown `var(--x)`" half of Debrief's `lint-styles` needs the app's token list and stays an app script. Rule 29 is a class
 based heuristic; reads through injected stores are not seen.
 

@@ -137,8 +137,3 @@ test('cli: exit status, json, out file, job summary file, only, list, usage', as
   assert.equal(await main(['run', 'echo'], io), 2);
 });
 
-test('cli run: the hermetic wrapper passes the exit status through', async () => {
-  const io = { log() {}, err() {}, env: {} };
-  assert.equal(await main(['run', '--', process.execPath, '-e', 'process.exit(0)'], io), 0);
-  assert.equal(await main(['run', '--', process.execPath, '-e', 'process.exit(3)'], io), 3);
-});

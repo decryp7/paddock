@@ -14,7 +14,7 @@
 //! 3. One bounded wait on the run (`./dev wait --ci-run`), then the jobs and the triage are read: **only NEW failures fail a
 //!    row** (`./dev ci triage` compares with the last main run and the flake history; a failure also on main is listed, not blamed).
 //!
-//! Every OS gets a row made with the shared [`measure`] and [`Outcome`] types (C124): `Clean` with evidence for this run, `Findings`
+//! Every OS gets a row made with the shared [`measure`] and [`Outcome`] types (ADR 0089): `Clean` with evidence for this run, `Findings`
 //! (the NEW failures), `NotMeasured` (the reason) or `NotApplicable` (no job of the plan ran on that OS). Never a silent skip
 //! (ER-33). **Report-only until its first green run is recorded (ER-41)**: [`ENFORCED`] is false, so the exit code is unchanged.
 //! The pass/fail reading of a PARTIAL run is this module's; `ci verdict` stays the one reader of FULL runs (it refuses a base
@@ -151,7 +151,7 @@ pub fn reach_of(plan: &Value) -> Reach {
 pub struct Row {
     /// The OS.
     pub os: Os,
-    /// The outcome (C124).
+    /// The outcome (ADR 0089).
     pub outcome: Outcome,
     /// The jobs of the run on this OS.
     pub jobs: Vec<String>,

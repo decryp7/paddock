@@ -29,7 +29,7 @@ scripts/setup-dev.sh --install  # macOS: installs the missing tools, then report
 
 ## Where things live
 
-Code, scripts and docs never name a disk (C125, rule 40): a disk gets renamed or replaced, and a hard-coded path then goes
+Code, scripts and docs never name a disk (rule 40): a disk gets renamed or replaced, and a hard-coded path then goes
 stale without a sound (on 2026-11-14 the dev data moved disks, and the guards, the VM scripts and the dev tool's defaults all
 pointed at disks that were gone). Tools derive every folder from one setting per machine, `git config paddock.worktreeRoot`
 in the main checkout (repo-local, so every worktree sees it), and fail with an `::error::` and this next step when it is not
@@ -271,7 +271,7 @@ author: that call belongs there. The Rust `heavy` tool (`tools/heavy`) makes no 
 - **Golden files (`paddock_testkit::golden`):** a golden is captured on one machine and checked on all of them (the Mac, the
   Linux CI image, which runs as root, and Windows). A value of the capturing machine (a uid, a home folder, a temp path) makes it
   fail elsewhere; normalise it in the test before the comparison (for example `norm()` in
-  `tools/paddock-dev/tests/it/host_steps.rs`), so the file says `<uid>`. Conformance C131 (report-only, ER-41) reads the golden
+  `tools/paddock-dev/tests/it/host_steps.rs`), so the file says `<uid>`. Conformance C131 (blocking since ci.yml 8869, ER-41) reads the golden
   folders (and `*.golden` and `*.snap` files) for uid and gid numbers, `/Users`, `/home` and `C:\Users` paths and temp paths, by
   fixed patterns, so it gives the same result on every machine; it walks the working folder today (reading git's tracked list is
   the approved train-14 item). A value that is fine (an invented user) gets an entry with a reason in `conformance/c131-allow.json`.

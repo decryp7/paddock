@@ -19,7 +19,10 @@ changes here, every app's copy is updated in the same change.
    sleeps or raised timeouts), never silently skipped. No limit (timeout, retry, wait, budget, tolerance, cap) is
    raised without a named, measured cause recorded next to it (ER-12); otherwise the cause is fixed. A new gate, CI job or
    check starts report-only and blocks only after its first green run on the real tree, recorded by run id where the
-   gate is defined (ER-41).
+   gate is defined (ER-41). Its report-only phase is short: a report-only check, register or port registered after
+   2026-11-24 carries an expiry date (`review_by` of its `[[report_only]]` entry in docs/gates.toml) at most 14 days
+   later, and by then it is flipped to blocking, switched over (the old side deleted) or removed. C100 warns a week
+   before; after the date it blocks release tags and the entry's own changes, and warns on any other push (user, 2026-11-24).
    A FLAKY test (fails, then passes on its one retry) blocks a landing only when the change touches the test itself or the
    source it exercises (its feature or module); see rule 50 (k) (ER-12, user, 2026-11-19).
    A reviewer of a bug fix runs a mutation check on it (user, 2026-10-30), in their own worktree: for Rust,

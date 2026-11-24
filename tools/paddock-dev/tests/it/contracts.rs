@@ -662,7 +662,7 @@ fn the_checks_the_rust_host_runs_in_ci_are_in_the_plan_for_every_input_they_read
     );
     let args = paddock_dev::ci_run::contract::conformance_rust_args_at(&root).unwrap();
     let ids: Vec<&str> = args[args.iter().position(|a| a == "--only").unwrap() + 1].split(',').collect();
-    assert!(ids.len() >= 12, "the 12 checks of pair P3: {ids:?}");
+    assert!(ids.len() >= 8, "the Rust-only checks (pair P3 and later): {ids:?}");
     // An empty graph: no `cargo metadata` (this test runs in the conformance job), and the conformance job does not depend on it.
     let graph = paddock_dev::plan::RepoGraph {
         cargo: paddock_repo_graph::Graph::new(),
