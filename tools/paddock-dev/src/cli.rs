@@ -397,6 +397,10 @@ enum CiCommand {
     RecordFixture(ci_runs::RecordArgs),
     /// Real CI timings of the family from the Gitea API (the script scripts/ci-timings.mjs it replaced is retired; the recorded golden is the reference).
     Timings(ci_runs::TimingsArgs),
+    /// The cost classes of paddock-dev's tests against what they took (ADR 0121): per class the longest test, and every unclassed test
+    /// over a quarter of its stop, from a run's job logs or a saved nextest output. Report-only (exit 0) unless --fail-on-findings (5);
+    /// 6 when no whole nextest run of paddock-dev was read.
+    TestCost(ci_runs::TestCostArgs),
     /// Is there a full green run of a workflow on a commit? The one reader of the runs for that verdict (the tag workflow asks
     /// it). A run counts if it is a push to main or its plan job logged `plan mode: full=true`; the newest full run decides.
     /// Exit 0 full green, 5 red or only partial runs, 6 not measured (never a pass).
@@ -788,6 +792,9 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
         Command::Ci {
             command: CiCommand::Timings(a),
         } => ci_runs::timings(&a),
+        Command::Ci {
+            command: CiCommand::TestCost(a),
+        } => ci_runs::test_cost(&a),
         Command::Ci {
             command: CiCommand::ScheduleSkip(a),
         } => ci_runs::schedule_skip(&a),

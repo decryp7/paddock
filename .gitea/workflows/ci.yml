@@ -1615,6 +1615,7 @@ jobs:
           # run's reached packages. Linux tests everything.
           TEST_FILTER: ${{ matrix.test_filter }}
           TEST_SKIP: ${{ matrix.test_skip }}
+          PADDOCK_TEST_COST_REPORT: ${{ runner.temp }}/test-cost-${{ github.run_id }}-${{ github.run_attempt }}.jsonl
         run: |
           # The plan's selection has no test of this workspace (its gates still run above): nothing to test, said, never a filter that selects none.
           if [ -z "$FILTER" ] && [ "$TEST_SKIP" = true ]; then echo "::notice::this run's selection holds no test of paddock-dev: nothing to test here"; exit 0; fi
@@ -1622,6 +1623,12 @@ jobs:
           if [ -n "$FILTER" ]; then echo "::notice::nextest runs only the selected tests (a rerun's failed tests, or the plan's smoke set or affected targets): $FILTER"; filter=(-E "$FILTER" --no-tests=warn)
           elif [ -n "$TEST_FILTER" ]; then echo "::notice::nextest filter (hostTests, and the packages this change reaches in a member run): $TEST_FILTER"; filter=(-E "$TEST_FILTER" --no-tests=fail); fi
           cargo nextest run --profile ci --locked --no-fail-fast ${filter[@]+"${filter[@]}"}
+
+      # ADR 0121, report-only (ER-41): the cost-class charges the tests recorded; a ::warning:: and a job-summary row per test outside its class.
+      - name: Test cost report
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' }}
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}
+        run: ./dev ci test-cost --report "$RUNNER_TEMP/test-cost-${{ github.run_id }}-${{ github.run_attempt }}.jsonl"
 
       # Licences, advisories, sources (tools/paddock-dev/deny.toml, the crates' rules); the image has cargo-deny.
       - name: Deny

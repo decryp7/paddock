@@ -1,12 +1,12 @@
 //! The migration net of ADR 0117 §8 (WP-5): what the repository model answers beside what the rule tables answer, recorded.
 //!
-//! - `recorded_rule_goldens`: one golden per migrated rule table and per difference category (`tests/golden/rules/<rule>.json`), on a
+//! - `graph_recorded_rule_goldens`: one golden per migrated rule table and per difference category (`tests/golden/rules/<rule>.json`), on a
 //!   small fixture repository built in the test with its own frozen inputs file: for each probe path, what the rule tables run when
 //!   only that file changes, what the model selects, and the category of every narrowing. A `category:` group is a positive control:
 //!   its probes must produce that category.
 //! - `recorded_content_rules`: the content rules (`guards_changed`, `lock_diff`, the `.gitattributes` extractor) on a table of
 //!   before and after texts (`tests/golden/rules/content.json`).
-//! - `train_replay_has_no_unlisted_narrowing`: every non-merge member commit of trains 15 to 20 against its parent on the real
+//! - `graph_train_replay_has_no_unlisted_narrowing`: every non-merge member commit of trains 15 to 20 against its parent on the real
 //!   tree, with no golden (nothing to re-bless when the tree moves); any narrowing no category of §8 explains fails, the defects of
 //!   WP-3's selection are pinned and may only shrink.
 //!
@@ -94,7 +94,7 @@ fn copy_extra(from: &Path, to: &Path) {
 }
 
 #[test]
-fn recorded_rule_goldens() {
+fn graph_recorded_rule_goldens() {
     let (_keep, root) = rules_fixture();
     let history = GitHistory::new(&root, Duration::from_secs(60));
     let graph = read_graph(&root, &history).unwrap();
@@ -249,7 +249,7 @@ fn replayed() -> Vec<Replayed> {
 /// The real tree, checked and not recorded: no golden, so nothing here is re-blessed when the tree moves. A narrowing no category of
 /// §8 explains fails; the report by category goes to the test's output.
 #[test]
-fn train_replay_has_no_unlisted_narrowing() {
+fn graph_train_replay_has_no_unlisted_narrowing() {
     let r = replayed();
     let bad = replay::unlisted(&r);
     assert!(
@@ -360,7 +360,7 @@ mod generators {
     }
 
     #[test]
-    fn a_script_a_generator_reads_makes_it_due_through_the_graph_and_the_control_removes_the_edge() {
+    fn graph_a_script_a_generator_reads_makes_it_due_through_the_graph_and_the_control_removes_the_edge() {
         let root = repo_root();
         let history = GitHistory::new(&root, Duration::from_secs(60));
         let graph_ = read_graph(&root, &history).unwrap();
@@ -397,7 +397,7 @@ mod generators {
     }
 
     #[test]
-    fn every_file_the_hand_lists_named_before_the_move_still_marks_its_generator() {
+    fn graph_every_file_the_hand_lists_named_before_the_move_still_marks_its_generator() {
         // The two paths WP-7 moved out of `paths` into `reads` (docs/generators.toml history: scripts/notices.sh in the three notices
         // entries, .gitea/workflows/ci.yml in the ci-run golden): the net for the migration of the hand lists.
         let root = repo_root();
@@ -419,7 +419,7 @@ mod generators {
     }
 
     #[test]
-    fn a_merge_is_stale_for_the_generators_both_sides_reach() {
+    fn graph_a_merge_is_stale_for_the_generators_both_sides_reach() {
         let root = repo_root();
         let history = GitHistory::new(&root, Duration::from_secs(60));
         let graph_ = read_graph(&root, &history).unwrap();
@@ -441,7 +441,7 @@ mod generators {
 /// plan that changes it answer everything (fail closed), so a new register is declared with the change that adds it (a merge of
 /// feat/shared-crate-dep-guard brought docs/shared-crate-features.toml without one). The positive control: the registers exist.
 #[test]
-fn every_register_under_docs_is_owned() {
+fn graph_every_register_under_docs_is_owned() {
     use paddock_repo_graph::History;
     let root = repo_root();
     let history = GitHistory::new(&root, Duration::from_secs(120));

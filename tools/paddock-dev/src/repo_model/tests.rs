@@ -615,7 +615,7 @@ fn every_extractor_reports_an_unresolvable_reference_and_the_plan_widens_to_its_
 /// Every declared smoke filterset names packages of its project's own Cargo workspace, and every declared smoke phase is a phase
 /// of its contract (a smoke set that names nothing would run nothing, ER-33). The control: a made-up package is found.
 #[test]
-fn every_declared_smoke_set_names_real_packages_and_phases() {
+fn graph_every_declared_smoke_set_names_real_packages_and_phases() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let history = paddock_repo_graph::GitHistory::new(&root, std::time::Duration::from_secs(120));
     let graph = crate::plan::read_graph_unplaced(&root, &history).unwrap();
@@ -880,7 +880,7 @@ fn the_contracts_are_read_at_the_requested_revision_not_the_working_tree() {
 /// tree with one would plan every change in full. The model's own reach over the checkout's tracked files names none; the control: a
 /// file at a path nothing claims is unowned.
 #[test]
-fn every_tracked_file_of_the_tree_has_an_owner_and_the_control_names_an_unclaimed_one() {
+fn graph_every_tracked_file_of_the_tree_has_an_owner_and_the_control_names_an_unclaimed_one() {
     let counter = paddock_env::starts::count_starts();
     let root = repo_root();
     let history = paddock_repo_graph::GitHistory::new(&root, std::time::Duration::from_secs(120));
@@ -948,7 +948,7 @@ fn every_tracked_file_of_the_tree_has_an_owner_and_the_control_names_an_unclaime
 /// Windows runner, run 8674; it starts 5 git processes whatever the tree holds, so the cost is work, not process starts). The
 /// control: `read_graph` over the same tree derives it, and the two read the same cargo and npm graphs.
 #[test]
-fn the_unplaced_graph_skips_the_os_placement_and_reads_the_same_graphs() {
+fn graph_the_unplaced_graph_skips_the_os_placement_and_reads_the_same_graphs() {
     let d = tempfile::tempdir().unwrap();
     let write = |path: &str, text: &str| {
         let p = d.path().join(path);

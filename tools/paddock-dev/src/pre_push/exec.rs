@@ -1164,6 +1164,7 @@ impl Exec for RealExec {
         if let Some(why) = harness_as_gate(&gate.program) {
             return Err(why);
         }
+        crate::test_cost::charge_argv("pre_push::exec (gate row)", &gate.program, &gate.args)?;
         let _ = std::fs::create_dir_all(&self.logs);
         let log = self.logs.join(format!("{}.log", log_name(&gate.id)));
         // Best-effort: the .id file only helps a reader; a failed write never stops the gate.

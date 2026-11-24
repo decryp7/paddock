@@ -173,6 +173,9 @@ impl Runner for Real {
                 tail: "no command".into(),
             };
         };
+        if let Err(tail) = crate::test_cost::charge_argv("locks::Real", program, args) {
+            return Ran { ok: false, tail };
+        }
         let mut cmd = command(program_for(
             program,
             &std::env::var("PATH").unwrap_or_default(),

@@ -74,7 +74,7 @@ fn tracked() -> Vec<String> {
 }
 
 #[test]
-fn a_shared_crate_marks_crates_and_every_app_whose_cargo_graph_reaches_it_rust_half_only() {
+fn graph_a_shared_crate_marks_crates_and_every_app_whose_cargo_graph_reaches_it_rust_half_only() {
     let r = run(&["crates/paddock-jobs/src/lib.rs"]);
     assert_eq!(r["crates"], true);
     assert_eq!(
@@ -92,7 +92,7 @@ fn a_shared_crate_marks_crates_and_every_app_whose_cargo_graph_reaches_it_rust_h
 }
 
 #[test]
-fn a_crate_nothing_else_uses_marks_only_crates_and_an_app_crate_only_its_app() {
+fn graph_a_crate_nothing_else_uses_marks_only_crates_and_an_app_crate_only_its_app() {
     let g = graph();
     let leaf = g
         .cargo
@@ -122,7 +122,7 @@ fn a_crate_nothing_else_uses_marks_only_crates_and_an_app_crate_only_its_app() {
 }
 
 #[test]
-fn the_e2e_port_and_build_guard_mark_the_ui_half_of_every_app() {
+fn graph_the_e2e_port_and_build_guard_mark_the_ui_half_of_every_app() {
     for f in ["ui/projects/paddock-e2e/src/env.ts", "ui/projects/paddock-e2e/src/build-guard.ts"] {
         let r = run(&[f]);
         for a in apps() {
@@ -132,7 +132,7 @@ fn the_e2e_port_and_build_guard_mark_the_ui_half_of_every_app() {
 }
 
 #[test]
-fn a_ui_change_marks_the_tauri_shells_that_embed_a_ui_build_both_halves() {
+fn graph_a_ui_change_marks_the_tauri_shells_that_embed_a_ui_build_both_halves() {
     let r = run(&["ui/projects/paddock-ui/shell/src/public-api.ts"]);
     assert_eq!(r["ui"], true);
     // Debrief maps @decryp7/paddock-ui and @decryp7/paddock-e2e to ui/dist in its tsconfig (package 0.4 of the 1.2 plan), as
@@ -148,7 +148,7 @@ fn a_ui_change_marks_the_tauri_shells_that_embed_a_ui_build_both_halves() {
 }
 
 #[test]
-fn a_generated_ui_file_marks_the_crate_that_checks_it_or_every_crate_when_none_does() {
+fn graph_a_generated_ui_file_marks_the_crate_that_checks_it_or_every_crate_when_none_does() {
     let r = run(&["ui/projects/paddock-ui/shell/generated/dialogs.ts"]);
     assert!(r["crates"] == true && r["ui"] == true);
     assert!(list(&r["packages"]["crates"]).contains(&"paddock-dialogs"));
@@ -161,7 +161,7 @@ fn a_generated_ui_file_marks_the_crate_that_checks_it_or_every_crate_when_none_d
 }
 
 #[test]
-fn an_apps_cargo_toml_and_capabilities_run_conformance_other_app_files_do_not() {
+fn graph_an_apps_cargo_toml_and_capabilities_run_conformance_other_app_files_do_not() {
     for f in [
         "apps/shell-demo/src-tauri/capabilities/dialog.json",
         "apps/shell-demo/src-tauri/Cargo.toml",
@@ -182,7 +182,7 @@ fn an_apps_cargo_toml_and_capabilities_run_conformance_other_app_files_do_not() 
 }
 
 #[test]
-fn a_per_machine_apps_installer_files_run_c91_and_the_shared_crates_sync_test() {
+fn graph_a_per_machine_apps_installer_files_run_c91_and_the_shared_crates_sync_test() {
     for f in [
         "apps/dyno/app/src-tauri/tauri.conf.json",
         "apps/dyno/app/src-tauri/tauri.windows.conf.json",
@@ -206,7 +206,7 @@ fn a_per_machine_apps_installer_files_run_c91_and_the_shared_crates_sync_test() 
 }
 
 #[test]
-fn uis_eslint_config_reaches_the_preset_and_docs_mark_only_the_link_check() {
+fn graph_uis_eslint_config_reaches_the_preset_and_docs_mark_only_the_link_check() {
     let r = run(&["eslint/src/preset.cjs"]);
     assert!(r["eslint"] == true && r["ui"] == true);
     // Built, not quoted: a contracts test fails on a quoted repo markdown path no DOC_INPUTS entry declares.
@@ -234,7 +234,7 @@ fn uis_eslint_config_reaches_the_preset_and_docs_mark_only_the_link_check() {
 }
 
 #[test]
-fn an_apps_rust_source_can_emit_a_cause_code_so_it_marks_ui_and_the_storage_cases_mark_dynos_rust_half() {
+fn graph_an_apps_rust_source_can_emit_a_cause_code_so_it_marks_ui_and_the_storage_cases_mark_dynos_rust_half() {
     let r = run(&["apps/dyno/app/src-tauri/src/health.rs"]);
     assert_eq!(r["ui"], true);
     assert!(list(&r["apps"]).contains(&"dyno") && list(&r["kinds"]["dyno"]).contains(&"rust"));
@@ -263,7 +263,7 @@ fn an_apps_rust_source_can_emit_a_cause_code_so_it_marks_ui_and_the_storage_case
 }
 
 #[test]
-fn global_inputs_mark_everything_an_unknown_root_file_too_and_editor_metadata_nothing() {
+fn graph_global_inputs_mark_everything_an_unknown_root_file_too_and_editor_metadata_nothing() {
     for f in ["rust-toolchain.toml", "package.json", ".npmrc", "tsconfig/base.json"] {
         let r = run(&[f]);
         for k in ["all", "crates", "ui", "eslint", "conformance", "tools"] {
@@ -287,7 +287,7 @@ fn global_inputs_mark_everything_an_unknown_root_file_too_and_editor_metadata_no
 }
 
 #[test]
-fn icons_conformance_scripts_ci_image_and_the_developer_tool_mark_what_they_feed() {
+fn graph_icons_conformance_scripts_ci_image_and_the_developer_tool_mark_what_they_feed() {
     assert_eq!(run(&["icons/shell-demo/shell-demo-macos-1024.png"])["apps"], json!(["shell-demo"]));
     assert_eq!(names(&run(&["icons/tools/build.mjs"])["apps"]), apps());
     assert_eq!(names(&run(&["conformance/src/checks/C03-icons.mjs"])["apps"]), apps());
@@ -327,7 +327,7 @@ fn icons_conformance_scripts_ci_image_and_the_developer_tool_mark_what_they_feed
 }
 
 #[test]
-fn scripts_mark_tools_and_ui_never_an_app_and_the_rust_inputs_only_the_rust_builds() {
+fn graph_scripts_mark_tools_and_ui_never_an_app_and_the_rust_inputs_only_the_rust_builds() {
     for f in ["scripts/publish.mjs", "scripts/new-app.test.mjs"] {
         let r = run(&[f]);
         assert_eq!(
@@ -372,7 +372,7 @@ fn scripts_mark_tools_and_ui_never_an_app_and_the_rust_inputs_only_the_rust_buil
 }
 
 #[test]
-fn every_tracked_files_projects_are_in_the_plan_and_no_app_outside_apps_appears() {
+fn graph_every_tracked_files_projects_are_in_the_plan_and_no_app_outside_apps_appears() {
     let known = apps();
     let files = tracked();
     for chunk in files.chunks(400) {
@@ -386,7 +386,7 @@ fn every_tracked_files_projects_are_in_the_plan_and_no_app_outside_apps_appears(
 }
 
 #[test]
-fn debrief_pacenotes_and_sighter_keep_their_own_shape() {
+fn graph_debrief_pacenotes_and_sighter_keep_their_own_shape() {
     let core = run(&["apps/debrief/crates/debrief-core/src/lib.rs"]);
     assert_eq!(
         (core["apps"].clone(), core["kinds"]["debrief"].clone(), core["crates"].clone()),
@@ -428,7 +428,7 @@ fn leg_rows(plan: &Value, opts: MatrixOpts, app: &str) -> Vec<Value> {
 }
 
 #[test]
-fn everything_gives_every_app_both_halves_on_linux_and_the_summary_names_each_leg() {
+fn graph_everything_gives_every_app_both_halves_on_linux_and_the_summary_names_each_leg() {
     let plan = plan_of(&[], true);
     let all = legs(&plan, MatrixOpts::default());
     let expected: Vec<String> = graph()
@@ -469,7 +469,7 @@ fn everything_gives_every_app_both_halves_on_linux_and_the_summary_names_each_le
 }
 
 #[test]
-fn a_pull_request_narrows_nextest_to_the_reached_crates() {
+fn graph_a_pull_request_narrows_nextest_to_the_reached_crates() {
     let lib = leg_rows(
         &run(&["apps/shell-demo/src-tauri/src/lib.rs"]),
         MatrixOpts {
@@ -498,7 +498,7 @@ fn a_pull_request_narrows_nextest_to_the_reached_crates() {
 }
 
 #[test]
-fn pitcrew_has_a_host_leg_per_os_with_the_rust_gates_only_and_a_ui_only_change_adds_none() {
+fn graph_pitcrew_has_a_host_leg_per_os_with_the_rust_gates_only_and_a_ui_only_change_adds_none() {
     let rust = leg_rows(
         &run(&["apps/pitcrew/crates/pitcrew-core/src/lib.rs"]),
         MatrixOpts::default(),
@@ -538,7 +538,7 @@ fn pitcrew_has_a_host_leg_per_os_with_the_rust_gates_only_and_a_ui_only_change_a
 }
 
 #[test]
-fn rust_checks_windows_clippy_and_last_packages_follow_the_apps_contract() {
+fn graph_rust_checks_windows_clippy_and_last_packages_follow_the_apps_contract() {
     let pw = leg_rows(
         &run(&["apps/pitwall/crates/pitwall-core/src/lib.rs"]),
         MatrixOpts::default(),
@@ -582,7 +582,7 @@ fn rust_checks_windows_clippy_and_last_packages_follow_the_apps_contract() {
 }
 
 #[test]
-fn spotters_e2e_runs_in_shards_and_a_webkit_leg_without_lengthening_the_main_leg() {
+fn graph_spotters_e2e_runs_in_shards_and_a_webkit_leg_without_lengthening_the_main_leg() {
     let spotter = graph().config("spotter");
     assert_eq!(spotter["e2eShards"], 2);
     assert!(list(&spotter["e2e"]).join("\n").contains("--shard=$E2E_SHARD"));
@@ -594,7 +594,7 @@ fn spotters_e2e_runs_in_shards_and_a_webkit_leg_without_lengthening_the_main_leg
 }
 
 #[test]
-fn a_tags_gates_keep_one_app_both_halves_and_no_other_project() {
+fn graph_a_tags_gates_keep_one_app_both_halves_and_no_other_project() {
     let only = only_app(&plan_of(&[], true), "pitcrew");
     assert_eq!(only["apps"], json!(["pitcrew"]));
     assert_eq!(only["kinds"], json!({"pitcrew": ["rust", "ui"]}));
@@ -887,7 +887,7 @@ fn every_ci_yml_job_is_in_the_job_table_and_asks_rerun_jobs() {
 }
 
 #[test]
-fn ci_yml_passes_every_field_of_a_matrix_leg_to_app_gates() {
+fn graph_ci_yml_passes_every_field_of_a_matrix_leg_to_app_gates() {
     let ci = std::fs::read_to_string(root().join(".gitea/workflows/ci.yml"))
         .unwrap()
         .replace("\r\n", "\n");
@@ -1048,7 +1048,7 @@ fn every_scheduled_workflow_skips_while_a_train_is_in_ci_and_never_marks_a_skipp
 }
 
 #[test]
-fn every_c100_input_glob_marks_conformance_on_the_real_tree_and_an_ordinary_file_does_not() {
+fn graph_every_c100_input_glob_marks_conformance_on_the_real_tree_and_an_ordinary_file_does_not() {
     let globs: Vec<&str> = paddock_dev::gates::inputs::GLOBS
         .iter()
         .copied()
@@ -1064,7 +1064,7 @@ fn every_c100_input_glob_marks_conformance_on_the_real_tree_and_an_ordinary_file
 }
 
 #[test]
-fn an_apps_notices_block_names_its_product_and_manifests_and_runs_on_the_linux_legs_only() {
+fn graph_an_apps_notices_block_names_its_product_and_manifests_and_runs_on_the_linux_legs_only() {
     for (name, config) in &graph().configs {
         if let Some(n) = config.get("notices").filter(|n| !n.is_null()) {
             assert!(

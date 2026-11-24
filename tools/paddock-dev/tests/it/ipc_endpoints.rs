@@ -531,7 +531,7 @@ fn the_check_and_the_harness_agree_on_names() {
 /// The repository's own register and ratchet, scanned against the repository's own sources: the push check in a test, so that
 /// CI runs it on every OS. It needs the whole tree (a sparse checkout without `apps/` cannot hold the register's files).
 #[test]
-fn the_repository_register_is_complete_and_the_ratchet_is_well_formed() {
+fn tree_the_repository_register_is_complete_and_the_ratchet_is_well_formed() {
     // Judged on progress, not on total time (ADR 0071): every source file read is a unit, so a slow disk passes and a scan that
     // reads no file for the stall limit does not. nextest's slow-timeout (`.config/nextest.toml`) is only the backstop.
     // conformance: hang-guard

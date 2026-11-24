@@ -219,6 +219,75 @@ failing mode.
 
 - **Notes:** the scope's `GRACE` is 2 s (`paddock_proc::FINISH_GRACE` itself since the WP-1 review): twice the worst kind measured (a script whose step is one second), equal to `paddock_proc::FINISH_GRACE`, and paid once per scope end, since every child is asked at once. A script with longer foreground steps is ended after the grace (reported as `ended`, not `asked`). The guardian's `SERVING_BOUND` (10 s) only meets a guardian stopped before its owner check (App Tamer, a debugger); a refused guardian answers at once with end of file. Windows is not measured: `ask` sends WM_CLOSE to a program's windows and a console program refuses it, so the end there is immediate for console children. Raw output: the test's `grace:` lines, not kept.
 
+### 2026-11-24, the conformance-line test of the CI model: main, the graph train and the cut (fix/graph-train-conformance-line-test-cost)
+
+- **Commits:** main d04af7b46, train/2026-11-23-graph fe331ca55, and the fix on top of it; debug test builds, `CARGO_BUILD_JOBS=2`
+- **Machine:** Mac mini, Apple M4 Pro, 14 cores, 64 GB, macOS 27.2, shared with two train CI runs: 1-minute load 42 to 121 (main
+  against train) and 24 to 32 (train against fix), so CPU time (user + sys, children included) is the measure and wall time an indication
+- **Command:** the lib test binary run directly, `--exact ci_run::tests::adding_a_check_changes_no_golden_row_but_the_rest_of_the_conformance_line_does --test-threads 1`, under `/usr/bin/time -p`, 5 interleaved rounds per pair; a `sample` of one train run for where the time goes
+- **Where the time goes (train):** 91% of the test thread in `gates::ci::build` (the walk of every step of every job, per matrix leg);
+  the test built the whole model four times and reads only ci.yml's rows
+- **Main against train:** CPU 10.1-11.8 s (median 10.5) against 11.4-12.4 s (median 11.7), +11%. The train's model code adds two leg keys
+  and a `hostTests` read per app; the rest is real new work, the steps the train added to the workflows (text +6.3%, 494 to 525 KB of
+  workflows and actions; ci.yml +160 lines, debrief.yml +86), multiplied by the matrix legs. No repeated parse, `cargo metadata` or git start
+- **Train against fix:** CPU 8.3-9.4 s (median 8.7) against 4.7-5.1 s (median 4.9), -44%: `rows_of` builds the model from ci.yml alone
+  (every action and contract kept) and the test keeps one full build as the control that the narrowing loses no row. So the other
+  workflows were about 70% of each build. Alone on the CI Mac runner the test took 12.6 s (run 8838); beside two heavy jobs it was stopped
+  at 60 s on both tries (jobs 47411, 47644)
+
+### 2026-11-24, test cost classes (feat/test-cost-classes, ADR 0121)
+
+- **Commit:** train/2026-11-23-graph at fe331ca55 with this change; before = the train's `tools/paddock-dev/.config/nextest.toml`
+  (per-name waivers and the `repo-graph` filter, `--config-file`), after = the class table. The same build and binaries for both
+  (debug test profile, `CARGO_BUILD_JOBS=2`)
+- **Machine:** Mac mini, Apple M4 Pro, 14 cores, 64 GB, macOS 27.2, shared with the graph train's CI jobs and other agents. Load sampled
+  every 30 s during each run (1-minute load average): before min 30.5, median 41.9, max 57.3 (19 samples); after min 32.0, median 38.9,
+  max 47.2 (11 samples). A first after run with an earlier inventory ran at median 59.5 (max 105.6) and is used only for the inventory
+- **Command:** `NEXTEST_TEST_THREADS=8 cargo nextest run --profile ci --locked --no-fail-fast` (8 = the macOS runner's test threads,
+  build-jobs) in tools/paddock-dev, with a `cargo` first on PATH that logged each `metadata` call with its test and `NEXTEST_TEST_GROUP`,
+  and `PADDOCK_TEST_COST_REPORT` set (the charge report)
+- **Runs:** 1 before, 1 after (final tree); n = 1 each, so the numbers are an indication of the shape, not a distribution
+- **Numbers:**
+
+| | before | after |
+|---|---|---|
+| suite wall time | 556 s (2588 tests; 2 FLAKY whole-tree tests that hit the 60 s stop on try 1, plus 3 failures of this change's own new tests and audit under the old config) | 306 s, 2588 passed, 0 FLAKY |
+| graph class (44 tests): sum, max, median, over 30 s | 754 s, 146.9 s, 8.5 s, 8 | 408 s, 79.2 s, 7.3 s, 1 |
+| tree class (29 tests): sum, max, median, over 30 s | 655 s, 59.1 s, 18.3 s, 7 | 269 s, 41.4 s, 7.8 s, 1 |
+| unclassed (2501): sum, max | 1158 s, 23.3 s | 902 s, 16.3 s |
+| `ci_run::tests::..._conformance_line_does` (runs 8830, 8843) | 59.1 s (1 s from its stop) | 11.6 s (12.6 s alone, per the coordinator) |
+| `repo_model::code::tests::on_the_real_tree_...` | 32.5 s | 10.1 s |
+| `check_engine::this_working_tree_...` | 54.0 s | 11.1 s |
+| `repo_graph_net::train_replay_...` | 146.9 s | 79.2 s |
+| `cargo metadata` calls outside `repo-graph` (shim) | 0 of 1028 | 0 of 1028 |
+| charges recorded / outside their group | n/a | 1032 / 0 (4 more than the shim: two `pre_push::tests` run cargo in a child whose environment the test replaces) |
+
+- **Inventory (the first after run, median load 59.5):** the class table without the `pre_push::` module in a group: the eight
+  `tests/it` `pre_push::` tests that start `./dev check --pre-push` over the real tree took 22 to 52 s (6 to 30 s before, in the old
+  group), so they joined the tree class; the charge named the two `src` `pre_push::tests` above. `./dev ci test-cost` on the final run:
+  one unclassed test over a quarter of its stop, `golden::ci_plan_declares_a_scope_...` 16.3 s (a fixture plan, not the real tree; a
+  fix item, not a class).
+- **Not measured:** Linux and Windows (the landing run of the train with this change, read with `./dev ci test-cost --run <id>`, is the
+  first; run 8838 Windows had `on_the_real_tree_` at 29.8 s alone); more than one run per side.
+
+### 2026-11-24, which paddock-dev tests run `cargo metadata`, and the repo-graph group (fix/graph-train-r5-repo-graph-group)
+
+- **Commit:** 47a27bf1f (train/2026-11-23-graph) before, the same with the new `tools/paddock-dev/.config/nextest.toml` after
+- **Machine:** Mac mini, Apple M4 Pro, 14 cores, 64 GB, macOS 27.2; shared with other agents and CI. 1-minute load 8 to 13 during the
+  run before, 29 to 36 during the run after, so the wall times are an indication, not an A/B
+- **Command:** `cargo nextest run --profile ci --test-threads 6 --no-fail-fast` (paddock-dev, every binary, debug build,
+  `CARGO_BUILD_JOBS=2`) with a `cargo` first on PATH that logged each `metadata` call (manifest, the test that started it, found as the
+  ancestor process started with `--exact`, and the test's `NEXTEST_TEST_GROUP`), then ran the real cargo unchanged
+- **Runs:** 1 before, 1 after
+- **Numbers:** 2576 tests, all passed both times; 1028 `cargo metadata` calls both times, none from an unknown test. Before: 15 tests
+  outside the group made calls: 7 over the real tree's 25 workspaces (`repo_model::code::tests::on_the_real_tree_` 9.7 s,
+  `repo_model::tests::every_declared_smoke_set_` 1.3 s, `repo_graph_net::every_register_under_docs_is_owned` 9.1 s, its three
+  `generators::` tests 8.1 to 11.1 s, `repo_graph_net::train_replay_` 98.4 s) and 8 over fixture trees (2 to 16 calls, 0.2 to 5.4 s).
+  After: 0 calls outside the group. Those 15 tests took 417 s in all before and 499 s after (the load was about three times higher);
+  `on_the_real_tree_` 9.7 s to 7.5 s. Suite wall time 297.8 s before, 389.9 s after (load, and the group's two slots)
+- **Not measured:** Windows, where the test was FLAKY (job 47457: stopped at 60 s, then 23.4 s); the landing run on the new head is the
+  check
+
 ### 2026-11-24, the repository model's ownership test: where the time goes, and the cut (fix/owner-test-windows-cost)
 
 - **Commit:** 727810fe9 (train/2026-11-23-graph) against the fix, both built as the test profile (debug), `CARGO_BUILD_JOBS=2`

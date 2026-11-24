@@ -821,6 +821,19 @@ fn graph_root(resolved: &Path, os: paddock_env::Os) -> Result<(PathBuf, String),
     Ok((PathBuf::from(&text), text))
 }
 
+/// The `cargo metadata` port with the cost-class charge in front of every run (ADR 0121).
+struct Charged<'a>(&'a dyn paddock_repo_graph::CargoMetadata);
+
+impl paddock_repo_graph::CargoMetadata for Charged<'_> {
+    fn metadata(&self, manifest: &str) -> Result<String, GraphError> {
+        crate::test_cost::charge(crate::test_cost::Class::Graph, "plan::read_graph").map_err(|reason| GraphError::Metadata {
+            manifest: manifest.to_string(),
+            reason,
+        })?;
+        self.0.metadata(manifest)
+    }
+}
+
 /// Reads the graphs of the repository at `root` (tracked files only, as `git ls-files` lists them).
 pub fn read_graph(root: &Path, history: &dyn History) -> Result<RepoGraph, GraphError> {
     read_graph_placing(root, history, true)
@@ -841,7 +854,10 @@ fn read_graph_placing(root: &Path, history: &dyn History, place: bool) -> Result
     let root = root.as_path();
     let disk = DiskFiles(root.to_path_buf());
     let cli = CargoCli::new(root, TIMEOUT);
-    let recording = paddock_repo_graph::Recording::new(&cli);
+    // ADR 0121: each `cargo metadata` run is charged to the test's `graph` cost class, at the run itself (a fixture with no workspace
+    // starts none and is charged nothing).
+    let charged = Charged(&cli);
+    let recording = paddock_repo_graph::Recording::new(&charged);
     let cargo = cargo_graph(&files, &disk, &recording, &root_text)?;
     let apps = apps_of(&files);
     let mut configs = BTreeMap::new();
