@@ -1287,9 +1287,6 @@ mod tests {
         assert_eq!(w["apps"], json!(["dyno"]));
         assert_eq!(plan(&["docs/rules.md"])["conformance"], true);
         assert_eq!(plan(&["docs/rules.md"])["docs"], false);
-        // the retired wiki's pages (ER-30) are prose: no tool lints them, so they mark no tool job
-        let p = plan(&["docs/wiki/index.md"]);
-        assert_eq!((&p["tools"], &p["crates"], &p["all"]), (&json!(false), &json!(false), &json!(false)));
         // the hooks' tests run in the tools job: a hook, places.rs (their parity test) or the copies register marks it, and no more
         for f in [
             ".claude/hooks/worktree-guard.py",

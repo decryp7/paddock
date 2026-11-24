@@ -970,8 +970,6 @@ impl SincePlan {
         out.extend([
             ("apps".into(), serde_json::to_string(&app_legs).unwrap_or_default()),
             ("any_app".into(), (!app_legs.is_empty()).to_string()),
-            // The commit lint, when it reruns, lints what came after the failed run.
-            ("base".into(), self.head.clone()),
             ("rerun_jobs".into(), serde_json::to_string(&keys).unwrap_or_default()),
         ]);
         // Written only for a job that reruns with known legs; otherwise the plan step writes every OS (ci.yml).
@@ -1399,9 +1397,9 @@ mod tests {
         assert_eq!(out["ui"], "true");
         assert_eq!(out["conformance"], "true");
         assert_eq!(out["tools"], "false", "passed jobs are not rerun");
-        assert_eq!(out["icons"], "false");
+        // The failed ui job reruns its icons and ESLint preset steps too (they are steps of it since 2026-11-24).
+        assert_eq!(out["icons"], "true");
         assert_eq!(out["paddock_dev"], "false");
-        assert_eq!(out["base"], "f1d7e0791f250c88dacd318f7caebf1dcf066cdf");
         assert_eq!(out["rerun_jobs"], r#"["app","conformance","crate","crates","e2e","ui"]"#);
         assert!(!out.contains_key("paddock_dev_legs"), "not rerun: the plan step writes every leg");
         let crate_legs: Value = serde_json::from_str(&out["crate_legs"]).unwrap();

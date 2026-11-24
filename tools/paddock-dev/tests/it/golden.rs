@@ -456,8 +456,9 @@ fn declared_scope(env: &[(&str, &str)]) -> (paddock_dev::run_scope::Declared, St
     (declared, std::fs::read_to_string(dir.path().join("out")).unwrap_or_default())
 }
 
-/// ADR 0113: what a ci.yml plan declares for each kind of run, read back by the one reader. A push to main, a full dispatch with
-/// WebKit and a tag are complete; every smaller scope is not, each missing one dimension (positive controls: the same tree).
+/// ADR 0113: what a ci.yml plan declares for each kind of run, read back by the one reader. A push to main, a full dispatch (with
+/// or without WebKit: a push to main's scope has none since 2026-11-24) and a tag are complete; every smaller scope is not, each
+/// missing one dimension (positive controls: the same tree).
 #[test]
 fn ci_plan_declares_a_scope_that_is_complete_only_when_it_covers_a_push_to_main() {
     let push = [("GITHUB_EVENT_NAME", "push"), ("GITHUB_REF", "refs/heads/main")];
@@ -466,56 +467,43 @@ fn ci_plan_declares_a_scope_that_is_complete_only_when_it_covers_a_push_to_main(
         e.extend_from_slice(extra);
         declared_scope(&e).0
     };
-    // Complete: a push to main (WebKit always), a full dispatch with the webkit input, a tag.
+    // Complete: a push to main (no WebKit, no reference-app browser jobs: the nightly's), a full dispatch, a tag (which runs them).
     let main = declared_scope(&push).0;
     assert_eq!(main.complete(), Ok(()), "{}", main.line());
     assert!(
-        main.need.engines.contains("webkit") && main.ran.engines.contains("webkit"),
+        !main.need.engines.contains("webkit") && !main.ran.engines.contains("webkit") && !main.ran.jobs.contains("e2e"),
         "{}",
         main.line()
     );
+    assert_eq!(dispatch(&[]).complete(), Ok(()), "a train's full dispatch without WebKit");
     assert_eq!(dispatch(&[("PLAN_WEBKIT", "1")]).complete(), Ok(()));
-    assert_eq!(
-        declared_scope(&[("GITHUB_EVENT_NAME", "push"), ("GITHUB_REF", "refs/tags/v1.0.0")])
-            .0
-            .complete(),
-        Ok(())
+    let tag = declared_scope(&[("GITHUB_EVENT_NAME", "push"), ("GITHUB_REF", "refs/tags/v1.0.0")]).0;
+    assert_eq!(tag.complete(), Ok(()));
+    assert!(
+        tag.ran.engines.contains("webkit") && tag.ran.jobs.contains("e2e-webkit"),
+        "{}",
+        tag.line()
     );
-    // One engine missing: the same full dispatch without the webkit input (the D4 hole).
-    let no_webkit = dispatch(&[]);
-    assert!(no_webkit.complete().unwrap_err().contains("engines webkit"), "{}", no_webkit.line());
     // One app (and its legs) missing: a dispatch with `app` is that app only, with or without WebKit.
     let app_only = dispatch(&[("PLAN_APP", "x"), ("PLAN_WEBKIT", "1")]);
     assert!(app_only.complete().unwrap_err().contains("apps "), "{}", app_only.line());
     // A member run (a base) covers less than the whole tree even with WebKit.
     let member = dispatch(&[("PLAN_BASE", "fixture-head"), ("PLAN_WEBKIT", "1")]);
     assert!(member.complete().is_err(), "{}", member.line());
-    // A landing run (ADR 0117 WP-8): the train's diff from main's last complete commit, WebKit on, no member base. It needs what a
-    // push to main does for this change, so it is complete; the same diff as a member run (`base`) is not, and a landing run that
-    // lost its WebKit is not either (positive controls).
-    let (landing, landing_out) = declared_scope(&[
+    // A landing run (ADR 0117 WP-8): the train's diff from main's last complete commit, no member base. It needs what a push to main
+    // does for this change, so it is complete; the same diff as a member run (`base`) is not (positive control).
+    let (landing, _) = declared_scope(&[
         ("GITHUB_EVENT_NAME", "workflow_dispatch"),
         ("GITHUB_REF", "refs/heads/topic"),
         ("PLAN_LANDING_BASE", "fixture-base"),
-        ("PLAN_WEBKIT", "1"),
     ]);
     assert_eq!(landing.complete(), Ok(()), "{}", landing.line());
-    // It planned the diff (the base is the planner's, which the commit lint also reads), not everything (G1).
-    assert!(landing_out.lines().any(|l| l == "base=fixture-base"), "{landing_out}");
+    // It planned the diff (its need names the base it was diffed from), not everything (G1).
+    assert_eq!(landing.base.as_deref(), Some("fixture-base"), "{}", landing.line());
     assert!(
-        dispatch(&[("PLAN_LANDING_BASE", "fixture-base")])
+        dispatch(&[("PLAN_LANDING_BASE", "fixture-base"), ("PLAN_BASE", "fixture-head")])
             .complete()
-            .unwrap_err()
-            .contains("engines webkit")
-    );
-    assert!(
-        dispatch(&[
-            ("PLAN_LANDING_BASE", "fixture-base"),
-            ("PLAN_BASE", "fixture-head"),
-            ("PLAN_WEBKIT", "1")
-        ])
-        .complete()
-        .is_err()
+            .is_err()
     );
     // A reused run ran nothing; it also switches every job off.
     let (reused, outputs) = declared_scope(&[
