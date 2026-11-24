@@ -3896,3 +3896,28 @@ pitcrew-service). The mini rig already wrote everything before it let its endpoi
 **Class: a test or harness whose outcome depended on which thread ran first** (earlier: run 8174's `owner-close-while-peer-not-reading`
 in the same harness, the Debrief Stop-button probe and the row-menu e2e, all above). Second instance in the endings harness: a scenario's
 precondition (here, input unread at the close) was assumed, not established before the endpoint acted.
+
+## Pre-push row reuse lost passes and saw dev's environment on macOS: two causes (fix/check-result-reuse-v2-macos, 2026-11-25)
+Symptoms (paddock-dev on macOS, Linux green; train d pulled feat/check-result-reuse-v2 for them, 7c58c4008):
+`pre_push::reuse::tests::a_changed_input_runs_that_row_again` failed with "the green result of fmt other was not stored for reuse: No
+such file or directory", and `it pre_push::tree_a_run_never_sees_the_machines_environment_or_takes_a_real_slot` with "the child saw
+variables nobody listed: [__CF_USER_TEXT_ENCODING, ...]".
+- **Concurrent writers shared one temporary name.** reuse.rs had its own `write_atomic` that named the temporary file
+  `.tmp-<pid>-<unix seconds>`. The pre-push workers store their passes from several threads of one process, so two stores in one
+  second wrote the same temporary file: one rename moved the other row's bytes under its own key, the second found no file, and both
+  passes were lost. Fix: the shared `paddock_env::write_atomic` (ER-22: a per-process counter in the name, one writer at a time);
+  eviction matches its temporary names. Regression test `passes_stored_at_once_by_parallel_workers_all_land`, red before the fix.
+- **A probe inherited dev's environment.** The version probes (`cargo --version`, `rustc -vV`, `node --version`, `docker --version`)
+  started through a bare `paddock_proc::command`, which inherits the process's environment; the gates start through `ToolCall`, with
+  the run's variables filtered by the named policy (ER-47, ADR 0100). macOS CoreFoundation adds `__CF_USER_TEXT_ENCODING` to dev's own
+  environment, so the probe saw it. Fix: the probe is a `ToolCall` under the gates' PASS list.
+- **Class (ER-21).** (1) A local copy of a shared mechanism (an atomic write) that lacked what the shared one had: a share-first miss.
+  (2) A child started outside the one environment policy. Both showed only on macOS, so the train now runs the full nextest ci profile
+  of every touched workspace on macOS and in the Linux CI image before a member stays (train d's retro). Train 2026-11-26-e reapplied
+  the pulled work as a revert of the revert, then merged these fixes: paddock-dev 2444 of 2444 on macOS and in the CI image.
+
+## Fix item: a FLAKY watch test on macOS in run 9011 (2026-11-25)
+`paddock-watch::it native::a_real_folder_change_reaches_the_action_and_a_recursive_watch_sees_sub_folders` was FLAKY on macOS in ci.yml
+run 9011 (failed once, passed on its retry; flaky-as-failure kept the run red, ER-12). Not fixed on train 2026-11-26-e: a fix item for
+paddock-watch's owner, which starts with a reproduction under load and the list of causes with what rules each out (ER-28). No sleep or
+raised timeout as the fix.
