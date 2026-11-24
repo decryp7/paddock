@@ -547,7 +547,7 @@ fn check(req: &Request) -> Result<Checked, CliError> {
                 ))
             } else {
                 generator_step::run(&root, &git, &merge, &crate::generators::run::Real::new(&root), &|l| {
-                    eprintln!("{l}")
+                    crate::log_text::eline(l)
                 })
             };
             let mut steps = Steps::default();

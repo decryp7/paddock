@@ -226,7 +226,7 @@ pub fn command(a: &CheckArgs) -> Result<Report, CliError> {
         })
     };
     check_with_due(&reg, &root, &changed, &graph_due, a.all, &a.only, &run::Real::new(&root), &|l| {
-        eprintln!("{l}")
+        crate::log_text::eline(l)
     })
 }
 

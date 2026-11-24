@@ -799,7 +799,7 @@ pub fn flakes(a: &FlakesArgs) -> Result<Report, CliError> {
         preconditions,
         config_source,
     };
-    let report = flakes::collect(&mut client, &req, &mut |l| eprintln!("{l}")).map_err(|e| {
+    let report = flakes::collect(&mut client, &req, &mut |l| crate::log_text::eline(l)).map_err(|e| {
         CliError::failure(format!("the runs of {} could not be listed: {e}", a.repo))
             .with_hint("Check the network, that GITEA_TOKEN can read the repository, and --until.")
     })?;
@@ -1260,7 +1260,7 @@ pub fn triage(a: &TriageArgs) -> Result<Report, CliError> {
         repo: a.repo.clone(),
         now_secs: time::now_secs(),
     };
-    let report = triage::collect(&mut client, &req, &mut |l| eprintln!("{l}")).map_err(|e| {
+    let report = triage::collect(&mut client, &req, &mut |l| crate::log_text::eline(l)).map_err(|e| {
         CliError::failure(format!("run {} could not be triaged: {e}", a.run))
             .with_hint("Check the network, that GITEA_TOKEN can read the repository, and that the run has finished.")
     })?;
@@ -1306,7 +1306,7 @@ pub fn timings(a: &TimingsArgs) -> Result<Report, CliError> {
     for repo in a.repos.split(',').filter(|r| !r.is_empty()) {
         eprintln!("{repo} ...");
         let mut client = Client::new(&mut http, server, &format!("{owner}/{repo}"), &token);
-        let mut log = |l: &str| eprintln!("{l}");
+        let mut log = |l: &str| crate::log_text::eline(l);
         let mut src = timings::Source {
             client: &mut client,
             cache: a.cache.as_deref().filter(|_| !a.no_logs),

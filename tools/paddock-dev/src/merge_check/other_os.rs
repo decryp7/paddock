@@ -575,7 +575,7 @@ impl Runs for Gitea {
                 repo: self.repo.clone(),
                 now_secs: time::now_secs(),
             };
-            triage::collect(&mut c, &req, &mut |l| eprintln!("{l}"))?
+            triage::collect(&mut c, &req, &mut |l| crate::log_text::eline(l))?
         };
         let http: &mut dyn Http = &mut self.http;
         Ok(failures_of(&report, run, http, &self.server, &self.repo, &self.token))
