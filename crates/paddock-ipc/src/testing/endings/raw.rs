@@ -130,13 +130,42 @@ pub fn read_to_end(stream: &mut dyn RawStream, guard: Duration) -> RawEnd {
     }
 }
 
+/// The junk bytes [`send_then_keep_writing`] puts in the same write as the first frame or line: small enough for one write to
+/// an empty socket or pipe buffer on every OS (one segment on loopback TCP, one queued buffer on a Unix socket).
+pub const JUNK_WITH_FIRST: usize = 1024;
+
+/// A client that keeps writing after it was refused ([`super::Scenario::ClientKeepsWriting`]): writes `first` (its hello),
+/// then junk until `total` junk bytes went out or the peer ended the connection. Returns the junk bytes written; an error
+/// only when `first` could not be written.
+///
+/// The first junk bytes go out in the same write as `first`, so they are in the endpoint's receive queue before the endpoint
+/// can read `first` and refuse: an endpoint that does not drain always closes with input unread, the scenario's premise.
+/// Written apart, the endpoint could read the hello, refuse and close before the junk arrived; nothing was then unread, and
+/// on Linux the stream ended in order instead of with a reset (CI run 9001: "stale ratchet entry I10").
+pub fn send_then_keep_writing(
+    stream: &mut dyn RawStream,
+    first: &[u8],
+    total: usize,
+) -> io::Result<usize> {
+    let with_first = total.min(JUNK_WITH_FIRST);
+    let mut opening = Vec::with_capacity(first.len() + with_first);
+    opening.extend_from_slice(first);
+    opening.resize(first.len() + with_first, JUNK_BYTE);
+    stream.write_all(&opening)?;
+    Ok(with_first + write_junk(stream, total - with_first))
+}
+
+/// The byte a client that keeps writing sends.
+const JUNK_BYTE: u8 = 0x5a;
+
 /// Writes `junk` to `stream` in chunks until `total` bytes went out or a write fails (the peer ended the connection, which
 /// is the point of the scenario, not an error). Returns the bytes written.
 pub fn write_junk(stream: &mut dyn RawStream, total: usize) -> usize {
-    let chunk = [0x5au8; 4096];
+    let chunk = [JUNK_BYTE; 4096];
     let mut written = 0;
     while written < total {
-        match stream.write(&chunk) {
+        let want = chunk.len().min(total - written);
+        match stream.write(&chunk[..want]) {
             Ok(0) | Err(_) => break,
             Ok(n) => written += n,
         }

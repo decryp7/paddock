@@ -99,6 +99,65 @@ fn a_broken_endpoint_that_a_scenario_cannot_see_is_not_blamed_there() {
     );
 }
 
+/// A stream that records each write call and reads nothing.
+#[derive(Default)]
+struct Recorder {
+    writes: Vec<Vec<u8>>,
+}
+
+impl std::io::Read for Recorder {
+    fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
+        Ok(0)
+    }
+}
+
+impl std::io::Write for Recorder {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.writes.push(buf.to_vec());
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl endings::raw::RawStream for Recorder {
+    fn set_read_timeout(&mut self, _: Option<std::time::Duration>) -> std::io::Result<()> {
+        Ok(())
+    }
+    fn shutdown_write(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+/// Regression (CI run 9001, Linux: "stale ratchet entry I10: ipc-host / client-keeps-writing: reset no longer happens"): the
+/// scenario's premise is that the endpoint closes with the client's later bytes unread. When the hello and the junk went out
+/// in separate writes, the host could read the hello, refuse and close before the first junk write arrived, so nothing was
+/// unread and Linux ended the stream in order instead of with a reset. The junk must travel in the same write as the hello,
+/// so it is in the endpoint's receive queue before the endpoint can read the hello and act on it.
+#[test]
+fn a_client_that_keeps_writing_sends_junk_in_the_same_write_as_its_hello() {
+    let hello = b"HELLO bad\n";
+    let mut rec = Recorder::default();
+    let junk = endings::raw::send_then_keep_writing(&mut rec, hello, endings::KEEP_WRITING_BYTES)
+        .expect("a recorder takes every write");
+    let first = rec.writes.first().expect("something was written");
+    assert!(
+        first.starts_with(hello) && first.len() > hello.len(),
+        "the first write carried {} bytes, the hello alone is {}: junk written separately can arrive after the endpoint \
+         read the hello and closed, and then nothing is unread at the close (CI run 9001)",
+        first.len(),
+        hello.len()
+    );
+    assert_eq!(
+        junk,
+        endings::KEEP_WRITING_BYTES,
+        "every junk byte is written"
+    );
+    let total: usize = rec.writes.iter().map(Vec::len).sum();
+    assert_eq!(total, hello.len() + endings::KEEP_WRITING_BYTES);
+}
+
 #[test]
 fn the_ratchet_reads_its_file_and_only_shrinks() {
     let text = r#"
