@@ -1,5 +1,8 @@
 # Merge queue on the branch ledger (design note)
 
+**Parked 2026-11-24 (user).** Trains are built by hand with the member gate (`./dev merge check --gates`); `./dev queue` and
+`./dev pr` stay in the tool but nothing runs them, and their tests are out of CI's nextest profile.
+
 Status: design note, 2026-11-12. Built: the ledger (slice 0) and `./dev queue tick|hold|unhold` (slices 1 to 3 and the landing without rule 54, plan-status and tags: `tools/paddock-dev/src/queue/`). A pull request is taken only with an approving review of its current head and no `owes/*` label; main moves only when every reached workflow has a full green run; the gates run without the queue's credentials. Not built: the Windows leg, the rule 54 dispatch, auto-tag and queue.yml (slices 2, 4, 5 and 6 in part). Owner of `.gitea/` for this work: the integrator.
 Inputs: the user's decisions of 2026-11-12 (below), the tools research of 2026-11-12
 (`dev-targets/review-scratch/tools-research-2026-11-12.md`, candidates 3 to 5), rule 50, rule 54, ER-8, ER-10, ER-31,
