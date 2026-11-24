@@ -1995,11 +1995,29 @@ fn a_train_whose_main_moved_is_rebuilt_even_when_its_pull_requests_did_not_chang
     );
 }
 
-// ---- the gates the tick no longer runs are jobs of the dispatched workflow ------------------------------------------------------------
+// ---- the workflow the tick dispatches -------------------------------------------------------------------------------------------------
 
 /// ci.yml as the tests read it: a Windows checkout has CRLF line endings (`core.autocrlf`), and every search below is for `\n`.
 fn ci_yml() -> String {
     include_str!("../../../../.gitea/workflows/ci.yml").replace("\r\n", "\n")
+}
+
+#[test]
+fn ci_yml_is_read_only_and_its_checkouts_keep_no_credentials() {
+    let ci = ci_yml();
+    let top = ci.split("\njobs:\n").next().unwrap();
+    assert!(
+        top.contains("\npermissions:\n  contents: read\n  actions: read\n"),
+        "workflow-level read-only permissions"
+    );
+    let checkouts = ci.matches("uses: actions/checkout@v4").count();
+    assert!(checkouts > 0);
+    assert_eq!(
+        ci.matches("persist-credentials: false").count(),
+        checkouts,
+        "every checkout drops its credentials, as tag.yml's does"
+    );
+    // Repeated keys (run 7998: two `with:` in a checkout step) are C111's: it parses every workflow with unique keys.
 }
 
 // ---- a train is a train only when its structure says so -------------------------------------------------------------------------------

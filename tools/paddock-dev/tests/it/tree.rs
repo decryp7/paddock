@@ -755,7 +755,7 @@ fn ci_yml_wires_the_plan_job_outputs_and_the_commits_job_asks_for_its_range() {
     let plan_job = &wf.jobs.iter().find(|(k, _)| k == "plan").unwrap().1;
     let declared = regex::Regex::new(r"(?m)^ {6}([a-z0-9_]+): \$\{\{ steps\.plan\.outputs\.([a-z0-9_]+) \}\}").unwrap();
     // The graph planner also writes its narrowed projects (`selection`) and `partial` (plan_graph::OUTPUTS).
-    let written: Vec<String> = paddock_dev::plan_ci::ci_outputs(&json!({}), &[], None)
+    let written: Vec<String> = paddock_dev::plan_ci::ci_outputs(&json!({}), &[])
         .into_iter()
         .map(|(k, _)| k)
         .chain(paddock_dev::plan_graph::OUTPUTS.iter().map(|k| k.to_string()))
@@ -864,7 +864,10 @@ fn every_ci_yml_job_is_in_the_job_table_and_asks_rerun_jobs() {
     // The reference e2e jobs run in a rerun of their failure even without the planner's webkit output.
     for job in ["e2e-webkit", "e2e"] {
         let text = &wf.jobs.iter().find(|(k, _)| k == job).unwrap().1;
-        assert!(text.contains(&format!("|| contains(fromJSON(needs.plan.outputs.rerun_jobs || '[]'), '{job}')")), "{job}");
+        assert!(
+            text.contains(&format!("|| contains(fromJSON(needs.plan.outputs.rerun_jobs || '[]'), '{job}')")),
+            "{job}"
+        );
     }
     // The matrices read their legs from the plan step, which writes every OS when it plans no rerun of them.
     for (job, output) in [("crate", "crate_legs"), ("paddock-dev", "paddock_dev_legs")] {
