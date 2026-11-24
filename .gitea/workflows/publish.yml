@@ -33,8 +33,15 @@ jobs:
       RUSTUP_TOOLCHAIN: stable
       # A release job (v* tag): ./dev ci steps never download a stored tool binary here (conformance/ci/kit.sh keeps the shell scripts too).
       PADDOCK_DEV_DOWNLOAD: "0"
+      # scripts/npm-audit.test.mjs (npm run test:scripts) measures its allow list's growth against this base (ER-46); a base it cannot read fails the test as
+      # not measured (runs 8327, 8807: a one-commit checkout has no merge base). Conformance C167 checks it.
+      PADDOCK_BASE_REF: origin/main
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          # The history for PADDOCK_BASE_REF and its merge base.
+          fetch-depth: 0
 
       # CARGO_BUILD_JOBS: this runner's share of the host (`./dev ci build-jobs` through conformance/ci/kit.sh; each runner class's layout is in ci_build_jobs.rs: Linux 6 jobs on 30 cores).
       - uses: ./.gitea/actions/build-jobs

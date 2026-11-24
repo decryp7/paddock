@@ -62,6 +62,7 @@ import C140 from './C140-per-item-opt-outs.mjs';
 import C143 from './C143-spawn-joined-path.mjs';
 import C144 from './C144-bare-stream-wait.mjs';
 import C156 from './C156-axe-scan-held-still.mjs';
+import C167 from './C167-growth-test-history.mjs';
 
 /** Every check, in id order. A check is { id, title, rule, run(ctx) -> findings[] | Promise<findings[]> }. */
-export const checks = [C03, C04, C06, C07, C08, C13, C14, C15, C16, C23, C24, C28, C29, C30, C31, C32, C33, C34, C35, C36, C37, C43, C45, C48, C50, C51, C54, C56, C57, C59, C61, C62, C71, C78, C79, C85, C91, C98, C99, C104, C110, C111, C112, C113, C114, C115, C116, C117, C118, C126, C127, C128, C133, C135, C136, C137, C138, C139, C140, C143, C144, C156];
+export const checks = [C03, C04, C06, C07, C08, C13, C14, C15, C16, C23, C24, C28, C29, C30, C31, C32, C33, C34, C35, C36, C37, C43, C45, C48, C50, C51, C54, C56, C57, C59, C61, C62, C71, C78, C79, C85, C91, C98, C99, C104, C110, C111, C112, C113, C114, C115, C116, C117, C118, C126, C127, C128, C133, C135, C136, C137, C138, C139, C140, C143, C144, C156, C167];
