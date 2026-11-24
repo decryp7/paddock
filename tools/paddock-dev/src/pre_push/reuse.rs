@@ -35,7 +35,6 @@ use super::exec::Row;
 use super::gates::Gate;
 use crate::input_hash::is_hashed_var;
 use crate::plan_repo::git_text;
-use paddock_proc::{Limits, command as proc_command, run_bounded};
 use paddock_repo_graph::Graph;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -303,6 +302,8 @@ pub struct Reuse {
     run: String,
     dev: Result<Dev, String>,
     cargo: Graph,
+    /// The run's variables: a probe's child gets them through the gates' own policy ([`super::exec::PASS`], ER-47).
+    env: HashMap<String, String>,
     build_vars: Vec<String>,
     base_ref: String,
     whole_vars: Vec<String>,
@@ -348,6 +349,7 @@ impl Reuse {
             run,
             dev,
             cargo,
+            env: env.clone(),
             build_vars,
             base_ref,
             whole_vars,
@@ -365,11 +367,17 @@ impl Reuse {
         if let Some(r) = self.probes.lock().ok().and_then(|m| m.get(&name).cloned()) {
             return r;
         }
-        let mut cmd = proc_command(&cmdline[0]);
-        cmd.args(&cmdline[1..]).current_dir(&self.root).env("RUSTUP_AUTO_INSTALL", "0");
-        let r = match run_bounded(cmd, Limits::new(PROBE_LIMIT)) {
-            Ok(o) if o.success() => Ok(o.stdout_text().trim().to_string()),
-            Ok(o) => Err(format!("`{name}` exited with an error: {}", o.stderr_text().trim())),
+        // The probe's child sees what the row's child sees: the run's variables through the gates' named policy, never this
+        // process's own environment (on macOS CoreFoundation adds `__CF_USER_TEXT_ENCODING` to it; ER-47, ADR 0100).
+        let call = crate::ci_tool::ToolCall::new(&cmdline[0])
+            .args(&cmdline[1..])
+            .pass(super::exec::PASS.iter().copied())
+            .env("RUSTUP_AUTO_INSTALL", "0")
+            .cwd(&self.root)
+            .timeout(PROBE_LIMIT);
+        let r = match call.run(&self.env, &mut std::io::sink()) {
+            Ok(o) if o.success => Ok(o.stdout.trim().to_string()),
+            Ok(o) => Err(format!("`{name}` exited with an error: {}", o.stderr.trim())),
             Err(e) => Err(format!("`{name}` could not run: {e}")),
         };
         if let Ok(mut m) = self.probes.lock() {
