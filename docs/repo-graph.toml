@@ -178,6 +178,13 @@ name = "ci-active-apps"
 files = ["docs/ci-active-apps.toml"]
 reaches = ["project:paddock-dev", "project:conformance"]
 
+[[input]]
+# The dispatch guards' first green uses (tools/paddock-dev/src/ci_runs/dispatch_guards.rs, its one reader and `ci guard-record` its
+# one writer): which guards of `./dev ci dispatch` block and which are report-only (ER-41).
+name = "ci-dispatch-guards"
+files = ["docs/ci-dispatch-guards.toml"]
+reaches = ["project:paddock-dev"]
+
 # The pins of the features Cargo resolves for watched crates (`./dev locks guard`, run by the crates job and train gates).
 [[input]]
 name = "shared-crate-features"

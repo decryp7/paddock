@@ -102,7 +102,9 @@ path = "junit.xml"
 # audit of the same kind takes the prefix and is in; no list here to forget (ER-42). tests/it/member_audits.rs and the gate's tests check
 # the clause. A test renamed into a cost class keeps its clause with an optional `tree_` (ADR 0121). Left out on purpose: the fixture
 # goldens (build_jobs_golden, host_steps_golden) read no tracked tree. (The first-parent history replay against affected.mjs, which was
-# left out too, was removed with the script, 2026-11-18.)
+# left out too, was removed with the script, 2026-11-18.) The two ownership tests are in (the `it` one and the lib's repo_model one): a
+# new register without an owner in docs/repo-graph.toml first failed in a train's full run three times (docs/shared-crate-features.toml,
+# docs/ci-active-apps.toml on train 2026-11-25-a, docs/ci-dispatch-guards.toml in run 8999 of train 2026-11-26-c).
 [profile.member-audits]
 default-filter = '''
 (binary(it) & (
@@ -115,8 +117,10 @@ default-filter = '''
     | test(/^contracts::every_markdown_file_that_code_reads/)
     | test(/^generators::the_registry_of_the_repository/)
     | test(/^doctests_off::graph_every_library_target_has_doctests_off/)
+    | test(/^repo_graph_net::graph_every_register_under_docs_is_owned$/)
 ))
 | test(/::no_source_file_/)
+| (kind(lib) & test(/^repo_model::tests::graph_every_tracked_file_of_the_tree_has_an_owner/))
 '''
 # Every failure of the run is listed, as in the ci profile.
 fail-fast = false
