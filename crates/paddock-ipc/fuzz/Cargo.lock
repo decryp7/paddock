@@ -1085,6 +1085,7 @@ name = "paddock-settings"
 version = "0.2.0"
 dependencies = [
  "log",
+ "paddock-env",
  "paddock-workspace-hack",
  "regex",
  "serde",
