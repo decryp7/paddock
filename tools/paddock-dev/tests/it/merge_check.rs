@@ -2084,7 +2084,7 @@ fn sync_member_lists_other_branches_reverts_in_the_order_the_train_made_them() {
     assert!(at("c") < at("a") && at("a") < at("d") && at("d") < at("b"), "{text}");
 }
 
-// ---- a member should contain the train's base (stale_base, report-only) ----
+// ---- a member should contain the train's base (stale_base, blocking) ----
 
 /// A train cut from main (m1) that merged `feat/a`; main then moved to m2. `merged_m2`: the train has merged main up to m2.
 /// Branches `old` (built on m1) and `new` (built on m2) each add one file. HEAD is on the train; `origin/main` is main's tip.
@@ -2121,27 +2121,58 @@ fn check_member(r: &Repo, member: &str) -> (i32, String) {
 }
 
 #[test]
-fn a_member_built_before_the_commit_of_main_the_train_has_merged_gets_a_warning_and_the_exit_is_unchanged() {
+fn a_member_built_before_the_commit_of_main_the_train_has_merged_is_refused_with_one_error_line() {
     let (r, m2) = train_on_main(true);
     let (code, text) = check_member(&r, "old");
-    assert_eq!(code, 0, "report-only: {text}");
+    assert_ne!(code, 0, "the old base blocks: {text}");
     assert!(
-        text.contains("::warning::merge check: old is built on an old base: it does not contain ")
+        text.contains("::error::merge check: old is built on an old base: it does not contain ")
             && text.contains(&m2[..9])
             && text.contains("the newest commit of main that train has merged")
-            && text.contains("Next step: run `./dev merge sync-member train`")
-            && text.contains("report-only"),
+            && text.contains("Next step: merge origin/main into old and re-run its gate")
+            && text.contains("--old-base-anyway")
+            && !text.contains("report-only"),
         "{text}"
     );
-    // The member built on that commit gets none; the other member merged ahead of it (feat/a) is not required.
+    // The member built on that commit passes; the other member merged ahead of it (feat/a) is not required.
     let (code, text) = check_member(&r, "new");
     assert_eq!(code, 0, "{text}");
     assert!(!text.contains("old base"), "{text}");
 }
 
 #[test]
-fn the_same_member_gets_no_warning_while_the_train_has_not_merged_the_newer_commit_of_main() {
-    // The positive control of the warning: identical history without the train's merge of m2.
+fn old_base_anyway_lets_the_old_member_through_and_prints_its_reason() {
+    let (r, m2) = train_on_main(true);
+    let (code, text) = r.check(&[
+        "--branch",
+        "old",
+        "--target",
+        "train",
+        "--no-generators",
+        "--old-base-anyway",
+        "hotfix, unrelated to main's m2",
+    ]);
+    assert_eq!(code, 0, "{text}");
+    assert!(
+        text.contains("::warning::merge check: old is built on an old base")
+            && text.contains(&m2[..9])
+            && text.contains("--old-base-anyway: hotfix, unrelated to main's m2")
+            && !text.contains("::error::"),
+        "{text}"
+    );
+}
+
+#[test]
+fn old_base_anyway_without_a_reason_is_a_usage_error_and_does_not_pass_the_member() {
+    let (r, _) = train_on_main(true);
+    let (code, text) = r.check(&["--branch", "old", "--target", "train", "--no-generators", "--old-base-anyway", " "]);
+    assert_ne!(code, 0, "{text}");
+    assert!(text.contains("--old-base-anyway needs a reason"), "{text}");
+}
+
+#[test]
+fn the_same_member_passes_while_the_train_has_not_merged_the_newer_commit_of_main() {
+    // The positive control of the block (deleting the check makes the refusal test fail; this one shows the check can say no): identical history without the train's merge of m2.
     let (r, _) = train_on_main(false);
     let (code, text) = check_member(&r, "old");
     assert_eq!(code, 0, "{text}");
@@ -2184,7 +2215,7 @@ fn tr2(r: &Repo, member: &str) -> (i32, String) {
 fn on_a_stacked_train_a_member_should_contain_the_previous_trains_commit_the_train_has_merged() {
     let (r, p1) = stacked_train(|h| format!("chore(train): merge train/prev ({h}) into train 2"));
     let (code, text) = tr2(&r, "before_p1");
-    assert_eq!(code, 0, "{text}");
+    assert_ne!(code, 0, "{text}");
     assert!(
         text.contains(&p1[..9]) && text.contains("the newest commit of train/prev that tr2 has merged"),
         "{text}"
@@ -2202,7 +2233,7 @@ fn on_a_stacked_train_a_member_should_contain_the_previous_trains_commit_the_tra
 fn remerge_subject_is_read(subject: fn(&str) -> String) {
     let (r, p1) = stacked_train(subject);
     let (code, text) = tr2(&r, "before_p1");
-    assert_eq!(code, 0, "{text}");
+    assert_ne!(code, 0, "{text}");
     assert!(text.contains(&p1[..9]) && text.contains("old base"), "{text}");
 }
 
@@ -2256,7 +2287,7 @@ fn a_re_merge_that_landed_on_main_is_not_this_trains_base_and_main_ahead_of_orig
     r.git(&["checkout", "-q", "tr3"]);
     r.git(&["merge", "-q", "--no-ff", "-m", "chore(train): merge main into train", "main"]);
     let (code, text) = r.check(&["--branch", "stale", "--target", "tr3", "--no-generators"]);
-    assert_eq!(code, 0, "{text}");
+    assert_ne!(code, 0, "{text}");
     assert!(
         text.contains("the newest commit of main that tr3 has merged") && text.contains(&m2[..9]) && !text.contains("train/old that"),
         "the base is main's m2, not the re-merge that landed on main: {text}"

@@ -1304,6 +1304,7 @@ fn trial_merge(a: &DispatchArgs, branch: &str, token: &str) -> Result<(crate::qu
             generators: false,
             gates: false,
             write_reverted: None,
+            old_base_anyway: None,
         })
         .map(|_| ())
         .map_err(|e| e.message)

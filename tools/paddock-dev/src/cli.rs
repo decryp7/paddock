@@ -306,6 +306,10 @@ struct MergeCheckArgs {
     /// Any other finding stays a finding for a person to answer.
     #[arg(long, value_name = "FILE")]
     write_reverted: Option<PathBuf>,
+    /// Emergency override of the old-base block: merge a member that lacks the train's base anyway, for this reason (required,
+    /// printed with the result). The default is an error that says to merge origin/main into the member and rerun its gate.
+    #[arg(long, value_name = "REASON")]
+    old_base_anyway: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -659,6 +663,7 @@ pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
                     generators: !a.no_generators,
                     gates: a.gates,
                     write_reverted: a.write_reverted,
+                    old_base_anyway: a.old_base_anyway,
                 },
                 out,
                 err,
@@ -868,6 +873,7 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
             generators: !a.no_generators,
             gates: a.gates,
             write_reverted: a.write_reverted,
+            old_base_anyway: a.old_base_anyway,
         }),
         Command::Merge {
             command: MergeCommand::SyncMember(a),
