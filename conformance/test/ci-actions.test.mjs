@@ -501,7 +501,7 @@ test('the sccache-stats action prints the statistics and tolerates a missing scc
     }
     return found;
   };
-  const rustJobs = ['ui', 'e2e', 'e2e-webkit', 'conformance', 'tools', 'heavy', 'crates', 'crate', 'audit', 'app', 'paddock-dev']; // audit: ./dev audit compare; conformance: ./dev gates check (C100, ADR 0060)
+  const rustJobs = ['paddock-dev', 'ui', 'e2e', 'e2e-webkit', 'conformance', 'tools', 'crates', 'crate', 'app', 'quick']; // quick: ./dev audit compare and the heavy tool; conformance: ./dev gates check (C100, ADR 0060)
   assert.deepEqual(jobsUsing('setup-rust'), rustJobs, 'setup-rust in every job that builds Rust');
   assert.deepEqual(jobsUsing('sccache-stats'), rustJobs, 'stats after each');
   assert.doesNotMatch(ci, /setup-rust\n\s+if: runner\.os/, 'no OS leg is left out');
@@ -904,7 +904,7 @@ test('stable-workspace leaves Linux containers alone and never fails a job it ca
 test('CI moves the checkout to a stable path on the host runners only, after Git bash is on PATH on Windows', () => {
   const ci = read(join(WORKFLOWS, 'ci.yml'));
   const jobs = parseJobs(ci).filter((j) => j.text.includes('uses: ./.gitea/actions/kept-clone'));
-  assert.deepEqual(jobs.map((j) => j.id), ['crate', 'app', 'paddock-dev'], 'the crate job, the apps\' host legs and the developer tool');
+  assert.deepEqual(jobs.map((j) => j.id), ['paddock-dev', 'crate', 'app'], 'the developer tool (first: the longest job, 2026-11-25), the crate job and the apps\' host legs');
   for (const job of jobs) {
     const at = job.text.indexOf('uses: ./.gitea/actions/kept-clone');
     assert.match(job.text.slice(at, at + 160), /\n\s+if: runner\.os != 'Linux'/, `${job.id}: host runners only; on Windows \`shell: bash\` before Git bash is on PATH resolves to WSL`);
@@ -1490,7 +1490,8 @@ test('every host job that keeps a build folder caps it at the end, with the shar
   const ci = read(join(WORKFLOWS, 'ci.yml'));
   const rel = read(join(WORKFLOWS, 'app-release.yml'));
   assert.match(ci, /- uses: \.\/\.gitea\/actions\/prune-build-folder\n\s+if: always\(\) && runner\.os != 'Linux'\n\n/, "ci.yml's app job prunes on the hosts, even after a failure");
-  assert.ok(ci.indexOf('actions/prune-build-folder') > ci.indexOf('actions/host-cleanup'), 'after the clean-up of the job');
+  const app = parseJobs(ci).find((j) => j.id === 'app').text;
+  assert.ok(app.indexOf('actions/prune-build-folder') > app.indexOf('actions/host-cleanup'), 'after the clean-up of the job');
   assert.match(rel, /- uses: \.\/\.gitea\/actions\/prune-build-folder\n\s+if: always\(\) && runner\.os != 'Linux'\n\s+with:\n\s+drop-bundles: "true"/, "app-release's bundle job prunes on the hosts after the upload");
   assert.ok(rel.indexOf('actions/prune-build-folder') > rel.indexOf('actions/upload-artifact'), 'only after the installers are uploaded');
   const action = read(join(ACTIONS, 'prune-build-folder', 'action.yml'));
@@ -2427,7 +2428,7 @@ test('a release or installer job never runs a downloaded ./dev: PADDOCK_DEV_DOWN
     assert.match(job.text, /PADDOCK_DEV_DOWNLOAD: \$\{\{ \(inputs\.release == true \|\| startsWith\(github\.ref, 'refs\/tags\/'\)\) && '0' \|\| '' \}\}/, `ci.yml:${job.id}: a run for a tag builds the tool from source`);
     tagJobs += 1;
   }
-  assert.equal(tagJobs, 7, 'the ci.yml jobs that read the prebuilt tool with the credential at job level: the three that take a host slot, conformance, and heavy, crates and audit (setup-rust runs ./dev); ui (with the ESLint preset and icons steps), e2e, e2e-webkit (on Linux since 2026-11-25, ADR 0120) and tools (`./dev ci run`) set it on their ./dev steps only (WP-3 review)');
+  assert.equal(tagJobs, 6, 'the ci.yml jobs that read the prebuilt tool with the credential at job level: the three that take a host slot, conformance, crates and quick (the heavy tool and audit steps; setup-rust runs ./dev); ui (with the ESLint preset and icons steps), e2e, e2e-webkit (on Linux since 2026-11-25, ADR 0120) and tools (`./dev ci run`) set it on their ./dev steps only (WP-3 review)');
 });
 
 test('dev-tool.yml publishes only from main, in every job (ADR 0022: the store is written only by main)', () => {
