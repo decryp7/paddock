@@ -4352,4 +4352,3 @@ startup"; the Chromium start judge, ADR 0031). A start that hands back a handle 
   train; the merge check refuses a member on an old base (the stale-base check made blocking on `ci/old-base-block`).
 - **Class: a green result on an old base was taken for a green result on the tree it joins** (earlier: ER-49 reuse of a landing run,
   ER-8 combined-tree failures, train 8's eight combination failures).
-
