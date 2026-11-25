@@ -2878,8 +2878,8 @@ for every git start, with disk0 at about 32,000 operations a second (`iostat`, 4
 
 ## Concurrent push-gate test rows on the shared Mac (2026-11-25, feat/heavy-two-slots-when-idle, base 4284e23d5)
 
-PARTIAL: round 1 (order 1, 2, 3) is complete; of round 2 (order 3, 2, 1) the 3- and 2-gate batches ran and the 1-gate batch was cut by
-the planned restart at 18:00. r2n2 overlapped this branch's own push gate (mean 1-minute load 18.5) and still matched r1n2.
+Two interleaved rounds: round 1 in the order 1, 2, 3 gates at once, round 2 in the order 3, 2, 1. r2n2 overlapped this branch's own push
+gate (mean 1-minute load 18.5) and still matched r1n2.
 
 - **Machine:** Mac mini, Apple M4 Pro, 14 cores, 64 GB, macOS 27.2, other agents running (the loads below include them).
 - **Workload, one "gate":** the push gate's `tests tools/paddock-dev` row in its own detached worktree and build folder:
@@ -2896,9 +2896,10 @@ the planned restart at 18:00. r2n2 overlapped this branch's own push gate (mean 
 | r1n3 | 3 | 4 | 421.1, 421.1, 417.3 | 906.0, 908.1, 899.2 | 422 | 25.6 | 18.9 / 14.5 / 14.4 | 19.7 | 68 % |
 | r2n3 | 3 | 4 | 477.5, 476.3, 477.3 | 902.1, 898.4, 903.6 | 478 | 22.6 | 4.6 / 8.4 / 12.3 | 24.3 | 68 % |
 | r2n2 | 2 | 7 | 246.7, 247.1 | 888.8, 890.4 | 247 | 29.1 | 4.5 / 11.7 / 14.6 | 18.5 | 69 % |
+| r2n1 | 1 | 14 | 146.3 | 843.7 | 146 | 24.7 | 6.4 / 11.9 / 14.3 | 13.0 | 69 % |
 
-Reading: two gates at once finished 22 % more gates per hour than one (29.4 against 24.0) for 3 % more CPU per gate; three at once
-finished fewer than two (25.6), with 6 % more CPU per gate than one (contention: the 1-minute load rose to about 20 on 14 cores). Memory
+Reading: two gates at once finished 18 to 22 % more gates per hour than one (29.1 to 29.4 against 24.0 to 24.7) for 3 to 5 % more CPU
+per gate; three at once finished fewer than two (25.6 and 22.6), with 6 to 7 % more CPU per gate than one (contention: the 1-minute load rose to about 20 on 14 cores). Memory
 was never short (68 % free at the lowest; a gate's largest process is about 1.4 GiB). So heavy caps at two slots (`MAX_AUTO_SLOTS = 2`)
 and opens the second under a 5-minute load of 0.85 x cores (11.9 here): every batch started under 12, and there two beat one; above it
 nothing measured says a second step helps. The round-1 3-gate batch started during another agent's burst (1-minute load 18.9); round 2
