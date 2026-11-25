@@ -132,7 +132,8 @@ fn tree_this_working_tree_run_is_sound() {
     crate::recorded::assert_live_tree_sound("c120", &full(&root));
     assert_eq!(rust(&root)["warnings"], 0, "every site carries a waiver with a reason, or is fixed");
     assert!(
-        rust(&root)["waived"].as_array().unwrap().len() >= 20,
+        // Not a count of the tree's waivers (deleting code that carried them would fail it): one is enough to show they are listed.
+        !rust(&root)["waived"].as_array().unwrap().is_empty(),
         "the waived sites stay visible in the report"
     );
 }

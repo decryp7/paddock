@@ -921,6 +921,9 @@ fn a_guardian_whose_input_is_not_a_pipe_refuses_and_says_so() {
     assert!(text.contains("standard input is not a pipe"), "{text}");
 }
 
+/// A guardian that ended is started again for the next child. The test kills the process-wide guardian, so it needs a process of
+/// its own: nextest runs every test in one (the guardian-as-user step and the crates job do), and plain libtest would let this
+/// kill take the keepers of other tests' children with it (CI run 9011).
 #[test]
 fn a_guardian_that_ended_is_started_again_for_the_next_child() {
     enable_in_test_binary(ENTRY);

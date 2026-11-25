@@ -828,7 +828,7 @@ mod unix_tests {
     use crate::guardian::{ACT_AS_USER_ENV, LOG_ENV};
     use crate::testchild::{Mode, child};
     use paddock_testkit::wait::{HANG_GUARD, poll_until_within};
-    use std::io::{BufRead, BufReader};
+    use std::io::{BufRead, BufReader, Read};
     use std::process::Stdio;
 
     const ENTRY: &str = "guardian::unix::tests::guardian_entry";
@@ -847,14 +847,30 @@ mod unix_tests {
         let mut cmd = child(Mode::Tree);
         cmd.stdout(Stdio::piped());
         let mut held = scope.start(cmd).unwrap();
-        let mut out = BufReader::new(held.take_stdout().unwrap());
-        let mut line = String::new();
+        // The grandchild writes into the child's output too, so the owner reads on until the grandchild's test harness has
+        // named its test (libtest writes `test <name> ... ` without a newline, hence bytes, not lines). A grandchild that had
+        // not written it yet when the owner was killed met a closed pipe, ended by itself with the write error, and was
+        // SIGKILLed by the guardian while it wrote its coverage profile at its exit: a corrupt .profraw that failed the
+        // crates job's coverage merge (CI run 9011).
+        let mut out = held.take_stdout().unwrap();
+        let mut text = String::new();
+        let mut buf = [0u8; 4096];
         let grandchild = loop {
-            line.clear();
-            assert!(out.read_line(&mut line).unwrap() > 0);
-            if let Some(i) = line.find("CHILD:pid ") {
-                break line[i + 10..].trim().to_owned();
+            let pid = text
+                .find("CHILD:pid ")
+                .and_then(|i| text[i + 10..].split_once('\n'))
+                .map(|(pid, _)| pid.trim().to_owned());
+            if let Some(pid) = pid
+                && text.matches("testchild::helper_main").count() >= 2
+            {
+                break pid;
             }
+            let n = out.read(&mut buf).unwrap();
+            assert!(
+                n > 0,
+                "the child's output ended before its grandchild started: {text}"
+            );
+            text.push_str(&String::from_utf8_lossy(&buf[..n]));
         };
         println!("child {}", held.process().unwrap().pid());
         println!("grandchild {grandchild}");
