@@ -4338,4 +4338,3 @@ startup"; the Chromium start judge, ADR 0031). A start that hands back a handle 
 - **Not measured.** The log line the wait prints for "which job" (`task <id> ...`) and the rule that an idle runner has no child process
   were taken from the runner's behaviour as known, not read from a real run; the tests use stand-ins. The window between the end of the
   wait and the boot-out is a few seconds, in which a restarted runner could take a job.
-
