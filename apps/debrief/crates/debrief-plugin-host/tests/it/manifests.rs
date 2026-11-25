@@ -33,15 +33,11 @@ fn plugins_that_never_describe_themselves_are_stopped_at_the_bound() {
     let err = load_manifests_within(&hang, Duration::from_secs(1)).unwrap_err();
     assert_eq!(err, "the plugins did not describe themselves in time");
     // Precondition (ER-33): the fake ran far enough to say who it was, so "gone" below means it was stopped.
-    let pid: u32 = std::fs::read_to_string(hang.with_extension("pid"))
-        .expect("the hanging fake did not start within the bound")
-        .parse()
-        .unwrap();
+    // Read as a record (rule 53, C128): a pid handed on since the fake ended reads as ended, never as the fake.
+    let fake = paddock_testkit_start::recorded::look_pid_file(&hang.with_extension("pid"))
+        .expect("the hanging fake did not start within the bound");
     // Stopped and reaped before load_manifests returned: nothing of that process is left.
-    assert!(
-        paddock_proc::ProcessId::of(pid).is_none(),
-        "the hanging plugins binary (pid {pid}) is still there"
-    );
+    assert!(fake.has_ended(), "the hanging plugins binary (pid {}) is still there", fake.pid());
 }
 
 #[test]

@@ -1,9 +1,10 @@
 import { Component, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { PatternHelper, TEST_DEBOUNCE_MS } from './pattern-helper';
+import { PatternHelper } from './pattern-helper';
 import { MockBackend } from '../../core/mock-backend';
 import { MOCK_SCHEMES } from '../../core/mock/mock-extraction';
-import { appProviders, flush, makeMock, settle, text, type as typeInto } from '../../../testing/test-helpers';
+import { until } from '@decryp7/paddock-ui/testing';
+import { appProviders, makeMock, settle, text, type as typeInto } from '../../../testing/test-helpers';
 
 // The real clock back after every test, so a test that times out cannot leave fake timers for the next one (ER-12, C154).
 afterEach(() => vi.useRealTimers());
@@ -22,16 +23,38 @@ class Host {
 
 describe('PatternHelper', () => {
   let backend: MockBackend;
+  /** Every engine test the helper asked for, with what it asked about and whether the answer has come. */
+  let asked: { pattern: string | null; text: string; answered: boolean }[] = [];
   function make() {
     backend = makeMock();
+    asked = [];
+    const real = backend.testPattern.bind(backend);
+    vi.spyOn(backend, 'testPattern').mockImplementation((versions, pattern, older, name) => {
+      const call = { pattern, text: name, answered: false };
+      asked.push(call);
+      const answer = real(versions, pattern, older, name);
+      void answer.then(
+        () => (call.answered = true),
+        () => (call.answered = true),
+      );
+      return answer;
+    });
     TestBed.configureTestingModule({ providers: appProviders(backend) });
     const f = TestBed.createComponent(Host);
     f.detectChanges();
     return f;
   }
   const el = (f: ReturnType<typeof make>, sel: string) => f.nativeElement.querySelector(sel) as HTMLElement;
+  /** Waits for the debounced engine test of the pattern and name the helper shows now to answer: the condition, not a guess at the debounce (C154). */
   const wait = async (f: ReturnType<typeof make>) => {
-    await flush(TEST_DEBOUNCE_MS + 20);
+    await until(
+      () => {
+        const last = asked.at(-1);
+        const name = (el(f, '#pattern-test') as HTMLInputElement).value;
+        return last !== undefined && last.answered && last.pattern === f.componentInstance.pattern() && last.text === name;
+      },
+      { what: 'the engine test of the current pattern and name to answer', settle: () => settle(f, 1) },
+    );
     await settle(f);
   };
 

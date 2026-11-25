@@ -1,5 +1,0 @@
-{
-  "allow": [
-    {"path": "conformance/test/c91-per-machine.test.mjs", "site": "assert.match(await msg({ '.gitea/workflows/demo-release.yml': 'jobs: {}\\n' }), /stage-paddock-setup/);", "reason": "a test of the conformance checks of workflows: the workflow text is its subject, not data read for another purpose"}
-  ]
-}
