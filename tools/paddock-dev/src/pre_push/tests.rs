@@ -4053,8 +4053,8 @@ mod member_tests {
         );
         assert!(host.env.contains(&("RUSTUP_AUTO_INSTALL".to_string(), "0".to_string())), "ER-45");
         assert!(
-            host.env.iter().any(|(k, _)| k == "NEXTEST_TEST_THREADS"),
-            "a share of the machine (ER-24, ER-48)"
+            host.env.iter().all(|(k, _)| k != "NEXTEST_TEST_THREADS"),
+            "the thread count is heavy's share of the machine (step_env), never a fixed number here; the caller's env wins (ER-24, ER-47, ER-48)"
         );
         assert!(
             host.env.iter().all(|(k, _)| !k.starts_with("CARGO_")),
