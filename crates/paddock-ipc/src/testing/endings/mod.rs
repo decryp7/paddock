@@ -202,12 +202,13 @@ pub enum PreconditionVerdict {
     Blocking,
 }
 
-/// The id of the report-only phase in `docs/gates.toml` `[[report_only]]` (ADR 0122 §6).
+/// The name the report-only warnings use for this phase (ADR 0122 §6); it has no docs/gates.toml entry (see below).
 pub const PRECONDITION_GATE_ID: &str = "test:endings-preconditions";
 
 /// The verdict [`run_all`] uses: report-only until the first complete green run on Linux, macOS and Windows in which every
-/// declared precondition held (ADR 0122 WP-5 then flips it to [`PreconditionVerdict::Blocking`] and removes the register entry
-/// [`PRECONDITION_GATE_ID`]).
+/// declared precondition held (ADR 0122 WP-5 then flips it to [`PreconditionVerdict::Blocking`]). The verdict runs inside the
+/// endings tests, not as a gate of its own, so docs/gates.toml has no entry for it; the user approved this report-only window on
+/// 2026-11-25 with a review by 2026-12-09.
 pub const PRECONDITION_VERDICT: PreconditionVerdict = PreconditionVerdict::ReportOnly;
 
 /// What can be wrong with an ending. The kind names ([`Fault::kind`]) are the ratchet's vocabulary.
@@ -667,7 +668,7 @@ pub fn conclude<E: std::fmt::Display>(
         .iter()
         .map(|(p, e)| {
             format!(
-                "warning: {endpoint} {scenario}: precondition {p} {e} (report-only under {PRECONDITION_GATE_ID} in docs/gates.toml; the scenario is judged and ratcheted as before, ADR 0122)"
+                "warning: {endpoint} {scenario}: precondition {p} {e} (report-only as {PRECONDITION_GATE_ID} until ADR 0122 WP-5; the scenario is judged and ratcheted as before)"
             )
         })
         .collect();
