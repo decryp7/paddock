@@ -2118,10 +2118,7 @@ mod tests {
         fn with_no_server_the_recorded_launcher_starts_ours_once_and_a_server_that_stays_down_means_plain_rustc() {
             let f = fresh();
             std::fs::write(f.run.join("launcher"), f.dev.program().to_string_lossy().as_bytes()).unwrap();
-            let down = {
-                let l = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
-                l.local_addr().unwrap().port()
-            };
+            let down = super::free_port(); // a port nothing listens on and nobody else is given
             assert!(f.compile(down), "the build never fails because the cache is down");
             assert_eq!(
                 f.dev.calls().unwrap(),
@@ -2140,10 +2137,7 @@ mod tests {
         #[test]
         fn with_no_server_and_no_launcher_the_compile_runs_plain_rustc() {
             let f = fresh();
-            let down = {
-                let l = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
-                l.local_addr().unwrap().port()
-            };
+            let down = super::free_port(); // a port nothing listens on and nobody else is given
             assert!(f.compile(down));
             assert_eq!(f.rustc.calls().unwrap().len(), 1);
             assert_eq!(f.sccache.calls().unwrap().len(), 0);
@@ -2154,10 +2148,7 @@ mod tests {
             let f = fresh();
             std::fs::write(f.run.join("launcher"), f.dev.program().to_string_lossy().as_bytes()).unwrap();
             std::fs::create_dir(f.run.join("start.lock")).unwrap();
-            let down = {
-                let l = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
-                l.local_addr().unwrap().port()
-            };
+            let down = super::free_port(); // a port nothing listens on and nobody else is given
             assert!(f.compile(down));
             assert_eq!(
                 f.dev.calls().unwrap().len(),
