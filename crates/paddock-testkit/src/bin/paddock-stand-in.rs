@@ -431,7 +431,6 @@ fn run_steps(actions: &Value, ctx: &Ctx) -> Result<Option<i32>, String> {
             }
             "ignore_term" => ignore_term()?,
             "stop_self" => stop_self()?,
-            "listen" => return listen(arg, ctx).map(|()| None),
             "sleep_ms" => {
                 let ms = arg
                     .as_i64()
@@ -612,34 +611,6 @@ fn wait_file(arg: &Value, ctx: &Ctx) -> Result<(), String> {
         std::thread::sleep(Duration::from_millis(10));
     }
     Ok(())
-}
-
-/// Listens on 127.0.0.1 at the port its template names, takes every connection and answers none, until the cap (two minutes): a
-/// server that has hung. A port that is taken is an error naming it, as a real server's start says "Address already in use".
-fn listen(arg: &Value, ctx: &Ctx) -> Result<(), String> {
-    let text = expand(arg.as_str().ok_or("listen needs a port")?, ctx)?;
-    let port: u16 = text
-        .trim()
-        .parse()
-        .map_err(|_| format!("listen: `{text}` is not a port"))?;
-    let listener = std::net::TcpListener::bind(("127.0.0.1", port))
-        .map_err(|e| format!("cannot listen on 127.0.0.1:{port}: {e}"))?;
-    listener
-        .set_nonblocking(true)
-        .map_err(|e| format!("cannot listen without blocking: {e}"))?;
-    let _ = std::io::stdout().flush();
-    let until = std::time::Instant::now() + cap();
-    let mut held = Vec::new();
-    while std::time::Instant::now() < until {
-        match listener.accept() {
-            Ok((conn, _)) => held.push(conn),
-            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                std::thread::sleep(Duration::from_millis(10));
-            }
-            Err(e) => return Err(format!("listen: accept failed: {e}")),
-        }
-    }
-    Err("listen ran to its cap of two minutes".into())
 }
 
 /// Reads a file to its end, which for a named pipe is the moment a writer opens and closes it (blocks until then).

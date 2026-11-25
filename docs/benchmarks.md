@@ -2893,36 +2893,3 @@ Added per member that touches paddock-dev: about 380 to 560 s of macOS test run 
 the other rows; the slot queue, not the tests, set the wall time. The OS scope (the `hostTests` placement derived from the code)
 leaves 40% of paddock-dev's tests off the container run; a pure workspace (no marked package or module) has no container run at all.
 Not measured: a `crates` member (the container would also compile the whole shared-crate workspace) and the guardian-as-user step.
-
-## sccache server hang: client behaviour and probe time (2026-11-25, fix/sccache-detect-restart, base 07dc7eb68)
-
-- **Question:** the local sccache 0.19.0 server hung on 2026-11-25 at 22:39Z after a burst of S3 errors, and every compile waited on it
-  at 0% CPU. What does a waiting client do when its server is stopped or restarted (does it fail, or compile locally)? How long does a
-  healthy server take to answer its statistics, so that a probe limit is a hang detector and never a speed limit (ER-12)?
-- **Method (client):** the pinned `~/.paddock-dev/tools/sccache/0.19.0/sccache` as a private server (port 4391, a private
-  `SCCACHE_DIR` and `TMPDIR`, `SCCACHE_IDLE_TIMEOUT=0`), started in the foreground (`SCCACHE_START_SERVER=1 SCCACHE_NO_DAEMON=1`: the
-  spawned pid is the listener's). Hung with SIGSTOP (it keeps the port; the kernel takes connections, nothing answers), then
-  `sccache rustc --crate-type lib x.rs --emit=link,metadata` clients started against it, with and without
-  `SCCACHE_IGNORE_SERVER_IO_ERROR=1`; then the server killed (SIGKILL), and in a second run killed and a fresh one started at once.
-- **Method (probe):** 300 runs of `sccache --show-adv-stats` against the machine's shared server (port 4226, the S3 chain, other agents
-  compiling through it), 0.2 s apart, timed from the client's start to its exit; 5 timed starts of a private local-disk server until its
-  port listened.
-- **Machine:** the shared Mac mini (arm64, 14 cores), 1-minute load 12 to 16 during the runs.
-
-| What | Result |
-|---|---|
-| `--show-stats` against the hung server | no answer; ended by the 15 s outer timeout |
-| A compile client against the hung server | waits, 0.0% CPU (as in the incident) |
-| That client when the server is killed | fails at once, exit 2: "Failed to read response header ... Connection reset by peer (os error 54)"; with `SCCACHE_IGNORE_SERVER_IO_ERROR=1` too; no output file |
-| That client when the server is killed and a fresh one started | the same failure; it never reconnects |
-| A new client after the restart | compiles, exit 0 |
-| A new client with no server on the port | starts a server itself (with its own environment) and compiles |
-| A second foreground server on a taken port | exits 2 at once: "Address already in use (os error 48)" |
-| Statistics of the healthy shared server (300 probes) | p50 0.020 s, p99 0.068 s, max 0.086 s; all answered |
-| A local-disk server from spawn to listening (5 starts) | 0.033 to 0.038 s |
-
-- **Decisions:** the probe limit is 10 s (`PROBE_LIMIT`, over 100 times the slowest healthy answer), asked when a build starts. A
-  build whose compiles already wait on a hung server cannot pass after a restart (they fail); detecting it mid-build was dropped (user,
-  2026-11-25), so nothing is built for that case. Not measured: Linux and Windows clients (the
-  failure path is sccache's own client code, the same on every OS), a server hung inside its S3 calls rather than stopped (SIGSTOP stands
-  in for it: the port is held and nothing answers, which is what the incident showed).

@@ -889,11 +889,7 @@ impl Step<'_> {
             .join(format!("paddock-sccache-start-{}-{}.log", std::process::id(), nanos()));
         let started = self.run(&call("--start-server").output(Output::File(log.clone())));
         let _ = std::fs::remove_file(&log);
-        // Asked within the probe limit the agents' local server is asked with (crate::sccache_server, rule 55): a hung server takes
-        // the connection and never answers, and a job must not wait on it.
-        let parent = self.ctx.env_snapshot();
-        let answers = matches!(&started, Ok(r) if r.success)
-            && crate::sccache_server::probe(&call("--show-stats"), &parent, crate::sccache_server::PROBE_LIMIT).is_ok();
+        let answers = matches!(&started, Ok(r) if r.success) && matches!(self.run(&call("--show-stats")), Ok(r) if r.success);
         if !answers {
             // The cache must slow a build down, never fail it: RUSTC_WRAPPER stays unset and the job builds without sccache.
             if let Ok(r) = &started

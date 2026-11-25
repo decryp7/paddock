@@ -16,11 +16,6 @@ const ERROR_LOG_LINES: usize = 20;
 
 /// The command over the real machine.
 pub fn run(env: &HashMap<String, String>, out: &mut dyn Write) -> i32 {
-    run_with(env, out, crate::sccache_server::PROBE_LIMIT)
-}
-
-/// [`run`] with the probe limit named (a test passes a short one).
-fn run_with(env: &HashMap<String, String>, out: &mut dyn Write, probe_limit: Duration) -> i32 {
     let mut step = Step {
         env,
         out,
@@ -30,13 +25,18 @@ fn run_with(env: &HashMap<String, String>, out: &mut dyn Write, probe_limit: Dur
     if !on_path(env, "sccache") {
         return 0;
     }
-    // The probe setup-rust and the agents' local server use (crate::sccache_server): a hung server takes the connection and never
-    // answers, so the statistics are asked for within the probe limit, not the step's.
-    let stats = ToolCall::new("sccache").args(["--show-stats"]).pass(["SCCACHE_*"]);
-    match crate::sccache_server::probe(&stats, env, probe_limit) {
-        Ok(out) => step.say(out.trim_end()),
-        // The words of the shell step (conformance/ci/host/sccache-stats.sh), which the parity test holds this to.
-        Err(_) => step.say("::notice::sccache statistics are unavailable (the cache server was not reachable)."),
+    let mut log = Vec::new();
+    let stats = ToolCall::new("sccache")
+        .args(["--show-stats"])
+        .pass(["SCCACHE_*"])
+        .timeout(STATS_TIMEOUT);
+    let ran = stats.run(env, &mut log);
+    step.out.write_all(&log).ok();
+    match ran {
+        Ok(r) if r.success => {
+            step.say(r.stdout.trim_end());
+        }
+        _ => step.say("::notice::sccache statistics are unavailable (the cache server was not reachable)."),
     }
     // What the server logged as an error (setup-rust puts it in the job's temp folder when the S3 level is on): a failed S3 write
     // never fails a build, so this is where it shows (ER-27).
@@ -162,23 +162,6 @@ mod tests {
         let d = crate::ci_host::canonical_tempdir();
         let (code, out, calls) = go(d.path(), &[]);
         assert_eq!((code, out.as_str(), calls.as_str()), (0, "", ""));
-    }
-
-    /// A hung server (its statistics never come) holds the step only for the probe limit, then the notice; the positive control is
-    /// the first test above, where the statistics come.
-    #[test]
-    fn a_hung_server_holds_the_step_only_for_the_probe_limit() {
-        let d = crate::ci_host::canonical_tempdir();
-        let calls = d.path().join("calls").display().to_string();
-        StandIn::new(d.path(), "sccache")
-            .answers(Actions::new().appends_with(&calls, CALL_LINE).sleeps(Duration::from_secs(30)))
-            .install()
-            .unwrap();
-        let env: HashMap<String, String> = [("PATH".to_string(), format!("{}:/usr/bin:/bin", d.path().display()))].into();
-        let mut out = Vec::new();
-        assert_eq!(run_with(&env, &mut out, Duration::from_millis(500)), 0);
-        let out = String::from_utf8(out).unwrap();
-        assert!(out.contains("statistics are unavailable"), "{out}");
     }
 
     #[test]

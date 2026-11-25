@@ -104,16 +104,6 @@ tools and never by your shell profile (user decision 2026-11-16; docs/research/s
   and names the log in the warning. It is off without a warning in CI (`CI`, `GITHUB_ACTIONS`), with
   `PADDOCK_SCCACHE=off`, or when `RUSTC_WRAPPER` is already set.
 - The build folder goes in as `--config build.target-dir=...` in every tool (see AGENTS.md, "Build folders").
-- **A hung server is found and replaced (user decision 2026-11-25).** The tools start the server in the foreground of a process they
-  spawn, so they hold its pid and start time, recorded in `sccache-run/server-<port>.json` (rule 53). Every `sccache env` and every
-  gate that compiles (when it first needs the wrapper) asks the server for its statistics within 10 s (`PROBE_LIMIT` in `tools/paddock-dev/src/sccache_server.rs`; a
-  healthy one answers in under 0.1 s). No answer: the server is stopped by its record (only when the recorded pid still has the recorded
-  start time), a fresh one is started and asked again; still no answer, the build runs without the cache with one `::warning::` line.
-  A server the tools did not start (no record, another start time: one started by hand or by an older tool) is never touched; end it
-  yourself (`sccache --stop-server` waits on a hung server: end its process). A build already waiting on a server when it hangs is not
-  detected (no watchdog, user decision 2026-11-25); its compiles fail with "Connection reset by peer" once the server is restarted
-  (measured: they never compile locally). CI's `setup-rust` and `sccache-stats` ask their server with the same probe and limit; they
-  still start it with `sccache --start-server`, like the shell steps of a release run, so a CI server is not restarted by its pid.
 - **One setting picks the backend, `PADDOCK_SCCACHE_BACKEND`:** `auto` (the default, user decision 2026-11-21: the local disk first
   with the shared RustFS store behind it, as CI's `s3` backend, when `~/.config/paddock/sccache-s3.env` (below) is there and the store
   answers its HTTP health check, `/minio/health/live`, within 5 s; otherwise the local disk alone, with one `::notice::` (no file: the

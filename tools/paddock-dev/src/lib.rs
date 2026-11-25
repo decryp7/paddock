@@ -103,7 +103,6 @@ pub mod repo_inputs;
 pub mod repo_model;
 pub mod run_scope;
 pub mod safe_remove;
-pub mod sccache_server;
 pub mod slots;
 pub mod test_cost;
 // Unix only: it starts the helper through a POSIX shell, and every test that uses it is `#[cfg(unix)]`.
