@@ -2949,7 +2949,6 @@ Why a local build found none of CI's compile-cache entries (the earlier block "L
   of workspace crates stay).
 - **Cross hit, measured:** a private server (fresh disk, S3 behind it under `paddock-ci/macOS-aarch64`), this branch's shim, a worktree that
   had never built, no CARGO variable in the shell, the same command: 294 compile requests executed, **174 L1 (S3) hits**, 0 L0, 117 misses
-  (the workspace crates and what no CI job built in that configuration), 117 writes. The 8 to 12 other keys of the table above are CI jobs
-  that were not run with the same command or without `CARGO_TERM_COLOR`.
+  (the workspace crates, which keep their checkout path, and what no CI job built with that command), 117 writes.
 - **Limits:** only CI jobs that have both variables share entries (`ci.yml`'s crate jobs do; a job without `CARGO_TERM_COLOR`, for
   example some app workflows, hashes a different key class). Windows has no shim (the wrapper is the sccache binary), so it is not covered.
