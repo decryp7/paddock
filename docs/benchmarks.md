@@ -2922,3 +2922,28 @@ was never short (68 % free at the lowest; a gate's largest process is about 1.4 
 and opens the second under a 5-minute load of 0.85 x cores (11.9 here): every batch started under 12, and there two beat one; above it
 nothing measured says a second step helps. The round-1 3-gate batch started during another agent's burst (1-minute load 18.9); round 2
 repeated it from a quiet start (4.6) and was slower still (22.6 gates per hour, mean 1-minute load 24.3), so three is not a gain.
+
+## Local sccache: a second worktree hits the first one's entries (2026-11-26, fix/sccache-local-reuse, base 202d0a181)
+
+- **Machine:** Mac mini, Apple M4 Pro, macOS 27.2, other agents running; 1-minute load 41 to 75 at the time (an indication, not a timing).
+- **Setup:** `./dev sccache env` of this branch (debug build) on a private port, a private tool home and a fresh local disk, with the shared
+  S3 store behind it under this machine's prefix `paddock-ci/macOS-aarch64`. The base list was the 206 worktrees of the repository (the
+  list this branch computes); the main checkout and both measured worktrees were in it. `SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS` as in the tool.
+- **Workload:** `cargo build -p paddock-repo-files --lib` (dev profile, `-j 4`) in `crates/`, a fresh target folder each time (outside every
+  base), `--zero-stats` before each build. 112 compile requests executed per build (the crate and its dependencies).
+
+| Build | Worktree | Server state | L0 (disk) hits | L1 (S3) hits | L1 writes |
+|---|---|---|---|---|---|
+| 1 | A | empty disk | 0 | 0 | 109 |
+| 2 | B (another worktree, clean target) | same server | 101 | 0 | 119 |
+| 3 | B, `CARGO_INCREMENTAL=0` | same server | 101 | 0 | not recorded |
+| 4 | B, a second server with an empty disk | empty disk, same prefix | 0 | 101 | 0 |
+
+- **Reading:** a second worktree hits 101 of 112 requests, the other 11 being the crate itself, its build scripts and crates that read
+  `CARGO_MANIFEST_DIR` (kept per checkout on purpose). With an empty disk the same 101 come from the S3 store, so a worktree on
+  another machine or after a disk wipe reuses them too. `CARGO_INCREMENTAL=0` does not change a key.
+- **Local against CI:** the 112 requests of build 1 found no entry that CI had stored under the same prefix (L1 hits 0 of 112, while the
+  prefix held 1000 or more CI objects from 2026-11-19 on). So the keys of a local build and of CI's jobs do not match today, third-party
+  crates included. The difference is not `CARGO_INCREMENTAL` and not the checkout folder (bases strip it); the cause is not yet
+  identified (candidates: the command mode and profile of CI's steps, rustflags, the toolchain path). The common prefix is in place so
+  that the entries share once the keys do.
