@@ -1,6 +1,6 @@
 // Read-only helpers over an app checkout. Paths are POSIX-style and relative to the root, so findings read the same everywhere.
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
-import { join, relative, sep } from 'node:path';
+import { join, normalize, relative, sep } from 'node:path';
 
 const SKIP_DIRS = new Set(['node_modules', '.git', 'target', 'dist', '.angular', 'coverage', 'test-results', 'playwright-report']);
 
@@ -20,14 +20,36 @@ export function walk(root, dir = root, out = []) {
   return out.sort();
 }
 
+/**
+ * Whether `rel` exists under `root` with exactly this case in every component. `existsSync` follows the file system, and macOS
+ * (APFS) and Windows are case-insensitive, so `docs/RULES.md` "exists" there beside `docs/rules.md` and fails only on Linux CI.
+ * Reads each folder's names once per `dirs` cache; untracked files that are present still count, as before.
+ */
+export function existsExact(root, rel, dirs = new Map()) {
+  let at = root;
+  for (const part of normalize(rel).split(sep).filter((x) => x && x !== '.')) {
+    if (!dirs.has(at)) {
+      try {
+        dirs.set(at, new Set(readdirSync(at)));
+      } catch {
+        dirs.set(at, new Set());
+      }
+    }
+    if (!dirs.get(at).has(part)) return false;
+    at = join(at, part);
+  }
+  return existsSync(at);
+}
+
 /** The inspected tree: lists files once, reads them on demand. */
 export function openTree(root) {
   let files = null;
   const cache = new Map();
+  const dirs = new Map();
   return {
     root,
     files: () => (files ??= walk(root)),
-    exists: (p) => existsSync(join(root, p)),
+    exists: (p) => existsExact(root, p, dirs),
     isDir: (p) => {
       try {
         return statSync(join(root, p)).isDirectory();
