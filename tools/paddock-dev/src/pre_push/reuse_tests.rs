@@ -103,6 +103,7 @@ fn gate(id: &str, cwd: &str) -> Gate {
         notice: None,
         progress: Progress::Lines,
         build_dir: None,
+        mount: None,
     }
 }
 
