@@ -3876,3 +3876,22 @@ first and records the second (`ci fix-items`) is part of the queued green-main w
 - **Class (ER-21).** Recorded as an instance of: a CI step on the user's shared macOS session that can take the whole session down
   (ADR 0120). Earlier instances: the 2026-11-23 session crash (hdiutil failure after the Mac runner's desktop session crashed, train
   18's fix item).
+
+## The Linux container can see a stale copy of a changed file (OrbStack bind mount, 2026-11-25, feat/member-check-touched-tests)
+
+- **What.** The member gate's `clippy-linux` and `tests-linux` rows failed with "unclosed delimiter" and "unterminated double quote
+  string" in files that compile on the host. Inside the container (`tools/linux-container.sh`, OrbStack 2.2.5, the repository on
+  /Volumes/vault-dev bind-mounted read-only) `stat` showed the size and mtime from before the edit, and the content was the new text cut
+  at the old size. It stayed stale for over an hour; `touch` and replacing the file with a new inode did not refresh it. A fresh
+  clone at a new path was seen correctly, until a checkout changed files there after a container had read them: the same staleness.
+  The danger is a false pass: an older version that still compiles is linted and tested instead of the member.
+- **Fix.** Not yet fixed. Proposed: each container row first compares the content hash of the change's files (`git hash-object`)
+  inside the container with the host's and reports `not measured` ("the container sees a stale copy") on a mismatch (ER-33: the
+  precondition is checked, never assumed). Restarting OrbStack is the user's call, not an agent's (ER-14).
+- **Also found by the first real `tests-linux` run.** nextest keeps its run store in the workspace (`target/nextest`), which is
+  read-only in the container (fixed: a tool configuration moves it into the build volume). `wrapper::the_cached_tool_holds_itself...`
+  writes a waiter lock into the repository's own `.git/paddock/waits` (read-only there; a test that writes into the real repository,
+  ER-45), and `host_steps::guardian_as_user_matches_the_shell` compares a printed duration (`1 s` against `0 s`, ER-12). Both are open
+  fix items; until they are fixed, the Linux row of a paddock-dev member fails on them.
+- **Class (ER-21).** First instance of a stale container view; the read-only mount finding is an instance of "a test writes outside its
+  own folder" (ER-45).
