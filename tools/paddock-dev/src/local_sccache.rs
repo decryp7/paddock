@@ -703,10 +703,26 @@ fn shim_text(bin: &Path) -> String {
     let real = bin.display().to_string().replace('\'', r"'\''");
     let key_env: String = CI_KEY_ENV.iter().map(|(k, v)| format!("export {k}={v}; ")).collect();
     format!(
-        "#!/bin/sh\n\
+        "#!/bin/bash\n\
 # Written by `./dev sccache env` (tools/paddock-dev/src/local_sccache.rs, shim_text): sccache for everything but a Windows (MSVC) C compile.\n\
+# A rustc compile goes to sccache only when OUR server listens (never sccache's own auto-start, which would run with the caller's\n\
+# environment). With none up, the launcher recorded by `./dev sccache env` starts ours (one start at a time), and when it is still\n\
+# down the compile runs plain rustc, so a build never fails because of the cache.\n\
 case \"$(basename -- \"$1\")\" in\n\
-  rustc | rustc.exe) {key_env}exec '{real}' \"$@\" ;;\n\
+  rustc | rustc.exe)\n\
+    port=${{SCCACHE_SERVER_PORT:-4226}}\n\
+    up() {{ (exec 3<>/dev/tcp/127.0.0.1/\"$port\") 2>/dev/null; }}\n\
+    if ! up; then\n\
+      run=\"$(dirname -- \"$0\")/../../../../sccache-run\"\n\
+      dev=$(cat \"$run/launcher\" 2>/dev/null)\n\
+      find \"$run/start.lock\" -maxdepth 0 -mmin +2 -exec rmdir {{}} \\; 2>/dev/null\n\
+      if [ -x \"$dev\" ] && mkdir \"$run/start.lock\" 2>/dev/null; then\n\
+        \"$dev\" sccache env >/dev/null 2>&1 </dev/null\n\
+        rmdir \"$run/start.lock\" 2>/dev/null\n\
+      fi\n\
+    fi\n\
+    if up; then {key_env}exec '{real}' \"$@\"; fi\n\
+    exec \"$@\" ;;\n\
   clang-cl | clang-cl.exe | cl | cl.exe) exec \"$@\" ;;\n\
 esac\n\
 for a in \"$@\"; do\n\
@@ -752,6 +768,81 @@ fn write_shim(bin: &Path) -> std::io::Result<()> {
         }
         Ok(f)
     })?)
+}
+
+/// What [`ensure_machine_config`] found or did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MachineConfig {
+    /// The file was made or updated (it is this tool's own).
+    Written,
+    /// The file already says this.
+    Current,
+    /// A file of somebody else's is there; it is not touched.
+    Foreign,
+}
+
+/// The first line of the file [`ensure_machine_config`] owns.
+const MACHINE_CONFIG_MARK: &str = "# Written by `./dev sccache env` (local_sccache::ensure_machine_config); remove the file to stop.";
+
+/// Puts `[build] rustc-wrapper = <shim>` into `<worktree root>/.cargo/config.toml`. Cargo reads the `.cargo/config.toml` of every folder
+/// above where it runs, so every cargo of every worktree, in any shell (an agent's fresh shell too, where `eval "$(./dev sccache env)"` is
+/// never run), uses the shim; the environment's `RUSTC_WRAPPER` still wins (cargo's rule, so CI's own is untouched, and CI's checkouts
+/// are not below this root). It is the machine's file, not the repository's: Windows cannot start an extensionless script as
+/// `build.rustc-wrapper`. A file that is not this tool's (no first-line mark) is left alone.
+///
+/// # Errors
+///
+/// The file or its folder cannot be written.
+pub fn ensure_machine_config(root: &Path, shim: &Path) -> std::io::Result<MachineConfig> {
+    let file = root.join(".cargo").join("config.toml");
+    let text = format!("{MACHINE_CONFIG_MARK}\n[build]\nrustc-wrapper = {:?}\n", shim.display().to_string());
+    match std::fs::read_to_string(&file) {
+        Ok(t) if t == text => return Ok(MachineConfig::Current),
+        Ok(t) if !t.starts_with(MACHINE_CONFIG_MARK) => return Ok(MachineConfig::Foreign),
+        Ok(_) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e),
+    }
+    std::fs::create_dir_all(root.join(".cargo"))?;
+    paddock_env::write_atomic_created(&file, text.as_bytes(), &mut |tmp| {
+        std::fs::OpenOptions::new().write(true).create_new(true).open(tmp)
+    })?;
+    Ok(MachineConfig::Written)
+}
+
+/// Writes the machine file for a ready wrapper and says so (one line; a failure is a warning with its next step, never a stop).
+pub fn say_machine_config(env: &HashMap<String, String>, ready: &Ready) {
+    let Some(shim) = ready.vars.iter().find(|(k, _)| k == "RUSTC_WRAPPER").map(|(_, v)| PathBuf::from(v)) else {
+        return;
+    };
+    let Some(root) = machine_config_root(env) else {
+        eprintln!(
+            "::notice::local-sccache: no worktree root is set (git config paddock.worktreeRoot), so a bare cargo in a fresh shell is not wrapped; run `eval \"$(./dev sccache env)\"` in the shell that builds"
+        );
+        return;
+    };
+    match ensure_machine_config(&root, &shim) {
+        Ok(MachineConfig::Written) => eprintln!(
+            "local-sccache: every cargo below {} now uses the wrapper ({}/.cargo/config.toml); an explicit RUSTC_WRAPPER still wins",
+            root.display(),
+            root.display()
+        ),
+        Ok(MachineConfig::Current) => {}
+        Ok(MachineConfig::Foreign) => eprintln!(
+            "::warning::local-sccache: {}/.cargo/config.toml is not this tool's, so it is not changed. Next: add `[build] rustc-wrapper = \"{}\"` to it, or move it",
+            root.display(),
+            shim.display()
+        ),
+        Err(e) => eprintln!("::warning::local-sccache: cannot write {}/.cargo/config.toml: {e}", root.display()),
+    }
+}
+
+/// The worktree root the machine file goes to: `git config paddock.worktreeRoot` of the repository the caller is in, else
+/// `PADDOCK_WORKTREE_ROOT` ([`crate::worktree::ops::resolve_root`]); `None` when neither is set.
+pub fn machine_config_root(env: &HashMap<String, String>) -> Option<PathBuf> {
+    let get = |k: &str| env.get(k).cloned();
+    let repo = crate::worktree::git::Repo::discover(&std::env::current_dir().ok()?).ok()?;
+    crate::worktree::ops::resolve_root(&repo, None, &get).ok()
 }
 
 /// A gate's path (`Install::Never`) writes nothing (ER-45): a missing or stale shim is a reason with its next step.
@@ -1116,6 +1207,12 @@ pub fn prepare(env: &HashMap<String, String>, install: Install) -> Outcome {
     };
     if let Err(why) = shim {
         return off(why, true);
+    }
+    if matches!(install, Install::OnDemand) {
+        // The shim starts our server through this binary when none listens (read by the shim; a stale path is a plain-rustc fallback).
+        if let Ok(me) = std::env::current_exe() {
+            let _ = std::fs::write(run.join("launcher"), me.display().to_string());
+        }
     }
     Outcome::Ready(Ready {
         vars: ready_vars(&bin, &backend, &basedirs),
@@ -1828,6 +1925,8 @@ mod tests {
             sccache: Installed,
             compilers: Vec<Installed>,
             path: String,
+            /// A server "running" on a port of its own, which the shim finds before it hands a rustc compile to sccache.
+            listener: std::net::TcpListener,
         }
 
         fn rig() -> Rig {
@@ -1837,6 +1936,7 @@ mod tests {
                 std::fs::create_dir(&p).unwrap();
                 p
             };
+            let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
             let sccache = StandIn::new(&dir("a"), "sccache")
                 .when_args(&["clang-cl"], Actions::new().stderr("Compiler not supported").exit(1))
                 .records_args()
@@ -1857,6 +1957,7 @@ mod tests {
                 sccache,
                 compilers,
                 path,
+                listener,
             }
         }
 
@@ -1869,6 +1970,7 @@ mod tests {
                 let ran = ToolCall::new(self.shim().to_string_lossy())
                     .args(args.iter().copied())
                     .env("PATH", format!("{}:/usr/bin:/bin", self.path))
+                    .env("SCCACHE_SERVER_PORT", self.listener.local_addr().unwrap().port().to_string())
                     .run(&HashMap::new(), &mut std::io::sink())
                     .unwrap();
                 ran.success
@@ -1920,6 +2022,7 @@ mod tests {
                 .records_env(&["CARGO_INCREMENTAL", "CARGO_TERM_COLOR"])
                 .install()
                 .unwrap();
+            let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
             write_shim(sccache.program()).unwrap();
             let shim = rustc_wrapper_for(sccache.program());
             let call = |args: &[&str], envs: &[(&str, &str)]| {
@@ -1927,8 +2030,10 @@ mod tests {
                 for (k, v) in envs {
                     c = c.env(*k, *v);
                 }
+                let port = listener.local_addr().unwrap().port().to_string();
                 assert!(
                     c.env("PATH", "/usr/bin:/bin")
+                        .env("SCCACHE_SERVER_PORT", port)
                         .run(&HashMap::new(), &mut std::io::sink())
                         .unwrap()
                         .success
@@ -1944,6 +2049,122 @@ mod tests {
                 assert_eq!(var(i, "CARGO_TERM_COLOR").as_deref(), Some("always"), "{seen:?}");
             }
             assert_eq!(var(2, "CARGO_INCREMENTAL"), None, "a C compile keeps the caller's environment");
+        }
+
+        /// A rustc compile in a fresh shell (nothing but a PATH): with our server up it goes through sccache; with none up the shim asks
+        /// the recorded launcher to start ours (never sccache's own auto-start, which would run with the caller's environment) and,
+        /// still none, or no launcher, runs rustc itself, so a build never fails because of the cache.
+        struct Fresh {
+            _d: tempfile::TempDir,
+            sccache: Installed,
+            rustc: Installed,
+            dev: Installed,
+            shim: PathBuf,
+            run: PathBuf,
+        }
+
+        fn fresh() -> Fresh {
+            let d = tempfile::tempdir().unwrap();
+            // The tool cache's layout: <home>/tools/sccache/<version>/{sccache,shim/sccache} and <home>/sccache-run.
+            let home = d.path().join("home");
+            let bin_dir = home.join("tools").join("sccache").join("0.20.1");
+            let run = home.join("sccache-run");
+            std::fs::create_dir_all(&bin_dir).unwrap();
+            std::fs::create_dir_all(&run).unwrap();
+            let other = |n: &str| {
+                let p = d.path().join(n);
+                std::fs::create_dir(&p).unwrap();
+                p
+            };
+            let sccache = StandIn::new(&bin_dir, "sccache").records_args().install().unwrap();
+            let rustc = StandIn::new(&other("r"), "rustc").records_args().install().unwrap();
+            let dev = StandIn::new(&other("d"), "paddock-dev").records_args().install().unwrap();
+            write_shim(sccache.program()).unwrap();
+            let shim = rustc_wrapper_for(sccache.program());
+            Fresh {
+                _d: d,
+                sccache,
+                rustc,
+                dev,
+                shim,
+                run,
+            }
+        }
+
+        impl Fresh {
+            /// One `rustc` compile the way cargo calls the wrapper, in a shell with no variable but PATH and the port.
+            fn compile(&self, port: u16) -> bool {
+                ToolCall::new(self.shim.to_string_lossy())
+                    .args([self.rustc.program().to_string_lossy().as_ref(), "--crate-name", "x"])
+                    .env("PATH", "/usr/bin:/bin")
+                    .env("SCCACHE_SERVER_PORT", port.to_string())
+                    .run(&HashMap::new(), &mut std::io::sink())
+                    .unwrap()
+                    .success
+            }
+        }
+
+        #[test]
+        fn a_compile_in_a_fresh_shell_goes_through_sccache_when_our_server_is_up() {
+            let f = fresh();
+            let up = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+            assert!(f.compile(up.local_addr().unwrap().port()));
+            assert_eq!(f.sccache.calls().unwrap().len(), 1, "sccache got the compile");
+            assert_eq!(f.rustc.calls().unwrap().len(), 0, "rustc was not run past it");
+            assert_eq!(f.dev.calls().unwrap().len(), 0, "nothing to start");
+        }
+
+        #[test]
+        fn with_no_server_the_recorded_launcher_starts_ours_once_and_a_server_that_stays_down_means_plain_rustc() {
+            let f = fresh();
+            std::fs::write(f.run.join("launcher"), f.dev.program().to_string_lossy().as_bytes()).unwrap();
+            let down = {
+                let l = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+                l.local_addr().unwrap().port()
+            };
+            assert!(f.compile(down), "the build never fails because the cache is down");
+            assert_eq!(
+                f.dev.calls().unwrap(),
+                [["sccache", "env"]],
+                "our launcher, no auto-start of sccache's own"
+            );
+            assert_eq!(
+                f.sccache.calls().unwrap().len(),
+                0,
+                "never a bare sccache client with nobody listening"
+            );
+            assert_eq!(f.rustc.calls().unwrap().len(), 1, "plain rustc ran the compile");
+            assert!(!f.run.join("start.lock").exists(), "the start lock is released");
+        }
+
+        #[test]
+        fn with_no_server_and_no_launcher_the_compile_runs_plain_rustc() {
+            let f = fresh();
+            let down = {
+                let l = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+                l.local_addr().unwrap().port()
+            };
+            assert!(f.compile(down));
+            assert_eq!(f.rustc.calls().unwrap().len(), 1);
+            assert_eq!(f.sccache.calls().unwrap().len(), 0);
+        }
+
+        #[test]
+        fn a_start_that_another_compile_holds_is_not_repeated() {
+            let f = fresh();
+            std::fs::write(f.run.join("launcher"), f.dev.program().to_string_lossy().as_bytes()).unwrap();
+            std::fs::create_dir(f.run.join("start.lock")).unwrap();
+            let down = {
+                let l = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+                l.local_addr().unwrap().port()
+            };
+            assert!(f.compile(down));
+            assert_eq!(
+                f.dev.calls().unwrap().len(),
+                0,
+                "the holder starts it; this compile runs plain rustc"
+            );
+            assert_eq!(f.rustc.calls().unwrap().len(), 1);
         }
 
         /// Positive control: the stand-in sccache itself fails for `clang-cl`, so the test above can see the failure it guards.
@@ -2462,5 +2683,42 @@ mod tests {
         let roots = worktree_roots(&t.path().join("wt").join("a").join("crates"));
         let root = |n: &str| t.path().join("wt").join(n).display().to_string();
         assert_eq!(roots, [root("a"), root("b")]);
+    }
+    /// Cargo reads `.cargo/config.toml` of every folder above the one it runs in, so a file beside the worktrees puts the wrapper into every
+    /// cargo of every worktree, in any shell (a bare `cargo` in an agent's fresh shell too), without a line in the repository (Windows
+    /// cannot start an extensionless script as `build.rustc-wrapper`). The environment's `RUSTC_WRAPPER` still wins (cargo's own rule).
+    #[test]
+    fn the_wrapper_is_set_for_every_cargo_below_the_worktree_root_and_a_foreign_file_is_never_overwritten() {
+        let t = tempfile::tempdir().unwrap();
+        let root = t.path().join("wt");
+        let shim = Path::new("/h/tools/sccache/0.20.1/shim/sccache");
+        assert_eq!(ensure_machine_config(&root, shim).unwrap(), MachineConfig::Written);
+        let file = root.join(".cargo").join("config.toml");
+        let text = std::fs::read_to_string(&file).unwrap();
+        let parsed: toml::Table = text.parse().unwrap();
+        assert_eq!(
+            parsed["build"]["rustc-wrapper"].as_str(),
+            Some("/h/tools/sccache/0.20.1/shim/sccache"),
+            "{text}"
+        );
+        assert_eq!(
+            ensure_machine_config(&root, shim).unwrap(),
+            MachineConfig::Current,
+            "the same file is left alone"
+        );
+        let moved = Path::new("/h2/shim/sccache");
+        assert_eq!(
+            ensure_machine_config(&root, moved).unwrap(),
+            MachineConfig::Written,
+            "ours is updated"
+        );
+        assert!(std::fs::read_to_string(&file).unwrap().contains("/h2/shim/sccache"));
+        std::fs::write(&file, "[build]\njobs = 3\n").unwrap();
+        assert_eq!(
+            ensure_machine_config(&root, shim).unwrap(),
+            MachineConfig::Foreign,
+            "somebody's own config stays"
+        );
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "[build]\njobs = 3\n");
     }
 }

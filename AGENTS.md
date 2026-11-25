@@ -45,10 +45,11 @@ package.json     the one npm workspace and package-lock.json (ui, eslint, icons,
   rebuilds fast). Pass it to cargo as `--config build.target-dir='<dir>'` (or `build.target-dir` in a `.cargo/config.toml`),
   **never as `CARGO_TARGET_DIR` or `CARGO_BUILD_TARGET_DIR`**: sccache 0.19 puts every `CARGO_*` variable into its cache key, so
   the variable gives 0% hits across worktrees and the configuration gives about 82% (ADR 0014 §1; docs/benchmarks.md). The
-  tools do this themselves (push gates, `./dev gen check`, `./dev`'s own build). For your own cargo calls run
-  `eval "$(./dev sccache env)"` once per shell: it installs the pinned sccache, starts the one local server and sets
-  `RUSTC_WRAPPER` for that shell only ([docs/dev-setup.md](docs/dev-setup.md#local-sccache)); it warns and builds without
-  it when sccache cannot be used. Worktrees and build folders go in
+  tools do this themselves (push gates, `./dev gen check`, `./dev`'s own build). Your own cargo calls need nothing in a fresh shell: `./dev sccache env`
+  (run once on a machine, and after a worktree is added) installs the pinned sccache, starts the one local server and writes
+  `<worktree root>/.cargo/config.toml` with `build.rustc-wrapper`, so every cargo below the worktree root compiles through it; the
+  wrapper starts the server again if it is down and runs plain rustc when it cannot, and an explicit `RUSTC_WRAPPER` wins
+  ([docs/dev-setup.md](docs/dev-setup.md#local-sccache)). `eval "$(./dev sccache env)"` still sets the variables for one shell. Worktrees and build folders go in
   `<dev-targets>` (the parent of the worktree root; this machine's folders are in
   [docs/dev-setup.md](docs/dev-setup.md#where-things-live), the one place that names a disk, rule 40). The worktree root is
   machine config, not code: `git config paddock.worktreeRoot <dev-targets>/wt` (repo-local, so it covers every worktree), or

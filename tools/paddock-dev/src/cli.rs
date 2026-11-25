@@ -852,7 +852,11 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
             for w in local_sccache::shell_warnings(&env) {
                 eprintln!("{w}");
             }
-            let lines = local_sccache::prepare_and_say(&env, local_sccache::Install::OnDemand).map(|r| local_sccache::shell_lines(&r)).unwrap_or_default();
+            let ready = local_sccache::prepare_and_say(&env, local_sccache::Install::OnDemand);
+            if let Some(r) = &ready {
+                local_sccache::say_machine_config(&env, r);
+            }
+            let lines = ready.map(|r| local_sccache::shell_lines(&r)).unwrap_or_default();
             Ok(Report::new(serde_json::json!({ "lines": lines }), lines.join("\n")))
         }
         Command::Disk { command } => disk::command(command),
