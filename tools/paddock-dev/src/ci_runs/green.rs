@@ -351,7 +351,7 @@ impl Touched {
         }
         match PROJECT_JOBS
             .iter()
-            .find(|(_, prefixes)| prefixes.iter().any(|p| job.starts_with(p)))
+            .find(|(_, prefixes)| prefixes.iter().any(|p| p.split('|').any(|q| job.starts_with(q))))
         {
             Some((flag, _)) => self.flags.contains(*flag) || (*flag == "e2e" || *flag == "e2e-webkit") && self.flags.contains("ui"),
             None => true,
