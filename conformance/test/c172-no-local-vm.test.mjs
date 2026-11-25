@@ -31,3 +31,11 @@ test('C172: the check passes its own positive control and reports warnings only'
   assert.equal(out[0].severity, 'warn');
   assert.equal(check.mode, 'report-only');
 });
+
+test('C172: developer commands and shared crates are in scope, CI-only dev code is not', () => {
+  const t = 'let c = "tools/linux-container.sh --id paddock";\n';
+  assert.deepEqual(localVmSites(t, 'crates/paddock-testkit/src/golden.rs'), [1]);
+  assert.deepEqual(localVmSites(t, 'tools/paddock-dev/src/golden_cmd.rs'), [1]);
+  assert.deepEqual(localVmSites(t, 'tools/paddock-dev/src/gates/ci.rs'), []);
+  assert.deepEqual(localVmSites(t, 'tools/paddock-dev/src/ci_run/x.rs'), []);
+});

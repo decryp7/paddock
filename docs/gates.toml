@@ -1119,8 +1119,8 @@ approved = "user"
 id = "C172"
 reason = "ER-41: report-only until its first green run on the real tree, recorded by run id here and in C172-no-local-vm.mjs, then flip the mode to gate. It flags a docker, podman, nerdctl, orb, orbctl, vmrun or linux-container.sh call in local gate code (tools/paddock-dev/src/pre_push, tools/githooks, lefthook.yml); CI-only scripts are out of scope. Positive control: the detector must flag its own sample, else check broken"
 owner = "NEW-no-local-vm: local gates never start a VM or a container on the Mac (user 2026-11-26; feat/no-local-linux-container)"
-since = 2026-11-26
-review_by = 2026-12-26
+since = 2026-11-25
+review_by = 2026-12-09
 approved = "user"
 
 # Retired check ids (ADR 0060 section 5): an id that existed, the commit that removed it and where its job went. Docs may still name

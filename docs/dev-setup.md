@@ -280,14 +280,9 @@ author: that call belongs there. The Rust `heavy` tool (`tools/heavy`) makes no 
   folders (and `*.golden` and `*.snap` files) for uid and gid numbers, `/Users`, `/home` and `C:\Users` paths and temp paths, by
   fixed patterns, so it gives the same result on every machine; it walks the working folder today (reading git's tracked list is
   the approved train-14 item). A value that is fine (an invented user) gets an entry with a reason in `conformance/c131-allow.json`.
-  **Rewriting:** `PADDOCK_UPDATE_GOLDEN=1` rewrites a differing golden and prints the command that runs that test on Linux as root
-  in the CI image (`tools/linux-container.sh --id paddock --ci-image -- sh -c 'cd <package folder> && cargo nextest run -p <package> <test>'`;
-  the test name comes from `NEXTEST_TEST_NAME`). Run it before you commit the file. `./dev golden confirm [-p <package>] <test filter>`
-  (from the workspace of the test, or `--manifest-dir <folder>`) runs the filtered tests on this machine and in that image and passes
-  only when both pass; a filter that selects no test fails with "no test matched the filter", and a filter starting with `-` is
-  refused. The container needs Docker or OrbStack and obeys `PADDOCK_LINUX_CPUS`, `PADDOCK_LINUX_JOBS`, `PADDOCK_LINUX_MEMORY`,
-  `PADDOCK_LINUX_USER`, `PADDOCK_LINUX_CI_REGISTRY` and `PADDOCK_LINUX_HOST_ARCH` (ER-14), all passed through. On an arm64 Mac the CI
-  image is a local arm64 build (not the registry's amd64 image).
+  **Rewriting:** `PADDOCK_UPDATE_GOLDEN=1` rewrites a differing golden and says that CI's Linux job confirms it as root on the Linux runner
+  (push the branch). No container or VM runs on this Mac (user, 2026-11-26; docs/rules.md NEW-no-local-vm), so `./dev golden confirm` and the
+  local CI-image run are gone.
 - **Checked (conformance C37):** a `tests/<name>.rs` outside `tests/it/` fails unless `ownTestBinaries` of
   `paddock.conformance.json` names it with the reason it needs its own binary, and every workspace member needs a CI test
   step and the workspace-hack dependency.

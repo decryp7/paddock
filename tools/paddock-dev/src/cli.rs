@@ -1,6 +1,6 @@
 use crate::{
     audit, check, check_ids, ci_build_env, ci_build_jobs, ci_host, ci_isolation, ci_run, ci_runs, ci_rust_pin, ci_s3_guard, ci_setup_rust,
-    disk, gates, generators, golden_cmd, heavy_cmd, heavy_install, hook, input_hash, ipc_endpoints, lessons_driver, load, local_sccache,
+    disk, gates, generators, heavy_cmd, heavy_install, hook, input_hash, ipc_endpoints, lessons_driver, load, local_sccache,
     locks, locks_guard, merge_check, places, plan_cmd, pr, pre_push, queue, release_isolation, slots, test_features, wait, worktree,
 };
 use clap::{Args, Parser, Subcommand};
@@ -38,11 +38,6 @@ enum Command {
     Heavy(heavy_cmd::HeavyArgs),
     /// Install the `heavy` binary of a release into `<dev-targets>/heavy/bin`: downloads the asset for this OS, checks its SHA256SUMS entry, renames it into place, records the version.
     HeavyInstall(heavy_install::InstallArgs),
-    /// Golden files: `confirm <test filter>` runs the tests on this machine and in the CI image as root; passes only if both pass.
-    Golden {
-        #[command(subcommand)]
-        command: golden_cmd::GoldenCommand,
-    },
     /// One line for the coordinator: start, hold or stop for new agents, from the load, the free disk of the dev-targets folder and the CI queue (ER-24).
     Load(load::LoadArgs),
     /// The machine's dev folders, derived from `git config paddock.worktreeRoot` (docs/dev-setup.md): dev-targets, dev-disk,
@@ -769,7 +764,6 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
         Command::Wait(a) => wait::command(&a),
         Command::Heavy(a) => heavy_cmd::command(&a),
         Command::HeavyInstall(a) => heavy_install::command(&a),
-        Command::Golden { command } => golden_cmd::command(command),
         Command::Load(a) => load::command(&a),
         Command::Places(a) => places::command(&a),
         Command::Audit { command } => audit::command(command),

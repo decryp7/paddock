@@ -2,13 +2,15 @@
 // Mac. Linux checks are CI's Linux jobs on the Linux runner, Windows checks the Windows runner. The container rows were the Mac's largest
 // load (clippy-linux, tests-linux, warm-linux, golden confirm).
 //
-// Flagged, in the code the local gates run: tools/paddock-dev/src/pre_push/ (Rust, outside tests.rs, *_tests.rs and the
+// Flagged, in the code the local gates and developer commands run: tools/paddock-dev/src/ (Rust, outside src/gates/ and ci_*.rs, the CI-only
+// code) and crates/*/src (golden.rs printed a container command)
+// (Rust, outside tests.rs, *_tests.rs and the
 // `#[cfg(test)]` tail of a file), tools/githooks/ and lefthook.yml: a string literal or a command word that names docker, podman,
 // nerdctl, orb, orbctl, vmrun or `linux-container.sh`. Whole-line comments are not read. CI-only scripts (.gitea/, conformance/ci/,
 // tools/linux-container.sh itself) are not in scope. A site that is fine carries `// conformance: no-local-vm — <why>` on its line or
 // the line above.
 // Positive control (ER-33): the detector first runs on a built-in sample that must be flagged; if it is not, the check is broken.
-// ER-41: report-only until its first green run on the real tree, recorded in docs/gates.toml; review date 2026-12-26.
+// ER-41: report-only until its first green run on the real tree, recorded in docs/gates.toml; review date 2026-12-09.
 import { error, unwaivable, warn } from '../finding.mjs';
 
 const WAIVER = /conformance:\s*no-local-vm\s*[—–-]+\s*\S.{2,}/;
@@ -18,7 +20,7 @@ const IN_STRING = new RegExp(`"(?:[^"\\n]*/)?(?:${TOOLS})(?:[\\s"])`);
 // A shell command word: at the start of a line, or after ; & | ( or $(.
 const COMMAND_WORD = new RegExp(`(?:^|[;&|(]|\\$\\()\\s*(?:sudo\\s+)?(?:[\\w./-]*/)?(?:${TOOLS})(?:\\s|$)`);
 
-const IN_SCOPE = /^(?:tools\/paddock-dev\/src\/pre_push\/[^/]+\.rs|tools\/githooks\/.+|lefthook\.ya?ml)$/;
+const IN_SCOPE = /^(?:tools\/paddock-dev\/src\/(?!gates\/|ci_)[^]+\.rs|crates\/[^/]+\/src\/[^]+\.rs|tools\/githooks\/.+|lefthook\.ya?ml)$/;
 const TEST_FILE = /(?:^|\/)tests\.rs$|_tests?\.rs$/;
 
 /** The 1-based lines of `text` (file `file`) that start a VM or container. Empty for a file that is not local gate code. */
