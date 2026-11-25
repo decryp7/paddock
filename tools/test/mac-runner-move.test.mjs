@@ -44,7 +44,7 @@ const agent = (home, name, extraEnv = '') => `<?xml version="1.0" encoding="UTF-
 `;
 
 /** A scratch Mac with three runner lanes, each a loaded LaunchAgent with its runner folder. */
-function mac({ root = true, unregistered = [], silent = [], psUser = USER, program = true, parkedByHand = false, dev = '/dt-test', signing = 'unsigned', jobPolls = 0, bootstrapFails = [], notRunning = [] } = {}) {
+function mac({ root = true, unregistered = [], silent = [], psUser = USER, program = true, parkedByHand = false, dev = '/dt-test', signing = 'unsigned', jobPolls = 0, jobScript = null, bootstrapFails = [], notRunning = [] } = {}) {
   const home = scratch('paddock-runner-home-');
   const sys = scratch('paddock-runner-sys-');
   const bin = scratch('paddock-runner-bin-');
@@ -93,13 +93,18 @@ esac`);
   // `ps -axo pid=,ppid=,command=` is the process table: the lane's runner (pid 4242) and, while the job's polls last, a job's
   // processes under it (each read of the table is one poll, so a job "ends" after N reads, never after a time). Any other call asks
   // for a process user.
-  write(bin, { jobpolls: `${jobPolls}\n` });
+  // `jobScript` ('1,1,0,1,0'): one answer per read of the table instead, 1 a job under the runner and 0 none, then none for ever.
+  write(bin, { jobpolls: `${jobPolls}\n`, jobscript: jobScript ? jobScript.split(',').join('\n') + '\n' : '' });
   shim(bin, 'ps', `case "$*" in
   *-axo*)
     echo "    1     0 /sbin/launchd"
     echo " 4242     1 ${home}/runners/lane-a/gitea-runner daemon --config ${home}/runners/lane-a/config.yaml"
-    n=$(cat "${bin}/jobpolls")
-    if [ "$n" -gt 0 ]; then echo "$((n - 1))" > "${bin}/jobpolls"; echo " 5001  4242 /bin/bash -e /tmp/act/step.sh"; echo " 5002  5001 ./dev ci run crates"; fi ;;
+    if [ -s "${bin}/jobscript" ]; then
+      n=$(head -1 "${bin}/jobscript"); tail -n +2 "${bin}/jobscript" > "${bin}/jobscript.n"; mv "${bin}/jobscript.n" "${bin}/jobscript"
+    else
+      n=$(cat "${bin}/jobpolls"); [ "$n" -le 0 ] || echo "$((n - 1))" > "${bin}/jobpolls"
+    fi
+    if [ "$n" -gt 0 ]; then echo " 5001  4242 /bin/bash -e /tmp/act/step.sh"; echo " 5002  5001 ./dev ci run crates"; fi ;;
   *) echo " ${psUser}" ;;
 esac`);
   shim(bin, 'chown');
@@ -397,7 +402,8 @@ test('install does not wait when no job runs (positive control: the same lanes w
   const r = move(m, ['install', ...LANES]);
   assert.equal(r.status, 0, r.out);
   assert.match(r.out, /No job is running/);
-  assert.ok(!calls(m.bin).some((l) => l.startsWith('launchctl kill')), 'nobody was told to drain');
+  assert.doesNotMatch(r.out, /waiting for the job/);
+  assert.equal(calls(m.bin).filter((l) => l.startsWith('launchctl kill SIGTERM')).length, 3, 'every loaded lane is told to take no new job, idle or not');
 });
 
 test('install that waits past --wait-max changes nothing, ends nothing and says so; the old daemon keeps running', { skip }, () => {
@@ -437,4 +443,34 @@ test('a daemon that does not start is a failure: launchctl bootstrap refusing, a
   assert.match(waiting.out, /fail\s+lane-a \(system\): .*state is 'spawn scheduled', not running/);
   // Positive control (ER-33): the same lanes with a daemon that starts pass.
   assert.equal(move(mac(), ['install', ...LANES]).status, 0);
+});
+
+test('a job that starts in the window between the end of the wait and the boot-out is seen and waited for, never booted out under', { skip }, () => {
+  // Only lane-a is loaded. The table's answers: a job, the job still there, none (the wait is over), a NEW job (read by the check
+  // just before the boot-out), still there, none, none (the check passes and the lane is stopped).
+  const m = mac({ parkedByHand: true, jobScript: '1,1,0,1,1,0,0' });
+  const r = move(m, ['install', '--user', USER, '--daemon', 'lane-a', '--wait-max', '60']);
+  assert.equal(r.status, 0, r.out);
+  assert.match(r.out, /a job started on lane-a before it could be stopped; waiting for it too/);
+  assert.equal(readFileSync(join(m.bin, 'jobscript'), 'utf8'), '', 'every answer was read: the check ran again after the new job');
+  const log = calls(m.bin).filter((l) => l.startsWith('launchctl '));
+  assert.equal(log.filter((l) => l.startsWith('launchctl kill SIGTERM')).length, 2, 'the runner is told again, in case launchd had restarted it');
+  assert.equal(log.filter((l) => /^launchctl bootout gui\/501\/.*lane-a$/.test(l)).length, 1, 'one boot-out, after the last job ended');
+  assert.ok(r.out.indexOf('a job started on lane-a') < r.out.indexOf('+ launchctl bootout'), 'the boot-out came after the new job was waited for');
+  assert.deepEqual(loadedJobs(m), [`system/${PREFIX}lane-a`]);
+  // Positive control (ER-33): the same lane with no new job in the window is stopped without the second wait.
+  const calm = mac({ parkedByHand: true, jobScript: '1,1,0,0' });
+  const c = move(calm, ['install', '--user', USER, '--daemon', 'lane-a', '--wait-max', '60']);
+  assert.equal(c.status, 0, c.out);
+  assert.doesNotMatch(c.out, /a job started on/);
+});
+
+test('a job that keeps starting in the window is bounded by --wait-max too', { skip }, () => {
+  const m = mac({ parkedByHand: true, jobPolls: 0, jobScript: Array(5000).fill('1').join(',') });
+  const before = snapshot(m.home, m.sys);
+  const r = move(m, ['install', '--user', USER, '--daemon', 'lane-a', '--wait-max', '1']);
+  assert.notEqual(r.status, 0, r.out);
+  assert.match(r.out, /still runs a job after 1 s; nothing was changed/);
+  assert.deepEqual(snapshot(m.home, m.sys), before);
+  assert.ok(!calls(m.bin).some((l) => l.startsWith('launchctl bootout')), 'never booted out under a job');
 });

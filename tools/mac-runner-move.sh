@@ -23,7 +23,9 @@
 # 30 s, how long it has waited, until every job has ended or --wait-max is over. At the end of the wait it fails with the old runner
 # still loaded and nothing changed on disk; it never ends a job or a helper itself (the job's own cleanup does, ER-51), and it finds
 # nothing by name: the runner's pid is read from `launchctl print` of its label, and its jobs are the processes under that pid.
-# Only then does it stop, swap and start, and verify: the new daemon must be `state = running` in `launchctl print` and have logged
+# Each lane is then booted out with its check for a job and its boot-out back to back (launchd starts a runner that exited, and that
+# one may have taken a job): a job seen there sends install back into the same bounded wait, so a boot-out never meets a job.
+# Only then does it swap and start, and verify: the new daemon must be `state = running` in `launchctl print` and have logged
 # "declare successfully"; a `launchctl bootstrap` that fails is a failed lane too.
 #
 # install: preflight (nothing changes if a lane cannot be rendered), then per lane: the daemon plist to /Library/LaunchDaemons
@@ -340,43 +342,70 @@ task_line() {
   [ -f "$log" ] && grep -E 'task [0-9]+' "$log" 2>/dev/null | tail -1 | cut -c1-200
 }
 
-# Before anything changes: every named lane whose runner runs a job is told to take no new job, and install waits, up to --wait-max,
-# until every job has ended, printing which job runs and how long it has waited. Past --wait-max it fails with nothing changed.
-wait_for_jobs() {
-  local name domain label pid procs busy=() line
+# Before anything changes, every loaded lane is stopped without ending a job: its runner is told to take no new job, install waits, up
+# to --wait-max, until no runner runs a job (printing which job runs and how long it has waited), and then boots each lane out. The
+# check and the boot-out of a lane are back to back, and a job seen by the check (one a restarted runner took, since launchd starts a
+# runner that exited) sends install back into the same bounded wait, so a boot-out never meets a job. Past --wait-max it fails with
+# nothing changed: only signals were sent, no lane was booted out and no file touched.
+stop_lanes() {
+  local name domain label pid procs line lanes=() busy=() still stopped=" " again
   for name in $(all_lanes); do
     domain=$(domain_of "$name"); [ -n "$domain" ] || continue
-    label=$(label_of "$name"); pid=$(runner_pid "$domain" "$label"); [ -n "$pid" ] || continue
-    procs=$(job_processes "$pid"); [ -n "$procs" ] || continue
-    busy+=("$name")
-    echo "- $name: a job is running ($domain/$label, runner pid $pid)"
-    line=$(task_line "$name" "$domain"); [ -z "$line" ] || echo "    log: $line"
-    printf '%s\n' "$procs" | head -5 | sed 's/^/    process: /'
+    lanes+=("$name")
+    label=$(label_of "$name"); pid=$(runner_pid "$domain" "$label"); procs=""
+    [ -z "$pid" ] || procs=$(job_processes "$pid")
+    if [ -n "$procs" ]; then
+      busy+=("$name")
+      echo "- $name: a job is running ($domain/$label, runner pid $pid)"
+      line=$(task_line "$name" "$domain"); [ -z "$line" ] || echo "    log: $line"
+      printf '%s\n' "$procs" | head -5 | sed 's/^/    process: /'
+    fi
     if [ "$dry" -eq 1 ]; then
-      echo "  would wait for the job on $name (at most ${wait_max}s), after telling its runner to take no new job: launchctl kill SIGTERM $domain/$label"
+      [ -z "$procs" ] || echo "  would wait for the job on $name (at most ${wait_max}s), after telling its runner to take no new job: launchctl kill SIGTERM $domain/$label"
     else
       step launchctl kill SIGTERM "$domain/$label" || fail "$name: the runner could not be told to take no new job (launchctl kill failed); nothing was changed" "launchctl print $domain/$label"
     fi
   done
-  if [ ${#busy[@]} -eq 0 ]; then echo "No job is running on any lane."; return 0; fi
-  [ "$dry" -eq 0 ] || return 0
-  local began=$SECONDS next=$SECONDS still
+  [ ${#busy[@]} -gt 0 ] || echo "No job is running on any lane."
+  [ "$dry" -eq 0 ] && [ ${#lanes[@]} -gt 0 ] || return 0
+  local began=$SECONDS next=$SECONDS
   while :; do
     still=()
-    for name in "${busy[@]}"; do
+    for name in "${lanes[@]}"; do
+      case "$stopped" in *" $name "*) continue ;; esac
       domain=$(domain_of "$name"); [ -n "$domain" ] || continue
       pid=$(runner_pid "$domain" "$(label_of "$name")"); [ -n "$pid" ] || continue
       procs=$(job_processes "$pid"); [ -z "$procs" ] || still+=("$name")
     done
-    if [ ${#still[@]} -eq 0 ]; then echo "  all jobs have finished (waited $((SECONDS - began)) s)"; return 0; fi
-    if [ $((SECONDS - began)) -ge "$wait_max" ]; then
-      fail "${still[0]} still runs a job after ${wait_max} s; nothing was changed: no file and no launchd job, no process was ended (the runner takes no new job, finishes this one and launchd starts it again when it exits)" "wait for the job and run install again, or give it longer with --wait-max SECONDS"
+    if [ ${#still[@]} -gt 0 ]; then
+      if [ $((SECONDS - began)) -ge "$wait_max" ]; then
+        fail "${still[0]} still runs a job after ${wait_max} s; nothing was changed: no file and no launchd job, no process was ended (the runner takes no new job, finishes this one and launchd starts it again when it exits)" "wait for the job and run install again, or give it longer with --wait-max SECONDS"
+      fi
+      if [ "$SECONDS" -ge "$next" ]; then
+        echo "  .. waiting for the job on ${still[*]} ($((SECONDS - began)) s of at most ${wait_max} s): $(printf '%s\n' "$procs" | head -1)"
+        next=$((SECONDS + report))
+      fi
+      sleep "$poll"; continue
     fi
-    if [ "$SECONDS" -ge "$next" ]; then
-      echo "  .. waiting for the job on ${still[*]} ($((SECONDS - began)) s of at most ${wait_max} s): $(printf '%s\n' "$procs" | head -1)"
-      next=$((SECONDS + report))
-    fi
-    sleep "$poll"
+    [ ${#busy[@]} -eq 0 ] || { echo "  all jobs have finished (waited $((SECONDS - began)) s); stopping the lanes"; busy=(); }
+    # Every runner is idle: stop each lane now, the check and the boot-out back to back. A job seen here is waited for, not stopped.
+    again=0
+    for name in "${lanes[@]}"; do
+      case "$stopped" in *" $name "*) continue ;; esac
+      domain=$(domain_of "$name")
+      if [ -n "$domain" ]; then
+        label=$(label_of "$name"); pid=$(runner_pid "$domain" "$label"); procs=""
+        [ -z "$pid" ] || procs=$(job_processes "$pid")
+        if [ -n "$procs" ]; then
+          echo "  .. a job started on $name before it could be stopped; waiting for it too"
+          step launchctl kill SIGTERM "$domain/$label" || fail "$name: the runner could not be told to take no new job (launchctl kill failed); nothing was booted out" "launchctl print $domain/$label"
+          again=1; break
+        fi
+        step launchctl bootout "$domain/$label"
+      fi
+      stopped="$stopped$name "
+    done
+    [ "$again" -eq 1 ] || return 0
   done
 }
 
@@ -405,7 +434,7 @@ install() {
   preflight
   echo
   echo "Jobs"
-  wait_for_jobs
+  stop_lanes
   echo
   echo "Install"
   local name failed=0 rc
@@ -486,7 +515,7 @@ lanes_args() {
 rollback() {
   echo "Rollback to the LaunchAgents of $user"
   echo "Jobs"
-  wait_for_jobs
+  stop_lanes
   local name restored=() failed=0 rc
   for name in ${daemons[@]+"${daemons[@]}"}; do
     local label target; label=$(label_of "$name"); target=$(daemon_plist "$name")

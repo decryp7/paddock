@@ -4336,5 +4336,8 @@ startup"; the Chromium start judge, ADR 0031). A start that hands back a handle 
   end of the wait they fail with nothing changed. Nothing is ended by name or by pid: the job's own cleanup ends its helpers (ER-51). The
   verify step also requires launchd's `state = running`, and a failing `launchctl bootstrap` is a failed lane.
 - **Not measured.** The log line the wait prints for "which job" (`task <id> ...`) and the rule that an idle runner has no child process
-  were taken from the runner's behaviour as known, not read from a real run; the tests use stand-ins. The window between the end of the
-  wait and the boot-out is a few seconds, in which a restarted runner could take a job.
+  were taken from the runner's behaviour as known, not read from a real run; the tests use stand-ins.
+- **Follow-up, the same day.** launchd starts a runner that exited, and a restarted runner could take a job between the end of the wait
+  and the boot-out. Every loaded lane is now told to take no new job at the start, and each lane's check for a job and its boot-out are
+  back to back; a job seen there sends install back into the same bounded wait and tells the runner again. What stays is the time between
+  that check and the boot-out call itself (milliseconds, against a runner that needs seconds to register and fetch a task).
