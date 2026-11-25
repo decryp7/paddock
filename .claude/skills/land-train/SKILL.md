@@ -15,7 +15,7 @@ Arguments: `$ARGUMENTS` (the train branch first, then its members). Work in the 
 4. Once, on the final combined tree: `./dev check --pre-push`. A "not measured" row is not a pass; fix it or say so.
 5. Push the train once.
 6. Dispatch `ci.yml` on the train with `./dev ci dispatch ci.yml --ref <train-branch> --max <duration>`, then wait with `./dev wait --ci-run <id> --max <duration>`.
-7. On red, fix and run a failed-only round first: dispatch with the `since_run` input set to the failed run number (`./dev plan --since-run <id>` shows the plan). Check that every failed test really ran in that round: not filtered out, not skipped. Use "rerun failed jobs" only for a suspected flake (ER-12).
+7. On red, fix and run a failed-only round first: dispatch with the `since_run` input set to the failed run number (`./dev plan --since-run <id>` shows the plan). Check that every failed test really ran in that round: not filtered out, not skipped. Use "rerun failed jobs" only for a suspected flake (ER-12). After any fix commit on the train, rerun the member gate on the new head (`./dev check --pre-push --member-gate --base <the head before the fix>`) before the push (train c retro).
 8. When every round is green, dispatch one full run on the final head: a plain dispatch with no `base` and no `since_run`. Nothing lands without it (ER-10).
 9. Land: fast-forward main to the train head (`git merge --ff-only`, never a rebase or squash), in the integrator's worktree. The merge queue (`./dev queue tick`) does this step when it runs the landing.
 10. If the run was green with FLAKY tests of code the change did not touch, record them: `./dev ci fix-items --workflow ci.yml --sha <the landed commit>` (ER-12).
