@@ -57,18 +57,15 @@ jobs:
       # One fixed folder on the boot disk, not the runner's tool cache on the external work volume: the browser is its own
       # responsible process, so the runner's Full Disk Access does not cover it, and a LaunchDaemon cannot show the Removable
       # Volumes prompt. Playwright keeps one build per browser revision there and removes builds no installed Playwright uses.
-      # Then it is signed with the Mac CI identity (tools/mac-ci-signing.sh; a notice and no signature where the runner has none).
+      # Then it is signed with the Mac CI identity from its default keychain (tools/mac-ci-signing.sh; a notice and no signature
+      # where the runner has none).
       # docs/dev-setup.md, "Mac CI runner".
       - name: Chromium
         run: |
           BROWSERS="$HOME/Library/Caches/paddock-ci/ms-playwright"
           echo "PLAYWRIGHT_BROWSERS_PATH=$BROWSERS" >> "$GITHUB_ENV"
           PLAYWRIGHT_BROWSERS_PATH="$BROWSERS" npx playwright install chromium
-          if [ -n "${PADDOCK_CI_SIGNING_KEYCHAIN:-}" ]; then
-            bash ../../../tools/mac-ci-signing.sh sign-playwright --if-configured "$BROWSERS"
-          else
-            echo "::notice::Playwright's browsers keep their ad-hoc signature (PADDOCK_CI_SIGNING_KEYCHAIN is not set)"
-          fi
+          bash ../../../tools/mac-ci-signing.sh sign-playwright --if-configured "$BROWSERS"
       - name: Regenerate into a scratch folder and compare with the tracked pictures
         run: |
           # The job slot's own port (conformance/ci/ports.txt); the scratch folder is the runner's temp, never the checkout.

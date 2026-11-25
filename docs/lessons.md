@@ -4233,7 +4233,7 @@ raised timeout as the fix.
   50120, `dev-tool.yml` on main) was green with no Removable Volumes request, because the runner's current cdhash still had its
   grant; the next runner update would have lost it.
 - **Fix in this change.** One self-signed identity (`tools/mac-ci-signing.sh`): `mac-runner-move.sh install` signs the runner,
-  `install-test-browser.mjs` signs Chrome for Testing, `dyno-screenshots.yml` keeps Playwright's browsers on the boot disk and signs
+  `install-test-browser.mjs` signs Chrome for Testing (CI jobs only, identity from its default keychain, no runner configuration), `dyno-screenshots.yml` keeps Playwright's browsers on the boot disk and signs
   them. The user grants Full Disk Access once by that identity (docs/dev-setup.md, "Full Disk Access by a stable identity").
 - **Open.** Whether the TCC grant for the re-signed bundle holds was not measured before the user's one-time steps; the check is the
   TCC log after the first Mac run that starts a browser.

@@ -357,18 +357,18 @@ signed; CI builds are never signed.
 
 The keychain is a file of its own, `~/Library/Keychains/paddock-ci-signing.keychain-db`, unlocked with the random password in
 `~/.config/paddock/ci-signing.pass` (0600), because the daemon has no unlocked login keychain and no window for a dialog. The CI
-hooks sign only where the runner's environment sets `PADDOCK_CI_SIGNING_KEYCHAIN`; a developer's Mac and the tests never sign.
+hooks find it at that default path (`PADDOCK_CI_SIGNING_KEYCHAIN` only overrides it), so the runner needs no configuration; without
+it they print a notice and sign nothing. They sign only in a CI job (the runner's own `GITEA_ACTIONS` or `PADDOCK_CI_HOME`), so a
+developer's Mac and the tests never sign, even with the identity in place.
 
 **Your one-time steps** (an agent never runs these; rule 7, ER-14). From the repository root, as yourself:
 
 1. **Create the identity** (once; idempotent, `--dry-run` shows the steps): `bash tools/mac-ci-signing.sh create`, then
    `bash tools/mac-ci-signing.sh identity` prints its SHA-1.
-2. **Tell the runner where it is:** add to `~/gitea-runner/config.yaml`, under `runner:` `envs:`,
-   `PADDOCK_CI_SIGNING_KEYCHAIN: /Users/<you>/Library/Keychains/paddock-ci-signing.keychain-db`.
-3. **Sign the runner and restart it:** `sudo bash tools/mac-runner-move.sh install --user <you> --daemon d7-mac-mini --retire d7-mac-mini-2 --retire d7-mac-mini-3`
+2. **Sign the runner and restart it:** `sudo bash tools/mac-runner-move.sh install --user <you> --daemon d7-mac-mini --retire d7-mac-mini-2 --retire d7-mac-mini-3`
    (it stops the runner after its running job, signs it, starts it and checks it declared itself). `status` then says
    `signature the Mac CI identity`.
-4. **Full Disk Access** (System Settings, Privacy & Security, Full Disk Access). Remove the old entries first, since they hold the
+3. **Full Disk Access** (System Settings, Privacy & Security, Full Disk Access). Remove the old entries first, since they hold the
    ad-hoc cdhash and no longer match: `gitea-runner` (all three: `~/gitea-runner/`, `~/gitea-runners/d7-mac-mini-2/`,
    `~/gitea-runners/d7-mac-mini-3/`). Then add with `+` (Cmd-Shift-G types a path; Cmd-Shift-. shows hidden folders), each
    switched on:
@@ -377,14 +377,14 @@ hooks sign only where the runner's environment sets `PADDOCK_CI_SIGNING_KEYCHAIN
      `/Volumes/vault-dev/ci/home/test-browser-paddock-s1/chrome-mac-arm64/Google Chrome for Testing.app` (after a Mac CI run
      has installed and signed it; check with `bash tools/mac-ci-signing.sh check "<that .app>"`). The entry is by bundle id, so
      it covers every copy and every later pin.
-5. **Check:** `bash tools/mac-ci-signing.sh check --identifier net.decryptology.gitea-runner ~/gitea-runner/gitea-runner`, and
+4. **Check:** `bash tools/mac-ci-signing.sh check --identifier net.decryptology.gitea-runner ~/gitea-runner/gitea-runner`, and
    after the next Mac run `log show --last 1h --predicate 'subsystem == "com.apple.TCC" AND eventMessage CONTAINS "Removable"'`.
 
-**After a runner update:** replace the binary, then run step 3 again. The Full Disk Access entry stays (same path, same DR).
+**After a runner update:** replace the binary, then run step 2 again. The Full Disk Access entry stays (same path, same DR).
 **A new browser pin** is signed by CI and needs nothing. **Not needed:** an entry for Playwright's browsers (they live on the boot
 disk and are signed for when they do touch the volume; add `chrome-headless-shell` only if the TCC log names it, as its entry is by
 path and the path holds Playwright's revision), and for `pitcrew-service` (CI runs it only as a child of the runner).
-**Rotating the certificate** (it is valid for 10 years) means: move the keychain away, `create`, then steps 3 and 4 again.
+**Rotating the certificate** (it is valid for 10 years) means: move the keychain away, `create`, then steps 2 and 3 again.
 
 ## Things that cost time when forgotten
 
