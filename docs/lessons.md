@@ -4079,3 +4079,18 @@ Measuring and reporting (2026-11-24)
 - A report-only gate must report where people look: the job summary, one `::warning::` per finding in CI, the terminal locally, with a
   test that a planted finding appears there. The test-cost check (ADR 0121) first wrote into passing tests' stderr, which nextest
   hides (ER-41).
+
+## Text is LF in every checkout (user decision, 2026-11-25)
+- **What.** `* text=auto` left the line endings of a checkout to the OS: Windows wrote CRLF, and tests that compare text or search for
+  `\n` failed three times: the Windows portability lesson (CRLF checkouts change `\n`), the dyno-helper service file (a unit and a
+  `#!/bin/sh` script with CRLF), and the `plan_graph_ci` fixture (the nightly's Windows leg, 2026-11-25). Each was fixed in its own
+  file by a path rule in `.gitattributes` or a `replace("\r\n", "\n")` in a test.
+- **Fix.** The root `.gitattributes` says `* text=auto eol=lf` (the apps' and the template's own files repeat it, because their
+  `* text=auto` line overrides the root's `text`). Exceptions: `*.cmd` and `*.bat` keep CRLF for cmd.exe; byte-exact inputs are
+  `-text` (the fixtures, goldens and corpora, and Debrief's three CRLF parser samples, which `git add --renormalize` would have
+  turned to LF). The renormalise changed no other file. Git rewrites only what a checkout changes, so an existing clone keeps its
+  CRLF files: after this lands, delete the Windows runner's kept clones once so the next job clones fresh.
+- **Rule of thumb.** Never convert line endings in a test or a tool because of a checkout; that is the attributes' job. Convert only
+  input a user or another program may send as CRLF. A new file that must be CRLF or byte-exact gets its own attribute line.
+- **Class (ER-21).** Recorded as an instance of: a test that bakes in the author's OS (see the Windows portability lesson); this is
+  its third instance, closed at the cause (the attribute) instead of at each test.
