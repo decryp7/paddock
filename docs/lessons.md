@@ -4326,4 +4326,3 @@ startup"; the Chromium start judge, ADR 0031). A start that hands back a handle 
   and every extra worktree would hold and cold-build its own copy, while the lock costs only a wait on the same folder.
 - **Not this.** The coordinator found the failure also deterministic in the combined lib-plus-`it` run of one worktree; the lock does not
   claim that cause (a test touching the target folder, `current_exe` or permissions is being looked for).
-

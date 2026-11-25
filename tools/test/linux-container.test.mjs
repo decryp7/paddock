@@ -328,7 +328,7 @@ async function until(what, ready, ms = 20_000) {
   const end = Date.now() + ms;
   while (!ready()) {
     assert.ok(Date.now() < end, `no signal: ${what}`);
-    await new Promise((r) => setTimeout(r, 25));
+    await new Promise((r) => setTimeout(r, 25)); // conformance: hang-guard — polls a file or an output line the row writes, ends the test after 20 s
   }
 }
 
