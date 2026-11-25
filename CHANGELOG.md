@@ -4,6 +4,13 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### Plugins: progress outside 0 to 1 does not decode (nightly fuzz run 9021)
+- `paddock-plugin-api`: `HostCall::Report.progress`, `Host::report`, `ToolCtx::report` and `FakeHost::reports` take the new
+  `protocol::Progress`, which holds only a finite fraction from 0 to 1 (`Progress::new` returns `ProgressError` otherwise). A plugin's
+  NaN, infinite or out-of-range progress is refused at decode (`invalid`) instead of decoding and being clamped by the host;
+  `paddock-plugin-host`'s `TaskObserver::report` and `RunningTask::progress` carry `Progress` too. Breaking for plugins: build the value
+  with `Progress::new(fraction)`.
+
 ### Tests: doctests are off (user, 2026-11-24)
 - Every library target has `[lib] doctest = false` and every runnable doc example is now a ```` ```text ```` block; no `cargo test --doc`
   runs in the push or member gate (a `doctests` row says so, a skip, never a pass), in ci.yml's crate job, the app-gates action,
