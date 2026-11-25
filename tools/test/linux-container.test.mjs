@@ -8,10 +8,25 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { spawn, spawnSync } from 'node:child_process';
 import { job, loadWorkflow, loadYaml } from '../../conformance/test/lib/workflow.mjs';
 
-/** A fake docker: records every call; `image inspect` fails (no image yet) unless HAVE_IMAGE is set; `build` reads its Dockerfile from stdin like the real one (an unread pipe would end the script's printf with SIGPIPE). */
-function docker({ ps = '', images = [] } = {}) {
-  const bin = scratch('paddock-bin-');
-  shim(bin, 'docker', `case "$1 $2" in "image inspect") [ -n "$HAVE_IMAGE" ];; "ps -aq") echo "${ps}";; "image ls") printf '%s\\n' ${images.join(' ')};; "build "*) cat >/dev/null;; esac`);
+/** A fake docker: records every call; `image inspect` fails (no image yet) unless HAVE_IMAGE is set or a build of this fake made that
+ * tag; `image ls` prints `images` (`ref`, or `ref<TAB>created`); `build` reads its Dockerfile from stdin like the real one (an unread
+ * pipe would end the script's printf with SIGPIPE), sleeps BUILD_SLEEP seconds when set, and marks its `-t` tag as built. */
+function docker({ ps = '', images = [], dir } = {}) {
+  const bin = dir ?? scratch('paddock-bin-');
+  writeFileSync(join(bin, 'images.txt'), images.map((i) => `${i}\n`).join(''));
+  shim(
+    bin,
+    'docker',
+    `state="${bin}"
+case "$1 $2" in
+  "image inspect") [ -n "$HAVE_IMAGE" ] || [ -e "$state/built-$3" ];;
+  "ps -aq") echo "${ps}";;
+  "image ls") cat "$state/images.txt";;
+  "build "*) cat >/dev/null; while [ $# -gt 0 ]; do [ "$1" = -t ] && tag="$2"; shift; done
+    echo "start $tag" >> "$state/builds.log"; [ -z "$BUILD_SLEEP" ] || sleep "$BUILD_SLEEP"; echo "end $tag" >> "$state/builds.log"
+    : > "$state/built-$tag";;
+esac`,
+  );
   return bin;
 }
 const go = (bin, args, env = {}) => run('linux-container.sh', args, { bin, cwd: scratch(), env: { DOCKER: join(bin, 'docker'), ...env } });
@@ -56,7 +71,7 @@ test('--clean removes only containers with this app\'s label and only its volume
     'docker ps -aq --filter label=paddock.tools=dyno',
     'docker rm -f abc123 def456',
     'docker volume rm -f dyno-cargo-registry dyno-linux-target dyno-linux-target-arm64',
-    'docker image ls --filter label=paddock.tools=dyno --format {{.Repository}}:{{.Tag}}',
+    'docker image ls --filter label=paddock.tools=dyno --format {{.Repository}}:{{.Tag}}\t{{.CreatedAt}}',
   ]);
   const none = docker();
   go(none, ['--id', 'dyno', '--clean']);
@@ -87,10 +102,10 @@ test('--image runs a ready image as it is: no inspect, no build, the platform pa
 });
 
 /** A repository root with the files --ci-image reads. */
-function ciRepo() {
+function ciRepo(variant = '') {
   return write(scratch(), {
     'ci-image/VERSION': '3\n',
-    'ci-image/Dockerfile': 'FROM ${GARAGE_IMAGE}\n',
+    'ci-image/Dockerfile': `FROM \${GARAGE_IMAGE}\n${variant}`,
     'ci-image/garage-arm64.Dockerfile': 'FROM base\n',
     'ci-image/fetch-verified.sh': '#!/bin/sh\n',
     'ci-image/verify.sh': '#!/bin/sh\n',
@@ -189,28 +204,87 @@ test('a checkout with a .git folder needs no extra git mount; its pre-push state
   assert.ok(runLine.includes('type=tmpfs,target=/work/.git/paddock-pre-push'), runLine);
 });
 
-test('a new arm64 build removes this id\'s older local CI images and keeps the new pair; --clean removes them all, never another image', () => {
-  const images = ['paddock-ci-local:v3-arm64-aaaaaaaaaaaa', 'paddock-garage-local:arm64-aaaaaaaaaaaa', 'paddock-linux-dev:1', 'someone-else:latest'];
+test('a new arm64 build keeps the newest two local CI images (each with its garage image) and removes older ones; --clean removes them all, never another image', () => {
+  const T = (ref, created) => `${ref}\t${created}`;
+  // An older pair from another worktree's hash: kept, as one of the newest two (it was removed before 2026-11-26, and that worktree
+  // rebuilt for about 20 min).
+  const images = [T('paddock-ci-local:v3-arm64-aaaaaaaaaaaa', '2026-11-25 10:00:00 +0800 +08'), T('paddock-garage-local:arm64-aaaaaaaaaaaa', '2026-11-25 09:50:00 +0800 +08'), 'paddock-linux-dev:1', 'someone-else:latest'];
   const bin = docker({ images });
   const repo = ciRepo();
   const r = go(bin, ['--id', 'paddock', '--root', repo, '--ci-image', '--', 'true'], { PADDOCK_LINUX_HOST_ARCH: 'arm64' });
   assert.equal(r.status, 0, r.out);
   const log = calls(bin);
-  assert.ok(log.includes('docker image ls --filter label=paddock.tools=paddock --format {{.Repository}}:{{.Tag}}'), log.join('\n'));
-  const removed = log.filter((l) => l.startsWith('docker image rm'));
-  assert.deepEqual(removed, ['docker image rm paddock-ci-local:v3-arm64-aaaaaaaaaaaa', 'docker image rm paddock-garage-local:arm64-aaaaaaaaaaaa']);
-  assert.match(r.out, /removed the old local image paddock-ci-local:v3-arm64-aaaaaaaaaaaa/);
+  assert.ok(log.some((l) => l.startsWith('docker image ls --filter label=paddock.tools=paddock --format {{.Repository}}:{{.Tag}}')), log.join('\n'));
+  assert.deepEqual(log.filter((l) => l.startsWith('docker image rm')), [], 'two pairs: nothing is removed');
   const fresh = log.find((l) => l.startsWith('docker build') && l.includes('ci-image/Dockerfile')).match(/-t (\S+)/)[1];
-  const kept = docker({ images: [fresh] });
-  go(kept, ['--id', 'paddock', '--root', repo, '--ci-image', '--', 'true'], { PADDOCK_LINUX_HOST_ARCH: 'arm64' });
-  assert.ok(!calls(kept).some((l) => l.startsWith('docker image rm')), 'the image just built stays');
+  const freshSum = fresh.split('-').at(-1);
 
-  const all = docker({ images });
+  // A third hash: the oldest pair goes, the two newest stay (listed oldest last here, so the order is the creation time's, not the list's).
+  const three = [
+    T('paddock-ci-local:v3-arm64-000000000000', '2026-11-24 08:00:00 +0800 +08'),
+    T('paddock-garage-local:arm64-000000000000', '2026-11-24 07:50:00 +0800 +08'),
+    ...images,
+  ];
+  const evict = docker({ images: [T(fresh, '2026-11-26 01:00:00 +0800 +08'), T(`paddock-garage-local:arm64-${freshSum}`, '2026-11-26 00:50:00 +0800 +08'), ...three] });
+  const r3 = go(evict, ['--id', 'paddock', '--root', ciRepo('changed'), '--ci-image', '--', 'true'], { PADDOCK_LINUX_HOST_ARCH: 'arm64' });
+  assert.equal(r3.status, 0, r3.out);
+  const removed = calls(evict).filter((l) => l.startsWith('docker image rm'));
+  // The fake lists three pairs (fresh, aaaa, 0000); the two newest by creation time stay, whatever order docker lists them in.
+  assert.deepEqual(removed.sort(), [
+    'docker image rm paddock-ci-local:v3-arm64-000000000000',
+    'docker image rm paddock-garage-local:arm64-000000000000',
+  ]);
+  assert.match(r3.out, /removed the old local image paddock-ci-local:v3-arm64-000000000000/);
+
+  // A second run with the old inputs builds nothing: its image is still there.
+  const again = docker({ dir: bin });
+  const r2 = go(again, ['--id', 'paddock', '--root', repo, '--ci-image', '--', 'true'], { PADDOCK_LINUX_HOST_ARCH: 'arm64' });
+  assert.equal(r2.status, 0, r2.out);
+  assert.equal(calls(again).filter((l) => l.startsWith('docker build')).length, 2, 'only the first run built (garage and image)');
+
+  const all = docker({ images: three });
   assert.equal(go(all, ['--id', 'paddock', '--clean']).status, 0);
-  assert.deepEqual(calls(all).filter((l) => l.startsWith('docker image rm')), removed);
-  const nobuild = docker({ images });
+  assert.deepEqual(calls(all).filter((l) => l.startsWith('docker image rm')).sort(), [
+    'docker image rm paddock-ci-local:v3-arm64-000000000000',
+    'docker image rm paddock-ci-local:v3-arm64-aaaaaaaaaaaa',
+    'docker image rm paddock-garage-local:arm64-000000000000',
+    'docker image rm paddock-garage-local:arm64-aaaaaaaaaaaa',
+  ]);
+  const nobuild = docker({ images: three });
   go(nobuild, ['--id', 'paddock', '--root', repo, '--ci-image', '--', 'true'], { PADDOCK_LINUX_HOST_ARCH: 'arm64', HAVE_IMAGE: '1' });
-  assert.ok(!calls(nobuild).some((l) => l.startsWith('docker image')  && !l.startsWith('docker image inspect')), 'no build, no clean-up');
+  assert.ok(!calls(nobuild).some((l) => l.startsWith('docker image') && !l.startsWith('docker image inspect')), 'no build, no clean-up');
+});
+
+test('two worktree roots with the same ci-image content get the same tag, and one build: the second waits for the build lock', async () => {
+  const bin = docker();
+  const common = write(scratch(), { 'HEAD': 'ref: refs/heads/main\n' });
+  const a = ciRepo();
+  const b = ciRepo();
+  const tag = (root) => {
+    const r = go(docker(), ['--id', 'paddock', '--root', root, '--ci-image', '--image-ready'], { PADDOCK_LINUX_HOST_ARCH: 'arm64' });
+    return r.out.match(/(paddock-ci-local:\S+)/)[1];
+  };
+  assert.equal(tag(a), tag(b), 'the tag is the content hash, not the path');
+  assert.notEqual(tag(a), tag(ciRepo('changed')), 'control: other content, another tag');
+  // Both start at once on the same hash; the lock (in a shared folder: TMPDIR stands in for the common git folder) lets one build.
+  const { spawn } = await import('node:child_process');
+  const start = (root) =>
+    new Promise((resolve) => {
+      const c = spawn('bash', [join(TOOLS, 'linux-container.sh'), '--id', 'paddock', '--root', root, '--ci-image', '--', 'true'], {
+        env: { PATH: `${bin}:/usr/bin:/bin`, HOME: common, TMPDIR: common, DOCKER: join(bin, 'docker'), PADDOCK_LINUX_HOST_ARCH: 'arm64', BUILD_SLEEP: '1' },
+        stdio: ['ignore', 'ignore', 'pipe'],
+        timeout: 60_000,
+      });
+      let out = '';
+      c.stderr.on('data', (d) => (out += d));
+      c.on('close', (code) => resolve({ code, out }));
+    });
+  const [ra, rb] = await Promise.all([start(a), start(b)]);
+  assert.equal(ra.code, 0, ra.out);
+  assert.equal(rb.code, 0, rb.out);
+  const builds = readFileSync(join(bin, 'builds.log'), 'utf8').trim().split('\n');
+  assert.equal(builds.filter((l) => l.startsWith('start ')).length, 2, `one build of the pair (garage, image), not two: ${builds.join(', ')}`);
+  assert.match(ra.out + rb.out, /was built while waiting for its build lock/);
 });
 
 /** Every `-e NAME=` the script passes to docker run. */

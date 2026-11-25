@@ -65,32 +65,39 @@ pub fn green_base(
     let repo = env("GITHUB_REPOSITORY").unwrap_or_else(|| "decryp7/paddock".into());
     let token = env("PLAN_TOKEN").unwrap_or_default();
     let mut client = Client::new(http, &server, &repo, &token);
-    green_base_in(&mut client, root, warn)
+    let before = crate::ci_runs::green::push_before(env);
+    green_base_in(&mut client, root, "HEAD", before.as_deref(), warn)
 }
 
-/// [`green_base`] over a client already made.
-fn green_base_in(
+/// [`green_base`] over a client already made; `before` is main's tip before the push (the push event's); the candidates are main's own
+/// line to `head` ([`crate::ci_runs::green::main_line`]), as `ci reuse` reads them.
+pub(crate) fn green_base_in(
     client: &mut crate::ci_runs::client::Client,
     root: &Path,
+    head: &str,
+    before: Option<&str>,
     warn: &mut dyn FnMut(&str),
 ) -> Result<Option<(String, u64)>, String> {
-    let first_parent = crate::ci_runs::green::first_parent_before(root, "HEAD");
-    green_base_over(client, root, &first_parent, warn)
+    green_base_over(client, root, head, false, before, warn)
 }
 
-/// The base over the commits given (`first_parent`: newest first): the last one the one definition of green accepts. A push to main
-/// asks it over the commits before its head; a train's landing dispatch over main's own commits (`ci_runs::landing`, ADR 0117 WP-8).
+/// The base over main's own line to `head` ([`green::main_line`]): the newest commit the one definition of green accepts. A push to main
+/// asks it before its head (`include_head` false, `before` its event's); a train's landing dispatch from main's tip, tip included
+/// (`ci_runs::landing`, ADR 0117 WP-8).
 pub(crate) fn green_base_over(
     client: &mut crate::ci_runs::client::Client,
     root: &Path,
-    first_parent: &[String],
+    head: &str,
+    include_head: bool,
+    before: Option<&str>,
     warn: &mut dyn FnMut(&str),
 ) -> Result<Option<(String, u64)>, String> {
     use crate::ci_runs::{green, verdict};
     let scope = verdict::scope_decisive("ci.yml");
     // The run list is read once for the whole search, and handed to the measure of what each candidate touched.
     let found = green::Runs::read(client, "ci.yml").map(|runs| {
-        green::find_base_in(client, &runs, first_parent, scope, &mut |c, runs, s| {
+        let first_parent = green::main_line(root, head, include_head, before, &runs.main_tips());
+        green::find_base_in(client, &runs, &first_parent, scope, &mut |c, runs, s| {
             green::touched_in(c, "ci.yml", root, s, scope, Some(runs))
         })
     });
@@ -1024,7 +1031,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let mut client = crate::ci_runs::client::Client::new(&mut http, "https://gitea.invalid", "decryp7/paddock", "t");
         client.backoff_ms = 0;
-        let got = green_base_in(&mut client, root.path(), &mut |w| warned = w.to_string());
+        let got = green_base_in(&mut client, root.path(), "HEAD", None, &mut |w| warned = w.to_string());
         assert!(got.is_err(), "{got:?}");
         assert!(warned.starts_with("::warning::the CI runs of main could not be read ("), "{warned}");
         assert!(warned.ends_with("this run tests everything"), "{warned}");

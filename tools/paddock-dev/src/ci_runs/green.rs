@@ -739,6 +739,25 @@ impl Runs {
         }
         Ok(Runs(by_sha))
     }
+
+    /// The commits main has been at, newest first: those of push runs on main (a train lands by fast-forward, so each landing is one push
+    /// of main's branch). Main's first-parent line does not hold them ([`main_line`]).
+    pub fn main_tips(&self) -> Vec<String> {
+        let mut pushes: Vec<(u64, &str)> = self
+            .0
+            .values()
+            .flatten()
+            .filter(|r| r.event == "push" && r.head_branch == "main")
+            .map(|r| (r.id, r.head_sha.as_str()))
+            .collect();
+        pushes.sort_by_key(|(id, _)| std::cmp::Reverse(*id));
+        let mut seen = BTreeSet::new();
+        pushes
+            .into_iter()
+            .filter(|(_, sha)| seen.insert(*sha))
+            .map(|(_, sha)| sha.to_string())
+            .collect()
+    }
 }
 
 /// The last first-parent commit (`first_parent`: newest first, the asking commit itself left out) whose outcome is complete and green
@@ -846,6 +865,90 @@ pub fn first_parent_before(root: &std::path::Path, sha: &str) -> Vec<String> {
     crate::plan_repo::git_text(root, &["rev-list", "--first-parent", "-n", &n, &range])
         .map(|t| t.lines().map(|l| l.trim().to_string()).filter(|l| !l.is_empty()).collect())
         .unwrap_or_default()
+}
+
+/// The candidate bases of a push to main that moved it from `before` to `sha`, newest first: main's own first-parent line from `before`
+/// (included), at most [`MAX_COMMITS`]. A train lands by fast-forward, so the first-parent line of `sha` is the train's: it holds the
+/// train's merges of main but never main's previous tip, and a search over it skipped that tip and found an older base (push run
+/// 9056 read b3ad2dd2d, two mains back, while train g's landing run 9054 had tested the diff from 4284e23d5, the main it moved from).
+/// Without a usable `before` (none, the zero id of a new branch, not a commit of this clone, or not an ancestor of `sha`: a forced
+/// push) it is [`first_parent_before`], whose base is only older: a wider diff, never a missed one.
+pub fn push_chain(root: &std::path::Path, sha: &str, before: Option<&str>) -> Vec<String> {
+    let usable = before.filter(|b| b.len() == 40 && b.bytes().all(|c| c.is_ascii_hexdigit()) && b.bytes().any(|c| c != b'0') && *b != sha);
+    // Exit 0 of `merge-base --is-ancestor` is the only yes; exit 1 (no) and an unknown commit are both a failure here.
+    if let Some(b) = usable.filter(|b| crate::plan_repo::git_text(root, &["merge-base", "--is-ancestor", b, sha]).is_some()) {
+        let n = MAX_COMMITS.to_string();
+        let chain: Vec<String> = crate::plan_repo::git_text(root, &["rev-list", "--first-parent", "-n", &n, b])
+            .map(|t| t.lines().map(|l| l.trim().to_string()).filter(|l| !l.is_empty()).collect())
+            .unwrap_or_default();
+        if !chain.is_empty() {
+            return chain;
+        }
+    }
+    first_parent_before(root, sha)
+}
+
+/// The candidate bases on main's own line, newest first: the commits main has been at (`tips`, [`Runs::main_tips`]) that are ancestors of
+/// `head` (`head` itself only with `include_head`), then the first-parent line (from `head`'s parent for a push, whose `before` is given
+/// to [`push_chain`]; from `head` for a landing dispatch). A train lands by fast-forward and merges main's previous tip as a second parent
+/// (3258361e7 into train j), so the first-parent line of main's tip never meets it: the push's reuse and the next dispatch both lost the
+/// last complete commit that way. The one candidate line of the push's reuse, the planner's base and a landing dispatch's base.
+pub fn main_line(root: &std::path::Path, head: &str, include_head: bool, before: Option<&str>, tips: &[String]) -> Vec<String> {
+    let n = MAX_COMMITS.to_string();
+    let ancestors = |rev: &str| -> Vec<String> {
+        crate::plan_repo::git_text(root, &["rev-list", "-n", &n, rev])
+            .map(|t| t.lines().map(|l| l.trim().to_string()).filter(|l| !l.is_empty()).collect())
+            .unwrap_or_default()
+    };
+    let Some(head_sha) = crate::plan_repo::git_text(root, &["rev-parse", "--verify", "--quiet", &format!("{head}^{{commit}}")])
+        .map(|t| t.trim().to_string())
+        .filter(|t| !t.is_empty())
+    else {
+        return Vec::new();
+    };
+    let reach: BTreeSet<String> = ancestors(&head_sha).into_iter().collect();
+    let below = if include_head {
+        let mut line = vec![head_sha.clone()];
+        line.extend(first_parent_before(root, &head_sha));
+        line
+    } else {
+        push_chain(root, &head_sha, before)
+    };
+    let mut seen = BTreeSet::new();
+    tips.iter()
+        .filter(|t| reach.contains(*t) && (include_head || **t != head_sha))
+        .cloned()
+        .chain(below)
+        .filter(|c| seen.insert(c.clone()))
+        .collect()
+}
+
+/// Main's tip before this push: `before` of the push event (`GITHUB_EVENT_PATH`, read with serde) when the event is a push; `None`
+/// otherwise or when it cannot be read ([`push_chain`] then falls back to the first-parent line, the safe side).
+pub fn push_before(env: &dyn Fn(&str) -> Option<String>) -> Option<String> {
+    if env("GITHUB_EVENT_NAME").as_deref() != Some("push") {
+        return None;
+    }
+    let text = std::fs::read_to_string(env("GITHUB_EVENT_PATH")?).ok()?;
+    let event: serde_json::Value = serde_json::from_str(&text).ok()?;
+    event.get("before")?.as_str().map(str::to_string)
+}
+
+/// Whether a run that tested the diff `from..head` tested at least what the diff `base..head` holds: `from` is an ancestor of `base`
+/// and every path `base..head` changes is changed in `from..head` too (the planner plans from the changed paths). `false` whenever git
+/// cannot say: the push then runs its own.
+pub fn diff_covers(root: &std::path::Path, from: &str, base: &str, head: &str) -> bool {
+    if crate::plan_repo::git_text(root, &["merge-base", "--is-ancestor", from, base]).is_none() {
+        return false;
+    }
+    let paths = |a: &str| -> Option<BTreeSet<String>> {
+        crate::plan_repo::git_text(root, &["diff", "--name-only", "-z", "--no-renames", a, head])
+            .map(|t| t.split('\0').filter(|p| !p.is_empty()).map(str::to_string).collect())
+    };
+    match (paths(from), paths(base)) {
+        (Some(wide), Some(push)) => push.is_subset(&wide),
+        _ => false,
+    }
 }
 
 /// What the commits `base..head` touched: the plan of that range. `None` when it cannot be planned (a commit that is not in this
