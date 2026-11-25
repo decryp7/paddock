@@ -2066,15 +2066,11 @@ mod tests {
     #[test]
     fn heavys_lock_folder_goes_to_the_dev_targets_folder_unless_the_caller_names_one() {
         let dir = tempfile::tempdir().unwrap();
-        let mut env: HashMap<String, String> = [(crate::places::DEV_TARGETS_ENV.to_string(), "/dev-targets-x".to_string())].into();
+        // An absolute folder on every OS (`/dev-targets-x` is not absolute on Windows, so no folder was derived there).
+        let targets = dir.path().join("dev-targets-x");
+        let mut env: HashMap<String, String> = [(crate::places::DEV_TARGETS_ENV.to_string(), targets.display().to_string())].into();
         let got = heavy_dir_env(dir.path(), &env);
-        assert_eq!(
-            got[0],
-            (
-                HEAVY_DIR_VAR.to_string(),
-                PathBuf::from("/dev-targets-x/throttle").display().to_string()
-            )
-        );
+        assert_eq!(got[0], (HEAVY_DIR_VAR.to_string(), targets.join("throttle").display().to_string()));
         assert_eq!(got[1].0, "HEAVY_MOVED_FROM");
         env.insert("HEAVY_DIR".into(), "/mine".into());
         assert!(heavy_dir_env(dir.path(), &env).is_empty(), "the caller's own folder wins");
