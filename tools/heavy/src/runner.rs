@@ -488,17 +488,22 @@ fn exec(h: &Heavy, args: &[String], opts: RunOpts, stop: Stop<'_>, acq: &mut Acq
     cmd.args(&args[1..]);
     // The correlation id travels to the command, so its own logs can be matched to this run.
     cmd.env("DEVKIT_RUN_ID", h.log.run_id());
-    // ER-48: the threads a step may use are set so that steps at once times jobs each stay within the cores. The caller's own value wins
-    // (ER-47: children inherit the environment; a caller that set it chose it).
-    if std::env::var_os("CARGO_BUILD_JOBS").is_none() {
-        let jobs = crate::gate::jobs_per_step(h.cfg.cpus, h.cfg.slots);
-        cmd.env("CARGO_BUILD_JOBS", jobs.to_string());
+    // ER-48: the threads a step may use are its share of the cores: a step admitted while `n` may run gets `1/n` of them, so steps at
+    // once times threads stay within the cores. The caller's own values win (ER-47: children inherit the environment; a caller that set
+    // one chose it).
+    let share = acq.share();
+    let env = crate::gate::step_env(h.cfg.cpus, share, &|k| {
+        std::env::var_os(k).map(|v| v.to_string_lossy().into_owned())
+    });
+    if !env.is_empty() {
+        let set: Vec<String> = env.iter().map(|(k, v)| format!("{k}={v}")).collect();
         h.log.info(
             "heavy.run",
-            "CARGO_BUILD_JOBS set for the step",
-            &[("Jobs", json!(jobs)), ("MaxSlots", json!(h.cfg.slots)), ("Cpus", json!(h.cfg.cpus))],
+            "threads set for the step",
+            &[("Share", json!(share)), ("Cpus", json!(h.cfg.cpus)), ("Set", json!(set))],
         );
     }
+    cmd.envs(env);
     // The prompt policy (ER-47, named: paddock_env::command::no_prompts): no standard input and no toolchain auto-install, so a
     // tool that asks "install X? [Y/n]" cannot hold the slot for hours (cargo llvm-cov did, 2026-11-20). HEAVY_STDIN=inherit opts in.
     paddock_env::command::no_prompts(&mut cmd);

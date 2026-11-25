@@ -65,27 +65,28 @@ command runs: a waiter does not break the lock of a SIGKILLed heavy whose comman
 
 ## Slots follow the load
 
-`HEAVY_SLOTS` (or `--slots N`) is the most steps that may run together: `auto` (the default) is about half the cores and at most
-5 (ER-24: about 5 builders on a 14-core Mac), a number is that maximum, 1 is one at a time. How many run at a moment is
-`gate::allowed_slots`, read by the head of the queue on every poll:
+`HEAVY_SLOTS` (or `--slots N`) is the most steps that may run together: `auto` (the default) is a step per 4 cores and at most 2
+(`MAX_AUTO_SLOTS`: three at once finished fewer push-gate rows per hour than two), a number is that maximum (never above 2: no limit is
+measured beyond it), 1 is one at a time. How many run at a moment
+is `gate::allowed_slots`, read by the head of the queue on every poll (user decision 2026-11-25: several slots when the machine is idle
+enough, one otherwise):
 
-- the cores the **15-minute load** leaves free, 2 cores a step (`CARGO_BUILD_JOBS=2`): `(cores - load15) / 2`, rounded down, between 1
-  and the maximum. The count is of all steps running, heavy's own included: their load is already in the average (late), so the rule
-  is the stricter reading of one thing, never a sum;
-- one while the **CPU idle share** is under 30 %, and one while the **1-minute load** is at or over the core count (the fast brake: a
-  burst the 15-minute average has not seen). `make -l N` and `ninja -l N` are the same shape, a count of jobs and a load brake; they
-  use the 1-minute load alone, which reacts at once and flaps; this opens on the 15-minute load and closes on either;
-- the **memory available** (free plus reclaimable) after a reserve of 2 GiB, 3 GiB a step (`MEMORY_RESERVE_MB`, `MEMORY_PER_SLOT_MB` in `gate.rs`, the one
-  place they are decided): a second step is refused when it would not fit. On 2026-11-22 free memory fell to about 1 GB while load and CPU still looked
-  acceptable (ER-24). The first step always runs;
-- one when the load, the idle share or the memory is unknown (Windows has no load average; the first CPU reading needs a sampling interval, it
-  is taken when heavy starts and a second one 200 ms later). Unknown is never read as plenty (ER-33).
+- the **5-minute load**: 2 under `SLOT_LOAD_SHARE[0]` (0.85) of the cores (11.9 on the 14-core Mac), else 1 (`gate.rs`, the one place they
+  are decided; the numbers come from the measurement in docs/benchmarks.md, "Concurrent push-gate test rows on the shared Mac"). The
+  count is of all steps running, heavy's own included: their load is in the average;
+- the **memory available** (free plus reclaimable) after a reserve of 2 GiB, 3 GiB a step (`MEMORY_RESERVE_MB`, `MEMORY_PER_SLOT_MB`): a
+  second step is refused when it would not fit. On 2026-11-22 free memory fell to about 1 GB while load and CPU still looked acceptable
+  (ER-24). The first step always runs;
+- one while a container run is going (it runs alone), and one when the load or the memory is unknown (Windows has no load average).
+  Unknown is never read as plenty (ER-33).
 
 Common practice: Bazel's `--local_resources` / `--jobs` and the cargo and make jobservers admit work by a resource budget (cores, RAM), not by one
-step at a time; `make -l` and `ninja -l` add a load brake. This rule is the same shape with the 15-minute load and a memory budget.
+step at a time; `make -l` and `ninja -l` add a load brake. This rule is the same shape with the 5-minute load and a memory budget.
 
-**Each step's threads (ER-48).** The command gets `CARGO_BUILD_JOBS` = `min(2, cores / most steps at once)` unless the caller already set one (the
-caller's value wins, ER-47), so steps at once times jobs stay within the cores. It is logged once (`heavy.run`, `Jobs`).
+**Each step's threads (ER-48).** A step admitted while `n` steps may run gets `1/n` of the cores (`gate::step_threads`):
+`NEXTEST_TEST_THREADS` and `RUST_TEST_THREADS` = `cores / n` (all of them for a step alone), `CARGO_BUILD_JOBS` = that, at most 2 (the
+family's cap). The caller's own values win (ER-47). So 2 steps at once on 14 cores run 7 test threads each, not 14. Logged once
+(`heavy.run`, "threads set for the step", `Share`).
 
 ## Quick rows go first (the history)
 

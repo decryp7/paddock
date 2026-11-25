@@ -32,7 +32,7 @@ pub struct Config {
     /// A container run that has waited this long for the machine to be free of other steps makes everyone else wait for it
     /// (a drain marker), so a stream of other steps cannot keep it out for good. Default: a sixth of `priority_max`.
     pub drain_after: Duration,
-    /// The most heavy steps that may run together (the "Auto" default is `gate::auto_max_slots`, at most 5). How many do run
+    /// The most heavy steps that may run together (the "Auto" default is `gate::auto_max_slots`, at most `gate::MAX_AUTO_SLOTS`). How many do run
     /// together at a given moment is `gate::allowed_slots`: this is only its upper bound; 1 means one at a time, always.
     pub slots: u32,
     /// The number of CPU cores the slot rule counts against the load (`HEAVY_CPUS`, else what the OS says).
@@ -237,7 +237,7 @@ mod tests {
             ("HEAVY_GATE_LOAD", "-1"),
             ("HEAVY_CPUS", "4"),
         ]);
-        assert_eq!((c.poll, c.slots, c.gate_load), (Duration::from_secs(5), 2, 30.0));
+        assert_eq!((c.poll, c.slots, c.gate_load), (Duration::from_secs(5), 1, 30.0));
         assert_eq!(w.len(), 3, "{w:?}");
     }
 
@@ -257,7 +257,7 @@ mod tests {
     fn defaults() {
         let (c, _) = Config::from_env(&|k| (k == "HEAVY_CPUS").then(|| "14".to_string()), true);
         assert_eq!(c.root, PathBuf::from(LEGACY_ROOT));
-        assert_eq!((c.gate_load, c.slots, c.wait_log), (30.0, 5, Duration::from_secs(60)));
+        assert_eq!((c.gate_load, c.slots, c.wait_log), (30.0, 2, Duration::from_secs(60)));
         assert!(c.log_path("2026-10-31").ends_with("heavy-logs/heavy.2026-10-31.log"));
     }
 }

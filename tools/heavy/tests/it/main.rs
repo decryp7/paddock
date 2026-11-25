@@ -9,4 +9,5 @@ mod priority;
 mod procutil;
 mod props;
 mod real;
+mod share;
 mod slots;
