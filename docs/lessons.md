@@ -3886,9 +3886,10 @@ first and records the second (`ci fix-items`) is part of the queued green-main w
   objects from earlier fetches, so `git rev-list` cut at the shallow boundary listed 0 commits without an error.
 - **Fix.** The fixture edit works on either line ending (`app_job_reads_any_app`, regression test with a CRLF copy).
   `replay::members` refuses a shallow clone with its cause (it also serves `./dev plan --replay`), regression test
-  `members_of_a_shallow_clone_are_refused_not_listed_short`. The replay test reports `::warning::NOT MEASURED` on a macOS or Windows
-  shallow clone and still fails on a shallow Linux clone, because the Linux legs check out the whole history and measure it.
-- **Rule of thumb.** A test that edits a checked-out text file normalises line endings first. A test that reads the real history checks
-  `is_shallow` before trusting an empty answer.
+  `members_of_a_shallow_clone_are_refused_not_listed_short`. The replay test is Linux only (`#[cfg(target_os = "linux")]`, ER-52): it
+  is OS-independent and only the Linux legs check out the whole history. A cfg, because the nightly ignores `hostTests`; a
+  warn-and-return on a shallow clone would show PASS for a check that did not run (ER-33).
+- **Rule of thumb.** A test that edits a checked-out text file normalises line endings first. Code that reads the real history checks
+  `is_shallow` before trusting an empty answer; an OS-independent test that needs the history runs on Linux only.
 - **Class (ER-21).** CRLF checkouts that break text tests on Windows: the third instance (see the Windows-portability lesson and the
   dyno-helper-service CRLF lesson). Proposed to the user: check out LF on every OS (`* text=auto eol=lf`, `*.cmd` stays CRLF).
