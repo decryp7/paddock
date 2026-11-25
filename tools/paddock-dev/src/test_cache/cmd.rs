@@ -35,6 +35,9 @@ pub struct TestCacheArgs {
     /// Skip reused targets even in shadow mode (the switch of docs/test-cache.toml is not on yet). For measuring.
     #[arg(long)]
     reuse: bool,
+    /// Only these packages, comma separated (a smaller run, for measuring; the default is every package of the workspace).
+    #[arg(long)]
+    only: Option<String>,
     /// The cargo build folder (default: the workspace's own `target`).
     #[arg(long)]
     build_dir: Option<String>,
@@ -143,7 +146,14 @@ pub fn command(a: &TestCacheArgs) -> Result<Report, CliError> {
         "audit" => Ok(audit(&local)),
         "lookup" | "run" => {
             let cfg = Config::read(&root).map_err(fail)?;
-            let cands = candidates(&root, &a.workspace)?;
+            let mut cands = candidates(&root, &a.workspace)?;
+            if let Some(only) = &a.only {
+                let want: Vec<&str> = only.split(',').collect();
+                cands.retain(|c| want.contains(&c.target.package.as_str()));
+                if cands.len() != want.len() {
+                    return Err(fail(format!("::error::ci test-cache: --only names a package the workspace `{}` does not have. Next step: check the names.", a.workspace)));
+                }
+            }
             run(a, &root, &cfg, &cands, store)
         }
         other => Err(fail(format!("::error::ci test-cache: unknown action `{other}`. Next step: use `run`, `lookup` or `audit`."))),
@@ -199,7 +209,7 @@ fn run(a: &TestCacheArgs, root: &Path, cfg: &Config, cands: &[Candidate], store:
     if !left.is_empty() {
         let asked: Vec<String> = left.iter().map(|c| c.target.package.clone()).collect();
         let t0 = std::time::Instant::now();
-        let out = nextest(a, root, cfg, &asked, left.len() == cands.len())?;
+        let out = nextest(a, root, cfg, &asked, left.len() == cands.len() && a.only.is_none())?;
         ran_secs = t0.elapsed().as_secs_f64();
         let judged = super::result::judge(&out.0, &asked);
         let mut put: Vec<Record> = Vec::new();

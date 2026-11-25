@@ -306,3 +306,10 @@ fn an_s3_store_that_cannot_be_reached_fails_the_call_so_everything_runs() {
     let n = notice.expect("a notice names the cause");
     assert!(!n.contains("s3cr3t"), "{n}");
 }
+
+#[test]
+fn the_exclusion_filter_names_the_reused_packages_only() {
+    let (a, b) = (Target::rust("crates/a", "a", "crates"), Target::rust("crates/b", "b", "crates"));
+    assert_eq!(exclude_filter(&[]), "");
+    assert_eq!(exclude_filter(&[&a, &b]), "not (package(=a) | package(=b))");
+}

@@ -171,3 +171,12 @@ pub fn write_allowed(env: &dyn Fn(&str) -> Option<String>) -> Result<(), String>
         Err(format!("only main and train runs write records, this run is on `{r}`"))
     }
 }
+
+/// The nextest filterset that leaves the reused packages out: `not (package(=a) | package(=b))`, the form of
+/// [`crate::plan_ci::package_filter`]; empty when nothing is reused. A gate that narrows its own filter ANDs this with it.
+pub fn exclude_filter(reused: &[&Target]) -> String {
+    if reused.is_empty() {
+        return String::new();
+    }
+    format!("not ({})", reused.iter().map(|t| format!("package(={})", t.package)).collect::<Vec<_>>().join(" | "))
+}
