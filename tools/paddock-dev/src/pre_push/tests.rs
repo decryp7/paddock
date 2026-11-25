@@ -3991,11 +3991,18 @@ mod member_tests {
         );
         assert!(
             command.contains("(cd crates && CARGO_TARGET_DIR=/target/v7/crates NEXTEST_TEST_THREADS=")
-                && command.contains("cargo nextest run --profile ci --locked --no-fail-fast --no-tests=fail --workspace --all-features -E 'package(=paddock-proc) | package(=paddock-chromium)'"),
+                && command.contains("cargo nextest run --tool-config-file paddock:/tmp/paddock-nextest-store-crates.toml --profile ci --locked --no-fail-fast --no-tests=fail --workspace --all-features -E 'package(=paddock-proc) | package(=paddock-chromium)'"),
             "{command}"
         );
         assert!(
             command.contains("(cd tools/paddock-dev && CARGO_TARGET_DIR=/target/v7/tools-paddock-dev"),
+            "{command}"
+        );
+        // The source tree is mounted read-only: nextest's run store goes into the build volume (found by the real run, 2026-11-25:
+        // "failed to create store dir at `/work/tools/paddock-dev/target/nextest/ci`: Read-only file system").
+        assert!(
+            command
+                .contains("printf '[store]\\ndir = \"/target/v7/crates/nextest\"\\n' > /tmp/paddock-nextest-store-crates.toml; (cd crates"),
             "{command}"
         );
         assert!(!command.contains("guardian-as-user"), "the guardian did not change: {command}");

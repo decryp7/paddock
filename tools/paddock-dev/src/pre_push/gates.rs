@@ -1135,14 +1135,16 @@ fn member_tests(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> {
 pub fn linux_tests_gate(chosen: &[(LinuxTarget, String)], version: &str, facts: &Facts, guardian: bool) -> Gate {
     let mut command = String::from("cargo nextest --version || exit 1; rc=0");
     for (t, filter) in chosen {
-        let args: Vec<String> = nextest_args(&t.ws, facts, &t.left_out, filter)
-            .iter()
-            .map(|a| shell_quote(a))
-            .collect();
+        let slug = slug(&t.ws);
+        // nextest keeps its run store in the workspace (`target/nextest`), which is the read-only mount here: a tool configuration
+        // (lower priority than the workspace's own) moves it into the build volume.
+        let store = format!("/tmp/paddock-nextest-store-{slug}.toml");
+        let mut args = nextest_args(&t.ws, facts, &t.left_out, filter);
+        args.splice(2..2, ["--tool-config-file".to_string(), format!("paddock:{store}")]);
+        let args: Vec<String> = args.iter().map(|a| shell_quote(a)).collect();
         command.push_str(&format!(
-            "; (cd {ws} && CARGO_TARGET_DIR=/target/v{version}/{slug} NEXTEST_TEST_THREADS={MEMBER_TEST_THREADS} cargo {args}) || rc=1",
+            "; printf '[store]\\ndir = \"/target/v{version}/{slug}/nextest\"\\n' > {store}; (cd {ws} && CARGO_TARGET_DIR=/target/v{version}/{slug} NEXTEST_TEST_THREADS={MEMBER_TEST_THREADS} cargo {args}) || rc=1",
             ws = t.ws,
-            slug = slug(&t.ws),
             args = args.join(" ")
         ));
     }
