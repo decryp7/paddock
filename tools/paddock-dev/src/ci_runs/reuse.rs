@@ -108,8 +108,8 @@ pub fn decide(client: &mut Client, workflow: &str, sha: &str, current: Option<u6
     decide_with(client, workflow, sha, current, verdict::scope_decisive(workflow), &root, before)
 }
 
-/// [`decide`] with the basis and the checkout given. The push's base is searched on main's own line ([`super::green::push_chain`]): a
-/// train lands by fast-forward, so the first-parent line of `sha` is the train's and never holds main's previous tip.
+/// [`decide`] with the basis and the checkout given. The push's base is searched on main's own line ([`super::green::main_line`]): a
+/// train lands by fast-forward, so the first-parent line of `sha` is the train's and never holds main's previous tips.
 pub fn decide_with(
     client: &mut Client,
     workflow: &str,
@@ -125,13 +125,13 @@ pub fn decide_with(
         sha,
         current,
         scope,
-        &mut || super::green::push_chain(root, sha, before),
+        &mut |tips| super::green::main_line(root, sha, false, before, tips),
         &mut |c, s| super::green::touched_in(c, workflow, root, s, scope, None),
         &mut |from, base| super::green::diff_covers(root, from, base, sha),
     )
 }
 
-/// [`decide_with`] with the way to read the push's candidate bases (newest first), what a commit's change touched, and whether a
+/// [`decide_with`] with the way to make the push's candidate bases (newest first) from main's tips (`tips`), what a commit's change touched, and whether a
 /// landing run's diff from `from` covers the push's diff from `base` (`covers(from, base)`, asked only when they differ) given.
 #[allow(clippy::too_many_arguments)]
 pub fn decide_with_touched(
@@ -140,7 +140,7 @@ pub fn decide_with_touched(
     sha: &str,
     current: Option<u64>,
     scope: bool,
-    first_parent: &mut dyn FnMut() -> Vec<String>,
+    first_parent: &mut dyn FnMut(&[String]) -> Vec<String>,
     touched: &mut dyn FnMut(&mut Client, &str) -> Option<super::green::Touched>,
     covers: &mut dyn FnMut(&str, &str) -> bool,
 ) -> Reuse {
@@ -149,7 +149,10 @@ pub fn decide_with_touched(
     // commit whose diff holds every file the push's does. Never a run that tested less than the push.
     let (v, landing_base) = verdict::landing_verdict_with(client, workflow, sha, current, scope, touched);
     if let Some(from) = landing_base {
-        let push_base = super::green::find_base(client, workflow, &first_parent(), scope, touched).map(|b| b.map(|b| b.sha));
+        let push_base = super::green::Runs::read(client, workflow).map(|runs| {
+            let chain = first_parent(&runs.main_tips());
+            super::green::find_base_in(client, &runs, &chain, scope, &mut |c, _, s| touched(c, s)).map(|b| b.sha)
+        });
         match push_base {
             Ok(Some(b)) if b == from || covers(&from, &b) => {}
             Ok(b) => {
@@ -436,7 +439,7 @@ mod tests {
                 SHA,
                 None,
                 true,
-                &mut Vec::new,
+                &mut |_| Vec::new(),
                 &mut |_, _| Some(t.clone()),
                 &mut |_, _| false,
             )

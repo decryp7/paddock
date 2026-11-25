@@ -935,7 +935,7 @@ fn a_push_reuses_a_landing_run_only_when_it_tested_the_pushs_own_diff() {
             &head,
             None,
             true,
-            &mut || vec![main.clone()],
+            &mut |_| vec![main.clone()],
             &mut |_, _| Some(touched(&[])),
             &mut |_, _| false,
         )
@@ -1114,6 +1114,137 @@ fn the_push_chain_is_mains_line_from_before_and_falls_back_to_the_first_parent_l
     ] {
         assert_eq!(push_chain(s.dir.path(), &s.y, before.as_deref()), train_line, "{before:?}");
     }
+}
+
+/// A temporary repository in the shape of main and trains i and j on 2026-11-26 (ER-46: invented ids): main at `b`, then `x` (a commit
+/// on main, a push run of its own); train i was cut from `b`, merged `x` and ended at `t`, to which main fast-forwarded; train j was
+/// cut from `t` and ended at `y`, to which main fast-forwarded. The first-parent line of `t` and `y` never meets `x`.
+struct Line {
+    dir: tempfile::TempDir,
+    b: String,
+    x: String,
+    t: String,
+    y: String,
+}
+
+fn train_ij_line() -> Line {
+    let dir = tempfile::tempdir().unwrap();
+    let git = |args: &[&str]| {
+        let out = crate::git_env::git()
+            .arg("-C")
+            .arg(dir.path())
+            .args([
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@example.invalid",
+                "-c",
+                "commit.gpgsign=false",
+            ])
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{args:?}: {}", String::from_utf8_lossy(&out.stderr));
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    };
+    let commit = |file: &str, msg: &str| {
+        std::fs::write(dir.path().join(file), format!("{msg}\n")).unwrap();
+        git(&["add", "-A"]);
+        git(&["commit", "-q", "-m", msg]);
+        git(&["rev-parse", "HEAD"])
+    };
+    git(&["init", "-q", "-b", "main"]);
+    let b = commit("base.txt", "b");
+    git(&["checkout", "-q", "-b", "train-i"]);
+    commit("member-i.txt", "member i");
+    git(&["checkout", "-q", "main"]);
+    let x = commit("x.txt", "x");
+    git(&["checkout", "-q", "train-i"]);
+    git(&["merge", "-q", "--no-ff", "-m", "merge main into train i", "main"]);
+    let t = git(&["rev-parse", "HEAD"]);
+    git(&["checkout", "-q", "main"]);
+    git(&["merge", "-q", "--ff-only", "train-i"]);
+    git(&["checkout", "-q", "-b", "train-j"]);
+    let y = commit("y.txt", "y");
+    git(&["checkout", "-q", "main"]);
+    git(&["merge", "-q", "--ff-only", "train-j"]);
+    Line { dir, b, x, t, y }
+}
+
+/// The runs of the line: complete pushes on `b` and `x`; train i's landing and push runs on `t` only narrowed (landing runs, never
+/// complete); train j's landing run on `y` narrowed from `x`, and the push run on `y` (`asking`) still going.
+fn train_ij_runs(l: &Line) -> Vec<Run> {
+    let landing = |id: u64, sha: &str, base: &str| {
+        let mut r = Run::train(id, sha, "success").partial(&landing_line(base, &[], &["app:debrief"]));
+        r.logs.push((r.jobs[1]["id"].as_u64().unwrap(), "ok\n".into()));
+        r
+    };
+    let mut asking = Run::push(9084, &l.y, "success");
+    asking.status = "in_progress";
+    asking.conclusion = "";
+    vec![
+        asking,
+        landing(9082, &l.y, &l.x),
+        Run::push(9080, &l.t, "success").partial(&landing_line(&l.x, &[], &["app:debrief"])),
+        Run::push(9073, &l.x, "success"),
+        Run::push(9030, &l.b, "success"),
+    ]
+}
+
+#[test]
+fn a_push_to_main_reuses_the_landing_run_when_main_moved_through_a_train_that_merged_an_older_tip() {
+    // Push run 9084 on main 595a0f688: main moved from t (train i's head) to y; the landing run tested the diff from x, main's last
+    // complete commit. The first-parent line of t skips x, so the push's own search found b, two mains back, and ran its own.
+    let l = train_ij_line();
+    let mut f = server_by_sha(&train_ij_runs(&l));
+    let r = crate::ci_runs::reuse::decide_with(&mut client(&mut f), "ci.yml", &l.y, Some(9084), true, l.dir.path(), Some(&l.t));
+    assert!(matches!(r, crate::ci_runs::reuse::Reuse::Skip { run: 9082, .. }), "{r:?}");
+}
+
+#[test]
+fn the_push_the_planner_and_the_next_landing_dispatch_find_the_same_base_on_mains_own_line() {
+    // One definition of complete, one candidate line: the push's reuse (above), the planner's base for a push and the landing base of
+    // train k's dispatch all name x. The dispatch said "no complete green ci run among main's newest commits" over the first-parent line.
+    let l = train_ij_line();
+    let mut f = server_by_sha(&train_ij_runs(&l));
+    let planned = crate::plan_cmd::green_base_in(&mut client(&mut f), l.dir.path(), "main", Some(&l.t), &mut |_| {});
+    assert_eq!(planned.unwrap().map(|b| b.0), Some(l.x.clone()), "the planner's base for the push");
+    let mut f = server_by_sha(&train_ij_runs(&l));
+    let landing = crate::plan_cmd::green_base_over(&mut client(&mut f), l.dir.path(), "main", true, None, &mut |_| {});
+    assert_eq!(
+        landing.unwrap().map(|b| b.0),
+        Some(l.x.clone()),
+        "the landing base of the next train"
+    );
+}
+
+#[test]
+fn the_next_landing_dispatch_takes_mains_tip_when_a_complete_push_run_tested_it() {
+    // The control: with a complete run on y itself, y is the base (the tip is a candidate), whatever the line below it holds.
+    let l = train_ij_line();
+    let mut runs = train_ij_runs(&l);
+    runs[0] = Run::push(9084, &l.y, "success");
+    let mut f = server_by_sha(&runs);
+    let landing = crate::plan_cmd::green_base_over(&mut client(&mut f), l.dir.path(), "main", true, None, &mut |_| {});
+    assert_eq!(landing.unwrap().map(|b| b.0), Some(l.y.clone()));
+}
+
+#[test]
+fn the_main_line_holds_main_tips_that_are_ancestors_only_and_falls_back_to_the_first_parent_line() {
+    let l = train_ij_line();
+    let elsewhere = "e".repeat(40);
+    let tips = vec![l.y.clone(), l.t.clone(), elsewhere, l.x.clone()];
+    let below = first_parent_before(l.dir.path(), &l.y);
+    assert_eq!(below.len(), 3, "t, train i's member and b: {below:?}");
+    let with = |head: Vec<&String>| head.into_iter().cloned().chain(below.iter().skip(1).cloned()).collect::<Vec<_>>();
+    // The tip and the tips below it that are ancestors, then the first-parent line (without what is already there).
+    assert_eq!(main_line(l.dir.path(), "main", true, None, &tips), with(vec![&l.y, &l.t, &l.x]));
+    // A push's own commit is left out; an unknown tip (a forced-away commit) never becomes a candidate.
+    assert_eq!(main_line(l.dir.path(), &l.y, false, Some(&l.t), &tips), with(vec![&l.t, &l.x]));
+    // No tips (the run list holds no push of main): the first-parent line, as before.
+    let mut line = vec![l.y.clone()];
+    line.extend(below);
+    assert_eq!(main_line(l.dir.path(), "main", true, None, &[]), line);
 }
 
 #[test]

@@ -1733,7 +1733,7 @@ mod tests {
             SHA,
             None,
             true,
-            &mut Vec::new,
+            &mut |_| Vec::new(),
             &mut |_, _| Some(Touched::default()),
             &mut |_, _| false,
         );

@@ -739,6 +739,25 @@ impl Runs {
         }
         Ok(Runs(by_sha))
     }
+
+    /// The commits main has been at, newest first: those of push runs on main (a train lands by fast-forward, so each landing is one push
+    /// of main's branch). Main's first-parent line does not hold them ([`main_line`]).
+    pub fn main_tips(&self) -> Vec<String> {
+        let mut pushes: Vec<(u64, &str)> = self
+            .0
+            .values()
+            .flatten()
+            .filter(|r| r.event == "push" && r.head_branch == "main")
+            .map(|r| (r.id, r.head_sha.as_str()))
+            .collect();
+        pushes.sort_by_key(|(id, _)| std::cmp::Reverse(*id));
+        let mut seen = BTreeSet::new();
+        pushes
+            .into_iter()
+            .filter(|(_, sha)| seen.insert(*sha))
+            .map(|(_, sha)| sha.to_string())
+            .collect()
+    }
 }
 
 /// The last first-parent commit (`first_parent`: newest first, the asking commit itself left out) whose outcome is complete and green
@@ -867,6 +886,41 @@ pub fn push_chain(root: &std::path::Path, sha: &str, before: Option<&str>) -> Ve
         }
     }
     first_parent_before(root, sha)
+}
+
+/// The candidate bases on main's own line, newest first: the commits main has been at (`tips`, [`Runs::main_tips`]) that are ancestors of
+/// `head` (`head` itself only with `include_head`), then the first-parent line (from `head`'s parent for a push, whose `before` is given
+/// to [`push_chain`]; from `head` for a landing dispatch). A train lands by fast-forward and merges main's previous tip as a second parent
+/// (3258361e7 into train j), so the first-parent line of main's tip never meets it: the push's reuse and the next dispatch both lost the
+/// last complete commit that way. The one candidate line of the push's reuse, the planner's base and a landing dispatch's base.
+pub fn main_line(root: &std::path::Path, head: &str, include_head: bool, before: Option<&str>, tips: &[String]) -> Vec<String> {
+    let n = MAX_COMMITS.to_string();
+    let ancestors = |rev: &str| -> Vec<String> {
+        crate::plan_repo::git_text(root, &["rev-list", "-n", &n, rev])
+            .map(|t| t.lines().map(|l| l.trim().to_string()).filter(|l| !l.is_empty()).collect())
+            .unwrap_or_default()
+    };
+    let Some(head_sha) = crate::plan_repo::git_text(root, &["rev-parse", "--verify", "--quiet", &format!("{head}^{{commit}}")])
+        .map(|t| t.trim().to_string())
+        .filter(|t| !t.is_empty())
+    else {
+        return Vec::new();
+    };
+    let reach: BTreeSet<String> = ancestors(&head_sha).into_iter().collect();
+    let below = if include_head {
+        let mut line = vec![head_sha.clone()];
+        line.extend(first_parent_before(root, &head_sha));
+        line
+    } else {
+        push_chain(root, &head_sha, before)
+    };
+    let mut seen = BTreeSet::new();
+    tips.iter()
+        .filter(|t| reach.contains(*t) && (include_head || **t != head_sha))
+        .cloned()
+        .chain(below)
+        .filter(|c| seen.insert(c.clone()))
+        .collect()
 }
 
 /// Main's tip before this push: `before` of the push event (`GITHUB_EVENT_PATH`, read with serde) when the event is a push; `None`
