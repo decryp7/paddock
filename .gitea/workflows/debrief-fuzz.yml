@@ -44,6 +44,8 @@ jobs:
         uses: ./.gitea/actions/schedule-skip
         with:
           workflow: debrief-fuzz.yml
+          # Ends while Debrief is not in docs/ci-active-apps.toml's `active` (user, 2026-11-25); active again needs no edit here.
+          app: debrief
           dev-token: ${{ secrets.BUILD_INPUTS_TOKEN }}
       - id: decide
         env:

@@ -4,6 +4,9 @@ inputs:
   workflow:
     description: "This workflow's file (nightly.yml): its own scheduled runs bound the skip (never twice in a row, never past max-gap-hours since its last measured run)."
     required: true
+  app:
+    description: "The app whose own workflow this is (debrief for debrief.yml): a scheduled run also ends while the app is not in docs/ci-active-apps.toml's `active`, so making it active again needs no edit here. Empty (nightly.yml and the other shared workflows): no such check."
+    default: ""
   max-gap-hours:
     description: "Never skip when the last measured scheduled run is older than this: 36 for a nightly, a week and a day (192) for a weekly workflow."
     default: "36"
@@ -37,10 +40,13 @@ runs:
         PADDOCK_DEV_DOWNLOAD: ${{ startsWith(github.ref, 'refs/tags/') && '0' || '' }}
         WORKFLOW: ${{ inputs.workflow }}
         MAX_GAP: ${{ inputs.max-gap-hours }}
+        APP: ${{ inputs.app }}
       run: |
         if [ "$EVENT" != schedule ]; then echo "skip=false" >> "$GITHUB_OUTPUT"; exit 0; fi
         out=$(mktemp)
-        if GITHUB_OUTPUT="$out" bash "${{ github.action_path }}/../../../dev" ci schedule-skip --workflow "$WORKFLOW" --max-gap-hours "$MAX_GAP"; then
+        app=()
+        if [ -n "$APP" ]; then app=(--app "$APP"); fi
+        if GITHUB_OUTPUT="$out" bash "${{ github.action_path }}/../../../dev" ci schedule-skip --workflow "$WORKFLOW" --max-gap-hours "$MAX_GAP" ${app[@]+"${app[@]}"}; then
           skip=$(sed -n 's/^skip=//p' "$out")
         else
           echo "::warning::schedule skip: ./dev ci schedule-skip did not run; this scheduled run proceeds (fail open)."

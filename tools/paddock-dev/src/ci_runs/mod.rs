@@ -560,6 +560,10 @@ pub struct ScheduleSkipArgs {
     /// workflow passes a week and a day). Whatever the limit, a workflow is never skipped twice in a row.
     #[arg(long, default_value_t = 36.0)]
     max_gap_hours: f64,
+    /// The app whose own workflow this is (`debrief` for debrief.yml): a scheduled run ends early while the app is not in
+    /// docs/ci-active-apps.toml's `active`. The nightly names none: it runs every app.
+    #[arg(long)]
+    app: Option<String>,
 }
 
 /// `ci schedule-skip`: `skip=true|false` to `GITHUB_OUTPUT` (standard output without it), the annotation on standard output,
@@ -581,7 +585,18 @@ pub fn schedule_skip(a: &ScheduleSkipArgs) -> Result<Report, CliError> {
     let now_ms = time::now_secs() as f64 * 1000.0;
     let mut http = CurlHttp;
     let mut client = Client::new(&mut http, &server, &repo, &token);
-    let d = schedule_skip::decide_scheduled(&mut client, &event, &a.workflow, now_ms, a.max_gap_hours);
+    // The checkout's own set (the run's commit): the job's workspace, else the current folder.
+    let root = env("GITHUB_WORKSPACE").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."));
+    let set = crate::active_apps::ActiveApps::load(&root);
+    if let (Some(app), Err(e)) = (a.app.as_deref(), &set)
+        && event == "schedule"
+    {
+        println!("::warning::schedule skip: whether {app} is active cannot be read ({e}); this scheduled run proceeds (fail open)");
+    }
+    let d = match schedule_skip::inactive(&event, a.app.as_deref(), set) {
+        Some(d) => d,
+        None => schedule_skip::decide_scheduled(&mut client, &event, &a.workflow, now_ms, a.max_gap_hours),
+    };
     let answer = format!("skip={}", d.skip());
     let mut text: Vec<String> = d.annotation().into_iter().collect();
     match env("GITHUB_OUTPUT") {
