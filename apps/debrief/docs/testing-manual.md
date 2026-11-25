@@ -202,6 +202,11 @@ budget and waits for conditions (no sleeps):
 
 Every spec ends with a clean quit (the config's `after` hook), so a later spec never starts after a "crash".
 
+CI's macOS leg of `real-app smoke` checks the debug `.app` (`scripts/ci/macos-verify-bundle.sh`) and starts its sidecars
+(`scripts/ci/macos-smoke.sh` with `SMOKE_LAUNCH=0`). The script's other half, launching the app and asking it to quit, needs a
+window server, which the CI Mac (a LaunchDaemon since ADR 0120, user decision 2026-11-25) does not have: run
+`bash scripts/ci/macos-smoke.sh <Debrief.app>` on a Mac with a login session for it.
+
 One-time setup:
 
 ```sh
