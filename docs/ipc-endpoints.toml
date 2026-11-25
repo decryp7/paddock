@@ -168,7 +168,7 @@ sites = 1
 
 [[out_of_scope]]
 path = "crates/paddock-pitwall/src/testing.rs"
-reason = "A fake Pitwall server for tests (compiled only for tests and the testing feature)."
+reason = "A fake Pitwall server for tests (compiled only for tests and the test-support feature)."
 owner = "paddock-pitwall"
 calls = ["std::net::TcpListener::bind"]
 sites = 1
@@ -210,7 +210,7 @@ sites = 5
 
 [[out_of_scope]]
 path = "crates/paddock-ipc/src/testing/**"
-reason = "The ending harness and its positive-control endpoints (feature `testing`); they exist to end connections right and wrong on purpose."
+reason = "The ending harness and its positive-control endpoints (feature `test-support`); they exist to end connections right and wrong on purpose."
 owner = "paddock-ipc"
 calls = ["paddock_ipc::Host::listen*", "std::net::TcpListener::bind"]
 sites = 5

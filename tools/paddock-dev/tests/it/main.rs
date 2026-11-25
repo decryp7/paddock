@@ -53,6 +53,7 @@ mod sccache_eviction;
 mod setup_rust;
 mod slots;
 mod sparse;
+mod test_features;
 mod tree;
 mod worktree;
 mod wrapper;

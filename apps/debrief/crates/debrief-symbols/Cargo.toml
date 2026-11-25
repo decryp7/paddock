@@ -28,6 +28,9 @@ proptest.workspace = true
 tempfile.workspace = true
 
 [features]
+# Test support (rule 99): `testing`, the fake symbol server. Enabled from `[dev-dependencies]` only, never in a shipped
+# build (`./dev check test-features`, C170).
+test-support = []
 default = ["server", "dbghelp"]
 # Downloads from symbol servers (only those the user enables).
 server = ["dep:ureq"]

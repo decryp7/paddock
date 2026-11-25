@@ -87,7 +87,8 @@
   ],
   "paddock": [
     "node conformance/bin/paddock-conformance.mjs $PADDOCK_CONFORMANCE_ARGS",
-    "./dev conformance $PADDOCK_CONFORMANCE_RUST_ARGS"
+    "./dev conformance $PADDOCK_CONFORMANCE_RUST_ARGS",
+    "./dev check test-features"
   ],
   "graph": {
     "tests": {

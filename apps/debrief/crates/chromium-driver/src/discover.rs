@@ -101,10 +101,12 @@ pub fn find() -> Option<Browser> {
 
 /// The browser tests may launch: only the explicit `CHROMIUM_TEST_PATH` (a pinned test build), never the browsers
 /// installed for the user (their Chrome must not be started by a test run). `None` skips the test.
+#[cfg(any(test, feature = "test-support"))]
 pub fn find_for_tests() -> Option<Browser> {
     find_for_tests_with(&|k| std::env::var(k).ok(), &|p| p.is_file())
 }
 
+#[cfg(any(test, feature = "test-support"))]
 pub fn find_for_tests_with(env: &dyn Fn(&str) -> Option<String>, exists: &dyn Fn(&Path) -> bool) -> Option<Browser> {
     env("CHROMIUM_TEST_PATH")
         .map(PathBuf::from)

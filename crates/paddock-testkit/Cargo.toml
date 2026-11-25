@@ -12,7 +12,7 @@ doctest = false # doctests are off (crates/README.md, "Doctests")
 
 [dependencies]
 paddock-env = { workspace = true }
-paddock-jobs = { workspace = true }
+paddock-jobs = { workspace = true, features = ["test-support"] }
 paddock-limits = { workspace = true }
 tempfile = "3"
 # `net::HeldPort::reset`: SO_LINGER 0 on an accepted connection.

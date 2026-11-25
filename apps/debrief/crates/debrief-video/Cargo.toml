@@ -37,6 +37,8 @@ lzma-rs = "0.3"
 ts-rs = { version = "11.1", optional = true }
 
 [dev-dependencies]
+debrief-image = { path = "../debrief-image", features = ["test-support"] }
+debrief-ai = { path = "../debrief-ai", features = ["test-support"] }
 tempfile.workspace = true
 proptest.workspace = true
 

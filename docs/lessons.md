@@ -4188,3 +4188,26 @@ startup"; the Chromium start judge, ADR 0031). A start that hands back a handle 
 - **Rule of thumb.** A new file write reaches for `paddock_env::write_atomic` before any `File::create` and `rename`.
 - **Class (ER-21).** An instance of: a mechanism copied per app and fixed one copy at a time (rule 55). Earlier: the hand-written
   process kill and the env-clear copies that C53 and the `disallowed-methods` entries retired.
+
+## A test hook in a shipped build is public API (rule 99, C170, 2026-11-25)
+
+- **What.** `paddock_ipc::Host::with_clock` (handshake.rs) was public with no gate, and an ADR draft copied the pattern for the
+  privileged dyno-helper daemon. A sweep found the same shape across the family: public clock setters (`with_clock`,
+  `with_time`), `for_tests` constructors (Pitcrew's `Http::for_tests` lets the service fetch plain `http://127.0.0.1`), a
+  process-wide test setter (`dyno_agent::build_id::set_watch_every_for_tests`) and whole fakes (`FakeClock`, `FakeWire`,
+  `FakePoster`, `FakeSource`, `fake_systemd`, `trust_fake`, Debrief's scripted LLM and fake Pitwall) compiled into every release.
+- **Fix.** Each hook sits behind `#[cfg(any(test, feature = "test-support"))]` (ADR 0073's name; the `testing` of paddock-ipc,
+  paddock-pitwall and paddock-siblings became `test-support` too, ADR 0073 WP-G); consumers enable it from `[dev-dependencies]`,
+  a crate's own integration tests through a self dev-dependency. Where production wiring used the same setter
+  (`Host::with_clock` from the link server, Pitwall's `Jobs::default`, Debrief's `AlertMutes::default`), it now calls a
+  crate-private function. `./dev check test-features` (C170, in the conformance job, report-only first) runs `cargo tree -e
+  normal` for every released binary and reports any crate with a test feature.
+- **Rule of thumb.** A setter that exists so a test can swap a default is a test hook: gate it the day it is written. A check
+  that reads a release build's features must use normal edges only: `clippy --all-targets` and nextest unify dev-dependency
+  features and never see the shipped graph.
+- **Not gated (open).** `paddock_service::testing` (`FakeSystem`) and `paddock_health::FakeToaster` are the shell demo's
+  backend on purpose (ADR 0073 X2); config structs whose public `clock` or `sleeper` field production fills with the system
+  implementation (12 fields in 11 structs) are ports, not setters, and were left as they are.
+- **Class (ER-21).** Test machinery reaching a release build. Earlier instances: Dyno's fakes in the release build (Dyno ADR
+  0033, 2026-11-08), Pitwall's fake engine behind a server flag (ADR 0073, 2026-11-09). ADR 0073's shared check (WP-0) was cut
+  on 2026-11-11; C170 is that check, cut to the feature graph.

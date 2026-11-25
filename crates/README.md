@@ -1814,7 +1814,7 @@ let state = Session::new(EngineChoice::Auto).state(&link);   // AiState -> Needs
   `UseFallback` (or `OpenSettings` for an app without an engine) so it never depends on Pitwall (rule 19).
 - `loopback`: the bounded, cancellable `127.0.0.1` HTTP/1.1 transport itself (header, line and body limits, chunked, injection-proof
   headers), reusable for other local servers: Debrief's llama-server client (`debrief-ai-worker/src/http.rs`) moves onto it.
-- `testing` (feature `testing`): `FakePitwall`, an in-process fake with exactly the routes of `PITWALL_ROUTES`, Pitwall's answer and
+- `testing` (feature `test-support`): `FakePitwall`, an in-process fake with exactly the routes of `PITWALL_ROUTES`, Pitwall's answer and
   error shapes, scripted pairing, failures with `Retry-After`, held and dying streams. It waits on conditions, never on the clock.
   `tests/contract.rs` runs the client against it; with `PADDOCK_PITWALL_HTTP_RS=<pitwall>/crates/pitwall-server/src/http.rs` it also
   checks that Pitwall's router still has every route (Pitwall's CI should set it).

@@ -39,13 +39,14 @@ windows = { version = "0.62", optional = true, features = ["Win32_Foundation", "
 webview2-com = { version = "0.39", optional = true }
 
 [dev-dependencies]
+paddock-jobs = { workspace = true, features = ["test-support"] }
 # The never-panics test of the parsers (conformance check C36).
 paddock-testkit = { workspace = true }
 # The adapter is tested on Tauri's mock runtime: no window, tray icon or single-instance lock reaches the desktop.
 tauri = { workspace = true, features = ["test"] }
 # Builds monitors for the popover and bounds on the mock runtime.
 tauri-runtime = "2.12"
-paddock-commands = { workspace = true, features = ["tauri"] }
+paddock-commands = { workspace = true, features = ["test-support", "tauri"] }
 # Dialogs opened in these tests are not parented natively (the mock runtime cannot on Linux).
 paddock-dialogs = { workspace = true, features = ["mock-runtime"] }
 tempfile = "3"

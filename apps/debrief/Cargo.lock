@@ -979,6 +979,7 @@ dependencies = [
 name = "chromium-driver"
 version = "0.1.0"
 dependencies = [
+ "chromium-driver",
  "libc",
  "log",
  "paddock-env",
@@ -1594,6 +1595,7 @@ name = "debrief-ai"
 version = "0.1.0"
 dependencies = [
  "base64 0.23.1",
+ "debrief-ai",
  "debrief-collect",
  "debrief-core",
  "debrief-image",
@@ -1806,6 +1808,7 @@ name = "debrief-dump"
 version = "0.1.0"
 dependencies = [
  "debrief-budget",
+ "debrief-dump",
  "debrief-symbols",
  "postcard",
  "proptest",
@@ -2019,6 +2022,7 @@ dependencies = [
  "debrief-plugin-api",
  "debrief-plugin-host",
  "debrief-plugin-package",
+ "debrief-store-client",
  "debrief-store-worker",
  "tempfile",
 ]
