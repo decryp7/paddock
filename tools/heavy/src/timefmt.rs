@@ -43,6 +43,20 @@ pub fn rfc3339_micros(micros: u64) -> String {
     )
 }
 
+/// `20261031T221900.123Z` for epoch microseconds: a file-name time that sorts as text in time order (a run log's name).
+pub fn stamp_text(micros: u64) -> String {
+    let secs = micros / 1_000_000;
+    let (y, m, d) = civil(i64::try_from(secs / 86_400).unwrap_or(0));
+    let t = secs % 86_400;
+    format!(
+        "{y:04}{m:02}{d:02}T{:02}{:02}{:02}.{:03}Z",
+        t / 3600,
+        t % 3600 / 60,
+        t % 60,
+        micros % 1_000_000 / 1000
+    )
+}
+
 /// `2026-10-31` for epoch seconds (the log file's day).
 pub fn day_text(secs: u64) -> String {
     let (y, m, d) = civil(i64::try_from(secs / 86_400).unwrap_or(0));
@@ -73,6 +87,7 @@ mod tests {
         assert_eq!(utc_text(1_793_485_140), "2026-10-31 22:19:00 UTC");
         assert_eq!(rfc3339_micros(1_793_485_140_000_123), "2026-10-31T22:19:00.000123Z");
         assert_eq!(day_text(1_793_485_140), "2026-10-31");
+        assert_eq!(stamp_text(1_793_485_140_123_456), "20261031T221900.123Z");
         assert_eq!(clock_text(1_793_485_140), "22:19:00Z");
     }
 

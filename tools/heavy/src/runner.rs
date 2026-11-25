@@ -1,17 +1,19 @@
 //! A whole `run`: home guard, queue, take, load gate, the command, release; every phase timed and logged.
 
+use crate::capture::{self, RunLog};
 use crate::exit::{self, describe_exit, tail_text as tail_of};
+use crate::hang::{HangWatch, Verdict};
 use crate::lock::{Acquirer, Heavy, Poll, Request};
 use crate::mask::mask_text;
 use crate::timefmt::clock_text;
 use paddock_proc::queue_stall::StallClock;
-use paddock_proc::{ProcessId, command, kill_tree, lower_priority};
+use paddock_proc::{ProcessId, RunState, command, kill_tree, lower_priority, run_state, tree_cpu_time};
 use serde_json::json;
 #[cfg(unix)]
 use std::io::IsTerminal;
 use std::io::{Read, Write};
 use std::process::Stdio;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -29,6 +31,8 @@ pub struct RunOpts {
     pub queue_stall: Option<Duration>,
     /// End the command with [`exit::RUN_LIMIT`] once it has run this long (queue time is not counted).
     pub run_max: Option<Duration>,
+    /// End the command with [`exit::HUNG`] when it has written nothing and its process tree used no CPU for this long ([`crate::hang`]).
+    pub stall: Option<Duration>,
 }
 
 /// A stop request (SIGINT/SIGTERM): the exit code to leave with, or None.
@@ -291,10 +295,21 @@ pub fn run(h: &Heavy, req: Request, args: &[String], opts: RunOpts, stop: Stop<'
     let queued = queued_secs();
 
     let t2 = h.now();
+    let run_log = open_run_log(h, &name, args);
     let t_run = Instant::now();
-    let (code, desc, tail) = exec(h, args, opts, stop, &mut acq);
+    let Ended { code, desc, tail, hung } = exec(h, args, opts, stop, &mut acq, run_log.clone());
     let ran = h.now().saturating_sub(t2);
     timing(queued, t_run.elapsed().as_secs_f64());
+    let summary = format!(
+        "{name} summary: exit {code}, {:.1} s, {}{}",
+        t_run.elapsed().as_secs_f64(),
+        if hung { "hung" } else { "ran" },
+        run_log.as_ref().map_or(String::new(), |l| format!("; log {}", l.path().display()))
+    );
+    (h.say)(&summary);
+    if let Some(l) = &run_log {
+        l.note(&format!("heavy: {summary}"));
+    }
     // A row that passed teaches the history how long it takes (a failure is not its usual time).
     if code == 0
         && let Some(row) = &req.row
@@ -364,8 +379,111 @@ pub fn run(h: &Heavy, req: Request, args: &[String], opts: RunOpts, stop: Stop<'
     code
 }
 
-/// Starts the command and waits for it. Returns (exit code, description, stderr tail).
-fn exec(h: &Heavy, args: &[String], opts: RunOpts, stop: Stop<'_>, acq: &mut Acquirer<'_>) -> (i32, String, Option<String>) {
+/// Opens the run's log in `<runs>/<agent>/` after evicting old ones ([`crate::capture`]) and says where it is. `None` (said, never a
+/// failure of the run) when it cannot be written: the output still reaches the terminal.
+fn open_run_log(h: &Heavy, name: &str, args: &[String]) -> Option<Arc<RunLog>> {
+    let runs = h.cfg.runs_dir();
+    let agent = capture::clean_name(name, 64);
+    let now = std::time::UNIX_EPOCH + Duration::from_micros(h.clock.now_micros());
+    let pruned = capture::prune(&runs, &agent, capture::KEEP_PER_AGENT, capture::MAX_AGE, now);
+    if !pruned.removed.is_empty() || !pruned.failed.is_empty() {
+        h.log.info(
+            "heavy.capture",
+            "old run logs removed",
+            &[
+                ("Removed", json!(pruned.removed.len())),
+                (
+                    "Failed",
+                    json!(
+                        pruned
+                            .failed
+                            .iter()
+                            .map(|(p, e)| format!("{}: {e}", p.display()))
+                            .collect::<Vec<_>>()
+                    ),
+                ),
+            ],
+        );
+    }
+    let stamp = crate::timefmt::stamp_text(h.clock.now_micros());
+    match RunLog::create(&runs, &agent, &stamp, &capture::short_name(args), capture::MAX_LOG_BYTES) {
+        Ok(l) => {
+            (h.say)(&format!("{name} run log {}", l.path().display()));
+            h.log
+                .info("heavy.capture", "run log opened", &[("Path", json!(l.path().to_string_lossy()))]);
+            Some(Arc::new(l))
+        }
+        Err(e) => {
+            let msg = format!(
+                "no run log in {}: {e}; the output goes to the terminal only. Next: set PADDOCK_DEV_TARGETS to a writable folder",
+                runs.join(&agent).display()
+            );
+            (h.say)(&msg);
+            h.log.warn("heavy.capture", &msg, &[]);
+            None
+        }
+    }
+}
+
+/// How the command ended.
+struct Ended {
+    code: i32,
+    desc: String,
+    tail: Option<String>,
+    /// Ended by the hang detector.
+    hung: bool,
+}
+
+/// Copies one output pipe of the command to heavy's own stream and the run log, counting the bytes (the hang detector's output
+/// signal) and keeping the stderr tail when asked.
+fn pump(
+    mut from: impl Read + Send + 'static,
+    to_stderr: bool,
+    log: Option<Arc<RunLog>>,
+    bytes: Arc<AtomicU64>,
+    tail: Option<Arc<Mutex<Vec<u8>>>>,
+    open: Arc<AtomicUsize>,
+) -> std::thread::JoinHandle<()> {
+    std::thread::spawn(move || {
+        let mut buf = [0u8; 8192];
+        while let Ok(n) = from.read(&mut buf) {
+            if n == 0 {
+                break;
+            }
+            let chunk = &buf[..n];
+            if to_stderr {
+                let mut out = std::io::stderr().lock();
+                let _ = out.write_all(chunk);
+                let _ = out.flush();
+            } else {
+                let mut out = std::io::stdout().lock();
+                let _ = out.write_all(chunk);
+                let _ = out.flush();
+            }
+            if let Some(l) = &log {
+                l.write(chunk);
+            }
+            bytes.fetch_add(n as u64, Ordering::SeqCst);
+            if let Some(t) = &tail
+                && let Ok(mut t) = t.lock()
+            {
+                t.extend_from_slice(chunk);
+                let over = t.len().saturating_sub(TAIL_BYTES);
+                t.drain(..over);
+            }
+        }
+        open.fetch_sub(1, Ordering::SeqCst);
+    })
+}
+
+/// Starts the command and waits for it.
+fn exec(h: &Heavy, args: &[String], opts: RunOpts, stop: Stop<'_>, acq: &mut Acquirer<'_>, run_log: Option<Arc<RunLog>>) -> Ended {
+    let ended = |code: i32, desc: String, tail: Option<String>| Ended {
+        code,
+        desc,
+        tail,
+        hung: false,
+    };
     let mut cmd = command(&args[0]);
     cmd.args(&args[1..]);
     // The correlation id travels to the command, so its own logs can be matched to this run.
@@ -396,9 +514,8 @@ fn exec(h: &Heavy, args: &[String], opts: RunOpts, stop: Stop<'_>, acq: &mut Acq
         // Its own process group, so a stop reaches the whole tree (a terminal user keeps Ctrl-C going straight to the command).
         cmd.process_group(0);
     }
-    if h.cfg.stderr_tail {
-        cmd.stderr(Stdio::piped());
-    }
+    // Both streams are pipes: heavy copies them to its own and to the run log, and counts them for the hang detector.
+    cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
     let mut child = match cmd.spawn() {
         Ok(c) => c,
         Err(e) => {
@@ -409,32 +526,26 @@ fn exec(h: &Heavy, args: &[String], opts: RunOpts, stop: Stop<'_>, acq: &mut Acq
             };
             let msg = format!("cannot run '{}': {e}", args[0]);
             (h.say)(&format!("heavy: {msg}"));
-            return (code, msg, None);
+            if let Some(l) = &run_log {
+                l.note(&format!("heavy: {msg}"));
+            }
+            return ended(code, msg, None);
         }
     };
     let tail = Arc::new(Mutex::new(Vec::<u8>::new()));
-    let pipe_closed = Arc::new(AtomicBool::new(false));
-    let pump = child.stderr.take().map(|mut err| {
-        let tail = Arc::clone(&tail);
-        let closed = Arc::clone(&pipe_closed);
-        std::thread::spawn(move || {
-            let mut buf = [0u8; 4096];
-            let mut out = std::io::stderr();
-            while let Ok(n) = err.read(&mut buf) {
-                if n == 0 {
-                    break;
-                }
-                let _ = out.write_all(&buf[..n]);
-                let _ = out.flush();
-                if let Ok(mut t) = tail.lock() {
-                    t.extend_from_slice(&buf[..n]);
-                    let over = t.len().saturating_sub(TAIL_BYTES);
-                    t.drain(..over);
-                }
-            }
-            closed.store(true, Ordering::SeqCst);
-        })
-    });
+    let bytes = Arc::new(AtomicU64::new(0));
+    let open = Arc::new(AtomicUsize::new(0));
+    let mut pumps = Vec::new();
+    let log_arc = run_log.clone();
+    if let Some(out) = child.stdout.take() {
+        open.fetch_add(1, Ordering::SeqCst);
+        pumps.push(pump(out, false, log_arc.clone(), Arc::clone(&bytes), None, Arc::clone(&open)));
+    }
+    if let Some(err) = child.stderr.take() {
+        open.fetch_add(1, Ordering::SeqCst);
+        let t = h.cfg.stderr_tail.then(|| Arc::clone(&tail));
+        pumps.push(pump(err, true, log_arc, Arc::clone(&bytes), t, Arc::clone(&open)));
+    }
     let id = ProcessId::of(child.id());
     if let Some(id) = id {
         acq.set_child(id.pid(), id.started().as_micros());
@@ -444,6 +555,19 @@ fn exec(h: &Heavy, args: &[String], opts: RunOpts, stop: Stop<'_>, acq: &mut Acq
     let mut deadline: Option<Instant> = None;
     let run_end = opts.run_max.map(|m| Instant::now() + m);
     let mut over_run = false;
+    let t_start = Instant::now();
+    let since_start = || u64::try_from(t_start.elapsed().as_micros()).unwrap_or(u64::MAX);
+    let mut hang = opts.stall.map(|d| HangWatch::new(d, since_start()));
+    let mut hung = false;
+    let mut hang_noted = false;
+    if hang.is_some() && id.is_none() {
+        // No identity, no CPU reading (and nothing to end by): the detector is not measured, never a silent pass (ER-33).
+        hang = None;
+        let msg =
+            "--stall: the command's start time cannot be read, so its CPU time cannot be either; the hang detector is off for this run";
+        (h.say)(msg);
+        h.log.warn("heavy.hang", msg, &[]);
+    }
     let status = loop {
         match child.try_wait() {
             Ok(Some(s)) => break Some(s),
@@ -477,43 +601,95 @@ fn exec(h: &Heavy, args: &[String], opts: RunOpts, stop: Stop<'_>, acq: &mut Acq
             }
             deadline = Some(Instant::now() + Duration::from_secs(10));
         }
+        if !hung
+            && !over_run
+            && stopped.is_none()
+            && let (Some(w), Some(id)) = (hang.as_mut(), id)
+        {
+            let now = since_start();
+            match w.observe(now, bytes.load(Ordering::SeqCst), || {
+                tree_cpu_time(id).map(|d| u64::try_from(d.as_micros()).unwrap_or(u64::MAX))
+            }) {
+                Verdict::Alive => {}
+                Verdict::NotMeasured => {
+                    if !hang_noted {
+                        hang_noted = true;
+                        let msg = "--stall: the CPU time of the command's processes cannot be read now; \
+                                   the hang detector waits (unknown is never idle)";
+                        (h.say)(msg);
+                        h.log.warn("heavy.hang", msg, &[]);
+                    }
+                }
+                Verdict::Hung(quiet) => {
+                    if run_state(id) == RunState::Stopped {
+                        // Paused by a signal or the OS (App Tamer): not stuck, it goes on when resumed.
+                        w.touch(now);
+                        h.log
+                            .info("heavy.hang", "quiet, but the command is stopped (paused), not hung", &[]);
+                    } else {
+                        hung = true;
+                        let limit = opts.stall.map_or(0.0, |d| d.as_secs_f64());
+                        let msg = format!("hung: no output and no CPU for {limit} s; ending the command and everything it started");
+                        (h.say)(&msg);
+                        h.log.warn(
+                            "heavy.hang",
+                            &msg,
+                            &[
+                                ("QuietSeconds", json!(quiet.as_secs_f64())),
+                                ("StallSeconds", json!(limit)),
+                                ("OutputBytes", json!(bytes.load(Ordering::SeqCst))),
+                            ],
+                        );
+                        if let Some(l) = &run_log {
+                            l.note(&format!("heavy: {msg}"));
+                        }
+                        // By the identity heavy holds (pid plus start time, rule 53): its group, then each process of its tree.
+                        let _ = kill_tree(id);
+                        deadline = Some(Instant::now() + Duration::from_secs(10));
+                    }
+                }
+            }
+        }
         if deadline.is_some_and(|d| Instant::now() >= d) {
             let _ = child.kill();
             deadline = None;
         }
         std::thread::sleep(Duration::from_millis(25));
     };
-    // The command ended, but a background process it started may still hold the stderr pipe open. Never wait for that
-    // for long: give the pipe `drain` to run dry, keep watching for a stop request, then leave the reader behind.
-    if let Some(p) = pump {
-        if !pipe_closed.load(Ordering::SeqCst) {
+    // The command ended, but a background process it started may still hold an output pipe open. Never wait for that
+    // for long: give the pipes `drain` to run dry, keep watching for a stop request, then leave the readers behind.
+    let closed = || open.load(Ordering::SeqCst) == 0;
+    if !pumps.is_empty() {
+        if !closed() {
             h.log.info(
                 "heavy.run",
-                "command exited; draining its stderr",
+                "command exited; draining its output",
                 &[("DrainMs", json!(h.cfg.drain.as_millis() as u64))],
             );
         }
         let end = Instant::now() + h.cfg.drain;
-        while !pipe_closed.load(Ordering::SeqCst) && Instant::now() < end {
+        while !closed() && Instant::now() < end {
             if stopped.is_none()
                 && let Some(code) = stop()
             {
                 stopped = Some(code);
                 h.log.warn(
                     "heavy.run",
-                    "stop requested while draining the command's stderr",
+                    "stop requested while draining the command's output",
                     &[("ExitCode", json!(code))],
                 );
                 break;
             }
             std::thread::sleep(Duration::from_millis(10));
         }
-        if pipe_closed.load(Ordering::SeqCst) {
-            let _ = p.join();
+        if closed() {
+            for p in pumps {
+                let _ = p.join();
+            }
         } else {
             h.log.warn(
                 "heavy.run",
-                "stderr is still held open by a process the command left running; not waiting for it",
+                "the output is still held open by a process the command left running; not waiting for it",
                 &[],
             );
         }
@@ -524,19 +700,28 @@ fn exec(h: &Heavy, args: &[String], opts: RunOpts, stop: Stop<'_>, acq: &mut Acq
         .map(|t| mask_text(&tail_of(&t, 40, TAIL_BYTES)))
         .filter(|t| !t.is_empty());
     if let Some(code) = stopped {
-        return (code, "stopped by a signal to heavy".into(), tail_str);
+        return ended(code, "stopped by a signal to heavy".into(), tail_str);
+    }
+    if hung {
+        let limit = opts.stall.map_or(0.0, |d| d.as_secs_f64());
+        return Ended {
+            code: exit::HUNG,
+            desc: format!("hung: no output and no CPU for {limit} s, so it was ended"),
+            tail: tail_str,
+            hung: true,
+        };
     }
     if over_run {
         let m = opts.run_max.map_or(0, |m| m.as_secs());
-        return (exit::RUN_LIMIT, format!("ended after the run limit of {m} s"), tail_str);
+        return ended(exit::RUN_LIMIT, format!("ended after the run limit of {m} s"), tail_str);
     }
     let Some(status) = status else {
-        return (1, "could not wait for the command".into(), tail_str);
+        return ended(1, "could not wait for the command".into(), tail_str);
     };
     #[cfg(unix)]
     let sig = std::os::unix::process::ExitStatusExt::signal(&status);
     #[cfg(not(unix))]
     let sig = None;
     let (code, desc) = describe_exit(status.code(), sig);
-    (code, desc, if code == 0 { None } else { tail_str })
+    ended(code, desc, if code == 0 { None } else { tail_str })
 }

@@ -5,7 +5,7 @@ One heavy step (cargo, npm, ng, playwright, llvm-cov, xwin) at a time per machin
 workspace and lockfile (`tools/heavy/`, ADR 0014's third kind).
 
 ```sh
-heavy run [--high] [--no-gate] [--low] [--gate-load N] [--slots N] [--queue-max S] [--queue-stall S] [--run-max S] [--verbose] [--log-file FILE] <agent> -- <command...>
+heavy run [--high] [--no-gate] [--low] [--gate-load N] [--slots N] [--queue-max S] [--queue-stall S] [--run-max S] [--stall S] [--verbose] [--log-file FILE] <agent> -- <command...>
 heavy status
 ```
 
@@ -17,12 +17,41 @@ tree is ended then).
 ## Exit codes (the wrapper rule)
 
 The command's own code is passed through. heavy's own failures use codes that do not look like a usual command failure (1, 2):
-**64** usage, **75** the lock could not be taken, **78** refused (the home guard), **79** no slot within `--queue-max`, or a queue that made no progress for `--queue-stall` (the command never ran), **80** the command was ended at `--run-max`, **126/127** the command could not be started,
+**64** usage, **75** the lock could not be taken, **78** refused (the home guard), **79** no slot within `--queue-max`, or a queue that made no progress for `--queue-stall` (the command never ran), **80** the command was ended at `--run-max`, **81** the command was hung (`--stall`: no output and no CPU for that long) and was ended, **126/127** the command could not be started,
 **129/130/143** stopped by SIGHUP/SIGINT/SIGTERM (128 + the signal). A command can return these too, so a wrapper that must
 tell them apart reads the failure line (`heavy <version> (<os>) exit 0x<hex>: <cause>. Next: <step>.`, printed once on stderr,
 as a `::error::` annotation when `CI` is set) or the log (`SessionId`, `Exit`, the `heavy.run` events). On Windows the exit
 status is the full 32 bits (an NTSTATUS crash is never turned into 0); elsewhere it is the low byte, and a non-zero code whose
 low byte is 0 becomes 1.
+
+## The run log and the hang detector
+
+**Run log.** `run` copies the command's stdout and stderr to the terminal as before and, as they arrive, into
+`<dev-targets>/runs/<agent>/<start>-<short-name>.log` (`20261125T072833.123Z-cargo-test.log`; the agent name and the short name are
+reduced to `[A-Za-z0-9._-]`). It prints `<agent> run log <path>` when the command starts and one line when it ends,
+`<agent> summary: exit <code>, <seconds> s, ran|hung; log <path>`, which is also the log's last line. `<dev-targets>` is found as the tools
+find it (docs/dev-setup.md, "Where things live"): `PADDOCK_DEV_TARGETS`, else the parent of `git config paddock.worktreeRoot`, else of
+`PADDOCK_WORKTREE_ROOT` (`capture::dev_targets_of`, a registered copy of `tools/paddock-dev/src/places.rs`; `./dev heavy` passes
+the folder it derives). With none, the logs go to `<lock folder>/runs`. A log that cannot be written is said, and the run goes on with the
+terminal only. This is ADR 0090's captured tool output in its minimal form: a whole capture of each run, nothing parsed.
+
+The run logs are a shared cache (ER-51): **owner** heavy, which writes and removes only names of its own shape; **size** at most 128 MiB
+a log (the rest still reaches the terminal, and the log says where it stopped) and the newest 20 logs per agent; **eviction** at the
+start of every run: the agent's logs beyond the newest 20, and every agent's logs older than 14 days (`capture.rs`, the one place these
+numbers are decided).
+
+**Hang detector, `--stall S`** (or `HEAVY_STALL`; the flag wins). When the command has written nothing **and** its process tree (the
+command and everything below it, by identity) has used no CPU for `S` seconds, heavy says and logs
+`hung: no output and no CPU for S s`, ends the tree by the identity it holds (pid plus start time: the group, then each process of the
+tree, `paddock_proc::kill_tree`; never by name, rule 53) and exits **81**. Output is watched all the time; CPU is read (`tree_cpu_time`,
+macOS, Linux and Windows) only after the output has been quiet for a quarter of `S` (at most 1 s). Any change of the CPU sum is activity.
+A CPU time that cannot be read is "not measured" and never counts as idle (ER-33); a stopped (paused) command is not hung.
+
+It is a hang detector, never a speed limit (ER-12): a step that computes or prints is never ended, however long it takes. **It is off
+by default**, because no measurement yet says how long a healthy step can be silent and idle, and some are by design: a `rustc` run
+through sccache waits idle while the sccache server (not in the tree) compiles, cargo waiting for a build-folder lock prints one line
+and then waits, and a test waiting on a network or a container is idle. A caller sets `--stall` from the longest quiet gap it measured
+for its step, with a wide margin (several times that gap; minutes, not seconds), and records the measurement next to the value.
 
 ## Compatible with the shell plock (rollout)
 
@@ -133,7 +162,9 @@ in the other slots, and a container run waiting for a drain is not waited for by
 | most steps at once | `--slots N`, `HEAVY_SLOTS` (`auto` or 1..64) | auto: half the cores, at most 5 |
 | the row's key for the run-time history (quick rows go first) | `HEAVY_ROW` | none: no history is read or kept |
 | cores counted against the load | `HEAVY_CPUS` | the OS's count |
-| wait for the command's stderr pipe after it exited (ms) | `HEAVY_DRAIN_MS` | 500 |
+| wait for the command's output pipes after it exited (ms) | `HEAVY_DRAIN_MS` | 500 |
+| hang detector: no output and no CPU for this many seconds ends the command (exit 81) | `HEAVY_STALL` (`--stall`) | off |
+| the folder of the run logs is `<this>/runs` | `PADDOCK_DEV_TARGETS`, else git config `paddock.worktreeRoot`'s parent, else `PADDOCK_WORKTREE_ROOT`'s | `<lock folder>/runs` |
 | correlation id | `DEVKIT_RUN_ID` is reused as the run id and passed to the command | made per run |
 | log | `HEAVY_LOG_FILE` (`--log-file`), `HEAVY_VERBOSE=1` (`--verbose`) | `<folder>/heavy-logs/heavy.<day>.log` |
 | stderr tail kept for failures | `HEAVY_STDERR_TAIL=0` turns it off | on |

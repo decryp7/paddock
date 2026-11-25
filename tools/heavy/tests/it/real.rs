@@ -478,7 +478,7 @@ fn sigterm_during_the_stderr_drain_still_stops_heavy_at_once() {
     // a long drain bound: only the stop request can end the wait
     let mut g = heavy_env(&w, &args, &[("HEAVY_DRAIN_MS", "25000")]);
     let bg = pid_from(&pidfile);
-    wait_until("the drain to start", || w.read(&log).contains("draining its stderr"));
+    wait_until("the drain to start", || w.read(&log).contains("draining its output"));
     let t0 = std::time::Instant::now();
     assert!(ask(ProcessId::of(g.pid()).expect("heavy runs")));
     let st = g.finish();
