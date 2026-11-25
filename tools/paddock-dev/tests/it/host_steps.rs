@@ -331,22 +331,34 @@ fn run_one(fx: &Fx, step: &Step, rust: bool) -> Seen {
 }
 
 /// Runs both on a fresh fixture each (made by `setup`) and demands they agree; returns what the Rust command left.
+///
+/// Both fixtures are made, and their stand-ins written, here on the calling thread before either side starts a program. Written on
+/// the two threads, a stand-in's copy (`StandIn::install` falls back to a copy where the stub's folder is on another file system, as in
+/// the Linux container) can still have its write descriptor open when the other side forks, and the child keeps that copy until it
+/// execs: the shell's own exec of the stand-in then fails with "Text file busy" (ETXTBSY), which only the test kit's spawns retry
+/// (`paddock_env::text_busy`), not a script. With every write finished before the first fork there is no such window; the sides
+/// still run side by side (ADR 0103), and the setup is a few small files.
 fn same(setup: &(dyn Fn(&Fx) + Sync), step: &Step) -> Seen {
-    // The two implementations share nothing, so they run side by side (ADR 0103): the test takes the slower one, not the sum.
-    let (shell, rust) = paddock_testkit::both(
-        || {
-            let a = fixture();
-            setup(&a);
-            run_one(&a, step, false)
-        },
-        || {
-            let b = fixture();
-            setup(&b);
-            run_one(&b, step, true)
-        },
-    );
+    let (a, b) = (fixture(), fixture());
+    setup(&a);
+    setup(&b);
+    let (shell, rust) = paddock_testkit::both(|| run_one(&a, step, false), || run_one(&b, step, true));
     assert_eq!(shell, rust, "the shell (left) and the Rust command (right) differ");
     rust
+}
+
+#[test]
+fn both_fixtures_are_set_up_on_the_calling_thread_before_either_side_runs() {
+    // ETXTBSY (see `same`): a stand-in written on one side's thread while the other side forks is a program the shell cannot exec. The
+    // reproduction is the cause, not the symptom: the symptom needs a fork inside the copy's window, which a test cannot place.
+    let seen = std::sync::Mutex::new(Vec::new());
+    same(&|_| seen.lock().unwrap().push(std::thread::current().id()), &sccache_stats(None));
+    let seen = seen.into_inner().unwrap();
+    assert_eq!(seen.len(), 2, "{seen:?}");
+    assert!(
+        seen.iter().all(|t| *t == std::thread::current().id()),
+        "setup ran on a side's own thread: {seen:?}"
+    );
 }
 
 // ---- stable-workspace ----
