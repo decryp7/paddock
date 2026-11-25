@@ -323,6 +323,10 @@ pub struct DispatchArgs {
     /// or an active app (a train that carries the fix). The reason is logged.
     #[arg(long, value_name = "REASON")]
     red_main_anyway: Option<String>,
+    /// Coordinator override of the train-audits guard: dispatch a train although the repository-wide audits failed (or could not run)
+    /// on its head. The reason is logged.
+    #[arg(long, value_name = "REASON")]
+    audits_anyway: Option<String>,
 }
 
 /// Arguments of `ci rerun-check`: guard 3 of the failed-only rounds (ER-10, ER-33).
@@ -1099,7 +1103,11 @@ pub fn dispatch(a: &DispatchArgs) -> Result<Report, CliError> {
     }
     let mut req = dispatch::parse_request(&a.workflow, &git_ref, &inputs, &a.max, a.interval.as_deref())
         .map_err(|e| CliError::usage(e).with_hint(hint))?;
-    for (flag, reason) in [("--full-anyway", &a.full_anyway), ("--red-main-anyway", &a.red_main_anyway)] {
+    for (flag, reason) in [
+        ("--full-anyway", &a.full_anyway),
+        ("--red-main-anyway", &a.red_main_anyway),
+        ("--audits-anyway", &a.audits_anyway),
+    ] {
         if reason.as_deref().is_some_and(|r| r.trim().is_empty()) {
             return Err(
                 CliError::usage(format!("{flag} needs a reason.")).with_hint("Say why, for example --full-anyway \"test renamed\".")
@@ -1233,6 +1241,7 @@ fn train_guards(
     let overrides = dispatch_guards::Overrides {
         full_anyway: a.full_anyway.as_deref(),
         red_main_anyway: a.red_main_anyway.as_deref(),
+        audits_anyway: a.audits_anyway.as_deref(),
     };
     dispatch_guards::check_train(
         &mut CurlHttp,

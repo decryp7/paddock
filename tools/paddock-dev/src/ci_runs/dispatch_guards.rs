@@ -37,6 +37,9 @@ pub enum Guard {
     FailedFirst,
     /// Main green in the foundation and the active apps before a train.
     GreenMain,
+    /// The repository-wide audits (the member audits and the conformance line) green on the train's head before a dispatch (user,
+    /// 2026-11-25): 4 of 8 red train rounds were audits that failed only on the merged train.
+    TrainAudits,
 }
 
 impl Guard {
@@ -45,12 +48,15 @@ impl Guard {
         match self {
             Guard::FailedFirst => "failed-first",
             Guard::GreenMain => "green-main",
+            Guard::TrainAudits => "train-audits",
         }
     }
 
     /// The guard of a name.
     pub fn parse(name: &str) -> Option<Guard> {
-        [Guard::FailedFirst, Guard::GreenMain].into_iter().find(|g| g.name() == name)
+        [Guard::FailedFirst, Guard::GreenMain, Guard::TrainAudits]
+            .into_iter()
+            .find(|g| g.name() == name)
     }
 
     /// Its override flag.
@@ -58,6 +64,7 @@ impl Guard {
         match self {
             Guard::FailedFirst => "--full-anyway",
             Guard::GreenMain => "--red-main-anyway",
+            Guard::TrainAudits => "--audits-anyway",
         }
     }
 }
@@ -83,7 +90,9 @@ pub fn recorded(text: &str, guard: Guard) -> Result<Option<u64>, String> {
         .and_then(toml::Value::as_table)
         .ok_or_else(|| format!("{REGISTER} has no [first_green] table"))?;
     if let Some(k) = table.keys().find(|k| Guard::parse(k).is_none()) {
-        return Err(format!("{REGISTER}: first_green.{k} is not a guard (failed-first, green-main)"));
+        return Err(format!(
+            "{REGISTER}: first_green.{k} is not a guard (failed-first, green-main, train-audits)"
+        ));
     }
     match table.get(guard.name()) {
         None => Ok(None),
@@ -98,6 +107,10 @@ pub fn recorded(text: &str, guard: Guard) -> Result<Option<u64>, String> {
 /// The mode of `guard` from the register text (`None`: the file is missing or unreadable, with the reason): report-only unless a run
 /// is recorded. An unreadable register never switches a guard on or off by accident: it stays report-only, with the reason.
 pub fn mode_of(text: Result<&str, &str>, guard: Guard) -> Mode {
+    // The audits are established tests the member gate already blocks on (user, 2026-11-17), not a new check: blocking from the start.
+    if guard == Guard::TrainAudits {
+        return Mode::Blocking { first_green: 0 };
+    }
     match text.map_err(str::to_string).and_then(|t| recorded(t, guard)) {
         Ok(Some(first_green)) => Mode::Blocking { first_green },
         Ok(None) => Mode::ReportOnly(format!("no first green use is recorded in {REGISTER}")),
@@ -157,6 +170,7 @@ pub fn decide(guard: Guard, mode: &Mode, finding: &Finding, override_reason: Opt
     let name = guard.name();
     let (mode_name, mode_why) = match mode {
         Mode::ReportOnly(why) => ("report-only", why.clone()),
+        Mode::Blocking { first_green: 0 } => ("blocking", "blocking: established tests (user, 2026-11-17)".to_string()),
         Mode::Blocking { first_green } => ("blocking", format!("blocking since run {first_green}")),
     };
     let row = |result: &str, detail: &str, overridden: Option<&str>| serde_json::json!({"guard": name, "mode": mode_name, "result": result, "detail": detail, "overridden": overridden});
@@ -169,7 +183,10 @@ pub fn decide(guard: Guard, mode: &Mode, finding: &Finding, override_reason: Opt
         Finding::NotMeasured(why) => (
             "not-measured",
             format!("not measured, never a pass (ER-33): {why}"),
-            "make the runs readable (GITEA_TOKEN, the server) and dispatch again".to_string(),
+            match guard {
+                Guard::TrainAudits => "dispatch from a clean worktree at the train's head, or fix what the line above names".to_string(),
+                _ => "make the runs readable (GITEA_TOKEN, the server) and dispatch again".to_string(),
+            },
         ),
     };
     if let Some(reason) = override_reason {
@@ -206,7 +223,106 @@ pub struct Overrides<'a> {
     pub full_anyway: Option<&'a str>,
     /// `--red-main-anyway`: the green-main guard.
     pub red_main_anyway: Option<&'a str>,
+    /// `--audits-anyway`: the train-audits guard.
+    pub audits_anyway: Option<&'a str>,
 }
+
+/// What the repository-wide audits answered on a checkout: the exit code of `check --pre-push` (`None`: ended by its bound or a
+/// signal) and its output's tail.
+pub type AuditRun = Result<(Option<i32>, String), String>;
+
+/// The checkout the dispatch runs from, as the train-audits guard needs it: its HEAD and whether it has changes of its own.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Checkout {
+    /// `git rev-parse HEAD`.
+    pub head: String,
+    /// Whether `git status --porcelain` lists anything.
+    pub dirty: bool,
+}
+
+/// The rows the train-audits guard runs: the repository-wide audits of tools/paddock-dev and the conformance line of ci.yml, through
+/// the push gate (`./dev check --pre-push --member-gate --only`), which runs each through the heavy slot as the member gate does.
+pub const AUDIT_ROWS: &str = "member-audits,conformance";
+
+/// The train-audits guard: the audits ran on the train's head as the server has it. `local` is the checkout the dispatch runs from
+/// (it must be at that head and clean: otherwise the audits would judge another tree, never a pass); `run` runs them there.
+pub fn train_audits(local: Result<Checkout, String>, server_head: &str, branch: &str, run: &mut dyn FnMut() -> AuditRun) -> Finding {
+    let local = match local {
+        Ok(c) => c,
+        Err(e) => return Finding::NotMeasured(format!("the checkout cannot be read: {e}")),
+    };
+    if local.head != server_head {
+        return Finding::NotMeasured(format!(
+            "this checkout is at {}, the head of {branch} is {}: the audits must run on the train's head (dispatch from the integrator's worktree at that head)",
+            short(&local.head),
+            short(server_head)
+        ));
+    }
+    if local.dirty {
+        return Finding::NotMeasured("this checkout has changes of its own: the audits would not judge the train's head".into());
+    }
+    match run() {
+        Err(e) => Finding::NotMeasured(format!("the audits could not run: {e}")),
+        Ok((Some(0), _)) => Finding::Pass(format!(
+            "the member audits and the conformance line passed on {}",
+            short(server_head)
+        )),
+        Ok((Some(6), tail)) => Finding::NotMeasured(format!("the audits could not look (exit 6): {}", tail.trim())),
+        Ok((code, tail)) => Finding::Refuse {
+            why: format!(
+                "the repository-wide audits failed on the merged train head {} (exit {}): {}",
+                short(server_head),
+                code.map_or("none".to_string(), |c| c.to_string()),
+                tail.trim()
+            ),
+            next: format!(
+                "fix the audit it names in the member that clashes, or pull that member (revert its merge); re-run them with `./dev check --pre-push --member-gate --only {AUDIT_ROWS} --base origin/main`"
+            ),
+        },
+    }
+}
+
+/// The checkout at `root`: its HEAD and whether it is dirty.
+pub fn checkout(root: &std::path::Path) -> Result<Checkout, String> {
+    let git = crate::merge_check::git::Git::new(root);
+    Ok(Checkout {
+        head: git.text(&["rev-parse", "HEAD"])?.trim().to_string(),
+        dirty: !git.text(&["status", "--porcelain", "--untracked-files=no"])?.trim().is_empty(),
+    })
+}
+
+/// Runs the audit rows in `root` through this program (or `PADDOCK_DISPATCH_AUDITS`, a test's stand-in): its exit code and the last
+/// lines it printed. Bounded like the member gate (each row has its own cap; this bound only ends a hang of the gate itself).
+pub fn run_audits(root: &std::path::Path) -> AuditRun {
+    let program = match std::env::var_os("PADDOCK_DISPATCH_AUDITS") {
+        Some(p) => std::path::PathBuf::from(p),
+        None => crate::tool_cache::self_exe().map_err(|e| format!("this program cannot be found: {e}"))?,
+    };
+    let mut cmd = paddock_proc::command(program);
+    cmd.args([
+        "check",
+        "--pre-push",
+        "--member-gate",
+        "--only",
+        AUDIT_ROWS,
+        "--base",
+        "origin/main",
+        "--root",
+    ])
+    .arg(root)
+    .current_dir(root);
+    let out = paddock_proc::run_bounded(cmd, paddock_proc::Limits::new(AUDITS_TIMEOUT)).map_err(|e| e.to_string())?;
+    let code = match out.outcome {
+        paddock_proc::Outcome::Exited(st) => st.code(),
+        _ => None,
+    };
+    let text = format!("{}\n{}", String::from_utf8_lossy(&out.stdout), out.stderr_text());
+    let lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
+    Ok((code, lines[lines.len().saturating_sub(12)..].join("\n")))
+}
+
+/// The backstop of [`run_audits`]: the member gate's own outer bound (merge_check::gates, measured there), as the rows are the same.
+const AUDITS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
 
 /// A blocking guard stopped the dispatch.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -293,6 +409,26 @@ pub fn check_train(
             &mode(Guard::GreenMain),
             &green.finding,
             overrides.red_main_anyway,
+            log,
+        ))?;
+    }
+    // Last: the audits take minutes, so they run only once the guards that read the API let the dispatch go, and only before a full
+    // run of the train (its first dispatch and its landing run): a failed-only round reruns what failed, a member run is narrowed.
+    if kind == RunKind::Full {
+        let head = Client::new(http, server, repo, token).branch_head(&branch);
+        let finding = match head {
+            Ok(Some(h)) => train_audits(checkout(root), &h, &branch, &mut || {
+                let _ = writeln!(log, "dispatch guard train-audits: running {AUDIT_ROWS} on the train head (minutes)");
+                run_audits(root)
+            }),
+            Ok(None) => Finding::NotMeasured(format!("branch {branch} is not on the server")),
+            Err(e) => Finding::NotMeasured(format!("the head of {branch} cannot be read: {e}")),
+        };
+        go(decide(
+            Guard::TrainAudits,
+            &mode(Guard::TrainAudits),
+            &finding,
+            overrides.audits_anyway,
             log,
         ))?;
     }
