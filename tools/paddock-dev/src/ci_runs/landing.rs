@@ -50,15 +50,6 @@ pub fn with_landing_base(
     inputs
 }
 
-/// Main's own first-parent commits, newest first, the tip included (`origin/main` of the checkout; empty when git cannot say, then no
-/// base is found). A stale `origin/main` only gives an older base: a wider diff, never a missed one.
-pub fn main_chain(root: &std::path::Path) -> Vec<String> {
-    let n = super::green::MAX_COMMITS.to_string();
-    crate::plan_repo::git_text(root, &["rev-list", "--first-parent", "-n", &n, "origin/main"])
-        .map(|t| t.lines().map(|l| l.trim().to_string()).filter(|l| !l.is_empty()).collect())
-        .unwrap_or_default()
-}
-
 /// [`with_landing_base`] over the real runs: reads main's runs through the API and the checkout's history.
 pub fn with_real_landing_base(
     http: &mut dyn crate::wait::Http,
@@ -75,8 +66,9 @@ pub fn with_real_landing_base(
         inputs,
         &mut || {
             let mut client = super::client::Client::new(http, target.server, target.repo, target.token);
-            let chain = main_chain(root);
-            crate::plan_cmd::green_base_over(&mut client, root, &chain, &mut |_| {})
+            // Main's own line from its tip, tip included (`origin/main` of the checkout; a stale one only gives an older base: a wider
+            // diff, never a missed one).
+            crate::plan_cmd::green_base_over(&mut client, root, "origin/main", true, None, &mut |_| {})
         },
         &mut warn,
     )

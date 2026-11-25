@@ -4314,3 +4314,14 @@ startup"; the Chromium start judge, ADR 0031). A start that hands back a handle 
   "CI job, identity present" that the Chrome for Testing hook uses too.
 - **Open.** Whether the TCC grant for the re-signed bundle holds was not measured before the user's one-time steps; the check is the
   TCC log after the first Mac run that starts a browser.
+
+## A push to main searched the train's line for its base and refused a landing run that covered it (2026-11-25, fix/ci-reuse-push-base)
+- **What.** Push run 9056 (main fast-forwarded from 4284e23d5 to train g's head 4ca4c56ec) refused to reuse train g's green landing
+  run 9054: 9054 had tested the diff from 4284e23d5, but the push's base came out as b3ad2dd2d (run 9030), two mains back, and the
+  push ran every job again.
+- **Why.** `ci reuse` and the plan job searched the push's base among `git rev-list --first-parent <head>^`. A train lands by
+  fast-forward, so that line is the train's: its re-merge of main has main's previous tip as the second parent, and the search never
+  met it. The landing dispatch searched main's own line (`origin/main`) and found 4284e23d5, so the two never agreed.
+- **Fix.** Both read main's own line from the push event's `before` (`green::push_chain`, falling back to the old line without a
+  usable `before`), and a landing run whose base is an older main is still reused when its diff holds every path of the push's
+  (`green::diff_covers`). Tests read runs 9030, 9045, 9054 and 9056 as recorded (`tests/ci-runs/reuse-push-base`).

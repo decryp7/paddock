@@ -1727,9 +1727,16 @@ mod tests {
         let mut f = run_8610("cancelled");
         let mut c = Client::new(&mut f, "https://gitea.invalid", "decryp7/paddock", "t");
         c.backoff_ms = 0;
-        let d = crate::ci_runs::reuse::decide_with_touched(&mut c, "ci.yml", SHA, None, true, &mut Vec::new, &mut |_, _| {
-            Some(Touched::default())
-        });
+        let d = crate::ci_runs::reuse::decide_with_touched(
+            &mut c,
+            "ci.yml",
+            SHA,
+            None,
+            true,
+            &mut |_| Vec::new(),
+            &mut |_, _| Some(Touched::default()),
+            &mut |_, _| false,
+        );
         assert!(matches!(d, crate::ci_runs::reuse::Reuse::Run(_)), "{d:?}");
     }
 }
