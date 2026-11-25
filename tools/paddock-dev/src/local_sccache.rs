@@ -680,10 +680,10 @@ pub(crate) fn worktree_roots(cwd: &Path) -> Vec<String> {
 }
 
 /// The `CARGO_*` variables CI's jobs have that sccache hashes into every Rust key (sccache 0.20.1 `generate_hash_key`: all of them but a
-/// few): `CARGO_INCREMENTAL=0` (setup-rust, [`crate::ci_setup_rust::env_lines`]) and `CARGO_TERM_COLOR=always` (the workflows' job
-/// `env`). The shim exports them for a rustc compile, so a local key equals CI's and the two share entries; cargo's own environment
-/// is left alone (no colour codes in piped output, incremental builds stay). docs/benchmarks.md, "Local keys against CI's".
-pub(crate) const CI_KEY_ENV: [(&str, &str); 2] = [("CARGO_INCREMENTAL", "0"), ("CARGO_TERM_COLOR", "always")];
+/// few): `CARGO_INCREMENTAL=0` and `CARGO_TERM_COLOR=always`,
+/// which setup-rust exports to `$GITHUB_ENV` ([`crate::ci_setup_rust::env_lines`]) for every job that has the cache. The shim exports
+/// them for a rustc compile, so a local key equals CI's and the two share entries; cargo's own environment is left alone (no colour codes in piped output, incremental builds stay). docs/benchmarks.md, "Local keys against CI's".
+pub const CI_KEY_ENV: [(&str, &str); 2] = [("CARGO_INCREMENTAL", "0"), ("CARGO_TERM_COLOR", "always")];
 
 /// The folder beside the sccache binary that holds the shim, so the shim can be called `sccache`.
 const SHIM_DIR: &str = "shim";

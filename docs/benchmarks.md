@@ -2950,5 +2950,12 @@ Why a local build found none of CI's compile-cache entries (the earlier block "L
 - **Cross hit, measured:** a private server (fresh disk, S3 behind it under `paddock-ci/macOS-aarch64`), this branch's shim, a worktree that
   had never built, no CARGO variable in the shell, the same command: 294 compile requests executed, **174 L1 (S3) hits**, 0 L0, 117 misses
   (the workspace crates, which keep their checkout path, and what no CI job built with that command), 117 writes.
-- **Limits:** only CI jobs that have both variables share entries (`ci.yml`'s crate jobs do; a job without `CARGO_TERM_COLOR`, for
-  example some app workflows, hashes a different key class). Windows has no shim (the wrapper is the sccache binary), so it is not covered.
+- **CI side (same branch):** setup-rust now exports both variables to `$GITHUB_ENV` from the same definition (`CI_KEY_ENV`), so every job
+  that sets up the cache has the same key class. Before it, only jobs whose workflow or job `env` had `CARGO_TERM_COLOR=always` did. Jobs
+  that call setup-rust and had it: `app-fuzz.yml` fuzz; `ci.yml` app, crate, heavy, paddock-dev; `debrief.yml` bundle, plan, plugin-sdk,
+  rust-lint, rust-test, rust-test-macos, tauri-smoke; `nightly.yml` dialog-window-probe. Jobs that called setup-rust and lacked it (a key
+  class of their own, so no sharing with the rest): `ci.yml` audit, conformance, crates, e2e, e2e-webkit, tools, ui; `nightly.yml` audit,
+  c100, escapes, generators, ipc-endpoints; `dev-tool.yml`, `heavy-release.yml` and `app-release.yml` jobs (release and tag builds never read the
+  store). The per-job `CARGO_TERM_COLOR` lines stay: they colour the log of jobs that have no cache.
+- **Limits:** Windows has no shim (the wrapper is the sccache binary), so a local Windows build does not share. The shell copy of
+  setup-rust (release path) exports the two variables too, as its twin test requires.
