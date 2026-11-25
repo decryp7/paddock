@@ -37,6 +37,7 @@
 
 use super::client::{Client, RunInfo};
 use super::green::{self, GradedResult, Touched};
+use crate::job_outcome::JobOutcome;
 use crate::plan_since::{COMPLETE_LINE, read_complete, workflow_file};
 use crate::run_scope::{self, SCOPE_LINE};
 use paddock_cli::outcome::{
@@ -100,13 +101,23 @@ pub enum Earlier {
     Unknown(String),
 }
 
+/// Whether a job of an earlier attempt makes the run's green a retry: it failed, was cancelled, never finished or ended in an
+/// unknown word. A skipped job does not: it never ran in that attempt (a job after a failed one is skipped, and the failed one
+/// already counts).
+fn earlier_failed(o: &JobOutcome) -> bool {
+    match o {
+        JobOutcome::Failed | JobOutcome::Cancelled | JobOutcome::Unfinished | JobOutcome::Unknown(_) => true,
+        JobOutcome::Passed | JobOutcome::Skipped => false,
+    }
+}
+
 /// The failed jobs of the earlier attempts of a run (1 up to `run_attempt - 1`).
 pub(super) fn read_earlier(client: &mut Client, run: &RunInfo) -> Earlier {
     for n in 1..run.run_attempt {
         match client.attempt_jobs(run.id, Some(n)) {
             Ok(Some(jobs)) => {
-                if let Some(j) = jobs.iter().find(|j| j.failed()) {
-                    return Earlier::Failed(format!("attempt {n}: job {:?} was {}", j.name, j.conclusion));
+                if let Some(j) = jobs.iter().find(|j| earlier_failed(&j.outcome)) {
+                    return Earlier::Failed(format!("attempt {n}: job {:?} was {}", j.name, j.outcome));
                 }
             }
             Ok(None) => return Earlier::Unknown(format!("the server has no job list for attempt {n}")),
@@ -128,7 +139,7 @@ fn scope_mode(run: &RunInfo, jobs: &[super::client::TimedJob], log: &str) -> Mod
             Err(why) => Mode::Partial(format!("its declared scope is not complete: {why}")),
             Ok(()) if !run.finished() => Mode::Full,
             Ok(()) => {
-                let pairs: Vec<(String, String)> = jobs.iter().map(|j| (j.name.clone(), j.conclusion.clone())).collect();
+                let pairs: Vec<(String, JobOutcome)> = jobs.iter().map(|j| (j.name.clone(), j.outcome.clone())).collect();
                 match run_scope::check_ran(&d, &pairs) {
                     Ok(()) => Mode::Full,
                     Err(run_scope::RanProblem::NotRun(why)) => Mode::Incomplete(format!("its declared scope was not run: {why}")),
@@ -287,7 +298,7 @@ fn landing_of(run: &RunInfo, jobs: &[super::client::TimedJob], log: &str) -> Opt
         return None;
     }
     if run.finished() {
-        let pairs: Vec<(String, String)> = jobs.iter().map(|j| (j.name.clone(), j.conclusion.clone())).collect();
+        let pairs: Vec<(String, JobOutcome)> = jobs.iter().map(|j| (j.name.clone(), j.outcome.clone())).collect();
         run_scope::check_ran(&d, &pairs).ok()?;
     }
     Some(d.base)

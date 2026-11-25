@@ -3933,3 +3933,8 @@ raised timeout as the fix.
   (`tools/paddock-dev/tests/ci-triage-skipped`, runs 9021, 8658, 8331, 8284, 8226).
 - **Class (ER-21, ER-33).** A CI-run reader reads "skipped" as "passed". Earlier instance: `ci verdict` counted a schedule-skipped run
   (every job skipped) as full and green (ADR 0089's instance table, row 2; ADR 0113, 2026-11-12).
+- **Redesign (user, 2026-11-25).** `TimedJob::failed()` and `RunJob::failed()` are gone: paddock-dev parses a job's conclusion once
+  into `JobOutcome` (`tools/paddock-dev/src/job_outcome.rs`: Passed, Failed, Cancelled, Skipped, Unfinished, Unknown), and every
+  reader matches on it, so the compiler makes each one decide skipped and cancelled on purpose. The sweep found a third instance:
+  the member gate's other-OS row (`merge_check/other_os.rs`) read an OS whose every job was skipped as clean; it is not applicable
+  now.

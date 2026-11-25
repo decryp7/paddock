@@ -7,6 +7,7 @@
 //! jobs) and `log-<job>.txt` for each failed job (only the lines the nextest reader needs, see [`trim_log`]), and one `runs-1.json`
 //! listing the recorded runs, which is the layout of [`Fake::from_dir`](super::testutil::Fake::from_dir). Read-only on the server.
 
+use crate::job_outcome::JobOutcome;
 use crate::log_text::plain;
 use crate::wait::{CurlHttp, Http};
 use serde_json::Value;
@@ -149,7 +150,11 @@ pub fn record(
             .as_array()
             .map(|a| {
                 a.iter()
-                    .filter(|j| !matches!(j["conclusion"].as_str(), Some("success" | "skipped")))
+                    // Record the log of every job that did not pass: a pass has nothing to show and a skip has no log.
+                    .filter(|j| match JobOutcome::from_api(j["conclusion"].as_str().unwrap_or("")) {
+                        JobOutcome::Passed | JobOutcome::Skipped => false,
+                        JobOutcome::Failed | JobOutcome::Cancelled | JobOutcome::Unfinished | JobOutcome::Unknown(_) => true,
+                    })
                     .filter_map(|j| j["id"].as_u64())
                     .collect()
             })

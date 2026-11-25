@@ -7,6 +7,7 @@
 //! Producers: `./dev plan --ci` for ci.yml ([`ci_scope`]), `./dev ci scope` for the app workflows ([`app_scope`]).
 //! The reader: [`read`] and [`Declared::complete`].
 
+use crate::job_outcome::JobOutcome;
 use crate::log_text::plain;
 use serde_json::{Value, json};
 use std::collections::BTreeSet;
@@ -415,8 +416,8 @@ pub enum RanProblem {
 
 /// "Ran means ran": every job the run declared in `ran` has a job in the run with a matching name, and none of them was skipped or
 /// cancelled. A failed one is left to the run's own conclusion (red). Only ci.yml's jobs are mapped; another workflow's declaration
-/// has no job names and passes (its `gates` job is not one job). `jobs` are `(display name, conclusion)`.
-pub fn check_ran(d: &Declared, jobs: &[(String, String)]) -> Result<(), RanProblem> {
+/// has no job names and passes (its `gates` job is not one job). `jobs` are `(display name, outcome)`.
+pub fn check_ran(d: &Declared, jobs: &[(String, JobOutcome)]) -> Result<(), RanProblem> {
     if d.workflow != "ci.yml" {
         return Ok(());
     }
@@ -428,12 +429,17 @@ pub fn check_ran(d: &Declared, jobs: &[(String, String)]) -> Result<(), RanProbl
         .chain(d.ran.apps.iter().map(|a| (a.as_str(), vec![name_of_leg(a)])));
     for (key, names) in declared {
         for name in names {
-            let found: Vec<&(String, String)> = jobs.iter().filter(|(n, _)| name.matches(n)).collect();
+            let found: Vec<&(String, JobOutcome)> = jobs.iter().filter(|(n, _)| name.matches(n)).collect();
             if found.is_empty() {
                 return Err(RanProblem::Missing(format!("{key}: the run has no job named like {name:?}")));
             }
-            if let Some((n, c)) = found.iter().find(|(_, c)| !matches!(c.as_str(), "success" | "failure")) {
-                let c = if c.is_empty() { "not finished" } else { c.as_str() };
+            for (n, o) in found {
+                let c = match o {
+                    // Ran: a failure is the run's own red, not a partial scope.
+                    JobOutcome::Passed | JobOutcome::Failed => continue,
+                    JobOutcome::Unfinished => "not finished",
+                    JobOutcome::Skipped | JobOutcome::Cancelled | JobOutcome::Unknown(_) => o.as_api(),
+                };
                 return Err(RanProblem::NotRun(format!("{key}: its job {n:?} was {c}, not success")));
             }
         }
@@ -826,9 +832,9 @@ mod tests {
         }
     }
 
-    fn run_jobs(d: &Declared, conclusion: &str) -> Vec<(String, String)> {
+    fn run_jobs(d: &Declared, conclusion: &str) -> Vec<(String, JobOutcome)> {
         // One job per declared key, named as ci.yml names it, all with `conclusion`.
-        let mut jobs: Vec<(String, String)> = Vec::new();
+        let mut jobs: Vec<(String, JobOutcome)> = Vec::new();
         for k in &d.ran.jobs {
             for n in names_of_job(k) {
                 jobs.push((
@@ -836,13 +842,13 @@ mod tests {
                         JobName::Exact(n) => n,
                         JobName::Prefix(p) => format!("{p}x)"),
                     },
-                    conclusion.into(),
+                    JobOutcome::from_api(conclusion),
                 ));
             }
         }
         for a in &d.ran.apps {
             if let JobName::Exact(n) = name_of_leg(a) {
-                jobs.push((n, conclusion.into()));
+                jobs.push((n, JobOutcome::from_api(conclusion)));
             }
         }
         jobs
@@ -857,7 +863,7 @@ mod tests {
         // The WebKit job skipped (the plan's webkit output dropped): the run declared WebKit and did not run it.
         let mut skipped = all.clone();
         let webkit = skipped.iter_mut().find(|(n, _)| n.starts_with("reference apps in WebKit")).unwrap();
-        webkit.1 = "skipped".into();
+        webkit.1 = JobOutcome::Skipped;
         assert!(
             matches!(check_ran(&d, &skipped), Err(RanProblem::NotRun(m)) if m.contains("e2e-webkit")),
             "{:?}",
@@ -865,10 +871,10 @@ mod tests {
         );
         // A cancelled app leg, a job that never finished.
         let mut cancelled = all.clone();
-        cancelled.iter_mut().find(|(n, _)| n == "app dyno (macos-latest)").unwrap().1 = "cancelled".into();
+        cancelled.iter_mut().find(|(n, _)| n == "app dyno (macos-latest)").unwrap().1 = JobOutcome::Cancelled;
         assert!(matches!(check_ran(&d, &cancelled), Err(RanProblem::NotRun(m)) if m.contains("cancelled")));
         let mut going = all.clone();
-        going.iter_mut().find(|(n, _)| n == "crate (windows-latest)").unwrap().1 = String::new();
+        going.iter_mut().find(|(n, _)| n == "crate (windows-latest)").unwrap().1 = JobOutcome::Unfinished;
         assert!(matches!(check_ran(&d, &going), Err(RanProblem::NotRun(m)) if m.contains("not finished")));
         // A declared job with no job of that name: the declaration cannot be checked.
         let gone: Vec<_> = all
@@ -885,7 +891,7 @@ mod tests {
         assert!(matches!(check_ran(&d, &no_leg), Err(RanProblem::Missing(m)) if m.contains("dyno@ubuntu-latest:e2e-webkit")));
         // A failed job is the run's own red, not a partial scope.
         let mut failed = all.clone();
-        failed[0].1 = "failure".into();
+        failed[0].1 = JobOutcome::Failed;
         assert_eq!(check_ran(&d, &failed), Ok(()));
         // Another workflow's declaration has no job names to check.
         let other = app_scope("debrief.yml", "debrief", true, true, false, false, &["chromium".to_string()]);

@@ -24,6 +24,7 @@ use super::generator_step::Step;
 use super::{Merge, git::Git, short};
 use crate::ci_runs::client::{Client, TimedJob};
 use crate::ci_runs::{dispatch, reservation, time, triage, trial};
+use crate::job_outcome::JobOutcome;
 use crate::queue::ports::{Blame, Failure, Sent};
 use crate::queue::real::{Child, GitTrain, failures_of};
 use crate::wait::{CurlHttp, Http};
@@ -83,8 +84,8 @@ impl Os {
 pub struct JobRow {
     /// The job's display name.
     pub name: String,
-    /// `success`, `failure`, `cancelled`, `skipped` or empty while unfinished.
-    pub conclusion: String,
+    /// How it ended.
+    pub outcome: JobOutcome,
 }
 
 /// How the wait on the run ended.
@@ -167,9 +168,19 @@ fn job_of(f: &Failure) -> &str {
     f.what.split(": ").next().unwrap_or("")
 }
 
-/// The rows of a finished run: for each OS, `NotApplicable` when the plan ran no job there, `NotMeasured` when a job did not finish
-/// or a failure cannot be blamed, `Findings` for NEW (and flaky: still red, ER-12) failures only, and `Clean` otherwise (failures
-/// also on main are `known`).
+/// Why a job tells nothing about its OS: cancelled, unfinished or ended in an unknown word. A pass and a failure ran; a skipped job
+/// did not run and is left out of the OS's measure.
+fn job_unmeasured(o: &JobOutcome) -> Option<String> {
+    match o {
+        JobOutcome::Passed | JobOutcome::Failed | JobOutcome::Skipped => None,
+        JobOutcome::Unfinished => Some("unfinished".into()),
+        JobOutcome::Cancelled | JobOutcome::Unknown(_) => Some(o.to_string()),
+    }
+}
+
+/// The rows of a finished run: for each OS, `NotApplicable` when the plan ran no job there (none listed, or all skipped),
+/// `NotMeasured` when a job did not finish or a failure cannot be blamed, `Findings` for NEW (and flaky: still red, ER-12) failures
+/// only, and `Clean` otherwise (failures also on main are `known`).
 pub fn rows(run: u64, sha: &str, jobs: &[JobRow], failures: &[Failure]) -> Vec<Row> {
     let subject = || Subject::CiRun {
         workflow: WORKFLOW.into(),
@@ -189,19 +200,21 @@ pub fn rows(run: u64, sha: &str, jobs: &[JobRow], failures: &[Failure]) -> Vec<R
                 .collect();
             let outcome = if mine.is_empty() {
                 Outcome::NotApplicable(Reason::new(format!("the plan ran no job on {} for this member", os.name())))
-            } else if let Some(j) = mine
-                .iter()
-                .find(|j| !matches!(j.conclusion.as_str(), "success" | "failure" | "skipped"))
-            {
+            } else if mine.iter().all(|j| j.outcome == JobOutcome::Skipped) {
+                // Every job there was skipped: nothing ran, so nothing was measured (ER-33), never a clean row.
+                Outcome::NotApplicable(Reason::new(format!(
+                    "every job on {} was skipped: the run ran none for this member",
+                    os.name()
+                )))
+            } else if let Some((j, ended)) = mine.iter().find_map(|j| job_unmeasured(&j.outcome).map(|e| (j, e))) {
                 Outcome::NotMeasured(Reason::new(format!(
-                    "job `{}` ended `{}` (cancelled or unfinished), so nothing can be said about {}",
+                    "job `{}` ended `{ended}` (cancelled or unfinished), so nothing can be said about {}",
                     j.name,
-                    if j.conclusion.is_empty() { "unfinished" } else { &j.conclusion },
                     os.name()
                 )))
             } else if let Some(j) = mine
                 .iter()
-                .find(|j| j.conclusion == "failure" && !fails.iter().any(|f| job_of(f) == j.name))
+                .find(|j| j.outcome == JobOutcome::Failed && !fails.iter().any(|f| job_of(f) == j.name))
             {
                 Outcome::NotMeasured(Reason::new(format!(
                     "job `{}` failed but triage read no failing test of it (nothing proves it is the member's)",
@@ -540,7 +553,7 @@ impl Runs for Gitea {
             .filter(|j| !j.is_caller())
             .map(|j| JobRow {
                 name: j.name,
-                conclusion: j.conclusion,
+                outcome: j.outcome,
             })
             .collect())
     }
@@ -589,7 +602,7 @@ mod tests {
     fn job(name: &str, conclusion: &str) -> JobRow {
         JobRow {
             name: name.into(),
-            conclusion: conclusion.into(),
+            outcome: JobOutcome::from_api(conclusion),
         }
     }
 
@@ -668,6 +681,34 @@ mod tests {
         assert!(matches!(row(&r, Os::Linux).outcome, Outcome::NotMeasured(_)));
         let r = rows(1, "a", &[job("x (ubuntu-latest)", "")], &[]);
         assert!(matches!(row(&r, Os::Linux).outcome, Outcome::NotMeasured(_)));
+    }
+
+    /// An OS whose every job was skipped ran nothing: it is not applicable, never clean (ER-33). Before the outcome enum a skipped
+    /// job counted as neither unfinished nor failed, so an all-skipped OS fell through to a clean row with evidence.
+    #[test]
+    fn an_os_whose_jobs_were_all_skipped_ran_nothing_and_is_never_clean() {
+        let jobs = [
+            job("crates (ubuntu-latest)", "success"),
+            job("paddock-dev (windows-latest)", "skipped"),
+            job("crates (windows-latest)", "skipped"),
+        ];
+        let r = rows(7, "abc", &jobs, &[]);
+        assert!(matches!(row(&r, Os::Linux).outcome, Outcome::Clean(_)));
+        match &row(&r, Os::Windows).outcome {
+            Outcome::NotApplicable(why) => assert!(why.as_str().contains("skipped"), "{why:?}"),
+            other => panic!("an all-skipped OS must not be {other:?}"),
+        }
+        // One job that ran is enough to measure the OS; the skipped one beside it is left out.
+        let r = rows(
+            7,
+            "abc",
+            &[
+                job("crates (windows-latest)", "success"),
+                job("paddock-dev (windows-latest)", "skipped"),
+            ],
+            &[],
+        );
+        assert!(matches!(row(&r, Os::Windows).outcome, Outcome::Clean(_)));
     }
 
     /// A table CI: records what was asked, answers from fields.
