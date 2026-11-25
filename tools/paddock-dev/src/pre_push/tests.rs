@@ -1359,7 +1359,9 @@ fn one_container_run_covers_every_touched_workspace_and_a_failing_one_fails_the_
             .unwrap();
     }
     let script = g.args.last().unwrap();
-    let mut cmd = paddock_proc::command("sh");
+    // An empty environment plus the listed one and a private HOME (C123, ER-14): the machine's CARGO_* and toolchain variables never
+    // reach the script.
+    let mut cmd = paddock_testkit::TestCommand::new("sh");
     // The script is the container's: `/target/...` is a Linux path there. Git bash on Windows would turn the value of
     // `CARGO_TARGET_DIR` into `C:/Program Files/Git/target/...` for the native stand-in (MSYS converts the environment of a
     // native program; run 8327), so the variable is left as it is, as the container leaves it.
@@ -1367,6 +1369,7 @@ fn one_container_run_covers_every_touched_workspace_and_a_failing_one_fails_the_
         .current_dir(dir.path())
         .env("MSYS2_ENV_CONV_EXCL", "CARGO_TARGET_DIR")
         .env("PATH", format!("{}:/usr/bin:/bin", bin.display()));
+    let (cmd, _private) = cmd.into_parts();
     let out = paddock_proc::run_bounded(cmd, paddock_proc::Limits::new(Duration::from_secs(30))).unwrap();
     let calls = std::fs::read_to_string(&log).unwrap();
     assert!(
