@@ -102,6 +102,7 @@ pub mod release_isolation;
 pub mod repo_inputs;
 pub mod repo_model;
 pub mod run_scope;
+pub mod test_cache;
 pub mod safe_remove;
 pub mod slots;
 pub mod test_cost;
