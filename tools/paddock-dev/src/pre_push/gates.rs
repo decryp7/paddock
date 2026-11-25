@@ -54,6 +54,10 @@ pub struct Gate {
     /// The cargo build folder it uses, relative to the repository root or absolute (`None`: not a cargo build, or not known): a step
     /// whose folder holds no build yet is COLD, and the history keeps cold and warm apart.
     pub build_dir: Option<String>,
+    /// The files whose content the container must see as the host has it before the row runs ([`super::mount_fresh`]): set by
+    /// [`plan_gates`] on every row that runs in the container ([`Need::LocalCiImage`]), `None` on the others. A container row
+    /// without it compares nothing, which is not measured (ER-33).
+    pub mount: Option<Box<super::mount_fresh::Compared>>,
 }
 
 impl Gate {
@@ -242,6 +246,7 @@ fn gate(id: String, cwd: &str, program: &str, args: &[&str], rank: u8, next: Str
         notice: None,
         progress: super::progress::Progress::Lines,
         build_dir: None,
+        mount: None,
     }
 }
 
@@ -307,8 +312,21 @@ fn build_dir(facts: &Facts, ws: &str, suffix: Option<&str>) -> String {
 pub const DOCTESTS_OFF: &str = "doctests: off (user 2026-11-24; crates/README.md, \"Doctests\"): every library target has `doctest = false` and doc examples are text, so no `cargo test --doc` runs here, in CI or in the nightly";
 
 /// The gates `change` reaches under `plan`, in table order. Each is CI's own command (the one source is named in `next` or the
-/// doc of the check that reads it).
+/// doc of the check that reads it). Every row that runs in the container names the files its mount probe compares (the change's,
+/// its own workspaces' first): one place for every container row, so none runs on a stale mount (rule 55).
 pub fn plan_gates(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> {
+    let mut out = plan_rows(plan, change, facts);
+    for p in &mut out {
+        if let Planned::Run(g) = p
+            && g.need == Need::LocalCiImage
+        {
+            g.mount = Some(Box::new(super::mount_fresh::files_for(&change.files, &g.workspaces)));
+        }
+    }
+    out
+}
+
+fn plan_rows(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> {
     let mut out = Vec::new();
     let own = own_workspaces(plan, &change.files);
     let mut dependents = Vec::new();

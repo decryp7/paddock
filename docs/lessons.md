@@ -3921,3 +3921,17 @@ variables nobody listed: [__CF_USER_TEXT_ENCODING, ...]".
 run 9011 (failed once, passed on its retry; flaky-as-failure kept the run red, ER-12). Not fixed on train 2026-11-26-e: a fix item for
 paddock-watch's owner, which starts with a reproduction under load and the list of causes with what rules each out (ER-28). No sleep or
 raised timeout as the fix.
+
+## OrbStack's bind mount served stale files to the Linux container (2026-11-25)
+
+- **What.** After a file changed on the host, the CI-image container (`tools/linux-container.sh --id paddock --ci-image`, the push
+  gate's `clippy-linux` row) saw the old size and mtime for over an hour, with the new text cut at the old length (OrbStack 2.2.5).
+  A container row could lint or test the old version and pass. A restart of OrbStack cleared it.
+- **Fix (user decision 2026-11-25: hash check).** Every push-gate row that runs in the container compares `git hash-object
+  --no-filters` of the change's files (its own workspaces' first, at most 256) inside the container with the host's before it runs
+  (`pre_push::mount_fresh`, set by `plan_gates` on every `Need::LocalCiImage` row). Any difference, or a probe that cannot look, is
+  "not measured" (exit 6) with the files named and the next step "restart OrbStack, or the Mac"; the row never runs on that mount.
+  The probe's duration and verdict are logged on standard error.
+- **Rule of thumb.** A check that reads files through a mount or a copy proves the copy is current before it counts (ER-33).
+- **Class (ER-21).** A check that ran on another version of its input than the one it reports on. Earlier instances: "Stale servers
+  and stale builds (e2e and screenshots, 2026-10-28)" above (stale CSS, fixed by the build guard).

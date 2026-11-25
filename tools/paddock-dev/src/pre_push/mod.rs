@@ -44,6 +44,7 @@ pub mod heavy_tool;
 pub mod kept;
 pub mod known;
 pub mod linux_inputs;
+pub mod mount_fresh;
 pub mod outcome;
 pub mod reuse;
 pub mod warm;

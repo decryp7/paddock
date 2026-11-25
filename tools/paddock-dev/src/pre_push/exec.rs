@@ -162,6 +162,14 @@ pub trait Exec: Sync {
     fn ci_image(&self) -> super::linux_inputs::ImageProbe {
         super::linux_inputs::ImageProbe::Ready
     }
+    /// Whether the container sees `compared`'s files as the host has them ([`super::mount_fresh`]). Never changes either side.
+    /// A test's executor answers fresh unless it stands in for a stale mount.
+    fn mount_probe(&self, compared: &super::mount_fresh::Compared) -> super::mount_fresh::MountProbe {
+        super::mount_fresh::MountProbe::Fresh {
+            checked: compared.files.len(),
+            of: compared.of,
+        }
+    }
     /// Runs the gate within `limits` (a heavy step: at most `limits.run` of running and `limits.queue` of waiting for the slot).
     /// `Err`: it could not be started (the program is missing).
     fn run(&self, gate: &Gate, limits: Limits) -> Result<Done, String>;
@@ -406,6 +414,51 @@ fn run_limit_note(done: &Done) -> String {
     }
 }
 
+/// A container row's mount probe ([`super::mount_fresh`]): `None` when the container sees the change's files as the host has them, else
+/// the row's "not measured" verdict (a stale mount or a probe that could not look; ER-33). Logs the probe's verdict and duration (ER-27).
+fn mount_not_fresh(gate: &Gate, exec: &dyn Exec) -> Option<Row> {
+    use super::mount_fresh::{MountProbe, STALE_NEXT};
+    let started = Instant::now();
+    let compared = gate.mount.clone().unwrap_or_default();
+    let probe = exec.mount_probe(&compared);
+    let secs = started.elapsed().as_secs_f64();
+    match probe {
+        MountProbe::Fresh { checked, of } => {
+            eprintln!(
+                "pre-push: {}: the container's mount matches the host for {checked} of the change's {of} file(s) ({secs:.1} s)",
+                gate.id
+            );
+            None
+        }
+        MountProbe::Stale { differing } => {
+            eprintln!(
+                "pre-push: {}: the container's mount is stale for {} file(s) ({secs:.1} s)",
+                gate.id,
+                differing.len()
+            );
+            let shown: Vec<&str> = differing.iter().take(5).map(String::as_str).collect();
+            let more = differing.len().saturating_sub(shown.len());
+            Some(Row::not_measured(
+                format!(
+                    "the container's bind mount is stale: it sees other content than the host for {}{}, so the row would check an old version",
+                    shown.join(", "),
+                    if more > 0 { format!(" and {more} more") } else { String::new() }
+                ),
+                STALE_NEXT,
+            ))
+        }
+        MountProbe::Broken(why) => {
+            eprintln!("pre-push: {}: the mount probe could not look ({secs:.1} s): {why}", gate.id);
+            Some(Row::not_measured(
+                format!("mount probe broken ({why}): it cannot be shown that the container sees the host's files"),
+                format!(
+                    "run `bash tools/linux-container.sh --id paddock --ci-image -- git status --short` yourself and read what it prints; {STALE_NEXT}"
+                ),
+            ))
+        }
+    }
+}
+
 /// The verdict of one gate: its needs first, then the run.
 pub fn decide(gate: &Gate, exec: &dyn Exec, subject: &Subject) -> Row {
     decide_with(gate, exec, Limits { stall: QUEUE_STALL }, subject, &mut |_| {})
@@ -442,6 +495,9 @@ pub fn decide_with(gate: &Gate, exec: &dyn Exec, limits: Limits, subject: &Subje
             ImageProbe::Broken(how) => {
                 return Row::not_measured(format!("image probe broken ({how})"), PROBE_NEXT);
             }
+        }
+        if let Some(row) = mount_not_fresh(gate, exec) {
+            return row;
         }
     }
     if gate.heavy
@@ -1213,6 +1269,32 @@ impl Exec for RealExec {
         }
     }
 
+    fn mount_probe(&self, compared: &super::mount_fresh::Compared) -> super::mount_fresh::MountProbe {
+        use super::mount_fresh::{SCRIPT, check};
+        // The same script on both sides: plain `sh` in the checkout, and through the container helper with the row's own mount.
+        let run = |call: ToolCall| -> Result<String, String> {
+            let r = call
+                .cwd(&self.root)
+                .pass(PASS.iter().copied())
+                .timeout(Duration::from_secs(120))
+                .run(&self.env, &mut std::io::sink())?;
+            if r.success {
+                Ok(r.stdout)
+            } else {
+                Err(format!("{}: {}", r.how, tail(&r.stderr, 3).trim()))
+            }
+        };
+        let host = |files: &[String]| run(ToolCall::new("sh").args(["-c", SCRIPT, "sh"]).args(files.iter().cloned()));
+        let container = |files: &[String]| {
+            run(ToolCall::new("bash")
+                .args(["tools/linux-container.sh", "--id", "paddock", "--ci-image", "--root"])
+                .args([self.root.to_string_lossy().to_string()])
+                .args(["--", "sh", "-c", SCRIPT, "sh"])
+                .args(files.iter().cloned()))
+        };
+        check(&compared.files, compared.of, host, container)
+    }
+
     fn load(&self) -> Option<f64> {
         let ran = ToolCall::new("uptime")
             .timeout(Duration::from_secs(10))
@@ -1915,6 +1997,7 @@ mod tests {
             notice: None,
             progress: crate::pre_push::progress::Progress::Lines,
             build_dir: None,
+            mount: None,
         })
     }
 
@@ -2021,6 +2104,7 @@ exit $rc
                 notice: None,
                 progress: crate::pre_push::progress::Progress::Lines,
                 build_dir: None,
+                mount: None,
             }
         }
 
