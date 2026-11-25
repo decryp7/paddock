@@ -140,6 +140,16 @@ test('two jobs on one host get different slots from the OS-lock holder, and each
   assert.ok(existsSync(b.exported().PADDOCK_SOCKET_BASE), 'and only its own');
 });
 
+test('slot affinity: the kind of job (workflow, job, OS) is passed to the holder as its key, and a job with no workflow name passes none', () => {
+  const h = host();
+  const a = h.job('aaaaaaaaaaaaaaaa', { GITHUB_WORKFLOW: 'CI' });
+  assert.equal(a.exec(['acquire']).status, 0);
+  assert.match(h.log(), new RegExp(`^ci slot acquire --max 4 --owner ${a.temp} --root ${h.ci} --key CI/aaaaaaaaaaaaaaaa/macOS$`, 'm'));
+  const b = h.job('bbbbbbbbbbbbbbbb');
+  assert.equal(b.exec(['acquire']).status, 0);
+  assert.match(h.log(), new RegExp(`^ci slot acquire --max 4 --owner ${b.temp} --root ${h.ci}$`, 'm'), 'no GITHUB_WORKFLOW: no key');
+});
+
 test('the slot count follows PADDOCK_CI_SLOTS (the pool maximum); a full house waits, then fails and names the holders', () => {
   const h = host();
   const jobs = ['1', '2', '3', '4'].map((n) => h.job(n.repeat(16), { PADDOCK_CI_SLOTS: '3' }));

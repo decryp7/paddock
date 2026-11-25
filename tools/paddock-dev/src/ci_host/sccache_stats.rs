@@ -2,6 +2,8 @@
 //! of the `sccache-stats` action; the last step of a job, with `if: always()`). Does nothing when sccache is absent. A server on
 //! the default port is never stopped: only CI's own server, whose port setup-rust sets (`SCCACHE_SERVER_PORT`).
 //!
+//! A job whose cache missed everywhere gets one `::warning::` ([`miss_warning`]; report-only until [`MISS_WARNING_REVIEW_BY`]).
+//!
 //! sccache gets `SCCACHE_*` only (the server's port and settings), never the job's tokens ([`ToolCall`]). Never fails the job.
 
 use super::{Step, on_path};
@@ -13,6 +15,42 @@ use std::time::Duration;
 const STATS_TIMEOUT: Duration = Duration::from_secs(120);
 /// How many lines of the server's error log the job log shows.
 const ERROR_LOG_LINES: usize = 20;
+
+/// ER-41: the warning below is report-only and is reviewed by this date (ER-41, user 2026-11-25): if no real run showed it by then it is
+/// deleted, not extended; one that fired on a cold job stays only with the user's yes. It is recorded here and in the warning's own text, not in
+/// docs/gates.toml: the register holds checks (C100 names an entry for anything else a nonexistent check, and one for the gated
+/// `action:sccache-stats` a stale entry).
+pub const MISS_WARNING_REVIEW_BY: &str = "2026-12-09";
+
+/// The most S3 (L1) misses a job may have with no hit at any level before [`miss_warning`] speaks: a small job misses a few crates
+/// by itself (jobs 50162 and 50136, 2026-11-25: 62 and 90 misses; only the second had no hit at all).
+const MISS_WARNING_ABOVE: u64 = 20;
+
+/// The value of the stats line that starts with exactly `label` (`Cache hits   277`, not `Cache hits rate   82.69 %` or
+/// `Cache hits (Rust)   271`), as `sccache --show-stats` prints it. `None` when no such line has a whole number.
+fn stat(text: &str, label: &str) -> Option<u64> {
+    text.lines()
+        .find_map(|l| l.trim_start().strip_prefix(label).and_then(|rest| rest.trim().parse().ok()))
+}
+
+/// The report-only miss warning (ER-21: the third time a changing path in the cache keys broke sccache; runs 9054, 9065 and 9066
+/// had 0 hits of 90 on a job that moved to another slot): `Some(line)` when no level had a hit, the S3 level (L1) had 0 hits and
+/// more than [`MISS_WARNING_ABOVE`] misses. A job whose disk level (L0) hit is warm even though L1 never sees those requests (job 50162:
+/// L0 277 hits, L1 0 hits and 62 misses), so L1 alone would warn on a healthy job. `None` when the text has no such counters (not
+/// measured: never a pass or a failure, ER-33) or the job hit.
+pub(super) fn miss_warning(stats: &str, leg: &str, slot: &str) -> Option<String> {
+    let (hits, l1_hits, l1_misses) = (
+        stat(stats, "Cache hits")?,
+        stat(stats, "L1 (s3) hits")?,
+        stat(stats, "L1 (s3) misses")?,
+    );
+    (hits == 0 && l1_hits == 0 && l1_misses > MISS_WARNING_ABOVE).then(|| {
+        format!(
+            "::warning::sccache-stats: leg {leg} (slot {slot}): 0 cache hits, S3 (L1) 0 hits and {l1_misses} misses; cache keys may contain a changing path \
+             (another slot or checkout folder than the last run of this job). Report-only, reviewed by {MISS_WARNING_REVIEW_BY}."
+        )
+    })
+}
 
 /// The command over the real machine.
 pub fn run(env: &HashMap<String, String>, out: &mut dyn Write) -> i32 {
@@ -35,6 +73,14 @@ pub fn run(env: &HashMap<String, String>, out: &mut dyn Write) -> i32 {
     match ran {
         Ok(r) if r.success => {
             step.say(r.stdout.trim_end());
+            let leg = format!(
+                "{}/{}",
+                step.var("GITHUB_WORKFLOW").unwrap_or("?"),
+                step.var("GITHUB_JOB").unwrap_or("?")
+            );
+            if let Some(line) = miss_warning(&r.stdout, &leg, step.var("PADDOCK_CI_SLOT").unwrap_or("none")) {
+                step.say(line);
+            }
         }
         _ => step.say("::notice::sccache statistics are unavailable (the cache server was not reachable)."),
     }
@@ -115,6 +161,100 @@ mod tests {
             String::from_utf8(out).unwrap(),
             std::fs::read_to_string(dir.join("calls")).unwrap_or_default(),
         )
+    }
+
+    /// The counters of job 50136's stats (a Mac job on a slot it did not hold last time; run 9054), as sccache prints them, without its
+    /// cache location lines (those carry machine paths, ER-46).
+    const COLD: &str = "Compile requests                    415
+Cache hits                            0
+Cache misses                         90
+Cache hits rate                    0.00 %
+Multi-level cache levels              2
+  L0 (disk) hits                      0
+  L0 (disk) misses                   90
+  L1 (s3) hits                        0
+  L1 (s3) misses                     90
+  L1 (s3) hit rate                 0.00 %
+";
+    /// The counters of job 50162's stats (a Windows job on its slot): the disk level answered, so the S3 level saw only the misses.
+    const WARM: &str = "Compile requests                    513
+Cache hits                          277
+Cache hits (Rust)                   271
+Cache misses                         58
+Cache hits rate                  82.69 %
+Multi-level cache levels              2
+  L0 (disk) hits                    277
+  L0 (disk) misses                   62
+  L1 (s3) hits                        0
+  L1 (s3) misses                     62
+  L1 (s3) hit rate                 0.00 %
+";
+
+    #[test]
+    fn a_job_with_no_hit_at_any_level_and_many_s3_misses_gets_one_warning_naming_leg_and_slot() {
+        let w = miss_warning(COLD, "CI/crate", "s2").unwrap();
+        assert!(w.starts_with("::warning::") && !w.contains('\n'), "{w}");
+        assert!(
+            w.contains("leg CI/crate") && w.contains("slot s2") && w.contains("90 misses"),
+            "{w}"
+        );
+        assert!(w.contains("cache keys may contain a changing path"), "{w}");
+        assert!(w.contains(MISS_WARNING_REVIEW_BY), "the review date is in the line: {w}");
+    }
+
+    #[test]
+    fn a_warm_job_a_small_job_and_unreadable_counters_get_no_warning() {
+        assert_eq!(
+            miss_warning(WARM, "CI/crate", "s1"),
+            None,
+            "L0 hit 277 times: warm, though L1 never hit"
+        );
+        let hit = COLD.replace("L1 (s3) hits                        0", "L1 (s3) hits                       30");
+        assert_eq!(miss_warning(&hit, "CI/crate", "s1"), None, "an S3 hit");
+        let few = COLD.replace("L1 (s3) misses                     90", "L1 (s3) misses                     20");
+        assert_eq!(miss_warning(&few, "CI/crate", "s1"), None, "20 misses is not above 20");
+        assert!(
+            miss_warning(
+                &few.replace("misses                     20", "misses                     21"),
+                "CI/crate",
+                "s1"
+            )
+            .is_some()
+        );
+        for text in ["", "Compile requests 4", "Cache hits   x\n  L1 (s3) hits  0\n  L1 (s3) misses  90"] {
+            assert_eq!(miss_warning(text, "CI/crate", "s1"), None, "not measured: {text:?}");
+        }
+        assert_eq!(stat(COLD, "Cache hits"), Some(0), "the rate line is not the count");
+    }
+
+    #[test]
+    fn the_step_prints_the_warning_after_the_statistics_and_still_ends_with_exit_0() {
+        let d = crate::ci_host::canonical_tempdir();
+        let calls = d.path().join("calls").display().to_string();
+        StandIn::new(d.path(), "sccache")
+            .answers(Actions::new().appends_with(&calls, CALL_LINE).stdout(COLD))
+            .install()
+            .unwrap();
+        let (code, out, _) = go(
+            d.path(),
+            &[("GITHUB_WORKFLOW", "CI"), ("GITHUB_JOB", "paddock-dev"), ("PADDOCK_CI_SLOT", "s2")],
+        );
+        assert_eq!(code, 0, "report-only: it never fails the step");
+        assert_eq!(out.matches("::warning::sccache-stats").count(), 1, "{out}");
+        assert!(out.find("Compile requests").unwrap() < out.find("::warning::sccache-stats").unwrap());
+        assert!(out.contains("leg CI/paddock-dev (slot s2)"), "{out}");
+        let d = crate::ci_host::canonical_tempdir();
+        StandIn::new(d.path(), "sccache")
+            .answers(
+                Actions::new()
+                    .appends_with(&d.path().join("calls").display().to_string(), CALL_LINE)
+                    .stdout(WARM),
+            )
+            .install()
+            .unwrap();
+        let (code, out, _) = go(d.path(), &[]);
+        assert_eq!(code, 0);
+        assert!(!out.contains("::warning::sccache-stats"), "{out}");
     }
 
     #[test]
