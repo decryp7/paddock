@@ -996,8 +996,11 @@ pub struct RealExec {
     pub state: PathBuf,
 }
 
-/// Variables every gate may see besides the base list: the toolchain, Docker, caches and Paddock's own settings.
+/// Variables every gate may see besides the base list: the caller's account (CI's runner has it, and tests read it: paddock-env's
+/// macOS ACL test writes `user:$USER`; ER-47), the toolchain, Docker, caches and Paddock's own settings.
 pub(crate) const PASS: &[&str] = &[
+    "USER",
+    "LOGNAME",
     "CARGO_*",
     "RUSTUP_*",
     "RUSTFLAGS",
@@ -2146,6 +2149,27 @@ exit $rc
             let row = decide(&g, &ex, &test_subject());
             assert_eq!(row.kind(), Kind::Failed);
             assert!(row.tail.contains("C100 conformance C999 is run by no reachable"), "{}", row.tail);
+        }
+
+        /// A row's child keeps the caller's account (`USER`, `LOGNAME`) as CI's runner gives it (ER-47): the member gate's `tests crates`
+        /// row ran paddock-env's macOS ACL test without `USER`, so it wrote `user: allow ...` and failed (train 2026-11-26-g). A token
+        /// stays out (the control).
+        #[test]
+        fn a_rows_child_keeps_the_callers_account_and_never_a_token() {
+            let d = tempfile::tempdir().unwrap();
+            let mut ex = real(d.path(), &d.path().join("lock"));
+            ex.env.insert("USER".into(), "someone".into());
+            ex.env.insert("LOGNAME".into(), "someone".into());
+            ex.env.insert("GITEA_TOKEN".into(), "secret".into());
+            let g = Gate {
+                heavy: false,
+                ..gate(
+                    "tests crates",
+                    r#"test "$USER" = someone && test "$LOGNAME" = someone && test -z "${GITEA_TOKEN:-}""#,
+                )
+            };
+            let row = decide(&g, &ex, &test_subject());
+            assert_eq!(row.kind(), Kind::Passed, "{}", row.reason());
         }
 
         /// A failed nextest row said only "exit 100": its failed tests and first panic line are in the row's cause and its JSON, read
