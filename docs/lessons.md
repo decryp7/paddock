@@ -3921,3 +3921,15 @@ variables nobody listed: [__CF_USER_TEXT_ENCODING, ...]".
 run 9011 (failed once, passed on its retry; flaky-as-failure kept the run red, ER-12). Not fixed on train 2026-11-26-e: a fix item for
 paddock-watch's owner, which starts with a reproduction under load and the list of causes with what rules each out (ER-28). No sleep or
 raised timeout as the fix.
+
+## Two of the Mac's three runners were unregistered for a day, and nothing said so (2026-11-25)
+- **What.** While preparing ADR 0120's runner move (read-only), `d7-mac-mini-2` and `-3` had logged `fail to invoke Declare ...
+  unregistered runner` at every start since 2026-11-24 10:35, the minutes after the WindowServer abort; launchd restarted them about
+  every 10 s (KeepAlive; `-2`'s `logs/runner.log` held about 19,000 such lines, two per start). Gitea no longer knew them. The Mac ran 3 jobs at
+  once, not 5. The user saw only "`-2` exited with status 1".
+- **Why it was missed.** A runner that cannot register is not a failed job: nothing in CI turns red, and the runner list shows fewer
+  runners only to someone who looks.
+- **Fix in this change.** `tools/mac-runner-move.sh` treats a lane as up only when its log says `declare successfully` after the start,
+  stops a lane that Gitea refuses (no crash loop) and prints the register command; its `status` shows each lane's last start line.
+- **Open.** The cause of the lost registrations is not known (the server side was not read). A check that each declared runner is
+  online belongs to ADR 0074's host inventory.

@@ -13,6 +13,7 @@ a bad option and never touches anything outside what it names.
 | `prune-build-folders.sh <folder> <max-gb>` (CI runs `./dev ci prune-folder`; this script is the release-path copy until WP-11) | keep a persistent CI build folder under a cap (incremental caches first, then the folder) | Dyno `ci-prune.sh` |
 | `prune-ci-build-folder.sh <folder> <max-gb> [--drop-bundles]` | the CI form: caps only a kept build folder of this job's slot (`job-isolation.sh owns <folder> target`: `target-<name>-<slot>` in the CI home, resolved, no symlinks), else leaves it alone | the `prune-build-folder` action |
 | `./dev ci prune-agent-builds --app debrief [--remove --keep 6c]` | list and remove build folders of finished worktrees (every OS; the port of `prune-build-folders.ps1`, WP-4) | Debrief `clean-build-dirs.ps1` |
+| `mac-runner-move.sh install\|rollback\|status --user <name> --daemon <lane> --gui <lane> --retire <lane> [--dry-run]` | ADR 0120's runner move, run by the user with sudo, never by an agent: the Mac's runner lanes leave the user's GUI session as LaunchDaemons (`mac-runners/runner-daemon.plist`), one GUI lane stays an Aqua agent (`mac-runners/runner-gui-agent.plist`), each rendered with plutil from the lane's current agent; then each lane must declare itself to Gitea; `rollback` puts the parked agents back. Runbook: docs/dev-setup.md, "Mac CI runner lanes" | the hand steps of ADR 0120 |
 | `host-cleanup.sh --id pitwall --process-pattern '{build}[/\\]debug[/\\]pitwall-server'` | this job's stray test processes (patterns anchored on its own folders; PowerShell on Windows) and temp folders on a host runner, then a leak check; used by the `host-cleanup` CI action | Pitwall `ci/macos-cleanup.sh` |
 
 Parameters carry what differed between the copies: the product name, the launchd label, the systemd unit, the service
@@ -22,6 +23,8 @@ scripts read (unit, launchd state, discovery file) is what `paddock-service` (X4
 Tests: `node --test tools/test/*.test.mjs`. They run every script in a scratch folder with a PATH of shims
 (`PADDOCK_TOOLS_OS` pretends to be macOS or Linux), so no launchd, systemd, Docker or installed app is touched. The PowerShell
 script is not run on the Mac; it is a parameterised port of Debrief's, reviewed by reading, and runs on the Windows runner.
+`mac-runner-move.test.mjs` runs on macOS only: it checks the rendered plists with the real `plutil` (lint and parse), so CI's
+Linux `tools` job skips it and says why.
 
 ## macos-vm-smoke.sh
 
