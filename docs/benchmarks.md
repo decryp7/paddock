@@ -2922,3 +2922,34 @@ was never short (68 % free at the lowest; a gate's largest process is about 1.4 
 and opens the second under a 5-minute load of 0.85 x cores (11.9 here): every batch started under 12, and there two beat one; above it
 nothing measured says a second step helps. The round-1 3-gate batch started during another agent's burst (1-minute load 18.9); round 2
 repeated it from a quiet start (4.6) and was slower still (22.6 gates per hour, mean 1-minute load 24.3), so three is not a gain.
+
+## Local keys against CI's: the two CARGO variables (2026-11-26, fix/sccache-key-env, base 202d0a181)
+
+Why a local build found none of CI's compile-cache entries (the earlier block "Local sccache: a second worktree hits...": 0 of 112).
+
+- **Method:** `SCCACHE_LOG=debug` prints each compile's hash key; the key is the object's name in the S3 store
+  (`<prefix>/<k0>/<k1>/<k2>/<key>`), so a key's presence and `last-modified` say whether CI stored it. The same units were compiled with
+  `cargo nextest run -p paddock-diag -p paddock-updater --no-run` (308 keys) in four environments and each key looked up with a signed HEAD
+  (a throwaway script, not kept). A stored CI entry (`stable_deref_trait`, its `-C extra-filename` hash and the fingerprint json equal to
+  a local build's) gave a leaf crate with the same cargo unit and a different sccache key.
+- **Cause:** sccache 0.20.1 (`src/compiler/rust.rs`, `generate_hash_key`) hashes every `CARGO_*` variable of the compile except a few
+  (`CARGO_MAKEFLAGS`, `CARGO_TARGET_DIR`, `CARGO_BUILD_*`, ...). CI's jobs have `CARGO_INCREMENTAL=0` (setup-rust) and
+  `CARGO_TERM_COLOR=always` (the workflows' `env`); a local shell has neither. Not the checkout folder (bases strip it), not the registry
+  path (same HOME), not the toolchain, not the profile.
+
+| Environment of the compile | Keys among the 308 that CI had stored before 2026-11-23 |
+|---|---|
+| neither variable | 0 |
+| `CARGO_INCREMENTAL=0` only | 0 |
+| `CARGO_TERM_COLOR=always` only | 0 |
+| both | 166 |
+
+- **Fix:** the RUSTC_WRAPPER shim that `./dev sccache env` writes exports the two variables for a rustc compile (`CI_KEY_ENV`), so sccache
+  sees them whatever the caller's shell has; cargo's own environment is unchanged (no colour codes in piped output, incremental builds
+  of workspace crates stay).
+- **Cross hit, measured:** a private server (fresh disk, S3 behind it under `paddock-ci/macOS-aarch64`), this branch's shim, a worktree that
+  had never built, no CARGO variable in the shell, the same command: 294 compile requests executed, **174 L1 (S3) hits**, 0 L0, 117 misses
+  (the workspace crates and what no CI job built in that configuration), 117 writes. The 8 to 12 other keys of the table above are CI jobs
+  that were not run with the same command or without `CARGO_TERM_COLOR`.
+- **Limits:** only CI jobs that have both variables share entries (`ci.yml`'s crate jobs do; a job without `CARGO_TERM_COLOR`, for
+  example some app workflows, hashes a different key class). Windows has no shim (the wrapper is the sccache binary), so it is not covered.
