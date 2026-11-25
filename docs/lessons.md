@@ -3921,3 +3921,15 @@ variables nobody listed: [__CF_USER_TEXT_ENCODING, ...]".
 run 9011 (failed once, passed on its retry; flaky-as-failure kept the run red, ER-12). Not fixed on train 2026-11-26-e: a fix item for
 paddock-watch's owner, which starts with a reproduction under load and the list of causes with what rules each out (ER-28). No sleep or
 raised timeout as the fix.
+
+## `ci triage` read a skipped job as a pass (2026-11-25)
+
+- **Symptom.** `./dev ci triage 9021` (nightly) called the "dialog commands (declared but never sent)" failure NEW. The last finished
+  main nightly, 8284, had skipped every job (its gate found main unchanged); nightly 8226 had the same failure.
+- **Cause.** `baseline_jobs` treated any job that was not `failed()` as passed, and `TimedJob::failed()` is false for `skipped`. It
+  also compared only with one run, so a job that run did not run had no way to an answer but NEW or UNKNOWN.
+- **Fix.** A job the comparison run skipped, lacked or cancelled before it ran is compared with the newest older main run of the
+  workflow that ran it, or is UNKNOWN with that reason; a run named with `--against` is never replaced. Tests from recorded runs
+  (`tools/paddock-dev/tests/ci-triage-skipped`, runs 9021, 8658, 8331, 8284, 8226).
+- **Class (ER-21, ER-33).** A CI-run reader reads "skipped" as "passed". Earlier instance: `ci verdict` counted a schedule-skipped run
+  (every job skipped) as full and green (ADR 0089's instance table, row 2; ADR 0113, 2026-11-12).
