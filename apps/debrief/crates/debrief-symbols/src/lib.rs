@@ -25,7 +25,7 @@ pub mod pe;
 pub mod fetch;
 #[cfg(feature = "server")]
 pub mod servers;
-#[cfg(feature = "server")]
+#[cfg(all(feature = "server", any(test, feature = "testing")))]
 #[doc(hidden)]
 pub mod testing;
 

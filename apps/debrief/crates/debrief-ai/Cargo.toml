@@ -11,6 +11,11 @@ description = "AI assistant for Debrief on Pitwall: engine-validated proposals, 
 [lib]
 doctest = false # doctests are off (crates/README.md, "Doctests")
 
+[features]
+# Test support (rule 97): the scripted LLM (`llm::fake`) and the fake Pitwall (`engine::pitwall::fake`). Enabled from
+# `[dev-dependencies]` only, never in a shipped build (`./dev check test-features`, C170).
+testing = []
+
 [dependencies]
 debrief-core = { path = "../debrief-core" }
 debrief-collect = { path = "../debrief-collect" }
@@ -40,6 +45,9 @@ libc.workspace = true
 windows = { workspace = true, features = ["Win32_System_Threading"] }
 
 [dev-dependencies]
+debrief-image = { path = "../debrief-image", features = ["testing"] }
+# The self dev-dependency that turns `testing` on for this package's own integration tests (rule 97).
+debrief-ai = { path = ".", features = ["testing"] }
 tempfile.workspace = true
 # A real store (the SQL tool and the end-to-end chat tests run over it); an adapter, so tests only.
 debrief-store-duck = { path = "../debrief-store-duck" }

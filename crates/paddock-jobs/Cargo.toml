@@ -13,6 +13,9 @@ doctest = false # doctests are off (crates/README.md, "Doctests")
 test = false
 
 [features]
+# Test support (rule 97): the test-only hooks and fakes (`FakeClock`). Enabled from `[dev-dependencies]` only, never in
+# a shipped build (`./dev check test-features`, C170).
+testing = []
 # The Tauri adapter (`paddock_jobs::tauri`: the `paddock://jobs` sink, `jobs_snapshot`, `job_cancel` in a `paddock-commands`
 # table); the core never depends on Tauri.
 tauri = ["dep:tauri", "dep:paddock-commands", "paddock-commands/tauri"]
@@ -30,6 +33,8 @@ sha2 = "0.10"
 paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
 
 [dev-dependencies]
+# The self dev-dependency that turns `testing` on for this package's own integration tests (rule 97).
+paddock-jobs = { path = ".", features = ["testing"] }
 proptest = "1"
 postcard = { version = "1", default-features = false, features = ["use-std"] }
 serde_json = "1"
@@ -37,7 +42,7 @@ tempfile = "3"
 # The Tauri adapter is tested on Tauri's mock runtime.
 tauri = { workspace = true, features = ["test"] }
 # The generated TypeScript of the adapter's command table, checked by tests/it/tauri.rs.
-paddock-commands = { workspace = true }
+paddock-commands = { workspace = true, features = ["testing"] }
 
 [[bench]]
 name = "walk"

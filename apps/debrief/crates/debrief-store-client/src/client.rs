@@ -107,6 +107,7 @@ impl WorkerConfig {
     /// ([`debrief_ipc::process::UNTIL_CONNECTED`], ADR 0071), never on a fixed window, since the first run of a fresh binary on
     /// macOS is held by the OS for far longer than the product's window (CI 7919 and 7925). The test runner's slow-timeout is
     /// the only hang guard. Tests that examine the window itself keep [`WorkerConfig::new`] and set their own.
+    #[cfg(any(test, feature = "testing"))]
     pub fn for_tests(exe: impl Into<PathBuf>) -> WorkerConfig {
         WorkerConfig {
             connect_window: debrief_ipc::process::UNTIL_CONNECTED,

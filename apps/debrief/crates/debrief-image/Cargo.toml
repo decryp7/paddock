@@ -11,6 +11,11 @@ description = "Untrusted images made safe for a model and the webview (ADR 0025)
 [lib]
 doctest = false # doctests are off (crates/README.md, "Doctests")
 
+[features]
+# Test support (rule 97): `sanitize::testing`, test images. Enabled from `[dev-dependencies]` only, never in a shipped
+# build (`./dev check test-features`, C170).
+testing = []
+
 [dependencies]
 serde.workspace = true
 thiserror.workspace = true

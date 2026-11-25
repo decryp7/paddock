@@ -29,13 +29,18 @@ pub struct AlertMutes {
 
 impl Default for AlertMutes {
     fn default() -> Self {
-        AlertMutes::with_clock(Arc::new(super::wall_ms))
+        AlertMutes::clocked(Arc::new(super::wall_ms))
     }
 }
 
 impl AlertMutes {
-    /// Mutes timed with `clock` (tests pass a fake one).
+    /// Mutes timed with `clock` (tests pass a fake one). Test only (rule 97).
+    #[cfg(any(test, feature = "test-support"))]
     pub fn with_clock(clock: Clock) -> AlertMutes {
+        AlertMutes::clocked(clock)
+    }
+
+    fn clocked(clock: Clock) -> AlertMutes {
         AlertMutes {
             entries: Vec::new(),
             clock,

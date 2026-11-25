@@ -11,6 +11,9 @@ publish = ["decryp7"]
 doctest = false # doctests are off (crates/README.md, "Doctests")
 
 [features]
+# Test support (rule 97): the test-only hooks and fakes (the `testing` assertions over a command table). Enabled from
+# `[dev-dependencies]` only, never in a shipped build (`./dev check test-features`, C170).
+testing = []
 # The Tauri adapter (`paddock_commands::tauri`); the core above it never depends on Tauri.
 tauri = ["dep:tauri", "dep:log", "dep:serde_json"]
 

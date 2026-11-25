@@ -385,6 +385,7 @@ impl Updater {
     }
 
     /// Another clock (seconds since 1970) for the last-checked time and the automatic check (tests).
+    #[cfg(any(test, feature = "testing"))]
     pub fn with_clock(mut self, now: impl Fn() -> u64 + Send + Sync + 'static) -> Updater {
         self.now = Box::new(now);
         self

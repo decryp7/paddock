@@ -122,6 +122,7 @@ impl Recents {
     }
 
     /// Replaces the clock (milliseconds since the Unix epoch); for tests.
+    #[cfg(any(test, feature = "testing"))]
     #[must_use]
     pub fn with_clock(mut self, clock: fn() -> u64) -> Recents {
         self.clock = clock;

@@ -445,8 +445,15 @@ impl Host {
         self
     }
 
-    /// The clock the accept wait and each handshake's limit run on, and that limit ([`HANDSHAKE_TIMEOUT`] by default).
-    pub fn with_clock(mut self, clock: Arc<dyn Clock>, handshake: Duration) -> Host {
+    /// The clock the accept wait and each handshake's limit run on, and that limit ([`HANDSHAKE_TIMEOUT`] by default). Test
+    /// only (rule 97): a shipped build cannot call it; the link server sets its configured clock through [`Host::clocked`].
+    #[cfg(any(test, feature = "testing"))]
+    pub fn with_clock(self, clock: Arc<dyn Clock>, handshake: Duration) -> Host {
+        self.clocked(clock, handshake)
+    }
+
+    /// `Host::with_clock` for this crate's own wiring: the link server sets the clock of its `ServerConfig`.
+    pub(crate) fn clocked(mut self, clock: Arc<dyn Clock>, handshake: Duration) -> Host {
         self.auth.clock = clock;
         self.auth.timeout = handshake;
         self

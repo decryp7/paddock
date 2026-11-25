@@ -24,7 +24,7 @@ paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
 [dev-dependencies]
 ts-rs = "11.1"
 # `testing::sync_generated`, the stale-file check of the generated TypeScript.
-paddock-commands = { workspace = true }
+paddock-commands = { workspace = true, features = ["testing"] }
 proptest = "1"
 
 [[bench]]

@@ -113,6 +113,7 @@ impl LogConfig {
     }
 
     /// Replaces the clock (tests).
+    #[cfg(any(test, feature = "testing"))]
     pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self {
         self.clock = clock;
         self

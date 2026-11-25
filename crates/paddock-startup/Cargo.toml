@@ -44,6 +44,7 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_Wind
 gtk = { version = "0.18", optional = true }
 
 [dev-dependencies]
+paddock-commands = { workspace = true, features = ["testing"] }
 # The never-panics test of the parsers (conformance check C36).
 paddock-testkit = { workspace = true }
 tempfile = "3"

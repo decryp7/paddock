@@ -265,6 +265,7 @@ fn encode(rgb: &RgbImage) -> Result<ImageInput, ImageError> {
 }
 
 /// Test images, made programmatically (never checked-in binaries).
+#[cfg(any(test, feature = "testing"))]
 #[doc(hidden)]
 pub mod testing {
     use ::image::{ExtendedColorType, ImageEncoder, Rgb, RgbImage, Rgba, RgbaImage};

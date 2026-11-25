@@ -150,6 +150,7 @@ impl CancelToken {
 
     /// Whether a cancel was requested, without evaluating the deadline (no clock is read, so it is safe under a clock's
     /// own lock).
+    #[cfg(any(test, feature = "testing"))]
     pub(crate) fn cancel_requested(&self) -> bool {
         self.0.state.load(Ordering::SeqCst) != LIVE
     }

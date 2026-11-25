@@ -61,6 +61,7 @@ pub mod item;
 pub mod labels;
 pub mod plugin_hook;
 pub mod table;
+#[cfg(any(test, feature = "testing"))]
 pub mod testing;
 pub mod ts;
 

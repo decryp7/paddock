@@ -21,6 +21,7 @@ pub mod install;
 pub mod known_folders;
 pub mod layout;
 pub mod trust;
+#[cfg(any(test, feature = "testing"))]
 pub mod trust_fake;
 pub mod trust_real;
 pub mod windows_acl;

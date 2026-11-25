@@ -11,6 +11,11 @@ description = "Debrief's side of the store worker (ADR 0014): the protocol, the 
 [lib]
 doctest = false # doctests are off (crates/README.md, "Doctests")
 
+[features]
+# Test support (rule 97): the test-only hooks (`WorkerConfig::for_tests`). Enabled from `[dev-dependencies]` only, never
+# in a shipped build (`./dev check test-features`, C170).
+testing = []
+
 [dependencies]
 debrief-core = { path = "../debrief-core" }
 debrief-ipc = { path = "../debrief-ipc" }

@@ -27,7 +27,8 @@ debrief-plugin-otel = { path = "../crates/debrief-plugin-otel" }
 debrief-plugin-syslog = { path = "../crates/debrief-plugin-syslog" }
 debrief-profile = { path = "../crates/debrief-profile" }
 debrief-plugin-profiling = { path = "../crates/debrief-plugin-profiling", default-features = false }
-debrief-dump = { path = "../crates/debrief-dump" }
+# `testing::summary` (rule 97; the fuzz targets never ship).
+debrief-dump = { path = "../crates/debrief-dump", features = ["testing"] }
 debrief-plugin-dumps = { path = "../crates/debrief-plugin-dumps", default-features = false }
 debrief-etw = { path = "../crates/debrief-etw" }
 debrief-symbols = { path = "../crates/debrief-symbols", default-features = false }

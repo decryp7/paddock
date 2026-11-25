@@ -252,6 +252,15 @@ review_by = 2026-12-13
 approved = "coordinator"
 
 [[level]]
+id = "C170"
+level = "nightly"
+reason = "runs cargo tree for every released binary of every app (18 binaries in 8 workspaces, about 6 s warm): nightly beside C102 until ADR 0122 WP-2 adds it to the tag paths; report-only until its first green run (ER-41, REPORT_ONLY in tools/paddock-dev/src/test_features.rs)"
+owner = "rule 97 (feat/test-hooks-test-only); ADR 0122 WP-2"
+since = 2026-11-25
+review_by = 2026-12-09
+approved = "coordinator"
+
+[[level]]
 id = "apps/dyno/scripts/check-pe-subsystem.mjs"
 level = "release"
 reason = "reads the built Windows binaries of the release: only the installer jobs build them"

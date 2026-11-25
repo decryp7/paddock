@@ -26,6 +26,7 @@ serde_json = { version = "1", features = ["float_roundtrip"] }
 paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
 
 [dev-dependencies]
+paddock-jobs = { workspace = true, features = ["testing"] }
 paddock-testkit = { workspace = true }
 paddock-plugin-test = { workspace = true }
 tempfile = "3"

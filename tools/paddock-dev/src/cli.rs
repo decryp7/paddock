@@ -1,7 +1,7 @@
 use crate::{
     audit, check, check_ids, ci_build_env, ci_build_jobs, ci_host, ci_isolation, ci_run, ci_runs, ci_rust_pin, ci_s3_guard, ci_setup_rust,
     disk, gates, generators, golden_cmd, heavy_cmd, heavy_install, hook, input_hash, ipc_endpoints, lessons_driver, load, local_sccache,
-    locks, locks_guard, merge_check, places, plan_cmd, pr, pre_push, queue, release_isolation, slots, wait, worktree,
+    locks, locks_guard, merge_check, places, plan_cmd, pr, pre_push, queue, release_isolation, slots, test_features, wait, worktree,
 };
 use clap::{Args, Parser, Subcommand};
 use paddock_cli::{CliError, Exit, Format, Report, finish};
@@ -197,6 +197,18 @@ enum CheckCommand {
         /// A release tag to check against the ratchet's `blocks_tag` patterns (for example `dyno-v1.2.0`).
         #[arg(long)]
         tag: Option<String>,
+        /// The repository root (default: the folder containing .git, found from the current folder).
+        #[arg(long)]
+        root: Option<PathBuf>,
+    },
+    /// C170 (rule 97): no released binary (each app's Tauri package and every `bundle.externalBin`, and paddock-setup) is built
+    /// with a test feature (`testing`, `test-support`, ...): `cargo tree -e normal` per binary. Report-only until its first green
+    /// run (ER-41); a probe that cannot see is "check broken" (exit 7).
+    #[command(name = "test-features")]
+    TestFeatures {
+        /// Only this app's binaries (default: every app and paddock-setup).
+        #[arg(long)]
+        app: Option<String>,
         /// The repository root (default: the folder containing .git, found from the current folder).
         #[arg(long)]
         root: Option<PathBuf>,
@@ -829,6 +841,9 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
         Command::Check {
             command: CheckCommand::IpcEndpoints { tag, root },
         } => ipc_endpoints::command(root, tag),
+        Command::Check {
+            command: CheckCommand::TestFeatures { app, root },
+        } => test_features::command(root, app),
         Command::Worktree { command } => worktree::command(command),
         Command::Sccache {
             command: SccacheCommand::Env,

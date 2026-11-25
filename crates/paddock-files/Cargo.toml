@@ -11,6 +11,9 @@ publish = ["decryp7"]
 doctest = false # doctests are off (crates/README.md, "Doctests")
 
 [features]
+# Test support (rule 97): the test-only hooks and fakes (`Recents::with_clock`). Enabled from `[dev-dependencies]` only,
+# never in a shipped build (`./dev check test-features`, C170).
+testing = []
 # The Tauri adapter (`paddock_files::tauri`): managed state, the `WindowGrants` command argument, the picker, recent, reveal, open
 # and URL commands, the drag-and-drop grants and the recent event. The core never depends on Tauri.
 tauri = ["dep:tauri", "paddock-commands/tauri"]
@@ -29,6 +32,9 @@ paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
 tauri-plugin-dialog = { version = "2.8", optional = true }
 
 [dev-dependencies]
+# The self dev-dependency that turns `testing` on for this package's own integration tests (rule 97).
+paddock-files = { path = ".", features = ["testing"] }
+paddock-commands = { workspace = true, features = ["testing"] }
 tempfile = "3"
 # The never-panics test of the path parser (conformance check C36).
 paddock-testkit = { workspace = true }
