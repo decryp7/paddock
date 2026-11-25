@@ -1198,15 +1198,15 @@ moved_to = "nothing: paddock_testkit::StandIn stays the way to plant a fixture p
 
 [[retired]]
 id = "C121"
-commit = "pending"
+commit = "036ae3a44"
 moved_to = "nothing: rule 79 (read declared data through its accessor) stays a review rule; its report-only phase (2026-11-13 to 2026-11-25) found only fixture text"
 
 [[retired]]
 id = "C133"
-commit = "pending"
+commit = "036ae3a44"
 moved_to = "the ESLint rule paddock/e2e-pinned-clock (eslint/src/rules/e2e-pinned-clock.cjs) keeps the pinned-clock imports and pages; a reason on an opt-out and waits over an empty set stay review rules (its report-only phase found two opt-outs without a reason beside them, no defect)"
 
 [[retired]]
 id = "C144"
-commit = "pending"
+commit = "036ae3a44"
 moved_to = "nothing: expectStreamDone (@decryp7/paddock-e2e) stays the way to wait for a stream; its report-only phase found two sites, neither a stream-finished wait"
