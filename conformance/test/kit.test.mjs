@@ -172,6 +172,31 @@ test('build-jobs and value commands on a host also keep the tool under the CI ho
   }
 });
 
+// Run 9054: the paddock-dev (windows-latest) job built the tool at its first kit step under the CI home, then built the same hash again
+// (137 s) in the checkout for a plain `./dev ci test-cost` step, which had no PADDOCK_DEV_HOME. The first kit step of a host job hands
+// the CI home's tools folder to every later step through GITHUB_ENV, so a plain ./dev finds the binary kept there by its hash.
+test('on a host the first kit step hands the CI home\'s tools folder to the job\'s later steps; Linux, a person\'s machine and an explicit home are left alone', () => {
+  const c = checkout();
+  try {
+    const env = join(c.root, 'github-env');
+    writeFileSync(env, '');
+    let r = c.run(['build-jobs'], { GITHUB_TOKEN: 't', GITHUB_ENV: env });
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(
+      readFileSync(env, 'utf8'),
+      `PADDOCK_DEV_HOME=${c.root}/ci-home/tools/paddock-dev\nPADDOCK_DEV_TARGET_DIR=${c.root}/ci-home/tools/paddock-dev-target\n`,
+    );
+    for (const extra of [{ RUNNER_OS: 'Linux' }, { GITHUB_ACTIONS: '' }, { PADDOCK_DEV_HOME: join(c.root, 'mine') }]) {
+      writeFileSync(env, '');
+      r = c.run(['build-jobs'], { GITHUB_TOKEN: 't', GITHUB_ENV: env, ...extra });
+      assert.equal(r.status, 0, r.stderr);
+      assert.equal(readFileSync(env, 'utf8'), '', JSON.stringify(extra));
+    }
+  } finally {
+    c.done();
+  }
+});
+
 test('a person\'s machine (no GITHUB_ACTIONS) never gets the CI home\'s tools folder: the tool stays where ./dev puts it', () => {
   const c = checkout();
   try {
@@ -343,13 +368,13 @@ test('a failed setup step (build-jobs, isolation acquire) marks the job aborted 
       const r = c.run(args, { GITHUB_ENV: env });
       assert.equal(r.status, 1, `${args}: ${r.stderr}`);
       assert.match(r.stderr, /::error::A job setup step failed \(exit 1/, `${args}: ${r.stderr}`);
-      assert.equal(readFileSync(env, 'utf8'), 'PADDOCK_JOB_ABORTED=1\n', `${args} marks the job`);
+      assert.match(readFileSync(env, 'utf8'), /^PADDOCK_JOB_ABORTED=1$/m, `${args} marks the job`);
     }
     exe(join(c.root, 'dev'), 'case "$*" in "--print-binary") echo "$0-none" ;; esac');
     writeFileSync(env, '');
     const ok = c.run(['build-jobs'], { GITHUB_ENV: env });
     assert.equal(ok.status, 0, ok.stderr);
-    assert.equal(readFileSync(env, 'utf8'), '', 'a good setup step marks nothing');
+    assert.doesNotMatch(readFileSync(env, 'utf8'), /PADDOCK_JOB_ABORTED/, 'a good setup step marks nothing');
   } finally {
     c.done();
   }

@@ -140,7 +140,7 @@ dev_env() {
 }
 
 # tools_home: in a CI job on a host runner, PADDOCK_DEV_HOME and PADDOCK_DEV_TARGET_DIR under the CI home's tools folder (unless the caller
-# chose them), found without the tool.
+# chose them), found without the tool, for this step and, through GITHUB_ENV, every later step of the job.
 tools_home() {
   # Only a CI job has a CI home: a person's machine keeps the tool where ./dev puts it (a RUNNER_OS in a shell profile must not move it).
   [ "${GITHUB_ACTIONS:-}" = true ] || return 0
@@ -150,6 +150,14 @@ tools_home() {
   PADDOCK_DEV_HOME="$tools/paddock-dev"
   PADDOCK_DEV_TARGET_DIR="$tools/paddock-dev-target"
   export PADDOCK_DEV_HOME PADDOCK_DEV_TARGET_DIR
+  # The job's later steps get the same folder (the first kit step writes it; later ones find it set and return above), so a plain
+  # `./dev` in a workflow step runs the binary kept there by its hash instead of building it again in the checkout (run 9054: the
+  # Windows paddock-dev job built the same hash twice, 153 s and 137 s). Windows gets C:/ paths, which bash and Rust both read.
+  if [ -n "${GITHUB_ENV:-}" ]; then
+    h="$PADDOCK_DEV_HOME" t="$PADDOCK_DEV_TARGET_DIR"
+    if command -v cygpath >/dev/null 2>&1; then h="$(cygpath -m "$h")" t="$(cygpath -m "$t")"; fi
+    printf 'PADDOCK_DEV_HOME=%s\nPADDOCK_DEV_TARGET_DIR=%s\n' "$h" "$t" >> "$GITHUB_ENV" || true
+  fi
 }
 
 dev_isolation() {

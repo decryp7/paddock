@@ -19,7 +19,12 @@
 # arm64 host runs under emulation, where a failed exec is not reported to the parent; the script then prints a warning.
 # The arm64 image has no Chrome for Testing and no draw.io (neither is published for Linux arm64): it runs the Rust gates and
 # Node scripts, not the e2e suites against Chrome for Testing or the SVG drift check, which stay CI's (amd64). A new arm64 build
-# removes this id's older local images (paddock-ci-local, paddock-garage-local; about 11 GB a pair); --clean removes them all.
+# keeps this id's newest KEEP_IMAGES (2) local images by creation time, each with its garage image (paddock-ci-local,
+# paddock-garage-local; about 11 GB a pair), and removes the older ones: worktrees on two Dockerfile hashes (main and a branch that
+# changes ci-image/) no longer evict each other and rebuild for about 20 min (three times on 2026-11-25). --clean removes them all.
+# One build per hash at a time: a kernel file lock (flock(2), through perl, which macOS and the CI image both have; macOS has no
+# flock(1)) in the common git folder, shared by every worktree; a second worktree on the same hash waits for it, at most 60 min,
+# and then uses the image the first one built.
 # A linked worktree's git folders (its own and the common one) are mounted read-only at their own paths, so git works inside; the
 # pre-push state folder (<common git dir>/paddock-pre-push) is a tmpfs there, so `dev check --pre-push` can write its logs without
 # touching the host's. CARGO_TARGET_DIR (/target, a volume) and /tmp are the other writable places. git accepts the host user's
@@ -57,15 +62,43 @@ command -v "$docker" >/dev/null 2>&1 || { echo "linux-container: $docker (OrbSta
 
 label="paddock.tools=$id"
 
-# Removes this id's local CI images (the arm64 builds of --ci-image) except the ones named; only images with this id's label.
+# How many arm64 CI images (each with its garage image) stay after a build: the newest by creation time.
+KEEP_IMAGES=2
+
+# Removes this id's local CI images (the arm64 builds of --ci-image) but the newest $1 (each with the garage image of its hash, whose
+# tag ends in the same hash); only images with this id's label. $1 = 0 removes them all (--clean).
 remove_local_images() {
-  local ref keep
-  while IFS= read -r ref; do
+  local keep_n="$1" ref n=0 sums=" " sum
+  local listed
+  listed=$("$docker" image ls --filter "label=$label" --format '{{.Repository}}:{{.Tag}}	{{.CreatedAt}}') || return 0
+  # The CI images, newest first (CreatedAt is `YYYY-MM-DD hh:mm:ss`: it sorts as text); the newest keep_n keep their hash.
+  while IFS=$'\t' read -r ref _; do
+    case "$ref" in paddock-ci-local:*) ;; *) continue ;; esac
+    n=$((n + 1))
+    [ "$n" -le "$keep_n" ] && sums+="${ref##*-} "
+  done < <(printf '%s\n' "$listed" | sort -t $'\t' -k2,2r)
+  while IFS=$'\t' read -r ref _; do
     case "$ref" in paddock-ci-local:* | paddock-garage-local:*) ;; *) continue ;; esac
-    for keep in "$@"; do [ "$ref" != "$keep" ] || continue 2; done
+    sum="${ref##*-}"
+    case "$sums" in *" $sum "*) continue ;; esac
     "$docker" image rm "$ref" >/dev/null 2>&1 && echo "linux-container: removed the old local image $ref" >&2
-  done < <("$docker" image ls --filter "label=$label" --format '{{.Repository}}:{{.Tag}}')
+  done <<< "$listed"
   return 0
+}
+
+# Runs a command while holding an exclusive kernel file lock on $1 (flock(2) through perl; the lock goes with the process, so a
+# crashed build never leaves it held), waiting at most 60 min for it. Exit 75 when the wait ran out.
+with_lock() {
+  perl -MFcntl=:flock -e '
+    my $file = shift;
+    open(my $fh, ">>", $file) or die "linux-container: cannot open the build lock $file: $!\n";
+    local $SIG{ALRM} = sub { print STDERR "::error::linux-container: waited 60 min for the build lock $file. Next step: see which build holds it (lsof $file)\n"; exit 75 };
+    alarm 3600;
+    flock($fh, LOCK_EX) or die "linux-container: cannot lock $file: $!\n";
+    alarm 0;
+    my $rc = system(@ARGV);
+    exit($rc == -1 ? 127 : ($rc & 127) ? 128 + ($rc & 127) : $rc >> 8);
+  ' "$@"
 }
 base_image="${PADDOCK_LINUX_BASE_IMAGE:-rust:1-bookworm}"
 image="$id-linux-dev:2"
@@ -80,7 +113,7 @@ if [ "$clean" = 1 ]; then
   # shellcheck disable=SC2086
   [ -z "$leftovers" ] || "$docker" rm -f $leftovers >/dev/null
   "$docker" volume rm -f "$registry_volume" "$target_volume" "$target_volume-arm64" >/dev/null
-  remove_local_images
+  remove_local_images 0
   echo "removed the volumes $registry_volume, $target_volume and $target_volume-arm64"
   exit 0
 fi
@@ -123,16 +156,25 @@ if [ "$ci_image" = 1 ]; then
       exit 3
     fi
     if ! "$docker" image inspect "$image" >/dev/null 2>&1; then
-      garage="paddock-garage-local:arm64-$sum"
-      started=$SECONDS
-      echo "linux-container: building $garage (ci-image/garage-arm64.Dockerfile; once per change to ci-image/) ..." >&2
-      "$docker" build --platform linux/arm64 --label "$label" -f "$root/ci-image/garage-arm64.Dockerfile" -t "$garage" "$root/ci-image" >&2 \
-        || { echo "::error::linux-container: building $garage failed (exit $?). Next step: read the build output above; the image is local only" >&2; exit 1; }
-      echo "linux-container: built $garage in $((SECONDS - started)) s; building $image (ci-image/Dockerfile) ..." >&2
-      "$docker" build --platform linux/arm64 --label "$label" --build-arg "GARAGE_IMAGE=$garage" -f "$root/ci-image/Dockerfile" -t "$image" "$root/ci-image" >&2 \
-        || { echo "::error::linux-container: building $image failed (exit $?). Next step: read the build output above; verify.sh names what is missing" >&2; exit 1; }
-      echo "linux-container: built $image in $((SECONDS - started)) s in all" >&2
-      remove_local_images "$image" "$garage"
+      # One build per hash: the lock lives in the common git folder (every worktree of the repository shares it), else $TMPDIR.
+      common=$(git -C "$root" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || common="${TMPDIR:-/tmp}"
+      lock="$common/paddock-ci-image-$sum.lock"
+      export docker label root image sum
+      with_lock "$lock" bash -c '
+        set -euo pipefail
+        # Another worktree on this hash may have built it while this one waited for the lock.
+        if "$docker" image inspect "$image" >/dev/null 2>&1; then echo "linux-container: $image was built while waiting for its build lock" >&2; exit 0; fi
+        garage="paddock-garage-local:arm64-$sum"
+        started=$SECONDS
+        echo "linux-container: building $garage (ci-image/garage-arm64.Dockerfile; once per change to ci-image/) ..." >&2
+        "$docker" build --platform linux/arm64 --label "$label" -f "$root/ci-image/garage-arm64.Dockerfile" -t "$garage" "$root/ci-image" >&2 \
+          || { echo "::error::linux-container: building $garage failed (exit $?). Next step: read the build output above; the image is local only" >&2; exit 1; }
+        echo "linux-container: built $garage in $((SECONDS - started)) s; building $image (ci-image/Dockerfile) ..." >&2
+        "$docker" build --platform linux/arm64 --label "$label" --build-arg "GARAGE_IMAGE=$garage" -f "$root/ci-image/Dockerfile" -t "$image" "$root/ci-image" >&2 \
+          || { echo "::error::linux-container: building $image failed (exit $?). Next step: read the build output above; verify.sh names what is missing" >&2; exit 1; }
+        echo "linux-container: built $image in $((SECONDS - started)) s in all" >&2
+      ' || exit $?
+      remove_local_images "$KEEP_IMAGES"
     fi
   else
     image="${PADDOCK_LINUX_CI_REGISTRY:-dev.decryptology.net/decryp7/paddock-ci}:v$version"
