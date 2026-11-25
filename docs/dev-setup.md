@@ -96,10 +96,14 @@ tools and never by your shell profile (user decision 2026-11-16; docs/research/s
   `~/.cargo`), starts the one server on the default port 4226, and prints `export RUSTC_WRAPPER=...` lines for that shell. Run it
   once per machine to install; the push gates and `./dev gen check` then use the installed copy by themselves and never download.
 - The server starts with `SCCACHE_BASEDIRS` (sccache 0.20: the longest matching base is stripped from every path in a Rust compile's
-  key) naming the worktree you are in and its sibling worktrees, and `SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS=CARGO_MANIFEST_DIR,CARGO_MANIFEST_PATH`
+  key) naming exactly this repository's worktrees, the main checkout included (`git worktree list`, wherever they live; never a
+  sibling folder that is another repository), and `SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS=CARGO_MANIFEST_DIR,CARGO_MANIFEST_PATH`
   (crates that bake those into their output stay per checkout). One server serves every worktree and reads the list only when it
-  starts, so a worktree made after that shares only third-party entries until the server restarts (`sccache --stop-server`, then
-  `eval "$(./dev sccache env)"`).
+  starts, so `./dev sccache env` records what the server started with (`<tool cache>/sccache-run/start-stamp`: the bases and the key
+  prefix) and, when the worktree list or the prefix changed, stops our server through its own client (`sccache --stop-server` on our
+  port, never a kill) and starts it again once; a server that is not ours is never touched, and builds keep going during the restart
+  (`SCCACHE_IGNORE_SERVER_IO_ERROR`). Only `./dev sccache env` restarts; the push gates never do. After `./dev worktree add`, run
+  `eval "$(./dev sccache env)"` in the new worktree once: that is what puts it into the list.
 - It is off, with one `::warning::` line and a build without the cache, when sccache is not installed, the server does not
   start, or a server on the port uses another cache. The server runs in its own short folder (`<tool cache>/sccache-run`, also its `TMPDIR`, working folder and error log
   `sccache.log`; short because macOS caps socket paths at 104 bytes), never in a job's or an agent's scratch folder, which a job deletes. It
@@ -118,7 +122,7 @@ tools and never by your shell profile (user decision 2026-11-16; docs/research/s
   (`host:port`, default `172.16.1.220:15000`) and `PADDOCK_SCCACHE_S3_BUCKET` (default `sccache-paddock`), each taken from the environment,
   else from an optional line of that name in the key file below, else the default (the one place the defaults are named: this file; the code
   holds them as `DEFAULT_S3_ENDPOINT` and `DEFAULT_S3_BUCKET` in `local_sccache.rs`); optionally
-  `PADDOCK_SCCACHE_S3_PREFIX` (default `paddock`) and, for `s3`, `PADDOCK_SCCACHE_S3_REGION` (default `auto`) and
+  `PADDOCK_SCCACHE_S3_PREFIX` (default CI's for this OS and arch, `paddock-ci/<OS>-<arch>`, `ci_setup_rust::ci_prefix`; a server still on the older `paddock` prefix is restarted once) and, for `s3`, `PADDOCK_SCCACHE_S3_REGION` (default `auto`) and
   `PADDOCK_SCCACHE_S3_SSL` (`true`; default `false`). With `auto` the first level is the sibling folder `<SCCACHE_DIR>-s3` (what S3
   backfills never reaches the plain folder, as in CI, ADR 0111): the first build after the switch starts from the store, not from
   the old folder, and the two folders together use up to twice `SCCACHE_CACHE_SIZE` on the Mac's disk (each is capped at that size; lower

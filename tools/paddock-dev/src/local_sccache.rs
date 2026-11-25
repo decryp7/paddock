@@ -40,6 +40,16 @@ pub const DEFAULT_S3_BUCKET: &str = "sccache-paddock";
 /// What `--show-adv-stats` prints as the cache location of a server started with the two-level chain (sccache 0.19.0, measured).
 pub const MULTILEVEL_LOCATION: &str = "Multi-level (2 levels)";
 
+/// The key prefix of this machine's S3 level: CI's own for the same OS and arch (`paddock-ci/<OS>-<arch>`,
+/// [`crate::ci_setup_rust::ci_prefix`], the one definition), so a local build can reuse what CI stored and CI what a local build
+/// stored. (CI's release and tag builds never read the store, so a local write can never reach a release.)
+pub fn default_prefix() -> String {
+    crate::ci_setup_rust::ci_prefix(crate::ci_setup_rust::host_runner_os(), std::env::consts::ARCH)
+}
+
+/// The prefix the local servers used before [`default_prefix`]: a server still running with it is ours and is restarted once.
+const LEGACY_PREFIX: &str = "paddock";
+
 /// The server's port: the caller's `SCCACHE_SERVER_PORT`, else sccache's default.
 pub fn server_port(env: &HashMap<String, String>) -> String {
     env.get("SCCACHE_SERVER_PORT")
@@ -158,7 +168,7 @@ pub fn install_path(env: &HashMap<String, String>) -> Result<PathBuf, String> {
 
 /// The S3 settings of the shared cache (all but the credentials are plain settings, safe to print). Variables:
 /// `PADDOCK_SCCACHE_S3_BUCKET` (required), `PADDOCK_SCCACHE_S3_ENDPOINT` (`host:port`, required), `PADDOCK_SCCACHE_S3_REGION` (default
-/// `auto`), `PADDOCK_SCCACHE_S3_SSL` (`true` or `false`, default `false`), `PADDOCK_SCCACHE_S3_PREFIX` (default `paddock`).
+/// `auto`), `PADDOCK_SCCACHE_S3_SSL` (`true` or `false`, default `false`), `PADDOCK_SCCACHE_S3_PREFIX` (default CI's for this OS and arch, [`default_prefix`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct S3 {
     /// The bucket.
@@ -305,7 +315,7 @@ pub fn backend(env: &HashMap<String, String>) -> Result<Backend, String> {
                 endpoint: need("PADDOCK_SCCACHE_S3_ENDPOINT")?,
                 region: get("PADDOCK_SCCACHE_S3_REGION").unwrap_or("auto").to_string(),
                 ssl: get("PADDOCK_SCCACHE_S3_SSL") == Some("true"),
-                prefix: get("PADDOCK_SCCACHE_S3_PREFIX").unwrap_or("paddock").to_string(),
+                prefix: get("PADDOCK_SCCACHE_S3_PREFIX").map_or_else(default_prefix, str::to_string),
             }))
         }
         other => Err(format!("PADDOCK_SCCACHE_BACKEND is `{other}`; it is auto, local or s3")),
@@ -390,7 +400,7 @@ pub fn choose(env: &HashMap<String, String>, probe: &dyn Fn(&S3) -> Result<(), S
             .to_string(),
         region: "auto".into(),
         ssl: false,
-        prefix: get("PADDOCK_SCCACHE_S3_PREFIX").unwrap_or("paddock").to_string(),
+        prefix: get("PADDOCK_SCCACHE_S3_PREFIX").map_or_else(default_prefix, str::to_string),
     };
     if let Err(e) = probe(&s3) {
         return local(e, true);
@@ -655,28 +665,65 @@ pub(crate) fn basedir_vars(roots: &[String], windows: bool) -> Vec<(String, Stri
     ]
 }
 
-/// The checkouts a local server should treat as one: the worktree `cwd` is in (the nearest folder with a `.git`) first, then its
-/// sibling worktrees (the folders next to it with a `.git`; agents' worktrees all live under one root, docs/dev-setup.md). One server
-/// serves every worktree and reads its base folders only when it starts, so a worktree made later is not in the list until the
-/// server restarts; it then builds correctly, only without sharing its own crates' entries.
+/// The checkouts a local server should treat as one: exactly this repository's worktrees, the main checkout included
+/// (`git worktree list --porcelain` run in `cwd`, so wherever they live on disk), never a sibling folder that is another repository.
+/// One server serves every worktree and reads its base folders only when it starts, so [`prepare`] compares this list with the one
+/// the server started with and restarts it when a worktree came or went. Sorted: the same set is the same stamp. A folder that is
+/// gone (prunable) is left out; not a repository, or git failing, gives no bases.
 pub(crate) fn worktree_roots(cwd: &Path) -> Vec<String> {
-    let Some(top) = cwd.ancestors().find(|a| a.join(".git").exists()) else {
+    let Ok(text) = crate::worktree::git::Git::at(cwd).text(&["worktree", "list", "--porcelain"]) else {
         return Vec::new();
     };
-    let mut roots = vec![top.display().to_string()];
-    if let Some(parent) = top.parent()
-        && let Ok(rd) = std::fs::read_dir(parent)
-    {
-        let mut sibs: Vec<String> = rd
-            .filter_map(Result::ok)
-            .map(|e| e.path())
-            .filter(|p| p != top && p.join(".git").exists())
-            .map(|p| p.display().to_string())
-            .collect();
-        sibs.sort();
-        roots.extend(sibs);
-    }
+    let mut roots: Vec<String> = crate::worktree::git::parse_worktrees(&text)
+        .into_iter()
+        .filter(|w| !w.prunable)
+        .map(|w| w.path)
+        .collect();
+    roots.sort();
     roots
+}
+
+/// The file that records what the server on our port was started with (in its own folder, beside its log).
+fn stamp_file(run: &Path) -> PathBuf {
+    run.join("start-stamp")
+}
+
+/// What the server reads once at its start and its stats cannot confirm: the base folders and the S3 key prefix.
+pub(crate) fn start_stamp(backend: &Backend, basedirs: &[(String, String)]) -> String {
+    let bases = basedirs
+        .iter()
+        .find(|(k, _)| k == "SCCACHE_BASEDIRS")
+        .map_or("", |(_, v)| v.as_str());
+    let prefix = match backend {
+        Backend::Tiered { s3, .. } | Backend::S3(s3) => s3.prefix.as_str(),
+        Backend::Local { .. } => "",
+    };
+    format!("bases={bases}\nprefix={prefix}\n")
+}
+
+/// Whether a running server of ours is stopped and started again: it is ours (by its stats) and what it started with is not what
+/// this call wants (a recorded stamp that differs, or none: an older server, once).
+pub(crate) fn must_restart(ours: bool, recorded: Option<&str>, wanted: &str) -> bool {
+    ours && recorded != Some(wanted)
+}
+
+/// The same backend with another S3 key prefix (the prefix a recorded or an older server was started with); others unchanged.
+fn with_prefix(b: &Backend, prefix: &str) -> Backend {
+    match b {
+        Backend::Tiered { dir, size, s3 } => Backend::Tiered {
+            dir: dir.clone(),
+            size: size.clone(),
+            s3: S3 {
+                prefix: prefix.into(),
+                ..s3.clone()
+            },
+        },
+        Backend::S3(s3) => Backend::S3(S3 {
+            prefix: prefix.into(),
+            ..s3.clone()
+        }),
+        other => other.clone(),
+    }
 }
 
 /// The folder beside the sccache binary that holds the shim, so the shim can be called `sccache`.
@@ -995,6 +1042,8 @@ pub fn prepare(env: &HashMap<String, String>, install: Install) -> Outcome {
     // `RemoteStorage::check`), so it is stopped and started once more; still read-only, the wrapper is off.
     let mut restarted = false;
     let mut upgraded = false;
+    let mut rebased = false;
+    let stamp = start_stamp(&backend, &basedirs);
     loop {
         let start_log = run.join(format!("start-{}.log", std::process::id()));
         // The server outlives this process and would hold a pipe open, so its starter writes to a file.
@@ -1002,7 +1051,7 @@ pub fn prepare(env: &HashMap<String, String>, install: Install) -> Outcome {
         // A server already listening is not started again: the start would only fail with "Address in use" and write that to the
         // running server's error log, the log every warning names (247 times in two days, docs/research/2026-11-19-sccache.md).
         // After a restart of our own server the port is started without asking.
-        let start = if !restarted && !upgraded && listening(env) {
+        let start = if !restarted && !upgraded && !rebased && listening(env) {
             Ok(crate::ci_tool::Ran {
                 success: true,
                 how: "already listening".into(),
@@ -1021,6 +1070,10 @@ pub fn prepare(env: &HashMap<String, String>, install: Install) -> Outcome {
                 })
         };
         let _ = std::fs::remove_file(&start_log);
+        if started_here {
+            // What this server started with, so a later call can tell when the worktree list or the prefix changed.
+            let _ = std::fs::write(stamp_file(&run), &stamp);
+        }
         let stats = server.call("--show-adv-stats").run(env, &mut std::io::sink());
         let (start, stats) = match (start, stats) {
             (Ok(s), Ok(t)) if s.success && t.success => (s, t),
@@ -1057,6 +1110,26 @@ pub fn prepare(env: &HashMap<String, String>, install: Install) -> Outcome {
             );
             let _ = server.call("--stop-server").run(env, &mut std::io::sink());
             continue;
+        }
+        // The base folders and the key prefix are read once, at the server's start. A server of ours (by its stats, with the prefix it
+        // was started with or the one older servers used) that started with another list is stopped through its own client and
+        // started again; builds meanwhile keep going (`SCCACHE_IGNORE_SERVER_IO_ERROR`). Only `./dev sccache env`: a gate's path
+        // never restarts a server another build may be using.
+        if !rebased && !started_here && matches!(install, Install::OnDemand) {
+            let recorded = std::fs::read_to_string(stamp_file(&run)).ok();
+            let recorded_prefix = recorded.as_deref().and_then(|r| r.lines().find_map(|l| l.strip_prefix("prefix=")));
+            let ours = backend.matches_stats(&stats.stdout)
+                || recorded_prefix.is_some_and(|p| with_prefix(&backend, p).matches_stats(&stats.stdout))
+                || with_prefix(&backend, LEGACY_PREFIX).matches_stats(&stats.stdout);
+            if must_restart(ours, recorded.as_deref(), &stamp) {
+                rebased = true;
+                eprintln!(
+                    "::notice::local-sccache: the server on port {} was started with other base folders or another key prefix (a worktree came or went, or the prefix changed); stopping it and starting it with the current ones",
+                    server_port(env)
+                );
+                let _ = server.call("--stop-server").run(env, &mut std::io::sink());
+                continue;
+            }
         }
         // An `auto` run that fell back to the disk (the store is down now) keeps a server of ours that already runs the chain: its
         // second level fails soft (`l0`), and stopping it would throw away a working cache.
@@ -1262,7 +1335,14 @@ mod tests {
             ("PADDOCK_SCCACHE_S3_ENDPOINT", "h:1"),
         ]))
         .unwrap();
-        assert!(s3.matches_stats("Cache location                  s3, name: b1, prefix: /paddock/\n"));
+        assert!(s3.matches_stats(&format!(
+            "Cache location                  s3, name: b1, prefix: /{}/\n",
+            default_prefix()
+        )));
+        assert!(
+            !s3.matches_stats("Cache location                  s3, name: b1, prefix: /paddock/\n"),
+            "the older default is another prefix"
+        );
         assert!(!s3.matches_stats(local));
     }
 
@@ -2404,17 +2484,134 @@ mod tests {
         assert!(basedir_vars(&[], false).is_empty(), "no root, no variables");
     }
 
-    #[test]
-    fn the_local_server_lists_the_worktree_and_its_sibling_worktrees() {
-        let t = tempfile::tempdir().unwrap();
-        for d in ["wt/a/crates", "wt/b", "wt/not-a-worktree"] {
-            std::fs::create_dir_all(t.path().join(d)).unwrap();
+    fn git_in(dir: &Path, args: &[&str]) {
+        let out = crate::worktree::git::Git::at(dir).text(args).unwrap_or_else(|e| panic!("{e}"));
+        drop(out);
+    }
+
+    fn repo_with(dir: &Path) {
+        std::fs::create_dir_all(dir).unwrap();
+        for a in [
+            &["init", "-q", "-b", "main"][..],
+            &["config", "user.email", "t@example.invalid"],
+            &["config", "user.name", "t"],
+            &["commit", "-q", "--allow-empty", "-m", "c"],
+        ] {
+            git_in(dir, a);
         }
-        std::fs::write(t.path().join("wt/a/.git"), "gitdir: x").unwrap();
-        std::fs::write(t.path().join("wt/b/.git"), "gitdir: y").unwrap();
-        // One component per join: a joined "wt/a/crates" keeps its `/`, so on Windows the root it finds prints as `...\wt/a`.
-        let roots = worktree_roots(&t.path().join("wt").join("a").join("crates"));
-        let root = |n: &str| t.path().join("wt").join(n).display().to_string();
-        assert_eq!(roots, [root("a"), root("b")]);
+    }
+
+    /// The bases are this repository's worktrees and nothing else: the repo's main checkout, its added worktrees (anywhere on disk),
+    /// and never a sibling folder that is another repository (2026-11-26: 77 unrelated bases, none of the agents' worktrees).
+    #[test]
+    fn the_bases_are_exactly_this_repositorys_worktrees_never_unrelated_sibling_repositories() {
+        let t = tempfile::tempdir().unwrap();
+        let root = paddock_env::winpath::real(t.path()).unwrap();
+        let main = root.join("repos").join("main");
+        let unrelated = root.join("repos").join("unrelated");
+        repo_with(&main);
+        repo_with(&unrelated);
+        for w in ["wt-a", "wt-b"] {
+            git_in(
+                &main,
+                &["worktree", "add", "-q", "-b", w, root.join("elsewhere").join(w).to_str().unwrap()],
+            );
+        }
+        // Asked from inside a subfolder of a worktree, the same list, in sorted order (a stable stamp).
+        let from = root.join("elsewhere").join("wt-b");
+        let roots = worktree_roots(&from);
+        let want: Vec<String> = [
+            root.join("elsewhere").join("wt-a"),
+            root.join("elsewhere").join("wt-b"),
+            main.clone(),
+        ]
+        .iter()
+        .map(|p| p.display().to_string())
+        .collect();
+        assert_eq!(roots, want);
+        assert!(!roots.iter().any(|r| r.contains("unrelated")), "{roots:?}");
+        // Not a repository: no bases (never a guess from the folder's neighbours).
+        let bare = root.join("plain");
+        std::fs::create_dir_all(&bare).unwrap();
+        assert_eq!(worktree_roots(&bare), Vec::<String>::new());
+    }
+
+    #[test]
+    fn the_local_prefix_is_ci_s_for_the_same_os_and_arch() {
+        assert_eq!(
+            default_prefix(),
+            crate::ci_setup_rust::ci_prefix(crate::ci_setup_rust::host_runner_os(), std::env::consts::ARCH)
+        );
+        assert!(default_prefix().starts_with("paddock-ci/"), "{}", default_prefix());
+        let home = tempfile::tempdir().unwrap();
+        let e = s3_env(home.path(), 1);
+        let (b, _) = choose(&e, &|_| Ok(())).unwrap();
+        let Backend::Tiered { s3, .. } = &b else { panic!("tiered") };
+        assert_eq!(s3.prefix, default_prefix());
+        let mut e2 = e.clone();
+        e2.insert("PADDOCK_SCCACHE_BACKEND".into(), "s3".into());
+        e2.insert("PADDOCK_SCCACHE_S3_BUCKET".into(), "b".into());
+        e2.insert("PADDOCK_SCCACHE_S3_ENDPOINT".into(), "h:1".into());
+        let Backend::S3(s) = backend(&e2).unwrap() else { panic!("s3") };
+        assert_eq!(s.prefix, default_prefix(), "one definition for both ways to the same default");
+    }
+
+    #[test]
+    fn a_server_is_restarted_only_when_it_is_ours_and_what_it_started_with_changed() {
+        assert!(must_restart(true, Some("old"), "new"), "the list changed");
+        assert!(must_restart(true, None, "new"), "an older server that never recorded it: once");
+        assert!(!must_restart(true, Some("same"), "same"), "nothing changed");
+        assert!(!must_restart(false, Some("old"), "new"), "a foreign server is never touched");
+    }
+
+    /// The stamp is the bases and the key prefix: the two things the server reads once and `--show-adv-stats` cannot confirm fully.
+    #[test]
+    fn the_start_stamp_names_the_bases_and_the_prefix() {
+        let local = Backend::Local {
+            dir: "/c".into(),
+            size: "1G".into(),
+        };
+        let t = Backend::Tiered {
+            dir: "/c-s3".into(),
+            size: "1G".into(),
+            s3: S3 {
+                bucket: "b".into(),
+                endpoint: "h:1".into(),
+                region: "auto".into(),
+                ssl: false,
+                prefix: "p/x".into(),
+            },
+        };
+        let b1 = basedir_vars(&["/w/a".into(), "/w/b".into()], false);
+        let b2 = basedir_vars(&["/w/a".into(), "/w/b".into(), "/w/c".into()], false);
+        assert_ne!(start_stamp(&local, &b1), start_stamp(&local, &b2));
+        assert_ne!(start_stamp(&t, &b1), start_stamp(&t, &b1).replace("p/x", "p/y"));
+        assert!(start_stamp(&t, &b1).contains("p/x") && start_stamp(&t, &b1).contains("/w/a:/w/b"));
+        assert_eq!(start_stamp(&t, &b1), start_stamp(&t, &b1));
+    }
+
+    /// A server on our port, ours by its stats, that was started with another list of bases: `./dev sccache env` stops it through its
+    /// own client (`--stop-server`, never a kill) and starts it again with the current list, once; the next call leaves it alone.
+    #[cfg(unix)]
+    #[test]
+    fn a_server_started_with_other_bases_is_restarted_once_through_its_own_client() {
+        let (_h, mut e, bin) = fake(0, None);
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        e.insert("SCCACHE_SERVER_PORT".into(), listener.local_addr().unwrap().port().to_string());
+        let run = run_folder(&e).unwrap();
+        std::fs::create_dir_all(&run).unwrap();
+        std::fs::write(stamp_file(&run), "bases=/old\nprefix=\n").unwrap();
+        assert!(matches!(prepare(&e, Install::OnDemand), Outcome::Ready(_)));
+        assert_eq!(
+            calls(&bin),
+            ["--stop-server", "--start-server"],
+            "stopped, then started with the current list"
+        );
+        let recorded = std::fs::read_to_string(stamp_file(&run)).unwrap();
+        assert!(!recorded.contains("/old"), "the new list is recorded: {recorded}");
+        assert!(matches!(prepare(&e, Install::OnDemand), Outcome::Ready(_)));
+        assert_eq!(calls(&bin), ["--stop-server", "--start-server"], "unchanged: no second restart");
+        // The positive control: a recorded list that equals the current one is what stops the restarts.
+        drop(listener);
     }
 }
