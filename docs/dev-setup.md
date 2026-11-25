@@ -329,8 +329,11 @@ the same account (`UserName`, so its toolchains, folders and Full Disk Access gr
 no GUI lane: jobs that need a window run elsewhere (ADR 0120, D1 and D8 as changed on 2026-11-25). `d7-mac-mini-2` and `-3`
 are removed: stopped, their plists parked in `~/gitea-runner-parked-2026-11-25/`, and to be deleted from Gitea's runner list.
 
-The user runs these; an agent never does (rule 7, ER-14). Run them from the repository root, with no CI job running if
-possible: stopping the runner lets its running job finish first (up to its 3 h `shutdown_timeout`).
+The user runs these; an agent never does (rule 7, ER-14). Run them from the repository root. A running job is waited for, visibly
+and bounded, before anything changes: `install` and `rollback` tell the runner to take no new job (`launchctl kill SIGTERM`), print
+which job runs and how long they have waited, and stop, swap and start only when every job has ended. After `--wait-max SECONDS`
+(default 3600) they fail with the old runner still loaded and nothing changed; they never end a job or its helpers, whose own cleanup
+does (ER-51). The new daemon must be `state = running` in `launchctl print` and log "declare successfully", or the lane fails.
 
 1. **Restart.** A planned restart is `sudo fdesetup authrestart` (D5, amended 2026-11-25).
 2. **Look first:** `bash tools/mac-runner-move.sh install --user decryp7 --daemon d7-mac-mini --retire d7-mac-mini-2 --retire d7-mac-mini-3 --dry-run`
