@@ -22,6 +22,7 @@
 use super::client::Client;
 use super::logfind;
 use super::verdict::{self, Verdict};
+use crate::job_outcome::JobOutcome;
 
 /// What the check decided.
 #[derive(Debug, Clone, PartialEq)]
@@ -76,7 +77,7 @@ fn clean_of_flaky(client: &mut Client, run: u64) -> Result<usize, String> {
     let mut read = 0;
     for job in jobs
         .iter()
-        .filter(|j| !j.is_caller() && !j.never_ran() && j.conclusion != "skipped")
+        .filter(|j| !j.is_caller() && !j.never_ran() && j.outcome != JobOutcome::Skipped)
     {
         match client.log(job.id) {
             Ok(Some(log)) => {

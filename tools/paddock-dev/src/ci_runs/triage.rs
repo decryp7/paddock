@@ -29,6 +29,7 @@
 use super::client::{Client, RunInfo, TimedJob};
 use super::flakes::{self, Kind};
 use super::logfind;
+use crate::job_outcome::JobOutcome;
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -477,21 +478,24 @@ enum InRun {
 }
 
 fn job_in(client: &mut Client, run: &RunInfo, jobs: &[TimedJob], name: &str, log: &mut dyn FnMut(&str)) -> InRun {
-    match jobs.iter().find(|j| j.name == name) {
-        None => InRun::NotRun(format!("run {} has no job of that name", run.id)),
-        Some(j) if j.conclusion == "skipped" => InRun::NotRun(format!("run {} skipped it", run.id)),
-        Some(j) if !j.failed() => InRun::Result(JobState::Passed),
-        Some(j) if j.is_caller() => InRun::Result(JobState::NoResult(format!(
+    let Some(j) = jobs.iter().find(|j| j.name == name) else {
+        return InRun::NotRun(format!("run {} has no job of that name", run.id));
+    };
+    match &j.outcome {
+        JobOutcome::Skipped => return InRun::NotRun(format!("run {} skipped it", run.id)),
+        JobOutcome::Passed => return InRun::Result(JobState::Passed),
+        JobOutcome::Failed | JobOutcome::Cancelled | JobOutcome::Unfinished | JobOutcome::Unknown(_) => {}
+    }
+    if j.is_caller() {
+        InRun::Result(JobState::NoResult(format!(
             "run {}: \"{name}\" only calls a reusable workflow",
             run.id
-        ))),
-        Some(j) if j.never_ran() || j.conclusion == "cancelled" => {
-            InRun::NotRun(format!("run {} ended it {} before it ran", run.id, j.conclusion))
-        }
-        Some(j) => {
-            log(&format!("baseline run {} job {}: reading the log", run.id, j.id));
-            InRun::Result(JobState::Failed(read_job(client, j)))
-        }
+        )))
+    } else if j.never_ran() || j.outcome == JobOutcome::Cancelled {
+        InRun::NotRun(format!("run {} ended it {} before it ran", run.id, j.outcome))
+    } else {
+        log(&format!("baseline run {} job {}: reading the log", run.id, j.id));
+        InRun::Result(JobState::Failed(read_job(client, j)))
     }
 }
 
@@ -617,7 +621,13 @@ pub fn collect(client: &mut Client, req: &Request, log: &mut dyn FnMut(&str)) ->
         .ok_or_else(|| format!("the server has no job list for run {}", run.id))?;
     let mut skipped_jobs = 0;
     let mut failed: Vec<FailedJob<'_>> = Vec::new();
-    for j in jobs.iter().filter(|j| j.failed()) {
+    // The jobs to triage: failures, cancels, jobs that never finished or ended in an unknown word. A pass and a skip have
+    // nothing to triage.
+    let to_triage = |o: &JobOutcome| match o {
+        JobOutcome::Failed | JobOutcome::Cancelled | JobOutcome::Unfinished | JobOutcome::Unknown(_) => true,
+        JobOutcome::Passed | JobOutcome::Skipped => false,
+    };
+    for j in jobs.iter().filter(|j| to_triage(&j.outcome)) {
         if j.is_caller() || j.never_ran() {
             skipped_jobs += 1;
             continue;

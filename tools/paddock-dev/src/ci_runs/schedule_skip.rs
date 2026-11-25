@@ -19,6 +19,7 @@
 
 use super::client::{Client, RunInfo};
 use super::time::ts;
+use crate::job_outcome::JobOutcome;
 use std::collections::BTreeSet;
 
 /// How many pages of 50 dispatch runs are read at most (a train's runs are among the newest).
@@ -200,7 +201,7 @@ pub fn read_past(client: &mut Client, workflow: &str) -> Result<Vec<Past>, Strin
         {
             let jobs = client.timed_jobs(r.id)?.unwrap_or_default();
             let mut train_skip = false;
-            for j in jobs.iter().filter(|j| j.conclusion == "success") {
+            for j in jobs.iter().filter(|j| j.outcome == JobOutcome::Passed) {
                 let gate = j
                     .steps
                     .iter()

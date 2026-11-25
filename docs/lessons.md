@@ -3986,3 +3986,8 @@ raised timeout as the fix.
   starts.
 - **Rule.** A tool that starts a long-lived helper holds it by its identity from the start; a helper only reachable by its own request
   protocol cannot be repaired when that protocol is what hangs.
+- **Redesign (user, 2026-11-25).** `TimedJob::failed()` and `RunJob::failed()` are gone: paddock-dev parses a job's conclusion once
+  into `JobOutcome` (`tools/paddock-dev/src/job_outcome.rs`: Passed, Failed, Cancelled, Skipped, Unfinished, Unknown), and every
+  reader matches on it, so the compiler makes each one decide skipped and cancelled on purpose. The sweep found a third instance:
+  the member gate's other-OS row (`merge_check/other_os.rs`) read an OS whose every job was skipped as clean; it is not applicable
+  now.

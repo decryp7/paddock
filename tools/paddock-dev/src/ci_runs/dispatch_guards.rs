@@ -22,6 +22,7 @@
 use super::client::{Client, RunInfo, TimedJob, encode_path};
 use super::dispatch::{DispatchTag, ReadWorkflow, Request, RunKind, Target, is_train};
 use crate::active_apps;
+use crate::job_outcome::JobOutcome;
 use crate::plan_since::read_marker;
 use crate::wait::Http;
 use std::collections::{BTreeMap, BTreeSet};
@@ -497,10 +498,11 @@ pub fn failed_jobs(jobs: &[TimedJob]) -> Vec<String> {
     let mut out: Vec<(bool, String)> = jobs
         .iter()
         .filter(|j| !j.is_caller())
-        .filter_map(|j| match j.conclusion.as_str() {
-            "failure" => Some((AGGREGATES.iter().any(|a| j.name.starts_with(a)), j.name.clone())),
-            "cancelled" => Some((false, format!("{} (cancelled: not measured)", j.name))),
-            _ => None,
+        .filter_map(|j| match j.outcome {
+            JobOutcome::Failed => Some((AGGREGATES.iter().any(|a| j.name.starts_with(a)), j.name.clone())),
+            JobOutcome::Cancelled => Some((false, format!("{} (cancelled: not measured)", j.name))),
+            // A finished run's job: a pass, a skip (the gate or a failed need left it out), or a word the reader does not know.
+            JobOutcome::Passed | JobOutcome::Skipped | JobOutcome::Unfinished | JobOutcome::Unknown(_) => None,
         })
         .collect();
     if out.iter().any(|(agg, _)| !agg) {
@@ -514,7 +516,7 @@ pub fn failed_jobs(jobs: &[TimedJob]) -> Vec<String> {
 fn measured(jobs: &[TimedJob]) -> bool {
     jobs.iter()
         .filter(|j| !j.name.starts_with("gate") && !j.name.starts_with("installers gate"))
-        .any(|j| matches!(j.conclusion.as_str(), "success" | "failure"))
+        .any(|j| matches!(j.outcome, JobOutcome::Passed | JobOutcome::Failed))
 }
 
 /// How many pages of 50 runs the readers look through at most.
