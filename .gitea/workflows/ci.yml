@@ -391,7 +391,8 @@ jobs:
   # WebKit is the engine of WKWebView, which the macOS apps render in: the three ui Playwright projects run in Playwright's own WebKit
   # build, for v* tags, nightly.yml and a manual ask only (the planner's `webkit`, as the e2e job). On Linux, in the CI image that bakes
   # WebKit in: the CI Mac is a LaunchDaemon with no window server (ADR 0120, user decision 2026-11-25), where Playwright's WebKit cannot
-  # register with WindowServer (Playwright #43066). macOS WebKit (the WKWebView build) is then a local run on a Mac with a login session.
+  # register with WindowServer (Playwright #43066). macOS WebKit (the WKWebView build) is then a local run on a Mac with a login session;
+  # no macOS WebKit in CI is accepted for now (user, 2026-11-25).
   e2e-webkit:
     name: reference apps in WebKit (Linux)
     needs: [plan]

@@ -1019,8 +1019,8 @@ jobs:
       # first run, each one's "Startup timings" line read and the medians checked against scripts/ci/startup-budgets.json.
       # Nightly and manual runs, on Linux, which reports until its first nightly numbers are in. The macOS benchmark (the measured
       # budgets, formerly also on every debrief-v tag) no longer runs in CI since 2026-11-25: the CI Mac is a LaunchDaemon with no
-      # window server (ADR 0120, user decision 2026-11-25), where the app cannot start. It is a manual run on a Mac with a login
-      # session (apps/debrief/docs/performance.md, "Start-up benchmark").
+      # window server (ADR 0120, user decision 2026-11-25), where the app cannot start. It is a manual step of the release checklist,
+      # on a Mac with a login session (user decision 2026-11-25; apps/debrief/docs/releasing.md, "Before tagging").
       # Verdict on a busy host (scripts/bench/busy-host.mjs; apps/debrief/docs/performance.md, "Start-up benchmark on a busy
       # host"): the benchmark is always taken, and the host's CPU idle and load are recorded with every start. It fails (exit 1,
       # on every run, tag or not) only when the started tree's CPU time is over its limit (the tight one on a quiet host, else
