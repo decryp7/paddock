@@ -388,21 +388,23 @@ jobs:
       - uses: ./.gitea/actions/sccache-stats
         if: always()
 
-  # WebKit is the engine of WKWebView, which the macOS apps render in: the three ui Playwright projects run in it on the Mac host runner
-  # (Playwright's own WebKit build), for v* tags, nightly.yml and a manual ask only (the planner's `webkit`, as the e2e job).
+  # WebKit is the engine of WKWebView, which the macOS apps render in: the three ui Playwright projects run in Playwright's own WebKit
+  # build, for v* tags, nightly.yml and a manual ask only (the planner's `webkit`, as the e2e job). On Linux, in the CI image that bakes
+  # WebKit in: the CI Mac is a LaunchDaemon with no window server (ADR 0120, user decision 2026-11-25), where Playwright's WebKit cannot
+  # register with WindowServer (Playwright #43066). macOS WebKit (the WKWebView build) is then a local run on a Mac with a login session.
   e2e-webkit:
-    name: reference apps in WebKit (macOS)
+    name: reference apps in WebKit (Linux)
     needs: [plan]
     if: ${{ needs.plan.outputs.ui == 'true' && (needs.plan.outputs.webkit == 'true' || contains(fromJSON(needs.plan.outputs.rerun_jobs || '[]'), 'e2e-webkit')) && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["e2e-webkit"]'), 'e2e-webkit') }}
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
     env:
       # The graph's selection of this job's project (ADR 0117 §5): `./dev ci run` skips a phase it does not keep and gives a test
       # runner only the affected files (tools/paddock-dev/src/ci_run/select.rs). Empty: every phase, every file.
       PADDOCK_PLAN_SELECTION: ${{ needs.plan.outputs.selection }}
       # A run for a tag builds the tool from source (ADR 0022: release and tag jobs bypass every cache); other runs may download it.
       PADDOCK_DEV_DOWNLOAD: ${{ (inputs.release == true || startsWith(github.ref, 'refs/tags/')) && '0' || '' }}
-      # Read credential for ./dev's prebuilt download (ADR 0022 R0b).
-      PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
     defaults:
       run:
         working-directory: ui
@@ -411,48 +413,36 @@ jobs:
         with:
           persist-credentials: false
 
-      # CARGO_BUILD_JOBS: this runner's share of the host's cores (before job-isolation, which builds paddock-dev).
-      - uses: ./.gitea/actions/build-jobs
+      # Before the first ./dev of the job: it hashes and builds itself with the job's pinned compiler.
+      - env:
+          PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+        uses: ./.gitea/actions/setup-rust
+        with:
+          sccache-s3-access-key-id: ${{ secrets.PADDOCK_SCCACHE_S3_ACCESS_KEY_ID }}
+          sccache-s3-secret-access-key: ${{ secrets.PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY }}
 
-      # A slot of the host (job isolation): its own Angular cache and ports, so two runs of this job can share the Mac.
-      - uses: ./.gitea/actions/job-isolation
-
+      # Playwright's browsers, WebKit with its Linux dependencies included, are baked into the image (ci-image/): nothing is downloaded.
       - uses: ./.gitea/actions/node-caches
+        with:
+          name: e2e-webkit
 
       - name: Install
         working-directory: .
         run: npm ci
 
-      # A host runner has no image: the browser is installed once per Playwright version into a kept host folder (outside the
-      # checkout and the runner user's own caches, rule 7) and only when that folder is missing.
-      - name: WebKit
-        run: |
-          PW_VERSION=$(node -p "require('playwright-core/package.json').version")
-          BROWSERS="${RUNNER_TOOL_CACHE:-$HOME/.cache}/paddock-playwright/$PW_VERSION"
-          echo "PLAYWRIGHT_BROWSERS_PATH=$BROWSERS" >> "$GITHUB_ENV"
-          if [ ! -f "$BROWSERS/.installed-webkit" ]; then
-            PLAYWRIGHT_BROWSERS_PATH="$BROWSERS" npx playwright install webkit
-            touch "$BROWSERS/.installed-webkit"
-          fi
-
+      # CI names its ports (@decryp7/paddock-e2e refuses a default there), apart from the e2e shards' 4300-4312 and nightly.yml's 4330-4332.
       - name: Reference app checks in WebKit
         env:
           PADDOCK_WEBKIT: "1"
+          PW_PORT: "4340"
+          SHELL_DEMO_PORT: "4341"
+          WORKBENCH_DEMO_PORT: "4342"
         run: |
-          # The display stays awake for the step (ADR 0120 WP-0, H2; Playwright #43066: WebKit work on a sleeping display fills
-          # the WindowServer). The handle is kept and the assertion ends with the step (ER-51).
-          caffeinate -d -i -w $$ & caffeinate_pid=$!
-          trap 'kill "$caffeinate_pid" 2>/dev/null || true' EXIT
-          # The job slot's own block of three ports (conformance/ci/ports.txt `webkit`: 4320-4322 for s1).
-          port=$(bash ../conformance/ci/kit.sh isolation port webkit)
-          export PW_PORT=$port SHELL_DEMO_PORT=$((port + 1)) WORKBENCH_DEMO_PORT=$((port + 2))
           npx playwright test --project=gallery-webkit --project=shell-demo-webkit --project=workbench-demo-webkit
           npx playwright test -c projects/paddock-e2e/selftest/playwright.config.ts --project=webkit
 
-      - uses: ./.gitea/actions/job-isolation
+      - uses: ./.gitea/actions/sccache-stats
         if: always()
-        with:
-          mode: release
 
   # @decryp7/paddock-conformance (conformance/, plan X9): every check has a good and a bad fixture, the release scripts are
   # tested (latest.json byte-equal to the apps' copy), the shared macOS verify runs against a shimmed bundle. One dependency, `yaml`

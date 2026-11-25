@@ -180,10 +180,11 @@ pub fn class_default(os: &str, what: Setting) -> &'static str {
         ("Windows", Setting::Share) => "3",
         // No class has a measured test-thread number: each takes the job's core share ((cores - kept) / jobs per host), so
         // lanes x threads stays within the cores (ER-48). Windows: 16 / 3 = 5, because 3 jobs x 8 threads plus a 5-job build
-        // oversubscribed the 16 vCPUs and git-heavy tests ran 2-8 times slower (runs 8335 against 8359). macOS: (14 - 2) / 3 = 4;
+        // oversubscribed the 16 vCPUs and git-heavy tests ran 2-8 times slower (runs 8335 against 8359). macOS: four jobs since ADR 0120 D8
+        // (user decision 2026-11-25: one runner, d7-mac-mini, a LaunchDaemon of capacity 4), (14 - 2) / 4 = 3;
         // its former 8 threads (3 x 8 = 24 on 12 usable cores) rested on one dyno lib run alone, not on three lanes at once, and
         // is gone (2026-11-24, user: "cut the Mac now"; the cost of 4 threads there is the 47.8 s against 15.7 s in docs/benchmarks.md).
-        ("macOS", Setting::Share) => "3",
+        ("macOS", Setting::Share) => "4",
         ("macOS", Setting::Cores) => "2",
         ("macOS", Setting::Ram) => "32768",
         (_, Setting::Threads) => "-",
@@ -524,13 +525,15 @@ mod tests {
     }
 
     #[test]
-    fn the_shared_mac_gets_a_third_of_its_usable_cores_for_builds_and_for_test_threads() {
+    fn the_shared_mac_gets_a_quarter_of_its_usable_cores_for_builds_and_for_test_threads() {
+        // ADR 0120 D8: four jobs at once on the one Mac runner, d7-mac-mini (capacity 4, user decision 2026-11-25).
         let (code, out, err) = go("1", &Fixed("14", "65536"), &[("RUNNER_OS", "macOS")]);
         assert_eq!(code, 0);
         assert_eq!(
             out,
-            "CARGO_BUILD_JOBS=4\nNEXTEST_TEST_THREADS=4\nPADDOCK_E2E_WORKERS=4\nVITEST_MAX_WORKERS=4\n"
+            "CARGO_BUILD_JOBS=3\nNEXTEST_TEST_THREADS=3\nPADDOCK_E2E_WORKERS=3\nVITEST_MAX_WORKERS=3\n"
         );
+        assert!(err.contains("(14 cores - 2 kept) / 4 jobs per host"), "{err}");
         assert!(
             err.contains("build-jobs: this host: 14 cores, 65536 MB of RAM, runner class macOS"),
             "{err}"

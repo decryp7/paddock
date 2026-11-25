@@ -182,10 +182,11 @@ fn every_runner_class_gets_the_shells_share() {
 #[test]
 fn the_class_values_are_the_documented_ones() {
     let s = Scratch::new();
+    // macOS: (14 cores - 2 kept) / 4 jobs per host (ADR 0120 D8: one runner of capacity 4).
     let mac = same(&s, None, &host("macOS", "14", "65536"), true);
     assert_eq!(
         mac.env_file,
-        "CARGO_BUILD_JOBS=4\nNEXTEST_TEST_THREADS=4\nPADDOCK_E2E_WORKERS=4\nVITEST_MAX_WORKERS=4\n"
+        "CARGO_BUILD_JOBS=3\nNEXTEST_TEST_THREADS=3\nPADDOCK_E2E_WORKERS=3\nVITEST_MAX_WORKERS=3\n"
     );
     let win = same(&s, None, &host("Windows", "16", "32768"), true);
     assert_eq!(
@@ -324,7 +325,7 @@ fn without_a_github_env_the_assignments_are_printed() {
     let s = Scratch::new();
     let r = same(&s, None, &host("macOS", "14", "65536"), false);
     assert_eq!(r.env_file, "");
-    assert!(r.stdout.starts_with("CARGO_BUILD_JOBS=4\nNEXTEST_TEST_THREADS=4"), "{}", r.stdout);
+    assert!(r.stdout.starts_with("CARGO_BUILD_JOBS=3\nNEXTEST_TEST_THREADS=3"), "{}", r.stdout);
 }
 
 /// The probes are programs: `nproc` first, then `sysctl -n hw.ncpu`, then `NUMBER_OF_PROCESSORS`, then `getconf`; the RAM from
