@@ -124,8 +124,8 @@ pub enum HostCall {
     Report {
         /// Task id.
         task: String,
-        /// 0 to 1, or `None` when unknown.
-        progress: Option<f32>,
+        /// How far it is, or `None` when unknown.
+        progress: Option<Progress>,
         /// What it is doing now.
         note: String,
     },
@@ -169,6 +169,68 @@ pub enum HostCall {
         dropped: u64,
     },
 }
+
+/// How far a task is: a finite fraction from 0 to 1. A plugin is untrusted, so the app decodes only such a value: anything
+/// else (NaN, an infinity, a value outside 0 to 1) is refused at decode with [`ProgressError`], never clamped later.
+#[derive(Clone, Copy, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(try_from = "f32", into = "f32")]
+pub struct Progress(f32);
+
+impl Progress {
+    /// Nothing done yet.
+    pub const ZERO: Progress = Progress(0.0);
+    /// All done.
+    pub const DONE: Progress = Progress(1.0);
+
+    /// `fraction` as progress, refused unless it is finite and from 0 to 1.
+    pub fn new(fraction: f32) -> Result<Progress, ProgressError> {
+        if fraction.is_finite() && (0.0..=1.0).contains(&fraction) {
+            Ok(Progress(fraction))
+        } else {
+            Err(ProgressError(fraction))
+        }
+    }
+
+    /// The fraction, from 0 to 1.
+    pub fn get(self) -> f32 {
+        self.0
+    }
+}
+
+impl std::fmt::Debug for Progress {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Debug::fmt(&self.0, f)
+    }
+}
+
+impl TryFrom<f32> for Progress {
+    type Error = ProgressError;
+    fn try_from(fraction: f32) -> Result<Progress, ProgressError> {
+        Progress::new(fraction)
+    }
+}
+
+impl From<Progress> for f32 {
+    fn from(p: Progress) -> f32 {
+        p.0
+    }
+}
+
+/// A progress value that is not a finite fraction from 0 to 1.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ProgressError(pub f32);
+
+impl std::fmt::Display for ProgressError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "progress {} is not a finite fraction from 0 to 1",
+            self.0
+        )
+    }
+}
+
+impl std::error::Error for ProgressError {}
 
 /// A typed failure of a call: the plugin answered, the process is fine, and it does not count as a fault.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -362,7 +424,7 @@ mod tests {
             },
             HostCall::Report {
                 task: "a".into(),
-                progress: Some(0.25),
+                progress: Some(Progress::new(0.25).unwrap()),
                 note: "n".into(),
             },
             HostCall::TaskStarted {
@@ -406,6 +468,43 @@ mod tests {
             decode::<SavedOutput>(&encode(&saved).unwrap()).unwrap(),
             saved
         );
+    }
+
+    /// Nightly fuzz run 9021 (`plugin_request`, crash-28a7eaf1d8cda2e3ed5ba92fc9cdbd2936adadda): a `Report` whose progress
+    /// is NaN decoded, and NaN never equals itself, so the round trip failed. Progress outside 0 to 1 is refused at decode.
+    #[test]
+    fn a_report_with_progress_outside_zero_to_one_does_not_decode() {
+        const FUZZ_CRASH: [u8; 8] = [0x01, 0x00, 0x01, 0x00, 0xff, 0xff, 0xff, 0x00];
+        assert!(
+            decode::<HostCall>(&FUZZ_CRASH).is_err(),
+            "NaN progress decoded"
+        );
+        let report = |bits: [u8; 4]| {
+            let mut b = vec![0x01, 0x00, 0x01];
+            b.extend_from_slice(&bits);
+            b.push(0x00);
+            b
+        };
+        for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, -0.01, 1.01, 7.0] {
+            assert!(
+                decode::<HostCall>(&report(bad.to_le_bytes())).is_err(),
+                "{bad} decoded"
+            );
+        }
+        assert_eq!(
+            Progress::new(f32::NAN)
+                .map_err(|e| e.to_string())
+                .unwrap_err(),
+            "progress NaN is not a finite fraction from 0 to 1"
+        );
+        assert_eq!(
+            (Progress::ZERO.get(), f32::from(Progress::DONE)),
+            (0.0, 1.0)
+        );
+        for good in [0.0f32, 0.25, 1.0] {
+            let call = decode::<HostCall>(&report(good.to_le_bytes())).unwrap();
+            assert_eq!(decode::<HostCall>(&encode(&call).unwrap()).unwrap(), call);
+        }
     }
 
     #[test]

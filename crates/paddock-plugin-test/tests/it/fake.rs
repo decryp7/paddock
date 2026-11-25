@@ -1,7 +1,7 @@
 //! The platform through the fake host: a plugin in this process, a real connection, the fixture's every contribution.
 
 use paddock_ipc::{FrameLimit, IpcError, RemoteError, codes};
-use paddock_plugin_api::protocol::{McpBudget, SavedOutput};
+use paddock_plugin_api::protocol::{McpBudget, Progress, SavedOutput};
 use paddock_plugin_api::serve::{CallEnv, ELEVATED_ROLE, PluginHandler};
 use paddock_plugin_api::tools::{FailureReason, Host, NoHost};
 use paddock_plugin_api::{Contract, Contributions, Fail, Plugin, RegisterError};
@@ -146,7 +146,11 @@ fn tasks_are_announced_reported_and_stopped_by_id() {
     assert_eq!(h.tasks_started()[0].1.id, "job-1");
     assert_eq!(
         h.reports(),
-        [("job-1".to_string(), Some(0.5), "halfway".to_string())]
+        [(
+            "job-1".to_string(),
+            Progress::new(0.5).ok(),
+            "halfway".to_string()
+        )]
     );
     h.stop_task("job-1").unwrap();
     assert_eq!(h.tasks_finished(), ["job-1"]);
