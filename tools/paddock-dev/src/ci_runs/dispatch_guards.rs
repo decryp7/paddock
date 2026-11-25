@@ -367,7 +367,19 @@ pub fn check_train(
         let mut client = Client::new(http, server, repo, token);
         let finding = match client.branch_head(&branch) {
             Ok(Some(head)) => match read_train(&mut client, &req.workflow, &branch) {
-                Ok(runs) => failed_first(&runs, &head, &req.workflow, &branch),
+                Ok(runs) => {
+                    let finding = failed_first(&runs, &head, &req.workflow, &branch);
+                    match (&finding, red_chain(&runs)) {
+                        (Finding::Refuse { .. }, Some((full, newest_red))) => {
+                            let (full_head, newest_red) = (full.head.clone(), newest_red);
+                            drop(client);
+                            let revert = clean_reverts(root, &full_head, &head);
+                            let round = round_is_full(http, target, newest_red, read);
+                            without_round(finding, revert, round)
+                        }
+                        _ => finding,
+                    }
+                }
                 Err(e) => Finding::NotMeasured(format!("the runs of {} on {branch} cannot be read: {e}", req.workflow)),
             },
             Ok(None) => Finding::NotMeasured(format!("branch {branch} is not on the server")),
@@ -517,6 +529,128 @@ pub fn failed_first(runs: &[TrainRun], head: &str, workflow: &str, git_ref: &str
         ),
         next,
     }
+}
+
+/// The red full run the failed-first guard measures from, and the newest red run of its chain (the full run, or a failed-only round
+/// after it): `None` when the last finished full run is green or there is none.
+pub fn red_chain(runs: &[TrainRun]) -> Option<(&TrainRun, u64)> {
+    let counted = |r: &TrainRun| r.finished && !matches!(r.conclusion.as_str(), "cancelled" | "skipped" | "");
+    let full = runs.iter().find(|r| r.kind == Some(RunKind::Full) && counted(r))?;
+    if full.conclusion == "success" {
+        return None;
+    }
+    let newest_red = runs
+        .iter()
+        .filter(|r| r.id > full.id && matches!(r.kind, Some(RunKind::Since(_))))
+        .find(|r| r.finished && r.conclusion == "failure")
+        .map_or(full.id, |r| r.id);
+    Some((full, newest_red))
+}
+
+/// The failed-first finding with its two allowances (user, 2026-11-25), recorded in [`REGISTER`]: a full run may go without a
+/// failed-only round when the round would add nothing, because every commit since the red full run cleanly reverts a member's merge
+/// (`revert`), or because the round would rerun everything on the same head anyway (`round_full`: its rerun plan is the whole run).
+/// Each is `Ok(Some(why))` when it holds; `Ok(None)` or `Err` (it could not be told) leaves the refusal as it is. Only a refusal
+/// changes; the full run before landing stays mandatory whatever this says (ER-10).
+pub fn without_round(finding: Finding, revert: Result<Option<String>, String>, round_full: Result<Option<String>, String>) -> Finding {
+    let Finding::Refuse { why, .. } = &finding else { return finding };
+    let allowed = match (revert, round_full) {
+        (Ok(Some(w)), _) => w,
+        (_, Ok(Some(w))) => w,
+        _ => return finding,
+    };
+    Finding::Pass(format!(
+        "{why}, but no failed-only round is needed: {allowed}; the full run before landing is this run (ER-10)"
+    ))
+}
+
+/// Whether every commit of `from..to` (first parent) cleanly reverts a member's merge: a commit with one parent that names the merge
+/// it pulls (git's `This reverts commit <sha>` line, or the train's own `(merge <sha>)` in the subject) and whose change is exactly the
+/// inverse of that merge's change against its first parent (the same files, the same removed and added lines). `Ok(None)` when one is
+/// not, or there is no commit; `Err` when git cannot tell (a commit missing here: fetch the train first).
+pub fn clean_reverts(root: &std::path::Path, from: &str, to: &str) -> Result<Option<String>, String> {
+    let git = crate::merge_check::git::Git::new(root);
+    let range = format!("{from}..{to}");
+    let commits: Vec<String> = git
+        .text(&["rev-list", "--first-parent", "--reverse", &range])?
+        .lines()
+        .map(str::to_string)
+        .collect();
+    if commits.is_empty() {
+        return Ok(None);
+    }
+    let parents = |c: &str| -> Result<usize, String> {
+        Ok(git
+            .text(&["rev-list", "--parents", "-n", "1", c])?
+            .split_whitespace()
+            .count()
+            .saturating_sub(1))
+    };
+    let mut said = Vec::new();
+    for c in &commits {
+        if parents(c)? != 1 {
+            return Ok(None);
+        }
+        let message = git.text(&["log", "-1", "--format=%B", c])?;
+        let mut named = crate::merge_check::reverted_base::trailer_targets(&message);
+        named.extend(merge_named(&message));
+        let undone = format!("{c}^");
+        let mut clean = None;
+        for x in named {
+            let Ok(full) = git.text(&["rev-parse", "--verify", &format!("{x}^{{commit}}")]) else {
+                continue;
+            };
+            let x = full.trim().to_string();
+            if parents(&x)? < 2 {
+                continue;
+            }
+            let merged_diff = git.text(&["diff", "--binary", "--no-color", &format!("{x}^1"), &x])?;
+            let put_back_diff = git.text(&["diff", "--binary", "--no-color", c, &undone])?;
+            let (merged, put_back) = (changed_lines(&merged_diff), changed_lines(&put_back_diff));
+            if !merged.is_empty() && merged == put_back {
+                clean = Some(x);
+                break;
+            }
+        }
+        match clean {
+            Some(x) => said.push(format!("{} reverts the merge {} exactly", short(c), short(&x))),
+            None => return Ok(None),
+        }
+    }
+    Ok(Some(said.join("; ")))
+}
+
+/// The merges a train's own pull-out names in its subject: `revert: pull <branch> (merge <sha>) from <train>`.
+fn merge_named(message: &str) -> Vec<String> {
+    let first = message.lines().next().unwrap_or("");
+    first
+        .match_indices("(merge ")
+        .filter_map(|(i, m)| {
+            let hex: String = first[i + m.len()..].chars().take_while(char::is_ascii_hexdigit).collect();
+            first[i + m.len() + hex.len()..].starts_with(')').then_some(hex)
+        })
+        .filter(|h| (7..=64).contains(&h.len()))
+        .collect()
+}
+
+/// What a diff changes, without its positions: the file headers and the removed and added lines, in order (hunk headers and index
+/// lines dropped, so the same change at shifted lines compares equal).
+fn changed_lines(diff: &str) -> Vec<&str> {
+    diff.lines()
+        .filter(|l| {
+            l.starts_with("diff --git ") || ((l.starts_with('+') || l.starts_with('-')) && !l.starts_with("+++") && !l.starts_with("---"))
+        })
+        .collect()
+}
+
+/// Whether the failed-only round of `run` would rerun the whole run anyway (its rerun plan is "everything": the plan job failed, or a
+/// failed job this ci.yml cannot gate alone), so a full run on the same head is the same run.
+pub fn round_is_full(http: &mut dyn Http, target: &Target<'_>, run: u64, read: ReadWorkflow<'_>) -> Result<Option<String>, String> {
+    let mut runs = crate::plan_since::GiteaRuns::new(http, target.server, target.repo, target.token.to_string());
+    let plan = crate::plan_since::since_run(&mut runs, run, read, &mut |_| {})?;
+    Ok(plan
+        .everything
+        .map(|why| format!("the failed-only round of run {run} would rerun everything ({why})")))
 }
 
 /// One run of main as the green-main guard reads it.
