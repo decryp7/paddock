@@ -37,6 +37,7 @@ import C85 from './C85-features-register.mjs';
 import C91 from './C91-per-machine.mjs';
 import C98 from './C98-read-retry-optouts.mjs';
 import C99 from './C99-no-keychain.mjs';
+import C172 from './C172-no-local-vm.mjs';
 import C104 from './C104-doc-links.mjs';
 import C110 from './C110-fixture-identity.mjs';
 import C111 from './C111-workflow-yaml.mjs';
@@ -59,4 +60,4 @@ import C167 from './C167-growth-test-history.mjs';
 import C169 from './C169-write-atomic.mjs';
 
 /** Every check, in id order. A check is { id, title, rule, run(ctx) -> findings[] | Promise<findings[]> }. */
-export const checks = [C03, C04, C06, C07, C08, C13, C15, C16, C23, C24, C28, C30, C31, C32, C33, C34, C35, C36, C37, C43, C45, C48, C50, C51, C54, C56, C57, C59, C61, C62, C71, C78, C79, C85, C91, C98, C99, C104, C110, C111, C112, C113, C114, C115, C116, C117, C128, C135, C136, C137, C138, C139, C140, C143, C156, C167, C169];
+export const checks = [C03, C04, C06, C07, C08, C13, C15, C16, C23, C24, C28, C30, C31, C32, C33, C34, C35, C36, C37, C43, C45, C48, C50, C51, C54, C56, C57, C59, C61, C62, C71, C78, C79, C85, C91, C98, C99, C104, C110, C111, C112, C113, C114, C115, C116, C117, C128, C135, C136, C137, C138, C139, C140, C143, C156, C167, C169, C172];

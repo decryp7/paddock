@@ -4,7 +4,6 @@
 
 use super::budget::{Slot, Timing, parse_heavy_timing, with_agent_name, with_heavy_flags};
 use super::gates::{Gate, Need, Planned};
-use super::linux_inputs::{ImageProbe, PROBE_NEXT, image_probe};
 use super::progress::{Counter, Progress, with_cargo_json, without_json};
 use super::stacks;
 use super::watchdog::{Observation, StepInfo, StepWatch, Stuck, WATCH_POLL, Watchdog, phase_line, stuck_how};
@@ -156,20 +155,6 @@ impl Done {
 pub trait Exec: Sync {
     /// Is `program` on PATH?
     fn has_tool(&self, program: &str) -> bool;
-    /// Does a Docker daemon answer? Never starts one.
-    fn docker_up(&self) -> bool;
-    /// Whether the local CI image the Linux Clippy runs in is built. Never builds it.
-    fn ci_image(&self) -> super::linux_inputs::ImageProbe {
-        super::linux_inputs::ImageProbe::Ready
-    }
-    /// Whether the container sees `compared`'s files as the host has them ([`super::mount_fresh`]). Never changes either side.
-    /// A test's executor answers fresh unless it stands in for a stale mount.
-    fn mount_probe(&self, compared: &super::mount_fresh::Compared) -> super::mount_fresh::MountProbe {
-        super::mount_fresh::MountProbe::Fresh {
-            checked: compared.files.len(),
-            of: compared.of,
-        }
-    }
     /// Runs the gate within `limits` (a heavy step: at most `limits.run` of running and `limits.queue` of waiting for the slot).
     /// `Err`: it could not be started (the program is missing).
     fn run(&self, gate: &Gate, limits: Limits) -> Result<Done, String>;
@@ -414,51 +399,6 @@ fn run_limit_note(done: &Done) -> String {
     }
 }
 
-/// A container row's mount probe ([`super::mount_fresh`]): `None` when the container sees the change's files as the host has them, else
-/// the row's "not measured" verdict (a stale mount or a probe that could not look; ER-33). Logs the probe's verdict and duration (ER-27).
-fn mount_not_fresh(gate: &Gate, exec: &dyn Exec) -> Option<Row> {
-    use super::mount_fresh::{MountProbe, STALE_NEXT};
-    let started = Instant::now();
-    let compared = gate.mount.clone().unwrap_or_default();
-    let probe = exec.mount_probe(&compared);
-    let secs = started.elapsed().as_secs_f64();
-    match probe {
-        MountProbe::Fresh { checked, of } => {
-            eprintln!(
-                "pre-push: {}: the container's mount matches the host for {checked} of the change's {of} file(s) ({secs:.1} s)",
-                gate.id
-            );
-            None
-        }
-        MountProbe::Stale { differing } => {
-            eprintln!(
-                "pre-push: {}: the container's mount is stale for {} file(s) ({secs:.1} s)",
-                gate.id,
-                differing.len()
-            );
-            let shown: Vec<&str> = differing.iter().take(5).map(String::as_str).collect();
-            let more = differing.len().saturating_sub(shown.len());
-            Some(Row::not_measured(
-                format!(
-                    "the container's bind mount is stale: it sees other content than the host for {}{}, so the row would check an old version",
-                    shown.join(", "),
-                    if more > 0 { format!(" and {more} more") } else { String::new() }
-                ),
-                STALE_NEXT,
-            ))
-        }
-        MountProbe::Broken(why) => {
-            eprintln!("pre-push: {}: the mount probe could not look ({secs:.1} s): {why}", gate.id);
-            Some(Row::not_measured(
-                format!("mount probe broken ({why}): it cannot be shown that the container sees the host's files"),
-                format!(
-                    "run `bash tools/linux-container.sh --id paddock --ci-image -- git status --short` yourself and read what it prints; {STALE_NEXT}"
-                ),
-            ))
-        }
-    }
-}
-
 /// The verdict of one gate: its needs first, then the run.
 pub fn decide(gate: &Gate, exec: &dyn Exec, subject: &Subject) -> Row {
     decide_with(gate, exec, Limits { stall: QUEUE_STALL }, subject, &mut |_| {})
@@ -475,30 +415,7 @@ pub fn decide_with(gate: &Gate, exec: &dyn Exec, limits: Limits, subject: &Subje
                 ),
             );
         }
-        Need::Docker | Need::LocalCiImage if !exec.docker_up() => {
-            return Row::not_measured(
-                "Docker (OrbStack) is not running",
-                "start it yourself and re-run; an agent reports this to the coordinator and never starts or restarts it (ER-14)",
-            );
-        }
         _ => {}
-    }
-    if gate.need == Need::LocalCiImage {
-        match exec.ci_image() {
-            ImageProbe::Ready => {}
-            ImageProbe::Missing => {
-                return Row::not_measured(
-                    "local CI image missing",
-                    "run `./dev check --warm-linux` (it builds the local CI image first, with its own bound, then warms the workspaces), then push again; the image build is never started under the push budget",
-                );
-            }
-            ImageProbe::Broken(how) => {
-                return Row::not_measured(format!("image probe broken ({how})"), PROBE_NEXT);
-            }
-        }
-        if let Some(row) = mount_not_fresh(gate, exec) {
-            return row;
-        }
     }
     if gate.heavy
         && let Some(why) = exec.heavy_unavailable()
@@ -558,31 +475,15 @@ pub fn decide_with(gate: &Gate, exec: &dyn Exec, limits: Limits, subject: &Subje
                 run_limit_note(&done),
                 done.log.as_ref().map_or(String::new(), |l| format!("; output so far in {l}"))
             ),
-            if gate.id.starts_with("clippy-linux") {
-                format!(
-                    "run `./dev check --warm-linux {}` once (no budget, live output; the first run of a workspace builds all its dependencies in the container's kept volume, minutes per workspace; docs/benchmarks.md), then push again",
-                    gate.workspaces.join(" ")
-                )
-            } else {
-                format!(
+            format!(
                     "re-run it alone: {} (a row may run {} min from the moment it starts; waiting for the heavy slot is not run time)",
                     gate.rerun(),
                     ROW_CAP.as_secs() / 60
                 )
-            },
         )
         .ended_by_guard(done.ended_by()),
         Ok(done) => {
-            let hint = match (gate.need == Need::LocalCiImage, done.how.as_str()) {
-                (true, "exit 125") => {
-                    "docker could not start the container or build the local CI image (read the output above; `docker login dev.decryptology.net` if a base image cannot be pulled)"
-                        .to_string()
-                }
-                (true, "exit 137") => {
-                    "the container was killed (out of memory at 12g): raise PADDOCK_LINUX_MEMORY (for example 16g) and re-run".to_string()
-                }
-                _ => gate.next.clone(),
-            };
+            let hint = gate.next.clone();
             let full = done.log.as_ref().map_or(String::new(), |l| format!(" Full output: {l}."));
             // A failed step that ran nextest names its failed tests and first panic, read from its whole output by the one nextest
             // reader (ER-42): the tail alone often ends in the summary, and the exit code says nothing (member gates, 2026-11-24).
@@ -1061,9 +962,6 @@ pub(crate) const PASS: &[&str] = &[
 /// The variable that, with `PADDOCK_HEAVY=off`, lets a test run a heavy gate without the slot.
 pub const TEST_HEAVY_OFF: &str = "PADDOCK_TEST_HEAVY_OFF";
 
-/// The label that marks the container of one run, so only it is ever stopped (ER-14).
-const RUN_LABEL: &str = "paddock.run";
-
 fn slug(id: &str) -> String {
     id.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect()
 }
@@ -1110,7 +1008,7 @@ impl RealExec {
             .any(|a| a == "--run-max")
     }
 
-    fn call(&self, gate: &Gate, limits: Limits, log: &Path, label: Option<&str>, name: &str) -> ToolCall {
+    fn call(&self, gate: &Gate, limits: Limits, log: &Path, name: &str) -> ToolCall {
         let own = own_run_limit(gate);
         // A heavy step: its run time is limited by heavy itself (`--run-max`), its wait for a slot separately (`--queue-stall`: no
         // progress of the queue); the outer timeout is only a backstop for the run.
@@ -1182,34 +1080,7 @@ impl RealExec {
                 call = crate::local_sccache::apply(call, w);
             }
         }
-        if let Some(l) = label {
-            call = call.env("PADDOCK_LINUX_RUN_LABEL", format!("{RUN_LABEL}={l}"));
-        }
         call.output(Output::File(log.to_path_buf()))
-    }
-
-    fn docker(&self) -> String {
-        self.env.get("DOCKER").cloned().unwrap_or_else(|| "docker".into())
-    }
-
-    /// Stops the container this run started (by its own label) and nothing else.
-    fn stop_container(&self, label: &str) {
-        let list = ToolCall::new(self.docker())
-            .args(["ps", "-q", "--filter", &format!("label={RUN_LABEL}={label}")])
-            .pass(PASS.iter().copied())
-            .timeout(Duration::from_secs(30))
-            .run(&self.env, &mut std::io::sink());
-        let Ok(list) = list else { return };
-        let ids: Vec<String> = list.stdout.split_whitespace().map(str::to_string).collect();
-        if ids.is_empty() {
-            return;
-        }
-        let _ = ToolCall::new(self.docker())
-            .args(["stop", "--time", "10"])
-            .args(ids)
-            .pass(PASS.iter().copied())
-            .timeout(Duration::from_secs(60))
-            .run(&self.env, &mut std::io::sink());
     }
 }
 
@@ -1284,59 +1155,8 @@ impl Exec for RealExec {
         on_path(&self.env, program)
     }
 
-    fn docker_up(&self) -> bool {
-        docker_answers(&self.env)
-    }
-
     fn heavy_unavailable(&self) -> Option<String> {
         self.heavy_command().err()
-    }
-
-    fn ci_image(&self) -> ImageProbe {
-        let ran = ToolCall::new("bash")
-            .args([
-                "tools/linux-container.sh",
-                "--id",
-                "paddock",
-                "--ci-image",
-                "--image-ready",
-                "--root",
-            ])
-            .args([self.root.to_string_lossy().to_string()])
-            .cwd(&self.root)
-            .pass(PASS.iter().copied())
-            .timeout(Duration::from_secs(60))
-            .run(&self.env, &mut std::io::sink());
-        match ran {
-            Ok(r) => image_probe(r.how.strip_prefix("exit ").and_then(|n| n.trim().parse().ok())),
-            Err(e) => ImageProbe::Broken(format!("could not start: {e}")),
-        }
-    }
-
-    fn mount_probe(&self, compared: &super::mount_fresh::Compared) -> super::mount_fresh::MountProbe {
-        use super::mount_fresh::{SCRIPT, check};
-        // The same script on both sides: plain `sh` in the checkout, and through the container helper with the row's own mount.
-        let run = |call: ToolCall| -> Result<String, String> {
-            let r = call
-                .cwd(&self.root)
-                .pass(PASS.iter().copied())
-                .timeout(Duration::from_secs(120))
-                .run(&self.env, &mut std::io::sink())?;
-            if r.success {
-                Ok(r.stdout)
-            } else {
-                Err(format!("{}: {}", r.how, tail(&r.stderr, 3).trim()))
-            }
-        };
-        let host = |files: &[String]| run(ToolCall::new("sh").args(["-c", SCRIPT, "sh"]).args(files.iter().cloned()));
-        let container = |files: &[String]| {
-            run(ToolCall::new("bash")
-                .args(["tools/linux-container.sh", "--id", "paddock", "--ci-image", "--root"])
-                .args([self.root.to_string_lossy().to_string()])
-                .args(["--", "sh", "-c", SCRIPT, "sh"])
-                .args(files.iter().cloned()))
-        };
-        check(&compared.files, compared.of, host, container)
     }
 
     fn load(&self) -> Option<f64> {
@@ -1357,7 +1177,6 @@ impl Exec for RealExec {
         let log = self.logs.join(format!("{}.log", log_name(&gate.id)));
         // Best-effort: the .id file only helps a reader; a failed write never stops the gate.
         let _ = std::fs::write(log.with_extension("id"), format!("{}\n", gate.id));
-        let label = matches!(gate.need, Need::Docker | Need::LocalCiImage).then(run_token);
         // Each step has a name of its own for heavy (`pre-push-<pid>-<n>`), and its log is new: nothing an earlier or another push
         // wrote can be read for this step's lines.
         let name = step_name();
@@ -1387,7 +1206,7 @@ impl Exec for RealExec {
             },
             None => (BuildLock { held: None }, Duration::ZERO),
         };
-        let call = self.call(gate, limits, &log, label.as_deref(), &name);
+        let call = self.call(gate, limits, &log, &name);
         let _ = std::fs::File::create(&log);
         // Our `heavy` writes "holds the lock" to the log when the slot is taken: until then every second is waiting for others,
         // and the row cap counts only from then (`RealExec::slot`). Another heavy prints no such line: nothing is known then.
@@ -1488,14 +1307,6 @@ impl Exec for RealExec {
                 }
                 _ => {}
             }
-        }
-        // Any ending that is not the container run's own (the row cap, the watchdog, the person) stops the container too: the heavy
-        // slot is free when the client ends, and a container left compiling would run beside the next step (review P1-2).
-        if let Some(l) = &label
-            && !ran.success
-            && ending.cut_short()
-        {
-            self.stop_container(l);
         }
         // The step's phases with their durations (ER-27): on the console and beside the gate logs.
         let wall = began.elapsed().as_secs_f64();
@@ -1794,44 +1605,6 @@ fn exists(dir: &Path, program: &str) -> bool {
     dir.join(program).is_file() || (cfg!(windows) && dir.join(format!("{program}.exe")).is_file())
 }
 
-/// Whether a Docker daemon is listening, asked without waking one: OrbStack's `docker` starts its VM on any command (ER-14: a
-/// start of shared infrastructure by an agent), so on Unix the socket is connected to instead. Windows has no such launcher.
-#[cfg(unix)]
-pub(crate) fn docker_answers(env: &HashMap<String, String>) -> bool {
-    docker_sockets(env)
-        .iter()
-        .any(|p| std::os::unix::net::UnixStream::connect(p).is_ok())
-}
-
-/// The sockets a Docker client would use: `DOCKER_HOST`, then OrbStack's, Docker Desktop's and the system's.
-#[cfg(unix)]
-pub fn docker_sockets(env: &HashMap<String, String>) -> Vec<PathBuf> {
-    let mut out = Vec::new();
-    if let Some(host) = env.get("DOCKER_HOST") {
-        if let Some(p) = host.strip_prefix("unix://") {
-            out.push(PathBuf::from(p));
-        }
-        return out;
-    }
-    if let Some(home) = env.get("HOME") {
-        out.push(Path::new(home).join(".orbstack/run/docker.sock"));
-        out.push(Path::new(home).join(".docker/run/docker.sock"));
-    }
-    out.push(PathBuf::from("/var/run/docker.sock"));
-    out
-}
-
-#[cfg(not(unix))]
-pub(crate) fn docker_answers(env: &HashMap<String, String>) -> bool {
-    let docker = env.get("DOCKER").cloned().unwrap_or_else(|| "docker".into());
-    ToolCall::new(docker)
-        .args(["info"])
-        .pass(PASS.iter().copied())
-        .timeout(Duration::from_secs(30))
-        .run(env, &mut std::io::sink())
-        .is_ok_and(|r| r.success)
-}
-
 /// A commit and tree for tests that need a [`Subject`].
 #[cfg(test)]
 pub(crate) fn test_subject() -> Subject {
@@ -1853,9 +1626,6 @@ mod tests {
 
     impl Exec for NoSlot {
         fn has_tool(&self, _: &str) -> bool {
-            true
-        }
-        fn docker_up(&self) -> bool {
             true
         }
         fn run(&self, _: &Gate, _: Limits) -> Result<Done, String> {
@@ -2041,7 +1811,6 @@ mod tests {
             notice: None,
             progress: crate::pre_push::progress::Progress::Lines,
             build_dir: None,
-            mount: None,
         })
     }
 
@@ -2164,7 +1933,6 @@ exit $rc
                 notice: None,
                 progress: crate::pre_push::progress::Progress::Lines,
                 build_dir: None,
-                mount: None,
             }
         }
 
@@ -2441,7 +2209,7 @@ exit $rc
                 stall: Duration::from_secs(60),
             };
             let log = d.path().join("g.log");
-            let env_of = |ex: &RealExec| ex.call(&g, limits, &log, None, "pre-push-1-1").child_env(&ex.env);
+            let env_of = |ex: &RealExec| ex.call(&g, limits, &log, "pre-push-1-1").child_env(&ex.env);
             let plain = env_of(&ex);
             assert!(
                 plain.iter().all(|(k, _)| k != "CARGO_TARGET_DIR" && k != "RUSTC_WRAPPER"),
@@ -2457,13 +2225,13 @@ exit $rc
             // A gate that is not cargo (conformance, a script) is never wrapped.
             let mut s = gate("conformance", "true");
             s.heavy = true;
-            let sh = ex.call(&s, limits, &log, None, "pre-push-1-1").child_env(&ex.env);
+            let sh = ex.call(&s, limits, &log, "pre-push-1-1").child_env(&ex.env);
             assert!(sh.iter().all(|(k, _)| k != "RUSTC_WRAPPER"), "{sh:?}");
             // A heavy gate names its row for heavy's history; a gate that does not go through heavy has no such variable.
             assert!(sh.contains(&("HEAVY_ROW".into(), "conformance".into())), "{sh:?}");
             let mut light = gate("fmt crates", "true");
             light.heavy = false;
-            let l = ex.call(&light, limits, &log, None, "pre-push-1-1").child_env(&ex.env);
+            let l = ex.call(&light, limits, &log, "pre-push-1-1").child_env(&ex.env);
             assert!(l.iter().all(|(k, _)| k != "HEAVY_ROW"), "{l:?}");
         }
 
@@ -2611,10 +2379,10 @@ exit $rc
             let mut g = gate("conformance-tests", "true");
             g.heavy = true;
             g.env.push(("PADDOCK_GATE_TARGET_DIR".into(), "/t/x".into()));
-            let with = ex.call(&g, limits, &log, None, "pre-push-1-1").child_env(&ex.env);
+            let with = ex.call(&g, limits, &log, "pre-push-1-1").child_env(&ex.env);
             assert!(with.contains(&("RUSTC_WRAPPER".into(), "/x/sccache".into())), "{with:?}");
             g.env.clear();
-            let without = ex.call(&g, limits, &log, None, "pre-push-1-1").child_env(&ex.env);
+            let without = ex.call(&g, limits, &log, "pre-push-1-1").child_env(&ex.env);
             assert!(
                 without.iter().all(|(k, _)| k != "RUSTC_WRAPPER"),
                 "a gate with no folder is never wrapped: {without:?}"
@@ -2938,36 +2706,6 @@ exit $rc
             assert_eq!(r.kind(), Kind::Passed, "{r:?}");
         }
 
-        /// Review P1-2: a step the watchdog ends as stuck stops its Linux container as well (the heavy slot is freed when the client
-        /// ends, and a container left compiling would run beside the next step). Any cut-short ending stops it.
-        #[test]
-        fn a_container_run_the_watchdog_ends_is_stopped_with_its_label() {
-            let d = tempfile::tempdir().unwrap();
-            let mut ex = real(d.path(), &d.path().join("l"));
-            let docker = paddock_testkit::StandIn::new(d.path(), "docker")
-                .records_args()
-                .when_args(&["ps"], paddock_testkit::Actions::new().stdout("abc123").exit(0))
-                .install()
-                .unwrap();
-            ex.env.insert("DOCKER".into(), docker.program().to_string_lossy().to_string());
-            ex.watchdog = Arc::new(Fires {
-                after: 2,
-                seen: Arc::default(),
-            });
-            let mut g = quiet_step(d.path(), 60);
-            g.need = Need::Docker;
-            let limits = Limits {
-                stall: Duration::from_secs(300),
-            };
-            let done = ex.run(&g, limits).unwrap();
-            assert!(done.cut_short() && !done.success, "{done:?}");
-            let calls = docker.calls().unwrap();
-            assert!(
-                calls.iter().any(|c| c.first().is_some_and(|a| a == "stop")),
-                "the container was stopped: {calls:?}"
-            );
-        }
-
         /// Review P2-1: every decision about an ending reads the type. A cut-short ending is exactly one that is not the run's own (the
         /// guards, the cap, the person, the output cap); the guard named is the watchdog's or the row cap.
         #[test]
@@ -3119,18 +2857,5 @@ exit $rc
             ex.env.insert("PATH".into(), "/usr/bin:/bin".into());
             assert_eq!(decide(&gate("clippy a", "true"), &ex, &test_subject()).kind(), Kind::Passed);
         }
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn docker_is_looked_for_at_its_sockets_and_never_started() {
-        let env = HashMap::from([("HOME".to_string(), "/h".to_string())]);
-        let s = docker_sockets(&env);
-        assert!(s.contains(&PathBuf::from("/h/.orbstack/run/docker.sock")) && s.contains(&PathBuf::from("/var/run/docker.sock")));
-        let host = HashMap::from([("DOCKER_HOST".to_string(), "unix:///x/d.sock".to_string())]);
-        assert_eq!(docker_sockets(&host), [PathBuf::from("/x/d.sock")]);
-        // No daemon behind a socket path: not up, and nothing was run to find out.
-        let none = HashMap::from([("DOCKER_HOST".to_string(), "unix:///nonexistent/paddock-docker.sock".to_string())]);
-        assert!(!docker_answers(&none));
     }
 }

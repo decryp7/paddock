@@ -16,11 +16,6 @@ pub enum Need {
     Nothing,
     /// A program on PATH (`cargo-xwin`, `cargo-deny`): without it the gate is "not measured", never a pass (ER-33).
     Tool(String),
-    /// A running Docker daemon: an agent never starts one (ER-14).
-    Docker,
-    /// A running Docker daemon and the local CI image built (the Linux Clippy): the image build is minutes and gigabytes, so it
-    /// is its own step (`./dev check --warm-linux`), never started under the push budget.
-    LocalCiImage,
 }
 
 /// One command of the push gate.
@@ -44,7 +39,7 @@ pub struct Gate {
     pub rank: u8,
     /// What to do when it fails, in one clause.
     pub next: String,
-    /// The Cargo workspace folders it lints (the Linux Clippy), for the steps that name them; empty for the other gates.
+    /// The Cargo workspace folders it lints (the host Clippy), for the steps that name them; empty for the other gates.
     pub workspaces: Vec<String>,
     /// One line the push prints when the gate checks less than its full command (the deny row without advisories); `None` otherwise.
     pub notice: Option<String>,
@@ -54,10 +49,6 @@ pub struct Gate {
     /// The cargo build folder it uses, relative to the repository root or absolute (`None`: not a cargo build, or not known): a step
     /// whose folder holds no build yet is COLD, and the history keeps cold and warm apart.
     pub build_dir: Option<String>,
-    /// The files whose content the container must see as the host has it before the row runs ([`super::mount_fresh`]): set by
-    /// [`plan_gates`] on every row that runs in the container ([`Need::LocalCiImage`]), `None` on the others. A container row
-    /// without it compares nothing, which is not measured (ER-33).
-    pub mount: Option<Box<super::mount_fresh::Compared>>,
 }
 
 impl Gate {
@@ -129,16 +120,11 @@ pub struct Facts {
     pub conformance_env: Option<String>,
     /// Workspace folders whose CI lints Windows too (`apps/<app>`, from `windowsClippy`); `crates` always does.
     pub windows_clippy: BTreeSet<String>,
-    /// The CI image version (from `ci-image/VERSION`), or why it cannot be read.
-    pub ci_version: Option<Result<String, String>>,
     /// Pitwall's script tests (`scripts/ci/*.test.mjs`, relative to `apps/pitwall`): no shell expands a glob here.
     pub pitwall_tests: Vec<String>,
     /// This program, for the checks `./dev` runs itself ([`crate::tool_cache::self_exe`]), or why it cannot be started again (a test
     /// program is never started as paddock-dev: its harness would run its tests again).
     pub dev_exe: Result<String, String>,
-    /// The Tauri crates each candidate workspace leaves out of the Linux Clippy ([`super::linux_inputs::left_out`]), or why cargo
-    /// could not say. Filled for [`linux_candidates`] only.
-    pub left_out: std::collections::BTreeMap<String, Result<super::linux_inputs::WsCrates, String>>,
     /// The run is the member gate of `./dev merge check --gates` (`--member-gate`): the repository-wide audits run too.
     pub member_gate: bool,
     /// A kept build folder per workspace (`<it>/<workspace>`), used when the caller sets no `CARGO_TARGET_DIR`: the throw-away
@@ -156,43 +142,7 @@ pub struct Facts {
     pub nextest_config: std::collections::BTreeMap<String, String>,
     /// The packages each workspace's change reaches, where [`Facts::test_filters`] narrows to them (absent: every package).
     pub reached: std::collections::BTreeMap<String, BTreeSet<String>>,
-    /// What the member gate's Linux run tests of each workspace: the code that behaves differently per OS, as the CI contract's
-    /// `hostTests` places it (derived from the code, [`crate::os_placement`]). Absent: [`OsScope::Unscoped`] (fail closed: every test);
-    /// `Err`: the contract cannot be read (the row is broken).
-    pub os_scope: std::collections::BTreeMap<String, Result<OsScope, String>>,
 }
-
-/// What the code of one workspace says about its tests on a second OS (user, 2026-11-25: the Linux run covers only crates with
-/// OS-conditional code, found from the code, never a hand list, ER-42).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum OsScope {
-    /// The contract declares no `hostTests`: every test is placed on every OS, so the Linux run tests them all.
-    Unscoped,
-    /// The packages and test-name prefixes whose code behaves differently per OS (`hostTests` with its exceptions, without any one
-    /// host's own `only` entries).
-    Marked(crate::host_tests::HostScope),
-    /// Nothing in the workspace behaves differently per OS: its macOS run is its only local run.
-    Unmarked,
-}
-
-impl OsScope {
-    /// The scope of a workspace from its CI contract and the placement derived from its code ([`crate::host_tests::read`], the one place
-    /// the two meet). A malformed contract is an error, never "unscoped" or "unmarked".
-    pub fn of(contract: &Value, what: &str, derived: &crate::host_tests::Derived) -> Result<OsScope, String> {
-        if crate::host_tests::Exceptions::parse(contract, what)?.is_none() {
-            return Ok(OsScope::Unscoped);
-        }
-        // A placement of one host's own entries alone selects nothing for the second OS (an empty scope would read as "every test").
-        Ok(match crate::host_tests::read(contract, what, derived)?.map(|h| h.common_scope()) {
-            Some(scope) if !scope.filterset().is_empty() => OsScope::Marked(scope),
-            _ => OsScope::Unmarked,
-        })
-    }
-}
-
-/// The files of the orphan guardian (paddock-proc): a change to one adds the guardian's acting tests as uid 65534 to the member gate's
-/// Linux row, as CI's Linux crates job runs them (`conformance/ci/guardian-as-user.sh`, ADR 0076 amendment 2026-11-09).
-pub const GUARDIAN_PATHS: &[&str] = &["crates/paddock-proc/src/guardian"];
 
 /// The reason of every row an inactive app's set leaves out: a skip with this reason is never a pass ([`super::render_timed`]
 /// counts it apart).
@@ -251,17 +201,9 @@ pub const ROW_SET: &[&str] = &[
     "pitwall-scripts",
 ];
 
-/// The id prefixes of the rows planned per workspace (the Linux Clippy names the workspaces it covers and those it leaves out): they
+/// The id prefixes of the rows planned per workspace : they
 /// are not in [`ROW_SET`], and the planner's test tells the fixed rows from these.
-pub const PER_WORKSPACE_PREFIXES: &[&str] = &[
-    "fmt ",
-    "lockfile ",
-    "clippy ",
-    "clippy-windows ",
-    "clippy-linux ",
-    "tests ",
-    "tests-linux ",
-];
+pub const PER_WORKSPACE_PREFIXES: &[&str] = &["fmt ", "lockfile ", "clippy ", "clippy-windows ", "tests "];
 
 /// Workspaces whose lints are not a push gate: they have a CI job of their own that is not part of a branch run.
 const OWN_JOB: &[&str] = &["/fuzz", "/templates/"];
@@ -297,7 +239,6 @@ fn gate(id: String, cwd: &str, program: &str, args: &[&str], rank: u8, next: Str
         notice: None,
         progress: super::progress::Progress::Lines,
         build_dir: None,
-        mount: None,
     }
 }
 
@@ -363,18 +304,9 @@ fn build_dir(facts: &Facts, ws: &str, suffix: Option<&str>) -> String {
 pub const DOCTESTS_OFF: &str = "doctests: off (user 2026-11-24; crates/README.md, \"Doctests\"): every library target has `doctest = false` and doc examples are text, so no `cargo test --doc` runs here, in CI or in the nightly";
 
 /// The gates `change` reaches under `plan`, in table order. Each is CI's own command (the one source is named in `next` or the
-/// doc of the check that reads it). Every row that runs in the container names the files its mount probe compares (the change's,
-/// its own workspaces' first): one place for every container row, so none runs on a stale mount (rule 55).
+/// doc of the check that reads it).
 pub fn plan_gates(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> {
-    let mut out = plan_rows(plan, change, facts);
-    for p in &mut out {
-        if let Planned::Run(g) = p
-            && g.need == Need::LocalCiImage
-        {
-            g.mount = Some(Box::new(super::mount_fresh::files_for(&change.files, &g.workspaces)));
-        }
-    }
-    out
+    plan_rows(plan, change, facts)
 }
 
 fn plan_rows(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> {
@@ -499,7 +431,6 @@ fn plan_rows(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> {
         });
     }
     out.extend(active_apps_row(facts));
-    out.extend(linux_clippy(plan, change, facts));
     out.push(conformance(facts));
     out.push(conformance_tests(plan, facts));
     out.extend(commit_lint(change));
@@ -597,191 +528,15 @@ fn plan_rows(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> {
     out
 }
 
-/// The workspaces the Linux Clippy runs for: every Cargo workspace with a changed file of its own (documentation aside), and
-/// `crates` when only `.cargo/` (which every build of it reads) changed. Every one, not only those with a `cfg(target_os =
-/// "linux")`: a text scan misses `cfg(unix)`, `not(macos)`, target-specific dependencies and `CARGO_CFG_TARGET_OS` in build scripts,
-/// and filtered few workspaces anyway. Pure; the caller reads each one's left-out crates.
-pub fn linux_candidates(plan: &Value, change: &Change) -> BTreeSet<String> {
+/// The workspaces the member gate tests: every Cargo workspace with a changed file of its own (documentation aside), and
+/// `crates` when only `.cargo/` (which every build of it reads) changed. Pure.
+pub fn touched_workspaces(plan: &Value, change: &Change) -> BTreeSet<String> {
     let code: Vec<String> = change.files.iter().filter(|f| !docs_only(f)).cloned().collect();
     let mut out = own_workspaces(plan, &code);
     if workspaces(plan).iter().any(|w| w == "crates") && code.iter().any(|f| f.starts_with(".cargo/")) {
         out.insert("crates".into());
     }
     out
-}
-
-/// One workspace of the Linux Clippy run and the crates the container cannot lint in it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LinuxTarget {
-    /// The workspace folder, repository-relative.
-    pub ws: String,
-    /// Its Tauri crates, left out (named in the row: a pass never claims them).
-    pub left_out: Vec<String>,
-}
-
-/// The Linux Clippy of every touched workspace, in the CI image, as one container run (native: the helper's `--ci-image` on this
-/// host's own architecture; CI's x64 Linux legs and the member gate catch the rare arch-specific lint). The Mac Clippy and the xwin
-/// Clippy never compile Linux-only code, so its lints first showed in CI: tonight's `zombie_processes` in paddock-env and an unused
-/// import in dyno-agent (fix/shared-crate-flakes-8174, 2026-11-16).
-///
-/// Blocking since its first green run on the real tree (ER-41): the hook's run on the push of b71443899
-/// (feat/pre-push-linux-clippy, 2026-11-16: `ok clippy-linux tools/paddock-dev`, 15.1 s, native, warm), recorded with the cold and
-/// warm numbers in docs/benchmarks.md, "Pre-push Linux Clippy, native". A local gate has no CI run id; the benchmark section is its
-/// record.
-fn linux_clippy(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> {
-    let (candidates, off): (BTreeSet<String>, BTreeSet<String>) = linux_candidates(plan, change)
-        .into_iter()
-        .partition(|ws| inactive_app(facts, ws).is_none());
-    let mut out: Vec<Planned> = off
-        .iter()
-        .map(|ws| Planned::Skip {
-            id: format!("clippy-linux {ws}"),
-            reason: inactive_reason(app_of_workspace(ws).unwrap_or(ws)),
-        })
-        .collect();
-    if candidates.is_empty() {
-        if off.is_empty() {
-            out.push(Planned::Skip {
-                id: "clippy-linux".into(),
-                reason: "nothing but documentation, or no Cargo workspace of its own, changed".into(),
-            });
-        }
-        return out;
-    }
-    out.push(linux_clippy_of(&candidates, facts));
-    out
-}
-
-/// The Linux Clippy row of the active candidate workspaces (not empty).
-fn linux_clippy_of(candidates: &BTreeSet<String>, facts: &Facts) -> Planned {
-    let id = format!("clippy-linux {}", candidates.iter().cloned().collect::<Vec<_>>().join(" + "));
-    let (version, targets, skipped) = match linux_targets(&id, candidates, facts) {
-        Ok(t) => t,
-        Err(p) => return *p,
-    };
-    let named = |s: &(String, Vec<String>)| format!("{} ({})", s.0, s.1.join(" "));
-    if targets.is_empty() {
-        return Planned::Skip {
-            id,
-            reason: format!(
-                "only Tauri crates are left in {}: the container cannot lint them (their build scripts write into the read-only source tree) and CI's Linux legs do",
-                skipped.iter().map(named).collect::<Vec<_>>().join(", ")
-            ),
-        };
-    }
-    let mut gate = linux_gate(&targets, &version);
-    for (ws, crates) in &skipped {
-        gate.id
-            .push_str(&format!(" + {ws} (skipped: only Tauri crates: {})", crates.join(" ")));
-    }
-    Planned::Run(gate)
-}
-
-/// The container rows' inputs for `candidates`: the CI image version, the workspaces with something the container can build (each
-/// with its Tauri crates left out) and the workspaces with nothing else (with those crates). `Err` is the row `id` as broken: an
-/// input the caller did not or could not read.
-type LinuxInputs = (String, Vec<LinuxTarget>, Vec<(String, Vec<String>)>);
-
-fn linux_targets(id: &str, candidates: &BTreeSet<String>, facts: &Facts) -> Result<LinuxInputs, Box<Planned>> {
-    let id = id.to_string();
-    let version = match &facts.ci_version {
-        Some(Ok(v)) => v.clone(),
-        Some(Err(e)) => {
-            return Err(Box::new(Planned::Broken {
-                id,
-                cause: e.clone(),
-                next: "run from a full checkout (ci-image/VERSION is needed)".into(),
-            }));
-        }
-        None => {
-            return Err(Box::new(Planned::Broken {
-                id,
-                cause: "the CI image version was not looked up".into(),
-                next: "report this: the caller of plan_gates must fill Facts::ci_version".into(),
-            }));
-        }
-    };
-    let mut targets = Vec::new();
-    // Workspaces with nothing left once the Tauri crates are out: cargo would stop with "no packages to compile".
-    let mut skipped: Vec<(String, Vec<String>)> = Vec::new();
-    for ws in candidates {
-        match facts.left_out.get(ws) {
-            Some(Ok(l)) if l.lintable == 0 => skipped.push((ws.clone(), l.left_out.clone())),
-            Some(Ok(l)) => targets.push(LinuxTarget {
-                ws: ws.clone(),
-                left_out: l.left_out.clone(),
-            }),
-            Some(Err(e)) => {
-                return Err(Box::new(Planned::Broken {
-                    id,
-                    cause: e.clone(),
-                    next: format!(
-                        "run `cargo metadata --no-deps` in {ws} and fix what it prints; the row cannot tell which crates the container cannot build"
-                    ),
-                }));
-            }
-            None => {
-                return Err(Box::new(Planned::Broken {
-                    id,
-                    cause: format!("the crates {ws} leaves out were not looked up"),
-                    next: "report this: the caller of plan_gates must fill Facts::left_out".into(),
-                }));
-            }
-        }
-    }
-    Ok((version, targets, skipped))
-}
-
-/// The row id of a Linux Clippy run: the workspaces, each with the crates it leaves out, so a pass never claims them. No comma in
-/// it: `--accept-not-measured` and `PADDOCK_ACCEPT_NOT_MEASURED` are comma-separated lists of full ids.
-pub fn linux_id(targets: &[LinuxTarget]) -> String {
-    format!("clippy-linux {}", targets_label(targets))
-}
-
-/// The workspaces of a container row, each with the crates it leaves out, joined by ` + `.
-fn targets_label(targets: &[LinuxTarget]) -> String {
-    let parts: Vec<String> = targets
-        .iter()
-        .map(|t| {
-            if t.left_out.is_empty() {
-                t.ws.clone()
-            } else {
-                format!("{} (left out: {})", t.ws, t.left_out.join(" "))
-            }
-        })
-        .collect();
-    parts.join(" + ")
-}
-
-/// The one container run that lints `targets` in the CI image: the push gate's row and `./dev check --warm-linux` both run exactly
-/// this command, so a warm volume is the one the row reuses. Each workspace builds in `/target/v<version>/<workspace>` of the
-/// helper's kept volume (one folder per workspace, so feature sets never rebuild each other's dependencies; the image version in
-/// the path, so a CI image bump starts clean). A failing workspace does not hide the next one's lints.
-pub fn linux_gate(targets: &[LinuxTarget], version: &str) -> Gate {
-    let mut command = String::from("rustc --version && cargo clippy --version || exit 1; rc=0");
-    for t in targets {
-        let features = if t.ws == "crates" { " --all-features" } else { "" };
-        let exclude: String = t.left_out.iter().map(|c| format!(" --exclude {c}")).collect();
-        command.push_str(&format!(
-            "; (cd {ws} && CARGO_TARGET_DIR=/target/v{version}/{slug} cargo clippy --workspace{exclude} --all-targets{features} --locked -- -D warnings) || rc=1",
-            ws = t.ws,
-            slug = slug(&t.ws)
-        ));
-    }
-    command.push_str("; exit $rc");
-    let mut g = gate(
-        linux_id(targets),
-        "",
-        "bash",
-        &["tools/linux-container.sh", "--id", "paddock", "--ci-image", "--", "sh", "-c", &command],
-        4,
-        "a lint that exists only on Linux (a `mode_t` width, dead code behind a cfg, a test child never waited for): fix it, or run the same container command above"
-            .into(),
-    );
-    g.heavy = true;
-    g.need = Need::LocalCiImage;
-    g.workspaces = targets.iter().map(|t| t.ws.clone()).collect();
-    g
 }
 
 /// The active set cannot be read (or names an app the tree does not have): every app's rows run (nothing is left out on a guess),
@@ -954,13 +709,13 @@ fn member_audits(facts: &Facts) -> Planned {
 }
 
 /// The share of the machine one test row takes (ER-24, ER-48): the `ci` profiles say `num-cpus`, for a CI job that has its host to
-/// itself; here a test row runs beside up to two other rows, and the Linux container has `PADDOCK_LINUX_CPUS` (4) cores.
+/// itself; here a test row runs beside up to two other rows.
 const MEMBER_TEST_THREADS: &str = "4";
 
 /// `nextest run` with CI's `ci` profile for workspace `ws`: the tests `filter` selects (empty: every test of the workspace); every
 /// feature in `crates`, as CI's crates job; an app's own nextest configuration. `--no-tests=fail`: a selection of nothing is a failure,
 /// never a pass (ER-33).
-fn nextest_args(ws: &str, facts: &Facts, exclude: &[String], filter: &str) -> Vec<String> {
+fn nextest_args(ws: &str, facts: &Facts, filter: &str) -> Vec<String> {
     let mut args = strs(&[
         "nextest",
         "run",
@@ -971,9 +726,6 @@ fn nextest_args(ws: &str, facts: &Facts, exclude: &[String], filter: &str) -> Ve
         "--no-tests=fail",
         "--workspace",
     ]);
-    for c in exclude {
-        args.extend(["--exclude".to_string(), c.clone()]);
-    }
     if ws == "crates" {
         args.push("--all-features".into());
     }
@@ -992,82 +744,34 @@ fn reached_filter<'a>(ws: &str, facts: &'a Facts) -> &'a str {
     facts.test_filters.get(ws).map(String::as_str).unwrap_or("")
 }
 
-/// Why the Linux run leaves a workspace out.
-enum LinuxOff {
-    /// Nothing there to test a second time (the reason).
-    Skip(String),
-    /// Its contract cannot be read (the cause).
-    Broken(String),
-}
-
-/// What the Linux run tests of `ws`: `Ok(filter)` (empty: every test), or why it leaves the workspace out: nothing there behaves
-/// differently per OS, or the change reaches none of what does.
-fn linux_selection(ws: &str, facts: &Facts) -> Result<String, LinuxOff> {
-    let reached = reached_filter(ws, facts);
-    let scope = match facts.os_scope.get(ws) {
-        None | Some(Ok(OsScope::Unscoped)) => return Ok(reached.to_string()),
-        Some(Ok(OsScope::Unmarked)) => {
-            return Err(LinuxOff::Skip(
-                "no OS-conditional code: the OS placement derived from its code (`hostTests`) marks nothing, so its macOS run covers it"
-                    .into(),
-            ));
-        }
-        Some(Ok(OsScope::Marked(scope))) => scope,
-        Some(Err(e)) => return Err(LinuxOff::Broken(e.clone())),
-    };
-    let mut scope = scope.clone();
-    if let Some(hit) = facts.reached.get(ws).filter(|_| !scope.packages.is_empty()) {
-        // A workspace placed by package: only the reached packages with OS-conditional code; the reached filter is then implied.
-        scope.packages.retain(|p| hit.contains(p));
-        if scope.packages.is_empty() {
-            return Err(LinuxOff::Skip(format!(
-                "the change reaches no package with OS-conditional code (reached: {}); their macOS run covers it",
-                hit.iter().cloned().collect::<Vec<_>>().join(" ")
-            )));
-        }
-        return Ok(scope.filterset());
-    }
-    Ok(crate::host_tests::and_filters(reached, &scope.filterset()))
-}
-
-fn guardian_touched(change: &Change) -> bool {
-    change.files.iter().any(|f| GUARDIAN_PATHS.iter().any(|p| f.starts_with(p)))
-}
-
-/// The member gate's tests (user, 2026-11-25): the full nextest `ci` profile of every Cargo workspace the member touches (the Linux
-/// Clippy's candidates: a workspace with a changed file of its own, documentation aside), on this host (`tests <ws>`) and in the Linux
-/// CI image (`tests-linux ...`, one container run, `--rm` with CPU and memory limits, the Linux Clippy's kept build folders), plus the
-/// orphan guardian's acting tests as uid 65534 when the guardian changed. The Linux run covers only the reached code that behaves
-/// differently per OS ([`Facts::os_scope`]: the `hostTests` placement CI's host legs use, derived from the code); a pure workspace,
-/// or a change that reaches no OS-conditional package, is named and pays nothing beyond its macOS run. Six members passed their own checks and failed on another OS
-/// in CI (train 12, run 7485, trains b, c and d twice); this replaces the report-only other-OS row, which needed a scratch folder and
-/// never ran. Windows stays CI's. Only in the member gate (`--member-gate`): a developer's push skips them with the reason. An
-/// inactive app's rows are skipped and named. A missing nextest, container runtime or local CI image is not measured, never a pass.
+/// The member gate's tests (user, 2026-11-25): the full nextest `ci` profile of every Cargo workspace the member touches (a workspace
+/// with a changed file of its own, documentation aside), on this host (`tests <ws>`). The Linux tests, with the orphan guardian's
+/// acting tests as uid 65534, are CI's Linux jobs on the Linux runner: no VM or container starts on this Mac (user, 2026-11-26;
+/// docs/rules.md NEW-no-local-vm), so there is no `tests-linux` row. Only in the member gate (`--member-gate`): a developer's push
+/// skips them with the reason. An inactive app's rows are skipped and named. A missing nextest is not measured, never a pass.
 /// Blocking from the start: the tests are CI's own established tests, not a new check (user, 2026-11-25). Measured in
 /// docs/benchmarks.md, "Member gate: CI tests of the touched workspaces".
 fn member_tests(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> {
     if !facts.member_gate {
         return vec![Planned::Skip {
-            id: "tests, tests-linux".into(),
+            id: "tests".into(),
             reason: "they run in the member gate of `./dev merge check --gates` (`--member-gate`), not in a developer's push".into(),
         }];
     }
-    let (candidates, off): (BTreeSet<String>, BTreeSet<String>) = linux_candidates(plan, change)
+    let (candidates, off): (BTreeSet<String>, BTreeSet<String>) = touched_workspaces(plan, change)
         .into_iter()
         .partition(|ws| inactive_app(facts, ws).is_none());
     let mut out: Vec<Planned> = Vec::new();
     for ws in &off {
-        for kind in ["tests", "tests-linux"] {
-            out.push(Planned::Skip {
-                id: format!("{kind} {ws}"),
-                reason: inactive_reason(app_of_workspace(ws).unwrap_or(ws)),
-            });
-        }
+        out.push(Planned::Skip {
+            id: format!("tests {ws}"),
+            reason: inactive_reason(app_of_workspace(ws).unwrap_or(ws)),
+        });
     }
     if candidates.is_empty() {
         if off.is_empty() {
             out.push(Planned::Skip {
-                id: "tests, tests-linux".into(),
+                id: "tests".into(),
                 reason: "nothing but documentation, or no Cargo workspace of its own, changed".into(),
             });
         }
@@ -1090,7 +794,7 @@ fn member_tests(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> {
                 "fix the test it names (its failed tests and first panic are above), then re-run the member gate".into(),
             )
         };
-        g.args = nextest_args(ws, facts, &[], reached_filter(ws, facts));
+        g.args = nextest_args(ws, facts, reached_filter(ws, facts));
         // The build folder goes in as cargo configuration after `run` (sccache hashes CARGO_* variables; nextest takes `--config`).
         if facts.target_dir.is_some() || facts.kept_targets.is_some() {
             g.args.splice(
@@ -1101,100 +805,7 @@ fn member_tests(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> {
         g.build_dir = Some(build_dir(facts, ws, None));
         out.push(Planned::Run(g));
     }
-    let guardian = guardian_touched(change) && candidates.contains("crates");
-    let id = format!(
-        "tests-linux {}{}",
-        candidates.iter().cloned().collect::<Vec<_>>().join(" + "),
-        if guardian { " + guardian-as-user" } else { "" }
-    );
-    let (version, targets, skipped) = match linux_targets(&id, &candidates, facts) {
-        Ok(t) => t,
-        Err(p) => {
-            out.push(*p);
-            return out;
-        }
-    };
-    // A workspace of Tauri crates alone cannot be built in the read-only mount; it is named, and CI's Linux legs test it.
-    for (ws, crates) in &skipped {
-        out.push(Planned::Skip {
-            id: format!("tests-linux {ws}"),
-            reason: format!(
-                "only Tauri crates ({}): their build scripts write into the read-only source tree; CI's Linux legs test them",
-                crates.join(" ")
-            ),
-        });
-    }
-    // Only the code that behaves differently per OS is tested a second time; the rest is named with the reason (user, 2026-11-25).
-    let mut chosen: Vec<(LinuxTarget, String)> = Vec::new();
-    for t in targets {
-        match linux_selection(&t.ws, facts) {
-            Ok(filter) => chosen.push((t, filter)),
-            Err(LinuxOff::Skip(reason)) => out.push(Planned::Skip {
-                id: format!("tests-linux {}", t.ws),
-                reason,
-            }),
-            Err(LinuxOff::Broken(cause)) => out.push(Planned::Broken {
-                id: format!("tests-linux {}", t.ws),
-                cause,
-                next: "fix the `hostTests` of the workspace's paddock.ci.json (`./dev plan --explain` reads the same field)".into(),
-            }),
-        }
-    }
-    if chosen.is_empty() && !guardian {
-        return out;
-    }
-    out.push(Planned::Run(linux_tests_gate(&chosen, &version, facts, guardian)));
     out
-}
-
-/// The one container run of the member gate's Linux tests: each workspace's `ci` profile in `/target/v<version>/<workspace>` (the
-/// Linux Clippy's folder, so its dependencies are reused), then the guardian's acting tests as uid 65534 when `guardian`. A failing
-/// workspace does not hide the next one's tests.
-pub fn linux_tests_gate(chosen: &[(LinuxTarget, String)], version: &str, facts: &Facts, guardian: bool) -> Gate {
-    let mut command = String::from("cargo nextest --version || exit 1; rc=0");
-    for (t, filter) in chosen {
-        let slug = slug(&t.ws);
-        // nextest keeps its run store in the workspace (`target/nextest`), which is the read-only mount here: a tool configuration
-        // (lower priority than the workspace's own) moves it into the build volume.
-        let store = format!("/tmp/paddock-nextest-store-{slug}.toml");
-        let mut args = nextest_args(&t.ws, facts, &t.left_out, filter);
-        args.splice(2..2, ["--tool-config-file".to_string(), format!("paddock:{store}")]);
-        let args: Vec<String> = args.iter().map(|a| shell_quote(a)).collect();
-        command.push_str(&format!(
-            "; printf '[store]\\ndir = \"/target/v{version}/{slug}/nextest\"\\n' > {store}; (cd {ws} && CARGO_TARGET_DIR=/target/v{version}/{slug} NEXTEST_TEST_THREADS={MEMBER_TEST_THREADS} cargo {args}) || rc=1",
-            ws = t.ws,
-            args = args.join(" ")
-        ));
-    }
-    if guardian {
-        // CI's own step (ci.yml, the Linux crates job): the container runs as root, which the guardian is off for, so the script drops
-        // to uid 65534 through setpriv for its acting tests.
-        command.push_str(&format!(
-            "; (cd crates && CARGO_TARGET_DIR=/target/v{version}/crates PADDOCK_TEST_UID=65534 bash ../conformance/ci/guardian-as-user.sh) || rc=1"
-        ));
-    }
-    command.push_str("; exit $rc");
-    let targets: Vec<LinuxTarget> = chosen.iter().map(|(t, _)| t.clone()).collect();
-    let mut parts: Vec<String> = Vec::new();
-    if !targets.is_empty() {
-        parts.push(targets_label(&targets));
-    }
-    if guardian {
-        parts.push("guardian-as-user".into());
-    }
-    let id = format!("tests-linux {}", parts.join(" + "));
-    let mut g = gate(
-        id,
-        "",
-        "bash",
-        &["tools/linux-container.sh", "--id", "paddock", "--ci-image", "--", "sh", "-c", &command],
-        5,
-        "a test that fails only on Linux (a /proc path, a cfg(unix) branch, root in the container, the guardian as uid 65534): fix it, or run the same container command above".into(),
-    );
-    g.heavy = true;
-    g.need = Need::LocalCiImage;
-    g.workspaces = targets.iter().map(|t| t.ws.clone()).collect();
-    g
 }
 
 /// The shared-crate dependency guard (`./dev locks guard`): the workspace hack, the resolved features of the watched crates and every
@@ -1282,8 +893,8 @@ pub const NOT_RUN: &[(&str, &str)] = &[
         "per-project commands live in YAML until WP-3's contracts",
     ),
     (
-        "Linux Clippy of the apps' Tauri crates",
-        "their build scripts write into the read-only mount; CI's Linux legs lint them",
+        "Linux Clippy and Linux tests, the guardian's acting tests as uid 65534",
+        "CI-owned: the Linux jobs on the Linux runner; no VM or container starts on this Mac (user, 2026-11-26)",
     ),
     (
         "Clippy and the Windows lint of workspaces reached only through dependencies",
@@ -1291,6 +902,6 @@ pub const NOT_RUN: &[(&str, &str)] = &[
     ),
     (
         "tests (nextest, vitest, Playwright) in a developer's push, other than the member audits; Windows tests anywhere locally",
-        "slower local checks run beside CI after dispatch (ER-9); the member gate (`--member-gate`) runs the nextest `ci` profile of every touched Cargo workspace on this host and in the Linux CI container (`tests`, `tests-linux`) and the repository-wide audits (`member-audits`); Windows stays CI's. Doctests run nowhere (the `doctests` row)",
+        "slower local checks run beside CI after dispatch (ER-9); the member gate (`--member-gate`) runs the nextest `ci` profile of every touched Cargo workspace on this host (`tests`) and the repository-wide audits (`member-audits`); Windows stays CI's. Doctests run nowhere (the `doctests` row)",
     ),
 ];
