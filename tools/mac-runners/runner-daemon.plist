@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  ADR 0120 (D1 as changed on 2026-11-25: one daemon runner, capacity 4, no GUI lane): the Mac CI runner as a LaunchDaemon
+  in the system domain, outside every GUI login session.
+  A template: tools/mac-runner-move.sh fills the values marked @set-by-mac-runner-move@ with plutil (Label, UserName,
+  GroupName, ProgramArguments, WorkingDirectory, EnvironmentVariables, StandardOutPath, StandardErrorPath), copying the
+  program, folder and environment from the lane's LaunchAgent it replaces. The fixed keys below are the ones today's agents
+  have (ExitTimeOut covers the runner's 3 h shutdown_timeout; NumberOfFiles is ADR 0074 I3), plus SessionCreate (its own
+  security session, which Tart needs under a daemon: orchard issue #308).
+-->
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>@set-by-mac-runner-move@</string>
+	<key>UserName</key>
+	<string>@set-by-mac-runner-move@</string>
+	<key>GroupName</key>
+	<string>@set-by-mac-runner-move@</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>@set-by-mac-runner-move@</string>
+	</array>
+	<key>WorkingDirectory</key>
+	<string>@set-by-mac-runner-move@</string>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>HOME</key>
+		<string>@set-by-mac-runner-move@</string>
+	</dict>
+	<key>StandardOutPath</key>
+	<string>@set-by-mac-runner-move@</string>
+	<key>StandardErrorPath</key>
+	<string>@set-by-mac-runner-move@</string>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<true/>
+	<key>SessionCreate</key>
+	<true/>
+	<key>ProcessType</key>
+	<string>Interactive</string>
+	<key>ExitTimeOut</key>
+	<integer>10800</integer>
+	<key>SoftResourceLimits</key>
+	<dict>
+		<key>NumberOfFiles</key>
+		<integer>65536</integer>
+	</dict>
+	<key>HardResourceLimits</key>
+	<dict>
+		<key>NumberOfFiles</key>
+		<integer>65536</integer>
+	</dict>
+</dict>
+</plist>
