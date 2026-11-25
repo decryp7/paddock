@@ -35,9 +35,7 @@ fn serve() {
     };
     let me = ProcessId::of(std::process::id()).expect("this process has a start time");
     let file = std::path::PathBuf::from(file);
-    let part = file.with_extension("part");
-    std::fs::write(&part, format!("{} {}\n", me.pid(), me.started().as_micros())).expect("write the report");
-    std::fs::rename(&part, &file).expect("publish the report");
+    paddock_env::write_atomic(&file, format!("{} {}\n", me.pid(), me.started().as_micros()).as_bytes(), false).expect("publish the report");
     std::thread::sleep(LIFETIME);
 }
 

@@ -69,13 +69,7 @@ impl BookmarkStore {
             channels: self.data.channels.clone(),
         };
         let text = serde_json::to_vec_pretty(&file)?;
-        let tmp = self.path.with_extension("json.tmp");
-        std::fs::write(&tmp, text).with_context(|| format!("cannot write {}", tmp.display()))?;
-        if let Err(e) = std::fs::rename(&tmp, &self.path) {
-            let _ = std::fs::remove_file(&tmp);
-            return Err(e).with_context(|| format!("cannot replace {}", self.path.display()));
-        }
-        Ok(())
+        paddock_env::write_atomic(&self.path, &text, false).with_context(|| format!("cannot replace {}", self.path.display()))
     }
 }
 

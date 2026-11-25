@@ -4215,6 +4215,7 @@ dependencies = [
  "jiff",
  "log",
  "paddock-commands",
+ "paddock-env",
  "paddock-jobs",
  "paddock-limits",
  "paddock-proc",
@@ -4652,6 +4653,7 @@ version = "0.2.0"
 dependencies = [
  "log",
  "paddock-commands",
+ "paddock-env",
  "paddock-health",
  "paddock-limits",
  "paddock-testkit",
@@ -4903,6 +4905,7 @@ dependencies = [
  "log",
  "paddock-commands",
  "paddock-dialogs",
+ "paddock-env",
  "paddock-jobs",
  "paddock-testkit",
  "paddock-workspace-hack",

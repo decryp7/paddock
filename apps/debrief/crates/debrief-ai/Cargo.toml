@@ -12,6 +12,8 @@ description = "AI assistant for Debrief on Pitwall: engine-validated proposals, 
 doctest = false # doctests are off (crates/README.md, "Doctests")
 
 [dependencies]
+# The shared atomic file replace (a temporary name of its own per write).
+paddock-env = { path = "../../../../crates/paddock-env" }
 debrief-core = { path = "../debrief-core" }
 debrief-collect = { path = "../debrief-collect" }
 debrief-image = { path = "../debrief-image" }

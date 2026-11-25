@@ -183,9 +183,11 @@ pub fn create_run_dir(output: &Path, schedule: &str, now: Timestamp) -> std::io:
 }
 
 pub fn write_manifest(dir: &Path, m: &RunManifest) -> std::io::Result<()> {
-    let tmp = dir.join(format!("{MANIFEST}.tmp"));
-    std::fs::write(&tmp, serde_json::to_vec_pretty(m).map_err(std::io::Error::other)?)?;
-    std::fs::rename(&tmp, dir.join(MANIFEST))
+    Ok(paddock_env::write_atomic(
+        &dir.join(MANIFEST),
+        &serde_json::to_vec_pretty(m).map_err(std::io::Error::other)?,
+        false,
+    )?)
 }
 
 /// Reads a run's manifest; refuses newer schemas and oversized files.

@@ -60,14 +60,7 @@ pub fn list_library(dir: &Path) -> Library {
 pub fn save_to_library(dir: &Path, playbook: &Playbook) -> Result<()> {
     playbook.check()?;
     let target = file_of(dir, &playbook.id)?;
-    std::fs::create_dir_all(dir).context("the playbook folder cannot be created")?;
-    let tmp = dir.join(format!(".{}.tmp", playbook.id));
-    std::fs::write(&tmp, playbook.to_json()).context("the playbook cannot be written")?;
-    std::fs::rename(&tmp, &target)
-        .inspect_err(|_| {
-            let _ = std::fs::remove_file(&tmp);
-        })
-        .context("the playbook cannot be saved")
+    paddock_env::write_atomic(&target, playbook.to_json().as_bytes(), false).context("the playbook cannot be saved")
 }
 
 /// Removes a playbook from the library; `false` when there was none.

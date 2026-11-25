@@ -238,38 +238,21 @@ pub fn install(exec: &dyn Exec, root: &Path, exe: &Path, origin: &Origin) -> Res
     ))
 }
 
-/// Copies `from` to `to` through a file next to it and a rename; returns the size.
+/// Copies `from` to `to` through the shared atomic replace; returns the size.
 fn place(from: &Path, to: &Path, executable: bool) -> std::io::Result<u64> {
-    let tmp = tmp_name(to);
-    let result = std::fs::copy(from, &tmp).and_then(|n| {
-        if executable {
-            set_executable(&tmp)?;
-        }
-        std::fs::rename(&tmp, to).map(|()| n)
-    });
-    if result.is_err() {
-        let _ = std::fs::remove_file(&tmp);
-    }
-    result
+    let bytes = std::fs::read(from)?;
+    place_bytes(&bytes, to, executable)?;
+    Ok(bytes.len() as u64)
 }
 
 fn place_bytes(bytes: &[u8], to: &Path, executable: bool) -> std::io::Result<()> {
-    let tmp = tmp_name(to);
-    let result = std::fs::write(&tmp, bytes).and_then(|()| {
+    Ok(paddock_env::write_atomic_created(to, bytes, &mut |tmp| {
+        let f = std::fs::OpenOptions::new().write(true).create_new(true).open(tmp)?;
         if executable {
-            set_executable(&tmp)?;
+            set_executable(tmp)?;
         }
-        std::fs::rename(&tmp, to)
-    });
-    if result.is_err() {
-        let _ = std::fs::remove_file(&tmp);
-    }
-    result
-}
-
-fn tmp_name(to: &Path) -> PathBuf {
-    let name = to.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    to.with_file_name(format!("{name}.new-{}", std::process::id()))
+        Ok(f)
+    })?)
 }
 
 #[cfg(unix)]

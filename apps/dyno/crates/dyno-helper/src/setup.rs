@@ -32,6 +32,7 @@ pub fn write_config(paths: &HelperPaths, config: &HelperConfig, files: &mut dyn 
         .map_err(|e| format!("The helper's data folder {} could not be created: {e}", paths.data_dir.display()))?;
     let temp = paths.config.with_extension("json.new");
     write_private(&temp, &config.to_text()).map_err(|e| format!("{} could not be written: {e}", temp.display()))?;
+    // conformance: write-atomic — the pending `config.json.new` is a name the helper's startup checks and removes (serve.rs, ER-38): a fixed, known name in a protected folder, written by one elevated install at a time
     std::fs::rename(&temp, &paths.config).map_err(|e| format!("{} could not be replaced: {e}", paths.config.display()))
 }
 

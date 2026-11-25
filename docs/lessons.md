@@ -4171,3 +4171,20 @@ reapplied in 6fe47386d after this branch was cut from a base where WP-1 was pull
 diagnostics, and dropped this branch's second copy of the handshake (`await_serving`, `SERVE_WAIT`).
 **Class: a started helper was relied on before it said it was ready** (earlier: the webview ready handshake, memory "Webview paused
 startup"; the Chromium start judge, ADR 0031). A start that hands back a handle should wait for the helper's own word.
+
+## Writers that shared one temporary name lost data: every whole-file write goes through `paddock_env::write_atomic` (C169, 2026-11-25)
+
+- **What.** A hand-written "write `<name>.tmp`, then rename" lost data twice when two writers shared the temporary name: Spotter's
+  avatar `write_atomic` (`path.with_extension("tmp")`) and the pre-push reuse store. About sixty copies of the pattern existed across
+  the apps, the shared crates and the tools, with 16 different temporary names, most without a flush and none with a counter.
+- **Fix (the user's decision, 2026-11-25).** Each copy that writes a whole file now calls `paddock_env::write_atomic` (a name with a
+  per-process counter, a flush, a rename, removal on failure); a file that needs a mode or a security descriptor uses
+  `write_atomic_created`. `From<EnvError> for std::io::Error` keeps an `io::Result` at the call sites. A copy that kept a `.bak`
+  copies the old file first and then writes. Streaming writers (downloads to `.part`, a segment written in pieces, the privileged
+  file copy that hashes as it writes) and directory moves are not this pattern and stay.
+- **Ban.** Conformance C169 (report-only, ER-41, register entry in docs/gates.toml) flags a `rename(` whose source is named `tmp` or
+  `temp` in production code outside paddock-env; a rename used as a lock claim (`tools/heavy/src/lock.rs`), Dyno's privileged helper (its startup
+  checks the fixed `config.json.new` name, ER-38) and the two streaming writers carry `// conformance: write-atomic — <why>`.
+- **Rule of thumb.** A new file write reaches for `paddock_env::write_atomic` before any `File::create` and `rename`.
+- **Class (ER-21).** An instance of: a mechanism copied per app and fixed one copy at a time (rule 55). Earlier: the hand-written
+  process kill and the env-clear copies that C53 and the `disallowed-methods` entries retired.

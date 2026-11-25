@@ -208,9 +208,14 @@ impl ProjectDir {
 
     /// Writes `project.toml` (atomically: a crash leaves the old one).
     pub fn save(&self, m: &ProjectManifest) -> Result<()> {
-        let tmp = self.dir.join(format!("{PROJECT_FILE}.tmp"));
-        std::fs::write(&tmp, m.to_toml()?).with_context(|| format!("cannot write {}", tmp.display()))?;
-        std::fs::rename(&tmp, self.manifest_path()).with_context(|| format!("cannot replace {}", self.manifest_path().display()))
+        // The project folder is the user's: one that is gone is reported, not made again.
+        anyhow::ensure!(
+            self.dir.is_dir(),
+            "cannot write {}: the project folder is missing",
+            self.manifest_path().display()
+        );
+        paddock_env::write_atomic(&self.manifest_path(), m.to_toml()?.as_bytes(), false)
+            .with_context(|| format!("cannot write {}", self.manifest_path().display()))
     }
 
     /// The files an export carries: everything but caches and write-ahead logs, relative, sorted.
