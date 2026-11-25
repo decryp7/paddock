@@ -2506,7 +2506,7 @@ mod tests {
     #[test]
     fn the_bases_are_exactly_this_repositorys_worktrees_never_unrelated_sibling_repositories() {
         let t = tempfile::tempdir().unwrap();
-        let root = t.path().canonicalize().unwrap();
+        let root = paddock_env::winpath::real(t.path()).unwrap();
         let main = root.join("repos").join("main");
         let unrelated = root.join("repos").join("unrelated");
         repo_with(&main);
