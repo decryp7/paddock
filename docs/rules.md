@@ -484,8 +484,8 @@ changes here, every app's copy is updated in the same change.
     constant the owning module exports), never by grepping or slicing that file's text. A source audit that must read another
     crate's code names the file through a path the owner exports and ends its span at an item boundary, not at a comment it
     remembers. A hand list that must equal generated data (heavy's `inputs.txt`) is generated, or its test prints the
-    regenerate command (ER-40). Not linted: review and the train's test run cover it (C121, which flagged a regular expression over
-    `.gitea/workflows/*.yml`, was dropped on 2026-11-25 after its report-only phase found only fixture text).
+    regenerate command (ER-40). Not linted: review and the train's test run cover it (the check that flagged a regular expression
+    over `.gitea/workflows/*.yml` was dropped on 2026-11-25: its report-only phase found only fixture text).
     *Why:* on train 8 (2026-11-13) eight fixes after the merges were combination failures; `bddd2947c` was a second reader of
     data that already had an accessor (`./dev ci conformance-args` now), `0308201b4` a span ended at a comment the author
     remembered, `11c365fc4` a path into another area's layout, `be69a31f6` a hand list that had to equal `cargo metadata`.
