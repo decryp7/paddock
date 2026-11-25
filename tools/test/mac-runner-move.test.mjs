@@ -44,7 +44,7 @@ const agent = (home, name, extraEnv = '') => `<?xml version="1.0" encoding="UTF-
 `;
 
 /** A scratch Mac with three runner lanes, each a loaded LaunchAgent with its runner folder. */
-function mac({ root = true, unregistered = [], silent = [], psUser = USER, program = true, parkedByHand = false } = {}) {
+function mac({ root = true, unregistered = [], silent = [], psUser = USER, program = true, parkedByHand = false, dev = '/dt-test' } = {}) {
   const home = scratch('paddock-runner-home-');
   const sys = scratch('paddock-runner-sys-');
   const bin = scratch('paddock-runner-bin-');
@@ -91,11 +91,17 @@ esac`);
   shim(bin, 'sudo', 'shift 2; exec "$@"');
   shim(bin, 'getconf', 'echo /private/var/folders/xx/test/T/');
   shim(bin, 'defaults', 'echo 1');
+  // ./dev: only `places --get dev-targets --pinned --repo <repo>` is asked.
+  shim(bin, 'dev', dev === null ? 'exit 3' : `[ "$1 $2 $3 $4 $5" = "places --get dev-targets --pinned --repo" ] && echo ${dev}`);
   return { home, sys, bin, state };
 }
 
 const move = (m, args) =>
-  run('mac-runner-move.sh', args, { bin: m.bin, cwd: m.home, env: { PADDOCK_TOOLS_OS: 'Darwin', PADDOCK_RUNNER_MOVE_SYSROOT: m.sys } });
+  run('mac-runner-move.sh', args, {
+    bin: m.bin,
+    cwd: m.home,
+    env: { PADDOCK_TOOLS_OS: 'Darwin', PADDOCK_RUNNER_MOVE_SYSROOT: m.sys, PADDOCK_RUNNER_MOVE_DEV: join(m.bin, 'dev') },
+  });
 const loadedJobs = (m) => readFileSync(m.state, 'utf8').trim().split('\n').filter(Boolean).sort();
 const plist = (file) => JSON.parse(spawnSync('plutil', ['-convert', 'json', '-o', '-', file], { encoding: 'utf8' }).stdout);
 const lint = (file) => spawnSync('plutil', ['-lint', file], { encoding: 'utf8' });
@@ -266,4 +272,20 @@ test('status is read-only and names where each lane runs', { skip }, () => {
   assert.equal(r.status, 0, r.out);
   assert.match(r.out, /- lane-a\n {4}agent plist .*\n {4}loaded in {5}gui\/501: running, pid 4242, user ci-tester/);
   assert.deepEqual(snapshot(m.home, m.sys), before);
+});
+
+test('the daemon gets HEAVY_DIR=<dev-targets>/heavy, so CI jobs and agents share one heavy queue in a folder a reboot keeps', { skip }, () => {
+  const m = mac();
+  const r = move(m, ['install', ...LANES]);
+  assert.equal(r.status, 0, r.out);
+  const env = plist(daemonPath(m, 'lane-a')).EnvironmentVariables;
+  assert.equal(env.HEAVY_DIR, '/dt-test/heavy');
+  assert.ok(calls(m.bin).includes(`dev places --get dev-targets --pinned --repo ${join(TOOLS, '..')}`), calls(m.bin).join('\n'));
+  // Control: a dev-targets folder that cannot be read stops before anything changes (the preflight renders every lane first).
+  const bad = mac({ dev: null });
+  const before = snapshot(bad.home, bad.sys);
+  const r2 = move(bad, ['install', ...LANES]);
+  assert.notEqual(r2.status, 0, r2.out);
+  assert.ok(r2.out.includes('cannot read the dev-targets folder'), r2.out);
+  assert.deepEqual(snapshot(bad.home, bad.sys), before);
 });

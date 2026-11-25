@@ -208,6 +208,16 @@ pub fn jobs_per_step(cpus: u32, max_slots: u32) -> u32 {
     (cpus / max_slots.max(1)).clamp(1, CORES_PER_SLOT as u32)
 }
 
+/// The test-worker variables a step gets its share in (ER-48): Playwright's (`e2eWorkers` of @decryp7/paddock-e2e) and Vitest's; the
+/// names `./dev ci build-jobs` sets for a CI job (tools/paddock-dev/src/ci_build_jobs.rs).
+pub const WORKER_VARS: [&str; 2] = ["PADDOCK_E2E_WORKERS", "VITEST_MAX_WORKERS"];
+
+/// Test workers (browsers, test processes) for one step: the step's share of the cores, `cpus / max_slots`, at least one, so workers
+/// per step times steps at once stays within the cores (ER-48).
+pub fn workers_per_step(cpus: u32, max_slots: u32) -> u32 {
+    (cpus / max_slots.max(1)).max(1)
+}
+
 /// The default maximum of the "Auto" setting: about half the cores, at most 5 builders (ER-24).
 pub fn auto_max_slots(cpus: u32) -> u32 {
     (cpus / 2).clamp(1, 5)

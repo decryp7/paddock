@@ -48,6 +48,7 @@ pub fn command(a: &HeavyArgs) -> Result<Report, CliError> {
     let (program, args) = line.split_first().ok_or_else(|| CliError::failure("dev heavy: no command"))?;
     let status = paddock_proc::command(program)
         .args(args)
+        .envs(crate::pre_push::exec::heavy_dir_env(&root, &env))
         .status()
         .map_err(|e| CliError::failure(format!("dev heavy: cannot start {program}: {e}")))?;
     // The hold ends with the command (and before `exit`, which runs no destructors).

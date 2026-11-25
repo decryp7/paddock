@@ -26,6 +26,8 @@ const READ_MAX: u64 = 256 * 1024;
 #[derive(Debug, Clone)]
 pub struct History {
     path: PathBuf,
+    /// The file it moved from (the lock folder's), read while `path` does not exist yet and copied over by the first record.
+    old: Option<PathBuf>,
 }
 
 /// A key made safe for one line of the file: no tab or line break, bounded.
@@ -42,7 +44,28 @@ pub fn clean_key(key: &str) -> String {
 impl History {
     /// The history in the lock folder `root`.
     pub fn new(root: &Path) -> History {
-        History { path: root.join(FILE) }
+        History {
+            path: root.join(FILE),
+            old: None,
+        }
+    }
+
+    /// The history in the lock folder `dir` that moved from the folder `old` (a folder a reboot keeps, ./dev's `<dev-targets>/heavy`,
+    /// after /private/tmp, where every reboot lost it): the old file is read while the new one does not exist, and the first record
+    /// copies its lines over.
+    pub fn moved(dir: &Path, old: &Path) -> History {
+        History {
+            path: dir.join(FILE),
+            old: Some(old.join(FILE)).filter(|o| *o != dir.join(FILE)),
+        }
+    }
+
+    /// The history of a configuration's lock folder, reading the folder it moved from once (`moved_from`, [`History::moved`]).
+    pub fn of(cfg: &crate::config::Config) -> History {
+        match &cfg.moved_from {
+            Some(old) => History::moved(&cfg.root, old),
+            None => History::new(&cfg.root),
+        }
     }
 
     /// The file.
@@ -51,11 +74,15 @@ impl History {
     }
 
     fn read(&self) -> Vec<(u64, u64, String)> {
-        let Ok(meta) = fs::metadata(&self.path) else { return Vec::new() };
+        let path = match &self.old {
+            Some(old) if !self.path.exists() => old,
+            _ => &self.path,
+        };
+        let Ok(meta) = fs::metadata(path) else { return Vec::new() };
         if meta.len() > READ_MAX {
             return Vec::new();
         }
-        let Ok(text) = fs::read_to_string(&self.path) else {
+        let Ok(text) = fs::read_to_string(path) else {
             return Vec::new();
         };
         text.lines()
@@ -103,6 +130,9 @@ impl History {
             kept.drain(..kept.len() - MAX_LINES);
         }
         let body: String = kept.iter().map(|(e, ms, k)| format!("{e}\t{ms}\t{k}\n")).collect();
+        if let Some(dir) = self.path.parent() {
+            fs::create_dir_all(dir)?;
+        }
         Ok(paddock_env::write_atomic(&self.path, body.as_bytes(), false)?)
     }
 

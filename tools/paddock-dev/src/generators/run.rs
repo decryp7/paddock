@@ -295,6 +295,9 @@ impl Runner for Real {
             .cloned()
             .unwrap_or_else(|| "2".into());
         let mut cmd = base_command(resolve(program), &self.env, dir, jobs);
+        if spec.heavy {
+            cmd.envs(crate::pre_push::exec::heavy_dir_env(&self.root, &self.env));
+        }
         // A cargo call got its build folder as configuration above (sccache hashes `CARGO_TARGET_DIR`: crate::cargo_target) and
         // compiles through the local sccache; a program that starts cargo itself (a script, `npm`) keeps the variable, as there is no
         // argument to put it in.
