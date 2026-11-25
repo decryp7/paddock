@@ -937,11 +937,204 @@ fn a_push_reuses_a_landing_run_only_when_it_tested_the_pushs_own_diff() {
             true,
             &mut || vec![main.clone()],
             &mut |_, _| Some(touched(&[])),
+            &mut |_, _| false,
         )
     };
     assert!(decide(landing(&main)).skip(), "the landing ran this push's diff (from {main})");
     let other_diff = decide(landing(&other));
     assert!(!other_diff.skip(), "another diff: the push runs its own ({other_diff:?})");
+}
+
+/// A temporary repository in the shape of main and train 2026-11-26-g on 2026-11-25: main at `b` (b3ad2dd2d), then `x` (4284e23d5,
+/// train f's landing); the train was cut from `b`, merged `x` (af3085462) and ends at `y` (4ca4c56ec), to which main fast-forwarded.
+/// `x` changes `flip.txt`; `y` changes it back when `revert_flip`, so the diff from `b` does not hold it while the diff from `x` does.
+struct Shape {
+    dir: tempfile::TempDir,
+    b: String,
+    x: String,
+    y: String,
+}
+
+fn train_g_shape(revert_flip: bool) -> Shape {
+    let dir = tempfile::tempdir().unwrap();
+    let git = |args: &[&str]| {
+        let out = crate::git_env::git()
+            .arg("-C")
+            .arg(dir.path())
+            .args([
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@example.invalid",
+                "-c",
+                "commit.gpgsign=false",
+            ])
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{args:?}: {}", String::from_utf8_lossy(&out.stderr));
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    };
+    let write = |p: &str, t: &str| std::fs::write(dir.path().join(p), t).unwrap();
+    git(&["init", "-q", "-b", "main"]);
+    write("flip.txt", "a\n");
+    write("base.txt", "b\n");
+    git(&["add", "-A"]);
+    git(&["commit", "-q", "-m", "b"]);
+    let b = git(&["rev-parse", "HEAD"]);
+    git(&["checkout", "-q", "-b", "train"]);
+    write("member.txt", "m\n");
+    git(&["add", "-A"]);
+    git(&["commit", "-q", "-m", "member"]);
+    git(&["checkout", "-q", "main"]);
+    write("flip.txt", "b\n");
+    write("x.txt", "x\n");
+    git(&["add", "-A"]);
+    git(&["commit", "-q", "-m", "x: train f lands"]);
+    let x = git(&["rev-parse", "HEAD"]);
+    git(&["checkout", "-q", "train"]);
+    git(&[
+        "merge",
+        "-q",
+        "--no-ff",
+        "-m",
+        "chore(train): merge origin/main (train f landed) into train g",
+        "main",
+    ]);
+    if revert_flip {
+        write("flip.txt", "a\n");
+    }
+    write("y.txt", "y\n");
+    git(&["add", "-A"]);
+    git(&["commit", "-q", "-m", "y"]);
+    let y = git(&["rev-parse", "HEAD"]);
+    git(&["checkout", "-q", "main"]);
+    git(&["merge", "-q", "--ff-only", "train"]);
+    Shape { dir, b, x, y }
+}
+
+/// A recorded run (`tests/ci-runs/reuse-push-base`: runs 9030, 9045, 9054 and 9056 of 2026-11-25, `./dev ci record-fixture`; the
+/// plan logs are the `plan scope:` line of each run's plan job, nothing else) on the commit `sha` of the temporary repository, its
+/// recorded commits replaced by the shape's (`map`).
+fn recorded(id: u64, sha: &str, map: &[(&str, &str)]) -> Run {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/ci-runs/reuse-push-base");
+    let read = |f: String| std::fs::read_to_string(dir.join(f)).unwrap();
+    let run: Value = serde_json::from_str(&read(format!("run-{id}.json"))).unwrap();
+    let jobs: Value = serde_json::from_str(&read(format!("jobs-{id}.json"))).unwrap();
+    let jobs: Vec<Value> = jobs["jobs"].as_array().unwrap().clone();
+    let mut plan = std::fs::read_to_string(dir.join(format!("plan-{id}.log"))).unwrap_or_default();
+    for (from, to) in map {
+        plan = plan.replace(from, to);
+    }
+    let leak = |s: &str| -> &'static str { Box::leak(s.to_string().into_boxed_str()) };
+    // Every job that ran has a log (the reuse reads them for FLAKY tests); the plan job's is its scope line.
+    let logs = jobs
+        .iter()
+        .skip(1)
+        .filter(|j| j["conclusion"].as_str() != Some("skipped"))
+        .map(|j| (j["id"].as_u64().unwrap(), "ok\n".to_string()))
+        .collect();
+    Run {
+        id,
+        sha: sha.to_string(),
+        event: leak(run["event"].as_str().unwrap()),
+        branch: leak(run["head_branch"].as_str().unwrap()),
+        conclusion: leak(run["conclusion"].as_str().unwrap()),
+        status: "completed",
+        attempt: 1,
+        plan,
+        jobs,
+        logs,
+        earlier: Vec::new(),
+    }
+}
+
+/// Push run 9056 asks whether train g's landing run 9054 on the same commit can be reused: main moved from `x` to `y`.
+fn push_9056_reuse(s: &Shape, before: Option<&str>) -> crate::ci_runs::reuse::Reuse {
+    const B: &str = "b3ad2dd2dc1a82f52c3388a4d96af5d2a9e9387d";
+    const X: &str = "4284e23d53e0eebe5c7660e210ddbe0a0870f1b0";
+    let map = [(B, s.b.as_str()), (X, s.x.as_str())];
+    let mut asking = recorded(9056, &s.y, &map);
+    asking.status = "in_progress";
+    asking.conclusion = "";
+    let mut f = server_by_sha(&[
+        asking,
+        recorded(9054, &s.y, &map),
+        recorded(9045, &s.x, &map),
+        recorded(9030, &s.b, &map),
+    ]);
+    crate::ci_runs::reuse::decide_with(&mut client(&mut f), "ci.yml", &s.y, Some(9056), true, s.dir.path(), before)
+}
+
+#[test]
+fn a_push_that_fast_forwards_main_reuses_the_landing_run_that_tested_the_diff_from_mains_previous_tip() {
+    // Runs 9054 and 9056: the landing run tested the diff from x (main's last complete commit, run 9045); the push moved main from x
+    // to y, so its diff is from x too. Its own first-parent line runs through the train and never meets x.
+    let s = train_g_shape(false);
+    let r = push_9056_reuse(&s, Some(&s.x));
+    assert!(matches!(r, crate::ci_runs::reuse::Reuse::Skip { run: 9054, .. }), "{r:?}");
+}
+
+#[test]
+fn without_the_pushs_before_the_older_base_is_used_and_the_landing_run_is_not_reused() {
+    // The control: the same runs with no `before` (no push event): the base is b, two mains back, and the landing run tested less.
+    let s = train_g_shape(false);
+    let r = push_9056_reuse(&s, None);
+    assert!(
+        matches!(&r, crate::ci_runs::reuse::Reuse::Run(why) if why.contains(&s.x) && why.contains(&s.b)),
+        "{r:?}"
+    );
+}
+
+#[test]
+fn a_landing_diff_from_an_older_main_is_reused_only_when_it_holds_every_path_the_pushs_diff_changes() {
+    let s = train_g_shape(false);
+    // From b, an ancestor of the push's base x, with every path of x..y in b..y: it tested at least the push's diff.
+    assert!(diff_covers(s.dir.path(), &s.b, &s.x, &s.y));
+    // A run from a newer commit than the base never covers it, nor a commit git does not know.
+    assert!(!diff_covers(s.dir.path(), &s.x, &s.b, &s.y));
+    assert!(!diff_covers(s.dir.path(), &"e".repeat(40), &s.x, &s.y));
+    // y changes flip.txt back to b's text: x..y holds it, b..y does not, so the diff from b tested less than the push.
+    let r = train_g_shape(true);
+    assert!(!diff_covers(r.dir.path(), &r.b, &r.x, &r.y));
+}
+
+#[test]
+fn the_push_chain_is_mains_line_from_before_and_falls_back_to_the_first_parent_line() {
+    let s = train_g_shape(false);
+    assert_eq!(push_chain(s.dir.path(), &s.y, Some(&s.x)), vec![s.x.clone(), s.b.clone()]);
+    let train_line = first_parent_before(s.dir.path(), &s.y);
+    assert!(!train_line.contains(&s.x), "the train's own line never meets x: {train_line:?}");
+    for before in [
+        None,
+        Some("0".repeat(40)),
+        Some(s.y.clone()),
+        Some("e".repeat(40)),
+        Some("not a sha".into()),
+    ] {
+        assert_eq!(push_chain(s.dir.path(), &s.y, before.as_deref()), train_line, "{before:?}");
+    }
+}
+
+#[test]
+fn the_pushs_before_comes_from_the_push_event_only() {
+    let dir = tempfile::tempdir().unwrap();
+    let event = dir.path().join("event.json");
+    std::fs::write(&event, r#"{"before":"4284e23d53e0eebe5c7660e210ddbe0a0870f1b0","after":"x"}"#).unwrap();
+    let path = event.display().to_string();
+    let env = |name: &'static str| {
+        let path = path.clone();
+        move |k: &str| match k {
+            "GITHUB_EVENT_NAME" => Some(name.to_string()),
+            "GITHUB_EVENT_PATH" => Some(path.clone()),
+            _ => None,
+        }
+    };
+    assert_eq!(
+        push_before(&env("push")).as_deref(),
+        Some("4284e23d53e0eebe5c7660e210ddbe0a0870f1b0")
+    );
+    assert_eq!(push_before(&env("workflow_dispatch")), None);
 }
 
 #[test]

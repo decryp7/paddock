@@ -848,6 +848,55 @@ pub fn first_parent_before(root: &std::path::Path, sha: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// The candidate bases of a push to main that moved it from `before` to `sha`, newest first: main's own first-parent line from `before`
+/// (included), at most [`MAX_COMMITS`]. A train lands by fast-forward, so the first-parent line of `sha` is the train's: it holds the
+/// train's merges of main but never main's previous tip, and a search over it skipped that tip and found an older base (push run
+/// 9056 read b3ad2dd2d, two mains back, while train g's landing run 9054 had tested the diff from 4284e23d5, the main it moved from).
+/// Without a usable `before` (none, the zero id of a new branch, not a commit of this clone, or not an ancestor of `sha`: a forced
+/// push) it is [`first_parent_before`], whose base is only older: a wider diff, never a missed one.
+pub fn push_chain(root: &std::path::Path, sha: &str, before: Option<&str>) -> Vec<String> {
+    let usable = before.filter(|b| b.len() == 40 && b.bytes().all(|c| c.is_ascii_hexdigit()) && b.bytes().any(|c| c != b'0') && *b != sha);
+    // Exit 0 of `merge-base --is-ancestor` is the only yes; exit 1 (no) and an unknown commit are both a failure here.
+    if let Some(b) = usable.filter(|b| crate::plan_repo::git_text(root, &["merge-base", "--is-ancestor", b, sha]).is_some()) {
+        let n = MAX_COMMITS.to_string();
+        let chain: Vec<String> = crate::plan_repo::git_text(root, &["rev-list", "--first-parent", "-n", &n, b])
+            .map(|t| t.lines().map(|l| l.trim().to_string()).filter(|l| !l.is_empty()).collect())
+            .unwrap_or_default();
+        if !chain.is_empty() {
+            return chain;
+        }
+    }
+    first_parent_before(root, sha)
+}
+
+/// Main's tip before this push: `before` of the push event (`GITHUB_EVENT_PATH`, read with serde) when the event is a push; `None`
+/// otherwise or when it cannot be read ([`push_chain`] then falls back to the first-parent line, the safe side).
+pub fn push_before(env: &dyn Fn(&str) -> Option<String>) -> Option<String> {
+    if env("GITHUB_EVENT_NAME").as_deref() != Some("push") {
+        return None;
+    }
+    let text = std::fs::read_to_string(env("GITHUB_EVENT_PATH")?).ok()?;
+    let event: serde_json::Value = serde_json::from_str(&text).ok()?;
+    event.get("before")?.as_str().map(str::to_string)
+}
+
+/// Whether a run that tested the diff `from..head` tested at least what the diff `base..head` holds: `from` is an ancestor of `base`
+/// and every path `base..head` changes is changed in `from..head` too (the planner plans from the changed paths). `false` whenever git
+/// cannot say: the push then runs its own.
+pub fn diff_covers(root: &std::path::Path, from: &str, base: &str, head: &str) -> bool {
+    if crate::plan_repo::git_text(root, &["merge-base", "--is-ancestor", from, base]).is_none() {
+        return false;
+    }
+    let paths = |a: &str| -> Option<BTreeSet<String>> {
+        crate::plan_repo::git_text(root, &["diff", "--name-only", "-z", "--no-renames", a, head])
+            .map(|t| t.split('\0').filter(|p| !p.is_empty()).map(str::to_string).collect())
+    };
+    match (paths(from), paths(base)) {
+        (Some(wide), Some(push)) => push.is_subset(&wide),
+        _ => false,
+    }
+}
+
 /// What the commits `base..head` touched: the plan of that range. `None` when it cannot be planned (a commit that is not in this
 /// clone), which makes a FLAKY test not measured, never untouched.
 pub fn plan_touched_range(root: &std::path::Path, base: &str, head: &str) -> Option<Touched> {

@@ -65,16 +65,20 @@ pub fn green_base(
     let repo = env("GITHUB_REPOSITORY").unwrap_or_else(|| "decryp7/paddock".into());
     let token = env("PLAN_TOKEN").unwrap_or_default();
     let mut client = Client::new(http, &server, &repo, &token);
-    green_base_in(&mut client, root, warn)
+    let before = crate::ci_runs::green::push_before(env);
+    green_base_in(&mut client, root, before.as_deref(), warn)
 }
 
-/// [`green_base`] over a client already made.
+/// [`green_base`] over a client already made; `before` is main's tip before the push (the push event's), whose own line holds the
+/// candidates ([`crate::ci_runs::green::push_chain`]), as `ci reuse` reads them.
 fn green_base_in(
     client: &mut crate::ci_runs::client::Client,
     root: &Path,
+    before: Option<&str>,
     warn: &mut dyn FnMut(&str),
 ) -> Result<Option<(String, u64)>, String> {
-    let first_parent = crate::ci_runs::green::first_parent_before(root, "HEAD");
+    let head = crate::plan_repo::git_text(root, &["rev-parse", "HEAD"]).map_or_else(|| "HEAD".to_string(), |t| t.trim().to_string());
+    let first_parent = crate::ci_runs::green::push_chain(root, &head, before);
     green_base_over(client, root, &first_parent, warn)
 }
 
@@ -1024,7 +1028,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let mut client = crate::ci_runs::client::Client::new(&mut http, "https://gitea.invalid", "decryp7/paddock", "t");
         client.backoff_ms = 0;
-        let got = green_base_in(&mut client, root.path(), &mut |w| warned = w.to_string());
+        let got = green_base_in(&mut client, root.path(), None, &mut |w| warned = w.to_string());
         assert!(got.is_err(), "{got:?}");
         assert!(warned.starts_with("::warning::the CI runs of main could not be read ("), "{warned}");
         assert!(warned.ends_with("this run tests everything"), "{warned}");
