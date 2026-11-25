@@ -1,5 +1,5 @@
 //! `heavy`: one heavy step (cargo, npm, playwright, llvm-cov) at a time per machine, replacing the shell `plock` and
-//! engineering-rules `scripts/heavy.sh` (ER-24). A pure core over ports (clock, process table, load average) with the real
+//! engineering-playbook `scripts/heavy.sh` (ER-24). A pure core over ports (clock, process table, load average) with the real
 //! adapters at the edge, the shell plock's on-disk layout so shell and Rust interoperate, and a built-in CLEF troubleshooting
 //! log (rule 56).
 //!

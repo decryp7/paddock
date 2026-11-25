@@ -8,7 +8,7 @@ Chromium and WebKit with their dependencies, sccache) and adds what jobs still f
 |---|---|---|
 | sccache | 0.19.0 (same checksums as `.gitea/actions/setup-rust`) | GitHub release, SHA-256 checked |
 | cargo-hakari, cargo-machete | 0.9.39, 0.9.2 | GitHub releases, SHA-256 checked |
-| shellcheck | 0.11.0 (same pin and checksum as engineering-rules' `ci.yml`) | GitHub release, SHA-256 checked |
+| shellcheck | 0.11.0 (same pin and checksum as engineering-playbook's `ci.yml`) | GitHub release, SHA-256 checked |
 | libduckdb | 1.5.6 (the `duckdb` crate's), in `/opt/libduckdb`, `DUCKDB_LIB_DIR` set | GitHub release, SHA-256 checked |
 | Chrome for Testing | 156.0.8078.47 (the build the apps download: `paddock-chromium`'s `chromium.toml`; Playwright keeps its own Chromium), `CHROMIUM_TEST_PATH` set | Google storage, SHA-256 checked (amd64 only) |
 | draw.io desktop | 32.6.10 (GitHub release jgraph/drawio-desktop, the `.deb`, 2026-11-04; `scripts/svg-drift.mjs` re-exports every `.drawio` with it), amd64 only | GitHub release, SHA-256 checked |

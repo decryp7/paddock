@@ -55,7 +55,7 @@ cleanup removes a locked one. Run it from any checkout of the repository (or pas
   sidecar `paddock-worktree-owners.holder` (who holds the lock: a locked file cannot be read on Windows; removed when the update ends)
   (`src/worktree/owners.rs`, which RT-7's hook reuses). A file it cannot read is an error, never an empty map. A lock wait ends
   after 15 s and names the process that holds it.
-- Tests: run them with `cargo nextest run` (per-test time bound, default profile: stops a test after 120 s; a plain `cargo test` can hang forever on a test that waits for something that never comes). `cargo test --test it worktree` builds throw-away repositories (Unix). `WORKTREE_SH=<engineering-rules>/scripts/worktree.sh`
+- Tests: run them with `cargo nextest run` (per-test time bound, default profile: stops a test after 120 s; a plain `cargo test` can hang forever on a test that waits for something that never comes). `cargo test --test it worktree` builds throw-away repositories (Unix). `WORKTREE_SH=<engineering-playbook>/scripts/worktree.sh`
   adds the oracle comparison with `worktree.sh` (otherwise those tests print `not measured`).
 
 ## CI steps in Rust (docs/plans/ci-in-rust.md)

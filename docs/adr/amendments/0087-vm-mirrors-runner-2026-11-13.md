@@ -6,7 +6,7 @@
 - Related: ER-9 (fix locally first), ER-14 (never touch the CI runner PC from an agent), ER-33 (a probe must show it can
   see what it checks), ER-37 (common practice and cost); ADR 0021 and its LF-checkouts amendment (2026-11-11), ADR 0025
   (job isolation), `docs/testing/windows-test-vm.md`.
-- The brief asked for the diagnostic job to be "report-only per ER-41". ER-41 is not in `engineering-rules/RULES.md`
+- The brief asked for the diagnostic job to be "report-only per ER-41". ER-41 is not in `engineering-playbook/RULES.md`
   (it ends at ER-38, read 2026-11-13); the job below is report-only on its own merits (D-M2).
 
 ```evidence-heads

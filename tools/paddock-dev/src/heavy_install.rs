@@ -1,5 +1,5 @@
 //! `dev heavy-install`: puts the `heavy` binary of a release (tools/heavy, `.gitea/workflows/heavy-release.yml`) into
-//! `<dev-targets>/heavy/bin/heavy`, the one place engineering-rules' `heavy.sh` wrapper looks after `HEAVY_BIN` and PATH.
+//! `<dev-targets>/heavy/bin/heavy`, the one place engineering-playbook's `heavy.sh` wrapper looks after `HEAVY_BIN` and PATH.
 //!
 //! It downloads the asset for this OS and CPU and the release's `SHA256SUMS` from the user's own Gitea
 //! (`PADDOCK_HEAVY_RELEASES`, default `https://dev.decryptology.net/decryp7/paddock/releases/download`, then `heavy-v<version>/<file>`),

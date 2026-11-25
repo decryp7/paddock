@@ -443,7 +443,7 @@ testing), and the `vm-smoke` pages step. Each WP that adds one adds its entry in
 > done job read as "Not installed", a past failure shown as current, and controls clipped by a doubled negative margin,
 > all with every test green.
 
-The general part goes to the engineering rules as **ER-33** (proposed). ER-31 and ER-32 are on `engineering-rules` main;
+The general part goes to the engineering rules as **ER-33** (proposed). ER-31 and ER-32 are on `engineering-playbook` main;
 the branch `docs/er-31-33` (head `1c147cc`) has no ER-33 text, but its name suggests the number is meant for something
 else, so the coordinator checks with its owner before taking ER-33 and takes the next free number otherwise. The sync is
 coordinator-owned like the other ER rules:

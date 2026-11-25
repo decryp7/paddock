@@ -137,7 +137,7 @@ runs under its own agent name (`pre-push-<pid>-<n>`) in a log folder of its own 
 `<git common dir>/paddock-pre-push/logs/`, the newest 20 kept), the file is created before the poller starts, and only
 `<that name> holds the lock (pid` counts, read from where the last poll stopped (250 ms). Before this, the shared per-gate log held
 the line of earlier runs (48 of 174 logs there already did) and of another worktree pushing the same gate. Only our `heavy` writes that
-line; any other heavy (a `PADDOCK_HEAVY` of someone else's, or engineering-rules' shell `heavy.sh` until its wrapper lands) gives `Unknown` and keeps the credit at the end of the step, so a silent tool never extends the
+line; any other heavy (a `PADDOCK_HEAVY` of someone else's, or engineering-playbook's shell `heavy.sh` until its wrapper lands) gives `Unknown` and keeps the credit at the end of the step, so a silent tool never extends the
 budget. No limit changed: the run budget is still 15 min of run time, the queue allowance 30 min. The end-of-step credit stays (it is
 exact, from heavy's own timing line, and it takes the sibling-held part out).
 
@@ -149,9 +149,9 @@ another (a new `current_exe()` use) is caught at merge time on the combined tree
 
 ## Amendment 2026-11-18 (second): the slots follow the load; the shell heavy is retired once the wrapper lands
 
-The user approved retiring the shell `heavy.sh` and plock (2026-11-18). Their callers outside Paddock's own tools: engineering-rules'
+The user approved retiring the shell `heavy.sh` and plock (2026-11-18). Their callers outside Paddock's own tools: engineering-playbook'
 `scripts/heavy.sh` (with its test and the `templates/lefthook.yml` line) and two stale worktrees of that repository; no other project under the
-development folder calls them. **Today** (this change landed, the wrapper not) engineering-rules still runs the shell semaphore with its own 5 slots
+development folder calls them. **Today** (this change landed, the wrapper not) engineering-playbook still runs the shell semaphore with its own 5 slots
 in its own folder, which does not exclude Rust holders, so up to 5 shell and up to 5 Rust steps can run; the wrapper (a patch of `scripts/heavy.sh`
 and its test, prepared and handed to the coordinator) is a landing prerequisite of calling the shell retired, and lands after the Rust `heavy` can be
 installed for other projects (README). Paddock's resolver (`heavy_prefix`) no longer looks for `heavy.sh`; the reference shell fixture, `tests/it/mixed.rs`
@@ -174,7 +174,7 @@ agents' steps and CI do. Letting a push start several is the next step and needs
 Distribution (same date): `heavy` is released from a `heavy-vX.Y.Z` tag by `.gitea/workflows/heavy-release.yml` (binaries for macOS arm64, Linux
 x86_64 and arm64 and Windows x86_64 plus `SHA256SUMS` on the Gitea release, the crate to the `decryp7` registry when its dependencies are there), and
 `./dev heavy-install` downloads the asset for the machine, verifies the checksum, installs atomically into `<dev-targets>/heavy/bin/heavy` and records
-the version (tools/heavy/README.md); the engineering-rules wrapper only looks there and says the install command when it is missing.
+the version (tools/heavy/README.md); the engineering-playbook wrapper only looks there and says the install command when it is missing.
 
 ## Amendment 2026-11-21: no total budget, and the queue is judged by its progress
 

@@ -1,7 +1,7 @@
-//! The engineering-rules `scripts/worktree.sh` is the oracle for add, list and clean: the same fixture repository goes
+//! The engineering-playbook `scripts/worktree.sh` is the oracle for add, list and clean: the same fixture repository goes
 //! through both tools and their decisions are compared. The tests run against a pinned copy of the script
 //! (`tests/fixtures/worktree-oracle/worktree-sh.txt`, its source commit in the first line); `WORKTREE_SH` names another
-//! script instead (for example the current one in engineering-rules). A test that did not run must not pass (ER-33), so
+//! script instead (for example the current one in engineering-playbook). A test that did not run must not pass (ER-33), so
 //! there is no skip.
 use super::Fixture;
 use paddock_testkit::TestCommand;

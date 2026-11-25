@@ -542,7 +542,7 @@ is the first.
 - Asked by the user on 2026-10-31: "start moving all to rust tooling", "consider which ones are generic and which are
   paddock", "perhaps rust tooling can be plugin based? and extensible?" ("but not sandboxing"), and the tools must log well
   enough for troubleshooting (rule 56, ER-27).
-- Already decided: `wiki` (branch `tools/wiki`) and `heavy` (branch `tools/heavy`, replacing plock and engineering-rules
+- Already decided: `wiki` (branch `tools/wiki`) and `heavy` (branch `tools/heavy`, replacing plock and engineering-playbook
   `scripts/heavy.sh`) are standalone, generic Rust tools. `wiki` stays in Paddock `tools/` for now, is published to the
   `decryp7` registry, and moves to its own repository later.
 - Related: ER-2, ER-4/5, ER-12, ER-14, ER-15, ER-22, ER-24, ER-27; rules 42/43, 55 (ADR 0034, `docs/known-copies.toml`),
@@ -551,28 +551,28 @@ is the first.
   `docs/adr-logging-root-cause`); the crates `paddock-cli`, `paddock-log`, `paddock-proc`, `paddock-packs`,
   `paddock-slots`, `paddock-testkit`.
 - Evidence: a read of `origin/main` at `233c1339b` and of the branches `ci/diagnostics`, `ci/setup-tools-hardening`,
-  `docs/rca-rules`, `docs/wiki-pilot`, `tools/wiki` (worktree), `tools/dev-*` and of `engineering-rules` at `791e941`.
+  `docs/rca-rules`, `docs/wiki-pilot`, `tools/wiki` (worktree), `tools/dev-*` and of `engineering-playbook` at `791e941`.
   Line counts are `wc -l` of tracked files. The inventory is Appendix G.
 
 ### G.1 Why a second kind of tool
 
 §3.1 puts every command in `paddock-dev`. That is right for what knows Paddock's layout (apps, `paddock.ci.json`, the
 release kit, the family's checks). It is wrong for about a third of the scripts (all of which become compiled Rust, G.10), which know nothing about Paddock and
-already exist **twice or three times**, partly in `engineering-rules` for other projects:
+already exist **twice or three times**, partly in `engineering-playbook` for other projects:
 
 | Mechanism | Copies today |
 |---|---|
-| wiki lint | engineering-rules `scripts/wiki-lint.mjs` and `templates/wiki/wiki-lint.mjs` (327 lines each), Paddock `docs/wiki-pilot` `scripts/wiki-lint.mjs` (244) |
-| heavy-step semaphore | engineering-rules `scripts/heavy.sh` (217), plock |
-| commit lint | `conformance/src/commit-lint.mjs` (72), `apps/debrief/scripts/commit-lint.mjs` (67), and the inline `grep` of engineering-rules `templates/lefthook.yml` `commit-msg` (two commands: Conventional Commits, no attribution) |
-| CI timings | engineering-rules `scripts/ci-timings.mjs` (155), Paddock `scripts/ci-timings.mjs` (355) |
-| secret whitespace | engineering-rules `scripts/strip-secret-whitespace.sh` (77), `conformance/release/strip-keys.mjs` (52) |
+| wiki lint | engineering-playbook `scripts/wiki-lint.mjs` and `templates/wiki/wiki-lint.mjs` (327 lines each), Paddock `docs/wiki-pilot` `scripts/wiki-lint.mjs` (244) |
+| heavy-step semaphore | engineering-playbook `scripts/heavy.sh` (217), plock |
+| commit lint | `conformance/src/commit-lint.mjs` (72), `apps/debrief/scripts/commit-lint.mjs` (67), and the inline `grep` of engineering-playbook `templates/lefthook.yml` `commit-msg` (two commands: Conventional Commits, no attribution) |
+| CI timings | engineering-playbook `scripts/ci-timings.mjs` (155), Paddock `scripts/ci-timings.mjs` (355) |
+| secret whitespace | engineering-playbook `scripts/strip-secret-whitespace.sh` (77), `conformance/release/strip-keys.mjs` (52) |
 | Gitea release publish | `conformance/release/publish.mjs` (117), `apps/pacenotes/scripts/release/publish.mjs` and `apps/sighter/...` (93 each) |
 | macOS bundle verify | `conformance/release/macos-verify-bundle.sh` (156), `apps/debrief/scripts/ci/macos-verify-bundle.sh` (85), `scripts/demo/verify-macos.sh` (83) |
 | build-folder pruning | `tools/prune-build-folders.sh` (38) and `.ps1` (57), `tools/prune-ci-build-folder.sh` (22), `apps/debrief/scripts/clean-build-dirs.ps1` (56) |
 | coverage gate | `scripts/coverage-gate.mjs` (49), `apps/pitwall/scripts/ci/ui-coverage-guard.mjs` (47) |
 
-A port into `paddock-dev` would end the Paddock copies but leave the engineering-rules ones (ER-22: "build it shared
+A port into `paddock-dev` would end the Paddock copies but leave the engineering-playbook ones (ER-22: "build it shared
 instead of copying"), and other projects could not install it without Paddock's layout. So: **generic tools are their own
 binaries, Paddock-specific commands stay in `./dev`, and both stand on one shared runtime.**
 
@@ -636,7 +636,7 @@ then nothing in them may read a Paddock path; a conformance check (G.8) enforces
 they do (`devkit commit-lint`, `devkit run`, `devkit ci timings`, `devkit bisect-flaky`, `devkit macos verify-bundle`).
 Packages keep the registry's `paddock-` prefix (as `paddock-wiki` does) until the move, where the prefix is decided once.
 
-**How engineering-rules calls them.** Templates and skills name the binary and carry one fallback line:
+**How engineering-playbook calls them.** Templates and skills name the binary and carry one fallback line:
 
 ```text
 heavy cargo clippy --workspace -- -D warnings
@@ -644,7 +644,7 @@ heavy cargo clippy --workspace -- -D warnings
 # (or from a Paddock checkout: cargo install --path tools/heavy --locked)
 ```
 
-The shell and Node scripts in `engineering-rules/scripts/` stay for one overlap release after the Rust tool ships with
+The shell and Node scripts in `engineering-playbook/scripts/` stay for one overlap release after the Rust tool ships with
 parity tests; then they are deleted and the templates (`lefthook.yml`, `BRIEF.md`, `checklists/*.md`, `skills/*/SKILL.md`)
 name only the binary. `templates/wiki/wiki-lint.mjs` and its test go with `scripts/wiki-lint.mjs`.
 
@@ -812,7 +812,7 @@ The R-packages keep their numbers. New generic packages are **G0 to G12**. "Stat
 | R13 | `dev images` | Paddock | – | 2 |
 | R14 | npm glue | Paddock | – | 1 |
 | R15 | generate the dialog command contract from Rust with ts-rs (reduced 2026-11-01 from 2.5: the UI lints and the analysis check are in R19, so they are not counted twice) | Paddock | – | 1.5 |
-| R16 | clean-up, plus deleting engineering-rules' replaced scripts and templates after the overlap | – | – | 1 |
+| R16 | clean-up, plus deleting engineering-playbook's replaced scripts and templates after the overlap | – | – | 1 |
 | G13 to G26, R17, R18 | **Adopted 2026-10-31 by reference** from [the features research note](../research/2026-10-dev-tooling-features.md) (its table of work packages, 23.0 agent-days; the note's priorities and dependencies stand): hooks through `heavy` (G13), `ci triage` (G14), worktree hooks (G15), `doctor` (G16), dispatch guard (G17), secret scan with betterleaks v1 (G18), tool version range (G19), flake ledger (G20), stall dump (G21), worktree finish (G22), MCP mode (G23), timing trends (G24), per-agent ledger (G25), gate stamps (G26), `./dev check --pre-push` (R17), release bump (R18) | mixed | – | 23.0 |
 | R19 | UI-side tooling in Rust (rows 71, 72, 75, 94): dialog-command analysis (the contract generated from Rust with ts-rs and checked by `oxc` source analysis in `./dev check`; no type checker is needed once generated), the UI source lints as `./dev check` rules, Sass (`grass`) and `tsc`/stamp glue as `./dev ui build`, the shipped i18n CLI as `./dev i18n` (the npm bin entries are removed; no backward compatibility before v1) | Paddock | – | 10 |
 | R20 | setup and image tooling (rows 76, 77, 95): `./dev setup` per OS replaces the bootstrap scripts, `devkit image verify`, and the minimal rustup shim (exception c) with its test | Paddock | – | 3 |
@@ -835,10 +835,10 @@ change or on the final run before merge (rule 50). Every local build or test run
 
 | Wave | Packages | Agent-days | Parity tests (golden against the old script, on all three OS) | Retirement step |
 |---|---|---|---|---|
-| 0 (in progress) | G0a `wiki`, G0b `heavy` | +1 after G1 | `wiki lint --json` equals `wiki-lint.mjs`'s findings on the wiki fixtures and on `docs/wiki`; `heavy` and `heavy.sh` waiters sharing one slot folder, never more than N holders (a stress test with a fake clock), the home guard's refusals as goldens | `scripts/wiki-lint.mjs` (+test) and engineering-rules' two copies; `heavy.sh` after one overlap release, templates and skills name the binary |
+| 0 (in progress) | G0a `wiki`, G0b `heavy` | +1 after G1 | `wiki lint --json` equals `wiki-lint.mjs`'s findings on the wiki fixtures and on `docs/wiki`; `heavy` and `heavy.sh` waiters sharing one slot folder, never more than N holders (a stress test with a fake clock), the home guard's refusals as goldens | `scripts/wiki-lint.mjs` (+test) and engineering-playbook's two copies; `heavy.sh` after one overlap release, templates and skills name the binary |
 | 1a | G1, G2 | 4 | the contract test (two compiled plugins, a binary crate and a fixture binary: env, one JSON object, exit codes, contract refusal, `OperationId` in both logs); a failure fixture whose log alone names the cause | – |
 | 1b | G3 to G11 | 9 | per command: the old script's stdout, stderr's `::error::` lines and exit code on fixture inputs, as goldens (`paddock_testkit::golden`); `run` on fixtures that exit with 0xC0000409 (Windows), SIGSEGV (Unix); timings on recorded API replies; commit-lint on the existing 77-line test's messages; bisect and polluter on scripted fake test commands | each PR deletes the script and its test, switches YAML, `package.json`, lefthook and docs, removes the copy from `docs/known-copies.toml`, and shrinks §3.7's baseline |
-| 2 | R0b, R1, R10, R2 + G12, R3, R4, R5, R6, R7, R8a, R8, R11, R12, R13, R14, R15, R16 (this order; the release-path packages above never inside a release window) | 43 (was 38: the earlier sum was wrong, it is 39.5, and the inventory re-estimates add 0.5 for R3 and 4 for R11) | as §3.6 (goldens, shadow week for plan, release, `latest.json`, rules; release dry runs per app); for split engines also a generic fixture repo that is **not** Paddock-shaped | as §3.7; R16 also removes the engineering-rules scripts after their overlap |
+| 2 | R0b, R1, R10, R2 + G12, R3, R4, R5, R6, R7, R8a, R8, R11, R12, R13, R14, R15, R16 (this order; the release-path packages above never inside a release window) | 43 (was 38: the earlier sum was wrong, it is 39.5, and the inventory re-estimates add 0.5 for R3 and 4 for R11) | as §3.6 (goldens, shadow week for plan, release, `latest.json`, rules; release dry runs per app); for split engines also a generic fixture repo that is **not** Paddock-shaped | as §3.7; R16 also removes the engineering-playbook scripts after their overlap |
 
 Wave 3 (added 2026-11-01): R19 to R23, 23.25 agent-days (about 23), in parallel with wave 2 where the release guard allows; none is on the release path, but R19's `./dev i18n` and `./dev ui build` change what app builds run, so they land outside release windows. Parity tests: the old script's output as goldens (i18n, Sass output, lints on fixtures), the dialog analysis on the existing fixtures plus the generated contract, the sample generator by seed-based property tests (invented data need not match byte for byte); retirement: each PR deletes the script and its test.
 
@@ -871,7 +871,7 @@ research note (G13 to G19 and R17: about 9.5 days) go into waves 1a and 1b insid
 | A `PATH` plugin shadows or impersonates a command | built-ins cannot be shadowed; `help` shows each command's origin; the trust rule (repository or registry install) is the boundary, the same as any binary on `PATH` |
 | `paddock-tool` waits for ADR 0036 WP-1, WP-2, WP-3, WP-7 and WP-10 | G1 starts on paddock-log's current API and switches in WP-1's change; WP-1 and WP-3 are size M and shared, so the switch is scheduled with them and G1 does not claim to be unblocked by a small change |
 | Generic tools drift back into Paddock knowledge | G.8's check; a fixture repository that is not Paddock-shaped in each generic tool's tests |
-| Two systems during overlap (engineering-rules scripts and binaries) | one overlap release, then deletion in R16; templates name the binary from the first release |
+| Two systems during overlap (engineering-playbook scripts and binaries) | one overlap release, then deletion in R16; templates name the binary from the first release |
 | The move to an own repository later costs a history split | tools live in self-contained `tools/<tool>/` folders with their own lockfiles, so `git filter-repo --path` moves them |
 
 ### G.10 Decisions
@@ -912,14 +912,14 @@ Decided (user, 2026-11-01): "ignore cargo script. move completely to rust compil
     template rules need Angular's own parser. They are exception (a), row 97; ESLint's config stays exception (b).
 
 Defaults that stand (coordinator, 2026-10-31): the name `devkit`; `wiki` on `paddock-cli`'s exit codes (findings exit 5);
-the project config file `devkit.toml`; a one-release overlap before engineering-rules' scripts are deleted.
+the project config file `devkit.toml`; a one-release overlap before engineering-playbook's scripts are deleted.
 
 The amendment was independently reviewed and is **Accepted** (2026-11-01); nothing is left for the user to decide.
 
 ### Appendix G: inventory and classification (2026-10-31)
 
 The non-Rust tooling files (`*.mjs`, `*.cjs`, `*.sh`, `*.py`, `*.ps1`) of Paddock `origin/main` at `233c1339b`, the four named
-branches and engineering-rules at `791e941`, without tests, fixtures, the UI's own Vitest and Playwright specs, ESLint
+branches and engineering-playbook at `791e941`, without tests, fixtures, the UI's own Vitest and Playwright specs, ESLint
 configs and shipped product code (the `@decryp7/paddock-ui` binaries in `ui/projects/paddock-ui/bin/`, 744 lines, row 94, and
 the shell-demo sidecar stub, 10 lines). A sweep of all 441 such files on `origin/main` (2026-10-31, `git ls-tree` and
 `wc -l`) found the files of rows 85 to 94 missing from the first draft; each other file matches a row or a glob row. Copies of one mechanism
@@ -953,7 +953,7 @@ Paddock, S split, X exception (G.2: only a, b or c).
 | 23 | `conformance/src/{cli,runner,report,context,finding,index}.mjs`, `util/*` | js | 844 | conformance engine: checks, waivers, reports | CI | R8 | S | `paddock-repo-rules` engine + `devkit check` |
 | 24 | checks C14, C15, C16, C24, C30, C31, C36, C57 | js | 531 | rules that follow from ER/PRINCIPLES and read no Paddock path (hermetic, installed browser, hard-coded version, reviewed images, wall clocks, ADR numbers, parser hardening, tracked symlinks) | CI | R8 | S | generic pack (data where expressible, else code in the engine) |
 | 25 | checks C03, C04, C06, C07, C08, C13, C23, C28, C29, C32, C33, C34, C35, C37, C39, C43, C45, C48, C50, C51, C53, C54, C56 + `index.mjs` | js | 2,349 | family checks (icons, signing, release, presets, i18n, a11y, sidecars, dialogs, shell start, QoS, env names) and the Paddock-bound ones moved from row 24: C23 (process; part 2 syncs doc blocks), C35 (reads `paddock.conformance.json`, `withCallTimeout`), C39 (`paddock_testkit::HeldPort`), C53 (requires `paddock_proc`) | CI | R8 | P | `./dev check` code checks + Paddock pack |
-| 26 | `conformance/src/sync/*` | js | 364 | sync baseline files and doc blocks from templates (C23, C28) | CI, Dev | R8 | S | generic "sync from a template repo" engine (also for engineering-rules' `rules-sync`) + Paddock manifest |
+| 26 | `conformance/src/sync/*` | js | 364 | sync baseline files and doc blocks from templates (C23, C28) | CI, Dev | R8 | S | generic "sync from a template repo" engine (also for engineering-playbook's `rules-sync`) + Paddock manifest |
 | 27 | `conformance/ci/install-test-browser.mjs`, `apps/spotter/scripts/install-test-browser.mjs`, `pin-chromium.mjs` | js | 183+55+72 | pinned Chrome for Testing: pin and install | CI | R3 | S | `devkit fetch` + catalogue pack |
 | 28 | `conformance/ci/pin-runtime.mjs`, `runtime-catalogue.mjs`, `apps/debrief/app/scripts/libduckdb.mjs`, `apps/debrief/scripts/ci/libduckdb-env.sh`, `update-ffmpeg-runtimes.py`, `update-llama-runtimes.py` | js, sh, py | 127+118+86+59+147+149 | pinned runtime catalogues and their fetchers | CI, Dev | R3 | S | `devkit fetch` + Paddock catalogues |
 | 29 | `tools/linux-container.sh`, `apps/dyno/scripts/linux-container.sh`, `linux-verify.sh`, `apps/pitwall/scripts/linux-container-verify.sh`, `-inner.sh`, `apps/debrief/scripts/ci/smoke-linux-docker.sh`, `e2e-linux-local.sh` | sh | 76+51+16+28+68+46+45 | run cargo or tests in a native Linux container | Dev, Ag | R5 | S | `devkit container` + per-app pack |
