@@ -316,7 +316,7 @@
   },
   {
    "check": "C123",
-   "severity": "warn",
+   "severity": "error",
    "rule": 3,
    "file": "tools/paddock-dev/src/pre_push/tests.rs",
    "line": 1311,
@@ -1549,6 +1549,6 @@
    }
   }
  ],
- "errors": 0,
- "warnings": 38
+ "errors": 1,
+ "warnings": 37
 }

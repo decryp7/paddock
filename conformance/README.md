@@ -93,9 +93,9 @@ The check index (generated from each module's id, title, scope, mode and needs):
 | C115 | A cleanup touches only its own items | both | gate | all |
 | C116 | Every generated or pinned file is covered by the generator registry | root | gate | all |
 | C117 | steps that run after a failure also stop when the job setup failed | root | gate | all |
-| C128 | Tests take a recorded pid's identity through the kit, never ProcessId::of | root | report-only | all |
+| C128 | Tests take a recorded pid's identity through the kit, never ProcessId::of | root | gate | all |
 | C135 | The test leak detector is switched off only where listed | root | gate | all |
-| C136 | A unit test that starts a live mock feed runs it on a clock the test moves | root | report-only | all |
+| C136 | A unit test that starts a live mock feed runs it on a clock the test moves | root | gate | all |
 | C137 | An app e2e spec imports the kit by package name only when its CI job builds it | root | gate | all |
 | C138 | Scrollers our code positions make no scroll moves of their own | both | gate | all |
 | C139 | the exceptions to paddock/e2e-ready-reads (eslint-suppressions.json) only shrink | root | gate | all |

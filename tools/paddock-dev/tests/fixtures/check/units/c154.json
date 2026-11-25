@@ -13,7 +13,7 @@
    "findings": [
     {
      "check": "C154",
-     "severity": "warn",
+     "severity": "error",
      "rule": 49,
      "file": "apps/a/app/src/leak.spec.ts",
      "line": 2,
@@ -22,8 +22,8 @@
     }
    ],
    "waived": [],
-   "errors": 0,
-   "warnings": 1
+   "errors": 1,
+   "warnings": 0
   }
  },
  {
@@ -40,7 +40,7 @@
    "findings": [
     {
      "check": "C154",
-     "severity": "warn",
+     "severity": "error",
      "rule": 49,
      "file": "apps/a/app/src/fin.spec.ts",
      "line": 3,
@@ -49,8 +49,8 @@
     }
    ],
    "waived": [],
-   "errors": 0,
-   "warnings": 1
+   "errors": 1,
+   "warnings": 0
   }
  },
  {
@@ -92,7 +92,7 @@
    "findings": [
     {
      "check": "C154",
-     "severity": "warn",
+     "severity": "error",
      "rule": 49,
      "file": "apps/b/app/src/b.spec.ts",
      "line": 1,
@@ -101,8 +101,8 @@
     }
    ],
    "waived": [],
-   "errors": 0,
-   "warnings": 1
+   "errors": 1,
+   "warnings": 0
   }
  },
  {
@@ -119,7 +119,7 @@
    "findings": [
     {
      "check": "C154",
-     "severity": "warn",
+     "severity": "error",
      "rule": 49,
      "file": "apps/a/app/src/fixed.spec.ts",
      "line": 1,
@@ -128,8 +128,8 @@
     }
    ],
    "waived": [],
-   "errors": 0,
-   "warnings": 1
+   "errors": 1,
+   "warnings": 0
   }
  },
  {
@@ -146,7 +146,7 @@
    "findings": [
     {
      "check": "C154",
-     "severity": "warn",
+     "severity": "error",
      "rule": 49,
      "file": "apps/a/app/src/lazy.spec.ts",
      "line": 1,
@@ -155,7 +155,7 @@
     },
     {
      "check": "C154",
-     "severity": "warn",
+     "severity": "error",
      "rule": 49,
      "file": "apps/a/app/src/lazy.spec.ts",
      "line": 3,
@@ -164,8 +164,8 @@
     }
    ],
    "waived": [],
-   "errors": 0,
-   "warnings": 2
+   "errors": 2,
+   "warnings": 0
   }
  },
  {

@@ -159,22 +159,6 @@ since = 2026-11-08
 review_by = 2026-12-27
 approved = "coordinator"
 
-[[report_only]]
-id = "C123"
-reason = "ER-41: report-only until its first green run on main, then flip SEVERITY in tools/paddock-dev/src/check/c123.rs and the mode to gate. Every existing Rust test spawn of ./dev, cargo or node is migrated onto paddock_testkit::TestCommand in the same change (no baseline); JavaScript tests are not judged (ADR 0100 follow-up). 2026-11-25: its one finding of run 9030 (pre_push/tests.rs, added 2026-11-18) starts through TestCommand; 0 findings, flip after the first green run of that tree"
-owner = "ADR 0100 (2026-11-13)"
-since = 2026-11-13
-review_by = 2026-12-08
-approved = "user"
-
-[[report_only]]
-id = "C128"
-reason = "ER-41: report-only until its first green run on the real tree, recorded by run id here and in C128-recorded-pid.mjs. It flags a test that takes the identity of a pid it parsed from a file or a child's output with ProcessId::of (rule 53; Spotter's run 8118 and the review of f224dd0b4): the fix is paddock_testkit_start::recorded. First count 2026-11-15 on fix/test-pid-reader: 12 sites before the branch, 0 after (5 migrated, 6 waived with a reason, 1 rewritten in paddock-proc, whose tests cannot use the kit). Known gap: a pid parsed in another function is not followed. 2026-11-25: its one finding of run 9030 (debrief-plugin-host manifests.rs, added after it landed) reads the pid file as a record now; 0 findings, flip after the first green run of that tree"
-owner = "ER-21 class: a test observes a recorded pid after the code under test may have ended it (fix/test-pid-reader)"
-since = 2026-11-15
-review_by = 2026-12-08
-approved = "coordinator"
-
 [[not_gated]]
 id = "C85"
 apps = ["debrief", "dyno", "pacenotes", "pitcrew", "pitwall", "shell-demo", "sighter", "spotter", "workbench-demo"]
@@ -1124,34 +1108,10 @@ review_by = 2026-12-20
 approved = "coordinator"
 
 [[report_only]]
-id = "C136"
-reason = "ER-41: report-only until its first green run on the real tree, recorded by run id in C136-unit-live-feeds.mjs, then flip the warnings to errors and the mode to gate. First count 2026-11-16: 3 findings in 1 file (mock-backend.spec.ts), fixed through ManualClock, 0 after (no allow list). 2026-11-25: its one finding of run 9030 (events-grid.spec.ts viewAfterGrowth, added after it landed) runs the feed on a ManualClock; 0 findings, flip after the first green run of that tree"
-owner = "ER-21 class: a unit test asserts a value while a live mock feed keeps changing it (run 8191; feat/unit-live-helper)"
-since = 2026-11-16
-review_by = 2026-12-08
-approved = "coordinator"
-
-[[report_only]]
-id = "C155"
-reason = "ER-41: report-only until its first green run on the real tree, recorded by run id here and in tools/paddock-dev/src/check/c155.rs, then flip the mode to Gate in the same step. Reads the sources of every workspace that declares `hostTests` (crates, the apps, tools/paddock-dev): OS code (an OS cfg, an OS-API crate, a portable-layer entry point in production code) in a package or paddock-dev module that hostTests does not run on Windows and macOS, a skipped module with OS code, a stale entry, and the import edges between paddock-dev modules (ci_setup_rust imports local_sccache, ci_run imports pre_push::exec). No baseline or allow list of its own (ER-46): hostTests is the list. Positive controls: its own control and tests/it/os_scoped.rs (unlisting paddock-proc, local_sccache and pre_push::exec each goes red). Count on the real tree: see the CHANGELOG entry. The register of OS-removal approvals (docs/os-removals.toml) is itself shrink-only (ER-46): an approval the merge base lacks is one unwaivable finding, an approval the merge base already covers is stale. Its first 26 approvals (24 only.macos-latest of tools/paddock-dev, 2 skip of paddock-service) were approved by the user on 2026-11-23 for the repository-graph train; after that train lands they are stale and the register shrinks to empty. 2026-11-25 (run 9030 had its 23 stale approvals as its only findings): the register is empty, 0 findings; flip after the first green run of that tree"
-owner = "OS-scoped tests (user decision 2026-11-22, docs/research/2026-11-22-os-scoped-tests.md): a test not listed in hostTests runs on Linux only, so OS code outside the list would silently lose its Windows and macOS tests (feat/os-scoped-tests)"
-since = 2026-11-22
-review_by = 2026-12-08
-approved = "user"
-
-[[report_only]]
 id = "C169"
 reason = "ER-41: report-only until its first green run on the real tree, recorded by run id here and in C169-write-atomic.mjs, then flip the mode to gate. It flags a rename whose source is a temporary file (tmp, temp) in Rust production code outside paddock-env: write the bytes with paddock_env::write_atomic (user decision 2026-11-25). First count 2026-11-25 on fix/write-atomic-everywhere: about 60 sites before the change, 0 after (the sites left carry a waiver: the tools/heavy lock protocol, which claims a name by rename; Dyno's privileged helper, whose startup checks the fixed pending config.json.new name (ER-38); and two streaming writers)."
 owner = "ER-21 class: writers that share one temporary name lose data (Spotter avatar write_atomic, the pre-push reuse store; fix/write-atomic-everywhere)"
 since = 2026-11-24
-review_by = 2026-12-08
-approved = "user"
-
-[[report_only]]
-id = "C154"
-reason = "ER-41: report-only until its first green run on the real tree, recorded by run id here and in tools/paddock-dev/src/check/c154.rs, then flip the mode to Gate. Three rules over *.spec.ts and *.e2e.ts (comments and strings masked): fake-timers (vi.useFakeTimers with no afterEach, afterAll or onTestFinished that restores the real clock and no test-setup that does), fixed-wait (flush(CONSTANT + n)) and lazy-wait (vi.waitFor or expect.poll that only imports, or a sync advanceTimersByTime followed by a DOM assertion). waitForTimeout and setTimeout-promise sleeps stay C71's. No baseline file (ER-46); a baseline needs the user's approval. First count at 67ac6d6ec: see the CHANGELOG entry. 2026-11-25: its one finding of run 9030 (Spotter pattern-helper.spec.ts flush(TEST_DEBOUNCE_MS + 20)) waits on the answered engine call; 0 findings, flip after the first green run of that tree"
-owner = "ER-21 class: a fixed-time wait or a leaked fake clock fails a spec on a loaded runner (Dyno extras-page leak c249b271c, Spotter flush(TEST_DEBOUNCE_MS + 20) ad0221ac1, Pitcrew flush(PREVIEW_DEBOUNCE_MS + 50); feat/fixed-wait-checks)"
-since = 2026-11-22
 review_by = 2026-12-08
 approved = "user"
 
