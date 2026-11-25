@@ -1252,10 +1252,10 @@ jobs:
 
       # The keychain action clears RUSTC_WRAPPER for its own cargo calls (no compile cache), as in its own job.
       - uses: ./.gitea/actions/keychain
-        if: ${{ !cancelled() && needs.plan.outputs.c99 == 'true' }}
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && needs.plan.outputs.c99 == 'true' }}
 
       - name: Audit against the merge base
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' }}
         run: |
           enforce=()
           if [ "${PADDOCK_AUDIT_ENFORCE:-}" = "1" ]; then enforce=(--enforce); fi
