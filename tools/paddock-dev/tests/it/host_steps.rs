@@ -1856,6 +1856,7 @@ fn boot_volume_says_which_volume_a_folder_is_on_and_where_the_boot_volumes_temp_
 fn guardian_machine(fx: &Fx, proc_exit: i32) {
     std::fs::create_dir_all(fx.p("tmp")).unwrap();
     std::fs::create_dir_all(fx.p("crates")).unwrap();
+    open_to_the_test_user(fx);
     // `cargo build` of the test kit's stand-in (the step builds it before it drops to the test user, ci.yml 8359) answers with
     // cargo's artifact line; the nextest archive and the nextest run are the other two calls. All are recorded in `calls`, as `shim` does.
     let calls = || Actions::new().appends_with(&fx.p("calls").display().to_string(), "{name} {args} token={env:GITHUB_TOKEN}\n");
@@ -1878,6 +1879,40 @@ fn guardian_machine(fx: &Fx, proc_exit: i32) {
         .answers(calls().stderr("   Archiving 4 binaries"))
         .install()
         .unwrap();
+}
+
+/// Whether this test process is root (`id -u`; the step then takes its `setpriv` path). No `unsafe` in tests.
+fn running_as_root() -> bool {
+    TestCommand::new("id")
+        .arg("-u")
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim() == "0")
+        .unwrap_or(false)
+}
+
+/// As root the step drops to the test user (uid 65534 by default) through `setpriv`, and its stand-in cargo must then append to
+/// `<ROOT>/calls`: open the fixture (its folder, the calls file and the working folders) to every user. A user's own fixture is left as is.
+fn open_to_the_test_user(fx: &Fx) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if !running_as_root() {
+            return;
+        }
+        std::fs::write(fx.p("calls"), "").unwrap();
+        for (rel, mode) in [
+            ("", 0o777),
+            ("calls", 0o666),
+            ("tmp", 0o777),
+            ("crates", 0o777),
+            ("bin", 0o755),
+            ("home", 0o755),
+        ] {
+            std::fs::set_permissions(fx.p(rel), std::fs::Permissions::from_mode(mode)).unwrap();
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = fx;
 }
 
 fn guardian() -> Step {
@@ -1937,10 +1972,15 @@ fn guardian_as_user_matches_the_shell() {
 
 #[test]
 fn guardian_as_user_archives_the_unit_tests_and_runs_the_guardian_cases_under_nextest_as_the_calling_user() {
-    // Run by a user (the test is not root: no setpriv, no sudo, ER-14), the tests run directly; the root path is the unit tests' (a fake
-    // machine records the setpriv command line).
+    // Run by a user, the tests run directly (no setpriv, no sudo, ER-14); run as root (CI's Linux image), the step drops to uid 65534
+    // through setpriv and the fixture is opened to that user. Both paths are asserted where they can run.
     let seen = guardian_rust(&|fx| guardian_machine(fx, 0));
     assert_eq!(seen.code, 0, "{seen:?}");
+    assert_eq!(
+        seen.stdout.contains("Running as uid 65534: setpriv "),
+        running_as_root(),
+        "{seen:?}"
+    );
     assert!(
         seen.stdout.contains("Archiving the paddock-proc and paddock-chromium unit tests"),
         "{seen:?}"
