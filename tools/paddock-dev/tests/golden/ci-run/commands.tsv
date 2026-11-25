@@ -87,6 +87,7 @@ job	conformance			*) echo "::error::sccache-backend must be auto, redis, local o
 job	conformance			*) echo "::warning::no pinned sccache release for $RUNNER_OS $(uname -m); building without the shared compile cache."
 job	conformance			*[!0-9]*) TOTAL=40
 job	conformance			*[!0-9]*) TOTAL=60
+job	conformance			./dev check test-features
 job	conformance			./dev conformance --app paddock --root . --only $RUST_ONLY
 job	conformance			./dev gates check
 job	conformance			BACKEND=local

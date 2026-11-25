@@ -3877,17 +3877,17 @@ first and records the second (`ci fix-items`) is part of the queued green-main w
   (ADR 0120). Earlier instances: the 2026-11-23 session crash (hdiutil failure after the Mac runner's desktop session crashed, train
   18's fix item).
 
-## A test hook in a shipped build is public API (rule 97, C170, 2026-11-25)
+## A test hook in a shipped build is public API (rule 99, C170, 2026-11-25)
 
 - **What.** `paddock_ipc::Host::with_clock` (handshake.rs) was public with no gate, and an ADR draft copied the pattern for the
   privileged dyno-helper daemon. A sweep found the same shape across the family: public clock setters (`with_clock`,
   `with_time`), `for_tests` constructors (Pitcrew's `Http::for_tests` lets the service fetch plain `http://127.0.0.1`), a
   process-wide test setter (`dyno_agent::build_id::set_watch_every_for_tests`) and whole fakes (`FakeClock`, `FakeWire`,
   `FakePoster`, `FakeSource`, `fake_systemd`, `trust_fake`, Debrief's scripted LLM and fake Pitwall) compiled into every release.
-- **Fix.** Each hook sits behind `#[cfg(any(test, feature = "testing"))]` (`test-support` in the crates that already had it,
-  ADR 0073); consumers enable it from `[dev-dependencies]`, a crate's own integration tests through a self dev-dependency.
+- **Fix.** Each hook sits behind `#[cfg(any(test, feature = "test-support"))]` (ADR 0073's name; paddock-ipc's `testing`
+  became `test-support` too); consumers enable it from `[dev-dependencies]`, a crate's own integration tests through a self dev-dependency.
   Where production wiring used the same setter (`Host::with_clock` from the link server, Pitwall's `Jobs::default`, Debrief's
-  `AlertMutes::default`), it now calls a crate-private function. `./dev check test-features` (C170, nightly, report-only first)
+  `AlertMutes::default`), it now calls a crate-private function. `./dev check test-features` (C170, in the conformance job, report-only first)
   runs `cargo tree -e normal` for every released binary and reports any crate with a test feature.
 - **Rule of thumb.** A setter that exists so a test can swap a default is a test hook: gate it the day it is written. A check
   that reads a release build's features must use normal edges only: `clippy --all-targets` and nextest unify dev-dependency

@@ -24,13 +24,13 @@ thiserror.workspace = true
 ts-rs = { version = "11.1", optional = true }
 
 [dev-dependencies]
-# The self dev-dependency that turns `testing` on for this package's own integration tests (rule 97).
-debrief-dump = { path = ".", features = ["testing"] }
+# The self dev-dependency that turns `test-support` on for this package's own integration tests (rule 99).
+debrief-dump = { path = ".", features = ["test-support"] }
 proptest.workspace = true
 serde_json.workspace = true
 
 [features]
-# Test support (rule 97): `testing`, small dumps and UMDH logs for tests. Enabled from `[dev-dependencies]` only, never
+# Test support (rule 99): `testing`, small dumps and UMDH logs for tests. Enabled from `[dev-dependencies]` only, never
 # in a shipped build (`./dev check test-features`, C170).
-testing = []
+test-support = []
 ts = ["dep:ts-rs"]

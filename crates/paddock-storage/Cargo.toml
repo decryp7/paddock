@@ -29,8 +29,8 @@ tauri = { workspace = true, optional = true }
 paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
 
 [dev-dependencies]
-paddock-jobs = { workspace = true, features = ["testing"] }
-paddock-commands = { workspace = true, features = ["testing"] }
+paddock-jobs = { workspace = true, features = ["test-support"] }
+paddock-commands = { workspace = true, features = ["test-support"] }
 paddock-testkit = { workspace = true }
 tempfile = "3"
 tauri = { workspace = true, features = ["test"] }

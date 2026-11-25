@@ -11,9 +11,9 @@ publish = ["decryp7"]
 doctest = false # doctests are off (crates/README.md, "Doctests")
 
 [features]
-# Test support (rule 97): the test-only hooks and fakes (`FakeSource`). Enabled from `[dev-dependencies]` only, never in
+# Test support (rule 99): the test-only hooks and fakes (`FakeSource`). Enabled from `[dev-dependencies]` only, never in
 # a shipped build (`./dev check test-features`, C170).
-testing = []
+test-support = []
 # The real-folder adapter over the `notify` crate (`paddock_watch::NotifySource`); its calls live in `src/native.rs`, which
 # the coverage job leaves out.
 notify = ["dep:notify"]
@@ -25,9 +25,9 @@ paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
 notify = { version = "8", optional = true, default-features = false, features = ["macos_fsevent"] }
 
 [dev-dependencies]
-# The self dev-dependency that turns `testing` on for this package's own integration tests (rule 97).
-paddock-watch = { path = ".", features = ["testing"] }
-paddock-jobs = { workspace = true, features = ["testing"] }
+# The self dev-dependency that turns `test-support` on for this package's own integration tests (rule 99).
+paddock-watch = { path = ".", features = ["test-support"] }
+paddock-jobs = { workspace = true, features = ["test-support"] }
 # The bounded retry of the real-folder test (`wait::retry_within`) and the hang guard of the rescan tests (`wait::HANG_GUARD`).
 paddock-testkit = { workspace = true }
 tempfile = "3"

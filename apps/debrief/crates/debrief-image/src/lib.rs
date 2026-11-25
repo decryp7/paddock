@@ -8,6 +8,6 @@ pub mod input;
 pub mod sanitize;
 
 pub use input::{ImageInput, ImageMime};
-#[cfg(any(test, feature = "testing"))]
+#[cfg(any(test, feature = "test-support"))]
 pub use sanitize::testing;
 pub use sanitize::{sanitize, ImageError, ImageLimits, SanitizedImage, SourceFormat, DEFAULT_TARGET_PIXELS, MAX_OUTPUT_SIDE};

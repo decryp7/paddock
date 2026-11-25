@@ -11,9 +11,9 @@ publish = ["decryp7"]
 doctest = false # doctests are off (crates/README.md, "Doctests")
 
 [features]
-# Test support (rule 97): the test-only hooks and fakes (`HostCaps::with_clock`). Enabled from `[dev-dependencies]`
+# Test support (rule 99): the test-only hooks and fakes (`HostCaps::with_clock`). Enabled from `[dev-dependencies]`
 # only, never in a shipped build (`./dev check test-features`, C170).
-testing = []
+test-support = []
 default = ["http"]
 # The HTTPS transport (`paddock_download::HttpTransport`: ureq and rustls, certificates checked against the operating system's
 # store). Without it the app brings its own `Transport`.
@@ -38,9 +38,9 @@ rustls = { version = "0.23", default-features = false, features = ["std", "tls12
 paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
 
 [dev-dependencies]
-# The self dev-dependency that turns `testing` on for this package's own integration tests (rule 97).
-paddock-download = { path = ".", features = ["testing"] }
-paddock-jobs = { workspace = true, features = ["testing"] }
+# The self dev-dependency that turns `test-support` on for this package's own integration tests (rule 99).
+paddock-download = { path = ".", features = ["test-support"] }
+paddock-jobs = { workspace = true, features = ["test-support"] }
 # The never-panics test of the parsers (conformance check C36).
 paddock-testkit = { workspace = true }
 sha2 = "0.10"

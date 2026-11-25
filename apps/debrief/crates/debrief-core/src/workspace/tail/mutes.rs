@@ -34,7 +34,7 @@ impl Default for AlertMutes {
 }
 
 impl AlertMutes {
-    /// Mutes timed with `clock` (tests pass a fake one). Test only (rule 97).
+    /// Mutes timed with `clock` (tests pass a fake one). Test only (rule 99).
     #[cfg(any(test, feature = "test-support"))]
     pub fn with_clock(clock: Clock) -> AlertMutes {
         AlertMutes::clocked(clock)

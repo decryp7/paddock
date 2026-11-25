@@ -193,7 +193,7 @@ fn main() {
             );
             std::process::exit(if r.is_err() { 0 } else { 1 });
         }
-        #[cfg(feature = "testing")]
+        #[cfg(feature = "test-support")]
         "observe" => {
             use paddock_ipc::testing::endings::raw::{READ_GUARD, RawEndKind, read_to_end};
             let b = child::read_bootstrap(std::io::stdin().lock()).unwrap();

@@ -201,7 +201,7 @@ enum CheckCommand {
         #[arg(long)]
         root: Option<PathBuf>,
     },
-    /// C170 (rule 97): no released binary (each app's Tauri package and every `bundle.externalBin`, and paddock-setup) is built
+    /// C170 (rule 99): no released binary (each app's Tauri package and every `bundle.externalBin`, and paddock-setup) is built
     /// with a test feature (`testing`, `test-support`, ...): `cargo tree -e normal` per binary. Report-only until its first green
     /// run (ER-41); a probe that cannot see is "check broken" (exit 7).
     #[command(name = "test-features")]

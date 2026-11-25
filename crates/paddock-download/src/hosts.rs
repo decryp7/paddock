@@ -44,7 +44,7 @@ impl HostCaps {
 
     /// The clock back-offs are measured on, and every download using these caps measures its waits and stalls on (a
     /// `FakeClock` in tests).
-    #[cfg(any(test, feature = "testing"))]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self {
         self.clock = clock;
         self

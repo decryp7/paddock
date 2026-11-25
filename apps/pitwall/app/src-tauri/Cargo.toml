@@ -122,9 +122,9 @@ cpal = { version = "0.18.2", default-features = false }
 workspace = true
 
 [dev-dependencies]
-paddock-jobs = { path = "../../../../crates/paddock-jobs", features = ["testing"] }
-paddock-health = { path = "../../../../crates/paddock-health", features = ["testing"] }
-paddock-commands = { path = "../../../../crates/paddock-commands", features = ["testing"] }
+paddock-jobs = { path = "../../../../crates/paddock-jobs", features = ["test-support"] }
+paddock-health = { path = "../../../../crates/paddock-health", features = ["test-support"] }
+paddock-commands = { path = "../../../../crates/paddock-commands", features = ["test-support"] }
 # A socket bound but not listening refuses connections on Linux and Windows (not macOS): "nothing listens" with the port held.
 socket2 = { version = "0.6", features = ["all"] }
 # The self dev-dependency that turns `test-support` on for this package's tests (ADR 0073 / rule 73).

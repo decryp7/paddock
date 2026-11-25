@@ -99,7 +99,7 @@ impl Clock for SystemClock {
     }
 }
 
-#[cfg(any(test, feature = "testing"))]
+#[cfg(any(test, feature = "test-support"))]
 #[derive(Debug)]
 struct FakeState {
     monotonic: Duration,
@@ -113,7 +113,7 @@ struct FakeState {
     generation: u64,
 }
 
-#[cfg(any(test, feature = "testing"))]
+#[cfg(any(test, feature = "test-support"))]
 #[derive(Debug)]
 struct FakeInner {
     state: Mutex<FakeState>,
@@ -126,18 +126,18 @@ struct FakeInner {
 /// test drives timeouts, back-off and throttling step by step: start the work, [`wait_for_waiters`](Self::wait_for_waiters)
 /// until it is blocked on the clock, advance, and assert the outcome. Both readings start at zero (the wall at the Unix
 /// epoch) unless set with [`at_wall`](Self::at_wall).
-#[cfg(any(test, feature = "testing"))]
+#[cfg(any(test, feature = "test-support"))]
 #[derive(Debug, Clone)]
 pub struct FakeClock(Arc<FakeInner>);
 
-#[cfg(any(test, feature = "testing"))]
+#[cfg(any(test, feature = "test-support"))]
 impl Default for FakeClock {
     fn default() -> Self {
         Self::at_wall(UNIX_EPOCH)
     }
 }
 
-#[cfg(any(test, feature = "testing"))]
+#[cfg(any(test, feature = "test-support"))]
 impl FakeClock {
     /// A clock at zero, its wall at the Unix epoch.
     pub fn new() -> Self {
@@ -268,7 +268,7 @@ impl FakeClock {
     }
 }
 
-#[cfg(any(test, feature = "testing"))]
+#[cfg(any(test, feature = "test-support"))]
 impl Clock for FakeClock {
     fn monotonic(&self) -> Duration {
         self.state().monotonic
@@ -318,7 +318,7 @@ impl Clock for FakeClock {
     }
 }
 
-#[cfg(any(test, feature = "testing"))]
+#[cfg(any(test, feature = "test-support"))]
 fn wall_from_ms(ms: i64) -> SystemTime {
     let d = Duration::from_millis(ms.unsigned_abs());
     if ms >= 0 {

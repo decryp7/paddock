@@ -49,7 +49,7 @@ pub use model::{
     Snapshot, cause_key,
 };
 /// The family's clock port (`paddock_jobs::time`): the notification centre reads [`Clock::wall_ms`].
-#[cfg(any(test, feature = "testing"))]
+#[cfg(any(test, feature = "test-support"))]
 pub use paddock_jobs::time::FakeClock;
 pub use paddock_jobs::time::{Clock, SystemClock};
 pub use registry::{Registry, Repair, ServiceSpec, Sink, SpecError};

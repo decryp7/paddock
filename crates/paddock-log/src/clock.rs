@@ -1,7 +1,7 @@
 //! The log's time: the family's clock port (`paddock_jobs::time`), read as UTC for stamps, rotation and file names.
 
 use jiff::Timestamp;
-#[cfg(any(test, feature = "testing"))]
+#[cfg(any(test, feature = "test-support"))]
 pub use paddock_jobs::time::FakeClock;
 pub use paddock_jobs::time::{Clock, SystemClock};
 

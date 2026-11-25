@@ -1,4 +1,4 @@
-//! C170 (rule 97): the positive control of `./dev check test-features` on a real Cargo workspace (ER-33). A fixture app ships a
+//! C170 (rule 99): the positive control of `./dev check test-features` on a real Cargo workspace (ER-33). A fixture app ships a
 //! Tauri package and a sidecar; the hooked library has a `testing` feature. When the Tauri package enables it on a normal edge,
 //! the check must report it; when only the sidecar's `[dev-dependencies]` enable it, a release build has no test feature and the
 //! check must be clean (cargo's resolver 2 keeps dev-dependency features out of `cargo tree -e normal`).

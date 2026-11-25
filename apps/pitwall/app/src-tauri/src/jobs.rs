@@ -284,7 +284,7 @@ impl Default for Jobs {
 
 impl Jobs {
     /// A registry on `clock` (a `FakeClock` in tests); progress is throttled to one event per `min_interval_ms`. Test only
-    /// (rule 97): the app uses [`Jobs::default`].
+    /// (rule 99): the app uses [`Jobs::default`].
     #[cfg(any(test, feature = "test-support"))]
     pub fn with_clock(clock: Arc<dyn Clock>, min_interval_ms: u64) -> Self {
         Self::clocked(clock, min_interval_ms)

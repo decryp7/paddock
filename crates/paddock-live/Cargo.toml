@@ -24,7 +24,7 @@ serde_json = "1"
 paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
 
 [dev-dependencies]
-paddock-jobs = { workspace = true, features = ["testing"] }
+paddock-jobs = { workspace = true, features = ["test-support"] }
 paddock-testkit = { workspace = true }
 tauri = { workspace = true, features = ["test"] }
-paddock-commands = { workspace = true, features = ["testing"] }
+paddock-commands = { workspace = true, features = ["test-support"] }

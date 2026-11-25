@@ -161,13 +161,13 @@ fn note(debouncer: &Debouncer, dir: &Path, change: Change) {
 }
 
 /// A [`ChangeSource`] for tests: the test sends the changes.
-#[cfg(any(test, feature = "testing"))]
+#[cfg(any(test, feature = "test-support"))]
 #[derive(Default, Clone)]
 pub struct FakeSource {
     tx: Arc<std::sync::Mutex<Option<Sender<Change>>>>,
 }
 
-#[cfg(any(test, feature = "testing"))]
+#[cfg(any(test, feature = "test-support"))]
 impl FakeSource {
     /// A source nobody has started watching yet.
     pub fn new() -> Self {
@@ -190,7 +190,7 @@ impl FakeSource {
     }
 }
 
-#[cfg(any(test, feature = "testing"))]
+#[cfg(any(test, feature = "test-support"))]
 impl ChangeSource for FakeSource {
     fn watch(
         &self,

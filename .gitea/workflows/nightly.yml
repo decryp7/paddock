@@ -85,10 +85,6 @@ jobs:
           sccache-s3-secret-access-key: ${{ secrets.PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY }}
       - name: Every listen site is registered
         run: ./dev check ipc-endpoints
-      # C170 (rule 97): no released binary is built with a test feature (`cargo tree -e normal` per binary the installers carry).
-      # Report-only until its first green run on the real tree (ER-41: findings are warnings); a probe that cannot see fails.
-      - name: No test feature in a release build (C170)
-        run: ./dev check test-features
 
   ci:
     name: everything

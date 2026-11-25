@@ -52,7 +52,7 @@ pub use pool::{
     assert_nonblocking_within,
 };
 pub use reporter::{Counter, DEFAULT_MIN_INTERVAL_MS, EventSink, Reporter, UncancellableGuard};
-#[cfg(any(test, feature = "testing"))]
+#[cfg(any(test, feature = "test-support"))]
 pub use time::FakeClock;
 pub use time::{Clock, SystemClock};
 pub use walk::{

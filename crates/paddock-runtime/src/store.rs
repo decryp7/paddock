@@ -201,7 +201,7 @@ impl RuntimeStore {
     }
 
     /// Uses `clock` for the quarantine times (tests pass a fake clock).
-    #[cfg(any(test, feature = "testing"))]
+    #[cfg(any(test, feature = "test-support"))]
     #[must_use]
     pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self {
         self.clock = clock;

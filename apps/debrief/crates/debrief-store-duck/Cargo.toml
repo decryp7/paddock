@@ -43,7 +43,7 @@ exit-hold = []
 [dev-dependencies]
 # The shared scratch_dir for fixtures that hand out a path.
 debrief-ipc = { path = "../debrief-ipc", features = ["test-support"] }
-# The self dev-dependency that turns `test-support` on for this package's own integration tests (rule 97).
+# The self dev-dependency that turns `test-support` on for this package's own integration tests (rule 99).
 debrief-store-duck = { path = ".", features = ["test-support"] }
 # The condition poll the exit test waits with (rule 49).
 paddock-testkit = { path = "../../../../crates/paddock-testkit" }

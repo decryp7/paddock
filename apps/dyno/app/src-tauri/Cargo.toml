@@ -104,9 +104,9 @@ objc2-foundation = { version = "0.3", default-features = false, features = ["std
 objc2-service-management = { version = "0.3", default-features = false, features = ["std", "SMAppService"] }
 
 [dev-dependencies]
-paddock-service = { path = "../../../../crates/paddock-service", features = ["testing"] }
-paddock-jobs = { path = "../../../../crates/paddock-jobs", features = ["testing"] }
-paddock-commands = { path = "../../../../crates/paddock-commands", features = ["testing"] }
+paddock-service = { path = "../../../../crates/paddock-service", features = ["test-support"] }
+paddock-jobs = { path = "../../../../crates/paddock-jobs", features = ["test-support"] }
+paddock-commands = { path = "../../../../crates/paddock-commands", features = ["test-support"] }
 paddock-testkit = { path = "../../../../crates/paddock-testkit" }
 # The capabilities are resolved through Tauri's own ACL in the tests.
 tauri-utils = "2.10"

@@ -42,7 +42,7 @@ paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
 tauri-plugin = { version = "2.7", features = ["build"] }
 
 [dev-dependencies]
-paddock-commands = { workspace = true, features = ["testing"] }
+paddock-commands = { workspace = true, features = ["test-support"] }
 tempfile = "3"
 tauri = { workspace = true, features = ["test"] }
 # The permission sets are resolved through Tauri's own ACL in the tests.
@@ -52,7 +52,7 @@ paddock-panels = { workspace = true, features = ["mock-runtime"] }
 paddock-dialogs = { workspace = true, features = ["tauri", "mock-runtime"] }
 # The plugin test builds an assistant over a canned provider and a fake clock.
 paddock-assistant = { workspace = true, features = ["tauri"] }
-paddock-health = { workspace = true, features = ["testing"] }
+paddock-health = { workspace = true, features = ["test-support"] }
 
 [[test]]
 name = "it"

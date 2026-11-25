@@ -11,9 +11,9 @@ publish = ["decryp7"]
 doctest = false # doctests are off (crates/README.md, "Doctests")
 
 [features]
-# Test support (rule 97): the test-only hooks and fakes (`FakeWire`, `Reply`, `Seen`, `StaticLookup`). Enabled from
+# Test support (rule 99): the test-only hooks and fakes (`FakeWire`, `Reply`, `Seen`, `StaticLookup`). Enabled from
 # `[dev-dependencies]` only, never in a shipped build (`./dev check test-features`, C170).
-testing = []
+test-support = []
 default = ["http"]
 # The real wire (`UreqWire`: ureq and rustls, certificates from the operating system, the proxy of `paddock-download`, the
 # address guard applied to the very addresses the socket connects to). Without it the app brings its own `Wire`.
@@ -30,8 +30,8 @@ rustls = { version = "0.23", default-features = false, features = ["std", "tls12
 paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
 
 [dev-dependencies]
-# The self dev-dependency that turns `testing` on for this package's own integration tests (rule 97).
-paddock-net = { path = ".", features = ["testing"] }
-paddock-jobs = { workspace = true, features = ["testing"] }
+# The self dev-dependency that turns `test-support` on for this package's own integration tests (rule 99).
+paddock-net = { path = ".", features = ["test-support"] }
+paddock-jobs = { workspace = true, features = ["test-support"] }
 paddock-testkit = { workspace = true }
 proptest = "1"

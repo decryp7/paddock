@@ -32,9 +32,9 @@ paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
 libc = "0.2"
 
 [dev-dependencies]
-# The self dev-dependency that turns `test-support` on for this package's own integration tests (rule 97).
+# The self dev-dependency that turns `test-support` on for this package's own integration tests (rule 99).
 paddock-chromium = { path = ".", features = ["test-support"] }
-paddock-jobs = { workspace = true, features = ["testing"] }
+paddock-jobs = { workspace = true, features = ["test-support"] }
 paddock-testkit = { workspace = true }
 paddock-testkit-start = { workspace = true }
 tempfile = "3"

@@ -64,7 +64,7 @@ paddock-testkit = { path = "../../../../crates/paddock-testkit" }
 # The identity of a pid read from a file, an output line or a process list (tests/supervision.rs, rule 53).
 paddock-testkit-start = { path = "../../../../crates/paddock-testkit-start" }
 # The ending harness of ADR 0072 (tests/endings.rs): the raw-stream client, the scenarios, the ratchet.
-paddock-ipc = { path = "../../../../crates/paddock-ipc", features = ["testing"] }
+paddock-ipc = { path = "../../../../crates/paddock-ipc", features = ["test-support"] }
 # The fake runner (examples/fake_runner.rs) stops on Ctrl+Break / SIGTERM like the real one.
 ctrlc = { version = "3.5", features = ["termination"] }
 

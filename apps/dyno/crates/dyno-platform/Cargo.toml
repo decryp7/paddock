@@ -89,7 +89,7 @@ libc = "0.2"
 test-support = ["dyno-core/test-support", "paddock-power/test-support"]
 
 [dev-dependencies]
-paddock-jobs = { path = "../../../../crates/paddock-jobs", features = ["testing"] }
+paddock-jobs = { path = "../../../../crates/paddock-jobs", features = ["test-support"] }
 paddock-testkit = { path = "../../../../crates/paddock-testkit" }
 tempfile.workspace = true
 # The unit tests compile this crate with cfg(test); the doubles of the crates below do not, so they ask for them.

@@ -61,7 +61,7 @@ pub mod backend;
 pub mod control;
 pub mod elevated;
 mod error;
-#[cfg(any(test, feature = "testing"))]
+#[cfg(any(test, feature = "test-support"))]
 pub mod fake_systemd;
 pub mod hardening;
 pub mod launch;

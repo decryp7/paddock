@@ -5,7 +5,7 @@ use crate::{PackError, PackKind, Reloader};
 use std::path::Path;
 use std::sync::Arc;
 
-#[cfg(any(test, feature = "testing"))]
+#[cfg(any(test, feature = "test-support"))]
 pub use paddock_watch::FakeSource;
 #[cfg(feature = "watch")]
 pub use paddock_watch::NotifySource;

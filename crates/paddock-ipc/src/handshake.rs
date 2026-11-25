@@ -446,8 +446,8 @@ impl Host {
     }
 
     /// The clock the accept wait and each handshake's limit run on, and that limit ([`HANDSHAKE_TIMEOUT`] by default). Test
-    /// only (rule 97): a shipped build cannot call it; the link server sets its configured clock through [`Host::clocked`].
-    #[cfg(any(test, feature = "testing"))]
+    /// only (rule 99): a shipped build cannot call it; the link server sets its configured clock through [`Host::clocked`].
+    #[cfg(any(test, feature = "test-support"))]
     pub fn with_clock(self, clock: Arc<dyn Clock>, handshake: Duration) -> Host {
         self.clocked(clock, handshake)
     }

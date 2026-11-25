@@ -28,6 +28,6 @@ pub use settle::{
     MAX_SCAN_DEPTH, MAX_SCAN_ENTRIES, Ready, Scan, Settle, SettleConfig, Skipped,
     is_temporary_name, scan_folder, scan_folder_limited,
 };
-#[cfg(any(test, feature = "testing"))]
+#[cfg(any(test, feature = "test-support"))]
 pub use source::FakeSource;
 pub use source::{Change, ChangeSource, WatchError, WatchHandle, spawn};

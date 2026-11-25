@@ -1,5 +1,5 @@
-//! C170 (rule 97): no released binary is built with a test feature. Test-only hooks (injected clocks, gates, fakes, test
-//! setters) compile only under `#[cfg(any(test, feature = "testing"))]`, and the feature is enabled from `[dev-dependencies]`
+//! C170 (rule 99): no released binary is built with a test feature. Test-only hooks (injected clocks, gates, fakes, test
+//! setters) compile only under `#[cfg(any(test, feature = "test-support"))]`, and the feature is enabled from `[dev-dependencies]`
 //! only. This check proves the second half for what the installers carry: for every released binary it asks cargo which
 //! features a build of that binary turns on (`cargo tree -e normal`, so dev-dependency features stay out, as in
 //! `tauri build` and a sidecar's `cargo build`), and reports every crate in that graph that has a feature of
@@ -29,12 +29,12 @@ use std::time::Duration;
 /// The check's id.
 pub const ID: &str = "C170";
 
-/// ER-41: findings are warnings until the first green run on the real tree is recorded here; then set this to false and
-/// remove the `[[report_only]]` entry of C170 from `docs/gates.toml`.
+/// ER-41: findings are warnings until the first green run on the real tree (the conformance job's `./dev check test-features`
+/// line in conformance/paddock.ci.json) is recorded here; then set this to false and the `CHECKS` row's `report_only` follows.
 pub const REPORT_ONLY: bool = true;
 
-/// Feature names that turn on test-only code. `testing` is rule 97's name; `test-support` the older one of ADR 0073 that
-/// several crates still use; `test-hooks` and `test-util` the same idea elsewhere (Pacenotes' branch, third-party crates
+/// Feature names that turn on test-only code. `test-support` is rule 99's (and ADR 0073's) name; `testing` the older one
+/// paddock-pitwall and paddock-siblings still use; `test-hooks` and `test-util` the same idea elsewhere (Pacenotes' branch, third-party crates
 /// such as tokio); `mock-runtime` builds a crate on Tauri's mock runtime (paddock-shell, paddock-dialogs, paddock-panels).
 pub const TEST_FEATURES: &[&str] = &["testing", "test-support", "test-hooks", "test-util", "mock-runtime"];
 
@@ -45,8 +45,8 @@ pub const EXTRA_SHIPPED: &[(&str, &str, &str)] = &[(
     "paddock-setup.exe, embedded by the per-machine installers (scripts/stage-paddock-setup.mjs, ADR 0053)",
 )];
 
-/// A hang detector for one cargo call (ER-12: not a performance limit). `cargo tree` of the largest workspace (Debrief) takes a
-/// few seconds with a warm index (docs/benchmarks.md, "C170"); a cold sparse index can take a minute or two.
+/// A hang detector for one cargo call (ER-12: not a performance limit, set with a wide margin). Measured 2026-11-25 on the Mac
+/// mini with a warm index: the whole run, 18 binaries in 8 workspaces, took about 6 s; a cold sparse index adds the download.
 const CARGO_LIMIT: Duration = Duration::from_secs(900);
 /// The most one cargo call's output is read into.
 const MAX_OUTPUT: usize = 64 << 20;
@@ -358,7 +358,7 @@ pub fn check(root: &Path, app: Option<&str>, cargo: &dyn Cargo) -> Result<Outcom
 /// The line of one finding.
 pub fn finding_line(f: &Finding) -> String {
     format!(
-        "{ID} {}: the release build of {} ({}, {}) enables feature \"{}\" on {}. Enable it from [dev-dependencies] only (rule 97); \
+        "{ID} {}: the release build of {} ({}, {}) enables feature \"{}\" on {}. Enable it from [dev-dependencies] only (rule 99); \
          `cargo tree -p {} -e normal,features -i {}` in {} shows who turns it on.",
         f.shipped.app,
         f.shipped.package,
