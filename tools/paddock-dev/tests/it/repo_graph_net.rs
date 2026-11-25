@@ -218,9 +218,12 @@ const LOCK_B: &str = r#"{"lockfileVersion":3,"packages":{"":{"workspaces":["ui"]
 
 /// The train replay's range: the head of train 14 (not replayed) to the head of train 20, as commit ids so a moved ref changes
 /// nothing. Its non-merge commits are the member commits of trains 15 to 20 and what they merged from main.
+#[cfg(target_os = "linux")]
 const REPLAY_FROM: &str = "9cbd77a63";
+#[cfg(target_os = "linux")]
 const REPLAY_TO: &str = "803aed12d";
 
+#[cfg(target_os = "linux")]
 fn replayed() -> Vec<Replayed> {
     let root = repo_root();
     let history = GitHistory::new(&root, Duration::from_secs(120));
@@ -248,6 +251,11 @@ fn replayed() -> Vec<Replayed> {
 
 /// The real tree, checked and not recorded: no golden, so nothing here is re-blessed when the tree moves. A narrowing no category of
 /// §8 explains fails; the report by category goes to the test's output.
+///
+/// Linux only (ER-52): the replay is OS-independent and needs the whole history, which only the Linux legs check out
+/// (`fetch-depth: 0`); the macOS and Windows legs use a kept clone fetched with `--depth=1` (ADR 0025), and the nightly tests every
+/// test on every OS whatever `hostTests` says, so the OS is chosen here (nightly 1812, run 9021).
+#[cfg(target_os = "linux")]
 #[test]
 fn graph_train_replay_has_no_unlisted_narrowing() {
     let r = replayed();
@@ -273,6 +281,7 @@ fn graph_train_replay_has_no_unlisted_narrowing() {
 
 /// How many (commit, project) differences the `ReleaseInstallersOnly` defect of WP-3's `selection` has in the replay today: none
 /// since WP-3's union selection (a release reach keeps the app's smoke set or suite), measured on the combined tree on 2026-11-23.
+#[cfg(target_os = "linux")]
 const PINNED_DEFECTS: usize = 0;
 
 #[test]
@@ -314,6 +323,32 @@ fn control_a_narrowing_no_category_explains_is_listed_and_a_listed_one_is_not() 
         1,
         "a commit a planner could not answer is listed"
     );
+}
+
+/// Run 9021 (nightly 1812), Windows: a host runner's kept clone is shallow (`--depth=1`, ADR 0025) but held the range's objects from
+/// earlier fetches, so `git rev-list` listed 0 members without an error. A shallow clone is refused with its cause, never a short list.
+#[test]
+fn members_of_a_shallow_clone_are_refused_not_listed_short() {
+    let (_keep, root) = crate::golden::fixture_repo();
+    let g = |args: &[&str]| crate::golden::git(&root, args);
+    std::fs::write(root.join("main.txt"), "main\n").unwrap();
+    g(&["add", "main.txt"]);
+    g(&["commit", "-q", "-m", "feat: main"]);
+    // Control: the whole history lists the commit.
+    assert_eq!(
+        replay::members(&root, "fixture-head..HEAD").unwrap().len(),
+        1,
+        "control: a full clone lists the member"
+    );
+    // Every object is still there; the history is cut at HEAD, as a depth-1 fetch cuts it.
+    let mut cmd = paddock_proc::command("git");
+    cmd.arg("-C").arg(&root).args(["rev-parse", "HEAD"]);
+    let head = paddock_proc::run_bounded(cmd, paddock_proc::Limits::new(Duration::from_secs(30)))
+        .unwrap()
+        .stdout_text();
+    std::fs::write(root.join(".git").join("shallow"), format!("{}\n", head.trim())).unwrap();
+    let err = replay::members(&root, "fixture-head..HEAD").unwrap_err();
+    assert!(err.contains("shallow") && err.contains("git fetch --unshallow"), "{err}");
 }
 
 #[test]

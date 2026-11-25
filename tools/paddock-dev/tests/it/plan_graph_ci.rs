@@ -31,18 +31,36 @@ fn fixture() -> (tempfile::TempDir, PathBuf) {
     .unwrap();
     // The app job runs the apps the plan names (its `if` reads `any_app`, as ci.yml's does).
     let ci = root.join(".gitea/workflows/ci.yml");
-    let text = std::fs::read_to_string(&ci).unwrap();
-    let text = text.replace(
-        "  app:\n    needs: [plan]\n",
-        "  app:\n    needs: [plan]\n    if: ${{ needs.plan.outputs.any_app == 'true' }}\n",
-    );
-    assert!(text.contains("outputs.any_app"), "the fixture's app job");
-    std::fs::write(&ci, text).unwrap();
+    std::fs::write(&ci, app_job_reads_any_app(&std::fs::read_to_string(&ci).unwrap())).unwrap();
     std::fs::create_dir_all(root.join("apps/x/app/src")).unwrap();
     std::fs::write(root.join("apps/x/app/src/main.spec.ts"), "it('runs', () => {});\n").unwrap();
     crate::golden::git(&root, &["add", "-A"]);
     crate::golden::git(&root, &["commit", "-q", "-m", "declarations"]);
     (keep, root)
+}
+
+/// The fixture's ci.yml with its app job's `if` reading `any_app`, written with LF whatever line endings the checkout gave it (the
+/// planner reads YAML, so the line endings of the temporary repository do not matter).
+fn app_job_reads_any_app(text: &str) -> String {
+    let text = text.replace("\r\n", "\n").replace(
+        "  app:\n    needs: [plan]\n",
+        "  app:\n    needs: [plan]\n    if: ${{ needs.plan.outputs.any_app == 'true' }}\n",
+    );
+    assert!(text.contains("outputs.any_app"), "the fixture's app job");
+    text
+}
+
+/// Run 9021 (nightly 1812), Windows: the checkout gives the fixture's ci.yml CRLF line endings (`* text=auto`), so an edit written
+/// with `\n` found no app job. The edit holds for both line endings.
+#[test]
+fn the_app_job_edit_holds_for_a_crlf_checkout() {
+    let lf = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden/fixture/.gitea/workflows/ci.yml"))
+        .unwrap()
+        .replace("\r\n", "\n");
+    let crlf = lf.replace('\n', "\r\n");
+    for text in [lf, crlf] {
+        assert!(app_job_reads_any_app(&text).contains("    if: ${{ needs.plan.outputs.any_app == 'true' }}"));
+    }
 }
 
 /// What the plan job of a dispatch with the parent as its base logs and writes, after one commit that writes `edit`.
