@@ -4,7 +4,7 @@
 //!
 //! Every scenario returns what a raw client saw below the library ([`Observed::raw`]), decoded as frames.
 
-use super::raw::{READ_GUARD, RawEndKind, RawStream, read_to_end, write_junk};
+use super::raw::{READ_GUARD, RawEndKind, RawStream, read_to_end, send_then_keep_writing};
 use super::{Decoded, Expect, Observed, Scenario, Typed};
 use crate::endpoint::{self, Stream};
 use crate::error::{IpcError, codes};
@@ -84,7 +84,8 @@ fn raw_client(target: &IpcTarget) -> Result<Stream, &'static str> {
     Stream::connect(&target.endpoint, GUARD).map_err(|_| "the endpoint could not be reached")
 }
 
-/// A client presents `hello` and reads to the end of the stream.
+/// A client presents `first` (and, with `keep_writing`, keeps writing in the same write and after) and reads to the end of
+/// the stream.
 fn refused_by(
     target: &IpcTarget,
     first: &[u8],
@@ -92,11 +93,12 @@ fn refused_by(
 ) -> Result<Observed, &'static str> {
     use std::io::Write;
     let mut c = raw_client(target)?;
-    c.write_all(first)
-        .map_err(|_| "the first frame could not be written")?;
-    if keep_writing {
-        write_junk(&mut c, super::KEEP_WRITING_BYTES);
-    }
+    let wrote = if keep_writing {
+        send_then_keep_writing(&mut c, first, super::KEEP_WRITING_BYTES).map(drop)
+    } else {
+        c.write_all(first)
+    };
+    wrote.map_err(|_| "the first frame could not be written")?;
     let raw = read_to_end(&mut c, READ_GUARD);
     Ok(observed(raw, target.limit))
 }

@@ -301,10 +301,10 @@ pub(crate) mod tests {
         assert!(members.len() >= complete, "the tool started its programs: {members:?}");
         let gone = eventually_gone(&members);
         if !gone {
-            // Only processes that are still the tool's own: a pid reused by an unrelated process is never touched.
-            for m in &members {
-                if running(*m) {
-                    kill_member(*m);
+            // Only processes that are still the tool's own: a pid handed on to an unrelated process is never touched.
+            for &m in &members {
+                if m.confirmed_running() {
+                    paddock_proc::end(m);
                 }
             }
         }
@@ -314,40 +314,22 @@ pub(crate) mod tests {
     /// Ends a hung test, never a product interval.
     const HANG_GUARD: Duration = Duration::from_secs(60);
 
-    /// One process of the tool's tree, with what identifies it beyond its pid: the tool's process group on Unix, its
-    /// start time on Windows.
-    #[derive(Debug, Clone, Copy)]
-    struct Member {
-        pid: u32,
-        mark: u64,
-    }
-
-    /// The tool `pid` and its programs: its process group on Unix, its descendants on Windows.
-    #[cfg(unix)]
-    fn tree_members(pid: u32) -> Vec<Member> {
-        let out = quiet_command(Path::new("pgrep")).args(["-g", &pid.to_string()]).output().unwrap();
-        String::from_utf8_lossy(&out.stdout)
-            .lines()
-            .filter_map(|l| l.trim().parse().ok())
-            .map(|p| Member {
-                pid: p,
-                mark: u64::from(pid),
-            })
-            .collect()
-    }
-
-    /// The tool's descendants by identity (paddock-proc follows parent links only from older to newer processes); the
-    /// mark is the start time in microseconds.
-    #[cfg(windows)]
-    fn tree_members(pid: u32) -> Vec<Member> {
-        use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
+    /// The tool `pid` and the programs it started, by identity (paddock-proc follows parent links only from older to newer
+    /// processes, so a stranger holding a handed-on parent pid is never a member).
+    fn tree_members(pid: u32) -> Vec<paddock_proc::ProcessId> {
         let Some(root) = paddock_proc::ProcessId::of(pid) else {
             return vec![];
         };
         let mut members = vec![root];
         members.extend(paddock_proc::descendants_of(root));
-        // `cmd` gets a console host of its own, which is not one of the tool's programs (the name only filters what to
-        // count; what is ended is chosen by identity).
+        console_hosts_dropped(members)
+    }
+
+    /// `cmd` gets a console host of its own, which is not one of the tool's programs (the name only filters what to count;
+    /// what is ended is chosen by identity).
+    #[cfg(windows)]
+    fn console_hosts_dropped(members: Vec<paddock_proc::ProcessId>) -> Vec<paddock_proc::ProcessId> {
+        use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
         let mut sys = System::new().expect("a System");
         sys.refresh_processes_specifics(ProcessesToUpdate::All, true, ProcessRefreshKind::nothing());
         members
@@ -356,18 +338,19 @@ pub(crate) mod tests {
                 sys.process(Pid::from_u32(id.pid()))
                     .is_none_or(|q| !q.name().to_string_lossy().eq_ignore_ascii_case("conhost.exe"))
             })
-            .map(|id| Member {
-                pid: id.pid(),
-                mark: id.started().as_micros(),
-            })
             .collect()
     }
 
-    /// Whether every one of `members` is gone (a zombie counts as gone), waiting on that condition up to the hang guard.
-    fn eventually_gone(members: &[Member]) -> bool {
+    #[cfg(unix)]
+    fn console_hosts_dropped(members: Vec<paddock_proc::ProcessId>) -> Vec<paddock_proc::ProcessId> {
+        members
+    }
+
+    /// Whether every one of `members` has ended (a zombie counts as ended), waiting on that condition up to the hang guard.
+    fn eventually_gone(members: &[paddock_proc::ProcessId]) -> bool {
         let guard = Instant::now() + HANG_GUARD;
         loop {
-            if members.iter().all(|m| !running(*m)) {
+            if members.iter().all(|m| m.has_ended()) {
                 return true;
             }
             if Instant::now() > guard {
@@ -375,51 +358,6 @@ pub(crate) mod tests {
             }
             std::thread::sleep(Duration::from_millis(20));
         }
-    }
-
-    /// Whether the member still runs and is still the tool's (same process group).
-    #[cfg(unix)]
-    fn running(m: Member) -> bool {
-        let out = quiet_command(Path::new("ps"))
-            .args(["-o", "stat=,pgid=", "-p", &m.pid.to_string()])
-            .output()
-            .unwrap();
-        let text = String::from_utf8_lossy(&out.stdout);
-        let mut fields = text.split_whitespace();
-        match (fields.next(), fields.next().and_then(|g| g.parse::<u64>().ok())) {
-            (Some(stat), Some(pgid)) => !stat.starts_with('Z') && pgid == m.mark,
-            _ => false,
-        }
-    }
-
-    /// Whether the member still runs and is still the same process (same start time, to the microsecond).
-    #[cfg(windows)]
-    fn running(m: Member) -> bool {
-        member_id(m).confirmed_running()
-    }
-
-    #[cfg(windows)]
-    fn member_id(m: Member) -> paddock_proc::ProcessId {
-        paddock_proc::ProcessId::new(m.pid, paddock_proc::StartTime::from_micros(m.mark))
-    }
-
-    #[cfg(unix)]
-    #[cfg_attr(
-        unix,
-        expect(
-            clippy::disallowed_methods,
-            reason = "ADR 0033 WP-6 (test): kills tree members found by parent pids; use paddock_proc"
-        )
-    )]
-    fn kill_member(m: Member) {
-        if let Ok(p) = i32::try_from(m.pid) {
-            let _ = nix::sys::signal::kill(nix::unistd::Pid::from_raw(p), nix::sys::signal::Signal::SIGKILL);
-        }
-    }
-
-    #[cfg(windows)]
-    fn kill_member(m: Member) {
-        paddock_proc::end(member_id(m));
     }
 
     #[test]

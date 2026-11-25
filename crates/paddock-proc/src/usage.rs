@@ -134,15 +134,7 @@ pub(crate) fn snapshot_with(make: impl FnOnce() -> Result<System, sysinfo::Error
         true,
         ProcessRefreshKind::nothing().with_memory(),
     );
-    table_of_listing(
-        listed_at,
-        sys.processes().iter().map(|(pid, p)| Listed {
-            pid: pid.as_u32(),
-            parent: p.parent().map(Pid::as_u32),
-            rss: p.memory(),
-            is_thread: p.thread_kind().is_some(),
-        }),
-    )
+    table_of_listing(listed_at, sys.processes().values().map(Listed::of))
 }
 
 /// The time to read just before a caller reads a process list itself (its own sysinfo `System`), for
@@ -174,6 +166,23 @@ pub struct Listed {
     pub rss: u64,
     /// Linux thread entry.
     pub is_thread: bool,
+}
+
+impl Listed {
+    /// The row of a process in a refreshed sysinfo list (its memory read with it, or 0). Its parent pid is only a number: give
+    /// the rows to [`table_of_listing`] and ask [`parent_of`] or [`descendants`], never follow it directly (ADR 0033).
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the one reader of sysinfo's parent pid: it goes into a table, where parent_of judges it"
+    )]
+    pub fn of(p: &sysinfo::Process) -> Listed {
+        Listed {
+            pid: p.pid().as_u32(),
+            parent: p.parent().map(Pid::as_u32),
+            rss: p.memory(),
+            is_thread: p.thread_kind().is_some(),
+        }
+    }
 }
 
 /// What one read of a single process gave, after the list: when the process that holds the pid now started, and its parent

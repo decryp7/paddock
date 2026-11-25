@@ -8,12 +8,12 @@ use dyno_core::process::Pid;
 pub struct ShortInfo {
     /// The user id the process runs as.
     pub uid: u32,
-    /// The parent's pid.
+    /// The parent's pid as the kernel lists it: only a number. Dyno follows it only through `paddock_proc::parent_of`
+    /// (the process list's table), which drops a link to a parent that started after the child (ADR 0033).
     pub parent: Pid,
 }
 
 /// The short BSD info of `pid`; `None` when the kernel won't say or the process is gone.
-// ADR 0033 WP-9: the parent pid is shown in the process tree without a start-time check (display only).
 pub fn short_info(pid: Pid) -> Option<ShortInfo> {
     // SAFETY: `proc_bsdshortinfo` is plain data for which zero is a valid bit pattern.
     let mut info: libc::proc_bsdshortinfo = unsafe { std::mem::zeroed() };
@@ -30,6 +30,7 @@ pub fn short_info(pid: Pid) -> Option<ShortInfo> {
     };
     (got == size && info.pbsi_pid == pid).then_some(ShortInfo {
         uid: info.pbsi_uid,
+        // conformance: parent-pid — only the listed parent: it fills the paddock_proc table, where parent_of judges it
         parent: info.pbsi_ppid,
     })
 }

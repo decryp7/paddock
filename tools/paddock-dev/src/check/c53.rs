@@ -10,7 +10,8 @@
 //! - open follow-ups: a comment or `#[expect]` reason naming `ADR 0033 WP-<n>`; each needs a dated waiver in
 //!   `paddock.waivers.toml`.
 //!
-//! A justified site carries `// conformance: pid-kill — <reason>` on the line or the line above.
+//! A justified site carries `// conformance: pid-kill — <reason>` on the line or the line above. The liveness half is
+//! [`super::c53_liveness`]; the parent-pid half (raw parent-pid struct fields, which Clippy cannot ban) is [`super::c53_parents`].
 //!
 //! The JavaScript check (`C53-pid-kills.mjs`) was retired with pair P3 (ADR 0022 amendment 2026-11-19); `tests/it/check.rs` holds this one to the answers it recorded. Positions are
 //! UTF-16 offsets, as in the JavaScript, so a hit orders the same way next to non-ASCII text.
@@ -177,8 +178,14 @@ impl Check for C53 {
                     "apps/x/vendor/d/src/w.rs",
                     "fn a(h: HANDLE) {\n    unsafe { TerminateProcess(h, 1) };\n}\n",
                 ),
+                // The parent-pid half: a raw Toolhelp parent outside paddock-proc, and the same read in paddock-proc.
+                ("crates/c/src/tree.rs", "fn a(e: E) -> u32 {\n    e.th32ParentProcessID\n}\n"),
+                (
+                    "crates/paddock-proc/src/list.rs",
+                    "fn a(e: E) -> u32 {\n    e.th32ParentProcessID\n}\n",
+                ),
             ],
-            expect: vec![("crates/c/src/bad.rs", 2)],
+            expect: vec![("crates/c/src/bad.rs", 2), ("crates/c/src/tree.rs", 2)],
         }
     }
 
@@ -236,6 +243,7 @@ impl Check for C53 {
         }
         let live = super::c53_liveness::liveness_findings(ctx);
         findings.extend(live.findings);
+        findings.extend(super::c53_parents::parent_findings(&ctx.files(), |f| ctx.read(f)));
         let has_rs = ctx.tree_files().iter().any(|f| f.ends_with(".rs"));
         let (met, detail) = if live.stale_unmeasured {
             (
