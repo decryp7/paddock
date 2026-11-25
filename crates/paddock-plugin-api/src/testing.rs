@@ -1,6 +1,6 @@
 //! Test doubles shared by this crate's unit tests.
 
-use crate::protocol::SavedOutput;
+use crate::protocol::{Progress, SavedOutput};
 use crate::tools::{Host, ToolError, ToolTask};
 use serde_json::Value;
 use std::sync::{Arc, Mutex};
@@ -48,7 +48,7 @@ impl Host for Memory {
         Ok(out)
     }
 
-    fn report(&self, task: &str, progress: Option<f32>, note: &str) {
+    fn report(&self, task: &str, progress: Option<Progress>, note: &str) {
         self.note(format!("report {task} {progress:?} {note}"));
     }
 

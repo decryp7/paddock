@@ -38,7 +38,7 @@ and links here.
 
 | Name | What is there | How the tools find it |
 | --- | --- | --- |
-| `<dev-targets>` | worktrees (`wt/`), build folders, agent scratch (`scratch/<agent id>`), `sccache`, `paddock-dev-home`, the disk index `.paddock-disk.sqlite` | `PADDOCK_DEV_TARGETS`, else the parent of `paddock.worktreeRoot`, else of `PADDOCK_WORKTREE_ROOT` |
+| `<dev-targets>` | worktrees (`wt/`), build folders, agent scratch (`scratch/<agent id>`), `sccache`, `paddock-dev-home`, the disk index `.paddock-disk.sqlite`, heavy's run logs (`runs/<agent>/`) | `PADDOCK_DEV_TARGETS`, else the parent of `paddock.worktreeRoot`, else of `PADDOCK_WORKTREE_ROOT` |
 | `<dev disk>` | the folder that holds `<dev-targets>` | the parent of `<dev-targets>` |
 | `<dev disk>/vm-data` | the Tart images `tart-from-home` of the service smoke | `PADDOCK_VM_DATA`, else derived |
 | `<dev disk>/ci/locks/test-machines` | the lock of the test machines (`scripts/vm-lock.sh`) | `PADDOCK_VM_LOCK_ROOT`, else derived |

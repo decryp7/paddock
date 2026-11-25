@@ -39,6 +39,28 @@ fn stop_flags() -> (Arc<AtomicBool>, Arc<AtomicBool>, Arc<AtomicBool>) {
     (int, term, hup)
 }
 
+/// The dev-targets folder by the tools' rule (docs/dev-setup.md, "Where things live"; `heavy::capture::dev_targets_of`):
+/// `PADDOCK_DEV_TARGETS`, else the parent of `git config paddock.worktreeRoot` read from the current folder, else of
+/// `PADDOCK_WORKTREE_ROOT`. `None` when none gives one: the run logs then go under the lock folder.
+fn dev_targets() -> Option<std::path::PathBuf> {
+    use heavy::capture::{DEV_TARGETS_ENV, dev_targets_of};
+    if let Some(v) = env_get(DEV_TARGETS_ENV) {
+        return dev_targets_of(Some(&v), None);
+    }
+    let mut git = paddock_proc::command("git");
+    git.args(["config", "--get", "paddock.worktreeRoot"]);
+    let from_git = paddock_proc::run_bounded(
+        git,
+        paddock_proc::Limits::new(std::time::Duration::from_secs(10)).max_output(1 << 16),
+    )
+    .ok()
+    .filter(paddock_proc::Output::success)
+    .map(|o| o.stdout_text().trim().to_string())
+    .filter(|v| !v.is_empty());
+    let root = from_git.or_else(|| env_get("PADDOCK_WORKTREE_ROOT"));
+    dev_targets_of(None, root.as_deref())
+}
+
 fn main() {
     let code = real_main();
     // The full 32 bits on Windows (NTSTATUS), the low byte (never a false success) elsewhere.
@@ -82,6 +104,9 @@ fn real_main() -> i32 {
         if let Some(f) = &r.log_file {
             cfg.log_file = Some(f.into());
         }
+    }
+    if matches!(parsed, Cli::Run(_)) && cfg.runs.is_none() {
+        cfg.runs = dev_targets().map(|d| d.join("runs"));
     }
     let log = Arc::new(Logger::new(
         run_id.clone(),
@@ -173,7 +198,9 @@ fn real_main() -> i32 {
                 queue_max: r.queue_max.map(std::time::Duration::from_secs_f64),
                 queue_stall: r.queue_stall.map(std::time::Duration::from_secs_f64),
                 run_max: r.run_max.map(std::time::Duration::from_secs_f64),
+                stall: r.stall.map(std::time::Duration::from_secs_f64).or(h.cfg.stall),
             };
+            // Inside a run that holds a slot (HEAVY_HELD from a live holder): run in that slot, never queue for it (ER-43).
             if let Some(outer) = heavy::runner::held_by(&h, env_get(heavy::runner::HELD_VAR).as_deref()) {
                 return heavy::runner::run_nested(&h, &req.name, &r.command, opts, &stop, &outer);
             }

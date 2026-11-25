@@ -24,6 +24,20 @@ const ABOUT_INFO = {
   updatesAvailable: false,
 };
 
+/** Updates as a build without an update signing key reports them: the releases page is the one thing to do. */
+const UPDATES_STATUS = {
+  currentVersion: '0.1.0',
+  phase: { kind: 'unavailable' },
+  lastChecked: null,
+  autoCheck: false,
+  channel: 'stable',
+  channels: [{ id: 'stable', label: 'Stable' }],
+  endpointHost: null,
+  releasesPage: 'https://updates.example/releases',
+  canInstall: false,
+  install: { scope: 'perUser', installOnQuitAvailable: false, administratorNotice: null },
+};
+
 /** Node's `fs`, loaded at run time (the spec programme has no Node types). */
 interface NodeFs {
   readFileSync(path: string, encoding: 'utf8'): string;
@@ -46,13 +60,19 @@ describe('shell-demo dialogs', () => {
         // Called with the IPC recorder in place: the window takes its Tauri backends, as in the desktop build.
         providers: dialogBaseProviders,
         baseCommands: DIALOG_BASE_COMMANDS,
-        answers: { window_ready: { recovered: null, ui: null }, about_info: ABOUT_INFO },
-        // The user follows About's releases link: the window asks the engine to open it (files_open_url).
+        answers: { window_ready: { recovered: null, ui: null }, about_info: ABOUT_INFO, updates_status: UPDATES_STATUS },
+        // The user follows About's releases link: the window asks the engine to open it (files_open_url). In Updates the user
+        // presses "Open releases page": the engine opens the page it knows (updates_open_releases).
         interact: {
           'pd.about': (root) => {
             const link = root.querySelector<HTMLAnchorElement>('[data-testid=about-releases]');
             if (!link) throw new Error('About shows no releases link');
             link.click();
+          },
+          'pd.updates': (root) => {
+            const button = [...root.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Open releases page');
+            if (!button) throw new Error(`Updates shows no "Open releases page" button: ${root.textContent ?? ''}`);
+            button.click();
           },
         },
         inputs: { 'sd.rename': { current: 'Demo' }, 'pd.channels.secret': { channelId: 'slack', label: 'Slack', kind: 'token' }, 'pd.channels.remove': { channelId: 'slack', name: 'Slack' }, 'pd.mcp.revoke': { keyId: 1, client: 'Pitwall' }, 'pd.confirm': { heading: 'Forget?', message: 'It goes.', confirm: { label: 'Forget greetings', destructive: true } } },
@@ -62,6 +82,7 @@ describe('shell-demo dialogs', () => {
       if (def.id === 'pd.settings') expect(report.sent).toContain('settings_overview');
       if (def.id === 'pd.setup') expect(report.sent).toContain('setup_state');
       if (def.id === 'pd.about') expect(report.sent).toContain('files_open_url');
+      if (def.id === 'pd.updates') expect(report.sent).toContain('updates_open_releases');
     });
   }
 

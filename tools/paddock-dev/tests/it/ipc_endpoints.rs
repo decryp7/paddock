@@ -3,8 +3,8 @@
 //! the expected sites, and removing any fixture file must change that list, so a call the parser stops seeing turns this red.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 use paddock_dev::ipc_endpoints::{
-    FAULTS, PRIMITIVES, RATCHET, REGISTER, RatchetEntry, SCENARIOS, Site, blocked_by, check, check_with, parse_ratchet, scan, scan_with,
-    tag_matches,
+    FAULTS, PRECONDITIONS, PRIMITIVES, RATCHET, REGISTER, RatchetEntry, SCENARIOS, Site, blocked_by, check, check_with, parse_ratchet,
+    scan, scan_with, tag_matches,
 };
 use std::path::{Path, PathBuf};
 
@@ -506,7 +506,7 @@ blocks_tag = "dyno-v*"
 fn the_check_and_the_harness_agree_on_names() {
     let source = std::fs::read_to_string(repo_root().join("crates/paddock-ipc/src/testing/endings/mod.rs")).unwrap();
     let ratchet_src = parse_ratchet(&std::fs::read_to_string(repo_root().join(RATCHET)).unwrap()).unwrap();
-    for name in SCENARIOS.iter().chain(FAULTS.iter()) {
+    for name in SCENARIOS.iter().chain(FAULTS.iter()).chain(PRECONDITIONS.iter()) {
         assert!(
             source.contains(&format!("\"{name}\"")),
             "the check knows `{name}`, which the harness does not report"
@@ -661,4 +661,60 @@ fn the_scan_reads_the_files_git_knows_and_not_the_file_system() {
     std::fs::write(dir.path().join("target/built.rs"), SERVER).unwrap();
     let files: Vec<String> = scan(dir.path()).unwrap().into_iter().map(|s| s.file).collect();
     assert_eq!(files, ["src/m\u{fc}ller server.rs", "src/tracked.rs", "src/untracked.rs"]);
+}
+
+/// ADR 0122: an exemption names a registered endpoint, a known scenario and precondition, and its reason; one entry per
+/// endpoint, scenario and precondition.
+#[test]
+fn precondition_exemptions_need_a_known_endpoint_scenario_precondition_and_reason() {
+    let register = format!(
+        r#"{GOOD_REGISTER}
+[[precondition_exempt]]
+endpoint = "ep"
+scenario = "busy"
+precondition = "input-queued-when-refused"
+reason = "writes nothing"
+
+[[precondition_exempt]]
+endpoint = "ep"
+scenario = "busy"
+precondition = "input-queued-when-refused"
+reason = "again"
+
+[[precondition_exempt]]
+endpoint = "ghost"
+scenario = "busy"
+precondition = "input-queued-when-refused"
+reason = "x"
+
+[[precondition_exempt]]
+endpoint = "ep"
+scenario = "nonsense"
+precondition = "input-queued-when-refused"
+reason = "x"
+
+[[precondition_exempt]]
+endpoint = "ep"
+scenario = "wrong-account"
+precondition = "nonsense"
+reason = "x"
+
+[[precondition_exempt]]
+endpoint = "ep"
+scenario = "client-keeps-writing"
+precondition = "input-queued-when-refused"
+reason = " "
+"#
+    );
+    let found = run(&[("src/server.rs", SERVER), ("tests/endings.rs", TEST_FILE)], &register, "").join("\n");
+    for want in [
+        "precondition_exempt ep / busy / input-queued-when-refused: listed twice",
+        "precondition_exempt ghost / busy / input-queued-when-refused: the endpoint is not registered",
+        "precondition_exempt ep / nonsense / input-queued-when-refused: unknown scenario",
+        "precondition_exempt ep / wrong-account / nonsense: unknown precondition",
+        "precondition_exempt ep / client-keeps-writing / input-queued-when-refused: an exemption needs its reason",
+    ] {
+        assert!(found.contains(want), "{want}\n{found}");
+    }
+    assert_eq!(found.matches("precondition_exempt").count(), 5, "the first entry is fine: {found}");
 }

@@ -48,7 +48,7 @@ impl Host for PeerHost {
             .map_err(to_error)
     }
 
-    fn report(&self, task: &str, progress: Option<f32>, note: &str) {
+    fn report(&self, task: &str, progress: Option<Progress>, note: &str) {
         let call = HostCall::Report {
             task: task.into(),
             progress,
@@ -162,7 +162,7 @@ impl Host for Tracking {
     fn read_file(&self, id: u64, offset: u64, len: u32) -> Result<Vec<u8>, ToolError> {
         self.inner.read_file(id, offset, len)
     }
-    fn report(&self, task: &str, progress: Option<f32>, note: &str) {
+    fn report(&self, task: &str, progress: Option<Progress>, note: &str) {
         self.inner.report(task, progress, note);
     }
     fn task_started(&self, tool: &str, task: &ToolTask) {

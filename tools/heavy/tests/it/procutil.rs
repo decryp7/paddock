@@ -138,6 +138,8 @@ pub fn base_env(c: &mut TestCommand, w: &World) {
         .env("HEAVY_SLOTS", "1")
         .env("HOME", w.path("home"))
         .env("CARGO_HOME", w.path("home/.cargo"))
+        // The run logs go to the world's own dev-targets folder, never the machine's (ER-14).
+        .env("PADDOCK_DEV_TARGETS", w.path("dev-targets"))
         .stdin(Stdio::null());
 }
 
