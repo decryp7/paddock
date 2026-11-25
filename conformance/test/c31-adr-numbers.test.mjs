@@ -21,3 +21,21 @@ test('C31 bad: 7 and 0007 are the same number, and a short number is reported', 
   assert.equal(f.filter((x) => /not four digits/.test(x.message)).length, 1);
   assert.equal(f.filter((x) => /used by 2 files/.test(x.message)).length, 2);
 });
+
+const rules = (...ls) => makeApp({ 'docs/rules.md': `# Rules\n\n${ls.join('\n')}\n` });
+
+test('C31 rules good: unique numbers pass', async () => {
+  assert.deepEqual(await findingsOf('C31', rules('1. **A.** x', '2. **B.** y')), []);
+});
+
+test('C31 rules bad: two rules with one number are an error', async () => {
+  const f = await findingsOf('C31', rules('90. **A.** x', '91. **B.** y', '90. **C.** z'));
+  assert.equal(f.length, 1);
+  assert.equal(f[0].severity, 'error');
+  assert.match(messages(f), /rule number 90 is used 2 times/);
+});
+
+test('C31 rules: a NEW- placeholder is a warning, not an error', async () => {
+  const f = await findingsOf('C31', rules('1. **A.** x', 'NEW-test-hooks. **B.** y'));
+  assert.deepEqual(f.map((x) => x.severity), ['warn']);
+});

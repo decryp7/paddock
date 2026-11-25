@@ -8,6 +8,10 @@ The rules marked ER-n come from the generic engineering-playbook repository, whi
 The Paddock incidents, run ids and ADR numbers behind each ER rule are in
 [lessons.md](lessons.md#incidents-behind-the-engineering-playbook-er-1-to-er-51-moved-from-the-generic-rules-repo-2026-11-24).
 
+A branch never picks a rule number (user, 2026-11-25): it writes a new rule as `NEW-<slug>.` in place of the number and cites it as
+`rule NEW-<slug>`; the train integrator gives it the next free number when the train lands and replaces every citation. Numbers are
+unique (C31).
+
 ## Way of working
 1. **One release at a time.** Release-critical work comes first. Other apps may progress in parallel only while load and
    CI capacity allow, and only if they don't change shared code (`crates/`, `ui/`) the release depends on; tags stay
