@@ -4139,3 +4139,35 @@ variables nobody listed: [__CF_USER_TEXT_ENCODING, ...]".
 run 9011 (failed once, passed on its retry; flaky-as-failure kept the run red, ER-12). Not fixed on train 2026-11-26-e: a fix item for
 paddock-watch's owner, which starts with a reproduction under load and the list of causes with what rules each out (ER-28). No sleep or
 raised timeout as the fix.
+
+## An owner killed while its guardian was still starting left its children running (fix/guardian-three-children-workspace-run, 2026-11-25)
+Symptom: `paddock-proc` `guardian::unix::tests::an_owner_killed_with_three_guarded_children_leaves_none_and_no_folder` failed both
+tries at 40 s ("the orphaned children's groups did not end, or their folders stayed") in the whole-workspace nextest ci run in the
+arm64 Linux CI image (4 of 4 tries), and passed in a paddock-proc-only run. CI's amd64 crates job passed it (run 9030, 0.17 s).
+**Causes listed.** (1) Load from the whole run: no, the second try ran last and alone and still failed, and the test failed alone on
+the whole-workspace binary (2 of 2). (2) Another test binary's state or processes (a shared path, a killed group): no, same reason; `-p
+paddock-proc` and the workspace build differ only in the build, not in neighbours. (3) Root: the test acts as a user, and the log
+showed the guardian acting. (4) PID reuse: the guardian's check reads its parent by identity; the log named the right owner. (5) The
+40 s hang guard: the guardian had refused at once, so no wait would end green.
+(6) **The owner died before its guardian had checked it**: confirmed. The guardian's log said "refused to serve: its parent (pid 1) is not
+the owner it names"; a snapshot just before the kill showed the guardian still starting (no command line, running, not yet reading),
+while the owner had registered three children and said "ready". `register` handed a child back as guarded as soon as it had written the
+line, without knowing the guardian would take its owner; the guardian's start took 11 ms in the Linux image, longer than the owner's
+path to its death there.
+**Fix.** The guardian says `serving` on its standard error (a pipe the owner reads) once its check passed, then points standard error
+at the null device; `start` waits for that word (at most 30 s, a hang detector; measured 3 ms on the Mac, 11 ms in the Linux image) and
+treats a guardian that exits first as no guard, logged. A new regression test,
+`an_owner_killed_the_moment_its_guarded_spawn_returns_leaves_no_child`, has the owner kill itself (SIGKILL) the moment its one guarded
+spawn returns: no sleep, no reader in between. With the wait taken out it failed 8 of 8 on macOS and at least 3 of 4 in the Linux image
+with the CI symptom; with the fix it passed 60 of 60 under `--stress-count` on macOS and 60 of 60 in the Linux image. Both owner tests'
+failures now carry what is left and the guardian's log (ER-27: the old message said only that something stayed). The whole-workspace
+run in the Linux image: 6 of 6 tries red before (whole run and the test alone on the workspace binary); 10 whole-workspace runs green
+after (5 before and 5 after the test change, 5221 and 5222 tests; arm64 CI image, 4 CPUs, num-cpus threads). Train g's
+integrator saw it red in 3 of 4 full container runs, so p is about 75 % to 100 % per run; 10 green runs exceed the 5 that p >= 50 %
+needs.
+**At the train merge** (train/2026-11-26-h, 2026-11-25) main already held ADR 0119 WP-1's own `serving` handshake (scope review 1,
+reapplied in 6fe47386d after this branch was cut from a base where WP-1 was pulled): the train kept WP-1's implementation
+(`SERVING_BOUND` 10 s, refusal exit 87, no answer logged and the start goes on) and this branch's regression test and failure
+diagnostics, and dropped this branch's second copy of the handshake (`await_serving`, `SERVE_WAIT`).
+**Class: a started helper was relied on before it said it was ready** (earlier: the webview ready handshake, memory "Webview paused
+startup"; the Chromium start judge, ADR 0031). A start that hands back a handle should wait for the helper's own word.
