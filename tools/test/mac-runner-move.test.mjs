@@ -4,7 +4,7 @@
 // parser (ER-42); these tests therefore run on macOS only.
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { test } from 'node:test';
@@ -44,7 +44,7 @@ const agent = (home, name, extraEnv = '') => `<?xml version="1.0" encoding="UTF-
 `;
 
 /** A scratch Mac with three runner lanes, each a loaded LaunchAgent with its runner folder. */
-function mac({ root = true, unregistered = [], silent = [], psUser = USER, program = true, parkedByHand = false, dev = '/dt-test', signing = 'unsigned' } = {}) {
+function mac({ root = true, unregistered = [], silent = [], psUser = USER, program = true, parkedByHand = false, dev = '/dt-test', signing = 'unsigned', jobPolls = 0, bootstrapFails = [], notRunning = [] } = {}) {
   const home = scratch('paddock-runner-home-');
   const sys = scratch('paddock-runner-sys-');
   const bin = scratch('paddock-runner-bin-');
@@ -66,11 +66,15 @@ function mac({ root = true, unregistered = [], silent = [], psUser = USER, progr
 state="${state}"
 case "$1" in
   print) grep -qxF "$2" "$state" || { echo "Could not find service \\"$2\\"" >&2; exit 113; }
-         printf '%s = {\\n\\tstate = running\\n\\tpid = 4242\\n}\\n' "$2" ;;
+         st=running; case " ${notRunning.join(' ')} " in *" \${2##*.} "*) st='spawn scheduled' ;; esac
+         printf '%s = {\\n\\tstate = %s\\n\\tpid = 4242\\n}\\n' "$2" "$st" ;;
+  kill) : > "$state.draining" ;;
   bootout) grep -vxF "$2" "$state" > "$state.n"; mv "$state.n" "$state" ;;
   bootstrap)
-    label=$(plutil -extract Label raw -o - "$3"); echo "$2/$label" >> "$state"
-    log=$(plutil -extract StandardErrorPath raw -o - "$3"); name=\${label#${PREFIX}}
+    label=$(plutil -extract Label raw -o - "$3"); name=\${label#${PREFIX}}
+    case " ${bootstrapFails.join(' ')} " in *" $name "*) echo "Bootstrap failed: 5: Input/output error" >&2; exit 5 ;; esac
+    echo "$2/$label" >> "$state"
+    log=$(plutil -extract StandardErrorPath raw -o - "$3")
     case " ${silent.join(' ')} " in *" $name "*) exit 0 ;; esac
     case " ${unregistered.join(' ')} " in
       *" $name "*) echo 'level=error msg="fail to invoke Declare" error="unknown: rpc error: code = Unauthenticated desc = unregistered runner"' >> "$log" ;;
@@ -86,7 +90,18 @@ case "$*" in
   *) exit 1 ;;
 esac`);
   shim(bin, 'dscl', `echo "NFSHomeDirectory: ${home}"`);
-  shim(bin, 'ps', `echo " ${psUser}"`);
+  // `ps -axo pid=,ppid=,command=` is the process table: the lane's runner (pid 4242) and, while the job's polls last, a job's
+  // processes under it (each read of the table is one poll, so a job "ends" after N reads, never after a time). Any other call asks
+  // for a process user.
+  write(bin, { jobpolls: `${jobPolls}\n` });
+  shim(bin, 'ps', `case "$*" in
+  *-axo*)
+    echo "    1     0 /sbin/launchd"
+    echo " 4242     1 ${home}/runners/lane-a/gitea-runner daemon --config ${home}/runners/lane-a/config.yaml"
+    n=$(cat "${bin}/jobpolls")
+    if [ "$n" -gt 0 ]; then echo "$((n - 1))" > "${bin}/jobpolls"; echo " 5001  4242 /bin/bash -e /tmp/act/step.sh"; echo " 5002  5001 ./dev ci run crates"; fi ;;
+  *) echo " ${psUser}" ;;
+esac`);
   shim(bin, 'chown');
   shim(bin, 'sudo', 'shift 2; exec "$@"');
   shim(bin, 'getconf', 'echo /private/var/folders/xx/test/T/');
@@ -114,7 +129,7 @@ const move = (m, args) =>
   run('mac-runner-move.sh', args, {
     bin: m.bin,
     cwd: m.home,
-    env: { PADDOCK_TOOLS_OS: 'Darwin', PADDOCK_RUNNER_MOVE_SYSROOT: m.sys, PADDOCK_RUNNER_MOVE_DEV: join(m.bin, 'dev'), PADDOCK_MAC_SIGNING: m.signing },
+    env: { PADDOCK_TOOLS_OS: 'Darwin', PADDOCK_RUNNER_MOVE_SYSROOT: m.sys, PADDOCK_RUNNER_MOVE_DEV: join(m.bin, 'dev'), PADDOCK_MAC_SIGNING: m.signing, PADDOCK_RUNNER_MOVE_POLL: '0.05', PADDOCK_RUNNER_MOVE_REPORT: '0' },
   });
 const loadedJobs = (m) => readFileSync(m.state, 'utf8').trim().split('\n').filter(Boolean).sort();
 const plist = (file) => JSON.parse(spawnSync('plutil', ['-convert', 'json', '-o', '-', file], { encoding: 'utf8' }).stdout);
@@ -349,4 +364,77 @@ test('status says whether the runner carries the identity', { skip }, () => {
   assert.match(move(m, ['status', ...LANES]).out, /- lane-a\n(.*\n)* {4}signature {5}NOT the Mac CI identity: has: cdhash/);
   const s = mac({ signing: 'signed' });
   assert.match(move(s, ['status', ...LANES]).out, /signature {5}the Mac CI identity \(net\.decryptology\.gitea-runner\)/);
+});
+
+// ---- install waits, visibly and bounded, for the job a runner is running (ADR 0120; the 2026-11-26 install that stopped a running job) ----
+
+/** The runner's log with the task it logged when it took the job: the line the wait prints as "which job". */
+const taskLine = 'level=info msg="task 9001 repo is decryp7/paddock https://gitea.example.test"\n';
+
+test('install while a job runs: the runner takes no new job, install waits and says which job, then stops, swaps and verifies', { skip }, () => {
+  const m = mac({ jobPolls: 4 });
+  writeFileSync(join(m.home, 'runners/lane-a/logs/runner.log'), taskLine);
+  const r = move(m, ['install', ...LANES, '--wait-max', '60']);
+  assert.equal(r.status, 0, r.out);
+  assert.match(r.out, /lane-a: a job is running/);
+  assert.match(r.out, /task 9001 repo is decryp7\/paddock/, 'it names the job from the runner log');
+  assert.match(r.out, /\.\/dev ci run crates/, 'and the processes of the job');
+  assert.match(r.out, /waiting for the job on lane-a/);
+  assert.match(r.out, /all jobs have finished/);
+  const log = calls(m.bin).filter((l) => l.startsWith('launchctl '));
+  const at = (re) => log.findIndex((l) => re.test(l));
+  const kill = at(/^launchctl kill SIGTERM gui\/501\/net\.decryptology\.gitea-runner\.lane-a$/);
+  assert.ok(kill >= 0, log.join('\n'));
+  assert.ok(kill < at(/^launchctl bootout gui\/501\/.*lane-a$/), 'new jobs stop before anything is booted out');
+  assert.ok(at(/^launchctl bootout gui\/501\/.*lane-a$/) < at(/^launchctl bootstrap system /), 'then the daemon starts');
+  assert.deepEqual(loadedJobs(m), [`system/${PREFIX}lane-a`], 'the daemon runs; the agents are gone');
+  assert.ok(existsSync(daemonPath(m, 'lane-a')));
+  assert.match(r.out, /ok\s+lane-a \(system\): running, pid 4242/);
+});
+
+test('install does not wait when no job runs (positive control: the same lanes without a job)', { skip }, () => {
+  const m = mac();
+  const r = move(m, ['install', ...LANES]);
+  assert.equal(r.status, 0, r.out);
+  assert.match(r.out, /No job is running/);
+  assert.ok(!calls(m.bin).some((l) => l.startsWith('launchctl kill')), 'nobody was told to drain');
+});
+
+test('install that waits past --wait-max changes nothing, ends nothing and says so; the old daemon keeps running', { skip }, () => {
+  const m = mac({ jobPolls: 1_000_000 });
+  const before = snapshot(m.home, m.sys);
+  const r = move(m, ['install', ...LANES, '--wait-max', '1']);
+  assert.notEqual(r.status, 0, r.out);
+  assert.match(r.out, /error: lane-a still runs a job after 1 s/);
+  assert.match(r.out, /nothing was changed/);
+  assert.match(r.out, /next: .*--wait-max/);
+  assert.deepEqual(snapshot(m.home, m.sys), before, 'no file changed');
+  assert.deepEqual(
+    loadedJobs(m),
+    ['lane-a', 'lane-b', 'lane-c'].map((n) => `gui/501/${PREFIX}${n}`),
+    'every agent is still loaded, none was booted out'
+  );
+  const log = calls(m.bin).filter((l) => l.startsWith('launchctl '));
+  assert.ok(!log.some((l) => /bootout|bootstrap/.test(l)), log.join('\n'));
+  assert.ok(!calls(m.bin).some((l) => /^(kill|pkill|killall) /.test(l)), 'no process was killed, by pid or by name (ER-51)');
+});
+
+test('a dry run with a job running says it would wait and signals nothing', { skip }, () => {
+  const m = mac({ jobPolls: 1_000_000 });
+  const r = move(m, ['install', ...LANES, '--dry-run']);
+  assert.equal(r.status, 0, r.out);
+  assert.match(r.out, /would wait for the job on lane-a/);
+  assert.ok(!calls(m.bin).some((l) => l.startsWith('launchctl kill')), 'dry run signals nothing');
+});
+
+test('a daemon that does not start is a failure: launchctl bootstrap refusing, and a state that is not running', { skip }, () => {
+  const refused = move(mac({ bootstrapFails: ['lane-a'] }), ['install', ...LANES]);
+  assert.notEqual(refused.status, 0, refused.out);
+  assert.match(refused.out, /fail\s+lane-a \(system\): launchctl bootstrap failed/);
+  assert.match(refused.out, /next: .*launchctl print system\//);
+  const waiting = move(mac({ notRunning: ['lane-a'] }), ['install', ...LANES]);
+  assert.notEqual(waiting.status, 0, waiting.out);
+  assert.match(waiting.out, /fail\s+lane-a \(system\): .*state is 'spawn scheduled', not running/);
+  // Positive control (ER-33): the same lanes with a daemon that starts pass.
+  assert.equal(move(mac(), ['install', ...LANES]).status, 0);
 });

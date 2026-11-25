@@ -4325,3 +4325,17 @@ startup"; the Chromium start judge, ADR 0031). A start that hands back a handle 
 - **Fix.** Both read main's own line from the push event's `before` (`green::push_chain`, falling back to the old line without a
   usable `before`), and a landing run whose base is an older main is still reused when its diff holds every path of the push's
   (`green::diff_covers`). Tests read runs 9030, 9045, 9054 and 9056 as recorded (`tests/ci-runs/reuse-push-base`).
+
+## 2026-11-26: `mac-runner-move.sh install` stopped a runner under a running job
+
+- **What.** The install booted the runner out while a CI job ran. The runner logged "shutdown initiated, waiting 3h0m0s for running jobs",
+  the job's helpers (slot hold, s3-guard) were left behind, and the new daemon was not started until a second install.
+- **Fix (user decision: wait visibly, bounded).** Before any change, `install` and `rollback` find the lanes whose runner has job
+  processes (the processes under the pid `launchctl print` gives for the lane's label), tell the runner to take no new job
+  (`launchctl kill SIGTERM`), print which job runs, and wait up to `--wait-max` (default 3600 s) with a progress line every 30 s. At the
+  end of the wait they fail with nothing changed. Nothing is ended by name or by pid: the job's own cleanup ends its helpers (ER-51). The
+  verify step also requires launchd's `state = running`, and a failing `launchctl bootstrap` is a failed lane.
+- **Not measured.** The log line the wait prints for "which job" (`task <id> ...`) and the rule that an idle runner has no child process
+  were taken from the runner's behaviour as known, not read from a real run; the tests use stand-ins. The window between the end of the
+  wait and the boot-out is a few seconds, in which a restarted runner could take a job.
+
