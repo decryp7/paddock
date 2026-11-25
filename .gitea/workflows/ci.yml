@@ -1197,12 +1197,28 @@ jobs:
         with:
           mode: release
 
-  # The short Linux checks in one job (user, 2026-11-25): each took under 2 minutes as a job of its own (gitleaks 0.5-0.6, C99 0.7-0.9,
-  # the heavy tool 0.6-1.2, audit 0.9; runs 8226 and 9021), mostly container start, checkout and setup, and each held a Linux lane.
+  # Secret scan (.gitea/actions/gitleaks): the tree and the commits this branch adds on top of origin/main. It runs on every change,
+  # whatever the plan reaches, because a secret is a leak wherever it is; .gitleaks.toml lists the known fixtures, one entry each.
+  gitleaks:
+    name: gitleaks (secret scan)
+    needs: [plan]
+    if: ${{ contains(fromJSON(needs.plan.outputs.rerun_jobs || '["gitleaks"]'), 'gitleaks') }}
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          # The history scan reads origin/main..HEAD.
+          fetch-depth: 0
+      - uses: ./.gitea/actions/gitleaks
+
+  # The short Linux checks in one job (user, 2026-11-25): each took under 2 minutes as a job of its own (C99 0.7-0.9, the heavy tool
+  # 0.6-1.2, audit 0.9; runs 8226 and 9021), mostly container start, checkout and setup, and each held a Linux lane. The secret scan
+  # stays a job of its own that no plan output can switch off (scripts/gitleaks-config.test.mjs).
   # Each check is a step that runs when its own job ran before, and a failed check does not skip the next (`!cancelled()`). Last in
   # the file, so it starts after the long jobs (see paddock-dev's comment).
-  #  - Secret scan (.gitea/actions/gitleaks): the tree and the commits this branch adds on top of origin/main, on every change, whatever
-  #    the plan reaches, because a secret is a leak wherever it is; .gitleaks.toml lists the known fixtures, one entry each.
   #  - Conformance C99 (ADR 0057 §3, rule 72): no shipped process uses the macOS Keychain. Planned on its own inputs (every Cargo.toml
   #    and Cargo.lock under apps/ and crates/, the scanned sources, capabilities, paddock.ci.json, the check's code;
   #    tools/paddock-dev/src/plan.rs C99_INPUT), because it needs cargo and the registry (`cargo fetch`, `cargo tree` for both Apple
@@ -1215,7 +1231,7 @@ jobs:
   #  - The heavy tool (tools/heavy): the machine-wide heavy-step lock. Its own Cargo workspace, when the plan marks `tools`; a Linux
   #    container, so no build-folder action (the build folder is tools/heavy/target in the container, git-ignored).
   quick:
-    name: quick checks (secret scan, C99, audit, heavy tool)
+    name: quick checks (C99, audit, heavy tool)
     needs: [plan]
     if: ${{ !cancelled() && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["quick"]'), 'quick') }}
     runs-on: ubuntu-latest
@@ -1233,7 +1249,7 @@ jobs:
       PADDOCK_AUDIT_ENFORCE: ${{ vars.PADDOCK_AUDIT_ENFORCE }}
       CARGO_TERM_COLOR: always
     steps:
-      # The whole history: the secret scan reads origin/main..HEAD, and the audit's merge base can be any older commit.
+      # The whole history: the audit's merge base can be any older commit.
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
@@ -1247,8 +1263,6 @@ jobs:
           components: clippy,rustfmt
           sccache-s3-access-key-id: ${{ secrets.PADDOCK_SCCACHE_S3_ACCESS_KEY_ID }}
           sccache-s3-secret-access-key: ${{ secrets.PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY }}
-
-      - uses: ./.gitea/actions/gitleaks
 
       # The keychain action clears RUSTC_WRAPPER for its own cargo calls (no compile cache), as in its own job.
       - uses: ./.gitea/actions/keychain

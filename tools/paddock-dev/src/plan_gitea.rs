@@ -27,8 +27,8 @@ pub const CI_JOBS: &[(&str, &[&str])] = &[
     ("crates", &["crates"]),
     ("crate", &["crates"]),
     ("app", &["apps"]),
-    // The short checks in one job (secret scan, C99, audit, heavy tool). The job itself runs on every change (the secret scan and the
-    // audit steps); its C99 step runs for `c99` and its heavy tool steps for `tools`, so an edit of it marks those two (and
+    ("gitleaks", &["conformance"]),
+    // The short checks in one job (C99, audit, heavy tool). The job itself runs on every change (the audit step); its C99 step runs for `c99` and its heavy tool steps for `tools`, so an edit of it marks those two (and
     // conformance, as every plan does).
     ("quick", &["conformance", "c99", "tools"]),
 ];
