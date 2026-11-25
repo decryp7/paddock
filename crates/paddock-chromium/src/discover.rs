@@ -173,11 +173,13 @@ pub const TEST_ISOLATION_FLAGS: [&str; 2] = [
 
 /// The browser tests may launch: only `CHROMIUM_TEST_PATH` when it exists and is not one of the browsers the user
 /// installed. `None` skips the test.
+#[cfg(any(test, feature = "test-support"))]
 pub fn find_for_tests() -> Option<Browser> {
     find_for_tests_with(this_os(), &|k| std::env::var(k).ok(), &|p| p.is_file())
 }
 
 /// [`find_for_tests`] with the OS, the environment and the file check injected.
+#[cfg(any(test, feature = "test-support"))]
 pub fn find_for_tests_with(
     os: OsKind,
     env: &dyn Fn(&str) -> Option<String>,

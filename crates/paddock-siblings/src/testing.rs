@@ -1,4 +1,4 @@
-//! Fakes for tests of apps that hand off (feature `testing`): nothing here starts a process or reads the disk.
+//! Fakes for tests of apps that hand off (feature `test-support`): nothing here starts a process or reads the disk.
 
 use crate::probe::{FileProbe, Spawner};
 use std::collections::BTreeSet;

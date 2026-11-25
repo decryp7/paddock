@@ -1,5 +1,5 @@
 'use strict';
-// Every e2e page runs on the pinned clock (`pinnedClockTest` in @decryp7/paddock-e2e; conformance C133 keeps what a linter cannot say). A
+// Every e2e page runs on the pinned clock (`pinnedClockTest` in @decryp7/paddock-e2e; what a linter cannot say is review's). A
 // spec reaches `test` through the app's `e2e/test.ts` only, and makes a page of its own with `newPinnedContext`. One rule, not
 // `no-restricted-*` selectors: flat-config rule options do not merge, so an app's own `no-restricted-syntax` in the same files would replace
 // the selectors of another block (Debrief's raw-row selectors, run 8056); a rule of its own has nothing to collide with.
@@ -31,7 +31,7 @@ function receiverName(node) {
 module.exports = {
   meta: {
     type: 'problem',
-    docs: { description: 'E2E specs reach test through the pinned-clock wrapper and make pages the fixtures pin (C133).' },
+    docs: { description: 'E2E specs reach test through the pinned-clock wrapper and make pages the fixtures pin (pinned clock).' },
     schema: [],
     messages: {
       test: `{{what}} from {{source}}: import test and expect from ${WRAPPER}; a type import is fine.`,

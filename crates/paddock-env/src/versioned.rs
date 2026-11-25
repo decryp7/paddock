@@ -194,6 +194,7 @@ impl<T: Serialize + DeserializeOwned + Default> VersionedFile<T> {
     }
 
     /// Replaces the clock used to name damaged copies (seconds since the Unix epoch); for tests.
+    #[cfg(any(test, feature = "test-support"))]
     #[must_use]
     pub fn with_clock(mut self, clock: fn() -> u64) -> Self {
         self.clock = clock;

@@ -44,6 +44,7 @@ windows = { workspace = true, features = ["Win32_System_JobObjects", "Win32_Secu
 
 [dev-dependencies]
 proptest.workspace = true
+# The self dev-dependency that turns `test-support` on for this package's own integration tests (rule 99).
 debrief-ipc = { path = ".", features = ["test-support"] }
 # Condition waits in the tests (`wait_until`, a 40 s hang guard): never a sleep that guesses an order (ADR 0041, 0071).
 paddock-testkit = { path = "../../../../crates/paddock-testkit" }

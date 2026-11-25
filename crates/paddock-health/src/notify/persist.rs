@@ -108,21 +108,13 @@ pub fn save_file(path: &Path, notices: &[Notice]) -> io::Result<()> {
 /// Writes `bytes` to `path` through a temporary file in the same folder (created if missing) and a rename, so a crash
 /// leaves the old file or the new one, never half of one.
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    let dir = path
-        .parent()
-        .filter(|d| !d.as_os_str().is_empty())
-        .unwrap_or(Path::new("."));
-    std::fs::create_dir_all(dir)?;
-    let name = path
-        .file_name()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "the path has no file name"))?;
-    let mut tmp_name = name.to_os_string();
-    tmp_name.push(".tmp");
-    let tmp = dir.join(tmp_name);
-    std::fs::write(&tmp, bytes)?;
-    std::fs::rename(&tmp, path).inspect_err(|_| {
-        let _ = std::fs::remove_file(&tmp);
-    })
+    if path.file_name().is_none() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "the path has no file name",
+        ));
+    }
+    Ok(paddock_env::write_atomic(path, bytes, false)?)
 }
 
 #[cfg(test)]

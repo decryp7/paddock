@@ -11,7 +11,6 @@
     )
 )]
 
-use std::io::Write;
 use std::path::Path;
 
 /// What a discovery file says about its writer.
@@ -66,37 +65,11 @@ pub fn remove_if_mine<H: Hint>(path: &Path, read: impl Fn(&Path) -> Option<H>) {
     }
 }
 
-/// Writes `body` to `path` atomically: a temporary file beside it with a name no other writer uses, created new (never
-/// following a link someone left at that name) and readable by the owner only on Unix, then renamed over `path`. The
-/// temporary file is removed when anything fails.
+/// Writes `body` to `path` atomically through the shared `paddock_env::write_atomic`: a temporary file beside it with a name no
+/// other writer uses, created new (never following a link someone left at that name) and readable by the owner only on Unix,
+/// then renamed over `path`. The temporary file is removed when anything fails.
 pub fn write_private_atomic(path: &Path, body: &[u8]) -> std::io::Result<()> {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir)?;
-    }
-    let mut tmp_name = path.as_os_str().to_owned();
-    tmp_name.push(format!(
-        ".{}.{}.tmp",
-        std::process::id(),
-        COUNTER.fetch_add(1, Ordering::Relaxed)
-    ));
-    let tmp = std::path::PathBuf::from(tmp_name);
-    let mut options = std::fs::OpenOptions::new();
-    options.write(true).create_new(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-    let result = options
-        .open(&tmp)
-        .and_then(|mut f| f.write_all(body))
-        .and_then(|()| std::fs::rename(&tmp, path));
-    if result.is_err() {
-        crate::cleanup::remove_file_warn(&tmp);
-    }
-    result
+    Ok(paddock_env::write_atomic(path, body, true)?)
 }
 
 #[cfg(test)]

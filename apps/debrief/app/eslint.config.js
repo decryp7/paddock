@@ -5,7 +5,7 @@ const eslint = require('@eslint/js');
 const { defineConfig } = require('eslint/config');
 const tseslint = require('typescript-eslint');
 const angular = require('angular-eslint');
-// Every e2e page runs on the pinned clock: specs reach `test` through e2e/test.ts only (C133).
+// Every e2e page runs on the pinned clock: specs reach `test` through e2e/test.ts only (ESLint `paddock/e2e-pinned-clock`).
 const { bulkCalls, e2ePinnedClock } = require('../../../eslint/src/index.cjs');
 
 /**

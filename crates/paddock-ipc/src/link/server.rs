@@ -175,7 +175,7 @@ impl LinkServer {
             (None, Some(dir)) => Host::listen_in(dir, config.limit, config.protocol)?,
             (None, None) => Host::listen(config.limit, config.protocol)?,
         };
-        let mut host = host.with_clock(config.clock.clone(), config.handshake_timeout);
+        let mut host = host.clocked(config.clock.clone(), config.handshake_timeout);
         let discovery = Discovery {
             endpoint: host.endpoint().to_string(),
             token: host.token().to_hex(),

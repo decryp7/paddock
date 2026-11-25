@@ -29,8 +29,7 @@
 //! and a redundant `add` each go red, and `tests/it/os_scoped.rs` shows the same on the real tree and sources, and that the derived
 //! placement is exactly what the contracts resolve to.
 //!
-//! **Report-only (warnings) until its first green run on the real tree is recorded here and in docs/gates.toml (ER-41).** Recorded: not
-//! yet.
+//! **Blocking (errors, mode gate) since its first green run on the real tree, ci.yml run 9065 (11cd82593, 2026-11-25; ER-41).**
 
 use super::baseline::{self, Growth};
 use super::finding::Finding;
@@ -188,7 +187,7 @@ impl C155 {
             }
         };
         let d = &placement.derived;
-        let warn = |msg: String, fix: String| Finding::warn("C155", RULE, w.contract, 1, msg, fix);
+        let finding = |msg: String, fix: String| Finding::error("C155", RULE, w.contract, 1, msg, fix);
         let all: Vec<(&str, &Exception)> = ex
             .add
             .iter()
@@ -198,7 +197,7 @@ impl C155 {
             .collect();
         for (key, e) in &all {
             if !known(&e.name, d) {
-                out.push(warn(
+                out.push(finding(
                     format!(
                         "[stale-entry] `hostTests.{key}` names `{}`, which is no member package of {} and no module of it",
                         e.name, w.root
@@ -213,7 +212,7 @@ impl C155 {
             without.add.remove(i);
             let derived_already = resolved_covers(&without.resolved(d), &e.name);
             if known(&e.name, d) && derived_already {
-                out.push(warn(
+                out.push(finding(
                     format!(
                         "[redundant-exception] `hostTests.add` lists `{}`, which the code already marks as OS-specific",
                         e.name
@@ -227,7 +226,7 @@ impl C155 {
         }
         for e in ex.skip.iter().filter(|e| e.modules.is_empty()) {
             if known(&e.name, d) && covered_marks(&e.name, &placement).is_empty() {
-                out.push(warn(
+                out.push(finding(
                     format!(
                         "[redundant-exception] `hostTests.skip` keeps `{}` on Linux, which the code does not mark as OS-specific",
                         e.name
@@ -248,7 +247,7 @@ impl C155 {
                 *probes += 1;
                 let sites = rust_sites(&text, is_test_file(f), f.ends_with("build.rs"), &RustcLex);
                 if let Some(s) = sites.first() {
-                    out.push(Finding::warn(
+                    out.push(Finding::error(
                         "C155",
                         RULE,
                         f,
@@ -277,7 +276,7 @@ impl C155 {
                 placement.windows.get(&e.name).filter(on_windows)
             };
             if let Some(holder) = holder {
-                out.push(warn(
+                out.push(finding(
                     format!(
                         "[os-code-windows] `{}` is tested only on macOS (`hostTests.only`) but `{holder}` holds Windows code: it would never run on Windows",
                         e.name
@@ -321,7 +320,7 @@ impl C155 {
                 let added = current.iter().filter(|k| !old.contains(*k) && !approved.contains(*k)).count();
                 if added > 0 {
                     out.push(
-                        warn(
+                        finding(
                             format!(
                                 "[os-removal] {added} `skip` or `only` entr{} not in {} at the merge base {short}: it takes an operating system away from code the derivation puts there",
                                 if added == 1 { "y is" } else { "ies are" },
@@ -349,7 +348,7 @@ impl C155 {
 
 /// The finding for an approval the register no longer needs (it only shrinks, ER-46).
 fn stale_approval(contract: &str, key: &str, why: &str) -> Finding {
-    Finding::warn(
+    Finding::error(
         "C155",
         RULE,
         APPROVALS,
@@ -388,7 +387,7 @@ fn register_growth(ctx: &Ctx, approved: &BTreeMap<String, BTreeSet<String>>) -> 
         )),
         Growth::Added { added: 0, .. } => None,
         Growth::Added { base, added, .. } => Some(
-            Finding::warn(
+            Finding::error(
                 "C155",
                 RULE,
                 APPROVALS,
@@ -423,7 +422,7 @@ impl Check for C155 {
     }
 
     fn mode(&self) -> Mode {
-        Mode::ReportOnly
+        Mode::Gate
     }
 
     fn control(&self) -> Control {
@@ -479,7 +478,7 @@ impl Check for C155 {
             Some(Ok(a)) => a,
             Some(Err(why)) => {
                 findings.push(
-                    Finding::warn(
+                    Finding::error(
                         "C155",
                         RULE,
                         APPROVALS,
@@ -499,7 +498,7 @@ impl Check for C155 {
             let value: serde_json::Value = match serde_json::from_str(&text) {
                 Ok(v) => v,
                 Err(e) => {
-                    findings.push(Finding::warn(
+                    findings.push(Finding::error(
                         "C155",
                         RULE,
                         &contract,
@@ -514,7 +513,7 @@ impl Check for C155 {
                 Ok(Some(e)) => e,
                 Ok(None) => continue,
                 Err(e) => {
-                    findings.push(Finding::warn(
+                    findings.push(Finding::error(
                         "C155",
                         RULE,
                         &contract,

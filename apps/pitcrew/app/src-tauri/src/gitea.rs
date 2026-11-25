@@ -93,10 +93,7 @@ fn save(path: &Path, c: &Cache) {
         let _ = std::fs::create_dir_all(dir);
     }
     if let Ok(text) = serde_json::to_string(c) {
-        let tmp = path.with_extension("tmp");
-        if std::fs::write(&tmp, text).is_ok() {
-            let _ = std::fs::rename(&tmp, path);
-        }
+        let _ = paddock_env::write_atomic(path, text.as_bytes(), false);
     }
 }
 

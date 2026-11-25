@@ -2,8 +2,8 @@ use crate::{Debouncer, Due};
 use paddock_jobs::CancelToken;
 use std::fmt;
 use std::path::Path;
+use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
-use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
@@ -161,11 +161,13 @@ fn note(debouncer: &Debouncer, dir: &Path, change: Change) {
 }
 
 /// A [`ChangeSource`] for tests: the test sends the changes.
+#[cfg(any(test, feature = "test-support"))]
 #[derive(Default, Clone)]
 pub struct FakeSource {
-    tx: Arc<Mutex<Option<Sender<Change>>>>,
+    tx: Arc<std::sync::Mutex<Option<Sender<Change>>>>,
 }
 
+#[cfg(any(test, feature = "test-support"))]
 impl FakeSource {
     /// A source nobody has started watching yet.
     pub fn new() -> Self {
@@ -188,6 +190,7 @@ impl FakeSource {
     }
 }
 
+#[cfg(any(test, feature = "test-support"))]
 impl ChangeSource for FakeSource {
     fn watch(
         &self,

@@ -227,6 +227,19 @@ mod tests {
         let got = std::fs::read(&f).unwrap();
         assert_eq!(got.len(), 4096);
         assert!(got.iter().all(|b| *b == got[0]));
+        assert!(leftovers(t.path()).is_empty(), "no temporary file is left");
+    }
+
+    /// Every writer succeeds when many write the same target and each temporary name is its own (the per-process counter):
+    /// two writers that shared `<name>.tmp` lost data twice (Spotter's avatar, the pre-push reuse store).
+    #[test]
+    fn temporary_names_are_never_shared() {
+        let t = tempfile::tempdir().unwrap();
+        let f = t.path().join("avatar.png");
+        let names: std::collections::HashSet<_> =
+            (0..64).map(|_| temp_name(t.path(), &f)).collect();
+        assert_eq!(names.len(), 64);
+        assert!(names.iter().all(|n| n != &f.with_extension("tmp")));
     }
 
     /// The caller creates the temporary file (`paddock-secrets` creates it with an owner-only security descriptor and no

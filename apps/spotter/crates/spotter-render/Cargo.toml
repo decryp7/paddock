@@ -12,6 +12,11 @@ publish = false
 [lib]
 doctest = false # doctests are off (crates/README.md, "Doctests")
 
+[features]
+# Test support (rule 99): the test-only hooks (`find_for_tests`). Enabled from `[dev-dependencies]` only, never in a
+# shipped build (`./dev check test-features`, C170).
+test-support = []
+
 [dependencies]
 spotter-core.workspace = true
 serde.workspace = true
@@ -26,6 +31,8 @@ tungstenite.workspace = true
 zip.workspace = true
 
 [dev-dependencies]
+# The self dev-dependency that turns `test-support` on for this package's own integration tests (rule 99).
+spotter-render = { path = ".", features = ["test-support"] }
 tempfile.workspace = true
 # The identity of a pid a stand-in wrote (launch.rs tests, rule 53) and the kit's bounded poll.
 paddock-testkit = { path = "../../../../crates/paddock-testkit" }

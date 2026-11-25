@@ -27,6 +27,7 @@ pub mod umdh;
 pub mod views;
 pub mod wire;
 
+#[cfg(any(test, feature = "test-support"))]
 #[doc(hidden)]
 pub mod testing;
 

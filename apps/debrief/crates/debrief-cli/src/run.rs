@@ -572,15 +572,7 @@ pub fn build_report(
 
 /// Writes `bytes` to a sibling temporary file and renames it, so a failed run leaves no half-written report.
 fn write_atomically(target: &Path, bytes: &[u8]) -> Result<(), String> {
-    let name = target
-        .file_name()
-        .map_or_else(|| "report".to_string(), |n| n.to_string_lossy().into_owned());
-    let tmp = target.with_file_name(format!(".{name}.{}.tmp", std::process::id()));
-    std::fs::write(&tmp, bytes).map_err(|e| format!("cannot write {}: {e}", target.display()))?;
-    std::fs::rename(&tmp, target).map_err(|e| {
-        let _ = std::fs::remove_file(&tmp);
-        format!("cannot write {}: {e}", target.display())
-    })
+    paddock_env::write_atomic(target, bytes, false).map_err(|e| format!("cannot write {}: {e}", target.display()))
 }
 
 #[cfg(test)]

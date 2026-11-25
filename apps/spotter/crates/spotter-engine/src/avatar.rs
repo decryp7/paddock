@@ -181,11 +181,7 @@ impl AvatarCache {
 }
 
 fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    let tmp = path.with_extension("tmp");
-    std::fs::write(&tmp, bytes)?;
-    std::fs::rename(&tmp, path).inspect_err(|_| {
-        let _ = std::fs::remove_file(&tmp);
-    })
+    Ok(paddock_env::write_atomic(path, bytes, false)?)
 }
 
 /// The picture for a source: the cached or freshly fetched one from its site, else the bundled mark, else `None`
