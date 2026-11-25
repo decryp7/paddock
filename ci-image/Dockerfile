@@ -77,7 +77,7 @@ RUN set -eu; \
       "$(pick "$MACHETE_SHA256_AMD64" "$MACHETE_SHA256_ARM64")" /tmp/dl/machete.tar.gz; \
     tar -xzf /tmp/dl/machete.tar.gz -C /tmp/dl --strip-components=1 --wildcards '*/cargo-machete'; \
     install -m 0755 /tmp/dl/cargo-machete /out/bin/cargo-machete; \
-    # shellcheck (the same pin as engineering-playbook's ci.yml)
+    # shellcheck (the same pin as engineering-rules' ci.yml)
     fetch-verified "https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/shellcheck-v${SHELLCHECK_VERSION}.linux.$(pick x86_64 aarch64).tar.xz" \
       "$(pick "$SHELLCHECK_SHA256_AMD64" "$SHELLCHECK_SHA256_ARM64")" /tmp/dl/shellcheck.tar.xz; \
     tar -xJf /tmp/dl/shellcheck.tar.xz -C /tmp/dl --strip-components=1 "shellcheck-v${SHELLCHECK_VERSION}/shellcheck"; \
