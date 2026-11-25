@@ -553,7 +553,7 @@ Amendments of the same date, no new number: the member gate runs each member's a
     API anyone linking the crate can call.
 
 ## Trains (user, 2026-11-26)
-NEW-members-merge-main. **A branch joins a train only after it has merged current main and re-run its member gate on that tip.** The
+100. **A branch joins a train only after it has merged current main and re-run its member gate on that tip.** The
 merge check (`./dev merge check`) refuses a member whose base is older than main: the stale-base check, being made blocking on
 `ci/old-base-block` (report-only until it lands). A refused member merges main, re-runs `./dev merge check --gates` on the result and
 is offered again. *Why:* on 2026-11-25 five members were pulled from trains i, k and m because their base was older than main (see
