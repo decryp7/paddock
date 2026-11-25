@@ -24,10 +24,17 @@ pub struct Member {
     pub parent: String,
 }
 
-/// The non-merge commits of `range` (`<from>..<to>`), oldest first, each with its first parent. One `git rev-list`.
+/// The non-merge commits of `range` (`<from>..<to>`), oldest first, each with its first parent. One `git rev-list`. A shallow
+/// clone is refused: its cut history lists too few commits, or none, without an error (a host runner's kept clone, run 9021).
 pub fn members(root: &Path, range: &str) -> Result<Vec<Member>, String> {
     if range.starts_with('-') || !range.contains("..") {
         return Err(format!("the range {range:?} is not <from>..<to>"));
+    }
+    if crate::gates::edge::is_shallow(root) {
+        return Err(format!(
+            "{} is a shallow clone, so {range} would list too few commits or none. Next step: fetch the full history (`git fetch --unshallow`)",
+            root.display()
+        ));
     }
     let mut cmd = crate::git_env::git();
     cmd.arg("-C")

@@ -221,8 +221,18 @@ const LOCK_B: &str = r#"{"lockfileVersion":3,"packages":{"":{"workspaces":["ui"]
 const REPLAY_FROM: &str = "9cbd77a63";
 const REPLAY_TO: &str = "803aed12d";
 
-fn replayed() -> Vec<Replayed> {
+/// The replay, or `None` (not measured, said with a `::warning::`) on a macOS or Windows runner's shallow kept clone (fetched with
+/// `--depth=1`, ADR 0025), which has no history to replay. The Linux legs check out the whole history (`fetch-depth: 0`), so on
+/// Linux a shallow clone fails with its cause instead: the replay is measured on every run that tests paddock-dev.
+fn replayed() -> Option<Vec<Replayed>> {
     let root = repo_root();
+    if !cfg!(target_os = "linux") && paddock_dev::gates::edge::is_shallow(&root) {
+        eprintln!(
+            "::warning::NOT MEASURED: the train replay needs the whole history and {} is a shallow clone (a host runner's kept clone); the Linux leg measures it. Next step, locally: `git fetch --unshallow`",
+            root.display()
+        );
+        return None;
+    }
     let history = GitHistory::new(&root, Duration::from_secs(120));
     let graph = read_graph(&root, &history).unwrap();
     let world = build_world(&root, &history, &graph, None).unwrap();
@@ -243,14 +253,14 @@ fn replayed() -> Vec<Replayed> {
             .and_then(|l| l.first().map(|c| c.subject.clone()))
             .unwrap_or_default()
     };
-    replay::replay(&root, &history, &graph, &world, &members, &subject)
+    Some(replay::replay(&root, &history, &graph, &world, &members, &subject))
 }
 
 /// The real tree, checked and not recorded: no golden, so nothing here is re-blessed when the tree moves. A narrowing no category of
 /// §8 explains fails; the report by category goes to the test's output.
 #[test]
 fn graph_train_replay_has_no_unlisted_narrowing() {
-    let r = replayed();
+    let Some(r) = replayed() else { return };
     let bad = replay::unlisted(&r);
     assert!(
         bad.is_empty(),
@@ -314,6 +324,32 @@ fn control_a_narrowing_no_category_explains_is_listed_and_a_listed_one_is_not() 
         1,
         "a commit a planner could not answer is listed"
     );
+}
+
+/// Run 9021 (nightly 1812), Windows: a host runner's kept clone is shallow (`--depth=1`, ADR 0025) but held the range's objects from
+/// earlier fetches, so `git rev-list` listed 0 members without an error. A shallow clone is refused with its cause, never a short list.
+#[test]
+fn members_of_a_shallow_clone_are_refused_not_listed_short() {
+    let (_keep, root) = crate::golden::fixture_repo();
+    let g = |args: &[&str]| crate::golden::git(&root, args);
+    std::fs::write(root.join("main.txt"), "main\n").unwrap();
+    g(&["add", "main.txt"]);
+    g(&["commit", "-q", "-m", "feat: main"]);
+    // Control: the whole history lists the commit.
+    assert_eq!(
+        replay::members(&root, "fixture-head..HEAD").unwrap().len(),
+        1,
+        "control: a full clone lists the member"
+    );
+    // Every object is still there; the history is cut at HEAD, as a depth-1 fetch cuts it.
+    let mut cmd = paddock_proc::command("git");
+    cmd.arg("-C").arg(&root).args(["rev-parse", "HEAD"]);
+    let head = paddock_proc::run_bounded(cmd, paddock_proc::Limits::new(Duration::from_secs(30)))
+        .unwrap()
+        .stdout_text();
+    std::fs::write(root.join(".git").join("shallow"), format!("{}\n", head.trim())).unwrap();
+    let err = replay::members(&root, "fixture-head..HEAD").unwrap_err();
+    assert!(err.contains("shallow") && err.contains("git fetch --unshallow"), "{err}");
 }
 
 #[test]

@@ -3876,3 +3876,19 @@ first and records the second (`ci fix-items`) is part of the queued green-main w
 - **Class (ER-21).** Recorded as an instance of: a CI step on the user's shared macOS session that can take the whole session down
   (ADR 0120). Earlier instances: the 2026-11-23 session crash (hdiutil failure after the Mac runner's desktop session crashed, train
   18's fix item).
+
+## Nightly 1812: two paddock-dev tests failed only on the host runners (run 9021, 2026-11-25, fix/nightly-1812-paddock-dev-windows)
+- **What.** The nightly tests every paddock-dev test on every OS (`os_full`), so tests that branch and train runs keep on Linux ran on
+  the host legs for the first time since they landed on 2026-11-23. (1) `plan_graph_ci::the_plan_job_log_and_outputs_under_the_graph_planner`
+  (Windows, both tries): "the fixture's app job". `* text=auto` checked the golden fixture's `ci.yml` out with CRLF, and the test's
+  edit searched for `\n`. (2) `repo_graph_net::graph_train_replay_has_no_unlisted_narrowing` (Windows: "not 0" members; macOS: unknown
+  revision): the host legs' kept clone is fetched with `--depth=1` (ADR 0025). On Windows the slot's clone still held the range's
+  objects from earlier fetches, so `git rev-list` cut at the shallow boundary listed 0 commits without an error.
+- **Fix.** The fixture edit works on either line ending (`app_job_reads_any_app`, regression test with a CRLF copy).
+  `replay::members` refuses a shallow clone with its cause (it also serves `./dev plan --replay`), regression test
+  `members_of_a_shallow_clone_are_refused_not_listed_short`. The replay test reports `::warning::NOT MEASURED` on a macOS or Windows
+  shallow clone and still fails on a shallow Linux clone, because the Linux legs check out the whole history and measure it.
+- **Rule of thumb.** A test that edits a checked-out text file normalises line endings first. A test that reads the real history checks
+  `is_shallow` before trusting an empty answer.
+- **Class (ER-21).** CRLF checkouts that break text tests on Windows: the third instance (see the Windows-portability lesson and the
+  dyno-helper-service CRLF lesson). Proposed to the user: check out LF on every OS (`* text=auto eol=lf`, `*.cmd` stays CRLF).
