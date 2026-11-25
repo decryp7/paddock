@@ -379,3 +379,61 @@ fn only_a_workflow_that_takes_since_run_has_the_failed_first_guard() {
     assert!(takes_since_run("debrief.yml", &read));
     assert!(!takes_since_run("dyno-release.yml", &read));
 }
+
+/// The repository-wide audits run on the train's head before a dispatch (user, 2026-11-25), blocking from the start (established
+/// tests): a failure refuses with the rows' tail and the next step; a checkout that is not the head, or is dirty, is not measured and the
+/// audits never run on it; only exit 0 passes.
+#[test]
+fn the_train_audits_refuse_a_red_head_and_never_pass_on_another_tree() {
+    let at = |head: &str, dirty: bool| Ok(Checkout { head: head.into(), dirty });
+    let mut ran = 0;
+    let mut green = || {
+        ran += 1;
+        Ok((Some(0), "ok".to_string()))
+    };
+    assert!(matches!(train_audits(at(HEAD, false), HEAD, TRAIN, &mut green), Finding::Pass(_)));
+    assert_eq!(ran, 1);
+    let mut never = || -> AuditRun { panic!("the audits never run on another tree") };
+    assert!(matches!(
+        train_audits(at(OLD, false), HEAD, TRAIN, &mut never),
+        Finding::NotMeasured(_)
+    ));
+    assert!(matches!(
+        train_audits(at(HEAD, true), HEAD, TRAIN, &mut never),
+        Finding::NotMeasured(_)
+    ));
+    assert!(matches!(
+        train_audits(Err("no git".into()), HEAD, TRAIN, &mut never),
+        Finding::NotMeasured(_)
+    ));
+    let Finding::Refuse { why, next } = train_audits(at(HEAD, false), HEAD, TRAIN, &mut || {
+        Ok((Some(5), "member-audits FAILED: golden::x".into()))
+    }) else {
+        panic!()
+    };
+    assert!(why.contains("golden::x") && why.contains("exit 5"), "{why}");
+    assert!(next.contains("--only member-audits,conformance"), "{next}");
+    for nm in [Ok((Some(6), "not measured".to_string())), Err("could not start".to_string())] {
+        let mut r = Some(nm);
+        assert!(matches!(
+            train_audits(at(HEAD, false), HEAD, TRAIN, &mut || r.take().unwrap()),
+            Finding::NotMeasured(_)
+        ));
+    }
+    // Blocking from the start, with no record in the register: a refusal stops the dispatch.
+    let mode = mode_of(Ok("[first_green]\n"), Guard::TrainAudits);
+    assert!(matches!(mode, Mode::Blocking { .. }));
+    let refuse = Finding::Refuse {
+        why: "w".into(),
+        next: "n".into(),
+    };
+    assert!(matches!(
+        decide(Guard::TrainAudits, &mode, &refuse, None, &mut Vec::new()),
+        Decision::Stop { not_measured: false, .. }
+    ));
+    // The coordinator's override lets it go, logged.
+    assert!(matches!(
+        decide(Guard::TrainAudits, &mode, &refuse, Some("known red, fixed next"), &mut Vec::new()),
+        Decision::Go(_)
+    ));
+}
