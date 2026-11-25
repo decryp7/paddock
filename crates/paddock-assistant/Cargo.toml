@@ -30,7 +30,7 @@ paddock-health = { workspace = true, features = ["test-support"] }
 # The never-panics test of the parsers (conformance check C36).
 paddock-testkit = { workspace = true }
 tempfile = "3"
-paddock-pitwall = { workspace = true, features = ["testing"] }
+paddock-pitwall = { workspace = true, features = ["test-support"] }
 paddock-secrets = { workspace = true }
 # The Tauri adapter is tested on Tauri's mock runtime.
 tauri = { workspace = true, features = ["test"] }

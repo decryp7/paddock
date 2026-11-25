@@ -33,8 +33,8 @@ pub const ID: &str = "C170";
 /// line in conformance/paddock.ci.json) is recorded here; then set this to false and the `CHECKS` row's `report_only` follows.
 pub const REPORT_ONLY: bool = true;
 
-/// Feature names that turn on test-only code. `test-support` is rule 99's (and ADR 0073's) name; `testing` the older one
-/// paddock-pitwall and paddock-siblings still use; `test-hooks` and `test-util` the same idea elsewhere (Pacenotes' branch, third-party crates
+/// Feature names that turn on test-only code. `test-support` is rule 99's (and ADR 0073's) name; `testing` the name
+/// some crates used before (a stray one is still caught); `test-hooks` and `test-util` the same idea elsewhere (Pacenotes' branch, third-party crates
 /// such as tokio); `mock-runtime` builds a crate on Tauri's mock runtime (paddock-shell, paddock-dialogs, paddock-panels).
 pub const TEST_FEATURES: &[&str] = &["testing", "test-support", "test-hooks", "test-util", "mock-runtime"];
 

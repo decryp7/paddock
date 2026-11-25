@@ -17,7 +17,7 @@
 //! - [`health`]: the optional service as a degraded `paddock-health` entry whose Repair does not depend on Pitwall.
 //! - [`loopback`]: the bounded, cancellable `127.0.0.1` HTTP/1.1 transport itself, reusable for other local servers
 //!   (Debrief's llama-server client).
-//! - `testing` (feature `testing`): a fake Pitwall on an ephemeral port that mirrors Pitwall's routes.
+//! - `testing` (feature `test-support`): a fake Pitwall on an ephemeral port that mirrors Pitwall's routes.
 //!
 //! Everything is blocking and bounded: apps call it from a worker thread (Paddock rule 10). Tests never use the real
 //! Pitwall, its port, its folder or the credential store.
@@ -35,7 +35,7 @@ pub mod retry;
 pub mod service;
 pub mod status;
 pub mod stream;
-#[cfg(any(test, feature = "testing"))]
+#[cfg(any(test, feature = "test-support"))]
 pub mod testing;
 #[cfg(test)]
 mod ts;

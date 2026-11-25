@@ -74,8 +74,8 @@ tauri = { workspace = true, features = ["test"] }
 paddock-dialogs = { workspace = true, features = ["tauri", "mock-runtime"] }
 # The diagnostics test installs a scoped log and folders in a temporary directory.
 # The Pitwall step is tested against the fake Pitwall on an ephemeral loopback port.
-paddock-pitwall = { workspace = true, features = ["testing"] }
-paddock-siblings = { workspace = true, features = ["testing"] }
+paddock-pitwall = { workspace = true, features = ["test-support"] }
+paddock-siblings = { workspace = true, features = ["test-support"] }
 paddock-secrets = { workspace = true }
 # The permission sets are resolved through Tauri's own ACL in the tests.
 tauri-utils = "2.10"

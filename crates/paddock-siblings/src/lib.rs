@@ -17,7 +17,7 @@
 //! (`paddock-window`'s single instance), so the receiving app gets the same call either way. The receiving side parses
 //! with [`Handoff::from_paths`] and [`Handoff::from_link`] over the output of `paddock_window::launch::parse_args`.
 //!
-//! Tests use [`testing`] (feature `testing`): a file system and a spawner that start nothing (rule 7).
+//! Tests use [`testing`] (feature `test-support`): a file system and a spawner that start nothing (rule 7).
 //!
 //! ```text
 //! use paddock_siblings::{Siblings, Handoff, Item, Outcome, testing::{FakeFiles, FakeSpawner}};
@@ -43,7 +43,7 @@ mod handoff;
 mod native;
 mod probe;
 mod siblings;
-#[cfg(any(test, feature = "testing"))]
+#[cfg(any(test, feature = "test-support"))]
 pub mod testing;
 
 pub use app::{Accepts, AppSpec, FAMILY};

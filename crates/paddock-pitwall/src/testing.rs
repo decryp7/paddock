@@ -1,5 +1,5 @@
 //! A fake Pitwall for tests: contract-shaped answers on an ephemeral `127.0.0.1` port, for this crate's contract tests and
-//! for the apps that use it (feature `testing`). It serves exactly the routes of [`PITWALL_ROUTES`], which mirror the
+//! for the apps that use it (feature `test-support`). It serves exactly the routes of [`PITWALL_ROUTES`], which mirror the
 //! routes of Pitwall's own router that the client contract uses, with Pitwall's answer and error shapes and `X-Pitwall-*`
 //! headers. Scriptable: pairing approved, denied or pending; another `apiVersion`; a revoked key; a server that dies
 //! mid-stream; one that holds its answer until released; typed failures with `Retry-After`. It never uses Pitwall's real

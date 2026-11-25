@@ -13,7 +13,7 @@
 //! - `serve-open <pipe name>` (Windows): a pipe that every account may open (`D:P(A;;GA;;;WD)`), served until killed, each client
 //!   dropped at once. For the cross-account VM step: the client then reaches its server-account check instead of being refused by the
 //!   pipe's access list (ER-33).
-//! - `observe <file>` (feature `testing`): connects, reads the raw stream of its connection to the end and writes what it
+//! - `observe <file>` (feature `test-support`): connects, reads the raw stream of its connection to the end and writes what it
 //!   read to `<file>.bin` and how it ended (`eof`, `reset` or `timeout`) to `<file>.end` (the launcher's ending test)
 //! - `out-of-files` (Unix): a host and a raw client in this process; the host accepts the client with the last free file
 //!   descriptor, so its handshake cannot take the copies it needs. Prints `host: <its error>` and `client: <the first frame

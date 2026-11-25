@@ -530,14 +530,14 @@ Amendments of the same date, no new number: the member gate runs each member's a
 
 ## Test-only hooks (user, 2026-11-25)
 99. **Test-only hooks compile only for tests.** An injected clock, gate, fake, test setter or `for_tests` constructor is behind
-    `#[cfg(any(test, feature = "test-support"))]`, and `test-support` (ADR 0073's name, the one name for this feature) is enabled
-    only from `[dev-dependencies]` (a self dev-dependency for a crate's own integration tests) or a test target's
+    `#[cfg(any(test, feature = "test-support"))]`, and `test-support` (ADR 0073's name, the one name for this feature) is
+    enabled only from `[dev-dependencies]` (a self dev-dependency for a crate's own integration tests) or a test target's
     `required-features`; production wiring that needs the same seam calls a crate-private function, never the public hook. C170
     (`./dev check test-features`, in the conformance job on every change it plans) proves that no released binary, each app's
     Tauri package, every `bundle.externalBin` and `paddock-setup`, is built with a test feature (`cargo tree -e normal`; it also
-    flags the older name `testing`, still used by paddock-pitwall and paddock-siblings; report-only until its first green run,
-    ER-41). *Why:* on 2026-11-25 `paddock_ipc::Host::with_clock` was public with no gate, and an ADR draft copied that pattern
-    for the privileged dyno-helper daemon; a shipped hook is an API anyone linking the crate can call.
+    flags a stray `testing`; report-only until its first green run, ER-41). *Why:* on 2026-11-25 `paddock_ipc::Host::with_clock`
+    was public with no gate, and an ADR draft copied that pattern for the privileged dyno-helper daemon; a shipped hook is an
+    API anyone linking the crate can call.
 
 ## Monorepo (ADR 0014 §10; effective for an app from its import into `paddock/apps/<app>`, for Paddock from the first import)
 Until an app is imported, rules 2, 3, 8, 9, 39 and 42 above apply to it as written. From its import, these replace them:
