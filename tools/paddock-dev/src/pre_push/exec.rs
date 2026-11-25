@@ -2078,8 +2078,11 @@ mod tests {
         assert_eq!(got[0], (HEAVY_DIR_VAR.to_string(), targets.join("throttle").display().to_string()));
         assert_eq!(got.len(), 1, "only HEAVY_DIR: heavy names its legacy folder itself: {got:?}");
         // Another dev-targets in the same process gets its own answer (no first-call-wins cache).
-        let other: HashMap<String, String> = [(crate::places::DEV_TARGETS_ENV.to_string(), "/dev-targets-y".to_string())].into();
-        assert_eq!(heavy_dir(dir.path(), &other), Some(PathBuf::from("/dev-targets-y/throttle")));
+        // Built from parts under the temp dir: a Unix literal like `/dev-targets-y` is not absolute on Windows (run 9116).
+        let targets_y = dir.path().join("dev-targets-y");
+        let other: HashMap<String, String> = [(crate::places::DEV_TARGETS_ENV.to_string(), targets_y.display().to_string())].into();
+        let got_y = heavy_dir(dir.path(), &other).expect("a folder for the second dev-targets");
+        assert!(paddock_testkit::path::same_path(&got_y, targets_y.join("throttle")), "{got_y:?}");
         env.insert("HEAVY_DIR".into(), "/mine".into());
         assert!(heavy_dir_env(dir.path(), &env).is_empty(), "the caller's own folder wins");
     }
