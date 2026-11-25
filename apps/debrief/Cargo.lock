@@ -979,6 +979,7 @@ dependencies = [
 name = "chromium-driver"
 version = "0.1.0"
 dependencies = [
+ "chromium-driver",
  "libc",
  "log",
  "paddock-env",

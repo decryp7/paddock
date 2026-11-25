@@ -89,6 +89,8 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 tokio = { workspace = true, features = ["sync", "time"] }
 
 [dev-dependencies]
+debrief-store-client = { path = "../../crates/debrief-store-client", features = ["testing"] }
+debrief-image = { path = "../../crates/debrief-image", features = ["testing"] }
 debrief-ai = { path = "../../crates/debrief-ai", features = ["testing"] }
 # A test process stopped by nextest's timeout (SIGTERM) or Ctrl-C removes its temp folders (`test_support::own`).
 ctrlc = { workspace = true, features = ["termination"] }

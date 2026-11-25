@@ -32,6 +32,8 @@ paddock-proc = { path = "../../../../crates/paddock-proc" }
 test-support = ["dep:paddock-testkit"]
 
 [dev-dependencies]
+# The self dev-dependency that turns `test-support` on for this package's own integration tests (rule 97).
+chromium-driver = { path = ".", features = ["test-support"] }
 # The real-browser tests wait for the browser until it is ready or ends, and set the test form of the answers (ADR 0071).
 paddock-testkit = { path = "../../../../crates/paddock-testkit" }
 paddock-testkit-start = { path = "../../../../crates/paddock-testkit-start" }
