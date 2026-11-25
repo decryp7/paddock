@@ -156,7 +156,7 @@ apart, both answered by `./dev audit` (`tools/paddock-dev/src/audit`; `cargo den
   exception with a reason and a review date (`deny.toml` `ignore` for cargo; `scripts/npm-audit-allow.json` for npm, the family's list that
   `scripts/npm-audit.mjs` also reads, which `./dev audit` reads in the same format: an approved entry warns, one on its review day counts as a finding
   again), which needs the user's approval (ER-46), or a fix. The failed job is the nightly's failure path.
-- **Does this change add one?** The `audit` job of ci.yml runs `./dev audit compare --base <merge base ref>` on every change. It audits the
+- **Does this change add one?** The audit step of ci.yml's `quick` job runs `./dev audit compare --base <merge base ref>` on every change. It audits the
   merge base's lockfiles with the same tools, only when the change has a finding. An advisory main has too is a `::warning::` ("already
   present on main, decided there"); only an advisory the change introduces fails. No list of accepted findings is kept, so none can grow
   silently (ER-46).
