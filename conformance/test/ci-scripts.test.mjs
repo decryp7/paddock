@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { buildEnv } from '../ci/build-env.mjs';
-import { checkPin, defaultGrant, executableIn, grantCommand, install, parseArgs, parseRustPin, platformId, urlFor } from '../ci/install-test-browser.mjs';
+import { checkPin, defaultGrant, defaultSign, executableIn, grantCommand, install, parseArgs, parseRustPin, platformId, signCommand, SIGNING_TOOL, urlFor } from '../ci/install-test-browser.mjs';
 import { decide, tagFor } from '../ci/plan.mjs';
 import { isTagRun } from '../src/util/is-tag-run.mjs';
 import { firstLaunch, releaseNotes } from '../ci/release-notes.mjs';
@@ -145,6 +145,61 @@ test('install-test-browser: on Windows, app containers may read and run the brow
   const [cmd, args] = grantCommand('C:\\ci\\browser', 'win32', { SystemRoot: 'C:\\Windows' });
   assert.equal(cmd, 'C:\\Windows\\System32\\icacls.exe');
   assert.deepEqual(args, ['C:\\ci\\browser', '/grant', '*S-1-15-2-1:(OI)(CI)(RX)', '/grant', '*S-1-15-2-2:(OI)(CI)(RX)', '/Q']);
+});
+
+test('install-test-browser: on macOS the browser bundle goes to the Mac CI signer as a CI hook (its one rule decides)', () => {
+  const exe = executableIn('/ci/browser', 'mac-arm64');
+  const [cmd, args] = signCommand(exe, 'darwin');
+  assert.equal(cmd, 'bash');
+  // --ci-hook: only in a CI job, only with the identity's default keychain; a developer's Mac never signs (tools/mac-ci-signing.sh).
+  assert.deepEqual(args, [SIGNING_TOOL, 'sign', '--ci-hook', '/ci/browser/chrome-mac-arm64/Google Chrome for Testing.app']);
+  assert.ok(existsSync(SIGNING_TOOL), 'the signer the command names exists');
+  assert.equal(signCommand(exe, 'linux'), null);
+  assert.equal(signCommand(executableIn('/ci/browser', 'linux64'), 'darwin'), null, 'another platform\'s build is not signed');
+});
+
+test('install-test-browser: a failed signature is an error naming the next step; no command runs nothing', () => {
+  const ran = [];
+  defaultSign('/b/x.app/Contents/MacOS/x', { command: ['bash', ['s']], run: (c, a) => ran.push([c, a]) });
+  assert.deepEqual(ran, [['bash', ['s']]]);
+  assert.throws(
+    () => defaultSign('/b/x.app/Contents/MacOS/x', { command: ['bash', ['s']], run: () => { throw new Error('exit 1'); } }),
+    /could not sign \/b\/x\.app\/Contents\/MacOS\/x with the Mac CI identity \(exit 1\); next: bash .*mac-ci-signing\.sh identity/,
+  );
+  defaultSign('/d', { command: null, run: () => assert.fail('nothing to run') });
+});
+
+test('install-test-browser on a developer Mac signs nothing: the real hook ends before any keychain', { skip: process.platform !== 'darwin' && 'macOS' }, () => {
+  const home = mkdtempSync(join(tmpdir(), 'paddock-dev-mac-'));
+  try {
+    const exe = executableIn(home, 'mac-arm64');
+    const [cmd, args] = signCommand(exe, 'darwin');
+    const r = spawnSync(cmd, args, { encoding: 'utf8', env: { PATH: '/usr/bin:/bin', HOME: home } });
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(`${r.stdout}${r.stderr}`, '');
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('install-test-browser: a fresh and a reused install both sign the browser', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'paddock-cft-sign-'));
+  try {
+    const bytes = Buffer.from('zip');
+    const pin = { version: '1.0.0', base: 'https://example.test', sums: { 'mac-arm64': createHash('sha256').update(bytes).digest('hex') } };
+    const signed = [];
+    const extract = (_zip, d) => {
+      const exe = executableIn(d, 'mac-arm64');
+      mkdirSync(dirname(exe), { recursive: true });
+      writeFileSync(exe, '');
+    };
+    const opts = { pin, dir, id: 'mac-arm64', fetchBytes: async () => bytes, extract, grant: () => {}, sign: (e) => signed.push(e) };
+    const exe = await install(opts);
+    await install(opts);
+    assert.deepEqual(signed, [exe, exe]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('install-test-browser: a failed grant warns and the install carries on; no command runs nothing', () => {

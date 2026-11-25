@@ -339,6 +339,58 @@ After a restart: once the disk is unlocked (by `authrestart`, or by your passwor
 at boot, before anyone logs in. The external disk mounts without a login because `AutomountDisksWithoutUserLogin` is 1 (the
 install checks it). A crash restart waits at the FileVault screen for the password, and the runner does not run until then.
 
+### Full Disk Access by a stable identity (user decision 2026-11-25, option A+B)
+
+The runner's work folder is on `/Volumes/vault-dev`, which macOS privacy (TCC) treats as a removable volume. A LaunchDaemon has
+no window, so a missing grant is a silent deny, never a prompt (the daemon's checks go to the system `tccd`: the log says
+`user tccd unavailable, forwarding ... to system tccd`). TCC checks the stored *designated requirement* (DR) of a program
+([TN3127](https://developer.apple.com/documentation/technotes/tn3127-inside-code-signing-requirements), "Designated
+requirement"); an ad-hoc signature's DR is its cdhash, so every runner update and every new test browser is a stranger
+([Apple DTS](https://developer.apple.com/forums/thread/795739): ad hoc signed code "does not include a stable DR"). Full Disk
+Access is checked before the Removable Volumes service ([Eclectic Light](https://eclecticlight.co/2026/04/20/privacy-how-locations-are-protected/)).
+
+So the runner and the programs that are their own responsible process carry one self-signed identity, `Paddock CI code signing`
+(`tools/mac-ci-signing.sh`), and its DR, `identifier "<id>" and certificate leaf = H"<sha1>"`, is the same for every update
+signed with it. The runner's children (git, cargo, rustc, test binaries, sccache) inherit the runner's grant and are not
+signed; CI builds are never signed.
+
+| Program | Identifier (TCC entry) | Signed by |
+| --- | --- | --- |
+| `~/gitea-runner/gitea-runner` | `net.decryptology.gitea-runner` (by its path) | `tools/mac-runner-move.sh install` (as you, after the old runner stopped) |
+| Chrome for Testing (`install-test-browser`, every copy and pin) | `com.google.chrome.for.testing` (by bundle id) | `conformance/ci/install-test-browser.mjs` after each install |
+| Playwright's browsers (any CI job; today Dyno's screenshots) | Chromium's and WebKit's bundle ids; the headless shell `net.decryptology.paddock.ci.chrome-headless-shell` | `conformance/ci/playwright-browsers.sh`, the one install point: one fixed folder on the boot disk, `~/Library/Caches/paddock-ci/ms-playwright`, for every Playwright version |
+
+The keychain is a file of its own, `~/Library/Keychains/paddock-ci-signing.keychain-db`, unlocked with the random password in
+`~/.config/paddock/ci-signing.pass` (0600), because the daemon has no unlocked login keychain and no window for a dialog. The CI
+hooks find it at that default path (`PADDOCK_CI_SIGNING_KEYCHAIN` only overrides it), so the runner needs no configuration; without
+it they print a notice and sign nothing. They sign only in a CI job (`GITEA_ACTIONS` or `GITHUB_ACTIONS`, which the runner sets in every job; the one rule is `mac-ci-signing.sh --ci-hook`), so a
+developer's Mac and the tests never sign, even with the identity in place.
+
+**Your one-time steps** (an agent never runs these; rule 7, ER-14). From the repository root, as yourself:
+
+1. **Create the identity** (once; idempotent, `--dry-run` shows the steps): `bash tools/mac-ci-signing.sh create`, then
+   `bash tools/mac-ci-signing.sh identity` prints its SHA-1.
+2. **Sign the runner and restart it:** `sudo bash tools/mac-runner-move.sh install --user <you> --daemon d7-mac-mini --retire d7-mac-mini-2 --retire d7-mac-mini-3`
+   (it stops the runner after its running job, signs it, starts it and checks it declared itself). `status` then says
+   `signature the Mac CI identity`.
+3. **Full Disk Access** (System Settings, Privacy & Security, Full Disk Access). Remove the old entries first, since they hold the
+   ad-hoc cdhash and no longer match: `gitea-runner` (all three: `~/gitea-runner/`, `~/gitea-runners/d7-mac-mini-2/`,
+   `~/gitea-runners/d7-mac-mini-3/`). Then add with `+` (Cmd-Shift-G types a path; Cmd-Shift-. shows hidden folders), each
+   switched on:
+   - `~/gitea-runner/gitea-runner`
+   - one signed copy of `Google Chrome for Testing.app`, for example
+     `/Volumes/vault-dev/ci/home/test-browser-paddock-s1/chrome-mac-arm64/Google Chrome for Testing.app` (after a Mac CI run
+     has installed and signed it; check with `bash tools/mac-ci-signing.sh check "<that .app>"`). The entry is by bundle id, so
+     it covers every copy and every later pin.
+4. **Check:** `bash tools/mac-ci-signing.sh check --identifier net.decryptology.gitea-runner ~/gitea-runner/gitea-runner`, and
+   after the next Mac run `log show --last 1h --predicate 'subsystem == "com.apple.TCC" AND eventMessage CONTAINS "Removable"'`.
+
+**After a runner update:** replace the binary, then run step 2 again. The Full Disk Access entry stays (same path, same DR).
+**A new browser pin** is signed by CI and needs nothing. **Not needed:** an entry for Playwright's browsers (they live on the boot
+disk and are signed for when they do touch the volume; add `chrome-headless-shell` only if the TCC log names it, as its entry is by
+path and the path holds Playwright's revision), and for `pitcrew-service` (CI runs it only as a child of the runner).
+**Rotating the certificate** (it is valid for 10 years) means: move the keychain away, `create`, then steps 2 and 3 again.
+
 ## Things that cost time when forgotten
 
 - Don't run macOS tests under `nice`: it is SIP-protected and strips `DYLD_*` variables, so libraries are not found.

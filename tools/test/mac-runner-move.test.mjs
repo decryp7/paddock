@@ -44,7 +44,7 @@ const agent = (home, name, extraEnv = '') => `<?xml version="1.0" encoding="UTF-
 `;
 
 /** A scratch Mac with three runner lanes, each a loaded LaunchAgent with its runner folder. */
-function mac({ root = true, unregistered = [], silent = [], psUser = USER, program = true, parkedByHand = false, dev = '/dt-test' } = {}) {
+function mac({ root = true, unregistered = [], silent = [], psUser = USER, program = true, parkedByHand = false, dev = '/dt-test', signing = 'unsigned' } = {}) {
   const home = scratch('paddock-runner-home-');
   const sys = scratch('paddock-runner-sys-');
   const bin = scratch('paddock-runner-bin-');
@@ -93,14 +93,28 @@ esac`);
   shim(bin, 'defaults', 'echo 1');
   // ./dev: only `places --get dev-targets --pinned --repo <repo>` is asked.
   shim(bin, 'dev', dev === null ? 'exit 3' : `[ "$1 $2 $3 $4 $5" = "places --get dev-targets --pinned --repo" ] && echo ${dev}`);
-  return { home, sys, bin, state };
+  // tools/mac-ci-signing.sh: `signing` is the state of the identity and the program ('unsigned', 'signed' or 'none' for no
+  // identity); sign marks the program signed in a file, as the real one changes the program.
+  const signed = join(bin, 'signed');
+  if (signing === 'signed') write(bin, { signed: '' });
+  write(bin, {
+    'signing.sh': `#!/bin/bash
+echo "signing $*" >> "${bin}/calls.log"
+${signing === 'none' ? 'echo "error: not measured: no identity" >&2; exit 6' : ''}
+case "$1" in
+  check) if [ -f "${signed}" ]; then echo "  ok    $4"; exit 0; fi; echo "  fail  $4"; echo '        has: cdhash H"00"'; exit 5 ;;
+  sign) : > "${signed}"; echo "  ok    $4: signed" ;;
+esac
+`,
+  });
+  return { home, sys, bin, state, signing: join(bin, 'signing.sh') };
 }
 
 const move = (m, args) =>
   run('mac-runner-move.sh', args, {
     bin: m.bin,
     cwd: m.home,
-    env: { PADDOCK_TOOLS_OS: 'Darwin', PADDOCK_RUNNER_MOVE_SYSROOT: m.sys, PADDOCK_RUNNER_MOVE_DEV: join(m.bin, 'dev') },
+    env: { PADDOCK_TOOLS_OS: 'Darwin', PADDOCK_RUNNER_MOVE_SYSROOT: m.sys, PADDOCK_RUNNER_MOVE_DEV: join(m.bin, 'dev'), PADDOCK_MAC_SIGNING: m.signing },
   });
 const loadedJobs = (m) => readFileSync(m.state, 'utf8').trim().split('\n').filter(Boolean).sort();
 const plist = (file) => JSON.parse(spawnSync('plutil', ['-convert', 'json', '-o', '-', file], { encoding: 'utf8' }).stdout);
@@ -288,4 +302,51 @@ test('the daemon gets HEAVY_DIR=<dev-targets>/throttle, so CI jobs and agents sh
   assert.notEqual(r2.status, 0, r2.out);
   assert.ok(r2.out.includes('cannot read the dev-targets folder'), r2.out);
   assert.deepEqual(snapshot(bad.home, bad.sys), before);
+});
+
+test('install signs the runner with the Mac CI identity after the old one stopped and before the daemon starts', { skip }, () => {
+  const m = mac();
+  const r = move(m, ['install', ...LANES, '--verify-max', '5']);
+  assert.equal(r.status, 0, r.out);
+  const program = join(m.home, 'runners/lane-a/gitea-runner');
+  const log = calls(m.bin);
+  const signAt = log.indexOf(`signing sign --identifier net.decryptology.gitea-runner ${program}`);
+  const bootoutAt = log.indexOf(`launchctl bootout gui/501/${PREFIX}lane-a`);
+  const bootstrapAt = log.findIndex((c) => c.startsWith('launchctl bootstrap system '));
+  assert.ok(signAt > bootoutAt && signAt < bootstrapAt, `sign between the stop and the start:\n${log.join('\n')}`);
+  assert.ok(!log.some((c) => c.startsWith('signing sign') && c.includes('lane-b')), 'retired lanes are not signed');
+  assert.match(r.out, /ok {4}lane-a: .* will be signed with the Mac CI identity/);
+});
+
+test('a runner that carries the identity is checked, not signed again', { skip }, () => {
+  const m = mac({ signing: 'signed' });
+  const r = move(m, ['install', ...LANES, '--verify-max', '5']);
+  assert.equal(r.status, 0, r.out);
+  assert.match(r.out, /ok {4}lane-a: .* carries the Mac CI identity/);
+});
+
+test('no identity fails the preflight with the create command, and changes nothing (ER-33: not measured is no pass)', { skip }, () => {
+  const m = mac({ signing: 'none' });
+  const before = snapshot(m.home, m.sys);
+  const r = move(m, ['install', ...LANES]);
+  assert.equal(r.status, 1, r.out);
+  assert.match(r.out, /fail {2}lane-a: no Mac CI signing identity for ci-tester/);
+  assert.match(r.out, /mac-ci-signing\.sh create|signing\.sh create/);
+  assert.deepEqual(snapshot(m.home, m.sys), before);
+  assert.equal(calls(m.bin).filter((c) => /launchctl (bootout|bootstrap)/.test(c)).length, 0);
+});
+
+test('--no-sign installs without signing, and says what that costs', { skip }, () => {
+  const m = mac({ signing: 'none' });
+  const r = move(m, ['install', ...LANES, '--verify-max', '5', '--no-sign']);
+  assert.equal(r.status, 0, r.out);
+  assert.match(r.out, /warn {2}lane-a: --no-sign/);
+  assert.ok(!calls(m.bin).some((c) => c.startsWith('signing sign')));
+});
+
+test('status says whether the runner carries the identity', { skip }, () => {
+  const m = mac();
+  assert.match(move(m, ['status', ...LANES]).out, /- lane-a\n(.*\n)* {4}signature {5}NOT the Mac CI identity: has: cdhash/);
+  const s = mac({ signing: 'signed' });
+  assert.match(move(s, ['status', ...LANES]).out, /signature {5}the Mac CI identity \(net\.decryptology\.gitea-runner\)/);
 });
