@@ -2412,7 +2412,8 @@ mod tests {
         }
         std::fs::write(t.path().join("wt/a/.git"), "gitdir: x").unwrap();
         std::fs::write(t.path().join("wt/b/.git"), "gitdir: y").unwrap();
-        let roots = worktree_roots(&t.path().join("wt/a/crates"));
+        // One component per join: a joined "wt/a/crates" keeps its `/`, so on Windows the root it finds prints as `...\wt/a`.
+        let roots = worktree_roots(&t.path().join("wt").join("a").join("crates"));
         let root = |n: &str| t.path().join("wt").join(n).display().to_string();
         assert_eq!(roots, [root("a"), root("b")]);
     }
