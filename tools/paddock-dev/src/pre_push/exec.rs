@@ -996,6 +996,43 @@ pub struct RealExec {
     pub state: PathBuf,
 }
 
+/// The variable that names heavy's lock folder (tools/heavy `HEAVY_DIR`, which it has always honoured).
+pub const HEAVY_DIR_VAR: &str = "HEAVY_DIR";
+
+/// heavy's lock folder for this machine (its queue, history and logs): `<dev-targets>/throttle` (the name after the decided heavy→throttle
+/// rename, so the folder moves once; `<dev-targets>/heavy` holds the installed binary) ([`crate::places::dev_targets`], the folder
+/// of worktrees and build folders, which a reboot keeps; it was /private/tmp, where every reboot lost the history), read once per
+/// process; `None` when it cannot be derived (heavy then uses its own default). The Mac CI runner's configuration sets the same
+/// `HEAVY_DIR`, so agents still see CI's `heavy mark` (ADR 0102).
+pub fn heavy_dir(root: &Path, env: &HashMap<String, String>) -> Option<PathBuf> {
+    static DIR: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
+    DIR.get_or_init(|| {
+        crate::places::dev_targets(root, &|k| env.get(k).cloned())
+            .ok()
+            .map(|t| t.join("throttle"))
+    })
+    .clone()
+}
+
+/// `HEAVY_DIR` for a heavy child: none when the caller names a lock folder itself (`HEAVY_DIR`, `PLOCK_DIR`, `PLOCK_ROOT`: its value
+/// wins, ER-47) or none can be derived, else [`heavy_dir`].
+pub fn heavy_dir_env(root: &Path, env: &HashMap<String, String>) -> Vec<(String, String)> {
+    if ["HEAVY_DIR", "PLOCK_DIR", "PLOCK_ROOT"]
+        .iter()
+        .any(|k| env.get(*k).is_some_and(|v| !v.is_empty()))
+    {
+        return Vec::new();
+    }
+    match heavy_dir(root, env) {
+        // The folder heavy used before (its legacy default): its history is read once, then the new folder's.
+        Some(d) => vec![
+            (HEAVY_DIR_VAR.to_string(), d.to_string_lossy().into_owned()),
+            ("HEAVY_MOVED_FROM".to_string(), "/private/tmp/claude-501".to_string()),
+        ],
+        None => Vec::new(),
+    }
+}
+
 /// Variables every gate may see besides the base list: the caller's account (CI's runner has it, and tests read it: paddock-env's
 /// macOS ACL test writes `user:$USER`; ER-47), the toolchain, Docker, caches and Paddock's own settings.
 pub(crate) const PASS: &[&str] = &[
@@ -1126,6 +1163,10 @@ impl RealExec {
         // go first (the run's agent name differs every run, so it cannot be the key). An older heavy ignores the variable.
         if gate.heavy {
             call = call.env("HEAVY_ROW", &gate.id);
+            // heavy's lock folder, where a reboot keeps its history (heavy_dir_env).
+            for (k, v) in heavy_dir_env(&self.root, &self.env) {
+                call = call.env(k, v);
+            }
         }
         for (k, v) in &gate.env {
             call = call.env(k, v);
@@ -2017,6 +2058,26 @@ mod tests {
         assert_eq!(workers(Some(5.0), 14), 3);
         assert_eq!(workers(None, 2), 2);
         assert_eq!(workers(Some(1.0), 0), 1);
+    }
+
+    /// heavy's lock folder goes to `<dev-targets>/throttle`, a folder a reboot keeps (it was in /private/tmp and its history was lost at
+    /// every reboot, so no row was ever quick; 2026-11-25), unless the caller names one. One process reads it once (nextest runs each
+    /// test in a process of its own).
+    #[test]
+    fn heavys_lock_folder_goes_to_the_dev_targets_folder_unless_the_caller_names_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut env: HashMap<String, String> = [(crate::places::DEV_TARGETS_ENV.to_string(), "/dev-targets-x".to_string())].into();
+        let got = heavy_dir_env(dir.path(), &env);
+        assert_eq!(
+            got[0],
+            (
+                HEAVY_DIR_VAR.to_string(),
+                PathBuf::from("/dev-targets-x/throttle").display().to_string()
+            )
+        );
+        assert_eq!(got[1].0, "HEAVY_MOVED_FROM");
+        env.insert("HEAVY_DIR".into(), "/mine".into());
+        assert!(heavy_dir_env(dir.path(), &env).is_empty(), "the caller's own folder wins");
     }
 
     #[test]

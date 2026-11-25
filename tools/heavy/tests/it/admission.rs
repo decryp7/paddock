@@ -374,3 +374,46 @@ fn a_row_expected_at_the_limit_is_not_quick() {
     };
     assert!(!at.is_quick() && under.is_quick() && !req("A").is_quick());
 }
+
+/// The lock folder (and the history in it) moves where a reboot does not clear it (./dev sets `HEAVY_DIR=<dev-targets>/throttle`; it was
+/// /private/tmp, and every reboot lost the history, so no row was ever quick, 2026-11-25), and the old folder's file is read once: the
+/// first record copies its lines over, and the new file is read from then on.
+#[test]
+fn the_history_moves_with_the_lock_folder_and_reads_the_old_file_once() {
+    let rig = Rig::new();
+    let old = History::new(rig.root());
+    old.record("lockfile crates", 0.4, 1000).unwrap();
+    let new_dir = rig.root().join("kept");
+    let h = History::moved(&new_dir, rig.root());
+    assert_eq!(h.path(), new_dir.join(heavy::history::FILE).as_path());
+    assert_eq!(
+        h.expected_secs("lockfile crates"),
+        Some(0.4),
+        "the old file is read while the new one does not exist"
+    );
+    h.record("clippy crates", 90.0, 1001).unwrap();
+    let text = std::fs::read_to_string(h.path()).unwrap();
+    assert!(
+        text.contains("\tlockfile crates") && text.contains("\tclippy crates"),
+        "the old lines came over once: {text}"
+    );
+    // From now on the old file is not read: a line added there later is not seen.
+    old.record("only in the old file", 1.0, 1002).unwrap();
+    assert_eq!(h.expected_secs("only in the old file"), None);
+    // Control: a folder that did not move reads only its own file.
+    assert_eq!(
+        History::moved(rig.root(), rig.root()).expected_secs("only in the old file"),
+        Some(1.0)
+    );
+    // The lock folder is HEAVY_DIR, which heavy has always honoured; HEAVY_MOVED_FROM names the old one, and without it nothing else
+    // is read (a test's or a CI job's heavy never reads the machine's old folder).
+    let vars = |k: &str| match k {
+        "HEAVY_DIR" => Some(new_dir.display().to_string()),
+        "HEAVY_MOVED_FROM" => Some(rig.root().display().to_string()),
+        _ => None,
+    };
+    let (c, _) = heavy::config::Config::from_env(&vars, true);
+    assert_eq!((c.root.as_path(), c.moved_from.as_deref()), (new_dir.as_path(), Some(rig.root())));
+    let (c, _) = heavy::config::Config::from_env(&|_| None, true);
+    assert_eq!(c.moved_from, None);
+}

@@ -782,3 +782,54 @@ fn the_step_gets_its_share_of_the_cores_unless_the_caller_set_one() {
     );
     assert!(o.contains("jobs=7 nextest=3 rust=14"), "{o}");
 }
+
+/// A heavy run inside a heavy run does not queue for the slot its own parent holds (ER-43; `./dev heavy -- ./dev gen check` held the
+/// only slot for 36 min while gen check's inner heavy steps queued behind it): heavy hands the command `HEAVY_HELD`, and an inner run
+/// that inherits it runs inside the outer slot. Control: the same inner run without the marker waits for the slot and hits its queue
+/// limit, so the test can see the wait it removes.
+#[test]
+fn a_nested_run_runs_inside_the_held_slot_and_without_the_marker_it_would_wait() {
+    let w = World::new();
+    let out = w.path("out");
+    let inner = |unset: &str| {
+        format!(
+            "{unset}\"$0\" run --no-gate --queue-max 3 INNER -- sh -c 'echo inner-ran >> \"$1\"' x \"$1\"; echo \"inner-rc=$?\" >> \"$1\""
+        )
+    };
+    let bin = BIN.to_string();
+    let out_s = out.to_str().unwrap().to_string();
+    let (code, _o, e) = heavy_out(&w, &["run", "--no-gate", "OUTER", "--", "sh", "-c", &inner(""), &bin, &out_s], &[]);
+    assert_eq!(code, 0, "{e}");
+    let text = w.read(&out);
+    assert!(
+        text.contains("inner-ran") && text.contains("inner-rc=0"),
+        "the nested run ran inside the outer slot: {text}\n{e}"
+    );
+    assert!(e.contains("INNER runs inside the slot"), "it says so: {e}");
+    assert_eq!(w.count("pitcrew-heavy.ticket."), 0, "no ticket left behind");
+
+    // Control: without the marker the inner run queues behind its own parent and gives up at its queue limit.
+    std::fs::remove_file(&out).unwrap();
+    let (code, _o, e) = heavy_out(
+        &w,
+        &[
+            "run",
+            "--no-gate",
+            "OUTER",
+            "--",
+            "sh",
+            "-c",
+            &inner("unset HEAVY_HELD; "),
+            &bin,
+            &out_s,
+        ],
+        &[],
+    );
+    assert_eq!(code, 0, "{e}");
+    let text = w.read(&out);
+    assert!(
+        !text.contains("inner-ran"),
+        "without the marker the inner run never got the slot: {text}"
+    );
+    assert!(text.contains(&format!("inner-rc={}", heavy::exit::QUEUE_LIMIT)), "{text}\n{e}");
+}

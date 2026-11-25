@@ -37,6 +37,9 @@ pub struct Config {
     pub slots: u32,
     /// The number of CPU cores the slot rule counts against the load (`HEAVY_CPUS`, else what the OS says).
     pub cpus: u32,
+    /// The lock folder this one moved from (`HEAVY_MOVED_FROM`, which ./dev sets beside `HEAVY_DIR`): its history file is read once
+    /// ([`crate::history::History::of`]). None: nothing moved, nothing else is read.
+    pub moved_from: Option<PathBuf>,
     /// The troubleshooting log file (None: the default under `root`).
     pub log_file: Option<PathBuf>,
     /// Echo every log event to stderr.
@@ -141,6 +144,7 @@ impl Config {
             slots,
             drain_after: Duration::from_secs_f64((priority_max / 6.0).max(1.0)),
             cpus,
+            moved_from: first(get, &["HEAVY_MOVED_FROM"]).map(PathBuf::from),
             log_file: first(get, &["HEAVY_LOG_FILE"]).map(PathBuf::from),
             verbose: flag("HEAVY_VERBOSE"),
             stderr_tail: get("HEAVY_STDERR_TAIL").is_none_or(|v| v != "0"),

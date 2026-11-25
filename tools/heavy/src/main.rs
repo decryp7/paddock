@@ -187,27 +187,24 @@ fn real_main() -> i32 {
                 cwd: heavy::timefmt::oneline(&cwd_text),
                 cmdline: heavy::mask::mask_cmd(&r.command),
                 high: r.high,
-                expected_secs: row
-                    .as_deref()
-                    .and_then(|k| heavy::history::History::new(&h.cfg.root).expected_secs(k)),
+                expected_secs: row.as_deref().and_then(|k| heavy::history::History::of(&h.cfg).expected_secs(k)),
                 row,
             };
             let (int, term, hup) = stop_flags();
             let stop = move || exit::stop_code(int.load(Ordering::SeqCst), term.load(Ordering::SeqCst), hup.load(Ordering::SeqCst));
-            run(
-                &h,
-                req,
-                &r.command,
-                RunOpts {
-                    gate: !r.no_gate,
-                    low: r.low,
-                    queue_max: r.queue_max.map(std::time::Duration::from_secs_f64),
-                    queue_stall: r.queue_stall.map(std::time::Duration::from_secs_f64),
-                    run_max: r.run_max.map(std::time::Duration::from_secs_f64),
-                    stall: r.stall.map(std::time::Duration::from_secs_f64).or(h.cfg.stall),
-                },
-                &stop,
-            )
+            let opts = RunOpts {
+                gate: !r.no_gate,
+                low: r.low,
+                queue_max: r.queue_max.map(std::time::Duration::from_secs_f64),
+                queue_stall: r.queue_stall.map(std::time::Duration::from_secs_f64),
+                run_max: r.run_max.map(std::time::Duration::from_secs_f64),
+                stall: r.stall.map(std::time::Duration::from_secs_f64).or(h.cfg.stall),
+            };
+            // Inside a run that holds a slot (HEAVY_HELD from a live holder): run in that slot, never queue for it (ER-43).
+            if let Some(outer) = heavy::runner::held_by(&h, env_get(heavy::runner::HELD_VAR).as_deref()) {
+                return heavy::runner::run_nested(&h, &req.name, &r.command, opts, &stop, &outer);
+            }
+            run(&h, req, &r.command, opts, &stop)
         }
         _ => exit::USAGE,
     }

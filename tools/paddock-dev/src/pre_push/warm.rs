@@ -79,7 +79,12 @@ fn not_measured(why: &str, next: &str) -> Report {
 fn step(root: &Path, id: &str, argv: &[String], what: &str) -> (String, Row, bool) {
     eprintln!("warm-linux: {id}: start ({what}; the container's own output follows)");
     let started = Instant::now();
-    let status = paddock_proc::command(&argv[0]).args(&argv[1..]).current_dir(root).status();
+    let env: HashMap<String, String> = crate::process_env::vars().collect();
+    let status = paddock_proc::command(&argv[0])
+        .args(&argv[1..])
+        .envs(super::exec::heavy_dir_env(root, &env))
+        .current_dir(root)
+        .status();
     let secs = started.elapsed().as_secs_f64();
     let subject = subject_of(root, None);
     let (done, word) = match status {

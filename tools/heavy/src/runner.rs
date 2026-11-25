@@ -40,6 +40,49 @@ pub type Stop<'a> = &'a (dyn Fn() -> Option<i32> + Sync);
 
 const TAIL_BYTES: usize = 16 * 1024;
 
+/// The variable heavy hands the command it runs: `<run id>:<pid>` of the run that holds the slot. A heavy run that inherits it (a heavy
+/// step of a command that is itself a heavy step: `./dev heavy -- ./dev gen check`) runs inside that slot instead of queuing for a
+/// slot its own parent holds (ER-43: a waiter never holds the capacity the work it waits for needs).
+pub const HELD_VAR: &str = "HEAVY_HELD";
+
+/// The holder a `HEAVY_HELD` value names, when that process is still alive: `Some(text)` to run inside its slot, `None` to queue as
+/// usual (no marker, a malformed one, or a holder that is gone: a marker left in a shell that outlived its run).
+pub fn held_by(h: &Heavy, value: Option<&str>) -> Option<String> {
+    let v = value?.trim();
+    let (_, pid) = v.rsplit_once(':')?;
+    let pid: u32 = pid.parse().ok()?;
+    crate::procs::pid_alive(h.procs.as_ref(), pid, None).then(|| v.to_string())
+}
+
+/// A run inside the slot an ancestor holds ([`HELD_VAR`]): no ticket, no queue, no load gate; the command runs with the same run
+/// limit and stop handling as a normal run, and its exit code is passed on.
+pub fn run_nested(h: &Heavy, name: &str, args: &[String], opts: RunOpts, stop: Stop<'_>, outer: &str) -> i32 {
+    (h.say)(&format!(
+        "{name} runs inside the slot {outer} already holds ({HELD_VAR}): no second slot, no queue (ER-43)"
+    ));
+    h.log.info(
+        "heavy.run",
+        "nested run inside a held slot",
+        &[("Agent", json!(name)), ("HeldBy", json!(outer)), ("Command", json!(args.join(" ")))],
+    );
+    let t = Instant::now();
+    let run_log = open_run_log(h, name, args);
+    let Ended { code, desc, .. } = exec(h, args, opts, stop, None, run_log);
+    (h.say)(&format!(
+        "{name} done rc={code} inside {outer}, ran {:.1} s",
+        t.elapsed().as_secs_f64()
+    ));
+    if code != 0 {
+        h.log.event(
+            crate::log::Level::Error,
+            "heavy.run",
+            &format!("the nested command failed: {desc}"),
+            &[("ExitCode", json!(code))],
+        );
+    }
+    code
+}
+
 /// Whether a CI system is running us (`CI` set and not 0/false).
 pub fn ci() -> bool {
     std::env::var("CI").is_ok_and(|v| !v.is_empty() && v != "0" && v != "false")
@@ -297,7 +340,7 @@ pub fn run(h: &Heavy, req: Request, args: &[String], opts: RunOpts, stop: Stop<'
     let t2 = h.now();
     let run_log = open_run_log(h, &name, args);
     let t_run = Instant::now();
-    let Ended { code, desc, tail, hung } = exec(h, args, opts, stop, &mut acq, run_log.clone());
+    let Ended { code, desc, tail, hung } = exec(h, args, opts, stop, Some(&mut acq), run_log.clone());
     let ran = h.now().saturating_sub(t2);
     timing(queued, t_run.elapsed().as_secs_f64());
     let summary = format!(
@@ -313,7 +356,7 @@ pub fn run(h: &Heavy, req: Request, args: &[String], opts: RunOpts, stop: Stop<'
     // A row that passed teaches the history how long it takes (a failure is not its usual time).
     if code == 0
         && let Some(row) = &req.row
-        && let Err(e) = crate::history::History::new(&h.cfg.root).record(row, t_run.elapsed().as_secs_f64(), h.now())
+        && let Err(e) = crate::history::History::of(&h.cfg).record(row, t_run.elapsed().as_secs_f64(), h.now())
     {
         h.log.warn(
             "heavy.history",
@@ -477,7 +520,7 @@ fn pump(
 }
 
 /// Starts the command and waits for it.
-fn exec(h: &Heavy, args: &[String], opts: RunOpts, stop: Stop<'_>, acq: &mut Acquirer<'_>, run_log: Option<Arc<RunLog>>) -> Ended {
+fn exec(h: &Heavy, args: &[String], opts: RunOpts, stop: Stop<'_>, acq: Option<&mut Acquirer<'_>>, run_log: Option<Arc<RunLog>>) -> Ended {
     let ended = |code: i32, desc: String, tail: Option<String>| Ended {
         code,
         desc,
@@ -488,10 +531,15 @@ fn exec(h: &Heavy, args: &[String], opts: RunOpts, stop: Stop<'_>, acq: &mut Acq
     cmd.args(&args[1..]);
     // The correlation id travels to the command, so its own logs can be matched to this run.
     cmd.env("DEVKIT_RUN_ID", h.log.run_id());
+    // A heavy step of this command runs inside this slot (run_nested); a nested run passes on the marker it was given.
+    if acq.is_some() {
+        cmd.env(HELD_VAR, format!("{}:{}", h.log.run_id(), h.pid));
+    }
     // ER-48: the threads a step may use are its share of the cores: a step admitted while `n` may run gets `1/n` of them, so steps at
     // once times threads stay within the cores. The caller's own values win (ER-47: children inherit the environment; a caller that set
     // one chose it).
-    let share = acq.share();
+    // A nested run (no slot of its own) inherits its holder's share: the variables its parent set stay as they are.
+    let share = acq.as_ref().map_or(1, |a| a.share());
     let env = crate::gate::step_env(h.cfg.cpus, share, &|k| {
         std::env::var_os(k).map(|v| v.to_string_lossy().into_owned())
     });
@@ -552,7 +600,9 @@ fn exec(h: &Heavy, args: &[String], opts: RunOpts, stop: Stop<'_>, acq: &mut Acq
         pumps.push(pump(err, true, log_arc, Arc::clone(&bytes), t, Arc::clone(&open)));
     }
     let id = ProcessId::of(child.id());
-    if let Some(id) = id {
+    if let Some(id) = id
+        && let Some(acq) = acq
+    {
         acq.set_child(id.pid(), id.started().as_micros());
     }
     h.log.info("heavy.run", "command started", &[("ChildPid", json!(child.id()))]);

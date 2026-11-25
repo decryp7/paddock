@@ -60,6 +60,8 @@ pub fn command(a: &HeavyArgs) -> Result<Report, CliError> {
     for (k, v) in child_env(a.stall, &env, &|| crate::places::dev_targets(&cwd, &|k| env.get(k).cloned()).ok()) {
         cmd.env(k, v);
     }
+    // heavy's lock folder, which a reboot keeps (crate::pre_push::exec::heavy_dir_env).
+    cmd.envs(crate::pre_push::exec::heavy_dir_env(&root, &env));
     let status = cmd
         .status()
         .map_err(|e| CliError::failure(format!("dev heavy: cannot start {program}: {e}")))?;
