@@ -3405,20 +3405,32 @@ fn a_container_row_on_a_stale_mount_is_not_measured_and_never_runs() {
         stale_mount: true,
         ..Fake::default()
     };
+    // Every container row: the Linux Clippy and, in the member gate, the Linux tests (feat/member-check-touched-tests).
+    let container: Vec<String> = run_gates(&planned)
+        .iter()
+        .filter(|g| g.need == Need::LocalCiImage)
+        .map(|g| g.id.clone())
+        .collect();
+    assert!(
+        container.iter().any(|id| id == "clippy-linux crates") && container.iter().any(|id| id.starts_with("tests-linux ")),
+        "{container:?}"
+    );
     let rows = run_all(&planned, &fake, 3);
     let v = verdicts(&rows);
-    let (reason, next) = nm(&v["clippy-linux crates"]).expect("not measured");
-    assert!(reason.contains("stale") && reason.contains("crates/a.rs (host "), "{reason}");
-    assert!(next.contains("restart OrbStack") && next.contains("or the Mac"), "{next}");
+    for id in &container {
+        let (reason, next) = nm(&v[id.as_str()]).unwrap_or_else(|| panic!("{id}: not measured"));
+        assert!(reason.contains("stale") && reason.contains("crates/a.rs (host "), "{id}: {reason}");
+        assert!(next.contains("restart OrbStack") && next.contains("or the Mac"), "{id}: {next}");
+    }
     assert!(
-        !fake.ran.lock().unwrap().iter().any(|r| r.starts_with("clippy-linux")),
+        !fake.ran.lock().unwrap().iter().any(|r| container.contains(r)),
         "a row on a stale mount must not run"
     );
     assert_eq!(render("h", &rows).exit, Exit::NotMeasured);
     assert_eq!(
         *fake.probed.lock().unwrap(),
-        vec![vec!["crates/a.rs".to_string(), "docs/x.md".to_string()]],
-        "the row's own workspace first, then the rest of the change"
+        vec![vec!["crates/a.rs".to_string(), "docs/x.md".to_string()]; container.len()],
+        "one probe per container row, each with the row's own workspace first, then the rest of the change"
     );
 
     let fresh = Fake::default();
