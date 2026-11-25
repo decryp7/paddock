@@ -2575,7 +2575,7 @@ fn the_commit_form_with_a_local_main_ahead_of_origin_does_not_take_the_re_merge_
     r.commit("feat: a on the train");
     r.git(&["merge", "-q", "--no-ff", "-m", "Merge stale into train", "stale"]);
     let (code, text) = r.check(&["HEAD", "--no-generators"]);
-    assert_eq!(code, 0, "{text}");
+    assert_ne!(code, 0, "the member lacks m1, so the old base blocks: {text}");
     assert!(
         text.contains("the newest commit of main that") && text.contains(&m1[..9]) && !text.contains("train/old"),
         "the base is origin/main's m1, not the re-merge on the local main: {text}"
