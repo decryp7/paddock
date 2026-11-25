@@ -110,52 +110,28 @@ async function installBuild({ version, url, sha, id, dir, fetchBytes, extract, g
 export const SIGNING_TOOL = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'tools', 'mac-ci-signing.sh');
 
 /**
- * The keychain of the Mac CI identity: PADDOCK_CI_SIGNING_KEYCHAIN overrides the default
- * ~/Library/Keychains/paddock-ci-signing.keychain-db (the path tools/mac-ci-signing.sh uses).
+ * The program and arguments that sign the browser bundle of `exe` with the Mac CI runner's stable identity (macOS builds only;
+ * `null` otherwise). Chrome for Testing is its own responsible process (it disclaims its parent), so the runner's Full Disk
+ * Access does not cover it, and its ad-hoc signature changes with every pin: a LaunchDaemon cannot show the Removable Volumes
+ * prompt, so the browser was denied silently on the external work volume. Signed with the identity, the user's one Full Disk
+ * Access grant for the bundle id com.google.chrome.for.testing stays valid for every copy and every pin (docs/dev-setup.md, "Mac
+ * CI runner"). `--ci-hook` is the signer's one rule: only in a CI job and only with the identity's default keychain, so a
+ * developer's Mac and the tests never sign or unlock anything (ER-14); a runner without the identity gets a notice. Idempotent.
  */
-export function signingKeychain(env = process.env) {
-  return env.PADDOCK_CI_SIGNING_KEYCHAIN || join(env.HOME || homedir(), 'Library', 'Keychains', 'paddock-ci-signing.keychain-db');
-}
-
-/** Whether this is a CI job on a runner (the runner's own markers), never a developer's shell or a test's child (ER-14). */
-export const onCiRunner = (env = process.env) => Boolean(env.GITEA_ACTIONS || env.PADDOCK_CI_HOME);
-
-/**
- * The program and arguments that sign the browser bundle of `exe` with the Mac CI runner's stable identity, or `null`. Chrome
- * for Testing is its own responsible process (it disclaims its parent), so the runner's Full Disk Access does not cover it, and
- * its ad-hoc signature changes with every pin: a LaunchDaemon cannot show the Removable Volumes prompt, so the browser was
- * denied silently on the external work volume. Signed with the identity, the user's one Full Disk Access grant for the bundle
- * id com.google.chrome.for.testing stays valid for every copy and every pin (docs/dev-setup.md, "Mac CI runner"). Only on
- * macOS, only in a CI job (`onCiRunner`) and only when the identity's keychain exists (`signingKeychain`): a developer's Mac
- * and the tests never sign or unlock anything. Idempotent. `exists` is injectable.
- */
-export function signCommand(exe, platform = process.platform, env = process.env, exists = existsSync) {
-  if (platform !== 'darwin' || !onCiRunner(env) || !exists(signingKeychain(env))) return null;
+export function signCommand(exe, platform = process.platform) {
+  if (platform !== 'darwin') return null;
   const app = exe.replace(/\/Contents\/MacOS\/[^/]+$/, '');
   if (app === exe || !app.endsWith('.app')) return null; // not a macOS build (a test installing another platform's)
-  return ['bash', [SIGNING_TOOL, 'sign', '--if-configured', app]];
+  return ['bash', [SIGNING_TOOL, 'sign', '--ci-hook', app]];
 }
 
 /**
  * Runs `signCommand` for `exe`, its output on standard error (standard output carries CHROMIUM_TEST_PATH). A failure is an
- * error: with the identity there, an unsigned browser would be denied later with no message (ER-27). On the runner without
- * the identity: a notice and the browser as it was. `command`, `run`, `notice`, `platform` and `env` are injectable.
+ * error: with the identity there, an unsigned browser would be denied later with no message (ER-27). `command` and `run` are
+ * injectable.
  */
-export function defaultSign(
-  exe,
-  {
-    env = process.env,
-    platform = process.platform,
-    command = signCommand(exe, platform, env),
-    run = (cmd, args) => execFileSync(cmd, args, { stdio: ['ignore', 2, 2], timeout: 5 * 60 * 1000 }),
-    notice = (m) => console.error(m),
-  } = {},
-) {
-  if (!command) {
-    if (platform === 'darwin' && onCiRunner(env) && exe.includes('.app/'))
-      notice(`::notice::install-test-browser: ${exe} keeps its ad-hoc signature (no Mac CI identity in ${signingKeychain(env)}; docs/dev-setup.md, "Mac CI runner")`);
-    return;
-  }
+export function defaultSign(exe, { command = signCommand(exe), run = (cmd, args) => execFileSync(cmd, args, { stdio: ['ignore', 2, 2], timeout: 5 * 60 * 1000 }) } = {}) {
+  if (!command) return;
   try {
     run(command[0], command[1]);
   } catch (e) {

@@ -353,12 +353,12 @@ signed; CI builds are never signed.
 | --- | --- | --- |
 | `~/gitea-runner/gitea-runner` | `net.decryptology.gitea-runner` (by its path) | `tools/mac-runner-move.sh install` (as you, after the old runner stopped) |
 | Chrome for Testing (`install-test-browser`, every copy and pin) | `com.google.chrome.for.testing` (by bundle id) | `conformance/ci/install-test-browser.mjs` after each install |
-| Playwright's Chromium (Dyno's screenshots) | its bundle id; the headless shell `net.decryptology.paddock.ci.chrome-headless-shell` | `dyno-screenshots.yml`, browsers in `~/Library/Caches/paddock-ci/ms-playwright` on the boot disk |
+| Playwright's browsers (any CI job; today Dyno's screenshots) | Chromium's and WebKit's bundle ids; the headless shell `net.decryptology.paddock.ci.chrome-headless-shell` | `conformance/ci/playwright-browsers.sh`, the one install point: one fixed folder on the boot disk, `~/Library/Caches/paddock-ci/ms-playwright`, for every Playwright version |
 
 The keychain is a file of its own, `~/Library/Keychains/paddock-ci-signing.keychain-db`, unlocked with the random password in
 `~/.config/paddock/ci-signing.pass` (0600), because the daemon has no unlocked login keychain and no window for a dialog. The CI
 hooks find it at that default path (`PADDOCK_CI_SIGNING_KEYCHAIN` only overrides it), so the runner needs no configuration; without
-it they print a notice and sign nothing. They sign only in a CI job (the runner's own `GITEA_ACTIONS` or `PADDOCK_CI_HOME`), so a
+it they print a notice and sign nothing. They sign only in a CI job (`GITEA_ACTIONS` or `GITHUB_ACTIONS`, which the runner sets in every job; the one rule is `mac-ci-signing.sh --ci-hook`), so a
 developer's Mac and the tests never sign, even with the identity in place.
 
 **Your one-time steps** (an agent never runs these; rule 7, ER-14). From the repository root, as yourself:

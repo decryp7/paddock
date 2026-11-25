@@ -4307,5 +4307,10 @@ startup"; the Chromium start judge, ADR 0031). A start that hands back a handle 
 - **Fix in this change.** One self-signed identity (`tools/mac-ci-signing.sh`): `mac-runner-move.sh install` signs the runner,
   `install-test-browser.mjs` signs Chrome for Testing (CI jobs only, identity from its default keychain, no runner configuration), `dyno-screenshots.yml` keeps Playwright's browsers on the boot disk and signs
   them. The user grants Full Disk Access once by that identity (docs/dev-setup.md, "Full Disk Access by a stable identity").
+- **Follow-up, 22:50 the same day.** `dyno-screenshots.yml` on main still installed Playwright into
+  `<work>/tool_cache/paddock-playwright/<version>/`, on the external volume, and its `chrome-headless-shell` raised a Removable
+  Volumes prompt. Every CI job now installs Playwright's browsers through one script, `conformance/ci/playwright-browsers.sh`:
+  one fixed folder on the boot disk for every version, then signed through `mac-ci-signing.sh --ci-hook`, the one rule for
+  "CI job, identity present" that the Chrome for Testing hook uses too.
 - **Open.** Whether the TCC grant for the re-signed bundle holds was not measured before the user's one-time steps; the check is the
   TCC log after the first Mac run that starts a browser.

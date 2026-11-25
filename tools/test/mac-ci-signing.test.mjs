@@ -166,3 +166,59 @@ test('create --dry-run writes nothing', { skip }, () => {
   assert.ok(!existsSync(join(m.home, 'cfg', 'ci.pass')));
   assert.ok(!calls(m.bin).some((c) => /^security (create-keychain|import)/.test(c)));
 });
+
+// --ci-hook: the one rule for the CI hooks (install-test-browser.mjs, conformance/ci/playwright-browsers.sh). It signs only in a CI
+// job (GITEA_ACTIONS or GITHUB_ACTIONS, which the runner sets in every job) and only with the identity's keychain at its default path (the variable only
+// overrides it); a developer's Mac never signs, even with the identity in place (ER-14).
+const hook = (m, args, env) =>
+  run('mac-ci-signing.sh', args, { bin: m.bin, cwd: m.home, env: { PADDOCK_TOOLS_OS: 'Darwin', ...env } });
+const defaultKeychainMac = () => {
+  const m = mac({ identity: false });
+  write(m.home, { 'Library/Keychains/paddock-ci-signing.keychain-db': 'keychain', '.config/paddock/ci-signing.pass': 'invented-keychain-password' });
+  write(m.bin, { imported: '' });
+  write(m.home, { prog: '#!/bin/bash\n' });
+  return m;
+};
+
+test('--ci-hook off a CI runner signs nothing and says nothing, even with the identity in place', { skip }, () => {
+  const m = defaultKeychainMac();
+  for (const env of [{}, { CI: 'true' }, { GITEA_ACTIONS: 'false' }]) {
+    const r = hook(m, ['sign', '--ci-hook', '--identifier', 'x', join(m.home, 'prog')], env);
+    assert.equal(r.status, 0, r.out);
+    assert.equal(r.out, '', `${JSON.stringify(env)} is not a CI job on the runner`);
+  }
+  assert.ok(!calls(m.bin).some((c) => /^(security|codesign)/.test(c)), 'not even a keychain lookup');
+});
+
+test('--ci-hook in a CI job signs with the identity from the default keychain, no configuration', { skip }, () => {
+  for (const marker of [{ GITEA_ACTIONS: 'true' }, { GITHUB_ACTIONS: 'true' }]) {
+    const m = defaultKeychainMac();
+    const r = hook(m, ['sign', '--ci-hook', '--identifier', 'x', join(m.home, 'prog')], marker);
+    assert.equal(r.status, 0, r.out);
+    const sign = calls(m.bin).find((c) => c.startsWith('codesign --force'));
+    assert.ok(sign, `${JSON.stringify(marker)}: signed\n${r.out}`);
+    assert.ok(sign.includes(`--keychain ${join(m.home, 'Library/Keychains/paddock-ci-signing.keychain-db')}`), sign);
+  }
+});
+
+test('--ci-hook in a CI job without the identity is a notice and signs nothing', { skip }, () => {
+  const m = mac({ identity: false });
+  write(m.home, { prog: '#!/bin/bash\n' });
+  const r = hook(m, ['sign', '--ci-hook', '--identifier', 'x', join(m.home, 'prog')], { GITEA_ACTIONS: 'true' });
+  assert.equal(r.status, 0, r.out);
+  assert.match(r.out, /::notice::mac-ci-signing: no identity .* in .*Library\/Keychains\/paddock-ci-signing\.keychain-db/);
+  assert.ok(!calls(m.bin).some((c) => c.startsWith('codesign --force')));
+});
+
+test('sign-playwright also signs WebKit\'s Playwright.app as a bundle', { skip }, () => {
+  const m = mac();
+  const dir = join(m.home, 'browsers');
+  write(dir, {
+    'webkit-2370/Playwright.app/Contents/MacOS/Playwright': '#!/bin/bash\n',
+    'webkit-2370/Playwright.app/Contents/Info.plist':
+      '<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0"><dict><key>CFBundleIdentifier</key><string>org.webkit.Playwright</string></dict></plist>\n',
+  });
+  const r = signing(['sign-playwright', dir], m);
+  assert.equal(r.status, 0, r.out);
+  assert.ok(calls(m.bin).some((c) => c.startsWith('codesign --force --deep') && c.endsWith('Playwright.app')));
+});

@@ -7,7 +7,7 @@ import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { buildEnv } from '../ci/build-env.mjs';
-import { checkPin, defaultGrant, defaultSign, executableIn, grantCommand, install, parseArgs, parseRustPin, platformId, signCommand, SIGNING_TOOL, signingKeychain, urlFor } from '../ci/install-test-browser.mjs';
+import { checkPin, defaultGrant, defaultSign, executableIn, grantCommand, install, parseArgs, parseRustPin, platformId, signCommand, SIGNING_TOOL, urlFor } from '../ci/install-test-browser.mjs';
 import { decide, tagFor } from '../ci/plan.mjs';
 import { isTagRun } from '../src/util/is-tag-run.mjs';
 import { firstLaunch, releaseNotes } from '../ci/release-notes.mjs';
@@ -147,28 +147,18 @@ test('install-test-browser: on Windows, app containers may read and run the brow
   assert.deepEqual(args, ['C:\\ci\\browser', '/grant', '*S-1-15-2-1:(OI)(CI)(RX)', '/grant', '*S-1-15-2-2:(OI)(CI)(RX)', '/Q']);
 });
 
-test('install-test-browser: on the macOS CI runner the browser bundle is signed with the Mac CI identity from its default keychain', () => {
+test('install-test-browser: on macOS the browser bundle goes to the Mac CI signer as a CI hook (its one rule decides)', () => {
   const exe = executableIn('/ci/browser', 'mac-arm64');
-  const app = '/ci/browser/chrome-mac-arm64/Google Chrome for Testing.app';
-  const runner = { HOME: '/Users/ci', GITEA_ACTIONS: 'true' };
-  const kc = '/Users/ci/Library/Keychains/paddock-ci-signing.keychain-db';
-  assert.equal(signingKeychain(runner), kc, 'the default keychain, no runner configuration needed');
-  assert.equal(signingKeychain({ ...runner, PADDOCK_CI_SIGNING_KEYCHAIN: '/k/other.keychain-db' }), '/k/other.keychain-db', 'the variable only overrides');
-  const exists = (p) => p === kc;
-  const [cmd, args] = signCommand(exe, 'darwin', runner, exists);
+  const [cmd, args] = signCommand(exe, 'darwin');
   assert.equal(cmd, 'bash');
-  assert.deepEqual(args, [SIGNING_TOOL, 'sign', '--if-configured', app]);
+  // --ci-hook: only in a CI job, only with the identity's default keychain; a developer's Mac never signs (tools/mac-ci-signing.sh).
+  assert.deepEqual(args, [SIGNING_TOOL, 'sign', '--ci-hook', '/ci/browser/chrome-mac-arm64/Google Chrome for Testing.app']);
   assert.ok(existsSync(SIGNING_TOOL), 'the signer the command names exists');
-  assert.ok(signCommand(exe, 'darwin', { HOME: '/Users/ci', PADDOCK_CI_HOME: '/v/ci/home' }, exists), 'PADDOCK_CI_HOME marks the runner too');
-  assert.equal(signCommand(exe, 'darwin', runner, () => false), null, 'no keychain: no signing');
-  assert.equal(signCommand(exe, 'linux', runner, exists), null);
-  assert.equal(signCommand(executableIn('/ci/browser', 'linux64'), 'darwin', runner, exists), null, 'another platform\'s build is not signed');
-  // A developer Mac (no runner markers) never signs, even with the identity in its keychain (ER-14).
-  assert.equal(signCommand(exe, 'darwin', { HOME: '/Users/ci' }, exists), null);
-  assert.equal(signCommand(exe, 'darwin', { HOME: '/Users/ci', PADDOCK_CI_SIGNING_KEYCHAIN: kc }, exists), null);
+  assert.equal(signCommand(exe, 'linux'), null);
+  assert.equal(signCommand(executableIn('/ci/browser', 'linux64'), 'darwin'), null, 'another platform\'s build is not signed');
 });
 
-test('install-test-browser: a failed signature is an error naming the next step; a missing identity on the runner is a notice', () => {
+test('install-test-browser: a failed signature is an error naming the next step; no command runs nothing', () => {
   const ran = [];
   defaultSign('/b/x.app/Contents/MacOS/x', { command: ['bash', ['s']], run: (c, a) => ran.push([c, a]) });
   assert.deepEqual(ran, [['bash', ['s']]]);
@@ -176,13 +166,20 @@ test('install-test-browser: a failed signature is an error naming the next step;
     () => defaultSign('/b/x.app/Contents/MacOS/x', { command: ['bash', ['s']], run: () => { throw new Error('exit 1'); } }),
     /could not sign \/b\/x\.app\/Contents\/MacOS\/x with the Mac CI identity \(exit 1\); next: bash .*mac-ci-signing\.sh identity/,
   );
-  const notes = [];
-  const quiet = { command: null, run: () => assert.fail('nothing to run'), notice: (m) => notes.push(m) };
-  defaultSign('/d', { ...quiet, platform: 'linux', env: { GITEA_ACTIONS: 'true' } });
-  defaultSign('/b/x.app/Contents/MacOS/x', { ...quiet, platform: 'darwin', env: { HOME: '/h' } });
-  assert.deepEqual(notes, [], 'no notice off the runner');
-  defaultSign('/b/x.app/Contents/MacOS/x', { ...quiet, platform: 'darwin', env: { HOME: '/h', GITEA_ACTIONS: 'true' } });
-  assert.match(notes[0], /::notice::.*keeps its ad-hoc signature \(no Mac CI identity in \/h\/Library\/Keychains\/paddock-ci-signing\.keychain-db/);
+  defaultSign('/d', { command: null, run: () => assert.fail('nothing to run') });
+});
+
+test('install-test-browser on a developer Mac signs nothing: the real hook ends before any keychain', { skip: process.platform !== 'darwin' && 'macOS' }, () => {
+  const home = mkdtempSync(join(tmpdir(), 'paddock-dev-mac-'));
+  try {
+    const exe = executableIn(home, 'mac-arm64');
+    const [cmd, args] = signCommand(exe, 'darwin');
+    const r = spawnSync(cmd, args, { encoding: 'utf8', env: { PATH: '/usr/bin:/bin', HOME: home } });
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(`${r.stdout}${r.stderr}`, '');
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
 });
 
 test('install-test-browser: a fresh and a reused install both sign the browser', async () => {

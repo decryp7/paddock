@@ -9,15 +9,17 @@
 #
 #   bash tools/mac-ci-signing.sh create [--dry-run]           once, by the user: the keychain, the certificate and its key
 #   bash tools/mac-ci-signing.sh identity                     read-only: the identity's name, SHA-1 and keychain
-#   bash tools/mac-ci-signing.sh sign [--identifier ID] [--if-configured] PATH...
+#   bash tools/mac-ci-signing.sh sign [--identifier ID] [--if-configured|--ci-hook] PATH...
 #   bash tools/mac-ci-signing.sh check [--identifier ID] [--leaf-sha1 HEX] PATH...
-#   bash tools/mac-ci-signing.sh sign-playwright [--if-configured] BROWSERS_DIR
+#   bash tools/mac-ci-signing.sh sign-playwright [--if-configured|--ci-hook] BROWSERS_DIR
 #
 # sign: a program already signed by the identity is left alone (idempotent). A plain program is signed as a copy that is then
 # renamed over it, so a running copy (the runner) keeps its pages; ID is required for it (`net.decryptology.gitea-runner`). An .app
 # keeps its CFBundleIdentifier as identifier and is signed with --deep (a third-party test bundle whose ad-hoc signature is
-# replaced as a whole; its main executable's DR is what TCC checks). --if-configured: no keychain is a notice and exit 0 (the
-# CI hooks use it, so a runner without the identity still works as before).
+# replaced as a whole; its main executable's DR is what TCC checks). --if-configured: no keychain is a notice and exit 0.
+# --ci-hook, the one rule of the CI hooks (install-test-browser.mjs, conformance/ci/playwright-browsers.sh): outside a CI job
+# (GITEA_ACTIONS or GITHUB_ACTIONS, which the runner sets to true in every job) it does nothing and says nothing, so a developer's Mac and the
+# tests never sign or unlock anything (ER-14); in a job it is --if-configured.
 # check: `codesign --verify --strict -R=<the DR above>`, the same test TCC applies to a stored requirement.
 # Exit: 0 ok, 1 error, 2 usage, 5 a program does not carry the identity, 6 not measured (no identity to check against, ER-33).
 #
@@ -32,13 +34,14 @@ fail() { echo "error: $1" >&2; [ -n "${2:-}" ] && echo "  next: $2" >&2; exit "$
 
 cmd="${1:-}"
 [ $# -gt 0 ] && shift
-identifier=""; leaf=""; dry=0; if_configured=0; paths=()
+identifier=""; leaf=""; dry=0; if_configured=0; ci_hook=0; paths=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --identifier) identifier="${2:?--identifier needs a value}"; shift ;;
     --leaf-sha1) leaf="${2:?--leaf-sha1 needs a value}"; shift ;;
     --dry-run) dry=1 ;;
     --if-configured) if_configured=1 ;;
+    --ci-hook) if_configured=1; ci_hook=1 ;;
     -*) fail "unknown option $1" "see the header of $0" 2 ;;
     *) paths+=("$1") ;;
   esac
@@ -47,8 +50,12 @@ done
 case "$cmd" in create | identity | sign | check | sign-playwright) ;; *) fail "the command must be create, identity, sign, check or sign-playwright, not '${cmd}'" "see the header of $0" 2 ;; esac
 [ "${PADDOCK_TOOLS_OS:-$(uname -s)}" = Darwin ] || fail "code signing identities are a macOS matter; this runs on the Mac only" "" 2
 
-keychain="${PADDOCK_CI_SIGNING_KEYCHAIN:-$HOME/Library/Keychains/paddock-ci-signing.keychain-db}"
-pass_file="${PADDOCK_CI_SIGNING_PASS_FILE:-$HOME/.config/paddock/ci-signing.pass}"
+# Not a CI job: a hook ends here, before any keychain is looked at.
+ci_job() { case "${GITEA_ACTIONS:-}${GITHUB_ACTIONS:-}" in *true*) return 0 ;; *) return 1 ;; esac; }
+if [ "$ci_hook" -eq 1 ] && ! ci_job; then exit 0; fi
+
+keychain="${PADDOCK_CI_SIGNING_KEYCHAIN:-${HOME:-}/Library/Keychains/paddock-ci-signing.keychain-db}"
+pass_file="${PADDOCK_CI_SIGNING_PASS_FILE:-${HOME:-}/.config/paddock/ci-signing.pass}"
 name="${PADDOCK_CI_SIGNING_NAME:-Paddock CI code signing}"
 if [ -n "$leaf" ] && ! printf '%s' "$leaf" | grep -Eq '^[0-9A-Fa-f]{40}$'; then fail "--leaf-sha1 must be 40 hex digits" "" 2; fi
 
@@ -223,7 +230,7 @@ case "$cmd" in
     need_identity
     unlock
     failed=0; found=0
-    # Chromium's app bundle keeps its bundle id; the headless shell is a plain program and gets a fixed identifier.
+    # Chromium's and WebKit's app bundles keep their bundle ids; the headless shell is a plain program with a fixed identifier.
     while IFS= read -r p; do
       found=$((found + 1))
       case "$p" in
@@ -231,7 +238,7 @@ case "$cmd" in
         *) identifier="net.decryptology.paddock.ci.chrome-headless-shell" ;;
       esac
       sign_one "$p" "$sha" || failed=$((failed + 1))
-    done < <(find "${paths[0]}" -maxdepth 3 \( -path '*/chrome-mac*/*.app' -o -path '*/chrome-headless-shell-mac*/chrome-headless-shell' \) -prune -print 2>/dev/null | sort)
+    done < <(find "${paths[0]}" -maxdepth 3 \( -path '*/chrome-mac*/*.app' -o -path '*/webkit-*/Playwright.app' -o -path '*/chrome-headless-shell-mac*/chrome-headless-shell' \) -prune -print 2>/dev/null | sort)
     [ $found -gt 0 ] || fail "no Chromium or headless shell under ${paths[0]}" "install them first: npx playwright install chromium"
     [ $failed -eq 0 ] || fail "$failed browser program(s) not signed (lines marked fail above)" ""
     ;;
