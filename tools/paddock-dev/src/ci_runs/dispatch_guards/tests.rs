@@ -437,3 +437,101 @@ fn the_train_audits_refuse_a_red_head_and_never_pass_on_another_tree() {
         Decision::Go(_)
     ));
 }
+
+/// A full run may go without a failed-only round when the round would add nothing (user, 2026-11-25): the commits since the red full
+/// run only revert members cleanly, or the round would rerun everything anyway (a full run on the same head). The full run before
+/// landing stays mandatory: these only skip the round before it.
+#[test]
+fn a_full_run_goes_without_a_round_after_a_clean_revert_or_when_the_round_would_be_full_anyway() {
+    let runs = vec![run(8868, Some(RunKind::Full), OLD, "failure")];
+    let refused = failed_first(&runs, HEAD, "ci.yml", TRAIN);
+    assert!(matches!(refused, Finding::Refuse { .. }));
+    let revert = Ok(Some("abc1234567 reverts the merge def4567890 exactly".to_string()));
+    let Finding::Pass(why) = without_round(refused.clone(), revert, Ok(None)) else {
+        panic!()
+    };
+    assert!(
+        why.contains("no failed-only round is needed") && why.contains("reverts the merge"),
+        "{why}"
+    );
+    assert!(why.contains("full run before landing"), "{why}");
+    let full = Ok(Some("run 8868's plan job failed: nothing after it ran".to_string()));
+    assert!(matches!(without_round(refused.clone(), Ok(None), full), Finding::Pass(_)));
+    // Positive control: neither applies, or neither can be told: the refusal stands (never a pass on what could not be read).
+    assert_eq!(without_round(refused.clone(), Ok(None), Ok(None)), refused);
+    assert_eq!(without_round(refused.clone(), Err("no git".into()), Err("no API".into())), refused);
+    // A pass or a not-measured finding is left as it is.
+    let pass = Finding::Pass("green".into());
+    assert_eq!(without_round(pass.clone(), revert_ok(), Ok(None)), pass);
+    let nm = Finding::NotMeasured("x".into());
+    assert_eq!(without_round(nm.clone(), revert_ok(), Ok(None)), nm);
+}
+
+fn revert_ok() -> Result<Option<String>, String> {
+    Ok(Some("r".into()))
+}
+
+/// A clean revert: the commit undoes exactly the lines a member's merge brought (`git revert -m 1`, or the train's own
+/// `revert: pull <branch> (merge <sha>)` without git's trailer); a revert with a change of its own, or of a commit that is not a merge,
+/// is not one.
+#[test]
+fn a_clean_revert_of_a_member_merge_is_told_from_a_revert_with_more_in_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let git = |args: &[&str]| {
+        let o = crate::git_env::git()
+            .arg("-C")
+            .arg(root)
+            .args([
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@example.invalid",
+                "-c",
+                "commit.gpgsign=false",
+            ])
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(o.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&o.stderr));
+        String::from_utf8_lossy(&o.stdout).trim().to_string()
+    };
+    git(&["init", "-q", "-b", "train"]);
+    std::fs::write(root.join("a.txt"), "one\n").unwrap();
+    git(&["add", "-A"]);
+    git(&["commit", "-qm", "base"]);
+    let full = git(&["rev-parse", "HEAD"]);
+    git(&["checkout", "-qb", "member"]);
+    std::fs::write(root.join("b.txt"), "member line\n").unwrap();
+    git(&["add", "-A"]);
+    git(&["commit", "-qm", "feat: member"]);
+    git(&["checkout", "-q", "train"]);
+    git(&["merge", "-q", "--no-ff", "-m", "chore(train): merge member", "member"]);
+    let merge = git(&["rev-parse", "HEAD"]);
+    // The train's own style: no trailer, the merge named in the subject.
+    git(&["rm", "-q", "b.txt"]);
+    git(&["commit", "-qm", &format!("revert: pull member (merge {}) from train", &merge[..9])]);
+    let head = git(&["rev-parse", "HEAD"]);
+    let found = clean_reverts(root, &merge, &head).unwrap();
+    assert!(found.as_deref().is_some_and(|w| w.contains(&merge[..10])), "{found:?}");
+    // Not clean: the same revert with a change of its own.
+    git(&["revert", "--no-edit", "HEAD"]);
+    git(&["rm", "-q", "b.txt"]);
+    std::fs::write(root.join("a.txt"), "one\nextra\n").unwrap();
+    git(&["add", "-A"]);
+    git(&[
+        "commit",
+        "-qm",
+        &format!("revert: pull member (merge {}) again, and more", &merge[..9]),
+    ]);
+    let dirty = git(&["rev-parse", "HEAD"]);
+    assert_eq!(clean_reverts(root, &format!("{dirty}~1"), &dirty).unwrap(), None);
+    // Not a member's merge: a revert of a plain commit.
+    assert_eq!(
+        clean_reverts(root, &full, &full).unwrap(),
+        None,
+        "nothing since the red run: no allowance"
+    );
+    // Every commit since the red run must be a clean revert: a fix beside one is not.
+    assert_eq!(clean_reverts(root, &merge, &dirty).unwrap(), None);
+}

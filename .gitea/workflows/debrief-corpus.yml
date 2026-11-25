@@ -46,6 +46,8 @@ jobs:
         uses: ./.gitea/actions/schedule-skip
         with:
           workflow: debrief-corpus.yml
+          # Ends while Debrief is not in docs/ci-active-apps.toml's `active` (user, 2026-11-25); active again needs no edit here.
+          app: debrief
           dev-token: ${{ secrets.BUILD_INPUTS_TOKEN }}
 
       # Exact-key lookup only: nothing is downloaded. The marker is saved by the nightly-mark job after a fully green run.

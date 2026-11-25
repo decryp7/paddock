@@ -61,6 +61,12 @@ pub enum Decision {
     },
     /// The runs could not be read: the scheduled run proceeds (fail open).
     Unreadable(String),
+    /// An app's own scheduled run while the app is not in `docs/ci-active-apps.toml`'s `active` (user, 2026-11-25): it ends early, every
+    /// time, until the app is made active again (one line in that file, no edit of the workflow). The nightly names no app and runs every one.
+    Inactive {
+        /// The app.
+        app: String,
+    },
     /// A train is in CI, but skipping would leave the workflow unmeasured too long (or that cannot be told): it proceeds.
     Overdue {
         /// The train runs found.
@@ -73,7 +79,7 @@ pub enum Decision {
 impl Decision {
     /// Whether the scheduled run ends early.
     pub fn skip(&self) -> bool {
-        matches!(self, Decision::Skip { .. })
+        matches!(self, Decision::Skip { .. } | Decision::Inactive { .. })
     }
 
     /// The one annotation line for the job log, if any.
@@ -82,6 +88,7 @@ impl Decision {
             Decision::NotScheduled | Decision::Run { .. } => None,
             Decision::Overdue { trains, why } => Some(format!("::notice::{}", overdue_line(trains, why))),
             Decision::Skip { trains, .. } => Some(format!("::notice::{}", skip_line(trains))),
+            Decision::Inactive { app } => Some(inactive_line(app)),
             Decision::Unreadable(e) => Some(format!(
                 "::warning::schedule skip: the Actions runs could not be read ({e}); this scheduled run proceeds (fail open). Check that the job token can read the repository's Actions runs."
             )),
@@ -107,6 +114,10 @@ impl Decision {
                 "### Schedule skip\n\n{}\n\nThis run measured nothing: a reader of scheduled results counts it as not measured, never green (ADR 0093, amendment 2026-11-12).{}\n",
                 skip_line(trains),
                 stale(s)
+            ),
+            Decision::Inactive { app } => format!(
+                "### Schedule skip\n\n{}\n\nThis run measured nothing: a reader of scheduled results counts it as not measured, never green.\n",
+                inactive_line(app).trim_start_matches("::notice::")
             ),
             Decision::Overdue { trains, why } => format!("### Schedule skip\n\n{}\n", overdue_line(trains, why)),
             Decision::Run { stale: s } => format!("### Schedule skip\n\nNo train is in CI: the scheduled run proceeds.{}\n", stale(s)),
@@ -134,6 +145,26 @@ fn overdue_line(trains: &[TrainRun], why: &str) -> String {
         "not skipped although train {} is in CI: {why}",
         branches.into_iter().collect::<Vec<_>>().join(", ")
     )
+}
+
+fn inactive_line(app: &str) -> String {
+    format!(
+        "{INACTIVE_NOTICE}{app} is not active in {} (`active`), so its scheduled run ends here; making it active is one line there, and the nightly runs every app",
+        crate::active_apps::FILE
+    )
+}
+
+/// The notice of a scheduled run that ended because its app is inactive; [`read_past`] counts such a run as not measured.
+pub const INACTIVE_NOTICE: &str = "::notice::skipped: inactive app ";
+
+/// An app's own scheduled run ([`Decision::Inactive`]) when `app` is named, the event is `schedule` and the active set does not name it;
+/// `None` otherwise, and for a set that cannot be read (the run proceeds: fail open, and the train check still decides).
+pub fn inactive(event: &str, app: Option<&str>, set: Result<crate::active_apps::ActiveApps, String>) -> Option<Decision> {
+    let app = app.filter(|a| !a.is_empty() && event == "schedule")?;
+    match set {
+        Ok(set) if !set.active.contains(app) => Some(Decision::Inactive { app: app.to_string() }),
+        _ => None,
+    }
 }
 
 /// The notice a skipped run's gate logs; [`read_past`] looks for it to tell a skipped run from a measured one.
@@ -206,7 +237,13 @@ pub fn read_past(client: &mut Client, workflow: &str) -> Result<Vec<Past>, Strin
                     .steps
                     .iter()
                     .any(|(name, _)| name.contains("actions/schedule-skip") || name.contains("actions/plan"));
-                if gate && client.log(j.id)?.is_some_and(|l| l.contains(SKIP_NOTICE)) {
+                // A run that ended because its app was inactive measured nothing either: counted the same way, so the first
+                // schedule after the app comes back is never skipped for a train.
+                if gate
+                    && client
+                        .log(j.id)?
+                        .is_some_and(|l| l.contains(SKIP_NOTICE) || l.contains(INACTIVE_NOTICE))
+                {
                     train_skip = true;
                     break;
                 }
@@ -334,6 +371,43 @@ mod tests {
             run_attempt: 1,
             title: String::new(),
         }
+    }
+
+    fn set(active: &[&str]) -> Result<crate::active_apps::ActiveApps, String> {
+        let names: Vec<String> = active.iter().map(|a| format!("\"{a}\"")).collect();
+        crate::active_apps::ActiveApps::parse(&format!(
+            "decided = \"2026-11-24\"\nby = \"user\"\nreason = \"r\"\nactive = [{}]\nnext = []\n",
+            names.join(", ")
+        ))
+    }
+
+    /// An app's own scheduled run ends while the app is inactive (docs/ci-active-apps.toml), so making it active again needs no edit
+    /// of its workflow (user, 2026-11-25): only a scheduled run of a workflow that names its app, and an unreadable set runs it.
+    #[test]
+    fn an_apps_own_scheduled_run_ends_while_the_app_is_inactive_and_runs_once_it_is_active() {
+        let d = inactive("schedule", Some("debrief"), set(&[])).expect("inactive: skipped");
+        assert!(d.skip());
+        let note = d.annotation().unwrap();
+        assert!(note.starts_with(INACTIVE_NOTICE) && note.contains("debrief"), "{note}");
+        assert!(d.summary().contains("measured nothing"), "{}", d.summary());
+        assert_eq!(
+            inactive("schedule", Some("debrief"), set(&["debrief"])),
+            None,
+            "active: the schedule runs"
+        );
+        assert_eq!(
+            inactive("schedule", None, set(&[])),
+            None,
+            "no app named (nightly.yml): never this skip"
+        );
+        assert_eq!(
+            inactive("workflow_dispatch", Some("debrief"), set(&[])),
+            None,
+            "only a scheduled run"
+        );
+        assert_eq!(inactive("push", Some("debrief"), set(&[])), None);
+        // Fail open: a set that cannot be read runs the schedule (the train check still decides).
+        assert_eq!(inactive("schedule", Some("debrief"), Err("unreadable".into())), None);
     }
 
     #[test]

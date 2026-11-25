@@ -45,7 +45,7 @@ mod hakari;
 mod hunks;
 mod lost_tests;
 mod reland;
-mod reverted_base;
+pub(crate) mod reverted_base;
 mod stale_base;
 pub mod sync_member;
 mod testnames;

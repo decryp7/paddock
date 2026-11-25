@@ -108,6 +108,9 @@ The file is read only through `tools/paddock-dev/src/active_apps.rs` (ER-42).
 - `./dev plan --ci --app <app>` (debrief.yml, the release workflows' plan action) answers `false` for an inactive app, writes
   `inactive=true` and says "Inactive" in the job summary; a release workflow's verdict reports it as a notice, not as a red run.
 - **The nightly ignores the set** (a `schedule` event, or the `os_full` input of the nightly's manual run): every app, the full check.
+- **An app's own schedule follows the set** (user, 2026-11-25): debrief.yml's scheduled run, and those of debrief-bench, debrief-fuzz, debrief-corpus and debrief-mutants, pass `app: debrief` to the schedule-skip
+  action (`./dev ci schedule-skip --app debrief`), which ends it with a notice while Debrief is inactive. Making the app active again
+  turns its schedule back on with no edit of the workflow.
 - An app's own gates (`PLAN_APP`, a release workflow's tag gates) and an app's own workflow on a tag of the app run that app whatever
   the set says.
 - **The push gate and the member gate** (`./dev check --pre-push`, and `./dev merge check --gates`, which runs it with

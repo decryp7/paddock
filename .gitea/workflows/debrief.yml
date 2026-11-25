@@ -126,11 +126,13 @@ jobs:
           matched: ${{ steps.green.outputs.cache-matched-key }}
           saved: n/a
 
-      # A scheduled run ends early while a train's dispatch run is queued or running (ADR 0093 amendment 2026-11-12).
+      # A scheduled run ends early while a train's dispatch run is queued or running (ADR 0093 amendment 2026-11-12), and while Debrief
+      # is not in docs/ci-active-apps.toml's `active` (user, 2026-11-25): making it active again needs no edit here.
       - id: train
         uses: ./.gitea/actions/schedule-skip
         with:
           workflow: debrief.yml
+          app: debrief
           dev-token: ${{ secrets.BUILD_INPUTS_TOKEN }}
 
       # ER-49, test a commit once: a push to main of a commit that a complete green run of this workflow already tested (the train's
