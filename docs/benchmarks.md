@@ -187,6 +187,38 @@ failing mode.
 - **Holders count while they live:** a holder whose record is inside the cap its own row lives under (the waiter's `--run-max`, `ROW_CAP` + grace, 3,675 s) is progress by itself, so a waiter behind a healthy 31 to 60 minute step is not stalled; past the cap it is not live, and the same picture ends the wait a stall limit later.
 - **Notes:** the basis of `QUEUE_STALL` (30 min, 1,800 s) in `tools/paddock-dev/src/pre_push/exec.rs`: over the longest gap seen, so a queue that moves is never ended. A holder that runs longer is ended by its own row cap. The per-push totals it replaces (15 min of run, 30 min of queue) were exceeded by three pushes on 2026-11-21 with no row running too long: 13, 14 and 15 rows, and 5 rows, were not measured. Not measured: the gaps of a quiet machine.
 
+### 2026-11-24, scope grace: from the stop request to the exit (feat/adr-0119-wp1-scope)
+
+- **Commit:** 9f6b241dc plus the uncommitted ADR 0119 WP-1 change (the measured code is `paddock_proc::ask` and the guardian handshake as committed)
+- **Machine:** Mac mini, Apple M4 Pro, 14 cores, 64 GB, macOS 27.2
+- **Load:** 1-minute load 27 to 35 during the runs (other agents' builds and tests)
+- **Build:** debug (the `it` test binary of paddock-proc); node v24.22.0
+- **Corpus:** stand-in children, each started, waited for until it prints `ready`, then asked to stop (`paddock_proc::ask`: SIGTERM by identity); the exit is seen through the held `Child` (`try_wait` every 0.2 ms)
+- **Command:** `cd crates && cargo nextest run -p paddock-proc --test it --run-ignored only -E 'test(measure_grace)' --no-capture -j 1` (`PADDOCK_SCOPE_GRACE_RUNS`, default 200; the trap kind and the first start run a quarter of it)
+- **Runs:** single run per kind; median, 99th percentile and worst
+- **Numbers:**
+
+  | Measure | n | Median | p99 | Worst | Verdict |
+  |---|---|---|---|---|---|
+  | Rust program, default SIGTERM action | 200 | 1.0 ms | 20.9 ms | 45.1 ms | well inside the grace |
+  | `sh` running `sleep`, default action | 200 | 0.8 ms | 4.4 ms | 6.7 ms | well inside |
+  | node program, default action | 200 | 1.7 ms | 8.4 ms | 10.4 ms | well inside |
+  | `sh` script that traps SIGTERM to clean up, one-second steps | 50 | 1.01 s | 1.02 s | 1.02 s | the worst kind: the trap runs when the current foreground command ends |
+  | first start of a process with the orphan guardian (start, guardian check, `serving` answer, child start) | 50 | 6.0 ms | 28.0 ms | 28.0 ms | far inside the 10 s `SERVING_BOUND` |
+
+- **Second run** after the WP-1 review (commit 460e7d60d plus the review round; the guardian now starts in `Scope::new`, so the
+  first-start row measures `Scope::new` plus the first start), 1-minute load 9.5 to 16.5:
+
+  | Measure | n | Median | p99 | Worst |
+  |---|---|---|---|---|
+  | Rust program, default SIGTERM action | 200 | 0.46 ms | 0.91 ms | 3.1 ms |
+  | `sh` running `sleep`, default action | 200 | 0.45 ms | 1.7 ms | 2.7 ms |
+  | node program, default action | 200 | 1.1 ms | 6.8 ms | 8.8 ms |
+  | `sh` script that traps SIGTERM, one-second steps | 50 | 1.01 s | 1.01 s | 1.01 s |
+  | `Scope::new` plus the first start, guardian included | 50 | 4.6 ms | 5.3 ms | 5.3 ms |
+
+- **Notes:** the scope's `GRACE` is 2 s (`paddock_proc::FINISH_GRACE` itself since the WP-1 review): twice the worst kind measured (a script whose step is one second), equal to `paddock_proc::FINISH_GRACE`, and paid once per scope end, since every child is asked at once. A script with longer foreground steps is ended after the grace (reported as `ended`, not `asked`). The guardian's `SERVING_BOUND` (10 s) only meets a guardian stopped before its owner check (App Tamer, a debugger); a refused guardian answers at once with end of file. Windows is not measured: `ask` sends WM_CLOSE to a program's windows and a console program refuses it, so the end there is immediate for console children. Raw output: the test's `grace:` lines, not kept.
+
 ### 2026-11-24, the conformance-line test of the CI model: main, the graph train and the cut (fix/graph-train-conformance-line-test-cost)
 
 - **Commits:** main d04af7b46, train/2026-11-23-graph fe331ca55, and the fix on top of it; debug test builds, `CARGO_BUILD_JOBS=2`
@@ -350,6 +382,7 @@ corpora are in each app's file.
 | `./dev hook pre-tool-use` (RT-4, [ADR 0083](adr/0083-agents-cannot-write-outside-their-own-worktree.md) §2) | Per-call time of the installed guard binary on a PreToolUse call, the shim around it, and the binary's size growth | 300 runs of `<git-common-dir>/paddock/hooks/paddock-dev hook pre-tool-use` with a JSON call on stdin, as described in the section below (the script is not kept) | A short, a 6 KB and a malformed call | none yet (the plan expects about 4 to 6 ms) | No | [results](#hook-per-call-cost-and-binary-size-rt-4-2026-11-10) |
 | `./dev gates check` (C100, [ADR 0060](adr/0060-every-check-runs-somewhere.md)) | Run time of the meta-check: 328 checks, the CI model, 3,192 Rust files scanned, the docs | `./dev gates check` (release build of `tools/paddock-dev`) | This repository | none (ADR 0060: quote it only from here; a few seconds at most) | `ci.yml` conformance job, `nightly.yml` c100 job | [results](#2026-11-08-dev-gates-check) |
 | Angular build budgets in `ui/angular.json` | Initial chunk size | `npm run build -w ui` (and each demo's build) | — | gallery 1.5 MB / 3 MB; shell-demo 500 kB / 1 MB; workbench-demo 580 kB / 1 MB (warn / error) | `ci.yml` ui jobs, through `ng build` | — |
+| `paddock_proc::scope::GRACE` ([`crates/paddock-proc/tests/it/scope.rs`](../crates/paddock-proc/tests/it/scope.rs), `measure_grace`, [ADR 0119](adr/0119-every-process-is-held-by-its-handle-and-ends-with-its-scope.md) WP-1) | Time from a stop request (SIGTERM by identity) to the exit, per kind of child; the first start with the orphan guardian | `cd crates && cargo nextest run -p paddock-proc --test it --run-ignored only -E 'test(measure_grace)' --no-capture -j 1` (Unix) | Stand-in children | none (it sets the grace constant, ER-12) | No | [2026-11-24](#2026-11-24-scope-grace-from-the-stop-request-to-the-exit-featadr-0119-wp1-scope) |
 | `./dev ci timings` (`tools/paddock-dev/src/ci_runs/timings.rs`, removed on 2026-11-24 with the command; the script `scripts/ci-timings.mjs` that made its recorded golden was deleted on 2026-11-18) | CI wall time, queueing, runners, per-step and compile/test phases, critical path (Gitea API, read-only) | `GITEA_TOKEN=… ./dev ci timings [--repos paddock] [--limit 30] [--cache DIR] [--out docs/research/2026-10-ci-timings.md] [--json-file F]` (default repo: `paddock`; the script defaulted to the old per-app repos) | Gitea run history | none | No (manual) | [research/2026-10-ci-timings.md](research/2026-10-ci-timings.md) |
 
 Not benchmarks, though the names suggest it:
