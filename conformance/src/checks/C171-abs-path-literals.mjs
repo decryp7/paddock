@@ -8,8 +8,15 @@
 // `Path::new(..)`, `PathBuf::from(..)` or a known validator (VALIDATORS: `dev_targets_of`). Not flagged: an item behind `#[cfg(unix)]`
 // or `#[cfg(not(windows))]`, a file that starts with `#![cfg(unix)]` (a `/dev/null` case is Unix by nature), and a site with
 // `// conformance: abs-path — <why>` on its line or the line above.
-// ER-41: report-only (warnings) until its first green run on the real tree, recorded in docs/gates.toml; review date 2026-12-26 there.
-import { warn } from '../finding.mjs';
+// Split (user decision 2026-11-26, after a third Windows-only failure of this class, run 9116, `"/dev-targets-y"` in a test of
+// pre_push/exec.rs): a site on a line the change ADDS (`git diff -U0` against the merge base with the gate's base ref, the working tree
+// included) is an ERROR (the check is a gate; ER-41 report-only phase skipped for new lines by that decision, recorded here because a gate has no
+// docs/gates.toml register entry), so no new Unix literal lands; every existing site stays a WARNING until the 2026-12-09 review in
+// docs/gates.toml sorts them (ER-41). When the base cannot be read the added lines are unknown: a warning outside CI, a not-measured
+// error in CI (ER-33, ADR 0089: a blocking check that cannot see its base does not pass).
+import { execFileSync } from 'node:child_process';
+import { error, warn } from '../finding.mjs';
+import { targetRef, unmeasuredFinding } from '../util/baseline.mjs';
 import { maskRust } from '../util/mask-rust.mjs';
 import { onlyTestItems, withoutTestItems } from '../util/rust-test-items.mjs';
 
@@ -69,21 +76,61 @@ export function absPathSites(text, file) {
   return out;
 }
 
+/** The lines a unified diff (`git diff -U0`) adds: a Map from file to the Set of its new line numbers. */
+export function addedLines(diff) {
+  const out = new Map();
+  let file = null;
+  for (const l of diff.split('\n')) {
+    if (l.startsWith('+++ ')) {
+      file = l === '+++ /dev/null' ? null : l.replace(/^\+\+\+ b\//, '');
+      if (file !== null && !out.has(file)) out.set(file, new Set());
+      continue;
+    }
+    const h = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/.exec(l);
+    if (h && file !== null) {
+      const start = Number(h[1]);
+      const count = h[2] === undefined ? 1 : Number(h[2]);
+      for (let n = start; n < start + count; n++) out.get(file).add(n);
+    }
+  }
+  return out;
+}
+
+/** The lines added since the merge base with the run's base ref, or `{ reason }` when git cannot say. */
+function addedSince(ctx) {
+  const git = ctx.options?.git ?? ((args) => execFileSync('git', args, { cwd: ctx.root, encoding: 'utf8', maxBuffer: 64 << 20, stdio: ['ignore', 'pipe', 'pipe'] }));
+  try {
+    const head = git(['rev-parse', 'HEAD']).trim();
+    let base = git(['merge-base', 'HEAD', targetRef(ctx.options)]).trim();
+    if (base === head) base = git(['rev-parse', 'HEAD^1']).trim();
+    return addedLines(git(['diff', '-U0', '--no-renames', '--no-color', base, '--', '*.rs']));
+  } catch (e) {
+    return { reason: `no merge base or diff (${String(e.message ?? e).split('\n')[0].slice(0, 120)})` };
+  }
+}
+
 export default {
   id: 'C171',
   scope: 'root',
-  mode: 'report-only',
+  mode: 'gate',
   title: 'Rust tests build absolute paths with paddock_testkit::path, never from a Unix-style literal',
   rule: 42,
   run(ctx) {
-    const out = [];
+    const sites = [];
     for (const f of ctx.files()) {
       if (!f.endsWith('.rs')) continue;
       const text = ctx.read(f);
       if (!text || !text.includes('"/')) continue;
-      for (const s of absPathSites(text, f)) {
-        out.push(warn('C171', 42, f, s.line, 'passes a Unix-style absolute path literal to a path constructor or validator: it is not absolute on Windows (the 2026-11-25 Windows-only CI failures)', FIX));
-      }
+      for (const site of absPathSites(text, f)) sites.push({ file: f, line: site.line });
+    }
+    if (sites.length === 0) return [];
+    const added = addedSince(ctx);
+    const out = [];
+    if (added.reason) out.push(unmeasuredFinding(ctx, { id: 'C171', rule: 42, file: 'conformance/src/checks/C171-abs-path-literals.mjs', what: 'the added-line block', g: { kind: 'no-base', reason: added.reason } }));
+    for (const { file, line } of sites) {
+      const isNew = !added.reason && added.get(file)?.has(line);
+      const message = 'passes a Unix-style absolute path literal to a path constructor or validator: it is not absolute on Windows (the 2026-11-25 Windows-only CI failures)';
+      out.push(isNew ? error('C171', 42, file, line, `${message}; this line is new, so it blocks`, FIX) : warn('C171', 42, file, line, message, FIX));
     }
     return out;
   },

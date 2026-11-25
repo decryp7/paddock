@@ -89,7 +89,9 @@ fn an_absolute_path_from_parts_is_rooted_on_every_os_and_has_no_text_to_split() 
         text_on(abs_on(["srv", "dt"], Os::Windows), Os::Windows),
         "C:/srv/dt"
     );
+    // conformance: abs-path — the expected value of the Unix spelling itself, compared as a value on every OS
     assert_eq!(abs_on(["srv", "dt"], Os::Linux), PathBuf::from("/srv/dt"));
+    // conformance: abs-path — the same, for macOS
     assert_eq!(abs_on(["srv", "dt"], Os::MacOs), PathBuf::from("/srv/dt"));
     // No parts: the root itself, which validators must refuse as a folder.
     assert_eq!(

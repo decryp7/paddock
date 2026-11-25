@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import check, { absPathSites } from '../src/checks/C171-abs-path-literals.mjs';
+import check, { absPathSites, addedLines } from '../src/checks/C171-abs-path-literals.mjs';
 
 const lines = (text, file = 'tools/x/tests/it/a.rs') => absPathSites(text, file).map((s) => s.line);
 
@@ -31,17 +31,49 @@ test('C171: test items of a src file are read; a unix-only item, a unix-only fil
   assert.deepEqual(lines('#[cfg(windows)]\n#[test]\nfn t() { let p = Path::new("/a"); }\n'), [1 + 2], 'a windows-only item is still flagged');
 });
 
-test('C171: positive control, a planted case is a warning that points at paddock-testkit::path, and the check is report-only', () => {
-  const planted = 'fn t() {\n    let p = PathBuf::from("/planted/abs");\n}\n';
-  const files = { 'tools/x/tests/it/planted.rs': planted };
-  const ctx = { files: () => Object.keys(files), read: (f) => files[f] };
-  const out = check.run(ctx);
-  assert.equal(out.length, 1, 'the planted literal is seen');
-  assert.equal(out[0].severity, 'warn');
-  assert.match(JSON.stringify(out[0]), /paddock-testkit::path/);
-  assert.equal(check.mode, 'report-only');
+const diffAdding = (file, ...lines) => `diff --git a/${file} b/${file}\n--- a/${file}\n+++ b/${file}\n${lines.map((n) => `@@ -${n},0 +${n} @@\n+x\n`).join('')}`;
+const fakeGit = (diff) => (args) => (args[0] === 'diff' ? diff : args[0] === 'merge-base' ? 'base111\n' : 'head222\n');
+const run = (files, diff, extra = {}) => check.run({ files: () => Object.keys(files), read: (f) => files[f], options: { git: fakeGit(diff), ...extra } });
+const PLANTED = 'fn t() {\n    let p = PathBuf::from("/planted/abs");\n}\n';
+
+test('C171: addedLines reads the new line numbers of a unified diff', () => {
+  const d = 'diff --git a/a.rs b/a.rs\n--- a/a.rs\n+++ b/a.rs\n@@ -3,0 +4,2 @@\n+x\n+y\n@@ -9 +11 @@\n-o\n+n\ndiff --git a/gone.rs b/gone.rs\n--- a/gone.rs\n+++ /dev/null\n@@ -1,2 +0,0 @@\n';
+  const m = addedLines(d);
+  assert.deepEqual([...m.get('a.rs')], [4, 5, 11]);
+  assert.equal(m.has('gone.rs'), false);
+});
+
+test('C171: a literal on a line the change adds blocks, with the paddock-testkit::path hint', () => {
+  const out = run({ 'tools/x/tests/it/planted.rs': PLANTED }, diffAdding('tools/x/tests/it/planted.rs', 2));
+  assert.equal(out.length, 1, 'the planted literal is seen (positive control)');
+  assert.equal(out[0].severity, 'error');
+  assert.match(out[0].fix, /paddock-testkit::path/);
+  assert.match(out[0].message, /this line is new/);
+});
+
+test('C171: an existing literal only warns, and so does a new one in another file', () => {
+  const files = { 'tools/x/tests/it/planted.rs': PLANTED };
+  assert.equal(run(files, diffAdding('tools/x/tests/it/planted.rs', 7))[0].severity, 'warn', 'another line of the file was added');
+  assert.equal(run(files, diffAdding('tools/x/tests/it/other.rs', 2))[0].severity, 'warn', 'another file was changed');
+  assert.equal(run(files, '')[0].severity, 'warn', 'no change at all');
+});
+
+test('C171: a waiver passes a new literal, and a relative one is quiet', () => {
+  const waived = 'fn t() {\n    // conformance: abs-path — Unix text from a Unix tool, never a validator\n    let p = PathBuf::from("/planted/abs");\n}\n';
+  assert.equal(run({ 'tools/x/tests/it/w.rs': waived }, diffAdding('tools/x/tests/it/w.rs', 2, 3)).length, 0);
+  assert.equal(run({ 'tools/x/tests/it/p.rs': 'fn t() { let p = PathBuf::from("rel/x"); }\n' }, diffAdding('tools/x/tests/it/p.rs', 1)).length, 0);
+});
+
+test('C171: when the base cannot be read a site is a warning, and in CI a not-measured error no waiver covers', () => {
+  const broken = { git: () => { throw new Error('fatal: no merge base'); } };
+  const files = { 'tools/x/tests/it/planted.rs': PLANTED };
+  const local = check.run({ files: () => Object.keys(files), read: (f) => files[f], options: { ...broken, ci: false } });
+  assert.ok(local.every((f) => f.severity === 'warn'), JSON.stringify(local));
+  const ci = check.run({ files: () => Object.keys(files), read: (f) => files[f], options: { ...broken, ci: true } });
+  assert.ok(ci.some((f) => f.severity === 'error' && f.unwaivable === true && f.outcome === 'not-measured'), JSON.stringify(ci));
+});
+
+test('C171: the check is a gate (new lines block) with id C171', () => {
+  assert.equal(check.mode, 'gate');
   assert.equal(check.id, 'C171');
-  // Hiding the signal (a relative literal) makes it go quiet: the check is not simply always red.
-  const quiet = { files: () => ['tools/x/tests/it/p.rs'], read: () => 'fn t() { let p = PathBuf::from("rel/x"); }\n' };
-  assert.equal(check.run(quiet).length, 0);
 });

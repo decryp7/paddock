@@ -104,7 +104,7 @@ The check index (generated from each module's id, title, scope, mode and needs):
 | C156 | An axe scan in an e2e spec runs with the page held still (withPageStill or axeViolations) | root | gate | all |
 | C167 | A workflow job that runs the merge-base growth tests checks out the history and names the base ref | root | gate | all |
 | C169 | A file is written whole through paddock_env::write_atomic, never a hand-written temporary file and rename | root | report-only | all |
-| C171 | Rust tests build absolute paths with paddock_testkit::path, never from a Unix-style literal | root | report-only | all |
+| C171 | Rust tests build absolute paths with paddock_testkit::path, never from a Unix-style literal | root | gate | all |
 <!-- checks:end -->
 
 Notes per check (written by hand; the index above is the complete list):
