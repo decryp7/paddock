@@ -133,9 +133,11 @@ impl LoadSource for FakeLoad {
 /// What the machine looks like to the slot rule.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Pressure {
-    /// The 1-minute load average: the fast brake (a burst that the 15-minute average has not seen yet).
+    /// The 1-minute load average: the quick lane's brake.
     pub load1: Option<f64>,
-    /// The 15-minute load average, when the platform has one.
+    /// The 5-minute load average.
+    pub load5: Option<f64>,
+    /// The 15-minute load average, when the platform has one (logged only).
     pub load15: Option<f64>,
     /// The CPU idle share since the last reading, 0 to 100, when known.
     pub idle: Option<f64>,
@@ -143,10 +145,16 @@ pub struct Pressure {
     pub memory_mb: Option<u64>,
 }
 
-/// Cores one heavy step is counted to use (`CARGO_BUILD_JOBS=2` is the family's cap for a builder, ER-24).
+/// Build jobs one heavy step gets at most (`CARGO_BUILD_JOBS=2` is the family's cap for a builder, ER-24; the push gate sets the same).
 pub const CORES_PER_SLOT: f64 = 2.0;
-/// Below this CPU idle share no second step starts.
-pub const MIN_IDLE_PERCENT: f64 = 30.0;
+/// The most steps the "Auto" setting lets run at once, and the most any setting does. Two, not three: on the 14-core Mac three push-gate
+/// test rows at once (4 test threads each) finished fewer per hour than two (7 each), docs/benchmarks.md, "Concurrent push-gate test rows
+/// on the shared Mac" (2026-11-25).
+pub const MAX_AUTO_SLOTS: u32 = 2;
+/// The 5-minute load, as a share of the cores, under which more than one step may run: entry 0 is the limit for 2 steps at once. 0.85
+/// (11.9 on 14 cores): every batch of that measurement started under a 5-minute load of 12, and two at once gave 22 % more rows per hour
+/// than one there; above it there is no measurement that a second step helps.
+pub const SLOT_LOAD_SHARE: [f64; MAX_AUTO_SLOTS as usize - 1] = [0.85];
 /// Memory one heavy step is counted to use, in MiB: a builder at `CARGO_BUILD_JOBS=2` (rustc with LTO off, a linker, a test binary).
 /// The one place this is decided; the admission rule and its tests read it from here (ER-22).
 pub const MEMORY_PER_SLOT_MB: u64 = 3072;
@@ -161,32 +169,38 @@ pub const CHEAP_SECS: f64 = 10.0;
 /// seconds, so the 15-minute load is no reason to hold it, but a CPU with no idle left is.
 pub const CHEAP_MIN_IDLE_PERCENT: f64 = 15.0;
 
-/// How many heavy steps may run together now, between 1 and `max`: the cores the 15-minute load leaves free, `CORES_PER_SLOT` each,
-/// and only while the CPU has at least `MIN_IDLE_PERCENT` idle and the 1-minute load is under the core count. The count is of ALL
-/// steps running, ours included: their own load is already in the load average (late, as it is a 15-minute one, which is why
-/// the 1-minute brake and the maximum bound a burst), so the rule is the stricter of the two readings of the same thing, never a
-/// sum. `make -l N` and `ninja -l N` are the same shape (a count of jobs and a load brake); they use the 1-minute load, which reacts
-/// at once and flaps, where this uses the 15-minute one to open and the 1-minute one only to close. One while a container run is going (or is the request: it runs
-/// alone), and one when the load or the idle share is unknown: nothing is guessed in favour of running more (ER-24, ER-33).
-/// Pure: numbers in, a count out.
+/// The 5-minute load under which `n` steps may run at once on `cpus` cores; `None` for one (always allowed) and above
+/// [`MAX_AUTO_SLOTS`].
+pub fn slot_load_limit(cpus: u32, n: u32) -> Option<f64> {
+    let i = usize::try_from(n.checked_sub(2)?).ok()?;
+    SLOT_LOAD_SHARE.get(i).map(|share| share * f64::from(cpus))
+}
+
+/// How many heavy steps may run together now, between 1 and `max` (and never above [`MAX_AUTO_SLOTS`]): the most `n` whose
+/// [`slot_load_limit`] the **5-minute load** is under, and as many as the memory available holds. The count is of ALL steps running,
+/// ours included: their own load is in the average, which is why the limits come from a measurement of steps running together (user
+/// decision 2026-11-25: several slots when the machine is idle enough, one otherwise). Every step admitted while `n` may run gets `1/n`
+/// of the cores ([`step_threads`]), so a second or third step does not add threads beyond the cores (ER-48). One while a container run
+/// is going (or is the request: it runs alone), and one when the load or the memory is unknown: nothing is guessed in favour of running
+/// more (ER-24, ER-33). Pure: numbers in, a count out.
 pub fn allowed_slots(max: u32, cpus: u32, p: &Pressure, container: bool) -> u32 {
     if max <= 1 || container {
         return 1;
     }
-    let (Some(load15), Some(idle), Some(memory)) = (p.load15, p.idle, p.memory_mb) else {
+    let (Some(load5), Some(memory)) = (p.load5, p.memory_mb) else {
         return 1;
     };
-    if idle < MIN_IDLE_PERCENT || p.load1.is_some_and(|l1| l1 >= f64::from(cpus)) {
+    if !load5.is_finite() {
         return 1;
     }
-    let free = (f64::from(cpus) - load15) / CORES_PER_SLOT;
-    if !free.is_finite() || free < 1.0 {
-        return 1;
-    }
+    let by_load = (2..=MAX_AUTO_SLOTS)
+        .rev()
+        .find(|n| slot_load_limit(cpus, *n).is_some_and(|limit| load5 < limit))
+        .unwrap_or(1);
     // The memory left after the reserve, `MEMORY_PER_SLOT_MB` a step: the second step is refused when it would not fit.
     let by_memory = memory.saturating_sub(MEMORY_RESERVE_MB) / MEMORY_PER_SLOT_MB;
     let by_memory = u32::try_from(by_memory).unwrap_or(u32::MAX);
-    (free.floor() as u32).min(by_memory).clamp(1, max)
+    by_load.min(by_memory).clamp(1, max)
 }
 
 /// Whether a quick row (expected under [`CHEAP_SECS`]) may start beside the full slots now: the machine has the idle CPU and the memory
@@ -202,15 +216,42 @@ pub fn cheap_admitted(cpus: u32, p: &Pressure, container: bool) -> bool {
     idle >= CHEAP_MIN_IDLE_PERCENT && load1 < 2.0 * f64::from(cpus) && memory >= MEMORY_RESERVE_MB + MEMORY_PER_SLOT_MB
 }
 
-/// `CARGO_BUILD_JOBS` for one step (ER-48): `CORES_PER_SLOT`, fewer when the most steps at once times it would pass the cores, so
-/// jobs per step times steps at once stays within the host's cores.
-pub fn jobs_per_step(cpus: u32, max_slots: u32) -> u32 {
-    (cpus / max_slots.max(1)).clamp(1, CORES_PER_SLOT as u32)
+/// The default maximum of the "Auto" setting: a step per 4 cores, at most [`MAX_AUTO_SLOTS`] (ER-24).
+pub fn auto_max_slots(cpus: u32) -> u32 {
+    (cpus / 4).clamp(1, MAX_AUTO_SLOTS)
 }
 
-/// The default maximum of the "Auto" setting: about half the cores, at most 5 builders (ER-24).
-pub fn auto_max_slots(cpus: u32) -> u32 {
-    (cpus / 2).clamp(1, 5)
+/// The threads one step may use (ER-48).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StepThreads {
+    /// `CARGO_BUILD_JOBS`.
+    pub build_jobs: u32,
+    /// `NEXTEST_TEST_THREADS` and `RUST_TEST_THREADS`.
+    pub test_threads: u32,
+}
+
+/// The threads of a step admitted while `share` steps may run at once: `cores / share` test threads (all of them for a step alone, as
+/// before), and that many build jobs up to the family's cap of `CORES_PER_SLOT`. Steps at once times threads stay within the cores.
+pub fn step_threads(cpus: u32, share: u32) -> StepThreads {
+    let per = (cpus / share.max(1)).max(1);
+    StepThreads {
+        build_jobs: per.min(CORES_PER_SLOT as u32),
+        test_threads: per,
+    }
+}
+
+/// The variables heavy gives the command for its share of the cores, leaving out any the caller set itself (its value wins, ER-47).
+pub fn step_env(cpus: u32, share: u32, get: &dyn Fn(&str) -> Option<String>) -> Vec<(String, String)> {
+    let t = step_threads(cpus, share);
+    [
+        ("CARGO_BUILD_JOBS", t.build_jobs),
+        ("NEXTEST_TEST_THREADS", t.test_threads),
+        ("RUST_TEST_THREADS", t.test_threads),
+    ]
+    .into_iter()
+    .filter(|(k, _)| get(k).is_none())
+    .map(|(k, v)| (k.to_string(), v.to_string()))
+    .collect()
 }
 
 /// Whether a command line is a container run (`docker`, `podman`, `nerdctl`, or the family's `linux-container.sh`): it counts as a

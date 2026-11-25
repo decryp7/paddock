@@ -152,12 +152,7 @@ pub fn read(dir: &Path) -> Result<Option<Record>, String> {
 /// Writes a folder's record atomically (a temp file, then rename).
 pub fn write(dir: &Path, r: &Record) -> Result<(), String> {
     let target = path_of(dir);
-    let tmp = dir.join(format!("{FILE}.tmp{}", std::process::id()));
-    std::fs::write(&tmp, r.render()).map_err(|e| format!("cannot write {}: {e}", tmp.display()))?;
-    std::fs::rename(&tmp, &target).map_err(|e| {
-        let _ = std::fs::remove_file(&tmp);
-        format!("cannot write {}: {e}", target.display())
-    })
+    paddock_env::write_atomic(&target, r.render().as_bytes(), false).map_err(|e| format!("cannot write {}: {e}", target.display()))
 }
 
 /// Marks the folder as used now. A folder without a record, or one touched in the last minute, is left alone. Returns whether

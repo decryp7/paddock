@@ -314,6 +314,7 @@ impl ProtectedFiles for RealFiles {
                     use std::os::unix::fs::PermissionsExt;
                     std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(mode))?;
                 }
+                // conformance: write-atomic — the payload is streamed from a reader and hashed as it is written, then given its exact mode; it is not held whole in memory
                 if let Err(e) = std::fs::rename(&tmp, to) {
                     paddock_proc::cleanup::remove_file_warn(&tmp);
                     return Err(e);

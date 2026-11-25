@@ -11,7 +11,14 @@ description = "AI assistant for Debrief on Pitwall: engine-validated proposals, 
 [lib]
 doctest = false # doctests are off (crates/README.md, "Doctests")
 
+[features]
+# Test support (rule 99): the scripted LLM (`llm::fake`) and the fake Pitwall (`engine::pitwall::fake`). Enabled from
+# `[dev-dependencies]` only, never in a shipped build (`./dev check test-features`, C170).
+test-support = []
+
 [dependencies]
+# The shared atomic file replace (a temporary name of its own per write).
+paddock-env = { path = "../../../../crates/paddock-env" }
 debrief-core = { path = "../debrief-core" }
 debrief-collect = { path = "../debrief-collect" }
 debrief-image = { path = "../debrief-image" }
@@ -40,6 +47,9 @@ libc.workspace = true
 windows = { workspace = true, features = ["Win32_System_Threading"] }
 
 [dev-dependencies]
+debrief-image = { path = "../debrief-image", features = ["test-support"] }
+# The self dev-dependency that turns `test-support` on for this package's own integration tests (rule 99).
+debrief-ai = { path = ".", features = ["test-support"] }
 tempfile.workspace = true
 # A real store (the SQL tool and the end-to-end chat tests run over it); an adapter, so tests only.
 debrief-store-duck = { path = "../debrief-store-duck" }

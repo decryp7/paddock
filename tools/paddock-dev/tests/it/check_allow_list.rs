@@ -91,7 +91,7 @@ fn twinned_differences(rust: &[(String, String)], js: &[(String, String)], rust_
 #[test]
 fn the_checks_that_name_an_allow_list_are_the_ones_the_js_host_recorded() {
     let rust: Vec<(String, String)> = users().iter().map(|(c, f)| (c.id().to_string(), f.to_string())).collect();
-    assert!(rust.len() >= 2, "C121 and C131 read an allow list: {rust:?}");
+    assert!(!rust.is_empty(), "C131 reads an allow list: {rust:?}");
     // The users the JS host had (recorded before it was retired): a Rust-only check that reads an allow list is a reviewed bless.
     let js: Vec<(String, String)> = serde_json::from_value(crate::recorded::expect("allow-list-users", &json!(rust))).unwrap();
     // The twins are the checks the Rust registry has (the registry is the one accessor of that list, ER-42).

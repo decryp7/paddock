@@ -240,11 +240,7 @@ fn save_sidecar(path: &Path, remote: &RemoteFile, cov: &Coverage) -> std::io::Re
         ranges: cov.ranges(),
     })
     .map_err(std::io::Error::other)?;
-    let mut tmp = path.as_os_str().to_owned();
-    tmp.push(".tmp");
-    let tmp = std::path::PathBuf::from(tmp);
-    std::fs::write(&tmp, body)?;
-    std::fs::rename(&tmp, path)
+    Ok(paddock_env::write_atomic(path, &body, false)?)
 }
 
 /// How a segmented run is tuned (a slice of [`super::DownloadOptions`]).

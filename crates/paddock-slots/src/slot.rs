@@ -57,6 +57,21 @@ pub fn acquire_first<L: SlotLocks>(
     locks: &L,
     max: u32,
 ) -> Result<Option<(SlotId, L::Guard)>, SlotError> {
+    acquire_preferring(locks, max, None)
+}
+
+/// [`acquire_first`], but `prefer` (when it is within `s1..=sMAX`) is tried first: the slot a job of the same kind held last, whose
+/// kept folders (and so compile cache) are warm. When it is busy this is [`acquire_first`] exactly.
+pub fn acquire_preferring<L: SlotLocks>(
+    locks: &L,
+    max: u32,
+    prefer: Option<SlotId>,
+) -> Result<Option<(SlotId, L::Guard)>, SlotError> {
+    if let Some(id) = prefer.filter(|id| id.number() <= max)
+        && let Some(guard) = locks.try_lock(id)?
+    {
+        return Ok(Some((id, guard)));
+    }
     for n in 1..=max {
         let id = SlotId(n);
         if let Some(guard) = locks.try_lock(id)? {
@@ -146,6 +161,20 @@ mod tests {
         assert!(acquire_first(&f, 3).unwrap().is_none());
         assert_eq!(acquire_first(&f, 4).unwrap().unwrap().0.number(), 4);
         assert!(acquire_first(&f, 0).unwrap().is_none());
+    }
+
+    #[test]
+    fn a_preferred_free_slot_comes_first_and_a_busy_or_out_of_range_one_is_skipped() {
+        let f = Fake(RefCell::new(BTreeSet::new()), None);
+        let (id, _) = acquire_preferring(&f, 3, SlotId::new(3)).unwrap().unwrap();
+        assert_eq!(id, SlotId(3));
+        // s3 is busy now: the first free slot, as without a preference.
+        let (id, _) = acquire_preferring(&f, 3, SlotId::new(3)).unwrap().unwrap();
+        assert_eq!(id, SlotId(1));
+        // A record from a larger pool is ignored.
+        let (id, _) = acquire_preferring(&f, 3, SlotId::new(9)).unwrap().unwrap();
+        assert_eq!(id, SlotId(2));
+        assert!(acquire_preferring(&f, 3, SlotId::new(1)).unwrap().is_none());
     }
 
     #[test]

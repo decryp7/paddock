@@ -556,6 +556,8 @@ struct Server<'a> {
     creds: Option<&'a Creds>,
     /// `SCCACHE_LOG`: the caller's, else `warn`.
     log_level: String,
+    /// [`basedir_vars`] for this checkout: the server reads them once, when it starts.
+    basedirs: Vec<(String, String)>,
 }
 
 impl Server<'_> {
@@ -577,7 +579,7 @@ impl Server<'_> {
         let creds = self.creds.map(Creds::pairs).unwrap_or_default();
         server_env(
             c,
-            &self.backend.vars(),
+            &[self.backend.vars(), self.basedirs.clone()].concat(),
             true,
             matches!(self.backend, Backend::S3(_) | Backend::Tiered { .. }),
             creds,
@@ -614,6 +616,67 @@ pub(crate) fn server_env(mut c: ToolCall, settings: &[(String, String)], survive
         c = c.env(k.as_str(), v.as_str()).secret(v.as_str());
     }
     c
+}
+
+/// The names of the variables whose values a Rust crate bakes into its outputs with `env!` and that sccache must hash verbatim, so a cache
+/// entry is shared across checkouts only for crates that do not embed the checkout's path (sccache docs/Rust.md at v0.20.1).
+pub(crate) const VERBATIM_ENV_DEPS: &str = "CARGO_MANIFEST_DIR,CARGO_MANIFEST_PATH";
+
+/// `SCCACHE_BASEDIRS` and `SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS` for the given checkout and build-folder roots (ER-22: the one place CI's
+/// setup-rust and the agents' local server both get them). sccache 0.20 strips the longest matching base from every path in a Rust
+/// compile's key, so the same source at another absolute path (a CI slot, a random work folder, a git worktree) hits the same entry.
+/// Separator: `;` on Windows hosts, `:` elsewhere (docs/Configuration.md at v0.20.1); only absolute paths (a relative one stops the
+/// server from starting), each once, in the given order. No usable root gives no variables. `CARGO_MANIFEST_DIR` and
+/// `CARGO_MANIFEST_PATH` stay verbatim in the key: 31 crates read them with `env!`, and a cached binary must not carry another
+/// checkout's path.
+pub(crate) fn basedir_vars(roots: &[String], windows: bool) -> Vec<(String, String)> {
+    let absolute = |r: &str| {
+        if windows {
+            let b = r.as_bytes();
+            b.len() >= 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && (b[2] == b'\\' || b[2] == b'/')
+        } else {
+            r.starts_with('/')
+        }
+    };
+    let mut seen: Vec<&str> = Vec::new();
+    for r in roots.iter().map(|r| r.trim()).filter(|r| !r.is_empty() && absolute(r)) {
+        let r = if r.len() > 1 { r.trim_end_matches(['/', '\\']) } else { r };
+        if !seen.contains(&r) {
+            seen.push(r);
+        }
+    }
+    if seen.is_empty() {
+        return Vec::new();
+    }
+    let sep = if windows { ";" } else { ":" };
+    vec![
+        ("SCCACHE_BASEDIRS".to_string(), seen.join(sep)),
+        ("SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS".to_string(), VERBATIM_ENV_DEPS.to_string()),
+    ]
+}
+
+/// The checkouts a local server should treat as one: the worktree `cwd` is in (the nearest folder with a `.git`) first, then its
+/// sibling worktrees (the folders next to it with a `.git`; agents' worktrees all live under one root, docs/dev-setup.md). One server
+/// serves every worktree and reads its base folders only when it starts, so a worktree made later is not in the list until the
+/// server restarts; it then builds correctly, only without sharing its own crates' entries.
+pub(crate) fn worktree_roots(cwd: &Path) -> Vec<String> {
+    let Some(top) = cwd.ancestors().find(|a| a.join(".git").exists()) else {
+        return Vec::new();
+    };
+    let mut roots = vec![top.display().to_string()];
+    if let Some(parent) = top.parent()
+        && let Ok(rd) = std::fs::read_dir(parent)
+    {
+        let mut sibs: Vec<String> = rd
+            .filter_map(Result::ok)
+            .map(|e| e.path())
+            .filter(|p| p != top && p.join(".git").exists())
+            .map(|p| p.display().to_string())
+            .collect();
+        sibs.sort();
+        roots.extend(sibs);
+    }
+    roots
 }
 
 /// The folder beside the sccache binary that holds the shim, so the shim can be called `sccache`.
@@ -673,15 +736,15 @@ fn write_shim(bin: &Path) -> std::io::Result<()> {
     if std::fs::read_to_string(&target).is_ok_and(|t| t == text) {
         return Ok(());
     }
-    std::fs::create_dir_all(target.parent().unwrap_or(Path::new(".")))?;
-    let tmp = target.with_extension(format!("tmp{}", std::process::id()));
-    std::fs::write(&tmp, &text)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755))?;
-    }
-    std::fs::rename(&tmp, &target)
+    Ok(paddock_env::write_atomic_created(&target, text.as_bytes(), &mut |tmp| {
+        let f = std::fs::OpenOptions::new().write(true).create_new(true).open(tmp)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            f.set_permissions(std::fs::Permissions::from_mode(0o755))?;
+        }
+        Ok(f)
+    })?)
 }
 
 /// A gate's path (`Install::Never`) writes nothing (ER-45): a missing or stale shim is a reason with its next step.
@@ -698,9 +761,10 @@ fn check_shim(bin: &Path) -> Result<(), String> {
 
 /// The variables a build gets: the wrapper, the settings the server runs with and the two that keep a server a build starts itself
 /// from replacing ours or hanging (never a credential).
-fn ready_vars(bin: &Path, backend: &Backend) -> Vec<(String, String)> {
+fn ready_vars(bin: &Path, backend: &Backend, basedirs: &[(String, String)]) -> Vec<(String, String)> {
     let mut vars = vec![("RUSTC_WRAPPER".to_string(), rustc_wrapper_for(bin).display().to_string())];
     vars.extend(backend.build_vars());
+    vars.extend(basedirs.iter().cloned());
     vars.push(("SCCACHE_IGNORE_SERVER_IO_ERROR".into(), "1".into()));
     vars.extend(survival_vars(matches!(backend, Backend::S3(_) | Backend::Tiered { .. })));
     vars
@@ -902,6 +966,10 @@ pub fn prepare(env: &HashMap<String, String>, install: Install) -> Outcome {
         return off(format!("cannot make the cache folder {dir}: {e}. Next: fix SCCACHE_DIR"), true);
     }
     let log = error_log(&run);
+    let basedirs = basedir_vars(
+        &std::env::current_dir().map(|c| worktree_roots(&c)).unwrap_or_default(),
+        cfg!(windows),
+    );
     let server = Server {
         bin: &bin,
         run: &run,
@@ -912,6 +980,7 @@ pub fn prepare(env: &HashMap<String, String>, install: Install) -> Outcome {
             .filter(|l| !l.is_empty())
             .cloned()
             .unwrap_or_else(|| "warn".into()),
+        basedirs: basedirs.clone(),
     };
     let where_log = format!("The server's log: {}", log.display());
     let long_path = if run.as_os_str().len() > SHORT_RUN_PATH {
@@ -1042,7 +1111,7 @@ pub fn prepare(env: &HashMap<String, String>, install: Install) -> Outcome {
         return off(why, true);
     }
     Outcome::Ready(Ready {
-        vars: ready_vars(&bin, &backend),
+        vars: ready_vars(&bin, &backend, &basedirs),
         bin,
     })
 }
@@ -1230,11 +1299,12 @@ mod tests {
 
     fn child_of(arg: &str, backend: &Backend, parent: &HashMap<String, String>) -> Vec<(String, String)> {
         let server = Server {
-            bin: Path::new("/h/tools/sccache/0.19.0/sccache"),
+            bin: Path::new("/h/tools/sccache/0.20.1/sccache"),
             run: Path::new("/h/sccache-run"),
             backend,
             creds: None,
             log_level: "warn".into(),
+            basedirs: Vec::new(),
         };
         server
             .call(arg)
@@ -1309,7 +1379,7 @@ mod tests {
         );
         // A build that has to start a server itself gets the same two protections.
         for b in [&local, &s3] {
-            let vars = ready_vars(Path::new("/b/sccache"), b);
+            let vars = ready_vars(Path::new("/b/sccache"), b, &[]);
             assert!(vars.contains(&("SCCACHE_IDLE_TIMEOUT".into(), "0".into())), "{vars:?}");
             assert!(
                 vars.iter()
@@ -1317,7 +1387,7 @@ mod tests {
                 "never a key"
             );
         }
-        assert!(ready_vars(Path::new("/b/sccache"), &s3).contains(&("AWS_EC2_METADATA_DISABLED".into(), "true".into())));
+        assert!(ready_vars(Path::new("/b/sccache"), &s3, &[]).contains(&("AWS_EC2_METADATA_DISABLED".into(), "true".into())));
     }
 
     #[test]
@@ -1363,7 +1433,7 @@ mod tests {
         };
         let mut fake = StandIn::new(dir, "sccache")
             .records_args()
-            .stdout("sccache 0.19.0")
+            .stdout("sccache 0.20.1")
             .when_args(&["--stop-server"], Actions::new())
             .when(
                 &Case::new()
@@ -1708,7 +1778,7 @@ mod tests {
         let stage = home.path().join("stage").join(&name);
         std::fs::create_dir_all(&stage).unwrap();
         let packed = paddock_testkit::StandIn::new(&stage, "sccache")
-            .stdout("sccache 0.19.0")
+            .stdout("sccache 0.20.1")
             .files()
             .unwrap();
         paddock_testkit::exe::write_program(stage.join(&packed.program_name), packed.bundled()).unwrap();
@@ -1735,7 +1805,7 @@ mod tests {
         assert!(!bin.exists(), "nothing is put in place");
         install_from(&bin, &url, "t", "tar.gz", &sum, &e).unwrap();
         assert!(bin.is_file());
-        assert_eq!(version_of(&bin, &e).as_deref(), Some("0.19.0"));
+        assert_eq!(version_of(&bin, &e).as_deref(), Some(SCCACHE_VERSION));
     }
 
     /// ER-33 and ER-47: cc-rs wraps `clang-cl` in whatever `RUSTC_WRAPPER` names when its file name is `sccache`, and sccache 0.19 answers
@@ -1858,9 +1928,9 @@ mod tests {
 
     #[test]
     fn off_unix_the_wrapper_is_the_binary_itself_and_on_unix_a_shim_beside_it() {
-        let bin = Path::new("/t/sccache/0.19.0/sccache");
+        let bin = Path::new("/t/sccache/0.20.1/sccache");
         assert_eq!(shim_for(bin, false), bin);
-        assert_eq!(shim_for(bin, true), Path::new("/t/sccache/0.19.0/shim/sccache"));
+        assert_eq!(shim_for(bin, true), Path::new("/t/sccache/0.20.1/shim/sccache"));
     }
 
     #[test]
@@ -1871,7 +1941,7 @@ mod tests {
             why.contains("cc-rs") && why.contains("clang-cl") && why.contains("./dev sccache env"),
             "{why}"
         );
-        let ours = declined(&env(&[("RUSTC_WRAPPER", "/t/sccache/0.19.0/shim/sccache")])).unwrap();
+        let ours = declined(&env(&[("RUSTC_WRAPPER", "/t/sccache/0.20.1/shim/sccache")])).unwrap();
         assert!(!ours.contains("cc-rs"), "our own shim is not the cause: {ours}");
         // Positive control: another wrapper gets the short message.
         let other = declined(&env(&[("RUSTC_WRAPPER", "/opt/bin/other")])).unwrap();
@@ -2147,7 +2217,7 @@ mod tests {
         let rw = |a: Actions| a.stdout("Effective cache mode            ReadWrite");
         let installed = StandIn::new(dir, "sccache")
             .records_args()
-            .stdout("sccache 0.19.0")
+            .stdout("sccache 0.20.1")
             .when_args(&["--start-server"], Actions::new())
             .when_args(&["--stop-server"], Actions::new().writes(&stopped, ""))
             .when(
@@ -2257,16 +2327,94 @@ mod tests {
         let (b, _) = choose(&e, &|_| Ok(())).unwrap();
         let creds = read_creds(&e).unwrap();
         let server = Server {
-            bin: Path::new("/h/tools/sccache/0.19.0/sccache"),
+            bin: Path::new("/h/tools/sccache/0.20.1/sccache"),
             run: Path::new("/h/sccache-run"),
             backend: &b,
             creds: Some(&creds),
             log_level: "warn".into(),
+            basedirs: Vec::new(),
         };
         let child = server.call("--start-server").child_env(&env(&[("PATH", "/usr/bin")]));
         assert_eq!(last(&child, "AWS_ACCESS_KEY_ID").as_deref(), Some("fake-id-1"));
         assert_eq!(last(&child, "SCCACHE_MULTILEVEL_CHAIN").as_deref(), Some("disk,s3"));
         assert_eq!(last(&child, "AWS_EC2_METADATA_DISABLED").as_deref(), Some("true"));
         assert!(!format!("{creds:?}").contains("fake-"), "Debug masks the keys");
+    }
+
+    #[test]
+    fn the_server_and_the_build_get_the_checkout_as_a_base_folder_and_keep_the_manifest_paths_verbatim() {
+        let roots = vec![
+            "/v/wt/a".to_string(),
+            "/v/wt/b/".to_string(),
+            "/v/wt/a".to_string(),
+            "rel/c".to_string(),
+            String::new(),
+        ];
+        let vars = basedir_vars(&roots, false);
+        assert_eq!(
+            vars,
+            [
+                ("SCCACHE_BASEDIRS".to_string(), "/v/wt/a:/v/wt/b".to_string()),
+                (
+                    "SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS".to_string(),
+                    "CARGO_MANIFEST_DIR,CARGO_MANIFEST_PATH".to_string()
+                )
+            ],
+            "absolute, once each, no trailing slash, ':' on a unix host; a relative path would stop the server from starting"
+        );
+        // The build's variables and the server's own start carry both.
+        let local = backend(&env(&[("SCCACHE_DIR", "/c"), ("PADDOCK_SCCACHE_BACKEND", "local")])).unwrap();
+        let build = ready_vars(Path::new("/b/sccache"), &local, &vars);
+        assert!(
+            build.iter().any(|(k, v)| k == "SCCACHE_BASEDIRS" && v == "/v/wt/a:/v/wt/b"),
+            "{build:?}"
+        );
+        assert!(build.iter().any(|(k, _)| k == "SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS"), "{build:?}");
+        let server = Server {
+            bin: Path::new("/b/sccache"),
+            run: Path::new("/h/run"),
+            backend: &local,
+            creds: None,
+            log_level: "warn".into(),
+            basedirs: vars,
+        };
+        let child = server.call("--start-server").child_env(&env(&[("PATH", "/usr/bin")]));
+        assert_eq!(last(&child, "SCCACHE_BASEDIRS").as_deref(), Some("/v/wt/a:/v/wt/b"));
+        assert_eq!(
+            last(&child, "SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS").as_deref(),
+            Some("CARGO_MANIFEST_DIR,CARGO_MANIFEST_PATH")
+        );
+    }
+
+    #[test]
+    fn on_windows_the_bases_are_drive_paths_joined_with_a_semicolon_and_unix_paths_are_refused() {
+        let vars = basedir_vars(
+            &[
+                r"C:\ci\src\paddock-s1".to_string(),
+                "D:/target/x-s1/".to_string(),
+                "/c/git/bash".to_string(),
+            ],
+            true,
+        );
+        assert_eq!(vars[0].1, r"C:\ci\src\paddock-s1;D:/target/x-s1");
+        assert!(
+            basedir_vars(&["/c/only".to_string()], true).is_empty(),
+            "a Git-bash path is not absolute to sccache on Windows"
+        );
+        assert!(basedir_vars(&[], false).is_empty(), "no root, no variables");
+    }
+
+    #[test]
+    fn the_local_server_lists_the_worktree_and_its_sibling_worktrees() {
+        let t = tempfile::tempdir().unwrap();
+        for d in ["wt/a/crates", "wt/b", "wt/not-a-worktree"] {
+            std::fs::create_dir_all(t.path().join(d)).unwrap();
+        }
+        std::fs::write(t.path().join("wt/a/.git"), "gitdir: x").unwrap();
+        std::fs::write(t.path().join("wt/b/.git"), "gitdir: y").unwrap();
+        // One component per join: a joined "wt/a/crates" keeps its `/`, so on Windows the root it finds prints as `...\wt/a`.
+        let roots = worktree_roots(&t.path().join("wt").join("a").join("crates"));
+        let root = |n: &str| t.path().join("wt").join(n).display().to_string();
+        assert_eq!(roots, [root("a"), root("b")]);
     }
 }

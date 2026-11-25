@@ -136,7 +136,9 @@ fn json_mode_strict_and_the_exit_statuses_agree() {
     let scratch = tempfile::tempdir().unwrap();
     let json_run = run_host(&["--app", "paddock", "--root", root, "--only", "C120", "--json"], scratch.path());
     assert!(json_run.stdout.trim_start().starts_with('{'));
-    // C123 is report-only: a warning never fails the run, `--strict` makes the named check's warnings fail.
+    // C123 blocks since its first green run (ci.yml 9065, ER-41): its finding is an error, so the run fails with or without
+    // `--strict`. No Rust-host check is report-only any more; how `--strict` turns a report-only check's warnings into a failure is
+    // shown by `check::outcome`'s own tests (`strict_makes_the_named_checks_warnings_fail`).
     // The binary's name is joined here, as in C123's own samples, so the dev_bin audit does not take this sample for a spawn.
     let sample = format!(
         "#[test]\nfn t() {{\n    let _ = std::process::Command::new(env!(\"{}\")).output();\n}}\n",
@@ -160,7 +162,7 @@ fn json_mode_strict_and_the_exit_statuses_agree() {
             "C123",
         ],
     );
-    assert_eq!(loose.code, Some(check::outcome::CLEAN), "{}", loose.stdout);
+    assert_eq!(loose.code, Some(check::outcome::FINDINGS), "{}", loose.stdout);
     assert_eq!(strict.code, Some(check::outcome::FINDINGS), "{}", strict.stdout);
     // C120 blocks since its first green run (ci.yml 8869, ER-41): its site fails the run without `--strict`.
     // conformance: stand-in — the shell file is the data of the C120 layout check, never run; conformance: layout-guess — a shell fixture for the blocking test, not a layout this code computes

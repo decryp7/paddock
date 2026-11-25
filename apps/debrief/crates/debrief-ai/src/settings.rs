@@ -102,10 +102,8 @@ impl AiSettings {
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir)?;
         }
-        let tmp = path.with_extension("json.tmp");
         let text = serde_json::to_string_pretty(&self.clone().clamp()).map_err(|e| crate::AiError::Io(e.to_string()))?;
-        std::fs::write(&tmp, text)?;
-        std::fs::rename(&tmp, path)?;
+        paddock_env::write_atomic(path, text.as_bytes(), false).map_err(std::io::Error::from)?;
         Ok(())
     }
 }

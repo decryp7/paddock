@@ -19,9 +19,9 @@ ARG TARGETARCH
 # Versions and checksums. Renovate bumps the version pins marked `renovate:`; a bump needs the new checksums
 # (`ci-image/README.md` says how to get them), so the build fails loudly rather than trusting an unverified file.
 # renovate: datasource=github-releases depName=mozilla/sccache
-ARG SCCACHE_VERSION=0.19.0
-ARG SCCACHE_SHA256_AMD64=aa73c7270c997894038c0d8f0d297865f57569e1687883322bc431713d4bb9dd
-ARG SCCACHE_SHA256_ARM64=3e47fc4a71b1ddd1b4294a0de9d34498922fdf41e3cd0bda5df3954e3d6deb9d
+ARG SCCACHE_VERSION=0.20.1
+ARG SCCACHE_SHA256_AMD64=c9f6c5a3ae84d9da0956b28c357a365827bda33f3383647fc0b67484c74a5ea9
+ARG SCCACHE_SHA256_ARM64=505324daad5fcbb1a3cab5d57d26ef42baf4d10b236df7de93a008196f1f2230
 # renovate: datasource=github-releases depName=guppy-rs/guppy extractVersion=^cargo-hakari-(?<version>.+)$
 ARG HAKARI_VERSION=0.9.39
 ARG HAKARI_SHA256_AMD64=699a3193a9bd1a8d914b970d3f50f3385f24fbd8b1294d0c0ff31fbe7c2c9f48
@@ -112,7 +112,7 @@ ARG NODE_MAJOR=24
 ARG PLAYWRIGHT_VERSION=1.64.1
 ARG CHROME_VERSION=156.0.8078.47
 ARG DUCKDB_VERSION=1.5.6
-ARG SCCACHE_VERSION=0.19.0
+ARG SCCACHE_VERSION=0.20.1
 ARG SHELLCHECK_VERSION=0.11.0
 ARG DRAWIO_VERSION=32.6.10
 # The Rust of the family: the `channel` of the root rust-toolchain.toml (scripts/ci-image.test.mjs checks they agree).

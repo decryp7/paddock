@@ -63,8 +63,13 @@ maxminddb = "0.27"
 libc = "0.2"
 
 [dev-dependencies]
+# The self dev-dependency that turns `test-support` on for this package's own integration tests (rule 99).
+dyno-agent = { path = ".", features = ["test-support"] }
+paddock-service = { path = "../../../../crates/paddock-service", features = ["test-support"] }
+paddock-net = { path = "../../../../crates/paddock-net", features = ["test-support"] }
+paddock-jobs = { path = "../../../../crates/paddock-jobs", features = ["test-support"] }
 # The ending harness of ADR 0072 (tests/endings.rs): the raw-stream client, the scenarios, the ratchet.
-paddock-ipc = { workspace = true, features = ["testing"] }
+paddock-ipc = { workspace = true, features = ["test-support"] }
 paddock-testkit = { path = "../../../../crates/paddock-testkit" }
 # The test doubles (ADR 0033): only here, so a build without test targets cannot name them.
 dyno-platform = { workspace = true, features = ["test-support"] }
@@ -79,6 +84,9 @@ proptest = "1"
 
 # The tiny MMDB writer (`geo_db::testdb`) for the fuzz seed corpus.
 [features]
+# Test support (rule 99): the test-only hooks (`build_id::set_watch_every_for_tests`, `PeerTransport::with_clock`).
+# Enabled from `[dev-dependencies]` only, never in a shipped build (`./dev check test-features`, C170).
+test-support = []
 testdb = []
 
 # A scripted run against a real running agent in a disposable VM (see the file's header).

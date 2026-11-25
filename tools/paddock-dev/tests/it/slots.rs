@@ -41,6 +41,29 @@ fn acquire(root: &Path, owner: &Path, max: &str) -> (i32, Value, String) {
     ])
 }
 
+/// `acquire` for a kind of job (`--key`): the kind's last slot is tried first.
+fn acquire_key(root: &Path, owner: &Path, max: &str, key: &str) -> (i32, Value, String) {
+    dev(&[
+        "ci",
+        "slot",
+        "acquire",
+        "--max",
+        max,
+        "--owner",
+        owner.to_str().unwrap(),
+        "--root",
+        root.to_str().unwrap(),
+        "--poll-ms",
+        POLL,
+        "--max-hold-secs",
+        "120",
+        "--acquire-grace-ms",
+        "50",
+        "--key",
+        key,
+    ])
+}
+
 /// Takes a slot with the real binary and returns (slot, token).
 fn take(root: &Path, owner: &Path, max: &str) -> (String, String) {
     let (code, v, err) = acquire(root, owner, max);
@@ -612,4 +635,66 @@ fn the_end_of_job_check_reports_a_replaced_lock_file_and_a_holder_that_is_gone()
     let (code, _, err) = check(&root, "s1", None);
     assert_ne!(code, 0);
     assert!(err.contains("Nobody holds slot s1"), "{err}");
+}
+
+/// Slot affinity: `crate` and `paddock-dev` start together and race for s1 and s2; a job that lands on another slot than last time
+/// starts with a cold compile cache. A kind of job (the key) gets the slot it held last, whatever the order it comes in.
+#[test]
+fn a_kind_of_job_gets_the_slot_it_held_last_whatever_the_order() {
+    let d = tempfile::tempdir().unwrap();
+    let root = d.path().join("ci");
+    let job = |n: &str| {
+        let p = d.path().join(n);
+        std::fs::create_dir(&p).unwrap();
+        p
+    };
+    // Round 1: A then B take s1 and s2, then both finish.
+    let (a1, b1) = (job("a1"), job("b1"));
+    let (_, va, _) = acquire_key(&root, &a1, "2", "CI/crate/macOS");
+    let (_, vb, _) = acquire_key(&root, &b1, "2", "CI/paddock-dev/macOS");
+    assert_eq!((va["slot"].as_str(), vb["slot"].as_str()), (Some("s1"), Some("s2")), "{va} {vb}");
+    for v in [&va, &vb] {
+        assert_eq!(release(&root, v["slot"].as_str().unwrap(), v["token"].as_str().unwrap()).0, 0);
+    }
+    // Round 2: B comes first and gets s2 (its own), then A gets s1 (its own).
+    let (a2, b2) = (job("a2"), job("b2"));
+    let (code, vb, err) = acquire_key(&root, &b2, "2", "CI/paddock-dev/macOS");
+    assert_eq!((code, vb["slot"].as_str()), (0, Some("s2")), "B gets its previous slot: {vb} {err}");
+    assert!(!err.contains("::notice::"), "a warm slot says nothing: {err}");
+    let (code, va, _) = acquire_key(&root, &a2, "2", "CI/crate/macOS");
+    assert_eq!((code, va["slot"].as_str()), (0, Some("s1")), "{va}");
+    for v in [&va, &vb] {
+        release(&root, v["slot"].as_str().unwrap(), v["token"].as_str().unwrap());
+    }
+}
+
+/// The kind's last slot is busy: the job takes a free one and says once that its cache will be cold. A key that names nothing
+/// readable (a damaged record) behaves as no key.
+#[test]
+fn a_busy_last_slot_falls_back_with_one_cold_cache_notice_and_a_damaged_record_is_no_preference() {
+    let d = tempfile::tempdir().unwrap();
+    let root = d.path().join("ci");
+    let job = |n: &str| {
+        let p = d.path().join(n);
+        std::fs::create_dir(&p).unwrap();
+        p
+    };
+    let (first, blocker) = (job("first"), job("blocker"));
+    let (_, v, _) = acquire_key(&root, &first, "2", "CI/crate/macOS");
+    assert_eq!(v["slot"].as_str(), Some("s1"));
+    release(&root, "s1", v["token"].as_str().unwrap());
+    // Somebody else (no key) takes s1.
+    let (_, other, _) = acquire(&root, &blocker, "2");
+    assert_eq!(other["slot"].as_str(), Some("s1"));
+    let (code, v, err) = acquire_key(&root, &job("second"), "2", "CI/crate/macOS");
+    assert_eq!((code, v["slot"].as_str()), (0, Some("s2")), "{v} {err}");
+    assert_eq!(err.matches("::notice::").count(), 1, "one notice: {err}");
+    assert!(err.contains("s1") && err.contains("s2") && err.contains("cold"), "{err}");
+    release(&root, "s2", v["token"].as_str().unwrap());
+    release(&root, "s1", other["token"].as_str().unwrap());
+    // A record that is not a slot name is read as no record.
+    std::fs::write(root.join("slots/last/CI_crate_macOS"), "not a slot").unwrap();
+    let (code, v, err) = acquire_key(&root, &job("third"), "2", "CI_crate_macOS");
+    assert_eq!((code, v["slot"].as_str()), (0, Some("s1")), "{v} {err}");
+    release(&root, "s1", v["token"].as_str().unwrap());
 }

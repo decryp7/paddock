@@ -3483,6 +3483,7 @@ dependencies = [
  "jiff",
  "libc",
  "nix",
+ "paddock-env",
  "paddock-ipc",
  "paddock-proc",
  "paddock-testkit",

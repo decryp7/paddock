@@ -150,6 +150,7 @@ impl OsNotifier {
     }
 
     /// The clock and the local time (tests move both by hand).
+    #[cfg(any(test, feature = "test-support"))]
     pub fn with_time(mut self, clock: Arc<dyn Clock>, local: Arc<dyn LocalTime>) -> OsNotifier {
         self.clock = clock;
         self.local = local;

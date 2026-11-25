@@ -48,7 +48,9 @@ pub use breadcrumbs::{
 pub use bridge::TracingBridge;
 pub use child::{MAX_CHILD_LINE, pump_child_lines, spawn_child_capture};
 pub use clef::{Enrichment, format_event, key_values};
-pub use clock::{Clock, FakeClock, SystemClock, now_utc};
+#[cfg(any(test, feature = "test-support"))]
+pub use clock::FakeClock;
+pub use clock::{Clock, SystemClock, now_utc};
 pub use error::{LogError, Result};
 pub use files::{DailyFiles, LineSink, StdoutSink, TOTAL_CAP_BYTES};
 pub use install::{LogConfig, LogHandle, Logging};

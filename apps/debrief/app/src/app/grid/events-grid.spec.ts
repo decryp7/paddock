@@ -1131,7 +1131,8 @@ describe('EventsGrid at scale', { timeout: 30_000 }, () => {
         vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockImplementation(function (this: HTMLElement) {
           return this.classList?.contains('viewport') ? parseFloat((this.lastElementChild as HTMLElement | null)?.style.height || '0') + VIEWPORT_H + 28 : 0;
         });
-        const { fixture, grid, vp } = await render(synthetic(5000, { liveMs: 25 }));
+        // The feed's clock never moves here (C136): a push on the page's own timers would re-dirty the layout between the wait and the scroll.
+        const { fixture, grid, vp } = await render(synthetic(5000, { liveMs: 25, clock: new ManualClock() }));
         await flush(fixture);
         const internals = grid as unknown as Internals;
         const start = 60 * ROW;

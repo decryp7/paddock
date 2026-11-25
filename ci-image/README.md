@@ -6,7 +6,7 @@ Chromium and WebKit with their dependencies, sccache) and adds what jobs still f
 
 | Tool | Pin | Source |
 |---|---|---|
-| sccache | 0.19.0 (same checksums as `.gitea/actions/setup-rust`) | GitHub release, SHA-256 checked |
+| sccache | 0.20.1 (same checksums as `.gitea/actions/setup-rust`) | GitHub release, SHA-256 checked |
 | cargo-hakari, cargo-machete | 0.9.39, 0.9.2 | GitHub releases, SHA-256 checked |
 | shellcheck | 0.11.0 (same pin and checksum as engineering-playbook's `ci.yml`) | GitHub release, SHA-256 checked |
 | libduckdb | 1.5.6 (the `duckdb` crate's), in `/opt/libduckdb`, `DUCKDB_LIB_DIR` set | GitHub release, SHA-256 checked |

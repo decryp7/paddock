@@ -15,7 +15,7 @@ default = ["native"]
 # The real process start (`ProcessSpawner`, `Siblings::native`); tests and apps with their own spawner turn it off.
 native = []
 # `paddock_siblings::testing`: a file system and a spawner that start nothing.
-testing = []
+test-support = []
 
 [dependencies]
 paddock-env = { workspace = true }

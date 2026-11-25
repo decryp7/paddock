@@ -344,7 +344,7 @@ mod tests {
 
     #[test]
     fn the_marker_is_the_one_the_harness_looks_for() {
-        #[cfg(feature = "testing")]
+        #[cfg(feature = "test-support")]
         assert_eq!(MARKER, crate::testing::endings::log::END_MARKER);
     }
 

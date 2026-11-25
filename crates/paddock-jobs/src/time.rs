@@ -10,7 +10,7 @@
 use crate::cancel::{CancelToken, Cancelled};
 use std::collections::VecDeque;
 use std::fmt;
-use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock};
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 /// The longest single OS wait (a wait for longer loops); keeps `Condvar::wait_timeout` away from overflowing durations.
@@ -99,6 +99,7 @@ impl Clock for SystemClock {
     }
 }
 
+#[cfg(any(test, feature = "test-support"))]
 #[derive(Debug)]
 struct FakeState {
     monotonic: Duration,
@@ -112,6 +113,7 @@ struct FakeState {
     generation: u64,
 }
 
+#[cfg(any(test, feature = "test-support"))]
 #[derive(Debug)]
 struct FakeInner {
     state: Mutex<FakeState>,
@@ -124,15 +126,18 @@ struct FakeInner {
 /// test drives timeouts, back-off and throttling step by step: start the work, [`wait_for_waiters`](Self::wait_for_waiters)
 /// until it is blocked on the clock, advance, and assert the outcome. Both readings start at zero (the wall at the Unix
 /// epoch) unless set with [`at_wall`](Self::at_wall).
+#[cfg(any(test, feature = "test-support"))]
 #[derive(Debug, Clone)]
 pub struct FakeClock(Arc<FakeInner>);
 
+#[cfg(any(test, feature = "test-support"))]
 impl Default for FakeClock {
     fn default() -> Self {
         Self::at_wall(UNIX_EPOCH)
     }
 }
 
+#[cfg(any(test, feature = "test-support"))]
 impl FakeClock {
     /// A clock at zero, its wall at the Unix epoch.
     pub fn new() -> Self {
@@ -159,7 +164,7 @@ impl FakeClock {
         Self::at_wall(wall_from_ms(ms))
     }
 
-    fn state(&self) -> MutexGuard<'_, FakeState> {
+    fn state(&self) -> std::sync::MutexGuard<'_, FakeState> {
         self.0.state.lock().unwrap_or_else(|p| p.into_inner())
     }
 
@@ -263,6 +268,7 @@ impl FakeClock {
     }
 }
 
+#[cfg(any(test, feature = "test-support"))]
 impl Clock for FakeClock {
     fn monotonic(&self) -> Duration {
         self.state().monotonic
@@ -312,6 +318,7 @@ impl Clock for FakeClock {
     }
 }
 
+#[cfg(any(test, feature = "test-support"))]
 fn wall_from_ms(ms: i64) -> SystemTime {
     let d = Duration::from_millis(ms.unsigned_abs());
     if ms >= 0 {

@@ -4,7 +4,7 @@
 use crate::common::{ELEVATE, READ_DOCS, Rig};
 
 use paddock_ipc::Json;
-use paddock_plugin_api::protocol::{Fail, McpBudget};
+use paddock_plugin_api::protocol::{Fail, McpBudget, Progress};
 use paddock_plugin_api::tools::FailureReason;
 use paddock_plugin_host::services::ElevatedRunner;
 use paddock_plugin_host::{FileError, Grants, HostError, Status, Supervisor};
@@ -354,7 +354,7 @@ fn background_tasks_are_listed_reported_stopped_and_ended_with_the_process() {
             t[0].progress,
             t[0].note.as_str()
         ),
-        (fixture::TOOL, "job-1", Some(0.5), "halfway")
+        (fixture::TOOL, "job-1", Progress::new(0.5).ok(), "halfway")
     );
     s.stop_task("job-1").unwrap();
     assert!(s.tasks().is_empty());

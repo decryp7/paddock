@@ -18,6 +18,7 @@
 
 mod egress;
 mod error;
+#[cfg(any(test, feature = "test-support"))]
 mod fake;
 mod policy;
 mod reach;
@@ -29,6 +30,7 @@ mod wire;
 
 pub use egress::{DownloadTransport, Egress, Streaming};
 pub use error::NetError;
+#[cfg(any(test, feature = "test-support"))]
 pub use fake::{FakeWire, Reply, Seen, StaticLookup};
 pub use policy::{DEFAULT_REDIRECTS, HostPattern, MAX_PATTERNS, MAX_REDIRECTS, Policy};
 pub mod limits;

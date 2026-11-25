@@ -78,6 +78,20 @@ impl std::error::Error for EnvError {
     }
 }
 
+/// For a caller that keeps `std::io::Result` (a file writer replaced by [`crate::write_atomic`]): an I/O failure keeps its kind
+/// and message (which names the step and the path); anything else is `ErrorKind::Other`.
+impl From<EnvError> for std::io::Error {
+    fn from(e: EnvError) -> Self {
+        match e {
+            EnvError::Io { op, path, source } => Self::new(
+                source.kind(),
+                format!("could not {op} {}: {source}", path.display()),
+            ),
+            other => Self::other(other.to_string()),
+        }
+    }
+}
+
 /// `Result` with [`EnvError`].
 pub type Result<T> = std::result::Result<T, EnvError>;
 
@@ -87,4 +101,27 @@ pub(crate) fn io(
 ) -> impl FnOnce(std::io::Error) -> EnvError {
     let path = path.to_path_buf();
     move |source| EnvError::Io { op, path, source }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_io_failure_keeps_its_kind_and_names_the_path() {
+        let e: std::io::Error = EnvError::Io {
+            op: "write",
+            path: "/d/x.json".into(),
+            source: std::io::Error::from(std::io::ErrorKind::PermissionDenied),
+        }
+        .into();
+        assert_eq!(e.kind(), std::io::ErrorKind::PermissionDenied);
+        assert!(e.to_string().contains("/d/x.json"), "{e}");
+    }
+
+    #[test]
+    fn another_failure_is_other() {
+        let e: std::io::Error = EnvError::NotAnObject.into();
+        assert_eq!(e.kind(), std::io::ErrorKind::Other);
+    }
 }

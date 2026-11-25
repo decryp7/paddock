@@ -36,8 +36,11 @@ toml.workspace = true
 libc = "0.2"
 
 [dev-dependencies]
+paddock-watch = { path = "../../../../crates/paddock-watch", features = ["test-support"] }
+paddock-service = { path = "../../../../crates/paddock-service", features = ["test-support"] }
+paddock-jobs = { path = "../../../../crates/paddock-jobs", features = ["test-support"] }
 # The ending harness of ADR 0072 (the ending test in src/server.rs).
-paddock-ipc = { workspace = true, features = ["testing"] }
+paddock-ipc = { workspace = true, features = ["test-support"] }
 paddock-testkit = { path = "../../../../crates/paddock-testkit" }
 # The test doubles (ADR 0033): only here, so a build without test targets cannot name them.
 dyno-platform = { workspace = true, features = ["test-support"] }

@@ -76,9 +76,11 @@ impl AgentState {
 
     pub fn save(&self, dir: &Path) -> std::io::Result<()> {
         std::fs::create_dir_all(dir)?;
-        let tmp = dir.join(format!("{STATE_FILE}.tmp"));
-        std::fs::write(&tmp, serde_json::to_vec_pretty(self).map_err(std::io::Error::other)?)?;
-        std::fs::rename(&tmp, dir.join(STATE_FILE))
+        Ok(paddock_env::write_atomic(
+            &dir.join(STATE_FILE),
+            &serde_json::to_vec_pretty(self).map_err(std::io::Error::other)?,
+            false,
+        )?)
     }
 
     pub fn get(&self, schedule: &str) -> ScheduleState {

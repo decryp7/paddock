@@ -4,12 +4,25 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### sccache 0.20.1, with base directories
+- Every sccache pin moves from 0.19.0 to 0.20.1 (setup-rust and its shell twin, the CI image, `./dev sccache env`) with the release's
+  own checksums. Setup-rust and the local server now set `SCCACHE_BASEDIRS` (the checkout, the build folder; in CI each job's own
+  slot or work folder) and `SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS=CARGO_MANIFEST_DIR,CARGO_MANIFEST_PATH`, so a workspace crate hits the
+  same cache entry from another slot, work folder or worktree. Cargo's legacy build-dir layout on Windows stays.
+
 ### `./dev ci triage`: a job the comparison run did not run is never NEW
 - When the last main run skipped a failed job (a nightly whose gate found main unchanged skips every job), had no job of that name, or
   ended it cancelled before it ran, triage compares that job with the newest older main run of the workflow that ran it and says which
   (`job "...": run 8284 skipped it; compared with run 8226`, `older_baselines` and a per-row `baseline_run` in `--json`). When no run in
   the newest 500 ran it, the row is UNKNOWN with that reason. A run named with `--against` is never replaced: a job it skipped is
   UNKNOWN. Before, a skipped job counted as passed and every failure in it was NEW (`ci triage 9021` against nightly 8284).
+
+### Plugins: progress outside 0 to 1 does not decode (nightly fuzz run 9021)
+- `paddock-plugin-api`: `HostCall::Report.progress`, `Host::report`, `ToolCtx::report` and `FakeHost::reports` take the new
+  `protocol::Progress`, which holds only a finite fraction from 0 to 1 (`Progress::new` returns `ProgressError` otherwise). A plugin's
+  NaN, infinite or out-of-range progress is refused at decode (`invalid`) instead of decoding and being clamped by the host;
+  `paddock-plugin-host`'s `TaskObserver::report` and `RunningTask::progress` carry `Progress` too. Breaking for plugins: build the value
+  with `Progress::new(fraction)`.
 
 ### Tests: doctests are off (user, 2026-11-24)
 - Every library target has `[lib] doctest = false` and every runnable doc example is now a ```` ```text ```` block; no `cargo test --doc`

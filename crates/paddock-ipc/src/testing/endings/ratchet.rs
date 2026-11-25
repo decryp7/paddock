@@ -6,7 +6,7 @@
 //! The file is a tiny TOML subset (`[[ratchet]]` tables of `key = "value"` lines), read here without a TOML dependency so
 //! that every crate with an ending test can use it.
 
-use super::{Report, Scenario};
+use super::{Report, RigFailure, Scenario};
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
@@ -182,14 +182,22 @@ impl Ratchet {
             .iter()
             .filter(|e| e.endpoint == endpoint && e.applies_here())
             .collect();
-        let mut problems: Vec<String> = reports
-            .iter()
-            .filter(|r| r.endpoint == endpoint)
-            .filter_map(|r| match &r.outcome {
-                super::Outcome::RigFailure(why) => Some(format!("rig failure: {endpoint} / {}: {why} (the rig could not drive the scenario; a scenario that does not apply is declared in the register's [[not_applicable]], never skipped in code)", r.scenario)),
-                _ => None,
-            })
-            .collect();
+        // A scenario whose precondition did not hold says nothing about the endpoint: its entries are neither matched nor stale.
+        let mut unjudged: BTreeSet<&str> = BTreeSet::new();
+        let mut problems: Vec<String> = Vec::new();
+        for r in reports.iter().filter(|r| r.endpoint == endpoint) {
+            match &r.outcome {
+                super::Outcome::RigFailure(why @ RigFailure::Drive(_)) => problems.push(format!("rig failure: {endpoint} / {}: {why} (the rig could not drive the scenario; a scenario that does not apply is declared in the register's [[not_applicable]], never skipped in code)", r.scenario)),
+                super::Outcome::RigFailure(why @ RigFailure::Precondition { .. }) => {
+                    unjudged.insert(r.scenario.name());
+                    problems.push(format!(
+                        "rig failure: {endpoint} / {}: {why}; the scenario's faults were not compared with the ratchet (no entry is new or stale; ADR 0122)",
+                        r.scenario
+                    ));
+                }
+                _ => {}
+            }
+        }
         for (scenario, fault) in &observed {
             let listed = mine
                 .iter()
@@ -200,7 +208,10 @@ impl Ratchet {
                 ));
             }
         }
-        for e in &mine {
+        for e in mine
+            .iter()
+            .filter(|e| !unjudged.contains(e.scenario.as_str()))
+        {
             let seen = observed
                 .iter()
                 .any(|(s, f)| *f == e.fault && (e.scenario == *s || e.scenario == "*"));

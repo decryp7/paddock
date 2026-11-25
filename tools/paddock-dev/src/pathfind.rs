@@ -8,6 +8,25 @@ pub(crate) const SOURCE: &str = include_str!("pathfind.rs");
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+/// Whether `rel` (a path written in a doc or config, `/`-separated) exists below `root` spelled exactly: every component must match a
+/// directory entry byte for byte. `Path::exists` follows the file system, which is case-insensitive on macOS and Windows, so a link
+/// to `docs/RULES.md` would pass beside `docs/rules.md` there and fail only on Linux CI.
+pub fn exists_exact(root: &Path, rel: &str) -> bool {
+    let mut at = root.to_path_buf();
+    for part in rel.split('/').filter(|p| !p.is_empty() && *p != ".") {
+        if part == ".." {
+            at.push(part);
+            continue;
+        }
+        let listed = std::fs::read_dir(&at).is_ok_and(|mut it| it.any(|e| e.is_ok_and(|e| e.file_name() == part)));
+        if !listed {
+            return false;
+        }
+        at.push(part);
+    }
+    at.exists()
+}
+
 /// The value of `key` in `vars`: exact on Unix, ignoring case on Windows (the real variable is usually `Path`, and `Env` keeps the
 /// spelling the process had). An exact match wins over a differently-cased one.
 pub fn lookup<'a>(vars: &'a BTreeMap<String, String>, key: &str, windows: bool) -> Option<&'a str> {
@@ -88,6 +107,18 @@ fn is_executable(_: &Path) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn exists_exact_needs_every_component_spelled_as_listed() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(d.path().join("docs")).unwrap();
+        std::fs::write(d.path().join("docs/rules.md"), "x").unwrap();
+        let r = d.path();
+        assert!(super::exists_exact(r, "docs/rules.md") && super::exists_exact(r, "docs") && super::exists_exact(r, "./docs/../docs"));
+        assert!(
+            !super::exists_exact(r, "docs/RULES.md") && !super::exists_exact(r, "DOCS/rules.md") && !super::exists_exact(r, "docs/none.md")
+        );
+    }
+
     use super::*;
 
     fn vars(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {

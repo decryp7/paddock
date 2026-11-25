@@ -93,10 +93,13 @@ fn stable_copy(exe: &Path, data_dir: &Path) -> Result<PathBuf, Error> {
     let bin = data_dir.join("bin");
     std::fs::create_dir_all(&bin).map_err(|e| io_error(&bin, e))?;
     let target = bin.join("pitcrew-service");
-    let tmp = bin.join("pitcrew-service.new");
-    std::fs::copy(exe, &tmp).map_err(|e| io_error(&tmp, e))?;
-    std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755)).map_err(|e| io_error(&tmp, e))?;
-    std::fs::rename(&tmp, &target).map_err(|e| io_error(&target, e))?;
+    let bytes = std::fs::read(exe).map_err(|e| io_error(exe, e))?;
+    paddock_env::write_atomic_created(&target, &bytes, &mut |tmp| {
+        let f = std::fs::OpenOptions::new().write(true).create_new(true).open(tmp)?;
+        f.set_permissions(std::fs::Permissions::from_mode(0o755))?;
+        Ok(f)
+    })
+    .map_err(|e| io_error(&target, e.into()))?;
     Ok(target)
 }
 

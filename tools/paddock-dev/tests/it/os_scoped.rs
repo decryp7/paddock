@@ -143,7 +143,7 @@ fn tree_the_derived_placement_holds_the_packages_and_modules_the_hand_lists_name
         assert!(dev.derived.modules.contains(m), "{m}: {:?}", dev.why.get(m));
     }
     // Planner modules have no OS code and no host caller: Linux only.
-    for m in ["audit::judge::", "check::c121::"] {
+    for m in ["audit::judge::", "check::c131::"] {
         assert!(
             dev.derived.known_modules.contains(m) && !dev.derived.modules.contains(m),
             "{m} is portable: {:?}",

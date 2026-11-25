@@ -6,7 +6,9 @@ use crate::files::{FileError, HostFiles};
 use crate::grants::Grants;
 use crate::output::OutputSink;
 use paddock_ipc::{CallCtx, Handler, Json, RemoteError, codes, decode_request, encode_reply};
-use paddock_plugin_api::protocol::{DENIED, Fail, HostCall, MAX_LOG_BATCH, MAX_LOG_LINE, cut_line};
+use paddock_plugin_api::protocol::{
+    DENIED, Fail, HostCall, MAX_LOG_BATCH, MAX_LOG_LINE, Progress, cut_line,
+};
 use paddock_plugin_api::tools::{FailureReason, ToolTask};
 use paddock_plugin_package::Manifest;
 use serde_json::Value;
@@ -26,7 +28,7 @@ pub trait TaskObserver: Send + Sync {
     /// A task started.
     fn started(&self, plugin: &str, tool: &str, task: &ToolTask);
     /// Progress (`None`: unknown) and what it is doing.
-    fn report(&self, plugin: &str, task: &str, progress: Option<f32>, note: &str);
+    fn report(&self, plugin: &str, task: &str, progress: Option<Progress>, note: &str);
     /// A task ended.
     fn finished(&self, plugin: &str, task: &str);
 }
@@ -36,7 +38,7 @@ pub struct NoTasks;
 
 impl TaskObserver for NoTasks {
     fn started(&self, _: &str, _: &str, _: &ToolTask) {}
-    fn report(&self, _: &str, _: &str, _: Option<f32>, _: &str) {}
+    fn report(&self, _: &str, _: &str, _: Option<Progress>, _: &str) {}
     fn finished(&self, _: &str, _: &str) {}
 }
 
@@ -60,8 +62,8 @@ pub struct RunningTask {
     pub tool: String,
     /// The task.
     pub task: ToolTask,
-    /// Its last progress (0 to 1).
-    pub progress: Option<f32>,
+    /// Its last progress.
+    pub progress: Option<Progress>,
     /// What it last said it was doing.
     pub note: String,
 }
@@ -134,9 +136,6 @@ impl HostServices {
                 progress,
                 note,
             } => {
-                let progress = progress
-                    .filter(|p| p.is_finite())
-                    .map(|p| p.clamp(0.0, 1.0));
                 if let Some(t) = lock(&self.running).get_mut(&task) {
                     t.progress = progress;
                     t.note = cut_line(&note, MAX_LOG_LINE).to_string();
@@ -247,7 +246,7 @@ mod tests {
         fn started(&self, plugin: &str, tool: &str, task: &ToolTask) {
             lock(&self.0).push(format!("started {plugin} {tool} {}", task.id));
         }
-        fn report(&self, plugin: &str, task: &str, progress: Option<f32>, note: &str) {
+        fn report(&self, plugin: &str, task: &str, progress: Option<Progress>, note: &str) {
             lock(&self.0).push(format!("report {plugin} {task} {progress:?} {note}"));
         }
         fn finished(&self, plugin: &str, task: &str) {
@@ -320,13 +319,21 @@ mod tests {
         .unwrap();
         s.serve(HostCall::Report {
             task: "a".into(),
-            progress: Some(7.0),
+            progress: Some(Progress::DONE),
             note: "x".repeat(10_000),
         })
         .unwrap();
+        // Progress outside 0 to 1 never reaches the services: the call does not decode (fuzz run 9021's NaN).
+        for bad in [f32::NAN, 7.0, -1.0] {
+            let mut body = vec![0x01, 0x01, b'a', 0x01];
+            body.extend_from_slice(&bad.to_le_bytes());
+            body.extend_from_slice(&[0x01, b'n']);
+            let e = decode_request::<HostCall>(&body).unwrap_err();
+            assert_eq!(e.code, codes::INVALID, "{bad}");
+        }
         s.serve(HostCall::Report {
             task: "a".into(),
-            progress: Some(f32::NAN),
+            progress: None,
             note: "n".into(),
         })
         .unwrap();
@@ -340,13 +347,6 @@ mod tests {
             ),
             ("t", "a", None, "n")
         );
-        s.serve(HostCall::Report {
-            task: "a".into(),
-            progress: Some(-1.0),
-            note: "n".into(),
-        })
-        .unwrap();
-        assert_eq!(s.tasks()[0].progress, Some(0.0));
         // A report for a task nobody announced reaches the observer and changes nothing.
         s.serve(HostCall::Report {
             task: "ghost".into(),

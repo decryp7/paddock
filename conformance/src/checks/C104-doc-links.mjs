@@ -15,10 +15,11 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, normalize, resolve } from 'node:path';
 import { error, warn } from '../finding.mjs';
+import { existsExact } from '../util/fs.mjs';
 import { baselineGrowth, targetRef, unmeasuredFinding } from '../util/baseline.mjs';
 
 export const BASELINE_PATH = 'conformance/baselines/C104.json';
-const EXTRA_CHECK_IDS = ['C100']; // lives in the gate register (ADR 0060), not in conformance/src/checks
+const EXTRA_CHECK_IDS = ['C100', 'C170']; // the `./dev` checks (`CHECKS` in tools/paddock-dev/src/gates/checks.rs), not in conformance/src/checks
 const CONTRACT = 'conformance/paddock.ci.json'; // `conformance.rust`: the checks that only the Rust host has (pair P3, ADR 0022 amendment 2026-11-19)
 
 /** Sentences of `text` as [{ text, start }] (offset of the first character): split at a full stop or semicolon before white space, and at blank lines. */
@@ -125,13 +126,14 @@ export default {
       const repo = dirname(rulesMd);
       sources.push({ file: 'RULES.md', abs: rulesMd, repo });
     }
+    const rulesDirs = new Map();
     const dead = [];
     for (const s of sources) {
       let text = s.text;
       if (s.abs) text = safeRead(s.abs);
       if (text == null) continue;
       for (const l of relativeLinks(text)) {
-        const ok = s.abs ? existsSync(join(s.repo, normalize(l.target))) : s.exists(normalize(join(s.base, l.target)));
+        const ok = s.abs ? existsExact(s.repo, l.target, rulesDirs) : s.exists(normalize(join(s.base, l.target)));
         if (!ok) dead.push({ file: s.file, target: l.target, line: l.line });
       }
     }
@@ -147,7 +149,7 @@ export default {
     const haveChecks = checkIds.size > EXTRA_CHECK_IDS.length + rustIds.length;
     const rulesRead = existsSync(rulesMd) && safeRead(rulesMd) !== null;
     const rulesRepo = rulesRead ? dirname(rulesMd) : null;
-    const present = (rel) => ctx.exists(rel) || (rulesRepo !== null && existsSync(join(rulesRepo, rel)));
+    const present = (rel) => ctx.exists(rel) || (rulesRepo !== null && existsExact(rulesRepo, rel, rulesDirs));
     const missing = [];
     const named = [{ file: 'AGENTS.md', text: ctx.read('AGENTS.md') }, { file: 'docs/rules.md', text: ctx.read('docs/rules.md') }];
     if (rulesRead) named.push({ file: 'RULES.md', text: safeRead(rulesMd) });

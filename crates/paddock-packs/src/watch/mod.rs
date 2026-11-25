@@ -5,9 +5,11 @@ use crate::{PackError, PackKind, Reloader};
 use std::path::Path;
 use std::sync::Arc;
 
+#[cfg(any(test, feature = "test-support"))]
+pub use paddock_watch::FakeSource;
 #[cfg(feature = "watch")]
 pub use paddock_watch::NotifySource;
-pub use paddock_watch::{ChangeSource, FakeSource, WatchHandle};
+pub use paddock_watch::{ChangeSource, WatchHandle};
 
 /// Watches `dir` (created if missing) on a background thread: changes go to the reloader's debouncer and, once the folder
 /// has been quiet, the store reloads and swaps in the new set. The first load is the caller's (`reload_now`) so the app has

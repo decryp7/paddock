@@ -103,11 +103,7 @@ impl History {
             kept.drain(..kept.len() - MAX_LINES);
         }
         let body: String = kept.iter().map(|(e, ms, k)| format!("{e}\t{ms}\t{k}\n")).collect();
-        let tmp = self.path.with_extension(format!("tmp{}", std::process::id()));
-        fs::write(&tmp, body)?;
-        fs::rename(&tmp, &self.path).inspect_err(|_| {
-            let _ = fs::remove_file(&tmp);
-        })
+        Ok(paddock_env::write_atomic(&self.path, body.as_bytes(), false)?)
     }
 
     /// Lines in the file now.

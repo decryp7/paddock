@@ -13,7 +13,9 @@ fail=0
 # who: agent|coord
 run() { # who cwd command
   if [ "$1" = agent ]; then extra='{"agent_id":"a1","agent_type":"implementer"}'; else extra='{}'; fi
-  jq -nc --arg c "$3" --arg d "$2" --argjson x "$extra" '{tool_name:"Bash",cwd:$d,tool_input:{command:$c}} + $x' | "$H" 2>/dev/null
+  # The command goes in on standard input: Linux caps one argument at 128 KiB (MAX_ARG_STRLEN), so a 150 KB or 300 KB command passed
+  # with --arg never reached the guard in CI (tools job of run 9030: "jq: Argument list too long") and its size tests passed on nothing.
+  printf '%s' "$3" | jq -nc --rawfile c /dev/stdin --arg d "$2" --argjson x "$extra" '{tool_name:"Bash",cwd:$d,tool_input:{command:$c}} + $x' | "$H" 2>/dev/null
 }
 expect() { # name want who cwd command
   out=$(run "$3" "$4" "$5")

@@ -83,13 +83,17 @@ app	workbench-demo	ubuntu-latest		node scripts/demo-release.mjs workbench-demo n
 app	workbench-demo	ubuntu-latest		node scripts/demo-release.mjs workbench-demo version
 app	workbench-demo	ubuntu-latest		npm run workbench-demo:build -w ui
 job	conformance			"$PADDOCK_DEV" ci setup-rust --sccache-backend "${{ github.event.inputs.sccache_backend || 's3' }}" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
+job	conformance			*) continue
 job	conformance			*) echo "::error::sccache-backend must be auto, redis, local or s3 (got '${{ github.event.inputs.sccache_backend || 's3' }}')"
 job	conformance			*) echo "::warning::no pinned sccache release for $RUNNER_OS $(uname -m); building without the shared compile cache."
 job	conformance			*[!0-9]*) TOTAL=40
 job	conformance			*[!0-9]*) TOTAL=60
+job	conformance			./dev check test-features
 job	conformance			./dev conformance --app paddock --root . --only $RUST_ONLY
 job	conformance			./dev gates check
 job	conformance			BACKEND=local
+job	conformance			BASES=""
+job	conformance			BASES="${BASES:+$BASES$SEP}$P"
 job	conformance			BIN=sccache
 job	conformance			BIN=sccache.exe
 job	conformance			DEST="${RUNNER_TOOL_CACHE:-$HOME/.cache}/sccache/$VERSION"
@@ -113,28 +117,33 @@ job	conformance			Linux-arm64) T=aarch64-unknown-linux-musl
 job	conformance			Linux-x86_64)            T=x86_64-unknown-linux-musl
 job	conformance			MOUNT="${PADDOCK_SCCACHE_MOUNT:-/sccache}"
 job	conformance			NAME="sccache-v$VERSION-$T"
+job	conformance			P="$(cygpath -m "$P")"
+job	conformance			P="${P%/}"
 job	conformance			PATH="$PINNED:$PATH"
 job	conformance			PER=$((TOTAL / LANES
 job	conformance			PER=$((TOTAL / SLOTS
 job	conformance			PER=2
-job	conformance			PINNED="${RUNNER_TOOL_CACHE:-$HOME/.cache}/sccache/0.19.0"
+job	conformance			PINNED="${RUNNER_TOOL_CACHE:-$HOME/.cache}/sccache/0.20.1"
 job	conformance			PORT="$(bash "$iso" port sccache)"
 job	conformance			PORT=4227
+job	conformance			SEP=":"
+job	conformance			SEP=";"
+job	conformance			SETTINGS+=("SCCACHE_BASEDIRS=$BASES" "SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS=CARGO_MANIFEST_DIR,CARGO_MANIFEST_PATH"
 job	conformance			SETTINGS+=("SCCACHE_DIR=$DIR" "SCCACHE_CACHE_SIZE=$SIZE"
 job	conformance			SETTINGS+=("SCCACHE_REDIS_ENDPOINT=${{ vars.SCCACHE_REDIS_ENDPOINT }}" "SCCACHE_REDIS_DB=${REDIS_DB:-5}"
 job	conformance			SETTINGS=(
 job	conformance			SIZE="${PER}G"
 job	conformance			SIZE=20G
 job	conformance			SLOTS="$(bash "$iso" slots)"
-job	conformance			SUM=28be8c61f6b2c89b9eb2869f6af7f78e6f992e78a8abae0ce855fcc129cbeac1
-job	conformance			SUM=3e47fc4a71b1ddd1b4294a0de9d34498922fdf41e3cd0bda5df3954e3d6deb9d
-job	conformance			SUM=a35a0b7d622618774bc1bb8102d72562dfb21e619f88b153b370d7f89bc286af
-job	conformance			SUM=aa73c7270c997894038c0d8f0d297865f57569e1687883322bc431713d4bb9dd
+job	conformance			SUM=505324daad5fcbb1a3cab5d57d26ef42baf4d10b236df7de93a008196f1f2230
+job	conformance			SUM=c9f6c5a3ae84d9da0956b28c357a365827bda33f3383647fc0b67484c74a5ea9
+job	conformance			SUM=ca500a01139e9af8d5f5a5e69b6a0dd941ed79ed3399a91cc35bba484fe732fa
+job	conformance			SUM=d2658c9a24bab25a24fdc1917cb5b614b7c20a4ce8f363e5303d37b7e699d5ec
 job	conformance			TOOLCHAIN=$(sed -n 's/^channel *= *"\([^"]*\)".*/\1/p' "$pin" | head -1
 job	conformance			TOOLCHAIN=${TOOLCHAIN:-stable
 job	conformance			TOTAL="${PADDOCK_CI_SCCACHE_GB:-40}"
 job	conformance			TOTAL="${PADDOCK_CI_SCCACHE_GB:-60}"
-job	conformance			VERSION=0.19.0
+job	conformance			VERSION=0.20.1
 job	conformance			Windows-x86_64)          T=x86_64-pc-windows-msvc
 job	conformance			bash "conformance/ci/dev-tool-cache.sh" key
 job	conformance			bash "conformance/ci/dev-tool-cache.sh" no-download
@@ -146,7 +155,11 @@ job	conformance			bash "dev" ci setup-rust --help >/dev/null
 job	conformance			bash "dev" ci setup-rust --sccache-backend "${{ github.event.inputs.sccache_backend || 's3' }}" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
 job	conformance			cargo --version
 job	conformance			cargo nextest run --manifest-path tools/paddock-dev/Cargo.toml --profile ci --no-tests=fail -E 'test(/^contracts::/) | test(/^audit::tests::(every_shared_|the_rust_reader_and_the_script_agree|the_families_real_list)/)'
+job	conformance			case "$P" in */) [ "${#P}" -gt 1 ]
+job	conformance			case "$P" in /*
+job	conformance			case "$P" in [A-Za-z]:/*
 job	conformance			case "$RUNNER_OS-$(uname -m)" in
+job	conformance			case "$SEP$BASES$SEP" in *"$SEP$P$SEP"*) continue
 job	conformance			case "$TOTAL" in ''
 job	conformance			case "${{ github.event.inputs.sccache_backend || 's3' }}" in auto
 job	conformance			chmod +x "$DEST/$BIN.part.$$"
@@ -188,6 +201,7 @@ job	conformance			echo "__CARGO_TEMPORARY_BUILD_DIR_NEW_LAYOUT_OPT_OUT=1"
 job	conformance			echo "kit=$kit" >> "$GITHUB_OUTPUT"
 job	conformance			echo "no ./dev binary is pinned for this job (PADDOCK_DEV), and this path never builds one" > "$LANE_ERR"
 job	conformance			echo "release=$(bash "conformance/ci/kit.sh" release-path)" >> "$GITHUB_OUTPUT"
+job	conformance			echo "sccache: base directories $BASES"
 job	conformance			echo "sccache: local disk $DIR"
 job	conformance			echo "sccache: shared backend ${{ vars.SCCACHE_REDIS_ENDPOINT }} db ${REDIS_DB:-5}"
 job	conformance			echo "sccache: this job holds lane $LANE of $LANES on $MOUNT"
@@ -196,9 +210,11 @@ job	conformance			else
 job	conformance			exit 0
 job	conformance			exit 1
 job	conformance			export PADDOCK_DEV_DOWNLOAD=0
+job	conformance			export SCCACHE_BASEDIRS="$BASES" SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS=CARGO_MANIFEST_DIR,CARGO_MANIFEST_PATH
 job	conformance			export SCCACHE_DIR="$DIR" SCCACHE_CACHE_SIZE="$SIZE"
 job	conformance			export SCCACHE_REDIS_ENDPOINT="${{ vars.SCCACHE_REDIS_ENDPOINT }}" SCCACHE_REDIS_DB="${REDIS_DB:-5}"
 job	conformance			export SCCACHE_SERVER_PORT="$PORT" SCCACHE_IGNORE_SERVER_IO_ERROR=1
+job	conformance			for P in "${PADDOCK_WORKSPACE:-}" "${GITHUB_WORKSPACE:-}" "${PADDOCK_BUILD_FOLDER:-}"
 job	conformance			for c in 
 job	conformance			for kv in "${SETTINGS[@]}"
 job	conformance			for name in "" stable
@@ -239,12 +255,15 @@ job	conformance			{
 job	conformance			} >> "$GITHUB_ENV"
 job	conformance		conformance	npm test
 job	crates			"$PADDOCK_DEV" ci setup-rust --sccache-backend "${{ github.event.inputs.sccache_backend || 's3' }}" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
+job	crates			*) continue
 job	crates			*) echo "::error::sccache-backend must be auto, redis, local or s3 (got '${{ github.event.inputs.sccache_backend || 's3' }}')"
 job	crates			*) echo "::warning::no pinned sccache release for $RUNNER_OS $(uname -m); building without the shared compile cache."
 job	crates			*[!0-9]*) TOTAL=40
 job	crates			*[!0-9]*) TOTAL=60
 job	crates			./dev locks guard
 job	crates			BACKEND=local
+job	crates			BASES=""
+job	crates			BASES="${BASES:+$BASES$SEP}$P"
 job	crates			BIN=sccache
 job	crates			BIN=sccache.exe
 job	crates			DEST="${RUNNER_TOOL_CACHE:-$HOME/.cache}/sccache/$VERSION"
@@ -268,28 +287,33 @@ job	crates			Linux-arm64) T=aarch64-unknown-linux-musl
 job	crates			Linux-x86_64)            T=x86_64-unknown-linux-musl
 job	crates			MOUNT="${PADDOCK_SCCACHE_MOUNT:-/sccache}"
 job	crates			NAME="sccache-v$VERSION-$T"
+job	crates			P="$(cygpath -m "$P")"
+job	crates			P="${P%/}"
 job	crates			PATH="$PINNED:$PATH"
 job	crates			PER=$((TOTAL / LANES
 job	crates			PER=$((TOTAL / SLOTS
 job	crates			PER=2
-job	crates			PINNED="${RUNNER_TOOL_CACHE:-$HOME/.cache}/sccache/0.19.0"
+job	crates			PINNED="${RUNNER_TOOL_CACHE:-$HOME/.cache}/sccache/0.20.1"
 job	crates			PORT="$(bash "$iso" port sccache)"
 job	crates			PORT=4227
+job	crates			SEP=":"
+job	crates			SEP=";"
+job	crates			SETTINGS+=("SCCACHE_BASEDIRS=$BASES" "SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS=CARGO_MANIFEST_DIR,CARGO_MANIFEST_PATH"
 job	crates			SETTINGS+=("SCCACHE_DIR=$DIR" "SCCACHE_CACHE_SIZE=$SIZE"
 job	crates			SETTINGS+=("SCCACHE_REDIS_ENDPOINT=${{ vars.SCCACHE_REDIS_ENDPOINT }}" "SCCACHE_REDIS_DB=${REDIS_DB:-5}"
 job	crates			SETTINGS=(
 job	crates			SIZE="${PER}G"
 job	crates			SIZE=20G
 job	crates			SLOTS="$(bash "$iso" slots)"
-job	crates			SUM=28be8c61f6b2c89b9eb2869f6af7f78e6f992e78a8abae0ce855fcc129cbeac1
-job	crates			SUM=3e47fc4a71b1ddd1b4294a0de9d34498922fdf41e3cd0bda5df3954e3d6deb9d
-job	crates			SUM=a35a0b7d622618774bc1bb8102d72562dfb21e619f88b153b370d7f89bc286af
-job	crates			SUM=aa73c7270c997894038c0d8f0d297865f57569e1687883322bc431713d4bb9dd
+job	crates			SUM=505324daad5fcbb1a3cab5d57d26ef42baf4d10b236df7de93a008196f1f2230
+job	crates			SUM=c9f6c5a3ae84d9da0956b28c357a365827bda33f3383647fc0b67484c74a5ea9
+job	crates			SUM=ca500a01139e9af8d5f5a5e69b6a0dd941ed79ed3399a91cc35bba484fe732fa
+job	crates			SUM=d2658c9a24bab25a24fdc1917cb5b614b7c20a4ce8f363e5303d37b7e699d5ec
 job	crates			TOOLCHAIN=$(sed -n 's/^channel *= *"\([^"]*\)".*/\1/p' "$pin" | head -1
 job	crates			TOOLCHAIN=${TOOLCHAIN:-stable
 job	crates			TOTAL="${PADDOCK_CI_SCCACHE_GB:-40}"
 job	crates			TOTAL="${PADDOCK_CI_SCCACHE_GB:-60}"
-job	crates			VERSION=0.19.0
+job	crates			VERSION=0.20.1
 job	crates			Windows-x86_64)          T=x86_64-pc-windows-msvc
 job	crates			bash "conformance/ci/dev-tool-cache.sh" key
 job	crates			bash "conformance/ci/dev-tool-cache.sh" no-download
@@ -300,7 +324,11 @@ job	crates			bash "conformance/ci/kit.sh" host sccache-stats
 job	crates			bash "dev" ci setup-rust --help >/dev/null
 job	crates			bash "dev" ci setup-rust --sccache-backend "${{ github.event.inputs.sccache_backend || 's3' }}" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
 job	crates			cargo --version
+job	crates			case "$P" in */) [ "${#P}" -gt 1 ]
+job	crates			case "$P" in /*
+job	crates			case "$P" in [A-Za-z]:/*
 job	crates			case "$RUNNER_OS-$(uname -m)" in
+job	crates			case "$SEP$BASES$SEP" in *"$SEP$P$SEP"*) continue
 job	crates			case "$TOTAL" in ''
 job	crates			case "${{ github.event.inputs.sccache_backend || 's3' }}" in auto
 job	crates			chmod +x "$DEST/$BIN.part.$$"
@@ -342,6 +370,7 @@ job	crates			echo "__CARGO_TEMPORARY_BUILD_DIR_NEW_LAYOUT_OPT_OUT=1"
 job	crates			echo "kit=$kit" >> "$GITHUB_OUTPUT"
 job	crates			echo "no ./dev binary is pinned for this job (PADDOCK_DEV), and this path never builds one" > "$LANE_ERR"
 job	crates			echo "release=$(bash "conformance/ci/kit.sh" release-path)" >> "$GITHUB_OUTPUT"
+job	crates			echo "sccache: base directories $BASES"
 job	crates			echo "sccache: local disk $DIR"
 job	crates			echo "sccache: shared backend ${{ vars.SCCACHE_REDIS_ENDPOINT }} db ${REDIS_DB:-5}"
 job	crates			echo "sccache: this job holds lane $LANE of $LANES on $MOUNT"
@@ -350,9 +379,11 @@ job	crates			else
 job	crates			exit 0
 job	crates			exit 1
 job	crates			export PADDOCK_DEV_DOWNLOAD=0
+job	crates			export SCCACHE_BASEDIRS="$BASES" SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS=CARGO_MANIFEST_DIR,CARGO_MANIFEST_PATH
 job	crates			export SCCACHE_DIR="$DIR" SCCACHE_CACHE_SIZE="$SIZE"
 job	crates			export SCCACHE_REDIS_ENDPOINT="${{ vars.SCCACHE_REDIS_ENDPOINT }}" SCCACHE_REDIS_DB="${REDIS_DB:-5}"
 job	crates			export SCCACHE_SERVER_PORT="$PORT" SCCACHE_IGNORE_SERVER_IO_ERROR=1
+job	crates			for P in "${PADDOCK_WORKSPACE:-}" "${GITHUB_WORKSPACE:-}" "${PADDOCK_BUILD_FOLDER:-}"
 job	crates			for c in 
 job	crates			for kv in "${SETTINGS[@]}"
 job	crates			for name in "" stable
@@ -399,11 +430,14 @@ job	crates		crates	cargo llvm-cov nextest --profile ci --workspace --all-feature
 job	crates		crates	cargo machete $(ls -d paddock-*/ | grep -v '^paddock-workspace-hack/$'
 job	crates		crates	node ../scripts/coverage-gate.mjs lcov.info 90
 job	e2e			"$PADDOCK_DEV" ci setup-rust --sccache-backend "${{ github.event.inputs.sccache_backend || 's3' }}" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
+job	e2e			*) continue
 job	e2e			*) echo "::error::sccache-backend must be auto, redis, local or s3 (got '${{ github.event.inputs.sccache_backend || 's3' }}')"
 job	e2e			*) echo "::warning::no pinned sccache release for $RUNNER_OS $(uname -m); building without the shared compile cache."
 job	e2e			*[!0-9]*) TOTAL=40
 job	e2e			*[!0-9]*) TOTAL=60
 job	e2e			BACKEND=local
+job	e2e			BASES=""
+job	e2e			BASES="${BASES:+$BASES$SEP}$P"
 job	e2e			BIN=sccache
 job	e2e			BIN=sccache.exe
 job	e2e			DEST="${RUNNER_TOOL_CACHE:-$HOME/.cache}/sccache/$VERSION"
@@ -427,28 +461,33 @@ job	e2e			Linux-arm64) T=aarch64-unknown-linux-musl
 job	e2e			Linux-x86_64)            T=x86_64-unknown-linux-musl
 job	e2e			MOUNT="${PADDOCK_SCCACHE_MOUNT:-/sccache}"
 job	e2e			NAME="sccache-v$VERSION-$T"
+job	e2e			P="$(cygpath -m "$P")"
+job	e2e			P="${P%/}"
 job	e2e			PATH="$PINNED:$PATH"
 job	e2e			PER=$((TOTAL / LANES
 job	e2e			PER=$((TOTAL / SLOTS
 job	e2e			PER=2
-job	e2e			PINNED="${RUNNER_TOOL_CACHE:-$HOME/.cache}/sccache/0.19.0"
+job	e2e			PINNED="${RUNNER_TOOL_CACHE:-$HOME/.cache}/sccache/0.20.1"
 job	e2e			PORT="$(bash "$iso" port sccache)"
 job	e2e			PORT=4227
+job	e2e			SEP=":"
+job	e2e			SEP=";"
+job	e2e			SETTINGS+=("SCCACHE_BASEDIRS=$BASES" "SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS=CARGO_MANIFEST_DIR,CARGO_MANIFEST_PATH"
 job	e2e			SETTINGS+=("SCCACHE_DIR=$DIR" "SCCACHE_CACHE_SIZE=$SIZE"
 job	e2e			SETTINGS+=("SCCACHE_REDIS_ENDPOINT=${{ vars.SCCACHE_REDIS_ENDPOINT }}" "SCCACHE_REDIS_DB=${REDIS_DB:-5}"
 job	e2e			SETTINGS=(
 job	e2e			SIZE="${PER}G"
 job	e2e			SIZE=20G
 job	e2e			SLOTS="$(bash "$iso" slots)"
-job	e2e			SUM=28be8c61f6b2c89b9eb2869f6af7f78e6f992e78a8abae0ce855fcc129cbeac1
-job	e2e			SUM=3e47fc4a71b1ddd1b4294a0de9d34498922fdf41e3cd0bda5df3954e3d6deb9d
-job	e2e			SUM=a35a0b7d622618774bc1bb8102d72562dfb21e619f88b153b370d7f89bc286af
-job	e2e			SUM=aa73c7270c997894038c0d8f0d297865f57569e1687883322bc431713d4bb9dd
+job	e2e			SUM=505324daad5fcbb1a3cab5d57d26ef42baf4d10b236df7de93a008196f1f2230
+job	e2e			SUM=c9f6c5a3ae84d9da0956b28c357a365827bda33f3383647fc0b67484c74a5ea9
+job	e2e			SUM=ca500a01139e9af8d5f5a5e69b6a0dd941ed79ed3399a91cc35bba484fe732fa
+job	e2e			SUM=d2658c9a24bab25a24fdc1917cb5b614b7c20a4ce8f363e5303d37b7e699d5ec
 job	e2e			TOOLCHAIN=$(sed -n 's/^channel *= *"\([^"]*\)".*/\1/p' "$pin" | head -1
 job	e2e			TOOLCHAIN=${TOOLCHAIN:-stable
 job	e2e			TOTAL="${PADDOCK_CI_SCCACHE_GB:-40}"
 job	e2e			TOTAL="${PADDOCK_CI_SCCACHE_GB:-60}"
-job	e2e			VERSION=0.19.0
+job	e2e			VERSION=0.20.1
 job	e2e			Windows-x86_64)          T=x86_64-pc-windows-msvc
 job	e2e			bash "$r" line Angular "‹steps.angular-cache.outputs.cache-primary-key›" "‹steps.angular-cache.outputs.cache-hit›" "‹steps.angular-cache.outputs.cache-matched-key›" pending
 job	e2e			bash "$r" line npm "‹steps.npm-cache.outputs.cache-primary-key›" "‹steps.npm-cache.outputs.cache-hit›" "‹steps.npm-cache.outputs.cache-matched-key›" pending
@@ -463,7 +502,11 @@ job	e2e			bash "conformance/ci/kit.sh" host sccache-stats
 job	e2e			bash "dev" ci setup-rust --help >/dev/null
 job	e2e			bash "dev" ci setup-rust --sccache-backend "${{ github.event.inputs.sccache_backend || 's3' }}" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
 job	e2e			cargo --version
+job	e2e			case "$P" in */) [ "${#P}" -gt 1 ]
+job	e2e			case "$P" in /*
+job	e2e			case "$P" in [A-Za-z]:/*
 job	e2e			case "$RUNNER_OS-$(uname -m)" in
+job	e2e			case "$SEP$BASES$SEP" in *"$SEP$P$SEP"*) continue
 job	e2e			case "$TOTAL" in ''
 job	e2e			case "${{ github.event.inputs.sccache_backend || 's3' }}" in auto
 job	e2e			chmod +x "$DEST/$BIN.part.$$"
@@ -506,6 +549,7 @@ job	e2e			echo "__CARGO_TEMPORARY_BUILD_DIR_NEW_LAYOUT_OPT_OUT=1"
 job	e2e			echo "kit=$kit" >> "$GITHUB_OUTPUT"
 job	e2e			echo "no ./dev binary is pinned for this job (PADDOCK_DEV), and this path never builds one" > "$LANE_ERR"
 job	e2e			echo "release=$(bash "conformance/ci/kit.sh" release-path)" >> "$GITHUB_OUTPUT"
+job	e2e			echo "sccache: base directories $BASES"
 job	e2e			echo "sccache: local disk $DIR"
 job	e2e			echo "sccache: shared backend ${{ vars.SCCACHE_REDIS_ENDPOINT }} db ${REDIS_DB:-5}"
 job	e2e			echo "sccache: this job holds lane $LANE of $LANES on $MOUNT"
@@ -515,9 +559,11 @@ job	e2e			else
 job	e2e			exit 0
 job	e2e			exit 1
 job	e2e			export PADDOCK_DEV_DOWNLOAD=0
+job	e2e			export SCCACHE_BASEDIRS="$BASES" SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS=CARGO_MANIFEST_DIR,CARGO_MANIFEST_PATH
 job	e2e			export SCCACHE_DIR="$DIR" SCCACHE_CACHE_SIZE="$SIZE"
 job	e2e			export SCCACHE_REDIS_ENDPOINT="${{ vars.SCCACHE_REDIS_ENDPOINT }}" SCCACHE_REDIS_DB="${REDIS_DB:-5}"
 job	e2e			export SCCACHE_SERVER_PORT="$PORT" SCCACHE_IGNORE_SERVER_IO_ERROR=1
+job	e2e			for P in "${PADDOCK_WORKSPACE:-}" "${GITHUB_WORKSPACE:-}" "${PADDOCK_BUILD_FOLDER:-}"
 job	e2e			for c in 
 job	e2e			for kv in "${SETTINGS[@]}"
 job	e2e			for name in "" stable
@@ -562,11 +608,14 @@ job	e2e		ui	npx playwright test --shard=2/2
 job	e2e		ui	npx playwright test -c projects/paddock-e2e/selftest/playwright.config.ts --project=chromium --shard=1/2
 job	e2e		ui	npx playwright test -c projects/paddock-e2e/selftest/playwright.config.ts --project=chromium --shard=2/2
 job	tools			"$PADDOCK_DEV" ci setup-rust --sccache-backend "${{ github.event.inputs.sccache_backend || 's3' }}" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
+job	tools			*) continue
 job	tools			*) echo "::error::sccache-backend must be auto, redis, local or s3 (got '${{ github.event.inputs.sccache_backend || 's3' }}')"
 job	tools			*) echo "::warning::no pinned sccache release for $RUNNER_OS $(uname -m); building without the shared compile cache."
 job	tools			*[!0-9]*) TOTAL=40
 job	tools			*[!0-9]*) TOTAL=60
 job	tools			BACKEND=local
+job	tools			BASES=""
+job	tools			BASES="${BASES:+$BASES$SEP}$P"
 job	tools			BIN=sccache
 job	tools			BIN=sccache.exe
 job	tools			DEST="${RUNNER_TOOL_CACHE:-$HOME/.cache}/sccache/$VERSION"
@@ -590,28 +639,33 @@ job	tools			Linux-arm64) T=aarch64-unknown-linux-musl
 job	tools			Linux-x86_64)            T=x86_64-unknown-linux-musl
 job	tools			MOUNT="${PADDOCK_SCCACHE_MOUNT:-/sccache}"
 job	tools			NAME="sccache-v$VERSION-$T"
+job	tools			P="$(cygpath -m "$P")"
+job	tools			P="${P%/}"
 job	tools			PATH="$PINNED:$PATH"
 job	tools			PER=$((TOTAL / LANES
 job	tools			PER=$((TOTAL / SLOTS
 job	tools			PER=2
-job	tools			PINNED="${RUNNER_TOOL_CACHE:-$HOME/.cache}/sccache/0.19.0"
+job	tools			PINNED="${RUNNER_TOOL_CACHE:-$HOME/.cache}/sccache/0.20.1"
 job	tools			PORT="$(bash "$iso" port sccache)"
 job	tools			PORT=4227
+job	tools			SEP=":"
+job	tools			SEP=";"
+job	tools			SETTINGS+=("SCCACHE_BASEDIRS=$BASES" "SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS=CARGO_MANIFEST_DIR,CARGO_MANIFEST_PATH"
 job	tools			SETTINGS+=("SCCACHE_DIR=$DIR" "SCCACHE_CACHE_SIZE=$SIZE"
 job	tools			SETTINGS+=("SCCACHE_REDIS_ENDPOINT=${{ vars.SCCACHE_REDIS_ENDPOINT }}" "SCCACHE_REDIS_DB=${REDIS_DB:-5}"
 job	tools			SETTINGS=(
 job	tools			SIZE="${PER}G"
 job	tools			SIZE=20G
 job	tools			SLOTS="$(bash "$iso" slots)"
-job	tools			SUM=28be8c61f6b2c89b9eb2869f6af7f78e6f992e78a8abae0ce855fcc129cbeac1
-job	tools			SUM=3e47fc4a71b1ddd1b4294a0de9d34498922fdf41e3cd0bda5df3954e3d6deb9d
-job	tools			SUM=a35a0b7d622618774bc1bb8102d72562dfb21e619f88b153b370d7f89bc286af
-job	tools			SUM=aa73c7270c997894038c0d8f0d297865f57569e1687883322bc431713d4bb9dd
+job	tools			SUM=505324daad5fcbb1a3cab5d57d26ef42baf4d10b236df7de93a008196f1f2230
+job	tools			SUM=c9f6c5a3ae84d9da0956b28c357a365827bda33f3383647fc0b67484c74a5ea9
+job	tools			SUM=ca500a01139e9af8d5f5a5e69b6a0dd941ed79ed3399a91cc35bba484fe732fa
+job	tools			SUM=d2658c9a24bab25a24fdc1917cb5b614b7c20a4ce8f363e5303d37b7e699d5ec
 job	tools			TOOLCHAIN=$(sed -n 's/^channel *= *"\([^"]*\)".*/\1/p' "$pin" | head -1
 job	tools			TOOLCHAIN=${TOOLCHAIN:-stable
 job	tools			TOTAL="${PADDOCK_CI_SCCACHE_GB:-40}"
 job	tools			TOTAL="${PADDOCK_CI_SCCACHE_GB:-60}"
-job	tools			VERSION=0.19.0
+job	tools			VERSION=0.20.1
 job	tools			Windows-x86_64)          T=x86_64-pc-windows-msvc
 job	tools			bash "conformance/ci/dev-tool-cache.sh" key
 job	tools			bash "conformance/ci/dev-tool-cache.sh" no-download
@@ -624,7 +678,11 @@ job	tools			bash "dev" ci setup-rust --sccache-backend "${{ github.event.inputs.
 job	tools			bash .claude/hooks/run-tests.sh
 job	tools			bash ci-image/fetch-verified.sh "https://github.com/jgraph/drawio-desktop/releases/download/v${v}/drawio-amd64-${v}.deb" "$sum" "$RUNNER_TEMP/drawio.deb"
 job	tools			cargo --version
+job	tools			case "$P" in */) [ "${#P}" -gt 1 ]
+job	tools			case "$P" in /*
+job	tools			case "$P" in [A-Za-z]:/*
 job	tools			case "$RUNNER_OS-$(uname -m)" in
+job	tools			case "$SEP$BASES$SEP" in *"$SEP$P$SEP"*) continue
 job	tools			case "$TOTAL" in ''
 job	tools			case "${{ github.event.inputs.sccache_backend || 's3' }}" in auto
 job	tools			chmod +x "$DEST/$BIN.part.$$"
@@ -671,6 +729,7 @@ job	tools			echo "__CARGO_TEMPORARY_BUILD_DIR_NEW_LAYOUT_OPT_OUT=1"
 job	tools			echo "kit=$kit" >> "$GITHUB_OUTPUT"
 job	tools			echo "no ./dev binary is pinned for this job (PADDOCK_DEV), and this path never builds one" > "$LANE_ERR"
 job	tools			echo "release=$(bash "conformance/ci/kit.sh" release-path)" >> "$GITHUB_OUTPUT"
+job	tools			echo "sccache: base directories $BASES"
 job	tools			echo "sccache: local disk $DIR"
 job	tools			echo "sccache: shared backend ${{ vars.SCCACHE_REDIS_ENDPOINT }} db ${REDIS_DB:-5}"
 job	tools			echo "sccache: this job holds lane $LANE of $LANES on $MOUNT"
@@ -679,9 +738,11 @@ job	tools			else
 job	tools			exit 0
 job	tools			exit 1
 job	tools			export PADDOCK_DEV_DOWNLOAD=0
+job	tools			export SCCACHE_BASEDIRS="$BASES" SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS=CARGO_MANIFEST_DIR,CARGO_MANIFEST_PATH
 job	tools			export SCCACHE_DIR="$DIR" SCCACHE_CACHE_SIZE="$SIZE"
 job	tools			export SCCACHE_REDIS_ENDPOINT="${{ vars.SCCACHE_REDIS_ENDPOINT }}" SCCACHE_REDIS_DB="${REDIS_DB:-5}"
 job	tools			export SCCACHE_SERVER_PORT="$PORT" SCCACHE_IGNORE_SERVER_IO_ERROR=1
+job	tools			for P in "${PADDOCK_WORKSPACE:-}" "${GITHUB_WORKSPACE:-}" "${PADDOCK_BUILD_FOLDER:-}"
 job	tools			for c in 
 job	tools			for kv in "${SETTINGS[@]}"
 job	tools			for name in "" stable
@@ -724,11 +785,14 @@ job	tools			v=$(sed -n 's/^ARG DRAWIO_VERSION=//p' ci-image/Dockerfile | head -n
 job	tools			{
 job	tools			} >> "$GITHUB_ENV"
 job	ui			"$PADDOCK_DEV" ci setup-rust --sccache-backend "${{ github.event.inputs.sccache_backend || 's3' }}" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
+job	ui			*) continue
 job	ui			*) echo "::error::sccache-backend must be auto, redis, local or s3 (got '${{ github.event.inputs.sccache_backend || 's3' }}')"
 job	ui			*) echo "::warning::no pinned sccache release for $RUNNER_OS $(uname -m); building without the shared compile cache."
 job	ui			*[!0-9]*) TOTAL=40
 job	ui			*[!0-9]*) TOTAL=60
 job	ui			BACKEND=local
+job	ui			BASES=""
+job	ui			BASES="${BASES:+$BASES$SEP}$P"
 job	ui			BIN=sccache
 job	ui			BIN=sccache.exe
 job	ui			DEST="${RUNNER_TOOL_CACHE:-$HOME/.cache}/sccache/$VERSION"
@@ -752,28 +816,33 @@ job	ui			Linux-arm64) T=aarch64-unknown-linux-musl
 job	ui			Linux-x86_64)            T=x86_64-unknown-linux-musl
 job	ui			MOUNT="${PADDOCK_SCCACHE_MOUNT:-/sccache}"
 job	ui			NAME="sccache-v$VERSION-$T"
+job	ui			P="$(cygpath -m "$P")"
+job	ui			P="${P%/}"
 job	ui			PATH="$PINNED:$PATH"
 job	ui			PER=$((TOTAL / LANES
 job	ui			PER=$((TOTAL / SLOTS
 job	ui			PER=2
-job	ui			PINNED="${RUNNER_TOOL_CACHE:-$HOME/.cache}/sccache/0.19.0"
+job	ui			PINNED="${RUNNER_TOOL_CACHE:-$HOME/.cache}/sccache/0.20.1"
 job	ui			PORT="$(bash "$iso" port sccache)"
 job	ui			PORT=4227
+job	ui			SEP=":"
+job	ui			SEP=";"
+job	ui			SETTINGS+=("SCCACHE_BASEDIRS=$BASES" "SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS=CARGO_MANIFEST_DIR,CARGO_MANIFEST_PATH"
 job	ui			SETTINGS+=("SCCACHE_DIR=$DIR" "SCCACHE_CACHE_SIZE=$SIZE"
 job	ui			SETTINGS+=("SCCACHE_REDIS_ENDPOINT=${{ vars.SCCACHE_REDIS_ENDPOINT }}" "SCCACHE_REDIS_DB=${REDIS_DB:-5}"
 job	ui			SETTINGS=(
 job	ui			SIZE="${PER}G"
 job	ui			SIZE=20G
 job	ui			SLOTS="$(bash "$iso" slots)"
-job	ui			SUM=28be8c61f6b2c89b9eb2869f6af7f78e6f992e78a8abae0ce855fcc129cbeac1
-job	ui			SUM=3e47fc4a71b1ddd1b4294a0de9d34498922fdf41e3cd0bda5df3954e3d6deb9d
-job	ui			SUM=a35a0b7d622618774bc1bb8102d72562dfb21e619f88b153b370d7f89bc286af
-job	ui			SUM=aa73c7270c997894038c0d8f0d297865f57569e1687883322bc431713d4bb9dd
+job	ui			SUM=505324daad5fcbb1a3cab5d57d26ef42baf4d10b236df7de93a008196f1f2230
+job	ui			SUM=c9f6c5a3ae84d9da0956b28c357a365827bda33f3383647fc0b67484c74a5ea9
+job	ui			SUM=ca500a01139e9af8d5f5a5e69b6a0dd941ed79ed3399a91cc35bba484fe732fa
+job	ui			SUM=d2658c9a24bab25a24fdc1917cb5b614b7c20a4ce8f363e5303d37b7e699d5ec
 job	ui			TOOLCHAIN=$(sed -n 's/^channel *= *"\([^"]*\)".*/\1/p' "$pin" | head -1
 job	ui			TOOLCHAIN=${TOOLCHAIN:-stable
 job	ui			TOTAL="${PADDOCK_CI_SCCACHE_GB:-40}"
 job	ui			TOTAL="${PADDOCK_CI_SCCACHE_GB:-60}"
-job	ui			VERSION=0.19.0
+job	ui			VERSION=0.20.1
 job	ui			Windows-x86_64)          T=x86_64-pc-windows-msvc
 job	ui			bash "$r" line Angular "‹steps.angular-cache.outputs.cache-primary-key›" "‹steps.angular-cache.outputs.cache-hit›" "‹steps.angular-cache.outputs.cache-matched-key›" pending
 job	ui			bash "$r" line npm "‹steps.npm-cache.outputs.cache-primary-key›" "‹steps.npm-cache.outputs.cache-hit›" "‹steps.npm-cache.outputs.cache-matched-key›" pending
@@ -787,7 +856,11 @@ job	ui			bash "conformance/ci/kit.sh" host sccache-stats
 job	ui			bash "dev" ci setup-rust --help >/dev/null
 job	ui			bash "dev" ci setup-rust --sccache-backend "${{ github.event.inputs.sccache_backend || 's3' }}" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
 job	ui			cargo --version
+job	ui			case "$P" in */) [ "${#P}" -gt 1 ]
+job	ui			case "$P" in /*
+job	ui			case "$P" in [A-Za-z]:/*
 job	ui			case "$RUNNER_OS-$(uname -m)" in
+job	ui			case "$SEP$BASES$SEP" in *"$SEP$P$SEP"*) continue
 job	ui			case "$TOTAL" in ''
 job	ui			case "${{ github.event.inputs.sccache_backend || 's3' }}" in auto
 job	ui			chmod +x "$DEST/$BIN.part.$$"
@@ -830,6 +903,7 @@ job	ui			echo "__CARGO_TEMPORARY_BUILD_DIR_NEW_LAYOUT_OPT_OUT=1"
 job	ui			echo "kit=$kit" >> "$GITHUB_OUTPUT"
 job	ui			echo "no ./dev binary is pinned for this job (PADDOCK_DEV), and this path never builds one" > "$LANE_ERR"
 job	ui			echo "release=$(bash "conformance/ci/kit.sh" release-path)" >> "$GITHUB_OUTPUT"
+job	ui			echo "sccache: base directories $BASES"
 job	ui			echo "sccache: local disk $DIR"
 job	ui			echo "sccache: shared backend ${{ vars.SCCACHE_REDIS_ENDPOINT }} db ${REDIS_DB:-5}"
 job	ui			echo "sccache: this job holds lane $LANE of $LANES on $MOUNT"
@@ -839,9 +913,11 @@ job	ui			else
 job	ui			exit 0
 job	ui			exit 1
 job	ui			export PADDOCK_DEV_DOWNLOAD=0
+job	ui			export SCCACHE_BASEDIRS="$BASES" SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS=CARGO_MANIFEST_DIR,CARGO_MANIFEST_PATH
 job	ui			export SCCACHE_DIR="$DIR" SCCACHE_CACHE_SIZE="$SIZE"
 job	ui			export SCCACHE_REDIS_ENDPOINT="${{ vars.SCCACHE_REDIS_ENDPOINT }}" SCCACHE_REDIS_DB="${REDIS_DB:-5}"
 job	ui			export SCCACHE_SERVER_PORT="$PORT" SCCACHE_IGNORE_SERVER_IO_ERROR=1
+job	ui			for P in "${PADDOCK_WORKSPACE:-}" "${GITHUB_WORKSPACE:-}" "${PADDOCK_BUILD_FOLDER:-}"
 job	ui			for c in 
 job	ui			for kv in "${SETTINGS[@]}"
 job	ui			for name in "" stable

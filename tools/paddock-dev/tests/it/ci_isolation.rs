@@ -115,6 +115,30 @@ fn acquires_uses_releases_and_sweeps_with_the_real_binary() {
     assert!(text(&h.run(&["status"], &[], false).stdout).contains("s1 free"));
 }
 
+/// Slot affinity through the whole path: the runner's workflow, job and OS become the slot's key, and the slot the job took is
+/// recorded under it (`<ci-home>/slots/last/<key>`), so the next job of that kind asks for it first. Without a workflow name there is no key.
+#[test]
+fn acquire_records_the_slot_under_the_jobs_workflow_job_and_os() {
+    let d = tempfile::tempdir().unwrap();
+    let h = Host::new(d.path(), "target target-{name}-{slot} slot\ntools tools shared\n");
+    let envs = [("GITHUB_WORKFLOW", "CI"), ("GITHUB_JOB", "crate")];
+    let acq = h.run(&["acquire"], &envs, false);
+    assert!(acq.status.success(), "{}", text(&acq.stderr));
+    assert_eq!(h.exported().get("PADDOCK_CI_SLOT").map(String::as_str), Some("s1"));
+    let last = h.ci.join("slots/last/CI_crate_macOS");
+    assert_eq!(
+        std::fs::read_to_string(&last).unwrap().trim(),
+        "s1",
+        "the record of the kind `CI/crate/macOS`"
+    );
+    let rel = h.run(&["release"], &[], true);
+    assert!(rel.status.success(), "{}", text(&rel.stderr));
+    std::fs::remove_dir_all(h.ci.join("slots/last")).unwrap();
+    let acq = h.run(&["acquire"], &[], false);
+    assert!(acq.status.success(), "{}", text(&acq.stderr));
+    assert!(!h.ci.join("slots/last").exists(), "no workflow name: no key, no record");
+}
+
 /// A stand-in for `heavy` that records its arguments (a stand-in, never a real queue).
 fn fake_heavy(root: &Path, exit: i32) -> (PathBuf, PathBuf) {
     let log = root.join("heavy-calls");

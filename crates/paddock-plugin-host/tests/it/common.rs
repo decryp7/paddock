@@ -5,6 +5,7 @@ use paddock_guard::{Quarantine, QuarantinePolicy};
 use paddock_ipc::FrameLimit;
 use paddock_jobs::time::{Clock, FakeClock};
 use paddock_plugin_api::compat::{HostInfo, NamespaceSupport};
+use paddock_plugin_api::protocol::Progress;
 use paddock_plugin_host::services::TaskObserver;
 use paddock_plugin_host::{Grants, HostConfig, Installed, PluginsDir, Supervisor};
 use paddock_plugin_package::{SecretKey, TrustPolicy, TrustSettings};
@@ -33,7 +34,7 @@ impl TaskObserver for Seen {
             .unwrap()
             .push(format!("started {plugin} {tool} {}", task.id));
     }
-    fn report(&self, plugin: &str, task: &str, progress: Option<f32>, note: &str) {
+    fn report(&self, plugin: &str, task: &str, progress: Option<Progress>, note: &str) {
         self.0
             .lock()
             .unwrap()

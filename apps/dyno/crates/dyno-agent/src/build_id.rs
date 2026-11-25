@@ -134,6 +134,7 @@ pub fn watch_every() -> std::time::Duration {
 }
 
 /// Shortens the time between looks for the rest of this process (a test of the watchers; never called by the agent).
+#[cfg(any(test, feature = "test-support"))]
 #[doc(hidden)]
 pub fn set_watch_every_for_tests(every: std::time::Duration) {
     EVERY_MS.store(

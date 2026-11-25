@@ -17,7 +17,7 @@ export async function settleAnimations(page: Page): Promise<void> {
   await page.evaluate(() => new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done()))));
   // Endless animations (spinners, a pulsing live dot) are ignored: they never settle. So are instant ones: with reduced
   // motion the motion tokens are 0.01ms, and WebKit can leave such a transition "running" without ever finishing it.
-  // conformance: e2e-wait — an empty set of animations is the settled state, not an early read: there is nothing to wait for
+  // An empty set of animations is the settled state, not an early read: there is nothing to wait for
   await page.waitForFunction(
     () =>
       document.getAnimations().every((a) => {

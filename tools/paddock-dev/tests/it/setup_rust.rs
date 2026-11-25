@@ -217,7 +217,7 @@ fn write_shim(path: &Path, calls: &Path, fail: Fail) {
     let mut shim = StandIn::new(path.parent().unwrap(), path.file_name().unwrap().to_str().unwrap())
         .exact_name()
         .answers(base())
-        .when_args(&["--version"], base().stdout("sccache 0.19.0"));
+        .when_args(&["--version"], base().stdout("sccache 0.20.1"));
     if let Fail::On(first) = fail {
         shim = shim.when_args(&[first], base().exit(1));
     }
@@ -290,6 +290,30 @@ fn a_host_slot_gets_its_own_folder_port_and_share_of_the_budget() {
         &[("PADDOCK_CI_SLOTS", "40"), ("PADDOCK_CI_SCCACHE_GB", "not-a-number")],
         true,
     );
+}
+
+/// The checkout and the build folder change with the slot or the work folder; both implementations hand sccache the same base
+/// directories and keep the manifest paths verbatim, to the server (its start call) and to every later step.
+#[test]
+fn the_checkout_and_build_folder_are_sccache_base_directories_and_the_manifest_paths_stay_verbatim() {
+    let r = Runner::new(Some(Fail::Never));
+    let extra = [
+        ("GITHUB_WORKSPACE", "/w/job-1234/"),
+        ("PADDOCK_WORKSPACE", "/ci/src/paddock-checkout-macOS-s1"),
+        ("PADDOCK_BUILD_FOLDER", "/ci/target-crates-s1"),
+    ];
+    let (_, rs) = same(&r, &LOCAL, &extra, true);
+    assert!(
+        rs.env.contains(
+            "SCCACHE_BASEDIRS=/ci/src/paddock-checkout-macOS-s1:/w/job-1234:/ci/target-crates-s1\n\
+             SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS=CARGO_MANIFEST_DIR,CARGO_MANIFEST_PATH\n"
+        ),
+        "{}",
+        rs.env
+    );
+    // Without a checkout variable there is nothing to name: no variable, no empty base.
+    let (_, rs) = same(&r, &LOCAL, &[], true);
+    assert!(!rs.env.contains("SCCACHE_BASEDIRS"), "{}", rs.env);
 }
 
 #[test]
@@ -551,7 +575,7 @@ fn without_sccache_the_job_builds_without_the_cache() {
     // The runner class of these cases is macOS: on an arm64 host it has a pin and the download fails; on another host there is
     // no pin. Both are a warning, in the shell and here.
     assert!(
-        rs.out.contains("::warning::could not download sccache 0.19.0")
+        rs.out.contains("::warning::could not download sccache 0.20.1")
             || rs.out.contains("::warning::no pinned sccache release for macOS"),
         "{}",
         rs.out
@@ -606,7 +630,7 @@ fn a_runner_without_a_pinned_release_is_the_same_warning_in_both() {
 #[test]
 fn a_pinned_copy_in_the_tool_cache_is_put_on_path_and_used() {
     let r = Runner::new(None);
-    let pinned = r.root.join("tools/sccache/0.19.0");
+    let pinned = r.root.join("tools/sccache/0.20.1");
     std::fs::create_dir_all(&pinned).unwrap();
     write_shim(&pinned.join("sccache"), &r.calls, Fail::Never);
     let (os, has_pin) = host_runner();
@@ -639,19 +663,19 @@ fn a_download_with_the_wrong_checksum_fails_the_step() {
         _ => return,
     };
     let os = if cfg!(target_os = "macos") { "macOS" } else { "Linux" };
-    let rel = r.root.join("no-releases/v0.19.0");
+    let rel = r.root.join("no-releases/v0.20.1");
     std::fs::create_dir_all(&rel).unwrap();
-    std::fs::write(rel.join(format!("sccache-v0.19.0-{target}.tar.gz")), b"not an archive").unwrap();
+    std::fs::write(rel.join(format!("sccache-v0.20.1-{target}.tar.gz")), b"not an archive").unwrap();
     let rs = r.rust(&LOCAL, &[("RUNNER_OS", os)]);
     assert_eq!(rs.code, 1, "{}", rs.out);
     assert!(
-        rs.out.contains(&format!("::error::sccache 0.19.0 checksum mismatch for {target}")),
+        rs.out.contains(&format!("::error::sccache 0.20.1 checksum mismatch for {target}")),
         "{}",
         rs.out
     );
     assert!(rs.out.contains("Next step:"), "{}", rs.out);
     assert_eq!(rs.path, "", "nothing is put on PATH");
-    assert!(!r.root.join("tools/sccache/0.19.0/sccache").exists());
+    assert!(!r.root.join("tools/sccache/0.20.1/sccache").exists());
 }
 
 #[test]
@@ -723,7 +747,7 @@ fn on_a_windows_host_the_slot_and_the_exe_names_are_used() {
 #[test]
 fn on_a_windows_host_a_pinned_copy_in_the_tool_cache_is_used() {
     let r = Runner::new(None);
-    let pinned = r.root.join("tools/sccache/0.19.0");
+    let pinned = r.root.join("tools/sccache/0.20.1");
     std::fs::create_dir_all(&pinned).unwrap();
     write_shim(&pinned.join("sccache.exe"), &r.calls, Fail::Never);
     let rs = r.rust(&LOCAL, &[("RUNNER_OS", "Windows"), ("PADDOCK_CI_ASSUME_WINDOWS", "1")]);
@@ -745,7 +769,7 @@ fn on_a_windows_host_a_pinned_copy_in_the_tool_cache_is_used() {
 #[test]
 fn in_a_container_a_pinned_copy_in_the_tool_cache_is_put_on_path() {
     let r = Runner::new(None);
-    let pinned = r.root.join("tools/sccache/0.19.0");
+    let pinned = r.root.join("tools/sccache/0.20.1");
     std::fs::create_dir_all(&pinned).unwrap();
     write_shim(&pinned.join("sccache"), &r.calls, Fail::Never);
     let mount = r.root.join("mount");
