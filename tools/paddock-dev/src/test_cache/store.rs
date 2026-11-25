@@ -124,6 +124,11 @@ pub struct FsStore {
     dir: PathBuf,
 }
 
+/// Where a record lives, relative to a store's root: `v<schema>/<class>/<target slug>/<key>.json` (the one layout of every store).
+pub fn rel_path(target: &str, class: &RunnerClass, key: &str) -> String {
+    format!("v{SCHEMA}/{}/{}/{key}.json", class.0, slug(target))
+}
+
 fn slug(target: &str) -> String {
     target.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '.' { c } else { '_' }).collect()
 }
@@ -135,7 +140,7 @@ impl FsStore {
     }
 
     fn path(&self, target: &str, class: &RunnerClass, key: &str) -> PathBuf {
-        self.dir.join(format!("v{SCHEMA}")).join(&class.0).join(slug(target)).join(format!("{key}.json"))
+        self.dir.join(rel_path(target, class, key))
     }
 
     /// Removes the records older than `after` and returns how many went. Anything in the folder that is not a record file is left alone.

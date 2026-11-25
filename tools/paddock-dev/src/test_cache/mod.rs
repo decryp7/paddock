@@ -6,7 +6,7 @@
 //! - [`config`]: `docs/test-cache.toml` (epoch, age rule, never-cached list, the shadow switch);
 //! - [`key`]: targets, runner classes and the key;
 //! - [`result`]: what a finished run proves per target (passes only, a flake is never a pass);
-//! - [`store`]: records and the store port, with the local store;
+//! - [`store`]: records and the store port, with the local store; [`s3`]: the RustFS store of CI and of every machine;
 //! - this file: the decision per target, and the trust rules (who may write, when nothing is read).
 //!
 //! Soundness limits, said plainly: a key covers what the graph's hash covers (ADR 0117 §5); a dirty node (uncommitted change in
@@ -17,6 +17,7 @@ pub mod cmd;
 pub mod config;
 pub mod key;
 pub mod result;
+pub mod s3;
 pub mod store;
 #[cfg(test)]
 mod tests;

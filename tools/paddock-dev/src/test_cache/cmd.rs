@@ -44,6 +44,10 @@ pub struct TestCacheArgs {
     /// The store folder (default: `<git common dir>/paddock-pre-push/test-cache`).
     #[arg(long)]
     store: Option<PathBuf>,
+    /// Use the shared store, the RustFS bucket `test-results-paddock` ([`super::s3::BUCKET`]), instead of the local folder. Without its
+    /// credentials the run says so and uses the local store.
+    #[arg(long)]
+    shared: bool,
 }
 
 fn fail(m: String) -> CliError {
@@ -118,13 +122,29 @@ fn env_get(k: &str) -> Option<String> {
 /// `ci test-cache <action>`.
 pub fn command(a: &TestCacheArgs) -> Result<Report, CliError> {
     let root = repo_root(a.root.clone())?;
-    let store = FsStore::new(&a.store.clone().unwrap_or_else(|| store_dir(&root)));
+    let local = FsStore::new(&a.store.clone().unwrap_or_else(|| store_dir(&root)));
+    let env: std::collections::HashMap<String, String> = crate::process_env::vars().collect();
+    let shared = if a.shared {
+        match super::s3::S3Store::from_env(&env, store_dir(&root).join("scratch")) {
+            Ok(s) => Some(s),
+            Err(w) => {
+                crate::log_text::eline(&format!("::notice::test-cache: the shared store is not used: {w}. The local store is."));
+                None
+            }
+        }
+    } else {
+        None
+    };
+    let store: &dyn Store = match &shared {
+        Some(s) => s,
+        None => &local,
+    };
     match a.action.as_str() {
-        "audit" => Ok(audit(&store)),
+        "audit" => Ok(audit(&local)),
         "lookup" | "run" => {
             let cfg = Config::read(&root).map_err(fail)?;
             let cands = candidates(&root, &a.workspace)?;
-            run(a, &root, &cfg, &cands, &store)
+            run(a, &root, &cfg, &cands, store)
         }
         other => Err(fail(format!("::error::ci test-cache: unknown action `{other}`. Next step: use `run`, `lookup` or `audit`."))),
     }
@@ -137,7 +157,7 @@ fn audit(store: &FsStore) -> Report {
     Report::new(serde_json::json!({"records": n, "bytes": bytes}), format!("test-cache store: {n} records, {bytes} bytes, {age}{warn}"))
 }
 
-fn run(a: &TestCacheArgs, root: &Path, cfg: &Config, cands: &[Candidate], store: &FsStore) -> Result<Report, CliError> {
+fn run(a: &TestCacheArgs, root: &Path, cfg: &Config, cands: &[Candidate], store: &dyn Store) -> Result<Report, CliError> {
     let class = RunnerClass::here();
     let started = std::time::Instant::now();
     let mut text: Vec<String> = Vec::new();

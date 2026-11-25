@@ -259,3 +259,50 @@ fn only_main_and_train_runs_write_in_ci_and_never_a_rerun() {
     assert!(write_allowed(&env(&rerun)).is_err());
     assert!(write_allowed(&env(&[])).is_ok(), "a local run writes its own store");
 }
+
+#[test]
+fn the_s3_store_reads_its_keys_from_the_standard_sources_and_never_prints_them() {
+    use super::s3::{BUCKET, S3Store};
+    assert_eq!(BUCKET, "test-results-paddock");
+    let d = tempfile::tempdir().unwrap();
+    let env: HashMap<String, String> = [
+        ("AWS_ACCESS_KEY_ID", "AKIDEXAMPLE"),
+        ("AWS_SECRET_ACCESS_KEY", "s3cr3t-value"),
+        ("PADDOCK_SCCACHE_ENV_FILE", d.path().join("absent.env").to_str().unwrap()),
+        ("PADDOCK_SCCACHE_S3_ENDPOINT", "10.0.0.9:15000"),
+    ]
+    .iter()
+    .map(|(k, v)| (k.to_string(), v.to_string()))
+    .collect();
+    let s = S3Store::from_env(&env, d.path().join("scratch")).unwrap();
+    let shown = format!("{s:?}");
+    assert_eq!(shown, "S3Store(http://10.0.0.9:15000/test-results-paddock)");
+    assert!(!shown.contains("s3cr3t"));
+    let mut none = env.clone();
+    none.remove("AWS_SECRET_ACCESS_KEY");
+    let e = S3Store::from_env(&none, d.path().join("x")).unwrap_err();
+    assert!(e.contains("no S3 credentials") && !e.contains("AKIDEXAMPLE"), "{e}");
+}
+
+#[test]
+fn an_s3_store_that_cannot_be_reached_fails_the_call_so_everything_runs() {
+    use super::s3::S3Store;
+    let d = tempfile::tempdir().unwrap();
+    let env: HashMap<String, String> = [
+        ("AWS_ACCESS_KEY_ID", "AKIDEXAMPLE"),
+        ("AWS_SECRET_ACCESS_KEY", "s3cr3t-value"),
+        ("PADDOCK_SCCACHE_ENV_FILE", d.path().join("absent.env").to_str().unwrap()),
+        // A black-hole port on the loopback: nothing listens (ER-33 fail-open control; no real service is touched, ER-14).
+        ("PADDOCK_SCCACHE_S3_ENDPOINT", "127.0.0.1:9"),
+    ]
+    .iter()
+    .map(|(k, v)| (k.to_string(), v.to_string()))
+    .collect();
+    let s = S3Store::from_env(&env, d.path().join("scratch")).unwrap();
+    let class = RunnerClass::here();
+    let c = cand("crates/a", "h");
+    let (dec, notice) = decide(&[c], &cfg(), &class, &s, NOW, OK);
+    assert!(matches!(dec[0], Decision::Run(Why::Off(_))));
+    let n = notice.expect("a notice names the cause");
+    assert!(!n.contains("s3cr3t"), "{n}");
+}
