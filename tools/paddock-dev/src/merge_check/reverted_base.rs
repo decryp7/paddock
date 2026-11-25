@@ -30,7 +30,7 @@ pub struct Names<'a> {
 }
 
 /// The commit names a message reverts, from git's own line `This reverts commit <hex>` (7 to 64 hex digits, as written).
-pub(super) fn trailer_targets(message: &str) -> Vec<String> {
+pub(crate) fn trailer_targets(message: &str) -> Vec<String> {
     const KEY: &str = "This reverts commit ";
     message
         .lines()

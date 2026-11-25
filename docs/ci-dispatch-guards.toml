@@ -3,6 +3,10 @@
 # - failed-first (ER-10): a full dispatch of ci.yml or debrief.yml on a `train/*` ref while the train's last full run of it is red and no
 #   failed-only round is green on the branch head. The refusal prints the exact `--input since_run=<run>` command; the coordinator's
 #   override is `--full-anyway "<reason>"`, logged.
+#   Two allowances (user, 2026-11-25), each said in the guard's pass line: the full run goes without a failed-only round when every
+#   commit since the red full run cleanly reverts a member's merge (the same lines out that the merge brought in; a revert with a change
+#   of its own is not clean), or when the failed-only round would rerun everything anyway (its rerun plan is the whole run: a full run
+#   on the same head). Either one only skips the round: the full green run before landing stays mandatory (ER-10).
 # - green-main: a train dispatch (a failed-only round excepted) while main's newest finished nightly or push run of ci.yml failed in the
 #   foundation or an app active at that run's commit (docs/ci-active-apps.toml). An inactive app's failures are printed as its fix items
 #   and never refuse. The override is `--red-main-anyway "<reason>"` (a train that carries the fix), logged.
