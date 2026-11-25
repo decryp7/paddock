@@ -208,7 +208,7 @@ Licence expressions (packages):
 - duckdb 1.20000.0 — MIT [MIT-5]
 - dunce 1.0.5 — CC0-1.0 OR MIT-0 OR Apache-2.0 [MIT-0-1]
 - dyn-clone 1.0.20 — MIT OR Apache-2.0 [MIT-63]
-- ed25519-compact 2.6.0 — MIT [MIT-11]
+- ed25519-compact 2.6.1 — MIT [MIT-11]
 - either 1.19.0 — MIT OR Apache-2.0 [MIT-301]
 - email_address 0.2.9 — MIT [MIT-186]
 - embed_plist 1.2.2 — MIT OR Apache-2.0 [MIT-199]
@@ -5865,7 +5865,7 @@ Used by (1):
 ### MIT-11
 
 Used by (1):
-  ed25519-compact 2.6.0
+  ed25519-compact 2.6.1
 
     MIT License
 
