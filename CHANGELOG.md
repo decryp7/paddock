@@ -4,6 +4,12 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### sccache 0.20.1, with base directories
+- Every sccache pin moves from 0.19.0 to 0.20.1 (setup-rust and its shell twin, the CI image, `./dev sccache env`) with the release's
+  own checksums. Setup-rust and the local server now set `SCCACHE_BASEDIRS` (the checkout, the build folder; in CI each job's own
+  slot or work folder) and `SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS=CARGO_MANIFEST_DIR,CARGO_MANIFEST_PATH`, so a workspace crate hits the
+  same cache entry from another slot, work folder or worktree. Cargo's legacy build-dir layout on Windows stays.
+
 ### `./dev ci triage`: a job the comparison run did not run is never NEW
 - When the last main run skipped a failed job (a nightly whose gate found main unchanged skips every job), had no job of that name, or
   ended it cancelled before it ran, triage compares that job with the newest older main run of the workflow that ran it and says which
