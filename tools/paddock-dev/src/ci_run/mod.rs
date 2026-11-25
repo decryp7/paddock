@@ -261,7 +261,7 @@ fn execute(
         let (text, cwd) = match l {
             Line::Cd(dir) => {
                 let _ = writeln!(out, "+ cd {dir}");
-                if !root.join(dir).is_dir() {
+                if !(crate::pathfind::exists_exact(root, dir) && root.join(dir).is_dir()) {
                     let cause = format!("ci run {} {}: command failed (exit 1): cd {dir}", args.project, args.phase);
                     let _ = writeln!(
                         out,

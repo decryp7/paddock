@@ -120,7 +120,7 @@ impl Tree {
     pub fn exists(&self, rel: &str) -> bool {
         match &self.memory {
             Some(m) => m.contains_key(rel) || self.is_dir(rel),
-            None => self.root.join(rel).exists(),
+            None => crate::pathfind::exists_exact(&self.root, rel),
         }
     }
 
@@ -128,7 +128,7 @@ impl Tree {
     pub fn is_dir(&self, rel: &str) -> bool {
         match &self.memory {
             Some(m) => m.keys().any(|k| k.starts_with(&format!("{rel}/"))),
-            None => self.root.join(rel).is_dir(),
+            None => crate::pathfind::exists_exact(&self.root, rel) && self.root.join(rel).is_dir(),
         }
     }
 
@@ -208,6 +208,20 @@ mod tests {
         assert_eq!(t.read("bad.rs").unwrap().as_str(), "a\u{fffd}");
         assert!(t.read("missing.rs").is_none());
         assert!(t.listing_complete());
+    }
+
+    #[test]
+    fn exists_and_is_dir_compare_case_exactly_even_on_a_case_insensitive_file_system() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(d.path().join("docs")).unwrap();
+        std::fs::write(d.path().join("docs/rules.md"), "x").unwrap();
+        let t = Tree::open(d.path());
+        assert!(
+            t.exists("docs/rules.md") && t.is_dir("docs"),
+            "positive control: the exact case exists"
+        );
+        assert!(!t.exists("docs/RULES.md"), "a case-wrong file is missing");
+        assert!(!t.exists("Docs/rules.md") && !t.is_dir("Docs"), "a case-wrong folder is missing");
     }
 
     #[cfg(unix)]
