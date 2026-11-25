@@ -4,6 +4,10 @@ Binding rules for every Paddock app and for everyone (people and agents) working
 decision or a lesson; the reasons are in [lessons.md](lessons.md). Each app's `AGENTS.md` carries these rules; when a rule
 changes here, every app's copy is updated in the same change.
 
+A branch never picks a rule number (user, 2026-11-25): it writes a new rule as `NEW-<slug>.` in place of the number and cites it as
+`rule NEW-<slug>`; the train integrator gives it the next free number when the train lands and replaces every citation. Numbers are
+unique (C31).
+
 ## Way of working
 1. **One release at a time.** Release-critical work comes first. Other apps may progress in parallel only while load and
    CI capacity allow, and only if they don't change shared code (`crates/`, `ui/`) the release depends on; tags stay
