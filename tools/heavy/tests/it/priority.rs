@@ -90,7 +90,7 @@ fn a_run_that_never_gets_a_slot_within_the_queue_limit_ends_with_its_own_code_an
     let rig = Rig::new();
     let n = rig.agent(12);
     rig.procs.run(31, rig.now() - 50);
-    rig.plant_lock(&format!("31\nx\nholder\n{}\n/work\nsleep 9\n", rig.now()));
+    let _holder = rig.plant_holder(&format!("31\nx\nholder\n{}\n/work\nsleep 9\n", rig.now()));
     let args = vec!["true".to_string()];
     let code = run(
         &n.h,
@@ -210,7 +210,7 @@ fn a_queue_that_makes_no_progress_ends_stalled_and_names_the_holder() {
     let rig = Rig::new();
     let n = rig.agent(12);
     rig.procs.run(31, rig.now() - 50);
-    rig.plant_lock(&format!("31\nx\nholder\n{}\n/work\nsleep 9\n", rig.now()));
+    let _holder = rig.plant_holder(&format!("31\nx\nholder\n{}\n/work\nsleep 9\n", rig.now()));
     let args = vec!["true".to_string()];
     let code = run(
         &n.h,
@@ -237,20 +237,21 @@ fn a_queue_that_keeps_moving_is_waited_for_past_the_stall_limit() {
     let (swaps, last) = (AtomicU64::new(0), AtomicU64::new(rig.now()));
     let start = rig.now();
     rig.procs.run(99, start - 50);
-    rig.plant_lock(&format!("99\nx\nholder-first\n{start}\n/work\nsleep 9\n"));
+    let cur = std::sync::Mutex::new(None);
+    *cur.lock().unwrap() = Some(rig.plant_holder(&format!("99\nx\nholder-first\n{start}\n/work\nsleep 9\n")));
     // The stop callback is read once per poll; it hands the slot to a new holder every 100 s of fake time (12 times: four times the
     // stall limit), then leaves it free.
     let stop = || {
         let (now, done) = (rig.now(), swaps.load(Ordering::SeqCst));
         if now.saturating_sub(last.load(Ordering::SeqCst)) >= 100 && done < 12 {
-            let _ = fs::remove_dir_all(rig.lock_dir());
+            drop(cur.lock().unwrap().take());
             let pid = 100 + done as u32;
             rig.procs.run(pid, now - 50);
-            rig.plant_lock(&format!("{pid}\nx\nholder-{done}\n{now}\n/work\nsleep 9\n"));
+            *cur.lock().unwrap() = Some(rig.plant_holder(&format!("{pid}\nx\nholder-{done}\n{now}\n/work\nsleep 9\n")));
             swaps.store(done + 1, Ordering::SeqCst);
             last.store(now, Ordering::SeqCst);
         } else if done >= 12 && now.saturating_sub(last.load(Ordering::SeqCst)) >= 100 {
-            let _ = fs::remove_dir_all(rig.lock_dir());
+            drop(cur.lock().unwrap().take());
         }
         None
     };
@@ -278,11 +279,12 @@ fn a_waiter_behind_a_live_holder_inside_its_cap_is_not_stalled() {
     let args = vec!["true".to_string()];
     let start = rig.now();
     rig.procs.run(31, start - 50);
-    rig.plant_lock(&format!("31\nx\nholder\n{start}\n/work\nsleep 9\n"));
+    let cur = std::sync::Mutex::new(None);
+    *cur.lock().unwrap() = Some(rig.plant_holder(&format!("31\nx\nholder\n{start}\n/work\nsleep 9\n")));
     let released = AtomicBool::new(false);
     let stop = || {
         if rig.now() - start >= 1200 && !released.swap(true, Ordering::SeqCst) {
-            let _ = fs::remove_dir_all(rig.lock_dir());
+            drop(cur.lock().unwrap().take());
         }
         None
     };
@@ -310,7 +312,7 @@ fn a_waiter_behind_a_holder_past_its_cap_stalls_after_the_limit() {
     let args = vec!["true".to_string()];
     rig.procs.run(31, rig.now() - 8000);
     // The record is two hours old: past the 3600 s a command may run.
-    rig.plant_lock(&format!("31\nx\nholder\n{}\n/work\nsleep 9\n", rig.now() - 7200));
+    let _holder = rig.plant_holder(&format!("31\nx\nholder\n{}\n/work\nsleep 9\n", rig.now() - 7200));
     let code = run(
         &n.h,
         req("N"),

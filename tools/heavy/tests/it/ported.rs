@@ -95,91 +95,6 @@ fn a_write_that_succeeds_but_leaves_an_empty_owner_is_never_published() {
     assert!(!rig.lock_dir().exists());
 }
 
-// 2b. ownerless lock and unparsable owner
-#[test]
-fn ownerless_lock_is_left_alone_while_young_and_broken_after_the_limit() {
-    let rig = Rig::new();
-    let y = rig.agent(11);
-    fs::create_dir(rig.lock_dir()).unwrap();
-    let mut acq = Acquirer::new(&y.h, req("Y")).unwrap();
-    assert_eq!(acq.poll(), Poll::Waiting);
-    assert!(rig.lock_dir().exists(), "younger than the limit: left alone");
-    rig.clock.advance(std::time::Duration::from_secs(4));
-    assert_eq!(acq.poll(), Poll::Held);
-    assert!(
-        rig.breaks_log().contains("broke a stale lock of an unknown owner"),
-        "{}",
-        rig.breaks_log()
-    );
-}
-
-#[test]
-fn an_old_non_empty_unparsable_owner_is_never_broken_and_status_says_so() {
-    let rig = Rig::new();
-    let g = rig.agent(11);
-    rig.plant_lock("this is not a record\n");
-    rig.clock.advance(std::time::Duration::from_secs(1000));
-    let mut acq = Acquirer::new(&g.h, req("G")).unwrap();
-    for _ in 0..5 {
-        assert_eq!(acq.poll(), Poll::Waiting);
-    }
-    assert!(rig.lock_dir().exists());
-    assert!(g.h.status().contains("UNPARSABLE"));
-    fs::remove_dir_all(rig.lock_dir()).unwrap();
-    assert_eq!(acq.poll(), Poll::Held, "runs after a person removes the lock");
-}
-
-// 3. dead owner (3-line and 6-line records)
-#[test]
-fn dead_owners_lock_is_broken_and_logged_old_record() {
-    let rig = Rig::new();
-    let z = rig.agent(11);
-    rig.plant_lock("99001\nMon Jan  1 00:00:00 2001\nghost\n");
-    let mut acq = Acquirer::new(&z.h, req("Z")).unwrap();
-    assert_eq!(acquire(&mut acq, &z.h, 5), Poll::Held);
-    assert!(rig.breaks_log().contains("Z broke a stale lock of ghost"));
-    assert!(
-        !rig.breaks_log().contains("waiting") && !rig.breaks_log().contains("took the lock"),
-        "waits and takes are not in the breaks log"
-    );
-    assert!(z.h.status().contains("broke a stale lock of ghost"));
-}
-
-#[test]
-fn dead_owners_lock_is_broken_new_record() {
-    let rig = Rig::new();
-    let z = rig.agent(11);
-    rig.plant_lock(&format!("99002\nx\nghost2\n{}\n/tmp\nsleep 1\n", rig.now()));
-    let mut acq = Acquirer::new(&z.h, req("Z")).unwrap();
-    assert_eq!(acquire(&mut acq, &z.h, 5), Poll::Held);
-    assert!(rig.breaks_log().contains("Z broke a stale lock of ghost2"));
-}
-
-// 3b. a recycled pid is broken
-#[test]
-fn a_recycled_pid_is_broken_and_logged() {
-    let rig = Rig::new();
-    let z = rig.agent(11);
-    rig.procs.run(99003, rig.now()); // alive, but started after the record was written
-    rig.plant_lock(&format!("99003\nMon Jan  1 00:00:00 2001\nreused\n{}\n", rig.now() - 100));
-    let mut acq = Acquirer::new(&z.h, req("Z")).unwrap();
-    assert_eq!(acquire(&mut acq, &z.h, 5), Poll::Held);
-    assert!(rig.breaks_log().contains("Z broke a stale lock of reused"));
-    assert!(z.h.log.has("os start"), "the evidence names the observed start time");
-}
-
-#[test]
-fn a_start_within_the_two_second_slack_is_the_same_process() {
-    let rig = Rig::new();
-    let z = rig.agent(11);
-    rig.procs.run(99004, rig.now() + 2);
-    rig.plant_lock(&format!("99004\nx\nslack\n{}\n", rig.now()));
-    let mut acq = Acquirer::new(&z.h, req("Z")).unwrap();
-    assert_eq!(acq.poll(), Poll::Waiting, "2 s after the record is still the writer");
-    rig.procs.run(99004, rig.now() + 3);
-    assert_eq!(acquire(&mut acq, &z.h, 5), Poll::Held, "3 s after is a recycled pid");
-}
-
 // 4/5/6. a live owner is not broken; wait message names the holder
 #[test]
 fn a_live_owner_is_not_broken_and_the_waiter_says_who_holds_it() {
@@ -202,43 +117,6 @@ fn a_live_owner_is_not_broken_and_the_waiter_says_who_holds_it() {
     assert_eq!(waiter.poll(), Poll::Held);
 }
 
-// 7. liveness does not depend on the start text (TZ / locale formatted) at all
-#[test]
-fn liveness_ignores_the_start_text() {
-    let rig = Rig::new();
-    let w = rig.agent(12);
-    for text in [
-        "Sat 31 Oct 23:29:50 2026",
-        "sam. 31 oct. 23:29:50 2026",
-        "2026年10月31日",
-        "",
-        "UTC+9 whatever",
-    ] {
-        let _ = fs::remove_dir_all(rig.lock_dir());
-        rig.procs.run(21, rig.now() - 50);
-        rig.plant_lock(&format!("21\n{text}\nHolder\n{}\n", rig.now() - 10));
-        let mut acq = Acquirer::new(&w.h, req("Waiter")).unwrap();
-        for _ in 0..3 {
-            assert_eq!(acq.poll(), Poll::Waiting, "start text {text:?}");
-        }
-        assert!(rig.breaks_log().is_empty(), "start text {text:?}");
-    }
-}
-
-// 7b. a process whose start time cannot be read counts as alive
-#[test]
-fn an_unreadable_start_time_is_not_a_dead_holder() {
-    let rig = Rig::new();
-    let w = rig.agent(12);
-    rig.procs.run_opaque(31);
-    rig.plant_lock(&format!("31\n\nHolder\n{}\n", rig.now() - 100));
-    let mut acq = Acquirer::new(&w.h, req("Waiter")).unwrap();
-    for _ in 0..3 {
-        assert_eq!(acq.poll(), Poll::Waiting);
-    }
-    assert!(rig.breaks_log().is_empty());
-}
-
 #[test]
 fn a_holder_that_cannot_read_its_own_start_writes_an_empty_start_text() {
     let rig = Rig::new();
@@ -253,89 +131,106 @@ fn a_holder_that_cannot_read_its_own_start_writes_an_empty_start_text() {
     assert!(rig.breaks_log().is_empty());
 }
 
-// 8. things vanishing never crash a waiter
-#[test]
-fn a_lock_that_vanishes_mid_check_does_not_crash() {
-    let rig = Rig::new();
-    let w = rig.agent(12);
-    // the whole lock dir vanishes between the decision and the rename
-    rig.plant_lock("99010\nx\nghost\n1\n");
-    let dir = rig.lock_dir();
-    *w.h.faults.before_aside.lock().unwrap() = Some(Box::new(move || {
-        let _ = fs::remove_dir_all(dir);
-    }));
-    assert!(!w.h.break_if_stale(&rig.lock_dir(), "W"), "nothing to break, and no panic");
-    // break_if_stale on a path that never existed
-    assert!(!w.h.break_if_stale(&rig.root().join("nope"), "W"));
-    // read_owner of a missing dir is Empty, not an error
-    assert_eq!(w.h.read_owner(&rig.root().join("nope")), heavy::record::OwnerRead::Empty);
-    let mut acq = Acquirer::new(&w.h, req("W")).unwrap();
-    assert_eq!(acq.poll(), Poll::Held);
-}
-
 #[test]
 fn old_three_line_record_without_epoch_uses_the_file_time_and_an_unknown_time_reads_fine() {
     let rig = Rig::new();
     let w = rig.agent(12);
-    rig.procs.run(51, rig.now() - 1000);
-    rig.plant_lock("51\nstart\noldagent\n");
+    let _holder = rig.plant_holder("51\nstart\noldagent\n");
     let mut acq = Acquirer::new(&w.h, req("W")).unwrap();
     assert_eq!(acq.poll(), Poll::Waiting);
     assert!(w.h.status().contains("held by oldagent"));
     assert_eq!(heavy::timefmt::mins(10, None), "an unknown time");
 }
 
+// The slot lock is the kernel's: that a slot is held, and that it is free again, is never decided from a record.
 #[test]
-fn an_empty_owner_lock_status_reports_the_age() {
-    let rig = Rig::new();
-    let w = rig.agent(12);
-    fs::create_dir(rig.lock_dir()).unwrap();
-    assert!(w.h.status().contains("empty owner record"));
-}
-
-// 8c. EPERM counts as alive
-#[test]
-fn a_pid_we_may_not_signal_is_alive() {
-    let rig = Rig::new();
-    let w = rig.agent(12);
-    rig.procs.run_opaque(1);
-    rig.plant_lock(&format!("1\nx\ninit\n{}\n", rig.now() - 100));
-    let mut acq = Acquirer::new(&w.h, req("W")).unwrap();
-    for _ in 0..3 {
-        assert_eq!(acq.poll(), Poll::Waiting);
+fn a_held_slot_whose_record_is_empty_or_unparsable_is_held_and_is_never_taken_over() {
+    for record in ["", "this is not a record\n"] {
+        let rig = Rig::new();
+        let w = rig.agent(12);
+        rig.clock.advance(std::time::Duration::from_secs(5000));
+        let holder = rig.plant_holder(record);
+        let mut acq = Acquirer::new(&w.h, req("W")).unwrap();
+        for _ in 0..5 {
+            assert_eq!(acq.poll(), Poll::Waiting, "record {record:?}");
+        }
+        assert!(
+            w.h.status().contains("held (its holder has not written who it is yet)"),
+            "{}",
+            w.h.status()
+        );
+        assert!(rig.breaks_log().is_empty(), "nothing is broken");
+        drop(holder);
+        assert_eq!(acq.poll(), Poll::Held, "free the moment the holder lets go");
     }
-    assert!(rig.lock_dir().exists() && rig.breaks_log().is_empty());
-}
-
-// 9. old-style lock and old-format live record
-#[test]
-fn the_old_style_lock_is_honoured() {
-    let rig = Rig::new();
-    let w = rig.agent(12);
-    fs::create_dir(rig.root().join("pitcrew-heavy.lock")).unwrap();
-    let mut acq = Acquirer::new(&w.h, req("W")).unwrap();
-    for _ in 0..3 {
-        assert_eq!(acq.poll(), Poll::Waiting);
-        rig.clock.advance(std::time::Duration::from_secs(1));
-    }
-    assert!(w.said().contains("old-style lock"));
-    assert!(w.h.status().contains("old-style lock"));
-    fs::remove_dir(rig.root().join("pitcrew-heavy.lock")).unwrap();
-    assert_eq!(acq.poll(), Poll::Held);
 }
 
 #[test]
-fn a_live_old_format_lock_is_kept_and_broken_once_its_owner_is_gone() {
+fn a_record_of_a_free_slot_is_ignored_and_replaced() {
     let rig = Rig::new();
     let w = rig.agent(12);
-    rig.procs.run(61, rig.now() - 500);
-    rig.plant_lock("61\nMon Jan  1 00:00:00 2001\noldagent\n");
+    // what a crashed holder leaves: its record, with nobody holding the lock
+    std::fs::write(rig.lock_dir(), format!("99999\nx\ncrashed\n{}\n/w\ncargo test\n", rig.now() - 100)).unwrap();
+    assert!(w.h.status().starts_with("free"), "{}", w.h.status());
     let mut acq = Acquirer::new(&w.h, req("W")).unwrap();
-    assert_eq!(acq.poll(), Poll::Waiting);
+    assert_eq!(acq.poll(), Poll::Held, "no waiting, no break, no liveness question");
+    assert_eq!(rig.owner_line(2), "W");
     assert!(rig.breaks_log().is_empty());
-    rig.procs.end(61);
-    assert_eq!(acquire(&mut acq, &w.h, 5), Poll::Held);
-    assert!(rig.breaks_log().contains("broke a stale lock of oldagent"));
+}
+
+#[test]
+fn a_taker_never_judges_a_holder_by_its_pid() {
+    // The holder's pid is not in the process table at all: it holds the lock, so it holds the slot.
+    let rig = Rig::new();
+    let w = rig.agent(12);
+    let _holder = rig.plant_holder(&format!("424242\nx\nnot-in-any-table\n{}\n", rig.now() - 100));
+    let mut acq = Acquirer::new(&w.h, req("W")).unwrap();
+    for _ in 0..3 {
+        assert_eq!(acq.poll(), Poll::Waiting);
+    }
+    assert!(w.h.status().contains("held by not-in-any-table pid 424242"));
+}
+
+#[test]
+fn a_released_slot_is_free_for_the_next_taker_and_its_record_is_gone() {
+    let rig = Rig::new();
+    let (a, b) = (rig.agent(11), rig.agent(12));
+    let mut ha = Acquirer::new(&a.h, req("A")).unwrap();
+    assert_eq!(ha.poll(), Poll::Held);
+    let mut hb = Acquirer::new(&b.h, req("B")).unwrap();
+    assert_eq!(hb.poll(), Poll::Waiting);
+    drop(ha);
+    assert!(!rig.lock_dir().exists());
+    assert_eq!(hb.poll(), Poll::Held);
+    assert_eq!(rig.owner_line(2), "B", "the new holder's own record, not the old one");
+}
+
+// Requirement (1): the lock folder is never on a network file system.
+#[test]
+fn a_lock_folder_on_a_network_file_system_is_refused_with_what_to_do() {
+    let rig = Rig::new();
+    let mut a = rig.agent(11);
+    a.h.fs_kind = std::sync::Arc::new(|_| heavy::fsinfo::FsKind::Network("smbfs".into()));
+    let Err(msg) = Acquirer::new(&a.h, req("A")) else {
+        panic!("expected a refusal")
+    };
+    assert!(
+        msg.contains("network file system") && msg.contains("smbfs") && msg.contains("HEAVY_DIR"),
+        "{msg}"
+    );
+    assert!(a.h.status().starts_with("REFUSED"), "{}", a.h.status());
+    assert_eq!(rig.held("heavy-"), 0, "nothing was taken");
+    assert_eq!(rig.count("pitcrew-heavy.ticket."), 0, "no ticket either");
+}
+
+#[test]
+fn a_file_system_the_os_did_not_name_is_let_through_and_logged() {
+    let rig = Rig::new();
+    let mut a = rig.agent(11);
+    a.h.fs_kind = std::sync::Arc::new(|_| heavy::fsinfo::FsKind::Unknown("statfs failed".into()));
+    let mut acq = Acquirer::new(&a.h, req("A")).unwrap();
+    assert_eq!(acq.poll(), Poll::Held);
+    assert!(a.h.log.has("the file system of the lock folder is not known"));
 }
 
 // 10. markers and tickets
@@ -421,7 +316,7 @@ fn the_owner_record_has_six_lines() {
     let a = rig.agent(11);
     let mut acq = Acquirer::new(&a.h, req("Rec")).unwrap();
     assert_eq!(acq.poll(), Poll::Held);
-    let text = fs::read_to_string(rig.lock_dir().join("owner")).unwrap();
+    let text = fs::read_to_string(rig.lock_dir()).unwrap();
     assert_eq!(text.lines().count(), 6);
     assert_eq!(rig.owner_line(0), "11");
     assert_eq!(rig.owner_line(2), "Rec");
@@ -497,42 +392,6 @@ fn masking_url_with_an_at_in_the_password_and_length_and_newlines() {
     assert_eq!(args(&[&"x".repeat(900)]).chars().count(), 500);
 }
 
-// 11b. break-aside race defences
-#[test]
-fn lock_replaced_by_a_new_dir_during_a_break_is_put_back_not_broken_not_logged() {
-    let rig = Rig::new();
-    let w = rig.agent(12);
-    rig.procs.run(91, rig.now() - 50);
-    rig.plant_lock(&format!("99020\nx\nghost\n{}\n", rig.now() - 5));
-    let (dir, now) = (rig.lock_dir(), rig.now());
-    *w.h.faults.before_aside.lock().unwrap() = Some(Box::new(move || {
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir(&dir).unwrap();
-        fs::write(dir.join("owner"), format!("91\nx\nnewer\n{now}\n")).unwrap();
-    }));
-    let mut acq = Acquirer::new(&w.h, req("W")).unwrap();
-    assert_eq!(acq.poll(), Poll::Waiting);
-    assert_eq!(rig.owner_line(2), "newer");
-    assert!(rig.breaks_log().is_empty());
-}
-
-#[test]
-fn owner_rewritten_in_place_during_a_break_is_put_back_and_leaves_no_break_dir() {
-    let rig = Rig::new();
-    let w = rig.agent(12);
-    rig.procs.run(92, rig.now() - 50);
-    rig.plant_lock(&format!("99021\nx\nghost\n{}\n", rig.now() - 5));
-    let (dir, now) = (rig.lock_dir(), rig.now());
-    *w.h.faults.before_aside.lock().unwrap() = Some(Box::new(move || {
-        fs::write(dir.join("owner"), format!("92\nx\nrewritten\n{now}\n")).unwrap();
-    }));
-    let mut acq = Acquirer::new(&w.h, req("W")).unwrap();
-    assert_eq!(acq.poll(), Poll::Waiting);
-    assert_eq!(rig.owner_line(2), "rewritten");
-    assert!(rig.breaks_log().is_empty());
-    assert_eq!(rig.count(".plock.break."), 0);
-}
-
 // 12. status
 #[test]
 fn status_shows_holder_and_command_then_free_and_nothing_left_behind() {
@@ -550,17 +409,6 @@ fn status_shows_holder_and_command_then_free_and_nothing_left_behind() {
     assert_eq!(a.h.status().lines().next(), Some("free"));
     assert_eq!(rig.count("pitcrew-heavy.ticket."), 0);
     assert!(!rig.lock_dir().exists());
-}
-
-#[test]
-fn release_leaves_a_lock_that_is_no_longer_ours() {
-    let rig = Rig::new();
-    let a = rig.agent(11);
-    let mut acq = Acquirer::new(&a.h, req("S")).unwrap();
-    assert_eq!(acq.poll(), Poll::Held);
-    fs::write(rig.lock_dir().join("owner"), format!("77\nx\nsomeone\n{}\n", rig.now())).unwrap();
-    acq.release();
-    assert!(rig.lock_dir().exists(), "never delete another owner's lock");
 }
 
 // 8. a file that vanishes between the listing and the read must neither crash nor count as a waiter ahead
@@ -588,79 +436,7 @@ fn a_high_marker_that_vanishes_between_listing_and_reading_is_skipped() {
 // ---- review fixes -------------------------------------------------------------------------------------------------------
 
 #[test]
-fn a_dead_heavy_whose_command_still_runs_keeps_the_lock_until_the_command_ends_or_is_recycled() {
-    let rig = Rig::new();
-    let w = rig.agent(12);
-    let start = rig.now() - 90;
-    rig.procs.run(300, start); // the command
-    rig.plant_lock(&format!(
-        "99200\nx\nkilled-heavy\n{}\n/w\ncargo test\nchild 300 {}\n",
-        rig.now() - 100,
-        start * 1_000_000
-    ));
-    let mut acq = Acquirer::new(&w.h, req("W")).unwrap();
-    for _ in 0..3 {
-        assert_eq!(acq.poll(), Poll::Waiting, "heavy is gone but its command runs");
-    }
-    assert!(rig.breaks_log().is_empty() && w.h.status().contains("heavy gone, its command still runs"));
-    // the pid is handed on to another process: no longer the command
-    rig.procs.run(300, start + 50);
-    assert_eq!(acquire(&mut acq, &w.h, 5), Poll::Held);
-    assert!(rig.breaks_log().contains("broke a stale lock of killed-heavy"));
-    // the command ended
-    let rig = Rig::new();
-    let w = rig.agent(12);
-    rig.plant_lock(&format!(
-        "99201\nx\nkilled-heavy\n{}\n/w\ncargo test\nchild 301 5\n",
-        rig.now() - 100
-    ));
-    let mut acq = Acquirer::new(&w.h, req("W")).unwrap();
-    assert_eq!(acquire(&mut acq, &w.h, 5), Poll::Held);
-}
-
-#[test]
-fn set_child_adds_the_seventh_line_and_keeps_the_first_six() {
-    let rig = Rig::new();
-    let a = rig.agent(11);
-    let mut acq = Acquirer::new(&a.h, req("C")).unwrap();
-    assert_eq!(acq.poll(), Poll::Held);
-    let before: Vec<String> = fs::read_to_string(rig.lock_dir().join("owner"))
-        .unwrap()
-        .lines()
-        .map(String::from)
-        .collect();
-    acq.set_child(555, 42);
-    let after: Vec<String> = fs::read_to_string(rig.lock_dir().join("owner"))
-        .unwrap()
-        .lines()
-        .map(String::from)
-        .collect();
-    assert_eq!(after.len(), 7);
-    assert_eq!(&after[..6], &before[..]);
-    assert_eq!(after[6], "child 555 42");
-    assert!(!rig.lock_dir().join("owner.tmp").exists());
-}
-
-#[test]
-fn release_never_removes_a_lock_that_was_replaced_just_before_the_removal() {
-    let rig = Rig::new();
-    let a = rig.agent(11);
-    let mut acq = Acquirer::new(&a.h, req("S")).unwrap();
-    assert_eq!(acq.poll(), Poll::Held);
-    let (dir, now) = (rig.lock_dir(), rig.now());
-    *a.h.faults.before_release.lock().unwrap() = Some(Box::new(move || {
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir(&dir).unwrap();
-        fs::write(dir.join("owner"), format!("77\nx\nsomeone-else\n{now}\n")).unwrap();
-    }));
-    acq.release();
-    assert!(rig.lock_dir().exists(), "the other holder's lock survives");
-    assert_eq!(rig.owner_line(2), "someone-else");
-    assert_eq!(rig.count(".plock.release."), 0, "nothing is left aside");
-}
-
-#[test]
-fn release_removes_our_own_lock_through_a_rename_aside() {
+fn release_removes_our_record_and_frees_the_kernel_lock() {
     let rig = Rig::new();
     let a = rig.agent(11);
     let mut acq = Acquirer::new(&a.h, req("S")).unwrap();
@@ -668,6 +444,7 @@ fn release_removes_our_own_lock_through_a_rename_aside() {
     acq.release();
     assert!(!rig.lock_dir().exists());
     assert_eq!(rig.count(".plock."), 0);
+    assert!(!heavy::slotfile::is_held(&rig.root().join("heavy-slot1.lock")).unwrap());
     assert!(a.h.log.has("released the lock"));
 }
 

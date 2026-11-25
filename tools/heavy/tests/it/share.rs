@@ -211,12 +211,12 @@ fn when_one_of_two_ends_its_slot_goes_to_the_next_and_the_other_keeps_its_own() 
     assert_eq!(ha.poll(), Poll::Held);
     assert_eq!(hb.poll(), Poll::Held);
     assert_eq!(hc.poll(), Poll::Waiting);
-    assert_eq!(rig.count("pitcrew-heavy-v2.lock"), 2);
+    assert_eq!(rig.held("heavy-"), 2);
     ha.release();
-    assert_eq!(rig.count("pitcrew-heavy-v2.lock"), 1, "only A's slot went");
+    assert_eq!(rig.held("heavy-"), 1, "only A's slot went");
     assert_eq!(hc.poll(), Poll::Held, "the waiter takes the freed slot");
     assert_eq!(hc.share(), 2);
-    assert_eq!(rig.count("pitcrew-heavy-v2.lock"), 2, "B kept its own slot");
+    assert_eq!(rig.held("heavy-"), 2, "B kept its own slot");
     // The load rises while two run: the next waiter is held to one, and the running two are never stopped.
     rig.load.set(load_for(cpus, 1));
     let d = rig.agent_with(54, cfg);

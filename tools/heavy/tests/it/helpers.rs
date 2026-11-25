@@ -19,6 +19,22 @@ pub struct Rig {
     pub load: Arc<FakeLoad>,
 }
 
+/// Plants holders in a lock folder (see [`Rig::plant_slot`]).
+#[derive(Clone)]
+pub struct Planter {
+    root: PathBuf,
+}
+
+impl Planter {
+    pub fn plant_slot(&self, n: u32, owner: &str) -> heavy::slotfile::Held {
+        let held = heavy::slotfile::take(&self.root.join(format!("heavy-slot{n}.lock")))
+            .expect("lock file")
+            .expect("free");
+        std::fs::write(self.root.join(format!("heavy-slot{n}.info")), owner).expect("info");
+        held
+    }
+}
+
 pub struct Agent {
     pub h: Heavy,
     pub said: Arc<Mutex<Vec<String>>>,
@@ -96,8 +112,21 @@ impl Rig {
         Agent { h, said }
     }
 
+    /// The info record of slot 1: there while a holder holds the slot, gone after a clean release.
     pub fn lock_dir(&self) -> PathBuf {
-        self.root().join("pitcrew-heavy-v2.lock")
+        self.root().join("heavy-slot1.info")
+    }
+
+    /// How many slots with this file name prefix (`heavy-slot`, `heavy-cheap`, `heavy-`) have a holder's record now.
+    pub fn held(&self, prefix: &str) -> usize {
+        std::fs::read_dir(self.root())
+            .map(|r| {
+                r.filter_map(Result::ok)
+                    .map(|e| e.file_name().to_string_lossy().into_owned())
+                    .filter(|n| n.starts_with(prefix) && n.ends_with(".info"))
+                    .count()
+            })
+            .unwrap_or(0)
     }
 
     pub fn breaks_log(&self) -> String {
@@ -119,14 +148,25 @@ impl Rig {
             .unwrap_or(0)
     }
 
-    /// Writes a lock dir with an owner file.
-    pub fn plant_lock(&self, owner: &str) {
-        std::fs::create_dir(self.lock_dir()).expect("mkdir");
-        std::fs::write(self.lock_dir().join("owner"), owner).expect("owner");
+    /// Makes slot 1 held by "somebody else" with this info record: the kernel lock is taken here and kept while the returned handle lives.
+    pub fn plant_holder(&self, owner: &str) -> heavy::slotfile::Held {
+        self.plant_slot(1, owner)
+    }
+
+    /// The same for slot `n` (1-based).
+    pub fn plant_slot(&self, n: u32, owner: &str) -> heavy::slotfile::Held {
+        self.clone_paths().plant_slot(n, owner)
+    }
+
+    /// A handle to plant holders from a closure that must be `'static` (a fault hook).
+    pub fn clone_paths(&self) -> Planter {
+        Planter {
+            root: self.root().to_path_buf(),
+        }
     }
 
     pub fn owner_line(&self, n: usize) -> String {
-        std::fs::read_to_string(self.lock_dir().join("owner"))
+        std::fs::read_to_string(self.lock_dir())
             .unwrap_or_default()
             .lines()
             .nth(n)

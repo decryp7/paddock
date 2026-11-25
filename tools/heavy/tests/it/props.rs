@@ -24,7 +24,7 @@ proptest! {
 
     #[test]
     fn a_written_record_reads_back(pid in 1u32.., epoch in 0u64..4_000_000_000, name in "[ -~]{0,40}", cmd in "[ -~]{0,100}") {
-        let o = heavy::record::Owner { pid, start_text: "t".into(), name: name.clone(), epoch: None, cwd: "/w".into(), cmd, child: None };
+        let o = heavy::record::Owner { pid, start_text: "t".into(), name: name.clone(), epoch: None, cwd: "/w".into(), cmd };
         let OwnerRead::Ok(back) = parse_owner(format_owner(&o, epoch).as_bytes(), None) else { return Err(TestCaseError::fail("not ok")) };
         prop_assert_eq!((back.pid, back.epoch), (pid, Some(epoch)));
         prop_assert_eq!(back.name, name);

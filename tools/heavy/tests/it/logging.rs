@@ -49,31 +49,6 @@ fn phases_carry_their_durations() {
 }
 
 #[test]
-fn a_break_names_the_identity_evidence() {
-    let rig = Rig::new();
-    let z = rig.agent(11);
-    rig.procs.run(99003, rig.now());
-    let epoch = rig.now() - 100;
-    rig.plant_lock(&format!("99003\nx\nreused\n{epoch}\n"));
-    let mut acq = Acquirer::new(&z.h, req("Z")).unwrap();
-    assert_eq!(acquire(&mut acq, &z.h, 5), Poll::Held);
-    let l =
-        z.h.log
-            .lines()
-            .into_iter()
-            .find(|l| l.contains("heavy.break"))
-            .expect("break event");
-    let v = json(&l);
-    assert_eq!(v["@l"], "Warning");
-    let ev = v["Evidence"].as_str().unwrap();
-    assert!(
-        ev.contains("pid 99003") && ev.contains("os start") && ev.contains(&format!("record epoch {epoch}")),
-        "{ev}"
-    );
-    assert!(v["Why"].as_str().unwrap().contains("recycled"));
-}
-
-#[test]
 fn stale_removals_are_logged_with_evidence() {
     let rig = Rig::new();
     let n = rig.agent(12);
@@ -185,7 +160,7 @@ fn two_slots_run_two_holders_and_a_third_waits() {
     assert_eq!(ha.poll(), Poll::Held);
     assert_eq!(hb.poll(), Poll::Held);
     assert_eq!(hc.poll(), Poll::Waiting);
-    assert!(rig.lock_dir().exists() && rig.root().join("pitcrew-heavy-v2.lock.slot2").exists());
+    assert!(rig.lock_dir().exists() && rig.root().join("heavy-slot2.info").exists());
     assert!(a.h.status().contains("slot 1: held by A") && a.h.status().contains("slot 2: held by B"));
     hb.release();
     assert_eq!(hc.poll(), Poll::Held);

@@ -53,15 +53,48 @@ through sccache waits idle while the sccache server (not in the tree) compiles, 
 and then waits, and a test waiting on a network or a container is idle. A caller sets `--stall` from the longest quiet gap it measured
 for its step, with a wide margin (several times that gap; minutes, not seconds), and records the measurement next to the value.
 
-## Compatible with the shell plock (rollout)
+## The slot locks: kernel file locks held by handle (user decision, 2026-11-26)
 
-The lock folder, record formats and names are the retired shell plock's layout, kept so an old record or marker is still read: the
-lock is the directory `pitcrew-heavy-v2.lock` published atomically with its 6-line `owner` record (pid, start text, agent, epoch
-seconds, cwd, masked command; old 3-line records are read), tickets `pitcrew-heavy.ticket.<016 microseconds>-<pid>` (4 lines), high
-markers `pitcrew-heavy.high.<pid>-<name>` (3 lines), the old-style `pitcrew-heavy.lock` is honoured, and breaks/removals and
-waits/takes go to `pitcrew-lock-breaks.log` / `pitcrew-lock-activity.log`. More slots use extra lock dirs
-`pitcrew-heavy-v2.lock.slotN`. The owner record has an optional 7th line `child <pid> <os start microseconds>`, written once the
-command runs: a waiter does not break the lock of a SIGKILLed heavy whose command still runs.
+A slot is an open file with an exclusive advisory lock: `std::fs::File::try_lock`, which is `flock` on macOS and Linux and `LockFileEx` on
+Windows (`slotfile.rs`, the one OS adapter). The kernel frees the lock when the holder's last handle closes, so a holder that exits,
+crashes or is killed with SIGKILL frees its slot **at once**, and no code decides whether an owner is still alive or breaks a lock.
+That replaced the lock directories with an owner record, the pid and start-time liveness test, the 2 s slack, the break-aside protocol
+and the "child still runs" line (measured: docs/benchmarks.md, "Slot locks on kernel file locks").
+
+```text
+<lock folder>/heavy-slotN.lock      slot N: the file that is locked (never deleted; empty)
+<lock folder>/heavy-slotN.info      who holds it: the 6-line owner record, written by the holder after it took the lock, removed before release
+<lock folder>/heavy-cheapN.lock/.info   the quick lane's places (at most 2)
+<lock folder>/pitcrew-heavy.ticket.<016 microseconds>-<pid>   FIFO queue tickets (4 lines)
+<lock folder>/pitcrew-heavy.high.<pid>-<name>               high markers (3 lines)
+<lock folder>/pitcrew-heavy.drain.<pid>-<name>              drain markers of a container run
+<lock folder>/pitcrew-lock-breaks.log / pitcrew-lock-activity.log   removals of stale tickets and markers / waits, takes, dones
+```
+
+What it promises, each with a test (`tests/it/filelock.rs`, `ported.rs`, `slots.rs`):
+
+1. **The lock folder is local.** Kernel file locks on SMB or NFS are emulated or per client, so a lock folder on a network file system is
+   refused (`statfs` `f_fstypename` on macOS, the `f_type` magic on Linux, UNC paths and `GetDriveTypeW` on Windows) with a message that says
+   to set `HEAVY_DIR` to a local folder; exit 75. A file system the OS did not name is logged and let through.
+2. **The throttle is taken on the host around a container, never inside one.** A container run (a command line with `docker`, `podman`,
+   `nerdctl` or `linux-container.sh`) holds a slot on the host and runs alone; the container gets none of heavy's variables and does not
+   mount the lock folder (a lock taken inside a VM-backed container does not exclude the host: a bind mount is another kernel).
+   `tools/linux-container.sh` is the only place the family's gates start a container; a test checks it.
+3. **The lock is not inherited.** `std` opens every file close-on-exec (Windows: not inheritable), so a command that outlives its `heavy`
+   never keeps the slot. A holder killed with SIGKILL frees its slot at once **although its command may still run**: the next step starts
+   beside that orphan (it is no longer counted in the load rule, only in the load itself). The directory locks kept the slot while the
+   command lived; the wait that cost was longer than the risk of one step beside an orphan.
+4. **Nested runs use the parent's slot** (`HEAVY_HELD`, below): no second slot, no ticket, no queue.
+
+The info record is only for the wait line, `status` and the admission rule (a container holder, the age order of holders); that a slot is
+held is the kernel's word. A record of a free slot (a crashed holder left it) is ignored and replaced by the next taker; a held slot whose
+record is missing or unreadable counts as held. A probe of a slot takes a shared lock for an instant and lets go, so a taker that tries
+in that instant tries again at its next poll. Tickets, high and drain markers still compare a pid with its OS start time (their owner is a
+process that may be another's, the CI job's pid for `heavy mark`).
+
+**Rollout gap.** The slot files have new names, so a `heavy` of the earlier kind (lock directories `pitcrew-heavy-v2.lock*`) and this one do not
+exclude each other: while one of each runs, both can hold a slot. `status` names a lock folder of the earlier kind when it finds one. Move
+every machine (the runner and every agent's cached binary) to this one together; a stale `pitcrew-heavy-v2.lock*` folder is safe to delete.
 
 ## Slots follow the load
 
@@ -95,7 +128,7 @@ row with `HEAVY_ROW` (its step plus its workspace, for example `clippy apps/dyno
 heavy keeps how long each row took when it passed (`heavy-history.tsv` in the lock folder, written only by heavy): the expected time is the slowest of
 its last 3 runs. A row expected under 10 s (`CHEAP_SECS`) is **quick**: when the machine has the idle CPU (15 %), the memory for a step more (the reserve
 stays) and a 1-minute load under twice the cores (`cheap_admitted`; the 15-minute load does not decide it), it takes a place in the **quick lane**
-(`pitcrew-heavy-v2.lock.cheapN`, at most 2 at once) beside the full slots, without waiting in the queue. The queued long steps are not delayed by it (the
+(`heavy-cheapN.lock`, at most 2 at once) beside the full slots, without waiting in the queue. The queued long steps are not delayed by it (the
 lane does not count against their slots) and a container run waits for the lane to empty and starts nothing beside it. No history, an unreadable history,
 a row at or over 10 s, or unknown readings: the row queues like any other (ER-33). A quick row that cannot get a place keeps its ticket and its place in
 the FIFO queue; a waiter holds a ticket, never a slot (ER-43).
@@ -143,11 +176,6 @@ not be taken, 127 with an `::error::` when `heavy` is not installed) makes engin
 prerequisite** of calling the shell retired, and it lands only once the binary can be installed for every project (a release from the registry that
 the user installs, or a stable path the wrapper finds). `HEAVY_LOCK_DIR` is ignored with a warning.
 
-Old binaries: a `heavy` built before this change looks at the first slot only (`slots` was 1). The first slot is shared by mutual exclusion (the
-directory), and the new ones count every slot folder including the old one's and read its owner record (a container run held by an old binary keeps the
-new ones out; tested). **The gap:** an old binary does not see `.slotN` holders or drain markers, so while one runs it can start beside new holders
-in the other slots, and a container run waiting for a drain is not waited for by it. Move every machine to the new binary together (the install below).
-
 ## Environment
 
 `HEAVY_*` wins over the legacy `PLOCK_*`; `HEAVY_LOCK_DIR` (heavy.sh) is ignored. A value that does not parse is reported and the default used.
@@ -157,7 +185,7 @@ in the other slots, and a container run waiting for a drain is not waited for by
 | lock folder | `HEAVY_DIR`, `PLOCK_DIR`, `PLOCK_ROOT`, `HEAVY_LOCK_DIR` | `/private/tmp/claude-501` if it exists, else `$TMPDIR/heavy-lock` |
 | poll seconds | `HEAVY_POLL`, `PLOCK_POLL` | 5 |
 | seconds between "waiting for X" lines | `HEAVY_WAIT_LOG`, `PLOCK_WAIT_LOG` | 60 |
-| ownerless lock/ticket broken after | `HEAVY_UNREADABLE_LIMIT`, `PLOCK_UNREADABLE_LIMIT` | 120 s |
+| an unreadable ticket removed after | `HEAVY_UNREADABLE_LIMIT`, `PLOCK_UNREADABLE_LIMIT` | 120 s |
 | load gate threshold / poll | `HEAVY_GATE_LOAD` (`--gate-load`), `HEAVY_GATE_POLL` | 30 / 20 s |
 | priority bound (`--high` yields to nobody; others stop yielding after this) | `HEAVY_PRIORITY_MAX` | 1800 s |
 | most steps at once | `--slots N`, `HEAVY_SLOTS` (`auto` or 1..64) | auto: half the cores, at most 5 |
@@ -181,9 +209,8 @@ in the other slots, and a container run waiting for a drain is not waited for by
 | load gate | 30, fixed | none | threshold and poll settable; skipped with a note on Windows (no load average there) |
 | N slots | no | `HEAVY_SLOTS` | `HEAVY_SLOTS` / `--slots`, following the 15-minute load and CPU idle |
 | home guard (ER-14) | no | yes | yes (`CARGO_TARGET_DIR`, `CARGO_BUILD_TARGET_DIR`, `--target-dir`, `--config build.target-dir`, `build.target-dir` in `.cargo/config.toml` up the tree and in `$CARGO_HOME`) |
-| slot kept while the command runs although the owner died | yes (`cpid`) | yes | yes (line 7 of the owner record) |
+| slot freed when its holder dies | stale-pid break | stale-pid break | at once (kernel file lock); the command is not waited for |
 | ends the command's group on INT/TERM | no | yes | yes, by process identity (`paddock_proc::kill_tree`, rule 53); 130/143 |
-| zombie owner counts as gone | no | yes | yes |
 | lower priority | not built in (callers use `nice`) | none | `--low` (`paddock_proc::lower_priority`: nice 10, below-normal on Windows) |
 | masked command in records | yes | n/a | yes, same rules |
 | troubleshooting log | activity/breaks logs | none | the same two logs plus a CLEF log (below) |
@@ -203,13 +230,14 @@ the observed OS start time (`Evidence`), every break, put-back and stale removal
 
 ## Design: lessons made impossible
 
-- Liveness compares the OS start time (`paddock_proc::ProcessId`: sysctl / `/proc` / `GetProcessTimes`) with the record's
-  epoch plus 2 s; the start *text* in the record is informational and never read, so TZ and locale cannot matter.
+- A slot is held by an open file with a kernel lock: whether a holder lives is the kernel's answer, never a guess from a pid, a start
+  time or a record's age. Nothing breaks a lock, so a break cannot break a live one.
+- The pure rules (who may take a slot, who keeps one when too many were taken, the share of the cores) are `core.rs`: time, load and the
+  holders are passed in. The OS adapters are `slotfile.rs` (locks) and `fsinfo.rs` (file system kind). Pitcrew uses the library.
+- Ticket and marker liveness compares the OS start time (`paddock_proc::ProcessId`: sysctl / `/proc` / `GetProcessTimes`) with the
+  record's epoch plus 2 s; the start *text* in a record is informational and never read, so TZ and locale cannot matter.
 - Every read tolerates the file vanishing (no parse of a missing value); records parse totally (proptest).
 - Deletions name exact paths; nothing is globbed into a delete.
-- The lock appears atomically with its owner inside; a write that leaves nothing is never published.
-- A non-empty unparsable owner is never broken. An empty one only after the age limit.
-- A break renames the lock aside, re-checks the directory identity and the owner, and puts it back if either changed.
 - A pid we may not signal (EPERM) or whose start time is unreadable is alive. Pid 0 and out-of-range pids are never probed.
 - Waits are logged every 60 s with the holder; the queue is FIFO.
 

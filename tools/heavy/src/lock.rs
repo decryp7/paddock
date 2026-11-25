@@ -1,28 +1,33 @@
-//! The lock itself, on the shell plock's on-disk layout (so shell and Rust interoperate):
+//! The slots, on kernel file locks, and the queue around them.
 //!
 //! ```text
-//! <root>/pitcrew-heavy-v2.lock/owner        the lock: a directory that appears atomically WITH its owner record
-//! <root>/pitcrew-heavy-v2.lock.slotN        slots 2.. (taken only while the load allows more than one step at a time)
-//! <root>/pitcrew-heavy-v2.lock.cheapN       the quick lane: rows expected under `CHEAP_SECS`, beside the full slots (at most `CHEAP_LANE`)
-//! <root>/pitcrew-heavy.lock                 the old-style lock (honoured while it exists)
+//! <root>/heavy-slotN.lock               slot N (1..): held by an open file with an exclusive lock; the kernel frees it on exit or crash
+//! <root>/heavy-slotN.info               who holds it (the owner record), written by the holder after it took the lock, removed before release
+//! <root>/heavy-cheapN.lock / .info      the quick lane: rows expected under `CHEAP_SECS`, beside the full slots (at most `CHEAP_LANE`)
 //! <root>/pitcrew-heavy.ticket.<us>-<pid>    FIFO queue tickets
 //! <root>/pitcrew-heavy.high.<pid>-<name>    --high markers
-//! <root>/pitcrew-lock-breaks.log            breaks and removals of stale things
-//! <root>/pitcrew-lock-activity.log          waits, takes, dones
+//! <root>/pitcrew-lock-breaks.log        removals of stale tickets and markers
+//! <root>/pitcrew-lock-activity.log      waits, takes, dones
 //! ```
+//!
+//! That a slot is held is the kernel's word ([`crate::slotfile`]); the info record is only for the wait line, `status` and the admission
+//! rule (a container run, the order of holders). A record of a slot that is free is ignored. Nothing decides whether a holder is
+//! alive, and nothing breaks a lock. The pure rules are in [`crate::core`].
 //!
 //! Every operation names an exact path; nothing is globbed into a delete. Every read tolerates the file vanishing.
 
 use crate::clock::Clock;
 use crate::config::Config;
-use crate::gate::{CHEAP_LANE, LoadSource, Pressure, allowed_slots, cheap_admitted, is_container_command, load_text};
+use crate::core::{self, Holder, Inputs};
+use crate::fsinfo::{self, FsKind};
+use crate::gate::{CHEAP_LANE, LoadSource, Pressure, is_container_command, load_text};
 use crate::log::{Level, Logger};
-use crate::probe::file_id;
 use crate::procs::{Presence, Procs, evidence, pid_alive};
 use crate::record::{self, Owner, OwnerRead};
+use crate::slotfile::{self, Held};
 use crate::timefmt::{clock_text, day_text, mins, oneline, utc_text};
 use crate::waitfor::{self, Break, Role, Rules, Waiter};
-use paddock_proc::queue_stall::{Holder, QueueView, within_cap};
+use paddock_proc::queue_stall::{Holder as QueueHolder, QueueView, within_cap};
 use serde_json::{Value, json};
 use std::fs;
 use std::io::Read;
@@ -32,12 +37,12 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::time::Duration;
 
-/// The lock directory's name.
-pub const LOCK_NAME: &str = "pitcrew-heavy-v2.lock";
-/// Slot indexes from here are the quick lane's: `CHEAP_BASE + j` is the folder `<lock>.cheap<j+1>`. Above the most slots a setting allows (64).
+/// The file name prefix of a full slot: `<prefix><N>.lock` (the lock) and `<prefix><N>.info` (the owner record).
+pub const SLOT_PREFIX: &str = "heavy-slot";
+/// The file name prefix of a quick-lane place.
+pub const CHEAP_PREFIX: &str = "heavy-cheap";
+/// Slot indexes from here are the quick lane's: `CHEAP_BASE + j` is the place `heavy-cheap<j+1>`. Above the most slots a setting allows (64).
 pub const CHEAP_BASE: u32 = 64;
-/// The old-style lock directory's name.
-pub const OLD_NAME: &str = "pitcrew-heavy.lock";
 /// The breaks log's name.
 pub const BREAKS_LOG: &str = "pitcrew-lock-breaks.log";
 /// The activity log's name.
@@ -52,18 +57,14 @@ pub const DRAIN_PREFIX: &str = "pitcrew-heavy.drain.";
 /// Failures to inject (tests only; there is no environment switch in the program).
 #[derive(Default)]
 pub struct Faults {
-    /// The next N owner writes fail (leaving an empty file).
+    /// The next N info writes fail (leaving an empty file).
     pub owner_fail: AtomicU32,
-    /// The next N owner writes "succeed" but leave an empty file.
+    /// The next N info writes "succeed" but leave an empty file.
     pub owner_empty: AtomicU32,
     /// Ticket writes fail.
     pub ticket_fail: AtomicBool,
-    /// Runs once inside a break, after the decision and before the rename (race tests).
-    pub before_aside: Mutex<Option<Box<dyn FnOnce() + Send>>>,
     /// Runs once right after a slot was taken, before the count is checked again (race tests: another taker arrives in between).
     pub after_take: Mutex<Option<Box<dyn FnOnce() + Send>>>,
-    /// Runs once inside a release, after the owner check and before the rename aside (race tests).
-    pub before_release: Mutex<Option<Box<dyn FnOnce() + Send>>>,
     /// The wait-for graph is read with the rule from before 7a4aafbee (a drain owner waits for the head of the queue): the model of
     /// the deadlock of 2026-11-18, so a test can see the cycle reported and broken without the deadlock itself being possible.
     pub old_drain_rule: AtomicBool,
@@ -91,6 +92,8 @@ pub struct Heavy {
     pub say: Arc<dyn Fn(&str) + Send + Sync>,
     /// Injected failures.
     pub faults: Faults,
+    /// Which file system a folder is on (the OS in the program; a test puts a network one here).
+    pub fs_kind: Arc<dyn Fn(&Path) -> FsKind + Send + Sync>,
     seq: AtomicU64,
 }
 
@@ -131,9 +134,10 @@ pub enum Poll {
 }
 
 enum Take {
-    Taken,
+    Taken(Held),
     Busy,
     WriteFailed,
+    LockFailed(String),
 }
 
 fn mtime(p: &Path) -> Option<u64> {
@@ -156,6 +160,24 @@ fn file_name(p: &Path) -> String {
     p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
 }
 
+/// The pure view of probed holders ([`core::Holder`]): their records' epoch and pid, and whether each runs a container command.
+pub fn holders_of(held: &[(u32, OwnerRead)]) -> Vec<Holder> {
+    held.iter()
+        .map(|(_, o)| match o {
+            OwnerRead::Ok(o) => Holder {
+                epoch: o.epoch,
+                pid: o.pid,
+                container: is_container_command(&o.cmd),
+            },
+            _ => Holder {
+                epoch: None,
+                pid: 0,
+                container: false,
+            },
+        })
+        .collect()
+}
+
 impl Heavy {
     /// A participant. `say` receives the human-readable lines.
     pub fn new(
@@ -176,6 +198,7 @@ impl Heavy {
             pid,
             say,
             faults: Faults::default(),
+            fs_kind: Arc::new(fsinfo::of),
             seq: AtomicU64::new(0),
         }
     }
@@ -185,15 +208,37 @@ impl Heavy {
         self.clock.now_secs()
     }
 
-    /// The lock directory of slot `i` (0-based; slot 0 is the plock-compatible lock).
-    pub fn slot_dir(&self, i: u32) -> PathBuf {
+    /// The lock file of slot `i` (0-based; from [`CHEAP_BASE`] the quick lane's places).
+    pub fn slot_lock(&self, i: u32) -> PathBuf {
+        self.slot_file(i, "lock")
+    }
+
+    /// The info file of slot `i`: the owner record of its holder.
+    pub fn slot_info(&self, i: u32) -> PathBuf {
+        self.slot_file(i, "info")
+    }
+
+    fn slot_file(&self, i: u32, ext: &str) -> PathBuf {
         if i >= CHEAP_BASE {
-            self.cfg.root.join(format!("{LOCK_NAME}.cheap{}", i - CHEAP_BASE + 1))
-        } else if i == 0 {
-            self.cfg.root.join(LOCK_NAME)
+            self.cfg.root.join(format!("{CHEAP_PREFIX}{}.{ext}", i - CHEAP_BASE + 1))
         } else {
-            self.cfg.root.join(format!("{LOCK_NAME}.slot{}", i + 1))
+            self.cfg.root.join(format!("{SLOT_PREFIX}{}.{ext}", i + 1))
         }
+    }
+
+    /// Checks the lock folder before anything is taken in it: it exists and is not on a network file system (kernel file locks there are
+    /// not reliable). `Err` is the message to print. A file system the OS did not name is logged and let through.
+    pub fn check_root(&self) -> Result<(), String> {
+        let _ = fs::create_dir_all(&self.cfg.root);
+        let kind = (self.fs_kind)(&self.cfg.root);
+        if let FsKind::Unknown(why) = &kind {
+            self.log.warn(
+                "heavy.fs",
+                "the file system of the lock folder is not known; locks are used as they are",
+                &[("Why", json!(why)), ("Root", json!(self.cfg.root.to_string_lossy()))],
+            );
+        }
+        fsinfo::check_root(&kind, &self.cfg.root)
     }
 
     fn stamp(&self) -> String {
@@ -227,9 +272,10 @@ impl Heavy {
         self.age_of(p).map_or("unknown".into(), |a| format!("{a}s"))
     }
 
-    /// The owner record in `dir`. Missing, unreadable or zero-byte is `Empty`.
-    pub fn read_owner(&self, dir: &Path) -> OwnerRead {
-        let f = dir.join("owner");
+    /// The owner record of slot `i`'s holder. Missing, unreadable or zero-byte is `Empty` (a taker that has the lock and has not yet
+    /// written its record).
+    pub fn read_owner(&self, i: u32) -> OwnerRead {
+        let f = self.slot_info(i);
         match read_bounded(&f) {
             Ok(b) => record::parse_owner(&b, mtime(&f)),
             Err(_) => OwnerRead::Empty,
@@ -266,7 +312,6 @@ impl Heavy {
             epoch: None,
             cwd: req.cwd.clone(),
             cmd: req.cmdline.clone(),
-            child: None,
         };
         fs::write(file, record::format_owner(&o, epoch)).is_ok()
     }
@@ -275,126 +320,30 @@ impl Heavy {
         fs::metadata(p).is_ok_and(|m| m.len() > 0)
     }
 
-    /// Publishes the lock directory with its owner record already inside (written aside, verified, renamed into place).
-    fn try_take(&self, dir: &Path, req: &Request, epoch_out: &mut u64) -> Take {
-        let tmp = self.tmp_name("");
-        if fs::create_dir(&tmp).is_err() {
-            return Take::WriteFailed;
-        }
-        let epoch = self.now();
-        let ot = tmp.join("owner.tmp");
-        let o = tmp.join("owner");
-        let written = self.write_owner(&ot, req, epoch) && Self::non_empty(&ot) && fs::rename(&ot, &o).is_ok() && Self::non_empty(&o);
-        if !written {
-            let _ = fs::remove_dir_all(&tmp);
-            return Take::WriteFailed;
-        }
-        // rename(2) of a directory onto an existing NON-EMPTY directory fails; the lock dir is never empty.
-        // conformance: write-atomic — the rename claims a name in the lock protocol (it fails when the name exists); the marker is a few bytes written under this holder's own name
-        if !dir.exists() && fs::rename(&tmp, dir).is_ok() {
-            *epoch_out = epoch;
-            return Take::Taken;
-        }
-        let _ = fs::remove_dir_all(&tmp);
-        Take::Busy
-    }
-
-    /// Whether the command a dead heavy started (line 7 of its record) still runs: the same pid with the same OS start time.
-    /// Like heavy.sh, a slot counts as taken while either lives.
-    pub fn child_alive(&self, o: &Owner) -> bool {
-        match o.child {
-            None => false,
-            Some((pid, start)) => match self.procs.probe(pid) {
-                Presence::Gone => false,
-                Presence::Present { start_micros: None } => true,
-                Presence::Present { start_micros: Some(s) } => s == start,
-            },
-        }
-    }
-
-    /// Breaks the lock in `dir` only when its owner is dead or recycled (or the record is empty and the lock old). Renames it
-    /// aside, re-checks identity and owner, and puts it back if either changed. Returns whether it was broken.
-    pub fn break_if_stale(&self, dir: &Path, who: &str) -> bool {
-        let Some(id) = file_id(dir) else { return false };
-        let first = self.read_owner(dir);
-        let (victim, why, evid, kind) = match &first {
-            OwnerRead::Ok(o) => {
-                if pid_alive(&*self.procs, o.pid, o.epoch) || self.child_alive(o) {
-                    return false;
-                }
-                (
-                    o.name.clone(),
-                    format!("pid {} is gone, or recycled (started after the record was written)", o.pid),
-                    evidence(&*self.procs, o.pid, o.epoch),
-                    "dead owner",
-                )
-            }
-            OwnerRead::Unparsable => return false,
-            OwnerRead::Empty => {
-                let Some(age) = self.age_of(dir) else { return false };
-                if age < self.cfg.unreadable_limit {
-                    return false;
-                }
-                (
-                    "an unknown owner".to_string(),
-                    format!(
-                        "owner record empty or missing and lock {age}s old (limit {}s)",
-                        self.cfg.unreadable_limit
-                    ),
-                    format!("no owner content; lock dir age {age}s"),
-                    "empty owner",
-                )
-            }
+    /// Tries to take slot `i`: the kernel lock first, then the holder's record (an old record is removed, then the new one is written
+    /// aside and renamed into place, so a reader sees no record or a whole one). A record that cannot be written gives the slot back.
+    fn try_take(&self, i: u32, req: &Request, epoch_out: &mut u64) -> Take {
+        let held = match slotfile::take(&self.slot_lock(i)) {
+            Ok(Some(h)) => h,
+            Ok(None) => return Take::Busy,
+            Err(e) => return Take::LockFailed(e.to_string()),
         };
-        let aside = self.tmp_name("break.");
-        let hook = self.faults.before_aside.lock().ok().and_then(|mut h| h.take());
-        if let Some(h) = hook {
-            h();
+        let info = self.slot_info(i);
+        let _ = fs::remove_file(&info);
+        let tmp = self.tmp_name("");
+        let epoch = self.now();
+        let written = self.write_owner(&tmp, req, epoch) && Self::non_empty(&tmp)
+            // conformance: write-atomic — the rename claims a name in the lock protocol (it fails when the name exists); the marker is a few bytes written under this holder's own name
+            && fs::rename(&tmp, &info).is_ok()
+            && Self::non_empty(&info);
+        if !written {
+            let _ = fs::remove_file(&tmp);
+            let _ = fs::remove_file(&info);
+            drop(held);
+            return Take::WriteFailed;
         }
-        if fs::rename(dir, &aside).is_err() {
-            return false;
-        }
-        let second = self.read_owner(&aside);
-        let same = file_id(&aside) == Some(id)
-            && match (&first, &second) {
-                (OwnerRead::Ok(a), OwnerRead::Ok(b)) => a.pid == b.pid && a.epoch == b.epoch,
-                (OwnerRead::Empty, OwnerRead::Empty) => true,
-                _ => false,
-            };
-        if same {
-            self.blog(&format!("{who} broke a stale lock of {victim} ({why})"));
-            self.log.warn(
-                "heavy.break",
-                &format!("{who} broke a stale lock of {victim}"),
-                &[
-                    ("Kind", json!(kind)),
-                    ("Why", json!(why)),
-                    ("Evidence", json!(evid)),
-                    ("Lock", json!(dir.to_string_lossy())),
-                ],
-            );
-            let _ = fs::remove_dir_all(&aside);
-            return true;
-        }
-        if !dir.exists() && fs::rename(&aside, dir).is_ok() {
-            self.log.warn(
-                "heavy.break",
-                "the lock changed while it was being broken; put back, not broken",
-                &[("Evidence", json!(evid)), ("Lock", json!(dir.to_string_lossy()))],
-            );
-            return false;
-        }
-        self.blog(&format!(
-            "{who} found the lock changed while breaking it and could not put it back; left at {}",
-            aside.display()
-        ));
-        self.log.event(
-            Level::Error,
-            "heavy.break",
-            "could not put a changed lock back",
-            &[("LeftAt", json!(aside.to_string_lossy()))],
-        );
-        false
+        *epoch_out = epoch;
+        Take::Taken(held)
     }
 
     fn dir_entries(&self, prefix: &str) -> Vec<PathBuf> {
@@ -555,8 +504,8 @@ impl Heavy {
     }
 
     /// The text for "who holds it" in a wait line, with the log properties.
-    fn holder_note(&self, dir: &Path) -> (String, Vec<(&'static str, Value)>) {
-        match self.read_owner(dir) {
+    fn holder_note(&self, slot: u32) -> (String, Vec<(&'static str, Value)>) {
+        match self.read_owner(slot) {
             OwnerRead::Ok(o) => {
                 let cmd = if o.cmd.is_empty() {
                     String::new()
@@ -580,13 +529,9 @@ impl Heavy {
                     ],
                 )
             }
-            OwnerRead::Empty => (
-                format!("the lock dir has an empty owner record (age {})", self.age_text(dir)),
-                vec![("Reason", json!("empty-owner")), ("Age", json!(self.age_text(dir)))],
-            ),
-            OwnerRead::Unparsable => (
-                "the lock dir has an unparsable owner record (not broken automatically)".into(),
-                vec![("Reason", json!("unparsable-owner"))],
+            OwnerRead::Empty | OwnerRead::Unparsable => (
+                "the lock is held (its holder has not written who it is yet)".into(),
+                vec![("Reason", json!("held-unknown"))],
             ),
         }
     }
@@ -615,47 +560,63 @@ impl Heavy {
         found
     }
 
-    /// Whether a taker that holds slot `me` now sees more holders than the rule allows (the load rose, or a container run took a
-    /// slot, between its look and its take) and is one of the younger ones: the holders are ordered by the time of their record
-    /// (then pid) and only the first `allowed` keep their slot, so two takers that see each other never both step back.
-    fn over_allowed(&self, req: &Request, me: u32, my_epoch: u64) -> bool {
-        let dirs = self.held_dirs();
-        let (allowed, _) = self.allowed(req, &dirs);
-        if dirs.len() <= allowed as usize {
-            return false;
-        }
-        let mine = (my_epoch, self.pid);
-        let mut keys: Vec<(u64, u32)> = dirs
-            .iter()
-            .map(|d| match self.read_owner(d) {
-                OwnerRead::Ok(o) => (o.epoch.unwrap_or(u64::MAX), o.pid),
-                _ => (u64::MAX, u32::MAX),
+    /// Whether a taker that holds a slot with the record epoch `my_epoch` now sees more holders than the rule allows (the load rose, or a
+    /// container run took a slot, between its look and its take) and is one of the younger ones ([`core::keeps_slot`]).
+    fn over_allowed(&self, req: &Request, my_epoch: u64) -> bool {
+        let held = self.held_holders();
+        let (allowed, _) = self.allowed(req, &held);
+        !core::keeps_slot(&held, (my_epoch, self.pid), allowed)
+    }
+
+    /// The slots among `indexes` that are held now, by the kernel's word, with their records (an unreadable record is `Empty`). A slot
+    /// that cannot be probed counts as held: an answer that is not known is never read as free (ER-33).
+    fn probe(&self, indexes: impl Iterator<Item = u32>) -> Vec<(u32, OwnerRead)> {
+        indexes
+            .filter(|&i| match slotfile::is_held(&self.slot_lock(i)) {
+                Ok(held) => held,
+                Err(e) => {
+                    self.log.warn(
+                        "heavy.take",
+                        "a slot could not be probed; counted as held",
+                        &[("Slot", json!(i + 1)), ("Error", json!(e.to_string()))],
+                    );
+                    true
+                }
             })
-            .collect();
-        let _ = me;
-        keys.sort();
-        keys.iter().position(|k| *k == mine).is_none_or(|p| p >= allowed as usize)
+            .map(|i| (i, self.read_owner(i)))
+            .collect()
     }
 
-    /// The live holders' slot folders: those that exist (a stale one is broken by the poll loop, not here).
-    fn held_dirs(&self) -> Vec<PathBuf> {
-        (0..self.cfg.slots).map(|i| self.slot_dir(i)).filter(|d| d.is_dir()).collect()
+    /// The holders of the full slots.
+    pub fn held_slots(&self) -> Vec<(u32, OwnerRead)> {
+        self.probe(0..self.cfg.slots)
     }
 
-    /// Whether a live holder is running a container (`gate::is_container_command` on its owner record).
-    fn container_running(&self, dirs: &[PathBuf]) -> bool {
-        dirs.iter().any(|d| match self.read_owner(d) {
-            OwnerRead::Ok(o) => is_container_command(&o.cmd),
-            _ => false,
-        })
+    /// The holders of the quick lane.
+    pub fn held_cheap(&self) -> Vec<(u32, OwnerRead)> {
+        self.probe(CHEAP_BASE..CHEAP_BASE + CHEAP_LANE)
+    }
+
+    /// The pure view of the holders of the full slots.
+    fn held_holders(&self) -> Vec<Holder> {
+        holders_of(&self.held_slots())
     }
 
     /// How many steps may run together now for `req`, and what the rule saw (for the wait line and the log). A step that is a
     /// container run counts as holding the machine alone; so does any live container holder.
-    pub fn allowed(&self, req: &Request, dirs: &[PathBuf]) -> (u32, String) {
+    pub fn allowed(&self, req: &Request, held: &[Holder]) -> (u32, String) {
         let p = self.pressure();
-        let container = is_container_command(&req.cmdline) || self.container_running(dirs);
-        let n = allowed_slots(self.cfg.slots, self.cfg.cpus, &p, container);
+        let a = core::admission(&Inputs {
+            max_slots: self.cfg.slots,
+            cpus: self.cfg.cpus,
+            pressure: &p,
+            req_container: is_container_command(&req.cmdline),
+            req_quick: false,
+            at_head: true,
+            held,
+            cheap_held: 0,
+        });
+        let n = a.allowed;
         let seen = format!(
             "{n} of at most {} at once ({} cores, 5-minute load {}, CPU idle {}, memory available {}{})",
             self.cfg.slots,
@@ -663,7 +624,7 @@ impl Heavy {
             p.load5.map_or("unknown".into(), |x| format!("{x:.1}")),
             p.idle.map_or("unknown".into(), |x| format!("{x:.0}%")),
             p.memory_mb.map_or("unknown".into(), |m| format!("{m} MiB")),
-            if container { ", a container run alone" } else { "" }
+            if a.container { ", a container run alone" } else { "" }
         );
         (n, seen)
     }
@@ -678,14 +639,6 @@ impl Heavy {
             idle: self.load.idle_percent(),
             memory_mb: self.load.available_memory_mb(),
         }
-    }
-
-    /// The live holders' quick-lane folders: those that exist.
-    pub fn held_cheap_dirs(&self) -> Vec<PathBuf> {
-        (0..CHEAP_LANE)
-            .map(|j| self.slot_dir(CHEAP_BASE + j))
-            .filter(|d| d.is_dir())
-            .collect()
     }
 
     /// The text of the admission decision, for the log and the wait line: what the rule saw and why a step was let in (or not).
@@ -807,66 +760,52 @@ impl Heavy {
     pub fn status(&self) -> String {
         let mut out = String::new();
         let multi = self.cfg.slots > 1;
+        if let Err(e) = self.check_root() {
+            out += &format!("REFUSED: {e}\n");
+            return out;
+        }
+        let held = self.held_slots();
         for i in 0..self.cfg.slots {
-            let dir = self.slot_dir(i);
             let pre = if multi { format!("slot {}: ", i + 1) } else { String::new() };
-            if dir.is_dir() {
-                match self.read_owner(&dir) {
-                    OwnerRead::Ok(o) => {
-                        let alive = if pid_alive(&*self.procs, o.pid, o.epoch) {
-                            "yes"
-                        } else if self.child_alive(&o) {
-                            "heavy gone, its command still runs"
-                        } else {
-                            "NO"
-                        };
-                        out += &format!(
-                            "{pre}held by {} pid {} since '{}' for {} (alive: {alive})\n",
-                            o.name,
-                            o.pid,
-                            o.start_text,
-                            mins(self.now(), o.epoch)
-                        );
-                        if !o.cmd.is_empty() {
-                            out += &format!("  command: {}\n", o.cmd);
-                        }
-                        if !o.cwd.is_empty() {
-                            out += &format!("  cwd: {}\n", o.cwd);
-                        }
+            match held.iter().find(|(s, _)| *s == i) {
+                Some((_, OwnerRead::Ok(o))) => {
+                    out += &format!(
+                        "{pre}held by {} pid {} since '{}' for {}\n",
+                        o.name,
+                        o.pid,
+                        o.start_text,
+                        mins(self.now(), o.epoch)
+                    );
+                    if !o.cmd.is_empty() {
+                        out += &format!("  command: {}\n", o.cmd);
                     }
-                    OwnerRead::Empty => {
-                        out += &format!(
-                            "{pre}lock dir with an empty owner record (age {}; broken after {}s)\n",
-                            self.age_text(&dir),
-                            self.cfg.unreadable_limit
-                        );
-                    }
-                    OwnerRead::Unparsable => {
-                        out += &format!(
-                            "{pre}lock dir with an UNPARSABLE owner record (never broken automatically; inspect {}/owner)\n",
-                            dir.display()
-                        );
+                    if !o.cwd.is_empty() {
+                        out += &format!("  cwd: {}\n", o.cwd);
                     }
                 }
-            } else {
-                out += &format!("{pre}free\n");
+                Some(_) => out += &format!("{pre}held (its holder has not written who it is yet)\n"),
+                None => out += &format!("{pre}free\n"),
             }
         }
-        for j in 0..CHEAP_LANE {
-            let dir = self.slot_dir(CHEAP_BASE + j);
-            if let (true, OwnerRead::Ok(o)) = (dir.is_dir(), self.read_owner(&dir)) {
+        for (i, o) in self.held_cheap() {
+            if let OwnerRead::Ok(o) = o {
                 out += &format!(
                     "quick lane {}: held by {} pid {} for {}\n",
-                    j + 1,
+                    i - CHEAP_BASE + 1,
                     o.name,
                     o.pid,
                     mins(self.now(), o.epoch)
                 );
             }
         }
-        let old = self.cfg.root.join(OLD_NAME);
-        if old.is_dir() {
-            out += &format!("old-style lock {} exists (an agent still on the old script)\n", old.display());
+        for legacy in ["pitcrew-heavy-v2.lock", "pitcrew-heavy.lock"] {
+            let p = self.cfg.root.join(legacy);
+            if p.is_dir() {
+                out += &format!(
+                    "a lock folder of an older heavy exists: {} (not honoured any more; an agent still on that binary does not wait for this one)\n",
+                    p.display()
+                );
+            }
         }
         for f in self.dir_entries(TICKET_PREFIX) {
             if file_name(&f).ends_with(".tmp") {
@@ -906,7 +845,7 @@ pub struct Acquirer<'a> {
     pub req: Request,
     ticket: PathBuf,
     marker: Option<PathBuf>,
-    held: Option<u32>,
+    held: Option<(u32, Held)>,
     /// How many steps the rule allowed at once when this run took its slot: its share of the cores is `1/share`
     /// (`gate::step_threads`). 1 until it holds a slot.
     share: u32,
@@ -932,7 +871,7 @@ impl<'a> Acquirer<'a> {
 
     /// Queues (a ticket) or announces itself (a high marker). Err: nothing could be written; no lock was taken.
     pub fn new(h: &'a Heavy, req: Request) -> Result<Acquirer<'a>, String> {
-        let _ = fs::create_dir_all(&h.cfg.root);
+        h.check_root()?;
         let t0 = h.now();
         let mut a = Acquirer {
             h,
@@ -1091,7 +1030,7 @@ impl<'a> Acquirer<'a> {
     pub fn poll(&mut self) -> Poll {
         let h = self.h;
         let name = self.req.name.clone();
-        'again: loop {
+        {
             if self.held.is_some() {
                 return Poll::Held;
             }
@@ -1099,7 +1038,7 @@ impl<'a> Acquirer<'a> {
             // step then waits (a stream of high-priority runs cannot keep the container run out for good).
             let container_req = is_container_command(&self.req.cmdline);
             let waited_now = h.now().saturating_sub(self.t0);
-            if container_req && self.drain.is_none() && waited_now >= h.cfg.drain_after.as_secs() && !h.held_dirs().is_empty() {
+            if container_req && self.drain.is_none() && waited_now >= h.cfg.drain_after.as_secs() && !h.held_slots().is_empty() {
                 let m = h.cfg.root.join(format!("{DRAIN_PREFIX}{}-{}", h.pid, record::sanitize_name(&name)));
                 let tmp = h.tmp_name("drain.");
                 // conformance: write-atomic — the rename claims a name in the lock protocol (it fails when the name exists); the marker is a few bytes written under this holder's own name
@@ -1150,27 +1089,27 @@ impl<'a> Acquirer<'a> {
                     return Poll::Waiting;
                 }
             }
-            let old = h.cfg.root.join(OLD_NAME);
-            if old.is_dir() {
-                self.wait_for(
-                    "old",
-                    &format!("the old-style lock {} is held (an agent still on the old script)", old.display()),
-                    &[("Reason", json!("old-style-lock"))],
-                );
-                return Poll::Waiting;
-            }
             // A container run that asked for the drain goes by its own marker, not by its place in the queue: every other step waits for
             // the drain (above), so a head that waits for it would otherwise wait for a drain owner queued behind it, which waits for
             // the head (the deadlock of 2026-11-18). Its ticket stays until it holds a slot.
             // A quick row (expected under `CHEAP_SECS` by the history) goes first when the machine has the idle CPU and the memory for a
             // step more: it takes a place in the quick lane beside the full slots and does not queue behind long steps. It keeps its
             // ticket meanwhile (a waiter holds a ticket, never a slot, ER-43) and falls back to the queue when the lane is not open.
-            let quick_ok = h.cfg.slots > 1
-                && self.req.is_quick()
-                && !h.container_running(&h.held_dirs())
-                && cheap_admitted(h.cfg.cpus, &h.pressure(), false)
-                && h.held_cheap_dirs().len() < CHEAP_LANE as usize;
-            let mut at_head = true;
+            let held = h.held_slots();
+            let cheap = h.held_cheap();
+            let holders = holders_of(&held);
+            let pressure = h.pressure();
+            let mut inputs = Inputs {
+                max_slots: h.cfg.slots,
+                cpus: h.cfg.cpus,
+                pressure: &pressure,
+                req_container: container_req,
+                req_quick: self.req.is_quick(),
+                at_head: true,
+                held: &holders,
+                cheap_held: cheap.len(),
+            };
+            let quick_ok = core::quick_ok(&inputs);
             if waitfor::follows_queue(role, rules) {
                 if !self.ticket.is_file()
                     && let Err(e) = self.make_ticket()
@@ -1178,7 +1117,7 @@ impl<'a> Acquirer<'a> {
                     return Poll::GaveUp(e);
                 }
                 let (pos, len, head) = h.queue(&self.ticket, &name);
-                at_head = pos == 1;
+                inputs.at_head = pos == 1;
                 if pos != 1 && !quick_ok {
                     self.check_cycle();
                     self.wait_for(
@@ -1205,31 +1144,27 @@ impl<'a> Acquirer<'a> {
                 );
                 return Poll::Waiting;
             }
-            let mut busy: Option<PathBuf> = None;
-            // A stale holder is broken first, so the count below is of live ones.
-            let dirs = h.held_dirs();
-            let cheap_dirs = h.held_cheap_dirs();
-            for d in dirs.iter().chain(&cheap_dirs) {
-                if h.break_if_stale(d, &name) {
-                    continue 'again;
-                }
-            }
-            let (allowed, seen) = if h.cfg.slots > 1 {
-                h.allowed(&self.req, &dirs)
+            let mut busy: Option<u32> = None;
+            let adm = core::admission(&inputs);
+            let (allowed, limited) = (adm.allowed, adm.limited);
+            let seen = if h.cfg.slots > 1 {
+                h.allowed(&self.req, &holders).1
             } else {
-                (1, String::new())
+                String::new()
             };
             // A waiter holds a ticket, never a slot (ER-43): the slot of a step that waits for the load stays free for whoever
-            // the rule lets in.
-            // A container run also waits for the quick lane to empty: it runs alone.
-            let limited = dirs.len() >= allowed as usize || !at_head || (container_req && !cheap_dirs.is_empty());
+            // the rule lets in. A container run also waits for the quick lane to empty: it runs alone.
             let quick_lane = if quick_ok { CHEAP_BASE..CHEAP_BASE + CHEAP_LANE } else { 0..0 };
             for i in (0..h.cfg.slots).chain(quick_lane) {
-                let dir = h.slot_dir(i);
                 let in_quick_lane = i >= CHEAP_BASE;
-                if dir.exists() {
+                let is_held = if in_quick_lane {
+                    cheap.iter().any(|(s, _)| *s == i)
+                } else {
+                    held.iter().any(|(s, _)| *s == i)
+                };
+                if is_held {
                     if !in_quick_lane {
-                        busy.get_or_insert(dir);
+                        busy.get_or_insert(i);
                     }
                     continue;
                 }
@@ -1237,15 +1172,15 @@ impl<'a> Acquirer<'a> {
                     continue;
                 }
                 let t = h.clock.now_micros();
-                match h.try_take(&dir, &self.req, &mut self.epoch) {
-                    Take::Taken => {
-                        self.held = Some(i);
+                match h.try_take(i, &self.req, &mut self.epoch) {
+                    Take::Taken(lock) => {
+                        self.held = Some((i, lock));
                         if let Some(hook) = h.faults.after_take.lock().ok().and_then(|mut x| x.take()) {
                             hook();
                         }
                         // Two takers can both have seen room (the load rose, a container run arrived, a high run came in beside the
                         // head): look again now that the slot is ours, and step back if the younger of too many. The ticket stays.
-                        if h.cfg.slots > 1 && !in_quick_lane && h.over_allowed(&self.req, i, self.epoch) {
+                        if h.cfg.slots > 1 && !in_quick_lane && h.over_allowed(&self.req, self.epoch) {
                             self.release_slot();
                             h.log.info(
                                 "heavy.wait",
@@ -1259,13 +1194,12 @@ impl<'a> Acquirer<'a> {
                             );
                             return Poll::Waiting;
                         }
-                        // Its share of the cores: as many steps as may run now, or as run now with it (a quick row beside them).
-                        let running = u32::try_from(dirs.len() + cheap_dirs.len() + 1).unwrap_or(u32::MAX);
-                        self.share = allowed.max(running).max(1);
+                        let running = held.len() + cheap.len() + 1;
+                        self.share = core::share(allowed, running);
                         self.waited_micros = h.clock.now_micros().saturating_sub(self.t0_micros);
                         // The admission decision, with what the rule saw: a stall explains itself from this line (ER-27).
                         let lane = if in_quick_lane { "quick" } else { "slot" };
-                        let mut props = h.admission_props(&self.req, lane, dirs.len() + cheap_dirs.len() + 1, allowed);
+                        let mut props = h.admission_props(&self.req, lane, running, allowed);
                         props.push(("WaitedSeconds", json!(self.waited_micros / 1_000_000)));
                         h.log.info("heavy.admit", &format!("admitted to the {lane} lane: {seen}"), &props);
                         h.log.info(
@@ -1297,7 +1231,19 @@ impl<'a> Acquirer<'a> {
                         return Poll::Held;
                     }
                     Take::Busy => {
-                        busy.get_or_insert(dir);
+                        busy.get_or_insert(i);
+                    }
+                    Take::LockFailed(e) => {
+                        h.log.event(
+                            Level::Error,
+                            "heavy.take",
+                            "the lock file could not be locked",
+                            &[("Error", json!(e)), ("Root", json!(h.cfg.root.to_string_lossy()))],
+                        );
+                        return Poll::GaveUp(format!(
+                            "giving up: no lock taken, the lock file in {} could not be locked ({e}); use a folder on a local disk (HEAVY_DIR)",
+                            h.cfg.root.display()
+                        ));
                     }
                     Take::WriteFailed => {
                         self.fails += 1;
@@ -1329,16 +1275,16 @@ impl<'a> Acquirer<'a> {
                 // A drain owner waits here for the running steps to end; it is the member of a cycle that can withdraw its marker.
                 self.check_cycle();
             }
-            if let Some(dir) = busy {
-                let (mut msg, props) = h.holder_note(&dir);
-                let mut reason = format!("{}:{}", msg.split(" for ").next().unwrap_or(""), file_name(&dir));
-                if h.cfg.slots > 1 && dirs.len() > 1 || (limited && h.cfg.slots > 1) {
-                    msg = format!("{msg}; {} running, {seen}", dirs.len());
+            if let Some(slot) = busy {
+                let (mut msg, props) = h.holder_note(slot);
+                let mut reason = format!("{}:slot{slot}", msg.split(" for ").next().unwrap_or(""));
+                if h.cfg.slots > 1 && held.len() > 1 || (limited && h.cfg.slots > 1) {
+                    msg = format!("{msg}; {} running, {seen}", held.len());
                     reason = format!("{reason}:limit{allowed}");
                 }
                 self.wait_for(&reason, &msg, &props);
             }
-            return Poll::Waiting;
+            Poll::Waiting
         }
     }
 
@@ -1356,10 +1302,10 @@ impl<'a> Acquirer<'a> {
         let now = self.h.now();
         let owners: Vec<Owner> = self
             .h
-            .held_dirs()
-            .iter()
-            .chain(&self.h.held_cheap_dirs())
-            .filter_map(|d| match self.h.read_owner(d) {
+            .held_slots()
+            .into_iter()
+            .chain(self.h.held_cheap())
+            .filter_map(|(_, o)| match o {
                 OwnerRead::Ok(o) => Some(o),
                 _ => None,
             })
@@ -1367,36 +1313,13 @@ impl<'a> Acquirer<'a> {
         let live = holder_cap.is_some_and(|c| owners.iter().any(|o| within_cap(o.epoch, now, c)));
         let holders = owners
             .into_iter()
-            .map(|o| Holder {
+            .map(|o| QueueHolder {
                 name: o.name,
                 pid: o.pid,
                 epoch: o.epoch,
             })
             .collect();
         QueueView { position, holders, live }
-    }
-
-    /// Records the command this run started (pid and OS start time) as line 7 of the owner record, atomically, so a heavy
-    /// that is killed while its command still runs does not let the next waiter break the lock.
-    pub fn set_child(&mut self, pid: u32, start_micros: u64) {
-        let (h, Some(i)) = (self.h, self.held) else { return };
-        let dir = h.slot_dir(i);
-        let OwnerRead::Ok(mut o) = h.read_owner(&dir) else { return };
-        if o.pid != h.pid || o.epoch != Some(self.epoch) {
-            return;
-        }
-        o.child = Some((pid, start_micros));
-        let tmp = dir.join("owner.tmp");
-        // conformance: write-atomic — the rename claims a name in the lock protocol (it fails when the name exists); the marker is a few bytes written under this holder's own name
-        let ok = fs::write(&tmp, record::format_owner(&o, self.epoch)).is_ok() && fs::rename(&tmp, dir.join("owner")).is_ok();
-        if !ok {
-            let _ = fs::remove_file(&tmp);
-            h.log.warn(
-                "heavy.take",
-                "could not record the command's identity in the owner record",
-                &[("ChildPid", json!(pid))],
-            );
-        }
     }
 
     /// Microseconds spent waiting for the lock (valid once held).
@@ -1414,7 +1337,14 @@ impl<'a> Acquirer<'a> {
         self.held.is_some()
     }
 
-    /// Gives everything back: the marker, the ticket, and the lock if the owner record is still ours.
+    /// The slot this run holds (1-based; the quick lane's places are named by their lane index too), for logs.
+    pub fn slot(&self) -> Option<u32> {
+        self.held
+            .as_ref()
+            .map(|(i, _)| if *i >= CHEAP_BASE { *i - CHEAP_BASE + 1 } else { *i + 1 })
+    }
+
+    /// Gives everything back: the marker, the ticket, and the slot.
     pub fn release(&mut self) {
         if let Some(m) = self.marker.take() {
             let _ = fs::remove_file(m);
@@ -1438,53 +1368,17 @@ impl<'a> Acquirer<'a> {
         }
     }
 
+    /// Gives the slot back: the record goes first (so the next taker's record is never the one removed), then the kernel lock.
     fn release_slot(&mut self) {
         let h = self.h;
-        if let Some(i) = self.held.take() {
-            let dir = h.slot_dir(i);
-            match h.read_owner(&dir) {
-                OwnerRead::Ok(o) if o.pid == h.pid && o.epoch == Some(self.epoch) => {
-                    let hook = h.faults.before_release.lock().ok().and_then(|mut x| x.take());
-                    if let Some(hook) = hook {
-                        hook();
-                    }
-                    // Rename aside first: what is removed is the directory we now own, re-checked, never a lock that was
-                    // replaced between the check and the removal.
-                    let aside = h.tmp_name("release.");
-                    if fs::rename(&dir, &aside).is_err() {
-                        h.log.warn(
-                            "heavy.release",
-                            "the lock could not be moved aside; left alone",
-                            &[("Slot", json!(i + 1))],
-                        );
-                        return;
-                    }
-                    match h.read_owner(&aside) {
-                        OwnerRead::Ok(now) if now.pid == h.pid && now.epoch == Some(self.epoch) => {
-                            let _ = fs::remove_dir_all(&aside);
-                            h.log.info("heavy.release", "released the lock", &[("Slot", json!(i + 1))]);
-                        }
-                        other => {
-                            if !dir.exists() && fs::rename(&aside, &dir).is_ok() {
-                                h.log.warn(
-                                    "heavy.release",
-                                    "the lock changed while it was being released; put back",
-                                    &[("Slot", json!(i + 1)), ("Found", json!(format!("{other:?}")))],
-                                );
-                            } else {
-                                h.blog(&format!(
-                                    "{} could not put back a changed lock at release; left at {}",
-                                    self.req.name,
-                                    aside.display()
-                                ));
-                            }
-                        }
-                    }
-                }
-                other => h.log.warn(
+        if let Some((i, lock)) = self.held.take() {
+            let _ = fs::remove_file(h.slot_info(i));
+            match lock.release() {
+                Ok(()) => h.log.info("heavy.release", "released the lock", &[("Slot", json!(i + 1))]),
+                Err(e) => h.log.warn(
                     "heavy.release",
-                    "the lock is no longer ours; left alone",
-                    &[("Slot", json!(i + 1)), ("Found", json!(format!("{other:?}")))],
+                    "the unlock failed; the slot is freed when this handle closes",
+                    &[("Slot", json!(i + 1)), ("Error", json!(e.to_string()))],
                 ),
             }
         }

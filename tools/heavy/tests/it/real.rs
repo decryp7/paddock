@@ -149,89 +149,10 @@ fn high_goes_before_an_earlier_normal_waiter() {
 }
 
 #[test]
-fn a_dead_owner_is_broken_and_a_recycled_pid_too() {
-    let w = World::new();
-    let dead = dead_pid();
-    fs::create_dir(w.lock_dir()).unwrap();
-    fs::write(
-        w.lock_dir().join("owner"),
-        format!("{dead}\nx\nghost\n{}\n/tmp\nsleep 1\n", now_secs()),
-    )
-    .unwrap();
-    let (code, _, e) = heavy_out(&w, &echo_args("Z", w.path("out").to_str().unwrap()), &[]);
-    assert_eq!(code, 0, "{e}");
-    assert!(
-        w.read(w.root().join("pitcrew-lock-breaks.log"))
-            .contains("Z broke a stale lock of ghost")
-    );
-
-    // a live process that started AFTER the record: the pid was handed on
-    let w = World::new();
-    let live = sleeper();
-    fs::create_dir(w.lock_dir()).unwrap();
-    fs::write(
-        w.lock_dir().join("owner"),
-        format!("{}\nx\nreused\n{}\n", live.pid(), now_secs() - 100),
-    )
-    .unwrap();
-    let t0 = std::time::Instant::now();
-    let (code, _, e) = heavy_out(&w, &echo_args("Z", w.path("out").to_str().unwrap()), &[]);
-    assert_eq!(code, 0, "{e}");
-    assert!(t0.elapsed().as_secs() <= 4);
-    let breaks = w.read(w.root().join("pitcrew-lock-breaks.log"));
-    assert!(breaks.contains("Z broke a stale lock of reused"), "{breaks}");
-}
-
-#[test]
-fn a_live_owner_whose_record_is_right_is_not_broken_whatever_tz_and_locale() {
-    for (t1, l1, t2, l2) in [
-        ("UTC", "de_DE.UTF-8", "Asia/Tokyo", "C"),
-        ("America/Los_Angeles", "fr_FR.UTF-8", "UTC", "en_US.UTF-8"),
-    ] {
-        let w = World::new();
-        let (flag, out) = (w.flag(), w.path("out"));
-        let (flag, out) = (flag.to_str().unwrap(), out.to_str().unwrap());
-        let mut h = heavy_env(&w, &hold_args("Holder", flag, out), &[("TZ", t1), ("LC_ALL", l1)]);
-        wait_until("holder", || w.locked());
-        let mut wt = heavy_env(&w, &echo_args("Waiter", out), &[("TZ", t2), ("LC_ALL", l2)]);
-        wait_until("waiter notes", || {
-            w.read(w.root().join("pitcrew-lock-activity.log")).contains("Waiter waiting")
-        });
-        assert!(
-            w.lock_dir().exists() && w.out().is_empty(),
-            "TZ={t1} LC_ALL={l1} holder broken by TZ={t2} LC_ALL={l2} waiter"
-        );
-        assert!(!w.read(w.root().join("pitcrew-lock-breaks.log")).contains("broke"));
-        w.release();
-        assert!(h.finish().success() && wt.finish().success());
-    }
-}
-
-/// Epoch second pid 1 started, from the same source heavy reads: the record must be written after its writer started,
-/// whatever the age of the machine or container (a fixed "100 s ago" is older than a container started a second ago).
-fn init_start_epoch() -> u64 {
-    ProcessId::of(1).expect("pid 1 is visible").started().as_micros() / 1_000_000
-}
-
-#[test]
-fn pid_one_is_alive_even_though_we_may_not_signal_it() {
-    let w = World::new();
-    fs::create_dir(w.lock_dir()).unwrap();
-    fs::write(w.lock_dir().join("owner"), format!("1\nx\ninit\n{}\n", init_start_epoch() + 1)).unwrap();
-    let mut g = heavy(&w, &echo_args("W", w.path("out").to_str().unwrap()));
-    wait_until("waiting for init", || {
-        w.read(w.root().join("pitcrew-lock-activity.log")).contains("held by init")
-    });
-    assert!(w.lock_dir().exists() && w.out().is_empty());
-    fs::remove_dir_all(w.lock_dir()).unwrap();
-    assert!(g.finish().success());
-}
-
-#[test]
 fn the_owner_record_has_six_lines_and_the_command_is_masked() {
     let w = World::new();
     let copy = w.path("rec.txt");
-    let lock_owner = w.lock_dir().join("owner");
+    let lock_owner = w.lock_dir();
     let script = format!("cp {} {}", lock_owner.display(), copy.display());
     let (code, _, e) = heavy_out(
         &w,
@@ -623,24 +544,6 @@ fn the_home_guard_also_reads_cargo_build_target_dir_and_cargo_config() {
     .unwrap();
     let (code, _, e) = heavy_out_in(&w, Some(proj.as_path()), &["run", "--no-gate", "G", "--", "true"], &[]);
     assert_eq!(code, 0, "{e}");
-}
-
-#[test]
-fn the_owner_record_names_the_command_while_it_runs() {
-    let w = World::new();
-    let (flag, out) = (w.flag(), w.path("out"));
-    let (flag, out) = (flag.to_str().unwrap(), out.to_str().unwrap());
-    let mut a = heavy(&w, &hold_args("C", flag, out));
-    wait_until("the child line", || w.owner_line(6).starts_with("child "));
-    let line = w.owner_line(6);
-    let parts: Vec<&str> = line.split(' ').collect();
-    let child: u32 = parts[1].parse().expect("child pid");
-    assert_ne!(child, a.pid());
-    // conformance: recorded-pid — holder `a` runs until `w.release()`, and the start time is compared with the record
-    assert!(ProcessId::of(child).is_some_and(|p| p.started().as_micros().to_string() == parts[2]));
-    assert_eq!(w.owner_line(0), a.pid().to_string(), "line 1 stays heavy's own pid for the shell");
-    w.release();
-    assert!(a.finish().success());
 }
 
 /// `heavy run` of `cat; echo eof-seen` with the caller's standard input an open pipe nobody writes to or closes.

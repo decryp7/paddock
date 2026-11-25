@@ -47,7 +47,7 @@ fn admission_refuses_a_second_step_past_the_memory_threshold() {
         "the wait line names the memory: {}",
         b.said()
     );
-    assert_eq!(rig.count("pitcrew-heavy-v2.lock"), 1, "the refused step holds a ticket, not a slot");
+    assert_eq!(rig.held("heavy-"), 1, "the refused step holds a ticket, not a slot");
 
     // Positive control: with the memory for two steps and the reserve the same world admits the second.
     let (rig, cfg) = rig_with(5);
@@ -122,7 +122,7 @@ fn two_quick_rows_run_together_beside_a_long_step_at_a_high_15_minute_load() {
     let mut q3 = Acquirer::new(&ags[3].h, quick("Q3")).unwrap();
     assert_eq!(q1.poll(), Poll::Held);
     assert_eq!(q2.poll(), Poll::Held, "two quick rows at once");
-    assert_eq!(rig.count("pitcrew-heavy-v2.lock.cheap"), CHEAP_LANE as usize);
+    assert_eq!(rig.held("heavy-cheap"), CHEAP_LANE as usize);
     assert_eq!(q3.poll(), Poll::Waiting, "the quick lane has {CHEAP_LANE} places");
     q1.release();
     assert_eq!(q3.poll(), Poll::Held, "a place came free");
@@ -135,7 +135,7 @@ fn two_quick_rows_run_together_beside_a_long_step_at_a_high_15_minute_load() {
     assert_eq!(l.poll(), Poll::Held);
     let mut r1 = Acquirer::new(&ags[1].h, req("R1")).unwrap();
     assert_eq!(r1.poll(), Poll::Waiting, "control: without a history it waits");
-    assert_eq!(rig.count("pitcrew-heavy-v2.lock.cheap"), 0);
+    assert_eq!(rig.held("heavy-cheap"), 0);
 }
 
 #[test]
@@ -186,7 +186,7 @@ fn a_quick_row_is_not_admitted_when_the_memory_or_the_cpu_is_short() {
         assert_eq!(l.poll(), Poll::Held);
         let mut q = Acquirer::new(&b.h, quick("Q")).unwrap();
         assert_eq!(q.poll(), Poll::Waiting, "memory {memory:?}, idle {idle:?}");
-        assert_eq!(rig.count("pitcrew-heavy-v2.lock.cheap"), 0);
+        assert_eq!(rig.held("heavy-cheap"), 0);
     }
 }
 
@@ -237,7 +237,7 @@ fn no_waiter_holds_a_slot_not_even_a_quick_one() {
     assert_eq!(polls.iter().filter(|p| **p == Poll::Held).count(), CHEAP_LANE as usize);
     assert_eq!(long_waiter.poll(), Poll::Waiting);
     // Folders that hold a step: the full slot and the quick lane's places, and nothing for the three that wait.
-    assert_eq!(rig.count("pitcrew-heavy-v2.lock"), 1 + CHEAP_LANE as usize);
+    assert_eq!(rig.held("heavy-"), 1 + CHEAP_LANE as usize);
     assert_eq!(
         rig.count("pitcrew-heavy.ticket."),
         2 + 1,

@@ -111,7 +111,7 @@ fn a_waiter_holds_a_ticket_and_never_a_slot() {
     assert_eq!(ha.poll(), Poll::Held);
     assert_eq!(hb.poll(), Poll::Waiting);
     assert_eq!(hc.poll(), Poll::Waiting);
-    assert_eq!(rig.count("pitcrew-heavy-v2.lock"), 1, "only the running step holds a slot folder");
+    assert_eq!(rig.held("heavy-"), 1, "only the running step holds a slot folder");
     assert_eq!(rig.count("pitcrew-heavy.ticket."), 2, "the waiters hold tickets");
     // The load drops: the head of the queue takes the second slot at once; the next takes one when a holder ends (at most two).
     rig.load.set(1.0);
@@ -201,25 +201,23 @@ fn a_container_run_that_appears_beside_a_taker_makes_the_younger_give_its_slot_b
     let a = rig.agent_with(91, cfg);
     let mut ha = Acquirer::new(&a.h, req("A")).unwrap();
     // Between A's take and its second look at the folder, a container run takes the second slot (it saw an empty machine too).
-    let root = rig.root().to_path_buf();
-    let procs = rig.procs.clone();
     let now = rig.now();
+    let (kept, planted) = (std::sync::Arc::new(std::sync::Mutex::new(Vec::new())), rig.clone_paths());
+    let keep = kept.clone();
     *a.h.faults.after_take.lock().unwrap() = Some(Box::new(move || {
-        procs.run(92, now.saturating_sub(150));
-        let dir = root.join("pitcrew-heavy-v2.lock.slot2");
-        std::fs::create_dir(&dir).unwrap();
-        std::fs::write(
-            dir.join("owner"),
-            format!("92\nstart\nC\n{}\n/w\nbash tools/linux-container.sh x\n", now.saturating_sub(100)),
-        )
-        .unwrap();
+        let held = planted.plant_slot(
+            2,
+            &format!("92\nstart\nC\n{}\n/w\nbash tools/linux-container.sh x\n", now.saturating_sub(100)),
+        );
+        keep.lock().unwrap().push(held);
     }));
     assert_eq!(ha.poll(), Poll::Waiting, "a container beside it: the younger one steps back");
     assert!(!rig.lock_dir().exists(), "its slot is free again");
     assert!(
-        rig.root().join("pitcrew-heavy-v2.lock.slot2").exists(),
+        rig.root().join("heavy-slot2.info").exists() && heavy::slotfile::is_held(&rig.root().join("heavy-slot2.lock")).unwrap(),
         "the container run keeps its slot"
     );
+    drop(kept);
     assert_eq!(rig.count("pitcrew-heavy.ticket."), 1, "it keeps its place in the queue");
 }
 
@@ -229,18 +227,14 @@ fn a_taker_that_finds_more_holders_than_the_load_allows_steps_back_unless_it_is_
     let a = rig.agent_with(93, cfg.clone());
     let mut ha = Acquirer::new(&a.h, req("A")).unwrap();
     let load = rig.load.clone();
-    let (root, procs, now) = (rig.root().to_path_buf(), rig.procs.clone(), rig.now());
+    let (planted, now) = (rig.clone_paths(), rig.now());
+    let kept = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let keep = kept.clone();
     *a.h.faults.after_take.lock().unwrap() = Some(Box::new(move || {
         // The load rose, and an older holder is there beside A.
         load.set(15.0);
-        procs.run(94, now.saturating_sub(150));
-        let dir = root.join("pitcrew-heavy-v2.lock.slot2");
-        std::fs::create_dir(&dir).unwrap();
-        std::fs::write(
-            dir.join("owner"),
-            format!("94\nstart\nO\n{}\n/w\ncargo test\n", now.saturating_sub(100)),
-        )
-        .unwrap();
+        let held = planted.plant_slot(2, &format!("94\nstart\nO\n{}\n/w\ncargo test\n", now.saturating_sub(100)));
+        keep.lock().unwrap().push(held);
     }));
     assert_eq!(ha.poll(), Poll::Waiting);
     // The oldest holder keeps its slot whatever the count: two takers never both step back.
@@ -248,13 +242,13 @@ fn a_taker_that_finds_more_holders_than_the_load_allows_steps_back_unless_it_is_
     let b = rig.agent_with(95, cfg);
     let mut hb = Acquirer::new(&b.h, req("B")).unwrap();
     let load = rig.load.clone();
-    let (root, procs, now) = (rig.root().to_path_buf(), rig.procs.clone(), rig.now());
+    let (planted, now) = (rig.clone_paths(), rig.now());
+    let kept2 = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let keep2 = kept2.clone();
     *b.h.faults.after_take.lock().unwrap() = Some(Box::new(move || {
         load.set(15.0);
-        procs.run(96, now.saturating_sub(5));
-        let dir = root.join("pitcrew-heavy-v2.lock.slot2");
-        std::fs::create_dir(&dir).unwrap();
-        std::fs::write(dir.join("owner"), format!("96\nstart\nY\n{}\n/w\ncargo test\n", now)).unwrap();
+        let held = planted.plant_slot(2, &format!("96\nstart\nY\n{}\n/w\ncargo test\n", now));
+        keep2.lock().unwrap().push(held);
     }));
     assert_eq!(
         hb.poll(),
@@ -275,11 +269,11 @@ fn a_binary_of_the_single_slot_kind_and_the_load_aware_ones_never_hold_more_than
     for _ in 0..4 {
         for h in hs.iter_mut() {
             let _ = h.poll();
-            let held = rig.count("pitcrew-heavy-v2.lock");
+            let held = rig.held("heavy-");
             assert!(held <= 5, "{held} holders beside each other");
         }
     }
-    assert!(rig.count("pitcrew-heavy-v2.lock") >= 2, "several run together");
+    assert!(rig.held("heavy-") >= 2, "several run together");
 }
 
 #[test]
@@ -382,7 +376,7 @@ fn a_container_run_held_by_a_single_slot_binary_keeps_the_load_aware_ones_from_s
         Poll::Held,
         "the old binary starts beside the new holder of another slot (the documented gap)"
     );
-    assert_eq!(rig.count("pitcrew-heavy-v2.lock"), 2);
+    assert_eq!(rig.held("heavy-"), 2);
 }
 
 /// The deadlock of 2026-11-18 (train 16): the head of the queue waits for a container run's drain, and the container run (the drain's
@@ -478,7 +472,7 @@ fn model_stuck_with(seed: u64, max: u32) -> Option<String> {
                 ran_for[i] = Some(round);
             }
         }
-        let holders = rig.count("pitcrew-heavy-v2.lock");
+        let holders = rig.held("heavy-");
         if holders > max as usize {
             return Some(format!("seed {seed}: {holders} holders, max {max}"));
         }

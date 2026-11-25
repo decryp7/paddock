@@ -599,13 +599,15 @@ fn exec(h: &Heavy, args: &[String], opts: RunOpts, stop: Stop<'_>, acq: Option<&
         let t = h.cfg.stderr_tail.then(|| Arc::clone(&tail));
         pumps.push(pump(err, true, log_arc, Arc::clone(&bytes), t, Arc::clone(&open)));
     }
+    // The slot is held by this heavy's own file handle, which the command does not inherit: a command that outlives this heavy
+    // never keeps the slot (the kernel frees it when heavy ends, however it ends).
     let id = ProcessId::of(child.id());
-    if let Some(id) = id
-        && let Some(acq) = acq
-    {
-        acq.set_child(id.pid(), id.started().as_micros());
-    }
-    h.log.info("heavy.run", "command started", &[("ChildPid", json!(child.id()))]);
+    let slot = acq.and_then(|a| a.slot());
+    h.log.info(
+        "heavy.run",
+        "command started",
+        &[("ChildPid", json!(child.id())), ("Slot", json!(slot))],
+    );
     let mut stopped: Option<i32> = None;
     let mut deadline: Option<Instant> = None;
     let run_end = opts.run_max.map(|m| Instant::now() + m);

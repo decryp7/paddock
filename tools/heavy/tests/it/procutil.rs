@@ -85,7 +85,7 @@ impl World {
         self.dir.path().join(name)
     }
     pub fn lock_dir(&self) -> PathBuf {
-        self.root().join("pitcrew-heavy-v2.lock")
+        self.root().join("heavy-slot1.info")
     }
     pub fn out(&self) -> String {
         std::fs::read_to_string(self.path("out")).unwrap_or_default()
@@ -109,7 +109,7 @@ impl World {
             .unwrap_or(0)
     }
     pub fn owner_line(&self, n: usize) -> String {
-        std::fs::read_to_string(self.lock_dir().join("owner"))
+        std::fs::read_to_string(self.lock_dir())
             .unwrap_or_default()
             .lines()
             .nth(n)
@@ -117,7 +117,7 @@ impl World {
             .to_string()
     }
     pub fn locked(&self) -> bool {
-        std::fs::metadata(self.lock_dir().join("owner")).is_ok_and(|m| m.len() > 0)
+        std::fs::metadata(self.lock_dir()).is_ok_and(|m| m.len() > 0)
     }
     pub fn read(&self, p: impl AsRef<Path>) -> String {
         std::fs::read_to_string(p).unwrap_or_default()

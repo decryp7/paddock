@@ -2,6 +2,7 @@
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 mod admission;
 mod capture;
+mod filelock;
 mod helpers;
 mod logging;
 mod ported;
