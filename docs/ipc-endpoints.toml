@@ -195,6 +195,13 @@ calls = ["std::net::TcpListener::bind"]
 sites = 1
 
 [[out_of_scope]]
+path = "crates/paddock-testkit/src/bin/paddock-stand-in.rs"
+reason = "Test support: the stand-in program's `listens` step, a fake server for tests (a hung sccache server) that takes connections on 127.0.0.1 and answers none, until it is ended or reaches its two-minute cap."
+owner = "paddock-testkit"
+calls = ["std::net::TcpListener::bind"]
+sites = 1
+
+[[out_of_scope]]
 path = "crates/paddock-net/src/stall_guard/proxy.rs"
 reason = "A loopback TCP proxy in front of one store (CI's S3 compile cache): it forwards opaque bytes and keeps TCP's own connection semantics, so the paddock-ipc endings scenarios do not apply; its endings (cut after a stall, breaker, stop request, idle exit) have their own tests in stall_guard/tests.rs."
 owner = "paddock-net"

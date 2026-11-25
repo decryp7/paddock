@@ -297,6 +297,14 @@ impl Actions {
         self.step("stop_self", Value::Null)
     }
 
+    /// Listens on 127.0.0.1 at the port `port_template` names (`{env:SCCACHE_SERVER_PORT}`), takes every connection and answers
+    /// none, until it is ended or reaches the cap of two minutes: a server that has hung. A taken port ends it at once (exit 70,
+    /// "Address already in use" on stderr). Nothing after it runs.
+    #[must_use]
+    pub fn listens(self, port_template: &str) -> Actions {
+        self.step("listen", Value::Str(port_template.to_string()))
+    }
+
     /// Reads one line of stdin (and no more), which `{stdin_line}` then gives: a program that waits for a `go` on its stdin.
     #[must_use]
     pub fn reads_stdin_line(mut self) -> Actions {
