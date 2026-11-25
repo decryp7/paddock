@@ -9,7 +9,7 @@ use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Mutex, MutexGuard, OnceLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// In a test binary: when set, a process that runs as root acts as the unprivileged user the guardian is meant for, so the
 /// Linux CI containers (which run as root) exercise the guardian's acting code under coverage instead of only the root
@@ -34,6 +34,14 @@ pub(crate) const MARKER: &str = ".paddock-proc-guardian";
 /// How often, and how many times, the guardian looks whether an ended group has emptied before it removes the folder.
 const EMPTY_LOOK: Duration = Duration::from_millis(50);
 const EMPTY_LOOKS: u32 = 200;
+/// What the guardian writes on its standard error once its check of the owner passed, before it reads any line: the owner
+/// waits for it, so a guarded child is never handed back while its guardian could still refuse an owner that has died.
+const SERVING: &[u8] = b"serving\n";
+/// How long the owner waits for [`SERVING`]: a hang detector (ER-12), not a budget. The wait ends at once when the guardian
+/// exits (its pipe closes); only a guardian that runs but never gets to its check reaches it. Measured from spawn to the word
+/// (2026-11-25, 30 starts each): median 3 ms, at most 4 ms on the Mac mini (load 9); median 11 ms, at most 12 ms in the arm64
+/// Linux CI image (4 CPUs). 30 s is over 2,000 times the slowest.
+const SERVE_WAIT: Duration = Duration::from_secs(30);
 /// The longest line the guardian takes (a folder of 4096 bytes is 8192 hex digits).
 const MAX_LINE: usize = 16 << 10;
 
@@ -192,6 +200,7 @@ fn start(args: &[OsString], me: ProcessId) -> std::io::Result<Running> {
     let exe = std::env::current_exe()?;
     let (from_owner, to) = std::io::pipe()?;
     let (keeper_input, keeper_hold) = std::io::pipe()?;
+    let (ready, says_ready) = std::io::pipe()?;
     let mut cmd = plumbing(exe);
     cmd.args(args)
         .env(GUARDIAN_ENV, "1")
@@ -199,7 +208,7 @@ fn start(args: &[OsString], me: ProcessId) -> std::io::Result<Running> {
         .env_remove(LOG_ENV)
         .stdin(from_owner)
         .stdout(keeper_hold)
-        .stderr(Stdio::null())
+        .stderr(says_ready)
         .process_group(0);
     let log = log_path();
     if let Some(l) = &log {
@@ -210,10 +219,24 @@ fn start(args: &[OsString], me: ProcessId) -> std::io::Result<Running> {
         // The guardian is a process of its own: it acts as the user too.
         cmd.env(ACT_AS_USER_ENV, "1");
     }
-    let child = cmd.spawn()?;
+    let began = Instant::now();
+    let mut child = cmd.spawn()?;
+    // The command holds the write ends it gave the guardian: closed here, so the guardian's exit is the ready pipe's end.
+    drop(cmd);
+    if let Err(why) = await_serving(&ready, SERVE_WAIT) {
+        // Ended through its handle: this process's own unreaped child.
+        crate::cleanup::logged("ending a guardian that does not serve", child.kill());
+        crate::cleanup::logged("reaping a guardian that does not serve", child.wait());
+        return Err(std::io::Error::other(format!(
+            "it did not start serving after {} ms ({why}); its log is {}",
+            began.elapsed().as_millis(),
+            log_text(log.as_deref())
+        )));
+    }
     log::info!(
-        "Started the orphan guardian (pid {}) for this process's supervised children; its log is {}",
+        "Started the orphan guardian (pid {}) for this process's supervised children, serving after {} ms; its log is {}",
         child.id(),
+        began.elapsed().as_millis(),
         log_text(log.as_deref())
     );
     Ok(Running {
@@ -221,6 +244,71 @@ fn start(args: &[OsString], me: ProcessId) -> std::io::Result<Running> {
         to,
         keeper_input,
     })
+}
+
+/// Waits up to `within` for the guardian's [`SERVING`] line on `ready`; the reason when it does not come (the guardian
+/// exited, which closes the pipe, or the wait ran out).
+fn await_serving(ready: &std::io::PipeReader, within: Duration) -> Result<(), String> {
+    use std::os::fd::AsRawFd;
+    let end = Instant::now() + within;
+    let mut got = Vec::new();
+    loop {
+        let left = end.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            return Err(format!("no word within {} s", within.as_secs()));
+        }
+        let mut p = libc::pollfd {
+            fd: ready.as_raw_fd(),
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        let ms = libc::c_int::try_from(left.as_millis().max(1)).unwrap_or(libc::c_int::MAX);
+        // SAFETY: one valid pollfd for the duration of the call.
+        let n = unsafe { libc::poll(&mut p, 1, ms) };
+        if n < 0 {
+            let e = std::io::Error::last_os_error();
+            if e.kind() == std::io::ErrorKind::Interrupted {
+                continue;
+            }
+            return Err(format!("waiting for its word failed ({e})"));
+        }
+        if n == 0 {
+            continue;
+        }
+        let mut buf = [0u8; 64];
+        match std::io::Read::read(&mut &*ready, &mut buf) {
+            Ok(0) => {
+                return Err(
+                    "it exited first: it refused the owner, or could not run; its log says why"
+                        .into(),
+                );
+            }
+            Ok(k) => got.extend_from_slice(&buf[..k]),
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(e) => return Err(format!("reading its word failed ({e})")),
+        }
+        if got.len() >= SERVING.len() {
+            return if got.starts_with(SERVING) {
+                Ok(())
+            } else {
+                Err(format!("it said {:?}", String::from_utf8_lossy(&got)))
+            };
+        }
+    }
+}
+
+/// The guardian's side of [`await_serving`]: says [`SERVING`] on standard error (the owner's ready pipe), then points
+/// standard error at the null device, so nothing written later goes into a pipe the owner no longer reads.
+fn say_serving() {
+    use std::os::fd::AsRawFd;
+    crate::cleanup::logged(
+        "telling the owner the guardian serves",
+        std::io::stderr().write_all(SERVING),
+    );
+    if let Ok(null) = std::fs::OpenOptions::new().write(true).open("/dev/null") {
+        // SAFETY: dup2 on two descriptors this process holds; standard error now names the null device.
+        unsafe { libc::dup2(null.as_raw_fd(), libc::STDERR_FILENO) };
+    }
 }
 
 /// How the log reads in a message.
@@ -748,6 +836,7 @@ fn serve(input: impl BufRead) -> i32 {
         ends.log(&format!("refused to serve: {why}"));
         return 2;
     }
+    say_serving();
     guard(input, &mut ends, EMPTY_LOOKS);
     // The keepers' pipe closes with this process, so the keepers of groups that were not ended end too.
     0

@@ -530,6 +530,16 @@ fn guard_owner_process() {
         return;
     };
     enable_in_test_binary(ENTRY);
+    if std::env::var_os(OWNER_DIES_ENV).is_some() {
+        let mut cmd = crate::command("/bin/sleep");
+        // Not this process's output: the test reads that to its end, which must come with this process's death.
+        cmd.arg("60").stdout(Stdio::null()).stderr(Stdio::null());
+        let first = folders.split(':').next().unwrap_or_default();
+        let s = Supervised::spawn_owning_folder(cmd, None, Path::new(first)).unwrap();
+        println!("child {}", s.id().unwrap());
+        // SAFETY: raise takes a signal number; SIGKILL ends this process at once, so none of its clean-up runs.
+        unsafe { libc::raise(libc::SIGKILL) };
+    }
     let mut held = Vec::new();
     for folder in folders.split(':') {
         let mut cmd = crate::command("/bin/sh");
@@ -547,6 +557,25 @@ fn guard_owner_process() {
     let _ = std::io::stdin().read_line(&mut String::new());
     std::process::exit(0);
 }
+
+/// What a failed guard left (ER-27): each process's state, each folder, and the guardian's log.
+fn what_is_left(ids: &[ProcessId], folders: &[PathBuf], log: &Path) -> String {
+    let mut lines: Vec<String> = ids
+        .iter()
+        .map(|id| format!("{id}: {:?}", run_state(*id)))
+        .collect();
+    lines.extend(
+        folders
+            .iter()
+            .map(|f| format!("{}: exists {}", f.display(), f.exists())),
+    );
+    let text = std::fs::read_to_string(log).unwrap_or_default();
+    format!("{}\nthe guardian's log:\n{text}", lines.join("\n"))
+}
+
+/// Set for [`guard_owner_process`]: it starts one guarded child for the first folder, names it, and kills itself the moment the
+/// spawn returns, before its guardian could have done anything else.
+const OWNER_DIES_ENV: &str = "PADDOCK_GUARD_TEST_OWNER_DIES";
 
 /// [`fail`] unless `ok`.
 fn fail_unless(ok: bool, ids: &[ProcessId], why: &str) {
@@ -665,7 +694,10 @@ fn owner_killed(act_as_user: bool) {
     if !gone {
         fail(
             &ids,
-            "the orphaned children's groups did not end, or their folders stayed",
+            &format!(
+                "the orphaned children's groups did not end, or their folders stayed\n{}",
+                what_is_left(&ids, &folders, &log)
+            ),
         );
     }
     // The guardian logs a group after it removed its folder: wait for the lines, not for the folders alone.
@@ -679,6 +711,57 @@ fn owner_killed(act_as_user: bool) {
     // the guardian must read that as emptied (the old code looked 10 s per group and logged "still had members").
     assert_eq!(text.matches(" (emptied) and removed ").count(), 3, "{text}");
     assert!(!text.contains("still had members"), "{text}");
+}
+
+/// The owner dies the moment its guarded spawn returns (no reader of its output, no wait): the guardian must already serve it.
+/// Before the guardian said it served, the spawn returned while the guardian was still starting; the guardian then found its
+/// parent was init, refused, and the child and its folder stayed (the whole-workspace Linux run, 2026-11-25).
+#[test]
+fn an_owner_killed_the_moment_its_guarded_spawn_returns_leaves_no_child() {
+    let dir = tempfile::tempdir().unwrap();
+    let folder = dir.path().join("profile");
+    std::fs::create_dir_all(&folder).unwrap();
+    let log = dir.path().join("guardian.log");
+    let mut owner = crate::command(std::env::current_exe().unwrap())
+        .args([OWNER_TEST, "--exact", "--nocapture"])
+        .env(ACT_AS_USER_ENV, "1")
+        .env(OWNER_FOLDERS_ENV, &folder)
+        .env(OWNER_DIES_ENV, "1")
+        .env(LOG_ENV, &log)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut ids = Vec::new();
+    for line in BufReader::new(owner.stdout.take().unwrap()).lines() {
+        let line = line.unwrap();
+        if let ["child", c] = line.split_whitespace().collect::<Vec<_>>()[..] {
+            // conformance: recorded-pid — the guardian or this test ends it; paddock-proc's tests cannot use paddock-testkit-start (a cycle)
+            ids.extend(ProcessId::of(c.parse().unwrap()));
+        }
+    }
+    let status = owner.wait().unwrap();
+    let folders = [folder];
+    fail_unless(
+        ids.len() == 1
+            && std::os::unix::process::ExitStatusExt::signal(&status) == Some(libc::SIGKILL),
+        &ids,
+        &format!("the owner did not start its child and kill itself ({status}, children {ids:?})"),
+    );
+    let gone = paddock_testkit::wait::poll_until_within(paddock_testkit::wait::HANG_GUARD, || {
+        ids.iter().all(|id| run_state(*id) == RunState::Exited)
+            && folders.iter().all(|f| !f.exists())
+    });
+    if !gone {
+        fail(
+            &ids,
+            &format!(
+                "the child of an owner killed as its spawn returned stayed, or its folder did\n{}",
+                what_is_left(&ids, &folders, &log)
+            ),
+        );
+    }
 }
 
 /// A root process registers nothing (ADR 0076 amendment 2026-11-09); any other user's does.
@@ -952,4 +1035,23 @@ fn the_guardians_plumbing_is_not_counted_as_the_callers_starts() {
     let _ = plumbing("true");
     let _ = crate::command("true");
     assert_eq!(counter.starts(), 1, "only the caller's own command counts");
+}
+
+/// The owner takes a guardian only on its word; a guardian that exits first, or says something else, is no guard.
+#[test]
+fn the_owner_takes_a_guardian_only_once_it_says_it_serves() {
+    let wait = std::time::Duration::from_secs(5);
+    let (r, mut w) = std::io::pipe().unwrap();
+    w.write_all(SERVING).unwrap();
+    assert_eq!(await_serving(&r, wait), Ok(()));
+
+    let (r, w) = std::io::pipe().unwrap();
+    drop(w);
+    let e = await_serving(&r, wait).unwrap_err();
+    assert!(e.contains("exited first"), "{e}");
+
+    let (r, mut w) = std::io::pipe().unwrap();
+    w.write_all(b"panicked at somewhere\n").unwrap();
+    let e = await_serving(&r, wait).unwrap_err();
+    assert!(e.contains("it said"), "{e}");
 }
