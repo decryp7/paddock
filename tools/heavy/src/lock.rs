@@ -657,10 +657,10 @@ impl Heavy {
         let container = is_container_command(&req.cmdline) || self.container_running(dirs);
         let n = allowed_slots(self.cfg.slots, self.cfg.cpus, &p, container);
         let seen = format!(
-            "{n} of at most {} at once ({} cores, 15-minute load {}, CPU idle {}, memory available {}{})",
+            "{n} of at most {} at once ({} cores, 5-minute load {}, CPU idle {}, memory available {}{})",
             self.cfg.slots,
             self.cfg.cpus,
-            p.load15.map_or("unknown".into(), |x| format!("{x:.1}")),
+            p.load5.map_or("unknown".into(), |x| format!("{x:.1}")),
             p.idle.map_or("unknown".into(), |x| format!("{x:.0}%")),
             p.memory_mb.map_or("unknown".into(), |m| format!("{m} MiB")),
             if container { ", a container run alone" } else { "" }
@@ -673,6 +673,7 @@ impl Heavy {
         let l = self.load.load();
         Pressure {
             load1: l.map(|l| l[0]),
+            load5: l.map(|l| l[1]),
             load15: l.map(|l| l[2]),
             idle: self.load.idle_percent(),
             memory_mb: self.load.available_memory_mb(),
@@ -697,6 +698,7 @@ impl Heavy {
             ("MaxSlots", json!(self.cfg.slots)),
             ("Cpus", json!(self.cfg.cpus)),
             ("Load1", json!(p.load1)),
+            ("Load5", json!(p.load5)),
             ("Load15", json!(p.load15)),
             ("IdlePercent", json!(p.idle)),
             ("MemoryAvailableMiB", json!(p.memory_mb)),
@@ -905,6 +907,9 @@ pub struct Acquirer<'a> {
     ticket: PathBuf,
     marker: Option<PathBuf>,
     held: Option<u32>,
+    /// How many steps the rule allowed at once when this run took its slot: its share of the cores is `1/share`
+    /// (`gate::step_threads`). 1 until it holds a slot.
+    share: u32,
     epoch: u64,
     fails: u32,
     t0: u64,
@@ -920,6 +925,11 @@ pub struct Acquirer<'a> {
 }
 
 impl<'a> Acquirer<'a> {
+    /// How many steps the rule allowed at once when this run took its slot (1 until it holds one): the command's share of the cores.
+    pub fn share(&self) -> u32 {
+        self.share
+    }
+
     /// Queues (a ticket) or announces itself (a high marker). Err: nothing could be written; no lock was taken.
     pub fn new(h: &'a Heavy, req: Request) -> Result<Acquirer<'a>, String> {
         let _ = fs::create_dir_all(&h.cfg.root);
@@ -930,6 +940,7 @@ impl<'a> Acquirer<'a> {
             ticket: PathBuf::from("/nonexistent.ticket"),
             marker: None,
             held: None,
+            share: 1,
             epoch: 0,
             fails: 0,
             t0,
@@ -1248,6 +1259,9 @@ impl<'a> Acquirer<'a> {
                             );
                             return Poll::Waiting;
                         }
+                        // Its share of the cores: as many steps as may run now, or as run now with it (a quick row beside them).
+                        let running = u32::try_from(dirs.len() + cheap_dirs.len() + 1).unwrap_or(u32::MAX);
+                        self.share = allowed.max(running).max(1);
                         self.waited_micros = h.clock.now_micros().saturating_sub(self.t0_micros);
                         // The admission decision, with what the rule saw: a stall explains itself from this line (ER-27).
                         let lane = if in_quick_lane { "quick" } else { "slot" };

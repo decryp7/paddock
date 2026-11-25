@@ -478,7 +478,7 @@ fn sigterm_during_the_stderr_drain_still_stops_heavy_at_once() {
     // a long drain bound: only the stop request can end the wait
     let mut g = heavy_env(&w, &args, &[("HEAVY_DRAIN_MS", "25000")]);
     let bg = pid_from(&pidfile);
-    wait_until("the drain to start", || w.read(&log).contains("draining its stderr"));
+    wait_until("the drain to start", || w.read(&log).contains("draining its output"));
     let t0 = std::time::Instant::now();
     assert!(ask(ProcessId::of(g.pid()).expect("heavy runs")));
     let st = g.finish();
@@ -745,23 +745,40 @@ fn the_binary_reads_the_rows_expected_time_from_the_history_and_logs_the_admissi
 }
 
 #[test]
-fn the_step_gets_a_core_cap_unless_the_caller_set_one() {
+fn the_step_gets_its_share_of_the_cores_unless_the_caller_set_one() {
+    // One slot (HEAVY_SLOTS=1), so the share does not depend on this machine's load: the step gets every core's test thread and the
+    // family's build-job cap. The share for several slots is `share.rs`'s, on a fake load.
     let w = World::new();
-    let probe = ["run", "--no-gate", "J", "--", "sh", "-c", "echo jobs=${CARGO_BUILD_JOBS-unset}"];
-    let (code, o, e) = heavy_out(
-        &w,
-        &probe,
-        &[("CARGO_BUILD_JOBS", UNSET), ("HEAVY_CPUS", "14"), ("HEAVY_SLOTS", "5")],
-    );
+    let probe = [
+        "run",
+        "--no-gate",
+        "J",
+        "--",
+        "sh",
+        "-c",
+        "echo jobs=${CARGO_BUILD_JOBS-unset} nextest=${NEXTEST_TEST_THREADS-unset} rust=${RUST_TEST_THREADS-unset}",
+    ];
+    let unset = [
+        ("CARGO_BUILD_JOBS", UNSET),
+        ("NEXTEST_TEST_THREADS", UNSET),
+        ("RUST_TEST_THREADS", UNSET),
+        ("HEAVY_CPUS", "14"),
+        ("HEAVY_SLOTS", "1"),
+    ];
+    let (code, o, e) = heavy_out(&w, &probe, &unset);
     assert_eq!(code, 0, "{e}");
-    assert!(o.contains("jobs=2"), "{o}");
+    assert!(o.contains("jobs=2 nextest=14 rust=14"), "{o}");
+    // The caller's own values win (ER-47).
     let (_c, o, _e) = heavy_out(
         &w,
         &probe,
-        &[("CARGO_BUILD_JOBS", UNSET), ("HEAVY_CPUS", "4"), ("HEAVY_SLOTS", "8")],
+        &[
+            ("CARGO_BUILD_JOBS", "7"),
+            ("NEXTEST_TEST_THREADS", "3"),
+            ("RUST_TEST_THREADS", UNSET),
+            ("HEAVY_CPUS", "14"),
+            ("HEAVY_SLOTS", "1"),
+        ],
     );
-    assert!(o.contains("jobs=1"), "more steps than half the cores: one job each: {o}");
-    // The caller's own value wins (ER-47).
-    let (_c, o, _e) = heavy_out(&w, &probe, &[("CARGO_BUILD_JOBS", "7")]);
-    assert!(o.contains("jobs=7"), "{o}");
+    assert!(o.contains("jobs=7 nextest=3 rust=14"), "{o}");
 }

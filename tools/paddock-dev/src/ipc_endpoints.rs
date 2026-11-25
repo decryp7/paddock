@@ -91,6 +91,12 @@ pub const SCENARIOS: [&str; 13] = [
     "stop-with-open-connection",
     "mixed-version-peer-ignores-fail0",
 ];
+/// The precondition names of `[[precondition_exempt]]` (ADR 0122; kept in step with the harness like [`SCENARIOS`]).
+pub const PRECONDITIONS: [&str; 3] = [
+    "input-queued-when-refused",
+    "peer-not-reading-at-close",
+    "peer-reads-before-reason-deadline",
+];
 /// The fault kinds of the ratchet file (see [`SCENARIOS`]).
 pub const FAULTS: [&str; 13] = [
     "no-reason",
@@ -642,6 +648,20 @@ pub struct NotApplicable {
     pub os: String,
 }
 
+/// One `[[precondition_exempt]]` entry: a default precondition of a scenario that does not apply to an endpoint (ADR 0122).
+/// The harness's loader also refuses a precondition the scenario does not declare.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PreconditionExempt {
+    /// The endpoint id.
+    pub endpoint: String,
+    /// The scenario name.
+    pub scenario: String,
+    /// The precondition name.
+    pub precondition: String,
+    /// Why it does not apply.
+    pub reason: String,
+}
+
 /// The register file.
 #[derive(Debug, Clone, Default)]
 pub struct Register {
@@ -651,6 +671,8 @@ pub struct Register {
     pub out_of_scope: Vec<OutOfScope>,
     /// The scenarios that do not apply, per endpoint.
     pub not_applicable: Vec<NotApplicable>,
+    /// The precondition exemptions.
+    pub precondition_exempt: Vec<PreconditionExempt>,
 }
 
 fn text_of(t: &toml::Table, key: &str) -> String {
@@ -716,10 +738,20 @@ pub fn parse_register(text: &str) -> Result<Register, String> {
             os: text_of(t, "os"),
         })
         .collect();
+    let precondition_exempt = tables(&doc, "precondition_exempt")
+        .into_iter()
+        .map(|t| PreconditionExempt {
+            endpoint: text_of(t, "endpoint"),
+            scenario: text_of(t, "scenario"),
+            precondition: text_of(t, "precondition"),
+            reason: text_of(t, "reason"),
+        })
+        .collect();
     Ok(Register {
         endpoints,
         out_of_scope,
         not_applicable,
+        precondition_exempt,
     })
 }
 
@@ -955,6 +987,28 @@ pub fn findings(root: &Path, sites: &[Site], register: &Register, ratchet: &[Rat
             .any(|r| r.endpoint == n.endpoint && r.scenario == n.scenario && overlap(&r.os, &n.os))
         {
             out.push(format!("{at}: the ratchet lists a fault for a scenario that does not apply."));
+        }
+    }
+    let mut exempt_seen = BTreeSet::new();
+    for x in &register.precondition_exempt {
+        let at = format!(
+            "{REGISTER}: precondition_exempt {} / {} / {}",
+            x.endpoint, x.scenario, x.precondition
+        );
+        if !exempt_seen.insert((&x.endpoint, &x.scenario, &x.precondition)) {
+            out.push(format!("{at}: listed twice; one entry per endpoint, scenario and precondition."));
+        }
+        if !ids.contains(&x.endpoint) {
+            out.push(format!("{at}: the endpoint is not registered."));
+        }
+        if !SCENARIOS.contains(&x.scenario.as_str()) {
+            out.push(format!("{at}: unknown scenario."));
+        }
+        if !PRECONDITIONS.contains(&x.precondition.as_str()) {
+            out.push(format!("{at}: unknown precondition (one of {}).", PRECONDITIONS.join(", ")));
+        }
+        if x.reason.trim().is_empty() {
+            out.push(format!("{at}: an exemption needs its reason."));
         }
     }
     for r in ratchet {

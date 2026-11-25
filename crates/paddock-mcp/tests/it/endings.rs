@@ -157,16 +157,9 @@ fn scenario(s: Scenario) -> Result<(Observed, Expect), &'static str> {
                 c.write_all(first).map_err(|_| "write")?;
             }
             let expect = Expect::reason(&[code, "handshake"]);
-            observe(
-                &mut rig,
-                c,
-                Vec::new(),
-                if s == Scenario::ClientKeepsWriting {
-                    expect.with_unread_input()
-                } else {
-                    expect
-                },
-            )
+            // Input queued when refused is the scenario's default precondition (ADR 0122): the judge folds a missing reason into
+            // the reset for client-keeps-writing without the rig saying so.
+            observe(&mut rig, c, Vec::new(), expect)
         }
         Scenario::Busy => {
             let mut rig = start(1);

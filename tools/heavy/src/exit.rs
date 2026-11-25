@@ -12,6 +12,8 @@ pub const REFUSED: i32 = 78;
 pub const QUEUE_LIMIT: i32 = 79;
 /// The command ran longer than `--run-max` and was ended.
 pub const RUN_LIMIT: i32 = 80;
+/// The command was hung (`--stall`): no output and no CPU in its process tree for that long, so heavy ended the tree.
+pub const HUNG: i32 = 81;
 /// The command exists but cannot be run.
 pub const NOT_RUNNABLE: i32 = 126;
 /// The command was not found.

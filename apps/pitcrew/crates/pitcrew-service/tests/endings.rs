@@ -124,15 +124,9 @@ fn scenario(s: Scenario) -> Result<(Observed, Expect), &'static str> {
                 c.write_all(&hello(PROTOCOL_VERSION + 1)).unwrap();
             }
             let expect = Expect::reason(&["protocolMismatch"]);
-            observe(
-                c,
-                GUARD,
-                if s == Scenario::ClientKeepsWriting {
-                    expect.with_unread_input()
-                } else {
-                    expect
-                },
-            )
+            // Input queued when refused is the scenario's default precondition (ADR 0122): the judge folds a missing reason into
+            // the reset for client-keeps-writing without the rig saying so.
+            observe(c, GUARD, expect)
         }
         Scenario::MalformedFirstFrame => {
             let mut c = connect(&data);
