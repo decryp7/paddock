@@ -3954,3 +3954,15 @@ raised timeout as the fix.
   fix items; until they are fixed, the Linux row of a paddock-dev member fails on them.
 - **Class (ER-21).** First instance of a stale container view; the read-only mount finding is an instance of "a test writes outside its
   own folder" (ER-45).
+
+## `ci triage` read a skipped job as a pass (2026-11-25)
+
+- **Symptom.** `./dev ci triage 9021` (nightly) called the "dialog commands (declared but never sent)" failure NEW. The last finished
+  main nightly, 8284, had skipped every job (its gate found main unchanged); nightly 8226 had the same failure.
+- **Cause.** `baseline_jobs` treated any job that was not `failed()` as passed, and `TimedJob::failed()` is false for `skipped`. It
+  also compared only with one run, so a job that run did not run had no way to an answer but NEW or UNKNOWN.
+- **Fix.** A job the comparison run skipped, lacked or cancelled before it ran is compared with the newest older main run of the
+  workflow that ran it, or is UNKNOWN with that reason; a run named with `--against` is never replaced. Tests from recorded runs
+  (`tools/paddock-dev/tests/ci-triage-skipped`, runs 9021, 8658, 8331, 8284, 8226).
+- **Class (ER-21, ER-33).** A CI-run reader reads "skipped" as "passed". Earlier instance: `ci verdict` counted a schedule-skipped run
+  (every job skipped) as full and green (ADR 0089's instance table, row 2; ADR 0113, 2026-11-12).

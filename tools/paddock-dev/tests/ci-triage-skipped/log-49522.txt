@@ -1,0 +1,2 @@
+2026-11-24T21:03:49.3197619Z Job: dialog-commands
+2026-11-24T21:05:20.9044879Z ##[error]Process completed with exit code 1.

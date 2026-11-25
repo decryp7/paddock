@@ -1,0 +1,10 @@
+2026-11-24T21:22:13.4829470Z Job: paddock-dev
+2026-11-24T21:24:18.9233900Z [32;1m    Starting[0m [1m2427[0m tests across [1m3[0m binaries ([1m112[0m tests [33;1mskipped[0m via [1mprofile.ci.default-filter[0m)
+2026-11-24T21:29:24.0111370Z [35;1m  TRY 1 FAIL[0m [  10.553s] (─────────) [35;1mpaddock-dev::it[0m [36mrepo_graph_net[0m[36m::[0m[34;1mgraph_train_replay_has_no_unlisted_narrowing[0m
+2026-11-24T21:29:24.0111900Z     [31;1m::error::the train replay cannot list 9cbd77a63..803aed12d: git rev-list 9cbd77a63..803aed12d: fatal: ambiguous argument '9cbd77a63..803aed12d': unknown revision or path not in the working tree.[0m
+2026-11-24T21:29:34.2152400Z [31;1m  TRY 2 FAIL[0m [  10.203s] (2259/2427) [35;1mpaddock-dev::it[0m [36mrepo_graph_net[0m[36m::[0m[34;1mgraph_train_replay_has_no_unlisted_narrowing[0m
+2026-11-24T21:29:34.2153320Z     [31;1m::error::the train replay cannot list 9cbd77a63..803aed12d: git rev-list 9cbd77a63..803aed12d: fatal: ambiguous argument '9cbd77a63..803aed12d': unknown revision or path not in the working tree.[0m
+2026-11-24T21:32:16.7424500Z [31;1m     Summary[0m [ 477.821s] [1m2427[0m tests run: [1m2426[0m [32;1mpassed[0m, [1m1[0m [31;1mfailed[0m, [1m112[0m [33;1mskipped[0m
+2026-11-24T21:32:16.7424550Z [31;1m  TRY 2 FAIL[0m [  10.203s] (2259/2427) [35;1mpaddock-dev::it[0m [36mrepo_graph_net[0m[36m::[0m[34;1mgraph_train_replay_has_no_unlisted_narrowing[0m
+2026-11-24T21:32:16.7425060Z     [31;1m::error::the train replay cannot list 9cbd77a63..803aed12d: git rev-list 9cbd77a63..803aed12d: fatal: ambiguous argument '9cbd77a63..803aed12d': unknown revision or path not in the working tree.[0m
+2026-11-24T21:32:16.7697480Z ##[error]Process completed with exit code 100.
