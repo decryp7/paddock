@@ -979,6 +979,7 @@ dependencies = [
 name = "chromium-driver"
 version = "0.1.0"
 dependencies = [
+ "chromium-driver",
  "libc",
  "log",
  "paddock-env",
@@ -1577,6 +1578,7 @@ dependencies = [
  "globset",
  "jiff",
  "log",
+ "paddock-env",
  "paddock-testkit",
  "serde",
  "serde_json",
@@ -1593,6 +1595,7 @@ name = "debrief-ai"
 version = "0.1.0"
 dependencies = [
  "base64 0.23.1",
+ "debrief-ai",
  "debrief-collect",
  "debrief-core",
  "debrief-image",
@@ -1601,6 +1604,7 @@ dependencies = [
  "libc",
  "log",
  "paddock-download",
+ "paddock-env",
  "paddock-testkit",
  "percent-encoding",
  "proptest",
@@ -1777,6 +1781,7 @@ dependencies = [
  "jiff",
  "libc",
  "log",
+ "paddock-env",
  "paddock-testkit",
  "proptest",
  "quick-xml",
@@ -1803,6 +1808,7 @@ name = "debrief-dump"
 version = "0.1.0"
 dependencies = [
  "debrief-budget",
+ "debrief-dump",
  "debrief-symbols",
  "postcard",
  "proptest",
@@ -2016,6 +2022,7 @@ dependencies = [
  "debrief-plugin-api",
  "debrief-plugin-host",
  "debrief-plugin-package",
+ "debrief-store-client",
  "debrief-store-worker",
  "tempfile",
 ]
@@ -2050,6 +2057,7 @@ dependencies = [
  "paddock-env",
  "paddock-proc",
  "paddock-testkit",
+ "paddock-testkit-start",
  "serde",
  "serde_json",
  "sha2 0.11.1",
@@ -2093,6 +2101,7 @@ dependencies = [
  "debrief-plugin-api",
  "ed25519-compact",
  "getrandom 0.4.3",
+ "paddock-env",
  "proptest",
  "semver",
  "serde",
@@ -2197,6 +2206,7 @@ dependencies = [
  "insta",
  "jiff",
  "minidump",
+ "paddock-env",
  "paddock-proc",
  "proptest",
  "quick-xml",
@@ -2342,6 +2352,7 @@ dependencies = [
  "debrief-ipc",
  "log",
  "lzma-rs",
+ "paddock-env",
  "proptest",
  "serde",
  "serde_json",
@@ -5386,6 +5397,7 @@ name = "paddock-settings"
 version = "0.2.0"
 dependencies = [
  "log",
+ "paddock-env",
  "paddock-workspace-hack",
  "regex",
  "serde",

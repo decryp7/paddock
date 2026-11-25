@@ -50,6 +50,9 @@ pub struct OwnerInfo {
     pub token: String,
 }
 
+/// The longest file name a job key becomes.
+const LAST_KEY_MAX: usize = 120;
+
 fn io(path: &Path) -> impl FnOnce(std::io::Error) -> SlotError + '_ {
     move |source| SlotError::Io {
         path: path.to_path_buf(),
@@ -128,6 +131,49 @@ impl FsLocks {
             pid: field("pid")?.parse().ok()?,
             token: field("token")?.to_string(),
             owner: PathBuf::from(field("owner")?),
+        })
+    }
+
+    /// The file that records the slot a job of kind `key` held last, or `None` when `key` has nothing nameable in it. The key is
+    /// written as a file name: letters, digits, `.`, `_` and `-` stay, anything else becomes `_` (so a key never leaves `last/`).
+    fn last_file(&self, key: &str) -> Option<PathBuf> {
+        let name: String = key
+            .chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-') {
+                    c
+                } else {
+                    '_'
+                }
+            })
+            .take(LAST_KEY_MAX)
+            .collect();
+        (!name.trim_matches('.').is_empty()).then(|| self.dir.join("last").join(name))
+    }
+
+    /// The slot a job of kind `key` held last, if its record is readable (a missing or unreadable record is `None`: the hint is only
+    /// a preference, never required).
+    pub fn last_slot(&self, key: &str) -> Option<SlotId> {
+        std::fs::read_to_string(self.last_file(key)?)
+            .ok()?
+            .trim()
+            .parse()
+            .ok()
+    }
+
+    /// Records that a job of kind `key` holds `id`: written to a temporary file and renamed over the record, so a reader sees the old
+    /// slot or the new one, never half of one.
+    pub fn record_last(&self, key: &str, id: SlotId) -> Result<(), SlotError> {
+        let Some(path) = self.last_file(key) else {
+            return Ok(());
+        };
+        let dir = self.dir.join("last");
+        std::fs::create_dir_all(&dir).map_err(io(&dir))?;
+        let tmp = path.with_extension(format!("tmp-{}", std::process::id()));
+        std::fs::write(&tmp, format!("{id}\n")).map_err(io(&tmp))?;
+        std::fs::rename(&tmp, &path).map_err(|e| {
+            let _ = std::fs::remove_file(&tmp);
+            io(&path)(e)
         })
     }
 
@@ -329,6 +375,61 @@ mod tests {
         );
         drop(guard);
         assert!(!locks.is_held(s1).unwrap());
+    }
+
+    #[test]
+    fn the_last_slot_of_a_kind_is_recorded_replaced_and_read_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let locks = FsLocks::new(dir.path());
+        let (s1, s2) = (SlotId::new(1).unwrap(), SlotId::new(2).unwrap());
+        assert_eq!(locks.last_slot("CI/crate/macOS"), None, "no record yet");
+        locks.record_last("CI/crate/macOS", s2).unwrap();
+        assert_eq!(locks.last_slot("CI/crate/macOS"), Some(s2));
+        locks.record_last("CI/crate/macOS", s1).unwrap();
+        assert_eq!(
+            locks.last_slot("CI/crate/macOS"),
+            Some(s1),
+            "the newer record replaces the older"
+        );
+        assert_eq!(
+            locks.last_slot("CI/other/macOS"),
+            None,
+            "another kind has its own record"
+        );
+        let left: Vec<_> = std::fs::read_dir(dir.path().join("slots/last"))
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(left.len(), 1, "no temporary file is left behind: {left:?}");
+    }
+
+    #[test]
+    fn a_key_never_leaves_the_last_folder_and_an_unreadable_record_is_no_record() {
+        let dir = tempfile::tempdir().unwrap();
+        let locks = FsLocks::new(dir.path());
+        let s1 = SlotId::new(1).unwrap();
+        locks.record_last("../../escape", s1).unwrap();
+        assert!(!dir.path().join("escape").exists() && !dir.path().join("slots/escape").exists());
+        assert_eq!(locks.last_slot("../../escape"), Some(s1));
+        // A key with nothing nameable in it records nothing and reads nothing.
+        locks.record_last("..", s1).unwrap();
+        assert_eq!(locks.last_slot(".."), None);
+        locks.record_last("", s1).unwrap();
+        assert_eq!(locks.last_slot(""), None);
+        // Garbage, a bad slot name, and a folder in the record's place: each is no record.
+        let file = locks.last_file("k").unwrap();
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        for bad in ["", "s0", "x", "s9999999999999999999"] {
+            std::fs::write(&file, bad).unwrap();
+            assert_eq!(locks.last_slot("k"), None, "{bad:?}");
+        }
+        std::fs::remove_file(&file).unwrap();
+        std::fs::create_dir(&file).unwrap();
+        assert_eq!(locks.last_slot("k"), None);
+        assert!(
+            locks.record_last("k", s1).is_err(),
+            "a record that cannot be written is an error the holder ignores"
+        );
     }
 
     #[test]

@@ -119,9 +119,7 @@ pub fn save_doc(path: Option<&str>, config: &AgentConfigFile, overwrite: bool, d
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(err)?;
     }
-    let tmp = path.with_extension("toml.tmp");
-    std::fs::write(&tmp, text).map_err(err)?;
-    std::fs::rename(&tmp, &path).map_err(err)?;
+    paddock_env::write_atomic(&path, text.as_bytes(), false).map_err(|e| err(std::io::Error::from(e)))?;
     Ok(Vec::new())
 }
 

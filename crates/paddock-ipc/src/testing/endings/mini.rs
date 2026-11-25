@@ -567,6 +567,7 @@ fn observe(raw: RawEnd, log: &LogCapture, typed: bool) -> Observed {
         typed,
         log: log.lines(),
         hung: false,
+        evidence: Vec::new(),
     }
 }
 

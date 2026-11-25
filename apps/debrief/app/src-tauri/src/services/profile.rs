@@ -57,11 +57,7 @@ impl ProfileFiles {
             std::fs::create_dir_all(dir).map_err(io)?;
         }
         self.archive(&path);
-        let tmp = path.with_extension("toml.tmp");
-        std::fs::write(&tmp, toml).and_then(|_| std::fs::rename(&tmp, &path)).map_err(|e| {
-            let _ = std::fs::remove_file(&tmp);
-            io(e)
-        })?;
+        paddock_env::write_atomic(&path, toml.as_bytes(), false).map_err(|e| io(e.into()))?;
         Ok(Some(path))
     }
 

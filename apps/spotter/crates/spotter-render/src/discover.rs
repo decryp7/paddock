@@ -145,11 +145,13 @@ pub fn test_browser_dir(env: &dyn Fn(&str) -> Option<String>) -> Option<PathBuf>
 /// The browser tests may launch: `SPOTTER_TEST_BROWSER` or the pinned Chrome for Testing in the test cache folder.
 /// Never an installed Edge, Chrome or Chromium: killing a launched system Chrome leaves a code-sign clone of the
 /// whole app behind on macOS, and tests must not touch the browser the user works in.
+#[cfg(any(test, feature = "test-support"))]
 pub fn find_for_tests() -> Option<Browser> {
     find_for_tests_with(Os::CURRENT, &|k| std::env::var(k).ok(), &|p| p.is_file())
 }
 
 /// [`find_for_tests`] with the OS, environment and file check injected.
+#[cfg(any(test, feature = "test-support"))]
 pub fn find_for_tests_with(os: Os, env: &dyn Fn(&str) -> Option<String>, exists: &dyn Fn(&Path) -> bool) -> Option<Browser> {
     if let Some(p) = env(TEST_BROWSER_ENV).filter(|p| !p.is_empty()).map(PathBuf::from) {
         return exists(&p).then_some(Browser {

@@ -278,13 +278,19 @@ pub struct Presses {
 
 impl Default for Jobs {
     fn default() -> Self {
-        Self::with_clock(Arc::new(paddock_jobs::SystemClock), DEFAULT_MIN_INTERVAL_MS)
+        Self::clocked(Arc::new(paddock_jobs::SystemClock), DEFAULT_MIN_INTERVAL_MS)
     }
 }
 
 impl Jobs {
-    /// A registry on `clock` (a `FakeClock` in tests); progress is throttled to one event per `min_interval_ms`.
+    /// A registry on `clock` (a `FakeClock` in tests); progress is throttled to one event per `min_interval_ms`. Test only
+    /// (rule 99): the app uses [`Jobs::default`].
+    #[cfg(any(test, feature = "test-support"))]
     pub fn with_clock(clock: Arc<dyn Clock>, min_interval_ms: u64) -> Self {
+        Self::clocked(clock, min_interval_ms)
+    }
+
+    fn clocked(clock: Arc<dyn Clock>, min_interval_ms: u64) -> Self {
         let router = Arc::new(Router { routes: Mutex::default() });
         Jobs {
             registry: JobRegistry::with_clock(router.clone(), clock, min_interval_ms),

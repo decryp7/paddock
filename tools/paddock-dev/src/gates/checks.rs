@@ -116,12 +116,20 @@ pub struct CheckInfo {
 
 /// The one table of `./dev` checks (ADR 0060 §1): `./dev` has no `help --json`, and clap's command tree alone cannot tell a
 /// check from a utility.
-pub const CHECKS: &[CheckInfo] = &[CheckInfo {
-    id: "C100",
-    subcommand: "gates check",
-    scope: Scope::Root,
-    report_only: false,
-}];
+pub const CHECKS: &[CheckInfo] = &[
+    CheckInfo {
+        id: "C100",
+        subcommand: "gates check",
+        scope: Scope::Root,
+        report_only: false,
+    },
+    CheckInfo {
+        id: crate::test_features::ID,
+        subcommand: "check test-features",
+        scope: Scope::Root,
+        report_only: crate::test_features::REPORT_ONLY,
+    },
+];
 
 /// The `paddock-conformance list --json` output as checks. The JSON is
 /// `[{"id": "C13", "scope": "apps", "mode": "gate", "needs": "rust", "file": "conformance/src/checks/C13-rust-lints.mjs"}, …]`.

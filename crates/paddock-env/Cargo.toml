@@ -11,8 +11,8 @@ publish = ["decryp7"]
 doctest = false # doctests are off (crates/README.md, "Doctests")
 
 [features]
-# The `create_all_as` and `open_as` seams of `paddock_env::private`, which name the account that is trusted. Never enabled in a
-# shipped build (ADR 0073).
+# The `create_all_as` and `open_as` seams of `paddock_env::private`, which name the account that is trusted, and
+# `VersionedFile::with_clock`. Never enabled in a shipped build (ADR 0073, rule 99; `./dev check test-features`, C170).
 test-support = []
 
 [dependencies]
@@ -29,6 +29,8 @@ libc = "0.2"
 windows-sys = { version = "0.61", features = ["Wdk_Foundation", "Wdk_Storage_FileSystem", "Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_System_IO", "Win32_System_Threading"] }
 
 [dev-dependencies]
+# The self dev-dependency that turns `test-support` on for this package's own integration tests (rule 99).
+paddock-env = { path = ".", features = ["test-support"] }
 serde = { version = "1", features = ["derive"] }
 tempfile = "3"
 

@@ -6,7 +6,6 @@ use crate::error::Error;
 use pitcrew_core::runner_config::{backup_name, backups_to_prune, is_backup, MAX_BACKUPS};
 use pitcrew_core::runner_schema::MAX_CONFIG_TEXT;
 use pitcrew_core::time::Timestamp;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 
 fn io(path: &Path) -> impl FnOnce(std::io::Error) -> Error + '_ {
@@ -75,19 +74,16 @@ pub fn save(path: &Path, text: &str, now: Timestamp) -> Result<Saved, Error> {
         None
     };
     // Write next to the target and rename, so a crash leaves the old file or the new one, never half.
-    let tmp = dir.join(format!(".{name}.pitcrew-tmp"));
-    {
-        let mut f = std::fs::File::create(&tmp).map_err(io(&tmp))?;
-        f.write_all(text.as_bytes()).map_err(io(&tmp))?;
-        f.sync_all().map_err(io(&tmp))?;
-    }
-    if let Ok(meta) = std::fs::metadata(&real) {
-        let _ = std::fs::set_permissions(&tmp, meta.permissions());
-    }
-    if let Err(e) = std::fs::rename(&tmp, &real) {
-        let _ = std::fs::remove_file(&tmp);
-        return Err(io(&real)(e));
-    }
+    // The shared atomic replace; the temporary file takes the permissions of the file it replaces.
+    let permissions = std::fs::metadata(&real).ok().map(|m| m.permissions());
+    paddock_env::write_atomic_created(&real, text.as_bytes(), &mut |tmp| {
+        let f = std::fs::OpenOptions::new().write(true).create_new(true).open(tmp)?;
+        if let Some(p) = &permissions {
+            let _ = f.set_permissions(p.clone());
+        }
+        Ok(f)
+    })
+    .map_err(|e| io(&real)(e.into()))?;
     for old in backups_to_prune(&name, &siblings(&real), MAX_BACKUPS) {
         let _ = std::fs::remove_file(dir.join(old));
     }

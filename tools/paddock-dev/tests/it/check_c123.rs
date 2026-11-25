@@ -84,7 +84,7 @@ fn every_shape_gives_the_same_findings_in_both_hosts() {
     let a = crate::recorded::expect("c123-every-shape", &b);
     assert_eq!(a, b);
     assert_eq!(
-        a["warnings"], 16,
+        a["errors"], 16,
         "bad.rs 4, bound.rs 3, lib.rs 1, the bare waiver 1, gaps.rs 6, b's lib.rs 1 (c's other.rs 0: another crate): {a}"
     );
 }

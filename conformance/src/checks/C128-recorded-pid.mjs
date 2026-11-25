@@ -13,8 +13,8 @@
 // Known gaps (not found): a pid parsed in another function and passed in (a `-> u32` helper), a pid parsed with something other
 // than `.parse`, a pid read from a deserialized field (`row.pid`, `v["pid"].as_u64()`) and one bound by a `for` over `ps` text.
 // A site that is fine carries `// conformance: recorded-pid — <why>` on its line or the line above.
-// ER-41: report-only (warnings) until its first green run on the real tree, recorded in docs/gates.toml.
-import { warn } from '../finding.mjs';
+// Blocking (errors, mode gate) since its first green run on the real tree, ci.yml run 9065 (11cd82593, 2026-11-25; ER-41).
+import { error } from '../finding.mjs';
 import { onlyTestItems } from '../util/rust-test-items.mjs';
 import { maskRust } from '../util/mask-rust.mjs';
 
@@ -71,7 +71,7 @@ export function recordedPidSites(text, file) {
 export default {
   id: 'C128',
   scope: 'root',
-  mode: 'report-only',
+  mode: 'gate',
   title: 'Tests take a recorded pid\'s identity through the kit, never ProcessId::of',
   rule: 53,
   run(ctx) {
@@ -81,7 +81,7 @@ export default {
       const text = ctx.read(f);
       if (!text || !text.includes('ProcessId::of')) continue;
       for (const s of recordedPidSites(text, f)) {
-        out.push(warn('C128', 53, f, s.line, 'takes the identity of a pid read from a file or a child\'s output with `ProcessId::of`: a writer the code under test already ended reads as "not yet", and a handed-on pid as its new holder (rule 53, ER-14)', FIX));
+        out.push(error('C128', 53, f, s.line, 'takes the identity of a pid read from a file or a child\'s output with `ProcessId::of`: a writer the code under test already ended reads as "not yet", and a handed-on pid as its new holder (rule 53, ER-14)', FIX));
       }
     }
     return out;

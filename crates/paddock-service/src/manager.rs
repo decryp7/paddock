@@ -163,6 +163,7 @@ impl Manager {
 
     /// Another time source (a test's fake clock, or the crash model's, which never reads the system's). The repair tracker
     /// reads the same one through the times this manager gives it.
+    #[cfg(any(test, feature = "test-support"))]
     #[must_use]
     pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self {
         self.clock = clock;

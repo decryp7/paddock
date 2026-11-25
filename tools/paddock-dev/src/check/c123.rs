@@ -12,8 +12,8 @@
 //! left out) does not name `TestCommand`; (3) the machine's `PATH` read in a function that builds a `TestCommand` (use `path_first`).
 //! Known false negatives (ADR 0100): a program held in a variable, an alias of `Command`, a block comment naming `TestCommand`, and
 //! spawns in a non-test helper module.
-//! A justified case carries `conformance: test-env — <why>` on the line or above. JavaScript tests are not judged. Report-only for now
-//! (ER-41).
+//! A justified case carries `conformance: test-env — <why>` on the line or above. JavaScript tests are not judged. Blocking
+//! (errors, mode gate) since its first green run on the real tree, ci.yml run 9065 (11cd82593, 2026-11-25; ER-41).
 //!
 //! The JavaScript check (`conformance/src/checks/C123-*.mjs`) was the original; it was retired with pair P3 (ADR 0022 amendment 2026-11-19) and the Rust host is the only one. The answers it gave are recorded in `tests/fixtures/check/recorded` and `units` and ``tests/it/check_c123.rs`` holds the check to them.
 
@@ -271,7 +271,7 @@ impl Check for C123 {
     }
 
     fn mode(&self) -> Mode {
-        Mode::ReportOnly
+        Mode::Gate
     }
 
     fn control(&self) -> Control {
@@ -329,7 +329,7 @@ impl Check for C123 {
                 } else {
                     ""
                 };
-                findings.push(Finding::warn(
+                findings.push(Finding::error(
                     "C123",
                     3,
                     f,

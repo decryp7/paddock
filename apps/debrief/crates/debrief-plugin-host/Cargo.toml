@@ -37,4 +37,6 @@ serde_json = { workspace = true, features = ["preserve_order"] }
 [dev-dependencies]
 # Condition waits in the tests (ADR 0041, 0071).
 paddock-testkit = { path = "../../../../crates/paddock-testkit" }
+# Pids the fakes record, read as records (rule 53).
+paddock-testkit-start = { path = "../../../../crates/paddock-testkit-start" }
 tempfile.workspace = true

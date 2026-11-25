@@ -1,7 +1,9 @@
 //! The log's time: the family's clock port (`paddock_jobs::time`), read as UTC for stamps, rotation and file names.
 
 use jiff::Timestamp;
-pub use paddock_jobs::time::{Clock, FakeClock, SystemClock};
+#[cfg(any(test, feature = "test-support"))]
+pub use paddock_jobs::time::FakeClock;
+pub use paddock_jobs::time::{Clock, SystemClock};
 
 /// The clock's wall reading as UTC (time stamps, daily file names, the crash marker).
 pub fn now_utc(clock: &dyn Clock) -> Timestamp {

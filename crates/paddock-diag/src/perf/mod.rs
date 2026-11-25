@@ -259,13 +259,7 @@ impl Drop for Timer {
     }
 }
 
-/// The temporary file a flush writes before the rename: one per process.
-fn tmp_path(path: &Path, pid: u32) -> PathBuf {
-    path.with_extension(format!("json.{pid}.tmp"))
-}
-
-/// Writes the ring to its file when it changed (a temporary file, then a rename; one flush at a time, so two callers never
-/// share the temporary file). Does nothing before [`init`].
+/// Writes the ring to its file when it changed (the shared `paddock_env::write_atomic`: a temporary file of its own, then a rename). Does nothing before [`init`].
 pub fn flush() -> std::io::Result<()> {
     let _one_at_a_time = FLUSH.lock().unwrap_or_else(PoisonError::into_inner);
     flush_locked()
@@ -284,11 +278,9 @@ fn flush_locked() -> std::io::Result<()> {
         st.dirty = false;
         (path, st.ring.to_bytes(now_ms()))
     };
-    let tmp = tmp_path(&path, std::process::id());
-    let written = std::fs::write(&tmp, &bytes).and_then(|()| std::fs::rename(&tmp, &path));
+    let written = paddock_env::write_atomic(&path, &bytes, false).map_err(std::io::Error::from);
     if written.is_err() {
         lock().dirty = true;
-        let _ = std::fs::remove_file(&tmp);
     }
     written
 }
@@ -554,13 +546,6 @@ mod tests {
         ));
         assert!(st.dirty, "the damaged file is replaced at the next flush");
         assert_eq!(st.ring.len(), 2, "what was loaded stays");
-    }
-
-    #[test]
-    fn the_temporary_file_is_one_per_process_beside_the_ring_file() {
-        let p = Path::new("/d/performance-ring.json");
-        assert_eq!(tmp_path(p, 7), Path::new("/d/performance-ring.json.7.tmp"));
-        assert_ne!(tmp_path(p, 7), tmp_path(p, 8));
     }
 
     #[test]

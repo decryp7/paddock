@@ -52,7 +52,9 @@ pub use pool::{
     assert_nonblocking_within,
 };
 pub use reporter::{Counter, DEFAULT_MIN_INTERVAL_MS, EventSink, Reporter, UncancellableGuard};
-pub use time::{Clock, FakeClock, SystemClock};
+#[cfg(any(test, feature = "test-support"))]
+pub use time::FakeClock;
+pub use time::{Clock, SystemClock};
 pub use walk::{
     Decision, EntryKind, Filter, SymlinkPolicy, WalkEntry, WalkIssue, WalkOptions, WalkResult,
     par_walk,

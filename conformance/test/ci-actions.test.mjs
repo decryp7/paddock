@@ -560,7 +560,7 @@ function runSccacheStep(env, shim = 'true') {
   const block = text.slice(at, text.indexOf('- name: Linux dependencies', at));
   const body = block.slice(block.indexOf('run: |\n') + 'run: |\n'.length).split('\n').map((l) => l.slice(8)).join('\n');
   mkdirSync(join(dir, 'bin'));
-  writeFileSync(join(dir, 'bin', 'sccache'), `#!/bin/sh\n[ "$1" = --version ] && echo sccache 0.19.0\n${shim}\nexit 0\n`);
+  writeFileSync(join(dir, 'bin', 'sccache'), `#!/bin/sh\n[ "$1" = --version ] && echo sccache 0.20.1\n${shim}\nexit 0\n`);
   chmodSync(join(dir, 'bin', 'sccache'), 0o755);
   writeFileSync(join(dir, 'step.sh'), body.replaceAll('${{ github.action_path }}', action));
   const ghEnv = join(dir, 'github-env');
@@ -622,7 +622,7 @@ test('the sccache pin is still the release that expands cargo\'s @argfile (LEGAC
   for (const pin of [shell, rust]) {
     assert.equal(
       pin,
-      '0.19.0',
+      '0.20.1',
       'sccache was bumped: check whether it now passes a response file through (mozilla/sccache#2787), then remove LEGACY_BUILD_DIR_LAYOUT or update this pin.',
     );
   }

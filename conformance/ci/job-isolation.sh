@@ -35,6 +35,8 @@
 #   PADDOCK_CI_MIN_FREE_GB (default 30), every idle slot's folders from the highest slot down. The first job in slot s1
 #   renames a kept folder of the old unslotted layout to its -s1 name (a warm cache, no second copy).
 #
+# Slot affinity: `acquire` tries first the slot the same kind of job (workflow, job, OS) held last (`<ci-home>/slots/last/<key>`, written
+# by the holder once it holds a slot) and, when that slot is busy, takes any free one and prints a `::notice::` that its cache is cold.
 # PADDOCK_CI_SLOTS: the most slots one host hands out (default 4); set it in every runner's environment (config.yaml
 # runner.envs) to the pool's maximum number of runners on the host. Linux containers take no slot (one job per Linux host
 # today; see ADR 0025 before running more): acquire and release do nothing there and everything else uses s1.
@@ -366,18 +368,25 @@ export_slot() {
 
 cmd_acquire() {
   if is_linux; then echo "job-isolation: no slot in a Linux container (one job per Linux host; ADR 0025)" >&2; return 0; fi
-  local out="${GITHUB_ENV:?GITHUB_ENV is not set}" temp home max said code=0 slot token tries=0 wait floor free
+  local out="${GITHUB_ENV:?GITHUB_ENV is not set}" temp home max said code=0 slot token tries=0 wait floor free key_args
   temp="$(job_temp)"
   [ -d "$temp" ] || die "the runner's per-job temp folder $temp does not exist"
   max="$(max_slots)"
   if [[ "${PADDOCK_CI_SLOT:-}" =~ ^s[1-9][0-9]*$ ]]; then echo "job-isolation: this job already holds $PADDOCK_CI_SLOT" >&2; return 0; fi
   home="$(ci_home)"
   wait="${PADDOCK_SLOT_WAIT_TRIES:-20}"
+  # Slot affinity: the kind of job (workflow, job, OS) gets the slot it held last, where its kept folders and compile cache are warm.
+  # No workflow or job name (a run outside the runner): no key, the first free slot as before. Same key as ci_isolation/slotflow.rs
+  # (the empty-array expansion is spelled for bash before 4.4, which fails on "${a[@]}" under set -u).
+  key_args=()
+  if [ -n "${GITHUB_WORKFLOW:-}" ] && [ -n "${GITHUB_JOB:-}" ]; then
+    key_args=(--key "$GITHUB_WORKFLOW/$GITHUB_JOB/$RUNNER_OS")
+  fi
   # A full house is refused (exit 4). It is real (more runners than PADDOCK_CI_SLOTS) or brief (a sweep holds an idle slot's
   # lock while it deletes that slot's folders): wait a little, then fail and name the holders.
   while :; do
     code=0
-    said="$(dev_tool ci slot acquire --max "$max" --owner "$(native "$temp")" --root "$(native "$home")")" || code=$?
+    said="$(dev_tool ci slot acquire --max "$max" --owner "$(native "$temp")" --root "$(native "$home")" ${key_args[@]+"${key_args[@]}"})" || code=$?
     if [ "$code" = 0 ] || [ "$code" != 4 ] || [ "$tries" -ge "$wait" ]; then break; fi
     tries=$((tries + 1))
     echo "job-isolation: all $max slots are held; trying again ($tries of $wait)" >&2

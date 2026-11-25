@@ -1,4 +1,4 @@
-//! The command line: `run [--high] [--no-gate] [--low] [--gate-load N] [--slots N] [--queue-max S] [--queue-stall S] [--run-max S] [--verbose] [--log-file F] <agent> [--] <cmd...>`
+//! The command line: `run [--high] [--no-gate] [--low] [--gate-load N] [--slots N] [--queue-max S] [--queue-stall S] [--run-max S] [--stall S] [--verbose] [--log-file F] <agent> [--] <cmd...>`
 //! and `status`. Hand parsed to keep plock's exact shape (options first, the agent name, an optional `--`, the command).
 
 /// What was asked.
@@ -40,6 +40,8 @@ pub struct RunArgs {
     pub queue_stall: Option<f64>,
     /// End the command (exit 80) when it has run this many seconds.
     pub run_max: Option<f64>,
+    /// End the command (exit 81) when it has written nothing and its process tree used no CPU for this many seconds (a hang detector).
+    pub stall: Option<f64>,
     /// Slot count override.
     pub slots: Option<u32>,
     /// Echo log events to stderr.
@@ -53,7 +55,7 @@ pub struct RunArgs {
 }
 
 /// Usage text.
-pub const USAGE: &str = "usage: heavy run [--high] [--no-gate] [--low] [--gate-load N] [--slots N] [--queue-max S] [--queue-stall S] [--run-max S] [--verbose] [--log-file FILE] <agent-name> -- <command...>\n       heavy status\n       heavy mark [--remove] ci-<name> --pid P   (a CI job on this host: normal runs yield while it lives, up to HEAVY_CI_MAX)\nExit codes: the command's own; 64 usage, 75 lock not taken, 78 refused (home guard), 79 queue limit or stalled queue, 80 run limit, 126/127 cannot run it, 129/130/143 stopped by a signal.\n";
+pub const USAGE: &str = "usage: heavy run [--high] [--no-gate] [--low] [--gate-load N] [--slots N] [--queue-max S] [--queue-stall S] [--run-max S] [--stall S] [--verbose] [--log-file FILE] <agent-name> -- <command...>\n       heavy status\n       heavy mark [--remove] ci-<name> --pid P   (a CI job on this host: normal runs yield while it lives, up to HEAVY_CI_MAX)\nExit codes: the command's own; 64 usage, 75 lock not taken, 78 refused (home guard), 79 queue limit or stalled queue, 80 run limit, 81 hung (--stall), 126/127 cannot run it, 129/130/143 stopped by a signal.\n";
 
 /// Parses the arguments after the program name. Err is the message to print (exit 64).
 pub fn parse(args: &[String]) -> Result<Cli, String> {
@@ -93,7 +95,7 @@ pub fn parse(args: &[String]) -> Result<Cli, String> {
                                 .ok_or(format!("--slots {v:?} is not 1..64"))?,
                         );
                     }
-                    "--queue-max" | "--queue-stall" | "--run-max" => {
+                    "--queue-max" | "--queue-stall" | "--run-max" | "--stall" => {
                         let v = value("a number of seconds")?;
                         let x = v
                             .parse::<f64>()
@@ -102,6 +104,8 @@ pub fn parse(args: &[String]) -> Result<Cli, String> {
                             .ok_or(format!("{a} {v:?} is not a number of seconds > 0"))?;
                         if a == "--queue-max" {
                             r.queue_max = Some(x);
+                        } else if a == "--stall" {
+                            r.stall = Some(x);
                         } else if a == "--queue-stall" {
                             r.queue_stall = Some(x);
                         } else {
@@ -223,6 +227,12 @@ mod tests {
         assert_eq!(r.queue_stall, Some(1800.0));
         assert!(p("run --queue-stall 0 A -- c").is_err());
         assert!(p("run --run-max nope A -- c").is_err());
+        let Ok(Cli::Run(r)) = p("run --stall 600 A -- c") else {
+            panic!("not run")
+        };
+        assert_eq!(r.stall, Some(600.0));
+        assert!(p("run --stall 0 A -- c").is_err());
+        assert!(p("run --stall x A -- c").is_err());
     }
 
     #[test]

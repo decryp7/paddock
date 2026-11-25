@@ -386,13 +386,8 @@ pub async fn ai_chat_export_markdown<R: Runtime>(
     let granted = crate::paths::WindowGrants::of(&app, win.label()).write(&path, &["md", "markdown"])?;
     let target = markdown_target(&granted.path().to_string_lossy(), overwrite.unwrap_or(false))?;
     blocking(move || {
-        let tmp = target.with_extension("md.tmp");
-        std::fs::write(&tmp, export_markdown(&record))
-            .and_then(|_| std::fs::rename(&tmp, &target))
-            .map_err(|e| {
-                let _ = std::fs::remove_file(&tmp);
-                AiCmdError::new(AiErrorCode::Io, format!("cannot write {}: {e}", target.display()))
-            })?;
+        paddock_env::write_atomic(&target, export_markdown(&record).as_bytes(), false)
+            .map_err(|e| AiCmdError::new(AiErrorCode::Io, format!("cannot write {}: {e}", target.display())))?;
         Ok(target.display().to_string())
     })
     .await

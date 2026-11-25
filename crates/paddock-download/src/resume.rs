@@ -59,9 +59,6 @@ impl ResumeState {
     /// Written to a temporary file and renamed into place, so a crash leaves the old or the new state.
     pub fn save(&self, path: &Path) -> std::io::Result<()> {
         let body = serde_json::to_vec(self).map_err(std::io::Error::other)?;
-        let mut tmp = path.as_os_str().to_owned();
-        tmp.push(".tmp");
-        std::fs::write(&tmp, body)?;
-        std::fs::rename(&tmp, path)
+        Ok(paddock_env::write_atomic(path, &body, false)?)
     }
 }

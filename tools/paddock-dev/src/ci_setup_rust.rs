@@ -36,7 +36,7 @@ use std::time::{Duration, Instant};
 
 /// The pinned sccache release, the same on every OS (one version, one cache format). The CI image pins the same
 /// (`ci-image/Dockerfile`, checked by scripts/ci-image.test.mjs).
-pub const SCCACHE_VERSION: &str = "0.19.0";
+pub const SCCACHE_VERSION: &str = "0.20.1";
 const RELEASES: &str = "https://github.com/mozilla/sccache/releases/download";
 /// The compile-cache budget of a Linux host in GB, divided between its lanes like the other classes' (`PADDOCK_CI_SCCACHE_GB`
 /// overrides it): 6 lanes get 10 GB each, the share Mac and Windows slots have. Before ADR 0111 the whole `/sccache` mount was
@@ -129,22 +129,22 @@ pub fn pin_for(os: &str, arch: &str) -> Option<Pin> {
         ("Linux", "x86_64") => pin(
             "x86_64-unknown-linux-musl",
             "tar.gz",
-            "aa73c7270c997894038c0d8f0d297865f57569e1687883322bc431713d4bb9dd",
+            "c9f6c5a3ae84d9da0956b28c357a365827bda33f3383647fc0b67484c74a5ea9",
         ),
         ("Linux", "aarch64" | "arm64") => pin(
             "aarch64-unknown-linux-musl",
             "tar.gz",
-            "3e47fc4a71b1ddd1b4294a0de9d34498922fdf41e3cd0bda5df3954e3d6deb9d",
+            "505324daad5fcbb1a3cab5d57d26ef42baf4d10b236df7de93a008196f1f2230",
         ),
         ("macOS", "arm64" | "aarch64") => pin(
             "aarch64-apple-darwin",
             "tar.gz",
-            "a35a0b7d622618774bc1bb8102d72562dfb21e619f88b153b370d7f89bc286af",
+            "d2658c9a24bab25a24fdc1917cb5b614b7c20a4ce8f363e5303d37b7e699d5ec",
         ),
         ("Windows", "x86_64") => pin(
             "x86_64-pc-windows-msvc",
             "zip",
-            "28be8c61f6b2c89b9eb2869f6af7f78e6f992e78a8abae0ce855fcc129cbeac1",
+            "ca500a01139e9af8d5f5a5e69b6a0dd941ed79ed3399a91cc35bba484fe732fa",
         ),
         _ => None,
     }
@@ -860,6 +860,24 @@ impl Step<'_> {
                 }
             }
         }
+        // The checkout and the build folder are per slot or per job (a random work folder in a container), so a workspace crate's key
+        // changed with every slot flip and the hit rate was 0%: sccache 0.20 strips these bases from every path in a Rust key
+        // (`SCCACHE_BASEDIRS`), and keeps the manifest paths verbatim for the crates that bake them in (local_sccache::basedir_vars).
+        // The server reads them at its start and each compile reads the verbatim list, so they go to both.
+        let roots: Vec<String> = ["PADDOCK_WORKSPACE", "GITHUB_WORKSPACE", "PADDOCK_BUILD_FOLDER"]
+            .iter()
+            .filter_map(|k| self.path_var(k))
+            .collect();
+        let basedirs = crate::local_sccache::basedir_vars(&roots, self.ctx.windows);
+        if let Some((k, v)) = basedirs.first() {
+            self.say(format!(
+                "sccache: base directories {v} ({k}; the same source at another slot or work folder hits the same entry)"
+            ));
+        }
+        settings.extend(basedirs.iter().cloned());
+        if let Some(full) = server_settings.as_mut() {
+            full.extend(basedirs);
+        }
         let secret = endpoint
             .rsplit_once('@')
             .map(|(userinfo, _)| userinfo.to_string())
@@ -1518,7 +1536,7 @@ mod tests {
             let name = format!("sccache-v{SCCACHE_VERSION}-test-target");
             let stage = root.join("stage").join(&name);
             std::fs::create_dir_all(&stage).unwrap();
-            std::fs::write(stage.join(exe), "sccache 0.19.0 stand-in bytes\n").unwrap();
+            std::fs::write(stage.join(exe), "sccache 0.20.1 stand-in bytes\n").unwrap();
             let rel = root.join("rel").join(format!("v{SCCACHE_VERSION}"));
             std::fs::create_dir_all(&rel).unwrap();
             let archive = rel.join(format!("{name}.tar.gz"));
@@ -1557,7 +1575,7 @@ mod tests {
             let bin = dest.join(exe);
             assert_eq!(step.download(pin, &dest, &bin), Ok(true), "{os}: {}", String::from_utf8_lossy(&out));
             assert_eq!(std::fs::metadata(&bin).unwrap().permissions().mode() & 0o777, 0o755, "{os}");
-            assert_eq!(std::fs::read_to_string(&bin).unwrap(), "sccache 0.19.0 stand-in bytes\n");
+            assert_eq!(std::fs::read_to_string(&bin).unwrap(), "sccache 0.20.1 stand-in bytes\n");
             let left: Vec<_> = std::fs::read_dir(&dest).unwrap().map(|e| e.unwrap().file_name()).collect();
             assert_eq!(left.len(), 1, "{os}: no part file is left: {left:?}");
             assert_eq!(std::fs::read_dir(&temp).unwrap().count(), 0, "{os}: the download folder is removed");

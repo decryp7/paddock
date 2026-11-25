@@ -15,6 +15,10 @@ use std::sync::OnceLock;
 /// Arguments of `dev heavy`.
 #[derive(Args, Debug)]
 pub struct HeavyArgs {
+    /// End the command when it has written nothing and its processes used no CPU for this many seconds (heavy's hang detector,
+    /// `heavy run --stall`; passed as `HEAVY_STALL`). Off unless given: pick it from the step's measured quiet gaps, with a wide margin.
+    #[arg(long, value_name = "SECONDS")]
+    pub stall: Option<f64>,
     /// The command and its arguments (after `--`).
     #[arg(trailing_var_arg = true, allow_hyphen_values = true, required = true)]
     pub command: Vec<String>,
@@ -36,6 +40,11 @@ pub fn plan(
 
 /// `heavy`, against the real machine.
 pub fn command(a: &HeavyArgs) -> Result<Report, CliError> {
+    if let Some(s) = a.stall
+        && !(s.is_finite() && s > 0.0)
+    {
+        return Err(CliError::usage(format!("dev heavy: --stall {s} is not a number of seconds > 0")));
+    }
     let env: HashMap<String, String> = crate::process_env::vars().collect();
     let cwd = std::env::current_dir().map_err(|e| CliError::failure(format!("current folder: {e}")))?;
     // The tree being committed in (a hook runs in an app's folder): heavy is built from this tree's tools/heavy.
@@ -46,8 +55,12 @@ pub fn command(a: &HeavyArgs) -> Result<Report, CliError> {
     let built = OnceLock::new();
     let line = plan(&a.command, &env, &|p| on_path(&env, p), &root, &built).map_err(CliError::failure)?;
     let (program, args) = line.split_first().ok_or_else(|| CliError::failure("dev heavy: no command"))?;
-    let status = paddock_proc::command(program)
-        .args(args)
+    let mut cmd = paddock_proc::command(program);
+    cmd.args(args);
+    for (k, v) in child_env(a.stall, &env, &|| crate::places::dev_targets(&cwd, &|k| env.get(k).cloned()).ok()) {
+        cmd.env(k, v);
+    }
+    let status = cmd
         .status()
         .map_err(|e| CliError::failure(format!("dev heavy: cannot start {program}: {e}")))?;
     // The hold ends with the command (and before `exit`, which runs no destructors).
@@ -62,6 +75,21 @@ pub fn command(a: &HeavyArgs) -> Result<Report, CliError> {
         a.command[0]
     );
     std::process::exit(code);
+}
+
+/// What `dev heavy` adds to heavy's environment: `HEAVY_STALL` from `--stall`, and `PADDOCK_DEV_TARGETS` (where heavy writes its run
+/// logs, `<dev-targets>/runs`) from the one derivation, `places.rs`, unless the caller set it (ER-47: the caller's value wins).
+fn child_env(stall: Option<f64>, env: &HashMap<String, String>, dev_targets: &dyn Fn() -> Option<PathBuf>) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    if let Some(s) = stall {
+        out.push(("HEAVY_STALL".to_string(), s.to_string()));
+    }
+    if !env.contains_key(crate::places::DEV_TARGETS_ENV)
+        && let Some(d) = dev_targets()
+    {
+        out.push((crate::places::DEV_TARGETS_ENV.to_string(), d.to_string_lossy().into_owned()));
+    }
+    out
 }
 
 #[cfg(unix)]
@@ -104,6 +132,21 @@ mod tests {
         );
         let line = plan(&cmd(), &HashMap::new(), &|p| p == "heavy", Path::new("/nonexistent"), &built).unwrap();
         assert_eq!(line, ["heavy", "run", "pre-push", "--", "cargo", "clippy"]);
+    }
+
+    #[test]
+    fn stall_and_the_dev_targets_folder_reach_heavy_and_a_callers_folder_wins() {
+        let found = || Some(PathBuf::from("/dt"));
+        assert_eq!(
+            child_env(Some(600.0), &HashMap::new(), &found),
+            [
+                ("HEAVY_STALL".to_string(), "600".to_string()),
+                ("PADDOCK_DEV_TARGETS".to_string(), "/dt".to_string())
+            ]
+        );
+        let env = HashMap::from([("PADDOCK_DEV_TARGETS".to_string(), "/mine".to_string())]);
+        assert_eq!(child_env(None, &env, &found), []);
+        assert_eq!(child_env(None, &HashMap::new(), &|| None), []);
     }
 
     #[test]

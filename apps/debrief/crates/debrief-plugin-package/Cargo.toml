@@ -12,6 +12,8 @@ description = "The .debriefplugin package of third-party Debrief plugins (ADR 00
 doctest = false # doctests are off (crates/README.md, "Doctests")
 
 [dependencies]
+# The shared atomic file replace (a temporary name of its own per write).
+paddock-env = { path = "../../../../crates/paddock-env" }
 debrief-plugin-api = { path = "../debrief-plugin-api" }
 # Ed25519 signatures (MIT, no dependencies): the publisher's signature over the package digest.
 ed25519-compact = { version = "2.6", default-features = false, features = ["std"] }

@@ -8,6 +8,10 @@ The rules marked ER-n come from the generic engineering-playbook repository, whi
 The Paddock incidents, run ids and ADR numbers behind each ER rule are in
 [lessons.md](lessons.md#incidents-behind-the-engineering-playbook-er-1-to-er-51-moved-from-the-generic-rules-repo-2026-11-24).
 
+A branch never picks a rule number (user, 2026-11-25): it writes a new rule as `NEW-<slug>.` in place of the number and cites it as
+`rule NEW-<slug>`; the train integrator gives it the next free number when the train lands and replaces every citation. Numbers are
+unique (C31).
+
 ## Way of working
 1. **One release at a time.** Release-critical work comes first. Other apps may progress in parallel only while load and
    CI capacity allow, and only if they don't change shared code (`crates/`, `ui/`) the release depends on; tags stay
@@ -493,9 +497,8 @@ The Paddock incidents, run ids and ADR numbers behind each ER rule are in
     constant the owning module exports), never by grepping or slicing that file's text. A source audit that must read another
     crate's code names the file through a path the owner exports and ends its span at an item boundary, not at a comment it
     remembers. A hand list that must equal generated data (heavy's `inputs.txt`) is generated, or its test prints the
-    regenerate command (ER-40). Checked where cheap: C121 (report-only until its first green run on the real tree) flags a
-    registry entry or test that runs `grep`, `sed`, `awk` or a regular expression over `.gitea/workflows/*.yml`; slicing another
-    file's text by anchors and hard-coded paths into another crate are not linted, so review and the train's test run cover them.
+    regenerate command (ER-40). Not linted: review and the train's test run cover it (the check that flagged a regular expression
+    over `.gitea/workflows/*.yml` was dropped on 2026-11-25: its report-only phase found only fixture text).
     *Why:* on train 8 (2026-11-13) eight fixes after the merges were combination failures; `bddd2947c` was a second reader of
     data that already had an accessor (`./dev ci conformance-args` now), `0308201b4` a span ended at a comment the author
     remembered, `11c365fc4` a path into another area's layout, `be69a31f6` a hand list that had to equal `cargo metadata`.
@@ -537,6 +540,17 @@ Amendments of the same date, no new number: the member gate runs each member's a
     selection the landing's own diff planned. Such a run counts for that landing only: it is never complete for a tag or a
     release, never the base for later planning, and the nightly still runs everything. *Why:* in ADR 0117's review round 2,
     narrowed runs were never complete, so a train whose change needed only a smoke set or its affected tests could never land.
+
+## Test-only hooks (user, 2026-11-25)
+99. **Test-only hooks compile only for tests.** An injected clock, gate, fake, test setter or `for_tests` constructor is behind
+    `#[cfg(any(test, feature = "test-support"))]`, and `test-support` (ADR 0073's name, the one name for this feature) is
+    enabled only from `[dev-dependencies]` (a self dev-dependency for a crate's own integration tests) or a test target's
+    `required-features`; production wiring that needs the same seam calls a crate-private function, never the public hook. C170
+    (`./dev check test-features`, in the conformance job on every change it plans) proves that no released binary, each app's
+    Tauri package, every `bundle.externalBin` and `paddock-setup`, is built with a test feature (`cargo tree -e normal`; it also
+    flags a stray `testing`; report-only until its first green run, ER-41). *Why:* on 2026-11-25 `paddock_ipc::Host::with_clock`
+    was public with no gate, and an ADR draft copied that pattern for the privileged dyno-helper daemon; a shipped hook is an
+    API anyone linking the crate can call.
 
 ## Monorepo (ADR 0014 §10; effective for an app from its import into `paddock/apps/<app>`, for Paddock from the first import)
 Until an app is imported, rules 2, 3, 8, 9, 39 and 42 above apply to it as written. From its import, these replace them:

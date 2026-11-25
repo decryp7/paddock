@@ -6,6 +6,7 @@
 
 pub mod client;
 pub mod discovery;
+#[cfg(any(test, feature = "test-support"))]
 pub mod fake;
 pub mod http;
 pub mod keys;

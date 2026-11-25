@@ -9,6 +9,8 @@
 //!   [`with_idle`] runs work on an idle slot while holding its lock (deleting its kept folders without a check-then-act race).
 //! - [`acquire_within`]: [`acquire_first`] repeated for a grace period when every slot looked busy (only a releaser's or an idle
 //!   sweep's instant of holding the lock is left to wait out: a status probe never takes it).
+//! - Affinity: a job kind's key names the slot it held last (`<root>/slots/last/<key>`, [`FsLocks::record_last`]); [`acquire_preferring`]
+//!   tries that slot first, so its kept folders stay warm. A missing or unreadable record is no preference.
 //! - Tokens: a holder has a [`fresh_token`]; `release` presents it, and a holder honours only its own, so a slow release can
 //!   never free the next job's slot.
 //! - [`FsLocks`]: the adapter over lock files, plus the holder protocol [`hold`]: a long-lived process takes a slot,
@@ -34,7 +36,10 @@ mod slot;
 pub use error::SlotError;
 pub use fs::{FsGuard, FsLocks, OwnerInfo};
 pub use hold::{
-    ACQUIRE_GRACE, Announcement, HoldEnd, HoldProbe, ReleaseLocks, acquire_within, fresh_token,
-    hold, hold_until, hold_while, hold_with, release, wait_free,
+    ACQUIRE_GRACE, Announcement, HoldEnd, HoldProbe, ReleaseLocks, acquire_within,
+    acquire_within_preferring, fresh_token, hold, hold_until, hold_while, hold_with, release,
+    wait_free,
 };
-pub use slot::{SlotId, SlotLocks, SlotState, acquire_first, slot_states, with_idle};
+pub use slot::{
+    SlotId, SlotLocks, SlotState, acquire_first, acquire_preferring, slot_states, with_idle,
+};

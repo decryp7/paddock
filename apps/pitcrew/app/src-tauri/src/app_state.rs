@@ -50,10 +50,8 @@ impl AppState {
     pub fn save(&self, dir: &Path) -> Result<(), String> {
         std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
         let path = dir.join(FILE_NAME);
-        let tmp = dir.join(format!("{FILE_NAME}.new"));
         let text = serde_json::to_string_pretty(self).map_err(|e| e.to_string())?;
-        std::fs::write(&tmp, text).map_err(|e| format!("{}: {e}", tmp.display()))?;
-        std::fs::rename(&tmp, &path).map_err(|e| format!("{}: {e}", path.display()))
+        paddock_env::write_atomic(&path, text.as_bytes(), false).map_err(|e| e.to_string())
     }
 }
 

@@ -290,6 +290,7 @@ impl Heavy {
             return Take::WriteFailed;
         }
         // rename(2) of a directory onto an existing NON-EMPTY directory fails; the lock dir is never empty.
+        // conformance: write-atomic — the rename claims a name in the lock protocol (it fails when the name exists); the marker is a few bytes written under this holder's own name
         if !dir.exists() && fs::rename(&tmp, dir).is_ok() {
             *epoch_out = epoch;
             return Take::Taken;
@@ -470,6 +471,7 @@ impl Heavy {
         let tmp = self.tmp_name("high.");
         // The holder started before this call: its record epoch is now.
         let body = record::format_marker(pid, "ci", self.now());
+        // conformance: write-atomic — the rename claims a name in the lock protocol (it fails when the name exists); the marker is a few bytes written under this holder's own name
         if fs::write(&tmp, body).is_err() || fs::rename(&tmp, &m).is_err() {
             let _ = fs::remove_file(&tmp);
             return Err(format!(
@@ -655,10 +657,10 @@ impl Heavy {
         let container = is_container_command(&req.cmdline) || self.container_running(dirs);
         let n = allowed_slots(self.cfg.slots, self.cfg.cpus, &p, container);
         let seen = format!(
-            "{n} of at most {} at once ({} cores, 15-minute load {}, CPU idle {}, memory available {}{})",
+            "{n} of at most {} at once ({} cores, 5-minute load {}, CPU idle {}, memory available {}{})",
             self.cfg.slots,
             self.cfg.cpus,
-            p.load15.map_or("unknown".into(), |x| format!("{x:.1}")),
+            p.load5.map_or("unknown".into(), |x| format!("{x:.1}")),
             p.idle.map_or("unknown".into(), |x| format!("{x:.0}%")),
             p.memory_mb.map_or("unknown".into(), |m| format!("{m} MiB")),
             if container { ", a container run alone" } else { "" }
@@ -671,6 +673,7 @@ impl Heavy {
         let l = self.load.load();
         Pressure {
             load1: l.map(|l| l[0]),
+            load5: l.map(|l| l[1]),
             load15: l.map(|l| l[2]),
             idle: self.load.idle_percent(),
             memory_mb: self.load.available_memory_mb(),
@@ -695,6 +698,7 @@ impl Heavy {
             ("MaxSlots", json!(self.cfg.slots)),
             ("Cpus", json!(self.cfg.cpus)),
             ("Load1", json!(p.load1)),
+            ("Load5", json!(p.load5)),
             ("Load15", json!(p.load15)),
             ("IdlePercent", json!(p.idle)),
             ("MemoryAvailableMiB", json!(p.memory_mb)),
@@ -903,6 +907,9 @@ pub struct Acquirer<'a> {
     ticket: PathBuf,
     marker: Option<PathBuf>,
     held: Option<u32>,
+    /// How many steps the rule allowed at once when this run took its slot: its share of the cores is `1/share`
+    /// (`gate::step_threads`). 1 until it holds a slot.
+    share: u32,
     epoch: u64,
     fails: u32,
     t0: u64,
@@ -918,6 +925,11 @@ pub struct Acquirer<'a> {
 }
 
 impl<'a> Acquirer<'a> {
+    /// How many steps the rule allowed at once when this run took its slot (1 until it holds one): the command's share of the cores.
+    pub fn share(&self) -> u32 {
+        self.share
+    }
+
     /// Queues (a ticket) or announces itself (a high marker). Err: nothing could be written; no lock was taken.
     pub fn new(h: &'a Heavy, req: Request) -> Result<Acquirer<'a>, String> {
         let _ = fs::create_dir_all(&h.cfg.root);
@@ -928,6 +940,7 @@ impl<'a> Acquirer<'a> {
             ticket: PathBuf::from("/nonexistent.ticket"),
             marker: None,
             held: None,
+            share: 1,
             epoch: 0,
             fails: 0,
             t0,
@@ -945,6 +958,7 @@ impl<'a> Acquirer<'a> {
                 .root
                 .join(format!("{HIGH_PREFIX}{}-{}", h.pid, record::sanitize_name(&a.req.name)));
             let tmp = h.tmp_name("high.");
+            // conformance: write-atomic — the rename claims a name in the lock protocol (it fails when the name exists); the marker is a few bytes written under this holder's own name
             let ok = fs::write(&tmp, record::format_marker(h.pid, &h.start_text(), h.now())).is_ok() && fs::rename(&tmp, &m).is_ok();
             if !ok {
                 let _ = fs::remove_file(&tmp);
@@ -985,6 +999,7 @@ impl<'a> Acquirer<'a> {
         let ok = !h.faults.ticket_fail.load(Ordering::SeqCst)
             && fs::write(&tmp, body).is_ok()
             && Heavy::non_empty(&tmp)
+            // conformance: write-atomic — the rename claims a name in the lock protocol (it fails when the name exists); the marker is a few bytes written under this holder's own name
             && fs::rename(&tmp, &ticket).is_ok();
         if !ok {
             let _ = fs::remove_file(&tmp);
@@ -1087,6 +1102,7 @@ impl<'a> Acquirer<'a> {
             if container_req && self.drain.is_none() && waited_now >= h.cfg.drain_after.as_secs() && !h.held_dirs().is_empty() {
                 let m = h.cfg.root.join(format!("{DRAIN_PREFIX}{}-{}", h.pid, record::sanitize_name(&name)));
                 let tmp = h.tmp_name("drain.");
+                // conformance: write-atomic — the rename claims a name in the lock protocol (it fails when the name exists); the marker is a few bytes written under this holder's own name
                 if fs::write(&tmp, record::format_marker(h.pid, &h.start_text(), h.now())).is_ok() && fs::rename(&tmp, &m).is_ok() {
                     h.log.info(
                         "heavy.wait",
@@ -1243,6 +1259,9 @@ impl<'a> Acquirer<'a> {
                             );
                             return Poll::Waiting;
                         }
+                        // Its share of the cores: as many steps as may run now, or as run now with it (a quick row beside them).
+                        let running = u32::try_from(dirs.len() + cheap_dirs.len() + 1).unwrap_or(u32::MAX);
+                        self.share = allowed.max(running).max(1);
                         self.waited_micros = h.clock.now_micros().saturating_sub(self.t0_micros);
                         // The admission decision, with what the rule saw: a stall explains itself from this line (ER-27).
                         let lane = if in_quick_lane { "quick" } else { "slot" };
@@ -1368,6 +1387,7 @@ impl<'a> Acquirer<'a> {
         }
         o.child = Some((pid, start_micros));
         let tmp = dir.join("owner.tmp");
+        // conformance: write-atomic — the rename claims a name in the lock protocol (it fails when the name exists); the marker is a few bytes written under this holder's own name
         let ok = fs::write(&tmp, record::format_owner(&o, self.epoch)).is_ok() && fs::rename(&tmp, dir.join("owner")).is_ok();
         if !ok {
             let _ = fs::remove_file(&tmp);

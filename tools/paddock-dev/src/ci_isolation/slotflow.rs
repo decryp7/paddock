@@ -300,6 +300,18 @@ fn heavy_mark(ctx: &Ctx, io: &mut Sinks<'_>, home: &str, slot: &str, remove: boo
     }
 }
 
+/// The kind of job for slot affinity: workflow, job and OS (`<workflow>/<job>/<OS>`; the app leg is the job, one job per leg). `None`
+/// when the runner names no workflow or job (the first free slot, as before). The shell kit builds the same key (job-isolation.sh).
+fn affinity_key(ctx: &Ctx) -> Option<String> {
+    let part = |k: &str| ctx.get(k).map(str::trim).filter(|v| !v.is_empty());
+    Some(format!(
+        "{}/{}/{}",
+        part("GITHUB_WORKFLOW")?,
+        part("GITHUB_JOB")?,
+        part("RUNNER_OS").unwrap_or("")
+    ))
+}
+
 /// `acquire`: the job's slot (first step of a host job); appends `PADDOCK_CI_SLOT`, `PADDOCK_CI_SLOT_TOKEN`, `PADDOCK_JOB_TEMP`, `TMPDIR`
 /// to `$GITHUB_ENV`; sweeps idle slots; checks the free-disk floor. A Linux container takes no slot.
 pub fn acquire(ctx: &Ctx, io: &mut Sinks<'_>) -> R<()> {
@@ -328,25 +340,28 @@ pub fn acquire(ctx: &Ctx, io: &mut Sinks<'_>) -> R<()> {
         .and_then(|v| v.parse::<f64>().ok())
         .unwrap_or(6.0);
     let mut tries = 0;
+    let max_text = max.to_string();
+    let (temp_native, home_native) = (native(&temp), native(&home));
+    // Slot affinity: the kind of job gets the slot it held last, where its kept folders and compile cache are warm.
+    let key = affinity_key(ctx);
+    let mut slot_args = vec![
+        "ci",
+        "slot",
+        "acquire",
+        "--max",
+        &max_text,
+        "--owner",
+        &temp_native,
+        "--root",
+        &home_native,
+    ];
+    if let Some(key) = &key {
+        slot_args.extend(["--key", key]);
+    }
     // A full house is refused (exit 4). It is real (more runners than PADDOCK_CI_SLOTS) or brief (a sweep holds an idle slot's lock
     // while it deletes that slot's folders): wait a little, then fail and name the holders.
     let (code, said) = loop {
-        let called = dev_tool(
-            ctx,
-            &[
-                "ci",
-                "slot",
-                "acquire",
-                "--max",
-                &max.to_string(),
-                "--owner",
-                &native(&temp),
-                "--root",
-                &native(&home),
-            ],
-            Capture::Read,
-            &[],
-        )?;
+        let called = dev_tool(ctx, &slot_args, Capture::Read, &[])?;
         if called.code != 4 || tries >= wait {
             break (called.code, called.stdout);
         }
@@ -574,8 +589,19 @@ pub fn release(ctx: &Ctx, io: &mut Sinks<'_>) -> R<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{free_gb, parse_df};
+    use super::{affinity_key, free_gb, parse_df};
     use crate::ci_isolation::testkit::{ctx, go};
+
+    #[test]
+    fn the_affinity_key_is_workflow_job_and_os_and_absent_without_a_workflow_or_job() {
+        let key = |vars: &[(&str, &str)]| affinity_key(&ctx(vars));
+        assert_eq!(
+            key(&[("GITHUB_WORKFLOW", "CI"), ("GITHUB_JOB", "crate"), ("RUNNER_OS", "macOS")]).as_deref(),
+            Some("CI/crate/macOS")
+        );
+        assert_eq!(key(&[("GITHUB_JOB", "crate")]), None, "no workflow name");
+        assert_eq!(key(&[("GITHUB_WORKFLOW", "CI"), ("GITHUB_JOB", " ")]), None, "a blank job name");
+    }
 
     #[test]
     fn slots_prints_the_default_and_the_configured_maximum() {

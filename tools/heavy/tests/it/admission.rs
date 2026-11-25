@@ -3,7 +3,7 @@
 //! Fixture folders and fake loads only (ER-14). Each rule has a positive control: the same world with the thing it reads removed.
 use crate::helpers::*;
 use heavy::config::Config;
-use heavy::gate::{CHEAP_LANE, CHEAP_SECS, MEMORY_PER_SLOT_MB, MEMORY_RESERVE_MB, Pressure, allowed_slots, cheap_admitted, jobs_per_step};
+use heavy::gate::{CHEAP_LANE, CHEAP_SECS, MAX_AUTO_SLOTS, MEMORY_PER_SLOT_MB, MEMORY_RESERVE_MB, Pressure, allowed_slots, cheap_admitted};
 use heavy::history::{History, KEEP_PER_ROW, MAX_LINES};
 use heavy::lock::{Acquirer, Poll, Request};
 
@@ -75,11 +75,12 @@ fn admission_refuses_a_second_step_past_the_memory_threshold() {
 fn the_rule_in_numbers_for_memory_and_cheap_rows() {
     let p = |memory_mb: Option<u64>| Pressure {
         load1: Some(0.0),
+        load5: Some(0.0),
         load15: Some(0.0),
         idle: Some(100.0),
         memory_mb,
     };
-    assert_eq!(allowed_slots(5, 14, &p(Some(64 * 1024)), false), 5);
+    assert_eq!(allowed_slots(5, 14, &p(Some(64 * 1024)), false), MAX_AUTO_SLOTS);
     assert_eq!(allowed_slots(5, 14, &p(Some(MEMORY_RESERVE_MB + 2 * MEMORY_PER_SLOT_MB)), false), 2);
     assert_eq!(
         allowed_slots(5, 14, &p(Some(MEMORY_RESERVE_MB + 2 * MEMORY_PER_SLOT_MB - 1)), false),
@@ -98,31 +99,19 @@ fn the_rule_in_numbers_for_memory_and_cheap_rows() {
     };
     assert!(!cheap_admitted(14, &busy, false));
     let busy_cpu_but_old_load = Pressure {
+        load5: Some(40.0),
         load15: Some(40.0),
         ..p(Some(64 * 1024))
     };
     assert!(
         cheap_admitted(14, &busy_cpu_but_old_load, false),
-        "the 15-minute load is no reason to hold a quick row"
+        "the 5- and 15-minute loads are no reason to hold a quick row"
     );
 }
 
 #[test]
-fn threads_per_step_times_steps_at_once_stay_within_the_cores() {
-    for cpus in [1u32, 2, 4, 8, 14, 16, 64] {
-        for max in [1u32, 2, 5, 8, 16] {
-            let jobs = jobs_per_step(cpus, max);
-            assert!((1..=2).contains(&jobs), "{cpus}/{max}: {jobs}");
-            assert!(max * jobs <= cpus.max(max), "{max} steps x {jobs} jobs on {cpus} cores");
-        }
-    }
-    assert_eq!(jobs_per_step(14, 5), 2);
-    assert_eq!(jobs_per_step(4, 8), 1, "more steps than half the cores: one job each");
-}
-
-#[test]
 fn two_quick_rows_run_together_beside_a_long_step_at_a_high_15_minute_load() {
-    // The 15-minute load fills the cores (one full slot only), a long step holds it: the quick rows still go.
+    // The load fills the cores (one full slot only), a long step holds it: the quick rows still go.
     let (rig, cfg) = rig_with(5);
     rig.load.set(15.0);
     let ags: Vec<_> = (41..46).map(|p| rig.agent_with(p, cfg.clone())).collect();
