@@ -1,9 +1,10 @@
 # 0116. A test target whose inputs did not change reuses its pass
 
-- Status: **Draft**, paused 2026-11-23 (the user put the repo-graph model first; this ADR depends on it). The user approved drafting a
-  Bazel-style CI test-result cache on 2026-11-23; the decisions below are open. Unfinished: §8's key controls still read as a
-  field list (they move to the graph ADR's tests), the costs need re-checking against the graph ADR's work packages, no review yet.
-- Date: 2026-11-23
+- Status: **Accepted** 2026-11-25 by the user: all decisions D1 to D9 as recommended (target-level reuse on the graph model, clippy, fmt
+  and e2e legs in phase 2, coverage never cached in phase 1, the runner's OS build reported and not keyed, a separate bucket, the
+  48-hour limit while the nightly is paused, the three additions beyond common practice, full runs may reuse exact-key passes).
+  Build started 2026-11-26 on `feat/adr-0116-test-result-cache`.
+- Date: 2026-11-23 (accepted 2026-11-25)
 - Related: ER-8 (full suite once on the combined tree), ER-12 (FLAKY never turns green), ER-15 and ER-49 (one verdict reader; test a
   commit once), ER-20 (cheaper operation), ER-33 (positive controls; not measured is never a pass), ER-37 (common practice and cost),
   ER-41 (report-only first), ER-46 (lists only shrink), ER-51 (every shared cache has an owner, a size limit and an eviction rule);
