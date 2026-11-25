@@ -15,7 +15,8 @@
 #
 #                calls, sites   what the matching files hold, as for an endpoint (a new listen call in a waived file is still a
 #                               listener and is looked at)
-# [[not_applicable]] endpoint, scenario, reason (and `os`): see the section at the end.
+# [[not_applicable]] endpoint, scenario, reason (and `os`): see the section near the end.
+# [[precondition_exempt]] endpoint, scenario, precondition, reason: see the last section.
 #
 # The ratchet (docs/ipc-endpoint-ratchet.toml) lists what fails today; this file never does.
 
@@ -489,3 +490,21 @@ reason = "No owner-side close of one connection and no Peer: the transport is ha
 endpoint = "pitcrew-service"
 scenario = "mixed-version-peer-ignores-fail0"
 reason = "No owner-side close of one connection and no Peer: the transport is hand-rolled (ADR 0072 section 9)."
+
+# --- Preconditions that do not apply -------------------------------------------------------------------------------------
+# [[precondition_exempt]] endpoint, scenario, precondition, reason (ADR 0122 §1). Every scenario declares the state it depends
+# on (`Scenario::default_preconditions` in crates/paddock-ipc/src/testing/endings/mod.rs); an entry here is the only way an
+# endpoint declares less. The harness's loader refuses a precondition the scenario does not have, and C102 checks the names.
+# The list only shrinks (ER-46): a new entry is the user's decision.
+
+[[precondition_exempt]]
+endpoint = "dyno-helper"
+scenario = "busy"
+precondition = "input-queued-when-refused"
+reason = "Its busy client writes nothing: the helper drops the 17th connection unanswered (ratchet I16, no-reason)."
+
+[[precondition_exempt]]
+endpoint = "pitcrew-service"
+scenario = "busy"
+precondition = "input-queued-when-refused"
+reason = "The service never refuses busy (ratchet I26: it waits on its semaphore on Linux and macOS, stops serving on Windows); not applicable until ADR 0072 WP-11."

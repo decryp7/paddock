@@ -96,6 +96,120 @@ impl fmt::Display for Scenario {
     }
 }
 
+impl Scenario {
+    /// The scenario named `name` ([`Scenario::name`]).
+    pub fn from_name(name: &str) -> Option<Scenario> {
+        Scenario::ALL.into_iter().find(|s| s.name() == name)
+    }
+
+    /// The preconditions every rig of this scenario depends on (ADR 0122 §1). A rig adds its own
+    /// ([`Expect::with_precondition`]); it narrows these only through a `[[precondition_exempt]]` entry of the register
+    /// ([`applicability::Applicability::exempt_reason`]), never in code.
+    pub fn default_preconditions(self) -> &'static [Precondition] {
+        match self {
+            Scenario::WrongAccount | Scenario::Busy | Scenario::ClientKeepsWriting => {
+                &[Precondition::InputQueuedWhenRefused]
+            }
+            Scenario::OwnerCloseWhilePeerNotReading => &[Precondition::PeerNotReadingAtClose],
+            _ => &[],
+        }
+    }
+}
+
+/// A state a scenario depends on, which the harness must establish before the endpoint acts and show that it held (ADR 0122).
+/// When it did not hold, what the client saw says nothing about the endpoint: the outcome is the rig's failure
+/// ([`RigFailure::Precondition`]), never a ratchet entry that is new or stale.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Precondition {
+    /// The client's bytes after its first frame (for busy: its first frame) are in the endpoint's receive queue before the
+    /// endpoint reads or refuses. An endpoint that closes with input unread makes the OS send a reset, which may or may not
+    /// reach the client before the reason does (a race: macOS delivers either), so a missing reason is then attributed to the
+    /// reset and reported as [`Fault::Reset`]. That is not the only outcome on TCP: the reset is one unacknowledged segment,
+    /// and when it does not reach the client (macOS, CI run 7868: a cut-off refusal, then nothing) the read waits out its
+    /// guard and is reported as [`Fault::Unanswered`]. Only an endpoint that half-closes and drains (ADR 0072 §2) ends the
+    /// same way every time.
+    InputQueuedWhenRefused,
+    /// The owner's send waits on the clock (the peer reads nothing) before the owner closes.
+    PeerNotReadingAtClose,
+    /// The peer reads again before the clock passes the reason deadline (the order of CI run 8174; the mini rig).
+    PeerReadsBeforeReasonDeadline,
+}
+
+impl Precondition {
+    /// Every precondition.
+    pub const ALL: [Precondition; 3] = [
+        Precondition::InputQueuedWhenRefused,
+        Precondition::PeerNotReadingAtClose,
+        Precondition::PeerReadsBeforeReasonDeadline,
+    ];
+
+    /// The name the register and the reports use.
+    pub fn name(self) -> &'static str {
+        match self {
+            Precondition::InputQueuedWhenRefused => "input-queued-when-refused",
+            Precondition::PeerNotReadingAtClose => "peer-not-reading-at-close",
+            Precondition::PeerReadsBeforeReasonDeadline => "peer-reads-before-reason-deadline",
+        }
+    }
+
+    /// The precondition named `name` ([`Precondition::name`]).
+    pub fn from_name(name: &str) -> Option<Precondition> {
+        Precondition::ALL.into_iter().find(|p| p.name() == name)
+    }
+}
+
+impl fmt::Display for Precondition {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.name())
+    }
+}
+
+/// What a rig saw of one precondition, with the measurement in words (`os_queue=1030`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Evidence {
+    /// It held before the endpoint acted.
+    Held(String),
+    /// It did not hold: the bound passed, or the rig's own order broke it.
+    Missed(String),
+    /// The rig could not tell (a probe failed, or nothing was recorded). Never counts as held (ER-33).
+    NotMeasured(String),
+}
+
+impl Evidence {
+    /// Whether the precondition held.
+    pub fn is_held(&self) -> bool {
+        matches!(self, Evidence::Held(_))
+    }
+}
+
+impl fmt::Display for Evidence {
+    /// `not met: <detail>`, `not measured: <detail>` or `held: <detail>`.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Evidence::Held(d) => write!(f, "held: {d}"),
+            Evidence::Missed(d) => write!(f, "not met: {d}"),
+            Evidence::NotMeasured(d) => write!(f, "not measured: {d}"),
+        }
+    }
+}
+
+/// How an unmet precondition counts (ADR 0122 §6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PreconditionVerdict {
+    /// A miss or a precondition not measured is a warning; the scenario is judged and ratcheted as before.
+    ReportOnly,
+    /// A miss or a precondition not measured is [`RigFailure::Precondition`]; the scenario is not compared with the ratchet.
+    Blocking,
+}
+
+/// The id of the report-only phase in `docs/gates.toml` `[[report_only]]` (ADR 0122 §6).
+pub const PRECONDITION_GATE_ID: &str = "test:endings-preconditions";
+
+/// The verdict [`run_all`] uses: report-only until the first complete green run on Linux, macOS and Windows in which every
+/// declared precondition held (ADR 0122 WP-5 then flips it to [`PreconditionVerdict::Blocking`] and removes the register entry
+/// [`PRECONDITION_GATE_ID`]).
+pub const PRECONDITION_VERDICT: PreconditionVerdict = PreconditionVerdict::ReportOnly;
+
 /// What can be wrong with an ending. The kind names ([`Fault::kind`]) are the ratchet's vocabulary.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Fault {
@@ -203,6 +317,18 @@ pub struct Observed {
     pub log: Vec<String>,
     /// The scenario did not finish within its guard.
     pub hung: bool,
+    /// What the rig saw of each precondition (ADR 0122 §3). A declared precondition with no entry is not measured.
+    pub evidence: Vec<(Precondition, Evidence)>,
+}
+
+impl Observed {
+    /// The evidence for `p`: the rig's, or not measured when it recorded none.
+    pub fn evidence_of(&self, p: Precondition) -> Evidence {
+        self.evidence.iter().find(|(q, _)| *q == p).map_or_else(
+            || Evidence::NotMeasured("the rig recorded no evidence".into()),
+            |(_, e)| e.clone(),
+        )
+    }
 }
 
 /// How a reason is expected.
@@ -224,13 +350,10 @@ pub struct Expect {
     /// How many end lines the scenario's connections make: one per connection the rig opened and that ended in the window
     /// (default 1). More or fewer is [`Fault::EndLineCount`]: a connection must end exactly once.
     pub ends: usize,
-    /// The client sent bytes the endpoint never reads before it closes (a refusal before the hello is read, a client that
-    /// keeps writing). Closing with unread input makes the OS send a reset, which may or may not reach the client before the
-    /// reason does (a race: macOS delivers either), so a missing reason is then attributed to the reset and reported as
-    /// [`Fault::Reset`]. That is not the only outcome on TCP: the reset is one unacknowledged segment, and when it does not
-    /// reach the client (macOS, CI run 7868: a cut-off refusal, then nothing) the read waits out its guard and is reported as
-    /// [`Fault::Unanswered`]. Only an endpoint that half-closes and drains (ADR 0072 §2) ends the same way every time.
-    pub unread_input: bool,
+    /// The preconditions the scenario depends on. A rig lists only its own additions ([`Expect::with_precondition`]);
+    /// [`conclude`] adds the scenario's defaults ([`Scenario::default_preconditions`]) and removes what the register exempts,
+    /// so [`judge`] sees the declared list.
+    pub preconditions: Vec<Precondition>,
 }
 
 impl Expect {
@@ -240,7 +363,7 @@ impl Expect {
             reason: ReasonRule::OneOf(codes.iter().map(|c| (*c).to_string()).collect()),
             end_line: true,
             ends: 1,
-            unread_input: false,
+            preconditions: Vec::new(),
         }
     }
 
@@ -250,7 +373,7 @@ impl Expect {
             reason: ReasonRule::Optional,
             end_line: true,
             ends: 1,
-            unread_input: false,
+            preconditions: Vec::new(),
         }
     }
 
@@ -266,9 +389,11 @@ impl Expect {
         self
     }
 
-    /// The same expectation for a client whose input the endpoint leaves unread (see [`Expect::unread_input`]).
-    pub fn with_unread_input(mut self) -> Expect {
-        self.unread_input = true;
+    /// The scenario also depends on `p` (a rig's own precondition beyond the scenario's defaults).
+    pub fn with_precondition(mut self, p: Precondition) -> Expect {
+        if !self.preconditions.contains(&p) {
+            self.preconditions.push(p);
+        }
         self
     }
 }
@@ -314,8 +439,15 @@ pub fn judge(observed: &Observed, expect: &Expect) -> Vec<Fault> {
             faults.push(Fault::TypedTransport);
         }
     }
-    if expect.unread_input && faults.contains(&Fault::NoReason) {
-        // The reset explains the missing reason (it may have discarded it), so only the reset is reported.
+    // Input queued when refused: the reset explains the missing reason (it may have discarded it), so only the reset is
+    // reported. The judge folds wherever the precondition is declared; once the verdict blocks, [`conclude`] turns a
+    // declared precondition without held evidence into a rig failure first, so the fold then applies exactly when it held.
+    // An exempt scenario (its client writes nothing) keeps `no-reason`.
+    if expect
+        .preconditions
+        .contains(&Precondition::InputQueuedWhenRefused)
+        && faults.contains(&Fault::NoReason)
+    {
         faults.retain(|f| *f != Fault::NoReason);
         if !faults.iter().any(|f| matches!(f, Fault::Reset(_))) {
             faults.push(Fault::Reset(std::io::ErrorKind::ConnectionReset));
@@ -358,11 +490,37 @@ pub fn judge(observed: &Observed, expect: &Expect) -> Vec<Fault> {
 pub enum Outcome {
     /// The scenario does not apply to this endpoint; the register (`[[not_applicable]]`) says why. It was not run.
     NotApplicable(String),
-    /// The rig itself failed (an endpoint that did not start, a client that could not connect): the test is red, never a
-    /// quiet "not applicable".
-    RigFailure(String),
+    /// The rig itself failed (an endpoint that did not start, a client that could not connect, a precondition that did not
+    /// hold): the test is red, never a quiet "not applicable".
+    RigFailure(RigFailure),
     /// It ran; these are the faults found (none: the ending is right).
     Ran(Vec<Fault>),
+}
+
+/// Why a rig failed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RigFailure {
+    /// The rig could not drive the scenario.
+    Drive(String),
+    /// A declared precondition did not hold or was not measured: the scenario's faults say nothing about the endpoint.
+    Precondition {
+        /// The precondition.
+        which: Precondition,
+        /// What the rig saw (never [`Evidence::Held`]).
+        evidence: Evidence,
+    },
+}
+
+impl fmt::Display for RigFailure {
+    /// The drive error, or `precondition <name> not met: <detail>` (or `not measured: <detail>`).
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            RigFailure::Drive(why) => f.write_str(why),
+            RigFailure::Precondition { which, evidence } => {
+                write!(f, "precondition {which} {evidence}")
+            }
+        }
+    }
 }
 
 /// One scenario's report.
@@ -376,6 +534,8 @@ pub struct Report {
     pub outcome: Outcome,
     /// The endpoint's log of the scenario, printed when the rig fails.
     pub log: Vec<String>,
+    /// The report-only precondition warnings of the scenario (ADR 0122 §6), one line each.
+    pub warnings: Vec<String>,
 }
 
 impl Report {
@@ -414,8 +574,9 @@ impl Report {
 pub type RigError = String;
 
 /// Runs `run` for every scenario of [`Scenario::ALL`] that the register does not declare not applicable to `endpoint`
-/// (`applicability`), and collects the reports. A scenario the register declares not applicable is not run; one that `run`
-/// cannot drive returns a [`RigError`], which becomes [`Outcome::RigFailure`] and fails [`ratchet::Ratchet::check`].
+/// (`applicability`), and collects the reports ([`conclude`], with [`PRECONDITION_VERDICT`]). A scenario the register declares
+/// not applicable is not run; one that `run` cannot drive returns a [`RigError`], which becomes [`Outcome::RigFailure`] and
+/// fails [`ratchet::Ratchet::check`].
 pub fn run_all<E: std::fmt::Display>(
     endpoint: &str,
     applicability: &applicability::Applicability,
@@ -424,24 +585,97 @@ pub fn run_all<E: std::fmt::Display>(
     Scenario::ALL
         .iter()
         .map(|&scenario| {
-            let report = |outcome, log| Report {
-                endpoint: endpoint.to_string(),
-                scenario,
-                outcome,
-                log,
-            };
             if let Some(why) = applicability.reason(endpoint, scenario) {
-                return report(Outcome::NotApplicable(why), Vec::new());
+                return Report {
+                    endpoint: endpoint.to_string(),
+                    scenario,
+                    outcome: Outcome::NotApplicable(why),
+                    log: Vec::new(),
+                    warnings: Vec::new(),
+                };
             }
-            match run(scenario) {
-                Err(why) => report(Outcome::RigFailure(why.to_string()), Vec::new()),
-                Ok((observed, expect)) => {
-                    let faults = judge(&observed, &expect);
-                    report(Outcome::Ran(faults), observed.log)
-                }
-            }
+            conclude(
+                endpoint,
+                scenario,
+                applicability,
+                PRECONDITION_VERDICT,
+                run(scenario),
+            )
         })
         .collect()
+}
+
+/// The report of one scenario that ran (`ran`): its declared preconditions are the scenario's defaults plus the rig's own,
+/// less the register's exemptions for `endpoint`. A declared precondition without held evidence is, under `verdict`, a
+/// warning (the scenario is then judged as before) or the rig's failure (the scenario is then not judged).
+pub fn conclude<E: std::fmt::Display>(
+    endpoint: &str,
+    scenario: Scenario,
+    applicability: &applicability::Applicability,
+    verdict: PreconditionVerdict,
+    ran: Result<(Observed, Expect), E>,
+) -> Report {
+    let report = |outcome, log, warnings| Report {
+        endpoint: endpoint.to_string(),
+        scenario,
+        outcome,
+        log,
+        warnings,
+    };
+    let (observed, mut expect) = match ran {
+        Err(why) => {
+            return report(
+                Outcome::RigFailure(RigFailure::Drive(why.to_string())),
+                Vec::new(),
+                Vec::new(),
+            );
+        }
+        Ok(r) => r,
+    };
+    let mut declared: Vec<Precondition> = scenario
+        .default_preconditions()
+        .iter()
+        .copied()
+        .filter(|p| {
+            applicability
+                .exempt_reason(endpoint, scenario, *p)
+                .is_none()
+        })
+        .collect();
+    for p in &expect.preconditions {
+        if !declared.contains(p) {
+            declared.push(*p);
+        }
+    }
+    expect.preconditions = declared;
+    let unmet: Vec<(Precondition, Evidence)> = expect
+        .preconditions
+        .iter()
+        .map(|p| (*p, observed.evidence_of(*p)))
+        .filter(|(_, e)| !e.is_held())
+        .collect();
+    if verdict == PreconditionVerdict::Blocking
+        && let Some((which, evidence)) = unmet.first().cloned()
+    {
+        return report(
+            Outcome::RigFailure(RigFailure::Precondition { which, evidence }),
+            observed.log,
+            Vec::new(),
+        );
+    }
+    let warnings: Vec<String> = unmet
+        .iter()
+        .map(|(p, e)| {
+            format!(
+                "warning: {endpoint} {scenario}: precondition {p} {e} (report-only under {PRECONDITION_GATE_ID} in docs/gates.toml; the scenario is judged and ratcheted as before, ADR 0122)"
+            )
+        })
+        .collect();
+    for w in &warnings {
+        eprintln!("{w}");
+    }
+    let faults = judge(&observed, &expect);
+    report(Outcome::Ran(faults), observed.log, warnings)
 }
 
 /// The text a rig prints when a check fails: the summaries and, for every scenario with faults, the endpoint's log.
@@ -450,6 +684,11 @@ pub fn failure_text(reports: &[Report]) -> String {
     for r in reports {
         out.push_str(&r.summary());
         out.push('\n');
+        for w in &r.warnings {
+            out.push_str("    ");
+            out.push_str(w);
+            out.push('\n');
+        }
         if !r.faults().is_empty() {
             for l in &r.log {
                 out.push_str("    | ");

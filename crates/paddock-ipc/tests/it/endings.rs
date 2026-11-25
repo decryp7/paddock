@@ -183,6 +183,7 @@ note = "why"
         scenario: Scenario::ListenerStopWithClientInBacklog,
         outcome: Outcome::Ran(judge(&o, &e)),
         log: o.log,
+        warnings: Vec::new(),
     };
     // A fault the ratchet lists is green only if it still happens in the way listed; the reset variant is a new failure.
     let result = ratchet.check("ipc-host", std::slice::from_ref(&report));
@@ -200,6 +201,7 @@ note = "why"
         scenario: Scenario::WrongToken,
         outcome: Outcome::Ran(vec![]),
         log: vec![],
+        warnings: Vec::new(),
     };
     let stale = ratchet
         .check("ipc-host", std::slice::from_ref(&clean))
@@ -351,9 +353,7 @@ mod link {
                         ..Default::default()
                     },
                     // The refused client's end, and the end of the held client's connection (dropped before the read).
-                    endings::Expect::reason(&["busy"])
-                        .with_unread_input()
-                        .with_ends(2),
+                    endings::Expect::reason(&["busy"]).with_ends(2),
                 ))
             }
             Scenario::SilentClient => {
@@ -491,7 +491,7 @@ fn a_rig_that_cannot_drive_a_scenario_turns_the_run_red_and_a_declared_not_appli
                     reason: endings::ReasonRule::Optional,
                     end_line: false,
                     ends: 1,
-                    unread_input: false,
+                    preconditions: Vec::new(),
                 },
             ))
         }
@@ -528,7 +528,7 @@ fn a_rig_that_cannot_drive_a_scenario_turns_the_run_red_and_a_declared_not_appli
                 reason: endings::ReasonRule::Optional,
                 end_line: false,
                 ends: 1,
-                unread_input: false,
+                preconditions: Vec::new(),
             },
         ))
     });
