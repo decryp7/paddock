@@ -100,7 +100,7 @@ test('allow list: the reader reads and parses the file once, and a file it could
   assert.deepEqual(l.warnings().map((f) => f.message), ['stale allow entry (a/b.rs: needle) matches no site', 'stale allow entry (a/gone.rs: needle) matches no site']);
 });
 
-test('allow list: every check that reads one has a sample here, and C30, C135 and C140 read one (C121 and C131 are Rust-only since pair P3)', () => {
+test('allow list: every check that reads one has a sample here, and C30, C135 and C140 read one (C131 is Rust-only since pair P3)', () => {
   assert.deepEqual(users.map((c) => c.id).filter((id) => !SAMPLE[id]), []);
   assert.deepEqual(users.map((c) => c.id), ['C30', 'C135', 'C140']);
 });

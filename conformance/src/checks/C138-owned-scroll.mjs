@@ -11,12 +11,12 @@
 // assistant log, which keeps the browser's anchoring on purpose (ADR 0105 decision 2: it keeps the reader's place).
 // Accepted gaps (not seen): `scrollIntoView` (it scrolls every ancestor, and the element it reveals is not the scroller),
 // `Renderer2.setProperty(el, 'scrollTop', ..)`, and per file, not per element: a component with two scrollers passes when either carries
-// the style. The reasoned waivers are listed in one warning, as C115 does. ER-41: report-only (warnings) until its first green run on the real tree; ER-33: a positive control runs on in-memory text
+// the style. The reasoned waivers are listed in one warning, as C115 does. ER-41: blocking (mode gate) since its first green run on the real tree, ci.yml run 9030 (b3ad2dd2d, 2026-11-25); ER-33: a positive control runs on in-memory text
 // first.
 import { posix } from 'node:path';
 import { unwaivable, error, warn } from '../finding.mjs';
 
-export const SEVERITY = warn;
+export const SEVERITY = error;
 const SOURCE = /^(apps\/[^/]+\/|ui\/projects\/).*\.ts$/;
 const SKIP = /\.spec\.ts$|\.test\.ts$|\.d\.ts$|(^|\/)(e2e|e2e-tauri|node_modules|dist|scripts|test|testing)\/|^ui\/projects\/paddock-e2e\//;
 const WAIVER = /conformance:\s*owned-scroll\s*[—–-]+\s*(\S.{2,})/;
@@ -140,7 +140,7 @@ const FIX =
 export default {
   id: 'C138',
   scope: 'both',
-  mode: 'report-only',
+  mode: 'gate',
   title: 'Scrollers our code positions make no scroll moves of their own',
   rule: 40,
   run(ctx) {

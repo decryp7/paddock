@@ -1477,7 +1477,7 @@ adr = "0022"
   ]
   owner = "paddock"
   delete_by = "v0.5.0"
-  note = "The helpers of the JavaScript host, which still runs the checks that have no Rust port (`node conformance/bin/paddock-conformance.mjs`). The checks C39, C53, C120, C121, C123 and C131 have no JavaScript module any more (C119, C122, C124, C125, C129 and C130 were retired on 2026-11-24): `./dev conformance` runs them (conformance.rust of conformance/paddock.ci.json) and tools/paddock-dev/tests/it holds them to the answers the JavaScript host recorded (tests/fixtures/check). tests/it/check_util.rs, check.rs (the mask) and check_allow_list.rs run both helper sets on the same inputs; the inline waiver and the shell and YAML lexers have no JavaScript copy left. Goes with the engine and the other checks (docs/plans/ci-in-rust.md, WP-10)."
+  note = "The helpers of the JavaScript host, which still runs the checks that have no Rust port (`node conformance/bin/paddock-conformance.mjs`). The checks C39, C53, C120, C123 and C131 have no JavaScript module any more (C119, C122, C124, C125, C129 and C130 were retired on 2026-11-24, C121 on 2026-11-25): `./dev conformance` runs them (conformance.rust of conformance/paddock.ci.json) and tools/paddock-dev/tests/it holds them to the answers the JavaScript host recorded (tests/fixtures/check). tests/it/check_util.rs, check.rs (the mask) and check_allow_list.rs run both helper sets on the same inputs; the inline waiver and the shell and YAML lexers have no JavaScript copy left. Goes with the engine and the other checks (docs/plans/ci-in-rust.md, WP-10)."
 
   [[mechanism.copy]]
   paths = ["conformance/src/checks/C139-e2e-ready-directives.mjs"]

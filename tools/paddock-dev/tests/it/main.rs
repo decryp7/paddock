@@ -7,7 +7,6 @@ mod cargo_target_lint;
 mod check;
 mod check_allow_list;
 mod check_c120;
-mod check_c121;
 mod check_c123;
 mod check_c131;
 mod check_c139;

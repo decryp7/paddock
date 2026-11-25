@@ -45,7 +45,7 @@ test('C138 lists every reasoned waiver in one warning, and a site without a reas
   assert.equal(f.filter((x) => /has no reason/.test(x.message)).length, 1);
 });
 
-test('C138 bad: each write shape in a component without the style is a warning on its line (report-only, ER-41)', async () => {
+test('C138 bad: each write shape in a component without the style is an error on its line (blocking since run 9030, ER-41)', async () => {
   const body = [
     '  a(el: HTMLElement) { el.scrollTop = 1; }',
     '  b(el: HTMLElement) { el.scrollLeft -= 1; }',
@@ -56,7 +56,7 @@ test('C138 bad: each write shape in a component without the style is a warning o
   ].join('\n');
   const f = await findingsOf('C138', makeApp({ 'apps/one/app/src/app/grid.ts': component('<div class="viewport"></div>', body) }));
   assert.equal(f.length, 6);
-  assert.ok(f.every((x) => x.severity === 'warn'));
+  assert.ok(f.every((x) => x.severity === 'error'));
   assert.deepEqual(f.map((x) => x.line), [3, 4, 5, 6, 7, 8]);
   assert.match(messages(f), /writes `scrollTop` but no scroller in this component carries the shared style/);
   assert.match(messages(f), /writes `scrollToIndex`/);
@@ -85,7 +85,7 @@ test('C138 positive control (ER-33): the probe sees a known write, a marker and 
   assert.equal(positiveControl(), true);
   assert.equal(scrollWrites('el.scrollTop = 1;\nconst x = el.scrollTop;\n').length, 1);
   assert.deepEqual(ownedScrollProblems(component('<div></div>', '  f(el: HTMLElement) { el.scrollTop = 1; }'), () => null).length, 1);
-  assert.equal(check.mode, 'report-only');
+  assert.equal(check.mode, 'gate');
 });
 
 test('C138 precision (review of 8e06ec809): receivers, bracket and logical assignments, multi-line assigns, comments and strings', () => {

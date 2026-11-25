@@ -6,11 +6,11 @@
 // in the job's `env` or the running step's `env` (the dispatch's base, else origin/main, as 138f8b879 set it).
 // ER-42: workflows are read through the `yaml` parser (as C111 does) and the contracts through their JSON, never by grepping text. Comment lines
 // of a `run` do not count. A workflow that does not parse, or no workflow at all, is "check broken" (ER-33), never a pass.
-// ER-41: report-only (warnings) until its first green run on the real tree, recorded by run id here. Recorded: not yet.
-import { error, unwaivable, warn } from '../finding.mjs';
+// ER-41: blocking (mode gate) since its first green run on the real tree, ci.yml run 9030 (b3ad2dd2d, 2026-11-25).
+import { error, unwaivable } from '../finding.mjs';
 import { BASE_REF_VAR } from '../util/baseline.mjs';
 
-export const SEVERITY = warn;
+export const SEVERITY = error;
 const FILE = /^\.gitea\/workflows\/[^/]+\.ya?ml$/;
 const GROWTH_TESTS = /\bnpm run test:scripts\b|\bnpm-audit\.test\b/;
 const DEV_CI_RUN = /(?:^|[\s;&|])\.\/dev ci run (\S+) (\S+)/;
@@ -68,7 +68,7 @@ export function jobProblems(ctx, job) {
 export default {
   id: 'C167',
   scope: 'root',
-  mode: 'report-only',
+  mode: 'gate',
   title: 'A workflow job that runs the merge-base growth tests checks out the history and names the base ref',
   rule: 21,
   async run(ctx) {

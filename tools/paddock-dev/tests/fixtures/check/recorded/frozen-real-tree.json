@@ -4,7 +4,6 @@
   "C39",
   "C53",
   "C120",
-  "C121",
   "C123",
   "C131"
  ],
@@ -314,24 +313,6 @@
    "line": 1,
    "message": "the baseline's shrink-only rule is not enforced here: no merge base (Command failed: git rev-parse HEAD)",
    "fix": "Fetch the target branch (`git fetch origin main`, full history), or set PADDOCK_BASE_REF to the ref to compare with."
-  },
-  {
-   "check": "C121",
-   "severity": "warn",
-   "rule": 79,
-   "file": "conformance/test/c137-e2e-kit-import.test.mjs",
-   "line": 54,
-   "message": "reads a workflow file's text with a regular expression: the data it needs has one accessor",
-   "fix": "Read the data through the one accessor that owns it (`./dev ci conformance-args`, `cargo metadata`, the register's parser, a constant the owner exports; rule 79). A test of a check of workflows may read them: list the site (its path, a piece of the line and a reason) in conformance/c121-allow.json."
-  },
-  {
-   "check": "C121",
-   "severity": "warn",
-   "rule": 79,
-   "file": "conformance/c121-allow.json",
-   "line": 1,
-   "message": "stale allow entry (conformance/test/c91-per-machine.test.mjs: assert.match(await msg({ '.gitea/workflows/demo-release.yml': 'jobs: {}\\n' }), /stage-paddock-setup/);) matches no site",
-   "fix": "Remove it from conformance/c121-allow.json."
   },
   {
    "check": "C123",
@@ -1569,5 +1550,5 @@
   }
  ],
  "errors": 0,
- "warnings": 40
+ "warnings": 38
 }
