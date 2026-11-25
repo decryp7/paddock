@@ -3876,3 +3876,23 @@ first and records the second (`ci fix-items`) is part of the queued green-main w
 - **Class (ER-21).** Recorded as an instance of: a CI step on the user's shared macOS session that can take the whole session down
   (ADR 0120). Earlier instances: the 2026-11-23 session crash (hdiutil failure after the Mac runner's desktop session crashed, train
   18's fix item).
+
+## A hung sccache server held every build and the heavy slot (2026-11-25, fix/sccache-detect-restart)
+
+- **What happened.** At 22:39Z the local sccache 0.19 server (started by `./dev sccache env`, local disk plus the RustFS S3 level) hung
+  after a burst of opendal S3 errors ("read failed / write close failed ... send http request"). It kept its port and took every
+  connection, but answered nothing: every rustc client waited at 0% CPU, the builds holding heavy's slot never finished, and every
+  agent's pre-push queued behind them until the coordinator restarted the server by hand. The tools had no handle on it:
+  `sccache --start-server` forks a daemon whose pid nobody is told, and the only stop they knew (`--stop-server`) is a request the hung
+  server never answers.
+- **Measured** (docs/benchmarks.md, "sccache server hang: client behaviour and probe time"): a client waiting on a hung server waits for
+  ever; when the server is stopped it fails the compile ("Connection reset by peer"), `SCCACHE_IGNORE_SERVER_IO_ERROR=1` or not, and
+  never compiles locally. So a build that waited cannot pass after a restart.
+- **Fix.** `tools/paddock-dev/src/sccache_server.rs` (its probe is also CI's, in `setup-rust` and `sccache-stats`, rule 55): the tools
+  start the agents' server in the foreground of a process they spawn and record its pid and start time;
+  they ask it for its statistics within 10 s; no answer, they stop it by that record (rule 53; a server they did not start is never
+  touched), start a fresh one and ask again; still none, the build runs uncached with one warning. Detecting a hang in the middle
+  of a build (a watchdog that gives back the heavy slot) was dropped by the user's decision of 2026-11-25: the probe runs when a build
+  starts.
+- **Rule.** A tool that starts a long-lived helper holds it by its identity from the start; a helper only reachable by its own request
+  protocol cannot be repaired when that protocol is what hangs.

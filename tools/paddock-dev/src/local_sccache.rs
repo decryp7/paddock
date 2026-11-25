@@ -17,9 +17,14 @@
 //! (ER-27). CI is untouched: `CI` or `GITHUB_ACTIONS` in the environment turns this off, and so does `PADDOCK_SCCACHE=off`.
 //! The build folder reaches cargo as `--config build.target-dir` ([`crate::cargo_target`]): the wrapper only pays when no
 //! `CARGO_*` variable names the folder.
+//!
+//! The server is started, probed, stopped and restarted through [`crate::sccache_server`] (shared with CI): held by its pid and start
+//! time from the start, asked for its statistics within a short limit, and when this tool started it and it gives no answer (hung,
+//! the incident of 2026-11-25), stopped by that record and started once more ([`recover`]); one this tool did not start is never touched.
 
 use crate::ci_setup_rust::{SCCACHE_VERSION, pin_for, sha256_file};
-use crate::ci_tool::{NETWORK_ENV, Output, ToolCall, tail};
+use crate::ci_tool::{NETWORK_ENV, ToolCall, tail};
+use crate::sccache_server::{Health, Limits, Stopped};
 use crate::tool_cache;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -51,10 +56,12 @@ pub fn server_port(env: &HashMap<String, String>) -> String {
 /// Whether a server listens on [`server_port`] on this machine (sccache listens on 127.0.0.1). A connect has no side effect, unlike
 /// `--show-stats`, which starts a server when none runs (ER-45). Which server it is, ours or not, is decided by its stats.
 pub fn listening(env: &HashMap<String, String>) -> bool {
-    let Ok(port) = server_port(env).parse::<u16>() else {
-        return false;
-    };
-    std::net::TcpStream::connect_timeout(&std::net::SocketAddr::from(([127, 0, 0, 1], port)), Duration::from_millis(300)).is_ok()
+    port_number(env).is_some_and(crate::sccache_server::listening)
+}
+
+/// [`server_port`] as a number (`None` when it is not one).
+fn port_number(env: &HashMap<String, String>) -> Option<u16> {
+    server_port(env).parse::<u16>().ok()
 }
 
 /// Whether [`prepare`] may download the pinned release.
@@ -560,9 +567,28 @@ struct Server<'a> {
 
 impl Server<'_> {
     fn call(&self, arg: &str) -> ToolCall {
+        self.base().args([arg])
+    }
+
+    /// The server's start: the binary with the server's environment, run in the foreground and held ([`crate::sccache_server::start`]).
+    fn start(&self, env: &HashMap<String, String>, port: u16, limits: Limits) -> Result<paddock_proc::ProcessId, String> {
+        let log = self.run.join(format!("start-{}.log", std::process::id()));
+        let started = crate::sccache_server::start(&self.base(), env, port, self.run, &log, limits.start);
+        let _ = std::fs::remove_file(&log);
+        started
+    }
+
+    /// Stops the server on `port`: by its record when this tool started it, else by sccache's own request (a server that answers and
+    /// runs on this tool's folder: the upgrade to the chain), which a hung server never gets.
+    fn stop(&self, env: &HashMap<String, String>, port: u16) {
+        if let crate::sccache_server::Stopped::NotOurs(_) = crate::sccache_server::stop_recorded(self.run, port) {
+            let _ = self.call("--stop-server").run(env, &mut std::io::sink());
+        }
+    }
+
+    fn base(&self) -> ToolCall {
         let run = self.run.to_string_lossy();
         let c = ToolCall::new(self.bin.to_string_lossy())
-            .args([arg])
             .pass(PASS)
             .cwd(self.run.to_path_buf())
             .without("TMPDIR")
@@ -832,9 +858,15 @@ fn ensure_binary(env: &HashMap<String, String>, install: Install) -> Result<Path
     }
 }
 
-/// Makes the wrapper ready: the pinned binary, one server on the default port for the chosen backend (started when none runs). Never
-/// fails a build: every problem is an [`Outcome::Off`] with its cause and next step.
+/// Makes the wrapper ready: the pinned binary, one server on the default port for the chosen backend (started when none runs, and
+/// restarted once when it was started by this tool and does not answer: [`recover`]). Never fails a build: every problem is an
+/// [`Outcome::Off`] with its cause and next step.
 pub fn prepare(env: &HashMap<String, String>, install: Install) -> Outcome {
+    prepare_with(env, install, Limits::default())
+}
+
+/// [`prepare`] with the server's limits named (a test passes short ones).
+pub(crate) fn prepare_with(env: &HashMap<String, String>, install: Install, limits: Limits) -> Outcome {
     if let Some(why) = declined(env) {
         return off(why, false);
     }
@@ -922,77 +954,63 @@ pub fn prepare(env: &HashMap<String, String>, install: Install) -> Outcome {
     } else {
         String::new()
     };
+    let Some(port) = port_number(env) else {
+        return off(
+            format!(
+                "SCCACHE_SERVER_PORT is `{}`, which is not a port. Next: unset it or set a port number",
+                server_port(env)
+            ),
+            true,
+        );
+    };
     // At most two starts: a server whose startup write check failed once stays read-only for its whole life (sccache 0.19.0
     // `RemoteStorage::check`), so it is stopped and started once more; still read-only, the wrapper is off.
     let mut restarted = false;
     let mut upgraded = false;
     loop {
-        let start_log = run.join(format!("start-{}.log", std::process::id()));
-        // The server outlives this process and would hold a pipe open, so its starter writes to a file.
         let mut started_here = false;
         // A server already listening is not started again: the start would only fail with "Address in use" and write that to the
         // running server's error log, the log every warning names (247 times in two days, docs/research/2026-11-19-sccache.md).
         // After a restart of our own server the port is started without asking.
-        let start = if !restarted && !upgraded && listening(env) {
-            Ok(crate::ci_tool::Ran {
-                success: true,
-                how: "already listening".into(),
-                stdout: String::new(),
-                stderr: String::new(),
-            })
-        } else {
-            server
-                .call("--start-server")
-                .output(Output::File(start_log.clone()))
-                .run(env, &mut std::io::sink())
-                .map(|mut s| {
-                    started_here = s.success;
-                    s.success |= already_running(&s);
-                    s
-                })
-        };
-        let _ = std::fs::remove_file(&start_log);
-        let stats = server.call("--show-adv-stats").run(env, &mut std::io::sink());
-        let (start, stats) = match (start, stats) {
-            (Ok(s), Ok(t)) if s.success && t.success => (s, t),
-            (Ok(s), _) if !s.success => {
-                return off(
-                    format!(
-                        "the sccache server did not start ({}): {}. {where_log}.{long_path}",
-                        s.how,
-                        tail(&s.stderr, 4).trim()
-                    ),
-                    true,
-                );
+        if restarted || upgraded || !listening(env) {
+            match server.start(env, port, limits) {
+                Ok(_) => started_here = true,
+                // Another agent's server took the port between the look and the start: it runs, and it is not this call's.
+                Err(why) if crate::sccache_server::address_in_use(&why) => {}
+                Err(why) => {
+                    return off(format!("the sccache server did not start: {why}. {where_log}.{long_path}"), true);
+                }
             }
-            (Err(e), _) | (_, Err(e)) => return off(format!("sccache could not be run: {e}. {where_log}."), true),
-            _ => {
-                return off(
-                    format!("the sccache server did not answer `--show-adv-stats`. {where_log}.{long_path}"),
-                    true,
-                );
-            }
+        }
+        let stats = match crate::sccache_server::probe(&server.call("--show-adv-stats"), env, limits.probe) {
+            Ok(stats) => stats,
+            Err(why) => match recover(&server, env, port, limits, &why) {
+                Ok((stats, fresh)) => {
+                    started_here |= fresh;
+                    stats
+                }
+                Err(reason) => return off(format!("{reason}. {where_log}"), true),
+            },
         };
-        let _ = start;
         // A plain-disk server on this tool's own folder, while this run wants the chain: it was started when the store was down (an `auto`
         // run that fell back), so it is replaced once, now that the store answers; left alone, every later build would be uncached
         // for good (the server never exits on its own).
         if !upgraded
             && let Backend::Tiered { dir, .. } = &backend
-            && location(&stats.stdout) == Some(format!("Local disk: \"{}\"", dir.strip_suffix("-s3").unwrap_or(dir)))
+            && location(&stats) == Some(format!("Local disk: \"{}\"", dir.strip_suffix("-s3").unwrap_or(dir)))
         {
             upgraded = true;
             eprintln!(
                 "::notice::local-sccache: the server on port {} runs the plain local disk (it was started while the shared store was down); stopping it and starting it with the store behind the disk",
                 server_port(env)
             );
-            let _ = server.call("--stop-server").run(env, &mut std::io::sink());
+            server.stop(env, port);
             continue;
         }
         // An `auto` run that fell back to the disk (the store is down now) keeps a server of ours that already runs the chain: its
         // second level fails soft (`l0`), and stopping it would throw away a working cache.
-        let keeps_chain = matches!(&backend, Backend::Local { dir, .. } if fallback.is_some() && chain_on(&stats.stdout, dir));
-        if !backend.matches_stats(&stats.stdout) && !keeps_chain {
+        let keeps_chain = matches!(&backend, Backend::Local { dir, .. } if fallback.is_some() && chain_on(&stats, dir));
+        if !backend.matches_stats(&stats) && !keeps_chain {
             return off(
                 format!(
                     "the sccache server on port {} does not use this cache ({}); it is not touched. Next: stop it yourself (`sccache --stop-server`) or leave the wrapper off. {where_log}",
@@ -1002,7 +1020,7 @@ pub fn prepare(env: &HashMap<String, String>, install: Install) -> Outcome {
                 true,
             );
         }
-        if cache_mode(&stats.stdout) != Some("ReadOnly") {
+        if cache_mode(&stats) != Some("ReadOnly") {
             break;
         }
         if !started_here {
@@ -1020,7 +1038,7 @@ pub fn prepare(env: &HashMap<String, String>, install: Install) -> Outcome {
         }
         restarted = true;
         eprintln!("local-sccache: the server came up read-only; stopping it (this call started it) and starting it once more");
-        let _ = server.call("--stop-server").run(env, &mut std::io::sink());
+        server.stop(env, port);
     }
     eprintln!(
         "local-sccache: sccache {SCCACHE_VERSION} on, {}{}, ready in {:.1} s; server log {}",
@@ -1045,6 +1063,43 @@ pub fn prepare(env: &HashMap<String, String>, install: Install) -> Outcome {
         vars: ready_vars(&bin, &backend),
         bin,
     })
+}
+
+/// A server on the port that gave no statistics within the probe limit (hung: it takes the connection and never answers, and every
+/// compile waits on it at 0% CPU, the incident of 2026-11-25): under the restart lock it is asked once more (another caller may have
+/// restarted it meanwhile), then stopped by its record and started fresh, then asked again ([`crate::sccache_server::answer_or_restart`]).
+/// A server this tool did not start is never touched. `Ok` with the statistics and whether a fresh server gave them; `Err` is the
+/// reason for the one warning, with the next step. A fresh server that still gives no answer is stopped again, by its record.
+fn recover(server: &Server, env: &HashMap<String, String>, port: u16, limits: Limits, first: &str) -> Result<(String, bool), String> {
+    let began = std::time::Instant::now();
+    let health = crate::sccache_server::with_restart_lock(server.run, port, || {
+        let mut probe = || crate::sccache_server::probe(&server.call("--show-adv-stats"), env, limits.probe);
+        let mut restart = || match crate::sccache_server::stop_recorded(server.run, port) {
+            Stopped::NotOurs(why) => Err(format!("this tool did not start it ({why}), so it is not touched")),
+            Stopped::Ended | Stopped::Gone => server.start(env, port, limits).map(|_| ()),
+        };
+        crate::sccache_server::answer_or_restart(&mut probe, &mut restart)
+    })
+    .map_err(|why| format!("the sccache server on port {port} does not answer ({first}) and could not be restarted: {why}"))?;
+    match health {
+        Health::Answered { stats, restarted } => {
+            if restarted {
+                eprintln!(
+                    "::notice::local-sccache: the sccache server on port {port} did not answer ({first}); this tool started it, so it was stopped and started again ({:.1} s)",
+                    began.elapsed().as_secs_f64()
+                );
+            }
+            Ok((stats, restarted))
+        }
+        Health::Unanswered(why) => {
+            // Only a server this tool started has a record, so nobody else's is ended here.
+            let _ = crate::sccache_server::stop_recorded(server.run, port);
+            Err(format!(
+                "the sccache server on port {port} does not answer: {why} ({:.1} s). Next: a server this tool did not start is yours or another agent's to stop (`sccache --stop-server` itself waits on a hung server: end that process); this build runs without the cache",
+                began.elapsed().as_secs_f64()
+            ))
+        }
+    }
 }
 
 /// The one warning for a server that was already running (not started by this call) and is read-only: it is somebody else's, so it
@@ -1330,22 +1385,40 @@ mod tests {
         assert_eq!(cache_mode("Cache location  x\n"), None);
     }
 
-    /// A stand-in sccache: `--version`, start and stop are recorded, and the stats say read-only for the first `readonly_starts`
-    /// starts (sccache 0.19.0 keeps a failed startup write check for the server's whole life). Each start makes a file
-    /// `starts-<n>` beside it (up to four), so the number of starts is which of them exist.
+    /// A test's home folder; every server its stand-in started is ended by its record when the test ends.
+    struct Home {
+        dir: tempfile::TempDir,
+        port: u16,
+    }
+
+    impl Home {
+        fn path(&self) -> &Path {
+            self.dir.path()
+        }
+    }
+
+    impl Drop for Home {
+        fn drop(&mut self) {
+            let _ = crate::sccache_server::stop_recorded(&self.dir.path().join("sccache-run"), self.port);
+        }
+    }
+
+    /// A stand-in sccache: `--version`, its start and stop are recorded, and the stats say read-only for the first `readonly_starts`
+    /// starts (sccache 0.19.0 keeps a failed startup write check for the server's whole life). Its start (`SCCACHE_START_SERVER`, no
+    /// arguments) is a process that listens on the port, as the real server does in the foreground; each start makes a file
+    /// `starts-<n>` beside it (up to four), so the number of starts is which of them exist. While the file `hung` exists beside it, the
+    /// first server's statistics never come (a hung server, and a restart cures it); while `hung-always` exists, no server's do.
     #[cfg(unix)]
-    fn fake(
-        readonly_starts: u32,
-        foreign_location: Option<&str>,
-    ) -> (tempfile::TempDir, HashMap<String, String>, paddock_testkit::Installed) {
+    fn fake(readonly_starts: u32, foreign_location: Option<&str>) -> (Home, HashMap<String, String>, paddock_testkit::Installed) {
         use paddock_testkit::{Actions, Case, StandIn};
         let home = tempfile::tempdir().unwrap();
+        // A port nothing listens on: the default 4226 is the machine's own server, which a test must never see (ER-14).
+        let port = crate::sccache_server::tests::port_for_a_server();
         let e = env(&[
             ("PADDOCK_DEV_HOME", home.path().to_str().unwrap()),
             ("SCCACHE_DIR", home.path().join("cache").to_str().unwrap()),
             ("PATH", "/usr/bin:/bin"),
-            // A port nothing listens on: the default 4226 is the machine's own server, which a test must never see (ER-14).
-            ("SCCACHE_SERVER_PORT", free_port().to_string().as_str()),
+            ("SCCACHE_SERVER_PORT", port.to_string().as_str()),
         ]);
         let bin = install_path(&e).unwrap();
         let dir = bin.parent().unwrap();
@@ -1376,24 +1449,38 @@ mod tests {
                     .args_start_with(&["--show-adv-stats"])
                     .file_exists(&starts(readonly_starts + 1)),
                 stats("ReadWrite"),
+            )
+            .when(
+                &Case::new()
+                    .args_start_with(&["--show-adv-stats"])
+                    .file_exists(&dir.join("hung"))
+                    .file_missing(&starts(2)),
+                Actions::new().sleeps(Duration::from_secs(30)),
+            )
+            .when(
+                &Case::new()
+                    .args_start_with(&["--show-adv-stats"])
+                    .file_exists(&dir.join("hung-always")),
+                Actions::new().sleeps(Duration::from_secs(30)),
             );
         for n in 1..=4 {
-            let mut case = Case::new().args_start_with(&["--start-server"]).file_missing(&starts(n));
+            let mut case = Case::new().env_is_set("SCCACHE_START_SERVER").file_missing(&starts(n));
             if n > 1 {
                 case = case.file_exists(&starts(n - 1));
             }
-            fake = fake.when(&case, Actions::new().writes(&starts(n), ""));
+            fake = fake.when(&case, Actions::new().writes(&starts(n), "").listens("{env:SCCACHE_SERVER_PORT}"));
         }
-        // Last, so it is asked first: a server that is already up answers every start with this.
-        fake = fake.when(
-            &Case::new()
-                .args_start_with(&["--start-server"])
-                .file_exists(&dir.join("address-in-use")),
-            Actions::new().stderr("Address in use (os error 48)").exit(1),
-        );
         let installed = fake.install().unwrap();
         write_shim(installed.program()).unwrap(); // what `./dev sccache env` did once on this machine
-        (home, e, installed)
+        (Home { dir: home, port }, e, installed)
+    }
+
+    /// Short limits for a test: a hung stand-in's statistics are given up on after half a second.
+    fn quick() -> Limits {
+        Limits {
+            probe: Duration::from_millis(500),
+            start: crate::sccache_server::START_LIMIT,
+        }
     }
 
     /// A port that is taken for the rest of the test process and nothing listens on (HeldPort::refusing, kept by `forget`): no
@@ -1427,13 +1514,18 @@ mod tests {
         assert_eq!(calls(&bin), Vec::<String>::new(), "no --start-server, no --stop-server");
     }
 
+    /// The starts and stops the stand-in saw, in order: `start` for a server's start (no arguments), `--stop-server` for sccache's own
+    /// stop request (a stop by the record is not a call of the binary).
     #[cfg(unix)]
     fn calls(bin: &paddock_testkit::Installed) -> Vec<String> {
         bin.calls()
             .unwrap()
             .into_iter()
-            .filter_map(|a| a.into_iter().next())
-            .filter(|a| a.starts_with("--start") || a.starts_with("--stop"))
+            .filter_map(|a| match a.into_iter().next() {
+                None => Some("start".to_string()),
+                Some(a) if a.starts_with("--stop") => Some(a),
+                Some(_) => None,
+            })
             .collect()
     }
 
@@ -1442,7 +1534,7 @@ mod tests {
     fn a_server_that_comes_up_read_only_is_stopped_and_started_once_more() {
         let (_h, e, bin) = fake(1, None);
         assert!(matches!(prepare(&e, Install::Never), Outcome::Ready(_)));
-        assert_eq!(calls(&bin), ["--start-server", "--stop-server", "--start-server"]);
+        assert_eq!(calls(&bin), ["start", "start"], "the first is stopped by its record, not asked");
     }
 
     #[cfg(unix)]
@@ -1462,7 +1554,93 @@ mod tests {
             }
             Outcome::Ready(_) => panic!("a read-only server stores nothing"),
         }
-        assert_eq!(calls(&bin), ["--start-server", "--stop-server", "--start-server"], "no third start");
+        assert_eq!(calls(&bin), ["start", "start"], "no third start");
+    }
+
+    /// The record of the server the stand-in runs now, under the test's home.
+    #[cfg(unix)]
+    fn server_of(e: &HashMap<String, String>) -> Option<paddock_proc::ProcessId> {
+        let port = port_number(e).unwrap();
+        crate::sccache_server::read_record(&crate::sccache_server::record_path(&run_folder(e).unwrap(), port)).map(|r| r.id)
+    }
+
+    /// The incident of 2026-11-25: a server this tool started stops answering. The next `prepare` asks it within the probe limit, stops
+    /// it by its record, starts a fresh one and uses it; the hung one has ended.
+    #[cfg(unix)]
+    #[test]
+    fn a_server_this_tool_started_that_does_not_answer_is_restarted() {
+        let (_h, e, bin) = fake(0, None);
+        assert!(matches!(prepare_with(&e, Install::Never, quick()), Outcome::Ready(_)));
+        let hung = server_of(&e).expect("held by its record");
+        std::fs::write(bin.dir().join("hung"), "").unwrap();
+        assert!(matches!(prepare_with(&e, Install::Never, quick()), Outcome::Ready(_)));
+        assert_eq!(
+            calls(&bin),
+            ["start", "start"],
+            "stopped by its record (no stop request to a hung server), started again"
+        );
+        assert!(hung.has_ended(), "the hung server was ended");
+        let fresh = server_of(&e).unwrap();
+        assert!(fresh != hung && fresh.confirmed_running());
+    }
+
+    /// A hung server this tool did not start (no record: the coordinator's, another tool's) is never touched; the build runs without
+    /// the cache, with the cause and the next step.
+    #[cfg(unix)]
+    #[test]
+    fn a_hung_server_this_tool_did_not_start_is_never_touched() {
+        let (_h, e, bin) = fake(0, None);
+        std::fs::write(bin.dir().join("hung-always"), "").unwrap();
+        let mut foreign = paddock_testkit::TestCommand::new(bin.program())
+            .env("SCCACHE_START_SERVER", "1")
+            .env("SCCACHE_SERVER_PORT", server_port(&e))
+            .spawn()
+            .unwrap();
+        let id = paddock_proc::ProcessId::of(foreign.id()).unwrap();
+        paddock_testkit::wait_until("the positive control: the foreign server listens", || listening(&e));
+        match prepare_with(&e, Install::Never, quick()) {
+            Outcome::Off { reason, warn } => {
+                assert!(warn, "a warning");
+                assert!(reason.contains("did not start it") && reason.contains("not touched"), "{reason}");
+                assert!(reason.contains("Next:") && reason.contains("without the cache"), "{reason}");
+            }
+            Outcome::Ready(_) => panic!("a hung server is never used"),
+        }
+        assert!(id.confirmed_running() && listening(&e), "still running, still listening");
+        assert_eq!(
+            calls(&bin),
+            ["start"],
+            "only the foreign start: this tool started and stopped nothing"
+        );
+        let _ = foreign.kill();
+        let _ = foreign.wait();
+    }
+
+    /// No answer after the restart either: the build falls back to no cache with one warning naming both failures, and the fresh
+    /// server that never answered is ended too (no build may wait on it).
+    #[cfg(unix)]
+    #[test]
+    fn a_second_failure_falls_back_to_no_cache_with_the_warning() {
+        let (h, e, bin) = fake(0, None);
+        std::fs::write(bin.dir().join("hung-always"), "").unwrap();
+        match prepare_with(&e, Install::Never, quick()) {
+            Outcome::Off { reason, warn } => {
+                assert!(warn);
+                assert!(
+                    reason.contains("does not answer") && reason.contains("still gave no answer"),
+                    "{reason}"
+                );
+                assert!(
+                    reason.contains(&h.path().join("sccache-run/sccache.log").display().to_string()),
+                    "the log: {reason}"
+                );
+                assert!(reason.contains("Next:"), "{reason}");
+            }
+            Outcome::Ready(_) => panic!("no answer twice"),
+        }
+        assert_eq!(calls(&bin), ["start", "start"], "one restart, no third start");
+        assert!(!listening(&e), "the fresh server that gave no answer was ended");
+        assert!(server_of(&e).is_none(), "and its record removed");
     }
 
     /// ER-45: a gate (`Install::Never`) never writes the shim; with none it is off, with the next step.
@@ -1488,22 +1666,23 @@ mod tests {
     fn a_read_write_server_is_left_running() {
         let (_h, e, bin) = fake(0, None);
         assert!(matches!(prepare(&e, Install::Never), Outcome::Ready(_)));
-        assert_eq!(calls(&bin), ["--start-server"]);
+        assert_eq!(calls(&bin), ["start"]);
     }
 
-    /// A server that was already running (this call's `--start-server` failed with "Address in use") belongs to another agent or
-    /// the user: it is never stopped, and a read-only one is used as it is (reads still hit) with one warning.
+    /// A server that was already running (not started by this call) belongs to another agent or the user: it is never stopped, and
+    /// a read-only one is used as it is (reads still hit) with one warning.
     #[cfg(unix)]
     #[test]
     fn an_already_running_read_only_server_is_never_stopped_and_is_warned_about() {
-        let (h, e, bin) = fake(5, None);
-        std::fs::write(bin.dir().join("address-in-use"), "").unwrap();
+        let (h, mut e, bin) = fake(5, None);
+        let other = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        e.insert("SCCACHE_SERVER_PORT".into(), other.local_addr().unwrap().port().to_string());
         std::fs::write(bin.dir().join("starts-1"), "").unwrap(); // the other owner's start: stats say read-only
         assert!(
             matches!(prepare(&e, Install::Never), Outcome::Ready(_)),
             "read-only is still used for reads"
         );
-        assert_eq!(calls(&bin), ["--start-server"], "no --stop-server: the server is not ours");
+        assert_eq!(calls(&bin), Vec::<String>::new(), "no start, no stop: the server is not ours");
         let warning = already_running_read_only_warning(&e, &h.path().join("sccache-run/sccache.log"));
         assert!(warning.starts_with("::warning::"), "{warning}");
         assert!(
@@ -1521,7 +1700,7 @@ mod tests {
             Outcome::Off { reason, warn } => assert!(warn && reason.contains("does not use this cache"), "{reason}"),
             Outcome::Ready(_) => panic!("not our cache"),
         }
-        assert_eq!(calls(&bin), ["--start-server"]);
+        assert_eq!(calls(&bin), ["start"]);
     }
 
     /// S3 without keys fails at once, before any binary is run or any request made (it used to hang about 75 s in the metadata
@@ -2072,7 +2251,7 @@ mod tests {
             !lines.contains("fake-") && !lines.contains("AWS_ACCESS") && !lines.contains("AWS_SECRET"),
             "the keys go to the server only: {lines}"
         );
-        assert!(calls(&bin).contains(&"--start-server".to_string()));
+        assert!(calls(&bin).contains(&"start".to_string()));
         served.join().unwrap();
         // Without the file: the plain disk folder, no failure.
         let (_h2, mut e2, _bin2) = fake(0, None);
@@ -2135,27 +2314,36 @@ mod tests {
     fn a_plain_disk_server_started_while_the_store_was_down_is_replaced_when_it_is_back() {
         use paddock_testkit::{Actions, Case, StandIn};
         let home = tempfile::tempdir().unwrap();
+        let port = crate::sccache_server::tests::port_for_a_server();
         let mut e = s3_env(home.path(), free_port());
         e.insert("PADDOCK_DEV_HOME".into(), home.path().to_str().unwrap().into());
         e.insert("PATH".into(), "/usr/bin:/bin".into());
-        e.insert("SCCACHE_SERVER_PORT".into(), free_port().to_string());
+        e.insert("SCCACHE_SERVER_PORT".into(), port.to_string());
         let plain = home.path().join("cache").display().to_string();
         let bin = install_path(&e).unwrap();
         let dir = bin.parent().unwrap();
         std::fs::create_dir_all(dir).unwrap();
-        let stopped = dir.join("stopped");
+        let (first, second) = (dir.join("started-1"), dir.join("started-2"));
         let rw = |a: Actions| a.stdout("Effective cache mode            ReadWrite");
+        let listens = |a: Actions| a.listens("{env:SCCACHE_SERVER_PORT}");
         let installed = StandIn::new(dir, "sccache")
             .records_args()
             .stdout("sccache 0.19.0")
-            .when_args(&["--start-server"], Actions::new())
-            .when_args(&["--stop-server"], Actions::new().writes(&stopped, ""))
             .when(
-                &Case::new().args_start_with(&["--show-adv-stats"]).file_missing(&stopped),
+                &Case::new().env_is_set("SCCACHE_START_SERVER").file_missing(&first),
+                listens(Actions::new().writes(&first, "")),
+            )
+            .when(
+                &Case::new().env_is_set("SCCACHE_START_SERVER").file_exists(&first),
+                listens(Actions::new().writes(&second, "")),
+            )
+            .when_args(&["--stop-server"], Actions::new())
+            .when(
+                &Case::new().args_start_with(&["--show-adv-stats"]).file_missing(&second),
                 rw(Actions::new().stdout_with(&format!("Cache location                  Local disk: \"{plain}\""))),
             )
             .when(
-                &Case::new().args_start_with(&["--show-adv-stats"]).file_exists(&stopped),
+                &Case::new().args_start_with(&["--show-adv-stats"]).file_exists(&second),
                 rw(Actions::new()
                     .stdout_with(&format!("{CHAIN_COUNTERS}Cache location                  Multi-level (2 levels)"))
                     .stdout_with("  L0 (disk)                     Local disk: \"{env:SCCACHE_DIR}\"")
@@ -2164,26 +2352,31 @@ mod tests {
             .install()
             .unwrap();
         write_shim(installed.program()).unwrap();
+        let run = run_folder(&e).unwrap();
+        let stop_at_end = Home { dir: home, port };
         let dir_of = |o: &Outcome| match o {
             Outcome::Ready(r) => r.vars.iter().find(|(k, _)| k == "SCCACHE_DIR").map(|(_, v)| v.clone()).unwrap(),
             other => panic!("not ready: {other:?}"),
         };
         // 1. The store is down: the plain disk, and a server on it.
         assert_eq!(dir_of(&prepare(&e, Install::Never)), plain);
-        assert!(!calls(&installed).contains(&"--stop-server".to_string()));
-        // 2. The store is back: the plain server is stopped and started again with the chain.
-        let (port, served) = health_server("200 OK");
-        e.insert("PADDOCK_SCCACHE_S3_ENDPOINT".into(), format!("127.0.0.1:{port}"));
+        assert_eq!(calls(&installed), ["start"]);
+        let plain_server = crate::sccache_server::read_record(&crate::sccache_server::record_path(&run, port))
+            .unwrap()
+            .id;
+        // 2. The store is back: the plain server (this tool's, by its record) is stopped and started again with the chain.
+        let (hport, served) = health_server("200 OK");
+        e.insert("PADDOCK_SCCACHE_S3_ENDPOINT".into(), format!("127.0.0.1:{hport}"));
         let up = prepare(&e, Install::Never);
         assert_eq!(dir_of(&up), format!("{plain}-s3"), "now the chain's disk folder");
-        let c = calls(&installed);
-        assert_eq!(c.iter().filter(|a| *a == "--stop-server").count(), 1, "one stop: {c:?}");
         assert_eq!(
-            &c[c.len() - 2..],
-            ["--stop-server", "--start-server"],
-            "stopped, then started with the chain: {c:?}"
+            calls(&installed),
+            ["start", "start"],
+            "stopped by its record, then started with the chain"
         );
+        assert!(plain_server.has_ended(), "the plain server was ended");
         served.join().unwrap();
+        drop(stop_at_end);
     }
 
     /// The store's endpoint and bucket may come from the credentials file (optional `PADDOCK_SCCACHE_S3_ENDPOINT` and

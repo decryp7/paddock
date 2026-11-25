@@ -1465,3 +1465,55 @@ fn a_literal_with_braces_reaches_the_output_unchanged_through_a_template_method(
         .unwrap();
     assert_eq!(out(&run(p.program(), &[])), format!("{text}\n"));
 }
+
+/// A hung server: it listens on the port its template names, takes a connection and answers nothing; a taken port ends it at once
+/// with the bind error. The positive control: before it starts, nothing listens on the port.
+#[test]
+fn listens_on_the_named_port_and_answers_nothing_and_a_taken_port_is_an_error() {
+    use std::io::Read;
+    let s = Scratch::new();
+    let free = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = free.local_addr().unwrap().port();
+    // conformance: freed-port — the stand-in under test must bind this port itself; a taker in between fails its bind loudly
+    drop(free);
+    assert!(
+        std::net::TcpStream::connect(("127.0.0.1", port)).is_err(),
+        "nothing listens before it starts"
+    );
+    let p = StandIn::new(&s.work(), "server")
+        .answers(Actions::new().listens("{env:FAKE_PORT}"))
+        .install()
+        .unwrap();
+    let mut child = TestCommand::new(p.program())
+        .env("FAKE_PORT", port.to_string())
+        .spawn()
+        .unwrap();
+    wait_until("it listens", || {
+        std::net::TcpStream::connect(("127.0.0.1", port)).is_ok()
+    });
+    let mut conn = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+    conn.set_read_timeout(Some(Duration::from_millis(300)))
+        .unwrap();
+    let mut buf = [0u8; 1];
+    let read = conn.read(&mut buf);
+    assert!(
+        read.as_ref().is_err_and(|e| matches!(
+            e.kind(),
+            std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+        )),
+        "no answer and no hang-up: {read:?}"
+    );
+    let second = run_env(p.program(), "FAKE_PORT", &port.to_string());
+    assert_eq!(second.status.code(), Some(70));
+    assert!(
+        err(&second).contains(&format!("127.0.0.1:{port}")),
+        "{}",
+        err(&second)
+    );
+    child.kill().unwrap();
+    child.wait().unwrap();
+}
+
+fn run_env(program: &Path, key: &str, value: &str) -> Output {
+    TestCommand::new(program).env(key, value).output().unwrap()
+}

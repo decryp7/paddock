@@ -275,6 +275,12 @@ impl ToolCall {
         })
     }
 
+    /// The command this call runs, built as [`ToolCall::run`] builds it (environment, folder), for a caller that starts and holds the
+    /// program itself (a server that outlives the call: [`crate::sccache_server::start`]). Its output, timeout and secrets are the caller's.
+    pub(crate) fn command(&self, parent: &HashMap<String, String>) -> std::process::Command {
+        self.build(parent)
+    }
+
     fn build(&self, parent: &HashMap<String, String>) -> std::process::Command {
         let mut cmd = command(&self.program);
         cmd.args(&self.args);
