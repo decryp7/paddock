@@ -1,27 +1,28 @@
 #!/usr/bin/env bash
-# ADR 0120's runner move (D1 = option D): the Mac's CI runner lanes leave the user's GUI login session. Each --daemon lane
-# becomes a LaunchDaemon in the system domain (it runs as --user through UserName, starts at boot before any login and has
-# no window server); the one --gui lane stays a LaunchAgent in the user's Aqua session for the work that needs a window
-# server; each --retire lane is stopped and parked. Every lane's program, folder and environment are copied from its
-# current LaunchAgent (~/Library/LaunchAgents/<prefix><name>.plist), through plutil, into the templates in mac-runners/.
+# ADR 0120's runner move, as changed on 2026-11-25 (one daemon runner, capacity 4, GUI jobs off the Mac): each --daemon lane
+# leaves the user's GUI login session and becomes a LaunchDaemon in the system domain. It runs as --user through UserName,
+# starts at boot before any login and has no window server. Each --retire lane is stopped and its agent parked, unless it is
+# already stopped and its agent gone from ~/Library/LaunchAgents, which is fine. A lane's program, folder and environment are
+# copied from its current LaunchAgent (~/Library/LaunchAgents/<prefix><name>.plist), through plutil, into
+# mac-runners/runner-daemon.plist.
 #
 # The USER runs this, with sudo; an agent never does (ER-14, rule 7). --dry-run needs no sudo and changes nothing: it checks,
-# renders the plists into a temporary folder, shows them and prints every step it would take.
+# renders the plist into a temporary folder, shows it and prints every step it would take.
 #
-#   sudo bash tools/mac-runner-move.sh install  --user <name> --daemon <lane>... --gui <lane> --retire <lane>... [--dry-run]
-#   sudo bash tools/mac-runner-move.sh rollback --user <name> --daemon <lane>... --gui <lane> --retire <lane>... [--dry-run]
-#        bash tools/mac-runner-move.sh status   --user <name> --daemon <lane>... --gui <lane> --retire <lane>...
+#   sudo bash tools/mac-runner-move.sh install  --user <name> --daemon <lane>... [--retire <lane>...] [--dry-run]
+#   sudo bash tools/mac-runner-move.sh rollback --user <name> --daemon <lane>... [--retire <lane>...] [--dry-run]
+#        bash tools/mac-runner-move.sh status   --user <name> --daemon <lane>... [--retire <lane>...]
 #
-# Options: --jobs-per-host N (PADDOCK_CI_JOBS_PER_HOST of every lane, default 4: ADR 0120 D8), --verify-max SECONDS (how long
-# a started lane may take to declare itself to Gitea, default 90), --label-prefix P (default net.decryptology.gitea-runner.).
+# Options: --jobs-per-host N (PADDOCK_CI_JOBS_PER_HOST, default 4: the one runner's capacity), --verify-max SECONDS (how long a
+# started lane may take to declare itself to Gitea, default 90), --label-prefix P (default net.decryptology.gitea-runner.).
 #
-# install: preflight (nothing changes if a lane cannot be rendered), then per lane: daemon plist to /Library/LaunchDaemons
+# install: preflight (nothing changes if a lane cannot be rendered), then per lane: the daemon plist to /Library/LaunchDaemons
 # (root:wheel 0644), the old agent booted out (the runner first finishes a running job, up to its shutdown_timeout) and
-# parked as <plist>.before-adr0120, the daemon bootstrapped; the GUI lane's agent rewritten in place (the original kept as
-# .before-adr0120) and bootstrapped again; then each started lane must log "declare successfully" within --verify-max. A
-# lane the server no longer knows ("unregistered runner") is stopped again and the register command is printed. Re-running
+# parked as <plist>.before-adr0120, the daemon bootstrapped; then each started lane must log "declare successfully" within
+# --verify-max and run as --user. A lane the server no longer knows ("unregistered runner") is stopped again. Re-running
 # install is safe: a parked .before-adr0120 copy is the source when it exists.
-# rollback: the daemons booted out and their plists removed, every parked .before-adr0120 agent put back and bootstrapped.
+# rollback: the daemons booted out and their plists removed, every agent this tool parked (.before-adr0120) put back and
+# bootstrapped. Agents parked by hand elsewhere are left where they are.
 # status: read-only; where each lane's plist is, which launchd domain runs it, its state, pid, process user and last
 # registration line.
 #
@@ -36,13 +37,12 @@ PARKED='.before-adr0120'
 
 cmd="${1:-}"
 [ $# -gt 0 ] && shift
-user=""; gui=""; jobs=4; prefix="net.decryptology.gitea-runner."; dry=0; verify_max=90
+user=""; jobs=4; prefix="net.decryptology.gitea-runner."; dry=0; verify_max=90
 daemons=(); retire=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --user) user="${2:?--user needs a value}"; shift ;;
     --daemon) daemons+=("${2:?--daemon needs a lane name}"); shift ;;
-    --gui) gui="${2:?--gui needs a lane name}"; shift ;;
     --retire) retire+=("${2:?--retire needs a lane name}"); shift ;;
     --jobs-per-host) jobs="${2:?}"; shift ;;
     --verify-max) verify_max="${2:?}"; shift ;;
@@ -56,7 +56,7 @@ done
 fail() { echo "error: $1" >&2; [ -n "${2:-}" ] && echo "  next: $2" >&2; exit "${3:-1}"; }
 case "$cmd" in install | rollback | uninstall | status) ;; *) fail "the command must be install, rollback or status, not '${cmd}'" "see the header of $0" 2 ;; esac
 [ "$cmd" = uninstall ] && cmd=rollback
-[ ${#daemons[@]} -gt 0 ] || [ -n "$gui" ] || [ ${#retire[@]} -gt 0 ] || fail "no lanes named" "pass --daemon, --gui and --retire with the runner names" 2
+[ ${#daemons[@]} -gt 0 ] || [ ${#retire[@]} -gt 0 ] || fail "no lanes named" "pass --daemon (and --retire) with the runner names" 2
 case "$jobs" in '' | *[!0-9]*) fail "--jobs-per-host must be a whole number, not '$jobs'" "" 2 ;; esac
 case "$verify_max" in '' | *[!0-9]*) fail "--verify-max must be seconds, not '$verify_max'" "" 2 ;; esac
 [ "${PADDOCK_TOOLS_OS:-$(uname -s)}" = Darwin ] || fail "this moves macOS launchd jobs; it runs on the Mac only" "" 2
@@ -89,7 +89,7 @@ step() {
 }
 
 # Every lane named, one per line (bash 3.2, the one sudo finds, has no empty-array expansion under set -u).
-all_lanes() { printf '%s\n' ${daemons[@]+"${daemons[@]}"} ${gui:+"$gui"} ${retire[@]+"${retire[@]}"}; }
+all_lanes() { printf '%s\n' ${daemons[@]+"${daemons[@]}"} ${retire[@]+"${retire[@]}"}; }
 label_of() { printf '%s%s' "$prefix" "$1"; }
 live_agent() { printf '%s/%s.plist' "$agent_dir" "$(label_of "$1")"; }
 daemon_plist() { printf '%s/%s.plist' "$daemon_dir" "$(label_of "$1")"; }
@@ -102,14 +102,14 @@ source_agent() {
 value() { plutil -extract "$1" raw -o - "$2" 2>/dev/null; }
 loaded() { launchctl print "$1/$2" >/dev/null 2>&1; }
 
-# Renders a lane's plist from its template into $3. $1 = daemon or gui-agent, $2 = lane name.
+# Renders a lane's daemon plist from the template into $2. $1 = lane name.
 render() {
-  local kind="$1" name="$2" out="$3" src program workdir
+  local name="$1" out="$2" src program workdir
   src=$(source_agent "$name") || { echo "no LaunchAgent for lane $name: $(live_agent "$name") (nor its $PARKED copy)"; return 1; }
   program=$(value ProgramArguments.0 "$src") || { echo "$src has no ProgramArguments"; return 1; }
   [ -x "$program" ] || { echo "the runner program $program (from $src) is missing or not executable"; return 1; }
   workdir=$(value WorkingDirectory "$src") || workdir=$(dirname "$program")
-  cp "$templates/runner-$kind.plist" "$out" || return 1
+  cp "$templates/runner-daemon.plist" "$out" || return 1
   local env_xml
   env_xml=$(plutil -extract EnvironmentVariables xml1 -o - "$src" 2>/dev/null) || env_xml='<dict/>'
   plutil -replace Label -string "$(label_of "$name")" "$out" &&
@@ -118,25 +118,17 @@ render() {
     plutil -replace EnvironmentVariables -xml "$env_xml" "$out" &&
     plutil -replace EnvironmentVariables.HOME -string "$home" "$out" &&
     plutil -replace EnvironmentVariables.PADDOCK_CI_JOBS_PER_HOST -string "$jobs" "$out" || { echo "plutil could not fill $out"; return 1; }
-  if [ "$kind" = daemon ]; then
-    # A daemon gets no per-user launchd environment, so USER, LOGNAME and the user's own temp folder are set here.
-    local user_tmp
-    if [ "$(id -u)" = "$uid" ]; then user_tmp=$(getconf DARWIN_USER_TEMP_DIR); else user_tmp=$(sudo -u "$user" getconf DARWIN_USER_TEMP_DIR); fi
-    [ -n "$user_tmp" ] || { echo "cannot read $user's temp folder (getconf DARWIN_USER_TEMP_DIR)"; return 1; }
-    plutil -replace UserName -string "$user" "$out" &&
-      plutil -replace GroupName -string "$group" "$out" &&
-      plutil -replace EnvironmentVariables.USER -string "$user" "$out" &&
-      plutil -replace EnvironmentVariables.LOGNAME -string "$user" "$out" &&
-      plutil -replace EnvironmentVariables.TMPDIR -string "$user_tmp" "$out" &&
-      plutil -replace StandardOutPath -string "$(daemon_log "$name")" "$out" &&
-      plutil -replace StandardErrorPath -string "$(daemon_log "$name")" "$out" || { echo "plutil could not fill $out"; return 1; }
-  else
-    local out_log err_log
-    out_log=$(value StandardOutPath "$src") || out_log="$workdir/logs/runner.log"
-    err_log=$(value StandardErrorPath "$src") || err_log="$out_log"
-    plutil -replace StandardOutPath -string "$out_log" "$out" &&
-      plutil -replace StandardErrorPath -string "$err_log" "$out" || { echo "plutil could not fill $out"; return 1; }
-  fi
+  # A daemon gets no per-user launchd environment, so USER, LOGNAME and the user's own temp folder are set here.
+  local user_tmp
+  if [ "$(id -u)" = "$uid" ]; then user_tmp=$(getconf DARWIN_USER_TEMP_DIR); else user_tmp=$(sudo -u "$user" getconf DARWIN_USER_TEMP_DIR); fi
+  [ -n "$user_tmp" ] || { echo "cannot read $user's temp folder (getconf DARWIN_USER_TEMP_DIR)"; return 1; }
+  plutil -replace UserName -string "$user" "$out" &&
+    plutil -replace GroupName -string "$group" "$out" &&
+    plutil -replace EnvironmentVariables.USER -string "$user" "$out" &&
+    plutil -replace EnvironmentVariables.LOGNAME -string "$user" "$out" &&
+    plutil -replace EnvironmentVariables.TMPDIR -string "$user_tmp" "$out" &&
+    plutil -replace StandardOutPath -string "$(daemon_log "$name")" "$out" &&
+    plutil -replace StandardErrorPath -string "$(daemon_log "$name")" "$out" || { echo "plutil could not fill $out"; return 1; }
   if grep -q "$MARK" "$out"; then echo "$out still has a $MARK value"; return 1; fi
   plutil -lint "$out" >/dev/null || { echo "plutil -lint rejects $out"; return 1; }
 }
@@ -216,7 +208,7 @@ preflight() {
   echo "Preflight ($cmd, user $user, uid $uid, group $group, PADDOCK_CI_JOBS_PER_HOST=$jobs)"
   for name in $(all_lanes); do
     local live; live=$(live_agent "$name")
-    if [ -f "$live" ] && [ -f "$live$PARKED" ] && [ "$cmd" = install ] && [ "$name" != "$gui" ]; then
+    if [ -f "$live" ] && [ -f "$live$PARKED" ] && [ "$cmd" = install ]; then
       echo "  fail  $name: both $live and $live$PARKED exist; launchd would load the live one at the next login"
       echo "        next: compare them, keep the right one as $live$PARKED and remove the other"
       problems=$((problems + 1))
@@ -224,17 +216,15 @@ preflight() {
   done
   if [ "$cmd" = install ]; then
     for name in ${daemons[@]+"${daemons[@]}"}; do
-      if why=$(render daemon "$name" "$tmp/$name.daemon.plist"); then echo "  ok    $name: daemon plist rendered"; else
+      if why=$(render "$name" "$tmp/$name.daemon.plist"); then echo "  ok    $name: daemon plist rendered"; else
         echo "  fail  $name: $why"; problems=$((problems + 1)); fi
     done
-    if [ -n "$gui" ]; then
-      if why=$(render gui-agent "$gui" "$tmp/$gui.agent.plist"); then echo "  ok    $gui: GUI agent plist rendered"; else
-        echo "  fail  $gui: $why"; problems=$((problems + 1)); fi
-    fi
     for name in ${retire[@]+"${retire[@]}"}; do
-      source_agent "$name" >/dev/null && echo "  ok    $name: agent found (to retire)" || echo "  ..    $name: no agent plist; nothing to retire"
+      if source_agent "$name" >/dev/null; then echo "  ok    $name: agent found (to retire)"
+      elif loaded "gui/$uid" "$(label_of "$name")"; then echo "  ok    $name: loaded with no plist in $agent_dir (to stop)"
+      else echo "  ok    $name: already stopped and parked outside $agent_dir; nothing to do"; fi
     done
-    for name in ${daemons[@]+"${daemons[@]}"} ${gui:+"$gui"}; do
+    for name in ${daemons[@]+"${daemons[@]}"}; do
       local src wd
       src=$(source_agent "$name") || continue
       wd=$(value WorkingDirectory "$src") || continue
@@ -265,8 +255,8 @@ park_agent() {
 register_hint() {
   local name="$1" wd src
   src=$(source_agent "$name") && wd=$(value WorkingDirectory "$src") || wd="<the lane's runner folder>"
-  echo "        next: register the lane again as $user, without sudo (the token comes from Gitea: Site Administration, Actions,"
-  echo "              Runners, Create new runner):"
+  echo "        next: register the runner again as $user, without sudo, with a token from Gitea (Site Administration,"
+  echo "              Actions, Runners, Create new runner):"
   echo "              cd $(printf '%q' "$wd") && ./gitea-runner --config config.yaml register --no-interactive --instance $(server_of "$wd") --name $name --token <token>"
   echo "              then run this install again."
 }
@@ -298,23 +288,14 @@ install() {
     step launchctl bootstrap system "$target"
   done
   for name in ${retire[@]+"${retire[@]}"}; do
+    if ! loaded "gui/$uid" "$(label_of "$name")" && [ ! -f "$(live_agent "$name")" ]; then
+      echo "- $name: retired already (not loaded, no agent in $agent_dir)"
+      continue
+    fi
     echo "- $name: retired (stopped, its agent parked as $PARKED)"
     stop_agent "$name"
     park_agent "$name"
   done
-  if [ -n "$gui" ]; then
-    local live gui_log; live=$(live_agent "$gui")
-    gui_log=$(value StandardErrorPath "$tmp/$gui.agent.plist")
-    echo "- $gui: GUI lane (LaunchAgent in $user's Aqua session, capacity 1)"
-    [ "$dry" -eq 1 ] && { echo "  rendered plist:"; plutil -p "$tmp/$gui.agent.plist" | sed 's/^/    /'; }
-    [ -f "$live$PARKED" ] || step cp -p "$live" "$live$PARKED"
-    stop_agent "$gui"
-    step cp "$tmp/$gui.agent.plist" "$live"
-    step chown "$user:$group" "$live"
-    step chmod 0644 "$live"
-    log_size "$gui_log" >"$tmp/offset.$gui"
-    step launchctl bootstrap "gui/$uid" "$live"
-  fi
   if [ "$dry" -eq 1 ]; then
     echo
     echo "Verify (would wait up to ${verify_max}s per lane for 'declare successfully' in its log, and check the process user)"
@@ -329,14 +310,9 @@ install() {
     if [ $rc -eq 3 ]; then step launchctl bootout "system/$(label_of "$name")"; register_hint "$name"; fi
     [ $rc -eq 0 ] || failed=$((failed + 1))
   done
-  if [ -n "$gui" ]; then
-    verify_lane "gui/$uid" "$gui" "$gui_log" "$(cat "$tmp/offset.$gui")"; rc=$?
-    if [ $rc -eq 3 ]; then step launchctl bootout "gui/$uid/$(label_of "$gui")"; register_hint "$gui"; fi
-    [ $rc -eq 0 ] || failed=$((failed + 1))
-  fi
   echo
   if [ "$failed" -gt 0 ]; then
-    echo "error: $failed lane(s) did not come up (lines marked fail above). The others run."
+    echo "error: $failed lane(s) did not come up (lines marked fail above). "
     echo "  next: fix and run install again, or go back to the LaunchAgents: sudo bash $0 rollback $(lanes_args)"
     return 1
   fi
@@ -346,7 +322,6 @@ install() {
 lanes_args() {
   local out="--user $user" name
   for name in ${daemons[@]+"${daemons[@]}"}; do out+=" --daemon $name"; done
-  [ -n "$gui" ] && out+=" --gui $gui"
   for name in ${retire[@]+"${retire[@]}"}; do out+=" --retire $name"; done
   printf '%s' "$out"
 }

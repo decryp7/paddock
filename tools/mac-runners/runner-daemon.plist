@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-  ADR 0120 (D1 = option D): a Mac CI runner lane as a LaunchDaemon in the system domain, outside every GUI login session.
+  ADR 0120 (D1 as changed on 2026-11-25: one daemon runner, capacity 4, no GUI lane): the Mac CI runner as a LaunchDaemon
+  in the system domain, outside every GUI login session.
   A template: tools/mac-runner-move.sh fills the values marked @set-by-mac-runner-move@ with plutil (Label, UserName,
   GroupName, ProgramArguments, WorkingDirectory, EnvironmentVariables, StandardOutPath, StandardErrorPath), copying the
   program, folder and environment from the lane's LaunchAgent it replaces. The fixed keys below are the ones today's agents

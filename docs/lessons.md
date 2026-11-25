@@ -3929,6 +3929,7 @@ raised timeout as the fix.
   once, not 5. The user saw only "`-2` exited with status 1".
 - **Why it was missed.** A runner that cannot register is not a failed job: nothing in CI turns red, and the runner list shows fewer
   runners only to someone who looks.
+- **Outcome.** The user removed both on 2026-11-25 (ADR 0120: one daemon runner of capacity 4).
 - **Fix in this change.** `tools/mac-runner-move.sh` treats a lane as up only when its log says `declare successfully` after the start,
   stops a lane that Gitea refuses (no crash loop) and prints the register command; its `status` shows each lane's last start line.
 - **Open.** The cause of the lost registrations is not known (the server side was not read). A check that each declared runner is

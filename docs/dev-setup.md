@@ -307,40 +307,32 @@ author: that call belongs there. The Rust `heavy` tool (`tools/heavy`) makes no 
   for scripts. The limits are flags (`--start-below`, `--hold-above`, `--min-free-gib`, `--ci-hold`, `--disk <path>`, `--no-ci`).
   It decides nothing by itself: it does not start or stop agents, and `heavy.sh` still caps the heavy steps.
 
-## Mac CI runner lanes (ADR 0120)
+## Mac CI runner (ADR 0120)
 
-The Mac's runners leave the user's GUI login session (ADR 0120, D1 = option D, D8 = 4 lanes): `d7-mac-mini` (capacity 3)
-becomes a LaunchDaemon that runs as the same account, `d7-mac-mini-2` (capacity 1) stays a LaunchAgent as the GUI lane, and
-`d7-mac-mini-3` is retired. This is stage 1: the runners keep the account, its toolchains and its Full Disk Access grants.
-Stage 2, the dedicated `paddockci` user of the ADR's steps, reuses the same tool with `--user paddockci`.
+The Mac keeps one runner, `d7-mac-mini`, with capacity 4, as a LaunchDaemon: it leaves the user's GUI login session, runs as
+the same account (`UserName`, so its toolchains, folders and Full Disk Access grants stay) and has no window server. There is
+no GUI lane: jobs that need a window run elsewhere (ADR 0120, D1 and D8 as changed on 2026-11-25). `d7-mac-mini-2` and `-3`
+are removed: stopped, their plists parked in `~/gitea-runner-parked-2026-11-25/`, and to be deleted from Gitea's runner list.
 
 The user runs these; an agent never does (rule 7, ER-14). Run them from the repository root, with no CI job running if
-possible: stopping a lane lets its running job finish first (up to the runner's 3 h `shutdown_timeout`).
+possible: stopping the runner lets its running job finish first (up to its 3 h `shutdown_timeout`).
 
-1. **Restart.** A planned restart is `sudo fdesetup authrestart` (D5, amended 2026-11-25), then log in.
-2. **The GUI lane's registration** (only with a token at hand). `d7-mac-mini-2` and `-3` have answered "unregistered runner"
-   since 2026-11-24 10:35 (their `logs/runner.log`). To bring the GUI lane back, register it again, as yourself, without sudo,
-   with a token from Gitea (Site Administration, Actions, Runners, Create new runner):
-   `cd ~/gitea-runners/d7-mac-mini-2 && ./gitea-runner --config config.yaml register --no-interactive --instance https://dev.decryptology.net --name d7-mac-mini-2 --token <token>`.
-   Without it, the install below moves the daemon lane, stops the GUI lane again and prints this command.
-3. **Look first:** `bash tools/mac-runner-move.sh install --user decryp7 --daemon d7-mac-mini --gui d7-mac-mini-2 --retire d7-mac-mini-3 --dry-run`
-   (no sudo, changes nothing: it renders and shows the plists and prints every step).
-4. **Install:** the same line with `sudo` and without `--dry-run`. It ends with one `ok` or `fail` line per lane: `ok` means
-   launchd runs it, as your account, and its log says `declare successfully` within 90 s (`--verify-max`).
-5. **Check later:** `bash tools/mac-runner-move.sh status --user decryp7 --daemon d7-mac-mini --gui d7-mac-mini-2 --retire d7-mac-mini-3`,
-   the daemon's log `/Library/Logs/gitea-runner/d7-mac-mini.log`, and Gitea's runner list (`d7-mac-mini` online).
-6. **Roll back:** `sudo bash tools/mac-runner-move.sh rollback --user decryp7 --daemon d7-mac-mini --gui d7-mac-mini-2 --retire d7-mac-mini-3`
-   removes the daemon and puts the three original agents (kept as `~/Library/LaunchAgents/<plist>.before-adr0120`) back and
-   starts them. `--dry-run` shows the steps first.
+1. **Restart.** A planned restart is `sudo fdesetup authrestart` (D5, amended 2026-11-25).
+2. **Look first:** `bash tools/mac-runner-move.sh install --user decryp7 --daemon d7-mac-mini --retire d7-mac-mini-2 --retire d7-mac-mini-3 --dry-run`
+   (no sudo, changes nothing: it renders and shows the plist and prints every step).
+3. **Install:** the same line with `sudo` and without `--dry-run`. It ends with one `ok` or `fail` line: `ok` means launchd
+   runs the runner in the system domain, as your account, and its log says `declare successfully` within 90 s
+   (`--verify-max`). The original agent is kept as `~/Library/LaunchAgents/net.decryptology.gitea-runner.d7-mac-mini.plist.before-adr0120`.
+4. **Check later:** `bash tools/mac-runner-move.sh status --user decryp7 --daemon d7-mac-mini --retire d7-mac-mini-2 --retire d7-mac-mini-3`,
+   the log `/Library/Logs/gitea-runner/d7-mac-mini.log`, `sudo launchctl print system/net.decryptology.gitea-runner.d7-mac-mini`,
+   and Gitea's runner list (`d7-mac-mini` online, with capacity 4 from `~/gitea-runner/config.yaml`).
+5. **Roll back:** `sudo bash tools/mac-runner-move.sh rollback --user decryp7 --daemon d7-mac-mini --retire d7-mac-mini-2 --retire d7-mac-mini-3`
+   removes the daemon, puts the parked agent back and starts it in your session. The `-2` and `-3` plists parked by hand stay
+   where they are. `--dry-run` shows the steps first.
 
-After a restart: once the disk is unlocked (by `authrestart`, or by your password at the FileVault screen) the daemon lane
-starts at boot, before anyone logs in; the external disk mounts without a login because
-`AutomountDisksWithoutUserLogin` is 1 (the install checks it). The GUI lane starts only when you log in. A crash restart
-waits at the FileVault screen for the password, and no lane runs until then.
-
-Until ADR 0120's WP-4 lands, no workflow asks for the `macos-gui` label, so a job that needs a window server (Debrief's
-real-app smoke, the nightly window probe, `ci.yml`'s `e2e-webkit`, Debrief's windowed real-browser tests) can still be
-given to the daemon lane, where it fails because it has no window server.
+After a restart: once the disk is unlocked (by `authrestart`, or by your password at the FileVault screen) the runner starts
+at boot, before anyone logs in. The external disk mounts without a login because `AutomountDisksWithoutUserLogin` is 1 (the
+install checks it). A crash restart waits at the FileVault screen for the password, and the runner does not run until then.
 
 ## Things that cost time when forgotten
 

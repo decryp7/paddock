@@ -13,7 +13,7 @@ import { TOOLS, calls, run, scratch, shim, write } from './helpers.mjs';
 const skip = process.platform === 'darwin' ? false : 'needs macOS plutil (the plists are checked by Apple’s own parser)';
 const PREFIX = 'net.decryptology.gitea-runner.';
 const USER = 'ci-tester';
-const LANES = ['--user', USER, '--daemon', 'lane-a', '--gui', 'lane-b', '--retire', 'lane-c'];
+const LANES = ['--user', USER, '--daemon', 'lane-a', '--retire', 'lane-b', '--retire', 'lane-c'];
 
 const agent = (home, name, extraEnv = '') => `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -44,7 +44,7 @@ const agent = (home, name, extraEnv = '') => `<?xml version="1.0" encoding="UTF-
 `;
 
 /** A scratch Mac with three runner lanes, each a loaded LaunchAgent with its runner folder. */
-function mac({ root = true, unregistered = [], silent = [], psUser = USER, program = true } = {}) {
+function mac({ root = true, unregistered = [], silent = [], psUser = USER, program = true, parkedByHand = false } = {}) {
   const home = scratch('paddock-runner-home-');
   const sys = scratch('paddock-runner-sys-');
   const bin = scratch('paddock-runner-bin-');
@@ -56,9 +56,12 @@ function mac({ root = true, unregistered = [], silent = [], psUser = USER, progr
     files[`runners/${name}/.runner`] = '{"address":"https://gitea.example.test","token":"invented-secret-token"}';
     files[`runners/${name}/logs/runner.log`] = 'level=error msg="fail to invoke Declare" error="unregistered runner"\n';
   }
+  if (parkedByHand)
+    for (const n of ['lane-b', 'lane-c']) delete files[`Library/LaunchAgents/${PREFIX}${n}.plist`];
   write(home, files);
   write(sys, { 'Library/LaunchDaemons/.keep': '' });
-  write(bin, { launchd: ['lane-a', 'lane-b', 'lane-c'].map((n) => `gui/501/${PREFIX}${n}`).join('\n') + '\n' });
+  const running = parkedByHand ? ['lane-a'] : ['lane-a', 'lane-b', 'lane-c'];
+  write(bin, { launchd: running.map((n) => `gui/501/${PREFIX}${n}`).join('\n') + '\n' });
   shim(bin, 'launchctl', `
 state="${state}"
 case "$1" in
@@ -113,11 +116,9 @@ function snapshot(...roots) {
   return out;
 }
 
-test('the plist templates pass plutil -lint', { skip }, () => {
-  for (const t of ['runner-daemon.plist', 'runner-gui-agent.plist']) {
-    const r = lint(join(TOOLS, 'mac-runners', t));
-    assert.equal(r.status, 0, `${t}: ${r.stdout}${r.stderr}`);
-  }
+test('the plist template passes plutil -lint', { skip }, () => {
+  const r = lint(join(TOOLS, 'mac-runners', 'runner-daemon.plist'));
+  assert.equal(r.status, 0, `${r.stdout}${r.stderr}`);
 });
 
 test('a dry run changes nothing, needs no sudo and prints every step', { skip }, () => {
@@ -130,11 +131,10 @@ test('a dry run changes nothing, needs no sudo and prints every step', { skip },
   for (const s of [
     `would run: launchctl bootout gui/501/${PREFIX}lane-a`,
     `would run: launchctl bootstrap system ${daemonPath(m, 'lane-a')}`,
+    `would run: launchctl bootout gui/501/${PREFIX}lane-b`,
     `would run: launchctl bootout gui/501/${PREFIX}lane-c`,
-    `would run: launchctl bootstrap gui/501 ${agentPath(m, 'lane-b')}`,
     `would run: chown root:wheel ${daemonPath(m, 'lane-a')}`,
     '"UserName" => "ci-tester"',
-    '"LimitLoadToSessionType" => "Aqua"',
     'Dry run: nothing was changed.',
   ])
     assert.ok(r.out.includes(s), `missing: ${s}\n${r.out}`);
@@ -148,7 +148,7 @@ test('install needs sudo unless it is a dry run', { skip }, () => {
   assert.equal(calls(m.bin).filter((c) => /launchctl (bootout|bootstrap)/.test(c)).length, 0);
 });
 
-test('install: the daemon lane runs in the system domain as the user, the GUI lane stays an Aqua agent, the third is parked', { skip }, () => {
+test('install: the daemon lane runs in the system domain as the user, the retired lanes are stopped and parked', { skip }, () => {
   const m = mac();
   const originals = Object.fromEntries(['lane-a', 'lane-b', 'lane-c'].map((n) => [n, readFileSync(agentPath(m, n), 'utf8')]));
   const r = move(m, ['install', ...LANES, '--verify-max', '5']);
@@ -171,30 +171,22 @@ test('install: the daemon lane runs in the system domain as the user, the GUI la
   assert.ok(!JSON.stringify(d).includes('@set-by-mac-runner-move@'));
   assert.ok(calls(m.bin).includes(`chown root:wheel ${daemon}`));
 
-  const g = plist(agentPath(m, 'lane-b'));
-  assert.equal(lint(agentPath(m, 'lane-b')).status, 0);
-  assert.equal(g.LimitLoadToSessionType, 'Aqua');
-  assert.equal(g.UserName, undefined);
-  assert.equal(g.EnvironmentVariables.PADDOCK_CI_JOBS_PER_HOST, '4');
-  assert.equal(g.StandardErrorPath, join(m.home, 'runners/lane-b/logs/runner.log'));
-
   for (const n of ['lane-a', 'lane-b', 'lane-c'])
     assert.equal(readFileSync(`${agentPath(m, n)}.before-adr0120`, 'utf8'), originals[n], `${n}: the original is kept`);
   assert.ok(!existsSync(agentPath(m, 'lane-a')), 'the daemon lane no longer has a live agent that a login would load');
-  assert.ok(!existsSync(agentPath(m, 'lane-c')), 'the retired lane is parked');
-  assert.deepEqual(loadedJobs(m), [`gui/501/${PREFIX}lane-b`, `system/${PREFIX}lane-a`]);
+  for (const n of ['lane-b', 'lane-c']) assert.ok(!existsSync(agentPath(m, n)), `${n}: the retired lane is parked`);
+  assert.deepEqual(loadedJobs(m), [`system/${PREFIX}lane-a`]);
   assert.match(r.out, /ok {4}lane-a \(system\): running, pid 4242, user ci-tester; runner: lane-a, .*declare successfully/);
-  assert.match(r.out, /ok {4}lane-b \(gui\/501\)/);
 });
 
 test('install twice is safe: the parked originals stay the source', { skip }, () => {
   const m = mac();
-  const original = readFileSync(agentPath(m, 'lane-b'), 'utf8');
+  const original = readFileSync(agentPath(m, 'lane-a'), 'utf8');
   assert.equal(move(m, ['install', ...LANES, '--verify-max', '5']).status, 0);
   const again = move(m, ['install', ...LANES, '--verify-max', '5']);
   assert.equal(again.status, 0, again.out);
-  assert.equal(readFileSync(`${agentPath(m, 'lane-b')}.before-adr0120`, 'utf8'), original);
-  assert.deepEqual(loadedJobs(m), [`gui/501/${PREFIX}lane-b`, `system/${PREFIX}lane-a`]);
+  assert.equal(readFileSync(`${agentPath(m, 'lane-a')}.before-adr0120`, 'utf8'), original);
+  assert.deepEqual(loadedJobs(m), [`system/${PREFIX}lane-a`]);
 });
 
 test('rollback puts back the exact LaunchAgents and removes the daemon', { skip }, () => {
@@ -218,14 +210,28 @@ test('rollback puts back the exact LaunchAgents and removes the daemon', { skip 
 });
 
 test('a lane Gitea no longer knows is stopped again, with the register command and never the token', { skip }, () => {
-  const m = mac({ unregistered: ['lane-b'] });
+  const m = mac({ unregistered: ['lane-a'] });
   const r = move(m, ['install', ...LANES, '--verify-max', '5']);
   assert.equal(r.status, 1, r.out);
-  assert.match(r.out, /fail {2}lane-b \(gui\/501\): Gitea answers 'unregistered runner'/);
-  assert.match(r.out, /register --no-interactive --instance https:\/\/gitea\.example\.test --name lane-b --token <token>/);
+  assert.match(r.out, /fail {2}lane-a \(system\): Gitea answers 'unregistered runner'/);
+  assert.match(r.out, /register --no-interactive --instance https:\/\/gitea\.example\.test --name lane-a --token <token>/);
   assert.ok(!r.out.includes('invented-secret-token'));
-  assert.deepEqual(loadedJobs(m), [`system/${PREFIX}lane-a`], 'the daemon lane runs; the unregistered GUI lane is booted out');
-  assert.match(r.out, /rollback --user ci-tester --daemon lane-a --gui lane-b --retire lane-c/);
+  assert.deepEqual(loadedJobs(m), [], 'the refused daemon is booted out, so it does not restart in a loop');
+  assert.match(r.out, /rollback --user ci-tester --daemon lane-a --retire lane-b --retire lane-c/);
+});
+
+test('retire accepts lanes already stopped and parked by hand elsewhere; rollback leaves them there', { skip }, () => {
+  const m = mac({ parkedByHand: true });
+  const r = move(m, ['install', ...LANES, '--verify-max', '5']);
+  assert.equal(r.status, 0, r.out);
+  assert.match(r.out, /ok {4}lane-b: already stopped and parked outside/);
+  assert.match(r.out, /- lane-c: retired already \(not loaded, no agent in /);
+  assert.equal(calls(m.bin).filter((c) => / bootout gui\/501\/.*lane-[bc]/.test(c)).length, 0);
+  assert.deepEqual(loadedJobs(m), [`system/${PREFIX}lane-a`]);
+  const back = move(m, ['rollback', ...LANES, '--verify-max', '5']);
+  assert.equal(back.status, 0, back.out);
+  assert.deepEqual(loadedJobs(m), [`gui/501/${PREFIX}lane-a`]);
+  for (const n of ['lane-b', 'lane-c']) assert.ok(!existsSync(agentPath(m, n)), `${n} stays parked`);
 });
 
 test('verify sees its signal: a lane that never declares itself fails at --verify-max (positive control, ER-33)', { skip }, () => {

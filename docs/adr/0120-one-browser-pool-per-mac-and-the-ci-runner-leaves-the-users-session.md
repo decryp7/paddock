@@ -1,8 +1,9 @@
 # 0120. One browser pool per Mac, and the CI runner leaves the user's login session
 
-- Status: Accepted 2026-11-25 by the user: D1 = option D, D3 = a pool of 6, D5 = (a), amended (see "Decisions of
-  2026-11-25"), D7 = the sampler and log collector for 14 days, D8 = 4 lanes. Decisions 1 and 2 of the brief were the user's
-  on 2026-11-24 (D2 = (a)); D4 = (a) landed as WP-0; D6 does not apply under D. Proposed 2026-11-24.
+- Status: Accepted 2026-11-25 by the user: D1 = option D, D3 = a pool of 6, D5 = (a), amended, D7 = the sampler and log
+  collector for 14 days, D8 = 4 lanes. Changed the same day: one daemon runner of capacity 4 and no GUI lane, GUI jobs off the
+  Mac (D1 and D8; see "Decisions of 2026-11-25"). Decisions 1 and 2 of the brief were the user's on 2026-11-24 (D2 = (a));
+  D4 = (a) landed as WP-0. Proposed 2026-11-24.
 - Date: 2026-11-24
 - Related: ER-12 (no limit without a measured cause), ER-14 (agents never reconfigure shared infrastructure), ER-22 (share
   first), ER-24 and ER-48 (load and concurrency budget), ER-27 (logs explain failures), ER-28 (intermittent causes), ER-33
@@ -392,43 +393,45 @@ Agents never run these (ER-14). Commands assume the CI user `paddockci` and the 
 
 ### Decisions of 2026-11-25 (the user)
 
-- **D1 = D, D3 = 6, D7 = yes for 14 days, D8 = 4 lanes**, as recommended.
+- **Accepted first:** D1 = D, D3 = 6, D7 = yes for 14 days, D8 = 4 lanes, as recommended.
 - **D5 = (a), amended.** Manual login, FileVault on, no auto-login. Planned restarts use `sudo fdesetup authrestart`, which
   unlocks the FileVault disk once without the password at the pre-boot screen. A crash restart waits at the FileVault screen
   for the password; nothing runs until it is typed.
 - **The move is brought forward.** The user's login session broke twice: the WindowServer abort of 2026-11-24, and on
   2026-11-25 no new WebKit page processes started, so Dyno showed a blank window and the nightly WebKit job hung. WP-0 has
   landed.
+- **2026-11-25, later: one daemon runner, capacity 4, GUI jobs off the Mac.** This changes D1 and D8. D1 becomes option B
+  without its own user (stage 1 below): the Mac keeps one runner, `d7-mac-mini`, as a LaunchDaemon with `capacity: 4`, and
+  there is no GUI lane. D8's 4 lanes are that one runner's capacity, with `PADDOCK_CI_JOBS_PER_HOST=4`. The jobs that need a
+  window server (inventory rows 6 to 8 and 10) move off the Mac on another branch; that move is the user's decision, as rule 88
+  asks. D6 therefore applies, as the user's choice made there. D3 (the pool of 6) is unchanged.
+- **Runners `d7-mac-mini-2` and `-3` are removed.** They were stopped and their plists parked in
+  `~/gitea-runner-parked-2026-11-25/` on 2026-11-25; their Gitea registrations were already gone (below).
 
-### The move in two stages (WP-4)
+### The move (WP-4)
 
-- **Stage 1 (2026-11-25, `tools/mac-runner-move.sh`).** The non-GUI lane runs as a LaunchDaemon in the system domain under the
-  existing account (`UserName`), so it keeps that account's toolchains, folders and Full Disk Access grants: `d7-mac-mini`
-  (capacity 3) becomes the daemon lane, `d7-mac-mini-2` (capacity 1) stays a LaunchAgent as the GUI lane, `d7-mac-mini-3` is
-  retired, and every lane gets `PADDOCK_CI_JOBS_PER_HOST=4` (D8). The plists are templates in `tools/mac-runners/`, filled
-  with plutil from each lane's current agent; the tool checks that each lane declares itself to Gitea and has a rollback to
-  the original agents. Runbook: docs/dev-setup.md, "Mac CI runner lanes". This gives decision 7's main gain (CI's browsers,
-  launches and windows leave the user's session, except the GUI lane) without the steps 1, 2, 4, 5 and 7 below. It does not
-  give option B's security gain: the daemon still runs as the user, with the user's files.
-- **Stage 2 (later).** The dedicated `paddockci` user and group, the shared folders and the GUI lane in that user's own
-  session, as in "Runner move" below; the same tool takes `--user paddockci` once that user's runner folders and agents exist.
-- **Still WP-4's agents' part:** the `macos-gui` label in the GUI lane's `config.yaml` and on inventory rows 6 to 8 and 10, the
-  build-jobs layout's macOS jobs per host (3) to 4, `PADDOCK_STEP_DEADLINE`, and T2. Until then a job that needs a window
-  server still asks for `macos-latest` and can be given to the daemon lane, where it fails.
-- **Found while preparing it (2026-11-25, read-only):** `d7-mac-mini-2` and `-3` have logged "unregistered runner" at every
-  start since 2026-11-24 10:35, and launchd restarts them every few seconds (`spawn scheduled`), so the Mac ran 3 jobs at once,
-  not 5, since then. The GUI lane needs a new registration (a token from Gitea) before it can take jobs; the install says so
-  and stops that lane again when Gitea refuses it.
+- **Stage 1 (2026-11-25, `tools/mac-runner-move.sh`).** `d7-mac-mini` runs as a LaunchDaemon in the system domain under the
+  existing account (`UserName`), so it keeps that account's toolchains, folders and Full Disk Access grants. The plist is a
+  template in `tools/mac-runners/`, filled with plutil from the runner's current agent. The tool checks that the runner
+  declares itself to Gitea, and it has a rollback to the original agent. Runbook: docs/dev-setup.md, "Mac CI runner". This
+  gives decision 7's main gain: CI's browsers, launches and windows leave the user's session. It does not give option B's
+  security gain: the daemon still runs as the user, with the user's files.
+- **Stage 2 (later, optional).** A dedicated `paddockci` user, as in steps 1, 2, 4, 5 and 7 of "Runner move" below. The same
+  tool takes `--user paddockci` once that user's runner folder and agent exist. Steps 8 (the GUI lane) no longer apply.
+- **Still WP-4's agents' part:** the build-jobs layout's macOS jobs per host (3) to 4, `PADDOCK_STEP_DEADLINE`, and T2 for
+  rows 1, 2, 5, 9, 11 and 12 under the daemon. Until the GUI rows have moved off the Mac, a job that needs a window server
+  still asks for `macos-latest` and fails on the daemon.
+- **Found while preparing it (2026-11-25, read-only):** `d7-mac-mini-2` and `-3` had logged "unregistered runner" at every
+  start since 2026-11-24 10:35, and launchd restarted them about every 10 s. So the Mac ran 3 jobs at once, not 5, from then on.
 
 ### Restarts, authrestart and the login window
 
-Daemons run before any login; the GUI lane needs one. After `fdesetup authrestart` the disk is unlocked at boot, so the
-daemon lane starts and takes jobs whether or not the Mac then stops at the login window. Its folders on the external disk are
-mounted without a login, because `AutomountDisksWithoutUserLogin` is 1 on this Mac (read 2026-11-25; the install checks it).
-Whether an authrestart then boots to the login window or logs the user in is still open: it changes only when the GUI lane
-starts. If it stops at the login window, the GUI lane waits for the user's login, and `macos-gui` jobs wait with it. After
-a crash restart nothing runs, daemon lane included, until the password is typed at the FileVault screen; on Apple silicon
-that password also logs the user in, so both lanes start together.
+A daemon runs before any login, so the runner no longer needs one: after `fdesetup authrestart` the disk is unlocked at boot
+and the runner starts and takes jobs whether or not the Mac then stops at the login window. Its folders on the external disk
+are mounted without a login, because `AutomountDisksWithoutUserLogin` is 1 on this Mac (read 2026-11-25; the install checks
+it). The open question, whether an authrestart boots to the login window or logs the user in, therefore no longer affects CI;
+it mattered only for the GUI lane, which is gone. After a crash restart nothing runs until the password is typed at the
+FileVault screen.
 
 Recurring: the class "a permission or service belongs to the session or responsible process, not the parent" (lessons of
 2026-11-04 and 2026-11-06, TCC on the external volume). The runner move is a third instance, and inventory row 4 handles it
