@@ -4054,6 +4054,14 @@ mod member_tests {
         let linux = by(&planned, "tests-linux ");
         assert_eq!(linux.id, "tests-linux crates + tools/paddock-dev");
         assert_eq!(linux.need, Need::LocalCiImage, "the CI image, as the Linux Clippy");
+        // A container row: the mount probe compares the change's files with the host before it runs, so a stale mount is not
+        // measured, never a pass on old code (fix/container-mount-freshness; train 2026-11-26-g joined the two).
+        let mount = linux
+            .mount
+            .as_deref()
+            .expect("the tests-linux row carries the files its mount probe compares");
+        assert_eq!(mount.files, strs(FILES), "the row's own workspaces' files first");
+        assert_eq!(mount.of, FILES.len());
         assert!(linux.heavy);
         let command = linux.args.last().unwrap();
         assert!(
