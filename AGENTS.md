@@ -162,6 +162,9 @@ Run these as well as the touched-file checks, on the merged tree when you hand b
 - `./dev gates check`: the gate register (an ignored test needs its gates.toml entry).
 - After a change to any `Cargo.toml`: `cargo metadata --locked --format-version 1 >/dev/null` in its workspace and in each workspace whose Cargo.lock lists the changed crate (`grep -l 'name = "<crate>"' $(git ls-files '*Cargo.lock')`, run in each lockfile's folder).
 - `./dev check --pre-push` before every push.
+- Last, on a branch for a train: merge `origin/main` into the branch, then run `./dev check --pre-push --member-gate --base origin/main`
+  on that head (user, 2026-11-25). The train's member gate reuses its green rows for every workspace only this branch touched; a
+  branch behind main has another tree there, so the train runs them again (`.claude/skills/land-train`, step 3).
 - The member audits, the repository-wide audits of tools/paddock-dev that only the member gate runs (a developer's `./dev check --pre-push` skips them): `cargo nextest run --profile member-audits --locked --no-tests=fail` in `tools/paddock-dev`.
 - A review reads a diff with `git show` and builds only in a scratch copy, never in the author's worktree.
 - A design document (ADR, plan, research note) records the branch heads it read (ADR 0091), checks claims about shipped code with `git tag --contains <commit>`, and names every check it relies on as built on origin/main, held on a named branch, or a prerequisite (ADR 0096).
