@@ -1,8 +1,10 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "description": "Renovate for the whole Paddock monorepo (ADR 0014 §8): every Cargo workspace, the one npm workspace and the workflows. One weekly PR for ordinary updates; Angular and Tauri each as one PR across all workspaces; Rust patch updates and lock maintenance per workspace, so an app in release freeze can hold its own; security fixes at any time.",
+  "description": "Renovate for the whole Paddock monorepo (ADR 0014 §8): every Cargo workspace, the one npm workspace and the workflows. One weekly PR for ordinary updates; Angular and Tauri each as one PR across all workspaces; Rust patch updates and lock maintenance per workspace, so an app in release freeze can hold its own; a new version waits 3 days before it is proposed (ER-57); security fixes at any time, without the wait, also from the OSV database.",
   "extends": ["config:recommended", "helpers:pinGitHubActionDigests"],
   "schedule": ["before 6am on monday"],
+  "minimumReleaseAge": "3 days",
+  "osvVulnerabilityAlerts": true,
   "ignorePaths": [
     "**/node_modules/**",
     "apps/*/target/**",
@@ -18,7 +20,7 @@
     "additionalBranchPrefix": "{{packageFileDir}}-",
     "commitMessageSuffix": "({{packageFileDir}})"
   },
-  "vulnerabilityAlerts": { "enabled": true, "groupName": null, "schedule": ["at any time"] },
+  "vulnerabilityAlerts": { "enabled": true, "groupName": null, "schedule": ["at any time"], "minimumReleaseAge": null },
   "packageRules": [
     {
       "description": "One weekly PR for every non-security update that no group below takes",

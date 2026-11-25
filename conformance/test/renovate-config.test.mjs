@@ -31,3 +31,10 @@ test('renovate.json never mixes * with other patterns (Renovate stops opening PR
   const config = JSON.parse(readFileSync(join(ROOT, 'renovate.json'), 'utf8'));
   assert.deepEqual(mixedWildcards(config), []);
 });
+
+test('renovate.json holds new versions for 3 days, reads OSV and exempts security fixes from the wait (ER-57)', () => {
+  const config = JSON.parse(readFileSync(join(ROOT, 'renovate.json'), 'utf8'));
+  assert.equal(config.minimumReleaseAge, '3 days');
+  assert.equal(config.osvVulnerabilityAlerts, true);
+  assert.equal(config.vulnerabilityAlerts?.minimumReleaseAge, null);
+});
