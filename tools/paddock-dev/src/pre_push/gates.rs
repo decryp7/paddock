@@ -302,6 +302,15 @@ fn gate(id: String, cwd: &str, program: &str, args: &[&str], rank: u8, next: Str
 }
 
 /// A workspace folder as one folder name: `apps/dyno` is `apps-dyno`.
+/// The arguments that make `tools/linux-container.sh` hold the host-side lock of each build folder `/target/v<version>/<slug>` the row
+/// uses, for the whole container run (build and tests: cargo's own lock covers the build only, and another worktree's row that
+/// rebuilt a test binary under a running nextest made train l fail with "failed to exec ... Permission denied"). The one place that
+/// names the folder next to its `CARGO_TARGET_DIR` (ER-22: the lock and the path are never typed twice).
+fn lock_args(workspaces: &[&str], version: &str) -> Vec<String> {
+    let folders: std::collections::BTreeSet<String> = workspaces.iter().map(|ws| format!("v{version}/{}", slug(ws))).collect();
+    folders.into_iter().flat_map(|f| ["--lock".to_string(), f]).collect()
+}
+
 fn slug(ws: &str) -> String {
     ws.replace('/', "-")
 }
@@ -769,11 +778,15 @@ pub fn linux_gate(targets: &[LinuxTarget], version: &str) -> Gate {
         ));
     }
     command.push_str("; exit $rc");
+    let locks = lock_args(&targets.iter().map(|t| t.ws.as_str()).collect::<Vec<_>>(), version);
+    let mut args = vec!["tools/linux-container.sh".to_string()];
+    args.extend(locks);
+    args.extend(["--id", "paddock", "--ci-image", "--", "sh", "-c", &command].map(String::from));
     let mut g = gate(
         linux_id(targets),
         "",
         "bash",
-        &["tools/linux-container.sh", "--id", "paddock", "--ci-image", "--", "sh", "-c", &command],
+        &args.iter().map(String::as_str).collect::<Vec<_>>(),
         4,
         "a lint that exists only on Linux (a `mode_t` width, dead code behind a cfg, a test child never waited for): fix it, or run the same container command above"
             .into(),
@@ -1183,11 +1196,19 @@ pub fn linux_tests_gate(chosen: &[(LinuxTarget, String)], version: &str, facts: 
         parts.push("guardian-as-user".into());
     }
     let id = format!("tests-linux {}", parts.join(" + "));
+    // The guardian's acting tests build in the `crates` folder too.
+    let mut held: Vec<&str> = chosen.iter().map(|(t, _)| t.ws.as_str()).collect();
+    if guardian {
+        held.push("crates");
+    }
+    let mut args = vec!["tools/linux-container.sh".to_string()];
+    args.extend(lock_args(&held, version));
+    args.extend(["--id", "paddock", "--ci-image", "--", "sh", "-c", &command].map(String::from));
     let mut g = gate(
         id,
         "",
         "bash",
-        &["tools/linux-container.sh", "--id", "paddock", "--ci-image", "--", "sh", "-c", &command],
+        &args.iter().map(String::as_str).collect::<Vec<_>>(),
         5,
         "a test that fails only on Linux (a /proc path, a cfg(unix) branch, root in the container, the guardian as uid 65534): fix it, or run the same container command above".into(),
     );

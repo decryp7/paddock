@@ -2,7 +2,7 @@
 
 use super::budget::Timing;
 use super::exec::{Done, Exec, Kind, Limits, QUEUE_STALL, Row, RunOpts, decide, run_all_timed, run_all_with, test_subject};
-use super::gates::{AUDIT_PROFILE, Change, Facts, Gate, Need, Planned, plan_gates, windows_skip_reason};
+use super::gates::{AUDIT_PROFILE, Change, Facts, Gate, LinuxTarget, Need, Planned, linux_tests_gate, plan_gates, windows_skip_reason};
 use super::{accept_not_measured, parse_refs, render, render_timed};
 use paddock_cli::Exit;
 use serde_json::json;
@@ -153,7 +153,7 @@ fn a_crates_change_reaches_every_gate_of_ci_er_9() {
         by("clippy-linux apps/dyno (left out: dyno-app) + apps/pitwall (left out: pitwall-app) + crates")
             .args
             .join(" ")
-            .contains("tools/linux-container.sh --id paddock --ci-image --")
+            .contains("--id paddock --ci-image --")
     );
     assert_eq!(
         (by("conformance").program.as_str(), by("conformance").args.join(" ")),
@@ -1344,6 +1344,68 @@ fn a_passing_linux_clippy_names_the_crates_it_never_linted() {
         "{}",
         report.text
     );
+}
+
+/// The folders a container row builds in, as its `CARGO_TARGET_DIR`s name them (`/target/v<version>/<folder>`).
+fn target_dirs(command: &str) -> Vec<String> {
+    let mut v: Vec<String> = command
+        .split("CARGO_TARGET_DIR=/target/")
+        .skip(1)
+        .map(|rest| rest.split_whitespace().next().unwrap().to_string())
+        .collect();
+    v.sort();
+    v.dedup();
+    v
+}
+
+/// The `--lock` folders of a row's arguments.
+fn locks_of(args: &[String]) -> Vec<String> {
+    args.windows(2).filter(|w| w[0] == "--lock").map(|w| w[1].clone()).collect()
+}
+
+#[test]
+fn a_container_row_holds_the_lock_of_every_build_folder_it_uses_for_the_whole_run() {
+    // Train l: another worktree's row rebuilt a test binary of the shared target volume while this row's nextest was about to exec
+    // it (cargo's own lock covers the build only). The linux-container helper holds one lock per folder through `--lock`, named
+    // from the same slug as the row's CARGO_TARGET_DIR, so the two never differ (ER-22).
+    let Planned::Run(clippy) = linux_row(&["crates/a/src/lib.rs", "apps/dyno/src/a.rs"], &facts()) else {
+        panic!("row")
+    };
+    let command = clippy.args.last().unwrap();
+    assert_eq!(locks_of(&clippy.args), target_dirs(command), "{:?}", clippy.args);
+    assert!(!locks_of(&clippy.args).is_empty());
+    assert!(clippy.args.iter().position(|a| a == "--lock").unwrap() < clippy.args.iter().position(|a| a == "--").unwrap());
+
+    // The member gate's tests row, and its guardian run in `crates` too: one lock for the folder, never two (a second `flock` of
+    // the same file by the same process would wait for itself).
+    let chosen = vec![
+        (
+            LinuxTarget {
+                ws: "crates".into(),
+                left_out: vec![],
+            },
+            String::new(),
+        ),
+        (
+            LinuxTarget {
+                ws: "tools/paddock-dev".into(),
+                left_out: vec![],
+            },
+            String::new(),
+        ),
+    ];
+    for guardian in [false, true] {
+        let g = linux_tests_gate(&chosen, "7", &facts(), guardian);
+        let locks = locks_of(&g.args);
+        assert_eq!(
+            locks,
+            vec!["v7/crates".to_string(), "v7/tools-paddock-dev".to_string()],
+            "guardian {guardian}"
+        );
+        assert_eq!(locks, target_dirs(g.args.last().unwrap()), "guardian {guardian}");
+    }
+    let only_guardian = linux_tests_gate(&[], "7", &facts(), true);
+    assert_eq!(locks_of(&only_guardian.args), vec!["v7/crates".to_string()]);
 }
 
 #[test]
@@ -4080,9 +4142,17 @@ mod member_tests {
         assert!(linux.heavy);
         let command = linux.args.last().unwrap();
         assert!(
-            linux
-                .args
-                .starts_with(&strs(&["tools/linux-container.sh", "--id", "paddock", "--ci-image", "--"])),
+            linux.args.starts_with(&strs(&[
+                "tools/linux-container.sh",
+                "--lock",
+                "v7/crates",
+                "--lock",
+                "v7/tools-paddock-dev",
+                "--id",
+                "paddock",
+                "--ci-image",
+                "--"
+            ])),
             "{:?}",
             linux.args
         );

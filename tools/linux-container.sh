@@ -10,6 +10,7 @@
 #   bash paddock/tools/linux-container.sh --id paddock --ci-image [--platform linux/amd64] -- command...   # the CI image, native by default
 #   bash paddock/tools/linux-container.sh --id paddock --ci-image --image-ready   # probe only: exit 0 the image is built, 3 it is not (never builds)
 #   bash paddock/tools/linux-container.sh --id dyno --clean              # stop labelled containers, delete its volumes and local CI images
+#   bash paddock/tools/linux-container.sh --id paddock --ci-image --lock v3/crates -- command...   # hold the lock of /target/v3/crates
 #
 # With no command: `cargo test -p <packages> && cargo clippy -p <packages> --all-targets -- -D warnings`.
 #
@@ -26,6 +27,12 @@
 # repository through the image's /etc/gitconfig (`[safe] directory = *`): the CI image has it, as in CI, and the image this script
 # builds from PADDOCK_LINUX_BASE_IMAGE gets it in its build; an --image of another kind needs its own. The script sets no GIT_*
 # variable, so a command's own HOME and its .gitconfig work as they do in CI.
+# --lock <folder under /target> (repeatable) holds a host-side kernel lock (flock) on that build folder of the kept target volume for
+# the whole container run, build and tests alike, so another worktree's row on the same folder waits instead of rebuilding a test
+# binary that this row's nextest is about to exec ("failed to exec .../it-<hash>: Permission denied", train l: cargo's own lock covers
+# the build only). The lock files are in the pre-push state folder of the common git folder, so every worktree sees them; the kernel
+# frees a lock when its holder ends, however it ends. The wait is bounded (PADDOCK_LINUX_LOCK_WAIT seconds, default 1800), says who
+# holds the lock and ends with one ::error:: line (exit 5). Locks are taken in name order. Row commands pass every folder they build in.
 # Environment inside: CARGO_BUILD_JOBS (CI sets it too) and CARGO_TERM_COLOR=never (CI: always, for its log viewer; local output
 # goes to files and greps, where colour codes would split the words), and CARGO_TARGET_DIR=/target (CI points cargo at its build
 # folder through .cargo/ci.toml instead, which a read-only /work cannot take).
@@ -34,7 +41,7 @@
 # PADDOCK_LINUX_RUN_LABEL (an extra label, `key=value`, on the container: `dev check --pre-push` finds and stops its own container by it), PADDOCK_LINUX_MEMORY (12g; ER-14 wants every test container capped), PADDOCK_LINUX_USER (e.g. 1000:1000 to exercise the "other users' processes" paths; builds into the container's /tmp).
 set -euo pipefail
 
-id=""; root="$PWD"; packages=""; clean=0; ready_image=""; platform=""; ci_image=0; image_ready=0
+id=""; root="$PWD"; packages=""; clean=0; ready_image=""; platform=""; ci_image=0; image_ready=0; locks=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --id) id="${2:?--id needs a value}"; shift ;;
@@ -45,6 +52,11 @@ while [ $# -gt 0 ]; do
     --ci-image) ci_image=1 ;;
     --image-ready) image_ready=1 ;;
     --clean) clean=1 ;;
+    --lock)
+      lock="${2-}"; shift || true
+      [[ "$lock" =~ ^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$ && "$lock" != *..* ]] \
+        || { echo "linux-container: --lock must be a plain relative folder (letters, digits, . _ - and /), not '$lock'" >&2; exit 2; }
+      locks+=("$lock") ;;
     --) shift; break ;;
     *) echo "linux-container: unknown option $1 (a command goes after --)" >&2; exit 2 ;;
   esac
@@ -187,7 +199,50 @@ if [ -n "$state" ]; then
   mkdir -p "$state" 2>/dev/null && git_args+=(--mount "type=tmpfs,target=$state_in")
 fi
 
-exec "$docker" run --rm --label "$label" ${PADDOCK_LINUX_RUN_LABEL:+--label "$PADDOCK_LINUX_RUN_LABEL"} --cpus "$cpus" --memory "$memory" \
+# The locks of the build folders this run uses (--lock): taken here, after the heavy slot the caller holds (a row that waits for a
+# lock holds a slot, but the holder it waits for has its own, so the two never wait for each other), and held by the process that
+# becomes `docker run`, so they end with it. Perl because macOS has no flock(1); `$^F` keeps the descriptors across the exec.
+lock_run=()
+if [ ${#locks[@]} -gt 0 ]; then
+  lock_dir="${state:-${TMPDIR:-/tmp}/paddock-linux-locks-$(id -u)}/target-locks"
+  mkdir -p "$lock_dir" || { echo "::error::linux-container: the lock folder $lock_dir cannot be made. Next step: make it writable or run without --lock" >&2; exit 1; }
+  # shellcheck disable=SC2016 # perl, not the shell, reads $ here
+  lock_perl='use strict; use warnings; use Fcntl qw(:flock);
+$^F = 1023; $| = 1;
+my ($dir, $vol, $wait, $note, $names, @cmd) = @ARGV;
+my $deadline = time + $wait; my @held;
+for my $name (sort split /,/, $names) {
+  (my $file = "$vol--$name") =~ s{/}{__}g;
+  my $path = "$dir/$file.lock";
+  open(my $fh, "+>>", $path) or do { print STDERR "::error::linux-container: $path cannot be opened: $!. Next step: make the folder writable
+"; exit 1 };
+  my $began = time; my $told = -1;
+  until (flock($fh, LOCK_EX | LOCK_NB)) {
+    my $held = ""; if (open(my $r, "<", $path)) { $held = <$r> // ""; close $r } chomp $held; $held ||= "another row (it did not say who)";
+    if (time >= $deadline) {
+      print STDERR "::error::linux-container: $name of volume $vol is still held by $held after $wait s. Next step: wait for that row, or stop it if it is stuck (its container carries the label paddock.tools); PADDOCK_LINUX_LOCK_WAIT sets the wait
+";
+      exit 5;
+    }
+    if (time - $began >= $told + 30 || $told < 0) {
+      $told = time - $began;
+      print STDERR "linux-container: waiting for the build folder $name of volume $vol, held by $held (waited $told s of at most $wait s)
+";
+    }
+    select(undef, undef, undef, 0.25);
+  }
+  truncate($fh, 0); seek($fh, 0, 0); print $fh "$note\n"; $fh->flush;
+  print STDERR "linux-container: holding the build folder $name of volume $vol (waited " . (time - $began) . " s)
+" if $told >= 0;
+  push @held, $fh; # the handle stays open: a closed one would free its lock
+}
+exec { $cmd[0] } @cmd or do { print STDERR "::error::linux-container: $cmd[0] cannot be started: $!
+"; exit 1 };'
+  lock_names=$(printf '%s\n' "${locks[@]}" | sort -u | paste -sd, -) # once each: a second flock of one file by this process would wait for itself
+  lock_run=(perl -e "$lock_perl" -- "$lock_dir" "$target_volume" "${PADDOCK_LINUX_LOCK_WAIT:-1800}" "pid $$ in $root (${PADDOCK_LINUX_LOCK_NOTE:-$(basename "$root")}), since $(date -u +%H:%M:%SZ)" "$lock_names")
+fi
+
+exec ${lock_run[@]+"${lock_run[@]}"} "$docker" run --rm --label "$label" ${PADDOCK_LINUX_RUN_LABEL:+--label "$PADDOCK_LINUX_RUN_LABEL"} --cpus "$cpus" --memory "$memory" \
   ${platform:+--platform "$platform"} \
   --mount "type=bind,source=$root,target=/work,readonly" ${git_args[@]+"${git_args[@]}"} \
   --mount "type=volume,source=$registry_volume,target=/usr/local/cargo/registry" \

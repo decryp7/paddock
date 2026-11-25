@@ -4314,3 +4314,16 @@ startup"; the Chromium start judge, ADR 0031). A start that hands back a handle 
   "CI job, identity present" that the Chrome for Testing hook uses too.
 - **Open.** Whether the TCC grant for the re-signed bundle holds was not measured before the user's one-time steps; the check is the
   TCC log after the first Mac run that starts a browser.
+
+## 2026-11-26: two worktrees' container rows shared one target folder, and only the build was locked
+
+- **What.** Train l's `tests-linux` failed 175 tests with "failed to exec .../it-<hash>: Permission denied". The kept volume
+  `paddock-linux-target-arm64` is shared by every worktree per workspace (`/target/v3/<workspace>`) and cargo's lock covers the build
+  only, so another worktree's row could replace a test binary between this row's build and its nextest run.
+- **Fix.** `tools/linux-container.sh --lock v<version>/<folder>` holds one host-side kernel lock per folder for the whole container run
+  (build and tests); `clippy-linux`, `tests-linux` and the guardian run pass it from the same slug as their `CARGO_TARGET_DIR`
+  (`pre_push/gates.rs::lock_args`). Chosen over a target folder per worktree: the volume is 10.2 GB for all workspaces (docs/benchmarks.md)
+  and every extra worktree would hold and cold-build its own copy, while the lock costs only a wait on the same folder.
+- **Not this.** The coordinator found the failure also deterministic in the combined lib-plus-`it` run of one worktree; the lock does not
+  claim that cause (a test touching the target folder, `current_exe` or permissions is being looked for).
+
