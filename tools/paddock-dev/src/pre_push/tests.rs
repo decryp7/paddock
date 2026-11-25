@@ -710,6 +710,10 @@ struct Fake {
     no_docker: bool,
     no_image: bool,
     probe_broken: bool,
+    /// The container's bind mount serves other content than the host has (OrbStack 2.2.5, 2026-11-25).
+    stale_mount: bool,
+    /// The files every mount probe was asked about.
+    probed: Mutex<Vec<Vec<String>>>,
     no_tools: Vec<String>,
     fail: Vec<String>,
     unstartable: Vec<String>,
@@ -753,6 +757,20 @@ impl Exec for Fake {
             ImageProbe::Missing
         } else {
             ImageProbe::Ready
+        }
+    }
+    fn mount_probe(&self, compared: &super::mount_fresh::Compared) -> super::mount_fresh::MountProbe {
+        use super::mount_fresh::MountProbe;
+        self.probed.lock().unwrap().push(compared.files.clone());
+        if self.stale_mount {
+            MountProbe::Stale {
+                differing: vec![format!("{} (host 0123456789ab, container ba9876543210)", compared.files[0])],
+            }
+        } else {
+            MountProbe::Fresh {
+                checked: compared.files.len(),
+                of: compared.of,
+            }
         }
     }
     fn run(&self, g: &Gate, limits: Limits) -> Result<Done, String> {
@@ -2869,6 +2887,7 @@ fn heavy_gate(id: &str, rank: u8) -> Planned {
         notice: None,
         progress: crate::pre_push::progress::Progress::Lines,
         build_dir: None,
+        mount: None,
     })
 }
 
@@ -3354,6 +3373,51 @@ fn a_missing_local_ci_image_is_not_measured_and_names_warm_linux() {
     assert!(
         !fake.ran.lock().unwrap().iter().any(|r| r.starts_with("clippy-linux")),
         "no build under the push budget"
+    );
+}
+
+/// The container's bind mount can serve stale files (OrbStack 2.2.5, 2026-11-25: the old size and mtime for over an hour, so an old
+/// version was linted): a container row whose probe sees other content than the host has is not measured, names the files and the
+/// restart, and never runs, so it can never pass on the old version (ER-33). Positive control: the same row with a fresh mount runs.
+#[test]
+fn a_container_row_on_a_stale_mount_is_not_measured_and_never_runs() {
+    let planned = plan_gates(&plan(), &change(&["crates/a.rs", "docs/x.md"]), &facts());
+    let fake = Fake {
+        stale_mount: true,
+        ..Fake::default()
+    };
+    let rows = run_all(&planned, &fake, 3);
+    let v = verdicts(&rows);
+    let (reason, next) = nm(&v["clippy-linux crates"]).expect("not measured");
+    assert!(reason.contains("stale") && reason.contains("crates/a.rs (host "), "{reason}");
+    assert!(next.contains("restart OrbStack") && next.contains("or the Mac"), "{next}");
+    assert!(
+        !fake.ran.lock().unwrap().iter().any(|r| r.starts_with("clippy-linux")),
+        "a row on a stale mount must not run"
+    );
+    assert_eq!(render("h", &rows).exit, Exit::NotMeasured);
+    assert_eq!(
+        *fake.probed.lock().unwrap(),
+        vec![vec!["crates/a.rs".to_string(), "docs/x.md".to_string()]],
+        "the row's own workspace first, then the rest of the change"
+    );
+
+    let fresh = Fake::default();
+    let rows = run_all(&planned, &fresh, 3);
+    assert!(fresh.ran.lock().unwrap().iter().any(|r| r == "clippy-linux crates"));
+    assert!(nm(&verdicts(&rows)["clippy-linux crates"]).is_none());
+}
+
+/// Only the container rows carry the files to compare; the host rows never start a probe.
+#[test]
+fn only_container_rows_carry_mount_files() {
+    let planned = plan_gates(&plan(), &change(&["crates/a.rs"]), &facts());
+    for g in run_gates(&planned) {
+        assert_eq!(g.mount.is_some(), g.need == Need::LocalCiImage, "{}", g.id);
+    }
+    assert!(
+        run_gates(&planned).iter().any(|g| g.need == Need::LocalCiImage),
+        "the plan has a container row"
     );
 }
 
