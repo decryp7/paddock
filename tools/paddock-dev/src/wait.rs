@@ -377,7 +377,7 @@ pub fn plock_log_path(env: &dyn Fn(&str) -> Option<String>, derived: Option<Path
         .join("pitcrew-lock-activity.log")
 }
 
-/// The lock folder ./dev hands heavy from this folder (`<dev-targets>/heavy`, [`crate::pre_push::exec::heavy_dir`]), when it exists.
+/// The lock folder ./dev hands heavy from this folder (`<dev-targets>/throttle`, [`crate::pre_push::exec::heavy_dir`]), when it exists.
 pub fn derived_heavy_dir() -> Option<PathBuf> {
     let map: std::collections::HashMap<String, String> = crate::process_env::vars().collect();
     let here = std::env::current_dir().ok()?;
@@ -1120,12 +1120,12 @@ mod tests {
         );
         // The folder ./dev hands heavy comes after the variables and before the legacy default.
         assert_eq!(
-            plock_log_path(&none, Some(PathBuf::from("/dt/heavy"))),
-            Path::new("/dt/heavy").join("pitcrew-lock-activity.log")
+            plock_log_path(&none, Some(PathBuf::from("/dt/throttle"))),
+            Path::new("/dt/throttle").join("pitcrew-lock-activity.log")
         );
         let heavy = |k: &str| (k == "HEAVY_DIR").then(|| "/h".to_string());
         assert_eq!(
-            plock_log_path(&heavy, Some(PathBuf::from("/dt/heavy"))),
+            plock_log_path(&heavy, Some(PathBuf::from("/dt/throttle"))),
             Path::new("/h").join("pitcrew-lock-activity.log")
         );
     }

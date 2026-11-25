@@ -386,7 +386,7 @@ fn a_row_expected_at_the_limit_is_not_quick() {
     assert!(!at.is_quick() && under.is_quick() && !req("A").is_quick());
 }
 
-/// The lock folder (and the history in it) moves where a reboot does not clear it (./dev sets `HEAVY_DIR=<dev-targets>/heavy`; it was
+/// The lock folder (and the history in it) moves where a reboot does not clear it (./dev sets `HEAVY_DIR=<dev-targets>/throttle`; it was
 /// /private/tmp, and every reboot lost the history, so no row was ever quick, 2026-11-25), and the old folder's file is read once: the
 /// first record copies its lines over, and the new file is read from then on.
 #[test]

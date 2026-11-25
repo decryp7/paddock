@@ -50,7 +50,7 @@ impl History {
         }
     }
 
-    /// The history in the lock folder `dir` that moved from the folder `old` (a folder a reboot keeps, ./dev's `<dev-targets>/heavy`,
+    /// The history in the lock folder `dir` that moved from the folder `old` (a folder a reboot keeps, ./dev's `<dev-targets>/throttle`,
     /// after /private/tmp, where every reboot lost it): the old file is read while the new one does not exist, and the first record
     /// copies its lines over.
     pub fn moved(dir: &Path, old: &Path) -> History {

@@ -26,7 +26,7 @@
 # status: read-only; where each lane's plist is, which launchd domain runs it, its state, pid, process user and last
 # registration line.
 #
-# The daemon's environment also gets HEAVY_DIR=<dev-targets>/heavy, heavy's lock folder: the folder the agents' ./dev hands heavy,
+# The daemon's environment also gets HEAVY_DIR=<dev-targets>/throttle, heavy's lock folder: the folder the agents' ./dev hands heavy,
 # read with `./dev places --get dev-targets --pinned` (the repository's own git config) as --user, so CI's `heavy mark` and the agents'
 # heavy steps meet in one queue (ADR 0102) in a folder a reboot keeps.
 #
@@ -109,7 +109,7 @@ source_agent() {
 value() { plutil -extract "$1" raw -o - "$2" 2>/dev/null; }
 loaded() { launchctl print "$1/$2" >/dev/null 2>&1; }
 
-# heavy's lock folder, <dev-targets>/heavy, as --user reads it (./dev builds and caches itself in that user's home, never root's).
+# heavy's lock folder, <dev-targets>/throttle (the name after the heavy->throttle rename, so it moves once), as --user reads it (./dev builds and caches itself in that user's home, never root's).
 heavy_dir() {
   local t
   if [ "$(id -u)" = "$uid" ]; then
@@ -117,7 +117,7 @@ heavy_dir() {
   else
     t=$(sudo -u "$user" bash "$dev" places --get dev-targets --pinned --repo "$repo")
   fi || return 1
-  [ -n "$t" ] && printf '%s/heavy' "${t%/}"
+  [ -n "$t" ] && printf '%s/throttle' "${t%/}"
 }
 
 # Renders a lane's daemon plist from the template into $2. $1 = lane name.

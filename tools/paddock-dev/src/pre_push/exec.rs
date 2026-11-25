@@ -999,7 +999,8 @@ pub struct RealExec {
 /// The variable that names heavy's lock folder (tools/heavy `HEAVY_DIR`, which it has always honoured).
 pub const HEAVY_DIR_VAR: &str = "HEAVY_DIR";
 
-/// heavy's lock folder for this machine (its queue, history and logs): `<dev-targets>/heavy` ([`crate::places::dev_targets`], the folder
+/// heavy's lock folder for this machine (its queue, history and logs): `<dev-targets>/throttle` (the name after the decided heavy→throttle
+/// rename, so the folder moves once; `<dev-targets>/heavy` holds the installed binary) ([`crate::places::dev_targets`], the folder
 /// of worktrees and build folders, which a reboot keeps; it was /private/tmp, where every reboot lost the history), read once per
 /// process; `None` when it cannot be derived (heavy then uses its own default). The Mac CI runner's configuration sets the same
 /// `HEAVY_DIR`, so agents still see CI's `heavy mark` (ADR 0102).
@@ -1008,7 +1009,7 @@ pub fn heavy_dir(root: &Path, env: &HashMap<String, String>) -> Option<PathBuf> 
     DIR.get_or_init(|| {
         crate::places::dev_targets(root, &|k| env.get(k).cloned())
             .ok()
-            .map(|t| t.join("heavy"))
+            .map(|t| t.join("throttle"))
     })
     .clone()
 }
@@ -2059,7 +2060,7 @@ mod tests {
         assert_eq!(workers(Some(1.0), 0), 1);
     }
 
-    /// heavy's lock folder goes to `<dev-targets>/heavy`, a folder a reboot keeps (it was in /private/tmp and its history was lost at
+    /// heavy's lock folder goes to `<dev-targets>/throttle`, a folder a reboot keeps (it was in /private/tmp and its history was lost at
     /// every reboot, so no row was ever quick; 2026-11-25), unless the caller names one. One process reads it once (nextest runs each
     /// test in a process of its own).
     #[test]
@@ -2071,7 +2072,7 @@ mod tests {
             got[0],
             (
                 HEAVY_DIR_VAR.to_string(),
-                PathBuf::from("/dev-targets-x/heavy").display().to_string()
+                PathBuf::from("/dev-targets-x/throttle").display().to_string()
             )
         );
         assert_eq!(got[1].0, "HEAVY_MOVED_FROM");

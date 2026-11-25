@@ -274,12 +274,12 @@ test('status is read-only and names where each lane runs', { skip }, () => {
   assert.deepEqual(snapshot(m.home, m.sys), before);
 });
 
-test('the daemon gets HEAVY_DIR=<dev-targets>/heavy, so CI jobs and agents share one heavy queue in a folder a reboot keeps', { skip }, () => {
+test('the daemon gets HEAVY_DIR=<dev-targets>/throttle, so CI jobs and agents share one heavy queue in a folder a reboot keeps', { skip }, () => {
   const m = mac();
   const r = move(m, ['install', ...LANES]);
   assert.equal(r.status, 0, r.out);
   const env = plist(daemonPath(m, 'lane-a')).EnvironmentVariables;
-  assert.equal(env.HEAVY_DIR, '/dt-test/heavy');
+  assert.equal(env.HEAVY_DIR, '/dt-test/throttle');
   assert.ok(calls(m.bin).includes(`dev places --get dev-targets --pinned --repo ${join(TOOLS, '..')}`), calls(m.bin).join('\n'));
   // Control: a dev-targets folder that cannot be read stops before anything changes (the preflight renders every lane first).
   const bad = mac({ dev: null });
