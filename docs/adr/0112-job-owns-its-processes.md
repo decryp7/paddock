@@ -10,7 +10,7 @@
 - Related: **ER-51** (start, hold, watch, end; the fixture shape; one folder per unit; engineering-rules cdb2a9c), ER-14, ER-21 /
   rule 40, ER-22 / rule 42, ER-27, ER-32, ER-33, ER-37 / rule 76, ER-41, ER-43, ER-46, ER-48; rule 53 and ADR 0033; rule 55
   (`docs/known-copies.toml`); ADR 0025 (CI job isolation); ADR 0103 (the test `Reaper`); ADR 0111 (no writable folder shared
-  between lanes); the new Paddock rule 90 (this ADR).
+  between lanes); the new Paddock rule 97 (this ADR; numbered 97 by ADR 0119 D7, as 90 was taken).
 - Number: 0112. On 2026-11-21 the highest ADR on `origin/main` was 0108 and on any `origin` branch 0111.
 - Amends: ADR 0025 (a job owns its processes and its folder; the job action replaces the separate acquire and release steps),
   ADR 0103 (the Reaper's group rule moves into `paddock_proc::own`), the lesson "Job processes (ER-14)" on

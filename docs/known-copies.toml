@@ -1526,7 +1526,7 @@ status = "built"
   note = "A benchmark scratch folder's identity as text: dev:ino on Unix (symlink_metadata), volume:index from dyno-platform's fileid on Windows."
 
 # =====================================================================================================================
-# Ending the processes a unit of work started (ADR 0112, rule 90)
+# Ending the processes a unit of work started (ADR 0112, rule 97)
 # =====================================================================================================================
 
 [[mechanism]]
