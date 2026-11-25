@@ -3,10 +3,13 @@
 //! root, and the guardian is off for root, so the crates job alone never runs the guardian's Linux code (`exe_of` through `/proc`,
 //! `owner_holds_pipe`) in acting mode: as root those tests assert the root behaviour instead.
 //!
-//! Run from `crates/`: builds the `paddock-proc` and `paddock-chromium` unit tests (all features), then runs the guardian tests and
-//! `paddock-chromium`'s owner-killed test as `PADDOCK_TEST_UID` (default 65534, nobody) through `setpriv`, with a private `TMPDIR` and
-//! `HOME`. As root it drops to that user; run by a user it runs the tests directly. Each failure prints one `::error::` line with the
-//! command, its exit code and the next step (ER-27); the job summary says what ran.
+//! Run from `crates/`: archives the `paddock-proc` and `paddock-chromium` unit tests (`cargo nextest archive`, all features), then runs
+//! the guardian tests and `paddock-chromium`'s owner-killed test from the archive with `cargo nextest run --profile ci` as
+//! `PADDOCK_TEST_UID` (default 65534, nobody) through `setpriv`, with a private `TMPDIR` and `HOME`. As root it drops to that user; run
+//! by a user it runs the tests directly. nextest runs each test in a process of its own, because the tests share no guardian: the
+//! guardian is one per process, and a test that ends it (or kills an owner) must not take other tests' keepers with it (CI run 9011;
+//! the sharing of one libtest process broke these tests three times). Each failure prints one `::error::` line with the command, its
+//! exit code and the next step (ER-27); the job summary says what ran.
 //!
 //! Everything that starts a program, asks who runs it or changes an owner sits behind [`Machine`], so the root path (which a test cannot
 //! take: it would need `sudo`) is tested with a fake that records the command lines. Both programs run with a limit (ER-32): the build
@@ -108,15 +111,12 @@ pub fn child_pass() -> Vec<&'static str> {
         .collect()
 }
 
-/// The test binary of a unit-test target in cargo's `--no-run` output: the last `Executable unittests src/lib.rs (<path>/<crate>-<hash>)`.
-pub fn exe_of(build_output: &str, krate: &str) -> Option<String> {
-    let re = regex::Regex::new(&format!(
-        r"(?m)Executable unittests src/lib\.rs \((.*/{}-[0-9a-f]*)\)\s*$",
-        regex::escape(krate)
-    ))
-    .ok()?;
-    re.captures_iter(build_output).last().map(|c| c[1].to_string())
-}
+/// The nextest filterset of what the step runs: the guardian tests of `paddock-proc` and `paddock-chromium`'s owner-killed browser test.
+pub const FILTERSET: &str =
+    "(package(paddock-proc) & test(guardian::)) | (package(paddock-chromium) & test(launch::tests::a_browser_whose_owner_is_killed))";
+
+/// The name of that selection in the summary and in errors.
+const TESTS: &str = "guardian::";
 
 /// The test kit's stand-in program and the variable that names a built one (`paddock_testkit::stand_in::{STAND_IN_BIN,
 /// STAND_IN_ENV}`; the kit is only a dev-dependency here, so a test holds these equal to the kit's).
@@ -227,7 +227,7 @@ pub fn run_with(machine: &dyn Machine, env: &HashMap<String, String>, out: &mut 
         Vec::new()
     };
 
-    step.say("Building the paddock-proc and paddock-chromium unit tests");
+    step.say("Archiving the paddock-proc and paddock-chromium unit tests");
     let Some(temp) = super::temp_folder(env) else {
         return step.fail(
             "no temp folder (TMPDIR, RUNNER_TEMP, TEMP or TMP) is set.",
@@ -244,10 +244,22 @@ pub fn run_with(machine: &dyn Machine, env: &HashMap<String, String>, out: &mut 
         }
     };
     let build_log = private.0.join("build.log");
+    let archive = private.0.join("guardian.tar.zst");
+    let run_dir = private.0.join("run");
     // The build log lives in the private folder of the user's tests too, so the private folder is made first and handed over after.
     let mut log = Vec::new();
     let build = ToolCall::new("cargo")
-        .args(["test", "--no-run", "--all-features", "-p", "paddock-proc", "-p", "paddock-chromium"])
+        .args([
+            "nextest",
+            "archive",
+            "--all-features",
+            "-p",
+            "paddock-proc",
+            "-p",
+            "paddock-chromium",
+            "--archive-file",
+        ])
+        .args([archive.display().to_string()])
         .pass(child_pass())
         .timeout(seconds(env, "PADDOCK_GUARDIAN_BUILD_TIMEOUT", 600))
         .output(Output::File(build_log.clone()));
@@ -269,19 +281,9 @@ pub fn run_with(machine: &dyn Machine, env: &HashMap<String, String>, out: &mut 
         for l in &lines[lines.len().saturating_sub(crate::ci_tool::TAIL_LINES)..] {
             step.say(l);
         }
-        step.say("::error::guardian-as-user: cargo test --no-run failed (output above); fix the build first");
+        step.say("::error::guardian-as-user: cargo nextest archive failed (output above); fix the build first");
         return 1;
     }
-    let (Some(proc_bin), Some(chromium_bin)) = (exe_of(&ran.stderr, "paddock_proc"), exe_of(&ran.stderr, "paddock_chromium")) else {
-        return step.fail(
-            format!(
-                "the unit test binaries were not found in cargo's output; see {}.",
-                build_log.display()
-            ),
-            "check that both packages have unit tests in src/lib.rs.",
-        );
-    };
-
     // The tests' fake programs are the test kit's stand-in. Unnamed, the kit compiles it into the build folder of the test program,
     // which the user the tests drop to cannot write (ci.yml 8359: "cannot make a build folder in /target/debug: Permission denied").
     // So it is built here, before the drop, and named to the tests; a stand-in the job names is used as it is.
@@ -323,66 +325,90 @@ pub fn run_with(machine: &dyn Machine, env: &HashMap<String, String>, out: &mut 
         }
     };
 
-    if euid == 0
-        && let Err(e) = machine.chown(&private.0, uid)
-    {
+    if let Err(e) = std::fs::create_dir(&run_dir) {
+        return step.fail(format!("cannot make {}: {e}.", run_dir.display()), "make the temp folder writable.");
+    }
+    let store_config = private.0.join("store.toml");
+    if let Err(e) = std::fs::write(&store_config, format!("[store]\ndir = '{}'\n", run_dir.join("store").display())) {
         return step.fail(
-            format!("cannot give {} to uid {uid}: {e}.", private.0.display()),
-            "check the image's users.",
+            format!("cannot write {}: {e}.", store_config.display()),
+            "make the temp folder writable.",
         );
+    }
+    let cwd = match std::env::current_dir() {
+        Ok(d) => d,
+        Err(e) => return step.fail(format!("cannot read the working folder: {e}."), "run this step from crates/."),
+    };
+    if euid == 0 {
+        for dir in [&private.0, &run_dir] {
+            if let Err(e) = machine.chown(dir, uid) {
+                return step.fail(
+                    format!("cannot give {} to uid {uid}: {e}.", dir.display()),
+                    "check the image's users.",
+                );
+            }
+        }
     }
     let guardian_log = private.0.join("guardian.log");
     let mut text = String::from("### Orphan guardian as a user\n\n| Tests | As | Result | Time |\n|---|---|---|---|\n");
-    let mut results = Vec::new();
-    for (bin, filter) in [
-        (&proc_bin, "guardian::"),
-        (&chromium_bin, "launch::tests::a_browser_whose_owner_is_killed"),
-    ] {
-        let mut argv = as_user.clone();
-        argv.extend([
-            "env".to_string(),
-            format!("TMPDIR={}", private.0.display()),
-            format!("HOME={}", private.0.display()),
-            format!("PADDOCK_PROC_GUARDIAN_LOG={}", guardian_log.display()),
-            format!("{STAND_IN_ENV}={stand_in}"),
-            bin.clone(),
-            filter.to_string(),
-        ]);
-        step.say(format!("Running as uid {uid}: {}", argv.join(" ")));
-        let started = Instant::now();
-        let call = ToolCall::new(argv[0].clone())
-            .args(argv[1..].iter().cloned())
-            .pass(child_pass())
-            .timeout(seconds(env, "PADDOCK_GUARDIAN_TEST_TIMEOUT", 300))
-            .output(Output::Stream);
-        let mut log = Vec::new();
-        let ran = machine.run(&call, &mut log);
-        flush(&mut step, &mut log);
-        let took = started.elapsed().as_secs();
-        let failure = match ran {
-            Ok(r) if r.success => None,
-            Ok(r) => Some(r.how),
-            Err(e) => Some(e),
-        };
-        if let Some(how) = failure {
-            match std::fs::read_to_string(&guardian_log) {
-                Ok(t) => {
-                    step.say("The guardian's log:");
-                    step.say(t.trim_end());
-                }
-                Err(_) => step.say(format!("The guardian wrote no log ({})", guardian_log.display())),
+    let mut argv = as_user.clone();
+    argv.extend([
+        "env".to_string(),
+        format!("TMPDIR={}", private.0.display()),
+        format!("HOME={}", private.0.display()),
+        format!("PADDOCK_PROC_GUARDIAN_LOG={}", guardian_log.display()),
+        format!("{STAND_IN_ENV}={stand_in}"),
+        "cargo".to_string(),
+        "nextest".to_string(),
+        "run".to_string(),
+        "--archive-file".to_string(),
+        archive.display().to_string(),
+        "--extract-to".to_string(),
+        run_dir.display().to_string(),
+        "--workspace-remap".to_string(),
+        cwd.display().to_string(),
+        // The ci profile writes its JUnit report into nextest's store folder, the workspace's own target folder unless a config names
+        // another (root's, or read-only, so not the user's): a tool config puts it in the user's own folder.
+        "--tool-config-file".to_string(),
+        format!("guardian:{}", store_config.display()),
+        "--profile".to_string(),
+        "ci".to_string(),
+        "--no-tests=fail".to_string(),
+        "-E".to_string(),
+        FILTERSET.to_string(),
+    ]);
+    step.say(format!("Running as uid {uid}: {}", argv.join(" ")));
+    let started = Instant::now();
+    let call = ToolCall::new(argv[0].clone())
+        .args(argv[1..].iter().cloned())
+        .pass(child_pass())
+        .timeout(seconds(env, "PADDOCK_GUARDIAN_TEST_TIMEOUT", 300))
+        .output(Output::Stream);
+    let mut log = Vec::new();
+    let ran = machine.run(&call, &mut log);
+    flush(&mut step, &mut log);
+    let took = started.elapsed().as_secs();
+    let failure = match ran {
+        Ok(r) if r.success => None,
+        Ok(r) => Some(r.how),
+        Err(e) => Some(e),
+    };
+    if let Some(how) = failure {
+        match std::fs::read_to_string(&guardian_log) {
+            Ok(t) => {
+                step.say("The guardian's log:");
+                step.say(t.trim_end());
             }
-            results.push(format!("| `{filter}` | uid {uid} | failed ({how}) | {took} s |\n"));
-            text.push_str(&results.join(""));
-            write_summary(&summary, &text);
-            return step.fail(
-                format!("`{filter}` failed as uid {uid} ({how}, {took} s): {}.", argv.join(" ")),
-                "run the same command in the CI image to see it.",
-            );
+            Err(_) => step.say(format!("The guardian wrote no log ({})", guardian_log.display())),
         }
-        results.push(format!("| `{filter}` | uid {uid} | passed | {took} s |\n"));
+        text.push_str(&format!("| `{TESTS}` | uid {uid} | failed ({how}) | {took} s |\n"));
+        write_summary(&summary, &text);
+        return step.fail(
+            format!("`{TESTS}` failed as uid {uid} ({how}, {took} s): {}.", argv.join(" ")),
+            "run the same command in the CI image to see it.",
+        );
     }
-    text.push_str(&results.join(""));
+    text.push_str(&format!("| `{TESTS}` | uid {uid} | passed | {took} s |\n"));
     write_summary(&summary, &text);
     step.say(format!("The guardian's acting tests passed as uid {uid}"));
     0
@@ -410,9 +436,6 @@ mod tests {
     /// What `cargo build --message-format=json` of the stand-in prints (one artifact line, cut to the fields the step reads).
     const STAND_IN_BUILD: &str = "   Compiling paddock-testkit v0.1.0\n{\"reason\":\"compiler-artifact\",\"target\":{\"name\":\"paddock-stand-in\",\"kind\":[\"bin\"]},\"executable\":\"/target/debug/paddock-stand-in\"}\n{\"reason\":\"build-finished\",\"success\":true}\n";
 
-    // conformance: layout-guess — a sample of cargo's own output, or the test binary it names; not a computed layout
-    const BUILD: &str = "   Compiling paddock-proc v0.1.0\n  Executable unittests src/lib.rs (target/debug/deps/paddock_proc-0123abcd)\n  Executable tests/it/main.rs (target/debug/deps/it-ff)\n  Executable unittests src/lib.rs (target/debug/deps/paddock_chromium-9f8e7d)\n";
-
     /// A scripted machine: who runs it, what the programs say, what was started.
     struct Fake {
         euid: u32,
@@ -421,7 +444,6 @@ mod tests {
         fail_filter: Option<&'static str>,
         started: Mutex<Vec<String>>,
         chowned: Mutex<Vec<(PathBuf, u32)>>,
-        build_text: &'static str,
     }
 
     impl Fake {
@@ -433,7 +455,6 @@ mod tests {
                 fail_filter: None,
                 started: Mutex::new(Vec::new()),
                 chowned: Mutex::new(Vec::new()),
-                build_text: BUILD,
             }
         }
     }
@@ -455,8 +476,6 @@ mod tests {
                 stdout: String::new(),
                 stderr: if call.display().starts_with("cargo build ") {
                     STAND_IN_BUILD.to_string()
-                } else if cargo {
-                    self.build_text.to_string()
                 } else {
                     String::new()
                 },
@@ -535,32 +554,13 @@ mod tests {
     }
 
     #[test]
-    fn the_test_binaries_are_the_last_unit_test_executables_of_each_crate() {
-        assert_eq!(
-            exe_of(BUILD, "paddock_proc"),
-            // conformance: layout-guess — a sample of cargo's own output, or the test binary it names; not a computed layout
-            Some("target/debug/deps/paddock_proc-0123abcd".into())
-        );
-        assert_eq!(
-            exe_of(BUILD, "paddock_chromium"),
-            // conformance: layout-guess — a sample of cargo's own output, or the test binary it names; not a computed layout
-            Some("target/debug/deps/paddock_chromium-9f8e7d".into())
-        );
-        assert_eq!(exe_of(BUILD, "paddock_missing"), None);
-        // conformance: layout-guess — a sample of cargo's own output, or the test binary it names; not a computed layout
-        let twice = format!("{BUILD}  Executable unittests src/lib.rs (target/debug/deps/paddock_proc-beef)\n");
-        // conformance: layout-guess — a sample of cargo's own output, or the test binary it names; not a computed layout
-        assert_eq!(exe_of(&twice, "paddock_proc"), Some("target/debug/deps/paddock_proc-beef".into()));
-    }
-
-    #[test]
     fn as_root_the_tests_run_as_the_configured_user_through_setpriv_with_a_private_folder_given_to_it() {
         let f = Fake::new(0);
         let (code, out, summary) = go(&f, &[("PADDOCK_TEST_UID", "4242")]);
         assert_eq!(code, 0, "{out}");
         let started = f.started.lock().unwrap().clone();
         assert!(
-            started[0].starts_with("cargo test --no-run --all-features -p paddock-proc -p paddock-chromium"),
+            started[0].starts_with("cargo nextest archive --all-features -p paddock-proc -p paddock-chromium --archive-file "),
             "{started:?}"
         );
         // ci.yml 8359: as uid 65534 the test kit could not compile its stand-in into root's build folder. It is built here, as
@@ -569,26 +569,29 @@ mod tests {
             started[1].starts_with("cargo build -p paddock-testkit --bin paddock-stand-in --message-format=json"),
             "{started:?}"
         );
-        for (i, filter) in [(2, "guardian::"), (3, "launch::tests::a_browser_whose_owner_is_killed")] {
-            assert!(
-                started[i].starts_with("setpriv --reuid=4242 --regid=4242 --clear-groups --no-new-privs -- env TMPDIR="),
-                "{}",
-                started[i]
-            );
-            assert!(
-                started[i].contains("PADDOCK_PROC_GUARDIAN_LOG=") && started[i].ends_with(filter),
-                "{}",
-                started[i]
-            );
-            assert!(
-                started[i].contains(" PADDOCK_STAND_IN_BIN=/target/debug/paddock-stand-in "),
-                "{}",
-                started[i]
-            );
-        }
+        // One nextest run from the archive, with the repo's ci profile, as the user; nothing builds after the drop.
+        assert!(
+            started[2].starts_with("setpriv --reuid=4242 --regid=4242 --clear-groups --no-new-privs -- env TMPDIR="),
+            "{}",
+            started[2]
+        );
+        assert!(started[2].contains(" cargo nextest run --archive-file "), "{}", started[2]);
+        assert!(started[2].contains(" --profile ci --no-tests=fail -E "), "{}", started[2]);
+        assert!(
+            started[2].contains("PADDOCK_PROC_GUARDIAN_LOG=") && started[2].ends_with(&format!("'{FILTERSET}'")),
+            "{}",
+            started[2]
+        );
+        assert!(
+            started[2].contains(" PADDOCK_STAND_IN_BIN=/target/debug/paddock-stand-in "),
+            "{}",
+            started[2]
+        );
+        assert_eq!(started.len(), 3, "{started:?}");
         let chowned = f.chowned.lock().unwrap().clone();
-        assert_eq!(chowned.len(), 1);
-        assert_eq!(chowned[0].1, 4242);
+        // The private folder and the folder nextest extracts the archive into.
+        assert_eq!(chowned.len(), 2);
+        assert!(chowned.iter().all(|c| c.1 == 4242));
         assert!(out.contains("Running as uid 4242: setpriv "), "{out}");
         assert!(out.ends_with("The guardian's acting tests passed as uid 4242\n"), "{out}");
         assert!(summary.contains("| `guardian::` | uid 4242 | passed |"), "{summary}");
@@ -652,19 +655,11 @@ mod tests {
         assert_eq!(code, 1);
         assert_eq!(out.lines().filter(|l| l.starts_with("::error::")).count(), 1, "{out}");
         assert!(
-            out.contains("::error::guardian-as-user: cargo test --no-run failed (output above); fix the build first"),
-            "{out}"
-        );
-        let mut lost = Fake::new(501);
-        lost.build_text = "Compiling only\n";
-        let (code, out, _) = go(&lost, &[]);
-        assert_eq!(code, 1);
-        assert!(
-            out.contains("the unit test binaries were not found in cargo's output; see "),
+            out.contains("::error::guardian-as-user: cargo nextest archive failed (output above); fix the build first"),
             "{out}"
         );
         let mut red = Fake::new(501);
-        red.fail_filter = Some("guardian::");
+        red.fail_filter = Some("a_browser_whose_owner_is_killed))'");
         let (code, out, summary) = go(&red, &[]);
         assert_eq!(code, 1);
         assert!(out.contains("The guardian wrote no log ("), "{out}");

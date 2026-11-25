@@ -26,7 +26,7 @@ origin/main ea94d9f1e
 debrief-v1.1.1 33eba7841
 origin/train/2026-11-11-5 55c056089
 origin/fix/debrief-env-exe-override 82517897b
-engineering-rules HEAD 35701f739
+engineering-playbook HEAD 35701f739
 ```
 
 ## The risk the user accepts

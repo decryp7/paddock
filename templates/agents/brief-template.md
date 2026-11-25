@@ -1,6 +1,6 @@
 # Brief template
 
-Copy this file, fill every field and delete nothing before sending the brief. The shared rules every agent gets are in the engineering-rules `templates/BRIEF.md`; this template adds what a
+Copy this file, fill every field and delete nothing before sending the brief. The shared rules every agent gets are in the engineering-playbook `templates/BRIEF.md`; this template adds what a
 Paddock brief has to say each time.
 
 ## Task

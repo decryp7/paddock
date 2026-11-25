@@ -150,7 +150,7 @@ specs: a framework-required test helper, an exception of the user's decision), t
 
 ### P5 `ci-timings.mjs`
 - No caller; the golden is recorded. Delete the script and the "regenerate with that command" note. From then on the golden is
-  edited by review. The engineering-rules repository's copy is separate (its own register line, one release later).
+  edited by review. The engineering-playbook repository's copy is separate (its own register line, one release later).
 
 ### P6 `npm-audit.mjs`
 - Add `./dev audit app [--dir]` (judge one folder's `npm audit --omit=dev --json` with the shared allow list; `judge.rs` and

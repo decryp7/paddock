@@ -23,8 +23,8 @@ test says so. Two instances in one day:
    a local discovery, no CI run): the
    child inherited `PATH`, so `heavy.sh` and `heavy` were found and the fake `cargo` was only one of the programs run.
 2. On `fix/precommit-heavy-slot` the new lookup of `heavy.sh` (`PADDOCK_HEAVY`, `PATH`, `$ENGINEERING_RULES`, then the
-   `engineering-rules` checkout beside the main checkout) made the test helper `dev()` find the real
-   `engineering-rules/scripts/heavy.sh` and take machine-wide slots in `~/.cache/heavy-slots` (ER-14). It was patched per
+   `engineering-playbook` checkout beside the main checkout) made the test helper `dev()` find the real
+   `engineering-playbook/scripts/heavy.sh` and take machine-wide slots in `~/.cache/heavy-slots` (ER-14). It was patched per
    test (`2ff5f5072`, 2026-11-13, found locally while reworking the pre-commit hook of `78a536f94`; no CI run: a fixture `ENGINEERING_RULES`, a `HEAVY_LOCK_DIR` assertion). The next lookup added to any tool
    fails the same way in every test that was not patched, and nothing finds those tests.
 

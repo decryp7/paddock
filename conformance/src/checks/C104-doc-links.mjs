@@ -1,7 +1,7 @@
 // C104: a relative Markdown link in the rules and docs points at a file that exists. Rules name scripts, hooks and checklists by
 // link; a link to a file that was never built or was moved is a rule naming a mechanism that does not exist (ER-21, 2026-11-12).
-// Reads docs/rules.md, AGENTS.md and docs/**/*.md under the checked root, and RULES.md of the engineering-rules repo when it is
-// given (`options.rulesMd`) or sits beside the repository (`../engineering-rules/RULES.md`); links in RULES.md resolve against that
+// Reads docs/rules.md, AGENTS.md and docs/**/*.md under the checked root, and RULES.md of the engineering-playbook repo when it is
+// given (`options.rulesMd`) or sits beside the repository (`../engineering-playbook/RULES.md`); links in RULES.md resolve against that
 // repository's root. Skips links with a scheme, `#anchors`, absolute paths, fenced code and code spans. A folder target is fine.
 // Dead links that existed when the check was added sit in `conformance/baselines/C104.json` ({file, target}); it may only shrink:
 // a listed link that works or is gone is a warning to remove, and an entry the baseline at the merge base lacks is an error.
@@ -9,7 +9,7 @@
 // tools/paddock-dev/src/cli.rs), `.claude/hooks/*` or `scripts/*` path, and a C-number (a check file under conformance/src/checks,
 // or C100 of the gate register, or an id in `conformance.rust` of conformance/paddock.ci.json) must exist, unless its own clause says "planned". One error per miss; today's misses sit in the
 // baseline's `mentions` list, shrink-only like `links`. `.claude/hooks/*` and `scripts/*` count when they exist in the checked root
-// or in the engineering-rules repository (RULES.md's own).
+// or in the engineering-playbook repository (RULES.md's own).
 // A root without docs/rules.md (an app folder) is not checked.
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
@@ -120,7 +120,7 @@ export default {
     if (!ctx.exists('docs/rules.md')) return [];
     const docs = ctx.files().filter((f) => f === 'AGENTS.md' || f === 'docs/rules.md' || (f.startsWith('docs/') && f.endsWith('.md')));
     const sources = docs.map((file) => ({ file, text: ctx.read(file), exists: (rel) => ctx.exists(rel), base: dirname(file) }));
-    const rulesMd = ctx.options.rulesMd ?? resolve(ctx.root, '..', 'engineering-rules', 'RULES.md');
+    const rulesMd = ctx.options.rulesMd ?? resolve(ctx.root, '..', 'engineering-playbook', 'RULES.md');
     if (existsSync(rulesMd)) {
       const repo = dirname(rulesMd);
       sources.push({ file: 'RULES.md', abs: rulesMd, repo });
@@ -165,7 +165,7 @@ export default {
     // ER-33: RULES.md is a second repository; when it was not read, nothing was measured for it (CI has no copy beside the repo).
     const skipFile = rulesRead ? null : 'RULES.md';
     if (!rulesRead) {
-      out.push(warn('C104', 40, 'RULES.md', 1, 'RULES.md: not measured (the file was not found or not readable, so its links and named mechanisms were not checked)', 'Check out engineering-rules beside this repository, or pass --rules-md <file>.'));
+      out.push(warn('C104', 40, 'RULES.md', 1, 'RULES.md: not measured (the file was not found or not readable, so its links and named mechanisms were not checked)', 'Check out engineering-playbook beside this repository, or pass --rules-md <file>.'));
     }
     let baseline = { links: [], mentions: [] };
     const raw = ctx.read(BASELINE_PATH);

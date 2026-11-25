@@ -1,4 +1,4 @@
-# `heavy`: the machine-wide heavy-step lock (replaces the shell scripts plock and engineering-rules scripts/heavy.sh, ER-24).
+# `heavy`: the machine-wide heavy-step lock (replaces the shell scripts plock and engineering-playbook scripts/heavy.sh, ER-24).
 # Its own Cargo workspace and lockfile (ADR 0014's third kind, `tools/<tool>/`). Package `paddock-heavy`, binary `heavy`.
 [workspace]
 resolver = "3"

@@ -137,6 +137,20 @@ package.json     the one npm workspace and package-lock.json (ui, eslint, icons,
   (cd crates && cargo fmt --all --check && cargo clippy --workspace --all-targets --all-features -- -D warnings)
   ```
 
+## Before hand-back (Paddock commands)
+
+Run these as well as the touched-file checks, on the merged tree when you hand back a merge, and list in the hand-off which you did not run:
+
+- `(cd conformance && npm test)`: the full conformance tests.
+- `./dev ci conformance-args` prints the conformance line of `.gitea/workflows/ci.yml`; run that line over the whole tree, not only the touched files.
+- `./dev gates check`: the gate register (an ignored test needs its gates.toml entry).
+- After a change to any `Cargo.toml`: `cargo metadata --locked --format-version 1 >/dev/null` in its workspace and in each workspace whose Cargo.lock lists the changed crate (`grep -l 'name = "<crate>"' $(git ls-files '*Cargo.lock')`, run in each lockfile's folder).
+- `./dev check --pre-push` before every push.
+- The member audits, the repository-wide audits of tools/paddock-dev that only the member gate runs (a developer's `./dev check --pre-push` skips them): `cargo nextest run --profile member-audits --locked --no-tests=fail` in `tools/paddock-dev`.
+- A review reads a diff with `git show` and builds only in a scratch copy, never in the author's worktree.
+- A design document (ADR, plan, research note) records the branch heads it read (ADR 0091), checks claims about shipped code with `git tag --contains <commit>`, and names every check it relies on as built on origin/main, held on a named branch, or a prerequisite (ADR 0096).
+- A loop that runs a command, process, query or request once per item needs a `// per-item: <reason>` comment, and a new bulk command needs a budget test (rule 85, ADR 0108).
+
 ## Dependencies and releases
 
 - Prefer permissive, well-maintained dependencies; commit `package-lock.json` and each workspace's `Cargo.lock`; CI uses
@@ -258,4 +272,4 @@ Apply these deliberately. They are not decoration:
   on Windows; a thread holding a lock that live work waits on is live, or must not hold the lock across slow work; a
   starvable level only for work nobody waits on, with a `conformance: background-qos — <why>` comment (C54).
 - Wait with `./dev wait`; never `pgrep -f` on a string your own command contains. `./dev wait --plock <name> | --pid <pid> | --file <path> --line <regex> | --ci-run <id> --max <duration>` always ends at `--max` with an `::error::` and the next step (a `pgrep -f` loop matches its own command line and never ends).
-- Spawn subagents by role: implementer (Sonnet, mechanical), designer, reviewer, researcher (Opus); see `.claude/agents/`.
+- Spawn subagents by role: implementer (Sonnet, mechanical), designer, reviewer, researcher (Opus).

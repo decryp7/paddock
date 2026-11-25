@@ -92,7 +92,7 @@ Licence expressions (packages):
 - bytemuck 1.25.2 — Zlib OR Apache-2.0 OR MIT [MIT-208]
 - byteorder 1.5.0 — Unlicense OR MIT [MIT-18]
 - byteorder-lite 0.1.0 — Unlicense OR MIT [MIT-18]
-- bytes 1.12.1 — MIT [MIT-87]
+- bytes 1.12.2 — MIT [MIT-87]
 - cairo-rs 0.18.5 — MIT [MIT-31]
 - cairo-sys-rs 0.18.2 — MIT [MIT-31]
 - camino 1.2.6 — MIT OR Apache-2.0 [MIT-49]
@@ -6539,7 +6539,7 @@ Used by (1):
 ### MIT-87
 
 Used by (1):
-  bytes 1.12.1
+  bytes 1.12.2
 
     Copyright (c) 2018 Carl Lerche
 

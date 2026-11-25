@@ -1,6 +1,6 @@
 //! C123: a Rust test starts `./dev`, `cargo` or `node` only through `paddock_testkit::TestCommand` (ADR 0100, ER-14, ER-21). A child
 //! started with a plain `Command` inherits the machine's whole environment, so every new environment lookup in the program under test
-//! quietly reaches real machine state (the pre-push tests ran the real heavy steps; `dev()` found the real engineering-rules `heavy.sh`
+//! quietly reaches real machine state (the pre-push tests ran the real heavy steps; `dev()` found the real engineering-playbook `heavy.sh`
 //! through ENGINEERING_RULES and took machine-wide slots, fix/precommit-heavy-slot, 2ff5f5072). Judged per Rust test file (a path
 //! under `tests/`, a `tests.rs` or `*_test.rs` file, or the part of any file after a `#[cfg(..)]` naming `test`, never `not(test)`):
 //! (1) a constructor (`Command::new`, `paddock_proc::command`, `quiet_command`, `<crate>::process::command`) whose first argument is a

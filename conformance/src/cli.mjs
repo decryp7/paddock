@@ -129,7 +129,7 @@ export async function main(argv, { log = console.log, err = console.error, env =
         graph: o['no-graph'] ? 'skipped' : undefined,
         // C99 only: judge one app's workspaces and crates/ (a release of that app, ER-31).
         scope: o.scope,
-        // C104: the engineering-rules RULES.md to link-check (default: ../engineering-rules/RULES.md when it exists).
+        // C104: the engineering-playbook RULES.md to link-check (default: ../engineering-playbook/RULES.md when it exists).
         rulesMd: o['rules-md'] && resolve(o['rules-md']),
       },
     });

@@ -26,8 +26,8 @@ things stand. Re-check against the log before acting on any line. Citations are 
 - Windows CI PC: the policy that keeps optional and preview updates off, and a report to Microsoft about the listener state change, were
   prepared; their application is not recorded. Source: src: `windows-runner-update-policy.md` (header).
 - Engineering rules catch-up: a rules-sync pass should bring the general Paddock rules and lessons (49 to 55, the heavy lock tool, cleanup paths,
-  busy-wait loops, the timer leak) into engineering-rules after ER-27 landed. Source: src: `merge-steward.md:700`.
-- The wiki itself: the user concluded the pilot and made the wiki official: ER-30 and `skills/wiki` are on engineering-rules `docs/er-30-wiki`, and
+  busy-wait loops, the timer leak) into engineering-playbook after ER-27 landed. Source: src: `merge-steward.md:700`.
+- The wiki itself: the user concluded the pilot and made the wiki official: ER-30 and `skills/wiki` are on engineering-playbook `docs/er-30-wiki`, and
   Paddock rule 59 is on `docs/rule-wiki`; neither is merged yet. The wiki tooling is to become one Rust `wiki` CLI (branch `tools/wiki`) and the Node lint
   retires after parity. Until then `scripts/wiki-lint.mjs` stays the check. Source: src: `merge-steward.md:719, 721`; [eval](eval.md) (kept as an optional measure).
 
