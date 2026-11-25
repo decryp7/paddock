@@ -146,7 +146,7 @@ pub fn black_box(
                 let first = encode(&hello(target, &wrong, frame::VERSION))?;
                 Ok((
                     refused_by(target, &first, true)?,
-                    Expect::reason(&[codes::AUTH]).with_unread_input(),
+                    Expect::reason(&[codes::AUTH]),
                 ))
             }
             _ => Err("not part of the black-box suite"),
@@ -384,7 +384,7 @@ fn in_process_inner(scenario: Scenario) -> Result<(Observed, Expect), &'static s
                     reason: super::ReasonRule::Optional,
                     end_line: false,
                     ends: 1,
-                    unread_input: false,
+                    preconditions: Vec::new(),
                 },
             ))
         }
@@ -422,10 +422,7 @@ fn account_scenario(wrong_account: bool) -> Result<(Observed, Expect), &'static 
     } else {
         codes::BUSY
     };
-    Ok((
-        observed(raw, limit),
-        Expect::reason(&[code]).with_unread_input(),
-    ))
+    Ok((observed(raw, limit), Expect::reason(&[code])))
 }
 
 fn peer_scenario(scenario: Scenario) -> Result<(Observed, Expect), &'static str> {

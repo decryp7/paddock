@@ -2,8 +2,12 @@
 //! `endpoint`, `scenario`, `reason` and optionally `os`). The reasons live in the register, where a reviewer reads them and
 //! the check C102 validates them; a rig cannot declare a scenario away in code, and a scenario it cannot drive is a rig
 //! failure ([`super::Outcome::RigFailure`]).
+//!
+//! The same file's `[[precondition_exempt]]` entries (`endpoint`, `scenario`, `precondition`, `reason`) narrow a scenario's
+//! default preconditions for one endpoint (ADR 0122 §1): the only way a rig declares less than
+//! [`Scenario::default_preconditions`]. The list only shrinks (ER-46).
 
-use super::Scenario;
+use super::{Precondition, Scenario};
 use std::path::{Path, PathBuf};
 
 /// The register file, relative to the repository root.
@@ -25,11 +29,26 @@ pub struct Entry {
     pub os: String,
 }
 
-/// The `[[not_applicable]]` entries of the register.
+/// One declared precondition exemption.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Exempt {
+    /// The endpoint id.
+    pub endpoint: String,
+    /// The scenario.
+    pub scenario: Scenario,
+    /// The default precondition of the scenario that does not apply to this endpoint.
+    pub precondition: Precondition,
+    /// Why.
+    pub reason: String,
+}
+
+/// The `[[not_applicable]]` and `[[precondition_exempt]]` entries of the register.
 #[derive(Debug, Clone, Default)]
 pub struct Applicability {
-    /// Every entry.
+    /// Every `[[not_applicable]]` entry.
     pub entries: Vec<Entry>,
+    /// Every `[[precondition_exempt]]` entry.
+    pub exempt: Vec<Exempt>,
 }
 
 impl Applicability {
@@ -50,18 +69,44 @@ impl Applicability {
                     os: String::new(),
                 })
                 .collect(),
+            exempt: Vec::new(),
         }
+    }
+
+    /// The same list with one precondition exemption more, for the controls of the harness itself.
+    pub fn with_exempt(
+        mut self,
+        endpoint: &str,
+        scenario: Scenario,
+        precondition: Precondition,
+        reason: &str,
+    ) -> Applicability {
+        self.exempt.push(Exempt {
+            endpoint: endpoint.to_string(),
+            scenario,
+            precondition,
+            reason: reason.to_string(),
+        });
+        self
     }
 
     /// Parses the register's text; the other tables of the file are skipped.
     ///
     /// # Errors
-    /// A `[[not_applicable]]` line that is not `key = "value"`, an unknown key or a missing `endpoint`, `scenario` or `reason`.
+    /// A line of the two tables that is not `key = "value"`, an unknown key, a missing `endpoint`, `scenario` or `reason`
+    /// (and `precondition` for an exemption), an unknown scenario or precondition in an exemption, or an exemption of a
+    /// precondition that is not among the scenario's defaults.
     pub fn parse(text: &str) -> Result<Applicability, String> {
-        let mut entries = Vec::new();
-        let mut current: Option<Vec<(String, String)>> = None;
-        let mut flush = |fields: Option<Vec<(String, String)>>, at: usize| -> Result<(), String> {
-            let Some(fields) = fields else { return Ok(()) };
+        const NOT_APPLICABLE: &str = "not_applicable";
+        const EXEMPT: &str = "precondition_exempt";
+        let mut found = Applicability::default();
+        let mut current: Option<(&str, Vec<(String, String)>)> = None;
+        let mut flush = |table: Option<(&str, Vec<(String, String)>)>,
+                         at: usize|
+         -> Result<(), String> {
+            let Some((kind, fields)) = table else {
+                return Ok(());
+            };
             let get = |k: &str| {
                 fields
                     .iter()
@@ -69,18 +114,49 @@ impl Applicability {
                     .map(|(_, v)| v.clone())
                     .unwrap_or_default()
             };
-            for k in ["endpoint", "scenario", "reason"] {
+            let need: &[&str] = if kind == EXEMPT {
+                &["endpoint", "scenario", "precondition", "reason"]
+            } else {
+                &["endpoint", "scenario", "reason"]
+            };
+            for k in need {
                 if get(k).trim().is_empty() {
                     return Err(format!(
-                        "the [[not_applicable]] entry before line {at} has no `{k}`"
+                        "the [[{kind}]] entry before line {at} has no `{k}`"
                     ));
                 }
             }
-            entries.push(Entry {
+            if kind == NOT_APPLICABLE {
+                found.entries.push(Entry {
+                    endpoint: get("endpoint"),
+                    scenario: get("scenario"),
+                    reason: get("reason"),
+                    os: get("os"),
+                });
+                return Ok(());
+            }
+            let scenario = Scenario::from_name(&get("scenario")).ok_or_else(|| {
+                format!(
+                    "the [[{kind}]] entry before line {at} names an unknown scenario `{}`",
+                    get("scenario")
+                )
+            })?;
+            let precondition = Precondition::from_name(&get("precondition")).ok_or_else(|| {
+                format!(
+                    "the [[{kind}]] entry before line {at} names an unknown precondition `{}`",
+                    get("precondition")
+                )
+            })?;
+            if !scenario.default_preconditions().contains(&precondition) {
+                return Err(format!(
+                    "the [[{kind}]] entry before line {at}: {precondition} is not a precondition of {scenario}, so there is nothing to exempt"
+                ));
+            }
+            found.exempt.push(Exempt {
                 endpoint: get("endpoint"),
-                scenario: get("scenario"),
+                scenario,
+                precondition,
                 reason: get("reason"),
-                os: get("os"),
             });
             Ok(())
         };
@@ -91,12 +167,14 @@ impl Applicability {
             }
             if line.starts_with("[[") {
                 flush(current.take(), i + 1)?;
-                if line == "[[not_applicable]]" {
-                    current = Some(Vec::new());
-                }
+                current = match line {
+                    "[[not_applicable]]" => Some((NOT_APPLICABLE, Vec::new())),
+                    "[[precondition_exempt]]" => Some((EXEMPT, Vec::new())),
+                    _ => None,
+                };
                 continue;
             }
-            let Some(fields) = current.as_mut() else {
+            let Some((kind, fields)) = current.as_mut() else {
                 continue;
             };
             let Some((key, value)) = line.split_once('=') else {
@@ -115,16 +193,18 @@ impl Applicability {
                         i + 1
                     )
                 })?;
-            if !["endpoint", "scenario", "reason", "os"].contains(&key) {
-                return Err(format!(
-                    "line {}: unknown key `{key}` in [[not_applicable]]",
-                    i + 1
-                ));
+            let known: &[&str] = if *kind == EXEMPT {
+                &["endpoint", "scenario", "precondition", "reason"]
+            } else {
+                &["endpoint", "scenario", "reason", "os"]
+            };
+            if !known.contains(&key) {
+                return Err(format!("line {}: unknown key `{key}` in [[{kind}]]", i + 1));
             }
             fields.push((key.to_string(), value.replace("\\\"", "\"")));
         }
         flush(current.take(), text.lines().count() + 1)?;
-        Ok(Applicability { entries })
+        Ok(found)
     }
 
     /// The register of the repository that contains `manifest_dir` (found by walking up, or the file [`FILE_ENV`] names).
@@ -163,5 +243,20 @@ impl Applicability {
                         || e.os.split(',').any(|o| o.trim() == std::env::consts::OS))
             })
             .map(|e| e.reason.clone())
+    }
+
+    /// Why the register exempts `endpoint`'s `scenario` from `precondition`, if it does.
+    pub fn exempt_reason(
+        &self,
+        endpoint: &str,
+        scenario: Scenario,
+        precondition: Precondition,
+    ) -> Option<&str> {
+        self.exempt
+            .iter()
+            .find(|e| {
+                e.endpoint == endpoint && e.scenario == scenario && e.precondition == precondition
+            })
+            .map(|e| e.reason.as_str())
     }
 }

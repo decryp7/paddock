@@ -19,3 +19,5 @@ mod system;
 // (Not `required-features`: that would drop this whole binary when the feature is off.)
 #[cfg(feature = "testing")]
 mod endings;
+#[cfg(feature = "testing")]
+mod endings_preconditions;
