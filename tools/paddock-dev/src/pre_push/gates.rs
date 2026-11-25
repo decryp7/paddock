@@ -966,9 +966,9 @@ fn member_audits(facts: &Facts) -> Planned {
     Planned::Run(g)
 }
 
-/// The share of the machine one test row takes (ER-24, ER-48): the `ci` profiles say `num-cpus`, for a CI job that has its host to
-/// itself; here a test row runs beside up to two other rows, and the Linux container has `PADDOCK_LINUX_CPUS` (4) cores.
-const MEMBER_TEST_THREADS: &str = "4";
+/// Test threads inside the Linux container, which has `PADDOCK_LINUX_CPUS` (4) cores of its own. A host test row has no fixed number:
+/// `heavy` sets `NEXTEST_TEST_THREADS` for the share of cores its slot gives (`gate::step_env`; the caller's own value wins, ER-47).
+const LINUX_TEST_THREADS: &str = "4";
 
 /// `nextest run` with CI's `ci` profile for workspace `ws`: the tests `filter` selects (empty: every test of the workspace); every
 /// feature in `crates`, as CI's crates job; an app's own nextest configuration. `--no-tests=fail`: a selection of nothing is a failure,
@@ -1090,10 +1090,7 @@ fn member_tests(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> {
         let mut g = Gate {
             heavy: true,
             need: Need::Tool("cargo-nextest".into()),
-            env: vec![
-                ("RUSTUP_AUTO_INSTALL".into(), "0".into()),
-                ("NEXTEST_TEST_THREADS".into(), MEMBER_TEST_THREADS.into()),
-            ],
+            env: vec![("RUSTUP_AUTO_INSTALL".into(), "0".into())],
             ..gate(
                 format!("tests {ws}"),
                 ws,
@@ -1174,7 +1171,7 @@ pub fn linux_tests_gate(chosen: &[(LinuxTarget, String)], version: &str, facts: 
         args.splice(2..2, ["--tool-config-file".to_string(), format!("paddock:{store}")]);
         let args: Vec<String> = args.iter().map(|a| shell_quote(a)).collect();
         command.push_str(&format!(
-            "; printf '[store]\\ndir = \"/target/v{version}/{slug}/nextest\"\\n' > {store}; (cd {ws} && CARGO_TARGET_DIR=/target/v{version}/{slug} NEXTEST_TEST_THREADS={MEMBER_TEST_THREADS} cargo {args}) || rc=1",
+            "; printf '[store]\\ndir = \"/target/v{version}/{slug}/nextest\"\\n' > {store}; (cd {ws} && CARGO_TARGET_DIR=/target/v{version}/{slug} NEXTEST_TEST_THREADS={LINUX_TEST_THREADS} cargo {args}) || rc=1",
             ws = t.ws,
             args = args.join(" ")
         ));
