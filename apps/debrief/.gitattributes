@@ -1,9 +1,13 @@
-# Source text is stored with LF; checkouts may use the platform's line endings.
-* text=auto
+# Text is LF in every checkout (the root .gitattributes states the family rule; this file's `text` setting overrides the root's, so it repeats eol).
+* text=auto eol=lf
 
 # Test inputs are byte-exact: generators and tests compare their bytes, and some formats are CRLF on
 # purpose (PerfMon CSV, log4net, SQL Server ERRORLOG). Never convert their line endings.
 samples/** -text
+# Parser samples whose bytes are CRLF on purpose (include_str! by the built-in parsers): byte-exact.
+crates/debrief-core/parsers/samples/billing.log -text
+crates/debrief-core/parsers/samples/billing.xml -text
+crates/debrief-core/parsers/samples/u_ex261014.log -text
 fuzz/corpus/** -text
 crates/*/tests/fixtures/** -text
 crates/*/templates/samples/** -text

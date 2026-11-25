@@ -1,5 +1,6 @@
-# Source text is stored with LF; checkouts may use the platform's line endings.
-* text=auto
+# Text is LF in the repository and in every checkout, on every OS (user, 2026-11-25). Exceptions say why: `*.cmd`/`*.bat` keep CRLF for cmd.exe,
+# and byte-exact inputs are `-text` (below and in the apps' own files).
+* text=auto eol=lf
 
 # Test inputs are byte-exact (checksums are computed over them). Never convert their line endings.
 crates/*/tests/fixtures/** -text
@@ -21,8 +22,9 @@ crates/*/tests/fixtures/** -text
 # The same for fixtures that sit beside tests/ (paddock-testplan): a CRLF checkout would break the text comparisons.
 crates/*/fixtures/** -text
 
-# Windows batch files keep CRLF.
+# Windows batch files keep CRLF (cmd.exe).
 *.cmd text eol=crlf
+*.bat text eol=crlf
 
 # The ./dev wrapper and the tool's input list are read by sh: LF on every checkout.
 /dev text eol=lf
