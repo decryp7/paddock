@@ -18,7 +18,7 @@ import { error, warn } from '../finding.mjs';
 import { baselineGrowth, targetRef, unmeasuredFinding } from '../util/baseline.mjs';
 
 export const BASELINE_PATH = 'conformance/baselines/C104.json';
-const EXTRA_CHECK_IDS = ['C100']; // lives in the gate register (ADR 0060), not in conformance/src/checks
+const EXTRA_CHECK_IDS = ['C100', 'C170']; // the `./dev` checks (`CHECKS` in tools/paddock-dev/src/gates/checks.rs), not in conformance/src/checks
 const CONTRACT = 'conformance/paddock.ci.json'; // `conformance.rust`: the checks that only the Rust host has (pair P3, ADR 0022 amendment 2026-11-19)
 
 /** Sentences of `text` as [{ text, start }] (offset of the first character): split at a full stop or semicolon before white space, and at blank lines. */
