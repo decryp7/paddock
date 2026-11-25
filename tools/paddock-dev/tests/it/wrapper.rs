@@ -1949,10 +1949,17 @@ fn the_cached_tool_holds_itself_for_its_run_and_completes_when_its_cache_entry_i
     std::fs::copy(crate::dev_bin::PATH, &cached).unwrap();
     let signal = scratch.path().join("signal.log");
     std::fs::write(&signal, "").unwrap();
+    let repo = scratch.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    let init = TestCommand::new("git").args(["init", "-q"]).current_dir(&repo).output().unwrap();
+    assert!(init.status.success(), "{}", String::from_utf8_lossy(&init.stderr));
     let mut run = TestCommand::new(&cached)
         .args(["wait", "--file"])
         .arg(&signal)
         .args(["--line", "^go$", "--include-past", "--max", "60s", "--interval", "100ms"])
+        // `wait` keeps its one-waiter lock in the git folder of the repository it runs in: run it in a repository of the test's own,
+        // never the checkout (ER-45; the checkout is read-only in the Linux container, where the lock write failed the run).
+        .current_dir(&repo)
         .env("PADDOCK_DEV_HOME", &home)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::piped())
@@ -1965,6 +1972,14 @@ fn the_cached_tool_holds_itself_for_its_run_and_completes_when_its_cache_entry_i
     std::io::BufRead::read_line(&mut err, &mut first).unwrap();
     assert!(first.contains("waiting for a line"), "{first}");
     assert_eq!(held(&home), 1, "the run holds its own binary");
+    let waits = repo.join(".git/paddock/waits");
+    let locks = std::fs::read_dir(&waits).map(|d| d.count()).unwrap_or(0);
+    assert_eq!(
+        locks,
+        1,
+        "the waiter's lock is in the test's own repository ({}), not the checkout's",
+        waits.display()
+    );
     {
         use std::os::unix::fs::MetadataExt;
         assert!(

@@ -4,6 +4,13 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `./dev ci triage`: a job the comparison run did not run is never NEW
+- When the last main run skipped a failed job (a nightly whose gate found main unchanged skips every job), had no job of that name, or
+  ended it cancelled before it ran, triage compares that job with the newest older main run of the workflow that ran it and says which
+  (`job "...": run 8284 skipped it; compared with run 8226`, `older_baselines` and a per-row `baseline_run` in `--json`). When no run in
+  the newest 500 ran it, the row is UNKNOWN with that reason. A run named with `--against` is never replaced: a job it skipped is
+  UNKNOWN. Before, a skipped job counted as passed and every failure in it was NEW (`ci triage 9021` against nightly 8284).
+
 ### Tests: doctests are off (user, 2026-11-24)
 - Every library target has `[lib] doctest = false` and every runnable doc example is now a ```` ```text ```` block; no `cargo test --doc`
   runs in the push or member gate (a `doctests` row says so, a skip, never a pass), in ci.yml's crate job, the app-gates action,

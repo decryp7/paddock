@@ -126,6 +126,12 @@ package.json     the one npm workspace and package-lock.json (ui, eslint, icons,
   container runtime and a warm volume: without one the row is "not measured" (exit 6), never a pass; warm a workspace once with
   `./dev check --warm-linux [workspace...]` (no budget). The integrator's member gate (`./dev merge check --gates`) runs the same
   row; a dependency bump may need `--warm-linux` first.
+- The member gate (`./dev check --pre-push --member-gate`, run by `./dev merge check --gates`) also runs the full nextest `ci`
+  profile of every touched Cargo workspace (the plan's reached packages, as CI's member run) on the host (`tests <ws>`) and, for the
+  reached code that behaves differently per OS (the `hostTests` placement derived from the code, as CI's host legs use it), in the
+  same CI-image container (`tests-linux ...`, `--rm` with CPU and memory limits); a pure workspace is named and skipped there, plus the orphan guardian's acting tests as uid
+  65534 when `crates/paddock-proc/src/guardian*` changed (user, 2026-11-25). Inactive apps are skipped and named; no container
+  runtime or image is "not measured" (exit 6). Windows stays CI-only. A developer's push skips these rows.
 - Before committing, the gates of the affected projects, for example:
 
   ```sh

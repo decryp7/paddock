@@ -30,14 +30,14 @@ function stubApp(root, { main, extra = {} }) {
   return app;
 }
 
-function run(app) {
-  return spawnSync('bash', [SCRIPT, app], { encoding: 'utf8', env: { ...process.env, SMOKE_QUIT: 'term', SETTLE: '1', QUIT_LIMIT: '2' } });
+function run(app, env = {}) {
+  return spawnSync('bash', [SCRIPT, app], { encoding: 'utf8', env: { ...process.env, SMOKE_QUIT: 'term', SETTLE: '1', QUIT_LIMIT: '2', ...env } });
 }
 
-const withApp = (opts, fn) => {
+const withApp = (opts, fn, env = {}) => {
   const root = mkdtempSync(join(tmpdir(), 'debrief-smoke-test-'));
   try {
-    fn(run(stubApp(root, opts)));
+    fn(run(stubApp(root, opts), env));
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -83,4 +83,23 @@ test('a failing sidecar fails the smoke', { skip: !mac }, () => {
     assert.equal(r.status, 1);
     assert.match(r.stdout, /failed with exit code 134/);
   });
+});
+
+// The CI Mac runs as a LaunchDaemon with no window server (ADR 0120, user decision 2026-11-25): there the smoke starts the
+// sidecars only (SMOKE_LAUNCH=0) and says that the launch was not run, never that it passed.
+test('SMOKE_LAUNCH=0 starts the sidecars and does not launch the app', { skip: !mac }, () => {
+  withApp({ main: 'exit 3' }, (r) => {
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.match(r.stdout, /2 sidecar\(s\) started/);
+    assert.match(r.stdout, /launch and quit: not run \(SMOKE_LAUNCH=0/);
+    assert.match(r.stdout, /macOS smoke OK \(sidecars only\)/);
+    assert.doesNotMatch(r.stdout, /exited by itself/);
+  }, { SMOKE_LAUNCH: '0' });
+});
+
+test('SMOKE_LAUNCH=0 still fails on a failing sidecar', { skip: !mac }, () => {
+  withApp({ main: 'sleep 5', extra: { 'debrief-store-worker': 'echo boom; exit 134' } }, (r) => {
+    assert.equal(r.status, 1);
+    assert.match(r.stdout, /failed with exit code 134/);
+  }, { SMOKE_LAUNCH: '0' });
 });

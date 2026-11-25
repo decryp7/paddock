@@ -112,7 +112,7 @@ The file is read only through `tools/paddock-dev/src/active_apps.rs` (ER-42).
   the set says.
 - **The push gate and the member gate** (`./dev check --pre-push`, and `./dev merge check --gates`, which runs it with
   `--member-gate`) read the same set through the same accessor. An inactive app's own build checks are not run: format, Clippy,
-  the Windows (xwin) and Linux Clippy of its workspaces, and Pitwall's script tests and `cargo deny`. Each such row is
+  the Windows (xwin) and Linux Clippy of its workspaces, the member gate's host and Linux tests (`tests`, `tests-linux`), and Pitwall's script tests and `cargo deny`. Each such row is
   printed as `inactive      <row>  inactive (docs/ci-active-apps.toml): <app> is not an active app ...`, counted apart in the
   summary (`N inactive (not checked ...)`, `"inactive"` in the JSON), and never counted as passed. The foundation's rows (crates,
   tools/paddock-dev and the other tools, conformance and its tests, the member audits, the gates register, commit-lint) always

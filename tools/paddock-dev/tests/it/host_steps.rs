@@ -93,6 +93,8 @@ fn norm(text: &str, fx: &Fx) -> String {
     let dur = regex::Regex::new(r" in \d+ s\b").unwrap();
     let private = regex::Regex::new(r"<ROOT>/tmp/(tmp\.[A-Za-z0-9]+|guardian-as-user\.[0-9]+\.[0-9]+)").unwrap();
     let secs_cell = regex::Regex::new(r"\| \d+ s \|").unwrap();
+    // The guardian's failure line: `(exit 3, 1 s)`.
+    let secs_paren = regex::Regex::new(r", \d+ s\)").unwrap();
     let sizes = regex::Regex::new(r"(is|still) \d+( \(cap|;)").unwrap();
     let bash_killed = regex::Regex::new(r": line \d+: +\d+ Killed ").unwrap();
     // A hung git ends at its limit (the Rust git's own, outside a clock mark) or, with a clock mark, when the abandoned phase ends it
@@ -126,6 +128,7 @@ fn norm(text: &str, fx: &Fx) -> String {
             // The guardian step's private folder: `mktemp -d` in the shell, `guardian-as-user.<pid>.<n>` in Rust.
             let l = private.replace_all(&l, "<PRIVATE>").to_string();
             let l = secs_cell.replace_all(&l, "| N s |").to_string();
+            let l = secs_paren.replace_all(&l, ", N s)").to_string();
             // The shell says `cargo test --no-run failed`, the Rust command quotes the command (backticks) and names how it ended.
             let l = l.replace(
                 "`cargo test --no-run` failed (exit 101; output above).",
@@ -1968,6 +1971,19 @@ fn guardian_as_user_matches_the_shell() {
     same(&|fx| guardian_machine(fx, 0), &guardian());
     same(&|fx| guardian_machine(fx, 3), &guardian());
     same(&guardian_broken_build, &guardian());
+}
+
+/// Every duration the two sides print is masked: the guardian's failure line names its run time (`(exit 3, 1 s)`), and two runs of
+/// one fixture can take 0 s and 1 s (the parity test above failed so in the CI image, 2026-11-25). Never a wall-time comparison (ER-12).
+#[test]
+fn norm_masks_the_run_time_in_the_guardians_failure_line() {
+    let fx = fixture();
+    let line = |secs: u32| format!("::error::guardian-as-user: `guardian::` failed as uid 1000 (exit 3, {secs} s): x --exact.");
+    assert_eq!(norm(&line(0), &fx), norm(&line(1), &fx));
+    assert_eq!(
+        norm(&line(12), &fx),
+        "::error::guardian-as-user: `guardian::` failed as uid 1000 (exit 3, N s): x --exact."
+    );
 }
 
 #[test]

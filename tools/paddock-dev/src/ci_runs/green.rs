@@ -27,6 +27,7 @@
 use super::client::{Client, RunInfo, TimedJob};
 use super::logfind;
 use super::verdict::{self, Earlier, Mode};
+use crate::job_outcome::JobOutcome;
 use crate::plan_since::workflow_file;
 use crate::run_scope::PROJECT_JOBS;
 use serde_json::Value;
@@ -491,7 +492,7 @@ pub fn read_failures(
 ) -> GradedResult {
     let failed: Vec<FailedJob> = jobs
         .iter()
-        .filter(|j| j.conclusion == "failure" && !j.is_caller())
+        .filter(|j| j.outcome == JobOutcome::Failed && !j.is_caller())
         .map(|j| FailedJob {
             name: j.name.clone(),
             id: j.id,
@@ -607,16 +608,18 @@ fn grade_run_inner(
     }
     // A job that was cancelled (or ended in no state) is neither a pass nor a failure; one the plan declared and that was skipped
     // is caught by the declared scope below, and one it did not declare is off.
-    if let Some(j) = read
+    let unmeasured = |o: &JobOutcome| match o {
+        JobOutcome::Passed | JobOutcome::Failed | JobOutcome::Skipped => None,
+        JobOutcome::Unfinished => Some("in no state".to_string()),
+        JobOutcome::Cancelled | JobOutcome::Unknown(_) => Some(o.to_string()),
+    };
+    if let Some((j, ended)) = read
         .jobs
         .iter()
-        .find(|j| !j.is_caller() && !matches!(j.conclusion.as_str(), "success" | "failure" | "skipped"))
+        .filter(|j| !j.is_caller())
+        .find_map(|j| unmeasured(&j.outcome).map(|e| (j, e)))
     {
-        let w = format!(
-            "job {:?} ended {}",
-            j.name,
-            if j.conclusion.is_empty() { "in no state" } else { &j.conclusion }
-        );
+        let w = format!("job {:?} ended {ended}", j.name);
         return Outcome::of(scope, GradedResult::NotMeasured(w)).noted(why);
     }
     let result = read_failures(client, run.workflow(), &read.jobs, touched);

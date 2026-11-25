@@ -4211,3 +4211,86 @@ startup"; the Chromium start judge, ADR 0031). A start that hands back a handle 
 - **Class (ER-21).** Test machinery reaching a release build. Earlier instances: Dyno's fakes in the release build (Dyno ADR
   0033, 2026-11-08), Pitwall's fake engine behind a server flag (ADR 0073, 2026-11-09). ADR 0073's shared check (WP-0) was cut
   on 2026-11-11; C170 is that check, cut to the feature graph.
+
+## OrbStack's bind mount served stale files to the Linux container (2026-11-25)
+
+- **What.** After a file changed on the host, the CI-image container (`tools/linux-container.sh --id paddock --ci-image`, the push
+  gate's `clippy-linux` row) saw the old size and mtime for over an hour, with the new text cut at the old length (OrbStack 2.2.5).
+  A container row could lint or test the old version and pass. A restart of OrbStack cleared it.
+- **Fix (user decision 2026-11-25: hash check).** Every push-gate row that runs in the container compares `git hash-object
+  --no-filters` of the change's files (its own workspaces' first, at most 256) inside the container with the host's before it runs
+  (`pre_push::mount_fresh`, set by `plan_gates` on every `Need::LocalCiImage` row). Any difference, or a probe that cannot look, is
+  "not measured" (exit 6) with the files named and the next step "restart OrbStack, or the Mac"; the row never runs on that mount.
+  The probe's duration and verdict are logged on standard error.
+- **Rule of thumb.** A check that reads files through a mount or a copy proves the copy is current before it counts (ER-33).
+- **Class (ER-21).** A check that ran on another version of its input than the one it reports on. Earlier instances: "Stale servers
+  and stale builds (e2e and screenshots, 2026-10-28)" above (stale CSS, fixed by the build guard).
+
+## The Linux container can see a stale copy of a changed file (OrbStack bind mount, 2026-11-25, feat/member-check-touched-tests)
+
+- **What.** The member gate's `clippy-linux` and `tests-linux` rows failed with "unclosed delimiter" and "unterminated double quote
+  string" in files that compile on the host. Inside the container (`tools/linux-container.sh`, OrbStack 2.2.5, the repository on
+  /Volumes/vault-dev bind-mounted read-only) `stat` showed the size and mtime from before the edit, and the content was the new text cut
+  at the old size. It stayed stale for over an hour; `touch` and replacing the file with a new inode did not refresh it. A fresh
+  clone at a new path was seen correctly, until a checkout changed files there after a container had read them: the same staleness.
+  The danger is a false pass: an older version that still compiles is linted and tested instead of the member.
+- **Fix.** Not yet fixed. Proposed: each container row first compares the content hash of the change's files (`git hash-object`)
+  inside the container with the host's and reports `not measured` ("the container sees a stale copy") on a mismatch (ER-33: the
+  precondition is checked, never assumed). Restarting OrbStack is the user's call, not an agent's (ER-14).
+- **Also found by the first real `tests-linux` run.** nextest keeps its run store in the workspace (`target/nextest`), which is
+  read-only in the container (fixed: a tool configuration moves it into the build volume). `wrapper::the_cached_tool_holds_itself...`
+  writes a waiter lock into the repository's own `.git/paddock/waits` (read-only there; a test that writes into the real repository,
+  ER-45), and `host_steps::guardian_as_user_matches_the_shell` compares a printed duration (`1 s` against `0 s`, ER-12). Both are open
+  fix items; until they are fixed, the Linux row of a paddock-dev member fails on them.
+- **Class (ER-21).** First instance of a stale container view; the read-only mount finding is an instance of "a test writes outside its
+  own folder" (ER-45).
+
+## `ci triage` read a skipped job as a pass (2026-11-25)
+
+- **Symptom.** `./dev ci triage 9021` (nightly) called the "dialog commands (declared but never sent)" failure NEW. The last finished
+  main nightly, 8284, had skipped every job (its gate found main unchanged); nightly 8226 had the same failure.
+- **Cause.** `baseline_jobs` treated any job that was not `failed()` as passed, and `TimedJob::failed()` is false for `skipped`. It
+  also compared only with one run, so a job that run did not run had no way to an answer but NEW or UNKNOWN.
+- **Fix.** A job the comparison run skipped, lacked or cancelled before it ran is compared with the newest older main run of the
+  workflow that ran it, or is UNKNOWN with that reason; a run named with `--against` is never replaced. Tests from recorded runs
+  (`tools/paddock-dev/tests/ci-triage-skipped`, runs 9021, 8658, 8331, 8284, 8226).
+- **Class (ER-21, ER-33).** A CI-run reader reads "skipped" as "passed". Earlier instance: `ci verdict` counted a schedule-skipped run
+  (every job skipped) as full and green (ADR 0089's instance table, row 2; ADR 0113, 2026-11-12).
+
+## A hung sccache server held every build and the heavy slot (2026-11-25, fix/sccache-detect-restart)
+
+- **What happened.** At 22:39Z the local sccache 0.19 server (started by `./dev sccache env`, local disk plus the RustFS S3 level) hung
+  after a burst of opendal S3 errors ("read failed / write close failed ... send http request"). It kept its port and took every
+  connection, but answered nothing: every rustc client waited at 0% CPU, the builds holding heavy's slot never finished, and every
+  agent's pre-push queued behind them until the coordinator restarted the server by hand. The tools had no handle on it:
+  `sccache --start-server` forks a daemon whose pid nobody is told, and the only stop they knew (`--stop-server`) is a request the hung
+  server never answers.
+- **Measured** (docs/benchmarks.md, "sccache server hang: client behaviour and probe time"): a client waiting on a hung server waits for
+  ever; when the server is stopped it fails the compile ("Connection reset by peer"), `SCCACHE_IGNORE_SERVER_IO_ERROR=1` or not, and
+  never compiles locally. So a build that waited cannot pass after a restart.
+- **Fix.** `tools/paddock-dev/src/sccache_server.rs` (its probe is also CI's, in `setup-rust` and `sccache-stats`, rule 55): the tools
+  start the agents' server in the foreground of a process they spawn and record its pid and start time;
+  they ask it for its statistics within 10 s; no answer, they stop it by that record (rule 53; a server they did not start is never
+  touched), start a fresh one and ask again; still none, the build runs uncached with one warning. Detecting a hang in the middle
+  of a build (a watchdog that gives back the heavy slot) was dropped by the user's decision of 2026-11-25: the probe runs when a build
+  starts.
+- **Rule.** A tool that starts a long-lived helper holds it by its identity from the start; a helper only reachable by its own request
+  protocol cannot be repaired when that protocol is what hangs.
+- **Redesign (user, 2026-11-25).** `TimedJob::failed()` and `RunJob::failed()` are gone: paddock-dev parses a job's conclusion once
+  into `JobOutcome` (`tools/paddock-dev/src/job_outcome.rs`: Passed, Failed, Cancelled, Skipped, Unfinished, Unknown), and every
+  reader matches on it, so the compiler makes each one decide skipped and cancelled on purpose. The sweep found a third instance:
+  the member gate's other-OS row (`merge_check/other_os.rs`) read an OS whose every job was skipped as clean; it is not applicable
+  now.
+
+## Two of the Mac's three runners were unregistered for a day, and nothing said so (2026-11-25)
+- **What.** While preparing ADR 0120's runner move (read-only), `d7-mac-mini-2` and `-3` had logged `fail to invoke Declare ...
+  unregistered runner` at every start since 2026-11-24 10:35, the minutes after the WindowServer abort; launchd restarted them about
+  every 10 s (KeepAlive; `-2`'s `logs/runner.log` held about 19,000 such lines, two per start). Gitea no longer knew them. The Mac ran 3 jobs at
+  once, not 5. The user saw only "`-2` exited with status 1".
+- **Why it was missed.** A runner that cannot register is not a failed job: nothing in CI turns red, and the runner list shows fewer
+  runners only to someone who looks.
+- **Outcome.** The user removed both on 2026-11-25 (ADR 0120: one daemon runner of capacity 4).
+- **Fix in this change.** `tools/mac-runner-move.sh` treats a lane as up only when its log says `declare successfully` after the start,
+  stops a lane that Gitea refuses (no crash loop) and prints the register command; its `status` shows each lane's last start line.
+- **Open.** The cause of the lost registrations is not known (the server side was not read). A check that each declared runner is
+  online belongs to ADR 0074's host inventory.

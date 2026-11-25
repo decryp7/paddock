@@ -75,6 +75,7 @@ pub mod hook;
 pub mod host_tests;
 pub mod input_hash;
 pub mod ipc_endpoints;
+pub mod job_outcome;
 pub mod lessons_driver;
 pub mod load;
 pub mod local_sccache;

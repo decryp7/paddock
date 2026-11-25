@@ -3,6 +3,7 @@
 //! logs (through the planner's [`GiteaRuns`]); the run list is the part `plan_since` does not have.
 
 use super::time::ts;
+use crate::job_outcome::JobOutcome;
 use crate::plan_since::GiteaRuns;
 use crate::wait::Http;
 use serde_json::Value;
@@ -86,8 +87,8 @@ pub struct TimedJob {
     pub runner_id: u64,
     /// The runner's name, when the job ran on one.
     pub runner: Option<String>,
-    /// `success`, `failure`...
-    pub conclusion: String,
+    /// How it ended (its `conclusion`, parsed once).
+    pub outcome: JobOutcome,
     /// Start and end, milliseconds since the epoch.
     pub start: Option<f64>,
     /// End, milliseconds since the epoch.
@@ -105,11 +106,6 @@ pub struct TimedJob {
 }
 
 impl TimedJob {
-    /// Whether the job did not pass (a failure, a cancel, a job that never finished).
-    pub fn failed(&self) -> bool {
-        !matches!(self.conclusion.as_str(), "success" | "skipped")
-    }
-
     /// Whether the job is the caller of a reusable workflow: no runner and no steps of its own, but a real start before its
     /// end (it spans its children, which are listed beside it). It has no log and nothing to measure of its own.
     pub fn is_caller(&self) -> bool {
@@ -135,7 +131,7 @@ impl TimedJob {
                 .as_str()
                 .filter(|r| !r.is_empty() && *r != "undefined")
                 .map(str::to_string),
-            conclusion: j["conclusion"].as_str().unwrap_or("").to_string(),
+            outcome: JobOutcome::from_api(j["conclusion"].as_str().unwrap_or("")),
             start: t(j, "started_at"),
             end: t(j, "completed_at"),
             steps: j["steps"]
@@ -337,12 +333,15 @@ mod tests {
         let jobs = jobs_7880();
         // `installers` (34496): no runner, no steps, but a real start and end; its children are listed beside it.
         let caller = named(&jobs, 34496);
-        assert!(caller.failed() && caller.is_caller() && !caller.never_ran(), "{caller:?}");
-        // A job the workflow skipped has no runner and epoch times: it is not failed at all.
-        assert!(!named(&jobs, 34497).failed());
+        assert!(
+            caller.outcome == JobOutcome::Failed && caller.is_caller() && !caller.never_ran(),
+            "{caller:?}"
+        );
+        // A job the workflow skipped has no runner and epoch times: it is skipped, not failed.
+        assert_eq!(named(&jobs, 34497).outcome, JobOutcome::Skipped);
         // A failed job that ran steps is neither.
         let ran = named(&jobs, 34520);
-        assert!(ran.failed() && !ran.is_caller() && !ran.never_ran());
+        assert!(ran.outcome == JobOutcome::Failed && !ran.is_caller() && !ran.never_ran());
     }
 
     #[test]

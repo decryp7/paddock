@@ -8,6 +8,8 @@
 # WebDriver suite (app/e2e-tauri).
 #   scripts/ci/macos-smoke.sh path/to/Debrief.app
 # SMOKE_QUIT=term asks with SIGTERM instead of the Apple event "quit" (used by the script's own test, where the app is a stub).
+# SMOKE_LAUNCH=0 runs step 1 only and says that step 2 was not run: the CI Mac is a LaunchDaemon with no window server (ADR 0120,
+# user decision 2026-11-25), where a WKWebView app cannot start. Step 2 then runs only on a Mac with a login session (locally).
 set -euo pipefail
 app="${1:?usage: macos-smoke.sh path/to/Debrief.app}"
 [ -d "$app" ] || { echo "::error::no .app at $app"; exit 1; }
@@ -59,6 +61,12 @@ while IFS= read -r exe; do
 done < <(find "$macos" -maxdepth 1 -type f -perm -u+x | sort)
 [ "$found" -gt 0 ] || { echo "::error::no sidecar executables found in $macos"; exit 1; }
 echo "$found sidecar(s) started"
+
+if [ "${SMOKE_LAUNCH:-1}" = 0 ]; then
+  echo "== launch and quit: not run (SMOKE_LAUNCH=0: no window server on this host) =="
+  echo "macOS smoke OK (sidecars only): $app"
+  exit 0
+fi
 
 echo "== launch and quit =="
 export DEBRIEF_DATA_DIR="$scratch/data"

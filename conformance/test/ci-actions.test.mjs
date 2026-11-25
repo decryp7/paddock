@@ -501,7 +501,7 @@ test('the sccache-stats action prints the statistics and tolerates a missing scc
     }
     return found;
   };
-  const rustJobs = ['ui', 'e2e', 'conformance', 'tools', 'heavy', 'crates', 'crate', 'audit', 'app', 'paddock-dev']; // audit: ./dev audit compare; conformance: ./dev gates check (C100, ADR 0060)
+  const rustJobs = ['ui', 'e2e', 'e2e-webkit', 'conformance', 'tools', 'heavy', 'crates', 'crate', 'audit', 'app', 'paddock-dev']; // audit: ./dev audit compare; conformance: ./dev gates check (C100, ADR 0060)
   assert.deepEqual(jobsUsing('setup-rust'), rustJobs, 'setup-rust in every job that builds Rust');
   assert.deepEqual(jobsUsing('sccache-stats'), rustJobs, 'stats after each');
   assert.doesNotMatch(ci, /setup-rust\n\s+if: runner\.os/, 'no OS leg is left out');
@@ -923,13 +923,17 @@ test('the test browser of a host job lives in a kept folder of its job slot, out
   assert.ok(ci.indexOf('PADDOCK_TEST_BROWSER_DIR') < ci.indexOf('uses: ./.gitea/actions/install-test-browser'), 'the folder is chosen before the browser is installed');
 });
 
-test('the WebKit job runs on the Mac runner when the planner says so (a v* tag, the nightly, the webkit input) and runs the three WebKit projects', () => {
+test('the WebKit job runs on Linux in the CI image when the planner says so (a v* tag, the nightly, the webkit input) and runs the three WebKit projects', () => {
   const ci = read(join(WORKFLOWS, 'ci.yml'));
   const on = ci.match(/^on:\n((?:[ \t]+.*\n|\n)+)/m)?.[1] ?? '';
   assert.match(on, /push:\n\s+branches: \[main\]\n\s+tags: \["v\*"\]/, 'a push is only main or a v* tag');
   const job = ci.match(/^  e2e-webkit:\n((?:    .*\n|\n)+)/m)?.[1] ?? '';
   assert.notEqual(job, '', 'the e2e-webkit job exists');
-  assert.match(job, /runs-on: macos-latest/);
+  // The CI Mac is a LaunchDaemon with no window server (ADR 0120, user decision 2026-11-25), where Playwright's WebKit cannot
+  // register with WindowServer: the job runs Playwright's WebKit on Linux, in the image that bakes it in.
+  assert.match(job, /^    runs-on: ubuntu-latest$/m);
+  assert.match(job, /^      image: dev\.decryptology\.net\/decryp7\/paddock-ci:v\d+$/m);
+  assert.doesNotMatch(job, /macos|caffeinate/);
   // One expression for WebKit (ADR 0113): the planner's `webkit` output (plan_ci::wants_webkit: a tag, the nightly, the webkit input),
   // which the scope the run declares also reads. The workflow keeps no second condition that could drift from it. The Chromium reference
   // job reads the same value (user, 2026-11-24: the reference apps' browser jobs are the nightly's, never a branch's or a train's).
@@ -2030,8 +2034,9 @@ const WINDOWS = { RUNNER_OS: 'Windows', PADDOCK_CI_CORES: '8', PADDOCK_CI_RAM_MB
 const LINUX = { RUNNER_OS: 'Linux', PADDOCK_CI_CORES: '30', PADDOCK_CI_RAM_MB: '65536' };
 
 test('build-jobs gives each runner class its share of the host, never the agents\' cap of two', () => {
-  // The Mac runs three jobs (d7-mac-mini, -2, -3) and keeps 2 of its 14 cores for the agents and the system: 4 each.
-  assert.equal(jobsOf(buildJobs(MAC)), '4');
+  // The Mac runs four jobs (ADR 0120 D8: one runner, d7-mac-mini, capacity 4) and keeps 2 of its 14 cores for the agents and the
+  // system: 3 each.
+  assert.equal(jobsOf(buildJobs(MAC)), '3');
   assert.equal(jobsOf(buildJobs({ ...MAC, PADDOCK_CI_JOBS_PER_HOST: '1', PADDOCK_CI_RESERVED_CORES: '1' })), '13');
   // Windows, which runs two jobs at once, gets its share once the runner says so.
   assert.equal(jobsOf(buildJobs({ ...WINDOWS, PADDOCK_CI_JOBS_PER_HOST: '2' })), '4');
@@ -2091,7 +2096,7 @@ test('build-jobs caps the share by memory: (RAM - kept) / (jobs per host x MB pe
 
 test('build-jobs splits the share between the builds a job runs at once (cargo mutants --jobs N)', () => {
   assert.equal(jobsOf(buildJobs(LINUX, ['2'])), '2');
-  assert.equal(jobsOf(buildJobs(MAC, ['2'])), '2');
+  assert.equal(jobsOf(buildJobs(MAC, ['2'])), '1');
   assert.equal(jobsOf(buildJobs({ ...LINUX, PADDOCK_CI_BUILD_JOBS: '12' }, ['3'])), '4');
   assert.equal(jobsOf(buildJobs(MAC, ['8'])), '1');
   assert.notEqual(buildJobs(MAC, ['0']).status, 0);
@@ -2123,13 +2128,13 @@ test('build-jobs rejects nonsense and leading zeros (bash would read 010 as 8 an
 
 test('build-jobs logs on stderr, prints only the assignments, appends it to GITHUB_ENV, and probes this machine', () => {
   const r = buildJobs(MAC);
-  assert.equal(r.stdout, 'CARGO_BUILD_JOBS=4\nNEXTEST_TEST_THREADS=4\nPADDOCK_E2E_WORKERS=4\nVITEST_MAX_WORKERS=4\n');
+  assert.equal(r.stdout, 'CARGO_BUILD_JOBS=3\nNEXTEST_TEST_THREADS=3\nPADDOCK_E2E_WORKERS=3\nVITEST_MAX_WORKERS=3\n');
   assert.match(r.stderr, /^build-jobs: this host: 14 cores, 65536 MB of RAM/m);
   const dir = mkdtempSync(join(tmpdir(), 'build-jobs-'));
   const envFile = join(dir, 'env');
   writeFileSync(envFile, '');
   assert.equal(buildJobs({ ...MAC, GITHUB_ENV: envFile }).status, 0);
-  assert.equal(read(envFile), 'CARGO_BUILD_JOBS=4\nNEXTEST_TEST_THREADS=4\nPADDOCK_E2E_WORKERS=4\nVITEST_MAX_WORKERS=4\n');
+  assert.equal(read(envFile), 'CARGO_BUILD_JOBS=3\nNEXTEST_TEST_THREADS=3\nPADDOCK_E2E_WORKERS=3\nVITEST_MAX_WORKERS=3\n');
   rmSync(dir, { recursive: true, force: true });
   // The real probes count something on this machine.
   const real = buildJobs({ RUNNER_OS: 'macOS', PADDOCK_CI_RESERVED_CORES: '0' });
@@ -2145,17 +2150,17 @@ const threadsOf = (r) => /^NEXTEST_TEST_THREADS=(\d+)$/m.exec(r.stdout)?.[1];
 test('build-jobs gives nextest the job\'s core share on every class, the runner\'s number winning', () => {
   const r = buildJobs(MAC);
   assert.equal(r.status, 0, r.stderr);
-  assert.equal(jobsOf(r), '4', '(14 cores - 2 kept) / 3 jobs per host');
-  assert.equal(threadsOf(r), '4', '(14 cores - 2 kept) / 3 jobs per host, no fixed class number');
-  assert.match(r.stderr, /NEXTEST_TEST_THREADS=4 \(\(14 cores - 2 kept\) \/ 3 jobs per host/);
+  assert.equal(jobsOf(r), '3', '(14 cores - 2 kept) / 4 jobs per host');
+  assert.equal(threadsOf(r), '3', '(14 cores - 2 kept) / 4 jobs per host, no fixed class number');
+  assert.match(r.stderr, /NEXTEST_TEST_THREADS=3 \(\(14 cores - 2 kept\) \/ 4 jobs per host/);
   assert.equal(threadsOf(buildJobs({ ...MAC, PADDOCK_CI_JOBS_PER_HOST: '1', PADDOCK_CI_RESERVED_CORES: '0' })), '14');
   // ER-48: lanes x threads fit the usable cores on every class (positive control: 3 x 8 on the Mac's 12 would not).
-  for (const [env, lanes, usable] of [[MAC, 3, 12], [LINUX, 6, 30], [{ ...LINUX, RUNNER_OS: 'Windows', PADDOCK_CI_CORES: '16', PADDOCK_CI_RAM_MB: '32768' }, 3, 16]]) {
+  for (const [env, lanes, usable] of [[MAC, 4, 12], [LINUX, 6, 30], [{ ...LINUX, RUNNER_OS: 'Windows', PADDOCK_CI_CORES: '16', PADDOCK_CI_RAM_MB: '32768' }, 3, 16]]) {
     assert.ok(lanes * Number(threadsOf(buildJobs(env))) <= usable, `${env.RUNNER_OS}: lanes x threads within ${usable} cores`);
   }
   assert.ok(3 * 8 > 12, 'control: the former macOS layout oversubscribed');
   // A split job (cargo mutants --jobs N) runs N test runs at once: each gets 1/N.
-  assert.equal(threadsOf(buildJobs(MAC, ['2'])), '2');
+  assert.equal(threadsOf(buildJobs(MAC, ['2'])), '1');
   assert.equal(threadsOf(buildJobs(MAC, ['16'])), '1', 'never below one');
   // Elsewhere the job's core share: (8 cores - 0 kept) / 2 jobs per host.
   const shared = { ...LINUX, PADDOCK_CI_CORES: '8', PADDOCK_CI_RAM_MB: '16316', PADDOCK_CI_JOBS_PER_HOST: '2' };
@@ -2176,7 +2181,7 @@ test('build-jobs gives nextest the job\'s core share on every class, the runner\
   const envFile = join(dir, 'env');
   writeFileSync(envFile, '');
   assert.equal(buildJobs({ ...MAC, GITHUB_ENV: envFile }).status, 0);
-  assert.equal(read(envFile), 'CARGO_BUILD_JOBS=4\nNEXTEST_TEST_THREADS=4\nPADDOCK_E2E_WORKERS=4\nVITEST_MAX_WORKERS=4\n');
+  assert.equal(read(envFile), 'CARGO_BUILD_JOBS=3\nNEXTEST_TEST_THREADS=3\nPADDOCK_E2E_WORKERS=3\nVITEST_MAX_WORKERS=3\n');
   rmSync(dir, { recursive: true, force: true });
 });
 
@@ -2185,10 +2190,10 @@ test('build-jobs gives nextest the job\'s core share on every class, the runner\
 const workersOf = (r, name) => new RegExp(`^${name}=(\\d+)$`, 'm').exec(r.stdout)?.[1];
 test('build-jobs gives the e2e and unit-test workers the job\'s core share, the runner\'s number winning, and warns when lanes x workers exceed the cores', () => {
   const r = buildJobs(MAC);
-  assert.equal(workersOf(r, 'PADDOCK_E2E_WORKERS'), '4', '(14 - 2) / 3');
-  assert.equal(workersOf(r, 'VITEST_MAX_WORKERS'), '4');
+  assert.equal(workersOf(r, 'PADDOCK_E2E_WORKERS'), '3', '(14 - 2) / 4');
+  assert.equal(workersOf(r, 'VITEST_MAX_WORKERS'), '3');
   assert.equal(workersOf(buildJobs(LINUX), 'VITEST_MAX_WORKERS'), '5');
-  assert.equal(workersOf(buildJobs(MAC, ['2']), 'PADDOCK_E2E_WORKERS'), '2', 'a split job halves it');
+  assert.equal(workersOf(buildJobs(MAC, ['2']), 'PADDOCK_E2E_WORKERS'), '1', 'a split job halves it');
   assert.equal(workersOf(buildJobs(MAC, ['16']), 'PADDOCK_E2E_WORKERS'), '1', 'never below one');
   assert.equal(workersOf(buildJobs({ ...LINUX, PADDOCK_CI_TEST_WORKERS: '3' }), 'PADDOCK_E2E_WORKERS'), '3');
   assert.doesNotMatch(buildJobs({ ...LINUX, PADDOCK_CI_TEST_WORKERS: '3' }).stdout, /::warning::/);
@@ -2422,7 +2427,7 @@ test('a release or installer job never runs a downloaded ./dev: PADDOCK_DEV_DOWN
     assert.match(job.text, /PADDOCK_DEV_DOWNLOAD: \$\{\{ \(inputs\.release == true \|\| startsWith\(github\.ref, 'refs\/tags\/'\)\) && '0' \|\| '' \}\}/, `ci.yml:${job.id}: a run for a tag builds the tool from source`);
     tagJobs += 1;
   }
-  assert.equal(tagJobs, 8, 'the ci.yml jobs that read the prebuilt tool with the credential at job level: the four that take a host slot, conformance, and heavy, crates and audit (setup-rust runs ./dev); ui (with the ESLint preset and icons steps), e2e and tools (`./dev ci run`) set it on their ./dev steps only (WP-3 review)');
+  assert.equal(tagJobs, 7, 'the ci.yml jobs that read the prebuilt tool with the credential at job level: the three that take a host slot, conformance, and heavy, crates and audit (setup-rust runs ./dev); ui (with the ESLint preset and icons steps), e2e, e2e-webkit (on Linux since 2026-11-25, ADR 0120) and tools (`./dev ci run`) set it on their ./dev steps only (WP-3 review)');
 });
 
 test('dev-tool.yml publishes only from main, in every job (ADR 0022: the store is written only by main)', () => {

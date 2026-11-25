@@ -2,6 +2,10 @@
 
 - Status: Proposed 2026-11-16. **Decided by the user on 2026-11-16: real runners**, as merge queues and merge trains do. The step
   is built and report-only (ER-41).
+- **Superseded 2026-11-25 (user decision):** the step never ran (it needed `PADDOCK_TRIAL_DIR` and stayed report-only) and is
+  removed with `merge_check/other_os.rs`. The member gate (`./dev check --pre-push --member-gate`) now runs the full nextest `ci`
+  profile of every touched Cargo workspace on the host and in the Linux CI container, and the guardian's acting tests as uid 65534
+  when the guardian changed (`tools/paddock-dev/src/pre_push/gates.rs`, `member_tests`). Windows stays CI-only.
 - Trigger: train 12 spent about 17 hours in three red CI rounds, and every failure was Linux- or Windows-only: run 8138 (23
   failures: a hidden PATH, `/srv` paths that are not absolute on Windows, a lost Git-bash PATH, slow process starts, ext4 folder
   blocks), run 8147 (a `#!/bin/sh` fixture Windows cannot run), run 8152 (TestCommand 6x slower on Windows). All of them passed

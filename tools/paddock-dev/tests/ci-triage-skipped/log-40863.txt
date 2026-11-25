@@ -1,0 +1,5 @@
+2026-11-17T21:38:12.3294860Z Job: crates
+2026-11-17T21:39:14.3980809Z     Starting 4836 tests across 115 binaries (1 test skipped)
+2026-11-17T21:39:46.0664470Z      Summary [  31.668s] 4836 tests run: 4836 passed, 1 skipped
+2026-11-17T21:40:07.6267363Z ::error::command failed (exit 1): cargo deny check (in crates) Next step: run `cargo deny check` in crates to reproduce, or `./dev ci run crates deny`
+2026-11-17T21:40:07.6454100Z ##[error]Process completed with exit code 1.

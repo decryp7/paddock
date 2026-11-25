@@ -307,6 +307,33 @@ author: that call belongs there. The Rust `heavy` tool (`tools/heavy`) makes no 
   for scripts. The limits are flags (`--start-below`, `--hold-above`, `--min-free-gib`, `--ci-hold`, `--disk <path>`, `--no-ci`).
   It decides nothing by itself: it does not start or stop agents, and `heavy.sh` still caps the heavy steps.
 
+## Mac CI runner (ADR 0120)
+
+The Mac keeps one runner, `d7-mac-mini`, with capacity 4, as a LaunchDaemon: it leaves the user's GUI login session, runs as
+the same account (`UserName`, so its toolchains, folders and Full Disk Access grants stay) and has no window server. There is
+no GUI lane: jobs that need a window run elsewhere (ADR 0120, D1 and D8 as changed on 2026-11-25). `d7-mac-mini-2` and `-3`
+are removed: stopped, their plists parked in `~/gitea-runner-parked-2026-11-25/`, and to be deleted from Gitea's runner list.
+
+The user runs these; an agent never does (rule 7, ER-14). Run them from the repository root, with no CI job running if
+possible: stopping the runner lets its running job finish first (up to its 3 h `shutdown_timeout`).
+
+1. **Restart.** A planned restart is `sudo fdesetup authrestart` (D5, amended 2026-11-25).
+2. **Look first:** `bash tools/mac-runner-move.sh install --user decryp7 --daemon d7-mac-mini --retire d7-mac-mini-2 --retire d7-mac-mini-3 --dry-run`
+   (no sudo, changes nothing: it renders and shows the plist and prints every step).
+3. **Install:** the same line with `sudo` and without `--dry-run`. It ends with one `ok` or `fail` line: `ok` means launchd
+   runs the runner in the system domain, as your account, and its log says `declare successfully` within 90 s
+   (`--verify-max`). The original agent is kept as `~/Library/LaunchAgents/net.decryptology.gitea-runner.d7-mac-mini.plist.before-adr0120`.
+4. **Check later:** `bash tools/mac-runner-move.sh status --user decryp7 --daemon d7-mac-mini --retire d7-mac-mini-2 --retire d7-mac-mini-3`,
+   the log `/Library/Logs/gitea-runner/d7-mac-mini.log`, `sudo launchctl print system/net.decryptology.gitea-runner.d7-mac-mini`,
+   and Gitea's runner list (`d7-mac-mini` online, with capacity 4 from `~/gitea-runner/config.yaml`).
+5. **Roll back:** `sudo bash tools/mac-runner-move.sh rollback --user decryp7 --daemon d7-mac-mini --retire d7-mac-mini-2 --retire d7-mac-mini-3`
+   removes the daemon, puts the parked agent back and starts it in your session. The `-2` and `-3` plists parked by hand stay
+   where they are. `--dry-run` shows the steps first.
+
+After a restart: once the disk is unlocked (by `authrestart`, or by your password at the FileVault screen) the runner starts
+at boot, before anyone logs in. The external disk mounts without a login because `AutomountDisksWithoutUserLogin` is 1 (the
+install checks it). A crash restart waits at the FileVault screen for the password, and the runner does not run until then.
+
 ## Things that cost time when forgotten
 
 - Don't run macOS tests under `nice`: it is SIP-protected and strips `DYLD_*` variables, so libraries are not found.
