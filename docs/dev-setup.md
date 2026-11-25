@@ -89,12 +89,17 @@ key on their checkout path (`CARGO_MANIFEST_DIR`); a symlink does not help, carg
 
 ### Local sccache
 
-Agents' builds use one local sccache 0.19.0 (the CI pin and checksums, `tools/paddock-dev/src/ci_setup_rust.rs`), set by Paddock's
+Agents' builds use one local sccache 0.20.1 (the CI pin and checksums, `tools/paddock-dev/src/ci_setup_rust.rs`), set by Paddock's
 tools and never by your shell profile (user decision 2026-11-16; docs/research/sccache-basedirs-2026-11-16.md):
 
-- `eval "$(./dev sccache env)"` installs the pinned release into `<PADDOCK_DEV_HOME or ~/.paddock-dev>/tools/sccache/0.19.0/` (never
+- `eval "$(./dev sccache env)"` installs the pinned release into `<PADDOCK_DEV_HOME or ~/.paddock-dev>/tools/sccache/0.20.1/` (never
   `~/.cargo`), starts the one server on the default port 4226, and prints `export RUSTC_WRAPPER=...` lines for that shell. Run it
   once per machine to install; the push gates and `./dev gen check` then use the installed copy by themselves and never download.
+- The server starts with `SCCACHE_BASEDIRS` (sccache 0.20: the longest matching base is stripped from every path in a Rust compile's
+  key) naming the worktree you are in and its sibling worktrees, and `SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS=CARGO_MANIFEST_DIR,CARGO_MANIFEST_PATH`
+  (crates that bake those into their output stay per checkout). One server serves every worktree and reads the list only when it
+  starts, so a worktree made after that shares only third-party entries until the server restarts (`sccache --stop-server`, then
+  `eval "$(./dev sccache env)"`).
 - It is off, with one `::warning::` line and a build without the cache, when sccache is not installed, the server does not
   start, or a server on the port uses another cache. The server runs in its own short folder (`<tool cache>/sccache-run`, also its `TMPDIR`, working folder and error log
   `sccache.log`; short because macOS caps socket paths at 104 bytes), never in a job's or an agent's scratch folder, which a job deletes. It

@@ -158,14 +158,14 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        VERSION=0.19.0
+        VERSION=0.20.1
         # The pinned release on every OS (one version, one cache format). A runner that already has exactly it keeps it.
         if command -v sccache >/dev/null 2>&1 && [ "$(sccache --version | awk '{print $2}')" = "$VERSION" ]; then exit 0; fi
         case "$RUNNER_OS-$(uname -m)" in
-          Linux-x86_64)            T=x86_64-unknown-linux-musl;  EXT=tar.gz; SUM=aa73c7270c997894038c0d8f0d297865f57569e1687883322bc431713d4bb9dd ;;
-          Linux-aarch64|Linux-arm64) T=aarch64-unknown-linux-musl; EXT=tar.gz; SUM=3e47fc4a71b1ddd1b4294a0de9d34498922fdf41e3cd0bda5df3954e3d6deb9d ;;
-          macOS-arm64)             T=aarch64-apple-darwin;       EXT=tar.gz; SUM=a35a0b7d622618774bc1bb8102d72562dfb21e619f88b153b370d7f89bc286af ;;
-          Windows-x86_64)          T=x86_64-pc-windows-msvc;     EXT=zip;    SUM=28be8c61f6b2c89b9eb2869f6af7f78e6f992e78a8abae0ce855fcc129cbeac1 ;;
+          Linux-x86_64)            T=x86_64-unknown-linux-musl;  EXT=tar.gz; SUM=c9f6c5a3ae84d9da0956b28c357a365827bda33f3383647fc0b67484c74a5ea9 ;;
+          Linux-aarch64|Linux-arm64) T=aarch64-unknown-linux-musl; EXT=tar.gz; SUM=505324daad5fcbb1a3cab5d57d26ef42baf4d10b236df7de93a008196f1f2230 ;;
+          macOS-arm64)             T=aarch64-apple-darwin;       EXT=tar.gz; SUM=d2658c9a24bab25a24fdc1917cb5b614b7c20a4ce8f363e5303d37b7e699d5ec ;;
+          Windows-x86_64)          T=x86_64-pc-windows-msvc;     EXT=zip;    SUM=ca500a01139e9af8d5f5a5e69b6a0dd941ed79ed3399a91cc35bba484fe732fa ;;
           *) echo "::warning::no pinned sccache release for $RUNNER_OS $(uname -m); building without the shared compile cache."; exit 0 ;;
         esac
         DEST="${RUNNER_TOOL_CACHE:-$HOME/.cache}/sccache/$VERSION"
@@ -202,7 +202,7 @@ runs:
       run: |
         set -euo pipefail
         # The Install step added the pinned copy to PATH for later steps only; this step finds it by its folder.
-        PINNED="${RUNNER_TOOL_CACHE:-$HOME/.cache}/sccache/0.19.0"
+        PINNED="${RUNNER_TOOL_CACHE:-$HOME/.cache}/sccache/0.20.1"
         if [ -d "$PINNED" ]; then PATH="$PINNED:$PATH"; fi
         if ! command -v sccache >/dev/null 2>&1; then
           echo "::warning::sccache is not available on this runner; building without the compile cache."
@@ -285,6 +285,22 @@ runs:
           export SCCACHE_DIR="$DIR" SCCACHE_CACHE_SIZE="$SIZE"
           SETTINGS+=("SCCACHE_DIR=$DIR" "SCCACHE_CACHE_SIZE=$SIZE")
           echo "sccache: local disk $DIR"
+        fi
+        # Base directories (the Rust twin: local_sccache::basedir_vars). The checkout and the build folder are per slot or per job, so a
+        # workspace crate's key changed with every slot flip; sccache 0.20 strips the longest matching base from every path in a Rust key
+        # (';' between them on Windows, ':' elsewhere) and keeps the manifest paths verbatim for the crates that bake them in.
+        BASES=""; SEP=":"; if [ "$RUNNER_OS" = Windows ]; then SEP=";"; fi
+        for P in "${PADDOCK_WORKSPACE:-}" "${GITHUB_WORKSPACE:-}" "${PADDOCK_BUILD_FOLDER:-}"; do
+          [ -n "$P" ] || continue
+          if [ "$RUNNER_OS" = Windows ]; then P="$(cygpath -m "$P")"; case "$P" in [A-Za-z]:/*) ;; *) continue ;; esac; else case "$P" in /*) ;; *) continue ;; esac; fi
+          case "$P" in */) [ "${#P}" -gt 1 ] && P="${P%/}" ;; esac
+          case "$SEP$BASES$SEP" in *"$SEP$P$SEP"*) continue ;; esac
+          BASES="${BASES:+$BASES$SEP}$P"
+        done
+        if [ -n "$BASES" ]; then
+          export SCCACHE_BASEDIRS="$BASES" SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS=CARGO_MANIFEST_DIR,CARGO_MANIFEST_PATH
+          SETTINGS+=("SCCACHE_BASEDIRS=$BASES" "SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS=CARGO_MANIFEST_DIR,CARGO_MANIFEST_PATH")
+          echo "sccache: base directories $BASES"
         fi
         sccache --version
         # A server left on this port by an earlier job would keep that job's backend: start it fresh with this job's settings.
