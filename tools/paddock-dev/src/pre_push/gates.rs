@@ -49,6 +49,9 @@ pub struct Gate {
     /// The cargo build folder it uses, relative to the repository root or absolute (`None`: not a cargo build, or not known): a step
     /// whose folder holds no build yet is COLD, and the history keeps cold and warm apart.
     pub build_dir: Option<String>,
+    /// The row runs CI's own tests (the member gate's `tests <ws>`): its child gets CI's job environment
+    /// ([`crate::ci_run::job_env`]) less the secrets, not the [`super::exec::PASS`] list of the other rows.
+    pub ci_env: bool,
 }
 
 impl Gate {
@@ -239,6 +242,7 @@ fn gate(id: String, cwd: &str, program: &str, args: &[&str], rank: u8, next: Str
         notice: None,
         progress: super::progress::Progress::Lines,
         build_dir: None,
+        ci_env: false,
     }
 }
 
@@ -785,6 +789,7 @@ fn member_tests(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> {
                 ("RUSTUP_AUTO_INSTALL".into(), "0".into()),
                 ("NEXTEST_TEST_THREADS".into(), MEMBER_TEST_THREADS.into()),
             ],
+            ci_env: true,
             ..gate(
                 format!("tests {ws}"),
                 ws,
