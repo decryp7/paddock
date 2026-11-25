@@ -746,6 +746,9 @@ pub struct ReuseArgs {
     /// The Gitea server (default: GITHUB_SERVER_URL, then the family's).
     #[arg(long)]
     server: Option<String>,
+    /// Main's tip before this push, the commit the push moved it from (default: the push event's `before`, from GITHUB_EVENT_PATH).
+    #[arg(long)]
+    before: Option<String>,
 }
 
 /// `ci reuse`: `reuse=true|false` and `run=<id>` to `GITHUB_OUTPUT` (standard output without it), one annotation, a summary line.
@@ -774,7 +777,8 @@ pub fn reuse(a: &ReuseArgs) -> Result<Report, CliError> {
     } else {
         let mut http = CurlHttp;
         let mut client = Client::new(&mut http, &server, &repo, &token);
-        reuse::decide(&mut client, &a.workflow, &sha, current)
+        let before = a.before.clone().or_else(|| green::push_before(&env));
+        reuse::decide(&mut client, &a.workflow, &sha, current, before.as_deref())
     };
     let run = if let reuse::Reuse::Skip { run, .. } = &d {
         run.to_string()
