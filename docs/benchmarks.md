@@ -2842,3 +2842,21 @@ load averages, which include the other agents and the graph train's CI.
 The cause of the plain-harness stall: a deleted working folder makes macOS's getcwd read the user temp folder (about 992,000 entries)
 for every git start, with disk0 at about 32,000 operations a second (`iostat`, 4 KB transfers). See docs/lessons.md, 2026-11-23,
 "The long paddock-dev test hangs had one cause".
+
+## Member gate: CI tests of the touched workspaces (2026-11-25, feat/member-check-touched-tests)
+
+Dev Mac (14 cores, 64 GiB), the CI image native (arm64, `tools/linux-container.sh --ci-image`, 4 CPUs, warm build volume from the
+Linux Clippy). The member is this branch itself (it touches `tools/paddock-dev` only); `./dev check --pre-push --member-gate --base
+origin/main`. Rows run three at a time through the heavy slot; "queued" is the wait for that slot, beside other agents' gates.
+
+| Row | Selected | Run | Queued | Load (1/5/15) |
+|---|---|---|---|---|
+| `tests tools/paddock-dev` (macOS, `ci` profile, 4 threads) | 2428 tests (112 skipped by the profile) | 376.1 s | 135.3 s | started at 5-minute 23.9 |
+| same, second run (clone at the branch head) | 2428 | 556.7 s (nextest 425.1 s) | 125.9 s | 42 / 19 / 21 |
+| `tests-linux tools/paddock-dev` (container, OS-scoped by module) | 1519 of 2540 (1021 not OS-conditional) | 117.2 s (nextest 85.2 s) | 374.2 s | 9 / 18 / 21 |
+| whole member gate, first run (all rows) | | 1905 s wall | | 24 / 24 / 18 at the start |
+
+Added per member that touches paddock-dev: about 380 to 560 s of macOS test run and about 120 s of container run, which run beside
+the other rows; the slot queue, not the tests, set the wall time. The OS scope (the `hostTests` placement derived from the code)
+leaves 40% of paddock-dev's tests off the container run; a pure workspace (no marked package or module) has no container run at all.
+Not measured: a `crates` member (the container would also compile the whole shared-crate workspace) and the guardian-as-user step.

@@ -53,6 +53,10 @@ fn facts() -> Facts {
         dev_exe: Ok("/x/dev".into()),
         target_dir: Some("/t/".into()),
         inactive: Ok(BTreeSet::new()),
+        test_filters: Default::default(),
+        nextest_config: Default::default(),
+        reached: Default::default(),
+        os_scope: Default::default(),
     }
 }
 
@@ -1189,8 +1193,13 @@ fn the_table_names_what_ci_runs_that_this_gate_does_not() {
 #[test]
 fn a_named_not_measured_gate_may_pass_and_the_use_is_logged() {
     let state = tempfile::tempdir().unwrap();
+    // A developer's push: in the member gate the Linux tests would be a second container row without Docker.
+    let push = Facts {
+        member_gate: false,
+        ..facts()
+    };
     let mut rows = run_all(
-        &crates_gates(),
+        &plan_gates(&plan(), &change(&["crates/a.rs"]), &push),
         &Fake {
             no_docker: true,
             ..Fake::default()
@@ -3917,8 +3926,9 @@ mod active_apps {
         let planned = plan_gates(&plan(), &change(FILES), &off(&["dyno", "pitwall", "debrief"]));
         let rows = run_all(&planned, &Fake::default(), 2);
         let n = rows.iter().filter(|(_, r)| r.reason().starts_with(&inactive_label())).count();
-        // fmt, clippy and clippy-windows of apps/dyno and apps/pitwall, their two Linux Clippy rows, and Pitwall's scripts and deny.
-        assert_eq!(n, 9, "{rows:?}");
+        // fmt, clippy and clippy-windows of apps/dyno and apps/pitwall, their two Linux Clippy rows, Pitwall's scripts and deny, and
+        // the member gate's host and Linux tests of both.
+        assert_eq!(n, 13, "{rows:?}");
         let report = render("h", &rows);
         let last = report.text.lines().find(|l| l.starts_with("pre-push: ")).unwrap_or_default();
         assert!(last.contains(&format!(", {n} inactive (not checked")), "{last}");
@@ -3972,4 +3982,377 @@ fn the_conformance_tests_run_in_a_push_only_when_the_change_reaches_conformance_
         "the member gate"
     );
     assert!(ids(&plan_gates(&plan(), &change, &push)).contains(&"conformance-tests".to_string()));
+}
+
+/// The member gate runs the full nextest `ci` profile of every Cargo workspace the member touches, on this host and in the Linux CI
+/// container, and the orphan guardian's acting tests as uid 65534 when the guardian changed (user, 2026-11-25: six members passed their
+/// own checks and then failed on another OS in CI; the report-only other-OS row never ran). Windows stays CI's.
+mod member_tests {
+    use super::*;
+    use crate::pre_push::gates::{GUARDIAN_PATHS, inactive_reason};
+
+    const FILES: &[&str] = &["crates/paddock-proc/src/lib.rs", "tools/paddock-dev/src/a.rs"];
+
+    fn plan2() -> serde_json::Value {
+        json!({
+            "conformance": true,
+            "apps": ["dyno"],
+            "packages": {
+                "crates": ["paddock-proc", "paddock-chromium"],
+                "tools/paddock-dev": ["paddock-dev"],
+                "apps/dyno": ["dyno-app", "dyno-core"],
+            }
+        })
+    }
+
+    fn member() -> Facts {
+        let mut f = facts();
+        f.left_out.insert("tools/paddock-dev".into(), Ok(crates_of(&[], 1)));
+        f.test_filters
+            .insert("crates".into(), "package(=paddock-proc) | package(=paddock-chromium)".into());
+        f
+    }
+
+    fn by<'a>(planned: &'a [Planned], prefix: &str) -> &'a Gate {
+        run_gates(planned)
+            .into_iter()
+            .find(|g| g.id.starts_with(prefix))
+            .unwrap_or_else(|| panic!("no row {prefix}: {:?}", ids(planned)))
+    }
+
+    #[test]
+    fn a_touched_workspace_gets_its_ci_tests_on_the_host_and_in_the_linux_container() {
+        let planned = plan_gates(&plan2(), &change(FILES), &member());
+        let host = by(&planned, "tests crates");
+        assert_eq!((host.program.as_str(), host.cwd.as_str()), ("cargo", "crates"));
+        assert_eq!(
+            host.args.join(" "),
+            "nextest run --config build.target-dir='/t' --profile ci --locked --no-fail-fast --no-tests=fail --workspace --all-features -E package(=paddock-proc) | package(=paddock-chromium)",
+            "CI's own profile, the plan's reached packages as CI's member run filters them, every feature as CI's crates job"
+        );
+        assert!(host.heavy, "it compiles: through heavy (ER-24)");
+        assert_eq!(
+            host.need,
+            Need::Tool("cargo-nextest".into()),
+            "no nextest is not measured, never a pass"
+        );
+        assert!(host.env.contains(&("RUSTUP_AUTO_INSTALL".to_string(), "0".to_string())), "ER-45");
+        assert!(
+            host.env.iter().any(|(k, _)| k == "NEXTEST_TEST_THREADS"),
+            "a share of the machine (ER-24, ER-48)"
+        );
+        assert!(
+            host.env.iter().all(|(k, _)| !k.starts_with("CARGO_")),
+            "sccache hashes CARGO_* variables"
+        );
+        let tool = by(&planned, "tests tools/paddock-dev");
+        assert!(
+            !tool.args.contains(&"-E".to_string()) && !tool.args.contains(&"--all-features".to_string()),
+            "{:?}",
+            tool.args
+        );
+        let linux = by(&planned, "tests-linux ");
+        assert_eq!(linux.id, "tests-linux crates + tools/paddock-dev");
+        assert_eq!(linux.need, Need::LocalCiImage, "the CI image, as the Linux Clippy");
+        assert!(linux.heavy);
+        let command = linux.args.last().unwrap();
+        assert!(
+            linux
+                .args
+                .starts_with(&strs(&["tools/linux-container.sh", "--id", "paddock", "--ci-image", "--"])),
+            "{:?}",
+            linux.args
+        );
+        assert!(
+            command.contains("(cd crates && CARGO_TARGET_DIR=/target/v7/crates NEXTEST_TEST_THREADS=")
+                && command.contains("cargo nextest run --tool-config-file paddock:/tmp/paddock-nextest-store-crates.toml --profile ci --locked --no-fail-fast --no-tests=fail --workspace --all-features -E 'package(=paddock-proc) | package(=paddock-chromium)'"),
+            "{command}"
+        );
+        assert!(
+            command.contains("(cd tools/paddock-dev && CARGO_TARGET_DIR=/target/v7/tools-paddock-dev"),
+            "{command}"
+        );
+        // The source tree is mounted read-only: nextest's run store goes into the build volume (found by the real run, 2026-11-25:
+        // "failed to create store dir at `/work/tools/paddock-dev/target/nextest/ci`: Read-only file system").
+        assert!(
+            command
+                .contains("printf '[store]\\ndir = \"/target/v7/crates/nextest\"\\n' > /tmp/paddock-nextest-store-crates.toml; (cd crates"),
+            "{command}"
+        );
+        assert!(!command.contains("guardian-as-user"), "the guardian did not change: {command}");
+        assert!(
+            command.ends_with("exit $rc"),
+            "a failing workspace does not hide the next one's: {command}"
+        );
+    }
+
+    fn strs(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn a_changed_guardian_adds_the_guardian_as_user_step_in_the_container() {
+        for f in GUARDIAN_PATHS {
+            let file = format!("{f}/unix.rs");
+            let planned = plan_gates(&plan2(), &change(&[&file]), &member());
+            let linux = by(&planned, "tests-linux ");
+            assert_eq!(linux.id, "tests-linux crates + guardian-as-user");
+            let command = linux.args.last().unwrap();
+            assert!(
+                command.contains("(cd crates && CARGO_TARGET_DIR=/target/v7/crates PADDOCK_TEST_UID=65534 bash ../conformance/ci/guardian-as-user.sh) || rc=1"),
+                "{command}"
+            );
+        }
+        let planned = plan_gates(&plan2(), &change(&["crates/paddock-proc/src/guardian.rs"]), &member());
+        assert!(by(&planned, "tests-linux ").id.ends_with("+ guardian-as-user"));
+    }
+
+    #[test]
+    fn a_developers_push_and_a_docs_only_change_run_no_tests_and_say_why() {
+        let dev = Facts {
+            member_gate: false,
+            ..member()
+        };
+        let planned = plan_gates(&plan2(), &change(FILES), &dev);
+        assert!(!ids(&planned).iter().any(|i| i.starts_with("tests")), "{:?}", ids(&planned));
+        assert!(
+            planned
+                .iter()
+                .any(|p| matches!(p, Planned::Skip { id, reason } if id == "tests, tests-linux" && reason.contains("--member-gate"))),
+            "{planned:?}"
+        );
+        let planned = plan_gates(&plan2(), &change(&["crates/paddock-proc/README.md"]), &member());
+        assert!(!ids(&planned).iter().any(|i| i.starts_with("tests")), "{:?}", ids(&planned));
+        assert!(
+            planned
+                .iter()
+                .any(|p| matches!(p, Planned::Skip { id, .. } if id == "tests, tests-linux"))
+        );
+    }
+
+    #[test]
+    fn an_inactive_apps_tests_are_skipped_and_named_as_inactive() {
+        let off = Facts {
+            inactive: Ok(BTreeSet::from(["dyno".to_string()])),
+            ..member()
+        };
+        let planned = plan_gates(
+            &plan2(),
+            &change(&["apps/dyno/crates/dyno-core/src/a.rs", "crates/paddock-proc/src/lib.rs"]),
+            &off,
+        );
+        assert!(
+            !ids(&planned).iter().any(|i| i.starts_with("tests") && i.contains("apps/dyno")),
+            "{:?}",
+            ids(&planned)
+        );
+        for id in ["tests apps/dyno", "tests-linux apps/dyno"] {
+            assert!(
+                planned
+                    .iter()
+                    .any(|p| matches!(p, Planned::Skip { id: i, reason } if i == id && *reason == inactive_reason("dyno"))),
+                "{id}: {planned:?}"
+            );
+        }
+        assert!(ids(&planned).contains(&"tests crates".to_string()));
+    }
+
+    #[test]
+    fn a_failing_test_fails_the_gate_and_a_missing_runtime_or_nextest_is_not_measured() {
+        let planned = plan_gates(&plan2(), &change(FILES), &member());
+        for row in ["tests crates", "tests-linux crates + tools/paddock-dev"] {
+            let rows = run_all(
+                &planned,
+                &Fake {
+                    fail: vec![row.into()],
+                    ..Fake::default()
+                },
+                2,
+            );
+            let report = render("h", &rows);
+            assert_eq!(report.exit, Exit::Findings, "{row}: {}", report.text);
+            assert!(report.text.contains(&format!("::error::{row}")), "{}", report.text);
+        }
+        let fake = Fake {
+            no_docker: true,
+            ..Fake::default()
+        };
+        let rows = run_all(&planned, &fake, 2);
+        assert!(
+            nm(&verdicts(&rows)["tests-linux crates + tools/paddock-dev"]).is_some(),
+            "no container runtime: not measured"
+        );
+        assert!(
+            !fake.ran.lock().unwrap().iter().any(|r| r.starts_with("tests-linux")),
+            "never started"
+        );
+        assert_eq!(render("h", &rows).exit, Exit::NotMeasured);
+        let rows = run_all(
+            &planned,
+            &Fake {
+                no_image: true,
+                ..Fake::default()
+            },
+            2,
+        );
+        assert!(nm(&verdicts(&rows)["tests-linux crates + tools/paddock-dev"]).is_some());
+        let rows = run_all(
+            &planned,
+            &Fake {
+                no_tools: vec!["cargo-nextest".into()],
+                ..Fake::default()
+            },
+            2,
+        );
+        assert!(nm(&verdicts(&rows)["tests crates"]).is_some());
+        // The positive control: with every row green both pass, so the verdicts above come from the rows.
+        let rows = run_all(&planned, &Fake::default(), 2);
+        let v = verdicts(&rows);
+        assert!(passed(&v["tests crates"]) && passed(&v["tests-linux crates + tools/paddock-dev"]));
+    }
+
+    /// The Linux run tests only the code that behaves differently per OS (user, 2026-11-25), as CI's host legs place it (`hostTests`,
+    /// derived from the code): a pure workspace or a change that reaches no OS-conditional package pays nothing beyond its macOS run.
+    mod os_scope {
+        use super::*;
+        use crate::host_tests::{Derived, HostScope};
+        use crate::pre_push::gates::OsScope;
+
+        fn marked(packages: &[&str], filter: &str) -> Result<OsScope, String> {
+            Ok(OsScope::Marked(HostScope {
+                packages: packages.iter().map(|p| p.to_string()).collect(),
+                filter: filter.into(),
+            }))
+        }
+
+        fn with(scopes: &[(&str, Result<OsScope, String>)]) -> Facts {
+            let mut f = member();
+            f.reached.insert(
+                "crates".into(),
+                BTreeSet::from(["paddock-proc".to_string(), "paddock-chromium".to_string()]),
+            );
+            for (ws, s) in scopes {
+                f.os_scope.insert(ws.to_string(), s.clone());
+            }
+            f
+        }
+
+        fn skip_reason(planned: &[Planned], id: &str) -> Option<String> {
+            planned.iter().find_map(|p| match p {
+                Planned::Skip { id: i, reason } if i == id => Some(reason.clone()),
+                _ => None,
+            })
+        }
+
+        #[test]
+        fn only_the_reached_packages_with_os_conditional_code_run_in_the_container() {
+            let facts = with(&[
+                ("crates", marked(&["paddock-proc", "paddock-env"], "")),
+                ("tools/paddock-dev", Ok(OsScope::Unmarked)),
+            ]);
+            let planned = plan_gates(&plan2(), &change(FILES), &facts);
+            let linux = by(&planned, "tests-linux ");
+            assert_eq!(linux.id, "tests-linux crates", "the pure workspace left the container run");
+            let command = linux.args.last().unwrap();
+            assert!(
+                command.contains("--all-features -E 'package(=paddock-proc)')"),
+                "paddock-chromium is reached but pure; paddock-env is marked but not reached: {command}"
+            );
+            let why = skip_reason(&planned, "tests-linux tools/paddock-dev").expect("the pure workspace is named");
+            assert!(why.contains("no OS-conditional code"), "{why}");
+            // Its macOS run is unchanged: every reached package.
+            assert!(
+                by(&planned, "tests crates")
+                    .args
+                    .join(" ")
+                    .ends_with("package(=paddock-proc) | package(=paddock-chromium)")
+            );
+            assert!(ids(&planned).contains(&"tests tools/paddock-dev".to_string()));
+        }
+
+        #[test]
+        fn a_change_that_reaches_no_marked_package_runs_no_container() {
+            let facts = with(&[
+                ("crates", marked(&["paddock-env"], "")),
+                ("tools/paddock-dev", Ok(OsScope::Unmarked)),
+            ]);
+            let planned = plan_gates(&plan2(), &change(FILES), &facts);
+            assert!(!ids(&planned).iter().any(|i| i.starts_with("tests-linux")), "{:?}", ids(&planned));
+            let why = skip_reason(&planned, "tests-linux crates").expect("named");
+            assert!(
+                why.contains("reaches no package with OS-conditional code") && why.contains("paddock-proc"),
+                "{why}"
+            );
+            // The positive control: the same change with paddock-proc marked starts the container.
+            let facts = with(&[
+                ("crates", marked(&["paddock-proc"], "")),
+                ("tools/paddock-dev", Ok(OsScope::Unmarked)),
+            ]);
+            assert_eq!(
+                by(&plan_gates(&plan2(), &change(FILES), &facts), "tests-linux ").id,
+                "tests-linux crates"
+            );
+        }
+
+        #[test]
+        fn a_module_placed_workspace_runs_its_marked_modules_and_an_unscoped_one_runs_everything() {
+            let facts = with(&[("tools/paddock-dev", marked(&[], "test(/^(?:pre_push::)/)"))]);
+            let planned = plan_gates(&plan2(), &change(FILES), &facts);
+            let command = by(&planned, "tests-linux ").args.last().unwrap().clone();
+            assert!(command.contains("--workspace -E 'test(/^(?:pre_push::)/)')"), "{command}");
+            // crates has no entry: unscoped, fail closed, every reached package (CI's member filter).
+            assert!(
+                command.contains("--all-features -E 'package(=paddock-proc) | package(=paddock-chromium)')"),
+                "{command}"
+            );
+        }
+
+        #[test]
+        fn an_unreadable_contract_is_a_broken_row_and_a_changed_guardian_still_runs_as_uid_65534() {
+            let facts = with(&[
+                ("crates", Err("crates/paddock.ci.json: `hostTests` must be an object".into())),
+                ("tools/paddock-dev", Ok(OsScope::Unmarked)),
+            ]);
+            let planned = plan_gates(&plan2(), &change(FILES), &facts);
+            assert!(
+                planned
+                    .iter()
+                    .any(|p| matches!(p, Planned::Broken { id, cause, .. } if id == "tests-linux crates" && cause.contains("hostTests"))),
+                "{planned:?}"
+            );
+            let facts = with(&[("crates", Ok(OsScope::Unmarked))]);
+            let planned = plan_gates(&plan2(), &change(&["crates/paddock-proc/src/guardian/unix.rs"]), &facts);
+            let linux = by(&planned, "tests-linux ");
+            assert_eq!(linux.id, "tests-linux guardian-as-user");
+            let command = linux.args.last().unwrap();
+            assert!(!command.contains("nextest run"), "{command}");
+            assert!(command.contains("guardian-as-user.sh"), "{command}");
+        }
+
+        #[test]
+        fn the_scope_comes_from_the_contract_and_the_derived_placement() {
+            let derived = Derived {
+                packages: BTreeSet::from(["paddock-proc".to_string()]),
+                known_packages: BTreeSet::from(["paddock-proc".to_string(), "paddock-text".to_string()]),
+                ..Derived::default()
+            };
+            let none = Derived {
+                known_packages: derived.known_packages.clone(),
+                ..Derived::default()
+            };
+            assert_eq!(OsScope::of(&json!({}), "c.json", &derived), Ok(OsScope::Unscoped));
+            assert_eq!(
+                OsScope::of(&json!({"hostTests": {}}), "c.json", &derived),
+                marked(&["paddock-proc"], "")
+            );
+            assert_eq!(OsScope::of(&json!({"hostTests": {}}), "c.json", &none), Ok(OsScope::Unmarked));
+            // A host's own `only` entry is not the second OS's.
+            let only = json!({"hostTests": {"only": [{"os": "macos-latest", "name": "paddock-proc", "reason": "a tool of the dev Mac"}]}});
+            assert_eq!(OsScope::of(&only, "c.json", &derived), Ok(OsScope::Unmarked));
+            assert!(
+                OsScope::of(&json!({"hostTests": []}), "c.json", &derived).is_err(),
+                "never unscoped by a typo"
+            );
+        }
+    }
 }
