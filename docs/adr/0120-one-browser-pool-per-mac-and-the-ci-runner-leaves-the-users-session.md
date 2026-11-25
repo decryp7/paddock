@@ -407,6 +407,12 @@ Agents never run these (ER-14). Commands assume the CI user `paddockci` and the 
   asks. D6 therefore applies, as the user's choice made there. D3 (the pool of 6) is unchanged.
 - **Runners `d7-mac-mini-2` and `-3` are removed.** They were stopped and their plists parked in
   `~/gitea-runner-parked-2026-11-25/` on 2026-11-25; their Gitea registrations were already gone (below).
+- **No macOS WebKit in CI for now (user, 2026-11-25).** With one daemon runner and no GUI lane, `e2e-webkit` runs Playwright's
+  WebKit on Linux in the CI image; the WKWebView build is a local run on a Mac with a login session. Debrief's macOS start-up
+  benchmark becomes a manual step of its release checklist (`apps/debrief/docs/releasing.md`). Branch `ci/mac-daemon-no-gui-jobs`
+  makes these moves; the runner moves only after it lands.
+- **Their files are in the Trash (user, 2026-11-25):** the runners' folders under `~/gitea-runners/` and
+  `/Volumes/vault-dev/gitea-runners/`, and the two parked plists.
 
 ### The move (WP-4)
 
