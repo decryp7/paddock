@@ -152,9 +152,18 @@ fn build(root: &Path, env: &HashMap<String, String>, target: &Path, key: &str, l
 fn publish(built: &Path, bin: &Path) -> Result<(), String> {
     let dir = bin.parent().map(Path::to_path_buf).unwrap_or_default();
     std::fs::create_dir_all(&dir).map_err(|e| format!("cannot write the cache folder {}: {e}", dir.display()))?;
-    let tmp = dir.join(format!(".heavy.{}", std::process::id()));
-    std::fs::copy(built, &tmp)
-        .and_then(|_| std::fs::rename(&tmp, bin))
+    let mode = std::fs::metadata(built).map(|m| m.permissions());
+    std::fs::read(built)
+        .and_then(|bytes| {
+            paddock_env::write_atomic_created(bin, &bytes, &mut |tmp| {
+                let f = std::fs::OpenOptions::new().write(true).create_new(true).open(tmp)?;
+                if let Ok(p) = &mode {
+                    f.set_permissions(p.clone())?;
+                }
+                Ok(f)
+            })
+            .map_err(std::io::Error::from)
+        })
         .map_err(|e| format!("cannot publish heavy into {}: {e}", dir.display()))
 }
 

@@ -8,6 +8,7 @@
 //! Long-running work is reported through [`ToolCtx`]'s task methods so the app can list it and stop it later
 //! ([`Tool::stop`]).
 
+use crate::protocol::Progress;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::fmt;
@@ -649,7 +650,7 @@ pub trait Host: Send + Sync {
     /// Up to `len` bytes (at most [`crate::protocol::READ_CHUNK`]) of the host file `id` at `offset`.
     fn read_file(&self, id: u64, offset: u64, len: u32) -> Result<Vec<u8>, ToolError>;
     /// Tells the app how far a task is (`None`: unknown) and what it is doing now.
-    fn report(&self, task: &str, progress: Option<f32>, note: &str);
+    fn report(&self, task: &str, progress: Option<Progress>, note: &str);
     /// Announces a background task.
     fn task_started(&self, tool: &str, task: &ToolTask);
     /// Announces that a task ended.
@@ -680,7 +681,7 @@ impl Host for NoHost {
     fn read_file(&self, _: u64, _: u64, _: u32) -> Result<Vec<u8>, ToolError> {
         Err(ToolError::Missing("this call has no host files".into()))
     }
-    fn report(&self, _: &str, _: Option<f32>, _: &str) {}
+    fn report(&self, _: &str, _: Option<Progress>, _: &str) {}
     fn task_started(&self, _: &str, _: &ToolTask) {}
     fn task_finished(&self, _: &str) {}
     fn output(
@@ -751,7 +752,7 @@ impl ToolCtx {
     }
 
     /// Reports a task's progress (`None`: unknown) and what it is doing.
-    pub fn report(&self, task: &str, progress: Option<f32>, note: &str) {
+    pub fn report(&self, task: &str, progress: Option<Progress>, note: &str) {
         self.host.report(task, progress, note);
     }
 
@@ -1010,7 +1011,7 @@ mod tests {
             kind: "k".into(),
             stoppable: true,
         });
-        ctx.report("a", Some(0.5), "half");
+        ctx.report("a", Some(Progress::new(0.5).unwrap()), "half");
         ctx.task_finished("a");
         assert_eq!(
             ctx.elevated("op", json!({"x": 1}), Duration::from_secs(1))

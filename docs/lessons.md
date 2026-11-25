@@ -4140,6 +4140,78 @@ run 9011 (failed once, passed on its retry; flaky-as-failure kept the run red, E
 paddock-watch's owner, which starts with a reproduction under load and the list of causes with what rules each out (ER-28). No sleep or
 raised timeout as the fix.
 
+## An owner killed while its guardian was still starting left its children running (fix/guardian-three-children-workspace-run, 2026-11-25)
+Symptom: `paddock-proc` `guardian::unix::tests::an_owner_killed_with_three_guarded_children_leaves_none_and_no_folder` failed both
+tries at 40 s ("the orphaned children's groups did not end, or their folders stayed") in the whole-workspace nextest ci run in the
+arm64 Linux CI image (4 of 4 tries), and passed in a paddock-proc-only run. CI's amd64 crates job passed it (run 9030, 0.17 s).
+**Causes listed.** (1) Load from the whole run: no, the second try ran last and alone and still failed, and the test failed alone on
+the whole-workspace binary (2 of 2). (2) Another test binary's state or processes (a shared path, a killed group): no, same reason; `-p
+paddock-proc` and the workspace build differ only in the build, not in neighbours. (3) Root: the test acts as a user, and the log
+showed the guardian acting. (4) PID reuse: the guardian's check reads its parent by identity; the log named the right owner. (5) The
+40 s hang guard: the guardian had refused at once, so no wait would end green.
+(6) **The owner died before its guardian had checked it**: confirmed. The guardian's log said "refused to serve: its parent (pid 1) is not
+the owner it names"; a snapshot just before the kill showed the guardian still starting (no command line, running, not yet reading),
+while the owner had registered three children and said "ready". `register` handed a child back as guarded as soon as it had written the
+line, without knowing the guardian would take its owner; the guardian's start took 11 ms in the Linux image, longer than the owner's
+path to its death there.
+**Fix.** The guardian says `serving` on its standard error (a pipe the owner reads) once its check passed, then points standard error
+at the null device; `start` waits for that word (at most 30 s, a hang detector; measured 3 ms on the Mac, 11 ms in the Linux image) and
+treats a guardian that exits first as no guard, logged. A new regression test,
+`an_owner_killed_the_moment_its_guarded_spawn_returns_leaves_no_child`, has the owner kill itself (SIGKILL) the moment its one guarded
+spawn returns: no sleep, no reader in between. With the wait taken out it failed 8 of 8 on macOS and at least 3 of 4 in the Linux image
+with the CI symptom; with the fix it passed 60 of 60 under `--stress-count` on macOS and 60 of 60 in the Linux image. Both owner tests'
+failures now carry what is left and the guardian's log (ER-27: the old message said only that something stayed). The whole-workspace
+run in the Linux image: 6 of 6 tries red before (whole run and the test alone on the workspace binary); 10 whole-workspace runs green
+after (5 before and 5 after the test change, 5221 and 5222 tests; arm64 CI image, 4 CPUs, num-cpus threads). Train g's
+integrator saw it red in 3 of 4 full container runs, so p is about 75 % to 100 % per run; 10 green runs exceed the 5 that p >= 50 %
+needs.
+**At the train merge** (train/2026-11-26-h, 2026-11-25) main already held ADR 0119 WP-1's own `serving` handshake (scope review 1,
+reapplied in 6fe47386d after this branch was cut from a base where WP-1 was pulled): the train kept WP-1's implementation
+(`SERVING_BOUND` 10 s, refusal exit 87, no answer logged and the start goes on) and this branch's regression test and failure
+diagnostics, and dropped this branch's second copy of the handshake (`await_serving`, `SERVE_WAIT`).
+**Class: a started helper was relied on before it said it was ready** (earlier: the webview ready handshake, memory "Webview paused
+startup"; the Chromium start judge, ADR 0031). A start that hands back a handle should wait for the helper's own word.
+
+## Writers that shared one temporary name lost data: every whole-file write goes through `paddock_env::write_atomic` (C169, 2026-11-25)
+
+- **What.** A hand-written "write `<name>.tmp`, then rename" lost data twice when two writers shared the temporary name: Spotter's
+  avatar `write_atomic` (`path.with_extension("tmp")`) and the pre-push reuse store. About sixty copies of the pattern existed across
+  the apps, the shared crates and the tools, with 16 different temporary names, most without a flush and none with a counter.
+- **Fix (the user's decision, 2026-11-25).** Each copy that writes a whole file now calls `paddock_env::write_atomic` (a name with a
+  per-process counter, a flush, a rename, removal on failure); a file that needs a mode or a security descriptor uses
+  `write_atomic_created`. `From<EnvError> for std::io::Error` keeps an `io::Result` at the call sites. A copy that kept a `.bak`
+  copies the old file first and then writes. Streaming writers (downloads to `.part`, a segment written in pieces, the privileged
+  file copy that hashes as it writes) and directory moves are not this pattern and stay.
+- **Ban.** Conformance C169 (report-only, ER-41, register entry in docs/gates.toml) flags a `rename(` whose source is named `tmp` or
+  `temp` in production code outside paddock-env; a rename used as a lock claim (`tools/heavy/src/lock.rs`), Dyno's privileged helper (its startup
+  checks the fixed `config.json.new` name, ER-38) and the two streaming writers carry `// conformance: write-atomic — <why>`.
+- **Rule of thumb.** A new file write reaches for `paddock_env::write_atomic` before any `File::create` and `rename`.
+- **Class (ER-21).** An instance of: a mechanism copied per app and fixed one copy at a time (rule 55). Earlier: the hand-written
+  process kill and the env-clear copies that C53 and the `disallowed-methods` entries retired.
+
+## A test hook in a shipped build is public API (rule 99, C170, 2026-11-25)
+
+- **What.** `paddock_ipc::Host::with_clock` (handshake.rs) was public with no gate, and an ADR draft copied the pattern for the
+  privileged dyno-helper daemon. A sweep found the same shape across the family: public clock setters (`with_clock`,
+  `with_time`), `for_tests` constructors (Pitcrew's `Http::for_tests` lets the service fetch plain `http://127.0.0.1`), a
+  process-wide test setter (`dyno_agent::build_id::set_watch_every_for_tests`) and whole fakes (`FakeClock`, `FakeWire`,
+  `FakePoster`, `FakeSource`, `fake_systemd`, `trust_fake`, Debrief's scripted LLM and fake Pitwall) compiled into every release.
+- **Fix.** Each hook sits behind `#[cfg(any(test, feature = "test-support"))]` (ADR 0073's name; the `testing` of paddock-ipc,
+  paddock-pitwall and paddock-siblings became `test-support` too, ADR 0073 WP-G); consumers enable it from `[dev-dependencies]`,
+  a crate's own integration tests through a self dev-dependency. Where production wiring used the same setter
+  (`Host::with_clock` from the link server, Pitwall's `Jobs::default`, Debrief's `AlertMutes::default`), it now calls a
+  crate-private function. `./dev check test-features` (C170, in the conformance job, report-only first) runs `cargo tree -e
+  normal` for every released binary and reports any crate with a test feature.
+- **Rule of thumb.** A setter that exists so a test can swap a default is a test hook: gate it the day it is written. A check
+  that reads a release build's features must use normal edges only: `clippy --all-targets` and nextest unify dev-dependency
+  features and never see the shipped graph.
+- **Not gated (open).** `paddock_service::testing` (`FakeSystem`) and `paddock_health::FakeToaster` are the shell demo's
+  backend on purpose (ADR 0073 X2); config structs whose public `clock` or `sleeper` field production fills with the system
+  implementation (12 fields in 11 structs) are ports, not setters, and were left as they are.
+- **Class (ER-21).** Test machinery reaching a release build. Earlier instances: Dyno's fakes in the release build (Dyno ADR
+  0033, 2026-11-08), Pitwall's fake engine behind a server flag (ADR 0073, 2026-11-09). ADR 0073's shared check (WP-0) was cut
+  on 2026-11-11; C170 is that check, cut to the feature graph.
+
 ## OrbStack's bind mount served stale files to the Linux container (2026-11-25)
 
 - **What.** After a file changed on the host, the CI-image container (`tools/linux-container.sh --id paddock --ci-image`, the push

@@ -130,11 +130,9 @@ fn plain(rel: &str) -> bool {
     !rel.is_empty() && p.components().count() == 1 && matches!(p.components().next(), Some(Component::Normal(_)))
 }
 
-/// Writes `bytes` to `path` through a temporary file and a rename (never a half-written file).
+/// Writes `bytes` to `path` through the shared atomic replace (never a half-written file).
 fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    let tmp = path.with_extension("tmp");
-    std::fs::write(&tmp, bytes)?;
-    std::fs::rename(&tmp, path)
+    Ok(paddock_env::write_atomic(path, bytes, false)?)
 }
 
 fn read_bounded(path: &Path) -> std::io::Result<Vec<u8>> {

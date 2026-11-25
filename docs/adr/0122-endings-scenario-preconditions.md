@@ -169,13 +169,13 @@ endpoint's own handle is the only place that sees unread input on every OS, and 
    check. `judge` folds `NoReason` into `Reset` exactly when `InputQueuedWhenRefused` is declared for that rig and scenario and its
    evidence is held; when it is exempt, missed or not measured, `NoReason` stays.
 
-6. **The whole precondition verdict starts report-only.** Missed and not measured both print a warning line, and the scenario is
-   judged and ratcheted as today, under the id `test:endings-preconditions` in `docs/gates.toml` `[[report_only]]`: owner `ADR 0122`,
-   `since` the day it lands on main, `review_by` at most 14 days later (rule 5), `approved = "user"`. The register has no run-id field
-   (`tools/paddock-dev/src/gates/register.rs`, `Stamp`: reason, owner, since, review_by, approved), so the first green run id goes in
-   `reason`, as the C128 and C138 entries do. The flip criterion: a complete green CI run on Linux, macOS and Windows in which every
-   declared, not exempt precondition was held; pitcrew-service busy is outside it through its exemption. **The flip to blocking is its
-   own later step** (WP-5): remove the entry, and a miss or not measured becomes a `RigFailure`.
+6. **The whole precondition verdict starts report-only.** Missed and not measured both print a warning line naming
+   `test:endings-preconditions`, and the scenario is judged and ratcheted as today. The verdict runs inside the endings tests, not as a
+   gate of its own, so it has no `docs/gates.toml` entry (C100 accepts only gates it can find); the constant `PRECONDITION_VERDICT` holds
+   the state, and its doc comment records the window the user approved on 2026-11-25: report-only, review by 2026-12-09. The flip
+   criterion: a complete green CI run on Linux, macOS and Windows in which every declared, not exempt precondition was held;
+   pitcrew-service busy is outside it through its exemption. **The flip to blocking is its own later step** (WP-5): set the constant to
+   `Blocking`, record that run id in its doc comment, and a miss or not measured becomes a `RigFailure`.
 
 ## What it removes
 

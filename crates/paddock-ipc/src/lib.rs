@@ -33,7 +33,7 @@ pub mod limits;
 pub mod link;
 pub mod peer;
 mod slot;
-#[cfg(feature = "testing")]
+#[cfg(feature = "test-support")]
 pub mod testing;
 pub mod token;
 pub mod trust;

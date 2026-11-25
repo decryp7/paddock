@@ -2,7 +2,7 @@
  "findings": [
   {
    "check": "C123",
-   "severity": "warn",
+   "severity": "error",
    "rule": 3,
    "file": "crates/a/src/lib.rs",
    "line": 7,
@@ -11,7 +11,7 @@
   },
   {
    "check": "C123",
-   "severity": "warn",
+   "severity": "error",
    "rule": 3,
    "file": "crates/a/tests/it/bad.rs",
    "line": 2,
@@ -20,7 +20,7 @@
   },
   {
    "check": "C123",
-   "severity": "warn",
+   "severity": "error",
    "rule": 3,
    "file": "crates/a/tests/it/bad.rs",
    "line": 3,
@@ -29,7 +29,7 @@
   },
   {
    "check": "C123",
-   "severity": "warn",
+   "severity": "error",
    "rule": 3,
    "file": "crates/a/tests/it/bad.rs",
    "line": 6,
@@ -38,7 +38,7 @@
   },
   {
    "check": "C123",
-   "severity": "warn",
+   "severity": "error",
    "rule": 3,
    "file": "crates/a/tests/it/bad.rs",
    "line": 7,
@@ -47,7 +47,7 @@
   },
   {
    "check": "C123",
-   "severity": "warn",
+   "severity": "error",
    "rule": 3,
    "file": "crates/a/tests/it/bound.rs",
    "line": 3,
@@ -56,7 +56,7 @@
   },
   {
    "check": "C123",
-   "severity": "warn",
+   "severity": "error",
    "rule": 3,
    "file": "crates/a/tests/it/bound.rs",
    "line": 4,
@@ -65,7 +65,7 @@
   },
   {
    "check": "C123",
-   "severity": "warn",
+   "severity": "error",
    "rule": 3,
    "file": "crates/a/tests/it/bound.rs",
    "line": 5,
@@ -74,7 +74,7 @@
   },
   {
    "check": "C123",
-   "severity": "warn",
+   "severity": "error",
    "rule": 3,
    "file": "crates/a/tests/it/waived.rs",
    "line": 7,
@@ -83,7 +83,7 @@
   },
   {
    "check": "C123",
-   "severity": "warn",
+   "severity": "error",
    "rule": 3,
    "file": "crates/b/src/lib.rs",
    "line": 8,
@@ -92,7 +92,7 @@
   },
   {
    "check": "C123",
-   "severity": "warn",
+   "severity": "error",
    "rule": 3,
    "file": "crates/b/tests/it/gaps.rs",
    "line": 2,
@@ -101,7 +101,7 @@
   },
   {
    "check": "C123",
-   "severity": "warn",
+   "severity": "error",
    "rule": 3,
    "file": "crates/b/tests/it/gaps.rs",
    "line": 3,
@@ -110,7 +110,7 @@
   },
   {
    "check": "C123",
-   "severity": "warn",
+   "severity": "error",
    "rule": 3,
    "file": "crates/b/tests/it/gaps.rs",
    "line": 4,
@@ -119,7 +119,7 @@
   },
   {
    "check": "C123",
-   "severity": "warn",
+   "severity": "error",
    "rule": 3,
    "file": "crates/b/tests/it/gaps.rs",
    "line": 5,
@@ -128,7 +128,7 @@
   },
   {
    "check": "C123",
-   "severity": "warn",
+   "severity": "error",
    "rule": 3,
    "file": "crates/b/tests/it/gaps.rs",
    "line": 6,
@@ -137,7 +137,7 @@
   },
   {
    "check": "C123",
-   "severity": "warn",
+   "severity": "error",
    "rule": 3,
    "file": "crates/b/tests/it/gaps.rs",
    "line": 8,
@@ -145,6 +145,6 @@
    "fix": "Start the child with `paddock_testkit::TestCommand::new(..)` (an empty environment plus the listed one, a private HOME and TMPDIR); add what the test needs with `.env(\"NAME\", value)`. A justified case carries `// conformance: test-env — <why>`."
   }
  ],
- "errors": 0,
- "warnings": 16
+ "errors": 16,
+ "warnings": 0
 }

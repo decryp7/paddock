@@ -23,6 +23,7 @@ impl Http {
     }
 
     /// A client that also fetches `http://127.0.0.1` (tests with a local server).
+    #[cfg(test)]
     pub fn for_tests() -> Self {
         Self::build(true)
     }

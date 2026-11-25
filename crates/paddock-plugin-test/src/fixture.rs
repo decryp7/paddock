@@ -6,7 +6,7 @@ use paddock_ipc::{RemoteError, codes};
 use paddock_plugin_api::host_file::{HostFile, HostFileRef};
 use paddock_plugin_api::output::OutputWriter;
 use paddock_plugin_api::prelude::*;
-use paddock_plugin_api::protocol::{McpBudget, McpToolInfo, ViewInfo};
+use paddock_plugin_api::protocol::{McpBudget, McpToolInfo, Progress, ViewInfo};
 use paddock_plugin_api::tools::ToolTask;
 use paddock_settings::{
     ApplyError, Configurable, FieldKind, SectionOwner, SettingField, SettingsSection, ValidValues,
@@ -246,7 +246,7 @@ impl Tool for FixtureTool {
                     kind: "fixture".into(),
                     stoppable: true,
                 });
-                ctx.report("job-1", Some(0.5), "halfway");
+                ctx.report("job-1", Progress::new(0.5).ok(), "halfway");
                 Ok(json!("started"))
             }
             "save" => {

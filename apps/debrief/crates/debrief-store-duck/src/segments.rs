@@ -184,6 +184,7 @@ impl SegmentWriter {
                 Promotion::default()
             }
         };
+        // conformance: write-atomic — a segment is streamed in pieces (never held whole in memory) under one name per writer, which the store lock gives one writer at a time
         std::fs::rename(&tmp, self.dir.join(&self.file)).with_context(|| format!("moving {} into place", tmp.display()))?;
         Ok(Segment {
             fields: self.stats.fields(),

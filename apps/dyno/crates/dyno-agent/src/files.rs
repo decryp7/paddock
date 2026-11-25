@@ -3,7 +3,6 @@
 
 use serde::de::DeserializeOwned;
 use serde::Serialize;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 
 /// The largest state file read.
@@ -15,25 +14,14 @@ fn backup_of(path: &Path) -> PathBuf {
     PathBuf::from(s)
 }
 
-/// Writes `value` as pretty JSON: to a temp file next to `path`, flushed, then renamed over it; the previous file
+/// Writes `value` as pretty JSON: through `paddock_env::write_atomic` (its own temporary file, flushed, then renamed over it); the previous file
 /// becomes `<path>.bak`.
 pub fn save<T: Serialize>(path: &Path, value: &T) -> std::io::Result<()> {
     let text = serde_json::to_vec_pretty(value).map_err(std::io::Error::other)?;
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir)?;
-    }
-    let mut tmp_name = path.as_os_str().to_owned();
-    tmp_name.push(".tmp");
-    let tmp = PathBuf::from(tmp_name);
-    {
-        let mut f = std::fs::File::create(&tmp)?;
-        f.write_all(&text)?;
-        f.sync_all()?;
-    }
     if path.exists() {
         let _ = std::fs::copy(path, backup_of(path));
     }
-    std::fs::rename(&tmp, path)
+    Ok(paddock_env::write_atomic(path, &text, false)?)
 }
 
 fn read_text(path: &Path) -> Option<String> {

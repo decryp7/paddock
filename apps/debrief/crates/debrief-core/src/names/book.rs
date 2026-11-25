@@ -396,9 +396,11 @@ impl NameBook {
 
     /// Writes the book atomically.
     pub fn save(&self, path: &Path) -> std::io::Result<()> {
-        let tmp = path.with_extension("tmp");
-        std::fs::write(&tmp, serde_json::to_vec(self).map_err(std::io::Error::other)?)?;
-        std::fs::rename(&tmp, path)
+        Ok(paddock_env::write_atomic(
+            path,
+            &serde_json::to_vec(self).map_err(std::io::Error::other)?,
+            false,
+        )?)
     }
 
     /// The scope of `group` and whether it can have AI aliases (entities of any kind, not field values).

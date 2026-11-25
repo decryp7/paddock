@@ -139,16 +139,19 @@ pub fn stable_copy(exe: &Path, data_dir: &Path) -> std::io::Result<PathBuf> {
     let bin = data_dir.join("bin");
     std::fs::create_dir_all(&bin)?;
     let target = bin.join(name);
-    let mut tmp_name = name.to_os_string();
-    tmp_name.push(".new");
-    let tmp = bin.join(tmp_name);
-    std::fs::copy(exe, &tmp)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755))?;
-    }
-    std::fs::rename(&tmp, &target)?;
+    let bytes = std::fs::read(exe)?;
+    paddock_env::write_atomic_created(&target, &bytes, &mut |tmp| {
+        let f = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(tmp)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            f.set_permissions(std::fs::Permissions::from_mode(0o755))?;
+        }
+        Ok(f)
+    })?;
     Ok(target)
 }
 

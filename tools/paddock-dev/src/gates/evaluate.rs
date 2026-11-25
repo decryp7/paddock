@@ -810,7 +810,7 @@ mod tests {
     use crate::gates::tree::MemTree;
 
     const LIST: &str = r#"[{"id":"C06","scope":"root","mode":"gate","needs":"all","file":"conformance/src/checks/C06.mjs"},{"id":"C13","scope":"apps","mode":"gate","needs":"rust","file":"conformance/src/checks/C13.mjs"}]"#;
-    const CI: &str = "on:\n  pull_request:\njobs:\n  c:\n    runs-on: ubuntu-latest\n    steps:\n      - run: node conformance/bin/paddock-conformance.mjs --app paddock --root . --only C06\n      - run: ./dev gates check\n";
+    const CI: &str = "on:\n  pull_request:\njobs:\n  c:\n    runs-on: ubuntu-latest\n    steps:\n      - run: node conformance/bin/paddock-conformance.mjs --app paddock --root . --only C06\n      - run: ./dev gates check\n      - run: ./dev check test-features\n";
     const REG_HEAD: &str = "version = 1\n[docs]\ninclude = [\"AGENTS.md\"]\nexclude = []\n[measurements]\nfiles = [\"notes/*.txt\"]\n";
 
     fn run(register: Option<&str>, files: &[(&str, &str)], contracts: &[(&str, &str)]) -> Outcome {
@@ -1174,6 +1174,6 @@ mod tests {
         let o = run(Some(REG_HEAD), &[], &[]);
         let s = summary(&o.rows);
         assert!(s.contains("| conformance | 2 |"), "{s}");
-        assert!(s.contains("| dev-check | 1 | 1 |"), "{s}");
+        assert!(s.contains("| dev-check | 2 | 2 |"), "{s}");
     }
 }

@@ -18,6 +18,8 @@ path = "src/bin/fake_ffmpeg.rs"
 test = false
 
 [dependencies]
+# The shared atomic file replace (a temporary name of its own per write).
+paddock-env = { path = "../../../../crates/paddock-env" }
 debrief-core = { path = "../debrief-core" }
 debrief-ai = { path = "../debrief-ai" }
 debrief-image = { path = "../debrief-image" }
@@ -35,6 +37,8 @@ lzma-rs = "0.3"
 ts-rs = { version = "11.1", optional = true }
 
 [dev-dependencies]
+debrief-image = { path = "../debrief-image", features = ["test-support"] }
+debrief-ai = { path = "../debrief-ai", features = ["test-support"] }
 tempfile.workspace = true
 proptest.workspace = true
 

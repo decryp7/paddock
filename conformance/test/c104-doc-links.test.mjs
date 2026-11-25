@@ -123,3 +123,11 @@ test('C104 shrink-only is judged against the merge base: main dropping an entry 
   const f = await findingsOf('C104', root, { options: { baseRef: 'main' } });
   assert.deepEqual(f.filter((x) => x.severity === 'error'), []);
 });
+
+test('C104 compares link targets case-exactly, even on a case-insensitive file system', async () => {
+  const wrong = makeApp({ ...base, 'docs/lessons.md': 'see [ER-14](RULES.md) and [up](../agents.md) and [d](../Docs)\n' });
+  const f = await findingsOf('C104', wrong, { options: nogit });
+  assert.deepEqual(f.map((x) => [x.file, x.line, x.severity]), [['docs/lessons.md', 1, 'error'], ['docs/lessons.md', 1, 'error'], ['docs/lessons.md', 1, 'error']]);
+  const right = makeApp({ ...base, 'docs/lessons.md': 'see [r](rules.md) and [up](../AGENTS.md) and [d](../docs)\n' });
+  assert.deepEqual(await findingsOf('C104', right, { options: nogit }), [], 'positive control: the exact case passes');
+});

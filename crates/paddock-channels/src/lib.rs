@@ -20,6 +20,7 @@ mod config;
 mod control;
 mod dispatch;
 mod error;
+#[cfg(any(test, feature = "test-support"))]
 mod fake;
 mod http;
 mod mail;
@@ -37,6 +38,7 @@ pub use dispatch::{
     DEFAULT_TIMEOUT, Delivery, Dispatcher, Phase, Progress, RetryPolicy, TEST_KIND,
 };
 pub use error::SendError;
+#[cfg(any(test, feature = "test-support"))]
 pub use fake::{FakeMail, FakePoster};
 pub use http::{
     EgressPoster, HttpPoster, MAX_HEADER_VALUE, PostRequest, PostResponse, channel_policy,

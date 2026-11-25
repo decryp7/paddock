@@ -13,6 +13,8 @@ publish = false
 doctest = false # doctests are off (crates/README.md, "Doctests")
 
 [dependencies]
+# The shared atomic file replace (a temporary name of its own per write).
+paddock-env = { path = "../../../../crates/paddock-env" }
 spotter-core.workspace = true
 spotter-sources.workspace = true
 reqwest.workspace = true

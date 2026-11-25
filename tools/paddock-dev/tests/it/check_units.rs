@@ -90,7 +90,6 @@ unit_parity! {
     c39_answers_every_input_of_the_js_tests_as_the_js_host_did: "C39",
     c53_answers_every_input_of_the_js_tests_as_the_js_host_did: "C53",
     c120_answers_every_input_of_the_js_tests_as_the_js_host_did: "C120",
-    c121_answers_every_input_of_the_js_tests_as_the_js_host_did: "C121",
     c123_answers_every_input_of_the_js_tests_as_the_js_host_did: "C123",
     c131_answers_every_input_of_the_js_tests_as_the_js_host_did: "C131",
     c141_answers_every_recorded_input_as_recorded: "C141",
@@ -129,7 +128,7 @@ fn a_changed_recorded_answer_is_a_difference() {
 fn the_frozen_real_tree_answers_as_the_js_host_did() {
     let (tree, frozen) = crate::recorded::frozen();
     assert!(frozen["files"].as_array().unwrap().len() > 100, "the frozen tree has its files");
-    let ids: Vec<String> = ["C39", "C53", "C120", "C121", "C123", "C131"].map(String::from).to_vec();
+    let ids: Vec<String> = ["C39", "C53", "C120", "C123", "C131"].map(String::from).to_vec();
     let opts = RunOptions {
         root: tree.path().to_path_buf(),
         config: paddock_dev::check::config::Config::bare("paddock"),

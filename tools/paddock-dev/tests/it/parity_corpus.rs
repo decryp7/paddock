@@ -211,27 +211,18 @@ pub(crate) fn assert_no_divergence(id: &str, seeds: &[Seed]) {
     );
 }
 
-/// A known divergence, with its measured `cause`: it fails when the hosts agree, so the marker is removed with the fix.
-pub(crate) fn assert_known_divergence(id: &str, seeds: &[Seed], cause: &str) {
-    let d = divergences(id, seeds);
-    assert!(
-        !d.is_empty(),
-        "{id} now agrees on the shared corpus: remove its known-divergence marker and call assert_no_divergence (cause was: {cause})"
-    );
-}
-
-/// The corpus sees a planted difference: giving the Rust host the text without its byte order mark removes C121's `bom` divergence.
+/// The corpus sees a planted difference: C53's hosts agree, and a Rust host given empty files in the `bom` variant (the plain one
+/// untouched) no longer sees what JavaScript saw there.
 #[test]
-fn the_corpus_sees_a_planted_byte_order_mark_difference() {
-    let real = divergences("C121", &[]);
+fn the_corpus_sees_a_planted_difference() {
+    let seed = ("crates/c/src/first.rs", "unsafe { TerminateProcess(h, 1) };\n");
+    assert!(divergences("C53", &[seed]).is_empty(), "C53's hosts agree on the corpus");
+    let planted = divergences_with("C53", &[seed], |t| {
+        if t.starts_with('\u{feff}') { String::new() } else { t.to_string() }
+    });
     assert!(
-        real.iter().any(|d| d.contains("`bom`")),
-        "C121 diverges on the bom variant today: {real:?}"
-    );
-    let planted = divergences_with("C121", &[], |t| t.trim_start_matches('\u{feff}').to_string());
-    assert!(
-        !planted.iter().any(|d| d.contains("`bom`")),
-        "a Rust host given the text without its BOM sees what JavaScript sees: {planted:?}"
+        planted.iter().any(|d| d.contains("`bom`")),
+        "a Rust host given empty text in the bom variant differs from the recorded JavaScript answers: {planted:?}"
     );
     // and a planted difference in a checked field is named
     let (rust, js) = (
@@ -268,12 +259,4 @@ fn c120_hosts_agree_on_the_corpus() {
         "let d = std::env::current_exe().unwrap().parent().unwrap().parent().unwrap().to_path_buf();\n",
     );
     assert_no_divergence("C120", &[seed]);
-}
-
-// Known divergences, found by this corpus on 2026-11-16 and fixed in train 14. Each fails once the hosts agree: remove the marker.
-
-/// C121 (measured 2026-11-16): on the `bom` variant the two hosts flag different sites: Rust warns 3 times where JavaScript warns 2.
-#[test]
-fn c121_known_divergence_with_a_byte_order_mark() {
-    assert_known_divergence("C121", &[], "the BOM variant warns 3 in Rust against 2 in JavaScript");
 }

@@ -148,11 +148,8 @@ impl RecordStore {
         let Some(path) = &self.path else {
             return Ok(());
         };
-        std::fs::create_dir_all(path.parent().unwrap_or(Path::new(".")))?;
         let text = serde_json::to_vec_pretty(rec).map_err(std::io::Error::other)?;
-        let tmp = path.with_extension("json.tmp");
-        std::fs::write(&tmp, text)?;
-        std::fs::rename(&tmp, path)
+        Ok(paddock_env::write_atomic(path, &text, false)?)
     }
 }
 

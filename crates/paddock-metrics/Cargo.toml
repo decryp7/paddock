@@ -23,5 +23,6 @@ paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
 
 [dev-dependencies]
+paddock-jobs = { workspace = true, features = ["test-support"] }
 paddock-testkit = { workspace = true }
 serde_json = "1"

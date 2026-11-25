@@ -231,12 +231,7 @@ pub struct Listed {
 }
 
 fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
-    let tmp = path.with_extension("tmp");
-    std::fs::write(&tmp, bytes)?;
-    std::fs::rename(&tmp, path).map_err(|e| {
-        let _ = std::fs::remove_file(&tmp);
-        VideoError::from(e)
-    })
+    paddock_env::write_atomic(path, bytes, false).map_err(|e| VideoError::from(std::io::Error::from(e)))
 }
 
 impl VideoFolder {

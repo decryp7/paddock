@@ -17,7 +17,7 @@
 //!    promise) followed directly by an `expect(` that reads the DOM (`querySelector`, `nativeElement`, `textContent`, `getBy`,
 //!    `locator`).
 //!
-//! **Report-only (warnings) until its first green CI run that includes it (ER-41), with that run id recorded in docs/gates.toml.**
+//! **Blocking (errors, mode gate) since its first green run on the real tree, ci.yml run 9065 (11cd82593, 2026-11-25; ER-41).**
 //! Lists only shrink (ER-46): no baseline file; a baseline needs the user's approval.
 
 use super::finding::Finding;
@@ -236,7 +236,7 @@ impl Check for C154 {
     }
 
     fn mode(&self) -> Mode {
-        Mode::ReportOnly
+        Mode::Gate
     }
 
     fn control(&self) -> Control {
@@ -293,7 +293,7 @@ impl Check for C154 {
                     "fixed-wait" => FIX_FLUSH,
                     _ => FIX_LAZY,
                 };
-                findings.push(Finding::warn("C154", 49, f, s.line, format!("[{}] {}", s.rule, s.message), fix));
+                findings.push(Finding::error("C154", 49, f, s.line, format!("[{}] {}", s.rule, s.message), fix));
             }
         }
         CheckOutput {

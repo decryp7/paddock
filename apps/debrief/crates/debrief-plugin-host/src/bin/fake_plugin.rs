@@ -274,7 +274,7 @@ fn main() {
         let exe = std::env::current_exe().unwrap_or_default();
         let stem = exe.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
         if stem.ends_with("-hang") {
-            let _ = std::fs::write(exe.with_extension("pid"), std::process::id().to_string());
+            let _ = std::fs::write(exe.with_extension("pid"), format!("{}\n", std::process::id()));
             park();
         } else if stem.ends_with("-huge") {
             use std::io::Write;
