@@ -4325,3 +4325,19 @@ startup"; the Chromium start judge, ADR 0031). A start that hands back a handle 
 - **Fix.** Both read main's own line from the push event's `before` (`green::push_chain`, falling back to the old line without a
   usable `before`), and a landing run whose base is an older main is still reused when its diff holds every path of the push's
   (`green::diff_covers`). Tests read runs 9030, 9045, 9054 and 9056 as recorded (`tests/ci-runs/reuse-push-base`).
+
+## Members on an old base were pulled from trains i, k and m (2026-11-25, NEW-members-merge-main)
+- **What.** Five members were pulled from trains i, k and m because their base was older than main. The five:
+  - the `testing` to `test-support` feature rename (main, 031a79c02): `paddock-ipc`'s endings tests still gated on the
+    old name (fixed in `3258361e7`);
+  - the ADR 0119 job API;
+  - the reuse-test fixtures;
+  - the heavy share design (the lock folder moved on main: `cd8625db9`, `9d9dbd867`);
+  - the gitleaks job.
+- **Why.** The merge check diffed each member against the train and caught stale reverts (ER-8), but nothing refused a member whose
+  base was older than main, so a member's green gates proved nothing about the tree it would be merged into.
+- **Fix.** The rule NEW-members-merge-main: a member merges current main and re-runs its member gate on that tip before it joins a
+  train; the merge check refuses a member on an old base (the stale-base check made blocking on `ci/old-base-block`).
+- **Class: a green result on an old base was taken for a green result on the tree it joins** (earlier: ER-49 reuse of a landing run,
+  ER-8 combined-tree failures, train 8's eight combination failures).
+
