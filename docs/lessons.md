@@ -4222,3 +4222,18 @@ raised timeout as the fix.
   stops a lane that Gitea refuses (no crash loop) and prints the register command; its `status` shows each lane's last start line.
 - **Open.** The cause of the lost registrations is not known (the server side was not read). A check that each declared runner is
   online belongs to ADR 0074's host inventory.
+
+## The Mac runner's Full Disk Access ended with every update (2026-11-25, fix/mac-ci-stable-identity)
+- **What.** The Mac CI runner and the test browsers it starts are ad-hoc signed: their designated requirement is their cdhash, so
+  TCC treats each runner update and each new browser pin as a new program. On 2026-11-09 the system TCC database had Full Disk
+  Access rows for all three runners that no longer matched (auth_value 0); Chrome for Testing and Playwright's browsers are
+  ad-hoc too (`codesign -dv`: `Signature=adhoc`), and they are their own responsible process, so the runner's grant does not cover them.
+- **Why it matters now.** Since ADR 0120 the runner is a LaunchDaemon: TCC checks go to the system `tccd` ("user tccd
+  unavailable") and a missing grant is a silent deny on `/Volumes/vault-dev`, never a prompt. The first daemon run (9063, job
+  50120, `dev-tool.yml` on main) was green with no Removable Volumes request, because the runner's current cdhash still had its
+  grant; the next runner update would have lost it.
+- **Fix in this change.** One self-signed identity (`tools/mac-ci-signing.sh`): `mac-runner-move.sh install` signs the runner,
+  `install-test-browser.mjs` signs Chrome for Testing, `dyno-screenshots.yml` keeps Playwright's browsers on the boot disk and signs
+  them. The user grants Full Disk Access once by that identity (docs/dev-setup.md, "Full Disk Access by a stable identity").
+- **Open.** Whether the TCC grant for the re-signed bundle holds was not measured before the user's one-time steps; the check is the
+  TCC log after the first Mac run that starts a browser.

@@ -14,7 +14,8 @@ import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { join, win32 } from 'node:path';
+import { dirname, join, win32 } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { CFT_PLATFORMS } from './pin-runtime.mjs';
 import { entryFor, platformKey, readCatalogue } from './runtime-catalogue.mjs';
 import { isMain } from '../src/util/is-main.mjs';
@@ -56,31 +57,33 @@ export function executableIn(dir, id) {
 
 /**
  * Installs the pinned build into `dir` unless that version is already there, and lets app containers read it either way
- * (`grantCommand`). `fetchBytes(url)`, `extract(zip, dir)` and `grant(dir)` are injectable. Returns the executable path.
+ * (`grantCommand`), and on macOS signs it with the Mac CI identity (`signCommand`). `fetchBytes(url)`, `extract(zip, dir)`,
+ * `grant(dir)` and `sign(exe)` are injectable. Returns the executable path.
  */
-export async function install({ pin, dir, id = platformId(), fetchBytes = defaultFetch, extract = defaultExtract, grant = defaultGrant }) {
+export async function install({ pin, dir, id = platformId(), fetchBytes = defaultFetch, extract = defaultExtract, grant = defaultGrant, sign = defaultSign }) {
   const sha = pin.sums[id];
   if (!sha) throw new Error(`no checksum for ${id} in the pin`);
-  return installBuild({ version: pin.version, url: urlFor(pin, id), sha, id, dir, fetchBytes, extract, grant });
+  return installBuild({ version: pin.version, url: urlFor(pin, id), sha, id, dir, fetchBytes, extract, grant, sign });
 }
 
 /**
  * Installs the build a `paddock-runtime` catalogue pins for `key` (this machine's by default) into `dir`. Returns the executable.
  */
-export async function installFromCatalogue({ text, dir, key = platformKey(), fetchBytes = defaultFetch, extract = defaultExtract, grant = defaultGrant }) {
+export async function installFromCatalogue({ text, dir, key = platformKey(), fetchBytes = defaultFetch, extract = defaultExtract, grant = defaultGrant, sign = defaultSign }) {
   const cat = readCatalogue(text);
   const e = entryFor(cat, key);
   const id = CFT_PLATFORMS[key];
   if (!id) throw new Error(`Chrome for Testing has no build for ${key}`);
   if (!/^[0-9a-f]{64}$/.test(e.sha256 ?? '')) throw new Error(`the checksum for ${key} is not a SHA-256`);
-  return installBuild({ version: cat.version, url: e.url, sha: e.sha256, id, dir, fetchBytes, extract, grant });
+  return installBuild({ version: cat.version, url: e.url, sha: e.sha256, id, dir, fetchBytes, extract, grant, sign });
 }
 
-async function installBuild({ version, url, sha, id, dir, fetchBytes, extract, grant }) {
+async function installBuild({ version, url, sha, id, dir, fetchBytes, extract, grant, sign }) {
   const exe = executableIn(dir, id);
   const stamp = join(dir, '.pinned-version');
   if (existsSync(stamp) && readFileSync(stamp, 'utf8').trim() === version && existsSync(exe)) {
     grant(dir);
+    sign(exe);
     return exe;
   }
   const bytes = await fetchBytes(url);
@@ -99,7 +102,48 @@ async function installBuild({ version, url, sha, id, dir, fetchBytes, extract, g
   }
   if (!existsSync(exe)) throw new Error(`the archive did not contain ${exe}`);
   grant(dir);
+  sign(exe);
   return exe;
+}
+
+/** tools/mac-ci-signing.sh, the one signer of the Mac CI identity. */
+export const SIGNING_TOOL = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'tools', 'mac-ci-signing.sh');
+
+/**
+ * The program and arguments that sign the browser bundle of `exe` with the Mac CI runner's stable identity (macOS only; `null`
+ * elsewhere). Chrome for Testing is its own responsible process (it disclaims its parent), so the runner's Full Disk Access does
+ * not cover it, and its ad-hoc signature changes with every pin: a LaunchDaemon cannot show the Removable Volumes prompt, so
+ * the browser was denied silently on the external work volume. Signed with the identity, the user's one Full Disk Access grant
+ * for the bundle id com.google.chrome.for.testing stays valid for every copy and every pin (docs/dev-setup.md, "Mac CI
+ * runner"). Only where PADDOCK_CI_SIGNING_KEYCHAIN is set (the runner's environment): a developer's Mac and the tests never
+ * sign or unlock anything (ER-14). `--if-configured`: a set variable but no identity gives a notice. Idempotent.
+ */
+export function signCommand(exe, platform = process.platform, env = process.env) {
+  if (platform !== 'darwin' || !env.PADDOCK_CI_SIGNING_KEYCHAIN) return null;
+  const app = exe.replace(/\/Contents\/MacOS\/[^/]+$/, '');
+  if (app === exe || !app.endsWith('.app')) return null; // not a macOS build (a test installing another platform's)
+  return ['bash', [SIGNING_TOOL, 'sign', '--if-configured', app]];
+}
+
+/**
+ * Runs `signCommand` for `exe`, its output on standard error (standard output carries CHROMIUM_TEST_PATH). A failure is an
+ * error: with the identity configured, an unsigned browser would be denied later with no message (ER-27). `command` and
+ * `run` are injectable.
+ */
+export function defaultSign(
+  exe,
+  { command = signCommand(exe), run = (cmd, args) => execFileSync(cmd, args, { stdio: ['ignore', 2, 2], timeout: 5 * 60 * 1000 }), notice = (m) => console.error(m), platform = process.platform } = {},
+) {
+  if (!command) {
+    if (platform === 'darwin' && exe.includes('.app/'))
+      notice(`::notice::install-test-browser: ${exe} keeps its ad-hoc signature (PADDOCK_CI_SIGNING_KEYCHAIN is not set; docs/dev-setup.md, "Mac CI runner")`);
+    return;
+  }
+  try {
+    run(command[0], command[1]);
+  } catch (e) {
+    throw new Error(`could not sign ${exe} with the Mac CI identity (${e.message}); next: bash ${SIGNING_TOOL} identity, then the lines above`);
+  }
 }
 
 /**

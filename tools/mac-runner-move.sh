@@ -26,8 +26,13 @@
 # status: read-only; where each lane's plist is, which launchd domain runs it, its state, pid, process user and last
 # registration line.
 #
+# The runner's program is signed with the Mac CI identity (tools/mac-ci-signing.sh, identifier net.decryptology.gitea-runner) as
+# the user, after the old runner stopped and before the daemon starts, so a Full Disk Access grant given once to that identity
+# stays across runner updates: after replacing the runner binary, run install again. A missing identity fails the preflight
+# (next: tools/mac-ci-signing.sh create); --no-sign leaves the program as it is. status shows whether it carries the identity.
+#
 # Tests point PADDOCK_RUNNER_MOVE_SYSROOT at a scratch folder (it prefixes /Library) and put shims first on PATH.
-# PADDOCK_TOOLS_OS overrides `uname -s`.
+# PADDOCK_TOOLS_OS overrides `uname -s`; PADDOCK_MAC_SIGNING replaces tools/mac-ci-signing.sh.
 set -uo pipefail
 
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -37,7 +42,8 @@ PARKED='.before-adr0120'
 
 cmd="${1:-}"
 [ $# -gt 0 ] && shift
-user=""; jobs=4; prefix="net.decryptology.gitea-runner."; dry=0; verify_max=90
+user=""; jobs=4; prefix="net.decryptology.gitea-runner."; dry=0; verify_max=90; sign=1
+RUNNER_ID='net.decryptology.gitea-runner'
 daemons=(); retire=()
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -48,6 +54,7 @@ while [ $# -gt 0 ]; do
     --verify-max) verify_max="${2:?}"; shift ;;
     --label-prefix) prefix="${2:?}"; shift ;;
     --dry-run) dry=1 ;;
+    --no-sign) sign=0 ;;
     *) echo "mac-runner-move: unknown option $1 (see the header of $0)" >&2; exit 2 ;;
   esac
   shift
@@ -100,6 +107,13 @@ source_agent() {
   if [ -f "$live$PARKED" ]; then printf '%s' "$live$PARKED"; elif [ -f "$live" ]; then printf '%s' "$live"; else return 1; fi
 }
 value() { plutil -extract "$1" raw -o - "$2" 2>/dev/null; }
+signing="${PADDOCK_MAC_SIGNING:-$here/mac-ci-signing.sh}"
+# tools/mac-ci-signing.sh as the user (the identity is in the user's keychain), with its exit code.
+as_user_signing() {
+  if [ "$(id -u)" = "$uid" ]; then bash "$signing" "$@"; else sudo -u "$user" env HOME="$home" bash "$signing" "$@"; fi
+}
+# A lane's runner program, from its original agent.
+program_of() { local src; src=$(source_agent "$1") && value ProgramArguments.0 "$src"; }
 loaded() { launchctl print "$1/$2" >/dev/null 2>&1; }
 
 # Renders a lane's daemon plist from the template into $2. $1 = lane name.
@@ -199,6 +213,15 @@ status() {
     if [ -n "$log" ] && [ -f "$log" ]; then
       echo "    last start    $(grep -E 'declare successfully|unregistered runner' "$log" | tail -1 | cut -c1-200)"
     fi
+    local program out rc
+    if program=$(program_of "$name"); then
+      out=$(as_user_signing check --identifier "$RUNNER_ID" "$program" 2>&1); rc=$?
+      case $rc in
+        0) echo "    signature     the Mac CI identity ($RUNNER_ID)" ;;
+        6) echo "    signature     not measured: no Mac CI identity (bash $signing create)" ;;
+        *) echo "    signature     NOT the Mac CI identity: $(printf '%s' "$out" | grep -E 'has:' | head -1 | sed 's/^ *//')" ;;
+      esac
+    fi
   done
 }
 
@@ -218,6 +241,20 @@ preflight() {
     for name in ${daemons[@]+"${daemons[@]}"}; do
       if why=$(render "$name" "$tmp/$name.daemon.plist"); then echo "  ok    $name: daemon plist rendered"; else
         echo "  fail  $name: $why"; problems=$((problems + 1)); fi
+    done
+    for name in ${daemons[@]+"${daemons[@]}"}; do
+      local program rc
+      [ "$sign" -eq 1 ] || { echo "  warn  $name: --no-sign: the runner keeps its signature; a Full Disk Access grant to an ad-hoc runner ends with the next update"; continue; }
+      program=$(program_of "$name") || continue
+      as_user_signing check --identifier "$RUNNER_ID" "$program" >/dev/null 2>&1; rc=$?
+      case $rc in
+        0) echo "  ok    $name: $program carries the Mac CI identity" ;;
+        5) echo "  ok    $name: $program will be signed with the Mac CI identity ($RUNNER_ID)" ;;
+        6) echo "  fail  $name: no Mac CI signing identity for $user"
+           echo "        next: as $user, without sudo: bash $signing create  (or pass --no-sign)"
+           problems=$((problems + 1)) ;;
+        *) echo "  fail  $name: cannot check the signature of $program (tools/mac-ci-signing.sh check exit $rc)"; problems=$((problems + 1)) ;;
+      esac
     done
     for name in ${retire[@]+"${retire[@]}"}; do
       if source_agent "$name" >/dev/null; then echo "  ok    $name: agent found (to retire)"
@@ -284,6 +321,15 @@ install() {
     stop_agent "$name"
     park_agent "$name"
     loaded system "$label" && step launchctl bootout "system/$label"
+    if [ "$sign" -eq 1 ]; then
+      local program; program=$(program_of "$name")
+      if [ "$dry" -eq 1 ]; then echo "  would run (as $user): bash $signing sign --identifier $RUNNER_ID $program"
+      else
+        echo "  + (as $user) bash $signing sign --identifier $RUNNER_ID $program"
+        as_user_signing sign --identifier "$RUNNER_ID" "$program" | sed 's/^/    /'
+        [ "${PIPESTATUS[0]}" -eq 0 ] || fail "$name: the runner could not be signed; the daemon was not started" "read the lines above; then run install again (or rollback)"
+      fi
+    fi
     log_size "$(daemon_log "$name")" >"$tmp/offset.$name"
     step launchctl bootstrap system "$target"
   done
