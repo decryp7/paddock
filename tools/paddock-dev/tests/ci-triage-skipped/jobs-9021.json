@@ -1,0 +1,3973 @@
+{
+  "jobs": [
+    {
+      "id": 49517,
+      "url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/jobs/49517",
+      "html_url": "https://gitea.invalid/example/paddock/actions/runs/9021/jobs/49517",
+      "run_id": 9021,
+      "run_url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/runs/9021",
+      "name": "gate (main changed since the last green nightly?)",
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "run_attempt": 1,
+      "head_sha": "07dc7eb685c7acde6d76b199a7600b99ae79d54a",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "success",
+      "runner_id": 31,
+      "runner_name": "runner-1",
+      "steps": [
+        {
+          "name": "Run actions/checkout@v4",
+          "number": 0,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:03:24Z",
+          "completed_at": "2026-11-24T21:03:43Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/plan",
+          "number": 1,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:03:43Z",
+          "completed_at": "2026-11-24T21:03:46Z"
+        }
+      ],
+      "created_at": "2026-11-24T21:03:18Z",
+      "started_at": "2026-11-24T21:03:23Z",
+      "completed_at": "2026-11-24T21:03:48Z"
+    },
+    {
+      "id": 49518,
+      "url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/jobs/49518",
+      "html_url": "https://gitea.invalid/example/paddock/actions/runs/9021/jobs/49518",
+      "run_id": 9021,
+      "run_url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/runs/9021",
+      "name": "C100 (every check runs somewhere)",
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "run_attempt": 1,
+      "head_sha": "07dc7eb685c7acde6d76b199a7600b99ae79d54a",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "success",
+      "runner_id": 31,
+      "runner_name": "runner-1",
+      "steps": [
+        {
+          "name": "Run actions/checkout@v4",
+          "number": 0,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:03:50Z",
+          "completed_at": "2026-11-24T21:05:39Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/setup-rust",
+          "number": 1,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:05:39Z",
+          "completed_at": "2026-11-24T21:07:00Z"
+        },
+        {
+          "name": "C100",
+          "number": 2,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:07:00Z",
+          "completed_at": "2026-11-24T21:07:05Z"
+        }
+      ],
+      "created_at": "2026-11-24T21:03:18Z",
+      "started_at": "2026-11-24T21:03:49Z",
+      "completed_at": "2026-11-24T21:07:08Z"
+    },
+    {
+      "id": 49519,
+      "url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/jobs/49519",
+      "html_url": "https://gitea.invalid/example/paddock/actions/runs/9021/jobs/49519",
+      "run_id": 9021,
+      "run_url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/runs/9021",
+      "name": "endpoint register (C102)",
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "run_attempt": 1,
+      "head_sha": "07dc7eb685c7acde6d76b199a7600b99ae79d54a",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "success",
+      "runner_id": 31,
+      "runner_name": "runner-1",
+      "steps": [
+        {
+          "name": "Run actions/checkout@v4",
+          "number": 0,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:03:50Z",
+          "completed_at": "2026-11-24T21:04:00Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/setup-rust",
+          "number": 1,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:04:00Z",
+          "completed_at": "2026-11-24T21:04:02Z"
+        },
+        {
+          "name": "Every listen site is registered",
+          "number": 2,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:04:02Z",
+          "completed_at": "2026-11-24T21:04:07Z"
+        }
+      ],
+      "created_at": "2026-11-24T21:03:18Z",
+      "started_at": "2026-11-24T21:03:49Z",
+      "completed_at": "2026-11-24T21:04:09Z"
+    },
+    {
+      "id": 49520,
+      "url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/jobs/49520",
+      "html_url": "https://gitea.invalid/example/paddock/actions/runs/9021/jobs/49520",
+      "run_id": 9021,
+      "run_url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/runs/9021",
+      "name": "everything",
+      "labels": [],
+      "run_attempt": 1,
+      "head_sha": "07dc7eb685c7acde6d76b199a7600b99ae79d54a",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "cancelled",
+      "runner_id": 0,
+      "steps": [],
+      "created_at": "2026-11-24T21:03:18Z",
+      "started_at": "2026-11-24T21:04:22Z",
+      "completed_at": "2026-11-24T23:38:51Z"
+    },
+    {
+      "id": 49521,
+      "url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/jobs/49521",
+      "html_url": "https://gitea.invalid/example/paddock/actions/runs/9021/jobs/49521",
+      "run_id": 9021,
+      "run_url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/runs/9021",
+      "name": "escapes (did a plan drop a target that fails tonight?)",
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "run_attempt": 1,
+      "head_sha": "07dc7eb685c7acde6d76b199a7600b99ae79d54a",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "success",
+      "runner_id": 31,
+      "runner_name": "runner-1",
+      "steps": [
+        {
+          "name": "Run actions/checkout@v4",
+          "number": 0,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T23:38:54Z",
+          "completed_at": "2026-11-24T23:39:20Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/setup-rust",
+          "number": 1,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T23:39:20Z",
+          "completed_at": "2026-11-24T23:39:22Z"
+        },
+        {
+          "name": "Escape monitor",
+          "number": 2,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T23:39:22Z",
+          "completed_at": "2026-11-24T23:39:22Z"
+        }
+      ],
+      "created_at": "2026-11-24T21:03:18Z",
+      "started_at": "2026-11-24T23:38:54Z",
+      "completed_at": "2026-11-24T23:39:23Z"
+    },
+    {
+      "id": 49522,
+      "url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/jobs/49522",
+      "html_url": "https://gitea.invalid/example/paddock/actions/runs/9021/jobs/49522",
+      "run_id": 9021,
+      "run_url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/runs/9021",
+      "name": "dialog commands (declared but never sent)",
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "run_attempt": 1,
+      "head_sha": "07dc7eb685c7acde6d76b199a7600b99ae79d54a",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "failure",
+      "runner_id": 31,
+      "runner_name": "runner-1",
+      "steps": [
+        {
+          "name": "Run actions/checkout@v4",
+          "number": 0,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:03:50Z",
+          "completed_at": "2026-11-24T21:04:00Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/build-jobs",
+          "number": 1,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:04:00Z",
+          "completed_at": "2026-11-24T21:04:02Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/node-caches",
+          "number": 2,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:04:02Z",
+          "completed_at": "2026-11-24T21:04:05Z"
+        },
+        {
+          "name": "Install",
+          "number": 3,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:04:05Z",
+          "completed_at": "2026-11-24T21:04:48Z"
+        },
+        {
+          "name": "Record the commands and the visited dialogs",
+          "number": 4,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:04:48Z",
+          "completed_at": "2026-11-24T21:05:20Z"
+        },
+        {
+          "name": "Check",
+          "number": 5,
+          "status": "completed",
+          "conclusion": "failure",
+          "started_at": "2026-11-24T21:05:20Z",
+          "completed_at": "2026-11-24T21:05:20Z"
+        }
+      ],
+      "created_at": "2026-11-24T21:03:18Z",
+      "started_at": "2026-11-24T21:03:49Z",
+      "completed_at": "2026-11-24T21:05:27Z"
+    },
+    {
+      "id": 49523,
+      "url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/jobs/49523",
+      "html_url": "https://gitea.invalid/example/paddock/actions/runs/9021/jobs/49523",
+      "run_id": 9021,
+      "run_url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/runs/9021",
+      "name": "dialog window probe (macos-latest)",
+      "labels": [
+        "macos-latest"
+      ],
+      "run_attempt": 1,
+      "head_sha": "07dc7eb685c7acde6d76b199a7600b99ae79d54a",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "skipped",
+      "runner_id": 0,
+      "steps": [],
+      "created_at": "2026-11-24T21:03:18Z",
+      "started_at": "1970-01-01T00:00:00Z",
+      "completed_at": "1970-01-01T00:00:00Z"
+    },
+    {
+      "id": 49524,
+      "url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/jobs/49524",
+      "html_url": "https://gitea.invalid/example/paddock/actions/runs/9021/jobs/49524",
+      "run_id": 9021,
+      "run_url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/runs/9021",
+      "name": "dialog window probe (ubuntu-latest)",
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "run_attempt": 1,
+      "head_sha": "07dc7eb685c7acde6d76b199a7600b99ae79d54a",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "skipped",
+      "runner_id": 0,
+      "steps": [],
+      "created_at": "2026-11-24T21:03:18Z",
+      "started_at": "1970-01-01T00:00:00Z",
+      "completed_at": "1970-01-01T00:00:00Z"
+    },
+    {
+      "id": 49525,
+      "url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/jobs/49525",
+      "html_url": "https://gitea.invalid/example/paddock/actions/runs/9021/jobs/49525",
+      "run_id": 9021,
+      "run_url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/runs/9021",
+      "name": "dialog window probe (windows-latest)",
+      "labels": [
+        "windows-latest"
+      ],
+      "run_attempt": 1,
+      "head_sha": "07dc7eb685c7acde6d76b199a7600b99ae79d54a",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "skipped",
+      "runner_id": 0,
+      "steps": [],
+      "created_at": "2026-11-24T21:03:18Z",
+      "started_at": "1970-01-01T00:00:00Z",
+      "completed_at": "1970-01-01T00:00:00Z"
+    },
+    {
+      "id": 49526,
+      "url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/jobs/49526",
+      "html_url": "https://gitea.invalid/example/paddock/actions/runs/9021/jobs/49526",
+      "run_id": 9021,
+      "run_url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/runs/9021",
+      "name": "installers gate (main or the toolchain image changed since the last nightly build?)",
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "run_attempt": 1,
+      "head_sha": "07dc7eb685c7acde6d76b199a7600b99ae79d54a",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "success",
+      "runner_id": 31,
+      "runner_name": "runner-1",
+      "steps": [
+        {
+          "name": "Run actions/checkout@v4",
+          "number": 0,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:04:10Z",
+          "completed_at": "2026-11-24T21:04:19Z"
+        },
+        {
+          "name": "Run actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830",
+          "number": 1,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:04:19Z",
+          "completed_at": "2026-11-24T21:04:22Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/cache-report",
+          "number": 2,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:04:22Z",
+          "completed_at": "2026-11-24T21:04:22Z"
+        },
+        {
+          "name": "Run if [ \"$HIT\" = true ]; then echo \"run=false\" >> \"$GITHUB_OUTPUT\"; echo \"::notice::main and the toolchain image are unchanged since the last nightly that built the installers; skipping.\"",
+          "number": 3,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:04:22Z",
+          "completed_at": "2026-11-24T21:04:22Z"
+        }
+      ],
+      "created_at": "2026-11-24T21:03:18Z",
+      "started_at": "2026-11-24T21:04:09Z",
+      "completed_at": "2026-11-24T21:04:23Z"
+    },
+    {
+      "id": 49527,
+      "url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/jobs/49527",
+      "html_url": "https://gitea.invalid/example/paddock/actions/runs/9021/jobs/49527",
+      "run_id": 9021,
+      "run_url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/runs/9021",
+      "name": "installers (Dyno, no publish)",
+      "labels": [],
+      "run_attempt": 1,
+      "head_sha": "07dc7eb685c7acde6d76b199a7600b99ae79d54a",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "success",
+      "runner_id": 0,
+      "steps": [],
+      "created_at": "2026-11-24T21:03:18Z",
+      "started_at": "2026-11-24T21:04:29Z",
+      "completed_at": "2026-11-24T21:31:24Z"
+    },
+    {
+      "id": 49528,
+      "url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/jobs/49528",
+      "html_url": "https://gitea.invalid/example/paddock/actions/runs/9021/jobs/49528",
+      "run_id": 9021,
+      "run_url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/runs/9021",
+      "name": "installers (Spotter, no publish)",
+      "labels": [],
+      "run_attempt": 1,
+      "head_sha": "07dc7eb685c7acde6d76b199a7600b99ae79d54a",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "success",
+      "runner_id": 0,
+      "steps": [],
+      "created_at": "2026-11-24T21:03:18Z",
+      "started_at": "2026-11-24T21:04:29Z",
+      "completed_at": "2026-11-24T21:21:03Z"
+    },
+    {
+      "id": 49529,
+      "url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/jobs/49529",
+      "html_url": "https://gitea.invalid/example/paddock/actions/runs/9021/jobs/49529",
+      "run_id": 9021,
+      "run_url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/runs/9021",
+      "name": "installers (Pitcrew, no publish)",
+      "labels": [],
+      "run_attempt": 1,
+      "head_sha": "07dc7eb685c7acde6d76b199a7600b99ae79d54a",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "success",
+      "runner_id": 0,
+      "steps": [],
+      "created_at": "2026-11-24T21:03:18Z",
+      "started_at": "2026-11-24T21:04:29Z",
+      "completed_at": "2026-11-24T21:24:33Z"
+    },
+    {
+      "id": 49530,
+      "url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/jobs/49530",
+      "html_url": "https://gitea.invalid/example/paddock/actions/runs/9021/jobs/49530",
+      "run_id": 9021,
+      "run_url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/runs/9021",
+      "name": "installers (Pitwall, no publish)",
+      "labels": [],
+      "run_attempt": 1,
+      "head_sha": "07dc7eb685c7acde6d76b199a7600b99ae79d54a",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "success",
+      "runner_id": 0,
+      "steps": [],
+      "created_at": "2026-11-24T21:03:18Z",
+      "started_at": "2026-11-24T21:12:43Z",
+      "completed_at": "2026-11-24T21:44:19Z"
+    },
+    {
+      "id": 49531,
+      "url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/jobs/49531",
+      "html_url": "https://gitea.invalid/example/paddock/actions/runs/9021/jobs/49531",
+      "run_id": 9021,
+      "run_url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/runs/9021",
+      "name": "installers verdict (the nightly built them, or it fails)",
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "run_attempt": 1,
+      "head_sha": "07dc7eb685c7acde6d76b199a7600b99ae79d54a",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "success",
+      "runner_id": 31,
+      "runner_name": "runner-1",
+      "steps": [
+        {
+          "name": "Run actions/checkout@v4",
+          "number": 0,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:58:45Z",
+          "completed_at": "2026-11-24T21:58:55Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/release-verdict",
+          "number": 1,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:58:55Z",
+          "completed_at": "2026-11-24T21:58:56Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/release-verdict",
+          "number": 2,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:58:56Z",
+          "completed_at": "2026-11-24T21:58:56Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/release-verdict",
+          "number": 3,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:58:56Z",
+          "completed_at": "2026-11-24T21:58:56Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/release-verdict",
+          "number": 4,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:58:56Z",
+          "completed_at": "2026-11-24T21:58:56Z"
+        }
+      ],
+      "created_at": "2026-11-24T21:03:18Z",
+      "started_at": "2026-11-24T21:58:44Z",
+      "completed_at": "2026-11-24T21:58:59Z"
+    },
+    {
+      "id": 49532,
+      "url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/jobs/49532",
+      "html_url": "https://gitea.invalid/example/paddock/actions/runs/9021/jobs/49532",
+      "run_id": 9021,
+      "run_url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/runs/9021",
+      "name": "mark the nightly that built every installer",
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "run_attempt": 1,
+      "head_sha": "07dc7eb685c7acde6d76b199a7600b99ae79d54a",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "success",
+      "runner_id": 31,
+      "runner_name": "runner-1",
+      "steps": [
+        {
+          "name": "Run actions/checkout@v4",
+          "number": 0,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:59:01Z",
+          "completed_at": "2026-11-24T21:59:11Z"
+        },
+        {
+          "name": "Run mkdir -p .nightly-installers && echo \"${{ github.sha }}\" > .nightly-installers/sha",
+          "number": 1,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:59:11Z",
+          "completed_at": "2026-11-24T21:59:11Z"
+        },
+        {
+          "name": "Run actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830",
+          "number": 2,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:59:11Z",
+          "completed_at": "2026-11-24T21:59:12Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/cache-report",
+          "number": 3,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:59:12Z",
+          "completed_at": "2026-11-24T21:59:12Z"
+        }
+      ],
+      "created_at": "2026-11-24T21:03:18Z",
+      "started_at": "2026-11-24T21:58:59Z",
+      "completed_at": "2026-11-24T21:59:13Z"
+    },
+    {
+      "id": 49533,
+      "url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/jobs/49533",
+      "html_url": "https://gitea.invalid/example/paddock/actions/runs/9021/jobs/49533",
+      "run_id": 9021,
+      "run_url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/runs/9021",
+      "name": "fuzz (paddock-ipc)",
+      "labels": [],
+      "run_attempt": 1,
+      "head_sha": "07dc7eb685c7acde6d76b199a7600b99ae79d54a",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "failure",
+      "runner_id": 0,
+      "steps": [],
+      "created_at": "2026-11-24T21:03:18Z",
+      "started_at": "2026-11-24T21:04:24Z",
+      "completed_at": "2026-11-24T21:12:40Z"
+    },
+    {
+      "id": 49534,
+      "url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/jobs/49534",
+      "html_url": "https://gitea.invalid/example/paddock/actions/runs/9021/jobs/49534",
+      "run_id": 9021,
+      "run_url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/runs/9021",
+      "name": "fuzz (paddock-plugin-package)",
+      "labels": [],
+      "run_attempt": 1,
+      "head_sha": "07dc7eb685c7acde6d76b199a7600b99ae79d54a",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "success",
+      "runner_id": 0,
+      "steps": [],
+      "created_at": "2026-11-24T21:03:18Z",
+      "started_at": "2026-11-24T21:05:28Z",
+      "completed_at": "2026-11-24T21:15:28Z"
+    },
+    {
+      "id": 49535,
+      "url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/jobs/49535",
+      "html_url": "https://gitea.invalid/example/paddock/actions/runs/9021/jobs/49535",
+      "run_id": 9021,
+      "run_url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/runs/9021",
+      "name": "fuzz (paddock-view)",
+      "labels": [],
+      "run_attempt": 1,
+      "head_sha": "07dc7eb685c7acde6d76b199a7600b99ae79d54a",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "success",
+      "runner_id": 0,
+      "steps": [],
+      "created_at": "2026-11-24T21:03:18Z",
+      "started_at": "2026-11-24T21:55:26Z",
+      "completed_at": "2026-11-24T22:02:54Z"
+    },
+    {
+      "id": 49536,
+      "url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/jobs/49536",
+      "html_url": "https://gitea.invalid/example/paddock/actions/runs/9021/jobs/49536",
+      "run_id": 9021,
+      "run_url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/runs/9021",
+      "name": "fuzz (paddock-archive)",
+      "labels": [],
+      "run_attempt": 1,
+      "head_sha": "07dc7eb685c7acde6d76b199a7600b99ae79d54a",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "success",
+      "runner_id": 0,
+      "steps": [],
+      "created_at": "2026-11-24T21:03:18Z",
+      "started_at": "2026-11-24T21:55:42Z",
+      "completed_at": "2026-11-24T22:02:54Z"
+    },
+    {
+      "id": 49537,
+      "url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/jobs/49537",
+      "html_url": "https://gitea.invalid/example/paddock/actions/runs/9021/jobs/49537",
+      "run_id": 9021,
+      "run_url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/runs/9021",
+      "name": "fuzz (paddock-testplan)",
+      "labels": [],
+      "run_attempt": 1,
+      "head_sha": "07dc7eb685c7acde6d76b199a7600b99ae79d54a",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "success",
+      "runner_id": 0,
+      "steps": [],
+      "created_at": "2026-11-24T21:03:18Z",
+      "started_at": "2026-11-24T22:02:55Z",
+      "completed_at": "2026-11-24T22:09:14Z"
+    },
+    {
+      "id": 49538,
+      "url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/jobs/49538",
+      "html_url": "https://gitea.invalid/example/paddock/actions/runs/9021/jobs/49538",
+      "run_id": 9021,
+      "run_url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/runs/9021",
+      "name": "generators (every registry check)",
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "run_attempt": 1,
+      "head_sha": "07dc7eb685c7acde6d76b199a7600b99ae79d54a",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "success",
+      "runner_id": 31,
+      "runner_name": "runner-1",
+      "steps": [
+        {
+          "name": "Run actions/checkout@v4",
+          "number": 0,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:04:16Z",
+          "completed_at": "2026-11-24T21:04:42Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/setup-rust",
+          "number": 1,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:04:42Z",
+          "completed_at": "2026-11-24T21:05:47Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/node-caches",
+          "number": 2,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:05:47Z",
+          "completed_at": "2026-11-24T21:05:49Z"
+        },
+        {
+          "name": "Install",
+          "number": 3,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:05:49Z",
+          "completed_at": "2026-11-24T21:06:28Z"
+        },
+        {
+          "name": "libduckdb",
+          "number": 4,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:06:28Z",
+          "completed_at": "2026-11-24T21:06:30Z"
+        },
+        {
+          "name": "Build the UI package",
+          "number": 5,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:06:30Z",
+          "completed_at": "2026-11-24T21:06:55Z"
+        },
+        {
+          "name": "cargo-about",
+          "number": 6,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:06:55Z",
+          "completed_at": "2026-11-24T21:08:44Z"
+        },
+        {
+          "name": "./dev gen check --all",
+          "number": 7,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:08:44Z",
+          "completed_at": "2026-11-24T22:09:30Z"
+        }
+      ],
+      "created_at": "2026-11-24T21:03:18Z",
+      "started_at": "2026-11-24T21:04:15Z",
+      "completed_at": "2026-11-24T22:10:48Z"
+    },
+    {
+      "id": 49539,
+      "url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/jobs/49539",
+      "html_url": "https://gitea.invalid/example/paddock/actions/runs/9021/jobs/49539",
+      "run_id": 9021,
+      "run_url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/runs/9021",
+      "name": "audit (advisories on main)",
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "run_attempt": 1,
+      "head_sha": "07dc7eb685c7acde6d76b199a7600b99ae79d54a",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "success",
+      "runner_id": 31,
+      "runner_name": "runner-1",
+      "steps": [
+        {
+          "name": "Run actions/checkout@v4",
+          "number": 0,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:03:24Z",
+          "completed_at": "2026-11-24T21:03:44Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/setup-rust",
+          "number": 1,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:03:44Z",
+          "completed_at": "2026-11-24T21:03:46Z"
+        },
+        {
+          "name": "Audit main",
+          "number": 2,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:03:46Z",
+          "completed_at": "2026-11-24T21:04:12Z"
+        }
+      ],
+      "created_at": "2026-11-24T21:03:18Z",
+      "started_at": "2026-11-24T21:03:23Z",
+      "completed_at": "2026-11-24T21:04:15Z"
+    },
+    {
+      "id": 49540,
+      "url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/jobs/49540",
+      "html_url": "https://gitea.invalid/example/paddock/actions/runs/9021/jobs/49540",
+      "run_id": 9021,
+      "run_url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/runs/9021",
+      "name": "temp sweep (the host's temp folder, our leftovers)",
+      "labels": [
+        "macos-latest"
+      ],
+      "run_attempt": 1,
+      "head_sha": "07dc7eb685c7acde6d76b199a7600b99ae79d54a",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "success",
+      "runner_id": 34,
+      "runner_name": "runner-2",
+      "steps": [
+        {
+          "name": "Run actions/checkout@v4",
+          "number": 0,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:03:21Z",
+          "completed_at": "2026-11-24T21:04:05Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/build-jobs",
+          "number": 1,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:04:05Z",
+          "completed_at": "2026-11-24T21:04:06Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/job-isolation",
+          "number": 2,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:04:06Z",
+          "completed_at": "2026-11-24T21:04:07Z"
+        },
+        {
+          "name": "Sweep the user temp folder",
+          "number": 3,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:04:07Z",
+          "completed_at": "2026-11-24T21:11:57Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/job-isolation",
+          "number": 4,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:11:57Z",
+          "completed_at": "2026-11-24T21:11:58Z"
+        }
+      ],
+      "created_at": "2026-11-24T21:03:18Z",
+      "started_at": "2026-11-24T21:03:20Z",
+      "completed_at": "2026-11-24T21:12:00Z"
+    },
+    {
+      "id": 49541,
+      "url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/jobs/49541",
+      "html_url": "https://gitea.invalid/example/paddock/actions/runs/9021/jobs/49541",
+      "run_id": 9021,
+      "run_url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/runs/9021",
+      "name": "mark the green nightly",
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "run_attempt": 1,
+      "head_sha": "07dc7eb685c7acde6d76b199a7600b99ae79d54a",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "cancelled",
+      "runner_id": 0,
+      "steps": [],
+      "created_at": "2026-11-24T21:03:18Z",
+      "started_at": "1970-01-01T00:00:00Z",
+      "completed_at": "2026-11-24T23:38:42Z"
+    },
+    {
+      "id": 49542,
+      "url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/jobs/49542",
+      "html_url": "https://gitea.invalid/example/paddock/actions/runs/9021/jobs/49542",
+      "run_id": 9021,
+      "run_url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/runs/9021",
+      "name": "plan (affected projects)",
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "run_attempt": 1,
+      "head_sha": "07dc7eb685c7acde6d76b199a7600b99ae79d54a",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "success",
+      "runner_id": 31,
+      "runner_name": "runner-1",
+      "steps": [
+        {
+          "name": "Run actions/checkout@v4",
+          "number": 0,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:04:23Z",
+          "completed_at": "2026-11-24T21:04:47Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/runner-wait",
+          "number": 1,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:04:47Z",
+          "completed_at": "2026-11-24T21:05:42Z"
+        },
+        {
+          "name": "C100 stays wired",
+          "number": 2,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:05:42Z",
+          "completed_at": "2026-11-24T21:05:42Z"
+        },
+        {
+          "name": "Reuse a full green run of this commit",
+          "number": 3,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:05:42Z",
+          "completed_at": "2026-11-24T21:05:42Z"
+        },
+        {
+          "name": "Affected projects",
+          "number": 4,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:05:42Z",
+          "completed_at": "2026-11-24T21:05:45Z"
+        }
+      ],
+      "created_at": "2026-11-24T21:03:48Z",
+      "started_at": "2026-11-24T21:04:22Z",
+      "completed_at": "2026-11-24T21:05:45Z"
+    },
+    {
+      "id": 49543,
+      "url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/jobs/49543",
+      "html_url": "https://gitea.invalid/example/paddock/actions/runs/9021/jobs/49543",
+      "run_id": 9021,
+      "run_url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/runs/9021",
+      "name": "ui (tokens, contrast, components, entry points, publish dry run, ESLint preset, icons)",
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "run_attempt": 1,
+      "head_sha": "07dc7eb685c7acde6d76b199a7600b99ae79d54a",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "success",
+      "runner_id": 31,
+      "runner_name": "runner-1",
+      "steps": [
+        {
+          "name": "Run actions/checkout@v4",
+          "number": 0,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:15:32Z",
+          "completed_at": "2026-11-24T21:15:55Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/setup-rust",
+          "number": 1,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:15:55Z",
+          "completed_at": "2026-11-24T21:15:57Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/node-caches",
+          "number": 2,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:15:57Z",
+          "completed_at": "2026-11-24T21:19:00Z"
+        },
+        {
+          "name": "Install",
+          "number": 3,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:19:00Z",
+          "completed_at": "2026-11-24T21:19:46Z"
+        },
+        {
+          "name": "Contrast and CVD checks",
+          "number": 4,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:19:46Z",
+          "completed_at": "2026-11-24T21:19:47Z"
+        },
+        {
+          "name": "Lint",
+          "number": 5,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:19:47Z",
+          "completed_at": "2026-11-24T21:20:09Z"
+        },
+        {
+          "name": "Component specs",
+          "number": 6,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:20:09Z",
+          "completed_at": "2026-11-24T21:20:42Z"
+        },
+        {
+          "name": "Script tests",
+          "number": 7,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:20:42Z",
+          "completed_at": "2026-11-24T21:20:48Z"
+        },
+        {
+          "name": "Build the library (all entry points)",
+          "number": 8,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:20:48Z",
+          "completed_at": "2026-11-24T21:21:15Z"
+        },
+        {
+          "name": "Translation files up to date",
+          "number": 9,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:21:15Z",
+          "completed_at": "2026-11-24T21:21:17Z"
+        },
+        {
+          "name": "Build @example/paddock-e2e",
+          "number": 10,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:21:17Z",
+          "completed_at": "2026-11-24T21:21:19Z"
+        },
+        {
+          "name": "Build the shell demo",
+          "number": 11,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:21:19Z",
+          "completed_at": "2026-11-24T21:21:29Z"
+        },
+        {
+          "name": "Build the workbench demo",
+          "number": 12,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:21:29Z",
+          "completed_at": "2026-11-24T21:21:42Z"
+        },
+        {
+          "name": "Publish dry run",
+          "number": 13,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:21:42Z",
+          "completed_at": "2026-11-24T21:22:00Z"
+        },
+        {
+          "name": "ESLint preset (rules 27 to 39)",
+          "number": 14,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:22:00Z",
+          "completed_at": "2026-11-24T21:23:32Z"
+        },
+        {
+          "name": "Icon tests",
+          "number": 15,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:23:32Z",
+          "completed_at": "2026-11-24T21:23:36Z"
+        },
+        {
+          "name": "Installed icon copies match the build",
+          "number": 16,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:23:36Z",
+          "completed_at": "2026-11-24T21:23:36Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/sccache-stats",
+          "number": 17,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:23:36Z",
+          "completed_at": "2026-11-24T21:23:37Z"
+        }
+      ],
+      "created_at": "2026-11-24T21:03:48Z",
+      "started_at": "2026-11-24T21:15:30Z",
+      "completed_at": "2026-11-24T21:23:43Z"
+    },
+    {
+      "id": 49544,
+      "url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/jobs/49544",
+      "html_url": "https://gitea.invalid/example/paddock/actions/runs/9021/jobs/49544",
+      "run_id": 9021,
+      "run_url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/runs/9021",
+      "name": "reference apps (shard 1/2)",
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "run_attempt": 1,
+      "head_sha": "07dc7eb685c7acde6d76b199a7600b99ae79d54a",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "success",
+      "runner_id": 31,
+      "runner_name": "runner-1",
+      "steps": [
+        {
+          "name": "Run actions/checkout@v4",
+          "number": 0,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:15:32Z",
+          "completed_at": "2026-11-24T21:15:40Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/setup-rust",
+          "number": 1,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:15:40Z",
+          "completed_at": "2026-11-24T21:15:42Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/node-caches",
+          "number": 2,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:15:42Z",
+          "completed_at": "2026-11-24T21:18:45Z"
+        },
+        {
+          "name": "Install",
+          "number": 3,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:18:45Z",
+          "completed_at": "2026-11-24T21:19:26Z"
+        },
+        {
+          "name": "Reference app checks",
+          "number": 4,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:19:26Z",
+          "completed_at": "2026-11-24T21:31:10Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/sccache-stats",
+          "number": 5,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:31:10Z",
+          "completed_at": "2026-11-24T21:31:11Z"
+        }
+      ],
+      "created_at": "2026-11-24T21:03:48Z",
+      "started_at": "2026-11-24T21:15:30Z",
+      "completed_at": "2026-11-24T21:31:16Z"
+    },
+    {
+      "id": 49545,
+      "url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/jobs/49545",
+      "html_url": "https://gitea.invalid/example/paddock/actions/runs/9021/jobs/49545",
+      "run_id": 9021,
+      "run_url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/runs/9021",
+      "name": "reference apps (shard 2/2)",
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "run_attempt": 1,
+      "head_sha": "07dc7eb685c7acde6d76b199a7600b99ae79d54a",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "success",
+      "runner_id": 31,
+      "runner_name": "runner-1",
+      "steps": [
+        {
+          "name": "Run actions/checkout@v4",
+          "number": 0,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:16:28Z",
+          "completed_at": "2026-11-24T21:16:39Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/setup-rust",
+          "number": 1,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:16:39Z",
+          "completed_at": "2026-11-24T21:16:42Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/node-caches",
+          "number": 2,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:16:42Z",
+          "completed_at": "2026-11-24T21:19:29Z"
+        },
+        {
+          "name": "Install",
+          "number": 3,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:19:29Z",
+          "completed_at": "2026-11-24T21:20:12Z"
+        },
+        {
+          "name": "Reference app checks",
+          "number": 4,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:20:12Z",
+          "completed_at": "2026-11-24T21:28:11Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/sccache-stats",
+          "number": 5,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:28:11Z",
+          "completed_at": "2026-11-24T21:28:11Z"
+        }
+      ],
+      "created_at": "2026-11-24T21:03:48Z",
+      "started_at": "2026-11-24T21:16:25Z",
+      "completed_at": "2026-11-24T21:28:16Z"
+    },
+    {
+      "id": 49546,
+      "url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/jobs/49546",
+      "html_url": "https://gitea.invalid/example/paddock/actions/runs/9021/jobs/49546",
+      "run_id": 9021,
+      "run_url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/runs/9021",
+      "name": "reference apps in WebKit (macOS)",
+      "labels": [
+        "macos-latest"
+      ],
+      "run_attempt": 1,
+      "head_sha": "07dc7eb685c7acde6d76b199a7600b99ae79d54a",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "cancelled",
+      "runner_id": 34,
+      "runner_name": "runner-2",
+      "steps": [
+        {
+          "name": "Run actions/checkout@v4",
+          "number": 0,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:14:21Z",
+          "completed_at": "2026-11-24T21:14:53Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/build-jobs",
+          "number": 1,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:14:53Z",
+          "completed_at": "2026-11-24T21:14:54Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/job-isolation",
+          "number": 2,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:14:54Z",
+          "completed_at": "2026-11-24T21:14:54Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/node-caches",
+          "number": 3,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:14:54Z",
+          "completed_at": "2026-11-24T21:14:54Z"
+        },
+        {
+          "name": "Install",
+          "number": 4,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:14:54Z",
+          "completed_at": "2026-11-24T21:15:00Z"
+        },
+        {
+          "name": "WebKit",
+          "number": 5,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:15:00Z",
+          "completed_at": "2026-11-24T21:15:05Z"
+        },
+        {
+          "name": "Reference app checks in WebKit",
+          "number": 6,
+          "status": "completed",
+          "conclusion": "failure",
+          "started_at": "2026-11-24T21:15:05Z",
+          "completed_at": "2026-11-24T23:38:51Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/job-isolation",
+          "number": 7,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T23:38:51Z",
+          "completed_at": "2026-11-24T23:38:51Z"
+        }
+      ],
+      "created_at": "2026-11-24T21:03:48Z",
+      "started_at": "2026-11-24T21:14:21Z",
+      "completed_at": "2026-11-24T23:38:51Z"
+    },
+    {
+      "id": 49547,
+      "url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/jobs/49547",
+      "html_url": "https://gitea.invalid/example/paddock/actions/runs/9021/jobs/49547",
+      "run_id": 9021,
+      "run_url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/runs/9021",
+      "name": "conformance (checks, release scripts)",
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "run_attempt": 1,
+      "head_sha": "07dc7eb685c7acde6d76b199a7600b99ae79d54a",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "success",
+      "runner_id": 31,
+      "runner_name": "runner-1",
+      "steps": [
+        {
+          "name": "Run actions/checkout@v4",
+          "number": 0,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:19:57Z",
+          "completed_at": "2026-11-24T21:20:17Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/setup-rust",
+          "number": 1,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:20:17Z",
+          "completed_at": "2026-11-24T21:20:19Z"
+        },
+        {
+          "name": "Install (yaml for C111, from the root package-lock.json)",
+          "number": 2,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:20:19Z",
+          "completed_at": "2026-11-24T21:20:20Z"
+        },
+        {
+          "name": "Tests",
+          "number": 3,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:20:20Z",
+          "completed_at": "2026-11-24T21:23:07Z"
+        },
+        {
+          "name": "Paddock itself (applicable checks)",
+          "number": 4,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:23:07Z",
+          "completed_at": "2026-11-24T21:23:56Z"
+        },
+        {
+          "name": "C100 (every check runs somewhere)",
+          "number": 5,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:23:56Z",
+          "completed_at": "2026-11-24T21:24:02Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/sccache-stats",
+          "number": 6,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:24:02Z",
+          "completed_at": "2026-11-24T21:24:03Z"
+        }
+      ],
+      "created_at": "2026-11-24T21:03:48Z",
+      "started_at": "2026-11-24T21:19:56Z",
+      "completed_at": "2026-11-24T21:24:06Z"
+    },
+    {
+      "id": 49548,
+      "url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/jobs/49548",
+      "html_url": "https://gitea.invalid/example/paddock/actions/runs/9021/jobs/49548",
+      "run_id": 9021,
+      "run_url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/runs/9021",
+      "name": "gitleaks (secret scan)",
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "run_attempt": 1,
+      "head_sha": "07dc7eb685c7acde6d76b199a7600b99ae79d54a",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "success",
+      "runner_id": 31,
+      "runner_name": "runner-1",
+      "steps": [
+        {
+          "name": "Run actions/checkout@v4",
+          "number": 0,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:23:46Z",
+          "completed_at": "2026-11-24T21:24:15Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/gitleaks",
+          "number": 1,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:24:15Z",
+          "completed_at": "2026-11-24T21:24:20Z"
+        }
+      ],
+      "created_at": "2026-11-24T21:03:48Z",
+      "started_at": "2026-11-24T21:23:44Z",
+      "completed_at": "2026-11-24T21:24:22Z"
+    },
+    {
+      "id": 49549,
+      "url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/jobs/49549",
+      "html_url": "https://gitea.invalid/example/paddock/actions/runs/9021/jobs/49549",
+      "run_id": 9021,
+      "run_url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/runs/9021",
+      "name": "C99 (no Keychain in a macOS build)",
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "run_attempt": 1,
+      "head_sha": "07dc7eb685c7acde6d76b199a7600b99ae79d54a",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "success",
+      "runner_id": 31,
+      "runner_name": "runner-1",
+      "steps": [
+        {
+          "name": "Run actions/checkout@v4",
+          "number": 0,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:24:06Z",
+          "completed_at": "2026-11-24T21:24:17Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/keychain",
+          "number": 1,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:24:17Z",
+          "completed_at": "2026-11-24T21:24:50Z"
+        }
+      ],
+      "created_at": "2026-11-24T21:03:48Z",
+      "started_at": "2026-11-24T21:24:05Z",
+      "completed_at": "2026-11-24T21:24:58Z"
+    },
+    {
+      "id": 49550,
+      "url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/jobs/49550",
+      "html_url": "https://gitea.invalid/example/paddock/actions/runs/9021/jobs/49550",
+      "run_id": 9021,
+      "run_url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/runs/9021",
+      "name": "tools and shared scripts",
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "run_attempt": 1,
+      "head_sha": "07dc7eb685c7acde6d76b199a7600b99ae79d54a",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "success",
+      "runner_id": 31,
+      "runner_name": "runner-1",
+      "steps": [
+        {
+          "name": "Run actions/checkout@v4",
+          "number": 0,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:24:08Z",
+          "completed_at": "2026-11-24T21:24:32Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/setup-rust",
+          "number": 1,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:24:32Z",
+          "completed_at": "2026-11-24T21:24:35Z"
+        },
+        {
+          "name": "Tools",
+          "number": 2,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:24:35Z",
+          "completed_at": "2026-11-24T21:24:37Z"
+        },
+        {
+          "name": "new-app templates",
+          "number": 3,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:24:37Z",
+          "completed_at": "2026-11-24T21:24:38Z"
+        },
+        {
+          "name": "Hooks tests (report-only)",
+          "number": 4,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:24:38Z",
+          "completed_at": "2026-11-24T21:25:26Z"
+        },
+        {
+          "name": "draw.io for the SVG drift check",
+          "number": 5,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:25:26Z",
+          "completed_at": "2026-11-24T21:25:26Z"
+        },
+        {
+          "name": "SVG drift (ER-40)",
+          "number": 6,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:25:26Z",
+          "completed_at": "2026-11-24T21:26:31Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/sccache-stats",
+          "number": 7,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:26:31Z",
+          "completed_at": "2026-11-24T21:29:22Z"
+        }
+      ],
+      "created_at": "2026-11-24T21:03:48Z",
+      "started_at": "2026-11-24T21:24:07Z",
+      "completed_at": "2026-11-24T21:29:25Z"
+    },
+    {
+      "id": 49551,
+      "url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/jobs/49551",
+      "html_url": "https://gitea.invalid/example/paddock/actions/runs/9021/jobs/49551",
+      "run_id": 9021,
+      "run_url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/runs/9021",
+      "name": "heavy tool",
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "run_attempt": 1,
+      "head_sha": "07dc7eb685c7acde6d76b199a7600b99ae79d54a",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "success",
+      "runner_id": 31,
+      "runner_name": "runner-1",
+      "steps": [
+        {
+          "name": "Run actions/checkout@v4",
+          "number": 0,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:24:30Z",
+          "completed_at": "2026-11-24T21:24:40Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/build-jobs",
+          "number": 1,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:24:40Z",
+          "completed_at": "2026-11-24T21:24:43Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/setup-rust",
+          "number": 2,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:24:43Z",
+          "completed_at": "2026-11-24T21:24:51Z"
+        },
+        {
+          "name": "Lockfile is current",
+          "number": 3,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:24:51Z",
+          "completed_at": "2026-11-24T21:24:55Z"
+        },
+        {
+          "name": "Format",
+          "number": 4,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:24:55Z",
+          "completed_at": "2026-11-24T21:24:56Z"
+        },
+        {
+          "name": "Clippy",
+          "number": 5,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:24:56Z",
+          "completed_at": "2026-11-24T21:25:10Z"
+        },
+        {
+          "name": "Tests",
+          "number": 6,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:25:10Z",
+          "completed_at": "2026-11-24T21:25:30Z"
+        },
+        {
+          "name": "Deny",
+          "number": 7,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:25:30Z",
+          "completed_at": "2026-11-24T21:25:31Z"
+        },
+        {
+          "name": "No GTK in the tool's Linux build",
+          "number": 8,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:25:31Z",
+          "completed_at": "2026-11-24T21:25:31Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/sccache-stats",
+          "number": 9,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:25:31Z",
+          "completed_at": "2026-11-24T21:25:32Z"
+        }
+      ],
+      "created_at": "2026-11-24T21:03:48Z",
+      "started_at": "2026-11-24T21:24:23Z",
+      "completed_at": "2026-11-24T21:25:34Z"
+    },
+    {
+      "id": 49552,
+      "url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/jobs/49552",
+      "html_url": "https://gitea.invalid/example/paddock/actions/runs/9021/jobs/49552",
+      "run_id": 9021,
+      "run_url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/runs/9021",
+      "name": "crates (fmt, workspace hack, unused deps, coverage, deny)",
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "run_attempt": 1,
+      "head_sha": "07dc7eb685c7acde6d76b199a7600b99ae79d54a",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "success",
+      "runner_id": 31,
+      "runner_name": "runner-1",
+      "steps": [
+        {
+          "name": "Run actions/checkout@v4",
+          "number": 0,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:25:01Z",
+          "completed_at": "2026-11-24T21:25:12Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/setup-rust",
+          "number": 1,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:25:12Z",
+          "completed_at": "2026-11-24T21:25:15Z"
+        },
+        {
+          "name": "Run ./dev ci run crates fmt",
+          "number": 2,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:25:15Z",
+          "completed_at": "2026-11-24T21:25:18Z"
+        },
+        {
+          "name": "Workspace hack up to date",
+          "number": 3,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:25:18Z",
+          "completed_at": "2026-11-24T21:25:25Z"
+        },
+        {
+          "name": "Shared-crate dependency guard",
+          "number": 4,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:25:25Z",
+          "completed_at": "2026-11-24T21:25:44Z"
+        },
+        {
+          "name": "Unused dependencies",
+          "number": 5,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:25:44Z",
+          "completed_at": "2026-11-24T21:25:45Z"
+        },
+        {
+          "name": "Coverage (>= 90 % lines; 99 % security target report-only)",
+          "number": 6,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:25:45Z",
+          "completed_at": "2026-11-24T21:29:44Z"
+        },
+        {
+          "name": "Run actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5",
+          "number": 7,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:29:44Z",
+          "completed_at": "2026-11-24T21:29:44Z"
+        },
+        {
+          "name": "Orphan guardian as a user (Linux)",
+          "number": 8,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:29:44Z",
+          "completed_at": "2026-11-24T21:30:08Z"
+        },
+        {
+          "name": "Dependency policy (cargo deny)",
+          "number": 9,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:30:08Z",
+          "completed_at": "2026-11-24T21:30:12Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/sccache-stats",
+          "number": 10,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:30:12Z",
+          "completed_at": "2026-11-24T21:30:12Z"
+        }
+      ],
+      "created_at": "2026-11-24T21:03:48Z",
+      "started_at": "2026-11-24T21:24:59Z",
+      "completed_at": "2026-11-24T21:30:14Z"
+    },
+    {
+      "id": 49553,
+      "url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/jobs/49553",
+      "html_url": "https://gitea.invalid/example/paddock/actions/runs/9021/jobs/49553",
+      "run_id": 9021,
+      "run_url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/runs/9021",
+      "name": "crate (macos-latest)",
+      "labels": [
+        "macos-latest"
+      ],
+      "run_attempt": 1,
+      "head_sha": "07dc7eb685c7acde6d76b199a7600b99ae79d54a",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "success",
+      "runner_id": 34,
+      "runner_name": "runner-2",
+      "steps": [
+        {
+          "name": "Run actions/checkout@v4",
+          "number": 0,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:16:49Z",
+          "completed_at": "2026-11-24T21:16:49Z"
+        },
+        {
+          "name": "Run actions/checkout@v4",
+          "number": 1,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:16:49Z",
+          "completed_at": "2026-11-24T21:17:03Z"
+        },
+        {
+          "name": "Git bash on PATH (Windows)",
+          "number": 2,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:17:03Z",
+          "completed_at": "2026-11-24T21:17:03Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/build-jobs",
+          "number": 3,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:17:03Z",
+          "completed_at": "2026-11-24T21:17:06Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/job-isolation",
+          "number": 4,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:17:06Z",
+          "completed_at": "2026-11-24T21:17:09Z"
+        },
+        {
+          "name": "Test browser folder (macOS, Windows)",
+          "number": 5,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:17:09Z",
+          "completed_at": "2026-11-24T21:17:10Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/kept-clone",
+          "number": 6,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:17:10Z",
+          "completed_at": "2026-11-24T21:17:18Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/build-folder",
+          "number": 7,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:17:18Z",
+          "completed_at": "2026-11-24T21:17:19Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/setup-rust",
+          "number": 8,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:17:19Z",
+          "completed_at": "2026-11-24T21:17:28Z"
+        },
+        {
+          "name": "Toolchain present",
+          "number": 9,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:17:28Z",
+          "completed_at": "2026-11-24T21:17:28Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/host-tools",
+          "number": 10,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:17:28Z",
+          "completed_at": "2026-11-24T21:17:29Z"
+        },
+        {
+          "name": "Clippy (workspace, every feature)",
+          "number": 11,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:17:29Z",
+          "completed_at": "2026-11-24T21:17:51Z"
+        },
+        {
+          "name": "Chrome for Testing (macOS, Windows)",
+          "number": 12,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:17:51Z",
+          "completed_at": "2026-11-24T21:17:51Z"
+        },
+        {
+          "name": "Tests (workspace, every feature)",
+          "number": 13,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:17:51Z",
+          "completed_at": "2026-11-24T21:20:35Z"
+        },
+        {
+          "name": "Run actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5",
+          "number": 14,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:20:35Z",
+          "completed_at": "2026-11-24T21:20:35Z"
+        },
+        {
+          "name": "Tests with the optional features off",
+          "number": 15,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:20:35Z",
+          "completed_at": "2026-11-24T21:21:02Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/sccache-stats",
+          "number": 16,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:21:02Z",
+          "completed_at": "2026-11-24T21:21:02Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/job-isolation",
+          "number": 17,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:21:02Z",
+          "completed_at": "2026-11-24T21:21:03Z"
+        }
+      ],
+      "created_at": "2026-11-24T21:03:48Z",
+      "started_at": "2026-11-24T21:16:48Z",
+      "completed_at": "2026-11-24T21:21:05Z"
+    },
+    {
+      "id": 49554,
+      "url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/jobs/49554",
+      "html_url": "https://gitea.invalid/example/paddock/actions/runs/9021/jobs/49554",
+      "run_id": 9021,
+      "run_url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/runs/9021",
+      "name": "audit (advisories this change adds)",
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "run_attempt": 1,
+      "head_sha": "07dc7eb685c7acde6d76b199a7600b99ae79d54a",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "success",
+      "runner_id": 31,
+      "runner_name": "runner-1",
+      "steps": [
+        {
+          "name": "Run actions/checkout@v4",
+          "number": 0,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:25:36Z",
+          "completed_at": "2026-11-24T21:25:57Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/setup-rust",
+          "number": 1,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:25:57Z",
+          "completed_at": "2026-11-24T21:25:59Z"
+        },
+        {
+          "name": "Audit against the merge base",
+          "number": 2,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:25:59Z",
+          "completed_at": "2026-11-24T21:26:24Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/sccache-stats",
+          "number": 3,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:26:24Z",
+          "completed_at": "2026-11-24T21:26:25Z"
+        }
+      ],
+      "created_at": "2026-11-24T21:03:48Z",
+      "started_at": "2026-11-24T21:25:35Z",
+      "completed_at": "2026-11-24T21:26:28Z"
+    },
+    {
+      "id": 49555,
+      "url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/jobs/49555",
+      "html_url": "https://gitea.invalid/example/paddock/actions/runs/9021/jobs/49555",
+      "run_id": 9021,
+      "run_url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/runs/9021",
+      "name": "app dyno (macos-latest)",
+      "labels": [
+        "macos-latest"
+      ],
+      "run_attempt": 1,
+      "head_sha": "07dc7eb685c7acde6d76b199a7600b99ae79d54a",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "success",
+      "runner_id": 34,
+      "runner_name": "runner-2",
+      "steps": [
+        {
+          "name": "Run actions/checkout@v4",
+          "number": 0,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:21:06Z",
+          "completed_at": "2026-11-24T21:21:06Z"
+        },
+        {
+          "name": "Run actions/checkout@v4",
+          "number": 1,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:21:06Z",
+          "completed_at": "2026-11-24T21:21:10Z"
+        },
+        {
+          "name": "Git bash on PATH (Windows)",
+          "number": 2,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:21:10Z",
+          "completed_at": "2026-11-24T21:21:10Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/build-jobs",
+          "number": 3,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:21:10Z",
+          "completed_at": "2026-11-24T21:21:11Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/job-isolation",
+          "number": 4,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:21:11Z",
+          "completed_at": "2026-11-24T21:21:12Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/kept-clone",
+          "number": 5,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:21:12Z",
+          "completed_at": "2026-11-24T21:21:13Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/build-folder",
+          "number": 6,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:21:13Z",
+          "completed_at": "2026-11-24T21:21:14Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/setup-rust",
+          "number": 7,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:21:14Z",
+          "completed_at": "2026-11-24T21:21:24Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/host-tools",
+          "number": 8,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:21:24Z",
+          "completed_at": "2026-11-24T21:21:24Z"
+        },
+        {
+          "name": "Test browser folder (macOS, Windows)",
+          "number": 9,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:21:24Z",
+          "completed_at": "2026-11-24T21:21:24Z"
+        },
+        {
+          "name": "Chrome for Testing (macOS, Windows)",
+          "number": 10,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:21:24Z",
+          "completed_at": "2026-11-24T21:21:24Z"
+        },
+        {
+          "name": "The tests' browser",
+          "number": 11,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:21:24Z",
+          "completed_at": "2026-11-24T21:21:24Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/node-caches",
+          "number": 12,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:21:24Z",
+          "completed_at": "2026-11-24T21:21:24Z"
+        },
+        {
+          "name": "Install",
+          "number": 13,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:21:24Z",
+          "completed_at": "2026-11-24T21:21:24Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/app-gates",
+          "number": 14,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:21:24Z",
+          "completed_at": "2026-11-24T21:25:48Z"
+        },
+        {
+          "name": "Run actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5",
+          "number": 15,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:25:48Z",
+          "completed_at": "2026-11-24T21:25:48Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/host-cleanup",
+          "number": 16,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:25:48Z",
+          "completed_at": "2026-11-24T21:25:48Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/prune-build-folder",
+          "number": 17,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:25:48Z",
+          "completed_at": "2026-11-24T21:25:49Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/sccache-stats",
+          "number": 18,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:25:49Z",
+          "completed_at": "2026-11-24T21:25:49Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/job-isolation",
+          "number": 19,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:25:49Z",
+          "completed_at": "2026-11-24T21:25:49Z"
+        }
+      ],
+      "created_at": "2026-11-24T21:03:48Z",
+      "started_at": "2026-11-24T21:21:05Z",
+      "completed_at": "2026-11-24T21:25:50Z"
+    },
+    {
+      "id": 49556,
+      "url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/jobs/49556",
+      "html_url": "https://gitea.invalid/example/paddock/actions/runs/9021/jobs/49556",
+      "run_id": 9021,
+      "run_url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/runs/9021",
+      "name": "paddock-dev (macos-latest)",
+      "labels": [
+        "macos-latest"
+      ],
+      "run_attempt": 1,
+      "head_sha": "07dc7eb685c7acde6d76b199a7600b99ae79d54a",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "failure",
+      "runner_id": 34,
+      "runner_name": "runner-2",
+      "steps": [
+        {
+          "name": "Run actions/checkout@v4",
+          "number": 0,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:22:13Z",
+          "completed_at": "2026-11-24T21:22:13Z"
+        },
+        {
+          "name": "Run actions/checkout@v4",
+          "number": 1,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:22:13Z",
+          "completed_at": "2026-11-24T21:22:18Z"
+        },
+        {
+          "name": "Git bash on PATH (Windows)",
+          "number": 2,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:22:18Z",
+          "completed_at": "2026-11-24T21:22:18Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/build-jobs",
+          "number": 3,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:22:18Z",
+          "completed_at": "2026-11-24T21:22:20Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/job-isolation",
+          "number": 4,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:22:20Z",
+          "completed_at": "2026-11-24T21:22:22Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/kept-clone",
+          "number": 5,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:22:22Z",
+          "completed_at": "2026-11-24T21:22:29Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/build-folder",
+          "number": 6,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:22:29Z",
+          "completed_at": "2026-11-24T21:22:29Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/setup-rust",
+          "number": 7,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:22:29Z",
+          "completed_at": "2026-11-24T21:22:38Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/host-tools",
+          "number": 8,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:22:38Z",
+          "completed_at": "2026-11-24T21:22:38Z"
+        },
+        {
+          "name": "Lockfile is current",
+          "number": 9,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:22:38Z",
+          "completed_at": "2026-11-24T21:22:39Z"
+        },
+        {
+          "name": "Format",
+          "number": 10,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:22:39Z",
+          "completed_at": "2026-11-24T21:22:43Z"
+        },
+        {
+          "name": "Clippy",
+          "number": 11,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:22:43Z",
+          "completed_at": "2026-11-24T21:23:25Z"
+        },
+        {
+          "name": "Fetch the other tools' dependencies",
+          "number": 12,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:23:25Z",
+          "completed_at": "2026-11-24T21:23:25Z"
+        },
+        {
+          "name": "Tests",
+          "number": 13,
+          "status": "completed",
+          "conclusion": "failure",
+          "started_at": "2026-11-24T21:23:25Z",
+          "completed_at": "2026-11-24T21:32:16Z"
+        },
+        {
+          "name": "Test cost report",
+          "number": 14,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:32:16Z",
+          "completed_at": "2026-11-24T21:32:18Z"
+        },
+        {
+          "name": "Deny",
+          "number": 15,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:32:18Z",
+          "completed_at": "2026-11-24T21:32:18Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/prune-build-folder",
+          "number": 16,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:32:18Z",
+          "completed_at": "2026-11-24T21:32:18Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/sccache-stats",
+          "number": 17,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:32:18Z",
+          "completed_at": "2026-11-24T21:32:18Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/job-isolation",
+          "number": 18,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:32:18Z",
+          "completed_at": "2026-11-24T21:32:19Z"
+        }
+      ],
+      "created_at": "2026-11-24T21:03:48Z",
+      "started_at": "2026-11-24T21:22:13Z",
+      "completed_at": "2026-11-24T21:32:19Z"
+    },
+    {
+      "id": 49557,
+      "url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/jobs/49557",
+      "html_url": "https://gitea.invalid/example/paddock/actions/runs/9021/jobs/49557",
+      "run_id": 9021,
+      "run_url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/runs/9021",
+      "name": "fuzz (shard 1)",
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "run_attempt": 1,
+      "head_sha": "07dc7eb685c7acde6d76b199a7600b99ae79d54a",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "failure",
+      "runner_id": 31,
+      "runner_name": "runner-1",
+      "steps": [
+        {
+          "name": "Run actions/checkout@v4",
+          "number": 0,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:04:26Z",
+          "completed_at": "2026-11-24T21:04:39Z"
+        },
+        {
+          "name": "Run actions/checkout@v4",
+          "number": 1,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:04:39Z",
+          "completed_at": "2026-11-24T21:04:48Z"
+        },
+        {
+          "name": "Run ./.paddock/.gitea/actions/setup-rust",
+          "number": 2,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:04:48Z",
+          "completed_at": "2026-11-24T21:07:49Z"
+        },
+        {
+          "name": "Run actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830",
+          "number": 3,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:07:49Z",
+          "completed_at": "2026-11-24T21:07:49Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/cache-report",
+          "number": 4,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:07:49Z",
+          "completed_at": "2026-11-24T21:07:50Z"
+        },
+        {
+          "name": "Run actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830",
+          "number": 5,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:07:50Z",
+          "completed_at": "2026-11-24T21:07:50Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/cache-report",
+          "number": 6,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:07:50Z",
+          "completed_at": "2026-11-24T21:07:51Z"
+        },
+        {
+          "name": "Install cargo-fuzz",
+          "number": 7,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:07:51Z",
+          "completed_at": "2026-11-24T21:07:51Z"
+        },
+        {
+          "name": "Build every fuzz target",
+          "number": 8,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:07:51Z",
+          "completed_at": "2026-11-24T21:09:35Z"
+        },
+        {
+          "name": "Fuzz ${{ matrix.targets }}",
+          "number": 9,
+          "status": "completed",
+          "conclusion": "failure",
+          "started_at": "2026-11-24T21:09:35Z",
+          "completed_at": "2026-11-24T21:12:30Z"
+        },
+        {
+          "name": "Summary",
+          "number": 10,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:12:30Z",
+          "completed_at": "2026-11-24T21:12:30Z"
+        },
+        {
+          "name": "Upload crashes",
+          "number": 11,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:12:30Z",
+          "completed_at": "2026-11-24T21:12:37Z"
+        }
+      ],
+      "created_at": "2026-11-24T21:03:48Z",
+      "started_at": "2026-11-24T21:04:24Z",
+      "completed_at": "2026-11-24T21:12:40Z"
+    },
+    {
+      "id": 49558,
+      "url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/jobs/49558",
+      "html_url": "https://gitea.invalid/example/paddock/actions/runs/9021/jobs/49558",
+      "run_id": 9021,
+      "run_url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/runs/9021",
+      "name": "fuzz (shard 1)",
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "run_attempt": 1,
+      "head_sha": "07dc7eb685c7acde6d76b199a7600b99ae79d54a",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "success",
+      "runner_id": 31,
+      "runner_name": "runner-1",
+      "steps": [
+        {
+          "name": "Run actions/checkout@v4",
+          "number": 0,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:05:43Z",
+          "completed_at": "2026-11-24T21:05:54Z"
+        },
+        {
+          "name": "Run actions/checkout@v4",
+          "number": 1,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:05:54Z",
+          "completed_at": "2026-11-24T21:06:03Z"
+        },
+        {
+          "name": "Run ./.paddock/.gitea/actions/setup-rust",
+          "number": 2,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:06:03Z",
+          "completed_at": "2026-11-24T21:09:58Z"
+        },
+        {
+          "name": "Run actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830",
+          "number": 3,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:09:58Z",
+          "completed_at": "2026-11-24T21:09:58Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/cache-report",
+          "number": 4,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:09:58Z",
+          "completed_at": "2026-11-24T21:09:58Z"
+        },
+        {
+          "name": "Run actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830",
+          "number": 5,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:09:58Z",
+          "completed_at": "2026-11-24T21:09:59Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/cache-report",
+          "number": 6,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:09:59Z",
+          "completed_at": "2026-11-24T21:09:59Z"
+        },
+        {
+          "name": "Install cargo-fuzz",
+          "number": 7,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:09:59Z",
+          "completed_at": "2026-11-24T21:09:59Z"
+        },
+        {
+          "name": "Build every fuzz target",
+          "number": 8,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:09:59Z",
+          "completed_at": "2026-11-24T21:11:19Z"
+        },
+        {
+          "name": "Fuzz ${{ matrix.targets }}",
+          "number": 9,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:11:19Z",
+          "completed_at": "2026-11-24T21:15:22Z"
+        },
+        {
+          "name": "Summary",
+          "number": 10,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:15:22Z",
+          "completed_at": "2026-11-24T21:15:22Z"
+        },
+        {
+          "name": "Upload crashes",
+          "number": 11,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:15:22Z",
+          "completed_at": "2026-11-24T21:15:22Z"
+        }
+      ],
+      "created_at": "2026-11-24T21:03:48Z",
+      "started_at": "2026-11-24T21:05:28Z",
+      "completed_at": "2026-11-24T21:15:27Z"
+    },
+    {
+      "id": 49559,
+      "url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/jobs/49559",
+      "html_url": "https://gitea.invalid/example/paddock/actions/runs/9021/jobs/49559",
+      "run_id": 9021,
+      "run_url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/runs/9021",
+      "name": "bundle (macos-latest)",
+      "labels": [
+        "macos-latest"
+      ],
+      "run_attempt": 1,
+      "head_sha": "07dc7eb685c7acde6d76b199a7600b99ae79d54a",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "success",
+      "runner_id": 34,
+      "runner_name": "runner-2",
+      "steps": [
+        {
+          "name": "Git bash on PATH (Windows)",
+          "number": 0,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:04:30Z",
+          "completed_at": "2026-11-24T21:04:30Z"
+        },
+        {
+          "name": "Rehearsal guard",
+          "number": 1,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:04:30Z",
+          "completed_at": "2026-11-24T21:04:30Z"
+        },
+        {
+          "name": "The kit is this commit",
+          "number": 2,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:04:30Z",
+          "completed_at": "2026-11-24T21:04:30Z"
+        },
+        {
+          "name": "Run actions/checkout@v4",
+          "number": 3,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:04:30Z",
+          "completed_at": "2026-11-24T21:04:30Z"
+        },
+        {
+          "name": "Run actions/checkout@v4",
+          "number": 4,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:04:30Z",
+          "completed_at": "2026-11-24T21:04:33Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/build-jobs",
+          "number": 5,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:04:33Z",
+          "completed_at": "2026-11-24T21:04:33Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/job-isolation",
+          "number": 6,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:04:33Z",
+          "completed_at": "2026-11-24T21:05:32Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/kept-clone",
+          "number": 7,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:05:32Z",
+          "completed_at": "2026-11-24T21:05:35Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/build-folder",
+          "number": 8,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:05:35Z",
+          "completed_at": "2026-11-24T21:05:36Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/setup-rust",
+          "number": 9,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:05:36Z",
+          "completed_at": "2026-11-24T21:05:44Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/setup-node",
+          "number": 10,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:05:44Z",
+          "completed_at": "2026-11-24T21:05:44Z"
+        },
+        {
+          "name": "Host Node matches .nvmrc",
+          "number": 11,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:05:44Z",
+          "completed_at": "2026-11-24T21:05:44Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/node-caches",
+          "number": 12,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:05:44Z",
+          "completed_at": "2026-11-24T21:05:44Z"
+        },
+        {
+          "name": "Fresh npm cache and no kept Angular cache on a tag",
+          "number": 13,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:05:44Z",
+          "completed_at": "2026-11-24T21:05:44Z"
+        },
+        {
+          "name": "The rehearsal's tag name",
+          "number": 14,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:05:44Z",
+          "completed_at": "2026-11-24T21:05:44Z"
+        },
+        {
+          "name": "The tag names the app's version",
+          "number": 15,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:05:44Z",
+          "completed_at": "2026-11-24T21:05:44Z"
+        },
+        {
+          "name": "The first release's CHANGELOG section is ready",
+          "number": 16,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:05:44Z",
+          "completed_at": "2026-11-24T21:05:44Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/build-env",
+          "number": 17,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:05:44Z",
+          "completed_at": "2026-11-24T21:05:45Z"
+        },
+        {
+          "name": "Stage paddock-setup.exe",
+          "number": 18,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:05:45Z",
+          "completed_at": "2026-11-24T21:05:45Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/tauri-bundle",
+          "number": 19,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:05:45Z",
+          "completed_at": "2026-11-24T21:13:35Z"
+        },
+        {
+          "name": "The app's own bundle check",
+          "number": 20,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:13:35Z",
+          "completed_at": "2026-11-24T21:13:39Z"
+        },
+        {
+          "name": "The app's own Windows binary check",
+          "number": 21,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:13:39Z",
+          "completed_at": "2026-11-24T21:13:39Z"
+        },
+        {
+          "name": "The per-machine installer check",
+          "number": 22,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:13:39Z",
+          "completed_at": "2026-11-24T21:13:39Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/macos-verify",
+          "number": 23,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:13:39Z",
+          "completed_at": "2026-11-24T21:14:02Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/sccache-stats",
+          "number": 24,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:14:02Z",
+          "completed_at": "2026-11-24T21:14:02Z"
+        },
+        {
+          "name": "Run actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5",
+          "number": 25,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:14:02Z",
+          "completed_at": "2026-11-24T21:14:11Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/host-cleanup",
+          "number": 26,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:14:11Z",
+          "completed_at": "2026-11-24T21:14:11Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/prune-build-folder",
+          "number": 27,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:14:11Z",
+          "completed_at": "2026-11-24T21:14:17Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/job-isolation",
+          "number": 28,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:14:17Z",
+          "completed_at": "2026-11-24T21:14:19Z"
+        }
+      ],
+      "created_at": "2026-11-24T21:04:23Z",
+      "started_at": "2026-11-24T21:04:29Z",
+      "completed_at": "2026-11-24T21:14:21Z"
+    },
+    {
+      "id": 49560,
+      "url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/jobs/49560",
+      "html_url": "https://gitea.invalid/example/paddock/actions/runs/9021/jobs/49560",
+      "run_id": 9021,
+      "run_url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/runs/9021",
+      "name": "bundle (ubuntu-latest)",
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "run_attempt": 1,
+      "head_sha": "07dc7eb685c7acde6d76b199a7600b99ae79d54a",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "success",
+      "runner_id": 31,
+      "runner_name": "runner-1",
+      "steps": [
+        {
+          "name": "Git bash on PATH (Windows)",
+          "number": 0,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:05:43Z",
+          "completed_at": "2026-11-24T21:05:43Z"
+        },
+        {
+          "name": "Rehearsal guard",
+          "number": 1,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:05:43Z",
+          "completed_at": "2026-11-24T21:05:43Z"
+        },
+        {
+          "name": "The kit is this commit",
+          "number": 2,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:05:43Z",
+          "completed_at": "2026-11-24T21:05:43Z"
+        },
+        {
+          "name": "Run actions/checkout@v4",
+          "number": 3,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:05:43Z",
+          "completed_at": "2026-11-24T21:05:54Z"
+        },
+        {
+          "name": "Run actions/checkout@v4",
+          "number": 4,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:05:54Z",
+          "completed_at": "2026-11-24T21:05:54Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/build-jobs",
+          "number": 5,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:05:54Z",
+          "completed_at": "2026-11-24T21:05:54Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/job-isolation",
+          "number": 6,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:05:54Z",
+          "completed_at": "2026-11-24T21:05:54Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/kept-clone",
+          "number": 7,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:05:54Z",
+          "completed_at": "2026-11-24T21:05:54Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/build-folder",
+          "number": 8,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:05:54Z",
+          "completed_at": "2026-11-24T21:05:54Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/setup-rust",
+          "number": 9,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:05:54Z",
+          "completed_at": "2026-11-24T21:05:55Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/setup-node",
+          "number": 10,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:05:55Z",
+          "completed_at": "2026-11-24T21:05:55Z"
+        },
+        {
+          "name": "Host Node matches .nvmrc",
+          "number": 11,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:05:55Z",
+          "completed_at": "2026-11-24T21:05:55Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/node-caches",
+          "number": 12,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:05:55Z",
+          "completed_at": "2026-11-24T21:05:57Z"
+        },
+        {
+          "name": "Fresh npm cache and no kept Angular cache on a tag",
+          "number": 13,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:05:57Z",
+          "completed_at": "2026-11-24T21:05:57Z"
+        },
+        {
+          "name": "The rehearsal's tag name",
+          "number": 14,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:05:57Z",
+          "completed_at": "2026-11-24T21:05:57Z"
+        },
+        {
+          "name": "The tag names the app's version",
+          "number": 15,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:05:57Z",
+          "completed_at": "2026-11-24T21:05:57Z"
+        },
+        {
+          "name": "The first release's CHANGELOG section is ready",
+          "number": 16,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:05:57Z",
+          "completed_at": "2026-11-24T21:05:57Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/build-env",
+          "number": 17,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:05:57Z",
+          "completed_at": "2026-11-24T21:05:57Z"
+        },
+        {
+          "name": "Stage paddock-setup.exe",
+          "number": 18,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:05:57Z",
+          "completed_at": "2026-11-24T21:05:57Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/tauri-bundle",
+          "number": 19,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:05:57Z",
+          "completed_at": "2026-11-24T21:19:39Z"
+        },
+        {
+          "name": "The app's own bundle check",
+          "number": 20,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:19:39Z",
+          "completed_at": "2026-11-24T21:19:40Z"
+        },
+        {
+          "name": "The app's own Windows binary check",
+          "number": 21,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:19:40Z",
+          "completed_at": "2026-11-24T21:19:40Z"
+        },
+        {
+          "name": "The per-machine installer check",
+          "number": 22,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:19:40Z",
+          "completed_at": "2026-11-24T21:19:40Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/macos-verify",
+          "number": 23,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:19:40Z",
+          "completed_at": "2026-11-24T21:19:40Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/sccache-stats",
+          "number": 24,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:19:40Z",
+          "completed_at": "2026-11-24T21:19:40Z"
+        },
+        {
+          "name": "Run actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5",
+          "number": 25,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:19:40Z",
+          "completed_at": "2026-11-24T21:19:52Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/host-cleanup",
+          "number": 26,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:19:52Z",
+          "completed_at": "2026-11-24T21:19:52Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/prune-build-folder",
+          "number": 27,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:19:52Z",
+          "completed_at": "2026-11-24T21:19:52Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/job-isolation",
+          "number": 28,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:19:52Z",
+          "completed_at": "2026-11-24T21:19:52Z"
+        }
+      ],
+      "created_at": "2026-11-24T21:04:23Z",
+      "started_at": "2026-11-24T21:05:38Z",
+      "completed_at": "2026-11-24T21:19:55Z"
+    },
+    {
+      "id": 49561,
+      "url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/jobs/49561",
+      "html_url": "https://gitea.invalid/example/paddock/actions/runs/9021/jobs/49561",
+      "run_id": 9021,
+      "run_url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/runs/9021",
+      "name": "bundle (windows-latest)",
+      "labels": [
+        "windows-latest"
+      ],
+      "run_attempt": 1,
+      "head_sha": "07dc7eb685c7acde6d76b199a7600b99ae79d54a",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "success",
+      "runner_id": 33,
+      "runner_name": "runner-3",
+      "steps": [
+        {
+          "name": "Git bash on PATH (Windows)",
+          "number": 0,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:04:29Z",
+          "completed_at": "2026-11-24T21:04:29Z"
+        },
+        {
+          "name": "Rehearsal guard",
+          "number": 1,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:04:29Z",
+          "completed_at": "2026-11-24T21:04:29Z"
+        },
+        {
+          "name": "The kit is this commit",
+          "number": 2,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:04:29Z",
+          "completed_at": "2026-11-24T21:04:29Z"
+        },
+        {
+          "name": "Run actions/checkout@v4",
+          "number": 3,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:04:29Z",
+          "completed_at": "2026-11-24T21:04:29Z"
+        },
+        {
+          "name": "Run actions/checkout@v4",
+          "number": 4,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:04:29Z",
+          "completed_at": "2026-11-24T21:04:43Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/build-jobs",
+          "number": 5,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:04:43Z",
+          "completed_at": "2026-11-24T21:04:44Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/job-isolation",
+          "number": 6,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:04:44Z",
+          "completed_at": "2026-11-24T21:06:37Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/kept-clone",
+          "number": 7,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:06:37Z",
+          "completed_at": "2026-11-24T21:06:48Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/build-folder",
+          "number": 8,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:06:48Z",
+          "completed_at": "2026-11-24T21:06:50Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/setup-rust",
+          "number": 9,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:06:50Z",
+          "completed_at": "2026-11-24T21:07:05Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/setup-node",
+          "number": 10,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:07:05Z",
+          "completed_at": "2026-11-24T21:07:05Z"
+        },
+        {
+          "name": "Host Node matches .nvmrc",
+          "number": 11,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:07:05Z",
+          "completed_at": "2026-11-24T21:07:05Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/node-caches",
+          "number": 12,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:07:05Z",
+          "completed_at": "2026-11-24T21:07:12Z"
+        },
+        {
+          "name": "Fresh npm cache and no kept Angular cache on a tag",
+          "number": 13,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:07:12Z",
+          "completed_at": "2026-11-24T21:07:12Z"
+        },
+        {
+          "name": "The rehearsal's tag name",
+          "number": 14,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:07:12Z",
+          "completed_at": "2026-11-24T21:07:12Z"
+        },
+        {
+          "name": "The tag names the app's version",
+          "number": 15,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:07:12Z",
+          "completed_at": "2026-11-24T21:07:12Z"
+        },
+        {
+          "name": "The first release's CHANGELOG section is ready",
+          "number": 16,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:07:12Z",
+          "completed_at": "2026-11-24T21:07:12Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/build-env",
+          "number": 17,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:07:12Z",
+          "completed_at": "2026-11-24T21:07:13Z"
+        },
+        {
+          "name": "Stage paddock-setup.exe",
+          "number": 18,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:07:13Z",
+          "completed_at": "2026-11-24T21:08:08Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/tauri-bundle",
+          "number": 19,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:08:08Z",
+          "completed_at": "2026-11-24T21:29:57Z"
+        },
+        {
+          "name": "The app's own bundle check",
+          "number": 20,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:29:57Z",
+          "completed_at": "2026-11-24T21:29:57Z"
+        },
+        {
+          "name": "The app's own Windows binary check",
+          "number": 21,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:29:57Z",
+          "completed_at": "2026-11-24T21:29:57Z"
+        },
+        {
+          "name": "The per-machine installer check",
+          "number": 22,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:29:57Z",
+          "completed_at": "2026-11-24T21:29:59Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/macos-verify",
+          "number": 23,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:29:59Z",
+          "completed_at": "2026-11-24T21:29:59Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/sccache-stats",
+          "number": 24,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:29:59Z",
+          "completed_at": "2026-11-24T21:30:00Z"
+        },
+        {
+          "name": "Run actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5",
+          "number": 25,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:30:00Z",
+          "completed_at": "2026-11-24T21:30:06Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/host-cleanup",
+          "number": 26,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:30:06Z",
+          "completed_at": "2026-11-24T21:30:08Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/prune-build-folder",
+          "number": 27,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:30:08Z",
+          "completed_at": "2026-11-24T21:30:56Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/job-isolation",
+          "number": 28,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:30:56Z",
+          "completed_at": "2026-11-24T21:31:13Z"
+        }
+      ],
+      "created_at": "2026-11-24T21:04:23Z",
+      "started_at": "2026-11-24T21:04:28Z",
+      "completed_at": "2026-11-24T21:31:23Z"
+    },
+    {
+      "id": 49562,
+      "url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/jobs/49562",
+      "html_url": "https://gitea.invalid/example/paddock/actions/runs/9021/jobs/49562",
+      "run_id": 9021,
+      "run_url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/runs/9021",
+      "name": "C99 (no Keychain in a macOS build)",
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "run_attempt": 1,
+      "head_sha": "07dc7eb685c7acde6d76b199a7600b99ae79d54a",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "skipped",
+      "runner_id": 0,
+      "steps": [],
+      "created_at": "2026-11-24T21:04:23Z",
+      "started_at": "1970-01-01T00:00:00Z",
+      "completed_at": "1970-01-01T00:00:00Z"
+    },
+    {
+      "id": 49563,
+      "url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/jobs/49563",
+      "html_url": "https://gitea.invalid/example/paddock/actions/runs/9021/jobs/49563",
+      "run_id": 9021,
+      "run_url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/runs/9021",
+      "name": "release",
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "run_attempt": 1,
+      "head_sha": "07dc7eb685c7acde6d76b199a7600b99ae79d54a",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "skipped",
+      "runner_id": 0,
+      "steps": [],
+      "created_at": "2026-11-24T21:04:23Z",
+      "started_at": "1970-01-01T00:00:00Z",
+      "completed_at": "1970-01-01T00:00:00Z"
+    },
+    {
+      "id": 49564,
+      "url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/jobs/49564",
+      "html_url": "https://gitea.invalid/example/paddock/actions/runs/9021/jobs/49564",
+      "run_id": 9021,
+      "run_url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/runs/9021",
+      "name": "release (rehearsal, nothing published)",
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "run_attempt": 1,
+      "head_sha": "07dc7eb685c7acde6d76b199a7600b99ae79d54a",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "skipped",
+      "runner_id": 0,
+      "steps": [],
+      "created_at": "2026-11-24T21:04:23Z",
+      "started_at": "1970-01-01T00:00:00Z",
+      "completed_at": "1970-01-01T00:00:00Z"
+    },
+    {
+      "id": 49565,
+      "url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/jobs/49565",
+      "html_url": "https://gitea.invalid/example/paddock/actions/runs/9021/jobs/49565",
+      "run_id": 9021,
+      "run_url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/runs/9021",
+      "name": "bundle (macos-latest)",
+      "labels": [
+        "macos-latest"
+      ],
+      "run_attempt": 1,
+      "head_sha": "07dc7eb685c7acde6d76b199a7600b99ae79d54a",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "success",
+      "runner_id": 34,
+      "runner_name": "runner-2",
+      "steps": [
+        {
+          "name": "Git bash on PATH (Windows)",
+          "number": 0,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:04:29Z",
+          "completed_at": "2026-11-24T21:04:29Z"
+        },
+        {
+          "name": "Rehearsal guard",
+          "number": 1,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:04:29Z",
+          "completed_at": "2026-11-24T21:04:29Z"
+        },
+        {
+          "name": "The kit is this commit",
+          "number": 2,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:04:29Z",
+          "completed_at": "2026-11-24T21:04:29Z"
+        },
+        {
+          "name": "Run actions/checkout@v4",
+          "number": 3,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:04:29Z",
+          "completed_at": "2026-11-24T21:04:29Z"
+        },
+        {
+          "name": "Run actions/checkout@v4",
+          "number": 4,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:04:29Z",
+          "completed_at": "2026-11-24T21:04:33Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/build-jobs",
+          "number": 5,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:04:33Z",
+          "completed_at": "2026-11-24T21:04:33Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/job-isolation",
+          "number": 6,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:04:33Z",
+          "completed_at": "2026-11-24T21:06:30Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/kept-clone",
+          "number": 7,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:06:30Z",
+          "completed_at": "2026-11-24T21:06:37Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/build-folder",
+          "number": 8,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:06:37Z",
+          "completed_at": "2026-11-24T21:06:37Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/setup-rust",
+          "number": 9,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:06:37Z",
+          "completed_at": "2026-11-24T21:06:45Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/setup-node",
+          "number": 10,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:06:45Z",
+          "completed_at": "2026-11-24T21:06:45Z"
+        },
+        {
+          "name": "Host Node matches .nvmrc",
+          "number": 11,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:06:45Z",
+          "completed_at": "2026-11-24T21:06:46Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/node-caches",
+          "number": 12,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:06:46Z",
+          "completed_at": "2026-11-24T21:06:47Z"
+        },
+        {
+          "name": "Fresh npm cache and no kept Angular cache on a tag",
+          "number": 13,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:06:47Z",
+          "completed_at": "2026-11-24T21:06:47Z"
+        },
+        {
+          "name": "The rehearsal's tag name",
+          "number": 14,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:06:47Z",
+          "completed_at": "2026-11-24T21:06:47Z"
+        },
+        {
+          "name": "The tag names the app's version",
+          "number": 15,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:06:47Z",
+          "completed_at": "2026-11-24T21:06:47Z"
+        },
+        {
+          "name": "The first release's CHANGELOG section is ready",
+          "number": 16,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:06:47Z",
+          "completed_at": "2026-11-24T21:06:47Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/build-env",
+          "number": 17,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:06:47Z",
+          "completed_at": "2026-11-24T21:06:47Z"
+        },
+        {
+          "name": "Stage paddock-setup.exe",
+          "number": 18,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:06:47Z",
+          "completed_at": "2026-11-24T21:06:47Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/tauri-bundle",
+          "number": 19,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:06:47Z",
+          "completed_at": "2026-11-24T21:13:21Z"
+        },
+        {
+          "name": "The app's own bundle check",
+          "number": 20,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:13:21Z",
+          "completed_at": "2026-11-24T21:13:21Z"
+        },
+        {
+          "name": "The app's own Windows binary check",
+          "number": 21,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:13:21Z",
+          "completed_at": "2026-11-24T21:13:21Z"
+        },
+        {
+          "name": "The per-machine installer check",
+          "number": 22,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:13:21Z",
+          "completed_at": "2026-11-24T21:13:21Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/macos-verify",
+          "number": 23,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:13:21Z",
+          "completed_at": "2026-11-24T21:13:31Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/sccache-stats",
+          "number": 24,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:13:31Z",
+          "completed_at": "2026-11-24T21:13:31Z"
+        },
+        {
+          "name": "Run actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5",
+          "number": 25,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:13:31Z",
+          "completed_at": "2026-11-24T21:13:35Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/host-cleanup",
+          "number": 26,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:13:35Z",
+          "completed_at": "2026-11-24T21:13:36Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/prune-build-folder",
+          "number": 27,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:13:36Z",
+          "completed_at": "2026-11-24T21:13:41Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/job-isolation",
+          "number": 28,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:13:41Z",
+          "completed_at": "2026-11-24T21:13:44Z"
+        }
+      ],
+      "created_at": "2026-11-24T21:04:24Z",
+      "started_at": "2026-11-24T21:04:29Z",
+      "completed_at": "2026-11-24T21:13:47Z"
+    },
+    {
+      "id": 49566,
+      "url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/jobs/49566",
+      "html_url": "https://gitea.invalid/example/paddock/actions/runs/9021/jobs/49566",
+      "run_id": 9021,
+      "run_url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/runs/9021",
+      "name": "bundle (ubuntu-latest)",
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "run_attempt": 1,
+      "head_sha": "07dc7eb685c7acde6d76b199a7600b99ae79d54a",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "success",
+      "runner_id": 31,
+      "runner_name": "runner-1",
+      "steps": [
+        {
+          "name": "Git bash on PATH (Windows)",
+          "number": 0,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:05:47Z",
+          "completed_at": "2026-11-24T21:05:47Z"
+        },
+        {
+          "name": "Rehearsal guard",
+          "number": 1,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:05:47Z",
+          "completed_at": "2026-11-24T21:05:47Z"
+        },
+        {
+          "name": "The kit is this commit",
+          "number": 2,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:05:47Z",
+          "completed_at": "2026-11-24T21:05:47Z"
+        },
+        {
+          "name": "Run actions/checkout@v4",
+          "number": 3,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:05:47Z",
+          "completed_at": "2026-11-24T21:05:56Z"
+        },
+        {
+          "name": "Run actions/checkout@v4",
+          "number": 4,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:05:56Z",
+          "completed_at": "2026-11-24T21:05:56Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/build-jobs",
+          "number": 5,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:05:56Z",
+          "completed_at": "2026-11-24T21:05:57Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/job-isolation",
+          "number": 6,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:05:57Z",
+          "completed_at": "2026-11-24T21:05:57Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/kept-clone",
+          "number": 7,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:05:57Z",
+          "completed_at": "2026-11-24T21:05:57Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/build-folder",
+          "number": 8,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:05:57Z",
+          "completed_at": "2026-11-24T21:05:57Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/setup-rust",
+          "number": 9,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:05:57Z",
+          "completed_at": "2026-11-24T21:05:58Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/setup-node",
+          "number": 10,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:05:58Z",
+          "completed_at": "2026-11-24T21:05:58Z"
+        },
+        {
+          "name": "Host Node matches .nvmrc",
+          "number": 11,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:05:58Z",
+          "completed_at": "2026-11-24T21:05:58Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/node-caches",
+          "number": 12,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:05:58Z",
+          "completed_at": "2026-11-24T21:06:00Z"
+        },
+        {
+          "name": "Fresh npm cache and no kept Angular cache on a tag",
+          "number": 13,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:06:00Z",
+          "completed_at": "2026-11-24T21:06:00Z"
+        },
+        {
+          "name": "The rehearsal's tag name",
+          "number": 14,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:06:00Z",
+          "completed_at": "2026-11-24T21:06:00Z"
+        },
+        {
+          "name": "The tag names the app's version",
+          "number": 15,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:06:00Z",
+          "completed_at": "2026-11-24T21:06:00Z"
+        },
+        {
+          "name": "The first release's CHANGELOG section is ready",
+          "number": 16,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:06:00Z",
+          "completed_at": "2026-11-24T21:06:00Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/build-env",
+          "number": 17,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:06:00Z",
+          "completed_at": "2026-11-24T21:06:00Z"
+        },
+        {
+          "name": "Stage paddock-setup.exe",
+          "number": 18,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:06:00Z",
+          "completed_at": "2026-11-24T21:06:00Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/tauri-bundle",
+          "number": 19,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:06:00Z",
+          "completed_at": "2026-11-24T21:13:44Z"
+        },
+        {
+          "name": "The app's own bundle check",
+          "number": 20,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:13:44Z",
+          "completed_at": "2026-11-24T21:13:44Z"
+        },
+        {
+          "name": "The app's own Windows binary check",
+          "number": 21,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:13:44Z",
+          "completed_at": "2026-11-24T21:13:44Z"
+        },
+        {
+          "name": "The per-machine installer check",
+          "number": 22,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:13:44Z",
+          "completed_at": "2026-11-24T21:13:44Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/macos-verify",
+          "number": 23,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:13:44Z",
+          "completed_at": "2026-11-24T21:13:44Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/sccache-stats",
+          "number": 24,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:13:44Z",
+          "completed_at": "2026-11-24T21:13:45Z"
+        },
+        {
+          "name": "Run actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5",
+          "number": 25,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:13:45Z",
+          "completed_at": "2026-11-24T21:13:57Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/host-cleanup",
+          "number": 26,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:13:57Z",
+          "completed_at": "2026-11-24T21:13:57Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/prune-build-folder",
+          "number": 27,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-24T21:13:57Z",
+          "completed_at": "2026-11-24T21:13:57Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/job-isolation",
+          "number": 28,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-24T21:13:57Z",
+          "completed_at": "2026-11-24T21:13:57Z"
+        }
+      ],
+      "created_at": "2026-11-24T21:04:24Z",
+      "started_at": "2026-11-24T21:05:46Z",
+      "completed_at": "2026-11-24T21:14:03Z"
+    }
+  ],
+  "total_count": 95
+}
