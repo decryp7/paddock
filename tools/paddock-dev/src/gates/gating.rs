@@ -1177,7 +1177,7 @@ mod tests {
 
     #[test]
     fn the_c99_output_is_a_planner_output_like_the_others() {
-        // ci.yml's c99 step (the quick job) runs under needs.plan.outputs.c99; the script it runs is a check
+        // ci.yml's c99 job runs under needs.plan.outputs.c99; the script it runs is a check
         let ci = "on:\n  pull_request:\njobs:\n  plan:\n    runs-on: ubuntu-latest\n    outputs:\n      c99: ${{ steps.plan.outputs.c99 }}\n    steps:\n      - id: plan\n        run: node scripts/affected.mjs --ci\n  conformance:\n    needs: [plan]\n    if: ${{ needs.plan.outputs.c99 == 'true' }}\n    runs-on: ubuntu-latest\n    steps:\n      - run: node scripts/check-x.mjs\n";
         let w = world(&[(".gitea/workflows/ci.yml", ci)], &[], &[]);
         let mut c = check(Kind::Script, "scripts/check-x.mjs");

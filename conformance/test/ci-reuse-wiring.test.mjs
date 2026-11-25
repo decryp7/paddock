@@ -45,8 +45,7 @@ test('a reused ci.yml run is declared by the planner: PLAN_REUSE reaches `./dev 
   assert.doesNotMatch(plan, /rerun_jobs=\[\]/, 'the planner writes rerun_jobs, not the shell');
   // Every job reads `rerun_jobs`: an empty list is none of them, so a reused run runs nothing.
   const jobs = [...ci.slice(ci.indexOf('\njobs:\n')).matchAll(/^ {2}([\w-]+):\n/gm)].map((m) => m[1]).filter((j) => j !== 'plan');
-  // A positive control that the reader saw the jobs: 10 since the short checks became one job (2026-11-25).
-  assert.ok(jobs.length >= 8, `the jobs of ci.yml were read (${jobs.length})`);
+  assert.ok(jobs.length >= 12, `the jobs of ci.yml were read (${jobs.length})`);
   for (const j of jobs) {
     const body = jobText(ci, j);
     assert.match(body, /rerun_jobs \|\| '\[/, `${j}: its if reads rerun_jobs, so an empty list ends it`);

@@ -837,27 +837,6 @@ fn since_outputs() -> Vec<String> {
     plan.ci_outputs(&[], &mut |_| {}).into_iter().map(|(k, _)| k).collect()
 }
 
-/// The longest Linux job starts first and the short checks share one job (user, 2026-11-25): Gitea gives a runner the waiting job
-/// with the oldest `updated` time, then the lowest id, and the ids follow the order of ci.yml's jobs, so `paddock-dev` is the first
-/// job after the plan and the short `quick` job (secret scan, C99, audit, heavy tool) is the last.
-#[test]
-fn the_longest_linux_job_is_first_after_the_plan_and_the_short_checks_are_one_job_last() {
-    let ci = std::fs::read_to_string(root().join(".gitea/workflows/ci.yml"))
-        .unwrap()
-        .replace("\r\n", "\n");
-    let wf = paddock_dev::plan_gitea::workflow_jobs(&ci).unwrap();
-    let keys: Vec<&str> = wf.jobs.iter().map(|(k, _)| k.as_str()).collect();
-    assert!(keys.len() >= 10, "a positive control: ci.yml's jobs were read: {keys:?}");
-    assert_eq!(keys[..2], ["plan", "paddock-dev"], "{keys:?}");
-    assert_eq!(keys.last(), Some(&"quick"), "{keys:?}");
-    for gone in ["gitleaks", "c99", "heavy", "audit"] {
-        assert!(
-            !keys.contains(&gone),
-            "{gone} is a step of the quick job, not a job of its own: {keys:?}"
-        );
-    }
-}
-
 /// A rerun of a run's failures must be able to run every job that failed and none that passed: every job of ci.yml is in the
 /// planner's job table (or a rerun of it plans everything), and every job but the plan asks `rerun_jobs` for itself.
 #[test]

@@ -1840,7 +1840,7 @@ mod tests {
 
     #[test]
     fn the_project_outputs_are_every_project_of_the_job_table() {
-        let out: Vec<String> = plan_of(vec![rerun("quick", Leg::default())])
+        let out: Vec<String> = plan_of(vec![rerun("c99", Leg::default())])
             .ci_outputs(&[], &mut |_| {})
             .into_iter()
             .map(|(k, _)| k)
@@ -1850,13 +1850,12 @@ mod tests {
                 assert!(out.contains(&p.replace('-', "_")), "{p} in {out:?}");
             }
         }
-        let c99: BTreeMap<String, String> = plan_of(vec![rerun("quick", Leg::default())])
+        let c99: BTreeMap<String, String> = plan_of(vec![rerun("c99", Leg::default())])
             .ci_outputs(&[], &mut |_| {})
             .into_iter()
             .collect();
-        assert_eq!(c99["c99"], "true", "the quick job's C99 step reruns");
-        assert_eq!(c99["tools"], "true", "and its heavy tool steps");
-        assert_eq!(c99["rerun_jobs"], r#"["quick"]"#);
+        assert_eq!(c99["c99"], "true");
+        assert_eq!(c99["rerun_jobs"], r#"["c99"]"#);
         assert!(!c99.contains_key("crate_legs"), "not rerun: the plan step writes every leg");
     }
 
