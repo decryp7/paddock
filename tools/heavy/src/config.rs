@@ -47,8 +47,13 @@ pub struct Config {
     pub stdin_inherit: bool,
     /// Allow a build folder inside the home folder (ER-14 override).
     pub allow_home_target: bool,
-    /// How long to wait for the command's stderr pipe to close after the command exited (a background process may hold it).
+    /// How long to wait for the command's output pipes to close after the command exited (a background process may hold them).
     pub drain: Duration,
+    /// The folder of the run logs (`crate::capture`): `<dev-targets>/runs`, resolved by the program at its edge; `None` is
+    /// `<root>/runs` ([`Config::runs_dir`]).
+    pub runs: Option<PathBuf>,
+    /// The hang detector's default (`HEAVY_STALL`, seconds; `--stall` wins): off unless set.
+    pub stall: Option<Duration>,
 }
 
 /// Problems found while reading settings (shown once, then the default is used).
@@ -142,8 +147,26 @@ impl Config {
             stdin_inherit: get("HEAVY_STDIN").is_some_and(|v| v == "inherit"),
             allow_home_target: flag("HEAVY_ALLOW_HOME_TARGET"),
             drain: Duration::from_millis(secs(get, &["HEAVY_DRAIN_MS"], 500.0, 0.0, &mut w) as u64),
+            runs: None,
+            stall: match first(get, &["HEAVY_STALL"]) {
+                None => None,
+                Some(v) => match v.trim().parse::<f64>() {
+                    Ok(x) if x.is_finite() && x > 0.0 => Some(Duration::from_secs_f64(x)),
+                    _ => {
+                        w.push(format!(
+                            "HEAVY_STALL={v:?} is not a number of seconds > 0; the hang detector stays off"
+                        ));
+                        None
+                    }
+                },
+            },
         };
         (cfg, w)
+    }
+
+    /// The folder of the run logs: the one resolved at the edge, else `<root>/runs`.
+    pub fn runs_dir(&self) -> PathBuf {
+        self.runs.clone().unwrap_or_else(|| self.root.join("runs"))
     }
 
     /// The log file for a day: `--log-file`, else `<root>/heavy-logs/heavy.<day>.log`.
@@ -161,6 +184,16 @@ mod tests {
     fn cfg(pairs: &[(&str, &str)]) -> (Config, Warnings) {
         let m: std::collections::HashMap<String, String> = pairs.iter().map(|(k, v)| ((*k).into(), (*v).into())).collect();
         Config::from_env(&|k| m.get(k).cloned(), false)
+    }
+
+    #[test]
+    fn the_hang_detector_is_off_unless_set() {
+        assert_eq!(cfg(&[]).0.stall, None);
+        assert_eq!(cfg(&[("HEAVY_STALL", "900")]).0.stall, Some(Duration::from_secs(900)));
+        let (c, w) = cfg(&[("HEAVY_STALL", "0")]);
+        assert_eq!((c.stall, w.len()), (None, 1));
+        let (c, _) = cfg(&[("HEAVY_DIR", "/l")]);
+        assert_eq!(c.runs_dir(), PathBuf::from("/l/runs"));
     }
 
     #[test]

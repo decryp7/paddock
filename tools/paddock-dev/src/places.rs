@@ -84,8 +84,8 @@ fn pinned_worktree_root(_from: &Path) -> Option<PathBuf> {
     None
 }
 
-/// The pure rule (the hooks' copy is `paddockpaths.dev_targets_of`): the named folder (absolute, not `/`, no `..`), else the
-/// parent of the worktree root (absolute, no `..`, and the parent is not `/`); a trailing `/` is dropped.
+/// The pure rule (the hooks' copy is `paddockpaths.dev_targets_of`, heavy's is `heavy::capture::dev_targets_of`): the named folder
+/// (absolute, not `/`, no `..`), else the parent of the worktree root (absolute, no `..`, and the parent is not `/`); a trailing `/` is dropped.
 pub fn dev_targets_of(set: Option<String>, worktree_root: Option<PathBuf>) -> Result<PathBuf, CliError> {
     let (path, from) = match (set, worktree_root) {
         (Some(v), _) => (PathBuf::from(trim_slash(v.trim())), DEV_TARGETS_ENV.to_string()),

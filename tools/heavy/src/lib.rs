@@ -8,12 +8,14 @@
 //! owner inside; a non-empty unparsable owner is never broken; a break is rename-aside, re-check, put back; EPERM is alive;
 //! commands are masked; waits are logged; the queue is FIFO with `--high` first.
 
+pub mod capture;
 pub mod cli;
 pub mod clock;
 pub mod config;
 pub mod exit;
 pub mod gate;
 pub mod guard;
+pub mod hang;
 pub mod history;
 pub mod lock;
 pub mod log;

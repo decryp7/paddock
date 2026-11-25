@@ -21,6 +21,7 @@ fn opts() -> RunOpts {
         queue_max: None,
         queue_stall: None,
         run_max: None,
+        stall: None,
     }
 }
 
