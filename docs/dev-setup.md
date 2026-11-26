@@ -116,11 +116,28 @@ tools and never by your shell profile (user decision 2026-11-16; docs/research/s
 - `eval "$(./dev sccache env)"` installs the pinned release into `<PADDOCK_DEV_HOME or ~/.paddock-dev>/tools/sccache/0.20.1/` (never
   `~/.cargo`), starts the one server on the default port 4226, and prints `export RUSTC_WRAPPER=...` lines for that shell. Run it
   once per machine to install; the push gates and `./dev gen check` then use the installed copy by themselves and never download.
+- **Always on, in any shell.** Agents' Bash tool starts a fresh shell for every command, so an `eval` per shell never held (2026-11-26:
+  the live server had 0 compile requests in three hours of builds). `./dev sccache env` therefore also writes
+  `<worktree root>/.cargo/config.toml` (first line marks it as this tool's; a file of somebody else's is never touched) with
+  `[build] rustc-wrapper = "<shim>"`. Cargo reads the `.cargo/config.toml` of every folder above where it runs, so every cargo in every
+  worktree, `./dev`'s own build included, compiles through the shim in any shell; the environment's `RUSTC_WRAPPER` still wins (cargo's
+  rule: CI's own, whose checkouts are not below this root, and a developer's). It is a machine file, not a line in the repository, because
+  Windows cannot start an extensionless script as `rustc-wrapper` (and a `.cmd` file is CRLF, which a shell script cannot be, ER-61). The
+  shim sends a rustc compile to sccache only when our server listens on the port; with none, the launcher recorded in
+  `<tool cache>/sccache-run/launcher` starts ours (one start at a time, `start.lock`), and when it is still down the compile runs plain
+  rustc, so a build never fails because of the cache. To switch it off, delete the file.
 - The server starts with `SCCACHE_BASEDIRS` (sccache 0.20: the longest matching base is stripped from every path in a Rust compile's
-  key) naming the worktree you are in and its sibling worktrees, and `SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS=CARGO_MANIFEST_DIR,CARGO_MANIFEST_PATH`
+  key) naming exactly this repository's worktrees, the main checkout included (`git worktree list`, wherever they live; never a
+  sibling folder that is another repository), and `SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS=CARGO_MANIFEST_DIR,CARGO_MANIFEST_PATH`
   (crates that bake those into their output stay per checkout). One server serves every worktree and reads the list only when it
-  starts, so a worktree made after that shares only third-party entries until the server restarts (`sccache --stop-server`, then
-  `eval "$(./dev sccache env)"`).
+  starts, so `./dev sccache env` records what the server started with (`<tool cache>/sccache-run/start-stamp`: the bases and the key
+  prefix) and, when the worktree list or the prefix changed, stops our server through its own client (`sccache --stop-server` on our
+  port, never a kill) and starts it again once; a server that is not ours is never touched, and builds keep going during the restart
+  (`SCCACHE_IGNORE_SERVER_IO_ERROR`). Only `./dev sccache env` restarts; the push gates never do. After `./dev worktree add`, run
+  `eval "$(./dev sccache env)"` in the new worktree once: that is what puts it into the list.
+- sccache hashes every `CARGO_*` variable of a compile into its key, and CI's setup-rust exports `CARGO_INCREMENTAL=0` and `CARGO_TERM_COLOR=always`
+  to every job with the cache. The wrapper shim exports the same two for a rustc compile (`CI_KEY_ENV` in `local_sccache.rs`), so a local key equals CI's and a build here
+  reuses what CI stored (docs/benchmarks.md, "Local keys against CI's"); your shell and cargo's output are unchanged.
 - It is off, with one `::warning::` line and a build without the cache, when sccache is not installed, the server does not
   start, or a server on the port uses another cache. The server runs in its own short folder (`<tool cache>/sccache-run`, also its `TMPDIR`, working folder and error log
   `sccache.log`; short because macOS caps socket paths at 104 bytes), never in a job's or an agent's scratch folder, which a job deletes. It
@@ -139,7 +156,7 @@ tools and never by your shell profile (user decision 2026-11-16; docs/research/s
   (`host:port`, default `172.16.1.220:15000`) and `PADDOCK_SCCACHE_S3_BUCKET` (default `sccache-paddock`), each taken from the environment,
   else from an optional line of that name in the key file below, else the default (the one place the defaults are named: this file; the code
   holds them as `DEFAULT_S3_ENDPOINT` and `DEFAULT_S3_BUCKET` in `local_sccache.rs`); optionally
-  `PADDOCK_SCCACHE_S3_PREFIX` (default `paddock`) and, for `s3`, `PADDOCK_SCCACHE_S3_REGION` (default `auto`) and
+  `PADDOCK_SCCACHE_S3_PREFIX` (default CI's for this OS and arch, `paddock-ci/<OS>-<arch>`, `ci_setup_rust::ci_prefix`; a server still on the older `paddock` prefix is restarted once) and, for `s3`, `PADDOCK_SCCACHE_S3_REGION` (default `auto`) and
   `PADDOCK_SCCACHE_S3_SSL` (`true`; default `false`). With `auto` the first level is the sibling folder `<SCCACHE_DIR>-s3` (what S3
   backfills never reaches the plain folder, as in CI, ADR 0111): the first build after the switch starts from the store, not from
   the old folder, and the two folders together use up to twice `SCCACHE_CACHE_SIZE` on the Mac's disk (each is capped at that size; lower
@@ -301,20 +318,9 @@ author: that call belongs there. The Rust `heavy` tool (`tools/heavy`) makes no 
   folders (and `*.golden` and `*.snap` files) for uid and gid numbers, `/Users`, `/home` and `C:\Users` paths and temp paths, by
   fixed patterns, so it gives the same result on every machine; it walks the working folder today (reading git's tracked list is
   the approved train-14 item). A value that is fine (an invented user) gets an entry with a reason in `conformance/c131-allow.json`.
-  **Rewriting:** `PADDOCK_UPDATE_GOLDEN=1` rewrites a differing golden and prints the command that runs that test on Linux as root
-  in the CI image (`tools/linux-container.sh --id paddock --ci-image -- sh -c 'cd <package folder> && cargo nextest run -p <package> <test>'`;
-  the test name comes from `NEXTEST_TEST_NAME`). Run it before you commit the file. `./dev golden confirm [-p <package>] <test filter>`
-  (from the workspace of the test, or `--manifest-dir <folder>`) runs the filtered tests on this machine and in that image and passes
-  only when both pass; a filter that selects no test fails with "no test matched the filter", and a filter starting with `-` is
-  refused. The container needs Docker or OrbStack and obeys `PADDOCK_LINUX_CPUS`, `PADDOCK_LINUX_JOBS`, `PADDOCK_LINUX_MEMORY`,
-  `PADDOCK_LINUX_USER`, `PADDOCK_LINUX_CI_REGISTRY` and `PADDOCK_LINUX_HOST_ARCH` (ER-14), all passed through. On an arm64 Mac the CI
-  image is a local arm64 build (not the registry's amd64 image).
-  **Container rows hold a lock on their build folder.** The kept volume's `/target/v<version>/<folder>` is shared by every worktree, and
-  cargo's own lock covers the build only, so another worktree could rebuild a test binary while this row's nextest was about to exec it
-  (train l: "failed to exec ... Permission denied"). `tools/linux-container.sh --lock v<version>/<folder>` (the rows' own commands pass
-  it; pass it in a command of your own that builds in `/target`) holds a host-side `flock` on that folder for the whole container run,
-  in `<common git dir>/paddock-pre-push/target-locks/`; a second row waits, says who holds it, and gives up after
-  `PADDOCK_LINUX_LOCK_WAIT` seconds (default 1800) with one `::error::` line (exit 5). The kernel frees the lock when its holder ends.
+  **Rewriting:** `PADDOCK_UPDATE_GOLDEN=1` rewrites a differing golden and says that CI's Linux job confirms it as root on the Linux runner
+  (push the branch). No container or VM runs on this Mac (user, 2026-11-26; docs/rules.md rule 101), so `./dev golden confirm` and the
+  local CI-image run are gone.
 - **Checked (conformance C37):** a `tests/<name>.rs` outside `tests/it/` fails unless `ownTestBinaries` of
   `paddock.conformance.json` names it with the reason it needs its own binary, and every workspace member needs a CI test
   step and the workspace-hack dependency.
@@ -346,8 +352,11 @@ the same account (`UserName`, so its toolchains, folders and Full Disk Access gr
 no GUI lane: jobs that need a window run elsewhere (ADR 0120, D1 and D8 as changed on 2026-11-25). `d7-mac-mini-2` and `-3`
 are removed: stopped, their plists parked in `~/gitea-runner-parked-2026-11-25/`, and to be deleted from Gitea's runner list.
 
-The user runs these; an agent never does (rule 7, ER-14). Run them from the repository root, with no CI job running if
-possible: stopping the runner lets its running job finish first (up to its 3 h `shutdown_timeout`).
+The user runs these; an agent never does (rule 7, ER-14). Run them from the repository root. A running job is waited for, visibly
+and bounded, before anything changes: `install` and `rollback` tell the runner to take no new job (`launchctl kill SIGTERM`), print
+which job runs and how long they have waited, and stop, swap and start only when every job has ended. After `--wait-max SECONDS`
+(default 3600) they fail with the old runner still loaded and nothing changed; they never end a job or its helpers, whose own cleanup
+does (ER-51). The new daemon must be `state = running` in `launchctl print` and log "declare successfully", or the lane fails.
 
 1. **Restart.** A planned restart is `sudo fdesetup authrestart` (D5, amended 2026-11-25).
 2. **Look first:** `bash tools/mac-runner-move.sh install --user decryp7 --daemon d7-mac-mini --retire d7-mac-mini-2 --retire d7-mac-mini-3 --dry-run`
