@@ -54,3 +54,12 @@ missing_docs = "warn"
 [lints.clippy]
 unwrap_used = "warn"
 expect_used = "warn"
+
+# Debug info for development and test builds, as crates/Cargo.toml (docs/dev-setup.md, "Build profiles"): line tables are enough
+# for backtraces with file and line, and dependencies get none, which makes the objects smaller and linking faster. A debugger
+# session that needs variables sets `CARGO_PROFILE_DEV_DEBUG=full` for that build.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
