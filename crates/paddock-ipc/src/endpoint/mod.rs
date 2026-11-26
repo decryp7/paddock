@@ -199,6 +199,12 @@ impl Stream {
         self.0.set_read_timeout(timeout)
     }
 
+    /// The OS handle of this side, for the endings harness's probe of unread input (ADR 0122). Test only (rule 99).
+    #[cfg(feature = "test-support")]
+    pub(crate) fn queue_handle(&self) -> crate::testing::endings::QueueHandle {
+        self.0.queue_handle()
+    }
+
     /// Something that ends the connection from any thread: blocked reads return end of stream, writes fail, and the
     /// other side sees the end of the stream once every handle is gone.
     pub fn closer(&self) -> io::Result<Closer> {

@@ -146,21 +146,21 @@ endpoint's own handle is the only place that sees unread input on every OS, and 
      sink answered `WouldBlock` at least once before `close_owner`.
    - The 8174 order: the sink's count of bytes taken after `limit_peer(.., usize::MAX)` is above zero before the advance.
 
-4. **The act gate is test-only.**
-   - `paddock-ipc`: a field and setter under `#[cfg(any(test, feature = "testing"))]` on `Host` and `link::ServerConfig`, typed
+4. **The act gate is test-only.** (Amended 2026-11-25 in WP-2: the feature is `test-support`, the one name rule 99 gives it, and the
+   release check is C170, below.)
+   - `paddock-ipc`: a field and setter under `#[cfg(any(test, feature = "test-support"))]` on `Host` and `link::ServerConfig`, typed
      `Arc<dyn Fn(&Stream) + Send + Sync>`, called by `Authenticator` after `accept` (covers ipc-host, ipc-link-server, dyno-agent).
-   - `paddock-mcp` and `pitcrew-service`: a new `testing` feature that only their integration tests enable (`required-features` on the
-     ending test target). mcp calls the gate on its accept thread. pitcrew-service runs on tokio: its accept task calls the gate through
-     `tokio::task::spawn_blocking` with the stream's raw handle and awaits it, so no runtime worker blocks; the task keeps the stream
-     until the gate returns.
+   - `paddock-mcp` and `pitcrew-service`: a new `test-support` feature that only their integration tests enable (a self
+     dev-dependency, rule 99). mcp calls the gate on its accept thread. pitcrew-service runs on tokio: each connection's task
+     (spawned by the accept loop, so a held connection holds up no other accept) calls the gate through `tokio::task::spawn_blocking`
+     with the stream's raw handle and awaits it, so no runtime worker blocks; the task keeps the stream until the gate returns.
    - dyno-helper needs no gate: none of its scenarios that apply has an input precondition (busy is exempt above). Its in-crate rig
      would use plain `#[cfg(test)]` if one is added later.
-   - The Winsock probe needs `windows-sys`'s `Win32_Networking_WinSock`, enabled only by `paddock-ipc`'s `testing` feature
-     (`testing = ["windows-sys?/Win32_Networking_WinSock"]`).
-   - **Release check:** no existing check proves a `testing` feature is off in a release build (`./dev locks guard` watches only
-     `serde_json`, from `cargo metadata`, which includes dev-dependencies). WP-2 adds one: for each release binary that links
-     `paddock-ipc`, `paddock-mcp` or `pitcrew-service`, `cargo tree -e normal,features -i <crate>` must not list their `testing`
-     feature; it also catches unification through the workspace hack. It starts report-only like any new check (rule 5).
+   - The Winsock probe needs `windows-sys`'s `Win32_Networking_WinSock`, enabled only by `paddock-ipc`'s `test-support` feature
+     (`test-support = ["windows-sys/Win32_Networking_WinSock"]`; `windows-sys` is not optional, so the feature has no `?`).
+   - **Release check:** C170 (`./dev check test-features`, rule 99; on `feat/test-hooks-test-only`, landing in train h) proves that no
+     released binary is built with a test feature (`cargo tree -e normal`), which covers the `test-support` features of `paddock-ipc`,
+     `paddock-mcp` and `pitcrew-service`. WP-2 reuses it and builds no check of its own.
 
 5. **The judge and the ratchet report it apart.** `Outcome::RigFailure` takes a typed cause: `RigFailure::Drive(String)` (today's) or
    `RigFailure::Precondition { which, evidence }`. The summary reads `ipc-host client-keeps-writing: RIG FAILURE (precondition
@@ -183,8 +183,8 @@ endpoint's own handle is the only place that sees unread input on every OS, and 
   `RIG FAILURE (write)` (8425).
 - `Expect::unread_input`, `Expect::with_unread_input`, its 5 calls and the 3 `unread_input: false` literals.
 - Per-incident lessons for each new ordering race in these rigs.
-- Adds: the enum, one test-only probe helper, one test-only gate (3 endpoint families), the `[[precondition_exempt]]` table, the
-  release-feature check. No product code path or log line changes.
+- Adds: the enum, one test-only probe helper, one test-only gate (3 endpoint families), the `[[precondition_exempt]]` table. The
+  release-feature check is C170's (rule 99). No product code path or log line changes.
 
 ## Work packages
 
@@ -193,7 +193,7 @@ Prerequisite: `fix/ipc-endings-i10` (8f14beeea) lands first (it holds `send_then
 | WP | What | Agent-days |
 |---|---|---|
 | 1 | `Precondition`, `Scenario::default_preconditions`, `[[precondition_exempt]]` (the `applicability` loader and C102), `Expect.preconditions`, typed `RigFailure`, the judge's fold, `run_all`, `Ratchet::check`; remove `unread_input`; tests 1, 5 | 1.0 |
-| 2 | First the probe self-test on all three OS (test 4; Windows pipe and TCP first, on the Windows runner), then `queued_bytes`; the test-only act gate in `paddock-ipc`, mcp and pitcrew-service (tokio via `spawn_blocking`); the `testing` features; the release-feature check; busy and client-keeps-writing rigs use the gate (fixes 8425); test 2 | 1.5 |
+| 2 | First the probe self-test on all three OS (test 4; Windows pipe and TCP first, on the Windows runner), then `queued_bytes`; the test-only act gate in `paddock-ipc`, mcp and pitcrew-service (tokio via `spawn_blocking`); the `test-support` features (the release-feature check is C170's, reused); busy and client-keeps-writing rigs use the gate (fixes 8425); test 2 | 1.5 |
 | 3 | ipc-host `OwnerCloseWhilePeerNotReading` on the clock with a small `write_queue`; mini's sink evidence and the 8174 barrier; `run_with` kept as the control hook; tests 3, 6, 7 | 0.5 |
 | 4 | Move the 8 rigs to declared preconditions with the two exemptions; the `[[report_only]]` entry | 0.5 |
 | 5 | After the first green run on three OS: record its id, remove the entry, misses and not measured become rig failures | 0.25 |
@@ -229,6 +229,6 @@ None open. D1 and D2 were taken on 2026-11-25 (Status). Option C is 1.0 agent-da
 ## Consequences
 
 - After the flip, a rig change that breaks the order is red with its cause named, and no ratchet edit can hide it.
-- The gate is a test seam in three endpoint families; a release build cannot carry it (the release-feature check).
+- The gate is a test seam in three endpoint families; a release build cannot carry it (C170, `./dev check test-features`).
 - dyno-helper's "places taken" stays an open risk until it is reproduced.
 - Rollback: drop the probe from the gate (option B); WPs 1, 3 and 4 stand alone.

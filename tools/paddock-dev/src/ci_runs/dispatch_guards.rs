@@ -664,6 +664,8 @@ pub struct MainRun {
     pub sha: String,
     /// The jobs that failed (a cancelled one says so in its name: it was not measured).
     pub failed: Vec<String>,
+    /// Its scope line's `expected` map (display name to job, leg and projects), read only for a run with failed jobs.
+    pub expected: crate::run_scope::ExpectedMap,
     /// When it was created, milliseconds since the epoch (`None`: not given).
     pub created_ms: Option<f64>,
 }
@@ -728,7 +730,7 @@ pub fn green_main(
             }
         };
         let pairs: Vec<(String, String)> = run.failed.iter().map(|j| (run.workflow.clone(), j.clone())).collect();
-        let red = active_apps::classify_nightly(&pairs, &active, apps);
+        let red = active_apps::classify_nightly(&pairs, &active, apps, &run.expected);
         blocking.extend(
             red.blocking
                 .into_iter()
@@ -821,11 +823,18 @@ pub fn read_main(client: &mut Client) -> Result<(Option<MainRun>, Option<MainRun
                 skipped += 1;
                 continue;
             }
+            let failed = failed_jobs(&jobs);
+            let expected = if failed.is_empty() {
+                crate::run_scope::ExpectedMap::new()
+            } else {
+                super::verdict::run_expected(client, &jobs)
+            };
             let run = MainRun {
                 id: r.id,
                 workflow: r.workflow().to_string(),
                 sha: r.head_sha.clone(),
-                failed: failed_jobs(&jobs),
+                failed,
+                expected,
                 created_ms: super::time::ts(&r.created_at),
             };
             if want_nightly {

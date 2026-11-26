@@ -1582,3 +1582,38 @@ adr = "0119"
   owner = "paddock"
   delete_by = "v0.5.0"
   note = "ADR 0103's test Reaper holds what a test spawned through its own Unit and job. ADR 0119 §1 makes it a Scope in test mode (its sampler and its words stay); until then it is a second holder of a unit's processes (WP-6)."
+
+# =====================================================================================================================
+# CI (ADR 0123: the job model lives in one pure crate and every reader asks it)
+# =====================================================================================================================
+
+[[mechanism]]
+id = "ci-workflow-reading"
+title = "Reading a CI workflow file: job ids, display names, legs and triggers (ADR 0123)"
+canonical = "paddock-ci-config"
+paths = ["crates/paddock-ci-config/src/yaml.rs", "crates/paddock-ci-config/src/jobs.rs"]
+status = "built"
+adr = "0123"
+
+  [[mechanism.copy]]
+  paths = ["tools/paddock-dev/src/active_apps.rs"]
+  symbols = ["item:app_of_job"]
+  kind = "copy"
+  owner = "paddock"
+  delete_by = "v0.5.0"
+  note = "The nightly's `installers (<App>, ...)` jobs are matched by their display name. They run only in the nightly and are never reused, so the scope line carries no name for them (ADR 0123 §3, out of scope on purpose); the match leaves when the nightly's installer jobs are written into the line or the nightly is split by app."
+
+  [[mechanism.copy]]
+  paths = ["tools/paddock-dev/src/ci_runs/dispatch.rs"]
+  kind = "copy"
+  owner = "paddock"
+  delete_by = "v0.5.0"
+  note = "Reads a workflow's `runs-on` with yaml_rust2 directly (the runner class of its jobs); it moves to the crate's yaml reader when the job model carries `runs-on`."
+
+  [[mechanism.copy]]
+  paths = ["tools/paddock-dev/src/ci_runs/dispatch_guards.rs"]
+  symbols = ["item:takes_since_run"]
+  kind = "copy"
+  owner = "paddock"
+  delete_by = "v0.5.0"
+  note = "Reads the `workflow_dispatch` inputs of a workflow with yaml_rust2 directly; it moves to the crate's yaml reader when the job model carries `on:`."

@@ -61,6 +61,9 @@ pub struct ServerConfig {
     pub clock: Arc<dyn Clock>,
     /// How each client's connection runs (its label names the clients).
     pub peer: PeerOptions,
+    /// The test-only act gate of every accepted client ([`ServerConfig::with_act_gate`]).
+    #[cfg(any(test, feature = "test-support"))]
+    act_gate: Option<crate::handshake::ActGate>,
 }
 
 impl std::fmt::Debug for ServerConfig {
@@ -90,7 +93,17 @@ impl ServerConfig {
             handshake_timeout: HANDSHAKE_TIMEOUT,
             clock: Arc::new(SystemClock),
             peer: PeerOptions::new("the app"),
+            #[cfg(any(test, feature = "test-support"))]
+            act_gate: None,
         }
+    }
+
+    /// Calls `gate` with each accepted client's stream before the server reads it or refuses it `busy`
+    /// ([`Host::with_act_gate`]). Test only (rule 99; ADR 0122 §4): a shipped build has no gate.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn with_act_gate(mut self, gate: crate::handshake::ActGate) -> ServerConfig {
+        self.act_gate = Some(gate);
+        self
     }
 }
 
@@ -206,6 +219,10 @@ impl LinkServer {
             (None, None) => Host::listen(config.limit, config.protocol)?,
         };
         let mut host = host.clocked(config.clock.clone(), config.handshake_timeout);
+        #[cfg(any(test, feature = "test-support"))]
+        if let Some(gate) = config.act_gate.clone() {
+            host = host.with_act_gate(gate);
+        }
         let discovery = Discovery {
             endpoint: host.endpoint().to_string(),
             token: host.token().to_hex(),
