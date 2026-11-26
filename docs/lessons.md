@@ -4368,3 +4368,12 @@ startup"; the Chromium start judge, ADR 0031). A start that hands back a handle 
   and the boot-out. Every loaded lane is now told to take no new job at the start, and each lane's check for a job and its boot-out are
   back to back; a job seen there sends install back into the same bounded wait and tells the runner again. What stays is the time between
   that check and the boot-out call itself (milliseconds, against a runner that needs seconds to register and fetch a task).
+
+## A git fixture helper sat in one tool's test folder and broke two rules (2026-11-26, perf/slow-git-tests-fixture)
+- **What happened.** `perf/slow-git-tests` fixed 710 s of train n's Windows job by building each `ci_runs` git fixture once per machine
+  and copying it per test. The helper (`template`, `copy_tree`) lived in `tools/paddock-dev/src/ci_runs/testutil.rs` and used
+  `std::env::temp_dir` (the clippy disallowed method) and `remove_dir_all` (the `safe_remove_lint` test), so train pq pulled the branch.
+- **Cause.** The helper was written where it was first needed, not checked against the shared kit (ER-22), and nothing told the next
+  fixture author that a per-test git repository is the slow shape.
+- **Fix (user decision 74).** The helper moved to `paddock_testkit::git_fixture` (temp folder from the kit, owner, size limit and eviction
+  rule in its doc), and rule NEW-git-fixtures with the report-only check C174 flags a fixture builder with six or more git starts per test.

@@ -955,18 +955,18 @@ struct Shape {
     y: String,
 }
 
-/// A private copy of the shape's template, built once per machine (`testutil::template`: the shape's 14 git starts are paid once, not
+/// A private copy of the shape's template, built once per machine (`paddock_testkit::git_fixture::template`: the shape's 14 git starts are paid once, not
 /// by every test that reads it, ER-20); the commits' ids are in the template's `shas` file.
 fn train_g_shape(revert_flip: bool) -> Shape {
     let name = if revert_flip { "shape-revert" } else { "shape" };
-    let t = crate::ci_runs::testutil::template(name, include_str!("tests.rs"), |build, _| {
+    let t = paddock_testkit::git_fixture::template(name, include_str!("tests.rs"), |build, _| {
         let repo = build.join("repo");
         std::fs::create_dir_all(&repo).unwrap();
         let [b, x, y] = build_shape(&repo, revert_flip);
         std::fs::write(build.join("shas"), format!("{b}\n{x}\n{y}\n")).unwrap();
     });
     let dir = tempfile::tempdir().unwrap();
-    crate::ci_runs::testutil::copy_tree(&t.join("repo"), dir.path());
+    paddock_testkit::git_fixture::copy_tree(&t.join("repo"), dir.path());
     let shas = std::fs::read_to_string(t.join("shas")).unwrap();
     let mut it = shas.lines().map(str::to_string);
     Shape {

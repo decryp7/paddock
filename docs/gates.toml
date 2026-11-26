@@ -1196,3 +1196,10 @@ moved_to = "the ESLint rule paddock/e2e-pinned-clock (eslint/src/rules/e2e-pinne
 id = "C144"
 commit = "036ae3a44"
 moved_to = "nothing: expectStreamDone (@decryp7/paddock-e2e) stays the way to wait for a stream; its report-only phase found two sites, neither a stream-finished wait"
+
+[[report_only]]
+id = "C174"
+reason = "ER-41: report-only until its first green run on the real tree, recorded by run id here and in tools/paddock-dev/src/check/c174.rs, then flip the mode to Gate. A fn in test code (a tests folder, tests.rs, testutil*.rs or a cfg(test) item) with six or more git starts (Command::new(\"git\") or a git, run_git, git_ok, git_in, git_out call) that does not use paddock_testkit::git_fixture is a per-test repository builder (rule NEW-git-fixtures). No baseline file (ER-46); a baseline needs the user's approval. Positive control in the check and tests/it/check_c174.rs"
+owner = "ER-21 class: a fixture builds its git repository once per test (trial::world 17 gits, green::train_g_shape 14: 710 s of train n's Windows job; user decision 74; perf/slow-git-tests-fixture)"
+since = 2026-11-26
+review_by = 2026-12-10

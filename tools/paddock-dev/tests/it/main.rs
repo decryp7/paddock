@@ -11,6 +11,7 @@ mod check_c123;
 mod check_c131;
 mod check_c139;
 mod check_c145;
+mod check_c174;
 mod check_engine;
 mod check_ids;
 mod check_lex;

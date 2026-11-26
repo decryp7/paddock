@@ -327,11 +327,11 @@ mod tests {
         git_in(&w.work, &["push", "-q", "-f", "origin", branch]);
     }
 
-    /// The world's fixture, built once per machine and recipe (`testutil::template`): an origin with main (shared.txt), a landed train,
+    /// The world's fixture, built once per machine and recipe (`paddock_testkit::git_fixture::template`): an origin with main (shared.txt), a landed train,
     /// an open train with member `m1`, and a working copy that makes branches. Each test gets a private copy ([`world`]), so no test
     /// shares mutable state and the dozens of git starts of the build are paid once, not by every test.
     fn template() -> PathBuf {
-        crate::ci_runs::testutil::template("trial", include_str!("trial.rs"), |build, ready| {
+        paddock_testkit::git_fixture::template("trial", include_str!("trial.rs"), |build, ready| {
             let origin = build.join("origin.git");
             let work = build.join("work");
             std::fs::create_dir_all(&work).unwrap();
@@ -373,8 +373,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let origin = dir.path().join("origin.git");
         let work = dir.path().join("work");
-        crate::ci_runs::testutil::copy_tree(&torigin, &origin);
-        crate::ci_runs::testutil::copy_tree(&twork, &work);
+        paddock_testkit::git_fixture::copy_tree(&torigin, &origin);
+        paddock_testkit::git_fixture::copy_tree(&twork, &work);
         let cfg = work.join(".git").join("config");
         let text = std::fs::read_to_string(&cfg).unwrap();
         let (old, new) = (escaped(&torigin), escaped(&origin));
