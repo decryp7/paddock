@@ -1,7 +1,8 @@
 # NEW. A link-server test reads the server's state through a wait the server wakes, never at a moment the client chose
 
-- Status: Proposed 2026-11-26 (ER-21: the user approved the investigation and a redesign ADR for this class the same day). The number
-  is taken at landing (the `NEW-` rule of AGENTS.md).
+- Status: Accepted 2026-11-26 by the user (D1 = C: option B plus the Clippy ban with a positive control), relayed by the coordinator.
+  The investigation and this redesign ADR were approved the same day (ER-21). The number is taken at landing (the `NEW-` rule of
+  AGENTS.md).
 - Date: 2026-11-26
 - Related: ADR [0122](0122-endings-scenario-preconditions.md) (the endings rigs' preconditions and act gate: the other direction of
   the same class, accepted 2026-11-25), ADR [0072](0072-every-connection-end-says-why-in-order.md) §5, ER-11, ER-12 (no sleeps or longer
@@ -109,34 +110,42 @@ No app uses `LinkServer` yet (`git grep LinkServer -- apps` finds none), so `ref
 | C | B, plus a check: `LinkServer::refused` and `LinkServer::peers` in `crates/clippy.toml` `disallowed-methods` with the reason "a snapshot; wait with wait_refused / wait_peers", so a direct read needs a written `#[expect(clippy::disallowed_methods, reason = ...)]` | about 0.75 agent-day (0.25 beyond B) | nothing; product code that wants a snapshot states why |
 | D | A simulated transport (turmoil-like) | rejected | ADR 0122 option D: the tests exist to see the real OS endings |
 
-## Decision (proposed: B, with C offered)
+## Decision (option C, accepted)
 
 1. **`LinkServer::wait_refused(max, until) -> Result<Vec<IpcError>, Vec<IpcError>>`** (on this branch): the refusal list gains a
    `Condvar` that `Shared::refuse` notifies after each record; the wait uses `Condvar::wait_timeout_while` and returns `Err` with the
    last list when `max` (OS time, a hang guard) passes. `refused()` stays, documented as a snapshot that can trail what a client saw.
-2. **`LinkServer::wait_peers(max, until)`** the same way over the peer list (WP-1): the handshake thread notifies after it pushes a
-   peer, `open_peers`' pruning and `stop` after they change it.
-3. **Every test read moves to the waits** (WP-1), the `yield_now` loop in `edges.rs` is already gone, and `clocked.rs`'s `wait_until`
-   is removed once its last user moves.
+2. **`LinkServer::wait_peers(max, until) -> Result<Vec<Peer>, Vec<Peer>>`** over the open peers: a `Condvar` beside the peer list,
+   woken when the handshake thread lists a peer (`Shared::add_peer`), when a listed peer's close is done, and when `stop` empties the
+   list. The close wake is a crate-private `Peer::when_closed` watcher (`crates/paddock-ipc/src/peer.rs`): run once by `report_done`
+   after the close is reported, with no lock of the peer held, or at once if the peer is already closed; it holds the server only
+   weakly. `stop` now takes the peers out of the list before it closes them, because the watcher takes the list's lock.
+3. **Every test read moves to the waits**: the `yield_now` loop in `edges.rs` and `clocked.rs`'s `wait_until` are deleted, and the
+   at-risk reads in `link.rs` and `edges.rs` (`peers().len() == 1` right after an answered call) wait for the list.
 4. **The other direction is ADR 0122's act gate**, unchanged: this ADR adds no second gate.
-5. **C (if chosen):** the two snapshot methods join `crates/clippy.toml`'s `disallowed-methods`. Clippy runs with `-D warnings` on
-   every crate change (built on origin/main), so the check needs no new gate; it starts as a warning only in the sense of ER-41 if the
-   user wants a report-only window, else it lands green (no product reader exists).
+5. **The check:** `LinkServer::refused` and `LinkServer::peers` are in `crates/clippy.toml`'s `disallowed-methods` (with
+   `allow-invalid`, since crates that do not depend on paddock-ipc cannot resolve the paths). Clippy runs with `-D warnings` on every
+   crate change (built on origin/main), so no new gate. It lands blocking: no product reader exists and its first run on the real tree
+   (the whole `crates` workspace, this branch) was green (ER-41). **Positive control:** `edges.rs` reads each snapshot once, in its own
+   function under `#[expect(clippy::disallowed_methods)]`; when an entry stops biting, its expectation is unfulfilled and Clippy is red
+   (seen on this branch: with the `peers` entry removed, "this lint expectation is unfulfilled" at `edges.rs:115`). The apps' own
+   `clippy.toml` files do not carry the entries: no app uses `LinkServer` yet; the app that adopts it (Dyno M3) adds them.
 
 ## What it removes
 
 - The 9150 class of flaky failures and its FLAKY retries on the macOS crate job.
 - The two spin-wait copies (`edges.rs` loop, done; `clocked.rs` `wait_until`, WP-1).
 - A false comment in the accept loop (corrected here).
-- Adds: one `Condvar` and two public wait methods on `LinkServer`. No product behaviour, log line or wire change.
+- Adds: two `Condvar`s and two public wait methods on `LinkServer`, a crate-private close watcher on `Peer`, two Clippy entries and
+  their controls. No log line or wire change; `stop` closes its peers after taking them out of the list instead of while holding it.
 
 ## Work packages
 
 | WP | What | Agent-days | State |
 |---|---|---|---|
 | 0 | `wait_refused`, the 9150 fix in the test child, the edges and two clocked reads moved, the accept-loop comment corrected | 0.25 | **done on `fix/ipc-link-flakes`** |
-| 1 | `wait_peers`; move `link.rs`'s `peers()` read and the remaining `clocked.rs` reads; delete `wait_until`; a stress of the moved tests (300 runs under burners) | 0.5 | proposed |
-| 2 | (option C) the `disallowed-methods` entries with their reason; `#[expect]` where a snapshot is meant | 0.25 | proposed, needs D1 |
+| 1 | `wait_peers` and `Peer::when_closed`; move `link.rs`'s and `edges.rs`'s `peers()` reads and the remaining `clocked.rs` reads; delete `wait_until` | 0.5 | **done on `fix/ipc-link-flakes`** |
+| 2 | the `disallowed-methods` entries with their reason; the positive controls | 0.25 | **done on `fix/ipc-link-flakes`** |
 | — | the busy rig | — | ADR 0122 WP-2 (prerequisite for 9156/8425; held uncommitted in the `adr-0122-wp2` worktree) |
 
 ## Checks it relies on
@@ -146,7 +155,7 @@ No app uses `LinkServer` yet (`git grep LinkServer -- apps` finds none), so `ref
 
 ## Decisions for the user
 
-- **D1.** B (recommended, 0.5 agent-day beyond what is done) or C (B plus the Clippy ban, 0.25 more), or A (stop at the fix done here).
+- **D1.** Taken 2026-11-26: C. None open.
 
 ## Consequences
 

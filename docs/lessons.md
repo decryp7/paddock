@@ -4412,4 +4412,4 @@ spec `data.spec.ts:301` (theme switch redraws the canvases) failed in the same r
   `edges.rs` and `clocked.rs` use it. Stress (12 loops plus 10 CPU burners): 7 of 3,600 before, 0 of 10,800 after, 7 of 3,600 with the
   wait removed again.
 - **Class.** A link-server test uses a client-side OS event as the barrier for server state (with ADR 0122's busy rig on Windows,
-  runs 8425 and 9156, the other direction). Redesign: ADR NEW-ipc-link-test-determinism (Proposed).
+  runs 8425 and 9156, the other direction). Redesign: ADR NEW-ipc-link-test-determinism (accepted 2026-11-26, option C: `wait_peers` too, and a Clippy ban on the snapshot reads with a positive control).
