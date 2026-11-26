@@ -60,3 +60,13 @@ test('the placement check sees an unguarded coverage step and a condition with a
   assert.throws(() => covers("${{ github.event_name == 'push' }}", {}), /does not know/);
   assert.equal(covers("${{ (inputs.os_full == true || startsWith(github.ref, 'refs/tags/')) }}", { ref: 'refs/heads/train/x' }), false);
 });
+
+test('the crate job names its partitions and runs the once-per-OS steps on the first partition only', () => {
+  const crate = job(loadWorkflow('ci.yml'), 'crate');
+  assert.ok(String(crate.name).includes('matrix.part_label'), 'the job name carries the partition label (run_scope names a leg by its prefix)');
+  for (const step of ['Clippy (workspace, every feature)', 'Tests with the optional features off']) {
+    const s = stepBy(crate, step);
+    assert.ok(s, `${step} exists`);
+    assert.ok(expr(s.if).includes("matrix.part_extra != 'false'"), `${step} runs once per OS, not once per partition`);
+  }
+});

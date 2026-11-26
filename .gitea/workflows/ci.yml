@@ -834,7 +834,9 @@ jobs:
   # `tauri` adapters are built too, the feature-off runs and the doc tests, as a few workspace-wide steps. On Linux the
   # all-features test run is the coverage job's (crates) only in the nightly, a release and a tag; otherwise this leg runs it plainly.
   crate:
-    name: crate (${{ matrix.os }})
+    # The Linux tests run as parallel jobs of whole packages when coverage does not run (`matrix.part_label`: `, 2/3`; the plan's
+    # `plan_ci::partition_linux_legs`); every other leg has an empty label.
+    name: crate (${{ matrix.os }}${{ matrix.part_label }})
     needs: [plan]
     if: ${{ needs.plan.outputs.crates == 'true' && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["crate"]'), 'crate') }}
     strategy:
@@ -946,8 +948,9 @@ jobs:
       # features and rebuilt the shared dependencies). Every step runs even after another failed; nextest and clippy name
       # the crate of every failure. scripts/publish.test.mjs and conformance C37 fail when a workspace member is left out.
       # A leg with a filter (a rerun of failed tests) runs only the test steps below: its other steps passed in the earlier run.
+      # Once per OS: the partitions of the Linux tests (`matrix.part_extra` is "false" on all but the first) do not repeat it.
       - name: Clippy (workspace, every feature)
-        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && !matrix.filter }}
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && !matrix.filter && matrix.part_extra != 'false' }}
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/crates
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
@@ -1030,7 +1033,7 @@ jobs:
       # selected crate depends on with a feature on gets its own run: paddock-shell turns on paddock-diag's, paddock-download's
       # and paddock-updater's `tauri`, and paddock-updater turns on paddock-download's default `http`.
       - name: Tests with the optional features off
-        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && !matrix.filter }}
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && !matrix.filter && matrix.part_extra != 'false' }}
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/crates
         run: |
           cargo nextest run -p paddock-shell -p paddock-secrets -p paddock-siblings --profile ci

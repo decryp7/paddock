@@ -559,6 +559,17 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
             let id = if key == "crates" { "crates" } else { "paddock-dev" };
             legs_of = crate::plan_graph::narrow_workspace_legs(legs_of, &plan, &graph, id, workspace_dir);
         }
+        // The Linux tests of the `crate` job run as parallel jobs of whole packages when coverage does not run (user decision 2026-11-26):
+        // a core change no longer runs as one long job. Before the reuse below, so a partition drops the packages it need not run.
+        if key == "crates" && !coverage_run(env) {
+            let packages: Vec<String> = graph
+                .cargo
+                .iter()
+                .filter(|(_, n)| n.workspace == workspace_dir)
+                .map(|(_, n)| n.name.clone())
+                .collect();
+            legs_of = crate::plan_ci::partition_linux_legs(legs_of, &packages, crate::plan_ci::LINUX_PARTITIONS);
+        }
         // Packages with a valid pass of the same key are left out of the legs' tests (never the declared filter: the run stays whole).
         let job = if key == "crates" { "crate" } else { "paddock-dev" };
         let applied = crate::test_cache::plan::apply(legs_of, job, &reuse_plan, key != "crates" || !coverage_run(env));

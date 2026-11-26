@@ -397,6 +397,8 @@ pub enum JobName {
     Exact(String),
     /// The start of the name (a job with a long or sharded name: `ui (`, `reference apps (shard`).
     Prefix(&'static str),
+    /// The start of the name, built at run time (a leg whose job may carry a partition label: `crate (ubuntu-latest`).
+    Starts(String),
 }
 
 impl JobName {
@@ -404,6 +406,7 @@ impl JobName {
         match self {
             JobName::Exact(n) => name == n,
             JobName::Prefix(p) => name.starts_with(p),
+            JobName::Starts(p) => name.starts_with(p.as_str()),
         }
     }
 }
@@ -430,7 +433,8 @@ fn names_of_job(key: &str) -> Vec<JobName> {
         return prefixes.iter().map(|p| JobName::Prefix(p)).collect();
     }
     match key.split_once('@') {
-        Some(("crate", os)) => vec![JobName::Exact(format!("crate ({os})"))],
+        // `crate (ubuntu-latest)` or, when its tests are split into parallel jobs, `crate (ubuntu-latest, 2/3)`: every one must have run.
+        Some(("crate", os)) => vec![JobName::Starts(format!("crate ({os}"))],
         Some(("paddock-dev", os)) => vec![JobName::Exact(format!("paddock-dev ({os})"))],
         _ => Vec::new(),
     }
@@ -722,6 +726,42 @@ mod tests {
         assert!(read_err(&bad).contains("reused.crate@macos-latest"), "{}", read_err(&bad));
     }
 
+    #[test]
+    fn a_crate_job_split_into_partitions_must_have_every_partition_pass_before_its_declared_job_counts() {
+        let d = declared(true, &["", ""]);
+        let job = |n: &str, o: JobOutcome| (n.to_string(), o);
+        let mut jobs: Vec<(String, JobOutcome)> = d
+            .ran
+            .jobs
+            .iter()
+            .filter(|j| !j.starts_with("crate@"))
+            .flat_map(|j| names_of_job(j))
+            .map(|n| match n {
+                JobName::Exact(e) => job(&e, JobOutcome::Passed),
+                JobName::Prefix(p) => job(&format!("{p}x)"), JobOutcome::Passed),
+                JobName::Starts(p) => job(&format!("{p})"), JobOutcome::Passed),
+            })
+            .chain(d.ran.apps.iter().map(|a| match name_of_leg(a) {
+                JobName::Exact(e) => job(&e, JobOutcome::Passed),
+                _ => unreachable!(),
+            }))
+            .collect();
+        jobs.extend([
+            job("crate (windows-latest)", JobOutcome::Passed),
+            job("crate (macos-latest)", JobOutcome::Passed),
+            job("crate (ubuntu-latest, 1/3)", JobOutcome::Passed),
+            job("crate (ubuntu-latest, 2/3)", JobOutcome::Passed),
+            job("crate (ubuntu-latest, 3/3)", JobOutcome::Passed),
+        ]);
+        assert_eq!(check_ran(&d, &jobs), Ok(()), "{jobs:?}");
+        // One partition cancelled is a partial scope, not a pass; and a missing job of the whole name is still missing.
+        let mut cut = jobs.clone();
+        cut.iter_mut().find(|(n, _)| n == "crate (ubuntu-latest, 2/3)").unwrap().1 = JobOutcome::Cancelled;
+        assert!(matches!(check_ran(&d, &cut), Err(RanProblem::NotRun(_))));
+        jobs.retain(|(n, _)| !n.starts_with("crate (ubuntu-latest"));
+        assert!(matches!(check_ran(&d, &jobs), Err(RanProblem::Missing(_))));
+    }
+
     fn read_err(line: &str) -> String {
         read(line).unwrap().unwrap_err()
     }
@@ -923,6 +963,7 @@ mod tests {
                     match n {
                         JobName::Exact(n) => n,
                         JobName::Prefix(p) => format!("{p}x)"),
+                        JobName::Starts(p) => format!("{p})"),
                     },
                     JobOutcome::from_api(conclusion),
                 ));
@@ -1005,7 +1046,7 @@ mod tests {
             }
         }
         // The matrix legs: the `name:` templates the exact names are built from.
-        assert_eq!(name_of("crate"), "crate (${{ matrix.os }})");
+        assert_eq!(name_of("crate"), "crate (${{ matrix.os }}${{ matrix.part_label }})");
         assert_eq!(name_of("paddock-dev"), "paddock-dev (${{ matrix.os }})");
         assert_eq!(
             name_of("app"),
