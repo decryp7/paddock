@@ -21,6 +21,12 @@
 use crate::ci_setup_rust::{SCCACHE_VERSION, pin_for, sha256_file};
 use crate::ci_tool::{NETWORK_ENV, Output, ToolCall, tail};
 use crate::tool_cache;
+use paddock_ci_config::settings::declared::{
+    PADDOCK_SCCACHE_S3_BUCKET, PADDOCK_SCCACHE_S3_ENDPOINT, PADDOCK_SCCACHE_S3_PREFIX, PADDOCK_SCCACHE_S3_REGION, PADDOCK_SCCACHE_S3_SSL,
+};
+use paddock_ci_config::settings::sccache::{CI_KEY_ENV, basedir_vars, ci_prefix, multilevel_settings, s3_endpoint, survival_vars};
+use paddock_ci_config::settings::{EnvMap, Layered, Settings};
+use paddock_env::MapVars;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -32,19 +38,25 @@ const PASS: [&str; 1] = ["SCCACHE_SERVER_PORT"];
 pub const DEFAULT_SIZE: &str = "30G";
 
 /// The shared store's S3 API (`host:port`) when `PADDOCK_SCCACHE_S3_ENDPOINT` names none: the user's RustFS (docs/dev-setup.md, "Local sccache").
-pub const DEFAULT_S3_ENDPOINT: &str = "172.16.1.220:15000";
+pub const DEFAULT_S3_ENDPOINT: &str = match PADDOCK_SCCACHE_S3_ENDPOINT.default {
+    Some(v) => v,
+    None => panic!("PADDOCK_SCCACHE_S3_ENDPOINT declares no default"),
+};
 
 /// The shared store's bucket when `PADDOCK_SCCACHE_S3_BUCKET` names none.
-pub const DEFAULT_S3_BUCKET: &str = "sccache-paddock";
+pub const DEFAULT_S3_BUCKET: &str = match PADDOCK_SCCACHE_S3_BUCKET.default {
+    Some(v) => v,
+    None => panic!("PADDOCK_SCCACHE_S3_BUCKET declares no default"),
+};
 
 /// What `--show-adv-stats` prints as the cache location of a server started with the two-level chain (sccache 0.19.0, measured).
 pub const MULTILEVEL_LOCATION: &str = "Multi-level (2 levels)";
 
 /// The key prefix of this machine's S3 level: CI's own for the same OS and arch (`paddock-ci/<OS>-<arch>`,
-/// [`crate::ci_setup_rust::ci_prefix`], the one definition), so a local build can reuse what CI stored and CI what a local build
+/// [`ci_prefix`], the one definition), so a local build can reuse what CI stored and CI what a local build
 /// stored. (CI's release and tag builds never read the store, so a local write can never reach a release.)
 pub fn default_prefix() -> String {
-    crate::ci_setup_rust::ci_prefix(crate::ci_setup_rust::host_runner_os(), std::env::consts::ARCH)
+    ci_prefix(crate::ci_setup_rust::host_runner_os(), std::env::consts::ARCH)
 }
 
 /// The prefix the local servers used before [`default_prefix`]: a server still running with it is ours and is restarted once.
@@ -309,13 +321,15 @@ pub fn backend(env: &HashMap<String, String>) -> Result<Backend, String> {
             size: cache_size(env),
         }),
         "s3" => {
-            let need = |k: &str| get(k).map(str::to_string).ok_or(format!("PADDOCK_SCCACHE_BACKEND=s3 needs {k}"));
+            let vars = EnvMap(env);
+            let st = Settings::new(&vars);
+            let need = |d: &paddock_ci_config::settings::Decl| st.get(d).ok_or(format!("PADDOCK_SCCACHE_BACKEND=s3 needs {}", d.name));
             Ok(Backend::S3(S3 {
-                bucket: need("PADDOCK_SCCACHE_S3_BUCKET")?,
-                endpoint: need("PADDOCK_SCCACHE_S3_ENDPOINT")?,
-                region: get("PADDOCK_SCCACHE_S3_REGION").unwrap_or("auto").to_string(),
-                ssl: get("PADDOCK_SCCACHE_S3_SSL") == Some("true"),
-                prefix: get("PADDOCK_SCCACHE_S3_PREFIX").map_or_else(default_prefix, str::to_string),
+                bucket: need(PADDOCK_SCCACHE_S3_BUCKET)?,
+                endpoint: need(PADDOCK_SCCACHE_S3_ENDPOINT)?,
+                region: st.get_or_default(PADDOCK_SCCACHE_S3_REGION).unwrap_or_default(),
+                ssl: st.is_on(PADDOCK_SCCACHE_S3_SSL),
+                prefix: st.get(PADDOCK_SCCACHE_S3_PREFIX).unwrap_or_else(default_prefix),
             }))
         }
         other => Err(format!("PADDOCK_SCCACHE_BACKEND is `{other}`; it is auto, local or s3")),
@@ -330,25 +344,6 @@ pub struct Fallback {
     pub warn: bool,
     /// One sentence, never with a key in it.
     pub why: String,
-}
-
-/// The settings of the two-level chain the SERVER starts with: the local disk, then the S3 store, a failed S3 write never fatal
-/// (`l0`; sccache v0.19.0 docs/MultiLevel.md). One definition for CI's `s3` backend ([`crate::ci_setup_rust::s3_server_settings`]) and this one.
-pub(crate) fn multilevel_settings(dir: &str, size: &str, bucket: &str, endpoint: &str, ssl: bool, prefix: &str) -> Vec<(String, String)> {
-    [
-        ("SCCACHE_DIR", dir),
-        ("SCCACHE_CACHE_SIZE", size),
-        ("SCCACHE_MULTILEVEL_CHAIN", "disk,s3"),
-        ("SCCACHE_MULTILEVEL_WRITE_ERROR_POLICY", "l0"),
-        ("SCCACHE_BUCKET", bucket),
-        ("SCCACHE_ENDPOINT", endpoint),
-        ("SCCACHE_REGION", "auto"),
-        ("SCCACHE_S3_USE_SSL", if ssl { "true" } else { "false" }),
-        ("SCCACHE_S3_KEY_PREFIX", prefix),
-    ]
-    .into_iter()
-    .map(|(k, v)| (k.to_string(), v.to_string()))
-    .collect()
 }
 
 /// The health check of the store before a run uses it: CI's own ([`crate::ci_setup_rust::s3_health_call`]), so the two never differ. It
@@ -388,21 +383,25 @@ pub fn choose(env: &HashMap<String, String>, probe: &dyn Fn(&S3) -> Result<(), S
         }
         Err(e) => return local(e, true),
     }
-    // The environment first, then the credentials file, then the defaults.
+    // The environment first, then the credentials file, then the declared defaults.
     let from_file = file_settings(env);
-    let setting = |k: &str| get(k).or_else(|| from_file.iter().find(|(n, _)| n == k).map(|(_, v)| v.as_str()));
-    // The one reading of the endpoint variable (`ci_setup_rust::parse_endpoint`, ER-22): `http://host:port`, `https://host:port` or `host:port`.
-    let (tls, host_port) = match crate::ci_setup_rust::parse_endpoint(setting("PADDOCK_SCCACHE_S3_ENDPOINT").unwrap_or(DEFAULT_S3_ENDPOINT))
-    {
+    let file_vars = from_file.iter().fold(MapVars::new(), |v, (k, x)| v.with(k, x.as_str()));
+    let process = EnvMap(env);
+    let layered = Layered(&[&process, &file_vars]);
+    let setting = Settings::new(&layered);
+    // The one reading of the endpoint variable (`parse_endpoint`, ER-22): `http://host:port`, `https://host:port` or `host:port`.
+    let (tls, host_port) = match s3_endpoint(&setting) {
         Ok(v) => v,
         Err(e) => return local(e, true),
     };
     let s3 = S3 {
-        bucket: setting("PADDOCK_SCCACHE_S3_BUCKET").unwrap_or(DEFAULT_S3_BUCKET).to_string(),
+        bucket: setting.get_or_default(PADDOCK_SCCACHE_S3_BUCKET).unwrap_or_default(),
         endpoint: host_port,
         region: "auto".into(),
         ssl: tls,
-        prefix: get("PADDOCK_SCCACHE_S3_PREFIX").map_or_else(default_prefix, str::to_string),
+        prefix: Settings::new(&process)
+            .get(PADDOCK_SCCACHE_S3_PREFIX)
+            .unwrap_or_else(default_prefix),
     };
     if let Err(e) = probe(&s3) {
         return local(e, true);
@@ -599,18 +598,6 @@ impl Server<'_> {
     }
 }
 
-/// The two settings that keep the server we start the only one: it never exits on its own (a build that finds none would start one
-/// with the build's environment, and for S3 without the keys, and that one would replace ours and fail), and with S3 there is no
-/// instance-metadata lookup (with no keys it hangs for about 75 s before it fails). Builds get these too (`ready_vars`, setup-rust's
-/// `$GITHUB_ENV`), so a server a build starts anyway behaves the same way. Never a credential.
-pub(crate) fn survival_vars(s3: bool) -> Vec<(String, String)> {
-    let mut v = vec![("SCCACHE_IDLE_TIMEOUT".to_string(), "0".to_string())];
-    if s3 {
-        v.push(("AWS_EC2_METADATA_DISABLED".to_string(), "true".to_string()));
-    }
-    v
-}
-
 /// The one place a sccache server gets its environment (ER-22, rule 55: the agents' local server and CI's setup-rust both start
 /// through it): `settings` (what the server runs with), [`survival_vars`] when `survive`, and the credentials in `creds`, which only
 /// the server gets and the logged command masks. `s3` turns the metadata lookup off.
@@ -628,43 +615,6 @@ pub(crate) fn server_env(mut c: ToolCall, settings: &[(String, String)], survive
         c = c.env(k.as_str(), v.as_str()).secret(v.as_str());
     }
     c
-}
-
-/// The names of the variables whose values a Rust crate bakes into its outputs with `env!` and that sccache must hash verbatim, so a cache
-/// entry is shared across checkouts only for crates that do not embed the checkout's path (sccache docs/Rust.md at v0.20.1).
-pub(crate) const VERBATIM_ENV_DEPS: &str = "CARGO_MANIFEST_DIR,CARGO_MANIFEST_PATH";
-
-/// `SCCACHE_BASEDIRS` and `SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS` for the given checkout and build-folder roots (ER-22: the one place CI's
-/// setup-rust and the agents' local server both get them). sccache 0.20 strips the longest matching base from every path in a Rust
-/// compile's key, so the same source at another absolute path (a CI slot, a random work folder, a git worktree) hits the same entry.
-/// Separator: `;` on Windows hosts, `:` elsewhere (docs/Configuration.md at v0.20.1); only absolute paths (a relative one stops the
-/// server from starting), each once, in the given order. No usable root gives no variables. `CARGO_MANIFEST_DIR` and
-/// `CARGO_MANIFEST_PATH` stay verbatim in the key: 31 crates read them with `env!`, and a cached binary must not carry another
-/// checkout's path.
-pub(crate) fn basedir_vars(roots: &[String], windows: bool) -> Vec<(String, String)> {
-    let absolute = |r: &str| {
-        if windows {
-            let b = r.as_bytes();
-            b.len() >= 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && (b[2] == b'\\' || b[2] == b'/')
-        } else {
-            r.starts_with('/')
-        }
-    };
-    let mut seen: Vec<&str> = Vec::new();
-    for r in roots.iter().map(|r| r.trim()).filter(|r| !r.is_empty() && absolute(r)) {
-        let r = if r.len() > 1 { r.trim_end_matches(['/', '\\']) } else { r };
-        if !seen.contains(&r) {
-            seen.push(r);
-        }
-    }
-    if seen.is_empty() {
-        return Vec::new();
-    }
-    let sep = if windows { ";" } else { ":" };
-    vec![
-        ("SCCACHE_BASEDIRS".to_string(), seen.join(sep)),
-        ("SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS".to_string(), VERBATIM_ENV_DEPS.to_string()),
-    ]
 }
 
 /// The checkouts a local server should treat as one: exactly this repository's worktrees, the main checkout included
@@ -727,12 +677,6 @@ fn with_prefix(b: &Backend, prefix: &str) -> Backend {
         other => other.clone(),
     }
 }
-
-/// The `CARGO_*` variables CI's jobs have that sccache hashes into every Rust key (sccache 0.20.1 `generate_hash_key`: all of them but a
-/// few): `CARGO_INCREMENTAL=0` and `CARGO_TERM_COLOR=always`,
-/// which setup-rust exports to `$GITHUB_ENV` ([`crate::ci_setup_rust::env_lines`]) for every job that has the cache. The shim exports
-/// them for a rustc compile, so a local key equals CI's and the two share entries; cargo's own environment is left alone (no colour codes in piped output, incremental builds stay). docs/benchmarks.md, "Local keys against CI's".
-pub const CI_KEY_ENV: [(&str, &str); 2] = [("CARGO_INCREMENTAL", "0"), ("CARGO_TERM_COLOR", "always")];
 
 /// The folder beside the sccache binary that holds the shim, so the shim can be called `sccache`.
 const SHIM_DIR: &str = "shim";
@@ -2740,24 +2684,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn on_windows_the_bases_are_drive_paths_joined_with_a_semicolon_and_unix_paths_are_refused() {
-        let vars = basedir_vars(
-            &[
-                r"C:\ci\src\paddock-s1".to_string(),
-                "D:/target/x-s1/".to_string(),
-                "/c/git/bash".to_string(),
-            ],
-            true,
-        );
-        assert_eq!(vars[0].1, r"C:\ci\src\paddock-s1;D:/target/x-s1");
-        assert!(
-            basedir_vars(&["/c/only".to_string()], true).is_empty(),
-            "a Git-bash path is not absolute to sccache on Windows"
-        );
-        assert!(basedir_vars(&[], false).is_empty(), "no root, no variables");
-    }
-
     fn git_in(dir: &Path, args: &[&str]) {
         let out = crate::worktree::git::Git::at(dir).text(args).unwrap_or_else(|e| panic!("{e}"));
         drop(out);
@@ -2815,7 +2741,7 @@ mod tests {
     fn the_local_prefix_is_ci_s_for_the_same_os_and_arch() {
         assert_eq!(
             default_prefix(),
-            crate::ci_setup_rust::ci_prefix(crate::ci_setup_rust::host_runner_os(), std::env::consts::ARCH)
+            ci_prefix(crate::ci_setup_rust::host_runner_os(), std::env::consts::ARCH)
         );
         assert!(default_prefix().starts_with("paddock-ci/"), "{}", default_prefix());
         let home = tempfile::tempdir().unwrap();

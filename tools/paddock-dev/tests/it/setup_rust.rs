@@ -258,7 +258,7 @@ fn a_host_slot_gets_its_own_folder_port_and_share_of_the_budget() {
     let (_, rs) = same(&r, &LOCAL, &[], true);
     assert!(rs.env.contains("RUSTC_WRAPPER=sccache\nCARGO_INCREMENTAL=0\n"), "{}", rs.env);
     // The variables sccache hashes into every key, as CI's key class and the local shim have them (local_sccache::CI_KEY_ENV).
-    for (k, v) in paddock_dev::local_sccache::CI_KEY_ENV {
+    for (k, v) in paddock_ci_config::settings::sccache::CI_KEY_ENV {
         assert!(
             rs.env.lines().any(|l| l == format!("{k}={v}")),
             "{k} is exported to every later step: {}",

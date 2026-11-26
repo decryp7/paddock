@@ -1204,3 +1204,11 @@ owner = "ER-21 class: a fixture builds its git repository once per test (trial::
 since = 2026-11-26
 review_by = 2026-12-10
 approved = "user"
+
+[[report_only]]
+id = "C175"
+reason = "ER-41: report-only until its first green run on the real tree, recorded by run id here and in tools/paddock-dev/src/check/c175.rs, then flip the mode to Gate. A complete string literal PADDOCK_* in the production code of tools/paddock-dev/src (a read or a write) is a variable named outside paddock-ci-config's settings (ADR 0123 section 5, decision 82); a name the table does not declare is said so. First count 2026-11-26 on feat/ci-config-settings: 169 sites. No baseline file (ER-46): the report is the starting list, a baseline needs the user's approval. Positive control in the check and tests/it/check_c175.rs: a fixture's direct read goes red, the same read through settings stays green"
+owner = "ER-21 class: one variable named, parsed and defaulted by hand at many sites (the S3 endpoint at three; run 9135 added http:// twice); ADR 0123 WP-4"
+since = 2026-11-26
+review_by = 2026-12-10
+approved = "user"

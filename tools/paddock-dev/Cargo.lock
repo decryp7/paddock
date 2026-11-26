@@ -2235,6 +2235,8 @@ dependencies = [
 name = "paddock-ci-config"
 version = "0.1.0"
 dependencies = [
+ "paddock-env",
+ "paddock-secrets",
  "paddock-workspace-hack",
  "yaml-rust2",
 ]
@@ -2270,6 +2272,7 @@ dependencies = [
  "paddock-net",
  "paddock-proc",
  "paddock-repo-graph",
+ "paddock-secrets",
  "paddock-slots",
  "paddock-testkit",
  "paddock-testkit-start",
@@ -2381,6 +2384,20 @@ dependencies = [
  "paddock-workspace-hack",
  "regex",
  "serde_json",
+]
+
+[[package]]
+name = "paddock-secrets"
+version = "0.1.0"
+dependencies = [
+ "getrandom 0.3.4",
+ "libc",
+ "log",
+ "paddock-env",
+ "paddock-proc",
+ "paddock-workspace-hack",
+ "windows-sys 0.61.2",
+ "zeroize",
 ]
 
 [[package]]
@@ -3865,6 +3882,12 @@ dependencies = [
  "syn 3.0.9",
  "synstructure",
 ]
+
+[[package]]
+name = "zeroize"
+version = "1.9.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "85ccff8a4805aba1eaa4cd4afcd49f7557dd2cf5fd79ffc37f8959466effc5aa"
 
 [[package]]
 name = "zerotrie"
