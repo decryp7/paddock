@@ -54,7 +54,8 @@ pub struct TestCacheArgs {
     /// `record`: the file holding a nextest run's output (stdout and stderr), read as the run's result.
     #[arg(long)]
     log: Option<PathBuf>,
-    /// `run`: a nextest filterset the run is narrowed to (a member run's reached packages); ANDed with the packages left to run.
+    /// The nextest filterset the run is narrowed to (a host leg's `test_filter`, a member run's reached packages). It is part of the key
+    /// (`run`, `lookup`, `record`, `forget`): a pass counts only under the same filter. `run` ANDs it with the packages left to run.
     #[arg(long)]
     filter: Option<String>,
     /// `run`: the nextest configuration file, relative to the workspace (an app's own).
@@ -170,6 +171,11 @@ fn repo_root(root: Option<PathBuf>) -> Result<PathBuf, CliError> {
     Ok(PathBuf::from(out.trim()))
 }
 
+/// The filter a run is keyed under: `--filter`, normalized (empty: the whole package).
+fn filter_of(a: &TestCacheArgs) -> String {
+    super::key::normalize_filter(a.filter.as_deref().unwrap_or(""))
+}
+
 fn env_get(k: &str) -> Option<String> {
     std::env::var(k).ok()
 }
@@ -219,7 +225,7 @@ pub fn command(a: &TestCacheArgs) -> Result<Report, CliError> {
                 }
             }
             if a.action == "forget" {
-                return forget(&cfg, &cands, store);
+                return forget(&cfg, &cands, store, &filter_of(a));
             }
             if a.action == "record" {
                 return record(a, &root, &cfg, &cands, store, &class);
@@ -257,6 +263,7 @@ fn run(
     class: &RunnerClass,
 ) -> Result<Report, CliError> {
     let started = std::time::Instant::now();
+    let filter = filter_of(a);
     let mut text: Vec<String> = Vec::new();
     // Whether this run may read at all, and what the lookup said.
     let (decisions, notice) = match read_allowed(&env_get) {
@@ -264,7 +271,7 @@ fn run(
             cands.iter().map(|_| Decision::Run(super::Why::Off(why.clone()))).collect(),
             Some(why),
         ),
-        Ok(()) => decide(cands, cfg, class, store, now(), &trust_check()),
+        Ok(()) => decide(cands, cfg, class, &filter, store, now(), &trust_check()),
     };
     if let Some(n) = notice {
         text.push(format!("::notice::test-cache: reuse is off for this run: {n}. Every target runs."));
@@ -323,11 +330,13 @@ fn run(
             if judged.passed.contains(p) {
                 if !c.dirty && writes.is_ok() {
                     put.push(Record {
-                        key: super::key_of(c, cfg, class),
+                        key: super::key_of(c, cfg, class, &filter),
                         target: c.target.id.clone(),
                         class: class.clone(),
+                        filter: filter.clone(),
                         run: format!("local-{}", std::process::id()),
                         job: String::new(),
+                        attempt: 0,
                         git_ref: env_get("GITHUB_REF").unwrap_or_default(),
                         commit: git_text(root, &["rev-parse", "HEAD"]).unwrap_or_default().trim().to_string(),
                         tests: judged.tests.get(p).copied().unwrap_or(0),
@@ -342,7 +351,7 @@ fn run(
                     let ask = Lookup {
                         target: c.target.id.clone(),
                         class: class.clone(),
-                        key: super::key_of(c, cfg, class),
+                        key: super::key_of(c, cfg, class, &filter),
                     };
                     match super::invalidate(store, std::slice::from_ref(&ask)) {
                         Ok(gone) => text.extend(gone.iter().map(|r| {
@@ -518,14 +527,14 @@ fn audit_shared(s: &super::s3::S3Store) -> Report {
 
 /// `forget`: deletes the records under the current keys of the selected targets (a mistaken or scratch record; the nightly's invalidation
 /// does the same for a failing target). Names each one it deleted.
-fn forget(cfg: &Config, cands: &[Candidate], store: &dyn Store) -> Result<Report, CliError> {
+fn forget(cfg: &Config, cands: &[Candidate], store: &dyn Store, filter: &str) -> Result<Report, CliError> {
     let class = RunnerClass::here();
     let asks: Vec<Lookup> = cands
         .iter()
         .map(|c| Lookup {
             target: c.target.id.clone(),
             class: class.clone(),
-            key: super::key_of(c, cfg, &class),
+            key: super::key_of(c, cfg, &class, filter),
         })
         .collect();
     let gone = store
@@ -571,13 +580,13 @@ fn trust_check() -> Trust {
     let token = env_get("PLAN_TOKEN").or_else(|| env_get("GITEA_TOKEN")).unwrap_or_default();
     let server = env_get("GITHUB_SERVER_URL").unwrap_or_else(|| "https://dev.decryptology.net".into());
     let repo = env_get("GITHUB_REPOSITORY").unwrap_or_else(|| "decryp7/paddock".into());
-    let p = super::trust::Provenance::new(move |id| {
+    let p = super::trust::Provenance::new(move |id, attempt| {
         if token.is_empty() {
             return Err("no API token (PLAN_TOKEN or GITEA_TOKEN)".into());
         }
         let mut http = crate::wait::CurlHttp;
         let mut client = crate::ci_runs::client::Client::new(&mut http, &server, &repo, &token);
-        super::trust::facts(&mut client, id)
+        super::trust::facts(&mut client, id, attempt)
     });
     Box::new(move |r| p.check(r))
 }
@@ -612,7 +621,10 @@ fn record(
     let asked: Vec<String> = cands.iter().map(|c| c.target.package.clone()).collect();
     let meta = super::RunMeta {
         run: env_get("GITHUB_RUN_ID").unwrap_or_else(|| format!("local-{}", std::process::id())),
-        job: env_get("GITHUB_JOB_ID").unwrap_or_default(),
+        // The job's display name and the run's attempt, which the CI step passes from its matrix (the reader finds the job by them,
+        // trust.rs). Without them the record is untrusted in CI: fail closed.
+        job: env_get("PADDOCK_JOB_NAME").unwrap_or_default().trim().to_string(),
+        attempt: env_get("PADDOCK_RUN_ATTEMPT").and_then(|v| v.trim().parse().ok()).unwrap_or(0),
         git_ref: env_get("GITHUB_REF").unwrap_or_default(),
         commit: git_text(root, &["rev-parse", "HEAD"]).unwrap_or_default().trim().to_string(),
         at: now(),
@@ -621,7 +633,8 @@ fn record(
     // The shadow phase (ER-41): of the targets a valid record already covered, how many ran here and passed, and which ran and failed (a
     // soundness finding: the key missed an input). Read before this run's own records are stored, and only when the lookup answered.
     let mut lines: Vec<String> = Vec::new();
-    let (decisions, notice) = decide(cands, cfg, class, store, now(), &trust_check());
+    let filter = filter_of(a);
+    let (decisions, notice) = decide(cands, cfg, class, &filter, store, now(), &trust_check());
     if notice.is_none() {
         let matched: Vec<&Candidate> = cands
             .iter()
@@ -635,12 +648,33 @@ fn record(
         }));
         lines.push(shadow.line());
     }
-    let put = super::records_from_log(&log, cands, cfg, class, &meta);
+    let put = super::records_from_log(&log, cands, cfg, class, &filter, &meta);
     lines.push(match store.put_many(&put) {
         Ok(()) => format!("test-cache: recorded {} packages ({} in the log)", put.len(), asked.len()),
         Err(e) => format!("::warning::test-cache: records not stored: {e}"),
     });
     Ok(Report::new(serde_json::json!({"stored": put.len()}), lines.join("\n")))
+}
+
+/// The filters the legs of `workspace` on `class` carry, normalized and without repeats: the whole package, and the filterset of a host
+/// leg's scope (`hostTests`), read through the planner's own leg builder ([`crate::plan_ci::workspace_legs`]) so the plan and the legs
+/// cannot disagree. A member run's own filter is not here: its legs find no entry and run everything.
+fn leg_filters(root: &Path, w: &World, workspace: &str, class: &RunnerClass) -> Result<Vec<String>, String> {
+    let contract = if workspace == "crates" {
+        crate::plan_cmd::CRATES_CONTRACT
+    } else {
+        crate::plan_cmd::PADDOCK_DEV_CONTRACT
+    };
+    let host = crate::plan_cmd::read_host_tests(root, contract, &w.graph.derived(workspace))?;
+    let mut out = vec![String::new()];
+    for leg in crate::plan_ci::workspace_legs(&crate::plan_ci::os_legs(), host.as_ref(), "", None) {
+        if super::plan::class_of_runner(leg["os"].as_str().unwrap_or("")) == class.0 {
+            out.push(super::key::normalize_filter(leg["test_filter"].as_str().unwrap_or("")));
+        }
+    }
+    out.sort();
+    out.dedup();
+    Ok(out)
 }
 
 /// `plan --out <file>`: for each runner class and each of the two workspaces, the packages with a valid record, as the
@@ -670,18 +704,33 @@ fn plan(a: &TestCacheArgs, root: &Path, store: &dyn Store) -> Result<Report, Cli
                         continue;
                     }
                 };
-                let (decisions, notice) = decide(&cands, &cfg, &class, store, now(), &trust);
-                if let Some(n) = notice {
-                    text.push(format!("::notice::test-cache: reuse is off for {} {ws}: {n}.", class.0));
-                }
-                for (c, d) in cands.iter().zip(decisions) {
-                    if let Decision::Reuse(r) = d {
-                        would += 1;
-                        if skip {
-                            out.by_class
-                                .entry(class.0.clone())
-                                .or_default()
-                                .insert(c.target.package.clone(), format!("{}@{} from run {}", r.target, class.0, r.run));
+                // One lookup per filter a leg of this class may carry (the whole package, and a host leg's scope).
+                let filters = match leg_filters(root, w, ws, &class) {
+                    Ok(f) => f,
+                    Err(e) => {
+                        text.push(format!(
+                            "::notice::test-cache: {ws} on {} has no filtered legs planned: {e}",
+                            class.0
+                        ));
+                        vec![String::new()]
+                    }
+                };
+                for filter in filters {
+                    let (decisions, notice) = decide(&cands, &cfg, &class, &filter, store, now(), &trust);
+                    if let Some(n) = notice {
+                        text.push(format!("::notice::test-cache: reuse is off for {} {ws}: {n}.", class.0));
+                    }
+                    for (c, d) in cands.iter().zip(decisions) {
+                        if let Decision::Reuse(r) = d {
+                            would += 1;
+                            if skip {
+                                out.by_class
+                                    .entry(class.0.clone())
+                                    .or_default()
+                                    .entry(filter.clone())
+                                    .or_default()
+                                    .insert(c.target.package.clone(), format!("{}@{} from run {}", r.target, class.0, r.run));
+                            }
                         }
                     }
                 }

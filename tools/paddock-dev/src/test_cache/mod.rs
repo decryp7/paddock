@@ -80,8 +80,8 @@ pub enum Decision {
     Run(Why),
 }
 
-/// The key of a candidate under `cfg` on `class`.
-pub fn key_of(c: &Candidate, cfg: &Config, class: &RunnerClass) -> String {
+/// The key of a candidate under `cfg` on `class`, for a run narrowed to nextest filterset `filter` (empty: the whole package).
+pub fn key_of(c: &Candidate, cfg: &Config, class: &RunnerClass, filter: &str) -> String {
     key(
         &c.target,
         &c.node_hash,
@@ -89,17 +89,20 @@ pub fn key_of(c: &Candidate, cfg: &Config, class: &RunnerClass) -> String {
             epoch: cfg.epoch,
             class,
             profile: &cfg.profile,
+            filter,
         },
     )
 }
 
 /// One decision per candidate, in order, from one bulk lookup. A store that errors turns reuse off for every target (fail open,
 /// §5: everything runs, never the other way round); the cause is the second answer, for one notice. `trust` is the reader-side
-/// check of a record (§7); `now` is Unix seconds.
+/// check of a record (§7); `now` is Unix seconds. `filter` is the filterset the run this lookup is for is narrowed to: a record counts
+/// only under the same filter.
 pub fn decide(
     cands: &[Candidate],
     cfg: &Config,
     class: &RunnerClass,
+    filter: &str,
     store: &dyn Store,
     now: u64,
     trust: &dyn Fn(&Record) -> Result<(), String>,
@@ -114,7 +117,7 @@ pub fn decide(
             asks.push(Lookup {
                 target: c.target.id.clone(),
                 class: class.clone(),
-                key: key_of(c, cfg, class),
+                key: key_of(c, cfg, class, filter),
             });
         }
     }
@@ -220,8 +223,10 @@ pub fn invalidate(store: &dyn Store, failed: &[Lookup]) -> Result<Vec<Record>, s
 pub struct RunMeta {
     /// The run (CI run id, or a local token).
     pub run: String,
-    /// The job id when the environment names it, else empty.
+    /// The job's display name (`crate (macos-latest)`), which the reader finds among the run's jobs; empty for a local run.
     pub job: String,
+    /// The run's attempt the job ran in (a rerun of a run is another attempt); 0 for a local run.
+    pub attempt: u64,
     /// The ref.
     pub git_ref: String,
     /// The commit tested.
@@ -234,19 +239,22 @@ pub struct RunMeta {
 
 /// The records a nextest log proves, and no others (ADR 0116 §3, ER-12, ER-33): one per candidate whose package ran in the log with
 /// every test passing on its first try, the log being whole. A package that failed, was flaky, passed on a retry, never appeared, or has
-/// uncommitted changes under its inputs gets none. The one place `record` decides what is stored.
-pub fn records_from_log(log: &str, cands: &[Candidate], cfg: &Config, class: &RunnerClass, m: &RunMeta) -> Vec<Record> {
+/// uncommitted changes under its inputs gets none. Each record is keyed by `filter`, the filterset the run was narrowed to, so a pass of
+/// the selected tests is never read as a pass of the whole package. The one place `record` decides what is stored.
+pub fn records_from_log(log: &str, cands: &[Candidate], cfg: &Config, class: &RunnerClass, filter: &str, m: &RunMeta) -> Vec<Record> {
     let asked: Vec<String> = cands.iter().map(|c| c.target.package.clone()).collect();
     let judged = result::judge(log, &asked);
     cands
         .iter()
         .filter(|c| !c.dirty && judged.passed.contains(&c.target.package))
         .map(|c| Record {
-            key: key_of(c, cfg, class),
+            key: key_of(c, cfg, class, filter),
             target: c.target.id.clone(),
             class: class.clone(),
+            filter: key::normalize_filter(filter),
             run: m.run.clone(),
             job: m.job.clone(),
+            attempt: m.attempt,
             git_ref: m.git_ref.clone(),
             commit: m.commit.clone(),
             tests: judged.tests.get(&c.target.package).copied().unwrap_or(0),
