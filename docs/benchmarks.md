@@ -2922,3 +2922,35 @@ was never short (68 % free at the lowest; a gate's largest process is about 1.4 
 and opens the second under a 5-minute load of 0.85 x cores (11.9 here): every batch started under 12, and there two beat one; above it
 nothing measured says a second step helps. The round-1 3-gate batch started during another agent's burst (1-minute load 18.9); round 2
 repeated it from a quiet start (4.6) and was slower still (22.6 gates per hour, mean 1-minute load 24.3), so three is not a gain.
+
+## Git fixture repositories of the ci_runs tests (2026-11-26, perf/slow-git-tests, base 8333e185f)
+
+Train n's Windows paddock-dev job (CI run 9118) spent 710 s of its test time in 75 tests over 5 s; the slowest were `ci_runs::trial::tests::*`
+(13 to 24 s each) and the `ci_runs::green::tests::*` that read `train_g_shape` (9 to 14 s). Cause, confirmed by reading the fixtures: each test
+built its own repository with 14 to 17 `git` starts (trial's `world()`: 17; green's `train_g_shape()`: 14) before its own work, and a git start
+costs about 45 ms on the Windows runner against about 6 ms here (rule 85's measure of 2026-11-18). The test-side fix: each fixture is built
+once per machine and recipe in `<temp>/paddock-dev-test-templates/<name>-<hash of the recipe source>` (`ci_runs::testutil::template`, 712 KB
+in all) and each test copies it with plain file copies (`copy_tree`): no git start, no shared mutable state. nextest runs each test in its own
+process, so a `OnceLock` per binary would have shared nothing. Budget tests: `a_world_is_a_private_copy_of_the_template_and_costs_no_git_start`
+(a counter of git starts on the test's thread: a world costs 0) and `a_shape_is_a_private_copy_of_its_template_with_the_same_commits`.
+
+- **Machine:** Mac mini, Apple M4 Pro, 14 cores, macOS 27.2, shared. Debug build, `cargo nextest run` of the 56 tests of the filter
+  (`ci_runs::trial::tests`, `ci_runs::green::tests`, the clean-revert test, the syn real-tree test), warm build folder.
+- **Load:** 1/5/15-minute load at the start 20.7 / 29.3 / 26.2 (before), 15.8 / 22.7 / 24.3 (after, warm templates). Not a quiet machine
+  (rule 2 above): single runs, so the times are indications; the difference in git starts is exact.
+- **Not measured on Windows:** the estimate below is the Mac ratio scaled by the start cost, not a run.
+
+| Family | Tests | Git starts of the fixture per test, before / after | Sum of test times on the Mac, before | after (templates warm) |
+|---|---|---|---|---|
+| `trial::tests` with a `world()` | 8 | 17 / 0 | 11.7 s (1.1 to 2.2 s each) | 4.7 s (0.3 to 1.2 s each) |
+| `green::tests` reading `train_g_shape` | 8 | 14 / 0 | 4.7 s (0.47 to 0.9 s each) | 1.5 s (0.07 to 0.33 s each) |
+| `dispatch_guards` clean-revert test | 1 | one repository, one test: unchanged | 0.8 s | 0.5 s (noise) |
+| `graph_on_the_real_tree_every_read_candidate_parses_with_syn` | 1 | unchanged | 10.1 s | 7.7 s (noise); the syn extract is 0.85 s and the text scan 0.38 s of it, the rest is `read_graph` (`cargo metadata`, the production path under test) |
+
+Windows estimate: a trial test of 13 to 24 s there is about 40 git starts at 45 ms plus file work; 17 of them go, so about 5 to 10 s each (the
+`prepare` and `prune` calls under test still start git); a shape test of 9 to 14 s goes to about 1 to 2 s (all its starts were the build). About
+150 s of the trial and green families' time becomes about 50 s. The first test process on a machine builds each template (the same cost as before,
+once); a cold CI job pays it once per recipe change, not per test.
+
+Left as it was: the syn test (its time is `cargo metadata`, which a shared parse would not remove, and a per-binary share does not exist under
+nextest) and `prune`'s one `merge-base --is-ancestor` per live trial ref (no bulk form answers it; commented `// per-item:`).
