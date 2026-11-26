@@ -381,3 +381,34 @@ fn the_exclusion_filter_names_the_reused_packages_only() {
     assert_eq!(exclude_filter(&[]), "");
     assert_eq!(exclude_filter(&[&a, &b]), "not (package(=a) | package(=b))");
 }
+
+/// One package, two binaries: the lib's test passes and an integration binary's test fails. The lib's binary is clean on its own, so
+/// only the package-level check (`bad` in `judge`) keeps the package from being a pass.
+#[test]
+fn one_failing_binary_makes_its_whole_package_not_a_pass() {
+    let log = [
+        "    Starting 2 tests across 2 binaries",
+        "        PASS [   0.010s] (1/2) pk t::ok",
+        "        FAIL [   0.010s] (2/2) pk::it t::broken",
+        "     Summary [   0.020s] 2 tests run: 1 passed, 1 failed, 0 skipped",
+        "        FAIL [   0.010s] (2/2) pk::it t::broken",
+    ]
+    .join("\n");
+    let j = judge(&log, &names(&["pk"]));
+    assert!(j.passed.is_empty(), "{j:?}");
+    assert!(j.not_passed[0].1.contains("failed"), "{j:?}");
+}
+
+/// A test that failed once and passed on its retry (`TRY 1 FAIL` then `PASS`) is a flake, which `ran_binaries` alone catches: the
+/// binary is not clean, so the package is not a pass even where the package-level check is not reached.
+#[test]
+fn a_pass_on_retry_leaves_its_binary_unclean() {
+    let log = [
+        "    Starting 1 test across 1 binary",
+        "  TRY 1 FAIL [   0.010s] (1/1) pk t::flaky",
+        "  TRY 2 PASS [   0.010s] (1/1) pk t::flaky",
+    ]
+    .join("\n");
+    let ran = crate::nextest_log::ran_binaries(&log);
+    assert!(ran.clean.is_empty() && ran.not_clean.contains("pk"), "{ran:?}");
+}
