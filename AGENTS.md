@@ -36,6 +36,8 @@ package.json     the one npm workspace and package-lock.json (ui, eslint, icons,
   `./dev gates check` and `./dev plan` read most folders, and a sparse cone makes them stop with an `::error::` line naming the
   missing folders (measurements: [benchmarks](docs/benchmarks.md#2026-11-12-full-against-sparse-worktree-checkout-fixworktree-gates-profile));
   `--sparse` is only for a `--detach` review copy, and `-b <branch>` attaches to a branch that already exists.
+  `add` also prints a WARNING (never a refusal) naming another locked worktree, its owner and the shared files when it changes files the new base
+  carries or its branch has the same topic (`tools/paddock-dev/src/worktree/overlap.rs`).
   Never work in the main checkout; never `git stash`.
 - **New rules take their number at landing (user, 2026-11-25).** A branch writes a new rule in docs/rules.md as `NEW-<slug>.` and
   cites it as `rule NEW-<slug>`; the train integrator assigns the next free number when the train lands and replaces every citation
