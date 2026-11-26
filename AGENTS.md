@@ -124,13 +124,13 @@ package.json     the one npm workspace and package-lock.json (ui, eslint, icons,
 
 ## Testing and quality gates
 
-- **One way to run long commands (user, 2026-11-25).** Builds, tests and gates go through `./dev heavy [--stall S] -- <command>` or
-  `heavy run [--stall S] <agent> -- <command>`, never wrapped in `timeout` or piped through `| tail`: an outer timeout ends heavy and
-  orphans the command it started, and a tail throws away the output you then need. heavy writes the whole output to
+- **One way to run long commands (user, 2026-11-25).** Builds, tests and gates go through `./dev throttle [--stall S] -- <command>` or
+  `throttle run [--stall S] <agent> -- <command>` (the old `heavy` names still work for now and print a deprecation line), never wrapped in `timeout` or piped through `| tail`: an outer timeout ends throttle and
+  orphans the command it started, and a tail throws away the output you then need. throttle writes the whole output to
   `<dev-targets>/runs/<agent>/<start>-<name>.log`, prints that path first and a summary line (exit code, seconds, ran or hung) last;
   read the log instead of re-running. `--stall S` ends a command that wrote nothing and used no CPU for `S` seconds (exit 81); it is
   off by default, and a value is a hang detector set from a measured quiet gap with a wide margin, never a speed limit (ER-12;
-  tools/heavy/README.md, "The run log and the hang detector").
+  tools/throttle/README.md, "The run log and the hang detector").
 - **E2E and screenshots run on fresh code (guidance; a binding rule is proposed).** A running dev server is reused only with `PW_REUSE_SERVER=1`; default ports derive from the worktree path (`e2ePort` in `@decryp7/paddock-e2e`); a config that consumes `ui/dist` or the css fails at load with "rebuild ui: npm run build -w ui" when they were built from older sources (`build-guard.ts`, content stamps; lessons.md). New Playwright configs use these.
 - Every change ships with tests; every bug fix starts with a failing test. A colour change keeps `npm run test:tokens`
   green (WCAG AA/AAA pairs, CVD separation); change the tokens, not the test.

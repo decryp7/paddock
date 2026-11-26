@@ -34,10 +34,13 @@ enum Command {
     },
     /// Wait, with a limit, for a plock job, a process, a line in a file or a CI run. Use it instead of `pgrep -f` loops.
     Wait(wait::WaitArgs),
-    /// Run a command through the machine-wide heavy slot (ER-24), found the way `check --pre-push` finds it; git hooks use it.
-    Heavy(heavy_cmd::HeavyArgs),
-    /// Install the `heavy` binary of a release into `<dev-targets>/heavy/bin`: downloads the asset for this OS, checks its SHA256SUMS entry, renames it into place, records the version.
-    HeavyInstall(heavy_install::InstallArgs),
+    /// Run a command through the machine-wide throttle slot (ER-24), found the way `check --pre-push` finds it; git hooks use it.
+    /// `./dev heavy` is the old name: it still works and prints a one-line deprecation.
+    #[command(alias = "heavy")]
+    Throttle(heavy_cmd::ThrottleArgs),
+    /// Install the `throttle` binary of a release into `<dev-targets>/throttle/bin`: downloads the asset for this OS, checks its SHA256SUMS entry, renames it into place, records the version.
+    #[command(alias = "heavy-install")]
+    ThrottleInstall(heavy_install::InstallArgs),
     /// One line for the coordinator: start, hold or stop for new agents, from the load, the free disk of the dev-targets folder and the CI queue (ER-24).
     Load(load::LoadArgs),
     /// The machine's dev folders, derived from `git config paddock.worktreeRoot` (docs/dev-setup.md): dev-targets, dev-disk,
@@ -785,8 +788,8 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
             command: CiCommand::GuardRecord(a),
         } => ci_runs::guard_record(&a),
         Command::Wait(a) => wait::command(&a),
-        Command::Heavy(a) => heavy_cmd::command(&a),
-        Command::HeavyInstall(a) => heavy_install::command(&a),
+        Command::Throttle(a) => heavy_cmd::command(&a),
+        Command::ThrottleInstall(a) => heavy_install::command(&a),
         Command::Load(a) => load::command(&a),
         Command::Places(a) => places::command(&a),
         Command::Audit { command } => audit::command(command),

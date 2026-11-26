@@ -160,7 +160,7 @@ fn a_host_job_announces_itself_to_the_agents_heavy_queue_for_as_long_as_it_holds
     let d = tempfile::tempdir().unwrap();
     let h = Host::new(d.path(), "tools tools shared\n");
     let (bin, calls) = fake_heavy(d.path(), 0);
-    let envs = [("PADDOCK_HEAVY_BIN", bin.to_str().unwrap())];
+    let envs = [("PADDOCK_THROTTLE_BIN", bin.to_str().unwrap())];
     let acq = h.run(&["acquire"], &envs, false);
     assert!(acq.status.success(), "{}", text(&acq.stderr));
     let holder = std::fs::read_to_string(h.ci.join("slots/s1.owner")).unwrap();
@@ -178,15 +178,15 @@ fn a_heavy_that_fails_or_is_missing_is_said_and_never_stops_the_job() {
     let d = tempfile::tempdir().unwrap();
     let h = Host::new(d.path(), "tools tools shared\n");
     let (bin, _) = fake_heavy(d.path(), 75);
-    let failing = h.run(&["acquire"], &[("PADDOCK_HEAVY_BIN", bin.to_str().unwrap())], false);
+    let failing = h.run(&["acquire"], &[("PADDOCK_THROTTLE_BIN", bin.to_str().unwrap())], false);
     assert!(failing.status.success(), "{}", text(&failing.stderr));
     let err = text(&failing.stderr);
     assert!(
-        err.contains("::warning::job-isolation: `heavy mark ci-s1") && err.contains("fake heavy says no"),
+        err.contains("::warning::job-isolation: `throttle mark ci-s1") && err.contains("fake heavy says no"),
         "{err}"
     );
     assert!(h.run(&["release"], &[], true).status.success());
-    let none = h.run(&["acquire"], &[("PADDOCK_HEAVY_BIN", "/nonexistent/heavy")], false);
+    let none = h.run(&["acquire"], &[("PADDOCK_THROTTLE_BIN", "/nonexistent/throttle")], false);
     assert!(none.status.success());
     assert!(text(&none.stderr).contains("could not be started"), "{}", text(&none.stderr));
 }

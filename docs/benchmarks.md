@@ -84,6 +84,22 @@ uses it, results in
 
 ## Results of shared tooling
 
+### 2026-11-26, slot locks on kernel file locks against directory locks (feat/throttle-rename-filelock)
+
+- **Commit:** origin/main 202d0a181 (directory locks, the release binary of that tree) against the file-lock tree of this branch (a debug build: the handoff time is poll-bound, not code-bound)
+- **Machine:** Mac mini, Apple M4 Pro, 14 cores, 64 GB, macOS 27.2; 5-minute load 11 to 17 during the runs (other agents' builds); each run in its own empty lock folder, no shared state
+- **Method:** `heavy run --no-gate` of `sh` commands, `HEAVY_SLOTS=1`, `PLOCK_POLL=1`, 5 interleaved pairs of runs per binary, times read with `perl -MTime::HiRes` in the commands; the script is not kept (twelve lines of shell)
+  1. *Two agents contend for one slot:* A holds the slot for 2 s, B starts 0.5 s later and queues; handoff = B's command start minus A's command end.
+  2. *A holder killed with SIGKILL:* K runs `sleep 8`; 2 s in, `kill -9` on K's heavy (its command goes on for 6 s more); then W starts `heavy run`; time = W's command start minus the kill.
+- **Numbers:**
+
+  | Measure | Directory locks (main) | File locks (this branch) |
+  |---|---|---|
+  | handoff to a queued waiter, 5 runs | 0.59 to 0.61 s | 0.57 to 0.61 s |
+  | next run after the holder is SIGKILLed, 5 runs | 6.26 to 6.37 s (it waited for the orphaned command to end) | 0.02 to 0.04 s |
+
+- **Notes:** the handoff is the poll interval (1 s here; the waiter looks again once a poll), so the lock kind does not change it. The SIGKILL case changes from "as long as the orphan lives" to "at once": the kernel frees the lock when heavy's handle closes. The price, stated in tools/heavy/README.md: the orphaned command is no longer counted against the slot, so the next step starts beside it. Not measured: Linux and Windows, a loaded host with two real gates (the live gates of other agents were not touched), a network file system (refused by design).
+
 ### 2026-11-26, test-result cache: an unchanged Cargo package reuses its pass (feat/adr-0116-test-result-cache)
 
 - **What:** `./dev ci test-cache run --workspace crates --only paddock-limits,paddock-names,paddock-metrics` (nextest `ci` profile,

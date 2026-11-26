@@ -82,7 +82,7 @@ export const ADOPTING = new Map(
     ['crates/paddock-plugin-test/src/bin/fixture_v1.rs', 'shared test fixture: adopts with the next shared batch'],
     ['crates/paddock-plugin-test/src/bin/misbehaving.rs', 'shared test fixture: adopts with the next shared batch'],
     ['crates/paddock-setup/src/main.rs', 'shared tool: adopts with the next shared batch'],
-    ['tools/heavy/src/main.rs', 'heavy tool: adopts with the next tooling batch'],
+    ['tools/throttle/src/main.rs', 'throttle tool: adopts with the next tooling batch'],
     ['tools/paddock-dev/src/main.rs', 'paddock-dev: adopts with the next shared batch'],
   ],
 );
