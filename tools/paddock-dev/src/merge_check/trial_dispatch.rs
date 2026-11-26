@@ -7,17 +7,25 @@
 //! (and only them), on the legs the plan names. It prints `run <id>`; this step prints it too. `./dev merge check --gates` reads the
 //! run later ([`super::member_trial`]).
 //!
-//! The trial merges what origin holds, so the sync tip is first pushed there as the scratch ref `sync/<member>` (the integrator's
-//! role: the integrator runs sync-member and may push shared branches; the member's own branch stays the author's) and the trial is of
-//! that ref (`trial/sync/<member>`). A push that fails is NOT MEASURED, nothing dispatched.
+//! The trial merges what origin holds, so the sync tip is first pushed there as a NEW scratch ref named by the synced commit,
+//! `sync/<member>/<short sha>` (the integrator's role: the integrator runs sync-member and may push shared branches; the member's own
+//! branch stays the author's) and the trial is of that ref (`trial/sync/<member>/<short sha>`). A re-sync is a new commit, so a new ref:
+//! every push is a plain push of a ref that does not exist yet, never a force or a lease (the guard hook refuses both). The push runs
+//! through the one runner of pushes that need the caller's credentials ([`crate::queue::real::GitTrain`], `Child::Authed`, as `ci
+//! dispatch --trial` pushes `trial/<branch>`): the token reaches that one child through the scoped askpass program, and the merge
+//! check's scrubbed git reader is never used for a push. The dispatch needs `PADDOCK_TRIAL_DIR` (the trial's scratch folder, which
+//! `ci dispatch --trial` reads from the environment); it is read once, before the push, and handed to the dispatch child. A push that
+//! fails, or a missing `PADDOCK_TRIAL_DIR` or `GITEA_TOKEN`, is NOT MEASURED, nothing dispatched.
 //!
 //! `--no-trial "<reason>"` skips it and logs the reason, like `--old-base-anyway`.
 
 use super::gates::GateRun;
+use super::git::{Git, short};
+use crate::queue::real::{Child, GitTrain};
 use paddock_cli::Exit;
 use paddock_proc::{Limits, command, run_bounded};
 use serde_json::json;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 /// The default of `--trial-max`: the longest the dispatch waits for a busy runner.
@@ -29,15 +37,66 @@ const TIMEOUT: Duration = Duration::from_secs(4 * 60 * 60);
 
 /// Starts the trial.
 pub trait Dispatcher {
-    /// `ci dispatch ci.yml --trial <member> --onto <train> --max <max>` in `root`; an error is a failure to start.
-    fn dispatch(&self, root: &Path, member: &str, train: &str, max: &str) -> Result<GateRun, String>;
+    /// `ci dispatch ci.yml --trial <member> --onto <train> --max <max>` in `root`, with `PADDOCK_TRIAL_DIR` = `trial_dir`; an error is
+    /// a failure to start.
+    fn dispatch(&self, root: &Path, trial_dir: &Path, member: &str, train: &str, max: &str) -> Result<GateRun, String>;
+}
+
+/// Pushes the sync tip.
+pub trait Pusher {
+    /// `git push origin HEAD:refs/heads/<reference>` in `root` with the caller's credentials; `trial_dir` is the scratch folder of the
+    /// askpass program and `hold` the longest the push waits while the server is down. An error is git's own words.
+    fn push(&self, root: &Path, trial_dir: &Path, reference: &str, hold: &str) -> Result<(), String>;
+}
+
+/// The real pusher: the runner `ci dispatch --trial` pushes with.
+pub struct RealPush;
+
+impl Pusher for RealPush {
+    fn push(&self, root: &Path, trial_dir: &Path, reference: &str, hold: &str) -> Result<(), String> {
+        let url = Git::new(root)
+            .text(&["remote", "get-url", "origin"])
+            .map(|t| t.trim().to_string())?;
+        push_with(
+            root,
+            &url,
+            trial_dir,
+            reference,
+            hold,
+            std::env::var("GITEA_TOKEN").ok().filter(|t| !t.is_empty()),
+        )
+    }
+}
+
+/// [`RealPush::push`] with the token and the origin's url given.
+fn push_with(root: &Path, url: &str, trial_dir: &Path, reference: &str, hold: &str, token: Option<String>) -> Result<(), String> {
+    if url.contains("://") && token.is_none() {
+        return Err("GITEA_TOKEN is not set (the push to origin needs the token `ci dispatch --trial` uses)".to_string());
+    }
+    std::fs::create_dir_all(trial_dir).map_err(|e| format!("cannot create {}: {e}", trial_dir.display()))?;
+    let mut g = GitTrain::for_checkout(root, url, trial_dir, token);
+    g.push_hold = crate::wait::parse_duration(hold).ok();
+    let (ok, out) = g.run_git(
+        Child::Authed,
+        &["push", "--quiet", "origin", &format!("HEAD:refs/heads/{reference}")],
+    )?;
+    if ok { Ok(()) } else { Err(out.trim().to_string()) }
+}
+
+/// `PADDOCK_TRIAL_DIR`, which `ci dispatch --trial` reads (the trial's scratch folder, on a data drive): the same variable, read here
+/// first so a missing one is refused before anything is pushed.
+pub fn trial_dir() -> Result<PathBuf, String> {
+    std::env::var_os("PADDOCK_TRIAL_DIR")
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
+        .ok_or_else(|| "PADDOCK_TRIAL_DIR is not set".to_string())
 }
 
 /// The real dispatcher (this tool, or `PADDOCK_SYNC_TRIAL_DISPATCH`: the tests' stand-in).
 pub struct Real;
 
 impl Dispatcher for Real {
-    fn dispatch(&self, root: &Path, member: &str, train: &str, max: &str) -> Result<GateRun, String> {
+    fn dispatch(&self, root: &Path, trial_dir: &Path, member: &str, train: &str, max: &str) -> Result<GateRun, String> {
         let program = match std::env::var_os("PADDOCK_SYNC_TRIAL_DISPATCH") {
             Some(p) => p.into(),
             None => crate::tool_cache::self_exe().map_err(|e| format!("this program cannot be found: {e}"))?,
@@ -47,6 +106,7 @@ impl Dispatcher for Real {
             "ci", "dispatch", "ci.yml", "--trial", member, "--onto", train, "--max", max, "--root",
         ])
         .arg(root)
+        .env("PADDOCK_TRIAL_DIR", trial_dir)
         .current_dir(root);
         let out = run_bounded(cmd, Limits::new(TIMEOUT)).map_err(|e| format!("`ci dispatch` could not run: {e}"))?;
         let code = match out.outcome {
@@ -92,9 +152,10 @@ pub fn not_run(why: &str) -> Step {
     }
 }
 
-/// The scratch ref the sync tip is pushed to for the trial: `sync/<member>`.
-pub fn sync_ref(member: &str) -> String {
-    format!("sync/{member}")
+/// The scratch ref the sync tip is pushed to for the trial: `sync/<member>/<short sha of the synced commit>`. A new commit is a new
+/// ref, so no push replaces one. `merge check --gates` finds the trial by the same name ([`super::member_trial`]).
+pub fn sync_ref(member: &str, synced_sha: &str) -> String {
+    format!("sync/{member}/{}", short(synced_sha))
 }
 
 /// The sync tip could not be pushed: nothing is dispatched.
@@ -102,7 +163,7 @@ pub fn not_pushed(synced: &str, why: &str) -> Step {
     let why = format!("the sync tip could not be pushed to origin as {synced}: {}", why.trim());
     Step {
         text: vec![format!(
-            "::error::merge sync-member: CI trial NOT DISPATCHED: {why}. Next step: fix the push (the integrator role pushes `sync/<member>` with a lease: a refusal as `stale info` means someone else moved it, so `git fetch origin sync/<member>` and look, or check the remote and your access), then run this again; or --no-trial \"<reason>\"."
+            "::error::merge sync-member: CI trial NOT DISPATCHED: {why}. Next step: fix the push (the integrator role pushes the new ref `sync/<member>/<short sha>`, a plain push: a refusal as `rejected` means that name already holds another commit, so `git fetch origin` and look; otherwise check GITEA_TOKEN, the remote and your access), then run this again; or --no-trial \"<reason>\"."
         )],
         data: json!({"outcome": "not measured", "why": why}),
         exit: Exit::NotMeasured,
@@ -199,10 +260,97 @@ mod tests {
 
     #[test]
     fn a_tip_that_cannot_be_pushed_dispatches_nothing() {
-        assert_eq!(sync_ref("feat/x"), "sync/feat/x");
-        let s = not_pushed("sync/feat/x", "permission denied");
+        assert_eq!(
+            sync_ref("feat/x", "0123456789abcdef0123456789abcdef01234567"),
+            "sync/feat/x/012345678"
+        );
+        let s = not_pushed("sync/feat/x/012345678", "permission denied");
         assert_eq!(s.exit, Exit::NotMeasured);
         assert!(s.text.join("\n").contains("NOT DISPATCHED") && s.text.join("\n").contains("permission denied"));
+    }
+
+    fn git(dir: &Path, args: &[&str]) -> String {
+        let out = crate::git_env::git().arg("-C").arg(dir).args(args).output().unwrap();
+        assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    }
+
+    /// The push runs through the shared runner: the token reaches that one child through the scoped askpass program (so a remote that
+    /// asks for credentials gets them from the environment), `GITEA_TOKEN` itself is never in the child, and a new ref is a plain push.
+    #[test]
+    fn the_push_child_keeps_the_callers_credentials_and_a_new_ref_needs_no_force() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (work, bare, scratch) = (tmp.path().join("work"), tmp.path().join("origin.git"), tmp.path().join("trial"));
+        std::fs::create_dir(&work).unwrap();
+        git(&work, &["init", "-q", "-b", "main"]);
+        git(&work, &["init", "-q", "--bare", bare.to_str().unwrap()]);
+        git(&work, &["remote", "add", "origin", bare.to_str().unwrap()]);
+        std::fs::write(work.join("f"), "1\n").unwrap();
+        git(&work, &["add", "f"]);
+        git(
+            &work,
+            &[
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@example.invalid",
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "-q",
+                "-m",
+                "a",
+            ],
+        );
+        let url = bare.to_str().unwrap();
+        push_with(&work, url, &scratch, "sync/m/aaaaaaaaa", "1m", Some("tok".into())).unwrap();
+        assert_eq!(
+            git(&bare, &["rev-parse", "refs/heads/sync/m/aaaaaaaaa"]),
+            git(&work, &["rev-parse", "HEAD"])
+        );
+        assert!(
+            scratch.join("askpass.sh").exists(),
+            "the credentials come through the shared askpass program"
+        );
+        // The child's environment: the token only through the askpass pair, never as GITEA_TOKEN.
+        let g = GitTrain::for_checkout(&work, url, &scratch, Some("tok".into()));
+        let c = g.command(None, Child::Authed);
+        let env: std::collections::HashMap<_, _> = c
+            .get_envs()
+            .map(|(k, v)| (k.to_string_lossy().into_owned(), v.map(|v| v.to_string_lossy().into_owned())))
+            .collect();
+        assert_eq!(env.get("PADDOCK_QUEUE_PUSH_TOKEN"), Some(&Some("tok".into())));
+        assert!(
+            env.get("GIT_ASKPASS")
+                .is_some_and(|v| v.as_deref().is_some_and(|p| p.ends_with("askpass.sh")))
+        );
+        assert_eq!(env.get("GITEA_TOKEN"), Some(&None), "GITEA_TOKEN is removed from the child");
+        // A different commit under a name that is taken is refused, not forced.
+        let commit = |msg: &str| {
+            std::fs::write(work.join("f"), msg).unwrap();
+            git(
+                &work,
+                &[
+                    "-c",
+                    "user.name=t",
+                    "-c",
+                    "user.email=t@example.invalid",
+                    "-c",
+                    "commit.gpgsign=false",
+                    "commit",
+                    "-q",
+                    "-am",
+                    msg,
+                ],
+            );
+        };
+        commit("b");
+        push_with(&work, url, &scratch, "sync/m/bbbbbbbbb", "1m", None).unwrap();
+        let taken = git(&bare, &["rev-parse", "refs/heads/sync/m/bbbbbbbbb"]);
+        git(&work, &["reset", "-q", "--hard", "HEAD~1"]);
+        commit("c");
+        assert!(push_with(&work, url, &scratch, "sync/m/bbbbbbbbb", "1m", None).is_err());
+        assert_eq!(git(&bare, &["rev-parse", "refs/heads/sync/m/bbbbbbbbb"]), taken);
     }
 
     #[test]

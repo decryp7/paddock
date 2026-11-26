@@ -22,7 +22,7 @@
 use super::git::{Git, short};
 use super::reverted_base::live_for_member;
 use super::static_rows::{self, StaticGates};
-use super::trial_dispatch::{self, Dispatcher};
+use super::trial_dispatch::{self, Dispatcher, Pusher};
 use paddock_cli::{CliError, Report};
 use serde_json::json;
 use std::path::Path;
@@ -77,7 +77,15 @@ pub struct Options<'a> {
 /// Lists the commands and warnings, then (the train merged) runs the static rows on the sync tip and, once they pass, dispatches
 /// the member's own CI trial.
 pub fn command(root: Option<&Path>, train: &str, member: Option<&str>, opts: &Options) -> Result<Report, CliError> {
-    command_with(root, train, member, opts, &static_rows::Real, &trial_dispatch::Real)
+    command_with(
+        root,
+        train,
+        member,
+        opts,
+        &static_rows::Real,
+        &trial_dispatch::RealPush,
+        &trial_dispatch::Real,
+    )
 }
 
 /// [`command`] with the static rows' runner and the dispatcher given (the tests hand stand-ins).
@@ -87,6 +95,7 @@ fn command_with(
     member: Option<&str>,
     opts: &Options,
     rows: &dyn StaticGates,
+    pusher: &dyn Pusher,
     dispatcher: &dyn Dispatcher,
 ) -> Result<Report, CliError> {
     let (no_static, no_trial) = (opts.no_static, opts.no_trial);
@@ -198,19 +207,16 @@ fn command_with(
         (None, true, e) if e != paddock_cli::Exit::Ok => trial_dispatch::not_run("the static rows did not pass: fix them first"),
         (None, true, _) => {
             let branch = name.strip_prefix("origin/").unwrap_or(&name).to_string();
-            // The trial merges what origin holds, so the sync tip goes there first, as the scratch ref `sync/<member>` (the integrator's
-            // push; the member's own branch is the author's). `--force-with-lease` on that ref: a re-sync replaces the integrator's own earlier tip,
-            // never one that someone else moved (the push is then refused as stale: fetch it, look, run again). The trial is then of `sync/<member>`, and `merge check` reads that name.
-            let synced = trial_dispatch::sync_ref(&branch);
-            match git.text(&[
-                "push",
-                "--quiet",
-                &format!("--force-with-lease=refs/heads/{synced}"),
-                "origin",
-                &format!("HEAD:refs/heads/{synced}"),
-            ]) {
-                Ok(_) => trial_dispatch::interpret(dispatcher.dispatch(&root, &synced, train, opts.trial_max), &synced, train),
+            // The trial merges what origin holds, so the sync tip goes there first, as a NEW scratch ref named by the synced commit,
+            // `sync/<member>/<short sha>` (the integrator's push; the member's own branch is the author's). A re-sync is a new commit and so
+            // a new ref: a plain push, never a force or a lease. The trial is then of that ref, and `merge check` reads the same name.
+            let synced = trial_dispatch::sync_ref(&branch, &head);
+            match trial_dispatch::trial_dir() {
                 Err(why) => trial_dispatch::not_pushed(&synced, &why),
+                Ok(dir) => match pusher.push(&root, &dir, &synced, opts.trial_max) {
+                    Ok(()) => trial_dispatch::interpret(dispatcher.dispatch(&root, &dir, &synced, train, opts.trial_max), &synced, train),
+                    Err(why) => trial_dispatch::not_pushed(&synced, &why),
+                },
             }
         }
     };

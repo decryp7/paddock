@@ -2869,18 +2869,36 @@ mod member_trial {
             .answers(log.clone().stdout(&format!(r#"{{"ok":true,"gates":{rows}}}"#)))
             .install()
             .unwrap();
+        // The dispatch stand-in also logs the trial folder it was handed: `ci dispatch --trial` reads it from its environment.
+        let dispatch_log = Actions::new().appends_with("{env:GATES_LOG}", "{args} trial_dir={env:PADDOCK_TRIAL_DIR}\n");
         StandIn::new(dir, "dispatch")
-            .answers(log.stdout_with("{env:DISPATCH_OUT}").exits_with_env("DISPATCH_EXIT", 0))
+            .answers(dispatch_log.stdout_with("{env:DISPATCH_OUT}").exits_with_env("DISPATCH_EXIT", 0))
             .install()
             .unwrap();
     }
 
     fn sync(r: &Repo, rows: &str, dispatch_out: &str, dispatch_exit: &str, extra: &[&str]) -> (i32, String, String) {
         let dir = tempfile::tempdir().unwrap();
+        sync_in(r, &dir, Some(dir.path().join("trial")), rows, dispatch_out, dispatch_exit, extra)
+    }
+
+    /// `sync` in a given stand-in folder (its log accumulates) and with or without `PADDOCK_TRIAL_DIR`.
+    fn sync_in(
+        r: &Repo,
+        dir: &tempfile::TempDir,
+        trial_dir: Option<PathBuf>,
+        rows: &str,
+        dispatch_out: &str,
+        dispatch_exit: &str,
+        extra: &[&str],
+    ) -> (i32, String, String) {
         stand_ins(dir.path(), rows);
         let log = dir.path().join("log");
-        let out = r
-            .dev_cmd()
+        let mut cmd = r.dev_cmd();
+        if let Some(t) = &trial_dir {
+            cmd.env("PADDOCK_TRIAL_DIR", t);
+        }
+        let out = cmd
             .env("PADDOCK_MERGE_CHECK_GATES", dir.path().join("rows"))
             .env("PADDOCK_SYNC_TRIAL_DISPATCH", dir.path().join("dispatch"))
             .env("GATES_LOG", &log)
@@ -2903,8 +2921,71 @@ mod member_trial {
         assert_eq!(code, 0, "{text}");
         assert!(text.contains("CI trial dispatched: run 4242"), "{text}");
         assert!(
-            log.contains("ci dispatch ci.yml --trial sync/feat/x --onto main --max 30m"),
+            log.contains(&format!(
+                "ci dispatch ci.yml --trial sync/feat/x/{} --onto main --max 30m",
+                short_head(&r)
+            )),
             "{log}"
+        );
+    }
+
+    /// The first nine characters of HEAD: the ref's name (`sync/<member>/<short sha>`).
+    fn short_head(r: &Repo) -> String {
+        r.git(&["rev-parse", "HEAD"])[..9].to_string()
+    }
+
+    /// `ci dispatch --trial` needs `PADDOCK_TRIAL_DIR`: the dispatch child is handed the folder this command was given, and a command that
+    /// has none says so before it pushes anything.
+    #[test]
+    fn the_dispatch_gets_the_trial_dir_and_a_missing_one_is_refused_before_the_push() {
+        let r = pushed();
+        let (code, text, log) = sync(&r, GREEN, "run 4242", "0", &[]);
+        assert_eq!(code, 0, "{text}");
+        assert!(log.contains("trial_dir=") && !log.contains("trial_dir=\n"), "{log}");
+        assert!(log.lines().any(|l| l.contains("--trial") && l.ends_with("/trial")), "{log}");
+        let dir = tempfile::tempdir().unwrap();
+        let (code, text, log) = sync_in(&r, &dir, None, GREEN, "run 4242", "0", &[]);
+        assert_eq!(code, 6, "{text}");
+        assert!(
+            text.contains("PADDOCK_TRIAL_DIR is not set") && !log.contains("ci dispatch"),
+            "{text}\n{log}"
+        );
+        let origin = r.git(&["remote", "get-url", "origin"]);
+        let refs = r.git(&["--git-dir", &origin, "for-each-ref", "refs/heads/sync/"]);
+        assert!(refs.lines().count() == 1, "only the first sync pushed a ref: {refs}");
+    }
+
+    /// A re-sync is a new commit and pushes a second, new ref: a plain push, no force and no lease, and the first ref is untouched.
+    #[test]
+    fn a_re_sync_pushes_a_second_new_ref_with_no_force() {
+        let r = pushed();
+        let first = r.git(&["rev-parse", "HEAD"]);
+        let (code, text, _) = sync(&r, GREEN, "run 4242", "0", &[]);
+        assert_eq!(code, 0, "{text}");
+        r.write("x3.txt", "x3\n");
+        r.commit("feat: x3");
+        let second = r.git(&["rev-parse", "HEAD"]);
+        let (code, text, log) = sync(&r, GREEN, "run 4243", "0", &[]);
+        assert_eq!(code, 0, "{text}");
+        assert!(log.contains(&format!("--trial sync/feat/x/{} ", &second[..9])), "{log}");
+        let origin = r.git(&["remote", "get-url", "origin"]);
+        let on = |sha: &str| r.git(&["--git-dir", &origin, "rev-parse", &format!("refs/heads/sync/feat/x/{}", &sha[..9])]);
+        assert_eq!((on(&first), on(&second)), (first.clone(), second.clone()));
+        // The same commit again is the same ref: nothing to replace, so nothing to force.
+        let (code, text, _) = sync(&r, GREEN, "run 4244", "0", &[]);
+        assert_eq!(code, 0, "{text}");
+    }
+
+    /// An https origin needs the caller's token: without GITEA_TOKEN the push is not attempted and the message names it.
+    #[test]
+    fn an_https_origin_without_a_token_is_not_pushed_and_names_the_token() {
+        let r = pushed();
+        r.git(&["remote", "set-url", "origin", "https://127.0.0.1:9/decryp7/paddock.git"]);
+        let (code, text, log) = sync(&r, GREEN, "run 4242", "0", &[]);
+        assert_eq!(code, 6, "{text}");
+        assert!(
+            text.contains("GITEA_TOKEN is not set") && !log.contains("ci dispatch"),
+            "{text}\n{log}"
         );
     }
 
@@ -2917,16 +2998,18 @@ mod member_trial {
     }
 
     #[test]
-    fn the_sync_tip_is_pushed_as_sync_member_before_the_dispatch_and_a_failed_push_dispatches_nothing() {
+    fn the_sync_tip_is_pushed_as_a_new_ref_before_the_dispatch_and_a_failed_push_dispatches_nothing() {
         let r = pushed();
         let (code, _, _) = sync(&r, GREEN, "run 4242", "0", &[]);
         assert_eq!(code, 0);
-        let on_origin = r.git(&["ls-remote", "origin", "refs/heads/sync/feat/x"]);
+        let name = format!("refs/heads/sync/feat/x/{}", short_head(&r));
+        let on_origin = r.git(&["ls-remote", "origin", &name]);
         assert!(on_origin.starts_with(&r.git(&["rev-parse", "HEAD"])), "{on_origin}");
-        // A sync branch someone else moved is not overwritten: the push is refused (the lease) and nothing is dispatched.
+        // The name holds another commit (a short-sha clash): the plain push is refused, nothing is overwritten and nothing is dispatched.
         let bare = r.git(&["remote", "get-url", "origin"]);
-        let moved = r.git(&["rev-parse", "HEAD~1"]);
-        r.git(&["--git-dir", &bare, "update-ref", "refs/heads/sync/feat/x", &moved]);
+        let moved = r.git(&["commit-tree", "HEAD^{tree}", "-m", "another commit under the same name"]);
+        r.git(&["push", "-q", "origin", &format!("{moved}:refs/heads/elsewhere")]);
+        r.git(&["--git-dir", &bare, "update-ref", &name, &moved]);
         let (code, text, log) = sync(&r, GREEN, "run 4242", "0", &[]);
         assert_eq!(code, 6, "{text}");
         assert!(
@@ -2934,7 +3017,7 @@ mod member_trial {
             "{text}\n{log}"
         );
         assert!(
-            r.git(&["--git-dir", &bare, "rev-parse", "refs/heads/sync/feat/x"]) == moved,
+            r.git(&["--git-dir", &bare, "rev-parse", &name]) == moved,
             "the moved ref was overwritten"
         );
         r.git(&["remote", "set-url", "origin", "/nonexistent/origin.git"]);
@@ -3025,12 +3108,27 @@ mod member_trial {
         let (r, dir) = merged_member();
         let (code, text, log) = check(&r, &dir, "green", "0", &[]);
         assert_eq!(code, 0, "{text}");
-        assert!(text.contains("run 77 of feat/a is green"), "{text}");
         let head = r.git(&["rev-parse", "feat/a"]);
+        let synced = format!("sync/feat/a/{}", &head[..9]);
+        assert!(text.contains(&format!("run 77 of {synced} is green")), "{text}");
         assert!(
-            log.contains("ci trial-verdict --branch feat/a --member-sha") && log.contains(&head),
+            log.contains(&format!("ci trial-verdict --branch {synced} --member-sha")) && log.contains(&head),
             "{log}"
         );
+    }
+
+    /// A member merged as its own sync ref already carries the trial's name: it is not prefixed twice.
+    #[test]
+    fn a_member_merged_as_its_sync_ref_is_read_under_that_name() {
+        let (r, dir) = merged_member();
+        let head = r.git(&["rev-parse", "feat/a"]);
+        let synced = format!("sync/feat/a/{}", &head[..9]);
+        r.git(&["branch", &synced, "feat/a"]);
+        r.git(&["reset", "-q", "--hard", "main~1"]);
+        r.git(&["merge", "-q", "--no-ff", "-m", &format!("Merge branch '{synced}'"), &synced]);
+        let (code, text, log) = check(&r, &dir, "green", "0", &[]);
+        assert_eq!(code, 0, "{text}");
+        assert!(log.contains(&format!("--branch {synced} ")) && !log.contains("sync/sync"), "{log}");
     }
 
     #[test]
