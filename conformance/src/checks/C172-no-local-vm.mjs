@@ -5,7 +5,7 @@
 // Flagged, in the code the local gates and developer commands run: tools/paddock-dev/src/ (Rust, outside src/gates/ and ci_*.rs, the CI-only
 // code) and crates/*/src (golden.rs printed a container command)
 // (Rust, outside tests.rs, *_tests.rs and the
-// `#[cfg(test)]` tail of a file), tools/githooks/ and lefthook.yml: a string literal or a command word that names docker, podman,
+// `#[cfg(test)]` tail of a file), tools/githooks/, apps/*/scripts/ and lefthook.yml: a string literal or a command word that names docker, podman,
 // nerdctl, orb, orbctl, vmrun or `linux-container.sh`. Whole-line comments are not read. CI-only scripts (.gitea/, conformance/ci/,
 // tools/linux-container.sh itself) are not in scope. A site that is fine carries `// conformance: no-local-vm — <why>` on its line or
 // the line above.
@@ -20,7 +20,7 @@ const IN_STRING = new RegExp(`"(?:[^"\\n]*/)?(?:${TOOLS})(?:[\\s"])`);
 // A shell command word: at the start of a line, or after ; & | ( or $(.
 const COMMAND_WORD = new RegExp(`(?:^|[;&|(]|\\$\\()\\s*(?:sudo\\s+)?(?:[\\w./-]*/)?(?:${TOOLS})(?:\\s|$)`);
 
-const IN_SCOPE = /^(?:tools\/paddock-dev\/src\/(?!gates\/|ci_)[^]+\.rs|crates\/[^/]+\/src\/[^]+\.rs|tools\/githooks\/.+|lefthook\.ya?ml)$/;
+const IN_SCOPE = /^(?:tools\/paddock-dev\/src\/(?!gates\/|ci_)[^]+\.rs|crates\/[^/]+\/src\/[^]+\.rs|apps\/[^/]+\/scripts\/[^]+|tools\/githooks\/.+|lefthook\.ya?ml)$/;
 const TEST_FILE = /(?:^|\/)tests\.rs$|_tests?\.rs$/;
 
 /** The 1-based lines of `text` (file `file`) that start a VM or container. Empty for a file that is not local gate code. */

@@ -177,9 +177,17 @@ export function tagProblems(env, version) {
  * The commands the crate workspace's gates run on a branch, from the CI model (`./dev gates model --json`, ADR 0060 §2): the one
  * accessor that reads ci.yml, its actions and its matrices (ER-42; this file never slices ci.yml text). A line counts when it runs
  * in the `crates` folder outside an app leg and is gated at the branch level (a conditional or report-only line proves nothing).
+ *
+ * One runtime selection is read as the workspace: the `crate` job's Linux nextest line (`"${sel[@]}"`). Off coverage runs the plan
+ * splits that leg into partitions of whole packages (`plan_ci::partition_linux_legs`, its test
+ * `every_package_is_in_exactly_one_linux_partition_so_no_pass_is_ever_split`), so its partitions together test every package; a host
+ * leg's selection (hostTests) stays unproven.
  */
 export function crateCommands(model) {
-  return model.lines.filter((l) => l.cwd === 'crates' && !l.app && l.levels?.branch === 'Gated').map((l) => l.text);
+  const linuxSelection = (l) => l.job === 'crate' && l.os === 'ubuntu-latest' && /^cargo nextest run "\$\{sel\[@\]\}" /.test(l.text);
+  return model.lines
+    .filter((l) => l.cwd === 'crates' && !l.app && l.levels?.branch === 'Gated')
+    .map((l) => (linuxSelection(l) ? l.text.replace('"${sel[@]}"', '--workspace') : l.text));
 }
 
 /** The CI model, read through the one accessor (`./dev gates model --json`). */
