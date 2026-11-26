@@ -2792,15 +2792,16 @@ mod tests {
         // Asked from inside a subfolder of a worktree, the same list, in sorted order (a stable stamp).
         let from = root.join("elsewhere").join("wt-b");
         let roots = worktree_roots(&from);
-        let want: Vec<String> = [
+        let want = [
             root.join("elsewhere").join("wt-a"),
             root.join("elsewhere").join("wt-b"),
             main.clone(),
-        ]
-        .iter()
-        .map(|p| p.display().to_string())
-        .collect();
-        assert_eq!(roots, want);
+        ];
+        // git prints `C:/...` on Windows: compared as paths, not as text (run 9129).
+        assert_eq!(roots.len(), want.len(), "{roots:?}");
+        for (got, want) in roots.iter().zip(&want) {
+            assert!(paddock_testkit::path::same_path(got, want), "{got} is not {}", want.display());
+        }
         assert!(!roots.iter().any(|r| r.contains("unrelated")), "{roots:?}");
         // Not a repository: no bases (never a guess from the folder's neighbours).
         let bare = root.join("plain");
