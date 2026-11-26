@@ -1147,7 +1147,8 @@ impl SincePlan {
             let runs: Vec<&Rerun> = self.reruns.iter().filter(|r| r.key.as_deref() == Some(key)).collect();
             if runs.is_empty() || runs.iter().any(|r| r.leg.os.is_none()) {
                 // Not rerun, or a leg that cannot be told: every leg, whole (the one leg set of the planner, ADR NEW-ci-job-model §4).
-                return serde_json::to_string(&crate::plan_ci::workspace_legs(&crate::plan_ci::os_legs(), None, "", None)).unwrap_or_default();
+                return serde_json::to_string(&crate::plan_ci::workspace_legs(&crate::plan_ci::os_legs(), None, "", None))
+                    .unwrap_or_default();
             }
             let legs: Vec<Value> = runs
                 .iter()

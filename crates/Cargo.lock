@@ -4084,6 +4084,7 @@ dependencies = [
 name = "paddock-ci-config"
 version = "0.1.0"
 dependencies = [
+ "paddock-testkit",
  "paddock-workspace-hack",
  "yaml-rust2",
 ]

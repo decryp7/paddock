@@ -14,3 +14,6 @@ doctest = false # doctests are off (crates/README.md, "Doctests")
 # The one YAML reader of the CI model (MIT or Apache-2.0): marked events give every node its line.
 yaml-rust2 = "0.13"
 paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
+
+[dev-dependencies]
+paddock-testkit = { workspace = true }

@@ -151,8 +151,13 @@ pub fn ci_jobs(text: &str) -> Result<std::collections::BTreeMap<String, Vec<Stri
         if projects.is_empty() {
             return Err(format!("{what} names no project"));
         }
-        if let Some(bad) = projects.iter().find(|p| !known.contains(p) && !matches!(p.as_str(), "everything" | "apps")) {
-            return Err(format!("{what} names {bad}, which is not a declared project, `everything` or `apps`"));
+        if let Some(bad) = projects
+            .iter()
+            .find(|p| !known.contains(p) && !matches!(p.as_str(), "everything" | "apps"))
+        {
+            return Err(format!(
+                "{what} names {bad}, which is not a declared project, `everything` or `apps`"
+            ));
         }
         out.insert(job.clone(), projects);
     }

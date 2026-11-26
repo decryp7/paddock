@@ -194,10 +194,9 @@ fn tool_cache_before_first_dev(steps: &[Node], declared: &Declared) -> bool {
         if let Some(action) = step
             .get_text("uses")
             .and_then(|u| u.strip_prefix("./.gitea/actions/"))
+            && (action == TOOL_CACHE_ACTION || declared.tool_cache_actions.contains(action))
         {
-            if action == TOOL_CACHE_ACTION || declared.tool_cache_actions.contains(action) {
-                return true;
-            }
+            return true;
         }
         if step.get_text("run").is_some_and(runs_dev) {
             return false;

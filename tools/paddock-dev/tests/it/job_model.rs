@@ -46,7 +46,11 @@ fn the_models_projects_equal_the_planners_job_table_for_every_job() {
 fn a_job_table_that_differs_from_the_model_is_seen() {
     let m = real_model();
     let ui = m.job("ui").unwrap();
-    assert_ne!(ui.projects, ["ui".to_string()].into_iter().collect::<BTreeSet<_>>(), "ui also runs for eslint and icons");
+    assert_ne!(
+        ui.projects,
+        ["ui".to_string()].into_iter().collect::<BTreeSet<_>>(),
+        "ui also runs for eslint and icons"
+    );
 }
 
 #[test]
