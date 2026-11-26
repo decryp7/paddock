@@ -1211,3 +1211,4 @@ reason = "ER-41: report-only until its first green run on the real tree, recorde
 owner = "ER-21 class: one variable named, parsed and defaulted by hand at many sites (the S3 endpoint at three; run 9135 added http:// twice); ADR 0123 WP-4"
 since = 2026-11-26
 review_by = 2026-12-10
+approved = "user"
