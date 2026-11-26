@@ -1,18 +1,23 @@
 //! The settings of `./dev disk`: defaults, overridden by `PADDOCK_DISK_*` environment variables, overridden by flags.
 
 use clap::Args;
+use paddock_ci_config::settings::declared::{
+    PADDOCK_DISK_FOLDER_TIMEOUT_SECS, PADDOCK_DISK_INDEX, PADDOCK_DISK_JOBS, PADDOCK_DISK_LIVE_HOURS, PADDOCK_DISK_REFUSE_GIB,
+    PADDOCK_DISK_ROOTS, PADDOCK_DISK_WARN_GIB,
+};
+use paddock_ci_config::settings::{Decl, EnvFn, Settings as EnvSettings};
 use paddock_cli::CliError;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 /// Warn below this much free space (GiB).
-pub const DEFAULT_WARN_GIB: u64 = 200;
+pub const DEFAULT_WARN_GIB: u64 = declared_default(PADDOCK_DISK_WARN_GIB);
 /// Refuse below this much free space (GiB).
-pub const DEFAULT_REFUSE_GIB: u64 = 50;
+pub const DEFAULT_REFUSE_GIB: u64 = declared_default(PADDOCK_DISK_REFUSE_GIB);
 /// A folder used within this many hours is live.
-pub const DEFAULT_LIVE_HOURS: u64 = 48;
+pub const DEFAULT_LIVE_HOURS: u64 = declared_default(PADDOCK_DISK_LIVE_HOURS);
 /// The longest one folder's size is measured.
-pub const DEFAULT_FOLDER_TIMEOUT_SECS: u64 = 60;
+pub const DEFAULT_FOLDER_TIMEOUT_SECS: u64 = declared_default(PADDOCK_DISK_FOLDER_TIMEOUT_SECS);
 /// Sizes measured less than this many hours ago are not measured again by `scan`.
 pub const DEFAULT_SIZE_MAX_AGE_HOURS: u64 = 6;
 /// The usage index's file name in the dev-targets folder. The default root is the dev-targets folder itself, derived
@@ -73,6 +78,14 @@ pub struct Settings {
 
 const GIB: u64 = 1 << 30;
 
+/// A number default read from its declaration (ER-22: the one place the literal lives is `paddock-ci-config`'s table).
+const fn declared_default(d: &Decl) -> u64 {
+    match d.default_u64() {
+        Some(n) => n,
+        None => panic!("the declaration has no numeric default"),
+    }
+}
+
 impl Settings {
     /// Flags over environment over defaults; the defaults of the roots and the index come from the dev-targets folder of the
     /// repository the command runs in.
@@ -90,18 +103,16 @@ impl Settings {
         env: &dyn Fn(&str) -> Option<String>,
         dev_targets: &dyn Fn() -> Result<PathBuf, String>,
     ) -> Settings {
-        let num = |name: &str| env(name).and_then(|v| v.trim().parse::<u64>().ok());
+        let vars = EnvFn(env);
+        let st = EnvSettings::new(&vars);
         let given_roots: Option<Vec<PathBuf>> = if !args.roots.is_empty() {
             Some(args.roots.clone())
         } else {
-            env("PADDOCK_DISK_ROOTS")
-                .filter(|v| !v.trim().is_empty())
+            st.raw(PADDOCK_DISK_ROOTS)
+                .filter(|v| !v.to_string_lossy().trim().is_empty())
                 .map(|v| std::env::split_paths(&v).collect())
         };
-        let given_index = args
-            .index
-            .clone()
-            .or_else(|| env("PADDOCK_DISK_INDEX").filter(|v| !v.is_empty()).map(PathBuf::from));
+        let given_index = args.index.clone().or_else(|| st.raw(PADDOCK_DISK_INDEX).map(PathBuf::from));
         let derived = if given_roots.is_some() && given_index.is_some() {
             None
         } else {
@@ -118,14 +129,18 @@ impl Settings {
         };
         let jobs = args
             .jobs
-            .or_else(|| num("PADDOCK_DISK_JOBS").and_then(|n| usize::try_from(n).ok()))
+            .or_else(|| st.number(PADDOCK_DISK_JOBS).and_then(|n| usize::try_from(n).ok()))
             .filter(|n| *n > 0)
             .unwrap_or_else(|| std::thread::available_parallelism().map_or(2, |n| n.get().saturating_sub(1).clamp(1, 4)));
         Settings {
-            warn_bytes: args.warn_gib.or_else(|| num("PADDOCK_DISK_WARN_GIB")).unwrap_or(DEFAULT_WARN_GIB) * GIB,
+            warn_bytes: args
+                .warn_gib
+                .or_else(|| st.number(PADDOCK_DISK_WARN_GIB))
+                .unwrap_or(DEFAULT_WARN_GIB)
+                * GIB,
             refuse_bytes: args
                 .refuse_gib
-                .or_else(|| num("PADDOCK_DISK_REFUSE_GIB"))
+                .or_else(|| st.number(PADDOCK_DISK_REFUSE_GIB))
                 .unwrap_or(DEFAULT_REFUSE_GIB)
                 * GIB,
             roots,
@@ -134,11 +149,11 @@ impl Settings {
             unlocated,
             live_secs: args
                 .live_hours
-                .or_else(|| num("PADDOCK_DISK_LIVE_HOURS"))
+                .or_else(|| st.number(PADDOCK_DISK_LIVE_HOURS))
                 .unwrap_or(DEFAULT_LIVE_HOURS)
                 * 3600,
             jobs,
-            folder_timeout: Duration::from_secs(num("PADDOCK_DISK_FOLDER_TIMEOUT_SECS").unwrap_or(DEFAULT_FOLDER_TIMEOUT_SECS)),
+            folder_timeout: Duration::from_secs(st.number(PADDOCK_DISK_FOLDER_TIMEOUT_SECS).unwrap_or(DEFAULT_FOLDER_TIMEOUT_SECS)),
             size_max_age_secs: DEFAULT_SIZE_MAX_AGE_HOURS * 3600,
         }
     }
@@ -243,5 +258,27 @@ mod tests {
     fn a_bad_number_in_the_environment_falls_back_to_the_default() {
         let s = Settings::resolve_with(&CommonArgs::default(), &env_of(&[("PADDOCK_DISK_WARN_GIB", "lots")]), &derived);
         assert_eq!(s.warn_bytes, 200 * GIB);
+    }
+
+    /// ER-22: the numbers the disk report defaults to are declared once, in the settings, and these constants read them.
+    #[test]
+    fn the_defaults_are_the_declared_ones() {
+        use paddock_ci_config::settings::declaration;
+        let declared = |n: &str| declaration(n).and_then(|d| d.default).map(|v| v.parse::<u64>().unwrap());
+        assert_eq!(declared("PADDOCK_DISK_WARN_GIB"), Some(DEFAULT_WARN_GIB));
+        assert_eq!(declared("PADDOCK_DISK_REFUSE_GIB"), Some(DEFAULT_REFUSE_GIB));
+        assert_eq!(declared("PADDOCK_DISK_LIVE_HOURS"), Some(DEFAULT_LIVE_HOURS));
+        assert_eq!(declared("PADDOCK_DISK_FOLDER_TIMEOUT_SECS"), Some(DEFAULT_FOLDER_TIMEOUT_SECS));
+    }
+
+    #[test]
+    fn the_roots_are_a_path_list_and_the_index_a_path_read_through_the_settings() {
+        let list = std::env::join_paths(["/srv/a", "/srv/b"]).unwrap().to_string_lossy().to_string();
+        let leaked: &'static str = Box::leak(list.into_boxed_str());
+        let pairs: &'static [(&'static str, &'static str)] =
+            Box::leak(Box::new([("PADDOCK_DISK_ROOTS", leaked), ("PADDOCK_DISK_INDEX", "/srv/i")]));
+        let s = Settings::resolve_with(&CommonArgs::default(), &env_of(pairs), &derived);
+        assert_eq!(s.roots, vec![PathBuf::from("/srv/a"), PathBuf::from("/srv/b")]);
+        assert_eq!(s.index, Some(PathBuf::from("/srv/i")));
     }
 }

@@ -48,7 +48,7 @@ fn the_table_is_sorted_named_and_consistent() {
 }
 
 #[test]
-fn a_number_is_digits_only_and_a_bad_one_falls_back_to_the_default() {
+fn a_number_is_a_u64_and_a_bad_one_falls_back_to_the_default() {
     let d = declaration("PADDOCK_CI_MIN_FREE_GB").unwrap();
     let get = |v: &str| Settings::new(&MapVars::new().with(d.name, v)).number_or_default(d);
     assert_eq!(get("45"), Some(45));

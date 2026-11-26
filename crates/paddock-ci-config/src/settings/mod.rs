@@ -30,6 +30,16 @@ impl Vars for EnvMap<'_> {
     }
 }
 
+/// A lookup function as an environment (the shape the disk report and the places resolver already take).
+#[derive(Clone, Copy)]
+pub struct EnvFn<'a>(pub &'a dyn Fn(&str) -> Option<String>);
+
+impl Vars for EnvFn<'_> {
+    fn get(&self, key: &str) -> Option<OsString> {
+        (self.0)(key).map(OsString::from)
+    }
+}
+
 /// Environments read in order: the first one that holds the name wins (the process environment first, a credentials file's
 /// settings after it).
 pub struct Layered<'a>(pub &'a [&'a dyn Vars]);
