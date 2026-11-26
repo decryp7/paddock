@@ -1,0 +1,252 @@
+//! The display names a run is expected to have (ADR 0123 §3): the planner renders every job of the job model over the legs it emits
+//! and writes `{display name: {job, leg}}` into the run's scope line (version 3), so every reader looks a name up instead of
+//! inverting a `name:` template.
+
+use super::Scope;
+use paddock_ci_config::jobs::{self, Declared as ModelDeclared, Job, JobModel, Leg, Legs, PROJECT_OUTPUTS};
+use serde_json::Value;
+use std::collections::BTreeMap;
+
+/// The leg keys the line keeps (a leg value that is empty is left out).
+pub const LEG_KEYS: [&str; 6] = ["os", "app", "e2e_leg", "part_label", "test_packages", "shard"];
+
+/// A job a run is expected to have, by display name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Expected {
+    /// The workflow job id (`crate`).
+    pub job: String,
+    /// The leg it runs: only the non-empty keys of [`LEG_KEYS`] (empty for a job without a matrix).
+    pub leg: BTreeMap<String, String>,
+}
+
+/// The expected jobs of a run by display name.
+pub type ExpectedMap = BTreeMap<String, Expected>;
+
+/// The legs the planner emitted for the three planned matrices of ci.yml.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct PlannedLegs<'a> {
+    /// `crate_legs`.
+    pub crate_legs: &'a [Value],
+    /// `paddock_dev_legs`.
+    pub paddock_dev_legs: &'a [Value],
+    /// `apps`.
+    pub apps: &'a [Value],
+}
+
+/// The job model of a workflow text with the declared projects of the inputs file text.
+pub fn load_model_from(workflow_text: &str, inputs_text: &str) -> Result<JobModel, String> {
+    let projects = crate::repo_inputs::ci_jobs(inputs_text)?;
+    jobs::model(
+        workflow_text,
+        &ModelDeclared {
+            projects,
+            ..ModelDeclared::default()
+        },
+    )
+    .map_err(|p| {
+        let lines: Vec<String> = p
+            .iter()
+            .map(|p| format!("{} (line {}): {}", p.job.as_deref().unwrap_or("-"), p.line, p.message))
+            .collect();
+        format!("ci.yml does not model: {}", lines.join("; "))
+    })
+}
+
+/// The job model of the repository at `root` (`.gitea/workflows/ci.yml` and `docs/repo-graph.toml`).
+pub fn load_model(root: &std::path::Path) -> Result<JobModel, String> {
+    let read = |rel: &str| {
+        std::fs::read_to_string(root.join(rel))
+            .map(|t| t.replace("\r\n", "\n"))
+            .map_err(|e| format!("{rel} cannot be read ({e}); the scope line names the jobs it expects from it"))
+    };
+    load_model_from(&read(".gitea/workflows/ci.yml")?, &read(crate::repo_inputs::FILE)?)
+}
+
+fn text_leg(leg: &Value) -> Leg {
+    LEG_KEYS
+        .iter()
+        .map(|k| (k.to_string(), leg[*k].as_str().unwrap_or("").to_string()))
+        .collect()
+}
+
+/// Whether the run ran the job: a key of `ran.jobs` or `ran.apps` names it, by its own id or by a project it runs for.
+fn ran_job(job: &Job, ran: &Scope) -> bool {
+    let projects_ran = PROJECT_OUTPUTS
+        .iter()
+        .filter(|(_, project, plan_key)| job.projects.contains(*project) && (ran.jobs.contains(*plan_key) || ran.jobs.contains(*project)))
+        .count()
+        > 0;
+    let named = ran.jobs.iter().any(|k| k.split('@').next() == Some(job.id.as_str()));
+    let app = job.projects.contains(jobs::APPS_PROJECT) && !ran.apps.is_empty();
+    projects_ran || named || app
+}
+
+/// The legs of a job the run ran: the model's own, or the planner's for a planned matrix.
+fn legs_ran(job: &Job, ran: &Scope, planned: &PlannedLegs) -> Result<Vec<Leg>, String> {
+    let from_values = |legs: &[Value], keep: &dyn Fn(&Leg) -> bool| legs.iter().map(text_leg).filter(|l| keep(l)).collect();
+    Ok(match &job.legs {
+        Legs::None => vec![Leg::new()],
+        Legs::Static(legs) => legs.clone(),
+        Legs::Planned(output) => match (job.id.as_str(), output.as_str()) {
+            ("crate", "crate_legs") | ("paddock-dev", "paddock_dev_legs") => {
+                let legs = if job.id == "crate" {
+                    planned.crate_legs
+                } else {
+                    planned.paddock_dev_legs
+                };
+                from_values(legs, &|l| ran.jobs.contains(&format!("{}@{}", job.id, l["os"])))
+            }
+            ("app", "apps") => from_values(planned.apps, &|_| true),
+            _ => return Err(format!("job {} has planned legs `{output}` that the planner does not name", job.id)),
+        },
+    })
+}
+
+/// The expected jobs of a run: every job of the model the run ran, rendered over its legs. A name two legs share is refused: a lookup
+/// by name would be ambiguous (the check of ADR 0123 §7 is this, made at the writer).
+pub fn expected_of(model: &JobModel, ran: &Scope, planned: &PlannedLegs) -> Result<ExpectedMap, String> {
+    let mut out = ExpectedMap::new();
+    for job in model.jobs.iter().filter(|j| ran_job(j, ran)) {
+        for leg in legs_ran(job, ran, planned)? {
+            let name = jobs::render(job, &leg);
+            let kept = leg
+                .into_iter()
+                .filter(|(k, v)| LEG_KEYS.contains(&k.as_str()) && !v.is_empty())
+                .collect();
+            let entry = Expected {
+                job: job.id.clone(),
+                leg: kept,
+            };
+            if out.insert(name.clone(), entry).is_some() {
+                return Err(format!(
+                    "two legs of job {} render the name {name:?} twice: the run's jobs could not be told apart",
+                    job.id
+                ));
+            }
+        }
+    }
+    Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn model() -> JobModel {
+        load_model_from(
+            include_str!("../../../../.gitea/workflows/ci.yml"),
+            include_str!("../../../../docs/repo-graph.toml"),
+        )
+        .unwrap_or_else(|e| panic!("ci.yml models: {e}"))
+    }
+
+    fn ran(keys: &[&str]) -> Scope {
+        Scope {
+            jobs: keys.iter().map(|k| k.to_string()).collect(),
+            ..Scope::default()
+        }
+    }
+
+    fn crate_legs() -> Vec<Value> {
+        let mut legs: Vec<Value> = (1..=3)
+            .map(|k| json!({"os": "ubuntu-latest", "part_label": format!(", {k}/3"), "test_packages": format!("pkg{k}")}))
+            .collect();
+        legs.push(json!({"os": "windows-latest"}));
+        legs.push(json!({"os": "macos-latest"}));
+        legs
+    }
+
+    fn all_crate_keys() -> Scope {
+        ran(&["crates", "crate@ubuntu-latest", "crate@windows-latest", "crate@macos-latest"])
+    }
+
+    #[test]
+    fn the_linux_crate_job_is_expected_once_per_partition_and_each_name_carries_its_leg() {
+        let planned = PlannedLegs {
+            crate_legs: &crate_legs(),
+            ..PlannedLegs::default()
+        };
+        let map = expected_of(&model(), &all_crate_keys(), &planned).unwrap();
+        for k in 1..=3 {
+            let e = &map[&format!("crate (ubuntu-latest, {k}/3)")];
+            assert_eq!(e.job, "crate");
+            assert_eq!(e.leg["os"], "ubuntu-latest");
+            assert_eq!(e.leg["part_label"], format!(", {k}/3"));
+            assert_eq!(e.leg["test_packages"], format!("pkg{k}"));
+        }
+        assert!(map.contains_key("crate (windows-latest)") && map.contains_key("crate (macos-latest)"));
+        assert!(
+            !map.contains_key("crate (ubuntu-latest)"),
+            "a partitioned leg has no whole-leg name"
+        );
+    }
+
+    #[test]
+    fn an_app_leg_with_an_e2e_leg_renders_the_format_call_and_a_main_leg_does_not() {
+        let apps = vec![
+            json!({"app": "dyno", "os": "ubuntu-latest", "e2e_leg": "e2e-1"}),
+            json!({"app": "dyno", "os": "macos-latest", "e2e_leg": ""}),
+        ];
+        let planned = PlannedLegs {
+            apps: &apps,
+            ..PlannedLegs::default()
+        };
+        let scope = Scope {
+            apps: ["dyno@ubuntu-latest:e2e-1".to_string(), "dyno@macos-latest".to_string()].into(),
+            ..Scope::default()
+        };
+        let map = expected_of(&model(), &scope, &planned).unwrap();
+        assert_eq!(map["app dyno (ubuntu-latest, e2e-1)"].leg["e2e_leg"], "e2e-1");
+        assert_eq!(map["app dyno (macos-latest)"].leg["app"], "dyno");
+        assert!(
+            !map["app dyno (macos-latest)"].leg.contains_key("e2e_leg"),
+            "an empty value is not stored"
+        );
+    }
+
+    #[test]
+    fn only_the_jobs_of_the_projects_the_run_ran_are_expected() {
+        let map = expected_of(&model(), &ran(&["conformance"]), &PlannedLegs::default()).unwrap();
+        assert!(map.contains_key("conformance (checks, release scripts)"));
+        assert!(
+            map.keys().any(|n| n.starts_with("quick checks (")),
+            "quick runs for conformance: {map:?}"
+        );
+        assert!(!map.keys().any(|n| n.starts_with("crate") || n.starts_with("ui (")), "{map:?}");
+    }
+
+    #[test]
+    fn a_job_with_a_static_matrix_is_expected_once_per_shard() {
+        let map = expected_of(&model(), &ran(&["e2e"]), &PlannedLegs::default()).unwrap();
+        assert!(
+            map.contains_key("reference apps (shard 1/2)") && map.contains_key("reference apps (shard 2/2)"),
+            "{map:?}"
+        );
+        assert_eq!(map["reference apps (shard 2/2)"].leg["shard"], "2");
+    }
+
+    #[test]
+    fn two_legs_that_render_one_name_are_refused_because_a_lookup_would_be_ambiguous() {
+        let legs = vec![json!({"os": "windows-latest"}), json!({"os": "windows-latest"})];
+        let planned = PlannedLegs {
+            crate_legs: &legs,
+            ..PlannedLegs::default()
+        };
+        let err = expected_of(&model(), &ran(&["crates", "crate@windows-latest"]), &planned).unwrap_err();
+        assert!(err.contains("crate (windows-latest)") && err.contains("twice"), "{err}");
+    }
+
+    #[test]
+    fn a_leg_whose_runner_the_run_did_not_run_is_not_expected() {
+        let planned = PlannedLegs {
+            crate_legs: &crate_legs(),
+            ..PlannedLegs::default()
+        };
+        let map = expected_of(&model(), &ran(&["crates", "crate@windows-latest"]), &planned).unwrap();
+        assert!(
+            map.contains_key("crate (windows-latest)") && !map.contains_key("crate (macos-latest)"),
+            "{map:?}"
+        );
+    }
+}

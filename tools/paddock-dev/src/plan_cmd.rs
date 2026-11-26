@@ -28,7 +28,7 @@ use crate::plan_ci::{
 };
 use crate::plan_repo::git_text;
 use crate::plan_since::{APP_WORKFLOWS, GiteaRuns, SincePlan};
-use crate::run_scope::{Scope, ci_scope, scope_of};
+use crate::run_scope::{ExpectedMap, PlannedLegs, Scope, ci_scope, expected_of, load_model, scope_of};
 use crate::wait::{CurlHttp, Http};
 use paddock_cli::{CliError, Report};
 use paddock_repo_graph::GitHistory;
@@ -536,6 +536,7 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
         })
         .unwrap_or_default();
     let mut cache_reused: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let mut emitted_legs: BTreeMap<&str, Vec<Value>> = BTreeMap::new();
     for (name, contract, key, workspace_dir) in [
         ("crate_legs", CRATES_CONTRACT, "crates", "crates"),
         ("paddock_dev_legs", PADDOCK_DEV_CONTRACT, "paddockDev", "tools/paddock-dev"),
@@ -575,6 +576,7 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
         let applied = crate::test_cache::plan::apply(legs_of, job, &reuse_plan, key != "crates" || !coverage_run(env));
         legs_of = applied.legs;
         cache_reused.extend(applied.reused);
+        emitted_legs.insert(if key == "crates" { "crate" } else { "paddock-dev" }, legs_of.clone());
         workspace_oses.insert(
             if key == "crates" { "crate" } else { "paddock-dev" },
             legs_of
@@ -664,7 +666,20 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
     // A push's or a landing's need is its own diff: the line names the base it was diffed from (a push reuses a landing run of
     // the same diff only, review round 2 P1-A).
     let need_base = if need_whole { None } else { base.as_deref() };
+    // ADR 0123 §3: the display name of every job the run should have, rendered by the job model over the legs this plan emitted.
+    let empty: Vec<Value> = Vec::new();
+    let expected = expected_names(
+        root,
+        &ran,
+        &PlannedLegs {
+            crate_legs: emitted_legs.get("crate").unwrap_or(&empty),
+            paddock_dev_legs: emitted_legs.get("paddock-dev").unwrap_or(&empty),
+            apps: &legs,
+        },
+        &log,
+    );
     log(&ci_scope(ran, false, need, need_whole)
+        .with_expected(expected)
         .with_base(need_base)
         .with_inactive(inactive.clone())
         .with_reused(cache_reused)
@@ -682,6 +697,20 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
         serde_json::json!({ "base": base, "reason": reason, "apps": legs.len() }),
         String::new(),
     ))
+}
+
+/// The jobs the run should have by display name ([`expected_of`]); empty for a run that ran nothing. A workflow that cannot be read or
+/// modelled gives an empty map and a warning: the scope reader then reports the run's job names as not measured (ER-33), never a pass.
+fn expected_names(root: &Path, ran: &Scope, planned: &PlannedLegs, log: &dyn Fn(&str)) -> ExpectedMap {
+    if ran.jobs.is_empty() && ran.apps.is_empty() {
+        return ExpectedMap::new();
+    }
+    load_model(root).and_then(|m| expected_of(&m, ran, planned)).unwrap_or_else(|e| {
+        log(&format!(
+            "::warning::dev plan: {e}; the scope line expects no job names, so a reader reports them as not measured"
+        ));
+        ExpectedMap::new()
+    })
 }
 
 /// The repository graph's reach of a request (ADR 0117): the model of the head and the reach of its changed files.
@@ -1071,5 +1100,31 @@ mod tests {
                 e.text()
             );
         }
+    }
+
+    #[test]
+    fn a_workflow_that_cannot_be_read_gives_an_empty_expected_map_and_a_warning_never_a_guess() {
+        let root = tempfile::tempdir().unwrap();
+        let ran = Scope {
+            jobs: ["conformance".to_string()].into(),
+            ..Scope::default()
+        };
+        let warned = std::cell::RefCell::new(String::new());
+        let got = expected_names(root.path(), &ran, &PlannedLegs::default(), &|w| warned.borrow_mut().push_str(w));
+        assert!(got.is_empty());
+        assert!(
+            warned.borrow().starts_with("::warning::dev plan: ") && warned.borrow().contains("not measured"),
+            "{}",
+            warned.borrow()
+        );
+        // A run that ran nothing expects nothing and says nothing.
+        let quiet = std::cell::RefCell::new(String::new());
+        assert!(
+            expected_names(root.path(), &Scope::default(), &PlannedLegs::default(), &|w| quiet
+                .borrow_mut()
+                .push_str(w))
+            .is_empty()
+        );
+        assert!(quiet.borrow().is_empty());
     }
 }
