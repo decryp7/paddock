@@ -5,18 +5,20 @@
 use super::Scope;
 use paddock_ci_config::jobs::{self, Declared as ModelDeclared, Job, JobModel, Leg, Legs, PROJECT_OUTPUTS};
 use serde_json::Value;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// The leg keys the line keeps (a leg value that is empty is left out).
 pub const LEG_KEYS: [&str; 7] = ["os", "app", "e2e_leg", "part_label", "test_packages", "part_extra", "shard"];
 
 /// A job a run is expected to have, by display name.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Expected {
     /// The workflow job id (`crate`).
     pub job: String,
     /// The leg it runs: only the non-empty keys of [`LEG_KEYS`] (empty for a job without a matrix).
     pub leg: BTreeMap<String, String>,
+    /// The projects the job runs for (the job model's `projects`), so a reader maps a job to its projects without a table of its own.
+    pub projects: BTreeSet<String>,
 }
 
 /// The expected jobs of a run by display name.
@@ -135,6 +137,8 @@ pub fn app_expected(workflow_text: &str, planned: &BTreeMap<String, Vec<Value>>)
             let entry = Expected {
                 job: job.id.clone(),
                 leg: kept,
+                // an app workflow has no project model: the job is the app's own
+                projects: BTreeSet::new(),
             };
             if out.insert(name.clone(), entry).is_some() {
                 return Err(format!(
@@ -194,6 +198,7 @@ pub fn expected_of(model: &JobModel, ran: &Scope, planned: &PlannedLegs) -> Resu
             let entry = Expected {
                 job: job.id.clone(),
                 leg: kept,
+                projects: job.projects.clone(),
             };
             if out.insert(name.clone(), entry).is_some() {
                 return Err(format!(
@@ -345,6 +350,16 @@ mod tests {
         assert!(app_expected("name: x\n", &BTreeMap::new()).is_err());
     }
 
+    #[test]
+    fn each_expected_job_carries_the_projects_of_its_model_job() {
+        let map = expected_of(&model(), &ran(&["conformance"]), &PlannedLegs::default()).unwrap();
+        let e = &map["conformance (checks, release scripts)"];
+        assert!(e.projects.contains("conformance"), "{e:?}");
+        let jobs = model();
+        let job = jobs.jobs.iter().find(|j| j.id == "conformance").unwrap();
+        assert_eq!(e.projects, job.projects);
+    }
+
     fn map() -> ExpectedMap {
         let part = |k: u8| {
             (
@@ -355,6 +370,7 @@ mod tests {
                         ("os".to_string(), "ubuntu-latest".to_string()),
                         ("part_label".to_string(), format!(", {k}/3")),
                     ]),
+                    ..Default::default()
                 },
             )
         };

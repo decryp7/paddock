@@ -317,7 +317,7 @@ fn expected_json(expected: &ExpectedMap) -> Value {
     Value::Object(
         expected
             .iter()
-            .map(|(name, e)| (name.clone(), json!({"job": e.job, "leg": e.leg})))
+            .map(|(name, e)| (name.clone(), json!({"job": e.job, "leg": e.leg, "projects": e.projects})))
             .collect(),
     )
 }
@@ -332,9 +332,12 @@ fn parse_expected(v: &Value) -> Result<ExpectedMap, String> {
             let leg: Option<BTreeMap<String, String>> = e["leg"]
                 .as_object()
                 .and_then(|l| l.iter().map(|(k, v)| v.as_str().map(|v| (k.clone(), v.to_string()))).collect());
-            match (job, leg) {
-                (Some(job), Some(leg)) => Ok((name.clone(), Expected { job: job.to_string(), leg })),
-                _ => Err(format!("the scope line's expected.{name:?} has no job and leg of text values")),
+            let projects: Option<BTreeSet<String>> = e["projects"]
+                .as_array()
+                .and_then(|p| p.iter().map(|v| v.as_str().map(str::to_string)).collect());
+            match (job, leg, projects) {
+                (Some(job), Some(leg), Some(projects)) => Ok((name.clone(), Expected { job: job.to_string(), leg, projects })),
+                _ => Err(format!("the scope line's expected.{name:?} has no job, leg of text values and list of projects")),
             }
         })
         .collect()
@@ -624,6 +627,7 @@ pub fn test_names(keys: &[&str]) -> ExpectedMap {
             Expected {
                 job: job.into(),
                 leg: BTreeMap::new(),
+                ..Default::default()
             },
         )
     };
@@ -639,15 +643,15 @@ pub fn test_names(keys: &[&str]) -> ExpectedMap {
 
 /// A complete ci.yml scope line, for the tests of the readers (`verdict`, `reuse`): a run that did what a push to main does.
 #[cfg(test)]
-pub const TEST_COMPLETE: &str = "plan scope: {\"v\":3,\"workflow\":\"ci.yml\",\"rerun\":false,\"ran\":{\"jobs\":[\"conformance\"],\"engines\":[\"chromium\",\"webkit\"],\"apps\":[],\"whole\":true,\"os_full\":true,\"smoke\":[],\"affected\":[]},\"need\":{\"jobs\":[\"conformance\"],\"engines\":[\"chromium\",\"webkit\"],\"apps\":[],\"whole\":true,\"os_full\":true,\"smoke\":[],\"affected\":[]},\"need_whole\":true,\"expected\":{\"conformance (checks, release scripts)\":{\"job\":\"conformance\",\"leg\":{}}}}\n";
+pub const TEST_COMPLETE: &str = "plan scope: {\"v\":3,\"workflow\":\"ci.yml\",\"rerun\":false,\"ran\":{\"jobs\":[\"conformance\"],\"engines\":[\"chromium\",\"webkit\"],\"apps\":[],\"whole\":true,\"os_full\":true,\"smoke\":[],\"affected\":[]},\"need\":{\"jobs\":[\"conformance\"],\"engines\":[\"chromium\",\"webkit\"],\"apps\":[],\"whole\":true,\"os_full\":true,\"smoke\":[],\"affected\":[]},\"need_whole\":true,\"expected\":{\"conformance (checks, release scripts)\":{\"job\":\"conformance\",\"leg\":{},\"projects\":[\"conformance\"]}}}\n";
 
 /// The line of [`TEST_COMPLETE`] from an `os=linux` run: it covers its `need` here, but it is one operating system's part only.
 #[cfg(test)]
-pub const TEST_OS_ONLY: &str = "plan scope: {\"v\":3,\"workflow\":\"ci.yml\",\"rerun\":false,\"os\":\"linux\",\"ran\":{\"jobs\":[\"conformance\"],\"engines\":[\"chromium\",\"webkit\"],\"apps\":[],\"whole\":true,\"os_full\":true,\"smoke\":[],\"affected\":[]},\"need\":{\"jobs\":[\"conformance\"],\"engines\":[\"chromium\",\"webkit\"],\"apps\":[],\"whole\":true,\"os_full\":true,\"smoke\":[],\"affected\":[]},\"need_whole\":true,\"expected\":{\"conformance (checks, release scripts)\":{\"job\":\"conformance\",\"leg\":{}}}}\n";
+pub const TEST_OS_ONLY: &str = "plan scope: {\"v\":3,\"workflow\":\"ci.yml\",\"rerun\":false,\"os\":\"linux\",\"ran\":{\"jobs\":[\"conformance\"],\"engines\":[\"chromium\",\"webkit\"],\"apps\":[],\"whole\":true,\"os_full\":true,\"smoke\":[],\"affected\":[]},\"need\":{\"jobs\":[\"conformance\"],\"engines\":[\"chromium\",\"webkit\"],\"apps\":[],\"whole\":true,\"os_full\":true,\"smoke\":[],\"affected\":[]},\"need_whole\":true,\"expected\":{\"conformance (checks, release scripts)\":{\"job\":\"conformance\",\"leg\":{},\"projects\":[\"conformance\"]}}}\n";
 
 /// A ci.yml scope line of a run that missed one engine (WebKit): not complete.
 #[cfg(test)]
-pub const TEST_PARTIAL: &str = "plan scope: {\"v\":3,\"workflow\":\"ci.yml\",\"rerun\":false,\"ran\":{\"jobs\":[\"conformance\"],\"engines\":[\"chromium\"],\"apps\":[],\"whole\":true,\"os_full\":true,\"smoke\":[],\"affected\":[]},\"need\":{\"jobs\":[\"conformance\"],\"engines\":[\"chromium\",\"webkit\"],\"apps\":[],\"whole\":true,\"os_full\":true,\"smoke\":[],\"affected\":[]},\"need_whole\":true,\"expected\":{\"conformance (checks, release scripts)\":{\"job\":\"conformance\",\"leg\":{}}}}\n";
+pub const TEST_PARTIAL: &str = "plan scope: {\"v\":3,\"workflow\":\"ci.yml\",\"rerun\":false,\"ran\":{\"jobs\":[\"conformance\"],\"engines\":[\"chromium\"],\"apps\":[],\"whole\":true,\"os_full\":true,\"smoke\":[],\"affected\":[]},\"need\":{\"jobs\":[\"conformance\"],\"engines\":[\"chromium\",\"webkit\"],\"apps\":[],\"whole\":true,\"os_full\":true,\"smoke\":[],\"affected\":[]},\"need_whole\":true,\"expected\":{\"conformance (checks, release scripts)\":{\"job\":\"conformance\",\"leg\":{},\"projects\":[\"conformance\"]}}}\n";
 
 #[cfg(test)]
 mod tests {
@@ -812,6 +816,7 @@ mod tests {
             Expected {
                 job: "crate".into(),
                 leg: BTreeMap::from([("os".to_string(), os.to_string()), ("part_label".to_string(), label.to_string())]),
+                projects: BTreeSet::from(["crates".to_string()]),
             },
         )
     }
@@ -832,12 +837,12 @@ mod tests {
         let v2 = TEST_COMPLETE.replace("\"v\":3", "\"v\":2");
         assert!(read_err(&v2).contains("version 2"), "{}", read_err(&v2));
         let missing = TEST_COMPLETE.replace(
-            ",\"expected\":{\"conformance (checks, release scripts)\":{\"job\":\"conformance\",\"leg\":{}}}",
+            ",\"expected\":{\"conformance (checks, release scripts)\":{\"job\":\"conformance\",\"leg\":{},\"projects\":[\"conformance\"]}}",
             "",
         );
         assert!(read_err(&missing).contains("expected"), "{}", read_err(&missing));
         let bad = TEST_COMPLETE.replace(
-            "{\"conformance (checks, release scripts)\":{\"job\":\"conformance\",\"leg\":{}}}",
+            "{\"conformance (checks, release scripts)\":{\"job\":\"conformance\",\"leg\":{},\"projects\":[\"conformance\"]}}",
             "{\"crate (x)\":{\"job\":\"crate\"}}",
         );
         assert!(read_err(&bad).contains("crate (x)"), "{}", read_err(&bad));

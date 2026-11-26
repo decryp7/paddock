@@ -1522,6 +1522,7 @@ mod tests {
         let entry = |job: &str, leg: &[(&str, &str)]| crate::run_scope::Expected {
             job: job.into(),
             leg: leg.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
+            ..Default::default()
         };
         let inside = |n: &str| n.split_once('(').and_then(|(_, r)| r.strip_suffix(')')).unwrap_or("").to_string();
         jobs()
@@ -1694,6 +1695,7 @@ mod tests {
                     ("test_packages".to_string(), "pkg-b pkg-e".to_string()),
                     ("part_extra".to_string(), "false".to_string()),
                 ]),
+                ..Default::default()
             },
         )]);
         let failed = RunJob {
@@ -2163,6 +2165,7 @@ mod tests {
             crate::run_scope::Expected {
                 job: "e2e".into(),
                 leg: BTreeMap::from([("shard".to_string(), "3".to_string())]),
+                ..Default::default()
             },
         )]);
         let key = Some("e2e".to_string());
