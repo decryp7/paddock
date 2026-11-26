@@ -618,7 +618,7 @@ fn check(req: &Request) -> Result<Checked, CliError> {
                     Some(if req.commit.is_none() {
                         gates::not_run("a branch is checked before it is merged, so there is no checkout of the result; run `./dev merge check --gates <merge-commit>` after merging")
                     } else {
-                        gates::run_from(&root, &git, &merge, &gates::Real, gates::ENFORCED, req.gates_base.as_deref())
+                        gates::run(&root, &git, &merge, &gates::Real, gates::ENFORCED, req.gates_base.as_deref())
                     }),
                 );
             }
