@@ -84,6 +84,28 @@ uses it, results in
 
 ## Results of shared tooling
 
+### 2026-11-26, test-result cache: an unchanged Cargo package reuses its pass (feat/adr-0116-test-result-cache)
+
+- **What:** `./dev ci test-cache run --workspace crates --only paddock-limits,paddock-names,paddock-metrics` (nextest `ci` profile,
+  `--all-features`, debug build) with the local store (`<git common dir>/paddock-pre-push/test-cache`). Three small packages, 171 tests.
+- **Host:** Mac mini, macOS arm64, 5-minute load about 20 before the runs (1-minute 8 to 12), nothing else of mine running. Single runs,
+  not interleaved A/B pairs: an indication, not a range (rule 4 above). Debug build, because the quantity is "run or skip".
+- **Runs (worktree A, then worktree B at another commit, each with its own build folder):**
+
+| Run | Targets | Reused | Ran | nextest time |
+|---|---|---|---|---|
+| A, empty store (cold build folder) | 3 | 0 | 3 | 96.4 s |
+| B, same inputs, other worktree and commit, shadow mode | 3 | 0 (3 would be) | 3 | 68.8 s (cold build folder) |
+| B again with `--reuse` | 3 | 3 | 0 | 0.0 s |
+| B after a one-line edit to `paddock-names`, committed, `--reuse` | 3 | 2 | 1 (`paddock-names`) | 1.9 s (warm build) |
+
+- **Reading:** the key is the same in both worktrees and commits (the graph's node hash is content, not commit), so a second
+  worktree, and a train after a branch gate, skip an unchanged package. A one-line change reran only the changed package here (the
+  other two do not depend on it). The cold runs are dominated by compiling the `crates` workspace once per build folder; the cache
+  removes the tests and their per-package build, not a cold workspace build.
+- **Not measured:** a full 58-package run, CI runner classes, the shared S3 store (bucket and keys not available when this ran), the
+  wall time of a train round, interleaved A/B.
+
 ### 2026-11-24, pre-push row reuse on an unchanged tree (feat/check-result-reuse-v2)
 
 - **Commit:** `285c68695` (one commit over train 2026-11-25-b `cfe8a8592`); the change under test is paddock-dev only
