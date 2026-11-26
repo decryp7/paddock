@@ -168,7 +168,7 @@ fn command_with(
     let step = match (no_static, after) {
         (Some(reason), _) => static_rows::skipped(reason.trim()),
         (None, false) => static_rows::not_yet(train),
-        (None, true) => static_rows::interpret(rows.run(&root, &train_tip), &short(&train_tip)),
+        (None, true) => static_rows::interpret(rows.run(&root, &train_tip), short(&train_tip)),
     };
     text.extend(step.text.iter().cloned());
     let item = |(m, r, s, b): &(String, String, String, String)| json!({"merge": m, "revert": r, "subject": s, "branch": b});
