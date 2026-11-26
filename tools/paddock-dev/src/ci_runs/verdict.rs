@@ -201,6 +201,8 @@ pub(super) struct ModeRead {
     /// `Some(base)` when the run is not complete but a landing may rest on it: it ran exactly its own diff's narrowed selection and
     /// every job it declared ran (`Declared::lands`, review round 2 P1-A); `base` is the commit its need was diffed from.
     pub landing: Option<Option<String>>,
+    /// The run's `expected` map (display name to job, leg and projects) from its scope line; empty when the line could not be read.
+    pub expected: run_scope::ExpectedMap,
 }
 
 /// [`read_mode`] with the run's jobs it read for it (the failed ones are graded by [`super::green`]), and the tag rule: for a tag
@@ -225,6 +227,7 @@ fn read_mode_plain(client: &mut Client, run: &RunInfo, scope_decisive: bool) -> 
         jobs,
         tag_refusal: None,
         landing: None,
+        expected: run_scope::ExpectedMap::new(),
     };
     let jobs = match client.timed_jobs(run.id) {
         Ok(Some(j)) => j,
@@ -265,10 +268,12 @@ fn read_mode_plain(client: &mut Client, run: &RunInfo, scope_decisive: bool) -> 
         );
     }
     let landing = landing_of(run, &jobs, &log);
+    let expected = run_scope::read(&log).and_then(Result::ok).map(|d| d.expected).unwrap_or_default();
     if scope_decisive {
         return ModeRead {
             tag_refusal,
             landing,
+            expected,
             ..same(scope, jobs)
         };
     }
@@ -292,6 +297,7 @@ fn read_mode_plain(client: &mut Client, run: &RunInfo, scope_decisive: bool) -> 
         jobs,
         tag_refusal,
         landing,
+        expected,
     }
 }
 
@@ -1543,7 +1549,8 @@ mod tests {
     /// Run 9 of this commit with the real jobs of train 19's run 8610 (scrubbed; ids as in the fixture): the plan job (44709) logs
     /// a complete scope, the crate job (44761) failed with only a FLAKY test.
     fn run_8610(conclusion: &str) -> Fake {
-        let mut f = server(vec![dispatch(9, conclusion)], &[(9, 44709, Some(run_scope::TEST_COMPLETE))]);
+        let plan = run_scope::test_complete_8610();
+        let mut f = server(vec![dispatch(9, conclusion)], &[(9, 44709, Some(plan.as_str()))]);
         f.json(
             &format!("{API}/runs/9/jobs?limit=50&page=1"),
             serde_json::from_str(JOBS_8610).unwrap(),

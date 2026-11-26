@@ -77,6 +77,8 @@ pub struct Found<'a> {
     pub job: String,
     /// The leg the line gives it; `None` when only the job's own log named it (the leg is not measured).
     pub leg: Option<&'a BTreeMap<String, String>>,
+    /// The projects the line gives it; `None` when only the job's own log named it.
+    pub projects: Option<&'a BTreeSet<String>>,
 }
 
 /// Looks a job's display name up in a run's `expected` map: the name as listed, then without its caller prefix. A name the line does
@@ -86,9 +88,14 @@ pub fn lookup<'a>(expected: &'a ExpectedMap, name: &str, log: Option<&str>) -> O
         return Some(Found {
             job: e.job.clone(),
             leg: Some(&e.leg),
+            projects: Some(&e.projects),
         });
     }
-    crate::plan_since::job_key(log?).map(|job| Found { job, leg: None })
+    crate::plan_since::job_key(log?).map(|job| Found {
+        job,
+        leg: None,
+        projects: None,
+    })
 }
 
 /// A scalar of a planned leg as the runner shows it in a name (`2` of a number, `true` of a boolean); anything else is empty.

@@ -645,6 +645,17 @@ pub fn test_names(keys: &[&str]) -> ExpectedMap {
 #[cfg(test)]
 pub const TEST_COMPLETE: &str = "plan scope: {\"v\":3,\"workflow\":\"ci.yml\",\"rerun\":false,\"ran\":{\"jobs\":[\"conformance\"],\"engines\":[\"chromium\",\"webkit\"],\"apps\":[],\"whole\":true,\"os_full\":true,\"smoke\":[],\"affected\":[]},\"need\":{\"jobs\":[\"conformance\"],\"engines\":[\"chromium\",\"webkit\"],\"apps\":[],\"whole\":true,\"os_full\":true,\"smoke\":[],\"affected\":[]},\"need_whole\":true,\"expected\":{\"conformance (checks, release scripts)\":{\"job\":\"conformance\",\"leg\":{},\"projects\":[\"conformance\"]}}}\n";
 
+/// [`TEST_COMPLETE`] with the two failed jobs of the recorded run 8610 (`tests/ci-runs/run-8610-jobs.json`) also in its `expected` map, as
+/// the job model gives them: the crate job (project `crates`) and an app job (leg `app`, project `apps`).
+#[cfg(test)]
+pub fn test_complete_8610() -> String {
+    let (line, rest) = TEST_COMPLETE.split_once('\n').expect("a scope line");
+    let mut v: Value = serde_json::from_str(line.strip_prefix("plan scope: ").expect("the prefix")).expect("JSON");
+    v["expected"]["crate (windows-latest)"] = json!({"job": "crate", "leg": {"os": "windows-latest"}, "projects": ["crates"]});
+    v["expected"]["app spotter (macos-latest)"] = json!({"job": "app", "leg": {"app": "spotter"}, "projects": ["apps"]});
+    format!("plan scope: {v}\n{rest}")
+}
+
 /// The line of [`TEST_COMPLETE`] from an `os=linux` run: it covers its `need` here, but it is one operating system's part only.
 #[cfg(test)]
 pub const TEST_OS_ONLY: &str = "plan scope: {\"v\":3,\"workflow\":\"ci.yml\",\"rerun\":false,\"os\":\"linux\",\"ran\":{\"jobs\":[\"conformance\"],\"engines\":[\"chromium\",\"webkit\"],\"apps\":[],\"whole\":true,\"os_full\":true,\"smoke\":[],\"affected\":[]},\"need\":{\"jobs\":[\"conformance\"],\"engines\":[\"chromium\",\"webkit\"],\"apps\":[],\"whole\":true,\"os_full\":true,\"smoke\":[],\"affected\":[]},\"need_whole\":true,\"expected\":{\"conformance (checks, release scripts)\":{\"job\":\"conformance\",\"leg\":{},\"projects\":[\"conformance\"]}}}\n";

@@ -61,6 +61,37 @@ fn real_job_in(fixture: &str, name: &str, run: u64, n: u64) -> Value {
     job
 }
 
+/// What the fixtures' job names are in a run's scope line (its `expected` map): job id, leg and projects, as the job model gives them.
+fn fixture_expected() -> run_scope::ExpectedMap {
+    let entry = |name: &str, job: &str, app: Option<&str>, projects: &[&str]| {
+        (
+            name.to_string(),
+            run_scope::Expected {
+                job: job.into(),
+                leg: app.map(|a| ("app".to_string(), a.to_string())).into_iter().collect(),
+                projects: projects.iter().map(|p| p.to_string()).collect(),
+            },
+        )
+    };
+    run_scope::ExpectedMap::from([
+        entry(CRATE, "crate", None, &["crates"]),
+        entry(CRATES, "crates", None, &["crates"]),
+        entry("crates (ubuntu-latest)", "crates", None, &["crates"]),
+        entry(APP, "app", Some("spotter"), &["apps"]),
+    ])
+}
+
+/// `plan`, a scope line, with the fixture entry of job `name` added to its `expected` map (a name the fixture does not know adds none).
+fn plan_expecting(plan: &str, name: &str) -> String {
+    let Some(e) = fixture_expected().remove(name) else {
+        return plan.to_string();
+    };
+    let (line, rest) = plan.split_once('\n').expect("a scope line");
+    let mut v: Value = serde_json::from_str(line.strip_prefix("plan scope: ").expect("the scope line")).unwrap();
+    v["expected"][name] = json!({"job": e.job, "leg": e.leg, "projects": e.projects});
+    format!("plan scope: {v}\n{rest}")
+}
+
 /// A run of the fake server: the run record, its jobs (the real shape) and their logs.
 struct Run {
     id: u64,
@@ -109,6 +140,7 @@ impl Run {
         let job = real_job_in(fixture, name, self.id, 2 + self.jobs.len() as u64);
         self.logs.push((job["id"].as_u64().unwrap(), log.to_string()));
         self.jobs.push(job);
+        self.plan = plan_expecting(&self.plan, name);
         self
     }
     /// Edits the job `name` of this run.
@@ -119,6 +151,14 @@ impl Run {
             .find(|j| j["name"].as_str().unwrap().starts_with(name))
             .expect("the job");
         f(job);
+        self
+    }
+    /// Takes job `name` out of the plan's `expected` map: the plan did not declare it.
+    fn undeclared(mut self, name: &str) -> Run {
+        let (line, rest) = self.plan.split_once('\n').expect("a scope line");
+        let mut v: Value = serde_json::from_str(line.strip_prefix("plan scope: ").expect("the scope line")).unwrap();
+        v["expected"].as_object_mut().expect("expected").remove(name);
+        self.plan = format!("plan scope: {v}\n{rest}");
         self
     }
     fn partial(mut self, plan: &str) -> Run {
@@ -178,6 +218,7 @@ fn server(runs: &[Run]) -> Fake {
 fn touched(apps: &[&str]) -> Touched {
     Touched {
         apps: apps.iter().map(|a| a.to_string()).collect(),
+        expected: fixture_expected(),
         ..Touched::default()
     }
 }
@@ -186,6 +227,7 @@ fn touched(apps: &[&str]) -> Touched {
 fn reached() -> Touched {
     Touched {
         flags: ["crates".to_string()].into(),
+        expected: fixture_expected(),
         ..Touched::default()
     }
 }
@@ -437,7 +479,11 @@ fn a_newer_failed_full_run_blocks_an_older_green_one_even_when_it_is_graded_but_
         let refs: Vec<&RunInfo> = refs.iter().collect();
         let got = commit_outcome(&mut client(&mut f), &refs, decisive, &mut |_| Some(touched(&["debrief"]))).expect("an outcome");
         assert_eq!(got.run, newer.id, "decisive={decisive}: the newer run decides");
-        assert!(got.outcome.blocking && !got.outcome.is_base(), "decisive={decisive}: {got:?}");
+        // A line that gives no job names cannot place the FLAKY test: it is red (touched), where a skipped declared job blocks.
+        assert!(
+            (got.outcome.blocking || matches!(got.outcome.result, GradedResult::Red(_))) && !got.outcome.is_base(),
+            "decisive={decisive}: {got:?}"
+        );
         let found = find_base(&mut client(&mut f), "ci.yml", std::slice::from_ref(&c), decisive, &mut |_, _| {
             Some(touched(&["debrief"]))
         });
@@ -492,6 +538,7 @@ fn a_cancelled_job_in_a_failed_run_is_not_measured_on_either_basis() {
     let other = Run::train(8610, &c, "failure")
         .failing(CRATE, CRATE_FLAKY)
         .failing(APP, "Job: app\n")
+        .undeclared(APP)
         .edit(APP, |j| j["conclusion"] = json!("cancelled"));
     let mut f = server(std::slice::from_ref(&other));
     assert!(matches!(
@@ -1346,6 +1393,7 @@ fn packages(reached: &[&str], narrow: bool) -> Touched {
         packages: [("crates".to_string(), reached.iter().map(|p| p.to_string()).collect())].into(),
         members: [("crates".to_string(), ["paddock-chromium", "paddock-core"].map(String::from).into())].into(),
         narrow,
+        expected: fixture_expected(),
         ..Touched::default()
     }
 }
@@ -1376,6 +1424,7 @@ fn ipc_untouched() -> Touched {
         packages: [("crates".to_string(), ["paddock-core".to_string()].into())].into(),
         members: [("crates".to_string(), ["paddock-ipc", "paddock-core"].map(String::from).into())].into(),
         narrow: true,
+        expected: fixture_expected(),
         ..Touched::default()
     }
 }
@@ -1475,6 +1524,7 @@ fn the_package_level_reads_the_job_test_and_plan() {
         app_cargo: [("spotter".to_string(), "apps/spotter/app/src-tauri".to_string())].into(),
         members: [("apps/spotter/app/src-tauri".to_string(), ["spotter-render".to_string()].into())].into(),
         narrow: true,
+        expected: fixture_expected(),
         ..Touched::default()
     };
     assert!(matches!(
@@ -1491,4 +1541,25 @@ fn the_package_level_reads_the_job_test_and_plan() {
     // `all`: the change cannot be bounded, everything is touched.
     let all = Touched { all: true, ..t };
     assert!(matches!(all.reaches_test(CRATE, "paddock-chromium a::b"), Reach::Touched(_)));
+}
+
+#[test]
+fn a_job_reaches_by_the_projects_its_runs_expected_map_gives_not_by_its_name() {
+    let expected = run_scope::ExpectedMap::from([(
+        "renamed checks (x)".to_string(),
+        run_scope::Expected {
+            job: "checks".into(),
+            projects: ["ui".to_string()].into(),
+            ..Default::default()
+        },
+    )]);
+    let with = |flag: &str| Touched {
+        flags: [flag.to_string()].into(),
+        expected: expected.clone(),
+        ..Touched::default()
+    };
+    assert!(with("ui").reaches("renamed checks (x)"));
+    assert!(!with("crates").reaches("renamed checks (x)"));
+    // A name the line does not hold cannot be placed: reached, the safe side.
+    assert!(with("crates").reaches("another name"));
 }
