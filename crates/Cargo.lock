@@ -4364,6 +4364,7 @@ dependencies = [
  "paddock-ipc",
  "paddock-jobs",
  "paddock-log",
+ "paddock-mcp",
  "paddock-proc",
  "paddock-testkit",
  "paddock-workspace-hack",

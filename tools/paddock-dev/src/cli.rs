@@ -222,8 +222,8 @@ enum MergeCommand {
     /// branches' merges the member holds. Run it before the merge of the train: it changes nothing. Run it again after the merge and it
     /// also runs the fast static rows on the sync tip (`check --pre-push --only conformance,gates-register,clippy,clippy-windows
     /// --base <train>`); a failing row is exit 5 (6 not measured) with the rows and the next step, unless `--no-static` says why not. Once
-    /// they pass it dispatches the member's own CI trial: it pushes the sync tip as `sync/<member>` (integrator role only) and runs `ci dispatch ci.yml
-    /// --trial sync/<member> --onto <train>` (the affected jobs of the member on the train), printing the run id, unless `--no-trial` says why not.
+    /// they pass it dispatches the member's own CI trial: it pushes the sync tip as the new ref `sync/<member>/<short sha>` (integrator role only) and runs `ci dispatch ci.yml
+    /// --trial sync/<member>/<short sha> --onto <train>` (the affected jobs of the member on the train), printing the run id, unless `--no-trial` says why not.
     SyncMember(SyncMemberArgs),
     /// Git's merge driver of docs/lessons.md (`merge=lessons`, set by `./dev hooks install`): `./dev merge lessons-driver %O %A %B`.
     /// Git's union merge of two appended sections, then the blank line it drops before a `## ` heading put back. The result is
@@ -252,7 +252,7 @@ struct SyncMemberArgs {
     #[arg(long, value_name = "REASON")]
     no_static: Option<String>,
     /// Do not dispatch the member's own CI trial (the affected jobs of the member on the train, `ci dispatch --trial`); the reason is
-    /// printed. After the static rows pass the trial is dispatched from the sync tip, pushed as `sync/<member>` (integrator role only); `merge check --gates` reads it.
+    /// printed. After the static rows pass the trial is dispatched from the sync tip, pushed as `sync/<member>/<short sha>` (integrator role only); `merge check --gates` reads it.
     #[arg(long, value_name = "REASON")]
     no_trial: Option<String>,
     /// The longest the trial's dispatch waits for a busy runner (default 30m).
@@ -304,6 +304,10 @@ struct MergeCheckArgs {
     /// checkout must be the merge result, else they are NOT MEASURED).
     #[arg(long)]
     no_generators: bool,
+    /// Also run the heavy generators the merge makes due (each builds a workspace: minutes per merge). By default they are named as
+    /// deferred to the final `./dev gen check --base origin/main`, which runs the train's union of them once.
+    #[arg(long, conflicts_with = "no_generators")]
+    heavy_generators: bool,
     /// Also run the member gate on the merge commit: `check --pre-push --base <merge>^1`, the fast gates on the combined tree
     /// (ADR 0098). The checkout must be the merge result. Report-only until its first green run on a real train is recorded.
     #[arg(long)]
@@ -693,6 +697,7 @@ pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
                     branch: a.branch,
                     target: a.target,
                     generators: !a.no_generators,
+                    heavy_generators: a.heavy_generators,
                     gates: a.gates,
                     write_reverted: a.write_reverted,
                     old_base_anyway: a.old_base_anyway,
@@ -921,6 +926,7 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
             branch: a.branch,
             target: a.target,
             generators: !a.no_generators,
+            heavy_generators: a.heavy_generators,
             gates: a.gates,
             write_reverted: a.write_reverted,
             old_base_anyway: a.old_base_anyway,

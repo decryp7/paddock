@@ -292,7 +292,16 @@ struct Bounds {
     drain_time: Duration,
     /// How long a stop waits for the listener's threads ([`STOP_BOUND`] when serving).
     stop: Duration,
+    /// The test-only act gate ([`ActGate`]; none when serving).
+    #[cfg(any(test, feature = "test-support"))]
+    act_gate: Option<ActGate>,
 }
+
+/// A test-only act gate (ADR 0122 §4, rule 99): called on the accept thread with each accepted connection before the listener
+/// reads it or refuses it, so an endings rig can hold the listener until the client's bytes are queued and measure them
+/// (`paddock_ipc::testing::endings::QueueGate`). It must return; the listener goes on when it does.
+#[cfg(any(test, feature = "test-support"))]
+pub type ActGate = Arc<dyn Fn(&TcpStream) + Send + Sync>;
 
 impl Bounds {
     fn serving() -> Bounds {
@@ -301,6 +310,8 @@ impl Bounds {
             handshake: HANDSHAKE_TIMEOUT,
             drain_time: REFUSAL_DRAIN_TIME,
             stop: STOP_BOUND,
+            #[cfg(any(test, feature = "test-support"))]
+            act_gate: None,
         }
     }
 }
@@ -831,6 +842,23 @@ pub fn serve_loopback(
     serve_with(server, keys, listener, max_connections, Bounds::serving())
 }
 
+/// [`serve_loopback`] whose accept thread calls `gate` with each accepted connection before it reads or refuses it. Test only
+/// (rule 99; ADR 0122 §4): a shipped build has no gate.
+#[cfg(any(test, feature = "test-support"))]
+pub fn serve_loopback_with_act_gate(
+    server: Arc<Server>,
+    keys: Arc<dyn KeyVerifier>,
+    listener: TcpListener,
+    max_connections: usize,
+    gate: ActGate,
+) -> io::Result<Serving> {
+    let bounds = Bounds {
+        act_gate: Some(gate),
+        ..Bounds::serving()
+    };
+    serve_with(server, keys, listener, max_connections, bounds)
+}
+
 /// [`serve_loopback`] with the bounds given (tests shorten or lengthen them).
 fn serve_with(
     server: Arc<Server>,
@@ -1004,6 +1032,10 @@ impl Accepting {
     /// Serves one accepted connection on its own thread: paired or refused with `key`/`handshake` by
     /// [`serve_connection`], or refused `busy` here and drained.
     fn serve(&self, mut stream: TcpStream) {
+        #[cfg(any(test, feature = "test-support"))]
+        if let Some(gate) = &self.bounds.act_gate {
+            gate(&stream);
+        }
         let accepted = Instant::now();
         let id = endlog::next_accept_number();
         if !stream.peer_addr().is_ok_and(|p| p.ip().is_loopback()) {

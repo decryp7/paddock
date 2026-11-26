@@ -306,6 +306,12 @@ impl Stream {
         })
     }
 
+    /// This side's pipe handle, for the endings harness's probe (ADR 0122). Test only (rule 99).
+    #[cfg(feature = "test-support")]
+    pub(super) fn queue_handle(&self) -> crate::testing::endings::QueueHandle {
+        crate::testing::endings::QueueHandle::Pipe(self.pipe.as_raw_handle() as usize)
+    }
+
     /// The facts of the client, after the first read (the OS refuses to impersonate before).
     pub(super) fn raw_peer(&self) -> Result<crate::identity::RawPeer, crate::identity::PeerError> {
         super::windows_peer::raw_peer(self.pipe.as_raw_handle())

@@ -292,12 +292,15 @@ pub struct DispatchArgs {
     /// The trial before approval (ADR 0098 WP-4): merge this branch's head onto the open train (origin/main when none is open) in
     /// the tool's own clone, report a conflict or a merge-check finding instead of dispatching, push `trial/<branch>` and
     /// dispatch it with `base` = the target's sha. The branch's one CI run (rule 50 (a)); the scratch clone lives in
-    /// PADDOCK_TRIAL_DIR (required: a folder on a data drive). Needs GITEA_TOKEN with write access.
+    /// the trial folder (`--trial-dir`, else git config `paddock.trialDir`, else PADDOCK_TRIAL_DIR, else `<dev-targets>/trials`). Needs GITEA_TOKEN with write access.
     #[arg(long, value_name = "BRANCH")]
     trial: Option<String>,
     /// With --trial: merge onto this ref (for example `origin/train/2026-11-13-8`) instead of the open train.
     #[arg(long, value_name = "REF", requires = "trial")]
     onto: Option<String>,
+    /// With --trial: the scratch folder, instead of `paddock.trialDir`, PADDOCK_TRIAL_DIR or `<dev-targets>/trials`.
+    #[arg(long, value_name = "DIR", requires = "trial")]
+    trial_dir: Option<PathBuf>,
     /// A workflow input, `key=value` (repeat for more).
     #[arg(long = "input", value_name = "KEY=VALUE")]
     inputs: Vec<String>,
@@ -1312,7 +1315,7 @@ pub fn dispatch(a: &DispatchArgs) -> Result<Report, CliError> {
         .map_err(|e| CliError::usage(e).with_hint(hint))?;
         dispatch::classes_of(&a.workflow, &read).map_err(|e| CliError::usage(e).with_hint("Check the workflow name and --root."))?;
         wait_for_trains()?;
-        let (g, trial_ref, base) = trial_merge(a, branch, &token)?;
+        let (g, trial_ref, base) = trial_merge(a, &root, branch, &token)?;
         git_ref = trial_ref.clone();
         inputs.push(format!("base={base}"));
         trial = Some((g, trial_ref));
@@ -1492,12 +1495,14 @@ fn train_guards(
 
 /// The trial merge of `--trial`: the ref to dispatch and the `base` input. A conflict or a merge-check finding is a failure with
 /// its `::error::` line and nothing is pushed.
-fn trial_merge(a: &DispatchArgs, branch: &str, token: &str) -> Result<(crate::queue::real::GitTrain, String, String), CliError> {
+fn trial_merge(
+    a: &DispatchArgs,
+    root: &std::path::Path,
+    branch: &str,
+    token: &str,
+) -> Result<(crate::queue::real::GitTrain, String, String), CliError> {
     use crate::queue::real::GitTrain;
-    let scratch = std::env::var_os("PADDOCK_TRIAL_DIR").map(PathBuf::from).ok_or_else(|| {
-        CliError::usage("PADDOCK_TRIAL_DIR is not set.")
-            .with_hint("Set it to a folder on a data drive for the trial's scratch clone (not under your home).")
-    })?;
+    let scratch = crate::places::trial_dir(root, a.trial_dir.as_deref(), &|k| std::env::var(k).ok())?;
     let url = format!("{}/{}.git", a.server.trim_end_matches('/'), a.repo);
     let fail = |why: String| {
         eprintln!("::error::trial: {why}");
@@ -1518,6 +1523,7 @@ fn trial_merge(a: &DispatchArgs, branch: &str, token: &str) -> Result<(crate::qu
             write_reverted: None,
             old_base_anyway: None,
             no_trial: None,
+            heavy_generators: false,
             gates_base: None,
         })
         .map(|_| ())
@@ -1564,6 +1570,9 @@ pub struct TrialPruneArgs {
     /// List the stale trial refs; delete nothing.
     #[arg(long)]
     dry_run: bool,
+    /// The scratch folder, instead of `paddock.trialDir`, PADDOCK_TRIAL_DIR or `<dev-targets>/trials`.
+    #[arg(long, value_name = "DIR")]
+    trial_dir: Option<PathBuf>,
     /// The repository.
     #[arg(long, default_value = "decryp7/paddock")]
     repo: String,
@@ -1577,9 +1586,8 @@ pub struct TrialPruneArgs {
 pub fn trial_prune(a: &TrialPruneArgs) -> Result<Report, CliError> {
     use crate::queue::real::GitTrain;
     let token = token()?;
-    let scratch = std::env::var_os("PADDOCK_TRIAL_DIR")
-        .map(PathBuf::from)
-        .ok_or_else(|| CliError::usage("PADDOCK_TRIAL_DIR is not set.").with_hint("Set it to the folder of the trial's scratch clone."))?;
+    let here = std::env::current_dir().map_err(|e| CliError::failure(format!("The current folder cannot be read: {e}.")))?;
+    let scratch = crate::places::trial_dir(&here, a.trial_dir.as_deref(), &|k| std::env::var(k).ok())?;
     let url = format!("{}/{}.git", a.server.trim_end_matches('/'), a.repo);
     let fail = |why: String| {
         CliError::failure(format!("::error::trial-prune: {why}")).with_hint("Check GITEA_TOKEN's write scope and the network.")
