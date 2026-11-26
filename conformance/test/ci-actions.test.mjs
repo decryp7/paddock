@@ -1143,7 +1143,7 @@ test('hostTests (OS-scoped tests): a host leg builds and tests only its packages
   assert.match(ci, /host-filter: \$\{\{ matrix\.host_filter \}\}/, 'ci.yml hands the filterset to app-gates');
   assert.match(ci, /TEST_PACKAGES: \$\{\{ matrix\.test_packages \}\}/, 'the crate leg reads its packages from the plan');
   // ER-42: read through the workflow parser, not by counting text: the test step of each of the two jobs reads its filterset from the plan.
-  const ciWorkflow = loadWorkflow(join(WORKFLOWS, 'ci.yml'));
+  const ciWorkflow = loadWorkflow('ci.yml');
   for (const id of ['crate', 'paddock-dev']) {
     const testSteps = stepsOf(workflowJob(ciWorkflow, id)).filter((st) => st.env?.TEST_FILTER === '${{ matrix.test_filter }}');
     assert.equal(testSteps.length, 1, `the ${id} leg reads its filterset from the plan, in one step`);
