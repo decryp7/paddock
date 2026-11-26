@@ -16,6 +16,11 @@ path = "src/lib.rs"
 name = "pitcrew-service"
 path = "src/main.rs"
 
+[features]
+# Test support (rule 99; ADR 0122 §4): the IPC server's act gate (`Host::start_with_act_gate`) for the ending test. Enabled
+# from `[dev-dependencies]` only, never in a shipped build (`./dev check test-features`, C170).
+test-support = []
+
 [dependencies]
 pitcrew-core.workspace = true
 serde.workspace = true
@@ -64,7 +69,9 @@ paddock-testkit = { path = "../../../../crates/paddock-testkit" }
 # The identity of a pid read from a file, an output line or a process list (tests/supervision.rs, rule 53).
 paddock-testkit-start = { path = "../../../../crates/paddock-testkit-start" }
 # The ending harness of ADR 0072 (tests/endings.rs): the raw-stream client, the scenarios, the ratchet.
-paddock-ipc = { path = "../../../../crates/paddock-ipc", features = ["testing"] }
+paddock-ipc = { path = "../../../../crates/paddock-ipc", features = ["test-support"] }
+# The self dev-dependency that turns `test-support` on for this package's own integration tests (rule 99): the act gate.
+pitcrew-service = { path = ".", features = ["test-support"] }
 # The fake runner (examples/fake_runner.rs) stops on Ctrl+Break / SIGTERM like the real one.
 ctrlc = { version = "3.5", features = ["termination"] }
 

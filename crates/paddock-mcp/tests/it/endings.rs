@@ -8,13 +8,15 @@ use paddock_ipc::testing::endings::log::LogCapture;
 use paddock_ipc::testing::endings::ratchet::Ratchet;
 use paddock_ipc::testing::endings::raw::{READ_GUARD, read_to_end, send_then_keep_writing};
 use paddock_ipc::testing::endings::{
-    Decoded, Expect, KEEP_WRITING_BYTES, Observed, Scenario, failure_text, run_all,
+    Decoded, Expect, KEEP_WRITING_BYTES, Observed, Precondition, QueueGate, QueueHandle, Scenario,
+    failure_text, run_all,
 };
-use paddock_mcp::{KeyStore, serve_loopback};
+use paddock_mcp::{KeyStore, serve_loopback_with_act_gate};
 use serde_json::Value;
 use std::io::{BufRead, BufReader, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::{Arc, OnceLock};
+use std::time::Duration;
 
 /// The product's log (the `log` facade), routed into a capture so the harness can find the endpoint's end line and a rig
 /// can print it when it fails.
@@ -71,17 +73,27 @@ struct Rig {
     key: String,
     log: &'static LogCapture,
     from: usize,
+    /// The listener's act gate (ADR 0122 §2): every accepted client passes it; an armed one is held until its bytes are queued.
+    gate: Arc<QueueGate>,
 }
 
 fn start(max_connections: usize) -> Rig {
+    start_with_gate(max_connections, READ_GUARD)
+}
+
+/// A rig whose act gate waits at most `bound` for the client's bytes.
+fn start_with_gate(max_connections: usize, bound: Duration) -> Rig {
     let log = captured();
     let keys = Arc::new(KeyStore::new());
     let (_, key) = keys.issue("ending test", 1).expect("a key");
-    let serving = serve_loopback(
+    let gate = Arc::new(QueueGate::new(bound));
+    let held = gate.clone();
+    let serving = serve_loopback_with_act_gate(
         rig().server,
         keys.clone(),
         TcpListener::bind("127.0.0.1:0").expect("a loopback port"),
         max_connections,
+        Arc::new(move |stream: &TcpStream| held.hold(QueueHandle::of_tcp(stream))),
     )
     .expect("serving");
     let addr = serving.addr();
@@ -91,6 +103,7 @@ fn start(max_connections: usize) -> Rig {
         key,
         log,
         from: log.len(),
+        gate,
     }
 }
 
@@ -145,25 +158,39 @@ fn scenario(s: Scenario) -> Result<(Observed, Expect), &'static str> {
     match s {
         Scenario::WrongToken | Scenario::MalformedFirstFrame | Scenario::ClientKeepsWriting => {
             let mut rig = start(4);
-            let mut c = TcpStream::connect(rig.addr).map_err(|_| "connect")?;
             let (first, code): (&[u8], &str) = if s == Scenario::MalformedFirstFrame {
                 (b"this is not json\n", "key")
             } else {
                 (b"{\"key\":\"pmk_wrong\"}\n", "key")
             };
-            if s == Scenario::ClientKeepsWriting {
+            let gated = s == Scenario::ClientKeepsWriting;
+            if gated {
+                // The listener is held at its act gate until more than the key line is queued (ADR 0122).
+                rig.gate.arm(first.len());
+            }
+            let mut c = TcpStream::connect(rig.addr).map_err(|_| "connect")?;
+            if gated {
                 send_then_keep_writing(&mut c, first, KEEP_WRITING_BYTES).map_err(|_| "write")?;
             } else {
                 c.write_all(first).map_err(|_| "write")?;
             }
             let expect = Expect::reason(&[code, "handshake"]);
-            // Input queued when refused is the scenario's default precondition (ADR 0122): the judge folds a missing reason into
-            // the reset for client-keeps-writing without the rig saying so.
-            observe(&mut rig, c, Vec::new(), expect)
+            observe(&mut rig, c, Vec::new(), expect).map(|(mut o, e)| {
+                if gated {
+                    o.evidence.push((
+                        Precondition::InputQueuedWhenRefused,
+                        rig.gate.evidence(READ_GUARD),
+                    ));
+                }
+                (o, e)
+            })
         }
         Scenario::Busy => {
             let mut rig = start(1);
             let held = pair(&rig)?;
+            // The held client's pass through the act gate is over (it was answered); the refused client's is measured: its key
+            // line must be queued before the listener refuses it (ADR 0122).
+            rig.gate.arm(0);
             let mut c = TcpStream::connect(rig.addr).map_err(|_| "connect")?;
             c.write_all(format!("{{\"key\":\"{}\"}}\n", rig.key).as_bytes())
                 .map_err(|_| "write")?;
@@ -174,6 +201,13 @@ fn scenario(s: Scenario) -> Result<(Observed, Expect), &'static str> {
                 vec![held],
                 Expect::reason(&["busy"]).with_ends(2),
             )
+            .map(|(mut o, e)| {
+                o.evidence.push((
+                    Precondition::InputQueuedWhenRefused,
+                    rig.gate.evidence(READ_GUARD),
+                ));
+                (o, e)
+            })
         }
         Scenario::StopWithOpenConnection => {
             let mut rig = start(4);
@@ -218,5 +252,54 @@ fn mcp_loopback_ends_every_connection_right_or_is_in_the_ratchet() {
                 )
             });
         assert_eq!(field(line, "reason"), Some(want), "{scenario}: {line}");
+    }
+}
+
+/// The positive control of the listener's act gate (ADR 0122 §3): a busy client whose key line is written only after the gate
+/// gave up is a missed precondition, the rig's failure once the verdict blocks; one whose key line is written first is held.
+#[test]
+fn the_act_gate_sees_a_busy_client_that_wrote_nothing_and_one_that_wrote_its_key_line() {
+    use paddock_ipc::testing::endings::{Evidence, PreconditionVerdict, conclude};
+    for writes_first in [false, true] {
+        let rig = start_with_gate(1, Duration::from_millis(200));
+        let held = pair(&rig).expect("the first client is paired");
+        rig.gate.arm(0);
+        let mut c = TcpStream::connect(rig.addr).expect("connect");
+        let line = format!("{{\"key\":\"{}\"}}\n", rig.key);
+        let evidence = if writes_first {
+            c.write_all(line.as_bytes()).expect("write");
+            rig.gate.evidence(READ_GUARD)
+        } else {
+            let evidence = rig.gate.evidence(READ_GUARD);
+            // The listener may have refused and closed by now: a failed write is what this client saw.
+            drop(c.write_all(line.as_bytes()));
+            evidence
+        };
+        drop((c, held));
+        if writes_first {
+            assert!(evidence.is_held(), "{evidence}");
+            continue;
+        }
+        assert!(matches!(evidence, Evidence::Missed(_)), "{evidence}");
+        let report = conclude(
+            "mcp-loopback",
+            Scenario::Busy,
+            &Applicability::none(),
+            PreconditionVerdict::Blocking,
+            Ok::<_, String>((
+                Observed {
+                    evidence: vec![(Precondition::InputQueuedWhenRefused, evidence)],
+                    ..Observed::default()
+                },
+                Expect::reason(&["busy"]).without_end_line(),
+            )),
+        );
+        assert!(
+            report.summary().starts_with(
+                "mcp-loopback busy: RIG FAILURE (precondition input-queued-when-refused not met: "
+            ),
+            "{}",
+            report.summary()
+        );
     }
 }

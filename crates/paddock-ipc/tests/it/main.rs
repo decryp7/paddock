@@ -17,7 +17,7 @@ mod system;
 // run only with it: `cargo test -p paddock-ipc --features testing` (CI runs every crate with `--all-features`). Without the
 // feature the module is absent and `cargo test` says nothing about it: run it with the feature before pushing a change here.
 // (Not `required-features`: that would drop this whole binary when the feature is off.)
-#[cfg(feature = "testing")]
+#[cfg(feature = "test-support")]
 mod endings;
-#[cfg(feature = "testing")]
+#[cfg(feature = "test-support")]
 mod endings_preconditions;

@@ -2,6 +2,9 @@
 //! a precondition that was missed or not measured is the rig's failure, never a finding about the endpoint (no ratchet entry
 //! is new or stale for it). The verdict is report-only for now (`test:endings-preconditions`): a miss is then a warning and
 //! the scenario is judged and ratcheted as before.
+//!
+//! WP-2: the probe of an endpoint's unread input (`queued_bytes`, test 4) and the act gate that measures it before the endpoint
+//! acts (test 2, the link server's busy client of CI run 8425).
 
 use paddock_ipc::endpoint::Stream;
 use paddock_ipc::frame::{self, Frame, FrameLimit, ProtocolVersion};
@@ -10,7 +13,7 @@ use paddock_ipc::testing::endings::ratchet::Ratchet;
 use paddock_ipc::testing::endings::raw::{READ_GUARD, read_to_end, write_junk};
 use paddock_ipc::testing::endings::{
     self, Evidence, Expect, Fault, Observed, Outcome, Precondition, PreconditionVerdict,
-    RigFailure, Scenario, conclude, ipc, judge, log,
+    QueueHandle, RigFailure, Scenario, conclude, ipc, judge, log, probe, queued_bytes,
 };
 use paddock_ipc::{Host, Token, codes};
 use std::time::Duration;
@@ -410,4 +413,147 @@ fn the_repository_register_exempts_exactly_the_two_busy_scenarios() {
             ),
         ]
     );
+}
+
+/// Reads `n` bytes from `reader` (the side whose queue is probed), in as many reads as it takes.
+fn read_exactly(reader: &mut impl std::io::Read, n: usize) {
+    let mut buf = vec![0u8; n];
+    reader
+        .read_exact(&mut buf)
+        .expect("the bytes written are there to read");
+}
+
+/// The probe's checks on one connection: `handle` is `reader`'s side. Exact counts, or, for a lower-bound probe (Windows TCP),
+/// more than zero while bytes remain.
+fn check_probe(
+    what: &str,
+    handle: QueueHandle,
+    writer: &mut impl std::io::Write,
+    reader: &mut impl std::io::Read,
+) {
+    const N: usize = 1029;
+    const K: usize = 5;
+    let exact = !handle.lower_bound_only();
+    assert_eq!(
+        queued_bytes(handle),
+        Some(0),
+        "{what}: nothing is queued before the write"
+    );
+    writer.write_all(&[7u8; N]).expect("write");
+    // Loopback delivery is not instant on every OS: wait (bounded) until all of it is there, then read the count.
+    let arrived = probe::wait_queued(handle, N - 1, GUARD);
+    assert!(arrived.is_held(), "{what}: {arrived}");
+    let n = queued_bytes(handle).expect("measured");
+    if exact {
+        assert_eq!(n, N, "{what}: the count after one write of {N} bytes");
+    } else {
+        assert!(n > 0, "{what}: a lower bound above zero, got {n}");
+    }
+    read_exactly(reader, K);
+    let n = queued_bytes(handle).expect("measured");
+    if exact {
+        assert_eq!(n, N - K, "{what}: the count after reading {K}");
+    } else {
+        assert!(n > 0, "{what}: bytes remain, got {n}");
+    }
+    read_exactly(reader, N - K);
+    assert_eq!(
+        queued_bytes(handle),
+        Some(0),
+        "{what}: nothing is left after reading it all"
+    );
+}
+
+/// Test 4 (ADR 0122, the first step of WP-2): `queued_bytes` reads what one side has not read yet, on the endpoint's own
+/// stream (a Unix socket; a named pipe on Windows), on loopback TCP (mcp; a lower bound on Windows) and on a plain Unix socket
+/// pair, and an invalid handle is `None`: not measured, never zero (ER-33).
+#[test]
+fn the_queue_probe_reads_what_a_side_has_not_read_and_an_invalid_handle_is_not_measured() {
+    let (mut server, mut client) = paddock_ipc::endpoint::pair().expect("an endpoint pair");
+    check_probe(
+        "endpoint stream",
+        QueueHandle::of_stream(&server),
+        &mut client,
+        &mut server,
+    );
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("a loopback port");
+    let mut tcp_client =
+        std::net::TcpStream::connect(listener.local_addr().expect("an address")).expect("connect");
+    let (mut tcp_server, _) = listener.accept().expect("accept");
+    check_probe(
+        "loopback tcp",
+        QueueHandle::of_tcp(&tcp_server),
+        &mut tcp_client,
+        &mut tcp_server,
+    );
+
+    #[cfg(unix)]
+    {
+        let (mut a, mut b) = std::os::unix::net::UnixStream::pair().expect("a socket pair");
+        check_probe("unix socket pair", QueueHandle::of_unix(&a), &mut b, &mut a);
+    }
+
+    assert_eq!(queued_bytes(QueueHandle::invalid()), None);
+    let unmeasured = probe::wait_queued(QueueHandle::invalid(), 0, GUARD);
+    assert!(
+        matches!(unmeasured, Evidence::NotMeasured(_)),
+        "{unmeasured}"
+    );
+}
+
+/// How long the control's gate waits for a client that writes nothing before it gives up: the miss is certain (the client
+/// writes only after the gate's evidence is in), so the bound only keeps the control short.
+const CONTROL_BOUND: Duration = Duration::from_millis(200);
+
+/// Test 2 (ADR 0122; CI run 8425, Windows: "ipc-link-server busy: RIG FAILURE (write)"): a busy client that writes nothing
+/// before the server's act gate gives up is a missed precondition, never a write failure or a ratchet line; with the hello
+/// written, the gate sees it queued every time.
+#[test]
+fn a_busy_client_that_writes_after_the_gate_misses_its_precondition_and_one_that_writes_first_holds_it()
+ {
+    use crate::endings::link::{BusyClient, busy};
+    let applicability =
+        Applicability::load_from(env!("CARGO_MANIFEST_DIR")).expect("the register file");
+    let missed = busy(BusyClient::WritesAfterTheGate, CONTROL_BOUND);
+    let report = conclude(
+        "ipc-link-server",
+        Scenario::Busy,
+        &applicability,
+        PreconditionVerdict::Blocking,
+        missed,
+    );
+    assert!(
+        matches!(
+            &report.outcome,
+            Outcome::RigFailure(RigFailure::Precondition {
+                which: Precondition::InputQueuedWhenRefused,
+                evidence: Evidence::Missed(_),
+            })
+        ),
+        "{}",
+        report.summary()
+    );
+    assert!(
+        !report.summary().contains("RIG FAILURE (write)"),
+        "{}",
+        report.summary()
+    );
+    let mut ratchet = Ratchet::load_from(env!("CARGO_MANIFEST_DIR")).expect("the ratchet file");
+    ratchet
+        .entries
+        .retain(|e| e.endpoint == "ipc-link-server" && e.scenario == Scenario::Busy.name());
+    let verdict = ratchet
+        .check("ipc-link-server", std::slice::from_ref(&report))
+        .expect_err("a rig failure is red");
+    assert!(verdict.contains("no entry is new or stale"), "{verdict}");
+    assert!(!verdict.contains("stale ratchet entry"), "{verdict}");
+    assert!(!verdict.contains("new failure"), "{verdict}");
+
+    for run in 0..100 {
+        let (observed, _) = busy(BusyClient::WritesItsHello, READ_GUARD)
+            .unwrap_or_else(|e| panic!("run {run}: RIG FAILURE ({e})"));
+        let evidence = observed.evidence_of(Precondition::InputQueuedWhenRefused);
+        assert!(evidence.is_held(), "run {run}: {evidence}");
+    }
 }

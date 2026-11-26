@@ -14,6 +14,9 @@ doctest = false # doctests are off (crates/README.md, "Doctests")
 # The Tauri adapter (`paddock_mcp::tauri`): the managed `McpControl`, the commands `mcp_get`, `mcp_save`, `mcp_issue_key`,
 # `mcp_revoke_key`, `mcp_audit`, `mcp_audit_clear` and the `paddock://mcp` event. The core never depends on Tauri.
 tauri = ["dep:tauri", "paddock-commands/tauri"]
+# Test support (rule 99; ADR 0122 §4): the loopback listener's act gate (`serve_loopback_with_act_gate`) for the ending test.
+# Enabled from `[dev-dependencies]` only, never in a shipped build (`./dev check test-features`, C170).
+test-support = []
 
 [dependencies]
 paddock-commands = { workspace = true }
@@ -43,7 +46,9 @@ tauri = { workspace = true, features = ["test"] }
 paddock-testkit = { workspace = true }
 tempfile = "3"
 # The ending harness of ADR 0072 (`tests/it/endings.rs`): the raw-stream client, the scenarios, the ratchet.
-paddock-ipc = { workspace = true, features = ["testing"] }
+paddock-ipc = { workspace = true, features = ["test-support"] }
+# The self dev-dependency that turns `test-support` on for this package's own integration tests (rule 99): the act gate.
+paddock-mcp = { path = ".", features = ["test-support"] }
 
 [target.'cfg(unix)'.dev-dependencies]
 # The loopback test that interrupts a read with a real signal (the Linux field case of 2026-11-07).
