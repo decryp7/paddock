@@ -142,6 +142,14 @@ package.json     the one npm workspace and package-lock.json (ui, eslint, icons,
 - The member gate (`./dev check --pre-push --member-gate`, run by `./dev merge check --gates`) also runs the full nextest `ci`
   profile of every touched Cargo workspace (the plan's reached packages, as CI's member run) on the host (`tests <ws>`). Inactive apps
   are skipped and named. A developer's push skips these rows.
+- **The train's ER-53 split (user, 2026-11-26).** `./dev check --pre-push --member-gate --set fast` runs every row but the host tests
+  (fmt, lockfiles, commit-lint, gates-register, conformance, Clippy, conformance-tests, member-audits) before CI is dispatched; then
+  `./dev ci dispatch` prints `run <id>`; `--set slow --cancel-ci-run <id>` runs the host tests beside CI and, on a failure, cancels that
+  run (`./dev ci cancel <id>`: the run's own cancel URL only, never the newest run). A slow run records its result for the commit it
+  checked; landing (ER-49) is `./dev ci landing-held --sha <sha>`: the complete green CI run AND the green slow rows on the same commit
+  (6, not held, while a slow row is unfinished or missing). A run with `--set fast` or `--set slow` leaves no whole-run pass record. The
+  Linux tests are CI's Linux jobs on d-gtr9. A push or member gate prints a per-row table (queued s, run s, concurrent) and writes
+  `row-timings.tsv` in its log folder.
 - Before committing, the gates of the affected projects, for example:
 
   ```sh

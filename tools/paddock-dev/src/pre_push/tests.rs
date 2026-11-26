@@ -1427,6 +1427,8 @@ mod known_commit {
             all_apps: false,
             accept_not_measured: vec![],
             no_reuse: false,
+            set: Default::default(),
+            cancel_ci_run: None,
         }
     }
 
@@ -2073,6 +2075,8 @@ mod base_choice {
             all_apps: false,
             accept_not_measured: vec![],
             no_reuse: false,
+            set: Default::default(),
+            cancel_ci_run: None,
         };
         let line = format!("refs/heads/x {two} refs/heads/main {}\n", "0".repeat(40));
         let got = command_in(
@@ -2538,6 +2542,9 @@ struct Queued {
     /// Steps that have entered `run`, and a signal for each entry.
     entered: Mutex<usize>,
     entry: std::sync::Condvar,
+    /// With a number: every step waits until that many have entered (a first batch that is in flight together by construction, not by
+    /// luck of timing under load, ER-12); the wait is bounded only as a hang detector. Zero: the older wait for one more entry.
+    batch: usize,
 }
 
 impl Queued {
@@ -2551,7 +2558,14 @@ impl Queued {
             beside: Mutex::new(Vec::new()),
             entered: Mutex::new(0),
             entry: std::sync::Condvar::new(),
+            batch: 0,
         }
+    }
+
+    /// Holds every step until `n` of them are in flight together.
+    fn with_batch(mut self, n: usize) -> Queued {
+        self.batch = n;
+        self
     }
 }
 
@@ -2578,10 +2592,18 @@ impl Exec for Queued {
         *n += 1;
         self.entry.notify_all();
         let mine = *n;
-        let _held = self
-            .entry
-            .wait_timeout_while(n, Duration::from_millis(200), |n| *n == mine)
-            .unwrap();
+        let _held = if self.batch > 0 {
+            // A hang detector, not a timing: it ends only if a step of the batch never arrives (a push that holds it back).
+            self.entry
+                .wait_timeout_while(n, Duration::from_secs(60), |n| *n < self.batch)
+                .unwrap()
+                .0
+        } else {
+            self.entry
+                .wait_timeout_while(n, Duration::from_millis(200), |n| *n == mine)
+                .unwrap()
+                .0
+        };
         drop(_held);
         self.running.lock().unwrap().retain(|id| *id != g.id);
         self.in_flight.fetch_sub(1, SeqCst);
@@ -2617,13 +2639,21 @@ fn heavy_gate(id: &str, rank: u8) -> Planned {
     })
 }
 
-/// Heavy has one machine-wide slot: two heavy steps of one push in flight together only queue behind each other, and that wait
-/// would be told apart from waiting for others only by the heavy tool's own lines.
+/// A push runs as many heavy steps at once as it has workers (ADR 0102 amendment 2026-11-26: the user asked for parallel rows; heavy's
+/// slots and the load decide the rest), and the run's own measure says what really ran. The executor counts the steps really in flight;
+/// `peak_heavy` and each row's concurrency must agree, and reach the worker count (a positive control: a measure that never saw a step
+/// would also read "never above the limit", ER-33). The queued seconds of a row stay apart from its run time (the row-timings table).
 #[test]
-fn a_push_has_one_heavy_step_in_flight_at_a_time() {
-    let fake = Queued::new(Duration::from_millis(30));
-    let planned = vec![heavy_gate("clippy a", 1), heavy_gate("clippy b", 1), heavy_gate("clippy c", 1)];
-    let rows = run_all_with(
+fn a_push_runs_as_many_heavy_steps_at_once_as_it_has_workers_and_measures_it() {
+    use crate::pre_push::exec::run_all_detailed;
+    let fake = Queued::new(Duration::from_millis(30)).with_batch(3);
+    let planned = vec![
+        heavy_gate("clippy a", 1),
+        heavy_gate("clippy b", 1),
+        heavy_gate("clippy c", 1),
+        heavy_gate("clippy d", 1),
+    ];
+    let detail = run_all_detailed(
         &planned,
         &fake,
         &RunOpts {
@@ -2634,8 +2664,57 @@ fn a_push_has_one_heavy_step_in_flight_at_a_time() {
             reuse: None,
         },
     );
-    assert!(rows.iter().all(|(_, v)| v.kind() == Kind::Passed), "{rows:?}");
-    assert_eq!(fake.most.load(std::sync::atomic::Ordering::SeqCst), 1);
+    assert!(detail.rows.iter().all(|(_, v)| v.kind() == Kind::Passed), "{:?}", detail.rows);
+    let seen = fake.most.load(std::sync::atomic::Ordering::SeqCst);
+    assert_eq!(seen, 3, "three workers, three heavy steps in flight at once");
+    assert_eq!(detail.peak_heavy, seen, "the run's measure agrees with what really ran");
+    assert_eq!(detail.concurrency.len(), 4, "every row that ran has its concurrency");
+    assert!(
+        detail.concurrency.values().all(|&c| (1..=3).contains(&c)),
+        "{:?}",
+        detail.concurrency
+    );
+    assert_eq!(
+        detail.concurrency.values().copied().max(),
+        Some(3),
+        "a row started beside two other heavy ones"
+    );
+    let lines = crate::pre_push::row_timings::lines(&detail);
+    assert_eq!(lines.len(), 4);
+    assert!(crate::pre_push::row_timings::table(&lines, 3).is_some_and(|t| t.contains("clippy d") && t.contains("at most 3")));
+}
+
+/// The limit is the worker count unless `PADDOCK_HEAVY_AT_ONCE` (1 or more) says otherwise, for a measurement; the run honours the limit
+/// it is given, at 1 (the behaviour before 2026-11-26) and 2.
+#[test]
+fn the_heavy_limit_is_the_worker_count_unless_a_measurement_sets_it_and_is_honoured() {
+    use crate::pre_push::exec::{heavy_limit, run_all_limited};
+    let env = |v: &str| std::collections::HashMap::from([("PADDOCK_HEAVY_AT_ONCE".to_string(), v.to_string())]);
+    assert_eq!(heavy_limit(&std::collections::HashMap::new(), 3), 3);
+    assert_eq!(heavy_limit(&env("1"), 3), 1);
+    assert_eq!(heavy_limit(&env("5"), 3), 5);
+    for bad in ["0", "two", "", "-1"] {
+        assert_eq!(heavy_limit(&env(bad), 3), 3, "{bad:?}");
+    }
+    assert_eq!(heavy_limit(&std::collections::HashMap::new(), 0), 1, "never below one");
+    for limit in [1, 2] {
+        let fake = Queued::new(Duration::from_millis(30)).with_batch(limit);
+        let planned: Vec<Planned> = (0..5).map(|i| heavy_gate(&format!("clippy {i}"), 1)).collect();
+        let detail = run_all_limited(
+            &planned,
+            &fake,
+            &RunOpts {
+                workers: 5,
+                queue_stall: Duration::from_secs(60),
+                stop: &AtomicBool::new(false),
+                subject: &test_subject(),
+                reuse: None,
+            },
+            limit,
+        );
+        assert_eq!(fake.most.load(std::sync::atomic::Ordering::SeqCst), limit);
+        assert_eq!(detail.peak_heavy, limit);
+    }
 }
 
 /// The 2026-11-14/15 shape: train 10 is being built locally (partly pushed or not at all), a fix branch is stacked on it. The push
@@ -2773,7 +2852,8 @@ fn a_persons_run_is_measured_from_the_nearest_base_like_its_push() {
     assert_eq!(super::person_base(&r.root, None, "origin/main", &r.live()).0, f1);
 }
 
-/// While a heavy step is in flight, a free worker runs the next light row instead of waiting on a heavy one (review P2-4).
+/// While a heavy step is in flight, a free worker runs the next light row instead of waiting on a heavy one (review P2-4); at a limit of
+/// one heavy step (`PADDOCK_HEAVY_AT_ONCE=1`, the behaviour before the 2026-11-26 amendment) never two heavy steps at once.
 #[test]
 fn a_free_worker_runs_light_rows_while_a_heavy_step_is_in_flight() {
     let fake = Queued::new(Duration::from_millis(10));
@@ -2785,7 +2865,7 @@ fn a_free_worker_runs_light_rows_while_a_heavy_step_is_in_flight() {
         }
     });
     let planned = vec![heavy_gate("clippy a", 1), heavy_gate("clippy b", 1), light];
-    let rows = run_all_with(
+    let rows = crate::pre_push::exec::run_all_limited(
         &planned,
         &fake,
         &RunOpts {
@@ -2795,7 +2875,9 @@ fn a_free_worker_runs_light_rows_while_a_heavy_step_is_in_flight() {
             subject: &test_subject(),
             reuse: None,
         },
-    );
+        1,
+    )
+    .rows;
     assert!(rows.iter().all(|(_, v)| v.kind() == Kind::Passed), "{rows:?}");
     let beside = fake.beside.lock().unwrap().clone();
     // The first heavy step and the light row overlapped (whichever entered first); held behind the second heavy row, the
@@ -3526,6 +3608,47 @@ mod member_tests {
         let planned = plan_gates(&plan2(), &change(&["crates/paddock-proc/README.md"]), &member());
         assert!(!ids(&planned).iter().any(|i| i.starts_with("tests")), "{:?}", ids(&planned));
         assert!(planned.iter().any(|p| matches!(p, Planned::Skip { id, .. } if id == "tests")));
+    }
+
+    /// The train's split (ER-53): the fast set is every row but the host tests, and holds the rows the plan names (fmt, lockfiles,
+    /// commit-lint, gates-register, conformance, Clippy, conformance-tests, member-audits); the slow set is the host tests alone; the two
+    /// together are the plan.
+    #[test]
+    fn the_fast_and_slow_sets_split_the_member_gate_at_the_host_tests() {
+        use crate::pre_push::train_split::{RowSet, select};
+        let planned = plan_gates(&plan2(), &change(FILES), &member());
+        let all = ids_of_all(&planned);
+        let fast = ids_of_all(&select(planned.clone(), RowSet::Fast));
+        let slow = ids_of_all(&select(planned, RowSet::Slow));
+        assert!(
+            !slow.is_empty() && slow.iter().all(|i| i == "tests" || i.starts_with("tests ")),
+            "{slow:?}"
+        );
+        assert!(fast.iter().all(|i| i != "tests" && !i.starts_with("tests ")), "{fast:?}");
+        for want in [
+            "fmt ",
+            "lockfile ",
+            "clippy ",
+            "clippy-windows ",
+            "commit-lint",
+            "gates-register",
+            "conformance",
+            "conformance-tests",
+            "member-audits",
+        ] {
+            assert!(fast.iter().any(|i| i.starts_with(want)), "{want} is a fast row: {fast:?}");
+        }
+        assert_eq!(fast.len() + slow.len(), all.len(), "nothing is dropped between the two sets");
+    }
+
+    fn ids_of_all(planned: &[Planned]) -> Vec<String> {
+        planned
+            .iter()
+            .map(|p| match p {
+                Planned::Run(g) => g.id.clone(),
+                Planned::Skip { id, .. } | Planned::NotMeasured { id, .. } | Planned::Broken { id, .. } => id.clone(),
+            })
+            .collect()
     }
 
     #[test]

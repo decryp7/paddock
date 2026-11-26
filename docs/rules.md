@@ -255,11 +255,14 @@ unique (C31).
     which and why; never a local branch), and its 15 minutes count run time only; time queued for the heavy slot behind other
     agents has its own allowance of 30 min per push and is reported apart (ADR 0102 and its 2026-11-15 amendment). Lint and type-check of the touched
     TS files stay by hand until WP-3. Then dispatch with `./dev`
-    and, at the same time, run the slower local checks in parallel: the affected tests on the dev OS, the same tests in the
-    `train3-linux-dev:1` container (CI limits, `ulimit -n 1024`) and timing-sensitive tests under load. Cap local builds
-    (`CARGO_BUILD_JOBS=2`) while CI runners share the machine. If a local check fails, cancel that run at once through the Gitea
-    API (`POST /api/v1/repos/{owner}/{repo}/actions/runs/{id}/cancel`), fix every failure and push once; this cancel needs no
-    further approval. (a) and (b) still hold.
+    and, at the same time, run the slower local checks in parallel: the affected host tests (`tests <ws>`, macOS; the Linux tests are
+    CI's Linux jobs, user 2026-11-26) and timing-sensitive tests under load. In the train this is the ER-53 split: `./dev check
+    --pre-push --member-gate --set fast` first, then `./dev ci dispatch` (prints `run <id>`), then `--set slow --cancel-ci-run <id>`
+    beside it: a slow-row failure cancels that run at once through `./dev ci cancel <id>` (the run's own cancel URL, never the newest
+    run; a cancelled run reads "cancelled: not measured"), and the landing (ER-49) needs both the complete green CI run and the green
+    slow rows on the same commit: `./dev ci landing-held --sha <sha>` (exit 0 landable, 5 refused, 6 not held: an unfinished slow row
+    is not held, ER-33). Cap local builds (`CARGO_BUILD_JOBS=2`) while CI runners share the machine. Fix every failure and push once;
+    this cancel needs no further approval. (a) and (b) still hold.
     (i) After a CI run fails, each fix round reruns only what failed in the last run: the failed jobs, and inside them only
     the failed tests (nextest or vitest filter) where the job's runner supports it. Jobs and tests that passed aren't rerun
     during fix rounds. Dispatch `ci.yml` (workflow_dispatch) with the input `base` = the commit CI last tested, not main; use
