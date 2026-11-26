@@ -743,7 +743,7 @@ fn reached_filter<'a>(ws: &str, facts: &'a Facts) -> &'a str {
 /// The member gate's tests (user, 2026-11-25): the full nextest `ci` profile of every Cargo workspace the member touches (a workspace
 /// with a changed file of its own, documentation aside), on this host (`tests <ws>`). The Linux tests, with the orphan guardian's
 /// acting tests as uid 65534, are CI's Linux jobs on the Linux runner: no VM or container starts on this Mac (user, 2026-11-26;
-/// docs/rules.md NEW-no-local-vm), so there is no `tests-linux` row. Only in the member gate (`--member-gate`): a developer's push
+/// docs/rules.md rule 101), so there is no `tests-linux` row. Only in the member gate (`--member-gate`): a developer's push
 /// skips them with the reason. An inactive app's rows are skipped and named. A missing nextest is not measured, never a pass.
 /// Blocking from the start: the tests are CI's own established tests, not a new check (user, 2026-11-25). Measured in
 /// docs/benchmarks.md, "Member gate: CI tests of the touched workspaces".

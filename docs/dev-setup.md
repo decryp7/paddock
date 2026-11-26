@@ -298,7 +298,7 @@ author: that call belongs there. The Rust `heavy` tool (`tools/heavy`) makes no 
   fixed patterns, so it gives the same result on every machine; it walks the working folder today (reading git's tracked list is
   the approved train-14 item). A value that is fine (an invented user) gets an entry with a reason in `conformance/c131-allow.json`.
   **Rewriting:** `PADDOCK_UPDATE_GOLDEN=1` rewrites a differing golden and says that CI's Linux job confirms it as root on the Linux runner
-  (push the branch). No container or VM runs on this Mac (user, 2026-11-26; docs/rules.md NEW-no-local-vm), so `./dev golden confirm` and the
+  (push the branch). No container or VM runs on this Mac (user, 2026-11-26; docs/rules.md rule 101), so `./dev golden confirm` and the
   local CI-image run are gone.
 - **Checked (conformance C37):** a `tests/<name>.rs` outside `tests/it/` fails unless `ownTestBinaries` of
   `paddock.conformance.json` names it with the reason it needs its own binary, and every workspace member needs a CI test

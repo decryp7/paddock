@@ -3581,7 +3581,7 @@ mod member_tests {
         assert!(passed(&verdicts(&rows)["tests crates"]));
     }
 
-    /// No VM or container starts on this Mac (user, 2026-11-26; docs/rules.md NEW-no-local-vm): no planned row is a Linux row, and
+    /// No VM or container starts on this Mac (user, 2026-11-26; docs/rules.md rule 101): no planned row is a Linux row, and
     /// no row's command is a container or VM tool, for a change that reaches every kind of row, in a developer's push and the member
     /// gate. The Linux checks are CI's Linux jobs; the register names them CI-owned.
     #[test]
