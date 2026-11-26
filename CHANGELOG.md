@@ -26,6 +26,9 @@ Conventional Commits; one semver tag for the whole repo.
   are gone; their coverage is CI's Linux jobs. `./dev golden confirm` is removed, and `paddock_testkit::golden::rewritten_notice` now takes
   the path alone and points at CI's Linux job (`confirm_command` and `test_name_of` are removed). Conformance C172 (report-only) flags a
   container or VM tool in local gate code.
+- Dyno's benchmark-unit tests (release step 2c) run in the `linux-units` job of `dyno-release.yml` through the new `./dev ci dyno-linux-units`
+  (no systemd user manager is exit 6, not measured; report-only until its first green run on the runner). `apps/dyno/scripts/linux-units-check.sh`
+  (OrbStack) is deleted with its C172 waivers and its C173 entry, and so are `ci-image/garage-arm64.Dockerfile` and `garage-release.txt`.
 
 ### sccache 0.20.1, with base directories
 - Every sccache pin moves from 0.19.0 to 0.20.1 (setup-rust and its shell twin, the CI image, `./dev sccache env`) with the release's
