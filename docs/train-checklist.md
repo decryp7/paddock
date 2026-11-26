@@ -10,7 +10,7 @@ locked worktree, never in the main checkout (rule 2).
    conflicting files.
 3. **The member gate.** `./dev merge check --gates HEAD` on the merge: the detectors (dropped hunks, lost tests, workspace-hack,
    generated files), then the fast gates of `./dev check --pre-push` on the combined tree with `--base HEAD^1`, with the touched
-   workspaces' nextest `ci` profile on macOS (`tests <ws>`) and their OS-conditional code in the Linux CI container (`tests-linux`). Load the machine
+   workspaces' nextest `ci` profile on macOS (`tests <ws>`); the Linux tests are CI's Linux jobs (no container on this Mac, user 2026-11-26). Load the machine
    lightly: `CARGO_BUILD_JOBS=2`, one member at a time. Only the foundation and the active apps (`docs/ci-active-apps.toml`) get
    their build checks; an inactive app's rows are shown as `inactive`, never as passed (docs/ci-schedules.md, "Active apps").
 4. **A member that fails is taken out, not fixed on the train.** Reset the train branch to `HEAD^1` in your own worktree

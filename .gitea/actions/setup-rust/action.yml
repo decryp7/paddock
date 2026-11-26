@@ -320,6 +320,8 @@ runs:
           echo "RUSTC_WRAPPER=sccache"
           # Cached builds are not incremental.
           echo "CARGO_INCREMENTAL=0"
+          # sccache hashes every CARGO_* variable into its key: the same two as local_sccache::CI_KEY_ENV (the Rust implementation).
+          echo "CARGO_TERM_COLOR=always"
           echo "SCCACHE_IGNORE_SERVER_IO_ERROR=1"
           echo "SCCACHE_SERVER_PORT=$PORT"
           # Windows: cargo's legacy build-dir layout. Cargo 1.100 passes one -L per indirect dependency and falls back to an @argfile

@@ -103,7 +103,6 @@ fn gate(id: &str, cwd: &str) -> Gate {
         notice: None,
         progress: Progress::Lines,
         build_dir: None,
-        mount: None,
     }
 }
 
@@ -139,9 +138,6 @@ impl Counting {
 impl Exec for Counting {
     fn has_tool(&self, _: &str) -> bool {
         false
-    }
-    fn docker_up(&self) -> bool {
-        true
     }
     fn run(&self, g: &Gate, _: Limits) -> Result<Done, String> {
         self.ran.lock().unwrap().push(g.id.clone());
