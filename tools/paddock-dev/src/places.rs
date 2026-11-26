@@ -307,6 +307,11 @@ pub(crate) fn test_abs(unix: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use crate::worktree::git::Git;
+
+    use super::test_abs as abs;
+
     fn no_default() -> Result<PathBuf, CliError> {
         Err(CliError::usage("no dev-targets"))
     }
@@ -314,32 +319,30 @@ mod tests {
     /// The trial folder: the flag, then git config, then the variable, then `<dev-targets>/trials`; refused only when none resolves.
     #[test]
     fn the_trial_folder_takes_the_flag_then_config_then_the_variable_then_the_default() {
-        let def = || Ok(PathBuf::from("/dt/trials"));
+        let (flag, cfg, env, dt) = (abs("/flag"), abs("/cfg"), abs("/env"), abs("/dt"));
+        let def = || Ok(PathBuf::from(&dt).join("trials"));
         let some = |v: &str| Some(v.to_string());
-        let flag = Path::new("/flag");
+        let want = |p: &str| PathBuf::from(p);
         assert_eq!(
-            trial_dir_of(Some(flag), some("/cfg"), some("/env"), def).unwrap(),
-            Path::new("/flag")
+            trial_dir_of(Some(Path::new(&flag)), some(&cfg), some(&env), def).unwrap(),
+            want(&flag)
         );
-        assert_eq!(trial_dir_of(None, some("/cfg"), some("/env"), def).unwrap(), Path::new("/cfg"));
-        assert_eq!(trial_dir_of(None, None, some("/env"), def).unwrap(), Path::new("/env"));
-        assert_eq!(trial_dir_of(None, some(" "), some(""), def).unwrap(), Path::new("/dt/trials"));
+        assert_eq!(trial_dir_of(None, some(&cfg), some(&env), def).unwrap(), want(&cfg));
+        assert_eq!(trial_dir_of(None, None, some(&env), def).unwrap(), want(&env));
+        assert_eq!(trial_dir_of(None, some(" "), some(""), def).unwrap(), want(&dt).join("trials"));
         let e = trial_dir_of(None, None, None, no_default).unwrap_err().message;
         assert!(e.contains("cannot be resolved"), "{e}");
     }
 
     #[test]
     fn the_default_trial_folder_is_below_the_dev_targets_folder() {
-        let env = |k: &str| (k == DEV_TARGETS_ENV).then(|| "/dt".to_string());
-        assert_eq!(trial_dir(Path::new("/nonexistent"), None, &env).unwrap(), Path::new("/dt/trials"));
+        let dt = abs("/dt");
+        let env = |k: &str| (k == DEV_TARGETS_ENV).then(|| dt.clone());
+        let nowhere = std::env::temp_dir().join("paddock-no-such-repo-for-trial-dir");
+        assert_eq!(trial_dir(&nowhere, None, &env).unwrap(), PathBuf::from(&dt).join("trials"));
         let none = |_: &str| None;
-        assert!(trial_dir(Path::new("/nonexistent"), None, &none).is_err());
+        assert!(trial_dir(&nowhere, None, &none).is_err());
     }
-
-    use super::*;
-    use crate::worktree::git::Git;
-
-    use super::test_abs as abs;
 
     #[test]
     fn the_named_folder_beats_the_worktree_root() {
