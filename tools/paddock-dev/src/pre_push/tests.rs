@@ -3632,11 +3632,18 @@ mod member_tests {
     fn a_touched_workspace_gets_its_ci_tests_on_the_host_with_heavys_thread_share() {
         let planned = plan_gates(&plan2(), &change(FILES), &member());
         let host = by(&planned, "tests crates");
-        assert_eq!((host.program.as_str(), host.cwd.as_str()), ("cargo", "crates"));
+        assert_eq!(
+            host.cwd, "",
+            "the test-cache command runs from the root and enters the workspace itself"
+        );
+        assert_ne!(
+            host.program, "cargo",
+            "the row is this program's `ci test-cache run`, never a bare nextest (ADR 0116)"
+        );
         assert_eq!(
             host.args.join(" "),
-            "nextest run --config build.target-dir='/t' --profile ci --locked --no-fail-fast --no-tests=fail --workspace --all-features -E package(=paddock-proc) | package(=paddock-chromium)",
-            "CI's own profile, the plan's reached packages as CI's member run filters them, every feature as CI's crates job"
+            "ci test-cache run --workspace crates --build-dir /t --filter package(=paddock-proc) | package(=paddock-chromium)",
+            "the plan's reached packages as CI's member run filters them; the command adds CI's profile, every feature in crates, the exclusion of reused packages and the record of passes"
         );
         assert!(host.heavy, "it compiles: through heavy (ER-24)");
         assert_eq!(
@@ -3655,7 +3662,7 @@ mod member_tests {
         );
         let tool = by(&planned, "tests tools/paddock-dev");
         assert!(
-            !tool.args.contains(&"-E".to_string()) && !tool.args.contains(&"--all-features".to_string()),
+            !tool.args.contains(&"--filter".to_string()) && tool.args.starts_with(&["ci".to_string(), "test-cache".to_string()]),
             "{:?}",
             tool.args
         );

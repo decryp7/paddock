@@ -743,7 +743,7 @@ pub(crate) fn stop_on_signals(stop: &Arc<AtomicBool>) {
 }
 
 /// The folder for this checkout's gate logs and override log: `<git common dir>/paddock-pre-push`.
-fn state_dir(root: &Path) -> PathBuf {
+pub(crate) fn state_dir(root: &Path) -> PathBuf {
     git_text(root, &["rev-parse", "--path-format=absolute", "--git-common-dir"])
         .map(|t| PathBuf::from(t.trim()))
         .unwrap_or_else(|| root.join(".git"))

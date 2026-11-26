@@ -45,6 +45,12 @@ pub struct TestCacheArgs {
     /// `record`: the file holding a nextest run's output (stdout and stderr), read as the run's result.
     #[arg(long)]
     log: Option<PathBuf>,
+    /// `run`: a nextest filterset the run is narrowed to (a member run's reached packages); ANDed with the packages left to run.
+    #[arg(long)]
+    filter: Option<String>,
+    /// `run`: the nextest configuration file, relative to the workspace (an app's own).
+    #[arg(long)]
+    nextest_config: Option<String>,
     /// The cargo build folder (default: the workspace's own `target`).
     #[arg(long)]
     build_dir: Option<String>,
@@ -70,13 +76,10 @@ fn now() -> u64 {
         .map_or(0, |d| d.as_secs())
 }
 
-/// The local store's folder: `<git common dir>/paddock-pre-push/test-cache`, beside the gate rows' records.
+/// The local store's folder: `test-cache` beside the gate rows' records in the pre-push state folder
+/// ([`crate::pre_push::state_dir`], the one definition of where they live).
 pub fn store_dir(root: &Path) -> PathBuf {
-    git_text(root, &["rev-parse", "--path-format=absolute", "--git-common-dir"])
-        .map(|t| PathBuf::from(t.trim()))
-        .unwrap_or_else(|| root.join(".git"))
-        .join("paddock-pre-push")
-        .join("test-cache")
+    crate::pre_push::state_dir(root).join("test-cache")
 }
 
 /// The packages of `workspace` as targets, from the planner's Cargo graph.
@@ -278,7 +281,7 @@ fn run(
     if !left.is_empty() {
         let asked: Vec<String> = left.iter().map(|c| c.target.package.clone()).collect();
         let t0 = std::time::Instant::now();
-        let out = nextest(a, root, cfg, &asked, left.len() == cands.len() && a.only.is_none())?;
+        let out = nextest(a, root, cfg, &asked, left.len() == cands.len() && a.only.is_none(), reused > 0)?;
         ran_secs = t0.elapsed().as_secs_f64();
         let judged = super::result::judge(&out.0, &asked);
         let mut put: Vec<Record> = Vec::new();
@@ -343,9 +346,10 @@ fn run(
             text.push(format!("test-cache: stored {} pass(es)", put.len()));
         }
         if !out.1 {
+            // The whole output: the gate's row reads the failed tests and the first panic from it.
             text.push(format!(
                 "{}\n::error::ci test-cache: nextest failed. Next step: fix the test it names above.",
-                tail(&out.0)
+                out.0
             ));
         }
     }
@@ -365,11 +369,6 @@ fn run(
     Ok(Report::new(data, text.join("\n")).with_exit(exit))
 }
 
-fn tail(log: &str) -> String {
-    let lines: Vec<&str> = log.lines().collect();
-    lines[lines.len().saturating_sub(40)..].join("\n")
-}
-
 /// The runner's OS build as observed (`uname -sr`): reported in each record, never keyed (decision D5).
 /// The runner's OS build as observed (`uname -sr`): reported in each record, never keyed (decision D5).
 fn os_build() -> String {
@@ -383,7 +382,14 @@ fn os_build() -> String {
 }
 
 /// One nextest run of `asked` (every package when `whole`), its output and whether it succeeded.
-fn nextest(a: &TestCacheArgs, root: &Path, cfg: &Config, asked: &[String], whole: bool) -> Result<(String, bool), CliError> {
+fn nextest(
+    a: &TestCacheArgs,
+    root: &Path,
+    cfg: &Config,
+    asked: &[String],
+    whole: bool,
+    reused_any: bool,
+) -> Result<(String, bool), CliError> {
     let mut cmd = paddock_proc::command("cargo");
     cmd.current_dir(root.join(&a.workspace));
     cmd.arg("nextest").arg("run");
@@ -395,15 +401,25 @@ fn nextest(a: &TestCacheArgs, root: &Path, cfg: &Config, asked: &[String], whole
         &cfg.profile,
         "--locked",
         "--no-fail-fast",
-        "--no-tests=warn",
+        // A selection of nothing is a failure, never a pass (ER-33), unless reuse left nothing of it to run.
+        if reused_any { "--no-tests=warn" } else { "--no-tests=fail" },
         "--workspace",
     ]);
+    if let Some(c) = &a.nextest_config {
+        cmd.args(["--config-file", c]);
+    }
     if a.workspace == "crates" {
         cmd.arg("--all-features");
     }
-    if !whole {
-        let filter = asked.iter().map(|p| format!("package(={p})")).collect::<Vec<_>>().join(" | ");
-        cmd.args(["-E", &filter]);
+    let packages = (!whole).then(|| asked.iter().map(|p| format!("package(={p})")).collect::<Vec<_>>().join(" | "));
+    let filter = match (a.filter.as_deref().filter(|f| !f.trim().is_empty()), packages) {
+        (Some(user), Some(pk)) => Some(format!("({user}) & ({pk})")),
+        (Some(user), None) => Some(user.to_string()),
+        (None, Some(pk)) => Some(pk),
+        (None, None) => None,
+    };
+    if let Some(f) = filter {
+        cmd.args(["-E", &f]);
     }
     cmd.env("RUSTUP_AUTO_INSTALL", "0");
     let out = run_bounded(cmd, Limits::new(RUN_TIMEOUT).max_output(1 << 28)).map_err(|e| {
