@@ -522,3 +522,52 @@ fn ci_uses_its_own_test_cache_key_before_the_machines_usual_source() {
         "half a key falls back, then says what is missing: {e}"
     );
 }
+
+#[test]
+fn record_stores_a_package_only_when_all_its_tests_passed_first_time_in_a_whole_log() {
+    let class = RunnerClass::here();
+    let meta = RunMeta {
+        run: "8700".into(),
+        job: String::new(),
+        git_ref: "refs/heads/main".into(),
+        commit: "c0ffee".into(),
+        at: NOW,
+        os_build: String::new(),
+    };
+    let mut dirty = cand("dirty", "h");
+    dirty.dirty = true;
+    let cands = [
+        cand("good", "h"),
+        cand("bad", "h"),
+        cand("retried", "h"),
+        cand("absent", "h"),
+        dirty,
+    ];
+    let log = |extra: &[&str]| {
+        let mut l = vec![
+            "    Starting 6 tests across 5 binaries".to_string(),
+            "        PASS [   0.010s] ( 1/6) good t::a".to_string(),
+            "        PASS [   0.010s] ( 2/6) dirty t::a".to_string(),
+            "  TRY 1 FAIL [   0.010s] ( 3/6) retried t::flaky".to_string(),
+            "  TRY 2 PASS [   0.010s] ( 3/6) retried t::flaky".to_string(),
+            "        PASS [   0.010s] ( 4/6) bad t::ok".to_string(),
+            "        FAIL [   0.010s] ( 5/6) bad::it t::broken".to_string(),
+            "     Summary [   0.050s] 6 tests run: 5 passed, 1 failed, 0 skipped".to_string(),
+            "        FAIL [   0.010s] ( 5/6) bad::it t::broken".to_string(),
+        ];
+        l.extend(extra.iter().map(|s| s.to_string()));
+        l.join("\n")
+    };
+    let got: Vec<String> = records_from_log(&log(&[]), &cands, &cfg(), &class, &meta)
+        .into_iter()
+        .map(|r| r.target)
+        .collect();
+    assert_eq!(
+        got,
+        vec!["rust:good"],
+        "only the package whose tests all passed the first time: {got:?}"
+    );
+    // A log with no summary (the run was cut short) stores nothing at all, even for the package that passed.
+    let cut: String = log(&[]).lines().filter(|l| !l.contains("Summary")).collect::<Vec<_>>().join("\n");
+    assert!(records_from_log(&cut, &cands, &cfg(), &class, &meta).is_empty());
+}

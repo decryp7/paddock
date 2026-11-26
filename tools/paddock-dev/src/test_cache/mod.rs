@@ -213,3 +213,45 @@ pub fn is_nightly(env: &dyn Fn(&str) -> Option<String>) -> bool {
 pub fn invalidate(store: &dyn Store, failed: &[Lookup]) -> Result<Vec<Record>, store::StoreError> {
     Ok(store.delete_many(failed)?.into_iter().flatten().collect())
 }
+
+/// Where a record came from.
+#[derive(Debug, Clone)]
+pub struct RunMeta {
+    /// The run (CI run id, or a local token).
+    pub run: String,
+    /// The job id when the environment names it, else empty.
+    pub job: String,
+    /// The ref.
+    pub git_ref: String,
+    /// The commit tested.
+    pub commit: String,
+    /// When, Unix seconds.
+    pub at: u64,
+    /// The runner's OS build, reported.
+    pub os_build: String,
+}
+
+/// The records a nextest log proves, and no others (ADR 0116 §3, ER-12, ER-33): one per candidate whose package ran in the log with
+/// every test passing on its first try, the log being whole. A package that failed, was flaky, passed on a retry, never appeared, or has
+/// uncommitted changes under its inputs gets none. The one place `record` decides what is stored.
+pub fn records_from_log(log: &str, cands: &[Candidate], cfg: &Config, class: &RunnerClass, m: &RunMeta) -> Vec<Record> {
+    let asked: Vec<String> = cands.iter().map(|c| c.target.package.clone()).collect();
+    let judged = result::judge(log, &asked);
+    cands
+        .iter()
+        .filter(|c| !c.dirty && judged.passed.contains(&c.target.package))
+        .map(|c| Record {
+            key: key_of(c, cfg, class),
+            target: c.target.id.clone(),
+            class: class.clone(),
+            run: m.run.clone(),
+            job: m.job.clone(),
+            git_ref: m.git_ref.clone(),
+            commit: m.commit.clone(),
+            tests: judged.tests.get(&c.target.package).copied().unwrap_or(0),
+            secs: 0.0,
+            at: m.at,
+            os_build: m.os_build.clone(),
+        })
+        .collect()
+}

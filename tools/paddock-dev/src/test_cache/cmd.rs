@@ -555,27 +555,15 @@ fn record(
         ))
     })?;
     let asked: Vec<String> = cands.iter().map(|c| c.target.package.clone()).collect();
-    let judged = super::result::judge(&log, &asked);
-    let commit = git_text(root, &["rev-parse", "HEAD"]).unwrap_or_default().trim().to_string();
-    let job = env_get("GITHUB_JOB_ID").unwrap_or_default();
-    let run_id = env_get("GITHUB_RUN_ID").unwrap_or_else(|| format!("local-{}", std::process::id()));
-    let put: Vec<Record> = cands
-        .iter()
-        .filter(|c| !c.dirty && judged.passed.contains(&c.target.package))
-        .map(|c| Record {
-            key: super::key_of(c, cfg, class),
-            target: c.target.id.clone(),
-            class: class.clone(),
-            run: run_id.clone(),
-            job: job.clone(),
-            git_ref: env_get("GITHUB_REF").unwrap_or_default(),
-            commit: commit.clone(),
-            tests: judged.tests.get(&c.target.package).copied().unwrap_or(0),
-            secs: 0.0,
-            at: now(),
-            os_build: os_build(),
-        })
-        .collect();
+    let meta = super::RunMeta {
+        run: env_get("GITHUB_RUN_ID").unwrap_or_else(|| format!("local-{}", std::process::id())),
+        job: env_get("GITHUB_JOB_ID").unwrap_or_default(),
+        git_ref: env_get("GITHUB_REF").unwrap_or_default(),
+        commit: git_text(root, &["rev-parse", "HEAD"]).unwrap_or_default().trim().to_string(),
+        at: now(),
+        os_build: os_build(),
+    };
+    let put = super::records_from_log(&log, cands, cfg, class, &meta);
     let line = match store.put_many(&put) {
         Ok(()) => format!("test-cache: recorded {} packages ({} in the log)", put.len(), asked.len()),
         Err(e) => format!("::warning::test-cache: records not stored: {e}"),
