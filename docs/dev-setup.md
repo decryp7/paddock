@@ -270,11 +270,19 @@ other (different lock files), so the move is made once, at a quiet moment, as it
 2. The first `./dev` call of each agent rebuilds `./dev` and the throttle on the new hash (the cached `heavy-<hash>` binaries are no longer
    used); builders resume after that.
 3. CI jobs build the throttle from their own tree, so only jobs already running at the landing use the old lock: a window of minutes.
-4. The user re-runs the runner install (`tools/mac-runner-move.sh`) whenever convenient, so the daemon's plist sets `THROTTLE_DIR`; the
-   `HEAVY_DIR` the old plist sets is accepted until then (every `HEAVY_X` is read when `THROTTLE_X` is not set).
-5. What carries over unchanged: the lock folder `<dev-targets>/throttle`, `heavy-history.tsv` in it (quick rows stay quick), the
-   `pitcrew-*` ticket and marker files and `pitcrew-lock-activity.log` that `./dev wait --plock` reads. The old `pitcrew-heavy-v2.lock*`
-   folders are ignored and safe to delete. `./dev heavy` and `./dev heavy-install` still work and print a deprecation line.
+4. The throttle decides its own lock folder (user decision 2026-11-26): `./dev` and `tools/mac-runner-move.sh` no longer pass one.
+   Precedence: `THROTTLE_DIR` (aliases `HEAVY_DIR`, `PLOCK_DIR`, `PLOCK_ROOT`), then `dir` in `<user config folder>/throttle/config.toml`, then
+   the per-user state folder (macOS `~/Library/Application Support/throttle`, Linux `$XDG_STATE_HOME/throttle` or `~/.local/state/throttle`,
+   Windows `%LOCALAPPDATA%\throttle`); `throttle dir` prints it, and a process with no `HOME` finds it through the user database. The
+   Mac daemon runs as the CI user, so its folder is that user's: the same one the agents' `./dev` resolves when they run as that user.
+   The user re-runs the runner install (`tools/mac-runner-move.sh`) whenever convenient: a reinstall drops the `THROTTLE_DIR` or `HEAVY_DIR`
+   the old plist sets (an old plist keeps working: the variable still wins until then, so keep it equal to the new default or reinstall
+   before the first run on the new binary, else the daemon and the agents queue in two folders).
+5. What carries over: the history. The first run that finds the new folder without a `heavy-history.tsv` reads the old folder's
+   (`<dev-targets>/throttle`, else `/private/tmp/claude-501`, else `THROTTLE_MOVED_FROM`) and copies it over once, so quick rows stay quick.
+   The `pitcrew-*` ticket and marker files and `pitcrew-lock-activity.log` (which `./dev wait --plock` reads through `throttle dir`) start fresh in the
+   new folder, so no run is queued across the move: do it at the quiet moment of step 1. The old `<dev-targets>/throttle` and the
+   `pitcrew-heavy-v2.lock*` folders are ignored and safe to delete after the first run. `./dev heavy` and `./dev heavy-install` still work and print a deprecation line.
 
 ## Tests
 

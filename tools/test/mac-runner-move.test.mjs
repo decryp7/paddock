@@ -44,7 +44,7 @@ const agent = (home, name, extraEnv = '') => `<?xml version="1.0" encoding="UTF-
 `;
 
 /** A scratch Mac with three runner lanes, each a loaded LaunchAgent with its runner folder. */
-function mac({ root = true, unregistered = [], silent = [], psUser = USER, program = true, parkedByHand = false, dev = '/dt-test', signing = 'unsigned' } = {}) {
+function mac({ root = true, unregistered = [], silent = [], psUser = USER, program = true, parkedByHand = false, signing = 'unsigned' } = {}) {
   const home = scratch('paddock-runner-home-');
   const sys = scratch('paddock-runner-sys-');
   const bin = scratch('paddock-runner-bin-');
@@ -91,8 +91,6 @@ esac`);
   shim(bin, 'sudo', 'shift 2; exec "$@"');
   shim(bin, 'getconf', 'echo /private/var/folders/xx/test/T/');
   shim(bin, 'defaults', 'echo 1');
-  // ./dev: only `places --get dev-targets --pinned --repo <repo>` is asked.
-  shim(bin, 'dev', dev === null ? 'exit 3' : `[ "$1 $2 $3 $4 $5" = "places --get dev-targets --pinned --repo" ] && echo ${dev}`);
   // tools/mac-ci-signing.sh: `signing` is the state of the identity and the program ('unsigned', 'signed' or 'none' for no
   // identity); sign marks the program signed in a file, as the real one changes the program.
   const signed = join(bin, 'signed');
@@ -114,7 +112,7 @@ const move = (m, args) =>
   run('mac-runner-move.sh', args, {
     bin: m.bin,
     cwd: m.home,
-    env: { PADDOCK_TOOLS_OS: 'Darwin', PADDOCK_RUNNER_MOVE_SYSROOT: m.sys, PADDOCK_RUNNER_MOVE_DEV: join(m.bin, 'dev'), PADDOCK_MAC_SIGNING: m.signing },
+    env: { PADDOCK_TOOLS_OS: 'Darwin', PADDOCK_RUNNER_MOVE_SYSROOT: m.sys, PADDOCK_MAC_SIGNING: m.signing },
   });
 const loadedJobs = (m) => readFileSync(m.state, 'utf8').trim().split('\n').filter(Boolean).sort();
 const plist = (file) => JSON.parse(spawnSync('plutil', ['-convert', 'json', '-o', '-', file], { encoding: 'utf8' }).stdout);
@@ -288,20 +286,14 @@ test('status is read-only and names where each lane runs', { skip }, () => {
   assert.deepEqual(snapshot(m.home, m.sys), before);
 });
 
-test('the daemon gets THROTTLE_DIR=<dev-targets>/throttle, so CI jobs and agents share one throttle queue in a folder a reboot keeps', { skip }, () => {
+test('the daemon names no throttle lock folder: throttle decides its own, and ./dev is not asked for one', { skip }, () => {
   const m = mac();
   const r = move(m, ['install', ...LANES]);
   assert.equal(r.status, 0, r.out);
   const env = plist(daemonPath(m, 'lane-a')).EnvironmentVariables;
-  assert.equal(env.THROTTLE_DIR, '/dt-test/throttle');
-  assert.ok(calls(m.bin).includes(`dev places --get dev-targets --pinned --repo ${join(TOOLS, '..')}`), calls(m.bin).join('\n'));
-  // Control: a dev-targets folder that cannot be read stops before anything changes (the preflight renders every lane first).
-  const bad = mac({ dev: null });
-  const before = snapshot(bad.home, bad.sys);
-  const r2 = move(bad, ['install', ...LANES]);
-  assert.notEqual(r2.status, 0, r2.out);
-  assert.ok(r2.out.includes('cannot read the dev-targets folder'), r2.out);
-  assert.deepEqual(snapshot(bad.home, bad.sys), before);
+  assert.equal(env.THROTTLE_DIR, undefined);
+  assert.equal(env.HEAVY_DIR, undefined);
+  assert.ok(!calls(m.bin).some((c) => c.startsWith('dev ')), calls(m.bin).join('\n'));
 });
 
 test('install signs the runner with the Mac CI identity after the old one stopped and before the daemon starts', { skip }, () => {

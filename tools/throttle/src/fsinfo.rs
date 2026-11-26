@@ -143,7 +143,7 @@ pub fn check_root(kind: &FsKind, root: &Path) -> Result<(), String> {
     match kind {
         FsKind::Network(n) => Err(format!(
             "the lock folder {} is on a network file system ({n}): file locks there are not reliable between machines or after a drop of the connection. \
-             Set THROTTLE_DIR to a folder on a local disk, one per machine",
+             Set THROTTLE_DIR (or `dir` in throttle's config.toml) to a folder on a local disk, one per machine",
             root.display()
         )),
         FsKind::Local | FsKind::Unknown(_) => Ok(()),

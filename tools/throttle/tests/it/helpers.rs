@@ -65,7 +65,7 @@ impl Rig {
     }
 
     pub fn cfg(&self) -> Config {
-        let (mut c, _) = Config::from_env(&|_| None, false);
+        let (mut c, _) = Config::from_env(&|_| None, &throttle::places::Host::none());
         c.root = self.root().to_path_buf();
         c.poll = Duration::from_millis(200);
         c.wait_log = Duration::from_secs(1);

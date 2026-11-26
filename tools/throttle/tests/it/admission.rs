@@ -407,27 +407,34 @@ fn the_history_moves_with_the_lock_folder_and_reads_the_old_file_once() {
         History::moved(rig.root(), rig.root()).expected_secs("only in the old file"),
         Some(1.0)
     );
-    // The lock folder is THROTTLE_DIR, which throttle has always honoured; THROTTLE_MOVED_FROM names the old one, and without it nothing else
-    // is read (a test's or a CI job's throttle never reads the machine's old folder).
+    // The lock folder is THROTTLE_DIR; THROTTLE_MOVED_FROM names the old one, and without it only a folder with a history is read (a test's
+    // or a CI job's throttle never reads the machine's old folder: Host::none() has none).
+    let host = throttle::places::Host::none();
     let vars = |k: &str| match k {
         "THROTTLE_DIR" => Some(new_dir.display().to_string()),
         "THROTTLE_MOVED_FROM" => Some(rig.root().display().to_string()),
         _ => None,
     };
-    let (c, _) = throttle::config::Config::from_env(&vars, true);
+    let (c, _) = throttle::config::Config::from_env(&vars, &host);
     assert_eq!((c.root.as_path(), c.moved_from.as_deref()), (new_dir.as_path(), Some(rig.root())));
-    let (c, _) = throttle::config::Config::from_env(&|_| None, true);
+    let (c, _) = throttle::config::Config::from_env(&|_| None, &host);
     assert_eq!(c.moved_from, None);
-    // HEAVY_DIR alone (what ./dev sets): heavy names its own legacy folder as the old one, when it exists (ER-22: no caller repeats it).
-    let only_dir = |k: &str| (k == "HEAVY_DIR").then(|| new_dir.display().to_string());
-    let (c, _) = heavy::config::Config::from_env(&only_dir, true);
-    assert_eq!(c.moved_from.as_deref(), Some(std::path::Path::new(heavy::config::LEGACY_ROOT)));
-    let (c, _) = heavy::config::Config::from_env(&only_dir, false);
-    assert_eq!(c.moved_from, None, "no legacy folder on this machine: nothing to read");
-    let legacy = |k: &str| (k == "HEAVY_DIR").then(|| heavy::config::LEGACY_ROOT.to_string());
+    // The old folders throttle names itself (ER-22: no caller repeats them): `<dev-targets>/throttle`, then the legacy folder, when they hold a history.
+    let legacy = std::path::Path::new(throttle::places::LEGACY_ROOT);
+    let has = |d: &std::path::Path| d == legacy;
+    let with_old = throttle::places::Host {
+        has_history: &has,
+        ..throttle::places::Host::none()
+    };
+    let default_dir = |k: &str| (k == "HOME").then(|| new_dir.display().to_string());
+    let (c, _) = throttle::config::Config::from_env(&default_dir, &with_old);
+    assert_eq!(c.moved_from.as_deref(), Some(legacy));
+    let (c, _) = throttle::config::Config::from_env(&default_dir, &host);
+    assert_eq!(c.moved_from, None, "no old folder with a history on this machine: nothing to read");
+    let only_dir = |k: &str| (k == "THROTTLE_DIR").then(|| new_dir.display().to_string());
     assert_eq!(
-        heavy::config::Config::from_env(&legacy, true).0.moved_from,
+        throttle::config::Config::from_env(&only_dir, &with_old).0.moved_from,
         None,
-        "the legacy folder itself did not move"
+        "a folder named in the environment reads no old folder of the machine"
     );
 }

@@ -180,7 +180,7 @@ fn the_rule_in_numbers() {
 #[test]
 fn auto_is_the_default_and_a_number_is_a_maximum() {
     let get = |pairs: &'static [(&'static str, &'static str)]| {
-        Config::from_env(&|k| pairs.iter().find(|(n, _)| *n == k).map(|(_, v)| (*v).to_string()), false)
+        Config::from_env(&|k| pairs.iter().find(|(n, _)| *n == k).map(|(_, v)| (*v).to_string()), &throttle::places::Host::none())
     };
     let (c, w) = get(&[("THROTTLE_CPUS", "14")]);
     assert_eq!((c.slots, c.cpus), (2, 14));

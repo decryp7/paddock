@@ -1,11 +1,11 @@
 //! The `throttle` program: arguments and environment in, ports wired to the real clock, process table and load.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use throttle::cli::{self, Cli, USAGE};
 use throttle::clock::{Clock, SystemClock};
-use throttle::config::{Config, LEGACY_ROOT};
+use throttle::config::Config;
 use throttle::exit::{self, process_exit};
 use throttle::gate::SysLoad;
 use throttle::lock::{Request, Throttle};
@@ -71,7 +71,6 @@ fn main() {
 
 fn real_main() -> i32 {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let (mut cfg, warnings) = Config::from_env(&env_get, Path::new(LEGACY_ROOT).is_dir());
     let clock: Arc<dyn Clock> = Arc::new(SystemClock);
     let pid = std::process::id();
     // One correlation id per run; an id handed in by a caller (a dev tool, CI) is reused and passed on to the command.
@@ -95,6 +94,10 @@ fn real_main() -> i32 {
         }
         _ => {}
     }
+    // The dev-targets folder is derived once: the run logs go under it, and `<dev-targets>/throttle` is an old lock folder.
+    let dev_targets = if matches!(parsed, Cli::Dir) { None } else { dev_targets() };
+    let host = throttle::places::Host::real(dev_targets.clone());
+    let (mut cfg, warnings) = Config::from_env(&env_get, &host);
     if let Cli::Run(r) = &parsed {
         if let Some(g) = r.gate_load {
             cfg.gate_load = g;
@@ -107,8 +110,16 @@ fn real_main() -> i32 {
             cfg.log_file = Some(f.into());
         }
     }
+    if matches!(parsed, Cli::Dir) {
+        // Only the folder on stdout (a caller reads it); what is wrong with a settings file goes to stderr.
+        println!("{}", cfg.root.display());
+        for w in &warnings {
+            eprintln!("throttle: {w}");
+        }
+        return 0;
+    }
     if matches!(parsed, Cli::Run(_)) && cfg.runs.is_none() {
-        cfg.runs = dev_targets().map(|d| d.join("runs"));
+        cfg.runs = dev_targets.map(|d| d.join("runs"));
     }
     let log = Arc::new(Logger::new(
         run_id.clone(),

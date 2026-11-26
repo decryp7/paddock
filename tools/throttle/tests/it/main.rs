@@ -5,6 +5,7 @@ mod capture;
 mod filelock;
 mod helpers;
 mod logging;
+mod places;
 mod ported;
 mod priority;
 mod procutil;

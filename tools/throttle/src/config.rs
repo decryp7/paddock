@@ -1,11 +1,9 @@
 //! Settings, from the environment and the command line. Names: `THROTTLE_*` first, then the legacy `PLOCK_*` (and heavy.sh's
 //! `HEAVY_LOCK_DIR`, `THROTTLE_SLOTS`). A value that does not parse is reported and the default used (fail soft, say why).
 
-use std::path::{Path, PathBuf};
+use crate::places::{self, Host};
+use std::path::PathBuf;
 use std::time::Duration;
-
-/// The folder the shell plock has always used on the agents' Mac; the default when it exists.
-pub const LEGACY_ROOT: &str = "/private/tmp/claude-501";
 
 /// Everything the lock needs to know.
 #[derive(Debug, Clone)]
@@ -37,8 +35,8 @@ pub struct Config {
     pub slots: u32,
     /// The number of CPU cores the slot rule counts against the load (`THROTTLE_CPUS`, else what the OS says).
     pub cpus: u32,
-    /// The lock folder this one moved from: `THROTTLE_MOVED_FROM`, else [`LEGACY_ROOT`] when `THROTTLE_DIR` names another folder and the
-    /// legacy one exists. Its history file is read once ([`crate::history::History::of`]). None: nothing moved, nothing else is read.
+    /// The lock folder this one moved from ([`places::moved_from`]: `THROTTLE_MOVED_FROM`, else `<dev-targets>/throttle` or the legacy
+    /// `/private/tmp/claude-501` when it holds a history). Its history file is read once ([`crate::history::History::of`]). None: nothing moved, nothing else is read.
     pub moved_from: Option<PathBuf>,
     /// The troubleshooting log file (None: the default under `root`).
     pub log_file: Option<PathBuf>,
@@ -89,20 +87,11 @@ fn first(get: &dyn Fn(&str) -> Option<String>, names: &[&str]) -> Option<String>
 
 impl Config {
     /// Settings from an environment lookup (`std::env::var` in the program, a map in tests).
-    pub fn from_env(get: &dyn Fn(&str) -> Option<String>, legacy_exists: bool) -> (Config, Warnings) {
+    pub fn from_env(get: &dyn Fn(&str) -> Option<String>, host: &Host<'_>) -> (Config, Warnings) {
         let mut w = Warnings::new();
         let alias = |k: &str| aliased(get, k);
         let get: &dyn Fn(&str) -> Option<String> = &alias;
-        let root = first(get, &["THROTTLE_DIR", "PLOCK_DIR", "PLOCK_ROOT"])
-            .map(PathBuf::from)
-            .unwrap_or_else(|| {
-                if legacy_exists {
-                    PathBuf::from(LEGACY_ROOT)
-                } else {
-                    let base = first(get, &["TMPDIR", "TEMP"]).unwrap_or_else(|| "/tmp".into());
-                    PathBuf::from(base).join("throttle-lock")
-                }
-            });
+        let (root, source) = places::resolve_root(get, host, &mut w);
         if let Some(v) = first(get, &["HEAVY_LOCK_DIR"]) {
             w.push(format!(
                 "HEAVY_LOCK_DIR={v:?} is heavy.sh's slot folder and is ignored: throttle uses {} (set THROTTLE_DIR to choose; heavy.sh callers must move to throttle at the same time)",
@@ -141,7 +130,7 @@ impl Config {
         };
         let flag = |n: &str| get(n).is_some_and(|v| v == "1");
         let cfg = Config {
-            root,
+            root: root.clone(),
             poll: Duration::from_secs_f64(poll),
             wait_log: Duration::from_secs_f64(wait_log),
             unreadable_limit: unreadable as u64,
@@ -152,13 +141,8 @@ impl Config {
             slots,
             drain_after: Duration::from_secs_f64((priority_max / 6.0).max(1.0)),
             cpus,
-            // THROTTLE_MOVED_FROM, else heavy's own legacy folder when THROTTLE_DIR chose another one and the legacy one exists: heavy names
-            // its legacy folder itself (ER-22), so a caller only sets THROTTLE_DIR. A run whose folder came from PLOCK_* or the default reads
-            // nothing else (a test's heavy never reads the machine's old folder).
-            moved_from: first(get, &["THROTTLE_MOVED_FROM"]).map(PathBuf::from).or_else(|| {
-                (legacy_exists && first(get, &["THROTTLE_DIR"]).is_some_and(|d| Path::new(&d) != Path::new(LEGACY_ROOT)))
-                    .then(|| PathBuf::from(LEGACY_ROOT))
-            }),
+            // The old lock folder with a history, named by places::moved_from (ER-22: no caller repeats it).
+            moved_from: places::moved_from(get, host, &root, &source),
             log_file: first(get, &["THROTTLE_LOG_FILE"]).map(PathBuf::from),
             verbose: flag("THROTTLE_VERBOSE"),
             stderr_tail: get("THROTTLE_STDERR_TAIL").is_none_or(|v| v != "0"),
@@ -201,7 +185,7 @@ mod tests {
 
     fn cfg(pairs: &[(&str, &str)]) -> (Config, Warnings) {
         let m: std::collections::HashMap<String, String> = pairs.iter().map(|(k, v)| ((*k).into(), (*v).into())).collect();
-        Config::from_env(&|k| m.get(k).cloned(), false)
+        Config::from_env(&|k| m.get(k).cloned(), &Host::none())
     }
 
     #[test]
@@ -288,8 +272,17 @@ mod tests {
 
     #[test]
     fn defaults() {
-        let (c, _) = Config::from_env(&|k| (k == "THROTTLE_CPUS").then(|| "14".to_string()), true);
-        assert_eq!(c.root, PathBuf::from(LEGACY_ROOT));
+        let get = |k: &str| match k {
+            "THROTTLE_CPUS" => Some("14".to_string()),
+            "HOME" => Some("/Users/u".to_string()),
+            _ => None,
+        };
+        let host = Host {
+            os: paddock_env::Os::MacOs,
+            ..Host::none()
+        };
+        let (c, _) = Config::from_env(&get, &host);
+        assert_eq!(c.root, PathBuf::from("/Users/u/Library/Application Support/throttle"));
         assert_eq!((c.gate_load, c.slots, c.wait_log), (30.0, 2, Duration::from_secs(60)));
         assert!(c.log_path("2026-10-31").ends_with("throttle-logs/throttle.2026-10-31.log"));
     }

@@ -6,6 +6,8 @@
 pub enum Cli {
     /// `status`.
     Status,
+    /// `dir`: print the lock folder this environment resolves to ([`crate::places`]), the one definition `./dev` asks.
+    Dir,
     /// `run ...`.
     Run(RunArgs),
     /// `mark <name> --pid P [--remove]`: announce (or withdraw) a CI job on this host (ADR 0102).
@@ -55,13 +57,14 @@ pub struct RunArgs {
 }
 
 /// Usage text.
-pub const USAGE: &str = "usage: throttle run [--high] [--no-gate] [--low] [--gate-load N] [--slots N] [--queue-max S] [--queue-stall S] [--run-max S] [--stall S] [--verbose] [--log-file FILE] <agent-name> -- <command...>\n       throttle status\n       throttle mark [--remove] ci-<name> --pid P   (a CI job on this host: normal runs yield while it lives, up to THROTTLE_CI_MAX)\nExit codes: the command's own; 64 usage, 75 lock not taken, 78 refused (home guard), 79 queue limit or stalled queue, 80 run limit, 81 hung (--stall), 126/127 cannot run it, 129/130/143 stopped by a signal.\n";
+pub const USAGE: &str = "usage: throttle run [--high] [--no-gate] [--low] [--gate-load N] [--slots N] [--queue-max S] [--queue-stall S] [--run-max S] [--stall S] [--verbose] [--log-file FILE] <agent-name> -- <command...>\n       throttle status\n       throttle dir   (print the lock folder: THROTTLE_DIR, else config.toml `dir`, else the per-user state folder)\n       throttle mark [--remove] ci-<name> --pid P   (a CI job on this host: normal runs yield while it lives, up to THROTTLE_CI_MAX)\nExit codes: the command's own; 64 usage, 75 lock not taken, 78 refused (home guard), 79 queue limit or stalled queue, 80 run limit, 81 hung (--stall), 126/127 cannot run it, 129/130/143 stopped by a signal.\n";
 
 /// Parses the arguments after the program name. Err is the message to print (exit 64).
 pub fn parse(args: &[String]) -> Result<Cli, String> {
     let mut it = args.iter().peekable();
     match it.next().map(String::as_str) {
         Some("status") => Ok(Cli::Status),
+        Some("dir") => Ok(Cli::Dir),
         Some("--help" | "-h") => Ok(Cli::Help),
         Some("--version" | "-V") => Ok(Cli::Version),
         Some("run") => {
@@ -193,6 +196,7 @@ mod tests {
     #[test]
     fn plock_shapes() {
         assert_eq!(p("status"), Ok(Cli::Status));
+        assert_eq!(p("dir"), Ok(Cli::Dir));
         let Ok(Cli::Run(r)) = p("run --high --no-gate A -- cargo test -p x") else {
             panic!("not run")
         };

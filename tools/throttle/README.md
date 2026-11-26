@@ -75,7 +75,7 @@ What it promises, each with a test (`tests/it/filelock.rs`, `ported.rs`, `slots.
 
 1. **The lock folder is local.** Kernel file locks on SMB or NFS are emulated or per client, so a lock folder on a network file system is
    refused (`statfs` `f_fstypename` on macOS, the `f_type` magic on Linux, UNC paths and `GetDriveTypeW` on Windows) with a message that says
-   to set `THROTTLE_DIR` to a local folder; exit 75. A file system the OS did not name is logged and let through.
+   to set `THROTTLE_DIR` (or `dir` in `config.toml`) to a local folder; exit 75. A file system the OS did not name is logged and let through.
 2. **The throttle is taken on the host around a container, never inside one.** A container run (a command line with `docker`, `podman`,
    `nerdctl` or `linux-container.sh`) holds a slot on the host and runs alone; the container gets none of throttle's variables and does not
    mount the lock folder (a lock taken inside a VM-backed container does not exclude the host: a bind mount is another kernel).
@@ -184,8 +184,7 @@ the user installs, or a stable path the wrapper finds). `HEAVY_LOCK_DIR` is igno
 
 | Setting | Names | Default |
 |---|---|---|
-<<<<<<< HEAD:tools/throttle/README.md
-| lock folder | `THROTTLE_DIR`, `PLOCK_DIR`, `PLOCK_ROOT`, `HEAVY_LOCK_DIR` | `/private/tmp/claude-501` if it exists, else `$TMPDIR/throttle-lock` |
+| lock folder (throttle decides it; nothing has to pass it) | in this order: `THROTTLE_DIR` (aliases `PLOCK_DIR`, `PLOCK_ROOT`, `HEAVY_DIR`); the `dir` key of `<user config folder>/throttle/config.toml` (below); else the per-user state folder. `HEAVY_LOCK_DIR` is ignored. `throttle dir` prints the answer | macOS `~/Library/Application Support/throttle`, Linux `$XDG_STATE_HOME/throttle` or `~/.local/state/throttle`, Windows `%LOCALAPPDATA%\throttle`; `$TMPDIR/throttle-lock` only when no home can be found |
 | poll seconds | `THROTTLE_POLL`, `PLOCK_POLL` | 5 |
 | seconds between "waiting for X" lines | `THROTTLE_WAIT_LOG`, `PLOCK_WAIT_LOG` | 60 |
 | an unreadable ticket removed after | `THROTTLE_UNREADABLE_LIMIT`, `PLOCK_UNREADABLE_LIMIT` | 120 s |
@@ -193,31 +192,30 @@ the user installs, or a stable path the wrapper finds). `HEAVY_LOCK_DIR` is igno
 | priority bound (`--high` yields to nobody; others stop yielding after this) | `THROTTLE_PRIORITY_MAX` | 1800 s |
 | most steps at once | `--slots N`, `THROTTLE_SLOTS` (`auto` or 1..64) | auto: half the cores, at most 5 |
 | the row's key for the run-time history (quick rows go first) | `THROTTLE_ROW` | none: no history is read or kept |
-| the run-time history | `heavy-history.tsv` in the lock folder; `THROTTLE_MOVED_FROM` names the folder it moved from, whose file is read until the first record copies it over (`./dev` sets `THROTTLE_DIR=<dev-targets>/throttle`, which a reboot keeps, and `THROTTLE_MOVED_FROM=/private/tmp/claude-501`; the Mac CI runner sets the same `THROTTLE_DIR`) | the lock folder |
+| the run-time history | `heavy-history.tsv` in the lock folder; the old folder it moved from has its file read until the first record copies it over, once: `THROTTLE_MOVED_FROM`, else `<dev-targets>/throttle` (the folder `./dev` used to hand throttle), else `/private/tmp/claude-501`, the first that is another folder and holds a history | the lock folder |
 | a run inside a run | `THROTTLE_HELD` (`<run id>:<pid>`), set by throttle for its command: a throttle run that inherits it while that holder lives runs inside its slot, with no ticket and no queue (ER-43: `./dev throttle -- ./dev gen check` once held the only slot for 36 min while its inner steps queued for it) | not set |
 | cores counted against the load | `THROTTLE_CPUS` | the OS's count |
 | wait for the command's output pipes after it exited (ms) | `THROTTLE_DRAIN_MS` | 500 |
 | hang detector: no output and no CPU for this many seconds ends the command (exit 81) | `THROTTLE_STALL` (`--stall`) | off |
-=======
-| lock folder | `HEAVY_DIR`, `PLOCK_DIR`, `PLOCK_ROOT`, `HEAVY_LOCK_DIR` | `/private/tmp/claude-501` if it exists, else `$TMPDIR/heavy-lock` |
-| poll seconds | `HEAVY_POLL`, `PLOCK_POLL` | 5 |
-| seconds between "waiting for X" lines | `HEAVY_WAIT_LOG`, `PLOCK_WAIT_LOG` | 60 |
-| ownerless lock/ticket broken after | `HEAVY_UNREADABLE_LIMIT`, `PLOCK_UNREADABLE_LIMIT` | 120 s |
-| load gate threshold / poll | `HEAVY_GATE_LOAD` (`--gate-load`), `HEAVY_GATE_POLL` | 30 / 20 s |
-| priority bound (`--high` yields to nobody; others stop yielding after this) | `HEAVY_PRIORITY_MAX` | 1800 s |
-| most steps at once | `--slots N`, `HEAVY_SLOTS` (`auto` or 1..64) | auto: half the cores, at most 5 |
-| the row's key for the run-time history (quick rows go first) | `HEAVY_ROW` | none: no history is read or kept |
-| the run-time history | `heavy-history.tsv` in the lock folder; the folder it moved from (`HEAVY_MOVED_FROM`, else `/private/tmp/claude-501` when `HEAVY_DIR` names another folder and that one exists) has its file read until the first record copies it over (`./dev` sets `HEAVY_DIR=<dev-targets>/throttle`, which a reboot keeps; the Mac CI runner sets the same `HEAVY_DIR`) | the lock folder |
-| a run inside a run | `HEAVY_HELD` (`<run id>:<pid>`), set by heavy for its command: a heavy run that inherits it while that holder lives runs inside its slot, with no ticket and no queue (ER-43: `./dev heavy -- ./dev gen check` once held the only slot for 36 min while its inner steps queued for it) | not set |
-| cores counted against the load | `HEAVY_CPUS` | the OS's count |
-| wait for the command's output pipes after it exited (ms) | `HEAVY_DRAIN_MS` | 500 |
-| hang detector: no output and no CPU for this many seconds ends the command (exit 81) | `HEAVY_STALL` (`--stall`) | off |
->>>>>>> origin/main:tools/heavy/README.md
 | the folder of the run logs is `<this>/runs` | `PADDOCK_DEV_TARGETS`, else git config `paddock.worktreeRoot`'s parent, else `PADDOCK_WORKTREE_ROOT`'s | `<lock folder>/runs` |
 | correlation id | `DEVKIT_RUN_ID` is reused as the run id and passed to the command | made per run |
 | log | `THROTTLE_LOG_FILE` (`--log-file`), `THROTTLE_VERBOSE=1` (`--verbose`) | `<folder>/throttle-logs/throttle.<day>.log` |
 | stderr tail kept for failures | `THROTTLE_STDERR_TAIL=0` turns it off | on |
 | home guard | `THROTTLE_ALLOW_HOME_TARGET=1`, `THROTTLE_BUILD_ROOT_HINT` | on |
+
+### Where the lock folder is decided (user decision 2026-11-26)
+
+`./dev`, CI and the Mac runner's daemon pass no lock folder: they all run `throttle`, and it resolves the same folder for the same user.
+`./dev wait --plock` asks `throttle dir` for it. A process with no `HOME` (a launchd daemon with `UserName` set, a service) finds the home
+through the user database (`getpwuid_r`). The network-folder refusal applies to whatever folder results, from any of the three steps.
+
+`<user config folder>/throttle/config.toml` (macOS `~/Library/Application Support/throttle/`, Linux `$XDG_CONFIG_HOME/throttle/` or
+`~/.config/throttle/`, Windows `%APPDATA%\throttle\`) reads one top-level key, an absolute folder as a quoted string; a Windows path goes in
+a `'literal string'`. Anything else in the file is skipped; a value that cannot be used is said once and the default is used:
+
+```toml
+dir = "/Volumes/work/throttle"
+```
 
 ## Parity with the two shell scripts
 
