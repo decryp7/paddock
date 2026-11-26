@@ -4397,3 +4397,19 @@ spec `data.spec.ts:301` (theme switch redraws the canvases) failed in the same r
   fixture author that a per-test git repository is the slow shape.
 - **Fix (user decision 74).** The helper moved to `paddock_testkit::git_fixture` (temp folder from the kit, owner, size limit and eviction
   rule in its doc), and rule NEW-git-fixtures with the report-only check C174 flags a fixture builder with six or more git starts per test.
+
+## A link-server test read the server's refusals the moment its client saw the end, and macOS ends the client first (2026-11-26, fix/ipc-link-flakes)
+- **Symptom.** ci.yml run 9150, job 51219 (`crate (macos-latest)`): `paddock-ipc::it edges::a_link_server_with_no_descriptor_left_to_accept_tells_the_waiting_client_why`
+  failed at `edges.rs:470` "the server records why: refused: []" in 0.095 s and passed on its retry.
+- **Hypotheses and what refuted them.** A free descriptor (the accept would have succeeded and the client waited seconds: the try took
+  0.095 s), an accept thread that never ran (the client would stay queued until its guard), another error (the list was empty), shared
+  paths or timing assertions (none in the test): all ruled out.
+- **Root cause.** XNU's `accept` closes a connection it cannot give a descriptor ("Don't put this back on the socket ... Drop the
+  socket", `bsd/kern/uipc_syscalls.c`), so the client sees its end inside the failed syscall, before the accept thread records the
+  refusal. The test child printed `refused()` as soon as the client said it was done. A synthetic probe on this Mac showed the client
+  pending before the accept and at EOF right after it, with the server doing nothing more.
+- **Fix.** `LinkServer::wait_refused` (a `Condvar` the record notifies, bounded by a hang guard); the child and the two spin-waits in
+  `edges.rs` and `clocked.rs` use it. Stress (12 loops plus 10 CPU burners): 7 of 3,600 before, 0 of 10,800 after, 7 of 3,600 with the
+  wait removed again.
+- **Class.** A link-server test uses a client-side OS event as the barrier for server state (with ADR 0122's busy rig on Windows,
+  runs 8425 and 9156, the other direction). Redesign: ADR NEW-ipc-link-test-determinism (Proposed).
