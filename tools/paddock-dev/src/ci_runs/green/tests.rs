@@ -86,8 +86,13 @@ fn plan_expecting(plan: &str, name: &str) -> String {
     let Some(e) = fixture_expected().remove(name) else {
         return plan.to_string();
     };
-    let (line, rest) = plan.split_once('\n').expect("a scope line");
-    let mut v: Value = serde_json::from_str(line.strip_prefix("plan scope: ").expect("the scope line")).unwrap();
+    let Some((line, rest)) = plan.split_once('\n') else {
+        return plan.to_string();
+    };
+    let Some(line) = line.strip_prefix("plan scope: ") else {
+        return plan.to_string();
+    };
+    let mut v: Value = serde_json::from_str(line).unwrap();
     v["expected"][name] = json!({"job": e.job, "leg": e.leg, "projects": e.projects});
     format!("plan scope: {v}\n{rest}")
 }
@@ -163,6 +168,15 @@ impl Run {
     }
     fn partial(mut self, plan: &str) -> Run {
         self.plan = plan.to_string();
+        // A job the fixture knows is in the plan's expected map, as the planner writes it (an old line has no map).
+        for name in self
+            .jobs
+            .iter()
+            .filter_map(|j| j["name"].as_str().map(str::to_string))
+            .collect::<Vec<_>>()
+        {
+            self.plan = plan_expecting(&self.plan, &name);
+        }
         self
     }
     fn json(&self) -> Value {
