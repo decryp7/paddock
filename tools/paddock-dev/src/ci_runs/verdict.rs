@@ -384,13 +384,30 @@ pub fn trial(client: &mut Client, workflow: &str, branch: &str, member_sha: &str
     Trial::NoRun
 }
 
+/// A trial run that ended green counts only when its declared scope ran, as for `ci verdict --landing`: every job its scope line
+/// expects ran and passed, and the line covers a full run or a landing's own diff (ADR 0113, ADR 0123 §7). A narrowed run, a run whose
+/// plan job logged no readable line and a declared job that was skipped are never green (ER-33).
+fn declared_scope_of_trial(client: &mut Client, run: &RunInfo) -> Trial {
+    let read = read_mode_jobs_for(client, run, true, false);
+    match read.mode {
+        Mode::Full => Trial::Green { run: run.id },
+        Mode::Partial(_) if read.landing.is_some() => Trial::Green { run: run.id },
+        Mode::Incomplete(why) => Trial::Red {
+            run: run.id,
+            reason: format!("the run is green but its declared scope was not run ({why})"),
+        },
+        Mode::Partial(why) => Trial::NotMeasured(format!("run {} is green but did not test a full scope ({why})", run.id)),
+        Mode::Unknown(why) => Trial::NotMeasured(format!("run {}: its declared scope cannot be read ({why})", run.id)),
+    }
+}
+
 fn state_of(client: &mut Client, run: &RunInfo) -> Trial {
     if !run.finished() {
         return Trial::Running { run: run.id };
     }
     match run.conclusion.as_str() {
         "success" => match read_earlier(client, run) {
-            Earlier::Clean => Trial::Green { run: run.id },
+            Earlier::Clean => declared_scope_of_trial(client, run),
             Earlier::Failed(why) => Trial::Red {
                 run: run.id,
                 reason: format!("the run is green only after a retry ({why})"),
@@ -1878,9 +1895,37 @@ mod tests {
         trial(&mut c, "ci.yml", "feat/x", MEMBER)
     }
 
+    /// The jobs and plan log of trial run `run`: the plan job logs `plan_log`, and the one job the line expects ends `conformance`.
+    fn trial_scope(f: &mut Fake, run: u64, plan_log: &str, conformance: &str) {
+        f.json(
+            &format!("{API}/runs/{run}/jobs?limit=50&page=1"),
+            json!({"total_count": 2, "jobs": [
+                {"id": run + 100, "name": "plan (affected projects)", "conclusion": "success"},
+                {"id": run + 200, "name": "conformance (checks, release scripts)", "conclusion": conformance}]}),
+        );
+        f.log(run + 100, plan_log);
+    }
+
+    #[test]
+    fn a_green_trial_counts_only_when_its_declared_scope_ran() {
+        let green = |plan: &str, conformance: &str| {
+            let mut f = trial_server(vec![trial_run(9, TRIAL_HEAD, "completed", "success")], &[(TRIAL_HEAD, MEMBER)]);
+            trial_scope(&mut f, 9, plan, conformance);
+            ask_trial(&mut f)
+        };
+        assert_eq!(green(run_scope::TEST_COMPLETE, "success"), Trial::Green { run: 9 });
+        // A declared job skipped although the run ended green (the shape of run 9167's e2e): red, not a pass.
+        assert!(matches!(green(run_scope::TEST_COMPLETE, "skipped"), Trial::Red { run: 9, .. }));
+        // A narrowed run (its scope is not what a push to main does, and no landing's own diff): not a pass.
+        assert!(matches!(green(run_scope::TEST_PARTIAL, "success"), Trial::NotMeasured(_)));
+        // A plan job with no readable scope line: not measured.
+        assert!(matches!(green("plan verdict: complete=true\n", "success"), Trial::NotMeasured(_)));
+    }
+
     #[test]
     fn a_finished_trial_of_this_head_is_green_or_red_by_its_conclusion() {
         let mut f = trial_server(vec![trial_run(9, TRIAL_HEAD, "completed", "success")], &[(TRIAL_HEAD, MEMBER)]);
+        trial_scope(&mut f, 9, run_scope::TEST_COMPLETE, "success");
         assert_eq!(ask_trial(&mut f), Trial::Green { run: 9 });
         let mut f = trial_server(vec![trial_run(9, TRIAL_HEAD, "completed", "failure")], &[(TRIAL_HEAD, MEMBER)]);
         assert!(matches!(ask_trial(&mut f), Trial::Red { run: 9, .. }));
