@@ -338,10 +338,11 @@ mod tests {
     fn the_default_trial_folder_is_below_the_dev_targets_folder() {
         let dt = abs("/dt");
         let env = |k: &str| (k == DEV_TARGETS_ENV).then(|| dt.clone());
-        let nowhere = std::env::temp_dir().join("paddock-no-such-repo-for-trial-dir");
-        assert_eq!(trial_dir(&nowhere, None, &env).unwrap(), PathBuf::from(&dt).join("trials"));
+        let tmp = tempfile::tempdir().unwrap();
+        let nowhere = tmp.path();
+        assert_eq!(trial_dir(nowhere, None, &env).unwrap(), PathBuf::from(&dt).join("trials"));
         let none = |_: &str| None;
-        assert!(trial_dir(&nowhere, None, &none).is_err());
+        assert!(trial_dir(nowhere, None, &none).is_err());
     }
 
     #[test]
