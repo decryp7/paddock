@@ -28,6 +28,9 @@
  "crate": [
   "crates"
  ],
+ "test-cache-shadow": [
+  "crates"
+ ],
  "app": [
   "apps"
  ],

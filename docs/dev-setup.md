@@ -103,7 +103,8 @@ tools and never by your shell profile (user decision 2026-11-16; docs/research/s
   rule: CI's own, whose checkouts are not below this root, and a developer's). It is a machine file, not a line in the repository, because
   Windows cannot start an extensionless script as `rustc-wrapper` (and a `.cmd` file is CRLF, which a shell script cannot be, ER-61). The
   shim sends a rustc compile to sccache only when our server listens on the port; with none, the launcher recorded in
-  `<tool cache>/sccache-run/launcher` starts ours (one start at a time, `start.lock`), and when it is still down the compile runs plain
+  `<tool cache>/sccache-run/launcher` (the primary checkout's `./dev`, which stays; never a run's own held binary, which is removed when the
+  run ends) starts ours (one start at a time, `start.lock`), and when it is still down the compile runs plain
   rustc, so a build never fails because of the cache. To switch it off, delete the file.
 - The server starts with `SCCACHE_BASEDIRS` (sccache 0.20: the longest matching base is stripped from every path in a Rust compile's
   key) naming exactly this repository's worktrees, the main checkout included (`git worktree list`, wherever they live; never a

@@ -36,6 +36,8 @@ package.json     the one npm workspace and package-lock.json (ui, eslint, icons,
   `./dev gates check` and `./dev plan` read most folders, and a sparse cone makes them stop with an `::error::` line naming the
   missing folders (measurements: [benchmarks](docs/benchmarks.md#2026-11-12-full-against-sparse-worktree-checkout-fixworktree-gates-profile));
   `--sparse` is only for a `--detach` review copy, and `-b <branch>` attaches to a branch that already exists.
+  `add` also prints a WARNING (never a refusal) naming another locked worktree, its owner and the shared files when it changes files the new base
+  carries or its branch has the same topic (`tools/paddock-dev/src/worktree/overlap.rs`).
   Never work in the main checkout; never `git stash`.
 - **New rules take their number at landing (user, 2026-11-25).** A branch writes a new rule in docs/rules.md as `NEW-<slug>.` and
   cites it as `rule NEW-<slug>`; the train integrator assigns the next free number when the train lands and replaces every citation
@@ -117,7 +119,7 @@ package.json     the one npm workspace and package-lock.json (ui, eslint, icons,
 - The public API is `ui/projects/paddock-ui/src/public-api.ts` and the CSS custom properties `--pd-*`, `data-theme`,
   `data-accent`, `data-density`. Any change is a CHANGELOG entry; no backward-compatibility shims before Paddock's v1.
 - Shared Rust crates have a pure core and a `tauri` feature for the adapter; typed errors, doc comments on public items,
-  no `unwrap` on I/O or user data, bounded resources. Coverage: crates >= 90% lines, security code 99% target, report-only for now (CI's llvm-cov gate, scripts/coverage-gate.mjs), components 100%.
+  no `unwrap` on I/O or user data, bounded resources. Coverage: crates >= 90% lines, security code 99% target, report-only for now (llvm-cov and scripts/coverage-gate.mjs run in the nightly, a release's gates and a tag only, never on a train, a branch or a push to main: user 2026-11-26, ADR 0116 D4), components 100%.
 - Anchor every ignore rule (`/ui/dist/`, not `dist/`); `node_modules` (no trailing slash, so it also matches a symlink) is the one unanchored rule; conformance C57 fails on any tracked symlink.
 
 ## Testing and quality gates
@@ -135,7 +137,9 @@ package.json     the one npm workspace and package-lock.json (ui, eslint, icons,
 - **No VM or container on this Mac (user, 2026-11-26; docs/rules.md rule 101).** `./dev check --pre-push` and the member gate
   start no Docker, OrbStack or Fusion: there is no `clippy-linux`, `tests-linux` or `--warm-linux`. Linux Clippy (`-D warnings`),
   the Linux tests and the orphan guardian's acting tests as uid 65534 are CI's Linux jobs on the Linux runner (ci.yml: the crates job's
-  "Orphan guardian as a user (Linux)" step, each app's Linux leg); Windows stays CI's. The register (`NOT_RUN` in
+  "Orphan guardian as a user (Linux)" step, each app's Linux leg); the Windows Clippy runs here through xwin for `crates`, the apps that
+  opt in (`windowsClippy`) and the developer tools `tools/paddock-dev` and `tools/heavy` (user, 2026-11-26: Windows-only dead code found
+  only by CI four times in a day), as heavy rows in parallel with the others and through sccache; Windows tests stay CI's. The register (`NOT_RUN` in
   `pre_push/gates.rs`) names them CI-owned.
 - The member gate (`./dev check --pre-push --member-gate`, run by `./dev merge check --gates`) also runs the full nextest `ci`
   profile of every touched Cargo workspace (the plan's reached packages, as CI's member run) on the host (`tests <ws>`). Inactive apps

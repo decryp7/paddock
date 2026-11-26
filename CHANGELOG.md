@@ -4,6 +4,14 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### C173: no new non-Rust tooling file (ADR 0022 section 3.7 a and b)
+- `./dev check run --only C173` reads git's tracked list and fails (blocking) on a `.sh`, `.ps1`, `.py`, `.mjs`, `.js`, `.cjs` or `.ts`
+  file in `scripts/`, `tools/`, `conformance/`, `.gitea/`, `ci-image/` or `apps/<app>/scripts/` that `conformance/tooling-files.json`
+  does not name. The list holds 4 permanent entries (the bootstrap and the helpers that run before `./dev` exists) and the baseline of
+  2026-11-26 (443 files), which may only shrink: the shared allow-list reader compares it with the merge base (ER-46). Fixture and
+  golden folders and Playwright and Vitest suite files are not tooling. 11 such files had landed since 2026-11-12 because the check the
+  ADR promised was never built. The growth guard is a warning until the list is on main, then `growth_blocks` flips to true.
+
 ### No VM or container on the Mac (user, 2026-11-26)
 - `./dev check --pre-push` and the member gate start no container: `clippy-linux`, `tests-linux`, `--warm-linux` and the guardian container run
   are gone; their coverage is CI's Linux jobs. `./dev golden confirm` is removed, and `paddock_testkit::golden::rewritten_notice` now takes
