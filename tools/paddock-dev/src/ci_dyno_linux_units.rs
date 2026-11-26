@@ -203,7 +203,7 @@ mod tests {
     fn go(f: &Fake, env: &[(&str, &str)]) -> (Report, String) {
         let env: HashMap<String, String> = env.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
         let mut out = Vec::new();
-        let r = run(f, &env, Path::new("/repo"), &mut out);
+        let r = run(f, &env, Path::new("repo"), &mut out);
         (r, String::from_utf8(out).unwrap())
     }
 
@@ -215,7 +215,10 @@ mod tests {
             assert_eq!(r.exit, Exit::Ok);
             assert_eq!(out, format!("linux-units: user manager: {state}\n"));
             assert_eq!(r.text, "linux-units: passed");
-            assert_eq!(f.seen.borrow().last().unwrap(), "/repo/apps/dyno /run/user/7");
+            assert_eq!(
+                f.seen.borrow().last().unwrap(),
+                &format!("{} /run/user/7", Path::new("repo").join("apps/dyno").display())
+            );
         }
     }
 
