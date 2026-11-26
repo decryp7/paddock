@@ -40,6 +40,16 @@ pub const DEFAULT_S3_BUCKET: &str = "sccache-paddock";
 /// What `--show-adv-stats` prints as the cache location of a server started with the two-level chain (sccache 0.19.0, measured).
 pub const MULTILEVEL_LOCATION: &str = "Multi-level (2 levels)";
 
+/// The key prefix of this machine's S3 level: CI's own for the same OS and arch (`paddock-ci/<OS>-<arch>`,
+/// [`crate::ci_setup_rust::ci_prefix`], the one definition), so a local build can reuse what CI stored and CI what a local build
+/// stored. (CI's release and tag builds never read the store, so a local write can never reach a release.)
+pub fn default_prefix() -> String {
+    crate::ci_setup_rust::ci_prefix(crate::ci_setup_rust::host_runner_os(), std::env::consts::ARCH)
+}
+
+/// The prefix the local servers used before [`default_prefix`]: a server still running with it is ours and is restarted once.
+const LEGACY_PREFIX: &str = "paddock";
+
 /// The server's port: the caller's `SCCACHE_SERVER_PORT`, else sccache's default.
 pub fn server_port(env: &HashMap<String, String>) -> String {
     env.get("SCCACHE_SERVER_PORT")
@@ -158,7 +168,7 @@ pub fn install_path(env: &HashMap<String, String>) -> Result<PathBuf, String> {
 
 /// The S3 settings of the shared cache (all but the credentials are plain settings, safe to print). Variables:
 /// `PADDOCK_SCCACHE_S3_BUCKET` (required), `PADDOCK_SCCACHE_S3_ENDPOINT` (`host:port`, required), `PADDOCK_SCCACHE_S3_REGION` (default
-/// `auto`), `PADDOCK_SCCACHE_S3_SSL` (`true` or `false`, default `false`), `PADDOCK_SCCACHE_S3_PREFIX` (default `paddock`).
+/// `auto`), `PADDOCK_SCCACHE_S3_SSL` (`true` or `false`, default `false`), `PADDOCK_SCCACHE_S3_PREFIX` (default CI's for this OS and arch, [`default_prefix`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct S3 {
     /// The bucket.
@@ -305,7 +315,7 @@ pub fn backend(env: &HashMap<String, String>) -> Result<Backend, String> {
                 endpoint: need("PADDOCK_SCCACHE_S3_ENDPOINT")?,
                 region: get("PADDOCK_SCCACHE_S3_REGION").unwrap_or("auto").to_string(),
                 ssl: get("PADDOCK_SCCACHE_S3_SSL") == Some("true"),
-                prefix: get("PADDOCK_SCCACHE_S3_PREFIX").unwrap_or("paddock").to_string(),
+                prefix: get("PADDOCK_SCCACHE_S3_PREFIX").map_or_else(default_prefix, str::to_string),
             }))
         }
         other => Err(format!("PADDOCK_SCCACHE_BACKEND is `{other}`; it is auto, local or s3")),
@@ -390,7 +400,7 @@ pub fn choose(env: &HashMap<String, String>, probe: &dyn Fn(&S3) -> Result<(), S
             .to_string(),
         region: "auto".into(),
         ssl: false,
-        prefix: get("PADDOCK_SCCACHE_S3_PREFIX").unwrap_or("paddock").to_string(),
+        prefix: get("PADDOCK_SCCACHE_S3_PREFIX").map_or_else(default_prefix, str::to_string),
     };
     if let Err(e) = probe(&s3) {
         return local(e, true);
@@ -655,29 +665,72 @@ pub(crate) fn basedir_vars(roots: &[String], windows: bool) -> Vec<(String, Stri
     ]
 }
 
-/// The checkouts a local server should treat as one: the worktree `cwd` is in (the nearest folder with a `.git`) first, then its
-/// sibling worktrees (the folders next to it with a `.git`; agents' worktrees all live under one root, docs/dev-setup.md). One server
-/// serves every worktree and reads its base folders only when it starts, so a worktree made later is not in the list until the
-/// server restarts; it then builds correctly, only without sharing its own crates' entries.
+/// The checkouts a local server should treat as one: exactly this repository's worktrees, the main checkout included
+/// (`git worktree list --porcelain` run in `cwd`, so wherever they live on disk), never a sibling folder that is another repository.
+/// One server serves every worktree and reads its base folders only when it starts, so [`prepare`] compares this list with the one
+/// the server started with and restarts it when a worktree came or went. Sorted: the same set is the same stamp. A folder that is
+/// gone (prunable) is left out; not a repository, or git failing, gives no bases.
 pub(crate) fn worktree_roots(cwd: &Path) -> Vec<String> {
-    let Some(top) = cwd.ancestors().find(|a| a.join(".git").exists()) else {
+    let Ok(text) = crate::worktree::git::Git::at(cwd).text(&["worktree", "list", "--porcelain"]) else {
         return Vec::new();
     };
-    let mut roots = vec![top.display().to_string()];
-    if let Some(parent) = top.parent()
-        && let Ok(rd) = std::fs::read_dir(parent)
-    {
-        let mut sibs: Vec<String> = rd
-            .filter_map(Result::ok)
-            .map(|e| e.path())
-            .filter(|p| p != top && p.join(".git").exists())
-            .map(|p| p.display().to_string())
-            .collect();
-        sibs.sort();
-        roots.extend(sibs);
-    }
+    let mut roots: Vec<String> = crate::worktree::git::parse_worktrees(&text)
+        .into_iter()
+        .filter(|w| !w.prunable)
+        .map(|w| w.path)
+        .collect();
+    roots.sort();
     roots
 }
+
+/// The file that records what the server on our port was started with (in its own folder, beside its log).
+fn stamp_file(run: &Path) -> PathBuf {
+    run.join("start-stamp")
+}
+
+/// What the server reads once at its start and its stats cannot confirm: the base folders and the S3 key prefix.
+pub(crate) fn start_stamp(backend: &Backend, basedirs: &[(String, String)]) -> String {
+    let bases = basedirs
+        .iter()
+        .find(|(k, _)| k == "SCCACHE_BASEDIRS")
+        .map_or("", |(_, v)| v.as_str());
+    let prefix = match backend {
+        Backend::Tiered { s3, .. } | Backend::S3(s3) => s3.prefix.as_str(),
+        Backend::Local { .. } => "",
+    };
+    format!("bases={bases}\nprefix={prefix}\n")
+}
+
+/// Whether a running server of ours is stopped and started again: it is ours (by its stats) and what it started with is not what
+/// this call wants (a recorded stamp that differs, or none: an older server, once).
+pub(crate) fn must_restart(ours: bool, recorded: Option<&str>, wanted: &str) -> bool {
+    ours && recorded != Some(wanted)
+}
+
+/// The same backend with another S3 key prefix (the prefix a recorded or an older server was started with); others unchanged.
+fn with_prefix(b: &Backend, prefix: &str) -> Backend {
+    match b {
+        Backend::Tiered { dir, size, s3 } => Backend::Tiered {
+            dir: dir.clone(),
+            size: size.clone(),
+            s3: S3 {
+                prefix: prefix.into(),
+                ..s3.clone()
+            },
+        },
+        Backend::S3(s3) => Backend::S3(S3 {
+            prefix: prefix.into(),
+            ..s3.clone()
+        }),
+        other => other.clone(),
+    }
+}
+
+/// The `CARGO_*` variables CI's jobs have that sccache hashes into every Rust key (sccache 0.20.1 `generate_hash_key`: all of them but a
+/// few): `CARGO_INCREMENTAL=0` and `CARGO_TERM_COLOR=always`,
+/// which setup-rust exports to `$GITHUB_ENV` ([`crate::ci_setup_rust::env_lines`]) for every job that has the cache. The shim exports
+/// them for a rustc compile, so a local key equals CI's and the two share entries; cargo's own environment is left alone (no colour codes in piped output, incremental builds stay). docs/benchmarks.md, "Local keys against CI's".
+pub const CI_KEY_ENV: [(&str, &str); 2] = [("CARGO_INCREMENTAL", "0"), ("CARGO_TERM_COLOR", "always")];
 
 /// The folder beside the sccache binary that holds the shim, so the shim can be called `sccache`.
 const SHIM_DIR: &str = "shim";
@@ -695,11 +748,28 @@ const SHIM_DIR: &str = "shim";
 /// lockfile).
 fn shim_text(bin: &Path) -> String {
     let real = bin.display().to_string().replace('\'', r"'\''");
+    let key_env: String = CI_KEY_ENV.iter().map(|(k, v)| format!("export {k}={v}; ")).collect();
     format!(
-        "#!/bin/sh\n\
+        "#!/bin/bash\n\
 # Written by `./dev sccache env` (tools/paddock-dev/src/local_sccache.rs, shim_text): sccache for everything but a Windows (MSVC) C compile.\n\
+# A rustc compile goes to sccache only when OUR server listens (never sccache's own auto-start, which would run with the caller's\n\
+# environment). With none up, the launcher recorded by `./dev sccache env` starts ours (one start at a time), and when it is still\n\
+# down the compile runs plain rustc, so a build never fails because of the cache.\n\
 case \"$(basename -- \"$1\")\" in\n\
-  rustc | rustc.exe) exec '{real}' \"$@\" ;;\n\
+  rustc | rustc.exe)\n\
+    port=${{SCCACHE_SERVER_PORT:-4226}}\n\
+    up() {{ (exec 3<>/dev/tcp/127.0.0.1/\"$port\") 2>/dev/null; }}\n\
+    if ! up; then\n\
+      run=\"$(dirname -- \"$0\")/../../../../sccache-run\"\n\
+      dev=$(cat \"$run/launcher\" 2>/dev/null)\n\
+      find \"$run/start.lock\" -maxdepth 0 -mmin +2 -exec rmdir {{}} \\; 2>/dev/null\n\
+      if [ -x \"$dev\" ] && mkdir \"$run/start.lock\" 2>/dev/null; then\n\
+        \"$dev\" sccache env >/dev/null 2>&1 </dev/null\n\
+        rmdir \"$run/start.lock\" 2>/dev/null\n\
+      fi\n\
+    fi\n\
+    if up; then {key_env}exec '{real}' \"$@\"; fi\n\
+    exec \"$@\" ;;\n\
   clang-cl | clang-cl.exe | cl | cl.exe) exec \"$@\" ;;\n\
 esac\n\
 for a in \"$@\"; do\n\
@@ -745,6 +815,81 @@ fn write_shim(bin: &Path) -> std::io::Result<()> {
         }
         Ok(f)
     })?)
+}
+
+/// What [`ensure_machine_config`] found or did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MachineConfig {
+    /// The file was made or updated (it is this tool's own).
+    Written,
+    /// The file already says this.
+    Current,
+    /// A file of somebody else's is there; it is not touched.
+    Foreign,
+}
+
+/// The first line of the file [`ensure_machine_config`] owns.
+const MACHINE_CONFIG_MARK: &str = "# Written by `./dev sccache env` (local_sccache::ensure_machine_config); remove the file to stop.";
+
+/// Puts `[build] rustc-wrapper = <shim>` into `<worktree root>/.cargo/config.toml`. Cargo reads the `.cargo/config.toml` of every folder
+/// above where it runs, so every cargo of every worktree, in any shell (an agent's fresh shell too, where `eval "$(./dev sccache env)"` is
+/// never run), uses the shim; the environment's `RUSTC_WRAPPER` still wins (cargo's rule, so CI's own is untouched, and CI's checkouts
+/// are not below this root). It is the machine's file, not the repository's: Windows cannot start an extensionless script as
+/// `build.rustc-wrapper`. A file that is not this tool's (no first-line mark) is left alone.
+///
+/// # Errors
+///
+/// The file or its folder cannot be written.
+pub fn ensure_machine_config(root: &Path, shim: &Path) -> std::io::Result<MachineConfig> {
+    let file = root.join(".cargo").join("config.toml");
+    let text = format!("{MACHINE_CONFIG_MARK}\n[build]\nrustc-wrapper = {:?}\n", shim.display().to_string());
+    match std::fs::read_to_string(&file) {
+        Ok(t) if t == text => return Ok(MachineConfig::Current),
+        Ok(t) if !t.starts_with(MACHINE_CONFIG_MARK) => return Ok(MachineConfig::Foreign),
+        Ok(_) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e),
+    }
+    std::fs::create_dir_all(root.join(".cargo"))?;
+    paddock_env::write_atomic_created(&file, text.as_bytes(), &mut |tmp| {
+        std::fs::OpenOptions::new().write(true).create_new(true).open(tmp)
+    })?;
+    Ok(MachineConfig::Written)
+}
+
+/// Writes the machine file for a ready wrapper and says so (one line; a failure is a warning with its next step, never a stop).
+pub fn say_machine_config(env: &HashMap<String, String>, ready: &Ready) {
+    let Some(shim) = ready.vars.iter().find(|(k, _)| k == "RUSTC_WRAPPER").map(|(_, v)| PathBuf::from(v)) else {
+        return;
+    };
+    let Some(root) = machine_config_root(env) else {
+        eprintln!(
+            "::notice::local-sccache: no worktree root is set (git config paddock.worktreeRoot), so a bare cargo in a fresh shell is not wrapped; run `eval \"$(./dev sccache env)\"` in the shell that builds"
+        );
+        return;
+    };
+    match ensure_machine_config(&root, &shim) {
+        Ok(MachineConfig::Written) => eprintln!(
+            "local-sccache: every cargo below {} now uses the wrapper ({}/.cargo/config.toml); an explicit RUSTC_WRAPPER still wins",
+            root.display(),
+            root.display()
+        ),
+        Ok(MachineConfig::Current) => {}
+        Ok(MachineConfig::Foreign) => eprintln!(
+            "::warning::local-sccache: {}/.cargo/config.toml is not this tool's, so it is not changed. Next: add `[build] rustc-wrapper = \"{}\"` to it, or move it",
+            root.display(),
+            shim.display()
+        ),
+        Err(e) => eprintln!("::warning::local-sccache: cannot write {}/.cargo/config.toml: {e}", root.display()),
+    }
+}
+
+/// The worktree root the machine file goes to: `git config paddock.worktreeRoot` of the repository the caller is in, else
+/// `PADDOCK_WORKTREE_ROOT` ([`crate::worktree::ops::resolve_root`]); `None` when neither is set.
+pub fn machine_config_root(env: &HashMap<String, String>) -> Option<PathBuf> {
+    let get = |k: &str| env.get(k).cloned();
+    let repo = crate::worktree::git::Repo::discover(&std::env::current_dir().ok()?).ok()?;
+    crate::worktree::ops::resolve_root(&repo, None, &get).ok()
 }
 
 /// A gate's path (`Install::Never`) writes nothing (ER-45): a missing or stale shim is a reason with its next step.
@@ -995,6 +1140,8 @@ pub fn prepare(env: &HashMap<String, String>, install: Install) -> Outcome {
     // `RemoteStorage::check`), so it is stopped and started once more; still read-only, the wrapper is off.
     let mut restarted = false;
     let mut upgraded = false;
+    let mut rebased = false;
+    let stamp = start_stamp(&backend, &basedirs);
     loop {
         let start_log = run.join(format!("start-{}.log", std::process::id()));
         // The server outlives this process and would hold a pipe open, so its starter writes to a file.
@@ -1002,7 +1149,7 @@ pub fn prepare(env: &HashMap<String, String>, install: Install) -> Outcome {
         // A server already listening is not started again: the start would only fail with "Address in use" and write that to the
         // running server's error log, the log every warning names (247 times in two days, docs/research/2026-11-19-sccache.md).
         // After a restart of our own server the port is started without asking.
-        let start = if !restarted && !upgraded && listening(env) {
+        let start = if !restarted && !upgraded && !rebased && listening(env) {
             Ok(crate::ci_tool::Ran {
                 success: true,
                 how: "already listening".into(),
@@ -1021,6 +1168,10 @@ pub fn prepare(env: &HashMap<String, String>, install: Install) -> Outcome {
                 })
         };
         let _ = std::fs::remove_file(&start_log);
+        if started_here {
+            // What this server started with, so a later call can tell when the worktree list or the prefix changed.
+            let _ = std::fs::write(stamp_file(&run), &stamp);
+        }
         let stats = server.call("--show-adv-stats").run(env, &mut std::io::sink());
         let (start, stats) = match (start, stats) {
             (Ok(s), Ok(t)) if s.success && t.success => (s, t),
@@ -1057,6 +1208,26 @@ pub fn prepare(env: &HashMap<String, String>, install: Install) -> Outcome {
             );
             let _ = server.call("--stop-server").run(env, &mut std::io::sink());
             continue;
+        }
+        // The base folders and the key prefix are read once, at the server's start. A server of ours (by its stats, with the prefix it
+        // was started with or the one older servers used) that started with another list is stopped through its own client and
+        // started again; builds meanwhile keep going (`SCCACHE_IGNORE_SERVER_IO_ERROR`). Only `./dev sccache env`: a gate's path
+        // never restarts a server another build may be using.
+        if !rebased && !started_here && matches!(install, Install::OnDemand) {
+            let recorded = std::fs::read_to_string(stamp_file(&run)).ok();
+            let recorded_prefix = recorded.as_deref().and_then(|r| r.lines().find_map(|l| l.strip_prefix("prefix=")));
+            let ours = backend.matches_stats(&stats.stdout)
+                || recorded_prefix.is_some_and(|p| with_prefix(&backend, p).matches_stats(&stats.stdout))
+                || with_prefix(&backend, LEGACY_PREFIX).matches_stats(&stats.stdout);
+            if must_restart(ours, recorded.as_deref(), &stamp) {
+                rebased = true;
+                eprintln!(
+                    "::notice::local-sccache: the server on port {} was started with other base folders or another key prefix (a worktree came or went, or the prefix changed); stopping it and starting it with the current ones",
+                    server_port(env)
+                );
+                let _ = server.call("--stop-server").run(env, &mut std::io::sink());
+                continue;
+            }
         }
         // An `auto` run that fell back to the disk (the store is down now) keeps a server of ours that already runs the chain: its
         // second level fails soft (`l0`), and stopping it would throw away a working cache.
@@ -1109,6 +1280,12 @@ pub fn prepare(env: &HashMap<String, String>, install: Install) -> Outcome {
     };
     if let Err(why) = shim {
         return off(why, true);
+    }
+    if matches!(install, Install::OnDemand) {
+        // The shim starts our server through this binary when none listens (read by the shim; a stale path is a plain-rustc fallback).
+        if let Ok(me) = crate::tool_cache::self_exe() {
+            let _ = std::fs::write(run.join("launcher"), me.display().to_string());
+        }
     }
     Outcome::Ready(Ready {
         vars: ready_vars(&bin, &backend, &basedirs),
@@ -1262,7 +1439,14 @@ mod tests {
             ("PADDOCK_SCCACHE_S3_ENDPOINT", "h:1"),
         ]))
         .unwrap();
-        assert!(s3.matches_stats("Cache location                  s3, name: b1, prefix: /paddock/\n"));
+        assert!(s3.matches_stats(&format!(
+            "Cache location                  s3, name: b1, prefix: /{}/\n",
+            default_prefix()
+        )));
+        assert!(
+            !s3.matches_stats("Cache location                  s3, name: b1, prefix: /paddock/\n"),
+            "the older default is another prefix"
+        );
         assert!(!s3.matches_stats(local));
     }
 
@@ -1821,6 +2005,8 @@ mod tests {
             sccache: Installed,
             compilers: Vec<Installed>,
             path: String,
+            /// A server "running" on a port of its own, which the shim finds before it hands a rustc compile to sccache.
+            listener: std::net::TcpListener,
         }
 
         fn rig() -> Rig {
@@ -1830,6 +2016,7 @@ mod tests {
                 std::fs::create_dir(&p).unwrap();
                 p
             };
+            let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
             let sccache = StandIn::new(&dir("a"), "sccache")
                 .when_args(&["clang-cl"], Actions::new().stderr("Compiler not supported").exit(1))
                 .records_args()
@@ -1850,6 +2037,7 @@ mod tests {
                 sccache,
                 compilers,
                 path,
+                listener,
             }
         }
 
@@ -1862,6 +2050,7 @@ mod tests {
                 let ran = ToolCall::new(self.shim().to_string_lossy())
                     .args(args.iter().copied())
                     .env("PATH", format!("{}:/usr/bin:/bin", self.path))
+                    .env("SCCACHE_SERVER_PORT", self.listener.local_addr().unwrap().port().to_string())
                     .run(&HashMap::new(), &mut std::io::sink())
                     .unwrap();
                 ran.success
@@ -1898,6 +2087,155 @@ mod tests {
             assert_eq!(calls[0][0], "cc");
             assert_eq!(calls[2], ["/some/where/rustc", "--target", "x86_64-pc-windows-msvc"]);
             assert_eq!(r.seen("cc"), 0, "native C ran past sccache");
+        }
+
+        /// sccache hashes every `CARGO_*` variable of a compile into its key, and CI's jobs have `CARGO_INCREMENTAL=0` and
+        /// `CARGO_TERM_COLOR=always` (setup-rust, the workflows). The shim gives sccache those two for a rustc compile, whatever the
+        /// caller's environment, so a local key equals CI's; cargo's own environment, and so its output and incremental builds, is not
+        /// changed (measured 2026-11-26: with them 166 of 308 keys were CI's stored entries, without 0).
+        #[test]
+        fn a_rustc_compile_reaches_sccache_with_the_cargo_variables_ci_hashes() {
+            let d = tempfile::tempdir().unwrap();
+            let dir = d.path().join("a");
+            std::fs::create_dir(&dir).unwrap();
+            let sccache = StandIn::new(&dir, "sccache")
+                .records_env(&["CARGO_INCREMENTAL", "CARGO_TERM_COLOR"])
+                .install()
+                .unwrap();
+            let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+            write_shim(sccache.program()).unwrap();
+            let shim = rustc_wrapper_for(sccache.program());
+            let call = |args: &[&str], envs: &[(&str, &str)]| {
+                let mut c = ToolCall::new(shim.to_string_lossy()).args(args.iter().copied());
+                for (k, v) in envs {
+                    c = c.env(*k, *v);
+                }
+                let port = listener.local_addr().unwrap().port().to_string();
+                assert!(
+                    c.env("PATH", "/usr/bin:/bin")
+                        .env("SCCACHE_SERVER_PORT", port)
+                        .run(&HashMap::new(), &mut std::io::sink())
+                        .unwrap()
+                        .success
+                );
+            };
+            call(&["rustc", "--version"], &[]);
+            call(&["/x/rustc", "-vV"], &[("CARGO_INCREMENTAL", "1"), ("CARGO_TERM_COLOR", "never")]);
+            call(&["cc", "-c", "a.c"], &[]);
+            let seen = sccache.invocations().unwrap();
+            let var = |i: usize, k: &str| seen[i].env.iter().find(|(n, _)| n == k).and_then(|(_, v)| v.clone());
+            for i in [0, 1] {
+                assert_eq!(var(i, "CARGO_INCREMENTAL").as_deref(), Some("0"), "{seen:?}");
+                assert_eq!(var(i, "CARGO_TERM_COLOR").as_deref(), Some("always"), "{seen:?}");
+            }
+            assert_eq!(var(2, "CARGO_INCREMENTAL"), None, "a C compile keeps the caller's environment");
+        }
+
+        /// A rustc compile in a fresh shell (nothing but a PATH): with our server up it goes through sccache; with none up the shim asks
+        /// the recorded launcher to start ours (never sccache's own auto-start, which would run with the caller's environment) and,
+        /// still none, or no launcher, runs rustc itself, so a build never fails because of the cache.
+        struct Fresh {
+            _d: tempfile::TempDir,
+            sccache: Installed,
+            rustc: Installed,
+            dev: Installed,
+            shim: PathBuf,
+            run: PathBuf,
+        }
+
+        fn fresh() -> Fresh {
+            let d = tempfile::tempdir().unwrap();
+            // The tool cache's layout: <home>/tools/sccache/<version>/{sccache,shim/sccache} and <home>/sccache-run.
+            let home = d.path().join("home");
+            let bin_dir = home.join("tools").join("sccache").join("0.20.1");
+            let run = home.join("sccache-run");
+            std::fs::create_dir_all(&bin_dir).unwrap();
+            std::fs::create_dir_all(&run).unwrap();
+            let other = |n: &str| {
+                let p = d.path().join(n);
+                std::fs::create_dir(&p).unwrap();
+                p
+            };
+            let sccache = StandIn::new(&bin_dir, "sccache").records_args().install().unwrap();
+            let rustc = StandIn::new(&other("r"), "rustc").records_args().install().unwrap();
+            let dev = StandIn::new(&other("d"), "paddock-dev").records_args().install().unwrap();
+            write_shim(sccache.program()).unwrap();
+            let shim = rustc_wrapper_for(sccache.program());
+            Fresh {
+                _d: d,
+                sccache,
+                rustc,
+                dev,
+                shim,
+                run,
+            }
+        }
+
+        impl Fresh {
+            /// One `rustc` compile the way cargo calls the wrapper, in a shell with no variable but PATH and the port.
+            fn compile(&self, port: u16) -> bool {
+                ToolCall::new(self.shim.to_string_lossy())
+                    .args([self.rustc.program().to_string_lossy().as_ref(), "--crate-name", "x"])
+                    .env("PATH", "/usr/bin:/bin")
+                    .env("SCCACHE_SERVER_PORT", port.to_string())
+                    .run(&HashMap::new(), &mut std::io::sink())
+                    .unwrap()
+                    .success
+            }
+        }
+
+        #[test]
+        fn a_compile_in_a_fresh_shell_goes_through_sccache_when_our_server_is_up() {
+            let f = fresh();
+            let up = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+            assert!(f.compile(up.local_addr().unwrap().port()));
+            assert_eq!(f.sccache.calls().unwrap().len(), 1, "sccache got the compile");
+            assert_eq!(f.rustc.calls().unwrap().len(), 0, "rustc was not run past it");
+            assert_eq!(f.dev.calls().unwrap().len(), 0, "nothing to start");
+        }
+
+        #[test]
+        fn with_no_server_the_recorded_launcher_starts_ours_once_and_a_server_that_stays_down_means_plain_rustc() {
+            let f = fresh();
+            std::fs::write(f.run.join("launcher"), f.dev.program().to_string_lossy().as_bytes()).unwrap();
+            let down = super::free_port(); // a port nothing listens on and nobody else is given
+            assert!(f.compile(down), "the build never fails because the cache is down");
+            assert_eq!(
+                f.dev.calls().unwrap(),
+                [["sccache", "env"]],
+                "our launcher, no auto-start of sccache's own"
+            );
+            assert_eq!(
+                f.sccache.calls().unwrap().len(),
+                0,
+                "never a bare sccache client with nobody listening"
+            );
+            assert_eq!(f.rustc.calls().unwrap().len(), 1, "plain rustc ran the compile");
+            assert!(!f.run.join("start.lock").exists(), "the start lock is released");
+        }
+
+        #[test]
+        fn with_no_server_and_no_launcher_the_compile_runs_plain_rustc() {
+            let f = fresh();
+            let down = super::free_port(); // a port nothing listens on and nobody else is given
+            assert!(f.compile(down));
+            assert_eq!(f.rustc.calls().unwrap().len(), 1);
+            assert_eq!(f.sccache.calls().unwrap().len(), 0);
+        }
+
+        #[test]
+        fn a_start_that_another_compile_holds_is_not_repeated() {
+            let f = fresh();
+            std::fs::write(f.run.join("launcher"), f.dev.program().to_string_lossy().as_bytes()).unwrap();
+            std::fs::create_dir(f.run.join("start.lock")).unwrap();
+            let down = super::free_port(); // a port nothing listens on and nobody else is given
+            assert!(f.compile(down));
+            assert_eq!(
+                f.dev.calls().unwrap().len(),
+                0,
+                "the holder starts it; this compile runs plain rustc"
+            );
+            assert_eq!(f.rustc.calls().unwrap().len(), 1);
         }
 
         /// Positive control: the stand-in sccache itself fails for `clang-cl`, so the test above can see the failure it guards.
@@ -2404,17 +2742,172 @@ mod tests {
         assert!(basedir_vars(&[], false).is_empty(), "no root, no variables");
     }
 
-    #[test]
-    fn the_local_server_lists_the_worktree_and_its_sibling_worktrees() {
-        let t = tempfile::tempdir().unwrap();
-        for d in ["wt/a/crates", "wt/b", "wt/not-a-worktree"] {
-            std::fs::create_dir_all(t.path().join(d)).unwrap();
+    fn git_in(dir: &Path, args: &[&str]) {
+        let out = crate::worktree::git::Git::at(dir).text(args).unwrap_or_else(|e| panic!("{e}"));
+        drop(out);
+    }
+
+    fn repo_with(dir: &Path) {
+        std::fs::create_dir_all(dir).unwrap();
+        for a in [
+            &["init", "-q", "-b", "main"][..],
+            &["config", "user.email", "t@example.invalid"],
+            &["config", "user.name", "t"],
+            &["commit", "-q", "--allow-empty", "-m", "c"],
+        ] {
+            git_in(dir, a);
         }
-        std::fs::write(t.path().join("wt/a/.git"), "gitdir: x").unwrap();
-        std::fs::write(t.path().join("wt/b/.git"), "gitdir: y").unwrap();
-        // One component per join: a joined "wt/a/crates" keeps its `/`, so on Windows the root it finds prints as `...\wt/a`.
-        let roots = worktree_roots(&t.path().join("wt").join("a").join("crates"));
-        let root = |n: &str| t.path().join("wt").join(n).display().to_string();
-        assert_eq!(roots, [root("a"), root("b")]);
+    }
+
+    /// The bases are this repository's worktrees and nothing else: the repo's main checkout, its added worktrees (anywhere on disk),
+    /// and never a sibling folder that is another repository (2026-11-26: 77 unrelated bases, none of the agents' worktrees).
+    #[test]
+    fn the_bases_are_exactly_this_repositorys_worktrees_never_unrelated_sibling_repositories() {
+        let t = tempfile::tempdir().unwrap();
+        let root = paddock_env::winpath::real(t.path()).unwrap();
+        let main = root.join("repos").join("main");
+        let unrelated = root.join("repos").join("unrelated");
+        repo_with(&main);
+        repo_with(&unrelated);
+        for w in ["wt-a", "wt-b"] {
+            git_in(
+                &main,
+                &["worktree", "add", "-q", "-b", w, root.join("elsewhere").join(w).to_str().unwrap()],
+            );
+        }
+        // Asked from inside a subfolder of a worktree, the same list, in sorted order (a stable stamp).
+        let from = root.join("elsewhere").join("wt-b");
+        let roots = worktree_roots(&from);
+        let want = [
+            root.join("elsewhere").join("wt-a"),
+            root.join("elsewhere").join("wt-b"),
+            main.clone(),
+        ];
+        // git prints `C:/...` on Windows: compared as paths, not as text (run 9129).
+        assert_eq!(roots.len(), want.len(), "{roots:?}");
+        for (got, want) in roots.iter().zip(&want) {
+            assert!(paddock_testkit::path::same_path(got, want), "{got} is not {}", want.display());
+        }
+        assert!(!roots.iter().any(|r| r.contains("unrelated")), "{roots:?}");
+        // Not a repository: no bases (never a guess from the folder's neighbours).
+        let bare = root.join("plain");
+        std::fs::create_dir_all(&bare).unwrap();
+        assert_eq!(worktree_roots(&bare), Vec::<String>::new());
+    }
+
+    #[test]
+    fn the_local_prefix_is_ci_s_for_the_same_os_and_arch() {
+        assert_eq!(
+            default_prefix(),
+            crate::ci_setup_rust::ci_prefix(crate::ci_setup_rust::host_runner_os(), std::env::consts::ARCH)
+        );
+        assert!(default_prefix().starts_with("paddock-ci/"), "{}", default_prefix());
+        let home = tempfile::tempdir().unwrap();
+        let e = s3_env(home.path(), 1);
+        let (b, _) = choose(&e, &|_| Ok(())).unwrap();
+        let Backend::Tiered { s3, .. } = &b else { panic!("tiered") };
+        assert_eq!(s3.prefix, default_prefix());
+        let mut e2 = e.clone();
+        e2.insert("PADDOCK_SCCACHE_BACKEND".into(), "s3".into());
+        e2.insert("PADDOCK_SCCACHE_S3_BUCKET".into(), "b".into());
+        e2.insert("PADDOCK_SCCACHE_S3_ENDPOINT".into(), "h:1".into());
+        let Backend::S3(s) = backend(&e2).unwrap() else { panic!("s3") };
+        assert_eq!(s.prefix, default_prefix(), "one definition for both ways to the same default");
+    }
+
+    #[test]
+    fn a_server_is_restarted_only_when_it_is_ours_and_what_it_started_with_changed() {
+        assert!(must_restart(true, Some("old"), "new"), "the list changed");
+        assert!(must_restart(true, None, "new"), "an older server that never recorded it: once");
+        assert!(!must_restart(true, Some("same"), "same"), "nothing changed");
+        assert!(!must_restart(false, Some("old"), "new"), "a foreign server is never touched");
+    }
+
+    /// The stamp is the bases and the key prefix: the two things the server reads once and `--show-adv-stats` cannot confirm fully.
+    #[test]
+    fn the_start_stamp_names_the_bases_and_the_prefix() {
+        let local = Backend::Local {
+            dir: "/c".into(),
+            size: "1G".into(),
+        };
+        let t = Backend::Tiered {
+            dir: "/c-s3".into(),
+            size: "1G".into(),
+            s3: S3 {
+                bucket: "b".into(),
+                endpoint: "h:1".into(),
+                region: "auto".into(),
+                ssl: false,
+                prefix: "p/x".into(),
+            },
+        };
+        let b1 = basedir_vars(&["/w/a".into(), "/w/b".into()], false);
+        let b2 = basedir_vars(&["/w/a".into(), "/w/b".into(), "/w/c".into()], false);
+        assert_ne!(start_stamp(&local, &b1), start_stamp(&local, &b2));
+        assert_ne!(start_stamp(&t, &b1), start_stamp(&t, &b1).replace("p/x", "p/y"));
+        assert!(start_stamp(&t, &b1).contains("p/x") && start_stamp(&t, &b1).contains("/w/a:/w/b"));
+        assert_eq!(start_stamp(&t, &b1), start_stamp(&t, &b1));
+    }
+
+    /// A server on our port, ours by its stats, that was started with another list of bases: `./dev sccache env` stops it through its
+    /// own client (`--stop-server`, never a kill) and starts it again with the current list, once; the next call leaves it alone.
+    #[cfg(unix)]
+    #[test]
+    fn a_server_started_with_other_bases_is_restarted_once_through_its_own_client() {
+        let (_h, mut e, bin) = fake(0, None);
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        e.insert("SCCACHE_SERVER_PORT".into(), listener.local_addr().unwrap().port().to_string());
+        let run = run_folder(&e).unwrap();
+        std::fs::create_dir_all(&run).unwrap();
+        std::fs::write(stamp_file(&run), "bases=/old\nprefix=\n").unwrap();
+        assert!(matches!(prepare(&e, Install::OnDemand), Outcome::Ready(_)));
+        assert_eq!(
+            calls(&bin),
+            ["--stop-server", "--start-server"],
+            "stopped, then started with the current list"
+        );
+        let recorded = std::fs::read_to_string(stamp_file(&run)).unwrap();
+        assert!(!recorded.contains("/old"), "the new list is recorded: {recorded}");
+        assert!(matches!(prepare(&e, Install::OnDemand), Outcome::Ready(_)));
+        assert_eq!(calls(&bin), ["--stop-server", "--start-server"], "unchanged: no second restart");
+        // The positive control: a recorded list that equals the current one is what stops the restarts.
+        drop(listener);
+    }
+    /// Cargo reads `.cargo/config.toml` of every folder above the one it runs in, so a file beside the worktrees puts the wrapper into every
+    /// cargo of every worktree, in any shell (a bare `cargo` in an agent's fresh shell too), without a line in the repository (Windows
+    /// cannot start an extensionless script as `build.rustc-wrapper`). The environment's `RUSTC_WRAPPER` still wins (cargo's own rule).
+    #[test]
+    fn the_wrapper_is_set_for_every_cargo_below_the_worktree_root_and_a_foreign_file_is_never_overwritten() {
+        let t = tempfile::tempdir().unwrap();
+        let root = t.path().join("wt");
+        let shim = Path::new("/h/tools/sccache/0.20.1/shim/sccache");
+        assert_eq!(ensure_machine_config(&root, shim).unwrap(), MachineConfig::Written);
+        let file = root.join(".cargo").join("config.toml");
+        let text = std::fs::read_to_string(&file).unwrap();
+        let parsed: toml::Table = text.parse().unwrap();
+        assert_eq!(
+            parsed["build"]["rustc-wrapper"].as_str(),
+            Some("/h/tools/sccache/0.20.1/shim/sccache"),
+            "{text}"
+        );
+        assert_eq!(
+            ensure_machine_config(&root, shim).unwrap(),
+            MachineConfig::Current,
+            "the same file is left alone"
+        );
+        let moved = Path::new("/h2/shim/sccache");
+        assert_eq!(
+            ensure_machine_config(&root, moved).unwrap(),
+            MachineConfig::Written,
+            "ours is updated"
+        );
+        assert!(std::fs::read_to_string(&file).unwrap().contains("/h2/shim/sccache"));
+        std::fs::write(&file, "[build]\njobs = 3\n").unwrap();
+        assert_eq!(
+            ensure_machine_config(&root, shim).unwrap(),
+            MachineConfig::Foreign,
+            "somebody's own config stays"
+        );
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "[build]\njobs = 3\n");
     }
 }
