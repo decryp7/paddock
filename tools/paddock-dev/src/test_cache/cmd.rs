@@ -261,13 +261,15 @@ fn run(
         }
     }
     if a.action == "lookup" {
+        // One line the first CI run shows: how many targets a valid record covers on this runner class (nothing is skipped here).
+        let would = reused + matched.len();
         text.push(format!(
-            "test-cache: {} targets, {reused} would be reused, {} would run",
+            "test-cache: reused {would} of {} targets ({}; nothing is skipped by a lookup)",
             cands.len(),
-            left.len()
+            class.0
         ));
         return Ok(Report::new(
-            serde_json::json!({"targets": cands.len(), "reused": reused}),
+            serde_json::json!({"targets": cands.len(), "reused": would}),
             text.join("\n"),
         ));
     }
@@ -575,7 +577,7 @@ fn record(
         })
         .collect();
     let line = match store.put_many(&put) {
-        Ok(()) => format!("test-cache: stored {} pass(es) of {} package(s) in the log", put.len(), asked.len()),
+        Ok(()) => format!("test-cache: recorded {} packages ({} in the log)", put.len(), asked.len()),
         Err(e) => format!("::warning::test-cache: records not stored: {e}"),
     };
     Ok(Report::new(serde_json::json!({"stored": put.len()}), line))
