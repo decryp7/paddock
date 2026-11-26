@@ -53,7 +53,16 @@ fn the_precedence_is_the_environment_then_the_config_file_then_the_default() {
 fn a_process_with_no_home_finds_it_through_the_user_database() {
     let w = World::new();
     // What a launchd daemon with UserName set sees: no HOME, no folder variable.
-    let got = dir_out(&w, &[("PLOCK_DIR", UNSET), ("HOME", UNSET)]);
+    // The XDG folders go too: on Linux they come before HOME, and the world sets them from its home.
+    let got = dir_out(
+        &w,
+        &[
+            ("PLOCK_DIR", UNSET),
+            ("HOME", UNSET),
+            ("XDG_STATE_HOME", UNSET),
+            ("XDG_CONFIG_HOME", UNSET),
+        ],
+    );
     let p = Path::new(&got);
     assert!(
         p.is_absolute() && p.ends_with(state_under(Path::new("/")).strip_prefix("/").unwrap()),

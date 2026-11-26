@@ -136,7 +136,17 @@ pub fn base_env(c: &mut TestCommand, w: &World) {
         .env("PLOCK_UNREADABLE_LIMIT", "3")
         // One at a time: the tests of the queue need it whatever the load of the machine they run on (slots.rs covers the rest).
         .env("THROTTLE_SLOTS", "1")
+        // The world's home and every per-user folder derived from it, set together: testkit's command sandbox names its own (XDG_*,
+        // APPDATA, ...), and throttle reads XDG_STATE_HOME and XDG_CONFIG_HOME before HOME on Linux, so a HOME alone left the
+        // sandbox's folders in force there (run 9143, places tests on the Linux runner).
         .env("HOME", w.path("home"))
+        .env("USERPROFILE", w.path("home"))
+        .env("XDG_STATE_HOME", w.path("home/.local/state"))
+        .env("XDG_CONFIG_HOME", w.path("home/.config"))
+        .env("XDG_DATA_HOME", w.path("home/.local/share"))
+        .env("XDG_CACHE_HOME", w.path("home/.cache"))
+        .env("APPDATA", w.path("home/AppData/Roaming"))
+        .env("LOCALAPPDATA", w.path("home/AppData/Local"))
         .env("CARGO_HOME", w.path("home/.cargo"))
         // The run logs go to the world's own dev-targets folder, never the machine's (ER-14).
         .env("PADDOCK_DEV_TARGETS", w.path("dev-targets"))
