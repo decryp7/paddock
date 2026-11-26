@@ -4484,3 +4484,15 @@ the test's child (here a compile-cache server) can name the child's pid as its p
 tree walks drop such a stranger by start time (ADR 0033, `orphan::descendants_skip_a_stranger_older_than_its_claimed_parent`), but
 this test asserts the raw listing. Fix: the test keeps only children that started no earlier than its child (`ProcessSource::started`)
 before it checks their names, with a failing test first (bug-fix skill). Open; not fixed on train 2026-11-26-u.
+
+## The raw child listing of a pid is private to its filter, with a Clippy ban (2026-11-27, feat/proc-children-filtered, user decision 98)
+- **What happened.** Runs 6603, 7448 and 9168 were three tests of `paddock-proc` that read `OsSource::children(pid)` raw and asserted on what it
+  listed (the last: every child of a test child is `conhost.exe`). A parent pid is only a number and on Windows it outlives its process
+  (ADR 0033), so the raw list can hold the orphans of an earlier holder of the pid. The tree walk already refused such a child; the tests did not.
+- **Fix (ER-21, the class named, the simplest complete fix).** The trait method that lists is now `ProcessSource::listed_children` (hidden, raw,
+  implemented by the sources). The only listing callers get is `ProcessSource::children(parent: ProcessId) -> Vec<ProcessId>`, which keeps a child
+  that started no earlier than its parent and no later than the scan that listed it, and returns nothing when the pid now names another process;
+  the tree walk uses it. `crates/clippy.toml` bans `paddock_proc::usage::ProcessSource::listed_children` everywhere (the one default body carries the
+  `#[expect]`). The positive control is `usage::tests::a_raw_listing_is_what_the_clippy_ban_catches`: its `#[expect]` is unfulfilled, and Clippy
+  fails, if the ban is removed or stops resolving the path. Callers checked across `crates/`, `apps/` and `tools/`: only `paddock-proc` itself
+  (`usage.rs`, `tests/it/orphan.rs`) implements or calls the trait; Debrief's, Dyno's and Pitcrew's `ProcessSource` are their own ports.
