@@ -2947,3 +2947,40 @@ repeated it from a quiet start (4.6) and was slower still (22.6 gates per hour, 
   crates included. The difference is not `CARGO_INCREMENTAL` and not the checkout folder (bases strip it); the cause is not yet
   identified (candidates: the command mode and profile of CI's steps, rustflags, the toolchain path). The common prefix is in place so
   that the entries share once the keys do.
+
+## Local keys against CI's: the two CARGO variables (2026-11-26, fix/sccache-key-env, base 202d0a181)
+
+Why a local build found none of CI's compile-cache entries (the earlier block "Local sccache: a second worktree hits...": 0 of 112).
+
+- **Method:** `SCCACHE_LOG=debug` prints each compile's hash key; the key is the object's name in the S3 store
+  (`<prefix>/<k0>/<k1>/<k2>/<key>`), so a key's presence and `last-modified` say whether CI stored it. The same units were compiled with
+  `cargo nextest run -p paddock-diag -p paddock-updater --no-run` (308 keys) in four environments and each key looked up with a signed HEAD
+  (a throwaway script, not kept). A stored CI entry (`stable_deref_trait`, its `-C extra-filename` hash and the fingerprint json equal to
+  a local build's) gave a leaf crate with the same cargo unit and a different sccache key.
+- **Cause:** sccache 0.20.1 (`src/compiler/rust.rs`, `generate_hash_key`) hashes every `CARGO_*` variable of the compile except a few
+  (`CARGO_MAKEFLAGS`, `CARGO_TARGET_DIR`, `CARGO_BUILD_*`, ...). CI's jobs have `CARGO_INCREMENTAL=0` (setup-rust) and
+  `CARGO_TERM_COLOR=always` (the workflows' `env`); a local shell has neither. Not the checkout folder (bases strip it), not the registry
+  path (same HOME), not the toolchain, not the profile.
+
+| Environment of the compile | Keys among the 308 that CI had stored before 2026-11-23 |
+|---|---|
+| neither variable | 0 |
+| `CARGO_INCREMENTAL=0` only | 0 |
+| `CARGO_TERM_COLOR=always` only | 0 |
+| both | 166 |
+
+- **Fix:** the RUSTC_WRAPPER shim that `./dev sccache env` writes exports the two variables for a rustc compile (`CI_KEY_ENV`), so sccache
+  sees them whatever the caller's shell has; cargo's own environment is unchanged (no colour codes in piped output, incremental builds
+  of workspace crates stay).
+- **Cross hit, measured:** a private server (fresh disk, S3 behind it under `paddock-ci/macOS-aarch64`), this branch's shim, a worktree that
+  had never built, no CARGO variable in the shell, the same command: 294 compile requests executed, **174 L1 (S3) hits**, 0 L0, 117 misses
+  (the workspace crates, which keep their checkout path, and what no CI job built with that command), 117 writes.
+- **CI side (same branch):** setup-rust now exports both variables to `$GITHUB_ENV` from the same definition (`CI_KEY_ENV`), so every job
+  that sets up the cache has the same key class. Before it, only jobs whose workflow or job `env` had `CARGO_TERM_COLOR=always` did. Jobs
+  that call setup-rust and had it: `app-fuzz.yml` fuzz; `ci.yml` app, crate, heavy, paddock-dev; `debrief.yml` bundle, plan, plugin-sdk,
+  rust-lint, rust-test, rust-test-macos, tauri-smoke; `nightly.yml` dialog-window-probe. Jobs that called setup-rust and lacked it (a key
+  class of their own, so no sharing with the rest): `ci.yml` audit, conformance, crates, e2e, e2e-webkit, tools, ui; `nightly.yml` audit,
+  c100, escapes, generators, ipc-endpoints; `dev-tool.yml`, `heavy-release.yml` and `app-release.yml` jobs (release and tag builds never read the
+  store). The per-job `CARGO_TERM_COLOR` lines stay: they colour the log of jobs that have no cache.
+- **Limits:** Windows has no shim (the wrapper is the sccache binary), so a local Windows build does not share. The shell copy of
+  setup-rust (release path) exports the two variables too, as its twin test requires.

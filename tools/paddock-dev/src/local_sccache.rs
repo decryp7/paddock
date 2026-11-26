@@ -726,6 +726,12 @@ fn with_prefix(b: &Backend, prefix: &str) -> Backend {
     }
 }
 
+/// The `CARGO_*` variables CI's jobs have that sccache hashes into every Rust key (sccache 0.20.1 `generate_hash_key`: all of them but a
+/// few): `CARGO_INCREMENTAL=0` and `CARGO_TERM_COLOR=always`,
+/// which setup-rust exports to `$GITHUB_ENV` ([`crate::ci_setup_rust::env_lines`]) for every job that has the cache. The shim exports
+/// them for a rustc compile, so a local key equals CI's and the two share entries; cargo's own environment is left alone (no colour codes in piped output, incremental builds stay). docs/benchmarks.md, "Local keys against CI's".
+pub const CI_KEY_ENV: [(&str, &str); 2] = [("CARGO_INCREMENTAL", "0"), ("CARGO_TERM_COLOR", "always")];
+
 /// The folder beside the sccache binary that holds the shim, so the shim can be called `sccache`.
 const SHIM_DIR: &str = "shim";
 
@@ -742,11 +748,12 @@ const SHIM_DIR: &str = "shim";
 /// lockfile).
 fn shim_text(bin: &Path) -> String {
     let real = bin.display().to_string().replace('\'', r"'\''");
+    let key_env: String = CI_KEY_ENV.iter().map(|(k, v)| format!("export {k}={v}; ")).collect();
     format!(
         "#!/bin/sh\n\
 # Written by `./dev sccache env` (tools/paddock-dev/src/local_sccache.rs, shim_text): sccache for everything but a Windows (MSVC) C compile.\n\
 case \"$(basename -- \"$1\")\" in\n\
-  rustc | rustc.exe) exec '{real}' \"$@\" ;;\n\
+  rustc | rustc.exe) {key_env}exec '{real}' \"$@\" ;;\n\
   clang-cl | clang-cl.exe | cl | cl.exe) exec \"$@\" ;;\n\
 esac\n\
 for a in \"$@\"; do\n\
@@ -1978,6 +1985,45 @@ mod tests {
             assert_eq!(calls[0][0], "cc");
             assert_eq!(calls[2], ["/some/where/rustc", "--target", "x86_64-pc-windows-msvc"]);
             assert_eq!(r.seen("cc"), 0, "native C ran past sccache");
+        }
+
+        /// sccache hashes every `CARGO_*` variable of a compile into its key, and CI's jobs have `CARGO_INCREMENTAL=0` and
+        /// `CARGO_TERM_COLOR=always` (setup-rust, the workflows). The shim gives sccache those two for a rustc compile, whatever the
+        /// caller's environment, so a local key equals CI's; cargo's own environment, and so its output and incremental builds, is not
+        /// changed (measured 2026-11-26: with them 166 of 308 keys were CI's stored entries, without 0).
+        #[test]
+        fn a_rustc_compile_reaches_sccache_with_the_cargo_variables_ci_hashes() {
+            let d = tempfile::tempdir().unwrap();
+            let dir = d.path().join("a");
+            std::fs::create_dir(&dir).unwrap();
+            let sccache = StandIn::new(&dir, "sccache")
+                .records_env(&["CARGO_INCREMENTAL", "CARGO_TERM_COLOR"])
+                .install()
+                .unwrap();
+            write_shim(sccache.program()).unwrap();
+            let shim = rustc_wrapper_for(sccache.program());
+            let call = |args: &[&str], envs: &[(&str, &str)]| {
+                let mut c = ToolCall::new(shim.to_string_lossy()).args(args.iter().copied());
+                for (k, v) in envs {
+                    c = c.env(*k, *v);
+                }
+                assert!(
+                    c.env("PATH", "/usr/bin:/bin")
+                        .run(&HashMap::new(), &mut std::io::sink())
+                        .unwrap()
+                        .success
+                );
+            };
+            call(&["rustc", "--version"], &[]);
+            call(&["/x/rustc", "-vV"], &[("CARGO_INCREMENTAL", "1"), ("CARGO_TERM_COLOR", "never")]);
+            call(&["cc", "-c", "a.c"], &[]);
+            let seen = sccache.invocations().unwrap();
+            let var = |i: usize, k: &str| seen[i].env.iter().find(|(n, _)| n == k).and_then(|(_, v)| v.clone());
+            for i in [0, 1] {
+                assert_eq!(var(i, "CARGO_INCREMENTAL").as_deref(), Some("0"), "{seen:?}");
+                assert_eq!(var(i, "CARGO_TERM_COLOR").as_deref(), Some("always"), "{seen:?}");
+            }
+            assert_eq!(var(2, "CARGO_INCREMENTAL"), None, "a C compile keeps the caller's environment");
         }
 
         /// Positive control: the stand-in sccache itself fails for `clang-cl`, so the test above can see the failure it guards.

@@ -104,6 +104,9 @@ tools and never by your shell profile (user decision 2026-11-16; docs/research/s
   port, never a kill) and starts it again once; a server that is not ours is never touched, and builds keep going during the restart
   (`SCCACHE_IGNORE_SERVER_IO_ERROR`). Only `./dev sccache env` restarts; the push gates never do. After `./dev worktree add`, run
   `eval "$(./dev sccache env)"` in the new worktree once: that is what puts it into the list.
+- sccache hashes every `CARGO_*` variable of a compile into its key, and CI's setup-rust exports `CARGO_INCREMENTAL=0` and `CARGO_TERM_COLOR=always`
+  to every job with the cache. The wrapper shim exports the same two for a rustc compile (`CI_KEY_ENV` in `local_sccache.rs`), so a local key equals CI's and a build here
+  reuses what CI stored (docs/benchmarks.md, "Local keys against CI's"); your shell and cargo's output are unchanged.
 - It is off, with one `::warning::` line and a build without the cache, when sccache is not installed, the server does not
   start, or a server on the port uses another cache. The server runs in its own short folder (`<tool cache>/sccache-run`, also its `TMPDIR`, working folder and error log
   `sccache.log`; short because macOS caps socket paths at 104 bytes), never in a job's or an agent's scratch folder, which a job deletes. It
