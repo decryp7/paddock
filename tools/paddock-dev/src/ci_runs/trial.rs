@@ -761,7 +761,9 @@ mod tests {
         // Not a commit of the target: refused, and no trial ref is left from this call.
         let main_sha = git_in(&w.origin, &["rev-parse", "refs/heads/main"]);
         let loose = git_in(&w.work, &["commit-tree", "-m", "x", &format!("{main_sha}^{{tree}}")]);
-        let e = prepare_with(&g, "feat/r", None, &[loose.clone()], &ok).err().unwrap_or_default();
+        let e = prepare_with(&g, "feat/r", None, std::slice::from_ref(&loose), &ok)
+            .err()
+            .unwrap_or_default();
         assert!(e.contains("--reland"), "{e}");
     }
 
