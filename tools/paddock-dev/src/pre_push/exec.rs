@@ -559,11 +559,18 @@ pub fn run_all_with(planned: &[Planned], exec: &dyn Exec, opts: &RunOpts) -> Vec
     run_all_timed(planned, exec, opts).0
 }
 
-/// How many heavy steps of one push may run at once: one (ADR 0102). Heavy's slots follow the machine's load, so a second heavy step of
-/// the same push would queue behind the first at high load, and that wait could not be told from waiting for other agents.
-/// `docs/benchmarks.md` ("Member gate: CI tests of the touched workspaces") and a test ([`HEAVY_AT_ONCE`] against the most heavy rows
-/// seen running at once) say the same number.
-pub const HEAVY_AT_ONCE: usize = 1;
+/// How many heavy steps of one push may run at once: as many as the gate has workers (ADR 0102, amendment 2026-11-26, at the user's
+/// request of that day; it was one since 2026-11-15). `heavy`'s own slots, which follow the machine's cores and load, still decide
+/// whether a step runs, so a step beyond them waits in heavy's queue and its wait is reported apart as the row's "queued" seconds (the
+/// row-timings table): waiting for others is still told from running. Each step's threads are heavy's share of the cores
+/// (`gate::step_threads`: cores divided by the steps in flight). [`workers`] is one at machine load 20 or more, so a loaded machine
+/// runs one at a time. `PADDOCK_HEAVY_AT_ONCE` (a number from 1) overrides it, for a measurement (1 is the earlier behaviour).
+pub fn heavy_limit(env: &std::collections::HashMap<String, String>, workers: usize) -> usize {
+    env.get("PADDOCK_HEAVY_AT_ONCE")
+        .and_then(|v| v.trim().parse::<usize>().ok())
+        .filter(|n| *n >= 1)
+        .unwrap_or(workers.max(1))
+}
 
 /// Whether a row may start, from [`Turns::next`].
 enum Start {
@@ -572,7 +579,7 @@ enum Start {
     Interrupted,
 }
 
-/// The rows left and whether a heavy step of the push is in flight. One heavy step at a time: heavy's slots follow the machine's
+/// The rows left and the heavy steps of the push in flight, at most `limit` ([`heavy_limit`]). Earlier, one heavy step at a time: heavy's slots follow the machine's
 /// load (several when it is low), so a second heavy step of the same push would queue behind the first at high load, and that
 /// wait could not be told from waiting for other agents (ADR 0102). With one in flight, every second a heavy step queues is time
 /// spent waiting for others, and the next heavy step is decided only after the one before has ended. While a heavy step is in
@@ -581,13 +588,16 @@ struct Turns {
     /// The rows left, the heavy steps in flight, and the most heavy steps seen in flight at once.
     state: Mutex<(VecDeque<usize>, usize, usize)>,
     changed: std::sync::Condvar,
+    /// How many heavy steps may be in flight at once.
+    limit: usize,
 }
 
 impl Turns {
-    fn new(order: VecDeque<usize>) -> Turns {
+    fn new(order: VecDeque<usize>, limit: usize) -> Turns {
         Turns {
             state: Mutex::new((order, 0, 0)),
             changed: std::sync::Condvar::new(),
+            limit,
         }
     }
 
@@ -604,7 +614,7 @@ impl Turns {
                 let i = st.0.pop_front()?;
                 return Some((i, matches!(planned[i], Planned::Run(_)).then_some(Start::Interrupted)));
             }
-            let busy = st.1 >= HEAVY_AT_ONCE;
+            let busy = st.1 >= self.limit;
             if let Some(pos) = st.0.iter().position(|&i| !(busy && heavy(i))) {
                 let i = st.0.remove(pos)?;
                 if !matches!(planned[i], Planned::Run(_)) {
@@ -655,7 +665,7 @@ pub fn run_all_timed(planned: &[Planned], exec: &dyn Exec, opts: &RunOpts) -> (V
 }
 
 /// Everything one run measured: the rows, the queue and run time of the steps that went through `heavy`, how many heavy steps were in
-/// flight when each row started (itself included), and the most heavy steps in flight at once (never above [`HEAVY_AT_ONCE`]).
+/// flight when each row started (itself included), and the most heavy steps in flight at once (never above the limit).
 pub struct RunDetail {
     /// The verdict of every planned row, in the planned order.
     pub rows: Vec<(String, Row)>,
@@ -669,12 +679,17 @@ pub struct RunDetail {
 
 /// [`run_all_timed`] with the concurrency of every row.
 pub fn run_all_detailed(planned: &[Planned], exec: &dyn Exec, opts: &RunOpts) -> RunDetail {
+    run_all_limited(planned, exec, opts, opts.workers.max(1))
+}
+
+/// [`run_all_detailed`] with at most `heavy_at_once` heavy steps in flight ([`heavy_limit`]); `run_all_detailed` takes the worker count.
+pub fn run_all_limited(planned: &[Planned], exec: &dyn Exec, opts: &RunOpts, heavy_at_once: usize) -> RunDetail {
     let mut order: Vec<usize> = (0..planned.len()).collect();
     order.sort_by_key(|&i| match &planned[i] {
         Planned::Run(g) => g.rank,
         _ => 0,
     });
-    let turns = Turns::new(order.into_iter().collect::<VecDeque<_>>());
+    let turns = Turns::new(order.into_iter().collect::<VecDeque<_>>(), heavy_at_once.max(1));
     let timings = Mutex::new(BTreeMap::<String, Timing>::new());
     let concurrency = Mutex::new(BTreeMap::<String, usize>::new());
     let results: Vec<Mutex<Option<Row>>> = planned.iter().map(|_| Mutex::new(None)).collect();
@@ -758,12 +773,13 @@ pub fn run_all_detailed(planned: &[Planned], exec: &dyn Exec, opts: &RunOpts) ->
     }
 }
 
-/// How many gates run at once: one while the machine is loaded (ER-24: 20 or more on the 1-minute average), else three; `heavy`
-/// still lets one compile at a time through, so the extra workers run the cheap gates meanwhile.
+/// How many gates run at once: one while the machine is loaded (ER-24: 20 or more on the 1-minute average), else three or one per 4
+/// cores (heavy's `auto_max_slots`: the steps it can admit), at most eight. Each may hold a heavy step ([`heavy_limit`]); the extra
+/// workers run the cheap gates meanwhile.
 pub fn workers(load: Option<f64>, cores: usize) -> usize {
     match load {
         Some(l) if l >= 20.0 => 1,
-        _ => 3.min(cores.max(1)),
+        _ => (cores / 4).clamp(3, 8).min(cores.max(1)),
     }
 }
 
@@ -1869,6 +1885,8 @@ mod tests {
         assert_eq!(workers(Some(5.0), 14), 3);
         assert_eq!(workers(None, 2), 2);
         assert_eq!(workers(Some(1.0), 0), 1);
+        assert_eq!(workers(Some(5.0), 16), 4, "one per 4 cores, the steps heavy admits");
+        assert_eq!(workers(Some(5.0), 64), 8, "at most eight");
     }
 
     /// heavy's lock folder goes to `<dev-targets>/throttle`, a folder a reboot keeps (it was in /private/tmp and its history was lost at

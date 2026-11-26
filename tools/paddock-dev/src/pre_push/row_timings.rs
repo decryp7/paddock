@@ -6,7 +6,7 @@
 //! Pure: the caller passes the rows, timings and concurrency and writes the text where it belongs.
 
 use super::budget::Timing;
-use super::exec::{HEAVY_AT_ONCE, Row, RunDetail};
+use super::exec::{Row, RunDetail};
 use std::collections::BTreeMap;
 
 /// One line of the table.
@@ -44,13 +44,13 @@ pub fn lines_of(rows: &[(String, Row)], timings: &BTreeMap<String, Timing>, conc
 }
 
 /// The text printed after the gate table, or `None` when no row ran a command.
-pub fn table(lines: &[Line]) -> Option<String> {
+pub fn table(lines: &[Line], limit: usize) -> Option<String> {
     if lines.is_empty() {
         return None;
     }
     let width = lines.iter().map(|l| l.id.len()).max().unwrap_or(0).max(3);
     let mut out = format!(
-        "Row timings (seconds; queued = waiting for a heavy slot beside other agents' gates, never run time; concurrent = heavy steps of this push in flight when the row started, at most {HEAVY_AT_ONCE})\n{:<width$}  {:>8}  {:>8}  {:>10}\n",
+        "Row timings (seconds; queued = waiting for a heavy slot beside other agents' gates, never run time; concurrent = heavy steps of this push in flight when the row started, at most {limit})\n{:<width$}  {:>8}  {:>8}  {:>10}\n",
         "row", "queued", "run", "concurrent"
     );
     for l in lines {
@@ -93,11 +93,8 @@ mod tests {
 
     #[test]
     fn the_table_names_queue_and_run_apart_and_states_the_limit() {
-        let t = table(&sample()).expect("a table");
-        assert!(
-            t.contains("queued = waiting for a heavy slot") && t.contains(&format!("at most {HEAVY_AT_ONCE}")),
-            "{t}"
-        );
+        let t = table(&sample(), 2).expect("a table");
+        assert!(t.contains("queued = waiting for a heavy slot") && t.contains("at most 2"), "{t}");
         let heavy = t.lines().find(|l| l.starts_with("tests tools/paddock-dev")).expect("the heavy row");
         assert!(heavy.contains("297.7") && heavy.contains("340.4"), "{heavy}");
         let light = t.lines().find(|l| l.starts_with("fmt crates")).expect("the light row");
@@ -105,7 +102,7 @@ mod tests {
             light.contains(" -") && light.contains("2.2"),
             "a row with no heavy slot has no queue time: {light}"
         );
-        assert_eq!(table(&[]), None, "no row ran a command: no table");
+        assert_eq!(table(&[], 2), None, "no row ran a command: no table");
     }
 
     #[test]

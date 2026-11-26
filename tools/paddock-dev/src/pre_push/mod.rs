@@ -51,7 +51,7 @@ pub mod train_split;
 use crate::plan::{Request, plan_with_graph};
 use crate::plan_repo::git_text;
 use clap::Args;
-use exec::{Kind, QUEUE_STALL, RealExec, Row, RunOpts, run_all_detailed, workers};
+use exec::{Kind, QUEUE_STALL, RealExec, Row, RunOpts, heavy_limit, run_all_limited, workers};
 use gates::{Change, Facts};
 use paddock_cli::{CliError, Exit, Report};
 use paddock_env::winpath;
@@ -602,7 +602,8 @@ fn command_in(
     {
         eprintln!("::warning::pre-push: the slow-row record of {sha} was not started: {e}. A landing reads it as not held.");
     }
-    let detail = run_all_detailed(
+    let limit = heavy_limit(&env, n);
+    let detail = run_all_limited(
         &planned,
         ex,
         &RunOpts {
@@ -612,10 +613,11 @@ fn command_in(
             subject: &subject,
             reuse: reuse.as_ref(),
         },
+        limit,
     );
     let row_lines = row_timings::lines(&detail);
     let exec::RunDetail { mut rows, timings, .. } = detail;
-    if let Some(table) = row_timings::table(&row_lines) {
+    if let Some(table) = row_timings::table(&row_lines, limit) {
         eprint!("pre-push: {table}");
         // The record beside the gate logs (ER-27): best effort, a failed write never changes a verdict.
         let _ = std::fs::write(real.logs.join("row-timings.tsv"), row_timings::tsv(&row_lines));

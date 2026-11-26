@@ -2621,13 +2621,13 @@ fn heavy_gate(id: &str, rank: u8) -> Planned {
     })
 }
 
-/// A push has at most `HEAVY_AT_ONCE` heavy steps in flight, the number docs/benchmarks.md states: two together only queue behind each
-/// other, and that wait could not be told from waiting for others. The executor counts the steps really in flight; the run's own
-/// measure (`peak_heavy`, the concurrency of each row) must say the same, and reach the limit (a positive control: a measure that
-/// never saw a step would also read "never above the limit", ER-33).
+/// A push runs as many heavy steps at once as it has workers (ADR 0102 amendment 2026-11-26: the user asked for parallel rows; heavy's
+/// slots and the load decide the rest), and the run's own measure says what really ran. The executor counts the steps really in flight;
+/// `peak_heavy` and each row's concurrency must agree, and reach the worker count (a positive control: a measure that never saw a step
+/// would also read "never above the limit", ER-33). The queued seconds of a row stay apart from its run time (the row-timings table).
 #[test]
-fn a_push_has_at_most_the_documented_number_of_heavy_steps_in_flight() {
-    use crate::pre_push::exec::{HEAVY_AT_ONCE, run_all_detailed};
+fn a_push_runs_as_many_heavy_steps_at_once_as_it_has_workers_and_measures_it() {
+    use crate::pre_push::exec::run_all_detailed;
     let fake = Queued::new(Duration::from_millis(30));
     let planned = vec![
         heavy_gate("clippy a", 1),
@@ -2639,7 +2639,7 @@ fn a_push_has_at_most_the_documented_number_of_heavy_steps_in_flight() {
         &planned,
         &fake,
         &RunOpts {
-            workers: 4,
+            workers: 3,
             queue_stall: Duration::from_secs(60),
             stop: &AtomicBool::new(false),
             subject: &test_subject(),
@@ -2648,13 +2648,55 @@ fn a_push_has_at_most_the_documented_number_of_heavy_steps_in_flight() {
     );
     assert!(detail.rows.iter().all(|(_, v)| v.kind() == Kind::Passed), "{:?}", detail.rows);
     let seen = fake.most.load(std::sync::atomic::Ordering::SeqCst);
-    assert_eq!(seen, HEAVY_AT_ONCE, "the executor saw this many heavy steps in flight at once");
+    assert_eq!(seen, 3, "three workers, three heavy steps in flight at once");
     assert_eq!(detail.peak_heavy, seen, "the run's measure agrees with what really ran");
     assert_eq!(detail.concurrency.len(), 4, "every row that ran has its concurrency");
-    assert!(detail.concurrency.values().all(|&c| c == HEAVY_AT_ONCE), "{:?}", detail.concurrency);
+    assert!(
+        detail.concurrency.values().all(|&c| (1..=3).contains(&c)),
+        "{:?}",
+        detail.concurrency
+    );
+    assert_eq!(
+        detail.concurrency.values().copied().max(),
+        Some(3),
+        "a row started beside two other heavy ones"
+    );
     let lines = crate::pre_push::row_timings::lines(&detail);
     assert_eq!(lines.len(), 4);
-    assert!(crate::pre_push::row_timings::table(&lines).is_some_and(|t| t.contains("clippy d")));
+    assert!(crate::pre_push::row_timings::table(&lines, 3).is_some_and(|t| t.contains("clippy d") && t.contains("at most 3")));
+}
+
+/// The limit is the worker count unless `PADDOCK_HEAVY_AT_ONCE` (1 or more) says otherwise, for a measurement; the run honours the limit
+/// it is given, at 1 (the behaviour before 2026-11-26) and 2.
+#[test]
+fn the_heavy_limit_is_the_worker_count_unless_a_measurement_sets_it_and_is_honoured() {
+    use crate::pre_push::exec::{heavy_limit, run_all_limited};
+    let env = |v: &str| std::collections::HashMap::from([("PADDOCK_HEAVY_AT_ONCE".to_string(), v.to_string())]);
+    assert_eq!(heavy_limit(&std::collections::HashMap::new(), 3), 3);
+    assert_eq!(heavy_limit(&env("1"), 3), 1);
+    assert_eq!(heavy_limit(&env("5"), 3), 5);
+    for bad in ["0", "two", "", "-1"] {
+        assert_eq!(heavy_limit(&env(bad), 3), 3, "{bad:?}");
+    }
+    assert_eq!(heavy_limit(&std::collections::HashMap::new(), 0), 1, "never below one");
+    for limit in [1, 2] {
+        let fake = Queued::new(Duration::from_millis(30));
+        let planned: Vec<Planned> = (0..5).map(|i| heavy_gate(&format!("clippy {i}"), 1)).collect();
+        let detail = run_all_limited(
+            &planned,
+            &fake,
+            &RunOpts {
+                workers: 5,
+                queue_stall: Duration::from_secs(60),
+                stop: &AtomicBool::new(false),
+                subject: &test_subject(),
+                reuse: None,
+            },
+            limit,
+        );
+        assert_eq!(fake.most.load(std::sync::atomic::Ordering::SeqCst), limit);
+        assert_eq!(detail.peak_heavy, limit);
+    }
 }
 
 /// The 2026-11-14/15 shape: train 10 is being built locally (partly pushed or not at all), a fix branch is stacked on it. The push
@@ -2792,7 +2834,8 @@ fn a_persons_run_is_measured_from_the_nearest_base_like_its_push() {
     assert_eq!(super::person_base(&r.root, None, "origin/main", &r.live()).0, f1);
 }
 
-/// While a heavy step is in flight, a free worker runs the next light row instead of waiting on a heavy one (review P2-4).
+/// While a heavy step is in flight, a free worker runs the next light row instead of waiting on a heavy one (review P2-4); at a limit of
+/// one heavy step (`PADDOCK_HEAVY_AT_ONCE=1`, the behaviour before the 2026-11-26 amendment) never two heavy steps at once.
 #[test]
 fn a_free_worker_runs_light_rows_while_a_heavy_step_is_in_flight() {
     let fake = Queued::new(Duration::from_millis(10));
@@ -2804,7 +2847,7 @@ fn a_free_worker_runs_light_rows_while_a_heavy_step_is_in_flight() {
         }
     });
     let planned = vec![heavy_gate("clippy a", 1), heavy_gate("clippy b", 1), light];
-    let rows = run_all_with(
+    let rows = crate::pre_push::exec::run_all_limited(
         &planned,
         &fake,
         &RunOpts {
@@ -2814,7 +2857,9 @@ fn a_free_worker_runs_light_rows_while_a_heavy_step_is_in_flight() {
             subject: &test_subject(),
             reuse: None,
         },
-    );
+        1,
+    )
+    .rows;
     assert!(rows.iter().all(|(_, v)| v.kind() == Kind::Passed), "{rows:?}");
     let beside = fake.beside.lock().unwrap().clone();
     // The first heavy step and the light row overlapped (whichever entered first); held behind the second heavy row, the

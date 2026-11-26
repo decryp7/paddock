@@ -211,3 +211,18 @@ change on 2026-11-21 (part of the gate-hang design, `docs/research/2026-11-19-ga
    Docker call per push) to decide. The row failed on 2026-11-21 because of the shared total, which is gone. A missing image still is
    "not measured" with the `--warm-linux` next step, as before.
 
+## Amendment 2026-11-26: as many heavy steps of one push at once as the slots and the load allow
+
+At the user's request of 2026-11-26 (parallel row execution), the 2026-11-15 rule of one heavy step in flight per push is dropped. The
+member gate showed what it cost: train i's member gate took 1 h 45 min, 64 % of it queued and 36 % running, with the rows serial.
+
+- A push runs as many heavy steps at once as it has workers (`heavy_limit`, `tools/paddock-dev/src/pre_push/exec.rs`): `workers` is one
+  at machine load 20 or more, else one per 4 cores, at least three and at most eight (heavy's `auto_max_slots`).
+- `heavy`'s slots still decide whether a step runs, and the throttle's load gate still holds steps back; a step beyond the slots waits in
+  heavy's queue. Each step's threads are heavy's share of the cores (`step_threads`: cores divided by the steps in flight, the caller's own
+  variables winning, ER-47). Cheap rows run beside the heavy ones, as before.
+- The reason for the old rule is kept by a label: every row has its own queued seconds (`heavy`'s measure, never run time), and the
+  per-row table (`row-timings.tsv`, printed after the gate table) lists queued, run and the heavy steps in flight at its start, so waiting for
+  other agents is told from running.
+- `PADDOCK_HEAVY_AT_ONCE=<n>` sets the number for a measurement; 1 is the earlier behaviour.
+- Measured: docs/benchmarks.md, "Member gate: parallel heavy rows (2026-11-26)".
