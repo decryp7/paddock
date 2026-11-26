@@ -43,16 +43,16 @@ mod generator_step;
 pub(crate) mod git;
 mod hakari;
 mod hunks;
-mod member_trial;
 mod lost_tests;
+mod member_trial;
 mod reland;
 pub(crate) mod reverted_base;
 mod stale_base;
 mod static_rows;
-pub mod trial_dispatch;
 pub mod sync_member;
 mod testnames;
 mod trailers;
+pub mod trial_dispatch;
 mod whole_file;
 
 use git::{AutoMerge, Git, short};
@@ -660,7 +660,16 @@ fn check(req: &Request) -> Result<Checked, CliError> {
                         pre_gates.take().unwrap_or_else(gates_step)
                     }),
                 );
-                steps.push("trial", Some(trial_step(&root, &merge, req.no_trial.as_deref(), &member_trial::Real)));
+                steps.push(
+                    "trial",
+                    Some(if req.commit.is_none() {
+                        member_trial::not_run(
+                            "a branch is checked before it is merged; run `./dev merge check --gates <merge-commit>` after merging",
+                        )
+                    } else {
+                        trial_step(&root, &merge, req.no_trial.as_deref(), &member_trial::Real)
+                    }),
+                );
             }
             Ok((merge.label, found, steps, result))
         }
@@ -675,10 +684,16 @@ fn trial_step(root: &std::path::Path, merge: &Merge, no_trial: Option<&str>, rea
     let [_, member] = merge.parents.as_slice() else {
         return member_trial::not_run("the merge does not have two parents");
     };
-    if merge.member_name == short(member) || merge.member_name.contains(char::is_whitespace) {
+    // The member's name: the one the merge was given, else the branch its subject names (`Merge branch 'x'`); a short hash or a
+    // subject that names none is no branch.
+    let subject = merge.message.lines().next().unwrap_or("");
+    let named = [merge.member_name.clone(), reverted_base::branch_of(subject)]
+        .into_iter()
+        .find(|n| !n.is_empty() && n != short(member) && !n.contains(char::is_whitespace));
+    let Some(named) = named else {
         return member_trial::not_run("the merge message names no member branch, so there is no trial ref to read");
-    }
-    let branch = merge.member_name.strip_prefix("origin/").unwrap_or(&merge.member_name);
+    };
+    let branch = named.strip_prefix("origin/").unwrap_or(&named);
     member_trial::interpret(reader.read(root, branch, member), branch)
 }
 
