@@ -2272,6 +2272,7 @@ dependencies = [
  "paddock-net",
  "paddock-proc",
  "paddock-repo-graph",
+ "paddock-secrets",
  "paddock-slots",
  "paddock-testkit",
  "paddock-testkit-start",

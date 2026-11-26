@@ -51,8 +51,18 @@ pub fn ci_prefix(os: &str, arch: &str) -> String {
     format!("paddock-ci/{os}-{arch}")
 }
 
-/// CI's S3 level of the compile cache, from the step's environment. Its key is two repository secrets (one key for every runner class,
-/// its policy scoped to `<bucket>/paddock-ci/*`); they never appear in `Debug` output or an error.
+/// The shared S3 store as the second cache level of a CI job (user decision 2026-11-19, docs/research/2026-11-19-sccache.md WP-8).
+///
+/// Designed against the Redis failure of 2026-10-25 (commit 1383e9898: the shared Dragonfly filled up, the Mac job's server failed
+/// to start and every rustc call failed): the job's own disk stays level 0 and decides alone whether a compile is stored
+/// (`SCCACHE_MULTILEVEL_WRITE_ERROR_POLICY=l0`: an S3 write or startup check that fails is logged, never fatal, and does not latch
+/// the server read-only; sccache v0.19.0 docs/MultiLevel.md); S3 is used only when this step was given its runner class's key
+/// (`PADDOCK_SCCACHE_S3_ACCESS_KEY_ID` and `PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY`, Gitea repository secrets passed through the
+/// setup-rust inputs to this step's environment only and never to `$GITHUB_ENV`; user decision 2026-11-19, least privilege; one key
+/// for every runner class, its policy scoped to `<bucket>/paddock-ci/*`) and its endpoint answers a TCP connect by its health
+/// check; the store's size is the store's job (the bucket quota and a lifecycle expiry rule set by the user on RustFS, since sccache
+/// never evicts from S3). The key never appears in `Debug` output or an error.
+
 #[derive(Clone, PartialEq, Eq)]
 pub struct S3Ci {
     /// `PADDOCK_SCCACHE_S3_BUCKET`.
