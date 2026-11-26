@@ -972,11 +972,20 @@ pub fn plan_touched_range(root: &std::path::Path, base: &str, head: &str) -> Opt
         .map(|(graph, plan)| Touched::from_plan(&plan).with_graph(&graph))
 }
 
-/// The candidate bases of the measure of what `sha` touched: main's own line, as the push's reuse, the planner and a landing dispatch
-/// read it. The first-parent line of `sha` alone never meets a tip a train merged (run 9150: the base was 62049e300 here and 3258361e7
-/// for the landing, so a FLAKY test of untouched paddock-ipc read as touched).
-pub fn touched_line(root: &std::path::Path, sha: &str, runs: &Runs) -> Vec<String> {
+/// THE candidate bases of a commit's readers (ER-21, ER-44): main's own line below `sha` (the tips main has been at that are ancestors,
+/// newest push run first, then the first-parent line; every ancestor is searched, never the newest N). The push's reuse, the planner,
+/// a landing dispatch, the measure of what a commit touched and the verdict's "last fully tested commit" hint all read the base from
+/// this one line, so they name the same commit (run 9150: 62049e300 here and 3258361e7 for the landing, and the hint said 62049e300).
+/// A push's reuse and planner add the push's `before` through [`main_line`]; this form has none.
+pub fn candidate_line(root: &std::path::Path, sha: &str, runs: &Runs) -> Vec<String> {
     main_line(root, sha, false, None, &runs.main_tips())
+}
+
+/// [`candidate_line`] with the runs read here, once; empty when they cannot be read (no base is found: the safe side).
+pub fn candidate_line_of(client: &mut Client, workflow: &str, root: &std::path::Path, sha: &str) -> Vec<String> {
+    Runs::read(client, workflow)
+        .map(|runs| candidate_line(root, sha, &runs))
+        .unwrap_or_default()
 }
 
 /// The touched reader of the production paths (`ci verdict`, `ci reuse`, the queue, the planner): [`touched_since_base`] over the
@@ -1000,7 +1009,7 @@ pub fn touched_in(
             &own
         }
     };
-    let first_parent = touched_line(root, sha, runs);
+    let first_parent = candidate_line(root, sha, runs);
     let narrow = PACKAGE_LEVEL_FIRST_GREEN_RUN.is_some();
     touched_since_base(client, runs, &first_parent, sha, scope_decisive, &mut |b, h| {
         plan_touched_range(root, b, h)

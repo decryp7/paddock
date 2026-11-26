@@ -4411,4 +4411,6 @@ spec `data.spec.ts:301` (theme switch redraws the canvases) failed in the same r
 - **Fix.** `main_line` reads every ancestor (about 30 ms for 10,000 commits; the candidates stay bounded by the tips and the first-parent
   line), and `touched_in` reads the same line through `green::touched_line`. `ci fix-items` reads the landing verdict, as `ci landing-held`
   and the queue do: a landed commit is decided by a landing run, so the plain verdict recorded nothing (also train a's 8983).
-- **Class.** A candidate list capped by a count of commits where a train adds many (ER-21: second instance with run 9056's first-parent line).
+- **Class (ER-21, finished in the same round).** One candidate line, `green::candidate_line` (over `main_line`), is now read by the push's reuse, the
+  planner, the landing dispatch, the touched measure and the verdict's "last fully tested commit" hint; the hint had named 62049e300. A test
+  asserts the hint and the push base agree. Earlier instance: run 9056's first-parent line.

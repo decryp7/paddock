@@ -893,9 +893,15 @@ fn a_landing_run_of_its_own_narrowed_diff_lands_but_is_never_a_base_nor_tag_gree
     let (v, from) = verdict::landing_verdict_with(&mut client(&mut f), "ci.yml", &head, None, true, &mut |_, _| Some(touched(&[])));
     assert_eq!(v, verdict::Verdict::Green { run: 8801 });
     assert_eq!(from.as_deref(), Some(main.as_str()));
-    let plain = verdict::verdict_with_touched(&mut client(&mut f), "ci.yml", &head, None, true, &mut Vec::new, &mut |_, _| {
-        Some(touched(&[]))
-    });
+    let plain = verdict::verdict_with_touched(
+        &mut client(&mut f),
+        "ci.yml",
+        &head,
+        None,
+        true,
+        &mut |_| Vec::new(),
+        &mut |_, _| Some(touched(&[])),
+    );
     // Run 8983: the reason named the landing run with an empty cause, "8983 ()". It says why the run is not complete here.
     assert!(
         matches!(&plain, verdict::Verdict::Red { reason, .. }
@@ -935,9 +941,15 @@ fn a_landing_run_with_a_flaky_test_of_an_untouched_target_has_fix_items_for_the_
         matches!(&v, verdict::Verdict::GreenWithFixItems { run: 8821, items } if items.len() == 1),
         "{v:?}"
     );
-    let plain = verdict::verdict_with_touched(&mut client(&mut f), "ci.yml", &head, None, true, &mut Vec::new, &mut |_, _| {
-        Some(touched(&["debrief"]))
-    });
+    let plain = verdict::verdict_with_touched(
+        &mut client(&mut f),
+        "ci.yml",
+        &head,
+        None,
+        true,
+        &mut |_| Vec::new(),
+        &mut |_, _| Some(touched(&["debrief"])),
+    );
     assert!(matches!(plain, verdict::Verdict::Red { .. }), "{plain:?}");
 }
 
@@ -1308,9 +1320,25 @@ fn a_main_tip_far_down_a_long_trains_history_is_still_a_candidate_base() {
     // The measure of what the push touched reads the same line (it read the first-parent line, which never meets x), and finds x
     // as the base of the change, not b or no base.
     let runs = Runs::read(&mut client(&mut f), "ci.yml").unwrap();
-    let line = touched_line(l.dir.path(), &l.y, &runs);
+    let line = candidate_line(l.dir.path(), &l.y, &runs);
     let found = find_base_in(&mut client(&mut f), &runs, &line, true, &mut |_, _, _| None);
     assert_eq!(found.map(|b| b.sha), Some(l.x.clone()), "{line:?}");
+}
+
+#[test]
+fn the_verdicts_hint_names_the_commit_the_pushs_base_is() {
+    // Run 9150: `ci verdict` said "the last fully tested commit on main is 62049e300" while the push's base and the landing's were
+    // 3258361e7. The hint reads the one candidate line, so it names the push's base (here x, below a 250-member train).
+    let l = train_ij_line_with(250);
+    let runs = &train_ij_runs(&l)[1..];
+    let mut f = server_by_sha(runs);
+    let planned = crate::plan_cmd::green_base_in(&mut client(&mut f), l.dir.path(), &l.y, Some(&l.t), &mut |_| {});
+    assert_eq!(planned.unwrap().map(|b| b.0), Some(l.x.clone()), "the push's base");
+    let v = verdict::verdict_in(&mut client(&mut f), "ci.yml", &l.y, None, true, l.dir.path());
+    assert!(
+        matches!(&v, verdict::Verdict::Red { reason, .. } if reason.contains(&format!("the last fully tested commit on main is {}", l.x))),
+        "{v:?}"
+    );
 }
 
 #[test]
