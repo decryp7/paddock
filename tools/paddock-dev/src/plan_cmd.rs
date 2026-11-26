@@ -23,8 +23,8 @@
 use crate::host_tests::HostTests;
 use crate::plan::{Request, plan_with_graph};
 use crate::plan_ci::{
-    BaseInput, MatrixOpts, USAGE, choose_base, ci_outputs, full_os, matrix, member_run, only_app, package_filters, parse_args, summary,
-    wants_webkit, workspace_legs,
+    BaseInput, MatrixOpts, USAGE, choose_base, ci_outputs, coverage_run, full_os, matrix, member_run, only_app, package_filters,
+    parse_args, summary, wants_webkit, workspace_legs,
 };
 use crate::plan_repo::git_text;
 use crate::plan_since::{APP_WORKFLOWS, GiteaRuns, SincePlan};
@@ -518,6 +518,24 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
     let mut os_scoped = legs
         .iter()
         .any(|l| !l["host_packages"].as_str().unwrap_or("").is_empty() || !l["host_filter"].as_str().unwrap_or("").is_empty());
+    // The test-result cache's plan (ADR 0116 §5): the packages each runner class skips, from the file `ci test-cache plan` wrote. No file,
+    // an unreadable one, or an empty plan (the switch is off) means nothing is skipped; a bad file is said, never read as a plan.
+    let reuse_plan = env(crate::test_cache::plan::ENV_FILE)
+        .filter(|p| !p.trim().is_empty())
+        .and_then(|p| {
+            match std::fs::read_to_string(&p)
+                .map_err(|e| e.to_string())
+                .and_then(|t| crate::test_cache::plan::ReusePlan::parse(&t))
+            {
+                Ok(plan) => Some(plan),
+                Err(e) => {
+                    log(&format!("::notice::test-cache: no reuse in this plan: {e}"));
+                    None
+                }
+            }
+        })
+        .unwrap_or_default();
+    let mut cache_reused: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for (name, contract, key, workspace_dir) in [
         ("crate_legs", CRATES_CONTRACT, "crates", "crates"),
         ("paddock_dev_legs", PADDOCK_DEV_CONTRACT, "paddockDev", "tools/paddock-dev"),
@@ -541,6 +559,11 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
             let id = if key == "crates" { "crates" } else { "paddock-dev" };
             legs_of = crate::plan_graph::narrow_workspace_legs(legs_of, &plan, &graph, id, workspace_dir);
         }
+        // Packages with a valid pass of the same key are left out of the legs' tests (never the declared filter: the run stays whole).
+        let job = if key == "crates" { "crate" } else { "paddock-dev" };
+        let applied = crate::test_cache::plan::apply(legs_of, job, &reuse_plan, key != "crates" || !coverage_run(env));
+        legs_of = applied.legs;
+        cache_reused.extend(applied.reused);
         workspace_oses.insert(
             if key == "crates" { "crate" } else { "paddock-dev" },
             legs_of
@@ -633,6 +656,7 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
     log(&ci_scope(ran, false, need, need_whole)
         .with_base(need_base)
         .with_inactive(inactive.clone())
+        .with_reused(cache_reused)
         .line());
     if narrow {
         log("narrowed to the packages the change reaches (a member run; the final head's full run tests the rest)");

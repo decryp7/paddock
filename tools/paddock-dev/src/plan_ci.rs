@@ -122,6 +122,14 @@ pub fn full_os(env: &dyn Fn(&str) -> Option<String>) -> bool {
         || env("GITHUB_REF").is_some_and(|r| r.starts_with("refs/tags/"))
 }
 
+/// Whether this run measures coverage: the nightly (`os_full`), a release's gates and a tag. A train, a branch, a pull request and a push
+/// to main run plain nextest, so the Linux tests of the `crate` job are cacheable like every other leg (user decision 2026-11-26, ADR 0116
+/// D4 amended; ci.yml's `crates` job guards its coverage step with the same three conditions, and a conformance test keeps them equal).
+pub fn coverage_run(env: &dyn Fn(&str) -> Option<String>) -> bool {
+    let set = |k: &str| env(k).is_some_and(|v| v == "true" || v == "1");
+    set("PLAN_FULL_OS") || set("PLAN_RELEASE") || env("GITHUB_REF").is_some_and(|r| r.starts_with("refs/tags/"))
+}
+
 /// The legs of one of the two jobs that are not apps (`crate`, `paddock-dev`): one object per runner of `os_legs` with the packages
 /// (`test_packages`, space-separated, for `-p`; empty: the workspace's) and the nextest filterset (`test_filter`) its tests run. A
 /// Windows or macOS leg tests only what the workspace's `hostTests` names (OS-scoped tests); every leg also keeps the member run's
@@ -1338,5 +1346,34 @@ mod tests {
         ] {
             assert_eq!(args(&a).unwrap_err(), why, "{a:?}");
         }
+    }
+}
+
+#[cfg(test)]
+mod coverage_run_tests {
+    use super::coverage_run;
+
+    fn env<'a>(pairs: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<String> + 'a {
+        move |k| pairs.iter().find(|(n, _)| *n == k).map(|(_, v)| v.to_string())
+    }
+
+    #[test]
+    fn coverage_runs_in_the_nightly_a_release_and_a_tag_and_never_on_a_train_or_a_push() {
+        assert!(coverage_run(&env(&[("PLAN_FULL_OS", "true")])), "the nightly");
+        assert!(coverage_run(&env(&[("PLAN_RELEASE", "true")])), "a release's gates");
+        assert!(coverage_run(&env(&[("GITHUB_REF", "refs/tags/v1.0.0")])), "a tag");
+        assert!(!coverage_run(&env(&[
+            ("GITHUB_REF", "refs/heads/train/2026-11-26-p"),
+            ("GITHUB_EVENT_NAME", "workflow_dispatch")
+        ])));
+        assert!(!coverage_run(&env(&[
+            ("GITHUB_REF", "refs/heads/main"),
+            ("GITHUB_EVENT_NAME", "push")
+        ])));
+        assert!(!coverage_run(&env(&[("GITHUB_REF", "refs/heads/feat/x")])));
+        assert!(
+            !coverage_run(&env(&[("PLAN_APP", "dyno")])),
+            "an app's own gates run no crates coverage"
+        );
     }
 }

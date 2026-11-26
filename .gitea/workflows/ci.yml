@@ -116,7 +116,7 @@ jobs:
       paddock_dev_legs: ${{ steps.plan.outputs.paddock_dev_legs }}
       # A member run (a dispatch with a base): the nextest filterset of the packages of that workspace the change reaches (empty: every
       # test, and always so on main, a tag and a manual run with no base: the final head's full run). The Linux crate tests run
-      # whole under coverage in `crates`.
+      # whole (the nightly and a tag also under coverage in `crates`).
       # Whether the WebKit tests and the reference apps' browser jobs run: the e2e and e2e-webkit jobs and the scope this run declares
       # (ADR 0113) read the one value of the planner.
       webkit: ${{ steps.plan.outputs.webkit }}
@@ -163,6 +163,19 @@ jobs:
           PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
         run: ./dev ci reuse --workflow ci.yml
 
+      # ADR 0116: the packages each runner class can skip, from the test-result store (the one step of the plan job that holds the
+      # test cache's key, C141). Empty while docs/test-cache.toml has no two clean shadow runs recorded. Fails open: no file, no reuse.
+      - name: Test cache plan
+        if: ${{ steps.reuse.outputs.reuse != 'true' }}
+        continue-on-error: true
+        env:
+          PLAN_TOKEN: ${{ github.token }}
+          PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+          PADDOCK_TEST_CACHE_KEY_ID: ${{ secrets.PADDOCK_TEST_CACHE_KEY_ID }}
+          PADDOCK_TEST_CACHE_SECRET: ${{ secrets.PADDOCK_TEST_CACHE_SECRET }}
+          PADDOCK_SCCACHE_S3_ENDPOINT: ${{ vars.PADDOCK_SCCACHE_S3_ENDPOINT }}
+        run: ./dev ci test-cache plan --shared --out "$RUNNER_TEMP/test-cache-plan.json"
+
       - name: Affected projects
         id: plan
         env:
@@ -189,6 +202,8 @@ jobs:
           # A reused run (the step above): the planner switches every job off and declares that it ran nothing; the reused run decides
           # the commit.
           PLAN_REUSE: ${{ steps.reuse.outputs.reuse }}
+          # The test-result cache's plan (ADR 0116): read when the file is there.
+          PLAN_TEST_CACHE_FILE: ${{ runner.temp }}/test-cache-plan.json
           EVENT: ${{ github.event_name }}
         run: |
           ./dev plan --ci
@@ -788,7 +803,11 @@ jobs:
       # region of the macro's generated wrapper to that line, which no test can all reach.
       # This is also Linux's all-features test run (the crate leg skips its own on Linux): the real-browser tests of
       # paddock-chromium must find the image's Chrome for Testing instead of skipping.
+      # Coverage runs only in the nightly (`os_full`), a release's gates and a tag (user decision 2026-11-26, ADR 0116 D4 amended): a train, a
+      # branch and a push to main run plain nextest in the `crate` job's Linux leg, so those tests are cacheable. The same three
+      # conditions are `plan_ci::coverage_run`; conformance/test/coverage-placement.test.mjs keeps them equal.
       - name: Coverage (>= 90 % lines; 99 % security target report-only)
+        if: ${{ (inputs.os_full == true || inputs.os_full == 'true' || github.event.inputs.os_full == 'true' || inputs.release == true || startsWith(github.ref, 'refs/tags/')) }}
         env:
           PADDOCK_REQUIRE_TEST_BROWSER: "1"
         run: ./dev ci run crates coverage
@@ -814,7 +833,7 @@ jobs:
 
   # Every crate on Linux, Windows and macOS (platform-only bugs exist: lessons): clippy and tests with every feature, so the
   # `tauri` adapters are built too, the feature-off runs and the doc tests, as a few workspace-wide steps. On Linux the
-  # all-features test run is the coverage job's (crates), so this leg runs only what that job does not.
+  # all-features test run is the coverage job's (crates) only in the nightly, a release and a tag; otherwise this leg runs it plainly.
   crate:
     name: crate (${{ matrix.os }})
     needs: [plan]
@@ -946,9 +965,10 @@ jobs:
       # Every crate's tests with every feature, so the `tauri` adapters are built and tested too (the dialogs and panels on the
       # mock runtime, paddock-chromium against its fake browser and against Chrome for Testing: CHROMIUM_TEST_PATH, never an
       # installed browser, rule 7; a missing browser fails instead of skipping). On Linux the coverage job (crates) runs
-      # exactly this run under llvm-cov, so this leg does not run it twice.
+      # exactly this run under llvm-cov in the nightly, a release and a tag, so this leg does not run it twice there; every other run
+      # (a train, a branch, a push to main) runs it here, plainly and cacheable.
       - name: Tests (workspace, every feature)
-        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && runner.os != 'Linux' }}
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && (runner.os != 'Linux' || !(inputs.os_full == true || inputs.os_full == 'true' || github.event.inputs.os_full == 'true' || inputs.release == true || startsWith(github.ref, 'refs/tags/'))) }}
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/crates
         env:
           PADDOCK_REQUIRE_TEST_BROWSER: "1"
@@ -961,6 +981,9 @@ jobs:
           TEST_PACKAGES: ${{ matrix.test_packages }}
           TEST_FILTER: ${{ matrix.test_filter }}
           TEST_SKIP: ${{ matrix.test_skip }}
+          # The packages whose pass of the same key the test cache reuses (ADR 0116, `./dev plan --ci`): a filterset that leaves them out;
+          # empty while the switch is off. Used only by a leg with no filter of its own, so the run stays whole.
+          TEST_CACHE_EXCLUDE: ${{ matrix.test_cache_exclude }}
           # A failed-only round (since_run): each failed test of FILTER must still select a test (./dev ci rerun-check), never a warning.
           RERUN: ${{ github.event.inputs.since_run }}
         run: |
@@ -978,12 +1001,13 @@ jobs:
           fi
           # The output is kept for the test-cache record step below (ADR 0116, report-only); pipefail keeps nextest's exit code.
           set -o pipefail
+          if [ -n "$TEST_CACHE_EXCLUDE" ] && [ -z "$FILTER" ] && [ -z "$TEST_FILTER" ]; then echo "::notice::test-cache: nextest leaves out the packages with a reusable pass of the same key: $TEST_CACHE_EXCLUDE"; filter=(-E "$TEST_CACHE_EXCLUDE" --no-tests=warn); fi
           cargo nextest run "${sel[@]}" --all-features --profile ci ${filter[@]+"${filter[@]}"} 2>&1 | tee "$RUNNER_TEMP/nextest-crates.log"
 
       # ADR 0116, report-only (ER-41): stores the pass of every package this run proved (and only a leg with no filter: `test_filter` empty) (whole, first try, no flake) in the shared test-result
       # store. Only a main or train run writes (`./dev ci test-cache record` refuses any other ref and any rerun itself). Never fails the job.
       - name: Record test results (test cache)
-        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && runner.os != 'Linux' && !matrix.filter && matrix.test_filter == '' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/train/')) }}
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && (runner.os != 'Linux' || !(inputs.os_full == true || inputs.os_full == 'true' || github.event.inputs.os_full == 'true' || inputs.release == true || startsWith(github.ref, 'refs/tags/'))) && !matrix.filter && matrix.test_filter == '' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/train/')) }}
         continue-on-error: true
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/crates
         env:
@@ -1364,6 +1388,8 @@ jobs:
           # run's reached packages. Linux tests everything.
           TEST_FILTER: ${{ matrix.test_filter }}
           TEST_SKIP: ${{ matrix.test_skip }}
+          # The packages whose pass of the same key the test cache reuses (ADR 0116): see the crates job's step.
+          TEST_CACHE_EXCLUDE: ${{ matrix.test_cache_exclude }}
           PADDOCK_TEST_COST_REPORT: ${{ runner.temp }}/test-cost-${{ github.run_id }}-${{ github.run_attempt }}.jsonl
           # A failed-only round (since_run): each failed test of FILTER must still select a test (./dev ci rerun-check), never a warning.
           RERUN: ${{ github.event.inputs.since_run }}
@@ -1377,6 +1403,7 @@ jobs:
           filter=()
           if [ -n "$FILTER" ]; then echo "::notice::nextest runs only the selected tests (a rerun's failed tests, or the plan's smoke set or affected targets): $FILTER"; filter=(-E "$FILTER" --no-tests=warn)
           elif [ -n "$TEST_FILTER" ]; then echo "::notice::nextest filter (hostTests, and the packages this change reaches in a member run): $TEST_FILTER"; filter=(-E "$TEST_FILTER" --no-tests=fail); fi
+          if [ -n "$TEST_CACHE_EXCLUDE" ] && [ -z "$FILTER" ] && [ -z "$TEST_FILTER" ]; then echo "::notice::test-cache: nextest leaves out the packages with a reusable pass of the same key: $TEST_CACHE_EXCLUDE"; filter=(-E "$TEST_CACHE_EXCLUDE" --no-tests=warn); fi
           set -o pipefail
           cargo nextest run --profile ci --locked --no-fail-fast ${filter[@]+"${filter[@]}"} 2>&1 | tee "$RUNNER_TEMP/nextest-paddock-dev.log"
 

@@ -42,6 +42,15 @@ pub struct TestCacheArgs {
     /// for the classes of the other runners this way.
     #[arg(long)]
     class: Option<String>,
+    /// `shadow-run`: the CI run (id) whose record steps' shadow lines are read.
+    #[arg(long)]
+    run: Option<u64>,
+    /// `shadow-run`: add a clean run's id to `[switch] green_runs` of docs/test-cache.toml (the file is only changed by this flag).
+    #[arg(long)]
+    write: bool,
+    /// `plan`: where to write the reuse plan (`PLAN_TEST_CACHE_FILE` of `./dev plan --ci`).
+    #[arg(long)]
+    out: Option<PathBuf>,
     /// `record`: the file holding a nextest run's output (stdout and stderr), read as the run's result.
     #[arg(long)]
     log: Option<PathBuf>,
@@ -90,17 +99,34 @@ fn targets(graph: &paddock_repo_graph::Graph, workspace: &str) -> Vec<Target> {
     t
 }
 
-/// The candidates with their node hashes, in one bulk read.
-pub fn candidates(root: &Path, workspace: &str, os: &str) -> Result<Vec<Candidate>, CliError> {
+/// The graph and the model of the tree, read once: a plan asks for several workspaces and runner classes.
+pub struct World {
+    graph: crate::plan::RepoGraph,
+    world: crate::repo_model::World,
+}
+
+/// Reads the graph and the model of the checkout at `root`.
+pub fn world(root: &Path) -> Result<World, CliError> {
     let history = GitHistory::new(root, READ_TIMEOUT);
     let graph = crate::plan::read_graph(root, &history).map_err(|e| fail(e.to_string()))?;
-    let ts = targets(&graph.cargo, workspace);
+    let world = crate::repo_model::build_world(root, &history, &graph, None).map_err(fail)?;
+    Ok(World { graph, world })
+}
+
+/// The candidates with their node hashes, in one bulk read.
+pub fn candidates(root: &Path, workspace: &str, os: &str) -> Result<Vec<Candidate>, CliError> {
+    candidates_in(root, &world(root)?, workspace, os)
+}
+
+/// [`candidates`] over a world read before.
+pub fn candidates_in(root: &Path, w: &World, workspace: &str, os: &str) -> Result<Vec<Candidate>, CliError> {
+    let ts = targets(&w.graph.cargo, workspace);
     if ts.is_empty() {
         return Err(fail(format!(
             "::error::ci test-cache: the Cargo graph has no package in the workspace `{workspace}`. Next step: name a workspace folder such as `crates`."
         )));
     }
-    let world = crate::repo_model::build_world(root, &history, &graph, None).map_err(fail)?;
+    let world = &w.world;
     let text = |f: &str| std::fs::read_to_string(root.join(f)).ok();
     let tree = crate::repo_model::hash::Tree {
         files: &world.files,
@@ -114,7 +140,7 @@ pub fn candidates(root: &Path, workspace: &str, os: &str) -> Result<Vec<Candidat
         os,
     };
     let nodes: Vec<String> = ts.iter().map(|t| t.node.clone()).collect();
-    let hashes = crate::repo_model::hash::node_hashes(&crate::input_hash::Real, &ctx, root, &world, &tree, &nodes)?;
+    let hashes = crate::repo_model::hash::node_hashes(&crate::input_hash::Real, &ctx, root, world, &tree, &nodes)?;
     ts.into_iter()
         .map(|t| {
             let h = hashes.get(&t.node).ok_or_else(|| {
@@ -173,6 +199,8 @@ pub fn command(a: &TestCacheArgs) -> Result<Report, CliError> {
             None => audit(&local),
         }),
         "selfcheck" => selfcheck(shared.as_ref()),
+        "plan" => plan(a, &root, store),
+        "shadow-run" => shadow_run(a, &root),
         "lookup" | "run" | "forget" | "record" => {
             let class = class_of(a);
             let cfg = Config::read(&root).map_err(fail)?;
@@ -563,10 +591,182 @@ fn record(
         at: now(),
         os_build: os_build(),
     };
+    // The shadow phase (ER-41): of the targets a valid record already covered, how many ran here and passed, and which ran and failed (a
+    // soundness finding: the key missed an input). Read before this run's own records are stored, and only when the lookup answered.
+    let mut lines: Vec<String> = Vec::new();
+    let (decisions, notice) = decide(cands, cfg, class, store, now(), &trust_check());
+    if notice.is_none() {
+        let matched: Vec<&Candidate> = cands
+            .iter()
+            .zip(&decisions)
+            .filter(|(_, d)| matches!(d, Decision::Reuse(_)))
+            .map(|(c, _)| c)
+            .collect();
+        let shadow = super::shadow_outcome(&matched, &super::result::judge(&log, &asked));
+        lines.extend(shadow.findings.iter().map(|t| {
+            format!("::error::test-cache soundness finding: {t} matched a valid record and then failed in this run. Next step: find the input its key misses (ADR 0116 section 8); the switch stays off.")
+        }));
+        lines.push(shadow.line());
+    }
     let put = super::records_from_log(&log, cands, cfg, class, &meta);
-    let line = match store.put_many(&put) {
+    lines.push(match store.put_many(&put) {
         Ok(()) => format!("test-cache: recorded {} packages ({} in the log)", put.len(), asked.len()),
         Err(e) => format!("::warning::test-cache: records not stored: {e}"),
+    });
+    Ok(Report::new(serde_json::json!({"stored": put.len()}), lines.join("\n")))
+}
+
+/// `plan --out <file>`: for each runner class and each of the two workspaces, the packages with a valid record, as the
+/// [`super::plan::ReusePlan`] `./dev plan --ci` reads. While the switch is off (`docs/test-cache.toml`, shadow) and `--reuse` is not given,
+/// the file holds an empty plan and the lines say what would be reused: nothing is skipped (ER-41). Fails open: a store that cannot be
+/// read, a run that may not read (tag, release, nightly) or a workspace that cannot be hashed gives no reuse for it, with the cause.
+fn plan(a: &TestCacheArgs, root: &Path, store: &dyn Store) -> Result<Report, CliError> {
+    let cfg = Config::read(root).map_err(fail)?;
+    let skip = cfg.mode() == Mode::On || a.reuse;
+    let mut out = super::plan::ReusePlan::default();
+    let mut text: Vec<String> = Vec::new();
+    let allowed = read_allowed(&env_get);
+    if let Err(w) = &allowed {
+        text.push(format!("::notice::test-cache: reuse is off for this run: {w}. Every target runs."));
+    }
+    let trust = trust_check();
+    let mut would = 0;
+    let w = if allowed.is_ok() { Some(world(root)?) } else { None };
+    if let Some(w) = &w {
+        for class in ["Linux-X64", "macOS-ARM64", "Windows-X64"] {
+            let class = RunnerClass(class.to_string());
+            for ws in ["crates", "tools/paddock-dev"] {
+                let cands = match candidates_in(root, w, ws, os_of(&class)) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        text.push(format!("::notice::test-cache: {ws} on {} not planned: {e}", class.0));
+                        continue;
+                    }
+                };
+                let (decisions, notice) = decide(&cands, &cfg, &class, store, now(), &trust);
+                if let Some(n) = notice {
+                    text.push(format!("::notice::test-cache: reuse is off for {} {ws}: {n}.", class.0));
+                }
+                for (c, d) in cands.iter().zip(decisions) {
+                    if let Decision::Reuse(r) = d {
+                        would += 1;
+                        if skip {
+                            out.by_class
+                                .entry(class.0.clone())
+                                .or_default()
+                                .insert(c.target.package.clone(), format!("{}@{} from run {}", r.target, class.0, r.run));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    let line = if skip {
+        format!("test-cache plan: reuse is ON: {would} package(s) skipped across the runner classes")
+    } else {
+        format!(
+            "test-cache plan: shadow: {would} package(s) would be skipped; nothing is skipped until docs/test-cache.toml records two clean shadow runs"
+        )
     };
-    Ok(Report::new(serde_json::json!({"stored": put.len()}), line))
+    text.push(line);
+    if let Some(p) = &a.out {
+        std::fs::write(p, out.json().to_string()).map_err(|e| {
+            fail(format!(
+                "::error::ci test-cache plan: {} cannot be written: {e}. Next step: check the path.",
+                p.display()
+            ))
+        })?;
+    }
+    Ok(Report::new(serde_json::json!({"would": would, "skipping": skip}), text.join("\n")))
+}
+
+/// The step whose log carries a job's shadow line.
+const RECORD_STEP: &str = "Record test results (test cache)";
+
+/// `shadow-run --run <id> [--write]`: is this CI run a clean shadow run (ADR 0116 §8, ER-41)? It must be a green run of ci.yml on a
+/// train branch, its record steps must have printed shadow lines, at least one target must have matched a record (a run that matched
+/// nothing proved nothing) and no matched target may have failed. Exit 0 clean (the run's id is added to docs/test-cache.toml with
+/// `--write`), 5 a soundness finding, 6 not measured (never a pass). Two distinct clean runs switch reuse on.
+fn shadow_run(a: &TestCacheArgs, root: &Path) -> Result<Report, CliError> {
+    let not_measured = |why: String| {
+        Ok(Report::new(
+            serde_json::json!({"verdict": "not_measured"}),
+            format!("::error::ci test-cache shadow-run: not measured: {why}. Next step: read the run's record steps."),
+        )
+        .with_exit(Exit::NotMeasured))
+    };
+    let Some(id) = a.run else {
+        return Err(fail(
+            "::error::ci test-cache shadow-run: --run <id> is required. Next step: pass the train run's id.".into(),
+        ));
+    };
+    let token = env_get("GITEA_TOKEN").or_else(|| env_get("PLAN_TOKEN")).unwrap_or_default();
+    if token.is_empty() {
+        return not_measured("no API token (GITEA_TOKEN)".into());
+    }
+    let server = env_get("GITHUB_SERVER_URL").unwrap_or_else(|| "https://dev.decryptology.net".into());
+    let repo = env_get("GITHUB_REPOSITORY").unwrap_or_else(|| "decryp7/paddock".into());
+    let mut http = crate::wait::CurlHttp;
+    let mut client = crate::ci_runs::client::Client::new(&mut http, &server, &repo, &token);
+    let run = match client.run(id) {
+        Ok(Some(r)) => r,
+        Ok(None) => return not_measured(format!("run {id} does not exist")),
+        Err(e) => return not_measured(format!("run {id} could not be read: {e}")),
+    };
+    if run.workflow() != "ci.yml" || !run.git_ref().starts_with("refs/heads/train/") || run.conclusion != "success" {
+        return not_measured(format!(
+            "run {id} is not a green ci.yml run on a train ({} on {}, {})",
+            run.workflow(),
+            run.git_ref(),
+            run.conclusion
+        ));
+    }
+    let jobs = match client.timed_jobs(id) {
+        Ok(Some(j)) => j,
+        Ok(None) => return not_measured(format!("run {id} has no job list")),
+        Err(e) => return not_measured(format!("the jobs of run {id} could not be read: {e}")),
+    };
+    let mut logs = Vec::new();
+    for j in jobs.iter().filter(|j| j.steps.iter().any(|(n, _)| n == RECORD_STEP)) {
+        match client.log(j.id) {
+            Ok(Some(l)) => logs.push(l),
+            Ok(None) => return not_measured(format!("job {} has no log", j.id)),
+            Err(e) => return not_measured(format!("the log of job {} could not be read: {e}", j.id)),
+        }
+    }
+    let Some((lines, sum)) = super::read_shadow(&logs) else {
+        return not_measured(format!(
+            "none of the {} record job log(s) of run {id} has a `test-cache shadow:` line",
+            logs.len()
+        ));
+    };
+    let summary = format!(
+        "run {id}: {lines} shadow line(s), matched {}, passed {}, findings {}",
+        sum.matched,
+        sum.passed,
+        sum.findings.len()
+    );
+    if !sum.findings.is_empty() {
+        return Ok(Report::new(
+            serde_json::json!({"verdict": "finding", "run": id}),
+            format!(
+                "::error::ci test-cache shadow-run: {summary}. A matched target failed: the key misses an input; the switch stays off."
+            ),
+        )
+        .with_exit(Exit::Findings));
+    }
+    if sum.matched == 0 {
+        return not_measured(format!("{summary}: nothing matched a record, so nothing was proven"));
+    }
+    let mut text = format!("test-cache shadow-run: clean: {summary}");
+    if a.write {
+        let path = root.join(super::config::FILE);
+        let cur = std::fs::read_to_string(&path).map_err(|e| fail(format!("{} cannot be read: {e}", path.display())))?;
+        let next = super::with_green_run(&cur, id).map_err(fail)?;
+        if next != cur {
+            std::fs::write(&path, next).map_err(|e| fail(format!("{} cannot be written: {e}", path.display())))?;
+            text.push_str(&format!("\ntest-cache shadow-run: run {id} added to {}", super::config::FILE));
+        }
+    }
+    Ok(Report::new(serde_json::json!({"verdict": "clean", "run": id}), text))
 }
