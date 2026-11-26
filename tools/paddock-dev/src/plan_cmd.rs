@@ -600,12 +600,15 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
     if reused {
         outputs.push(("rerun_jobs".into(), "[]".into()));
     }
+    // The job model of ci.yml names the jobs a scope has (ADR 0123): a workflow that cannot be modelled stops the plan with its problems.
+    let model = load_model(root).map_err(|e| fail(format!("ci.yml cannot be modelled, so the run's scope cannot be named: {e}")))?;
     let os_legs = crate::plan_ci::os_legs();
     let filter_of = |p: &Value, k: &str| p["filters"][k].as_str().unwrap_or("").to_string();
     let mut ran = if reused {
         Scope::default()
     } else {
         scope_of(
+            &model,
             &plan,
             &legs,
             wants_webkit(env),
@@ -662,7 +665,7 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
     .map_err(fail)?;
     // A push to main's scope has no WebKit and no reference-app end-to-end jobs (the nightly's), so a train's full run is complete
     // without them (user, 2026-11-24).
-    let need = scope_of(&need_plan, &need_legs, false, &os_legs, &[]);
+    let need = scope_of(&model, &need_plan, &need_legs, false, &os_legs, &[]);
     // A push's or a landing's need is its own diff: the line names the base it was diffed from (a push reuses a landing run of
     // the same diff only, review round 2 P1-A).
     let need_base = if need_whole { None } else { base.as_deref() };
@@ -926,7 +929,8 @@ fn since_ci_with(root: &Path, env: &dyn Fn(&str) -> Option<String>, id: u64, rea
         },
     )
     .map_err(fail)?;
-    let need = scope_of(&everything, &need_legs, true, &crate::plan_ci::os_legs(), &[]);
+    let model = load_model(root).map_err(|e| fail(format!("ci.yml cannot be modelled, so the rerun's scope cannot be named: {e}")))?;
+    let need = scope_of(&model, &everything, &need_legs, true, &crate::plan_ci::os_legs(), &[]);
     eprintln!("{}", ci_scope(Scope::default(), true, need, true).with_inactive(inactive).line());
     if let Some(why) = &plan.everything {
         println!("::warning::dev plan --since-run {id}: {why}; this run tests everything");

@@ -16,6 +16,7 @@ pub use expected::{
 
 use crate::job_outcome::JobOutcome;
 use crate::log_text::plain;
+use paddock_ci_config::jobs::JobModel;
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -399,25 +400,32 @@ fn leg_id(leg: &Value) -> String {
     if e2e.is_empty() { base } else { format!("{base}:{e2e}") }
 }
 
-/// The scope of a ci.yml plan: the project jobs it switched on (and the crate and paddock-dev jobs on each runner), the app legs,
-/// the engines (WebKit only when `webkit` and a UI is reached), and whether every test ran whole.
-pub fn scope_of(plan: &Value, legs: &[Value], webkit: bool, os_legs: &[String], package_filters: &[&str]) -> Scope {
+/// The scope of a ci.yml plan: the project jobs it switched on (and each per-runner job of the model on each runner), the app legs,
+/// the engines (WebKit only when `webkit` and a UI is reached), and whether every test ran whole. Every job id comes from `model`: a job
+/// with planned per-runner legs (`crate_legs`, `paddock_dev_legs`) runs on each of `os_legs` when its project's flag is set, and a
+/// job that reads the plan's `webkit` output (the reference-app jobs) runs when `webkit` is wanted and a UI is reached.
+pub fn scope_of(model: &JobModel, plan: &Value, legs: &[Value], webkit: bool, os_legs: &[String], package_filters: &[&str]) -> Scope {
+    use paddock_ci_config::jobs::{Legs, PROJECT_OUTPUTS};
     // The project flags of a plan that each decide a job of ci.yml: the job model's one table.
-    let mut jobs: BTreeSet<String> = paddock_ci_config::jobs::PROJECT_OUTPUTS
+    let flag_set = |key: &str| plan[key].as_bool() == Some(true);
+    let mut jobs: BTreeSet<String> = PROJECT_OUTPUTS
         .iter()
-        .filter(|(_, _, key)| plan[*key].as_bool() == Some(true))
+        .filter(|(_, _, key)| flag_set(key))
         .map(|(_, _, key)| key.to_string())
         .collect();
-    for (flag, job) in [("crates", "crate"), ("paddockDev", "paddock-dev")] {
-        if plan[flag].as_bool() == Some(true) {
-            jobs.extend(os_legs.iter().map(|os| format!("{job}@{os}")));
+    for job in &model.jobs {
+        let per_runner = matches!(&job.legs, Legs::Planned(output) if output != "apps");
+        let flagged = PROJECT_OUTPUTS
+            .iter()
+            .any(|(_, project, key)| job.projects.contains(*project) && flag_set(key));
+        if per_runner && flagged {
+            jobs.extend(os_legs.iter().map(|os| format!("{}@{os}", job.id)));
         }
-    }
-    // The reference-app jobs of ci.yml (Chromium and WebKit) run when a UI is reached and the planner wants them (`webkit`: a tag,
-    // the nightly, a manual ask).
-    if plan["ui"].as_bool() == Some(true) && webkit {
-        jobs.insert("e2e".to_string());
-        jobs.insert("e2e-webkit".to_string());
+        // The reference-app jobs of ci.yml (Chromium and WebKit) run when a UI is reached and the planner wants them (`webkit`: a tag,
+        // the nightly, a manual ask).
+        if job.reads_webkit && job.projects.contains("ui") && flag_set("ui") && webkit {
+            jobs.insert(job.id.clone());
+        }
     }
     let ui_leg = legs
         .iter()
@@ -680,6 +688,15 @@ mod tests {
         l
     }
 
+    /// The job model of the real ci.yml.
+    fn model() -> JobModel {
+        load_model_from(
+            include_str!("../../../.gitea/workflows/ci.yml"),
+            include_str!("../../../docs/repo-graph.toml"),
+        )
+        .unwrap()
+    }
+
     fn os() -> Vec<String> {
         strings(&crate::plan_ci::OS_LEGS)
     }
@@ -694,8 +711,8 @@ mod tests {
     }
 
     fn declared(ran_webkit: bool, filters: &[&str]) -> Declared {
-        let need = scope_of(&plan(), &legs(true), true, &os(), &[]);
-        let ran = scope_of(&plan(), &legs(ran_webkit), ran_webkit, &os(), filters);
+        let need = scope_of(&model(), &plan(), &legs(true), true, &os(), &[]);
+        let ran = scope_of(&model(), &plan(), &legs(ran_webkit), ran_webkit, &os(), filters);
         // The names the run expects, rendered by the job model of the real ci.yml over these legs (what `./dev plan --ci` writes).
         let model = load_model_from(
             include_str!("../../../.gitea/workflows/ci.yml"),
@@ -856,13 +873,13 @@ mod tests {
             l["host_packages"] = json!("a b");
             l["host_filter"] = json!("not (package(=a))");
         }
-        let need = scope_of(&plan(), &legs(true), true, &os(), &[]);
-        let ran = scope_of(&plan(), &scoped, true, &os(), &["", ""]);
+        let need = scope_of(&model(), &plan(), &legs(true), true, &os(), &[]);
+        let ran = scope_of(&model(), &plan(), &scoped, true, &os(), &["", ""]);
         assert_eq!(ran, need);
         assert_eq!(ci_scope(ran, false, need.clone(), true).complete(), Ok(()));
         // Positive control: the same legs with a member filter are partial.
         scoped[1]["filter"] = json!("package(=a)");
-        let narrowed = scope_of(&plan(), &scoped, true, &os(), &["", ""]);
+        let narrowed = scope_of(&model(), &plan(), &scoped, true, &os(), &["", ""]);
         assert!(ci_scope(narrowed, false, need, true).complete().is_err());
     }
 
@@ -938,13 +955,13 @@ mod tests {
             l[0]["filter"] = json!("package(=x)");
             l
         };
-        let ran = scope_of(&plan(), &narrowed_leg, true, &os(), &[]);
+        let ran = scope_of(&model(), &plan(), &narrowed_leg, true, &os(), &[]);
         assert!(!ran.whole);
     }
 
     #[test]
     fn a_rerun_and_a_run_that_ran_nothing_are_never_complete() {
-        let need = scope_of(&plan(), &legs(true), true, &os(), &[]);
+        let need = scope_of(&model(), &plan(), &legs(true), true, &os(), &[]);
         let rerun = ci_scope(Scope::default(), true, need.clone(), true);
         assert!(rerun.complete().unwrap_err().contains("rerun"), "{:?}", rerun.complete());
         // Even a rerun that claims to have run everything is a rerun.
@@ -1135,7 +1152,7 @@ mod tests {
     #[test]
     fn webkit_is_an_engine_only_when_a_ui_is_reached() {
         let no_ui = json!({"crates": true, "ui": false});
-        let s = scope_of(&no_ui, &[], true, &os(), &[]);
+        let s = scope_of(&model(), &no_ui, &[], true, &os(), &[]);
         assert!(s.engines.is_empty(), "a plan with no UI has no engine to miss: {:?}", s.engines);
     }
 
@@ -1213,5 +1230,28 @@ mod tests {
         assert!(ci_scope(ran, true, need.clone(), false).lands().is_err());
         // A complete run lands too.
         assert_eq!(ci_scope(need.clone(), false, need, false).lands(), Ok(()));
+    }
+
+    #[test]
+    fn the_jobs_of_a_scope_come_from_the_job_model() {
+        let plan = json!({"crates": true, "paddockDev": true, "ui": true});
+        let on = |webkit: bool| scope_of(&model(), &plan, &[], webkit, &os(), &[]).jobs;
+        let with = on(true);
+        for os in os() {
+            assert!(
+                with.contains(&format!("crate@{os}")) && with.contains(&format!("paddock-dev@{os}")),
+                "{with:?}"
+            );
+        }
+        // The reference-app jobs are the model's jobs that read the plan's `webkit` output; WebKit not wanted leaves them out.
+        assert!(with.contains("e2e") && with.contains("e2e-webkit"), "{with:?}");
+        let without = on(false);
+        assert!(
+            !without.contains("e2e") && !without.contains("e2e-webkit") && without.contains("crate@macos-latest"),
+            "{without:?}"
+        );
+        // Positive control: no UI reached, no reference-app jobs even when WebKit is wanted.
+        let no_ui = scope_of(&model(), &json!({"crates": true}), &[], true, &os(), &[]).jobs;
+        assert!(!no_ui.contains("e2e") && no_ui.contains("crate@ubuntu-latest"), "{no_ui:?}");
     }
 }
