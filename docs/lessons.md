@@ -4396,6 +4396,23 @@ spec `data.spec.ts:301` (theme switch redraws the canvases) failed in the same r
 - **Cause.** The helper was written where it was first needed, not checked against the shared kit (ER-22), and nothing told the next
   fixture author that a per-test git repository is the slow shape.
 - **Fix (user decision 74).** The helper moved to `paddock_testkit::git_fixture` (temp folder from the kit, owner, size limit and eviction
+  rule in its doc), and rule NEW-git-fixtures with the report-only check C174 flags a fixture builder with six or more git starts per test.
+
+## A link-server test read the server's refusals the moment its client saw the end, and macOS ends the client first (2026-11-26, fix/ipc-link-flakes)
+- **Symptom.** ci.yml run 9150, job 51219 (`crate (macos-latest)`): `paddock-ipc::it edges::a_link_server_with_no_descriptor_left_to_accept_tells_the_waiting_client_why`
+  failed at `edges.rs:470` "the server records why: refused: []" in 0.095 s and passed on its retry.
+- **Hypotheses and what refuted them.** A free descriptor (the accept would have succeeded and the client waited seconds: the try took
+  0.095 s), an accept thread that never ran (the client would stay queued until its guard), another error (the list was empty), shared
+  paths or timing assertions (none in the test): all ruled out.
+- **Root cause.** XNU's `accept` closes a connection it cannot give a descriptor ("Don't put this back on the socket ... Drop the
+  socket", `bsd/kern/uipc_syscalls.c`), so the client sees its end inside the failed syscall, before the accept thread records the
+  refusal. The test child printed `refused()` as soon as the client said it was done. A synthetic probe on this Mac showed the client
+  pending before the accept and at EOF right after it, with the server doing nothing more.
+- **Fix.** `LinkServer::wait_refused` (a `Condvar` the record notifies, bounded by a hang guard); the child and the two spin-waits in
+  `edges.rs` and `clocked.rs` use it. Stress (12 loops plus 10 CPU burners): 7 of 3,600 before, 0 of 10,800 after, 7 of 3,600 with the
+  wait removed again.
+- **Class.** A link-server test uses a client-side OS event as the barrier for server state (with ADR 0122's busy rig on Windows,
+  runs 8425 and 9156, the other direction). Redesign: ADR 0124 (accepted 2026-11-26, option C: `wait_peers` too, and a Clippy ban on the snapshot reads with a positive control).
   rule in its doc), and rule 102 with the report-only check C174 flags a fixture builder with six or more git starts per test.
 
 ## Fix item: a FLAKY paddock-ipc link-server test on macOS in run 9150, recorded by hand (2026-11-26)
@@ -4423,3 +4440,12 @@ sleep or a raised limit.
 - **Class (ER-21, finished in the same round).** One candidate line, `green::candidate_line` (over `main_line`), is now read by the push's reuse, the
   planner, the landing dispatch, the touched measure and the verdict's "last fully tested commit" hint; the hint had named 62049e300. A test
   asserts the hint and the push base agree. Earlier instance: run 9056's first-parent line.
+
+## Fix item: a FLAKY paddock-ipc link-server endings test on Windows in run 9156 (2026-11-26)
+`paddock-ipc::it endings::ipc_link_server_ends_every_connection_right_or_is_in_the_ratchet` was FLAKY on Windows in ci.yml run 9156
+(job 51298, crate (windows-latest); failed once, passed on its retry; flaky-as-failure kept the run red, ER-12). Train 2026-11-26-s did
+not touch the code it drives (its only paddock-ipc change was `crates/paddock-ipc/fuzz/Cargo.lock`), so it did not block the landing.
+Third Windows instance of this test after runs 8174 and 8425 (the Train A fix items above), and the same crate as run 9150's macOS
+link-server flake. Fixed on train 2026-11-26-t by ADR 0122 WP-2 (`feat/adr-0122-wp2-probe-gate`: the rigs hold the endpoint at the act
+gate and probe the queued bytes) and ADR 0124 (`fix/ipc-link-flakes`: `wait_refused`/`wait_peers`,
+`Peer::when_closed`, stop ordering and a Clippy ban on reading the server's lists without a wait).

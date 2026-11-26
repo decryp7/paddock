@@ -329,6 +329,9 @@ pub struct Request {
     /// Run the generator checks of `docs/generators.toml` that the merge makes due (the commit form only; the checkout must be
     /// the merge result). `--no-generators` turns it off.
     pub generators: bool,
+    /// Also run the heavy generators the merge made due (`--heavy-generators`); by default they are named as deferred to the final
+    /// `./dev gen check --base origin/main` ([`generator_step::run`]).
+    pub heavy_generators: bool,
     /// Run the member gate (`./dev check --pre-push --member-gate --base <merge>^1`) on the merge (the commit form only; the checkout must be
     /// the merge result). ADR 0098 WP-1; report-only until its first green run ([`gates::ENFORCED`]).
     pub gates: bool,
@@ -574,9 +577,14 @@ fn check(req: &Request) -> Result<Checked, CliError> {
             // (Each closure has its own `Git`: its answer caches are not shared between threads.)
             let gen_step = || {
                 let git = Git::new(&root);
-                generator_step::run(&root, &git, &merge, &crate::generators::run::Real::new(&root), &|l| {
-                    crate::log_text::eline(l)
-                })
+                generator_step::run(
+                    &root,
+                    &git,
+                    &merge,
+                    req.heavy_generators,
+                    &crate::generators::run::Real::new(&root),
+                    &|l| crate::log_text::eline(l),
+                )
             };
             let gates_step = || {
                 let git = Git::new(&root);

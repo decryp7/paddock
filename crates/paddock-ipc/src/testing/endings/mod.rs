@@ -10,8 +10,11 @@ pub mod applicability;
 pub mod ipc;
 pub mod log;
 pub mod mini;
+pub mod probe;
 pub mod ratchet;
 pub mod raw;
+
+pub use probe::{QueueGate, QueueHandle, queued_bytes};
 
 use raw::{RawEnd, RawEndKind};
 use std::fmt;

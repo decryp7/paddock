@@ -4,12 +4,13 @@
 //!
 //! Every scenario returns what a raw client saw below the library ([`Observed::raw`]), decoded as frames.
 
+use super::probe::{QueueGate, QueueHandle};
 use super::raw::{READ_GUARD, RawEndKind, RawStream, read_to_end, send_then_keep_writing};
-use super::{Decoded, Expect, Observed, Scenario, Typed};
+use super::{Decoded, Expect, Observed, Precondition, Scenario, Typed};
 use crate::endpoint::{self, Stream};
 use crate::error::{IpcError, codes};
 use crate::frame::{self, Frame, FrameLimit, ProtocolVersion};
-use crate::handshake::{Client, Connection, Host, PeerCredentials};
+use crate::handshake::{ActGate, Client, Connection, Host, PeerCredentials};
 use crate::peer::{CallCtx, Handler, Peer, PeerOptions};
 use crate::token::Token;
 use paddock_jobs::time::FakeClock;
@@ -111,11 +112,29 @@ fn garbage_frame() -> Vec<u8> {
     v
 }
 
+/// The act gate of a `paddock-ipc` endpoint ([`Host::with_act_gate`], `ServerConfig::with_act_gate`) that holds it at `gate`
+/// (ADR 0122 §2).
+pub fn act_gate(gate: &Arc<QueueGate>) -> ActGate {
+    let gate = gate.clone();
+    Arc::new(move |stream: &Stream| gate.hold(QueueHandle::of_stream(stream)))
+}
+
 /// The black-box scenarios of a client against `target`: a wrong token, another version, a first frame that is not a hello,
-/// and a refused client that keeps writing. `None` for a scenario this suite does not cover.
+/// and a refused client that keeps writing. `None` for a scenario this suite does not cover. An endpoint without an act gate:
+/// its input-queued precondition is not measured ([`black_box_gated`]).
 pub fn black_box(
     target: &IpcTarget,
     scenario: Scenario,
+) -> Option<Result<(Observed, Expect), &'static str>> {
+    black_box_gated(target, scenario, None)
+}
+
+/// [`black_box`] against an endpoint whose act gate holds it at `gate`: the client that keeps writing arms the gate for more
+/// than its first frame, and the gate's evidence is the scenario's input-queued precondition (ADR 0122 §3).
+pub fn black_box_gated(
+    target: &IpcTarget,
+    scenario: Scenario,
+    gate: Option<&QueueGate>,
 ) -> Option<Result<(Observed, Expect), &'static str>> {
     let wrong = Token::from_bytes([0x11; crate::token::TOKEN_BYTES]);
     let encode = |f: &Frame| frame::encode(f, target.limit).map_err(|_| "cannot encode");
@@ -144,10 +163,16 @@ pub fn black_box(
             }
             Scenario::ClientKeepsWriting => {
                 let first = encode(&hello(target, &wrong, frame::VERSION))?;
-                Ok((
-                    refused_by(target, &first, true)?,
-                    Expect::reason(&[codes::AUTH]),
-                ))
+                if let Some(gate) = gate {
+                    gate.arm(first.len());
+                }
+                let mut observed = refused_by(target, &first, true)?;
+                if let Some(gate) = gate {
+                    observed
+                        .evidence
+                        .push((Precondition::InputQueuedWhenRefused, gate.evidence(GUARD)));
+                }
+                Ok((observed, Expect::reason(&[codes::AUTH])))
             }
             _ => Err("not part of the black-box suite"),
         }
@@ -269,8 +294,10 @@ fn in_process_inner(scenario: Scenario) -> Result<(Observed, Expect), &'static s
         | Scenario::WrongVersion
         | Scenario::MalformedFirstFrame
         | Scenario::ClientKeepsWriting => {
-            let mut host =
-                Host::listen(limit, ProtocolVersion::UNVERSIONED).map_err(|_| "no endpoint")?;
+            let gate = Arc::new(QueueGate::new(READ_GUARD));
+            let mut host = Host::listen(limit, ProtocolVersion::UNVERSIONED)
+                .map_err(|_| "no endpoint")?
+                .with_act_gate(act_gate(&gate));
             let target = IpcTarget {
                 endpoint: host.endpoint().to_string(),
                 token: host.token().clone(),
@@ -278,7 +305,7 @@ fn in_process_inner(scenario: Scenario) -> Result<(Observed, Expect), &'static s
                 protocol: ProtocolVersion::UNVERSIONED,
             };
             let server = serve_one(move || drop(host.accept(GUARD)));
-            let result = black_box(&target, scenario).ok_or("not covered")?;
+            let result = black_box_gated(&target, scenario, Some(&gate)).ok_or("not covered")?;
             drop(server.join());
             result
         }
@@ -392,11 +419,15 @@ fn in_process_inner(scenario: Scenario) -> Result<(Observed, Expect), &'static s
 }
 
 /// `wrong_account` (true) refuses a client of another account before its hello is read; otherwise the host is busy. Both
-/// leave the client's hello unread.
+/// leave the client's hello unread; the act gate shows it was queued before the refusal.
 fn account_scenario(wrong_account: bool) -> Result<(Observed, Expect), &'static str> {
     // Not run on Windows: the register declares it not applicable there (the OS gives no user id for a pipe client).
     let limit = FrameLimit::default();
-    let host = Host::listen(limit, ProtocolVersion::UNVERSIONED).map_err(|_| "no endpoint")?;
+    let gate = Arc::new(QueueGate::new(READ_GUARD));
+    gate.arm(0);
+    let host = Host::listen(limit, ProtocolVersion::UNVERSIONED)
+        .map_err(|_| "no endpoint")?
+        .with_act_gate(act_gate(&gate));
     let mut host = if wrong_account {
         host.same_account_only()
     } else {
@@ -422,7 +453,10 @@ fn account_scenario(wrong_account: bool) -> Result<(Observed, Expect), &'static 
     } else {
         codes::BUSY
     };
-    Ok((observed(raw, limit), Expect::reason(&[code])))
+    let mut o = observed(raw, limit);
+    o.evidence
+        .push((Precondition::InputQueuedWhenRefused, gate.evidence(GUARD)));
+    Ok((o, Expect::reason(&[code])))
 }
 
 fn peer_scenario(scenario: Scenario) -> Result<(Observed, Expect), &'static str> {

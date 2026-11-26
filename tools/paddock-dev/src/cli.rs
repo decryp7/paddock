@@ -304,6 +304,10 @@ struct MergeCheckArgs {
     /// checkout must be the merge result, else they are NOT MEASURED).
     #[arg(long)]
     no_generators: bool,
+    /// Also run the heavy generators the merge makes due (each builds a workspace: minutes per merge). By default they are named as
+    /// deferred to the final `./dev gen check --base origin/main`, which runs the train's union of them once.
+    #[arg(long, conflicts_with = "no_generators")]
+    heavy_generators: bool,
     /// Also run the member gate on the merge commit: `check --pre-push --base <merge>^1`, the fast gates on the combined tree
     /// (ADR 0098). The checkout must be the merge result. Report-only until its first green run on a real train is recorded.
     #[arg(long)]
@@ -693,6 +697,7 @@ pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
                     branch: a.branch,
                     target: a.target,
                     generators: !a.no_generators,
+                    heavy_generators: a.heavy_generators,
                     gates: a.gates,
                     write_reverted: a.write_reverted,
                     old_base_anyway: a.old_base_anyway,
@@ -921,6 +926,7 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
             branch: a.branch,
             target: a.target,
             generators: !a.no_generators,
+            heavy_generators: a.heavy_generators,
             gates: a.gates,
             write_reverted: a.write_reverted,
             old_base_anyway: a.old_base_anyway,

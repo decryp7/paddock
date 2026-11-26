@@ -15,7 +15,7 @@ use std::io::{BufRead, Write};
 use std::path::Path;
 use std::process::Stdio;
 use std::sync::{Arc, Mutex, mpsc};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 fn echo() -> Arc<dyn Handler> {
     Arc::new(|_: &CallCtx, body: &[u8]| -> Result<Vec<u8>, RemoteError> { Ok(body.to_vec()) })
@@ -64,12 +64,22 @@ fn a_link_server_refuses_a_wrong_token_and_keeps_serving() {
         )
         .is_err()
     );
-    // The refusal is recorded by the accept thread right after it answered: a hang guard, not a timing assertion.
-    let started = Instant::now();
-    while server.refused().is_empty() && started.elapsed() < GUARD {
-        std::thread::yield_now();
-    }
-    assert!(matches!(server.refused().first(), Some(IpcError::Auth(_))));
+    // The refusal is recorded by the handshake thread right after it answered: wait for it (a hang guard, not a timing
+    // assertion). Nothing else was refused, so a wait that does not ask for one ends at once.
+    let refused = server.wait_refused(GUARD, |r| !r.is_empty());
+    assert!(
+        matches!(
+            refused.as_deref().map(<[_]>::first),
+            Ok(Some(IpcError::Auth(_)))
+        ),
+        "{refused:?}"
+    );
+    assert_eq!(
+        server
+            .wait_refused(Duration::ZERO, |r| r.len() > 1)
+            .map_err(|r| r.len()),
+        Err(1)
+    );
     let d = match paddock_ipc::link::discovery::read(&path, |_| true) {
         paddock_ipc::link::Found::Live(d) => d,
         other => panic!("{other:?}"),
@@ -84,7 +94,41 @@ fn a_link_server_refuses_a_wrong_token_and_keeps_serving() {
     let peer =
         paddock_ipc::Peer::start(conn, Arc::new(NoCalls), PeerOptions::new("server")).unwrap();
     assert_eq!(peer.call(b"x".to_vec(), T).unwrap(), b"x");
-    assert_eq!(server.peers().len(), 1);
+    // The handshake thread lists the peer after the welcome, so the call can be answered first: wait for the list.
+    let listed = server.wait_peers(GUARD, |p| p.len() == 1);
+    assert!(listed.is_ok(), "{listed:?}");
+}
+
+/// Positive controls of the snapshot ban in `crates/clippy.toml` (ADR 0124): each read below is what
+/// one entry refuses, so its `expect` goes unfulfilled, and Clippy (`-D warnings`) red, the day that entry stops biting. One read
+/// per function, so each entry has its own control. With no client the snapshots are deterministic.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "positive control: the refusal snapshot the ban must catch"
+)]
+fn refused_snapshot(server: &LinkServer) -> Vec<paddock_ipc::IpcError> {
+    server.refused()
+}
+
+/// The `peers` entry's control (see [`refused_snapshot`]).
+#[expect(
+    clippy::disallowed_methods,
+    reason = "positive control: the peer snapshot the ban must catch"
+)]
+fn peers_snapshot(server: &LinkServer) -> Vec<paddock_ipc::Peer> {
+    server.peers()
+}
+
+#[test]
+fn the_snapshot_reads_are_what_the_clippy_ban_catches() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = LinkServer::start(
+        ServerConfig::new(dir.path().join("agent.json"), "b"),
+        echo(),
+    )
+    .unwrap();
+    assert!(refused_snapshot(&server).is_empty());
+    assert!(peers_snapshot(&server).is_empty());
 }
 
 /// A companion of `build`, returned once it printed `ready`.

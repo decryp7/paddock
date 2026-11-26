@@ -43,6 +43,8 @@ pub use control::{
 pub use key_list::{FileKeys, KeyListStore, KeysLoad, MemoryKeys};
 pub use keys::{KEY_PREFIX, KeyEntry, KeyStore, KeyVerifier};
 pub use lines::{serve_lines, serve_stdio};
+#[cfg(any(test, feature = "test-support"))]
+pub use loopback::{ActGate, serve_loopback_with_act_gate};
 pub use loopback::{Serving, serve_loopback};
 pub use registry::{
     Access, CallCtx, Handler, Policy, RegisterError, ResourceDef, ToolDef, ToolError, ToolOutput,
