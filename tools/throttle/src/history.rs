@@ -1,6 +1,6 @@
 //! The history of how long each row ran, so a row that takes seconds is not queued behind one that takes minutes.
 //!
-//! Owner: `throttle` (the only writer). One file, `throttle-history.tsv`, in the lock folder: a line per finished run,
+//! Owner: `throttle` (the only writer). One file, `heavy-history.tsv` (its name from before the rename, kept so the history carries over), in the lock folder: a line per finished run,
 //! `<epoch seconds>\t<milliseconds>\t<row key>`. Bounded (ER-51): at most [`KEEP_PER_ROW`] lines per row and [`MAX_LINES`] in all; a write
 //! drops the oldest lines first. A row's key is the caller's name for it plus its workspace (`THROTTLE_ROW`, for example
 //! `clippy apps/dyno`), never the run's own name, which differs every run. The file is a hint: a writer that loses a race loses a
@@ -10,7 +10,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 /// The history's file name in the lock folder.
-pub const FILE: &str = "throttle-history.tsv";
+pub const FILE: &str = "heavy-history.tsv";
 /// Most lines kept in all; the oldest go first.
 pub const MAX_LINES: usize = 512;
 /// Most lines kept for one row, so a busy row cannot push the others out.

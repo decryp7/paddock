@@ -125,7 +125,7 @@ family's cap). The caller's own values win (ER-47). So 2 steps at once on 14 cor
 
 A row that takes seconds (a warm clippy: 1 s after 270 to 948 s in the queue on 2026-11-23) must not wait behind steps that take minutes. A caller names a
 row with `THROTTLE_ROW` (its step plus its workspace, for example `clippy apps/dyno`; the run's agent name differs every run, so it cannot be the key).
-throttle keeps how long each row took when it passed (`throttle-history.tsv` in the lock folder, written only by throttle): the expected time is the slowest of
+throttle keeps how long each row took when it passed (`heavy-history.tsv` in the lock folder, written only by throttle): the expected time is the slowest of
 its last 3 runs. A row expected under 10 s (`CHEAP_SECS`) is **quick**: when the machine has the idle CPU (15 %), the memory for a step more (the reserve
 stays) and a 1-minute load under twice the cores (`cheap_admitted`; the 15-minute load does not decide it), it takes a place in the **quick lane**
 (`throttle-cheapN.lock`, at most 2 at once) beside the full slots, without waiting in the queue. The queued long steps are not delayed by it (the
@@ -178,7 +178,7 @@ the user installs, or a stable path the wrapper finds). `HEAVY_LOCK_DIR` is igno
 
 ## Environment
 
-**Renamed 2026-11-26** (it was `heavy`): `HEAVY_X` is still accepted for every `THROTTLE_X` (`THROTTLE_X` wins when both are set), and `HEAVY_HELD` is set beside `THROTTLE_HELD` for the command, until the Mac runner is re-installed and every agent's cached binary is new; `./dev heavy` is an alias of `./dev throttle` that prints a one-line deprecation. The names of the files in the lock folder that start with `pitcrew-` are unchanged (`./dev wait --plock` reads them).
+**Renamed 2026-11-26** (it was `heavy`): `HEAVY_X` is still accepted for every `THROTTLE_X` (`THROTTLE_X` wins when both are set), and `HEAVY_HELD` is set beside `THROTTLE_HELD` for the command, until the Mac runner is re-installed and every agent's cached binary is new; the old `heavy` command of `./dev` is an alias of `./dev throttle` that prints a one-line deprecation. The names of the files in the lock folder that start with `pitcrew-` are unchanged (`./dev wait --plock` reads them).
 
 `THROTTLE_*` wins over the legacy `PLOCK_*`; `HEAVY_LOCK_DIR` (heavy.sh) is ignored. A value that does not parse is reported and the default used.
 
@@ -192,7 +192,7 @@ the user installs, or a stable path the wrapper finds). `HEAVY_LOCK_DIR` is igno
 | priority bound (`--high` yields to nobody; others stop yielding after this) | `THROTTLE_PRIORITY_MAX` | 1800 s |
 | most steps at once | `--slots N`, `THROTTLE_SLOTS` (`auto` or 1..64) | auto: half the cores, at most 5 |
 | the row's key for the run-time history (quick rows go first) | `THROTTLE_ROW` | none: no history is read or kept |
-| the run-time history | `throttle-history.tsv` in the lock folder; `THROTTLE_MOVED_FROM` names the folder it moved from, whose file is read until the first record copies it over (`./dev` sets `THROTTLE_DIR=<dev-targets>/throttle`, which a reboot keeps, and `THROTTLE_MOVED_FROM=/private/tmp/claude-501`; the Mac CI runner sets the same `THROTTLE_DIR`) | the lock folder |
+| the run-time history | `heavy-history.tsv` in the lock folder; `THROTTLE_MOVED_FROM` names the folder it moved from, whose file is read until the first record copies it over (`./dev` sets `THROTTLE_DIR=<dev-targets>/throttle`, which a reboot keeps, and `THROTTLE_MOVED_FROM=/private/tmp/claude-501`; the Mac CI runner sets the same `THROTTLE_DIR`) | the lock folder |
 | a run inside a run | `THROTTLE_HELD` (`<run id>:<pid>`), set by throttle for its command: a throttle run that inherits it while that holder lives runs inside its slot, with no ticket and no queue (ER-43: `./dev throttle -- ./dev gen check` once held the only slot for 36 min while its inner steps queued for it) | not set |
 | cores counted against the load | `THROTTLE_CPUS` | the OS's count |
 | wait for the command's output pipes after it exited (ms) | `THROTTLE_DRAIN_MS` | 500 |

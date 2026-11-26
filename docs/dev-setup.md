@@ -261,6 +261,21 @@ lands), so a cleanup knows whose it is. Callers: engineering-playbook `scripts/h
 no script here makes one). The scratch folder an agent's brief names is made by the brief's
 author: that call belongs there. The Rust `throttle` tool (`tools/throttle`) makes no folder.
 
+### Cutover from `heavy` to `throttle` (user decision 2026-11-26; no dual-lock shim before v1)
+
+The slot locks are kernel file locks now and the tool is `throttle` (`tools/throttle/README.md`). A `heavy` and a `throttle` do not exclude each
+other (different lock files), so the move is made once, at a quiet moment, as its own train:
+
+1. The coordinator pauses every builder and lands the train.
+2. The first `./dev` call of each agent rebuilds `./dev` and the throttle on the new hash (the cached `heavy-<hash>` binaries are no longer
+   used); builders resume after that.
+3. CI jobs build the throttle from their own tree, so only jobs already running at the landing use the old lock: a window of minutes.
+4. The user re-runs the runner install (`tools/mac-runner-move.sh`) whenever convenient, so the daemon's plist sets `THROTTLE_DIR`; the
+   `HEAVY_DIR` the old plist sets is accepted until then (every `HEAVY_X` is read when `THROTTLE_X` is not set).
+5. What carries over unchanged: the lock folder `<dev-targets>/throttle`, `heavy-history.tsv` in it (quick rows stay quick), the
+   `pitcrew-*` ticket and marker files and `pitcrew-lock-activity.log` that `./dev wait --plock` reads. The old `pitcrew-heavy-v2.lock*`
+   folders are ignored and safe to delete. `./dev heavy` and `./dev heavy-install` still work and print a deprecation line.
+
 ## Tests
 
 - **Rust:** `cargo nextest run` (each app's `.config/nextest.toml`: one test per core but one, slow-test warnings after

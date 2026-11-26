@@ -69,7 +69,6 @@ fn the_container_script_never_mounts_the_lock_folder_or_starts_heavy_inside() {
 #[cfg(unix)]
 mod real {
     use crate::procutil::*;
-    use paddock_proc::ProcessId;
     use std::time::{Duration, Instant};
 
     // (3) a holder killed with SIGKILL frees its slot at once, although its command still runs: the next run does not wait for it.
@@ -117,8 +116,9 @@ mod real {
     #[test]
     fn a_background_process_of_the_command_does_not_keep_the_slot() {
         let w = World::new();
-        let (flag, pidfile) = (w.flag(), w.path("bg.pid"));
-        let script = r#"( while [ ! -e "$0" ]; do sleep 0.1; done ) >/dev/null 2>&1 & echo $! > "$1""#;
+        let (flag, done) = (w.flag(), w.path("bg.done"));
+        // The background loop writes `bg.done` only after the flag appears, so a missing file while Q runs says it still lives.
+        let script = r#"( while [ ! -e "$0" ]; do sleep 0.1; done; : > "$1" ) >/dev/null 2>&1 &"#;
         let (code, _, e) = heavy_out(
             &w,
             &[
@@ -130,16 +130,11 @@ mod real {
                 "-c",
                 script,
                 flag.to_str().unwrap(),
-                pidfile.to_str().unwrap(),
+                done.to_str().unwrap(),
             ],
             &[],
         );
         assert_eq!(code, 0, "{e}");
-        let bg: u32 = w.read(&pidfile).trim().parse().expect("background pid");
-        assert!(
-            ProcessId::of(bg).is_some(),
-            "the background process outlived throttle and its command"
-        );
         let t = Instant::now();
         let (code, _, e) = heavy_out(&w, &["run", "--no-gate", "Q", "--", "true"], &[]);
         assert_eq!(code, 0, "{e}");
@@ -148,9 +143,9 @@ mod real {
             "Q waited {:?} for the background process",
             t.elapsed()
         );
-        assert!(ProcessId::of(bg).is_some(), "it is still running while Q ran");
+        assert!(!done.exists(), "the background process was still running while Q ran");
         w.release();
-        wait_until("the background process ends", || ProcessId::of(bg).is_none());
+        wait_until("the background process ends", || done.exists());
     }
 
     // (3) the same at the file: a lock taken here is not held by a child that outlives the handle.

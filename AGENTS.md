@@ -118,7 +118,7 @@ package.json     the one npm workspace and package-lock.json (ui, eslint, icons,
 ## Testing and quality gates
 
 - **One way to run long commands (user, 2026-11-25).** Builds, tests and gates go through `./dev throttle [--stall S] -- <command>` or
-  `throttle run [--stall S] <agent> -- <command>` (`./dev heavy` and `heavy` are the old names: they still work for now and print a deprecation line), never wrapped in `timeout` or piped through `| tail`: an outer timeout ends throttle and
+  `throttle run [--stall S] <agent> -- <command>` (the old `heavy` names still work for now and print a deprecation line), never wrapped in `timeout` or piped through `| tail`: an outer timeout ends throttle and
   orphans the command it started, and a tail throws away the output you then need. throttle writes the whole output to
   `<dev-targets>/runs/<agent>/<start>-<name>.log`, prints that path first and a summary line (exit code, seconds, ran or hung) last;
   read the log instead of re-running. `--stall S` ends a command that wrote nothing and used no CPU for `S` seconds (exit 81); it is
