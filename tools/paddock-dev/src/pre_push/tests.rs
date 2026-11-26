@@ -1,7 +1,7 @@
 //! The push gate with a plan, a list of files and a fake machine: no process starts (ER-14).
 
 use super::budget::Timing;
-use super::exec::{Done, Exec, Kind, Limits, QUEUE_STALL, Row, RunOpts, decide, run_all_timed, run_all_with, test_subject};
+use super::exec::{Done, Exec, Kind, Limits, QUEUE_STALL, Row, RunOpts, run_all_timed, run_all_with, test_subject};
 use super::gates::{AUDIT_PROFILE, Change, Facts, Gate, Need, Planned, plan_gates, windows_skip_reason};
 use super::{accept_not_measured, parse_refs, render, render_timed};
 use paddock_cli::Exit;
@@ -3039,7 +3039,7 @@ fn shape_train_on_the_remote_through_a_sibling_with_a_non_ascii_path() {
 #[cfg(unix)]
 mod deny_row {
     use super::*;
-    use crate::pre_push::exec::RealExec;
+    use crate::pre_push::exec::{RealExec, decide};
     use std::collections::HashMap;
     use std::path::Path;
     use std::sync::Arc;
