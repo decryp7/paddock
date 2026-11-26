@@ -16,7 +16,8 @@ pub struct Fake {
 
 impl Fake {
     /// The replies recorded in a folder: `runs-1.json` (page 1 of the run list), `run-<id>.json` (one run), `jobs-<run>.json` (page 1 of a run's jobs) and
-    /// `log-<job>.txt`, for `repo` on `https://gitea.invalid`. Anything else is a 404.
+    /// `log-<job>.txt`, `attempt-<run>-<n>.json` (the jobs of an earlier attempt) and `commit-<sha>.json` (a commit's parents), for `repo` on
+    /// `https://gitea.invalid`. Anything else is a 404.
     pub fn from_dir(dir: &std::path::Path, repo: &str) -> Fake {
         let api = format!("https://gitea.invalid/api/v1/repos/{repo}/actions");
         let mut f = Fake::default();
@@ -40,6 +41,20 @@ impl Fake {
             } else if let Some(id) = n.strip_prefix("jobs-").and_then(|r| r.strip_suffix(".json")) {
                 f.json(
                     &format!("{api}/runs/{id}/jobs?limit=50&page=1"),
+                    serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap(),
+                );
+            } else if let Some((run, attempt)) = n
+                .strip_prefix("attempt-")
+                .and_then(|r| r.strip_suffix(".json"))
+                .and_then(|r| r.split_once('-'))
+            {
+                f.json(
+                    &format!("{api}/runs/{run}/attempts/{attempt}/jobs?limit=50&page=1"),
+                    serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap(),
+                );
+            } else if let Some(sha) = n.strip_prefix("commit-").and_then(|r| r.strip_suffix(".json")) {
+                f.json(
+                    &format!("https://gitea.invalid/api/v1/repos/{repo}/git/commits/{sha}"),
                     serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap(),
                 );
             } else if let Some(id) = n.strip_prefix("log-").and_then(|r| r.strip_suffix(".txt")) {

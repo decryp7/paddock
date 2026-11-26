@@ -25,6 +25,8 @@ pub mod landing;
 pub mod logfind;
 pub mod members;
 pub mod record;
+#[cfg(test)]
+mod replay;
 pub mod reservation;
 pub mod reuse;
 pub mod schedule_skip;
@@ -889,8 +891,11 @@ pub struct RecordArgs {
     #[arg(required = true)]
     runs: Vec<u64>,
     /// The folder the files are written to (create it under the test folder of the tool that reads them).
+    #[arg(long, conflicts_with = "name", required_unless_present = "name")]
+    out: Option<PathBuf>,
+    /// Record a replay shape: the files go to `tools/paddock-dev/tests/fixtures/runs/<name>/` (docs/testing/ci-replay.md).
     #[arg(long)]
-    out: PathBuf,
+    name: Option<String>,
     /// The repository.
     #[arg(long, default_value = "decryp7/paddock")]
     repo: String,

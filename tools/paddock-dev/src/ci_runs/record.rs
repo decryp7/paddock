@@ -4,8 +4,11 @@
 //! A recording is kept in git for good, and the API's answers carry people and machines: full names, e-mail addresses, avatar
 //! links, logins and runner host names. [`scrub`] replaces them with invented values before anything is written, and conformance
 //! C110 fails any fixture that still holds one. The recorder writes, per run, `run-<id>.json`, `jobs-<id>.json` (the first page of
-//! jobs) and `log-<job>.txt` for each failed job (only the lines the nextest reader needs, see [`trim_log`]), and one `runs-1.json`
-//! listing the recorded runs, which is the layout of [`Fake::from_dir`](super::testutil::Fake::from_dir). Read-only on the server.
+//! jobs) and `log-<job>.txt` for each job that ran (only the lines the readers need, see [`trim_log`]: the plan job's scope line, the
+//! nextest and Playwright result lines), `attempt-<run>-<n>.json` for each earlier attempt of a rerun run, `commit-<sha>.json` (the
+//! parents only) for the head of a `trial/` run, and one `runs-1.json` listing the recorded runs, which is the layout of
+//! [`Fake::from_dir`](super::testutil::Fake::from_dir). `--name <shape>` records into `tests/fixtures/runs/<shape>/`, the shapes the
+//! replay suite reads (`ci_runs::replay`, docs/testing/ci-replay.md). Read-only on the server.
 
 use crate::job_outcome::JobOutcome;
 use crate::log_text::plain;
@@ -84,7 +87,7 @@ fn identity(key: &str, value: &str, runners: &mut BTreeMap<String, usize>) -> Op
 /// API answers are: the server and owner names ([`rename`]), runner and disk names, and the user folder of a home path.
 pub fn trim_log(log: &str, real_host: &str, real_owner: &str) -> String {
     let keep = regex::Regex::new(
-        r"^\s*(Job: |Starting \d+ tests?|(FAIL|TIMEOUT|TMT|SIG\w*|FLAKY|FLKY\S*|TRY \d+ (FAIL|TIMEOUT|PASS|SIG\w*))\b|Summary \[|.*tests? (were |was )?not run|Cancelling due to|##\[error\]|::error::)",
+        r"^\s*(Job: |plan (scope|verdict): |Starting \d+ tests?|(FAIL|TIMEOUT|TMT|SIG\w*|FLAKY|FLKY\S*|TRY \d+ (FAIL|TIMEOUT|PASS|SIG\w*))\b|Summary \[|.*tests? (were |was )?not run|Cancelling due to|##\[error\]|::error::)",
     );
     let Ok(keep) = keep else { return String::new() };
     // (pattern, replacement), in order. Runner work folders name the runner and the disk: `/Volumes/<disk>/gitea-runners/<runner>`;
@@ -146,24 +149,48 @@ pub fn record(
     for id in runs {
         let mut run = http.get_json(&format!("{api}/runs/{id}"), token)?;
         let mut jobs = http.get_json(&format!("{api}/runs/{id}/jobs?limit=50&page=1"), token)?;
-        let failed: Vec<u64> = jobs["jobs"]
+        let logged: Vec<u64> = jobs["jobs"]
             .as_array()
             .map(|a| {
                 a.iter()
-                    // Record the log of every job that did not pass: a pass has nothing to show and a skip has no log.
-                    .filter(|j| match JobOutcome::from_api(j["conclusion"].as_str().unwrap_or("")) {
-                        JobOutcome::Passed | JobOutcome::Skipped => false,
-                        JobOutcome::Failed | JobOutcome::Cancelled | JobOutcome::Unfinished | JobOutcome::Unknown(_) => true,
-                    })
+                    // Record the log of every job that ran (the readers grade a pass by its log too, and the plan job's holds the
+                    // scope line): a skip has no log.
+                    .filter(|j| !matches!(JobOutcome::from_api(j["conclusion"].as_str().unwrap_or("")), JobOutcome::Skipped))
                     .filter_map(|j| j["id"].as_u64())
                     .collect()
             })
             .unwrap_or_default();
-        for job in failed {
+        // per-item: the server has no bulk log call; each trimmed log is a few lines, and a recording is made once per shape.
+        for job in logged {
             match http.get_text(&format!("{api}/jobs/{job}/logs"), token) {
                 Ok(t) => files.push((format!("log-{job}.txt"), trim_log(&t, host, owner))),
                 Err(e) => log(&format!("::warning::job {job}: its log was not recorded ({e})")),
             }
+        }
+        // The jobs of each earlier attempt of a rerun (the verdict reads them to see a green that rests on a retry).
+        let attempts = run["run_attempt"].as_u64().unwrap_or(1);
+        for n in 1..attempts {
+            // per-item: one list per earlier attempt; a rerun has one or two.
+            let mut earlier = http.get_json(&format!("{api}/runs/{id}/attempts/{n}/jobs?limit=50&page=1"), token)?;
+            scrub(&mut earlier, host, owner, &mut runners);
+            files.push((format!("attempt-{id}-{n}.json"), format!("{earlier:#}\n")));
+        }
+        // A trial's merge commit: only its parents are read (the member is the second), so only they are kept.
+        if run["head_branch"].as_str().is_some_and(|b| b.starts_with("trial/"))
+            && let Some(sha) = run["head_sha"].as_str()
+        {
+            let commit = http.get_json(
+                &format!("{}/git/commits/{sha}", api.strip_suffix("/actions").unwrap_or(&api)),
+                token,
+            )?;
+            let parents: Vec<Value> = commit["parents"]
+                .as_array()
+                .map(|a| a.iter().map(|p| serde_json::json!({"sha": p["sha"]})).collect())
+                .unwrap_or_default();
+            files.push((
+                format!("commit-{sha}.json"),
+                format!("{:#}\n", serde_json::json!({"sha": sha, "parents": parents})),
+            ));
         }
         scrub(&mut run, host, owner, &mut runners);
         scrub(&mut jobs, host, owner, &mut runners);
@@ -178,21 +205,51 @@ pub fn record(
     Ok(files)
 }
 
+/// The folder of the replay suite's shapes, below the repository root.
+pub const SHAPES: &str = "tools/paddock-dev/tests/fixtures/runs";
+
+/// Whether `name` is a shape name: lower-case words joined by `-`, so it is one folder name and never a path.
+pub fn valid_shape(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .split('-')
+            .all(|w| !w.is_empty() && w.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit()))
+}
+
+/// The folder to write: `--out`, or the shape's folder below the repository root.
+fn out_dir(a: &super::RecordArgs) -> Result<std::path::PathBuf, paddock_cli::CliError> {
+    use paddock_cli::CliError;
+    match (&a.out, &a.name) {
+        (Some(out), None) => Ok(out.clone()),
+        (None, Some(name)) if valid_shape(name) => {
+            let here = std::env::current_dir().map_err(|e| CliError::failure(format!("The current folder cannot be read: {e}.")))?;
+            let root = super::find_root(&here).ok_or_else(|| {
+                CliError::failure("no repository root above the current folder.").with_hint("Run it inside the checkout.")
+            })?;
+            Ok(root.join(SHAPES).join(name))
+        }
+        (None, Some(name)) => Err(CliError::usage(format!("{name:?} is not a shape name."))
+            .with_hint("Use lower-case words joined by `-`, for example green-train.")),
+        _ => Err(CliError::usage("give exactly one of --name and --out.").with_hint("`--name <shape>` records a replay shape.")),
+    }
+}
+
 /// `ci record-fixture`, against the real server.
 pub fn command(a: &super::RecordArgs) -> Result<paddock_cli::Report, paddock_cli::CliError> {
+    let out = out_dir(a)?;
     let token = super::token()?;
     let mut http = CurlHttp;
     let files = record(&mut http, &a.server, &a.repo, &token, &a.runs, &mut |l| crate::log_text::eline(l)).map_err(|e| {
         paddock_cli::CliError::failure(format!("the runs could not be recorded: {e}")).with_hint("Check the network and GITEA_TOKEN.")
     })?;
-    std::fs::create_dir_all(&a.out).map_err(|e| paddock_cli::CliError::failure(format!("cannot create {}: {e}", a.out.display())))?;
+    std::fs::create_dir_all(&out).map_err(|e| paddock_cli::CliError::failure(format!("cannot create {}: {e}", out.display())))?;
     for (name, text) in &files {
-        std::fs::write(a.out.join(name), text).map_err(|e| paddock_cli::CliError::failure(format!("cannot write {name}: {e}")))?;
+        std::fs::write(out.join(name), text).map_err(|e| paddock_cli::CliError::failure(format!("cannot write {name}: {e}")))?;
     }
     let names: Vec<&str> = files.iter().map(|(n, _)| n.as_str()).collect();
     Ok(paddock_cli::Report::new(
-        serde_json::json!({"out": a.out.display().to_string(), "files": names}),
-        format!("{} file(s) written to {}, identities scrubbed", files.len(), a.out.display()),
+        serde_json::json!({"out": out.display().to_string(), "files": names}),
+        format!("{} file(s) written to {}, identities scrubbed", files.len(), out.display()),
     ))
 }
 
@@ -311,5 +368,96 @@ mod tests {
         assert!(log.contains("::error::") && log.contains("gitea.invalid/example/paddock"), "{log}");
         assert!(log.contains("/Users/user/src") && log.contains("/home/user/x"), "{log}");
         assert!(log.contains("\"/Volumes/disk\"/z"), "the quote ends the disk name: {log}");
+    }
+
+    #[test]
+    fn the_plan_scope_line_and_the_logs_of_passed_jobs_are_recorded_and_a_skipped_job_has_none() {
+        let mut f = Fake::default();
+        let api = "https://real.example.net/api/v1/repos/jdoe/paddock/actions";
+        f.json(&format!("{api}/runs/11"), sample());
+        f.json(
+            &format!("{api}/runs/11/jobs?limit=50&page=1"),
+            json!({"total_count": 3, "jobs": [{"id": 1, "name": "plan", "conclusion": "success"},
+                {"id": 2, "name": "crates", "conclusion": "success"}, {"id": 3, "name": "ui", "conclusion": "skipped"}]}),
+        );
+        f.log(
+            1,
+            "2026-01-01T00:00:00.0Z noise\nplan scope: {\"v\":2}\nplan verdict: complete=true\n",
+        );
+        f.log(2, "Job: crates\nnoise\n     Summary [ 1.0s] 2 tests run: 2 passed\n");
+        let files = record(&mut f, "https://real.example.net", "jdoe/paddock", "t", &[11], &mut |_| {}).unwrap();
+        let names: Vec<&str> = files.iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(names, ["log-1.txt", "log-2.txt", "jobs-11.json", "run-11.json", "runs-1.json"]);
+        assert!(
+            files[0].1.contains("plan scope: {\"v\":2}")
+                && files[0].1.contains("plan verdict: complete=true")
+                && !files[0].1.contains("noise")
+        );
+        assert!(files[1].1.contains("Summary") && !files[1].1.contains("noise"));
+    }
+
+    #[test]
+    fn a_rerun_records_the_jobs_of_each_earlier_attempt() {
+        let mut f = Fake::default();
+        let api = "https://real.example.net/api/v1/repos/jdoe/paddock/actions";
+        let mut run = sample();
+        run["run_attempt"] = json!(3);
+        f.json(&format!("{api}/runs/12"), run);
+        f.json(
+            &format!("{api}/runs/12/jobs?limit=50&page=1"),
+            json!({"total_count": 0, "jobs": []}),
+        );
+        for n in 1..=2 {
+            f.json(
+                &format!("{api}/runs/12/attempts/{n}/jobs?limit=50&page=1"),
+                json!({"total_count": 1, "jobs": [{"id": n, "name": "crates", "conclusion": "failure", "runner_name": "box-1"}]}),
+            );
+        }
+        let files = record(&mut f, "https://real.example.net", "jdoe/paddock", "t", &[12], &mut |_| {}).unwrap();
+        let names: Vec<&str> = files.iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(
+            names,
+            [
+                "attempt-12-1.json",
+                "attempt-12-2.json",
+                "jobs-12.json",
+                "run-12.json",
+                "runs-1.json"
+            ]
+        );
+        assert!(!files[0].1.contains("box-1"), "the attempt's runner is scrubbed: {}", files[0].1);
+    }
+
+    #[test]
+    fn a_trials_head_commit_is_recorded_with_its_parents_only() {
+        let mut f = Fake::default();
+        let api = "https://real.example.net/api/v1/repos/jdoe/paddock";
+        let mut run = sample();
+        run["head_branch"] = json!("trial/feat/x");
+        run["head_sha"] = json!("aaaa");
+        f.json(&format!("{api}/actions/runs/13"), run);
+        f.json(
+            &format!("{api}/actions/runs/13/jobs?limit=50&page=1"),
+            json!({"total_count": 0, "jobs": []}),
+        );
+        f.json(
+            &format!("{api}/git/commits/aaaa"),
+            json!({"sha": "aaaa", "author": {"name": "Jane Doe", "email": "jane@real.example.net"}, "parents": [{"sha": "bbbb", "url": "x"}, {"sha": "cccc", "url": "y"}]}),
+        );
+        let files = record(&mut f, "https://real.example.net", "jdoe/paddock", "t", &[13], &mut |_| {}).unwrap();
+        let (name, text) = &files[0];
+        assert_eq!(name, "commit-aaaa.json");
+        let v: Value = serde_json::from_str(text).unwrap();
+        assert_eq!(v, json!({"sha": "aaaa", "parents": [{"sha": "bbbb"}, {"sha": "cccc"}]}));
+    }
+
+    #[test]
+    fn a_shape_name_is_one_folder_name() {
+        for ok in ["green-train", "push-reused", "run9167"] {
+            assert!(valid_shape(ok), "{ok}");
+        }
+        for bad in ["", "-a", "a-", "a--b", "A", "a/b", "../x", "a b", "a_b"] {
+            assert!(!valid_shape(bad), "{bad}");
+        }
     }
 }
