@@ -114,7 +114,7 @@ impl std::error::Error for GoldenError {}
 /// CI's Linux job on the Linux runner.
 pub fn rewritten_notice(path: &Path) -> String {
     format!(
-        "golden: rewrote {}\n  Confirm it on Linux as root before you merge it (a value of this machine fails there): push the branch, and CI's Linux jobs run the golden as root on the Linux runner. No container or VM runs on this Mac (docs/rules.md NEW-no-local-vm).",
+        "golden: rewrote {}\n  Confirm it on Linux as root before you merge it (a value of this machine fails there): push the branch, and CI's Linux jobs run the golden as root on the Linux runner. No container or VM runs on this Mac (docs/rules.md rule 101).",
         path.display()
     )
 }
