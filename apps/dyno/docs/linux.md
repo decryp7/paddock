@@ -47,12 +47,11 @@ dyno-agent once | head -30                          # one measurement as JSON
 dyno-agent bench 25 processes                       # Dyno's own CPU (share of ONE core) and memory
 ```
 
-### Verifying the Linux adapters on any machine
+### Verifying the Linux adapters
 
-`scripts/linux-verify.sh` builds and tests `dyno-platform` in a native Linux container (OrbStack or Docker) against a real
-`/proc` and `/sys`: tests and `clippy -D warnings` as root, then the tests again as uid 1000 (which exercises the "other users'
-processes are out of sight" paths), then the portable parsers natively on the host. `scripts/linux-container.sh <command>` runs
-any command in the same container; `--clean-volumes` deletes its two named volumes. CI runs the same tests on `ubuntu-latest`.
+CI's Linux job (`ubuntu-latest`, on the Linux runner) builds and tests `dyno-platform` against a real `/proc` and `/sys`, with
+`clippy -D warnings`. *Note 2026-11-26:* the local container scripts (`scripts/linux-verify.sh`, `scripts/linux-container.sh`: root, then uid 1000,
+in OrbStack or Docker) are removed; no container or VM runs on this Mac (user decision, docs/rules.md NEW-no-local-vm). Push the branch and read CI's Linux job.
 
 ## What Dyno can see and do
 

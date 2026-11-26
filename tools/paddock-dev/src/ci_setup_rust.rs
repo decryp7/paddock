@@ -350,24 +350,7 @@ impl S3Ci {
         let need = |k: &str| value(k).ok_or_else(|| warn(format!("the variable {k} is not set")));
         let bucket = need("PADDOCK_SCCACHE_S3_BUCKET")?;
         let endpoint = need("PADDOCK_SCCACHE_S3_ENDPOINT")?;
-        let (ssl, host_port) = if let Some(rest) = endpoint.strip_prefix("https://") {
-            (true, rest)
-        } else {
-            (false, endpoint.strip_prefix("http://").unwrap_or(&endpoint))
-        };
-        let host_port = host_port.trim_end_matches('/').to_string();
-        if host_port.contains('@') {
-            // `user:password@host` would put a credential into a variable that is logged and into the health check's URL.
-            return Err(warn(
-                "PADDOCK_SCCACHE_S3_ENDPOINT holds `@`; it is http://host:port with no user or password (the key is the two secrets)"
-                    .into(),
-            ));
-        }
-        if host_port.contains("://") || host_port.contains('/') || !host_port.contains(':') {
-            return Err(warn(format!(
-                "PADDOCK_SCCACHE_S3_ENDPOINT is `{endpoint}`; it is http://host:port (or https://), with no path"
-            )));
-        }
+        let (ssl, host_port) = parse_endpoint(&endpoint).map_err(warn)?;
         Ok(S3Ci {
             bucket,
             endpoint: host_port,
@@ -478,6 +461,31 @@ pub fn shown_endpoint(endpoint: &str) -> String {
         (Some(s), Some(at)) if at > s + 3 => format!("{}***{}", &endpoint[..s + 3], &endpoint[at..]),
         _ => endpoint.to_string(),
     }
+}
+
+/// The one reading of `PADDOCK_SCCACHE_S3_ENDPOINT` (ER-22): the repository variable holds `http://host:port` (or `https://`), never a bare
+/// `host:port` with the scheme added again and never a path. Returns whether the endpoint speaks TLS and its `host:port` with no scheme and
+/// no trailing slash, the form sccache's own settings take (`SCCACHE_ENDPOINT` with `SCCACHE_S3_USE_SSL`). A bare `host:port` is plain HTTP.
+/// An endpoint with a user, a password or a path is an error that says what the variable should hold.
+pub fn parse_endpoint(endpoint: &str) -> Result<(bool, String), String> {
+    let (ssl, host_port) = if let Some(rest) = endpoint.strip_prefix("https://") {
+        (true, rest)
+    } else {
+        (false, endpoint.strip_prefix("http://").unwrap_or(endpoint))
+    };
+    let host_port = host_port.trim_end_matches('/').to_string();
+    if host_port.contains('@') {
+        // `user:password@host` would put a credential into a variable that is logged and into the health check's URL.
+        return Err(
+            "PADDOCK_SCCACHE_S3_ENDPOINT holds `@`; it is http://host:port with no user or password (the key is the two secrets)".into(),
+        );
+    }
+    if host_port.contains("://") || host_port.contains('/') || !host_port.contains(':') {
+        return Err(format!(
+            "PADDOCK_SCCACHE_S3_ENDPOINT is `{endpoint}`; it is http://host:port (or https://), with no path"
+        ));
+    }
+    Ok((ssl, host_port))
 }
 
 /// The password of a `redis://[user]:password@host` endpoint (or the user part when there is no colon), for masking.

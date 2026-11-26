@@ -559,27 +559,45 @@ pub fn run_all_with(planned: &[Planned], exec: &dyn Exec, opts: &RunOpts) -> Vec
     run_all_timed(planned, exec, opts).0
 }
 
+/// How many heavy steps of one push may run at once: as many as the gate has workers (ADR 0102, amendment 2026-11-26, at the user's
+/// request of that day; it was one since 2026-11-15). `heavy`'s own slots, which follow the machine's cores and load, still decide
+/// whether a step runs, so a step beyond them waits in heavy's queue and its wait is reported apart as the row's "queued" seconds (the
+/// row-timings table): waiting for others is still told from running. Each step's threads are heavy's share of the cores
+/// (`gate::step_threads`: cores divided by the steps in flight). [`workers`] is one at machine load 20 or more, so a loaded machine
+/// runs one at a time. `PADDOCK_HEAVY_AT_ONCE` (a number from 1) overrides it, for a measurement (1 is the earlier behaviour).
+pub fn heavy_limit(env: &std::collections::HashMap<String, String>, workers: usize) -> usize {
+    env.get("PADDOCK_HEAVY_AT_ONCE")
+        .and_then(|v| v.trim().parse::<usize>().ok())
+        .filter(|n| *n >= 1)
+        .unwrap_or(workers.max(1))
+}
+
 /// Whether a row may start, from [`Turns::next`].
 enum Start {
-    Go(Limits),
+    /// It may run; `concurrent` is the number of heavy steps of this push in flight with it, itself included when it is heavy.
+    Go(Limits, usize),
     Interrupted,
 }
 
-/// The rows left and whether a heavy step of the push is in flight. One heavy step at a time: heavy's slots follow the machine's
+/// The rows left and the heavy steps of the push in flight, at most `limit` ([`heavy_limit`]). Earlier, one heavy step at a time: heavy's slots follow the machine's
 /// load (several when it is low), so a second heavy step of the same push would queue behind the first at high load, and that
 /// wait could not be told from waiting for other agents (ADR 0102). With one in flight, every second a heavy step queues is time
 /// spent waiting for others, and the next heavy step is decided only after the one before has ended. While a heavy step is in
 /// flight, a free worker takes the next light row instead of waiting.
 struct Turns {
-    state: Mutex<(VecDeque<usize>, bool)>,
+    /// The rows left, the heavy steps in flight, and the most heavy steps seen in flight at once.
+    state: Mutex<(VecDeque<usize>, usize, usize)>,
     changed: std::sync::Condvar,
+    /// How many heavy steps may be in flight at once.
+    limit: usize,
 }
 
 impl Turns {
-    fn new(order: VecDeque<usize>) -> Turns {
+    fn new(order: VecDeque<usize>, limit: usize) -> Turns {
         Turns {
-            state: Mutex::new((order, false)),
+            state: Mutex::new((order, 0, 0)),
             changed: std::sync::Condvar::new(),
+            limit,
         }
     }
 
@@ -596,16 +614,17 @@ impl Turns {
                 let i = st.0.pop_front()?;
                 return Some((i, matches!(planned[i], Planned::Run(_)).then_some(Start::Interrupted)));
             }
-            let busy = st.1;
+            let busy = st.1 >= self.limit;
             if let Some(pos) = st.0.iter().position(|&i| !(busy && heavy(i))) {
                 let i = st.0.remove(pos)?;
                 if !matches!(planned[i], Planned::Run(_)) {
                     return Some((i, None));
                 }
                 if heavy(i) {
-                    st.1 = true;
+                    st.1 += 1;
+                    st.2 = st.2.max(st.1);
                 }
-                let start = Start::Go(Limits { stall: opts.queue_stall });
+                let start = Start::Go(Limits { stall: opts.queue_stall }, st.1);
                 return Some((i, Some(start)));
             }
             // Only heavy rows are left and one is in flight: woken when it ends; the timeout only re-reads the stop flag.
@@ -622,9 +641,14 @@ impl Turns {
             return;
         }
         if let Ok(mut st) = self.state.lock() {
-            st.1 = false;
+            st.1 = st.1.saturating_sub(1);
         }
         self.changed.notify_all();
+    }
+
+    /// The most heavy steps that were in flight at once.
+    fn peak(&self) -> usize {
+        self.state.lock().map_or(0, |st| st.2)
     }
 }
 
@@ -636,13 +660,38 @@ fn load_text(load: Option<f64>) -> String {
 /// [`run_all_with`], and the queue and run time of every row that went through `heavy`. A row's run time is its own: the rows share
 /// no total, and what a step queued for the slot is reported apart and never counted as run time.
 pub fn run_all_timed(planned: &[Planned], exec: &dyn Exec, opts: &RunOpts) -> (Vec<(String, Row)>, BTreeMap<String, Timing>) {
+    let d = run_all_detailed(planned, exec, opts);
+    (d.rows, d.timings)
+}
+
+/// Everything one run measured: the rows, the queue and run time of the steps that went through `heavy`, how many heavy steps were in
+/// flight when each row started (itself included), and the most heavy steps in flight at once (never above the limit).
+pub struct RunDetail {
+    /// The verdict of every planned row, in the planned order.
+    pub rows: Vec<(String, Row)>,
+    /// Queue and run seconds of every row that went through `heavy`.
+    pub timings: BTreeMap<String, Timing>,
+    /// Heavy steps in flight at the start of each row that ran a command (a light row counts the heavy steps beside it).
+    pub concurrency: BTreeMap<String, usize>,
+    /// The most heavy steps in flight at once.
+    pub peak_heavy: usize,
+}
+
+/// [`run_all_timed`] with the concurrency of every row.
+pub fn run_all_detailed(planned: &[Planned], exec: &dyn Exec, opts: &RunOpts) -> RunDetail {
+    run_all_limited(planned, exec, opts, opts.workers.max(1))
+}
+
+/// [`run_all_detailed`] with at most `heavy_at_once` heavy steps in flight ([`heavy_limit`]); `run_all_detailed` takes the worker count.
+pub fn run_all_limited(planned: &[Planned], exec: &dyn Exec, opts: &RunOpts, heavy_at_once: usize) -> RunDetail {
     let mut order: Vec<usize> = (0..planned.len()).collect();
     order.sort_by_key(|&i| match &planned[i] {
         Planned::Run(g) => g.rank,
         _ => 0,
     });
-    let turns = Turns::new(order.into_iter().collect::<VecDeque<_>>());
+    let turns = Turns::new(order.into_iter().collect::<VecDeque<_>>(), heavy_at_once.max(1));
     let timings = Mutex::new(BTreeMap::<String, Timing>::new());
+    let concurrency = Mutex::new(BTreeMap::<String, usize>::new());
     let results: Vec<Mutex<Option<Row>>> = planned.iter().map(|_| Mutex::new(None)).collect();
     std::thread::scope(|s| {
         for _ in 0..opts.workers.max(1) {
@@ -654,7 +703,10 @@ pub fn run_all_timed(planned: &[Planned], exec: &dyn Exec, opts: &RunOpts) -> (V
                                 "the push was interrupted before it started",
                                 format!("re-run `./dev check --pre-push --only {}`", first_word(&g.id)),
                             ),
-                            Start::Go(limits) => {
+                            Start::Go(limits, in_flight) => {
+                                if let Ok(mut m) = concurrency.lock() {
+                                    m.insert(g.id.clone(), in_flight);
+                                }
                                 let key = match opts.reuse.map(|r| r.lookup(g)) {
                                     Some(super::reuse::Lookup::Hit(green)) => {
                                         turns.end(g.heavy);
@@ -713,15 +765,21 @@ pub fn run_all_timed(planned: &[Planned], exec: &dyn Exec, opts: &RunOpts) -> (V
             (row_id(p).to_string(), v)
         })
         .collect();
-    (rows, timings.into_inner().unwrap_or_default())
+    RunDetail {
+        rows,
+        timings: timings.into_inner().unwrap_or_default(),
+        concurrency: concurrency.into_inner().unwrap_or_default(),
+        peak_heavy: turns.peak(),
+    }
 }
 
-/// How many gates run at once: one while the machine is loaded (ER-24: 20 or more on the 1-minute average), else three; `heavy`
-/// still lets one compile at a time through, so the extra workers run the cheap gates meanwhile.
+/// How many gates run at once: one while the machine is loaded (ER-24: 20 or more on the 1-minute average), else three or one per 4
+/// cores (heavy's `auto_max_slots`: the steps it can admit), at most eight. Each may hold a heavy step ([`heavy_limit`]); the extra
+/// workers run the cheap gates meanwhile.
 pub fn workers(load: Option<f64>, cores: usize) -> usize {
     match load {
         Some(l) if l >= 20.0 => 1,
-        _ => 3.min(cores.max(1)),
+        _ => (cores / 4).clamp(3, 8).min(cores.max(1)),
     }
 }
 
@@ -939,7 +997,8 @@ pub fn heavy_dir_env(root: &Path, env: &HashMap<String, String>) -> Vec<(String,
         .collect()
 }
 
-/// Variables every gate may see besides the base list: the caller's account (CI's runner has it, and tests read it: paddock-env's
+/// Variables every gate but the rows of CI's own tests ([`Gate::ci_env`], which take [`ci_test_env_names`]) may see besides the base
+/// list: the caller's account (CI's runner has it, and tests read it: paddock-env's
 /// macOS ACL test writes `user:$USER`; ER-47), the toolchain, Docker, caches and Paddock's own settings.
 pub(crate) const PASS: &[&str] = &[
     "USER",
@@ -963,6 +1022,17 @@ pub(crate) const PASS: &[&str] = &[
     "NPM_CONFIG_*",
     "npm_config_*",
 ];
+
+/// The caller's variables a row that runs CI's own tests ([`Gate::ci_env`]) gets: CI's job environment ([`crate::ci_run::job_env`],
+/// the one definition `ci run` uses) less every secret ([`crate::child_env::is_secret`]: a developer's `GITEA_TOKEN` stays out).
+pub(crate) fn ci_test_env_names(env: &HashMap<String, String>) -> Vec<String> {
+    let mut names: Vec<String> = crate::ci_run::job_env(env)
+        .into_keys()
+        .filter(|k| !crate::child_env::is_secret(k))
+        .collect();
+    names.sort();
+    names
+}
 
 /// The variable that, with `PADDOCK_HEAVY=off`, lets a test run a heavy gate without the slot.
 pub const TEST_HEAVY_OFF: &str = "PADDOCK_TEST_HEAVY_OFF";
@@ -1053,9 +1123,13 @@ impl RealExec {
         } else {
             own
         };
-        let mut call = ToolCall::new(program)
-            .args(args)
-            .pass(PASS.iter().copied())
+        let call = ToolCall::new(program).args(args);
+        let call = if gate.ci_env {
+            call.pass(ci_test_env_names(&self.env))
+        } else {
+            call.pass(PASS.iter().copied())
+        };
+        let mut call = call
             .cwd(self.root.join(&gate.cwd))
             .timeout(timeout)
             .cancel_on(Arc::clone(&self.stop));
@@ -1816,6 +1890,7 @@ mod tests {
             notice: None,
             progress: crate::pre_push::progress::Progress::Lines,
             build_dir: None,
+            ci_env: false,
         })
     }
 
@@ -1832,6 +1907,8 @@ mod tests {
         assert_eq!(workers(Some(5.0), 14), 3);
         assert_eq!(workers(None, 2), 2);
         assert_eq!(workers(Some(1.0), 0), 1);
+        assert_eq!(workers(Some(5.0), 16), 4, "one per 4 cores, the steps heavy admits");
+        assert_eq!(workers(Some(5.0), 64), 8, "at most eight");
     }
 
     /// heavy's lock folder goes to `<dev-targets>/throttle`, a folder a reboot keeps (it was in /private/tmp and its history was lost at
@@ -1944,6 +2021,7 @@ exit $rc
                 notice: None,
                 progress: crate::pre_push::progress::Progress::Lines,
                 build_dir: None,
+                ci_env: false,
             }
         }
 
@@ -2006,6 +2084,72 @@ exit $rc
             };
             let row = decide(&g, &ex, &test_subject());
             assert_eq!(row.kind(), Kind::Passed, "{}", row.reason());
+        }
+
+        /// The member gate's test rows take CI's job environment ([`crate::ci_run::job_env`], what `ci run` gives a contract line), not
+        /// the hand-kept [`PASS`] list, which twice differed from CI (`USER` missing, train 2026-11-26-g). A variable CI's job has and
+        /// PASS never named reaches the row; a credential never does (`GITEA_TOKEN`, `PADDOCK_DEV_TOKEN`: the control).
+        #[test]
+        fn a_ci_test_rows_child_has_cis_job_environment_and_never_a_credential() {
+            let d = tempfile::tempdir().unwrap();
+            let mut ex = real(d.path(), &d.path().join("lock"));
+            ex.env.insert("RUST_BACKTRACE".into(), "1".into());
+            ex.env.insert("CI_ONLY_SETTING".into(), "on".into());
+            ex.env.insert("GITEA_TOKEN".into(), "secret".into());
+            ex.env.insert("PADDOCK_DEV_TOKEN".into(), "secret".into());
+            let g = Gate {
+                heavy: false,
+                ci_env: true,
+                ..gate(
+                    "tests crates",
+                    r#"test "$RUST_BACKTRACE" = 1 && test "$CI_ONLY_SETTING" = on && test -z "${GITEA_TOKEN:-}" && test -z "${PADDOCK_DEV_TOKEN:-}""#,
+                )
+            };
+            let row = decide(&g, &ex, &test_subject());
+            assert_eq!(row.kind(), Kind::Passed, "{}", row.reason());
+            // The positive control: a row that keeps the PASS list does not see the CI-only variable.
+            let other = Gate {
+                heavy: false,
+                ..gate("clippy crates", r#"test -z "${CI_ONLY_SETTING:-}""#)
+            };
+            assert_eq!(decide(&other, &ex, &test_subject()).kind(), Kind::Passed);
+        }
+
+        /// Rule 55: the member rows' environment is CI's job environment less the secrets, variable for variable, for the same caller.
+        #[test]
+        fn the_member_rows_environment_is_cis_job_environment_less_the_secrets() {
+            let parent: std::collections::HashMap<String, String> = [
+                ("PATH", "/bin"),
+                ("HOME", "/h"),
+                ("USER", "u"),
+                ("LOGNAME", "u"),
+                ("TMPDIR", "/t"),
+                ("RUST_BACKTRACE", "1"),
+                ("NEXTEST_PROFILE", "ci"),
+                ("CI_ONLY_SETTING", "on"),
+                ("GITEA_TOKEN", "s"),
+                ("PADDOCK_DEV_TOKEN", "s"),
+                ("BUILD_INPUTS_TOKEN", "s"),
+                ("AWS_SECRET_ACCESS_KEY", "s"),
+                ("RUSTUP_AUTO_INSTALL", "0"),
+            ]
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+            let member: std::collections::BTreeSet<String> = ToolCall::new("x")
+                .pass(ci_test_env_names(&parent))
+                .child_env(&parent)
+                .into_iter()
+                .map(|(k, _)| k)
+                .collect();
+            let ci: std::collections::BTreeSet<String> = crate::ci_run::job_env(&parent).into_keys().collect();
+            let want: std::collections::BTreeSet<String> = ci.iter().filter(|k| !crate::child_env::is_secret(k)).cloned().collect();
+            assert_eq!(member, want);
+            assert!(
+                ci.contains("GITEA_TOKEN") && !ci.contains("PADDOCK_DEV_TOKEN"),
+                "CI's own definition: {ci:?}"
+            );
+            assert!(!member.iter().any(|k| k.contains("TOKEN") || k.contains("SECRET")), "{member:?}");
         }
 
         /// A failed nextest row said only "exit 100": its failed tests and first panic line are in the row's cause and its JSON, read
@@ -2544,14 +2688,14 @@ exit $rc
                 seen: Arc::clone(&seen),
             });
             let g = quiet_step(d.path(), 60);
-            let t = Instant::now();
+            // No assertion on elapsed wall time (ER-12: a busy machine never fails a test): the step is a 60 s sleep that would pass, so
+            // a row that is "not measured: stuck" with the guard named is the proof that the watchdog stopped it, not the step's end.
             let r = decide(&g, &ex, &test_subject());
-            assert!(
-                t.elapsed() < Duration::from_secs(30),
-                "the 60 s step was stopped, not waited for: {:?}",
-                t.elapsed()
+            assert_eq!(
+                r.kind(),
+                Kind::NotMeasured,
+                "the step was stopped by the watchdog, not waited for to a pass: {r:?}"
             );
-            assert_eq!(r.kind(), Kind::NotMeasured, "{r:?}");
             let why = r.reason();
             assert!(why.starts_with("stuck:") && why.contains("last output line: compiling x"), "{why}");
             assert!(why.contains("stuck (fake)") && why.contains("no progress for 300 s"), "{why}");
@@ -2618,10 +2762,9 @@ exit $rc
             let mut ex = real(d.path(), &d.path().join("l"));
             ex.watchdog = stall_dog(Mode::Enforce, 3, None);
             let g = json_step(d.path(), &[UNIT_LINE], 60);
-            let t = Instant::now();
+            // No wall-time assertion (ER-12): the 60 s step would pass, so "not measured: stuck" is the proof it was stopped.
             let r = decide(&g, &ex, &test_subject());
-            assert!(t.elapsed() < Duration::from_secs(40), "stopped, not waited for: {:?}", t.elapsed());
-            assert_eq!(r.kind(), Kind::NotMeasured, "{r:?}");
+            assert_eq!(r.kind(), Kind::NotMeasured, "stopped, not waited for to a pass: {r:?}");
             assert!(
                 r.reason().starts_with("stuck:") && r.reason().contains("progress watchdog"),
                 "{}",
@@ -2759,9 +2902,8 @@ exit $rc
             let mut ex = real(d.path(), &d.path().join("l"));
             ex.row_cap = Duration::from_secs(2);
             let g = quiet_step(d.path(), 60);
-            let t = Instant::now();
+            // No wall-time assertion (ER-12): the 60 s step would pass, so "not measured, ended by the row cap" is the proof.
             let r = decide(&g, &ex, &test_subject());
-            assert!(t.elapsed() < Duration::from_secs(30), "{:?}", t.elapsed());
             assert_eq!(r.kind(), Kind::NotMeasured, "{r:?}");
             assert_eq!(r.ended_by.as_deref(), Some("row cap"));
             assert!(r.reason().contains("timed out"), "{}", r.reason());

@@ -16,6 +16,7 @@ pub mod git;
 pub mod inventory;
 pub mod note;
 pub mod ops;
+pub mod overlap;
 pub mod owners;
 pub mod procs;
 

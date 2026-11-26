@@ -7,13 +7,25 @@
 //! - the row: its id, folder, program (by file name; this binary as `<dev>`, since it runs through a held link whose name carries the
 //!   run's pid), its arguments with the checkout's path as `<root>` and the build folder left out (a throw-away worktree and the
 //!   working tree agree), and its own variables;
-//! - the tool version: the hash of this `dev` binary's bytes, and the versions of the programs the row starts (`cargo --version`,
-//!   `rustc -vV`, `cargo xwin --version`, `node --version`);
+//! - the tool version: the versions of the programs the row starts (`cargo --version`, `rustc -vV`, `cargo nextest --version`,
+//!   `cargo xwin --version`, `node --version`), and for a row this `dev` binary computes itself (it is the row's
+//!   program: the gates register, the Rust conformance runs) the hash of its bytes. A Cargo or container row is not keyed on `dev`
+//!   (user, 2026-11-25): it builds the command line, which is in the key, and the row's result comes from cargo, nextest or clippy.
+//!   When this binary cannot be read at all, no row is reused;
 //! - the inputs, as git object ids at HEAD: a Cargo row's workspace folder, the folders of every path dependency the planner's Cargo
 //!   graph names (followed transitively), each of those workspaces' manifest, lockfile and settings, the toolchain pin and the lint
 //!   settings, plus the hashed build variables ([`crate::input_hash::is_hashed_var`]); a repository-wide row (conformance and the
 //!   other rows of [`class_of`]) keys on the whole tree, the base it compares with (`PADDOCK_BASE_REF` or `origin/main`, resolved), the
-//!   CI markers it reads and the day (waivers expire by date).
+//!   CI markers it reads and the day (waivers expire by date);
+//! - the member gate's tests (`tests <ws>`): a Cargo row's inputs plus what the tests read outside them ([`TEST_READS`]); a workspace
+//!   whose tests read the whole repository ([`TESTS_READ_REPO`]) keys on the whole tree.
+//!
+//! **A train** (user, 2026-11-25): the integrator's member gate on a train head (`./dev merge check --gates`) reuses each member's own
+//! green rows, stored when the member's author ran the same gate on the member branch. A row hits when the train's inputs of that row
+//! are the ones the member passed: a workspace (and its path dependencies) that only one member touched. It runs again when its
+//! inputs differ from every member's: a workspace two members touched, a conflict resolution or a train fix commit in it, a change to
+//! what its tests read, another tool version, or a member whose own row did not pass (only passes are stored). Repository-wide rows
+//! key on the whole tree, so they always run on the combined tree (ER-8). CI's full run still covers the whole train.
 //!
 //! **What is stored**: only a green result that ran: a `Clean` row this run measured (never a reused row, a failure, "not measured",
 //! a broken check, an excused row or a skipped one, inactive rows included: ADR 0089). Rows that are never [`Planned::Run`] (skipped,
@@ -26,8 +38,10 @@
 //! runs, with the cause printed). Probes never change what they check (ER-45: `RUSTUP_AUTO_INSTALL=0`).
 //!
 //! **Storage**: `<git common dir>/paddock-pre-push/reuse/<key>.json`, beside the gate's step history (`step-history.jsonl`) and
-//! pass records, so every worktree of the repository sees it. One small file per record, written by temp file and rename, evicted
-//! after every run by age ([`MAX_AGE`]) and count ([`KEEP`]).
+//! pass records, so every worktree of the repository sees it: a member's worktree writes, the train's worktree reads. A shared cache
+//! (ER-51): its owner is this module (no other code writes or removes there), its size is bounded by [`KEEP`] records of under 1 KB
+//! each, and it is evicted after every run by age ([`MAX_AGE`]) and count ([`KEEP`]). One small file per record, written by temp file
+//! and rename.
 //!
 //! **Switch**: `--no-reuse`, or `PADDOCK_NO_REUSE=1` (which also reaches the member gate's child through the environment).
 
@@ -85,14 +99,26 @@ const CARGO_PER_WORKSPACE: &[&str] = &[
     ".clippy.toml",
 ];
 
+/// What the member gate's tests read outside their Cargo inputs, found by reading the tests (2026-11-25): crates' and Dyno's tests
+/// compare against the shared UI package's generated files, tokens and format cases (`ui/projects/paddock-ui/...`), and Dyno's and
+/// Pitwall's tests read their release workflows (`.gitea/workflows/<app>-release.yml`). A tests row also keys on these, so another
+/// member's change there runs it again.
+pub const TEST_READS: &[&str] = &["ui/projects/paddock-ui", ".gitea"];
+
+/// Workspaces whose tests read the whole repository (the developer tool's contracts, goldens and workflow tests): their tests rows
+/// key on the whole tree, so on a train they always run.
+pub const TESTS_READ_REPO: &[&str] = &["tools/paddock-dev"];
+
 /// The variables a repository-wide row reads besides the tree (conformance's base ref and its CI markers).
 const WHOLE_VARS: &[&str] = &["PADDOCK_BASE_REF", "CI", "GITEA_ACTIONS", "GITHUB_ACTIONS"];
 
 /// What a row reads, as far as reuse knows it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Class {
-    /// A Cargo row of these workspaces (the Linux Clippy lints several in one container run).
+    /// A Cargo row of these workspaces .
     Cargo(Vec<String>),
+    /// A tests row of these workspaces: their Cargo inputs plus what the tests read outside them ([`TEST_READS`]).
+    Tests(Vec<String>),
     /// A repository-wide row: the whole tree and the base.
     Whole,
 }
@@ -105,7 +131,17 @@ pub fn class_of(g: &Gate) -> Option<Class> {
     match first {
         "lockfile" | "fmt" | "clippy" | "clippy-windows" if !g.cwd.is_empty() => Some(Class::Cargo(vec![g.cwd.clone()])),
         "conformance" | "conformance-tests" | "gates-register" | "pitwall-scripts" => Some(Class::Whole),
+        "tests" if !g.cwd.is_empty() => Some(tests_class(vec![g.cwd.clone()])),
         _ => None,
+    }
+}
+
+/// The class of a tests row of `ws`: the whole tree when one of them reads the whole repository ([`TESTS_READ_REPO`]).
+fn tests_class(ws: Vec<String>) -> Class {
+    if ws.iter().any(|w| TESTS_READ_REPO.contains(&w.as_str())) {
+        Class::Whole
+    } else {
+        Class::Tests(ws)
     }
 }
 
@@ -120,6 +156,9 @@ pub fn probes_of(g: &Gate) -> Vec<Vec<String>> {
             let mut v = vec![a(&["cargo", "--version"]), a(&["rustc", "-vV"])];
             if g.args.first().is_some_and(|x| x == "xwin") {
                 v.push(a(&["cargo", "xwin", "--version"]));
+            }
+            if g.args.first().is_some_and(|x| x == "nextest") {
+                v.push(a(&["cargo", "nextest", "--version"]));
             }
             v
         }
@@ -457,13 +496,22 @@ impl Reuse {
             .collect();
         own.sort();
         f.extend(own);
-        f.push(format!("tool dev {}", dev.hash));
+        // The `dev` binary is a tool version only of the rows it computes itself; a row it merely starts (cargo, the container,
+        // node) is keyed on that program's sources and versions (user, 2026-11-25: a train whose members change `tools/paddock-dev`
+        // would otherwise rerun every row).
+        if program == "<dev>" {
+            f.push(format!("tool dev {}", dev.hash));
+        }
         for p in probes_of(g) {
             f.push(format!("tool {} = {}", p.join(" "), self.probe(&p)?));
         }
+        let is_tests = matches!(class, Class::Tests(_));
         let lines = match class {
-            Class::Cargo(ws) => {
-                let paths = cargo_inputs(&self.cargo, &ws)?;
+            Class::Cargo(ws) | Class::Tests(ws) => {
+                let mut paths = cargo_inputs(&self.cargo, &ws)?;
+                if is_tests {
+                    paths.extend(TEST_READS.iter().map(|p| p.to_string()));
+                }
                 let mut l = self.hash_paths(&paths)?;
                 l.extend(self.build_vars.iter().cloned());
                 l
