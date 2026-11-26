@@ -36,6 +36,7 @@ mod hostile;
 mod inputs;
 mod ipc_endpoints;
 mod isolation;
+mod job_model;
 mod lessons_merge;
 mod locks;
 mod locks_guard;

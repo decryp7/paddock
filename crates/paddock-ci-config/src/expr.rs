@@ -141,11 +141,15 @@ fn tokenize(src: &str) -> Option<Vec<Tok>> {
                 while i < c.len() && (c[i].is_ascii_digit() || c[i] == '.') {
                     i += 1;
                 }
-                out.push(Tok::Num(c[start..i].iter().collect::<String>().parse().ok()?));
+                out.push(Tok::Num(
+                    c[start..i].iter().collect::<String>().parse().ok()?,
+                ));
             }
             a if a.is_ascii_alphabetic() || a == '_' => {
                 let start = i;
-                while i < c.len() && (c[i].is_ascii_alphanumeric() || matches!(c[i], '_' | '.' | '-' | '*')) {
+                while i < c.len()
+                    && (c[i].is_ascii_alphanumeric() || matches!(c[i], '_' | '.' | '-' | '*'))
+                {
                     i += 1;
                 }
                 out.push(Tok::Name(c[start..i].iter().collect()));
@@ -321,7 +325,9 @@ impl Eval<'_> {
                 _ => Val::Unknown,
             },
             "format" => {
-                let Some(mut out) = text(0) else { return Val::Unknown };
+                let Some(mut out) = text(0) else {
+                    return Val::Unknown;
+                };
                 for (i, a) in args.iter().enumerate().skip(1) {
                     match a.text() {
                         Some(t) => out = out.replace(&format!("{{{}}}", i - 1), &t),
@@ -385,7 +391,10 @@ pub enum Tri {
 /// Evaluates an `if:` condition (with or without `${{ }}`); returns the answer and the plan outputs it relied on.
 pub fn condition(src: &str, lookup: &dyn Lookup) -> (Tri, BTreeSet<String>) {
     let t = src.trim();
-    let inner = t.strip_prefix("${{").and_then(|r| r.strip_suffix("}}")).unwrap_or(t);
+    let inner = t
+        .strip_prefix("${{")
+        .and_then(|r| r.strip_suffix("}}"))
+        .unwrap_or(t);
     let (v, planned) = eval(inner, lookup);
     let probe = Eval {
         toks: Vec::new(),
@@ -473,7 +482,8 @@ mod tests {
     }
 
     #[test]
-    fn a_plan_output_found_not_false_is_planned_like_one_equal_to_true_and_other_negations_are_unknown() {
+    fn a_plan_output_found_not_false_is_planned_like_one_equal_to_true_and_other_negations_are_unknown()
+     {
         let (t, planned) = condition("always() && needs.plan.outputs.ui != 'false'", &ctx);
         assert_eq!(t, Tri::Yes);
         assert!(planned.contains("ui"));
@@ -560,7 +570,11 @@ mod tests {
             _ => Val::Unknown,
         };
         assert_eq!(
-            interpolate("${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/x", &lk).text,
+            interpolate(
+                "${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/x",
+                &lk
+            )
+            .text,
             "<ws>/tools/x"
         );
     }

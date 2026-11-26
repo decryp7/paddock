@@ -8,7 +8,7 @@
 //!   `python3`) is given, including a path held in a shell variable assigned in the same block. A path inside other text (a grep
 //!   pattern, an echo, a comment) is no edge.
 //! - **What a job runs for**: a ci.yml job's `if:` reads the plan's outputs (`needs.plan.outputs.<name>`); the output names the
-//!   project ([`crate::plan_ci::PROJECT_OUTPUTS`], the planner's own table). `./dev ci run <project> <phase>` runs that project; `dev
+//!   project ([`paddock_ci_config::jobs::PROJECT_OUTPUTS`], the planner's own table). `./dev ci run <project> <phase>` runs that project; `dev
 //!   plan` runs the planner (paddock-dev). A job of an app's own workflow (`<app>.yml`, `<app>-*.yml`) runs for that app, the
 //!   repository's naming rule (AGENTS.md "Workflows are named after their app").
 //! - **Release**: a job that uses a declared release action (bundling, signing, publishing) is a release node, and an action
@@ -699,7 +699,7 @@ impl CiExtractor {
         if output == "any_app" {
             return self.apps.iter().map(|a| format!("app:{a}")).collect();
         }
-        crate::plan_ci::PROJECT_OUTPUTS
+        paddock_ci_config::jobs::PROJECT_OUTPUTS
             .iter()
             .filter(|(o, _, _)| *o == output)
             .map(|(_, p, _)| p.to_string())

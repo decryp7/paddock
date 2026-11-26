@@ -1146,7 +1146,8 @@ impl SincePlan {
         let os_legs = |key: &str| -> String {
             let runs: Vec<&Rerun> = self.reruns.iter().filter(|r| r.key.as_deref() == Some(key)).collect();
             if runs.is_empty() || runs.iter().any(|r| r.leg.os.is_none()) {
-                return String::new(); // not rerun, or a leg that cannot be told: the plan step writes every leg, whole
+                // Not rerun, or a leg that cannot be told: every leg, whole (the one leg set of the planner, ADR NEW-ci-job-model §4).
+                return serde_json::to_string(&crate::plan_ci::workspace_legs(&crate::plan_ci::os_legs(), None, "", None)).unwrap_or_default();
             }
             let legs: Vec<Value> = runs
                 .iter()
@@ -1165,12 +1166,9 @@ impl SincePlan {
             ("any_app".into(), (!app_legs.is_empty()).to_string()),
             ("rerun_jobs".into(), serde_json::to_string(&keys).unwrap_or_default()),
         ]);
-        // Written only for a job that reruns with known legs; otherwise the plan step writes every OS (ci.yml).
+        // The legs of a job that reruns, or every leg whole: ci.yml has no fallback of its own.
         for (name, key) in [("crate_legs", "crate"), ("paddock_dev_legs", "paddock-dev")] {
-            let legs = os_legs(key);
-            if !legs.is_empty() {
-                out.push((name.into(), legs));
-            }
+            out.push((name.into(), os_legs(key)));
         }
         out
     }
@@ -1729,7 +1727,18 @@ mod tests {
         assert_eq!(out["icons"], "true");
         assert_eq!(out["paddock_dev"], "false");
         assert_eq!(out["rerun_jobs"], r#"["app","conformance","crate","crates","e2e","ui"]"#);
-        assert!(!out.contains_key("paddock_dev_legs"), "not rerun: the plan step writes every leg");
+        let every_os = |legs: &str| -> Vec<String> {
+            serde_json::from_str::<Vec<Value>>(legs)
+                .unwrap()
+                .iter()
+                .map(|l| l["os"].as_str().unwrap().to_string())
+                .collect()
+        };
+        assert_eq!(
+            every_os(&out["paddock_dev_legs"]),
+            crate::plan_ci::OS_LEGS,
+            "not rerun: the plan writes every leg itself, ci.yml has no fallback (ADR NEW-ci-job-model section 4)"
+        );
         let crate_legs: Value = serde_json::from_str(&out["crate_legs"]).unwrap();
         assert_eq!(crate_legs.as_array().unwrap().len(), 2);
         assert_eq!(crate_legs[0]["os"], "macos-latest");
@@ -1857,7 +1866,11 @@ mod tests {
         assert_eq!(c99["c99"], "true", "the quick job's C99 step reruns");
         assert_eq!(c99["tools"], "true", "and its heavy tool steps");
         assert_eq!(c99["rerun_jobs"], r#"["quick"]"#);
-        assert!(!c99.contains_key("crate_legs"), "not rerun: the plan step writes every leg");
+        assert_eq!(
+            serde_json::from_str::<Vec<Value>>(&c99["crate_legs"]).unwrap().len(),
+            crate::plan_ci::OS_LEGS.len(),
+            "not rerun: the plan writes every leg itself"
+        );
     }
 
     #[test]

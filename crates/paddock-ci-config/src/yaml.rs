@@ -104,7 +104,12 @@ impl Builder {
                 Some(key) => entries.push((key, node)),
                 None => match node.value {
                     Value::Scalar { text, .. } => *pending = Some(text),
-                    _ => self.error = Some(format!("line {}: a mapping key that is not text", node.line)),
+                    _ => {
+                        self.error = Some(format!(
+                            "line {}: a mapping key that is not text",
+                            node.line
+                        ))
+                    }
                 },
             },
         }
@@ -125,8 +130,12 @@ impl MarkedEventReceiver for Builder {
                     anchor,
                 );
             }
-            Event::SequenceStart(anchor, _) => self.stack.push(Frame::Seq(Vec::new(), line, anchor)),
-            Event::MappingStart(anchor, _) => self.stack.push(Frame::Map(Vec::new(), None, line, anchor)),
+            Event::SequenceStart(anchor, _) => {
+                self.stack.push(Frame::Seq(Vec::new(), line, anchor))
+            }
+            Event::MappingStart(anchor, _) => {
+                self.stack.push(Frame::Map(Vec::new(), None, line, anchor))
+            }
             Event::SequenceEnd => {
                 if let Some(Frame::Seq(items, line, anchor)) = self.stack.pop() {
                     self.put(
