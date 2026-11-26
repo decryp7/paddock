@@ -2922,3 +2922,37 @@ was never short (68 % free at the lowest; a gate's largest process is about 1.4 
 and opens the second under a 5-minute load of 0.85 x cores (11.9 here): every batch started under 12, and there two beat one; above it
 nothing measured says a second step helps. The round-1 3-gate batch started during another agent's burst (1-minute load 18.9); round 2
 repeated it from a quiet start (4.6) and was slower still (22.6 gates per hour, mean 1-minute load 24.3), so three is not a gain.
+
+## Member gate: parallel heavy rows (2026-11-26, feat/gate-two-heavy-rows)
+
+ER-20, one real gate, two runs on the same tree (this branch, 38 changed files in `tools/paddock-dev`, `docs/`, `conformance/`):
+`./dev check --pre-push --member-gate --no-reuse --base origin/main`, a Mac with 14 cores, other agents' gates running throughout.
+Serial is `PADDOCK_HEAVY_AT_ONCE=1` (the rule since 2026-11-15); parallel is the default, one heavy step per worker (3 workers, heavy's
+slots and load gate deciding). The study of train i's member gate (1 h 45 min, 64 % queue, 36 % run) is the serial baseline of the
+production gate.
+
+| Run | Wall | Load 1/5/15 at start | at end | Heavy steps at once | Failed rows |
+|---|---|---|---|---|---|
+| serial (limit 1) | 1547 s | 22.1 / 16.3 / 15.8 | 5.1 / 11.4 / 14.4 | 1 | `conformance-tests` (a load-dependent conformance test, see below) |
+| parallel (default) | 721 s | 5.1 / 11.4 / 14.4 | 44.5 / 26.0 / 18.6 | 3 | `conformance-tests` (same), `tests tools/paddock-dev` (a timing assumption in the new concurrency test, fixed: the fake now holds a batch together) |
+
+| Row | serial queued / run (s) | parallel queued / run (s) |
+|---|---|---|
+| clippy crates | 183.4 / 1.0 | 83.3 / 0.8 |
+| clippy-windows crates | 0.0 / 0.9 | 67.9 / 0.8 |
+| clippy tools/paddock-dev | 161.9 / 4.1 | 5.2 / 0.4 |
+| conformance-tests | 109.8 / 81.5 | 15.5 / 73.7 |
+| member-audits | 0.0 / 105.2 | 15.7 / 91.1 |
+| tests crates | 135.8 / 320.7 | 167.7 / 78.6 |
+| tests tools/paddock-dev | 26.2 / 325.3 | 162.4 / 450.7 |
+
+The wall time fell to 47 % (1547 s to 721 s) with three heavy steps at once; the per-row table shows where: the serial run's rows waited
+for each other (concurrent 1), the parallel run's started beside two others (concurrent 3), and the queued seconds stayed a separate
+column, so waiting for the machine is still told from running. The two runs are not a controlled A/B: the load differed (the serial run
+started at 22, the parallel one at 5 and ended at 44 because the gate and other agents were all running), and the clippy rows reuse a
+warm build folder, so their run times are about one second. `tests tools/paddock-dev` ran 450.7 s in parallel against 325.3 s serial
+because its threads were heavy's share of the cores (`step_threads`: cores divided by the steps in flight) beside two other test rows.
+One pair is a measurement, not a distribution (ER-28): repeat it on a quiet machine before quoting the factor. A failed
+`conformance-tests` row in both runs is `verify reads the real dev self hash --json shape`, which took 30 to 37 s under load; it is not
+touched by this change.
+
