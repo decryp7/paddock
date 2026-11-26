@@ -212,6 +212,22 @@ pub struct S3Off {
     pub why: String,
 }
 
+/// The S3 key prefix of a runner class: `paddock-ci/<RUNNER_OS>-<arch>` (`os` as `RUNNER_OS` spells it, `arch` as Rust's `ARCH`). The
+/// one definition: CI's [`S3Ci`] and the agents' local server ([`crate::local_sccache::default_prefix`]) both use it.
+pub(crate) fn ci_prefix(os: &str, arch: &str) -> String {
+    format!("paddock-ci/{os}-{arch}")
+}
+
+/// This host's `RUNNER_OS` spelling (`macOS`, `Linux`, `Windows`), for the prefix of a local server.
+pub(crate) fn host_runner_os() -> &'static str {
+    match std::env::consts::OS {
+        "macos" => "macOS",
+        "linux" => "Linux",
+        "windows" => "Windows",
+        other => other,
+    }
+}
+
 /// The suffix of the S3 level's local disk: a SIBLING of the job's plain sccache folder (`<folder>-s3`), never a folder inside it
 /// (sccache's LRU evicts any file below its folder) and never one a second lane can reach (ADR 0111). Jobs without the S3 level and
 /// release builds use the plain folder and never see what S3 backfilled.
@@ -356,7 +372,7 @@ impl S3Ci {
             bucket,
             endpoint: host_port,
             ssl,
-            prefix: format!("paddock-ci/{os}-{arch}"),
+            prefix: ci_prefix(os, arch),
             key: (id, secret),
         })
     }
@@ -444,10 +460,11 @@ pub const LEGACY_BUILD_DIR_LAYOUT: &str = "__CARGO_TEMPORARY_BUILD_DIR_NEW_LAYOU
 pub fn env_lines(port: &str, settings: &[(String, String)], windows: bool) -> Vec<String> {
     let mut lines = vec![
         "RUSTC_WRAPPER=sccache".to_string(),
-        "CARGO_INCREMENTAL=0".to_string(),
         "SCCACHE_IGNORE_SERVER_IO_ERROR=1".to_string(),
         format!("SCCACHE_SERVER_PORT={port}"),
     ];
+    // After the wrapper: the `CARGO_*` variables sccache hashes into every key, one definition with the agents' shim.
+    lines.splice(1..1, crate::local_sccache::CI_KEY_ENV.iter().map(|(k, v)| format!("{k}={v}")));
     if windows {
         lines.push(LEGACY_BUILD_DIR_LAYOUT.to_string());
     }
@@ -1484,6 +1501,7 @@ mod tests {
             [
                 "RUSTC_WRAPPER=sccache",
                 "CARGO_INCREMENTAL=0",
+                "CARGO_TERM_COLOR=always",
                 "SCCACHE_IGNORE_SERVER_IO_ERROR=1",
                 "SCCACHE_SERVER_PORT=4228",
                 "SCCACHE_DIR=/d",

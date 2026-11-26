@@ -708,10 +708,6 @@ fn member_audits(facts: &Facts) -> Planned {
     Planned::Run(g)
 }
 
-/// The share of the machine one test row takes (ER-24, ER-48): the `ci` profiles say `num-cpus`, for a CI job that has its host to
-/// itself; here a test row runs beside up to two other rows.
-const MEMBER_TEST_THREADS: &str = "4";
-
 /// `nextest run` with CI's `ci` profile for workspace `ws`: the tests `filter` selects (empty: every test of the workspace); every
 /// feature in `crates`, as CI's crates job; an app's own nextest configuration. `--no-tests=fail`: a selection of nothing is a failure,
 /// never a pass (ER-33).
@@ -747,7 +743,7 @@ fn reached_filter<'a>(ws: &str, facts: &'a Facts) -> &'a str {
 /// The member gate's tests (user, 2026-11-25): the full nextest `ci` profile of every Cargo workspace the member touches (a workspace
 /// with a changed file of its own, documentation aside), on this host (`tests <ws>`). The Linux tests, with the orphan guardian's
 /// acting tests as uid 65534, are CI's Linux jobs on the Linux runner: no VM or container starts on this Mac (user, 2026-11-26;
-/// docs/rules.md NEW-no-local-vm), so there is no `tests-linux` row. Only in the member gate (`--member-gate`): a developer's push
+/// docs/rules.md rule 101), so there is no `tests-linux` row. Only in the member gate (`--member-gate`): a developer's push
 /// skips them with the reason. An inactive app's rows are skipped and named. A missing nextest is not measured, never a pass.
 /// Blocking from the start: the tests are CI's own established tests, not a new check (user, 2026-11-25). Measured in
 /// docs/benchmarks.md, "Member gate: CI tests of the touched workspaces".
@@ -781,10 +777,7 @@ fn member_tests(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> {
         let mut g = Gate {
             heavy: true,
             need: Need::Tool("cargo-nextest".into()),
-            env: vec![
-                ("RUSTUP_AUTO_INSTALL".into(), "0".into()),
-                ("NEXTEST_TEST_THREADS".into(), MEMBER_TEST_THREADS.into()),
-            ],
+            env: vec![("RUSTUP_AUTO_INSTALL".into(), "0".into())],
             ..gate(
                 format!("tests {ws}"),
                 ws,
