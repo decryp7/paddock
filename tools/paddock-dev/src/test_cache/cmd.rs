@@ -165,7 +165,7 @@ pub fn command(a: &TestCacheArgs) -> Result<Report, CliError> {
             None => audit(&local),
         }),
         "selfcheck" => selfcheck(shared.as_ref()),
-        "lookup" | "run" => {
+        "lookup" | "run" | "forget" => {
             let cfg = Config::read(&root).map_err(fail)?;
             let mut cands = candidates(&root, &a.workspace)?;
             if let Some(only) = &a.only {
@@ -177,6 +177,9 @@ pub fn command(a: &TestCacheArgs) -> Result<Report, CliError> {
                         a.workspace
                     )));
                 }
+            }
+            if a.action == "forget" {
+                return forget(&cfg, &cands, store);
             }
             run(a, &root, &cfg, &cands, store)
         }
@@ -436,4 +439,32 @@ fn audit_shared(s: &super::s3::S3Store) -> Report {
         )
         .with_exit(Exit::NotMeasured),
     }
+}
+
+/// `forget`: deletes the records under the current keys of the selected targets (a mistaken or scratch record; the nightly's invalidation
+/// does the same for a failing target). Names each one it deleted.
+fn forget(cfg: &Config, cands: &[Candidate], store: &dyn Store) -> Result<Report, CliError> {
+    let class = RunnerClass::here();
+    let asks: Vec<Lookup> = cands
+        .iter()
+        .map(|c| Lookup {
+            target: c.target.id.clone(),
+            class: class.clone(),
+            key: super::key_of(c, cfg, &class),
+        })
+        .collect();
+    let gone = store
+        .delete_many(&asks)
+        .map_err(|e| fail(format!("::error::ci test-cache forget: {e}. Next step: check the store.")))?;
+    let n = gone.iter().flatten().count();
+    let text = gone
+        .iter()
+        .flatten()
+        .map(|r| format!("test-cache: forgot target={} (from run {})", r.target, r.run))
+        .collect::<Vec<_>>()
+        .join("\n");
+    Ok(Report::new(
+        serde_json::json!({"forgot": n}),
+        format!("{text}\ntest-cache: {n} record(s) forgotten"),
+    ))
 }
