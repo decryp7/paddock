@@ -600,8 +600,7 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
     if reused {
         outputs.push(("rerun_jobs".into(), "[]".into()));
     }
-    // The job model of ci.yml names the jobs a scope has (ADR 0123): a workflow that cannot be modelled stops the plan with its problems.
-    let model = load_model(root).map_err(|e| fail(format!("ci.yml cannot be modelled, so the run's scope cannot be named: {e}")))?;
+    let model = scope_model(root);
     let os_legs = crate::plan_ci::os_legs();
     let filter_of = |p: &Value, k: &str| p["filters"][k].as_str().unwrap_or("").to_string();
     let mut ran = if reused {
@@ -700,6 +699,13 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
         serde_json::json!({ "base": base, "reason": reason, "apps": legs.len() }),
         String::new(),
     ))
+}
+
+/// The job model of ci.yml, which names the jobs of a scope (ADR 0123). A workflow that cannot be read or modelled gives an empty model
+/// (the warning is [`expected_names`]'s): the scope then names no per-runner or reference-app job and the line expects no job names, so
+/// a reader reports the run as not measured (ER-33), never a pass.
+fn scope_model(root: &Path) -> paddock_ci_config::jobs::JobModel {
+    load_model(root).unwrap_or(paddock_ci_config::jobs::JobModel { jobs: Vec::new() })
 }
 
 /// The jobs the run should have by display name ([`expected_of`]); empty for a run that ran nothing. A workflow that cannot be read or
@@ -929,7 +935,7 @@ fn since_ci_with(root: &Path, env: &dyn Fn(&str) -> Option<String>, id: u64, rea
         },
     )
     .map_err(fail)?;
-    let model = load_model(root).map_err(|e| fail(format!("ci.yml cannot be modelled, so the rerun's scope cannot be named: {e}")))?;
+    let model = scope_model(root);
     let need = scope_of(&model, &everything, &need_legs, true, &crate::plan_ci::os_legs(), &[]);
     eprintln!("{}", ci_scope(Scope::default(), true, need, true).with_inactive(inactive).line());
     if let Some(why) = &plan.everything {
