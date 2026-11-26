@@ -3544,14 +3544,12 @@ mod member_tests {
             "{:?}",
             ids(&planned)
         );
-        for id in ["tests apps/dyno"] {
-            assert!(
-                planned
-                    .iter()
-                    .any(|p| matches!(p, Planned::Skip { id: i, reason } if i == id && *reason == inactive_reason("dyno"))),
-                "{id}: {planned:?}"
-            );
-        }
+        assert!(
+            planned
+                .iter()
+                .any(|p| matches!(p, Planned::Skip { id, reason } if id == "tests apps/dyno" && *reason == inactive_reason("dyno"))),
+            "{planned:?}"
+        );
         assert!(ids(&planned).contains(&"tests crates".to_string()));
     }
 
