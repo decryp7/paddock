@@ -227,6 +227,18 @@ impl<'a> Client<'a> {
         Ok(v.and_then(|v| v["commit"]["id"].as_str().filter(|s| !s.is_empty()).map(str::to_string)))
     }
 
+    /// The parents of a commit (`GET .../git/commits/<sha>`), first parent first; `Ok(None)` when the server has no such commit (404).
+    pub fn commit_parents(&mut self, sha: &str) -> Result<Option<Vec<String>>, String> {
+        let url = format!("{}/api/v1/repos/{}/git/commits/{sha}", self.server.trim_end_matches('/'), self.repo);
+        let v = self.retry(|c| c.http.get_json(&url, &c.token))?;
+        Ok(v.map(|v| {
+            v["parents"]
+                .as_array()
+                .map(|a| a.iter().filter_map(|p| p["sha"].as_str().map(str::to_string)).collect())
+                .unwrap_or_default()
+        }))
+    }
+
     /// Page `page` of the run list (50 a page), an empty page for a missing one.
     pub fn runs_page(&mut self, page: u32) -> Result<RunsPage, String> {
         self.runs_page_where(page, "")

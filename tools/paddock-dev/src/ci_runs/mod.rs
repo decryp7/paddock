@@ -495,6 +495,73 @@ pub struct VerdictArgs {
     landing: bool,
 }
 
+/// Arguments of `ci trial-verdict`.
+#[derive(Args)]
+pub struct TrialVerdictArgs {
+    /// The workflow file whose runs are read.
+    #[arg(long, default_value = "ci.yml")]
+    workflow: String,
+    /// The member's branch (the trial ref is `trial/<branch>`).
+    #[arg(long)]
+    branch: String,
+    /// The member's head, the full 40-hex commit id: only a trial merge of exactly this head counts.
+    #[arg(long)]
+    member_sha: String,
+    /// The repository.
+    #[arg(long, default_value = "decryp7/paddock")]
+    repo: String,
+    /// The Gitea server.
+    #[arg(long, default_value = SERVER)]
+    server: String,
+}
+
+/// `ci trial-verdict`: what the member's own trial run (`ci dispatch --trial`) says, through the one reader ([`verdict::trial`]).
+/// Exit 0 green, 5 red, 6 still running, no trial run of this head, or not measured (never a pass, ER-33). `--json` carries `state`:
+/// `green`, `red`, `running`, `no-run` or `not-measured`, and `run` when there is one.
+pub fn trial_verdict(a: &TrialVerdictArgs) -> Result<Report, CliError> {
+    if a.member_sha.len() != 40 || !a.member_sha.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
+        return Err(CliError::usage(format!("--member-sha {:?} is not a full 40-hex commit id.", a.member_sha))
+            .with_hint("Pass the whole sha (`git rev-parse HEAD`)."));
+    }
+    let t = match token() {
+        Err(_) => verdict::Trial::NotMeasured("GITEA_TOKEN is not set, so the runs cannot be read".into()),
+        Ok(token) => {
+            let mut http = CurlHttp;
+            let mut client = Client::new(&mut http, &a.server, &a.repo, &token);
+            verdict::trial(&mut client, &a.workflow, &a.branch, &a.member_sha)
+        }
+    };
+    Ok(trial_report(&t, &a.branch))
+}
+
+/// The report for a trial state (the words are the ones `merge check` prints).
+pub fn trial_report(t: &verdict::Trial, branch: &str) -> Report {
+    use verdict::Trial;
+    let (state, run, text, exit) = match t {
+        Trial::Green { run } => ("green", Some(*run), format!("trial of {branch}: run {run} is green"), Exit::Ok),
+        Trial::Red { run, reason } => (
+            "red",
+            Some(*run),
+            format!("trial of {branch}: run {run} is red: {reason}"),
+            Exit::Findings,
+        ),
+        Trial::Running { run } => (
+            "running",
+            Some(*run),
+            format!("trial of {branch}: run {run} is still running (not a pass)"),
+            Exit::NotMeasured,
+        ),
+        Trial::NoRun => (
+            "no-run",
+            None,
+            format!("trial of {branch}: no trial run of this head (run `./dev merge sync-member <train>` after merging the train)"),
+            Exit::NotMeasured,
+        ),
+        Trial::NotMeasured(why) => ("not-measured", None, format!("trial of {branch}: not measured: {why}"), Exit::NotMeasured),
+    };
+    Report::new(serde_json::json!({"state": state, "run": run, "branch": branch}), text).with_exit(exit)
+}
+
 /// Arguments of `ci fix-items`.
 #[derive(Args)]
 pub struct FixItemsArgs {
@@ -1398,6 +1465,7 @@ fn trial_merge(a: &DispatchArgs, branch: &str, token: &str) -> Result<(crate::qu
             gates: false,
             write_reverted: None,
             old_base_anyway: None,
+            no_trial: None,
         })
         .map(|_| ())
         .map_err(|e| e.message)

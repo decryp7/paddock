@@ -43,11 +43,13 @@ mod generator_step;
 pub(crate) mod git;
 mod hakari;
 mod hunks;
+mod member_trial;
 mod lost_tests;
 mod reland;
 pub(crate) mod reverted_base;
 mod stale_base;
 mod static_rows;
+pub mod trial_dispatch;
 pub mod sync_member;
 mod testnames;
 mod trailers;
@@ -334,6 +336,8 @@ pub struct Request {
     pub write_reverted: Option<PathBuf>,
     /// `--old-base-anyway <reason>`: let a member that lacks the train's base through, and print the reason ([`stale_base`]).
     pub old_base_anyway: Option<String>,
+    /// `--no-trial <reason>`: with `gates`, do not read the member's own CI trial run, and print the reason ([`member_trial`]).
+    pub no_trial: Option<String>,
 }
 
 /// The step for `--write-reverted`: the lines a re-land explains, written with the message to `file`; says plainly when it tied none.
@@ -529,6 +533,10 @@ fn check(req: &Request) -> Result<Checked, CliError> {
         return Err(CliError::usage("--old-base-anyway needs a reason.")
             .with_hint("Say why, for example --old-base-anyway \"hotfix, the newer main work is unrelated\"."));
     }
+    if req.no_trial.as_deref().is_some_and(|r| r.trim().is_empty()) {
+        return Err(CliError::usage("--no-trial needs a reason.")
+            .with_hint("Say why, for example --no-trial \"docs-only member, no job of its own to run\"."));
+    }
     let root = crate::gates::command::repo_root(req.root.as_deref())?;
     let git = Git::new(&root);
     let merge = resolve(&git, req)?;
@@ -618,10 +626,26 @@ fn check(req: &Request) -> Result<Checked, CliError> {
                         gates::run(&root, &git, &merge, &gates::Real, gates::ENFORCED)
                     }),
                 );
+                steps.push("trial", Some(trial_step(&root, &merge, req.no_trial.as_deref(), &member_trial::Real)));
             }
             Ok((merge.label, found, steps, result))
         }
     }
+}
+
+/// The member's own CI trial (`merge sync-member` dispatched it): what the one reader says about the member's head, the second parent.
+fn trial_step(root: &std::path::Path, merge: &Merge, no_trial: Option<&str>, reader: &dyn member_trial::Reader) -> generator_step::Step {
+    if let Some(reason) = no_trial {
+        return member_trial::skipped(reason.trim());
+    }
+    let [_, member] = merge.parents.as_slice() else {
+        return member_trial::not_run("the merge does not have two parents");
+    };
+    if merge.member_name == short(member) || merge.member_name.contains(char::is_whitespace) {
+        return member_trial::not_run("the merge message names no member branch, so there is no trial ref to read");
+    }
+    let branch = merge.member_name.strip_prefix("origin/").unwrap_or(&merge.member_name);
+    member_trial::interpret(reader.read(root, branch, member), branch)
 }
 
 /// `./dev merge check`. Detector findings are an error (exit 5), so the text goes to standard error like every other failure.
