@@ -1,7 +1,7 @@
 import { expect, Page } from '@playwright/test';
 import { APP_LOAD_TIMEOUT, gridRows } from './app';
 import { showView } from './menu-support';
-import { pressMod } from '@decryp7/paddock-e2e';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard.ts';
 
 /**
  * Opens the app with the mock tools backend switched by query parameters:

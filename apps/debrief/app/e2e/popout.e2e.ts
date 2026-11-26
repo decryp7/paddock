@@ -7,7 +7,7 @@ import { runCommand } from './analysis-support';
 import { anchoredMenu, menuItem, openMenu } from './menu-support';
 import { expectNotMoving } from '../../../../ui/projects/paddock-e2e/src/ready.ts';
 import { clickThatClosesItsPage, untilItsPageCloses } from '../../../../ui/projects/paddock-e2e/src/close-click.ts';
-import { pageModKey } from '@decryp7/paddock-e2e';
+import { pageModKey } from '../../../../ui/projects/paddock-e2e/src/keyboard.ts';
 
 // Pop-out windows in the browser build: `window.open` popups of the same app, synced over a BroadcastChannel (the
 // same port interface as the Tauri events between real OS windows).

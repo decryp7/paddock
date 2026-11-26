@@ -2,7 +2,7 @@ import { expect, test } from './test';
 import type { Page } from '@playwright/test';
 import { openApp } from './app';
 import { expectNoSeriousViolations } from './axe';
-import { pressMod } from '@decryp7/paddock-e2e';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard.ts';
 
 /** The region (shell landmark or dock group) holding the focused element. */
 function focusedRegion(page: Page): Promise<string | null> {

@@ -1,7 +1,7 @@
 import { expect, test } from './test';
 import type { Page } from '@playwright/test';
 import { APP_LOAD_TIMEOUT, openApp } from './app';
-import { pressMod } from '@decryp7/paddock-e2e';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard.ts';
 
 // Settings > Storage > Project stores against the browser build's mock storage backend
 // (src/app/settings/storage/mock-storage-backend.ts): five folders, two of them orphaned.

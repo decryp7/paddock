@@ -1,7 +1,7 @@
 import { expect, test } from './test';
 import type { Page } from '@playwright/test';
 import { openAppWith } from './mock-url';
-import { pressMod } from '@decryp7/paddock-e2e';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard.ts';
 
 // Opening a diagnostics zip (mock backend): the engine recognises it, so the Diagnostics report panel shows its
 // processes, steps, breadcrumbs and snapshots. `?mockOpen=` makes the browser build's "Open files" pick that path.

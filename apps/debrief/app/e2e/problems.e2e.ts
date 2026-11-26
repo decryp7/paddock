@@ -2,7 +2,7 @@ import { expect, test } from './test';
 import { expectNoSeriousViolations } from './axe';
 import { chooseMenu } from './menu-support';
 import { openAppWith } from './mock-url';
-import { pressMod } from '@decryp7/paddock-e2e';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard.ts';
 
 // A file whose timestamps the engine cannot read (the mock stands in: a path naming "no-timestamps" imports
 // without timestamps, with the format the engine would propose; see src/app/core/mock/mock-timestamps.ts).

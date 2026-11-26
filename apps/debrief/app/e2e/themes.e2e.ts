@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs';
 import type { Page } from '@playwright/test';
 import { gridRows, openApp } from './app';
 import { expectNoSeriousViolations, settleAnimations, settleDockLayout } from './axe';
-import { pressMod } from '@decryp7/paddock-e2e';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard.ts';
 
 /**
  * Every built-in theme in both colour schemes (ADR 0018): the main window passes axe (WCAG 2.2 AA), and the main

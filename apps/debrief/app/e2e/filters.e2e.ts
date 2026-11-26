@@ -1,6 +1,6 @@
 import { expect, test } from './test';
 import { gridRows, gridTotal, initialTotal, openApp, parseCount } from './app';
-import { pressMod } from '@decryp7/paddock-e2e';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard.ts';
 
 test.describe('filters', () => {
   test.beforeEach(async ({ page }) => openApp(page));

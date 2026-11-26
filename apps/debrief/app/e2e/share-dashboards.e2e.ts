@@ -2,7 +2,7 @@ import { expect, test } from './test';
 import type { Page } from '@playwright/test';
 import { openApp } from './app';
 import { expectNoSeriousViolations } from './axe';
-import { pressMod } from '@decryp7/paddock-e2e';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard.ts';
 
 async function runCommand(page: Page, name: string): Promise<void> {
   await pressMod(page, 'Mod+k');

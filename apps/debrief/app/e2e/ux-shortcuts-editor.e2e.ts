@@ -3,7 +3,7 @@ import type { Page } from '@playwright/test';
 import { openApp } from './app';
 import { expectNoSeriousViolations } from './axe';
 import { chooseMenu } from './menu-support';
-import { pressMod } from '@decryp7/paddock-e2e';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard.ts';
 
 // The shortcut editor (Settings ▸ Keyboard) and the cheat sheet that follows it. Overrides live in localStorage.
 

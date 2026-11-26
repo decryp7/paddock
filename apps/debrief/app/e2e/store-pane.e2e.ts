@@ -2,7 +2,7 @@ import { expect, test } from './test';
 import { expectNoSeriousViolations } from './axe';
 import { chooseMenu, showView } from './menu-support';
 import { openAppWith } from './mock-url';
-import { pageModKey, pressMod } from '@decryp7/paddock-e2e';
+import { pageModKey, pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard.ts';
 
 // The Store pane and its SQL console (ADR 0030) against the mock backend: the reports, a confirmed maintenance job,
 // and a SQL run with completion, a refusal, results, Open in Events and saving next to the saved queries.

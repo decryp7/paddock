@@ -3,7 +3,7 @@ import type { Page } from '@playwright/test';
 import { APP_LOAD_TIMEOUT } from './app';
 import { expectNoSeriousViolations } from './axe';
 import { hotspots, openProfiles, runCommand, showCaptures } from './profiling-support';
-import { pressMod } from '@decryp7/paddock-e2e';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard.ts';
 
 /** Clicks the timeline's chip with this name, or its entry in the "+N" menu when it did not fit in the strip. */
 async function openFromStrip(page: Page, name: string): Promise<void> {

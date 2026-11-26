@@ -2,7 +2,7 @@ import { expect, test } from './test';
 import type { Page } from '@playwright/test';
 import { openApp } from './app';
 import { expectNoSeriousViolations } from './axe';
-import { pressMod } from '@decryp7/paddock-e2e';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard.ts';
 
 // Settings ▸ AI ▸ Knowledge (ADR 0029) against the browser build's mock knowledge backend
 // (src/app/ai/knowledge/mock-knowledge-backend.ts): write a project file, it is listed and read by the AI; disable it;

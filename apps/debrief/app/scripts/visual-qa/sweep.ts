@@ -4,7 +4,7 @@ import { join, resolve } from 'node:path';
 import { openApp } from '../../e2e/app';
 import { chooseMenu, menubar, openMenu } from '../../e2e/menu-support';
 import { layoutProblems, LayoutProblem } from './layout-check';
-import { pressMod } from '@decryp7/paddock-e2e';
+import { pressMod } from '../../../../../ui/projects/paddock-e2e/src/keyboard.ts';
 
 /**
  * Visual QA sweep (see playwright.config.ts): for each theme and size, screenshots the default layout, every top-level

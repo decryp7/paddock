@@ -2,7 +2,7 @@ import { expect, test } from './test';
 import type { Page } from '@playwright/test';
 import { openApp } from './app';
 import { expectNoSeriousViolations } from './axe';
-import { pressMod } from '@decryp7/paddock-e2e';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard.ts';
 
 // The Parsers view (ADR 0026, I3) against the browser build's mock parser library
 // (src/app/core/mock/mock-parsers.ts): "Import .toml…" picks /demo/parsers/inventory-csv.toml, an invented parser

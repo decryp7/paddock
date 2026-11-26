@@ -2,7 +2,7 @@ import { expect, test } from './test';
 import { closeStatusDetails, openStatusDetails } from './app';
 import { expectNoSeriousViolations } from './axe';
 import { openAppWith, runCommand } from './tools-support';
-import { pressMod } from '@decryp7/paddock-e2e';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard.ts';
 
 test.describe('projects', () => {
   test('save, change, reopen: the query comes back and the unsaved dot follows', async ({ page }) => {

@@ -1,7 +1,7 @@
 import { expect, test } from './test';
 import { gridRows, gridTotal, initialTotal, openApp, parseCount } from './app';
 import { openQuery } from './analysis-support';
-import { pageModKey } from '@decryp7/paddock-e2e';
+import { pageModKey } from '../../../../ui/projects/paddock-e2e/src/keyboard.ts';
 
 test.describe('query language filters the workspace', () => {
   test.beforeEach(async ({ page }) => openApp(page));

@@ -2,7 +2,7 @@ import { expect, test } from './test';
 import type { Page } from '@playwright/test';
 import { openApp, APP_LOAD_TIMEOUT } from './app';
 import { expectNoSeriousViolations } from './axe';
-import { pressMod } from '@decryp7/paddock-e2e';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard.ts';
 
 // Settings ▸ Storage against the browser build's mock storage backend
 // (src/app/settings/storage/mock-storage-backend.ts), which mimics the engine's categories and protections.

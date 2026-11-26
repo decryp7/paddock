@@ -1,7 +1,7 @@
 import { expect, test } from './test';
 import { openApp } from './app';
 import { expectNoSeriousViolations } from './axe';
-import { pressMod } from '@decryp7/paddock-e2e';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard.ts';
 
 // Human-like name matching in search everything (Mod+Shift+F) against the mock backend: the "Did you mean" line says
 // which name the words mean, why, how else it is written and whether an AI suggested it; accepting or rejecting is

@@ -8,7 +8,7 @@ import { gridRows, openApp } from './app';
 import { settleAnimations, settleDockLayout } from './axe';
 import { openAppWith } from './mock-url';
 import { anchoredMenu } from './menu-support';
-import { pressMod } from '@decryp7/paddock-e2e';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard.ts';
 
 /**
  * Shell baseline (Paddock X50, plan package W0): screenshots of the shell and workbench layer taken BEFORE any

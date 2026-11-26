@@ -2,7 +2,7 @@ import { expect, test } from './test';
 import type { Page } from '@playwright/test';
 import { gridRows, openApp } from './app';
 import { anchoredMenu, contextMenu, menuNamed } from './menu-support';
-import { pressMod } from '@decryp7/paddock-e2e';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard.ts';
 
 // The app should feel like a desktop app: no browser context menu on its chrome, no reload, page zoom or other
 // browser keys. The guard only prevents the browser's default, so Debrief's own menus and shortcuts keep working.

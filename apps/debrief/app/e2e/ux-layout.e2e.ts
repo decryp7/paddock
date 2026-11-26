@@ -2,7 +2,7 @@ import { expect, test } from './test';
 import type { Page } from '@playwright/test';
 import { runCommand } from './ai-support';
 import { ensureInspector, gridRows, openApp } from './app';
-import { pressMod } from '@decryp7/paddock-e2e';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard.ts';
 
 // Usability review 2026-10-23 (U1, U2): the events grid is the main artefact, so the default layout, a document opened
 // beside the timeline and a pinned Inspector all leave it many rows, and the timeline plot keeps its width.

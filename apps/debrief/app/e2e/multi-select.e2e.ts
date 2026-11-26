@@ -3,7 +3,7 @@ import { gridRows, openApp } from './app';
 import { runCommand } from './analysis-support';
 import { expectNoSeriousViolations } from './axe';
 import { contextMenu } from './menu-support';
-import { pageModKey } from '@decryp7/paddock-e2e';
+import { pageModKey } from '../../../../ui/projects/paddock-e2e/src/keyboard.ts';
 
 test.describe('grid multi-select', () => {
   test.beforeEach(async ({ page }) => openApp(page));

@@ -5,7 +5,7 @@ import { expectNoSeriousViolations } from './axe';
 import { runCommand } from './analysis-support';
 import { heldToast } from './toast-support';
 import { expectNotMoving } from '../../../../ui/projects/paddock-e2e/src/ready.ts';
-import { pageModKey, pressMod } from '@decryp7/paddock-e2e';
+import { pageModKey, pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard.ts';
 
 // The filter bar's ONE search field: plain words search the messages live; text with query structure is a query that
 // runs with Enter or Ctrl/Cmd+Enter. The mock backend classifies like the engine (operator, pipe, exists(), known field).

@@ -1,6 +1,6 @@
 import { expect, test } from './test';
 import { gridTotal, initialTotal, openApp } from './app';
-import { pressMod } from '@decryp7/paddock-e2e';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard.ts';
 
 // Search everything (Mod+Shift+F) against the mock backend: the palette lists results by kind with the words marked,
 // and choosing one goes where it points.

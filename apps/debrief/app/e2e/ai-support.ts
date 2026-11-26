@@ -3,7 +3,7 @@ import { gridRows, openAppWith } from './mock-url';
 import { expectStreamDone } from '../../../../ui/projects/paddock-e2e/src/ready.ts';
 import { contextMenu } from './menu-support';
 import { heldToast, pressInToast } from './toast-support';
-import { pressMod } from '@decryp7/paddock-e2e';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard.ts';
 
 /** Opens the app with the scripted AI mock (fast streaming) plus `extra` switches, and waits for the grid. */
 export async function openAiApp(page: Page, extra = ''): Promise<void> {

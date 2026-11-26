@@ -3,7 +3,7 @@ import type { Page } from '@playwright/test';
 import { gridTotal, initialTotal, openApp, parseCount } from './app';
 import { expectNoSeriousViolations } from './axe';
 import { openMenu } from './menu-support';
-import { pressMod } from '@decryp7/paddock-e2e';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard.ts';
 
 async function openEditMenu(page: Page) {
   return openMenu(page, 'Edit');

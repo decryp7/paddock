@@ -2,7 +2,7 @@ import { expect, test } from './test';
 import { expandFields, openApp } from './app';
 import { expectNoSeriousViolations } from './axe';
 import { openQuery, runCommand, searchField } from './analysis-support';
-import { pageModKey } from '@decryp7/paddock-e2e';
+import { pageModKey } from '../../../../ui/projects/paddock-e2e/src/keyboard.ts';
 
 test.describe('analysis views', () => {
   test.beforeEach(async ({ page }) => openApp(page));

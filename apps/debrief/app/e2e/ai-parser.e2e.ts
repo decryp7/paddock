@@ -2,7 +2,7 @@ import { expect, test } from './test';
 import { expectNoSeriousViolations } from './axe';
 import { openAiApp } from './ai-support';
 import { anchoredMenu } from './menu-support';
-import { pressMod } from '@decryp7/paddock-e2e';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard.ts';
 
 /** Parsers view ▸ Generate with AI… (ADR 0032), with the scripted AI mock: the engine's verdict is shown. */
 test.describe('AI parser generation', () => {

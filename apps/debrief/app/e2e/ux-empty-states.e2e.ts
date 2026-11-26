@@ -1,7 +1,7 @@
 import { expect, test } from './test';
 import { gridTotal, initialTotal, openApp } from './app';
 import { expectNoSeriousViolations } from './axe';
-import { pressMod } from '@decryp7/paddock-e2e';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard.ts';
 
 test('an empty grid says why and offers the next step', async ({ page }, testInfo) => {
   await openApp(page);

@@ -3,7 +3,7 @@ import type { Page } from '@playwright/test';
 import { gridRows, openApp } from './app';
 import { expectNoSeriousViolations } from './axe';
 import { anchoredMenu } from './menu-support';
-import { pressMod } from '@decryp7/paddock-e2e';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard.ts';
 
 // Narrow windows: the filter bar folds range, time zone and Clear all into a ⋯ menu (bar < 1000 px), the Explorer
 // closes by itself when the layout plan has no room for it beside the events grid (and comes back with a margin), low-priority

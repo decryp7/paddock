@@ -2,7 +2,7 @@ import { expect, test } from './test';
 import { openApp } from './app';
 import { expectNoSeriousViolations } from './axe';
 import { openQuery } from './analysis-support';
-import { pressMod } from '@decryp7/paddock-e2e';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard.ts';
 
 test.describe('did you mean', () => {
   test('the query bar suggests the field name and fixes the query', async ({ page }, testInfo) => {

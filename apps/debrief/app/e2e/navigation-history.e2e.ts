@@ -3,7 +3,7 @@ import type { Page } from '@playwright/test';
 import { gridRows, gridTotal, initialTotal, openApp } from './app';
 import { expectNoSeriousViolations } from './axe';
 import { runCommand } from './analysis-support';
-import { pressMod } from '@decryp7/paddock-e2e';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard.ts';
 
 // Back and forward through where the user has been (Alt+Left / Alt+Right, the mouse's back and forward buttons) and
 // undo of a zoom (Ctrl/Cmd+Z). The inspector slides out over the right edge on a selection; the grid stays usable.

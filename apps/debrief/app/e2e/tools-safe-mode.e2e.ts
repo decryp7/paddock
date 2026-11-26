@@ -4,7 +4,7 @@ import { openAppWith, openView, runCommand } from './tools-support';
 import { chooseMenu } from './menu-support';
 import { nextRender } from './app';
 import { expectNotMoving } from '../../../../ui/projects/paddock-e2e/src/ready.ts';
-import { pressMod } from '@decryp7/paddock-e2e';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard.ts';
 
 /** The titles of the views offered (View ▸ Other windows… lists every one). */
 async function viewMenu(page: Page): Promise<string[]> {

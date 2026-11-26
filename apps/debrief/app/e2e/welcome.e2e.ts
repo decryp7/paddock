@@ -3,7 +3,7 @@ import { openApp } from './app';
 import { expectNoSeriousViolations } from './axe';
 import { chooseMenu } from './menu-support';
 import { expectNotMoving } from '../../../../ui/projects/paddock-e2e/src/ready.ts';
-import { pressMod } from '@decryp7/paddock-e2e';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard.ts';
 
 async function closeWorkspace(page: import('@playwright/test').Page): Promise<void> {
   await chooseMenu(page, 'File', 'Close workspace');

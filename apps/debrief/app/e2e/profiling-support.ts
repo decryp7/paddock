@@ -1,7 +1,7 @@
 import { expect, Page } from '@playwright/test';
 import { APP_LOAD_TIMEOUT } from './app';
 import { chooseMenu } from './menu-support';
-import { pressMod } from '@decryp7/paddock-e2e';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard.ts';
 
 /**
  * Opens the app (browser build, mock backends) and opens the demo captures through File › Open

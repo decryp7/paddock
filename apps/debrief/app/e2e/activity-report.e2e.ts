@@ -2,7 +2,7 @@ import { expect, test } from './test';
 import type { Page } from '@playwright/test';
 import { CAPTURE_TIMEOUT, openApp } from './app';
 import { heldToast, pressInToast, runningToast, toastByCause } from './toast-support';
-import { pressMod } from '@decryp7/paddock-e2e';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard.ts';
 
 // Report a problem (mock backend): an error raises the toast, "Report a problem…" opens the dialog that lists
 // what the zip will contain and the steps to reproduce, and Save writes it (the mock records the save).

@@ -2,7 +2,7 @@ import { expect, test } from './test';
 import { expectListFiltered, expectNotMoving } from '../../../../ui/projects/paddock-e2e/src/ready.ts';
 import { openAppWith } from './mock-url';
 import { runCommand } from './ai-support';
-import { pressMod } from '@decryp7/paddock-e2e';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard.ts';
 
 // Usability review 2026-10-23 (U7): the welcome page is centred and offers (quietly, dismissibly) to set up the AI
 // assistant; the activity bar has an entry for it before it is set up. Palette: "AI" finds the set-up near the top.

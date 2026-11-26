@@ -4,7 +4,7 @@ import { CAPTURE_TIMEOUT, openApp, openView } from './app';
 import { openAppWith } from './mock-url';
 import { heldToast, toastByCause } from './toast-support';
 import { expectNotMoving } from '../../../../ui/projects/paddock-e2e/src/ready.ts';
-import { pressMod } from '@decryp7/paddock-e2e';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard.ts';
 
 // Error snapshots: the window is rendered to an image inside the webview (html-to-image), so this runs
 // against the real capture code in every project. The production build is served with the Tauri CSP,

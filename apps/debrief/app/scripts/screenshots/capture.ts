@@ -2,7 +2,7 @@ import { expect, Page, test } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { ensureInspector, openApp } from '../../e2e/app';
-import { pageModKey, pressMod } from '@decryp7/paddock-e2e';
+import { pageModKey, pressMod } from '../../../../../ui/projects/paddock-e2e/src/keyboard.ts';
 
 /**
  * Captures the README screenshots from the browser build (mock backend) into docs/screenshots.

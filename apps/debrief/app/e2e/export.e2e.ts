@@ -3,7 +3,7 @@ import { gridTotal, initialTotal, openApp, parseCount } from './app';
 import { expectNoSeriousViolations } from './axe';
 import { chooseMenu } from './menu-support';
 import { heldToast, runningToast } from './toast-support';
-import { pressMod } from '@decryp7/paddock-e2e';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard.ts';
 
 test('export dialog counts events, exports through the backend and reports it', async ({ page }, testInfo) => {
   await openApp(page);

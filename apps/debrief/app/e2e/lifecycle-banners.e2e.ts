@@ -2,7 +2,7 @@ import { expect, test } from './test';
 import { expectNoSeriousViolations } from './axe';
 import { openAppWith, runCommand } from './tools-support';
 import { heldToast } from './toast-support';
-import { pressMod } from '@decryp7/paddock-e2e';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard.ts';
 
 test.describe('lifecycle banners and elevation', () => {
   test('safe mode shows a banner with Restart normally', async ({ page }, testInfo) => {

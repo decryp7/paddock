@@ -4,7 +4,7 @@ import { openAppWith } from './tools-support';
 import { expectNoSeriousViolations } from './axe';
 import { gridRows } from './app';
 import { heldToast } from './toast-support';
-import { pressMod } from '@decryp7/paddock-e2e';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard.ts';
 
 async function runCommand(page: Page, title: string): Promise<void> {
   await pressMod(page, 'Mod+k');

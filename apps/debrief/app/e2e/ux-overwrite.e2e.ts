@@ -5,7 +5,7 @@ import { expectNoSeriousViolations } from './axe';
 import { openAppWith, openView, runCommand } from './tools-support';
 import { chooseMenu } from './menu-support';
 import { heldToast, pressInToast, runningToast, toastNamed } from './toast-support';
-import { pressMod } from '@decryp7/paddock-e2e';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard.ts';
 
 async function exportEvents(page: Page) {
   await pressMod(page, 'Mod+Shift+e');

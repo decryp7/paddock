@@ -3,7 +3,7 @@ import type { Page } from '@playwright/test';
 import { gridRows, openApp } from './app';
 import { expectNoSeriousViolations } from './axe';
 import { expectNotMoving } from '../../../../ui/projects/paddock-e2e/src/ready.ts';
-import { pressMod } from '@decryp7/paddock-e2e';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard.ts';
 
 // The Settings screen runs against the browser build's mock settings backend
 // (src/app/settings/mock-settings-backend.ts), which mimics the engine's schema and messages.

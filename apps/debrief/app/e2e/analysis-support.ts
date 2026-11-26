@@ -1,5 +1,5 @@
 import { expect, Page } from '@playwright/test';
-import { pressMod } from '@decryp7/paddock-e2e';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard.ts';
 
 /** Runs a command from the palette by its title. */
 export async function runCommand(page: Page, title: string): Promise<void> {

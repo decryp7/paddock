@@ -4,7 +4,7 @@ import { expectNoSeriousViolations } from './axe';
 import { chooseMenu } from './menu-support';
 import { hotspots } from './profiling-support';
 import { heldToast, pressInToast, toastNamed } from './toast-support';
-import { pressMod } from '@decryp7/paddock-e2e';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard.ts';
 
 // The Captures view is the landing of the Profiling perspective; opening a performance capture switches there once
 // (the toast offers Undo), and not again for the next capture.

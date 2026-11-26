@@ -5,7 +5,7 @@ import { expectNoSeriousViolations } from './axe';
 import { narrativeDialog, openAiApp, releaseMockHolds, rowMenu, runCommand, viewAnswer } from './ai-support';
 import { menuItem, openMenu, showProfileEditor } from './menu-support';
 import { runningToast } from './toast-support';
-import { pressMod } from '@decryp7/paddock-e2e';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard.ts';
 
 // The AI entry points outside the chat (query bar, context menu, Overview, Moment, markers manager, profile
 // editor, infer-regex dialog) and AI being absent when it is unavailable. Scripted AI mock.

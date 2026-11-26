@@ -4,7 +4,7 @@ import { initialTotal, openApp } from './app';
 import { runCommand } from './analysis-support';
 import { openAppWith } from './mock-url';
 import { showProfileEditor } from './menu-support';
-import { pageModKey } from '@decryp7/paddock-e2e';
+import { pageModKey } from '../../../../ui/projects/paddock-e2e/src/keyboard.ts';
 
 async function openProfile(page: Page) {
   await openApp(page);

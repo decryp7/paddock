@@ -2,7 +2,7 @@ import { expect, test } from './test';
 import type { Page } from '@playwright/test';
 import { expectNoSeriousViolations } from './axe';
 import { openAppWith } from './mock-url';
-import { pressMod } from '@decryp7/paddock-e2e';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard.ts';
 
 // Pitwall as the only AI engine (ADR 0059, ADR 0070) against the scripted AI mock (?mockPitwall=...).
 
