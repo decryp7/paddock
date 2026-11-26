@@ -27,12 +27,6 @@ pub const SCOPE_LINE: &str = "plan scope: ";
 /// should have to its job and leg, so no reader inverts a `name:` template.
 pub const VERSION: u64 = 3;
 
-/// The runners the `crate` and `paddock-dev` jobs run on: the planner's one leg set (ADR NEW-ci-job-model §4; WP-2 reads it from the model).
-pub const DEFAULT_OS_LEGS: [&str; 3] = crate::plan_ci::OS_LEGS;
-
-/// The project flags of a plan that each decide a job of ci.yml.
-const PROJECTS: [&str; 8] = ["crates", "ui", "eslint", "conformance", "c99", "tools", "icons", "paddockDev"];
-
 /// What a run covers: jobs, the browser engines of its tests, apps (a leg is `app@os` with an e2e leg appended) and whether its
 /// tests ran whole (not narrowed to packages).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -398,10 +392,11 @@ fn leg_id(leg: &Value) -> String {
 /// The scope of a ci.yml plan: the project jobs it switched on (and the crate and paddock-dev jobs on each runner), the app legs,
 /// the engines (WebKit only when `webkit` and a UI is reached), and whether every test ran whole.
 pub fn scope_of(plan: &Value, legs: &[Value], webkit: bool, os_legs: &[String], package_filters: &[&str]) -> Scope {
-    let mut jobs: BTreeSet<String> = PROJECTS
+    // The project flags of a plan that each decide a job of ci.yml: the job model's one table.
+    let mut jobs: BTreeSet<String> = paddock_ci_config::jobs::PROJECT_OUTPUTS
         .iter()
-        .filter(|p| plan[**p].as_bool() == Some(true))
-        .map(|p| p.to_string())
+        .filter(|(_, _, key)| plan[*key].as_bool() == Some(true))
+        .map(|(_, _, key)| key.to_string())
         .collect();
     for (flag, job) in [("crates", "crate"), ("paddockDev", "paddock-dev")] {
         if plan[flag].as_bool() == Some(true) {
@@ -435,23 +430,6 @@ pub fn scope_of(plan: &Value, legs: &[Value], webkit: bool, os_legs: &[String], 
         ..Scope::default()
     }
 }
-
-/// The display names of the ci.yml jobs each project flag of a plan switches on (`plan_gitea::CI_JOBS` lists them by id; a test reads
-/// ci.yml and checks each prefix names a job there). Jobs whose `if` reads more than the plan (`audit`) are
-/// not here: a skipped one is not a scope that was not covered.
-pub const PROJECT_JOBS: &[(&str, &[&str])] = &[
-    ("crates", &["crates ("]),
-    ("ui", &["ui ("]),
-    ("eslint", &["ui ("]),
-    ("conformance", &["conformance ("]),
-    // `a|b`: either name; the first is the job's name now, the rest its names in runs of an older ci.yml (the short checks became one
-    // job, `quick`, on 2026-11-26), which the verdict and reuse readers still read.
-    ("c99", &["quick checks (|C99 ("]),
-    ("tools", &["tools and shared scripts", "quick checks (|heavy tool"]),
-    ("icons", &["ui ("]),
-    ("e2e", &["reference apps (shard"]),
-    ("e2e-webkit", &["reference apps in WebKit"]),
-];
 
 /// What `check_ran` found wrong with a run's jobs.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -693,7 +671,7 @@ mod tests {
     }
 
     fn os() -> Vec<String> {
-        strings(&DEFAULT_OS_LEGS)
+        strings(&crate::plan_ci::OS_LEGS)
     }
 
     /// The legs the planner would emit for the `crate` job: the Linux tests split into three partitions, one leg on each other runner.
@@ -1096,36 +1074,6 @@ mod tests {
         // Another workflow's declaration has no job names to check.
         let other = app_scope("debrief.yml", "debrief", true, true, false, false, &["chromium".to_string()]);
         assert_eq!(check_ran(&other, &[]), Ok(()));
-    }
-
-    #[test]
-    fn every_job_name_the_scope_maps_is_a_job_of_the_real_ci_yml() {
-        // The mapping from declared keys to display names is read against ci.yml through the planner's own accessor of its jobs, so a
-        // renamed job fails here and not in a tag gate (ER-42).
-        let text = std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.gitea/workflows/ci.yml")).unwrap();
-        let wf = crate::plan_gitea::workflow_jobs(&text).unwrap();
-        let name_of = |id: &str| -> String {
-            let job = &wf
-                .jobs
-                .iter()
-                .find(|(k, _)| k == id)
-                .unwrap_or_else(|| panic!("ci.yml has no job {id}"))
-                .1;
-            job.lines().find_map(|l| l.trim().strip_prefix("name: ")).unwrap().to_string()
-        };
-        for (key, prefixes) in PROJECT_JOBS {
-            assert!(!prefixes.is_empty(), "{key}");
-            for p in *prefixes {
-                // `now|older`: the first name is today's job; the older ones are only for recorded runs.
-                let now = p.split('|').next().unwrap_or(p);
-                assert!(
-                    wf.jobs.iter().any(|(id, _)| name_of(id).starts_with(now)),
-                    "no job of ci.yml is named like {now:?} (the key {key})"
-                );
-            }
-        }
-        // Positive control: a prefix that names no job is not found.
-        assert!(!wf.jobs.iter().any(|(id, _)| name_of(id).starts_with("no such job")));
     }
 
     #[test]
