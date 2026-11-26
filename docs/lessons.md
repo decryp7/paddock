@@ -4315,6 +4315,18 @@ startup"; the Chromium start judge, ADR 0031). A start that hands back a handle 
 - **Open.** Whether the TCC grant for the re-signed bundle holds was not measured before the user's one-time steps; the check is the
   TCC log after the first Mac run that starts a browser.
 
+## 2026-11-26: two worktrees' container rows shared one target folder, and only the build was locked
+
+- **What.** Train l's `tests-linux` failed 175 tests with "failed to exec .../it-<hash>: Permission denied". The kept volume
+  `paddock-linux-target-arm64` is shared by every worktree per workspace (`/target/v3/<workspace>`) and cargo's lock covers the build
+  only, so another worktree's row could replace a test binary between this row's build and its nextest run.
+- **Fix.** `tools/linux-container.sh --lock v<version>/<folder>` holds one host-side kernel lock per folder for the whole container run
+  (build and tests); `clippy-linux`, `tests-linux` and the guardian run pass it from the same slug as their `CARGO_TARGET_DIR`
+  (`pre_push/gates.rs::lock_args`). Chosen over a target folder per worktree: the volume is 10.2 GB for all workspaces (docs/benchmarks.md)
+  and every extra worktree would hold and cold-build its own copy, while the lock costs only a wait on the same folder.
+- **Not this.** The coordinator found the failure also deterministic in the combined lib-plus-`it` run of one worktree; the lock does not
+  claim that cause (a test touching the target folder, `current_exe` or permissions is being looked for).
+
 ## A push to main searched the train's line for its base and refused a landing run that covered it (2026-11-25, fix/ci-reuse-push-base)
 - **What.** Push run 9056 (main fast-forwarded from 4284e23d5 to train g's head 4ca4c56ec) refused to reuse train g's green landing
   run 9054: 9054 had tested the diff from 4284e23d5, but the push's base came out as b3ad2dd2d (run 9030), two mains back, and the
@@ -4325,3 +4337,34 @@ startup"; the Chromium start judge, ADR 0031). A start that hands back a handle 
 - **Fix.** Both read main's own line from the push event's `before` (`green::push_chain`, falling back to the old line without a
   usable `before`), and a landing run whose base is an older main is still reused when its diff holds every path of the push's
   (`green::diff_covers`). Tests read runs 9030, 9045, 9054 and 9056 as recorded (`tests/ci-runs/reuse-push-base`).
+
+## Members on an old base were pulled from trains i, k and m (2026-11-25)
+- **What.** Five members were pulled from trains i, k and m because their base was older than main. The five:
+  - the `testing` to `test-support` feature rename (main, 031a79c02): `paddock-ipc`'s endings tests still gated on the
+    old name (fixed in `3258361e7`);
+  - the ADR 0119 job API;
+  - the reuse-test fixtures;
+  - the heavy share design (the lock folder moved on main: `cd8625db9`, `9d9dbd867`);
+  - the gitleaks job.
+- **Why.** The merge check diffed each member against the train and caught stale reverts (ER-8), but nothing refused a member whose
+  base was older than main, so a member's green gates proved nothing about the tree it would be merged into.
+- **Fix.** Rule 100: a member merges current main and re-runs its member gate on that tip before it joins a
+  train; the merge check refuses a member on an old base (the stale-base check made blocking on `ci/old-base-block`).
+- **Class: a green result on an old base was taken for a green result on the tree it joins** (earlier: ER-49 reuse of a landing run,
+  ER-8 combined-tree failures, train 8's eight combination failures).
+
+## 2026-11-26: `mac-runner-move.sh install` stopped a runner under a running job
+
+- **What.** The install booted the runner out while a CI job ran. The runner logged "shutdown initiated, waiting 3h0m0s for running jobs",
+  the job's helpers (slot hold, s3-guard) were left behind, and the new daemon was not started until a second install.
+- **Fix (user decision: wait visibly, bounded).** Before any change, `install` and `rollback` find the lanes whose runner has job
+  processes (the processes under the pid `launchctl print` gives for the lane's label), tell the runner to take no new job
+  (`launchctl kill SIGTERM`), print which job runs, and wait up to `--wait-max` (default 3600 s) with a progress line every 30 s. At the
+  end of the wait they fail with nothing changed. Nothing is ended by name or by pid: the job's own cleanup ends its helpers (ER-51). The
+  verify step also requires launchd's `state = running`, and a failing `launchctl bootstrap` is a failed lane.
+- **Not measured.** The log line the wait prints for "which job" (`task <id> ...`) and the rule that an idle runner has no child process
+  were taken from the runner's behaviour as known, not read from a real run; the tests use stand-ins.
+- **Follow-up, the same day.** launchd starts a runner that exited, and a restarted runner could take a job between the end of the wait
+  and the boot-out. Every loaded lane is now told to take no new job at the start, and each lane's check for a job and its boot-out are
+  back to back; a job seen there sends install back into the same bounded wait and tells the runner again. What stays is the time between
+  that check and the boot-out call itself (milliseconds, against a runner that needs seconds to register and fetch a task).

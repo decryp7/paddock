@@ -356,6 +356,9 @@ pub enum JobName {
     Exact(String),
     /// The start of the name (a job with a long or sharded name: `ui (`, `reference apps (shard`).
     Prefix(&'static str),
+    /// Any of these starts: the job's name now and its names before a rename, so a recorded run of the old ci.yml still reads as
+    /// covering its project (`quick checks (|C99 (`: C99 was a job of its own until 2026-11-26).
+    AnyPrefix(Vec<&'static str>),
 }
 
 impl JobName {
@@ -363,6 +366,7 @@ impl JobName {
         match self {
             JobName::Exact(n) => name == n,
             JobName::Prefix(p) => name.starts_with(p),
+            JobName::AnyPrefix(ps) => ps.iter().any(|p| name.starts_with(p)),
         }
     }
 }
@@ -375,8 +379,10 @@ pub const PROJECT_JOBS: &[(&str, &[&str])] = &[
     ("ui", &["ui ("]),
     ("eslint", &["ui ("]),
     ("conformance", &["conformance ("]),
-    ("c99", &["C99 ("]),
-    ("tools", &["tools and shared scripts", "heavy tool"]),
+    // `a|b`: either name; the first is the job's name now, the rest its names in runs of an older ci.yml (the short checks became one
+    // job, `quick`, on 2026-11-26), which the verdict and reuse readers still read.
+    ("c99", &["quick checks (|C99 ("]),
+    ("tools", &["tools and shared scripts", "quick checks (|heavy tool"]),
     ("icons", &["ui ("]),
     ("e2e", &["reference apps (shard"]),
     ("e2e-webkit", &["reference apps in WebKit"]),
@@ -386,7 +392,13 @@ pub const PROJECT_JOBS: &[(&str, &[&str])] = &[
 /// `paddock-dev@os` legs).
 fn names_of_job(key: &str) -> Vec<JobName> {
     if let Some((_, prefixes)) = PROJECT_JOBS.iter().find(|(k, _)| *k == key) {
-        return prefixes.iter().map(|p| JobName::Prefix(p)).collect();
+        return prefixes
+            .iter()
+            .map(|p| match p.split_once('|') {
+                Some(_) => JobName::AnyPrefix(p.split('|').collect()),
+                None => JobName::Prefix(p),
+            })
+            .collect();
     }
     match key.split_once('@') {
         Some(("crate", os)) => vec![JobName::Exact(format!("crate ({os})"))],
@@ -841,6 +853,7 @@ mod tests {
                     match n {
                         JobName::Exact(n) => n,
                         JobName::Prefix(p) => format!("{p}x)"),
+                        JobName::AnyPrefix(ps) => format!("{}x)", ps[0]),
                     },
                     JobOutcome::from_api(conclusion),
                 ));
@@ -852,6 +865,22 @@ mod tests {
             }
         }
         jobs
+    }
+
+    /// A run recorded before the short checks became one job (`quick`, 2026-11-26) has its C99 and heavy tool jobs under their old
+    /// names: the verdict and reuse readers still read it as covering c99 and tools (run 9054 of tests/ci-runs/reuse-push-base).
+    #[test]
+    fn a_run_of_the_older_ci_yml_with_its_own_c99_and_heavy_tool_jobs_still_covers_c99_and_tools() {
+        let finds = |key: &str, job: &str| names_of_job(key).iter().any(|n| n.matches(job));
+        // Today's names.
+        assert!(finds("c99", "quick checks (C99, audit, heavy tool)"));
+        assert!(finds("tools", "quick checks (C99, audit, heavy tool)") && finds("tools", "tools and shared scripts"));
+        // The older ci.yml's own jobs (recorded run 9054 and every run before 2026-11-26).
+        assert!(finds("c99", "C99 (no Keychain in a macOS build)"));
+        assert!(finds("tools", "heavy tool"));
+        // Control: an unrelated job covers neither.
+        assert!(!finds("c99", "crates (fmt, workspace hack, unused deps, coverage, deny)"));
+        assert!(!finds("tools", "gitleaks (secret scan)"));
     }
 
     #[test]
@@ -916,9 +945,11 @@ mod tests {
         for (key, prefixes) in PROJECT_JOBS {
             assert!(!prefixes.is_empty(), "{key}");
             for p in *prefixes {
+                // `now|older`: the first name is today's job; the older ones are only for recorded runs.
+                let now = p.split('|').next().unwrap_or(p);
                 assert!(
-                    wf.jobs.iter().any(|(id, _)| name_of(id).starts_with(p)),
-                    "no job of ci.yml is named like {p:?} (the key {key})"
+                    wf.jobs.iter().any(|(id, _)| name_of(id).starts_with(now)),
+                    "no job of ci.yml is named like {now:?} (the key {key})"
                 );
             }
         }

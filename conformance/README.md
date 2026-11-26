@@ -105,6 +105,7 @@ The check index (generated from each module's id, title, scope, mode and needs):
 | C167 | A workflow job that runs the merge-base growth tests checks out the history and names the base ref | root | gate | all |
 | C169 | A file is written whole through paddock_env::write_atomic, never a hand-written temporary file and rename | root | report-only | all |
 | C171 | Rust tests build absolute paths with paddock_testkit::path, never from a Unix-style literal | root | gate | all |
+| C172 | Local gate code never starts a VM or a container (docker, orb, orbctl, vmrun, linux-container.sh) | root | report-only | all |
 <!-- checks:end -->
 
 Notes per check (written by hand; the index above is the complete list):

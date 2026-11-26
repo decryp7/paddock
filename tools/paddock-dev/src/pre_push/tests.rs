@@ -1,7 +1,7 @@
 //! The push gate with a plan, a list of files and a fake machine: no process starts (ER-14).
 
 use super::budget::Timing;
-use super::exec::{Done, Exec, Kind, Limits, QUEUE_STALL, Row, RunOpts, decide, run_all_timed, run_all_with, test_subject};
+use super::exec::{Done, Exec, Kind, Limits, QUEUE_STALL, Row, RunOpts, run_all_timed, run_all_with, test_subject};
 use super::gates::{AUDIT_PROFILE, Change, Facts, Gate, Need, Planned, plan_gates, windows_skip_reason};
 use super::{accept_not_measured, parse_refs, render, render_timed};
 use paddock_cli::Exit;
@@ -25,13 +25,6 @@ fn plan() -> serde_json::Value {
     })
 }
 
-fn crates_of(left_out: &[&str], lintable: usize) -> super::linux_inputs::WsCrates {
-    super::linux_inputs::WsCrates {
-        left_out: left_out.iter().map(|c| c.to_string()).collect(),
-        lintable,
-    }
-}
-
 fn facts() -> Facts {
     Facts {
         conformance: Some(Ok(["conformance/bin/paddock-conformance.mjs", "--app", "paddock", "--only", "C06"]
@@ -39,14 +32,6 @@ fn facts() -> Facts {
             .to_vec())),
         conformance_env: None,
         windows_clippy: BTreeSet::from(["apps/dyno".to_string(), "apps/pitwall".to_string()]),
-        ci_version: Some(Ok("7".into())),
-        left_out: [
-            ("crates".to_string(), Ok(crates_of(&[], 3))),
-            ("apps/dyno".to_string(), Ok(crates_of(&["dyno-app"], 2))),
-            ("apps/pitwall".to_string(), Ok(crates_of(&["pitwall-app"], 2))),
-            ("apps/debrief".to_string(), Ok(crates_of(&["debrief-app"], 2))),
-        ]
-        .into(),
         member_gate: true,
         kept_targets: None,
         pitwall_tests: vec!["scripts/ci/a.test.mjs".into()],
@@ -56,7 +41,6 @@ fn facts() -> Facts {
         test_filters: Default::default(),
         nextest_config: Default::default(),
         reached: Default::default(),
-        os_scope: Default::default(),
     }
 }
 
@@ -92,7 +76,6 @@ fn a_crates_change_reaches_every_gate_of_ci_er_9() {
         "lockfile crates",
         "clippy crates",
         "clippy-windows crates",
-        "clippy-linux apps/dyno (left out: dyno-app) + apps/pitwall (left out: pitwall-app) + crates",
         "conformance",
         "commit-lint",
         "fmt apps/dyno",
@@ -144,16 +127,6 @@ fn a_crates_change_reaches_every_gate_of_ci_er_9() {
         by("clippy-windows crates")
             .next
             .contains("rustup target add x86_64-pc-windows-msvc --toolchain")
-    );
-    assert_eq!(
-        by("clippy-linux apps/dyno (left out: dyno-app) + apps/pitwall (left out: pitwall-app) + crates").need,
-        Need::LocalCiImage
-    );
-    assert!(
-        by("clippy-linux apps/dyno (left out: dyno-app) + apps/pitwall (left out: pitwall-app) + crates")
-            .args
-            .join(" ")
-            .contains("tools/linux-container.sh --id paddock --ci-image --")
     );
     assert_eq!(
         (by("conformance").program.as_str(), by("conformance").args.join(" ")),
@@ -381,10 +354,9 @@ fn what_the_change_does_not_reach_is_skipped_with_a_reason() {
         .filter_map(|p| if let Planned::Skip { reason, .. } = p { Some(reason) } else { None })
         .collect();
     assert!(skipped.len() >= 5 && skipped.iter().all(|r| !r.is_empty()), "{skipped:?}");
-    // An app-only change: no Linux Clippy of the shared crates, and Windows only where CI lints it.
+    // An app-only change: Windows only where CI lints it.
     let app = plan_gates(&plan(), &change(&["apps/debrief/src/a.rs"]), &facts());
     let got = ids(&app);
-    assert!(!got.contains(&"clippy-linux crates".to_string()), "{got:?}");
     assert!(
         !got.contains(&"clippy-windows apps/debrief".to_string()),
         "debrief has no windowsClippy: {got:?}"
@@ -405,8 +377,7 @@ fn the_windows_skip_reason_names_the_real_cause_per_workspace() {
 fn plan_gates_skips_the_windows_lint_of_paddock_dev_with_its_own_reason() {
     let mut p = plan();
     p["packages"]["tools/paddock-dev"] = json!(["paddock-dev"]);
-    let mut f = facts();
-    f.left_out.insert("tools/paddock-dev".to_string(), Ok(crates_of(&[], 1)));
+    let f = facts();
     let windows_skip = |planned: &[Planned], ws: &str| {
         planned.iter().find_map(|g| match g {
             Planned::Skip { id, reason } if *id == format!("clippy-windows {ws}") => Some(reason.clone()),
@@ -711,13 +682,6 @@ fn a_unreadable_conformance_line_makes_the_check_broken_not_passed() {
 
 #[derive(Default)]
 struct Fake {
-    no_docker: bool,
-    no_image: bool,
-    probe_broken: bool,
-    /// The container's bind mount serves other content than the host has (OrbStack 2.2.5, 2026-11-25).
-    stale_mount: bool,
-    /// The files every mount probe was asked about.
-    probed: Mutex<Vec<Vec<String>>>,
     no_tools: Vec<String>,
     fail: Vec<String>,
     unstartable: Vec<String>,
@@ -749,33 +713,6 @@ impl Exec for Fake {
     }
     fn has_tool(&self, p: &str) -> bool {
         !self.no_tools.iter().any(|t| t == p)
-    }
-    fn docker_up(&self) -> bool {
-        !self.no_docker
-    }
-    fn ci_image(&self) -> super::linux_inputs::ImageProbe {
-        use super::linux_inputs::ImageProbe;
-        if self.probe_broken {
-            ImageProbe::Broken("exit 2".into())
-        } else if self.no_image {
-            ImageProbe::Missing
-        } else {
-            ImageProbe::Ready
-        }
-    }
-    fn mount_probe(&self, compared: &super::mount_fresh::Compared) -> super::mount_fresh::MountProbe {
-        use super::mount_fresh::MountProbe;
-        self.probed.lock().unwrap().push(compared.files.clone());
-        if self.stale_mount {
-            MountProbe::Stale {
-                differing: vec![format!("{} (host 0123456789ab, container ba9876543210)", compared.files[0])],
-            }
-        } else {
-            MountProbe::Fresh {
-                checked: compared.files.len(),
-                of: compared.of,
-            }
-        }
     }
     fn run(&self, g: &Gate, limits: Limits) -> Result<Done, String> {
         self.limits.lock().unwrap().push((g.id.clone(), limits));
@@ -846,29 +783,6 @@ fn verdicts(rows: &[(String, Row)]) -> std::collections::BTreeMap<String, Row> {
 }
 
 #[test]
-fn no_docker_means_not_measured_and_never_a_pass() {
-    let planned = plan_gates(&plan(), &change(&["crates/a.rs"]), &facts());
-    let fake = Fake {
-        no_docker: true,
-        ..Fake::default()
-    };
-    let rows = run_all(&planned, &fake, 3);
-    let v = verdicts(&rows);
-    assert!(matches!(nm(&v["clippy-linux crates"]), Some((reason, next)) if reason.contains("Docker") && next.contains("never starts")));
-    assert!(
-        !fake.ran.lock().unwrap().iter().any(|r| r.starts_with("clippy-linux")),
-        "the container was never started"
-    );
-    let report = render("h", &rows);
-    assert_eq!(report.exit, Exit::NotMeasured, "only not-measured rows: exit 6");
-    assert!(
-        report.text.contains("NOT MEASURED  clippy-linux crates") && report.text.contains("do not push"),
-        "{}",
-        report.text
-    );
-}
-
-#[test]
 fn a_missing_xwin_is_not_measured_with_the_install_line() {
     let planned = plan_gates(&plan(), &change(&["crates/a.rs"]), &facts());
     let rows = run_all(
@@ -912,7 +826,6 @@ fn a_failure_is_one_line_with_the_cause_the_next_step_and_the_rerun_command() {
         &planned,
         &Fake {
             fail: vec!["fmt crates".into()],
-            no_docker: true,
             ..Fake::default()
         },
         2,
@@ -936,35 +849,6 @@ fn everything_green_exits_zero_and_cheap_gates_start_first() {
         last_cheap < first_clippy,
         "fmt, conformance and commit-lint before any Clippy: {ran:?}"
     );
-}
-
-#[test]
-fn a_docker_failure_names_its_cause() {
-    struct Oom;
-    impl Exec for Oom {
-        fn has_tool(&self, _: &str) -> bool {
-            true
-        }
-        fn docker_up(&self) -> bool {
-            true
-        }
-        fn run(&self, _: &Gate, _: Limits) -> Result<Done, String> {
-            Ok(Done {
-                success: false,
-                how: "exit 137".into(),
-                tail: String::new(),
-                log: None,
-                timing: None,
-                ending: crate::pre_push::exec::Ending::Exited,
-            })
-        }
-    }
-    let planned = plan_gates(&plan(), &change(&["crates/a.rs"]), &facts());
-    let g = run_gates(&planned).into_iter().find(|g| g.id == "clippy-linux crates").unwrap();
-    assert!({
-        let r = decide(g, &Oom, &test_subject());
-        r.kind() == Kind::Failed && r.next.contains("PADDOCK_LINUX_MEMORY")
-    });
 }
 
 #[test]
@@ -1139,18 +1023,6 @@ fn the_worst_finding_decides_the_exit_code_7_then_5_then_6() {
 }
 
 #[test]
-fn the_cargo_folder_alone_reaches_linux_clippy_but_documentation_does_not() {
-    let reached = |files: &[&str]| ids(&plan_gates(&plan(), &change(files), &facts())).contains(&"clippy-linux crates".to_string());
-    assert!(reached(&[".cargo/config.toml"]), ".cargo/ is a trigger on its own");
-    assert!(reached(&["crates/paddock-proc/src/a.rs"]));
-    assert!(
-        !reached(&["crates/paddock-proc/README.md", "crates/CHANGELOG.md"]),
-        "documentation next to the code cannot change Clippy"
-    );
-    assert!(!reached(&["apps/dyno/src/a.rs"]));
-}
-
-#[test]
 fn pitwalls_deny_needs_cargo_deny_and_an_empty_script_list_is_a_broken_check() {
     let planned = crates_gates();
     let deny = run_gates(&planned).into_iter().find(|g| g.id.starts_with("pitwall-deny")).unwrap();
@@ -1183,7 +1055,7 @@ fn the_table_names_what_ci_runs_that_this_gate_does_not() {
         "machete",
         "cargo deny outside Pitwall",
         "TypeScript",
-        "Linux Clippy of the apps' Tauri crates",
+        "Linux Clippy and Linux tests",
         "reached only through dependencies",
     ] {
         assert!(report.text.contains(what), "{what} missing:\n{}", report.text);
@@ -1193,7 +1065,7 @@ fn the_table_names_what_ci_runs_that_this_gate_does_not() {
 #[test]
 fn a_named_not_measured_gate_may_pass_and_the_use_is_logged() {
     let state = tempfile::tempdir().unwrap();
-    // A developer's push: in the member gate the Linux tests would be a second container row without Docker.
+    // A developer's push, on a machine without cargo-xwin: the Windows Clippy is the one row that cannot be measured.
     let push = Facts {
         member_gate: false,
         ..facts()
@@ -1201,26 +1073,26 @@ fn a_named_not_measured_gate_may_pass_and_the_use_is_logged() {
     let mut rows = run_all(
         &plan_gates(&plan(), &change(&["crates/a.rs"]), &push),
         &Fake {
-            no_docker: true,
+            no_tools: vec!["cargo-xwin".into()],
             ..Fake::default()
         },
         2,
     );
     assert_eq!(render("h", &rows).exit, Exit::NotMeasured);
     // A name that is not the gate's accepts nothing.
-    accept_not_measured(&mut rows, &["clippy-linux".into()], state.path());
+    accept_not_measured(&mut rows, &["clippy-windows".into()], state.path());
     assert_eq!(render("h", &rows).exit, Exit::NotMeasured);
-    accept_not_measured(&mut rows, &["clippy-linux crates".into()], state.path());
+    accept_not_measured(&mut rows, &["clippy-windows crates".into()], state.path());
     let report = render("h", &rows);
     assert_eq!(report.exit, Exit::Ok);
-    assert!(report.text.contains("ACCEPTED      clippy-linux crates") && report.text.contains("logged"));
+    assert!(report.text.contains("ACCEPTED      clippy-windows crates") && report.text.contains("logged"));
     assert!(
         report.text.contains("Pushed with 1 accepted not-measured row(s)") && !report.text.contains("Safe to push"),
         "{}",
         report.text
     );
     let log = std::fs::read_to_string(state.path().join("overrides.log")).unwrap();
-    assert!(log.contains("gate=clippy-linux crates") && log.contains("Docker"), "{log}");
+    assert!(log.contains("gate=clippy-windows crates") && log.contains("cargo-xwin"), "{log}");
 }
 
 #[test]
@@ -1291,172 +1163,11 @@ fn only_workspaces_with_a_changed_file_of_their_own_are_linted() {
     assert_eq!(own.into_iter().collect::<Vec<_>>(), ["apps/debrief", "apps/dyno"]);
 }
 
-fn linux_row(files: &[&str], f: &Facts) -> Planned {
-    plan_gates(&plan(), &change(files), f)
-        .into_iter()
-        .find(|p| match p {
-            Planned::Run(g) => g.id.starts_with("clippy-linux"),
-            Planned::Skip { id, .. } | Planned::NotMeasured { id, .. } | Planned::Broken { id, .. } => id.starts_with("clippy-linux"),
-        })
-        .expect("the plan always has a Linux Clippy row")
-}
-
 #[test]
-fn the_linux_clippy_runs_for_every_touched_workspace_and_names_what_it_leaves_out() {
-    let Planned::Run(g) = linux_row(&["crates/paddock-proc/src/lib.rs"], &facts()) else {
-        panic!("a touched workspace gets the row")
-    };
-    assert_eq!(g.id, "clippy-linux crates");
-    // An app too, whatever its sources say: the row does not guess from a text scan. Its Tauri crate is named in the row.
-    let Planned::Run(g) = linux_row(&["apps/pitwall/src/a.rs"], &facts()) else {
-        panic!("an app workspace gets the row")
-    };
-    assert_eq!(g.id, "clippy-linux apps/pitwall (left out: pitwall-app)");
-    assert_eq!(
-        g.workspaces,
-        ["apps/pitwall"],
-        "the workspaces are carried, not parsed back from the id"
-    );
-    assert!(
-        !g.id.contains(','),
-        "no comma in an id: --accept-not-measured lists are comma-separated"
-    );
-    // Documentation alone reaches no workspace.
-    assert!(matches!(linux_row(&["docs/x.md"], &facts()), Planned::Skip { .. }));
-    // Cargo could not say what to leave out: the row is broken (ER-45), never a pass or a guess.
-    let mut f = facts();
-    f.left_out
-        .insert("apps/pitwall".into(), Err("cargo metadata for apps/pitwall failed: x".into()));
-    assert!(matches!(linux_row(&["apps/pitwall/src/a.rs"], &f), Planned::Broken { cause, .. } if cause.contains("cargo metadata")));
-}
-
-#[test]
-fn a_passing_linux_clippy_names_the_crates_it_never_linted() {
-    let planned = plan_gates(&plan(), &change(&["apps/dyno/src/a.rs"]), &facts());
-    let report = render("h", &run_all(&planned, &Fake::default(), 3));
-    assert!(
-        report.text.contains("clippy-linux apps/dyno (left out: dyno-app)"),
-        "a green row must not claim the Tauri crate: {}",
-        report.text
-    );
-    assert!(
-        report.text.contains("Linux Clippy of the apps' Tauri crates") && report.text.contains("CI's Linux legs lint them"),
-        "{}",
-        report.text
-    );
-}
-
-#[test]
-fn one_container_run_covers_every_touched_workspace_and_a_failing_one_fails_the_row_not_the_next() {
-    let Planned::Run(g) = linux_row(&["crates/a/src/lib.rs", "apps/dyno/src/a.rs"], &facts()) else {
-        panic!("row")
-    };
-    assert_eq!(g.id, "clippy-linux apps/dyno (left out: dyno-app) + crates");
-    assert_eq!(
-        g.args.iter().filter(|a| a.as_str() == "tools/linux-container.sh").count(),
-        1,
-        "one container run"
-    );
-    assert!(g.heavy, "through the heavy queue and the load gate");
-    // The real script, with a stub rustc and cargo on PATH: each workspace gets its own folder in the version's target folder,
-    // the left-out crate is excluded, a failing workspace does not hide the next, and the exit code is the worst.
-    let dir = tempfile::tempdir().unwrap();
-    for ws in ["crates", "apps/dyno"] {
-        std::fs::create_dir_all(dir.path().join(ws)).unwrap();
-    }
-    let bin = dir.path().join("bin");
-    std::fs::create_dir_all(&bin).unwrap();
-    let log = dir.path().join("calls.log").display().to_string();
-    // Every call is logged; in apps/dyno everything but `clippy --version` fails.
-    let line = "{cwd}|{env:CARGO_TARGET_DIR|}|{args}\n";
-    for tool in ["cargo", "rustc"] {
-        paddock_testkit::StandIn::new(&bin, tool)
-            .answers(paddock_testkit::Actions::new().appends_with(&log, line))
-            .when(
-                &paddock_testkit::Case::new().cwd_ends_with("/apps/dyno"),
-                paddock_testkit::Actions::new().appends_with(&log, line).exit(1),
-            )
-            .when(
-                &paddock_testkit::Case::new()
-                    .cwd_ends_with("/apps/dyno")
-                    .args_start_with(&["clippy", "--version"]),
-                paddock_testkit::Actions::new().appends_with(&log, line),
-            )
-            .install()
-            .unwrap();
-    }
-    let script = g.args.last().unwrap();
-    // An empty environment plus the listed one and a private HOME (C123, ER-14): the machine's CARGO_* and toolchain variables never
-    // reach the script.
-    let mut cmd = paddock_testkit::TestCommand::new("sh");
-    // The script is the container's: `/target/...` is a Linux path there. Git bash on Windows would turn the value of
-    // `CARGO_TARGET_DIR` into `C:/Program Files/Git/target/...` for the native stand-in (MSYS converts the environment of a
-    // native program; run 8327), so the variable is left as it is, as the container leaves it.
-    cmd.args(["-c", script])
-        .current_dir(dir.path())
-        .env("MSYS2_ENV_CONV_EXCL", "CARGO_TARGET_DIR")
-        .env("PATH", format!("{}:/usr/bin:/bin", bin.display()));
-    let (cmd, _private) = cmd.into_parts();
-    let out = paddock_proc::run_bounded(cmd, paddock_proc::Limits::new(Duration::from_secs(30))).unwrap();
-    let calls = std::fs::read_to_string(&log).unwrap();
-    assert!(
-        matches!(out.outcome, paddock_proc::Outcome::Exited(s) if s.code() == Some(1)),
-        "worst exit wins: {calls}"
-    );
-    let lines: Vec<&str> = calls.lines().filter(|l| l.contains("|/target/")).collect();
-    assert_eq!(
-        lines.len(),
-        2,
-        "both workspaces ran, the failing one did not stop the next: {calls}"
-    );
-    assert!(
-        lines[0].ends_with("|/target/v7/apps-dyno|clippy --workspace --exclude dyno-app --all-targets --locked -- -D warnings"),
-        "{}",
-        lines[0]
-    );
-    assert!(
-        lines[1].ends_with("|/target/v7/crates|clippy --workspace --all-targets --all-features --locked -- -D warnings"),
-        "{}",
-        lines[1]
-    );
-}
-
-#[test]
-fn the_printed_rerun_can_be_pasted() {
-    let Planned::Run(g) = linux_row(&["crates/a/src/lib.rs"], &facts()) else {
-        panic!("row")
-    };
-    let line = g.rerun();
-    assert!(
-        line.contains("-- sh -c 'rustc --version && cargo clippy --version || exit 1;"),
-        "the script is one quoted word: {line}"
-    );
+fn a_shell_word_is_quoted_so_the_printed_rerun_can_be_pasted() {
     assert_eq!(super::gates::shell_quote("a b"), "'a b'");
     assert_eq!(super::gates::shell_quote("it's"), "'it'\\''s'");
     assert_eq!(super::gates::shell_quote("plain-1.2/x"), "plain-1.2/x");
-}
-
-#[test]
-fn the_tauri_crates_are_the_packages_with_a_writing_build_dependency() {
-    use super::linux_inputs::{ci_version, split_crates};
-    let json = r#"{"packages":[
-        {"name":"dyno-app","dependencies":[{"name":"tauri-build","kind":"build"},{"name":"serde","kind":null}]},
-        {"name":"pitwall-app","dependencies":[{"name":"paddock-build","kind":"build"}]},
-        {"name":"dyno-core","dependencies":[{"name":"serde","kind":null}]},
-        {"name":"dev-only","dependencies":[{"name":"tauri-build","kind":"dev"}]},
-        {"name":"in-src-tauri-but-no-build-script","dependencies":[]}]}"#;
-    let split = split_crates(json).unwrap();
-    assert_eq!(split.left_out, ["dyno-app", "pitwall-app"]);
-    assert_eq!(split.lintable, 3, "the other packages stay lintable");
-    assert!(split_crates("{}").is_err() && split_crates("x").is_err());
-    // A workspace whose only package is a Tauri crate (apps/workbench-demo/src-tauri) has nothing left for cargo to compile.
-    let only = r#"{"packages":[{"name":"workbench-demo-app","dependencies":[{"name":"tauri-build","kind":"build"}]}]}"#;
-    assert_eq!(split_crates(only).unwrap().lintable, 0);
-    let d = tempfile::tempdir().unwrap();
-    assert!(ci_version(d.path()).is_err());
-    std::fs::create_dir_all(d.path().join("ci-image")).unwrap();
-    std::fs::write(d.path().join("ci-image/VERSION"), "7\n").unwrap();
-    assert_eq!(ci_version(d.path()).unwrap(), "7");
 }
 
 #[test]
@@ -1465,7 +1176,6 @@ fn the_override_names_full_row_ids_and_is_announced() {
     let mut rows = run_all(
         &crates_gates(),
         &Fake {
-            no_docker: true,
             no_tools: vec!["cargo-xwin".into()],
             ..Fake::default()
         },
@@ -2849,9 +2559,6 @@ impl Exec for Queued {
     fn has_tool(&self, _: &str) -> bool {
         true
     }
-    fn docker_up(&self) -> bool {
-        true
-    }
     fn load(&self) -> Option<f64> {
         Some(28.0)
     }
@@ -2907,7 +2614,6 @@ fn heavy_gate(id: &str, rank: u8) -> Planned {
         notice: None,
         progress: crate::pre_push::progress::Progress::Lines,
         build_dir: None,
-        mount: None,
     })
 }
 
@@ -3327,230 +3033,13 @@ fn shape_train_on_the_remote_through_a_sibling_with_a_non_ascii_path() {
     );
 }
 
-/// A cold build that runs out of the push budget names `./dev check --warm-linux <workspaces>` as the next step (not a finding, not a pass).
-#[test]
-fn a_cold_linux_clippy_cut_short_names_the_warm_command() {
-    let planned = plan_gates(&plan(), &change(&["crates/a.rs"]), &facts());
-    let fake = Fake {
-        cut_short: vec!["clippy-linux crates".into()],
-        ..Fake::default()
-    };
-    let v = verdicts(&run_all(&planned, &fake, 3));
-    let (_, next) = nm(&v["clippy-linux crates"]).expect("not measured");
-    assert!(
-        next.contains("./dev check --warm-linux crates") && next.contains("kept volume"),
-        "{next}"
-    );
-}
-
-#[test]
-fn warm_linux_runs_the_push_rows_own_command_once_per_workspace() {
-    use super::warm::{runs, targets};
-    let rows = runs(&["crates".to_string(), "apps/dyno".to_string()], "7", &|ws| {
-        Ok(if ws == "crates" {
-            crates_of(&[], 2)
-        } else {
-            crates_of(&["dyno-app"], 1)
-        })
-    })
-    .unwrap()
-    .into_iter()
-    .map(|(_, g)| g.expect("both have crates to lint"))
-    .collect::<Vec<_>>();
-    assert_eq!(rows.len(), 2, "one container run per workspace");
-    let Planned::Run(row) = linux_row(&["crates/a.rs"], &facts()) else {
-        panic!("row")
-    };
-    assert_eq!(rows[0].args, row.args, "what it warms is what the push row reuses");
-    assert_eq!(rows[0].program, row.program);
-    assert!(rows[1].id.contains("left out: dyno-app"), "{}", rows[1].id);
-    assert!(runs(&["x".to_string()], "7", &|_| Err("cargo metadata for x failed".into())).is_err());
-    // Named workspaces must be Cargo workspaces; none named means every one.
-    let d = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(d.path().join("b")).unwrap();
-    std::fs::write(d.path().join("b/Cargo.toml"), "[workspace]\n").unwrap();
-    let all = ["a".to_string(), "b".to_string()];
-    assert_eq!(targets(d.path(), &[], &all).unwrap(), ["a", "b"]);
-    assert_eq!(targets(d.path(), &["b/".to_string()], &all).unwrap(), ["b"]);
-    assert!(targets(d.path(), &["nope".to_string()], &all).is_err());
-}
-
-/// The local CI image is built by `./dev check --warm-linux` with its own bound, never under the push budget: a missing image is
-/// "not measured" with that command as the next step, and the container is never started.
-#[test]
-fn a_missing_local_ci_image_is_not_measured_and_names_warm_linux() {
-    let planned = plan_gates(&plan(), &change(&["crates/a.rs"]), &facts());
-    let fake = Fake {
-        no_image: true,
-        ..Fake::default()
-    };
-    let rows = run_all(&planned, &fake, 3);
-    let v = verdicts(&rows);
-    let (reason, next) = nm(&v["clippy-linux crates"]).expect("not measured");
-    assert!(reason.contains("local CI image missing"), "{reason}");
-    assert!(
-        next.contains("./dev check --warm-linux") && next.contains("never started under the push budget"),
-        "{next}"
-    );
-    assert!(
-        !fake.ran.lock().unwrap().iter().any(|r| r.starts_with("clippy-linux")),
-        "no build under the push budget"
-    );
-}
-
-/// The container's bind mount can serve stale files (OrbStack 2.2.5, 2026-11-25: the old size and mtime for over an hour, so an old
-/// version was linted): a container row whose probe sees other content than the host has is not measured, names the files and the
-/// restart, and never runs, so it can never pass on the old version (ER-33). Positive control: the same row with a fresh mount runs.
-#[test]
-fn a_container_row_on_a_stale_mount_is_not_measured_and_never_runs() {
-    let planned = plan_gates(&plan(), &change(&["crates/a.rs", "docs/x.md"]), &facts());
-    let fake = Fake {
-        stale_mount: true,
-        ..Fake::default()
-    };
-    // Every container row: the Linux Clippy and, in the member gate, the Linux tests (feat/member-check-touched-tests).
-    let container: Vec<String> = run_gates(&planned)
-        .iter()
-        .filter(|g| g.need == Need::LocalCiImage)
-        .map(|g| g.id.clone())
-        .collect();
-    assert!(
-        container.iter().any(|id| id == "clippy-linux crates") && container.iter().any(|id| id.starts_with("tests-linux ")),
-        "{container:?}"
-    );
-    let rows = run_all(&planned, &fake, 3);
-    let v = verdicts(&rows);
-    for id in &container {
-        let (reason, next) = nm(&v[id.as_str()]).unwrap_or_else(|| panic!("{id}: not measured"));
-        assert!(reason.contains("stale") && reason.contains("crates/a.rs (host "), "{id}: {reason}");
-        assert!(next.contains("restart OrbStack") && next.contains("or the Mac"), "{id}: {next}");
-    }
-    assert!(
-        !fake.ran.lock().unwrap().iter().any(|r| container.contains(r)),
-        "a row on a stale mount must not run"
-    );
-    assert_eq!(render("h", &rows).exit, Exit::NotMeasured);
-    assert_eq!(
-        *fake.probed.lock().unwrap(),
-        vec![vec!["crates/a.rs".to_string(), "docs/x.md".to_string()]; container.len()],
-        "one probe per container row, each with the row's own workspace first, then the rest of the change"
-    );
-
-    let fresh = Fake::default();
-    let rows = run_all(&planned, &fresh, 3);
-    assert!(fresh.ran.lock().unwrap().iter().any(|r| r == "clippy-linux crates"));
-    assert!(nm(&verdicts(&rows)["clippy-linux crates"]).is_none());
-}
-
-/// Only the container rows carry the files to compare; the host rows never start a probe.
-#[test]
-fn only_container_rows_carry_mount_files() {
-    let planned = plan_gates(&plan(), &change(&["crates/a.rs"]), &facts());
-    for g in run_gates(&planned) {
-        assert_eq!(g.mount.is_some(), g.need == Need::LocalCiImage, "{}", g.id);
-    }
-    assert!(
-        run_gates(&planned).iter().any(|g| g.need == Need::LocalCiImage),
-        "the plan has a container row"
-    );
-}
-
-/// A row with several workspaces has a full id with no comma, so the accept list (comma-separated) can name it.
-#[test]
-fn a_multi_workspace_linux_row_can_be_accepted_by_its_id() {
-    let state = tempfile::tempdir().unwrap();
-    let planned = plan_gates(&plan(), &change(&["crates/a.rs", "apps/dyno/src/a.rs"]), &facts());
-    let fake = Fake {
-        no_docker: true,
-        ..Fake::default()
-    };
-    let mut rows = run_all(&planned, &fake, 3);
-    let id = "clippy-linux apps/dyno (left out: dyno-app) + crates";
-    accept_not_measured(&mut rows, &[id.to_string()], state.path());
-    let report = render("h", &rows);
-    assert!(report.text.contains(&format!("ACCEPTED      {id}")), "{}", report.text);
-    assert_eq!(
-        super::accepted_ids(&["x".into()], &[("PADDOCK_ACCEPT_NOT_MEASURED".to_string(), id.to_string())].into()),
-        ["x", id]
-    );
-}
-
-/// ER-33: a probe that says neither "built" (0) nor "not built" (3) is broken, never read as one of them.
-#[test]
-fn an_image_probe_that_neither_succeeds_nor_says_missing_is_broken_not_measured() {
-    use super::linux_inputs::{ImageProbe, image_probe};
-    assert_eq!(image_probe(Some(0)), ImageProbe::Ready);
-    assert_eq!(image_probe(Some(3)), ImageProbe::Missing);
-    for code in [Some(1), Some(2), Some(127), Some(137), None] {
-        assert!(matches!(image_probe(code), ImageProbe::Broken(_)), "{code:?}");
-    }
-    let planned = plan_gates(&plan(), &change(&["crates/a.rs"]), &facts());
-    let fake = Fake {
-        probe_broken: true,
-        ..Fake::default()
-    };
-    let rows = run_all(&planned, &fake, 3);
-    let v = verdicts(&rows);
-    let (reason, next) = nm(&v["clippy-linux crates"]).expect("not measured");
-    assert!(reason.contains("image probe broken"), "{reason}");
-    assert!(next.contains("--image-ready") && next.contains("broken"), "{next}");
-    assert!(
-        !fake.ran.lock().unwrap().iter().any(|r| r.starts_with("clippy-linux")),
-        "nothing started"
-    );
-}
-
-/// A workspace whose only package is a Tauri crate (apps/workbench-demo/src-tauri) leaves nothing for `cargo clippy --workspace
-/// --exclude ..` to compile: cargo stops with "no packages to compile" (the integrator's `--warm-linux`, train 14). The row skips
-/// it and says so; what is left of the other workspaces still runs.
-#[test]
-fn a_workspace_with_only_tauri_crates_is_skipped_and_named_not_linted() {
-    let mut f = facts();
-    let mut plan = plan();
-    plan["packages"]["apps/demo/src-tauri"] = json!(["demo-app"]);
-    let linux_row = |files: &[&str], f: &Facts| {
-        plan_gates(&plan, &change(files), f)
-            .into_iter()
-            .find(|p| {
-                matches!(p, Planned::Run(g) if g.id.starts_with("clippy-linux"))
-                    || matches!(p, Planned::Skip { id, .. } if id.starts_with("clippy-linux"))
-            })
-            .expect("a Linux Clippy row")
-    };
-    f.left_out.insert("apps/demo/src-tauri".into(), Ok(crates_of(&["demo-app"], 0)));
-    // Alone: the row is a skip that names the workspace and why.
-    let Planned::Skip { id, reason } = linux_row(&["apps/demo/src-tauri/src/a.rs"], &f) else {
-        panic!("a workspace with nothing to lint is skipped")
-    };
-    assert!(id.starts_with("clippy-linux") && id.contains("apps/demo/src-tauri"), "{id}");
-    assert!(reason.contains("only Tauri crates") && reason.contains("demo-app"), "{reason}");
-    // Beside a lintable one: that one runs, and the id names the skipped workspace.
-    let Planned::Run(g) = linux_row(&["crates/a/src/lib.rs", "apps/demo/src-tauri/src/a.rs"], &f) else {
-        panic!("the lintable workspace still runs")
-    };
-    assert!(
-        g.id.contains("apps/demo/src-tauri (skipped: only Tauri crates: demo-app)"),
-        "{}",
-        g.id
-    );
-    assert!(
-        g.args.join(" ").contains("cd crates") && !g.args.join(" ").contains("cd apps/demo/src-tauri"),
-        "{:?}",
-        g.args
-    );
-    assert_eq!(g.workspaces, ["crates"]);
-    // `--warm-linux` skips it too.
-    let rows = super::warm::runs(&["apps/demo/src-tauri".to_string()], "7", &|_| Ok(crates_of(&["demo-app"], 0))).unwrap();
-    assert!(rows[0].1.is_none());
-}
-
 /// A `cargo` and `cargo-deny` stand-in (ER-14: the real tool never runs, nothing reaches the network): `cargo deny ...` records its
 /// arguments and fails like the real one when the checks it was asked for have a finding. `adv` and `lic` are files in its folder
 /// that switch an advisory and a licence finding on; a run with no category named checks all four.
 #[cfg(unix)]
 mod deny_row {
     use super::*;
-    use crate::pre_push::exec::RealExec;
+    use crate::pre_push::exec::{RealExec, decide};
     use std::collections::HashMap;
     use std::path::Path;
     use std::sync::Arc;
@@ -3823,7 +3312,7 @@ mod active_apps {
         let planned = plan_gates(&plan(), &change(FILES), &off(&["dyno", "pitwall", "debrief"]));
         let ran = ids(&planned);
         for ws in ["apps/dyno", "apps/pitwall"] {
-            for kind in ["fmt", "clippy", "clippy-windows", "clippy-linux"] {
+            for kind in ["fmt", "clippy", "clippy-windows"] {
                 let id = format!("{kind} {ws}");
                 assert!(!ran.iter().any(|r| r == &id), "{id} ran: {ran:?}");
                 let reason = skipped(&planned, &id).unwrap_or_else(|| panic!("{id} is not named: {planned:?}"));
@@ -3838,8 +3327,6 @@ mod active_apps {
             Some(inactive_reason("pitwall").as_str())
         );
         assert!(!ran.iter().any(|r| r.starts_with("pitwall-")), "{ran:?}");
-        // The Linux Clippy keeps the active workspaces in its one container run.
-        assert!(ran.contains(&"clippy-linux crates".to_string()), "{ran:?}");
     }
 
     /// Positive control: the same change with the apps active runs their rows (the skip above is the set's, not the plan's).
@@ -3850,11 +3337,6 @@ mod active_apps {
         for id in ["fmt apps/dyno", "clippy apps/dyno", "clippy-windows apps/dyno"] {
             assert!(ran.contains(&id.to_string()), "{id} did not run: {ran:?}");
         }
-        assert!(
-            ran.contains(&"clippy-linux apps/dyno (left out: dyno-app) + crates".to_string()),
-            "{ran:?}"
-        );
-        assert!(skipped(&planned, "clippy-linux apps/pitwall").is_some(), "{planned:?}");
         assert!(skipped(&planned, "clippy apps/pitwall").is_some_and(|r| r.starts_with(&inactive_label())));
     }
 
@@ -3867,7 +3349,7 @@ mod active_apps {
             "fmt crates",
             "clippy crates",
             "clippy-windows crates",
-            "clippy-linux crates",
+            "clippy-windows crates",
             "conformance",
             "conformance-tests",
             "member-audits",
@@ -3941,9 +3423,9 @@ mod active_apps {
         let planned = plan_gates(&plan(), &change(FILES), &off(&["dyno", "pitwall", "debrief"]));
         let rows = run_all(&planned, &Fake::default(), 2);
         let n = rows.iter().filter(|(_, r)| r.reason().starts_with(&inactive_label())).count();
-        // fmt, clippy and clippy-windows of apps/dyno and apps/pitwall, their two Linux Clippy rows, Pitwall's scripts and deny, and
-        // the member gate's host and Linux tests of both.
-        assert_eq!(n, 13, "{rows:?}");
+        // fmt, clippy and clippy-windows of apps/dyno and apps/pitwall, Pitwall's scripts and deny, and the member gate's host tests
+        // of both.
+        assert_eq!(n, 9, "{rows:?}");
         let report = render("h", &rows);
         let last = report.text.lines().find(|l| l.starts_with("pre-push: ")).unwrap_or_default();
         assert!(last.contains(&format!(", {n} inactive (not checked")), "{last}");
@@ -4004,7 +3486,7 @@ fn the_conformance_tests_run_in_a_push_only_when_the_change_reaches_conformance_
 /// own checks and then failed on another OS in CI; the report-only other-OS row never ran). Windows stays CI's.
 mod member_tests {
     use super::*;
-    use crate::pre_push::gates::{GUARDIAN_PATHS, inactive_reason};
+    use crate::pre_push::gates::inactive_reason;
 
     const FILES: &[&str] = &["crates/paddock-proc/src/lib.rs", "tools/paddock-dev/src/a.rs"];
 
@@ -4022,112 +3504,9 @@ mod member_tests {
 
     fn member() -> Facts {
         let mut f = facts();
-        f.left_out.insert("tools/paddock-dev".into(), Ok(crates_of(&[], 1)));
         f.test_filters
             .insert("crates".into(), "package(=paddock-proc) | package(=paddock-chromium)".into());
         f
-    }
-
-    fn by<'a>(planned: &'a [Planned], prefix: &str) -> &'a Gate {
-        run_gates(planned)
-            .into_iter()
-            .find(|g| g.id.starts_with(prefix))
-            .unwrap_or_else(|| panic!("no row {prefix}: {:?}", ids(planned)))
-    }
-
-    #[test]
-    fn a_touched_workspace_gets_its_ci_tests_on_the_host_and_in_the_linux_container() {
-        let planned = plan_gates(&plan2(), &change(FILES), &member());
-        let host = by(&planned, "tests crates");
-        assert_eq!((host.program.as_str(), host.cwd.as_str()), ("cargo", "crates"));
-        assert_eq!(
-            host.args.join(" "),
-            "nextest run --config build.target-dir='/t' --profile ci --locked --no-fail-fast --no-tests=fail --workspace --all-features -E package(=paddock-proc) | package(=paddock-chromium)",
-            "CI's own profile, the plan's reached packages as CI's member run filters them, every feature as CI's crates job"
-        );
-        assert!(host.heavy, "it compiles: through heavy (ER-24)");
-        assert_eq!(
-            host.need,
-            Need::Tool("cargo-nextest".into()),
-            "no nextest is not measured, never a pass"
-        );
-        assert!(host.env.contains(&("RUSTUP_AUTO_INSTALL".to_string(), "0".to_string())), "ER-45");
-        assert!(
-            host.env.iter().any(|(k, _)| k == "NEXTEST_TEST_THREADS"),
-            "a share of the machine (ER-24, ER-48)"
-        );
-        assert!(
-            host.env.iter().all(|(k, _)| !k.starts_with("CARGO_")),
-            "sccache hashes CARGO_* variables"
-        );
-        let tool = by(&planned, "tests tools/paddock-dev");
-        assert!(
-            !tool.args.contains(&"-E".to_string()) && !tool.args.contains(&"--all-features".to_string()),
-            "{:?}",
-            tool.args
-        );
-        let linux = by(&planned, "tests-linux ");
-        assert_eq!(linux.id, "tests-linux crates + tools/paddock-dev");
-        assert_eq!(linux.need, Need::LocalCiImage, "the CI image, as the Linux Clippy");
-        // A container row: the mount probe compares the change's files with the host before it runs, so a stale mount is not
-        // measured, never a pass on old code (fix/container-mount-freshness; train 2026-11-26-g joined the two).
-        let mount = linux
-            .mount
-            .as_deref()
-            .expect("the tests-linux row carries the files its mount probe compares");
-        assert_eq!(mount.files, strs(FILES), "the row's own workspaces' files first");
-        assert_eq!(mount.of, FILES.len());
-        assert!(linux.heavy);
-        let command = linux.args.last().unwrap();
-        assert!(
-            linux
-                .args
-                .starts_with(&strs(&["tools/linux-container.sh", "--id", "paddock", "--ci-image", "--"])),
-            "{:?}",
-            linux.args
-        );
-        assert!(
-            command.contains("(cd crates && CARGO_TARGET_DIR=/target/v7/crates NEXTEST_TEST_THREADS=")
-                && command.contains("cargo nextest run --tool-config-file paddock:/tmp/paddock-nextest-store-crates.toml --profile ci --locked --no-fail-fast --no-tests=fail --workspace --all-features -E 'package(=paddock-proc) | package(=paddock-chromium)'"),
-            "{command}"
-        );
-        assert!(
-            command.contains("(cd tools/paddock-dev && CARGO_TARGET_DIR=/target/v7/tools-paddock-dev"),
-            "{command}"
-        );
-        // The source tree is mounted read-only: nextest's run store goes into the build volume (found by the real run, 2026-11-25:
-        // "failed to create store dir at `/work/tools/paddock-dev/target/nextest/ci`: Read-only file system").
-        assert!(
-            command
-                .contains("printf '[store]\\ndir = \"/target/v7/crates/nextest\"\\n' > /tmp/paddock-nextest-store-crates.toml; (cd crates"),
-            "{command}"
-        );
-        assert!(!command.contains("guardian-as-user"), "the guardian did not change: {command}");
-        assert!(
-            command.ends_with("exit $rc"),
-            "a failing workspace does not hide the next one's: {command}"
-        );
-    }
-
-    fn strs(v: &[&str]) -> Vec<String> {
-        v.iter().map(|s| s.to_string()).collect()
-    }
-
-    #[test]
-    fn a_changed_guardian_adds_the_guardian_as_user_step_in_the_container() {
-        for f in GUARDIAN_PATHS {
-            let file = format!("{f}/unix.rs");
-            let planned = plan_gates(&plan2(), &change(&[&file]), &member());
-            let linux = by(&planned, "tests-linux ");
-            assert_eq!(linux.id, "tests-linux crates + guardian-as-user");
-            let command = linux.args.last().unwrap();
-            assert!(
-                command.contains("(cd crates && CARGO_TARGET_DIR=/target/v7/crates PADDOCK_TEST_UID=65534 bash ../conformance/ci/guardian-as-user.sh) || rc=1"),
-                "{command}"
-            );
-        }
-        let planned = plan_gates(&plan2(), &change(&["crates/paddock-proc/src/guardian.rs"]), &member());
-        assert!(by(&planned, "tests-linux ").id.ends_with("+ guardian-as-user"));
     }
 
     #[test]
@@ -4141,16 +3520,12 @@ mod member_tests {
         assert!(
             planned
                 .iter()
-                .any(|p| matches!(p, Planned::Skip { id, reason } if id == "tests, tests-linux" && reason.contains("--member-gate"))),
+                .any(|p| matches!(p, Planned::Skip { id, reason } if id == "tests" && reason.contains("--member-gate"))),
             "{planned:?}"
         );
         let planned = plan_gates(&plan2(), &change(&["crates/paddock-proc/README.md"]), &member());
         assert!(!ids(&planned).iter().any(|i| i.starts_with("tests")), "{:?}", ids(&planned));
-        assert!(
-            planned
-                .iter()
-                .any(|p| matches!(p, Planned::Skip { id, .. } if id == "tests, tests-linux"))
-        );
+        assert!(planned.iter().any(|p| matches!(p, Planned::Skip { id, .. } if id == "tests")));
     }
 
     #[test]
@@ -4169,56 +3544,29 @@ mod member_tests {
             "{:?}",
             ids(&planned)
         );
-        for id in ["tests apps/dyno", "tests-linux apps/dyno"] {
-            assert!(
-                planned
-                    .iter()
-                    .any(|p| matches!(p, Planned::Skip { id: i, reason } if i == id && *reason == inactive_reason("dyno"))),
-                "{id}: {planned:?}"
-            );
-        }
+        assert!(
+            planned
+                .iter()
+                .any(|p| matches!(p, Planned::Skip { id, reason } if id == "tests apps/dyno" && *reason == inactive_reason("dyno"))),
+            "{planned:?}"
+        );
         assert!(ids(&planned).contains(&"tests crates".to_string()));
     }
 
     #[test]
-    fn a_failing_test_fails_the_gate_and_a_missing_runtime_or_nextest_is_not_measured() {
+    fn a_failing_test_fails_the_gate_and_a_missing_nextest_is_not_measured() {
         let planned = plan_gates(&plan2(), &change(FILES), &member());
-        for row in ["tests crates", "tests-linux crates + tools/paddock-dev"] {
-            let rows = run_all(
-                &planned,
-                &Fake {
-                    fail: vec![row.into()],
-                    ..Fake::default()
-                },
-                2,
-            );
-            let report = render("h", &rows);
-            assert_eq!(report.exit, Exit::Findings, "{row}: {}", report.text);
-            assert!(report.text.contains(&format!("::error::{row}")), "{}", report.text);
-        }
-        let fake = Fake {
-            no_docker: true,
-            ..Fake::default()
-        };
-        let rows = run_all(&planned, &fake, 2);
-        assert!(
-            nm(&verdicts(&rows)["tests-linux crates + tools/paddock-dev"]).is_some(),
-            "no container runtime: not measured"
-        );
-        assert!(
-            !fake.ran.lock().unwrap().iter().any(|r| r.starts_with("tests-linux")),
-            "never started"
-        );
-        assert_eq!(render("h", &rows).exit, Exit::NotMeasured);
         let rows = run_all(
             &planned,
             &Fake {
-                no_image: true,
+                fail: vec!["tests crates".into()],
                 ..Fake::default()
             },
             2,
         );
-        assert!(nm(&verdicts(&rows)["tests-linux crates + tools/paddock-dev"]).is_some());
+        let report = render("h", &rows);
+        assert_eq!(report.exit, Exit::Findings, "{}", report.text);
+        assert!(report.text.contains("::error::tests crates"), "{}", report.text);
         let rows = run_all(
             &planned,
             &Fake {
@@ -4228,154 +3576,88 @@ mod member_tests {
             2,
         );
         assert!(nm(&verdicts(&rows)["tests crates"]).is_some());
-        // The positive control: with every row green both pass, so the verdicts above come from the rows.
+        // The positive control: with every row green it passes, so the verdicts above come from the row.
         let rows = run_all(&planned, &Fake::default(), 2);
-        let v = verdicts(&rows);
-        assert!(passed(&v["tests crates"]) && passed(&v["tests-linux crates + tools/paddock-dev"]));
+        assert!(passed(&verdicts(&rows)["tests crates"]));
     }
 
-    /// The Linux run tests only the code that behaves differently per OS (user, 2026-11-25), as CI's host legs place it (`hostTests`,
-    /// derived from the code): a pure workspace or a change that reaches no OS-conditional package pays nothing beyond its macOS run.
-    mod os_scope {
-        use super::*;
-        use crate::host_tests::{Derived, HostScope};
-        use crate::pre_push::gates::OsScope;
-
-        fn marked(packages: &[&str], filter: &str) -> Result<OsScope, String> {
-            Ok(OsScope::Marked(HostScope {
-                packages: packages.iter().map(|p| p.to_string()).collect(),
-                filter: filter.into(),
-            }))
-        }
-
-        fn with(scopes: &[(&str, Result<OsScope, String>)]) -> Facts {
-            let mut f = member();
-            f.reached.insert(
-                "crates".into(),
-                BTreeSet::from(["paddock-proc".to_string(), "paddock-chromium".to_string()]),
-            );
-            for (ws, s) in scopes {
-                f.os_scope.insert(ws.to_string(), s.clone());
+    /// No VM or container starts on this Mac (user, 2026-11-26; docs/rules.md rule 101): no planned row is a Linux row, and
+    /// no row's command is a container or VM tool, for a change that reaches every kind of row, in a developer's push and the member
+    /// gate. The Linux checks are CI's Linux jobs; the register names them CI-owned.
+    #[test]
+    fn no_row_starts_a_container_or_a_vm_and_the_linux_rows_are_ci_owned() {
+        const FORBIDDEN: &[&str] = &["docker", "podman", "nerdctl", "orb", "orbctl", "vmrun", "linux-container.sh"];
+        let files = [
+            "crates/paddock-proc/src/guardian/a.rs",
+            "tools/paddock-dev/src/a.rs",
+            "apps/dyno/crates/dyno-core/src/a.rs",
+        ];
+        for member_gate in [false, true] {
+            let f = Facts { member_gate, ..member() };
+            let planned = plan_gates(&plan2(), &change(&files), &f);
+            for g in run_gates(&planned) {
+                assert!(
+                    !g.id.contains("linux"),
+                    "{}: a Linux row runs on this Mac (member_gate {member_gate})",
+                    g.id
+                );
+                for word in std::iter::once(&g.program).chain(g.args.iter()) {
+                    let base = word.rsplit('/').next().unwrap_or(word);
+                    assert!(!FORBIDDEN.contains(&base), "{}: starts {base} (member_gate {member_gate})", g.id);
+                }
             }
-            f
-        }
-
-        fn skip_reason(planned: &[Planned], id: &str) -> Option<String> {
-            planned.iter().find_map(|p| match p {
-                Planned::Skip { id: i, reason } if i == id => Some(reason.clone()),
-                _ => None,
-            })
-        }
-
-        #[test]
-        fn only_the_reached_packages_with_os_conditional_code_run_in_the_container() {
-            let facts = with(&[
-                ("crates", marked(&["paddock-proc", "paddock-env"], "")),
-                ("tools/paddock-dev", Ok(OsScope::Unmarked)),
-            ]);
-            let planned = plan_gates(&plan2(), &change(FILES), &facts);
-            let linux = by(&planned, "tests-linux ");
-            assert_eq!(linux.id, "tests-linux crates", "the pure workspace left the container run");
-            let command = linux.args.last().unwrap();
-            assert!(
-                command.contains("--all-features -E 'package(=paddock-proc)')"),
-                "paddock-chromium is reached but pure; paddock-env is marked but not reached: {command}"
-            );
-            let why = skip_reason(&planned, "tests-linux tools/paddock-dev").expect("the pure workspace is named");
-            assert!(why.contains("no OS-conditional code"), "{why}");
-            // Its macOS run is unchanged: every reached package.
-            assert!(
-                by(&planned, "tests crates")
-                    .args
-                    .join(" ")
-                    .ends_with("package(=paddock-proc) | package(=paddock-chromium)")
-            );
-            assert!(ids(&planned).contains(&"tests tools/paddock-dev".to_string()));
-        }
-
-        #[test]
-        fn a_change_that_reaches_no_marked_package_runs_no_container() {
-            let facts = with(&[
-                ("crates", marked(&["paddock-env"], "")),
-                ("tools/paddock-dev", Ok(OsScope::Unmarked)),
-            ]);
-            let planned = plan_gates(&plan2(), &change(FILES), &facts);
-            assert!(!ids(&planned).iter().any(|i| i.starts_with("tests-linux")), "{:?}", ids(&planned));
-            let why = skip_reason(&planned, "tests-linux crates").expect("named");
-            assert!(
-                why.contains("reaches no package with OS-conditional code") && why.contains("paddock-proc"),
-                "{why}"
-            );
-            // The positive control: the same change with paddock-proc marked starts the container.
-            let facts = with(&[
-                ("crates", marked(&["paddock-proc"], "")),
-                ("tools/paddock-dev", Ok(OsScope::Unmarked)),
-            ]);
-            assert_eq!(
-                by(&plan_gates(&plan2(), &change(FILES), &facts), "tests-linux ").id,
-                "tests-linux crates"
-            );
-        }
-
-        #[test]
-        fn a_module_placed_workspace_runs_its_marked_modules_and_an_unscoped_one_runs_everything() {
-            let facts = with(&[("tools/paddock-dev", marked(&[], "test(/^(?:pre_push::)/)"))]);
-            let planned = plan_gates(&plan2(), &change(FILES), &facts);
-            let command = by(&planned, "tests-linux ").args.last().unwrap().clone();
-            assert!(command.contains("--workspace -E 'test(/^(?:pre_push::)/)')"), "{command}");
-            // crates has no entry: unscoped, fail closed, every reached package (CI's member filter).
-            assert!(
-                command.contains("--all-features -E 'package(=paddock-proc) | package(=paddock-chromium)')"),
-                "{command}"
-            );
-        }
-
-        #[test]
-        fn an_unreadable_contract_is_a_broken_row_and_a_changed_guardian_still_runs_as_uid_65534() {
-            let facts = with(&[
-                ("crates", Err("crates/paddock.ci.json: `hostTests` must be an object".into())),
-                ("tools/paddock-dev", Ok(OsScope::Unmarked)),
-            ]);
-            let planned = plan_gates(&plan2(), &change(FILES), &facts);
             assert!(
                 planned
                     .iter()
-                    .any(|p| matches!(p, Planned::Broken { id, cause, .. } if id == "tests-linux crates" && cause.contains("hostTests"))),
-                "{planned:?}"
+                    .all(|p| !matches!(p, Planned::NotMeasured { id, .. } | Planned::Broken { id, .. } if id.contains("linux"))),
+                "no Linux row is left behind as not measured"
             );
-            let facts = with(&[("crates", Ok(OsScope::Unmarked))]);
-            let planned = plan_gates(&plan2(), &change(&["crates/paddock-proc/src/guardian/unix.rs"]), &facts);
-            let linux = by(&planned, "tests-linux ");
-            assert_eq!(linux.id, "tests-linux guardian-as-user");
-            let command = linux.args.last().unwrap();
-            assert!(!command.contains("nextest run"), "{command}");
-            assert!(command.contains("guardian-as-user.sh"), "{command}");
         }
+        assert!(
+            crate::pre_push::gates::NOT_RUN
+                .iter()
+                .any(|(what, why)| what.contains("Linux") && why.contains("CI-owned")),
+            "the register names the Linux rows CI-owned"
+        );
+    }
 
-        #[test]
-        fn the_scope_comes_from_the_contract_and_the_derived_placement() {
-            let derived = Derived {
-                packages: BTreeSet::from(["paddock-proc".to_string()]),
-                known_packages: BTreeSet::from(["paddock-proc".to_string(), "paddock-text".to_string()]),
-                ..Derived::default()
-            };
-            let none = Derived {
-                known_packages: derived.known_packages.clone(),
-                ..Derived::default()
-            };
-            assert_eq!(OsScope::of(&json!({}), "c.json", &derived), Ok(OsScope::Unscoped));
-            assert_eq!(
-                OsScope::of(&json!({"hostTests": {}}), "c.json", &derived),
-                marked(&["paddock-proc"], "")
-            );
-            assert_eq!(OsScope::of(&json!({"hostTests": {}}), "c.json", &none), Ok(OsScope::Unmarked));
-            // A host's own `only` entry is not the second OS's.
-            let only = json!({"hostTests": {"only": [{"os": "macos-latest", "name": "paddock-proc", "reason": "a tool of the dev Mac"}]}});
-            assert_eq!(OsScope::of(&only, "c.json", &derived), Ok(OsScope::Unmarked));
-            assert!(
-                OsScope::of(&json!({"hostTests": []}), "c.json", &derived).is_err(),
-                "never unscoped by a typo"
-            );
-        }
+    fn by<'a>(planned: &'a [Planned], prefix: &str) -> &'a Gate {
+        run_gates(planned)
+            .into_iter()
+            .find(|g| g.id.starts_with(prefix))
+            .unwrap_or_else(|| panic!("no row {prefix}: {:?}", ids(planned)))
+    }
+
+    #[test]
+    fn a_touched_workspace_gets_its_ci_tests_on_the_host_with_heavys_thread_share() {
+        let planned = plan_gates(&plan2(), &change(FILES), &member());
+        let host = by(&planned, "tests crates");
+        assert_eq!((host.program.as_str(), host.cwd.as_str()), ("cargo", "crates"));
+        assert_eq!(
+            host.args.join(" "),
+            "nextest run --config build.target-dir='/t' --profile ci --locked --no-fail-fast --no-tests=fail --workspace --all-features -E package(=paddock-proc) | package(=paddock-chromium)",
+            "CI's own profile, the plan's reached packages as CI's member run filters them, every feature as CI's crates job"
+        );
+        assert!(host.heavy, "it compiles: through heavy (ER-24)");
+        assert_eq!(
+            host.need,
+            Need::Tool("cargo-nextest".into()),
+            "no nextest is not measured, never a pass"
+        );
+        assert!(host.env.contains(&("RUSTUP_AUTO_INSTALL".to_string(), "0".to_string())), "ER-45");
+        assert!(
+            host.env.iter().all(|(k, _)| k != "NEXTEST_TEST_THREADS"),
+            "the thread count is heavy's share of the machine (step_env), never a fixed number here; the caller's env wins (ER-24, ER-47, ER-48)"
+        );
+        assert!(
+            host.env.iter().all(|(k, _)| !k.starts_with("CARGO_")),
+            "sccache hashes CARGO_* variables"
+        );
+        let tool = by(&planned, "tests tools/paddock-dev");
+        assert!(
+            !tool.args.contains(&"-E".to_string()) && !tool.args.contains(&"--all-features".to_string()),
+            "{:?}",
+            tool.args
+        );
     }
 }
