@@ -192,7 +192,9 @@ fn a_silent_client_delays_nobody_and_its_handshake_runs_out() {
     let peer = Peer::start(conn, Arc::new(NoCalls), PeerOptions::new("server")).unwrap();
     assert_eq!(peer.call(b"ok".to_vec(), T).unwrap(), b"ok");
     clock.advance(Duration::from_secs(5));
-    wait_until(|| server.refused().contains(&IpcError::Timeout));
+    server
+        .wait_refused(GUARD, |r| r.contains(&IpcError::Timeout))
+        .expect("the handshake ran out and was recorded");
 }
 
 #[test]
@@ -354,7 +356,9 @@ fn the_refusal_list_keeps_the_latest_64() {
             ProtocolVersion::UNVERSIONED,
         );
     }
-    wait_until(|| server.refused().len() == 64);
+    server
+        .wait_refused(GUARD, |r| r.len() == 64)
+        .expect("64 refusals were recorded");
     assert!(
         server
             .refused()

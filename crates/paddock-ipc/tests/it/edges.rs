@@ -15,7 +15,7 @@ use std::io::{BufRead, Write};
 use std::path::Path;
 use std::process::Stdio;
 use std::sync::{Arc, Mutex, mpsc};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 fn echo() -> Arc<dyn Handler> {
     Arc::new(|_: &CallCtx, body: &[u8]| -> Result<Vec<u8>, RemoteError> { Ok(body.to_vec()) })
@@ -64,12 +64,22 @@ fn a_link_server_refuses_a_wrong_token_and_keeps_serving() {
         )
         .is_err()
     );
-    // The refusal is recorded by the accept thread right after it answered: a hang guard, not a timing assertion.
-    let started = Instant::now();
-    while server.refused().is_empty() && started.elapsed() < GUARD {
-        std::thread::yield_now();
-    }
-    assert!(matches!(server.refused().first(), Some(IpcError::Auth(_))));
+    // The refusal is recorded by the handshake thread right after it answered: wait for it (a hang guard, not a timing
+    // assertion). Nothing else was refused, so a wait that does not ask for one ends at once.
+    let refused = server.wait_refused(GUARD, |r| !r.is_empty());
+    assert!(
+        matches!(
+            refused.as_deref().map(<[_]>::first),
+            Ok(Some(IpcError::Auth(_)))
+        ),
+        "{refused:?}"
+    );
+    assert_eq!(
+        server
+            .wait_refused(Duration::ZERO, |r| r.len() > 1)
+            .map_err(|r| r.len()),
+        Err(1)
+    );
     let d = match paddock_ipc::link::discovery::read(&path, |_| true) {
         paddock_ipc::link::Found::Live(d) => d,
         other => panic!("{other:?}"),

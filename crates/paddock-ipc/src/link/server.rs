@@ -24,7 +24,7 @@ use paddock_jobs::time::{Clock, SystemClock};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
@@ -135,6 +135,8 @@ struct Shared {
     peers: Mutex<Vec<Peer>>,
     handshakes: AtomicUsize,
     refused: Mutex<Vec<IpcError>>,
+    /// Woken after every refusal is recorded ([`LinkServer::wait_refused`]).
+    refused_changed: Condvar,
 }
 
 impl Shared {
@@ -144,6 +146,8 @@ impl Shared {
             refused.remove(0);
         }
         refused.push(e);
+        drop(refused);
+        self.refused_changed.notify_all();
     }
 
     fn open_peers(&self) -> usize {
@@ -192,6 +196,7 @@ impl LinkServer {
             peers: Mutex::new(Vec::new()),
             handshakes: AtomicUsize::new(0),
             refused: Mutex::new(Vec::new()),
+            refused_changed: Condvar::new(),
         });
         let endpoint = host.endpoint().to_string();
         let s = shared.clone();
@@ -212,7 +217,9 @@ impl LinkServer {
                         Ok(accepted) => accepted,
                         Err(e) if e.kind() == std::io::ErrorKind::TimedOut => continue,
                         Err(e) => {
-                            // Recorded before the client is answered, so `refused()` never trails what a client was told.
+                            // Recorded before `turn_away` answers the client (Linux). On macOS the failed accept has already
+                            // dropped the client in the kernel, so the client can see its end before this line runs: read the
+                            // record with `wait_refused`, never at a moment the client chose (CI run 9150).
                             s.refuse(IpcError::from(std::io::Error::new(e.kind(), e.to_string())));
                             host.turn_away(&e);
                             std::thread::sleep(ACCEPT_ERROR_PAUSE);
@@ -282,8 +289,33 @@ impl LinkServer {
     }
 
     /// Clients that were refused (wrong token, another protocol, too many, a handshake that ran out), the most recent 64.
+    ///
+    /// A snapshot: a refusal is recorded by the server's own threads, so it can trail what the client already saw (a client
+    /// told why is recorded right after the answer; on macOS a client the accept could not take is dropped by the kernel
+    /// before the server learns of it). To act on a refusal a client caused, wait for it with [`LinkServer::wait_refused`].
     pub fn refused(&self) -> Vec<IpcError> {
         lock(&self.shared.refused).clone()
+    }
+
+    /// Waits until `until` holds for the recorded refusals ([`LinkServer::refused`]), woken by each new one, at most `max`
+    /// (OS time; a hang guard, not a limit of anything). `Ok` with the refusals that met it, `Err` with the last ones seen when
+    /// `max` passed first.
+    pub fn wait_refused(
+        &self,
+        max: Duration,
+        until: impl Fn(&[IpcError]) -> bool,
+    ) -> Result<Vec<IpcError>, Vec<IpcError>> {
+        let guard = lock(&self.shared.refused);
+        let (refused, timeout) = self
+            .shared
+            .refused_changed
+            .wait_timeout_while(guard, max, |r| !until(r))
+            .unwrap_or_else(|p| p.into_inner());
+        if timeout.timed_out() && !until(&refused) {
+            Err(refused.clone())
+        } else {
+            Ok(refused.clone())
+        }
     }
 
     /// Stops accepting, closes every connection and removes the discovery file if it still names this process.
