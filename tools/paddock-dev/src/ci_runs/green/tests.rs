@@ -955,12 +955,52 @@ struct Shape {
     y: String,
 }
 
+/// A private copy of the shape's template, built once per machine (`paddock_testkit::git_fixture::template`: the shape's 14 git starts are paid once, not
+/// by every test that reads it, ER-20); the commits' ids are in the template's `shas` file.
 fn train_g_shape(revert_flip: bool) -> Shape {
+    let name = if revert_flip { "shape-revert" } else { "shape" };
+    let t = paddock_testkit::git_fixture::template(name, include_str!("tests.rs"), |build, _| {
+        let repo = build.join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        let [b, x, y] = build_shape(&repo, revert_flip);
+        std::fs::write(build.join("shas"), format!("{b}\n{x}\n{y}\n")).unwrap();
+    });
     let dir = tempfile::tempdir().unwrap();
+    paddock_testkit::git_fixture::copy_tree(&t.join("repo"), dir.path());
+    let shas = std::fs::read_to_string(t.join("shas")).unwrap();
+    let mut it = shas.lines().map(str::to_string);
+    Shape {
+        dir,
+        b: it.next().unwrap(),
+        x: it.next().unwrap(),
+        y: it.next().unwrap(),
+    }
+}
+
+/// Budget (rule 85): a shape is a file copy of its template, not a build: two copies have the same commits, are private, and a write in
+/// one is in neither the other nor the template.
+#[test]
+fn a_shape_is_a_private_copy_of_its_template_with_the_same_commits() {
+    let (a, b) = (train_g_shape(false), train_g_shape(false));
+    assert_eq!((&a.b, &a.x, &a.y), (&b.b, &b.x, &b.y));
+    assert_ne!(a.dir.path(), b.dir.path());
+    std::fs::write(a.dir.path().join("only-a.txt"), "a").unwrap();
+    assert!(!b.dir.path().join("only-a.txt").exists());
+    assert!(a.dir.path().join(".git").is_dir() && a.dir.path().join("y.txt").is_file());
+    assert_ne!(train_g_shape(true).dir.path().join("flip.txt"), a.dir.path().join("flip.txt"));
+    assert_eq!(
+        std::fs::read_to_string(train_g_shape(true).dir.path().join("flip.txt")).unwrap(),
+        "a\n"
+    );
+    assert_eq!(std::fs::read_to_string(a.dir.path().join("flip.txt")).unwrap(), "b\n");
+}
+
+/// Builds the shape in `root` and returns the ids of `b`, `x` and `y`.
+fn build_shape(root: &std::path::Path, revert_flip: bool) -> [String; 3] {
     let git = |args: &[&str]| {
         let out = crate::git_env::git()
             .arg("-C")
-            .arg(dir.path())
+            .arg(root)
             .args([
                 "-c",
                 "user.name=t",
@@ -975,7 +1015,7 @@ fn train_g_shape(revert_flip: bool) -> Shape {
         assert!(out.status.success(), "{args:?}: {}", String::from_utf8_lossy(&out.stderr));
         String::from_utf8_lossy(&out.stdout).trim().to_string()
     };
-    let write = |p: &str, t: &str| std::fs::write(dir.path().join(p), t).unwrap();
+    let write = |p: &str, t: &str| std::fs::write(root.join(p), t).unwrap();
     git(&["init", "-q", "-b", "main"]);
     write("flip.txt", "a\n");
     write("base.txt", "b\n");
@@ -1010,7 +1050,7 @@ fn train_g_shape(revert_flip: bool) -> Shape {
     let y = git(&["rev-parse", "HEAD"]);
     git(&["checkout", "-q", "main"]);
     git(&["merge", "-q", "--ff-only", "train"]);
-    Shape { dir, b, x, y }
+    [b, x, y]
 }
 
 /// A recorded run (`tests/ci-runs/reuse-push-base`: runs 9030, 9045, 9054 and 9056 of 2026-11-25, `./dev ci record-fixture`; the

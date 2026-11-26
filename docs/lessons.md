@@ -4388,3 +4388,12 @@ with `pressMod`; `isMac()` shares `isMacNavigator` with `modKey` (one definition
 the apps' own e2e (`apps/*/app/e2e`, 108 uses) still press `ControlOrMeta`; their WebKit legs are the Linux ones, so the same failure waits there.
 A lint rule in `paddock/e2e-*` that refuses `ControlOrMeta` in a spec is proposed, not built (it needs the user's yes: one in, one out). The chart
 spec `data.spec.ts:301` (theme switch redraws the canvases) failed in the same run for a cause not shown by the log.
+
+## A git fixture helper sat in one tool's test folder and broke two rules (2026-11-26, perf/slow-git-tests-fixture)
+- **What happened.** `perf/slow-git-tests` fixed 710 s of train n's Windows job by building each `ci_runs` git fixture once per machine
+  and copying it per test. The helper (`template`, `copy_tree`) lived in `tools/paddock-dev/src/ci_runs/testutil.rs` and used
+  `std::env::temp_dir` (the clippy disallowed method) and `remove_dir_all` (the `safe_remove_lint` test), so train pq pulled the branch.
+- **Cause.** The helper was written where it was first needed, not checked against the shared kit (ER-22), and nothing told the next
+  fixture author that a per-test git repository is the slow shape.
+- **Fix (user decision 74).** The helper moved to `paddock_testkit::git_fixture` (temp folder from the kit, owner, size limit and eviction
+  rule in its doc), and rule NEW-git-fixtures with the report-only check C174 flags a fixture builder with six or more git starts per test.

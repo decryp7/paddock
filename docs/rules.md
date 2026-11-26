@@ -584,3 +584,12 @@ Until an app is imported, rules 2, 3, 8, 9, 39 and 42 above apply to it as writt
     *Why:* Dyno 1.1.0 was correctly blocked by Paddock run 7485 (mostly code Dyno ships). Run 7489 failed in the shell-demo's i18n check (outside Dyno) and in aggregate coverage; the coverage gate printed no per-crate output and a crate Dyno depends on was in it, so that blocked under (b) until the gate was fixed and a full run was green. The failures also skipped the dependency audit and several ui steps, which (a) asks to be cleared.
 
 101. **Local gates never start a VM or a container on a developer's Mac** (user, 2026-11-26). Linux checks run as CI's Linux jobs on the Linux runner, Windows checks on the Windows runner. The pre-push and member gate have no Linux row (`clippy-linux`, `tests-linux`, `--warm-linux` are removed; the register names them CI-owned), and conformance C172 (report-only, review 2026-12-09) flags a docker, podman, nerdctl, orb, orbctl, vmrun or `linux-container.sh` call in local gate code. *Why:* the container rows were the Mac's largest load, and the user decided on 2026-11-26 that no VM runs on the Mac. Status: in force (train o); C172 report-only until its first green run on the real tree (ER-41), review 2026-12-09.
+
+## Git fixtures (user decision 74, 2026-11-26)
+NEW-git-fixtures. **A test that needs a git repository builds it once per machine and recipe through `paddock_testkit::git_fixture`** (ER-20, ER-22,
+    rule 85). `git_fixture::template(name, include_str!(this file), |build, ready| ..)` builds the repository in a folder under the
+    kit's temp folder, with an owner, a size limit and an eviction rule (ER-51; the module doc), and each test gets its own copy with
+    `git_fixture::copy_tree`, which starts no process. A fixture builder that starts git six or more times per test is a finding of C174
+    (report-only until its first green run, ER-41; `./dev conformance --only C174`). A test about the build itself says why in its own
+    comment and keeps its builder. *Why:* the `ci_runs` fixtures started 14 to 17 gits in every test, 45 ms each on the Windows runner:
+    710 s of train n's Windows job (docs/benchmarks.md, "Git fixture repositories of the ci_runs tests").
