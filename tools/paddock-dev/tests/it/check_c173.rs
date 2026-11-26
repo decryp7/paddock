@@ -266,7 +266,9 @@ fn c173_with_a_broken_allow_file_is_one_check_broken_finding() {
     }
 }
 
-/// The real tree: every tooling file it tracks is named by the list (no error), and the one thing a branch may add is the growth warning.
+/// The real tree: every tooling file it tracks is named by the list (no error), and the one thing a branch may add is the growth warning,
+/// or, where the target cannot be resolved, the warning that growth is not measured here. The base is the target CI and the gates name
+/// (`baseline::target_ref`: `PADDOCK_BASE_REF`, else `origin/main`), never a local `main`: CI's checkout has none (run 9135).
 #[test]
 fn live_c173_every_tooling_file_of_the_tree_is_named() {
     let root = repo_root();
@@ -274,13 +276,18 @@ fn live_c173_every_tooling_file_of_the_tree_is_named() {
         let root = root.clone();
         move |progress| {
             let tree = Tree::open(&root).with_progress(move || progress.tick());
-            run_checks_in(&tree, &options(&root), &registry()).unwrap()
+            let opts = RunOptions {
+                base_ref: None,
+                ..options(&root)
+            };
+            run_checks_in(&tree, &opts, &registry()).unwrap()
         }
     });
     assert_eq!(r.errors(), 0, "{:?}", r.findings);
     assert!(
-        r.findings.iter().all(|f| f.message.contains("the allow list grew")),
-        "only the growth of a list not yet on the target branch may be reported: {:?}",
+        r.findings.iter().all(|f| f.severity == Severity::Warn
+            && (f.message.contains("the allow list grew") || f.message.contains("shrink-only rule is not enforced here"))),
+        "only the growth of a list not yet on the target branch, or growth not measured here, may be reported: {:?}",
         r.findings
     );
 }
