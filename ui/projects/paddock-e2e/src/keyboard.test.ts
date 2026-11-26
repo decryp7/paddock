@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { modKey, tabKey, walkStep } from './keyboard.ts';
+import { isMacNavigator, modKey, tabKey, walkStep } from './keyboard.ts';
 
 test('a walk goes on while every stop is new', () => {
   assert.equal(walkStep([], 'a'), 'continue');
@@ -46,4 +46,18 @@ test('Mod is the key the page binds it to: Cmd for a Mac or iOS navigator, Ctrl 
   assert.equal(modKey({ platform: 'Win32', userAgent: chrome }), 'Control');
   assert.equal(modKey({ platform: 'Linux x86_64', userAgent: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/605.1.15' }), 'Control');
   assert.equal(modKey({}), 'Control');
+});
+
+// Regression (nightly run 9103, the reference apps in WebKit on Linux): the page-object `isMac()` read `navigator.platform` alone, which is
+// `Linux x86_64` in Playwright's WebKit on a Linux runner, while the app takes the Mac from the user agent too: the menus drew ⇧⌘H and
+// the spec expected Ctrl+Shift+H. One definition, shared with `modKey`.
+test('the page is a Mac when its platform or its user agent says so, the one test modKey uses', () => {
+  const safari = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15';
+  assert.equal(isMacNavigator({ platform: 'Linux x86_64', userAgent: safari }), true);
+  assert.equal(isMacNavigator({ platform: 'MacIntel' }), true);
+  assert.equal(isMacNavigator({ platform: 'Win32', userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }), false);
+  assert.equal(isMacNavigator({}), false);
+  for (const nav of [{ platform: 'Linux x86_64', userAgent: safari }, { platform: 'Win32' }, {}]) {
+    assert.equal(modKey(nav) === 'Meta', isMacNavigator(nav));
+  }
 });

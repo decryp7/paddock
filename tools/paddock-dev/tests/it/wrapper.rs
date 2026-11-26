@@ -1942,8 +1942,8 @@ fn other_tools_in_the_cache_are_not_counted_as_the_wrappers_own_and_keep_five_of
     let home = scratch.path().join("home");
     let mine: Vec<String> = (0..3).map(|i| format!("old-{i}")).collect();
     old_entries(&home, &mine, "paddock-dev-test-host");
-    let heavy: Vec<String> = (0..7).map(|i| format!("heavy-{i:040x}")).collect();
-    old_entries(&home, &heavy, "heavy");
+    let heavy: Vec<String> = (0..7).map(|i| format!("throttle-{i:040x}")).collect();
+    old_entries(&home, &heavy, "throttle");
     let rustc = fake_rustc(scratch.path(), "rustc", "1.90.0", "aaaa", "test-host");
     let (hash, _) = f.both(&[("RUSTC", rustc.clone())]);
     // A legacy build folder named like a heavy entry is not the wrapper's to remove for it.

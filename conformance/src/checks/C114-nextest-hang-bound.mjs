@@ -118,7 +118,7 @@ export default {
       const shared = named.find(([c, ci]) => files.has(c) && ws.startsWith(`${dirname(ci)}/`))?.[0];
       const config = files.has(own) ? own : shared;
       if (!config) {
-        findings.push(error('C114', 5, ws, 1, `Cargo workspace ${ws} has no nextest config (${own}), so its tests have no time bound`, `Create ${own} (copy tools/heavy/.config/nextest.toml) or name a shared config in this app's paddock.ci.json \`nextestConfig\`. ${next}`));
+        findings.push(error('C114', 5, ws, 1, `Cargo workspace ${ws} has no nextest config (${own}), so its tests have no time bound`, `Create ${own} (copy tools/throttle/.config/nextest.toml) or name a shared config in this app's paddock.ci.json \`nextestConfig\`. ${next}`));
         continue;
       }
       configs.set(config, [...(configs.get(config) ?? []), ws]);

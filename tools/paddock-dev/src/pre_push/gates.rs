@@ -718,29 +718,21 @@ fn member_audits(facts: &Facts) -> Planned {
     Planned::Run(g)
 }
 
-/// `nextest run` with CI's `ci` profile for workspace `ws`: the tests `filter` selects (empty: every test of the workspace); every
-/// feature in `crates`, as CI's crates job; an app's own nextest configuration. `--no-tests=fail`: a selection of nothing is a failure,
-/// never a pass (ER-33).
-fn nextest_args(ws: &str, facts: &Facts, filter: &str) -> Vec<String> {
-    let mut args = strs(&[
-        "nextest",
-        "run",
-        "--profile",
-        "ci",
-        "--locked",
-        "--no-fail-fast",
-        "--no-tests=fail",
-        "--workspace",
-    ]);
-    if ws == "crates" {
-        args.push("--all-features".into());
+/// The member gate's test row: this program's `ci test-cache run` (ADR 0116, ER-49), which runs CI's `ci` profile nextest command ([`crate::test_cache::cmd`], `--no-tests=fail` unless reuse left nothing to run, every feature in `crates`, an app's own nextest configuration) with each package
+/// whose inputs did not change since a green run left out and its pass stored when it passes whole. Reuse is on only when
+/// `docs/test-cache.toml` has recorded two clean shadow runs; until then every package runs and the passes are recorded (shadow). The build
+/// folder goes in as cargo configuration (`--build-dir`), never as `CARGO_TARGET_DIR` (sccache hashes it).
+fn test_cache_args(ws: &str, facts: &Facts, filter: &str) -> Vec<String> {
+    let mut args = strs(&["ci", "test-cache", "run", "--workspace", ws]);
+    if facts.target_dir.is_some() || facts.kept_targets.is_some() {
+        args.extend(["--build-dir".to_string(), build_dir(facts, ws, None)]);
     }
     if let Some(cfg) = facts.nextest_config.get(ws) {
         let up = "../".repeat(ws.split('/').filter(|p| !p.is_empty()).count());
-        args.extend(["--config-file".to_string(), format!("{up}{cfg}")]);
+        args.extend(["--nextest-config".to_string(), format!("{up}{cfg}")]);
     }
     if !filter.trim().is_empty() {
-        args.extend(["-E".to_string(), filter.to_string()]);
+        args.extend(["--filter".to_string(), filter.to_string()]);
     }
     args
 }
@@ -791,23 +783,16 @@ fn member_tests(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> {
             ci_env: true,
             ..gate(
                 format!("tests {ws}"),
-                ws,
-                "cargo",
+                "",
+                "",
                 &[],
                 5,
                 "fix the test it names (its failed tests and first panic are above), then re-run the member gate".into(),
             )
         };
-        g.args = nextest_args(ws, facts, reached_filter(ws, facts));
-        // The build folder goes in as cargo configuration after `run` (sccache hashes CARGO_* variables; nextest takes `--config`).
-        if facts.target_dir.is_some() || facts.kept_targets.is_some() {
-            g.args.splice(
-                2..2,
-                ["--config".to_string(), cargo_target::config_value(&build_dir(facts, ws, None))],
-            );
-        }
+        g.args = test_cache_args(ws, facts, reached_filter(ws, facts));
         g.build_dir = Some(build_dir(facts, ws, None));
-        out.push(Planned::Run(g));
+        out.push(dev_run(facts, g));
     }
     out
 }

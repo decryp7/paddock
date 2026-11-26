@@ -242,7 +242,7 @@
    "hash": "ee768c80f322b855"
   },
   {
-   "file": "tools/heavy/src/probe.rs",
+   "file": "tools/throttle/src/probe.rs",
    "line": 17,
    "hash": "39d9704acaf0a279"
   }

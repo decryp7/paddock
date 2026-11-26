@@ -8,8 +8,8 @@ use std::path::Path;
 
 /// Files outside the dependency folders that cargo reads for this build.
 const EXTRAS: [&str; 3] = ["tools/paddock-dev", "crates/Cargo.toml", ".cargo/config.toml"];
-/// The same for `tools/heavy`, which `./dev check --pre-push` builds on demand under its own hash.
-const HEAVY_EXTRAS: [&str; 3] = ["tools/heavy", "crates/Cargo.toml", ".cargo/config.toml"];
+/// The same for `tools/throttle`, which `./dev check --pre-push` builds on demand under its own hash.
+const HEAVY_EXTRAS: [&str; 3] = ["tools/throttle", "crates/Cargo.toml", ".cargo/config.toml"];
 
 /// The triple this machine builds for. Metadata is read for it alone: the path dependencies are the same on every platform, and
 /// resolving the others would need registry crates (Windows, Android) that an offline machine never downloaded.
@@ -126,14 +126,14 @@ fn dev_dependencies_are_not_inputs() {
 
 #[test]
 fn heavy_inputs_txt_matches_cargo_metadata() {
-    let text = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../heavy/inputs.txt")).unwrap();
+    let text = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../throttle/inputs.txt")).unwrap();
     let listed = paddock_dev::input_hash::parse_inputs(&text).unwrap();
-    let mut expected = path_dependency_folders(&metadata("heavy"));
-    expected.remove("tools/heavy");
+    let mut expected = path_dependency_folders(&metadata("throttle"));
+    expected.remove("tools/throttle");
     expected.extend(HEAVY_EXTRAS.map(String::from));
     let listed_set: BTreeSet<String> = listed.iter().cloned().collect();
-    assert_eq!(listed.len(), listed_set.len(), "tools/heavy/inputs.txt lists a path twice");
-    if let Some(hint) = regenerate_hint("tools/heavy/inputs.txt", &listed_set, &expected) {
+    assert_eq!(listed.len(), listed_set.len(), "tools/throttle/inputs.txt lists a path twice");
+    if let Some(hint) = regenerate_hint("tools/throttle/inputs.txt", &listed_set, &expected) {
         panic!("{hint}");
     }
 }

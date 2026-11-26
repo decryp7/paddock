@@ -1,8 +1,8 @@
 use crate::{
     audit, check, check_ids, ci_build_env, ci_build_jobs, ci_dyno_linux_units, ci_host, ci_isolation, ci_run, ci_runs, ci_rust_pin,
-    ci_s3_guard, ci_setup_rust, disk, gates, generators, heavy_cmd, heavy_install, hook, input_hash, ipc_endpoints, lessons_driver, load,
-    local_sccache, locks, locks_guard, merge_check, places, plan_cmd, pr, pre_push, queue, release_isolation, slots, test_cache,
-    test_features, wait, worktree,
+    ci_s3_guard, ci_setup_rust, deps_cache, disk, gates, generators, heavy_cmd, heavy_install, hook, input_hash, ipc_endpoints,
+    lessons_driver, load, local_sccache, locks, locks_guard, merge_check, places, plan_cmd, pr, pre_push, queue, release_isolation, slots,
+    test_cache, test_features, wait, worktree,
 };
 use clap::{Args, Parser, Subcommand};
 use paddock_cli::{CliError, Exit, Format, Report, finish};
@@ -35,10 +35,13 @@ enum Command {
     },
     /// Wait, with a limit, for a plock job, a process, a line in a file or a CI run. Use it instead of `pgrep -f` loops.
     Wait(wait::WaitArgs),
-    /// Run a command through the machine-wide heavy slot (ER-24), found the way `check --pre-push` finds it; git hooks use it.
-    Heavy(heavy_cmd::HeavyArgs),
-    /// Install the `heavy` binary of a release into `<dev-targets>/heavy/bin`: downloads the asset for this OS, checks its SHA256SUMS entry, renames it into place, records the version.
-    HeavyInstall(heavy_install::InstallArgs),
+    /// Run a command through the machine-wide throttle slot (ER-24), found the way `check --pre-push` finds it; git hooks use it.
+    /// `./dev heavy` is the old name: it still works and prints a one-line deprecation.
+    #[command(alias = "heavy")]
+    Throttle(heavy_cmd::ThrottleArgs),
+    /// Install the `throttle` binary of a release into `<dev-targets>/throttle/bin`: downloads the asset for this OS, checks its SHA256SUMS entry, renames it into place, records the version.
+    #[command(alias = "heavy-install")]
+    ThrottleInstall(heavy_install::InstallArgs),
     /// One line for the coordinator: start, hold or stop for new agents, from the load, the free disk of the dev-targets folder and the CI queue (ER-24).
     Load(load::LoadArgs),
     /// The machine's dev folders, derived from `git config paddock.worktreeRoot` (docs/dev-setup.md): dev-targets, dev-disk,
@@ -85,6 +88,12 @@ enum Command {
     Sccache {
         #[command(subcommand)]
         command: SccacheCommand,
+    },
+    /// The shared cache of `node_modules` and `ui/dist`: `install` and `ui` give this worktree a copy-on-write clone of a result built
+    /// once per content key under `<dev-targets>/cache/npm`, or build it once.
+    Deps {
+        #[command(subcommand)]
+        command: deps_cache::DepsCommand,
     },
     /// Disk watch and clean-up: free-space check, usage report, scan, owner records, clean.
     Disk {
@@ -295,6 +304,10 @@ struct MergeCheckArgs {
     /// printed with the result). The default is an error that says to merge origin/main into the member and rerun its gate.
     #[arg(long, value_name = "REASON")]
     old_base_anyway: Option<String>,
+    /// With `--gates`: measure the member gate from this ref (`origin/main`) instead of the merge's first parent, so it plans the whole
+    /// train's rows and leaves a pass for each: the push hook and the train-audits guard then reuse them on the same tree.
+    #[arg(long, value_name = "REF")]
+    gates_base: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -662,6 +675,7 @@ pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
                     gates: a.gates,
                     write_reverted: a.write_reverted,
                     old_base_anyway: a.old_base_anyway,
+                    gates_base: a.gates_base,
                 },
                 out,
                 err,
@@ -793,8 +807,8 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
             command: CiCommand::GuardRecord(a),
         } => ci_runs::guard_record(&a),
         Command::Wait(a) => wait::command(&a),
-        Command::Heavy(a) => heavy_cmd::command(&a),
-        Command::HeavyInstall(a) => heavy_install::command(&a),
+        Command::Throttle(a) => heavy_cmd::command(&a),
+        Command::ThrottleInstall(a) => heavy_install::command(&a),
         Command::Load(a) => load::command(&a),
         Command::Places(a) => places::command(&a),
         Command::Audit { command } => audit::command(command),
@@ -856,6 +870,7 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
             command: CheckCommand::TestFeatures { app, root },
         } => test_features::command(root, app),
         Command::Worktree { command } => worktree::command(command),
+        Command::Deps { command } => deps_cache::command(command),
         Command::Sccache {
             command: SccacheCommand::Env,
         } => {
@@ -884,6 +899,7 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
             gates: a.gates,
             write_reverted: a.write_reverted,
             old_base_anyway: a.old_base_anyway,
+            gates_base: a.gates_base,
         }),
         Command::Merge {
             command: MergeCommand::SyncMember(a),

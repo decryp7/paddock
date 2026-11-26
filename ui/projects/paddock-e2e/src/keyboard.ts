@@ -40,7 +40,12 @@ export interface NavigatorPlatform {
  * `devices['Desktop Safari']`, a Mac, so the app wants Cmd there while `ControlOrMeta` presses Ctrl (CI run 7134). Pure.
  */
 export function modKey(nav: NavigatorPlatform): 'Meta' | 'Control' {
-  return /Mac|iPhone|iPad/.test(`${nav.platform ?? ''} ${nav.userAgent ?? ''}`) ? 'Meta' : 'Control';
+  return isMacNavigator(nav) ? 'Meta' : 'Control';
+}
+
+/** Whether the page runs on a Mac (its keys read ⌘): the platform or the user agent says Mac, iPhone or iPad, as the app decides it. Pure. */
+export function isMacNavigator(nav: NavigatorPlatform): boolean {
+  return /Mac|iPhone|iPad/.test(`${nav.platform ?? ''} ${nav.userAgent ?? ''}`);
 }
 
 /** {@link modKey} for the page's own navigator. */
