@@ -4397,3 +4397,12 @@ spec `data.spec.ts:301` (theme switch redraws the canvases) failed in the same r
   fixture author that a per-test git repository is the slow shape.
 - **Fix (user decision 74).** The helper moved to `paddock_testkit::git_fixture` (temp folder from the kit, owner, size limit and eviction
   rule in its doc), and rule NEW-git-fixtures with the report-only check C174 flags a fixture builder with six or more git starts per test.
+
+## Fix item: a FLAKY paddock-ipc link-server test on macOS in run 9150, recorded by hand (2026-11-26)
+`paddock-ipc::it edges::a_link_server_with_no_descriptor_left_to_accept_tells_the_waiting_client_why` was FLAKY on macOS in ci.yml run
+9150 on 4ee7d98fc (train 2026-11-26-r's landed head): try 1 failed at `crates/paddock-ipc/tests/it/edges.rs:470`, the assertion that the
+server records why it refused, with `refused: []` (no reason recorded), and try 2 passed. Train r did not touch paddock-ipc, so it did not
+block the landing (ER-12). `./dev ci fix-items` could not record it because the push-reuse chain broke on that landing (a reused push
+verdict, fixed on `fix/reuse-chain-reused-verdict`), so it is recorded here. Same crate as the `ipc-link-server busy` Windows flakes
+above. A fix item for the crate's owner: a failing reproduction first, with the causes listed and what rules each out (ER-28); never a
+sleep or a raised limit.
