@@ -7,6 +7,7 @@
 #   .app seal verifies (ad-hoc is fine; a linker-signed bundle is refused by SMAppService), and that the agent and the dyno command are bundled;
 #   the sidecars' code-signing identifiers (Dyno ADR 0026: they must start with net.decryptology.dyno.), then the agent measures once from the built .app (`dyno-agent once`, read-only: the real-app smoke). The hardened runtime,
 #   TeamIdentifier and sidecar-start checks (Paddock rule 23) are the shared macos-verify action's, run by app-release.yml.
+#   scripts/check-bundle.sh --launch-view <dyno-agent>   only the agent's launchd view, by hand in a login session (NOT MEASURED in CI, ER-60).
 # app-release.yml runs it through `bundle-check` (dyno-release.yml), from the repository root.
 # Windows is not checked here (no run paths); the Windows runner's tests and the installer smoke cover it.
 set -euo pipefail
@@ -21,6 +22,44 @@ ok_path() {
     *) return 1 ;;
   esac
 }
+
+# The bundled agent's socket view, run as a launchd job the way the login service starts it. The identifier on disk is not the whole story
+# (Dyno 1.0.0 had the right one and the Network page still showed only the agent's own sockets): `dyno-agent view` prints
+# `identifier=… announced=… sent=… cut_down=…`. It needs the user's launchd session (gui/<uid>); the CI Mac is a LaunchDaemon with no login
+# session (ADR 0120, ER-60), where this step is NOT MEASURED, never a pass: it is run by hand in the user's session before a Dyno tag
+# (apps/dyno/docs/releasing.md): `scripts/check-bundle.sh --launch-view <the .app>/Contents/MacOS/dyno-agent`.
+# A launchd job is its own responsible process: its output files go on the boot volume, never on an external one, where
+# macOS (TCC, Removable Volumes) prompts or denies (conformance/ci/boot-volume.sh, the one rule; docs/lessons.md).
+launch_view() {
+  local agent="$1" view_root view label sub_err state line
+  if ! launchctl print "gui/$(id -u)" > /dev/null 2>&1; then
+    echo "::warning::the agent-launch step (the bundled dyno-agent view as a launchd job) is NOT MEASURED: no login session (launchd domain gui/$(id -u)) on this CI service runner (ER-60). Next step: run scripts/check-bundle.sh --launch-view <.app>/Contents/MacOS/dyno-agent by hand in your session before the tag."
+    return 0
+  fi
+  view_root="$(bash "$(cd "$(dirname "$0")/../../.." && pwd)/conformance/ci/boot-volume.sh" temp "${TMPDIR:-/tmp}")" || view_root="${TMPDIR:-/tmp}"
+  view="$(mktemp "${view_root%/}/dyno-view-ci.XXXXXX")"
+  label="net.decryptology.dyno.checkbundle.$$"
+  sub_err="$(launchctl submit -l "$label" -o "$view" -e "$view.err" -- "$agent" view 2>&1)" || { err "launchctl could not start the bundled dyno-agent view: ${sub_err:-no output}"; return 0; }
+  for _ in $(seq 1 100); do [[ -s "$view" || -s "$view.err" ]] && break; sleep 0.2; done
+  if [[ ! -s "$view" && ! -s "$view.err" ]]; then
+    # Neither output file got a byte in 20 s: the job did not run or could not open them. Say what launchd knows.
+    state="$(launchctl print "gui/$(id -u)/$label" 2>&1 | grep -E 'state =|last exit code|exit status|spawn' | tr -s ' \t' ' ' | paste -sd';' - | head -c 400 || true)"
+    err "the launchd job $label (dyno-agent view, output in $view) wrote nothing in 20 s; launchctl print: ${state:-nothing}; TMPDIR=${TMPDIR:-unset}, output folder $view_root (macOS denies a launchd job a folder on an external volume, TCC Removable Volumes: see conformance/ci/boot-volume.sh); this is not a code-signing identifier problem"
+    return 0
+  fi
+  launchctl remove "$label" 2>/dev/null || true
+  line="$(head -n 1 "$view")"
+  echo "bundled agent socket view (as a launchd job): ${line:-none} $(head -c 300 "$view.err" 2>/dev/null)"
+  rm -f "$view" "$view.err"
+  [[ -z "$line" ]] || [[ "$line" =~ identifier=net\.decryptology\.dyno\. ]] || err "the running bundled agent reports '${line:-nothing}': its code-signing identifier is not net.decryptology.dyno.* (ADR 0026)"
+  # The kernel hides other programs' sockets from a cut-down view only on macOS 27 (ADR 0026).
+  if [[ "$(sw_vers -productVersion | cut -d. -f1)" -ge 27 && "$line" == *"cut_down=true"* ]]; then
+    err "macOS showed the bundled agent only its own sockets even as a launchd job ('$line'): the Network page would be empty (ADR 0026)"
+  fi
+}
+
+# By hand, in a login session: only the launch step, on the bundled dyno-agent given as the argument (the one the CI Mac cannot run).
+if [[ "$bundle" == --launch-view ]]; then launch_view "${2:?path of the bundled dyno-agent}"; exit "$fail"; fi
 
 case "$(uname -s)" in
   Linux)
@@ -127,31 +166,7 @@ case "$(uname -s)" in
       "$agent" once > "$out" || err "the bundled dyno-agent could not measure once"
       head -c 400 "$out"; echo
       rm -f "$out"
-      # The identifier on disk is not the whole story (Dyno 1.0.0 had the right one and the Network page still showed only the
-      # agent's own sockets): ask the running bundled agent what it is shown, started the way the login service starts it, as a
-      # launchd job. `dyno-agent view` prints `identifier=… announced=… sent=… cut_down=…`.
-      # A launchd job is its own responsible process: its output files go on the boot volume, never on an external one, where
-      # macOS (TCC, Removable Volumes) prompts or denies (conformance/ci/boot-volume.sh, the one rule; docs/lessons.md).
-      view_root="$(bash "$(cd "$(dirname "$0")/../../.." && pwd)/conformance/ci/boot-volume.sh" temp "${TMPDIR:-/tmp}")" || view_root="${TMPDIR:-/tmp}"
-      view="$(mktemp "${view_root%/}/dyno-view-ci.XXXXXX")"
-      label="net.decryptology.dyno.checkbundle.$$"
-      launchctl submit -l "$label" -o "$view" -e "$view.err" -- "$agent" view || err "launchctl could not start the bundled dyno-agent view"
-      for _ in $(seq 1 100); do [[ -s "$view" || -s "$view.err" ]] && break; sleep 0.2; done
-      if [[ ! -s "$view" && ! -s "$view.err" ]]; then
-        # Neither output file got a byte in 20 s: the job did not run or could not open them. Say what launchd knows.
-        state="$(launchctl print "gui/$(id -u)/$label" 2>&1 | grep -E 'state =|last exit code|exit status|spawn' | tr -s ' \t' ' ' | paste -sd';' - | head -c 400 || true)"
-        [[ -n "$state" ]] || state="$(launchctl print "user/$(id -u)/$label" 2>&1 | head -c 300 | tr '\n' ';' || true)"
-        err "the launchd job $label (dyno-agent view, output in $view) wrote nothing in 20 s; launchctl print: ${state:-nothing}; TMPDIR=${TMPDIR:-unset}, output folder $view_root (macOS denies a launchd job a folder on an external volume, TCC Removable Volumes: see conformance/ci/boot-volume.sh); this is not a code-signing identifier problem"
-      fi
-      launchctl remove "$label" 2>/dev/null || true
-      line="$(head -n 1 "$view")"
-      echo "bundled agent socket view (as a launchd job): ${line:-none} $(head -c 300 "$view.err" 2>/dev/null)"
-      rm -f "$view" "$view.err"
-      [[ -z "$line" ]] || [[ "$line" =~ identifier=net\.decryptology\.dyno\. ]] || err "the running bundled agent reports '${line:-nothing}': its code-signing identifier is not net.decryptology.dyno.* (ADR 0026)"
-      # The kernel hides other programs' sockets from a cut-down view only on macOS 27 (ADR 0026).
-      if [[ "$(sw_vers -productVersion | cut -d. -f1)" -ge 27 && "$line" == *"cut_down=true"* ]]; then
-        err "macOS showed the bundled agent only its own sockets even as a launchd job ('$line'): the Network page would be empty (ADR 0026)"
-      fi
+      launch_view "$agent"
     fi
     ;;
   *)
