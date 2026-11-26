@@ -17,7 +17,6 @@ use paddock_cli::{CliError, Exit, Report};
 use paddock_proc::{Limits, run_bounded};
 use paddock_repo_graph::GitHistory;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::time::Duration;
 
 const READ_TIMEOUT: Duration = Duration::from_secs(120);
@@ -58,7 +57,9 @@ fn fail(m: String) -> CliError {
 }
 
 fn now() -> u64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs())
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs())
 }
 
 /// The local store's folder: `<git common dir>/paddock-pre-push/test-cache`, beside the gate rows' records.
@@ -93,18 +94,32 @@ fn candidates(root: &Path, workspace: &str) -> Result<Vec<Candidate>, CliError> 
     }
     let world = crate::repo_model::build_world(root, &history, &graph, None).map_err(fail)?;
     let text = |f: &str| std::fs::read_to_string(root.join(f)).ok();
-    let tree = crate::repo_model::hash::Tree { files: &world.files, text: &text };
+    let tree = crate::repo_model::hash::Tree {
+        files: &world.files,
+        text: &text,
+    };
     let vars: Vec<(String, String)> = crate::process_env::vars().collect();
     let env = |k: &str| std::env::var(k).ok();
-    let ctx = crate::repo_model::hash::HashEnv { env: &env, vars: &vars, os: std::env::consts::OS };
+    let ctx = crate::repo_model::hash::HashEnv {
+        env: &env,
+        vars: &vars,
+        os: std::env::consts::OS,
+    };
     let nodes: Vec<String> = ts.iter().map(|t| t.node.clone()).collect();
     let hashes = crate::repo_model::hash::node_hashes(&crate::input_hash::Real, &ctx, root, &world, &tree, &nodes)?;
     ts.into_iter()
         .map(|t| {
-            let h = hashes
-                .get(&t.node)
-                .ok_or_else(|| fail(format!("::error::ci test-cache: no input hash for {}. Next step: run `./dev plan --hash {}`.", t.node, t.node)))?;
-            Ok(Candidate { target: t, node_hash: h.hash.clone(), dirty: h.dirty })
+            let h = hashes.get(&t.node).ok_or_else(|| {
+                fail(format!(
+                    "::error::ci test-cache: no input hash for {}. Next step: run `./dev plan --hash {}`.",
+                    t.node, t.node
+                ))
+            })?;
+            Ok(Candidate {
+                target: t,
+                node_hash: h.hash.clone(),
+                dirty: h.dirty,
+            })
         })
         .collect()
 }
@@ -131,7 +146,9 @@ pub fn command(a: &TestCacheArgs) -> Result<Report, CliError> {
         match super::s3::S3Store::from_env(&env, store_dir(&root).join("scratch")) {
             Ok(s) => Some(s),
             Err(w) => {
-                crate::log_text::eline(&format!("::notice::test-cache: the shared store is not used: {w}. The local store is."));
+                crate::log_text::eline(&format!(
+                    "::notice::test-cache: the shared store is not used: {w}. The local store is."
+                ));
                 None
             }
         }
@@ -151,20 +168,34 @@ pub fn command(a: &TestCacheArgs) -> Result<Report, CliError> {
                 let want: Vec<&str> = only.split(',').collect();
                 cands.retain(|c| want.contains(&c.target.package.as_str()));
                 if cands.len() != want.len() {
-                    return Err(fail(format!("::error::ci test-cache: --only names a package the workspace `{}` does not have. Next step: check the names.", a.workspace)));
+                    return Err(fail(format!(
+                        "::error::ci test-cache: --only names a package the workspace `{}` does not have. Next step: check the names.",
+                        a.workspace
+                    )));
                 }
             }
             run(a, &root, &cfg, &cands, store)
         }
-        other => Err(fail(format!("::error::ci test-cache: unknown action `{other}`. Next step: use `run`, `lookup` or `audit`."))),
+        other => Err(fail(format!(
+            "::error::ci test-cache: unknown action `{other}`. Next step: use `run`, `lookup` or `audit`."
+        ))),
     }
 }
 
 fn audit(store: &FsStore) -> Report {
     let (bytes, n, oldest) = store.usage();
-    let age = oldest.map_or("no record".to_string(), |o| format!("oldest {} days old", now().saturating_sub(o) / 86400));
-    let warn = if bytes > (1 << 30) { "\n::warning::ci test-cache audit: the store is over 1 GiB. Next step: lower `EVICT_AFTER` or delete the folder." } else { "" };
-    Report::new(serde_json::json!({"records": n, "bytes": bytes}), format!("test-cache store: {n} records, {bytes} bytes, {age}{warn}"))
+    let age = oldest.map_or("no record".to_string(), |o| {
+        format!("oldest {} days old", now().saturating_sub(o) / 86400)
+    });
+    let warn = if bytes > (1 << 30) {
+        "\n::warning::ci test-cache audit: the store is over 1 GiB. Next step: lower `EVICT_AFTER` or delete the folder."
+    } else {
+        ""
+    };
+    Report::new(
+        serde_json::json!({"records": n, "bytes": bytes}),
+        format!("test-cache store: {n} records, {bytes} bytes, {age}{warn}"),
+    )
 }
 
 fn run(a: &TestCacheArgs, root: &Path, cfg: &Config, cands: &[Candidate], store: &dyn Store) -> Result<Report, CliError> {
@@ -173,7 +204,10 @@ fn run(a: &TestCacheArgs, root: &Path, cfg: &Config, cands: &[Candidate], store:
     let mut text: Vec<String> = Vec::new();
     // Whether this run may read at all, and what the lookup said.
     let (decisions, notice) = match read_allowed(&env_get) {
-        Err(why) => (cands.iter().map(|_| Decision::Run(super::Why::Off(why.clone()))).collect(), Some(why)),
+        Err(why) => (
+            cands.iter().map(|_| Decision::Run(super::Why::Off(why.clone()))).collect(),
+            Some(why),
+        ),
         Ok(()) => decide(cands, cfg, &class, store, now(), &|_| Ok(())),
     };
     if let Some(n) = notice {
@@ -201,8 +235,15 @@ fn run(a: &TestCacheArgs, root: &Path, cfg: &Config, cands: &[Candidate], store:
         }
     }
     if a.action == "lookup" {
-        text.push(format!("test-cache: {} targets, {reused} would be reused, {} would run", cands.len(), left.len()));
-        return Ok(Report::new(serde_json::json!({"targets": cands.len(), "reused": reused}), text.join("\n")));
+        text.push(format!(
+            "test-cache: {} targets, {reused} would be reused, {} would run",
+            cands.len(),
+            left.len()
+        ));
+        return Ok(Report::new(
+            serde_json::json!({"targets": cands.len(), "reused": reused}),
+            text.join("\n"),
+        ));
     }
     let mut findings = 0;
     let mut ran_secs = 0.0;
@@ -233,7 +274,11 @@ fn run(a: &TestCacheArgs, root: &Path, cfg: &Config, cands: &[Candidate], store:
                     });
                 }
             } else {
-                let why = judged.not_passed.iter().find(|(q, _)| q == p).map_or("no verdict", |(_, w)| w.as_str());
+                let why = judged
+                    .not_passed
+                    .iter()
+                    .find(|(q, _)| q == p)
+                    .map_or("no verdict", |(_, w)| w.as_str());
                 if matched.iter().any(|m| m.target.id == c.target.id) {
                     findings += 1;
                     text.push(format!(
@@ -253,7 +298,10 @@ fn run(a: &TestCacheArgs, root: &Path, cfg: &Config, cands: &[Candidate], store:
             text.push(format!("test-cache: stored {} pass(es)", put.len()));
         }
         if !out.1 {
-            text.push(format!("{}\n::error::ci test-cache: nextest failed. Next step: fix the test it names above.", tail(&out.0)));
+            text.push(format!(
+                "{}\n::error::ci test-cache: nextest failed. Next step: fix the test it names above.",
+                tail(&out.0)
+            ));
         }
     }
     text.push(format!(
@@ -264,7 +312,11 @@ fn run(a: &TestCacheArgs, root: &Path, cfg: &Config, cands: &[Candidate], store:
         ran_secs
     ));
     let data = serde_json::json!({"targets": cands.len(), "reused": reused, "ran": left.len(), "findings": findings});
-    let exit = if findings > 0 || text.iter().any(|l| l.contains("nextest failed")) { Exit::Findings } else { Exit::Ok };
+    let exit = if findings > 0 || text.iter().any(|l| l.contains("nextest failed")) {
+        Exit::Findings
+    } else {
+        Exit::Ok
+    };
     Ok(Report::new(data, text.join("\n")).with_exit(exit))
 }
 
@@ -276,7 +328,7 @@ fn tail(log: &str) -> String {
 /// The runner's OS build as observed (`uname -sr`): reported in each record, never keyed (decision D5).
 /// The runner's OS build as observed (`uname -sr`): reported in each record, never keyed (decision D5).
 fn os_build() -> String {
-    let mut cmd = Command::new("uname");
+    let mut cmd = paddock_proc::command("uname");
     cmd.arg("-sr");
     run_bounded(cmd, Limits::new(Duration::from_secs(10)))
         .ok()
@@ -287,13 +339,20 @@ fn os_build() -> String {
 
 /// One nextest run of `asked` (every package when `whole`), its output and whether it succeeded.
 fn nextest(a: &TestCacheArgs, root: &Path, cfg: &Config, asked: &[String], whole: bool) -> Result<(String, bool), CliError> {
-    let mut cmd = Command::new("cargo");
+    let mut cmd = paddock_proc::command("cargo");
     cmd.current_dir(root.join(&a.workspace));
     cmd.arg("nextest").arg("run");
     if let Some(d) = &a.build_dir {
         cmd.arg("--config").arg(crate::cargo_target::config_value(d));
     }
-    cmd.args(["--profile", &cfg.profile, "--locked", "--no-fail-fast", "--no-tests=warn", "--workspace"]);
+    cmd.args([
+        "--profile",
+        &cfg.profile,
+        "--locked",
+        "--no-fail-fast",
+        "--no-tests=warn",
+        "--workspace",
+    ]);
     if a.workspace == "crates" {
         cmd.arg("--all-features");
     }
@@ -302,8 +361,11 @@ fn nextest(a: &TestCacheArgs, root: &Path, cfg: &Config, asked: &[String], whole
         cmd.args(["-E", &filter]);
     }
     cmd.env("RUSTUP_AUTO_INSTALL", "0");
-    let out = run_bounded(cmd, Limits::new(RUN_TIMEOUT).max_output(1 << 28))
-        .map_err(|e| fail(format!("::error::ci test-cache: nextest did not run: {e}. Next step: install cargo-nextest (`cargo install cargo-nextest --locked`).")))?;
+    let out = run_bounded(cmd, Limits::new(RUN_TIMEOUT).max_output(1 << 28)).map_err(|e| {
+        fail(format!(
+            "::error::ci test-cache: nextest did not run: {e}. Next step: install cargo-nextest (`cargo install cargo-nextest --locked`)."
+        ))
+    })?;
     let text = format!("{}\n{}", out.stdout_text(), out.stderr_text());
     Ok((text, out.success()))
 }

@@ -19,7 +19,11 @@ fn cfg() -> Config {
 }
 
 fn cand(dir: &str, hash: &str) -> Candidate {
-    Candidate { target: Target::rust(dir, dir, "crates"), node_hash: hash.into(), dirty: false }
+    Candidate {
+        target: Target::rust(dir, dir, "crates"),
+        node_hash: hash.into(),
+        dirty: false,
+    }
 }
 
 fn rec(c: &Candidate, class: &RunnerClass, at: u64) -> Record {
@@ -53,9 +57,33 @@ fn the_key_changes_with_each_part_and_only_with_them() {
     assert_ne!(base, p(2, &linux, "ci"), "the epoch");
     assert_ne!(base, p(1, &RunnerClass::of("windows", "x86_64"), "ci"), "the runner class");
     assert_ne!(base, p(1, &linux, "default"), "the profile");
-    assert_ne!(base, key(&t, "sha256:2", &KeyParts { epoch: 1, class: &linux, profile: "ci" }), "the node hash");
+    assert_ne!(
+        base,
+        key(
+            &t,
+            "sha256:2",
+            &KeyParts {
+                epoch: 1,
+                class: &linux,
+                profile: "ci"
+            }
+        ),
+        "the node hash"
+    );
     let other = Target::rust("crates/b", "b", "crates");
-    assert_ne!(base, key(&other, "sha256:1", &KeyParts { epoch: 1, class: &linux, profile: "ci" }), "the target");
+    assert_ne!(
+        base,
+        key(
+            &other,
+            "sha256:1",
+            &KeyParts {
+                epoch: 1,
+                class: &linux,
+                profile: "ci"
+            }
+        ),
+        "the target"
+    );
     assert_eq!(RunnerClass::of("macos", "aarch64").0, "macOS-ARM64");
 }
 
@@ -75,9 +103,15 @@ fn the_shipped_config_is_in_shadow_and_two_distinct_green_runs_switch_it_on() {
 #[test]
 fn removing_a_never_cached_entry_is_found_and_adding_one_is_not() {
     let with = |l: &str| CFG.replace("no_test_cache = []", &format!("no_test_cache = [{l}]"));
-    assert_eq!(removed(&with("\"crate:a\", \"crate:b\""), &with("\"crate:a\"")).unwrap(), vec!["crate:b".to_string()]);
+    assert_eq!(
+        removed(&with("\"crate:a\", \"crate:b\""), &with("\"crate:a\"")).unwrap(),
+        vec!["crate:b".to_string()]
+    );
     assert!(removed(&with("\"crate:a\""), &with("\"crate:a\", \"crate:b\"")).unwrap().is_empty());
-    assert!(removed(&with("\"crate:a\""), "not toml [").is_err(), "a broken file is never a pass");
+    assert!(
+        removed(&with("\"crate:a\""), "not toml [").is_err(),
+        "a broken file is never a pass"
+    );
 }
 
 fn names(v: &[&str]) -> Vec<String> {
@@ -86,8 +120,12 @@ fn names(v: &[&str]) -> Vec<String> {
 
 /// A whole run of one passing test, in the status lines nextest 0.9.149 prints (as the captured fixtures show them).
 fn clean_log() -> String {
-    ["    Starting 1 test across 1 binary", "        PASS [   0.061s] (1/1) nxflaky t::passes", "     Summary [   0.061s] 1 test run: 1 passed, 0 skipped"]
-        .join("\n")
+    [
+        "    Starting 1 test across 1 binary",
+        "        PASS [   0.061s] (1/1) nxflaky t::passes",
+        "     Summary [   0.061s] 1 test run: 1 passed, 0 skipped",
+    ]
+    .join("\n")
 }
 
 #[test]
@@ -117,7 +155,10 @@ fn a_failed_or_retried_or_flaky_test_never_makes_a_pass() {
 fn a_run_cut_short_or_without_the_package_is_not_a_pass() {
     let log = clean_log();
     let cut: String = log.lines().filter(|l| !l.contains("Summary")).collect::<Vec<_>>().join("\n");
-    assert!(judge(&cut, &names(&["nxflaky"])).passed.is_empty(), "no summary: crashed or stopped");
+    assert!(
+        judge(&cut, &names(&["nxflaky"])).passed.is_empty(),
+        "no summary: crashed or stopped"
+    );
     assert!(judge(&log, &names(&["other"])).passed.is_empty(), "a package the log never ran");
     assert!(judge("nothing here", &names(&["nxflaky"])).passed.is_empty());
 }
@@ -173,18 +214,30 @@ fn never_cached_dirty_old_and_untrusted_records_run() {
     s.put_many(&[rec(&a, &class, NOW - 3600)]).unwrap();
     let mut c = cfg();
     c.no_test_cache = vec!["crate:crates/a".into()];
-    assert_eq!(decide(&[a.clone()], &c, &class, &s, NOW, OK).0[0], Decision::Run(Why::Never));
+    assert_eq!(
+        decide(std::slice::from_ref(&a), &c, &class, &s, NOW, OK).0[0],
+        Decision::Run(Why::Never)
+    );
     let mut dirty = a.clone();
     dirty.dirty = true;
     assert_eq!(decide(&[dirty], &cfg(), &class, &s, NOW, OK).0[0], Decision::Run(Why::Dirty));
     // 48 hours while the nightly is paused, no limit once it runs.
     let old = NOW + 49 * 3600;
-    assert_eq!(decide(&[a.clone()], &cfg(), &class, &s, old, OK).0[0], Decision::Run(Why::TooOld));
+    assert_eq!(
+        decide(std::slice::from_ref(&a), &cfg(), &class, &s, old, OK).0[0],
+        Decision::Run(Why::TooOld)
+    );
     let mut running = cfg();
     running.nightly_paused = false;
-    assert!(matches!(decide(&[a.clone()], &running, &class, &s, old, OK).0[0], Decision::Reuse(_)));
+    assert!(matches!(
+        decide(std::slice::from_ref(&a), &running, &class, &s, old, OK).0[0],
+        Decision::Reuse(_)
+    ));
     let deny: &dyn Fn(&Record) -> Result<(), String> = &|_| Err("run 8635 is on a branch".into());
-    assert!(matches!(decide(&[a], &cfg(), &class, &s, NOW, deny).0[0], Decision::Run(Why::Untrusted(_))));
+    assert!(matches!(
+        decide(&[a], &cfg(), &class, &s, NOW, deny).0[0],
+        Decision::Run(Why::Untrusted(_))
+    ));
 }
 
 #[test]
@@ -193,7 +246,7 @@ fn a_corrupt_or_foreign_record_is_a_miss() {
     let class = RunnerClass::here();
     let a = cand("crates/a", "h");
     let r = rec(&a, &class, NOW);
-    s.put_many(&[r.clone()]).unwrap();
+    s.put_many(std::slice::from_ref(&r)).unwrap();
     let file = std::fs::read_dir(d.path().join("tc")).unwrap().next().unwrap().unwrap().path();
     let mut f = vec![file];
     let mut json = None;
@@ -206,7 +259,10 @@ fn a_corrupt_or_foreign_record_is_a_miss() {
     }
     let json = json.unwrap();
     std::fs::write(&json, "{not json").unwrap();
-    assert_eq!(decide(&[a.clone()], &cfg(), &class, &s, NOW, OK).0[0], Decision::Run(Why::Miss));
+    assert_eq!(
+        decide(std::slice::from_ref(&a), &cfg(), &class, &s, NOW, OK).0[0],
+        Decision::Run(Why::Miss)
+    );
     // A record of another key sitting under this key's name is refused by its own fields.
     let mut other = r.clone();
     other.key = "deadbeef".into();
@@ -220,7 +276,10 @@ fn eviction_removes_old_records_only() {
     let class = RunnerClass::here();
     let a = cand("crates/a", "h");
     s.put_many(&[rec(&a, &class, NOW)]).unwrap();
-    let real_now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+    let real_now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
     assert_eq!(s.evict(real_now, super::store::EVICT_AFTER), 0);
     assert_eq!(s.evict(real_now + 31 * 24 * 3600, super::store::EVICT_AFTER), 1);
     assert_eq!(s.usage().1, 0);
@@ -238,9 +297,15 @@ fn tags_releases_the_nightly_and_an_off_dispatch_read_nothing() {
     assert!(read_allowed(&env(&[("GITHUB_REF", "refs/heads/train/x")])).is_ok());
     for e in [
         vec![("GITHUB_REF", "refs/tags/v1.0.0")],
-        vec![("GITHUB_WORKFLOW_REF", "decryp7/paddock/.gitea/workflows/dyno-release.yml@refs/heads/main")],
+        vec![(
+            "GITHUB_WORKFLOW_REF",
+            "decryp7/paddock/.gitea/workflows/dyno-release.yml@refs/heads/main",
+        )],
         vec![("GITHUB_WORKFLOW_REF", "decryp7/paddock/.gitea/workflows/tag.yml@refs/heads/main")],
-        vec![("GITHUB_WORKFLOW_REF", "decryp7/paddock/.gitea/workflows/nightly.yml@refs/heads/main")],
+        vec![(
+            "GITHUB_WORKFLOW_REF",
+            "decryp7/paddock/.gitea/workflows/nightly.yml@refs/heads/main",
+        )],
         vec![("GITHUB_EVENT_NAME", "schedule")],
         vec![("PLAN_TEST_CACHE", "off")],
     ] {
@@ -253,7 +318,10 @@ fn only_main_and_train_runs_write_in_ci_and_never_a_rerun() {
     let ci = |r: &'static str| vec![("GITHUB_ACTIONS", "true"), ("GITHUB_REF", r)];
     assert!(write_allowed(&env(&ci("refs/heads/main"))).is_ok());
     assert!(write_allowed(&env(&ci("refs/heads/train/2026-11-26-m"))).is_ok());
-    assert!(write_allowed(&env(&ci("refs/heads/feat/x"))).is_err(), "a branch run reads, never writes");
+    assert!(
+        write_allowed(&env(&ci("refs/heads/feat/x"))).is_err(),
+        "a branch run reads, never writes"
+    );
     let mut rerun = ci("refs/heads/main");
     rerun.push(("PLAN_SINCE_RUN", "8635"));
     assert!(write_allowed(&env(&rerun)).is_err());

@@ -102,7 +102,9 @@ impl Config {
             switch: Switch { green_runs },
         };
         if c.nightly_paused && c.max_age_hours == 0 {
-            return Err(bad("max_age_hours must be above 0 while nightly_paused (a zero limit refuses every record)".into()));
+            return Err(bad(
+                "max_age_hours must be above 0 while nightly_paused (a zero limit refuses every record)".into(),
+            ));
         }
         Ok(c)
     }
@@ -117,7 +119,11 @@ impl Config {
     /// Shadow until [`GREEN_RUNS_TO_SWITCH`] distinct runs are recorded.
     pub fn mode(&self) -> Mode {
         let runs: BTreeSet<&u64> = self.switch.green_runs.iter().collect();
-        if runs.len() >= GREEN_RUNS_TO_SWITCH { Mode::On } else { Mode::Shadow }
+        if runs.len() >= GREEN_RUNS_TO_SWITCH {
+            Mode::On
+        } else {
+            Mode::Shadow
+        }
     }
 
     /// The oldest record a run accepts: `None` when the nightly runs (it is the net).

@@ -76,7 +76,11 @@ impl Record {
             .ok()
             .and_then(|s| jiff::Timestamp::from_second(s).ok())
             .map_or_else(|| format!("unix {}", self.at), |t| t.strftime("%Y-%m-%d").to_string());
-        let job = if self.job.is_empty() { String::new() } else { format!(" job {}", self.job) };
+        let job = if self.job.is_empty() {
+            String::new()
+        } else {
+            format!(" job {}", self.job)
+        };
         format!(
             "test-cache: reused target={}@{} key={} from run {}{job} (commit {}, {} tests, {when})",
             self.target,
@@ -130,7 +134,16 @@ pub fn rel_path(target: &str, class: &RunnerClass, key: &str) -> String {
 }
 
 fn slug(target: &str) -> String {
-    target.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '.' { c } else { '_' }).collect()
+    target
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '.' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
 }
 
 impl FsStore {
@@ -147,7 +160,10 @@ impl FsStore {
     pub fn evict(&self, now: u64, after: Duration) -> usize {
         let mut gone = 0;
         for f in self.files() {
-            let at = std::fs::metadata(&f).and_then(|m| m.modified()).ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok());
+            let at = std::fs::metadata(&f)
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok());
             if at.is_some_and(|a| now.saturating_sub(a.as_secs()) > after.as_secs()) && std::fs::remove_file(&f).is_ok() {
                 gone += 1;
             }

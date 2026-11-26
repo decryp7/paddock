@@ -80,7 +80,15 @@ pub enum Decision {
 
 /// The key of a candidate under `cfg` on `class`.
 pub fn key_of(c: &Candidate, cfg: &Config, class: &RunnerClass) -> String {
-    key(&c.target, &c.node_hash, &KeyParts { epoch: cfg.epoch, class, profile: &cfg.profile })
+    key(
+        &c.target,
+        &c.node_hash,
+        &KeyParts {
+            epoch: cfg.epoch,
+            class,
+            profile: &cfg.profile,
+        },
+    )
 }
 
 /// One decision per candidate, in order, from one bulk lookup. A store that errors turns reuse off for every target (fail open,
@@ -101,7 +109,11 @@ pub fn decide(
             at.push(None);
         } else {
             at.push(Some(asks.len()));
-            asks.push(Lookup { target: c.target.id.clone(), class: class.clone(), key: key_of(c, cfg, class) });
+            asks.push(Lookup {
+                target: c.target.id.clone(),
+                class: class.clone(),
+                key: key_of(c, cfg, class),
+            });
         }
     }
     let found = match store.get_many(&asks) {
@@ -178,5 +190,12 @@ pub fn exclude_filter(reused: &[&Target]) -> String {
     if reused.is_empty() {
         return String::new();
     }
-    format!("not ({})", reused.iter().map(|t| format!("package(={})", t.package)).collect::<Vec<_>>().join(" | "))
+    format!(
+        "not ({})",
+        reused
+            .iter()
+            .map(|t| format!("package(={})", t.package))
+            .collect::<Vec<_>>()
+            .join(" | ")
+    )
 }

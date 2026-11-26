@@ -53,8 +53,17 @@ impl S3Store {
             .cloned()
             .unwrap_or_else(|| crate::local_sccache::DEFAULT_S3_ENDPOINT.to_string());
         let ssl = env.get("PADDOCK_SCCACHE_S3_SSL").is_some_and(|v| v == "true");
-        let region = env.get("PADDOCK_SCCACHE_S3_REGION").filter(|v| !v.is_empty()).cloned().unwrap_or_else(|| "auto".into());
-        Ok(S3Store { base: format!("{}://{endpoint}", if ssl { "https" } else { "http" }), region, keys: (id, secret), scratch })
+        let region = env
+            .get("PADDOCK_SCCACHE_S3_REGION")
+            .filter(|v| !v.is_empty())
+            .cloned()
+            .unwrap_or_else(|| "auto".into());
+        Ok(S3Store {
+            base: format!("{}://{endpoint}", if ssl { "https" } else { "http" }),
+            region,
+            keys: (id, secret),
+            scratch,
+        })
     }
 
     /// The address of one object.
@@ -97,7 +106,10 @@ impl S3Store {
         let out = run_bounded_with_input(cmd, self.config(blocks).into_bytes(), Limits::new(Duration::from_secs(CALL_SECS)))
             .map_err(|e| StoreError(self.mask(&format!("the store did not answer: {e}"))))?;
         if !out.success() {
-            return Err(StoreError(self.mask(&format!("curl failed: {}", out.stderr_text().trim().chars().take(200).collect::<String>()))));
+            return Err(StoreError(self.mask(&format!(
+                "curl failed: {}",
+                out.stderr_text().trim().chars().take(200).collect::<String>()
+            ))));
         }
         let text = out.stdout_text();
         let mut done = Vec::new();
@@ -132,9 +144,18 @@ impl Store for S3Store {
                 let file = self.body_path(i);
                 let code = done.iter().find(|(_, f)| *f == file.display().to_string()).map(|(c, _)| *c);
                 match code {
-                    Some(200) => out.push(std::fs::read_to_string(&file).ok().and_then(|t| Record::parse(&t, &l.key, &l.target, &l.class))),
+                    Some(200) => out.push(
+                        std::fs::read_to_string(&file)
+                            .ok()
+                            .and_then(|t| Record::parse(&t, &l.key, &l.target, &l.class)),
+                    ),
                     Some(404) => out.push(None),
-                    other => return Err(StoreError(format!("the store answered {} for a record (credentials, bucket or a down server)", other.map_or("nothing".into(), |c| c.to_string())))),
+                    other => {
+                        return Err(StoreError(format!(
+                            "the store answered {} for a record (credentials, bucket or a down server)",
+                            other.map_or("nothing".into(), |c| c.to_string())
+                        )));
+                    }
                 }
             }
             Ok(out)
@@ -152,7 +173,11 @@ impl Store for S3Store {
             let up = self.scratch.join(format!("{}-up-{i}", std::process::id()));
             std::fs::write(&up, serde_json::to_string(&r.json()).unwrap_or_default())
                 .map_err(|e| StoreError(format!("{} cannot be written: {e}", up.display())))?;
-            blocks.push((self.url(&rel_path(&r.target, &RunnerClass(r.class.0.clone()), &r.key)), self.body_path(i), Some(up)));
+            blocks.push((
+                self.url(&rel_path(&r.target, &RunnerClass(r.class.0.clone()), &r.key)),
+                self.body_path(i),
+                Some(up),
+            ));
         }
         let done = self.run(&blocks);
         for (i, _) in records.iter().enumerate() {
@@ -161,7 +186,9 @@ impl Store for S3Store {
         }
         let done = done?;
         if done.len() != records.len() || done.iter().any(|(c, _)| !(200..300).contains(c)) {
-            return Err(StoreError("the store refused a record (credentials, bucket or a down server)".into()));
+            return Err(StoreError(
+                "the store refused a record (credentials, bucket or a down server)".into(),
+            ));
         }
         Ok(())
     }

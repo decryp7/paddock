@@ -46,13 +46,15 @@ pub fn judge(log: &str, asked: &[String]) -> Judged {
     let bad: BTreeSet<&str> = not_clean.iter().map(|b| package_of(b)).collect();
     for p in asked {
         if bad.contains(p.as_str()) {
-            out.not_passed.push((p.clone(), "a test failed, was flaky or passed on a retry".into()));
+            out.not_passed
+                .push((p.clone(), "a test failed, was flaky or passed on a retry".into()));
         } else if clean.contains(p.as_str()) {
             out.passed.insert(p.clone());
             let n = tests.iter().filter(|(b, _)| package_of(b) == p).map(|(_, n)| n).sum();
             out.tests.insert(p.clone(), n);
         } else {
-            out.not_passed.push((p.clone(), "no test of the package was seen in the output".into()));
+            out.not_passed
+                .push((p.clone(), "no test of the package was seen in the output".into()));
         }
     }
     out
