@@ -249,10 +249,8 @@ unique (C31).
     tests"), conformance with ci.yml's own list and the conformance tests (`cd conformance && npm test`, both on every push, ER-41;
     a flaky conformance test that blocks a push is fixed at once under ER-12, never skipped or bypassed, ER-39),
     commit-lint (rule 50g) and lockfiles with `--locked`; when a Cargo workspace
-    has a changed file of its own, also its Clippy on Linux in the CI image (native architecture, one container run for all of them,
-    `--cpus 4 --memory 12g`, the apps' Tauri crates left out and named in the row; `./dev merge check --gates` runs the same row;
-    `./dev check --warm-linux [workspace...]` warms a workspace's build folder once, so the push only sees warm runs). A gate that cannot run (no Docker, no
-    cargo-xwin) is "not measured", exit 6, never a pass; an agent never starts Docker (ER-14). It checks every commit the remote
+    has a changed file of its own, its Clippy on the host and (Windows) through xwin; Linux Clippy is CI's Linux job, since no VM or container starts on this Mac (user 2026-11-26, rule rule 101). A gate that cannot run (no
+    cargo-xwin) is "not measured", exit 6, never a pass. It checks every commit the remote
     lacks (`git rev-list <tip> --not --remotes`), measured from the nearest commit of the remote the push contains (the header says
     which and why; never a local branch), and its 15 minutes count run time only; time queued for the heavy slot behind other
     agents has its own allowance of 30 min per push and is reported apart (ADR 0102 and its 2026-11-15 amendment). Lint and type-check of the touched
@@ -552,6 +550,13 @@ Amendments of the same date, no new number: the member gate runs each member's a
     was public with no gate, and an ADR draft copied that pattern for the privileged dyno-helper daemon; a shipped hook is an
     API anyone linking the crate can call.
 
+## Trains (user, 2026-11-26)
+100. **A branch joins a train only after it has merged current main and re-run its member gate on that tip.** The
+merge check (`./dev merge check`) refuses a member whose base is older than main: the stale-base check, being made blocking on
+`ci/old-base-block` (report-only until it lands). A refused member merges main, re-runs `./dev merge check --gates` on the result and
+is offered again. *Why:* on 2026-11-25 five members were pulled from trains i, k and m because their base was older than main (see
+[lessons.md](lessons.md#members-on-an-old-base-were-pulled-from-trains-i-k-and-m-2026-11-25)).
+
 ## Monorepo (ADR 0014 §10; effective for an app from its import into `paddock/apps/<app>`, for Paddock from the first import)
 Until an app is imported, rules 2, 3, 8, 9, 39 and 42 above apply to it as written. From its import, these replace them:
 - **Rule 2:** every agent works in its own git worktree of `paddock` (a full checkout: `./dev worktree add --profile gates`,
@@ -574,3 +579,5 @@ Until an app is imported, rules 2, 3, 8, 9, 39 and 42 above apply to it as writt
     (c) ER-8, ER-15 and ER-16 still hold: the full suite ran to completion on the tagged tree, the tag is made for CI to build from and never on a `[skip ci]` commit, and it is the commit the gates tested.
     (d) The landing needs the normal green gates and is a merge or fast-forward, never a rebase or squash, so the tag is an ancestor of main (later release notes read the history from the previous tag). Fixes for other products go on their own line, not on the release branch.
     *Why:* Dyno 1.1.0 was correctly blocked by Paddock run 7485 (mostly code Dyno ships). Run 7489 failed in the shell-demo's i18n check (outside Dyno) and in aggregate coverage; the coverage gate printed no per-crate output and a crate Dyno depends on was in it, so that blocked under (b) until the gate was fixed and a full run was green. The failures also skipped the dependency audit and several ui steps, which (a) asks to be cleared.
+
+101. **Local gates never start a VM or a container on a developer's Mac** (user, 2026-11-26). Linux checks run as CI's Linux jobs on the Linux runner, Windows checks on the Windows runner. The pre-push and member gate have no Linux row (`clippy-linux`, `tests-linux`, `--warm-linux` are removed; the register names them CI-owned), and conformance C-NEW (report-only, review 2026-12-09) flags a docker, podman, nerdctl, orb, orbctl, vmrun or `linux-container.sh` call in local gate code. *Why:* the container rows were the Mac's largest load, and the user decided on 2026-11-26 that no VM runs on the Mac. Status: in progress.

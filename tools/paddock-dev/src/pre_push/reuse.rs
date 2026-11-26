@@ -8,7 +8,7 @@
 //!   run's pid), its arguments with the checkout's path as `<root>` and the build folder left out (a throw-away worktree and the
 //!   working tree agree), and its own variables;
 //! - the tool version: the hash of this `dev` binary's bytes, and the versions of the programs the row starts (`cargo --version`,
-//!   `rustc -vV`, `cargo xwin --version`, `docker --version`, `node --version`);
+//!   `rustc -vV`, `cargo xwin --version`, `node --version`);
 //! - the inputs, as git object ids at HEAD: a Cargo row's workspace folder, the folders of every path dependency the planner's Cargo
 //!   graph names (followed transitively), each of those workspaces' manifest, lockfile and settings, the toolchain pin and the lint
 //!   settings, plus the hashed build variables ([`crate::input_hash::is_hashed_var`]); a repository-wide row (conformance and the
@@ -104,7 +104,6 @@ pub fn class_of(g: &Gate) -> Option<Class> {
     let first = g.id.split([' ', ',']).next().unwrap_or("");
     match first {
         "lockfile" | "fmt" | "clippy" | "clippy-windows" if !g.cwd.is_empty() => Some(Class::Cargo(vec![g.cwd.clone()])),
-        "clippy-linux" if !g.workspaces.is_empty() => Some(Class::Cargo(g.workspaces.clone())),
         "conformance" | "conformance-tests" | "gates-register" | "pitwall-scripts" => Some(Class::Whole),
         _ => None,
     }
@@ -124,7 +123,6 @@ pub fn probes_of(g: &Gate) -> Vec<Vec<String>> {
             }
             v
         }
-        "bash" => vec![a(&["docker", "--version"])],
         "node" => vec![a(&["node", "--version"])],
         _ => Vec::new(),
     }
@@ -465,11 +463,7 @@ impl Reuse {
         }
         let lines = match class {
             Class::Cargo(ws) => {
-                let mut paths = cargo_inputs(&self.cargo, &ws)?;
-                if g.id.starts_with("clippy-linux") {
-                    // The container script and the image it runs in are read by this row alone.
-                    paths.extend(["tools/linux-container.sh".to_string(), "ci-image".to_string()]);
-                }
+                let paths = cargo_inputs(&self.cargo, &ws)?;
                 let mut l = self.hash_paths(&paths)?;
                 l.extend(self.build_vars.iter().cloned());
                 l
