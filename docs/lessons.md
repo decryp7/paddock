@@ -4368,3 +4368,11 @@ startup"; the Chromium start judge, ADR 0031). A start that hands back a handle 
   and the boot-out. Every loaded lane is now told to take no new job at the start, and each lane's check for a job and its boot-out are
   back to back; a job seen there sends install back into the same bounded wait and tells the runner again. What stays is the time between
   that check and the boot-out call itself (milliseconds, against a runner that needs seconds to register and fetch a task).
+
+## Fix item: a FLAKY sccache eviction test on Windows in run 9135 (2026-11-26)
+`paddock-dev::it sccache_eviction::a_cargo_file_under_the_sccache_folder_is_evicted_once_the_cache_is_over_its_cap` was FLAKY on
+Windows in ci.yml run 9135 (job 50993; failed once, passed on its retry; flaky-as-failure kept the run red, ER-12) and passed in the
+failed-only round 9137. Train 2026-11-26-pq did not touch what it drives: the test runs the real sccache binary through paddock-env and
+paddock-testkit, and the train's sccache change was in `local_sccache.rs` only, so it did not block the landing (rule 54 (4)). A fix
+item for the test's owner, which starts with a reproduction on the Windows runner and the list of causes with what rules each out
+(ER-28). No sleep or raised timeout as the fix.
