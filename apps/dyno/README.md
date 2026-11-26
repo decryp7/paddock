@@ -138,7 +138,7 @@ status-notifier host (GNOME: the AppIndicator extension). Details: [docs/linux.m
 | --- | --- |
 | Core | Built and unit-tested: model, grouping, diagnosis, anomalies, forecast, health, history, alarms, baselines, protocol. |
 | Agent | Sampling loop, SQLite history with rollups, alarms, issues, flight recorder, weekly report, disk usage, benchmarks, startup list (view), plugin host (sensors), service install/ensure. |
-| Platform adapters | macOS and Linux: sensors, details, locks, startup, facts, user activity (macOS tested on a real Mac, Linux in a container with `scripts/linux-verify.sh`). Windows: sensors and user activity; details, locks, startup and facts are not wired yet. |
+| Platform adapters | macOS and Linux: sensors, details, locks, startup, facts, user activity (macOS tested on a real Mac, Linux in CI's Linux job, since 2026-11-26 no container runs on the Mac). Windows: sensors and user activity; details, locks, startup and facts are not wired yet. |
 | App | Dashboard, processes, why slow, alarms, issues, reports, counters, extras, benchmarks, network, settings, tray, native feel against the real agent through the shell. |
 | Privileges | Everything runs with your own rights; unreadable figures say why and other users' processes are one "Other users" row. 1.1.0 adds the optional administrator helper (ADR 0027); "start as administrator at login" comes later. |
 | Installers | CI builds NSIS, `.dmg`, `.deb` and AppImage on `dyno-v*` tags, nightly and manual runs. 1.2.0 is published. |
