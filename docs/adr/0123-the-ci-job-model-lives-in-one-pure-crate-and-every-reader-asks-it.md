@@ -1,10 +1,10 @@
-# NEW. The CI job model and the repository settings live in one pure crate, read from ci.yml, and every reader asks it
+# 0123. The CI job model and the repository settings live in one pure crate, read from ci.yml, and every reader asks it
 
 - Status: **Accepted (user 2026-11-26)**: 81, 81a, 82, D1 = B (8 days approved), D2 = (a), D3 = (a). Redesign (ER-21: the class was
   seen twice in train pq). Revision 3: the independent review's 4 P1s (cleared in round 2) and its 8 + 5 P2s are taken. Revision 3's
   P2s grow the total to 9.0 days, 12.5 % over the approved 8 and inside its 6.5 to 10.5 range (§Work packages).
 - Date: 2026-11-26
-- Number: assigned at landing (user decision); the file is `NEW-ci-job-model.md` until then.
+- Number: 0123, assigned when train 2026-11-26-r landed (user decision 16).
 - Related: ADR [0060](0060-every-check-runs-somewhere.md) (the CI model: `gates/ci.rs`, `gates/yaml.rs`, `gates/expr.rs`), ADR
   [0113](0113-a-run-declares-its-scope-as-data-and-one-reader-decides-complete.md) (the scope line, `run_scope`), ADR
   [0117](0117-the-repository-graph-is-the-one-model-and-every-plan-is-a-query.md) (WP-2 deletes `plan_gitea`; D12 keeps the old
