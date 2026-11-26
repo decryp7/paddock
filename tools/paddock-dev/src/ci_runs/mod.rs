@@ -1474,6 +1474,7 @@ fn trial_merge(a: &DispatchArgs, branch: &str, token: &str) -> Result<(crate::qu
             write_reverted: None,
             old_base_anyway: None,
             no_trial: None,
+            heavy_generators: false,
             gates_base: None,
         })
         .map(|_| ())
