@@ -1,8 +1,6 @@
 //! The push gate with a plan, a list of files and a fake machine: no process starts (ER-14).
 
 use super::budget::Timing;
-#[cfg(unix)]
-use super::exec::decide;
 use super::exec::{Done, Exec, Kind, Limits, QUEUE_STALL, Row, RunOpts, run_all_timed, run_all_with, test_subject};
 use super::gates::{AUDIT_PROFILE, Change, Facts, Gate, Need, Planned, plan_gates, windows_skip_reason};
 use super::{accept_not_measured, parse_refs, render, render_timed};
@@ -3161,7 +3159,7 @@ fn shape_train_on_the_remote_through_a_sibling_with_a_non_ascii_path() {
 #[cfg(unix)]
 mod deny_row {
     use super::*;
-    use crate::pre_push::exec::RealExec;
+    use crate::pre_push::exec::{RealExec, decide};
     use std::collections::HashMap;
     use std::path::Path;
     use std::sync::Arc;
@@ -3744,7 +3742,7 @@ mod member_tests {
         assert!(passed(&verdicts(&rows)["tests crates"]));
     }
 
-    /// No VM or container starts on this Mac (user, 2026-11-26; docs/rules.md NEW-no-local-vm): no planned row is a Linux row, and
+    /// No VM or container starts on this Mac (user, 2026-11-26; docs/rules.md rule 101): no planned row is a Linux row, and
     /// no row's command is a container or VM tool, for a change that reaches every kind of row, in a developer's push and the member
     /// gate. The Linux checks are CI's Linux jobs; the register names them CI-owned.
     #[test]
@@ -3781,6 +3779,46 @@ mod member_tests {
                 .iter()
                 .any(|(what, why)| what.contains("Linux") && why.contains("CI-owned")),
             "the register names the Linux rows CI-owned"
+        );
+    }
+
+    fn by<'a>(planned: &'a [Planned], prefix: &str) -> &'a Gate {
+        run_gates(planned)
+            .into_iter()
+            .find(|g| g.id.starts_with(prefix))
+            .unwrap_or_else(|| panic!("no row {prefix}: {:?}", ids(planned)))
+    }
+
+    #[test]
+    fn a_touched_workspace_gets_its_ci_tests_on_the_host_with_heavys_thread_share() {
+        let planned = plan_gates(&plan2(), &change(FILES), &member());
+        let host = by(&planned, "tests crates");
+        assert_eq!((host.program.as_str(), host.cwd.as_str()), ("cargo", "crates"));
+        assert_eq!(
+            host.args.join(" "),
+            "nextest run --config build.target-dir='/t' --profile ci --locked --no-fail-fast --no-tests=fail --workspace --all-features -E package(=paddock-proc) | package(=paddock-chromium)",
+            "CI's own profile, the plan's reached packages as CI's member run filters them, every feature as CI's crates job"
+        );
+        assert!(host.heavy, "it compiles: through heavy (ER-24)");
+        assert_eq!(
+            host.need,
+            Need::Tool("cargo-nextest".into()),
+            "no nextest is not measured, never a pass"
+        );
+        assert!(host.env.contains(&("RUSTUP_AUTO_INSTALL".to_string(), "0".to_string())), "ER-45");
+        assert!(
+            host.env.iter().all(|(k, _)| k != "NEXTEST_TEST_THREADS"),
+            "the thread count is heavy's share of the machine (step_env), never a fixed number here; the caller's env wins (ER-24, ER-47, ER-48)"
+        );
+        assert!(
+            host.env.iter().all(|(k, _)| !k.starts_with("CARGO_")),
+            "sccache hashes CARGO_* variables"
+        );
+        let tool = by(&planned, "tests tools/paddock-dev");
+        assert!(
+            !tool.args.contains(&"-E".to_string()) && !tool.args.contains(&"--all-features".to_string()),
+            "{:?}",
+            tool.args
         );
     }
 }

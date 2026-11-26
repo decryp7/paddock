@@ -45,10 +45,11 @@ package.json     the one npm workspace and package-lock.json (ui, eslint, icons,
   rebuilds fast). Pass it to cargo as `--config build.target-dir='<dir>'` (or `build.target-dir` in a `.cargo/config.toml`),
   **never as `CARGO_TARGET_DIR` or `CARGO_BUILD_TARGET_DIR`**: sccache 0.19 puts every `CARGO_*` variable into its cache key, so
   the variable gives 0% hits across worktrees and the configuration gives about 82% (ADR 0014 §1; docs/benchmarks.md). The
-  tools do this themselves (push gates, `./dev gen check`, `./dev`'s own build). For your own cargo calls run
-  `eval "$(./dev sccache env)"` once per shell: it installs the pinned sccache, starts the one local server and sets
-  `RUSTC_WRAPPER` for that shell only ([docs/dev-setup.md](docs/dev-setup.md#local-sccache)); it warns and builds without
-  it when sccache cannot be used. Worktrees and build folders go in
+  tools do this themselves (push gates, `./dev gen check`, `./dev`'s own build). Your own cargo calls need nothing in a fresh shell: `./dev sccache env`
+  (run once on a machine, and after a worktree is added) installs the pinned sccache, starts the one local server and writes
+  `<worktree root>/.cargo/config.toml` with `build.rustc-wrapper`, so every cargo below the worktree root compiles through it; the
+  wrapper starts the server again if it is down and runs plain rustc when it cannot, and an explicit `RUSTC_WRAPPER` wins
+  ([docs/dev-setup.md](docs/dev-setup.md#local-sccache)). `eval "$(./dev sccache env)"` still sets the variables for one shell. Worktrees and build folders go in
   `<dev-targets>` (the parent of the worktree root; this machine's folders are in
   [docs/dev-setup.md](docs/dev-setup.md#where-things-live), the one place that names a disk, rule 40). The worktree root is
   machine config, not code: `git config paddock.worktreeRoot <dev-targets>/wt` (repo-local, so it covers every worktree), or
@@ -82,6 +83,9 @@ package.json     the one npm workspace and package-lock.json (ui, eslint, icons,
 - **Merge queue: parked (user, 2026-11-24).** `./dev queue` and `./dev pr` (docs/plans/merge-queue.md) stay in the tool, but
   nothing runs them and CI does not test them; trains are built by hand with the member gate (`./dev merge check --gates`).
   A member merges current main and re-runs its member gate on that tip before it joins a train (rule 100).
+- **Old-base block (user, 2026-11-25).** `./dev merge check` refuses a train member that lacks the train's base (the newest commit of
+  main, or of the earlier train, the train has merged) with one `::error::`: merge origin/main into the member and rerun its gate;
+  `--old-base-anyway "<reason>"` is the logged emergency override (`tools/paddock-dev/src/merge_check/stale_base.rs`).
 - **Dispatching workflows.** Integrators dispatch through `./dev ci dispatch <workflow>.yml --ref <ref> --max <duration>`, never by a bare API call: it waits while another run has an unfinished job on the same single runner (the Mac runner took overlapping runs 7960/7961 and 7969-7971/7967 and timed out tests) and ends at `--max` with an `::error::` naming the busy run. A `train/*` run of a workflow whose first job runs the `runner-wait` action is sent at once and waits in that Linux job instead (`./dev ci runner-wait`, only for older runs), so scheduled runs see the train queued and yield to it. A full dispatch of `ci.yml` on a `train/*` ref (no `base`, no `since_run`) is complete without WebKit, as a push to main's scope has none since 2026-11-24 (the nightly runs it), so the landed train's push to main can reuse it (ER-49, docs/ci-schedules.md). It prints `run <id>`: the run whose title carries the `dispatch_id` token it sent (never "the newest run", ER-51). On a
   `train/*` ref it first runs the failed-first and green-main guards (docs/ci-dispatch-guards.toml: report-only until
   `./dev ci guard-record` records their first green use; overrides `--full-anyway` and `--red-main-anyway` take a logged reason).
@@ -128,7 +132,7 @@ package.json     the one npm workspace and package-lock.json (ui, eslint, icons,
 - **E2E and screenshots run on fresh code (guidance; a binding rule is proposed).** A running dev server is reused only with `PW_REUSE_SERVER=1`; default ports derive from the worktree path (`e2ePort` in `@decryp7/paddock-e2e`); a config that consumes `ui/dist` or the css fails at load with "rebuild ui: npm run build -w ui" when they were built from older sources (`build-guard.ts`, content stamps; lessons.md). New Playwright configs use these.
 - Every change ships with tests; every bug fix starts with a failing test. A colour change keeps `npm run test:tokens`
   green (WCAG AA/AAA pairs, CVD separation); change the tokens, not the test.
-- **No VM or container on this Mac (user, 2026-11-26; docs/rules.md NEW-no-local-vm).** `./dev check --pre-push` and the member gate
+- **No VM or container on this Mac (user, 2026-11-26; docs/rules.md rule 101).** `./dev check --pre-push` and the member gate
   start no Docker, OrbStack or Fusion: there is no `clippy-linux`, `tests-linux` or `--warm-linux`. Linux Clippy (`-D warnings`),
   the Linux tests and the orphan guardian's acting tests as uid 65534 are CI's Linux jobs on the Linux runner (ci.yml: the crates job's
   "Orphan guardian as a user (Linux)" step, each app's Linux leg); the Windows Clippy runs here through xwin for `crates`, the apps that
