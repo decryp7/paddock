@@ -201,6 +201,8 @@ pub(super) struct ModeRead {
     /// `Some(base)` when the run is not complete but a landing may rest on it: it ran exactly its own diff's narrowed selection and
     /// every job it declared ran (`Declared::lands`, review round 2 P1-A); `base` is the commit its need was diffed from.
     pub landing: Option<Option<String>>,
+    /// The run's `expected` map (display name to job, leg and projects) from its scope line; empty when the line could not be read.
+    pub expected: run_scope::ExpectedMap,
 }
 
 /// [`read_mode`] with the run's jobs it read for it (the failed ones are graded by [`super::green`]), and the tag rule: for a tag
@@ -225,6 +227,7 @@ fn read_mode_plain(client: &mut Client, run: &RunInfo, scope_decisive: bool) -> 
         jobs,
         tag_refusal: None,
         landing: None,
+        expected: run_scope::ExpectedMap::new(),
     };
     let jobs = match client.timed_jobs(run.id) {
         Ok(Some(j)) => j,
@@ -265,10 +268,12 @@ fn read_mode_plain(client: &mut Client, run: &RunInfo, scope_decisive: bool) -> 
         );
     }
     let landing = landing_of(run, &jobs, &log);
+    let expected = run_scope::read(&log).and_then(Result::ok).map(|d| d.expected).unwrap_or_default();
     if scope_decisive {
         return ModeRead {
             tag_refusal,
             landing,
+            expected,
             ..same(scope, jobs)
         };
     }
@@ -292,7 +297,20 @@ fn read_mode_plain(client: &mut Client, run: &RunInfo, scope_decisive: bool) -> 
         jobs,
         tag_refusal,
         landing,
+        expected,
     }
+}
+
+/// The run's `expected` map (its plan job's scope line, ADR 0123 §3), read once per run from the plan job's log. Empty when the run has
+/// no plan job or its line cannot be read: a reader then cannot place a job by name and reports it as not measured.
+pub(super) fn run_expected(client: &mut Client, jobs: &[super::client::TimedJob]) -> run_scope::ExpectedMap {
+    jobs.iter()
+        .find(|j| crate::plan_since::is_plan_name(&j.name))
+        .and_then(|plan| client.log(plan.id).ok().flatten())
+        .and_then(|log| run_scope::read(&log))
+        .and_then(Result::ok)
+        .map(|d| d.expected)
+        .unwrap_or_default()
 }
 
 /// `Some(base)` when the run's declared scope is not complete but a landing may rest on it (`Declared::lands`) and every job it
@@ -366,13 +384,30 @@ pub fn trial(client: &mut Client, workflow: &str, branch: &str, member_sha: &str
     Trial::NoRun
 }
 
+/// A trial run that ended green counts only when its declared scope ran, as for `ci verdict --landing`: every job its scope line
+/// expects ran and passed, and the line covers a full run or a landing's own diff (ADR 0113, ADR 0123 §7). A narrowed run, a run whose
+/// plan job logged no readable line and a declared job that was skipped are never green (ER-33).
+fn declared_scope_of_trial(client: &mut Client, run: &RunInfo) -> Trial {
+    let read = read_mode_jobs_for(client, run, true, false);
+    match read.mode {
+        Mode::Full => Trial::Green { run: run.id },
+        Mode::Partial(_) if read.landing.is_some() => Trial::Green { run: run.id },
+        Mode::Incomplete(why) => Trial::Red {
+            run: run.id,
+            reason: format!("the run is green but its declared scope was not run ({why})"),
+        },
+        Mode::Partial(why) => Trial::NotMeasured(format!("run {} is green but did not test a full scope ({why})", run.id)),
+        Mode::Unknown(why) => Trial::NotMeasured(format!("run {}: its declared scope cannot be read ({why})", run.id)),
+    }
+}
+
 fn state_of(client: &mut Client, run: &RunInfo) -> Trial {
     if !run.finished() {
         return Trial::Running { run: run.id };
     }
     match run.conclusion.as_str() {
         "success" => match read_earlier(client, run) {
-            Earlier::Clean => Trial::Green { run: run.id },
+            Earlier::Clean => declared_scope_of_trial(client, run),
             Earlier::Failed(why) => Trial::Red {
                 run: run.id,
                 reason: format!("the run is green only after a retry ({why})"),
@@ -989,7 +1024,7 @@ mod tests {
             for_app(&mut c, v, app)
         };
         // The foundation-only line: complete, with pitwall inactive (docs/ci-active-apps.toml).
-        let line = run_scope::TEST_COMPLETE.replacen("\"need_whole\":true}", "\"need_whole\":true,\"inactive\":[\"pitwall\"]}", 1);
+        let line = run_scope::TEST_COMPLETE.replacen("\"need_whole\":true,", "\"need_whole\":true,\"inactive\":[\"pitwall\"],", 1);
         assert!(line.contains("inactive"), "the control line names pitwall: {line}");
         let mut f = server(vec![main_push(5, "success")], &[(5, 50, Some(line.as_str()))]);
         assert_eq!(ask(&mut f), Verdict::Green { run: 5 }, "the run is complete for the foundation");
@@ -1441,7 +1476,12 @@ mod tests {
             os_full: true,
             ..Default::default()
         };
-        format!("{}\n", run_scope::ci_scope(scope(ran_jobs), false, scope(need_jobs), true).line())
+        format!(
+            "{}\n",
+            run_scope::ci_scope(scope(ran_jobs), false, scope(need_jobs), true)
+                .with_expected(run_scope::test_names(ran_jobs))
+                .line()
+        )
     }
 
     /// Run 5 (a push to main) with the plan log `log` and these jobs besides its plan job: `(id, name, conclusion)`.
@@ -1615,7 +1655,8 @@ mod tests {
     /// Run 9 of this commit with the real jobs of train 19's run 8610 (scrubbed; ids as in the fixture): the plan job (44709) logs
     /// a complete scope, the crate job (44761) failed with only a FLAKY test.
     fn run_8610(conclusion: &str) -> Fake {
-        let mut f = server(vec![dispatch(9, conclusion)], &[(9, 44709, Some(run_scope::TEST_COMPLETE))]);
+        let plan = run_scope::test_complete_8610();
+        let mut f = server(vec![dispatch(9, conclusion)], &[(9, 44709, Some(plan.as_str()))]);
         f.json(
             &format!("{API}/runs/9/jobs?limit=50&page=1"),
             serde_json::from_str(JOBS_8610).unwrap(),
@@ -1854,9 +1895,37 @@ mod tests {
         trial(&mut c, "ci.yml", "feat/x", MEMBER)
     }
 
+    /// The jobs and plan log of trial run `run`: the plan job logs `plan_log`, and the one job the line expects ends `conformance`.
+    fn trial_scope(f: &mut Fake, run: u64, plan_log: &str, conformance: &str) {
+        f.json(
+            &format!("{API}/runs/{run}/jobs?limit=50&page=1"),
+            json!({"total_count": 2, "jobs": [
+                {"id": run + 100, "name": "plan (affected projects)", "conclusion": "success"},
+                {"id": run + 200, "name": "conformance (checks, release scripts)", "conclusion": conformance}]}),
+        );
+        f.log(run + 100, plan_log);
+    }
+
+    #[test]
+    fn a_green_trial_counts_only_when_its_declared_scope_ran() {
+        let green = |plan: &str, conformance: &str| {
+            let mut f = trial_server(vec![trial_run(9, TRIAL_HEAD, "completed", "success")], &[(TRIAL_HEAD, MEMBER)]);
+            trial_scope(&mut f, 9, plan, conformance);
+            ask_trial(&mut f)
+        };
+        assert_eq!(green(run_scope::TEST_COMPLETE, "success"), Trial::Green { run: 9 });
+        // A declared job skipped although the run ended green (the shape of run 9167's e2e): red, not a pass.
+        assert!(matches!(green(run_scope::TEST_COMPLETE, "skipped"), Trial::Red { run: 9, .. }));
+        // A narrowed run (its scope is not what a push to main does, and no landing's own diff): not a pass.
+        assert!(matches!(green(run_scope::TEST_PARTIAL, "success"), Trial::NotMeasured(_)));
+        // A plan job with no readable scope line: not measured.
+        assert!(matches!(green("plan verdict: complete=true\n", "success"), Trial::NotMeasured(_)));
+    }
+
     #[test]
     fn a_finished_trial_of_this_head_is_green_or_red_by_its_conclusion() {
         let mut f = trial_server(vec![trial_run(9, TRIAL_HEAD, "completed", "success")], &[(TRIAL_HEAD, MEMBER)]);
+        trial_scope(&mut f, 9, run_scope::TEST_COMPLETE, "success");
         assert_eq!(ask_trial(&mut f), Trial::Green { run: 9 });
         let mut f = trial_server(vec![trial_run(9, TRIAL_HEAD, "completed", "failure")], &[(TRIAL_HEAD, MEMBER)]);
         assert!(matches!(ask_trial(&mut f), Trial::Red { run: 9, .. }));
