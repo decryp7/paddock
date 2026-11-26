@@ -1,3 +1,4 @@
+// ci-runs-reader: test-cache trust: is the run a cached pass rests on a main or train run whose job ended success (not a verdict on a commit)
 //! The reader side of trust (ADR 0116 §7), independent of who wrote a record. Before a record is counted, the run it names is asked of
 //! the Gitea API (through [`crate::ci_runs::client`], the one run reader): the run's ref must be `main` or a `train/*` branch and the
 //! job it names (or, when it names none, the whole run) must have ended `success`. One call per distinct run, remembered for the plan job. A record that fails is ignored

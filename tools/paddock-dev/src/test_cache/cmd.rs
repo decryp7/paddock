@@ -1,3 +1,4 @@
+// ci-runs-reader: test-cache: builds the reader-side trust check of cached passes (the run behind a record), not a verdict on a commit
 //! `ci test-cache`: `run` (the cache around one Cargo workspace's nextest run), `lookup` (what would be reused, nothing run) and
 //! `audit` (the local store's size and oldest record, report-only, ER-51).
 //!
