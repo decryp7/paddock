@@ -21,9 +21,12 @@ test = false
 doc = false
 
 [features]
-# Test support for other crates (ADR 0072 WP-0): `testing::endings`, the harness that drives an endpoint through every way a
-# connection ends and the raw-stream client that sees what the peer would. Never enabled in a shipped build.
-testing = []
+# Test support (rule 99; ADR 0072 WP-0): `testing::endings`, the harness that drives an endpoint through every way a
+# connection ends and the raw-stream client that sees what the peer would, and `Host::with_clock`. Enabled from
+# `[dev-dependencies]` only, never in a shipped build (`./dev check test-features`, C170).
+# ADR 0122 adds the queue probe (Winsock's `FIONREAD` for loopback TCP on Windows) and the act gate (`Host::with_act_gate`,
+# `ServerConfig::with_act_gate`).
+test-support = ["windows-sys/Win32_Networking_WinSock"]
 
 [dependencies]
 paddock-env = { workspace = true }
@@ -55,6 +58,9 @@ windows-sys = { version = "0.61", features = [
 ] }
 
 [dev-dependencies]
+# The self dev-dependency that turns `test-support` on for this package's own integration tests (rule 99): `Host::with_clock` and
+# `testing::endings` are test-only and never reach a shipped build.
+paddock-ipc = { path = ".", features = ["test-support"] }
 paddock-testkit = { workspace = true }
 proptest = "1"
 tempfile = "3"

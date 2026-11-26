@@ -163,6 +163,12 @@ fn own_uid() -> Option<u32> {
     }
 }
 
+/// A test-only act gate (ADR 0122 §4, rule 99): called with the accepted stream after `accept` and before the endpoint reads
+/// or refuses it, so an endings rig can hold the endpoint until the client's bytes are queued and measure them
+/// (`testing::endings::QueueGate`). It must return; the endpoint goes on when it does.
+#[cfg(any(test, feature = "test-support"))]
+pub type ActGate = Arc<dyn Fn(&Stream) + Send + Sync>;
+
 /// What a host checks in a `Hello`: cheap to clone, so each client is authenticated on its own thread.
 #[derive(Clone)]
 pub struct Authenticator {
@@ -174,6 +180,9 @@ pub struct Authenticator {
     timeout: Duration,
     /// Refuse a client that runs as another user (Unix); off for a service that other accounts connect to.
     same_account: bool,
+    /// The test-only act gate ([`ActGate`]).
+    #[cfg(any(test, feature = "test-support"))]
+    act_gate: Option<ActGate>,
 }
 
 impl std::fmt::Debug for Authenticator {
@@ -187,8 +196,17 @@ impl std::fmt::Debug for Authenticator {
 }
 
 impl Authenticator {
+    /// Holds this side at the test-only act gate, if one is set ([`ActGate`]); nothing in a shipped build.
+    fn at_act_gate(&self, _stream: &Stream) {
+        #[cfg(any(test, feature = "test-support"))]
+        if let Some(gate) = &self.act_gate {
+            gate(_stream);
+        }
+    }
+
     /// Answers a client that cannot be served now (too many connections) with a `busy` refusal and closes it.
     pub fn refuse_busy(&self, mut stream: Stream, message: &str) {
+        self.at_act_gate(&stream);
         let sent = Cell::new(ReasonOutcome::Unsent);
         self.refuse(&mut stream, codes::BUSY, message, &sent);
         crate::endlog::log_handshake_end(
@@ -231,6 +249,7 @@ impl Authenticator {
         pid: Option<u32>,
         peer_uid: Option<u32>,
     ) -> Result<Connection, IpcError> {
+        self.at_act_gate(&stream);
         let started = std::time::Instant::now();
         let sent = Cell::new(ReasonOutcome::Unsent);
         let result = self.authenticate_inner(stream, os_pid, pid, peer_uid, &sent);
@@ -425,6 +444,8 @@ impl Host {
                 clock: Arc::new(SystemClock),
                 timeout: HANDSHAKE_TIMEOUT,
                 same_account: false,
+                #[cfg(any(test, feature = "test-support"))]
+                act_gate: None,
             },
         })
     }
@@ -449,6 +470,14 @@ impl Host {
     pub fn with_clock(mut self, clock: Arc<dyn Clock>, handshake: Duration) -> Host {
         self.auth.clock = clock;
         self.auth.timeout = handshake;
+        self
+    }
+
+    /// Calls `gate` with each accepted stream before this host (and every [`Authenticator`] taken from it afterwards) reads or
+    /// refuses it. Test only (rule 99; ADR 0122 §4): a shipped build has no gate.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn with_act_gate(mut self, gate: ActGate) -> Host {
+        self.auth.act_gate = Some(gate);
         self
     }
 

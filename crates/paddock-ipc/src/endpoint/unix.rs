@@ -220,6 +220,12 @@ impl Stream {
         })
     }
 
+    /// This side's socket, for the endings harness's probe (ADR 0122). Test only (rule 99).
+    #[cfg(feature = "test-support")]
+    pub(super) fn queue_handle(&self) -> crate::testing::endings::QueueHandle {
+        crate::testing::endings::QueueHandle::Fd(self.s.as_raw_fd())
+    }
+
     /// The user id of the process on the other end, from the kernel.
     pub(super) fn peer_uid(&self) -> Option<u32> {
         peer_uid(&self.s)
