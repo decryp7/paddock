@@ -389,7 +389,7 @@ release_actions = ["tauri-bundle", "publish-release", "macos-verify", "keychain"
 # decision 2026-11-23).
 release_gate_phases = ["checks"]
 
-# [ci.jobs]: the projects a ci.yml job runs for by choice, which no `if:` shows (ADR NEW-ci-job-model §2; read by
+# [ci.jobs]: the projects a ci.yml job runs for by choice, which no `if:` shows (ADR 0123 §2; read by
 # tools/paddock-dev/src/repo_inputs.rs `ci_jobs`, ER-42). The job model (crates/paddock-ci-config) derives every other project from the
 # plan outputs the job's and its steps' conditions read; a job left with no project is a problem, never `always`. Shrink-only (ER-46): a
 # new entry needs the user, and the model check (tests/it/job_model.rs) compares the whole with plan_gitea::CI_JOBS until ADR 0117 D12.

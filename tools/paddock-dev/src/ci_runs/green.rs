@@ -906,9 +906,12 @@ pub fn push_chain(root: &std::path::Path, sha: &str, before: Option<&str>) -> Ve
 /// (3258361e7 into train j), so the first-parent line of main's tip never meets it: the push's reuse and the next dispatch both lost the
 /// last complete commit that way. The one candidate line of the push's reuse, the planner's base and a landing dispatch's base.
 pub fn main_line(root: &std::path::Path, head: &str, include_head: bool, before: Option<&str>, tips: &[String]) -> Vec<String> {
-    let n = MAX_COMMITS.to_string();
+    // Every ancestor, not the newest MAX_COMMITS of them: a train merges many commits, so a tip main has been at can lie far below `head`
+    // in the walk (train r's push: 222 commits down, past 200, and the push took an older base than its landing run had). One
+    // `rev-list` of hashes, about 30 ms for 10,000 commits; the candidates stay bounded by the tips (at most MAX_PAGES pages of runs)
+    // and the first-parent line below.
     let ancestors = |rev: &str| -> Vec<String> {
-        crate::plan_repo::git_text(root, &["rev-list", "-n", &n, rev])
+        crate::plan_repo::git_text(root, &["rev-list", rev])
             .map(|t| t.lines().map(|l| l.trim().to_string()).filter(|l| !l.is_empty()).collect())
             .unwrap_or_default()
     };
@@ -981,6 +984,22 @@ pub fn plan_touched_range(root: &std::path::Path, base: &str, head: &str) -> Opt
         .map(|(graph, plan)| Touched::from_plan(&plan).with_graph(&graph))
 }
 
+/// THE candidate bases of a commit's readers (ER-21, ER-44): main's own line below `sha` (the tips main has been at that are ancestors,
+/// newest push run first, then the first-parent line; every ancestor is searched, never the newest N). The push's reuse, the planner,
+/// a landing dispatch, the measure of what a commit touched and the verdict's "last fully tested commit" hint all read the base from
+/// this one line, so they name the same commit (run 9150: 62049e300 here and 3258361e7 for the landing, and the hint said 62049e300).
+/// A push's reuse and planner add the push's `before` through [`main_line`]; this form has none.
+pub fn candidate_line(root: &std::path::Path, sha: &str, runs: &Runs) -> Vec<String> {
+    main_line(root, sha, false, None, &runs.main_tips())
+}
+
+/// [`candidate_line`] with the runs read here, once; empty when they cannot be read (no base is found: the safe side).
+pub fn candidate_line_of(client: &mut Client, workflow: &str, root: &std::path::Path, sha: &str) -> Vec<String> {
+    Runs::read(client, workflow)
+        .map(|runs| candidate_line(root, sha, &runs))
+        .unwrap_or_default()
+}
+
 /// The touched reader of the production paths (`ci verdict`, `ci reuse`, the queue, the planner): [`touched_since_base`] over the
 /// first-parent history of `root`, planned by [`plan_touched_range`], at the level [`PACKAGE_LEVEL_FIRST_GREEN_RUN`] says decides;
 /// with no good base, everything counts as reached, and a range
@@ -994,7 +1013,6 @@ pub fn touched_in(
     scope_decisive: bool,
     runs: Option<&Runs>,
 ) -> Option<Touched> {
-    let first_parent = first_parent_before(root, sha);
     let own;
     let runs = match runs {
         Some(r) => r,
@@ -1003,6 +1021,7 @@ pub fn touched_in(
             &own
         }
     };
+    let first_parent = candidate_line(root, sha, runs);
     let narrow = PACKAGE_LEVEL_FIRST_GREEN_RUN.is_some();
     touched_since_base(client, runs, &first_parent, sha, scope_decisive, &mut |b, h| {
         plan_touched_range(root, b, h)

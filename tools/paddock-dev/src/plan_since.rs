@@ -1111,7 +1111,7 @@ impl SincePlan {
         let os_legs = |key: &str| -> String {
             let runs: Vec<&Rerun> = self.reruns.iter().filter(|r| r.key.as_deref() == Some(key)).collect();
             if runs.is_empty() || runs.iter().any(|r| r.leg.os.is_none()) {
-                // Not rerun, or a leg that cannot be told: every leg, whole (the one leg set of the planner, ADR NEW-ci-job-model §4).
+                // Not rerun, or a leg that cannot be told: every leg, whole (the one leg set of the planner, ADR 0123 §4).
                 return serde_json::to_string(&crate::plan_ci::workspace_legs(&crate::plan_ci::os_legs(), None, "", None))
                     .unwrap_or_default();
             }
@@ -1809,7 +1809,7 @@ mod tests {
         assert_eq!(
             every_os(&out["paddock_dev_legs"]),
             crate::plan_ci::OS_LEGS,
-            "not rerun: the plan writes every leg itself, ci.yml has no fallback (ADR NEW-ci-job-model section 4)"
+            "not rerun: the plan writes every leg itself, ci.yml has no fallback (ADR 0123 section 4)"
         );
         let crate_legs: Value = serde_json::from_str(&out["crate_legs"]).unwrap();
         assert_eq!(crate_legs.as_array().unwrap().len(), 2);

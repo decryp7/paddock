@@ -2,6 +2,7 @@ import { expect, test } from './test';
 import type { Page } from '@playwright/test';
 import { gridRows, openApp } from './app';
 import { anchoredMenu, contextMenu, menuNamed } from './menu-support';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard.ts';
 
 // The app should feel like a desktop app: no browser context menu on its chrome, no reload, page zoom or other
 // browser keys. The guard only prevents the browser's default, so Debrief's own menus and shortcuts keep working.
@@ -110,9 +111,9 @@ test.describe('native feel', () => {
     await watch(page, ['keydown']);
     await page.locator('debrief-status-bar').click();
     await page.keyboard.press('F5');
-    await page.keyboard.press('ControlOrMeta+r');
-    await page.keyboard.press('ControlOrMeta+p');
-    await page.keyboard.press('ControlOrMeta+Equal');
+    await pressMod(page, 'Mod+r');
+    await pressMod(page, 'Mod+p');
+    await pressMod(page, 'Mod+Equal');
     await expect.poll(() => prevented(page, 'keydown')).toEqual([true, true, true, true]);
     await page.waitForTimeout(500);
     expect(await page.evaluate(() => (window as unknown as { __marker?: number }).__marker)).toBe(42);

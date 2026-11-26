@@ -1,4 +1,4 @@
-//! The job model of ci.yml (`paddock-ci-config`, ADR NEW-ci-job-model) against this repository's real workflow, the declared
+//! The job model of ci.yml (`paddock-ci-config`, ADR 0123) against this repository's real workflow, the declared
 //! `[ci.jobs]` table and the planner's job table, which stays until ADR 0117's remaining deletion (D12).
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 use paddock_ci_config::jobs::{Declared, JobModel, model};

@@ -902,7 +902,7 @@ fn every_ci_yml_job_is_in_the_job_table_and_asks_rerun_jobs() {
         );
     }
     let plan = &wf.jobs.iter().find(|(k, _)| k == "plan").unwrap().1;
-    // `dev plan --ci` writes every leg itself (plan_ci::OS_LEGS): ci.yml keeps no copy of the OS list and no fallback (ADR NEW-ci-job-model §4).
+    // `dev plan --ci` writes every leg itself (plan_ci::OS_LEGS): ci.yml keeps no copy of the OS list and no fallback (ADR 0123 §4).
     assert!(!plan.contains("PLAN_OS_LEGS"), "ci.yml's plan job keeps no OS leg list");
     assert!(!plan.contains("crate_legs="), "ci.yml's plan job writes no leg output");
 }

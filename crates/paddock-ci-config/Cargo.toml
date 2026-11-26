@@ -1,7 +1,7 @@
 [package]
 name = "paddock-ci-config"
 version = "0.1.0"
-description = "The CI job model: ci.yml's jobs, matrices, needs and the projects each job runs for, built once from the workflow text (ADR NEW-ci-job-model). A pure core: no file or process I/O."
+description = "The CI job model: ci.yml's jobs, matrices, needs and the projects each job runs for, built once from the workflow text (ADR 0123). A pure core: no file or process I/O."
 edition.workspace = true
 license.workspace = true
 repository.workspace = true

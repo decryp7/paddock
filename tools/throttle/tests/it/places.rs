@@ -3,8 +3,11 @@
 #![cfg(unix)]
 
 use crate::procutil::*;
+use paddock_env::Os;
 use std::fs;
 use std::path::{Path, PathBuf};
+use throttle::config::Config;
+use throttle::places::Host;
 
 /// The settings and state folder of the platform under `home` (macOS convention; XDG elsewhere, none of its variables set in a test).
 fn state_under(home: &Path) -> PathBuf {
@@ -49,24 +52,36 @@ fn the_precedence_is_the_environment_then_the_config_file_then_the_default() {
     }
 }
 
+/// What a launchd daemon with `UserName` set sees: no `HOME`, no XDG folder, no folder variable. The home then comes from the user
+/// database, which the test injects through [`Host::user_home`] (the world's own folder stands in for the passwd entry): a test that ran
+/// the binary read the real user's home and its `config.toml`, so it failed on any machine with one (ER-14; the coordinator's throttle
+/// config of 2026-11-26). The resolver is the binary's own (`Config::from_env` with the host it builds), only the user database is fake.
 #[test]
 fn a_process_with_no_home_finds_it_through_the_user_database() {
     let w = World::new();
-    // What a launchd daemon with UserName set sees: no HOME, no folder variable.
-    // The XDG folders go too: on Linux they come before HOME, and the world sets them from its home.
-    let got = dir_out(
-        &w,
-        &[
-            ("PLOCK_DIR", UNSET),
-            ("HOME", UNSET),
-            ("XDG_STATE_HOME", UNSET),
-            ("XDG_CONFIG_HOME", UNSET),
-        ],
-    );
-    let p = Path::new(&got);
-    assert!(
-        p.is_absolute() && p.ends_with(state_under(Path::new("/")).strip_prefix("/").unwrap()),
-        "{got}"
+    let passwd_home = w.path("passwd-home");
+    fs::create_dir_all(&passwd_home).unwrap();
+    let user_home = || Some(passwd_home.clone());
+    let host = Host {
+        os: Os::current(),
+        user_home: &user_home,
+        read_file: &|p| fs::read_to_string(p).ok(),
+        has_history: &|_| false,
+        dev_targets: None,
+    };
+    let no_env = |_: &str| None;
+    let (cfg, warnings) = Config::from_env(&no_env, &host);
+    assert_eq!(cfg.root, state_under(&passwd_home), "the default under the user database's home");
+    assert!(warnings.is_empty(), "{warnings:?}");
+    // The settings file is read from that home too, and wins over the default.
+    let cfg_file = config_under(&passwd_home);
+    fs::create_dir_all(cfg_file.parent().unwrap()).unwrap();
+    let chosen = w.path("chosen");
+    fs::write(&cfg_file, format!("dir = '{}'\n", chosen.display())).unwrap();
+    assert_eq!(
+        Config::from_env(&no_env, &host).0.root,
+        chosen,
+        "the config file under the user database's home"
     );
 }
 

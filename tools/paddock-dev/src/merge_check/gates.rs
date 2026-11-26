@@ -67,27 +67,35 @@ pub struct Real;
 
 impl Gates for Real {
     fn run(&self, root: &Path, base: &str) -> Result<GateRun, String> {
-        let mut cmd = command(program()?);
-        cmd.args(["--json", "check", "--pre-push", "--member-gate", "--base", base, "--root"])
-            .arg(root)
-            .current_dir(root);
-        let out = run_bounded(cmd, Limits::new(TIMEOUT)).map_err(|e| format!("`check --pre-push` could not run: {e}"))?;
-        let code = match out.outcome {
-            paddock_proc::Outcome::Exited(st) => st.code(),
-            _ => None,
-        };
-        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
-        let wire = stdout
-            .lines()
-            .find(|l| l.starts_with('{'))
-            .and_then(|l| serde_json::from_str(l).ok());
-        let text = format!("{}\n{}", stdout, out.stderr_text());
-        Ok(GateRun {
-            code,
-            text: text.trim().to_string(),
-            wire,
-        })
+        run_pre_push(root, base, &["--member-gate"])
     }
+}
+
+/// Runs `<this tool> --json check --pre-push <extra> --base <base> --root <root>` in `root` and reads what it printed (the member gate
+/// and the static rows of `merge sync-member` differ only in `extra`).
+pub fn run_pre_push(root: &Path, base: &str, extra: &[&str]) -> Result<GateRun, String> {
+    let mut cmd = command(program()?);
+    cmd.args(["--json", "check", "--pre-push"])
+        .args(extra)
+        .args(["--base", base, "--root"])
+        .arg(root)
+        .current_dir(root);
+    let out = run_bounded(cmd, Limits::new(TIMEOUT)).map_err(|e| format!("`check --pre-push` could not run: {e}"))?;
+    let code = match out.outcome {
+        paddock_proc::Outcome::Exited(st) => st.code(),
+        _ => None,
+    };
+    let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+    let wire = stdout
+        .lines()
+        .find(|l| l.starts_with('{'))
+        .and_then(|l| serde_json::from_str(l).ok());
+    let text = format!("{}\n{}", stdout, out.stderr_text());
+    Ok(GateRun {
+        code,
+        text: text.trim().to_string(),
+        wire,
+    })
 }
 
 fn step(exit: Exit, outcome: &str, base: &str, text: Vec<String>, rows: &str) -> Step {

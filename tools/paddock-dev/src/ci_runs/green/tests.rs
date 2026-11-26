@@ -946,9 +946,15 @@ fn a_landing_run_of_its_own_narrowed_diff_lands_but_is_never_a_base_nor_tag_gree
     let (v, from) = verdict::landing_verdict_with(&mut client(&mut f), "ci.yml", &head, None, true, &mut |_, _| Some(touched(&[])));
     assert_eq!(v, verdict::Verdict::Green { run: 8801 });
     assert_eq!(from.as_deref(), Some(main.as_str()));
-    let plain = verdict::verdict_with_touched(&mut client(&mut f), "ci.yml", &head, None, true, &mut Vec::new, &mut |_, _| {
-        Some(touched(&[]))
-    });
+    let plain = verdict::verdict_with_touched(
+        &mut client(&mut f),
+        "ci.yml",
+        &head,
+        None,
+        true,
+        &mut |_| Vec::new(),
+        &mut |_, _| Some(touched(&[])),
+    );
     // Run 8983: the reason named the landing run with an empty cause, "8983 ()". It says why the run is not complete here.
     assert!(
         matches!(&plain, verdict::Verdict::Red { reason, .. }
@@ -969,6 +975,35 @@ fn a_landing_run_of_its_own_narrowed_diff_lands_but_is_never_a_base_nor_tag_gree
     let whole = Run::train(8803, &head, "success").partial(&whole);
     let mut f3 = server_by_sha(&[clone_run(&whole)]);
     assert_eq!(grade(&mut f3, &whole, touched(&[])).scope, Scope::Partial);
+}
+
+#[test]
+fn a_landing_run_with_a_flaky_test_of_an_untouched_target_has_fix_items_for_the_landing_reader_and_is_partial_for_the_plain_one() {
+    // `ci fix-items` records what a landing leaves (docs/ci-schedules.md), and a commit that landed on a landing run is never complete:
+    // read through the plain verdict it recorded nothing (8983) and said "last fully tested commit is ..." (9150). The landing reader,
+    // the one `ci landing-held` and the queue use, gives the items.
+    let (main, head) = (sha(1), sha(2));
+    let landing = Run::train(8821, &head, "failure")
+        .failing(CRATE, CRATE_FLAKY)
+        .partial(&landing_line(&main, &[], &["app:debrief"]));
+    let mut f = server_by_sha(&[Run::push(8820, &main, "success"), clone_run(&landing)]);
+    let (v, _) = verdict::landing_verdict_with(&mut client(&mut f), "ci.yml", &head, None, true, &mut |_, _| {
+        Some(touched(&["debrief"]))
+    });
+    assert!(
+        matches!(&v, verdict::Verdict::GreenWithFixItems { run: 8821, items } if items.len() == 1),
+        "{v:?}"
+    );
+    let plain = verdict::verdict_with_touched(
+        &mut client(&mut f),
+        "ci.yml",
+        &head,
+        None,
+        true,
+        &mut |_| Vec::new(),
+        &mut |_, _| Some(touched(&["debrief"])),
+    );
+    assert!(matches!(plain, verdict::Verdict::Red { .. }), "{plain:?}");
 }
 
 #[test]
@@ -1223,6 +1258,13 @@ struct Line {
 }
 
 fn train_ij_line() -> Line {
+    train_ij_line_with(1)
+}
+
+/// [`train_ij_line`] with `members` commits on train i. Beyond one they are written by one `git fast-import` and dated far in the
+/// future, so a walk from the tip meets all of them before main's own commit `x`: a train of many members, as on 2026-11-26 (train
+/// r's push found `x` 222 commits down the history, past the 200 the candidate line used to read).
+fn train_ij_line_with(members: usize) -> Line {
     let dir = tempfile::tempdir().unwrap();
     let git = |args: &[&str]| {
         let out = crate::git_env::git()
@@ -1250,8 +1292,31 @@ fn train_ij_line() -> Line {
     };
     git(&["init", "-q", "-b", "main"]);
     let b = commit("base.txt", "b");
-    git(&["checkout", "-q", "-b", "train-i"]);
-    commit("member-i.txt", "member i");
+    if members <= 1 {
+        git(&["checkout", "-q", "-b", "train-i"]);
+        commit("member-i.txt", "member i");
+    } else {
+        use std::io::Write;
+        let mut script = format!("reset refs/heads/train-i\nfrom {b}\n");
+        for n in 0..members {
+            let msg = format!("member {n}");
+            script.push_str(&format!(
+                "commit refs/heads/train-i\ncommitter t <t@example.invalid> {} +0000\ndata {}\n{msg}\n",
+                4_102_444_800u64 + n as u64,
+                msg.len()
+            ));
+        }
+        let mut child = crate::git_env::git()
+            .arg("-C")
+            .arg(dir.path())
+            .args(["fast-import", "--quiet"])
+            .stdin(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        child.stdin.take().unwrap().write_all(script.as_bytes()).unwrap();
+        assert!(child.wait().unwrap().success(), "fast-import");
+        git(&["checkout", "-q", "train-i"]);
+    }
     git(&["checkout", "-q", "main"]);
     let x = commit("x.txt", "x");
     git(&["checkout", "-q", "train-i"]);
@@ -1294,6 +1359,39 @@ fn a_push_to_main_reuses_the_landing_run_when_main_moved_through_a_train_that_me
     let mut f = server_by_sha(&train_ij_runs(&l));
     let r = crate::ci_runs::reuse::decide_with(&mut client(&mut f), "ci.yml", &l.y, Some(9084), true, l.dir.path(), Some(&l.t));
     assert!(matches!(r, crate::ci_runs::reuse::Reuse::Skip { run: 9082, .. }), "{r:?}");
+}
+
+#[test]
+fn a_main_tip_far_down_a_long_trains_history_is_still_a_candidate_base() {
+    // Train r (2026-11-26): 242 commits between main's old complete commit and the push, so the tip x that train i merged was commit
+    // 222 of the walk: past the 200 the line read, so the push took an older base than the landing dispatch had (x), and `ci reuse`
+    // said the landing "does not cover it". The tips that are ancestors are found whatever the length of the history below them.
+    let l = train_ij_line_with(250);
+    let mut f = server_by_sha(&train_ij_runs(&l));
+    let r = crate::ci_runs::reuse::decide_with(&mut client(&mut f), "ci.yml", &l.y, Some(9084), true, l.dir.path(), Some(&l.t));
+    assert!(matches!(r, crate::ci_runs::reuse::Reuse::Skip { run: 9082, .. }), "{r:?}");
+    // The measure of what the push touched reads the same line (it read the first-parent line, which never meets x), and finds x
+    // as the base of the change, not b or no base.
+    let runs = Runs::read(&mut client(&mut f), "ci.yml").unwrap();
+    let line = candidate_line(l.dir.path(), &l.y, &runs);
+    let found = find_base_in(&mut client(&mut f), &runs, &line, true, &mut |_, _, _| None);
+    assert_eq!(found.map(|b| b.sha), Some(l.x.clone()), "{line:?}");
+}
+
+#[test]
+fn the_verdicts_hint_names_the_commit_the_pushs_base_is() {
+    // Run 9150: `ci verdict` said "the last fully tested commit on main is 62049e300" while the push's base and the landing's were
+    // 3258361e7. The hint reads the one candidate line, so it names the push's base (here x, below a 250-member train).
+    let l = train_ij_line_with(250);
+    let runs = &train_ij_runs(&l)[1..];
+    let mut f = server_by_sha(runs);
+    let planned = crate::plan_cmd::green_base_in(&mut client(&mut f), l.dir.path(), &l.y, Some(&l.t), &mut |_| {});
+    assert_eq!(planned.unwrap().map(|b| b.0), Some(l.x.clone()), "the push's base");
+    let v = verdict::verdict_in(&mut client(&mut f), "ci.yml", &l.y, None, true, l.dir.path());
+    assert!(
+        matches!(&v, verdict::Verdict::Red { reason, .. } if reason.contains(&format!("the last fully tested commit on main is {}", l.x))),
+        "{v:?}"
+    );
 }
 
 #[test]

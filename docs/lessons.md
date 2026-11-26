@@ -4396,4 +4396,30 @@ spec `data.spec.ts:301` (theme switch redraws the canvases) failed in the same r
 - **Cause.** The helper was written where it was first needed, not checked against the shared kit (ER-22), and nothing told the next
   fixture author that a per-test git repository is the slow shape.
 - **Fix (user decision 74).** The helper moved to `paddock_testkit::git_fixture` (temp folder from the kit, owner, size limit and eviction
-  rule in its doc), and rule NEW-git-fixtures with the report-only check C174 flags a fixture builder with six or more git starts per test.
+  rule in its doc), and rule 102 with the report-only check C174 flags a fixture builder with six or more git starts per test.
+
+## Fix item: a FLAKY paddock-ipc link-server test on macOS in run 9150, recorded by hand (2026-11-26)
+`paddock-ipc::it edges::a_link_server_with_no_descriptor_left_to_accept_tells_the_waiting_client_why` was FLAKY on macOS in ci.yml run
+9150 on 4ee7d98fc (train 2026-11-26-r's landed head): try 1 failed at `crates/paddock-ipc/tests/it/edges.rs:470`, the assertion that the
+server records why it refused, with `refused: []` (no reason recorded), and try 2 passed. Train r did not touch paddock-ipc, so it did not
+block the landing (ER-12). `./dev ci fix-items` could not record it because the push-reuse chain broke on that landing (a reused push
+verdict, fixed on `fix/reuse-chain-reused-verdict`), so it is recorded here. Same crate as the `ipc-link-server busy` Windows flakes
+above. A fix item for the crate's owner: a failing reproduction first, with the causes listed and what rules each out (ER-28); never a
+sleep or a raised limit.
+
+## A push to main took an older base than its own landing run (2026-11-26, fix/reuse-chain-reused-verdict)
+- **What happened.** Train r landed on main (4ee7d98fc) right after train pq. Its push run 9150 did not reuse the landing run 9148: `ci reuse`
+  said the landing tested the diff from 3258361e7 and the push's diff was from 62049e300. `ci fix-items` refused 9150 as well.
+- **First hypothesis, refuted.** That a push run which itself reused another run (pq's 9140) does not count. It does not: the reader takes the
+  deciding run of a commit from all its runs, and a landing run is never a base by design (review round 2, P1-A). The pre-push reuse store
+  (`feat/reuse-member-audits`) is not involved.
+- **Cause.** `green::main_line` filtered main's tips (the push runs' commits) by the 200 newest ancestors of `head` (`rev-list -n 200`). A
+  train merges many commits, so tip 3258361e7 was commit 222 of the walk and fell out, and the line fell back to the first-parent line,
+  which meets 62049e300 and never 3258361e7. The landing dispatch, from the older tip 42a884158, still saw it. A second copy of the
+  line, `green::touched_in`, read the first-parent line only, so a FLAKY test of untouched paddock-ipc was measured from the older base.
+- **Fix.** `main_line` reads every ancestor (about 30 ms for 10,000 commits; the candidates stay bounded by the tips and the first-parent
+  line), and `touched_in` reads the same line through `green::touched_line`. `ci fix-items` reads the landing verdict, as `ci landing-held`
+  and the queue do: a landed commit is decided by a landing run, so the plain verdict recorded nothing (also train a's 8983).
+- **Class (ER-21, finished in the same round).** One candidate line, `green::candidate_line` (over `main_line`), is now read by the push's reuse, the
+  planner, the landing dispatch, the touched measure and the verdict's "last fully tested commit" hint; the hint had named 62049e300. A test
+  asserts the hint and the push base agree. Earlier instance: run 9056's first-parent line.

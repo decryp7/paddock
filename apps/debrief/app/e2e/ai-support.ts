@@ -3,6 +3,7 @@ import { gridRows, openAppWith } from './mock-url';
 import { expectStreamDone } from '../../../../ui/projects/paddock-e2e/src/ready.ts';
 import { contextMenu } from './menu-support';
 import { heldToast, pressInToast } from './toast-support';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard.ts';
 
 /** Opens the app with the scripted AI mock (fast streaming) plus `extra` switches, and waits for the grid. */
 export async function openAiApp(page: Page, extra = ''): Promise<void> {
@@ -47,7 +48,7 @@ export async function rowMenu(page: Page): Promise<Locator> {
 
 /** Runs a palette command by title (options are looked up in the palette only: the chat has <option>s too). */
 export async function runCommand(page: Page, title: string): Promise<void> {
-  await page.keyboard.press('ControlOrMeta+k');
+  await pressMod(page, 'Mod+k');
   const input = page.getByRole('combobox', { name: 'Type a command' });
   await expect(input).toBeFocused();
   await input.fill(title);

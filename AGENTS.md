@@ -84,7 +84,10 @@ package.json     the one npm workspace and package-lock.json (ui, eslint, icons,
   (`tools/paddock-dev`) narrows the same way and answers the same plan; its golden test compares it with the script.
 - **Merge queue: parked (user, 2026-11-24).** `./dev queue` and `./dev pr` (docs/plans/merge-queue.md) stay in the tool, but
   nothing runs them and CI does not test them; trains are built by hand with the member gate (`./dev merge check --gates`).
-  A member merges current main and re-runs its member gate on that tip before it joins a train (rule 100).
+  A member merges current main and re-runs its member gate on that tip before it joins a train (rule 100). `./dev merge sync-member <train>`, run after the merge, runs the
+  fast static rows (conformance, gates-register, clippy, clippy-windows) on the sync tip first and fails on a bad row (`--no-static "<reason>"` skips them, logged);
+  once they pass it dispatches the member's own CI trial (the affected jobs on the train, `ci dispatch --trial` on `sync/<member>`, which sync-member pushes: integrator role only) and prints the run id, which
+  `./dev merge check --gates` reads later (red blocks, running is not a pass; `--no-trial "<reason>"` skips it, logged).
 - **Old-base block (user, 2026-11-25).** `./dev merge check` refuses a train member that lacks the train's base (the newest commit of
   main, or of the earlier train, the train has merged) with one `::error::`: merge origin/main into the member and rerun its gate;
   `--old-base-anyway "<reason>"` is the logged emergency override (`tools/paddock-dev/src/merge_check/stale_base.rs`).
@@ -132,7 +135,7 @@ package.json     the one npm workspace and package-lock.json (ui, eslint, icons,
   off by default, and a value is a hang detector set from a measured quiet gap with a wide margin, never a speed limit (ER-12;
   tools/throttle/README.md, "The run log and the hang detector").
 - **E2E and screenshots run on fresh code (guidance; a binding rule is proposed).** A running dev server is reused only with `PW_REUSE_SERVER=1`; default ports derive from the worktree path (`e2ePort` in `@decryp7/paddock-e2e`); a config that consumes `ui/dist` or the css fails at load with "rebuild ui: npm run build -w ui" when they were built from older sources (`build-guard.ts`, content stamps; lessons.md). New Playwright configs use these.
-- **Git fixtures (rule NEW-git-fixtures).** A test that needs a git repository builds it once per machine with `paddock_testkit::git_fixture::template` and copies it per test with `copy_tree`; a fixture builder with six or more `git` starts per test is a C174 finding (report-only).
+- **Git fixtures (rule 102).** A test that needs a git repository builds it once per machine with `paddock_testkit::git_fixture::template` and copies it per test with `copy_tree`; a fixture builder with six or more `git` starts per test is a C174 finding (report-only).
 - Every change ships with tests; every bug fix starts with a failing test. A colour change keeps `npm run test:tokens`
   green (WCAG AA/AAA pairs, CVD separation); change the tokens, not the test.
 - **No VM or container on this Mac (user, 2026-11-26; docs/rules.md rule 101).** `./dev check --pre-push` and the member gate

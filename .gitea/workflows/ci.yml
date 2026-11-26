@@ -676,6 +676,15 @@ jobs:
           npx playwright test --project=gallery-webkit --project=shell-demo-webkit --project=workbench-demo-webkit
           npx playwright test -c projects/paddock-e2e/selftest/playwright.config.ts --project=webkit
 
+      # The traces of failed tests (retain-on-failure, paddockTrace) and each failure's error context: nightly 9103's chart spec failed with
+      # only its timeout in the log and nothing kept to show why.
+      - uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v3
+        if: failure()
+        with:
+          name: e2e-webkit-results
+          path: ui/.angular/playwright-results
+          if-no-files-found: ignore
+
       - uses: ./.gitea/actions/sccache-stats
         if: always()
 
