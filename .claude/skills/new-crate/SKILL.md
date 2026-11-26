@@ -51,3 +51,9 @@ Work in your own worktree with its own `CARGO_TARGET_DIR`; heavy steps through t
 - Bumping a crate's minor version without bumping its dependents.
 - Forgetting to commit the hack crate or lockfile after `hakari generate`.
 - Duplicating behaviour an existing crate already tests (rule 43).
+- A crate that parses text needs a never-panics test, or conformance C36 (strict) fails: `assert!(paddock_testkit::never_panics(&paddock_testkit::corpus(SEED), parse).is_empty())`
+  in `tests/it`, with `paddock-testkit` as a dev-dependency (a lockfile line).
+- Code moved in from a tool workspace (`tools/paddock-dev` formats at its own width) is reformatted by `cargo fmt -p paddock-<name>` at crates'
+  width; run it before the first commit, or the pre-commit rustfmt hook refuses the commit.
+- A dotted or slashed string literal in a `tools/paddock-dev` model module (`"ci.jobs"`, a file name) is read as a path fact by the model guard
+  (`the_paddock_dev_model_modules_hold_no_path_literal`): keep such facts in `docs/repo-graph.toml` or write a label as `"[ci.jobs]"`.
