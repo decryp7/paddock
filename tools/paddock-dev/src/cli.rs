@@ -209,7 +209,9 @@ enum MergeCommand {
     Check(MergeCheckArgs),
     /// Before merging the train into a member branch: list the commands that re-apply the member's own work the train reverted
     /// (`git revert <sha>`, git's "revert a faulty merge"; run them after `git merge <train>`), and warn about reverts of other
-    /// branches' merges the member holds. Read-only: runs nothing. Run it before the merge of the train.
+    /// branches' merges the member holds. Run it before the merge of the train: it changes nothing. Run it again after the merge and it
+    /// also runs the fast static rows on the sync tip (`check --pre-push --only conformance,gates-register,clippy,clippy-windows
+    /// --base <train>`); a failing row is exit 5 (6 not measured) with the rows and the next step, unless `--no-static` says why not.
     SyncMember(SyncMemberArgs),
     /// Git's merge driver of docs/lessons.md (`merge=lessons`, set by `./dev hooks install`): `./dev merge lessons-driver %O %A %B`.
     /// Git's union merge of two appended sections, then the blank line it drops before a `## ` heading put back. The result is
@@ -234,6 +236,9 @@ struct SyncMemberArgs {
     /// The member's branch name (default: the branch HEAD is on).
     #[arg(long)]
     member: Option<String>,
+    /// Do not run the static rows on the sync tip; the reason is printed (like `merge check --old-base-anyway`).
+    #[arg(long, value_name = "REASON")]
+    no_static: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -879,7 +884,7 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
         }),
         Command::Merge {
             command: MergeCommand::SyncMember(a),
-        } => merge_check::sync_member::command(a.root.as_deref(), &a.train, a.member.as_deref()),
+        } => merge_check::sync_member::command(a.root.as_deref(), &a.train, a.member.as_deref(), a.no_static.as_deref()),
         Command::Merge {
             command: MergeCommand::LessonsDriver { base, ours, theirs },
         } => lessons_driver::command(&base, &ours, &theirs),

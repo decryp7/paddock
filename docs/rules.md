@@ -557,7 +557,9 @@ Amendments of the same date, no new number: the member gate runs each member's a
 100. **A branch joins a train only after it has merged current main and re-run its member gate on that tip.** The
 merge check (`./dev merge check`) refuses a member whose base is older than main: the stale-base check, being made blocking on
 `ci/old-base-block` (report-only until it lands). A refused member merges main, re-runs `./dev merge check --gates` on the result and
-is offered again. *Why:* on 2026-11-25 five members were pulled from trains i, k and m because their base was older than main (see
+is offered again. After merging main (or the train) into the member, `./dev merge sync-member <train>` runs the fast static rows
+(conformance, the gate register, Clippy and Windows Clippy of the touched workspaces) on that sync tip and ends non-zero on a failing
+or unmeasured row; fix it on the member and re-sync. `--no-static "<reason>"` is the logged escape. *Why:* on 2026-11-25 five members were pulled from trains i, k and m because their base was older than main (see
 [lessons.md](lessons.md#members-on-an-old-base-were-pulled-from-trains-i-k-and-m-2026-11-25)).
 
 ## Monorepo (ADR 0014 §10; effective for an app from its import into `paddock/apps/<app>`, for Paddock from the first import)

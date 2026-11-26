@@ -1945,6 +1945,9 @@ fn sync_member(r: &Repo, train: &str, extra: &[&str]) -> (i32, String) {
     (out.status.code().unwrap(), text)
 }
 
+/// The static rows of a sync tip need a repository with checks; the read-only tests of the revert listing opt out of them.
+const NO_STATIC: [&str; 2] = ["--no-static", "fixture: only the revert listing is under test"];
+
 /// The train (`main`) merged `feat/x` and reverted the merge; main then moved on. HEAD ends on `feat/x` (the reverted branch itself).
 /// Returns the repository and the revert commit.
 fn reverted_own_branch() -> (Repo, String) {
@@ -2526,7 +2529,7 @@ fn sync_member_run_after_the_merge_reads_the_members_pre_merge_tip_and_leaves_ou
     r.write("x2.txt", "x2\n"); // a commit of the member's own after the train merged it, so the train's merge is a real merge
     r.commit("feat: x2");
     r.git(&["merge", "-q", "--no-edit", "main"]);
-    let (code, text) = sync_member(&r, "main", &[]);
+    let (code, text) = sync_member(&r, "main", &NO_STATIC);
     assert_eq!(code, 0, "{text}");
     assert!(
         text.contains(&format!("git revert {s}"))
@@ -2536,7 +2539,7 @@ fn sync_member_run_after_the_merge_reads_the_members_pre_merge_tip_and_leaves_ou
     );
     // Run what it printed: nothing is left, and it says that one was already re-applied.
     r.git(&["revert", "--no-edit", &s]);
-    let (code, text) = sync_member(&r, "main", &[]);
+    let (code, text) = sync_member(&r, "main", &NO_STATIC);
     assert_eq!(code, 0, "{text}");
     assert!(
         text.contains("0 revert(s) of this member's own merges") && text.contains("1 already re-applied") && !text.contains("git revert "),
@@ -2699,4 +2702,110 @@ fn a_member_that_changes_the_lockfile_makes_its_generator_due() {
     let (code, text) = check_with_generators(&r);
     assert_eq!(code, 0, "{text}");
     assert!(text.contains("gen check: 1 of 2 due: lock-gen"), "{text}");
+}
+
+// `merge sync-member` runs the fast static rows on the sync tip (the train merged into HEAD). A stand-in for `dev check --pre-push`
+// plays them: it logs its argv, prints the rows the test gives it and exits with GATES_EXIT.
+#[cfg(unix)]
+mod sync_static {
+    use super::*;
+
+    fn fake_rows(dir: &Path, rows: &str) {
+        let log = Actions::new().appends_with("{env:GATES_LOG}", "{args}\n");
+        StandIn::new(dir, "rows")
+            .answers(
+                log.stdout(&format!(r#"{{"ok":true,"gates":{rows}}}"#))
+                    .exits_with_env("GATES_EXIT", 0),
+            )
+            .install()
+            .unwrap();
+    }
+
+    const GREEN: &str = r#"[{"id":"conformance","verdict":"passed"},{"id":"gates-register","verdict":"passed"},{"id":"clippy crates","verdict":"passed"},{"id":"clippy-windows crates","verdict":"passed"}]"#;
+
+    /// The member has merged the train: HEAD is the sync tip.
+    fn merged() -> Repo {
+        let (r, _) = reverted_own_branch();
+        r.write("x2.txt", "x2\n");
+        r.commit("feat: x2");
+        r.git(&["merge", "-q", "--no-edit", "main"]);
+        r
+    }
+
+    fn run(r: &Repo, rows: &str, exit: &str, extra: &[&str]) -> (i32, String, String) {
+        let dir = tempfile::tempdir().unwrap();
+        fake_rows(dir.path(), rows);
+        let log = dir.path().join("log");
+        let out = r
+            .dev_cmd()
+            .env("PADDOCK_MERGE_CHECK_GATES", dir.path().join("rows"))
+            .env("GATES_LOG", &log)
+            .env("GATES_EXIT", exit)
+            .args(["merge", "sync-member", "--root"])
+            .arg(r.path())
+            .args(extra)
+            .arg("main")
+            .output()
+            .unwrap();
+        let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        (out.status.code().unwrap(), text, fs::read_to_string(&log).unwrap_or_default())
+    }
+
+    #[test]
+    fn after_the_merge_it_runs_the_asked_rows_against_the_train_and_prints_each() {
+        let r = merged();
+        let (code, text, log) = run(&r, GREEN, "0", &[]);
+        assert_eq!(code, 0, "{text}");
+        for row in ["conformance", "gates-register", "clippy crates", "clippy-windows crates"] {
+            assert!(text.contains(row), "{row}: {text}");
+        }
+        assert!(text.contains("static rows: passed"), "{text}");
+        let main = r.git(&["rev-parse", "main"]);
+        assert!(
+            log.contains("--only conformance,gates-register,clippy,clippy-windows") && log.contains(&format!("--base {main}")),
+            "{log}"
+        );
+    }
+
+    #[test]
+    fn a_failing_row_ends_non_zero_with_one_error_and_the_next_step() {
+        let r = merged();
+        let rows = r#"[{"id":"conformance","verdict":"failed"},{"id":"gates-register","verdict":"passed"}]"#;
+        let (code, text, _) = run(&r, rows, "5", &[]);
+        assert_eq!(code, 5, "{text}");
+        assert_eq!(text.matches("::error::").count(), 1, "{text}");
+        assert!(
+            text.contains("conformance") && text.contains("fix on the member, then re-sync"),
+            "{text}"
+        );
+    }
+
+    /// Positive control (ER-33): a stand-in that prints no rows (the signal hidden) is not a pass.
+    #[test]
+    fn rows_that_were_not_printed_are_not_a_pass() {
+        let r = merged();
+        let (code, text, _) = run(&r, "[]", "0", &[]);
+        assert_eq!(code, 6, "{text}");
+        assert!(text.contains("NOT MEASURED") && !text.contains("static rows: passed"), "{text}");
+    }
+
+    #[test]
+    fn no_static_skips_the_rows_and_logs_the_reason() {
+        let r = merged();
+        let (code, text, log) = run(&r, "[]", "5", &["--no-static", "docs-only sync"]);
+        assert_eq!(code, 0, "{text}");
+        assert!(text.contains("static rows NOT run (--no-static: docs-only sync)"), "{text}");
+        assert_eq!(log, "", "the rows were not started");
+        let (code, text, _) = run(&r, GREEN, "0", &["--no-static", " "]);
+        assert_eq!(code, 2, "{text}");
+        assert!(text.contains("--no-static needs a reason"), "{text}");
+    }
+
+    #[test]
+    fn before_the_merge_there_is_no_sync_tip_and_the_rows_are_not_started() {
+        let (r, _) = reverted_own_branch();
+        let (code, text, log) = run(&r, GREEN, "0", &[]);
+        assert_eq!(code, 0, "{text}");
+        assert!(text.contains("static rows not run") && log.is_empty(), "{text}");
+    }
 }

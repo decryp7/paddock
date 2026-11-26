@@ -47,6 +47,7 @@ mod lost_tests;
 mod reland;
 pub(crate) mod reverted_base;
 mod stale_base;
+mod static_rows;
 pub mod sync_member;
 mod testnames;
 mod trailers;

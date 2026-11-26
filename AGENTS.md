@@ -84,7 +84,8 @@ package.json     the one npm workspace and package-lock.json (ui, eslint, icons,
   (`tools/paddock-dev`) narrows the same way and answers the same plan; its golden test compares it with the script.
 - **Merge queue: parked (user, 2026-11-24).** `./dev queue` and `./dev pr` (docs/plans/merge-queue.md) stay in the tool, but
   nothing runs them and CI does not test them; trains are built by hand with the member gate (`./dev merge check --gates`).
-  A member merges current main and re-runs its member gate on that tip before it joins a train (rule 100).
+  A member merges current main and re-runs its member gate on that tip before it joins a train (rule 100). `./dev merge sync-member <train>`, run after the merge, runs the
+  fast static rows (conformance, gates-register, clippy, clippy-windows) on the sync tip first and fails on a bad row (`--no-static "<reason>"` skips them, logged).
 - **Old-base block (user, 2026-11-25).** `./dev merge check` refuses a train member that lacks the train's base (the newest commit of
   main, or of the earlier train, the train has merged) with one `::error::`: merge origin/main into the member and rerun its gate;
   `--old-base-anyway "<reason>"` is the logged emergency override (`tools/paddock-dev/src/merge_check/stale_base.rs`).
