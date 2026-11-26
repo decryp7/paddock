@@ -2673,7 +2673,7 @@ fn a_step_that_never_got_a_slot_is_not_measured_with_its_queue_time_never_passed
         reason.starts_with("queue stalled, held by") && reason.contains("31.0 s"),
         "{reason}"
     );
-    assert!(next.contains("heavy status") && next.contains("PADDOCK_QUEUE_STALL"), "{next}");
+    assert!(next.contains("throttle status") && next.contains("PADDOCK_QUEUE_STALL"), "{next}");
     let report = render_timed("h", &rows, &timings);
     assert_eq!(report.exit, Exit::NotMeasured);
     assert!(report.text.contains("NOT MEASURED  clippy crates"), "{}", report.text);
@@ -2767,7 +2767,7 @@ fn a_queue_with_no_progress_is_not_measured_and_names_the_holder() {
         "{reason}"
     );
     assert!(
-        next.contains("--only clippy") && next.contains("heavy status") && next.contains("30 min"),
+        next.contains("--only clippy") && next.contains("throttle status") && next.contains("30 min"),
         "{next}"
     );
     assert!(
@@ -3589,7 +3589,7 @@ mod deny_row {
             ]),
             logs: d.join("logs"),
             stop: Arc::new(AtomicBool::new(false)),
-            built_heavy: Default::default(),
+            built_throttle: Default::default(),
             live_slot: Default::default(),
             priority: false,
             wrapper: crate::local_sccache::Lazy::off(),

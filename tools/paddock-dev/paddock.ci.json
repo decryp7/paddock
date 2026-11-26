@@ -44,7 +44,7 @@
         "reason": "called by host-runner production code (ci_run, ci_setup_rust) inside a folder that is otherwise dev-Mac only, so it is tested on every host (docs/research/2026-11-22-os-scoped-tests.md section 1)"
       },
       {
-        "name": "pre_push::heavy_tool::",
+        "name": "pre_push::throttle_tool::",
         "reason": "called by host-runner production code (ci_run, ci_setup_rust) inside a folder that is otherwise dev-Mac only, so it is tested on every host (docs/research/2026-11-22-os-scoped-tests.md section 1)"
       },
       {
@@ -128,12 +128,12 @@
       },
       {
         "os": "macos-latest",
-        "name": "heavy_cmd::",
+        "name": "throttle_cmd::",
         "reason": "a tool or check of the developer's Mac: tested on macOS only, never on a Windows host (user decision 2026-11-22, docs/research/2026-11-22-os-scoped-tests.md section 1)"
       },
       {
         "os": "macos-latest",
-        "name": "heavy_install::",
+        "name": "throttle_install::",
         "reason": "a tool or check of the developer's Mac: tested on macOS only, never on a Windows host (user decision 2026-11-22, docs/research/2026-11-22-os-scoped-tests.md section 1)"
       },
       {

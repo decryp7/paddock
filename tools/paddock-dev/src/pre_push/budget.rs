@@ -2,13 +2,13 @@
 //! it waits for the machine-wide heavy slot is never run time and has its own bound, the queue's progress ([`super::exec::QUEUE_STALL`]).
 //! There is no total budget shared by the rows of a push (2026-11-21, ADR 0102 amendment). Pure: instants and text in, numbers out.
 //!
-//! - [`parse_heavy_timing`]: the `<agent> timing queued Q s, ran R s` line `heavy` prints for every run.
+//! - [`parse_throttle_timing`]: the `<agent> timing queued Q s, ran R s` line `throttle` prints for every run.
 //! - [`is_landing_ref`]: the refs whose pre-push gate takes the priority lane (`train/*`, `main`, a release tag).
-//! - [`with_heavy_flags`]: puts the lane and the two limits into the `heavy run ... --` prefix.
+//! - [`with_throttle_flags`]: puts the lane and the two limits into the `throttle run ... --` prefix.
 
 use std::time::{Duration, Instant};
 
-/// Queue and run seconds of one step, as `heavy` measured them.
+/// Queue and run seconds of one step, as `throttle` measured them.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Timing {
     /// Seconds from the start until the command began (slot queue and load gate).
@@ -23,7 +23,7 @@ pub enum Slot {
     /// Nothing is known (the executor does not look).
     #[default]
     Unknown,
-    /// Waiting for the machine-wide slot since `since` (when the step was handed to `heavy`): every second since is queue time,
+    /// Waiting for the machine-wide slot since `since` (when the step was handed to `throttle`): every second since is queue time,
     /// never run time.
     Queued {
         /// When the wait began.
@@ -38,8 +38,8 @@ pub enum Slot {
     },
 }
 
-/// `heavy`'s `<agent> timing queued 12.3 s, ran 45.6 s` line, the last one in `log`.
-pub fn parse_heavy_timing(log: &str) -> Option<Timing> {
+/// `throttle`'s `<agent> timing queued 12.3 s, ran 45.6 s` line, the last one in `log`.
+pub fn parse_throttle_timing(log: &str) -> Option<Timing> {
     log.lines().rev().find_map(|l| {
         let rest = l.split(" timing queued ").nth(1)?;
         let (q, rest) = rest.split_once(" s, ran ")?;
@@ -74,14 +74,14 @@ pub fn is_landing_ref(remote_ref: &str) -> bool {
     }
 }
 
-/// Seconds, as `heavy` takes them.
+/// Seconds, as `throttle` takes them.
 fn secs(d: Duration) -> String {
     format!("{}", d.as_secs().max(1))
 }
 
-/// `prefix` (the `heavy run <agent> --` command) with the priority lane and the limits. Only our own `heavy` has them: a
-/// `PADDOCK_HEAVY` of someone else's, or `heavy.sh`, is returned unchanged.
-pub fn with_heavy_flags(prefix: &[String], priority: bool, queue_stall: Duration, run_max: Duration) -> Vec<String> {
+/// `prefix` (the `throttle run <agent> --` command) with the priority lane and the limits. Only our own `throttle` has them: a
+/// `PADDOCK_THROTTLE` of someone else's, or `heavy.sh`, is returned unchanged.
+pub fn with_throttle_flags(prefix: &[String], priority: bool, queue_stall: Duration, run_max: Duration) -> Vec<String> {
     let ours = prefix.len() >= 3 && prefix[1] == "run" && prefix.last().is_some_and(|l| l == "--");
     if !ours {
         return prefix.to_vec();
@@ -97,8 +97,8 @@ pub fn with_heavy_flags(prefix: &[String], priority: bool, queue_stall: Duration
     out
 }
 
-/// `prefix` (our `heavy run <agent> --`) with `name` as the agent: a step's own name, so its lines in a log are told from any other
-/// step's (`<name> holds the lock (pid`). Anything else (not our `heavy`) is returned unchanged.
+/// `prefix` (our `throttle run <agent> --`) with `name` as the agent: a step's own name, so its lines in a log are told from any other
+/// step's (`<name> holds the lock (pid`). Anything else (not our `throttle`) is returned unchanged.
 pub fn with_agent_name(prefix: &[String], name: &str) -> Vec<String> {
     let ours = prefix.len() >= 3 && prefix[1] == "run" && prefix.last().is_some_and(|l| l == "--");
     let mut out = prefix.to_vec();
@@ -117,10 +117,10 @@ mod tests {
 
     #[test]
     fn heavys_timing_line_is_read_and_the_last_one_wins() {
-        let log = "heavy: X timing queued 1.0 s, ran 2.0 s\nnoise\nheavy: pre-push timing queued 12.3 s, ran 45.6 s\n";
-        assert_eq!(parse_heavy_timing(log), Some(Timing { queued: 12.3, ran: 45.6 }));
-        assert_eq!(parse_heavy_timing("heavy: nothing here\n"), None);
-        assert_eq!(parse_heavy_timing("a timing queued x s, ran 1.0 s"), None);
+        let log = "throttle: X timing queued 1.0 s, ran 2.0 s\nnoise\nthrottle: pre-push timing queued 12.3 s, ran 45.6 s\n";
+        assert_eq!(parse_throttle_timing(log), Some(Timing { queued: 12.3, ran: 45.6 }));
+        assert_eq!(parse_throttle_timing("throttle: nothing here\n"), None);
+        assert_eq!(parse_throttle_timing("a timing queued x s, ran 1.0 s"), None);
     }
 
     #[test]
@@ -152,12 +152,12 @@ mod tests {
 
     #[test]
     fn a_step_gets_its_own_agent_name_in_our_heavy_only() {
-        let ours: Vec<String> = ["heavy", "run", "--high", "--queue-stall", "1", "pre-push", "--"]
+        let ours: Vec<String> = ["throttle", "run", "--high", "--queue-stall", "1", "pre-push", "--"]
             .map(String::from)
             .to_vec();
         assert_eq!(
             with_agent_name(&ours, "pre-push-7-1").join(" "),
-            "heavy run --high --queue-stall 1 pre-push-7-1 --"
+            "throttle run --high --queue-stall 1 pre-push-7-1 --"
         );
         let other = vec!["heavy.sh".to_string()];
         assert_eq!(with_agent_name(&other, "x"), other);
@@ -165,13 +165,13 @@ mod tests {
 
     #[test]
     fn the_flags_go_into_our_heavy_only() {
-        let ours: Vec<String> = ["heavy", "run", "pre-push", "--"].map(String::from).to_vec();
-        let got = with_heavy_flags(&ours, true, Duration::from_secs(1800), Duration::from_secs(900));
-        assert_eq!(got.join(" "), "heavy run --high --queue-stall 1800 --run-max 900 pre-push --");
-        let got = with_heavy_flags(&ours, false, Duration::from_secs(1800), Duration::from_millis(100));
-        assert_eq!(got.join(" "), "heavy run --queue-stall 1800 --run-max 1 pre-push --");
-        for other in [vec!["heavy.sh".to_string()], vec!["my-heavy".into(), "--x".into()], vec![]] {
-            assert_eq!(with_heavy_flags(&other, true, MIN15, MIN15), other);
+        let ours: Vec<String> = ["throttle", "run", "pre-push", "--"].map(String::from).to_vec();
+        let got = with_throttle_flags(&ours, true, Duration::from_secs(1800), Duration::from_secs(900));
+        assert_eq!(got.join(" "), "throttle run --high --queue-stall 1800 --run-max 900 pre-push --");
+        let got = with_throttle_flags(&ours, false, Duration::from_secs(1800), Duration::from_millis(100));
+        assert_eq!(got.join(" "), "throttle run --queue-stall 1800 --run-max 1 pre-push --");
+        for other in [vec!["heavy.sh".to_string()], vec!["my-throttle".into(), "--x".into()], vec![]] {
+            assert_eq!(with_throttle_flags(&other, true, MIN15, MIN15), other);
         }
     }
 }

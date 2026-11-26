@@ -1,5 +1,5 @@
 //! The tool cache: `<PADDOCK_DEV_HOME or ~/.paddock-dev>/bin/` (and `bin-source/`), where `./dev` keeps paddock-dev
-//! (`<hash>/paddock-dev-<host>`) and paddock-dev keeps the tools it builds (`heavy-<hash>/heavy`, [`crate::pre_push::heavy_tool`]).
+//! (`<hash>/paddock-dev-<host>`) and paddock-dev keeps the tools it builds (`throttle-<hash>/heavy`, [`crate::pre_push::throttle_tool`]).
 //! One mechanism for every cached tool, so a long run never loses the binary it resolved (ER-21; CI run 7773's job-isolation, and
 //! on 2026-11-14 six generators of one train-10 `gen check` found heavy gone):
 //!  - [`hold`]: a run that starts a cached tool more than once holds its own name for it, a hard link (else a copy) under
@@ -197,7 +197,7 @@ mod tests {
 
     #[test]
     fn a_held_tool_survives_another_run_removing_or_replacing_the_cache_and_the_run_completes() {
-        for tool in ["heavy", "paddock-dev"] {
+        for tool in ["throttle", "paddock-dev"] {
             let home = tempfile::tempdir().unwrap();
             let env = env_for(home.path());
             let cached = fake_tool(home.path(), &format!("{tool}-abc"), tool);
@@ -238,7 +238,7 @@ mod tests {
     fn a_fresh_hold_of_a_binary_built_weeks_ago_survives_another_runs_sweep() {
         let home = tempfile::tempdir().unwrap();
         let env = env_for(home.path());
-        let cached = fake_tool(home.path(), "heavy-abc", "heavy");
+        let cached = fake_tool(home.path(), "throttle-abc", "throttle");
         // Built a month ago: a hard link shares the file's times, so the hold's file looks a month old too.
         let month = SystemTime::now() - Duration::from_secs(30 * 24 * 3600);
         std::fs::File::options()
@@ -247,9 +247,9 @@ mod tests {
             .unwrap()
             .set_modified(month)
             .unwrap();
-        let first = hold("heavy", &cached, &env).unwrap();
+        let first = hold("throttle", &cached, &env).unwrap();
         // Another run starts and holds the same binary; its sweep must not take the first run's hold away.
-        let second = hold("heavy", &cached, &env).unwrap();
+        let second = hold("throttle", &cached, &env).unwrap();
         assert!(
             first.path().is_file(),
             "a hold made a moment ago is not stale, whatever the binary's age"
@@ -281,10 +281,10 @@ mod tests {
     #[test]
     fn a_missing_cached_binary_cannot_be_held_and_says_why() {
         let home = tempfile::tempdir().unwrap();
-        let why = hold("heavy", &home.path().join("bin/heavy-x/heavy"), &env_for(home.path()))
+        let why = hold("throttle", &home.path().join("bin/throttle-x/throttle"), &env_for(home.path()))
             .err()
             .unwrap();
-        assert!(why.contains("cannot hold heavy") && why.contains("Next:"), "{why}");
+        assert!(why.contains("cannot hold throttle") && why.contains("Next:"), "{why}");
     }
 
     #[cfg(unix)]

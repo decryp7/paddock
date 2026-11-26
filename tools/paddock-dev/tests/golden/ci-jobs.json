@@ -25,7 +25,7 @@
  "tools": [
   "tools"
  ],
- "heavy": [
+ "throttle": [
   "tools"
  ],
  "crates": [

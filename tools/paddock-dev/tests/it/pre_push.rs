@@ -27,7 +27,7 @@ fn fake_bin(dir: &Path, answer: Actions) -> String {
     format!("{}:/usr/bin:/bin", dir.display())
 }
 
-/// The fake cargo runs without the machine-wide slot: `PADDOCK_HEAVY=off`, as a machine only its user uses would set it.
+/// The fake cargo runs without the machine-wide slot: `PADDOCK_THROTTLE=off`, as a machine only its user uses would set it.
 fn dev(path: &str, args: &[&str]) -> (i32, String, String) {
     dev_heavy(path, args, Some("off"), true)
 }
@@ -45,9 +45,9 @@ fn dev_heavy(path: &str, args: &[&str], heavy: Option<&str>, test_off: bool) -> 
         // must not depend on the build folder the agent that runs it exports.
         .env_remove("CARGO_TARGET_DIR")
         .env_remove("CARGO_BUILD_TARGET_DIR")
-        .env_remove("PADDOCK_HEAVY")
-        .envs(heavy.map(|h| ("PADDOCK_HEAVY", h)))
-        .envs(test_off.then_some(("PADDOCK_TEST_HEAVY_OFF", "1")))
+        .env_remove("PADDOCK_THROTTLE")
+        .envs(heavy.map(|h| ("PADDOCK_THROTTLE", h)))
+        .envs(test_off.then_some(("PADDOCK_TEST_THROTTLE_OFF", "1")))
         // An empty cache: the heavy tool is built (by the fake cargo, which builds nothing) and never taken from the user's.
         .env(
             "PADDOCK_DEV_HOME",
@@ -164,14 +164,14 @@ fn tree_heavy_off_without_the_test_variable_is_an_override_and_not_measured() {
 }
 
 /// Every name a run of `./dev` started by a test may carry (ADR 0100): what the process builder lists, plus this file's own
-/// named additions (`PADDOCK_DEV_HOME`, `PADDOCK_HEAVY`, `PADDOCK_TEST_HEAVY_OFF`, `ENGINEERING_RULES`, and the sccache switch every
+/// named additions (`PADDOCK_DEV_HOME`, `PADDOCK_THROTTLE`, `PADDOCK_TEST_THROTTLE_OFF`, `ENGINEERING_RULES`, and the sccache switch every
 /// started `./dev` carries through `dev_bin::command`) and what `dev` itself sets for its gates (`CARGO_BUILD_JOBS`).
 fn listed(name: &str) -> bool {
     const NAMED: &[&str] = &[
         crate::dev_bin::OFF.0,
         "PADDOCK_DEV_HOME",
-        "PADDOCK_HEAVY",
-        "PADDOCK_TEST_HEAVY_OFF",
+        "PADDOCK_THROTTLE",
+        "PADDOCK_TEST_THROTTLE_OFF",
         "ENGINEERING_RULES",
         "CARGO_BUILD_JOBS",
         "PWD",

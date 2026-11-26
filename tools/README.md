@@ -52,7 +52,7 @@ The prebuilt download (the `dev-tool.yml` package) is not wired yet. Commands to
 acquire|release|status|idle-run`, `plan`; the rest arrives with R1 and later. When a path dependency in `crates/` changes its
 dependencies, regenerate the tool's lockfile in the same change (`cd tools/paddock-dev && cargo update -w`).
 
-## heavy
+## throttle
 
-`tools/heavy` (package `paddock-heavy`, binary `heavy`): the machine-wide heavy-step lock that replaces the shell `plock`
-and engineering-playbook `scripts/heavy.sh` (ER-24). Its own Cargo workspace; see [tools/heavy/README.md](heavy/README.md).
+`tools/throttle` (package `paddock-throttle`, binary `throttle`): the machine-wide heavy-step lock that replaces the shell `plock`
+and engineering-playbook `scripts/heavy.sh` (ER-24). Its own Cargo workspace; see [tools/throttle/README.md](throttle/README.md).

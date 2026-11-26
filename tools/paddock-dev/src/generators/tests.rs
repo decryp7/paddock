@@ -319,7 +319,7 @@ fn the_limit_follows_the_cost_class() {
     assert!(run::limit(Cost::Fast) < run::limit(Cost::Heavy));
 }
 
-/// `Real` with a fake `heavy` (the machine-wide slot) and a fake `cargo` (records what it was started with).
+/// `Real` with a fake `throttle` (the machine-wide slot) and a fake `cargo` (records what it was started with).
 #[cfg(unix)]
 mod real {
     use super::super::registry::Cost;
@@ -351,7 +351,7 @@ mod real {
             ))
             .install()
             .unwrap();
-        StandIn::new(&bin, "fake-heavy").answers(heavy).install().unwrap();
+        StandIn::new(&bin, "fake-throttle").answers(heavy).install().unwrap();
         Fixture { dir, repo, builds }
     }
 
@@ -359,8 +359,8 @@ mod real {
         HashMap::from([
             ("PATH".to_string(), format!("{}:/usr/bin:/bin", f.dir.path().join("bin").display())),
             (
-                "PADDOCK_HEAVY".to_string(),
-                f.dir.path().join("bin/fake-heavy").display().to_string(),
+                "PADDOCK_THROTTLE".to_string(),
+                f.dir.path().join("bin/fake-throttle").display().to_string(),
             ),
             ("PADDOCK_DEV_TARGET_DIR".to_string(), f.builds.display().to_string()),
         ])
@@ -449,7 +449,7 @@ mod real {
         // On the run's output alone, not on a stand-in timed out by the clock: that test raced the stand-in's start against a 1 s
         // limit and failed on a loaded runner when the line came after it (run 8546, job 44050; a stand-in that waits 1.5 s before
         // the line reproduces it every time). paddock_proc's own tests show a run ended at its limit keeps what was written.
-        let held = timed_out("heavy: the lock is held by Bob (pid 12) for 3m, running: cargo test\n");
+        let held = timed_out("throttle: the lock is held by Bob (pid 12) for 3m, running: cargo test\n");
         match ran_from(&held, true) {
             Ran::SlotWait(who) => assert!(who.contains("Bob"), "{who}"),
             other => panic!("{other:?}"),
@@ -458,7 +458,7 @@ mod real {
         // command, are plain timeouts; so is a heavy that wrote nothing before the limit.
         assert_eq!(ran_from(&held, false), Ran::TimedOut);
         let took = timed_out(
-            "heavy: the lock is held by Bob (pid 12) for 3m, running: cargo test\nheavy: pre-push holds the lock (pid 9) at 10:00:00Z, waited 4s\n",
+            "throttle: the lock is held by Bob (pid 12) for 3m, running: cargo test\nthrottle: pre-push holds the lock (pid 9) at 10:00:00Z, waited 4s\n",
         );
         assert_eq!(ran_from(&took, true), Ran::TimedOut);
         assert_eq!(ran_from(&timed_out(""), true), Ran::TimedOut);
@@ -468,7 +468,7 @@ mod real {
     fn a_heavy_that_ran_the_command_and_timed_out_later_is_a_plain_timeout() {
         let f = fixture(
             Actions::new()
-                .stderr("heavy: pre-push holds the lock (pid 9) at 10:00:00Z, waited 0s")
+                .stderr("throttle: pre-push holds the lock (pid 9) at 10:00:00Z, waited 0s")
                 .sleeps(Duration::from_secs(30)),
         );
         let real = Real::with(&f.repo, env(&f), Vec::new());
@@ -549,7 +549,7 @@ mod real {
     fn heavy_refusing_the_slot_is_not_the_checks_verdict() {
         let f = fixture(
             Actions::new()
-                .stderr("heavy 0.1 (macos) exit 0x4b: the lock could not be taken. Next: x")
+                .stderr("throttle 0.1 (macos) exit 0x4b: the lock could not be taken. Next: x")
                 .exit(75),
         );
         let real = Real::with(&f.repo, env(&f), Vec::new());
@@ -563,7 +563,7 @@ mod real {
             },
         );
         assert!(
-            matches!(ran, Ran::Unavailable(ref w) if w.contains("heavy gave no slot")),
+            matches!(ran, Ran::Unavailable(ref w) if w.contains("throttle gave no slot")),
             "{ran:?}"
         );
     }

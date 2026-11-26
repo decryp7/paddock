@@ -365,10 +365,11 @@ fn truncate(s: &str, max: usize) -> String {
     }
 }
 
-/// `heavy`'s activity log: `<root>/pitcrew-lock-activity.log`, the root as heavy reads it from its environment (`HEAVY_DIR`, then the
-/// legacy `PLOCK_DIR` and `PLOCK_ROOT`), else `derived` (the folder ./dev hands heavy, [`derived_heavy_dir`]), else heavy's legacy default.
+/// `throttle`'s activity log: `<root>/pitcrew-lock-activity.log`, the root as heavy reads it from its environment (`THROTTLE_DIR`, then the
+/// legacy `PLOCK_DIR` and `PLOCK_ROOT`), else `derived` (the folder ./dev hands heavy, [`derived_throttle_dir`]), else heavy's legacy default.
 pub fn plock_log_path(env: &dyn Fn(&str) -> Option<String>, derived: Option<PathBuf>) -> PathBuf {
-    env("HEAVY_DIR")
+    env("THROTTLE_DIR")
+        .or_else(|| env("HEAVY_DIR"))
         .or_else(|| env("PLOCK_DIR"))
         .or_else(|| env("PLOCK_ROOT"))
         .map(PathBuf::from)
@@ -377,11 +378,11 @@ pub fn plock_log_path(env: &dyn Fn(&str) -> Option<String>, derived: Option<Path
         .join("pitcrew-lock-activity.log")
 }
 
-/// The lock folder ./dev hands heavy from this folder (`<dev-targets>/throttle`, [`crate::pre_push::exec::heavy_dir`]), when it exists.
-pub fn derived_heavy_dir() -> Option<PathBuf> {
+/// The lock folder ./dev hands heavy from this folder (`<dev-targets>/throttle`, [`crate::pre_push::exec::throttle_dir`]), when it exists.
+pub fn derived_throttle_dir() -> Option<PathBuf> {
     let map: std::collections::HashMap<String, String> = crate::process_env::vars().collect();
     let here = std::env::current_dir().ok()?;
-    crate::pre_push::exec::heavy_dir(&here, &map).filter(|d| d.is_dir())
+    crate::pre_push::exec::throttle_dir(&here, &map).filter(|d| d.is_dir())
 }
 
 /// The pattern for the line plock writes when `name` finishes: `<date> <time> <name> done rc=N, ...`.
@@ -744,7 +745,7 @@ pub fn run_with(args: &WaitArgs, env: Env<'_>, clock: &mut dyn Clock, log: &mut 
                 &args
                     .plock_log
                     .clone()
-                    .unwrap_or_else(|| plock_log_path(env.var, derived_heavy_dir()))
+                    .unwrap_or_else(|| plock_log_path(env.var, derived_throttle_dir()))
             )
         )
     } else if let Some(p) = args.pid {
@@ -790,7 +791,7 @@ pub fn run_with(args: &WaitArgs, env: Env<'_>, clock: &mut dyn Clock, log: &mut 
         let path = args
             .plock_log
             .clone()
-            .unwrap_or_else(|| plock_log_path(env.var, derived_heavy_dir()));
+            .unwrap_or_else(|| plock_log_path(env.var, derived_throttle_dir()));
         let pattern = plock_done_pattern(name).map_err(usage)?;
         let mut probe = LineProbe::new(
             env.files,
@@ -1123,7 +1124,7 @@ mod tests {
             plock_log_path(&none, Some(PathBuf::from("/dt/throttle"))),
             Path::new("/dt/throttle").join("pitcrew-lock-activity.log")
         );
-        let heavy = |k: &str| (k == "HEAVY_DIR").then(|| "/h".to_string());
+        let heavy = |k: &str| (k == "THROTTLE_DIR").then(|| "/h".to_string());
         assert_eq!(
             plock_log_path(&heavy, Some(PathBuf::from("/dt/throttle"))),
             Path::new("/h").join("pitcrew-lock-activity.log")

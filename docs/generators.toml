@@ -69,13 +69,13 @@ cost = "fast"
 drift_marker = ["needs to be updated", "duplicate key", "cannot update the lock file"]
 
 [[generator]]
-id = "cargo-lock-tools-heavy"
-what = "tools/heavy/Cargo.lock resolves with --locked (a manifest change, a duplicate key or a shared crate's new dependency leaves it stale)"
+id = "cargo-lock-tools-throttle"
+what = "tools/throttle/Cargo.lock resolves with --locked (a manifest change, a duplicate key or a shared crate's new dependency leaves it stale)"
 check = ["sh", "-c", "cargo metadata --locked --format-version 1 >/dev/null"]
 regenerate = "cargo metadata --format-version 1 >/dev/null   # without --locked cargo rewrites Cargo.lock; commit it"
-cwd = "tools/heavy"
-paths = ["tools/heavy/Cargo.toml", "tools/heavy/**/Cargo.toml", "tools/heavy/Cargo.lock", "crates/*/Cargo.toml"]
-outputs = ["tools/heavy/Cargo.lock"]
+cwd = "tools/throttle"
+paths = ["tools/throttle/Cargo.toml", "tools/throttle/**/Cargo.toml", "tools/throttle/Cargo.lock", "crates/*/Cargo.toml"]
+outputs = ["tools/throttle/Cargo.lock"]
 cost = "fast"
 drift_marker = ["needs to be updated", "duplicate key", "cannot update the lock file"]
 

@@ -2,7 +2,7 @@
 //! each bounded by its own cap on its own run time and its wait for the heavy slot by the queue's progress (no total shared by the
 //! rows, 2026-11-21), and stopped when the person stops the push.
 
-use super::budget::{Slot, Timing, parse_heavy_timing, with_agent_name, with_heavy_flags};
+use super::budget::{Slot, Timing, parse_throttle_timing, with_agent_name, with_throttle_flags};
 use super::gates::{Gate, Need, Planned};
 use super::linux_inputs::{ImageProbe, PROBE_NEXT, image_probe};
 use super::progress::{Counter, Progress, with_cargo_json, without_json};
@@ -51,8 +51,8 @@ const QUEUE_LENGTH_SEEN: u64 = 13;
 const SLOWEST_HEALTHY_ROW: u64 = 1122;
 
 /// The outer process limit on one step's whole wait for the heavy slot, so that no call runs unbounded (ER-32). It is a backstop and not
-/// the judgement: a queue that keeps moving is waited for and `heavy`'s stall judgement ends one that does not, so this only ends a
-/// `heavy` client that is itself hung. Derived from data: the longest queue seen ([`QUEUE_LENGTH_SEEN`], 13) times the slowest healthy
+/// the judgement: a queue that keeps moving is waited for and `throttle`'s stall judgement ends one that does not, so this only ends a
+/// `throttle` client that is itself hung. Derived from data: the longest queue seen ([`QUEUE_LENGTH_SEEN`], 13) times the slowest healthy
 /// row ([`SLOWEST_HEALTHY_ROW`]), 4 h 5 min, doubled for a queue longer than any seen: 8 h 10 min.
 pub const WAIT_BACKSTOP: Duration = Duration::from_secs(2 * QUEUE_LENGTH_SEEN * SLOWEST_HEALTHY_ROW);
 
@@ -129,7 +129,7 @@ pub struct Done {
     pub tail: String,
     /// The file that holds the whole output, when there is one.
     pub log: Option<String>,
-    /// Queue and run seconds as `heavy` measured them; none for a gate that did not go through it.
+    /// Queue and run seconds as `throttle` measured them; none for a gate that did not go through it.
     pub timing: Option<Timing>,
     /// How it ended, typed ([`Ending`]); `how` is the same in words for a person.
     pub ending: Ending,
@@ -146,7 +146,7 @@ impl Done {
         self.ending.guard()
     }
 
-    /// `heavy` gave up waiting for a slot (the queue stalled): the command never ran.
+    /// `throttle` gave up waiting for a slot (the queue stalled): the command never ran.
     pub fn no_slot(&self) -> bool {
         self.ending == Ending::QueueLimit
     }
@@ -177,9 +177,9 @@ pub trait Exec: Sync {
     fn load(&self) -> Option<f64> {
         None
     }
-    /// Why a heavy gate has no machine-wide slot to go through (no `heavy` on PATH and the build of tools/heavy failed), or
+    /// Why a heavy gate has no machine-wide slot to go through (no `throttle` on PATH and the build of tools/throttle failed), or
     /// `None`: it would otherwise compete with every other push (ER-24), so it is not measured instead.
-    fn heavy_unavailable(&self) -> Option<String> {
+    fn throttle_unavailable(&self) -> Option<String> {
         None
     }
     /// This program as the rows `./dev` runs itself start it ([`crate::tool_cache::self_exe`]), or why it cannot be started again.
@@ -337,7 +337,7 @@ pub(crate) fn first_word(id: &str) -> &str {
     id.split(' ').next().unwrap_or(id)
 }
 
-/// The line `heavy` writes when it holds the slot for a step (`<agent> holds the lock (pid N) at ...`): before it, a step is queued.
+/// The line `throttle` writes when it holds the slot for a step (`<agent> holds the lock (pid N) at ...`): before it, a step is queued.
 const LOCK_TAKEN: &str = " holds the lock (pid ";
 /// What heavy prints when it holds the slot for the step named `name`: before it, that step is queued. The step's own name (not
 /// "pre-push") so a line of another step, in this log or a stale one, is not taken for it.
@@ -406,7 +406,7 @@ fn own_run_limit(_gate: &Gate) -> Duration {
     ROW_CAP + CAP_GRACE
 }
 
-/// For a run `heavy` ended at its run limit (the backstop beyond the row cap), with the run time it had (empty for any other ending).
+/// For a run `throttle` ended at its run limit (the backstop beyond the row cap), with the run time it had (empty for any other ending).
 fn run_limit_note(done: &Done) -> String {
     match (done.ending == Ending::RowCap, done.timing) {
         (true, Some(t)) => format!("; the row cap of {} min spent after {:.0} s of run", ROW_CAP.as_secs() / 60, t.ran),
@@ -501,7 +501,7 @@ pub fn decide_with(gate: &Gate, exec: &dyn Exec, limits: Limits, subject: &Subje
         }
     }
     if gate.heavy
-        && let Some(why) = exec.heavy_unavailable()
+        && let Some(why) = exec.throttle_unavailable()
     {
         return Row::not_measured(
             format!("no heavy slot tool, so a compile would run beside every other push's: {why}"),
@@ -529,7 +529,7 @@ pub fn decide_with(gate: &Gate, exec: &dyn Exec, limits: Limits, subject: &Subje
                 load_text(exec.load())
             ),
             format!(
-                "look at `heavy status` for who holds the slot, and re-run `./dev check --pre-push --only {}` when it moves (the wait goes on while the queue moves and ends after {} min without progress: PADDOCK_QUEUE_STALL, in seconds); an agent reports this (ER-24, ER-33)",
+                "look at `throttle status` for who holds the slot, and re-run `./dev check --pre-push --only {}` when it moves (the wait goes on while the queue moves and ends after {} min without progress: PADDOCK_QUEUE_STALL, in seconds); an agent reports this (ER-24, ER-33)",
                 first_word(&gate.id),
                 limits.stall.as_secs() / 60
             ),
@@ -732,7 +732,7 @@ fn load_text(load: Option<f64>) -> String {
     load.map_or_else(|| "unknown".to_string(), |l| format!("{l:.1}"))
 }
 
-/// [`run_all_with`], and the queue and run time of every row that went through `heavy`. A row's run time is its own: the rows share
+/// [`run_all_with`], and the queue and run time of every row that went through `throttle`. A row's run time is its own: the rows share
 /// no total, and what a step queued for the slot is reported apart and never counted as run time.
 pub fn run_all_timed(planned: &[Planned], exec: &dyn Exec, opts: &RunOpts) -> (Vec<(String, Row)>, BTreeMap<String, Timing>) {
     let mut order: Vec<usize> = (0..planned.len()).collect();
@@ -815,7 +815,7 @@ pub fn run_all_timed(planned: &[Planned], exec: &dyn Exec, opts: &RunOpts) -> (V
     (rows, timings.into_inner().unwrap_or_default())
 }
 
-/// How many gates run at once: one while the machine is loaded (ER-24: 20 or more on the 1-minute average), else three; `heavy`
+/// How many gates run at once: one while the machine is loaded (ER-24: 20 or more on the 1-minute average), else three; `throttle`
 /// still lets one compile at a time through, so the extra workers run the cheap gates meanwhile.
 pub fn workers(load: Option<f64>, cores: usize) -> usize {
     match load {
@@ -835,50 +835,55 @@ pub fn parse_load(uptime: &str) -> Option<f64> {
         .ok()
 }
 
-/// The command that puts a heavy step through the machine-wide slot (ER-24): `PADDOCK_HEAVY` as given, else `heavy` on PATH (the
-/// shell `heavy.sh` is retired: engineering-playbook's script is a thin wrapper of `heavy`). Empty when there is none (the caller says so).
-pub fn heavy_prefix(env: &HashMap<String, String>, has: &dyn Fn(&str) -> bool) -> Vec<String> {
-    if let Some(h) = env.get("PADDOCK_HEAVY").filter(|h| !h.trim().is_empty()) {
+/// The value of `PADDOCK_THROTTLE`, else of the old name `PADDOCK_HEAVY` (accepted until the settings that set it are changed).
+pub fn throttle_override(env: &HashMap<String, String>) -> Option<&String> {
+    env.get("PADDOCK_THROTTLE").or_else(|| env.get("PADDOCK_HEAVY"))
+}
+
+/// The command that puts a heavy step through the machine-wide slot (ER-24): `PADDOCK_THROTTLE` as given, else `throttle` on PATH (the
+/// shell `heavy.sh` is retired: engineering-playbook's script is a thin wrapper of `throttle`). Empty when there is none (the caller says so).
+pub fn throttle_prefix(env: &HashMap<String, String>, has: &dyn Fn(&str) -> bool) -> Vec<String> {
+    if let Some(h) = throttle_override(env).filter(|h| !h.trim().is_empty()) {
         if h.trim() == "off" {
             return Vec::new();
         }
         return h.split_whitespace().map(str::to_string).collect();
     }
-    if has("heavy") {
-        return ["heavy", "run", "pre-push", "--"].map(String::from).to_vec();
+    if has("throttle") {
+        return ["throttle", "run", "pre-push", "--"].map(String::from).to_vec();
     }
     Vec::new()
 }
 
-/// The command that puts a heavy step through the machine-wide slot: [`heavy_prefix`], else the `heavy` built from the tree at
+/// The command that puts a heavy step through the machine-wide slot: [`throttle_prefix`], else the `throttle` built from the tree at
 /// `root` (once, kept in `built`; `build_limit` bounds that build), held under a name of this run's own for as long as `built` lives
 /// ([`crate::tool_cache::Held`]), so another agent pruning or replacing the shared cache cannot fail a later step. The one
-/// resolver of the push gate and of `./dev gen check`, so both queue for the same slot. `Err` is the whole explanation; `Ok(empty)` only for the test-only `PADDOCK_HEAVY=off`.
-pub fn heavy_command_for(
+/// resolver of the push gate and of `./dev gen check`, so both queue for the same slot. `Err` is the whole explanation; `Ok(empty)` only for the test-only `PADDOCK_THROTTLE=off`.
+pub fn throttle_command_for(
     root: &Path,
     env: &HashMap<String, String>,
     has_tool: &dyn Fn(&str) -> bool,
     built: &std::sync::OnceLock<Result<crate::tool_cache::Held, String>>,
     build_limit: Duration,
 ) -> Result<Vec<String>, String> {
-    if env.get("PADDOCK_HEAVY").map(|v| v.trim()) == Some("off") {
+    if throttle_override(env).map(|v| v.trim()) == Some("off") {
         // Only a test may run without the slot: anything else is an override that makes the gate not measured.
-        return if env.contains_key(TEST_HEAVY_OFF) {
+        return if env.contains_key(TEST_THROTTLE_OFF) {
             Ok(Vec::new())
         } else {
-            Err("PADDOCK_HEAVY=off is set without the test-only variable PADDOCK_TEST_HEAVY_OFF, so this is an override of the machine-wide slot (OVERRIDE SET); unset it".into())
+            Err("PADDOCK_THROTTLE=off is set without the test-only variable PADDOCK_TEST_THROTTLE_OFF, so this is an override of the machine-wide slot (OVERRIDE SET); unset it".into())
         };
     }
-    let found = heavy_prefix(env, has_tool);
+    let found = throttle_prefix(env, has_tool);
     if !found.is_empty() {
         return Ok(found);
     }
     // A build that failed for a reason that will not pass on its own is remembered for the run; one that timed out (or ran out of budget)
     // is not: the next step builds it again instead of every row of the run reading a stale timeout.
     if built.get().is_none() {
-        let result = super::heavy_tool::ensure(root, env, build_limit).and_then(|bin| super::heavy_tool::hold(&bin, env));
+        let result = super::throttle_tool::ensure(root, env, build_limit).and_then(|bin| super::throttle_tool::hold(&bin, env));
         if let Err(e) = &result
-            && super::heavy_tool::is_transient(e)
+            && super::throttle_tool::is_transient(e)
         {
             return Err(e.clone());
         }
@@ -950,7 +955,7 @@ pub fn waiting_line(id: &str, waited: Duration, status: Option<&str>, stall: Dur
     format!(
         "pre-push: {id}: waiting for a heavy slot, {} s so far; {} (queue time, not run time; the wait ends only after {} min without progress)",
         waited.as_secs(),
-        status.unwrap_or("heavy has not said who holds it yet"),
+        status.unwrap_or("throttle has not said who holds it yet"),
         stall.as_secs() / 60
     )
 }
@@ -958,7 +963,7 @@ pub fn waiting_line(id: &str, waited: Duration, status: Option<&str>, stall: Dur
 /// How often the push says that a step still waits for the slot.
 const WAITING_SAY: Duration = Duration::from_secs(60);
 
-/// Whether the output of a gate run through `heavy` shows that it never got the slot: it printed who holds the lock
+/// Whether the output of a gate run through `throttle` shows that it never got the slot: it printed who holds the lock
 /// ("the lock is held by <name> (pid <n>) ...") and never "<name> holds the lock". Returns the phrase for the verdict.
 pub fn slot_wait(log: &str) -> Option<String> {
     if log.lines().any(|l| l.contains(LOCK_TAKEN)) {
@@ -979,11 +984,11 @@ pub struct RealExec {
     pub logs: PathBuf,
     /// Set by SIGINT or SIGTERM: the running gates' process trees are ended.
     pub stop: Arc<AtomicBool>,
-    /// The `heavy` built from tools/heavy when none is on PATH, built once per run (or the reason it could not be).
-    pub built_heavy: std::sync::OnceLock<Result<crate::tool_cache::Held, String>>,
-    /// How far the heavy step in flight has got ([`Exec::slot`]): written while a step runs through our `heavy`.
+    /// The `throttle` built from tools/throttle when none is on PATH, built once per run (or the reason it could not be).
+    pub built_throttle: std::sync::OnceLock<Result<crate::tool_cache::Held, String>>,
+    /// How far the heavy step in flight has got ([`Exec::slot`]): written while a step runs through our `throttle`.
     pub live_slot: Mutex<Slot>,
-    /// The push is a landing (`train/*`, `main`, a release tag): its heavy steps take the priority lane (`heavy --high`, ADR 0102).
+    /// The push is a landing (`train/*`, `main`, a release tag): its heavy steps take the priority lane (`throttle --high`, ADR 0102).
     pub priority: bool,
     /// The local sccache wrapper for the gates that compile (`None`: off, or CI; [`crate::local_sccache`]).
     pub wrapper: crate::local_sccache::Lazy,
@@ -996,15 +1001,15 @@ pub struct RealExec {
     pub state: PathBuf,
 }
 
-/// The variable that names heavy's lock folder (tools/heavy `HEAVY_DIR`, which it has always honoured).
-pub const HEAVY_DIR_VAR: &str = "HEAVY_DIR";
+/// The variable that names heavy's lock folder (tools/throttle `THROTTLE_DIR`, which it has always honoured).
+pub const THROTTLE_DIR_VAR: &str = "THROTTLE_DIR";
 
 /// heavy's lock folder for this machine (its queue, history and logs): `<dev-targets>/throttle` (the name after the decided heavy→throttle
 /// rename, so the folder moves once; `<dev-targets>/heavy` holds the installed binary) ([`crate::places::dev_targets`], the folder
 /// of worktrees and build folders, which a reboot keeps; it was /private/tmp, where every reboot lost the history), read once per
 /// process; `None` when it cannot be derived (heavy then uses its own default). The Mac CI runner's configuration sets the same
-/// `HEAVY_DIR`, so agents still see CI's `heavy mark` (ADR 0102).
-pub fn heavy_dir(root: &Path, env: &HashMap<String, String>) -> Option<PathBuf> {
+/// `THROTTLE_DIR`, so agents still see CI's `throttle mark` (ADR 0102).
+pub fn throttle_dir(root: &Path, env: &HashMap<String, String>) -> Option<PathBuf> {
     static DIR: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
     DIR.get_or_init(|| {
         crate::places::dev_targets(root, &|k| env.get(k).cloned())
@@ -1014,20 +1019,20 @@ pub fn heavy_dir(root: &Path, env: &HashMap<String, String>) -> Option<PathBuf> 
     .clone()
 }
 
-/// `HEAVY_DIR` for a heavy child: none when the caller names a lock folder itself (`HEAVY_DIR`, `PLOCK_DIR`, `PLOCK_ROOT`: its value
-/// wins, ER-47) or none can be derived, else [`heavy_dir`].
-pub fn heavy_dir_env(root: &Path, env: &HashMap<String, String>) -> Vec<(String, String)> {
-    if ["HEAVY_DIR", "PLOCK_DIR", "PLOCK_ROOT"]
+/// `THROTTLE_DIR` for a heavy child: none when the caller names a lock folder itself (`THROTTLE_DIR`, `PLOCK_DIR`, `PLOCK_ROOT`: its value
+/// wins, ER-47) or none can be derived, else [`throttle_dir`].
+pub fn throttle_dir_env(root: &Path, env: &HashMap<String, String>) -> Vec<(String, String)> {
+    if ["THROTTLE_DIR", "PLOCK_DIR", "PLOCK_ROOT"]
         .iter()
         .any(|k| env.get(*k).is_some_and(|v| !v.is_empty()))
     {
         return Vec::new();
     }
-    match heavy_dir(root, env) {
+    match throttle_dir(root, env) {
         // The folder heavy used before (its legacy default): its history is read once, then the new folder's.
         Some(d) => vec![
-            (HEAVY_DIR_VAR.to_string(), d.to_string_lossy().into_owned()),
-            ("HEAVY_MOVED_FROM".to_string(), "/private/tmp/claude-501".to_string()),
+            (THROTTLE_DIR_VAR.to_string(), d.to_string_lossy().into_owned()),
+            ("THROTTLE_MOVED_FROM".to_string(), "/private/tmp/claude-501".to_string()),
         ],
         None => Vec::new(),
     }
@@ -1058,8 +1063,8 @@ pub(crate) const PASS: &[&str] = &[
     "npm_config_*",
 ];
 
-/// The variable that, with `PADDOCK_HEAVY=off`, lets a test run a heavy gate without the slot.
-pub const TEST_HEAVY_OFF: &str = "PADDOCK_TEST_HEAVY_OFF";
+/// The variable that, with `PADDOCK_THROTTLE=off`, lets a test run a heavy gate without the slot.
+pub const TEST_THROTTLE_OFF: &str = "PADDOCK_TEST_THROTTLE_OFF";
 
 /// The label that marks the container of one run, so only it is ever stopped (ER-14).
 const RUN_LABEL: &str = "paddock.run";
@@ -1078,19 +1083,19 @@ fn log_name(id: &str) -> String {
 }
 
 impl RealExec {
-    /// The command that puts a heavy gate through the slot: `PADDOCK_HEAVY` or `heavy` on PATH, else the `heavy`
-    /// built from this tree ([`super::heavy_tool`]). Empty for `PADDOCK_HEAVY=off` (hermetic tests only); `Err` when the build failed.
+    /// The command that puts a heavy gate through the slot: `PADDOCK_THROTTLE` or `throttle` on PATH, else the `throttle`
+    /// built from this tree ([`super::throttle_tool`]). Empty for `PADDOCK_THROTTLE=off` (hermetic tests only); `Err` when the build failed.
     fn heavy_command(&self) -> Result<Vec<String>, String> {
-        heavy_command_for(
+        throttle_command_for(
             &self.root,
             &self.env,
             &|p| self.has_tool(p),
-            &self.built_heavy,
-            super::heavy_tool::BUILD_LIMIT,
+            &self.built_throttle,
+            super::throttle_tool::BUILD_LIMIT,
         )
     }
 
-    /// How far the heavy step in flight has got, read live (the push has one in flight at most): [`Slot::Queued`] until `heavy`
+    /// How far the heavy step in flight has got, read live (the push has one in flight at most): [`Slot::Queued`] until `throttle`
     /// holds the slot for it.
     fn slot(&self) -> Slot {
         self.live_slot.lock().map_or(Slot::Unknown, |g| *g)
@@ -1102,10 +1107,10 @@ impl RealExec {
         }
     }
 
-    /// Whether this heavy gate goes through the `heavy` of tools/heavy (the one with `--queue-stall`, `--run-max` and its log lines).
+    /// Whether this heavy gate goes through the `throttle` of tools/throttle (the one with `--queue-stall`, `--run-max` and its log lines).
     fn runs_through_our_heavy(&self, limits: Limits) -> bool {
         let prefix = self.heavy_command().unwrap_or_default();
-        with_heavy_flags(&prefix, false, limits.stall, ROW_CAP)
+        with_throttle_flags(&prefix, false, limits.stall, ROW_CAP)
             .iter()
             .any(|a| a == "--run-max")
     }
@@ -1117,7 +1122,7 @@ impl RealExec {
         let run_max = own;
         let heavy = if gate.heavy {
             with_agent_name(
-                &with_heavy_flags(&self.heavy_command().unwrap_or_default(), self.priority, limits.stall, run_max),
+                &with_throttle_flags(&self.heavy_command().unwrap_or_default(), self.priority, limits.stall, run_max),
                 name,
             )
         } else {
@@ -1142,9 +1147,9 @@ impl RealExec {
             ),
             None => (gate.program.clone(), gate_args),
         };
-        // Through our `heavy` the queue and the run are bounded apart (`--queue-stall`, `--run-max`). The wait for a slot has no total
+        // Through our `throttle` the queue and the run are bounded apart (`--queue-stall`, `--run-max`). The wait for a slot has no total
         // bound here: the queue ending it is heavy's stall judgement, so the outer timeout covers the run only; for a step through
-        // another `heavy` (whose queue cannot be told apart) the row cap from its start is the bound, and the monitor enforces it.
+        // another `throttle` (whose queue cannot be told apart) the row cap from its start is the bound, and the monitor enforces it.
         let timeout = if limited {
             run_max + WAIT_BACKSTOP + Duration::from_secs(60)
         } else {
@@ -1162,9 +1167,9 @@ impl RealExec {
         // The row's own name (its id: the step and its workspace), so heavy keeps how long it takes and lets a row that takes seconds
         // go first (the run's agent name differs every run, so it cannot be the key). An older heavy ignores the variable.
         if gate.heavy {
-            call = call.env("HEAVY_ROW", &gate.id);
-            // heavy's lock folder, where a reboot keeps its history (heavy_dir_env).
-            for (k, v) in heavy_dir_env(&self.root, &self.env) {
+            call = call.env("THROTTLE_ROW", &gate.id);
+            // heavy's lock folder, where a reboot keeps its history (throttle_dir_env).
+            for (k, v) in throttle_dir_env(&self.root, &self.env) {
                 call = call.env(k, v);
             }
         }
@@ -1288,7 +1293,7 @@ impl Exec for RealExec {
         docker_answers(&self.env)
     }
 
-    fn heavy_unavailable(&self) -> Option<String> {
+    fn throttle_unavailable(&self) -> Option<String> {
         self.heavy_command().err()
     }
 
@@ -1389,7 +1394,7 @@ impl Exec for RealExec {
         };
         let call = self.call(gate, limits, &log, label.as_deref(), &name);
         let _ = std::fs::File::create(&log);
-        // Our `heavy` writes "holds the lock" to the log when the slot is taken: until then every second is waiting for others,
+        // Our `throttle` writes "holds the lock" to the log when the slot is taken: until then every second is waiting for others,
         // and the row cap counts only from then (`RealExec::slot`). Another heavy prints no such line: nothing is known then.
         let ours = gate.heavy && self.runs_through_our_heavy(limits);
         let info = StepInfo {
@@ -1468,7 +1473,7 @@ impl Exec for RealExec {
         let mut timing = None;
         if gate.heavy {
             let text = std::fs::read_to_string(&log).unwrap_or_default();
-            timing = parse_heavy_timing(&text);
+            timing = parse_throttle_timing(&text);
             // heavy's own limits: 79 no slot in time (the command never ran), 80 the command was ended at its run limit.
             let how = ran.how.clone();
             match how.as_str() {
@@ -1544,8 +1549,8 @@ impl Exec for RealExec {
     }
 }
 
-/// Since when a step counts as running, and whether the watchdog may judge it: `None` while it must not be watched at all, our `heavy`
-/// queueing (the wait for the slot is waiting for others, ER-43). A heavy step through another `heavy` has no lock line, so a queue cannot
+/// Since when a step counts as running, and whether the watchdog may judge it: `None` while it must not be watched at all, our `throttle`
+/// queueing (the wait for the slot is waiting for others, ER-43). A heavy step through another `throttle` has no lock line, so a queue cannot
 /// be told from a run: the row cap counts from its start (its bound is honest, a step that is only queued for an hour is cut) and the
 /// watchdog does not judge it. Every other step runs, and is judged, from its start.
 fn active_since(ours: bool, heavy: bool, slot: Slot, began: Instant) -> Option<(Instant, bool)> {
@@ -1716,7 +1721,7 @@ impl RealExec {
 
     /// Shows a running step to its watch once per [`WATCH_POLL`] until it ends; a `Some` verdict ends the step's whole process tree
     /// through `paddock_proc` (by identity, rule 53) and is left in `stuck`. A step is shown only while it runs: not while it queues
-    /// for the slot (ER-43; our `heavy` is known to hold the slot from [`Slot::Taken`]), and a heavy step through another `heavy`
+    /// for the slot (ER-43; our `throttle` is known to hold the slot from [`Slot::Taken`]), and a heavy step through another `throttle`
     /// (no lock line, so no way to tell a queue from a run) is not watched, the row cap ends it.
     #[allow(clippy::too_many_arguments)]
     fn watch_step(
@@ -1846,7 +1851,7 @@ pub(crate) fn test_subject() -> Subject {
 mod tests {
     use super::*;
 
-    /// An executor whose heavy step got no slot: `heavy` exited 79 and its log says who held the slot.
+    /// An executor whose heavy step got no slot: `throttle` exited 79 and its log says who held the slot.
     struct NoSlot {
         log: PathBuf,
     }
@@ -1989,7 +1994,7 @@ mod tests {
     /// The wait for the slot is a state of its own in the log: the time so far, the holder, and that it is not run time.
     #[test]
     fn the_waiting_line_names_the_time_waited_and_the_holder() {
-        let log = "heavy: pre-push-1-2 waiting 60s: queued, position 3 of 4, behind agent-7\nheavy: pre-push-1-2 waiting 125s: queued, position 2 of 4, behind agent-7\n";
+        let log = "throttle: pre-push-1-2 waiting 60s: queued, position 3 of 4, behind agent-7\nthrottle: pre-push-1-2 waiting 125s: queued, position 2 of 4, behind agent-7\n";
         assert_eq!(wait_status(log).as_deref(), Some("queued, position 2 of 4, behind agent-7"));
         assert_eq!(wait_status("compiling x\n"), None);
         let line = waiting_line(
@@ -2069,46 +2074,49 @@ mod tests {
         // An absolute folder on every OS (`/dev-targets-x` is not absolute on Windows, so no folder was derived there).
         let targets = dir.path().join("dev-targets-x");
         let mut env: HashMap<String, String> = [(crate::places::DEV_TARGETS_ENV.to_string(), targets.display().to_string())].into();
-        let got = heavy_dir_env(dir.path(), &env);
-        assert_eq!(got[0], (HEAVY_DIR_VAR.to_string(), targets.join("throttle").display().to_string()));
-        assert_eq!(got[1].0, "HEAVY_MOVED_FROM");
-        env.insert("HEAVY_DIR".into(), "/mine".into());
-        assert!(heavy_dir_env(dir.path(), &env).is_empty(), "the caller's own folder wins");
+        let got = throttle_dir_env(dir.path(), &env);
+        assert_eq!(
+            got[0],
+            (THROTTLE_DIR_VAR.to_string(), targets.join("throttle").display().to_string())
+        );
+        assert_eq!(got[1].0, "THROTTLE_MOVED_FROM");
+        env.insert("THROTTLE_DIR".into(), "/mine".into());
+        assert!(throttle_dir_env(dir.path(), &env).is_empty(), "the caller's own folder wins");
     }
 
     #[test]
     fn heavy_is_found_when_the_variable_is_not_set() {
         let env = HashMap::new();
-        assert!(heavy_prefix(&env, &|_| false).is_empty());
+        assert!(throttle_prefix(&env, &|_| false).is_empty());
         assert!(
-            heavy_prefix(&env, &|p| p == "heavy.sh").is_empty(),
+            throttle_prefix(&env, &|p| p == "heavy.sh").is_empty(),
             "the shell heavy.sh is retired: it is no slot tool of ours"
         );
-        assert_eq!(heavy_prefix(&env, &|p| p == "heavy"), ["heavy", "run", "pre-push", "--"]);
-        let set = HashMap::from([("PADDOCK_HEAVY".to_string(), "my-heavy --x".to_string())]);
-        assert_eq!(heavy_prefix(&set, &|_| true), ["my-heavy", "--x"]);
+        assert_eq!(throttle_prefix(&env, &|p| p == "throttle"), ["throttle", "run", "pre-push", "--"]);
+        let set = HashMap::from([("PADDOCK_THROTTLE".to_string(), "my-heavy --x".to_string())]);
+        assert_eq!(throttle_prefix(&set, &|_| true), ["my-heavy", "--x"]);
     }
 
     #[test]
     fn a_log_that_only_waited_names_the_holder() {
         let waited =
-            "heavy: the lock is held by Bob (pid 12) for 3m, running: cargo clippy\nheavy: the lock is held by Bob (pid 12) for 4m\n";
+            "throttle: the lock is held by Bob (pid 12) for 3m, running: cargo clippy\nthrottle: the lock is held by Bob (pid 12) for 4m\n";
         assert_eq!(
             slot_wait(waited).as_deref(),
             Some("waiting for the heavy slot, held by Bob (pid 12)")
         );
-        let ran = format!("{waited}heavy: pre-push holds the lock (pid 9) at 10:00:00Z, waited 5s\n");
+        let ran = format!("{waited}throttle: pre-push holds the lock (pid 9) at 10:00:00Z, waited 5s\n");
         assert_eq!(slot_wait(&ran), None);
         assert_eq!(slot_wait("error: boom\n"), None);
     }
 
     #[test]
     fn heavy_off_runs_without_the_slot_and_is_the_only_way_to() {
-        let off = HashMap::from([("PADDOCK_HEAVY".to_string(), "off".to_string())]);
-        assert!(heavy_prefix(&off, &|_| true).is_empty());
+        let off = HashMap::from([("PADDOCK_THROTTLE".to_string(), "off".to_string())]);
+        assert!(throttle_prefix(&off, &|_| true).is_empty());
     }
 
-    /// A stand-in for `heavy`: a directory is the lock (`mkdir`), a waiter prints who holds it as heavy does, the holder runs
+    /// A stand-in for `throttle`: a directory is the lock (`mkdir`), a waiter prints who holds it as heavy does, the holder runs
     /// its command with the lock held. Fake commands only (ER-14): no real build runs.
     #[cfg(unix)]
     mod slot {
@@ -2118,7 +2126,7 @@ mod tests {
         const FAKE_HEAVY: &str = r#"
 lock="$1"; shift
 while ! mkdir "$lock" 2>/dev/null; do
-  echo "heavy: the lock is held by $(cat "$lock/owner" 2>/dev/null || echo other) (pid 1) for 0m" >&2
+  echo "throttle: the lock is held by $(cat "$lock/owner" 2>/dev/null || echo other) (pid 1) for 0m" >&2
   sleep 0.1
 done
 echo "pre-push holds the lock (pid $$) at now, waited 0s" >&2
@@ -2129,17 +2137,20 @@ exit $rc
 "#;
 
         fn real(dir: &Path, lock: &Path) -> RealExec {
-            let script = dir.join("fake-heavy.sh");
+            let script = dir.join("fake-throttle.sh");
             std::fs::write(&script, FAKE_HEAVY).unwrap();
             RealExec {
                 root: dir.to_path_buf(),
                 env: HashMap::from([
-                    ("PADDOCK_HEAVY".to_string(), format!("sh {} {}", script.display(), lock.display())),
+                    (
+                        "PADDOCK_THROTTLE".to_string(),
+                        format!("sh {} {}", script.display(), lock.display()),
+                    ),
                     ("PATH".to_string(), std::env::var("PATH").unwrap_or_default()),
                 ]),
                 logs: dir.join("logs"),
                 stop: Arc::new(AtomicBool::new(false)),
-                built_heavy: Default::default(),
+                built_throttle: Default::default(),
                 live_slot: Default::default(),
                 priority: false,
                 wrapper: crate::local_sccache::Lazy::off(),
@@ -2376,9 +2387,9 @@ exit $rc
                     .unwrap();
                 assert!(ok.status.success(), "{args:?}: {}", String::from_utf8_lossy(&ok.stderr));
             };
-            std::fs::create_dir_all(d.join("tools/heavy")).unwrap();
-            std::fs::write(d.join("tools/heavy/inputs.txt"), "tools/heavy\n").unwrap();
-            std::fs::write(d.join("tools/heavy/Cargo.toml"), "# fake\n").unwrap();
+            std::fs::create_dir_all(d.join("tools/throttle")).unwrap();
+            std::fs::write(d.join("tools/throttle/inputs.txt"), "tools/throttle\n").unwrap();
+            std::fs::write(d.join("tools/throttle/Cargo.toml"), "# fake\n").unwrap();
             git(&["init", "-q"]);
             git(&["add", "."]);
             git(&["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "x"]);
@@ -2388,7 +2399,7 @@ exit $rc
             let cargo = if cargo_ok {
                 use paddock_testkit::{Actions, Case, Exec, StandIn};
                 // What the build "makes": a heavy that answers `--version`, records its arguments and runs the gate's command.
-                let heavy = StandIn::new(&bin, "heavy")
+                let heavy = StandIn::new(&bin, "throttle")
                     .answers(
                         Actions::new()
                             .appends_with(&d.join("heavy-calls").display().to_string(), "{{args}}\n")
@@ -2399,7 +2410,7 @@ exit $rc
                 cargo.answers(
                     Actions::new()
                         .makes_dir(&format!("{target}/release"))
-                        .installs(&format!("{target}/release/heavy"), &heavy),
+                        .installs(&format!("{target}/release/throttle"), &heavy),
                 )
             } else {
                 cargo.stderr("error[E0432]: unresolved import").exit(101)
@@ -2416,7 +2427,7 @@ exit $rc
                 ]),
                 logs: d.join("logs"),
                 stop: Arc::new(AtomicBool::new(false)),
-                built_heavy: Default::default(),
+                built_throttle: Default::default(),
                 live_slot: Default::default(),
                 priority: false,
                 wrapper: crate::local_sccache::Lazy::off(),
@@ -2460,11 +2471,11 @@ exit $rc
             let sh = ex.call(&s, limits, &log, None, "pre-push-1-1").child_env(&ex.env);
             assert!(sh.iter().all(|(k, _)| k != "RUSTC_WRAPPER"), "{sh:?}");
             // A heavy gate names its row for heavy's history; a gate that does not go through heavy has no such variable.
-            assert!(sh.contains(&("HEAVY_ROW".into(), "conformance".into())), "{sh:?}");
+            assert!(sh.contains(&("THROTTLE_ROW".into(), "conformance".into())), "{sh:?}");
             let mut light = gate("fmt crates", "true");
             light.heavy = false;
             let l = ex.call(&light, limits, &log, None, "pre-push-1-1").child_env(&ex.env);
-            assert!(l.iter().all(|(k, _)| k != "HEAVY_ROW"), "{l:?}");
+            assert!(l.iter().all(|(k, _)| k != "THROTTLE_ROW"), "{l:?}");
         }
 
         /// The live queue state ([`Exec::slot`], ADR 0102 amendment 2026-11-18): queued from the start of a step through our
@@ -2647,7 +2658,7 @@ exit $rc
             assert!(d.path().join("out.txt").is_file(), "the gate's command ran under the built heavy");
             let cached: Vec<_> = std::fs::read_dir(d.path().join("home/bin")).unwrap().flatten().collect();
             assert!(
-                cached.len() == 1 && cached[0].file_name().to_string_lossy().starts_with("heavy-"),
+                cached.len() == 1 && cached[0].file_name().to_string_lossy().starts_with("throttle-"),
                 "{cached:?}"
             );
             // The per-build folder is gone (not under the cache folder: the build folder is `PADDOCK_DEV_TARGET_DIR`).
@@ -2655,11 +2666,11 @@ exit $rc
                 .map(|r| r.flatten().collect())
                 .unwrap_or_default();
             assert!(left.is_empty(), "the build folder was not removed: {left:?}");
-            assert!(!d.path().join("home").join("target-heavy-x").exists());
+            assert!(!d.path().join("home").join("target-throttle-x").exists());
             // A second run finds it in the cache: cargo is not needed.
             std::fs::remove_file(d.path().join("fakebin/cargo")).unwrap();
             let ex2 = RealExec {
-                built_heavy: Default::default(),
+                built_throttle: Default::default(),
                 live_slot: Default::default(),
                 priority: false,
                 wrapper: crate::local_sccache::Lazy::off(),
@@ -2692,7 +2703,7 @@ exit $rc
         fn heavy_off_without_the_test_variable_is_an_override_and_not_measured() {
             let d = tempfile::tempdir().unwrap();
             let mut ex = real(d.path(), &d.path().join("l"));
-            ex.env.insert("PADDOCK_HEAVY".into(), "off".into());
+            ex.env.insert("PADDOCK_THROTTLE".into(), "off".into());
             let r = decide(&gate("clippy a", "true"), &ex, &test_subject());
             assert_eq!(r.kind(), Kind::NotMeasured, "{r:?}");
             assert!(r.reason().contains("OVERRIDE SET"), "{}", r.reason());
@@ -3024,7 +3035,7 @@ exit $rc
         }
 
         /// Queue time is never judged (ER-43): a step queued for our slot is not shown to its watch; a running one is, from the moment it
-        /// took the slot. A step through another `heavy` (no lock line to tell a queue from a run) has its row cap counted from its start
+        /// took the slot. A step through another `throttle` (no lock line to tell a queue from a run) has its row cap counted from its start
         /// and is not judged.
         #[test]
         fn only_a_running_step_is_shown_to_its_watch() {
@@ -3044,7 +3055,7 @@ exit $rc
             assert_eq!(
                 active_since(false, true, Slot::Unknown, t0),
                 Some((t0, false)),
-                "another heavy: capped from the start, never judged"
+                "another throttle: capped from the start, never judged"
             );
             assert_eq!(
                 active_since(false, false, Slot::Unknown, t0),
@@ -3088,18 +3099,18 @@ exit $rc
                 .install()
                 .unwrap();
             let has = |p: &str| ex.has_tool(p);
-            let first = heavy_command_for(&ex.root, &ex.env, &has, &ex.built_heavy, Duration::from_secs(1));
+            let first = throttle_command_for(&ex.root, &ex.env, &has, &ex.built_throttle, Duration::from_secs(1));
             assert!(first.as_ref().is_err_and(|e| e.contains("timed out")), "{first:?}");
-            assert!(ex.built_heavy.get().is_none(), "a timeout is not remembered");
+            assert!(ex.built_throttle.get().is_none(), "a timeout is not remembered");
             std::fs::write(&spec, good).unwrap();
-            let second = heavy_command_for(&ex.root, &ex.env, &has, &ex.built_heavy, Duration::from_secs(600));
+            let second = throttle_command_for(&ex.root, &ex.env, &has, &ex.built_throttle, Duration::from_secs(600));
             assert!(second.is_ok(), "the second call builds it: {second:?}");
             // a deterministic failure is remembered for the run
             let d2 = tempfile::tempdir().unwrap();
             let bad = repo_with_fake_cargo(d2.path(), false);
             let has2 = |p: &str| bad.has_tool(p);
-            let one = heavy_command_for(&bad.root, &bad.env, &has2, &bad.built_heavy, Duration::from_secs(600));
-            assert!(one.is_err() && bad.built_heavy.get().is_some(), "{one:?}");
+            let one = throttle_command_for(&bad.root, &bad.env, &has2, &bad.built_throttle, Duration::from_secs(600));
+            assert!(one.is_err() && bad.built_throttle.get().is_some(), "{one:?}");
         }
 
         /// Review (d): the outer limits of a step leave the monitor room to write the stacks (their own bound plus 15 s) before they
@@ -3114,8 +3125,8 @@ exit $rc
         fn heavy_off_still_runs_without_the_slot_for_hermetic_tests() {
             let d = tempfile::tempdir().unwrap();
             let mut ex = real(d.path(), &d.path().join("l"));
-            ex.env.insert("PADDOCK_HEAVY".into(), "off".into());
-            ex.env.insert(TEST_HEAVY_OFF.into(), "1".into());
+            ex.env.insert("PADDOCK_THROTTLE".into(), "off".into());
+            ex.env.insert(TEST_THROTTLE_OFF.into(), "1".into());
             ex.env.insert("PATH".into(), "/usr/bin:/bin".into());
             assert_eq!(decide(&gate("clippy a", "true"), &ex, &test_subject()).kind(), Kind::Passed);
         }

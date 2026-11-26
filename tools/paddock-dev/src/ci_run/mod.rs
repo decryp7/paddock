@@ -50,7 +50,7 @@ pub struct RunArgs {
     /// The most seconds one line may run before its process tree is ended.
     #[arg(long, default_value_t = DEFAULT_MAX_SECS)]
     pub max_secs: u64,
-    /// Put every line through the machine-wide heavy slot (ER-24): `PADDOCK_HEAVY`, else `heavy` on PATH.
+    /// Put every line through the machine-wide heavy slot (ER-24): `PADDOCK_THROTTLE`, else `throttle` on PATH.
     #[arg(long)]
     pub heavy: bool,
     /// The repository root (default: the folder with a `.git` above the current one).
@@ -231,19 +231,19 @@ pub fn run_with(args: &RunArgs, env: &HashMap<String, String>, stop: &Arc<Atomic
         }
         return 0;
     }
-    let heavy = if args.heavy { heavy_prefix(env) } else { Vec::new() };
+    let heavy = if args.heavy { throttle_prefix(env) } else { Vec::new() };
     if args.heavy && heavy.is_empty() {
         return fail(
             out,
-            "--heavy asked for the machine-wide slot, but neither PADDOCK_HEAVY nor `heavy` is available".into(),
-            "install tools/heavy (`cargo install --path tools/heavy --locked`), or run without --heavy",
+            "--heavy asked for the machine-wide slot, but neither PADDOCK_THROTTLE nor `throttle` is available".into(),
+            "install tools/throttle (`cargo install --path tools/throttle --locked`), or run without --heavy",
         );
     }
     execute(args, &root, &lines, &child_env, &heavy, stop, out)
 }
 
-fn heavy_prefix(env: &HashMap<String, String>) -> Vec<String> {
-    crate::pre_push::exec::heavy_prefix(env, &|p| crate::pre_push::exec::on_path(env, p))
+fn throttle_prefix(env: &HashMap<String, String>) -> Vec<String> {
+    crate::pre_push::exec::throttle_prefix(env, &|p| crate::pre_push::exec::on_path(env, p))
 }
 
 fn execute(

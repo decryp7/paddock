@@ -1397,11 +1397,11 @@ status = "built"
   note = "The guard hooks' copy (dev_targets_of, dev_targets, main_checkout): Python, because the hooks run before any binary is built; scripts call `./dev places` instead. .claude/hooks/paddockpaths-parity.test.sh runs both on one table (named, root-level, relative, `..`, blank and whitespace values). Goes when the guards move onto `./dev hook pre-tool-use` (ADR 0083)."
 
   [[mechanism.copy]]
-  paths = ["tools/heavy/src/capture.rs", "tools/heavy/src/main.rs"]
+  paths = ["tools/throttle/src/capture.rs", "tools/throttle/src/main.rs"]
   symbols = ["text:dev_targets_of", "text:PADDOCK_DEV_TARGETS", "text:paddock.worktreeRoot"]
   owner = "paddock"
   delete_by = "v0.5.0"
-  note = "heavy's copy, for where its run logs go (`<dev-targets>/runs`): heavy is its own workspace, installed for other projects too, and cannot call `./dev places`; `./dev heavy` passes PADDOCK_DEV_TARGETS from places.rs, so the copy only serves a bare `heavy run`. Its unit test uses the places.rs table's cases (named, parent of the root, root-level, relative, `..`, blank). Goes when the rule moves into a shared crate heavy can depend on."
+  note = "the throttle's copy, for where its run logs go (`<dev-targets>/runs`): throttle is its own workspace, installed for other projects too, and cannot call `./dev places`; `./dev throttle` passes PADDOCK_DEV_TARGETS from places.rs, so the copy only serves a bare `heavy run`. Its unit test uses the places.rs table's cases (named, parent of the root, root-level, relative, `..`, blank). Goes when the rule moves into a shared crate heavy can depend on."
 
 # =====================================================================================================================
 # Guarded removal under an explicit root

@@ -837,23 +837,23 @@
       "count": 2
     },
     {
-      "path": "tools/heavy/tests/it/priority.rs",
+      "path": "tools/throttle/tests/it/priority.rs",
       "site": "assert!(t.elapsed() < Duration::from_secs(20));",
       "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
     },
     {
-      "path": "tools/heavy/tests/it/real.rs",
+      "path": "tools/throttle/tests/it/real.rs",
       "site": "assert!(t0.elapsed().as_secs() < 8);",
       "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
     },
     {
-      "path": "tools/heavy/tests/it/real.rs",
+      "path": "tools/throttle/tests/it/real.rs",
       "site": "assert!(t0.elapsed().as_secs() <= 4);",
       "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
     },
     {
-      "path": "tools/heavy/tests/it/real.rs",
-      "site": "assert!(took.as_secs() < 8, \"heavy waited {took:?} for a background process's stderr\");",
+      "path": "tools/throttle/tests/it/real.rs",
+      "site": "assert!(took.as_secs() < 8, \"throttle waited {took:?} for a background process's stderr\");",
       "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
     },
     {
@@ -877,7 +877,7 @@
       "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
     },
     {
-      "path": "tools/paddock-dev/src/pre_push/heavy_tool.rs",
+      "path": "tools/paddock-dev/src/pre_push/throttle_tool.rs",
       "site": "assert!(",
       "reason": "listed when C30 began to block new findings (2026-11-18); fix it with a FakeClock, a counted assertion or the mechanism, then remove the entry"
     },

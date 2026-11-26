@@ -25,7 +25,7 @@ pub const CI_JOBS: &[(&str, &[&str])] = &[
     ("c99", &["c99"]),
     ("gitleaks", &["conformance"]),
     ("tools", &["tools"]),
-    ("heavy", &["tools"]),
+    ("throttle", &["tools"]),
     ("crates", &["crates"]),
     ("crate", &["crates"]),
     ("audit", &["paddock-dev"]),

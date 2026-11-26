@@ -40,13 +40,13 @@ const KEEP_RUN_LOGS: usize = 20;
 pub mod deny;
 pub mod exec;
 pub mod gates;
-pub mod heavy_tool;
 pub mod kept;
 pub mod known;
 pub mod linux_inputs;
 pub mod mount_fresh;
 pub mod outcome;
 pub mod reuse;
+pub mod throttle_tool;
 pub mod warm;
 
 use crate::plan::{Request, plan_with_graph};
@@ -475,7 +475,7 @@ fn command_in(
             mine
         },
         stop: Arc::clone(&stop),
-        built_heavy: Default::default(),
+        built_throttle: Default::default(),
         live_slot: Default::default(),
         priority: pushes.iter().any(|p| budget::is_landing_ref(&p.remote_ref)),
         wrapper,
@@ -568,12 +568,12 @@ fn command_in(
     let load = ex.load();
     let n = workers(load, std::thread::available_parallelism().map_or(1, |n| n.get()));
     let mut overridden = String::new();
-    if env.get("PADDOCK_HEAVY").map(|v| v.trim()) == Some("off") && !env.contains_key(exec::TEST_HEAVY_OFF) {
+    if exec::throttle_override(&env).map(|v| v.trim()) == Some("off") && !env.contains_key(exec::TEST_THROTTLE_OFF) {
         overridden =
-            "OVERRIDE SET: PADDOCK_HEAVY=off is not allowed outside the tests; every compile (clippy, xwin, Linux) is not measured\n"
+            "OVERRIDE SET: PADDOCK_THROTTLE=off is not allowed outside the tests; every compile (clippy, xwin, Linux) is not measured\n"
                 .into();
-    } else if exec::heavy_prefix(&env, &|p| ex.has_tool(p)).is_empty() {
-        notes.push("no heavy on PATH: the compiles (clippy, xwin, Linux) run through the heavy built from tools/heavy (cached under ~/.paddock-dev/bin); if that build fails they are not measured (ER-24)".into());
+    } else if exec::throttle_prefix(&env, &|p| ex.has_tool(p)).is_empty() {
+        notes.push("no heavy on PATH: the compiles (clippy, xwin, Linux) run through the heavy built from tools/throttle (cached under ~/.paddock-dev/bin); if that build fails they are not measured (ER-24)".into());
     }
     let head = format!(
         "{overridden}pre-push: base {} ({}), {} commit(s) beyond it; {} changed file(s); {} gate(s) at a time (1-minute load {}); no total budget: each row has a cap of {} min on its own run time, counted from when it starts running, stacks logged before a step is ended; watchdog: {} (waiting for the heavy slot is queue time, reported apart and never run time; it goes on while the queue moves and ends after {} min without progress; {}); logs in {}\n{}",
