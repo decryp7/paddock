@@ -2688,14 +2688,14 @@ exit $rc
                 seen: Arc::clone(&seen),
             });
             let g = quiet_step(d.path(), 60);
-            let t = Instant::now();
+            // No assertion on elapsed wall time (ER-12: a busy machine never fails a test): the step is a 60 s sleep that would pass, so
+            // a row that is "not measured: stuck" with the guard named is the proof that the watchdog stopped it, not the step's end.
             let r = decide(&g, &ex, &test_subject());
-            assert!(
-                t.elapsed() < Duration::from_secs(30),
-                "the 60 s step was stopped, not waited for: {:?}",
-                t.elapsed()
+            assert_eq!(
+                r.kind(),
+                Kind::NotMeasured,
+                "the step was stopped by the watchdog, not waited for to a pass: {r:?}"
             );
-            assert_eq!(r.kind(), Kind::NotMeasured, "{r:?}");
             let why = r.reason();
             assert!(why.starts_with("stuck:") && why.contains("last output line: compiling x"), "{why}");
             assert!(why.contains("stuck (fake)") && why.contains("no progress for 300 s"), "{why}");
@@ -2762,10 +2762,9 @@ exit $rc
             let mut ex = real(d.path(), &d.path().join("l"));
             ex.watchdog = stall_dog(Mode::Enforce, 3, None);
             let g = json_step(d.path(), &[UNIT_LINE], 60);
-            let t = Instant::now();
+            // No wall-time assertion (ER-12): the 60 s step would pass, so "not measured: stuck" is the proof it was stopped.
             let r = decide(&g, &ex, &test_subject());
-            assert!(t.elapsed() < Duration::from_secs(40), "stopped, not waited for: {:?}", t.elapsed());
-            assert_eq!(r.kind(), Kind::NotMeasured, "{r:?}");
+            assert_eq!(r.kind(), Kind::NotMeasured, "stopped, not waited for to a pass: {r:?}");
             assert!(
                 r.reason().starts_with("stuck:") && r.reason().contains("progress watchdog"),
                 "{}",
@@ -2903,9 +2902,8 @@ exit $rc
             let mut ex = real(d.path(), &d.path().join("l"));
             ex.row_cap = Duration::from_secs(2);
             let g = quiet_step(d.path(), 60);
-            let t = Instant::now();
+            // No wall-time assertion (ER-12): the 60 s step would pass, so "not measured, ended by the row cap" is the proof.
             let r = decide(&g, &ex, &test_subject());
-            assert!(t.elapsed() < Duration::from_secs(30), "{:?}", t.elapsed());
             assert_eq!(r.kind(), Kind::NotMeasured, "{r:?}");
             assert_eq!(r.ended_by.as_deref(), Some("row cap"));
             assert!(r.reason().contains("timed out"), "{}", r.reason());
