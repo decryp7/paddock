@@ -86,7 +86,7 @@ package.json     the one npm workspace and package-lock.json (ui, eslint, icons,
   nothing runs them and CI does not test them; trains are built by hand with the member gate (`./dev merge check --gates`).
   A member merges current main and re-runs its member gate on that tip before it joins a train (rule 100). `./dev merge sync-member <train>`, run after the merge, runs the
   fast static rows (conformance, gates-register, clippy, clippy-windows) on the sync tip first and fails on a bad row (`--no-static "<reason>"` skips them, logged);
-  once they pass it dispatches the member's own CI trial (the affected jobs on the train, `ci dispatch --trial` on `sync/<member>`, which sync-member pushes: integrator role only) and prints the run id, which
+  once they pass it dispatches the member's own CI trial (the affected jobs on the train, `ci dispatch --trial` on `sync/<member>/<short sha>`, a new ref per synced commit that sync-member pushes with a plain push: integrator role only) and prints the run id, which
   `./dev merge check --gates` reads later (red blocks, running is not a pass; `--no-trial "<reason>"` skips it, logged).
 - **Old-base block (user, 2026-11-25).** `./dev merge check` refuses a train member that lacks the train's base (the newest commit of
   main, or of the earlier train, the train has merged) with one `::error::`: merge origin/main into the member and rerun its gate;

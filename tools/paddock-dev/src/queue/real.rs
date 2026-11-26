@@ -254,6 +254,25 @@ impl GitTrain {
         }
     }
 
+    /// A checkout that is not the queue's clone (the integrator's member worktree), to push from through the same runner: the token
+    /// reaches the push child alone through the scoped askpass program in `scratch`, and nothing else of the environment is cleared
+    /// beyond [`scrub`]. A local-path `url` (no `://`) is allowed as the `file` transport, as git itself allows a direct one.
+    pub fn for_checkout(root: &Path, url: &str, scratch: &Path, token: Option<String>) -> GitTrain {
+        GitTrain {
+            root: root.to_path_buf(),
+            trusted: None,
+            url: url.to_string(),
+            token,
+            authed_fetch: false,
+            allow_file: !url.contains("://"),
+            scratch: scratch.to_path_buf(),
+            merge_check: crate::merge_check::command,
+            planner: run_planner,
+            timeout: GIT_TIMEOUT,
+            push_hold: None,
+        }
+    }
+
     fn redact(&self, text: &str) -> String {
         match self.token.as_deref() {
             Some(t) if !t.is_empty() => text.replace(t, "***"),

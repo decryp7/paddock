@@ -702,7 +702,14 @@ fn trial_step(root: &std::path::Path, merge: &Merge, no_trial: Option<&str>, rea
         return member_trial::not_run("the merge message names no member branch, so there is no trial ref to read");
     };
     let branch = named.strip_prefix("origin/").unwrap_or(&named);
-    member_trial::interpret(reader.read(root, branch, member), branch)
+    // The trial of this head is of the ref sync-member pushed for it, named by the commit.
+    // (a member merged as its sync ref, `sync/<member>/<short sha>`, already is that name).
+    let synced = if branch.starts_with("sync/") && branch.ends_with(&format!("/{}", short(member))) {
+        branch.to_string()
+    } else {
+        trial_dispatch::sync_ref(branch, member)
+    };
+    member_trial::interpret(reader.read(root, &synced, member), &synced)
 }
 
 /// `./dev merge check`. Detector findings are an error (exit 5), so the text goes to standard error like every other failure.

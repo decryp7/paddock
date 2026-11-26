@@ -31,6 +31,46 @@ pub const DEV_TARGETS_ENV: &str = "PADDOCK_DEV_TARGETS";
 const HINT: &str = "Run `git config paddock.worktreeRoot <dev-targets>/wt` once in the main checkout (docs/dev-setup.md), or set \
                     PADDOCK_DEV_TARGETS to the folder that holds the worktrees, build folders and scratch.";
 
+/// The environment variable that names the trial scratch folder outright (`ci dispatch --trial`, `ci trial-prune`, `merge sync-member`).
+pub const TRIAL_DIR_ENV: &str = "PADDOCK_TRIAL_DIR";
+
+/// The trial scratch folder (the tool's own clone and askpass program for trial refs): `--trial-dir`, then git config
+/// `paddock.trialDir`, then `PADDOCK_TRIAL_DIR`, then `<dev-targets>/trials` ([`dev_targets`]); the one resolver every command that
+/// pushes or prunes trial refs uses. Refused only when no source resolves.
+pub fn trial_dir(from: &Path, flag: Option<&Path>, env: &dyn Fn(&str) -> Option<String>) -> Result<PathBuf, CliError> {
+    let config = Repo::discover(from)
+        .ok()
+        .and_then(|r| r.git().text(&["config", "--get", "paddock.trialDir"]).ok())
+        .map(|v| v.trim().to_string());
+    trial_dir_of(flag, config, env(TRIAL_DIR_ENV), || {
+        dev_targets(from, env).map(|d| d.join("trials"))
+    })
+}
+
+/// The pure rule of [`trial_dir`]: the first of the flag, the git config value and the variable that is set and not empty, else `default`.
+pub fn trial_dir_of(
+    flag: Option<&Path>,
+    config: Option<String>,
+    env: Option<String>,
+    default: impl FnOnce() -> Result<PathBuf, CliError>,
+) -> Result<PathBuf, CliError> {
+    if let Some(f) = flag.filter(|f| !f.as_os_str().is_empty()) {
+        return Ok(f.to_path_buf());
+    }
+    if let Some(v) = [config, env].into_iter().flatten().find(|v| !v.trim().is_empty()) {
+        return Ok(PathBuf::from(v.trim()));
+    }
+    default().map_err(|e| {
+        CliError::usage(
+            "The trial folder cannot be resolved: no --trial-dir, no `paddock.trialDir`, no PADDOCK_TRIAL_DIR and no dev-targets folder.",
+        )
+        .with_hint(format!(
+            "{} Or set PADDOCK_TRIAL_DIR / `git config paddock.trialDir` to a folder on a data drive.",
+            e.message
+        ))
+    })
+}
+
 /// The dev-targets folder of the repository at `from` (see the module doc), or why it cannot be derived.
 pub fn dev_targets(from: &Path, env: &dyn Fn(&str) -> Option<String>) -> Result<PathBuf, CliError> {
     let set = env(DEV_TARGETS_ENV).filter(|v| !v.trim().is_empty());
@@ -271,6 +311,39 @@ mod tests {
     use crate::worktree::git::Git;
 
     use super::test_abs as abs;
+
+    fn no_default() -> Result<PathBuf, CliError> {
+        Err(CliError::usage("no dev-targets"))
+    }
+
+    /// The trial folder: the flag, then git config, then the variable, then `<dev-targets>/trials`; refused only when none resolves.
+    #[test]
+    fn the_trial_folder_takes_the_flag_then_config_then_the_variable_then_the_default() {
+        let (flag, cfg, env, dt) = (abs("/flag"), abs("/cfg"), abs("/env"), abs("/dt"));
+        let def = || Ok(PathBuf::from(&dt).join("trials"));
+        let some = |v: &str| Some(v.to_string());
+        let want = |p: &str| PathBuf::from(p);
+        assert_eq!(
+            trial_dir_of(Some(Path::new(&flag)), some(&cfg), some(&env), def).unwrap(),
+            want(&flag)
+        );
+        assert_eq!(trial_dir_of(None, some(&cfg), some(&env), def).unwrap(), want(&cfg));
+        assert_eq!(trial_dir_of(None, None, some(&env), def).unwrap(), want(&env));
+        assert_eq!(trial_dir_of(None, some(" "), some(""), def).unwrap(), want(&dt).join("trials"));
+        let e = trial_dir_of(None, None, None, no_default).unwrap_err().message;
+        assert!(e.contains("cannot be resolved"), "{e}");
+    }
+
+    #[test]
+    fn the_default_trial_folder_is_below_the_dev_targets_folder() {
+        let dt = abs("/dt");
+        let env = |k: &str| (k == DEV_TARGETS_ENV).then(|| dt.clone());
+        let tmp = tempfile::tempdir().unwrap();
+        let nowhere = tmp.path();
+        assert_eq!(trial_dir(nowhere, None, &env).unwrap(), PathBuf::from(&dt).join("trials"));
+        let none = |_: &str| None;
+        assert!(trial_dir(nowhere, None, &none).is_err());
+    }
 
     #[test]
     fn the_named_folder_beats_the_worktree_root() {

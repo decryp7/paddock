@@ -10,6 +10,9 @@
 //!   the first green train that used the trial is recorded in docs/lessons.md);
 //! - `--no-trial "<reason>"` skips it and logs the reason, like `--old-base-anyway`.
 //!
+//! The trial is looked up by the ref sync-member pushed for the member's head: `sync/<member>/<short sha of the second parent>`
+//! ([`super::trial_dispatch::sync_ref`]; a new ref per synced commit, so no push is ever forced).
+//!
 //! The reader runs as a child (`<this tool> --json ci trial-verdict ...`, or `PADDOCK_MERGE_CHECK_TRIAL`: the tests' stand-in), and the
 //! answer is its `state`; an exit code alone is never read as a pass.
 
