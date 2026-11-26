@@ -365,12 +365,15 @@ fn truncate(s: &str, max: usize) -> String {
     }
 }
 
+/// The folder of plock's activity log before throttle resolved its own (the legacy default, used when no throttle can be asked).
+pub const LEGACY_PLOCK_DIR: &str = "/private/tmp/claude-501";
+
 /// `throttle`'s activity log: `<root>/pitcrew-lock-activity.log`, the root being the one throttle resolves itself (`throttle dir`:
 /// its variables, then its config file, then its per-user state folder; [`throttle_dir_from_tool`]), else the legacy folder when no
 /// throttle can be asked.
 pub fn plock_log_path(throttle_dir: Option<PathBuf>) -> PathBuf {
     throttle_dir
-        .unwrap_or_else(|| PathBuf::from("/private/tmp/claude-501"))
+        .unwrap_or_else(|| PathBuf::from(LEGACY_PLOCK_DIR))
         .join("pitcrew-lock-activity.log")
 }
 
@@ -1129,12 +1132,12 @@ mod tests {
     fn the_plock_log_follows_the_folder_throttle_resolves() {
         // The folder is throttle's own answer, never a variable ./dev reads (one definition, ER-22).
         assert_eq!(
-            plock_log_path(Some(PathBuf::from("/h"))),
-            Path::new("/h").join("pitcrew-lock-activity.log")
+            plock_log_path(Some(paddock_testkit::path::abs(["h"]))),
+            paddock_testkit::path::abs(["h"]).join("pitcrew-lock-activity.log")
         );
         assert_eq!(
             plock_log_path(None),
-            Path::new("/private/tmp/claude-501").join("pitcrew-lock-activity.log"),
+            Path::new(LEGACY_PLOCK_DIR).join("pitcrew-lock-activity.log"),
             "no throttle to ask: the legacy folder"
         );
     }

@@ -200,7 +200,10 @@ pub fn moved_from(get: &dyn Fn(&str) -> Option<String>, host: &Host<'_>, root: &
     candidates.filter(|c| c != root).find(|c| (host.has_history)(c))
 }
 
+// The cases are Unix path text (`/h`, `/Users/u`, XDG values): `Path::is_absolute` reads them as absolute only on Unix, where throttle's
+// tests run (C171: a Unix-only case sits behind `cfg(unix)`).
 #[cfg(test)]
+#[cfg(unix)]
 mod tests {
     use super::*;
     use std::collections::HashMap;

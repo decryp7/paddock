@@ -139,7 +139,14 @@ mod tests {
             plan(&cmd(), &env, &|_| false, Path::new("/nonexistent"), &built).unwrap(),
             ["/x/heavy.sh", "cargo", "clippy"]
         );
-        let line = plan(&cmd(), &HashMap::new(), &|p| p == "throttle", Path::new("/nonexistent"), &built).unwrap();
+        let line = plan(
+            &cmd(),
+            &HashMap::new(),
+            &|p| p == "throttle",
+            &paddock_testkit::path::abs(["nonexistent"]),
+            &built,
+        )
+        .unwrap();
         assert_eq!(line, ["throttle", "run", "pre-push", "--", "cargo", "clippy"]);
     }
 

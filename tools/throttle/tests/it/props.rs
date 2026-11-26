@@ -61,7 +61,7 @@ proptest! {
     #[test]
     fn guard_paths_never_panic(dir in ".{0,80}") {
         let cwd = std::path::Path::new("/");
-        let _ = throttle::guard::violation(std::slice::from_ref(&dir), Some(std::path::Path::new("/home/x")), cwd);
+        let _ = throttle::guard::violation(std::slice::from_ref(&dir), Some(&paddock_testkit::path::abs(["home", "x"])), cwd);
         let _ = throttle::guard::build_dirs(Some(&dir), Some(&dir), &[dir.clone(), "--target-dir".into(), dir.clone()]);
     }
 }

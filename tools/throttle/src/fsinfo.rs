@@ -120,7 +120,8 @@ pub fn of(path: &Path) -> FsKind {
 pub fn of(path: &Path) -> FsKind {
     use windows_sys::Win32::Storage::FileSystem::GetDriveTypeW;
     const DRIVE_REMOTE: u32 = 4;
-    let canon = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    // The resolved path in its plain form (`C:\...`, `\\server\share\...`); win_root reads either form.
+    let canon = paddock_env::winpath::real(path).unwrap_or_else(|_| path.to_path_buf());
     let text = canon.to_string_lossy().into_owned();
     match win_root(&text) {
         WinRoot::Unc => FsKind::Network(text),
@@ -191,7 +192,7 @@ mod tests {
 
     #[test]
     fn a_network_folder_is_refused_with_what_to_do_and_a_local_or_unknown_one_is_not() {
-        let root = Path::new("/Volumes/share/throttle");
+        let root = &paddock_testkit::path::abs(["Volumes", "share", "throttle"]);
         let e = check_root(&FsKind::Network("smbfs".into()), root).expect_err("refused");
         assert!(
             e.contains("network file system") && e.contains("smbfs") && e.contains("THROTTLE_DIR"),

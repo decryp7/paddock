@@ -34,25 +34,10 @@ fn a_run_with_its_lock_folder_on_a_network_file_system_is_refused_and_the_comman
     assert_eq!(rig.count("pitcrew-heavy.ticket."), 0);
 }
 
-// (2) the throttle is taken on the host around containers: the container script mounts nothing of the lock folder, passes none of its
-// variables and never starts throttle inside the container. (The call sites: `tools/linux-container.sh` is the only place that starts a
-// container for the family's gates; the pre-push and member-gate rows reach it through `throttle run`, on the host, and throttle recognises
-// the command as a container run, which then runs alone: `gate::is_container_command`.)
+// (2) a container run runs alone, on the host: throttle recognises the command as one (`gate::is_container_command`). The check of
+// `tools/linux-container.sh` went with the script (no VM or container starts on the Mac, docs/rules.md rule 101).
 #[test]
-fn the_container_script_never_mounts_the_lock_folder_or_starts_heavy_inside() {
-    let script = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../linux-container.sh")).expect("tools/linux-container.sh");
-    let code: Vec<&str> = script.lines().filter(|l| !l.trim_start().starts_with('#')).collect();
-    for l in &code {
-        let low = l.to_ascii_lowercase();
-        assert!(
-            !low.contains("heavy_dir") && !low.contains("throttle_dir") && !low.contains("heavy_held") && !low.contains("throttle_held"),
-            "the container gets no variable of the throttle: {l}"
-        );
-        assert!(
-            !low.contains("/throttle") && !low.contains("pitcrew-heavy"),
-            "the lock folder is not mounted: {l}"
-        );
-    }
+fn a_container_command_is_recognised_so_it_runs_alone_on_the_host() {
     for cmd in [
         "bash tools/linux-container.sh cargo test",
         "docker run --rm x",

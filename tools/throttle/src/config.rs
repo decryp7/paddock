@@ -183,6 +183,13 @@ impl Config {
 mod tests {
     use super::*;
 
+    use paddock_testkit::path::abs;
+
+    /// A path's text for an environment value (the invented folders are valid UTF-8).
+    fn txt(p: &std::path::Path) -> &str {
+        p.to_str().expect("an invented folder is UTF-8")
+    }
+
     fn cfg(pairs: &[(&str, &str)]) -> (Config, Warnings) {
         let m: std::collections::HashMap<String, String> = pairs.iter().map(|(k, v)| ((*k).into(), (*v).into())).collect();
         Config::from_env(&|k| m.get(k).cloned(), &Host::none())
@@ -194,8 +201,9 @@ mod tests {
         assert_eq!(cfg(&[("THROTTLE_STALL", "900")]).0.stall, Some(Duration::from_secs(900)));
         let (c, w) = cfg(&[("THROTTLE_STALL", "0")]);
         assert_eq!((c.stall, w.len()), (None, 1));
-        let (c, _) = cfg(&[("THROTTLE_DIR", "/l")]);
-        assert_eq!(c.runs_dir(), PathBuf::from("/l/runs"));
+        let l = abs(["l"]);
+        let (c, _) = cfg(&[("THROTTLE_DIR", txt(&l))]);
+        assert_eq!(c.runs_dir(), l.join("runs"));
     }
 
     #[test]
@@ -207,32 +215,28 @@ mod tests {
 
     #[test]
     fn legacy_and_new_names() {
+        let (a, b, cc) = (abs(["a"]), abs(["b"]), abs(["c"]));
         let (c, w) = cfg(&[
-            ("PLOCK_DIR", "/a"),
+            ("PLOCK_DIR", txt(&a)),
             ("PLOCK_POLL", "0.2"),
             ("PLOCK_WAIT_LOG", "1"),
             ("PLOCK_UNREADABLE_LIMIT", "3"),
         ]);
         assert!(w.is_empty());
-        assert_eq!(
-            (c.root, c.poll, c.unreadable_limit),
-            (PathBuf::from("/a"), Duration::from_millis(200), 3)
-        );
-        let (c, _) = cfg(&[("PLOCK_DIR", "/a"), ("PLOCK_ROOT", "/b"), ("THROTTLE_DIR", "/c")]);
-        assert_eq!(c.root, PathBuf::from("/c"));
-        let (c, _) = cfg(&[("PLOCK_ROOT", "/b")]);
-        assert_eq!(c.root, PathBuf::from("/b"));
+        assert_eq!((c.root, c.poll, c.unreadable_limit), (a.clone(), Duration::from_millis(200), 3));
+        let (c, _) = cfg(&[("PLOCK_DIR", txt(&a)), ("PLOCK_ROOT", txt(&b)), ("THROTTLE_DIR", txt(&cc))]);
+        assert_eq!(c.root, cc);
+        let (c, _) = cfg(&[("PLOCK_ROOT", txt(&b))]);
+        assert_eq!(c.root, b);
     }
 
     #[test]
     fn the_old_heavy_names_are_accepted_and_the_new_ones_win() {
-        let (c, _) = cfg(&[("HEAVY_DIR", "/old"), ("HEAVY_SLOTS", "3"), ("HEAVY_STALL", "70")]);
-        assert_eq!(
-            (c.root, c.slots, c.stall),
-            (PathBuf::from("/old"), 3, Some(Duration::from_secs(70)))
-        );
-        let (c, _) = cfg(&[("HEAVY_DIR", "/old"), ("THROTTLE_DIR", "/new")]);
-        assert_eq!(c.root, PathBuf::from("/new"));
+        let (old, new) = (abs(["old"]), abs(["new"]));
+        let (c, _) = cfg(&[("HEAVY_DIR", txt(&old)), ("HEAVY_SLOTS", "3"), ("HEAVY_STALL", "70")]);
+        assert_eq!((c.root, c.slots, c.stall), (old.clone(), 3, Some(Duration::from_secs(70))));
+        let (c, _) = cfg(&[("HEAVY_DIR", txt(&old)), ("THROTTLE_DIR", txt(&new))]);
+        assert_eq!(c.root, new);
         assert_eq!(
             aliased(&|k| (k == "HEAVY_HELD").then(|| "a:1".to_string()), "THROTTLE_HELD"),
             Some("a:1".to_string())
@@ -241,8 +245,9 @@ mod tests {
 
     #[test]
     fn heavy_sh_slot_folder_is_ignored_with_a_warning() {
-        let (c, w) = cfg(&[("PLOCK_DIR", "/a"), ("HEAVY_LOCK_DIR", "/slots")]);
-        assert_eq!(c.root, PathBuf::from("/a"));
+        let a = abs(["a"]);
+        let (c, w) = cfg(&[("PLOCK_DIR", txt(&a)), ("HEAVY_LOCK_DIR", "/slots")]);
+        assert_eq!(c.root, a);
         assert!(w.iter().any(|m| m.contains("HEAVY_LOCK_DIR")), "{w:?}");
     }
 
@@ -282,6 +287,7 @@ mod tests {
             ..Host::none()
         };
         let (c, _) = Config::from_env(&get, &host);
+        // conformance: abs-path — the expected macOS default of a modelled macOS host (Os::MacOs, HOME=/Users/u), compared as path text
         assert_eq!(c.root, PathBuf::from("/Users/u/Library/Application Support/throttle"));
         assert_eq!((c.gate_load, c.slots, c.wait_log), (30.0, 2, Duration::from_secs(60)));
         assert!(c.log_path("2026-10-31").ends_with("throttle-logs/throttle.2026-10-31.log"));
