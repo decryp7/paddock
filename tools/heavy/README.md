@@ -162,7 +162,7 @@ in the other slots, and a container run waiting for a drain is not waited for by
 | priority bound (`--high` yields to nobody; others stop yielding after this) | `HEAVY_PRIORITY_MAX` | 1800 s |
 | most steps at once | `--slots N`, `HEAVY_SLOTS` (`auto` or 1..64) | auto: half the cores, at most 5 |
 | the row's key for the run-time history (quick rows go first) | `HEAVY_ROW` | none: no history is read or kept |
-| the run-time history | `heavy-history.tsv` in the lock folder; `HEAVY_MOVED_FROM` names the folder it moved from, whose file is read until the first record copies it over (`./dev` sets `HEAVY_DIR=<dev-targets>/throttle`, which a reboot keeps, and `HEAVY_MOVED_FROM=/private/tmp/claude-501`; the Mac CI runner sets the same `HEAVY_DIR`) | the lock folder |
+| the run-time history | `heavy-history.tsv` in the lock folder; the folder it moved from (`HEAVY_MOVED_FROM`, else `/private/tmp/claude-501` when `HEAVY_DIR` names another folder and that one exists) has its file read until the first record copies it over (`./dev` sets `HEAVY_DIR=<dev-targets>/throttle`, which a reboot keeps; the Mac CI runner sets the same `HEAVY_DIR`) | the lock folder |
 | a run inside a run | `HEAVY_HELD` (`<run id>:<pid>`), set by heavy for its command: a heavy run that inherits it while that holder lives runs inside its slot, with no ticket and no queue (ER-43: `./dev heavy -- ./dev gen check` once held the only slot for 36 min while its inner steps queued for it) | not set |
 | cores counted against the load | `HEAVY_CPUS` | the OS's count |
 | wait for the command's output pipes after it exited (ms) | `HEAVY_DRAIN_MS` | 500 |
