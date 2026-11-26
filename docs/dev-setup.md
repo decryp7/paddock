@@ -288,6 +288,12 @@ author: that call belongs there. The Rust `heavy` tool (`tools/heavy`) makes no 
   refused. The container needs Docker or OrbStack and obeys `PADDOCK_LINUX_CPUS`, `PADDOCK_LINUX_JOBS`, `PADDOCK_LINUX_MEMORY`,
   `PADDOCK_LINUX_USER`, `PADDOCK_LINUX_CI_REGISTRY` and `PADDOCK_LINUX_HOST_ARCH` (ER-14), all passed through. On an arm64 Mac the CI
   image is a local arm64 build (not the registry's amd64 image).
+  **Container rows hold a lock on their build folder.** The kept volume's `/target/v<version>/<folder>` is shared by every worktree, and
+  cargo's own lock covers the build only, so another worktree could rebuild a test binary while this row's nextest was about to exec it
+  (train l: "failed to exec ... Permission denied"). `tools/linux-container.sh --lock v<version>/<folder>` (the rows' own commands pass
+  it; pass it in a command of your own that builds in `/target`) holds a host-side `flock` on that folder for the whole container run,
+  in `<common git dir>/paddock-pre-push/target-locks/`; a second row waits, says who holds it, and gives up after
+  `PADDOCK_LINUX_LOCK_WAIT` seconds (default 1800) with one `::error::` line (exit 5). The kernel frees the lock when its holder ends.
 - **Checked (conformance C37):** a `tests/<name>.rs` outside `tests/it/` fails unless `ownTestBinaries` of
   `paddock.conformance.json` names it with the reason it needs its own binary, and every workspace member needs a CI test
   step and the workspace-hack dependency.
