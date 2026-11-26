@@ -1,5 +1,5 @@
 //! The tool cache: `<PADDOCK_DEV_HOME or ~/.paddock-dev>/bin/` (and `bin-source/`), where `./dev` keeps paddock-dev
-//! (`<hash>/paddock-dev-<host>`) and paddock-dev keeps the tools it builds (`throttle-<hash>/heavy`, [`crate::pre_push::throttle_tool`]).
+//! (`<hash>/paddock-dev-<host>`) and paddock-dev keeps the tools it builds (`throttle-<hash>/heavy`, [`crate::pre_push::heavy_tool`]).
 //! One mechanism for every cached tool, so a long run never loses the binary it resolved (ER-21; CI run 7773's job-isolation, and
 //! on 2026-11-14 six generators of one train-10 `gen check` found heavy gone):
 //!  - [`hold`]: a run that starts a cached tool more than once holds its own name for it, a hard link (else a copy) under

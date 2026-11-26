@@ -4,7 +4,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 // windows-twin: none: it serves the release over curl on a loopback port and checks Unix file modes
 #![cfg(unix)]
-use paddock_dev::throttle_install::{Done, Install, asset_name, install};
+use paddock_dev::heavy_install::{Done, Install, asset_name, install};
 use paddock_testkit::StandIn;
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap};

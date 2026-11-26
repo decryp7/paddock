@@ -1,8 +1,7 @@
 use crate::{
     audit, check, check_ids, ci_build_env, ci_build_jobs, ci_host, ci_isolation, ci_run, ci_runs, ci_rust_pin, ci_s3_guard, ci_setup_rust,
-    disk, gates, generators, golden_cmd, hook, input_hash, ipc_endpoints, lessons_driver, load, local_sccache, locks, locks_guard,
-    merge_check, places, plan_cmd, pr, pre_push, queue, release_isolation, slots, test_features, throttle_cmd, throttle_install, wait,
-    worktree,
+    disk, gates, generators, golden_cmd, heavy_cmd, heavy_install, hook, input_hash, ipc_endpoints, lessons_driver, load, local_sccache,
+    locks, locks_guard, merge_check, places, plan_cmd, pr, pre_push, queue, release_isolation, slots, test_features, wait, worktree,
 };
 use clap::{Args, Parser, Subcommand};
 use paddock_cli::{CliError, Exit, Format, Report, finish};
@@ -38,10 +37,10 @@ enum Command {
     /// Run a command through the machine-wide throttle slot (ER-24), found the way `check --pre-push` finds it; git hooks use it.
     /// `./dev heavy` is the old name: it still works and prints a one-line deprecation.
     #[command(alias = "heavy")]
-    Throttle(throttle_cmd::ThrottleArgs),
+    Throttle(heavy_cmd::ThrottleArgs),
     /// Install the `throttle` binary of a release into `<dev-targets>/throttle/bin`: downloads the asset for this OS, checks its SHA256SUMS entry, renames it into place, records the version.
     #[command(alias = "heavy-install")]
-    ThrottleInstall(throttle_install::InstallArgs),
+    ThrottleInstall(heavy_install::InstallArgs),
     /// Golden files: `confirm <test filter>` runs the tests on this machine and in the CI image as root; passes only if both pass.
     Golden {
         #[command(subcommand)]
@@ -782,8 +781,8 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
             command: CiCommand::GuardRecord(a),
         } => ci_runs::guard_record(&a),
         Command::Wait(a) => wait::command(&a),
-        Command::Throttle(a) => throttle_cmd::command(&a),
-        Command::ThrottleInstall(a) => throttle_install::command(&a),
+        Command::Throttle(a) => heavy_cmd::command(&a),
+        Command::ThrottleInstall(a) => heavy_install::command(&a),
         Command::Golden { command } => golden_cmd::command(command),
         Command::Load(a) => load::command(&a),
         Command::Places(a) => places::command(&a),

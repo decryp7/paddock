@@ -881,9 +881,9 @@ pub fn throttle_command_for(
     // A build that failed for a reason that will not pass on its own is remembered for the run; one that timed out (or ran out of budget)
     // is not: the next step builds it again instead of every row of the run reading a stale timeout.
     if built.get().is_none() {
-        let result = super::throttle_tool::ensure(root, env, build_limit).and_then(|bin| super::throttle_tool::hold(&bin, env));
+        let result = super::heavy_tool::ensure(root, env, build_limit).and_then(|bin| super::heavy_tool::hold(&bin, env));
         if let Err(e) = &result
-            && super::throttle_tool::is_transient(e)
+            && super::heavy_tool::is_transient(e)
         {
             return Err(e.clone());
         }
@@ -1084,14 +1084,14 @@ fn log_name(id: &str) -> String {
 
 impl RealExec {
     /// The command that puts a heavy gate through the slot: `PADDOCK_THROTTLE` or `throttle` on PATH, else the `throttle`
-    /// built from this tree ([`super::throttle_tool`]). Empty for `PADDOCK_THROTTLE=off` (hermetic tests only); `Err` when the build failed.
+    /// built from this tree ([`super::heavy_tool`]). Empty for `PADDOCK_THROTTLE=off` (hermetic tests only); `Err` when the build failed.
     fn heavy_command(&self) -> Result<Vec<String>, String> {
         throttle_command_for(
             &self.root,
             &self.env,
             &|p| self.has_tool(p),
             &self.built_throttle,
-            super::throttle_tool::BUILD_LIMIT,
+            super::heavy_tool::BUILD_LIMIT,
         )
     }
 

@@ -40,13 +40,13 @@ const KEEP_RUN_LOGS: usize = 20;
 pub mod deny;
 pub mod exec;
 pub mod gates;
+pub mod heavy_tool;
 pub mod kept;
 pub mod known;
 pub mod linux_inputs;
 pub mod mount_fresh;
 pub mod outcome;
 pub mod reuse;
-pub mod throttle_tool;
 pub mod warm;
 
 use crate::plan::{Request, plan_with_graph};

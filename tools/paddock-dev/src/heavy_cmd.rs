@@ -3,7 +3,7 @@
 //! `heavy` built from tools/throttle). When none can be found it is an error with the next step: never an unthrottled run.
 
 use crate::pre_push::exec::{on_path, throttle_command_for};
-use crate::pre_push::throttle_tool::BUILD_LIMIT;
+use crate::pre_push::heavy_tool::BUILD_LIMIT;
 use crate::tool_cache::Held;
 use clap::Args;
 use paddock_cli::{CliError, Report};

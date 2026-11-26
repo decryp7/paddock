@@ -69,6 +69,8 @@ pub mod generators;
 pub mod git_env;
 pub mod golden_cmd;
 pub mod health;
+pub mod heavy_cmd;
+pub mod heavy_install;
 pub mod hook;
 pub mod host_tests;
 pub mod input_hash;
@@ -104,8 +106,6 @@ pub mod safe_remove;
 pub mod slots;
 pub mod test_cost;
 pub mod test_features;
-pub mod throttle_cmd;
-pub mod throttle_install;
 // Unix only: it starts the helper through a POSIX shell, and every test that uses it is `#[cfg(unix)]`.
 #[cfg(all(test, unix))]
 mod test_sleeper;

@@ -339,7 +339,7 @@ pub fn install(i: &Install) -> Result<Done, String> {
 
 /// `dev throttle-install`, against the real machine.
 pub fn command(a: &InstallArgs) -> Result<Report, CliError> {
-    crate::throttle_cmd::deprecated_name("heavy-install", "throttle-install");
+    crate::heavy_cmd::deprecated_name("heavy-install", "throttle-install");
     let env: HashMap<String, String> = crate::process_env::vars().collect();
     let cwd = std::env::current_dir().map_err(|e| CliError::failure(format!("current folder: {e}")))?;
     let targets = crate::places::dev_targets(&cwd, &|k| env.get(k).cloned())?;
