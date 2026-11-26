@@ -4,7 +4,11 @@
 //! that cannot be read, is NOT MEASURED, never a pass (ER-33).
 
 use super::{Merge, git::Git};
-use crate::generators::{self, registry::PATH, run::Runner};
+use crate::generators::{
+    self,
+    registry::{Cost, PATH},
+    run::Runner,
+};
 use paddock_cli::Exit;
 use serde_json::{Value, json};
 use std::path::Path;
@@ -39,7 +43,7 @@ fn unmeasured(why: &str, next: &str) -> Step {
 }
 
 /// Runs the generator checks a merge makes due. `None` when the repository declares no registry (nothing to check).
-pub fn run(root: &Path, git: &Git, merge: &Merge, runner: &dyn Runner, log: &(dyn Fn(&str) + Sync)) -> Option<Step> {
+pub fn run(root: &Path, git: &Git, merge: &Merge, heavy: bool, runner: &dyn Runner, log: &(dyn Fn(&str) + Sync)) -> Option<Step> {
     if !root.join(PATH).exists() {
         return None;
     }
@@ -65,14 +69,46 @@ pub fn run(root: &Path, git: &Git, merge: &Merge, runner: &dyn Runner, log: &(dy
             ));
         }
     };
-    match generators::check_with(&reg, root, &changed, false, &[], runner, log) {
-        Ok(r) => Some(Step {
-            text: r.text.lines().map(str::to_string).collect(),
-            data: r.data,
-            exit: r.exit,
-        }),
-        Err(e) => Some(unmeasured(&e.message, "fix the registry")),
+    // A heavy generator (it builds a workspace: minutes, and again for every merge of a train) is deferred to the one
+    // `./dev gen check --base origin/main` that runs beside the member gate: its due set is the union of every merge's, so nothing a merge
+    // made due is left unchecked, and a stale file there still names its generator and inputs (ER-36, ER-20; docs/benchmarks.md).
+    let due = reg.due(&changed);
+    let deferred: Vec<String> = if heavy {
+        Vec::new()
+    } else {
+        due.iter()
+            .filter(|g| g.cost == Cost::Heavy && g.manual.is_none())
+            .map(|g| g.id.clone())
+            .collect()
+    };
+    let now: Vec<String> = due.iter().map(|g| g.id.clone()).filter(|id| !deferred.contains(id)).collect();
+    let mut step = if !deferred.is_empty() && now.is_empty() {
+        // Nothing but heavy entries is due: nothing starts.
+        Step {
+            text: Vec::new(),
+            data: json!({"outcome": "clean", "registered": reg.generators.len(), "due": [], "manual": [], "results": []}),
+            exit: Exit::Ok,
+        }
+    } else {
+        // `only` names the entries to run whatever the change is, so with nothing deferred the plain due selection is kept.
+        let only: &[String] = if deferred.is_empty() { &[] } else { &now };
+        match generators::check_with(&reg, root, &changed, false, only, runner, log) {
+            Ok(r) => Step {
+                text: r.text.lines().map(str::to_string).collect(),
+                data: r.data,
+                exit: r.exit,
+            },
+            Err(e) => return Some(unmeasured(&e.message, "fix the registry")),
+        }
+    };
+    if !deferred.is_empty() {
+        step.text.push(format!(
+            "gen check: deferred, heavy ({}): not run in this merge check. The final `./dev gen check --base origin/main` runs them once on the train (or pass --heavy-generators to run them here).",
+            deferred.join(", ")
+        ));
+        step.data["deferred"] = json!(deferred);
     }
+    Some(step)
 }
 
 /// Why the checkout is not the merge result, and the next step: `None` when HEAD's tree is the merge's and nothing tracked is

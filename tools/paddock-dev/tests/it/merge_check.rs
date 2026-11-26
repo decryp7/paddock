@@ -3067,3 +3067,93 @@ mod member_trial {
         assert_eq!(code, 2, "{text}");
     }
 }
+
+/// A fast generator marked by the docs and a heavy one marked by the lockfile; the heavy one's check always fails, so a run of it
+/// shows (a STALE finding) and a skipped one shows (exit 0): the stand-in for a build that costs minutes (ER-33: the control sees it).
+const FAST_AND_HEAVY: &str = r#"version = 1
+
+[[generator]]
+id = "docs-gen"
+what = "the docs"
+check = ["true"]
+regenerate = "none: invented"
+paths = ["docs/**"]
+outputs = []
+cost = "fast"
+
+[[generator]]
+id = "heavy-gen"
+what = "a workspace build"
+check = ["false"]
+regenerate = "none: invented"
+paths = ["crates/Cargo.lock"]
+outputs = []
+cost = "heavy"
+"#;
+
+/// A member that changes `member_file`, merged into a train that moved on; the registry is [`FAST_AND_HEAVY`].
+fn member_changing(member_file: &str) -> Repo {
+    let r = Repo::new();
+    r.write("docs/generators.toml", FAST_AND_HEAVY);
+    r.write("crates/Cargo.lock", "1\n");
+    r.write("docs/a.md", "a\n");
+    r.commit("base");
+    r.git(&["checkout", "-q", "-b", "member"]);
+    r.write(member_file, "member\n");
+    r.commit("chore: member");
+    r.git(&["checkout", "-q", "main"]);
+    r.write("other.txt", "b\n");
+    r.commit("chore: the train moved on");
+    r.git(&["merge", "-q", "--no-ff", "-m", "Merge member", "member"]);
+    r
+}
+
+fn check_with_extra(r: &Repo, extra: &[&str]) -> (i32, String) {
+    let builds = tempfile::tempdir().unwrap();
+    let out = r
+        .dev_cmd()
+        .args(["merge", "check", "--root"])
+        .arg(r.path())
+        .arg("HEAD")
+        .args(extra)
+        .env("PADDOCK_DEV_TARGET_DIR", builds.path())
+        .output()
+        .unwrap();
+    let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    (out.status.code().unwrap_or(-1), text)
+}
+
+#[test]
+fn a_merge_that_changes_only_a_heavy_generators_input_starts_no_generator_and_names_it_deferred() {
+    let r = member_changing("crates/Cargo.lock");
+    let (code, text) = check_with_extra(&r, &[]);
+    assert_eq!(code, 0, "the heavy check (which always fails) must not have run: {text}");
+    assert!(
+        text.contains("deferred") && text.contains("heavy-gen") && text.contains("gen check --base origin/main"),
+        "a skipped check says so and names the one that runs it, never silence (ER-33): {text}"
+    );
+    assert!(!text.contains("gen heavy-gen: running"), "{text}");
+}
+
+#[test]
+fn the_flag_runs_the_heavy_generators_a_merge_made_due() {
+    // The positive control: the same merge, with the heavy step asked for, starts the heavy check.
+    let r = member_changing("crates/Cargo.lock");
+    let (code, text) = check_with_extra(&r, &["--heavy-generators"]);
+    // In this bare repository the heavy slot cannot be made (NOT MEASURED, exit 6); either way the check was started and is not a pass.
+    assert!(matches!(code, 5 | 6), "the heavy check must have been started: {code} {text}");
+    assert!(text.contains("gen heavy-gen") && !text.contains("deferred"), "{text}");
+}
+
+#[test]
+fn a_fast_generator_still_runs_in_every_merge_check() {
+    let r = member_changing("docs/adr.md");
+    let (code, text) = check_with_extra(&r, &[]);
+    assert_eq!(code, 0, "{text}");
+    assert!(text.contains("gen check: 1 of 2 due: docs-gen"), "{text}");
+    assert!(
+        text.contains("gen docs-gen: running") || text.contains("gen docs-gen: current"),
+        "{text}"
+    );
+    assert!(!text.contains("deferred"), "nothing heavy was due: {text}");
+}
