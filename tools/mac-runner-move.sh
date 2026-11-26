@@ -38,9 +38,8 @@
 # status: read-only; where each lane's plist is, which launchd domain runs it, its state, pid, process user and last
 # registration line.
 #
-# The daemon's environment also gets HEAVY_DIR=<dev-targets>/throttle, heavy's lock folder: the folder the agents' ./dev hands heavy,
-# read with `./dev places --get dev-targets --pinned` (the repository's own git config) as --user, so CI's `heavy mark` and the agents'
-# heavy steps meet in one queue (ADR 0102) in a folder a reboot keeps.
+# The daemon's environment names no throttle lock folder: throttle decides its own (the per-user state folder of the daemon's UserName, found
+# through the user database; docs/dev-setup.md), so CI's `throttle mark` and the agents' heavy steps meet in one queue (ADR 0102).
 #
 # The runner's program is signed with the Mac CI identity (tools/mac-ci-signing.sh, identifier net.decryptology.gitea-runner) as
 # the user, after the old runner stopped and before the daemon starts, so a Full Disk Access grant given once to that identity
@@ -54,7 +53,6 @@ set -uo pipefail
 
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 repo=$(cd "$here/.." && pwd)
-dev="${PADDOCK_RUNNER_MOVE_DEV:-$repo/dev}"
 templates="$here/mac-runners"
 MARK='@set-by-mac-runner-move@'
 PARKED='.before-adr0120'
@@ -138,17 +136,6 @@ as_user_signing() {
 program_of() { local src; src=$(source_agent "$1") && value ProgramArguments.0 "$src"; }
 loaded() { launchctl print "$1/$2" >/dev/null 2>&1; }
 
-# heavy's lock folder, <dev-targets>/throttle (the name after the heavy->throttle rename, so it moves once), as --user reads it (./dev builds and caches itself in that user's home, never root's).
-heavy_dir() {
-  local t
-  if [ "$(id -u)" = "$uid" ]; then
-    t=$(bash "$dev" places --get dev-targets --pinned --repo "$repo")
-  else
-    t=$(sudo -u "$user" bash "$dev" places --get dev-targets --pinned --repo "$repo")
-  fi || return 1
-  [ -n "$t" ] && printf '%s/throttle' "${t%/}"
-}
-
 # Renders a lane's daemon plist from the template into $2. $1 = lane name.
 render() {
   local name="$1" out="$2" src program workdir
@@ -165,9 +152,6 @@ render() {
     plutil -replace EnvironmentVariables -xml "$env_xml" "$out" &&
     plutil -replace EnvironmentVariables.HOME -string "$home" "$out" &&
     plutil -replace EnvironmentVariables.PADDOCK_CI_JOBS_PER_HOST -string "$jobs" "$out" || { echo "plutil could not fill $out"; return 1; }
-  local heavy
-  heavy=$(heavy_dir) || { echo "cannot read the dev-targets folder (./dev places --get dev-targets --pinned as $user); set git config paddock.worktreeRoot in the main checkout (docs/dev-setup.md)"; return 1; }
-  plutil -replace EnvironmentVariables.HEAVY_DIR -string "$heavy" "$out" || { echo "plutil could not fill $out"; return 1; }
   # A daemon gets no per-user launchd environment, so USER, LOGNAME and the user's own temp folder are set here.
   local user_tmp
   if [ "$(id -u)" = "$uid" ]; then user_tmp=$(getconf DARWIN_USER_TEMP_DIR); else user_tmp=$(sudo -u "$user" getconf DARWIN_USER_TEMP_DIR); fi

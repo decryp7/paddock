@@ -146,12 +146,31 @@ test('the key reads the real wrapper contract: hash and state on standard output
   assert.match(r.stderr, /^dev: hash [0-9a-f]{40} inputs:/m);
 });
 
+/** The embedded hash a `dev self hash --json` answer must carry: the input hash for a clean tree, the word `dirty` for an edited one. */
+function checkEmbedded(j) {
+  // A binary built from a clean tree embeds its input hash; one built from a tree with uncommitted changes in the tool's inputs
+  // embeds the word `dirty` (git holds no hash for those files), which is what `dirty: true` says. A person's pre-push run on an
+  // edited tree is the second case, never a failure of the launcher (this test failed at 30 to 37 s, the build's time, in every gate run
+  // before a commit).
+  if (j.dirty === false) assert.equal(j.embedded, j.hash, 'a binary the launcher built or fetched for this hash embeds it');
+  else assert.equal(j.embedded, 'dirty', 'a binary built from an edited tree embeds `dirty`, as `dirty: true` says');
+}
+
+test('the embedded-hash check accepts both real shapes and sees a wrong one (positive control)', () => {
+  const h = 'a'.repeat(40);
+  checkEmbedded({ hash: h, embedded: h, dirty: false });
+  checkEmbedded({ hash: h, embedded: 'dirty', dirty: true });
+  assert.throws(() => checkEmbedded({ hash: h, embedded: 'dirty', dirty: false }), /embeds it/);
+  assert.throws(() => checkEmbedded({ hash: h, embedded: 'b'.repeat(40), dirty: false }), /embeds it/);
+  assert.throws(() => checkEmbedded({ hash: h, embedded: h, dirty: true }), /embeds `dirty`/);
+});
+
 test('verify reads the real `dev self hash --json` shape: an embedded hash equal to the launcher hash (train 18 run 8560)', () => {
   const r = spawnSync('sh', [join(PADDOCK, 'dev'), 'self', 'hash', '--json'], { encoding: 'utf8', env: { ...process.env, RUSTUP_AUTO_INSTALL: '0' } });
   assert.equal(r.status, 0, `the real ./dev self hash needs a Rust compiler here: ${r.stderr}`);
   const j = JSON.parse(r.stdout);
   assert.match(j.hash, /^[0-9a-f]{40}$/);
-  assert.equal(j.embedded, j.hash, 'a binary the launcher built or fetched for this hash embeds it');
+  checkEmbedded(j);
 });
 
 test('a tool that reports no embedded hash (a binary built outside the launcher) fails the step', () => {

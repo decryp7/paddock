@@ -38,6 +38,7 @@ export {
   pressTab,
   modKey,
   pageModKey,
+  isMacNavigator,
   pressMod,
   expectTabOrder,
   expectReachableByKeyboard,

@@ -88,8 +88,9 @@ const FIXED: &[(&str, &str)] = &[
     ("NO_COLOR", "1"),
 ];
 
-/// The private global git config: no background maintenance or gc, a test identity, every folder trusted (see the module).
-const GITCONFIG: &str = "[maintenance]\n\tauto = false\n[gc]\n\tauto = 0\n[user]\n\tname = Paddock Test\n\temail = test@example.invalid\n[safe]\n\tdirectory = *\n";
+/// The private global git config: no background maintenance or gc, a test identity, every folder trusted (see the module), and LF
+/// checkouts whatever the machine's git converts to (ER-61; [`crate::git_fixture::LF_CONFIG`] for the repositories a fixture makes).
+const GITCONFIG: &str = "[maintenance]\n\tauto = false\n[gc]\n\tauto = 0\n[user]\n\tname = Paddock Test\n\temail = test@example.invalid\n[safe]\n\tdirectory = *\n[core]\n\tautocrlf = false\n\teol = lf\n";
 
 /// The folders the private home and temp variables name (see [`TestCommand::private_dir`]). This is the kept list of folder
 /// variables: each points into the command's private folder, and each folder exists before the child starts (but

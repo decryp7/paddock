@@ -225,8 +225,8 @@ test('C115 ignores for, while and done inside quotes when it looks for a loop', 
 });
 
 test('C115 skips the tests/fixtures folders', () => {
-  assert.equal(isCleanupSource('tools/heavy/tests/fixtures/plock.sh'), false);
-  assert.equal(isCleanupSource('tools/heavy/tests/plock.sh'), true);
+  assert.equal(isCleanupSource('tools/throttle/tests/fixtures/plock.sh'), false);
+  assert.equal(isCleanupSource('tools/throttle/tests/plock.sh'), true);
 });
 
 test('C115 does not count a value that only climbs (dot segments) as a literal path part', () => {

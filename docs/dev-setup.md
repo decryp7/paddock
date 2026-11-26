@@ -38,7 +38,7 @@ and links here.
 
 | Name | What is there | How the tools find it |
 | --- | --- | --- |
-| `<dev-targets>` | worktrees (`wt/`), build folders, agent scratch (`scratch/<agent id>`), `sccache`, `paddock-dev-home`, the disk index `.paddock-disk.sqlite`, heavy's run logs (`runs/<agent>/`) | `PADDOCK_DEV_TARGETS`, else the parent of `paddock.worktreeRoot`, else of `PADDOCK_WORKTREE_ROOT` |
+| `<dev-targets>` | worktrees (`wt/`), build folders, agent scratch (`scratch/<agent id>`), `sccache`, `paddock-dev-home`, the disk index `.paddock-disk.sqlite`, the throttle's run logs (`runs/<agent>/`), the shared npm cache `cache/npm` | `PADDOCK_DEV_TARGETS`, else the parent of `paddock.worktreeRoot`, else of `PADDOCK_WORKTREE_ROOT` |
 | `<dev disk>` | the folder that holds `<dev-targets>` | the parent of `<dev-targets>` |
 | `<dev disk>/vm-data` | the Tart images `tart-from-home` of the service smoke | `PADDOCK_VM_DATA`, else derived |
 | `<dev disk>/ci/locks/test-machines` | the lock of the test machines (`scripts/vm-lock.sh`) | `PADDOCK_VM_LOCK_ROOT`, else derived |
@@ -58,6 +58,27 @@ The Mac mini's layout since 2026-11-14 (one SSD for all dev data; media and back
 
 After a disk move: move the folders, run `git config paddock.worktreeRoot <new dev-targets>/wt` in the main checkout,
 update the shell profile's `SCCACHE_DIR` and `PADDOCK_DEV_HOME`, and change the table above. Nothing else names the disk.
+
+## Shared npm cache (`./dev deps`)
+
+`npm ci` and the `ui/dist` build are done once per content key, not once per worktree. `./dev deps install` gives the worktree its
+`node_modules` (the root's and each workspace's) and `./dev deps ui` adds `ui/dist` and the generated css: each is a copy-on-write
+clone (APFS `clonefile` through `cp -c`, a reflink where the file system has one, else a plain copy) of an entry in
+`<dev-targets>/cache/npm/`, or the one build that makes the entry. A clone is a real folder of its own, never a link into the cache,
+so Angular, Vitest and Playwright resolve ordinary paths and no worktree can change another's. `./dev worktree add` clones a warm
+`node_modules` at once; with a cold cache it keeps installing only the conformance dependencies and never builds.
+
+- **Keys.** `node_modules`: `package-lock.json`, the Node version and the platform. `ui/dist`: the build guard's own content hashes
+  (`sourceHash` in `@decryp7/paddock-e2e`, read from Node), the `node_modules` key and the hash of `ui/angular.json`,
+  `ui/package.json`, `ui/tsconfig.json`, `ui/scripts/` and `tsconfig/`. A changed lockfile or source is a new key (a miss), never an
+  edit of an old entry.
+- **Owner, lock, size, eviction (ER-51).** Owner: `./dev deps` (`owner.json` in the folder). One kernel file lock per key
+  (`<name>.lock`), exclusive while an entry is built and stored, shared while one is only cloned out, so two builders of one key
+  build once and an entry is never read half made. An entry is made in a staging folder and renamed into place; `entry.json` records
+  its folders and file count, and an entry that fails the check is removed and rebuilt. Cap 10 GiB (`PADDOCK_DEPS_CACHE_MAX_GIB`);
+  over it, the least recently used entry (folder modification time, set on every hit) goes first, never the one just used or one
+  whose lock is held. Every deletion goes through `safe_remove`.
+- **Measurements:** [docs/benchmarks.md](benchmarks.md#2026-11-26-shared-npm-and-uidist-cache-featnpm-ui-cache).
 
 ## Environment
 
@@ -265,7 +286,7 @@ shared backend on 2026-10-28 and again on 2026-11-17 (CI keeps its per-slot cach
 - **The sccache shim (ER-47).** cc-rs puts `RUSTC_WRAPPER` in front of the C compiler when its file name is `sccache`, cargo hands that
   variable to every build script, and sccache 0.19 cannot probe `clang-cl` (it reads `/Users/...` as `/U` options), so every
   `cargo xwin` lint that compiles C (ring) failed. cc-rs 1.8 to 1.11 has no switch for one target, so `./dev sccache env` (and the
-  gates, `./dev gen check`, heavy's build) set `RUSTC_WRAPPER` to `<tool cache>/tools/sccache/<version>/shim/sccache`, a shell
+  gates, `./dev gen check`, the throttle's build) set `RUSTC_WRAPPER` to `<tool cache>/tools/sccache/<version>/shim/sccache`, a shell
   program named `sccache` that runs `clang-cl`/`cl` (or a compiler with `--target=...-windows-msvc`) directly and everything else
   through the real sccache. Native C stays cached on macOS and Linux; only the cross C compiles are not. Written by `./dev sccache env`
   only (a gate with no shim turns the wrapper off and says so). Policy: `local_sccache::shim_text`; measured: docs/benchmarks.md.
@@ -277,7 +298,30 @@ owner record, `./dev disk record <dir> --kind <build|scratch|...> --link <worktr
 lands), so a cleanup knows whose it is. Callers: engineering-playbook `scripts/heavy.sh` records `CARGO_TARGET_DIR` (so every
 `cargo`, `cargo xwin` and `llvm-cov` run through it is covered; the xwin target folder is whatever `CARGO_TARGET_DIR` names,
 no script here makes one). The scratch folder an agent's brief names is made by the brief's
-author: that call belongs there. The Rust `heavy` tool (`tools/heavy`) makes no folder.
+author: that call belongs there. The Rust `throttle` tool (`tools/throttle`) makes no folder.
+
+### Cutover from `heavy` to `throttle` (user decision 2026-11-26; no dual-lock shim before v1)
+
+The slot locks are kernel file locks now and the tool is `throttle` (`tools/throttle/README.md`). A `heavy` and a `throttle` do not exclude each
+other (different lock files), so the move is made once, at a quiet moment, as its own train:
+
+1. The coordinator pauses every builder and lands the train.
+2. The first `./dev` call of each agent rebuilds `./dev` and the throttle on the new hash (the cached `heavy-<hash>` binaries are no longer
+   used); builders resume after that.
+3. CI jobs build the throttle from their own tree, so only jobs already running at the landing use the old lock: a window of minutes.
+4. The throttle decides its own lock folder (user decision 2026-11-26): `./dev` and `tools/mac-runner-move.sh` no longer pass one.
+   Precedence: `THROTTLE_DIR` (aliases `HEAVY_DIR`, `PLOCK_DIR`, `PLOCK_ROOT`), then `dir` in `<user config folder>/throttle/config.toml`, then
+   the per-user state folder (macOS `~/Library/Application Support/throttle`, Linux `$XDG_STATE_HOME/throttle` or `~/.local/state/throttle`,
+   Windows `%LOCALAPPDATA%\throttle`); `throttle dir` prints it, and a process with no `HOME` finds it through the user database. The
+   Mac daemon runs as the CI user, so its folder is that user's: the same one the agents' `./dev` resolves when they run as that user.
+   The user re-runs the runner install (`tools/mac-runner-move.sh`) whenever convenient: a reinstall drops the `THROTTLE_DIR` or `HEAVY_DIR`
+   the old plist sets (an old plist keeps working: the variable still wins until then, so keep it equal to the new default or reinstall
+   before the first run on the new binary, else the daemon and the agents queue in two folders).
+5. What carries over: the history. The first run that finds the new folder without a `heavy-history.tsv` reads the old folder's
+   (`<dev-targets>/throttle`, else `/private/tmp/claude-501`, else `THROTTLE_MOVED_FROM`) and copies it over once, so quick rows stay quick.
+   The `pitcrew-*` ticket and marker files and `pitcrew-lock-activity.log` (which `./dev wait --plock` reads through `throttle dir`) start fresh in the
+   new folder, so no run is queued across the move: do it at the quiet moment of step 1. The old `<dev-targets>/throttle` and the
+   `pitcrew-heavy-v2.lock*` folders are ignored and safe to delete after the first run. `./dev heavy` and `./dev heavy-install` still work and print a deprecation line.
 
 ## Tests
 

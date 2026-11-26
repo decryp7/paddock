@@ -1,5 +1,5 @@
 import { expect, test } from './test';
-import { axeViolations, expectNoHorizontalScroll, expectNotMoving, THEMES, WorkbenchApp } from '@decryp7/paddock-e2e';
+import { axeViolations, expectNoHorizontalScroll, expectNotMoving, THEMES, WorkbenchApp, pressMod } from '@decryp7/paddock-e2e';
 
 // The workbench demo is the reference consumer of @decryp7/paddock-ui/workbench (ADR 0013 §4; plan W4, W7). It uses only
 // the test kit (@decryp7/paddock-e2e): the workbench page objects and the shell's.
@@ -118,10 +118,10 @@ test.describe('dock (plan W2a, W2b)', () => {
     await wb.frame.open();
     const dock = page.getByTestId('pd-dock');
     await tab(page, 'wd.orientation').click();
-    await page.keyboard.press('ControlOrMeta+2');
+    await pressMod(page, 'Mod+2');
     await expect(dock).toHaveAttribute('data-perspective', 'wd.review');
     await expect(tab(page, 'wd.problems')).toBeVisible();
-    await page.keyboard.press('ControlOrMeta+1');
+    await pressMod(page, 'Mod+1');
     await expect(dock).toHaveAttribute('data-perspective', 'wd.understand');
     await expect(tab(page, 'wd.orientation')).toBeVisible();
   });

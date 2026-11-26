@@ -497,7 +497,7 @@ unique (C31).
     through the one accessor that owns that data (`ci_run::contract::conformance_args`, `cargo metadata`, the register's parser, a
     constant the owning module exports), never by grepping or slicing that file's text. A source audit that must read another
     crate's code names the file through a path the owner exports and ends its span at an item boundary, not at a comment it
-    remembers. A hand list that must equal generated data (heavy's `inputs.txt`) is generated, or its test prints the
+    remembers. A hand list that must equal generated data (the throttle's `inputs.txt`) is generated, or its test prints the
     regenerate command (ER-40). Not linted: review and the train's test run cover it (the check that flagged a regular expression
     over `.gitea/workflows/*.yml` was dropped on 2026-11-25: its report-only phase found only fixture text).
     *Why:* on train 8 (2026-11-13) eight fixes after the merges were combination failures; `bddd2947c` was a second reader of
@@ -506,7 +506,7 @@ unique (C31).
 
 ## Waiting, fixes, checks, lists and environments (user, 2026-11-15 and 2026-11-16; ER-43 to ER-47)
 Status is as of train 14 planning: "planned" is not built, "in progress" is on a branch. Rules 80 to 84 map the engineering rules to Paddock's mechanisms.
-80. **A waiter never holds the capacity the work it waits for needs** (ER-43). Paddock: `./dev wait` and the heavy-slot queue take no slot for the wait; the waiter guard (duplicate waits, grep polling) and the scheduled-runs-yield rule follow. Status: planned, train 14.
+80. **A waiter never holds the capacity the work it waits for needs** (ER-43). Paddock: `./dev wait` and the throttle-slot queue take no slot for the wait; the waiter guard (duplicate waits, grep polling) and the scheduled-runs-yield rule follow. Status: planned, train 14.
 81. **A complete fix, not a quick one** (ER-44). The principle (user, 2026-11-24): the minimum simplest complete fix, and a redesign only if it is necessary for the long term; rules 76, 83 and ER-21, ER-36, ER-41 enforce it. A review's or incident's cause, its fix and its copies in `docs/known-copies.toml` (rule 55) land in one round; ask the user only above 1 agent-day beyond common practice (rule 76). Status: in force.
 82. **Checks have no side effects** (ER-45). Paddock: launcher probes and `setup-rust` set `RUSTUP_AUTO_INSTALL=0`, shell checks print the cause before exiting under `set -e`, and a check's positive control runs on in-memory data . Container runs go through `tools/linux-container.sh` only (ER-14); tests use `StandIn` programs, never installed apps or `~/.rustup`. Status: in progress, train 14.
 83. **Lists only shrink; goldens hold no machine** (ER-46). Paddock: planned growth checks compare each list with the merge base and fail on growth without the user's approval (one each for the exceptions list, the allow list and the baselines; the ids are reserved with `./dev check new-id`); goldens are normalised (uid, names, paths, sizes) and the e2e suites use the fixed clock. Status: the three checks are planned (report-only first, ER-41); fixed e2e clock in progress.
@@ -590,3 +590,12 @@ Until an app is imported, rules 2, 3, 8, 9, 39 and 42 above apply to it as writt
     *Why:* Dyno 1.1.0 was correctly blocked by Paddock run 7485 (mostly code Dyno ships). Run 7489 failed in the shell-demo's i18n check (outside Dyno) and in aggregate coverage; the coverage gate printed no per-crate output and a crate Dyno depends on was in it, so that blocked under (b) until the gate was fixed and a full run was green. The failures also skipped the dependency audit and several ui steps, which (a) asks to be cleared.
 
 101. **Local gates never start a VM or a container on a developer's Mac** (user, 2026-11-26). Linux checks run as CI's Linux jobs on the Linux runner, Windows checks on the Windows runner. The pre-push and member gate have no Linux row (`clippy-linux`, `tests-linux`, `--warm-linux` are removed; the register names them CI-owned), and conformance C172 (report-only, review 2026-12-09) flags a docker, podman, nerdctl, orb, orbctl, vmrun or `linux-container.sh` call in local gate code. *Why:* the container rows were the Mac's largest load, and the user decided on 2026-11-26 that no VM runs on the Mac. Status: in force (train o); C172 report-only until its first green run on the real tree (ER-41), review 2026-12-09.
+
+## Git fixtures (user decision 74, 2026-11-26)
+NEW-git-fixtures. **A test that needs a git repository builds it once per machine and recipe through `paddock_testkit::git_fixture`** (ER-20, ER-22,
+    rule 85). `git_fixture::template(name, include_str!(this file), |build, ready| ..)` builds the repository in a folder under the
+    kit's temp folder, with an owner, a size limit and an eviction rule (ER-51; the module doc), and each test gets its own copy with
+    `git_fixture::copy_tree`, which starts no process. A fixture builder that starts git six or more times per test is a finding of C174
+    (report-only until its first green run, ER-41; `./dev conformance --only C174`). A test about the build itself says why in its own
+    comment and keeps its builder. *Why:* the `ci_runs` fixtures started 14 to 17 gits in every test, 45 ms each on the Windows runner:
+    710 s of train n's Windows job (docs/benchmarks.md, "Git fixture repositories of the ci_runs tests").
