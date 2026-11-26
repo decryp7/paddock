@@ -155,9 +155,8 @@ tools and never by your shell profile (user decision 2026-11-16; docs/research/s
   `local` (the disk only; `SCCACHE_DIR` and `SCCACHE_CACHE_SIZE` from the profile above) or `s3` (the store alone, through sccache's
   own S3 support; needs `PADDOCK_SCCACHE_S3_BUCKET` and `PADDOCK_SCCACHE_S3_ENDPOINT`). The store is `PADDOCK_SCCACHE_S3_ENDPOINT`
   (`host:port`, default `172.16.1.220:15000`) and `PADDOCK_SCCACHE_S3_BUCKET` (default `sccache-paddock`), each taken from the environment,
-  else from an optional line of that name in the key file below, else the default (the one place the defaults are named: this file; the code
-  holds them as `DEFAULT_S3_ENDPOINT` and `DEFAULT_S3_BUCKET` in `local_sccache.rs`); optionally
-  `PADDOCK_SCCACHE_S3_PREFIX` (default CI's for this OS and arch, `paddock-ci/<OS>-<arch>`, `ci_setup_rust::ci_prefix`; a server still on the older `paddock` prefix is restarted once) and, for `s3`, `PADDOCK_SCCACHE_S3_REGION` (default `auto`) and
+  else from an optional line of that name in the key file below, else the default (the defaults are declared once in `crates/paddock-ci-config/src/settings/declared.rs`, ADR 0123; `local_sccache.rs` reads `DEFAULT_S3_ENDPOINT` and `DEFAULT_S3_BUCKET` from it); optionally
+  `PADDOCK_SCCACHE_S3_PREFIX` (default CI's for this OS and arch, `paddock-ci/<OS>-<arch>`, `paddock_ci_config::settings::sccache::ci_prefix`; a server still on the older `paddock` prefix is restarted once) and, for `s3`, `PADDOCK_SCCACHE_S3_REGION` (default `auto`) and
   `PADDOCK_SCCACHE_S3_SSL` (`true`; default `false`). With `auto` the first level is the sibling folder `<SCCACHE_DIR>-s3` (what S3
   backfills never reaches the plain folder, as in CI, ADR 0111): the first build after the switch starts from the store, not from
   the old folder, and the two folders together use up to twice `SCCACHE_CACHE_SIZE` on the Mac's disk (each is capped at that size; lower

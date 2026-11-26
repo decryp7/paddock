@@ -249,6 +249,14 @@ job model is unchanged by it, and every moved step makes the crate-coverage quer
 `crate` job's selection is touched here (about 0.3 days of WP-7). WP-11 was to port the publish scripts after the tags; decision 81a
 takes `scripts/publish.mjs` now, so WP-11 shrinks by its count (2 days).
 
+## WP-4 as built (settings)
+
+Counted by a text search of `tools/paddock-dev/src` at 43c28c456: **141 distinct `PADDOCK_*` names in 91 files** (the 128 in 66 non-test files above was an estimate; the count here includes test files and doc comments). All 141 are declared in `crates/paddock-ci-config/src/settings/declared.rs` with their type, parser, default, secret flag and who sets them (`Scope`: repository variable, repository secret, machine, handoff between tools, test only). Names that are not configuration are declared with scope `Handoff` (set by one tool for the tools it starts, such as `PADDOCK_CI_SLOT_TOKEN`, `PADDOCK_RELEASE_*`) or `TestOnly` (stand-ins and test hooks such as `PADDOCK_TRIAL_DIR`, `PADDOCK_DF`, `PADDOCK_PS`); none is out of scope, and the table says which they are.
+
+Readers switched to `settings`: the compile cache's S3 level (`S3Ci::from_vars`, with its release and tag wall), the local server's `backend` and `choose`, the test cache's store address and key, and `./dev disk` (its seven `PADDOCK_DISK_*` names, defaults read from the declaration). `parse_endpoint`, `ci_prefix`, the chain settings, the survival variables, the base folders and the CI key environment moved into the crate and the adapters apply what they return.
+
+Deferred, one cluster per later change (the report of check C175 is the shrinking list; ER-46): the other readers, grouped as `ci_build_jobs` and `ci_isolation` (`PADDOCK_CI_*`, `PADDOCK_SLOT_*`, `PADDOCK_SOCKET_*`), `ci_host` (`PADDOCK_KEPT_CLONE_*`, guardian), `release_isolation`, `pre_push` (gate switches), `places`/`worktree`, `merge_check` and `ci_runs` (stand-in programs), `heavy_install`, `deps_cache`, `test_cost`. Each reads its variables through its own lookup shape today (a closure, a `HashMap`, the step's `Ctx`); each needs an adapter of the same kind as `EnvFn` or `EnvMap` and its own failing test, and none shares behaviour with the S3 cluster.
+
 ## Checks this ADR relies on (ADR 0096)
 
 - Built on origin/main: `gates/ci.rs`, `gates/yaml.rs`, `gates/expr.rs`, `gates/shell.rs` (ADR 0060), `./dev gates model --json`,
