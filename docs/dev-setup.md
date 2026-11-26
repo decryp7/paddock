@@ -297,20 +297,9 @@ author: that call belongs there. The Rust `heavy` tool (`tools/heavy`) makes no 
   folders (and `*.golden` and `*.snap` files) for uid and gid numbers, `/Users`, `/home` and `C:\Users` paths and temp paths, by
   fixed patterns, so it gives the same result on every machine; it walks the working folder today (reading git's tracked list is
   the approved train-14 item). A value that is fine (an invented user) gets an entry with a reason in `conformance/c131-allow.json`.
-  **Rewriting:** `PADDOCK_UPDATE_GOLDEN=1` rewrites a differing golden and prints the command that runs that test on Linux as root
-  in the CI image (`tools/linux-container.sh --id paddock --ci-image -- sh -c 'cd <package folder> && cargo nextest run -p <package> <test>'`;
-  the test name comes from `NEXTEST_TEST_NAME`). Run it before you commit the file. `./dev golden confirm [-p <package>] <test filter>`
-  (from the workspace of the test, or `--manifest-dir <folder>`) runs the filtered tests on this machine and in that image and passes
-  only when both pass; a filter that selects no test fails with "no test matched the filter", and a filter starting with `-` is
-  refused. The container needs Docker or OrbStack and obeys `PADDOCK_LINUX_CPUS`, `PADDOCK_LINUX_JOBS`, `PADDOCK_LINUX_MEMORY`,
-  `PADDOCK_LINUX_USER`, `PADDOCK_LINUX_CI_REGISTRY` and `PADDOCK_LINUX_HOST_ARCH` (ER-14), all passed through. On an arm64 Mac the CI
-  image is a local arm64 build (not the registry's amd64 image).
-  **Container rows hold a lock on their build folder.** The kept volume's `/target/v<version>/<folder>` is shared by every worktree, and
-  cargo's own lock covers the build only, so another worktree could rebuild a test binary while this row's nextest was about to exec it
-  (train l: "failed to exec ... Permission denied"). `tools/linux-container.sh --lock v<version>/<folder>` (the rows' own commands pass
-  it; pass it in a command of your own that builds in `/target`) holds a host-side `flock` on that folder for the whole container run,
-  in `<common git dir>/paddock-pre-push/target-locks/`; a second row waits, says who holds it, and gives up after
-  `PADDOCK_LINUX_LOCK_WAIT` seconds (default 1800) with one `::error::` line (exit 5). The kernel frees the lock when its holder ends.
+  **Rewriting:** `PADDOCK_UPDATE_GOLDEN=1` rewrites a differing golden and says that CI's Linux job confirms it as root on the Linux runner
+  (push the branch). No container or VM runs on this Mac (user, 2026-11-26; docs/rules.md NEW-no-local-vm), so `./dev golden confirm` and the
+  local CI-image run are gone.
 - **Checked (conformance C37):** a `tests/<name>.rs` outside `tests/it/` fails unless `ownTestBinaries` of
   `paddock.conformance.json` names it with the reason it needs its own binary, and every workspace member needs a CI test
   step and the workspace-hack dependency.

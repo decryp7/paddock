@@ -129,18 +129,14 @@ package.json     the one npm workspace and package-lock.json (ui, eslint, icons,
 - **E2E and screenshots run on fresh code (guidance; a binding rule is proposed).** A running dev server is reused only with `PW_REUSE_SERVER=1`; default ports derive from the worktree path (`e2ePort` in `@decryp7/paddock-e2e`); a config that consumes `ui/dist` or the css fails at load with "rebuild ui: npm run build -w ui" when they were built from older sources (`build-guard.ts`, content stamps; lessons.md). New Playwright configs use these.
 - Every change ships with tests; every bug fix starts with a failing test. A colour change keeps `npm run test:tokens`
   green (WCAG AA/AAA pairs, CVD separation); change the tokens, not the test.
-- `./dev check --pre-push` runs the Linux Clippy in the CI image (native architecture; CI's x64 legs and the member gate catch the
-  rare arch-specific lint) for every touched Cargo workspace, because the Mac and xwin Clippy cannot see Linux-only code. The row
-  names the apps' Tauri crates it leaves out (their build scripts write into the read-only mount; CI lints them). It needs a running
-  container runtime and a warm volume: without one the row is "not measured" (exit 6), never a pass; warm a workspace once with
-  `./dev check --warm-linux [workspace...]` (no budget). The integrator's member gate (`./dev merge check --gates`) runs the same
-  row; a dependency bump may need `--warm-linux` first.
+- **No VM or container on this Mac (user, 2026-11-26; docs/rules.md NEW-no-local-vm).** `./dev check --pre-push` and the member gate
+  start no Docker, OrbStack or Fusion: there is no `clippy-linux`, `tests-linux` or `--warm-linux`. Linux Clippy (`-D warnings`),
+  the Linux tests and the orphan guardian's acting tests as uid 65534 are CI's Linux jobs on the Linux runner (ci.yml: the crates job's
+  "Orphan guardian as a user (Linux)" step, each app's Linux leg); Windows stays CI's. The register (`NOT_RUN` in
+  `pre_push/gates.rs`) names them CI-owned.
 - The member gate (`./dev check --pre-push --member-gate`, run by `./dev merge check --gates`) also runs the full nextest `ci`
-  profile of every touched Cargo workspace (the plan's reached packages, as CI's member run) on the host (`tests <ws>`) and, for the
-  reached code that behaves differently per OS (the `hostTests` placement derived from the code, as CI's host legs use it), in the
-  same CI-image container (`tests-linux ...`, `--rm` with CPU and memory limits); a pure workspace is named and skipped there, plus the orphan guardian's acting tests as uid
-  65534 when `crates/paddock-proc/src/guardian*` changed (user, 2026-11-25). Inactive apps are skipped and named; no container
-  runtime or image is "not measured" (exit 6). Windows stays CI-only. A developer's push skips these rows.
+  profile of every touched Cargo workspace (the plan's reached packages, as CI's member run) on the host (`tests <ws>`). Inactive apps
+  are skipped and named. A developer's push skips these rows.
 - Before committing, the gates of the affected projects, for example:
 
   ```sh

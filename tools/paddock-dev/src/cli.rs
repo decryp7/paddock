@@ -1,7 +1,7 @@
 use crate::{
     audit, check, check_ids, ci_build_env, ci_build_jobs, ci_host, ci_isolation, ci_run, ci_runs, ci_rust_pin, ci_s3_guard, ci_setup_rust,
-    disk, gates, generators, golden_cmd, heavy_cmd, heavy_install, hook, input_hash, ipc_endpoints, lessons_driver, load, local_sccache,
-    locks, locks_guard, merge_check, places, plan_cmd, pr, pre_push, queue, release_isolation, slots, test_features, wait, worktree,
+    disk, gates, generators, heavy_cmd, heavy_install, hook, input_hash, ipc_endpoints, lessons_driver, load, local_sccache, locks,
+    locks_guard, merge_check, places, plan_cmd, pr, pre_push, queue, release_isolation, slots, test_features, wait, worktree,
 };
 use clap::{Args, Parser, Subcommand};
 use paddock_cli::{CliError, Exit, Format, Report, finish};
@@ -38,11 +38,6 @@ enum Command {
     Heavy(heavy_cmd::HeavyArgs),
     /// Install the `heavy` binary of a release into `<dev-targets>/heavy/bin`: downloads the asset for this OS, checks its SHA256SUMS entry, renames it into place, records the version.
     HeavyInstall(heavy_install::InstallArgs),
-    /// Golden files: `confirm <test filter>` runs the tests on this machine and in the CI image as root; passes only if both pass.
-    Golden {
-        #[command(subcommand)]
-        command: golden_cmd::GoldenCommand,
-    },
     /// One line for the coordinator: start, hold or stop for new agents, from the load, the free disk of the dev-targets folder and the CI queue (ER-24).
     Load(load::LoadArgs),
     /// The machine's dev folders, derived from `git config paddock.worktreeRoot` (docs/dev-setup.md): dev-targets, dev-disk,
@@ -165,22 +160,11 @@ enum CheckCommand {
         #[arg(long)]
         out: Option<PathBuf>,
     },
-    /// ER-9's fast gates for what this push changes (fmt, host and Windows Clippy, Linux Clippy in the CI image, conformance,
+    /// ER-9's fast gates for what this push changes (fmt, host and Windows Clippy, conformance,
     /// commit-lint, lockfiles `--locked`), the commands CI runs, in parallel and bounded by load. A gate that could not run
     /// is "not measured" (exit 6), never a pass; a failure is one line with its next step (exit 5). The pre-push hook runs it.
     #[command(name = "pre-push", long_flag = "pre-push")]
     PrePush(pre_push::PrePushArgs),
-    /// Builds the Linux Clippy's dependencies in the CI image's kept volume (one container run per workspace, no budget, live
-    /// output), so the pre-push row only sees warm runs. Default: every Cargo workspace. Run it once per
-    /// workspace, and again after a CI image bump (the target folder is keyed by ci-image/VERSION) or a large dependency change; a push that finds the volume cold is "not measured". The kept volume `paddock-linux-target-arm64` grows with every workspace and image version (size: docs/benchmarks.md, "Pre-push Linux Clippy"); `bash tools/linux-container.sh --id paddock --clean` removes it.
-    #[command(name = "warm-linux", long_flag = "warm-linux")]
-    WarmLinux {
-        /// Workspace folders to warm (`crates`, `apps/dyno`, ...).
-        workspaces: Vec<String>,
-        /// The repository root (default: the folder containing .git, found from the current folder).
-        #[arg(long)]
-        root: Option<PathBuf>,
-    },
     /// The next free conformance check id, read from the working tree, every local branch, every branch of origin as the
     /// remote has it now (git ls-remote) and conformance/reserved/ (ER-21: two branches took the same id five times). `--reserve <branch>` takes the id on origin at once (a push of refs/paddock/check-ids/C<n>, which only one agent can create) and writes the reservation file.
     NewId {
@@ -780,7 +764,6 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
         Command::Wait(a) => wait::command(&a),
         Command::Heavy(a) => heavy_cmd::command(&a),
         Command::HeavyInstall(a) => heavy_install::command(&a),
-        Command::Golden { command } => golden_cmd::command(command),
         Command::Load(a) => load::command(&a),
         Command::Places(a) => places::command(&a),
         Command::Audit { command } => audit::command(command),
@@ -832,9 +815,6 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
         Command::Check {
             command: CheckCommand::PrePush(a),
         } => pre_push::command(&a),
-        Command::Check {
-            command: CheckCommand::WarmLinux { workspaces, root },
-        } => pre_push::warm::command(&root, &workspaces),
         Command::Check {
             command: CheckCommand::NewId { reserve, root },
         } => check_ids::command(root, reserve),
