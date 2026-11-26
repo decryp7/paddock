@@ -4368,3 +4368,15 @@ startup"; the Chromium start judge, ADR 0031). A start that hands back a handle 
   and the boot-out. Every loaded lane is now told to take no new job at the start, and each lane's check for a job and its boot-out are
   back to back; a job seen there sends install back into the same bounded wait and tells the runner again. What stays is the time between
   that check and the boot-out call itself (milliseconds, against a runner that needs seconds to register and fetch a task).
+
+## 2026-11-26: the Mac is the page's, not the test machine's: the lesson of 2026-10-29 again, and `isMac()` too (WebKit on Linux, nightly 9103)
+
+The reference apps in WebKit moved from the CI Mac to Linux (ADR 0120, 2026-11-25) and their first run, nightly 9103, failed seven specs:
+Playwright's WebKit on Linux has a Mac user agent and `navigator.platform` `Linux x86_64`, so the app binds `Mod` to Cmd and draws ⌘.
+Five specs still pressed `ControlOrMeta` (the host's key, Ctrl) and `shell-demo-locale` chose its key by `process.platform`; the page object
+`isMac()` read `navigator.platform` alone, so two specs expected `Ctrl+Shift+H` where the menu drew `⇧⌘H`. The 2026-10-29 rule (press an app
+shortcut with `pressMod`) was written but nothing enforced it, and the macOS WebKit leg had hidden the rest. **Fix:** every reference-app spec presses
+with `pressMod`; `isMac()` shares `isMacNavigator` with `modKey` (one definition, with a test). **Open:** a second occurrence (ER-21): 63 files of
+the apps' own e2e (`apps/*/app/e2e`, 108 uses) still press `ControlOrMeta`; their WebKit legs are the Linux ones, so the same failure waits there.
+A lint rule in `paddock/e2e-*` that refuses `ControlOrMeta` in a spec is proposed, not built (it needs the user's yes: one in, one out). The chart
+spec `data.spec.ts:301` (theme switch redraws the canvases) failed in the same run for a cause not shown by the log.
