@@ -377,14 +377,14 @@ fn the_windows_skip_reason_names_the_real_cause_per_workspace() {
 /// the change reaches gets the row, as a heavy row (so it runs beside the others and reuses sccache through the gate's wrapper) in its
 /// own `xwin` build folder; a tool the change does not reach gets none.
 #[test]
-fn the_windows_lint_runs_for_paddock_dev_and_heavy_when_the_plan_reaches_them() {
+fn the_windows_lint_runs_for_paddock_dev_and_throttle_when_the_plan_reaches_them() {
     let mut p = plan();
     p["packages"]["tools/paddock-dev"] = json!(["paddock-dev"]);
-    p["packages"]["tools/heavy"] = json!(["paddock-heavy"]);
+    p["packages"]["tools/throttle"] = json!(["paddock-throttle"]);
     let f = facts();
     for (tool, files) in [
         ("tools/paddock-dev", &["tools/paddock-dev/src/pre_push/tests.rs"][..]),
-        ("tools/heavy", &["tools/heavy/src/gate.rs"][..]),
+        ("tools/throttle", &["tools/throttle/src/gate.rs"][..]),
     ] {
         let planned = plan_gates(&p, &change(files), &f);
         let row = run_gates(&planned)
@@ -416,7 +416,7 @@ fn the_windows_lint_runs_for_paddock_dev_and_heavy_when_the_plan_reaches_them() 
     // Selected by the plan: a change that reaches neither tool plans neither row; an app without `windowsClippy` keeps its own reason.
     let planned = plan_gates(&p, &change(&["tools/paddock-dev/src/a.rs", "apps/debrief/src/a.rs"]), &f);
     assert!(
-        !ids(&planned).iter().any(|i| i == "clippy-windows tools/heavy"),
+        !ids(&planned).iter().any(|i| i == "clippy-windows tools/throttle"),
         "{:?}",
         ids(&planned)
     );
