@@ -544,6 +544,8 @@ pub struct Leg {
     pub part_label: Option<String>,
     /// The packages a split `crate` leg tests (space separated), so a rerun tests the same ones.
     pub test_packages: Option<String>,
+    /// Whether the once-per-job extras (Clippy, feature-off runs) run in a split `crate` leg (`"true"` on partition 1, else `"false"`).
+    pub part_extra: Option<String>,
 }
 
 /// The leg of a job from the run's scope line (ADR 0123 §3): `None` fields when the line does not name the job, so every leg of that
@@ -558,6 +560,7 @@ fn leg_of(key: &str, leg: Option<&BTreeMap<String, String>>) -> Leg {
         shard: get("shard"),
         part_label: get("part_label"),
         test_packages: get("test_packages"),
+        part_extra: get("part_extra"),
     }
 }
 
@@ -1128,7 +1131,11 @@ impl SincePlan {
                     };
                     let mut leg = json!({ "os": r.leg.os, "filter": filter });
                     // A split leg keeps its partition and its packages: a rerun of `2/3` tests those packages, not the workspace.
-                    for (key, value) in [("part_label", &r.leg.part_label), ("test_packages", &r.leg.test_packages)] {
+                    for (key, value) in [
+                        ("part_label", &r.leg.part_label),
+                        ("test_packages", &r.leg.test_packages),
+                        ("part_extra", &r.leg.part_extra),
+                    ] {
                         if let Some(v) = value {
                             leg[key] = json!(v);
                         }
@@ -1630,6 +1637,7 @@ mod tests {
                 shard: None,
                 part_label: None,
                 test_packages: None,
+                part_extra: None,
             }
         );
         assert!(matches!(dyno.scope, Scope::Tests { ref tests, .. } if tests.len() == 1));
@@ -1684,6 +1692,7 @@ mod tests {
                     ("os".to_string(), "ubuntu-latest".to_string()),
                     ("part_label".to_string(), ", 2/3".to_string()),
                     ("test_packages".to_string(), "pkg-b pkg-e".to_string()),
+                    ("part_extra".to_string(), "false".to_string()),
                 ]),
             },
         )]);
@@ -1707,6 +1716,10 @@ mod tests {
         assert_eq!(legs[0]["os"], "ubuntu-latest");
         assert_eq!(legs[0]["part_label"], ", 2/3");
         assert_eq!(legs[0]["test_packages"], "pkg-b pkg-e");
+        assert_eq!(
+            legs[0]["part_extra"], "false",
+            "a rerun of partition 2 does not run the first partition's extras"
+        );
     }
 
     fn run_7821() -> Value {
@@ -1880,6 +1893,7 @@ mod tests {
             shard: None,
             part_label: None,
             test_packages: None,
+            part_extra: None,
         };
         assert!(plan_of(vec![rerun("e2e-webkit", Leg::default())]).needs_webkit());
         assert!(plan_of(vec![rerun("app", app(Some("e2e-webkit")))]).needs_webkit());
@@ -1954,6 +1968,7 @@ mod tests {
                     shard: None,
                     part_label: None,
                     test_packages: None,
+                    part_extra: None,
                 },
                 scope: Scope::Job("x".into()),
                 vitest: vec![],

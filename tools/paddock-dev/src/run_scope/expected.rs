@@ -8,7 +8,7 @@ use serde_json::Value;
 use std::collections::BTreeMap;
 
 /// The leg keys the line keeps (a leg value that is empty is left out).
-pub const LEG_KEYS: [&str; 6] = ["os", "app", "e2e_leg", "part_label", "test_packages", "shard"];
+pub const LEG_KEYS: [&str; 7] = ["os", "app", "e2e_leg", "part_label", "test_packages", "part_extra", "shard"];
 
 /// A job a run is expected to have, by display name.
 #[derive(Debug, Clone, PartialEq, Eq)]
