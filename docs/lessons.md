@@ -4368,3 +4368,32 @@ startup"; the Chromium start judge, ADR 0031). A start that hands back a handle 
   and the boot-out. Every loaded lane is now told to take no new job at the start, and each lane's check for a job and its boot-out are
   back to back; a job seen there sends install back into the same bounded wait and tells the runner again. What stays is the time between
   that check and the boot-out call itself (milliseconds, against a runner that needs seconds to register and fetch a task).
+
+## Fix item: a FLAKY sccache eviction test on Windows in run 9135 (2026-11-26)
+`paddock-dev::it sccache_eviction::a_cargo_file_under_the_sccache_folder_is_evicted_once_the_cache_is_over_its_cap` was FLAKY on
+Windows in ci.yml run 9135 (job 50993; failed once, passed on its retry; flaky-as-failure kept the run red, ER-12) and passed in the
+failed-only round 9137. Train 2026-11-26-pq did not touch what it drives: the test runs the real sccache binary through paddock-env and
+paddock-testkit, and the train's sccache change was in `local_sccache.rs` only, so it did not block the landing (rule 54 (4)). A fix
+item for the test's owner, which starts with a reproduction on the Windows runner and the list of causes with what rules each out
+(ER-28). No sleep or raised timeout as the fix.
+
+## 2026-11-26: the Mac is the page's, not the test machine's: the lesson of 2026-10-29 again, and `isMac()` too (WebKit on Linux, nightly 9103)
+
+The reference apps in WebKit moved from the CI Mac to Linux (ADR 0120, 2026-11-25) and their first run, nightly 9103, failed seven specs:
+Playwright's WebKit on Linux has a Mac user agent and `navigator.platform` `Linux x86_64`, so the app binds `Mod` to Cmd and draws ⌘.
+Five specs still pressed `ControlOrMeta` (the host's key, Ctrl) and `shell-demo-locale` chose its key by `process.platform`; the page object
+`isMac()` read `navigator.platform` alone, so two specs expected `Ctrl+Shift+H` where the menu drew `⇧⌘H`. The 2026-10-29 rule (press an app
+shortcut with `pressMod`) was written but nothing enforced it, and the macOS WebKit leg had hidden the rest. **Fix:** every reference-app spec presses
+with `pressMod`; `isMac()` shares `isMacNavigator` with `modKey` (one definition, with a test). **Open:** a second occurrence (ER-21): 63 files of
+the apps' own e2e (`apps/*/app/e2e`, 108 uses) still press `ControlOrMeta`; their WebKit legs are the Linux ones, so the same failure waits there.
+A lint rule in `paddock/e2e-*` that refuses `ControlOrMeta` in a spec is proposed, not built (it needs the user's yes: one in, one out). The chart
+spec `data.spec.ts:301` (theme switch redraws the canvases) failed in the same run for a cause not shown by the log.
+
+## A git fixture helper sat in one tool's test folder and broke two rules (2026-11-26, perf/slow-git-tests-fixture)
+- **What happened.** `perf/slow-git-tests` fixed 710 s of train n's Windows job by building each `ci_runs` git fixture once per machine
+  and copying it per test. The helper (`template`, `copy_tree`) lived in `tools/paddock-dev/src/ci_runs/testutil.rs` and used
+  `std::env::temp_dir` (the clippy disallowed method) and `remove_dir_all` (the `safe_remove_lint` test), so train pq pulled the branch.
+- **Cause.** The helper was written where it was first needed, not checked against the shared kit (ER-22), and nothing told the next
+  fixture author that a per-test git repository is the slow shape.
+- **Fix (user decision 74).** The helper moved to `paddock_testkit::git_fixture` (temp folder from the kit, owner, size limit and eviction
+  rule in its doc), and rule NEW-git-fixtures with the report-only check C174 flags a fixture builder with six or more git starts per test.

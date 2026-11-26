@@ -1398,6 +1398,7 @@ fn trial_merge(a: &DispatchArgs, branch: &str, token: &str) -> Result<(crate::qu
             gates: false,
             write_reverted: None,
             old_base_anyway: None,
+            gates_base: None,
         })
         .map(|_| ())
         .map_err(|e| e.message)

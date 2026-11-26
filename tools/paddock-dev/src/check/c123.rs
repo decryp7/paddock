@@ -388,11 +388,11 @@ mod tests {
     fn any_built_binary_a_bound_name_and_a_spliced_machine_path_are_sites() {
         let t = "crates/a/tests/it/x.rs";
         assert_eq!(
-            lines("fn t() {\n    Command::new(env!(\"CARGO_BIN_EXE_heavy\")).output();\n}\n", t),
+            lines("fn t() {\n    Command::new(env!(\"CARGO_BIN_EXE_throttle\")).output();\n}\n", t),
             vec![2]
         );
         let bound =
-            "pub const BIN: &str = env!(\"CARGO_BIN_EXE_heavy\");\nfn t() {\n    let mut c = command(BIN);\n    Command::new(&BIN);\n}\n";
+            "pub const BIN: &str = env!(\"CARGO_BIN_EXE_throttle\");\nfn t() {\n    let mut c = command(BIN);\n    Command::new(&BIN);\n}\n";
         assert_eq!(lines(bound, t), vec![3, 4]);
         let handed = "fn t() {\n    let s = SpawnSpec::new(env!(\"CARGO_BIN_EXE_child\"), \"x\");\n}\n";
         assert!(lines(handed, t).is_empty());
