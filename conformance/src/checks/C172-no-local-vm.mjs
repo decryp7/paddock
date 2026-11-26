@@ -1,4 +1,4 @@
-// C172 (docs/rules.md NEW-no-local-vm, user decision 2026-11-26): local gate code never starts a VM or a container on a developer's
+// C172 (docs/rules.md rule 101, user decision 2026-11-26): local gate code never starts a VM or a container on a developer's
 // Mac. Linux checks are CI's Linux jobs on the Linux runner, Windows checks the Windows runner. The container rows were the Mac's largest
 // load (clippy-linux, tests-linux, warm-linux, golden confirm).
 //
@@ -43,7 +43,7 @@ export function localVmSites(text, file) {
   return out;
 }
 
-const FIX = 'Remove it: Linux checks are CI\'s Linux jobs on the Linux runner (docs/rules.md NEW-no-local-vm). A site that is fine carries `// conformance: no-local-vm — <why>`.';
+const FIX = 'Remove it: Linux checks are CI\'s Linux jobs on the Linux runner (docs/rules.md rule 101). A site that is fine carries `// conformance: no-local-vm — <why>`.';
 
 export default {
   id: 'C172',
