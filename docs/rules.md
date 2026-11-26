@@ -557,7 +557,13 @@ Amendments of the same date, no new number: the member gate runs each member's a
 100. **A branch joins a train only after it has merged current main and re-run its member gate on that tip.** The
 merge check (`./dev merge check`) refuses a member whose base is older than main: the stale-base check, being made blocking on
 `ci/old-base-block` (report-only until it lands). A refused member merges main, re-runs `./dev merge check --gates` on the result and
-is offered again. *Why:* on 2026-11-25 five members were pulled from trains i, k and m because their base was older than main (see
+is offered again. After merging main (or the train) into the member, `./dev merge sync-member <train>` runs the fast static rows
+(conformance, the gate register, Clippy and Windows Clippy of the touched workspaces) on that sync tip and ends non-zero on a failing
+or unmeasured row; fix it on the member and re-sync. `--no-static "<reason>"` is the logged escape. Once the rows pass it also
+dispatches the member's own narrowed CI run on the train (`ci dispatch ci.yml --trial`, the plan's affected jobs on its Linux and Windows
+legs; the integrator's sync-member pushes the sync tip as `sync/<member>` first) and prints the run id; a later `./dev merge check --gates` reads that run through the verdict reader: a
+red trial blocks the member, a running one is not a pass. `--no-trial "<reason>"` is the logged escape. *Why (trial):* members that passed
+on the Mac failed only on Windows or Linux CI in three trains. *Why:* on 2026-11-25 five members were pulled from trains i, k and m because their base was older than main (see
 [lessons.md](lessons.md#members-on-an-old-base-were-pulled-from-trains-i-k-and-m-2026-11-25)).
 
 ## Monorepo (ADR 0014 §10; effective for an app from its import into `paddock/apps/<app>`, for Paddock from the first import)
@@ -586,7 +592,7 @@ Until an app is imported, rules 2, 3, 8, 9, 39 and 42 above apply to it as writt
 101. **Local gates never start a VM or a container on a developer's Mac** (user, 2026-11-26). Linux checks run as CI's Linux jobs on the Linux runner, Windows checks on the Windows runner. The pre-push and member gate have no Linux row (`clippy-linux`, `tests-linux`, `--warm-linux` are removed; the register names them CI-owned), and conformance C172 (report-only, review 2026-12-09) flags a docker, podman, nerdctl, orb, orbctl, vmrun or `linux-container.sh` call in local gate code. *Why:* the container rows were the Mac's largest load, and the user decided on 2026-11-26 that no VM runs on the Mac. Status: in force (train o); C172 report-only until its first green run on the real tree (ER-41), review 2026-12-09.
 
 ## Git fixtures (user decision 74, 2026-11-26)
-NEW-git-fixtures. **A test that needs a git repository builds it once per machine and recipe through `paddock_testkit::git_fixture`** (ER-20, ER-22,
+102. **A test that needs a git repository builds it once per machine and recipe through `paddock_testkit::git_fixture`** (ER-20, ER-22,
     rule 85). `git_fixture::template(name, include_str!(this file), |build, ready| ..)` builds the repository in a folder under the
     kit's temp folder, with an owner, a size limit and an eviction rule (ER-51; the module doc), and each test gets its own copy with
     `git_fixture::copy_tree`, which starts no process. A fixture builder that starts git six or more times per test is a finding of C174

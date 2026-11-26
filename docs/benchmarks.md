@@ -3067,7 +3067,7 @@ Train n's Windows paddock-dev job (CI run 9118) spent 710 s of its test time in 
 (13 to 24 s each) and the `ci_runs::green::tests::*` that read `train_g_shape` (9 to 14 s). Cause, confirmed by reading the fixtures: each test
 built its own repository with 14 to 17 `git` starts (trial's `world()`: 17; green's `train_g_shape()`: 14) before its own work, and a git start
 costs about 45 ms on the Windows runner against about 6 ms here (rule 85's measure of 2026-11-18). The test-side fix: each fixture is built
-once per machine and recipe in `<temp>/paddock-git-fixture-templates/<name>-<hash of the recipe source>` (`paddock_testkit::git_fixture::template`, the shared module since rule NEW-git-fixtures, 712 KB
+once per machine and recipe in `<temp>/paddock-git-fixture-templates/<name>-<hash of the recipe source>` (`paddock_testkit::git_fixture::template`, the shared module since rule 102, 712 KB
 in all) and each test copies it with plain file copies (`copy_tree`): no git start, no shared mutable state. nextest runs each test in its own
 process, so a `OnceLock` per binary would have shared nothing. Budget tests: `a_world_is_a_private_copy_of_the_template_and_costs_no_git_start`
 (a counter of git starts on the test's thread: a world costs 0) and `a_shape_is_a_private_copy_of_its_template_with_the_same_commits`.

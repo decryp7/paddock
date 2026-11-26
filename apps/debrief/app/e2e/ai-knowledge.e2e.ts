@@ -2,6 +2,7 @@ import { expect, test } from './test';
 import type { Page } from '@playwright/test';
 import { openApp } from './app';
 import { expectNoSeriousViolations } from './axe';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard.ts';
 
 // Settings ▸ AI ▸ Knowledge (ADR 0029) against the browser build's mock knowledge backend
 // (src/app/ai/knowledge/mock-knowledge-backend.ts): write a project file, it is listed and read by the AI; disable it;
@@ -10,7 +11,7 @@ import { expectNoSeriousViolations } from './axe';
 const settingsDialog = (page: Page) => page.getByRole('dialog', { name: 'Settings' });
 
 async function openKnowledge(page: Page) {
-  await page.keyboard.press('ControlOrMeta+Comma');
+  await pressMod(page, 'Mod+Comma');
   await expect(settingsDialog(page)).toBeVisible();
   await settingsDialog(page).getByRole('navigation', { name: 'Settings sections' }).getByRole('button', { name: /AI assistant/ }).click();
   const project = settingsDialog(page).getByTestId('knowledge-project');

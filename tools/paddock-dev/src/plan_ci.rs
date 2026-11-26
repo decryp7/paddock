@@ -183,6 +183,14 @@ pub fn partition_linux_legs(legs: Vec<Value>, packages: &[String], parts: usize)
     out
 }
 
+/// The runners the `crate` and `paddock-dev` jobs run on: the one place the OS leg set is written (ADR 0123 §4).
+pub const OS_LEGS: [&str; 3] = ["ubuntu-latest", "windows-latest", "macos-latest"];
+
+/// [`OS_LEGS`] as the runner names the planner passes around.
+pub fn os_legs() -> Vec<String> {
+    OS_LEGS.iter().map(|s| s.to_string()).collect()
+}
+
 /// The legs of one of the two jobs that are not apps (`crate`, `paddock-dev`): one object per runner of `os_legs` with the packages
 /// (`test_packages`, space-separated, for `-p`; empty: the workspace's) and the nextest filterset (`test_filter`) its tests run. A
 /// Windows or macOS leg tests only what the workspace's `hostTests` names (OS-scoped tests); every leg also keeps the member run's
@@ -456,18 +464,9 @@ pub fn is_ci_yml(path: &str) -> bool {
 
 // --------------------------------------------------------------------------------------------------------------- outputs
 
-/// The ci.yml job outputs that say whether a project runs: (output name, project id, plan key). The one table: [`ci_outputs`] writes
-/// them, and the repository model reads a job's `if:` through it to know which project the job runs for (ADR 0117 WP-2).
-pub const PROJECT_OUTPUTS: [(&str, &str, &str); 8] = [
-    ("crates", "crates", "crates"),
-    ("ui", "ui", "ui"),
-    ("eslint", "eslint", "eslint"),
-    ("conformance", "conformance", "conformance"),
-    ("c99", "c99", "c99"),
-    ("tools", "tools", "tools"),
-    ("icons", "icons", "icons"),
-    ("paddock_dev", "paddock-dev", "paddockDev"),
-];
+/// The ci.yml job outputs that say whether a project runs: the one table lives in `paddock-ci-config` (ADR 0123), where the
+/// job model reads a job's `if:` through it; [`ci_outputs`] writes them.
+pub use paddock_ci_config::jobs::PROJECT_OUTPUTS;
 
 /// The ci.yml job outputs of a plan (the plan job declares and wires exactly these names), as `(name, value)` lines.
 pub fn ci_outputs(plan: &Value, legs: &[Value]) -> Vec<(String, String)> {

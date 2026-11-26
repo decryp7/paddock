@@ -4,6 +4,15 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `paddock-ci-config`: the CI job model (ADR 0123, WP-1)
+- New shared crate `crates/paddock-ci-config` (pure core, `publish = false`): `jobs::model` builds ci.yml's jobs, matrices, `needs` and
+  the projects each job runs for from the workflow text; `jobs::render` evaluates a job's `name:` for one leg. `gates/yaml.rs`,
+  `gates/expr.rs` and `plan_ci::PROJECT_OUTPUTS` moved into it, so `paddock-dev` has one CI parser (`gates::yaml` and `gates::expr`
+  re-export it). `[ci.jobs]` in `docs/repo-graph.toml` declares what no `if:` shows; a test keeps the model's projects equal to
+  `plan_gitea::CI_JOBS` for every job.
+- The OS leg set of the `crate` and `paddock-dev` jobs is written once (`plan_ci::OS_LEGS`): ci.yml's `PLAN_OS_LEGS` and its two
+  fallback lines are gone, and a rerun that does not rerun those jobs writes their whole legs itself.
+
 ### C173: no new non-Rust tooling file (ADR 0022 section 3.7 a and b)
 - `./dev check run --only C173` reads git's tracked list and fails (blocking) on a `.sh`, `.ps1`, `.py`, `.mjs`, `.js`, `.cjs` or `.ts`
   file in `scripts/`, `tools/`, `conformance/`, `.gitea/`, `ci-image/` or `apps/<app>/scripts/` that `conformance/tooling-files.json`
@@ -17,6 +26,9 @@ Conventional Commits; one semver tag for the whole repo.
   are gone; their coverage is CI's Linux jobs. `./dev golden confirm` is removed, and `paddock_testkit::golden::rewritten_notice` now takes
   the path alone and points at CI's Linux job (`confirm_command` and `test_name_of` are removed). Conformance C172 (report-only) flags a
   container or VM tool in local gate code.
+- Dyno's benchmark-unit tests (release step 2c) run in the `linux-units` job of `dyno-release.yml` through the new `./dev ci dyno-linux-units`
+  (no systemd user manager is exit 6, not measured; report-only until its first green run on the runner). `apps/dyno/scripts/linux-units-check.sh`
+  (OrbStack) is deleted with its C172 waivers and its C173 entry, and so are `ci-image/garage-arm64.Dockerfile` and `garage-release.txt`.
 
 ### sccache 0.20.1, with base directories
 - Every sccache pin moves from 0.19.0 to 0.20.1 (setup-rust and its shell twin, the CI image, `./dev sccache env`) with the release's

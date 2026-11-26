@@ -26,6 +26,7 @@ deranged = { version = "0.5", features = ["serde"] }
 email_address = { version = "0.2" }
 flate2 = { version = "1", features = ["zlib-rs"] }
 getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3", default-features = false, features = ["std"] }
+hashbrown = { version = "0.17", default-features = false, features = ["default-hasher"] }
 http = { version = "1" }
 httparse = { version = "1" }
 idna = { version = "1" }
@@ -83,6 +84,7 @@ uuid = { version = "1", features = ["v4"] }
 [target.aarch64-apple-darwin.build-dependencies]
 base64 = { version = "0.23" }
 deranged = { version = "0.5", features = ["serde"] }
+hashbrown = { version = "0.17", default-features = false, features = ["default-hasher"] }
 time = { version = "0.3", features = ["formatting", "macros", "parsing", "serde"] }
 
 [target.x86_64-unknown-linux-gnu.dependencies]
@@ -110,6 +112,7 @@ uuid = { version = "1", features = ["serde"] }
 winnow = { version = "1" }
 
 [target.x86_64-unknown-linux-gnu.build-dependencies]
+hashbrown = { version = "0.17", default-features = false, features = ["default-hasher"] }
 smallvec = { version = "1", default-features = false, features = ["const_new"] }
 syn-7b89eefb6aaa9bf3 = { package = "syn", version = "3", default-features = false, features = ["visit-mut"] }
 syn-f595c2ba2a3f28df = { package = "syn", version = "2", default-features = false, features = ["visit-mut"] }

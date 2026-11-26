@@ -892,7 +892,7 @@ fn every_ci_yml_job_is_in_the_job_table_and_asks_rerun_jobs() {
             "{job}"
         );
     }
-    // The matrices read their legs from the plan step, which writes every OS when it plans no rerun of them.
+    // The matrices read their legs from the plan step, which writes every OS itself when it plans no rerun of them.
     for (job, output) in [("crate", "crate_legs"), ("paddock-dev", "paddock_dev_legs")] {
         let text = &wf.jobs.iter().find(|(k, _)| k == job).unwrap().1;
         assert!(
@@ -901,7 +901,9 @@ fn every_ci_yml_job_is_in_the_job_table_and_asks_rerun_jobs() {
         );
     }
     let plan = &wf.jobs.iter().find(|(k, _)| k == "plan").unwrap().1;
-    assert!(plan.contains("crate_legs=$PLAN_OS_LEGS") && plan.contains("paddock_dev_legs=$PLAN_OS_LEGS"));
+    // `dev plan --ci` writes every leg itself (plan_ci::OS_LEGS): ci.yml keeps no copy of the OS list and no fallback (ADR 0123 §4).
+    assert!(!plan.contains("PLAN_OS_LEGS"), "ci.yml's plan job keeps no OS leg list");
+    assert!(!plan.contains("crate_legs="), "ci.yml's plan job writes no leg output");
 }
 
 #[test]

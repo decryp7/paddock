@@ -20,8 +20,8 @@ pub const SCOPE_LINE: &str = "plan scope: ";
 /// tree (`need_whole`).
 pub const VERSION: u64 = 2;
 
-/// The runners the `crate` and `paddock-dev` jobs run on when the plan names none of its own (ci.yml's `PLAN_OS_LEGS`).
-pub const DEFAULT_OS_LEGS: [&str; 3] = ["ubuntu-latest", "windows-latest", "macos-latest"];
+/// The runners the `crate` and `paddock-dev` jobs run on: the planner's one leg set (ADR 0123 §4; WP-2 reads it from the model).
+pub const DEFAULT_OS_LEGS: [&str; 3] = crate::plan_ci::OS_LEGS;
 
 /// The project flags of a plan that each decide a job of ci.yml.
 const PROJECTS: [&str; 8] = ["crates", "ui", "eslint", "conformance", "c99", "tools", "icons", "paddockDev"];

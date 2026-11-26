@@ -4,6 +4,7 @@ import { initialTotal, openApp } from './app';
 import { runCommand } from './analysis-support';
 import { openAppWith } from './mock-url';
 import { showProfileEditor } from './menu-support';
+import { pageModKey } from '../../../../ui/projects/paddock-e2e/src/keyboard.ts';
 
 async function openProfile(page: Page) {
   await openApp(page);
@@ -48,7 +49,7 @@ test.describe('profile editor', () => {
     await openProfile(page);
     await page.getByRole('tab', { name: 'TOML', exact: true }).click();
     const toml = page.getByRole('textbox', { name: 'Profile TOML' });
-    await toml.press('ControlOrMeta+Home');
+    await toml.press(`${await pageModKey(page)}+Home`);
     await page.keyboard.type('this is = = not toml\n');
 
     const problem = page.locator('debrief-toml-editor .problem');

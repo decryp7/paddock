@@ -214,7 +214,7 @@ env -u DYLD_LIBRARY_PATH cargo nextest run --workspace --no-fail-fast
 # the app library without test-only features (cargo test unifies them; a real build does not)
 cargo check -p debrief-app --lib
 # Linux: CI's Linux job and e2e legs on the Linux runner. Note 2026-11-26: scripts/ci/smoke-linux-docker.sh and e2e-linux-local.sh
-# (a local container) are removed; no container or VM runs on this Mac (user decision, docs/rules.md NEW-no-local-vm).
+# (a local container) are removed; no container or VM runs on this Mac (user decision, docs/rules.md rule 101).
 ```
 
 The full suites (Chromium and WebKit) run once on the combined result before a build or tag (Paddock rule 3); in a

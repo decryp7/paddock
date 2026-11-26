@@ -2,6 +2,7 @@ import { expect, test } from './test';
 import type { Page } from '@playwright/test';
 import { openApp } from './app';
 import { expectNoSeriousViolations } from './axe';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard.ts';
 
 /** The region (shell landmark or dock group) holding the focused element. */
 function focusedRegion(page: Page): Promise<string | null> {
@@ -51,9 +52,9 @@ test.describe('keyboard regions', () => {
       await page.keyboard.press(`Control+Alt+Digit${n}`);
       expect(await focusedRegion(page)).toBe(`group:${n}`);
     }
-    await page.keyboard.press('ControlOrMeta+0');
+    await pressMod(page, 'Mod+0');
     expect(await focusedRegion(page)).toBe('sidebar');
-    await page.keyboard.press('ControlOrMeta+Shift+G');
+    await pressMod(page, 'Mod+Shift+G');
     await expect(page.getByRole('grid', { name: 'Events' })).toBeFocused();
   });
 

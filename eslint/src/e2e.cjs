@@ -16,6 +16,7 @@ function severityFromEnv(name) {
  * @param {object} [options]
  * @param {string[]} [options.files]  globs of the specs (default `e2e/**\/*.ts`)
  * @param {'off'|'warn'|'error'} [options.ready]  severity of `paddock/e2e-ready-reads` (default `error`)
+ * @param {'off'|'warn'|'error'} [options.controlOrMeta]  severity of `paddock/e2e-no-control-or-meta` (default `error`)
  * @param {'off'|'warn'|'error'} [options.transient]  severity of `paddock/e2e-transient-wait` (default: the environment variable PADDOCK_E2E_TRANSIENT_LINT, else `off`; report-only, ER-41)
  * @param {string[]} [options.ignores] the wrapper, which alone may import `test` itself (default `e2e/test.ts`)
  */
@@ -32,6 +33,7 @@ function e2ePinnedClock(options = {}) {
       rules: {
         'paddock/e2e-pinned-clock': 'error',
         'paddock/e2e-ready-reads': options.ready ?? 'error',
+        'paddock/e2e-no-control-or-meta': options.controlOrMeta ?? 'error',
         'paddock/e2e-transient-wait': options.transient ?? severityFromEnv('PADDOCK_E2E_TRANSIENT_LINT'),
       },
     },
