@@ -3493,6 +3493,7 @@ dependencies = [
  "paddock-testkit",
  "paddock-testkit-start",
  "pitcrew-core",
+ "pitcrew-service",
  "serde",
  "serde_json",
  "sysinfo",
