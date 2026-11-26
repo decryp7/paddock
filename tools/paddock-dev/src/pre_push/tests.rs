@@ -2542,6 +2542,9 @@ struct Queued {
     /// Steps that have entered `run`, and a signal for each entry.
     entered: Mutex<usize>,
     entry: std::sync::Condvar,
+    /// With a number: every step waits until that many have entered (a first batch that is in flight together by construction, not by
+    /// luck of timing under load, ER-12); the wait is bounded only as a hang detector. Zero: the older wait for one more entry.
+    batch: usize,
 }
 
 impl Queued {
@@ -2555,7 +2558,14 @@ impl Queued {
             beside: Mutex::new(Vec::new()),
             entered: Mutex::new(0),
             entry: std::sync::Condvar::new(),
+            batch: 0,
         }
+    }
+
+    /// Holds every step until `n` of them are in flight together.
+    fn with_batch(mut self, n: usize) -> Queued {
+        self.batch = n;
+        self
     }
 }
 
@@ -2582,10 +2592,18 @@ impl Exec for Queued {
         *n += 1;
         self.entry.notify_all();
         let mine = *n;
-        let _held = self
-            .entry
-            .wait_timeout_while(n, Duration::from_millis(200), |n| *n == mine)
-            .unwrap();
+        let _held = if self.batch > 0 {
+            // A hang detector, not a timing: it ends only if a step of the batch never arrives (a push that holds it back).
+            self.entry
+                .wait_timeout_while(n, Duration::from_secs(60), |n| *n < self.batch)
+                .unwrap()
+                .0
+        } else {
+            self.entry
+                .wait_timeout_while(n, Duration::from_millis(200), |n| *n == mine)
+                .unwrap()
+                .0
+        };
         drop(_held);
         self.running.lock().unwrap().retain(|id| *id != g.id);
         self.in_flight.fetch_sub(1, SeqCst);
@@ -2628,7 +2646,7 @@ fn heavy_gate(id: &str, rank: u8) -> Planned {
 #[test]
 fn a_push_runs_as_many_heavy_steps_at_once_as_it_has_workers_and_measures_it() {
     use crate::pre_push::exec::run_all_detailed;
-    let fake = Queued::new(Duration::from_millis(30));
+    let fake = Queued::new(Duration::from_millis(30)).with_batch(3);
     let planned = vec![
         heavy_gate("clippy a", 1),
         heavy_gate("clippy b", 1),
@@ -2680,7 +2698,7 @@ fn the_heavy_limit_is_the_worker_count_unless_a_measurement_sets_it_and_is_honou
     }
     assert_eq!(heavy_limit(&std::collections::HashMap::new(), 0), 1, "never below one");
     for limit in [1, 2] {
-        let fake = Queued::new(Duration::from_millis(30));
+        let fake = Queued::new(Duration::from_millis(30)).with_batch(limit);
         let planned: Vec<Planned> = (0..5).map(|i| heavy_gate(&format!("clippy {i}"), 1)).collect();
         let detail = run_all_limited(
             &planned,
