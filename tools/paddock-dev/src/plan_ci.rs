@@ -183,7 +183,7 @@ pub fn partition_linux_legs(legs: Vec<Value>, packages: &[String], parts: usize)
     out
 }
 
-/// The runners the `crate` and `paddock-dev` jobs run on: the one place the OS leg set is written (ADR NEW-ci-job-model §4).
+/// The runners the `crate` and `paddock-dev` jobs run on: the one place the OS leg set is written (ADR 0123 §4).
 pub const OS_LEGS: [&str; 3] = ["ubuntu-latest", "windows-latest", "macos-latest"];
 
 /// [`OS_LEGS`] as the runner names the planner passes around.
@@ -464,7 +464,7 @@ pub fn is_ci_yml(path: &str) -> bool {
 
 // --------------------------------------------------------------------------------------------------------------- outputs
 
-/// The ci.yml job outputs that say whether a project runs: the one table lives in `paddock-ci-config` (ADR NEW-ci-job-model), where the
+/// The ci.yml job outputs that say whether a project runs: the one table lives in `paddock-ci-config` (ADR 0123), where the
 /// job model reads a job's `if:` through it; [`ci_outputs`] writes them.
 pub use paddock_ci_config::jobs::PROJECT_OUTPUTS;
 

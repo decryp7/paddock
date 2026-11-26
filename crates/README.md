@@ -137,7 +137,7 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 | `paddock-service` | background services and login items: one `ServiceSpec` rendered as the launchd plist (bundled or file), systemd unit, Windows `Run` value or service and NSIS hooks; registration and repair behind ports (rule 24), registered version, exe-changed restart, launch at login, health entry (plan X4, D4) | yes (Pitwall, Pitcrew, Dyno, Debrief agent); built |
 | `paddock-repo-files` | a bounded, `.gitignore`-aware repository walk and SHA-256 hashing with deterministic results (ADR 0022 §6) | yes (`paddock-dev`; Pacenotes' index later); built |
 | `paddock-repo-graph` | the project graph: Cargo and npm projects and edges (Tauri `frontendDist`, tsconfig, angular.json, ESLint config references), file to project, the affected closure, lockfile differences and a `History` port; git and `cargo metadata` adapters behind features (ADR 0022 §6) | yes (`paddock-dev`; Pacenotes later); built |
-| `paddock-ci-config` | the CI job model: ci.yml's jobs, matrices, `needs` and the projects each job runs for, built once from the workflow text (`jobs::model`, `jobs::render`); the one CI YAML reader (`yaml`) and expression evaluator (`expr`); a pure core with no file or process I/O (ADR NEW-ci-job-model) | yes (`paddock-dev`); built |
+| `paddock-ci-config` | the CI job model: ci.yml's jobs, matrices, `needs` and the projects each job runs for, built once from the workflow text (`jobs::model`, `jobs::render`); the one CI YAML reader (`yaml`) and expression evaluator (`expr`); a pure core with no file or process I/O (ADR 0123) | yes (`paddock-dev`); built |
 | `paddock-slots` | numbered slots over OS file locks the kernel releases when the holder dies, a holder protocol and a typed API: no stale reclaim, so no reclaim race (ADR 0022, the CI kit's job isolation) | yes (`paddock-dev ci slot`); built |
 | `paddock-siblings` | hand-off between the family's apps: the apps and what each accepts (`docs/ecosystem.md`), a typed `Handoff` (open, import files, show an item), discovery of an installed sibling per OS, starting it detached with paths or a deep link, plain "not installed" and "needs update" answers, the receiving side's parsers (plan X45; from Pitcrew's `debrief_link.rs` and `handoff.rs`) | yes (Pitcrew, Dyno, Debrief, Spotter); built |
 | `paddock-names` | identifier search (rule 20): word segmentation, name normalisation (`Path` and `Text` styles), grouping of spellings, ranked and explained matching of parts, joins, separators, case, plurals, filler words, word order and typos, clarifying question on a true tie (plan X18; from Debrief `names/` and Dyno's counter search) | yes (Debrief, Dyno; Pitwall, Spotter, Pacenotes later); built |
@@ -2104,7 +2104,7 @@ let answer = plugin.invoke("collector", "start", json!({ "folder": path }))?;   
   the OS sandbox. The author's tool is `cargo-paddock-plugin` (below).
 
 
-## `paddock-ci-config` (ADR NEW-ci-job-model, WP-1)
+## `paddock-ci-config` (ADR 0123, WP-1)
 
 The CI job model: every reader of ci.yml asks one typed model instead of re-typing the layout. A pure core (workflow texts and
 declared data are passed in; no file or process I/O), `publish = false`.

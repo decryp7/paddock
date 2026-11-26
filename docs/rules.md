@@ -592,7 +592,7 @@ Until an app is imported, rules 2, 3, 8, 9, 39 and 42 above apply to it as writt
 101. **Local gates never start a VM or a container on a developer's Mac** (user, 2026-11-26). Linux checks run as CI's Linux jobs on the Linux runner, Windows checks on the Windows runner. The pre-push and member gate have no Linux row (`clippy-linux`, `tests-linux`, `--warm-linux` are removed; the register names them CI-owned), and conformance C172 (report-only, review 2026-12-09) flags a docker, podman, nerdctl, orb, orbctl, vmrun or `linux-container.sh` call in local gate code. *Why:* the container rows were the Mac's largest load, and the user decided on 2026-11-26 that no VM runs on the Mac. Status: in force (train o); C172 report-only until its first green run on the real tree (ER-41), review 2026-12-09.
 
 ## Git fixtures (user decision 74, 2026-11-26)
-NEW-git-fixtures. **A test that needs a git repository builds it once per machine and recipe through `paddock_testkit::git_fixture`** (ER-20, ER-22,
+102. **A test that needs a git repository builds it once per machine and recipe through `paddock_testkit::git_fixture`** (ER-20, ER-22,
     rule 85). `git_fixture::template(name, include_str!(this file), |build, ready| ..)` builds the repository in a folder under the
     kit's temp folder, with an owner, a size limit and an eviction rule (ER-51; the module doc), and each test gets its own copy with
     `git_fixture::copy_tree`, which starts no process. A fixture builder that starts git six or more times per test is a finding of C174

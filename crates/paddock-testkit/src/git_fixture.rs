@@ -1,4 +1,4 @@
-//! [`template`] and [`copy_tree`]: a git fixture built once per machine and copied per test (ER-20, rule 85, rule NEW-git-fixtures).
+//! [`template`] and [`copy_tree`]: a git fixture built once per machine and copied per test (ER-20, rule 85, rule 102).
 //!
 //! A test that needs a git repository (an origin with a few commits, a landed train, a worktree) used to build it itself, and the
 //! dozens of `git` starts of a fixture (about 45 ms each on the Windows runner) were paid by every test. nextest runs each test in

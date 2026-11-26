@@ -51,7 +51,7 @@ dyno-agent bench 25 processes                       # Dyno's own CPU (share of O
 
 CI's Linux job (`ubuntu-latest`, on the Linux runner) builds and tests `dyno-platform` against a real `/proc` and `/sys`, with
 `clippy -D warnings`. *Note 2026-11-26:* the local container scripts (`scripts/linux-verify.sh`, `scripts/linux-container.sh`: root, then uid 1000,
-in OrbStack or Docker) are removed; no container or VM runs on this Mac (user decision, docs/rules.md NEW-no-local-vm). Push the branch and read CI's Linux job.
+in OrbStack or Docker) are removed; no container or VM runs on this Mac (user decision, docs/rules.md rule 101). Push the branch and read CI's Linux job.
 
 ## What Dyno can see and do
 

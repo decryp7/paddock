@@ -12,7 +12,7 @@
 //! - [`TestCommand`]: the one way a test starts `./dev`, `cargo` or `node`: an empty environment plus a listed one, a private
 //!   home and temp folder, a curated `PATH` (ADR 0100, check C123).
 //! - [`git_fixture`]: `template` and `copy_tree`, a git fixture built once per machine and copied per test, so a test of git
-//!   code starts no `git` to set up (ER-20, rule NEW-git-fixtures).
+//!   code starts no `git` to set up (ER-20, rule 102).
 //! - [`golden`]: expected-output files; a difference fails with the first differing line, `PADDOCK_UPDATE_GOLDEN=1`
 //!   rewrites them.
 //! - [`FakeRunner`]: a scripted stand-in for "run an OS command" seams (launchctl, systemctl, reg, ...), recording every call.

@@ -31,7 +31,7 @@ the repo. Local smoke test: `docker build --platform linux/amd64 -t paddock-ci-s
 ## No local image
 
 *Note 2026-11-26:* the local linux/arm64 stand-in for garage (`garage-arm64.Dockerfile`, with `garage-release.txt` and the
-`tools/linux-container.sh` that built it) is deleted: no container or VM runs on the Mac (user decision, docs/rules.md NEW-no-local-vm). The Linux
+`tools/linux-container.sh` that built it) is deleted: no container or VM runs on the Mac (user decision, docs/rules.md rule 101). The Linux
 jobs run in this image on the Linux runner only. The smoke test above is for the person who owns the image build, on the build host.
 
 ## Bumping a pin

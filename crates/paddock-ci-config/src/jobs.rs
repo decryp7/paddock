@@ -1,4 +1,4 @@
-//! The job model of one workflow file (ADR NEW-ci-job-model §2).
+//! The job model of one workflow file (ADR 0123 §2).
 
 use crate::expr::{self, Lookup, Tri, Val};
 use crate::yaml::{self, Node};

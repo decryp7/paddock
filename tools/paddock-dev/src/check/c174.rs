@@ -1,4 +1,4 @@
-//! C174: a test fixture that builds a git repository with many `git` starts goes through `paddock_testkit::git_fixture` (rule NEW-git-fixtures, ER-20,
+//! C174: a test fixture that builds a git repository with many `git` starts goes through `paddock_testkit::git_fixture` (rule 102, ER-20,
 //! ER-22; user decision 74 of 2026-11-26). ER-21 class "a fixture builds its repository once per test": the `ci_runs` tests started 14
 //! to 17 `git` processes in every test (`trial::world`, `green::train_g_shape`), about 45 ms each on the Windows runner, 710 s of one
 //! train's Windows job (docs/benchmarks.md, "Git fixture repositories of the ci_runs tests"; perf/slow-git-tests). The one fix is the
@@ -28,7 +28,7 @@ use paddock_repo_graph::model::os::is_test_file;
 use regex::Regex;
 use std::sync::LazyLock;
 
-/// The rule field: rule 85 (bulk, one git start per item), the rule this one refines; rule NEW-git-fixtures takes its number at landing (decision 16).
+/// The rule field: rule 85 (bulk, one git start per item), the rule this one refines; rule 102 (git fixtures) refines it.
 const RULE: u32 = 85;
 
 /// How many git starts in one `fn` make it a repository builder: six cost about 270 ms per test on the Windows runner.
@@ -41,7 +41,7 @@ static FN: LazyLock<Regex> = LazyLock::new(|| rx(r"\bfn\s+([A-Za-z_]\w*)"));
 static NEW_GIT: LazyLock<Regex> = LazyLock::new(|| rx(r#"\bnew\(\s*"git"\s*[,)]"#));
 static HELPER: LazyLock<Regex> = LazyLock::new(|| rx(r"(?:^|[^\w.])(?:run_git|git_ok|git_in|git_out|git)\s*\("));
 
-const FIX: &str = "Build the repository once per machine with `paddock_testkit::git_fixture::template(name, include_str!(this file), |build, ready| ..)` and give each test `git_fixture::copy_tree(&template, &its_folder)`: no git start per test (rule NEW-git-fixtures).";
+const FIX: &str = "Build the repository once per machine with `paddock_testkit::git_fixture::template(name, include_str!(this file), |build, ready| ..)` and give each test `git_fixture::copy_tree(&template, &its_folder)`: no git start per test (rule 102).";
 
 /// One repository builder: where its `fn` is, its name and how many git starts it makes.
 #[derive(Debug, PartialEq, Eq)]

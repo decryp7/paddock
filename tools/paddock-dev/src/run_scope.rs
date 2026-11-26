@@ -20,7 +20,7 @@ pub const SCOPE_LINE: &str = "plan scope: ";
 /// tree (`need_whole`).
 pub const VERSION: u64 = 2;
 
-/// The runners the `crate` and `paddock-dev` jobs run on: the planner's one leg set (ADR NEW-ci-job-model §4; WP-2 reads it from the model).
+/// The runners the `crate` and `paddock-dev` jobs run on: the planner's one leg set (ADR 0123 §4; WP-2 reads it from the model).
 pub const DEFAULT_OS_LEGS: [&str; 3] = crate::plan_ci::OS_LEGS;
 
 /// The project flags of a plan that each decide a job of ci.yml.

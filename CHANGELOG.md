@@ -4,7 +4,7 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
-### `paddock-ci-config`: the CI job model (ADR NEW-ci-job-model, WP-1)
+### `paddock-ci-config`: the CI job model (ADR 0123, WP-1)
 - New shared crate `crates/paddock-ci-config` (pure core, `publish = false`): `jobs::model` builds ci.yml's jobs, matrices, `needs` and
   the projects each job runs for from the workflow text; `jobs::render` evaluates a job's `name:` for one leg. `gates/yaml.rs`,
   `gates/expr.rs` and `plan_ci::PROJECT_OUTPUTS` moved into it, so `paddock-dev` has one CI parser (`gates::yaml` and `gates::expr`

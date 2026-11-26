@@ -28,7 +28,7 @@
 //! release_actions = ["tauri-bundle"]  # actions whose use makes a job a release job
 //! release_gate_phases = ["checks"]    # contract phases a check of a release job runs beside the smoke set (no installers)
 //!
-//! [ci.jobs]                      # ci.yml jobs: the projects each runs for by choice, which no `if:` shows (ADR NEW-ci-job-model; shrink-only, ER-46)
+//! [ci.jobs]                      # ci.yml jobs: the projects each runs for by choice, which no `if:` shows (ADR 0123; shrink-only, ER-46)
 //! gitleaks = ["conformance"]     # read by `ci_jobs`; the job model derives the rest from the workflow
 //!
 //! [hash]                         # what an input hash reads besides a node's files (ADR 0117 §5)
@@ -131,7 +131,7 @@ pub fn load_planner(root: &Path) -> Result<Planner, String> {
     planner(&text)
 }
 
-/// The `[ci.jobs]` table of the inputs file text (ADR NEW-ci-job-model §2): per ci.yml job, the projects it runs for by choice, which
+/// The `[ci.jobs]` table of the inputs file text (ADR 0123 §2): per ci.yml job, the projects it runs for by choice, which
 /// no `if:` shows. Each project is a declared one, `everything` or `apps`; a job that names none is refused (it would run for no
 /// project, and a job is never `always`).
 pub fn ci_jobs(text: &str) -> Result<std::collections::BTreeMap<String, Vec<String>>, String> {

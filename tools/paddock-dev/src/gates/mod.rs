@@ -15,5 +15,5 @@ pub mod register;
 pub mod scan;
 pub mod shell;
 pub mod tree;
-/// The one CI YAML reader and expression evaluator live in `paddock-ci-config` (ADR NEW-ci-job-model); these paths stay for the readers here.
+/// The one CI YAML reader and expression evaluator live in `paddock-ci-config` (ADR 0123); these paths stay for the readers here.
 pub use paddock_ci_config::{expr, yaml};
