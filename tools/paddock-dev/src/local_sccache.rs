@@ -391,15 +391,17 @@ pub fn choose(env: &HashMap<String, String>, probe: &dyn Fn(&S3) -> Result<(), S
     // The environment first, then the credentials file, then the defaults.
     let from_file = file_settings(env);
     let setting = |k: &str| get(k).or_else(|| from_file.iter().find(|(n, _)| n == k).map(|(_, v)| v.as_str()));
+    // The one reading of the endpoint variable (`ci_setup_rust::parse_endpoint`, ER-22): `http://host:port`, `https://host:port` or `host:port`.
+    let (tls, host_port) = match crate::ci_setup_rust::parse_endpoint(setting("PADDOCK_SCCACHE_S3_ENDPOINT").unwrap_or(DEFAULT_S3_ENDPOINT))
+    {
+        Ok(v) => v,
+        Err(e) => return local(e, true),
+    };
     let s3 = S3 {
         bucket: setting("PADDOCK_SCCACHE_S3_BUCKET").unwrap_or(DEFAULT_S3_BUCKET).to_string(),
-        endpoint: setting("PADDOCK_SCCACHE_S3_ENDPOINT")
-            .unwrap_or(DEFAULT_S3_ENDPOINT)
-            .trim_start_matches("http://")
-            .trim_end_matches('/')
-            .to_string(),
+        endpoint: host_port,
         region: "auto".into(),
-        ssl: false,
+        ssl: tls,
         prefix: get("PADDOCK_SCCACHE_S3_PREFIX").map_or_else(default_prefix, str::to_string),
     };
     if let Err(e) = probe(&s3) {
