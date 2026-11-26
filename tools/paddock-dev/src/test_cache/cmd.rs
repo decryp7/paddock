@@ -244,6 +244,7 @@ fn run(
     let nightly = super::is_nightly(&env_get);
     let skip = cfg.mode() == Mode::On || a.reuse;
     let mut reused = 0;
+    let mut why_run: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
     let mut left: Vec<&Candidate> = Vec::new();
     let mut matched: Vec<&Candidate> = Vec::new();
     for (c, d) in cands.iter().zip(&decisions) {
@@ -258,11 +259,13 @@ fn run(
                 left.push(c);
             }
             Decision::Run(w) => {
-                text.push(format!("test-cache: run target={} ({})", c.target.id, w.text()));
+                *why_run.entry(w.text()).or_default() += 1;
                 left.push(c);
             }
         }
     }
+    // One line per reason, not one per target: a whole workspace is dozens of lines (the reused ones are named above).
+    text.extend(why_run.iter().map(|(w, n)| format!("test-cache: run {n} target(s): {w}")));
     if a.action == "lookup" {
         // One line the first CI run shows: how many targets a valid record covers on this runner class (nothing is skipped here).
         let would = reused + matched.len();
@@ -285,6 +288,7 @@ fn run(
         ran_secs = t0.elapsed().as_secs_f64();
         let judged = super::result::judge(&out.0, &asked);
         let mut put: Vec<Record> = Vec::new();
+        let mut not_seen = 0usize;
         let writes = write_allowed(&env_get);
         for c in &left {
             let p = &c.target.package;
@@ -333,10 +337,17 @@ fn run(
                         "::error::test-cache soundness finding: {} matched a valid record and then failed ({why}). Next step: find the input its key misses (ADR 0116 §8); the switch stays off.",
                         c.target.id
                     ));
-                } else {
+                } else if why.contains("failed") {
                     text.push(format!("test-cache: not stored target={} ({why})", c.target.id));
+                } else {
+                    not_seen += 1;
                 }
             }
+        }
+        if not_seen > 0 {
+            text.push(format!(
+                "test-cache: {not_seen} target(s) had no test in this run's output (outside its filter, or without tests): not stored"
+            ));
         }
         if let Err(w) = &writes {
             text.push(format!("test-cache: nothing stored ({w})"));
