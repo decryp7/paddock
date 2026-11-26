@@ -986,7 +986,8 @@ pub fn verdict(a: &VerdictArgs) -> Result<Report, CliError> {
     Ok(r)
 }
 
-/// `ci fix-items`: records the fix items of the verdict on `--sha` in `docs/lessons.md` ([`fix_items::record`]). A plain green has none; a
+/// `ci fix-items`: records the fix items of the landing verdict ([`verdict::verdict_landing_at`], the reader `ci landing-held` and the
+/// queue use: a landed commit is decided by a landing run, never a complete one) on `--sha` in `docs/lessons.md` ([`fix_items::record`]). A plain green has none; a
 /// red or partial verdict or one that is not measured is reported with its exit code and writes nothing.
 pub fn fix_items_cmd(a: &FixItemsArgs) -> Result<Report, CliError> {
     if a.sha.len() != 40 || !a.sha.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
@@ -1002,7 +1003,7 @@ pub fn fix_items_cmd(a: &FixItemsArgs) -> Result<Report, CliError> {
         Ok(token) => {
             let mut http = CurlHttp;
             let mut client = Client::new(&mut http, &a.server, &a.repo, &token);
-            verdict::verdict_at(&mut client, &a.workflow, &a.sha, &root)
+            verdict::verdict_landing_at(&mut client, &a.workflow, &a.sha, &root)
         }
     };
     match v {

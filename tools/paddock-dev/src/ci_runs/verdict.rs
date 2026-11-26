@@ -398,7 +398,7 @@ pub fn verdict_for(client: &mut Client, workflow: &str, sha: &str, exclude: Opti
         exclude,
         scope,
         tag,
-        &mut || green::first_parent_before(&root, sha),
+        &mut |c| green::candidate_line_of(c, workflow, &root, sha),
         &mut |c, s| green::touched_in(c, workflow, &root, s, scope, None),
     )
 }
@@ -453,7 +453,7 @@ pub fn verdict_in(client: &mut Client, workflow: &str, sha: &str, exclude: Optio
         sha,
         exclude,
         scope,
-        &mut || green::first_parent_before(root, sha),
+        &mut |c| green::candidate_line_of(c, workflow, root, sha),
         &mut |c, s| green::touched_in(c, workflow, root, s, scope, None),
     )
 }
@@ -466,7 +466,7 @@ pub fn verdict_with_touched(
     sha: &str,
     exclude: Option<u64>,
     scope: bool,
-    first_parent: &mut dyn FnMut() -> Vec<String>,
+    first_parent: &mut dyn FnMut(&mut Client) -> Vec<String>,
     touched: &mut dyn FnMut(&mut Client, &str) -> Option<Touched>,
 ) -> Verdict {
     verdict_with_touched_for(client, workflow, sha, exclude, scope, false, first_parent, touched)
@@ -481,12 +481,13 @@ pub fn verdict_with_touched_for(
     exclude: Option<u64>,
     scope: bool,
     tag: bool,
-    first_parent: &mut dyn FnMut() -> Vec<String>,
+    first_parent: &mut dyn FnMut(&mut Client) -> Vec<String>,
     touched: &mut dyn FnMut(&mut Client, &str) -> Option<Touched>,
 ) -> Verdict {
     match verdict_core(client, workflow, sha, exclude, scope, tag, touched) {
         Verdict::Red { run: None, reason } => {
-            let next = match last_full(client, workflow, scope, tag, &first_parent(), touched) {
+            let line = first_parent(client);
+            let next = match last_full(client, workflow, scope, tag, &line, touched) {
                 Some(last) => {
                     format!("the last fully tested commit on main is {last}: tag that one, or dispatch a full run on this commit")
                 }
@@ -855,7 +856,7 @@ mod tests {
         let mut c = Client::new(f, "https://gitea.invalid", "decryp7/paddock", "t");
         c.backoff_ms = 0;
         let fp = vec!["e".repeat(40)];
-        verdict_with_touched(&mut c, "ci.yml", SHA, None, true, &mut || fp.clone(), &mut |_, _| {
+        verdict_with_touched(&mut c, "ci.yml", SHA, None, true, &mut |_| fp.clone(), &mut |_, _| {
             Some(Touched::default())
         })
     }
@@ -865,7 +866,7 @@ mod tests {
         let mut c = Client::new(f, "https://gitea.invalid", "decryp7/paddock", "t");
         c.backoff_ms = 0;
         let fp = vec!["e".repeat(40)];
-        verdict_with_touched(&mut c, "ci.yml", SHA, None, false, &mut || fp.clone(), &mut |_, _| {
+        verdict_with_touched(&mut c, "ci.yml", SHA, None, false, &mut |_| fp.clone(), &mut |_, _| {
             Some(Touched::default())
         })
     }
@@ -938,7 +939,7 @@ mod tests {
             let mut c = Client::new(f, "https://gitea.invalid", "decryp7/paddock", "t");
             c.backoff_ms = 0;
             let fp: Vec<String> = Vec::new();
-            verdict_with_touched_for(&mut c, "ci.yml", SHA, None, scope, true, &mut || fp.clone(), &mut |_, _| {
+            verdict_with_touched_for(&mut c, "ci.yml", SHA, None, scope, true, &mut |_| fp.clone(), &mut |_, _| {
                 Some(Touched::default())
             })
         };
@@ -988,7 +989,7 @@ mod tests {
             let mut c = Client::new(f, "https://gitea.invalid", "decryp7/paddock", "t");
             c.backoff_ms = 0;
             let fp = vec!["e".repeat(40), "d".repeat(40)];
-            verdict_with_touched_for(&mut c, "ci.yml", SHA, None, true, tag, &mut || fp.clone(), &mut |_, _| {
+            verdict_with_touched_for(&mut c, "ci.yml", SHA, None, true, tag, &mut |_| fp.clone(), &mut |_, _| {
                 Some(Touched::default())
             })
         };
@@ -1555,7 +1556,7 @@ mod tests {
         };
         let mut c = Client::new(f, "https://gitea.invalid", "decryp7/paddock", "t");
         c.backoff_ms = 0;
-        verdict_with_touched(&mut c, "ci.yml", SHA, None, true, &mut Vec::new, &mut |_, _| Some(t.clone()))
+        verdict_with_touched(&mut c, "ci.yml", SHA, None, true, &mut |_| Vec::new(), &mut |_, _| Some(t.clone()))
     }
 
     #[test]
@@ -1626,7 +1627,7 @@ mod tests {
                 SHA,
                 None,
                 true,
-                &mut || {
+                &mut |_| {
                     asked.set(asked.get() + 1);
                     Vec::new()
                 },
@@ -1647,7 +1648,7 @@ mod tests {
             SHA,
             None,
             true,
-            &mut || {
+            &mut |_| {
                 asked.set(asked.get() + 1);
                 Vec::new()
             },
@@ -1706,7 +1707,7 @@ mod tests {
             f.log(44768, include_str!("../../tests/ci-runs/nextest-run8610-app-gates-flaky-only.log"));
             let mut c = Client::new(&mut f, "https://gitea.invalid", "decryp7/paddock", "t");
             c.backoff_ms = 0;
-            let v = verdict_with_touched(&mut c, "ci.yml", SHA, None, scope, &mut Vec::new, &mut |_, _| {
+            let v = verdict_with_touched(&mut c, "ci.yml", SHA, None, scope, &mut |_| Vec::new(), &mut |_, _| {
                 Some(Touched::default())
             });
             assert!(
