@@ -134,6 +134,22 @@ uses it, results in
   `the_checkout_path_and_build_folder_are_not_in_the_key` checks), a member gate, and other machines. Raw output was kept only in the
   agent's scratch folder.
 
+### 2026-11-25, member gate reuse on a train (feat/train-gate-reruns-overlaps)
+
+- **What:** how many of a train's member-gate rows can rest on the members' own green rows, now that the `tests` and `tests-linux`
+  rows are keyed too (they were never reused before: the shared store held 447 records, none of them a tests row).
+- **Part 1, from the history (no run):** for every member merge of trains 2026-11-26-f, -g, -h and -i, whether the member's head and
+  the merge agree on each touched Cargo workspace's inputs (the workspace, `crates` for an app, `.cargo`, `lint`,
+  `rust-toolchain.toml`, `ui/projects/paddock-ui`, `.gitea`) and on `tools/paddock-dev` (the `dev` binary in every key). Script:
+  `git diff --quiet <merge>^2 <merge> -- <inputs>` per workspace.
+- **Numbers (part 1):** 26 member merges that touch a Cargo workspace (75 workspace checks); 0 workspaces whose inputs match, and the `dev` differs in all 26.
+  Every member was branched from an older main than its train, and main changed `crates`, the apps and `tools/paddock-dev` in
+  between (13 of the 18 merges of trains f and g changed `tools/paddock-dev`), so the member's green rows are of another tree.
+- **Notes:** with these inputs the reuse would have rerun every row on these trains, whatever the key held for `dev`. Two changes
+  follow (user, 2026-11-25): a member runs its final member gate after merging origin/main (AGENTS.md, "Before hand-back"), and the
+  `dev` hash keys only the rows `dev` computes itself, so a member that changes `tools/paddock-dev` no longer reruns the Cargo,
+  Clippy and tests rows of the others.
+
 ### 2026-11-16, unit suites with the test leak detector (feat/test-leak-detector)
 
 - **Commit:** the tip of `feat/test-leak-detector`; base `3585bcab1` (train 13) plus `fix/debrief-startup-loads-drain`

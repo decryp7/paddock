@@ -2674,6 +2674,7 @@ fn heavy_gate(id: &str, rank: u8) -> Planned {
         notice: None,
         progress: crate::pre_push::progress::Progress::Lines,
         build_dir: None,
+        ci_env: false,
     })
 }
 

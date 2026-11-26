@@ -997,7 +997,8 @@ pub fn heavy_dir_env(root: &Path, env: &HashMap<String, String>) -> Vec<(String,
         .collect()
 }
 
-/// Variables every gate may see besides the base list: the caller's account (CI's runner has it, and tests read it: paddock-env's
+/// Variables every gate but the rows of CI's own tests ([`Gate::ci_env`], which take [`ci_test_env_names`]) may see besides the base
+/// list: the caller's account (CI's runner has it, and tests read it: paddock-env's
 /// macOS ACL test writes `user:$USER`; ER-47), the toolchain, Docker, caches and Paddock's own settings.
 pub(crate) const PASS: &[&str] = &[
     "USER",
@@ -1021,6 +1022,17 @@ pub(crate) const PASS: &[&str] = &[
     "NPM_CONFIG_*",
     "npm_config_*",
 ];
+
+/// The caller's variables a row that runs CI's own tests ([`Gate::ci_env`]) gets: CI's job environment ([`crate::ci_run::job_env`],
+/// the one definition `ci run` uses) less every secret ([`crate::child_env::is_secret`]: a developer's `GITEA_TOKEN` stays out).
+pub(crate) fn ci_test_env_names(env: &HashMap<String, String>) -> Vec<String> {
+    let mut names: Vec<String> = crate::ci_run::job_env(env)
+        .into_keys()
+        .filter(|k| !crate::child_env::is_secret(k))
+        .collect();
+    names.sort();
+    names
+}
 
 /// The variable that, with `PADDOCK_HEAVY=off`, lets a test run a heavy gate without the slot.
 pub const TEST_HEAVY_OFF: &str = "PADDOCK_TEST_HEAVY_OFF";
@@ -1111,9 +1123,13 @@ impl RealExec {
         } else {
             own
         };
-        let mut call = ToolCall::new(program)
-            .args(args)
-            .pass(PASS.iter().copied())
+        let call = ToolCall::new(program).args(args);
+        let call = if gate.ci_env {
+            call.pass(ci_test_env_names(&self.env))
+        } else {
+            call.pass(PASS.iter().copied())
+        };
+        let mut call = call
             .cwd(self.root.join(&gate.cwd))
             .timeout(timeout)
             .cancel_on(Arc::clone(&self.stop));
@@ -1874,6 +1890,7 @@ mod tests {
             notice: None,
             progress: crate::pre_push::progress::Progress::Lines,
             build_dir: None,
+            ci_env: false,
         })
     }
 
@@ -2004,6 +2021,7 @@ exit $rc
                 notice: None,
                 progress: crate::pre_push::progress::Progress::Lines,
                 build_dir: None,
+                ci_env: false,
             }
         }
 
@@ -2066,6 +2084,72 @@ exit $rc
             };
             let row = decide(&g, &ex, &test_subject());
             assert_eq!(row.kind(), Kind::Passed, "{}", row.reason());
+        }
+
+        /// The member gate's test rows take CI's job environment ([`crate::ci_run::job_env`], what `ci run` gives a contract line), not
+        /// the hand-kept [`PASS`] list, which twice differed from CI (`USER` missing, train 2026-11-26-g). A variable CI's job has and
+        /// PASS never named reaches the row; a credential never does (`GITEA_TOKEN`, `PADDOCK_DEV_TOKEN`: the control).
+        #[test]
+        fn a_ci_test_rows_child_has_cis_job_environment_and_never_a_credential() {
+            let d = tempfile::tempdir().unwrap();
+            let mut ex = real(d.path(), &d.path().join("lock"));
+            ex.env.insert("RUST_BACKTRACE".into(), "1".into());
+            ex.env.insert("CI_ONLY_SETTING".into(), "on".into());
+            ex.env.insert("GITEA_TOKEN".into(), "secret".into());
+            ex.env.insert("PADDOCK_DEV_TOKEN".into(), "secret".into());
+            let g = Gate {
+                heavy: false,
+                ci_env: true,
+                ..gate(
+                    "tests crates",
+                    r#"test "$RUST_BACKTRACE" = 1 && test "$CI_ONLY_SETTING" = on && test -z "${GITEA_TOKEN:-}" && test -z "${PADDOCK_DEV_TOKEN:-}""#,
+                )
+            };
+            let row = decide(&g, &ex, &test_subject());
+            assert_eq!(row.kind(), Kind::Passed, "{}", row.reason());
+            // The positive control: a row that keeps the PASS list does not see the CI-only variable.
+            let other = Gate {
+                heavy: false,
+                ..gate("clippy crates", r#"test -z "${CI_ONLY_SETTING:-}""#)
+            };
+            assert_eq!(decide(&other, &ex, &test_subject()).kind(), Kind::Passed);
+        }
+
+        /// Rule 55: the member rows' environment is CI's job environment less the secrets, variable for variable, for the same caller.
+        #[test]
+        fn the_member_rows_environment_is_cis_job_environment_less_the_secrets() {
+            let parent: std::collections::HashMap<String, String> = [
+                ("PATH", "/bin"),
+                ("HOME", "/h"),
+                ("USER", "u"),
+                ("LOGNAME", "u"),
+                ("TMPDIR", "/t"),
+                ("RUST_BACKTRACE", "1"),
+                ("NEXTEST_PROFILE", "ci"),
+                ("CI_ONLY_SETTING", "on"),
+                ("GITEA_TOKEN", "s"),
+                ("PADDOCK_DEV_TOKEN", "s"),
+                ("BUILD_INPUTS_TOKEN", "s"),
+                ("AWS_SECRET_ACCESS_KEY", "s"),
+                ("RUSTUP_AUTO_INSTALL", "0"),
+            ]
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+            let member: std::collections::BTreeSet<String> = ToolCall::new("x")
+                .pass(ci_test_env_names(&parent))
+                .child_env(&parent)
+                .into_iter()
+                .map(|(k, _)| k)
+                .collect();
+            let ci: std::collections::BTreeSet<String> = crate::ci_run::job_env(&parent).into_keys().collect();
+            let want: std::collections::BTreeSet<String> = ci.iter().filter(|k| !crate::child_env::is_secret(k)).cloned().collect();
+            assert_eq!(member, want);
+            assert!(
+                ci.contains("GITEA_TOKEN") && !ci.contains("PADDOCK_DEV_TOKEN"),
+                "CI's own definition: {ci:?}"
+            );
+            assert!(!member.iter().any(|k| k.contains("TOKEN") || k.contains("SECRET")), "{member:?}");
         }
 
         /// A failed nextest row said only "exit 100": its failed tests and first panic line are in the row's cause and its JSON, read
