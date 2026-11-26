@@ -17,6 +17,7 @@ app	dyno	ubuntu-latest	apps/dyno	cargo fetch --locked --target x86_64-pc-windows
 app	dyno	ubuntu-latest	apps/dyno	cargo nextest run --locked --profile ci -p dyno-agent --test helper_wiring
 app	dyno	ubuntu-latest	apps/dyno	cargo nextest run --locked --profile ci -p dyno-platform --test no_ungated_doubles
 app	dyno	ubuntu-latest	apps/dyno	node --test docs/diagrams/src/*.test.mjs
+app	dyno	ubuntu-latest	apps/dyno	node --test scripts/check-bundle.test.mjs
 app	dyno	ubuntu-latest	apps/dyno	node --test scripts/check-capabilities.test.mjs
 app	dyno	ubuntu-latest	apps/dyno	node --test scripts/check-logon-entry.test.mjs
 app	dyno	ubuntu-latest	apps/dyno	node --test scripts/check-pe-subsystem.test.mjs
