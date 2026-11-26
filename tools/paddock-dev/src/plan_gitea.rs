@@ -18,19 +18,19 @@ fn re(pattern: &str) -> Regex {
 /// What each job of ci.yml runs for: the plan project(s) that make the job run (`apps` = every app leg).
 pub const CI_JOBS: &[(&str, &[&str])] = &[
     ("plan", &["everything"]),
+    ("paddock-dev", &["paddock-dev"]),
     ("ui", &["ui", "eslint", "icons"]),
     ("e2e", &["ui"]),
     ("e2e-webkit", &["ui"]),
     ("conformance", &["conformance"]),
-    ("c99", &["c99"]),
-    ("gitleaks", &["conformance"]),
     ("tools", &["tools"]),
-    ("throttle", &["tools"]),
     ("crates", &["crates"]),
     ("crate", &["crates"]),
-    ("audit", &["paddock-dev"]),
     ("app", &["apps"]),
-    ("paddock-dev", &["paddock-dev"]),
+    ("gitleaks", &["conformance"]),
+    // The short checks in one job (C99, audit, heavy tool). The job itself runs on every change (the audit step); its C99 step runs for `c99` and its heavy tool steps for `tools`, so an edit of it marks those two (and
+    // conformance, as every plan does).
+    ("quick", &["conformance", "c99", "tools"]),
 ];
 
 fn ci_job(name: &str) -> Option<&'static [&'static str]> {

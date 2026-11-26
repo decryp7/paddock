@@ -12,7 +12,7 @@
 //! [`kept`] keeps bounded after every run)
 //! and every gate runs there, so a dirty tree or another checked-out commit cannot change the answer. Without it, the working tree
 //! as it is (a person's run). Only workspaces that hold a changed file themselves get Clippy and format; the ones reached through
-//! dependencies are CI's (ER-9 overlap), and the Linux Clippy in the CI image (native architecture) runs for every touched workspace.
+//! dependencies are CI's (ER-9 overlap). Linux checks are CI's Linux jobs: no VM or container starts here (user, 2026-11-26).
 //! Only the foundation and the active apps ([`crate::active_apps`], `docs/ci-active-apps.toml`) get their build checks: an inactive
 //! app's rows are shown as `inactive (docs/ci-active-apps.toml)` and counted apart, never as passed; the generators that write into
 //! its folder (its lockfile, Dyno's wire fixtures) still run (ER-40), and `--all-apps` runs every app's rows.
@@ -43,11 +43,8 @@ pub mod gates;
 pub mod heavy_tool;
 pub mod kept;
 pub mod known;
-pub mod linux_inputs;
-pub mod mount_fresh;
 pub mod outcome;
 pub mod reuse;
-pub mod warm;
 
 use crate::plan::{Request, plan_with_graph};
 use crate::plan_repo::git_text;
@@ -511,14 +508,6 @@ fn command_in(
     } else {
         node_env_problem(cfg!(windows) && work != root, &|p| std::fs::read_to_string(work.join(p)).ok())
     };
-    facts.left_out = gates::linux_candidates(&plan, &change)
-        .into_iter()
-        .filter(|ws| gates::inactive_app(&facts, ws).is_none())
-        .map(|ws| {
-            let l = linux_inputs::left_out(&work, &ws);
-            (ws, l)
-        })
-        .collect();
     facts.member_gate = args.member_gate;
     facts.kept_targets = kept_targets;
     // The member gate's tests narrow each workspace to the packages the change reaches, exactly as CI's member run does (one copy).
@@ -541,17 +530,6 @@ fn command_in(
             (ws.clone(), hit)
         })
         .collect();
-    // The Linux run tests only the code that behaves differently per OS: the placement CI's host legs use (`hostTests`, derived from
-    // the code by the planner's graph), read through its one accessor (ER-22, ER-42).
-    if args.member_gate {
-        facts.os_scope = gates::linux_candidates(&plan, &change)
-            .into_iter()
-            .map(|ws| {
-                let scope = os_scope_of(&work, &graph, &ws);
-                (ws, scope)
-            })
-            .collect();
-    }
     let mut planned = gates::plan_gates(&plan, &change, &facts);
     planned = select_rows(planned, &args.only)?;
     notes.extend(
@@ -570,10 +548,10 @@ fn command_in(
     let mut overridden = String::new();
     if exec::throttle_override(&env).map(|v| v.trim()) == Some("off") && !env.contains_key(exec::TEST_THROTTLE_OFF) {
         overridden =
-            "OVERRIDE SET: PADDOCK_THROTTLE=off is not allowed outside the tests; every compile (clippy, xwin, Linux) is not measured\n"
+            "OVERRIDE SET: PADDOCK_THROTTLE=off is not allowed outside the tests; every compile (clippy, xwin) is not measured\n"
                 .into();
     } else if exec::throttle_prefix(&env, &|p| ex.has_tool(p)).is_empty() {
-        notes.push("no heavy on PATH: the compiles (clippy, xwin, Linux) run through the heavy built from tools/throttle (cached under ~/.paddock-dev/bin); if that build fails they are not measured (ER-24)".into());
+        notes.push("no heavy on PATH: the compiles (clippy, xwin) run through the heavy built from tools/throttle (cached under ~/.paddock-dev/bin); if that build fails they are not measured (ER-24)".into());
     }
     let head = format!(
         "{overridden}pre-push: base {} ({}), {} commit(s) beyond it; {} changed file(s); {} gate(s) at a time (1-minute load {}); no total budget: each row has a cap of {} min on its own run time, counted from when it starts running, stacks logged before a step is ended; watchdog: {} (waiting for the heavy slot is queue time, reported apart and never run time; it goes on while the queue moves and ends after {} min without progress; {}); logs in {}\n{}",
@@ -1533,23 +1511,6 @@ fn discover(root: &Path, base: &str, files: &[String], pushed: &[String]) -> Res
 }
 
 /// What the repository says that the plan does not: the conformance contract's check list, the apps that lint Windows, the CI image.
-/// The [`gates::OsScope`] of the Cargo workspace `ws`: its CI contract (an app's `apps/<app>/paddock.ci.json`, another workspace's own)
-/// with the placement the planner's graph derived for it. No contract is [`gates::OsScope::Unscoped`] (every test, fail closed).
-fn os_scope_of(root: &Path, graph: &crate::plan::RepoGraph, ws: &str) -> Result<gates::OsScope, String> {
-    let unit = match gates::app_of_workspace(ws) {
-        Some(app) => format!("apps/{app}"),
-        None => ws.to_string(),
-    };
-    let path = format!("{unit}/{}", crate::ci_run::contract::FILE);
-    let text = match std::fs::read_to_string(root.join(&path)) {
-        Ok(t) => t,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(gates::OsScope::Unscoped),
-        Err(e) => return Err(format!("{path}: {e}")),
-    };
-    let contract: Value = serde_json::from_str(&text).map_err(|e| format!("{path}: not valid JSON: {e}"))?;
-    gates::OsScope::of(&contract, &path, &graph.derived(&unit))
-}
-
 fn read_facts(root: &Path, plan: &Value, env: &HashMap<String, String>, ex: &dyn exec::Exec) -> Facts {
     let ci = crate::ci_run::contract::conformance_args_at(root);
     let mut windows = std::collections::BTreeSet::new();
@@ -1568,7 +1529,6 @@ fn read_facts(root: &Path, plan: &Value, env: &HashMap<String, String>, ex: &dyn
             windows.insert(ws);
         }
     }
-    let version = linux_inputs::ci_version(root);
     let mut tests: Vec<String> = std::fs::read_dir(root.join("apps/pitwall/scripts/ci"))
         .map(|d| {
             d.flatten()
@@ -1583,8 +1543,6 @@ fn read_facts(root: &Path, plan: &Value, env: &HashMap<String, String>, ex: &dyn
         conformance: Some(ci),
         conformance_env: None,
         windows_clippy: windows,
-        ci_version: Some(version),
-        left_out: Default::default(),
         member_gate: false,
         kept_targets: None,
         pitwall_tests: tests,
@@ -1594,7 +1552,6 @@ fn read_facts(root: &Path, plan: &Value, env: &HashMap<String, String>, ex: &dyn
         test_filters: Default::default(),
         nextest_config,
         reached: Default::default(),
-        os_scope: Default::default(),
     }
 }
 

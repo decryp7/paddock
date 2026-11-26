@@ -113,8 +113,7 @@ fn c131_flags_the_planted_uid_and_the_other_machine_values_as_errors() {
             && has("x/tests/golden/h.txt", 1, "id `uid=1`")
             && has("x/tests/golden/h.txt", 3, "home `/home/b`")
     );
-    // Exactly these 16, whoever runs it: the check reads no fact of the machine, so a Mac and the CI image as root agree
-    // (`./dev golden confirm check_c131` runs this on both).
+    // Exactly these 16, whoever runs it: the check reads no fact of the machine, so a Mac and the CI image as root agree.
     assert!(
         has("x/tests/golden/i.txt", 1, "id") && has("x/tests/golden/i.txt", 2, "id") && has("x/tests/golden/i.txt", 3, "id"),
         "{got:?}"

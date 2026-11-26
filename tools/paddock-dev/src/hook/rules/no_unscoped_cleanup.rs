@@ -73,6 +73,7 @@ fn after_options<'a>(words: &'a [Word], at: usize, value_opts: &[&str]) -> Vec<&
 }
 
 fn is_engine(word: &Word) -> bool {
+    // conformance: no-local-vm — this guard recognises a docker command line to refuse an unscoped prune; it never starts one
     matches!(basename(&word.text), "docker" | "podman")
 }
 
@@ -122,6 +123,7 @@ fn engine_refusal(cmd: &Simple, prev_lists_all: bool, piped: bool) -> bool {
     let from = if base == Some("xargs") {
         words.iter().skip(1).position(is_engine).map(|p| p + 1)
     } else {
+        // conformance: no-local-vm — this guard recognises a docker command line to refuse an unscoped prune; it never starts one
         base.is_some_and(|b| b == "docker" || b == "podman").then_some(0)
     };
     let Some(at) = from else { return false };
