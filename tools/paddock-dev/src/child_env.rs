@@ -1,29 +1,38 @@
 //! The environment of a child that must not hold the queue's credentials (docs/plans/merge-queue.md): the queue's tokens, git
 //! credentials and anything else named like a secret are removed, git reads no global or system configuration.
 
+/// The variables named as credentials, whatever their value.
+const NAMED: [&str; 10] = [
+    "GITEA_TOKEN",
+    "QUEUE_BOT_TOKEN",
+    "PLAN_TOKEN",
+    "GITHUB_TOKEN",
+    "GIT_ASKPASS",
+    "SSH_ASKPASS",
+    "GIT_CONFIG_PARAMETERS",
+    "GIT_CONFIG_COUNT",
+    "ACTIONS_RUNTIME_TOKEN",
+    "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
+];
+
+/// Words in a variable's name that say it is a secret.
+const WORDS: [&str; 6] = ["TOKEN", "SECRET", "PASSWORD", "CREDENTIAL", "AUTH", "PRIVATE_KEY"];
+
+/// Whether a variable is a credential or names itself a secret (any case): the queue's tokens, git credentials and configuration
+/// that can carry one, and any name holding one of [`WORDS`].
+pub fn is_secret(name: &str) -> bool {
+    let up = name.to_ascii_uppercase();
+    NAMED.contains(&up.as_str())
+        || up.starts_with("GIT_CONFIG_KEY_")
+        || up.starts_with("GIT_CONFIG_VALUE_")
+        || WORDS.iter().any(|w| up.contains(w))
+}
+
 /// The variables and configuration a child must not see: the queue's tokens, git credentials, and any other variable whose name
-/// says it is a secret. `parent` is the environment names of this process.
+/// says it is a secret ([`is_secret`]). `parent` is the environment names of this process.
 pub fn scrub(cmd: &mut std::process::Command, parent: &[String]) {
-    const NAMED: [&str; 10] = [
-        "GITEA_TOKEN",
-        "QUEUE_BOT_TOKEN",
-        "PLAN_TOKEN",
-        "GITHUB_TOKEN",
-        "GIT_ASKPASS",
-        "SSH_ASKPASS",
-        "GIT_CONFIG_PARAMETERS",
-        "GIT_CONFIG_COUNT",
-        "ACTIONS_RUNTIME_TOKEN",
-        "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
-    ];
-    const WORDS: [&str; 6] = ["TOKEN", "SECRET", "PASSWORD", "CREDENTIAL", "AUTH", "PRIVATE_KEY"];
     for name in parent {
-        let up = name.to_ascii_uppercase();
-        if NAMED.contains(&up.as_str())
-            || up.starts_with("GIT_CONFIG_KEY_")
-            || up.starts_with("GIT_CONFIG_VALUE_")
-            || WORDS.iter().any(|w| up.contains(w))
-        {
+        if is_secret(name) {
             cmd.env_remove(name);
         }
     }

@@ -249,17 +249,20 @@ unique (C31).
     tests"), conformance with ci.yml's own list and the conformance tests (`cd conformance && npm test`, both on every push, ER-41;
     a flaky conformance test that blocks a push is fixed at once under ER-12, never skipped or bypassed, ER-39),
     commit-lint (rule 50g) and lockfiles with `--locked`; when a Cargo workspace
-    has a changed file of its own, its Clippy on the host and (Windows) through xwin; Linux Clippy is CI's Linux job, since no VM or container starts on this Mac (user 2026-11-26, rule rule 101). A gate that cannot run (no
+    has a changed file of its own, its Clippy on the host and (Windows) through xwin; Linux Clippy is CI's Linux job, since no VM or container starts on this Mac (user 2026-11-26, rule 101). A gate that cannot run (no
     cargo-xwin) is "not measured", exit 6, never a pass. It checks every commit the remote
     lacks (`git rev-list <tip> --not --remotes`), measured from the nearest commit of the remote the push contains (the header says
     which and why; never a local branch), and its 15 minutes count run time only; time queued for the heavy slot behind other
     agents has its own allowance of 30 min per push and is reported apart (ADR 0102 and its 2026-11-15 amendment). Lint and type-check of the touched
     TS files stay by hand until WP-3. Then dispatch with `./dev`
-    and, at the same time, run the slower local checks in parallel: the affected tests on the dev OS, the same tests in the
-    `train3-linux-dev:1` container (CI limits, `ulimit -n 1024`) and timing-sensitive tests under load. Cap local builds
-    (`CARGO_BUILD_JOBS=2`) while CI runners share the machine. If a local check fails, cancel that run at once through the Gitea
-    API (`POST /api/v1/repos/{owner}/{repo}/actions/runs/{id}/cancel`), fix every failure and push once; this cancel needs no
-    further approval. (a) and (b) still hold.
+    and, at the same time, run the slower local checks in parallel: the affected host tests (`tests <ws>`, macOS; the Linux tests are
+    CI's Linux jobs, user 2026-11-26) and timing-sensitive tests under load. In the train this is the ER-53 split: `./dev check
+    --pre-push --member-gate --set fast` first, then `./dev ci dispatch` (prints `run <id>`), then `--set slow --cancel-ci-run <id>`
+    beside it: a slow-row failure cancels that run at once through `./dev ci cancel <id>` (the run's own cancel URL, never the newest
+    run; a cancelled run reads "cancelled: not measured"), and the landing (ER-49) needs both the complete green CI run and the green
+    slow rows on the same commit: `./dev ci landing-held --sha <sha>` (exit 0 landable, 5 refused, 6 not held: an unfinished slow row
+    is not held, ER-33). Cap local builds (`CARGO_BUILD_JOBS=2`) while CI runners share the machine. Fix every failure and push once;
+    this cancel needs no further approval. (a) and (b) still hold.
     (i) After a CI run fails, each fix round reruns only what failed in the last run: the failed jobs, and inside them only
     the failed tests (nextest or vitest filter) where the job's runner supports it. Jobs and tests that passed aren't rerun
     during fix rounds. Dispatch `ci.yml` (workflow_dispatch) with the input `base` = the commit CI last tested, not main; use
@@ -580,4 +583,4 @@ Until an app is imported, rules 2, 3, 8, 9, 39 and 42 above apply to it as writt
     (d) The landing needs the normal green gates and is a merge or fast-forward, never a rebase or squash, so the tag is an ancestor of main (later release notes read the history from the previous tag). Fixes for other products go on their own line, not on the release branch.
     *Why:* Dyno 1.1.0 was correctly blocked by Paddock run 7485 (mostly code Dyno ships). Run 7489 failed in the shell-demo's i18n check (outside Dyno) and in aggregate coverage; the coverage gate printed no per-crate output and a crate Dyno depends on was in it, so that blocked under (b) until the gate was fixed and a full run was green. The failures also skipped the dependency audit and several ui steps, which (a) asks to be cleared.
 
-101. **Local gates never start a VM or a container on a developer's Mac** (user, 2026-11-26). Linux checks run as CI's Linux jobs on the Linux runner, Windows checks on the Windows runner. The pre-push and member gate have no Linux row (`clippy-linux`, `tests-linux`, `--warm-linux` are removed; the register names them CI-owned), and conformance C-NEW (report-only, review 2026-12-09) flags a docker, podman, nerdctl, orb, orbctl, vmrun or `linux-container.sh` call in local gate code. *Why:* the container rows were the Mac's largest load, and the user decided on 2026-11-26 that no VM runs on the Mac. Status: in progress.
+101. **Local gates never start a VM or a container on a developer's Mac** (user, 2026-11-26). Linux checks run as CI's Linux jobs on the Linux runner, Windows checks on the Windows runner. The pre-push and member gate have no Linux row (`clippy-linux`, `tests-linux`, `--warm-linux` are removed; the register names them CI-owned), and conformance C172 (report-only, review 2026-12-09) flags a docker, podman, nerdctl, orb, orbctl, vmrun or `linux-container.sh` call in local gate code. *Why:* the container rows were the Mac's largest load, and the user decided on 2026-11-26 that no VM runs on the Mac. Status: in force (train o); C172 report-only until its first green run on the real tree (ER-41), review 2026-12-09.

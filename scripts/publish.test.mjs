@@ -236,6 +236,22 @@ describe('crateStepsMissing', () => {
     const model = { lines: [line({ text: 'keep' }), line({ text: 'cond', levels: { branch: 'Conditional' } }), line({ text: 'app', app: 'dyno' }), line({ text: 'elsewhere', cwd: 'ui' }), line({ text: 'tag', levels: {} })] };
     assert.deepEqual(crateCommands(model), ['keep']);
   });
+  // Run 9135: with coverage off trains, the Linux crate tests run as partitions of whole packages (plan_ci::partition_linux_legs,
+  // every package in exactly one partition); their nextest line selects at run time (`"${sel[@]}"`), so it stands for the workspace.
+  test('the Linux crate leg, split into partitions of whole packages, counts as testing the workspace', () => {
+    const sel = 'cargo nextest run "${sel[@]}" --all-features --profile ci ${filter[@]+"${filter[@]}"} 2>&1';
+    const line = (o) => ({ cwd: 'crates', app: null, job: 'crate', os: 'ubuntu-latest', levels: { branch: 'Gated' }, text: sel, ...o });
+    const clippy = line({ text: 'cargo clippy --workspace --all-targets --all-features -- -D warnings' });
+    const cmds = crateCommands({ lines: [clippy, line({})] });
+    assert.deepEqual(crateStepsMissing(cmds, ['paddock-a', 'paddock-b']), []);
+  });
+  test('positive control: a runtime selection on a host leg (hostTests) still proves nothing', () => {
+    const sel = 'cargo nextest run "${sel[@]}" --all-features --profile ci';
+    const line = (o) => ({ cwd: 'crates', app: null, job: 'crate', levels: { branch: 'Gated' }, text: sel, ...o });
+    const clippy = line({ os: 'ubuntu-latest', text: 'cargo clippy --workspace --all-targets --all-features -- -D warnings' });
+    const cmds = crateCommands({ lines: [clippy, line({ os: 'windows-latest' }), line({ os: 'macos-latest' })] });
+    assert.deepEqual(crateStepsMissing(cmds, ['paddock-a']), ['paddock-a']);
+  });
   test('the real CI model gates a clippy and a nextest line for every workspace member', () => {
     const metadata = JSON.parse(execFileSync('cargo', ['metadata', '--format-version', '1', '--no-deps'], { cwd: join(root, 'crates'), encoding: 'utf8' }));
     const names = workspaceCrates(metadata).map((c) => c.name);

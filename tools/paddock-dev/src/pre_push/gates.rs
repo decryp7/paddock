@@ -49,6 +49,9 @@ pub struct Gate {
     /// The cargo build folder it uses, relative to the repository root or absolute (`None`: not a cargo build, or not known): a step
     /// whose folder holds no build yet is COLD, and the history keeps cold and warm apart.
     pub build_dir: Option<String>,
+    /// The row runs CI's own tests (the member gate's `tests <ws>`): its child gets CI's job environment
+    /// ([`crate::ci_run::job_env`]) less the secrets, not the [`super::exec::PASS`] list of the other rows.
+    pub ci_env: bool,
 }
 
 impl Gate {
@@ -239,6 +242,7 @@ fn gate(id: String, cwd: &str, program: &str, args: &[&str], rank: u8, next: Str
         notice: None,
         progress: super::progress::Progress::Lines,
         build_dir: None,
+        ci_env: false,
     }
 }
 
@@ -274,8 +278,14 @@ pub fn own_workspaces(plan: &Value, files: &[String]) -> std::collections::BTree
         .collect()
 }
 
+/// The developer tools whose Clippy also runs for Windows here, through xwin on the Mac like `crates` (user, 2026-11-26): four Windows-only
+/// CI failures in `tools/paddock-dev` in one day, the latest an import used only by `cfg(unix)` tests (dead code on Windows), found
+/// only by CI's Windows leg. Selected by the plan like every other row: a tool the change reaches. `tools/throttle` is `tools/heavy`
+/// after its rename; the one that does not exist in the plan is never planned.
+pub const WINDOWS_LINTED_TOOLS: &[&str] = &["tools/paddock-dev", "tools/heavy", "tools/throttle"];
+
 /// Why a workspace gets no Windows lint here. An app opts in with `windowsClippy` in its `paddock.ci.json`; a workspace with no
-/// such contract (`tools/paddock-dev`) is linted by CI's own job on every OS leg, so on Windows natively.
+/// such contract (a tool other than [`WINDOWS_LINTED_TOOLS`]) is linted by CI's own job on every OS leg, so on Windows natively.
 pub(super) fn windows_skip_reason(ws: &str) -> String {
     if ws.starts_with("apps/") {
         "CI lints this workspace on the host OSes only (no windowsClippy in its paddock.ci.json)".into()
@@ -369,7 +379,7 @@ fn plan_rows(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> {
         g.progress = super::progress::Progress::CargoJson;
         g.build_dir = Some(build_dir(facts, &ws, None));
         out.push(Planned::Run(g));
-        if all_features || facts.windows_clippy.contains(&ws) {
+        if all_features || facts.windows_clippy.contains(&ws) || WINDOWS_LINTED_TOOLS.contains(&ws.as_str()) {
             let mut args: Vec<&str> = vec![
                 "xwin",
                 "clippy",
@@ -778,6 +788,7 @@ fn member_tests(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> {
             heavy: true,
             need: Need::Tool("cargo-nextest".into()),
             env: vec![("RUSTUP_AUTO_INSTALL".into(), "0".into())],
+            ci_env: true,
             ..gate(
                 format!("tests {ws}"),
                 ws,

@@ -103,6 +103,7 @@ fn gate(id: &str, cwd: &str) -> Gate {
         notice: None,
         progress: Progress::Lines,
         build_dir: None,
+        ci_env: false,
     }
 }
 
@@ -254,23 +255,38 @@ fn an_uncommitted_input_is_never_reused_or_stored() {
     assert_eq!(s.records(), before, "nothing stored for a dirty input");
 }
 
-/// A new tool version (another `dev` binary, or another base the whole-tree rows compare with) runs everything.
+/// A row `dev` computes itself (its program is this binary).
+fn dev_row(id: &str) -> Planned {
+    let mut g = gate(id, "");
+    g.program = "/held/dev-1234".into();
+    Planned::Run(g)
+}
+
+/// Another `dev` binary runs again the rows `dev` computes itself, and only those: a Cargo row it merely starts is keyed on its
+/// sources and the toolchain (user, 2026-11-25).
 #[test]
-fn a_tool_version_change_runs_everything() {
+fn a_new_dev_reruns_the_rows_dev_computes_and_reuses_the_cargo_rows() {
     let s = Scratch::new();
     let ex = Counting::new(true);
-    run(&rows(), &ex, Some(&s.reuse()));
+    let planned = vec![
+        dev_row("gates-register"),
+        tests_row("app"),
+        Planned::Run(gate("fmt other", "other")),
+    ];
+    run(&planned, &ex, Some(&s.reuse()));
     ex.take();
     let newer = s.reuse_with("tool-2", &HashMap::new(), false).unwrap();
-    run(&rows(), &ex, Some(&newer));
-    assert_eq!(
-        ex.take(),
-        all(&["conformance", "fmt app", "fmt other"]),
-        "another tool version: every row runs"
-    );
+    let got = run(&planned, &ex, Some(&newer));
+    assert_eq!(ex.take(), all(&["gates-register"]), "another dev: only the row dev computes runs");
+    assert!(got.iter().filter(|(id, _)| id != "gates-register").all(|(_, r)| r.reused.is_some()));
+    // Positive control: the same rows with the first dev again are all reused, the dev row included.
+    run(&planned, &ex, Some(&s.reuse()));
+    assert!(ex.take().is_empty());
     // A build variable is part of a Cargo row's key too.
     let env: HashMap<String, String> = [("RUSTFLAGS".to_string(), "-Dwarnings".to_string())].into();
-    run(&rows(), &ex, Some(&s.reuse_with("tool-2", &env, false).unwrap()));
+    run(&rows(), &ex, Some(&s.reuse()));
+    ex.take();
+    run(&rows(), &ex, Some(&s.reuse_with("tool-1", &env, false).unwrap()));
     assert_eq!(ex.take(), all(&["fmt app", "fmt other"]), "another RUSTFLAGS: the Cargo rows run");
 }
 
@@ -566,4 +582,221 @@ fn eviction_drops_old_records_and_keeps_the_newest() {
     let later = std::time::SystemTime::now() + MAX_AGE + Duration::from_secs(60);
     assert_eq!(evict(d.path(), later, MAX_AGE, 100), 4, "age");
     assert!(d.path().join("notes.txt").exists());
+}
+
+// The member gate on a train (user, 2026-11-25): each member's author ran the same gate on the member branch, in their own worktree;
+// the integrator's run on the train head, in another worktree, reuses a member's green row when the train's inputs of that row are
+// the ones the member passed, and runs it again otherwise. The records are shared through the store, as the real store in the
+// repository's common git folder is shared by every worktree.
+
+impl Scratch {
+    /// A linked worktree `name` on a new branch of the same name from `base`, beside the scratch repository.
+    fn worktree(&self, name: &str, base: &str) -> PathBuf {
+        let dir = self.store.parent().unwrap().parent().unwrap().join(name);
+        self.git(&["worktree", "add", "-q", "-b", name, &dir.to_string_lossy(), base]);
+        dir
+    }
+    /// Reuse for the checkout at `root` with the tool version `tool`, the scratch store shared.
+    fn reuse_in(&self, root: &Path, tool: &str) -> Reuse {
+        Reuse::new(
+            root,
+            self.store.clone(),
+            &HashMap::new(),
+            "run-1-abc".into(),
+            Ok(Dev {
+                path: "/held/dev-1234".into(),
+                hash: tool.into(),
+            }),
+            graph(),
+            false,
+        )
+        .expect("on")
+    }
+}
+
+fn git_in(root: &Path, args: &[&str]) -> String {
+    crate::plan_repo::git_text(root, args).unwrap_or_else(|| panic!("git {args:?} in {}", root.display()))
+}
+
+fn commit_in(root: &Path, file: &str, text: &str) {
+    let p = root.join(file);
+    std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+    std::fs::write(p, text).unwrap();
+    git_in(root, &["add", "-A"]);
+    git_in(root, &["commit", "-q", "-m", file]);
+}
+
+fn tests_row(ws: &str) -> Planned {
+    Planned::Run(gate(&format!("tests {ws}"), ws))
+}
+
+/// Member `a` changes `app` (which depends on `lib`), member `b` changes `other`; each runs its own member gate in its own worktree.
+/// Returns the train worktree with both merged (`--no-ff`, as a train merges).
+fn train_of_two(s: &Scratch, ex: &Counting, a_passes: bool) -> PathBuf {
+    let a = s.worktree("member-a", "main");
+    commit_in(&a, "app/src/lib.rs", "pub fn a() {}\n");
+    let bad = Counting::new(false);
+    let own = if a_passes { ex } else { &bad };
+    run(&[tests_row("app")], own, Some(&s.reuse_in(&a, "tool-1")));
+    let b = s.worktree("member-b", "main");
+    commit_in(&b, "other/src/lib.rs", "pub fn b() {}\n");
+    run(&[tests_row("other")], ex, Some(&s.reuse_in(&b, "tool-1")));
+    ex.take();
+    let t = s.worktree("train", "main");
+    git_in(&t, &["merge", "-q", "--no-ff", "-m", "merge a", "member-a"]);
+    git_in(&t, &["merge", "-q", "--no-ff", "-m", "merge b", "member-b"]);
+    t
+}
+
+/// A workspace only one member touched reuses that member's pass on the train head, though the train's whole tree is new and the
+/// train is another worktree: the member's tests rows do not run again.
+#[test]
+fn a_train_reuses_each_members_pass_of_a_workspace_only_it_touched() {
+    let s = Scratch::new();
+    let ex = Counting::new(true);
+    let t = train_of_two(&s, &ex, true);
+    let got = run(&[tests_row("app"), tests_row("other")], &ex, Some(&s.reuse_in(&t, "tool-1")));
+    assert!(ex.take().is_empty(), "each workspace has its member's green row");
+    assert!(got.iter().all(|(_, r)| r.kind() == Kind::Passed && r.reused.is_some()), "{got:?}");
+    // Positive control: the same train with reuse off runs both rows.
+    run(&[tests_row("app"), tests_row("other")], &ex, None);
+    assert_eq!(ex.take(), all(&["tests app", "tests other"]));
+}
+
+/// A workspace two members touched has inputs neither member passed: its row runs on the train; the other is still reused.
+#[test]
+fn a_workspace_two_members_touched_runs_on_the_train() {
+    let s = Scratch::new();
+    let ex = Counting::new(true);
+    let t = train_of_two(&s, &ex, true);
+    // A third member touches `app` too (another file, no conflict) and passes its own gate.
+    let c = s.worktree("member-c", "main");
+    commit_in(&c, "app/src/more.rs", "pub fn c() {}\n");
+    run(&[tests_row("app")], &ex, Some(&s.reuse_in(&c, "tool-1")));
+    ex.take();
+    git_in(&t, &["merge", "-q", "--no-ff", "-m", "merge c", "member-c"]);
+    run(&[tests_row("app"), tests_row("other")], &ex, Some(&s.reuse_in(&t, "tool-1")));
+    assert_eq!(ex.take(), all(&["tests app"]), "app has a's and c's changes together");
+}
+
+/// A conflict resolution that writes what no member had, and a train fix commit, run the rows whose inputs they change.
+#[test]
+fn a_conflict_resolution_or_a_train_fix_runs_the_rows_it_changes() {
+    let s = Scratch::new();
+    let ex = Counting::new(true);
+    let t = train_of_two(&s, &ex, true);
+    // Member d edits the line member a edited: the merge conflicts and the integrator writes both.
+    let d = s.worktree("member-d", "main");
+    commit_in(&d, "app/src/lib.rs", "pub fn d() {}\n");
+    run(&[tests_row("app")], &ex, Some(&s.reuse_in(&d, "tool-1")));
+    ex.take();
+    assert!(
+        crate::plan_repo::git_text(&t, &["merge", "-q", "--no-ff", "-m", "merge d", "member-d"]).is_none(),
+        "it conflicts"
+    );
+    commit_in(&t, "app/src/lib.rs", "pub fn a() {}\npub fn d() {}\n");
+    run(&[tests_row("app"), tests_row("other")], &ex, Some(&s.reuse_in(&t, "tool-1")));
+    assert_eq!(ex.take(), all(&["tests app"]), "the resolved file is in no member's tree");
+    // A fix commit on the train to `other`: its row runs, app's (green on this train now) is reused.
+    commit_in(&t, "other/src/lib.rs", "pub fn b() {}\npub fn fix() {}\n");
+    run(&[tests_row("app"), tests_row("other")], &ex, Some(&s.reuse_in(&t, "tool-1")));
+    assert_eq!(ex.take(), all(&["tests other"]));
+}
+
+/// A nextest row as the gate plans it (cargo starts it), so the key holds the toolchain and nextest versions.
+fn nextest_row(ws: &str) -> Planned {
+    let mut g = gate(&format!("tests {ws}"), ws);
+    g.program = "cargo".into();
+    g.args = vec!["nextest".into(), "run".into(), "--profile".into(), "ci".into()];
+    Planned::Run(g)
+}
+
+/// The probe answers a test gives instead of starting cargo (the probes' cache is filled first, so nothing real runs).
+fn with_versions(r: Reuse, rustc: &str, nextest: &str) -> Reuse {
+    let mut m = r.probes.lock().unwrap();
+    m.insert("cargo --version".into(), Ok("cargo 1.0.0".into()));
+    m.insert("rustc -vV".into(), Ok(rustc.into()));
+    m.insert("cargo nextest --version".into(), Ok(nextest.into()));
+    drop(m);
+    r
+}
+
+/// The train's toolchain or nextest differs from the member's: its tests rows run. Another `dev` alone does not run them.
+#[test]
+fn a_train_with_another_toolchain_or_nextest_runs_the_tests_rows() {
+    let s = Scratch::new();
+    let ex = Counting::new(true);
+    let a = s.worktree("member-a", "main");
+    commit_in(&a, "app/src/lib.rs", "pub fn a() {}\n");
+    run(
+        &[nextest_row("app")],
+        &ex,
+        Some(&with_versions(s.reuse_in(&a, "tool-1"), "rustc 1.90.0", "nextest 0.9.100")),
+    );
+    ex.take();
+    let t = s.worktree("train", "main");
+    git_in(&t, &["merge", "-q", "--no-ff", "-m", "merge a", "member-a"]);
+    run(
+        &[nextest_row("app")],
+        &ex,
+        Some(&with_versions(s.reuse_in(&t, "tool-2"), "rustc 1.90.0", "nextest 0.9.100")),
+    );
+    assert!(ex.take().is_empty(), "same toolchain and nextest, another dev: reused");
+    run(
+        &[nextest_row("app")],
+        &ex,
+        Some(&with_versions(s.reuse_in(&t, "tool-1"), "rustc 1.91.0", "nextest 0.9.100")),
+    );
+    assert_eq!(ex.take(), all(&["tests app"]), "another rustc");
+    run(
+        &[nextest_row("app")],
+        &ex,
+        Some(&with_versions(s.reuse_in(&t, "tool-1"), "rustc 1.90.0", "nextest 0.9.101")),
+    );
+    assert_eq!(ex.take(), all(&["tests app"]), "another nextest");
+}
+
+/// A member whose own row failed left no record: the train runs that row; the other member's pass is reused.
+#[test]
+fn a_members_failed_row_is_never_reused_on_the_train() {
+    let s = Scratch::new();
+    let ex = Counting::new(true);
+    let t = train_of_two(&s, &ex, false);
+    run(&[tests_row("app"), tests_row("other")], &ex, Some(&s.reuse_in(&t, "tool-1")));
+    assert_eq!(ex.take(), all(&["tests app"]));
+}
+
+/// The tests read more than their Cargo inputs: the shared UI package's generated files and tokens (crates' and Dyno's tests) and the
+/// workflows (Dyno's and Pitwall's release tests). A change there runs the tests rows, not the format row of the same workspace.
+#[test]
+fn a_tests_row_also_keys_on_what_tests_read_outside_the_workspace() {
+    let s = Scratch::new();
+    let ex = Counting::new(true);
+    let planned = vec![tests_row("app"), Planned::Run(gate("fmt app", "app"))];
+    run(&planned, &ex, Some(&s.reuse()));
+    ex.take();
+    for (n, file) in ["ui/projects/paddock-ui/shell/generated/x.ts", ".gitea/workflows/app-release.yml"]
+        .iter()
+        .enumerate()
+    {
+        s.commit(file, &format!("{n}\n"));
+        run(&planned, &ex, Some(&s.reuse()));
+        assert_eq!(ex.take(), all(&["tests app"]), "{file}");
+    }
+    s.commit("ui/projects/gallery/x.ts", "gallery\n");
+    run(&planned, &ex, Some(&s.reuse()));
+    assert!(ex.take().is_empty(), "a file outside what the tests read changes nothing");
+}
+
+#[test]
+fn the_member_gates_test_rows_have_a_class() {
+    let c = |id: &str, cwd: &str, ws: &[&str]| {
+        let mut g = gate(id, cwd);
+        g.workspaces = ws.iter().map(|w| w.to_string()).collect();
+        class_of(&g)
+    };
+    assert_eq!(c("tests apps/dyno", "apps/dyno", &[]), Some(Class::Tests(vec!["apps/dyno".into()])));
+    // The developer tool's tests read the whole repository (contracts, goldens, workflows): keyed on the whole tree.
+    assert_eq!(c("tests tools/paddock-dev", "tools/paddock-dev", &[]), Some(Class::Whole));
+    assert_eq!(c("tests", "", &[]), None, "the summary row of a skip is never a run");
 }

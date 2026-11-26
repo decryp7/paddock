@@ -153,7 +153,7 @@ pub fn reconcile<T>(
 }
 
 /// `git args` in `root`: standard output, or the error line the JavaScript reports (`Command failed: git ...`) and the standard error.
-fn git(root: &Path, args: &[&str]) -> Result<String, (String, String)> {
+pub(super) fn git(root: &Path, args: &[&str]) -> Result<String, (String, String)> {
     let mut cmd = crate::git_env::git();
     cmd.arg("-C").arg(root).args(args);
     let failed = |e: String| (format!("Command failed: git {}", args.join(" ")), e);

@@ -1,0 +1,18 @@
+{
+ "findings": [
+  {
+   "check": "C173",
+   "severity": "warn",
+   "rule": 83,
+   "file": "conformance/tooling-files.json",
+   "line": 1,
+   "message": "the check cannot look: conformance/tooling-files.json cannot be read",
+   "fix": "Restore conformance/tooling-files.json: {\"allow\": [{\"path\": \"...\", \"site\": \"tooling file\", \"reason\": \"...\"}]}.",
+   "unwaivable": true,
+   "outcome": "check-broken"
+  }
+ ],
+ "errors": 0,
+ "warnings": 1,
+ "waived": []
+}

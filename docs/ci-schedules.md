@@ -47,7 +47,7 @@ into each leg (`host_packages`, `host_filter`, `test_packages`, `test_filter`).
 **Member runs test only the reached packages (2026-11-21).** A dispatch with a `base` and no `since_run` (a member or a fix round)
 passes `./dev plan --ci` the event, and the plan narrows nextest to the packages the change reaches: the app legs' `filter`, and
 `crates_filter` and `paddock_dev_filter` for the host legs of `crate` and the tests of `paddock-dev`. The Linux crate tests run
-whole under coverage in `crates`. A push to main, a tag, the nightly, a manual run with no base and an app's own gates are never
+whole (plain nextest in the `crate` job's Linux leg, cacheable by ADR 0116; the nightly, a release's gates and a tag also run them under coverage in `crates`: user decision 2026-11-26, `plan_ci::coverage_run`). A push to main, a tag, the nightly, a manual run with no base and an app's own gates are never
 narrowed: the full run on the final head catches what the narrowed ones missed (ER-8). A project is narrowed only when every reason the plan
 gives for it is a Cargo reach (`cargoOnly` in the plan): a UI, installer, lockfile or script reason runs its tests whole. A half of an app's
 nextest that selects no test is skipped with a notice, never passed.
