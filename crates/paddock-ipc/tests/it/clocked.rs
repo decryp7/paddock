@@ -160,15 +160,6 @@ fn live(path: &std::path::Path) -> paddock_ipc::link::Discovery {
     }
 }
 
-fn wait_until(f: impl Fn() -> bool) {
-    // A hang guard around a state the server reaches right after an event the test caused.
-    let start = std::time::Instant::now();
-    while !f() {
-        assert!(start.elapsed() < GUARD, "the server never got there");
-        std::thread::yield_now();
-    }
-}
-
 #[test]
 fn a_silent_client_delays_nobody_and_its_handshake_runs_out() {
     let dir = tempfile::tempdir().unwrap();
@@ -220,17 +211,21 @@ fn connections_beyond_the_cap_are_refused_as_busy() {
     )
     .unwrap();
     assert_eq!(first.call(b"1".to_vec(), T).unwrap(), b"1");
-    wait_until(|| server.peers().len() == 1);
+    server
+        .wait_peers(GUARD, |p| p.len() == 1)
+        .expect("the first client is listed");
     assert!(connect().is_err());
-    wait_until(|| {
-        server
-            .refused()
-            .iter()
-            .any(|e| matches!(e, IpcError::Remote(r) if r.code == codes::BUSY))
-    });
+    server
+        .wait_refused(GUARD, |r| {
+            r.iter()
+                .any(|e| matches!(e, IpcError::Remote(r) if r.code == codes::BUSY))
+        })
+        .expect("the second client was refused busy");
     // When the first leaves, there is room again.
     first.close();
-    wait_until(|| server.peers().is_empty());
+    server
+        .wait_peers(GUARD, <[_]>::is_empty)
+        .expect("the first client's connection closed");
     assert!(connect().is_ok());
 }
 
@@ -356,13 +351,8 @@ fn the_refusal_list_keeps_the_latest_64() {
             ProtocolVersion::UNVERSIONED,
         );
     }
-    server
+    let refused = server
         .wait_refused(GUARD, |r| r.len() == 64)
         .expect("64 refusals were recorded");
-    assert!(
-        server
-            .refused()
-            .iter()
-            .all(|e| matches!(e, IpcError::Auth(_)))
-    );
+    assert!(refused.iter().all(|e| matches!(e, IpcError::Auth(_))));
 }

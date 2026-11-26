@@ -94,7 +94,41 @@ fn a_link_server_refuses_a_wrong_token_and_keeps_serving() {
     let peer =
         paddock_ipc::Peer::start(conn, Arc::new(NoCalls), PeerOptions::new("server")).unwrap();
     assert_eq!(peer.call(b"x".to_vec(), T).unwrap(), b"x");
-    assert_eq!(server.peers().len(), 1);
+    // The handshake thread lists the peer after the welcome, so the call can be answered first: wait for the list.
+    let listed = server.wait_peers(GUARD, |p| p.len() == 1);
+    assert!(listed.is_ok(), "{listed:?}");
+}
+
+/// Positive controls of the snapshot ban in `crates/clippy.toml` (ADR NEW-ipc-link-test-determinism): each read below is what
+/// one entry refuses, so its `expect` goes unfulfilled, and Clippy (`-D warnings`) red, the day that entry stops biting. One read
+/// per function, so each entry has its own control. With no client the snapshots are deterministic.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "positive control: the refusal snapshot the ban must catch"
+)]
+fn refused_snapshot(server: &LinkServer) -> Vec<paddock_ipc::IpcError> {
+    server.refused()
+}
+
+/// The `peers` entry's control (see [`refused_snapshot`]).
+#[expect(
+    clippy::disallowed_methods,
+    reason = "positive control: the peer snapshot the ban must catch"
+)]
+fn peers_snapshot(server: &LinkServer) -> Vec<paddock_ipc::Peer> {
+    server.peers()
+}
+
+#[test]
+fn the_snapshot_reads_are_what_the_clippy_ban_catches() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = LinkServer::start(
+        ServerConfig::new(dir.path().join("agent.json"), "b"),
+        echo(),
+    )
+    .unwrap();
+    assert!(refused_snapshot(&server).is_empty());
+    assert!(peers_snapshot(&server).is_empty());
 }
 
 /// A companion of `build`, returned once it printed `ready`.

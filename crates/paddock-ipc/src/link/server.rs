@@ -133,6 +133,8 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 struct Shared {
     stop: AtomicBool,
     peers: Mutex<Vec<Peer>>,
+    /// Woken when a peer joins the list, closes or leaves it ([`LinkServer::wait_peers`]).
+    peers_changed: Condvar,
     handshakes: AtomicUsize,
     refused: Mutex<Vec<IpcError>>,
     /// Woken after every refusal is recorded ([`LinkServer::wait_refused`]).
@@ -148,6 +150,20 @@ impl Shared {
         refused.push(e);
         drop(refused);
         self.refused_changed.notify_all();
+    }
+
+    /// Adds a served peer and wakes [`LinkServer::wait_peers`], now and again when it closes.
+    fn add_peer(self: &Arc<Self>, peer: Peer) {
+        let shared = Arc::downgrade(self);
+        lock(&self.peers).push(peer.clone());
+        self.peers_changed.notify_all();
+        peer.when_closed(Box::new(move || {
+            if let Some(s) = shared.upgrade() {
+                // Under the lock, so a waiter between its check and its wait cannot miss the wake.
+                let _held = lock(&s.peers);
+                s.peers_changed.notify_all();
+            }
+        }));
     }
 
     fn open_peers(&self) -> usize {
@@ -194,6 +210,7 @@ impl LinkServer {
         let shared = Arc::new(Shared {
             stop: AtomicBool::new(false),
             peers: Mutex::new(Vec::new()),
+            peers_changed: Condvar::new(),
             handshakes: AtomicUsize::new(0),
             refused: Mutex::new(Vec::new()),
             refused_changed: Condvar::new(),
@@ -255,7 +272,7 @@ impl LinkServer {
                                 .and_then(|c| Peer::start(c, handler, opts))
                             {
                                 Ok(peer) if s2.stop.load(Ordering::SeqCst) => peer.close(),
-                                Ok(peer) => lock(&s2.peers).push(peer),
+                                Ok(peer) => s2.add_peer(peer),
                                 Err(e) => s2.refuse(e),
                             }
                             s2.handshakes.fetch_sub(1, Ordering::SeqCst);
@@ -282,10 +299,39 @@ impl LinkServer {
     }
 
     /// The open connections.
+    ///
+    /// A snapshot: a peer is listed by its handshake thread after the client was welcomed, so it can trail what the client
+    /// already saw (a client's first call can be answered before its peer is listed). To act on a change a client caused,
+    /// wait for it with [`LinkServer::wait_peers`].
     pub fn peers(&self) -> Vec<Peer> {
         let mut peers = lock(&self.shared.peers);
         peers.retain(|p| !p.is_closed());
         peers.clone()
+    }
+
+    /// Waits until `until` holds for the open connections ([`LinkServer::peers`]), woken when one is listed or closes, at
+    /// most `max` (OS time; a hang guard, not a limit of anything). `Ok` with the peers that met it, `Err` with the last ones
+    /// seen when `max` passed first.
+    pub fn wait_peers(
+        &self,
+        max: Duration,
+        until: impl Fn(&[Peer]) -> bool,
+    ) -> Result<Vec<Peer>, Vec<Peer>> {
+        let guard = lock(&self.shared.peers);
+        let (mut peers, _) = self
+            .shared
+            .peers_changed
+            .wait_timeout_while(guard, max, |p| {
+                p.retain(|p| !p.is_closed());
+                !until(p)
+            })
+            .unwrap_or_else(|p| p.into_inner());
+        peers.retain(|p| !p.is_closed());
+        if until(&peers) {
+            Ok(peers.clone())
+        } else {
+            Err(peers.clone())
+        }
     }
 
     /// Clients that were refused (wrong token, another protocol, too many, a handshake that ran out), the most recent 64.
@@ -324,7 +370,10 @@ impl LinkServer {
         if let Some(t) = self.accept.take() {
             paddock_proc::cleanup::join_warn("the link server's accept thread", t);
         }
-        for p in lock(&self.shared.peers).drain(..) {
+        // Out of the list first: a peer's close watcher takes the list's lock, so no peer is closed while it is held.
+        let peers: Vec<Peer> = lock(&self.shared.peers).drain(..).collect();
+        self.shared.peers_changed.notify_all();
+        for p in peers {
             p.close();
         }
         Discovery::remove_if_owned_by(&self.discovery, std::process::id());
