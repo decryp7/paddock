@@ -116,10 +116,15 @@ No app uses `LinkServer` yet (`git grep LinkServer -- apps` finds none), so `ref
    `Condvar` that `Shared::refuse` notifies after each record; the wait uses `Condvar::wait_timeout_while` and returns `Err` with the
    last list when `max` (OS time, a hang guard) passes. `refused()` stays, documented as a snapshot that can trail what a client saw.
 2. **`LinkServer::wait_peers(max, until) -> Result<Vec<Peer>, Vec<Peer>>`** over the open peers: a `Condvar` beside the peer list,
-   woken when the handshake thread lists a peer (`Shared::add_peer`), when a listed peer's close is done, and when `stop` empties the
-   list. The close wake is a crate-private `Peer::when_closed` watcher (`crates/paddock-ipc/src/peer.rs`): run once by `report_done`
+   woken when the handshake thread lists a peer (`Shared::add_peer`) and when a listed peer's close is done (`stop` takes `&mut self`,
+   so no waiter can be woken by it). `until` runs under the list's lock, so it must not call the server or close a peer; the same holds
+   for `wait_refused`. Each wake site has a deterministic test that parks the wait first (`listing_a_peer_wakes_a_parked_wait_for_it`,
+   `a_listed_peer_closing_wakes_a_parked_wait_for_it`, in `link/server.rs`). The close wake is a crate-private `Peer::when_closed` watcher (`crates/paddock-ipc/src/peer.rs`): run once by `report_done`
    after the close is reported, with no lock of the peer held, or at once if the peer is already closed; it holds the server only
-   weakly. `stop` now takes the peers out of the list before it closes them, because the watcher takes the list's lock.
+   weakly. `stop` now takes the peers out of the list before it closes them, because the watcher takes the list's lock. `add_peer`
+   reads the stop flag under the list's lock and closes the peer when the server has stopped: `stop` does not join the handshake
+   threads, so a handshake that passed its own stop check could list a peer after `stop` emptied the list and leave it open
+   (found in review, older than this ADR; `a_peer_listed_after_stop_is_closed_not_left_open`).
 3. **Every test read moves to the waits**: the `yield_now` loop in `edges.rs` and `clocked.rs`'s `wait_until` are deleted, and the
    at-risk reads in `link.rs` and `edges.rs` (`peers().len() == 1` right after an answered call) wait for the list.
 4. **The other direction is ADR 0122's act gate**, unchanged: this ADR adds no second gate.
