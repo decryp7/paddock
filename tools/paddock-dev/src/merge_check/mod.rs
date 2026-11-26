@@ -577,9 +577,14 @@ fn check(req: &Request) -> Result<Checked, CliError> {
             // (Each closure has its own `Git`: its answer caches are not shared between threads.)
             let gen_step = || {
                 let git = Git::new(&root);
-                generator_step::run(&root, &git, &merge, req.heavy_generators, &crate::generators::run::Real::new(&root), &|l| {
-                    crate::log_text::eline(l)
-                })
+                generator_step::run(
+                    &root,
+                    &git,
+                    &merge,
+                    req.heavy_generators,
+                    &crate::generators::run::Real::new(&root),
+                    &|l| crate::log_text::eline(l),
+                )
             };
             let gates_step = || {
                 let git = Git::new(&root);
