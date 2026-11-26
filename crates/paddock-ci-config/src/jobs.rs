@@ -57,6 +57,8 @@ pub struct Job {
     pub needs: Vec<String>,
     /// Whether its `if:` runs it when `rerun_jobs` names it and not when `rerun_jobs` names only another job.
     pub asks_rerun_jobs: bool,
+    /// Whether its `if:` reads the plan's `webkit` output: it runs only when the planner wants WebKit (a tag, the nightly, a manual ask).
+    pub reads_webkit: bool,
     /// Whether a step that restores the dev tool comes before the first step that runs `./dev`.
     pub tool_cache_before_first_dev: bool,
     /// The projects it runs for: derived from the plan outputs its conditions read, plus the declared ones.
@@ -381,6 +383,10 @@ pub fn model(workflow_text: &str, declared: &Declared) -> Result<JobModel, Vec<P
             legs,
             needs: text_list(body.get("needs")),
             asks_rerun_jobs: asks_rerun_jobs(id, body.get_text("if")),
+            reads_webkit: body
+                .get_text("if")
+                .and_then(reads)
+                .is_some_and(|outputs| outputs.iter().any(|o| o == "webkit")),
             tool_cache_before_first_dev: tool_cache_before_first_dev(steps, declared),
             projects,
         });

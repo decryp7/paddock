@@ -475,3 +475,11 @@ fn named_jobs_read_the_names_and_matrices_of_a_workflow_with_no_project_outputs(
             .contains("no `jobs:`")
     );
 }
+
+#[test]
+fn a_job_whose_condition_reads_the_webkit_output_says_so() {
+    let m = built();
+    // The reference-app jobs run only when the planner wants WebKit (a tag, the nightly, a manual ask).
+    assert!(m.job("e2e").unwrap().reads_webkit);
+    assert!(!m.job("ui").unwrap().reads_webkit && !m.job("crate").unwrap().reads_webkit);
+}
