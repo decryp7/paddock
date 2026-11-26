@@ -4412,7 +4412,7 @@ spec `data.spec.ts:301` (theme switch redraws the canvases) failed in the same r
   `edges.rs` and `clocked.rs` use it. Stress (12 loops plus 10 CPU burners): 7 of 3,600 before, 0 of 10,800 after, 7 of 3,600 with the
   wait removed again.
 - **Class.** A link-server test uses a client-side OS event as the barrier for server state (with ADR 0122's busy rig on Windows,
-  runs 8425 and 9156, the other direction). Redesign: ADR NEW-ipc-link-test-determinism (accepted 2026-11-26, option C: `wait_peers` too, and a Clippy ban on the snapshot reads with a positive control).
+  runs 8425 and 9156, the other direction). Redesign: ADR 0124 (accepted 2026-11-26, option C: `wait_peers` too, and a Clippy ban on the snapshot reads with a positive control).
   rule in its doc), and rule 102 with the report-only check C174 flags a fixture builder with six or more git starts per test.
 
 ## Fix item: a FLAKY paddock-ipc link-server test on macOS in run 9150, recorded by hand (2026-11-26)
@@ -4447,5 +4447,5 @@ sleep or a raised limit.
 not touch the code it drives (its only paddock-ipc change was `crates/paddock-ipc/fuzz/Cargo.lock`), so it did not block the landing.
 Third Windows instance of this test after runs 8174 and 8425 (the Train A fix items above), and the same crate as run 9150's macOS
 link-server flake. Fixed on train 2026-11-26-t by ADR 0122 WP-2 (`feat/adr-0122-wp2-probe-gate`: the rigs hold the endpoint at the act
-gate and probe the queued bytes) and the link-test determinism ADR (`fix/ipc-link-flakes`: `wait_refused`/`wait_peers`,
+gate and probe the queued bytes) and ADR 0124 (`fix/ipc-link-flakes`: `wait_refused`/`wait_peers`,
 `Peer::when_closed`, stop ordering and a Clippy ban on reading the server's lists without a wait).

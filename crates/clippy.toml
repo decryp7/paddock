@@ -3,11 +3,11 @@
 # paddock_proc::command; `attached_command` for a child that shares this console or relaunches the app), which also counts starts for budget tests
 # (paddock_env::starts). `temp_dir` stays allowed (the shared crates are where the temp helpers live), and paddock-secrets is the one door to the OS credential store, so keyring::Entry stays allowed.
 disallowed-methods = [
-    # ADR NEW-ipc-link-test-determinism (user 2026-11-26, D1 = C): the link server's lists are snapshots that can trail what a client
+    # ADR 0124 (user 2026-11-26, D1 = C): the link server's lists are snapshots that can trail what a client
     # saw (CI run 9150), so tests wait for them; the positive control is paddock-ipc's `edges::the_snapshot_reads_are_what_the_clippy_ban_catches`.
     # allow-invalid: a crate that does not depend on paddock-ipc cannot resolve the paths.
-    { path = "paddock_ipc::link::server::LinkServer::refused", allow-invalid = true, reason = "a snapshot that can trail what the client saw: wait with LinkServer::wait_refused (ADR NEW-ipc-link-test-determinism), or justify the site with #[expect]" },
-    { path = "paddock_ipc::link::server::LinkServer::peers", allow-invalid = true, reason = "a snapshot that can trail what the client saw: wait with LinkServer::wait_peers (ADR NEW-ipc-link-test-determinism), or justify the site with #[expect]" },
+    { path = "paddock_ipc::link::server::LinkServer::refused", allow-invalid = true, reason = "a snapshot that can trail what the client saw: wait with LinkServer::wait_refused (ADR 0124), or justify the site with #[expect]" },
+    { path = "paddock_ipc::link::server::LinkServer::peers", allow-invalid = true, reason = "a snapshot that can trail what the client saw: wait with LinkServer::wait_peers (ADR 0124), or justify the site with #[expect]" },
     # Bulk-API redesign G3: every start is made by the one constructor, so a budget test's count (paddock_env::starts) sees it.
     { path = "std::process::Command::new", reason = "build it with paddock_env::command::command (paddock_proc::command), or attached_command for a child that shares this console: no console window on Windows, and counted for budget tests (paddock_env::starts)" },
     { path = "tokio::process::Command::new", allow-invalid = true, reason = "build a std Command with paddock_env::command::command and convert it (tokio::process::Command::from): counted for budget tests" },

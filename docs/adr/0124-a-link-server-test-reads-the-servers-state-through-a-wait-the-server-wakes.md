@@ -1,8 +1,8 @@
-# NEW. A link-server test reads the server's state through a wait the server wakes, never at a moment the client chose
+# 0124. A link-server test reads the server's state through a wait the server wakes, never at a moment the client chose
 
 - Status: Accepted 2026-11-26 by the user (D1 = C: option B plus the Clippy ban with a positive control), relayed by the coordinator.
-  The investigation and this redesign ADR were approved the same day (ER-21). The number is taken at landing (the `NEW-` rule of
-  AGENTS.md).
+  The investigation and this redesign ADR were approved the same day (ER-21). It took number 0124 as train 2026-11-26-t landed
+  (the `NEW-` rule of AGENTS.md).
 - Date: 2026-11-26
 - Related: ADR [0122](0122-endings-scenario-preconditions.md) (the endings rigs' preconditions and act gate: the other direction of
   the same class, accepted 2026-11-25), ADR [0072](0072-every-connection-end-says-why-in-order.md) §5, ER-11, ER-12 (no sleeps or longer

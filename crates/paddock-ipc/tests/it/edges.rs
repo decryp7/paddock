@@ -99,7 +99,7 @@ fn a_link_server_refuses_a_wrong_token_and_keeps_serving() {
     assert!(listed.is_ok(), "{listed:?}");
 }
 
-/// Positive controls of the snapshot ban in `crates/clippy.toml` (ADR NEW-ipc-link-test-determinism): each read below is what
+/// Positive controls of the snapshot ban in `crates/clippy.toml` (ADR 0124): each read below is what
 /// one entry refuses, so its `expect` goes unfulfilled, and Clippy (`-D warnings`) red, the day that entry stops biting. One read
 /// per function, so each entry has its own control. With no client the snapshots are deterministic.
 #[expect(
