@@ -372,7 +372,12 @@ fn link_out_of_files(discovery: &str) {
     let mut line = String::new();
     let _ = std::io::stdin().read_line(&mut line);
     drop(fillers);
-    println!("refused: {:?}", server.refused());
+    // The refusal is recorded by the accept thread, which on macOS can run after the client already saw its end (the kernel
+    // drops it inside the failed accept; CI run 9150): wait for the record, bounded by a hang guard.
+    let refused = server
+        .wait_refused(std::time::Duration::from_secs(60), |r| !r.is_empty())
+        .unwrap_or_else(|last| last);
+    println!("refused: {refused:?}");
 }
 
 /// The `out-of-files-idle` mode: see the file header.

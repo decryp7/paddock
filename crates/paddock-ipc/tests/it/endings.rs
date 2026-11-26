@@ -258,11 +258,12 @@ fn assert_reason(reports: &[endings::Report], scenario: Scenario, want: &str) {
     );
 }
 
-mod link {
+pub mod link {
     use super::*;
     use paddock_ipc::link::{LinkServer, ServerConfig, discovery};
     use paddock_ipc::testing::endings::ipc::IpcTarget;
     use paddock_ipc::testing::endings::raw::{READ_GUARD, read_to_end};
+    use paddock_ipc::testing::endings::{Precondition, QueueGate};
     use paddock_ipc::{
         CallCtx, Client, FrameLimit, Handler, NoCalls, ProtocolVersion, RemoteError,
     };
@@ -280,10 +281,19 @@ mod link {
         server: Option<LinkServer>,
         target: IpcTarget,
         clock: FakeClock,
+        /// The server's act gate (ADR 0122 §2): every accepted client passes it; an armed one is held until its bytes are
+        /// queued.
+        gate: Arc<QueueGate>,
         _dir: tempfile::TempDir,
     }
 
     fn rig(max_connections: usize) -> Rig {
+        rig_with_gate(max_connections, READ_GUARD)
+    }
+
+    /// A rig whose act gate waits at most `bound` for the client's bytes.
+    fn rig_with_gate(max_connections: usize, bound: Duration) -> Rig {
+        let gate = Arc::new(QueueGate::new(bound));
         let dir = tempfile::tempdir().expect("a temporary folder");
         let path = dir.path().join("agent.json");
         let clock = FakeClock::new();
@@ -292,6 +302,7 @@ mod link {
         c.clock = Arc::new(clock.clone());
         c.handshake_timeout = Duration::from_secs(10);
         c.max_connections = max_connections;
+        let c = c.with_act_gate(ipc::act_gate(&gate));
         let server = LinkServer::start(c, echo()).expect("the link server starts");
         let found = discovery::read(&path, |_| true);
         let (discovery::Found::Live(d) | discovery::Found::Stale(d)) = found else {
@@ -307,8 +318,75 @@ mod link {
             server: Some(server),
             target,
             clock,
+            gate,
             _dir: dir,
         }
+    }
+
+    /// How the busy client of [`busy`] writes its hello.
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    pub enum BusyClient {
+        /// Right after it connected: the server's act gate sees the hello queued before the server refuses (CI run 8425 was
+        /// this client without the gate: the server refused first and the write failed).
+        WritesItsHello,
+        /// Only after the server's act gate gave up waiting (the positive control of test 2): the precondition is missed.
+        WritesAfterTheGate,
+    }
+
+    /// The busy scenario (one place, held by a first client): the refused client's hello must be queued before the server
+    /// refuses it, which the act gate establishes and measures (ADR 0122 test 2). A write that fails after a missed
+    /// precondition is part of what the rig saw, never a `RIG FAILURE (write)`.
+    pub fn busy(
+        client: BusyClient,
+        bound: Duration,
+    ) -> Result<(endings::Observed, endings::Expect), &'static str> {
+        let rig = rig_with_gate(1, bound);
+        // One connection takes the only place; its handshake is over (and its pass through the gate) when `connect` returns.
+        let held = Client::connect(
+            &rig.target.endpoint,
+            &rig.target.token,
+            rig.target.limit,
+            rig.target.protocol,
+        )
+        .map_err(|_| "the first client could not connect")?;
+        let first = paddock_ipc::frame::encode(
+            &paddock_ipc::Frame::Hello {
+                version: paddock_ipc::frame::VERSION,
+                protocol: rig.target.protocol,
+                token: *rig.target.token.as_bytes(),
+                pid: std::process::id(),
+            },
+            rig.target.limit,
+        )
+        .map_err(|_| "encode")?;
+        rig.gate.arm(0);
+        let mut c = paddock_ipc::endpoint::Stream::connect(&rig.target.endpoint, GUARD)
+            .map_err(|_| "connect")?;
+        let evidence = match client {
+            BusyClient::WritesItsHello => {
+                std::io::Write::write_all(&mut c, &first).map_err(|_| "write")?;
+                rig.gate.evidence(GUARD)
+            }
+            BusyClient::WritesAfterTheGate => {
+                let evidence = rig.gate.evidence(GUARD);
+                // The server may have refused and closed by now: a failed write is what this client saw, not the rig's.
+                drop(std::io::Write::write_all(&mut c, &first));
+                evidence
+            }
+        };
+        let raw = read_to_end(&mut c, READ_GUARD);
+        drop(held);
+        let decoded = ipc::decode_frames(&raw.bytes, rig.target.limit);
+        Ok((
+            endings::Observed {
+                raw: Some(raw),
+                decoded,
+                evidence: vec![(Precondition::InputQueuedWhenRefused, evidence)],
+                ..Default::default()
+            },
+            // The refused client's end, and the end of the held client's connection (dropped before the read).
+            endings::Expect::reason(&["busy"]).with_ends(2),
+        ))
     }
 
     pub fn scenario(s: Scenario) -> Result<(endings::Observed, endings::Expect), &'static str> {
@@ -318,44 +396,9 @@ mod link {
             | Scenario::MalformedFirstFrame
             | Scenario::ClientKeepsWriting => {
                 let rig = rig(64);
-                ipc::black_box(&rig.target, s).expect("covered")
+                ipc::black_box_gated(&rig.target, s, Some(&rig.gate)).expect("covered")
             }
-            Scenario::Busy => {
-                let rig = rig(1);
-                // One connection takes the only place.
-                let held = Client::connect(
-                    &rig.target.endpoint,
-                    &rig.target.token,
-                    rig.target.limit,
-                    rig.target.protocol,
-                )
-                .map_err(|_| "the first client could not connect")?;
-                let first = paddock_ipc::frame::encode(
-                    &paddock_ipc::Frame::Hello {
-                        version: paddock_ipc::frame::VERSION,
-                        protocol: rig.target.protocol,
-                        token: *rig.target.token.as_bytes(),
-                        pid: std::process::id(),
-                    },
-                    rig.target.limit,
-                )
-                .map_err(|_| "encode")?;
-                let mut c = paddock_ipc::endpoint::Stream::connect(&rig.target.endpoint, GUARD)
-                    .map_err(|_| "connect")?;
-                std::io::Write::write_all(&mut c, &first).map_err(|_| "write")?;
-                let raw = read_to_end(&mut c, READ_GUARD);
-                drop(held);
-                let decoded = ipc::decode_frames(&raw.bytes, rig.target.limit);
-                Ok((
-                    endings::Observed {
-                        raw: Some(raw),
-                        decoded,
-                        ..Default::default()
-                    },
-                    // The refused client's end, and the end of the held client's connection (dropped before the read).
-                    endings::Expect::reason(&["busy"]).with_ends(2),
-                ))
-            }
+            Scenario::Busy => busy(BusyClient::WritesItsHello, READ_GUARD),
             Scenario::SilentClient => {
                 let rig = rig(64);
                 let mut c = paddock_ipc::endpoint::Stream::connect(&rig.target.endpoint, GUARD)

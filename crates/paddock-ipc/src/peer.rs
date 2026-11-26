@@ -261,6 +261,8 @@ struct Inner {
     closed: Mutex<Closing>,
     /// Signalled when the close is done.
     closed_cv: Condvar,
+    /// Run once, after the close is reported done ([`Peer::when_closed`]); taken by `report_done` (lock after `closed`).
+    close_watchers: Mutex<Vec<CloseWatcher>>,
     /// A test's look at the peer at the end of `mark_closed`, on whichever thread closed it: after the served calls were
     /// cancelled and the close was reported done (so `wait_closed` can return before it runs).
     #[cfg(test)]
@@ -313,6 +315,9 @@ impl Drop for DoneOnDrop<'_> {
         }
     }
 }
+
+/// Code a peer's owner runs once its close is done ([`Peer::when_closed`]).
+pub(crate) type CloseWatcher = Box<dyn FnOnce() + Send>;
 
 /// The calls running now and those waiting for a slot.
 #[derive(Default)]
@@ -459,6 +464,7 @@ impl Peer {
                 dropped_pushes: AtomicU64::new(0),
                 closed: Mutex::new(Closing::Open),
                 closed_cv: Condvar::new(),
+                close_watchers: Mutex::new(Vec::new()),
                 #[cfg(test)]
                 after_cancel: Mutex::new(None),
                 #[cfg(test)]
@@ -630,10 +636,28 @@ impl Peer {
         }
     }
 
-    /// Marks the close done and wakes the closers waiting for it.
+    /// Marks the close done and wakes the closers waiting for it, then runs the close watchers (no lock of this peer held).
     fn report_done(&self, why: IpcError) {
         *lock(&self.inner.closed) = Closing::Done(why);
         self.inner.closed_cv.notify_all();
+        let watchers = std::mem::take(&mut *lock(&self.inner.close_watchers));
+        for w in watchers {
+            w();
+        }
+    }
+
+    /// Runs `f` once when the close is done (at once, on this thread, if it already is): on the closing thread, with no lock
+    /// of this peer held, so `f` may take its owner's locks. A watcher must not close a peer or wait for one.
+    pub(crate) fn when_closed(&self, f: CloseWatcher) {
+        {
+            let closed = lock(&self.inner.closed);
+            if closed.done().is_none() {
+                // Under the close lock: `report_done` sets Done before it takes the watchers, so none is missed or run twice.
+                lock(&self.inner.close_watchers).push(f);
+                return;
+            }
+        }
+        f();
     }
 
     /// Why the connection closed (every close records its reason first, so this is the reason while the close is under way too).
@@ -1417,6 +1441,41 @@ mod tests {
         );
         assert!(peer.is_closed() && peer.wait_closed(Some(Duration::ZERO)));
         drop(theirs);
+    }
+
+    /// A close watcher runs once, after the close is reported done (so it sees the peer closed); one added after the close
+    /// runs at once. The link server's `wait_peers` is woken through it.
+    #[test]
+    fn a_close_watcher_runs_once_after_the_close_and_at_once_when_it_is_already_closed() {
+        let (ours, theirs) = endpoint::pair().unwrap();
+        let peer = Peer::start(
+            Connection::raw(ours, FrameLimit::default()),
+            Arc::new(NoCalls),
+            PeerOptions::new("the other side"),
+        )
+        .unwrap();
+        let (tx, seen) = std::sync::mpsc::channel();
+        let (p2, tx2) = (peer.clone(), tx.clone());
+        peer.when_closed(Box::new(move || {
+            let _ = tx2.send(("before", p2.is_closed()));
+        }));
+        assert!(seen.try_recv().is_err(), "a watcher ran before the close");
+        drop(theirs);
+        peer.close();
+        assert_eq!(
+            seen.recv_timeout(paddock_testkit::HANG_GUARD),
+            Ok(("before", true))
+        );
+        let p3 = peer.clone();
+        peer.when_closed(Box::new(move || {
+            let _ = tx.send(("after", p3.is_closed()));
+        }));
+        assert_eq!(
+            seen.try_recv(),
+            Ok(("after", true)),
+            "a watcher added after the close runs at once"
+        );
+        assert!(seen.try_recv().is_err(), "a watcher ran twice");
     }
 
     /// Regression (CI run 8214, the crates job on Linux: paddock-plugin-host's

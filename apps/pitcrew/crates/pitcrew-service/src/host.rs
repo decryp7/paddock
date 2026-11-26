@@ -26,6 +26,27 @@ impl Host {
 
     /// [`Host::start`] with the Unix socket in `socket_dir` (Linux: the user's runtime folder).
     pub fn start_at(data_dir: PathBuf, socket_dir: PathBuf, on_fatal: impl FnOnce(String) + Send + 'static) -> Result<Host, Error> {
+        Host::start_gated(data_dir, socket_dir, ipc::Gate::default(), on_fatal)
+    }
+
+    /// [`Host::start`] whose IPC server holds each accepted connection at `gate` before it reads it (ADR 0122). Test only
+    /// (rule 99): a shipped build has no gate.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn start_with_act_gate(
+        data_dir: PathBuf,
+        gate: ipc::ActGate,
+        on_fatal: impl FnOnce(String) + Send + 'static,
+    ) -> Result<Host, Error> {
+        let socket_dir = data_dir.clone();
+        Host::start_gated(data_dir, socket_dir, ipc::Gate(Some(gate)), on_fatal)
+    }
+
+    fn start_gated(
+        data_dir: PathBuf,
+        socket_dir: PathBuf,
+        gate: ipc::Gate,
+        on_fatal: impl FnOnce(String) + Send + 'static,
+    ) -> Result<Host, Error> {
         std::fs::create_dir_all(&data_dir).map_err(|source| Error::Io {
             path: data_dir.display().to_string(),
             source,
@@ -51,7 +72,7 @@ impl Host {
         let ipc_tx = tx.clone();
         let stop_tx = tx.clone();
         runtime.spawn(async move {
-            if let Err(e) = ipc::serve(ipc_tx, socket_dir).await {
+            if let Err(e) = ipc::serve_gated(ipc_tx, socket_dir, gate).await {
                 on_fatal(e);
                 let _ = stop_tx.send(Msg::Shutdown);
             }

@@ -217,7 +217,9 @@ pub struct Stale {
     pub why: String,
 }
 
-/// The trial refs of branches that are gone or whose trialed head is on main now (landed). `dry` lists them without deleting.
+/// The trial refs of branches that are gone or whose trialed head is on main now (landed), and the `sync/<member>/<short sha>` refs
+/// `./dev merge sync-member` pushes (one per synced commit) with the `trial/sync/...` refs made from them: a sync ref goes once its tip is
+/// on main or its member branch is gone from origin, and its trial ref goes with it. `dry` lists them without deleting.
 pub fn prune(g: &GitTrain, dry: bool) -> Result<Vec<Stale>, String> {
     git(
         g,
@@ -229,6 +231,7 @@ pub fn prune(g: &GitTrain, dry: bool) -> Result<Vec<Stale>, String> {
             "origin",
             "+refs/heads/main:refs/remotes/origin/main",
             "+refs/heads/trial/*:refs/remotes/origin/trial/*",
+            "+refs/heads/sync/*:refs/remotes/origin/sync/*",
         ],
     )?;
     let heads = git(g, Child::Authed, &["ls-remote", "--heads", "origin"])?;
@@ -243,9 +246,53 @@ pub fn prune(g: &GitTrain, dry: bool) -> Result<Vec<Stale>, String> {
         &["for-each-ref", "--format=%(refname:short)", "refs/remotes/origin/trial/"],
     )?;
     let mut stale = Vec::new();
+    // The sync refs: one bulk read of those whose tip main contains, and the member branch of each (`sync/<member>/<sha>`).
+    let (_, landed_out) = g.run_git(
+        Child::Local,
+        &[
+            "for-each-ref",
+            "--merged",
+            "origin/main",
+            "--format=%(refname:short)",
+            "refs/remotes/origin/sync/",
+        ],
+    )?;
+    let landed_sync: std::collections::BTreeSet<&str> = landed_out
+        .lines()
+        .map(str::trim)
+        .filter_map(|l| l.strip_prefix("origin/"))
+        .collect();
+    let all_sync = git(
+        g,
+        Child::Local,
+        &["for-each-ref", "--format=%(refname:short)", "refs/remotes/origin/sync/"],
+    )?;
+    let mut stale_sync = std::collections::BTreeSet::new();
+    for sync_ref in all_sync.lines().map(str::trim).filter_map(|l| l.strip_prefix("origin/")) {
+        let member = sync_ref.strip_prefix("sync/").and_then(|r| r.rsplit_once('/')).map(|(m, _)| m);
+        let why = if landed_sync.contains(sync_ref) {
+            format!("{sync_ref} is on main")
+        } else if member.is_some_and(|m| !branches.contains(m)) {
+            format!("member branch {} is gone", member.unwrap_or_default())
+        } else {
+            continue;
+        };
+        stale_sync.insert(sync_ref.to_string());
+        stale.push(Stale {
+            trial_ref: sync_ref.to_string(),
+            why,
+        });
+    }
     for short in listed.lines().map(str::trim).filter(|l| !l.is_empty()) {
         let Some(trial_ref) = short.strip_prefix("origin/") else { continue };
         let branch = trial_ref.trim_start_matches("trial/");
+        if stale_sync.contains(branch) {
+            stale.push(Stale {
+                trial_ref: trial_ref.to_string(),
+                why: format!("its sync ref {branch} can go"),
+            });
+            continue;
+        }
         if !branches.contains(branch) {
             stale.push(Stale {
                 trial_ref: trial_ref.to_string(),
@@ -555,6 +602,54 @@ mod tests {
         let left = git_in(&w.origin, &["branch", "--list", "trial/*"]);
         assert!(
             left.contains("trial/feat/live") && !left.contains("gone") && !left.contains("landed"),
+            "{left}"
+        );
+    }
+
+    /// The refs `merge sync-member` pushes (`sync/<member>/<short sha>`) and the trials made from them go once their tip is on main or
+    /// their member branch is gone; a live member's refs stay.
+    #[test]
+    fn prune_deletes_the_sync_refs_and_their_trial_refs_of_landed_and_gone_members_and_keeps_live_ones() {
+        let w = world();
+        for m in ["feat/s", "feat/t", "feat/u"] {
+            commit(&w, m, &format!("{}.txt", m.replace('/', "_")), m, "main");
+        }
+        let syncs = ["sync/feat/s/aaaaaaaaa", "sync/feat/t/bbbbbbbbb", "sync/feat/u/ccccccccc"];
+        for (sync, m) in syncs.iter().zip(["feat/s", "feat/t", "feat/u"]) {
+            commit(&w, sync, "synced.txt", sync, m);
+        }
+        let g = open(&w);
+        for sync in syncs {
+            assert!(matches!(prepare(&g, sync, None, &ok).unwrap(), Outcome::Ready { .. }), "{sync}");
+        }
+        // feat/s landed (its sync tip is on main); feat/u's branch is deleted; feat/t is live.
+        git_in(&w.work, &["checkout", "-q", "main"]);
+        git_in(&w.work, &["merge", "-q", "--ff-only", syncs[0]]);
+        git_in(&w.work, &["push", "-q", "origin", "main"]);
+        git_in(&w.work, &["push", "-q", "origin", "--delete", "feat/u"]);
+        let dry = prune(&g, true).unwrap();
+        let mut named: Vec<&str> = dry.iter().map(|s| s.trial_ref.as_str()).collect();
+        named.sort_unstable();
+        assert_eq!(
+            named,
+            [
+                "sync/feat/s/aaaaaaaaa",
+                "sync/feat/u/ccccccccc",
+                "trial/sync/feat/s/aaaaaaaaa",
+                "trial/sync/feat/u/ccccccccc"
+            ]
+        );
+        assert!(
+            git_in(&w.origin, &["branch", "--list", "sync/*"]).contains("aaaaaaaaa"),
+            "a dry run deletes nothing"
+        );
+        assert_eq!(prune(&g, false).unwrap().len(), 4);
+        let left = git_in(&w.origin, &["branch", "--list", "sync/*", "trial/sync/*"]);
+        assert!(
+            left.contains("sync/feat/t/bbbbbbbbb")
+                && left.contains("trial/sync/feat/t/bbbbbbbbb")
+                && !left.contains("aaaa")
+                && !left.contains("cccc"),
             "{left}"
         );
     }

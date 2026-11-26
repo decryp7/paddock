@@ -3170,3 +3170,15 @@ workspaces were not in the plan of the gate that ran last. `merge check --gates 
 train's rows. Not changed, for a decision: keying the whole-tree rows on `merge-base(HEAD, base)` instead of the base's tip would survive
 landings, but conformance's checks that read the base's files (shrink-only lists) could then judge an older base; that trade is ER-33's.
 
+
+## Merge check: heavy generators deferred to the final gen check (2026-11-26, perf/merge-check-generators, base 43c28c456)
+
+ER-20, ER-36, a Mac with 14 cores. Train s's integrator saw `./dev merge check` take 10 to 23 minutes per merge (host load 12 to 29). **Cause:** the
+step runs every generator of `docs/generators.toml` the merge changed against its first parent, and a heavy one builds a workspace
+(`ci-run-golden`: `cargo test --no-run --lib` of tools/paddock-dev), then `./dev gen check --base origin/main` ran them all again on the train.
+**Measured** (load 12 to 17, sccache on, warm build folder): merge `8fa93ff0f` (due: `notices-dyno`, `ci-run-golden`): 236 s before (notices
+41 s, build 139 s, test 54 s), 1.3 s after. Merges that make no generator due (`15cc05b38`, `bc248b630`): 2.3 s and 1.7 s, unchanged. **Change:** a
+heavy generator is named `deferred` in the merge check (never a pass, ER-33) and runs once in the final `gen check --base origin/main`, whose due set is
+the union of every merge's; `--heavy-generators` runs them per merge. Fast generators still run per merge. Also seen: the per-merge
+`ci-run-golden` was STALE on a mid-train merge that a later member fixed, so the per-merge run named a member that was not at fault.
+Not measured: the final gen check on a whole train (it runs what the per-merge steps ran before, once).

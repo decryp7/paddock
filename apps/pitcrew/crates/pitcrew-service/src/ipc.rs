@@ -166,8 +166,50 @@ async fn subscribed<S: AsyncRead + AsyncWrite + Unpin + Send>(stream: S, tx: Sen
 
 /// Accepts connections until the runtime shuts down.
 pub async fn serve(tx: Sender<Msg>, socket_dir: std::path::PathBuf) -> Result<(), String> {
+    serve_gated(tx, socket_dir, Gate::default()).await
+}
+
+/// [`serve`] with the act gate `gate` (test only; none in a shipped build).
+pub(crate) async fn serve_gated(tx: Sender<Msg>, socket_dir: std::path::PathBuf, gate: Gate) -> Result<(), String> {
     let permits = Arc::new(Semaphore::new(MAX_CONNECTIONS));
-    platform::serve(tx, socket_dir, permits).await
+    platform::serve(tx, socket_dir, permits, gate).await
+}
+
+/// The OS handle of an accepted connection as the act gate sees it: its file descriptor on Unix, its pipe handle (as an
+/// integer, so it crosses to a blocking thread) on Windows.
+#[cfg(unix)]
+pub type RawConnection = std::os::fd::RawFd;
+/// The OS handle of an accepted connection as the act gate sees it: its file descriptor on Unix, its pipe handle (as an
+/// integer, so it crosses to a blocking thread) on Windows.
+#[cfg(not(unix))]
+pub type RawConnection = usize;
+
+/// A test-only act gate (ADR 0122 §4, rule 99): called with each accepted connection's handle before the service reads it,
+/// on a blocking thread (`spawn_blocking`) so no runtime worker waits, while the connection's task keeps the stream open. An
+/// endings rig holds the service there until the client's bytes are queued and measures them
+/// (`paddock_ipc::testing::endings::QueueGate`). It must return; the service goes on when it does.
+#[cfg(any(test, feature = "test-support"))]
+pub type ActGate = Arc<dyn Fn(RawConnection) + Send + Sync>;
+
+/// The act gate a server was started with: empty in a shipped build, which has no gate.
+#[derive(Clone, Default)]
+pub(crate) struct Gate(#[cfg(any(test, feature = "test-support"))] pub(crate) Option<ActGate>);
+
+impl Gate {
+    /// Holds the connection whose handle is `raw` at the gate, if there is one, on a blocking thread; the caller keeps the
+    /// stream until this returns.
+    #[cfg(any(test, feature = "test-support"))]
+    async fn hold(&self, raw: RawConnection) {
+        if let Some(gate) = self.0.clone() {
+            // A gate that panicked has let the connection go all the same; the scenario then judges what the client saw.
+            drop(tokio::task::spawn_blocking(move || gate(raw)).await);
+        }
+    }
+
+    /// No gate in a shipped build.
+    #[cfg(not(any(test, feature = "test-support")))]
+    #[allow(clippy::unused_async, reason = "the test build's twin awaits the gate's blocking thread")]
+    async fn hold(&self, _: RawConnection) {}
 }
 
 #[cfg(windows)]
@@ -176,7 +218,8 @@ mod platform {
     //! the pipe's creation.
     #![allow(unsafe_code)]
 
-    use super::{connection, Msg, PIPE_SDDL};
+    use super::{connection, Gate, Msg, PIPE_SDDL};
+    use std::os::windows::io::AsRawHandle;
     use std::sync::mpsc::Sender;
     use std::sync::Arc;
     use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};
@@ -212,7 +255,7 @@ mod platform {
         result
     }
 
-    pub async fn serve(tx: Sender<Msg>, data_dir: std::path::PathBuf, permits: Arc<Semaphore>) -> Result<(), String> {
+    pub async fn serve(tx: Sender<Msg>, data_dir: std::path::PathBuf, permits: Arc<Semaphore>, gate: Gate) -> Result<(), String> {
         let name = super::pipe_name(&data_dir);
         let mut server =
             create(&name, true).map_err(|e| format!("the pipe {name} could not be created ({e}); is another Pitcrew service running?"))?;
@@ -223,8 +266,9 @@ mod platform {
             let Ok(permit) = permits.clone().acquire_owned().await else {
                 return Ok(());
             };
-            let tx = tx.clone();
+            let (tx, gate) = (tx.clone(), gate.clone());
             tokio::spawn(async move {
+                gate.hold(connected.as_raw_handle() as usize).await;
                 connection(connected, tx).await;
                 drop(permit);
             });
@@ -234,14 +278,15 @@ mod platform {
 
 #[cfg(unix)]
 mod platform {
-    use super::{connection, Msg, SOCKET_FILE};
+    use super::{connection, Gate, Msg, SOCKET_FILE};
+    use std::os::fd::AsRawFd;
     use std::os::unix::fs::PermissionsExt;
     use std::sync::mpsc::Sender;
     use std::sync::Arc;
     use tokio::net::UnixListener;
     use tokio::sync::Semaphore;
 
-    pub async fn serve(tx: Sender<Msg>, socket_dir: std::path::PathBuf, permits: Arc<Semaphore>) -> Result<(), String> {
+    pub async fn serve(tx: Sender<Msg>, socket_dir: std::path::PathBuf, permits: Arc<Semaphore>, gate: Gate) -> Result<(), String> {
         std::fs::create_dir_all(&socket_dir).map_err(|e| format!("{}: {e}", socket_dir.display()))?;
         let _ = std::fs::set_permissions(&socket_dir, std::fs::Permissions::from_mode(0o700));
         let path = socket_dir.join(SOCKET_FILE);
@@ -254,8 +299,9 @@ mod platform {
             let Ok(permit) = permits.clone().acquire_owned().await else {
                 return Ok(());
             };
-            let tx = tx.clone();
+            let (tx, gate) = (tx.clone(), gate.clone());
             tokio::spawn(async move {
+                gate.hold(stream.as_raw_fd()).await;
                 connection(stream, tx).await;
                 drop(permit);
             });
@@ -269,6 +315,7 @@ mod platform {
         _: std::sync::mpsc::Sender<super::Msg>,
         _: std::path::PathBuf,
         _: std::sync::Arc<tokio::sync::Semaphore>,
+        _: super::Gate,
     ) -> Result<(), String> {
         Err("no local transport on this platform".into())
     }

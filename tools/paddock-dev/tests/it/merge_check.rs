@@ -2869,18 +2869,44 @@ mod member_trial {
             .answers(log.clone().stdout(&format!(r#"{{"ok":true,"gates":{rows}}}"#)))
             .install()
             .unwrap();
+        // The dispatch stand-in also logs the trial folder it was handed: `ci dispatch --trial` reads it from its environment.
+        let dispatch_log = Actions::new().appends_with("{env:GATES_LOG}", "{args} trial_dir={env:PADDOCK_TRIAL_DIR}\n");
         StandIn::new(dir, "dispatch")
-            .answers(log.stdout_with("{env:DISPATCH_OUT}").exits_with_env("DISPATCH_EXIT", 0))
+            .answers(dispatch_log.stdout_with("{env:DISPATCH_OUT}").exits_with_env("DISPATCH_EXIT", 0))
             .install()
             .unwrap();
     }
 
     fn sync(r: &Repo, rows: &str, dispatch_out: &str, dispatch_exit: &str, extra: &[&str]) -> (i32, String, String) {
         let dir = tempfile::tempdir().unwrap();
+        sync_in(
+            r,
+            &dir,
+            &[("PADDOCK_TRIAL_DIR", dir.path().join("trial"))],
+            rows,
+            dispatch_out,
+            dispatch_exit,
+            extra,
+        )
+    }
+
+    /// `sync` in a given stand-in folder (its log accumulates) and with or without `PADDOCK_TRIAL_DIR`.
+    fn sync_in(
+        r: &Repo,
+        dir: &tempfile::TempDir,
+        envs: &[(&str, PathBuf)],
+        rows: &str,
+        dispatch_out: &str,
+        dispatch_exit: &str,
+        extra: &[&str],
+    ) -> (i32, String, String) {
         stand_ins(dir.path(), rows);
         let log = dir.path().join("log");
-        let out = r
-            .dev_cmd()
+        let mut cmd = r.dev_cmd();
+        for (k, v) in envs {
+            cmd.env(k, v);
+        }
+        let out = cmd
             .env("PADDOCK_MERGE_CHECK_GATES", dir.path().join("rows"))
             .env("PADDOCK_SYNC_TRIAL_DISPATCH", dir.path().join("dispatch"))
             .env("GATES_LOG", &log)
@@ -2903,8 +2929,79 @@ mod member_trial {
         assert_eq!(code, 0, "{text}");
         assert!(text.contains("CI trial dispatched: run 4242"), "{text}");
         assert!(
-            log.contains("ci dispatch ci.yml --trial sync/feat/x --onto main --max 30m"),
+            log.contains(&format!(
+                "ci dispatch ci.yml --trial sync/feat/x/{} --onto main --max 30m",
+                short_head(&r)
+            )),
             "{log}"
+        );
+    }
+
+    /// The first nine characters of HEAD: the ref's name (`sync/<member>/<short sha>`).
+    fn short_head(r: &Repo) -> String {
+        r.git(&["rev-parse", "HEAD"])[..9].to_string()
+    }
+
+    /// `ci dispatch --trial` needs `PADDOCK_TRIAL_DIR`: the dispatch child is handed the folder this command was given, and a command that
+    /// has none says so before it pushes anything.
+    #[test]
+    fn the_dispatch_gets_the_trial_dir_and_a_missing_one_is_refused_before_the_push() {
+        let r = pushed();
+        let (code, text, log) = sync(&r, GREEN, "run 4242", "0", &[]);
+        assert_eq!(code, 0, "{text}");
+        assert!(log.contains("trial_dir=") && !log.contains("trial_dir=\n"), "{log}");
+        assert!(log.lines().any(|l| l.contains("--trial") && l.ends_with("/trial")), "{log}");
+        let dir = tempfile::tempdir().unwrap();
+        let (code, text, log) = sync_in(&r, &dir, &[], GREEN, "run 4242", "0", &[]);
+        assert_eq!(code, 6, "{text}");
+        assert!(text.contains("cannot be resolved") && !log.contains("ci dispatch"), "{text}\n{log}");
+        let origin = r.git(&["remote", "get-url", "origin"]);
+        let refs = r.git(&["--git-dir", &origin, "for-each-ref", "refs/heads/sync/"]);
+        assert!(refs.lines().count() == 1, "only the first sync pushed a ref: {refs}");
+    }
+
+    /// With no `PADDOCK_TRIAL_DIR`, the one resolver's default is handed to the dispatch child: `<dev-targets>/trials`.
+    #[test]
+    fn without_the_variable_the_trial_dir_defaults_below_the_dev_targets_folder() {
+        let r = pushed();
+        let dir = tempfile::tempdir().unwrap();
+        let dt = dir.path().join("dt");
+        let (code, text, log) = sync_in(&r, &dir, &[("PADDOCK_DEV_TARGETS", dt.clone())], GREEN, "run 4242", "0", &[]);
+        assert_eq!(code, 0, "{text}");
+        assert!(log.contains(&format!("trial_dir={}", dt.join("trials").display())), "{log}");
+    }
+
+    /// A re-sync is a new commit and pushes a second, new ref: a plain push, no force and no lease, and the first ref is untouched.
+    #[test]
+    fn a_re_sync_pushes_a_second_new_ref_with_no_force() {
+        let r = pushed();
+        let first = r.git(&["rev-parse", "HEAD"]);
+        let (code, text, _) = sync(&r, GREEN, "run 4242", "0", &[]);
+        assert_eq!(code, 0, "{text}");
+        r.write("x3.txt", "x3\n");
+        r.commit("feat: x3");
+        let second = r.git(&["rev-parse", "HEAD"]);
+        let (code, text, log) = sync(&r, GREEN, "run 4243", "0", &[]);
+        assert_eq!(code, 0, "{text}");
+        assert!(log.contains(&format!("--trial sync/feat/x/{} ", &second[..9])), "{log}");
+        let origin = r.git(&["remote", "get-url", "origin"]);
+        let on = |sha: &str| r.git(&["--git-dir", &origin, "rev-parse", &format!("refs/heads/sync/feat/x/{}", &sha[..9])]);
+        assert_eq!((on(&first), on(&second)), (first.clone(), second.clone()));
+        // The same commit again is the same ref: nothing to replace, so nothing to force.
+        let (code, text, _) = sync(&r, GREEN, "run 4244", "0", &[]);
+        assert_eq!(code, 0, "{text}");
+    }
+
+    /// An https origin needs the caller's token: without GITEA_TOKEN the push is not attempted and the message names it.
+    #[test]
+    fn an_https_origin_without_a_token_is_not_pushed_and_names_the_token() {
+        let r = pushed();
+        r.git(&["remote", "set-url", "origin", "https://127.0.0.1:9/decryp7/paddock.git"]);
+        let (code, text, log) = sync(&r, GREEN, "run 4242", "0", &[]);
+        assert_eq!(code, 6, "{text}");
+        assert!(
+            text.contains("GITEA_TOKEN is not set") && !log.contains("ci dispatch"),
+            "{text}\n{log}"
         );
     }
 
@@ -2917,16 +3014,18 @@ mod member_trial {
     }
 
     #[test]
-    fn the_sync_tip_is_pushed_as_sync_member_before_the_dispatch_and_a_failed_push_dispatches_nothing() {
+    fn the_sync_tip_is_pushed_as_a_new_ref_before_the_dispatch_and_a_failed_push_dispatches_nothing() {
         let r = pushed();
         let (code, _, _) = sync(&r, GREEN, "run 4242", "0", &[]);
         assert_eq!(code, 0);
-        let on_origin = r.git(&["ls-remote", "origin", "refs/heads/sync/feat/x"]);
+        let name = format!("refs/heads/sync/feat/x/{}", short_head(&r));
+        let on_origin = r.git(&["ls-remote", "origin", &name]);
         assert!(on_origin.starts_with(&r.git(&["rev-parse", "HEAD"])), "{on_origin}");
-        // A sync branch someone else moved is not overwritten: the push is refused (the lease) and nothing is dispatched.
+        // The name holds another commit (a short-sha clash): the plain push is refused, nothing is overwritten and nothing is dispatched.
         let bare = r.git(&["remote", "get-url", "origin"]);
-        let moved = r.git(&["rev-parse", "HEAD~1"]);
-        r.git(&["--git-dir", &bare, "update-ref", "refs/heads/sync/feat/x", &moved]);
+        let moved = r.git(&["commit-tree", "HEAD^{tree}", "-m", "another commit under the same name"]);
+        r.git(&["push", "-q", "origin", &format!("{moved}:refs/heads/elsewhere")]);
+        r.git(&["--git-dir", &bare, "update-ref", &name, &moved]);
         let (code, text, log) = sync(&r, GREEN, "run 4242", "0", &[]);
         assert_eq!(code, 6, "{text}");
         assert!(
@@ -2934,7 +3033,7 @@ mod member_trial {
             "{text}\n{log}"
         );
         assert!(
-            r.git(&["--git-dir", &bare, "rev-parse", "refs/heads/sync/feat/x"]) == moved,
+            r.git(&["--git-dir", &bare, "rev-parse", &name]) == moved,
             "the moved ref was overwritten"
         );
         r.git(&["remote", "set-url", "origin", "/nonexistent/origin.git"]);
@@ -3025,12 +3124,27 @@ mod member_trial {
         let (r, dir) = merged_member();
         let (code, text, log) = check(&r, &dir, "green", "0", &[]);
         assert_eq!(code, 0, "{text}");
-        assert!(text.contains("run 77 of feat/a is green"), "{text}");
         let head = r.git(&["rev-parse", "feat/a"]);
+        let synced = format!("sync/feat/a/{}", &head[..9]);
+        assert!(text.contains(&format!("run 77 of {synced} is green")), "{text}");
         assert!(
-            log.contains("ci trial-verdict --branch feat/a --member-sha") && log.contains(&head),
+            log.contains(&format!("ci trial-verdict --branch {synced} --member-sha")) && log.contains(&head),
             "{log}"
         );
+    }
+
+    /// A member merged as its own sync ref already carries the trial's name: it is not prefixed twice.
+    #[test]
+    fn a_member_merged_as_its_sync_ref_is_read_under_that_name() {
+        let (r, dir) = merged_member();
+        let head = r.git(&["rev-parse", "feat/a"]);
+        let synced = format!("sync/feat/a/{}", &head[..9]);
+        r.git(&["branch", &synced, "feat/a"]);
+        r.git(&["reset", "-q", "--hard", "main~1"]);
+        r.git(&["merge", "-q", "--no-ff", "-m", &format!("Merge branch '{synced}'"), &synced]);
+        let (code, text, log) = check(&r, &dir, "green", "0", &[]);
+        assert_eq!(code, 0, "{text}");
+        assert!(log.contains(&format!("--branch {synced} ")) && !log.contains("sync/sync"), "{log}");
     }
 
     #[test]
@@ -3066,4 +3180,94 @@ mod member_trial {
         let (code, text, _) = check(&r, &dir, "green", "0", &["--no-trial", " "]);
         assert_eq!(code, 2, "{text}");
     }
+}
+
+/// A fast generator marked by the docs and a heavy one marked by the lockfile; the heavy one's check always fails, so a run of it
+/// shows (a STALE finding) and a skipped one shows (exit 0): the stand-in for a build that costs minutes (ER-33: the control sees it).
+const FAST_AND_HEAVY: &str = r#"version = 1
+
+[[generator]]
+id = "docs-gen"
+what = "the docs"
+check = ["true"]
+regenerate = "none: invented"
+paths = ["docs/**"]
+outputs = []
+cost = "fast"
+
+[[generator]]
+id = "heavy-gen"
+what = "a workspace build"
+check = ["false"]
+regenerate = "none: invented"
+paths = ["crates/Cargo.lock"]
+outputs = []
+cost = "heavy"
+"#;
+
+/// A member that changes `member_file`, merged into a train that moved on; the registry is [`FAST_AND_HEAVY`].
+fn member_changing(member_file: &str) -> Repo {
+    let r = Repo::new();
+    r.write("docs/generators.toml", FAST_AND_HEAVY);
+    r.write("crates/Cargo.lock", "1\n");
+    r.write("docs/a.md", "a\n");
+    r.commit("base");
+    r.git(&["checkout", "-q", "-b", "member"]);
+    r.write(member_file, "member\n");
+    r.commit("chore: member");
+    r.git(&["checkout", "-q", "main"]);
+    r.write("other.txt", "b\n");
+    r.commit("chore: the train moved on");
+    r.git(&["merge", "-q", "--no-ff", "-m", "Merge member", "member"]);
+    r
+}
+
+fn check_with_extra(r: &Repo, extra: &[&str]) -> (i32, String) {
+    let builds = tempfile::tempdir().unwrap();
+    let out = r
+        .dev_cmd()
+        .args(["merge", "check", "--root"])
+        .arg(r.path())
+        .arg("HEAD")
+        .args(extra)
+        .env("PADDOCK_DEV_TARGET_DIR", builds.path())
+        .output()
+        .unwrap();
+    let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    (out.status.code().unwrap_or(-1), text)
+}
+
+#[test]
+fn a_merge_that_changes_only_a_heavy_generators_input_starts_no_generator_and_names_it_deferred() {
+    let r = member_changing("crates/Cargo.lock");
+    let (code, text) = check_with_extra(&r, &[]);
+    assert_eq!(code, 0, "the heavy check (which always fails) must not have run: {text}");
+    assert!(
+        text.contains("deferred") && text.contains("heavy-gen") && text.contains("gen check --base origin/main"),
+        "a skipped check says so and names the one that runs it, never silence (ER-33): {text}"
+    );
+    assert!(!text.contains("gen heavy-gen: running"), "{text}");
+}
+
+#[test]
+fn the_flag_runs_the_heavy_generators_a_merge_made_due() {
+    // The positive control: the same merge, with the heavy step asked for, starts the heavy check.
+    let r = member_changing("crates/Cargo.lock");
+    let (code, text) = check_with_extra(&r, &["--heavy-generators"]);
+    // In this bare repository the heavy slot cannot be made (NOT MEASURED, exit 6); either way the check was started and is not a pass.
+    assert!(matches!(code, 5 | 6), "the heavy check must have been started: {code} {text}");
+    assert!(text.contains("gen heavy-gen") && !text.contains("deferred"), "{text}");
+}
+
+#[test]
+fn a_fast_generator_still_runs_in_every_merge_check() {
+    let r = member_changing("docs/adr.md");
+    let (code, text) = check_with_extra(&r, &[]);
+    assert_eq!(code, 0, "{text}");
+    assert!(text.contains("gen check: 1 of 2 due: docs-gen"), "{text}");
+    assert!(
+        text.contains("gen docs-gen: running") || text.contains("gen docs-gen: current"),
+        "{text}"
+    );
+    assert!(!text.contains("deferred"), "nothing heavy was due: {text}");
 }
