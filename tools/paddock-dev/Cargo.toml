@@ -50,6 +50,7 @@ paddock-ci-config = { path = "../../crates/paddock-ci-config" }
 paddock-cli = { path = "../../crates/paddock-cli" }
 paddock-env = { path = "../../crates/paddock-env" }
 paddock-proc = { path = "../../crates/paddock-proc" }
+paddock-secrets = { path = "../../crates/paddock-secrets" }
 paddock-git = { path = "../../crates/paddock-git" }
 # ci_s3_guard: the stall guard (a localhost proxy that cuts a request the store does not answer); no TLS stack without the `http` feature.
 paddock-net = { path = "../../crates/paddock-net", default-features = false }

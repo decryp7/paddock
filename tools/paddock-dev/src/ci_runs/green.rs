@@ -30,7 +30,8 @@ use super::logfind;
 use super::verdict::{self, Earlier, Mode};
 use crate::job_outcome::JobOutcome;
 use crate::plan_since::workflow_file;
-use crate::run_scope::PROJECT_JOBS;
+use crate::run_scope::{ExpectedMap, lookup};
+use paddock_ci_config::jobs::{self, PROJECT_OUTPUTS};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -174,6 +175,9 @@ pub struct Touched {
     pub members: BTreeMap<String, BTreeSet<String>>,
     /// Each app's Cargo workspace folder ([`crate::plan_ci::app_cargo_dir`]).
     pub app_cargo: BTreeMap<String, String>,
+    /// The graded run's `expected` map (its scope line): what a job display name is (its job id, app and projects). Set by the grading
+    /// from the run it reads; a name it does not hold is placed on the safe side (reached).
+    pub expected: ExpectedMap,
 }
 
 thread_local! {
@@ -292,21 +296,19 @@ impl Touched {
                 "{test:?} is not a nextest test: its job's project is the narrowest level, and it was reached"
             ));
         };
-        let (project, workspace) = if job.starts_with("crate (") || job.starts_with("crates (") {
-            ("crates".to_string(), "crates".to_string())
-        } else if job.starts_with("paddock-dev (") {
-            ("paddock-dev".to_string(), "tools/paddock-dev".to_string())
-        } else if let Some(rest) = job.strip_prefix("app ") {
-            let app = rest.split(" (").next().unwrap_or(rest);
-            match self.app_cargo.get(app) {
+        let found = lookup(&self.expected, job, None);
+        let leg_app = found.as_ref().and_then(|f| f.leg).and_then(|l| l.get("app")).cloned();
+        let (project, workspace) = match (found.as_ref().map(|f| f.job.as_str()), leg_app) {
+            (Some("crate" | "crates"), _) => ("crates".to_string(), "crates".to_string()),
+            (Some("paddock-dev"), _) => ("paddock-dev".to_string(), "tools/paddock-dev".to_string()),
+            (Some("app"), Some(app)) => match self.app_cargo.get(&app) {
                 Some(dir) => (format!("app:{app}"), dir.clone()),
                 None if self.members.is_empty() => {
                     return Reach::Unknown(format!("the Cargo workspace of app {app} was not read"));
                 }
                 None => return Reach::Touched(format!("app {app} has no Cargo workspace: the app is the narrowest level")),
-            }
-        } else {
-            return Reach::Touched(format!("job {job:?} has no package level and its project was reached"));
+            },
+            _ => return Reach::Touched(format!("job {job:?} has no package level and its project was reached")),
         };
         let krate = binary.split("::").next().unwrap_or(binary);
         if !self.cargo_only.contains(&project) {
@@ -334,23 +336,22 @@ impl Touched {
         if self.all {
             return true;
         }
-        if let Some(rest) = job.strip_prefix("app ") {
-            let app = rest.split(" (").next().unwrap_or(rest);
+        // A name the run's line does not hold, or a job it gives no project, cannot be placed: reached, the safe side.
+        let Some(found) = lookup(&self.expected, job, None) else {
+            return true;
+        };
+        if let Some(app) = found.leg.and_then(|l| l.get("app")) {
             return self.apps.contains(app);
         }
-        if job.starts_with("crate (") {
-            return self.flags.contains("crates");
-        }
-        if job.starts_with("paddock-dev (") {
-            return self.flags.contains("paddockDev");
-        }
-        match PROJECT_JOBS
-            .iter()
-            .find(|(_, prefixes)| prefixes.iter().any(|p| p.split('|').any(|q| job.starts_with(q))))
-        {
-            Some((flag, _)) => self.flags.contains(*flag) || (*flag == "e2e" || *flag == "e2e-webkit") && self.flags.contains("ui"),
-            None => true,
-        }
+        let projects = match found.projects {
+            Some(p) if !p.is_empty() => p,
+            _ => return true,
+        };
+        projects.iter().any(|p| {
+            self.flags.contains(p.as_str())
+                || (p == jobs::APPS_PROJECT && !self.apps.is_empty())
+                || PROJECT_OUTPUTS.iter().any(|(_, id, key)| id == p && self.flags.contains(*key))
+        })
     }
 }
 
@@ -371,7 +372,12 @@ pub struct FailedJob {
 /// Grades the failed jobs of a finished complete run of `workflow`. A job is test-only when every failed step is a test step
 /// ([`crate::plan_since::failure_is_tests`]) and its log shows only FLAKY tests; any other failed step is red. `touched` is
 /// asked at most once, and only when a FLAKY test needs it.
-pub fn grade_failures(workflow: &str, jobs: &[FailedJob], touched: &mut dyn FnMut() -> Option<Touched>) -> GradedResult {
+pub fn grade_failures(
+    workflow: &str,
+    jobs: &[FailedJob],
+    expected: &ExpectedMap,
+    touched: &mut dyn FnMut() -> Option<Touched>,
+) -> GradedResult {
     use crate::plan_since::{StepProblem, failure_is_tests, job_key};
     let mut red = Vec::new();
     let mut unread = Vec::new();
@@ -414,7 +420,12 @@ pub fn grade_failures(workflow: &str, jobs: &[FailedJob], touched: &mut dyn FnMu
                 continue;
             }
         }
-        let t = touch.get_or_insert_with(&mut *touched);
+        let t = touch.get_or_insert_with(|| {
+            touched().map(|t| Touched {
+                expected: expected.clone(),
+                ..t
+            })
+        });
         let Some(t) = t else {
             unread.push(format!(
                 "the targets the change touched cannot be read (job {name:?} has a FLAKY test)"
@@ -467,6 +478,7 @@ pub fn read_failures(
     client: &mut Client,
     workflow: &str,
     jobs: &[TimedJob],
+    expected: &ExpectedMap,
     touched: &mut dyn FnMut(&mut Client) -> Option<Touched>,
 ) -> GradedResult {
     let failed: Vec<FailedJob> = jobs
@@ -483,7 +495,7 @@ pub fn read_failures(
     if failed.is_empty() {
         return GradedResult::Red("the run failed and no job names a failure".into());
     }
-    grade_failures(workflow, &failed, &mut || touched(&mut *client))
+    grade_failures(workflow, &failed, expected, &mut || touched(&mut *client))
 }
 
 /// The outcome of one run. A cancelled or skipped run is `Partial` times `NotMeasured`, and one still going is `NotMeasured` on
@@ -601,7 +613,7 @@ fn grade_run_inner(
         let w = format!("job {:?} ended {ended}", j.name);
         return Outcome::of(scope, GradedResult::NotMeasured(w)).noted(why);
     }
-    let result = read_failures(client, run.workflow(), &read.jobs, touched);
+    let result = read_failures(client, run.workflow(), &read.jobs, &read.expected, touched);
     // Fix items are granted only on the declared scope that ran, whichever basis decides "complete" (ER-41's report-only phase).
     if matches!(result, GradedResult::GreenWithFixItems(_)) {
         match read.scope_view {

@@ -4474,3 +4474,13 @@ gate and probe the queued bytes) and ADR 0124 (`fix/ipc-link-flakes`: `wait_refu
   orphan older than its parent, an ended child, an equal-tick child) pins the rule, and the assertion message names both pids.
 - **Class (ER-21).** A test that asserts on live OS process state through the raw list instead of the product's identity rule (second instance:
   run 8694's runner counting an orphan's tree). No new check: the product's rule is the one definition, and the test now calls it.
+
+## Fix item: a FLAKY paddock-proc child-listing test on Windows in run 9168 (2026-11-26)
+`paddock-proc usage::tests::the_os_source_lists_the_children_of_one_pid_without_a_table` was FLAKY on Windows in ci.yml run 9168
+(job 51509, crate (windows-latest); failed once at `usage.rs:1558`, passed on its retry; flaky-as-failure kept the run red, ER-12).
+Train 2026-11-26-t did not touch paddock-proc. The failure: a listed child of the test's sleeping child was `sccache.exe`, not
+`conhost.exe`. Windows keeps a dead parent's pid in its children's parent field and hands the pid on, so a process started before
+the test's child (here a compile-cache server) can name the child's pid as its parent. `OsSource::children` is the raw listing; the
+tree walks drop such a stranger by start time (ADR 0033, `orphan::descendants_skip_a_stranger_older_than_its_claimed_parent`), but
+this test asserts the raw listing. Fix: the test keeps only children that started no earlier than its child (`ProcessSource::started`)
+before it checks their names, with a failing test first (bug-fix skill). Open; not fixed on train 2026-11-26-u.

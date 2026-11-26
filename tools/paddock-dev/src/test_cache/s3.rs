@@ -9,7 +9,10 @@
 
 use super::key::RunnerClass;
 use super::store::{Lookup, Record, Store, StoreError, rel_path};
+use paddock_ci_config::settings::sccache::{TestCacheAddress, test_cache_address, test_cache_key};
+use paddock_ci_config::settings::{EnvMap, Settings};
 use paddock_proc::{Limits, run_bounded_with_input};
+use paddock_secrets::Secret;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -31,7 +34,7 @@ pub struct S3Store {
     /// `http://host:port` or `https://host:port`.
     base: String,
     region: String,
-    keys: (String, String),
+    keys: (Secret, Secret),
     scratch: PathBuf,
 }
 
@@ -47,34 +50,27 @@ impl S3Store {
     pub fn from_env(env: &std::collections::HashMap<String, String>, scratch: PathBuf) -> Result<S3Store, String> {
         // CI's own key first (user decision 2026-11-26: a separate RustFS key for the test cache; C141 lets only `./dev ci test-cache`
         // steps name its secrets). Elsewhere the machine's usual source: the key file outside the repository, else `AWS_*`.
-        let ci = |k: &str| env.get(k).filter(|v| !v.is_empty()).cloned();
-        let (id, secret) = match (ci("PADDOCK_TEST_CACHE_KEY_ID"), ci("PADDOCK_TEST_CACHE_SECRET")) {
-            (Some(id), Some(secret)) => (id, secret),
-            _ => {
+        let vars = EnvMap(env);
+        let settings = Settings::new(&vars);
+        let (id, secret) = match test_cache_key(&settings).map_err(|e| e.0)? {
+            Some((id, secret)) => (id, secret),
+            None => {
                 let creds = crate::local_sccache::read_creds(env)?;
                 let get = |k: &str| creds.pairs().iter().find(|(n, _)| n == k).map(|(_, v)| v.clone());
                 let (Some(id), Some(secret)) = (get("AWS_ACCESS_KEY_ID"), get("AWS_SECRET_ACCESS_KEY")) else {
                     return Err("no S3 credentials (CI: the secrets PADDOCK_TEST_CACHE_KEY_ID and PADDOCK_TEST_CACHE_SECRET; elsewhere the key file outside the repository, or AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY)".into());
                 };
-                (id, secret)
+                (
+                    Secret::new(id).map_err(|e| e.to_string())?,
+                    Secret::new(secret).map_err(|e| e.to_string())?,
+                )
             }
         };
-        // The endpoint exactly as the compile cache reads it (`ci_setup_rust::parse_endpoint`, ER-22): the repository variable is
+        // The address exactly as the compile cache reads the endpoint (`parse_endpoint`, ER-22): the repository variable is
         // `http://host:port`, so the scheme is taken from it and never added a second time (run 9135: `http://http://...` answered 308).
-        let endpoint = env
-            .get("PADDOCK_SCCACHE_S3_ENDPOINT")
-            .filter(|v| !v.is_empty())
-            .cloned()
-            .unwrap_or_else(|| crate::local_sccache::DEFAULT_S3_ENDPOINT.to_string());
-        let (tls, host_port) = crate::ci_setup_rust::parse_endpoint(&endpoint)?;
-        let ssl = tls || env.get("PADDOCK_SCCACHE_S3_SSL").is_some_and(|v| v == "true");
-        let region = env
-            .get("PADDOCK_SCCACHE_S3_REGION")
-            .filter(|v| !v.is_empty())
-            .cloned()
-            .unwrap_or_else(|| "auto".into());
+        let TestCacheAddress { base, region } = test_cache_address(&settings)?;
         Ok(S3Store {
-            base: format!("{}://{host_port}", if ssl { "https" } else { "http" }),
+            base,
             region,
             keys: (id, secret),
             scratch,
@@ -97,8 +93,8 @@ impl S3Store {
             out.push_str(&format!(
                 "url = \"{url}\"\naws-sigv4 = \"aws:amz:{}:s3\"\nuser = \"{}:{}\"\nconnect-timeout = {REQUEST_SECS}\nmax-time = {REQUEST_SECS}\nsilent\nshow-error\noutput = \"{}\"\nwrite-out = \"%{{http_code}}|%{{redirect_url}}|%{{filename_effective}}\\n\"\n",
                 self.region,
-                self.keys.0,
-                self.keys.1,
+                self.keys.0.expose(),
+                self.keys.1.expose(),
                 file.display()
             ));
             if let Some(up) = up {
@@ -133,7 +129,7 @@ impl S3Store {
     }
 
     fn mask(&self, t: &str) -> String {
-        t.replace(&self.keys.1, "***").replace(&self.keys.0, "***")
+        t.replace(self.keys.1.expose(), "***").replace(self.keys.0.expose(), "***")
     }
 
     fn body_path(&self, i: usize) -> PathBuf {

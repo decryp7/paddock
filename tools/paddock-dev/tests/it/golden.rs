@@ -479,11 +479,9 @@ fn ci_plan_declares_a_scope_that_is_complete_only_when_it_covers_a_push_to_main(
     assert_eq!(dispatch(&[("PLAN_WEBKIT", "1")]).complete(), Ok(()));
     let tag = declared_scope(&[("GITHUB_EVENT_NAME", "push"), ("GITHUB_REF", "refs/tags/v1.0.0")]).0;
     assert_eq!(tag.complete(), Ok(()));
-    assert!(
-        tag.ran.engines.contains("webkit") && tag.ran.jobs.contains("e2e-webkit"),
-        "{}",
-        tag.line()
-    );
+    // The reference-app jobs are named by the job model of the repository's ci.yml (ADR 0123; run_scope's
+    // `the_jobs_of_a_scope_come_from_the_job_model` checks them on the real one); this fixture's toy ci.yml models none.
+    assert!(tag.ran.engines.contains("webkit"), "{}", tag.line());
     // One app (and its legs) missing: a dispatch with `app` is that app only, with or without WebKit.
     let app_only = dispatch(&[("PLAN_APP", "x"), ("PLAN_WEBKIT", "1")]);
     assert!(app_only.complete().unwrap_err().contains("apps "), "{}", app_only.line());
