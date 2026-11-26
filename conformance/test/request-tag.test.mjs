@@ -13,22 +13,22 @@ const SHA = 'a'.repeat(40);
 const files = (o) => (p) => o[p] ?? null;
 const conf = (v) => JSON.stringify({ version: v });
 
-// heavy-vX.Y.Z publishes the tool (heavy-release.yml): its version source is tools/heavy/Cargo.toml, not an app folder.
-test('a heavy-v tag is checked against the version of tools/heavy/Cargo.toml', () => {
-  const cargo = 'tools/heavy/Cargo.toml';
-  const toml = (v) => `[package]\nname = "paddock-heavy"\nversion = "${v}"\n`;
-  assert.equal(checkVersion('heavy', 'heavy-v0.2.0', files({ [cargo]: toml('0.2.0') })), '0.2.0');
-  assert.throws(() => checkVersion('heavy', 'heavy-v0.2.0', files({ [cargo]: toml('0.1.0') })), /says 0\.2\.0, tools\/heavy\/Cargo\.toml says 0\.1\.0/);
-  assert.throws(() => checkVersion('heavy', 'heavy-v0.2.0', files({})), /tools\/heavy\/Cargo\.toml is missing/);
-  assert.equal(gateWorkflow('heavy', files({})), 'ci.yml');
+// throttle-vX.Y.Z publishes the tool (throttle-release.yml): its version source is tools/throttle/Cargo.toml, not an app folder.
+test('a throttle-v tag is checked against the version of tools/throttle/Cargo.toml', () => {
+  const cargo = 'tools/throttle/Cargo.toml';
+  const toml = (v) => `[package]\nname = "paddock-throttle"\nversion = "${v}"\n`;
+  assert.equal(checkVersion('throttle', 'throttle-v0.2.0', files({ [cargo]: toml('0.2.0') })), '0.2.0');
+  assert.throws(() => checkVersion('throttle', 'throttle-v0.2.0', files({ [cargo]: toml('0.1.0') })), /says 0\.2\.0, tools\/throttle\/Cargo\.toml says 0\.1\.0/);
+  assert.throws(() => checkVersion('throttle', 'throttle-v0.2.0', files({})), /tools\/throttle\/Cargo\.toml is missing/);
+  assert.equal(gateWorkflow('throttle', files({})), 'ci.yml');
   // The release workflow, read through the workflow accessor (not by text): it runs on that tag only, builds the four targets, attaches
   // SHA256SUMS through the release script, keeps its notes out of the assets and publishes the crate last.
-  const wf = loadWorkflow('heavy-release.yml');
-  assert.deepEqual(wf.on?.push?.tags ?? wf.true?.push?.tags, ['heavy-v*']);
+  const wf = loadWorkflow('throttle-release.yml');
+  assert.deepEqual(wf.on?.push?.tags ?? wf.true?.push?.tags, ['throttle-v*']);
   const targets = ['build-linux', 'build-host'].flatMap((id) => (wf.jobs[id].strategy.matrix.include ?? []).map((m) => m.target)).sort();
   assert.deepEqual(targets, ['aarch64-apple-darwin', 'aarch64-unknown-linux-gnu', 'x86_64-pc-windows-msvc', 'x86_64-unknown-linux-gnu']);
   const run = (id) => (wf.jobs[id].steps ?? []).map((s) => s.run ?? '').join('\n');
-  assert.match(run('release'), /sha256sum heavy-\* > SHA256SUMS/);
+  assert.match(run('release'), /sha256sum throttle-\* > SHA256SUMS/);
   assert.match(run('release'), /conformance\/release\/publish\.mjs .*--dir release\b/);
   assert.doesNotMatch(run('release'), /release\/NOTES\.md/, 'the notes are not an uploaded asset');
   assert.deepEqual(wf.jobs.release.needs, ['build-linux', 'build-host']);

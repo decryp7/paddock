@@ -318,7 +318,7 @@ pub fn compute(
     compute_for(exec, env, vars, root, "tools/paddock-dev")
 }
 
-/// [`compute`] for another tool of the repository (`tools/heavy`): the same hash over the `inputs.txt` in its folder `tool_dir`
+/// [`compute`] for another tool of the repository (`tools/throttle`): the same hash over the `inputs.txt` in its folder `tool_dir`
 /// (relative to `root`), so a tool built on demand is cached under its own content address.
 pub fn compute_for(
     exec: &dyn Exec,

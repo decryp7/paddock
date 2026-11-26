@@ -4,7 +4,7 @@
 Refused: `cargo llvm-cov` (also `cargo +nightly llvm-cov`, `cargo-llvm-cov`), `rustup component add`, `rustup toolchain install`,
 `rustup target add` (also `rustup install`, `rustup update`, `rustup self update`, `rustup default <version>`,
 `rustup toolchain add`, `cargo install cargo-llvm-cov`), wherever the command sits in a line, behind a wrapper
-(`heavy run ... --`, `env`, `timeout`, `bash -c`) or in a `&&` chain. Text in heredocs, comments and quoted arguments is not a
+(`throttle run ... --`, `env`, `timeout`, `bash -c`) or in a `&&` chain. Text in heredocs, comments and quoted arguments is not a
 command (lib/shellscan.py). Applies to agents only (agent_id set), like docker-guard and kill-guard. Never fails closed."""
 import json, os, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
@@ -12,7 +12,7 @@ import shellscan
 
 NAME = "no-local-installs"
 # Programs that start the command they are given: the tool follows them, after options, assignments, numbers or `--`.
-WRAPPERS = {"env", "time", "nice", "nohup", "timeout", "heavy", "dev", "sudo", "command", "exec", "xargs", "caffeinate", "taskpolicy"}
+WRAPPERS = {"env", "time", "nice", "nohup", "timeout", "heavy", "throttle", "dev", "sudo", "command", "exec", "xargs", "caffeinate", "taskpolicy"}
 INSTALL = {("component", "add"), ("toolchain", "install"), ("toolchain", "add"), ("target", "add")}
 # cargo options that take a value as the next word (`--opt=value` carries its own).
 CARGO_VALUE_OPTS = {"--config", "-C", "-Z", "--manifest-path", "--color", "--target-dir", "--explain"}

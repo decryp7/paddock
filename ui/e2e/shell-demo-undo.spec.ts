@@ -1,5 +1,5 @@
 import { expect, test } from './test';
-import { axeViolations, expectNoHorizontalScroll, LAYOUT_WIDTHS, THEMES, expectNotMoving } from '@decryp7/paddock-e2e';
+import { axeViolations, expectNoHorizontalScroll, LAYOUT_WIDTHS, THEMES, expectNotMoving, pressMod } from '@decryp7/paddock-e2e';
 
 // Undo and the activity log (plan X44) in the shell demo: a greeting is an undoable edit (Edit > Undo and Redo keys, the
 // "Done, Undo" toast) and an entry of the Activity page, which can take it back. The Lab page exists while there is at least
@@ -17,9 +17,9 @@ test.describe('undo and activity (plan X44)', () => {
     await expect(app.sidebar.link('Lab')).toHaveCount(0);
     await expect(toast).toHaveCount(0);
 
-    await page.keyboard.press('ControlOrMeta+Shift+z');
+    await pressMod(page, 'Mod+Shift+z');
     await expect(app.sidebar.link('Lab')).toBeVisible();
-    await page.keyboard.press('ControlOrMeta+z');
+    await pressMod(page, 'Mod+z');
     await expect(app.sidebar.link('Lab')).toHaveCount(0);
 
     // The close button hides the toast and keeps the edit.

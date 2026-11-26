@@ -22,8 +22,8 @@ export const TAG_RE = /^(?:([a-z0-9]+(?:-[a-z0-9]+)*)-)?v(\d+\.\d+\.\d+(?:-[0-9A
 export const SHA_RE = /^[0-9a-f]{40}$/;
 const SKIP_CI = /\[(?:skip ci|ci skip|no ci|skip actions|actions skip)\]/i;
 
-/** Tools published from their own tag (`heavy-vX.Y.Z`, heavy-release.yml): the tag's name and the file that says their version. */
-export const TOOL_VERSION_SOURCES = { heavy: 'tools/heavy/Cargo.toml' };
+/** Tools published from their own tag (`throttle-vX.Y.Z`, throttle-release.yml): the tag's name and the file that says their version. */
+export const TOOL_VERSION_SOURCES = { throttle: 'tools/throttle/Cargo.toml' };
 
 /** `{ app, version }` of a tag (`app` is null for a `v*` tag of the shared packages), or throws. */
 export function parseTag(tag) {
