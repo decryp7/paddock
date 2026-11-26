@@ -84,6 +84,34 @@ uses it, results in
 
 ## Results of shared tooling
 
+### 2026-11-26, shared npm and ui/dist cache (feat/npm-ui-cache)
+
+- **Commit:** `feat/npm-ui-cache` over `origin/main` `8333e185f`; the change under test is `./dev deps` (`tools/paddock-dev/src/deps_cache.rs`)
+- **Machine:** Mac mini, Apple M4 Pro, 14 cores, macOS 27.2.1, APFS; worktrees and the cache on the same volume (`<dev-targets>`); other agents shared the machine
+- **Load:** the 1-minute load was 20 to 50 during every run below (5-minute load 25 to 35), so the absolute times are inflated; the A/B pairs ran one after the other
+- **Workload:** the root workspace of this commit: 541 `node_modules` folders (43,087 files, 582 MiB; 6 workspace `node_modules` folders), `npm ci --no-audit --no-fund` (npm 11.19.1, Node 24.22.0, registry reachable, npm's own http cache warm), then `npm run build -w ui` (`ui/dist` 9 MiB, css 124 KiB)
+- **Before:** the two commands above, after removing `node_modules`, `ui/dist` and `ui/projects/paddock-ui/css`. **After, cold:** `./dev deps ui` with no cache entry (the same two commands, then a store of each result). **After, warm:** `./dev deps ui` with both entries present
+- **Runs:** before and warm: pairs, interleaved (the second pair below); cold: once (it needs an empty cache). Not repeated more than that: the effect is an order of magnitude
+- **Numbers (wall seconds):**
+
+  | Step | Before (`npm ci` + ui build) | After, cold (`./dev deps ui`) | After, warm (`./dev deps ui`) |
+  |---|---|---|---|
+  | Pair 1, load 50 | 26.0 | | 1.48 |
+  | Pair 2, load 44 | 13.4 | | 1.45 |
+  | Separate run, load 20 to 25 | 6.3 + 10.6 = 16.9 | | 1.9 to 2.2 (three runs, `node_modules` 0.8 to 1.0 s, ui 1.0 to 1.3 s) |
+  | Separate run, load 48 | | 52.0 (npm ci 22.1, build 26.1; the two stores cost 1.9 and 0.3) | |
+
+  The cold run costs about 2 s more than the plain commands (the store, a clone of each result); every later worktree costs 1.5 to 2 s
+  instead of 13 to 26 s, whatever the load, because a hit runs no install and no build.
+- **Cheaper operation (ER-20):** the clone is one `clonefile(2)` of the whole folder on macOS. `cp -cRP` of the same 43,087 files took
+  5.0 s (the first version of this code, 5.3 s for `node_modules`) and `clonefile(2)` 0.46 s; removing a clone is 1.7 to 2.0 s. A
+  clone shares the file data until a file is written, so a cached entry plus N worktrees hold about one copy on disk. Parallelism does
+  not apply: a hit is one call, a miss is one `npm ci` that must not run twice.
+- **Checks made on a cloned tree:** `npm run build -w ui` (Angular, 18 s), `npm run test:tokens` (Vitest, 532 tests) and the e2e build guard
+  (`staleBuilds(ui, 'ui-dist')` empty) all pass; workspace links in a clone are relative (`node_modules/@decryp7/paddock-conformance ->
+  ../../conformance`), so they point into the clone's own worktree.
+- **Not measured:** other disks (a clone across volumes is a plain copy); Linux reflinks; the apps' own builds.
+
 ### 2026-11-24, pre-push row reuse on an unchanged tree (feat/check-result-reuse-v2)
 
 - **Commit:** `285c68695` (one commit over train 2026-11-25-b `cfe8a8592`); the change under test is paddock-dev only
@@ -409,6 +437,7 @@ corpora are in each app's file.
 | Window weight ([`conformance/src/window-weight`](../conformance/src/window-weight)) | JS each window loads before first paint (rule 35) | `ng build --stats-json`, then `paddock-conformance window-weight [kind] [--max kB] [--record]` | The build | `windowWeight` in `paddock.conformance.json`, **not configured anywhere** | none (its check C29 was retired on 2026-11-24, configured nowhere) | — |
 | `./dev hook pre-tool-use` (RT-4, [ADR 0083](adr/0083-agents-cannot-write-outside-their-own-worktree.md) §2) | Per-call time of the installed guard binary on a PreToolUse call, the shim around it, and the binary's size growth | 300 runs of `<git-common-dir>/paddock/hooks/paddock-dev hook pre-tool-use` with a JSON call on stdin, as described in the section below (the script is not kept) | A short, a 6 KB and a malformed call | none yet (the plan expects about 4 to 6 ms) | No | [results](#hook-per-call-cost-and-binary-size-rt-4-2026-11-10) |
 | `./dev gates check` (C100, [ADR 0060](adr/0060-every-check-runs-somewhere.md)) | Run time of the meta-check: 328 checks, the CI model, 3,192 Rust files scanned, the docs | `./dev gates check` (release build of `tools/paddock-dev`) | This repository | none (ADR 0060: quote it only from here; a few seconds at most) | `ci.yml` conformance job, `nightly.yml` c100 job | [results](#2026-11-08-dev-gates-check) |
+| `./dev deps ui` (shared npm and ui/dist cache) | `npm ci` plus the ui build in a fresh worktree, before against cold and warm cache | `./dev deps ui` | This repository's root workspace | none | No | [results](#2026-11-26-shared-npm-and-uidist-cache-featnpm-ui-cache) |
 | Angular build budgets in `ui/angular.json` | Initial chunk size | `npm run build -w ui` (and each demo's build) | — | gallery 1.5 MB / 3 MB; shell-demo 500 kB / 1 MB; workbench-demo 580 kB / 1 MB (warn / error) | `ci.yml` ui jobs, through `ng build` | — |
 | `paddock_proc::scope::GRACE` ([`crates/paddock-proc/tests/it/scope.rs`](../crates/paddock-proc/tests/it/scope.rs), `measure_grace`, [ADR 0119](adr/0119-every-process-is-held-by-its-handle-and-ends-with-its-scope.md) WP-1) | Time from a stop request (SIGTERM by identity) to the exit, per kind of child; the first start with the orphan guardian | `cd crates && cargo nextest run -p paddock-proc --test it --run-ignored only -E 'test(measure_grace)' --no-capture -j 1` (Unix) | Stand-in children | none (it sets the grace constant, ER-12) | No | [2026-11-24](#2026-11-24-scope-grace-from-the-stop-request-to-the-exit-featadr-0119-wp1-scope) |
 | `./dev ci timings` (`tools/paddock-dev/src/ci_runs/timings.rs`, removed on 2026-11-24 with the command; the script `scripts/ci-timings.mjs` that made its recorded golden was deleted on 2026-11-18) | CI wall time, queueing, runners, per-step and compile/test phases, critical path (Gitea API, read-only) | `GITEA_TOKEN=… ./dev ci timings [--repos paddock] [--limit 30] [--cache DIR] [--out docs/research/2026-10-ci-timings.md] [--json-file F]` (default repo: `paddock`; the script defaulted to the old per-app repos) | Gitea run history | none | No (manual) | [research/2026-10-ci-timings.md](research/2026-10-ci-timings.md) |

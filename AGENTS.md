@@ -61,7 +61,7 @@ package.json     the one npm workspace and package-lock.json (ui, eslint, icons,
   `setup-rust` reads it in CI). Upgrading Rust is one change: bump that file, rebuild the CI image, re-capture the
   Rust-tool rows (ADR 0090) and reformat with the new rustfmt. The pinned toolchain starts without extra targets: for the
   Windows lint (`cargo xwin`) run `rustup target add x86_64-pc-windows-msvc --toolchain <the channel in the file>` once.
-- **npm.** One workspace and one `package-lock.json` at the root: `npm ci` there, never in a package folder; add a
+- **npm.** One workspace and one `package-lock.json` at the root: `./dev deps install` (a clone of the shared, content-keyed cache, or `npm ci` once; `./dev deps ui` does the same for `ui/dist`, [docs/dev-setup.md](docs/dev-setup.md#shared-npm-cache-dev-deps)) or `npm ci` there, never in a package folder; add a
   dependency with `npm install <pkg> -w <workspace>`. Apps use `@decryp7/paddock-ui` from `ui/dist` (built with
   `npm run build -w ui`). Name styles and assets in `angular.json` by package path, never `node_modules/...`.
 - **Affected tests (rule 3).** `./dev plan origin/main --explain` lists the projects a change reaches (the

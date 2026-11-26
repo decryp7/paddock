@@ -38,7 +38,7 @@ and links here.
 
 | Name | What is there | How the tools find it |
 | --- | --- | --- |
-| `<dev-targets>` | worktrees (`wt/`), build folders, agent scratch (`scratch/<agent id>`), `sccache`, `paddock-dev-home`, the disk index `.paddock-disk.sqlite`, heavy's run logs (`runs/<agent>/`) | `PADDOCK_DEV_TARGETS`, else the parent of `paddock.worktreeRoot`, else of `PADDOCK_WORKTREE_ROOT` |
+| `<dev-targets>` | worktrees (`wt/`), build folders, agent scratch (`scratch/<agent id>`), `sccache`, `paddock-dev-home`, the disk index `.paddock-disk.sqlite`, heavy's run logs (`runs/<agent>/`), the shared npm cache `cache/npm` | `PADDOCK_DEV_TARGETS`, else the parent of `paddock.worktreeRoot`, else of `PADDOCK_WORKTREE_ROOT` |
 | `<dev disk>` | the folder that holds `<dev-targets>` | the parent of `<dev-targets>` |
 | `<dev disk>/vm-data` | the Tart images `tart-from-home` of the service smoke | `PADDOCK_VM_DATA`, else derived |
 | `<dev disk>/ci/locks/test-machines` | the lock of the test machines (`scripts/vm-lock.sh`) | `PADDOCK_VM_LOCK_ROOT`, else derived |
@@ -58,6 +58,27 @@ The Mac mini's layout since 2026-11-14 (one SSD for all dev data; media and back
 
 After a disk move: move the folders, run `git config paddock.worktreeRoot <new dev-targets>/wt` in the main checkout,
 update the shell profile's `SCCACHE_DIR` and `PADDOCK_DEV_HOME`, and change the table above. Nothing else names the disk.
+
+## Shared npm cache (`./dev deps`)
+
+`npm ci` and the `ui/dist` build are done once per content key, not once per worktree. `./dev deps install` gives the worktree its
+`node_modules` (the root's and each workspace's) and `./dev deps ui` adds `ui/dist` and the generated css: each is a copy-on-write
+clone (APFS `clonefile` through `cp -c`, a reflink where the file system has one, else a plain copy) of an entry in
+`<dev-targets>/cache/npm/`, or the one build that makes the entry. A clone is a real folder of its own, never a link into the cache,
+so Angular, Vitest and Playwright resolve ordinary paths and no worktree can change another's. `./dev worktree add` clones a warm
+`node_modules` at once; with a cold cache it keeps installing only the conformance dependencies and never builds.
+
+- **Keys.** `node_modules`: `package-lock.json`, the Node version and the platform. `ui/dist`: the build guard's own content hashes
+  (`sourceHash` in `@decryp7/paddock-e2e`, read from Node), the `node_modules` key and the hash of `ui/angular.json`,
+  `ui/package.json`, `ui/tsconfig.json`, `ui/scripts/` and `tsconfig/`. A changed lockfile or source is a new key (a miss), never an
+  edit of an old entry.
+- **Owner, lock, size, eviction (ER-51).** Owner: `./dev deps` (`owner.json` in the folder). One kernel file lock per key
+  (`<name>.lock`), exclusive while an entry is built and stored, shared while one is only cloned out, so two builders of one key
+  build once and an entry is never read half made. An entry is made in a staging folder and renamed into place; `entry.json` records
+  its folders and file count, and an entry that fails the check is removed and rebuilt. Cap 10 GiB (`PADDOCK_DEPS_CACHE_MAX_GIB`);
+  over it, the least recently used entry (folder modification time, set on every hit) goes first, never the one just used or one
+  whose lock is held. Every deletion goes through `safe_remove`.
+- **Measurements:** [docs/benchmarks.md](benchmarks.md#2026-11-26-shared-npm-and-uidist-cache-featnpm-ui-cache).
 
 ## Environment
 
