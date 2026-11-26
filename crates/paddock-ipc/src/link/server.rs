@@ -24,7 +24,7 @@ use paddock_jobs::time::{Clock, SystemClock};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
@@ -146,8 +146,12 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 struct Shared {
     stop: AtomicBool,
     peers: Mutex<Vec<Peer>>,
+    /// Woken when a peer joins the list or a listed one closes ([`LinkServer::wait_peers`]).
+    peers_changed: Condvar,
     handshakes: AtomicUsize,
     refused: Mutex<Vec<IpcError>>,
+    /// Woken after every refusal is recorded ([`LinkServer::wait_refused`]).
+    refused_changed: Condvar,
 }
 
 impl Shared {
@@ -157,6 +161,32 @@ impl Shared {
             refused.remove(0);
         }
         refused.push(e);
+        drop(refused);
+        self.refused_changed.notify_all();
+    }
+
+    /// Adds a served peer and wakes [`LinkServer::wait_peers`], now and again when it closes. After [`LinkServer::stop`] the
+    /// peer is closed instead: `stop` does not join the handshake threads, so one that passed its own stop check can get here
+    /// after `stop` emptied the list. The flag is read under the list's lock, which `stop` takes after setting it.
+    fn add_peer(self: &Arc<Self>, peer: Peer) {
+        let shared = Arc::downgrade(self);
+        {
+            let mut peers = lock(&self.peers);
+            if self.stop.load(Ordering::SeqCst) {
+                drop(peers);
+                peer.close();
+                return;
+            }
+            peers.push(peer.clone());
+        }
+        self.peers_changed.notify_all();
+        peer.when_closed(Box::new(move || {
+            if let Some(s) = shared.upgrade() {
+                // Under the lock, so a waiter between its check and its wait cannot miss the wake.
+                let _held = lock(&s.peers);
+                s.peers_changed.notify_all();
+            }
+        }));
     }
 
     fn open_peers(&self) -> usize {
@@ -207,8 +237,10 @@ impl LinkServer {
         let shared = Arc::new(Shared {
             stop: AtomicBool::new(false),
             peers: Mutex::new(Vec::new()),
+            peers_changed: Condvar::new(),
             handshakes: AtomicUsize::new(0),
             refused: Mutex::new(Vec::new()),
+            refused_changed: Condvar::new(),
         });
         let endpoint = host.endpoint().to_string();
         let s = shared.clone();
@@ -229,7 +261,9 @@ impl LinkServer {
                         Ok(accepted) => accepted,
                         Err(e) if e.kind() == std::io::ErrorKind::TimedOut => continue,
                         Err(e) => {
-                            // Recorded before the client is answered, so `refused()` never trails what a client was told.
+                            // Recorded before `turn_away` answers the client (Linux). On macOS the failed accept has already
+                            // dropped the client in the kernel, so the client can see its end before this line runs: read the
+                            // record with `wait_refused`, never at a moment the client chose (CI run 9150).
                             s.refuse(IpcError::from(std::io::Error::new(e.kind(), e.to_string())));
                             host.turn_away(&e);
                             std::thread::sleep(ACCEPT_ERROR_PAUSE);
@@ -264,8 +298,7 @@ impl LinkServer {
                                 .authenticate(stream, os_pid, None)
                                 .and_then(|c| Peer::start(c, handler, opts))
                             {
-                                Ok(peer) if s2.stop.load(Ordering::SeqCst) => peer.close(),
-                                Ok(peer) => lock(&s2.peers).push(peer),
+                                Ok(peer) => s2.add_peer(peer),
                                 Err(e) => s2.refuse(e),
                             }
                             s2.handshakes.fetch_sub(1, Ordering::SeqCst);
@@ -292,15 +325,70 @@ impl LinkServer {
     }
 
     /// The open connections.
+    ///
+    /// A snapshot: a peer is listed by its handshake thread after the client was welcomed, so it can trail what the client
+    /// already saw (a client's first call can be answered before its peer is listed). To act on a change a client caused,
+    /// wait for it with [`LinkServer::wait_peers`].
     pub fn peers(&self) -> Vec<Peer> {
         let mut peers = lock(&self.shared.peers);
         peers.retain(|p| !p.is_closed());
         peers.clone()
     }
 
+    /// Waits until `until` holds for the open connections ([`LinkServer::peers`]), woken when one is listed or closes, at
+    /// most `max` (OS time; a hang guard, not a limit of anything). `Ok` with the peers that met it, `Err` with the last ones
+    /// seen when `max` passed first. `until` runs under the server's lock of the list: it must not call this server or close a
+    /// peer (a closing peer's watcher takes that lock).
+    pub fn wait_peers(
+        &self,
+        max: Duration,
+        until: impl Fn(&[Peer]) -> bool,
+    ) -> Result<Vec<Peer>, Vec<Peer>> {
+        let guard = lock(&self.shared.peers);
+        let (mut peers, _) = self
+            .shared
+            .peers_changed
+            .wait_timeout_while(guard, max, |p| {
+                p.retain(|p| !p.is_closed());
+                !until(p)
+            })
+            .unwrap_or_else(|p| p.into_inner());
+        peers.retain(|p| !p.is_closed());
+        if until(&peers) {
+            Ok(peers.clone())
+        } else {
+            Err(peers.clone())
+        }
+    }
+
     /// Clients that were refused (wrong token, another protocol, too many, a handshake that ran out), the most recent 64.
+    ///
+    /// A snapshot: a refusal is recorded by the server's own threads, so it can trail what the client already saw (a client
+    /// told why is recorded right after the answer; on macOS a client the accept could not take is dropped by the kernel
+    /// before the server learns of it). To act on a refusal a client caused, wait for it with [`LinkServer::wait_refused`].
     pub fn refused(&self) -> Vec<IpcError> {
         lock(&self.shared.refused).clone()
+    }
+
+    /// Waits until `until` holds for the recorded refusals ([`LinkServer::refused`]), woken by each new one, at most `max`
+    /// (OS time; a hang guard, not a limit of anything). `Ok` with the refusals that met it, `Err` with the last ones seen when
+    /// `max` passed first. `until` runs under the server's lock of its refusals: it must not call this server or close a peer.
+    pub fn wait_refused(
+        &self,
+        max: Duration,
+        until: impl Fn(&[IpcError]) -> bool,
+    ) -> Result<Vec<IpcError>, Vec<IpcError>> {
+        let guard = lock(&self.shared.refused);
+        let (refused, timeout) = self
+            .shared
+            .refused_changed
+            .wait_timeout_while(guard, max, |r| !until(r))
+            .unwrap_or_else(|p| p.into_inner());
+        if timeout.timed_out() && !until(&refused) {
+            Err(refused.clone())
+        } else {
+            Ok(refused.clone())
+        }
     }
 
     /// Stops accepting, closes every connection and removes the discovery file if it still names this process.
@@ -309,7 +397,9 @@ impl LinkServer {
         if let Some(t) = self.accept.take() {
             paddock_proc::cleanup::join_warn("the link server's accept thread", t);
         }
-        for p in lock(&self.shared.peers).drain(..) {
+        // Out of the list first: a peer's close watcher takes the list's lock, so no peer is closed while it is held.
+        let peers: Vec<Peer> = lock(&self.shared.peers).drain(..).collect();
+        for p in peers {
             p.close();
         }
         Discovery::remove_if_owned_by(&self.discovery, std::process::id());
@@ -382,6 +472,116 @@ mod tests {
     use crate::endpoint::Listener;
     use crate::frame::{self, Frame};
     use std::time::Duration;
+
+    /// A server around `shared` with no accept thread and no discovery file: the tests below drive `Shared` directly.
+    fn bare_server() -> (LinkServer, Arc<Shared>) {
+        let shared = Arc::new(Shared {
+            stop: AtomicBool::new(false),
+            peers: Mutex::new(Vec::new()),
+            peers_changed: Condvar::new(),
+            handshakes: AtomicUsize::new(0),
+            refused: Mutex::new(Vec::new()),
+            refused_changed: Condvar::new(),
+        });
+        let server = LinkServer {
+            shared: shared.clone(),
+            discovery: PathBuf::new(),
+            endpoint: String::new(),
+            accept: None,
+        };
+        (server, shared)
+    }
+
+    /// A served peer on one end of a fresh pair; the other end is returned so the connection stays up.
+    fn served_peer() -> (Peer, Stream) {
+        let (ours, theirs) = crate::endpoint::pair().unwrap();
+        let peer = Peer::start(
+            crate::handshake::Connection::raw(ours, FrameLimit::default()),
+            Arc::new(crate::NoCalls),
+            PeerOptions::new("a client"),
+        )
+        .unwrap();
+        (peer, theirs)
+    }
+
+    /// Runs `wait_peers(until)` on a thread and returns once `until` has said no at least once, so the waiter is parked on
+    /// the condition variable (it re-takes the lock only when woken): what the caller does next must wake it. The wait's own
+    /// bound is three hang guards and the caller reads its answer within one, so an answer means it was woken, not that its
+    /// bound ran out (its last check would then pass too).
+    fn parked_wait_peers(
+        server: Arc<LinkServer>,
+        until: fn(&[Peer]) -> bool,
+    ) -> std::sync::mpsc::Receiver<Result<usize, usize>> {
+        let (said_no, first_no) = std::sync::mpsc::channel();
+        let (answer, answered) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let got = server
+                .wait_peers(paddock_testkit::HANG_GUARD * 3, |p| {
+                    let ok = until(p);
+                    if !ok {
+                        let _ = said_no.send(());
+                    }
+                    ok
+                })
+                .map(|p| p.len())
+                .map_err(|p| p.len());
+            let _ = answer.send(got);
+        });
+        first_no
+            .recv_timeout(paddock_testkit::HANG_GUARD)
+            .expect("the wait checked its condition");
+        answered
+    }
+
+    /// Wake site 1: listing a peer wakes a parked `wait_peers` (without the notify in `add_peer` it sleeps to its guard).
+    #[test]
+    fn listing_a_peer_wakes_a_parked_wait_for_it() {
+        let (server, shared) = bare_server();
+        let server = Arc::new(server);
+        let waiter = parked_wait_peers(server.clone(), |p| p.len() == 1);
+        let (peer, _theirs) = served_peer();
+        shared.add_peer(peer);
+        assert_eq!(
+            waiter.recv_timeout(paddock_testkit::HANG_GUARD),
+            Ok(Ok(1)),
+            "the wait was not woken by the listed peer"
+        );
+    }
+
+    /// Wake site 2: a listed peer's close wakes a parked `wait_peers` (without the notify in the close watcher it sleeps to
+    /// its guard).
+    #[test]
+    fn a_listed_peer_closing_wakes_a_parked_wait_for_it() {
+        let (server, shared) = bare_server();
+        let server = Arc::new(server);
+        let (peer, _theirs) = served_peer();
+        shared.add_peer(peer.clone());
+        let waiter = parked_wait_peers(server.clone(), <[Peer]>::is_empty);
+        peer.close();
+        assert_eq!(
+            waiter.recv_timeout(paddock_testkit::HANG_GUARD),
+            Ok(Ok(0)),
+            "the wait was not woken by the close"
+        );
+    }
+
+    /// A handshake that passed the stop check before `stop` and lists its peer after `stop` emptied the list must not leave
+    /// that peer open: `stop` does not join the handshake threads.
+    #[test]
+    fn a_peer_listed_after_stop_is_closed_not_left_open() {
+        let (mut server, shared) = bare_server();
+        server.stop();
+        let (peer, _theirs) = served_peer();
+        shared.add_peer(peer.clone());
+        assert!(
+            peer.wait_closed(Some(Duration::ZERO)),
+            "the peer listed after stop is still open"
+        );
+        assert!(
+            lock(&shared.peers).is_empty(),
+            "the peer listed after stop is in the list"
+        );
+    }
 
     /// A handshake thread that cannot start leaves the client told `busy` with the cause, not a connection that just ends.
     #[test]

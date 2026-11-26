@@ -194,8 +194,14 @@ fn the_client_reconnects_with_back_off_on_a_fake_clock() {
             pid: std::process::id()
         }
     );
-    assert_eq!(first.peers().len(), 1);
-    assert!(first.refused().is_empty());
+    // The server lists the peer after the welcome, so the call above can be answered first: wait for the list.
+    assert!(first.wait_peers(GUARD, |p| p.len() == 1).is_ok());
+    assert_eq!(
+        first
+            .wait_refused(Duration::ZERO, |r| r.is_empty())
+            .map_err(|r| r.len()),
+        Ok(vec![])
+    );
     // The companion goes away: the next wait is longer (two seconds: the link was not healthy for a minute).
     first.stop();
     assert!(!path.exists(), "the server removed its discovery file");
