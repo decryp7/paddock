@@ -1203,3 +1203,4 @@ reason = "ER-41: report-only until its first green run on the real tree, recorde
 owner = "ER-21 class: a fixture builds its git repository once per test (trial::world 17 gits, green::train_g_shape 14: 710 s of train n's Windows job; user decision 74; perf/slow-git-tests-fixture)"
 since = 2026-11-26
 review_by = 2026-12-10
+approved = "user"
