@@ -139,7 +139,7 @@ pub fn ci_jobs(text: &str) -> Result<std::collections::BTreeMap<String, Vec<Stri
     let Some(jobs) = t.get("ci").and_then(|c| c.get("jobs")) else {
         return Ok(std::collections::BTreeMap::new());
     };
-    let jobs = table(jobs, "ci.jobs")?;
+    let jobs = table(jobs, "[ci.jobs]")?;
     let known: Vec<String> = tables(&t, "project")?
         .iter()
         .filter_map(|p| p.get("id").and_then(toml::Value::as_str).map(str::to_string))
