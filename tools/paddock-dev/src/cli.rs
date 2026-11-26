@@ -1,7 +1,8 @@
 use crate::{
     audit, check, check_ids, ci_build_env, ci_build_jobs, ci_host, ci_isolation, ci_run, ci_runs, ci_rust_pin, ci_s3_guard, ci_setup_rust,
-    disk, gates, generators, heavy_cmd, heavy_install, hook, input_hash, ipc_endpoints, lessons_driver, load, local_sccache, locks,
-    locks_guard, merge_check, places, plan_cmd, pr, pre_push, queue, release_isolation, slots, test_cache, test_features, wait, worktree,
+    deps_cache, disk, gates, generators, heavy_cmd, heavy_install, hook, input_hash, ipc_endpoints, lessons_driver, load, local_sccache,
+    locks, locks_guard, merge_check, places, plan_cmd, pr, pre_push, queue, release_isolation, slots, test_cache, test_features, wait,
+    worktree,
 };
 use clap::{Args, Parser, Subcommand};
 use paddock_cli::{CliError, Exit, Format, Report, finish};
@@ -87,6 +88,12 @@ enum Command {
     Sccache {
         #[command(subcommand)]
         command: SccacheCommand,
+    },
+    /// The shared cache of `node_modules` and `ui/dist`: `install` and `ui` give this worktree a copy-on-write clone of a result built
+    /// once per content key under `<dev-targets>/cache/npm`, or build it once.
+    Deps {
+        #[command(subcommand)]
+        command: deps_cache::DepsCommand,
     },
     /// Disk watch and clean-up: free-space check, usage report, scan, owner records, clean.
     Disk {
@@ -851,6 +858,7 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
             command: CheckCommand::TestFeatures { app, root },
         } => test_features::command(root, app),
         Command::Worktree { command } => worktree::command(command),
+        Command::Deps { command } => deps_cache::command(command),
         Command::Sccache {
             command: SccacheCommand::Env,
         } => {
