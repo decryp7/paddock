@@ -359,6 +359,15 @@ Each lists the recommended option and the common-practice option.
   runs never read the cache, only member and fix rounds do (saves less: the measured rounds above were full train runs). Common
   practice (Bazel on CI, Nx Cloud) reads the cache on main too.
 
+## Amendment 2026-11-26: declared input sets for the whole-tree rows, measured and not built
+
+The user approved declared input sets for `conformance-tests` and `member-audits` in shadow, after a trace of what each reads. The trace
+(docs/benchmarks.md, "what the two whole-tree gate rows read") found 13,675 and 36,087 distinct paths in every top-level area of the tree, the
+apps and shared crates included. A sound declared set is therefore the whole tree, which is the key those rows already have (the tree, the
+base ref, the day), so a `Class::Declared` would add a second key with no extra reuse. A per-run read set needs a tracer per OS and a key no
+one can review (ER-37, common practice: Bazel and ccache do it with sandboxes the build system owns). Not built. What remains open: adding
+`member-audits` to the whole-tree class of `reuse::class_of` for an exact-tree repeat (a one-line change in the gate owner's file).
+
 ## Consequences
 
 - A change to shared CI configuration, docs or another app no longer reruns an app's unchanged tests; a change to a shared crate reruns

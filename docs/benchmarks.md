@@ -84,6 +84,28 @@ uses it, results in
 
 ## Results of shared tooling
 
+### 2026-11-26, what the two whole-tree gate rows read (ADR 0116, declared input sets for `conformance-tests` and `member-audits`)
+
+- **What:** a one-off trace of every `open`, `stat`, `lstat`, `opendir` and `fopen` under the checkout during one green run of each row, by a
+  throw-away `DYLD_INSERT_LIBRARIES` interposer (macOS, non-SIP binaries only: node and the cargo-built test binaries; `git` and `/bin/sh` children
+  are not seen). Distinct paths, `node_modules`, `.git` and build folders left out. Not kept in the repository (a measurement tool, not a check).
+- **Host and tree:** Mac mini, load 28 to 50 during the runs (a trace, not a timing); tree `247afe10e`.
+- **Results:**
+
+| Row | Run | Distinct paths read | Where |
+|---|---|---|---|
+| `conformance-tests` (`node test/run-tests.mjs`, 1203 tests) | 78 s | 13,675 | apps/* 5,900, conformance 2,600, ui 1,100, tools/paddock-dev 1,000, `.gitea` 190, crates/* about 1,500, docs, scripts, icons, templates, eslint |
+| `member-audits` (83 tests) | 117 s | 36,087 | apps/* 15,800, tools/paddock-dev 5,700, icons 2,400, ui 3,900, crates/* about 2,500, conformance 670, docs, `.gitea` |
+
+- **Reading:** both rows read files in every top-level folder of the tree, the apps and the shared crates included. Any declared input set that
+  is sound is the whole tree minus build output, so a folder-level declared key reuses no more than the whole-tree key does today. A tighter key
+  needs a per-run read set (hash the files a green run read, check them on the next run; Bazel's and ccache's dynamic dependency
+  tracking), which needs a tracer on every OS (dyld interposition here, `LD_PRELOAD` on Linux, nothing equivalent on Windows without a driver) and
+  gives a key that no author can review. The rows also read the base ref (the growth tests) and the clock (waivers), which the whole-tree key
+  already carries. Decision recorded in ADR 0116 (amendment 2026-11-26): no `Class::Declared`; `member-audits` can join `reuse::class_of`'s whole-tree class
+  (one line, the gate owner's file) if the exact-tree repeat is worth it.
+- **Not measured:** the child processes (`git`, shells, `./dev` started by tests), Linux and Windows, a trace of a failing run.
+
 ### 2026-11-26, test-result cache: an unchanged Cargo package reuses its pass (feat/adr-0116-test-result-cache)
 
 - **What:** `./dev ci test-cache run --workspace crates --only paddock-limits,paddock-names,paddock-metrics` (nextest `ci` profile,
