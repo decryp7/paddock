@@ -47,8 +47,8 @@ fn a_child_sees_only_listed_names_whatever_the_machine_has() {
     for k in [
         "ENGINEERING_RULES",
         "HEAVY_LOCK_DIR",
-        "HEAVY_SLOTS",
-        "PADDOCK_HEAVY",
+        "THROTTLE_SLOTS",
+        "PADDOCK_THROTTLE",
         "PADDOCK_DEV_HOME",
         "CI",
         "GITHUB_TOKEN",
@@ -563,7 +563,7 @@ fn an_installed_tool_beside_the_toolchain_is_not_reachable_and_the_toolchain_is(
     let mut cmd = TestCommand::on("/bin/sh", &m);
     cmd.args([
         "-c",
-        "if command -v heavy; then exit 3; fi; found=$(command -v rustc) && test -x \"$found\" && echo \"$found\"",
+        "if command -v throttle; then exit 3; fi; found=$(command -v rustc) && test -x \"$found\" && echo \"$found\"",
     ]);
     let report = cmd.path_report();
     let out = cmd.output().unwrap();
@@ -571,7 +571,7 @@ fn an_installed_tool_beside_the_toolchain_is_not_reachable_and_the_toolchain_is(
     assert_ne!(
         out.status.code(),
         Some(3),
-        "heavy is reachable: {said}\n{report}"
+        "throttle is reachable: {said}\n{report}"
     );
     assert!(
         out.status.success(),

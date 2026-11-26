@@ -311,13 +311,13 @@ jobs:
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/paddock-dev
         run: cargo clippy --all-targets --locked -- -D warnings
 
-      # The inputs and generator tests read the cargo metadata of tools/heavy offline: its packages must be in
+      # The inputs and generator tests read the cargo metadata of tools/throttle offline: its packages must be in
       # the job's cargo home, not only paddock-dev's (heavy's paddock-env dependency was missing on 2026-11-13, run 8050).
       - name: Fetch the other tools' dependencies
         if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' }}
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools
         run: |
-          for t in heavy; do
+          for t in throttle; do
             (cd "$t" && cargo fetch --locked) || {
               echo "::error::cargo fetch --locked failed in tools/$t, so the offline metadata tests cannot read it. Next step: run it on the runner to see why"; exit 1; }
           done
@@ -1329,8 +1329,8 @@ jobs:
   #    an advisory this change adds fails. `./dev audit compare` audits the merge base's lockfiles with the same tools (no list is kept,
   #    ER-46). Report-only until the repository variable PADDOCK_AUDIT_ENFORCE is 1 (ER-41: set after its first green run, recorded in
   #    docs/ci-schedules.md); the plain audit steps of the other jobs stay blocking until then. It runs on every event, as its job did.
-  #  - The heavy tool (tools/heavy): the machine-wide heavy-step lock. Its own Cargo workspace, when the plan marks `tools`; a Linux
-  #    container, so no build-folder action (the build folder is tools/heavy/target in the container, git-ignored).
+  #  - The heavy tool (tools/throttle): the machine-wide heavy-step lock. Its own Cargo workspace, when the plan marks `tools`; a Linux
+  #    container, so no build-folder action (the build folder is tools/throttle/target in the container, git-ignored).
   quick:
     name: quick checks (C99, audit, heavy tool)
     needs: [plan]
@@ -1378,29 +1378,29 @@ jobs:
 
       - name: heavy tool, lockfile is current
         if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && needs.plan.outputs.tools == 'true' }}
-        working-directory: tools/heavy
+        working-directory: tools/throttle
         run: |
           cargo metadata --locked --format-version 1 > /dev/null || {
-            echo "::error::tools/heavy/Cargo.lock is stale, run cargo update -w in tools/heavy and commit it"; exit 1; }
+            echo "::error::tools/throttle/Cargo.lock is stale, run cargo update -w in tools/throttle and commit it"; exit 1; }
 
       - name: heavy tool, format
         if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && needs.plan.outputs.tools == 'true' }}
-        working-directory: tools/heavy
+        working-directory: tools/throttle
         run: cargo fmt --check
 
       - name: heavy tool, clippy
         if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && needs.plan.outputs.tools == 'true' }}
-        working-directory: tools/heavy
+        working-directory: tools/throttle
         run: cargo clippy --all-targets --locked -- -D warnings
 
       - name: heavy tool, tests
         if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && needs.plan.outputs.tools == 'true' }}
-        working-directory: tools/heavy
+        working-directory: tools/throttle
         run: cargo nextest run --profile ci --locked --no-fail-fast
 
       - name: heavy tool, deny
         if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && needs.plan.outputs.tools == 'true' }}
-        working-directory: tools/heavy
+        working-directory: tools/throttle
         run: cargo deny check
 
       # The tool builds with a plain Rust toolchain: no GTK -sys crate may reach it through the shared crates (the workspace
@@ -1413,7 +1413,7 @@ jobs:
           # bash -e -o pipefail: every command that may legitimately fail is handled by hand. grep exits 1 when it finds nothing,
           # which is the success case here.
           rc=0
-          for tool in heavy; do
+          for tool in throttle; do
             tree=$(cd "tools/$tool" && cargo tree --locked --target x86_64-unknown-linux-gnu -e normal,build --prefix none) || {
               echo "::error::cargo tree failed for tools/$tool (see the lines above). Run it in tools/$tool with the same arguments."
               rc=1; continue; }

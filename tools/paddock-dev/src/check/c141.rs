@@ -62,7 +62,7 @@ const RULE: u32 = 79;
 /// user (ER-46), and the test `the_no_secret_list_only_shrinks` pins its content so a growing list shows in a diff.
 pub const NO_SECRET: [&str; 6] = [
     "app-release.yml",
-    "heavy-release.yml",
+    "throttle-release.yml",
     "dyno-release.yml",
     "pitcrew-release.yml",
     "pitwall-release.yml",
@@ -716,7 +716,7 @@ mod tests {
         // Pinned: a longer list shows in this diff and needs the user's yes (ER-46).
         assert_eq!(
             NO_SECRET,
-            ["app-release.yml", "heavy-release.yml", "dyno-release.yml", "pitcrew-release.yml", "pitwall-release.yml", "spotter-release.yml"]
+            ["app-release.yml", "throttle-release.yml", "dyno-release.yml", "pitcrew-release.yml", "pitwall-release.yml", "spotter-release.yml"]
         );
     }
 

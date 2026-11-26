@@ -314,7 +314,7 @@ fn a_tool_lockfile_entry_marks_the_manifest_of_every_shared_crate_the_tool_depen
         .lines()
         .find_map(|l| l.strip_prefix("host: ").map(str::to_string))
         .unwrap();
-    for tool in ["tools/paddock-dev", "tools/heavy"] {
+    for tool in ["tools/paddock-dev", "tools/throttle"] {
         let out = TestCommand::new(env!("CARGO"))
             .args([
                 "metadata",

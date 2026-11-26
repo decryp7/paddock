@@ -11,6 +11,8 @@
 //!   changed, and [`EnvLock::hermetic`], which points `HOME`, `APPDATA`, the XDG folders and `TMPDIR` into a [`Scratch`].
 //! - [`TestCommand`]: the one way a test starts `./dev`, `cargo` or `node`: an empty environment plus a listed one, a private
 //!   home and temp folder, a curated `PATH` (ADR 0100, check C123).
+//! - [`git_fixture`]: `template` and `copy_tree`, a git fixture built once per machine and copied per test, so a test of git
+//!   code starts no `git` to set up (ER-20, rule NEW-git-fixtures).
 //! - [`golden`]: expected-output files; a difference fails with the first differing line, `PADDOCK_UPDATE_GOLDEN=1`
 //!   rewrites them.
 //! - [`FakeRunner`]: a scripted stand-in for "run an OS command" seams (launchctl, systemctl, reg, ...), recording every call.
@@ -51,6 +53,7 @@ pub mod cargo_layout;
 pub mod cases;
 pub mod env;
 pub mod exe;
+pub mod git_fixture;
 pub mod golden;
 pub mod hostile;
 pub mod limits;

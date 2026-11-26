@@ -493,14 +493,13 @@ fn only_rows_that_read_nothing_but_the_tree_have_a_class() {
     let c = |id: &str, cwd: &str| class_of(&gate(id, cwd));
     assert_eq!(c("clippy apps/dyno", "apps/dyno"), Some(Class::Cargo(vec!["apps/dyno".into()])));
     assert_eq!(c("conformance", ""), Some(Class::Whole));
-    for never in [
-        "commit-lint",
-        "member-audits",
-        "locks-guard",
-        "pitwall-deny",
-        "dyno-wire-fixtures",
-        "something-new",
-    ] {
+    assert_eq!(c("conformance-tests", ""), Some(Class::WholeTree));
+    assert_eq!(
+        c("member-audits", ""),
+        Some(Class::Whole),
+        "the audits read the whole tree: keyed like conformance"
+    );
+    for never in ["commit-lint", "locks-guard", "pitwall-deny", "dyno-wire-fixtures", "something-new"] {
         assert_eq!(c(never, ""), None, "{never} is never reused");
     }
 }
@@ -799,4 +798,82 @@ fn the_member_gates_test_rows_have_a_class() {
     // The developer tool's tests read the whole repository (contracts, goldens, workflows): keyed on the whole tree.
     assert_eq!(c("tests tools/paddock-dev", "tools/paddock-dev", &[]), Some(Class::Whole));
     assert_eq!(c("tests", "", &[]), None, "the summary row of a skip is never a run");
+}
+
+/// The member audits (ADR 0116 amendment 2026-11-26) are reused on an exact-tree repeat and run again once the tree changes: the member
+/// gate's pass is the push's, and the train-audits guard's, as long as nothing under the tree moved.
+#[test]
+fn the_member_audits_are_reused_on_the_same_tree_and_run_again_when_the_tree_changes() {
+    let s = Scratch::new();
+    let ex = Counting::new(true);
+    let audits = || vec![Planned::Run(gate("member-audits", "tools/paddock-dev"))];
+    run(&audits(), &ex, Some(&s.reuse()));
+    assert_eq!(ex.take(), all(&["member-audits"]), "the first run runs it");
+    let again = run(&audits(), &ex, Some(&s.reuse()));
+    assert!(ex.take().is_empty(), "the same tree: the audits are not run again");
+    assert!(
+        again.iter().all(|(_, r)| r.reused.is_some() && r.kind() == Kind::Passed),
+        "{again:?}"
+    );
+    // Positive control: a change anywhere in the tree (a file the audits could read) runs them again.
+    s.commit("docs/elsewhere.md", "changed\n");
+    run(&audits(), &ex, Some(&s.reuse()));
+    assert_eq!(ex.take(), all(&["member-audits"]), "a changed tree: the audits run again");
+}
+
+/// The class of each repository-wide row is declared in one place ([`BASE_READING_ROWS`], [`TREE_ONLY_ROWS`]): the rows that read the
+/// base's files key on its tip ([`Class::Whole`]), the rest on the merge base ([`Class::WholeTree`]); no row is in both.
+#[test]
+fn each_whole_tree_row_is_in_exactly_one_class_by_whether_it_reads_the_base() {
+    let c = |id: &str| class_of(&gate(id, ""));
+    for id in BASE_READING_ROWS {
+        assert_eq!(c(id), Some(Class::Whole), "{id} reads the base's files");
+        assert!(!TREE_ONLY_ROWS.contains(id), "{id} is in both lists");
+    }
+    for id in TREE_ONLY_ROWS {
+        assert_eq!(c(id), Some(Class::WholeTree), "{id} reads only the tree");
+    }
+    for id in ["conformance", "gates-register", "member-audits"] {
+        assert!(BASE_READING_ROWS.contains(&id), "{id}: the base's tip stays in its key");
+    }
+}
+
+/// A landing moves `origin/main`'s tip but not the merge base: a row that reads the base's files runs again (its answer can change with
+/// the base), a row that reads only the tree keeps its pass. Moving the merge base itself runs both again (the positive control: the
+/// merge-base key is not a constant).
+#[test]
+fn a_moved_base_tip_recomputes_a_base_reading_row_and_keeps_a_tree_only_row() {
+    let s = Scratch::new();
+    s.git(&["update-ref", "refs/remotes/origin/main", "HEAD"]);
+    s.commit("x.txt", "1\n");
+    let ex = Counting::new(true);
+    let rows = || vec![Planned::Run(gate("conformance", "")), Planned::Run(gate("conformance-tests", ""))];
+    run(&rows(), &ex, Some(&s.reuse()));
+    assert_eq!(ex.take(), all(&["conformance", "conformance-tests"]), "the first run runs both");
+    run(&rows(), &ex, Some(&s.reuse()));
+    assert!(ex.take().is_empty(), "nothing moved: both are reused");
+    // A landing: origin/main gains a commit the branch does not have. The merge base is unchanged.
+    let m0 = s.git(&["rev-parse", "origin/main"]).trim().to_string();
+    let tree = s.git(&["rev-parse", "origin/main^{tree}"]).trim().to_string();
+    let m1 = s.git(&["commit-tree", &tree, "-p", &m0, "-m", "landed"]).trim().to_string();
+    s.git(&["update-ref", "refs/remotes/origin/main", &m1]);
+    assert_eq!(
+        s.git(&["merge-base", "HEAD", "origin/main"]).trim(),
+        m0,
+        "the merge base did not move"
+    );
+    run(&rows(), &ex, Some(&s.reuse()));
+    assert_eq!(
+        ex.take(),
+        all(&["conformance"]),
+        "the base reader runs again, the tree-only row is reused"
+    );
+    // The merge base moves (the branch's head is now the base): both run again.
+    s.git(&["update-ref", "refs/remotes/origin/main", "HEAD"]);
+    run(&rows(), &ex, Some(&s.reuse()));
+    assert_eq!(
+        ex.take(),
+        all(&["conformance", "conformance-tests"]),
+        "a moved merge base runs both"
+    );
 }

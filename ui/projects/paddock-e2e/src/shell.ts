@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { expect, type Locator, type Page } from '@playwright/test';
+import { isMacNavigator } from './keyboard.ts';
 
 /*
  * Page objects for the parts of the Paddock shell (plan S14 and the packages before it), by their accessible names and
@@ -189,9 +190,9 @@ export class ShellMenus {
   async item(menu: string, item: string): Promise<Locator> {
     return (await this.open(menu)).getByRole('menuitem', { name: item });
   }
-  /** Whether the window runs on a Mac (keys read ⌘ there). */
-  isMac(): Promise<boolean> {
-    return this.page.evaluate(() => /Mac|iPhone|iPad/.test(navigator.platform));
+  /** Whether the window runs on a Mac (keys read ⌘ there): by the page's navigator as the app does, not the machine the tests run on. */
+  async isMac(): Promise<boolean> {
+    return isMacNavigator(await this.page.evaluate(() => ({ platform: navigator.platform, userAgent: navigator.userAgent })));
   }
 }
 

@@ -132,14 +132,17 @@ pub struct Space {
     pub purgeable: Option<u64>,
 }
 
-/// Picks the free bytes from what macOS can report, best first: the "important usage" figure (Finder's), the plain available
-/// figure, then `statvfs`'s `f_bavail` (which leaves purgeable space out). A missing or zero figure falls through to the next
-/// (zero is what a volume that cannot say reports), and the pick never exceeds the capacity.
+/// Picks the free bytes from what macOS can report: the "important usage" figure (Finder's, purgeable space counted), the plain
+/// available figure, and `statvfs`'s `f_bavail` (which leaves purgeable space out). The first two are the same moment's free
+/// space plus what the OS gives back, so they are never below `f_bavail`; read a moment apart on a live disk one can come out a
+/// few KB lower, and the pick is then `f_bavail`, never below it. A missing or zero figure counts for nothing (zero is what a
+/// volume that cannot say reports), and the pick never exceeds the capacity.
 pub fn choose_free(important: Option<u64>, available: Option<u64>, bavail: Option<u64>, total: u64) -> Option<u64> {
     [important, available, bavail]
         .into_iter()
         .flatten()
-        .find(|v| *v > 0)
+        .filter(|v| *v > 0)
+        .max()
         .or(bavail)
         .map(|v| v.min(total))
 }
@@ -669,14 +672,22 @@ mod tests {
     }
 
     /// Purgeable space counts as free, so the figure is never below what `statvfs` reports (the tray used to show that one and the
-    /// dashboard Finder's: 589 GB against 1,256 GB on one Mac).
+    /// dashboard Finder's: 589 GB against 1,256 GB on one Mac). The figures are read a moment apart on a live disk, so a figure that
+    /// reads lower than `f_bavail` is skew, not a smaller free space (nightly run 9103: a free figure 64 KB under `f_bavail`): the
+    /// pick never goes below `f_bavail`. Compared here on given figures, never on two reads of this machine's disk.
+    #[test]
+    fn choose_free_is_never_below_bavail() {
+        assert_eq!(choose_free(Some(9_000), Some(9_000), Some(9_064), 20_000), Some(9_064));
+        assert_eq!(choose_free(Some(600), Some(400), Some(380), 1_000), Some(600));
+        assert_eq!(choose_free(Some(900), None, Some(950), 1_000), Some(950));
+    }
+
+    /// The live read on a real folder: a defined state (ER-14: nothing here depends on how much space this machine has).
     #[cfg(target_os = "macos")]
     #[test]
-    fn free_on_macos_is_never_below_statvfs() {
+    fn free_on_macos_is_read_and_inside_the_capacity() {
         let t = paddock_testkit::private_tempdir().unwrap();
-        let (_, bavail) = statvfs(t.path()).unwrap();
         let s = space(&t.path().to_string_lossy()).unwrap();
-        assert!(s.free >= bavail, "free {} below statvfs {}", s.free, bavail);
         assert!(s.total > 0 && s.free <= s.total);
     }
 
