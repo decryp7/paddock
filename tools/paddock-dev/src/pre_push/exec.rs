@@ -1006,17 +1006,25 @@ pub const THROTTLE_DIR_VAR: &str = "THROTTLE_DIR";
 
 /// heavy's lock folder for this machine (its queue, history and logs): `<dev-targets>/throttle` (the name after the decided heavy→throttle
 /// rename, so the folder moves once; `<dev-targets>/heavy` holds the installed binary) ([`crate::places::dev_targets`], the folder
-/// of worktrees and build folders, which a reboot keeps; it was /private/tmp, where every reboot lost the history), read once per
-/// process; `None` when it cannot be derived (heavy then uses its own default). The Mac CI runner's configuration sets the same
-/// `THROTTLE_DIR`, so agents still see CI's `throttle mark` (ADR 0102).
+/// of worktrees and build folders, which a reboot keeps; it was /private/tmp, where every reboot lost the history);
+/// `None` when it cannot be derived (heavy then uses its own default). The Mac CI runner's configuration sets the same `THROTTLE_DIR`, so
+/// agents still see CI's `throttle mark` (ADR 0102). Kept per checkout and per the variables that move dev-targets, so a second root or
+/// environment in one process gets its own answer (one git start per key, not per heavy row: ER-20).
 pub fn throttle_dir(root: &Path, env: &HashMap<String, String>) -> Option<PathBuf> {
-    static DIR: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
-    DIR.get_or_init(|| {
+    type Key = (PathBuf, Option<String>, Option<String>);
+    static DIRS: std::sync::Mutex<Option<HashMap<Key, Option<PathBuf>>>> = std::sync::Mutex::new(None);
+    let key: Key = (
+        root.to_path_buf(),
+        env.get(crate::places::DEV_TARGETS_ENV).cloned(),
+        env.get("PADDOCK_WORKTREE_ROOT").cloned(),
+    );
+    let derive = || {
         crate::places::dev_targets(root, &|k| env.get(k).cloned())
             .ok()
             .map(|t| t.join("throttle"))
-    })
-    .clone()
+    };
+    let Ok(mut dirs) = DIRS.lock() else { return derive() };
+    dirs.get_or_insert_with(HashMap::new).entry(key).or_insert_with(derive).clone()
 }
 
 /// `THROTTLE_DIR` for a heavy child: none when the caller names a lock folder itself (`THROTTLE_DIR`, `PLOCK_DIR`, `PLOCK_ROOT`: its value
@@ -1028,14 +1036,11 @@ pub fn throttle_dir_env(root: &Path, env: &HashMap<String, String>) -> Vec<(Stri
     {
         return Vec::new();
     }
-    match throttle_dir(root, env) {
-        // The folder heavy used before (its legacy default): its history is read once, then the new folder's.
-        Some(d) => vec![
-            (THROTTLE_DIR_VAR.to_string(), d.to_string_lossy().into_owned()),
-            ("THROTTLE_MOVED_FROM".to_string(), "/private/tmp/claude-501".to_string()),
-        ],
-        None => Vec::new(),
-    }
+    // heavy reads its own legacy folder's history once (it names that folder itself, ER-22).
+    throttle_dir(root, env)
+        .map(|d| (THROTTLE_DIR_VAR.to_string(), d.to_string_lossy().into_owned()))
+        .into_iter()
+        .collect()
 }
 
 /// Variables every gate may see besides the base list: the caller's account (CI's runner has it, and tests read it: paddock-env's
@@ -2075,11 +2080,14 @@ mod tests {
         let targets = dir.path().join("dev-targets-x");
         let mut env: HashMap<String, String> = [(crate::places::DEV_TARGETS_ENV.to_string(), targets.display().to_string())].into();
         let got = throttle_dir_env(dir.path(), &env);
-        assert_eq!(
-            got[0],
-            (THROTTLE_DIR_VAR.to_string(), targets.join("throttle").display().to_string())
-        );
-        assert_eq!(got[1].0, "THROTTLE_MOVED_FROM");
+        assert_eq!(got[0], (THROTTLE_DIR_VAR.to_string(), targets.join("throttle").display().to_string()));
+        assert_eq!(got.len(), 1, "only THROTTLE_DIR: heavy names its legacy folder itself: {got:?}");
+        // Another dev-targets in the same process gets its own answer (no first-call-wins cache).
+        // Built from parts under the temp dir: a Unix literal like `/dev-targets-y` is not absolute on Windows (run 9116).
+        let targets_y = dir.path().join("dev-targets-y");
+        let other: HashMap<String, String> = [(crate::places::DEV_TARGETS_ENV.to_string(), targets_y.display().to_string())].into();
+        let got_y = throttle_dir(dir.path(), &other).expect("a folder for the second dev-targets");
+        assert!(paddock_testkit::path::same_path(&got_y, targets_y.join("throttle")), "{got_y:?}");
         env.insert("THROTTLE_DIR".into(), "/mine".into());
         assert!(throttle_dir_env(dir.path(), &env).is_empty(), "the caller's own folder wins");
     }

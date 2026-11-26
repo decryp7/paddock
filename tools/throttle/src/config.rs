@@ -1,7 +1,7 @@
 //! Settings, from the environment and the command line. Names: `THROTTLE_*` first, then the legacy `PLOCK_*` (and heavy.sh's
 //! `HEAVY_LOCK_DIR`, `THROTTLE_SLOTS`). A value that does not parse is reported and the default used (fail soft, say why).
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 /// The folder the shell plock has always used on the agents' Mac; the default when it exists.
@@ -37,8 +37,8 @@ pub struct Config {
     pub slots: u32,
     /// The number of CPU cores the slot rule counts against the load (`THROTTLE_CPUS`, else what the OS says).
     pub cpus: u32,
-    /// The lock folder this one moved from (`THROTTLE_MOVED_FROM`, which ./dev sets beside `THROTTLE_DIR`): its history file is read once
-    /// ([`crate::history::History::of`]). None: nothing moved, nothing else is read.
+    /// The lock folder this one moved from: `THROTTLE_MOVED_FROM`, else [`LEGACY_ROOT`] when `THROTTLE_DIR` names another folder and the
+    /// legacy one exists. Its history file is read once ([`crate::history::History::of`]). None: nothing moved, nothing else is read.
     pub moved_from: Option<PathBuf>,
     /// The troubleshooting log file (None: the default under `root`).
     pub log_file: Option<PathBuf>,
@@ -152,7 +152,13 @@ impl Config {
             slots,
             drain_after: Duration::from_secs_f64((priority_max / 6.0).max(1.0)),
             cpus,
-            moved_from: first(get, &["THROTTLE_MOVED_FROM"]).map(PathBuf::from),
+            // THROTTLE_MOVED_FROM, else heavy's own legacy folder when THROTTLE_DIR chose another one and the legacy one exists: heavy names
+            // its legacy folder itself (ER-22), so a caller only sets THROTTLE_DIR. A run whose folder came from PLOCK_* or the default reads
+            // nothing else (a test's heavy never reads the machine's old folder).
+            moved_from: first(get, &["THROTTLE_MOVED_FROM"]).map(PathBuf::from).or_else(|| {
+                (legacy_exists && first(get, &["THROTTLE_DIR"]).is_some_and(|d| Path::new(&d) != Path::new(LEGACY_ROOT)))
+                    .then(|| PathBuf::from(LEGACY_ROOT))
+            }),
             log_file: first(get, &["THROTTLE_LOG_FILE"]).map(PathBuf::from),
             verbose: flag("THROTTLE_VERBOSE"),
             stderr_tail: get("THROTTLE_STDERR_TAIL").is_none_or(|v| v != "0"),

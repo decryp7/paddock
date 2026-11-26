@@ -184,6 +184,7 @@ the user installs, or a stable path the wrapper finds). `HEAVY_LOCK_DIR` is igno
 
 | Setting | Names | Default |
 |---|---|---|
+<<<<<<< HEAD:tools/throttle/README.md
 | lock folder | `THROTTLE_DIR`, `PLOCK_DIR`, `PLOCK_ROOT`, `HEAVY_LOCK_DIR` | `/private/tmp/claude-501` if it exists, else `$TMPDIR/throttle-lock` |
 | poll seconds | `THROTTLE_POLL`, `PLOCK_POLL` | 5 |
 | seconds between "waiting for X" lines | `THROTTLE_WAIT_LOG`, `PLOCK_WAIT_LOG` | 60 |
@@ -197,6 +198,21 @@ the user installs, or a stable path the wrapper finds). `HEAVY_LOCK_DIR` is igno
 | cores counted against the load | `THROTTLE_CPUS` | the OS's count |
 | wait for the command's output pipes after it exited (ms) | `THROTTLE_DRAIN_MS` | 500 |
 | hang detector: no output and no CPU for this many seconds ends the command (exit 81) | `THROTTLE_STALL` (`--stall`) | off |
+=======
+| lock folder | `HEAVY_DIR`, `PLOCK_DIR`, `PLOCK_ROOT`, `HEAVY_LOCK_DIR` | `/private/tmp/claude-501` if it exists, else `$TMPDIR/heavy-lock` |
+| poll seconds | `HEAVY_POLL`, `PLOCK_POLL` | 5 |
+| seconds between "waiting for X" lines | `HEAVY_WAIT_LOG`, `PLOCK_WAIT_LOG` | 60 |
+| ownerless lock/ticket broken after | `HEAVY_UNREADABLE_LIMIT`, `PLOCK_UNREADABLE_LIMIT` | 120 s |
+| load gate threshold / poll | `HEAVY_GATE_LOAD` (`--gate-load`), `HEAVY_GATE_POLL` | 30 / 20 s |
+| priority bound (`--high` yields to nobody; others stop yielding after this) | `HEAVY_PRIORITY_MAX` | 1800 s |
+| most steps at once | `--slots N`, `HEAVY_SLOTS` (`auto` or 1..64) | auto: half the cores, at most 5 |
+| the row's key for the run-time history (quick rows go first) | `HEAVY_ROW` | none: no history is read or kept |
+| the run-time history | `heavy-history.tsv` in the lock folder; the folder it moved from (`HEAVY_MOVED_FROM`, else `/private/tmp/claude-501` when `HEAVY_DIR` names another folder and that one exists) has its file read until the first record copies it over (`./dev` sets `HEAVY_DIR=<dev-targets>/throttle`, which a reboot keeps; the Mac CI runner sets the same `HEAVY_DIR`) | the lock folder |
+| a run inside a run | `HEAVY_HELD` (`<run id>:<pid>`), set by heavy for its command: a heavy run that inherits it while that holder lives runs inside its slot, with no ticket and no queue (ER-43: `./dev heavy -- ./dev gen check` once held the only slot for 36 min while its inner steps queued for it) | not set |
+| cores counted against the load | `HEAVY_CPUS` | the OS's count |
+| wait for the command's output pipes after it exited (ms) | `HEAVY_DRAIN_MS` | 500 |
+| hang detector: no output and no CPU for this many seconds ends the command (exit 81) | `HEAVY_STALL` (`--stall`) | off |
+>>>>>>> origin/main:tools/heavy/README.md
 | the folder of the run logs is `<this>/runs` | `PADDOCK_DEV_TARGETS`, else git config `paddock.worktreeRoot`'s parent, else `PADDOCK_WORKTREE_ROOT`'s | `<lock folder>/runs` |
 | correlation id | `DEVKIT_RUN_ID` is reused as the run id and passed to the command | made per run |
 | log | `THROTTLE_LOG_FILE` (`--log-file`), `THROTTLE_VERBOSE=1` (`--verbose`) | `<folder>/throttle-logs/throttle.<day>.log` |

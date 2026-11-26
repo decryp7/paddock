@@ -552,6 +552,13 @@ Amendments of the same date, no new number: the member gate runs each member's a
     was public with no gate, and an ADR draft copied that pattern for the privileged dyno-helper daemon; a shipped hook is an
     API anyone linking the crate can call.
 
+## Trains (user, 2026-11-26)
+100. **A branch joins a train only after it has merged current main and re-run its member gate on that tip.** The
+merge check (`./dev merge check`) refuses a member whose base is older than main: the stale-base check, being made blocking on
+`ci/old-base-block` (report-only until it lands). A refused member merges main, re-runs `./dev merge check --gates` on the result and
+is offered again. *Why:* on 2026-11-25 five members were pulled from trains i, k and m because their base was older than main (see
+[lessons.md](lessons.md#members-on-an-old-base-were-pulled-from-trains-i-k-and-m-2026-11-25)).
+
 ## Monorepo (ADR 0014 §10; effective for an app from its import into `paddock/apps/<app>`, for Paddock from the first import)
 Until an app is imported, rules 2, 3, 8, 9, 39 and 42 above apply to it as written. From its import, these replace them:
 - **Rule 2:** every agent works in its own git worktree of `paddock` (a full checkout: `./dev worktree add --profile gates`,

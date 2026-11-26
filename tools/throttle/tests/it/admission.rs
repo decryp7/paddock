@@ -418,4 +418,16 @@ fn the_history_moves_with_the_lock_folder_and_reads_the_old_file_once() {
     assert_eq!((c.root.as_path(), c.moved_from.as_deref()), (new_dir.as_path(), Some(rig.root())));
     let (c, _) = throttle::config::Config::from_env(&|_| None, true);
     assert_eq!(c.moved_from, None);
+    // HEAVY_DIR alone (what ./dev sets): heavy names its own legacy folder as the old one, when it exists (ER-22: no caller repeats it).
+    let only_dir = |k: &str| (k == "HEAVY_DIR").then(|| new_dir.display().to_string());
+    let (c, _) = heavy::config::Config::from_env(&only_dir, true);
+    assert_eq!(c.moved_from.as_deref(), Some(std::path::Path::new(heavy::config::LEGACY_ROOT)));
+    let (c, _) = heavy::config::Config::from_env(&only_dir, false);
+    assert_eq!(c.moved_from, None, "no legacy folder on this machine: nothing to read");
+    let legacy = |k: &str| (k == "HEAVY_DIR").then(|| heavy::config::LEGACY_ROOT.to_string());
+    assert_eq!(
+        heavy::config::Config::from_env(&legacy, true).0.moved_from,
+        None,
+        "the legacy folder itself did not move"
+    );
 }
