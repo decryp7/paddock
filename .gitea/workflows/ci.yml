@@ -364,7 +364,7 @@ jobs:
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/paddock-dev
         env:
           PLAN_TOKEN: ${{ github.token }}
-          TEST_FILTER: ${{ matrix.test_filter }}
+          LEG_FILTER: ${{ matrix.test_filter }}
           # The job's display name (the `name:` of this job) and the run's attempt: the reader trusts a record by its own job's result.
           PADDOCK_JOB_NAME: paddock-dev (${{ matrix.os }})
           PADDOCK_RUN_ATTEMPT: ${{ github.run_attempt }}
@@ -373,7 +373,7 @@ jobs:
           PADDOCK_SCCACHE_S3_ENDPOINT: ${{ vars.PADDOCK_SCCACHE_S3_ENDPOINT }}
         run: |
           [ -s "$RUNNER_TEMP/nextest-paddock-dev.log" ] || { echo "::notice::test-cache: no nextest output to record"; exit 0; }
-          "${PADDOCK_WORKSPACE:-$GITHUB_WORKSPACE}/dev" ci test-cache record --workspace tools/paddock-dev --shared --filter "$TEST_FILTER" --log "$RUNNER_TEMP/nextest-paddock-dev.log"
+          "${PADDOCK_WORKSPACE:-$GITHUB_WORKSPACE}/dev" ci test-cache record --workspace tools/paddock-dev --shared --filter "$LEG_FILTER" --log "$RUNNER_TEMP/nextest-paddock-dev.log"
 
       # ADR 0121, report-only (ER-41): the cost-class charges the tests recorded; a ::warning:: and a job-summary row per test outside its class.
       - name: Test cost report
@@ -1095,7 +1095,7 @@ jobs:
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/crates
         env:
           PLAN_TOKEN: ${{ github.token }}
-          TEST_FILTER: ${{ matrix.test_filter }}
+          LEG_FILTER: ${{ matrix.test_filter }}
           # The job's display name (the `name:` of this job) and the run's attempt: the reader trusts a record by its own job's result.
           PADDOCK_JOB_NAME: crate (${{ matrix.os }}${{ matrix.part_label }})
           PADDOCK_RUN_ATTEMPT: ${{ github.run_attempt }}
@@ -1104,7 +1104,7 @@ jobs:
           PADDOCK_SCCACHE_S3_ENDPOINT: ${{ vars.PADDOCK_SCCACHE_S3_ENDPOINT }}
         run: |
           [ -s "$RUNNER_TEMP/nextest-crates.log" ] || { echo "::notice::test-cache: no nextest output to record"; exit 0; }
-          "${PADDOCK_WORKSPACE:-$GITHUB_WORKSPACE}/dev" ci test-cache record --workspace crates --shared --filter "$TEST_FILTER" --log "$RUNNER_TEMP/nextest-crates.log"
+          "${PADDOCK_WORKSPACE:-$GITHUB_WORKSPACE}/dev" ci test-cache record --workspace crates --shared --filter "$LEG_FILTER" --log "$RUNNER_TEMP/nextest-crates.log"
 
       - uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v3
         if: failure() && runner.os == 'Windows'

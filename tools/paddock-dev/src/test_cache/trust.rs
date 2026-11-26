@@ -48,13 +48,16 @@ pub fn facts(client: &mut Client, id: u64, attempt: u64) -> Result<Option<RunFac
     }))
 }
 
+/// What a fetch answered for one run attempt.
+type Fetched = Result<Option<RunFacts>, String>;
+
 /// How a run attempt's facts are fetched (run, attempt); `Ok(None)` is a run the server does not have.
 type Fetch<'a> = Box<dyn FnMut(u64, u64) -> Result<Option<RunFacts>, String> + 'a>;
 
 /// A reader-side check with its per-run-attempt memory. `fetch` asks for facts; an error or an unknown run refuses the record.
 pub struct Provenance<'a> {
     fetch: RefCell<Fetch<'a>>,
-    seen: RefCell<HashMap<(u64, u64), Result<Option<RunFacts>, String>>>,
+    seen: RefCell<HashMap<(u64, u64), Fetched>>,
 }
 
 impl<'a> Provenance<'a> {

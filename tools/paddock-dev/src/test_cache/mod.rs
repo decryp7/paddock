@@ -75,7 +75,7 @@ impl Why {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Decision {
     /// A valid record exists: the target's pass can be reused.
-    Reuse(Record),
+    Reuse(Box<Record>),
     /// Run the target.
     Run(Why),
 }
@@ -139,7 +139,7 @@ pub fn decide(
                 return Decision::Run(Why::TooOld);
             }
             match trust(r) {
-                Ok(()) => Decision::Reuse(r.clone()),
+                Ok(()) => Decision::Reuse(Box::new(r.clone())),
                 Err(w) => Decision::Run(Why::Untrusted(w)),
             }
         })

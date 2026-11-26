@@ -388,7 +388,7 @@ under filter `F` is a pass of the tests `F` selects, so it counts only for a loo
 for a whole-package run, a whole-package pass never for a filtered one, and another filter is a miss. The record also stores the filter
 (audit; the key is what decides).
 
-- Record side: `ci test-cache record --filter "$TEST_FILTER"`; the record step no longer requires an empty `test_filter`. A leg still
+- Record side: `ci test-cache record --filter "$LEG_FILTER"`; the record step no longer requires an empty `test_filter`. A leg still
   does not record when `matrix.filter` is set (a rerun's failed tests, a smoke or affected selection).
 - Plan side: the plan file is by runner class, then filter, then package. `ci test-cache plan` asks once per filter a leg of that class can
   carry: the whole package, and the host scope's filter read through the planner's own leg builder (`plan_ci::workspace_legs`). `apply`

@@ -1016,13 +1016,13 @@ fn the_record_steps_carry_their_jobs_name_and_the_leg_filter_as_the_workflow_nam
             Some("${{ github.run_attempt }}"),
             "{job}"
         );
-        assert_eq!(step["env"]["TEST_FILTER"].as_str(), Some("${{ matrix.test_filter }}"), "{job}");
+        assert_eq!(step["env"]["LEG_FILTER"].as_str(), Some("${{ matrix.test_filter }}"), "{job}");
         assert!(
             !step["if"].as_str().unwrap_or("").contains("test_filter"),
             "{job}: a filtered leg records too (its filter is in the key)"
         );
         assert!(
-            step["run"].as_str().unwrap_or("").contains("--filter \"$TEST_FILTER\""),
+            step["run"].as_str().unwrap_or("").contains("--filter \"$LEG_FILTER\""),
             "{job}: the record is keyed by the filter"
         );
     }
