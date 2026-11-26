@@ -4376,3 +4376,15 @@ failed-only round 9137. Train 2026-11-26-pq did not touch what it drives: the te
 paddock-testkit, and the train's sccache change was in `local_sccache.rs` only, so it did not block the landing (rule 54 (4)). A fix
 item for the test's owner, which starts with a reproduction on the Windows runner and the list of causes with what rules each out
 (ER-28). No sleep or raised timeout as the fix.
+
+## 2026-11-26: the Mac is the page's, not the test machine's: the lesson of 2026-10-29 again, and `isMac()` too (WebKit on Linux, nightly 9103)
+
+The reference apps in WebKit moved from the CI Mac to Linux (ADR 0120, 2026-11-25) and their first run, nightly 9103, failed seven specs:
+Playwright's WebKit on Linux has a Mac user agent and `navigator.platform` `Linux x86_64`, so the app binds `Mod` to Cmd and draws ⌘.
+Five specs still pressed `ControlOrMeta` (the host's key, Ctrl) and `shell-demo-locale` chose its key by `process.platform`; the page object
+`isMac()` read `navigator.platform` alone, so two specs expected `Ctrl+Shift+H` where the menu drew `⇧⌘H`. The 2026-10-29 rule (press an app
+shortcut with `pressMod`) was written but nothing enforced it, and the macOS WebKit leg had hidden the rest. **Fix:** every reference-app spec presses
+with `pressMod`; `isMac()` shares `isMacNavigator` with `modKey` (one definition, with a test). **Open:** a second occurrence (ER-21): 63 files of
+the apps' own e2e (`apps/*/app/e2e`, 108 uses) still press `ControlOrMeta`; their WebKit legs are the Linux ones, so the same failure waits there.
+A lint rule in `paddock/e2e-*` that refuses `ControlOrMeta` in a spec is proposed, not built (it needs the user's yes: one in, one out). The chart
+spec `data.spec.ts:301` (theme switch redraws the canvases) failed in the same run for a cause not shown by the log.

@@ -1,5 +1,5 @@
 import { expect, test } from './test';
-import { axeViolations, expectNoHorizontalScroll, expectWithinWidth, installTauriFake, LAYOUT_WIDTHS, pressTab, THEMES, type Page, expectNotMoving } from '@decryp7/paddock-e2e';
+import { axeViolations, expectNoHorizontalScroll, expectWithinWidth, installTauriFake, LAYOUT_WIDTHS, pressTab, THEMES, type Page, expectNotMoving, pressMod } from '@decryp7/paddock-e2e';
 
 // The pages frame (plan S14) in the shell demo: navigation, lazy pages with their own providers, conditions and badges,
 // the status bar's items, the sidebar by the layout plan at every width, F6 regions, axe in both themes. Only the test
@@ -69,7 +69,7 @@ test.describe('pages frame (plan S14)', () => {
     await lab.click();
     await expect(app.frame.heading).toHaveText('Lab');
     // The condition turns false while it is shown: the first page takes over.
-    await page.keyboard.press('ControlOrMeta+Shift+H');
+    await pressMod(page, 'Mod+Shift+H');
     await (await app.menus.item('Help', 'Reset greetings')).click();
     await expect(app.frame.heading).toHaveText('Overview');
     await expect(lab).toHaveCount(0);
