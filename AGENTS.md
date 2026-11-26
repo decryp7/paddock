@@ -137,7 +137,9 @@ package.json     the one npm workspace and package-lock.json (ui, eslint, icons,
 - **No VM or container on this Mac (user, 2026-11-26; docs/rules.md rule 101).** `./dev check --pre-push` and the member gate
   start no Docker, OrbStack or Fusion: there is no `clippy-linux`, `tests-linux` or `--warm-linux`. Linux Clippy (`-D warnings`),
   the Linux tests and the orphan guardian's acting tests as uid 65534 are CI's Linux jobs on the Linux runner (ci.yml: the crates job's
-  "Orphan guardian as a user (Linux)" step, each app's Linux leg); Windows stays CI's. The register (`NOT_RUN` in
+  "Orphan guardian as a user (Linux)" step, each app's Linux leg); the Windows Clippy runs here through xwin for `crates`, the apps that
+  opt in (`windowsClippy`) and the developer tools `tools/paddock-dev` and `tools/heavy` (user, 2026-11-26: Windows-only dead code found
+  only by CI four times in a day), as heavy rows in parallel with the others and through sccache; Windows tests stay CI's. The register (`NOT_RUN` in
   `pre_push/gates.rs`) names them CI-owned.
 - The member gate (`./dev check --pre-push --member-gate`, run by `./dev merge check --gates`) also runs the full nextest `ci`
   profile of every touched Cargo workspace (the plan's reached packages, as CI's member run) on the host (`tests <ws>`). Inactive apps

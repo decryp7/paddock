@@ -372,24 +372,62 @@ fn the_windows_skip_reason_names_the_real_cause_per_workspace() {
     assert!(windows_skip_reason("apps/debrief").contains("windowsClippy"));
 }
 
-/// The reason as `plan_gates` prints it: the `Planned::Skip` of the Windows lint, not only the helper's string.
+/// The Windows Clippy (xwin, native on the Mac) also covers the developer tools (user, 2026-11-26: four Windows-only CI failures in
+/// `tools/paddock-dev` in one day, the latest an import used only by `cfg(unix)` tests). The plan selects it like the other rows: a tool
+/// the change reaches gets the row, as a heavy row (so it runs beside the others and reuses sccache through the gate's wrapper) in its
+/// own `xwin` build folder; a tool the change does not reach gets none.
 #[test]
-fn plan_gates_skips_the_windows_lint_of_paddock_dev_with_its_own_reason() {
+fn the_windows_lint_runs_for_paddock_dev_and_heavy_when_the_plan_reaches_them() {
     let mut p = plan();
     p["packages"]["tools/paddock-dev"] = json!(["paddock-dev"]);
+    p["packages"]["tools/heavy"] = json!(["paddock-heavy"]);
     let f = facts();
-    let windows_skip = |planned: &[Planned], ws: &str| {
-        planned.iter().find_map(|g| match g {
-            Planned::Skip { id, reason } if *id == format!("clippy-windows {ws}") => Some(reason.clone()),
+    for (tool, files) in [
+        ("tools/paddock-dev", &["tools/paddock-dev/src/pre_push/tests.rs"][..]),
+        ("tools/heavy", &["tools/heavy/src/gate.rs"][..]),
+    ] {
+        let planned = plan_gates(&p, &change(files), &f);
+        let row = run_gates(&planned)
+            .into_iter()
+            .find(|g| g.id == format!("clippy-windows {tool}"))
+            .unwrap_or_else(|| panic!("no Windows lint planned for {tool}: {:?}", ids(&planned)));
+        // The flags that make an import used only by `cfg(unix)` tests red: the tests are compiled (`--all-targets`) and warnings deny.
+        assert_eq!(
+            row.args.join(" "),
+            "xwin clippy --config build.target-dir='/t/xwin' --target x86_64-pc-windows-msvc --workspace --all-targets --locked -- -D warnings",
+            "{tool}"
+        );
+        assert_eq!(
+            (row.cwd.as_str(), row.heavy),
+            (tool, true),
+            "a heavy row in the tool's own folder: it runs beside the others"
+        );
+        assert_eq!(row.need, Need::Tool("cargo-xwin".into()));
+        assert!(
+            row.build_dir.as_deref().is_some_and(|d| d.ends_with("/xwin")),
+            "{:?}",
+            row.build_dir
+        );
+        assert!(
+            row.env.iter().all(|(k, _)| !k.starts_with("CARGO_")),
+            "sccache hashes CARGO_* variables"
+        );
+    }
+    // Selected by the plan: a change that reaches neither tool plans neither row; an app without `windowsClippy` keeps its own reason.
+    let planned = plan_gates(&p, &change(&["tools/paddock-dev/src/a.rs", "apps/debrief/src/a.rs"]), &f);
+    assert!(
+        !ids(&planned).iter().any(|i| i == "clippy-windows tools/heavy"),
+        "{:?}",
+        ids(&planned)
+    );
+    let app = planned
+        .iter()
+        .find_map(|g| match g {
+            Planned::Skip { id, reason } if id == "clippy-windows apps/debrief" => Some(reason.clone()),
             _ => None,
         })
-    };
-    let planned = plan_gates(&p, &change(&["tools/paddock-dev/src/a.rs", "apps/debrief/src/a.rs"]), &f);
-    let tool = windows_skip(&planned, "tools/paddock-dev").unwrap_or_else(|| panic!("no Windows skip for paddock-dev: {planned:?}"));
-    assert!(tool.contains("Windows leg natively") && !tool.contains("windowsClippy"), "{tool}");
-    // Positive control: an app without `windowsClippy` still gets the app wording, so the assertion above can tell the two apart.
-    let app = windows_skip(&planned, "apps/debrief").unwrap_or_else(|| panic!("no Windows skip for debrief: {planned:?}"));
-    assert!(app.contains("windowsClippy") && !app.contains("Windows leg natively"), "{app}");
+        .unwrap_or_else(|| panic!("no Windows skip for debrief: {planned:?}"));
+    assert!(app.contains("windowsClippy"), "{app}");
 }
 
 /// ER-41 (user, 2026-11-14): a branch's touched-file tests passed and the full conformance run failed (lib-usage.test.mjs on
