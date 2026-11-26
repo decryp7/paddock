@@ -364,7 +364,8 @@ pub fn add(repo: &Repo, caller: &Caller, req: &AddRequest<'_>) -> Result<Report,
     // A full worktree has no `conformance/node_modules`, and the conformance gate then says "check broken" (C111, the yaml package):
     // install them here, bounded and logged; a failure is a warning with the next step, never a failed `add`.
     let deps_note = if req.branch.is_some() {
-        conformance_deps_note(Path::new(&k), &npm_ci)
+        // A warm shared cache (`./dev deps`) gives the whole `node_modules` as a clone, conformance's included; otherwise only that.
+        crate::deps_cache::warm_note(Path::new(&k)).unwrap_or_else(|| conformance_deps_note(Path::new(&k), &npm_ci))
     } else {
         String::new()
     };

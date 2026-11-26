@@ -365,23 +365,47 @@ fn truncate(s: &str, max: usize) -> String {
     }
 }
 
-/// `heavy`'s activity log: `<root>/pitcrew-lock-activity.log`, the root as heavy reads it from its environment (`HEAVY_DIR`, then the
-/// legacy `PLOCK_DIR` and `PLOCK_ROOT`), else `derived` (the folder ./dev hands heavy, [`derived_heavy_dir`]), else heavy's legacy default.
-pub fn plock_log_path(env: &dyn Fn(&str) -> Option<String>, derived: Option<PathBuf>) -> PathBuf {
-    env("HEAVY_DIR")
-        .or_else(|| env("PLOCK_DIR"))
-        .or_else(|| env("PLOCK_ROOT"))
-        .map(PathBuf::from)
-        .or(derived)
-        .unwrap_or_else(|| PathBuf::from("/private/tmp/claude-501"))
+/// The folder of plock's activity log before throttle resolved its own (the legacy default, used when no throttle can be asked).
+pub const LEGACY_PLOCK_DIR: &str = "/private/tmp/claude-501";
+
+/// `throttle`'s activity log: `<root>/pitcrew-lock-activity.log`, the root being the one throttle resolves itself (`throttle dir`:
+/// its variables, then its config file, then its per-user state folder; [`throttle_dir_from_tool`]), else the legacy folder when no
+/// throttle can be asked.
+pub fn plock_log_path(throttle_dir: Option<PathBuf>) -> PathBuf {
+    throttle_dir
+        .unwrap_or_else(|| PathBuf::from(LEGACY_PLOCK_DIR))
         .join("pitcrew-lock-activity.log")
 }
 
-/// The lock folder ./dev hands heavy from this folder (`<dev-targets>/throttle`, [`crate::pre_push::exec::heavy_dir`]), when it exists.
-pub fn derived_heavy_dir() -> Option<PathBuf> {
-    let map: std::collections::HashMap<String, String> = crate::process_env::vars().collect();
+/// The lock folder throttle resolves for this environment, asked of the tool itself (`throttle dir`) so there is one definition of it
+/// (ER-22): the binary is found as the push gate finds it ([`crate::pre_push::exec::throttle_command_for`]). `None` when no throttle
+/// can be found or it does not answer with an absolute folder (a bounded call: it never holds a wait up).
+pub fn throttle_dir_from_tool() -> Option<PathBuf> {
+    let env: std::collections::HashMap<String, String> = crate::process_env::vars().collect();
     let here = std::env::current_dir().ok()?;
-    crate::pre_push::exec::heavy_dir(&here, &map).filter(|d| d.is_dir())
+    let root = crate::worktree::git::Git::at(&here)
+        .text(&["rev-parse", "--show-toplevel"])
+        .map(|t| PathBuf::from(t.trim()))
+        .unwrap_or(here);
+    throttle_dir_of(&root, &env)
+}
+
+/// [`throttle_dir_from_tool`] for a given tree and environment (`PADDOCK_THROTTLE` names the tool in a test).
+fn throttle_dir_of(root: &Path, env: &std::collections::HashMap<String, String>) -> Option<PathBuf> {
+    let built = std::sync::OnceLock::new();
+    let prefix = crate::pre_push::exec::throttle_command_for(
+        root,
+        env,
+        &|p| crate::pre_push::exec::on_path(env, p),
+        &built,
+        crate::pre_push::heavy_tool::BUILD_LIMIT,
+    )
+    .ok()?;
+    let mut cmd = paddock_proc::command(prefix.first()?);
+    cmd.arg("dir");
+    let out = paddock_proc::run_bounded(cmd, paddock_proc::Limits::new(Duration::from_secs(20)).max_output(1 << 12)).ok()?;
+    let dir = PathBuf::from(out.stdout_text().lines().map(str::trim).rfind(|l| !l.is_empty())?);
+    out.success().then_some(dir).filter(|d| d.is_absolute())
 }
 
 /// The pattern for the line plock writes when `name` finishes: `<date> <time> <name> done rc=N, ...`.
@@ -651,6 +675,8 @@ pub struct WaitArgs {
 pub struct Env<'a> {
     /// Environment variables.
     pub var: &'a dyn Fn(&str) -> Option<String>,
+    /// The lock folder throttle resolves ([`throttle_dir_from_tool`]), asked only by a `--plock` wait that names no log.
+    pub throttle_dir: &'a dyn Fn() -> Option<PathBuf>,
     /// Files.
     pub files: &'a dyn Files,
     /// HTTP.
@@ -677,6 +703,7 @@ pub fn command(args: &WaitArgs) -> Result<Report, CliError> {
     let services = wait_services(&args.server, &vars);
     let env = Env {
         var: &var,
+        throttle_dir: &throttle_dir_from_tool,
         files: &DiskFiles,
         http: &mut http,
         alive: Box::new(ProcessId::presence),
@@ -740,12 +767,7 @@ pub fn run_with(args: &WaitArgs, env: Env<'_>, clock: &mut dyn Clock, log: &mut 
     let target = if let Some(n) = &args.plock {
         format!(
             "plock:{n}@{}",
-            absolute(
-                &args
-                    .plock_log
-                    .clone()
-                    .unwrap_or_else(|| plock_log_path(env.var, derived_heavy_dir()))
-            )
+            absolute(&args.plock_log.clone().unwrap_or_else(|| plock_log_path((env.throttle_dir)())))
         )
     } else if let Some(p) = args.pid {
         format!("pid:{p}")
@@ -787,10 +809,7 @@ pub fn run_with(args: &WaitArgs, env: Env<'_>, clock: &mut dyn Clock, log: &mut 
     let kind;
     let outcome = if let Some(name) = &args.plock {
         kind = "plock";
-        let path = args
-            .plock_log
-            .clone()
-            .unwrap_or_else(|| plock_log_path(env.var, derived_heavy_dir()));
+        let path = args.plock_log.clone().unwrap_or_else(|| plock_log_path((env.throttle_dir)()));
         let pattern = plock_done_pattern(name).map_err(usage)?;
         let mut probe = LineProbe::new(
             env.files,
@@ -1110,23 +1129,44 @@ mod tests {
     }
 
     #[test]
-    fn the_plock_log_follows_plocks_environment() {
-        let env = |k: &str| (k == "PLOCK_ROOT").then(|| "/r".to_string());
-        assert_eq!(plock_log_path(&env, None), Path::new("/r").join("pitcrew-lock-activity.log"));
-        let none = |_: &str| None;
+    fn the_plock_log_follows_the_folder_throttle_resolves() {
+        // The folder is throttle's own answer, never a variable ./dev reads (one definition, ER-22).
         assert_eq!(
-            plock_log_path(&none, None),
-            Path::new("/private/tmp/claude-501").join("pitcrew-lock-activity.log")
+            plock_log_path(Some(paddock_testkit::path::abs(["h"]))),
+            paddock_testkit::path::abs(["h"]).join("pitcrew-lock-activity.log")
         );
-        // The folder ./dev hands heavy comes after the variables and before the legacy default.
         assert_eq!(
-            plock_log_path(&none, Some(PathBuf::from("/dt/throttle"))),
-            Path::new("/dt/throttle").join("pitcrew-lock-activity.log")
+            plock_log_path(None),
+            Path::new(LEGACY_PLOCK_DIR).join("pitcrew-lock-activity.log"),
+            "no throttle to ask: the legacy folder"
         );
-        let heavy = |k: &str| (k == "HEAVY_DIR").then(|| "/h".to_string());
+    }
+
+    /// `./dev wait --plock` asks the tool for the folder (`throttle dir`), so ./dev and throttle name one folder; a tool that fails or answers
+    /// with something that is no absolute folder gives none (the legacy folder), never a guess.
+    #[cfg(unix)]
+    #[test]
+    fn the_lock_folder_is_what_the_throttle_tool_prints() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let tool = |name: &str, body: &str| {
+            let p = dir.path().join(name);
+            std::fs::write(&p, format!("#!/bin/sh\n{body}\n")).unwrap();
+            std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+            std::collections::HashMap::from([("PADDOCK_THROTTLE".to_string(), p.display().to_string())])
+        };
+        // Only `throttle dir` is asked: any other first argument fails, so the call is exactly `<tool> dir`.
+        let ok = tool("ok", "[ \"$1\" = dir ] && echo /state/throttle");
+        assert_eq!(throttle_dir_of(dir.path(), &ok), Some(PathBuf::from("/state/throttle")));
         assert_eq!(
-            plock_log_path(&heavy, Some(PathBuf::from("/dt/throttle"))),
-            Path::new("/h").join("pitcrew-lock-activity.log")
+            throttle_dir_of(dir.path(), &tool("rel", "echo relative")),
+            None,
+            "not an absolute folder"
+        );
+        assert_eq!(
+            throttle_dir_of(dir.path(), &tool("bad", "echo /x; exit 3")),
+            None,
+            "a failing tool gives none"
         );
     }
 
@@ -1228,9 +1268,12 @@ mod tests {
         look: &dyn Fn(u32) -> Presence,
     ) -> (Result<Report, CliError>, String) {
         let var = move |k: &str| vars.iter().find(|(n, _)| *n == k).map(|(_, v)| v.to_string());
+        // The tool's answer, faked: the folder the test names as THROTTLE_DIR.
+        let tool = move || vars.iter().find(|(n, _)| *n == "THROTTLE_DIR").map(|(_, v)| PathBuf::from(v));
         let process = |pid: u32| (pid == 1).then(|| ProcessId::of(std::process::id()).unwrap());
         let env = Env {
             var: &var,
+            throttle_dir: &tool,
             files,
             http,
             alive: Box::new(|_| Presence::Running),
@@ -1252,6 +1295,7 @@ mod tests {
         let files = FakeFiles::default();
         let env = Env {
             var: &var,
+            throttle_dir: &|| None,
             files: &files,
             http,
             alive: Box::new(|_| Presence::Running),
@@ -1360,6 +1404,7 @@ mod tests {
             let files = FakeFiles::default();
             let env = Env {
                 var: &var,
+                throttle_dir: &|| None,
                 files: &files,
                 http: &mut http,
                 alive: Box::new(|_| Presence::Running),
@@ -1478,7 +1523,7 @@ mod tests {
     }
 
     #[test]
-    fn plock_through_the_command_uses_the_log_of_the_environment() {
+    fn plock_through_the_command_uses_the_log_of_the_folder_throttle_resolves() {
         let files = FakeFiles::default();
         files.put(&Path::new("/p").join("pitcrew-lock-activity.log").to_string_lossy(), "");
         let mut http = FakeHttp {
@@ -1486,7 +1531,7 @@ mod tests {
             urls: vec![],
         };
         let a = args(&["--plock", "job1", "--max", "5s", "--interval", "1s"]);
-        let (r, log) = run(&a, &files, &mut http, &[("PLOCK_DIR", "/p")]);
+        let (r, log) = run(&a, &files, &mut http, &[("THROTTLE_DIR", "/p")]);
         assert!(r.is_err());
         // The log names the path as the OS spells it: `/p\pitcrew-lock-activity.log` on Windows.
         let expected = Path::new("/p").join("pitcrew-lock-activity.log");
@@ -1520,6 +1565,7 @@ mod tests {
             };
             let env = Env {
                 var: &var,
+                throttle_dir: &|| None,
                 files: &files,
                 http: &mut http,
                 alive: Box::new(|_| Presence::Running),
@@ -1585,6 +1631,7 @@ mod tests {
             };
             let env = Env {
                 var: &var,
+                throttle_dir: &|| None,
                 files: &files,
                 http: &mut http,
                 alive: Box::new(|_| Presence::Running),

@@ -15,8 +15,9 @@
 //! - the inputs, as git object ids at HEAD: a Cargo row's workspace folder, the folders of every path dependency the planner's Cargo
 //!   graph names (followed transitively), each of those workspaces' manifest, lockfile and settings, the toolchain pin and the lint
 //!   settings, plus the hashed build variables ([`crate::input_hash::is_hashed_var`]); a repository-wide row (conformance and the
-//!   other rows of [`class_of`]) keys on the whole tree, the base it compares with (`PADDOCK_BASE_REF` or `origin/main`, resolved), the
-//!   CI markers it reads and the day (waivers expire by date);
+//!   other rows of [`class_of`]) keys on the whole tree, the base it compares with (`PADDOCK_BASE_REF` or `origin/main`: its TIP for a row
+//!   that reads the base's files, [`BASE_READING_ROWS`], and `merge-base(HEAD, base)` for a row that reads only the tree,
+//!   [`TREE_ONLY_ROWS`]), the CI markers it reads and the day (waivers expire by date);
 //! - the member gate's tests (`tests <ws>`): a Cargo row's inputs plus what the tests read outside them ([`TEST_READS`]); a workspace
 //!   whose tests read the whole repository ([`TESTS_READ_REPO`]) keys on the whole tree.
 //!
@@ -119,18 +120,37 @@ pub enum Class {
     Cargo(Vec<String>),
     /// A tests row of these workspaces: their Cargo inputs plus what the tests read outside them ([`TEST_READS`]).
     Tests(Vec<String>),
-    /// A repository-wide row: the whole tree and the base.
+    /// A repository-wide row that READS THE BASE's files (shrink-only lists, allow-list growth, anything compared with the base tree):
+    /// the whole tree, the base's TIP and the day. A landing or fetch that moves the base runs it again, which is right: its answer
+    /// can change with the base's files.
     Whole,
+    /// A repository-wide row that reads nothing of the base: the whole tree, `merge-base(HEAD, base)` and the day, so a landing that
+    /// moves the base's tip but not the merge base keeps its pass (user, 2026-11-26: split by need).
+    WholeTree,
 }
 
-/// The class of a row, or `None` when its result is never reused: the commit lint (it reads commits), the audits and the locks
+/// The repository-wide rows that read the base's files: conformance (baselines and allow lists grow against the base), the gate
+/// register (its date history and ratchets compare with the base), the member audits (their live allow-list and baseline checks) and
+/// the developer tool's own tests (they include those live checks). Their reuse key holds the base's tip. THE place that says a row
+/// reads the base: a row not listed here and listed in [`TREE_ONLY_ROWS`] does not.
+pub const BASE_READING_ROWS: &[&str] = &["conformance", "gates-register", "member-audits"];
+
+/// The repository-wide rows that read only the tree: the conformance tests (they build their own fixtures) and Pitwall's script tests.
+/// Their reuse key holds the merge base, not the base's tip.
+pub const TREE_ONLY_ROWS: &[&str] = &["conformance-tests", "pitwall-scripts"];
+
+/// The class of a row, or `None` when its result is never reused: the commit lint (it reads commits), the locks
 /// guard (history and the base's lockfiles), the deny row (the advisory database moves without the tree), the wire fixtures (the row
 /// writes files) and any row this module does not know.
 pub fn class_of(g: &Gate) -> Option<Class> {
     let first = g.id.split([' ', ',']).next().unwrap_or("");
     match first {
         "lockfile" | "fmt" | "clippy" | "clippy-windows" if !g.cwd.is_empty() => Some(Class::Cargo(vec![g.cwd.clone()])),
-        "conformance" | "conformance-tests" | "gates-register" | "pitwall-scripts" => Some(Class::Whole),
+        // `member-audits` reads about 14k to 36k files across the whole tree (the ADR 0116 trace, amendment 2026-11-26: a declared input
+        // set gains nothing), so it keys like the other repository-wide rows. Whether the base's tip or the merge base is in the key is
+        // declared once, in [`BASE_READING_ROWS`] and [`TREE_ONLY_ROWS`].
+        f if BASE_READING_ROWS.contains(&f) => Some(Class::Whole),
+        f if TREE_ONLY_ROWS.contains(&f) => Some(Class::WholeTree),
         "tests" if !g.cwd.is_empty() => Some(tests_class(vec![g.cwd.clone()])),
         _ => None,
     }
@@ -346,6 +366,7 @@ pub struct Reuse {
     whole_vars: Vec<String>,
     probes: Mutex<HashMap<String, Result<String, String>>>,
     whole: OnceLock<Result<Vec<String>, String>>,
+    whole_tree: OnceLock<Result<Vec<String>, String>>,
 }
 
 impl Reuse {
@@ -392,6 +413,7 @@ impl Reuse {
             whole_vars,
             probes: Default::default(),
             whole: OnceLock::new(),
+            whole_tree: OnceLock::new(),
         })
     }
 
@@ -424,26 +446,37 @@ impl Reuse {
     }
 
     /// The key lines of a repository-wide row: the tree (clean only), the base it compares with, the CI markers and the day.
-    fn whole_lines(&self) -> Result<Vec<String>, String> {
-        self.whole
-            .get_or_init(|| {
-                let dirty = git_text(&self.root, &["status", "--porcelain", "--untracked-files=all"]).ok_or("git status failed")?;
-                if !dirty.trim().is_empty() {
-                    return Err("the tree has uncommitted changes".to_string());
-                }
-                let tree = git_text(&self.root, &["rev-parse", "HEAD^{tree}"]).ok_or("git rev-parse HEAD^{tree} failed")?;
-                let base_ref = &self.base_ref;
-                let base = git_text(&self.root, &["rev-parse", "--verify", "--quiet", &format!("{base_ref}^{{commit}}")])
-                    .map_or_else(|| "absent".to_string(), |t| t.trim().to_string());
-                let mut lines = vec![
-                    format!("tree {}", tree.trim()),
-                    format!("base {base_ref} {base}"),
-                    format!("day {}", paddock_cli::UnixSeconds::now().0 / 86_400),
-                ];
-                lines.extend(self.whole_vars.iter().cloned());
-                Ok(lines)
-            })
-            .clone()
+    fn whole_lines(&self, merge_base: bool) -> Result<Vec<String>, String> {
+        let cell = if merge_base { &self.whole_tree } else { &self.whole };
+        cell.get_or_init(|| {
+            let dirty = git_text(&self.root, &["status", "--porcelain", "--untracked-files=all"]).ok_or("git status failed")?;
+            if !dirty.trim().is_empty() {
+                return Err("the tree has uncommitted changes".to_string());
+            }
+            let tree = git_text(&self.root, &["rev-parse", "HEAD^{tree}"]).ok_or("git rev-parse HEAD^{tree} failed")?;
+            let base_ref = &self.base_ref;
+            // A row that reads the base's files keys on the base's tip; one that does not, on the merge base only.
+            let (label, base) = if merge_base {
+                (
+                    "merge-base",
+                    git_text(&self.root, &["merge-base", "HEAD", base_ref]).map_or_else(|| "absent".to_string(), |t| t.trim().to_string()),
+                )
+            } else {
+                (
+                    "base",
+                    git_text(&self.root, &["rev-parse", "--verify", "--quiet", &format!("{base_ref}^{{commit}}")])
+                        .map_or_else(|| "absent".to_string(), |t| t.trim().to_string()),
+                )
+            };
+            let mut lines = vec![
+                format!("tree {}", tree.trim()),
+                format!("{label} {base_ref} {base}"),
+                format!("day {}", paddock_cli::UnixSeconds::now().0 / 86_400),
+            ];
+            lines.extend(self.whole_vars.iter().cloned());
+            Ok(lines)
+        })
+        .clone()
     }
 
     /// `path id` lines of `paths` at HEAD, sorted (a folder as its tree id); a path git does not track is `absent`. `Err` when a path
@@ -516,7 +549,8 @@ impl Reuse {
                 l.extend(self.build_vars.iter().cloned());
                 l
             }
-            Class::Whole => self.whole_lines()?,
+            Class::Whole => self.whole_lines(false)?,
+            Class::WholeTree => self.whole_lines(true)?,
         };
         f.extend(lines.iter().map(|l| format!("input {l}")));
         Ok(Prepared {

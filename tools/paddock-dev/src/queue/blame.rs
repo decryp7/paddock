@@ -91,9 +91,9 @@ mod tests {
 
     #[test]
     fn a_gate_job_is_blamed_through_the_files_its_log_names() {
-        let a = reach(&["ui"], &["tools/heavy/inputs.txt"]);
+        let a = reach(&["ui"], &["tools/throttle/inputs.txt"]);
         let b = reach(&["ui"], &["README.md"]);
-        let f = fail("train gates", &["train gates"], &["tools/heavy/inputs.txt"]);
+        let f = fail("train gates", &["train gates"], &["tools/throttle/inputs.txt"]);
         let s = suspects(&[a, b], &[&f]);
         assert_eq!(s.precise.len(), 1);
         assert_eq!(s.precise[0].0, 0);

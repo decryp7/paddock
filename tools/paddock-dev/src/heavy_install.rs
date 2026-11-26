@@ -1,10 +1,10 @@
-//! `dev heavy-install`: puts the `heavy` binary of a release (tools/heavy, `.gitea/workflows/heavy-release.yml`) into
-//! `<dev-targets>/heavy/bin/heavy`, the one place engineering-playbook's `heavy.sh` wrapper looks after `HEAVY_BIN` and PATH.
+//! `dev throttle-install`: puts the `throttle` binary of a release (tools/throttle, `.gitea/workflows/throttle-release.yml`) into
+//! `<dev-targets>/throttle/bin/throttle`, the one place engineering-playbook's `heavy.sh` wrapper looks after `HEAVY_BIN` (its own name for it) and PATH.
 //!
 //! It downloads the asset for this OS and CPU and the release's `SHA256SUMS` from the user's own Gitea
-//! (`PADDOCK_HEAVY_RELEASES`, default `https://dev.decryptology.net/decryp7/paddock/releases/download`, then `heavy-v<version>/<file>`),
+//! (`PADDOCK_THROTTLE_RELEASES`, default `https://dev.decryptology.net/decryp7/paddock/releases/download`, then `throttle-v<version>/<file>`),
 //! refuses a checksum that does not match (an `::error::` line, nothing installed), publishes the binary with an atomic rename and
-//! records the version beside it (`<dev-targets>/heavy/VERSION`). A rerun of the same version that finds the binary unchanged
+//! records the version beside it (`<dev-targets>/throttle/VERSION`). A rerun of the same version that finds the binary unchanged
 //! downloads nothing. The token (`PADDOCK_DEV_TOKEN`, else `GITHUB_TOKEN`, as `./dev` itself reads) reaches curl through a
 //! private config file and is never printed. Nothing here touches `~/.cargo` or `~/.rustup`: the download is not a `cargo install`.
 
@@ -18,14 +18,14 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 /// Where the releases are (a test points it at a fake server).
-pub const RELEASES_ENV: &str = "PADDOCK_HEAVY_RELEASES";
+pub const RELEASES_ENV: &str = "PADDOCK_THROTTLE_RELEASES";
 /// The user's own Gitea.
 pub const DEFAULT_RELEASES: &str = "https://dev.decryptology.net/decryp7/paddock/releases/download";
 
-/// Arguments of `dev heavy-install`.
+/// Arguments of `dev throttle-install`.
 #[derive(Args, Debug)]
 pub struct InstallArgs {
-    /// The version to install (default: the version of this checkout's tools/heavy/Cargo.toml).
+    /// The version to install (default: the version of this checkout's tools/throttle/Cargo.toml).
     #[arg(long)]
     pub version: Option<String>,
 }
@@ -38,15 +38,15 @@ pub fn target_of(os: &str, arch: &str) -> Result<&'static str, String> {
         ("linux", "aarch64") => Ok("aarch64-unknown-linux-gnu"),
         ("windows", "x86_64") => Ok("x86_64-pc-windows-msvc"),
         _ => Err(format!(
-            "there is no heavy release for {os} on {arch} (macOS arm64, Linux x86_64 and arm64, Windows x86_64 have one)"
+            "there is no throttle release for {os} on {arch} (macOS arm64, Linux x86_64 and arm64, Windows x86_64 have one)"
         )),
     }
 }
 
-/// The release asset of a version for a machine: `heavy-<version>-<target>` (`.exe` on Windows), as the release workflow names it.
+/// The release asset of a version for a machine: `throttle-<version>-<target>` (`.exe` on Windows), as the release workflow names it.
 pub fn asset_name(version: &str, os: &str, arch: &str) -> Result<String, String> {
     let exe = if os == "windows" { ".exe" } else { "" };
-    Ok(format!("heavy-{version}-{}{exe}", target_of(os, arch)?))
+    Ok(format!("throttle-{version}-{}{exe}", target_of(os, arch)?))
 }
 
 /// The checksum `SHA256SUMS` (`<hex>  <file>` per line, `sha256sum`'s output) lists for `asset`.
@@ -57,9 +57,9 @@ pub fn find_sum(sums: &str, asset: &str) -> Option<String> {
     })
 }
 
-/// The file name of the binary on a machine: `heavy.exe` on Windows.
+/// The file name of the binary on a machine: `throttle.exe` on Windows.
 pub fn bin_name(os: &str) -> &'static str {
-    if os == "windows" { "heavy.exe" } else { "heavy" }
+    if os == "windows" { "throttle.exe" } else { "throttle" }
 }
 
 /// Whether `v` is a semantic version (`1.2.3`, `1.2.3-rc.1`): the only thing a release tag and a folder name are built from.
@@ -146,7 +146,7 @@ pub enum Done {
 
 /// What one install needs; the machine's parts are arguments so a test can name them.
 pub struct Install<'a> {
-    /// `<dev-targets>/heavy`.
+    /// `<dev-targets>/throttle`.
     pub dir: &'a Path,
     /// The version to install.
     pub version: &'a str,
@@ -163,7 +163,7 @@ pub struct Install<'a> {
 }
 
 fn error(cause: &str, next: &str) -> String {
-    format!("::error::heavy-install: {cause} Next step: {next}")
+    format!("::error::throttle-install: {cause} Next step: {next}")
 }
 
 /// Writes `text` to a new file only its owner can read, with that mode from the start (never a moment with a wider one).
@@ -221,7 +221,7 @@ fn sweep(dir: &Path) {
 }
 
 fn download(i: &Install, work: &Path, file: &str) -> Result<PathBuf, String> {
-    let url = format!("{}/heavy-v{}/{file}", i.base.trim_end_matches('/'), i.version);
+    let url = format!("{}/throttle-v{}/{file}", i.base.trim_end_matches('/'), i.version);
     let dest = work.join(file);
     let mut call = ToolCall::new("curl")
         .args(["-fsS", "--retry", "2", "--connect-timeout", "10", "--max-time", "300", "-o"])
@@ -249,7 +249,7 @@ fn download(i: &Install, work: &Path, file: &str) -> Result<PathBuf, String> {
     if !ran.success {
         return Err(error(
             &format!("cannot download {url} ({}): {}", ran.how, tail(&ran.stderr, 3).trim()),
-            "check that the tag exists and has this asset (heavy-release.yml), that PADDOCK_DEV_TOKEN can read the repository, and run it again.",
+            "check that the tag exists and has this asset (throttle-release.yml), that PADDOCK_DEV_TOKEN can read the repository, and run it again.",
         ));
     }
     Ok(dest)
@@ -260,7 +260,7 @@ pub fn install(i: &Install) -> Result<Done, String> {
     let asset = asset_name(i.version, i.os, i.arch).map_err(|e| {
         error(
             &format!("{e}."),
-            "build it from tools/heavy (`cargo install --path tools/heavy --locked --root <dir>`).",
+            "build it from tools/throttle (`cargo install --path tools/throttle --locked --root <dir>`).",
         )
     })?;
     check_base(i.base).map_err(|e| error(&format!("{e}."), "use the repository's https release URL."))?;
@@ -299,8 +299,8 @@ pub fn install(i: &Install) -> Result<Done, String> {
         let sums = std::fs::read_to_string(&sums).map_err(|e| error(&format!("cannot read SHA256SUMS: {e}."), "run it again."))?;
         let want = find_sum(&sums, &asset).ok_or_else(|| {
             error(
-                &format!("SHA256SUMS of heavy-v{} does not list {asset}.", i.version),
-                "the release was built without this OS; check heavy-release.yml's matrix.",
+                &format!("SHA256SUMS of throttle-v{} does not list {asset}.", i.version),
+                "the release was built without this OS; check throttle-release.yml's matrix.",
             )
         })?;
         let file = download(i, &work, &asset)?;
@@ -320,8 +320,8 @@ pub fn install(i: &Install) -> Result<Done, String> {
         // The verified file itself is renamed into place (same disk, a folder only this user reaches): what was hashed is what runs.
         replace_binary(&file, &bin, &|a, b| std::fs::rename(a, b)).map_err(|e| {
             error(
-                &format!("cannot put heavy into {}: {e}.", bin.display()),
-                "stop the heavy runs that use it (Windows) and run it again.",
+                &format!("cannot put throttle into {}: {e}.", bin.display()),
+                "stop the throttle runs that use it (Windows) and run it again.",
             )
         })?;
         let rec = Record {
@@ -337,8 +337,9 @@ pub fn install(i: &Install) -> Result<Done, String> {
     result
 }
 
-/// `dev heavy-install`, against the real machine.
+/// `dev throttle-install`, against the real machine.
 pub fn command(a: &InstallArgs) -> Result<Report, CliError> {
+    crate::heavy_cmd::deprecated_name("heavy-install", "throttle-install");
     let env: HashMap<String, String> = crate::process_env::vars().collect();
     let cwd = std::env::current_dir().map_err(|e| CliError::failure(format!("current folder: {e}")))?;
     let targets = crate::places::dev_targets(&cwd, &|k| env.get(k).cloned())?;
@@ -348,7 +349,7 @@ pub fn command(a: &InstallArgs) -> Result<Report, CliError> {
     };
     if !is_semver(&version) {
         return Err(CliError::failure(format!(
-            "heavy-install: {version:?} is not a version like 1.2.3; pass --version X.Y.Z"
+            "throttle-install: {version:?} is not a version like 1.2.3; pass --version X.Y.Z"
         )));
     }
     let base = env
@@ -360,7 +361,7 @@ pub fn command(a: &InstallArgs) -> Result<Report, CliError> {
         .get("PADDOCK_DEV_TOKEN")
         .or_else(|| env.get("GITHUB_TOKEN"))
         .filter(|t| !t.is_empty());
-    let dir = targets.join("heavy");
+    let dir = targets.join("throttle");
     let done = install(&Install {
         dir: &dir,
         version: &version,
@@ -372,7 +373,7 @@ pub fn command(a: &InstallArgs) -> Result<Report, CliError> {
     })
     .map_err(|line| {
         eprintln!("{line}");
-        CliError::failure("heavy-install failed")
+        CliError::failure("throttle-install failed")
     })?;
     let (bin, what) = match done {
         Done::AlreadyInstalled(b) => (b, "already installed"),
@@ -380,22 +381,25 @@ pub fn command(a: &InstallArgs) -> Result<Report, CliError> {
     };
     Ok(Report::new(
         json!({ "ok": true, "version": version, "path": bin.display().to_string(), "result": what }),
-        format!("heavy {version} {what}: {}\n", bin.display()),
+        format!("throttle {version} {what}: {}\n", bin.display()),
     ))
 }
 
-/// The version in this checkout's `tools/heavy/Cargo.toml`.
+/// The version in this checkout's `tools/throttle/Cargo.toml`.
 fn checkout_version(from: &Path) -> Result<String, CliError> {
     let root = crate::worktree::git::Git::at(from)
         .text(&["rev-parse", "--show-toplevel"])
         .map(|t| PathBuf::from(t.trim()))
-        .map_err(|e| CliError::failure(format!("heavy-install: {e}; run it in a Paddock checkout or pass --version")))?;
-    let text = std::fs::read_to_string(root.join("tools/heavy/Cargo.toml"))
-        .map_err(|e| CliError::failure(format!("heavy-install: cannot read tools/heavy/Cargo.toml ({e}); pass --version")))?;
+        .map_err(|e| CliError::failure(format!("throttle-install: {e}; run it in a Paddock checkout or pass --version")))?;
+    let text = std::fs::read_to_string(root.join("tools/throttle/Cargo.toml")).map_err(|e| {
+        CliError::failure(format!(
+            "throttle-install: cannot read tools/throttle/Cargo.toml ({e}); pass --version"
+        ))
+    })?;
     text.parse::<toml::Table>()
         .ok()
         .and_then(|t| t.get("package")?.get("version")?.as_str().map(str::to_string))
-        .ok_or_else(|| CliError::failure("heavy-install: tools/heavy/Cargo.toml has no package version; pass --version"))
+        .ok_or_else(|| CliError::failure("throttle-install: tools/throttle/Cargo.toml has no package version; pass --version"))
 }
 
 #[cfg(test)]
@@ -441,10 +445,10 @@ mod tests {
     /// Windows: the name of the binary, and replacing one that is in use (its rename over is refused, but it can be renamed away).
     #[test]
     fn a_windows_binary_in_use_is_moved_aside_and_the_new_one_renamed_into_place() {
-        assert_eq!(bin_name("windows"), "heavy.exe");
-        assert_eq!(bin_name("linux"), "heavy");
+        assert_eq!(bin_name("windows"), "throttle.exe");
+        assert_eq!(bin_name("linux"), "throttle");
         let d = tempfile::tempdir().unwrap();
-        let (new, bin) = (d.path().join("new"), d.path().join("heavy.exe"));
+        let (new, bin) = (d.path().join("new"), d.path().join("throttle.exe"));
         std::fs::write(&new, "new").unwrap();
         std::fs::write(&bin, "old").unwrap();
         // The first rename of anything onto `bin` is refused, as Windows does for a running program.
@@ -462,7 +466,7 @@ mod tests {
             .flatten()
             .map(|e| e.file_name().to_string_lossy().into_owned())
             .collect();
-        assert_eq!(left, ["heavy.exe"], "the old one is removed when it can be: {left:?}");
+        assert_eq!(left, ["throttle.exe"], "the old one is removed when it can be: {left:?}");
         // When nothing can be renamed, the old binary is untouched and the error is the first one.
         std::fs::write(&new, "newer").unwrap();
         let never = |_: &Path, _: &Path| Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied));
@@ -472,24 +476,27 @@ mod tests {
 
     #[test]
     fn the_asset_of_each_supported_machine_and_the_checksum_line() {
-        assert_eq!(asset_name("0.2.0", "macos", "aarch64").unwrap(), "heavy-0.2.0-aarch64-apple-darwin");
+        assert_eq!(
+            asset_name("0.2.0", "macos", "aarch64").unwrap(),
+            "throttle-0.2.0-aarch64-apple-darwin"
+        );
         assert_eq!(
             asset_name("0.2.0", "linux", "x86_64").unwrap(),
-            "heavy-0.2.0-x86_64-unknown-linux-gnu"
+            "throttle-0.2.0-x86_64-unknown-linux-gnu"
         );
         assert_eq!(
             asset_name("0.2.0", "linux", "aarch64").unwrap(),
-            "heavy-0.2.0-aarch64-unknown-linux-gnu"
+            "throttle-0.2.0-aarch64-unknown-linux-gnu"
         );
         assert_eq!(
             asset_name("0.2.0", "windows", "x86_64").unwrap(),
-            "heavy-0.2.0-x86_64-pc-windows-msvc.exe"
+            "throttle-0.2.0-x86_64-pc-windows-msvc.exe"
         );
         assert!(asset_name("0.2.0", "freebsd", "x86_64").is_err());
-        let sums = "AB12  heavy-0.2.0-a\r\ncd34 *heavy-0.2.0-b\n";
-        assert_eq!(find_sum(sums, "heavy-0.2.0-a").as_deref(), Some("ab12"));
-        assert_eq!(find_sum(sums, "heavy-0.2.0-b").as_deref(), Some("cd34"));
-        assert_eq!(find_sum(sums, "heavy-0.2.0-c"), None);
+        let sums = "AB12  throttle-0.2.0-a\r\ncd34 *throttle-0.2.0-b\n";
+        assert_eq!(find_sum(sums, "throttle-0.2.0-a").as_deref(), Some("ab12"));
+        assert_eq!(find_sum(sums, "throttle-0.2.0-b").as_deref(), Some("cd34"));
+        assert_eq!(find_sum(sums, "throttle-0.2.0-c"), None);
         assert_eq!(
             Record::parse(
                 &Record {
