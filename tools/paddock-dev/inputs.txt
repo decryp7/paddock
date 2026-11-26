@@ -13,6 +13,7 @@ crates/paddock-limits
 crates/paddock-net
 crates/paddock-proc
 crates/paddock-repo-graph
+crates/paddock-secrets
 crates/paddock-slots
 crates/paddock-workspace-hack
 .cargo/config.toml
