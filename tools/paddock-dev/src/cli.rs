@@ -368,6 +368,12 @@ enum CiCommand {
     /// over a quarter of its stop, from a run's job logs or a saved nextest output. Report-only (exit 0) unless --fail-on-findings (5);
     /// 6 when no whole nextest run of paddock-dev was read.
     TestCost(ci_runs::TestCostArgs),
+    /// Cancels one CI run by the id `./dev ci dispatch` printed, through that run's own cancel URL (never "the newest run", ER-51). A
+    /// cancelled run reads as "cancelled: not measured". Exit 0 sent or already finished, 6 not measured.
+    Cancel(ci_runs::CancelArgs),
+    /// May the commit land (ER-49)? Needs the complete green CI run AND the green local slow rows (`./dev check --pre-push --member-gate
+    /// --set slow`) on the same commit. Exit 0 landable, 5 refused, 6 not held (an unfinished or missing half is never a pass).
+    LandingHeld(ci_runs::LandingHeldArgs),
     /// Is there a full green run of a workflow on a commit? The one reader of the runs for that verdict (the tag workflow asks
     /// it). A run counts if it is a push to main or its plan job logged `plan mode: full=true`; the newest full run decides.
     /// Exit 0 full green (with `--landing` also green with fix items: FLAKY tests in untouched code), 5 red, only partial runs, or
@@ -745,6 +751,12 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
         Command::Ci {
             command: CiCommand::RustPin(a),
         } => ci_rust_pin::command(&a),
+        Command::Ci {
+            command: CiCommand::Cancel(a),
+        } => ci_runs::cancel_cmd(&a),
+        Command::Ci {
+            command: CiCommand::LandingHeld(a),
+        } => ci_runs::landing_held(&a),
         Command::Ci {
             command: CiCommand::Verdict(a),
         } => ci_runs::verdict(&a),

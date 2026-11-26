@@ -13,6 +13,8 @@ pub struct Judged {
     pub passed: BTreeSet<String>,
     /// Why a package is not in `passed`, by package (a failure, a flake, no test seen), and why the run itself could not be read.
     pub not_passed: Vec<(String, String)>,
+    /// Packages that ran and had a test fail, end flaky or pass on a retry (a subset of `not_passed`: not "never seen" or "log cut short").
+    pub failed: BTreeSet<String>,
     /// How many tests each passed package ran.
     pub tests: std::collections::BTreeMap<String, u64>,
 }
@@ -46,6 +48,7 @@ pub fn judge(log: &str, asked: &[String]) -> Judged {
     let bad: BTreeSet<&str> = not_clean.iter().map(|b| package_of(b)).collect();
     for p in asked {
         if bad.contains(p.as_str()) {
+            out.failed.insert(p.clone());
             out.not_passed
                 .push((p.clone(), "a test failed, was flaky or passed on a retry".into()));
         } else if clean.contains(p.as_str()) {

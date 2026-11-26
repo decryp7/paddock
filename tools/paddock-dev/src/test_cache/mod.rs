@@ -16,6 +16,7 @@
 pub mod cmd;
 pub mod config;
 pub mod key;
+pub mod plan;
 pub mod result;
 pub mod s3;
 pub mod store;
@@ -254,4 +255,102 @@ pub fn records_from_log(log: &str, cands: &[Candidate], cfg: &Config, class: &Ru
             os_build: m.os_build.clone(),
         })
         .collect()
+}
+
+/// What the shadow phase saw in one run (ADR 0116 §8, ER-41): of the targets whose key matched a valid record, how many ran in this run
+/// and passed, and which ran and failed. A matched target that fails is a soundness finding: the key missed an input.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Shadow {
+    /// Matched targets that ran in this run's log.
+    pub matched: usize,
+    /// Of those, the ones that passed whole on the first try.
+    pub passed: usize,
+    /// The matched targets that ran and did not pass, by target id.
+    pub findings: Vec<String>,
+}
+
+impl Shadow {
+    /// The one line a record step prints and `ci test-cache shadow-run` reads back.
+    pub fn line(&self) -> String {
+        format!(
+            "test-cache shadow: matched {}, passed {}, findings {}",
+            self.matched,
+            self.passed,
+            self.findings.len()
+        )
+    }
+}
+
+/// The shadow outcome of `matched` (the candidates a valid record covered before this run) against what the log proved. A matched target
+/// that never appeared in the log did not run (it is not counted); one whose run could not be read as whole is not a finding either
+/// (nothing can be said, and the run is not clean for the switch: it prints `matched 0`).
+pub fn shadow_outcome(matched: &[&Candidate], judged: &result::Judged) -> Shadow {
+    let mut s = Shadow::default();
+    for c in matched {
+        let p = &c.target.package;
+        if judged.passed.contains(p) {
+            s.matched += 1;
+            s.passed += 1;
+        } else if judged.failed.contains(p) {
+            s.matched += 1;
+            s.findings.push(c.target.id.clone());
+        }
+    }
+    s
+}
+
+/// The shadow lines of job logs, summed: how many lines were read, and the totals. `None` when no log has a line (nothing measured).
+pub fn read_shadow(logs: &[String]) -> Option<(usize, Shadow)> {
+    let mut lines = 0;
+    let mut sum = Shadow::default();
+    for log in logs {
+        for l in log.lines() {
+            let l = crate::log_text::plain(l);
+            let Some(rest) = l.trim().split("test-cache shadow: ").nth(1) else {
+                continue;
+            };
+            let n = |key: &str| {
+                rest.split(&format!("{key} "))
+                    .nth(1)
+                    .and_then(|r| r.split([',', ' ']).next())
+                    .and_then(|v| v.parse::<usize>().ok())
+            };
+            let (Some(m), Some(p), Some(f)) = (n("matched"), n("passed"), n("findings")) else {
+                continue;
+            };
+            lines += 1;
+            sum.matched += m;
+            sum.passed += p;
+            // The names are in the `::error::` lines; the count is what the switch needs.
+            sum.findings.extend((0..f).map(|i| format!("finding {}", i + 1)));
+        }
+    }
+    (lines > 0).then_some((lines, sum))
+}
+
+/// The text of `docs/test-cache.toml` with `run` added to `[switch] green_runs`, once (a second call with the same id changes nothing).
+/// Reads the file through [`config::Config`] before and after, so a text it cannot read is an error and the result always parses.
+pub fn with_green_run(text: &str, run: u64) -> Result<String, String> {
+    let before = Config::parse(text)?;
+    if before.switch.green_runs.contains(&run) {
+        return Ok(text.to_string());
+    }
+    let mut runs = before.switch.green_runs.clone();
+    runs.push(run);
+    let list = format!("green_runs = [{}]", runs.iter().map(u64::to_string).collect::<Vec<_>>().join(", "));
+    let out = match text.lines().position(|l| l.trim_start().starts_with("green_runs")) {
+        Some(i) => {
+            let mut v: Vec<String> = text.lines().map(str::to_string).collect();
+            v[i] = list;
+            let mut t = v.join("\n");
+            t.push('\n');
+            t
+        }
+        None => return Err("docs/test-cache.toml has no `green_runs` line under [switch]".into()),
+    };
+    let after = Config::parse(&out)?;
+    if after.switch.green_runs != runs {
+        return Err("the edit did not produce the expected green_runs".into());
+    }
+    Ok(out)
 }

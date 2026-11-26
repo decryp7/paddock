@@ -571,3 +571,209 @@ fn record_stores_a_package_only_when_all_its_tests_passed_first_time_in_a_whole_
     let cut: String = log(&[]).lines().filter(|l| !l.contains("Summary")).collect::<Vec<_>>().join("\n");
     assert!(records_from_log(&cut, &cands, &cfg(), &class, &meta).is_empty());
 }
+
+fn leg(os: &str, packages: &str, filter: &str) -> serde_json::Value {
+    serde_json::json!({"os": os, "test_packages": packages, "test_filter": filter, "test_skip": ""})
+}
+
+fn reuse_plan() -> super::plan::ReusePlan {
+    super::plan::ReusePlan::parse(
+        r#"{"macOS-ARM64": {"a": "rust:crates/a@macOS-ARM64 from run 8635", "b": "rust:crates/b@macOS-ARM64 from run 8635"},
+            "Linux-X64": {"a": "rust:crates/a@Linux-X64 from run 8635"}}"#,
+    )
+    .unwrap()
+}
+
+#[test]
+fn a_whole_workspace_leg_gets_an_exclusion_and_keeps_its_filter_empty_so_the_run_stays_whole() {
+    let applied = super::plan::apply(
+        vec![leg("macos-latest", "", ""), leg("windows-latest", "", "")],
+        "crate",
+        &reuse_plan(),
+        false,
+    );
+    assert_eq!(applied.legs[0]["test_cache_exclude"], "not (package(=a) | package(=b))");
+    assert_eq!(
+        applied.legs[0]["test_filter"], "",
+        "the declared filter is untouched: `whole` stays true"
+    );
+    assert!(
+        applied.legs[1].get("test_cache_exclude").is_none(),
+        "no record for Windows: nothing excluded"
+    );
+    assert_eq!(applied.reused["crate@macos-latest"].len(), 2);
+    assert!(!applied.reused.contains_key("crate@windows-latest"));
+}
+
+#[test]
+fn a_package_list_leg_loses_the_reused_packages_and_ends_when_none_is_left() {
+    let some = super::plan::apply(vec![leg("macos-latest", "a c", "")], "crate", &reuse_plan(), false);
+    assert_eq!(some.legs[0]["test_packages"], "c");
+    assert_eq!(some.legs[0]["test_skip"], "");
+    let all = super::plan::apply(vec![leg("macos-latest", "a b", "")], "crate", &reuse_plan(), false);
+    assert_eq!(all.legs[0]["test_packages"], "");
+    assert_eq!(
+        all.legs[0]["test_skip"], "true",
+        "nothing left to test on this runner: said, never an empty list (which means everything)"
+    );
+    let none = super::plan::apply(vec![leg("macos-latest", "c", "")], "crate", &reuse_plan(), false);
+    assert_eq!(none.legs[0], leg("macos-latest", "c", ""));
+    assert!(none.reused.is_empty());
+}
+
+#[test]
+fn a_narrowed_leg_and_the_coverage_run_are_left_alone() {
+    // A filtered leg is not a whole-package run, and the crate job's Linux leg runs no tests (the coverage job does, uncached, D4).
+    let narrowed = super::plan::apply(vec![leg("macos-latest", "", "package(=a)")], "crate", &reuse_plan(), false);
+    assert!(narrowed.legs[0].get("test_cache_exclude").is_none() && narrowed.reused.is_empty());
+    let linux_crate = super::plan::apply(vec![leg("ubuntu-latest", "", "")], "crate", &reuse_plan(), false);
+    assert!(linux_crate.reused.is_empty());
+    // The same Linux leg of paddock-dev runs its tests plainly, so it is cacheable there.
+    let linux_dev = super::plan::apply(vec![leg("ubuntu-latest", "", "")], "paddock-dev", &reuse_plan(), true);
+    assert_eq!(linux_dev.legs[0]["test_cache_exclude"], "not (package(=a))");
+}
+
+#[test]
+fn a_plan_file_that_is_not_a_class_package_note_map_is_refused() {
+    for bad in ["[]", "{\"macOS-ARM64\": []}", "{\"macOS-ARM64\": {\"a\": \"\"}}", "not json"] {
+        assert!(super::plan::ReusePlan::parse(bad).is_err(), "{bad}");
+    }
+    let p = reuse_plan();
+    assert_eq!(super::plan::ReusePlan::parse(&p.json().to_string()).unwrap(), p);
+}
+
+#[test]
+fn a_matched_target_that_ran_and_failed_is_a_soundness_finding_and_a_missing_one_is_not() {
+    let (a, b, c) = (cand("a", "h"), cand("b", "h"), cand("c", "h"));
+    let log = [
+        "    Starting 3 tests across 3 binaries",
+        "        PASS [   0.010s] ( 1/3) a t::ok",
+        "        FAIL [   0.010s] ( 2/3) b t::broken",
+        "        PASS [   0.010s] ( 3/3) other t::ok",
+        "     Summary [   0.050s] 3 tests run: 2 passed, 1 failed, 0 skipped",
+        "        FAIL [   0.010s] ( 2/3) b t::broken",
+    ]
+    .join("\n");
+    let judged = judge(&log, &names(&["a", "b", "c"]));
+    let s = shadow_outcome(&[&a, &b, &c], &judged);
+    assert_eq!((s.matched, s.passed, s.findings.clone()), (2, 1, vec!["rust:b".to_string()]));
+    assert_eq!(s.line(), "test-cache shadow: matched 2, passed 1, findings 1");
+    // A log that is not whole proves nothing: no match counted, no finding.
+    let cut = judge("garbage", &names(&["a"]));
+    assert_eq!(shadow_outcome(&[&a], &cut), Shadow::default());
+}
+
+#[test]
+fn the_shadow_lines_of_several_jobs_sum_and_no_line_is_not_measured() {
+    let logs = vec![
+        "2026-11-26T00:00:00Z test-cache shadow: matched 3, passed 3, findings 0".to_string(),
+        "noise\n2026-11-26T00:00:01Z test-cache shadow: matched 2, passed 1, findings 1\n".to_string(),
+        "no such line here".to_string(),
+    ];
+    let (n, sum) = read_shadow(&logs).unwrap();
+    assert_eq!((n, sum.matched, sum.passed, sum.findings.len()), (2, 5, 4, 1));
+    assert!(read_shadow(&["nothing".to_string()]).is_none());
+}
+
+#[test]
+fn a_run_is_added_to_the_green_runs_once_and_the_file_still_parses() {
+    let one = with_green_run(CFG, 9001).unwrap();
+    assert_eq!(Config::parse(&one).unwrap().switch.green_runs, vec![9001]);
+    assert_eq!(Config::parse(&one).unwrap().mode(), Mode::Shadow);
+    assert_eq!(with_green_run(&one, 9001).unwrap(), one, "the same run twice changes nothing");
+    let two = with_green_run(&one, 9002).unwrap();
+    assert_eq!(
+        Config::parse(&two).unwrap().mode(),
+        Mode::On,
+        "two distinct clean runs switch it on"
+    );
+    assert!(two.contains("# The switch (ER-41)"), "the comments stay");
+    assert!(with_green_run("epoch = 1\n", 1).is_err(), "a text that does not parse is an error");
+}
+
+fn s3_with(endpoint: &str, ssl: Option<&str>) -> super::s3::S3Store {
+    let d = tempfile::tempdir().unwrap();
+    let mut env: HashMap<String, String> = [
+        ("AWS_ACCESS_KEY_ID", "AKIDEXAMPLE"),
+        ("AWS_SECRET_ACCESS_KEY", "s3cr3t-value"),
+        ("PADDOCK_SCCACHE_ENV_FILE", d.path().join("absent.env").to_str().unwrap()),
+        ("PADDOCK_SCCACHE_S3_ENDPOINT", endpoint),
+    ]
+    .iter()
+    .map(|(k, v)| (k.to_string(), v.to_string()))
+    .collect();
+    if let Some(v) = ssl {
+        env.insert("PADDOCK_SCCACHE_S3_SSL".into(), v.into());
+    }
+    super::s3::S3Store::from_env(&env, d.path().join("scratch")).unwrap()
+}
+
+#[test]
+fn the_endpoint_forms_of_the_repository_variable_all_make_one_address() {
+    // CI's exact form (run 9135 log: `PADDOCK_SCCACHE_S3_ENDPOINT: http://172.16.1.220:15000`) was turned into `http://http://...`.
+    let shown = |e: &str, ssl| format!("{:?}", s3_with(e, ssl));
+    assert_eq!(
+        shown("http://172.16.1.220:15000", None),
+        "S3Store(http://172.16.1.220:15000/test-results-paddock)"
+    );
+    assert_eq!(
+        shown("172.16.1.220:15000", None),
+        "S3Store(http://172.16.1.220:15000/test-results-paddock)",
+        "the bare host:port of a local setup"
+    );
+    assert_eq!(
+        shown("http://172.16.1.220:15000/", None),
+        "S3Store(http://172.16.1.220:15000/test-results-paddock)",
+        "a trailing slash"
+    );
+    assert_eq!(
+        shown("https://store.lan:9000", None),
+        "S3Store(https://store.lan:9000/test-results-paddock)"
+    );
+    assert_eq!(
+        shown("172.16.1.220:15000", Some("true")),
+        "S3Store(https://172.16.1.220:15000/test-results-paddock)",
+        "the SSL switch of the compile cache"
+    );
+    // The same reading as the compile cache's (one definition, ER-22): what it refuses, the store refuses too.
+    let d = tempfile::tempdir().unwrap();
+    let bad = |e: &str| {
+        let env: HashMap<String, String> = [
+            ("AWS_ACCESS_KEY_ID", "AKIDEXAMPLE"),
+            ("AWS_SECRET_ACCESS_KEY", "s3cr3t-value"),
+            ("PADDOCK_SCCACHE_ENV_FILE", d.path().join("absent.env").to_str().unwrap()),
+            ("PADDOCK_SCCACHE_S3_ENDPOINT", e),
+        ]
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
+        super::s3::S3Store::from_env(&env, d.path().join("s")).unwrap_err()
+    };
+    assert!(bad("http://user:pw@host:1").contains("no user or password") && !bad("http://user:pw@host:1").contains("pw@"));
+    assert!(bad("http://host:1/path").contains("no path"));
+    assert!(
+        bad("http://http://host:1").contains("no path"),
+        "a doubled scheme is refused, never sent"
+    );
+}
+
+#[test]
+fn a_redirect_is_never_followed_and_is_named_with_its_target() {
+    let e = super::s3::parse_done("308|http://172.16.1.220:15000/test-results-paddock/v1/x|/tmp/body-0\n")
+        .unwrap_err()
+        .to_string();
+    assert!(
+        e.contains("308") && e.contains("a redirect to http://172.16.1.220:15000/test-results-paddock/v1/x") && e.contains("not followed"),
+        "{e}"
+    );
+    let none = super::s3::parse_done("301||/tmp/b\n").unwrap_err().to_string();
+    assert!(none.contains("an address it did not give"), "{none}");
+    // A normal answer and a miss still parse.
+    assert_eq!(
+        super::s3::parse_done("200||/tmp/a\n404||/tmp/b\n").unwrap(),
+        vec![(200, "/tmp/a".to_string()), (404, "/tmp/b".to_string())]
+    );
+    assert!(super::s3::parse_done("garbage").is_err());
+    // The whole call fails on a redirect, so the caller runs everything (fail open), whichever transfer it was.
+    assert!(super::s3::parse_done("200||/tmp/a\n308|http://x/|/tmp/b\n").is_err());
+}

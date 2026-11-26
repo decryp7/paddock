@@ -343,6 +343,10 @@ Each lists the recommended option and the common-practice option.
   not tagged `external`.
 - **D4. Coverage.** Recommended: never cached in phase 1 (the `crates` job keeps measuring whole). Common practice: coverage runs
   uncached or on a schedule.
+  **Amended 2026-11-26 (user):** coverage leaves the trains. The Linux `crate` leg runs plain nextest on a train, a branch and a push to
+  main (cacheable like every other leg); `cargo llvm-cov` and `scripts/coverage-gate.mjs` (still report-only) run in the nightly, a
+  release's gates and a tag only. `plan_ci::coverage_run` and the `crates` job's step condition say the same three things, and
+  `conformance/test/coverage-placement.test.mjs` keeps them equal.
 - **D5. The runner's OS build in the key.** Recommended: not in the key, reported in each record, the nightly as the net (ER-26 keeps
   runners on the stable channel). Common practice: Bazel keys on the execution platform's declared properties, not the host's patch
   level.

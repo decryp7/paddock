@@ -59,19 +59,22 @@ impl S3Store {
                 (id, secret)
             }
         };
+        // The endpoint exactly as the compile cache reads it (`ci_setup_rust::parse_endpoint`, ER-22): the repository variable is
+        // `http://host:port`, so the scheme is taken from it and never added a second time (run 9135: `http://http://...` answered 308).
         let endpoint = env
             .get("PADDOCK_SCCACHE_S3_ENDPOINT")
             .filter(|v| !v.is_empty())
             .cloned()
             .unwrap_or_else(|| crate::local_sccache::DEFAULT_S3_ENDPOINT.to_string());
-        let ssl = env.get("PADDOCK_SCCACHE_S3_SSL").is_some_and(|v| v == "true");
+        let (tls, host_port) = crate::ci_setup_rust::parse_endpoint(&endpoint)?;
+        let ssl = tls || env.get("PADDOCK_SCCACHE_S3_SSL").is_some_and(|v| v == "true");
         let region = env
             .get("PADDOCK_SCCACHE_S3_REGION")
             .filter(|v| !v.is_empty())
             .cloned()
             .unwrap_or_else(|| "auto".into());
         Ok(S3Store {
-            base: format!("{}://{endpoint}", if ssl { "https" } else { "http" }),
+            base: format!("{}://{host_port}", if ssl { "https" } else { "http" }),
             region,
             keys: (id, secret),
             scratch,
@@ -92,7 +95,7 @@ impl S3Store {
                 out.push_str("next\n");
             }
             out.push_str(&format!(
-                "url = \"{url}\"\naws-sigv4 = \"aws:amz:{}:s3\"\nuser = \"{}:{}\"\nconnect-timeout = {REQUEST_SECS}\nmax-time = {REQUEST_SECS}\nsilent\nshow-error\noutput = \"{}\"\nwrite-out = \"%{{http_code}} %{{filename_effective}}\\n\"\n",
+                "url = \"{url}\"\naws-sigv4 = \"aws:amz:{}:s3\"\nuser = \"{}:{}\"\nconnect-timeout = {REQUEST_SECS}\nmax-time = {REQUEST_SECS}\nsilent\nshow-error\noutput = \"{}\"\nwrite-out = \"%{{http_code}}|%{{redirect_url}}|%{{filename_effective}}\\n\"\n",
                 self.region,
                 self.keys.0,
                 self.keys.1,
@@ -126,13 +129,7 @@ impl S3Store {
                 out.stderr_text().trim().chars().take(200).collect::<String>()
             ))));
         }
-        let text = out.stdout_text();
-        let mut done = Vec::new();
-        for l in text.lines() {
-            let (code, file) = l.split_once(' ').ok_or_else(|| StoreError(format!("curl said {l:?}")))?;
-            done.push((code.parse().unwrap_or(0), file.to_string()));
-        }
-        Ok(done)
+        parse_done(&out.stdout_text())
     }
 
     fn mask(&self, t: &str) -> String {
@@ -326,4 +323,30 @@ fn s3_error(body: &str) -> String {
         (Some(c), None) => format!(" ({c})"),
         _ => String::new(),
     }
+}
+
+/// Reads curl's per-transfer `write-out` lines, `<code>|<redirect url>|<output file>`. A redirect (3xx) is never followed: a signed request
+/// does not survive one, and a store that redirects every request (run 9135: a doubled `http://` in the address) must say so, not look like a
+/// refusal. It is an error for the whole call, with the address it was sent to, so the caller runs everything.
+pub(super) fn parse_done(text: &str) -> Result<Vec<(u16, String)>, StoreError> {
+    let mut done = Vec::new();
+    for l in text.lines() {
+        let mut p = l.splitn(3, '|');
+        let (Some(code), Some(redirect), Some(file)) = (p.next(), p.next(), p.next()) else {
+            return Err(StoreError(format!("curl said {l:?}")));
+        };
+        let code: u16 = code.parse().unwrap_or(0);
+        if (300..400).contains(&code) {
+            let to = if redirect.is_empty() {
+                "an address it did not give".to_string()
+            } else {
+                redirect.to_string()
+            };
+            return Err(StoreError(format!(
+                "the store answered {code}, a redirect to {to} (not followed: the endpoint is `http://host:port` with no path, the scheme is not added twice)"
+            )));
+        }
+        done.push((code, file.to_string()));
+    }
+    Ok(done)
 }
