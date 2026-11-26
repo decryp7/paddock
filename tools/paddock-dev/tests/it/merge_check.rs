@@ -1472,6 +1472,26 @@ mod member_gate {
         );
     }
 
+    /// `--gates-base <ref>` measures the gate from that ref, not from the merge's first parent: the whole train's rows, so a push of the
+    /// same tree finds a pass for each (user, 2026-11-26). The default is unchanged (the test above); this is the positive control that
+    /// the flag changes what the gate is asked.
+    #[test]
+    fn gates_base_measures_the_gate_from_the_named_ref() {
+        let t = train(true);
+        let first_parent = t.repo.git(&["rev-parse", "HEAD^1"]);
+        let base = t.repo.git(&["rev-parse", "HEAD~2"]);
+        t.run(&["--gates", "--gates-base", &base, "HEAD"], "5");
+        let log = fs::read_to_string(t.log()).unwrap();
+        assert!(
+            log.contains(&format!("check --pre-push --member-gate --base {base} --root")),
+            "{log}"
+        );
+        assert!(
+            !log.contains(&format!("--base {first_parent} --root")),
+            "the first parent is not the base now: {log}"
+        );
+    }
+
     #[test]
     fn without_gates_nothing_is_run() {
         let t = train(true);

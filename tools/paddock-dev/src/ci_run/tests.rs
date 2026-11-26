@@ -543,7 +543,7 @@ fn heavy_puts_every_line_through_the_machine_wide_slot_and_refuses_without_one()
         .install()
         .unwrap();
     let wrap = wrap.program();
-    let (code, log) = r.run("ui", "checks", |a| a.heavy = true, &[("PADDOCK_HEAVY", wrap.to_str().unwrap())]);
+    let (code, log) = r.run("ui", "checks", |a| a.heavy = true, &[("PADDOCK_THROTTLE", wrap.to_str().unwrap())]);
     assert_eq!(code, 0, "{log}");
     assert_eq!(
         std::fs::read_to_string(r.root().join("slot-log")).unwrap().trim(),

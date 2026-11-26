@@ -554,13 +554,13 @@ restart_or_fail() {
 }
 
 # The tool cache (`$home/bin`, `$home/bin-source`) holds every cached tool: paddock-dev's entries (`<hash>/paddock-dev-<host>`) and
-# those paddock-dev builds itself (`heavy-<hash>/heavy`, tools/paddock-dev/src/tool_cache.rs). One policy for all of them:
-#  - each tool keeps its five newest entries (a tool is the name of the file an entry holds, so heavy's never count as ours);
+# those paddock-dev builds itself (`throttle-<hash>/throttle`, tools/paddock-dev/src/tool_cache.rs). One policy for all of them:
+#  - each tool keeps its five newest entries (a tool is the name of the file an entry holds, so the throttle's never count as ours);
 #  - an entry used within the last day is never removed: a job on the same mount (several runners share a host's tools folder)
 #    runs it again at its end, when its temp folder is already gone and a rebuild cannot work (run 7773, job-isolation release),
 #    and every hit touches its entry;
 #  - an entry a run holds is never removed: a hold is a hard link under `$home/held/` (tool_cache::hold), so a file with more
-#    than one link is in use (2026-11-14: heavy vanished in the middle of a train-10 `gen check`).
+#    than one link is in use (2026-11-14: the throttle vanished in the middle of a train-10 `gen check`).
 # Only paddock-dev's own entries take their legacy build folders (`target-<hash>`) with them.
 # cache_tool <entry>: the tool an entry holds (the first file whose name does not start with a dot; a temp copy sorts after it).
 # shellcheck disable=SC2012 # entry and tool names are hashes and tool names, never with spaces or newlines

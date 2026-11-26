@@ -631,6 +631,7 @@ impl Train for GitTrain {
                 gates: false,
                 write_reverted: None,
                 old_base_anyway: None,
+                gates_base: None,
             };
             match (self.merge_check)(&req) {
                 Ok(_) => merged.push(pr.number),

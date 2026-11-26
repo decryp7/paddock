@@ -400,7 +400,7 @@ test('setup-rust uses ./dev only off the release path, and never a stored tool b
   assert.ok(text.indexOf('- name: Rust toolchain') < text.indexOf('- name: Compile cache and Tauri libraries'));
 });
 
-// Review of ci-in-rust step 1 (P1): ci.yml's wiki, heavy and crates jobs ran setup-rust's ./dev without the tag rule, so a rule 54
+// Review of ci-in-rust step 1 (P1): ci.yml's wiki, throttle and crates jobs ran setup-rust's ./dev without the tag rule, so a rule 54
 // dispatch could take a stored tool binary. Every job that uses the action from this repository carries the rule in its env.
 test('every job that uses setup-rust sets the tag rule for ./dev (it runs ./dev ci setup-rust)', () => {
   const missing = [];
@@ -2683,7 +2683,7 @@ export function toolCacheProblem(job, wfEnv, load) {
   if (!order[cache].token) return `the tool cache (${order[cache].step}) gets no download token, so it reports usable=false and nothing is restored or saved`;
   return '';
 }
-const RELEASE_PATH = new Set(['tag.yml', 'tag-rehearsal.yml', 'heavy-release.yml']);   // a tag's own gates and a release build the tool from source
+const RELEASE_PATH = new Set(['tag.yml', 'tag-rehearsal.yml', 'throttle-release.yml']);   // a tag's own gates and a release build the tool from source
 test('every Linux job restores the dev tool, with a download token, before its first ./dev call', () => {
   const problems = [];
   let jobs = 0;

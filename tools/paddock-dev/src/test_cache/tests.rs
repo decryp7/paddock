@@ -196,8 +196,13 @@ fn an_unchanged_target_reuses_and_a_changed_one_runs() {
     assert!(notice.is_none());
     assert!(matches!(d[0], Decision::Reuse(_)));
     assert_eq!(d[1], Decision::Run(Why::Miss));
-    // The same record is not read on another runner class.
-    let (d, _) = decide(&[a], &cfg(), &RunnerClass::of("windows", "x86_64"), &s, NOW, OK);
+    // The same record is not read on another runner class: one that is not this host's (on the Windows runner, Windows-X64 is
+    // `here()`, so a fixed Windows class read its own record back; run 9146).
+    let other = [RunnerClass::of("windows", "x86_64"), RunnerClass::of("linux", "x86_64")]
+        .into_iter()
+        .find(|c| *c != class)
+        .expect("two different classes");
+    let (d, _) = decide(&[a], &cfg(), &other, &s, NOW, OK);
     assert_eq!(d[0], Decision::Run(Why::Miss));
 }
 

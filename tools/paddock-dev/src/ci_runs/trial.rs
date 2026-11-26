@@ -253,6 +253,8 @@ pub fn prune(g: &GitTrain, dry: bool) -> Result<Vec<Stale>, String> {
             });
             continue;
         }
+        // per-item: one `merge-base --is-ancestor` of a trial's second parent, which no bulk form answers (`for-each-ref --merged` tests
+        // the ref's own tip); the loop is bounded by the live trial refs, which prune keeps to a handful.
         // The head the trial merged is its second parent: on main, the branch landed.
         let (landed, _) = g.run_git(Child::Local, &["merge-base", "--is-ancestor", &format!("{short}^2"), "origin/main"])?;
         if landed {
@@ -281,8 +283,14 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
+    thread_local! {
+        /// The git starts of this test's thread (each test runs on its own thread), what the budget test reads.
+        static GIT_STARTS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    }
+
     #[allow(clippy::disallowed_methods, reason = "a test starts git in its own scratch repositories")]
     fn git_in(dir: &Path, args: &[&str]) -> String {
+        GIT_STARTS.with(|c| c.set(c.get() + 1));
         let out = crate::git_env::git()
             .current_dir(dir)
             .env("GIT_CONFIG_NOSYSTEM", "1")
@@ -319,31 +327,87 @@ mod tests {
         git_in(&w.work, &["push", "-q", "-f", "origin", branch]);
     }
 
-    /// An origin with main (shared.txt), a landed train, an open train with member `m1`, and a working copy that makes branches.
+    /// The world's fixture, built once per machine and recipe (`paddock_testkit::git_fixture::template`): an origin with main (shared.txt), a landed train,
+    /// an open train with member `m1`, and a working copy that makes branches. Each test gets a private copy ([`world`]), so no test
+    /// shares mutable state and the dozens of git starts of the build are paid once, not by every test.
+    fn template() -> PathBuf {
+        paddock_testkit::git_fixture::template("trial", include_str!("trial.rs"), |build, ready| {
+            let origin = build.join("origin.git");
+            let work = build.join("work");
+            std::fs::create_dir_all(&work).unwrap();
+            git_in(build, &["init", "-q", "--bare", "-b", "main", origin.to_str().unwrap()]);
+            git_in(&work, &["init", "-q", "-b", "main"]);
+            // LF checkouts on every OS before the first checkout (ER-61).
+            paddock_testkit::git_fixture::lf_only(&origin);
+            paddock_testkit::git_fixture::lf_only(&work);
+            git_in(&work, &["remote", "add", "origin", origin.to_str().unwrap()]);
+            std::fs::write(work.join("shared.txt"), "one\n").unwrap();
+            git_in(&work, &["add", "-A"]);
+            git_in(&work, &["commit", "-q", "-m", "base"]);
+            git_in(&work, &["push", "-q", "origin", "main"]);
+            let w = World {
+                origin,
+                clone: build.join("clone"),
+                work,
+                _dir: tempfile::tempdir().unwrap(),
+            };
+            commit(&w, "train/old", "old.txt", "old", "main");
+            git_in(&w.work, &["checkout", "-q", "main"]);
+            git_in(&w.work, &["merge", "-q", "--ff-only", "train/old"]);
+            git_in(&w.work, &["push", "-q", "origin", "main"]);
+            commit(&w, "train/open", "m1.txt", "m1", "main");
+            // The working copy's url names the scratch folder; it must name the template's final place.
+            let cfg = w.work.join(".git").join("config");
+            let text = std::fs::read_to_string(&cfg).unwrap();
+            std::fs::write(&cfg, text.replace(&escaped(&w.origin), &escaped(&ready.join("origin.git")))).unwrap();
+        })
+    }
+
+    /// A path as git's config file writes it in a value (a backslash, on Windows, is doubled).
+    fn escaped(p: &Path) -> String {
+        p.to_str().unwrap().replace('\\', "\\\\")
+    }
+
+    /// A private copy of the template, made with no git start: both folders are copied and the working copy's `origin` url, the one
+    /// absolute path in it, is pointed at the copy of the origin.
     fn world() -> World {
+        let t = template();
+        let (torigin, twork) = (t.join("origin.git"), t.join("work"));
         let dir = tempfile::tempdir().unwrap();
         let origin = dir.path().join("origin.git");
         let work = dir.path().join("work");
-        std::fs::create_dir_all(&work).unwrap();
-        git_in(dir.path(), &["init", "-q", "--bare", "-b", "main", origin.to_str().unwrap()]);
-        git_in(&work, &["init", "-q", "-b", "main"]);
-        git_in(&work, &["remote", "add", "origin", origin.to_str().unwrap()]);
-        std::fs::write(work.join("shared.txt"), "one\n").unwrap();
-        git_in(&work, &["add", "-A"]);
-        git_in(&work, &["commit", "-q", "-m", "base"]);
-        git_in(&work, &["push", "-q", "origin", "main"]);
-        let w = World {
+        paddock_testkit::git_fixture::copy_tree(&torigin, &origin);
+        paddock_testkit::git_fixture::copy_tree(&twork, &work);
+        let cfg = work.join(".git").join("config");
+        let text = std::fs::read_to_string(&cfg).unwrap();
+        let (old, new) = (escaped(&torigin), escaped(&origin));
+        assert!(text.contains(&old), "the template's origin url is in the working copy's config");
+        std::fs::write(&cfg, text.replace(&old, &new)).unwrap();
+        World {
             origin,
             clone: dir.path().join("clone"),
             work,
             _dir: dir,
-        };
-        commit(&w, "train/old", "old.txt", "old", "main");
-        git_in(&w.work, &["checkout", "-q", "main"]);
-        git_in(&w.work, &["merge", "-q", "--ff-only", "train/old"]);
-        git_in(&w.work, &["push", "-q", "origin", "main"]);
-        commit(&w, "train/open", "m1.txt", "m1", "main");
-        w
+        }
+    }
+
+    /// Budget (rule 85): a test's world costs no git start once the template exists, and is private: a push in one copy is not in
+    /// another or in the template.
+    #[test]
+    fn a_world_is_a_private_copy_of_the_template_and_costs_no_git_start() {
+        let t = template();
+        let before = GIT_STARTS.with(|c| c.get());
+        let a = world();
+        let b = world();
+        assert_eq!(GIT_STARTS.with(|c| c.get()), before, "a world is a file copy, not git starts");
+        commit(&a, "feat/only-a", "a.txt", "a", "main");
+        assert!(git_in(&a.origin, &["branch", "--list", "feat/only-a"]).contains("only-a"));
+        assert!(git_in(&b.origin, &["branch", "--list", "feat/only-a"]).is_empty());
+        assert!(git_in(&t.join("origin.git"), &["branch", "--list", "feat/only-a"]).is_empty());
+        assert!(
+            git_in(&b.origin, &["branch", "--list", "train/open"]).contains("train/open"),
+            "the template's content is there"
+        );
     }
 
     fn open(w: &World) -> GitTrain {
