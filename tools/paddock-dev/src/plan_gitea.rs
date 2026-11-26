@@ -28,6 +28,7 @@ pub const CI_JOBS: &[(&str, &[&str])] = &[
     ("heavy", &["tools"]),
     ("crates", &["crates"]),
     ("crate", &["crates"]),
+    ("test-cache-shadow", &["crates"]),
     ("audit", &["paddock-dev"]),
     ("app", &["apps"]),
     ("paddock-dev", &["paddock-dev"]),
