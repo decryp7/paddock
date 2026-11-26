@@ -493,14 +493,12 @@ fn only_rows_that_read_nothing_but_the_tree_have_a_class() {
     let c = |id: &str, cwd: &str| class_of(&gate(id, cwd));
     assert_eq!(c("clippy apps/dyno", "apps/dyno"), Some(Class::Cargo(vec!["apps/dyno".into()])));
     assert_eq!(c("conformance", ""), Some(Class::Whole));
-    for never in [
-        "commit-lint",
-        "member-audits",
-        "locks-guard",
-        "pitwall-deny",
-        "dyno-wire-fixtures",
-        "something-new",
-    ] {
+    assert_eq!(
+        c("member-audits", ""),
+        Some(Class::Whole),
+        "the audits read the whole tree: keyed like conformance"
+    );
+    for never in ["commit-lint", "locks-guard", "pitwall-deny", "dyno-wire-fixtures", "something-new"] {
         assert_eq!(c(never, ""), None, "{never} is never reused");
     }
 }
@@ -799,4 +797,25 @@ fn the_member_gates_test_rows_have_a_class() {
     // The developer tool's tests read the whole repository (contracts, goldens, workflows): keyed on the whole tree.
     assert_eq!(c("tests tools/paddock-dev", "tools/paddock-dev", &[]), Some(Class::Whole));
     assert_eq!(c("tests", "", &[]), None, "the summary row of a skip is never a run");
+}
+
+/// The member audits (ADR 0116 amendment 2026-11-26) are reused on an exact-tree repeat and run again once the tree changes: the member
+/// gate's pass is the push's, and the train-audits guard's, as long as nothing under the tree moved.
+#[test]
+fn the_member_audits_are_reused_on_the_same_tree_and_run_again_when_the_tree_changes() {
+    let s = Scratch::new();
+    let ex = Counting::new(true);
+    let audits = || vec![Planned::Run(gate("member-audits", "tools/paddock-dev"))];
+    run(&audits(), &ex, Some(&s.reuse()));
+    assert_eq!(ex.take(), all(&["member-audits"]), "the first run runs it");
+    let again = run(&audits(), &ex, Some(&s.reuse()));
+    assert!(ex.take().is_empty(), "the same tree: the audits are not run again");
+    assert!(
+        again.iter().all(|(_, r)| r.reused.is_some() && r.kind() == Kind::Passed),
+        "{again:?}"
+    );
+    // Positive control: a change anywhere in the tree (a file the audits could read) runs them again.
+    s.commit("docs/elsewhere.md", "changed\n");
+    run(&audits(), &ex, Some(&s.reuse()));
+    assert_eq!(ex.take(), all(&["member-audits"]), "a changed tree: the audits run again");
 }

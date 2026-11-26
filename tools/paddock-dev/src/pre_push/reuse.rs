@@ -123,14 +123,17 @@ pub enum Class {
     Whole,
 }
 
-/// The class of a row, or `None` when its result is never reused: the commit lint (it reads commits), the audits and the locks
+/// The class of a row, or `None` when its result is never reused: the commit lint (it reads commits), the locks
 /// guard (history and the base's lockfiles), the deny row (the advisory database moves without the tree), the wire fixtures (the row
 /// writes files) and any row this module does not know.
 pub fn class_of(g: &Gate) -> Option<Class> {
     let first = g.id.split([' ', ',']).next().unwrap_or("");
     match first {
         "lockfile" | "fmt" | "clippy" | "clippy-windows" if !g.cwd.is_empty() => Some(Class::Cargo(vec![g.cwd.clone()])),
-        "conformance" | "conformance-tests" | "gates-register" | "pitwall-scripts" => Some(Class::Whole),
+        // `member-audits` reads about 14k to 36k files across the whole tree (the ADR 0116 trace, amendment 2026-11-26: a declared input
+        // set gains nothing), so it keys like the other repository-wide rows: the whole tree, the base and the day. An exact-tree repeat (the
+        // member gate then the push, or the train-audits guard after it) reuses its pass; any change to the tree runs it again.
+        "conformance" | "conformance-tests" | "gates-register" | "pitwall-scripts" | "member-audits" => Some(Class::Whole),
         "tests" if !g.cwd.is_empty() => Some(tests_class(vec![g.cwd.clone()])),
         _ => None,
     }
