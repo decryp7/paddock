@@ -27,14 +27,10 @@ use paddock_cli::{CliError, Report};
 use serde_json::json;
 use std::path::Path;
 
-/// Whether the merge of `branch` (from a train merge subject) is the member's own, with or without a remote prefix.
+/// Whether the merge of `branch` (from a train merge subject) is the member's own: the same name with or without a remote prefix, and
+/// a sync branch (`sync/<member>`, `sync/<member>/<sha>`, the integrator's branch for the member) is its member's.
 pub fn is_own(branch: &str, member: &str) -> bool {
-    let strip = |s: &str| {
-        s.split_once('/')
-            .filter(|(remote, _)| *remote == "origin")
-            .map_or(s.to_string(), |(_, r)| r.to_string())
-    };
-    strip(branch) == strip(member)
+    trial_dispatch::member_key(branch) == trial_dispatch::member_key(member)
 }
 
 /// The member's branch name: `member` as given, else the branch HEAD is on.
@@ -72,6 +68,9 @@ pub struct Options<'a> {
     pub no_trial: Option<&'a str>,
     /// `--trial-max <duration>`: the longest the dispatch waits for a busy runner.
     pub trial_max: &'a str,
+    /// `--reland <revert>` (repeatable): reverts of the member's own earlier merge that the sync tip re-applies, besides the ones
+    /// found in its history; the trial's merge carries `Reverted:` lines for them.
+    pub relands: &'a [String],
 }
 
 /// Lists the commands and warnings, then (the train merged) runs the static rows on the sync tip and, once they pass, dispatches
@@ -136,6 +135,8 @@ fn command_with(
     };
     let mut reverts = live_for_member(&git, &train_tip, &basis).map_err(|e| step(e, "fix what is named, then run it again"))?;
     let mut done = 0;
+    // The reverts of merges that HEAD already re-applies (a `git revert` of the revert is in train..HEAD).
+    let mut reapplied: Vec<(String, String, String, String)> = Vec::new();
     if after {
         let mut open = Vec::new();
         for r in reverts {
@@ -155,6 +156,7 @@ fn command_with(
                 open.push(r);
             } else {
                 done += 1;
+                reapplied.push(r);
             }
         }
         reverts = open;
@@ -194,6 +196,20 @@ fn command_with(
             short(m)
         ));
     }
+    // The reverts the trial's merge must carry: the member's own, already re-applied, and the ones named with `--reland`.
+    let mut relands: Vec<String> = reapplied.iter().filter(|r| is_own(&r.3, &name)).map(|r| r.1.clone()).collect();
+    for given in opts.relands {
+        let full = git
+            .text(&["rev-parse", "--verify", &format!("{given}^{{commit}}")])
+            .map(|t| t.trim().to_string())
+            .map_err(|e| {
+                CliError::usage(format!("--reland {given} is not a commit: {e}"))
+                    .with_hint("Give the revert commit the train made of the member's merge (a sha the list above names).")
+            })?;
+        if !relands.contains(&full) {
+            relands.push(full);
+        }
+    }
     let step = match (no_static, after) {
         (Some(reason), _) => static_rows::skipped(reason.trim()),
         (None, false) => static_rows::not_yet(train),
@@ -206,16 +222,26 @@ fn command_with(
         (None, false, _) => trial_dispatch::not_run("the train is not merged into HEAD yet; run this again after `git merge`"),
         (None, true, e) if e != paddock_cli::Exit::Ok => trial_dispatch::not_run("the static rows did not pass: fix them first"),
         (None, true, _) => {
-            let branch = name.strip_prefix("origin/").unwrap_or(&name).to_string();
+            // The integrator works on `sync/<member>`: the refs are named by the member, not by that branch.
+            let branch = trial_dispatch::member_key(&name).to_string();
             // The trial merges what origin holds, so the sync tip goes there first, as a NEW scratch ref named by the synced commit,
             // `sync/<member>/<short sha>` (the integrator's push; the member's own branch is the author's). A re-sync is a new commit and so
             // a new ref: a plain push, never a force or a lease. The trial is then of that ref, and `merge check` reads the same name.
             let synced = trial_dispatch::sync_ref(&branch, &head);
             match trial_dispatch::trial_dir(&root) {
                 Err(why) => trial_dispatch::not_pushed(&synced, &why),
-                Ok(dir) => match pusher.push(&root, &dir, &synced, opts.trial_max) {
-                    Ok(()) => trial_dispatch::interpret(dispatcher.dispatch(&root, &dir, &synced, train, opts.trial_max), &synced, train),
+                // An old flat `sync/<member>` on origin would clash with the new ref: said before the push, naming the old ref.
+                Ok(dir) => match pusher.flat_refs(&root, &dir, &branch) {
                     Err(why) => trial_dispatch::not_pushed(&synced, &why),
+                    Ok(old) if !old.is_empty() => trial_dispatch::flat_ref_blocks(&old, &synced),
+                    Ok(_) => match pusher.push(&root, &dir, &synced, opts.trial_max) {
+                        Ok(()) => trial_dispatch::interpret(
+                            dispatcher.dispatch(&root, &dir, &synced, train, opts.trial_max, &relands),
+                            &synced,
+                            train,
+                        ),
+                        Err(why) => trial_dispatch::not_pushed(&synced, &why),
+                    },
                 },
             }
         }

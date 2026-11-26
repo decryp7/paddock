@@ -110,16 +110,26 @@ pub(super) fn branch_of(subject: &str) -> String {
     }
 }
 
-/// `name (abc1234)` becomes `name`.
+/// `name (abc1234)` becomes `name`; so does `name (abc1234, synced as sync/m/abc123456)`, the integrator's merge subject: the
+/// parenthesis opens with the member's commit and may go on after a comma.
 fn strip_hex_suffix(s: &str) -> &str {
     if let Some(body) = s.strip_suffix(')')
-        && let Some((head, hex)) = body.rsplit_once(" (")
-        && hex.len() >= 7
-        && hex.chars().all(|c| c.is_ascii_hexdigit())
+        && let Some((head, inside)) = body.rsplit_once(" (")
     {
-        return head.trim_end();
+        let hex = inside.split_once(',').map_or(inside, |(h, _)| h).trim();
+        if hex.len() >= 7 && hex.chars().all(|c| c.is_ascii_hexdigit()) {
+            return head.trim_end();
+        }
     }
     s
+}
+
+/// The sync ref a merge subject names, `Merge <member> (<sha>, synced as sync/<member>/<short sha>) into <train>`: the text after
+/// `synced as ` up to the closing parenthesis. `None` when the subject names none.
+pub(super) fn synced_ref(subject: &str) -> Option<String> {
+    let rest = subject.split("synced as ").nth(1)?;
+    let name = rest.split([')', ' ', ',']).next()?.trim();
+    (!name.is_empty()).then(|| name.to_string())
 }
 
 /// One commit of `member..target`, newest first.
@@ -399,6 +409,19 @@ mod tests {
         assert_eq!(branch_of("chore(train): merge feat/x (abc1234) into train 12"), "feat/x");
         assert_eq!(branch_of("Merge feat/x (abc1234def) into trial of main"), "feat/x");
         assert_eq!(branch_of("chore(train): merge feat/x (abc1234)"), "feat/x");
+        assert_eq!(
+            branch_of("Merge feat/x (d5b1ce0e4, synced as sync/feat/x/2ab388102) into train/2026-11-26-u"),
+            "feat/x"
+        );
+        assert_eq!(
+            branch_of("Merge feat/x (b6d3953b3, synced as sync/feat/x) into train/2026-11-26-t"),
+            "feat/x"
+        );
+        assert_eq!(
+            synced_ref("Merge feat/x (d5b1ce0e4, synced as sync/feat/x/2ab388102) into train/u").as_deref(),
+            Some("sync/feat/x/2ab388102")
+        );
+        assert_eq!(synced_ref("Merge branch 'feat/x'"), None);
         assert_eq!(branch_of("something else"), "something else");
         assert_eq!(branch_of("fix: a (note)"), "fix: a (note)");
     }

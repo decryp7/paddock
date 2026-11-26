@@ -82,6 +82,20 @@ pub fn prepare(
     onto: Option<&str>,
     check: &dyn Fn(&Path, &str) -> Result<(), String>,
 ) -> Result<Outcome, String> {
+    prepare_with(g, branch, onto, &[], check)
+}
+
+/// [`prepare`] for a member that re-lands work the target reverted: `relands` are the target's revert commits (any name git resolves
+/// in the clone; each must be an ancestor of the target) whose work the member re-applies. The trial's merge message then carries a
+/// `Reverted: <path>: ...` line for every file such a revert changed, which is how the merge check accepts the re-add (the
+/// integrator's real merge carries the same lines, `merge check --write-reverted`).
+pub fn prepare_with(
+    g: &GitTrain,
+    branch: &str,
+    onto: Option<&str>,
+    relands: &[String],
+    check: &dyn Fn(&Path, &str) -> Result<(), String>,
+) -> Result<Outcome, String> {
     if !valid_branch(branch) {
         return Err(format!(
             "`{branch}` is not a branch name this command accepts (letters, digits, . _ - and /)"
@@ -155,10 +169,42 @@ pub fn prepare(
         return Ok(Outcome::Conflict { target, files });
     }
     let tree = out.lines().next().unwrap_or("").trim().to_string();
-    let message = format!(
+    let mut message = format!(
         "Merge {branch} ({}) into trial of {target}\n",
         branch_sha.get(..9).unwrap_or(&branch_sha)
     );
+    for r in relands {
+        let revert = git(g, Child::Local, &["rev-parse", "--verify", &format!("{r}^{{commit}}")])
+            .map_err(|e| format!("--reland {r} is not a commit of the clone: {e}"))?
+            .trim()
+            .to_string();
+        let (on_target, _) = g.run_git(Child::Local, &["merge-base", "--is-ancestor", &revert, &target_sha])?;
+        if !on_target {
+            return Err(format!(
+                "--reland {r}: that commit is not part of {target}, so it is not a revert the trial's merge re-lands"
+            ));
+        }
+        let files = git(
+            g,
+            Child::Local,
+            &[
+                "diff-tree",
+                "--no-commit-id",
+                "--name-only",
+                "-r",
+                "--no-renames",
+                "--root",
+                &revert,
+            ],
+        )?;
+        message.push('\n');
+        for f in files.lines().map(str::trim).filter(|f| !f.is_empty()) {
+            message.push_str(&format!(
+                "Reverted: {f}: the member re-lands the work the revert {} took out (--reland)\n",
+                revert.get(..9).unwrap_or(&revert)
+            ));
+        }
+    }
     let head = git(
         g,
         Child::Local,
@@ -269,7 +315,10 @@ pub fn prune(g: &GitTrain, dry: bool) -> Result<Vec<Stale>, String> {
     )?;
     let mut stale_sync = std::collections::BTreeSet::new();
     for sync_ref in all_sync.lines().map(str::trim).filter_map(|l| l.strip_prefix("origin/")) {
-        let member = sync_ref.strip_prefix("sync/").and_then(|r| r.rsplit_once('/')).map(|(m, _)| m);
+        // `sync/<member>/<short sha>`, or the old flat `sync/<member>` (git cannot hold it beside the new form, so it must go).
+        let member = crate::merge_check::trial_dispatch::split_sync_ref(sync_ref)
+            .map(|(m, _)| m)
+            .or_else(|| sync_ref.strip_prefix("sync/"));
         let why = if landed_sync.contains(sync_ref) {
             format!("{sync_ref} is on main")
         } else if member.is_some_and(|m| !branches.contains(m)) {
@@ -652,6 +701,68 @@ mod tests {
                 && !left.contains("cccc"),
             "{left}"
         );
+    }
+
+    /// The old flat `sync/<member>` (and its `trial/sync/<member>`) blocks the new `sync/<member>/<sha>`: prune deletes them once the
+    /// member has landed (their tip is on main) and keeps a live member's.
+    #[test]
+    fn prune_deletes_the_old_flat_sync_refs_of_landed_members() {
+        let w = world();
+        for m in ["feat/s", "feat/t"] {
+            commit(&w, m, &format!("{}.txt", m.replace('/', "_")), m, "main");
+        }
+        commit(&w, "sync/feat/s", "synced.txt", "s", "feat/s");
+        commit(&w, "sync/feat/t", "synced.txt", "t", "feat/t");
+        let g = open(&w);
+        for sync in ["sync/feat/s", "sync/feat/t"] {
+            assert!(matches!(prepare(&g, sync, None, &ok).unwrap(), Outcome::Ready { .. }), "{sync}");
+        }
+        git_in(&w.work, &["checkout", "-q", "main"]);
+        git_in(&w.work, &["merge", "-q", "--ff-only", "sync/feat/s"]);
+        git_in(&w.work, &["push", "-q", "origin", "main"]);
+        let mut named: Vec<String> = prune(&g, false).unwrap().into_iter().map(|s| s.trial_ref).collect();
+        named.sort_unstable();
+        assert_eq!(named, ["sync/feat/s", "trial/sync/feat/s"]);
+        let left = git_in(&w.origin, &["branch", "--list", "sync/*", "trial/sync/*"]);
+        assert!(
+            left.contains("sync/feat/t") && left.contains("trial/sync/feat/t") && !left.contains("feat/s"),
+            "{left}"
+        );
+    }
+
+    /// A re-landing member: the trial's merge carries a `Reverted:` line for each file of the target's revert, and a name that is not
+    /// a revert on the target is refused before anything is pushed.
+    #[test]
+    fn a_trial_of_a_relanding_member_carries_reverted_lines_for_the_revert_it_names() {
+        let w = world();
+        commit(&w, "feat/r", "r.txt", "r", "main");
+        commit(&w, "train/open", "old.txt", "old\n", "train/open");
+        git_in(&w.work, &["rm", "-q", "old.txt"]);
+        git_in(
+            &w.work,
+            &["commit", "-q", "-m", "Revert \"feat: old.txt\"\n\nThis reverts commit 1234567."],
+        );
+        let revert = git_in(&w.work, &["rev-parse", "HEAD"]);
+        git_in(&w.work, &["push", "-q", "-f", "origin", "train/open"]);
+        let g = open(&w);
+        let seen = std::cell::RefCell::new(String::new());
+        let record = |root: &Path, head: &str| -> Result<(), String> {
+            *seen.borrow_mut() = git_in(root, &["show", "-s", "--format=%B", head]);
+            Ok(())
+        };
+        let Outcome::Ready { .. } = prepare_with(&g, "feat/r", None, std::slice::from_ref(&revert), &record).unwrap() else {
+            panic!()
+        };
+        let message = seen.borrow().clone();
+        assert!(
+            message.contains("Reverted: old.txt: the member re-lands the work the revert") && message.contains(&revert[..9]),
+            "{message}"
+        );
+        // Not a commit of the target: refused, and no trial ref is left from this call.
+        let main_sha = git_in(&w.origin, &["rev-parse", "refs/heads/main"]);
+        let loose = git_in(&w.work, &["commit-tree", "-m", "x", &format!("{main_sha}^{{tree}}")]);
+        let e = prepare_with(&g, "feat/r", None, &[loose.clone()], &ok).err().unwrap_or_default();
+        assert!(e.contains("--reland"), "{e}");
     }
 
     #[test]
