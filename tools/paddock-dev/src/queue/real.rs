@@ -982,7 +982,7 @@ pub fn failures_of(report: &triage::Report, run: u64, http: &mut dyn Http, serve
     let jobs = runs.jobs(run).unwrap_or_default();
     let expected = jobs
         .iter()
-        .find(|j| j.name == "plan" || j.name.starts_with("plan "))
+        .find(|j| crate::plan_since::is_plan_name(&j.name))
         .and_then(|j| runs.log(j.id).ok())
         .and_then(|log| crate::run_scope::read(&log))
         .and_then(Result::ok)

@@ -496,9 +496,10 @@ pub fn name_templates(workflow: &str) -> Vec<(String, String)> {
         .unwrap_or_default()
 }
 
-/// Whether a job display name is the plan job's (`plan`, `plan (affected projects)`): the job whose log holds the scope line, so it
-/// cannot be looked up in it.
-fn is_plan_name(name: &str) -> bool {
+/// Whether a job display name is the plan job's (`plan`, `plan (affected projects)`, or either under the nightly's caller job:
+/// `everything / plan`): the job whose log holds the scope line, so it cannot be looked up in it.
+pub fn is_plan_name(name: &str) -> bool {
+    let name = crate::run_scope::strip_caller(name);
     name == "plan" || name.starts_with("plan ")
 }
 
@@ -1952,6 +1953,16 @@ mod tests {
             classify(&job(33275), Ok(APP_DYNO), "ci.yml", &fixture_expected()).scope,
             Scope::Tests { .. }
         ));
+    }
+
+    #[test]
+    fn the_plan_job_is_found_by_its_name_also_under_the_nightlys_caller() {
+        for name in ["plan", "plan (affected projects)", "everything / plan"] {
+            assert!(is_plan_name(name), "{name}");
+        }
+        for name in ["planner", "everything / crate (windows-latest)", "gate (main changed?)"] {
+            assert!(!is_plan_name(name), "{name}");
+        }
     }
 
     #[test]

@@ -305,7 +305,7 @@ fn read_mode_plain(client: &mut Client, run: &RunInfo, scope_decisive: bool) -> 
 /// no plan job or its line cannot be read: a reader then cannot place a job by name and reports it as not measured.
 pub(super) fn run_expected(client: &mut Client, jobs: &[super::client::TimedJob]) -> run_scope::ExpectedMap {
     jobs.iter()
-        .find(|j| j.name == "plan" || j.name.starts_with("plan "))
+        .find(|j| crate::plan_since::is_plan_name(&j.name))
         .and_then(|plan| client.log(plan.id).ok().flatten())
         .and_then(|log| run_scope::read(&log))
         .and_then(Result::ok)
