@@ -44,12 +44,15 @@ pub(crate) mod git;
 mod hakari;
 mod hunks;
 mod lost_tests;
+mod member_trial;
 mod reland;
 pub(crate) mod reverted_base;
 mod stale_base;
+mod static_rows;
 pub mod sync_member;
 mod testnames;
 mod trailers;
+pub mod trial_dispatch;
 mod whole_file;
 
 use git::{AutoMerge, Git, short};
@@ -333,6 +336,8 @@ pub struct Request {
     pub write_reverted: Option<PathBuf>,
     /// `--old-base-anyway <reason>`: let a member that lacks the train's base through, and print the reason ([`stale_base`]).
     pub old_base_anyway: Option<String>,
+    /// `--no-trial <reason>`: with `gates`, do not read the member's own CI trial run, and print the reason ([`member_trial`]).
+    pub no_trial: Option<String>,
     /// `--gates-base <ref>`: the base the member gate measures from, instead of the merge's first parent. A member's gate plans only
     /// that member's delta; the final gate of a train with `--gates-base origin/main` plans the whole train's rows, so the rows the push
     /// hook and the train-audits guard will ask for already have a pass on this tree and are reused, not run again (user, 2026-11-26).
@@ -543,6 +548,10 @@ fn check(req: &Request) -> Result<Checked, CliError> {
         return Err(CliError::usage("--old-base-anyway needs a reason.")
             .with_hint("Say why, for example --old-base-anyway \"hotfix, the newer main work is unrelated\"."));
     }
+    if req.no_trial.as_deref().is_some_and(|r| r.trim().is_empty()) {
+        return Err(CliError::usage("--no-trial needs a reason.")
+            .with_hint("Say why, for example --no-trial \"docs-only member, no job of its own to run\"."));
+    }
     let root = crate::gates::command::repo_root(req.root.as_deref())?;
     let git = Git::new(&root);
     let merge = resolve(&git, req)?;
@@ -651,10 +660,41 @@ fn check(req: &Request) -> Result<Checked, CliError> {
                         pre_gates.take().unwrap_or_else(gates_step)
                     }),
                 );
+                steps.push(
+                    "trial",
+                    Some(if req.commit.is_none() {
+                        member_trial::not_run(
+                            "a branch is checked before it is merged; run `./dev merge check --gates <merge-commit>` after merging",
+                        )
+                    } else {
+                        trial_step(&root, &merge, req.no_trial.as_deref(), &member_trial::Real)
+                    }),
+                );
             }
             Ok((merge.label, found, steps, result))
         }
     }
+}
+
+/// The member's own CI trial (`merge sync-member` dispatched it): what the one reader says about the member's head, the second parent.
+fn trial_step(root: &std::path::Path, merge: &Merge, no_trial: Option<&str>, reader: &dyn member_trial::Reader) -> generator_step::Step {
+    if let Some(reason) = no_trial {
+        return member_trial::skipped(reason.trim());
+    }
+    let [_, member] = merge.parents.as_slice() else {
+        return member_trial::not_run("the merge does not have two parents");
+    };
+    // The member's name: the one the merge was given, else the branch its subject names (`Merge branch 'x'`); a short hash or a
+    // subject that names none is no branch.
+    let subject = merge.message.lines().next().unwrap_or("");
+    let named = [merge.member_name.clone(), reverted_base::branch_of(subject)]
+        .into_iter()
+        .find(|n| !n.is_empty() && n != short(member) && !n.contains(char::is_whitespace));
+    let Some(named) = named else {
+        return member_trial::not_run("the merge message names no member branch, so there is no trial ref to read");
+    };
+    let branch = named.strip_prefix("origin/").unwrap_or(&named);
+    member_trial::interpret(reader.read(root, branch, member), branch)
 }
 
 /// `./dev merge check`. Detector findings are an error (exit 5), so the text goes to standard error like every other failure.

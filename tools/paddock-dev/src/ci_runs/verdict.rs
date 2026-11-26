@@ -314,6 +314,82 @@ pub fn verdict(client: &mut Client, workflow: &str, sha: &str) -> Verdict {
     verdict_excluding(client, workflow, sha, None)
 }
 
+/// What a member's own trial run (`ci dispatch --trial`, `trial/<branch>`) says. A trial is the member's narrowed run on the train, not
+/// a full run: green here is "this member passed its own affected jobs", never a landing proof (that is [`verdict`]). Only a finished
+/// run is green or red; one that is still going is [`Trial::Running`], which is not a pass (ER-33).
+#[derive(Debug, Clone, PartialEq)]
+pub enum Trial {
+    /// The newest trial run of this member's head finished and succeeded.
+    Green {
+        /// Its id.
+        run: u64,
+    },
+    /// It finished and did not succeed (a failed job, or an earlier attempt that failed).
+    Red {
+        /// Its id.
+        run: u64,
+        /// What to fix.
+        reason: String,
+    },
+    /// It has not finished.
+    Running {
+        /// Its id.
+        run: u64,
+    },
+    /// No trial run of this member's head is listed (never dispatched, or the trial is of an older head).
+    NoRun,
+    /// Nothing was measured: the list or the commit cannot be read, or the run ended cancelled.
+    NotMeasured(String),
+}
+
+/// The newest `workflow` run on `trial/<branch>` whose trial merge has `member_sha` as its second parent (the trial merge is
+/// `-p <train> -p <member>`, [`super::trial::prepare`]): a trial of an older head of the branch is not this member's.
+pub fn trial(client: &mut Client, workflow: &str, branch: &str, member_sha: &str) -> Trial {
+    let want_branch = format!("trial/{branch}");
+    for page in 1..=2u32 {
+        let runs = match client.runs_page_where(page, "event=workflow_dispatch") {
+            Ok(p) => p.runs,
+            Err(e) => return Trial::NotMeasured(format!("the run list cannot be read: {e}")),
+        };
+        if runs.is_empty() {
+            break;
+        }
+        for run in runs.iter().filter(|r| r.workflow() == workflow && r.head_branch == want_branch) {
+            match client.commit_parents(&run.head_sha) {
+                Err(e) => return Trial::NotMeasured(format!("the trial commit {} cannot be read: {e}", short(&run.head_sha))),
+                Ok(Some(parents)) if parents.get(1).is_some_and(|p| p == member_sha) => return state_of(client, run),
+                // Another head of the branch, or a commit the server no longer has: look at the older runs.
+                Ok(_) => {}
+            }
+        }
+    }
+    Trial::NoRun
+}
+
+fn state_of(client: &mut Client, run: &RunInfo) -> Trial {
+    if !run.finished() {
+        return Trial::Running { run: run.id };
+    }
+    match run.conclusion.as_str() {
+        "success" => match read_earlier(client, run) {
+            Earlier::Clean => Trial::Green { run: run.id },
+            Earlier::Failed(why) => Trial::Red {
+                run: run.id,
+                reason: format!("the run is green only after a retry ({why})"),
+            },
+            Earlier::Unknown(why) => Trial::NotMeasured(format!("run {}: {why}", run.id)),
+        },
+        "failure" => Trial::Red {
+            run: run.id,
+            reason: "a job of the run failed".into(),
+        },
+        other => Trial::NotMeasured(format!(
+            "run {} ended {:?}: a cancelled or skipped run proves nothing",
+            run.id, other
+        )),
+    }
+}
+
 /// Whether the declared scope decides for `workflow`: its producer is recorded in the register of the current repository (ER-41). The
 /// reason it is not (no register, a register of another shape) is a warning, never a switch.
 pub fn scope_decisive(workflow: &str) -> bool {
@@ -1744,5 +1820,83 @@ mod tests {
             &mut |_, _| false,
         );
         assert!(matches!(d, crate::ci_runs::reuse::Reuse::Run(_)), "{d:?}");
+    }
+
+    // ---- `trial`: the member's own run on `trial/<branch>` ----
+
+    const MEMBER: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const TRIAL_HEAD: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+
+    fn trial_run(id: u64, head: &str, status: &str, conclusion: &str) -> serde_json::Value {
+        json!({"id": id, "path": "ci.yml@refs/heads/trial/feat/x", "event": "workflow_dispatch", "head_branch": "trial/feat/x",
+               "status": status, "conclusion": conclusion, "head_sha": head, "created_at": "2026-11-26T00:00:00Z"})
+    }
+
+    /// A fake server: the dispatch runs (newest first) and, for each trial commit, its parents.
+    fn trial_server(runs: Vec<serde_json::Value>, commits: &[(&str, &str)]) -> Fake {
+        let mut f = Fake::default();
+        f.json(
+            &format!("{API}/runs?event=workflow_dispatch&limit=50&page=1"),
+            json!({"total_count": runs.len(), "workflow_runs": runs}),
+        );
+        for (sha, second) in commits {
+            f.json(
+                &format!("https://gitea.invalid/api/v1/repos/decryp7/paddock/git/commits/{sha}"),
+                json!({"parents": [{"sha": "train-tip"}, {"sha": second}]}),
+            );
+        }
+        f
+    }
+
+    fn ask_trial(f: &mut Fake) -> Trial {
+        let mut c = Client::new(f, "https://gitea.invalid", "decryp7/paddock", "t");
+        c.backoff_ms = 0;
+        trial(&mut c, "ci.yml", "feat/x", MEMBER)
+    }
+
+    #[test]
+    fn a_finished_trial_of_this_head_is_green_or_red_by_its_conclusion() {
+        let mut f = trial_server(vec![trial_run(9, TRIAL_HEAD, "completed", "success")], &[(TRIAL_HEAD, MEMBER)]);
+        assert_eq!(ask_trial(&mut f), Trial::Green { run: 9 });
+        let mut f = trial_server(vec![trial_run(9, TRIAL_HEAD, "completed", "failure")], &[(TRIAL_HEAD, MEMBER)]);
+        assert!(matches!(ask_trial(&mut f), Trial::Red { run: 9, .. }));
+    }
+
+    /// Positive control (ER-33): a run that is going, one that was cancelled and an unreadable commit are never green.
+    #[test]
+    fn a_running_cancelled_or_unreadable_trial_is_never_green() {
+        let mut f = trial_server(vec![trial_run(9, TRIAL_HEAD, "in_progress", "")], &[(TRIAL_HEAD, MEMBER)]);
+        assert_eq!(ask_trial(&mut f), Trial::Running { run: 9 });
+        let mut f = trial_server(vec![trial_run(9, TRIAL_HEAD, "completed", "cancelled")], &[(TRIAL_HEAD, MEMBER)]);
+        assert!(matches!(ask_trial(&mut f), Trial::NotMeasured(_)));
+        let mut f = trial_server(vec![trial_run(9, TRIAL_HEAD, "completed", "success")], &[]);
+        f.error(
+            &format!("https://gitea.invalid/api/v1/repos/decryp7/paddock/git/commits/{TRIAL_HEAD}"),
+            "HTTP 500",
+        );
+        assert!(matches!(ask_trial(&mut f), Trial::NotMeasured(_)));
+    }
+
+    #[test]
+    fn a_trial_of_another_head_or_another_branch_is_no_run_and_the_newest_run_of_this_head_decides() {
+        // The run is of an older head of the branch (its second parent is not this member's head).
+        let mut f = trial_server(
+            vec![trial_run(9, TRIAL_HEAD, "completed", "success")],
+            &[(TRIAL_HEAD, "cccccccccccccccccccccccccccccccccccccccc")],
+        );
+        assert_eq!(ask_trial(&mut f), Trial::NoRun);
+        let mut other = trial_run(9, TRIAL_HEAD, "completed", "success");
+        other["head_branch"] = json!("trial/feat/y");
+        assert_eq!(ask_trial(&mut trial_server(vec![other], &[(TRIAL_HEAD, MEMBER)])), Trial::NoRun);
+        assert_eq!(ask_trial(&mut trial_server(vec![], &[])), Trial::NoRun);
+        // Newest first: a red rerun of the same head decides over an older green.
+        let mut f = trial_server(
+            vec![
+                trial_run(10, TRIAL_HEAD, "completed", "failure"),
+                trial_run(9, TRIAL_HEAD, "completed", "success"),
+            ],
+            &[(TRIAL_HEAD, MEMBER)],
+        );
+        assert!(matches!(ask_trial(&mut f), Trial::Red { run: 10, .. }));
     }
 }

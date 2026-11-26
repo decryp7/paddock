@@ -1965,6 +1965,14 @@ fn sync_member(r: &Repo, train: &str, extra: &[&str]) -> (i32, String) {
     (out.status.code().unwrap(), text)
 }
 
+/// The static rows of a sync tip need a repository with checks; the read-only tests of the revert listing opt out of them.
+const NO_STATIC: [&str; 4] = [
+    "--no-static",
+    "fixture: only the revert listing is under test",
+    "--no-trial",
+    "fixture: only the revert listing is under test",
+];
+
 /// The train (`main`) merged `feat/x` and reverted the merge; main then moved on. HEAD ends on `feat/x` (the reverted branch itself).
 /// Returns the repository and the revert commit.
 fn reverted_own_branch() -> (Repo, String) {
@@ -2546,7 +2554,7 @@ fn sync_member_run_after_the_merge_reads_the_members_pre_merge_tip_and_leaves_ou
     r.write("x2.txt", "x2\n"); // a commit of the member's own after the train merged it, so the train's merge is a real merge
     r.commit("feat: x2");
     r.git(&["merge", "-q", "--no-edit", "main"]);
-    let (code, text) = sync_member(&r, "main", &[]);
+    let (code, text) = sync_member(&r, "main", &NO_STATIC);
     assert_eq!(code, 0, "{text}");
     assert!(
         text.contains(&format!("git revert {s}"))
@@ -2556,7 +2564,7 @@ fn sync_member_run_after_the_merge_reads_the_members_pre_merge_tip_and_leaves_ou
     );
     // Run what it printed: nothing is left, and it says that one was already re-applied.
     r.git(&["revert", "--no-edit", &s]);
-    let (code, text) = sync_member(&r, "main", &[]);
+    let (code, text) = sync_member(&r, "main", &NO_STATIC);
     assert_eq!(code, 0, "{text}");
     assert!(
         text.contains("0 revert(s) of this member's own merges") && text.contains("1 already re-applied") && !text.contains("git revert "),
@@ -2719,4 +2727,343 @@ fn a_member_that_changes_the_lockfile_makes_its_generator_due() {
     let (code, text) = check_with_generators(&r);
     assert_eq!(code, 0, "{text}");
     assert!(text.contains("gen check: 1 of 2 due: lock-gen"), "{text}");
+}
+
+// `merge sync-member` runs the fast static rows on the sync tip (the train merged into HEAD). A stand-in for `dev check --pre-push`
+// plays them: it logs its argv, prints the rows the test gives it and exits with GATES_EXIT.
+#[cfg(unix)]
+mod sync_static {
+    use super::*;
+
+    fn fake_rows(dir: &Path, rows: &str) {
+        let log = Actions::new().appends_with("{env:GATES_LOG}", "{args}\n");
+        StandIn::new(dir, "rows")
+            .answers(
+                log.stdout(&format!(r#"{{"ok":true,"gates":{rows}}}"#))
+                    .exits_with_env("GATES_EXIT", 0),
+            )
+            .install()
+            .unwrap();
+    }
+
+    const GREEN: &str = r#"[{"id":"conformance","verdict":"passed"},{"id":"gates-register","verdict":"passed"},{"id":"clippy crates","verdict":"passed"},{"id":"clippy-windows crates","verdict":"passed"}]"#;
+
+    /// The member has merged the train: HEAD is the sync tip.
+    fn merged() -> Repo {
+        let (r, _) = reverted_own_branch();
+        r.write("x2.txt", "x2\n");
+        r.commit("feat: x2");
+        r.git(&["merge", "-q", "--no-edit", "main"]);
+        r
+    }
+
+    fn run(r: &Repo, rows: &str, exit: &str, extra: &[&str]) -> (i32, String, String) {
+        let dir = tempfile::tempdir().unwrap();
+        fake_rows(dir.path(), rows);
+        let log = dir.path().join("log");
+        let out = r
+            .dev_cmd()
+            .env("PADDOCK_MERGE_CHECK_GATES", dir.path().join("rows"))
+            .env("GATES_LOG", &log)
+            .env("GATES_EXIT", exit)
+            .args([
+                "merge",
+                "sync-member",
+                "--no-trial",
+                "fixture: the static rows are under test",
+                "--root",
+            ])
+            .arg(r.path())
+            .args(extra)
+            .arg("main")
+            .output()
+            .unwrap();
+        let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        (out.status.code().unwrap(), text, fs::read_to_string(&log).unwrap_or_default())
+    }
+
+    #[test]
+    fn after_the_merge_it_runs_the_asked_rows_against_the_train_and_prints_each() {
+        let r = merged();
+        let (code, text, log) = run(&r, GREEN, "0", &[]);
+        assert_eq!(code, 0, "{text}");
+        for row in ["conformance", "gates-register", "clippy crates", "clippy-windows crates"] {
+            assert!(text.contains(row), "{row}: {text}");
+        }
+        assert!(text.contains("static rows: passed"), "{text}");
+        let main = r.git(&["rev-parse", "main"]);
+        assert!(
+            log.contains("--only conformance,gates-register,clippy,clippy-windows") && log.contains(&format!("--base {main}")),
+            "{log}"
+        );
+    }
+
+    #[test]
+    fn a_failing_row_ends_non_zero_with_one_error_and_the_next_step() {
+        let r = merged();
+        let rows = r#"[{"id":"conformance","verdict":"failed"},{"id":"gates-register","verdict":"passed"}]"#;
+        let (code, text, _) = run(&r, rows, "5", &[]);
+        assert_eq!(code, 5, "{text}");
+        assert_eq!(text.matches("::error::").count(), 1, "{text}");
+        assert!(
+            text.contains("conformance") && text.contains("fix on the member, then re-sync"),
+            "{text}"
+        );
+    }
+
+    /// Positive control (ER-33): a stand-in that prints no rows (the signal hidden) is not a pass.
+    #[test]
+    fn rows_that_were_not_printed_are_not_a_pass() {
+        let r = merged();
+        let (code, text, _) = run(&r, "[]", "0", &[]);
+        assert_eq!(code, 6, "{text}");
+        assert!(text.contains("NOT MEASURED") && !text.contains("static rows: passed"), "{text}");
+    }
+
+    #[test]
+    fn no_static_skips_the_rows_and_logs_the_reason() {
+        let r = merged();
+        let (code, text, log) = run(&r, "[]", "5", &["--no-static", "docs-only sync"]);
+        assert_eq!(code, 0, "{text}");
+        assert!(text.contains("static rows NOT run (--no-static: docs-only sync)"), "{text}");
+        assert_eq!(log, "", "the rows were not started");
+        let (code, text, _) = run(&r, GREEN, "0", &["--no-static", " "]);
+        assert_eq!(code, 2, "{text}");
+        assert!(text.contains("--no-static needs a reason"), "{text}");
+    }
+
+    #[test]
+    fn before_the_merge_there_is_no_sync_tip_and_the_rows_are_not_started() {
+        let (r, _) = reverted_own_branch();
+        let (code, text, log) = run(&r, GREEN, "0", &[]);
+        assert_eq!(code, 0, "{text}");
+        assert!(text.contains("static rows not run") && log.is_empty(), "{text}");
+    }
+}
+
+// After the static rows pass, `merge sync-member` dispatches the member's own CI trial (`ci dispatch ci.yml --trial ...`), and a later
+// `merge check --gates` reads it. Stand-ins play the static rows, the dispatch and the trial reader (`ci trial-verdict`).
+#[cfg(unix)]
+mod member_trial {
+    use super::*;
+
+    const GREEN: &str = r#"[{"id":"conformance","verdict":"passed"},{"id":"gates-register","verdict":"passed"}]"#;
+    const RED: &str = r#"[{"id":"conformance","verdict":"failed"},{"id":"gates-register","verdict":"passed"}]"#;
+
+    /// The member (feat/x) has merged the train (main) and has a bare `origin`.
+    fn pushed() -> Repo {
+        let (r, _) = reverted_own_branch();
+        r.write("x2.txt", "x2\n");
+        r.commit("feat: x2");
+        r.git(&["merge", "-q", "--no-edit", "main"]);
+        let bare = r.path().join("..").join(format!("origin-{}.git", std::process::id()));
+        r.git(&["init", "-q", "--bare", bare.to_str().unwrap()]);
+        r.git(&["remote", "add", "origin", bare.to_str().unwrap()]);
+        r.git(&["push", "-q", "origin", "feat/x"]);
+        r
+    }
+
+    fn stand_ins(dir: &Path, rows: &str) {
+        let log = Actions::new().appends_with("{env:GATES_LOG}", "{args}\n");
+        StandIn::new(dir, "rows")
+            .answers(log.clone().stdout(&format!(r#"{{"ok":true,"gates":{rows}}}"#)))
+            .install()
+            .unwrap();
+        StandIn::new(dir, "dispatch")
+            .answers(log.stdout_with("{env:DISPATCH_OUT}").exits_with_env("DISPATCH_EXIT", 0))
+            .install()
+            .unwrap();
+    }
+
+    fn sync(r: &Repo, rows: &str, dispatch_out: &str, dispatch_exit: &str, extra: &[&str]) -> (i32, String, String) {
+        let dir = tempfile::tempdir().unwrap();
+        stand_ins(dir.path(), rows);
+        let log = dir.path().join("log");
+        let out = r
+            .dev_cmd()
+            .env("PADDOCK_MERGE_CHECK_GATES", dir.path().join("rows"))
+            .env("PADDOCK_SYNC_TRIAL_DISPATCH", dir.path().join("dispatch"))
+            .env("GATES_LOG", &log)
+            .env("DISPATCH_OUT", dispatch_out)
+            .env("DISPATCH_EXIT", dispatch_exit)
+            .args(["merge", "sync-member", "--root"])
+            .arg(r.path())
+            .args(extra)
+            .arg("main")
+            .output()
+            .unwrap();
+        let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        (out.status.code().unwrap(), text, fs::read_to_string(&log).unwrap_or_default())
+    }
+
+    #[test]
+    fn once_the_static_rows_pass_the_members_own_trial_is_dispatched_and_the_run_id_printed() {
+        let r = pushed();
+        let (code, text, log) = sync(&r, GREEN, "run 4242", "0", &[]);
+        assert_eq!(code, 0, "{text}");
+        assert!(text.contains("CI trial dispatched: run 4242"), "{text}");
+        assert!(
+            log.contains("ci dispatch ci.yml --trial sync/feat/x --onto main --max 30m"),
+            "{log}"
+        );
+    }
+
+    #[test]
+    fn a_failing_static_row_dispatches_no_trial() {
+        let r = pushed();
+        let (code, text, log) = sync(&r, RED, "run 4242", "0", &[]);
+        assert_eq!(code, 5, "{text}");
+        assert!(!log.contains("ci dispatch") && !text.contains("trial dispatched"), "{text}\n{log}");
+    }
+
+    #[test]
+    fn the_sync_tip_is_pushed_as_sync_member_before_the_dispatch_and_a_failed_push_dispatches_nothing() {
+        let r = pushed();
+        let (code, _, _) = sync(&r, GREEN, "run 4242", "0", &[]);
+        assert_eq!(code, 0);
+        let on_origin = r.git(&["ls-remote", "origin", "refs/heads/sync/feat/x"]);
+        assert!(on_origin.starts_with(&r.git(&["rev-parse", "HEAD"])), "{on_origin}");
+        // A sync branch someone else moved is not overwritten: the push is refused (the lease) and nothing is dispatched.
+        let bare = r.git(&["remote", "get-url", "origin"]);
+        let moved = r.git(&["rev-parse", "HEAD~1"]);
+        r.git(&["--git-dir", &bare, "update-ref", "refs/heads/sync/feat/x", &moved]);
+        let (code, text, log) = sync(&r, GREEN, "run 4242", "0", &[]);
+        assert_eq!(code, 6, "{text}");
+        assert!(
+            text.contains("could not be pushed") && !log.contains("ci dispatch"),
+            "{text}\n{log}"
+        );
+        assert!(
+            r.git(&["--git-dir", &bare, "rev-parse", "refs/heads/sync/feat/x"]) == moved,
+            "the moved ref was overwritten"
+        );
+        r.git(&["remote", "set-url", "origin", "/nonexistent/origin.git"]);
+        let (code, text, log) = sync(&r, GREEN, "run 4242", "0", &[]);
+        assert_eq!(code, 6, "{text}");
+        assert!(
+            text.contains("could not be pushed") && !log.contains("ci dispatch"),
+            "{text}\n{log}"
+        );
+    }
+
+    /// Positive control (ER-33): a dispatch that exits 0 without a run line, and one that fails, are not a started trial.
+    #[test]
+    fn a_dispatch_that_gave_no_run_or_failed_is_not_a_started_trial() {
+        let r = pushed();
+        for (out, exit) in [("guards ok", "0"), ("::error::the runner is busy", "5")] {
+            let (code, text, _) = sync(&r, GREEN, out, exit, &[]);
+            assert_eq!(code, 6, "{text}");
+            assert!(text.contains("NOT DISPATCHED") && !text.contains("trial dispatched"), "{text}");
+        }
+    }
+
+    #[test]
+    fn no_trial_skips_the_dispatch_and_logs_the_reason() {
+        let r = pushed();
+        let (code, text, log) = sync(&r, GREEN, "run 4242", "0", &["--no-trial", "docs-only member"]);
+        assert_eq!(code, 0, "{text}");
+        assert!(
+            text.contains("no CI trial dispatched (--no-trial: docs-only member)") && !log.contains("ci dispatch"),
+            "{text}\n{log}"
+        );
+        let (code, text, _) = sync(&r, GREEN, "run 4242", "0", &["--no-trial", " "]);
+        assert_eq!(code, 2, "{text}");
+    }
+
+    // ---- `merge check --gates` reads the trial ----
+
+    /// A train with member `a` merged under git's own subject, so the member's branch name is known; the gates stand-in passes.
+    fn merged_member() -> (Repo, tempfile::TempDir) {
+        let repo = Repo::new();
+        repo.write("base.txt", "base\n");
+        repo.commit("base");
+        repo.git(&["checkout", "-q", "-b", "feat/a", "main"]);
+        repo.write("a.txt", "a\n");
+        repo.commit("feat: a");
+        repo.git(&["checkout", "-q", "main"]);
+        repo.git(&["merge", "-q", "--no-ff", "-m", "Merge branch 'feat/a'", "feat/a"]);
+        let dir = tempfile::tempdir().unwrap();
+        let ev = r#"{{"check":"pre-push","subject":{{"kind":"commit","sha":"{run:git|rev-parse|HEAD}","tree":"{run:git|rev-parse|HEAD:}"}},"tool":"fake","at":1}}"#;
+        StandIn::new(dir.path(), "gates")
+            .answers(Actions::new().stdout_with(&format!(r#"{{{{"outcome":{{{{"status":"clean","evidence":{ev}}}}}}}}}"#)))
+            .install()
+            .unwrap();
+        StandIn::new(dir.path(), "trial")
+            .answers(
+                Actions::new()
+                    .appends_with("{env:GATES_LOG}", "{args}\n")
+                    .stdout_with(r#"{{"ok":true,"state":"{env:TRIAL_STATE}","run":77}}"#)
+                    .exits_with_env("TRIAL_EXIT", 0),
+            )
+            .install()
+            .unwrap();
+        (repo, dir)
+    }
+
+    fn check(r: &Repo, dir: &tempfile::TempDir, state: &str, exit: &str, extra: &[&str]) -> (i32, String, String) {
+        let log = dir.path().join("log");
+        let out = r
+            .dev_cmd()
+            .env("PADDOCK_MERGE_CHECK_GATES", dir.path().join("gates"))
+            .env("PADDOCK_MERGE_CHECK_TRIAL", dir.path().join("trial"))
+            .env("PADDOCK_MERGE_CHECK_CARGO", "/nonexistent/cargo")
+            .env("GATES_LOG", &log)
+            .env("TRIAL_STATE", state)
+            .env("TRIAL_EXIT", exit)
+            .args(["merge", "check", "--gates", "--root"])
+            .arg(r.path())
+            .args(extra)
+            .arg("HEAD")
+            .output()
+            .unwrap();
+        let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        (out.status.code().unwrap(), text, fs::read_to_string(&log).unwrap_or_default())
+    }
+
+    #[test]
+    fn a_green_trial_passes_and_the_reader_is_asked_about_the_members_branch_and_head() {
+        let (r, dir) = merged_member();
+        let (code, text, log) = check(&r, &dir, "green", "0", &[]);
+        assert_eq!(code, 0, "{text}");
+        assert!(text.contains("run 77 of feat/a is green"), "{text}");
+        let head = r.git(&["rev-parse", "feat/a"]);
+        assert!(
+            log.contains("ci trial-verdict --branch feat/a --member-sha") && log.contains(&head),
+            "{log}"
+        );
+    }
+
+    #[test]
+    fn a_red_trial_blocks_the_member_with_one_error() {
+        let (r, dir) = merged_member();
+        let (code, text, _) = check(&r, &dir, "red", "5", &[]);
+        assert_eq!(code, 5, "{text}");
+        assert_eq!(
+            text.matches("is red. Next step: fix on the member, then re-sync").count(),
+            1,
+            "{text}"
+        );
+    }
+
+    /// Positive control (ER-33): a running trial prints "still running" and is not a pass.
+    #[test]
+    fn a_running_trial_is_still_running_and_not_a_pass() {
+        let (r, dir) = merged_member();
+        let (code, text, _) = check(&r, &dir, "running", "6", &[]);
+        assert_eq!(code, 6, "{text}");
+        assert!(text.contains("still running") && text.contains("NOT a pass"), "{text}");
+    }
+
+    #[test]
+    fn no_trial_skips_the_read_and_logs_the_reason() {
+        let (r, dir) = merged_member();
+        let (code, text, log) = check(&r, &dir, "red", "5", &["--no-trial", "flaky job, rerun by hand"]);
+        assert_eq!(code, 0, "{text}");
+        assert!(
+            text.contains("--no-trial: flaky job, rerun by hand") && log.is_empty(),
+            "{text}\n{log}"
+        );
+        let (code, text, _) = check(&r, &dir, "green", "0", &["--no-trial", " "]);
+        assert_eq!(code, 2, "{text}");
+    }
 }

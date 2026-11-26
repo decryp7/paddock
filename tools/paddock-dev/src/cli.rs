@@ -219,7 +219,11 @@ enum MergeCommand {
     Check(MergeCheckArgs),
     /// Before merging the train into a member branch: list the commands that re-apply the member's own work the train reverted
     /// (`git revert <sha>`, git's "revert a faulty merge"; run them after `git merge <train>`), and warn about reverts of other
-    /// branches' merges the member holds. Read-only: runs nothing. Run it before the merge of the train.
+    /// branches' merges the member holds. Run it before the merge of the train: it changes nothing. Run it again after the merge and it
+    /// also runs the fast static rows on the sync tip (`check --pre-push --only conformance,gates-register,clippy,clippy-windows
+    /// --base <train>`); a failing row is exit 5 (6 not measured) with the rows and the next step, unless `--no-static` says why not. Once
+    /// they pass it dispatches the member's own CI trial: it pushes the sync tip as `sync/<member>` (integrator role only) and runs `ci dispatch ci.yml
+    /// --trial sync/<member> --onto <train>` (the affected jobs of the member on the train), printing the run id, unless `--no-trial` says why not.
     SyncMember(SyncMemberArgs),
     /// Git's merge driver of docs/lessons.md (`merge=lessons`, set by `./dev hooks install`): `./dev merge lessons-driver %O %A %B`.
     /// Git's union merge of two appended sections, then the blank line it drops before a `## ` heading put back. The result is
@@ -244,6 +248,16 @@ struct SyncMemberArgs {
     /// The member's branch name (default: the branch HEAD is on).
     #[arg(long)]
     member: Option<String>,
+    /// Do not run the static rows on the sync tip; the reason is printed (like `merge check --old-base-anyway`).
+    #[arg(long, value_name = "REASON")]
+    no_static: Option<String>,
+    /// Do not dispatch the member's own CI trial (the affected jobs of the member on the train, `ci dispatch --trial`); the reason is
+    /// printed. After the static rows pass the trial is dispatched from the sync tip, pushed as `sync/<member>` (integrator role only); `merge check --gates` reads it.
+    #[arg(long, value_name = "REASON")]
+    no_trial: Option<String>,
+    /// The longest the trial's dispatch waits for a busy runner (default 30m).
+    #[arg(long, value_name = "DURATION", default_value = merge_check::trial_dispatch::DEFAULT_MAX)]
+    trial_max: String,
 }
 
 #[derive(Subcommand)]
@@ -304,6 +318,10 @@ struct MergeCheckArgs {
     /// printed with the result). The default is an error that says to merge origin/main into the member and rerun its gate.
     #[arg(long, value_name = "REASON")]
     old_base_anyway: Option<String>,
+    /// With `--gates`: do not read the member's own CI trial run (`merge sync-member` dispatches it); the reason is required and printed
+    /// (like `--old-base-anyway`). A red trial otherwise blocks the member, a running one is not a pass.
+    #[arg(long, value_name = "REASON")]
+    no_trial: Option<String>,
     /// With `--gates`: measure the member gate from this ref (`origin/main`) instead of the merge's first parent, so it plans the whole
     /// train's rows and leaves a pass for each: the push hook and the train-audits guard then reuse them on the same tree.
     #[arg(long, value_name = "REF")]
@@ -397,6 +415,9 @@ enum CiCommand {
     /// Exit 0 full green (with `--landing` also green with fix items: FLAKY tests in untouched code), 5 red, only partial runs, or
     /// fix items without `--landing` (a tag needs a run without them), 6 not measured (never a pass).
     Verdict(ci_runs::VerdictArgs),
+    /// What the member's own trial run says (the run `./dev merge sync-member` dispatched with `ci dispatch --trial`): `green` (exit 0),
+    /// `red` (5), `running`, `no-run` or `not-measured` (6, never a pass). Read by `merge check`.
+    TrialVerdict(ci_runs::TrialVerdictArgs),
     /// Records the fix items of a run that is green with fix items (FLAKY tests of crates and apps the change did not reach, ER-12) in
     /// docs/lessons.md, once whatever the number of calls: the call a landing makes on the landed commit, the queue's or an
     /// integrator's by hand. Exit 0 recorded or already recorded (or nothing to record on a plain green), 5 red or partial, 6 not measured.
@@ -675,6 +696,7 @@ pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
                     gates: a.gates,
                     write_reverted: a.write_reverted,
                     old_base_anyway: a.old_base_anyway,
+                    no_trial: a.no_trial,
                     gates_base: a.gates_base,
                 },
                 out,
@@ -773,6 +795,9 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
         Command::Ci {
             command: CiCommand::DynoLinuxUnits(a),
         } => ci_dyno_linux_units::command(&a),
+        Command::Ci {
+            command: CiCommand::TrialVerdict(a),
+        } => ci_runs::trial_verdict(&a),
         Command::Ci {
             command: CiCommand::Cancel(a),
         } => ci_runs::cancel_cmd(&a),
@@ -899,11 +924,21 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
             gates: a.gates,
             write_reverted: a.write_reverted,
             old_base_anyway: a.old_base_anyway,
+            no_trial: a.no_trial,
             gates_base: a.gates_base,
         }),
         Command::Merge {
             command: MergeCommand::SyncMember(a),
-        } => merge_check::sync_member::command(a.root.as_deref(), &a.train, a.member.as_deref()),
+        } => merge_check::sync_member::command(
+            a.root.as_deref(),
+            &a.train,
+            a.member.as_deref(),
+            &merge_check::sync_member::Options {
+                no_static: a.no_static.as_deref(),
+                no_trial: a.no_trial.as_deref(),
+                trial_max: &a.trial_max,
+            },
+        ),
         Command::Merge {
             command: MergeCommand::LessonsDriver { base, ours, theirs },
         } => lessons_driver::command(&base, &ours, &theirs),

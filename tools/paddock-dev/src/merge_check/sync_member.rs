@@ -11,9 +11,18 @@
 //!   remote prefix such as `origin/`): the `git revert <revert>` to run after the merge, oldest revert first;
 //! - for a revert of another branch's merge that this member holds: a `::warning::` (re-base on the train, or land that branch
 //!   first): that work is not this member's to re-apply.
+//!
+//! Run it AFTER the merge too: with the train in HEAD (the sync tip), it also runs the fast static rows on that tip
+//! ([`static_rows`]: conformance, the gate register, Clippy and the Windows Clippy of the workspaces the member touches, through
+//! `check --pre-push --only ... --base <train>`), prints each row, and a failing or unmeasured row is exit 5 or 6 with one `::error::`
+//! ("fix on the member, then re-sync"). `--no-static "<reason>"` skips them and logs the reason. Once they pass it dispatches the
+//! member's own CI trial ([`trial_dispatch`]: the member's affected jobs on the train, the run id printed; `--no-trial "<reason>"`
+//! skips it). The command changes no file of the checkout; the trial pushes only the scratch ref `trial/<member>`.
 
 use super::git::{Git, short};
 use super::reverted_base::live_for_member;
+use super::static_rows::{self, StaticGates};
+use super::trial_dispatch::{self, Dispatcher};
 use paddock_cli::{CliError, Report};
 use serde_json::json;
 use std::path::Path;
@@ -55,8 +64,40 @@ fn pre_merge_tip(git: &Git, train: &str, head: &str) -> Result<String, String> {
     Ok(found.unwrap_or_else(|| head.to_string()))
 }
 
-/// Lists the commands and warnings; runs nothing.
-pub fn command(root: Option<&Path>, train: &str, member: Option<&str>) -> Result<Report, CliError> {
+/// The escapes and the trial's wait, from the command line.
+pub struct Options<'a> {
+    /// `--no-static <reason>`: skip the static rows.
+    pub no_static: Option<&'a str>,
+    /// `--no-trial <reason>`: do not dispatch the member's CI trial.
+    pub no_trial: Option<&'a str>,
+    /// `--trial-max <duration>`: the longest the dispatch waits for a busy runner.
+    pub trial_max: &'a str,
+}
+
+/// Lists the commands and warnings, then (the train merged) runs the static rows on the sync tip and, once they pass, dispatches
+/// the member's own CI trial.
+pub fn command(root: Option<&Path>, train: &str, member: Option<&str>, opts: &Options) -> Result<Report, CliError> {
+    command_with(root, train, member, opts, &static_rows::Real, &trial_dispatch::Real)
+}
+
+/// [`command`] with the static rows' runner and the dispatcher given (the tests hand stand-ins).
+fn command_with(
+    root: Option<&Path>,
+    train: &str,
+    member: Option<&str>,
+    opts: &Options,
+    rows: &dyn StaticGates,
+    dispatcher: &dyn Dispatcher,
+) -> Result<Report, CliError> {
+    let (no_static, no_trial) = (opts.no_static, opts.no_trial);
+    if no_trial.is_some_and(|r| r.trim().is_empty()) {
+        return Err(CliError::usage("--no-trial needs a reason.")
+            .with_hint("Say why, for example --no-trial \"docs-only member, no job of its own to run\"."));
+    }
+    if no_static.is_some_and(|r| r.trim().is_empty()) {
+        return Err(CliError::usage("--no-static needs a reason.")
+            .with_hint("Say why, for example --no-static \"docs-only sync, the rows ran on the last tip\"."));
+    }
     let root = crate::gates::command::repo_root(root)?;
     let git = Git::new(&root);
     let step = |why: String, next: &str| CliError::failure(format!("::error::merge sync-member: {why}. Next step: {next}"));
@@ -144,11 +185,47 @@ pub fn command(root: Option<&Path>, train: &str, member: Option<&str>) -> Result
             short(m)
         ));
     }
+    let step = match (no_static, after) {
+        (Some(reason), _) => static_rows::skipped(reason.trim()),
+        (None, false) => static_rows::not_yet(train),
+        (None, true) => static_rows::interpret(rows.run(&root, &train_tip), short(&train_tip)),
+    };
+    text.extend(step.text.iter().cloned());
+    // The trial follows the static rows: only a sync tip they passed (or that `--no-static` let through, logged) is worth a CI run.
+    let trial = match (no_trial, after, step.exit) {
+        (Some(reason), _, _) => trial_dispatch::skipped(reason.trim()),
+        (None, false, _) => trial_dispatch::not_run("the train is not merged into HEAD yet; run this again after `git merge`"),
+        (None, true, e) if e != paddock_cli::Exit::Ok => trial_dispatch::not_run("the static rows did not pass: fix them first"),
+        (None, true, _) => {
+            let branch = name.strip_prefix("origin/").unwrap_or(&name).to_string();
+            // The trial merges what origin holds, so the sync tip goes there first, as the scratch ref `sync/<member>` (the integrator's
+            // push; the member's own branch is the author's). `--force-with-lease` on that ref: a re-sync replaces the integrator's own earlier tip,
+            // never one that someone else moved (the push is then refused as stale: fetch it, look, run again). The trial is then of `sync/<member>`, and `merge check` reads that name.
+            let synced = trial_dispatch::sync_ref(&branch);
+            match git.text(&[
+                "push",
+                "--quiet",
+                &format!("--force-with-lease=refs/heads/{synced}"),
+                "origin",
+                &format!("HEAD:refs/heads/{synced}"),
+            ]) {
+                Ok(_) => trial_dispatch::interpret(dispatcher.dispatch(&root, &synced, train, opts.trial_max), &synced, train),
+                Err(why) => trial_dispatch::not_pushed(&synced, &why),
+            }
+        }
+    };
+    text.extend(trial.text.iter().cloned());
+    let exit = if step.exit != paddock_cli::Exit::Ok {
+        step.exit
+    } else {
+        trial.exit
+    };
     let item = |(m, r, s, b): &(String, String, String, String)| json!({"merge": m, "revert": r, "subject": s, "branch": b});
     Ok(Report::new(
-        json!({"member": name, "train": train_tip, "own": own.iter().map(item).collect::<Vec<_>>(), "other": other.iter().map(item).collect::<Vec<_>>()}),
+        json!({"member": name, "train": train_tip, "own": own.iter().map(item).collect::<Vec<_>>(), "other": other.iter().map(item).collect::<Vec<_>>(), "static": step.data, "trial": trial.data}),
         text.join("\n"),
-    ))
+    )
+    .with_exit(exit))
 }
 
 #[cfg(test)]
