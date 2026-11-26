@@ -3123,3 +3123,19 @@ Why a local build found none of CI's compile-cache entries (the earlier block "L
   store). The per-job `CARGO_TERM_COLOR` lines stay: they colour the log of jobs that have no cache.
 - **Limits:** Windows has no shim (the wrapper is the sccache binary), so a local Windows build does not share. The shell copy of
   setup-rust (release path) exports the two variables too, as its twin test requires.
+
+## Pre-push reuse after the member gate, and the train-audits guard (2026-11-26, feat/reuse-member-audits)
+
+ER-20, a Mac with 14 cores. **(1) Member gate, then the push hook, on one clean tree** (`check --pre-push --member-gate --base origin/main`, then
+the hook's own form, `--refs-from-stdin` in a throw-away worktree): every row the gate ran was reused by the hook (lockfile, fmt, Clippy,
+`conformance`, `conformance-tests`, `gates-register`); only `commit-lint` (0.1 s, never reused: it reads commits) ran again, and
+`member-audits` and `tests` are member-gate-only by design. **(2) The train-audits guard's command**
+(`check --pre-push --member-gate --only member-audits,conformance --base origin/main`) on one commit: 221 s (computed), 112 s (computed
+again, because `origin/main` had moved between the two runs: a train landed), then 6 s and 6 s (both rows `reused`, `origin/main` still).
+With `member-audits` in the whole-tree class a repeat costs 6 s, not about 2 to 4 minutes. **Why rows re-ran in train o:** a whole-tree row's
+key holds the resolved tip of the base (`origin/main`), so any landing or fetch between the member gate and the push makes conformance and
+the audits run again; and a member's gate plans only its own delta (the merge's first parent as base), so rows of earlier members'
+workspaces were not in the plan of the gate that ran last. `merge check --gates --gates-base origin/main` on the last member plans the whole
+train's rows. Not changed, for a decision: keying the whole-tree rows on `merge-base(HEAD, base)` instead of the base's tip would survive
+landings, but conformance's checks that read the base's files (shrink-only lists) could then judge an older base; that trade is ER-33's.
+
