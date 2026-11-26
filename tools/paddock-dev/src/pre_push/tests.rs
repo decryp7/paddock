@@ -1427,6 +1427,8 @@ mod known_commit {
             all_apps: false,
             accept_not_measured: vec![],
             no_reuse: false,
+            set: Default::default(),
+            cancel_ci_run: None,
         }
     }
 
@@ -2073,6 +2075,8 @@ mod base_choice {
             all_apps: false,
             accept_not_measured: vec![],
             no_reuse: false,
+            set: Default::default(),
+            cancel_ci_run: None,
         };
         let line = format!("refs/heads/x {two} refs/heads/main {}\n", "0".repeat(40));
         let got = command_in(
@@ -3541,6 +3545,47 @@ mod member_tests {
         let planned = plan_gates(&plan2(), &change(&["crates/paddock-proc/README.md"]), &member());
         assert!(!ids(&planned).iter().any(|i| i.starts_with("tests")), "{:?}", ids(&planned));
         assert!(planned.iter().any(|p| matches!(p, Planned::Skip { id, .. } if id == "tests")));
+    }
+
+    /// The train's split (ER-53): the fast set is every row but the host tests, and holds the rows the plan names (fmt, lockfiles,
+    /// commit-lint, gates-register, conformance, Clippy, conformance-tests, member-audits); the slow set is the host tests alone; the two
+    /// together are the plan.
+    #[test]
+    fn the_fast_and_slow_sets_split_the_member_gate_at_the_host_tests() {
+        use crate::pre_push::train_split::{RowSet, select};
+        let planned = plan_gates(&plan2(), &change(FILES), &member());
+        let all = ids_of_all(&planned);
+        let fast = ids_of_all(&select(planned.clone(), RowSet::Fast));
+        let slow = ids_of_all(&select(planned, RowSet::Slow));
+        assert!(
+            !slow.is_empty() && slow.iter().all(|i| i == "tests" || i.starts_with("tests ")),
+            "{slow:?}"
+        );
+        assert!(fast.iter().all(|i| i != "tests" && !i.starts_with("tests ")), "{fast:?}");
+        for want in [
+            "fmt ",
+            "lockfile ",
+            "clippy ",
+            "clippy-windows ",
+            "commit-lint",
+            "gates-register",
+            "conformance",
+            "conformance-tests",
+            "member-audits",
+        ] {
+            assert!(fast.iter().any(|i| i.starts_with(want)), "{want} is a fast row: {fast:?}");
+        }
+        assert_eq!(fast.len() + slow.len(), all.len(), "nothing is dropped between the two sets");
+    }
+
+    fn ids_of_all(planned: &[Planned]) -> Vec<String> {
+        planned
+            .iter()
+            .map(|p| match p {
+                Planned::Run(g) => g.id.clone(),
+                Planned::Skip { id, .. } | Planned::NotMeasured { id, .. } | Planned::Broken { id, .. } => id.clone(),
+            })
+            .collect()
     }
 
     #[test]

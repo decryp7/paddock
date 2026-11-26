@@ -46,6 +46,7 @@ pub mod known;
 pub mod outcome;
 pub mod reuse;
 pub mod row_timings;
+pub mod train_split;
 
 use crate::plan::{Request, plan_with_graph};
 use crate::plan_repo::git_text;
@@ -104,6 +105,15 @@ pub struct PrePushArgs {
     /// Also read from PADDOCK_ACCEPT_NOT_MEASURED (comma separated).
     #[arg(long, value_delimiter = ',')]
     pub accept_not_measured: Vec<String>,
+    /// The rows this run takes (the train's ER-53 split, [`train_split`]): `fast` is everything but the host tests, run before CI is
+    /// dispatched; `slow` is the host tests (`tests <ws>`, member gate), run beside CI; `all` (default) is every row. A `slow` run
+    /// records its result for the commit it checked, which `./dev ci landing-held` reads. Neither a fast nor a slow run leaves the
+    /// pass record of a whole run.
+    #[arg(long, value_enum, default_value_t = train_split::RowSet::All)]
+    pub set: train_split::RowSet,
+    /// With `--set slow`: when a slow row fails, cancel this CI run at once (`./dev ci cancel`; the id `./dev ci dispatch` printed).
+    #[arg(long)]
+    pub cancel_ci_run: Option<u64>,
     /// Run every row even when an earlier green run with the same key is on record ([`reuse`]; `PADDOCK_NO_REUSE=1` is the same switch).
     #[arg(long)]
     pub no_reuse: bool,
@@ -533,6 +543,7 @@ fn command_in(
         .collect();
     let mut planned = gates::plan_gates(&plan, &change, &facts);
     planned = select_rows(planned, &args.only)?;
+    planned = train_split::select(planned, args.set);
     notes.extend(
         planned
             .iter()
@@ -581,6 +592,16 @@ fn command_in(
     } else {
         None
     };
+    // The slow rows of the train's split are recorded for the commit they check: unfinished until they end (a run that dies is "not held").
+    let slow_sha = checked
+        .clone()
+        .or_else(|| head_sha.clone())
+        .filter(|_| args.set == train_split::RowSet::Slow && !args.dry_run);
+    if let Some(sha) = &slow_sha
+        && let Err(e) = train_split::start(&state, sha)
+    {
+        eprintln!("::warning::pre-push: the slow-row record of {sha} was not started: {e}. A landing reads it as not held.");
+    }
     let detail = run_all_detailed(
         &planned,
         ex,
@@ -607,6 +628,15 @@ fn command_in(
     }
     rows.extend(extra_ref_rows(&extra));
     accept_not_measured(&mut rows, &accept, &state);
+    if let Some(sha) = &slow_sha {
+        if let Err(e) = train_split::finish(&state, sha, &rows) {
+            eprintln!("::warning::pre-push: the slow-row record of {sha} was not written: {e}. A landing reads it as not held.");
+        }
+        let mut cancel = |id: u64| crate::ci_runs::cancel_by_id(id);
+        if let Some(line) = train_split::cancel_failed_run(&rows, args.cancel_ci_run, &mut cancel) {
+            eprintln!("{line}");
+        }
+    }
     log_queue_times(&state, checked.as_deref(), &base, &timings);
     // The kept build folders of the throw-away worktrees stay bounded (kept.rs): stale incremental state goes, a folder a build
     // holds is skipped.
@@ -751,7 +781,7 @@ pub(crate) fn stop_on_signals(stop: &Arc<AtomicBool>) {
 }
 
 /// The folder for this checkout's gate logs and override log: `<git common dir>/paddock-pre-push`.
-fn state_dir(root: &Path) -> PathBuf {
+pub(crate) fn state_dir(root: &Path) -> PathBuf {
     git_text(root, &["rev-parse", "--path-format=absolute", "--git-common-dir"])
         .map(|t| PathBuf::from(t.trim()))
         .unwrap_or_else(|| root.join(".git"))

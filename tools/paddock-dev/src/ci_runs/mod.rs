@@ -14,6 +14,7 @@
 //! The token is read from `GITEA_TOKEN`, travels in a header only and is printed nowhere.
 
 pub mod cache_audit;
+pub mod cancel;
 pub mod client;
 pub mod dispatch;
 pub mod dispatch_guards;
@@ -822,6 +823,98 @@ pub struct RecordArgs {
     /// The Gitea server.
     #[arg(long, default_value = SERVER)]
     server: String,
+}
+
+/// Arguments of `ci cancel`.
+#[derive(Args)]
+pub struct CancelArgs {
+    /// The run to cancel: the id `./dev ci dispatch` printed (`run <id>`). Never "the newest run".
+    run: u64,
+    /// The repository.
+    #[arg(long, default_value = "decryp7/paddock")]
+    repo: String,
+    /// The Gitea server.
+    #[arg(long, default_value = SERVER)]
+    server: String,
+}
+
+/// `ci cancel`: stops run `--run` through its own cancel URL ([`cancel::cancel_run`]). Exit 0 sent or already finished, 6 when it could
+/// not be read or sent (never a silent pass: the run may still be running).
+pub fn cancel_cmd(a: &CancelArgs) -> Result<Report, CliError> {
+    let token = token()?;
+    let mut http = CurlHttp;
+    match cancel::cancel_run(&mut http, &a.server, &a.repo, &token, a.run) {
+        Ok(done) => Ok(Report::new(
+            serde_json::json!({ "run": a.run, "sent": matches!(done, cancel::Cancelled::Sent { .. }) }),
+            done.line(),
+        )),
+        Err(e) => Err(CliError::new(
+            Exit::NotMeasured,
+            format!(
+                "::error::ci cancel: run {}: {e}. Next step: read the run on the server and cancel it by hand if it still runs.",
+                a.run
+            ),
+        )),
+    }
+}
+
+/// Arguments of `ci landing-held`.
+#[derive(Args)]
+pub struct LandingHeldArgs {
+    /// The full 40-hex commit that is to land.
+    #[arg(long)]
+    sha: String,
+    /// The workflow whose complete green run is needed.
+    #[arg(long, default_value = "ci.yml")]
+    workflow: String,
+    /// The repository.
+    #[arg(long, default_value = "decryp7/paddock")]
+    repo: String,
+    /// The Gitea server.
+    #[arg(long, default_value = SERVER)]
+    server: String,
+}
+
+/// `ci landing-held`: ER-49's landing needs BOTH the complete green CI run ([`verdict::verdict_landing_at`]) and the green local slow rows
+/// (`./dev check --pre-push --member-gate --set slow`, [`crate::pre_push::train_split`]) on the same commit. Exit 0 landable, 5 refused
+/// (CI red or a slow row failed), 6 not held (anything unfinished, missing or unread: never a pass, ER-33).
+pub fn landing_held(a: &LandingHeldArgs) -> Result<Report, CliError> {
+    use crate::pre_push::train_split::{Ci, Landing, SlowState, landing, read};
+    if a.sha.len() != 40 || !a.sha.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
+        return Err(CliError::usage(format!("--sha {:?} is not a full 40-hex commit id.", a.sha))
+            .with_hint("Pass the whole sha (`git rev-parse HEAD`)."));
+    }
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let root = find_root(&cwd).unwrap_or(cwd);
+    let ci = match token() {
+        Err(_) => Ci::NotMeasured("GITEA_TOKEN is not set, so the runs cannot be read".into()),
+        Ok(token) => {
+            let mut http = CurlHttp;
+            let mut client = Client::new(&mut http, &a.server, &a.repo, &token);
+            match verdict::verdict_landing_at(&mut client, &a.workflow, &a.sha, &root) {
+                verdict::Verdict::Green { .. } | verdict::Verdict::GreenWithFixItems { .. } => Ci::Green,
+                verdict::Verdict::Red { reason, .. } => Ci::Red(reason),
+                verdict::Verdict::NotMeasured(why) => Ci::NotMeasured(why),
+            }
+        }
+    };
+    let slow: SlowState = read(&crate::pre_push::state_dir(&root), &a.sha);
+    let (exit, text) = match landing(&ci, &slow) {
+        Landing::Landable => (
+            Exit::Ok,
+            format!("{} may land: the complete green CI run and the green slow rows hold on it", a.sha),
+        ),
+        Landing::Refused(why) => (Exit::Findings, format!("{} may not land: {why}", a.sha)),
+        Landing::NotHeld(why) => (Exit::NotMeasured, format!("{} is not held for landing: {why}", a.sha)),
+    };
+    Ok(Report::new(serde_json::json!({ "sha": a.sha, "landable": exit == Exit::Ok }), text).with_exit(exit))
+}
+
+/// Cancels run `id` of the family's server (the pre-push slow set calls this when a slow row fails): the line to print, or why not.
+pub fn cancel_by_id(id: u64) -> Result<String, String> {
+    let token = token().map_err(|e| e.to_string())?;
+    let mut http = CurlHttp;
+    cancel::cancel_run(&mut http, SERVER, "decryp7/paddock", &token, id).map(|d| d.line())
 }
 
 fn token() -> Result<String, CliError> {
