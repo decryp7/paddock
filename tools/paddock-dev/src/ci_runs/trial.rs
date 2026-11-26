@@ -337,6 +337,9 @@ mod tests {
             std::fs::create_dir_all(&work).unwrap();
             git_in(build, &["init", "-q", "--bare", "-b", "main", origin.to_str().unwrap()]);
             git_in(&work, &["init", "-q", "-b", "main"]);
+            // LF checkouts on every OS before the first checkout (ER-61).
+            paddock_testkit::git_fixture::lf_only(&origin);
+            paddock_testkit::git_fixture::lf_only(&work);
             git_in(&work, &["remote", "add", "origin", origin.to_str().unwrap()]);
             std::fs::write(work.join("shared.txt"), "one\n").unwrap();
             git_in(&work, &["add", "-A"]);

@@ -1017,6 +1017,8 @@ fn build_shape(root: &std::path::Path, revert_flip: bool) -> [String; 3] {
     };
     let write = |p: &str, t: &str| std::fs::write(root.join(p), t).unwrap();
     git(&["init", "-q", "-b", "main"]);
+    // LF checkouts on every OS before the first checkout (ER-61; the Windows runner's git wrote `a\r\n` here, run 9143).
+    paddock_testkit::git_fixture::lf_only(root);
     write("flip.txt", "a\n");
     write("base.txt", "b\n");
     git(&["add", "-A"]);
