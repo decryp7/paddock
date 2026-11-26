@@ -520,8 +520,19 @@ fn a_failed_job_maps_to_its_project_and_an_unknown_one_is_unmapped() {
         expected: ["ui", "plan"]
             .iter()
             .map(|n| {
-                let projects = if *n == "ui" { ["ui", "eslint", "icons"].map(String::from).into() } else { ["everything".to_string()].into() };
-                (format!("job {n}"), crate::run_scope::Expected { job: n.to_string(), projects, ..Default::default() })
+                let projects = if *n == "ui" {
+                    ["ui", "eslint", "icons"].map(String::from).into()
+                } else {
+                    ["everything".to_string()].into()
+                };
+                (
+                    format!("job {n}"),
+                    crate::run_scope::Expected {
+                        job: n.to_string(),
+                        projects,
+                        ..Default::default()
+                    },
+                )
             })
             .collect(),
     };

@@ -10,7 +10,8 @@
 mod expected;
 
 pub use expected::{
-    Expected, ExpectedMap, Found, LEG_KEYS, PlannedLegs, app_expected, expected_of, load_model, load_model_from, lookup, lookup_entry, strip_caller,
+    Expected, ExpectedMap, Found, LEG_KEYS, PlannedLegs, app_expected, expected_of, load_model, load_model_from, lookup, lookup_entry,
+    strip_caller,
 };
 
 use crate::job_outcome::JobOutcome;
@@ -330,8 +331,17 @@ fn parse_expected(v: &Value) -> Result<ExpectedMap, String> {
                 .as_array()
                 .and_then(|p| p.iter().map(|v| v.as_str().map(str::to_string)).collect());
             match (job, leg, projects) {
-                (Some(job), Some(leg), Some(projects)) => Ok((name.clone(), Expected { job: job.to_string(), leg, projects })),
-                _ => Err(format!("the scope line's expected.{name:?} has no job, leg of text values and list of projects")),
+                (Some(job), Some(leg), Some(projects)) => Ok((
+                    name.clone(),
+                    Expected {
+                        job: job.to_string(),
+                        leg,
+                        projects,
+                    },
+                )),
+                _ => Err(format!(
+                    "the scope line's expected.{name:?} has no job, leg of text values and list of projects"
+                )),
             }
         })
         .collect()

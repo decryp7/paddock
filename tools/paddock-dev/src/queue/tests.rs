@@ -908,14 +908,27 @@ fn the_marker_round_trips_and_rows_name_their_projects() {
         ("ui (tokens, contrast)".to_string(), entry("ui", None)),
     ]);
     assert_eq!(
-        real::projects_of_row(&expected, "crate (ubuntu-latest)", &Test::Named("paddock-service per_machine::t".into())),
+        real::projects_of_row(
+            &expected,
+            "crate (ubuntu-latest)",
+            &Test::Named("paddock-service per_machine::t".into())
+        ),
         set(&["paddockservice"])
     );
-    assert_eq!(real::projects_of_row(&expected, "app dyno (macos-latest)", &Test::WholeJob), set(&["dyno"]));
+    assert_eq!(
+        real::projects_of_row(&expected, "app dyno (macos-latest)", &Test::WholeJob),
+        set(&["dyno"])
+    );
     // The job id from the line, not the text of the name.
-    assert_eq!(real::projects_of_row(&expected, "ui (tokens, contrast)", &Test::WholeJob), set(&["ui"]));
+    assert_eq!(
+        real::projects_of_row(&expected, "ui (tokens, contrast)", &Test::WholeJob),
+        set(&["ui"])
+    );
     // A job the line does not hold falls back to the first word of its name.
-    assert_eq!(real::projects_of_row(&crate::run_scope::ExpectedMap::new(), "ui", &Test::WholeJob), set(&["ui"]));
+    assert_eq!(
+        real::projects_of_row(&crate::run_scope::ExpectedMap::new(), "ui", &Test::WholeJob),
+        set(&["ui"])
+    );
     let plan = serde_json::json!({"all": false, "crates": true, "ui": false, "paddockDev": true, "apps": ["dyno"], "packages": {"crates/paddock-service": ["paddock-service"]}});
     assert_eq!(
         real::projects_of_plan(&plan),

@@ -28,8 +28,8 @@ use crate::job_outcome::JobOutcome;
 use crate::log_text::plain;
 use crate::plan_gitea::workflow_jobs;
 use crate::run_scope::ExpectedMap;
-use paddock_ci_config::jobs::PROJECT_OUTPUTS;
 use crate::wait::Http;
+use paddock_ci_config::jobs::PROJECT_OUTPUTS;
 use regex::Regex;
 use serde_json::{Map, Value, json};
 use std::collections::{BTreeMap, BTreeSet};
@@ -1065,7 +1065,10 @@ impl SincePlan {
         let mut out: Vec<(String, String)> = PROJECT_OUTPUTS
             .iter()
             .map(|(output, project, _)| {
-                let on = self.expected.values().any(|e| keys.contains(e.job.as_str()) && e.projects.contains(*project));
+                let on = self
+                    .expected
+                    .values()
+                    .any(|e| keys.contains(e.job.as_str()) && e.projects.contains(*project));
                 (output.to_string(), on.to_string())
             })
             .collect();
@@ -1520,7 +1523,12 @@ mod tests {
         let entry = |job: &str, leg: &[(&str, &str)]| crate::run_scope::Expected {
             job: job.into(),
             leg: leg.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
-            projects: model.jobs.iter().find(|j| j.id == job).map(|j| j.projects.clone()).unwrap_or_default(),
+            projects: model
+                .jobs
+                .iter()
+                .find(|j| j.id == job)
+                .map(|j| j.projects.clone())
+                .unwrap_or_default(),
         };
         let inside = |n: &str| n.split_once('(').and_then(|(_, r)| r.strip_suffix(')')).unwrap_or("").to_string();
         jobs()

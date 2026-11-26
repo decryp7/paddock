@@ -172,7 +172,14 @@ fn main_run(id: u64, workflow: &str, sha: &str, failed: &[&str]) -> MainRun {
             .filter_map(|n| {
                 let app = crate::run_scope::strip_caller(n).strip_prefix("app ")?.split(" (").next()?;
                 let leg = [("app".to_string(), app.to_string())].into();
-                Some((n.to_string(), crate::run_scope::Expected { job: "app".into(), leg, ..Default::default() }))
+                Some((
+                    n.to_string(),
+                    crate::run_scope::Expected {
+                        job: "app".into(),
+                        leg,
+                        ..Default::default()
+                    },
+                ))
             })
             .collect(),
         created_ms: Some(NOW - 3_600_000.0),

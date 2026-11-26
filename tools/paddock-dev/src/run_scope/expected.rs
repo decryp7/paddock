@@ -29,7 +29,12 @@ impl Expected {
             .iter()
             .map(|(_, project, _)| *project)
             .find(|p| self.projects.contains(*p))
-            .or_else(|| self.projects.iter().map(String::as_str).find(|p| !matches!(*p, "everything" | jobs::APPS_PROJECT)))
+            .or_else(|| {
+                self.projects
+                    .iter()
+                    .map(String::as_str)
+                    .find(|p| !matches!(*p, "everything" | jobs::APPS_PROJECT))
+            })
     }
 }
 
