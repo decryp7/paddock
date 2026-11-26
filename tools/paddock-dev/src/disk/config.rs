@@ -273,12 +273,16 @@ mod tests {
 
     #[test]
     fn the_roots_are_a_path_list_and_the_index_a_path_read_through_the_settings() {
-        let list = std::env::join_paths(["/srv/a", "/srv/b"]).unwrap().to_string_lossy().to_string();
-        let leaked: &'static str = Box::leak(list.into_boxed_str());
-        let pairs: &'static [(&'static str, &'static str)] =
-            Box::leak(Box::new([("PADDOCK_DISK_ROOTS", leaked), ("PADDOCK_DISK_INDEX", "/srv/i")]));
-        let s = Settings::resolve_with(&CommonArgs::default(), &env_of(pairs), &derived);
-        assert_eq!(s.roots, vec![PathBuf::from("/srv/a"), PathBuf::from("/srv/b")]);
-        assert_eq!(s.index, Some(PathBuf::from("/srv/i")));
+        use paddock_testkit::path::abs;
+        let (a, b, i) = (abs(["srv", "a"]), abs(["srv", "b"]), abs(["srv", "i"]));
+        let list = std::env::join_paths([&a, &b]).unwrap().to_string_lossy().to_string();
+        let env = move |k: &str| match k {
+            "PADDOCK_DISK_ROOTS" => Some(list.clone()),
+            "PADDOCK_DISK_INDEX" => Some(i.display().to_string()),
+            _ => None,
+        };
+        let s = Settings::resolve_with(&CommonArgs::default(), &env, &derived);
+        assert_eq!(s.roots, vec![a, b]);
+        assert_eq!(s.index, Some(abs(["srv", "i"])));
     }
 }
