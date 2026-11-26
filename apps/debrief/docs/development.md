@@ -213,10 +213,8 @@ or a tag, also run:
 env -u DYLD_LIBRARY_PATH cargo nextest run --workspace --no-fail-fast
 # the app library without test-only features (cargo test unifies them; a real build does not)
 cargo check -p debrief-app --lib
-# Linux, in the CI image (one container at a time, --cpus 6; on an arm64 Mac the amd64 image runs emulated:
-# layout and metric failures count, timing failures need the native CI run)
-scripts/ci/smoke-linux-docker.sh            # the real-app smoke (WebdriverIO + tauri-driver, Xvfb)
-scripts/ci/e2e-linux-local.sh <specs…>      # Playwright with Linux fonts (whole suite before a tag)
+# Linux: CI's Linux job and e2e legs on the Linux runner. Note 2026-11-26: scripts/ci/smoke-linux-docker.sh and e2e-linux-local.sh
+# (a local container) are removed; no container or VM runs on this Mac (user decision, docs/rules.md NEW-no-local-vm).
 ```
 
 The full suites (Chromium and WebKit) run once on the combined result before a build or tag (Paddock rule 3); in a

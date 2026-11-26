@@ -8,6 +8,7 @@ machine="${1:-paddock-gate-arm}"
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 target="${LINUX_UNITS_TARGET:-/home/$USER/cache/dyno-bench-target}"
 echo "linux-units-check: machine $machine, checkout $root"
+# conformance: no-local-vm — Dyno release step 2c needs a systemd user manager no CI job has; kept until the user decides how that check moves to a Linux runner (2026-11-26)
 orbctl start "$machine" >/dev/null 2>&1 || true
 orb -m "$machine" bash -lc "
   set -e
