@@ -764,12 +764,7 @@ pub fn run_with(args: &WaitArgs, env: Env<'_>, clock: &mut dyn Clock, log: &mut 
     let target = if let Some(n) = &args.plock {
         format!(
             "plock:{n}@{}",
-            absolute(
-                &args
-                    .plock_log
-                    .clone()
-                    .unwrap_or_else(|| plock_log_path((env.throttle_dir)()))
-            )
+            absolute(&args.plock_log.clone().unwrap_or_else(|| plock_log_path((env.throttle_dir)())))
         )
     } else if let Some(p) = args.pid {
         format!("pid:{p}")
@@ -811,10 +806,7 @@ pub fn run_with(args: &WaitArgs, env: Env<'_>, clock: &mut dyn Clock, log: &mut 
     let kind;
     let outcome = if let Some(name) = &args.plock {
         kind = "plock";
-        let path = args
-            .plock_log
-            .clone()
-            .unwrap_or_else(|| plock_log_path((env.throttle_dir)()));
+        let path = args.plock_log.clone().unwrap_or_else(|| plock_log_path((env.throttle_dir)()));
         let pattern = plock_done_pattern(name).map_err(usage)?;
         let mut probe = LineProbe::new(
             env.files,
@@ -1163,8 +1155,16 @@ mod tests {
         // Only `throttle dir` is asked: any other first argument fails, so the call is exactly `<tool> dir`.
         let ok = tool("ok", "[ \"$1\" = dir ] && echo /state/throttle");
         assert_eq!(throttle_dir_of(dir.path(), &ok), Some(PathBuf::from("/state/throttle")));
-        assert_eq!(throttle_dir_of(dir.path(), &tool("rel", "echo relative")), None, "not an absolute folder");
-        assert_eq!(throttle_dir_of(dir.path(), &tool("bad", "echo /x; exit 3")), None, "a failing tool gives none");
+        assert_eq!(
+            throttle_dir_of(dir.path(), &tool("rel", "echo relative")),
+            None,
+            "not an absolute folder"
+        );
+        assert_eq!(
+            throttle_dir_of(dir.path(), &tool("bad", "echo /x; exit 3")),
+            None,
+            "a failing tool gives none"
+        );
     }
 
     #[test]

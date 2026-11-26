@@ -55,7 +55,10 @@ fn a_process_with_no_home_finds_it_through_the_user_database() {
     // What a launchd daemon with UserName set sees: no HOME, no folder variable.
     let got = dir_out(&w, &[("PLOCK_DIR", UNSET), ("HOME", UNSET)]);
     let p = Path::new(&got);
-    assert!(p.is_absolute() && p.ends_with(state_under(Path::new("/")).strip_prefix("/").unwrap()), "{got}");
+    assert!(
+        p.is_absolute() && p.ends_with(state_under(Path::new("/")).strip_prefix("/").unwrap()),
+        "{got}"
+    );
 }
 
 #[test]
@@ -83,7 +86,10 @@ fn the_old_folders_history_is_copied_once_to_the_new_default() {
     assert_eq!(code, 0, "{e}");
     let new_file = state_under(&home).join("heavy-history.tsv");
     let text = fs::read_to_string(&new_file).unwrap();
-    assert!(text.contains("\told row\n") && text.contains("\tnew row\n"), "the old lines came over: {text}");
+    assert!(
+        text.contains("\told row\n") && text.contains("\tnew row\n"),
+        "the old lines came over: {text}"
+    );
     // Once: a line added to the old file later is not copied, and the old file is left as it was.
     fs::write(&old_file, "2000\t1000\tlate row\n").unwrap();
     let (code, _, e) = heavy_out(&w, &["run", "--no-gate", "M", "--", "true"], &env);
