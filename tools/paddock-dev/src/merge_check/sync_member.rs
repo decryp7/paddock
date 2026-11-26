@@ -211,7 +211,7 @@ fn command_with(
             // `sync/<member>/<short sha>` (the integrator's push; the member's own branch is the author's). A re-sync is a new commit and so
             // a new ref: a plain push, never a force or a lease. The trial is then of that ref, and `merge check` reads the same name.
             let synced = trial_dispatch::sync_ref(&branch, &head);
-            match trial_dispatch::trial_dir() {
+            match trial_dispatch::trial_dir(&root) {
                 Err(why) => trial_dispatch::not_pushed(&synced, &why),
                 Ok(dir) => match pusher.push(&root, &dir, &synced, opts.trial_max) {
                     Ok(()) => trial_dispatch::interpret(dispatcher.dispatch(&root, &dir, &synced, train, opts.trial_max), &synced, train),

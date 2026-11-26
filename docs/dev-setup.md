@@ -40,6 +40,7 @@ and links here.
 | --- | --- | --- |
 | `<dev-targets>` | worktrees (`wt/`), build folders, agent scratch (`scratch/<agent id>`), `sccache`, `paddock-dev-home`, the disk index `.paddock-disk.sqlite`, the throttle's run logs (`runs/<agent>/`), the shared npm cache `cache/npm` | `PADDOCK_DEV_TARGETS`, else the parent of `paddock.worktreeRoot`, else of `PADDOCK_WORKTREE_ROOT` |
 | `<dev disk>` | the folder that holds `<dev-targets>` | the parent of `<dev-targets>` |
+| `<trial folder>` | the tool's own clone and askpass program for `trial/*` and `sync/*` refs (`ci dispatch --trial`, `ci trial-prune`, `merge sync-member`) | `--trial-dir`, else git config `paddock.trialDir`, else `PADDOCK_TRIAL_DIR`, else `<dev-targets>/trials` |
 | `<dev disk>/vm-data` | the Tart images `tart-from-home` of the service smoke | `PADDOCK_VM_DATA`, else derived |
 | `<dev disk>/ci/locks/test-machines` | the lock of the test machines (`scripts/vm-lock.sh`) | `PADDOCK_VM_LOCK_ROOT`, else derived |
 | the main checkout | `paddock`, with `engineering-playbook` next to it | the folder that holds the git common directory |

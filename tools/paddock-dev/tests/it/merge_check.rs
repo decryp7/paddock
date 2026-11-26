@@ -2879,14 +2879,22 @@ mod member_trial {
 
     fn sync(r: &Repo, rows: &str, dispatch_out: &str, dispatch_exit: &str, extra: &[&str]) -> (i32, String, String) {
         let dir = tempfile::tempdir().unwrap();
-        sync_in(r, &dir, Some(dir.path().join("trial")), rows, dispatch_out, dispatch_exit, extra)
+        sync_in(
+            r,
+            &dir,
+            &[("PADDOCK_TRIAL_DIR", dir.path().join("trial"))],
+            rows,
+            dispatch_out,
+            dispatch_exit,
+            extra,
+        )
     }
 
     /// `sync` in a given stand-in folder (its log accumulates) and with or without `PADDOCK_TRIAL_DIR`.
     fn sync_in(
         r: &Repo,
         dir: &tempfile::TempDir,
-        trial_dir: Option<PathBuf>,
+        envs: &[(&str, PathBuf)],
         rows: &str,
         dispatch_out: &str,
         dispatch_exit: &str,
@@ -2895,8 +2903,8 @@ mod member_trial {
         stand_ins(dir.path(), rows);
         let log = dir.path().join("log");
         let mut cmd = r.dev_cmd();
-        if let Some(t) = &trial_dir {
-            cmd.env("PADDOCK_TRIAL_DIR", t);
+        for (k, v) in envs {
+            cmd.env(k, v);
         }
         let out = cmd
             .env("PADDOCK_MERGE_CHECK_GATES", dir.path().join("rows"))
@@ -2944,15 +2952,23 @@ mod member_trial {
         assert!(log.contains("trial_dir=") && !log.contains("trial_dir=\n"), "{log}");
         assert!(log.lines().any(|l| l.contains("--trial") && l.ends_with("/trial")), "{log}");
         let dir = tempfile::tempdir().unwrap();
-        let (code, text, log) = sync_in(&r, &dir, None, GREEN, "run 4242", "0", &[]);
+        let (code, text, log) = sync_in(&r, &dir, &[], GREEN, "run 4242", "0", &[]);
         assert_eq!(code, 6, "{text}");
-        assert!(
-            text.contains("PADDOCK_TRIAL_DIR is not set") && !log.contains("ci dispatch"),
-            "{text}\n{log}"
-        );
+        assert!(text.contains("cannot be resolved") && !log.contains("ci dispatch"), "{text}\n{log}");
         let origin = r.git(&["remote", "get-url", "origin"]);
         let refs = r.git(&["--git-dir", &origin, "for-each-ref", "refs/heads/sync/"]);
         assert!(refs.lines().count() == 1, "only the first sync pushed a ref: {refs}");
+    }
+
+    /// With no `PADDOCK_TRIAL_DIR`, the one resolver's default is handed to the dispatch child: `<dev-targets>/trials`.
+    #[test]
+    fn without_the_variable_the_trial_dir_defaults_below_the_dev_targets_folder() {
+        let r = pushed();
+        let dir = tempfile::tempdir().unwrap();
+        let dt = dir.path().join("dt");
+        let (code, text, log) = sync_in(&r, &dir, &[("PADDOCK_DEV_TARGETS", dt.clone())], GREEN, "run 4242", "0", &[]);
+        assert_eq!(code, 0, "{text}");
+        assert!(log.contains(&format!("trial_dir={}", dt.join("trials").display())), "{log}");
     }
 
     /// A re-sync is a new commit and pushes a second, new ref: a plain push, no force and no lease, and the first ref is untouched.

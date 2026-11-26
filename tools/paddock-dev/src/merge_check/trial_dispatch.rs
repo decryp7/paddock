@@ -83,13 +83,10 @@ fn push_with(root: &Path, url: &str, trial_dir: &Path, reference: &str, hold: &s
     if ok { Ok(()) } else { Err(out.trim().to_string()) }
 }
 
-/// `PADDOCK_TRIAL_DIR`, which `ci dispatch --trial` reads (the trial's scratch folder, on a data drive): the same variable, read here
-/// first so a missing one is refused before anything is pushed.
-pub fn trial_dir() -> Result<PathBuf, String> {
-    std::env::var_os("PADDOCK_TRIAL_DIR")
-        .filter(|v| !v.is_empty())
-        .map(PathBuf::from)
-        .ok_or_else(|| "PADDOCK_TRIAL_DIR is not set".to_string())
+/// The trial's scratch folder, through the one resolver `ci dispatch --trial` uses ([`crate::places::trial_dir`]): resolved here first
+/// so an unresolvable one is refused before anything is pushed, and handed to the dispatch child.
+pub fn trial_dir(root: &Path) -> Result<PathBuf, String> {
+    crate::places::trial_dir(root, None, &|k| std::env::var(k).ok()).map_err(|e| format!("{} {}", e.message, e.hint))
 }
 
 /// The real dispatcher (this tool, or `PADDOCK_SYNC_TRIAL_DISPATCH`: the tests' stand-in).
