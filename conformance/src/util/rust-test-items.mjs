@@ -26,7 +26,7 @@ export function impliesTest(predicate) {
 }
 
 /** [start, end) of each test-only `#[cfg(..)]` attribute of `masked`: the attribute alone, `end` just past its `]`. */
-function testAttributes(masked) {
+function testAttributes(masked, predicate = impliesTest) {
   const found = [];
   for (const m of masked.matchAll(/#\[\s*cfg\s*\(/g)) {
     let depth = 1;
@@ -34,7 +34,7 @@ function testAttributes(masked) {
     const inner = i;
     for (; i < masked.length && depth > 0; i++) depth += masked[i] === '(' ? 1 : masked[i] === ')' ? -1 : 0;
     const close = /^\s*\]/.exec(masked.slice(i));
-    if (depth === 0 && close && impliesTest(masked.slice(inner, i - 1))) found.push([m.index, i + close[0].length]);
+    if (depth === 0 && close && predicate(masked.slice(inner, i - 1))) found.push([m.index, i + close[0].length]);
   }
   return found;
 }
@@ -42,14 +42,15 @@ function testAttributes(masked) {
 /**
  * `masked` (a `maskRust` result) with every test-only item (`#[cfg(test)]`, `#[cfg(all(unix, test))]`, see `impliesTest`) blanked, newlines and offsets kept: a `mod name { … }` or fn
  * with a body (brace-matched) or a single item ending in `;` (a `use`, a `const`). Code after a test item stays visible, so a
- * leading `#[cfg(test)] use …;` hides nothing below it.
+ * leading `#[cfg(test)] use …;` hides nothing below it. `predicate` decides which `cfg` predicates mark an item to blank (default
+ * `impliesTest`; a check of another cfg, such as C171's `unix`, passes its own).
  */
-export function withoutTestItems(masked) {
+export function withoutTestItems(masked, predicate = impliesTest) {
   const chars = [...masked];
   const blank = (from, to) => {
     for (let i = from; i < to; i++) if (chars[i] !== '\n') chars[i] = ' ';
   };
-  for (const [attrStart, attrEnd] of testAttributes(masked)) {
+  for (const [attrStart, attrEnd] of testAttributes(masked, predicate)) {
     let i = attrEnd;
     // Further attributes on the same item.
     for (;;) {

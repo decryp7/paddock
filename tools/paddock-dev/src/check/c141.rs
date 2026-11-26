@@ -16,6 +16,9 @@
 //! - the jobs and workflows in [`NO_SECRET`] hold no secret at all: a gates job that must run without any (conformance test
 //!   `the_local_gates_are_the_first_jobs_of_a_trains_dispatch_run_and_run_without_a_token`) and the release path, whose kit steps
 //!   run in the shell, where the `s3` backend is the local disk (a key passed there is exposure for nothing);
+//! - the test-result cache's own key (user decision 2026-11-26, ADR 0116 §4: a separate RustFS key for CI's test cache), the two secrets
+//!   [`TEST_CACHE_SECRETS`], appears only in a step that runs `./dev ci test-cache`, and nowhere else (not a workflow- or job-level
+//!   `env:`, not another step, not an action file): [`test_cache_strays`];
 //! - setup-rust's own `action.yml` hands each `inputs.sccache-s3-*` to exactly one step and no step that holds one writes to
 //!   `$GITHUB_ENV` (read with the YAML reader, per step).
 //!
@@ -40,6 +43,11 @@ pub const KEYS: [(&str, &str); 2] = [
     ("sccache-s3-secret-access-key", "PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY"),
 ];
 
+/// The test-result cache's key: two Gitea repository secrets, for the steps that run `./dev ci test-cache` and no other.
+pub const TEST_CACHE_SECRETS: [&str; 2] = ["PADDOCK_TEST_CACHE_KEY_ID", "PADDOCK_TEST_CACHE_SECRET"];
+/// What a step that may hold [`TEST_CACHE_SECRETS`] runs.
+const TEST_CACHE_COMMAND: &str = "ci test-cache";
+
 const WORKFLOWS: &str = ".gitea/workflows";
 /// The action that receives the key; the only action file that may name the secrets' inputs.
 const ACTION: &str = ".gitea/actions/setup-rust/action.yml";
@@ -54,7 +62,7 @@ const RULE: u32 = 79;
 /// user (ER-46), and the test `the_no_secret_list_only_shrinks` pins its content so a growing list shows in a diff.
 pub const NO_SECRET: [&str; 6] = [
     "app-release.yml",
-    "heavy-release.yml",
+    "throttle-release.yml",
     "dyno-release.yml",
     "pitcrew-release.yml",
     "pitwall-release.yml",
@@ -288,6 +296,41 @@ pub fn stray_lines(text: &str, owned: &BTreeSet<usize>) -> Vec<usize> {
         .collect()
 }
 
+/// The lines of `text` (0-based) that name a [`TEST_CACHE_SECRETS`] secret outside a step that runs `./dev ci test-cache`: a workflow
+/// or job `env:`, another step, a `with:`. A step's text runs from its first line to the next step's or job's. A workflow that cannot
+/// be read is a finding at line 0 of its own (the caller reports it).
+pub fn test_cache_strays(text: &str) -> Result<Vec<usize>, String> {
+    let doc = yaml::parse(text)?;
+    let lines: Vec<&str> = text.split('\n').collect();
+    // Delimiters: (1-based line, whether a step starts there).
+    let mut marks: Vec<(usize, bool)> = Vec::new();
+    for (_, job) in doc.get("jobs").map(Node::entries).unwrap_or_default() {
+        marks.push((job.line, false));
+        marks.extend(job.get("steps").map(Node::items).unwrap_or_default().iter().map(|st| (st.line, true)));
+    }
+    marks.sort();
+    let mut out = Vec::new();
+    for (i, l) in lines.iter().enumerate() {
+        if l.trim_start().starts_with('#') || !TEST_CACHE_SECRETS.iter().any(|s| l.contains(s)) {
+            continue;
+        }
+        let line = i + 1;
+        let at = marks.iter().rposition(|(m, _)| *m <= line);
+        let ok = at.is_some_and(|k| {
+            let (from, is_step) = marks[k];
+            let to = marks.get(k + 1).map_or(lines.len() + 1, |(n, _)| *n);
+            is_step
+                && lines[from.saturating_sub(1)..(to - 1).min(lines.len())]
+                    .iter()
+                    .any(|t| !t.trim_start().starts_with('#') && t.contains(TEST_CACHE_COMMAND))
+        });
+        if !ok {
+            out.push(i);
+        }
+    }
+    Ok(out)
+}
+
 /// The `inputs.sccache-s3-*` of setup-rust's `action.yml` and where they go: exactly one step names each, and no step that names one
 /// writes to `$GITHUB_ENV` (a later step, test or build script would see the key). The findings are `(line, message)`; a file the
 /// reader cannot parse or without steps is a finding too. Read per step: the step's text is from its own first line to the next
@@ -403,6 +446,11 @@ impl Check for C141 {
                     ".gitea/actions/setup-rust/action.yml",
                     "name: setup-rust\nruns:\n  using: composite\n  steps:\n    - name: one\n      env:\n        K: ${{ inputs.sccache-s3-access-key-id }}\n        S: ${{ inputs.sccache-s3-secret-access-key }}\n      run: echo hi\n    - name: leak\n      run: echo \"K=${{ inputs.sccache-s3-secret-access-key }}\" >> \"$GITHUB_ENV\"\n",
                 ),
+                // The test cache's key: right in the test-cache step's env, a stray line in a job env and in another step.
+                (
+                    ".gitea/workflows/tc.yml",
+                    "jobs:\n  a:\n    env:\n      X: ${{ secrets.PADDOCK_TEST_CACHE_SECRET }}\n    steps:\n      - run: ./dev ci test-cache record\n        env:\n          ID: ${{ secrets.PADDOCK_TEST_CACHE_KEY_ID }}\n      - run: echo ${{ secrets.PADDOCK_TEST_CACHE_KEY_ID }}\n",
+                ),
                 (
                     "docs/not-a-workflow.yml",
                     "jobs:\n  a:\n    steps:\n      - uses: ./.gitea/actions/setup-rust\n",
@@ -413,6 +461,8 @@ impl Check for C141 {
                 (".gitea/actions/setup-rust/action.yml", 10),
                 (".gitea/actions/setup-rust/action.yml", 10),
                 (".gitea/workflows/dyno-release.yml", 6),
+                (".gitea/workflows/tc.yml", 4),
+                (".gitea/workflows/tc.yml", 9),
                 (".gitea/workflows/unwired.yml", 4),
             ],
         }
@@ -482,6 +532,19 @@ impl Check for C141 {
                     "Write that part as a block on lines of its own.",
                 )),
             }
+            match test_cache_strays(&text) {
+                Ok(strays) => findings.extend(strays.into_iter().map(|i| {
+                    Finding::error(
+                        "C141",
+                        RULE,
+                        f,
+                        i + 1,
+                        "names the test cache's key secret outside a step that runs `./dev ci test-cache`",
+                        "Remove it here: PADDOCK_TEST_CACHE_KEY_ID and PADDOCK_TEST_CACHE_SECRET reach only the test-cache steps, in their own `env:` (ADR 0116 section 4).",
+                    )
+                })),
+                Err(e) => findings.push(Finding::error("C141", RULE, f, 1, format!("the test cache's key lines cannot be placed: {e}"), "Write that part as a block on lines of its own.")),
+            }
         }
         if let Some(text) = ctx.read(ACTION) {
             for (line, message) in action_leaks(&text) {
@@ -509,6 +572,18 @@ impl Check for C141 {
                     "an action other than setup-rust names an S3 key secret",
                     "Remove it: only .gitea/actions/setup-rust/action.yml receives the key.",
                 ));
+            }
+            for (i, l) in text.split('\n').enumerate() {
+                if !l.trim_start().starts_with('#') && TEST_CACHE_SECRETS.iter().any(|s| l.contains(s)) {
+                    findings.push(Finding::error(
+                        "C141",
+                        RULE,
+                        f,
+                        i + 1,
+                        "an action names the test cache's key secret",
+                        "Remove it: the test cache's key is read in the `env:` of the step that runs `./dev ci test-cache`, never by an action.",
+                    ));
+                }
             }
         }
         CheckOutput {
@@ -578,6 +653,24 @@ mod tests {
         assert_eq!(edits, vec![Edit::Replace(7, format!("          {PAIR}"))]);
     }
 
+    const TC_OK: &str = "jobs:\n  a:\n    steps:\n      - name: Record\n        run: ./dev ci test-cache record --shared\n        env:\n          PADDOCK_TEST_CACHE_KEY_ID: ${{ secrets.PADDOCK_TEST_CACHE_KEY_ID }}\n          PADDOCK_TEST_CACHE_SECRET: ${{ secrets.PADDOCK_TEST_CACHE_SECRET }}\n";
+
+    #[test]
+    fn the_test_cache_key_is_allowed_in_a_test_cache_step_and_nowhere_else() {
+        assert_eq!(test_cache_strays(TC_OK).unwrap(), Vec::<usize>::new());
+        // Positive controls: the same lines in a workflow env, a job env, another step and a `with:` are each found.
+        let job_env = TC_OK.replace("  a:\n", "  a:\n    env:\n      K: ${{ secrets.PADDOCK_TEST_CACHE_SECRET }}\n");
+        assert_eq!(test_cache_strays(&job_env).unwrap(), vec![3]);
+        let wf_env = format!("env:\n  K: ${{{{ secrets.PADDOCK_TEST_CACHE_KEY_ID }}}}\n{TC_OK}");
+        assert_eq!(test_cache_strays(&wf_env).unwrap(), vec![1]);
+        let other = TC_OK.replace("./dev ci test-cache record --shared", "cargo test");
+        assert_eq!(test_cache_strays(&other).unwrap(), vec![6, 7]);
+        let with = format!("{TC_OK}      - uses: ./.gitea/actions/setup-rust\n        with:\n          k: ${{{{ secrets.PADDOCK_TEST_CACHE_SECRET }}}}\n");
+        assert_eq!(test_cache_strays(&with).unwrap(), vec![10]);
+        // A comment that names it is not a use.
+        assert!(test_cache_strays(&format!("# PADDOCK_TEST_CACHE_SECRET\n{TC_OK}")).unwrap().is_empty());
+    }
+
     #[test]
     fn the_key_named_in_a_job_env_is_a_stray_line() {
         let leaked = STEP_WITHOUT_WITH.replace(
@@ -623,7 +716,7 @@ mod tests {
         // Pinned: a longer list shows in this diff and needs the user's yes (ER-46).
         assert_eq!(
             NO_SECRET,
-            ["app-release.yml", "heavy-release.yml", "dyno-release.yml", "pitcrew-release.yml", "pitwall-release.yml", "spotter-release.yml"]
+            ["app-release.yml", "throttle-release.yml", "dyno-release.yml", "pitcrew-release.yml", "pitwall-release.yml", "spotter-release.yml"]
         );
     }
 

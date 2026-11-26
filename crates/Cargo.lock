@@ -84,6 +84,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "arraydeque"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7d902e3d592a523def97af8f317b08ce16b7ab854c1985a0c671e6f15cebc236"
+
+[[package]]
 name = "async-broadcast"
 version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1205,9 +1211,9 @@ checksum = "d0881ea181b1df73ff77ffaaf9c7544ecc11e82fba9b5f27b262a3c73a332555"
 
 [[package]]
 name = "ed25519-compact"
-version = "2.6.0"
+version = "2.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1454db4f2edb7f0e8fe0c5b375b0c978fc63244cc9f010d160e417eb10139aa8"
+checksum = "9547879431a90e352a35863a54416d92898a787b9af09e6ae2e09a96bd78be80"
 
 [[package]]
 name = "email-encoding"
@@ -1414,9 +1420,9 @@ checksum = "1c66915cc5391097de7a2b0b972e8505aa33c0df401fd3a6811dbdb32881ba48"
 
 [[package]]
 name = "flate2"
-version = "1.1.10"
+version = "1.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6e634e2e0ebac1ee034020da1ca582e17ffe4e0f5e985823721e168928136dcb"
+checksum = "626d4928326b646e70f65ed36fc7cf9f206bdb68a0019ee7c6b4709da4e084c4"
 dependencies = [
  "crc32fast",
  "miniz_oxide 0.9.1",
@@ -2542,6 +2548,18 @@ name = "hashbrown"
 version = "0.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
+dependencies = [
+ "foldhash",
+]
+
+[[package]]
+name = "hashlink"
+version = "0.12.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a596f1b20ed2cc5ecac41a164aaebc7258057060f06c0cf7a2ba3991ee7990fb"
+dependencies = [
+ "hashbrown 0.17.1",
+]
 
 [[package]]
 name = "heapless"
@@ -4022,6 +4040,7 @@ name = "paddock-channels"
 version = "0.1.0"
 dependencies = [
  "lettre",
+ "paddock-channels",
  "paddock-commands",
  "paddock-dialogs",
  "paddock-download",
@@ -4046,6 +4065,7 @@ version = "0.1.0"
 dependencies = [
  "libc",
  "log",
+ "paddock-chromium",
  "paddock-download",
  "paddock-env",
  "paddock-jobs",
@@ -4058,6 +4078,15 @@ dependencies = [
  "tempfile",
  "tungstenite",
  "zip",
+]
+
+[[package]]
+name = "paddock-ci-config"
+version = "0.1.0"
+dependencies = [
+ "paddock-testkit",
+ "paddock-workspace-hack",
+ "yaml-rust2",
 ]
 
 [[package]]
@@ -4137,6 +4166,7 @@ version = "0.2.0"
 dependencies = [
  "fs4",
  "httpdate",
+ "paddock-download",
  "paddock-env",
  "paddock-jobs",
  "paddock-limits",
@@ -4157,6 +4187,7 @@ version = "0.1.0"
 dependencies = [
  "libc",
  "log",
+ "paddock-env",
  "paddock-workspace-hack",
  "serde",
  "serde_json",
@@ -4171,6 +4202,7 @@ dependencies = [
  "log",
  "paddock-commands",
  "paddock-env",
+ "paddock-files",
  "paddock-proc",
  "paddock-testkit",
  "paddock-workspace-hack",
@@ -4215,6 +4247,7 @@ dependencies = [
  "jiff",
  "log",
  "paddock-commands",
+ "paddock-env",
  "paddock-jobs",
  "paddock-limits",
  "paddock-proc",
@@ -4259,6 +4292,7 @@ dependencies = [
  "log",
  "paddock-commands",
  "paddock-env",
+ "paddock-jobs",
  "paddock-limits",
  "paddock-workspace-hack",
  "postcard",
@@ -4305,6 +4339,7 @@ dependencies = [
  "log",
  "paddock-env",
  "paddock-jobs",
+ "paddock-log",
  "paddock-testkit",
  "paddock-workspace-hack",
  "serde",
@@ -4387,6 +4422,7 @@ dependencies = [
  "paddock-download",
  "paddock-jobs",
  "paddock-limits",
+ "paddock-net",
  "paddock-testkit",
  "paddock-workspace-hack",
  "proptest",
@@ -4404,6 +4440,7 @@ dependencies = [
  "paddock-env",
  "paddock-health",
  "paddock-jobs",
+ "paddock-packs",
  "paddock-testkit",
  "paddock-watch",
  "paddock-workspace-hack",
@@ -4592,6 +4629,7 @@ dependencies = [
  "paddock-download",
  "paddock-env",
  "paddock-jobs",
+ "paddock-runtime",
  "paddock-testkit",
  "paddock-workspace-hack",
  "serde",
@@ -4633,6 +4671,7 @@ dependencies = [
  "paddock-env",
  "paddock-health",
  "paddock-proc",
+ "paddock-service",
  "paddock-settings",
  "paddock-testkit",
  "paddock-workspace-hack",
@@ -4654,6 +4693,7 @@ version = "0.2.0"
 dependencies = [
  "log",
  "paddock-commands",
+ "paddock-env",
  "paddock-health",
  "paddock-limits",
  "paddock-testkit",
@@ -4846,6 +4886,7 @@ dependencies = [
  "paddock-jobs",
  "paddock-limits",
  "paddock-testkit",
+ "paddock-updater",
  "paddock-workspace-hack",
  "semver",
  "serde",
@@ -4881,6 +4922,7 @@ dependencies = [
  "notify",
  "paddock-jobs",
  "paddock-testkit",
+ "paddock-watch",
  "paddock-workspace-hack",
  "tempfile",
 ]
@@ -4905,6 +4947,7 @@ dependencies = [
  "log",
  "paddock-commands",
  "paddock-dialogs",
+ "paddock-env",
  "paddock-jobs",
  "paddock-testkit",
  "paddock-workspace-hack",
@@ -4957,6 +5000,7 @@ dependencies = [
  "futures-core",
  "getrandom 0.3.4",
  "getrandom 0.4.3",
+ "hashbrown 0.17.1",
  "http",
  "httparse",
  "idna",
@@ -8174,6 +8218,17 @@ checksum = "32e45ad4206f6d2479085147f02bc2ef834ac85886624a23575ae137c8aa8156"
 dependencies = [
  "libc",
  "rustix",
+]
+
+[[package]]
+name = "yaml-rust2"
+version = "0.13.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4a8af4469040402b7fe43c26575bab9a3069f0717c4a2931ecf4fb8728ee4cec"
+dependencies = [
+ "arraydeque",
+ "encoding_rs",
+ "hashlink",
 ]
 
 [[package]]

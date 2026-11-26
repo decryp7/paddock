@@ -1309,19 +1309,73 @@ fn two_wrappers_with_different_hashes_on_one_kept_mount_each_cache_their_own_bin
     }
 }
 
+/// One build of a hash per host (user, 2026-11-26): two jobs on one host that need the same new hash built it at once (on 48 h of
+/// runs, 38 such pairs, about 144 runner-min). The second wrapper waits for the first one's build lock, says so, and then runs the binary
+/// the first one published: one build. Control: the first wrapper is held inside `cargo` until the second one is waiting, so a wrapper
+/// without the lock would be inside `cargo` too (two builds) before either can publish.
 #[cfg(unix)]
 #[test]
-fn two_wrappers_with_the_same_hash_on_one_kept_mount_both_succeed_and_leave_one_verified_binary() {
-    let probe = Fixture::new();
-    let tmp = tempfile::tempdir().unwrap();
-    let (a, _) = rustcs(tmp.path());
-    let (hash, _) = probe.both(&[("RUSTC", a.clone())]);
-    let (scratch, outs, _f) = run_overlapping(&[&a, &a], 2, false);
+fn two_wrappers_with_the_same_hash_on_one_kept_mount_build_it_once_and_both_run_it() {
+    let f = Fixture::new();
+    let scratch = tempfile::tempdir().unwrap();
+    let (a, _) = rustcs(scratch.path());
+    let (hash, _) = f.both(&[("RUSTC", a.clone())]);
+    let mount = scratch.path().join("mount");
+    let barrier = scratch.path().join("barrier");
+    std::fs::create_dir_all(&mount).unwrap();
+    std::fs::create_dir_all(&barrier).unwrap();
+    install_cargo(&f.cargo_home.path().join("shims"), true, |c| building(c, barrier_cargo()));
+    let shims_dir = f.cargo_home.path().join("shims").to_path_buf();
+    let said_b = scratch.path().join("b.err");
+    let start = |i: usize, err: Option<&Path>| {
+        let mut cmd = TestCommand::new_in("sh", &scratch.path().join(format!("child-{i}")));
+        match err {
+            Some(e) => cmd.args(["-c", "exec sh \"$0\" hello 2>\"$1\""]).arg(f.root().join("dev")).arg(e),
+            None => cmd.arg(f.root().join("dev")).arg("hello"),
+        };
+        cmd.current_dir(f.root())
+            .path_first(&shims_dir)
+            .env("HOME", scratch.path().join("home"))
+            .env("CARGO_HOME", f.cargo_home.path())
+            .env("RUSTC", &a)
+            .env("GITHUB_ACTIONS", "true")
+            .env("PADDOCK_DEV_PACKAGES", "http://127.0.0.1:9/generic")
+            .env("PADDOCK_DEV_HOME", mount.join("paddock-dev"))
+            .env("PADDOCK_DEV_TARGET_DIR", scratch.path().join(format!("target-{i}")))
+            .env("BARRIER", &barrier);
+        cmd.output_child()
+    };
+    let builds = || {
+        std::fs::read_dir(&barrier)
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().starts_with("built-"))
+            .count()
+    };
+    let first = start(0, None);
+    assert!(
+        paddock_testkit::poll_until_within(std::time::Duration::from_secs(60), || builds() >= 1),
+        "the first build never started"
+    );
+    let second = start(1, Some(&said_b));
+    let waiting = || {
+        std::fs::read_to_string(&said_b)
+            .unwrap_or_default()
+            .contains("waiting for its build")
+    };
+    // The second wrapper either waits for the lock (it says so) or, without one, builds too.
+    let settled = paddock_testkit::poll_until_within(std::time::Duration::from_secs(60), || waiting() || builds() >= 2);
+    std::fs::write(barrier.join("go"), "").unwrap();
+    let outs = [first.wait_with_output().unwrap(), second.wait_with_output().unwrap()];
+    let said = std::fs::read_to_string(&said_b).unwrap_or_default();
+    assert!(settled, "the second wrapper neither waited nor built in 60 s: {said}");
     for o in &outs {
-        assert_eq!(o.status.code(), Some(0), "{}", String::from_utf8_lossy(&o.stderr));
+        assert_eq!(o.status.code(), Some(0), "{}{said}", String::from_utf8_lossy(&o.stderr));
         assert_eq!(String::from_utf8_lossy(&o.stdout).trim(), "built-by-shim");
     }
-    assert_cached(&scratch.path().join("mount"), &hash);
+    assert_eq!(builds(), 1, "one build of the hash on this host; the second wrapper said: {said}");
+    assert!(waiting(), "the second wrapper says it waits for the first one's build: {said}");
+    assert_cached(&mount, &hash);
 }
 
 #[cfg(unix)]
@@ -1888,8 +1942,8 @@ fn other_tools_in_the_cache_are_not_counted_as_the_wrappers_own_and_keep_five_of
     let home = scratch.path().join("home");
     let mine: Vec<String> = (0..3).map(|i| format!("old-{i}")).collect();
     old_entries(&home, &mine, "paddock-dev-test-host");
-    let heavy: Vec<String> = (0..7).map(|i| format!("heavy-{i:040x}")).collect();
-    old_entries(&home, &heavy, "heavy");
+    let heavy: Vec<String> = (0..7).map(|i| format!("throttle-{i:040x}")).collect();
+    old_entries(&home, &heavy, "throttle");
     let rustc = fake_rustc(scratch.path(), "rustc", "1.90.0", "aaaa", "test-host");
     let (hash, _) = f.both(&[("RUSTC", rustc.clone())]);
     // A legacy build folder named like a heavy entry is not the wrapper's to remove for it.
@@ -1949,10 +2003,17 @@ fn the_cached_tool_holds_itself_for_its_run_and_completes_when_its_cache_entry_i
     std::fs::copy(crate::dev_bin::PATH, &cached).unwrap();
     let signal = scratch.path().join("signal.log");
     std::fs::write(&signal, "").unwrap();
+    let repo = scratch.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    let init = TestCommand::new("git").args(["init", "-q"]).current_dir(&repo).output().unwrap();
+    assert!(init.status.success(), "{}", String::from_utf8_lossy(&init.stderr));
     let mut run = TestCommand::new(&cached)
         .args(["wait", "--file"])
         .arg(&signal)
         .args(["--line", "^go$", "--include-past", "--max", "60s", "--interval", "100ms"])
+        // `wait` keeps its one-waiter lock in the git folder of the repository it runs in: run it in a repository of the test's own,
+        // never the checkout (ER-45; the checkout is read-only in the Linux container, where the lock write failed the run).
+        .current_dir(&repo)
         .env("PADDOCK_DEV_HOME", &home)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::piped())
@@ -1965,6 +2026,14 @@ fn the_cached_tool_holds_itself_for_its_run_and_completes_when_its_cache_entry_i
     std::io::BufRead::read_line(&mut err, &mut first).unwrap();
     assert!(first.contains("waiting for a line"), "{first}");
     assert_eq!(held(&home), 1, "the run holds its own binary");
+    let waits = repo.join(".git/paddock/waits");
+    let locks = std::fs::read_dir(&waits).map(|d| d.count()).unwrap_or(0);
+    assert_eq!(
+        locks,
+        1,
+        "the waiter's lock is in the test's own repository ({}), not the checkout's",
+        waits.display()
+    );
     {
         use std::os::unix::fs::MetadataExt;
         assert!(

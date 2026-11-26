@@ -24,6 +24,7 @@
 //!
 //! The pure core is here ([`nextest_failures`], [`classify`], [`SincePlan`]); [`GiteaRuns`] reads a run through the Gitea API.
 
+use crate::job_outcome::JobOutcome;
 use crate::log_text::plain;
 use crate::plan_gitea::{CI_JOBS, workflow_jobs};
 use crate::wait::Http;
@@ -637,8 +638,8 @@ pub struct RunJob {
     pub id: u64,
     /// Its display name.
     pub name: String,
-    /// `success`, `failure`, `cancelled`, `skipped`...
-    pub conclusion: String,
+    /// How it ended (its `conclusion`, or its `status` on a server that puts the conclusion there).
+    pub outcome: JobOutcome,
     /// The names of its failed steps.
     pub failed_steps: Vec<String>,
 }
@@ -653,7 +654,7 @@ impl RunJob {
                     .map(|j| RunJob {
                         id: j["id"].as_u64().unwrap_or(0),
                         name: j["name"].as_str().unwrap_or("").to_string(),
-                        conclusion: j["conclusion"].as_str().or(j["status"].as_str()).unwrap_or("").to_string(),
+                        outcome: JobOutcome::from_api(j["conclusion"].as_str().or(j["status"].as_str()).unwrap_or("")),
                         failed_steps: j["steps"]
                             .as_array()
                             .map(|s| {
@@ -669,9 +670,14 @@ impl RunJob {
             .unwrap_or_default()
     }
 
-    /// Whether the job needs a rerun: anything but a pass or a skip (a failure, a cancel, a job that never finished).
-    pub fn failed(&self) -> bool {
-        !matches!(self.conclusion.as_str(), "success" | "skipped")
+    /// Whether the job reruns on its own: a failure, a cancel, a job that never finished or ended in a word this reader does not
+    /// know. A pass does not; a skipped job does not on its own either: it reruns only after a job it needs
+    /// ([`SincePlan::add_skipped_dependents`]).
+    pub fn reruns(&self) -> bool {
+        match self.outcome {
+            JobOutcome::Failed | JobOutcome::Cancelled | JobOutcome::Unfinished | JobOutcome::Unknown(_) => true,
+            JobOutcome::Passed | JobOutcome::Skipped => false,
+        }
     }
 }
 
@@ -716,11 +722,12 @@ pub fn classify(job: &RunJob, log: Result<&str, &str>, workflow: &str, templates
 
 fn narrow(job: &RunJob, log: Result<&str, &str>, workflow: &str, key: Option<&str>) -> Result<Scope, String> {
     let log = log.map_err(|e| format!("its log could not be read ({e})"))?;
-    if job.conclusion != "failure" {
-        return Err(format!(
-            "it ended {}",
-            if job.conclusion.is_empty() { "unknown" } else { &job.conclusion }
-        ));
+    match &job.outcome {
+        JobOutcome::Failed => {}
+        JobOutcome::Unfinished => return Err("it ended unknown".into()),
+        o @ (JobOutcome::Passed | JobOutcome::Cancelled | JobOutcome::Skipped | JobOutcome::Unknown(_)) => {
+            return Err(format!("it ended {o}"));
+        }
     }
     let key = key.ok_or("its workflow job is unknown")?;
     if job.failed_steps.is_empty()
@@ -874,7 +881,7 @@ impl SincePlan {
         let workflow = workflow_file(path);
         let ci = workflow == "ci.yml";
         let mut reruns = Vec::new();
-        for j in jobs.iter().filter(|j| j.failed()) {
+        for j in jobs.iter().filter(|j| j.reruns()) {
             let text = log(j.id);
             reruns.push(classify(j, text.as_deref().map_err(String::as_str), &workflow, templates));
         }
@@ -930,7 +937,7 @@ impl SincePlan {
         loop {
             let failed: BTreeSet<String> = self.reruns.iter().filter_map(|r| r.key.clone()).collect();
             let mut added = false;
-            for j in jobs.iter().filter(|j| j.conclusion == "skipped") {
+            for j in jobs.iter().filter(|j| j.outcome == JobOutcome::Skipped) {
                 if self.reruns.iter().any(|r| r.id == j.id) {
                     continue;
                 }
@@ -1139,7 +1146,9 @@ impl SincePlan {
         let os_legs = |key: &str| -> String {
             let runs: Vec<&Rerun> = self.reruns.iter().filter(|r| r.key.as_deref() == Some(key)).collect();
             if runs.is_empty() || runs.iter().any(|r| r.leg.os.is_none()) {
-                return String::new(); // not rerun, or a leg that cannot be told: the plan step writes every leg, whole
+                // Not rerun, or a leg that cannot be told: every leg, whole (the one leg set of the planner, ADR 0123 §4).
+                return serde_json::to_string(&crate::plan_ci::workspace_legs(&crate::plan_ci::os_legs(), None, "", None))
+                    .unwrap_or_default();
             }
             let legs: Vec<Value> = runs
                 .iter()
@@ -1158,12 +1167,9 @@ impl SincePlan {
             ("any_app".into(), (!app_legs.is_empty()).to_string()),
             ("rerun_jobs".into(), serde_json::to_string(&keys).unwrap_or_default()),
         ]);
-        // Written only for a job that reruns with known legs; otherwise the plan step writes every OS (ci.yml).
+        // The legs of a job that reruns, or every leg whole: ci.yml has no fallback of its own.
         for (name, key) in [("crate_legs", "crate"), ("paddock_dev_legs", "paddock-dev")] {
-            let legs = os_legs(key);
-            if !legs.is_empty() {
-                out.push((name.into(), legs));
-            }
+            out.push((name.into(), os_legs(key)));
         }
         out
     }
@@ -1272,7 +1278,7 @@ pub fn since_run_with(
     let file = path.split('@').next().unwrap_or("");
     let text = workflow_text(file);
     let templates = text.as_deref().map(name_templates).unwrap_or_default();
-    let failed = jobs.iter().filter(|j| j.failed()).count();
+    let failed = jobs.iter().filter(|j| j.reruns()).count();
     log(&format!("run {id} ({path}): {} jobs, {failed} failed", jobs.len()));
     let started = std::time::Instant::now();
     let plan = SincePlan::new(&run, &jobs, &templates, &mut |job| {
@@ -1722,7 +1728,18 @@ mod tests {
         assert_eq!(out["icons"], "true");
         assert_eq!(out["paddock_dev"], "false");
         assert_eq!(out["rerun_jobs"], r#"["app","conformance","crate","crates","e2e","ui"]"#);
-        assert!(!out.contains_key("paddock_dev_legs"), "not rerun: the plan step writes every leg");
+        let every_os = |legs: &str| -> Vec<String> {
+            serde_json::from_str::<Vec<Value>>(legs)
+                .unwrap()
+                .iter()
+                .map(|l| l["os"].as_str().unwrap().to_string())
+                .collect()
+        };
+        assert_eq!(
+            every_os(&out["paddock_dev_legs"]),
+            crate::plan_ci::OS_LEGS,
+            "not rerun: the plan writes every leg itself, ci.yml has no fallback (ADR 0123 section 4)"
+        );
         let crate_legs: Value = serde_json::from_str(&out["crate_legs"]).unwrap();
         assert_eq!(crate_legs.as_array().unwrap().len(), 2);
         assert_eq!(crate_legs[0]["os"], "macos-latest");
@@ -1833,7 +1850,7 @@ mod tests {
 
     #[test]
     fn the_project_outputs_are_every_project_of_the_job_table() {
-        let out: Vec<String> = plan_of(vec![rerun("c99", Leg::default())])
+        let out: Vec<String> = plan_of(vec![rerun("quick", Leg::default())])
             .ci_outputs(&[], &mut |_| {})
             .into_iter()
             .map(|(k, _)| k)
@@ -1843,13 +1860,18 @@ mod tests {
                 assert!(out.contains(&p.replace('-', "_")), "{p} in {out:?}");
             }
         }
-        let c99: BTreeMap<String, String> = plan_of(vec![rerun("c99", Leg::default())])
+        let c99: BTreeMap<String, String> = plan_of(vec![rerun("quick", Leg::default())])
             .ci_outputs(&[], &mut |_| {})
             .into_iter()
             .collect();
-        assert_eq!(c99["c99"], "true");
-        assert_eq!(c99["rerun_jobs"], r#"["c99"]"#);
-        assert!(!c99.contains_key("crate_legs"), "not rerun: the plan step writes every leg");
+        assert_eq!(c99["c99"], "true", "the quick job's C99 step reruns");
+        assert_eq!(c99["tools"], "true", "and its heavy tool steps");
+        assert_eq!(c99["rerun_jobs"], r#"["quick"]"#);
+        assert_eq!(
+            serde_json::from_str::<Vec<Value>>(&c99["crate_legs"]).unwrap().len(),
+            crate::plan_ci::OS_LEGS.len(),
+            "not rerun: the plan writes every leg itself"
+        );
     }
 
     #[test]
@@ -1893,7 +1915,7 @@ mod tests {
         let failed_plan = vec![RunJob {
             id: 9,
             name: "plan (affected projects)".into(),
-            conclusion: "failure".into(),
+            outcome: JobOutcome::Failed,
             failed_steps: vec!["Affected projects".into()],
         }];
         let plan = SincePlan::new(&run_7821(), &failed_plan, &templates(), &mut |_| Err("gone".into()));
@@ -1944,7 +1966,7 @@ mod tests {
         let mut jobs = debrief_jobs();
         for (id, conclusion, steps) in changes {
             let j = jobs.iter_mut().find(|j| j.id == *id).unwrap();
-            j.conclusion = conclusion.to_string();
+            j.outcome = JobOutcome::from_api(conclusion);
             j.failed_steps = steps.iter().map(|s| s.to_string()).collect();
         }
         jobs
@@ -2069,7 +2091,7 @@ mod tests {
         assert!(
             jobs.iter()
                 .filter(|j| j.name.starts_with("bundle") || j.name.starts_with("real-app"))
-                .all(|j| j.conclusion == "skipped")
+                .all(|j| j.outcome == JobOutcome::Skipped)
         );
         let plan = plan_debrief_with("workflow_dispatch", &jobs, Ok(plan_log("true", Some("true"))));
         assert!(plan.full_ran && plan.needs_full());
@@ -2107,7 +2129,7 @@ mod tests {
         jobs.push(RunJob {
             id: 9,
             name: "a job added later".into(),
-            conclusion: "failure".into(),
+            outcome: JobOutcome::Failed,
             failed_steps: vec!["x".into()],
         });
         assert!(
@@ -2172,7 +2194,7 @@ mod tests {
         let page = |from: usize, to: usize| {
             let list: Vec<Value> = all[from..to]
                 .iter()
-                .map(|j| json!({"id": j.id, "name": j.name, "conclusion": j.conclusion, "steps": []}))
+                .map(|j| json!({"id": j.id, "name": j.name, "conclusion": j.outcome.as_api(), "steps": []}))
                 .collect();
             Ok(json!({"total_count": all.len(), "jobs": list}))
         };

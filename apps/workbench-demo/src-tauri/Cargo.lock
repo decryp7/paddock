@@ -1425,6 +1425,9 @@ name = "hashbrown"
 version = "0.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
+dependencies = [
+ "foldhash",
+]
 
 [[package]]
 name = "heck"
@@ -2729,6 +2732,7 @@ dependencies = [
  "jiff",
  "log",
  "paddock-commands",
+ "paddock-env",
  "paddock-jobs",
  "paddock-limits",
  "paddock-workspace-hack",
@@ -2950,6 +2954,7 @@ version = "0.2.0"
 dependencies = [
  "log",
  "paddock-commands",
+ "paddock-env",
  "paddock-health",
  "paddock-workspace-hack",
  "regex",
@@ -3076,6 +3081,7 @@ dependencies = [
  "log",
  "paddock-commands",
  "paddock-dialogs",
+ "paddock-env",
  "paddock-jobs",
  "paddock-workspace-hack",
  "serde",
@@ -3148,6 +3154,7 @@ dependencies = [
  "futures-core",
  "getrandom 0.3.4",
  "getrandom 0.4.3",
+ "hashbrown 0.17.1",
  "http",
  "httparse",
  "idna",

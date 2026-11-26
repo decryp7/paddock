@@ -35,7 +35,7 @@ origin/docs/rust-tooling-plan 2791c634c
 origin/feat/rt5-check-host ec8530a95
 origin/feat/rt8-ci-flakes 0d40eafed
 origin/docs/rule-48-merge-check 3d45cdb57
-engineering-rules main ca4124bdc
+engineering-playbook main ca4124bdc
 ```
 
 ## Context: the incidents
@@ -120,7 +120,7 @@ JSON come only from 0089's `Verdict` (precedence 7, then failing findings 5, the
 matches `tools/paddock-dev/src/check/record.rs`).
 
 **Other repositories.** `--repo <name>=<path>` (or a `[evidence.repos]` entry in the tool's config) lets the
-engineering-rules line be compared against that checkout's `origin`.
+engineering-playbook line be compared against that checkout's `origin`.
 
 **`--accept`** rewrites the shas to the tips and the `read:` line to today, after `check` has printed the moves in the
 same run. It refuses on a document whose `- Status:` says Accepted: an accepted document's block is history, and its
@@ -155,9 +155,9 @@ match missed the `=` line in the first run of that control.)
 
 ### 4. Reviews start with it
 
-The reviewer brief (Paddock `.claude/agents/reviewer.md`, engineering-rules `agents/reviewer.md`) gets one line: run
+The reviewer brief (Paddock `.claude/agents/reviewer.md`, engineering-playbook `agents/reviewer.md`) gets one line: run
 `./dev evidence check` on the document first; read every failing finding before anything else; a fact the moves
-contradict is a P1. The engineering-rules pre-review checklist (`checklists/pre-review.md`) gets two lines: re-read the
+contradict is a P1. The engineering-playbook pre-review checklist (`checklists/pre-review.md`) gets two lines: re-read the
 heads and run the check right before committing a design document; cite `./dev evidence shipped` for shipped claims.
 
 ### 5. C105 in the RT-5 host: the block is there and well formed

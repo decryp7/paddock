@@ -47,7 +47,7 @@ into each leg (`host_packages`, `host_filter`, `test_packages`, `test_filter`).
 **Member runs test only the reached packages (2026-11-21).** A dispatch with a `base` and no `since_run` (a member or a fix round)
 passes `./dev plan --ci` the event, and the plan narrows nextest to the packages the change reaches: the app legs' `filter`, and
 `crates_filter` and `paddock_dev_filter` for the host legs of `crate` and the tests of `paddock-dev`. The Linux crate tests run
-whole under coverage in `crates`. A push to main, a tag, the nightly, a manual run with no base and an app's own gates are never
+whole (plain nextest in the `crate` job's Linux leg, cacheable by ADR 0116; the nightly, a release's gates and a tag also run them under coverage in `crates`: user decision 2026-11-26, `plan_ci::coverage_run`). A push to main, a tag, the nightly, a manual run with no base and an app's own gates are never
 narrowed: the full run on the final head catches what the narrowed ones missed (ER-8). A project is narrowed only when every reason the plan
 gives for it is a Cargo reach (`cargoOnly` in the plan): a UI, installer, lockfile or script reason runs its tests whole. A half of an app's
 nextest that selects no test is skipped with a notice, never passed.
@@ -108,11 +108,14 @@ The file is read only through `tools/paddock-dev/src/active_apps.rs` (ER-42).
 - `./dev plan --ci --app <app>` (debrief.yml, the release workflows' plan action) answers `false` for an inactive app, writes
   `inactive=true` and says "Inactive" in the job summary; a release workflow's verdict reports it as a notice, not as a red run.
 - **The nightly ignores the set** (a `schedule` event, or the `os_full` input of the nightly's manual run): every app, the full check.
+- **An app's own schedule follows the set** (user, 2026-11-25): debrief.yml's scheduled run, and those of debrief-bench, debrief-fuzz, debrief-corpus and debrief-mutants, pass `app: debrief` to the schedule-skip
+  action (`./dev ci schedule-skip --app debrief`), which ends it with a notice while Debrief is inactive. Making the app active again
+  turns its schedule back on with no edit of the workflow.
 - An app's own gates (`PLAN_APP`, a release workflow's tag gates) and an app's own workflow on a tag of the app run that app whatever
   the set says.
 - **The push gate and the member gate** (`./dev check --pre-push`, and `./dev merge check --gates`, which runs it with
   `--member-gate`) read the same set through the same accessor. An inactive app's own build checks are not run: format, Clippy,
-  the Windows (xwin) and Linux Clippy of its workspaces, and Pitwall's script tests and `cargo deny`. Each such row is
+  the Windows (xwin) and Linux Clippy of its workspaces, the member gate's host and Linux tests (`tests`, `tests-linux`), and Pitwall's script tests and `cargo deny`. Each such row is
   printed as `inactive      <row>  inactive (docs/ci-active-apps.toml): <app> is not an active app ...`, counted apart in the
   summary (`N inactive (not checked ...)`, `"inactive"` in the JSON), and never counted as passed. The foundation's rows (crates,
   tools/paddock-dev and the other tools, conformance and its tests, the member audits, the gates register, commit-lint) always
@@ -156,7 +159,7 @@ apart, both answered by `./dev audit` (`tools/paddock-dev/src/audit`; `cargo den
   exception with a reason and a review date (`deny.toml` `ignore` for cargo; `scripts/npm-audit-allow.json` for npm, the family's list that
   `scripts/npm-audit.mjs` also reads, which `./dev audit` reads in the same format: an approved entry warns, one on its review day counts as a finding
   again), which needs the user's approval (ER-46), or a fix. The failed job is the nightly's failure path.
-- **Does this change add one?** The `audit` job of ci.yml runs `./dev audit compare --base <merge base ref>` on every change. It audits the
+- **Does this change add one?** The audit step of ci.yml's `quick` job runs `./dev audit compare --base <merge base ref>` on every change. It audits the
   merge base's lockfiles with the same tools, only when the change has a finding. An advisory main has too is a `::warning::` ("already
   present on main, decided there"); only an advisory the change introduces fails. No list of accepted findings is kept, so none can grow
   silently (ER-46).

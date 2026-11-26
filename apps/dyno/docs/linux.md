@@ -47,12 +47,11 @@ dyno-agent once | head -30                          # one measurement as JSON
 dyno-agent bench 25 processes                       # Dyno's own CPU (share of ONE core) and memory
 ```
 
-### Verifying the Linux adapters on any machine
+### Verifying the Linux adapters
 
-`scripts/linux-verify.sh` builds and tests `dyno-platform` in a native Linux container (OrbStack or Docker) against a real
-`/proc` and `/sys`: tests and `clippy -D warnings` as root, then the tests again as uid 1000 (which exercises the "other users'
-processes are out of sight" paths), then the portable parsers natively on the host. `scripts/linux-container.sh <command>` runs
-any command in the same container; `--clean-volumes` deletes its two named volumes. CI runs the same tests on `ubuntu-latest`.
+CI's Linux job (`ubuntu-latest`, on the Linux runner) builds and tests `dyno-platform` against a real `/proc` and `/sys`, with
+`clippy -D warnings`. *Note 2026-11-26:* the local container scripts (`scripts/linux-verify.sh`, `scripts/linux-container.sh`: root, then uid 1000,
+in OrbStack or Docker) are removed; no container or VM runs on this Mac (user decision, docs/rules.md rule 101). Push the branch and read CI's Linux job.
 
 ## What Dyno can see and do
 
@@ -113,9 +112,11 @@ agent side was run at nice 10 to show the unit does not inherit it):
 | Restart cleanup | A recorded leftover unit was stopped; a unit with the same prefix and a foreign InvocationID stayed running; the records were forgotten |
 
 These are `crates/dyno-agent/tests/bench_units.rs` (a scripted runner, no benchmark work). They are `#[ignore]`d in a plain
-`cargo test` and FAIL without a user manager (never a silent pass). Run them with `scripts/linux-units-check.sh` (a release
-checklist step, `docs/releasing.md`), which is `cargo test -p dyno-agent --test bench_units -- --ignored --test-threads=1` on
-`paddock-gate-arm`. On a headless machine start the manager first
+`cargo test` and FAIL without a user manager (never a silent pass). Run them with the `linux-units` job of `dyno-release.yml`
+(`./dev ci dyno-linux-units`, a release checklist step, `docs/releasing.md`), which is
+`cargo test -p dyno-agent --test bench_units -- --ignored --test-threads=1` on the Linux runner. *Note 2026-11-26:* it used to run on an OrbStack
+machine (`scripts/linux-units-check.sh`, deleted); no VM or container runs on the Mac now. Where the job's container has no user manager the step
+ends "not measured" (exit 6), never a pass. On a headless machine start the manager first
 (`sudo loginctl enable-linger $USER`, then `XDG_RUNTIME_DIR=/run/user/$(id -u)`). Unit tests of the pure parts (command
 lines, parsers, cleanup decisions) are in `dyno_core::bench::unit`, and the agent's logic runs against a scripted child.
 `LINUX_UNITS_VERIFIED` in `bench.rs` switches the unit mode off in one place if it ever has to be.

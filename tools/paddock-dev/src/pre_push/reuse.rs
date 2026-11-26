@@ -7,13 +7,26 @@
 //! - the row: its id, folder, program (by file name; this binary as `<dev>`, since it runs through a held link whose name carries the
 //!   run's pid), its arguments with the checkout's path as `<root>` and the build folder left out (a throw-away worktree and the
 //!   working tree agree), and its own variables;
-//! - the tool version: the hash of this `dev` binary's bytes, and the versions of the programs the row starts (`cargo --version`,
-//!   `rustc -vV`, `cargo xwin --version`, `docker --version`, `node --version`);
+//! - the tool version: the versions of the programs the row starts (`cargo --version`, `rustc -vV`, `cargo nextest --version`,
+//!   `cargo xwin --version`, `node --version`), and for a row this `dev` binary computes itself (it is the row's
+//!   program: the gates register, the Rust conformance runs) the hash of its bytes. A Cargo or container row is not keyed on `dev`
+//!   (user, 2026-11-25): it builds the command line, which is in the key, and the row's result comes from cargo, nextest or clippy.
+//!   When this binary cannot be read at all, no row is reused;
 //! - the inputs, as git object ids at HEAD: a Cargo row's workspace folder, the folders of every path dependency the planner's Cargo
 //!   graph names (followed transitively), each of those workspaces' manifest, lockfile and settings, the toolchain pin and the lint
 //!   settings, plus the hashed build variables ([`crate::input_hash::is_hashed_var`]); a repository-wide row (conformance and the
-//!   other rows of [`class_of`]) keys on the whole tree, the base it compares with (`PADDOCK_BASE_REF` or `origin/main`, resolved), the
-//!   CI markers it reads and the day (waivers expire by date).
+//!   other rows of [`class_of`]) keys on the whole tree, the base it compares with (`PADDOCK_BASE_REF` or `origin/main`: its TIP for a row
+//!   that reads the base's files, [`BASE_READING_ROWS`], and `merge-base(HEAD, base)` for a row that reads only the tree,
+//!   [`TREE_ONLY_ROWS`]), the CI markers it reads and the day (waivers expire by date);
+//! - the member gate's tests (`tests <ws>`): a Cargo row's inputs plus what the tests read outside them ([`TEST_READS`]); a workspace
+//!   whose tests read the whole repository ([`TESTS_READ_REPO`]) keys on the whole tree.
+//!
+//! **A train** (user, 2026-11-25): the integrator's member gate on a train head (`./dev merge check --gates`) reuses each member's own
+//! green rows, stored when the member's author ran the same gate on the member branch. A row hits when the train's inputs of that row
+//! are the ones the member passed: a workspace (and its path dependencies) that only one member touched. It runs again when its
+//! inputs differ from every member's: a workspace two members touched, a conflict resolution or a train fix commit in it, a change to
+//! what its tests read, another tool version, or a member whose own row did not pass (only passes are stored). Repository-wide rows
+//! key on the whole tree, so they always run on the combined tree (ER-8). CI's full run still covers the whole train.
 //!
 //! **What is stored**: only a green result that ran: a `Clean` row this run measured (never a reused row, a failure, "not measured",
 //! a broken check, an excused row or a skipped one, inactive rows included: ADR 0089). Rows that are never [`Planned::Run`] (skipped,
@@ -26,8 +39,10 @@
 //! runs, with the cause printed). Probes never change what they check (ER-45: `RUSTUP_AUTO_INSTALL=0`).
 //!
 //! **Storage**: `<git common dir>/paddock-pre-push/reuse/<key>.json`, beside the gate's step history (`step-history.jsonl`) and
-//! pass records, so every worktree of the repository sees it. One small file per record, written by temp file and rename, evicted
-//! after every run by age ([`MAX_AGE`]) and count ([`KEEP`]).
+//! pass records, so every worktree of the repository sees it: a member's worktree writes, the train's worktree reads. A shared cache
+//! (ER-51): its owner is this module (no other code writes or removes there), its size is bounded by [`KEEP`] records of under 1 KB
+//! each, and it is evicted after every run by age ([`MAX_AGE`]) and count ([`KEEP`]). One small file per record, written by temp file
+//! and rename.
 //!
 //! **Switch**: `--no-reuse`, or `PADDOCK_NO_REUSE=1` (which also reaches the member gate's child through the environment).
 
@@ -85,28 +100,68 @@ const CARGO_PER_WORKSPACE: &[&str] = &[
     ".clippy.toml",
 ];
 
+/// What the member gate's tests read outside their Cargo inputs, found by reading the tests (2026-11-25): crates' and Dyno's tests
+/// compare against the shared UI package's generated files, tokens and format cases (`ui/projects/paddock-ui/...`), and Dyno's and
+/// Pitwall's tests read their release workflows (`.gitea/workflows/<app>-release.yml`). A tests row also keys on these, so another
+/// member's change there runs it again.
+pub const TEST_READS: &[&str] = &["ui/projects/paddock-ui", ".gitea"];
+
+/// Workspaces whose tests read the whole repository (the developer tool's contracts, goldens and workflow tests): their tests rows
+/// key on the whole tree, so on a train they always run.
+pub const TESTS_READ_REPO: &[&str] = &["tools/paddock-dev"];
+
 /// The variables a repository-wide row reads besides the tree (conformance's base ref and its CI markers).
 const WHOLE_VARS: &[&str] = &["PADDOCK_BASE_REF", "CI", "GITEA_ACTIONS", "GITHUB_ACTIONS"];
 
 /// What a row reads, as far as reuse knows it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Class {
-    /// A Cargo row of these workspaces (the Linux Clippy lints several in one container run).
+    /// A Cargo row of these workspaces .
     Cargo(Vec<String>),
-    /// A repository-wide row: the whole tree and the base.
+    /// A tests row of these workspaces: their Cargo inputs plus what the tests read outside them ([`TEST_READS`]).
+    Tests(Vec<String>),
+    /// A repository-wide row that READS THE BASE's files (shrink-only lists, allow-list growth, anything compared with the base tree):
+    /// the whole tree, the base's TIP and the day. A landing or fetch that moves the base runs it again, which is right: its answer
+    /// can change with the base's files.
     Whole,
+    /// A repository-wide row that reads nothing of the base: the whole tree, `merge-base(HEAD, base)` and the day, so a landing that
+    /// moves the base's tip but not the merge base keeps its pass (user, 2026-11-26: split by need).
+    WholeTree,
 }
 
-/// The class of a row, or `None` when its result is never reused: the commit lint (it reads commits), the audits and the locks
+/// The repository-wide rows that read the base's files: conformance (baselines and allow lists grow against the base), the gate
+/// register (its date history and ratchets compare with the base), the member audits (their live allow-list and baseline checks) and
+/// the developer tool's own tests (they include those live checks). Their reuse key holds the base's tip. THE place that says a row
+/// reads the base: a row not listed here and listed in [`TREE_ONLY_ROWS`] does not.
+pub const BASE_READING_ROWS: &[&str] = &["conformance", "gates-register", "member-audits"];
+
+/// The repository-wide rows that read only the tree: the conformance tests (they build their own fixtures) and Pitwall's script tests.
+/// Their reuse key holds the merge base, not the base's tip.
+pub const TREE_ONLY_ROWS: &[&str] = &["conformance-tests", "pitwall-scripts"];
+
+/// The class of a row, or `None` when its result is never reused: the commit lint (it reads commits), the locks
 /// guard (history and the base's lockfiles), the deny row (the advisory database moves without the tree), the wire fixtures (the row
 /// writes files) and any row this module does not know.
 pub fn class_of(g: &Gate) -> Option<Class> {
     let first = g.id.split([' ', ',']).next().unwrap_or("");
     match first {
         "lockfile" | "fmt" | "clippy" | "clippy-windows" if !g.cwd.is_empty() => Some(Class::Cargo(vec![g.cwd.clone()])),
-        "clippy-linux" if !g.workspaces.is_empty() => Some(Class::Cargo(g.workspaces.clone())),
-        "conformance" | "conformance-tests" | "gates-register" | "pitwall-scripts" => Some(Class::Whole),
+        // `member-audits` reads about 14k to 36k files across the whole tree (the ADR 0116 trace, amendment 2026-11-26: a declared input
+        // set gains nothing), so it keys like the other repository-wide rows. Whether the base's tip or the merge base is in the key is
+        // declared once, in [`BASE_READING_ROWS`] and [`TREE_ONLY_ROWS`].
+        f if BASE_READING_ROWS.contains(&f) => Some(Class::Whole),
+        f if TREE_ONLY_ROWS.contains(&f) => Some(Class::WholeTree),
+        "tests" if !g.cwd.is_empty() => Some(tests_class(vec![g.cwd.clone()])),
         _ => None,
+    }
+}
+
+/// The class of a tests row of `ws`: the whole tree when one of them reads the whole repository ([`TESTS_READ_REPO`]).
+fn tests_class(ws: Vec<String>) -> Class {
+    if ws.iter().any(|w| TESTS_READ_REPO.contains(&w.as_str())) {
+        Class::Whole
+    } else {
+        Class::Tests(ws)
     }
 }
 
@@ -122,9 +177,11 @@ pub fn probes_of(g: &Gate) -> Vec<Vec<String>> {
             if g.args.first().is_some_and(|x| x == "xwin") {
                 v.push(a(&["cargo", "xwin", "--version"]));
             }
+            if g.args.first().is_some_and(|x| x == "nextest") {
+                v.push(a(&["cargo", "nextest", "--version"]));
+            }
             v
         }
-        "bash" => vec![a(&["docker", "--version"])],
         "node" => vec![a(&["node", "--version"])],
         _ => Vec::new(),
     }
@@ -309,6 +366,7 @@ pub struct Reuse {
     whole_vars: Vec<String>,
     probes: Mutex<HashMap<String, Result<String, String>>>,
     whole: OnceLock<Result<Vec<String>, String>>,
+    whole_tree: OnceLock<Result<Vec<String>, String>>,
 }
 
 impl Reuse {
@@ -355,6 +413,7 @@ impl Reuse {
             whole_vars,
             probes: Default::default(),
             whole: OnceLock::new(),
+            whole_tree: OnceLock::new(),
         })
     }
 
@@ -387,26 +446,37 @@ impl Reuse {
     }
 
     /// The key lines of a repository-wide row: the tree (clean only), the base it compares with, the CI markers and the day.
-    fn whole_lines(&self) -> Result<Vec<String>, String> {
-        self.whole
-            .get_or_init(|| {
-                let dirty = git_text(&self.root, &["status", "--porcelain", "--untracked-files=all"]).ok_or("git status failed")?;
-                if !dirty.trim().is_empty() {
-                    return Err("the tree has uncommitted changes".to_string());
-                }
-                let tree = git_text(&self.root, &["rev-parse", "HEAD^{tree}"]).ok_or("git rev-parse HEAD^{tree} failed")?;
-                let base_ref = &self.base_ref;
-                let base = git_text(&self.root, &["rev-parse", "--verify", "--quiet", &format!("{base_ref}^{{commit}}")])
-                    .map_or_else(|| "absent".to_string(), |t| t.trim().to_string());
-                let mut lines = vec![
-                    format!("tree {}", tree.trim()),
-                    format!("base {base_ref} {base}"),
-                    format!("day {}", paddock_cli::UnixSeconds::now().0 / 86_400),
-                ];
-                lines.extend(self.whole_vars.iter().cloned());
-                Ok(lines)
-            })
-            .clone()
+    fn whole_lines(&self, merge_base: bool) -> Result<Vec<String>, String> {
+        let cell = if merge_base { &self.whole_tree } else { &self.whole };
+        cell.get_or_init(|| {
+            let dirty = git_text(&self.root, &["status", "--porcelain", "--untracked-files=all"]).ok_or("git status failed")?;
+            if !dirty.trim().is_empty() {
+                return Err("the tree has uncommitted changes".to_string());
+            }
+            let tree = git_text(&self.root, &["rev-parse", "HEAD^{tree}"]).ok_or("git rev-parse HEAD^{tree} failed")?;
+            let base_ref = &self.base_ref;
+            // A row that reads the base's files keys on the base's tip; one that does not, on the merge base only.
+            let (label, base) = if merge_base {
+                (
+                    "merge-base",
+                    git_text(&self.root, &["merge-base", "HEAD", base_ref]).map_or_else(|| "absent".to_string(), |t| t.trim().to_string()),
+                )
+            } else {
+                (
+                    "base",
+                    git_text(&self.root, &["rev-parse", "--verify", "--quiet", &format!("{base_ref}^{{commit}}")])
+                        .map_or_else(|| "absent".to_string(), |t| t.trim().to_string()),
+                )
+            };
+            let mut lines = vec![
+                format!("tree {}", tree.trim()),
+                format!("{label} {base_ref} {base}"),
+                format!("day {}", paddock_cli::UnixSeconds::now().0 / 86_400),
+            ];
+            lines.extend(self.whole_vars.iter().cloned());
+            Ok(lines)
+        })
+        .clone()
     }
 
     /// `path id` lines of `paths` at HEAD, sorted (a folder as its tree id); a path git does not track is `absent`. `Err` when a path
@@ -459,22 +529,28 @@ impl Reuse {
             .collect();
         own.sort();
         f.extend(own);
-        f.push(format!("tool dev {}", dev.hash));
+        // The `dev` binary is a tool version only of the rows it computes itself; a row it merely starts (cargo, the container,
+        // node) is keyed on that program's sources and versions (user, 2026-11-25: a train whose members change `tools/paddock-dev`
+        // would otherwise rerun every row).
+        if program == "<dev>" {
+            f.push(format!("tool dev {}", dev.hash));
+        }
         for p in probes_of(g) {
             f.push(format!("tool {} = {}", p.join(" "), self.probe(&p)?));
         }
+        let is_tests = matches!(class, Class::Tests(_));
         let lines = match class {
-            Class::Cargo(ws) => {
+            Class::Cargo(ws) | Class::Tests(ws) => {
                 let mut paths = cargo_inputs(&self.cargo, &ws)?;
-                if g.id.starts_with("clippy-linux") {
-                    // The container script and the image it runs in are read by this row alone.
-                    paths.extend(["tools/linux-container.sh".to_string(), "ci-image".to_string()]);
+                if is_tests {
+                    paths.extend(TEST_READS.iter().map(|p| p.to_string()));
                 }
                 let mut l = self.hash_paths(&paths)?;
                 l.extend(self.build_vars.iter().cloned());
                 l
             }
-            Class::Whole => self.whole_lines()?,
+            Class::Whole => self.whole_lines(false)?,
+            Class::WholeTree => self.whole_lines(true)?,
         };
         f.extend(lines.iter().map(|l| format!("input {l}")));
         Ok(Prepared {

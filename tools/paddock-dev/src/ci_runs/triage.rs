@@ -17,6 +17,10 @@
 //! 4. **UNKNOWN**: nothing proves either way (no baseline run, the job did not run or its log cannot be read, a log the reader
 //!    cannot account for). Never "new" and never "old" (ER-33).
 //!
+//! A job the last main run did not run (skipped, as a nightly whose gate found main unchanged skips every job, cancelled before
+//! it ran, or absent) is compared with the newest older main run of the workflow that ran it; when none did, the answer is
+//! UNKNOWN with that reason, never NEW (run 9021 against nightly 8284). A run named with `--against` is never replaced.
+//!
 //! The flake history reads one app at a time, so the history covers the app of the run's workflow and of its `app <name>` jobs. Failures
 //! of shared jobs (`crate`, `paddock-dev`) have no flake history; the report says so.
 //!
@@ -25,6 +29,7 @@
 use super::client::{Client, RunInfo, TimedJob};
 use super::flakes::{self, Kind};
 use super::logfind;
+use crate::job_outcome::JobOutcome;
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -76,6 +81,8 @@ pub struct Baseline {
     pub main: bool,
     /// Its jobs by display name, those the triaged run failed in.
     pub jobs: BTreeMap<String, JobState>,
+    /// The jobs this run did not run that were compared with an older main run instead: the job, why, and that run's id and commit.
+    pub older: Older,
 }
 
 /// The answer for one failed test.
@@ -190,6 +197,8 @@ pub struct Report {
     pub head: String,
     /// The comparison run, when one was found.
     pub baseline: Option<(u64, String, bool)>,
+    /// Jobs the comparison run did not run, compared with an older main run: job, why, that run's id and commit.
+    pub older: Older,
     /// Failed jobs that never ran a step (cancelled while queued) or call a reusable workflow: nothing to read.
     pub skipped_jobs: usize,
     /// One row per failed test (or per failed job with no named test).
@@ -279,6 +288,12 @@ impl Report {
             Some((id, head, false)) => out.push_str(&format!("compared with run {id} ({})\n", &head[..head.len().min(9)])),
             None => out.push_str("no run to compare with was found\n"),
         }
+        for (job, (why, id, head)) in &self.older {
+            out.push_str(&format!(
+                "job \"{job}\": {why}; compared with run {id} ({})\n",
+                &head[..head.len().min(9)]
+            ));
+        }
         let words: Vec<String> = self.rows.iter().map(|r| r.status.word(main, brun)).collect();
         let w = words.iter().map(String::len).max().unwrap_or(6).max(6);
         let jw = self.rows.iter().map(|r| r.job.chars().count()).max().unwrap_or(3).clamp(3, 40);
@@ -323,6 +338,7 @@ impl Report {
             "path": self.path,
             "head": self.head,
             "baseline": self.baseline.as_ref().map(|(id, head, main)| json!({"run": id, "head": head, "main": main})),
+            "older_baselines": self.older.iter().map(|(job, (why, id, head))| json!({"job": job, "why": why, "run": id, "head": head})).collect::<Vec<_>>(),
             "counts": {
                 "new": self.count("new"),
                 "already_failing": self.count("already-failing"),
@@ -339,6 +355,7 @@ impl Report {
                     "test": match &r.test { Test::Named(n) => json!(n), _ => Value::Null },
                     "whole_job": r.test == Test::WholeJob,
                     "status": r.status.kind(),
+                    "baseline_run": self.older.get(&r.job).map(|o| o.1).or(self.baseline.as_ref().map(|b| b.0)),
                 });
                 if let Status::Flaky { count, runs, also_on_baseline } = &r.status {
                     v["flaky"] = json!({"count": count, "runs": runs, "also_on_baseline": also_on_baseline});
@@ -407,52 +424,141 @@ fn read_job_ends(client: &mut Client, job: &TimedJob) -> Result<(BTreeSet<String
     }
 }
 
-/// The last finished run of `workflow` on main, other than `not`.
-fn last_main_run(client: &mut Client, workflow: &str, not: u64) -> Result<Option<RunInfo>, String> {
-    for page in 1..=BASELINE_PAGES {
-        let runs = client.runs_page(page)?.runs;
-        if runs.is_empty() {
-            break;
-        }
-        if let Some(r) = runs.into_iter().find(|r| {
-            r.id != not
-                && r.workflow() == workflow
-                && r.git_ref() == "refs/heads/main"
-                && matches!(r.conclusion.as_str(), "success" | "failure")
-        }) {
-            return Ok(Some(r));
-        }
-    }
-    Ok(None)
+/// The finished runs of a workflow on main other than the triaged one, newest first, read a page of the run list at a time as they
+/// are needed (at most [`BASELINE_PAGES`] pages).
+struct MainRuns<'a> {
+    workflow: &'a str,
+    not: u64,
+    pages: u32,
+    exhausted: bool,
+    runs: Vec<RunInfo>,
 }
 
+impl<'a> MainRuns<'a> {
+    fn new(workflow: &'a str, not: u64) -> Self {
+        MainRuns {
+            workflow,
+            not,
+            pages: 0,
+            exhausted: false,
+            runs: Vec::new(),
+        }
+    }
+
+    /// The `i`th newest such run, if the pages read hold one.
+    fn get(&mut self, client: &mut Client, i: usize) -> Result<Option<RunInfo>, String> {
+        while self.runs.len() <= i && !self.exhausted {
+            if self.pages >= BASELINE_PAGES {
+                self.exhausted = true;
+                break;
+            }
+            self.pages += 1;
+            let runs = client.runs_page(self.pages)?.runs;
+            if runs.is_empty() {
+                self.exhausted = true;
+            }
+            self.runs.extend(runs.into_iter().filter(|r| {
+                r.id != self.not
+                    && r.workflow() == self.workflow
+                    && r.git_ref() == "refs/heads/main"
+                    && matches!(r.conclusion.as_str(), "success" | "failure")
+            }));
+        }
+        Ok(self.runs.get(i).cloned())
+    }
+}
+
+/// Jobs compared with an older main run: job, why the first run has no result, that run's id and commit.
+pub type Older = BTreeMap<String, (String, u64, String)>;
+
+/// What a run did with one job: a result to compare with, or why it has none because it did not run the job.
+enum InRun {
+    Result(JobState),
+    NotRun(String),
+}
+
+fn job_in(client: &mut Client, run: &RunInfo, jobs: &[TimedJob], name: &str, log: &mut dyn FnMut(&str)) -> InRun {
+    let Some(j) = jobs.iter().find(|j| j.name == name) else {
+        return InRun::NotRun(format!("run {} has no job of that name", run.id));
+    };
+    match &j.outcome {
+        JobOutcome::Skipped => return InRun::NotRun(format!("run {} skipped it", run.id)),
+        JobOutcome::Passed => return InRun::Result(JobState::Passed),
+        JobOutcome::Failed | JobOutcome::Cancelled | JobOutcome::Unfinished | JobOutcome::Unknown(_) => {}
+    }
+    if j.is_caller() {
+        InRun::Result(JobState::NoResult(format!(
+            "run {}: \"{name}\" only calls a reusable workflow",
+            run.id
+        )))
+    } else if j.never_ran() || j.outcome == JobOutcome::Cancelled {
+        InRun::NotRun(format!("run {} ended it {} before it ran", run.id, j.outcome))
+    } else {
+        log(&format!("baseline run {} job {}: reading the log", run.id, j.id));
+        InRun::Result(JobState::Failed(read_job(client, j)))
+    }
+}
+
+/// The baseline's state of each failed job. A job `run` did not run is looked up in the older main runs of `older` (none when
+/// the run was named with `--against`): the newest one that ran it answers, and `older` records which one.
 fn baseline_jobs(
     client: &mut Client,
     run: &RunInfo,
+    mut older: Option<&mut MainRuns<'_>>,
     failed: &BTreeSet<String>,
     log: &mut dyn FnMut(&str),
-) -> Result<BTreeMap<String, JobState>, String> {
+) -> Result<(BTreeMap<String, JobState>, Older), String> {
     let jobs = client
         .timed_jobs(run.id)?
         .ok_or_else(|| format!("the server has no job list for run {}", run.id))?;
+    let mut listed: BTreeMap<u64, Vec<TimedJob>> = BTreeMap::new();
     let mut out = BTreeMap::new();
+    let mut from_older = BTreeMap::new();
     for name in failed {
-        let job = jobs.iter().find(|j| &j.name == name);
-        let state = match job {
-            None => JobState::NoResult(format!("run {} has no job named \"{name}\"", run.id)),
-            Some(j) if !j.failed() => JobState::Passed,
-            Some(j) if j.is_caller() => JobState::NoResult(format!("run {}: \"{name}\" only calls a reusable workflow", run.id)),
-            Some(j) if j.never_ran() || j.conclusion == "cancelled" => {
-                JobState::NoResult(format!("run {}: job \"{name}\" ended {} without running", run.id, j.conclusion))
+        let why = match job_in(client, run, &jobs, name, log) {
+            InRun::Result(state) => {
+                out.insert(name.clone(), state);
+                continue;
             }
-            Some(j) => {
-                log(&format!("baseline run {} job {}: reading the log", run.id, j.id));
-                JobState::Failed(read_job(client, j))
-            }
+            InRun::NotRun(why) => why,
         };
-        out.insert(name.clone(), state);
+        let Some(runs) = older.as_deref_mut() else {
+            out.insert(
+                name.clone(),
+                JobState::NoResult(format!(
+                    "job \"{name}\": {why}; --against names that run, so no other run is compared"
+                )),
+            );
+            continue;
+        };
+        let mut state = None;
+        // Index 0 is `run` itself, the newest main run.
+        let mut i = 1;
+        while let Some(r) = runs.get(client, i)? {
+            i += 1;
+            if let std::collections::btree_map::Entry::Vacant(e) = listed.entry(r.id) {
+                log(&format!("job \"{name}\": {why}; reading the jobs of main run {}", r.id));
+                let Some(js) = client.timed_jobs(r.id)? else { continue };
+                e.insert(js);
+            }
+            if let InRun::Result(s) = job_in(client, &r, &listed[&r.id], name, log) {
+                from_older.insert(name.clone(), (why.clone(), r.id, r.head_sha.clone()));
+                state = Some(s);
+                break;
+            }
+        }
+        out.insert(
+            name.clone(),
+            state.unwrap_or_else(|| {
+                JobState::NoResult(format!(
+                    "job \"{name}\": {why}; no older finished run of {} on main in the newest {} runs ran it",
+                    runs.workflow,
+                    BASELINE_PAGES * 50
+                ))
+            }),
+        );
     }
-    Ok(out)
+    Ok((out, from_older))
 }
 
 /// The workflow's own app (`debrief.yml`, `dyno-release.yml`), none for the shared workflows.
@@ -515,7 +621,13 @@ pub fn collect(client: &mut Client, req: &Request, log: &mut dyn FnMut(&str)) ->
         .ok_or_else(|| format!("the server has no job list for run {}", run.id))?;
     let mut skipped_jobs = 0;
     let mut failed: Vec<FailedJob<'_>> = Vec::new();
-    for j in jobs.iter().filter(|j| j.failed()) {
+    // The jobs to triage: failures, cancels, jobs that never finished or ended in an unknown word. A pass and a skip have
+    // nothing to triage.
+    let to_triage = |o: &JobOutcome| match o {
+        JobOutcome::Failed | JobOutcome::Cancelled | JobOutcome::Unfinished | JobOutcome::Unknown(_) => true,
+        JobOutcome::Passed | JobOutcome::Skipped => false,
+    };
+    for j in jobs.iter().filter(|j| to_triage(&j.outcome)) {
         if j.is_caller() || j.never_ran() {
             skipped_jobs += 1;
             continue;
@@ -530,6 +642,7 @@ pub fn collect(client: &mut Client, req: &Request, log: &mut dyn FnMut(&str)) ->
     let failed_names: BTreeSet<String> = failed.iter().map(|(j, _, _)| j.name.clone()).collect();
     let mut gaps = Vec::new();
     // The baseline.
+    let mut main_runs = MainRuns::new(run.workflow(), run.id);
     let base_run = match req.against {
         Some(id) => Some(
             client
@@ -540,7 +653,7 @@ pub fn collect(client: &mut Client, req: &Request, log: &mut dyn FnMut(&str)) ->
                 })
                 .ok_or_else(|| format!("--against {id}: no such run"))?,
         ),
-        None => last_main_run(client, run.workflow(), run.id)?.map(|r| (r, true)),
+        None => main_runs.get(client, 0)?.map(|r| (r, true)),
     };
     let baseline = match base_run {
         None => {
@@ -552,12 +665,14 @@ pub fn collect(client: &mut Client, req: &Request, log: &mut dyn FnMut(&str)) ->
             None
         }
         Some((b, main)) => {
-            let jobs = baseline_jobs(client, &b, &failed_names, log)?;
+            let older = req.against.is_none().then_some(&mut main_runs);
+            let (jobs, older) = baseline_jobs(client, &b, older, &failed_names, log)?;
             Some(Baseline {
                 run: b.id,
                 head: b.head_sha.clone(),
                 main,
                 jobs,
+                older,
             })
         }
     };
@@ -618,6 +733,7 @@ pub fn collect(client: &mut Client, req: &Request, log: &mut dyn FnMut(&str)) ->
         run: run.id,
         path: run.path.clone(),
         head: run.head_sha.clone(),
+        older: baseline.as_ref().map(|b| b.older.clone()).unwrap_or_default(),
         baseline: baseline.map(|b| (b.run, b.head, b.main)),
         skipped_jobs,
         rows,
@@ -648,7 +764,10 @@ mod tests {
     }
 
     fn triage(run: u64, against: Option<u64>) -> Report {
-        let mut f = fake();
+        triage_with(fake(), run, against)
+    }
+
+    fn triage_with(mut f: Fake, run: u64, against: Option<u64>) -> Report {
         let mut c = Client::new(&mut f, "https://gitea.invalid", "example/paddock", "t");
         c.backoff_ms = 0;
         let req = Request {
@@ -676,6 +795,7 @@ mod tests {
             head: "abc".into(),
             main: true,
             jobs: jobs.iter().map(|(n, s)| (n.to_string(), s.clone())).collect(),
+            older: BTreeMap::new(),
         }
     }
 
@@ -1092,6 +1212,81 @@ mod tests {
         assert!(r.gaps.iter().any(|g| g.contains("flake history of debrief")), "{:?}", r.gaps);
         assert!(!r.complete());
         assert_eq!(r.rows.len(), 3);
+    }
+
+    // Nightly 9021 against main (recorded: runs 9021, 8658, 8331, 8284 and 8226 of nightly.yml). The last finished main nightly,
+    // 8284, skipped every job (its gate found main unchanged), and 8658 and 8331 were cancelled; 8226 ran the jobs.
+
+    const DIALOG: &str = "dialog commands (declared but never sent)";
+
+    fn skipped() -> Fake {
+        Fake::from_dir(
+            &Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/ci-triage-skipped"),
+            "example/paddock",
+        )
+    }
+
+    #[test]
+    fn a_job_the_last_main_run_skipped_is_compared_with_the_newest_main_run_that_ran_it() {
+        // `ci triage 9021` called the dialog-commands failure NEW because 8284 skipped the job; nightly 8226 had the same failure.
+        let r = triage_with(skipped(), 9021, None);
+        assert_eq!(r.baseline.as_ref().map(|b| (b.0, b.2)), Some((8284, true)));
+        let d = r
+            .rows
+            .iter()
+            .find(|x| x.job == DIALOG)
+            .unwrap_or_else(|| panic!("no {DIALOG} row: {:?}", r.rows));
+        assert_eq!((&d.test, &d.status), (&Test::WholeJob, &Status::OnBaseline), "{:?}", r.rows);
+        let text = r.text();
+        assert!(
+            text.contains(&format!("job \"{DIALOG}\": run 8284 skipped it; compared with run 8226")),
+            "{text}"
+        );
+        let json = r.json();
+        let row = json["rows"].as_array().unwrap().iter().find(|x| x["job"] == DIALOG).unwrap();
+        assert_eq!(row["baseline_run"], 8226);
+        // No row is NEW against a run that did not run its job.
+        for x in &r.rows {
+            if x.status == Status::New {
+                assert!(
+                    json["rows"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .any(|y| y["job"] == x.job.as_str() && y["baseline_run"] == 8226),
+                    "{x:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_job_no_main_run_ran_is_unknown_with_the_reason_never_new() {
+        let mut f = skipped();
+        let runs = f.take_runs().into_iter().filter(|r| r["id"] != 8226).collect();
+        f.set_runs(runs);
+        let r = triage_with(f, 9021, None);
+        let d = r.rows.iter().find(|x| x.job == DIALOG).unwrap();
+        let Status::Unknown(why) = &d.status else {
+            panic!("{:?}", d.status)
+        };
+        assert!(
+            why.contains("run 8284 skipped it") && why.contains("no older finished run of nightly.yml on main"),
+            "{why}"
+        );
+        assert!(r.rows.iter().all(|x| x.status != Status::New), "{:?}", r.rows);
+        assert_eq!(r.exit(), paddock_cli::Exit::Findings);
+    }
+
+    #[test]
+    fn a_named_comparison_run_that_skipped_the_job_is_unknown_and_is_not_replaced() {
+        let r = triage_with(skipped(), 9021, Some(8284));
+        let d = r.rows.iter().find(|x| x.job == DIALOG).unwrap();
+        let Status::Unknown(why) = &d.status else {
+            panic!("{:?}", d.status)
+        };
+        assert!(why.contains("run 8284 skipped it") && why.contains("--against"), "{why}");
+        assert!(r.rows.iter().all(|x| x.status != Status::New), "{:?}", r.rows);
     }
 
     #[test]

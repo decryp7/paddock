@@ -351,10 +351,7 @@ fn file_stem(file: &str) -> &str {
 
 fn write_atomic(dir: &Path, name: &str, text: &str) -> Result<(), LibraryError> {
     let io = |e: std::io::Error| LibraryError::Io(format!("cannot write {name} in the parser folder: {e}"));
-    std::fs::create_dir_all(dir).map_err(io)?;
-    let tmp = dir.join(format!(".{name}.tmp"));
-    std::fs::write(&tmp, text).map_err(io)?;
-    std::fs::rename(&tmp, dir.join(name)).map_err(io)
+    paddock_env::write_atomic(&dir.join(name), text.as_bytes(), false).map_err(|e| io(e.into()))
 }
 
 fn remove_file(path: &Path) -> Result<(), LibraryError> {

@@ -51,9 +51,7 @@ pub fn save(dir: &Path, settings: &Settings) -> Result<(), String> {
         settings: settings.clone(),
     })
     .map_err(|e| e.to_string())?;
-    let tmp = dir.join(format!("{FILE}.tmp"));
-    std::fs::write(&tmp, text).map_err(|e| format!("the settings could not be saved: {e}"))?;
-    std::fs::rename(&tmp, dir.join(FILE)).map_err(|e| format!("the settings could not be saved: {e}"))
+    paddock_env::write_atomic(&dir.join(FILE), text.as_bytes(), false).map_err(|e| format!("the settings could not be saved: {e}"))
 }
 
 /// Channel secrets in a credential store (`Pitcrew notification channel` / `<key>`, the entries Pitcrew 1.0 wrote): the OS

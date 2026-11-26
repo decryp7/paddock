@@ -719,6 +719,7 @@ fn install(arg: &Value, ctx: &Ctx) -> Result<(), String> {
         std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755))
             .map_err(|e| format!("cannot make {} executable: {e}", tmp.display()))?;
     }
+    // conformance: write-atomic — the stand-in is one file compiled with plain rustc and no dependencies, so it cannot link paddock-env; its name is per process and per install
     std::fs::rename(&tmp, &target).map_err(|e| {
         let _ = std::fs::remove_file(&tmp);
         format!("cannot install {path}: {e}")

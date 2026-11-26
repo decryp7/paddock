@@ -166,6 +166,44 @@ pub fn seen(log: &str) -> Option<Seen> {
     })
 }
 
+/// The binaries a log ran, by how their tests ended.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Ran {
+    /// Binary ids all of whose tests ended `PASS` on the first try.
+    pub clean: BTreeSet<String>,
+    /// Binary ids with a test that failed, ended flaky or passed on a retry (ADR 0116 §3: never a pass, ER-12).
+    pub not_clean: BTreeSet<String>,
+    /// How many tests each binary id ran.
+    pub tests: BTreeMap<String, u64>,
+}
+
+/// The binaries of a log by how their tests ended, from each test's last status line. Binary ids come as nextest prints them:
+/// `package` or `package::binary`. Whether the run was whole is [`read`]'s to say.
+pub fn ran_binaries(log: &str) -> Ran {
+    let mut states: BTreeMap<TestId, Last> = BTreeMap::new();
+    for raw in log.lines() {
+        let l = plain(raw);
+        if let Some(m) = LINE.captures(&l) {
+            states.insert((m[4].to_string(), m[5].to_string()), last_of(&m));
+        }
+    }
+    let mut out = Ran::default();
+    for (b, _) in states.keys() {
+        *out.tests.entry(b.clone()).or_default() += 1;
+    }
+    for ((b, _), s) in &states {
+        if *s != Last::Passed {
+            out.not_clean.insert(b.clone());
+        }
+    }
+    for (b, _) in states.keys() {
+        if !out.not_clean.contains(b) {
+            out.clean.insert(b.clone());
+        }
+    }
+    out
+}
+
 /// Reads every nextest run of a job log.
 pub fn read(log: &str) -> Result<Nextest, NextestError> {
     let partial = |s: String| NextestError::Partial(s);

@@ -10,7 +10,8 @@ use paddock_plugin_api::Plugin;
 use paddock_plugin_api::extension::Contract;
 use paddock_plugin_api::host_file::HostFileRef;
 use paddock_plugin_api::protocol::{
-    DENIED, Described, Fail, HostCall, McpBudget, PLATFORM_PROTOCOL, PlatformRequest, SavedOutput,
+    DENIED, Described, Fail, HostCall, McpBudget, PLATFORM_PROTOCOL, PlatformRequest, Progress,
+    SavedOutput,
 };
 use paddock_plugin_api::serve::PluginHandler;
 use paddock_plugin_api::tools::ToolTask;
@@ -63,7 +64,7 @@ type ElevatedFn = Box<dyn Fn(&str, &str, Value) -> Result<Value, Fail> + Send + 
 #[derive(Default)]
 struct Recorded {
     files: HashMap<u64, Vec<u8>>,
-    reports: Vec<(String, Option<f32>, String)>,
+    reports: Vec<(String, Option<Progress>, String)>,
     started: Vec<(String, ToolTask)>,
     finished: Vec<String>,
     outputs: BTreeMap<String, Vec<u8>>,
@@ -361,7 +362,7 @@ impl FakeHost {
     }
 
     /// Progress reports the plugin made: `(task, progress, note)`.
-    pub fn reports(&self) -> Vec<(String, Option<f32>, String)> {
+    pub fn reports(&self) -> Vec<(String, Option<Progress>, String)> {
         lock(&self.services.rec).reports.clone()
     }
 

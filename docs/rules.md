@@ -4,6 +4,14 @@ Binding rules for every Paddock app and for everyone (people and agents) working
 decision or a lesson; the reasons are in [lessons.md](lessons.md). Each app's `AGENTS.md` carries these rules; when a rule
 changes here, every app's copy is updated in the same change.
 
+The rules marked ER-n come from the generic engineering-playbook repository, which keeps only the generic rule and a short reason.
+The Paddock incidents, run ids and ADR numbers behind each ER rule are in
+[lessons.md](lessons.md#incidents-behind-the-engineering-playbook-er-1-to-er-51-moved-from-the-generic-rules-repo-2026-11-24).
+
+A branch never picks a rule number (user, 2026-11-25): it writes a new rule as `NEW-<slug>.` in place of the number and cites it as
+`rule NEW-<slug>`; the train integrator gives it the next free number when the train lands and replaces every citation. Numbers are
+unique (C31).
+
 ## Way of working
 1. **One release at a time.** Release-critical work comes first. Other apps may progress in parallel only while load and
    CI capacity allow, and only if they don't change shared code (`crates/`, `ui/`) the release depends on; tags stay
@@ -12,7 +20,7 @@ changes here, every app's copy is updated in the same change.
    stays on `main` for the coordinator.
 3. **Tests in a branch: only the affected ones** (touched crates, touched specs, related Playwright files), with
    Playwright in Chromium only. The full suite, Chromium and WebKit, runs once on the combined result before a local
-   build or release, plus CI. Fix everything locally first; CI confirms, it is not where failures are found.
+   build or release, plus CI. CI runs the foundation (`crates/`, `ui/`, tools) plus the active apps (the current release set); the nightly runs all apps. Doctests are off; a crate turns them on only if it is published for others or its docs become a real user guide (ER-7, 2026-11-24). Fix everything locally first; CI confirms, it is not where failures are found.
 4. **When CI fails:** fix and re-run only the failed tests locally, push once; never push fix by fix to see what CI says.
    Lint and type-check the touched files before every push.
 5. **Every bug fix starts with a failing regression test.** A test-only failure is fixed properly (deterministic, no
@@ -23,6 +31,9 @@ changes here, every app's copy is updated in the same change.
    2026-11-24 carries an expiry date (`review_by` of its `[[report_only]]` entry in docs/gates.toml) at most 14 days
    later, and by then it is flipped to blocking, switched over (the old side deleted) or removed. C100 warns a week
    before; after the date it blocks release tags and the entry's own changes, and warns on any other push (user, 2026-11-24).
+   Every report-only check, register and hook carries a review date; if it caught nothing real by then it is deleted, not extended, and extending needs the user (ER-41, 2026-11-24).
+   A report-only gate reports in the job summary, a `::warning::` per finding and the terminal, with a test
+   that a planted finding appears there (ER-41, user, 2026-11-24).
    A FLAKY test (fails, then passes on its one retry) blocks a landing only when the change touches the test itself or the
    source it exercises (its feature or module); see rule 50 (k) (ER-12, user, 2026-11-19).
    A reviewer of a bug fix runs a mutation check on it (user, 2026-10-30), in their own worktree: for Rust,
@@ -40,12 +51,12 @@ changes here, every app's copy is updated in the same change.
    out of resources, the agent stops and reports instead of fixing it (2026-11-11; ER-14). *Why (added 2026-11-11):* an
    uncapped test container ran OrbStack's VM out of memory; the agent then restarted OrbStack, which also restarts every
    container of the user's, and Docker was down for about 15 minutes.
-    Fixtures recorded from live APIs or CI are scrubbed of names, emails, avatars and hostnames at capture; a check fails on real-looking values (ER-14; 2026-11-12). Paddock's planned check C110 does this.
+    Fixtures recorded from live APIs or CI are scrubbed of names, emails, avatars and hostnames at capture; a check fails on real-looking values (ER-14; 2026-11-12). Paddock's check C110 does this.
 8. **Every lesson goes into [lessons.md](lessons.md)**, every rule here; no `Co-Authored-By` or AI attribution anywhere.
-    Hooks and gates are never bypassed: no `--no-verify`, `-n`, `LEFTHOOK=0` or `LEFTHOOK_EXCLUDE`; fix the failure or stop and report (ER-39; the worktree-guard refusal is planned; 2026-11-12). Generated files (SVGs, lockfiles, synced copies) are regenerated from their source, never hand-edited, and CI checks they match (ER-40). Checks run on every change that could bring in their class, not only when their own files change; conformance runs on every change: CI plans its job for every change (`conformance always runs` in `./dev plan`), and the push gate runs the conformance row and the conformance tests on every push (ER-41; user, 2026-11-14).
+    Hooks and gates are never bypassed: no `--no-verify`, `-n`, `LEFTHOOK=0` or `LEFTHOOK_EXCLUDE`; fix the failure or stop and report (ER-39; the worktree-guard hook refuses these for agents; 2026-11-12). Generated files (SVGs, lockfiles, synced copies) are regenerated from their source, never hand-edited, and CI checks they match (ER-40). Checks run on every change that could bring in their class, not only when their own files change; conformance runs on every change: CI plans its job for every change (`conformance always runs` in `./dev plan`), and the push gate runs the conformance row and the conformance tests on every push (ER-41; user, 2026-11-14).
 9. **Releases only from a tag in CI**, never from a local machine; a local build for the user to try is fine but is never
    published. Never tag a `[skip ci]` commit.
-    A tag or landing counts only a complete CI run on that exact commit, not a skipped run, a failed-only rerun or an in-place retry; `./dev ci verdict` is the one reader (planned; ER-15; 2026-11-12).
+    A tag or landing counts only a complete CI run on that exact commit, not a skipped run, a failed-only rerun or an in-place retry; `./dev ci verdict` is the one reader (ER-15; 2026-11-12).
 
 ## Long operations and performance
 10. **Every operation runs on a background thread or worker pool,** never on the UI thread, the Tauri main thread or an
@@ -124,8 +135,8 @@ changes here, every app's copy is updated in the same change.
     or checked (a declared contract, one shared mechanism, a lint or test over every instance), and fix the instances
     through it. Until v1, check every batch of bug reports for such patterns.
     The coordinator proposes the redesign in the same reply that relays the report (a question to the user, or a start under
-    an earlier approval), never ending a turn with an unproposed class (ER-21; hook `.claude/hooks/recurring-guard.sh` planned).
-    Hooks that judge an agent's text (the recurring guard, hook `.claude/hooks/recurring-guard.sh` planned, advisory) only warn; hooks
+    an earlier approval), never ending a turn with an unproposed class (ER-21). Simpler first (2026-11-24): a repeat first asks whether the failing thing can be deleted or simplified, or common practice used; a new mechanism or ADR comes only when that cannot hold long term, and the proposal states what it removes. Before building anything, walk the necessity ladder (PRINCIPLES.md, KISS and YAGNI).
+    Hooks that judge an agent's text (the recurring guard hook `.claude/hooks/recurring-guard.sh`, advisory) only warn; hooks
     that guard state (the cd guard, safe-remove) still block (user, 2026-11-12).
     A gate's "passed" is a value only the check can produce, and its tests show both a deleted check and a skipped gate fail (PRINCIPLES.md, robustness; 2026-11-12).
 
@@ -212,7 +223,7 @@ changes here, every app's copy is updated in the same change.
     zero rows and failed 31 of 240 runs under the pinned clock).
     (e) A claim that a timing-sensitive spec passes or is stable states its runs, workers and engines (or OS). An e2e timing fix
     needs at least 20 runs per engine at 4 workers, or more when the measured failure rate requires it; a bare "N of N green" is
-    rejected in review (ER-28, user, 2026-11-17). *Why:* on 2026-11-16 a Debrief live-tail fix was reported "3 of 3" and was 3 of 7
+    rejected in review (ER-28, user, 2026-11-17). A speed claim made on a shared machine compares CPU time or interleaved A/B runs and states the load, never elapsed time alone (ER-28, user, 2026-11-24). *Why:* on 2026-11-16 a Debrief live-tail fix was reported "3 of 3" and was 3 of 7
     red, and "12 of 12" was 4 of 150 red (`fix/debrief-events-grid-live-tail`, `fix/debrief-live-tail-adr`).
 
 ## CI economy (user, 2026-10-29)
@@ -231,26 +242,27 @@ changes here, every app's copy is updated in the same change.
     (g) Before landing a branch (a merge into main), the integrator lints its commits locally:
     `node conformance/bin/paddock-conformance.mjs commit-lint --range origin/main..<branch>`. A push to main lints only what main
     itself gets (`--first-parent`), so this is where a branch's own subjects and trailers are checked; C23 is the backstop.
-    (h) Local checks and CI overlap; a local failure cancels the run (ER-9). Before dispatch, run the fast static gates locally,
+    (h) Local checks and CI overlap; a local failure cancels the run (ER-53). Before dispatch, run the fast static gates locally,
     in parallel and bounded by the machine's load: `./dev check --pre-push` (the pre-push hook runs it): `cargo fmt --check`,
     clippy on the host and, for Windows, `cargo xwin clippy --target x86_64-pc-windows-msvc --workspace --all-targets -- -D warnings`
     (an import or helper used only by a unix-gated test is dead code there; ADR 0021, lessons.md "Windows-only assumptions in
     tests"), conformance with ci.yml's own list and the conformance tests (`cd conformance && npm test`, both on every push, ER-41;
     a flaky conformance test that blocks a push is fixed at once under ER-12, never skipped or bypassed, ER-39),
     commit-lint (rule 50g) and lockfiles with `--locked`; when a Cargo workspace
-    has a changed file of its own, also its Clippy on Linux in the CI image (native architecture, one container run for all of them,
-    `--cpus 4 --memory 12g`, the apps' Tauri crates left out and named in the row; `./dev merge check --gates` runs the same row;
-    `./dev check --warm-linux [workspace...]` warms a workspace's build folder once, so the push only sees warm runs). A gate that cannot run (no Docker, no
-    cargo-xwin) is "not measured", exit 6, never a pass; an agent never starts Docker (ER-14). It checks every commit the remote
+    has a changed file of its own, its Clippy on the host and (Windows) through xwin; Linux Clippy is CI's Linux job, since no VM or container starts on this Mac (user 2026-11-26, rule 101). A gate that cannot run (no
+    cargo-xwin) is "not measured", exit 6, never a pass. It checks every commit the remote
     lacks (`git rev-list <tip> --not --remotes`), measured from the nearest commit of the remote the push contains (the header says
     which and why; never a local branch), and its 15 minutes count run time only; time queued for the heavy slot behind other
     agents has its own allowance of 30 min per push and is reported apart (ADR 0102 and its 2026-11-15 amendment). Lint and type-check of the touched
     TS files stay by hand until WP-3. Then dispatch with `./dev`
-    and, at the same time, run the slower local checks in parallel: the affected tests on the dev OS, the same tests in the
-    `train3-linux-dev:1` container (CI limits, `ulimit -n 1024`) and timing-sensitive tests under load. Cap local builds
-    (`CARGO_BUILD_JOBS=2`) while CI runners share the machine. If a local check fails, cancel that run at once through the Gitea
-    API (`POST /api/v1/repos/{owner}/{repo}/actions/runs/{id}/cancel`), fix every failure and push once; this cancel needs no
-    further approval. (a) and (b) still hold.
+    and, at the same time, run the slower local checks in parallel: the affected host tests (`tests <ws>`, macOS; the Linux tests are
+    CI's Linux jobs, user 2026-11-26) and timing-sensitive tests under load. In the train this is the ER-53 split: `./dev check
+    --pre-push --member-gate --set fast` first, then `./dev ci dispatch` (prints `run <id>`), then `--set slow --cancel-ci-run <id>`
+    beside it: a slow-row failure cancels that run at once through `./dev ci cancel <id>` (the run's own cancel URL, never the newest
+    run; a cancelled run reads "cancelled: not measured"), and the landing (ER-49) needs both the complete green CI run and the green
+    slow rows on the same commit: `./dev ci landing-held --sha <sha>` (exit 0 landable, 5 refused, 6 not held: an unfinished slow row
+    is not held, ER-33). Cap local builds (`CARGO_BUILD_JOBS=2`) while CI runners share the machine. Fix every failure and push once;
+    this cancel needs no further approval. (a) and (b) still hold.
     (i) After a CI run fails, each fix round reruns only what failed in the last run: the failed jobs, and inside them only
     the failed tests (nextest or vitest filter) where the job's runner supports it. Jobs and tests that passed aren't rerun
     during fix rounds. Dispatch `ci.yml` (workflow_dispatch) with the input `base` = the commit CI last tested, not main; use
@@ -267,7 +279,9 @@ changes here, every app's copy is updated in the same change.
     out (the train is reset to `<merge>^1` in the integrator's own worktree) and sent back to its author with the failing
     rows; it is not fixed on the train. The gate is report-only (printed, exit unchanged) until its first green run on a real
     train is recorded in ADR 0098, and sends members back from then on. For a failed train run, `./dev ci triage <run> --members
-    <train-base>` names the members whose change reaches each new failure (the queue's own rule). Tests stay once per train.
+    <train-base>` names the members whose change reaches each new failure (the queue's own rule). The member gate also runs the touched
+    workspaces' nextest `ci` profile on macOS and their OS-conditional code in the Linux CI container (user, 2026-11-25); the full
+    suite stays once per train.
     The train's sequence (user, 2026-11-16): (1) each member's one short review runs at the same time as the train's CI, not
     before the merge; a P1 cancels the train's run and pulls the member, so a review never delays a green train. (2) The next
     train is assembled during the current train's CI: its integrator merges members on top of the running train's head, runs
@@ -284,7 +298,7 @@ changes here, every app's copy is updated in the same change.
     waits with nothing running (their minutes are not yet measured; the landing report records them from the next train).
     The gate that decides on a branch runs on the same kind of machine as CI (the real runners, as merge queues and merge trains
     do); a run on another architecture, under emulation or as another user counts only as not measured, or as a finding only when
-    compared with the base's own result on that machine (ER-9; 2026-11-16: the Windows-on-Arm VM and an amd64 container failed 22
+    compared with the base's own result on that machine (ER-53; 2026-11-16: the Windows-on-Arm VM and an amd64 container failed 22
     paddock-dev tests on a base the real runner passed).
     A member the train pulled out with a revert keeps its work when its author catches up: before `git merge <train>`, run
     `./dev merge sync-member <train>` (read-only); it prints a `git revert <sha>` for each live train revert of a merge of this
@@ -409,7 +423,7 @@ changes here, every app's copy is updated in the same change.
     (d) A copy whose delete-by tag is reached is reported as a warning; it no longer blocks a tag (user, 2026-11-11: the
     register is a to-do list). A delete-by date moves to a later release line (a higher major or minor version) only
     with the user's approval, with the reason in the commit body.
-    (e) Enforced by conformance check C58 (planned, ADR 0034 WP-1; not built yet). A register-only change is docs-only
+    (e) Enforced by conformance check C58 (ADR 0034 WP-1; not built, so the steward checks the register by hand). A register-only change is docs-only
     and gets no CI run (rule 50), so the steward checks the register by hand before it lands. Once C58 exists, batches
     run `copies --range <base>..HEAD` before pushing, and the steward runs `copies --tag <tag>` before creating a tag.
     Until C58 exists, the reviewer and the steward check the register by hand.
@@ -433,7 +447,7 @@ changes here, every app's copy is updated in the same change.
     A design, mechanism or fix costing more than 1 agent-day beyond the common-practice option needs the user's yes, with
     both costs shown; a standing "build everything" OK does not cover it. Each release plan states its budget in raw
     agent-days when its scope is agreed, and growth beyond 20% goes back to the user. Each release gets one cut review, at
-    scope freeze, by one reviewer, against this rule (ER-37, amended 2026-11-12).
+    scope freeze, by one reviewer, against this rule (ER-37, amended 2026-11-12). One in, one out (2026-11-24): a new check, register, hook, gate or ADR mechanism removes or replaces something of similar cost, or names a recurring real failure and the comparison; a proposal states what it adds and removes.
     *Why:* on 2026-11-11 a 23-31-day elevated-helper design for Debrief went through four review rounds before the user
     compared it with Visual Studio and VS Code and chose a half-day risk warning instead; several accepted process ADRs
     (signed approvals, decision registers, extra gates) were then cut as more than a personal tool needs.
@@ -483,28 +497,28 @@ changes here, every app's copy is updated in the same change.
     through the one accessor that owns that data (`ci_run::contract::conformance_args`, `cargo metadata`, the register's parser, a
     constant the owning module exports), never by grepping or slicing that file's text. A source audit that must read another
     crate's code names the file through a path the owner exports and ends its span at an item boundary, not at a comment it
-    remembers. A hand list that must equal generated data (heavy's `inputs.txt`) is generated, or its test prints the
-    regenerate command (ER-40). Checked where cheap: C121 (report-only until its first green run on the real tree) flags a
-    registry entry or test that runs `grep`, `sed`, `awk` or a regular expression over `.gitea/workflows/*.yml`; slicing another
-    file's text by anchors and hard-coded paths into another crate are not linted, so review and the train's test run cover them.
+    remembers. A hand list that must equal generated data (the throttle's `inputs.txt`) is generated, or its test prints the
+    regenerate command (ER-40). Not linted: review and the train's test run cover it (the check that flagged a regular expression
+    over `.gitea/workflows/*.yml` was dropped on 2026-11-25: its report-only phase found only fixture text).
     *Why:* on train 8 (2026-11-13) eight fixes after the merges were combination failures; `bddd2947c` was a second reader of
     data that already had an accessor (`./dev ci conformance-args` now), `0308201b4` a span ended at a comment the author
     remembered, `11c365fc4` a path into another area's layout, `be69a31f6` a hand list that had to equal `cargo metadata`.
 
 ## Waiting, fixes, checks, lists and environments (user, 2026-11-15 and 2026-11-16; ER-43 to ER-47)
 Status is as of train 14 planning: "planned" is not built, "in progress" is on a branch. Rules 80 to 84 map the engineering rules to Paddock's mechanisms.
-80. **A waiter never holds the capacity the work it waits for needs** (ER-43). Paddock: `./dev wait` and the heavy-slot queue take no slot for the wait; the waiter guard (duplicate waits, grep polling) and the scheduled-runs-yield rule follow. Status: planned, train 14.
-81. **A complete fix, not a quick one** (ER-44). A review's or incident's cause, its fix and its copies in `docs/known-copies.toml` (rule 55) land in one round; ask the user only above 1 agent-day beyond common practice (rule 76). Status: in force.
-82. **Checks have no side effects** (ER-45). Paddock: launcher probes and `setup-rust` set `RUSTUP_AUTO_INSTALL=0`, shell checks print the cause before exiting under `set -e`, and a check's positive control runs on in-memory data (planned: the check that reads the exceptions list). Container runs go through `tools/linux-container.sh` only (ER-14); tests use `StandIn` programs, never installed apps or `~/.rustup`. Status: in progress, train 14.
+80. **A waiter never holds the capacity the work it waits for needs** (ER-43). Paddock: `./dev wait` and the throttle-slot queue take no slot for the wait; the waiter guard (duplicate waits, grep polling) and the scheduled-runs-yield rule follow. Status: planned, train 14.
+81. **A complete fix, not a quick one** (ER-44). The principle (user, 2026-11-24): the minimum simplest complete fix, and a redesign only if it is necessary for the long term; rules 76, 83 and ER-21, ER-36, ER-41 enforce it. A review's or incident's cause, its fix and its copies in `docs/known-copies.toml` (rule 55) land in one round; ask the user only above 1 agent-day beyond common practice (rule 76). Status: in force.
+82. **Checks have no side effects** (ER-45). Paddock: launcher probes and `setup-rust` set `RUSTUP_AUTO_INSTALL=0`, shell checks print the cause before exiting under `set -e`, and a check's positive control runs on in-memory data . Container runs go through `tools/linux-container.sh` only (ER-14); tests use `StandIn` programs, never installed apps or `~/.rustup`. Status: in progress, train 14.
 83. **Lists only shrink; goldens hold no machine** (ER-46). Paddock: planned growth checks compare each list with the merge base and fail on growth without the user's approval (one each for the exceptions list, the allow list and the baselines; the ids are reserved with `./dev check new-id`); goldens are normalised (uid, names, paths, sizes) and the e2e suites use the fixed clock. Status: the three checks are planned (report-only first, ER-41); fixed e2e clock in progress.
 84. **Children inherit the environment** (ER-47). Paddock: production children inherit: `paddock_proc::clean_env` keeps its kept list and every restricting variable the caller has, as the caller has it. `TestCommand` is an allow-list on purpose (ADR 0100): it clears only through `paddock_env::clear_env_pinned_from` and keeps a restricting variable only in a restricting value (a developer's `PADDOCK_DEV_DOWNLOAD=1` is dropped), and sets `RUSTUP_AUTO_INSTALL=0` when the caller's value does not restrict. Clearing needs a named policy with a kept list and never strips a restricting value. The restricting variables are the one typed list `paddock_env::RESTRICTING` (`RUSTUP_AUTO_INSTALL=0`, `CARGO_NET_OFFLINE=true|1`, `PADDOCK_DEV_DOWNLOAD=0`, `PADDOCK_TOOLCHAIN_FAILED=1`), and the only function that clears a child's environment is `paddock_env::clear_env_from` and its pinned twin: Clippy forbids `Command::env_clear` elsewhere (ADR 0100, ER-47 section). Status: in progress, train 14.
 
-Amendments of the same date, no new number: the member gate runs each member's affected tests on every target OS in a fresh CI-like clone before it joins a train (ER-9; planned, train 14); agents start on the 15-minute load and CPU idle, count container runs and run at most 5 builders while containers run (ER-24); agents never start the user's installed apps or touch `~/.rustup` and `~/.cargo` (ER-14).
+Amendments of the same date, no new number: the member gate runs each member's affected tests before it joins a train (ER-9): the full nextest `ci` profile of every touched Cargo workspace on macOS, its reached OS-conditional code (the `hostTests` placement derived from the code) also in the Linux CI container, and the guardian's acting tests as uid 65534 when the guardian changed; Windows tests run only on CI's own runner, with no separate Windows member check (ER-52, 2026-11-24; user, 2026-11-25); agents start on the 15-minute load and CPU idle, count container runs and run at most 5 builders while containers run (ER-24); agents never start the user's installed apps or touch `~/.rustup` and `~/.cargo` (ER-14).
 
 ## Bulk APIs (user, 2026-11-18; ER-20, PRINCIPLES "Bulk APIs")
-85. **Bulk APIs: one call for many items** (ER-20; PRINCIPLES "Bulk APIs"; ADR 0108). A function, Tauri command, port method, IPC message or HTTP endpoint that works on items takes many at once (a slice, an iterator, a stream) and returns a result per item, so a caller with N items makes one call; a single-item form, where one is needed, is a thin wrapper over the bulk one; one bad item does not fail the batch unless the operation is atomic by design; large inputs are chunked or paged (ADR 0018, bounded loading). Work over many items is one bulk call or one long-lived process or connection: one SQL statement or one transaction, one bulk IPC request, one `git cat-file --batch` reader instead of a git start per object, an in-process library. A loop that calls a command, port, process, query or endpoint per item is a review finding unless the code says why (`// per-item: <reason>`). A command's count of process starts, statements or invokes is a budget a test guards: each bulk command lands with a test that N items cost at most K, failing first with the per-item code. Status: rule and review line in force; the shared batch git reader (`crates/paddock-git`) and the stdin-taking bounded run in paddock-proc in progress on `perf/git-heavy-tests-2`; the counting seams, the per-item result type and the ESLint rule `paddock/no-backend-call-in-loop` (report-only until its first green run, ER-41) planned (ADR 0108 WP-0). *Why:* on 2026-11-18 a git start cost about 45 ms on the Windows runner against about 6 ms on the Mac and the merge check started 33 to 75 gits per check (train 14); the inventory of that day found 65 more places across every app, the shared crates and the dev tools (docs/research/2026-11-18-bulk-api-inventory.md), after six earlier instances fixed one by one (ADR 0108).
+85. **Bulk APIs: one call for many items** (ER-20; PRINCIPLES "Bulk APIs"; ADR 0108). A function, Tauri command, port method, IPC message or HTTP endpoint that works on items takes many at once (a slice, an iterator, a stream) and returns a result per item, so a caller with N items makes one call; a single-item form, where one is needed, is a thin wrapper over the bulk one; one bad item does not fail the batch unless the operation is atomic by design; large inputs are chunked or paged (ADR 0018, bounded loading). Work over many items is one bulk call or one long-lived process or connection: one SQL statement or one transaction, one bulk IPC request, one `git cat-file --batch` reader instead of a git start per object, an in-process library. A loop that calls a command, port, process, query or endpoint per item is a review finding unless the code says why (`// per-item: <reason>`). A command's count of process starts, statements or invokes is a budget a test guards: each bulk command lands with a test that N items cost at most K, failing first with the per-item code. Status: rule and review line in force; the shared batch git reader (`crates/paddock-git`) and the stdin-taking bounded run in paddock-proc in progress on `perf/git-heavy-tests-2`; the counting seams, the per-item result type (ADR 0108). *Why:* on 2026-11-18 a git start cost about 45 ms on the Windows runner against about 6 ms on the Mac and the merge check started 33 to 75 gits per check (train 14); the inventory of that day found 65 more places across every app, the shared crates and the dev tools (docs/research/2026-11-18-bulk-api-inventory.md), after six earlier instances fixed one by one (ADR 0108).
+97. **Start, hold, watch, end** (ER-51; ADR [0112](adr/0112-job-owns-its-processes.md)). Whoever starts a process, a CI run, a container or a slot keeps the handle the start gave back (`paddock_proc::ProcessId`, the run id, the container id, the holder token), waits on it with a bound and ends it through it; nothing is found again by name or by search (`pgrep`, `pkill`, `ps | grep`, "the newest run"). Every Paddock CI job is a fixture: the shared job action `./.gitea/actions/job` prepares (health, slot, the job's process ledger, the job's one folder for temp, logs and outputs) and its post step cleans up on success, failure and cancel (ends the ledger's processes by identity, releases the slot, writes the job summary). Nothing writes outside the job's folder except declared outputs and the shared caches named in `kept-folders.txt`. Status: rule in force for new jobs and scripts; the job action, the fixture check and the handle check (both report-only first, ER-41) are planned (ADR 0112 WP-4 to WP-6). *Why:* on 2026-11-20 a host job left `vm-lock.sh` running for four days and leaked test folders filled the Mac runner's temp folder (runs 8334, 8341, 8346), after the slot-holder leak of run 8099 (82d5ee496); macOS hides the environment of Apple programs, so cleanup by marker missed the shell scripts.
 
-## CI selection and test runs (user, 2026-11-23; ADR 0117; ER-9, ER-32, ER-49)
+## CI selection and test runs (user, 2026-11-23; ADR 0117; ER-9, ER-32, ER-49, ER-52)
 86. **Only setup-only actions declared in `docs/repo-graph.toml` are plumbing.** A change to an action, script or doc that the graph
     does not declare as plumbing reaches the projects that use it, and an unowned or unresolvable reference selects everything (fail
     closed, ADR 0117). Nothing is plumbing by its folder or name. *Why:* `.gitea/actions/README.md` was on the planner's global list
@@ -512,7 +526,7 @@ Amendments of the same date, no new number: the member gate runs each member's a
 87. **A change to a conformance check, or to a check a release job runs, runs the app's smoke set and its checks phase, not the
     installers** (user, 2026-11-23). The text is rule 54 (a0), the one copy.
 88. **Removing an OS from a test needs the user's approval.** The record is `docs/os-removals.toml`; growth of that register is a
-    finding that no waiver clears (rule 83; the check is planned in ADR 0117). *Why:* OS-scoped tests (ER-9) cut Windows time by 46%, and an OS
+    finding that no waiver clears (rule 83; ADR 0117). *Why:* OS-scoped tests (ER-52) cut Windows time by 46%, and an OS
     dropped without a reason is a hole in the net.
 89. **Every test run goes through the bounded runner** (ER-32, ER-51; amended (user, 2026-11-24)): `cargo nextest run` with the
     workspace's `.config/nextest.toml`, which gives every test a per-test timeout (`slow-timeout` with `terminate-after`) and one
@@ -527,6 +541,30 @@ Amendments of the same date, no new number: the member gate runs each member's a
     selection the landing's own diff planned. Such a run counts for that landing only: it is never complete for a tag or a
     release, never the base for later planning, and the nightly still runs everything. *Why:* in ADR 0117's review round 2,
     narrowed runs were never complete, so a train whose change needed only a smoke set or its affected tests could never land.
+
+## Test-only hooks (user, 2026-11-25)
+99. **Test-only hooks compile only for tests.** An injected clock, gate, fake, test setter or `for_tests` constructor is behind
+    `#[cfg(any(test, feature = "test-support"))]`, and `test-support` (ADR 0073's name, the one name for this feature) is
+    enabled only from `[dev-dependencies]` (a self dev-dependency for a crate's own integration tests) or a test target's
+    `required-features`; production wiring that needs the same seam calls a crate-private function, never the public hook. C170
+    (`./dev check test-features`, in the conformance job on every change it plans) proves that no released binary, each app's
+    Tauri package, every `bundle.externalBin` and `paddock-setup`, is built with a test feature (`cargo tree -e normal`; it also
+    flags a stray `testing`; report-only until its first green run, ER-41). *Why:* on 2026-11-25 `paddock_ipc::Host::with_clock`
+    was public with no gate, and an ADR draft copied that pattern for the privileged dyno-helper daemon; a shipped hook is an
+    API anyone linking the crate can call.
+
+## Trains (user, 2026-11-26)
+100. **A branch joins a train only after it has merged current main and re-run its member gate on that tip.** The
+merge check (`./dev merge check`) refuses a member whose base is older than main: the stale-base check, being made blocking on
+`ci/old-base-block` (report-only until it lands). A refused member merges main, re-runs `./dev merge check --gates` on the result and
+is offered again. After merging main (or the train) into the member, `./dev merge sync-member <train>` runs the fast static rows
+(conformance, the gate register, Clippy and Windows Clippy of the touched workspaces) on that sync tip and ends non-zero on a failing
+or unmeasured row; fix it on the member and re-sync. `--no-static "<reason>"` is the logged escape. Once the rows pass it also
+dispatches the member's own narrowed CI run on the train (`ci dispatch ci.yml --trial`, the plan's affected jobs on its Linux and Windows
+legs; the integrator's sync-member pushes the sync tip as `sync/<member>` first) and prints the run id; a later `./dev merge check --gates` reads that run through the verdict reader: a
+red trial blocks the member, a running one is not a pass. `--no-trial "<reason>"` is the logged escape. *Why (trial):* members that passed
+on the Mac failed only on Windows or Linux CI in three trains. *Why:* on 2026-11-25 five members were pulled from trains i, k and m because their base was older than main (see
+[lessons.md](lessons.md#members-on-an-old-base-were-pulled-from-trains-i-k-and-m-2026-11-25)).
 
 ## Monorepo (ADR 0014 §10; effective for an app from its import into `paddock/apps/<app>`, for Paddock from the first import)
 Until an app is imported, rules 2, 3, 8, 9, 39 and 42 above apply to it as written. From its import, these replace them:
@@ -544,3 +582,20 @@ Until an app is imported, rules 2, 3, 8, 9, 39 and 42 above apply to it as writt
   no publish-and-consume step. "Consume the published version" becomes "use the in-tree version".
 - Rule 1 is about attention, load, CI capacity and shared-code conflicts, not repos (amended 2026-10-28: one release at a
   time; other apps only within those limits).
+98. **In a repository with several products, CI failures in code an app does not ship do not block its release** (was ER-31, moved here from the generic rules 2026-11-24). Judge failing tests and skipped steps, not jobs.
+    (a) Tag the app in CI on its release branch's tested commit, and land the branch on main afterwards, when every failing test is in other products' own code or in shared code the app does not depend on, and every step a failure skipped has been re-run green or is shown not to touch the app's dependency set. List the dependency set from the lockfile or the package manager, and from the app's imports of shared packages where the manager cannot see them.
+    (b) These always block: failures in shared code the app ships; an aggregate coverage failure, until a per-crate gate shows the failing crates are not the app's; another aggregate gate (dependency audit) unless its output clears the app's crates; and anything on the release path (the build and publish steps and the shared actions).
+    (c) ER-8, ER-15 and ER-16 still hold: the full suite ran to completion on the tagged tree, the tag is made for CI to build from and never on a `[skip ci]` commit, and it is the commit the gates tested.
+    (d) The landing needs the normal green gates and is a merge or fast-forward, never a rebase or squash, so the tag is an ancestor of main (later release notes read the history from the previous tag). Fixes for other products go on their own line, not on the release branch.
+    *Why:* Dyno 1.1.0 was correctly blocked by Paddock run 7485 (mostly code Dyno ships). Run 7489 failed in the shell-demo's i18n check (outside Dyno) and in aggregate coverage; the coverage gate printed no per-crate output and a crate Dyno depends on was in it, so that blocked under (b) until the gate was fixed and a full run was green. The failures also skipped the dependency audit and several ui steps, which (a) asks to be cleared.
+
+101. **Local gates never start a VM or a container on a developer's Mac** (user, 2026-11-26). Linux checks run as CI's Linux jobs on the Linux runner, Windows checks on the Windows runner. The pre-push and member gate have no Linux row (`clippy-linux`, `tests-linux`, `--warm-linux` are removed; the register names them CI-owned), and conformance C172 (report-only, review 2026-12-09) flags a docker, podman, nerdctl, orb, orbctl, vmrun or `linux-container.sh` call in local gate code. *Why:* the container rows were the Mac's largest load, and the user decided on 2026-11-26 that no VM runs on the Mac. Status: in force (train o); C172 report-only until its first green run on the real tree (ER-41), review 2026-12-09.
+
+## Git fixtures (user decision 74, 2026-11-26)
+102. **A test that needs a git repository builds it once per machine and recipe through `paddock_testkit::git_fixture`** (ER-20, ER-22,
+    rule 85). `git_fixture::template(name, include_str!(this file), |build, ready| ..)` builds the repository in a folder under the
+    kit's temp folder, with an owner, a size limit and an eviction rule (ER-51; the module doc), and each test gets its own copy with
+    `git_fixture::copy_tree`, which starts no process. A fixture builder that starts git six or more times per test is a finding of C174
+    (report-only until its first green run, ER-41; `./dev conformance --only C174`). A test about the build itself says why in its own
+    comment and keeps its builder. *Why:* the `ci_runs` fixtures started 14 to 17 gits in every test, 45 ms each on the Windows runner:
+    710 s of train n's Windows job (docs/benchmarks.md, "Git fixture repositories of the ci_runs tests").

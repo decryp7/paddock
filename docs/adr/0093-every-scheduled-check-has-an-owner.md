@@ -47,7 +47,7 @@ origin/docs/redesign-adrs-7-9 4b0633e73
 origin/feat/rt5-check-host ec8530a95
 origin/docs/adr-private-files e2f7e946b
 origin/docs/adr-user-approvals d21eddcbf
-engineering-rules main ca4124bdc
+engineering-playbook main ca4124bdc
 ```
 
 ## Context: the incidents

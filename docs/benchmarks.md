@@ -84,6 +84,94 @@ uses it, results in
 
 ## Results of shared tooling
 
+### 2026-11-26, slot locks on kernel file locks against directory locks (feat/throttle-rename-filelock)
+
+- **Commit:** origin/main 202d0a181 (directory locks, the release binary of that tree) against the file-lock tree of this branch (a debug build: the handoff time is poll-bound, not code-bound)
+- **Machine:** Mac mini, Apple M4 Pro, 14 cores, 64 GB, macOS 27.2; 5-minute load 11 to 17 during the runs (other agents' builds); each run in its own empty lock folder, no shared state
+- **Method:** `heavy run --no-gate` of `sh` commands, `HEAVY_SLOTS=1`, `PLOCK_POLL=1`, 5 interleaved pairs of runs per binary, times read with `perl -MTime::HiRes` in the commands; the script is not kept (twelve lines of shell)
+  1. *Two agents contend for one slot:* A holds the slot for 2 s, B starts 0.5 s later and queues; handoff = B's command start minus A's command end.
+  2. *A holder killed with SIGKILL:* K runs `sleep 8`; 2 s in, `kill -9` on K's heavy (its command goes on for 6 s more); then W starts `heavy run`; time = W's command start minus the kill.
+- **Numbers:**
+
+  | Measure | Directory locks (main) | File locks (this branch) |
+  |---|---|---|
+  | handoff to a queued waiter, 5 runs | 0.59 to 0.61 s | 0.57 to 0.61 s |
+  | next run after the holder is SIGKILLed, 5 runs | 6.26 to 6.37 s (it waited for the orphaned command to end) | 0.02 to 0.04 s |
+
+- **Notes:** the handoff is the poll interval (1 s here; the waiter looks again once a poll), so the lock kind does not change it. The SIGKILL case changes from "as long as the orphan lives" to "at once": the kernel frees the lock when heavy's handle closes. The price, stated in tools/heavy/README.md: the orphaned command is no longer counted against the slot, so the next step starts beside it. Not measured: Linux and Windows, a loaded host with two real gates (the live gates of other agents were not touched), a network file system (refused by design).
+
+### 2026-11-26, shared npm and ui/dist cache (feat/npm-ui-cache)
+
+- **Commit:** `feat/npm-ui-cache` over `origin/main` `8333e185f`; the change under test is `./dev deps` (`tools/paddock-dev/src/deps_cache.rs`)
+- **Machine:** Mac mini, Apple M4 Pro, 14 cores, macOS 27.2.1, APFS; worktrees and the cache on the same volume (`<dev-targets>`); other agents shared the machine
+- **Load:** the 1-minute load was 20 to 50 during every run below (5-minute load 25 to 35), so the absolute times are inflated; the A/B pairs ran one after the other
+- **Workload:** the root workspace of this commit: 541 `node_modules` folders (43,087 files, 582 MiB; 6 workspace `node_modules` folders), `npm ci --no-audit --no-fund` (npm 11.19.1, Node 24.22.0, registry reachable, npm's own http cache warm), then `npm run build -w ui` (`ui/dist` 9 MiB, css 124 KiB)
+- **Before:** the two commands above, after removing `node_modules`, `ui/dist` and `ui/projects/paddock-ui/css`. **After, cold:** `./dev deps ui` with no cache entry (the same two commands, then a store of each result). **After, warm:** `./dev deps ui` with both entries present
+- **Runs:** before and warm: pairs, interleaved (the second pair below); cold: once (it needs an empty cache). Not repeated more than that: the effect is an order of magnitude
+- **Numbers (wall seconds):**
+
+  | Step | Before (`npm ci` + ui build) | After, cold (`./dev deps ui`) | After, warm (`./dev deps ui`) |
+  |---|---|---|---|
+  | Pair 1, load 50 | 26.0 | | 1.48 |
+  | Pair 2, load 44 | 13.4 | | 1.45 |
+  | Separate run, load 20 to 25 | 6.3 + 10.6 = 16.9 | | 1.9 to 2.2 (three runs, `node_modules` 0.8 to 1.0 s, ui 1.0 to 1.3 s) |
+  | Separate run, load 48 | | 52.0 (npm ci 22.1, build 26.1; the two stores cost 1.9 and 0.3) | |
+
+  The cold run costs about 2 s more than the plain commands (the store, a clone of each result); every later worktree costs 1.5 to 2 s
+  instead of 13 to 26 s, whatever the load, because a hit runs no install and no build.
+- **Cheaper operation (ER-20):** the clone is one `clonefile(2)` of the whole folder on macOS. `cp -cRP` of the same 43,087 files took
+  5.0 s (the first version of this code, 5.3 s for `node_modules`) and `clonefile(2)` 0.46 s; removing a clone is 1.7 to 2.0 s. A
+  clone shares the file data until a file is written, so a cached entry plus N worktrees hold about one copy on disk. Parallelism does
+  not apply: a hit is one call, a miss is one `npm ci` that must not run twice.
+- **Checks made on a cloned tree:** `npm run build -w ui` (Angular, 18 s), `npm run test:tokens` (Vitest, 532 tests) and the e2e build guard
+  (`staleBuilds(ui, 'ui-dist')` empty) all pass; workspace links in a clone are relative (`node_modules/@decryp7/paddock-conformance ->
+  ../../conformance`), so they point into the clone's own worktree.
+- **Not measured:** other disks (a clone across volumes is a plain copy); Linux reflinks; the apps' own builds.
+
+### 2026-11-26, what the two whole-tree gate rows read (ADR 0116, declared input sets for `conformance-tests` and `member-audits`)
+
+- **What:** a one-off trace of every `open`, `stat`, `lstat`, `opendir` and `fopen` under the checkout during one green run of each row, by a
+  throw-away `DYLD_INSERT_LIBRARIES` interposer (macOS, non-SIP binaries only: node and the cargo-built test binaries; `git` and `/bin/sh` children
+  are not seen). Distinct paths, `node_modules`, `.git` and build folders left out. Not kept in the repository (a measurement tool, not a check).
+- **Host and tree:** Mac mini, load 28 to 50 during the runs (a trace, not a timing); tree `247afe10e`.
+- **Results:**
+
+| Row | Run | Distinct paths read | Where |
+|---|---|---|---|
+| `conformance-tests` (`node test/run-tests.mjs`, 1203 tests) | 78 s | 13,675 | apps/* 5,900, conformance 2,600, ui 1,100, tools/paddock-dev 1,000, `.gitea` 190, crates/* about 1,500, docs, scripts, icons, templates, eslint |
+| `member-audits` (83 tests) | 117 s | 36,087 | apps/* 15,800, tools/paddock-dev 5,700, icons 2,400, ui 3,900, crates/* about 2,500, conformance 670, docs, `.gitea` |
+
+- **Reading:** both rows read files in every top-level folder of the tree, the apps and the shared crates included. Any declared input set that
+  is sound is the whole tree minus build output, so a folder-level declared key reuses no more than the whole-tree key does today. A tighter key
+  needs a per-run read set (hash the files a green run read, check them on the next run; Bazel's and ccache's dynamic dependency
+  tracking), which needs a tracer on every OS (dyld interposition here, `LD_PRELOAD` on Linux, nothing equivalent on Windows without a driver) and
+  gives a key that no author can review. The rows also read the base ref (the growth tests) and the clock (waivers), which the whole-tree key
+  already carries. Decision recorded in ADR 0116 (amendment 2026-11-26): no `Class::Declared`; `member-audits` can join `reuse::class_of`'s whole-tree class
+  (one line, the gate owner's file) if the exact-tree repeat is worth it.
+- **Not measured:** the child processes (`git`, shells, `./dev` started by tests), Linux and Windows, a trace of a failing run.
+
+### 2026-11-26, test-result cache: an unchanged Cargo package reuses its pass (feat/adr-0116-test-result-cache)
+
+- **What:** `./dev ci test-cache run --workspace crates --only paddock-limits,paddock-names,paddock-metrics` (nextest `ci` profile,
+  `--all-features`, debug build) with the local store (`<git common dir>/paddock-pre-push/test-cache`). Three small packages, 171 tests.
+- **Host:** Mac mini, macOS arm64, 5-minute load about 20 before the runs (1-minute 8 to 12), nothing else of mine running. Single runs,
+  not interleaved A/B pairs: an indication, not a range (rule 4 above). Debug build, because the quantity is "run or skip".
+- **Runs (worktree A, then worktree B at another commit, each with its own build folder):**
+
+| Run | Targets | Reused | Ran | nextest time |
+|---|---|---|---|---|
+| A, empty store (cold build folder) | 3 | 0 | 3 | 96.4 s |
+| B, same inputs, other worktree and commit, shadow mode | 3 | 0 (3 would be) | 3 | 68.8 s (cold build folder) |
+| B again with `--reuse` | 3 | 3 | 0 | 0.0 s |
+| B after a one-line edit to `paddock-names`, committed, `--reuse` | 3 | 2 | 1 (`paddock-names`) | 1.9 s (warm build) |
+
+- **Reading:** the key is the same in both worktrees and commits (the graph's node hash is content, not commit), so a second
+  worktree, and a train after a branch gate, skip an unchanged package. A one-line change reran only the changed package here (the
+  other two do not depend on it). The cold runs are dominated by compiling the `crates` workspace once per build folder; the cache
+  removes the tests and their per-package build, not a cold workspace build.
+- **Not measured:** a full 58-package run, CI runner classes, the shared S3 store (bucket and keys not available when this ran), the
+  wall time of a train round, interleaved A/B.
+
 ### 2026-11-24, pre-push row reuse on an unchanged tree (feat/check-result-reuse-v2)
 
 - **Commit:** `285c68695` (one commit over train 2026-11-25-b `cfe8a8592`); the change under test is paddock-dev only
@@ -111,6 +199,22 @@ uses it, results in
   through the hook (a throw-away worktree of the same commit; the key leaves the checkout path and the build folder out, which
   `the_checkout_path_and_build_folder_are_not_in_the_key` checks), a member gate, and other machines. Raw output was kept only in the
   agent's scratch folder.
+
+### 2026-11-25, member gate reuse on a train (feat/train-gate-reruns-overlaps)
+
+- **What:** how many of a train's member-gate rows can rest on the members' own green rows, now that the `tests` and `tests-linux`
+  rows are keyed too (they were never reused before: the shared store held 447 records, none of them a tests row).
+- **Part 1, from the history (no run):** for every member merge of trains 2026-11-26-f, -g, -h and -i, whether the member's head and
+  the merge agree on each touched Cargo workspace's inputs (the workspace, `crates` for an app, `.cargo`, `lint`,
+  `rust-toolchain.toml`, `ui/projects/paddock-ui`, `.gitea`) and on `tools/paddock-dev` (the `dev` binary in every key). Script:
+  `git diff --quiet <merge>^2 <merge> -- <inputs>` per workspace.
+- **Numbers (part 1):** 26 member merges that touch a Cargo workspace (75 workspace checks); 0 workspaces whose inputs match, and the `dev` differs in all 26.
+  Every member was branched from an older main than its train, and main changed `crates`, the apps and `tools/paddock-dev` in
+  between (13 of the 18 merges of trains f and g changed `tools/paddock-dev`), so the member's green rows are of another tree.
+- **Notes:** with these inputs the reuse would have rerun every row on these trains, whatever the key held for `dev`. Two changes
+  follow (user, 2026-11-25): a member runs its final member gate after merging origin/main (AGENTS.md, "Before hand-back"), and the
+  `dev` hash keys only the rows `dev` computes itself, so a member that changes `tools/paddock-dev` no longer reruns the Cargo,
+  Clippy and tests rows of the others.
 
 ### 2026-11-16, unit suites with the test leak detector (feat/test-leak-detector)
 
@@ -179,7 +283,7 @@ failing mode.
 - **Load:** 1-minute load 9.0 to 9.8 at the start and end of the runs (other agents' builds were running)
 - **Build:** the `./dev` wrapper's binary, unchanged by the measurement
 - **Corpus:** this repository: 13,163 tracked files; the cone is `crates,ui,scripts,docs,tools,apps/spotter`
-- **Command:** `HEAVY_LOCK_DIR=/Volumes/d8sst7/dev-targets/heavy-slots engineering-rules/scripts/heavy.sh ./dev worktree add <name> --base origin/main -b <branch> --owner implementer:meas --root /Volumes/d8sst7/dev-targets/wt --agent <id> [--sparse crates,ui,scripts,docs,tools,apps/spotter]`, then `du -sk <folder>`
+- **Command:** `HEAVY_LOCK_DIR=/Volumes/d8sst7/dev-targets/heavy-slots engineering-playbook/scripts/heavy.sh ./dev worktree add <name> --base origin/main -b <branch> --owner implementer:meas --root /Volumes/d8sst7/dev-targets/wt --agent <id> [--sparse crates,ui,scripts,docs,tools,apps/spotter]`, then `du -sk <folder>`
 - **Runs:** 3 runs of each, interleaved; median and range of the wall time as `date` differences; disk is the same every run
 - **Numbers:**
 
@@ -214,6 +318,38 @@ failing mode.
 - **Derived limits (ER-12):** `WAIT_BACKSTOP` = 2 x 13 x 1,122 s (the slowest healthy row, "Doctest row of the push gate") = 29,172 s (8 h 6 min); the member gate's outer `TIMEOUT` is 24 h, 15 times the longest push gate run seen (95 min). Both are backstops for a hung client or gate: the judgement is the row cap and the queue's progress.
 - **Holders count while they live:** a holder whose record is inside the cap its own row lives under (the waiter's `--run-max`, `ROW_CAP` + grace, 3,675 s) is progress by itself, so a waiter behind a healthy 31 to 60 minute step is not stalled; past the cap it is not live, and the same picture ends the wait a stall limit later.
 - **Notes:** the basis of `QUEUE_STALL` (30 min, 1,800 s) in `tools/paddock-dev/src/pre_push/exec.rs`: over the longest gap seen, so a queue that moves is never ended. A holder that runs longer is ended by its own row cap. The per-push totals it replaces (15 min of run, 30 min of queue) were exceeded by three pushes on 2026-11-21 with no row running too long: 13, 14 and 15 rows, and 5 rows, were not measured. Not measured: the gaps of a quiet machine.
+
+### 2026-11-24, scope grace: from the stop request to the exit (feat/adr-0119-wp1-scope)
+
+- **Commit:** 9f6b241dc plus the uncommitted ADR 0119 WP-1 change (the measured code is `paddock_proc::ask` and the guardian handshake as committed)
+- **Machine:** Mac mini, Apple M4 Pro, 14 cores, 64 GB, macOS 27.2
+- **Load:** 1-minute load 27 to 35 during the runs (other agents' builds and tests)
+- **Build:** debug (the `it` test binary of paddock-proc); node v24.22.0
+- **Corpus:** stand-in children, each started, waited for until it prints `ready`, then asked to stop (`paddock_proc::ask`: SIGTERM by identity); the exit is seen through the held `Child` (`try_wait` every 0.2 ms)
+- **Command:** `cd crates && cargo nextest run -p paddock-proc --test it --run-ignored only -E 'test(measure_grace)' --no-capture -j 1` (`PADDOCK_SCOPE_GRACE_RUNS`, default 200; the trap kind and the first start run a quarter of it)
+- **Runs:** single run per kind; median, 99th percentile and worst
+- **Numbers:**
+
+  | Measure | n | Median | p99 | Worst | Verdict |
+  |---|---|---|---|---|---|
+  | Rust program, default SIGTERM action | 200 | 1.0 ms | 20.9 ms | 45.1 ms | well inside the grace |
+  | `sh` running `sleep`, default action | 200 | 0.8 ms | 4.4 ms | 6.7 ms | well inside |
+  | node program, default action | 200 | 1.7 ms | 8.4 ms | 10.4 ms | well inside |
+  | `sh` script that traps SIGTERM to clean up, one-second steps | 50 | 1.01 s | 1.02 s | 1.02 s | the worst kind: the trap runs when the current foreground command ends |
+  | first start of a process with the orphan guardian (start, guardian check, `serving` answer, child start) | 50 | 6.0 ms | 28.0 ms | 28.0 ms | far inside the 10 s `SERVING_BOUND` |
+
+- **Second run** after the WP-1 review (commit 460e7d60d plus the review round; the guardian now starts in `Scope::new`, so the
+  first-start row measures `Scope::new` plus the first start), 1-minute load 9.5 to 16.5:
+
+  | Measure | n | Median | p99 | Worst |
+  |---|---|---|---|---|
+  | Rust program, default SIGTERM action | 200 | 0.46 ms | 0.91 ms | 3.1 ms |
+  | `sh` running `sleep`, default action | 200 | 0.45 ms | 1.7 ms | 2.7 ms |
+  | node program, default action | 200 | 1.1 ms | 6.8 ms | 8.8 ms |
+  | `sh` script that traps SIGTERM, one-second steps | 50 | 1.01 s | 1.01 s | 1.01 s |
+  | `Scope::new` plus the first start, guardian included | 50 | 4.6 ms | 5.3 ms | 5.3 ms |
+
+- **Notes:** the scope's `GRACE` is 2 s (`paddock_proc::FINISH_GRACE` itself since the WP-1 review): twice the worst kind measured (a script whose step is one second), equal to `paddock_proc::FINISH_GRACE`, and paid once per scope end, since every child is asked at once. A script with longer foreground steps is ended after the grace (reported as `ended`, not `asked`). The guardian's `SERVING_BOUND` (10 s) only meets a guardian stopped before its owner check (App Tamer, a debugger); a refused guardian answers at once with end of file. Windows is not measured: `ask` sends WM_CLOSE to a program's windows and a console program refuses it, so the end there is immediate for console children. Raw output: the test's `grace:` lines, not kept.
 
 ### 2026-11-24, the conformance-line test of the CI model: main, the graph train and the cut (fix/graph-train-conformance-line-test-cost)
 
@@ -377,7 +513,9 @@ corpora are in each app's file.
 | Window weight ([`conformance/src/window-weight`](../conformance/src/window-weight)) | JS each window loads before first paint (rule 35) | `ng build --stats-json`, then `paddock-conformance window-weight [kind] [--max kB] [--record]` | The build | `windowWeight` in `paddock.conformance.json`, **not configured anywhere** | none (its check C29 was retired on 2026-11-24, configured nowhere) | — |
 | `./dev hook pre-tool-use` (RT-4, [ADR 0083](adr/0083-agents-cannot-write-outside-their-own-worktree.md) §2) | Per-call time of the installed guard binary on a PreToolUse call, the shim around it, and the binary's size growth | 300 runs of `<git-common-dir>/paddock/hooks/paddock-dev hook pre-tool-use` with a JSON call on stdin, as described in the section below (the script is not kept) | A short, a 6 KB and a malformed call | none yet (the plan expects about 4 to 6 ms) | No | [results](#hook-per-call-cost-and-binary-size-rt-4-2026-11-10) |
 | `./dev gates check` (C100, [ADR 0060](adr/0060-every-check-runs-somewhere.md)) | Run time of the meta-check: 328 checks, the CI model, 3,192 Rust files scanned, the docs | `./dev gates check` (release build of `tools/paddock-dev`) | This repository | none (ADR 0060: quote it only from here; a few seconds at most) | `ci.yml` conformance job, `nightly.yml` c100 job | [results](#2026-11-08-dev-gates-check) |
+| `./dev deps ui` (shared npm and ui/dist cache) | `npm ci` plus the ui build in a fresh worktree, before against cold and warm cache | `./dev deps ui` | This repository's root workspace | none | No | [results](#2026-11-26-shared-npm-and-uidist-cache-featnpm-ui-cache) |
 | Angular build budgets in `ui/angular.json` | Initial chunk size | `npm run build -w ui` (and each demo's build) | — | gallery 1.5 MB / 3 MB; shell-demo 500 kB / 1 MB; workbench-demo 580 kB / 1 MB (warn / error) | `ci.yml` ui jobs, through `ng build` | — |
+| `paddock_proc::scope::GRACE` ([`crates/paddock-proc/tests/it/scope.rs`](../crates/paddock-proc/tests/it/scope.rs), `measure_grace`, [ADR 0119](adr/0119-every-process-is-held-by-its-handle-and-ends-with-its-scope.md) WP-1) | Time from a stop request (SIGTERM by identity) to the exit, per kind of child; the first start with the orphan guardian | `cd crates && cargo nextest run -p paddock-proc --test it --run-ignored only -E 'test(measure_grace)' --no-capture -j 1` (Unix) | Stand-in children | none (it sets the grace constant, ER-12) | No | [2026-11-24](#2026-11-24-scope-grace-from-the-stop-request-to-the-exit-featadr-0119-wp1-scope) |
 | `./dev ci timings` (`tools/paddock-dev/src/ci_runs/timings.rs`, removed on 2026-11-24 with the command; the script `scripts/ci-timings.mjs` that made its recorded golden was deleted on 2026-11-18) | CI wall time, queueing, runners, per-step and compile/test phases, critical path (Gitea API, read-only) | `GITEA_TOKEN=… ./dev ci timings [--repos paddock] [--limit 30] [--cache DIR] [--out docs/research/2026-10-ci-timings.md] [--json-file F]` (default repo: `paddock`; the script defaulted to the old per-app repos) | Gitea run history | none | No (manual) | [research/2026-10-ci-timings.md](research/2026-10-ci-timings.md) |
 
 Not benchmarks, though the names suggest it:
@@ -2842,3 +2980,193 @@ load averages, which include the other agents and the graph train's CI.
 The cause of the plain-harness stall: a deleted working folder makes macOS's getcwd read the user temp folder (about 992,000 entries)
 for every git start, with disk0 at about 32,000 operations a second (`iostat`, 4 KB transfers). See docs/lessons.md, 2026-11-23,
 "The long paddock-dev test hangs had one cause".
+
+## Member gate: CI tests of the touched workspaces (2026-11-25, feat/member-check-touched-tests)
+
+Dev Mac (14 cores, 64 GiB), the CI image native (arm64, `tools/linux-container.sh --ci-image`, 4 CPUs, warm build volume from the
+Linux Clippy). The member is this branch itself (it touches `tools/paddock-dev` only); `./dev check --pre-push --member-gate --base
+origin/main`. Up to three rows run at once (`workers`: one at machine load 20 or more), but a push runs as many heavy steps at once as it has workers (1 until 2026-11-26, then as many as heavy's slots and the load allow, ADR 0102 amendment 2026-11-26): the rows beyond heavy's slots queue, and the cheap rows run beside them. "queued" is the wait for the machine-wide heavy slot, beside other agents' gates. (Corrected 2026-11-26: this said "three at a time through the heavy slot", which was wrong. Since feat/gate-row-timings a run prints and records a per-row table of queued s, run s and concurrency: `row-timings.tsv` in the run's log folder. The `tests-linux` rows below were removed on 2026-11-26: no container runs on this Mac.)
+
+| Row | Selected | Run | Queued | Load (1/5/15) |
+|---|---|---|---|---|
+| `tests tools/paddock-dev` (macOS, `ci` profile, 4 threads) | 2428 tests (112 skipped by the profile) | 376.1 s | 135.3 s | started at 5-minute 23.9 |
+| same, second run (clone at the branch head) | 2428 | 556.7 s (nextest 425.1 s) | 125.9 s | 42 / 19 / 21 |
+| `tests-linux tools/paddock-dev` (container, OS-scoped by module) | 1519 of 2540 (1021 not OS-conditional) | 117.2 s (nextest 85.2 s) | 374.2 s | 9 / 18 / 21 |
+| whole member gate, first run (all rows) | | 1905 s wall | | 24 / 24 / 18 at the start |
+
+Added per member that touches paddock-dev: about 380 to 560 s of macOS test run and about 120 s of container run, which run beside
+the other rows; the slot queue, not the tests, set the wall time. The OS scope (the `hostTests` placement derived from the code)
+leaves 40% of paddock-dev's tests off the container run; a pure workspace (no marked package or module) has no container run at all.
+Not measured: a `crates` member (the container would also compile the whole shared-crate workspace) and the guardian-as-user step.
+
+## Concurrent push-gate test rows on the shared Mac (2026-11-25, feat/heavy-two-slots-when-idle, base 4284e23d5)
+
+Two interleaved rounds: round 1 in the order 1, 2, 3 gates at once, round 2 in the order 3, 2, 1. r2n2 overlapped this branch's own push
+gate (mean 1-minute load 18.5) and still matched r1n2.
+
+- **Machine:** Mac mini, Apple M4 Pro, 14 cores, 64 GB, macOS 27.2, other agents running (the loads below include them).
+- **Workload, one "gate":** the push gate's `tests tools/paddock-dev` row in its own detached worktree and build folder:
+  `touch src/lib.rs`, then `CARGO_BUILD_JOBS=2 NEXTEST_TEST_THREADS=<14/n> cargo nextest run --locked --no-fail-fast` (debug, no sccache,
+  dependencies warm; rebuilds paddock-dev and its test binaries, then 2557 tests). n gates at once, each with 14/n test threads.
+- **Each batch** ran as one `./dev heavy` step and started only while the 5-minute load was under 12. Wall and CPU (user + sys of the
+  whole tree) from `/usr/bin/time -l`; load and `memory_pressure` free share sampled every 5 s.
+- **Scripts:** a batch script and a driver in the agent's scratch folder (not kept); the commands are the ones above.
+
+| Batch | Gates at once | Test threads each | Wall per gate (s) | CPU per gate (s) | Batch wall (s) | Gates per hour | Load at start (1/5/15) | Mean 1-min load | Min memory free |
+|---|---|---|---|---|---|---|---|---|---|
+| r1n1 | 1 | 14 | 149.6 | 854.9 | 150 | 24.0 | 4.6 / 8.4 / 14.8 | 11.8 | 69 % |
+| r1n2 | 2 | 7 | 244.8, 244.9 | 876.6, 880.1 | 245 | 29.4 | 7.9 / 11.2 / 13.9 | 13.9 | 69 % |
+| r1n3 | 3 | 4 | 421.1, 421.1, 417.3 | 906.0, 908.1, 899.2 | 422 | 25.6 | 18.9 / 14.5 / 14.4 | 19.7 | 68 % |
+| r2n3 | 3 | 4 | 477.5, 476.3, 477.3 | 902.1, 898.4, 903.6 | 478 | 22.6 | 4.6 / 8.4 / 12.3 | 24.3 | 68 % |
+| r2n2 | 2 | 7 | 246.7, 247.1 | 888.8, 890.4 | 247 | 29.1 | 4.5 / 11.7 / 14.6 | 18.5 | 69 % |
+| r2n1 | 1 | 14 | 146.3 | 843.7 | 146 | 24.7 | 6.4 / 11.9 / 14.3 | 13.0 | 69 % |
+
+Reading: two gates at once finished 18 to 22 % more gates per hour than one (29.1 to 29.4 against 24.0 to 24.7) for 3 to 5 % more CPU
+per gate; three at once finished fewer than two (25.6 and 22.6), with 6 to 7 % more CPU per gate than one (contention: the 1-minute load rose to about 20 on 14 cores). Memory
+was never short (68 % free at the lowest; a gate's largest process is about 1.4 GiB). So heavy caps at two slots (`MAX_AUTO_SLOTS = 2`)
+and opens the second under a 5-minute load of 0.85 x cores (11.9 here): every batch started under 12, and there two beat one; above it
+nothing measured says a second step helps. The round-1 3-gate batch started during another agent's burst (1-minute load 18.9); round 2
+repeated it from a quiet start (4.6) and was slower still (22.6 gates per hour, mean 1-minute load 24.3), so three is not a gain.
+
+## Member gate: parallel heavy rows (2026-11-26, feat/gate-two-heavy-rows)
+
+ER-20, one real gate, two runs on the same tree (this branch, 38 changed files in `tools/paddock-dev`, `docs/`, `conformance/`):
+`./dev check --pre-push --member-gate --no-reuse --base origin/main`, a Mac with 14 cores, other agents' gates running throughout.
+Serial is `PADDOCK_HEAVY_AT_ONCE=1` (the rule since 2026-11-15); parallel is the default, one heavy step per worker (3 workers, heavy's
+slots and load gate deciding). The study of train i's member gate (1 h 45 min, 64 % queue, 36 % run) is the serial baseline of the
+production gate.
+
+| Run | Wall | Load 1/5/15 at start | at end | Heavy steps at once | Failed rows |
+|---|---|---|---|---|---|
+| serial (limit 1) | 1547 s | 22.1 / 16.3 / 15.8 | 5.1 / 11.4 / 14.4 | 1 | `conformance-tests` (a load-dependent conformance test, see below) |
+| parallel (default) | 721 s | 5.1 / 11.4 / 14.4 | 44.5 / 26.0 / 18.6 | 3 | `conformance-tests` (same), `tests tools/paddock-dev` (a timing assumption in the new concurrency test, fixed: the fake now holds a batch together) |
+
+| Row | serial queued / run (s) | parallel queued / run (s) |
+|---|---|---|
+| clippy crates | 183.4 / 1.0 | 83.3 / 0.8 |
+| clippy-windows crates | 0.0 / 0.9 | 67.9 / 0.8 |
+| clippy tools/paddock-dev | 161.9 / 4.1 | 5.2 / 0.4 |
+| conformance-tests | 109.8 / 81.5 | 15.5 / 73.7 |
+| member-audits | 0.0 / 105.2 | 15.7 / 91.1 |
+| tests crates | 135.8 / 320.7 | 167.7 / 78.6 |
+| tests tools/paddock-dev | 26.2 / 325.3 | 162.4 / 450.7 |
+
+The wall time fell to 47 % (1547 s to 721 s) with three heavy steps at once; the per-row table shows where: the serial run's rows waited
+for each other (concurrent 1), the parallel run's started beside two others (concurrent 3), and the queued seconds stayed a separate
+column, so waiting for the machine is still told from running. The two runs are not a controlled A/B: the load differed (the serial run
+started at 22, the parallel one at 5 and ended at 44 because the gate and other agents were all running), and the clippy rows reuse a
+warm build folder, so their run times are about one second. `tests tools/paddock-dev` ran 450.7 s in parallel against 325.3 s serial
+because its threads were heavy's share of the cores (`step_threads`: cores divided by the steps in flight) beside two other test rows.
+One pair is a measurement, not a distribution (ER-28): repeat it on a quiet machine before quoting the factor. A failed
+`conformance-tests` row in both runs is `verify reads the real dev self hash --json shape`, which took 30 to 37 s under load; it is not
+touched by this change.
+
+## Git fixture repositories of the ci_runs tests (2026-11-26, perf/slow-git-tests, base 8333e185f)
+
+Train n's Windows paddock-dev job (CI run 9118) spent 710 s of its test time in 75 tests over 5 s; the slowest were `ci_runs::trial::tests::*`
+(13 to 24 s each) and the `ci_runs::green::tests::*` that read `train_g_shape` (9 to 14 s). Cause, confirmed by reading the fixtures: each test
+built its own repository with 14 to 17 `git` starts (trial's `world()`: 17; green's `train_g_shape()`: 14) before its own work, and a git start
+costs about 45 ms on the Windows runner against about 6 ms here (rule 85's measure of 2026-11-18). The test-side fix: each fixture is built
+once per machine and recipe in `<temp>/paddock-git-fixture-templates/<name>-<hash of the recipe source>` (`paddock_testkit::git_fixture::template`, the shared module since rule 102, 712 KB
+in all) and each test copies it with plain file copies (`copy_tree`): no git start, no shared mutable state. nextest runs each test in its own
+process, so a `OnceLock` per binary would have shared nothing. Budget tests: `a_world_is_a_private_copy_of_the_template_and_costs_no_git_start`
+(a counter of git starts on the test's thread: a world costs 0) and `a_shape_is_a_private_copy_of_its_template_with_the_same_commits`.
+
+- **Machine:** Mac mini, Apple M4 Pro, 14 cores, macOS 27.2, shared. Debug build, `cargo nextest run` of the 56 tests of the filter
+  (`ci_runs::trial::tests`, `ci_runs::green::tests`, the clean-revert test, the syn real-tree test), warm build folder.
+- **Load:** 1/5/15-minute load at the start 20.7 / 29.3 / 26.2 (before), 15.8 / 22.7 / 24.3 (after, warm templates). Not a quiet machine
+  (rule 2 above): single runs, so the times are indications; the difference in git starts is exact.
+- **Not measured on Windows:** the estimate below is the Mac ratio scaled by the start cost, not a run.
+
+| Family | Tests | Git starts of the fixture per test, before / after | Sum of test times on the Mac, before | after (templates warm) |
+|---|---|---|---|---|
+| `trial::tests` with a `world()` | 8 | 17 / 0 | 11.7 s (1.1 to 2.2 s each) | 4.7 s (0.3 to 1.2 s each) |
+| `green::tests` reading `train_g_shape` | 8 | 14 / 0 | 4.7 s (0.47 to 0.9 s each) | 1.5 s (0.07 to 0.33 s each) |
+| `dispatch_guards` clean-revert test | 1 | one repository, one test: unchanged | 0.8 s | 0.5 s (noise) |
+| `graph_on_the_real_tree_every_read_candidate_parses_with_syn` | 1 | unchanged | 10.1 s | 7.7 s (noise); the syn extract is 0.85 s and the text scan 0.38 s of it, the rest is `read_graph` (`cargo metadata`, the production path under test) |
+
+Windows estimate: a trial test of 13 to 24 s there is about 40 git starts at 45 ms plus file work; 17 of them go, so about 5 to 10 s each (the
+`prepare` and `prune` calls under test still start git); a shape test of 9 to 14 s goes to about 1 to 2 s (all its starts were the build). About
+150 s of the trial and green families' time becomes about 50 s. The first test process on a machine builds each template (the same cost as before,
+once); a cold CI job pays it once per recipe change, not per test.
+
+Left as it was: the syn test (its time is `cargo metadata`, which a shared parse would not remove, and a per-binary share does not exist under
+nextest) and `prune`'s one `merge-base --is-ancestor` per live trial ref (no bulk form answers it; commented `// per-item:`).
+
+## Local sccache: a second worktree hits the first one's entries (2026-11-26, fix/sccache-local-reuse, base 202d0a181)
+
+- **Machine:** Mac mini, Apple M4 Pro, macOS 27.2, other agents running; 1-minute load 41 to 75 at the time (an indication, not a timing).
+- **Setup:** `./dev sccache env` of this branch (debug build) on a private port, a private tool home and a fresh local disk, with the shared
+  S3 store behind it under this machine's prefix `paddock-ci/macOS-aarch64`. The base list was the 206 worktrees of the repository (the
+  list this branch computes); the main checkout and both measured worktrees were in it. `SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS` as in the tool.
+- **Workload:** `cargo build -p paddock-repo-files --lib` (dev profile, `-j 4`) in `crates/`, a fresh target folder each time (outside every
+  base), `--zero-stats` before each build. 112 compile requests executed per build (the crate and its dependencies).
+
+| Build | Worktree | Server state | L0 (disk) hits | L1 (S3) hits | L1 writes |
+|---|---|---|---|---|---|
+| 1 | A | empty disk | 0 | 0 | 109 |
+| 2 | B (another worktree, clean target) | same server | 101 | 0 | 119 |
+| 3 | B, `CARGO_INCREMENTAL=0` | same server | 101 | 0 | not recorded |
+| 4 | B, a second server with an empty disk | empty disk, same prefix | 0 | 101 | 0 |
+
+- **Reading:** a second worktree hits 101 of 112 requests, the other 11 being the crate itself, its build scripts and crates that read
+  `CARGO_MANIFEST_DIR` (kept per checkout on purpose). With an empty disk the same 101 come from the S3 store, so a worktree on
+  another machine or after a disk wipe reuses them too. `CARGO_INCREMENTAL=0` does not change a key.
+- **Local against CI:** the 112 requests of build 1 found no entry that CI had stored under the same prefix (L1 hits 0 of 112, while the
+  prefix held 1000 or more CI objects from 2026-11-19 on). So the keys of a local build and of CI's jobs do not match today, third-party
+  crates included. The difference is not `CARGO_INCREMENTAL` and not the checkout folder (bases strip it); the cause is not yet
+  identified (candidates: the command mode and profile of CI's steps, rustflags, the toolchain path). The common prefix is in place so
+  that the entries share once the keys do.
+
+## Local keys against CI's: the two CARGO variables (2026-11-26, fix/sccache-key-env, base 202d0a181)
+
+Why a local build found none of CI's compile-cache entries (the earlier block "Local sccache: a second worktree hits...": 0 of 112).
+
+- **Method:** `SCCACHE_LOG=debug` prints each compile's hash key; the key is the object's name in the S3 store
+  (`<prefix>/<k0>/<k1>/<k2>/<key>`), so a key's presence and `last-modified` say whether CI stored it. The same units were compiled with
+  `cargo nextest run -p paddock-diag -p paddock-updater --no-run` (308 keys) in four environments and each key looked up with a signed HEAD
+  (a throwaway script, not kept). A stored CI entry (`stable_deref_trait`, its `-C extra-filename` hash and the fingerprint json equal to
+  a local build's) gave a leaf crate with the same cargo unit and a different sccache key.
+- **Cause:** sccache 0.20.1 (`src/compiler/rust.rs`, `generate_hash_key`) hashes every `CARGO_*` variable of the compile except a few
+  (`CARGO_MAKEFLAGS`, `CARGO_TARGET_DIR`, `CARGO_BUILD_*`, ...). CI's jobs have `CARGO_INCREMENTAL=0` (setup-rust) and
+  `CARGO_TERM_COLOR=always` (the workflows' `env`); a local shell has neither. Not the checkout folder (bases strip it), not the registry
+  path (same HOME), not the toolchain, not the profile.
+
+| Environment of the compile | Keys among the 308 that CI had stored before 2026-11-23 |
+|---|---|
+| neither variable | 0 |
+| `CARGO_INCREMENTAL=0` only | 0 |
+| `CARGO_TERM_COLOR=always` only | 0 |
+| both | 166 |
+
+- **Fix:** the RUSTC_WRAPPER shim that `./dev sccache env` writes exports the two variables for a rustc compile (`CI_KEY_ENV`), so sccache
+  sees them whatever the caller's shell has; cargo's own environment is unchanged (no colour codes in piped output, incremental builds
+  of workspace crates stay).
+- **Cross hit, measured:** a private server (fresh disk, S3 behind it under `paddock-ci/macOS-aarch64`), this branch's shim, a worktree that
+  had never built, no CARGO variable in the shell, the same command: 294 compile requests executed, **174 L1 (S3) hits**, 0 L0, 117 misses
+  (the workspace crates, which keep their checkout path, and what no CI job built with that command), 117 writes.
+- **CI side (same branch):** setup-rust now exports both variables to `$GITHUB_ENV` from the same definition (`CI_KEY_ENV`), so every job
+  that sets up the cache has the same key class. Before it, only jobs whose workflow or job `env` had `CARGO_TERM_COLOR=always` did. Jobs
+  that call setup-rust and had it: `app-fuzz.yml` fuzz; `ci.yml` app, crate, heavy, paddock-dev; `debrief.yml` bundle, plan, plugin-sdk,
+  rust-lint, rust-test, rust-test-macos, tauri-smoke; `nightly.yml` dialog-window-probe. Jobs that called setup-rust and lacked it (a key
+  class of their own, so no sharing with the rest): `ci.yml` audit, conformance, crates, e2e, e2e-webkit, tools, ui; `nightly.yml` audit,
+  c100, escapes, generators, ipc-endpoints; `dev-tool.yml`, `heavy-release.yml` and `app-release.yml` jobs (release and tag builds never read the
+  store). The per-job `CARGO_TERM_COLOR` lines stay: they colour the log of jobs that have no cache.
+- **Limits:** Windows has no shim (the wrapper is the sccache binary), so a local Windows build does not share. The shell copy of
+  setup-rust (release path) exports the two variables too, as its twin test requires.
+
+## Pre-push reuse after the member gate, and the train-audits guard (2026-11-26, feat/reuse-member-audits)
+
+ER-20, a Mac with 14 cores. **(1) Member gate, then the push hook, on one clean tree** (`check --pre-push --member-gate --base origin/main`, then
+the hook's own form, `--refs-from-stdin` in a throw-away worktree): every row the gate ran was reused by the hook (lockfile, fmt, Clippy,
+`conformance`, `conformance-tests`, `gates-register`); only `commit-lint` (0.1 s, never reused: it reads commits) ran again, and
+`member-audits` and `tests` are member-gate-only by design. **(2) The train-audits guard's command**
+(`check --pre-push --member-gate --only member-audits,conformance --base origin/main`) on one commit: 221 s (computed), 112 s (computed
+again, because `origin/main` had moved between the two runs: a train landed), then 6 s and 6 s (both rows `reused`, `origin/main` still).
+With `member-audits` in the whole-tree class a repeat costs 6 s, not about 2 to 4 minutes. **Why rows re-ran in train o:** a whole-tree row's
+key holds the resolved tip of the base (`origin/main`), so any landing or fetch between the member gate and the push makes conformance and
+the audits run again; and a member's gate plans only its own delta (the merge's first parent as base), so rows of earlier members'
+workspaces were not in the plan of the gate that ran last. `merge check --gates --gates-base origin/main` on the last member plans the whole
+train's rows. Not changed, for a decision: keying the whole-tree rows on `merge-base(HEAD, base)` instead of the base's tip would survive
+landings, but conformance's checks that read the base's files (shrink-only lists) could then judge an older base; that trade is ER-33's.
+

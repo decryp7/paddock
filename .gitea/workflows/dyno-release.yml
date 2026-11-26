@@ -32,6 +32,10 @@ on:
         type: boolean
         default: false
 
+# The fallback switch of conformance/ci/kit.sh (WP-1): set the repository variable to shell and every kit step runs its script.
+env:
+  PADDOCK_CI_KIT: ${{ vars.PADDOCK_CI_KIT }}
+
 # A newer push to main supersedes the run still going; a tag has its own ref, so a release is never cancelled by a later push. The group differs from ci.yml's (that
 # one is called below and names this workflow too), or the called workflow would cancel its caller.
 concurrency:
@@ -206,6 +210,34 @@ jobs:
       TAURI_UPDATER_PUBKEY: ${{ secrets.PADDOCK_TAURI_UPDATER_PUBKEY }}
       APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
       RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+
+  # Release step 2c (apps/dyno/docs/releasing.md), moved here from a local OrbStack machine (user decision 2026-11-26: no VM or container on the
+  # Mac): the benchmark-unit tests on the Linux runner. They need a systemd user manager, which the CI container may not have: then
+  # `./dev ci dyno-linux-units` ends "not measured" (exit 6) and, because the job is report-only (ER-41: it blocks only after its first green run on the
+  # runner, recorded here), the run goes on. It is not part of the installers verdict (rule 54), so the release path is as before.
+  linux-units:
+    name: benchmark units (Linux, systemd user manager)
+    needs: [plan]
+    if: ${{ needs.plan.outputs.run == 'true' }}
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
+    env:
+      # A tag run builds ./dev from source (the tag rule for setup-rust and build-jobs).
+      PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+      PADDOCK_DEV_DOWNLOAD: "0"
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: ./.gitea/actions/build-jobs
+      # No S3 key: the release path holds no secret of the compile cache (C141's NO_SECRET list); sccache stays on the local disk here.
+      - uses: ./.gitea/actions/setup-rust
+      - name: Benchmark unit tests
+        shell: bash
+        run: ./dev ci dyno-linux-units
 
   # What this run proves about the installers (rule 54): "installers: built" or "installers: not built (why)" in the summary, and a
   # red run when a manual run or a tag was meant to build them and did not. The verdict reads whichever of the two installer jobs ran.

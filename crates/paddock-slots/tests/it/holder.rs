@@ -1,6 +1,6 @@
 use paddock_slots::{
     Announcement, FsLocks, HoldEnd, OwnerInfo, ReleaseLocks, SlotError, SlotId, SlotLocks,
-    acquire_first, fresh_token, hold, hold_with, release, slot_states, wait_free,
+    acquire_first, fresh_token, hold, hold_while, hold_with, release, slot_states, wait_free,
 };
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
@@ -563,4 +563,91 @@ fn control_a_holder_whose_lock_file_is_untouched_keeps_its_slot() {
         Some((id(1), HoldEnd::Expired)),
         "only the cap ends it"
     );
+}
+
+/// Runs `hold_while` with a key on a thread; the thread returns when the job folder is gone. The slot it took is the first line.
+fn keyed_hold(
+    locks: &FsLocks,
+    owner: &std::path::Path,
+    key: &str,
+) -> (std::thread::JoinHandle<Option<(SlotId, HoldEnd)>>, SlotId) {
+    let (locks, owner, key) = (locks.clone(), owner.to_path_buf(), key.to_string());
+    let (tx, rx) = std::sync::mpsc::channel::<Vec<u8>>();
+    let t = std::thread::spawn(move || {
+        let mut writer = ChannelWriter(tx);
+        hold_while(
+            &locks,
+            2,
+            &owner,
+            POLL,
+            None,
+            Duration::ZERO,
+            Some(&key),
+            &mut || true,
+            &mut writer,
+        )
+        .unwrap()
+    });
+    let said = rx.recv_timeout(LONG).unwrap();
+    let Ok(Announcement::Slot(slot, _)) = Announcement::parse(&String::from_utf8(said).unwrap())
+    else {
+        panic!("the holder announces its slot");
+    };
+    (t, slot)
+}
+
+/// A kind of job keeps its slot: A then B take s1 and s2 and end; B first takes s2 again, then A takes s1 (the order that made `crate`
+/// and `paddock-dev` change slots and miss the compile cache). Without a record it is the first free slot.
+#[test]
+fn a_keyed_holder_takes_the_slot_its_kind_held_last() {
+    let _gate = crate::share_gate();
+    let dir = tempfile::tempdir().unwrap();
+    let locks = FsLocks::new(dir.path().join("ci"));
+    let job = |n: &str| {
+        let p = dir.path().join(n);
+        std::fs::create_dir(&p).unwrap();
+        p
+    };
+    let (a1, b1) = (job("a1"), job("b1"));
+    let (ta, sa) = keyed_hold(&locks, &a1, "A");
+    let (tb, sb) = keyed_hold(&locks, &b1, "B");
+    assert_eq!((sa, sb), (id(1), id(2)), "no record: the first free slot");
+    std::fs::remove_dir(&a1).unwrap();
+    std::fs::remove_dir(&b1).unwrap();
+    for t in [ta, tb] {
+        assert_eq!(
+            t.join().unwrap().map(|(_, end)| end),
+            Some(HoldEnd::OwnerGone)
+        );
+    }
+    let (a2, b2) = (job("a2"), job("b2"));
+    let (tb, sb) = keyed_hold(&locks, &b2, "B");
+    let (ta, sa) = keyed_hold(&locks, &a2, "A");
+    assert_eq!(
+        (sb, sa),
+        (id(2), id(1)),
+        "each gets its own previous slot, whatever the order"
+    );
+    std::fs::remove_dir(&a2).unwrap();
+    std::fs::remove_dir(&b2).unwrap();
+    for t in [ta, tb] {
+        t.join().unwrap();
+    }
+}
+
+/// The kind's slot is busy: the holder takes the first free one and records that one, so the next job follows it.
+#[test]
+fn a_keyed_holder_whose_slot_is_busy_takes_a_free_one_and_records_it() {
+    let _gate = crate::share_gate();
+    let dir = tempfile::tempdir().unwrap();
+    let locks = FsLocks::new(dir.path().join("ci"));
+    locks.record_last("A", id(1)).unwrap();
+    let (_, _busy) = acquire_first(&locks, 1).unwrap().unwrap();
+    let owner = dir.path().join("a");
+    std::fs::create_dir(&owner).unwrap();
+    let (t, slot) = keyed_hold(&locks, &owner, "A");
+    assert_eq!(slot, id(2));
+    assert_eq!(locks.last_slot("A"), Some(id(2)));
+    std::fs::remove_dir(&owner).unwrap();
+    t.join().unwrap();
 }

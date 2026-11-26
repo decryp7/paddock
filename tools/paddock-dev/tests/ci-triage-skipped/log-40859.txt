@@ -1,0 +1,6 @@
+2026-11-17T21:36:23.9242037Z Job: wiki
+2026-11-17T21:37:17.5366720Z ::error::not found
+2026-11-17T21:37:17.5623047Z ##[error]Process completed with exit code 1.
+2026-11-17T21:37:33.8162073Z [32;1m    Starting[0m [1m53[0m tests across [1m3[0m binaries
+2026-11-17T21:37:34.1430467Z [32;1m     Summary[0m [   0.327s] [1m53[0m tests run: [1m53[0m [32;1mpassed[0m, [1m0[0m [33;1mskipped[0m
+2026-11-17T21:37:35.2020858Z ##[error]Process completed with exit code 1.

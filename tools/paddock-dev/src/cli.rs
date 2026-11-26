@@ -1,7 +1,8 @@
 use crate::{
-    audit, check, check_ids, ci_build_env, ci_build_jobs, ci_host, ci_isolation, ci_run, ci_runs, ci_rust_pin, ci_s3_guard, ci_setup_rust,
-    disk, gates, generators, golden_cmd, heavy_cmd, heavy_install, hook, input_hash, ipc_endpoints, lessons_driver, load, local_sccache,
-    locks, locks_guard, merge_check, places, plan_cmd, pr, pre_push, queue, release_isolation, slots, wait, worktree,
+    audit, check, check_ids, ci_build_env, ci_build_jobs, ci_dyno_linux_units, ci_host, ci_isolation, ci_run, ci_runs, ci_rust_pin,
+    ci_s3_guard, ci_setup_rust, deps_cache, disk, gates, generators, heavy_cmd, heavy_install, hook, input_hash, ipc_endpoints,
+    lessons_driver, load, local_sccache, locks, locks_guard, merge_check, places, plan_cmd, pr, pre_push, queue, release_isolation, slots,
+    test_cache, test_features, wait, worktree,
 };
 use clap::{Args, Parser, Subcommand};
 use paddock_cli::{CliError, Exit, Format, Report, finish};
@@ -34,15 +35,13 @@ enum Command {
     },
     /// Wait, with a limit, for a plock job, a process, a line in a file or a CI run. Use it instead of `pgrep -f` loops.
     Wait(wait::WaitArgs),
-    /// Run a command through the machine-wide heavy slot (ER-24), found the way `check --pre-push` finds it; git hooks use it.
-    Heavy(heavy_cmd::HeavyArgs),
-    /// Install the `heavy` binary of a release into `<dev-targets>/heavy/bin`: downloads the asset for this OS, checks its SHA256SUMS entry, renames it into place, records the version.
-    HeavyInstall(heavy_install::InstallArgs),
-    /// Golden files: `confirm <test filter>` runs the tests on this machine and in the CI image as root; passes only if both pass.
-    Golden {
-        #[command(subcommand)]
-        command: golden_cmd::GoldenCommand,
-    },
+    /// Run a command through the machine-wide throttle slot (ER-24), found the way `check --pre-push` finds it; git hooks use it.
+    /// `./dev heavy` is the old name: it still works and prints a one-line deprecation.
+    #[command(alias = "heavy")]
+    Throttle(heavy_cmd::ThrottleArgs),
+    /// Install the `throttle` binary of a release into `<dev-targets>/throttle/bin`: downloads the asset for this OS, checks its SHA256SUMS entry, renames it into place, records the version.
+    #[command(alias = "heavy-install")]
+    ThrottleInstall(heavy_install::InstallArgs),
     /// One line for the coordinator: start, hold or stop for new agents, from the load, the free disk of the dev-targets folder and the CI queue (ER-24).
     Load(load::LoadArgs),
     /// The machine's dev folders, derived from `git config paddock.worktreeRoot` (docs/dev-setup.md): dev-targets, dev-disk,
@@ -89,6 +88,12 @@ enum Command {
     Sccache {
         #[command(subcommand)]
         command: SccacheCommand,
+    },
+    /// The shared cache of `node_modules` and `ui/dist`: `install` and `ui` give this worktree a copy-on-write clone of a result built
+    /// once per content key under `<dev-targets>/cache/npm`, or build it once.
+    Deps {
+        #[command(subcommand)]
+        command: deps_cache::DepsCommand,
     },
     /// Disk watch and clean-up: free-space check, usage report, scan, owner records, clean.
     Disk {
@@ -165,22 +170,11 @@ enum CheckCommand {
         #[arg(long)]
         out: Option<PathBuf>,
     },
-    /// ER-9's fast gates for what this push changes (fmt, host and Windows Clippy, Linux Clippy in the CI image, conformance,
+    /// ER-9's fast gates for what this push changes (fmt, host and Windows Clippy, conformance,
     /// commit-lint, lockfiles `--locked`), the commands CI runs, in parallel and bounded by load. A gate that could not run
     /// is "not measured" (exit 6), never a pass; a failure is one line with its next step (exit 5). The pre-push hook runs it.
     #[command(name = "pre-push", long_flag = "pre-push")]
     PrePush(pre_push::PrePushArgs),
-    /// Builds the Linux Clippy's dependencies in the CI image's kept volume (one container run per workspace, no budget, live
-    /// output), so the pre-push row only sees warm runs. Default: every Cargo workspace. Run it once per
-    /// workspace, and again after a CI image bump (the target folder is keyed by ci-image/VERSION) or a large dependency change; a push that finds the volume cold is "not measured". The kept volume `paddock-linux-target-arm64` grows with every workspace and image version (size: docs/benchmarks.md, "Pre-push Linux Clippy"); `bash tools/linux-container.sh --id paddock --clean` removes it.
-    #[command(name = "warm-linux", long_flag = "warm-linux")]
-    WarmLinux {
-        /// Workspace folders to warm (`crates`, `apps/dyno`, ...).
-        workspaces: Vec<String>,
-        /// The repository root (default: the folder containing .git, found from the current folder).
-        #[arg(long)]
-        root: Option<PathBuf>,
-    },
     /// The next free conformance check id, read from the working tree, every local branch, every branch of origin as the
     /// remote has it now (git ls-remote) and conformance/reserved/ (ER-21: two branches took the same id five times). `--reserve <branch>` takes the id on origin at once (a push of refs/paddock/check-ids/C<n>, which only one agent can create) and writes the reservation file.
     NewId {
@@ -201,6 +195,18 @@ enum CheckCommand {
         #[arg(long)]
         root: Option<PathBuf>,
     },
+    /// C170 (rule 99): no released binary (each app's Tauri package and every `bundle.externalBin`, and paddock-setup) is built
+    /// with a test feature (`testing`, `test-support`, ...): `cargo tree -e normal` per binary. Report-only until its first green
+    /// run (ER-41); a probe that cannot see is "check broken" (exit 7).
+    #[command(name = "test-features")]
+    TestFeatures {
+        /// Only this app's binaries (default: every app and paddock-setup).
+        #[arg(long)]
+        app: Option<String>,
+        /// The repository root (default: the folder containing .git, found from the current folder).
+        #[arg(long)]
+        root: Option<PathBuf>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -213,7 +219,11 @@ enum MergeCommand {
     Check(MergeCheckArgs),
     /// Before merging the train into a member branch: list the commands that re-apply the member's own work the train reverted
     /// (`git revert <sha>`, git's "revert a faulty merge"; run them after `git merge <train>`), and warn about reverts of other
-    /// branches' merges the member holds. Read-only: runs nothing. Run it before the merge of the train.
+    /// branches' merges the member holds. Run it before the merge of the train: it changes nothing. Run it again after the merge and it
+    /// also runs the fast static rows on the sync tip (`check --pre-push --only conformance,gates-register,clippy,clippy-windows
+    /// --base <train>`); a failing row is exit 5 (6 not measured) with the rows and the next step, unless `--no-static` says why not. Once
+    /// they pass it dispatches the member's own CI trial: it pushes the sync tip as `sync/<member>` (integrator role only) and runs `ci dispatch ci.yml
+    /// --trial sync/<member> --onto <train>` (the affected jobs of the member on the train), printing the run id, unless `--no-trial` says why not.
     SyncMember(SyncMemberArgs),
     /// Git's merge driver of docs/lessons.md (`merge=lessons`, set by `./dev hooks install`): `./dev merge lessons-driver %O %A %B`.
     /// Git's union merge of two appended sections, then the blank line it drops before a `## ` heading put back. The result is
@@ -238,6 +248,16 @@ struct SyncMemberArgs {
     /// The member's branch name (default: the branch HEAD is on).
     #[arg(long)]
     member: Option<String>,
+    /// Do not run the static rows on the sync tip; the reason is printed (like `merge check --old-base-anyway`).
+    #[arg(long, value_name = "REASON")]
+    no_static: Option<String>,
+    /// Do not dispatch the member's own CI trial (the affected jobs of the member on the train, `ci dispatch --trial`); the reason is
+    /// printed. After the static rows pass the trial is dispatched from the sync tip, pushed as `sync/<member>` (integrator role only); `merge check --gates` reads it.
+    #[arg(long, value_name = "REASON")]
+    no_trial: Option<String>,
+    /// The longest the trial's dispatch waits for a busy runner (default 30m).
+    #[arg(long, value_name = "DURATION", default_value = merge_check::trial_dispatch::DEFAULT_MAX)]
+    trial_max: String,
 }
 
 #[derive(Subcommand)]
@@ -294,6 +314,18 @@ struct MergeCheckArgs {
     /// Any other finding stays a finding for a person to answer.
     #[arg(long, value_name = "FILE")]
     write_reverted: Option<PathBuf>,
+    /// Emergency override of the old-base block: merge a member that lacks the train's base anyway, for this reason (required,
+    /// printed with the result). The default is an error that says to merge origin/main into the member and rerun its gate.
+    #[arg(long, value_name = "REASON")]
+    old_base_anyway: Option<String>,
+    /// With `--gates`: do not read the member's own CI trial run (`merge sync-member` dispatches it); the reason is required and printed
+    /// (like `--old-base-anyway`). A red trial otherwise blocks the member, a running one is not a pass.
+    #[arg(long, value_name = "REASON")]
+    no_trial: Option<String>,
+    /// With `--gates`: measure the member gate from this ref (`origin/main`) instead of the merge's first parent, so it plans the whole
+    /// train's rows and leaves a pass for each: the push hook and the train-audits guard then reuse them on the same tree.
+    #[arg(long, value_name = "REF")]
+    gates_base: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -336,6 +368,10 @@ enum CiCommand {
     /// The compiler a release job builds with is the exact version `rust-toolchain.toml` pins (`rustc --version` against its `channel`, read
     /// with the TOML parser): one `::error::` line naming both versions when they differ or the channel floats.
     RustPin(ci_rust_pin::RustPinArgs),
+    /// Dyno's release step 2c in CI (ported from the shell script of chore/dyno-linux-units-on-ci, which never landed): the benchmark-unit tests (`cargo test -p
+    /// dyno-agent --test bench_units -- --ignored`) in a systemd user manager. No manager is exit 6, not measured, never a pass; failing
+    /// tests are exit 1.
+    DynoLinuxUnits(ci_dyno_linux_units::DynoLinuxUnitsArgs),
     /// CARGO_BUILD_JOBS and NEXTEST_TEST_THREADS for the job: the runner's share of the host (the port of
     /// conformance/ci/build-jobs.sh). Assignments to $GITHUB_ENV (or standard output without it), the reason on standard error.
     BuildJobs(ci_build_jobs::BuildJobsArgs),
@@ -368,11 +404,20 @@ enum CiCommand {
     /// over a quarter of its stop, from a run's job logs or a saved nextest output. Report-only (exit 0) unless --fail-on-findings (5);
     /// 6 when no whole nextest run of paddock-dev was read.
     TestCost(ci_runs::TestCostArgs),
+    /// Cancels one CI run by the id `./dev ci dispatch` printed, through that run's own cancel URL (never "the newest run", ER-51). A
+    /// cancelled run reads as "cancelled: not measured". Exit 0 sent or already finished, 6 not measured.
+    Cancel(ci_runs::CancelArgs),
+    /// May the commit land (ER-49)? Needs the complete green CI run AND the green local slow rows (`./dev check --pre-push --member-gate
+    /// --set slow`) on the same commit. Exit 0 landable, 5 refused, 6 not held (an unfinished or missing half is never a pass).
+    LandingHeld(ci_runs::LandingHeldArgs),
     /// Is there a full green run of a workflow on a commit? The one reader of the runs for that verdict (the tag workflow asks
     /// it). A run counts if it is a push to main or its plan job logged `plan mode: full=true`; the newest full run decides.
     /// Exit 0 full green (with `--landing` also green with fix items: FLAKY tests in untouched code), 5 red, only partial runs, or
     /// fix items without `--landing` (a tag needs a run without them), 6 not measured (never a pass).
     Verdict(ci_runs::VerdictArgs),
+    /// What the member's own trial run says (the run `./dev merge sync-member` dispatched with `ci dispatch --trial`): `green` (exit 0),
+    /// `red` (5), `running`, `no-run` or `not-measured` (6, never a pass). Read by `merge check`.
+    TrialVerdict(ci_runs::TrialVerdictArgs),
     /// Records the fix items of a run that is green with fix items (FLAKY tests of crates and apps the change did not reach, ER-12) in
     /// docs/lessons.md, once whatever the number of calls: the call a landing makes on the landed commit, the queue's or an
     /// integrator's by hand. Exit 0 recorded or already recorded (or nothing to record on a plain green), 5 red or partial, 6 not measured.
@@ -380,6 +425,9 @@ enum CiCommand {
     /// The cache keys of the last runs that no job ever saved, read from the `cache-report:` lines of the job logs (ADR 0115).
     /// Report-only (exit 0) unless `--fail-on-never-saved` (5); no report line in the window exits 6, check broken.
     CacheAudit(ci_runs::CacheAuditArgs),
+    /// The test-result cache (ADR 0116): `run` the nextest of a Cargo workspace with each unchanged package's pass reused, `lookup` what
+    /// would be reused, or `audit` the local store. Shadow mode (report-only) until docs/test-cache.toml records two green train runs.
+    TestCache(test_cache::cmd::TestCacheArgs),
     /// Whether a scheduled run ends early because a train's dispatch run is queued or running (skip=true|false to
     /// GITHUB_OUTPUT). Fails open: an unreadable API lets the run proceed, with a warning.
     ScheduleSkip(ci_runs::ScheduleSkipArgs),
@@ -647,6 +695,9 @@ pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
                     generators: !a.no_generators,
                     gates: a.gates,
                     write_reverted: a.write_reverted,
+                    old_base_anyway: a.old_base_anyway,
+                    no_trial: a.no_trial,
+                    gates_base: a.gates_base,
                 },
                 out,
                 err,
@@ -742,6 +793,18 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
             command: CiCommand::RustPin(a),
         } => ci_rust_pin::command(&a),
         Command::Ci {
+            command: CiCommand::DynoLinuxUnits(a),
+        } => ci_dyno_linux_units::command(&a),
+        Command::Ci {
+            command: CiCommand::TrialVerdict(a),
+        } => ci_runs::trial_verdict(&a),
+        Command::Ci {
+            command: CiCommand::Cancel(a),
+        } => ci_runs::cancel_cmd(&a),
+        Command::Ci {
+            command: CiCommand::LandingHeld(a),
+        } => ci_runs::landing_held(&a),
+        Command::Ci {
             command: CiCommand::Verdict(a),
         } => ci_runs::verdict(&a),
         Command::Ci {
@@ -750,6 +813,9 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
         Command::Ci {
             command: CiCommand::CacheAudit(a),
         } => ci_runs::cache_audit(&a),
+        Command::Ci {
+            command: CiCommand::TestCache(a),
+        } => test_cache::cmd::command(&a),
         Command::Ci {
             command: CiCommand::Dispatch(a),
         } => ci_runs::dispatch(&a),
@@ -766,9 +832,8 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
             command: CiCommand::GuardRecord(a),
         } => ci_runs::guard_record(&a),
         Command::Wait(a) => wait::command(&a),
-        Command::Heavy(a) => heavy_cmd::command(&a),
-        Command::HeavyInstall(a) => heavy_install::command(&a),
-        Command::Golden { command } => golden_cmd::command(command),
+        Command::Throttle(a) => heavy_cmd::command(&a),
+        Command::ThrottleInstall(a) => heavy_install::command(&a),
         Command::Load(a) => load::command(&a),
         Command::Places(a) => places::command(&a),
         Command::Audit { command } => audit::command(command),
@@ -821,15 +886,16 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
             command: CheckCommand::PrePush(a),
         } => pre_push::command(&a),
         Command::Check {
-            command: CheckCommand::WarmLinux { workspaces, root },
-        } => pre_push::warm::command(&root, &workspaces),
-        Command::Check {
             command: CheckCommand::NewId { reserve, root },
         } => check_ids::command(root, reserve),
         Command::Check {
             command: CheckCommand::IpcEndpoints { tag, root },
         } => ipc_endpoints::command(root, tag),
+        Command::Check {
+            command: CheckCommand::TestFeatures { app, root },
+        } => test_features::command(root, app),
         Command::Worktree { command } => worktree::command(command),
+        Command::Deps { command } => deps_cache::command(command),
         Command::Sccache {
             command: SccacheCommand::Env,
         } => {
@@ -837,7 +903,11 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
             for w in local_sccache::shell_warnings(&env) {
                 eprintln!("{w}");
             }
-            let lines = local_sccache::prepare_and_say(&env, local_sccache::Install::OnDemand).map(|r| local_sccache::shell_lines(&r)).unwrap_or_default();
+            let ready = local_sccache::prepare_and_say(&env, local_sccache::Install::OnDemand);
+            if let Some(r) = &ready {
+                local_sccache::say_machine_config(&env, r);
+            }
+            let lines = ready.map(|r| local_sccache::shell_lines(&r)).unwrap_or_default();
             Ok(Report::new(serde_json::json!({ "lines": lines }), lines.join("\n")))
         }
         Command::Disk { command } => disk::command(command),
@@ -853,10 +923,22 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
             generators: !a.no_generators,
             gates: a.gates,
             write_reverted: a.write_reverted,
+            old_base_anyway: a.old_base_anyway,
+            no_trial: a.no_trial,
+            gates_base: a.gates_base,
         }),
         Command::Merge {
             command: MergeCommand::SyncMember(a),
-        } => merge_check::sync_member::command(a.root.as_deref(), &a.train, a.member.as_deref()),
+        } => merge_check::sync_member::command(
+            a.root.as_deref(),
+            &a.train,
+            a.member.as_deref(),
+            &merge_check::sync_member::Options {
+                no_static: a.no_static.as_deref(),
+                no_trial: a.no_trial.as_deref(),
+                trial_max: &a.trial_max,
+            },
+        ),
         Command::Merge {
             command: MergeCommand::LessonsDriver { base, ours, theirs },
         } => lessons_driver::command(&base, &ours, &theirs),

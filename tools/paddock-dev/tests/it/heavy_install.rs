@@ -1,4 +1,4 @@
-//! `dev heavy-install` against a fake release server (a std listener serving files): a good checksum installs atomically and records
+//! `dev throttle-install` against a fake release server (a std listener serving files): a good checksum installs atomically and records
 //! the version, a bad checksum is refused with an `::error::` line and installs nothing, a rerun of the same version downloads nothing,
 //! and the token reaches the server as a header and never the output.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
@@ -85,7 +85,7 @@ fn binary() -> &'static [u8] {
     static BYTES: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
     BYTES.get_or_init(|| {
         let d = tempfile::tempdir().unwrap();
-        let installed = StandIn::new(d.path(), "heavy").stdout("heavy-test").install().unwrap();
+        let installed = StandIn::new(d.path(), "throttle").stdout("throttle-test").install().unwrap();
         std::fs::read(installed.program()).unwrap()
     })
 }
@@ -99,8 +99,8 @@ fn release(sum: &str) -> BTreeMap<String, Vec<u8>> {
     let arch = std::env::consts::ARCH;
     let asset = asset_name(VERSION, os, arch).expect("this machine has a release asset");
     BTreeMap::from([
-        (format!("/heavy-v{VERSION}/{asset}"), binary().to_vec()),
-        (format!("/heavy-v{VERSION}/SHA256SUMS"), format!("{sum}  {asset}\n").into_bytes()),
+        (format!("/throttle-v{VERSION}/{asset}"), binary().to_vec()),
+        (format!("/throttle-v{VERSION}/SHA256SUMS"), format!("{sum}  {asset}\n").into_bytes()),
     ])
 }
 
@@ -120,10 +120,10 @@ fn run(dir: &std::path::Path, base: &str, token: Option<&str>) -> Result<Done, S
 #[test]
 fn a_good_checksum_installs_atomically_with_the_version_recorded_and_the_token_only_as_a_header() {
     let d = tempfile::tempdir().unwrap();
-    let dir = d.path().join("heavy");
+    let dir = d.path().join("throttle");
     let server = Server::start(release(&hex(binary())));
     let done = run(&dir, &server.base, Some("s3cret-token")).unwrap();
-    let bin = dir.join("bin/heavy");
+    let bin = dir.join("bin/throttle");
     assert_eq!(done, Done::Installed(bin.clone()));
     assert_eq!(std::fs::read(&bin).unwrap(), binary());
     {
@@ -150,53 +150,56 @@ fn a_good_checksum_installs_atomically_with_the_version_recorded_and_the_token_o
 #[test]
 fn a_bad_checksum_is_refused_with_an_error_line_and_installs_nothing() {
     let d = tempfile::tempdir().unwrap();
-    let dir = d.path().join("heavy");
+    let dir = d.path().join("throttle");
     let server = Server::start(release(&hex(b"something else")));
     let err = run(&dir, &server.base, None).unwrap_err();
-    assert!(err.starts_with("::error::heavy-install: the downloaded heavy-9.9.9-"), "{err}");
+    assert!(
+        err.starts_with("::error::throttle-install: the downloaded throttle-9.9.9-"),
+        "{err}"
+    );
     assert!(
         err.contains("SHA256SUMS says") && err.contains("it is not installed") && err.contains("Next step"),
         "{err}"
     );
-    assert!(!dir.join("bin/heavy").exists(), "nothing installed");
+    assert!(!dir.join("bin/throttle").exists(), "nothing installed");
     assert!(!dir.join("VERSION").exists(), "nothing recorded");
     // A release that does not carry the asset is an error too, not an install.
     let server = Server::start(BTreeMap::from([(
-        format!("/heavy-v{VERSION}/SHA256SUMS"),
-        b"00  heavy-other\n".to_vec(),
+        format!("/throttle-v{VERSION}/SHA256SUMS"),
+        b"00  throttle-other\n".to_vec(),
     )]));
     let err = run(&dir, &server.base, None).unwrap_err();
     assert!(err.contains("does not list"), "{err}");
     let server = Server::start(BTreeMap::new());
     let err = run(&dir, &server.base, None).unwrap_err();
-    assert!(err.starts_with("::error::heavy-install: cannot download"), "{err}");
+    assert!(err.starts_with("::error::throttle-install: cannot download"), "{err}");
 }
 
 #[test]
 fn a_rerun_of_the_same_version_downloads_nothing_and_a_changed_binary_is_installed_again() {
     let d = tempfile::tempdir().unwrap();
-    let dir = d.path().join("heavy");
+    let dir = d.path().join("throttle");
     let server = Server::start(release(&hex(binary())));
     run(&dir, &server.base, None).unwrap();
     let first = server.count();
     assert_eq!(
         run(&dir, &server.base, None).unwrap(),
-        Done::AlreadyInstalled(dir.join("bin/heavy"))
+        Done::AlreadyInstalled(dir.join("bin/throttle"))
     );
     assert_eq!(server.count(), first, "no request on the rerun");
     // The installed file was changed under us: it is not the recorded one, so it is installed again.
-    std::fs::write(dir.join("bin/heavy"), b"tampered").unwrap();
-    assert_eq!(run(&dir, &server.base, None).unwrap(), Done::Installed(dir.join("bin/heavy")));
-    assert_eq!(std::fs::read(dir.join("bin/heavy")).unwrap(), binary());
+    std::fs::write(dir.join("bin/throttle"), b"tampered").unwrap();
+    assert_eq!(run(&dir, &server.base, None).unwrap(), Done::Installed(dir.join("bin/throttle")));
+    assert_eq!(std::fs::read(dir.join("bin/throttle")).unwrap(), binary());
 }
 
 #[test]
 fn a_plain_http_release_off_this_machine_and_a_bad_version_are_refused_before_any_request() {
     let d = tempfile::tempdir().unwrap();
-    let dir = d.path().join("heavy");
+    let dir = d.path().join("throttle");
     let err = run(&dir, "http://dev.decryptology.net/decryp7/paddock/releases/download", Some("t")).unwrap_err();
     assert!(
-        err.starts_with("::error::heavy-install: ") && err.contains("not an https URL") && err.contains("Next step"),
+        err.starts_with("::error::throttle-install: ") && err.contains("not an https URL") && err.contains("Next step"),
         "{err}"
     );
     let env = HashMap::from([("PATH".to_string(), std::env::var("PATH").unwrap_or_default())]);
@@ -217,7 +220,7 @@ fn a_plain_http_release_off_this_machine_and_a_bad_version_are_refused_before_an
 #[test]
 fn the_download_folder_of_a_gone_run_is_swept_and_the_work_folder_is_private_and_gone_after() {
     let d = tempfile::tempdir().unwrap();
-    let dir = d.path().join("heavy");
+    let dir = d.path().join("throttle");
     std::fs::create_dir_all(dir.join(".download.4000000000")).unwrap();
     std::fs::write(
         dir.join(".download.4000000000/curl.cfg"),
@@ -225,7 +228,7 @@ fn the_download_folder_of_a_gone_run_is_swept_and_the_work_folder_is_private_and
     )
     .unwrap();
     std::fs::create_dir_all(dir.join("bin")).unwrap();
-    std::fs::write(dir.join("bin/heavy.old.1"), "old").unwrap();
+    std::fs::write(dir.join("bin/throttle.old.1"), "old").unwrap();
     let server = Server::start(release(&hex(binary())));
     run(&dir, &server.base, Some("tok")).unwrap();
     let mut left: Vec<String> = std::fs::read_dir(&dir)
@@ -239,5 +242,5 @@ fn the_download_folder_of_a_gone_run_is_swept_and_the_work_folder_is_private_and
         ["VERSION", "bin"],
         "the dead run's folder (and its config) is swept, ours is gone: {left:?}"
     );
-    assert!(!dir.join("bin/heavy.old.1").exists());
+    assert!(!dir.join("bin/throttle.old.1").exists());
 }

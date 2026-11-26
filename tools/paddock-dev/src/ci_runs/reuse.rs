@@ -22,6 +22,7 @@
 use super::client::Client;
 use super::logfind;
 use super::verdict::{self, Verdict};
+use crate::job_outcome::JobOutcome;
 
 /// What the check decided.
 #[derive(Debug, Clone, PartialEq)]
@@ -76,7 +77,7 @@ fn clean_of_flaky(client: &mut Client, run: u64) -> Result<usize, String> {
     let mut read = 0;
     for job in jobs
         .iter()
-        .filter(|j| !j.is_caller() && !j.never_ran() && j.conclusion != "skipped")
+        .filter(|j| !j.is_caller() && !j.never_ran() && j.outcome != JobOutcome::Skipped)
     {
         match client.log(job.id) {
             Ok(Some(log)) => {
@@ -99,46 +100,64 @@ fn clean_of_flaky(client: &mut Client, run: u64) -> Result<usize, String> {
     Ok(read)
 }
 
-/// Decides for `workflow` on `sha`; `current` is the asking run's id (left out of the verdict). The basis is the verdict's: the declared
-/// scope once its producer is recorded, the old line before (ER-41).
-pub fn decide(client: &mut Client, workflow: &str, sha: &str, current: Option<u64>) -> Reuse {
-    decide_with(client, workflow, sha, current, verdict::scope_decisive(workflow))
+/// Decides for `workflow` on `sha`; `current` is the asking run's id (left out of the verdict); `before` is main's tip before this push
+/// (the push event's `before`, [`super::green::push_before`]). The basis is the verdict's: the declared scope once its producer is
+/// recorded, the old line before (ER-41).
+pub fn decide(client: &mut Client, workflow: &str, sha: &str, current: Option<u64>, before: Option<&str>) -> Reuse {
+    let root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    decide_with(client, workflow, sha, current, verdict::scope_decisive(workflow), &root, before)
 }
 
-/// [`decide`] with the basis given.
-pub fn decide_with(client: &mut Client, workflow: &str, sha: &str, current: Option<u64>, scope: bool) -> Reuse {
-    let root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+/// [`decide`] with the basis and the checkout given. The push's base is searched on main's own line ([`super::green::main_line`]): a
+/// train lands by fast-forward, so the first-parent line of `sha` is the train's and never holds main's previous tips.
+pub fn decide_with(
+    client: &mut Client,
+    workflow: &str,
+    sha: &str,
+    current: Option<u64>,
+    scope: bool,
+    root: &std::path::Path,
+    before: Option<&str>,
+) -> Reuse {
     decide_with_touched(
         client,
         workflow,
         sha,
         current,
         scope,
-        &mut || super::green::first_parent_before(&root, sha),
-        &mut |c, s| super::green::touched_in(c, workflow, &root, s, scope, None),
+        &mut |tips| super::green::main_line(root, sha, false, before, tips),
+        &mut |c, s| super::green::touched_in(c, workflow, root, s, scope, None),
+        &mut |from, base| super::green::diff_covers(root, from, base, sha),
     )
 }
 
-/// [`decide_with`] with the way to read the first-parent commits and what a commit's change touched given.
+/// [`decide_with`] with the way to make the push's candidate bases (newest first) from main's tips (`tips`), what a commit's change touched, and whether a
+/// landing run's diff from `from` covers the push's diff from `base` (`covers(from, base)`, asked only when they differ) given.
+#[allow(clippy::too_many_arguments)]
 pub fn decide_with_touched(
     client: &mut Client,
     workflow: &str,
     sha: &str,
     current: Option<u64>,
     scope: bool,
-    first_parent: &mut dyn FnMut() -> Vec<String>,
+    first_parent: &mut dyn FnMut(&[String]) -> Vec<String>,
     touched: &mut dyn FnMut(&mut Client, &str) -> Option<super::green::Touched>,
+    covers: &mut dyn FnMut(&str, &str) -> bool,
 ) -> Reuse {
-    // A landing run that ran exactly its own diff's narrowed selection is reused only when that diff is this push's: its need
-    // was diffed from this push's own base, the last complete green commit before it (review round 2 P1-A).
+    // A landing run that ran exactly its own diff's narrowed selection is reused only when its diff covers this push's: its need was
+    // diffed from this push's own base, the last complete green commit of main before it (review round 2 P1-A), or from an older
+    // commit whose diff holds every file the push's does. Never a run that tested less than the push.
     let (v, landing_base) = verdict::landing_verdict_with(client, workflow, sha, current, scope, touched);
     if let Some(from) = landing_base {
-        let push_base = super::green::find_base(client, workflow, &first_parent(), scope, touched).map(|b| b.map(|b| b.sha));
+        let push_base = super::green::Runs::read(client, workflow).map(|runs| {
+            let chain = first_parent(&runs.main_tips());
+            super::green::find_base_in(client, &runs, &chain, scope, &mut |c, _, s| touched(c, s)).map(|b| b.sha)
+        });
         match push_base {
-            Ok(Some(b)) if b == from => {}
+            Ok(Some(b)) if b == from || covers(&from, &b) => {}
             Ok(b) => {
                 return Reuse::Run(format!(
-                    "the landing run tested the diff from {from}, this push's diff is from {} (the last complete green commit): it runs its own",
+                    "the landing run tested the diff from {from}, this push's diff is from {} (the last complete green commit of main) and the landing's does not cover it: it runs its own",
                     b.as_deref().unwrap_or("no complete commit")
                 ));
             }
@@ -229,7 +248,7 @@ mod tests {
     fn ask(f: &mut Fake, current: Option<u64>) -> Reuse {
         let mut c = Client::new(f, "https://gitea.invalid", "decryp7/paddock", "t");
         c.backoff_ms = 0;
-        decide_with(&mut c, "ci.yml", SHA, current, true)
+        decide_with(&mut c, "ci.yml", SHA, current, true, std::path::Path::new("."), None)
     }
 
     #[test]
@@ -414,7 +433,16 @@ mod tests {
                 flags: flags.iter().map(|a| a.to_string()).collect(),
                 ..Default::default()
             };
-            decide_with_touched(&mut c, "ci.yml", SHA, None, true, &mut Vec::new, &mut |_, _| Some(t.clone()))
+            decide_with_touched(
+                &mut c,
+                "ci.yml",
+                SHA,
+                None,
+                true,
+                &mut |_| Vec::new(),
+                &mut |_, _| Some(t.clone()),
+                &mut |_, _| false,
+            )
         };
         assert!(matches!(ask(&[]), Reuse::Skip { run: 8610, .. }));
         // Positive control: when the plan reached the crates, the FLAKY test is red and the push runs.

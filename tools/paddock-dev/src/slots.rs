@@ -76,6 +76,9 @@ pub struct AcquireArgs {
     /// How long the holder keeps trying while every slot looks busy before it says so (milliseconds; tests shorten it).
     #[arg(long, default_value_t = DEFAULT_GRACE_MS, hide = true)]
     acquire_grace_ms: u64,
+    /// The kind of job (workflow, job and OS): its last slot is tried first, so the kept folders and the compile cache stay warm.
+    #[arg(long)]
+    key: Option<String>,
 }
 
 impl AcquireArgs {
@@ -90,6 +93,7 @@ impl AcquireArgs {
             max_hold_secs: DEFAULT_MAX_HOLD_SECS,
             holder_timeout_secs: DEFAULT_FIRST_LINE_SECS,
             acquire_grace_ms: DEFAULT_GRACE_MS,
+            key: None,
         }
     }
 }
@@ -171,6 +175,9 @@ pub struct HoldArgs {
     /// How long to keep trying while every slot looks busy (milliseconds).
     #[arg(long, default_value_t = DEFAULT_GRACE_MS, hide = true)]
     acquire_grace_ms: u64,
+    /// The kind of job whose last slot is tried first (see `acquire`).
+    #[arg(long)]
+    key: Option<String>,
 }
 
 fn check_max(max: u32) -> Result<(), CliError> {
@@ -195,7 +202,7 @@ pub fn parse_announcement(line: &str) -> Result<Announcement, CliError> {
 
 /// The holder's command line.
 pub fn holder_args(a: &AcquireArgs, owner: &Path) -> Vec<String> {
-    vec![
+    let mut args = vec![
         "ci".into(),
         "slot".into(),
         "hold".into(),
@@ -211,7 +218,11 @@ pub fn holder_args(a: &AcquireArgs, owner: &Path) -> Vec<String> {
         a.max_hold_secs.to_string(),
         "--acquire-grace-ms".into(),
         a.acquire_grace_ms.to_string(),
-    ]
+    ];
+    if let Some(key) = &a.key {
+        args.extend(["--key".to_string(), key.clone()]);
+    }
+    args
 }
 
 /// The holder must run from somewhere that does not stand in the job folder's way: a process whose working folder or program
@@ -308,6 +319,8 @@ pub fn acquire_with(a: &AcquireArgs, exe: &Path) -> Result<Report, CliError> {
     std::fs::create_dir_all(&a.root).map_err(|e| {
         CliError::failure(format!("{} cannot be created: {e}.", a.root.display())).with_hint("Pass a writable CI home with --root.")
     })?;
+    // Read before the holder starts (it records the slot it takes): only for the notice, the holder reads the record itself.
+    let before = a.key.as_deref().and_then(|k| FsLocks::new(&a.root).last_slot(k));
     // The holder must not inherit the runner's pipes (run 8019): a holder that keeps the step's pipe is ended with the step.
     // `spawn_detached_clearing_handles` fails closed: no holder at all rather than one that frees the slot in the middle of the job.
     let mut child =
@@ -338,6 +351,9 @@ pub fn acquire_with(a: &AcquireArgs, exe: &Path) -> Result<Report, CliError> {
         Announcement::Slot(id, token) => {
             // The holder lives on by itself; reap nothing, wait for nothing.
             drop(child);
+            if let Some(line) = cold_slot_notice(before, id, a.max) {
+                eprintln!("{line}");
+            }
             Ok(Report::new(
                 json!({
                     "slot": id.to_string(),
@@ -359,6 +375,21 @@ pub fn acquire_with(a: &AcquireArgs, exe: &Path) -> Result<Report, CliError> {
             .with_hint("Wait for a job to finish or raise --max."))
         }
     }
+}
+
+/// The one `::notice::` line when a job did not get the slot its kind held last (it was busy, or the pool shrank): that slot's
+/// kept folders and compile cache are not the ones this job uses, so its first build is cold. `None`: no earlier slot is known, or
+/// the job has it.
+pub fn cold_slot_notice(last: Option<SlotId>, got: SlotId, max: u32) -> Option<String> {
+    let last = last.filter(|l| *l != got)?;
+    let why = if last.number() > max {
+        format!("it is beyond the pool of {max}")
+    } else {
+        "another job holds it".to_string()
+    };
+    Some(format!(
+        "::notice::slot-affinity: this kind of job last ran in slot {last} ({why}); it runs in {got}, so its kept folders and compile cache are cold"
+    ))
 }
 
 fn holder_pid(root: &Path, id: SlotId) -> Value {
@@ -393,6 +424,7 @@ pub fn hold(a: &HoldArgs) -> Result<Report, CliError> {
         Duration::from_millis(a.poll_ms.max(1)),
         (a.max_hold_secs > 0).then(|| Duration::from_secs(a.max_hold_secs)),
         Duration::from_millis(a.acquire_grace_ms),
+        a.key.as_deref(),
         &mut alive,
         &mut std::io::stdout(),
     )
@@ -571,6 +603,17 @@ mod tests {
     }
 
     #[test]
+    fn the_cold_slot_notice_names_both_slots_and_appears_only_when_they_differ() {
+        let s = |n| SlotId::new(n).unwrap();
+        assert_eq!(cold_slot_notice(None, s(1), 4), None, "no record: nothing to compare");
+        assert_eq!(cold_slot_notice(Some(s(2)), s(2), 4), None, "the same slot: warm");
+        let busy = cold_slot_notice(Some(s(2)), s(1), 4).unwrap();
+        assert!(busy.starts_with("::notice::") && busy.contains("s2") && busy.contains("s1") && busy.contains("another job holds it"));
+        assert!(!busy.contains('\n'), "one line");
+        assert!(cold_slot_notice(Some(s(7)), s(1), 4).unwrap().contains("beyond the pool of 4"));
+    }
+
+    #[test]
     fn holder_arguments_carry_everything_the_holder_needs() {
         let a = AcquireArgs {
             max: 4,
@@ -580,12 +623,14 @@ mod tests {
             max_hold_secs: 9,
             holder_timeout_secs: 30,
             acquire_grace_ms: 1234,
+            key: Some("CI/crate/macOS".into()),
         };
         let args = holder_args(&a, Path::new("/abs/o"));
         assert_eq!(args[..3], ["ci", "slot", "hold"]);
         assert!(args.windows(2).any(|w| w == ["--owner", "/abs/o"]));
         assert!(args.windows(2).any(|w| w == ["--poll-ms", "7"]));
         assert!(args.windows(2).any(|w| w == ["--max-hold-secs", "9"]));
+        assert!(args.windows(2).any(|w| w == ["--key", "CI/crate/macOS"]));
         assert!(args.windows(2).any(|w| w == ["--acquire-grace-ms", "1234"]));
     }
 
@@ -660,6 +705,7 @@ mod tests {
             max_hold_secs: 0,
             holder_timeout_secs: 30,
             acquire_grace_ms: 50,
+            key: None,
         }
     }
 

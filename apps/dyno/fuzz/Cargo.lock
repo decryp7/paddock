@@ -2071,6 +2071,7 @@ version = "0.2.0"
 dependencies = [
  "jiff",
  "log",
+ "paddock-env",
  "paddock-jobs",
  "paddock-limits",
  "paddock-workspace-hack",
@@ -2218,6 +2219,7 @@ name = "paddock-settings"
 version = "0.2.0"
 dependencies = [
  "log",
+ "paddock-env",
  "paddock-workspace-hack",
  "regex",
  "serde",
@@ -2287,6 +2289,7 @@ dependencies = [
  "futures-core",
  "getrandom 0.3.4",
  "getrandom 0.4.3",
+ "hashbrown 0.17.1",
  "http",
  "httparse",
  "idna",

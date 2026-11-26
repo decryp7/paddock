@@ -113,6 +113,22 @@ from the releases page; revoke the old secrets.
 
 - [ ] **`debrief.yml` dispatch with bundles green** (Actions > debrief > Run workflow, `bundles` on): open the run and check that the three `bundle (...)` jobs ran and passed (Debrief has no verdict job yet). A green run whose `bundle` jobs were skipped proves nothing about the release path (rule 54).
 
+- [ ] **macOS start-up benchmark, run by hand** (Paddock rule 16; user decision 2026-11-25). CI no longer runs it: the CI Mac
+  is a LaunchDaemon with no window server (ADR 0120), where the app cannot start. On a Mac with a login session (not over
+  SSH), with no heavy build running, from the repository root at the commit to be tagged:
+
+  ```sh
+  npm ci && npm run build -w ui
+  (cd apps/debrief/app && DEBRIEF_CARGO_PROFILE=debug npx tauri build --debug --bundles app --config src-tauri/tauri.sidecars.conf.json)
+  cd apps/debrief
+  app=$(find target/debug/bundle/macos -maxdepth 1 -name '*.app' | head -n 1)   # or <your build.target-dir>/debug/bundle/macos
+  node scripts/ci/startup-bench.mjs "$app" --runs 5 --out startup-timings.json
+  ```
+
+  It checks the medians against `scripts/ci/startup-budgets.json`. Exit 0 passes; 1 means a mark is over its budget (fix it
+  before tagging); 6 means not measured (the app did not start or logged no timings), which is never a pass. The same
+  checkout can run the other half of the macOS smoke: `bash scripts/ci/macos-smoke.sh "$app"` (launch and quit within 10 s).
+
 Debrief builds its installers in `debrief.yml` (not through `app-release.yml`), so there is no verdict job there yet: read the `bundle` jobs of the run instead.
 
 ## Checking a release

@@ -4,6 +4,52 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `paddock-ci-config`: the CI job model (ADR 0123, WP-1)
+- New shared crate `crates/paddock-ci-config` (pure core, `publish = false`): `jobs::model` builds ci.yml's jobs, matrices, `needs` and
+  the projects each job runs for from the workflow text; `jobs::render` evaluates a job's `name:` for one leg. `gates/yaml.rs`,
+  `gates/expr.rs` and `plan_ci::PROJECT_OUTPUTS` moved into it, so `paddock-dev` has one CI parser (`gates::yaml` and `gates::expr`
+  re-export it). `[ci.jobs]` in `docs/repo-graph.toml` declares what no `if:` shows; a test keeps the model's projects equal to
+  `plan_gitea::CI_JOBS` for every job.
+- The OS leg set of the `crate` and `paddock-dev` jobs is written once (`plan_ci::OS_LEGS`): ci.yml's `PLAN_OS_LEGS` and its two
+  fallback lines are gone, and a rerun that does not rerun those jobs writes their whole legs itself.
+
+### C173: no new non-Rust tooling file (ADR 0022 section 3.7 a and b)
+- `./dev check run --only C173` reads git's tracked list and fails (blocking) on a `.sh`, `.ps1`, `.py`, `.mjs`, `.js`, `.cjs` or `.ts`
+  file in `scripts/`, `tools/`, `conformance/`, `.gitea/`, `ci-image/` or `apps/<app>/scripts/` that `conformance/tooling-files.json`
+  does not name. The list holds 4 permanent entries (the bootstrap and the helpers that run before `./dev` exists) and the baseline of
+  2026-11-26 (443 files), which may only shrink: the shared allow-list reader compares it with the merge base (ER-46). Fixture and
+  golden folders and Playwright and Vitest suite files are not tooling. 11 such files had landed since 2026-11-12 because the check the
+  ADR promised was never built. The growth guard is a warning until the list is on main, then `growth_blocks` flips to true.
+
+### No VM or container on the Mac (user, 2026-11-26)
+- `./dev check --pre-push` and the member gate start no container: `clippy-linux`, `tests-linux`, `--warm-linux` and the guardian container run
+  are gone; their coverage is CI's Linux jobs. `./dev golden confirm` is removed, and `paddock_testkit::golden::rewritten_notice` now takes
+  the path alone and points at CI's Linux job (`confirm_command` and `test_name_of` are removed). Conformance C172 (report-only) flags a
+  container or VM tool in local gate code.
+- Dyno's benchmark-unit tests (release step 2c) run in the `linux-units` job of `dyno-release.yml` through the new `./dev ci dyno-linux-units`
+  (no systemd user manager is exit 6, not measured; report-only until its first green run on the runner). `apps/dyno/scripts/linux-units-check.sh`
+  (OrbStack) is deleted with its C172 waivers and its C173 entry, and so are `ci-image/garage-arm64.Dockerfile` and `garage-release.txt`.
+
+### sccache 0.20.1, with base directories
+- Every sccache pin moves from 0.19.0 to 0.20.1 (setup-rust and its shell twin, the CI image, `./dev sccache env`) with the release's
+  own checksums. Setup-rust and the local server now set `SCCACHE_BASEDIRS` (the checkout, the build folder; in CI each job's own
+  slot or work folder) and `SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS=CARGO_MANIFEST_DIR,CARGO_MANIFEST_PATH`, so a workspace crate hits the
+  same cache entry from another slot, work folder or worktree. Cargo's legacy build-dir layout on Windows stays.
+
+### `./dev ci triage`: a job the comparison run did not run is never NEW
+- When the last main run skipped a failed job (a nightly whose gate found main unchanged skips every job), had no job of that name, or
+  ended it cancelled before it ran, triage compares that job with the newest older main run of the workflow that ran it and says which
+  (`job "...": run 8284 skipped it; compared with run 8226`, `older_baselines` and a per-row `baseline_run` in `--json`). When no run in
+  the newest 500 ran it, the row is UNKNOWN with that reason. A run named with `--against` is never replaced: a job it skipped is
+  UNKNOWN. Before, a skipped job counted as passed and every failure in it was NEW (`ci triage 9021` against nightly 8284).
+
+### Plugins: progress outside 0 to 1 does not decode (nightly fuzz run 9021)
+- `paddock-plugin-api`: `HostCall::Report.progress`, `Host::report`, `ToolCtx::report` and `FakeHost::reports` take the new
+  `protocol::Progress`, which holds only a finite fraction from 0 to 1 (`Progress::new` returns `ProgressError` otherwise). A plugin's
+  NaN, infinite or out-of-range progress is refused at decode (`invalid`) instead of decoding and being clamped by the host;
+  `paddock-plugin-host`'s `TaskObserver::report` and `RunningTask::progress` carry `Progress` too. Breaking for plugins: build the value
+  with `Progress::new(fraction)`.
+
 ### Tests: doctests are off (user, 2026-11-24)
 - Every library target has `[lib] doctest = false` and every runnable doc example is now a ```` ```text ```` block; no `cargo test --doc`
   runs in the push or member gate (a `doctests` row says so, a skip, never a pass), in ci.yml's crate job, the app-gates action,

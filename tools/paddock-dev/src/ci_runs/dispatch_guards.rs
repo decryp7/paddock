@@ -22,6 +22,7 @@
 use super::client::{Client, RunInfo, TimedJob, encode_path};
 use super::dispatch::{DispatchTag, ReadWorkflow, Request, RunKind, Target, is_train};
 use crate::active_apps;
+use crate::job_outcome::JobOutcome;
 use crate::plan_since::read_marker;
 use crate::wait::Http;
 use std::collections::{BTreeMap, BTreeSet};
@@ -36,6 +37,9 @@ pub enum Guard {
     FailedFirst,
     /// Main green in the foundation and the active apps before a train.
     GreenMain,
+    /// The repository-wide audits (the member audits and the conformance line) green on the train's head before a dispatch (user,
+    /// 2026-11-25): 4 of 8 red train rounds were audits that failed only on the merged train.
+    TrainAudits,
 }
 
 impl Guard {
@@ -44,12 +48,15 @@ impl Guard {
         match self {
             Guard::FailedFirst => "failed-first",
             Guard::GreenMain => "green-main",
+            Guard::TrainAudits => "train-audits",
         }
     }
 
     /// The guard of a name.
     pub fn parse(name: &str) -> Option<Guard> {
-        [Guard::FailedFirst, Guard::GreenMain].into_iter().find(|g| g.name() == name)
+        [Guard::FailedFirst, Guard::GreenMain, Guard::TrainAudits]
+            .into_iter()
+            .find(|g| g.name() == name)
     }
 
     /// Its override flag.
@@ -57,6 +64,7 @@ impl Guard {
         match self {
             Guard::FailedFirst => "--full-anyway",
             Guard::GreenMain => "--red-main-anyway",
+            Guard::TrainAudits => "--audits-anyway",
         }
     }
 }
@@ -82,7 +90,9 @@ pub fn recorded(text: &str, guard: Guard) -> Result<Option<u64>, String> {
         .and_then(toml::Value::as_table)
         .ok_or_else(|| format!("{REGISTER} has no [first_green] table"))?;
     if let Some(k) = table.keys().find(|k| Guard::parse(k).is_none()) {
-        return Err(format!("{REGISTER}: first_green.{k} is not a guard (failed-first, green-main)"));
+        return Err(format!(
+            "{REGISTER}: first_green.{k} is not a guard (failed-first, green-main, train-audits)"
+        ));
     }
     match table.get(guard.name()) {
         None => Ok(None),
@@ -97,6 +107,10 @@ pub fn recorded(text: &str, guard: Guard) -> Result<Option<u64>, String> {
 /// The mode of `guard` from the register text (`None`: the file is missing or unreadable, with the reason): report-only unless a run
 /// is recorded. An unreadable register never switches a guard on or off by accident: it stays report-only, with the reason.
 pub fn mode_of(text: Result<&str, &str>, guard: Guard) -> Mode {
+    // The audits are established tests the member gate already blocks on (user, 2026-11-17), not a new check: blocking from the start.
+    if guard == Guard::TrainAudits {
+        return Mode::Blocking { first_green: 0 };
+    }
     match text.map_err(str::to_string).and_then(|t| recorded(t, guard)) {
         Ok(Some(first_green)) => Mode::Blocking { first_green },
         Ok(None) => Mode::ReportOnly(format!("no first green use is recorded in {REGISTER}")),
@@ -156,6 +170,7 @@ pub fn decide(guard: Guard, mode: &Mode, finding: &Finding, override_reason: Opt
     let name = guard.name();
     let (mode_name, mode_why) = match mode {
         Mode::ReportOnly(why) => ("report-only", why.clone()),
+        Mode::Blocking { first_green: 0 } => ("blocking", "blocking: established tests (user, 2026-11-17)".to_string()),
         Mode::Blocking { first_green } => ("blocking", format!("blocking since run {first_green}")),
     };
     let row = |result: &str, detail: &str, overridden: Option<&str>| serde_json::json!({"guard": name, "mode": mode_name, "result": result, "detail": detail, "overridden": overridden});
@@ -168,7 +183,10 @@ pub fn decide(guard: Guard, mode: &Mode, finding: &Finding, override_reason: Opt
         Finding::NotMeasured(why) => (
             "not-measured",
             format!("not measured, never a pass (ER-33): {why}"),
-            "make the runs readable (GITEA_TOKEN, the server) and dispatch again".to_string(),
+            match guard {
+                Guard::TrainAudits => "dispatch from a clean worktree at the train's head, or fix what the line above names".to_string(),
+                _ => "make the runs readable (GITEA_TOKEN, the server) and dispatch again".to_string(),
+            },
         ),
     };
     if let Some(reason) = override_reason {
@@ -205,7 +223,106 @@ pub struct Overrides<'a> {
     pub full_anyway: Option<&'a str>,
     /// `--red-main-anyway`: the green-main guard.
     pub red_main_anyway: Option<&'a str>,
+    /// `--audits-anyway`: the train-audits guard.
+    pub audits_anyway: Option<&'a str>,
 }
+
+/// What the repository-wide audits answered on a checkout: the exit code of `check --pre-push` (`None`: ended by its bound or a
+/// signal) and its output's tail.
+pub type AuditRun = Result<(Option<i32>, String), String>;
+
+/// The checkout the dispatch runs from, as the train-audits guard needs it: its HEAD and whether it has changes of its own.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Checkout {
+    /// `git rev-parse HEAD`.
+    pub head: String,
+    /// Whether `git status --porcelain` lists anything.
+    pub dirty: bool,
+}
+
+/// The rows the train-audits guard runs: the repository-wide audits of tools/paddock-dev and the conformance line of ci.yml, through
+/// the push gate (`./dev check --pre-push --member-gate --only`), which runs each through the heavy slot as the member gate does.
+pub const AUDIT_ROWS: &str = "member-audits,conformance";
+
+/// The train-audits guard: the audits ran on the train's head as the server has it. `local` is the checkout the dispatch runs from
+/// (it must be at that head and clean: otherwise the audits would judge another tree, never a pass); `run` runs them there.
+pub fn train_audits(local: Result<Checkout, String>, server_head: &str, branch: &str, run: &mut dyn FnMut() -> AuditRun) -> Finding {
+    let local = match local {
+        Ok(c) => c,
+        Err(e) => return Finding::NotMeasured(format!("the checkout cannot be read: {e}")),
+    };
+    if local.head != server_head {
+        return Finding::NotMeasured(format!(
+            "this checkout is at {}, the head of {branch} is {}: the audits must run on the train's head (dispatch from the integrator's worktree at that head)",
+            short(&local.head),
+            short(server_head)
+        ));
+    }
+    if local.dirty {
+        return Finding::NotMeasured("this checkout has changes of its own: the audits would not judge the train's head".into());
+    }
+    match run() {
+        Err(e) => Finding::NotMeasured(format!("the audits could not run: {e}")),
+        Ok((Some(0), _)) => Finding::Pass(format!(
+            "the member audits and the conformance line passed on {}",
+            short(server_head)
+        )),
+        Ok((Some(6), tail)) => Finding::NotMeasured(format!("the audits could not look (exit 6): {}", tail.trim())),
+        Ok((code, tail)) => Finding::Refuse {
+            why: format!(
+                "the repository-wide audits failed on the merged train head {} (exit {}): {}",
+                short(server_head),
+                code.map_or("none".to_string(), |c| c.to_string()),
+                tail.trim()
+            ),
+            next: format!(
+                "fix the audit it names in the member that clashes, or pull that member (revert its merge); re-run them with `./dev check --pre-push --member-gate --only {AUDIT_ROWS} --base origin/main`"
+            ),
+        },
+    }
+}
+
+/// The checkout at `root`: its HEAD and whether it is dirty.
+pub fn checkout(root: &std::path::Path) -> Result<Checkout, String> {
+    let git = crate::merge_check::git::Git::new(root);
+    Ok(Checkout {
+        head: git.text(&["rev-parse", "HEAD"])?.trim().to_string(),
+        dirty: !git.text(&["status", "--porcelain", "--untracked-files=no"])?.trim().is_empty(),
+    })
+}
+
+/// Runs the audit rows in `root` through this program (or `PADDOCK_DISPATCH_AUDITS`, a test's stand-in): its exit code and the last
+/// lines it printed. Bounded like the member gate (each row has its own cap; this bound only ends a hang of the gate itself).
+pub fn run_audits(root: &std::path::Path) -> AuditRun {
+    let program = match std::env::var_os("PADDOCK_DISPATCH_AUDITS") {
+        Some(p) => std::path::PathBuf::from(p),
+        None => crate::tool_cache::self_exe().map_err(|e| format!("this program cannot be found: {e}"))?,
+    };
+    let mut cmd = paddock_proc::command(program);
+    cmd.args([
+        "check",
+        "--pre-push",
+        "--member-gate",
+        "--only",
+        AUDIT_ROWS,
+        "--base",
+        "origin/main",
+        "--root",
+    ])
+    .arg(root)
+    .current_dir(root);
+    let out = paddock_proc::run_bounded(cmd, paddock_proc::Limits::new(AUDITS_TIMEOUT)).map_err(|e| e.to_string())?;
+    let code = match out.outcome {
+        paddock_proc::Outcome::Exited(st) => st.code(),
+        _ => None,
+    };
+    let text = format!("{}\n{}", String::from_utf8_lossy(&out.stdout), out.stderr_text());
+    let lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
+    Ok((code, lines[lines.len().saturating_sub(12)..].join("\n")))
+}
+
+/// The backstop of [`run_audits`]: the member gate's own outer bound (merge_check::gates, measured there), as the rows are the same.
+const AUDITS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
 
 /// A blocking guard stopped the dispatch.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -250,7 +367,19 @@ pub fn check_train(
         let mut client = Client::new(http, server, repo, token);
         let finding = match client.branch_head(&branch) {
             Ok(Some(head)) => match read_train(&mut client, &req.workflow, &branch) {
-                Ok(runs) => failed_first(&runs, &head, &req.workflow, &branch),
+                Ok(runs) => {
+                    let finding = failed_first(&runs, &head, &req.workflow, &branch);
+                    match (&finding, red_chain(&runs)) {
+                        (Finding::Refuse { .. }, Some((full, newest_red))) => {
+                            let (full_head, newest_red) = (full.head.clone(), newest_red);
+                            drop(client);
+                            let revert = clean_reverts(root, &full_head, &head);
+                            let round = round_is_full(http, target, newest_red, read);
+                            without_round(finding, revert, round)
+                        }
+                        _ => finding,
+                    }
+                }
                 Err(e) => Finding::NotMeasured(format!("the runs of {} on {branch} cannot be read: {e}", req.workflow)),
             },
             Ok(None) => Finding::NotMeasured(format!("branch {branch} is not on the server")),
@@ -292,6 +421,26 @@ pub fn check_train(
             &mode(Guard::GreenMain),
             &green.finding,
             overrides.red_main_anyway,
+            log,
+        ))?;
+    }
+    // Last: the audits take minutes, so they run only once the guards that read the API let the dispatch go, and only before a full
+    // run of the train (its first dispatch and its landing run): a failed-only round reruns what failed, a member run is narrowed.
+    if kind == RunKind::Full {
+        let head = Client::new(http, server, repo, token).branch_head(&branch);
+        let finding = match head {
+            Ok(Some(h)) => train_audits(checkout(root), &h, &branch, &mut || {
+                let _ = writeln!(log, "dispatch guard train-audits: running {AUDIT_ROWS} on the train head (minutes)");
+                run_audits(root)
+            }),
+            Ok(None) => Finding::NotMeasured(format!("branch {branch} is not on the server")),
+            Err(e) => Finding::NotMeasured(format!("the head of {branch} cannot be read: {e}")),
+        };
+        go(decide(
+            Guard::TrainAudits,
+            &mode(Guard::TrainAudits),
+            &finding,
+            overrides.audits_anyway,
             log,
         ))?;
     }
@@ -380,6 +529,128 @@ pub fn failed_first(runs: &[TrainRun], head: &str, workflow: &str, git_ref: &str
         ),
         next,
     }
+}
+
+/// The red full run the failed-first guard measures from, and the newest red run of its chain (the full run, or a failed-only round
+/// after it): `None` when the last finished full run is green or there is none.
+pub fn red_chain(runs: &[TrainRun]) -> Option<(&TrainRun, u64)> {
+    let counted = |r: &TrainRun| r.finished && !matches!(r.conclusion.as_str(), "cancelled" | "skipped" | "");
+    let full = runs.iter().find(|r| r.kind == Some(RunKind::Full) && counted(r))?;
+    if full.conclusion == "success" {
+        return None;
+    }
+    let newest_red = runs
+        .iter()
+        .filter(|r| r.id > full.id && matches!(r.kind, Some(RunKind::Since(_))))
+        .find(|r| r.finished && r.conclusion == "failure")
+        .map_or(full.id, |r| r.id);
+    Some((full, newest_red))
+}
+
+/// The failed-first finding with its two allowances (user, 2026-11-25), recorded in [`REGISTER`]: a full run may go without a
+/// failed-only round when the round would add nothing, because every commit since the red full run cleanly reverts a member's merge
+/// (`revert`), or because the round would rerun everything on the same head anyway (`round_full`: its rerun plan is the whole run).
+/// Each is `Ok(Some(why))` when it holds; `Ok(None)` or `Err` (it could not be told) leaves the refusal as it is. Only a refusal
+/// changes; the full run before landing stays mandatory whatever this says (ER-10).
+pub fn without_round(finding: Finding, revert: Result<Option<String>, String>, round_full: Result<Option<String>, String>) -> Finding {
+    let Finding::Refuse { why, .. } = &finding else { return finding };
+    let allowed = match (revert, round_full) {
+        (Ok(Some(w)), _) => w,
+        (_, Ok(Some(w))) => w,
+        _ => return finding,
+    };
+    Finding::Pass(format!(
+        "{why}, but no failed-only round is needed: {allowed}; the full run before landing is this run (ER-10)"
+    ))
+}
+
+/// Whether every commit of `from..to` (first parent) cleanly reverts a member's merge: a commit with one parent that names the merge
+/// it pulls (git's `This reverts commit <sha>` line, or the train's own `(merge <sha>)` in the subject) and whose change is exactly the
+/// inverse of that merge's change against its first parent (the same files, the same removed and added lines). `Ok(None)` when one is
+/// not, or there is no commit; `Err` when git cannot tell (a commit missing here: fetch the train first).
+pub fn clean_reverts(root: &std::path::Path, from: &str, to: &str) -> Result<Option<String>, String> {
+    let git = crate::merge_check::git::Git::new(root);
+    let range = format!("{from}..{to}");
+    let commits: Vec<String> = git
+        .text(&["rev-list", "--first-parent", "--reverse", &range])?
+        .lines()
+        .map(str::to_string)
+        .collect();
+    if commits.is_empty() {
+        return Ok(None);
+    }
+    let parents = |c: &str| -> Result<usize, String> {
+        Ok(git
+            .text(&["rev-list", "--parents", "-n", "1", c])?
+            .split_whitespace()
+            .count()
+            .saturating_sub(1))
+    };
+    let mut said = Vec::new();
+    for c in &commits {
+        if parents(c)? != 1 {
+            return Ok(None);
+        }
+        let message = git.text(&["log", "-1", "--format=%B", c])?;
+        let mut named = crate::merge_check::reverted_base::trailer_targets(&message);
+        named.extend(merge_named(&message));
+        let undone = format!("{c}^");
+        let mut clean = None;
+        for x in named {
+            let Ok(full) = git.text(&["rev-parse", "--verify", &format!("{x}^{{commit}}")]) else {
+                continue;
+            };
+            let x = full.trim().to_string();
+            if parents(&x)? < 2 {
+                continue;
+            }
+            let merged_diff = git.text(&["diff", "--binary", "--no-color", &format!("{x}^1"), &x])?;
+            let put_back_diff = git.text(&["diff", "--binary", "--no-color", c, &undone])?;
+            let (merged, put_back) = (changed_lines(&merged_diff), changed_lines(&put_back_diff));
+            if !merged.is_empty() && merged == put_back {
+                clean = Some(x);
+                break;
+            }
+        }
+        match clean {
+            Some(x) => said.push(format!("{} reverts the merge {} exactly", short(c), short(&x))),
+            None => return Ok(None),
+        }
+    }
+    Ok(Some(said.join("; ")))
+}
+
+/// The merges a train's own pull-out names in its subject: `revert: pull <branch> (merge <sha>) from <train>`.
+fn merge_named(message: &str) -> Vec<String> {
+    let first = message.lines().next().unwrap_or("");
+    first
+        .match_indices("(merge ")
+        .filter_map(|(i, m)| {
+            let hex: String = first[i + m.len()..].chars().take_while(char::is_ascii_hexdigit).collect();
+            first[i + m.len() + hex.len()..].starts_with(')').then_some(hex)
+        })
+        .filter(|h| (7..=64).contains(&h.len()))
+        .collect()
+}
+
+/// What a diff changes, without its positions: the file headers and the removed and added lines, in order (hunk headers and index
+/// lines dropped, so the same change at shifted lines compares equal).
+fn changed_lines(diff: &str) -> Vec<&str> {
+    diff.lines()
+        .filter(|l| {
+            l.starts_with("diff --git ") || ((l.starts_with('+') || l.starts_with('-')) && !l.starts_with("+++") && !l.starts_with("---"))
+        })
+        .collect()
+}
+
+/// Whether the failed-only round of `run` would rerun the whole run anyway (its rerun plan is "everything": the plan job failed, or a
+/// failed job this ci.yml cannot gate alone), so a full run on the same head is the same run.
+pub fn round_is_full(http: &mut dyn Http, target: &Target<'_>, run: u64, read: ReadWorkflow<'_>) -> Result<Option<String>, String> {
+    let mut runs = crate::plan_since::GiteaRuns::new(http, target.server, target.repo, target.token.to_string());
+    let plan = crate::plan_since::since_run(&mut runs, run, read, &mut |_| {})?;
+    Ok(plan
+        .everything
+        .map(|why| format!("the failed-only round of run {run} would rerun everything ({why})")))
 }
 
 /// One run of main as the green-main guard reads it.
@@ -497,10 +768,11 @@ pub fn failed_jobs(jobs: &[TimedJob]) -> Vec<String> {
     let mut out: Vec<(bool, String)> = jobs
         .iter()
         .filter(|j| !j.is_caller())
-        .filter_map(|j| match j.conclusion.as_str() {
-            "failure" => Some((AGGREGATES.iter().any(|a| j.name.starts_with(a)), j.name.clone())),
-            "cancelled" => Some((false, format!("{} (cancelled: not measured)", j.name))),
-            _ => None,
+        .filter_map(|j| match j.outcome {
+            JobOutcome::Failed => Some((AGGREGATES.iter().any(|a| j.name.starts_with(a)), j.name.clone())),
+            JobOutcome::Cancelled => Some((false, format!("{} (cancelled: not measured)", j.name))),
+            // A finished run's job: a pass, a skip (the gate or a failed need left it out), or a word the reader does not know.
+            JobOutcome::Passed | JobOutcome::Skipped | JobOutcome::Unfinished | JobOutcome::Unknown(_) => None,
         })
         .collect();
     if out.iter().any(|(agg, _)| !agg) {
@@ -514,7 +786,7 @@ pub fn failed_jobs(jobs: &[TimedJob]) -> Vec<String> {
 fn measured(jobs: &[TimedJob]) -> bool {
     jobs.iter()
         .filter(|j| !j.name.starts_with("gate") && !j.name.starts_with("installers gate"))
-        .any(|j| matches!(j.conclusion.as_str(), "success" | "failure"))
+        .any(|j| matches!(j.outcome, JobOutcome::Passed | JobOutcome::Failed))
 }
 
 /// How many pages of 50 runs the readers look through at most.

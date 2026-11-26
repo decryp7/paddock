@@ -251,10 +251,14 @@ fn env_lines(file: &str, lines: &[String]) -> R<()> {
     Ok(())
 }
 
-/// The `heavy` that announces this job to the agents' queue (ADR 0102): `PADDOCK_HEAVY_BIN`, else the one cached for this tree
-/// (`~/.paddock-dev/bin/heavy-<hash>`, built by any agent's pre-push). It never builds one: that would slow every job's first step.
-fn heavy_bin(ctx: &Ctx) -> Option<PathBuf> {
-    if let Some(b) = ctx.get("PADDOCK_HEAVY_BIN").filter(|b| !b.is_empty()) {
+/// The `throttle` that announces this job to the agents' queue (ADR 0102): `PADDOCK_THROTTLE_BIN`, else the one cached for this tree
+/// (`~/.paddock-dev/bin/throttle-<hash>`, built by any agent's pre-push). It never builds one: that would slow every job's first step.
+fn throttle_bin(ctx: &Ctx) -> Option<PathBuf> {
+    if let Some(b) = ctx
+        .get("PADDOCK_THROTTLE_BIN")
+        .or_else(|| ctx.get("PADDOCK_HEAVY_BIN"))
+        .filter(|b| !b.is_empty())
+    {
         return Some(PathBuf::from(b));
     }
     let root = ctx
@@ -264,19 +268,19 @@ fn heavy_bin(ctx: &Ctx) -> Option<PathBuf> {
     crate::pre_push::heavy_tool::ensure(&root, &ctx.env_snapshot(), Duration::ZERO).ok()
 }
 
-/// Announces (or withdraws) this job on the agents' heavy queue: `heavy mark ci-<slot> --pid <the slot's holder>`. While the holder
+/// Announces (or withdraws) this job on the agents' heavy queue: `throttle mark ci-<slot> --pid <the slot's holder>`. While the holder
 /// lives, agents' normal heavy steps wait for it (they are never killed; ADR 0102); the marker goes with the holder, with `release`,
-/// and after `HEAVY_CI_MAX` (the bound of a hung or crashed job). Best effort: a missing or failing `heavy` is said, and the job goes on.
-fn heavy_mark(ctx: &Ctx, io: &mut Sinks<'_>, home: &str, slot: &str, remove: bool) {
+/// and after `THROTTLE_CI_MAX` (the bound of a hung or crashed job). Best effort: a missing or failing `throttle` is said, and the job goes on.
+fn throttle_mark(ctx: &Ctx, io: &mut Sinks<'_>, home: &str, slot: &str, remove: bool) {
     let Some(pid) = owner_field(home, slot, "pid").filter(|p| p.parse::<u32>().is_ok()) else {
         io.say(format!(
             "::warning::job-isolation: {slot} has no holder pid, so agents' heavy steps are not told to yield to this job"
         ));
         return;
     };
-    let Some(bin) = heavy_bin(ctx) else {
+    let Some(bin) = throttle_bin(ctx) else {
         if !remove {
-            io.say("::warning::job-isolation: no `heavy` for this tree is built yet (any agent's `./dev check --pre-push` builds it, or set PADDOCK_HEAVY_BIN), so agents' heavy steps do not yield to this job (ADR 0102)");
+            io.say("::warning::job-isolation: no `throttle` for this tree is built yet (any agent's `./dev check --pre-push` builds it, or set PADDOCK_THROTTLE_BIN), so agents' heavy steps do not yield to this job (ADR 0102)");
         }
         return;
     };
@@ -291,13 +295,25 @@ fn heavy_mark(ctx: &Ctx, io: &mut Sinks<'_>, home: &str, slot: &str, remove: boo
             io.say(format!("job-isolation: {} {name} (holder pid {pid}) on the agents' heavy queue", if remove { "withdrew" } else { "announced" }));
         }
         Ok(o) => io.say(format!(
-            "::warning::job-isolation: `heavy {}` failed ({}): {}. Agents' heavy steps may not yield to this job; next step: run it by hand",
+            "::warning::job-isolation: `throttle {}` failed ({}): {}. Agents' heavy steps may not yield to this job; next step: run it by hand",
             args.join(" "),
             o.status,
             String::from_utf8_lossy(&o.stderr).trim()
         )),
         Err(e) => io.say(format!("::warning::job-isolation: {} could not be started: {e}", bin.display())),
     }
+}
+
+/// The kind of job for slot affinity: workflow, job and OS (`<workflow>/<job>/<OS>`; the app leg is the job, one job per leg). `None`
+/// when the runner names no workflow or job (the first free slot, as before). The shell kit builds the same key (job-isolation.sh).
+fn affinity_key(ctx: &Ctx) -> Option<String> {
+    let part = |k: &str| ctx.get(k).map(str::trim).filter(|v| !v.is_empty());
+    Some(format!(
+        "{}/{}/{}",
+        part("GITHUB_WORKFLOW")?,
+        part("GITHUB_JOB")?,
+        part("RUNNER_OS").unwrap_or("")
+    ))
 }
 
 /// `acquire`: the job's slot (first step of a host job); appends `PADDOCK_CI_SLOT`, `PADDOCK_CI_SLOT_TOKEN`, `PADDOCK_JOB_TEMP`, `TMPDIR`
@@ -328,25 +344,28 @@ pub fn acquire(ctx: &Ctx, io: &mut Sinks<'_>) -> R<()> {
         .and_then(|v| v.parse::<f64>().ok())
         .unwrap_or(6.0);
     let mut tries = 0;
+    let max_text = max.to_string();
+    let (temp_native, home_native) = (native(&temp), native(&home));
+    // Slot affinity: the kind of job gets the slot it held last, where its kept folders and compile cache are warm.
+    let key = affinity_key(ctx);
+    let mut slot_args = vec![
+        "ci",
+        "slot",
+        "acquire",
+        "--max",
+        &max_text,
+        "--owner",
+        &temp_native,
+        "--root",
+        &home_native,
+    ];
+    if let Some(key) = &key {
+        slot_args.extend(["--key", key]);
+    }
     // A full house is refused (exit 4). It is real (more runners than PADDOCK_CI_SLOTS) or brief (a sweep holds an idle slot's lock
     // while it deletes that slot's folders): wait a little, then fail and name the holders.
     let (code, said) = loop {
-        let called = dev_tool(
-            ctx,
-            &[
-                "ci",
-                "slot",
-                "acquire",
-                "--max",
-                &max.to_string(),
-                "--owner",
-                &native(&temp),
-                "--root",
-                &native(&home),
-            ],
-            Capture::Read,
-            &[],
-        )?;
+        let called = dev_tool(ctx, &slot_args, Capture::Read, &[])?;
         if called.code != 4 || tries >= wait {
             break (called.code, called.stdout);
         }
@@ -373,7 +392,7 @@ pub fn acquire(ctx: &Ctx, io: &mut Sinks<'_>) -> R<()> {
     }
     // The env lines a slot gives the job's later steps, then the job's temp and socket folders (job-tmpdir, one implementation).
     env_lines(&out, &[format!("PADDOCK_CI_SLOT={slot}"), format!("PADDOCK_CI_SLOT_TOKEN={token}")])?;
-    heavy_mark(ctx, io, &home, &slot, false);
+    throttle_mark(ctx, io, &home, &slot, false);
     if let Err(e) = tmpdir::sweep(ctx, io) {
         if !e.text.is_empty() {
             io.say(&e.text);
@@ -540,7 +559,7 @@ pub fn release(ctx: &Ctx, io: &mut Sinks<'_>) -> R<()> {
         }
         Ok(true) => {}
     }
-    heavy_mark(ctx, io, &home, &s, true);
+    throttle_mark(ctx, io, &home, &s, true);
     // Only this job's own holder: release honours only its token.
     let released = dev_tool(
         ctx,
@@ -574,8 +593,19 @@ pub fn release(ctx: &Ctx, io: &mut Sinks<'_>) -> R<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{free_gb, parse_df};
+    use super::{affinity_key, free_gb, parse_df};
     use crate::ci_isolation::testkit::{ctx, go};
+
+    #[test]
+    fn the_affinity_key_is_workflow_job_and_os_and_absent_without_a_workflow_or_job() {
+        let key = |vars: &[(&str, &str)]| affinity_key(&ctx(vars));
+        assert_eq!(
+            key(&[("GITHUB_WORKFLOW", "CI"), ("GITHUB_JOB", "crate"), ("RUNNER_OS", "macOS")]).as_deref(),
+            Some("CI/crate/macOS")
+        );
+        assert_eq!(key(&[("GITHUB_JOB", "crate")]), None, "no workflow name");
+        assert_eq!(key(&[("GITHUB_WORKFLOW", "CI"), ("GITHUB_JOB", " ")]), None, "a blank job name");
+    }
 
     #[test]
     fn slots_prints_the_default_and_the_configured_maximum() {

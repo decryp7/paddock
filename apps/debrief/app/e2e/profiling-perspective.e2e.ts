@@ -4,6 +4,7 @@ import { expectNoSeriousViolations } from './axe';
 import { chooseMenu } from './menu-support';
 import { hotspots } from './profiling-support';
 import { heldToast, pressInToast, toastNamed } from './toast-support';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard.ts';
 
 // The Captures view is the landing of the Profiling perspective; opening a performance capture switches there once
 // (the toast offers Undo), and not again for the next capture.
@@ -19,7 +20,7 @@ test.describe('profiling perspective', () => {
   });
 
   test('Ctrl+2 shows the Captures landing with Open capture…', async ({ page }, testInfo) => {
-    await page.keyboard.press('ControlOrMeta+2');
+    await pressMod(page, 'Mod+2');
     const landing = page.getByTestId('captures-landing');
     await expect(landing).toBeVisible();
     await expect(landing.getByRole('button', { name: 'Open capture…' })).toBeEnabled();
@@ -51,7 +52,7 @@ test.describe('profiling perspective', () => {
   });
 
   test('already in Profiling: opening a capture does not announce a switch', async ({ page }) => {
-    await page.keyboard.press('ControlOrMeta+2');
+    await pressMod(page, 'Mod+2');
     await chooseMenu(page, 'File', 'Open performance capture…');
     await expect(hotspots(page).locator('tbody tr[aria-rowindex]').first()).toBeVisible({ timeout: APP_LOAD_TIMEOUT });
     await expect(toast(page)).toHaveCount(0);

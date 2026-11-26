@@ -143,9 +143,7 @@ impl FetchStore {
         let mut out = self.clone();
         out.version = 1;
         let bytes = serde_json::to_vec_pretty(&out).map_err(std::io::Error::other)?;
-        let tmp = path.with_extension("json.tmp");
-        std::fs::write(&tmp, bytes)?;
-        replace(&tmp, &path)
+        Ok(paddock_env::write_atomic(&path, &bytes, false)?)
     }
 }
 

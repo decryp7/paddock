@@ -27,6 +27,7 @@
 use super::client::{Client, RunInfo, TimedJob};
 use super::logfind;
 use super::verdict::{self, Earlier, Mode};
+use crate::job_outcome::JobOutcome;
 use crate::plan_since::workflow_file;
 use crate::run_scope::PROJECT_JOBS;
 use serde_json::Value;
@@ -350,7 +351,7 @@ impl Touched {
         }
         match PROJECT_JOBS
             .iter()
-            .find(|(_, prefixes)| prefixes.iter().any(|p| job.starts_with(p)))
+            .find(|(_, prefixes)| prefixes.iter().any(|p| p.split('|').any(|q| job.starts_with(q))))
         {
             Some((flag, _)) => self.flags.contains(*flag) || (*flag == "e2e" || *flag == "e2e-webkit") && self.flags.contains("ui"),
             None => true,
@@ -491,7 +492,7 @@ pub fn read_failures(
 ) -> GradedResult {
     let failed: Vec<FailedJob> = jobs
         .iter()
-        .filter(|j| j.conclusion == "failure" && !j.is_caller())
+        .filter(|j| j.outcome == JobOutcome::Failed && !j.is_caller())
         .map(|j| FailedJob {
             name: j.name.clone(),
             id: j.id,
@@ -607,16 +608,18 @@ fn grade_run_inner(
     }
     // A job that was cancelled (or ended in no state) is neither a pass nor a failure; one the plan declared and that was skipped
     // is caught by the declared scope below, and one it did not declare is off.
-    if let Some(j) = read
+    let unmeasured = |o: &JobOutcome| match o {
+        JobOutcome::Passed | JobOutcome::Failed | JobOutcome::Skipped => None,
+        JobOutcome::Unfinished => Some("in no state".to_string()),
+        JobOutcome::Cancelled | JobOutcome::Unknown(_) => Some(o.to_string()),
+    };
+    if let Some((j, ended)) = read
         .jobs
         .iter()
-        .find(|j| !j.is_caller() && !matches!(j.conclusion.as_str(), "success" | "failure" | "skipped"))
+        .filter(|j| !j.is_caller())
+        .find_map(|j| unmeasured(&j.outcome).map(|e| (j, e)))
     {
-        let w = format!(
-            "job {:?} ended {}",
-            j.name,
-            if j.conclusion.is_empty() { "in no state" } else { &j.conclusion }
-        );
+        let w = format!("job {:?} ended {ended}", j.name);
         return Outcome::of(scope, GradedResult::NotMeasured(w)).noted(why);
     }
     let result = read_failures(client, run.workflow(), &read.jobs, touched);
@@ -736,6 +739,25 @@ impl Runs {
         }
         Ok(Runs(by_sha))
     }
+
+    /// The commits main has been at, newest first: those of push runs on main (a train lands by fast-forward, so each landing is one push
+    /// of main's branch). Main's first-parent line does not hold them ([`main_line`]).
+    pub fn main_tips(&self) -> Vec<String> {
+        let mut pushes: Vec<(u64, &str)> = self
+            .0
+            .values()
+            .flatten()
+            .filter(|r| r.event == "push" && r.head_branch == "main")
+            .map(|r| (r.id, r.head_sha.as_str()))
+            .collect();
+        pushes.sort_by_key(|(id, _)| std::cmp::Reverse(*id));
+        let mut seen = BTreeSet::new();
+        pushes
+            .into_iter()
+            .filter(|(_, sha)| seen.insert(*sha))
+            .map(|(_, sha)| sha.to_string())
+            .collect()
+    }
 }
 
 /// The last first-parent commit (`first_parent`: newest first, the asking commit itself left out) whose outcome is complete and green
@@ -845,6 +867,93 @@ pub fn first_parent_before(root: &std::path::Path, sha: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// The candidate bases of a push to main that moved it from `before` to `sha`, newest first: main's own first-parent line from `before`
+/// (included), at most [`MAX_COMMITS`]. A train lands by fast-forward, so the first-parent line of `sha` is the train's: it holds the
+/// train's merges of main but never main's previous tip, and a search over it skipped that tip and found an older base (push run
+/// 9056 read b3ad2dd2d, two mains back, while train g's landing run 9054 had tested the diff from 4284e23d5, the main it moved from).
+/// Without a usable `before` (none, the zero id of a new branch, not a commit of this clone, or not an ancestor of `sha`: a forced
+/// push) it is [`first_parent_before`], whose base is only older: a wider diff, never a missed one.
+pub fn push_chain(root: &std::path::Path, sha: &str, before: Option<&str>) -> Vec<String> {
+    let usable = before.filter(|b| b.len() == 40 && b.bytes().all(|c| c.is_ascii_hexdigit()) && b.bytes().any(|c| c != b'0') && *b != sha);
+    // Exit 0 of `merge-base --is-ancestor` is the only yes; exit 1 (no) and an unknown commit are both a failure here.
+    if let Some(b) = usable.filter(|b| crate::plan_repo::git_text(root, &["merge-base", "--is-ancestor", b, sha]).is_some()) {
+        let n = MAX_COMMITS.to_string();
+        let chain: Vec<String> = crate::plan_repo::git_text(root, &["rev-list", "--first-parent", "-n", &n, b])
+            .map(|t| t.lines().map(|l| l.trim().to_string()).filter(|l| !l.is_empty()).collect())
+            .unwrap_or_default();
+        if !chain.is_empty() {
+            return chain;
+        }
+    }
+    first_parent_before(root, sha)
+}
+
+/// The candidate bases on main's own line, newest first: the commits main has been at (`tips`, [`Runs::main_tips`]) that are ancestors of
+/// `head` (`head` itself only with `include_head`), then the first-parent line (from `head`'s parent for a push, whose `before` is given
+/// to [`push_chain`]; from `head` for a landing dispatch). A train lands by fast-forward and merges main's previous tip as a second parent
+/// (3258361e7 into train j), so the first-parent line of main's tip never meets it: the push's reuse and the next dispatch both lost the
+/// last complete commit that way. The one candidate line of the push's reuse, the planner's base and a landing dispatch's base.
+pub fn main_line(root: &std::path::Path, head: &str, include_head: bool, before: Option<&str>, tips: &[String]) -> Vec<String> {
+    // Every ancestor, not the newest MAX_COMMITS of them: a train merges many commits, so a tip main has been at can lie far below `head`
+    // in the walk (train r's push: 222 commits down, past 200, and the push took an older base than its landing run had). One
+    // `rev-list` of hashes, about 30 ms for 10,000 commits; the candidates stay bounded by the tips (at most MAX_PAGES pages of runs)
+    // and the first-parent line below.
+    let ancestors = |rev: &str| -> Vec<String> {
+        crate::plan_repo::git_text(root, &["rev-list", rev])
+            .map(|t| t.lines().map(|l| l.trim().to_string()).filter(|l| !l.is_empty()).collect())
+            .unwrap_or_default()
+    };
+    let Some(head_sha) = crate::plan_repo::git_text(root, &["rev-parse", "--verify", "--quiet", &format!("{head}^{{commit}}")])
+        .map(|t| t.trim().to_string())
+        .filter(|t| !t.is_empty())
+    else {
+        return Vec::new();
+    };
+    let reach: BTreeSet<String> = ancestors(&head_sha).into_iter().collect();
+    let below = if include_head {
+        let mut line = vec![head_sha.clone()];
+        line.extend(first_parent_before(root, &head_sha));
+        line
+    } else {
+        push_chain(root, &head_sha, before)
+    };
+    let mut seen = BTreeSet::new();
+    tips.iter()
+        .filter(|t| reach.contains(*t) && (include_head || **t != head_sha))
+        .cloned()
+        .chain(below)
+        .filter(|c| seen.insert(c.clone()))
+        .collect()
+}
+
+/// Main's tip before this push: `before` of the push event (`GITHUB_EVENT_PATH`, read with serde) when the event is a push; `None`
+/// otherwise or when it cannot be read ([`push_chain`] then falls back to the first-parent line, the safe side).
+pub fn push_before(env: &dyn Fn(&str) -> Option<String>) -> Option<String> {
+    if env("GITHUB_EVENT_NAME").as_deref() != Some("push") {
+        return None;
+    }
+    let text = std::fs::read_to_string(env("GITHUB_EVENT_PATH")?).ok()?;
+    let event: serde_json::Value = serde_json::from_str(&text).ok()?;
+    event.get("before")?.as_str().map(str::to_string)
+}
+
+/// Whether a run that tested the diff `from..head` tested at least what the diff `base..head` holds: `from` is an ancestor of `base`
+/// and every path `base..head` changes is changed in `from..head` too (the planner plans from the changed paths). `false` whenever git
+/// cannot say: the push then runs its own.
+pub fn diff_covers(root: &std::path::Path, from: &str, base: &str, head: &str) -> bool {
+    if crate::plan_repo::git_text(root, &["merge-base", "--is-ancestor", from, base]).is_none() {
+        return false;
+    }
+    let paths = |a: &str| -> Option<BTreeSet<String>> {
+        crate::plan_repo::git_text(root, &["diff", "--name-only", "-z", "--no-renames", a, head])
+            .map(|t| t.split('\0').filter(|p| !p.is_empty()).map(str::to_string).collect())
+    };
+    match (paths(from), paths(base)) {
+        (Some(wide), Some(push)) => push.is_subset(&wide),
+        _ => false,
+    }
+}
+
 /// What the commits `base..head` touched: the plan of that range. `None` when it cannot be planned (a commit that is not in this
 /// clone), which makes a FLAKY test not measured, never untouched.
 pub fn plan_touched_range(root: &std::path::Path, base: &str, head: &str) -> Option<Touched> {
@@ -863,6 +972,22 @@ pub fn plan_touched_range(root: &std::path::Path, base: &str, head: &str) -> Opt
         .map(|(graph, plan)| Touched::from_plan(&plan).with_graph(&graph))
 }
 
+/// THE candidate bases of a commit's readers (ER-21, ER-44): main's own line below `sha` (the tips main has been at that are ancestors,
+/// newest push run first, then the first-parent line; every ancestor is searched, never the newest N). The push's reuse, the planner,
+/// a landing dispatch, the measure of what a commit touched and the verdict's "last fully tested commit" hint all read the base from
+/// this one line, so they name the same commit (run 9150: 62049e300 here and 3258361e7 for the landing, and the hint said 62049e300).
+/// A push's reuse and planner add the push's `before` through [`main_line`]; this form has none.
+pub fn candidate_line(root: &std::path::Path, sha: &str, runs: &Runs) -> Vec<String> {
+    main_line(root, sha, false, None, &runs.main_tips())
+}
+
+/// [`candidate_line`] with the runs read here, once; empty when they cannot be read (no base is found: the safe side).
+pub fn candidate_line_of(client: &mut Client, workflow: &str, root: &std::path::Path, sha: &str) -> Vec<String> {
+    Runs::read(client, workflow)
+        .map(|runs| candidate_line(root, sha, &runs))
+        .unwrap_or_default()
+}
+
 /// The touched reader of the production paths (`ci verdict`, `ci reuse`, the queue, the planner): [`touched_since_base`] over the
 /// first-parent history of `root`, planned by [`plan_touched_range`], at the level [`PACKAGE_LEVEL_FIRST_GREEN_RUN`] says decides;
 /// with no good base, everything counts as reached, and a range
@@ -876,7 +1001,6 @@ pub fn touched_in(
     scope_decisive: bool,
     runs: Option<&Runs>,
 ) -> Option<Touched> {
-    let first_parent = first_parent_before(root, sha);
     let own;
     let runs = match runs {
         Some(r) => r,
@@ -885,6 +1009,7 @@ pub fn touched_in(
             &own
         }
     };
+    let first_parent = candidate_line(root, sha, runs);
     let narrow = PACKAGE_LEVEL_FIRST_GREEN_RUN.is_some();
     touched_since_base(client, runs, &first_parent, sha, scope_decisive, &mut |b, h| {
         plan_touched_range(root, b, h)

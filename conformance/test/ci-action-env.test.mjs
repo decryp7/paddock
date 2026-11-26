@@ -71,7 +71,7 @@ export function missingEnv(file, text, table = REQUIRED_ENV) {
 }
 
 // The jobs below predate the table. The list only shrinks (conformance/src/util/baseline.mjs): a job that is not listed must be right, a
-// listed job that is now right only warns "remove it", and an entry that the merge base's list lacks fails. ci.yml's wiki, heavy and
+// listed job that is now right only warns "remove it", and an entry that the merge base's list lacks fails. ci.yml's wiki, throttle and
 // crates are fixed by feat/ci-in-rust-setup-rust; dev-tool.yml runs on main only and publishes the tool itself.
 const BASELINE_PATH = 'conformance/baselines/ci-action-env.json';
 const BASELINE = join(PADDOCK, BASELINE_PATH);

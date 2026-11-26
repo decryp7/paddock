@@ -126,11 +126,13 @@ jobs:
           matched: ${{ steps.green.outputs.cache-matched-key }}
           saved: n/a
 
-      # A scheduled run ends early while a train's dispatch run is queued or running (ADR 0093 amendment 2026-11-12).
+      # A scheduled run ends early while a train's dispatch run is queued or running (ADR 0093 amendment 2026-11-12), and while Debrief
+      # is not in docs/ci-active-apps.toml's `active` (user, 2026-11-25): making it active again needs no edit here.
       - id: train
         uses: ./.gitea/actions/schedule-skip
         with:
           workflow: debrief.yml
+          app: debrief
           dev-token: ${{ secrets.BUILD_INPUTS_TOKEN }}
 
       # ER-49, test a commit once: a push to main of a commit that a complete green run of this workflow already tested (the train's
@@ -458,7 +460,13 @@ jobs:
             if [ -n "$HOST_PACKAGES" ]; then echo "::notice::only the packages with OS-specific code are tested on this runner (hostTests): $HOST_PACKAGES"; sel=(); for p in $HOST_PACKAGES; do sel+=(-p "$p"); done; fi
             if [ -n "$HOST_FILTER" ]; then filter=(-E "$HOST_FILTER"); fi
           fi
-          cargo nextest run "${sel[@]}" --profile ci ${filter[@]+"${filter[@]}"}
+          # chromium-driver's real-browser tests open real (windowed) Chrome windows: launch.rs has no headless mode. The CI Mac is a
+          # LaunchDaemon with no window server (ADR 0120, user decision 2026-11-25), so they run on Linux only (`rust tests`, under
+          # xvfb-run); on macOS they are a local run on a Mac with a login session.
+          no_window='not (package(chromium-driver) & test(/^real_browser::/))'
+          if [ ${#filter[@]} -gt 0 ]; then filter=(-E "(${filter[1]}) & $no_window"); else filter=(-E "$no_window"); fi
+          echo "::notice::not run on this runner (no window server): chromium-driver's real_browser:: tests"
+          cargo nextest run "${sel[@]}" --profile ci "${filter[@]}"
 
       - name: No temp folders left behind
         if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' }}
@@ -784,11 +792,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # macOS has no WebDriver for WKWebView: its leg builds the .app, starts every sidecar from it and asserts that the
-        # app stays up and quits within 10 s (scripts/ci/macos-smoke.sh). The v1.0.1 store-worker abort reached users
-        # because no macOS job ever started the sidecars.
+        # macOS has no WebDriver for WKWebView: its leg builds the .app, checks its seal and load (macos-verify-bundle.sh) and
+        # starts every sidecar from it (scripts/ci/macos-smoke.sh). The v1.0.1 store-worker abort reached users because no
+        # macOS job ever started the sidecars. It no longer launches the app itself (the launch-and-quit check and the macOS
+        # start-up benchmark): the CI Mac is a LaunchDaemon with no window server (ADR 0120, user decision 2026-11-25: one
+        # runner, no GUI lane), where a WKWebView app cannot start. Those two run on a Mac with a login session only
+        # (docs/testing-manual.md of Debrief; apps/debrief/docs/performance.md).
         os: [ubuntu-latest, windows-latest, macos-latest]
-    # paddock-timing-job: macos — the start-up benchmark and the quit-within-10-s check read the clock (C113)
+    # paddock-timing-job: macos — the sidecar start checks have a 40 s limit each (C113)
     runs-on: ${{ matrix.os }}
     env:
       # Read credential and tag rule for ./dev's prebuilt download (ADR 0022 R0b; a tag run builds from source).
@@ -929,7 +940,7 @@ jobs:
           npm run e2e:tauri:build
 
       # macOS: a real debug .app (ad-hoc sealed by tauri.macos.conf.json) with the sidecars and libduckdb inside, the same
-      # layout the installer ships; then the signature/Team-ID/load checks and the launch-and-quit smoke.
+      # layout the installer ships; then the signature/Team-ID/load checks and the sidecar starts (no launch: no window server).
       - name: Debug .app (macOS)
         if: runner.os == 'macOS'
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief/app
@@ -941,9 +952,12 @@ jobs:
           (cd ../../.. && npm run build -w ui)
           npx tauri build --debug --bundles app --config src-tauri/tauri.sidecars.conf.json
 
-      - name: Smoke test, sidecars and quit within 10 s (macOS)
+      - name: Smoke test, sidecars only (macOS)
         if: runner.os == 'macOS'
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief
+        env:
+          # The launch-and-quit half needs a window server, which the CI Mac (a LaunchDaemon, ADR 0120) does not have.
+          SMOKE_LAUNCH: "0"
         run: |
           app=$(find "$PADDOCK_BUILD_FOLDER/debug/bundle/macos" -maxdepth 1 -name '*.app' | head -n 1)
           [ -d "$app" ] || { echo "::error::no debug .app was built"; exit 1; }
@@ -1005,22 +1019,15 @@ jobs:
 
       # The start-up benchmark (Paddock rule 16; startup_timings.rs): five everyday starts of the built app after a
       # first run, each one's "Startup timings" line read and the medians checked against scripts/ci/startup-budgets.json.
-      # Nightly and manual runs, and on macOS every debrief-v tag (a release needs a measured benchmark). macOS has measured
-      # budgets; Linux reports until its first nightly numbers are in.
+      # Nightly and manual runs, on Linux, which reports until its first nightly numbers are in. The macOS benchmark (the measured
+      # budgets, formerly also on every debrief-v tag) no longer runs in CI since 2026-11-25: the CI Mac is a LaunchDaemon with no
+      # window server (ADR 0120, user decision 2026-11-25), where the app cannot start. It is a manual step of the release checklist,
+      # on a Mac with a login session (user decision 2026-11-25; apps/debrief/docs/releasing.md, "Before tagging").
       # Verdict on a busy host (scripts/bench/busy-host.mjs; apps/debrief/docs/performance.md, "Start-up benchmark on a busy
       # host"): the benchmark is always taken, and the host's CPU idle and load are recorded with every start. It fails (exit 1,
       # on every run, tag or not) only when the started tree's CPU time is over its limit (the tight one on a quiet host, else
       # the coarse one) or a wall mark is over its ceiling; a slow wall mark, a wide spread and the host load are notes. NOT
       # MEASURED (exit 6, an ::error::) only when the app produced no timings (ER-33).
-      - name: Start-up benchmark (macOS)
-        timeout-minutes: 20
-        if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/debrief-v')) && !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && runner.os == 'macOS'
-        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief
-        run: |
-          app=$(find "$PADDOCK_BUILD_FOLDER/debug/bundle/macos" -maxdepth 1 -name '*.app' | head -n 1)
-          node --test scripts/ci/startup-bench.test.mjs
-          node scripts/ci/startup-bench.mjs "$app" --runs 5 --out "${RUNNER_TEMP:-/tmp}/startup-timings.json"
-
       - name: Start-up benchmark (Linux, report only)
         if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && runner.os == 'Linux'
         env:

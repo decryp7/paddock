@@ -13,7 +13,7 @@ use serde_json::{Map, Value, json};
 use std::collections::BTreeMap;
 use std::fmt;
 use std::fs::{File, OpenOptions, TryLockError};
-use std::io::{Read, Write};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -334,17 +334,8 @@ impl OwnerStore {
     }
 
     fn write(&self, map: &OwnerMap) -> Result<(), OwnerError> {
-        let tmp = self.dir.join(format!("paddock-worktree-owners.json.{}.tmp", std::process::id()));
-        let io = |what: &str, e| OwnerError::Io(format!("{what} {}", tmp.display()), e);
-        let mut f = File::create(&tmp).map_err(|e| io("Creating", e))?;
-        f.write_all(format!("{:#}\n", map.to_json()).as_bytes())
-            .map_err(|e| io("Writing", e))?;
-        f.sync_all().map_err(|e| io("Syncing", e))?;
-        drop(f);
-        std::fs::rename(&tmp, self.file()).map_err(|e| {
-            let _ = std::fs::remove_file(&tmp);
-            OwnerError::Io(format!("Replacing {}", self.file().display()), e)
-        })
+        paddock_env::write_atomic(&self.file(), format!("{:#}\n", map.to_json()).as_bytes(), false)
+            .map_err(|e| OwnerError::Io(format!("Replacing {}", self.file().display()), e.into()))
     }
 }
 

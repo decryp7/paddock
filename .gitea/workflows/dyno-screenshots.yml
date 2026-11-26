@@ -54,15 +54,10 @@ jobs:
         run: |
           npm run build -w ui
           npm run build:e2e -w ui
+      # The one install point (conformance/ci/playwright-browsers.sh): on the Mac one fixed folder on the boot disk, never the
+      # runner's tool cache on the external work volume, then signed with the Mac CI identity (docs/dev-setup.md, "Mac CI runner").
       - name: Chromium
-        run: |
-          PW_VERSION=$(node -p "require('playwright-core/package.json').version")
-          BROWSERS="${RUNNER_TOOL_CACHE:-$HOME/.cache}/paddock-playwright/$PW_VERSION"
-          echo "PLAYWRIGHT_BROWSERS_PATH=$BROWSERS" >> "$GITHUB_ENV"
-          if [ ! -f "$BROWSERS/.installed-chromium" ]; then
-            PLAYWRIGHT_BROWSERS_PATH="$BROWSERS" npx playwright install chromium
-            touch "$BROWSERS/.installed-chromium"
-          fi
+        run: bash ../../../conformance/ci/playwright-browsers.sh chromium
       - name: Regenerate into a scratch folder and compare with the tracked pictures
         run: |
           # The job slot's own port (conformance/ci/ports.txt); the scratch folder is the runner's temp, never the checkout.

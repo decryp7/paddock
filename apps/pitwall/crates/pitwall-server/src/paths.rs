@@ -104,15 +104,10 @@ impl Dirs {
 
 /// Write `data` to `path` atomically, keeping the previous file as `<path>.bak`.
 pub fn write_atomic(path: &Path, data: &[u8]) -> std::io::Result<()> {
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir)?;
-    }
-    let tmp = path.with_extension("tmp");
-    std::fs::write(&tmp, data)?;
     if path.exists() {
         let _ = std::fs::copy(path, backup_of(path));
     }
-    std::fs::rename(&tmp, path)
+    Ok(paddock_env::write_atomic(path, data, false)?)
 }
 
 /// `<path>.bak`.

@@ -56,7 +56,7 @@ fn every_shape_gives_the_same_findings_in_both_hosts() {
         ),
         (
             "crates/a/tests/it/bound.rs",
-            "const BIN: &str = env!(\"CARGO_BIN_EXE_heavy\");\nfn t() {\n    Command::new(env!(\"CARGO_BIN_EXE_other\")).output();\n    let mut c = command(BIN);\n    let p = std::env::var(\"PATH\").unwrap();\n    TestCommand::new(\"x\").env(\"PATH\", p);\n    let s = SpawnSpec::new(env!(\"CARGO_BIN_EXE_child\"), \"x\");\n}\n",
+            "const BIN: &str = env!(\"CARGO_BIN_EXE_throttle\");\nfn t() {\n    Command::new(env!(\"CARGO_BIN_EXE_other\")).output();\n    let mut c = command(BIN);\n    let p = std::env::var(\"PATH\").unwrap();\n    TestCommand::new(\"x\").env(\"PATH\", p);\n    let s = SpawnSpec::new(env!(\"CARGO_BIN_EXE_child\"), \"x\");\n}\n",
         ),
         ("crates/a/src/plain.rs", "fn run() {\n    Command::new(\"cargo\");\n}\n"),
         (
@@ -84,7 +84,7 @@ fn every_shape_gives_the_same_findings_in_both_hosts() {
     let a = crate::recorded::expect("c123-every-shape", &b);
     assert_eq!(a, b);
     assert_eq!(
-        a["warnings"], 16,
+        a["errors"], 16,
         "bad.rs 4, bound.rs 3, lib.rs 1, the bare waiver 1, gaps.rs 6, b's lib.rs 1 (c's other.rs 0: another crate): {a}"
     );
 }

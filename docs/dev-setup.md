@@ -38,11 +38,11 @@ and links here.
 
 | Name | What is there | How the tools find it |
 | --- | --- | --- |
-| `<dev-targets>` | worktrees (`wt/`), build folders, agent scratch (`scratch/<agent id>`), `sccache`, `paddock-dev-home`, the disk index `.paddock-disk.sqlite` | `PADDOCK_DEV_TARGETS`, else the parent of `paddock.worktreeRoot`, else of `PADDOCK_WORKTREE_ROOT` |
+| `<dev-targets>` | worktrees (`wt/`), build folders, agent scratch (`scratch/<agent id>`), `sccache`, `paddock-dev-home`, the disk index `.paddock-disk.sqlite`, the throttle's run logs (`runs/<agent>/`), the shared npm cache `cache/npm` | `PADDOCK_DEV_TARGETS`, else the parent of `paddock.worktreeRoot`, else of `PADDOCK_WORKTREE_ROOT` |
 | `<dev disk>` | the folder that holds `<dev-targets>` | the parent of `<dev-targets>` |
 | `<dev disk>/vm-data` | the Tart images `tart-from-home` of the service smoke | `PADDOCK_VM_DATA`, else derived |
 | `<dev disk>/ci/locks/test-machines` | the lock of the test machines (`scripts/vm-lock.sh`) | `PADDOCK_VM_LOCK_ROOT`, else derived |
-| the main checkout | `paddock`, with `engineering-rules` next to it | the folder that holds the git common directory |
+| the main checkout | `paddock`, with `engineering-playbook` next to it | the folder that holds the git common directory |
 
 The derivation is `tools/paddock-dev/src/places.rs`; scripts ask `./dev places` (`--get <name>` for one folder, `--pinned` to
 ignore every environment variable). The hooks, which run before any binary is built, have the one copy,
@@ -58,6 +58,27 @@ The Mac mini's layout since 2026-11-14 (one SSD for all dev data; media and back
 
 After a disk move: move the folders, run `git config paddock.worktreeRoot <new dev-targets>/wt` in the main checkout,
 update the shell profile's `SCCACHE_DIR` and `PADDOCK_DEV_HOME`, and change the table above. Nothing else names the disk.
+
+## Shared npm cache (`./dev deps`)
+
+`npm ci` and the `ui/dist` build are done once per content key, not once per worktree. `./dev deps install` gives the worktree its
+`node_modules` (the root's and each workspace's) and `./dev deps ui` adds `ui/dist` and the generated css: each is a copy-on-write
+clone (APFS `clonefile` through `cp -c`, a reflink where the file system has one, else a plain copy) of an entry in
+`<dev-targets>/cache/npm/`, or the one build that makes the entry. A clone is a real folder of its own, never a link into the cache,
+so Angular, Vitest and Playwright resolve ordinary paths and no worktree can change another's. `./dev worktree add` clones a warm
+`node_modules` at once; with a cold cache it keeps installing only the conformance dependencies and never builds.
+
+- **Keys.** `node_modules`: `package-lock.json`, the Node version and the platform. `ui/dist`: the build guard's own content hashes
+  (`sourceHash` in `@decryp7/paddock-e2e`, read from Node), the `node_modules` key and the hash of `ui/angular.json`,
+  `ui/package.json`, `ui/tsconfig.json`, `ui/scripts/` and `tsconfig/`. A changed lockfile or source is a new key (a miss), never an
+  edit of an old entry.
+- **Owner, lock, size, eviction (ER-51).** Owner: `./dev deps` (`owner.json` in the folder). One kernel file lock per key
+  (`<name>.lock`), exclusive while an entry is built and stored, shared while one is only cloned out, so two builders of one key
+  build once and an entry is never read half made. An entry is made in a staging folder and renamed into place; `entry.json` records
+  its folders and file count, and an entry that fails the check is removed and rebuilt. Cap 10 GiB (`PADDOCK_DEPS_CACHE_MAX_GIB`);
+  over it, the least recently used entry (folder modification time, set on every hit) goes first, never the one just used or one
+  whose lock is held. Every deletion goes through `safe_remove`.
+- **Measurements:** [docs/benchmarks.md](benchmarks.md#2026-11-26-shared-npm-and-uidist-cache-featnpm-ui-cache).
 
 ## Environment
 
@@ -89,12 +110,35 @@ key on their checkout path (`CARGO_MANIFEST_DIR`); a symlink does not help, carg
 
 ### Local sccache
 
-Agents' builds use one local sccache 0.19.0 (the CI pin and checksums, `tools/paddock-dev/src/ci_setup_rust.rs`), set by Paddock's
+Agents' builds use one local sccache 0.20.1 (the CI pin and checksums, `tools/paddock-dev/src/ci_setup_rust.rs`), set by Paddock's
 tools and never by your shell profile (user decision 2026-11-16; docs/research/sccache-basedirs-2026-11-16.md):
 
-- `eval "$(./dev sccache env)"` installs the pinned release into `<PADDOCK_DEV_HOME or ~/.paddock-dev>/tools/sccache/0.19.0/` (never
+- `eval "$(./dev sccache env)"` installs the pinned release into `<PADDOCK_DEV_HOME or ~/.paddock-dev>/tools/sccache/0.20.1/` (never
   `~/.cargo`), starts the one server on the default port 4226, and prints `export RUSTC_WRAPPER=...` lines for that shell. Run it
   once per machine to install; the push gates and `./dev gen check` then use the installed copy by themselves and never download.
+- **Always on, in any shell.** Agents' Bash tool starts a fresh shell for every command, so an `eval` per shell never held (2026-11-26:
+  the live server had 0 compile requests in three hours of builds). `./dev sccache env` therefore also writes
+  `<worktree root>/.cargo/config.toml` (first line marks it as this tool's; a file of somebody else's is never touched) with
+  `[build] rustc-wrapper = "<shim>"`. Cargo reads the `.cargo/config.toml` of every folder above where it runs, so every cargo in every
+  worktree, `./dev`'s own build included, compiles through the shim in any shell; the environment's `RUSTC_WRAPPER` still wins (cargo's
+  rule: CI's own, whose checkouts are not below this root, and a developer's). It is a machine file, not a line in the repository, because
+  Windows cannot start an extensionless script as `rustc-wrapper` (and a `.cmd` file is CRLF, which a shell script cannot be, ER-61). The
+  shim sends a rustc compile to sccache only when our server listens on the port; with none, the launcher recorded in
+  `<tool cache>/sccache-run/launcher` (the primary checkout's `./dev`, which stays; never a run's own held binary, which is removed when the
+  run ends) starts ours (one start at a time, `start.lock`), and when it is still down the compile runs plain
+  rustc, so a build never fails because of the cache. To switch it off, delete the file.
+- The server starts with `SCCACHE_BASEDIRS` (sccache 0.20: the longest matching base is stripped from every path in a Rust compile's
+  key) naming exactly this repository's worktrees, the main checkout included (`git worktree list`, wherever they live; never a
+  sibling folder that is another repository), and `SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS=CARGO_MANIFEST_DIR,CARGO_MANIFEST_PATH`
+  (crates that bake those into their output stay per checkout). One server serves every worktree and reads the list only when it
+  starts, so `./dev sccache env` records what the server started with (`<tool cache>/sccache-run/start-stamp`: the bases and the key
+  prefix) and, when the worktree list or the prefix changed, stops our server through its own client (`sccache --stop-server` on our
+  port, never a kill) and starts it again once; a server that is not ours is never touched, and builds keep going during the restart
+  (`SCCACHE_IGNORE_SERVER_IO_ERROR`). Only `./dev sccache env` restarts; the push gates never do. After `./dev worktree add`, run
+  `eval "$(./dev sccache env)"` in the new worktree once: that is what puts it into the list.
+- sccache hashes every `CARGO_*` variable of a compile into its key, and CI's setup-rust exports `CARGO_INCREMENTAL=0` and `CARGO_TERM_COLOR=always`
+  to every job with the cache. The wrapper shim exports the same two for a rustc compile (`CI_KEY_ENV` in `local_sccache.rs`), so a local key equals CI's and a build here
+  reuses what CI stored (docs/benchmarks.md, "Local keys against CI's"); your shell and cargo's output are unchanged.
 - It is off, with one `::warning::` line and a build without the cache, when sccache is not installed, the server does not
   start, or a server on the port uses another cache. The server runs in its own short folder (`<tool cache>/sccache-run`, also its `TMPDIR`, working folder and error log
   `sccache.log`; short because macOS caps socket paths at 104 bytes), never in a job's or an agent's scratch folder, which a job deletes. It
@@ -113,7 +157,7 @@ tools and never by your shell profile (user decision 2026-11-16; docs/research/s
   (`host:port`, default `172.16.1.220:15000`) and `PADDOCK_SCCACHE_S3_BUCKET` (default `sccache-paddock`), each taken from the environment,
   else from an optional line of that name in the key file below, else the default (the one place the defaults are named: this file; the code
   holds them as `DEFAULT_S3_ENDPOINT` and `DEFAULT_S3_BUCKET` in `local_sccache.rs`); optionally
-  `PADDOCK_SCCACHE_S3_PREFIX` (default `paddock`) and, for `s3`, `PADDOCK_SCCACHE_S3_REGION` (default `auto`) and
+  `PADDOCK_SCCACHE_S3_PREFIX` (default CI's for this OS and arch, `paddock-ci/<OS>-<arch>`, `ci_setup_rust::ci_prefix`; a server still on the older `paddock` prefix is restarted once) and, for `s3`, `PADDOCK_SCCACHE_S3_REGION` (default `auto`) and
   `PADDOCK_SCCACHE_S3_SSL` (`true`; default `false`). With `auto` the first level is the sibling folder `<SCCACHE_DIR>-s3` (what S3
   backfills never reaches the plain folder, as in CI, ADR 0111): the first build after the switch starts from the store, not from
   the old folder, and the two folders together use up to twice `SCCACHE_CACHE_SIZE` on the Mac's disk (each is capped at that size; lower
@@ -242,7 +286,7 @@ shared backend on 2026-10-28 and again on 2026-11-17 (CI keeps its per-slot cach
 - **The sccache shim (ER-47).** cc-rs puts `RUSTC_WRAPPER` in front of the C compiler when its file name is `sccache`, cargo hands that
   variable to every build script, and sccache 0.19 cannot probe `clang-cl` (it reads `/Users/...` as `/U` options), so every
   `cargo xwin` lint that compiles C (ring) failed. cc-rs 1.8 to 1.11 has no switch for one target, so `./dev sccache env` (and the
-  gates, `./dev gen check`, heavy's build) set `RUSTC_WRAPPER` to `<tool cache>/tools/sccache/<version>/shim/sccache`, a shell
+  gates, `./dev gen check`, the throttle's build) set `RUSTC_WRAPPER` to `<tool cache>/tools/sccache/<version>/shim/sccache`, a shell
   program named `sccache` that runs `clang-cl`/`cl` (or a compiler with `--target=...-windows-msvc`) directly and everything else
   through the real sccache. Native C stays cached on macOS and Linux; only the cross C compiles are not. Written by `./dev sccache env`
   only (a gate with no shim turns the wrapper off and says so). Policy: `local_sccache::shim_text`; measured: docs/benchmarks.md.
@@ -251,10 +295,33 @@ shared backend on 2026-10-28 and again on 2026-11-17 (CI keeps its per-slot cach
 
 A folder a tool creates for an agent (a cargo or cargo-xwin target folder, a test scratch folder, a VM run folder) gets an
 owner record, `./dev disk record <dir> --kind <build|scratch|...> --link <worktree>` (on branch `feat/dev-disk` until it
-lands), so a cleanup knows whose it is. Callers: engineering-rules `scripts/heavy.sh` records `CARGO_TARGET_DIR` (so every
+lands), so a cleanup knows whose it is. Callers: engineering-playbook `scripts/heavy.sh` records `CARGO_TARGET_DIR` (so every
 `cargo`, `cargo xwin` and `llvm-cov` run through it is covered; the xwin target folder is whatever `CARGO_TARGET_DIR` names,
 no script here makes one). The scratch folder an agent's brief names is made by the brief's
-author: that call belongs there. The Rust `heavy` tool (`tools/heavy`) makes no folder.
+author: that call belongs there. The Rust `throttle` tool (`tools/throttle`) makes no folder.
+
+### Cutover from `heavy` to `throttle` (user decision 2026-11-26; no dual-lock shim before v1)
+
+The slot locks are kernel file locks now and the tool is `throttle` (`tools/throttle/README.md`). A `heavy` and a `throttle` do not exclude each
+other (different lock files), so the move is made once, at a quiet moment, as its own train:
+
+1. The coordinator pauses every builder and lands the train.
+2. The first `./dev` call of each agent rebuilds `./dev` and the throttle on the new hash (the cached `heavy-<hash>` binaries are no longer
+   used); builders resume after that.
+3. CI jobs build the throttle from their own tree, so only jobs already running at the landing use the old lock: a window of minutes.
+4. The throttle decides its own lock folder (user decision 2026-11-26): `./dev` and `tools/mac-runner-move.sh` no longer pass one.
+   Precedence: `THROTTLE_DIR` (aliases `HEAVY_DIR`, `PLOCK_DIR`, `PLOCK_ROOT`), then `dir` in `<user config folder>/throttle/config.toml`, then
+   the per-user state folder (macOS `~/Library/Application Support/throttle`, Linux `$XDG_STATE_HOME/throttle` or `~/.local/state/throttle`,
+   Windows `%LOCALAPPDATA%\throttle`); `throttle dir` prints it, and a process with no `HOME` finds it through the user database. The
+   Mac daemon runs as the CI user, so its folder is that user's: the same one the agents' `./dev` resolves when they run as that user.
+   The user re-runs the runner install (`tools/mac-runner-move.sh`) whenever convenient: a reinstall drops the `THROTTLE_DIR` or `HEAVY_DIR`
+   the old plist sets (an old plist keeps working: the variable still wins until then, so keep it equal to the new default or reinstall
+   before the first run on the new binary, else the daemon and the agents queue in two folders).
+5. What carries over: the history. The first run that finds the new folder without a `heavy-history.tsv` reads the old folder's
+   (`<dev-targets>/throttle`, else `/private/tmp/claude-501`, else `THROTTLE_MOVED_FROM`) and copies it over once, so quick rows stay quick.
+   The `pitcrew-*` ticket and marker files and `pitcrew-lock-activity.log` (which `./dev wait --plock` reads through `throttle dir`) start fresh in the
+   new folder, so no run is queued across the move: do it at the quiet moment of step 1. The old `<dev-targets>/throttle` and the
+   `pitcrew-heavy-v2.lock*` folders are ignored and safe to delete after the first run. `./dev heavy` and `./dev heavy-install` still work and print a deprecation line.
 
 ## Tests
 
@@ -275,14 +342,9 @@ author: that call belongs there. The Rust `heavy` tool (`tools/heavy`) makes no 
   folders (and `*.golden` and `*.snap` files) for uid and gid numbers, `/Users`, `/home` and `C:\Users` paths and temp paths, by
   fixed patterns, so it gives the same result on every machine; it walks the working folder today (reading git's tracked list is
   the approved train-14 item). A value that is fine (an invented user) gets an entry with a reason in `conformance/c131-allow.json`.
-  **Rewriting:** `PADDOCK_UPDATE_GOLDEN=1` rewrites a differing golden and prints the command that runs that test on Linux as root
-  in the CI image (`tools/linux-container.sh --id paddock --ci-image -- sh -c 'cd <package folder> && cargo nextest run -p <package> <test>'`;
-  the test name comes from `NEXTEST_TEST_NAME`). Run it before you commit the file. `./dev golden confirm [-p <package>] <test filter>`
-  (from the workspace of the test, or `--manifest-dir <folder>`) runs the filtered tests on this machine and in that image and passes
-  only when both pass; a filter that selects no test fails with "no test matched the filter", and a filter starting with `-` is
-  refused. The container needs Docker or OrbStack and obeys `PADDOCK_LINUX_CPUS`, `PADDOCK_LINUX_JOBS`, `PADDOCK_LINUX_MEMORY`,
-  `PADDOCK_LINUX_USER`, `PADDOCK_LINUX_CI_REGISTRY` and `PADDOCK_LINUX_HOST_ARCH` (ER-14), all passed through. On an arm64 Mac the CI
-  image is a local arm64 build (not the registry's amd64 image).
+  **Rewriting:** `PADDOCK_UPDATE_GOLDEN=1` rewrites a differing golden and says that CI's Linux job confirms it as root on the Linux runner
+  (push the branch). No container or VM runs on this Mac (user, 2026-11-26; docs/rules.md rule 101), so `./dev golden confirm` and the
+  local CI-image run are gone.
 - **Checked (conformance C37):** a `tests/<name>.rs` outside `tests/it/` fails unless `ownTestBinaries` of
   `paddock.conformance.json` names it with the reason it needs its own binary, and every workspace member needs a CI test
   step and the workspace-hack dependency.
@@ -306,6 +368,88 @@ author: that call belongs there. The Rust `heavy` tool (`tools/heavy`) makes no 
   number that is missing); `stop` at a 5-minute load of 20 or more, or under 50 GiB free on a root. `--json` gives the numbers
   for scripts. The limits are flags (`--start-below`, `--hold-above`, `--min-free-gib`, `--ci-hold`, `--disk <path>`, `--no-ci`).
   It decides nothing by itself: it does not start or stop agents, and `heavy.sh` still caps the heavy steps.
+
+## Mac CI runner (ADR 0120)
+
+The Mac keeps one runner, `d7-mac-mini`, with capacity 4, as a LaunchDaemon: it leaves the user's GUI login session, runs as
+the same account (`UserName`, so its toolchains, folders and Full Disk Access grants stay) and has no window server. There is
+no GUI lane: jobs that need a window run elsewhere (ADR 0120, D1 and D8 as changed on 2026-11-25). `d7-mac-mini-2` and `-3`
+are removed: stopped, their plists parked in `~/gitea-runner-parked-2026-11-25/`, and to be deleted from Gitea's runner list.
+
+The user runs these; an agent never does (rule 7, ER-14). Run them from the repository root. A running job is waited for, visibly
+and bounded, before anything changes: `install` and `rollback` tell the runner to take no new job (`launchctl kill SIGTERM`), print
+which job runs and how long they have waited, and stop, swap and start only when every job has ended. After `--wait-max SECONDS`
+(default 3600) they fail with the old runner still loaded and nothing changed; they never end a job or its helpers, whose own cleanup
+does (ER-51). The new daemon must be `state = running` in `launchctl print` and log "declare successfully", or the lane fails.
+
+1. **Restart.** A planned restart is `sudo fdesetup authrestart` (D5, amended 2026-11-25).
+2. **Look first:** `bash tools/mac-runner-move.sh install --user decryp7 --daemon d7-mac-mini --retire d7-mac-mini-2 --retire d7-mac-mini-3 --dry-run`
+   (no sudo, changes nothing: it renders and shows the plist and prints every step).
+3. **Install:** the same line with `sudo` and without `--dry-run`. It ends with one `ok` or `fail` line: `ok` means launchd
+   runs the runner in the system domain, as your account, and its log says `declare successfully` within 90 s
+   (`--verify-max`). The original agent is kept as `~/Library/LaunchAgents/net.decryptology.gitea-runner.d7-mac-mini.plist.before-adr0120`.
+4. **Check later:** `bash tools/mac-runner-move.sh status --user decryp7 --daemon d7-mac-mini --retire d7-mac-mini-2 --retire d7-mac-mini-3`,
+   the log `/Library/Logs/gitea-runner/d7-mac-mini.log`, `sudo launchctl print system/net.decryptology.gitea-runner.d7-mac-mini`,
+   and Gitea's runner list (`d7-mac-mini` online, with capacity 4 from `~/gitea-runner/config.yaml`).
+5. **Roll back:** `sudo bash tools/mac-runner-move.sh rollback --user decryp7 --daemon d7-mac-mini --retire d7-mac-mini-2 --retire d7-mac-mini-3`
+   removes the daemon, puts the parked agent back and starts it in your session. The `-2` and `-3` plists parked by hand stay
+   where they are. `--dry-run` shows the steps first.
+
+After a restart: once the disk is unlocked (by `authrestart`, or by your password at the FileVault screen) the runner starts
+at boot, before anyone logs in. The external disk mounts without a login because `AutomountDisksWithoutUserLogin` is 1 (the
+install checks it). A crash restart waits at the FileVault screen for the password, and the runner does not run until then.
+
+### Full Disk Access by a stable identity (user decision 2026-11-25, option A+B)
+
+The runner's work folder is on `/Volumes/vault-dev`, which macOS privacy (TCC) treats as a removable volume. A LaunchDaemon has
+no window, so a missing grant is a silent deny, never a prompt (the daemon's checks go to the system `tccd`: the log says
+`user tccd unavailable, forwarding ... to system tccd`). TCC checks the stored *designated requirement* (DR) of a program
+([TN3127](https://developer.apple.com/documentation/technotes/tn3127-inside-code-signing-requirements), "Designated
+requirement"); an ad-hoc signature's DR is its cdhash, so every runner update and every new test browser is a stranger
+([Apple DTS](https://developer.apple.com/forums/thread/795739): ad hoc signed code "does not include a stable DR"). Full Disk
+Access is checked before the Removable Volumes service ([Eclectic Light](https://eclecticlight.co/2026/04/20/privacy-how-locations-are-protected/)).
+
+So the runner and the programs that are their own responsible process carry one self-signed identity, `Paddock CI code signing`
+(`tools/mac-ci-signing.sh`), and its DR, `identifier "<id>" and certificate leaf = H"<sha1>"`, is the same for every update
+signed with it. The runner's children (git, cargo, rustc, test binaries, sccache) inherit the runner's grant and are not
+signed; CI builds are never signed.
+
+| Program | Identifier (TCC entry) | Signed by |
+| --- | --- | --- |
+| `~/gitea-runner/gitea-runner` | `net.decryptology.gitea-runner` (by its path) | `tools/mac-runner-move.sh install` (as you, after the old runner stopped) |
+| Chrome for Testing (`install-test-browser`, every copy and pin) | `com.google.chrome.for.testing` (by bundle id) | `conformance/ci/install-test-browser.mjs` after each install |
+| Playwright's browsers (any CI job; today Dyno's screenshots) | Chromium's and WebKit's bundle ids; the headless shell `net.decryptology.paddock.ci.chrome-headless-shell` | `conformance/ci/playwright-browsers.sh`, the one install point: one fixed folder on the boot disk, `~/Library/Caches/paddock-ci/ms-playwright`, for every Playwright version |
+
+The keychain is a file of its own, `~/Library/Keychains/paddock-ci-signing.keychain-db`, unlocked with the random password in
+`~/.config/paddock/ci-signing.pass` (0600), because the daemon has no unlocked login keychain and no window for a dialog. The CI
+hooks find it at that default path (`PADDOCK_CI_SIGNING_KEYCHAIN` only overrides it), so the runner needs no configuration; without
+it they print a notice and sign nothing. They sign only in a CI job (`GITEA_ACTIONS` or `GITHUB_ACTIONS`, which the runner sets in every job; the one rule is `mac-ci-signing.sh --ci-hook`), so a
+developer's Mac and the tests never sign, even with the identity in place.
+
+**Your one-time steps** (an agent never runs these; rule 7, ER-14). From the repository root, as yourself:
+
+1. **Create the identity** (once; idempotent, `--dry-run` shows the steps): `bash tools/mac-ci-signing.sh create`, then
+   `bash tools/mac-ci-signing.sh identity` prints its SHA-1.
+2. **Sign the runner and restart it:** `sudo bash tools/mac-runner-move.sh install --user <you> --daemon d7-mac-mini --retire d7-mac-mini-2 --retire d7-mac-mini-3`
+   (it stops the runner after its running job, signs it, starts it and checks it declared itself). `status` then says
+   `signature the Mac CI identity`.
+3. **Full Disk Access** (System Settings, Privacy & Security, Full Disk Access). Remove the old entries first, since they hold the
+   ad-hoc cdhash and no longer match: `gitea-runner` (all three: `~/gitea-runner/`, `~/gitea-runners/d7-mac-mini-2/`,
+   `~/gitea-runners/d7-mac-mini-3/`). Then add with `+` (Cmd-Shift-G types a path; Cmd-Shift-. shows hidden folders), each
+   switched on:
+   - `~/gitea-runner/gitea-runner`
+   - one signed copy of `Google Chrome for Testing.app`, for example
+     `/Volumes/vault-dev/ci/home/test-browser-paddock-s1/chrome-mac-arm64/Google Chrome for Testing.app` (after a Mac CI run
+     has installed and signed it; check with `bash tools/mac-ci-signing.sh check "<that .app>"`). The entry is by bundle id, so
+     it covers every copy and every later pin.
+4. **Check:** `bash tools/mac-ci-signing.sh check --identifier net.decryptology.gitea-runner ~/gitea-runner/gitea-runner`, and
+   after the next Mac run `log show --last 1h --predicate 'subsystem == "com.apple.TCC" AND eventMessage CONTAINS "Removable"'`.
+
+**After a runner update:** replace the binary, then run step 2 again. The Full Disk Access entry stays (same path, same DR).
+**A new browser pin** is signed by CI and needs nothing. **Not needed:** an entry for Playwright's browsers (they live on the boot
+disk and are signed for when they do touch the volume; add `chrome-headless-shell` only if the TCC log names it, as its entry is by
+path and the path holds Playwright's revision), and for `pitcrew-service` (CI runs it only as a child of the runner).
+**Rotating the certificate** (it is valid for 10 years) means: move the keychain away, `create`, then steps 2 and 3 again.
 
 ## Things that cost time when forgotten
 

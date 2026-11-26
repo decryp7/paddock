@@ -23,12 +23,12 @@
 use crate::host_tests::HostTests;
 use crate::plan::{Request, plan_with_graph};
 use crate::plan_ci::{
-    BaseInput, MatrixOpts, USAGE, choose_base, ci_outputs, full_os, matrix, member_run, only_app, package_filters, parse_args, summary,
-    wants_webkit, workspace_legs,
+    BaseInput, MatrixOpts, USAGE, choose_base, ci_outputs, coverage_run, full_os, matrix, member_run, only_app, package_filters,
+    parse_args, summary, wants_webkit, workspace_legs,
 };
 use crate::plan_repo::git_text;
 use crate::plan_since::{APP_WORKFLOWS, GiteaRuns, SincePlan};
-use crate::run_scope::{DEFAULT_OS_LEGS, Scope, ci_scope, scope_of};
+use crate::run_scope::{Scope, ci_scope, scope_of};
 use crate::wait::{CurlHttp, Http};
 use paddock_cli::{CliError, Report};
 use paddock_repo_graph::GitHistory;
@@ -65,32 +65,39 @@ pub fn green_base(
     let repo = env("GITHUB_REPOSITORY").unwrap_or_else(|| "decryp7/paddock".into());
     let token = env("PLAN_TOKEN").unwrap_or_default();
     let mut client = Client::new(http, &server, &repo, &token);
-    green_base_in(&mut client, root, warn)
+    let before = crate::ci_runs::green::push_before(env);
+    green_base_in(&mut client, root, "HEAD", before.as_deref(), warn)
 }
 
-/// [`green_base`] over a client already made.
-fn green_base_in(
+/// [`green_base`] over a client already made; `before` is main's tip before the push (the push event's); the candidates are main's own
+/// line to `head` ([`crate::ci_runs::green::main_line`]), as `ci reuse` reads them.
+pub(crate) fn green_base_in(
     client: &mut crate::ci_runs::client::Client,
     root: &Path,
+    head: &str,
+    before: Option<&str>,
     warn: &mut dyn FnMut(&str),
 ) -> Result<Option<(String, u64)>, String> {
-    let first_parent = crate::ci_runs::green::first_parent_before(root, "HEAD");
-    green_base_over(client, root, &first_parent, warn)
+    green_base_over(client, root, head, false, before, warn)
 }
 
-/// The base over the commits given (`first_parent`: newest first): the last one the one definition of green accepts. A push to main
-/// asks it over the commits before its head; a train's landing dispatch over main's own commits (`ci_runs::landing`, ADR 0117 WP-8).
+/// The base over main's own line to `head` ([`green::main_line`]): the newest commit the one definition of green accepts. A push to main
+/// asks it before its head (`include_head` false, `before` its event's); a train's landing dispatch from main's tip, tip included
+/// (`ci_runs::landing`, ADR 0117 WP-8).
 pub(crate) fn green_base_over(
     client: &mut crate::ci_runs::client::Client,
     root: &Path,
-    first_parent: &[String],
+    head: &str,
+    include_head: bool,
+    before: Option<&str>,
     warn: &mut dyn FnMut(&str),
 ) -> Result<Option<(String, u64)>, String> {
     use crate::ci_runs::{green, verdict};
     let scope = verdict::scope_decisive("ci.yml");
     // The run list is read once for the whole search, and handed to the measure of what each candidate touched.
     let found = green::Runs::read(client, "ci.yml").map(|runs| {
-        green::find_base_in(client, &runs, first_parent, scope, &mut |c, runs, s| {
+        let first_parent = green::main_line(root, head, include_head, before, &runs.main_tips());
+        green::find_base_in(client, &runs, &first_parent, scope, &mut |c, runs, s| {
             green::touched_in(c, "ci.yml", root, s, scope, Some(runs))
         })
     });
@@ -401,7 +408,7 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
     // The selection record of the escape monitor (ADR 0117 WP-9): what this run's plan runs; never fails the plan.
     if plan_app.is_none() {
         let selected = if graph_mode {
-            crate::plan_graph::escape_selected(&plan, &legs, &os_legs(env))
+            crate::plan_graph::escape_selected(&plan, &legs, &crate::plan_ci::os_legs())
         } else {
             crate::repo_inputs::load(root)
                 .map(|inputs| crate::escape::cmd::rules_selected(&plan, &inputs, &graph))
@@ -505,12 +512,30 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
     plan["webkit"] = serde_json::json!(wants_webkit(env));
     let mut outputs = ci_outputs(&plan, &legs);
     // OS-scoped tests: the legs of the `crate` and `paddock-dev` jobs with what each runner tests (`hostTests` of their contracts).
-    let os_runners = os_legs(env);
+    let os_runners = crate::plan_ci::os_legs();
     let mut workspace_oses: BTreeMap<&str, BTreeSet<String>> = BTreeMap::new();
     // Whether this run is OS-scoped: some leg tests only the packages with OS-specific code (declared in its scope line, `os_full`).
     let mut os_scoped = legs
         .iter()
         .any(|l| !l["host_packages"].as_str().unwrap_or("").is_empty() || !l["host_filter"].as_str().unwrap_or("").is_empty());
+    // The test-result cache's plan (ADR 0116 §5): the packages each runner class skips, from the file `ci test-cache plan` wrote. No file,
+    // an unreadable one, or an empty plan (the switch is off) means nothing is skipped; a bad file is said, never read as a plan.
+    let reuse_plan = env(crate::test_cache::plan::ENV_FILE)
+        .filter(|p| !p.trim().is_empty())
+        .and_then(|p| {
+            match std::fs::read_to_string(&p)
+                .map_err(|e| e.to_string())
+                .and_then(|t| crate::test_cache::plan::ReusePlan::parse(&t))
+            {
+                Ok(plan) => Some(plan),
+                Err(e) => {
+                    log(&format!("::notice::test-cache: no reuse in this plan: {e}"));
+                    None
+                }
+            }
+        })
+        .unwrap_or_default();
+    let mut cache_reused: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for (name, contract, key, workspace_dir) in [
         ("crate_legs", CRATES_CONTRACT, "crates", "crates"),
         ("paddock_dev_legs", PADDOCK_DEV_CONTRACT, "paddockDev", "tools/paddock-dev"),
@@ -534,6 +559,22 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
             let id = if key == "crates" { "crates" } else { "paddock-dev" };
             legs_of = crate::plan_graph::narrow_workspace_legs(legs_of, &plan, &graph, id, workspace_dir);
         }
+        // The Linux tests of the `crate` job run as parallel jobs of whole packages when coverage does not run (user decision 2026-11-26):
+        // a core change no longer runs as one long job. Before the reuse below, so a partition drops the packages it need not run.
+        if key == "crates" && !coverage_run(env) {
+            let packages: Vec<String> = graph
+                .cargo
+                .iter()
+                .filter(|(_, n)| n.workspace == workspace_dir)
+                .map(|(_, n)| n.name.clone())
+                .collect();
+            legs_of = crate::plan_ci::partition_linux_legs(legs_of, &packages, crate::plan_ci::LINUX_PARTITIONS);
+        }
+        // Packages with a valid pass of the same key are left out of the legs' tests (never the declared filter: the run stays whole).
+        let job = if key == "crates" { "crate" } else { "paddock-dev" };
+        let applied = crate::test_cache::plan::apply(legs_of, job, &reuse_plan, key != "crates" || !coverage_run(env));
+        legs_of = applied.legs;
+        cache_reused.extend(applied.reused);
         workspace_oses.insert(
             if key == "crates" { "crate" } else { "paddock-dev" },
             legs_of
@@ -557,7 +598,7 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
     if reused {
         outputs.push(("rerun_jobs".into(), "[]".into()));
     }
-    let os_legs = os_legs(env);
+    let os_legs = crate::plan_ci::os_legs();
     let filter_of = |p: &Value, k: &str| p["filters"][k].as_str().unwrap_or("").to_string();
     let mut ran = if reused {
         Scope::default()
@@ -626,6 +667,7 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
     log(&ci_scope(ran, false, need, need_whole)
         .with_base(need_base)
         .with_inactive(inactive.clone())
+        .with_reused(cache_reused)
         .line());
     if narrow {
         log("narrowed to the packages the change reaches (a member run; the final head's full run tests the rest)");
@@ -667,19 +709,6 @@ fn read_host_tests(root: &Path, path: &str, derived: &crate::host_tests::Derived
     };
     let contract: Value = serde_json::from_str(&text).map_err(|e| format!("{path} is not valid JSON: {e}"))?;
     crate::host_tests::read(&contract, path, derived)
-}
-
-/// The runners of the `crate` and `paddock-dev` jobs: the `os` of each entry of `PLAN_OS_LEGS` (ci.yml's own default list), or the
-/// three runners when it is not set or not readable.
-fn os_legs(env: &dyn Fn(&str) -> Option<String>) -> Vec<String> {
-    env("PLAN_OS_LEGS")
-        .and_then(|t| serde_json::from_str::<Value>(&t).ok())
-        .and_then(|v| {
-            v.as_array()
-                .map(|a| a.iter().filter_map(|e| e["os"].as_str().map(str::to_string)).collect::<Vec<_>>())
-        })
-        .filter(|v| !v.is_empty())
-        .unwrap_or_else(|| DEFAULT_OS_LEGS.iter().map(|s| s.to_string()).collect())
 }
 
 /// The workflow file a run names (`ci.yml`), from this checkout; `None` for a name that is not a plain file name.
@@ -868,7 +897,7 @@ fn since_ci_with(root: &Path, env: &dyn Fn(&str) -> Option<String>, id: u64, rea
         },
     )
     .map_err(fail)?;
-    let need = scope_of(&everything, &need_legs, true, &os_legs(env), &[]);
+    let need = scope_of(&everything, &need_legs, true, &crate::plan_ci::os_legs(), &[]);
     eprintln!("{}", ci_scope(Scope::default(), true, need, true).with_inactive(inactive).line());
     if let Some(why) = &plan.everything {
         println!("::warning::dev plan --since-run {id}: {why}; this run tests everything");
@@ -1024,7 +1053,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let mut client = crate::ci_runs::client::Client::new(&mut http, "https://gitea.invalid", "decryp7/paddock", "t");
         client.backoff_ms = 0;
-        let got = green_base_in(&mut client, root.path(), &mut |w| warned = w.to_string());
+        let got = green_base_in(&mut client, root.path(), "HEAD", None, &mut |w| warned = w.to_string());
         assert!(got.is_err(), "{got:?}");
         assert!(warned.starts_with("::warning::the CI runs of main could not be read ("), "{warned}");
         assert!(warned.ends_with("this run tests everything"), "{warned}");

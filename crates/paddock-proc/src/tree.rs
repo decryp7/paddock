@@ -49,6 +49,19 @@ pub(crate) trait Os {
     fn names(&self) -> Names {
         Names::default()
     }
+    /// The group of a guarded child of this process and the keeper that leads it (Unix, [`crate::guardian`]): such a child
+    /// does not lead its group, so its group is ended through the keeper and never signalled by the child's pid.
+    fn pinned_group(&self, _root: ProcessId) -> Option<(u32, ProcessId)> {
+        None
+    }
+    /// Ends `group` while `keeper` still leads it ([`end_pinned_group`]).
+    fn end_pinned(&self, _group: u32, _keeper: ProcessId) -> bool {
+        false
+    }
+    /// Whether `root` was a guarded child that has been released: its group was never its own pid's (Unix).
+    fn was_guarded(&self, _root: ProcessId) -> bool {
+        false
+    }
 }
 
 /// `pid -> (program name, parent pid)` of the running processes, from one look at the process list, read just before
@@ -66,6 +79,7 @@ const CHAIN_DEPTH: usize = 6;
     reason = "names a parent chain in a log line only (chain_text); nothing is counted, followed for a decision or ended"
 )]
 fn read_names() -> Names {
+    usage::note_table_read();
     let Some(mut sys) = usage::new_system_with(sysinfo::System::new) else {
         return Names::default();
     };
@@ -172,6 +186,21 @@ impl Os for RealOs {
         }
     }
 
+    #[cfg(unix)]
+    fn pinned_group(&self, root: ProcessId) -> Option<(u32, ProcessId)> {
+        crate::guardian::pinned(root)
+    }
+
+    #[cfg(unix)]
+    fn end_pinned(&self, group: u32, keeper: ProcessId) -> bool {
+        end_pinned_group(group, keeper)
+    }
+
+    #[cfg(unix)]
+    fn was_guarded(&self, root: ProcessId) -> bool {
+        crate::guardian::was_guarded(root)
+    }
+
     #[cfg(windows)]
     fn end(&self, id: ProcessId) -> Ending {
         crate::sys::end_if(id)
@@ -182,6 +211,67 @@ impl Os for RealOs {
         crate::sys::signal_by_pidfd(id, crate::sys::SIGKILL)
             .unwrap_or_else(|| check_then_kill(self, id))
     }
+}
+
+/// The operating system with one look at the table and at the names, taken once and shared by several tree ends (a scope's
+/// end: N members cost two reads, not 2N; ER-20). The look is taken before anything is ended, as each single end does; a pid
+/// handed on since is still caught by the identity check of each end.
+pub(crate) struct OnceRead {
+    table: Table,
+    names: Names,
+}
+
+impl OnceRead {
+    /// Reads the table and the names now.
+    pub(crate) fn now() -> OnceRead {
+        OnceRead {
+            table: usage::snapshot(),
+            names: read_names(),
+        }
+    }
+}
+
+impl Os for OnceRead {
+    fn table(&self) -> Table {
+        self.table.clone()
+    }
+
+    fn start_of(&self, pid: u32) -> Option<StartTime> {
+        RealOs.start_of(pid)
+    }
+
+    fn end_group(&self, root: u32) {
+        RealOs.end_group(root);
+    }
+
+    fn kill_pid(&self, pid: u32) -> bool {
+        RealOs.kill_pid(pid)
+    }
+
+    fn end(&self, id: ProcessId) -> Ending {
+        RealOs.end(id)
+    }
+
+    fn names(&self) -> Names {
+        self.names.clone()
+    }
+
+    fn pinned_group(&self, root: ProcessId) -> Option<(u32, ProcessId)> {
+        RealOs.pinned_group(root)
+    }
+
+    fn end_pinned(&self, group: u32, keeper: ProcessId) -> bool {
+        RealOs.end_pinned(group, keeper)
+    }
+
+    fn was_guarded(&self, root: ProcessId) -> bool {
+        RealOs.was_guarded(root)
+    }
+}
+
+/// [`kill_tree`] over a shared look ([`OnceRead`]).
+pub(crate) fn kill_tree_with(os: &dyn Os, root: ProcessId) -> TreeEnding {
+    kill_tree_on(os, root, false, None)
 }
 
 /// What ending one process of a tree found, root first.
@@ -213,13 +303,25 @@ pub(crate) fn kill_tree_on(
     } else {
         holder(root, os.start_of(root.pid()))
     };
+    // A guarded child does not lead its group: its group is ended through the keeper that leads it, never signalled by the
+    // child's pid, which after the child is reaped can belong to a stranger's group (rule 53; review round 3).
+    let pinned = os.pinned_group(root);
+    if let Some((group, keeper)) = pinned {
+        os.end_pinned(group, keeper);
+    }
+    // A released guarded child (a caller held its identity past the release) never had its own group either.
+    let own_group = pinned.is_none() && !os.was_guarded(root);
     match root_holder {
         Holder::Same => {
-            os.end_group(root.pid());
+            if own_group {
+                os.end_group(root.pid());
+            }
             out.push((root, os.end(root)));
         }
         Holder::Gone => {
-            os.end_group(root.pid());
+            if own_group {
+                os.end_group(root.pid());
+            }
             out.push((root, Ending::Gone));
         }
         h @ Holder::Other(_) => out.push((root, Ending::of(h, false))),
@@ -315,18 +417,15 @@ pub(crate) fn group_runs_in_proc(proc_root: &std::path::Path, group: u32) -> Opt
     seen.then_some(runs)
 }
 
-/// Ends `root` and everything below it. A child started by this crate leads its own process group (Unix), which is
-/// signalled as a whole while the root is still the process `root` names (or is gone with no new holder of its pid); every
+/// Ends `root` and everything below it. A child started by this crate runs in a process group (Unix) that is ended as a whole:
+/// a guarded child's group through the keeper that leads it, while that keeper is still the process recorded (the child's own
+/// pid is then never signalled as a group: after the child is reaped it may name a stranger's group, rule 53); an unguarded
+/// child's own group while the root is still the process `root` names (or is gone with no new holder of its pid); every
 /// process of the tree is then ended by identity, so a pid handed on since the tree was read is left alone (ADR 0033).
 /// Windows ends each process through a handle after checking its creation time (never `taskkill /T`, which follows parent
 /// pids). Safe to call for a process that is already gone. Returns what it found for each process, root first.
 pub fn kill_tree(root: ProcessId) -> TreeEnding {
     kill_tree_on(&RealOs, root, false, None)
-}
-
-/// [`kill_tree`] for a child of this process that has not been reaped, with its job's members on Windows.
-pub(crate) fn kill_child_tree(root: ProcessId, members: Option<Vec<ProcessId>>) -> TreeEnding {
-    kill_tree_on(&RealOs, root, true, members)
 }
 
 /// Ends the process group led by `pid`, a child of this process that has not been reaped and whose start time could not
@@ -760,6 +859,53 @@ mod port_tests {
             out.contains(&(ProcessId::new(12, at(300)), Ending::Gone)),
             "{out:?}"
         );
+    }
+
+    /// A guarded child: its group is the keeper's (77), recorded for the root.
+    struct Guarded(FakeOs, Mutex<Vec<(u32, ProcessId)>>);
+
+    impl Os for Guarded {
+        fn table(&self) -> Table {
+            self.0.table()
+        }
+        fn start_of(&self, pid: u32) -> Option<StartTime> {
+            self.0.start_of(pid)
+        }
+        fn end_group(&self, root: u32) {
+            self.0.end_group(root);
+        }
+        fn kill_pid(&self, pid: u32) -> bool {
+            self.0.kill_pid(pid)
+        }
+        fn pinned_group(&self, root: ProcessId) -> Option<(u32, ProcessId)> {
+            (root.pid() == 10).then_some((77, ProcessId::new(77, at(50))))
+        }
+        fn end_pinned(&self, group: u32, keeper: ProcessId) -> bool {
+            self.1.lock().unwrap().push((group, keeper));
+            true
+        }
+    }
+
+    /// Rule 53 (review round 3, P2-1): a guarded root does not lead its group, so its pid is never signalled as a group (after
+    /// it is reaped the pid can name a stranger's group); its group is ended through the keeper instead, whether the root
+    /// still runs or is gone.
+    #[test]
+    fn a_guarded_roots_group_is_ended_through_its_keeper_and_never_by_its_pid() {
+        let running: &[(u32, Option<u32>, u64)] =
+            &[(1, None, 1), (10, Some(1), 100), (12, Some(10), 300)];
+        let gone: &[(u32, Option<u32>, u64)] = &[(1, None, 1)];
+        for rows in [running, gone] {
+            let os = Guarded(FakeOs::new(rows, unchanged), Mutex::new(Vec::new()));
+            kill_tree_on(&os, ProcessId::new(10, at(100)), false, None);
+            assert!(
+                os.0.groups.lock().unwrap().is_empty(),
+                "the root's pid was signalled as a group"
+            );
+            assert_eq!(
+                *os.1.lock().unwrap(),
+                vec![(77, ProcessId::new(77, at(50)))]
+            );
+        }
     }
 
     #[test]

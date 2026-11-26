@@ -1,9 +1,9 @@
-//! The `heavy` binary for the push gate, built on demand like `./dev` builds `paddock-dev` (ADR 0022 §3.3): content-addressed by
-//! [`input_hash::compute_for`] over `tools/heavy/inputs.txt`, cached under `<PADDOCK_DEV_HOME or ~/.paddock-dev>/bin/heavy-<hash>/`,
+//! The `throttle` binary for the push gate, built on demand like `./dev` builds `paddock-dev` (ADR 0022 §3.3): content-addressed by
+//! [`input_hash::compute_for`] over `tools/throttle/inputs.txt`, cached under `<PADDOCK_DEV_HOME or ~/.paddock-dev>/bin/throttle-<hash>/`,
 //! built with `cargo build --release --locked` and published by an atomic rename. The build folder is `./dev`'s own root
-//! (`PADDOCK_DEV_TARGET_DIR`, else `tools/heavy/target` of the tree, never the internal disk's cache folder), one per build, and is
+//! (`PADDOCK_DEV_TARGET_DIR`, else `tools/throttle/target` of the tree, never the internal disk's cache folder), one per build, and is
 //! removed afterwards through `safe_remove` with the result printed. Inputs with uncommitted changes (a fix to heavy still in the
-//! working tree) are published as `heavy-dirty`, replaced by each such build. Any failure is a message with the
+//! working tree) are published as `throttle-dirty`, replaced by each such build. Any failure is a message with the
 //! cause and the next step; the caller turns it into "not measured" (ER-33).
 //! The cache, its hold and its prune are the tool cache's one mechanism ([`crate::tool_cache`]): a run starts its own hold, never
 //! the shared path.
@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-/// The most the build of `heavy` may take (it is a cold release build of tools/heavy: 58 s measured in the research note, section 2).
+/// The most the build of `throttle` may take (it is a cold release build of tools/throttle: 58 s measured in the research note, section 2).
 pub const BUILD_LIMIT: Duration = Duration::from_secs(1200);
 
 /// Whether an `ensure` or `hold` error is one that may pass on its own (a build that timed out on a busy machine, a budget that was
@@ -49,19 +49,19 @@ fn runs(bin: &Path, env: &HashMap<String, String>) -> bool {
         .is_ok_and(|r| r.success && !r.stdout.trim().is_empty())
 }
 
-/// The path of a runnable `heavy` for the tree at `root`: cached, else built. `Err` is the whole explanation.
+/// The path of a runnable `throttle` for the tree at `root`: cached, else built. `Err` is the whole explanation.
 pub fn ensure(root: &Path, env: &HashMap<String, String>, left: Duration) -> Result<PathBuf, String> {
     let home = home(env)?;
     let lookup = |k: &str| env.get(k).cloned();
     let vars: Vec<(String, String)> = env.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-    let h = input_hash::compute_for(&Real, &lookup, &vars, root, "tools/heavy")
+    let h = input_hash::compute_for(&Real, &lookup, &vars, root, "tools/throttle")
         .map_err(|e| format!("the heavy tool's input hash could not be computed: {e:?}. Next: run `./dev check --pre-push` inside the Paddock repository with git and rustc working"))?;
     let (key, cached) = if h.dirty {
-        ("dirty".to_string(), home.join("bin").join("heavy-dirty").join(exe("heavy")))
+        ("dirty".to_string(), home.join("bin").join("throttle-dirty").join(exe("throttle")))
     } else {
         (
             h.hash.clone(),
-            home.join("bin").join(format!("heavy-{}", h.hash)).join(exe("heavy")),
+            home.join("bin").join(format!("throttle-{}", h.hash)).join(exe("throttle")),
         )
     };
     // A cached binary that fails its probe is not removed: a probe that timed out on a loaded machine is no proof the file is
@@ -82,7 +82,7 @@ pub fn ensure(root: &Path, env: &HashMap<String, String>, left: Duration) -> Res
     }
     let base = match env.get("PADDOCK_DEV_TARGET_DIR").filter(|d| !d.is_empty()) {
         Some(d) => PathBuf::from(d),
-        None => root.join("tools/heavy/target"),
+        None => root.join("tools/throttle/target"),
     };
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -115,7 +115,7 @@ pub fn ensure(root: &Path, env: &HashMap<String, String>, left: Duration) -> Res
 
 /// Builds heavy into `target` and returns the binary's path there.
 fn build(root: &Path, env: &HashMap<String, String>, target: &Path, key: &str, limit: Duration) -> Result<PathBuf, String> {
-    let built = target.join("release").join(exe("heavy"));
+    let built = target.join("release").join(exe("throttle"));
     // The build folder as cargo configuration, never `CARGO_TARGET_DIR` (sccache hashes it: crate::cargo_target).
     let args = crate::cargo_target::with_target_dir(
         &["build", "--release", "--locked", "--quiet"].map(String::from),
@@ -124,17 +124,17 @@ fn build(root: &Path, env: &HashMap<String, String>, target: &Path, key: &str, l
     let call = ToolCall::new("cargo")
         .args(args)
         .pass(PASS.iter().copied())
-        .cwd(root.join("tools/heavy"))
+        .cwd(root.join("tools/throttle"))
         .without("CARGO_TARGET_DIR")
         .without("CARGO_BUILD_TARGET_DIR")
         .env("CARGO_BUILD_JOBS", "2")
         .timeout(limit);
     let ran = call.run(env, &mut std::io::sink()).map_err(|e| {
-        format!("heavy ({key}) could not be built: {e}. Next: run `cargo build --release --locked` in tools/heavy to see why")
+        format!("throttle ({key}) could not be built: {e}. Next: run `cargo build --release --locked` in tools/throttle to see why")
     })?;
     if !ran.success {
         return Err(format!(
-            "heavy ({key}) could not be built ({}): {}. Next: run `cargo build --release --locked` in tools/heavy; a stale tools/heavy/Cargo.lock is the usual cause",
+            "throttle ({key}) could not be built ({}): {}. Next: run `cargo build --release --locked` in tools/throttle; a stale tools/throttle/Cargo.lock is the usual cause",
             ran.how,
             tail(&ran.stderr, 6).trim()
         ));
@@ -152,15 +152,24 @@ fn build(root: &Path, env: &HashMap<String, String>, target: &Path, key: &str, l
 fn publish(built: &Path, bin: &Path) -> Result<(), String> {
     let dir = bin.parent().map(Path::to_path_buf).unwrap_or_default();
     std::fs::create_dir_all(&dir).map_err(|e| format!("cannot write the cache folder {}: {e}", dir.display()))?;
-    let tmp = dir.join(format!(".heavy.{}", std::process::id()));
-    std::fs::copy(built, &tmp)
-        .and_then(|_| std::fs::rename(&tmp, bin))
+    let mode = std::fs::metadata(built).map(|m| m.permissions());
+    std::fs::read(built)
+        .and_then(|bytes| {
+            paddock_env::write_atomic_created(bin, &bytes, &mut |tmp| {
+                let f = std::fs::OpenOptions::new().write(true).create_new(true).open(tmp)?;
+                if let Ok(p) = &mode {
+                    f.set_permissions(p.clone())?;
+                }
+                Ok(f)
+            })
+            .map_err(std::io::Error::from)
+        })
         .map_err(|e| format!("cannot publish heavy into {}: {e}", dir.display()))
 }
 
-/// Holds the cached `heavy` at `bin` for this run: the tool cache's one hold ([`crate::tool_cache::hold`]).
+/// Holds the cached `throttle` at `bin` for this run: the tool cache's one hold ([`crate::tool_cache::hold`]).
 pub fn hold(bin: &Path, env: &HashMap<String, String>) -> Result<Held, String> {
-    crate::tool_cache::hold("heavy", bin, env)
+    crate::tool_cache::hold("throttle", bin, env)
 }
 
 #[cfg(all(test, unix))]
@@ -175,22 +184,22 @@ mod tests {
         env.insert("PADDOCK_DEV_HOME".into(), home.path().display().to_string());
         let lookup = |k: &str| env.get(k).cloned();
         let vars: Vec<(String, String)> = env.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-        let h = input_hash::compute_for(&Real, &lookup, &vars, &root, "tools/heavy").unwrap();
+        let h = input_hash::compute_for(&Real, &lookup, &vars, &root, "tools/throttle").unwrap();
         if h.dirty {
-            // An uncommitted tools/heavy has no cache entry to touch (it builds `heavy-dirty`): nothing to check on this tree.
-            eprintln!("tools/heavy has uncommitted changes; the cache-hit path is not reachable here");
+            // An uncommitted tools/throttle has no cache entry to touch (it builds `throttle-dirty`): nothing to check on this tree.
+            eprintln!("tools/throttle has uncommitted changes; the cache-hit path is not reachable here");
             return;
         }
-        let entry = home.path().join("bin").join(format!("heavy-{}", h.hash));
+        let entry = home.path().join("bin").join(format!("throttle-{}", h.hash));
         std::fs::create_dir_all(&entry).unwrap();
         // A probe that fails: `--version` prints nothing and the program exits 1.
-        let bin = paddock_testkit::StandIn::new(&entry, "heavy")
+        let bin = paddock_testkit::StandIn::new(&entry, "throttle")
             .exit(1)
             .install()
             .unwrap()
             .program()
             .to_path_buf();
-        assert_eq!(bin, entry.join(exe("heavy")));
+        assert_eq!(bin, entry.join(exe("throttle")));
         let two_days = std::time::SystemTime::now() - Duration::from_secs(2 * 86_400);
         std::fs::File::open(&entry).unwrap().set_modified(two_days).unwrap();
         // No budget left: ensure stops after the probe and builds nothing.

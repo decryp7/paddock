@@ -26,6 +26,8 @@ debrief-plugin-api = { path = "../debrief-plugin-api" }
 debrief-store-worker = { path = "../debrief-store-worker" }
 
 [dev-dependencies]
+# `WorkerConfig::for_tests` (test only, rule 99), re-exported by debrief-store-worker.
+debrief-store-client = { path = "../debrief-store-client", features = ["test-support"] }
 cargo-debrief-plugin = { path = "../cargo-debrief-plugin" }
 debrief-core = { path = "../debrief-core" }
 debrief-plugin-host = { path = "../debrief-plugin-host" }

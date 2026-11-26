@@ -110,9 +110,20 @@ pub fn acquire_within<L: SlotLocks>(
     grace: Duration,
     pause: Duration,
 ) -> Result<Option<(SlotId, L::Guard)>, SlotError> {
+    acquire_within_preferring(locks, max, None, grace, pause)
+}
+
+/// [`acquire_within`] that tries `prefer` first at every attempt ([`crate::acquire_preferring`]).
+pub fn acquire_within_preferring<L: SlotLocks>(
+    locks: &L,
+    max: u32,
+    prefer: Option<SlotId>,
+    grace: Duration,
+    pause: Duration,
+) -> Result<Option<(SlotId, L::Guard)>, SlotError> {
     let deadline = Instant::now() + grace;
     loop {
-        if let Some(got) = crate::acquire_first(locks, max)? {
+        if let Some(got) = crate::acquire_preferring(locks, max, prefer)? {
             return Ok(Some(got));
         }
         if Instant::now() >= deadline {
@@ -200,13 +211,16 @@ pub fn hold_with(
         poll,
         max_hold,
         grace,
+        None,
         &mut || true,
         announce,
     )
 }
 
 /// [`hold_with`] that also lets go when `alive` answers false ([`HoldEnd::LifelineGone`]): asked once per look, it says whether the
-/// process whose life bounds the holder still runs (the caller reads its identity; this crate reads no processes).
+/// process whose life bounds the holder still runs (the caller reads its identity; this crate reads no processes). With a `key`
+/// (the kind of job: workflow, job and OS) it first tries the slot that kind held last and, once it holds a slot, records it as the
+/// kind's last (`FsLocks::last_slot`, `FsLocks::record_last`); a busy preferred slot means the first free one, as without a key.
 #[allow(clippy::too_many_arguments)]
 pub fn hold_while(
     locks: &FsLocks,
@@ -215,15 +229,22 @@ pub fn hold_while(
     poll: Duration,
     max_hold: Option<Duration>,
     grace: Duration,
+    key: Option<&str>,
     alive: &mut dyn FnMut() -> bool,
     announce: &mut dyn Write,
 ) -> Result<Option<(SlotId, HoldEnd)>, SlotError> {
-    let Some((id, guard)) = acquire_within(locks, max, grace, ACQUIRE_PAUSE)? else {
+    let prefer = key.and_then(|k| locks.last_slot(k));
+    let Some((id, guard)) = acquire_within_preferring(locks, max, prefer, grace, ACQUIRE_PAUSE)?
+    else {
         let _ = announce
             .write_all(Announcement::None.line().as_bytes())
             .and_then(|()| announce.flush());
         return Ok(None);
     };
+    // Only a hint: a record that cannot be written costs the next job a cold slot, never this job its slot.
+    if let Some(k) = key {
+        let _ = locks.record_last(k, id);
+    }
     let token = fresh_token();
     locks.clear_release(id);
     locks.write_owner(

@@ -1,6 +1,6 @@
 //! C123: a Rust test starts `./dev`, `cargo` or `node` only through `paddock_testkit::TestCommand` (ADR 0100, ER-14, ER-21). A child
 //! started with a plain `Command` inherits the machine's whole environment, so every new environment lookup in the program under test
-//! quietly reaches real machine state (the pre-push tests ran the real heavy steps; `dev()` found the real engineering-rules `heavy.sh`
+//! quietly reaches real machine state (the pre-push tests ran the real heavy steps; `dev()` found the real engineering-playbook `heavy.sh`
 //! through ENGINEERING_RULES and took machine-wide slots, fix/precommit-heavy-slot, 2ff5f5072). Judged per Rust test file (a path
 //! under `tests/`, a `tests.rs` or `*_test.rs` file, or the part of any file after a `#[cfg(..)]` naming `test`, never `not(test)`):
 //! (1) a constructor (`Command::new`, `paddock_proc::command`, `quiet_command`, `<crate>::process::command`) whose first argument is a
@@ -12,8 +12,8 @@
 //! left out) does not name `TestCommand`; (3) the machine's `PATH` read in a function that builds a `TestCommand` (use `path_first`).
 //! Known false negatives (ADR 0100): a program held in a variable, an alias of `Command`, a block comment naming `TestCommand`, and
 //! spawns in a non-test helper module.
-//! A justified case carries `conformance: test-env — <why>` on the line or above. JavaScript tests are not judged. Report-only for now
-//! (ER-41).
+//! A justified case carries `conformance: test-env — <why>` on the line or above. JavaScript tests are not judged. Blocking
+//! (errors, mode gate) since its first green run on the real tree, ci.yml run 9065 (11cd82593, 2026-11-25; ER-41).
 //!
 //! The JavaScript check (`conformance/src/checks/C123-*.mjs`) was the original; it was retired with pair P3 (ADR 0022 amendment 2026-11-19) and the Rust host is the only one. The answers it gave are recorded in `tests/fixtures/check/recorded` and `units` and ``tests/it/check_c123.rs`` holds the check to them.
 
@@ -271,7 +271,7 @@ impl Check for C123 {
     }
 
     fn mode(&self) -> Mode {
-        Mode::ReportOnly
+        Mode::Gate
     }
 
     fn control(&self) -> Control {
@@ -329,7 +329,7 @@ impl Check for C123 {
                 } else {
                     ""
                 };
-                findings.push(Finding::warn(
+                findings.push(Finding::error(
                     "C123",
                     3,
                     f,
@@ -388,11 +388,11 @@ mod tests {
     fn any_built_binary_a_bound_name_and_a_spliced_machine_path_are_sites() {
         let t = "crates/a/tests/it/x.rs";
         assert_eq!(
-            lines("fn t() {\n    Command::new(env!(\"CARGO_BIN_EXE_heavy\")).output();\n}\n", t),
+            lines("fn t() {\n    Command::new(env!(\"CARGO_BIN_EXE_throttle\")).output();\n}\n", t),
             vec![2]
         );
         let bound =
-            "pub const BIN: &str = env!(\"CARGO_BIN_EXE_heavy\");\nfn t() {\n    let mut c = command(BIN);\n    Command::new(&BIN);\n}\n";
+            "pub const BIN: &str = env!(\"CARGO_BIN_EXE_throttle\");\nfn t() {\n    let mut c = command(BIN);\n    Command::new(&BIN);\n}\n";
         assert_eq!(lines(bound, t), vec![3, 4]);
         let handed = "fn t() {\n    let s = SpawnSpec::new(env!(\"CARGO_BIN_EXE_child\"), \"x\");\n}\n";
         assert!(lines(handed, t).is_empty());

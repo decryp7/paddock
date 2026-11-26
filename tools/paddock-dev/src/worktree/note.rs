@@ -54,7 +54,7 @@ impl Note {
         )
     }
 
-    /// Reads a note back. Besides the form above it reads the engineering-rules skill's `<role>: <task text>` (what a
+    /// Reads a note back. Besides the form above it reads the engineering-playbook skill's `<role>: <task text>` (what a
     /// coordinator types with a raw `git worktree add --lock --reason`); a lock with any other text has no note.
     pub fn parse(text: &str) -> Option<Note> {
         Note::parse_structured(text).or_else(|| Note::parse_free(text))

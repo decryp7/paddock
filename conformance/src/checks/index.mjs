@@ -47,7 +47,6 @@ import C115 from './C115-scoped-cleanup.mjs';
 import C116 from './C116-generator-registry.mjs';
 import C117 from './C117-job-abort-guard.mjs';
 import C128 from './C128-recorded-pid.mjs';
-import C133 from './C133-e2e-pinned-clock.mjs';
 import C135 from './C135-leak-detector-opt-outs.mjs';
 import C136 from './C136-unit-live-feeds.mjs';
 import C137 from './C137-e2e-kit-import.mjs';
@@ -55,9 +54,11 @@ import C138 from './C138-owned-scroll.mjs';
 import C139 from './C139-e2e-ready-directives.mjs';
 import C140 from './C140-per-item-opt-outs.mjs';
 import C143 from './C143-spawn-joined-path.mjs';
-import C144 from './C144-bare-stream-wait.mjs';
 import C156 from './C156-axe-scan-held-still.mjs';
 import C167 from './C167-growth-test-history.mjs';
+import C169 from './C169-write-atomic.mjs';
+import C171 from './C171-abs-path-literals.mjs';
+import C172 from './C172-no-local-vm.mjs';
 
 /** Every check, in id order. A check is { id, title, rule, run(ctx) -> findings[] | Promise<findings[]> }. */
-export const checks = [C03, C04, C06, C07, C08, C13, C15, C16, C23, C24, C28, C30, C31, C32, C33, C34, C35, C36, C37, C43, C45, C48, C50, C51, C54, C56, C57, C59, C61, C62, C71, C78, C79, C85, C91, C98, C99, C104, C110, C111, C112, C113, C114, C115, C116, C117, C128, C133, C135, C136, C137, C138, C139, C140, C143, C144, C156, C167];
+export const checks = [C03, C04, C06, C07, C08, C13, C15, C16, C23, C24, C28, C30, C31, C32, C33, C34, C35, C36, C37, C43, C45, C48, C50, C51, C54, C56, C57, C59, C61, C62, C71, C78, C79, C85, C91, C98, C99, C104, C110, C111, C112, C113, C114, C115, C116, C117, C128, C135, C136, C137, C138, C139, C140, C143, C156, C167, C169, C171, C172];

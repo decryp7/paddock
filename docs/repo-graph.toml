@@ -20,7 +20,8 @@
 # [hash]     runner_configs (the nextest, Vitest and Playwright files that select and run a node), contracts (the files whose command
 #            lines run a node's phases), image_files (what pins the CI image): added to a node's input hash (§5, WP-7)
 # [ci]       setup_only (actions that stay plumbing in a release job), release_actions (actions that make a job a release job),
-#            release_gate_phases (the contract phases a check of a release job runs beside the smoke set)
+#            release_gate_phases (the contract phases a check of a release job runs beside the smoke set), and the sub-table
+#            [ci.jobs] (per ci.yml job, the projects it runs for by choice; see its own comment below)
 # [planner]  mode (graph | rules; no table: graph), reason (required for rules), lint_phases (the contract phases a test-only change
 #            keeps): which planner decides `./dev plan --ci`. The
 #            graph decides from the landing of ADR 0117's wiring (the user, 2026-11-23); `rules` is the emergency switch back to the
@@ -387,6 +388,16 @@ release_actions = ["tauri-bundle", "publish-release", "macos-verify", "keychain"
 # set and these contract phases, never the installers; the steps that use a release action build them (rule 54 narrowed, user
 # decision 2026-11-23).
 release_gate_phases = ["checks"]
+
+# [ci.jobs]: the projects a ci.yml job runs for by choice, which no `if:` shows (ADR 0123 §2; read by
+# tools/paddock-dev/src/repo_inputs.rs `ci_jobs`, ER-42). The job model (crates/paddock-ci-config) derives every other project from the
+# plan outputs the job's and its steps' conditions read; a job left with no project is a problem, never `always`. Shrink-only (ER-46): a
+# new entry needs the user, and the model check (tests/it/job_model.rs) compares the whole with plan_gitea::CI_JOBS until ADR 0117 D12.
+[ci.jobs]
+plan = ["everything"]            # the plan job runs on every change
+gitleaks = ["conformance"]       # the secret scan runs for `conformance` by choice
+quick = ["conformance"]          # the short checks run on every change; their C99 and heavy tool steps are derived (c99, tools)
+test-cache-shadow = ["crates"]   # the shadow report reads the crates workspace's test cache
 
 [hash]
 runner_configs = ["**/.config/nextest.toml", "**/vitest.config.*", "**/playwright.config.*", "**/angular.json"]

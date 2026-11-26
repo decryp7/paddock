@@ -46,6 +46,7 @@ syn = { version = "2", default-features = false, features = ["full", "parsing", 
 proc-macro2 = { version = "1", features = ["span-locations"] }
 # pre_push/reuse: the time a reused row was green, in RFC 3339 (jiff is the one date and time crate).
 jiff = { version = "0.2", default-features = false, features = ["std"] }
+paddock-ci-config = { path = "../../crates/paddock-ci-config" }
 paddock-cli = { path = "../../crates/paddock-cli" }
 paddock-env = { path = "../../crates/paddock-env" }
 paddock-proc = { path = "../../crates/paddock-proc" }
@@ -66,11 +67,11 @@ tree-sitter-yaml = "=0.7.2"
 [target.'cfg(unix)'.dependencies]
 # fds.rs: the holder closes the descriptors it inherited.
 libc = "0.2"
-# pre_push: SIGINT and SIGTERM set a flag that ends the running gates' process trees (as tools/heavy does).
+# pre_push: SIGINT and SIGTERM set a flag that ends the running gates' process trees (as tools/throttle does).
 signal-hook = { version = "0.3", default-features = false }
 
 [target.'cfg(windows)'.dependencies]
-# pre_push: Ctrl+C sets the flag that ends the running gates (as tools/heavy does).
+# pre_push: Ctrl+C sets the flag that ends the running gates (as tools/throttle does).
 ctrlc = "3"
 # fds.rs: every handle is made non-inheritable before the holder starts (Threading: the handle count); release_isolation: the file index.
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Console", "Win32_Storage_FileSystem", "Win32_System_SystemInformation", "Win32_System_Threading"] }

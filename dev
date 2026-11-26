@@ -554,13 +554,13 @@ restart_or_fail() {
 }
 
 # The tool cache (`$home/bin`, `$home/bin-source`) holds every cached tool: paddock-dev's entries (`<hash>/paddock-dev-<host>`) and
-# those paddock-dev builds itself (`heavy-<hash>/heavy`, tools/paddock-dev/src/tool_cache.rs). One policy for all of them:
-#  - each tool keeps its five newest entries (a tool is the name of the file an entry holds, so heavy's never count as ours);
+# those paddock-dev builds itself (`throttle-<hash>/throttle`, tools/paddock-dev/src/tool_cache.rs). One policy for all of them:
+#  - each tool keeps its five newest entries (a tool is the name of the file an entry holds, so the throttle's never count as ours);
 #  - an entry used within the last day is never removed: a job on the same mount (several runners share a host's tools folder)
 #    runs it again at its end, when its temp folder is already gone and a rebuild cannot work (run 7773, job-isolation release),
 #    and every hit touches its entry;
 #  - an entry a run holds is never removed: a hold is a hard link under `$home/held/` (tool_cache::hold), so a file with more
-#    than one link is in use (2026-11-14: heavy vanished in the middle of a train-10 `gen check`).
+#    than one link is in use (2026-11-14: the throttle vanished in the middle of a train-10 `gen check`).
 # Only paddock-dev's own entries take their legacy build folders (`target-<hash>`) with them.
 # cache_tool <entry>: the tool an entry holds (the first file whose name does not start with a dot; a temp copy sorts after it).
 # shellcheck disable=SC2012 # entry and tool names are hashes and tool names, never with spaces or newlines
@@ -618,6 +618,31 @@ stale=
 if [ -e "$cache/$name" ] && ! is_for_hash "$cache/$name"; then
   echo "dev: the cached tool binary $cache/$name does not run or is not for hash $hash; rebuilding it." >&2
   stale=1
+fi
+# One build of a hash at a time on a host (user, 2026-11-26): two jobs that need the same new hash built it at once (on 48 h of runs, 38
+# such pairs, about 144 runner-min). The build runs under a kernel file lock (flock(2) through perl, which macOS, Git for Windows and
+# the CI image all have; macOS has no flock(1)) in `<home>/locks`: this run starts itself again under the lock with
+# PADDOCK_DEV_BUILD_ONLY=1, which builds (or finds the binary another run published while this one waited) and ends without running it;
+# the lock goes with that process, so a crashed build never leaves it held, and cargo and sccache never inherit it. The wait is at most
+# 60 min. Then this run starts over once (PADDOCK_DEV_AFTER_LOCK), which finds the published binary, also when the compiler changed
+# during the build and the build under the lock published another hash. Without perl the build runs as before, unlocked (cargo's own
+# folder lock still serialises one compiler's builds).
+if { [ -n "$stale" ] || [ ! -x "$cache/$name" ]; } && [ -z "${PADDOCK_DEV_BUILD_ONLY:-}" ] && [ -z "${PADDOCK_DEV_AFTER_LOCK:-}" ] \
+  && command -v perl >/dev/null 2>&1 && mkdir -p "$home/locks"; then
+  PADDOCK_DEV_BUILD_ONLY=1 perl -MFcntl=:flock -e '
+    my ($file, $hash) = (shift, shift);
+    open(my $fh, ">>", $file) or die "dev: cannot open the build lock $file: $!\n";
+    unless (flock($fh, LOCK_EX | LOCK_NB)) {
+      print STDERR "dev: another run is building paddock-dev $hash on this host; waiting for its build (lock $file, at most 60 min).\n";
+      local $SIG{ALRM} = sub { print STDERR "::error::./dev waited 60 min for the build lock $file. Next step: see which process holds it (lsof $file), then run ./dev again.\n"; exit 75 };
+      alarm 3600;
+      flock($fh, LOCK_EX) or die "dev: cannot lock $file: $!\n";
+      alarm 0;
+    }
+    my $rc = system(@ARGV);
+    exit($rc == -1 ? 127 : ($rc & 127) ? 128 + ($rc & 127) : $rc >> 8);
+  ' "$home/locks/build-$binroot-$hash.lock" "$hash" sh "$0" || exit $?
+  PADDOCK_DEV_AFTER_LOCK=1 exec sh "$0" "$@"
 fi
 if [ -n "$stale" ] || [ ! -x "$cache/$name" ]; then
   fetched=
@@ -687,6 +712,10 @@ if [ -n "$stale" ] || [ ! -x "$cache/$name" ]; then
     if [ -n "$(find "$t" -maxdepth 0 -mmin +1440 2>/dev/null)" ]; then rm -rf "${t:?}" || true; fi
   done
 fi
+# The run under the build lock ends here: the binary is published (or was already), and the run that started it runs it.
+[ -n "${PADDOCK_DEV_BUILD_ONLY:-}" ] && exit 0
+# A ./dev the tool starts takes the build lock again when it needs a build of its own.
+unset PADDOCK_DEV_AFTER_LOCK
 # A hit counts as use: the prune keeps the newest-used tools, so main's hash outlives a stream of branch hashes.
 touch "$cache" 2>/dev/null || true
 # `--print-binary`: where the tool is (built if need be), without running it. job-isolation pins it for the whole job: the hash

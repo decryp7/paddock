@@ -4,7 +4,9 @@
 mod cleanup_log;
 mod never_panics;
 mod orphan;
+mod owner;
 mod run_state;
+mod scope;
 mod self_test;
 mod starts;
 mod text_busy;

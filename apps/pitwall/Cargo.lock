@@ -517,9 +517,9 @@ checksum = "8f1fe948ff07f4bd06c30984e69f5b4899c516a3ef74f34df92a2df2ab535495"
 
 [[package]]
 name = "bytes"
-version = "1.12.1"
+version = "1.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
+checksum = "776dfebd015e2d8732c684a2c71003674ccb49457b539b9e82151ba38e96dd7c"
 dependencies = [
  "serde",
 ]
@@ -3487,6 +3487,7 @@ dependencies = [
  "jiff",
  "log",
  "paddock-commands",
+ "paddock-env",
  "paddock-jobs",
  "paddock-limits",
  "paddock-workspace-hack",
@@ -3691,6 +3692,7 @@ version = "0.2.0"
 dependencies = [
  "log",
  "paddock-commands",
+ "paddock-env",
  "paddock-health",
  "paddock-workspace-hack",
  "regex",
@@ -3856,6 +3858,7 @@ dependencies = [
  "log",
  "paddock-commands",
  "paddock-dialogs",
+ "paddock-env",
  "paddock-jobs",
  "paddock-workspace-hack",
  "serde",
@@ -3883,6 +3886,7 @@ dependencies = [
  "futures-core",
  "getrandom 0.3.4",
  "getrandom 0.4.3",
+ "hashbrown 0.17.1",
  "http",
  "httparse",
  "idna",

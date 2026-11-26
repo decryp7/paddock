@@ -24,7 +24,11 @@
 #               without a path typed here (ADR 0117 §5, WP-7). `paths` then names only what no edge names (a lockfile, a data file).
 #               A node the model lacks makes the entry due on every change (fail closed) and is named in the warning.
 #   outputs     globs of the files it writes: what C116 matches generated files against. May be empty for a check only.
-#   cost        "fast" (a script over files; run four at a time) or "heavy" (a build, the network or a long tool; one at a time).
+#   cost        "fast" (no compile and no download: a script over files, or a tool that reads its lockfile; run four at a time, never
+#               queued for the heavy slot) or "heavy" (a build, the network or a long tool; one at a time, through the slot). Measured
+#               on 2026-11-25 under a 1-minute load of about 29: `cargo metadata --locked` took 0.3 to 1.4 s per workspace and
+#               `./dev locks guard` 8 s, so the lockfile entries and the shared-crate features are fast; queued as heavy, such sub-second
+#               rows waited minutes behind compiles.
 #   manual      instead of `check`: why there is no automatic check (needs the network, a download, a person). Such an entry never
 #               runs and never fails; `gen check` names it with its regenerate command when its paths change, and C116 counts its
 #               outputs as covered. Keep these few: each one is a known gap.
@@ -50,7 +54,7 @@ regenerate = "cargo metadata --format-version 1 >/dev/null   # without --locked 
 cwd = "crates"
 paths = ["crates/Cargo.toml", "crates/**/Cargo.toml", "crates/Cargo.lock"]
 outputs = ["crates/Cargo.lock"]
-cost = "heavy"
+cost = "fast"
 drift_marker = ["needs to be updated", "duplicate key", "cannot update the lock file"]
 
 [[generator]]
@@ -61,18 +65,18 @@ regenerate = "cargo metadata --format-version 1 >/dev/null   # without --locked 
 cwd = "tools/paddock-dev"
 paths = ["tools/paddock-dev/Cargo.toml", "tools/paddock-dev/Cargo.lock", "crates/*/Cargo.toml"]
 outputs = ["tools/paddock-dev/Cargo.lock"]
-cost = "heavy"
+cost = "fast"
 drift_marker = ["needs to be updated", "duplicate key", "cannot update the lock file"]
 
 [[generator]]
-id = "cargo-lock-tools-heavy"
-what = "tools/heavy/Cargo.lock resolves with --locked (a manifest change, a duplicate key or a shared crate's new dependency leaves it stale)"
+id = "cargo-lock-tools-throttle"
+what = "tools/throttle/Cargo.lock resolves with --locked (a manifest change, a duplicate key or a shared crate's new dependency leaves it stale)"
 check = ["sh", "-c", "cargo metadata --locked --format-version 1 >/dev/null"]
 regenerate = "cargo metadata --format-version 1 >/dev/null   # without --locked cargo rewrites Cargo.lock; commit it"
-cwd = "tools/heavy"
-paths = ["tools/heavy/Cargo.toml", "tools/heavy/**/Cargo.toml", "tools/heavy/Cargo.lock", "crates/*/Cargo.toml"]
-outputs = ["tools/heavy/Cargo.lock"]
-cost = "heavy"
+cwd = "tools/throttle"
+paths = ["tools/throttle/Cargo.toml", "tools/throttle/**/Cargo.toml", "tools/throttle/Cargo.lock", "crates/*/Cargo.toml"]
+outputs = ["tools/throttle/Cargo.lock"]
+cost = "fast"
 drift_marker = ["needs to be updated", "duplicate key", "cannot update the lock file"]
 
 [[generator]]
@@ -83,7 +87,7 @@ regenerate = "cargo metadata --format-version 1 >/dev/null   # without --locked 
 cwd = "apps/debrief"
 paths = ["apps/debrief/Cargo.toml", "apps/debrief/**/Cargo.toml", "apps/debrief/Cargo.lock", "crates/**/Cargo.toml", "crates/Cargo.lock"]
 outputs = ["apps/debrief/Cargo.lock"]
-cost = "heavy"
+cost = "fast"
 drift_marker = ["needs to be updated", "duplicate key", "cannot update the lock file"]
 
 [[generator]]
@@ -94,7 +98,7 @@ regenerate = "cargo metadata --format-version 1 >/dev/null   # without --locked 
 cwd = "apps/dyno"
 paths = ["apps/dyno/Cargo.toml", "apps/dyno/**/Cargo.toml", "apps/dyno/Cargo.lock", "crates/**/Cargo.toml", "crates/Cargo.lock"]
 outputs = ["apps/dyno/Cargo.lock"]
-cost = "heavy"
+cost = "fast"
 drift_marker = ["needs to be updated", "duplicate key", "cannot update the lock file"]
 
 [[generator]]
@@ -105,7 +109,7 @@ regenerate = "cargo metadata --format-version 1 >/dev/null   # without --locked 
 cwd = "apps/pitcrew"
 paths = ["apps/pitcrew/Cargo.toml", "apps/pitcrew/**/Cargo.toml", "apps/pitcrew/Cargo.lock", "crates/**/Cargo.toml", "crates/Cargo.lock"]
 outputs = ["apps/pitcrew/Cargo.lock"]
-cost = "heavy"
+cost = "fast"
 drift_marker = ["needs to be updated", "duplicate key", "cannot update the lock file"]
 
 [[generator]]
@@ -116,7 +120,7 @@ regenerate = "cargo metadata --format-version 1 >/dev/null   # without --locked 
 cwd = "apps/pitwall"
 paths = ["apps/pitwall/Cargo.toml", "apps/pitwall/**/Cargo.toml", "apps/pitwall/Cargo.lock", "crates/**/Cargo.toml", "crates/Cargo.lock"]
 outputs = ["apps/pitwall/Cargo.lock"]
-cost = "heavy"
+cost = "fast"
 drift_marker = ["needs to be updated", "duplicate key", "cannot update the lock file"]
 
 [[generator]]
@@ -127,7 +131,7 @@ regenerate = "cargo metadata --format-version 1 >/dev/null   # without --locked 
 cwd = "apps/spotter"
 paths = ["apps/spotter/Cargo.toml", "apps/spotter/**/Cargo.toml", "apps/spotter/Cargo.lock", "crates/**/Cargo.toml", "crates/Cargo.lock"]
 outputs = ["apps/spotter/Cargo.lock"]
-cost = "heavy"
+cost = "fast"
 drift_marker = ["needs to be updated", "duplicate key", "cannot update the lock file"]
 
 [[generator]]
@@ -138,7 +142,7 @@ regenerate = "cargo metadata --format-version 1 >/dev/null   # without --locked 
 cwd = "apps/shell-demo/src-tauri"
 paths = ["apps/shell-demo/src-tauri/Cargo.toml", "apps/shell-demo/src-tauri/**/Cargo.toml", "apps/shell-demo/src-tauri/Cargo.lock", "crates/**/Cargo.toml", "crates/Cargo.lock"]
 outputs = ["apps/shell-demo/src-tauri/Cargo.lock"]
-cost = "heavy"
+cost = "fast"
 drift_marker = ["needs to be updated", "duplicate key", "cannot update the lock file"]
 
 [[generator]]
@@ -149,7 +153,7 @@ regenerate = "cargo metadata --format-version 1 >/dev/null   # without --locked 
 cwd = "apps/workbench-demo/src-tauri"
 paths = ["apps/workbench-demo/src-tauri/Cargo.toml", "apps/workbench-demo/src-tauri/**/Cargo.toml", "apps/workbench-demo/src-tauri/Cargo.lock", "crates/**/Cargo.toml", "crates/Cargo.lock"]
 outputs = ["apps/workbench-demo/src-tauri/Cargo.lock"]
-cost = "heavy"
+cost = "fast"
 drift_marker = ["needs to be updated", "duplicate key", "cannot update the lock file"]
 
 [[generator]]
@@ -179,7 +183,7 @@ check = ["./dev", "locks", "guard"]
 regenerate = "./dev locks sync && ./dev locks guard --write   # review the diff of docs/shared-crate-features.toml, then commit it"
 paths = ["crates/**/Cargo.toml", "apps/**/Cargo.toml", "tools/**/Cargo.toml", "**/Cargo.lock", "crates/.config/hakari.toml", "docs/shared-crate-features.toml"]
 outputs = ["docs/shared-crate-features.toml"]
-cost = "heavy"
+cost = "fast"
 
 [[generator]]
 id = "publish-dry-run"

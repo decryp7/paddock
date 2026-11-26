@@ -2,6 +2,9 @@
  "plan": [
   "everything"
  ],
+ "paddock-dev": [
+  "paddock-dev"
+ ],
  "ui": [
   "ui",
   "eslint",
@@ -16,16 +19,7 @@
  "conformance": [
   "conformance"
  ],
- "c99": [
-  "c99"
- ],
- "gitleaks": [
-  "conformance"
- ],
  "tools": [
-  "tools"
- ],
- "heavy": [
   "tools"
  ],
  "crates": [
@@ -34,13 +28,18 @@
  "crate": [
   "crates"
  ],
- "audit": [
-  "paddock-dev"
+ "test-cache-shadow": [
+  "crates"
  ],
  "app": [
   "apps"
  ],
- "paddock-dev": [
-  "paddock-dev"
+ "gitleaks": [
+  "conformance"
+ ],
+ "quick": [
+  "conformance",
+  "c99",
+  "tools"
  ]
 }

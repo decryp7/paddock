@@ -17,6 +17,7 @@
 use super::client::{Client, RunInfo, TimedJob};
 use super::logfind;
 use super::time::{date_of, parse_ms};
+use crate::job_outcome::JobOutcome;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 /// The most pages of the run list read (50 runs a page); a window that needs more is reported incomplete.
@@ -156,6 +157,15 @@ impl Report {
 }
 
 /// Whether a workflow file is the app's own (`dyno.yml`, `dyno-release.yml`): all its jobs are the app's.
+/// Whether a job's log is searched for failed and FLAKY tests: a failure, a cancel, a job that never finished or ended in an
+/// unknown word (its log may still name a test). A pass is not, and a skipped job has no log.
+fn is_failed(o: &JobOutcome) -> bool {
+    match o {
+        JobOutcome::Failed | JobOutcome::Cancelled | JobOutcome::Unfinished | JobOutcome::Unknown(_) => true,
+        JobOutcome::Passed | JobOutcome::Skipped => false,
+    }
+}
+
 fn own_workflow(app: &str, file: &str) -> bool {
     file == format!("{app}.yml") || file.starts_with(&format!("{app}-"))
 }
@@ -325,7 +335,7 @@ pub fn collect(client: &mut Client, req: &Request, log: &mut dyn FnMut(&str)) ->
         }
         report.runs += 1;
         for (k, mine) in attempts.iter().enumerate() {
-            for job in mine.iter().filter(|j| j.failed()) {
+            for job in mine.iter().filter(|j| is_failed(&j.outcome)) {
                 if job.is_caller() {
                     continue; // a reusable workflow's caller: its children are listed beside it
                 }
@@ -343,7 +353,11 @@ pub fn collect(client: &mut Client, req: &Request, log: &mut dyn FnMut(&str)) ->
                             job: label,
                             why: format!(
                                 "the server has no log for it (the job ended {})",
-                                if job.conclusion.is_empty() { "unknown" } else { &job.conclusion }
+                                if job.outcome == JobOutcome::Unfinished {
+                                    "unknown".to_string()
+                                } else {
+                                    job.outcome.to_string()
+                                }
                             ),
                         });
                         continue;
@@ -384,7 +398,7 @@ pub fn collect(client: &mut Client, req: &Request, log: &mut dyn FnMut(&str)) ->
                     attempts[k + 1..]
                         .iter()
                         .flatten()
-                        .any(|j| j.name == job.name && j.conclusion == "success")
+                        .any(|j| j.name == job.name && j.outcome == JobOutcome::Passed)
                 } else {
                     rerun_passed(client, &passed, &mut later_jobs, run, &job.name, &mut report.not_measured)
                 };
@@ -462,7 +476,7 @@ fn rerun_passed(
     for id in ids.iter().filter(|id| **id > run.id) {
         let jobs = cache.entry(*id).or_insert_with(|| client.attempt_jobs(*id, None));
         match jobs {
-            Ok(Some(jobs)) if jobs.iter().any(|j| j.name == job && j.conclusion == "success") => return true,
+            Ok(Some(jobs)) if jobs.iter().any(|j| j.name == job && j.outcome == JobOutcome::Passed) => return true,
             Ok(Some(_)) => {}
             Ok(None) => not_measured.push(NotMeasured {
                 run: run.id,

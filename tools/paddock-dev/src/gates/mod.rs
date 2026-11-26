@@ -9,11 +9,11 @@ pub mod command;
 pub mod docs;
 pub mod edge;
 pub mod evaluate;
-pub mod expr;
 pub mod gating;
 pub mod inputs;
 pub mod register;
 pub mod scan;
 pub mod shell;
 pub mod tree;
-pub mod yaml;
+/// The one CI YAML reader and expression evaluator live in `paddock-ci-config` (ADR 0123); these paths stay for the readers here.
+pub use paddock_ci_config::{expr, yaml};

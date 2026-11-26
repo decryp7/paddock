@@ -69,7 +69,7 @@ test('C136 reads literals only: a liveMs held in a constant is not judged', () =
   assert.deepEqual(liveStarts("const LIVE_MS = 25;\nit('a', () => {\n  new MockBackend({ liveMs: LIVE_MS });\n});\n"), []);
 });
 
-test('C136 through the runner: unit specs only, warnings only', async () => {
+test('C136 through the runner: unit specs only, errors since its first green run', async () => {
   const files = {
     'apps/a/src/a.spec.ts': "it('x', () => {\n  new MockBackend({ liveMs: 20 });\n});\n",
     'apps/a/src/held.spec.ts': "it('x', () => {\n  const clock = new ManualClock();\n  new MockBackend({ liveMs: 20, clock });\n});\n",
@@ -77,5 +77,5 @@ test('C136 through the runner: unit specs only, warnings only', async () => {
     'apps/a/src/b.ts': 'const b = new MockBackend({ liveMs: 20 });\n',
   };
   const found = await findingsOf('C136', makeApp(files));
-  assert.deepEqual(found.map((f) => [f.file, f.line, f.severity]), [['apps/a/src/a.spec.ts', 2, 'warn']]);
+  assert.deepEqual(found.map((f) => [f.file, f.line, f.severity]), [['apps/a/src/a.spec.ts', 2, 'error']]);
 });

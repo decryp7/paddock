@@ -49,6 +49,7 @@ serde_json = "1"
 log = { version = "0.4", features = ["kv"] }
 
 [dev-dependencies]
+paddock-commands = { path = "../../../crates/paddock-commands", features = ["test-support"] }
 tauri = { version = "2.12", features = ["test"] }
 # Dialogs and pop-outs on Tauri's mock runtime (not parented to a native window).
 paddock-shell = { path = "../../../crates/paddock-shell", features = ["mock-runtime"] }

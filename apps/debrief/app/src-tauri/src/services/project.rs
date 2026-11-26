@@ -67,13 +67,11 @@ pub fn write_ui(dir: &Path, ui: &Value, reports: &[debrief_core::report::Report]
     let io = |e: std::io::Error| CmdError::new(ErrorCode::Io, format!("cannot save the project's view: {e}"));
     let json = serde_json::to_vec(&serde_json::json!({ "version": 1, "ui": ui, "reports": reports }))
         .map_err(|e| CmdError::new(ErrorCode::Internal, e.to_string()))?;
-    let tmp = dir.join(format!("{UI_FILE}.tmp"));
-    std::fs::write(&tmp, json)
-        .and_then(|_| std::fs::rename(&tmp, dir.join(UI_FILE)))
-        .map_err(|e| {
-            let _ = std::fs::remove_file(&tmp);
-            io(e)
-        })
+    // The project folder is the user's: one that is gone is reported, not made again.
+    if !dir.is_dir() {
+        return Err(io(std::io::Error::from(std::io::ErrorKind::NotFound)));
+    }
+    paddock_env::write_atomic(&dir.join(UI_FILE), &json, false).map_err(|e| io(e.into()))
 }
 
 /// The UI's state and the reports of a project folder; nothing when there are none or they cannot be read

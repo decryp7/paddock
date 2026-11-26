@@ -36,15 +36,22 @@ package.json     the one npm workspace and package-lock.json (ui, eslint, icons,
   `./dev gates check` and `./dev plan` read most folders, and a sparse cone makes them stop with an `::error::` line naming the
   missing folders (measurements: [benchmarks](docs/benchmarks.md#2026-11-12-full-against-sparse-worktree-checkout-fixworktree-gates-profile));
   `--sparse` is only for a `--detach` review copy, and `-b <branch>` attaches to a branch that already exists.
+  `add` also prints a WARNING (never a refusal) naming another locked worktree, its owner and the shared files when it changes files the new base
+  carries or its branch has the same topic (`tools/paddock-dev/src/worktree/overlap.rs`).
   Never work in the main checkout; never `git stash`.
+- **New rules take their number at landing (user, 2026-11-25).** A branch writes a new rule in docs/rules.md as `NEW-<slug>.` and
+  cites it as `rule NEW-<slug>`; the train integrator assigns the next free number when the train lands and replaces every citation
+  (a step of the land-train skill, which lives on `chore/playbook-skills` until train f lands). C31 refuses a repeated number and
+  warns on a `NEW-` placeholder.
 - **Build folders.** One build folder per app per worktree, kept between tasks for the same app (reusing it is what makes
   rebuilds fast). Pass it to cargo as `--config build.target-dir='<dir>'` (or `build.target-dir` in a `.cargo/config.toml`),
   **never as `CARGO_TARGET_DIR` or `CARGO_BUILD_TARGET_DIR`**: sccache 0.19 puts every `CARGO_*` variable into its cache key, so
   the variable gives 0% hits across worktrees and the configuration gives about 82% (ADR 0014 §1; docs/benchmarks.md). The
-  tools do this themselves (push gates, `./dev gen check`, `./dev`'s own build). For your own cargo calls run
-  `eval "$(./dev sccache env)"` once per shell: it installs the pinned sccache, starts the one local server and sets
-  `RUSTC_WRAPPER` for that shell only ([docs/dev-setup.md](docs/dev-setup.md#local-sccache)); it warns and builds without
-  it when sccache cannot be used. Worktrees and build folders go in
+  tools do this themselves (push gates, `./dev gen check`, `./dev`'s own build). Your own cargo calls need nothing in a fresh shell: `./dev sccache env`
+  (run once on a machine, and after a worktree is added) installs the pinned sccache, starts the one local server and writes
+  `<worktree root>/.cargo/config.toml` with `build.rustc-wrapper`, so every cargo below the worktree root compiles through it; the
+  wrapper starts the server again if it is down and runs plain rustc when it cannot, and an explicit `RUSTC_WRAPPER` wins
+  ([docs/dev-setup.md](docs/dev-setup.md#local-sccache)). `eval "$(./dev sccache env)"` still sets the variables for one shell. Worktrees and build folders go in
   `<dev-targets>` (the parent of the worktree root; this machine's folders are in
   [docs/dev-setup.md](docs/dev-setup.md#where-things-live), the one place that names a disk, rule 40). The worktree root is
   machine config, not code: `git config paddock.worktreeRoot <dev-targets>/wt` (repo-local, so it covers every worktree), or
@@ -57,7 +64,7 @@ package.json     the one npm workspace and package-lock.json (ui, eslint, icons,
   `setup-rust` reads it in CI). Upgrading Rust is one change: bump that file, rebuild the CI image, re-capture the
   Rust-tool rows (ADR 0090) and reformat with the new rustfmt. The pinned toolchain starts without extra targets: for the
   Windows lint (`cargo xwin`) run `rustup target add x86_64-pc-windows-msvc --toolchain <the channel in the file>` once.
-- **npm.** One workspace and one `package-lock.json` at the root: `npm ci` there, never in a package folder; add a
+- **npm.** One workspace and one `package-lock.json` at the root: `./dev deps install` (a clone of the shared, content-keyed cache, or `npm ci` once; `./dev deps ui` does the same for `ui/dist`, [docs/dev-setup.md](docs/dev-setup.md#shared-npm-cache-dev-deps)) or `npm ci` there, never in a package folder; add a
   dependency with `npm install <pkg> -w <workspace>`. Apps use `@decryp7/paddock-ui` from `ui/dist` (built with
   `npm run build -w ui`). Name styles and assets in `angular.json` by package path, never `node_modules/...`.
 - **Affected tests (rule 3).** `./dev plan origin/main --explain` lists the projects a change reaches (the
@@ -77,6 +84,13 @@ package.json     the one npm workspace and package-lock.json (ui, eslint, icons,
   (`tools/paddock-dev`) narrows the same way and answers the same plan; its golden test compares it with the script.
 - **Merge queue: parked (user, 2026-11-24).** `./dev queue` and `./dev pr` (docs/plans/merge-queue.md) stay in the tool, but
   nothing runs them and CI does not test them; trains are built by hand with the member gate (`./dev merge check --gates`).
+  A member merges current main and re-runs its member gate on that tip before it joins a train (rule 100). `./dev merge sync-member <train>`, run after the merge, runs the
+  fast static rows (conformance, gates-register, clippy, clippy-windows) on the sync tip first and fails on a bad row (`--no-static "<reason>"` skips them, logged);
+  once they pass it dispatches the member's own CI trial (the affected jobs on the train, `ci dispatch --trial` on `sync/<member>`, which sync-member pushes: integrator role only) and prints the run id, which
+  `./dev merge check --gates` reads later (red blocks, running is not a pass; `--no-trial "<reason>"` skips it, logged).
+- **Old-base block (user, 2026-11-25).** `./dev merge check` refuses a train member that lacks the train's base (the newest commit of
+  main, or of the earlier train, the train has merged) with one `::error::`: merge origin/main into the member and rerun its gate;
+  `--old-base-anyway "<reason>"` is the logged emergency override (`tools/paddock-dev/src/merge_check/stale_base.rs`).
 - **Dispatching workflows.** Integrators dispatch through `./dev ci dispatch <workflow>.yml --ref <ref> --max <duration>`, never by a bare API call: it waits while another run has an unfinished job on the same single runner (the Mac runner took overlapping runs 7960/7961 and 7969-7971/7967 and timed out tests) and ends at `--max` with an `::error::` naming the busy run. A `train/*` run of a workflow whose first job runs the `runner-wait` action is sent at once and waits in that Linux job instead (`./dev ci runner-wait`, only for older runs), so scheduled runs see the train queued and yield to it. A full dispatch of `ci.yml` on a `train/*` ref (no `base`, no `since_run`) is complete without WebKit, as a push to main's scope has none since 2026-11-24 (the nightly runs it), so the landed train's push to main can reuse it (ER-49, docs/ci-schedules.md). It prints `run <id>`: the run whose title carries the `dispatch_id` token it sent (never "the newest run", ER-51). On a
   `train/*` ref it first runs the failed-first and green-main guards (docs/ci-dispatch-guards.toml: report-only until
   `./dev ci guard-record` records their first green use; overrides `--full-anyway` and `--red-main-anyway` take a logged reason).
@@ -108,20 +122,40 @@ package.json     the one npm workspace and package-lock.json (ui, eslint, icons,
 - The public API is `ui/projects/paddock-ui/src/public-api.ts` and the CSS custom properties `--pd-*`, `data-theme`,
   `data-accent`, `data-density`. Any change is a CHANGELOG entry; no backward-compatibility shims before Paddock's v1.
 - Shared Rust crates have a pure core and a `tauri` feature for the adapter; typed errors, doc comments on public items,
-  no `unwrap` on I/O or user data, bounded resources. Coverage: crates >= 90% lines, security code 99% target, report-only for now (CI's llvm-cov gate, scripts/coverage-gate.mjs), components 100%.
+  no `unwrap` on I/O or user data, bounded resources. Coverage: crates >= 90% lines, security code 99% target, report-only for now (llvm-cov and scripts/coverage-gate.mjs run in the nightly, a release's gates and a tag only, never on a train, a branch or a push to main: user 2026-11-26, ADR 0116 D4), components 100%.
 - Anchor every ignore rule (`/ui/dist/`, not `dist/`); `node_modules` (no trailing slash, so it also matches a symlink) is the one unanchored rule; conformance C57 fails on any tracked symlink.
 
 ## Testing and quality gates
 
+- **One way to run long commands (user, 2026-11-25).** Builds, tests and gates go through `./dev throttle [--stall S] -- <command>` or
+  `throttle run [--stall S] <agent> -- <command>` (the old `heavy` names still work for now and print a deprecation line), never wrapped in `timeout` or piped through `| tail`: an outer timeout ends throttle and
+  orphans the command it started, and a tail throws away the output you then need. throttle writes the whole output to
+  `<dev-targets>/runs/<agent>/<start>-<name>.log`, prints that path first and a summary line (exit code, seconds, ran or hung) last;
+  read the log instead of re-running. `--stall S` ends a command that wrote nothing and used no CPU for `S` seconds (exit 81); it is
+  off by default, and a value is a hang detector set from a measured quiet gap with a wide margin, never a speed limit (ER-12;
+  tools/throttle/README.md, "The run log and the hang detector").
 - **E2E and screenshots run on fresh code (guidance; a binding rule is proposed).** A running dev server is reused only with `PW_REUSE_SERVER=1`; default ports derive from the worktree path (`e2ePort` in `@decryp7/paddock-e2e`); a config that consumes `ui/dist` or the css fails at load with "rebuild ui: npm run build -w ui" when they were built from older sources (`build-guard.ts`, content stamps; lessons.md). New Playwright configs use these.
+- **Git fixtures (rule 102).** A test that needs a git repository builds it once per machine with `paddock_testkit::git_fixture::template` and copies it per test with `copy_tree`; a fixture builder with six or more `git` starts per test is a C174 finding (report-only).
 - Every change ships with tests; every bug fix starts with a failing test. A colour change keeps `npm run test:tokens`
   green (WCAG AA/AAA pairs, CVD separation); change the tokens, not the test.
-- `./dev check --pre-push` runs the Linux Clippy in the CI image (native architecture; CI's x64 legs and the member gate catch the
-  rare arch-specific lint) for every touched Cargo workspace, because the Mac and xwin Clippy cannot see Linux-only code. The row
-  names the apps' Tauri crates it leaves out (their build scripts write into the read-only mount; CI lints them). It needs a running
-  container runtime and a warm volume: without one the row is "not measured" (exit 6), never a pass; warm a workspace once with
-  `./dev check --warm-linux [workspace...]` (no budget). The integrator's member gate (`./dev merge check --gates`) runs the same
-  row; a dependency bump may need `--warm-linux` first.
+- **No VM or container on this Mac (user, 2026-11-26; docs/rules.md rule 101).** `./dev check --pre-push` and the member gate
+  start no Docker, OrbStack or Fusion: there is no `clippy-linux`, `tests-linux` or `--warm-linux`. Linux Clippy (`-D warnings`),
+  the Linux tests and the orphan guardian's acting tests as uid 65534 are CI's Linux jobs on the Linux runner (ci.yml: the crates job's
+  "Orphan guardian as a user (Linux)" step, each app's Linux leg); the Windows Clippy runs here through xwin for `crates`, the apps that
+  opt in (`windowsClippy`) and the developer tools `tools/paddock-dev` and `tools/throttle` (user, 2026-11-26: Windows-only dead code found
+  only by CI four times in a day), as heavy rows in parallel with the others and through sccache; Windows tests stay CI's. The register (`NOT_RUN` in
+  `pre_push/gates.rs`) names them CI-owned.
+- The member gate (`./dev check --pre-push --member-gate`, run by `./dev merge check --gates`) also runs the full nextest `ci`
+  profile of every touched Cargo workspace (the plan's reached packages, as CI's member run) on the host (`tests <ws>`). Inactive apps
+  are skipped and named. A developer's push skips these rows.
+- **The train's ER-53 split (user, 2026-11-26).** `./dev check --pre-push --member-gate --set fast` runs every row but the host tests
+  (fmt, lockfiles, commit-lint, gates-register, conformance, Clippy, conformance-tests, member-audits) before CI is dispatched; then
+  `./dev ci dispatch` prints `run <id>`; `--set slow --cancel-ci-run <id>` runs the host tests beside CI and, on a failure, cancels that
+  run (`./dev ci cancel <id>`: the run's own cancel URL only, never the newest run). A slow run records its result for the commit it
+  checked; landing (ER-49) is `./dev ci landing-held --sha <sha>`: the complete green CI run AND the green slow rows on the same commit
+  (6, not held, while a slow row is unfinished or missing). A run with `--set fast` or `--set slow` leaves no whole-run pass record. The
+  Linux tests are CI's Linux jobs on d-gtr9. A push or member gate prints a per-row table (queued s, run s, concurrent) and writes
+  `row-timings.tsv` in its log folder.
 - Before committing, the gates of the affected projects, for example:
 
   ```sh
@@ -130,6 +164,23 @@ package.json     the one npm workspace and package-lock.json (ui, eslint, icons,
   (cd ui && npm run test:tokens && npm run lint && npm test && npm run build && npx playwright test --project=gallery)
   (cd crates && cargo fmt --all --check && cargo clippy --workspace --all-targets --all-features -- -D warnings)
   ```
+
+## Before hand-back (Paddock commands)
+
+Run these as well as the touched-file checks, on the merged tree when you hand back a merge, and list in the hand-off which you did not run:
+
+- `(cd conformance && npm test)`: the full conformance tests.
+- `./dev ci conformance-args` prints the conformance line of `.gitea/workflows/ci.yml`; run that line over the whole tree, not only the touched files.
+- `./dev gates check`: the gate register (an ignored test needs its gates.toml entry).
+- After a change to any `Cargo.toml`: `cargo metadata --locked --format-version 1 >/dev/null` in its workspace and in each workspace whose Cargo.lock lists the changed crate (`grep -l 'name = "<crate>"' $(git ls-files '*Cargo.lock')`, run in each lockfile's folder).
+- `./dev check --pre-push` before every push.
+- Last, on a branch for a train: merge `origin/main` into the branch, then run `./dev check --pre-push --member-gate --base origin/main`
+  on that head (user, 2026-11-25). The train's member gate reuses its green rows for every workspace only this branch touched; a
+  branch behind main has another tree there, so the train runs them again (`.claude/skills/land-train`, step 3).
+- The member audits, the repository-wide audits of tools/paddock-dev that only the member gate runs (a developer's `./dev check --pre-push` skips them): `cargo nextest run --profile member-audits --locked --no-tests=fail` in `tools/paddock-dev`.
+- A review reads a diff with `git show` and builds only in a scratch copy, never in the author's worktree.
+- A design document (ADR, plan, research note) records the branch heads it read (ADR 0091), checks claims about shipped code with `git tag --contains <commit>`, and names every check it relies on as built on origin/main, held on a named branch, or a prerequisite (ADR 0096).
+- A loop that runs a command, process, query or request once per item needs a `// per-item: <reason>` comment, and a new bulk command needs a budget test (rule 85, ADR 0108).
 
 ## Dependencies and releases
 
@@ -252,4 +303,4 @@ Apply these deliberately. They are not decoration:
   on Windows; a thread holding a lock that live work waits on is live, or must not hold the lock across slow work; a
   starvable level only for work nobody waits on, with a `conformance: background-qos — <why>` comment (C54).
 - Wait with `./dev wait`; never `pgrep -f` on a string your own command contains. `./dev wait --plock <name> | --pid <pid> | --file <path> --line <regex> | --ci-run <id> --max <duration>` always ends at `--max` with an `::error::` and the next step (a `pgrep -f` loop matches its own command line and never ends).
-- Spawn subagents by role: implementer (Sonnet, mechanical), designer, reviewer, researcher (Opus); see `.claude/agents/`.
+- Spawn subagents by role: implementer (Sonnet, mechanical), designer, reviewer, researcher (Opus).

@@ -7,9 +7,10 @@
 //! Producers: `./dev plan --ci` for ci.yml ([`ci_scope`]), `./dev ci scope` for the app workflows ([`app_scope`]).
 //! The reader: [`read`] and [`Declared::complete`].
 
+use crate::job_outcome::JobOutcome;
 use crate::log_text::plain;
 use serde_json::{Value, json};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// The prefix of the scope line (after the colours and the timestamp).
 pub const SCOPE_LINE: &str = "plan scope: ";
@@ -19,8 +20,8 @@ pub const SCOPE_LINE: &str = "plan scope: ";
 /// tree (`need_whole`).
 pub const VERSION: u64 = 2;
 
-/// The runners the `crate` and `paddock-dev` jobs run on when the plan names none of its own (ci.yml's `PLAN_OS_LEGS`).
-pub const DEFAULT_OS_LEGS: [&str; 3] = ["ubuntu-latest", "windows-latest", "macos-latest"];
+/// The runners the `crate` and `paddock-dev` jobs run on: the planner's one leg set (ADR 0123 §4; WP-2 reads it from the model).
+pub const DEFAULT_OS_LEGS: [&str; 3] = crate::plan_ci::OS_LEGS;
 
 /// The project flags of a plan that each decide a job of ci.yml.
 const PROJECTS: [&str; 8] = ["crates", "ui", "eslint", "conformance", "c99", "tools", "icons", "paddockDev"];
@@ -128,6 +129,11 @@ pub struct Declared {
     /// foundation and the active apps, never for these ([`Declared::covers_app`]). Written only when some are inactive; a line without
     /// the key (written before the set existed, or by a run that planned every app) has none.
     pub inactive: BTreeSet<String>,
+    /// The jobs the plan switched off because every one of their test targets reuses a trusted pass of the same key (ADR 0116 §6), with
+    /// one note per target (`rust:crates/a@Linux-X64 from run 8635`). A job here counts as covered in [`Declared::complete`] and is
+    /// not expected to have run; a job that runs only some of its targets is in `ran` as usual and its reused targets are named in
+    /// the plan log. Written only when non-empty, so a line without the key (an older producer, or a run with no reuse) has none.
+    pub reused: BTreeMap<String, Vec<String>>,
 }
 
 impl Declared {
@@ -151,6 +157,9 @@ impl Declared {
         }
         if !self.inactive.is_empty() {
             v["inactive"] = json!(self.inactive);
+        }
+        if !self.reused.is_empty() {
+            v["reused"] = json!(self.reused);
         }
         format!("{SCOPE_LINE}{v}")
     }
@@ -181,7 +190,12 @@ impl Declared {
         if self.need.jobs.is_empty() && self.need.apps.is_empty() {
             return Err("its declared need is empty (a scope that needs nothing proves nothing)".into());
         }
-        let gone = self.ran.missing(&self.need);
+        // A job switched off because all its targets were reused is covered (ADR 0116 §6): "ran or reused".
+        let covered = Scope {
+            jobs: self.ran.jobs.iter().chain(self.reused.keys()).cloned().collect(),
+            ..self.ran.clone()
+        };
+        let gone = covered.missing(&self.need);
         if gone.is_empty() {
             Ok(())
         } else {
@@ -237,6 +251,19 @@ impl Declared {
 }
 
 impl Declared {
+    /// This declaration with the jobs the test-result cache switched off, and the targets each rests on.
+    pub fn with_reused(self, reused: BTreeMap<String, Vec<String>>) -> Declared {
+        Declared { reused, ..self }
+    }
+
+    /// One line per reused target, `reused from run N`, for the verdict reader to print: a verdict that relied on a reused pass says so.
+    pub fn reuse_notes(&self) -> Vec<String> {
+        self.reused
+            .iter()
+            .flat_map(|(job, ts)| ts.iter().map(move |t| format!("{job}: reused {t}")))
+            .collect()
+    }
+
     /// This declaration with the apps its tree's active set left out.
     pub fn with_inactive(self, inactive: BTreeSet<String>) -> Declared {
         Declared { inactive, ..self }
@@ -297,6 +324,21 @@ fn parse(text: &str) -> Result<Declared, String> {
             Value::Array(a) if a.iter().all(|x| x.as_str().is_some_and(|s| !s.is_empty())) => set(&v["inactive"]),
             other => return Err(format!("the scope line's inactive is {other}, not a list of apps")),
         },
+        reused: match &v["reused"] {
+            Value::Null => BTreeMap::new(),
+            Value::Object(o) => o
+                .iter()
+                .map(|(job, ts)| {
+                    let list: Option<Vec<String>> = ts
+                        .as_array()
+                        .and_then(|a| a.iter().map(|x| x.as_str().filter(|s| !s.is_empty()).map(str::to_string)).collect());
+                    list.filter(|l| !l.is_empty())
+                        .map(|l| (job.clone(), l))
+                        .ok_or_else(|| format!("the scope line's reused.{job} is not a non-empty list of targets"))
+                })
+                .collect::<Result<_, _>>()?,
+            other => return Err(format!("the scope line's reused is {other}, not a map of jobs")),
+        },
     })
 }
 
@@ -355,6 +397,11 @@ pub enum JobName {
     Exact(String),
     /// The start of the name (a job with a long or sharded name: `ui (`, `reference apps (shard`).
     Prefix(&'static str),
+    /// Any of these starts: the job's name now and its names before a rename, so a recorded run of the old ci.yml still reads as
+    /// covering its project (`quick checks (|C99 (`: C99 was a job of its own until 2026-11-26).
+    AnyPrefix(Vec<&'static str>),
+    /// The start of the name, built at run time (a leg whose job may carry a partition label: `crate (ubuntu-latest`).
+    Starts(String),
 }
 
 impl JobName {
@@ -362,6 +409,8 @@ impl JobName {
         match self {
             JobName::Exact(n) => name == n,
             JobName::Prefix(p) => name.starts_with(p),
+            JobName::AnyPrefix(ps) => ps.iter().any(|p| name.starts_with(p)),
+            JobName::Starts(p) => name.starts_with(p.as_str()),
         }
     }
 }
@@ -374,8 +423,10 @@ pub const PROJECT_JOBS: &[(&str, &[&str])] = &[
     ("ui", &["ui ("]),
     ("eslint", &["ui ("]),
     ("conformance", &["conformance ("]),
-    ("c99", &["C99 ("]),
-    ("tools", &["tools and shared scripts", "heavy tool"]),
+    // `a|b`: either name; the first is the job's name now, the rest its names in runs of an older ci.yml (the short checks became one
+    // job, `quick`, on 2026-11-26), which the verdict and reuse readers still read.
+    ("c99", &["quick checks (|C99 ("]),
+    ("tools", &["tools and shared scripts", "quick checks (|heavy tool"]),
     ("icons", &["ui ("]),
     ("e2e", &["reference apps (shard"]),
     ("e2e-webkit", &["reference apps in WebKit"]),
@@ -385,10 +436,17 @@ pub const PROJECT_JOBS: &[(&str, &[&str])] = &[
 /// `paddock-dev@os` legs).
 fn names_of_job(key: &str) -> Vec<JobName> {
     if let Some((_, prefixes)) = PROJECT_JOBS.iter().find(|(k, _)| *k == key) {
-        return prefixes.iter().map(|p| JobName::Prefix(p)).collect();
+        return prefixes
+            .iter()
+            .map(|p| match p.split_once('|') {
+                Some(_) => JobName::AnyPrefix(p.split('|').collect()),
+                None => JobName::Prefix(p),
+            })
+            .collect();
     }
     match key.split_once('@') {
-        Some(("crate", os)) => vec![JobName::Exact(format!("crate ({os})"))],
+        // `crate (ubuntu-latest)` or, when its tests are split into parallel jobs, `crate (ubuntu-latest, 2/3)`: every one must have run.
+        Some(("crate", os)) => vec![JobName::Starts(format!("crate ({os}"))],
         Some(("paddock-dev", os)) => vec![JobName::Exact(format!("paddock-dev ({os})"))],
         _ => Vec::new(),
     }
@@ -415,8 +473,8 @@ pub enum RanProblem {
 
 /// "Ran means ran": every job the run declared in `ran` has a job in the run with a matching name, and none of them was skipped or
 /// cancelled. A failed one is left to the run's own conclusion (red). Only ci.yml's jobs are mapped; another workflow's declaration
-/// has no job names and passes (its `gates` job is not one job). `jobs` are `(display name, conclusion)`.
-pub fn check_ran(d: &Declared, jobs: &[(String, String)]) -> Result<(), RanProblem> {
+/// has no job names and passes (its `gates` job is not one job). `jobs` are `(display name, outcome)`.
+pub fn check_ran(d: &Declared, jobs: &[(String, JobOutcome)]) -> Result<(), RanProblem> {
     if d.workflow != "ci.yml" {
         return Ok(());
     }
@@ -428,12 +486,17 @@ pub fn check_ran(d: &Declared, jobs: &[(String, String)]) -> Result<(), RanProbl
         .chain(d.ran.apps.iter().map(|a| (a.as_str(), vec![name_of_leg(a)])));
     for (key, names) in declared {
         for name in names {
-            let found: Vec<&(String, String)> = jobs.iter().filter(|(n, _)| name.matches(n)).collect();
+            let found: Vec<&(String, JobOutcome)> = jobs.iter().filter(|(n, _)| name.matches(n)).collect();
             if found.is_empty() {
                 return Err(RanProblem::Missing(format!("{key}: the run has no job named like {name:?}")));
             }
-            if let Some((n, c)) = found.iter().find(|(_, c)| !matches!(c.as_str(), "success" | "failure")) {
-                let c = if c.is_empty() { "not finished" } else { c.as_str() };
+            for (n, o) in found {
+                let c = match o {
+                    // Ran: a failure is the run's own red, not a partial scope.
+                    JobOutcome::Passed | JobOutcome::Failed => continue,
+                    JobOutcome::Unfinished => "not finished",
+                    JobOutcome::Skipped | JobOutcome::Cancelled | JobOutcome::Unknown(_) => o.as_api(),
+                };
                 return Err(RanProblem::NotRun(format!("{key}: its job {n:?} was {c}, not success")));
             }
         }
@@ -454,6 +517,7 @@ pub fn ci_scope(ran: Scope, rerun: bool, need: Scope, need_whole: bool) -> Decla
         need_whole,
         base: None,
         inactive: BTreeSet::new(),
+        reused: BTreeMap::new(),
     }
 }
 
@@ -495,6 +559,7 @@ pub fn app_scope(workflow: &str, app: &str, full: bool, run: bool, since_run: bo
         need_whole: true,
         base: None,
         inactive: BTreeSet::new(),
+        reused: BTreeMap::new(),
     }
 }
 
@@ -635,6 +700,81 @@ mod tests {
         assert!(read_err(&TEST_OS_ONLY.replace("\"linux\"", "7")).contains("os"));
     }
 
+    /// The run that switched the macOS crate job off because every target of it reused a pass.
+    fn reused_job_run() -> Declared {
+        let mut d = declared(true, &["", ""]);
+        d.ran.jobs.remove("crate@macos-latest");
+        d.with_reused(BTreeMap::from([(
+            "crate@macos-latest".to_string(),
+            strings(&["rust:crates/a@macOS-ARM64 from run 8635"]),
+        )]))
+    }
+
+    #[test]
+    fn a_job_switched_off_by_reuse_is_covered_and_one_that_just_did_not_run_is_not() {
+        let d = reused_job_run();
+        assert_eq!(d.complete(), Ok(()), "{}", d.line());
+        // Positive control: the same run without the reuse entry is missing that job (deleting the reuse rule makes this the answer).
+        let mut gone = d.clone();
+        gone.reused.clear();
+        assert!(gone.complete().unwrap_err().contains("crate@macos-latest"));
+        // A reuse entry for another job does not cover it.
+        let other = d.clone().with_reused(BTreeMap::from([("ui".to_string(), strings(&["x"]))]));
+        assert!(other.complete().is_err());
+    }
+
+    #[test]
+    fn the_reuse_survives_the_line_and_the_reader_names_the_run_it_relies_on() {
+        let d = reused_job_run();
+        let back = read(&d.line()).unwrap().unwrap();
+        assert_eq!(back, d);
+        assert_eq!(
+            back.reuse_notes(),
+            vec!["crate@macos-latest: reused rust:crates/a@macOS-ARM64 from run 8635".to_string()]
+        );
+        // A line with no reuse has no key, and a malformed one is refused, never read as no reuse.
+        assert!(!declared(true, &[]).line().contains("reused"));
+        let bad = d.line().replace("[\"rust:crates/a@macOS-ARM64 from run 8635\"]", "[]");
+        assert!(read_err(&bad).contains("reused.crate@macos-latest"), "{}", read_err(&bad));
+    }
+
+    #[test]
+    fn a_crate_job_split_into_partitions_must_have_every_partition_pass_before_its_declared_job_counts() {
+        let d = declared(true, &["", ""]);
+        let job = |n: &str, o: JobOutcome| (n.to_string(), o);
+        let mut jobs: Vec<(String, JobOutcome)> = d
+            .ran
+            .jobs
+            .iter()
+            .filter(|j| !j.starts_with("crate@"))
+            .flat_map(|j| names_of_job(j))
+            .map(|n| match n {
+                JobName::Exact(e) => job(&e, JobOutcome::Passed),
+                JobName::Prefix(p) => job(&format!("{p}x)"), JobOutcome::Passed),
+                JobName::AnyPrefix(ps) => job(&format!("{}x)", ps[0]), JobOutcome::Passed),
+                JobName::Starts(p) => job(&format!("{p})"), JobOutcome::Passed),
+            })
+            .chain(d.ran.apps.iter().map(|a| match name_of_leg(a) {
+                JobName::Exact(e) => job(&e, JobOutcome::Passed),
+                _ => unreachable!(),
+            }))
+            .collect();
+        jobs.extend([
+            job("crate (windows-latest)", JobOutcome::Passed),
+            job("crate (macos-latest)", JobOutcome::Passed),
+            job("crate (ubuntu-latest, 1/3)", JobOutcome::Passed),
+            job("crate (ubuntu-latest, 2/3)", JobOutcome::Passed),
+            job("crate (ubuntu-latest, 3/3)", JobOutcome::Passed),
+        ]);
+        assert_eq!(check_ran(&d, &jobs), Ok(()), "{jobs:?}");
+        // One partition cancelled is a partial scope, not a pass; and a missing job of the whole name is still missing.
+        let mut cut = jobs.clone();
+        cut.iter_mut().find(|(n, _)| n == "crate (ubuntu-latest, 2/3)").unwrap().1 = JobOutcome::Cancelled;
+        assert!(matches!(check_ran(&d, &cut), Err(RanProblem::NotRun(_))));
+        jobs.retain(|(n, _)| !n.starts_with("crate (ubuntu-latest"));
+        assert!(matches!(check_ran(&d, &jobs), Err(RanProblem::Missing(_))));
+    }
+
     fn read_err(line: &str) -> String {
         read(line).unwrap().unwrap_err()
     }
@@ -767,6 +907,7 @@ mod tests {
             need_whole: true,
             base: None,
             inactive: BTreeSet::new(),
+            reused: BTreeMap::new(),
         };
         assert!(nothing.complete().unwrap_err().contains("empty"));
     }
@@ -826,26 +967,44 @@ mod tests {
         }
     }
 
-    fn run_jobs(d: &Declared, conclusion: &str) -> Vec<(String, String)> {
+    fn run_jobs(d: &Declared, conclusion: &str) -> Vec<(String, JobOutcome)> {
         // One job per declared key, named as ci.yml names it, all with `conclusion`.
-        let mut jobs: Vec<(String, String)> = Vec::new();
+        let mut jobs: Vec<(String, JobOutcome)> = Vec::new();
         for k in &d.ran.jobs {
             for n in names_of_job(k) {
                 jobs.push((
                     match n {
                         JobName::Exact(n) => n,
                         JobName::Prefix(p) => format!("{p}x)"),
+                        JobName::AnyPrefix(ps) => format!("{}x)", ps[0]),
+                        JobName::Starts(p) => format!("{p})"),
                     },
-                    conclusion.into(),
+                    JobOutcome::from_api(conclusion),
                 ));
             }
         }
         for a in &d.ran.apps {
             if let JobName::Exact(n) = name_of_leg(a) {
-                jobs.push((n, conclusion.into()));
+                jobs.push((n, JobOutcome::from_api(conclusion)));
             }
         }
         jobs
+    }
+
+    /// A run recorded before the short checks became one job (`quick`, 2026-11-26) has its C99 and heavy tool jobs under their old
+    /// names: the verdict and reuse readers still read it as covering c99 and tools (run 9054 of tests/ci-runs/reuse-push-base).
+    #[test]
+    fn a_run_of_the_older_ci_yml_with_its_own_c99_and_heavy_tool_jobs_still_covers_c99_and_tools() {
+        let finds = |key: &str, job: &str| names_of_job(key).iter().any(|n| n.matches(job));
+        // Today's names.
+        assert!(finds("c99", "quick checks (C99, audit, heavy tool)"));
+        assert!(finds("tools", "quick checks (C99, audit, heavy tool)") && finds("tools", "tools and shared scripts"));
+        // The older ci.yml's own jobs (recorded run 9054 and every run before 2026-11-26).
+        assert!(finds("c99", "C99 (no Keychain in a macOS build)"));
+        assert!(finds("tools", "heavy tool"));
+        // Control: an unrelated job covers neither.
+        assert!(!finds("c99", "crates (fmt, workspace hack, unused deps, coverage, deny)"));
+        assert!(!finds("tools", "gitleaks (secret scan)"));
     }
 
     #[test]
@@ -857,7 +1016,7 @@ mod tests {
         // The WebKit job skipped (the plan's webkit output dropped): the run declared WebKit and did not run it.
         let mut skipped = all.clone();
         let webkit = skipped.iter_mut().find(|(n, _)| n.starts_with("reference apps in WebKit")).unwrap();
-        webkit.1 = "skipped".into();
+        webkit.1 = JobOutcome::Skipped;
         assert!(
             matches!(check_ran(&d, &skipped), Err(RanProblem::NotRun(m)) if m.contains("e2e-webkit")),
             "{:?}",
@@ -865,10 +1024,10 @@ mod tests {
         );
         // A cancelled app leg, a job that never finished.
         let mut cancelled = all.clone();
-        cancelled.iter_mut().find(|(n, _)| n == "app dyno (macos-latest)").unwrap().1 = "cancelled".into();
+        cancelled.iter_mut().find(|(n, _)| n == "app dyno (macos-latest)").unwrap().1 = JobOutcome::Cancelled;
         assert!(matches!(check_ran(&d, &cancelled), Err(RanProblem::NotRun(m)) if m.contains("cancelled")));
         let mut going = all.clone();
-        going.iter_mut().find(|(n, _)| n == "crate (windows-latest)").unwrap().1 = String::new();
+        going.iter_mut().find(|(n, _)| n == "crate (windows-latest)").unwrap().1 = JobOutcome::Unfinished;
         assert!(matches!(check_ran(&d, &going), Err(RanProblem::NotRun(m)) if m.contains("not finished")));
         // A declared job with no job of that name: the declaration cannot be checked.
         let gone: Vec<_> = all
@@ -885,7 +1044,7 @@ mod tests {
         assert!(matches!(check_ran(&d, &no_leg), Err(RanProblem::Missing(m)) if m.contains("dyno@ubuntu-latest:e2e-webkit")));
         // A failed job is the run's own red, not a partial scope.
         let mut failed = all.clone();
-        failed[0].1 = "failure".into();
+        failed[0].1 = JobOutcome::Failed;
         assert_eq!(check_ran(&d, &failed), Ok(()));
         // Another workflow's declaration has no job names to check.
         let other = app_scope("debrief.yml", "debrief", true, true, false, false, &["chromium".to_string()]);
@@ -910,14 +1069,16 @@ mod tests {
         for (key, prefixes) in PROJECT_JOBS {
             assert!(!prefixes.is_empty(), "{key}");
             for p in *prefixes {
+                // `now|older`: the first name is today's job; the older ones are only for recorded runs.
+                let now = p.split('|').next().unwrap_or(p);
                 assert!(
-                    wf.jobs.iter().any(|(id, _)| name_of(id).starts_with(p)),
-                    "no job of ci.yml is named like {p:?} (the key {key})"
+                    wf.jobs.iter().any(|(id, _)| name_of(id).starts_with(now)),
+                    "no job of ci.yml is named like {now:?} (the key {key})"
                 );
             }
         }
         // The matrix legs: the `name:` templates the exact names are built from.
-        assert_eq!(name_of("crate"), "crate (${{ matrix.os }})");
+        assert_eq!(name_of("crate"), "crate (${{ matrix.os }}${{ matrix.part_label }})");
         assert_eq!(name_of("paddock-dev"), "paddock-dev (${{ matrix.os }})");
         assert_eq!(
             name_of("app"),

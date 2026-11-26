@@ -6,9 +6,9 @@ Chromium and WebKit with their dependencies, sccache) and adds what jobs still f
 
 | Tool | Pin | Source |
 |---|---|---|
-| sccache | 0.19.0 (same checksums as `.gitea/actions/setup-rust`) | GitHub release, SHA-256 checked |
+| sccache | 0.20.1 (same checksums as `.gitea/actions/setup-rust`) | GitHub release, SHA-256 checked |
 | cargo-hakari, cargo-machete | 0.9.39, 0.9.2 | GitHub releases, SHA-256 checked |
-| shellcheck | 0.11.0 (same pin and checksum as engineering-rules' `ci.yml`) | GitHub release, SHA-256 checked |
+| shellcheck | 0.11.0 (same pin and checksum as engineering-playbook's `ci.yml`) | GitHub release, SHA-256 checked |
 | libduckdb | 1.5.6 (the `duckdb` crate's), in `/opt/libduckdb`, `DUCKDB_LIB_DIR` set | GitHub release, SHA-256 checked |
 | Chrome for Testing | 156.0.8078.47 (the build the apps download: `paddock-chromium`'s `chromium.toml`; Playwright keeps its own Chromium), `CHROMIUM_TEST_PATH` set | Google storage, SHA-256 checked (amd64 only) |
 | draw.io desktop | 32.6.10 (GitHub release jgraph/drawio-desktop, the `.deb`, 2026-11-04; `scripts/svg-drift.mjs` re-exports every `.drawio` with it), amd64 only | GitHub release, SHA-256 checked |
@@ -26,16 +26,13 @@ v3 (not yet built when `ci-image/VERSION` and the workflows moved to it, 2026-11
 Manual dispatch of `.gitea/workflows/ci-image.yml` (linux/amd64, pushed to `dev.decryptology.net/decryp7/paddock-ci` as
 `v<VERSION>`, a dated run tag and `latest`). Never push from a workstation. Bump `ci-image/VERSION` with any change to what the
 CI image contains or does, and point `ci.yml` at it; `scripts/ci-image.test.mjs` checks the two agree and that the pins agree with
-the repo. Files only the local stand-in reads (`garage-arm64.Dockerfile`, `garage-release.txt`), and `verify.sh` checks that only
-stand-in variables enable (`EXPECT_NEXTEST`, `EXPECT_LLVM_COV`, `EXPECT_DENY`), ride with the next bump.
-Local smoke test: `docker build --platform linux/amd64 -t paddock-ci-smoke ci-image`, then remove it.
+the repo. Local smoke test: `docker build --platform linux/amd64 -t paddock-ci-smoke ci-image`, then remove it.
 
-## The local arm64 image
+## No local image
 
-`tools/linux-container.sh --ci-image` on an Apple Silicon Mac builds this Dockerfile for linux/arm64 on `garage-arm64.Dockerfile`,
-a local stand-in for garage (which is amd64 only), and never pushes it. The stand-in follows `garage-release.txt`, the record of the
-garage that `GARAGE_IMAGE` names; recapture it as its header says after a `GARAGE_IMAGE` change. The arm64 image has no Chrome for
-Testing or draw.io, so e2e against Chrome for Testing and the SVG drift check stay CI's.
+*Note 2026-11-26:* the local linux/arm64 stand-in for garage (`garage-arm64.Dockerfile`, with `garage-release.txt` and the
+`tools/linux-container.sh` that built it) is deleted: no container or VM runs on the Mac (user decision, docs/rules.md rule 101). The Linux
+jobs run in this image on the Linux runner only. The smoke test above is for the person who owns the image build, on the build host.
 
 ## Bumping a pin
 

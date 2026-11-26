@@ -367,10 +367,9 @@ pub fn build(b: Build, out: &Path) -> Result<String, PackageError> {
         };
         files.insert(SIGNATURE.into(), toml::to_string(&sig).unwrap_or_default().into_bytes());
     }
-    let tmp = out.with_extension("debriefplugin.part");
-    let written = (|| -> Result<(), PackageError> {
-        let file = std::fs::File::create(&tmp).map_err(|e| PackageError::Io(format!("cannot write {}: {e}", tmp.display())))?;
-        let mut zip = zip::ZipWriter::new(file);
+    // Every file is already held in memory, so the archive is built in memory and written through the shared atomic replace.
+    let written = (|| -> Result<Vec<u8>, PackageError> {
+        let mut zip = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
         let opts = zip::write::SimpleFileOptions::default()
             .compression_method(zip::CompressionMethod::Deflated)
             .last_modified_time(zip::DateTime::default())
@@ -379,14 +378,9 @@ pub fn build(b: Build, out: &Path) -> Result<String, PackageError> {
             zip.start_file(name.as_str(), opts).map_err(|e| PackageError::Io(e.to_string()))?;
             zip.write_all(bytes)?;
         }
-        zip.finish().map_err(|e| PackageError::Io(e.to_string()))?.sync_all()?;
-        Ok(())
-    })();
-    if let Err(e) = written {
-        let _ = std::fs::remove_file(&tmp);
-        return Err(e);
-    }
-    std::fs::rename(&tmp, out).map_err(|e| PackageError::Io(format!("cannot write {}: {e}", out.display())))?;
+        Ok(zip.finish().map_err(|e| PackageError::Io(e.to_string()))?.into_inner())
+    })()?;
+    paddock_env::write_atomic(out, &written, false).map_err(|e| PackageError::Io(format!("cannot write {}: {e}", out.display())))?;
     Ok(to_hex(&digest))
 }
 

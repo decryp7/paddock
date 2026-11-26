@@ -3,9 +3,9 @@
 //! (see docs/benchmarks.md, "Pre-push Linux Clippy"); the push gate's row then only ever sees warm runs. It runs the push gate's own command ([`gates::linux_gate`]), so what it warms is what the row reuses; a lint it finds in
 //! the workspace itself is reported (exit 5) but the dependencies are warm either way.
 
-use super::budget::with_heavy_flags;
+use super::budget::with_throttle_flags;
 use super::exec::{Done, Ending, Row};
-use super::exec::{QUEUE_STALL, docker_answers, heavy_command_for, on_path};
+use super::exec::{QUEUE_STALL, docker_answers, on_path, throttle_command_for};
 use super::gates::{self, Gate, LinuxTarget};
 use super::linux_inputs::{ImageProbe, PROBE_NEXT, WsCrates, ci_version, image_probe, left_out};
 use super::outcome::subject_of;
@@ -156,16 +156,16 @@ pub fn command(root: &Option<PathBuf>, named: &[String]) -> Result<Report, CliEr
         ));
     }
     let built = std::sync::OnceLock::new();
-    let base_prefix = match heavy_command_for(&root, &env, &|p| on_path(&env, p), &built, Duration::from_secs(600)) {
+    let base_prefix = match throttle_command_for(&root, &env, &|p| on_path(&env, p), &built, Duration::from_secs(600)) {
         Ok(p) => p,
         Err(e) => {
             return Ok(not_measured(
                 &e,
-                "make `heavy` available (it is built from tools/heavy) and run it again",
+                "make `throttle` available (it is built from tools/throttle) and run it again",
             ));
         }
     };
-    let prefix = with_heavy_flags(&base_prefix, false, QUEUE_STALL, RUN_MAX);
+    let prefix = with_throttle_flags(&base_prefix, false, QUEUE_STALL, RUN_MAX);
     let mut rows: Vec<(String, Row)> = Vec::new();
     // The local CI image is its own step with its own bound: it is minutes and gigabytes, and neither a workspace's run limit nor
     // the push budget may cut it off. Built once per change to ci-image/; the probe decides, and a broken probe is not "missing".
@@ -187,7 +187,7 @@ pub fn command(root: &Option<PathBuf>, named: &[String]) -> Result<Report, CliEr
             return Ok(not_measured(&format!("image probe broken ({how})"), PROBE_NEXT));
         }
         ImageProbe::Missing => {
-            let mut argv = with_heavy_flags(&base_prefix, false, QUEUE_STALL, IMAGE_MAX);
+            let mut argv = with_throttle_flags(&base_prefix, false, QUEUE_STALL, IMAGE_MAX);
             argv.extend(["bash", "tools/linux-container.sh", "--id", "paddock", "--ci-image", "--", "true"].map(String::from));
             let what = format!("local CI image, once per change to ci-image/; limit {} s", IMAGE_MAX.as_secs());
             let (id, row, ok) = step(&root, "local CI image", &argv, &what);

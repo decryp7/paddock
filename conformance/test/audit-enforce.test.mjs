@@ -1,4 +1,4 @@
-// Both CI `audit` jobs (ci.yml: `dev audit compare`, nightly.yml: `dev audit nightly`) are report-only until the repository variable
+// Both CI audits (ci.yml's `quick` job: `dev audit compare`, nightly.yml's `audit` job: `dev audit nightly`) are report-only until the repository variable
 // PADDOCK_AUDIT_ENFORCE is 1 (ER-41), and then they must pass `--enforce`. A step that stops adding it leaves the gate report-only for
 // ever, with every job green (ER-33). The workflows are read through the line reader every conformance check uses (util/workflows.mjs,
 // ER-42), and the step's own script is run with the variable set and unset, with `./dev` replaced by a function that prints its
@@ -11,9 +11,9 @@ import { test } from 'node:test';
 import { parseJobs, parseSteps } from '../src/util/workflows.mjs';
 import { PADDOCK } from './helpers.mjs';
 
-/** The audit job's step that runs `./dev audit`: { job, run, env } of workflow `file` (the job id `audit`), through the shared reader. */
-export function auditStep(text) {
-  const job = parseJobs(text).find((j) => j.id === 'audit');
+/** The step that runs `./dev audit` in the job `id` of a workflow: { job, run, env }, through the shared reader. */
+export function auditStep(text, id = 'audit') {
+  const job = parseJobs(text).find((j) => j.id === id);
   if (!job) return null;
   const step = parseSteps(job.text).find((s) => /\.\/dev audit\b/.test(s.run ?? ''));
   if (!step) return { job, run: null };
@@ -31,15 +31,15 @@ export function devArgs(run, value) {
 }
 
 const WORKFLOWS = [
-  ['.gitea/workflows/ci.yml', 'compare'],
-  ['.gitea/workflows/nightly.yml', 'nightly'],
+  ['.gitea/workflows/ci.yml', 'compare', 'quick'],
+  ['.gitea/workflows/nightly.yml', 'nightly', 'audit'],
 ];
 
-for (const [file, sub] of WORKFLOWS) {
-  test(`${file}: the audit job runs \`./dev audit ${sub}\` and adds --enforce exactly when PADDOCK_AUDIT_ENFORCE is 1`, () => {
-    const s = auditStep(readFileSync(join(PADDOCK, file), 'utf8'));
-    assert.ok(s?.run, `${file} has an \`audit\` job with a step that runs \`./dev audit\` (read through parseJobs and parseSteps)`);
-    assert.ok(s.jobEnv, `${file}: the audit job passes the repository variable as PADDOCK_AUDIT_ENFORCE`);
+for (const [file, sub, id] of WORKFLOWS) {
+  test(`${file}: the job ${id} runs \`./dev audit ${sub}\` and adds --enforce exactly when PADDOCK_AUDIT_ENFORCE is 1`, () => {
+    const s = auditStep(readFileSync(join(PADDOCK, file), 'utf8'), id);
+    assert.ok(s?.run, `${file} has a \`${id}\` job with a step that runs \`./dev audit\` (read through parseJobs and parseSteps)`);
+    assert.ok(s.jobEnv, `${file}: the job ${id} passes the repository variable as PADDOCK_AUDIT_ENFORCE`);
     const on = devArgs(s.run, '1');
     assert.equal(on[0], 'audit');
     assert.equal(on[1], sub);

@@ -1,6 +1,6 @@
 # Brief template
 
-Copy this file, fill every field and delete nothing before sending the brief. The shared rules every agent gets are in the engineering-rules `templates/BRIEF.md`; this template adds what a
+Copy this file, fill every field and delete nothing before sending the brief. The shared rules every agent gets are in the engineering-playbook `templates/BRIEF.md`; this template adds what a
 Paddock brief has to say each time.
 
 ## Task
@@ -30,7 +30,7 @@ Decisions: <what the user or an accepted ADR already decided, and what was ruled
 
 Check ids: <a brief that adds a conformance check says: take the id with `./dev check new-id --reserve <branch>` and commit the reservation file; otherwise write "none">
 Gates: <the exact commands, in order: fmt, clippy on the host and through xwin, the touched tests, `./dev gates check`, commit-lint, and the conformance line if conformance is touched>
-Heavy steps: through the Rust `heavy` (`heavy run <agent> -- <command>`, or `./dev heavy -- <command>`, which finds or builds it; the slot count follows the machine's load), with CARGO_BUILD_JOBS=2, NEXTEST_TEST_THREADS=4 and a private CARGO_TARGET_DIR under <dev-targets>/build/.
+Heavy steps: through the Rust `throttle` (`throttle run <agent> -- <command>`, or `./dev throttle -- <command>`, which finds or builds it; the slot count follows the machine's load), with CARGO_BUILD_JOBS=2, NEXTEST_TEST_THREADS=4 and a private CARGO_TARGET_DIR under <dev-targets>/build/.
 
 ## Rules every brief repeats
 

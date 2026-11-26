@@ -14,6 +14,7 @@
 //! The token is read from `GITEA_TOKEN`, travels in a header only and is printed nowhere.
 
 pub mod cache_audit;
+pub mod cancel;
 pub mod client;
 pub mod dispatch;
 pub mod dispatch_guards;
@@ -323,6 +324,10 @@ pub struct DispatchArgs {
     /// or an active app (a train that carries the fix). The reason is logged.
     #[arg(long, value_name = "REASON")]
     red_main_anyway: Option<String>,
+    /// Coordinator override of the train-audits guard: dispatch a train although the repository-wide audits failed (or could not run)
+    /// on its head. The reason is logged.
+    #[arg(long, value_name = "REASON")]
+    audits_anyway: Option<String>,
 }
 
 /// Arguments of `ci rerun-check`: guard 3 of the failed-only rounds (ER-10, ER-33).
@@ -490,6 +495,80 @@ pub struct VerdictArgs {
     landing: bool,
 }
 
+/// Arguments of `ci trial-verdict`.
+#[derive(Args)]
+pub struct TrialVerdictArgs {
+    /// The workflow file whose runs are read.
+    #[arg(long, default_value = "ci.yml")]
+    workflow: String,
+    /// The member's branch (the trial ref is `trial/<branch>`).
+    #[arg(long)]
+    branch: String,
+    /// The member's head, the full 40-hex commit id: only a trial merge of exactly this head counts.
+    #[arg(long)]
+    member_sha: String,
+    /// The repository.
+    #[arg(long, default_value = "decryp7/paddock")]
+    repo: String,
+    /// The Gitea server.
+    #[arg(long, default_value = SERVER)]
+    server: String,
+}
+
+/// `ci trial-verdict`: what the member's own trial run (`ci dispatch --trial`) says, through the one reader ([`verdict::trial`]).
+/// Exit 0 green, 5 red, 6 still running, no trial run of this head, or not measured (never a pass, ER-33). `--json` carries `state`:
+/// `green`, `red`, `running`, `no-run` or `not-measured`, and `run` when there is one.
+pub fn trial_verdict(a: &TrialVerdictArgs) -> Result<Report, CliError> {
+    if a.member_sha.len() != 40 || !a.member_sha.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
+        return Err(
+            CliError::usage(format!("--member-sha {:?} is not a full 40-hex commit id.", a.member_sha))
+                .with_hint("Pass the whole sha (`git rev-parse HEAD`)."),
+        );
+    }
+    let t = match token() {
+        Err(_) => verdict::Trial::NotMeasured("GITEA_TOKEN is not set, so the runs cannot be read".into()),
+        Ok(token) => {
+            let mut http = CurlHttp;
+            let mut client = Client::new(&mut http, &a.server, &a.repo, &token);
+            verdict::trial(&mut client, &a.workflow, &a.branch, &a.member_sha)
+        }
+    };
+    Ok(trial_report(&t, &a.branch))
+}
+
+/// The report for a trial state (the words are the ones `merge check` prints).
+pub fn trial_report(t: &verdict::Trial, branch: &str) -> Report {
+    use verdict::Trial;
+    let (state, run, text, exit) = match t {
+        Trial::Green { run } => ("green", Some(*run), format!("trial of {branch}: run {run} is green"), Exit::Ok),
+        Trial::Red { run, reason } => (
+            "red",
+            Some(*run),
+            format!("trial of {branch}: run {run} is red: {reason}"),
+            Exit::Findings,
+        ),
+        Trial::Running { run } => (
+            "running",
+            Some(*run),
+            format!("trial of {branch}: run {run} is still running (not a pass)"),
+            Exit::NotMeasured,
+        ),
+        Trial::NoRun => (
+            "no-run",
+            None,
+            format!("trial of {branch}: no trial run of this head (run `./dev merge sync-member <train>` after merging the train)"),
+            Exit::NotMeasured,
+        ),
+        Trial::NotMeasured(why) => (
+            "not-measured",
+            None,
+            format!("trial of {branch}: not measured: {why}"),
+            Exit::NotMeasured,
+        ),
+    };
+    Report::new(serde_json::json!({"state": state, "run": run, "branch": branch}), text).with_exit(exit)
+}
+
 /// Arguments of `ci fix-items`.
 #[derive(Args)]
 pub struct FixItemsArgs {
@@ -560,6 +639,10 @@ pub struct ScheduleSkipArgs {
     /// workflow passes a week and a day). Whatever the limit, a workflow is never skipped twice in a row.
     #[arg(long, default_value_t = 36.0)]
     max_gap_hours: f64,
+    /// The app whose own workflow this is (`debrief` for debrief.yml): a scheduled run ends early while the app is not in
+    /// docs/ci-active-apps.toml's `active`. The nightly names none: it runs every app.
+    #[arg(long)]
+    app: Option<String>,
 }
 
 /// `ci schedule-skip`: `skip=true|false` to `GITHUB_OUTPUT` (standard output without it), the annotation on standard output,
@@ -581,7 +664,18 @@ pub fn schedule_skip(a: &ScheduleSkipArgs) -> Result<Report, CliError> {
     let now_ms = time::now_secs() as f64 * 1000.0;
     let mut http = CurlHttp;
     let mut client = Client::new(&mut http, &server, &repo, &token);
-    let d = schedule_skip::decide_scheduled(&mut client, &event, &a.workflow, now_ms, a.max_gap_hours);
+    // The checkout's own set (the run's commit): the job's workspace, else the current folder.
+    let root = env("GITHUB_WORKSPACE").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."));
+    let set = crate::active_apps::ActiveApps::load(&root);
+    if let (Some(app), Err(e)) = (a.app.as_deref(), &set)
+        && event == "schedule"
+    {
+        println!("::warning::schedule skip: whether {app} is active cannot be read ({e}); this scheduled run proceeds (fail open)");
+    }
+    let d = match schedule_skip::inactive(&event, a.app.as_deref(), set) {
+        Some(d) => d,
+        None => schedule_skip::decide_scheduled(&mut client, &event, &a.workflow, now_ms, a.max_gap_hours),
+    };
     let answer = format!("skip={}", d.skip());
     let mut text: Vec<String> = d.annotation().into_iter().collect();
     match env("GITHUB_OUTPUT") {
@@ -727,6 +821,9 @@ pub struct ReuseArgs {
     /// The Gitea server (default: GITHUB_SERVER_URL, then the family's).
     #[arg(long)]
     server: Option<String>,
+    /// Main's tip before this push, the commit the push moved it from (default: the push event's `before`, from GITHUB_EVENT_PATH).
+    #[arg(long)]
+    before: Option<String>,
 }
 
 /// `ci reuse`: `reuse=true|false` and `run=<id>` to `GITHUB_OUTPUT` (standard output without it), one annotation, a summary line.
@@ -755,7 +852,8 @@ pub fn reuse(a: &ReuseArgs) -> Result<Report, CliError> {
     } else {
         let mut http = CurlHttp;
         let mut client = Client::new(&mut http, &server, &repo, &token);
-        reuse::decide(&mut client, &a.workflow, &sha, current)
+        let before = a.before.clone().or_else(|| green::push_before(&env));
+        reuse::decide(&mut client, &a.workflow, &sha, current, before.as_deref())
     };
     let run = if let reuse::Reuse::Skip { run, .. } = &d {
         run.to_string()
@@ -799,6 +897,98 @@ pub struct RecordArgs {
     /// The Gitea server.
     #[arg(long, default_value = SERVER)]
     server: String,
+}
+
+/// Arguments of `ci cancel`.
+#[derive(Args)]
+pub struct CancelArgs {
+    /// The run to cancel: the id `./dev ci dispatch` printed (`run <id>`). Never "the newest run".
+    run: u64,
+    /// The repository.
+    #[arg(long, default_value = "decryp7/paddock")]
+    repo: String,
+    /// The Gitea server.
+    #[arg(long, default_value = SERVER)]
+    server: String,
+}
+
+/// `ci cancel`: stops run `--run` through its own cancel URL ([`cancel::cancel_run`]). Exit 0 sent or already finished, 6 when it could
+/// not be read or sent (never a silent pass: the run may still be running).
+pub fn cancel_cmd(a: &CancelArgs) -> Result<Report, CliError> {
+    let token = token()?;
+    let mut http = CurlHttp;
+    match cancel::cancel_run(&mut http, &a.server, &a.repo, &token, a.run) {
+        Ok(done) => Ok(Report::new(
+            serde_json::json!({ "run": a.run, "sent": matches!(done, cancel::Cancelled::Sent { .. }) }),
+            done.line(),
+        )),
+        Err(e) => Err(CliError::new(
+            Exit::NotMeasured,
+            format!(
+                "::error::ci cancel: run {}: {e}. Next step: read the run on the server and cancel it by hand if it still runs.",
+                a.run
+            ),
+        )),
+    }
+}
+
+/// Arguments of `ci landing-held`.
+#[derive(Args)]
+pub struct LandingHeldArgs {
+    /// The full 40-hex commit that is to land.
+    #[arg(long)]
+    sha: String,
+    /// The workflow whose complete green run is needed.
+    #[arg(long, default_value = "ci.yml")]
+    workflow: String,
+    /// The repository.
+    #[arg(long, default_value = "decryp7/paddock")]
+    repo: String,
+    /// The Gitea server.
+    #[arg(long, default_value = SERVER)]
+    server: String,
+}
+
+/// `ci landing-held`: ER-49's landing needs BOTH the complete green CI run ([`verdict::verdict_landing_at`]) and the green local slow rows
+/// (`./dev check --pre-push --member-gate --set slow`, [`crate::pre_push::train_split`]) on the same commit. Exit 0 landable, 5 refused
+/// (CI red or a slow row failed), 6 not held (anything unfinished, missing or unread: never a pass, ER-33).
+pub fn landing_held(a: &LandingHeldArgs) -> Result<Report, CliError> {
+    use crate::pre_push::train_split::{Ci, Landing, SlowState, landing, read};
+    if a.sha.len() != 40 || !a.sha.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
+        return Err(CliError::usage(format!("--sha {:?} is not a full 40-hex commit id.", a.sha))
+            .with_hint("Pass the whole sha (`git rev-parse HEAD`)."));
+    }
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let root = find_root(&cwd).unwrap_or(cwd);
+    let ci = match token() {
+        Err(_) => Ci::NotMeasured("GITEA_TOKEN is not set, so the runs cannot be read".into()),
+        Ok(token) => {
+            let mut http = CurlHttp;
+            let mut client = Client::new(&mut http, &a.server, &a.repo, &token);
+            match verdict::verdict_landing_at(&mut client, &a.workflow, &a.sha, &root) {
+                verdict::Verdict::Green { .. } | verdict::Verdict::GreenWithFixItems { .. } => Ci::Green,
+                verdict::Verdict::Red { reason, .. } => Ci::Red(reason),
+                verdict::Verdict::NotMeasured(why) => Ci::NotMeasured(why),
+            }
+        }
+    };
+    let slow: SlowState = read(&crate::pre_push::state_dir(&root), &a.sha);
+    let (exit, text) = match landing(&ci, &slow) {
+        Landing::Landable => (
+            Exit::Ok,
+            format!("{} may land: the complete green CI run and the green slow rows hold on it", a.sha),
+        ),
+        Landing::Refused(why) => (Exit::Findings, format!("{} may not land: {why}", a.sha)),
+        Landing::NotHeld(why) => (Exit::NotMeasured, format!("{} is not held for landing: {why}", a.sha)),
+    };
+    Ok(Report::new(serde_json::json!({ "sha": a.sha, "landable": exit == Exit::Ok }), text).with_exit(exit))
+}
+
+/// Cancels run `id` of the family's server (the pre-push slow set calls this when a slow row fails): the line to print, or why not.
+pub fn cancel_by_id(id: u64) -> Result<String, String> {
+    let token = token().map_err(|e| e.to_string())?;
+    let mut http = CurlHttp;
+    cancel::cancel_run(&mut http, SERVER, "decryp7/paddock", &token, id).map(|d| d.line())
 }
 
 fn token() -> Result<String, CliError> {
@@ -870,7 +1060,8 @@ pub fn verdict(a: &VerdictArgs) -> Result<Report, CliError> {
     Ok(r)
 }
 
-/// `ci fix-items`: records the fix items of the verdict on `--sha` in `docs/lessons.md` ([`fix_items::record`]). A plain green has none; a
+/// `ci fix-items`: records the fix items of the landing verdict ([`verdict::verdict_landing_at`], the reader `ci landing-held` and the
+/// queue use: a landed commit is decided by a landing run, never a complete one) on `--sha` in `docs/lessons.md` ([`fix_items::record`]). A plain green has none; a
 /// red or partial verdict or one that is not measured is reported with its exit code and writes nothing.
 pub fn fix_items_cmd(a: &FixItemsArgs) -> Result<Report, CliError> {
     if a.sha.len() != 40 || !a.sha.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
@@ -886,7 +1077,7 @@ pub fn fix_items_cmd(a: &FixItemsArgs) -> Result<Report, CliError> {
         Ok(token) => {
             let mut http = CurlHttp;
             let mut client = Client::new(&mut http, &a.server, &a.repo, &token);
-            verdict::verdict_at(&mut client, &a.workflow, &a.sha, &root)
+            verdict::verdict_landing_at(&mut client, &a.workflow, &a.sha, &root)
         }
     };
     match v {
@@ -1099,7 +1290,11 @@ pub fn dispatch(a: &DispatchArgs) -> Result<Report, CliError> {
     }
     let mut req = dispatch::parse_request(&a.workflow, &git_ref, &inputs, &a.max, a.interval.as_deref())
         .map_err(|e| CliError::usage(e).with_hint(hint))?;
-    for (flag, reason) in [("--full-anyway", &a.full_anyway), ("--red-main-anyway", &a.red_main_anyway)] {
+    for (flag, reason) in [
+        ("--full-anyway", &a.full_anyway),
+        ("--red-main-anyway", &a.red_main_anyway),
+        ("--audits-anyway", &a.audits_anyway),
+    ] {
         if reason.as_deref().is_some_and(|r| r.trim().is_empty()) {
             return Err(
                 CliError::usage(format!("{flag} needs a reason.")).with_hint("Say why, for example --full-anyway \"test renamed\".")
@@ -1233,6 +1428,7 @@ fn train_guards(
     let overrides = dispatch_guards::Overrides {
         full_anyway: a.full_anyway.as_deref(),
         red_main_anyway: a.red_main_anyway.as_deref(),
+        audits_anyway: a.audits_anyway.as_deref(),
     };
     dispatch_guards::check_train(
         &mut CurlHttp,
@@ -1276,6 +1472,9 @@ fn trial_merge(a: &DispatchArgs, branch: &str, token: &str) -> Result<(crate::qu
             generators: false,
             gates: false,
             write_reverted: None,
+            old_base_anyway: None,
+            no_trial: None,
+            gates_base: None,
         })
         .map(|_| ())
         .map_err(|e| e.message)

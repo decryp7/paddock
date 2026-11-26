@@ -7,9 +7,9 @@
 // number of lines) have `liveMs: <literal>` below one second, a feed that ticks on the page's own timers (a long `liveMs` never ticks and
 // is not flagged; only literals are judged, a `liveMs` held in a constant is not read). Each call is judged by itself: it is covered when
 // its own options have `clock:` or the shorthand `clock`, or when its `it(` / `test(` block, or a `beforeEach` that encloses it, calls
-// `useFakeTimers`. A mention of `ManualClock` elsewhere in the file (an import) covers nothing, and neither does `clock: systemMockClock` (the page's real timers). Findings are warnings: report-only until
-// its first green run on the real tree is recorded here (ER-41). Recorded: not yet.
-import { warn } from '../finding.mjs';
+// `useFakeTimers`. A mention of `ManualClock` elsewhere in the file (an import) covers nothing, and neither does `clock: systemMockClock` (the page's real timers). Findings are errors: blocking
+// (mode gate) since its first green run on the real tree, ci.yml run 9065 (11cd82593, 2026-11-25; ER-41).
+import { error } from '../finding.mjs';
 
 const SPEC = /^(?:apps|ui)\/.*\.spec\.ts$/;
 const SKIP = /(?:^|\/)(?:node_modules|dist|e2e)\//;
@@ -88,7 +88,7 @@ const lineOfComment = (lines, n) => /^\s*(?:\/\/|\*)/.test(lines[n - 1] ?? '');
 export default {
   id: 'C136',
   scope: 'root',
-  mode: 'report-only',
+  mode: 'gate',
   title: 'A unit test that starts a live mock feed runs it on a clock the test moves',
   rule: 21,
   run(ctx) {
@@ -97,10 +97,10 @@ export default {
       if (!SPEC.test(f) || SKIP.test(f)) continue;
       const text = ctx.read(f);
       if (text === null || text === undefined) {
-        out.push(warn('C136', 21, f, 1, 'not measured: the file cannot be read', 'Fix the file, then run the check again.'));
+        out.push(error('C136', 21, f, 1, 'not measured: the file cannot be read', 'Fix the file, then run the check again.'));
         continue;
       }
-      for (const { line, why } of liveStarts(text)) out.push(warn('C136', 21, f, line, `${why} and its call has no clock option and no useFakeTimers covers it`, FIX));
+      for (const { line, why } of liveStarts(text)) out.push(error('C136', 21, f, line, `${why} and its call has no clock option and no useFakeTimers covers it`, FIX));
     }
     return out;
   },

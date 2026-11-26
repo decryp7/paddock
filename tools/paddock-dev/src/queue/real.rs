@@ -630,6 +630,9 @@ impl Train for GitTrain {
                 generators: false,
                 gates: false,
                 write_reverted: None,
+                old_base_anyway: None,
+                no_trial: None,
+                gates_base: None,
             };
             match (self.merge_check)(&req) {
                 Ok(_) => merged.push(pr.number),
@@ -911,7 +914,7 @@ pub struct HeldDispatch<'a> {
     pub find_interval: Duration,
 }
 
-/// The dispatch of the queue and of the other-OS member gate, the same path as `./dev ci dispatch`: the landing base, the dispatch guards ([`dispatch_guards::check_train`],
+/// The dispatch of the queue, the same path as `./dev ci dispatch`: the landing base, the dispatch guards ([`dispatch_guards::check_train`],
 /// with no override), a `dispatch_id` token, the wait for a free runner, the send, and the run that carries the token
 /// ([`dispatch::find_run`]): the handle the tick records. A service that stays down or a busy runner is a busy answer (nothing sent).
 pub fn dispatch_held(

@@ -8,11 +8,11 @@ a bad option and never touches anything outside what it names.
 |---|---|---|
 | `bootstrap.sh --name Pitcrew [--check]` | check the prerequisites (macOS or Linux), `npm ci`, build the installers, print where they are and the next steps | Pitcrew `macos-bootstrap.sh`, `linux-bootstrap.sh`; Pitwall `linux-bootstrap.sh` |
 | `verify-installed.sh --name Pitcrew --label ... --unit ... --service ...` | read-only check of an installed app: bundle, launchd agent or systemd user unit, socket, service answer, log tail | Pitcrew/Pitwall `macos-verify.sh`, `linux-verify.sh`; Dyno `linux-verify.sh` |
-| `linux-container.sh --id dyno --packages dyno-platform`, `linux-container.sh --id paddock --ci-image -- <cmd>` | cargo test and clippy in a Linux container; labelled containers and volumes only; `--clean`. `--ci-image` runs the CI image natively (linux/arm64 on an Apple Silicon Mac, built locally from `ci-image/` on `garage-arm64.Dockerfile`; amd64 there is emulated, misses failed execs, and warns; the arm64 image has no Chrome for Testing or draw.io, so no e2e against Chrome for Testing and no SVG drift check; a new build removes older local images, `--clean` all of them); a worktree's git folders are mounted read-only and the pre-push state folder is a tmpfs | Dyno `linux-container.sh`; Pitwall `linux-container-verify.sh` |
 | `macos-vm-smoke.sh --old <N> --new <N+1> [--guest macos\|linux]` | run a smoke that registers real services (launch agent, systemd user unit) in a fresh, always-deleted Tart VM from a pinned image; disk, load and one-VM-at-a-time checks | the service-after-update smoke (rule 7) |
 | `prune-build-folders.sh <folder> <max-gb>` (CI runs `./dev ci prune-folder`; this script is the release-path copy until WP-11) | keep a persistent CI build folder under a cap (incremental caches first, then the folder) | Dyno `ci-prune.sh` |
 | `prune-ci-build-folder.sh <folder> <max-gb> [--drop-bundles]` | the CI form: caps only a kept build folder of this job's slot (`job-isolation.sh owns <folder> target`: `target-<name>-<slot>` in the CI home, resolved, no symlinks), else leaves it alone | the `prune-build-folder` action |
 | `./dev ci prune-agent-builds --app debrief [--remove --keep 6c]` | list and remove build folders of finished worktrees (every OS; the port of `prune-build-folders.ps1`, WP-4) | Debrief `clean-build-dirs.ps1` |
+| `mac-runner-move.sh install\|rollback\|status --user <name> --daemon <lane> [--retire <lane>] [--dry-run]` | ADR 0120's runner move, run by the user with sudo, never by an agent: the Mac's runner leaves the user's GUI session as a LaunchDaemon (`mac-runners/runner-daemon.plist`, rendered with plutil from its current agent); retired lanes are stopped and parked, or left alone when already parked; then the runner must declare itself to Gitea; `rollback` puts the parked agent back. Runbook: docs/dev-setup.md, "Mac CI runner" | the hand steps of ADR 0120 |
 | `host-cleanup.sh --id pitwall --process-pattern '{build}[/\\]debug[/\\]pitwall-server'` | this job's stray test processes (patterns anchored on its own folders; PowerShell on Windows) and temp folders on a host runner, then a leak check; used by the `host-cleanup` CI action | Pitwall `ci/macos-cleanup.sh` |
 
 Parameters carry what differed between the copies: the product name, the launchd label, the systemd unit, the service
@@ -22,6 +22,8 @@ scripts read (unit, launchd state, discovery file) is what `paddock-service` (X4
 Tests: `node --test tools/test/*.test.mjs`. They run every script in a scratch folder with a PATH of shims
 (`PADDOCK_TOOLS_OS` pretends to be macOS or Linux), so no launchd, systemd, Docker or installed app is touched. The PowerShell
 script is not run on the Mac; it is a parameterised port of Debrief's, reviewed by reading, and runs on the Windows runner.
+`mac-runner-move.test.mjs` runs on macOS only: it checks the rendered plist with the real `plutil` (lint and parse), so CI's
+Linux `tools` job skips it and says why.
 
 ## macos-vm-smoke.sh
 
@@ -49,7 +51,7 @@ The prebuilt download (the `dev-tool.yml` package) is not wired yet. Commands to
 acquire|release|status|idle-run`, `plan`; the rest arrives with R1 and later. When a path dependency in `crates/` changes its
 dependencies, regenerate the tool's lockfile in the same change (`cd tools/paddock-dev && cargo update -w`).
 
-## heavy
+## throttle
 
-`tools/heavy` (package `paddock-heavy`, binary `heavy`): the machine-wide heavy-step lock that replaces the shell `plock`
-and engineering-rules `scripts/heavy.sh` (ER-24). Its own Cargo workspace; see [tools/heavy/README.md](heavy/README.md).
+`tools/throttle` (package `paddock-throttle`, binary `throttle`): the machine-wide heavy-step lock that replaces the shell `plock`
+and engineering-playbook `scripts/heavy.sh` (ER-24). Its own Cargo workspace; see [tools/throttle/README.md](throttle/README.md).

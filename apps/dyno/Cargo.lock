@@ -1257,6 +1257,7 @@ checksum = "d0881ea181b1df73ff77ffaaf9c7544ecc11e82fba9b5f27b262a3c73a332555"
 name = "dyno-agent"
 version = "1.2.0"
 dependencies = [
+ "dyno-agent",
  "dyno-core",
  "dyno-helper",
  "dyno-helper-service",
@@ -4042,6 +4043,7 @@ dependencies = [
  "jiff",
  "log",
  "paddock-commands",
+ "paddock-env",
  "paddock-jobs",
  "paddock-limits",
  "paddock-workspace-hack",
@@ -4258,6 +4260,7 @@ version = "0.2.0"
 dependencies = [
  "log",
  "paddock-commands",
+ "paddock-env",
  "paddock-health",
  "paddock-workspace-hack",
  "regex",
@@ -4432,6 +4435,7 @@ dependencies = [
  "log",
  "paddock-commands",
  "paddock-dialogs",
+ "paddock-env",
  "paddock-jobs",
  "paddock-workspace-hack",
  "serde",
@@ -4459,6 +4463,7 @@ dependencies = [
  "futures-core",
  "getrandom 0.3.4",
  "getrandom 0.4.3",
+ "hashbrown 0.17.1",
  "http",
  "httparse",
  "idna",

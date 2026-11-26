@@ -58,7 +58,12 @@ owner marked:
   time, rule 53), and that the parent's executable (`proc_pidpath` on macOS, `/proc/<pid>/exe` on Linux, canonical) is its
   own (`current_exe`, canonical). Its standard input must be a pipe; on Linux the owner must hold that pipe (its inode among
   the owner's descriptors); macOS gives no portable way to name a pipe's other end, so there the parent check stands
-  alone. Otherwise it logs the refusal and exits without reading.
+  alone. Otherwise it logs the refusal and exits without reading. Once the checks pass it says `serving` on its standard
+  error, a pipe the owner reads, and the owner hands back no guarded child before that word (ADR 0119 WP-1; 2026-11-25: an
+  owner killed within the guardian's start, about 11 ms in the Linux CI image, left a guardian whose parent was already
+  init, which refused it and left the children running). The owner waits at most `SERVING_BOUND` (10 s); a guardian that
+  ends first is no guard (a refusal, exit 87, lasts for the process), and one that does not answer in time is logged and
+  the start goes on.
 - **Groups**: only a group whose keeper is, by identity, still in it, and whose executable is the keeper program
   (`/bin/cat`, canonical).
 - **Folders**: only an absolute, canonical path (no link on the way), a real folder (not a link), holding the owner's

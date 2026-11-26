@@ -44,13 +44,15 @@ pub(crate) mod git;
 mod hakari;
 mod hunks;
 mod lost_tests;
-mod other_os;
+mod member_trial;
 mod reland;
-mod reverted_base;
+pub(crate) mod reverted_base;
 mod stale_base;
+mod static_rows;
 pub mod sync_member;
 mod testnames;
 mod trailers;
+pub mod trial_dispatch;
 mod whole_file;
 
 use git::{AutoMerge, Git, short};
@@ -332,6 +334,14 @@ pub struct Request {
     pub gates: bool,
     /// Write the merge message with the `Reverted:` lines a re-land explains to this file ([`reland`]; findings only).
     pub write_reverted: Option<PathBuf>,
+    /// `--old-base-anyway <reason>`: let a member that lacks the train's base through, and print the reason ([`stale_base`]).
+    pub old_base_anyway: Option<String>,
+    /// `--no-trial <reason>`: with `gates`, do not read the member's own CI trial run, and print the reason ([`member_trial`]).
+    pub no_trial: Option<String>,
+    /// `--gates-base <ref>`: the base the member gate measures from, instead of the merge's first parent. A member's gate plans only
+    /// that member's delta; the final gate of a train with `--gates-base origin/main` plans the whole train's rows, so the rows the push
+    /// hook and the train-audits guard will ask for already have a pass on this tree and are reused, not run again (user, 2026-11-26).
+    pub gates_base: Option<String>,
 }
 
 /// The step for `--write-reverted`: the lines a re-land explains, written with the message to `file`; says plainly when it tied none.
@@ -522,7 +532,26 @@ impl Steps {
 /// The merge's label, its findings, the steps after the detectors and the outcome as the wire object (with its evidence).
 type Checked = (String, Vec<Finding>, Steps, serde_json::Value);
 
+/// Runs `a` and `b` at the same time and returns both results: the member gate beside the generated-file check, so the integrator waits
+/// for the longer one. Each closure runs on a thread of its own inside one scope, so neither outlives the call.
+fn both<A: Send, B: Send>(a: impl FnOnce() -> A + Send, b: impl FnOnce() -> B + Send) -> (A, B) {
+    std::thread::scope(|s| {
+        let hb = s.spawn(b);
+        let ra = a();
+        let rb = hb.join().unwrap_or_else(|e| std::panic::resume_unwind(e));
+        (ra, rb)
+    })
+}
+
 fn check(req: &Request) -> Result<Checked, CliError> {
+    if req.old_base_anyway.as_deref().is_some_and(|r| r.trim().is_empty()) {
+        return Err(CliError::usage("--old-base-anyway needs a reason.")
+            .with_hint("Say why, for example --old-base-anyway \"hotfix, the newer main work is unrelated\"."));
+    }
+    if req.no_trial.as_deref().is_some_and(|r| r.trim().is_empty()) {
+        return Err(CliError::usage("--no-trial needs a reason.")
+            .with_hint("Say why, for example --no-trial \"docs-only member, no job of its own to run\"."));
+    }
     let root = crate::gates::command::repo_root(req.root.as_deref())?;
     let git = Git::new(&root);
     let merge = resolve(&git, req)?;
@@ -539,33 +568,63 @@ fn check(req: &Request) -> Result<Checked, CliError> {
         Outcome::Clean(_) | Outcome::Findings(_) => {
             let found = analysis.found;
             // The generated files are checked in the checkout, so only a merge that exists as a commit has one to check.
-            let step = if !req.generators {
+            // The generated-file check (`./dev gen check`) and the member gate read the merge's checkout and neither writes it, so with
+            // `--gates` on a merge commit they run at the same time, not one after the other (user, 2026-11-26): the integrator waits
+            // for the longer of the two instead of their sum ([`both`]).
+            // (Each closure has its own `Git`: its answer caches are not shared between threads.)
+            let gen_step = || {
+                let git = Git::new(&root);
+                generator_step::run(&root, &git, &merge, &crate::generators::run::Real::new(&root), &|l| {
+                    crate::log_text::eline(l)
+                })
+            };
+            let gates_step = || {
+                let git = Git::new(&root);
+                gates::run(&root, &git, &merge, &gates::Real, gates::ENFORCED, req.gates_base.as_deref())
+            };
+            let (mut pre_gen, mut pre_gates) = (None, None);
+            if req.generators && req.gates && req.commit.is_some() {
+                let (g, ga) = both(gen_step, gates_step);
+                (pre_gen, pre_gates) = (Some(g), Some(ga));
+            }
+            let step = if let Some(s) = pre_gen.take() {
+                s
+            } else if !req.generators {
                 Some(generator_step::not_run("--no-generators"))
             } else if req.commit.is_none() {
                 Some(generator_step::not_run(
                     "a branch is checked before it is merged, so there is no checkout of the result; run `./dev merge check <merge-commit>` after merging",
                 ))
             } else {
-                generator_step::run(&root, &git, &merge, &crate::generators::run::Real::new(&root), &|l| {
-                    crate::log_text::eline(l)
-                })
+                gen_step()
             };
             let mut steps = Steps::default();
             steps.push("generators", step);
             // Report-only (ER-41): a member built on a merge the target reverted; never a finding, never an exit code.
             steps.push("reverted-base", reverted_base::run(&git, &merge));
-            // Report-only (ER-41, stale_base::ENFORCED): a member that lacks the train's base, and a train with no declared base.
+            // A member that lacks the train's base is refused (stale_base::ENFORCED, user 2026-11-25) unless --old-base-anyway names a
+            // reason; a train with no declared base is only noticed.
             if let [train, member] = merge.parents.as_slice() {
                 match stale_base::problem(&git, train, member, &merge.target_name, &merge.member_name) {
-                    Ok(Some(text)) if stale_base::ENFORCED => return Err(CliError::new(Exit::Findings, text)),
-                    Ok(Some(text)) => steps.push(
-                        "stale-base",
-                        Some(generator_step::Step {
-                            text: vec![text],
-                            data: json!({"outcome": "warning"}),
-                            exit: Exit::Ok,
-                        }),
-                    ),
+                    Ok(Some(text)) => match (&req.old_base_anyway, stale_base::ENFORCED) {
+                        (Some(reason), true) => steps.push(
+                            "stale-base",
+                            Some(generator_step::Step {
+                                text: vec![stale_base::overridden(&text, reason)],
+                                data: json!({"outcome": "overridden", "reason": reason}),
+                                exit: Exit::Ok,
+                            }),
+                        ),
+                        (None, true) => return Err(CliError::new(Exit::Findings, text)),
+                        (_, false) => steps.push(
+                            "stale-base",
+                            Some(generator_step::Step {
+                                text: vec![text],
+                                data: json!({"outcome": "warning"}),
+                                exit: Exit::Ok,
+                            }),
+                        ),
+                    },
                     Ok(None) => {}
                     Err(why) => steps.push(
                         "stale-base",
@@ -598,21 +657,44 @@ fn check(req: &Request) -> Result<Checked, CliError> {
                     Some(if req.commit.is_none() {
                         gates::not_run("a branch is checked before it is merged, so there is no checkout of the result; run `./dev merge check --gates <merge-commit>` after merging")
                     } else {
-                        gates::run(&root, &git, &merge, &gates::Real, gates::ENFORCED)
+                        pre_gates.take().unwrap_or_else(gates_step)
                     }),
                 );
                 steps.push(
-                    "other_os",
+                    "trial",
                     Some(if req.commit.is_none() {
-                        other_os::not_run("a branch is checked before it is merged, so there is no checkout of the result")
+                        member_trial::not_run(
+                            "a branch is checked before it is merged; run `./dev merge check --gates <merge-commit>` after merging",
+                        )
                     } else {
-                        other_os::run_real(&root, &git, &merge, other_os::ENFORCED)
+                        trial_step(&root, &merge, req.no_trial.as_deref(), &member_trial::Real)
                     }),
                 );
             }
             Ok((merge.label, found, steps, result))
         }
     }
+}
+
+/// The member's own CI trial (`merge sync-member` dispatched it): what the one reader says about the member's head, the second parent.
+fn trial_step(root: &std::path::Path, merge: &Merge, no_trial: Option<&str>, reader: &dyn member_trial::Reader) -> generator_step::Step {
+    if let Some(reason) = no_trial {
+        return member_trial::skipped(reason.trim());
+    }
+    let [_, member] = merge.parents.as_slice() else {
+        return member_trial::not_run("the merge does not have two parents");
+    };
+    // The member's name: the one the merge was given, else the branch its subject names (`Merge branch 'x'`); a short hash or a
+    // subject that names none is no branch.
+    let subject = merge.message.lines().next().unwrap_or("");
+    let named = [merge.member_name.clone(), reverted_base::branch_of(subject)]
+        .into_iter()
+        .find(|n| !n.is_empty() && n != short(member) && !n.contains(char::is_whitespace));
+    let Some(named) = named else {
+        return member_trial::not_run("the merge message names no member branch, so there is no trial ref to read");
+    };
+    let branch = named.strip_prefix("origin/").unwrap_or(&named);
+    member_trial::interpret(reader.read(root, branch, member), branch)
 }
 
 /// `./dev merge check`. Detector findings are an error (exit 5), so the text goes to standard error like every other failure.
@@ -688,7 +770,36 @@ pub fn command_json(req: &Request, out: &mut dyn std::io::Write, err: &mut dyn s
 
 #[cfg(test)]
 mod merge_tests {
-    use super::Merge;
+    use super::{Merge, both};
+    use std::sync::{Condvar, Mutex};
+    use std::time::Duration;
+
+    /// The member gate and the generated-file check run at the same time (user, 2026-11-26): each closure announces that it started and
+    /// waits (bounded only as a hang detector, ER-12) until the other has started too. A serial `both` would never let the second start
+    /// while the first waits, so the wait would end at its bound and the assertion below would fail: the test sees overlap by construction,
+    /// not by timing. The results come back in call order.
+    #[test]
+    fn both_runs_the_two_closures_at_the_same_time_and_returns_their_results_in_order() {
+        let started = (Mutex::new(0u32), Condvar::new());
+        let meet = |me: &'static str| {
+            let mut n = started.0.lock().unwrap();
+            *n += 1;
+            started.1.notify_all();
+            let (n, timeout) = started.1.wait_timeout_while(n, Duration::from_secs(60), |n| *n < 2).unwrap();
+            (me, *n, timeout.timed_out())
+        };
+        let (a, b) = both(|| meet("generators"), || meet("gates"));
+        assert_eq!((a.0, b.0), ("generators", "gates"), "the results keep the call order");
+        assert!(!a.2 && !b.2, "each saw the other start while it was itself in flight: {a:?} {b:?}");
+        assert_eq!((a.1, b.1), (2, 2));
+    }
+
+    /// A panic in either closure reaches the caller (a failed step is never silently dropped).
+    #[test]
+    #[should_panic(expected = "the gates step broke")]
+    fn a_panic_in_the_second_closure_reaches_the_caller() {
+        let _ = both(|| 1, || -> u8 { panic!("the gates step broke") });
+    }
 
     #[test]
     fn a_new_merge_names_its_parents_by_short_id_and_has_no_message_or_commit() {

@@ -7,7 +7,7 @@
 //! The reader also owns the error paths, so every check that uses it has the same ones on both hosts (ER-21 class "the two hosts
 //! diverge on an error path": C125 in 865498235, then C121 and C124): an allow file that is missing, not JSON, without its list or
 //! with a malformed entry is one unwaivable check-broken finding and nothing else ([`read`]), and a file the check cannot read is a
-//! not-measured error at that file ([`AllowList::read`]). Used by C121 and C131, each declaring the [`Spec`] it reads with in
+//! not-measured error at that file ([`AllowList::read`]). Used by C131, declaring the [`Spec`] it reads with in
 //! [`super::Check::allow_list`]. The port of `conformance/src/util/allow-list.mjs`; `tests/it/check_allow_list.rs` compares the error
 //! paths of every user on both hosts.
 //!
@@ -250,7 +250,7 @@ impl AllowList {
         }
     }
 
-    /// What the list says about one flagged site at `path`: `matches(site)` says whether an entry's `site` names it (C121 and C131:
+    /// What the list says about one flagged site at `path`: `matches(site)` says whether an entry's `site` names it (C131:
     /// the flagged line holds the site's text). The site counts on the
     /// first matching entry with room left; when every matching entry is at its count it is [`Admit::Beyond`], and the caller reports
     /// it at its own file and line.

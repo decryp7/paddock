@@ -11,6 +11,10 @@ publish = ["decryp7"]
 doctest = false # doctests are off (crates/README.md, "Doctests")
 
 [features]
+# Test support (rule 99): the test-only hooks and fakes (`Manager::with_clock`, `fake_systemd`,
+# `privileged::trust_fake`). Enabled from `[dev-dependencies]` only, never in a shipped build (`./dev check
+# test-features`, C170).
+test-support = []
 # The Tauri adapter (`paddock_service::tauri`): the managed `ServiceControl`, the commands `service_status`,
 # `service_repair`, `service_install` and `open_login_items`, the `paddock://service` event and the health wiring. The
 # core never depends on Tauri.
@@ -61,6 +65,10 @@ windows = { version = "0.62", features = [
 windows-service = "0.8"
 
 [dev-dependencies]
+# The self dev-dependency that turns `test-support` on for this package's own integration tests (rule 99).
+paddock-service = { path = ".", features = ["test-support"] }
+paddock-health = { workspace = true, features = ["test-support"] }
+paddock-commands = { workspace = true, features = ["test-support"] }
 tempfile = "3"
 # The never-panics test of the parser (`corpus`, `never_panics`).
 paddock-testkit = { workspace = true }

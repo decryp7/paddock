@@ -145,14 +145,14 @@ mod command_tests {
 }
 
 /// The real runner: bounded and started through `paddock-proc`. Every check runs with `CARGO_BUILD_JOBS` (the caller's, else 2)
-/// and its workspace's kept `CARGO_TARGET_DIR` under the build-folder root; a heavy one is queued through `heavy`.
+/// and its workspace's kept `CARGO_TARGET_DIR` under the build-folder root; a heavy one is queued through `throttle`.
 pub struct Real {
     root: PathBuf,
     env: HashMap<String, String>,
     /// Build-folder roots tried when `PADDOCK_DEV_TARGET_DIR` is not set (`./dev disk`'s configured roots), first that exists.
     default_roots: Vec<PathBuf>,
     /// The heavy built from the tree, held for this whole run (never the shared cache path: see `tool_cache::Held`).
-    built_heavy: OnceLock<Result<crate::tool_cache::Held, String>>,
+    built_throttle: OnceLock<Result<crate::tool_cache::Held, String>>,
     /// The local sccache wrapper (`None`: off, or a test; [`crate::local_sccache`]).
     wrapper: crate::local_sccache::Lazy,
 }
@@ -176,7 +176,7 @@ impl Real {
             root: root.to_path_buf(),
             env,
             default_roots,
-            built_heavy: OnceLock::new(),
+            built_throttle: OnceLock::new(),
             wrapper: crate::local_sccache::Lazy::off(),
         }
     }
@@ -226,9 +226,9 @@ pub(super) fn ran_from(o: &paddock_proc::Output, heavy: bool) -> Ran {
     let text = format!("{}\n{}", o.stderr_text(), o.stdout_text());
     match o.outcome {
         paddock_proc::Outcome::Exited(status) => {
-            if heavy && matches!(status.code(), Some(75 | 78)) && text.contains("heavy ") {
+            if heavy && matches!(status.code(), Some(75 | 78)) && text.contains("throttle ") {
                 return Ran::Unavailable(format!(
-                    "heavy gave no slot (status {}): {}",
+                    "throttle gave no slot (status {}): {}",
                     status.code().unwrap_or(0),
                     tail(&text)
                 ));
@@ -261,11 +261,11 @@ impl Runner for Real {
                 env.entry("PADDOCK_DEV_TARGET_DIR".into())
                     .or_insert_with(|| root.display().to_string());
             }
-            match crate::pre_push::exec::heavy_command_for(
+            match crate::pre_push::exec::throttle_command_for(
                 &self.root,
                 &env,
                 &|p| crate::pre_push::exec::on_path(&self.env, p),
-                &self.built_heavy,
+                &self.built_throttle,
                 limit,
             ) {
                 Ok(prefix) => full.extend(prefix),

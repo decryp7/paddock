@@ -50,7 +50,7 @@ pub struct RunArgs {
     /// The most seconds one line may run before its process tree is ended.
     #[arg(long, default_value_t = DEFAULT_MAX_SECS)]
     pub max_secs: u64,
-    /// Put every line through the machine-wide heavy slot (ER-24): `PADDOCK_HEAVY`, else `heavy` on PATH.
+    /// Put every line through the machine-wide heavy slot (ER-24): `PADDOCK_THROTTLE`, else `throttle` on PATH.
     #[arg(long)]
     pub heavy: bool,
     /// The repository root (default: the folder with a `.git` above the current one).
@@ -196,7 +196,7 @@ pub fn run_with(args: &RunArgs, env: &HashMap<String, String>, stop: &Arc<Atomic
             let _ = writeln!(out, "::warning::ci run {} {}: {e}; every line runs", args.project, args.phase);
         }
     }
-    let mut child_env = env.clone();
+    let mut child_env = job_env(env);
     if args.project == "conformance" && contract.get("conformance").is_some() {
         match contract::conformance_args(&contract) {
             Ok(a) => {
@@ -214,10 +214,6 @@ pub fn run_with(args: &RunArgs, env: &HashMap<String, String>, stop: &Arc<Atomic
     // The end-to-end step's index: `i` of a shard `i/N`, empty for a leg without one (the WebKit leg), so `bash -u` never meets it unset.
     let shard = env.get("E2E_SHARD").map(String::as_str).unwrap_or("");
     child_env.insert("E2E_INDEX".into(), shard.split('/').next().unwrap_or("").to_string());
-    // The commands never need the download credential of `./dev` itself: it does not reach the programs a contract runs.
-    for secret in ["PADDOCK_DEV_TOKEN", "BUILD_INPUTS_TOKEN"] {
-        child_env.remove(secret);
-    }
     if args.list {
         for l in &lines {
             match l {
@@ -231,19 +227,19 @@ pub fn run_with(args: &RunArgs, env: &HashMap<String, String>, stop: &Arc<Atomic
         }
         return 0;
     }
-    let heavy = if args.heavy { heavy_prefix(env) } else { Vec::new() };
+    let heavy = if args.heavy { throttle_prefix(env) } else { Vec::new() };
     if args.heavy && heavy.is_empty() {
         return fail(
             out,
-            "--heavy asked for the machine-wide slot, but neither PADDOCK_HEAVY nor `heavy` is available".into(),
-            "install tools/heavy (`cargo install --path tools/heavy --locked`), or run without --heavy",
+            "--heavy asked for the machine-wide slot, but neither PADDOCK_THROTTLE nor `throttle` is available".into(),
+            "install tools/throttle (`cargo install --path tools/throttle --locked`), or run without --heavy",
         );
     }
     execute(args, &root, &lines, &child_env, &heavy, stop, out)
 }
 
-fn heavy_prefix(env: &HashMap<String, String>) -> Vec<String> {
-    crate::pre_push::exec::heavy_prefix(env, &|p| crate::pre_push::exec::on_path(env, p))
+fn throttle_prefix(env: &HashMap<String, String>) -> Vec<String> {
+    crate::pre_push::exec::throttle_prefix(env, &|p| crate::pre_push::exec::on_path(env, p))
 }
 
 fn execute(
@@ -261,7 +257,7 @@ fn execute(
         let (text, cwd) = match l {
             Line::Cd(dir) => {
                 let _ = writeln!(out, "+ cd {dir}");
-                if !root.join(dir).is_dir() {
+                if !(crate::pathfind::exists_exact(root, dir) && root.join(dir).is_dir()) {
                     let cause = format!("ci run {} {}: command failed (exit 1): cd {dir}", args.project, args.phase);
                     let _ = writeln!(
                         out,
@@ -318,6 +314,21 @@ fn execute(
         started.elapsed().as_secs_f64()
     );
     if failed == 0 { 0 } else { 1 }
+}
+
+/// The credentials a CI job has that its test and gate commands never get: the download credential of `./dev` itself, which does not
+/// reach the programs a contract runs.
+pub const JOB_ENV_DROPPED: [&str; 2] = ["PADDOCK_DEV_TOKEN", "BUILD_INPUTS_TOKEN"];
+
+/// The environment CI gives a job's commands: the job's whole environment as the runner and the step's `env:` give it (the account,
+/// HOME, TMPDIR, the toolchain, the job's settings), less [`JOB_ENV_DROPPED`]. The one definition: `ci run` runs every contract line
+/// with it, and the member gate's test rows (`tests <ws>`) take it, less the secrets (`pre_push::exec`), instead
+/// of a list of their own that twice differed from CI (`USER` missing; train 2026-11-26-g).
+pub fn job_env(env: &HashMap<String, String>) -> HashMap<String, String> {
+    env.iter()
+        .filter(|(k, _)| !JOB_ENV_DROPPED.contains(&k.as_str()))
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect()
 }
 
 /// The variable through which the push gate hands the executor the build folder of the `cargo nextest run` line of a phase. Not a

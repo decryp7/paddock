@@ -93,6 +93,8 @@ fn norm(text: &str, fx: &Fx) -> String {
     let dur = regex::Regex::new(r" in \d+ s\b").unwrap();
     let private = regex::Regex::new(r"<ROOT>/tmp/(tmp\.[A-Za-z0-9]+|guardian-as-user\.[0-9]+\.[0-9]+)").unwrap();
     let secs_cell = regex::Regex::new(r"\| \d+ s \|").unwrap();
+    // The guardian's failure line: `(exit 3, 1 s)`.
+    let secs_paren = regex::Regex::new(r", \d+ s\)").unwrap();
     let sizes = regex::Regex::new(r"(is|still) \d+( \(cap|;)").unwrap();
     let bash_killed = regex::Regex::new(r": line \d+: +\d+ Killed ").unwrap();
     // A hung git ends at its limit (the Rust git's own, outside a clock mark) or, with a clock mark, when the abandoned phase ends it
@@ -126,6 +128,7 @@ fn norm(text: &str, fx: &Fx) -> String {
             // The guardian step's private folder: `mktemp -d` in the shell, `guardian-as-user.<pid>.<n>` in Rust.
             let l = private.replace_all(&l, "<PRIVATE>").to_string();
             let l = secs_cell.replace_all(&l, "| N s |").to_string();
+            let l = secs_paren.replace_all(&l, ", N s)").to_string();
             // The shell says `cargo test --no-run failed`, the Rust command quotes the command (backticks) and names how it ended.
             let l = l.replace(
                 "`cargo test --no-run` failed (exit 101; output above).",
@@ -328,22 +331,34 @@ fn run_one(fx: &Fx, step: &Step, rust: bool) -> Seen {
 }
 
 /// Runs both on a fresh fixture each (made by `setup`) and demands they agree; returns what the Rust command left.
+///
+/// Both fixtures are made, and their stand-ins written, here on the calling thread before either side starts a program. Written on
+/// the two threads, a stand-in's copy (`StandIn::install` falls back to a copy where the stub's folder is on another file system, as in
+/// the Linux container) can still have its write descriptor open when the other side forks, and the child keeps that copy until it
+/// execs: the shell's own exec of the stand-in then fails with "Text file busy" (ETXTBSY), which only the test kit's spawns retry
+/// (`paddock_env::text_busy`), not a script. With every write finished before the first fork there is no such window; the sides
+/// still run side by side (ADR 0103), and the setup is a few small files.
 fn same(setup: &(dyn Fn(&Fx) + Sync), step: &Step) -> Seen {
-    // The two implementations share nothing, so they run side by side (ADR 0103): the test takes the slower one, not the sum.
-    let (shell, rust) = paddock_testkit::both(
-        || {
-            let a = fixture();
-            setup(&a);
-            run_one(&a, step, false)
-        },
-        || {
-            let b = fixture();
-            setup(&b);
-            run_one(&b, step, true)
-        },
-    );
+    let (a, b) = (fixture(), fixture());
+    setup(&a);
+    setup(&b);
+    let (shell, rust) = paddock_testkit::both(|| run_one(&a, step, false), || run_one(&b, step, true));
     assert_eq!(shell, rust, "the shell (left) and the Rust command (right) differ");
     rust
+}
+
+#[test]
+fn both_fixtures_are_set_up_on_the_calling_thread_before_either_side_runs() {
+    // ETXTBSY (see `same`): a stand-in written on one side's thread while the other side forks is a program the shell cannot exec. The
+    // reproduction is the cause, not the symptom: the symptom needs a fork inside the copy's window, which a test cannot place.
+    let seen = std::sync::Mutex::new(Vec::new());
+    same(&|_| seen.lock().unwrap().push(std::thread::current().id()), &sccache_stats(None));
+    let seen = seen.into_inner().unwrap();
+    assert_eq!(seen.len(), 2, "{seen:?}");
+    assert!(
+        seen.iter().all(|t| *t == std::thread::current().id()),
+        "setup ran on a side's own thread: {seen:?}"
+    );
 }
 
 // ---- stable-workspace ----
@@ -1851,14 +1866,23 @@ fn boot_volume_says_which_volume_a_folder_is_on_and_where_the_boot_volumes_temp_
 
 // ---- guardian-as-user ----
 
-/// A `crates` folder with a `cargo` that builds two unit-test binaries (fake programs) and a private temp folder. `proc_exit` is what
-/// the paddock-proc test binary exits with; a failing one leaves the guardian's log, as the real tests do.
+/// A `crates` folder with a `cargo` that archives the unit tests, builds the stand-in and runs nextest, and a private temp folder.
+/// `proc_exit` is what `cargo nextest run` exits with; a failing one leaves the guardian's log, as the real tests do.
 fn guardian_machine(fx: &Fx, proc_exit: i32) {
     std::fs::create_dir_all(fx.p("tmp")).unwrap();
+    std::fs::create_dir_all(fx.p("crates")).unwrap();
+    open_to_the_test_user(fx);
     // `cargo build` of the test kit's stand-in (the step builds it before it drops to the test user, ci.yml 8359) answers with
-    // cargo's artifact line; every other cargo call is the unit-test build. Both are recorded in `calls`, as `shim` does.
+    // cargo's artifact line; the nextest archive and the nextest run are the other two calls. All are recorded in `calls`, as `shim` does.
     let calls = || Actions::new().appends_with(&fx.p("calls").display().to_string(), "{name} {args} token={env:GITHUB_TOKEN}\n");
     let stand_in = fx.p("crates/target/debug/paddock-stand-in").display().to_string();
+    let run = calls().stdout_with("nextest tests: {args}");
+    let run = if proc_exit == 0 {
+        run
+    } else {
+        run.writes_with("{env:PADDOCK_PROC_GUARDIAN_LOG}", "guardian said no\n")
+            .exit(proc_exit)
+    };
     fx.stand_in("bin/cargo")
         .when_args(
             &["build"],
@@ -1866,35 +1890,44 @@ fn guardian_machine(fx: &Fx, proc_exit: i32) {
                 "{{\"reason\":\"compiler-artifact\",\"target\":{{\"name\":\"paddock-stand-in\"}},\"executable\":\"{stand_in}\"}}"
             )),
         )
-        .answers(
-            calls()
-                .stdout("   Compiling paddock-proc v0.1.0")
-                // conformance: layout-guess — a sample of cargo's own output, or the test binary it names; not a computed layout
-                .stderr("  Executable unittests src/lib.rs (target/debug/deps/paddock_proc-0123abcd)")
-                // conformance: layout-guess — a sample of cargo's own output, or the test binary it names; not a computed layout
-                .stderr("  Executable tests/it/main.rs (target/debug/deps/it-ff)")
-                // conformance: layout-guess — a sample of cargo's own output, or the test binary it names; not a computed layout
-                .stderr("  Executable unittests src/lib.rs (target/debug/deps/paddock_chromium-9f8e7d)"),
-        )
+        .when_args(&["nextest", "run"], run)
+        .answers(calls().stderr("   Archiving 4 binaries"))
         .install()
         .unwrap();
-    let proc = Actions::new().stdout_with("proc tests: {args}");
-    let proc = if proc_exit == 0 {
-        proc
-    } else {
-        proc.writes_with("{env:PADDOCK_PROC_GUARDIAN_LOG}", "guardian said no\n")
-            .exit(proc_exit)
-    };
-    // conformance: layout-guess — a sample of cargo's own output, or the test binary it names; not a computed layout
-    fx.stand_in("crates/target/debug/deps/paddock_proc-0123abcd")
-        .answers(proc)
-        .install()
-        .unwrap();
-    // conformance: layout-guess — a sample of cargo's own output, or the test binary it names; not a computed layout
-    fx.stand_in("crates/target/debug/deps/paddock_chromium-9f8e7d")
-        .answers(Actions::new().stdout_with("chromium tests: {args}"))
-        .install()
-        .unwrap();
+}
+
+/// Whether this test process is root (`id -u`; the step then takes its `setpriv` path). No `unsafe` in tests.
+fn running_as_root() -> bool {
+    TestCommand::new("id")
+        .arg("-u")
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim() == "0")
+        .unwrap_or(false)
+}
+
+/// As root the step drops to the test user (uid 65534 by default) through `setpriv`, and its stand-in cargo must then append to
+/// `<ROOT>/calls`: open the fixture (its folder, the calls file and the working folders) to every user. A user's own fixture is left as is.
+fn open_to_the_test_user(fx: &Fx) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if !running_as_root() {
+            return;
+        }
+        std::fs::write(fx.p("calls"), "").unwrap();
+        for (rel, mode) in [
+            ("", 0o777),
+            ("calls", 0o666),
+            ("tmp", 0o777),
+            ("crates", 0o777),
+            ("bin", 0o755),
+            ("home", 0o755),
+        ] {
+            std::fs::set_permissions(fx.p(rel), std::fs::Permissions::from_mode(mode)).unwrap();
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = fx;
 }
 
 fn guardian() -> Step {
@@ -1952,27 +1985,46 @@ fn guardian_as_user_matches_the_shell() {
     same(&guardian_broken_build, &guardian());
 }
 
+/// Every duration the two sides print is masked: the guardian's failure line names its run time (`(exit 3, 1 s)`), and two runs of
+/// one fixture can take 0 s and 1 s (the parity test above failed so in the CI image, 2026-11-25). Never a wall-time comparison (ER-12).
 #[test]
-fn guardian_as_user_builds_the_unit_tests_and_runs_the_two_guardian_cases_as_the_calling_user() {
-    // Run by a user (the test is not root: no setpriv, no sudo, ER-14), the tests run directly; the root path is the unit tests' (a fake
-    // machine records the setpriv command line).
+fn norm_masks_the_run_time_in_the_guardians_failure_line() {
+    let fx = fixture();
+    let line = |secs: u32| format!("::error::guardian-as-user: `guardian::` failed as uid 1000 (exit 3, {secs} s): x --exact.");
+    assert_eq!(norm(&line(0), &fx), norm(&line(1), &fx));
+    assert_eq!(
+        norm(&line(12), &fx),
+        "::error::guardian-as-user: `guardian::` failed as uid 1000 (exit 3, N s): x --exact."
+    );
+}
+
+#[test]
+fn guardian_as_user_archives_the_unit_tests_and_runs_the_guardian_cases_under_nextest_as_the_calling_user() {
+    // Run by a user, the tests run directly (no setpriv, no sudo, ER-14); run as root (CI's Linux image), the step drops to uid 65534
+    // through setpriv and the fixture is opened to that user. Both paths are asserted where they can run.
     let seen = guardian_rust(&|fx| guardian_machine(fx, 0));
     assert_eq!(seen.code, 0, "{seen:?}");
-    assert!(
-        seen.stdout.contains("Building the paddock-proc and paddock-chromium unit tests"),
+    assert_eq!(
+        seen.stdout.contains("Running as uid 65534: setpriv "),
+        running_as_root(),
         "{seen:?}"
     );
-    assert!(seen.stdout.contains("proc tests: guardian::"), "{seen:?}");
+    assert!(
+        seen.stdout.contains("Archiving the paddock-proc and paddock-chromium unit tests"),
+        "{seen:?}"
+    );
+    assert!(seen.stdout.contains("nextest tests: nextest run --archive-file "), "{seen:?}");
     assert!(
         seen.stdout
-            .contains("chromium tests: launch::tests::a_browser_whose_owner_is_killed"),
+            .contains(" --profile ci --no-tests=fail -E (package(paddock-proc) & test(guardian::))"),
         "{seen:?}"
     );
+    assert!(seen.stdout.contains("launch::tests::a_browser_whose_owner_is_killed"), "{seen:?}");
     assert!(seen.stdout.contains("The guardian's acting tests passed as uid "), "{seen:?}");
     assert!(seen.github_path.contains("| `guardian::` | uid "), "{seen:?}");
     assert!(
         seen.calls
-            .starts_with("cargo test --no-run --all-features -p paddock-proc -p paddock-chromium"),
+            .starts_with("cargo nextest archive --all-features -p paddock-proc -p paddock-chromium --archive-file "),
         "{seen:?}"
     );
     // A failing test: its guardian log, one error line with the command, the summary row.
@@ -1990,7 +2042,7 @@ fn guardian_as_user_builds_the_unit_tests_and_runs_the_two_guardian_cases_as_the
     assert_eq!(broken.code, 1);
     assert!(broken.stdout.contains("error[E0425]: nothing here"), "{broken:?}");
     assert!(
-        broken.stdout.contains("::error::guardian-as-user: cargo test --no-run failed"),
+        broken.stdout.contains("::error::guardian-as-user: cargo nextest archive failed"),
         "{broken:?}"
     );
 }

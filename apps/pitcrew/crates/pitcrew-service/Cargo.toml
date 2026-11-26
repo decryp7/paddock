@@ -22,6 +22,8 @@ path = "src/main.rs"
 test-support = []
 
 [dependencies]
+# The shared atomic file replace (a temporary name of its own per write).
+paddock-env = { path = "../../../../crates/paddock-env" }
 pitcrew-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true

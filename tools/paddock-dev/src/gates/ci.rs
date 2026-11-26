@@ -235,15 +235,12 @@ fn parse_matrix(n: &Node) -> Matrix {
                     m.axes.push(("shard".to_string(), vec!["1".to_string()]));
                 }
                 // The crate and paddock-dev legs of ci.yml: every OS unless a rerun of the earlier run's failures narrows them (the
-                // plan step writes PLAN_OS_LEGS otherwise), so the model runs them on all three.
+                // planner writes the whole set otherwise: plan_ci::OS_LEGS), so the model runs them on all three.
                 Some(t)
                     if t.contains("fromJSON(needs.plan.outputs.crate_legs)")
                         || t.contains("fromJSON(needs.plan.outputs.paddock_dev_legs)") =>
                 {
-                    m.axes.push((
-                        "os".to_string(),
-                        ["ubuntu-latest", "windows-latest", "macos-latest"].map(String::from).to_vec(),
-                    ));
+                    m.axes.push(("os".to_string(), crate::plan_ci::os_legs()));
                 }
                 Some(_) => m.include.push(BTreeMap::from([("__unresolved".to_string(), "true".to_string())])),
                 None => m.include.extend(v.items().iter().map(|i| {

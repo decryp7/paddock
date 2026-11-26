@@ -14,6 +14,7 @@ members = [
     "paddock-build",
     "paddock-channels",
     "paddock-chromium",
+    "paddock-ci-config",
     "paddock-commands",
     "paddock-dialogs",
     "paddock-diag",

@@ -137,7 +137,7 @@ runs under its own agent name (`pre-push-<pid>-<n>`) in a log folder of its own 
 `<git common dir>/paddock-pre-push/logs/`, the newest 20 kept), the file is created before the poller starts, and only
 `<that name> holds the lock (pid` counts, read from where the last poll stopped (250 ms). Before this, the shared per-gate log held
 the line of earlier runs (48 of 174 logs there already did) and of another worktree pushing the same gate. Only our `heavy` writes that
-line; any other heavy (a `PADDOCK_HEAVY` of someone else's, or engineering-rules' shell `heavy.sh` until its wrapper lands) gives `Unknown` and keeps the credit at the end of the step, so a silent tool never extends the
+line; any other heavy (a `PADDOCK_HEAVY` of someone else's, or engineering-playbook's shell `heavy.sh` until its wrapper lands) gives `Unknown` and keeps the credit at the end of the step, so a silent tool never extends the
 budget. No limit changed: the run budget is still 15 min of run time, the queue allowance 30 min. The end-of-step credit stays (it is
 exact, from heavy's own timing line, and it takes the sibling-held part out).
 
@@ -149,9 +149,9 @@ another (a new `current_exe()` use) is caught at merge time on the combined tree
 
 ## Amendment 2026-11-18 (second): the slots follow the load; the shell heavy is retired once the wrapper lands
 
-The user approved retiring the shell `heavy.sh` and plock (2026-11-18). Their callers outside Paddock's own tools: engineering-rules'
+The user approved retiring the shell `heavy.sh` and plock (2026-11-18). Their callers outside Paddock's own tools: engineering-playbook'
 `scripts/heavy.sh` (with its test and the `templates/lefthook.yml` line) and two stale worktrees of that repository; no other project under the
-development folder calls them. **Today** (this change landed, the wrapper not) engineering-rules still runs the shell semaphore with its own 5 slots
+development folder calls them. **Today** (this change landed, the wrapper not) engineering-playbook still runs the shell semaphore with its own 5 slots
 in its own folder, which does not exclude Rust holders, so up to 5 shell and up to 5 Rust steps can run; the wrapper (a patch of `scripts/heavy.sh`
 and its test, prepared and handed to the coordinator) is a landing prerequisite of calling the shell retired, and lands after the Rust `heavy` can be
 installed for other projects (README). Paddock's resolver (`heavy_prefix`) no longer looks for `heavy.sh`; the reference shell fixture, `tests/it/mixed.rs`
@@ -174,7 +174,7 @@ agents' steps and CI do. Letting a push start several is the next step and needs
 Distribution (same date): `heavy` is released from a `heavy-vX.Y.Z` tag by `.gitea/workflows/heavy-release.yml` (binaries for macOS arm64, Linux
 x86_64 and arm64 and Windows x86_64 plus `SHA256SUMS` on the Gitea release, the crate to the `decryp7` registry when its dependencies are there), and
 `./dev heavy-install` downloads the asset for the machine, verifies the checksum, installs atomically into `<dev-targets>/heavy/bin/heavy` and records
-the version (tools/heavy/README.md); the engineering-rules wrapper only looks there and says the install command when it is missing.
+the version (tools/heavy/README.md); the engineering-playbook wrapper only looks there and says the install command when it is missing.
 
 ## Amendment 2026-11-21: no total budget, and the queue is judged by its progress
 
@@ -211,3 +211,18 @@ change on 2026-11-21 (part of the gate-hang design, `docs/research/2026-11-19-ga
    Docker call per push) to decide. The row failed on 2026-11-21 because of the shared total, which is gone. A missing image still is
    "not measured" with the `--warm-linux` next step, as before.
 
+## Amendment 2026-11-26: as many heavy steps of one push at once as the slots and the load allow
+
+At the user's request of 2026-11-26 (parallel row execution), the 2026-11-15 rule of one heavy step in flight per push is dropped. The
+member gate showed what it cost: train i's member gate took 1 h 45 min, 64 % of it queued and 36 % running, with the rows serial.
+
+- A push runs as many heavy steps at once as it has workers (`heavy_limit`, `tools/paddock-dev/src/pre_push/exec.rs`): `workers` is one
+  at machine load 20 or more, else one per 4 cores, at least three and at most eight (heavy's `auto_max_slots`).
+- `heavy`'s slots still decide whether a step runs, and the throttle's load gate still holds steps back; a step beyond the slots waits in
+  heavy's queue. Each step's threads are heavy's share of the cores (`step_threads`: cores divided by the steps in flight, the caller's own
+  variables winning, ER-47). Cheap rows run beside the heavy ones, as before.
+- The reason for the old rule is kept by a label: every row has its own queued seconds (`heavy`'s measure, never run time), and the
+  per-row table (`row-timings.tsv`, printed after the gate table) lists queued, run and the heavy steps in flight at its start, so waiting for
+  other agents is told from running.
+- `PADDOCK_HEAVY_AT_ONCE=<n>` sets the number for a measurement; 1 is the earlier behaviour.
+- Measured: docs/benchmarks.md, "Member gate: parallel heavy rows (2026-11-26)".

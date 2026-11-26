@@ -12,7 +12,7 @@
 //! [`kept`] keeps bounded after every run)
 //! and every gate runs there, so a dirty tree or another checked-out commit cannot change the answer. Without it, the working tree
 //! as it is (a person's run). Only workspaces that hold a changed file themselves get Clippy and format; the ones reached through
-//! dependencies are CI's (ER-9 overlap), and the Linux Clippy in the CI image (native architecture) runs for every touched workspace.
+//! dependencies are CI's (ER-9 overlap). Linux checks are CI's Linux jobs: no VM or container starts here (user, 2026-11-26).
 //! Only the foundation and the active apps ([`crate::active_apps`], `docs/ci-active-apps.toml`) get their build checks: an inactive
 //! app's rows are shown as `inactive (docs/ci-active-apps.toml)` and counted apart, never as passed; the generators that write into
 //! its folder (its lockfile, Dyno's wire fixtures) still run (ER-40), and `--all-apps` runs every app's rows.
@@ -43,15 +43,15 @@ pub mod gates;
 pub mod heavy_tool;
 pub mod kept;
 pub mod known;
-pub mod linux_inputs;
 pub mod outcome;
 pub mod reuse;
-pub mod warm;
+pub mod row_timings;
+pub mod train_split;
 
 use crate::plan::{Request, plan_with_graph};
 use crate::plan_repo::git_text;
 use clap::Args;
-use exec::{Kind, QUEUE_STALL, RealExec, Row, RunOpts, run_all_timed, workers};
+use exec::{Kind, QUEUE_STALL, RealExec, Row, RunOpts, heavy_limit, run_all_limited, workers};
 use gates::{Change, Facts};
 use paddock_cli::{CliError, Exit, Report};
 use paddock_env::winpath;
@@ -105,6 +105,15 @@ pub struct PrePushArgs {
     /// Also read from PADDOCK_ACCEPT_NOT_MEASURED (comma separated).
     #[arg(long, value_delimiter = ',')]
     pub accept_not_measured: Vec<String>,
+    /// The rows this run takes (the train's ER-53 split, [`train_split`]): `fast` is everything but the host tests, run before CI is
+    /// dispatched; `slow` is the host tests (`tests <ws>`, member gate), run beside CI; `all` (default) is every row. A `slow` run
+    /// records its result for the commit it checked, which `./dev ci landing-held` reads. Neither a fast nor a slow run leaves the
+    /// pass record of a whole run.
+    #[arg(long, value_enum, default_value_t = train_split::RowSet::All)]
+    pub set: train_split::RowSet,
+    /// With `--set slow`: when a slow row fails, cancel this CI run at once (`./dev ci cancel`; the id `./dev ci dispatch` printed).
+    #[arg(long)]
+    pub cancel_ci_run: Option<u64>,
     /// Run every row even when an earlier green run with the same key is on record ([`reuse`]; `PADDOCK_NO_REUSE=1` is the same switch).
     #[arg(long)]
     pub no_reuse: bool,
@@ -474,7 +483,7 @@ fn command_in(
             mine
         },
         stop: Arc::clone(&stop),
-        built_heavy: Default::default(),
+        built_throttle: Default::default(),
         live_slot: Default::default(),
         priority: pushes.iter().any(|p| budget::is_landing_ref(&p.remote_ref)),
         wrapper,
@@ -510,18 +519,31 @@ fn command_in(
     } else {
         node_env_problem(cfg!(windows) && work != root, &|p| std::fs::read_to_string(work.join(p)).ok())
     };
-    facts.left_out = gates::linux_candidates(&plan, &change)
-        .into_iter()
-        .filter(|ws| gates::inactive_app(&facts, ws).is_none())
-        .map(|ws| {
-            let l = linux_inputs::left_out(&work, &ws);
-            (ws, l)
-        })
-        .collect();
     facts.member_gate = args.member_gate;
     facts.kept_targets = kept_targets;
+    // The member gate's tests narrow each workspace to the packages the change reaches, exactly as CI's member run does (one copy).
+    facts.test_filters = gates::workspaces(&plan)
+        .into_iter()
+        .filter_map(|ws| {
+            let project = crate::plan::project_of_dir(&ws)?;
+            Some((ws.clone(), crate::plan_ci::package_filter(&plan, &graph, &ws, &project, true)))
+        })
+        .collect();
+    facts.reached = facts
+        .test_filters
+        .iter()
+        .filter(|(_, f)| !f.trim().is_empty())
+        .map(|(ws, _)| {
+            let hit = plan["packages"][ws.as_str()]
+                .as_array()
+                .map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect())
+                .unwrap_or_default();
+            (ws.clone(), hit)
+        })
+        .collect();
     let mut planned = gates::plan_gates(&plan, &change, &facts);
     planned = select_rows(planned, &args.only)?;
+    planned = train_split::select(planned, args.set);
     notes.extend(
         planned
             .iter()
@@ -536,12 +558,11 @@ fn command_in(
     let load = ex.load();
     let n = workers(load, std::thread::available_parallelism().map_or(1, |n| n.get()));
     let mut overridden = String::new();
-    if env.get("PADDOCK_HEAVY").map(|v| v.trim()) == Some("off") && !env.contains_key(exec::TEST_HEAVY_OFF) {
+    if exec::throttle_override(&env).map(|v| v.trim()) == Some("off") && !env.contains_key(exec::TEST_THROTTLE_OFF) {
         overridden =
-            "OVERRIDE SET: PADDOCK_HEAVY=off is not allowed outside the tests; every compile (clippy, xwin, Linux) is not measured\n"
-                .into();
-    } else if exec::heavy_prefix(&env, &|p| ex.has_tool(p)).is_empty() {
-        notes.push("no heavy on PATH: the compiles (clippy, xwin, Linux) run through the heavy built from tools/heavy (cached under ~/.paddock-dev/bin); if that build fails they are not measured (ER-24)".into());
+            "OVERRIDE SET: PADDOCK_THROTTLE=off is not allowed outside the tests; every compile (clippy, xwin) is not measured\n".into();
+    } else if exec::throttle_prefix(&env, &|p| ex.has_tool(p)).is_empty() {
+        notes.push("no heavy on PATH: the compiles (clippy, xwin) run through the heavy built from tools/throttle (cached under ~/.paddock-dev/bin); if that build fails they are not measured (ER-24)".into());
     }
     let head = format!(
         "{overridden}pre-push: base {} ({}), {} commit(s) beyond it; {} changed file(s); {} gate(s) at a time (1-minute load {}); no total budget: each row has a cap of {} min on its own run time, counted from when it starts running, stacks logged before a step is ended; watchdog: {} (waiting for the heavy slot is queue time, reported apart and never run time; it goes on while the queue moves and ends after {} min without progress; {}); logs in {}\n{}",
@@ -571,7 +592,18 @@ fn command_in(
     } else {
         None
     };
-    let (mut rows, timings) = run_all_timed(
+    // The slow rows of the train's split are recorded for the commit they check: unfinished until they end (a run that dies is "not held").
+    let slow_sha = checked
+        .clone()
+        .or_else(|| head_sha.clone())
+        .filter(|_| args.set == train_split::RowSet::Slow && !args.dry_run);
+    if let Some(sha) = &slow_sha
+        && let Err(e) = train_split::start(&state, sha)
+    {
+        eprintln!("::warning::pre-push: the slow-row record of {sha} was not started: {e}. A landing reads it as not held.");
+    }
+    let limit = heavy_limit(&env, n);
+    let detail = run_all_limited(
         &planned,
         ex,
         &RunOpts {
@@ -581,7 +613,15 @@ fn command_in(
             subject: &subject,
             reuse: reuse.as_ref(),
         },
+        limit,
     );
+    let row_lines = row_timings::lines(&detail);
+    let exec::RunDetail { mut rows, timings, .. } = detail;
+    if let Some(table) = row_timings::table(&row_lines, limit) {
+        eprint!("pre-push: {table}");
+        // The record beside the gate logs (ER-27): best effort, a failed write never changes a verdict.
+        let _ = std::fs::write(real.logs.join("row-timings.tsv"), row_timings::tsv(&row_lines));
+    }
     if let Some(r) = &reuse {
         let gone = r.evict();
         if gone > 0 {
@@ -590,6 +630,15 @@ fn command_in(
     }
     rows.extend(extra_ref_rows(&extra));
     accept_not_measured(&mut rows, &accept, &state);
+    if let Some(sha) = &slow_sha {
+        if let Err(e) = train_split::finish(&state, sha, &rows) {
+            eprintln!("::warning::pre-push: the slow-row record of {sha} was not written: {e}. A landing reads it as not held.");
+        }
+        let mut cancel = |id: u64| crate::ci_runs::cancel_by_id(id);
+        if let Some(line) = train_split::cancel_failed_run(&rows, args.cancel_ci_run, &mut cancel) {
+            eprintln!("{line}");
+        }
+    }
     log_queue_times(&state, checked.as_deref(), &base, &timings);
     // The kept build folders of the throw-away worktrees stay bounded (kept.rs): stale incremental state goes, a folder a build
     // holds is skipped.
@@ -734,7 +783,7 @@ pub(crate) fn stop_on_signals(stop: &Arc<AtomicBool>) {
 }
 
 /// The folder for this checkout's gate logs and override log: `<git common dir>/paddock-pre-push`.
-fn state_dir(root: &Path) -> PathBuf {
+pub(crate) fn state_dir(root: &Path) -> PathBuf {
     git_text(root, &["rev-parse", "--path-format=absolute", "--git-common-dir"])
         .map(|t| PathBuf::from(t.trim()))
         .unwrap_or_else(|| root.join(".git"))
@@ -1504,6 +1553,7 @@ fn discover(root: &Path, base: &str, files: &[String], pushed: &[String]) -> Res
 fn read_facts(root: &Path, plan: &Value, env: &HashMap<String, String>, ex: &dyn exec::Exec) -> Facts {
     let ci = crate::ci_run::contract::conformance_args_at(root);
     let mut windows = std::collections::BTreeSet::new();
+    let mut nextest_config = std::collections::BTreeMap::new();
     for ws in gates::workspaces(plan) {
         let Some(app) = ws.strip_prefix("apps/").and_then(|r| r.split('/').next()) else {
             continue;
@@ -1511,11 +1561,13 @@ fn read_facts(root: &Path, plan: &Value, env: &HashMap<String, String>, ex: &dyn
         let contract = std::fs::read_to_string(root.join(format!("apps/{app}/paddock.ci.json")))
             .ok()
             .and_then(|t| serde_json::from_str::<Value>(&t).ok());
+        if let Some(cfg) = contract.as_ref().and_then(|c| c["nextestConfig"].as_str()) {
+            nextest_config.insert(ws.clone(), cfg.to_string());
+        }
         if contract.is_some_and(|c| c["windowsClippy"] == true) {
             windows.insert(ws);
         }
     }
-    let version = linux_inputs::ci_version(root);
     let mut tests: Vec<String> = std::fs::read_dir(root.join("apps/pitwall/scripts/ci"))
         .map(|d| {
             d.flatten()
@@ -1530,14 +1582,15 @@ fn read_facts(root: &Path, plan: &Value, env: &HashMap<String, String>, ex: &dyn
         conformance: Some(ci),
         conformance_env: None,
         windows_clippy: windows,
-        ci_version: Some(version),
-        left_out: Default::default(),
         member_gate: false,
         kept_targets: None,
         pitwall_tests: tests,
         dev_exe: ex.dev_program(),
         target_dir: env.get("CARGO_TARGET_DIR").cloned(),
         inactive: Ok(Default::default()),
+        test_filters: Default::default(),
+        nextest_config,
+        reached: Default::default(),
     }
 }
 

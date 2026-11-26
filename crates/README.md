@@ -137,6 +137,7 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 | `paddock-service` | background services and login items: one `ServiceSpec` rendered as the launchd plist (bundled or file), systemd unit, Windows `Run` value or service and NSIS hooks; registration and repair behind ports (rule 24), registered version, exe-changed restart, launch at login, health entry (plan X4, D4) | yes (Pitwall, Pitcrew, Dyno, Debrief agent); built |
 | `paddock-repo-files` | a bounded, `.gitignore`-aware repository walk and SHA-256 hashing with deterministic results (ADR 0022 §6) | yes (`paddock-dev`; Pacenotes' index later); built |
 | `paddock-repo-graph` | the project graph: Cargo and npm projects and edges (Tauri `frontendDist`, tsconfig, angular.json, ESLint config references), file to project, the affected closure, lockfile differences and a `History` port; git and `cargo metadata` adapters behind features (ADR 0022 §6) | yes (`paddock-dev`; Pacenotes later); built |
+| `paddock-ci-config` | the CI job model: ci.yml's jobs, matrices, `needs` and the projects each job runs for, built once from the workflow text (`jobs::model`, `jobs::render`); the one CI YAML reader (`yaml`) and expression evaluator (`expr`); a pure core with no file or process I/O (ADR 0123) | yes (`paddock-dev`); built |
 | `paddock-slots` | numbered slots over OS file locks the kernel releases when the holder dies, a holder protocol and a typed API: no stale reclaim, so no reclaim race (ADR 0022, the CI kit's job isolation) | yes (`paddock-dev ci slot`); built |
 | `paddock-siblings` | hand-off between the family's apps: the apps and what each accepts (`docs/ecosystem.md`), a typed `Handoff` (open, import files, show an item), discovery of an installed sibling per OS, starting it detached with paths or a deep link, plain "not installed" and "needs update" answers, the receiving side's parsers (plan X45; from Pitcrew's `debrief_link.rs` and `handoff.rs`) | yes (Pitcrew, Dyno, Debrief, Spotter); built |
 | `paddock-names` | identifier search (rule 20): word segmentation, name normalisation (`Path` and `Text` styles), grouping of spellings, ranked and explained matching of parts, joins, separators, case, plurals, filler words, word order and typos, clarifying question on a true tie (plan X18; from Debrief `names/` and Dyno's counter search) | yes (Debrief, Dyno; Pitwall, Spotter, Pacenotes later); built |
@@ -1814,7 +1815,7 @@ let state = Session::new(EngineChoice::Auto).state(&link);   // AiState -> Needs
   `UseFallback` (or `OpenSettings` for an app without an engine) so it never depends on Pitwall (rule 19).
 - `loopback`: the bounded, cancellable `127.0.0.1` HTTP/1.1 transport itself (header, line and body limits, chunked, injection-proof
   headers), reusable for other local servers: Debrief's llama-server client (`debrief-ai-worker/src/http.rs`) moves onto it.
-- `testing` (feature `testing`): `FakePitwall`, an in-process fake with exactly the routes of `PITWALL_ROUTES`, Pitwall's answer and
+- `testing` (feature `test-support`): `FakePitwall`, an in-process fake with exactly the routes of `PITWALL_ROUTES`, Pitwall's answer and
   error shapes, scripted pairing, failures with `Retry-After`, held and dying streams. It waits on conditions, never on the clock.
   `tests/contract.rs` runs the client against it; with `PADDOCK_PITWALL_HTTP_RS=<pitwall>/crates/pitwall-server/src/http.rs` it also
   checks that Pitwall's router still has every route (Pitwall's CI should set it).
@@ -2102,6 +2103,24 @@ let answer = plugin.invoke("collector", "start", json!({ "folder": path }))?;   
   contract bodies, ADR 0003 phase 2), the elevated *process* (the app starts it and runs `Invoke` with the `elevated` role),
   the OS sandbox. The author's tool is `cargo-paddock-plugin` (below).
 
+
+## `paddock-ci-config` (ADR 0123, WP-1)
+
+The CI job model: every reader of ci.yml asks one typed model instead of re-typing the layout. A pure core (workflow texts and
+declared data are passed in; no file or process I/O), `publish = false`.
+
+- `yaml`: the one YAML reader of the CI model (`parse`, `Node` with its line, `Value`), on `yaml-rust2`; an anchor merge key or an
+  alias of an unknown anchor is an error, never a silent miss. Moved from `paddock-dev`'s `gates/yaml.rs` (ADR 0060).
+- `expr`: the condition and string evaluator for the subset of GitHub/Gitea expressions the workflows use (`eval`, `condition`,
+  `interpolate`; anything outside it is `Val::Unknown`, fail closed). Moved from `gates/expr.rs`.
+- `jobs`: `model(workflow_text, &Declared) -> Result<JobModel, Vec<Problem>>`: per job its id, raw `name:` template, `legs` (`None`,
+  `Static` or `Planned(output)`), `needs`, whether its `if:` asks `rerun_jobs`, whether the dev tool is restored before the first
+  `./dev`, and `projects`: the union of the plan outputs its and its steps' conditions read (`PROJECT_OUTPUTS`, the planner's table,
+  moved here from `plan_ci`) plus the declared ones (`[ci.jobs]` of `docs/repo-graph.toml`). A job left with no project, an output
+  the table does not know or a condition the evaluator cannot read is a `Problem`. `render(job, leg)` evaluates the `name:` template
+  for one leg.
+- Used by `paddock-dev` (`gates`, `repo_model`, `plan_ci`; `tests/it/job_model.rs` keeps the model equal to `plan_gitea::CI_JOBS`
+  until ADR 0117 D12). WP-2 onward moves the run readers onto it.
 
 ## `paddock-repo-files`, `paddock-repo-graph` and `paddock-slots` (ADR 0022 R0)
 

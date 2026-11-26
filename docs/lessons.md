@@ -2096,7 +2096,7 @@ config key or the script's own location) is never a literal default, and a guard
 ## A test child that inherits the machine's environment reads the machine (tests, 2026-11-13)
 Twice in one day a new environment lookup in a tool reached real machine state through tests: the pre-push integration tests ran
 the real heavy steps (`PATH` found `heavy.sh`), and on `fix/precommit-heavy-slot` the helper `dev()` found the real
-engineering-rules `heavy.sh` through `ENGINEERING_RULES` and the checkout beside the repository, and took machine-wide slots in
+engineering-playbook `heavy.sh` through `ENGINEERING_RULES` and the checkout beside the repository, and took machine-wide slots in
 `~/.cache/heavy-slots` (ER-14). Patching each test (`2ff5f5072`) leaves every other spawn site open for the next lookup, because
 a deny-list never contains the variable that bites next. Fix (ADR 0100): `paddock_testkit::TestCommand` starts `./dev`, `cargo` and
 `node` from an empty environment plus an allow-list (`allowed_names()`), with a private `HOME` and temp folder and a curated
@@ -3657,6 +3657,20 @@ logged with what the rule saw (ER-27). Lesson: an admission rule needs a cost, n
   tests, all order-dependent (native-feel.spec.ts, app.spec.ts, palette.spec.ts, timeline-panel.spec.ts, testing/startup.spec.ts), none a
   timeout. ER-29's nightly shuffled run would show them.
 
+## The runner does give a Windows job a job object; macOS is the gap (2026-11-21, ADR 0112)
+- **What was wrong:** the lesson "Job processes (ER-14)" of 2026-11-21 (`feat/lessons-check-and-job-cleanup`) says the host runner
+  gives a job no process group or job object that its end closes, and that a Windows job object per job "needs the runner's
+  cooperation, which it does not give". Read at the tags we run (v5.4.1 on the Mac, v6.0.1 on Windows, from job logs 43808 and
+  43703), the runner puts every step of a job into one job object per job and terminates it in `Remove` at the job's end
+  (`internal/pkg/process/group_windows.go`, gitea/runner #1080). So on Windows a job's processes already end with the job. The
+  marker cleanup's "not measured" there stays until a positive control on the real runner measures it (ADR 0112 WP-1).
+- **The real gap is macOS:** each step leads its own process group, which the runner signals only on cancel; at the job's end it
+  kills by `RUNNER_TRACKING_ID` in the environment, and macOS shows no environment of a program Apple ships (measured on 27.2.1:
+  `/bin/sleep` hides it, an ad-hoc signed copy shows it). A bash script left by a step that ended normally lives on.
+- **Lesson:** read the other program's source at the version that runs before writing what it does not do; the claim came from a
+  note about the step's own job object (`slots.rs`, whose note names only that one; ADR 0112 WP-7 adds the job's), not from the job's.
+- **Class: an owner ends but not what it started** (82d5ee496, ADR 0103, c528dbfb1): ADR 0112 makes the job the unit.
+
 ## The graph train's landing runs (ci.yml 8830, debrief.yml 8831 on 47a27bf1f): a graph reader outside the repo-graph group again, and fix items (2026-11-24)
 
 - **What happened.** `repo_model::code::tests::on_the_real_tree_every_read_candidate_parses_with_syn` was FLAKY on the Windows runner
@@ -3877,6 +3891,210 @@ first and records the second (`ci fix-items`) is part of the queued green-main w
   (ADR 0120). Earlier instances: the 2026-11-23 session crash (hdiutil failure after the Mac runner's desktop session crashed, train
   18's fix item).
 
+## Nightly 1812: two paddock-dev tests failed only on the host runners (run 9021, 2026-11-25, fix/nightly-1812-paddock-dev-windows)
+- **What.** The nightly tests every paddock-dev test on every OS (`os_full`), so tests that branch and train runs keep on Linux ran on
+  the host legs for the first time since they landed on 2026-11-23. (1) `plan_graph_ci::the_plan_job_log_and_outputs_under_the_graph_planner`
+  (Windows, both tries): "the fixture's app job". `* text=auto` checked the golden fixture's `ci.yml` out with CRLF, and the test's
+  edit searched for `\n`. (2) `repo_graph_net::graph_train_replay_has_no_unlisted_narrowing` (Windows: "not 0" members; macOS: unknown
+  revision): the host legs' kept clone is fetched with `--depth=1` (ADR 0025). On Windows the slot's clone still held the range's
+  objects from earlier fetches, so `git rev-list` cut at the shallow boundary listed 0 commits without an error.
+- **Fix.** The fixture edit works on either line ending (`app_job_reads_any_app`, regression test with a CRLF copy).
+  `replay::members` refuses a shallow clone with its cause (it also serves `./dev plan --replay`), regression test
+  `members_of_a_shallow_clone_are_refused_not_listed_short`. The replay test is Linux only (`#[cfg(target_os = "linux")]`, ER-52): it
+  is OS-independent and only the Linux legs check out the whole history. A cfg, because the nightly ignores `hostTests`; a
+  warn-and-return on a shallow clone would show PASS for a check that did not run (ER-33).
+- **Rule of thumb.** A test that edits a checked-out text file normalises line endings first. Code that reads the real history checks
+  `is_shallow` before trusting an empty answer; an OS-independent test that needs the history runs on Linux only.
+- **Class (ER-21).** CRLF checkouts that break text tests on Windows: the third instance (see the Windows-portability lesson and the
+  dyno-helper-service CRLF lesson). Proposed to the user: check out LF on every OS (`* text=auto eol=lf`, `*.cmd` stays CRLF).
+
+## Mechanisms grew back after the cuts of 2026-11-11 (2026-11-24)
+
+- **Class (ER-21).** Over a dozen new mechanisms were proposed or approved in one day: quarantine, C167, C168, dispatch guards, guards A1-A7 and B1-B2, train-first priority, worktree leases, host inventory, nightly issue filing, test cost classes and a CPU watchdog. The cuts of 2026-11-11 (plain ADRs, one review round) had grown back.
+- **Cause.** The rules only ever added: ER-21 redesigns, ER-37's complete option for foundation work, and shrink-only lists for exceptions but not for checks.
+- **Rule.** The minimum simplest complete fix, and a redesign only if it is necessary for the long term (ER-44). Four brakes enforce it: one in, one out (ER-37), sunset by default with a review date (ER-41, ER-46), simpler first (ER-21) and a monthly independent cut review with a drop list (ER-36).
+- **Lesson.** A rule set that can only add will grow. A new mechanism names what it removes, and every report-only one expires unless it caught something real.
+
+## Incidents behind the engineering rules ER-1 to ER-51 (moved from the generic rules repo, 2026-11-24)
+
+The engineering-playbook repository is project-agnostic. These are the original texts of every rule that carried a Paddock incident,
+run id, ADR number or date, copied verbatim from engineering-playbook commit 77c4b23 (RULES.md and PRINCIPLES.md) before they were
+made generic. The generic rule text stays in that repository; its incident detail lives here, and docs/rules.md cites the ER numbers.
+
+### RULES.md: ER-1
+
+- **ER-1. One release at a time.** Release-critical work comes first. Other apps or tasks may progress in parallel only while load and CI capacity allow, and only if they don't change shared code the release depends on. Once a train carries a release, that train and the trains ahead of it are frozen: they take only fixes for their own CI failures, new tooling waits for the next train, and tooling work in progress is capped (finish open branches before starting new ones) while the next release's prep keeps moving (user, 2026-11-20). Why: the real limits are attention, machine load, CI runners and conflicts in shared code, not the number of apps; on 2026-11-19 Dyno was ready but stood behind two trains that kept taking tooling members, with about 10 tooling branches in flight.
+
+### RULES.md: ER-2
+
+- **ER-2. Every agent works in its own git worktree,** created, locked with an owner note and claimed through the project's one worktree tool, with its own build directory and its own test ports. Only its owner, or the coordinator after the owner has ended, unlocks it; no cleanup removes a locked worktree, and "pushed and clean" is not "unused". Merges into trains and main run in the integrator's locked worktree. The main checkout stays on `main` for the coordinator's fast-forwards. A guard hook is planned (Paddock RT-7) to refuse an unguarded `cd` (one not followed by `&&` or `|| exit`), an agent's git writes and edits outside its own worktree and scratch folder, and the coordinator's other git writes in the main checkout; until it exists the rule rests on the agents and the coordinator; a probe of the main checkout runs at every landing. Why: parallel agents overwrite each other's files and builds otherwise, and on 2026-11-10 a cleanup removed a live agent's worktree and its `cd ...; git merge` then merged into the main checkout's `main` (scripts/worktree.sh (engineering-playbook/scripts/worktree.sh); Paddock ADR 0083).
+
+### RULES.md: ER-36
+
+- **ER-36. Always improve how the work is done, for speed and quality together.** After every batch, incident, review round or slow step, ask what made it slow or let a defect through, and change the process, not only the instance: automate a step done by hand twice, run independent work in parallel within the machine's load, run only what a change needs (and the full suite once), move each check earlier (on the machine before CI, a failing test before the fix, a review before landing), remove waits, hand-offs and round trips, and give agents the permissions and tools a reviewed step needs instead of routing it through a person. Record each change as a rule, lesson, tool, hook or brief template so it holds next time. Never buy speed with quality: gates, independent reviews and failing-first tests stay; make them faster instead. Why: on 2026-11-08 the user asked for this as a standing rule; that day one red main, agent pushes blocked by permissions and serial landings cost hours, while independent reviews found real defects in nearly every branch, so both halves matter. Hooks that judge an agent's text (the planned recurring-line guard `.claude/hooks/recurring-guard.sh` in Paddock) only warn; hooks that guard state (the cd guard, safe-remove) still block (user, 2026-11-12). Details: checklists/speed-and-quality.md (engineering-playbook/checklists/speed-and-quality.md). Monthly cut review (2026-11-24): once a month an independent reviewer measures each check, register, hook, workflow and tool for cost against what it caught, and gives the user a drop list. Why: see ER-21, 2026-11-24.
+
+### RULES.md: ER-44
+
+- **ER-44. A complete fix, not a quick one.** The principle: the minimum simplest complete fix, and a redesign only if it is necessary for the long term. The fix is the smallest, simplest change that removes the cause completely, with its registered copies; "complete" means the cause is gone, never more machinery around it. ER-21, ER-36, ER-37, ER-41 and ER-46 are how this is enforced. When a review or an incident finds the cause, the fix that removes it, and its registered copies, land in the same round. No "minimal now, real fix later". Ask the user only when the complete fix costs more than 1 agent-day beyond common practice (ER-37). Why: the user said so on 2026-11-16, after a slowdown fix was split into a small part and a deferred root fix.
+
+### RULES.md: ER-7
+
+- **ER-7. In a branch run only the affected tests** (touched modules, touched specs, related end-to-end files; one browser engine). CI runs the foundation (shared crates, shared UI packages, tools) plus the active apps, the apps in the current release set; the nightly runs everything (user, 2026-11-24). Doctests are off; a crate turns them on only if it is published for others or its docs become a real user guide (user, 2026-11-24). Why: the machine is shared and full suites are slow.
+
+### RULES.md: ER-8
+
+- **ER-8. Run the full suite once on the combined result** before a local build or release, plus CI. Every merge into a train or integration branch also runs, at merge time, the checks that fail only on combined code (workspace-hack, publish dry run, conformance), not first in the full CI run. The gate runs on each member's merge (the fast gates on the combined tree, diffed from the train before it), so a member that fails them is taken out and sent back to its author before the next member is merged, not fixed on the train; tests stay once per train (Paddock ADR 0098). A member's one short review runs at the same time as the train's CI, not before the merge: a P1 cancels the train's run and pulls the member, so a review never delays a green train. One independent review, then fix and land; a second round only for security code or a P1 finding (user, 2026-11-11). The next train is assembled during the current train's CI, on top of the running train's head, and re-merges that head when it lands, so the next CI starts at once. A train's full run covers the foundation plus the active apps; the nightly runs the rest (user, 2026-11-24). Why: interactions between branches only show on the merged tree; on 2026-11-12 a publish cycle, workspace-hack drift and C53/C71 failures in a train first showed in the full CI run; on 2026-11-13 eight fixes on train 8 were combination failures that each branch's own checks had passed. On 2026-11-16 train 12's release gates repeated the tests of the full CI run and cost about 77 minutes of the one Mac runner, while the review before each merge and the assembly after the green run were waits with nothing running.
+
+### RULES.md: ER-9
+
+- **ER-9. Fix everything locally first; CI confirms,** it is not where failures are found. Lint and type-check the touched files before every push. Before pushing shared or cross-platform code, also run the affected tests on Linux (a local Linux VM or container), not only on the dev OS, and the Windows tests where paths are compared; at the least type-check the Windows target (`cargo xwin check` or the project's equivalent). Before a branch joins an integration branch (a train), its affected Linux tests run in a fresh CI-like clone (no repo-local config, the CI environment variables, the CI user, CI's file system), not only on the dev OS plus a cross-compile; the Windows and macOS tests run on their own runners in the train's CI, with no separate Windows member check (user, 2026-11-24). "Every target OS" means the OS a test's code behaves differently on: a test that does not depend on the OS runs on Linux alone in every kind of run (branch, fix round, member check and train landing), an OS-specific test runs on its own OS, a check flags OS-specific code not marked for its OS, and a full nightly run on every OS is the net (user, 2026-11-22; Paddock ADR 0080 amendment). Trains have 3 to 4 members, and a red member is pulled out so the rest land. When one app's flakes make a second round red, that app's members are pulled at once (a revert of their merges), not after a third round, and return as a revert of the revert once its full local sweep is clean (user, 2026-11-19; Debrief's WebKit flakes held train 14 for two days). Why: every push-to-see round trip costs minutes of shared runner time. Paddock train 12 spent about 17 h in red CI rounds (runs 8138, 8147, 8152, 8154), all Linux- or Windows-only, and one member's bug held nine. A Mac-only run missed the Linux-visible causes of a red run on 2026-11-04 (root user in the CI containers, font metrics, a software rasteriser; Paddock run 7485, fixes b4dda40d5). In a repository with several projects, CI selects by a dependency graph with declared inputs per project (code, data it reads, scripts it runs, config), and a file or reference that is unowned or cannot be resolved selects everything (fail closed), never nothing; a file counts as plumbing only when the graph declares it so (user, 2026-11-23). Why: on 2026-11-23 Paddock's planner marked everything for a README in the actions folder that sat on a global list, and a train dispatch with no base planned the whole tree; train 20 spent six full rounds of about 700 to 730 job-minutes each (runs 8610, 8635, 8647).
+
+### RULES.md: ER-10
+
+- **ER-10. When CI fails,** fix and re-run only the failed tests locally and push once; never push fix by fix to see what CI says. After a CI run fails, each fix round reruns only what failed in the last run: the failed jobs, and inside them only the failed tests (with a nextest or vitest filter) where the job's runner supports it. Jobs and tests that passed aren't rerun during fix rounds. Use "rerun failed jobs" on the same commit only to retry a suspected flake, never to turn red green (ER-12). When every round is green, run the full affected plan against main once on the final tree (ER-8); that run catches anything a fix broke elsewhere. Then land. Nothing lands without that full green run. The planner is getting a mode for this (`./dev plan --since-run <id>` lists the failed jobs and tests of a run, a train-3 item); until it exists, the coordinator builds that list by hand. Why: one push with all fixes is one CI run instead of five; on 2026-11-09 each full re-run of a combined train cost about 35 minutes of every runner, while the fixes touched a few jobs.
+
+### RULES.md: ER-49
+
+- **ER-49. Test a commit once.** A commit that already has a complete green CI run is not run again by itself: the post-landing push to main, a re-dispatch and a tag build reuse that verdict through the one verdict reader (ER-15). A new run happens only for a new commit, or once to retry a suspected flake (ER-10, ER-12). Why: on 2026-11-20 the push of Paddock train 15 to main started runs 8341 and 8342 on e0fd0f511, which 8335 had already tested in full; they held every runner until cancelled. A landing run tests the train's diff from main's last complete commit and the push to main reuses its verdict; nightly and tags test the whole tree. "Complete" has one definition, shared by the landing and the reader (ER-15), so a landing never accepts a red the reader refuses or the reverse (user, 2026-11-23). Why: from 2026-11-12 Paddock's reader found no complete base (it needed a successful push run, and landings accept a FLAKY-only red), so every push to main planned the whole tree (push run 8664 cancelled).
+
+### RULES.md: ER-12
+
+- **ER-12. Never fix a flaky test with sleeps or raised timeouts, and never raise any limit (timeout, retry, wait, budget, tolerance, cap) without a named, measured cause recorded next to it** (the measurement and where it is recorded); otherwise fix the cause. Make it deterministic (wait on the condition, inject a clock, control the fake); never silently skip a test, and never let a retry turn a red run green: at most one retry, and only with flaky-as-failure (nextest `retries = 1` with `flaky-result = "fail"`, nextest ≥ 0.9.131; Playwright `retries: 1` with `failOnFlakyTests: true`), so the run stays red and the report marks the test FLAKY. A test that fails and then passes on its one retry (FLAKY) blocks a landing only when the change touches the test itself or the source the test exercises (its feature or module: the files it drives, not just any file in the same app package or crate); a FLAKY test whose feature the change does not touch does not block, and is recorded with its log as a fix item and fixed in the next train or batch. Otherwise the landing goes ahead: the flake is recorded with its log as a fix item and fixed in the next train or batch, with a failing reproduction first. A test that fails both tries always blocks, even when the same test also fails on main: "already failing on main" is not an exception (user, 2026-11-20). A retry never turns the run itself green: the report still marks it FLAKY. Why: a sleep only moves the race, and a skipped test hides the bug, and a retry that passes hides it. On 2026-11-12 the slot-acquire wait was raised from 50 ms to 5 s instead of removing the probe's competing lock, and nextest waivers cited "over 240 s under I/O load" without a measurement. On 2026-11-16 two old races in unchanged shared crates (Paddock run 8174: paddock-ipc endings, plugin-host ETXTBSY) held train 12 for hours; large projects such as Chromium and Google quarantine such flakes rather than block unrelated changes. A wait or assertion over a set of elements requires the set to be non-empty, or names why empty is expected: an `every()` over nothing passes. A layout check counts only when two reads agree. On 2026-11-16 Dyno's layout check passed on zero rows and failed 13% of runs under the pinned clock (31 of 240). On 2026-11-19 a Dyno power test that had flaked 2 of 170 runs before Paddock train 14 was reached only through a shared crate's dependency graph, and whether that blocked the landing needed the user's decision (run 8283). The user narrowed the clause to the feature on the same day: Debrief train 14 was held by rare WebKit flakes (1 in 145 runs) in features it did not touch (the accessibility check, the home dashboard) because it changed other Debrief source (runs 8297, 8300). On 2026-11-20 the fix-ladder review found that the landing check let trains land past both-tries failures marked "already failing on main" with no recorded decision; the user chose the common practice of GitLab merge trains and bors, which block.
+
+### RULES.md: ER-45
+
+- **ER-45. Checks have no side effects.** A probe, check or self-test never changes what it checks: no auto-installs (rustup 1.28.1 and later installs a missing pinned toolchain when a probe runs; set `RUSTUP_AUTO_INSTALL=0`), no writes to the real repository or HOME, and a check's positive control runs on in-memory data only. Shell probes under `set -e` or `pipefail` never exit silently: they print the cause and the next step. Why: on 2026-11-16 a launcher probe would have started unlocked installs (the class of run 8060), a reviewer's probe installed a toolchain into the user's `~/.rustup`, C129's control read the real repository, and setup-rust and target.sh exited silently.
+
+### RULES.md: ER-46
+
+- **ER-46. Lists only shrink; goldens hold no machine.** Every baseline, allow-list or exception file is compared against the merge base by its own check, and growth needs the user's approval. Machine-specific values (uid, user and host names, home and temp paths, RAM and CPU sizes, wall-clock dates) never go into goldens or fixtures: tests normalise them and pin the clock, and a new golden is confirmed on the CI OS. Why: on 2026-11-16 C129's exceptions and C130's allow list could grow silently, six goldens on one branch held Mac-only values (uid 501), and Spotter's e2e failed after midnight UTC (run 8154). Fixtures and snapshots generated from the source tree redact secret-shaped strings (tokens, keys) at generation, fake ones from tests included, so a secret scanner never needs a new allow entry. On 2026-11-20 Paddock train 16's gitleaks job failed on a fake `glpat-` token that a snapshot fixture (tools/paddock-dev/tests/fixtures/check/real-tree.json) had copied from a masker test. Every register declares its policy (shrink-only, approval-required or free) in one place, and one check applies the growth rule to all of them, so a new register cannot skip it (user, 2026-11-23). Why: Paddock's C129 exceptions, C130 allow list and the OS-removals register each had their own growth rule or none. The policy line also carries a review date for the register itself: a register that caught nothing real by that date is deleted, not extended (ER-41, 2026-11-24). Shrink-only lists alone did not stop the checks themselves from growing.
+
+### RULES.md: ER-47
+
+- **ER-47. Children inherit the environment.** A tool or test that starts a program passes the caller's environment by default. Clearing it needs a named policy, a reason and a kept list, and never strips variables that restrict the child (download bans, failure markers). Why: on 2026-11-15/16 devEnv hid CI's cargo (run 8138), TestCommand lost Git-bash's tools on Windows, a stripped `PADDOCK_DEV_DOWNLOAD=0` re-enabled release downloads, and a ported status call lost `XDG_DATA_HOME`.
+
+### RULES.md: ER-14
+
+- **ER-14. Tests never touch the user's machine:** no real services or login items, no installed apps, never the user's installed browser (a pinned test browser or explicit env var only), no Documents/Desktop/Downloads, no real user data, no windows on the desktop, no processes left behind. Docker: only containers you created, each with `--rm` and CPU and memory limits (for example `--cpus 4 --memory 12g`). Agents run containers only through the project's helper, never with `-v` of a host path and never with anything from HOME. Agents never start the user's installed apps (a diagram editor, keychain tools, gpg) and never touch the user's toolchains (`~/.rustup`, `~/.cargo`); tests use stand-in programs. Agents never restart, stop or reconfigure shared infrastructure (Docker or OrbStack, CI runners, the test VM outside its lock); if it is down or out of resources, the agent stops and reports instead of fixing it. Agents never capture a host's tool output (registry, process, service or config dumps) to learn what a tool prints without the user's OK for that capture (user, 2026-11-10). Never put real user logs or data in fixtures, docs or commits; invent same-shape data. Fixtures recorded from live APIs or CI are scrubbed of names, emails, avatars and hostnames at capture, and a check fails on real-looking values. Paddock's planned check C110 does this. Why: on 2026-11-12 recorded CI fixtures carried the user's name. Why: a test run must not change or leak the machine it runs on, and on 2026-11-11 an uncapped test container ran OrbStack's VM out of memory; the agent then restarted OrbStack, which also restarts every container of the user's, and Docker was down for about 15 minutes (checklists/agent-cleanup.md (engineering-playbook/checklists/agent-cleanup.md)). On 2026-11-15 and 2026-11-16 a test started the user's draw.io (a keychain dialog), a reviewer's `-v $HOME/.cargo/config.toml` created a directory there and broke cargo, and a probe installed a toolchain into `~/.rustup`.
+
+### RULES.md: ER-26
+
+- **ER-26. CI runners and test machines stay on the stable OS update channel,** never preview or insider builds. When a test breaks on one machine with no code change, check that machine's OS updates first, and make the product report raw values before guessing a fix. Every compiler and tool CI uses is pinned to an exact version in the repo (toolchain files, action inputs, image Dockerfile pins with checksums), never a floating channel (`stable`, `latest`, or `@vN` without a digest for downloads). An upgrade is one deliberate change followed by a full CI run. Why: a Windows preview update (KB5127653) on the CI PC changed how TCP listeners are reported and broke CI for a day. On 2026-11-12/13 the Mac and Windows CI runners updated Rust stable 1.99.1 to 1.100.0 in the middle of a run (`rustup install stable`); cargo's new build-folder layout and longer rustc command lines broke the Pitcrew, Spotter and Debrief jobs with no code change (Paddock runs 8027, 8028).
+
+### RULES.md: ER-33
+
+- **ER-33. A release check counts only if its precondition was verified and its probe has shown it can see the thing;** otherwise it reports `not measured` or `check broken`, and the release does not pass. Every new check, gate, test assertion over a signal, and shared wait helper lands with a positive control: a test that removes or hides the thing it watches (the signal, element, attribute or job step) and shows it goes red. A review rejects one that has none. This also holds for a cause called "confirmed" in a release check (it was a separate Paddock rule 71, merged here 2026-11-12). Why: on Dyno 1.1.0 a VM with no menu bar produced a false "confirmed" cause in 12 of 12 runs, a tray count matched the app's own window buttons, and a reading row passed on a dead helper. On 2026-11-17 a Debrief dock spec's "nothing moves after planned" check never ran (24 of 24 runs, the signal was never logged), a shared `expectIdle` helper passed before the stream had started, and conformance C137 passed on the text of an unrelated ci.yml job. A cancelled or skipped job is reported as cancelled or not run, never as a failure and never as a pass; every reader of CI results (triage, verdicts, flake history) keeps the three apart. On 2026-11-20 cancelling Paddock runs 8341 and 8342 made triage list 13 false new failures.
+
+### RULES.md: ER-15
+
+- **ER-15. Release only from a tag in CI,** never from a local machine; a local build for the user to try is fine but is never published. A tag or landing counts only a complete CI run on that exact commit, never a skipped run, a failed-only rerun or an in-place retry; one shared reader defines "complete" (Paddock: `./dev ci verdict`, planned). Why: a laptop build is not reproducible and skips the gates; the verdict-reader review of 2026-11-12 found schedule-skipped and rerun-only runs counted as green. A landing may rest on a narrowed run (a smoke set or the affected tests) that ran exactly the selection its own diff planned; such a run counts for that landing only. It is never complete for a tag or a release, never the base for later planning, and the nightly still runs everything (user, 2026-11-23). Why: in Paddock's ADR 0117 review round 2 (2026-11-23), narrowed runs were never complete, so a train whose change only needed a smoke set or its affected tests could never land; the user chose to keep the narrowing at landing rather than rerun every reached project in full.
+
+### RULES.md: clause
+
+  Why: Dyno 1.1.0 was correctly blocked by Paddock run 7485 (mostly code Dyno ships). Run 7489 failed in the shell-demo's i18n check (outside Dyno) and in aggregate coverage; the coverage gate printed no per-crate output and a crate Dyno depends on was in it, so that blocked under (b) until the gate was fixed and a full run was green. The failures also skipped the dependency audit and several ui steps, which (a) asks to be cleared.
+
+### RULES.md: ER-20
+
+- **ER-20. For any slow operation, check both more parallelism and a cheaper operation, with measurements.** Parallelise where it helps, bounded by the kind of work (CPU: cores minus one; SSD I/O a few; HDD one or two; network a few per host; memory-heavy by RAM), at background priority, with deterministic results. Also ask whether the operation can be made cheaper (less work per item, no repeated work, a cheaper algorithm or format, caching, batching, skipping); thread counts are settings with an "Auto" default, and a design for a long or bulk operation has a "Parallelism and cost" section. Batch work over many items is batched: one bulk call or one long-lived process or connection (a batch query or insert, a bulk file or IPC request, `git cat-file --batch`, an in-process library) instead of one call, process or round trip per item, through one shared mechanism. A command's count of processes or round trips is a measured budget that a test guards. APIs are designed bulk-first for the same reason (PRINCIPLES: Bulk APIs). Why: the wrong bound makes the work slower than serial, and bottlenecks found by accident (a 2-thread writer, a single-threaded catalogue, regex at 38% of parse time) should be found by design. On 2026-11-18 each git start cost about 45 ms on Paddock's Windows runner against about 6 ms on the Mac, and its merge check started 33 to 75 gits per check, which made tests 1.3 to 15 times slower (Paddock train 14, runs 8251 to 8257).
+
+### RULES.md: ER-21
+
+- **ER-21. Recurring bugs mean a missing design rule, and looking for them is standing work, not done on request.** When the same kind of bug shows up again, stop fixing instances: name the pattern, propose a redesign as an ADR that makes the class impossible or checked (a declared contract, one shared mechanism, a lint or test over every instance), and fix the instances through it. At the end of every batch, incident, CI failure round and review round the coordinator asks "is this a class we have seen before?", and every agent report and every review ends with a `Recurring:` line: `none`, or the class name plus its earlier instances with their sources (commits, runs, lessons). A class seen twice gets its redesign ADR proposed in the same session, and its decisions go to the user without waiting to be asked. The coordinator does this in the same reply that relays the report: a question to the user, or a start under an earlier approval; never ending a turn with an unproposed class (an enforcing Stop hook is planned; until it exists the rule rests on the coordinator). Instances keep being fixed meanwhile, through the new mechanism once it is accepted. Why: fixing instances one by one never ends (recurring-bug-adr (engineering-playbook/skills/recurring-bug-adr/SKILL.md)); on 2026-11-10 six redesign ADRs came only after the user asked "any redesign?", although their classes had recurred for days; on 2026-11-12 the user had to ask "any redesign?" three times in one morning although every report carried a `Recurring:` line. Simpler first (2026-11-24): a bug that repeats first asks whether the failing thing can be deleted or simplified, or common practice used (ER-44), before any new mechanism. A redesign (a new mechanism or ADR) comes only when that simple fix cannot hold for the long term, shown by a recurrence the simple fix did not stop or by a concrete reason, and the proposal states what it removes. Before building anything, walk the necessity ladder in PRINCIPLES.md (KISS and YAGNI). Why: on 2026-11-24 a coordinator proposed or approved over a dozen new mechanisms in one day (quarantine, C167, C168, dispatch guards, guards A1-A7 and B1-B2, train-first priority, worktree leases, host inventory, nightly issue filing, test cost classes, a CPU watchdog), while the cuts of 2026-11-11 had grown back because the rules only ever added.
+
+### RULES.md: ER-22
+
+- **ER-22. Share first.** Before building something, check whether a shared library or package already has it. If it does, use it; if it is missing, generic, or another project needs the same, build it shared instead of copying. Test shared behaviour once, in the shared code; consumers test only their wiring and domain logic. A value that another module decides (a size, a threshold, a count, a layout verdict) is read from that module, by a call or an exported constant, and never re-typed. Reviews check for it. Why: copies drift apart and get fixed in one place only. On 2026-11-17 Debrief's Explorer width constant copied the layout plan's rule and caused a 920-934 px jump, and an earlier 51 px placeholder had copied the filter bar's height. Shared crates, packages and commands are named by the concept, not by the first format or consumer (a diagrams crate with draw.io as one backend, not a draw.io crate), so the second use needs no rename (user, 2026-10-30).
+
+### RULES.md: ER-23
+
+- **ER-23. Every user-facing image (icons, store and README screenshots, product UI passes) gets an independent review** by someone who did not make it; ADR and plan diagrams are checked by their author. Why: authors stop seeing their own flaws in shipped art, while internal diagrams rarely need a second agent (narrowed 2026-11-12, user) (independent-review (engineering-playbook/skills/independent-review/SKILL.md)).
+
+### RULES.md: ER-37
+
+- **ER-37. Measure a design against common practice before paying for it.** Before an ADR or design is accepted, it states how comparable, well-known software handles the same problem (for example Visual Studio, VS Code, Chrome, Docker, Homebrew, git, the OS vendor's own tools) and what the platform vendor documents as the standard (Microsoft, Apple, Linux distributions), with sources. It then states the cost in agent-days, set against that baseline. A design that goes beyond common practice says why this project needs more, and the cheaper common-practice option is always offered as a decision. Personal, single-user tools default to common practice. Foundation work (the CI, merge, test and tooling base that later work stands on) is the exception for the recommendation: recommend the complete, correct option (migrate existing sites, not baseline them), still showing both costs (user, 2026-11-13); release and app feature scope is asked as before. Prefer a focused check over a new ADR, and add no register, gate or check without a recurring real failure behind it (user, 2026-11-11). No firm estimate before a design has work packages: undesigned items are quoted as a wide range and called a guess (a helper quoted at 5 to 8 agent-days came to 43 to 65 once designed). A design, mechanism or fix costing more than 1 agent-day beyond the common-practice option needs the user's yes, with both costs shown; a standing "build everything" OK does not cover it. Each release plan states its budget in raw agent-days when its scope is agreed, and growth beyond 20% goes back to the user. Each release gets one cut review, at scope freeze, by one reviewer, against this rule. Why: on 2026-11-11 a 23-31-day elevated-helper design for Debrief went through four review rounds before the user compared it with Visual Studio and VS Code and chose a half-day risk warning instead; several accepted process ADRs (signed approvals, decision registers, extra gates) were then cut as more than a personal tool needs. On 2026-11-12 a cut review found Debrief 1.2 grown to about 656 raw days and Pitcrew's 1-2 day caller check in its 8th review round. One in, one out (2026-11-24): a new check, register, hook, gate or ADR mechanism removes or replaces something of similar cost, or it names a recurring real failure and the common-practice comparison above. Every proposal states what it adds and what it removes. The "complete, correct option" for foundation work means a complete fix of the cause (ER-44), not more machinery. Walk the necessity ladder in PRINCIPLES.md (KISS and YAGNI) before proposing a mechanism. Why: see ER-21, 2026-11-24 (the user: "there are lots of overengineering ... we already cut a lot of stuff but it still grows back").
+
+### RULES.md: ER-38
+
+- **ER-38. Privileged services check the caller.** A service or helper that runs as administrator, root or SYSTEM authorises every request that changes something by the caller's identity, read from the OS (pipe client token, peer credentials), not by the pipe or socket ACL alone. A request that changes what runs elevated (a program path, a folder, a setting the elevated side acts on) needs an administrator caller. Read-only requests may take any local user the ACL lets in. Elevation the user chooses with a click (Run or Restart as administrator) needs only a clear risk warning, as tools such as Visual Studio and VS Code allow elevation with no further controls (they mark the window as Administrator). User-chosen elevation is governed by this rule, not by a project's rule that a process with more rights never reads what fewer rights can change (Paddock rule 75). Why: on 2026-11-11 a survey found that Pitcrew's LocalSystem service (shipped in pitcrew-v1.0.1) starts any program a same-user process names over its pipe, with no prompt, because ADR 0004 authorised by the pipe ACL alone. Dyno's helper already checks the caller per connection. The user chose "warn and accept" for click-to-elevate and a caller check for no-click paths.
+
+### RULES.md: ER-39
+
+- **ER-39. Hooks and gates are never bypassed.** A failing hook or gate is fixed, or its fix is cherry-picked. Never skip it with `--no-verify`, `-n`, `LEFTHOOK=0`, `LEFTHOOK_EXCLUDE` or similar. An agent that cannot fix it stops and reports. Agents never write an approval (`approved: user`, a waiver or a lowered minimum) on the user's behalf: only the user's own message approves, and the coordinator records it (user, 2026-11-04). Why: on 2026-11-12 two agents skipped a broken pre-push hook. Paddock's worktree-guard refuses these for agents (planned).
+
+### RULES.md: ER-40
+
+- **ER-40. Generated files are never hand-edited.** SVGs, lockfiles, synced copies and similar are regenerated from their source, and CI checks that they match. Why: on 2026-11-12 SVGs and synced AGENTS.md copies had been patched by hand.
+
+### RULES.md: ER-41
+
+- **ER-41. Checks run on every change that could bring in their class,** not only when their own files change (Paddock: conformance runs on every change since train 12, main 97176067c; its counting ci.yml run is 8177, green on 098a17e2e). Every new gate, CI job or check starts report-only and blocks only after its first green run on the real tree, recorded by run id where the gate is defined. Why: on 2026-11-12 four new checks were skipped on the very changes they guard; a nightly generator job was wired into the green-nightly mark before any run (it lacked the libduckdb setup and would never have passed), and registry check commands were copied from file headers without being run. A report-only check turns blocking in the same tool step that records its first green run, never by a later hand edit. Paddock C130, C137 and C139 each had their first green run recorded and stayed report-only (C139: run 8335, 2026-11-20). Time-based conditions (exception review dates, advisories, delete-by tags) never block an unrelated push: they warn on push, block a push that touches that entry, block tags and releases, run in the scheduled job, and send a reminder a week before the date (user, 2026-11-23). Why: on 2026-11-22 an advisory (RUSTSEC-2026-0592) and on 2026-11-23 an expired C50 review date each blocked every push of Paddock. A report-only gate puts its findings where people look: the job summary plus one `::warning::` per finding in CI, and the terminal locally. It has a test showing a planted finding appears there. A finding written only to a place the runner hides (a passing test's stderr under nextest, a log nobody reads) does not count as reported. Why: on 2026-11-24 Paddock's test-cost check (ADR 0121) first reported into passing tests' stderr, which nextest hides. Sunset by default (2026-11-24): every report-only check, register and hook carries a review date. If it caught nothing real by then, it is deleted, not extended; extending it needs the user. Why: see ER-21, 2026-11-24.
+
+### RULES.md: ER-42
+
+- **ER-42. Tests read declared data through its accessor.** A test, lint list or registry entry that needs data another part of the repository declares (a workflow's command line, a manifest's dependencies, a register's rows, where a file lives) reads it through the one accessor that owns that data, never by grepping or slicing that file's text. A source audit that must read another crate's code names the file through a path the owner exports and ends its span at an item boundary, not at a comment it remembers. A hand list that must equal generated data is generated, or its test prints the regenerate command (ER-40). A check that polices a tool's config, directives or output reads it through that tool's own parser or output (ESLint's suppressions, `cargo metadata`, a YAML parser for workflows), never a home-made regex over its text (user, 2026-11-18; seen three times: a check matching unrelated workflow text, a `sed` over `ci.yml`, a regex that missed three directive forms). Why: on train 8 (2026-11-13) a registry entry ran `sed` over ci.yml for a line that had moved while the accessor existed, a source audit ended its span at a comment the author remembered, and a hand list that had to equal `cargo metadata` went stale (Paddock ADR 0098, rule 79, check C121).
+
+### RULES.md: ER-43
+
+- **ER-43. A waiter never holds the capacity the work it waits for needs.** A wait on a queue, slot, lock or build releases (or never takes) any slot, permit or lock that the waited-for work could need, and a tool that waits takes no capacity for the wait itself. Why: on 2026-11-14/15 an agent waiting on the heavy queue held a slot the waited-for build needed, so both stood still.
+
+### RULES.md: ER-24
+
+- **ER-24. Scale parallel work to the machine.** Watch load and free disk continuously: start more agents when load stays low, hold or stop starting them when it stays high. A development or CI disk stays below about 70% full, and the tools warn when free space falls below the project's threshold; an SSD near full slows down badly (on 2026-11-22 a USB SSD at 97% full wrote at 0.02 GiB/s). Decide from the 15-minute load, the CPU idle and the free memory (free plus reclaimable, with a threshold set from measurements), not one reading, and count container runs; no new agent or heavy job starts while memory is below the threshold (on 2026-11-22 free memory fell to about 1 GB with 16 GB compressed while load and CPU still looked acceptable); run at most 5 builders while containers run. The load average misleads while a VM's threads count (on 2026-11-15 the load was 41 to 95 at 45% CPU idle, from OrbStack threads); use a shared build cache and per-agent build directories; never let tests crowd out a release. Only one train's CI runs at a time on each shared runner class; a dispatch waits while it is busy (Paddock: `./dev ci dispatch`, planned). Example (a 14-core Mac): at most about 5 parallel agents, each with `CARGO_BUILD_JOBS=2`, heavy steps through scripts/heavy.sh (engineering-playbook/scripts/heavy.sh) (which refuses a build dir inside `~`, ER-14); 7 to 8 agents once drove the load to 240. Why: an overloaded machine makes everything, including the release, slower than fewer agents would; on 2026-11-12 overlapping train runs on the one Mac caused timeouts. A train's CI holds its runner class for its whole sequence, including the gaps between workflows. Member checks, diagnostics and trial runs wait for the reservation (bounded) or report `not measured`; the train always goes first. On 2026-11-16 a member-gate trial run (Paddock run 8166) took the Mac runner between two of train 12's release gates and held Pitwall's gate for 8 minutes.
+
+### RULES.md: ER-48
+
+- **ER-48. Concurrency budget.** When concurrency goes up (CI runner lanes, test workers, parallel agents), the parallelism inside each unit goes down in the same change, so lanes times threads per job stay within the host's cores (and its RAM). The layout lives in the repository, not in a hand setting on one machine, and a job logs a warning naming both numbers when the host it sees does not match the layout. Why: on 2026-11-20 Paddock's Linux runner went from 3 to 6 lanes on 30 CPUs while each job still let cargo use every core; the same jobs ran 1.2 to 1.7 times slower (runs 8335 against 8346; Linux compile 9.4 to 17.6 job-minutes) and the host peaked at 96% CPU.
+
+### RULES.md: ER-28
+
+- **ER-28. For an intermittent failure, a cause is confirmed only when the reproduction, run without it, stays green as often as the failure rate requires (bug-fix step 6), and fails again with it put back.** Before fixing, list every plausible cause with the observation that would rule it out, measure them in the failing run, and record the list in the commit or lesson. A deterministic bug needs none of this: its failing test (ER-11) is the proof (narrowed 2026-11-12, user). "Flaky", "load" and "timing" are symptoms, not causes. A claim that a timing-sensitive test passes or is stable states its runs x workers x engines (or OS). E2e timing fixes need at least 20 runs per engine at 4 workers, or more when the measured failure rate requires it. A bare "N of N green" is rejected in review. A speed or timing claim made on a shared machine (a CI host, or a dev machine with other work running) compares CPU time, or interleaved A/B runs (A, B, A, B under the same load), never elapsed time alone, and states the load beside the numbers. Paddock is to get a `./dev bench` helper for interleaved A/B runs (planned). Why: four of five slow diagnoses in one day started from a wrong guess that one measurement would have refuted On 2026-11-16 a Debrief live-tail fix was reported "3 of 3" and was 3 of 7 red, and "12 of 12" was 4 of 150 red (fix/debrief-events-grid-live-tail, fix/debrief-live-tail-adr). On 2026-11-24 a coordinator reported that Paddock's graph train made a test 40% slower. That was elapsed time at load 42 to 121; CPU time over 5 interleaved rounds showed 11% (docs/benchmarks.md). (bug-fix (engineering-playbook/skills/bug-fix/SKILL.md)).
+
+### RULES.md: ER-32
+
+- **ER-32. An agent waits only on a real completion signal, and always with a maximum duration.** A signal is the tool's own notification, a line in a job's output, a pid (with its start time) or a CI run id. Never poll with `pgrep -f` or any loop that matches its own command line (it finds itself and never ends), and never stack several waiters for one event. A tool hook catches the common shape (Paddock: `.claude/hooks/no-pgrep-wait.sh`, tested by its `.test.sh`); the rule still holds where the hook misses. Paddock's implementation of the wait is `./dev wait` (`--plock`, `--pid`, `--file ... --line`, `--ci-run`, always with `--max`). Why: 36 stuck or stacked waiters were stopped by hand over two days (2026-11-03 and 2026-11-04; Paddock coordinator log, 2026-10-29-overnight.md:719, :750, :766) and held the machine's load and agents' attention. An agent sends one report per result. If the harness refuses a report, the agent resends it at once as a plain message, never as another hand-back. On 2026-11-16 one agent's reports were refused four times and its results went missing. Every test run is bounded by a timeout and a progress watchdog, in CI and for agents; an agent never runs an unbounded test command (plain `cargo test`, a bare runner call) and a hook steers it to the bounded runner (user, 2026-11-23). Why: on 2026-11-22/23 two Paddock tests hung 3.5 h (at 0% CPU) and 18 min under plain `cargo test --test it`, which has no nextest timeout, and test-spawned helper processes were orphaned four times.
+
+### RULES.md: ER-50
+
+- **ER-50. Use the connected tools first, and keep their view current.** Before reading or guessing, an agent uses the best tool connected to the session for the job: symbol-aware code navigation (Serena or the language server) for code, not whole-file reads or grep; the CI system's API and its verdict reader for CI state; the project's dashboards (for example Grafana through the browser extension) for host load and memory; the browser extension for web pages the user names; documentation tools for library facts. A tool's view must match what it claims to show: the checkout a code index reads is fast-forwarded after every landing, and a lookup states which tree or time it read. Briefs name the tools the agent should use. If a connected tool is missing, down or stale, the agent says so and falls back, never silently. Why: on 2026-11-20 nobody in a long Paddock session used Serena although it was connected, and the main checkout it indexes was 361 commits behind origin/main, so it would have served stale code; the same day, host-capacity decisions were first made from a single screenshot before the user pointed to the Grafana dashboard that showed a week of CPU and memory.
+
+### RULES.md: ER-51
+
+- **ER-51. Start, hold, watch, end.** Whoever starts something keeps the handle the start gave back and does everything else through it: waits on it with a bound, reads its result from it, and ends it through it. A process is held by its pid plus start time, a CI run by its run id, a container by its id, a lock or slot by its holder token. Nothing is found again later by name or by search (`pgrep`, `pkill`, `ps | grep`, "the newest run on this branch"). A unit of work that starts things (a CI job, a test, a tool run) has three parts, like a test fixture: prepare, execute and clean up. The prepare and clean-up halves come from one shared mechanism, so they cannot be split, and clean-up runs on failure and on cancel too, ending everything the unit started. Files the unit creates go under one folder it owns (its temp, caches, logs and outputs), which prepare makes and hands to every child through the working folder, `TMPDIR` and the environment; nothing writes anywhere else except declared outputs and shared caches named in the project, and clean-up removes the folder. Every shared cache, build folder and container volume is declared with an owner, a size limit and an eviction rule (oldest first), and one sweep enforces them. An agent's worktree with its build folders is a unit of work too: the project's worktree tool makes it, and it is removed with its build folders when its branch lands, unless it is locked; builds never write inside the checkout. A check flags a start whose handle is not kept. Why: on 2026-11-20 and 2026-11-21 CI jobs and agents left processes and slot holders running after they ended, and macOS hides the environment of Apple programs, so cleanup by marker missed the shell scripts (Paddock ADR 0112). On 2026-11-22 a 4 TB dev disk held 2.2 TiB of worktrees and build folders nobody removed, some with build folders inside the checkout, and the CI runner's caches had grown to 330 GiB, because only the sccache caches had a limit. ER-32 (wait on a real signal) and Paddock rule 53 (act on held identity) are parts of this rule.
+
+### RULES.md: ER-30
+
+- **ER-30. Retired 2026-11-12 (user): the wiki rule.** Why: the wiki was last ingested on 2026-11-09 and most pages were stale, so its writer, fact-check, lint and weekly pass bought nothing; memory and the project's status tool already cover it. A project may still keep notes that link their sources and carry a date, with no process around them. The `Wiki notes:` report line is gone.
+
+### PRINCIPLES.md: clause
+
+- **A gate's result comes only from the check.** "Passed" is a value only the check can produce (a private constructor or token type), and its tests delete the check and, separately, skip the gate, to show both fail. Why: on 2026-11-12 three Dyno rounds had refusals that only a surrounding `if` enforced.
+
+### PRINCIPLES.md: clause
+
+- **State another program owns.** An adapter that writes a config file, OS object or resource another program owns names that owner and the spec it follows, and either preserves everything it does not model (comments, order, unknown keys) or touches only items it marked as its own, refusing unmarked ones with a next step. An open-ended external format also gets a raw view, with secrets masked and the mask never saved. Why: on 2026-11-20 a partial settings form hid a runner's cache server and its raw view showed secrets, and a PerfMon install deleted any same-named collector set (Paddock ADR 0110).
+Measuring and reporting (2026-11-24)
+- Compare CPU time or interleaved A/B runs on a shared machine, never elapsed time alone, and state the load. A graph train was
+  reported to make a test 40% slower: that was elapsed time at load 42 to 121; CPU time over 5 interleaved rounds showed 11%
+  (docs/benchmarks.md; ER-28).
+- A report-only gate must report where people look: the job summary, one `::warning::` per finding in CI, the terminal locally, with a
+  test that a planted finding appears there. The test-cost check (ADR 0121) first wrote into passing tests' stderr, which nextest
+  hides (ER-41).
+
+## Text is LF in every checkout (user decision, 2026-11-25)
+- **What.** `* text=auto` left the line endings of a checkout to the OS: Windows wrote CRLF, and tests that compare text or search for
+  `\n` failed three times: the Windows portability lesson (CRLF checkouts change `\n`), the dyno-helper service file (a unit and a
+  `#!/bin/sh` script with CRLF), and the `plan_graph_ci` fixture (the nightly's Windows leg, 2026-11-25). Each was fixed in its own
+  file by a path rule in `.gitattributes` or a `replace("\r\n", "\n")` in a test.
+- **Fix.** The root `.gitattributes` says `* text=auto eol=lf` (the apps' and the template's own files repeat it, because their
+  `* text=auto` line overrides the root's `text`). Exceptions: `*.cmd` and `*.bat` keep CRLF for cmd.exe; byte-exact inputs are
+  `-text` (the fixtures, goldens and corpora, and Debrief's three CRLF parser samples, which `git add --renormalize` would have
+  turned to LF). The renormalise changed no other file. Git rewrites only what a checkout changes, so an existing clone keeps its
+  CRLF files: after this lands, delete the Windows runner's kept clones once so the next job clones fresh.
+- **Rule of thumb.** Never convert line endings in a test or a tool because of a checkout; that is the attributes' job. Convert only
+  input a user or another program may send as CRLF. A new file that must be CRLF or byte-exact gets its own attribute line.
+- **Class (ER-21).** Recorded as an instance of: a test that bakes in the author's OS (see the Windows portability lesson); this is
+  its third instance, closed at the cause (the attribute) instead of at each test.
+
 ## A refused client's junk arrived after the close: `client-keeps-writing` depended on thread order (2026-11-25, run 9001)
 Symptom (crates job, llvm-cov step, Linux container; FLAKY, green on its retry): `paddock-ipc` `endings::ipc_host_ends_every_connection_right_or_is_in_the_ratchet`
 panicked with "stale ratchet entry I10: ipc-host / client-keeps-writing: reset no longer happens". The crate had not changed.
@@ -3921,3 +4139,287 @@ variables nobody listed: [__CF_USER_TEXT_ENCODING, ...]".
 run 9011 (failed once, passed on its retry; flaky-as-failure kept the run red, ER-12). Not fixed on train 2026-11-26-e: a fix item for
 paddock-watch's owner, which starts with a reproduction under load and the list of causes with what rules each out (ER-28). No sleep or
 raised timeout as the fix.
+
+## An owner killed while its guardian was still starting left its children running (fix/guardian-three-children-workspace-run, 2026-11-25)
+Symptom: `paddock-proc` `guardian::unix::tests::an_owner_killed_with_three_guarded_children_leaves_none_and_no_folder` failed both
+tries at 40 s ("the orphaned children's groups did not end, or their folders stayed") in the whole-workspace nextest ci run in the
+arm64 Linux CI image (4 of 4 tries), and passed in a paddock-proc-only run. CI's amd64 crates job passed it (run 9030, 0.17 s).
+**Causes listed.** (1) Load from the whole run: no, the second try ran last and alone and still failed, and the test failed alone on
+the whole-workspace binary (2 of 2). (2) Another test binary's state or processes (a shared path, a killed group): no, same reason; `-p
+paddock-proc` and the workspace build differ only in the build, not in neighbours. (3) Root: the test acts as a user, and the log
+showed the guardian acting. (4) PID reuse: the guardian's check reads its parent by identity; the log named the right owner. (5) The
+40 s hang guard: the guardian had refused at once, so no wait would end green.
+(6) **The owner died before its guardian had checked it**: confirmed. The guardian's log said "refused to serve: its parent (pid 1) is not
+the owner it names"; a snapshot just before the kill showed the guardian still starting (no command line, running, not yet reading),
+while the owner had registered three children and said "ready". `register` handed a child back as guarded as soon as it had written the
+line, without knowing the guardian would take its owner; the guardian's start took 11 ms in the Linux image, longer than the owner's
+path to its death there.
+**Fix.** The guardian says `serving` on its standard error (a pipe the owner reads) once its check passed, then points standard error
+at the null device; `start` waits for that word (at most 30 s, a hang detector; measured 3 ms on the Mac, 11 ms in the Linux image) and
+treats a guardian that exits first as no guard, logged. A new regression test,
+`an_owner_killed_the_moment_its_guarded_spawn_returns_leaves_no_child`, has the owner kill itself (SIGKILL) the moment its one guarded
+spawn returns: no sleep, no reader in between. With the wait taken out it failed 8 of 8 on macOS and at least 3 of 4 in the Linux image
+with the CI symptom; with the fix it passed 60 of 60 under `--stress-count` on macOS and 60 of 60 in the Linux image. Both owner tests'
+failures now carry what is left and the guardian's log (ER-27: the old message said only that something stayed). The whole-workspace
+run in the Linux image: 6 of 6 tries red before (whole run and the test alone on the workspace binary); 10 whole-workspace runs green
+after (5 before and 5 after the test change, 5221 and 5222 tests; arm64 CI image, 4 CPUs, num-cpus threads). Train g's
+integrator saw it red in 3 of 4 full container runs, so p is about 75 % to 100 % per run; 10 green runs exceed the 5 that p >= 50 %
+needs.
+**At the train merge** (train/2026-11-26-h, 2026-11-25) main already held ADR 0119 WP-1's own `serving` handshake (scope review 1,
+reapplied in 6fe47386d after this branch was cut from a base where WP-1 was pulled): the train kept WP-1's implementation
+(`SERVING_BOUND` 10 s, refusal exit 87, no answer logged and the start goes on) and this branch's regression test and failure
+diagnostics, and dropped this branch's second copy of the handshake (`await_serving`, `SERVE_WAIT`).
+**Class: a started helper was relied on before it said it was ready** (earlier: the webview ready handshake, memory "Webview paused
+startup"; the Chromium start judge, ADR 0031). A start that hands back a handle should wait for the helper's own word.
+
+## Writers that shared one temporary name lost data: every whole-file write goes through `paddock_env::write_atomic` (C169, 2026-11-25)
+
+- **What.** A hand-written "write `<name>.tmp`, then rename" lost data twice when two writers shared the temporary name: Spotter's
+  avatar `write_atomic` (`path.with_extension("tmp")`) and the pre-push reuse store. About sixty copies of the pattern existed across
+  the apps, the shared crates and the tools, with 16 different temporary names, most without a flush and none with a counter.
+- **Fix (the user's decision, 2026-11-25).** Each copy that writes a whole file now calls `paddock_env::write_atomic` (a name with a
+  per-process counter, a flush, a rename, removal on failure); a file that needs a mode or a security descriptor uses
+  `write_atomic_created`. `From<EnvError> for std::io::Error` keeps an `io::Result` at the call sites. A copy that kept a `.bak`
+  copies the old file first and then writes. Streaming writers (downloads to `.part`, a segment written in pieces, the privileged
+  file copy that hashes as it writes) and directory moves are not this pattern and stay.
+- **Ban.** Conformance C169 (report-only, ER-41, register entry in docs/gates.toml) flags a `rename(` whose source is named `tmp` or
+  `temp` in production code outside paddock-env; a rename used as a lock claim (`tools/heavy/src/lock.rs`), Dyno's privileged helper (its startup
+  checks the fixed `config.json.new` name, ER-38) and the two streaming writers carry `// conformance: write-atomic — <why>`.
+- **Rule of thumb.** A new file write reaches for `paddock_env::write_atomic` before any `File::create` and `rename`.
+- **Class (ER-21).** An instance of: a mechanism copied per app and fixed one copy at a time (rule 55). Earlier: the hand-written
+  process kill and the env-clear copies that C53 and the `disallowed-methods` entries retired.
+
+## A test hook in a shipped build is public API (rule 99, C170, 2026-11-25)
+
+- **What.** `paddock_ipc::Host::with_clock` (handshake.rs) was public with no gate, and an ADR draft copied the pattern for the
+  privileged dyno-helper daemon. A sweep found the same shape across the family: public clock setters (`with_clock`,
+  `with_time`), `for_tests` constructors (Pitcrew's `Http::for_tests` lets the service fetch plain `http://127.0.0.1`), a
+  process-wide test setter (`dyno_agent::build_id::set_watch_every_for_tests`) and whole fakes (`FakeClock`, `FakeWire`,
+  `FakePoster`, `FakeSource`, `fake_systemd`, `trust_fake`, Debrief's scripted LLM and fake Pitwall) compiled into every release.
+- **Fix.** Each hook sits behind `#[cfg(any(test, feature = "test-support"))]` (ADR 0073's name; the `testing` of paddock-ipc,
+  paddock-pitwall and paddock-siblings became `test-support` too, ADR 0073 WP-G); consumers enable it from `[dev-dependencies]`,
+  a crate's own integration tests through a self dev-dependency. Where production wiring used the same setter
+  (`Host::with_clock` from the link server, Pitwall's `Jobs::default`, Debrief's `AlertMutes::default`), it now calls a
+  crate-private function. `./dev check test-features` (C170, in the conformance job, report-only first) runs `cargo tree -e
+  normal` for every released binary and reports any crate with a test feature.
+- **Rule of thumb.** A setter that exists so a test can swap a default is a test hook: gate it the day it is written. A check
+  that reads a release build's features must use normal edges only: `clippy --all-targets` and nextest unify dev-dependency
+  features and never see the shipped graph.
+- **Not gated (open).** `paddock_service::testing` (`FakeSystem`) and `paddock_health::FakeToaster` are the shell demo's
+  backend on purpose (ADR 0073 X2); config structs whose public `clock` or `sleeper` field production fills with the system
+  implementation (12 fields in 11 structs) are ports, not setters, and were left as they are.
+- **Class (ER-21).** Test machinery reaching a release build. Earlier instances: Dyno's fakes in the release build (Dyno ADR
+  0033, 2026-11-08), Pitwall's fake engine behind a server flag (ADR 0073, 2026-11-09). ADR 0073's shared check (WP-0) was cut
+  on 2026-11-11; C170 is that check, cut to the feature graph.
+
+## OrbStack's bind mount served stale files to the Linux container (2026-11-25)
+
+- **What.** After a file changed on the host, the CI-image container (`tools/linux-container.sh --id paddock --ci-image`, the push
+  gate's `clippy-linux` row) saw the old size and mtime for over an hour, with the new text cut at the old length (OrbStack 2.2.5).
+  A container row could lint or test the old version and pass. A restart of OrbStack cleared it.
+- **Fix (user decision 2026-11-25: hash check).** Every push-gate row that runs in the container compares `git hash-object
+  --no-filters` of the change's files (its own workspaces' first, at most 256) inside the container with the host's before it runs
+  (`pre_push::mount_fresh`, set by `plan_gates` on every `Need::LocalCiImage` row). Any difference, or a probe that cannot look, is
+  "not measured" (exit 6) with the files named and the next step "restart OrbStack, or the Mac"; the row never runs on that mount.
+  The probe's duration and verdict are logged on standard error.
+- **Rule of thumb.** A check that reads files through a mount or a copy proves the copy is current before it counts (ER-33).
+- **Class (ER-21).** A check that ran on another version of its input than the one it reports on. Earlier instances: "Stale servers
+  and stale builds (e2e and screenshots, 2026-10-28)" above (stale CSS, fixed by the build guard).
+
+## The Linux container can see a stale copy of a changed file (OrbStack bind mount, 2026-11-25, feat/member-check-touched-tests)
+
+- **What.** The member gate's `clippy-linux` and `tests-linux` rows failed with "unclosed delimiter" and "unterminated double quote
+  string" in files that compile on the host. Inside the container (`tools/linux-container.sh`, OrbStack 2.2.5, the repository on
+  /Volumes/vault-dev bind-mounted read-only) `stat` showed the size and mtime from before the edit, and the content was the new text cut
+  at the old size. It stayed stale for over an hour; `touch` and replacing the file with a new inode did not refresh it. A fresh
+  clone at a new path was seen correctly, until a checkout changed files there after a container had read them: the same staleness.
+  The danger is a false pass: an older version that still compiles is linted and tested instead of the member.
+- **Fix.** Not yet fixed. Proposed: each container row first compares the content hash of the change's files (`git hash-object`)
+  inside the container with the host's and reports `not measured` ("the container sees a stale copy") on a mismatch (ER-33: the
+  precondition is checked, never assumed). Restarting OrbStack is the user's call, not an agent's (ER-14).
+- **Also found by the first real `tests-linux` run.** nextest keeps its run store in the workspace (`target/nextest`), which is
+  read-only in the container (fixed: a tool configuration moves it into the build volume). `wrapper::the_cached_tool_holds_itself...`
+  writes a waiter lock into the repository's own `.git/paddock/waits` (read-only there; a test that writes into the real repository,
+  ER-45), and `host_steps::guardian_as_user_matches_the_shell` compares a printed duration (`1 s` against `0 s`, ER-12). Both are open
+  fix items; until they are fixed, the Linux row of a paddock-dev member fails on them.
+- **Class (ER-21).** First instance of a stale container view; the read-only mount finding is an instance of "a test writes outside its
+  own folder" (ER-45).
+
+## `ci triage` read a skipped job as a pass (2026-11-25)
+
+- **Symptom.** `./dev ci triage 9021` (nightly) called the "dialog commands (declared but never sent)" failure NEW. The last finished
+  main nightly, 8284, had skipped every job (its gate found main unchanged); nightly 8226 had the same failure.
+- **Cause.** `baseline_jobs` treated any job that was not `failed()` as passed, and `TimedJob::failed()` is false for `skipped`. It
+  also compared only with one run, so a job that run did not run had no way to an answer but NEW or UNKNOWN.
+- **Fix.** A job the comparison run skipped, lacked or cancelled before it ran is compared with the newest older main run of the
+  workflow that ran it, or is UNKNOWN with that reason; a run named with `--against` is never replaced. Tests from recorded runs
+  (`tools/paddock-dev/tests/ci-triage-skipped`, runs 9021, 8658, 8331, 8284, 8226).
+- **Class (ER-21, ER-33).** A CI-run reader reads "skipped" as "passed". Earlier instance: `ci verdict` counted a schedule-skipped run
+  (every job skipped) as full and green (ADR 0089's instance table, row 2; ADR 0113, 2026-11-12).
+
+## A hung sccache server held every build and the heavy slot (2026-11-25, fix/sccache-detect-restart)
+
+- **What happened.** At 22:39Z the local sccache 0.19 server (started by `./dev sccache env`, local disk plus the RustFS S3 level) hung
+  after a burst of opendal S3 errors ("read failed / write close failed ... send http request"). It kept its port and took every
+  connection, but answered nothing: every rustc client waited at 0% CPU, the builds holding heavy's slot never finished, and every
+  agent's pre-push queued behind them until the coordinator restarted the server by hand. The tools had no handle on it:
+  `sccache --start-server` forks a daemon whose pid nobody is told, and the only stop they knew (`--stop-server`) is a request the hung
+  server never answers.
+- **Measured** (docs/benchmarks.md, "sccache server hang: client behaviour and probe time"): a client waiting on a hung server waits for
+  ever; when the server is stopped it fails the compile ("Connection reset by peer"), `SCCACHE_IGNORE_SERVER_IO_ERROR=1` or not, and
+  never compiles locally. So a build that waited cannot pass after a restart.
+- **Fix.** `tools/paddock-dev/src/sccache_server.rs` (its probe is also CI's, in `setup-rust` and `sccache-stats`, rule 55): the tools
+  start the agents' server in the foreground of a process they spawn and record its pid and start time;
+  they ask it for its statistics within 10 s; no answer, they stop it by that record (rule 53; a server they did not start is never
+  touched), start a fresh one and ask again; still none, the build runs uncached with one warning. Detecting a hang in the middle
+  of a build (a watchdog that gives back the heavy slot) was dropped by the user's decision of 2026-11-25: the probe runs when a build
+  starts.
+- **Rule.** A tool that starts a long-lived helper holds it by its identity from the start; a helper only reachable by its own request
+  protocol cannot be repaired when that protocol is what hangs.
+- **Redesign (user, 2026-11-25).** `TimedJob::failed()` and `RunJob::failed()` are gone: paddock-dev parses a job's conclusion once
+  into `JobOutcome` (`tools/paddock-dev/src/job_outcome.rs`: Passed, Failed, Cancelled, Skipped, Unfinished, Unknown), and every
+  reader matches on it, so the compiler makes each one decide skipped and cancelled on purpose. The sweep found a third instance:
+  the member gate's other-OS row (`merge_check/other_os.rs`) read an OS whose every job was skipped as clean; it is not applicable
+  now.
+
+## Two of the Mac's three runners were unregistered for a day, and nothing said so (2026-11-25)
+- **What.** While preparing ADR 0120's runner move (read-only), `d7-mac-mini-2` and `-3` had logged `fail to invoke Declare ...
+  unregistered runner` at every start since 2026-11-24 10:35, the minutes after the WindowServer abort; launchd restarted them about
+  every 10 s (KeepAlive; `-2`'s `logs/runner.log` held about 19,000 such lines, two per start). Gitea no longer knew them. The Mac ran 3 jobs at
+  once, not 5. The user saw only "`-2` exited with status 1".
+- **Why it was missed.** A runner that cannot register is not a failed job: nothing in CI turns red, and the runner list shows fewer
+  runners only to someone who looks.
+- **Outcome.** The user removed both on 2026-11-25 (ADR 0120: one daemon runner of capacity 4).
+- **Fix in this change.** `tools/mac-runner-move.sh` treats a lane as up only when its log says `declare successfully` after the start,
+  stops a lane that Gitea refuses (no crash loop) and prints the register command; its `status` shows each lane's last start line.
+- **Open.** The cause of the lost registrations is not known (the server side was not read). A check that each declared runner is
+  online belongs to ADR 0074's host inventory.
+
+## The Mac runner's Full Disk Access ended with every update (2026-11-25, fix/mac-ci-stable-identity)
+- **What.** The Mac CI runner and the test browsers it starts are ad-hoc signed: their designated requirement is their cdhash, so
+  TCC treats each runner update and each new browser pin as a new program. On 2026-11-09 the system TCC database had Full Disk
+  Access rows for all three runners that no longer matched (auth_value 0); Chrome for Testing and Playwright's browsers are
+  ad-hoc too (`codesign -dv`: `Signature=adhoc`), and they are their own responsible process, so the runner's grant does not cover them.
+- **Why it matters now.** Since ADR 0120 the runner is a LaunchDaemon: TCC checks go to the system `tccd` ("user tccd
+  unavailable") and a missing grant is a silent deny on `/Volumes/vault-dev`, never a prompt. The first daemon run (9063, job
+  50120, `dev-tool.yml` on main) was green with no Removable Volumes request, because the runner's current cdhash still had its
+  grant; the next runner update would have lost it.
+- **Fix in this change.** One self-signed identity (`tools/mac-ci-signing.sh`): `mac-runner-move.sh install` signs the runner,
+  `install-test-browser.mjs` signs Chrome for Testing (CI jobs only, identity from its default keychain, no runner configuration), `dyno-screenshots.yml` keeps Playwright's browsers on the boot disk and signs
+  them. The user grants Full Disk Access once by that identity (docs/dev-setup.md, "Full Disk Access by a stable identity").
+- **Follow-up, 22:50 the same day.** `dyno-screenshots.yml` on main still installed Playwright into
+  `<work>/tool_cache/paddock-playwright/<version>/`, on the external volume, and its `chrome-headless-shell` raised a Removable
+  Volumes prompt. Every CI job now installs Playwright's browsers through one script, `conformance/ci/playwright-browsers.sh`:
+  one fixed folder on the boot disk for every version, then signed through `mac-ci-signing.sh --ci-hook`, the one rule for
+  "CI job, identity present" that the Chrome for Testing hook uses too.
+- **Open.** Whether the TCC grant for the re-signed bundle holds was not measured before the user's one-time steps; the check is the
+  TCC log after the first Mac run that starts a browser.
+
+## 2026-11-26: two worktrees' container rows shared one target folder, and only the build was locked
+
+- **What.** Train l's `tests-linux` failed 175 tests with "failed to exec .../it-<hash>: Permission denied". The kept volume
+  `paddock-linux-target-arm64` is shared by every worktree per workspace (`/target/v3/<workspace>`) and cargo's lock covers the build
+  only, so another worktree's row could replace a test binary between this row's build and its nextest run.
+- **Fix.** `tools/linux-container.sh --lock v<version>/<folder>` holds one host-side kernel lock per folder for the whole container run
+  (build and tests); `clippy-linux`, `tests-linux` and the guardian run pass it from the same slug as their `CARGO_TARGET_DIR`
+  (`pre_push/gates.rs::lock_args`). Chosen over a target folder per worktree: the volume is 10.2 GB for all workspaces (docs/benchmarks.md)
+  and every extra worktree would hold and cold-build its own copy, while the lock costs only a wait on the same folder.
+- **Not this.** The coordinator found the failure also deterministic in the combined lib-plus-`it` run of one worktree; the lock does not
+  claim that cause (a test touching the target folder, `current_exe` or permissions is being looked for).
+
+## A push to main searched the train's line for its base and refused a landing run that covered it (2026-11-25, fix/ci-reuse-push-base)
+- **What.** Push run 9056 (main fast-forwarded from 4284e23d5 to train g's head 4ca4c56ec) refused to reuse train g's green landing
+  run 9054: 9054 had tested the diff from 4284e23d5, but the push's base came out as b3ad2dd2d (run 9030), two mains back, and the
+  push ran every job again.
+- **Why.** `ci reuse` and the plan job searched the push's base among `git rev-list --first-parent <head>^`. A train lands by
+  fast-forward, so that line is the train's: its re-merge of main has main's previous tip as the second parent, and the search never
+  met it. The landing dispatch searched main's own line (`origin/main`) and found 4284e23d5, so the two never agreed.
+- **Fix.** Both read main's own line from the push event's `before` (`green::push_chain`, falling back to the old line without a
+  usable `before`), and a landing run whose base is an older main is still reused when its diff holds every path of the push's
+  (`green::diff_covers`). Tests read runs 9030, 9045, 9054 and 9056 as recorded (`tests/ci-runs/reuse-push-base`).
+
+## Members on an old base were pulled from trains i, k and m (2026-11-25)
+- **What.** Five members were pulled from trains i, k and m because their base was older than main. The five:
+  - the `testing` to `test-support` feature rename (main, 031a79c02): `paddock-ipc`'s endings tests still gated on the
+    old name (fixed in `3258361e7`);
+  - the ADR 0119 job API;
+  - the reuse-test fixtures;
+  - the heavy share design (the lock folder moved on main: `cd8625db9`, `9d9dbd867`);
+  - the gitleaks job.
+- **Why.** The merge check diffed each member against the train and caught stale reverts (ER-8), but nothing refused a member whose
+  base was older than main, so a member's green gates proved nothing about the tree it would be merged into.
+- **Fix.** Rule 100: a member merges current main and re-runs its member gate on that tip before it joins a
+  train; the merge check refuses a member on an old base (the stale-base check made blocking on `ci/old-base-block`).
+- **Class: a green result on an old base was taken for a green result on the tree it joins** (earlier: ER-49 reuse of a landing run,
+  ER-8 combined-tree failures, train 8's eight combination failures).
+
+## 2026-11-26: `mac-runner-move.sh install` stopped a runner under a running job
+
+- **What.** The install booted the runner out while a CI job ran. The runner logged "shutdown initiated, waiting 3h0m0s for running jobs",
+  the job's helpers (slot hold, s3-guard) were left behind, and the new daemon was not started until a second install.
+- **Fix (user decision: wait visibly, bounded).** Before any change, `install` and `rollback` find the lanes whose runner has job
+  processes (the processes under the pid `launchctl print` gives for the lane's label), tell the runner to take no new job
+  (`launchctl kill SIGTERM`), print which job runs, and wait up to `--wait-max` (default 3600 s) with a progress line every 30 s. At the
+  end of the wait they fail with nothing changed. Nothing is ended by name or by pid: the job's own cleanup ends its helpers (ER-51). The
+  verify step also requires launchd's `state = running`, and a failing `launchctl bootstrap` is a failed lane.
+- **Not measured.** The log line the wait prints for "which job" (`task <id> ...`) and the rule that an idle runner has no child process
+  were taken from the runner's behaviour as known, not read from a real run; the tests use stand-ins.
+- **Follow-up, the same day.** launchd starts a runner that exited, and a restarted runner could take a job between the end of the wait
+  and the boot-out. Every loaded lane is now told to take no new job at the start, and each lane's check for a job and its boot-out are
+  back to back; a job seen there sends install back into the same bounded wait and tells the runner again. What stays is the time between
+  that check and the boot-out call itself (milliseconds, against a runner that needs seconds to register and fetch a task).
+
+## Fix item: a FLAKY sccache eviction test on Windows in run 9135 (2026-11-26)
+`paddock-dev::it sccache_eviction::a_cargo_file_under_the_sccache_folder_is_evicted_once_the_cache_is_over_its_cap` was FLAKY on
+Windows in ci.yml run 9135 (job 50993; failed once, passed on its retry; flaky-as-failure kept the run red, ER-12) and passed in the
+failed-only round 9137. Train 2026-11-26-pq did not touch what it drives: the test runs the real sccache binary through paddock-env and
+paddock-testkit, and the train's sccache change was in `local_sccache.rs` only, so it did not block the landing (rule 54 (4)). A fix
+item for the test's owner, which starts with a reproduction on the Windows runner and the list of causes with what rules each out
+(ER-28). No sleep or raised timeout as the fix.
+
+## 2026-11-26: the Mac is the page's, not the test machine's: the lesson of 2026-10-29 again, and `isMac()` too (WebKit on Linux, nightly 9103)
+
+The reference apps in WebKit moved from the CI Mac to Linux (ADR 0120, 2026-11-25) and their first run, nightly 9103, failed seven specs:
+Playwright's WebKit on Linux has a Mac user agent and `navigator.platform` `Linux x86_64`, so the app binds `Mod` to Cmd and draws ⌘.
+Five specs still pressed `ControlOrMeta` (the host's key, Ctrl) and `shell-demo-locale` chose its key by `process.platform`; the page object
+`isMac()` read `navigator.platform` alone, so two specs expected `Ctrl+Shift+H` where the menu drew `⇧⌘H`. The 2026-10-29 rule (press an app
+shortcut with `pressMod`) was written but nothing enforced it, and the macOS WebKit leg had hidden the rest. **Fix:** every reference-app spec presses
+with `pressMod`; `isMac()` shares `isMacNavigator` with `modKey` (one definition, with a test). **Open:** a second occurrence (ER-21): 63 files of
+the apps' own e2e (`apps/*/app/e2e`, 108 uses) still press `ControlOrMeta`; their WebKit legs are the Linux ones, so the same failure waits there.
+A lint rule in `paddock/e2e-*` that refuses `ControlOrMeta` in a spec is proposed, not built (it needs the user's yes: one in, one out). The chart
+spec `data.spec.ts:301` (theme switch redraws the canvases) failed in the same run for a cause not shown by the log.
+
+## A git fixture helper sat in one tool's test folder and broke two rules (2026-11-26, perf/slow-git-tests-fixture)
+- **What happened.** `perf/slow-git-tests` fixed 710 s of train n's Windows job by building each `ci_runs` git fixture once per machine
+  and copying it per test. The helper (`template`, `copy_tree`) lived in `tools/paddock-dev/src/ci_runs/testutil.rs` and used
+  `std::env::temp_dir` (the clippy disallowed method) and `remove_dir_all` (the `safe_remove_lint` test), so train pq pulled the branch.
+- **Cause.** The helper was written where it was first needed, not checked against the shared kit (ER-22), and nothing told the next
+  fixture author that a per-test git repository is the slow shape.
+- **Fix (user decision 74).** The helper moved to `paddock_testkit::git_fixture` (temp folder from the kit, owner, size limit and eviction
+  rule in its doc), and rule 102 with the report-only check C174 flags a fixture builder with six or more git starts per test.
+
+## Fix item: a FLAKY paddock-ipc link-server test on macOS in run 9150, recorded by hand (2026-11-26)
+`paddock-ipc::it edges::a_link_server_with_no_descriptor_left_to_accept_tells_the_waiting_client_why` was FLAKY on macOS in ci.yml run
+9150 on 4ee7d98fc (train 2026-11-26-r's landed head): try 1 failed at `crates/paddock-ipc/tests/it/edges.rs:470`, the assertion that the
+server records why it refused, with `refused: []` (no reason recorded), and try 2 passed. Train r did not touch paddock-ipc, so it did not
+block the landing (ER-12). `./dev ci fix-items` could not record it because the push-reuse chain broke on that landing (a reused push
+verdict, fixed on `fix/reuse-chain-reused-verdict`), so it is recorded here. Same crate as the `ipc-link-server busy` Windows flakes
+above. A fix item for the crate's owner: a failing reproduction first, with the causes listed and what rules each out (ER-28); never a
+sleep or a raised limit.
+
+## A push to main took an older base than its own landing run (2026-11-26, fix/reuse-chain-reused-verdict)
+- **What happened.** Train r landed on main (4ee7d98fc) right after train pq. Its push run 9150 did not reuse the landing run 9148: `ci reuse`
+  said the landing tested the diff from 3258361e7 and the push's diff was from 62049e300. `ci fix-items` refused 9150 as well.
+- **First hypothesis, refuted.** That a push run which itself reused another run (pq's 9140) does not count. It does not: the reader takes the
+  deciding run of a commit from all its runs, and a landing run is never a base by design (review round 2, P1-A). The pre-push reuse store
+  (`feat/reuse-member-audits`) is not involved.
+- **Cause.** `green::main_line` filtered main's tips (the push runs' commits) by the 200 newest ancestors of `head` (`rev-list -n 200`). A
+  train merges many commits, so tip 3258361e7 was commit 222 of the walk and fell out, and the line fell back to the first-parent line,
+  which meets 62049e300 and never 3258361e7. The landing dispatch, from the older tip 42a884158, still saw it. A second copy of the
+  line, `green::touched_in`, read the first-parent line only, so a FLAKY test of untouched paddock-ipc was measured from the older base.
+- **Fix.** `main_line` reads every ancestor (about 30 ms for 10,000 commits; the candidates stay bounded by the tips and the first-parent
+  line), and `touched_in` reads the same line through `green::touched_line`. `ci fix-items` reads the landing verdict, as `ci landing-held`
+  and the queue do: a landed commit is decided by a landing run, so the plain verdict recorded nothing (also train a's 8983).
+- **Class (ER-21, finished in the same round).** One candidate line, `green::candidate_line` (over `main_line`), is now read by the push's reuse, the
+  planner, the landing dispatch, the touched measure and the verdict's "last fully tested commit" hint; the hint had named 62049e300. A test
+  asserts the hint and the push base agree. Earlier instance: run 9056's first-parent line.

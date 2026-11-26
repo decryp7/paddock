@@ -67,27 +67,35 @@ pub struct Real;
 
 impl Gates for Real {
     fn run(&self, root: &Path, base: &str) -> Result<GateRun, String> {
-        let mut cmd = command(program()?);
-        cmd.args(["--json", "check", "--pre-push", "--member-gate", "--base", base, "--root"])
-            .arg(root)
-            .current_dir(root);
-        let out = run_bounded(cmd, Limits::new(TIMEOUT)).map_err(|e| format!("`check --pre-push` could not run: {e}"))?;
-        let code = match out.outcome {
-            paddock_proc::Outcome::Exited(st) => st.code(),
-            _ => None,
-        };
-        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
-        let wire = stdout
-            .lines()
-            .find(|l| l.starts_with('{'))
-            .and_then(|l| serde_json::from_str(l).ok());
-        let text = format!("{}\n{}", stdout, out.stderr_text());
-        Ok(GateRun {
-            code,
-            text: text.trim().to_string(),
-            wire,
-        })
+        run_pre_push(root, base, &["--member-gate"])
     }
+}
+
+/// Runs `<this tool> --json check --pre-push <extra> --base <base> --root <root>` in `root` and reads what it printed (the member gate
+/// and the static rows of `merge sync-member` differ only in `extra`).
+pub fn run_pre_push(root: &Path, base: &str, extra: &[&str]) -> Result<GateRun, String> {
+    let mut cmd = command(program()?);
+    cmd.args(["--json", "check", "--pre-push"])
+        .args(extra)
+        .args(["--base", base, "--root"])
+        .arg(root)
+        .current_dir(root);
+    let out = run_bounded(cmd, Limits::new(TIMEOUT)).map_err(|e| format!("`check --pre-push` could not run: {e}"))?;
+    let code = match out.outcome {
+        paddock_proc::Outcome::Exited(st) => st.code(),
+        _ => None,
+    };
+    let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+    let wire = stdout
+        .lines()
+        .find(|l| l.starts_with('{'))
+        .and_then(|l| serde_json::from_str(l).ok());
+    let text = format!("{}\n{}", stdout, out.stderr_text());
+    Ok(GateRun {
+        code,
+        text: text.trim().to_string(),
+        wire,
+    })
 }
 
 fn step(exit: Exit, outcome: &str, base: &str, text: Vec<String>, rows: &str) -> Step {
@@ -107,12 +115,14 @@ pub fn not_run(why: &str) -> Step {
     }
 }
 
-/// Runs the gates on the merge `merge` (checked out in `root`) and turns the answer into a step. `enforced` is [`ENFORCED`] outside
-/// the tests.
-pub fn run(root: &Path, git: &Git, merge: &Merge, gates: &dyn Gates, enforced: bool) -> Step {
-    let Some(base) = merge.parents.first() else {
+/// Runs the gates on the merge `merge` (checked out in `root`) and turns the answer into a step. `enforced` is [`ENFORCED`] outside the
+/// tests. They are measured from `base` (`--gates-base`) when given, else from the merge's first parent: the rows of the whole range, so
+/// a later push of the same tree finds a pass record for each of them.
+pub fn run(root: &Path, git: &Git, merge: &Merge, gates: &dyn Gates, enforced: bool, base: Option<&str>) -> Step {
+    let Some(first) = merge.parents.first() else {
         return not_run("the merge has no parents");
     };
+    let base = base.unwrap_or(first.as_str());
     if let Some((why, next)) = checkout_problem(git, merge) {
         let (level, report_only) = wording(enforced);
         return step(

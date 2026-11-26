@@ -116,7 +116,7 @@ jobs:
       paddock_dev_legs: ${{ steps.plan.outputs.paddock_dev_legs }}
       # A member run (a dispatch with a base): the nextest filterset of the packages of that workspace the change reaches (empty: every
       # test, and always so on main, a tag and a manual run with no base: the final head's full run). The Linux crate tests run
-      # whole under coverage in `crates`.
+      # whole (the nightly and a tag also under coverage in `crates`).
       # Whether the WebKit tests and the reference apps' browser jobs run: the e2e and e2e-webkit jobs and the scope this run declares
       # (ADR 0113) read the one value of the planner.
       webkit: ${{ steps.plan.outputs.webkit }}
@@ -163,6 +163,19 @@ jobs:
           PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
         run: ./dev ci reuse --workflow ci.yml
 
+      # ADR 0116: the packages each runner class can skip, from the test-result store (the one step of the plan job that holds the
+      # test cache's key, C141). Empty while docs/test-cache.toml has no two clean shadow runs recorded. Fails open: no file, no reuse.
+      - name: Test cache plan
+        if: ${{ steps.reuse.outputs.reuse != 'true' }}
+        continue-on-error: true
+        env:
+          PLAN_TOKEN: ${{ github.token }}
+          PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+          PADDOCK_TEST_CACHE_KEY_ID: ${{ secrets.PADDOCK_TEST_CACHE_KEY_ID }}
+          PADDOCK_TEST_CACHE_SECRET: ${{ secrets.PADDOCK_TEST_CACHE_SECRET }}
+          PADDOCK_SCCACHE_S3_ENDPOINT: ${{ vars.PADDOCK_SCCACHE_S3_ENDPOINT }}
+        run: ./dev ci test-cache plan --shared --out "$RUNNER_TEMP/test-cache-plan.json"
+
       - name: Affected projects
         id: plan
         env:
@@ -180,8 +193,6 @@ jobs:
           PLAN_WEBKIT: ${{ (inputs.webkit == true || inputs.webkit == 'true') && '1' || '' }}
           # The rerun reads the earlier run's jobs and logs through the API (tools/paddock-dev/src/plan_since.rs).
           PLAN_SINCE_RUN: ${{ github.event.inputs.since_run }}
-          # The crate and paddock-dev legs when the plan names none of its own (every run but a rerun of their failures).
-          PLAN_OS_LEGS: '[{"os":"ubuntu-latest"},{"os":"windows-latest"},{"os":"macos-latest"}]'
           # The scope of a rerun planner's reading of this run (plan_since::MODE_LINE). It is not the verdict: `./dev plan --ci` prints
           # the line `plan scope: {json}` (ADR 0113), what the run does against what a push to main does, and `./dev ci verdict`
           # compares them. No line of this workflow decides "complete".
@@ -189,14 +200,237 @@ jobs:
           # A reused run (the step above): the planner switches every job off and declares that it ran nothing; the reused run decides
           # the commit.
           PLAN_REUSE: ${{ steps.reuse.outputs.reuse }}
+          # The test-result cache's plan (ADR 0116): read when the file is there.
+          PLAN_TEST_CACHE_FILE: ${{ runner.temp }}/test-cache-plan.json
           EVENT: ${{ github.event_name }}
         run: |
           ./dev plan --ci
           # A smoke or affected-only selection (the graph planner's `partial`) is never a full run; the mode line says so (P2-4).
           if grep -q '^partial=true$' "$GITHUB_OUTPUT"; then PLAN_MODE_FULL=false; fi
           echo "plan mode: full=$PLAN_MODE_FULL"
-          grep -q '^crate_legs=' "$GITHUB_OUTPUT" || echo "crate_legs=$PLAN_OS_LEGS" >> "$GITHUB_OUTPUT"
-          grep -q '^paddock_dev_legs=' "$GITHUB_OUTPUT" || echo "paddock_dev_legs=$PLAN_OS_LEGS" >> "$GITHUB_OUTPUT"
+
+  # The developer and CI tool (ADR 0022): its own Cargo workspace and lockfile, tested on every OS it runs on. Linux runs in the
+  # paddock-ci image (git, Node for the golden test's live oracle, nextest); Windows and macOS run on the host.
+  # Started first (user, 2026-11-25): the longest Linux job is the first job after `plan` in this file, so it takes the first free
+  # Linux lane. Gitea hands a runner the waiting job with the oldest `updated` time, then the lowest id (models/actions/task.go,
+  # CreateTaskForRunner: Asc("updated", "id")); every job that needs only `plan` turns waiting in the same transaction, and the ids
+  # follow the order of the jobs in this file, so the file order is the start order. A `needs` would make it wait instead.
+  # It waited 5.5 to 12.8 min behind short jobs when it came last (speed audit, 2026-11-25).
+  paddock-dev:
+    name: paddock-dev (${{ matrix.os }})
+    needs: [plan]
+    if: ${{ needs.plan.outputs.paddock_dev == 'true' && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["paddock-dev"]'), 'paddock-dev') }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Every OS; a rerun of a run's failures (since_run) only the failed legs, each with the filter of its failed tests.
+        include: ${{ fromJSON(needs.plan.outputs.paddock_dev_legs) }}
+    runs-on: ${{ matrix.os }}
+    container: ${{ matrix.os == 'ubuntu-latest' && 'dev.decryptology.net/decryp7/paddock-ci:v3' || '' }}
+    defaults:
+      run:
+        working-directory: tools/paddock-dev
+        shell: bash
+    env:
+      # A run for a tag builds the tool from source (ADR 0022: release and tag jobs bypass every cache); other runs may download it.
+      PADDOCK_DEV_DOWNLOAD: ${{ (inputs.release == true || startsWith(github.ref, 'refs/tags/')) && '0' || '' }}
+      # Read credential for ./dev's prebuilt download (ADR 0022 R0b), only in the jobs that run ./dev (job-isolation).
+      PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+      CARGO_TERM_COLOR: always
+    steps:
+      # Linux: the whole tree in the container. Hosts: only the bootstrap folders (the actions, their scripts, paddock-dev's inputs)
+      # as a partial clone; the kept-clone step below brings the slot's own clone to this commit (conformance/ci/checkout-profiles.txt).
+      - uses: actions/checkout@v4
+        if: runner.os == 'Linux'
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - uses: actions/checkout@v4
+        if: runner.os != 'Linux'
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            .cargo
+            .gitea
+            conformance
+            scripts
+            tools
+            crates
+          filter: blob:none
+
+      - name: Git bash on PATH (Windows)
+        if: runner.os == 'Windows'
+        shell: cmd
+        working-directory: .
+        run: |
+          if not exist "%ProgramFiles%\Git\bin\bash.exe" (echo Git for Windows is not installed on this runner & exit /b 1)
+          echo %ProgramFiles%\Git\bin>>"%GITHUB_PATH%"
+
+      # CARGO_BUILD_JOBS: this runner's share of the host's cores (before job-isolation, which builds paddock-dev).
+      - uses: ./.gitea/actions/build-jobs
+
+      # A slot of the host (job isolation; after Git bash on Windows): its kept folders and ports are this job's alone.
+      - uses: ./.gitea/actions/job-isolation
+
+      - uses: ./.gitea/actions/kept-clone
+        if: runner.os != 'Linux'
+        with:
+          name: paddock-checkout-${{ runner.os }}
+          profile: lean
+
+      - uses: ./.gitea/actions/build-folder
+        with:
+          workspace: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/paddock-dev
+          name: paddock-${{ github.job }}
+
+      - uses: ./.gitea/actions/setup-rust
+        with:
+          components: clippy,rustfmt
+          sccache-s3-access-key-id: ${{ secrets.PADDOCK_SCCACHE_S3_ACCESS_KEY_ID }}
+          sccache-s3-secret-access-key: ${{ secrets.PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY }}
+
+      - uses: ./.gitea/actions/host-tools
+
+      # The tool's lockfile must follow the lockfiles of the crates/ it uses by path (they change dependencies in their own PRs).
+      # A leg with a filter (a rerun of failed tests) runs only the tests: its other steps passed in the earlier run.
+      - name: Lockfile is current
+        if: ${{ !matrix.filter }}
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/paddock-dev
+        run: |
+          cargo metadata --locked --format-version 1 > /dev/null || {
+            echo "::error::tools/paddock-dev/Cargo.lock is stale, run cargo update -w in tools/paddock-dev and commit it"; exit 1; }
+
+      - name: Format
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && !matrix.filter }}
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/paddock-dev
+        run: cargo fmt --check
+
+      - name: Clippy
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && !matrix.filter }}
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/paddock-dev
+        run: cargo clippy --all-targets --locked -- -D warnings
+
+      # The inputs and generator tests read the cargo metadata of tools/throttle offline: its packages must be in
+      # the job's cargo home, not only paddock-dev's (heavy's paddock-env dependency was missing on 2026-11-13, run 8050).
+      - name: Fetch the other tools' dependencies
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' }}
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools
+        run: |
+          for t in throttle; do
+            (cd "$t" && cargo fetch --locked) || {
+              echo "::error::cargo fetch --locked failed in tools/$t, so the offline metadata tests cannot read it. Next step: run it on the runner to see why"; exit 1; }
+          done
+
+      - name: Tests
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' }}
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/paddock-dev
+        env:
+          FILTER: ${{ matrix.filter }}
+          # OS-scoped tests (tools/paddock-dev/paddock.ci.json `hostTests`, ./dev plan --ci): the modules this host leg tests, with a member
+          # run's reached packages. Linux tests everything.
+          TEST_FILTER: ${{ matrix.test_filter }}
+          TEST_SKIP: ${{ matrix.test_skip }}
+          # The packages whose pass of the same key the test cache reuses (ADR 0116): see the crates job's step.
+          TEST_CACHE_EXCLUDE: ${{ matrix.test_cache_exclude }}
+          PADDOCK_TEST_COST_REPORT: ${{ runner.temp }}/test-cost-${{ github.run_id }}-${{ github.run_attempt }}.jsonl
+          # A failed-only round (since_run): each failed test of FILTER must still select a test (./dev ci rerun-check), never a warning.
+          RERUN: ${{ github.event.inputs.since_run }}
+        run: |
+          # The plan's selection has no test of this workspace (its gates still run above): nothing to test, said, never a filter that selects none.
+          if [ -z "$FILTER" ] && [ "$TEST_SKIP" = true ]; then echo "::notice::this run's selection holds no test of paddock-dev: nothing to test here"; exit 0; fi
+          if [ -n "$FILTER" ] && [ -n "$RERUN" ]; then
+            cargo nextest list --locked -E "$FILTER" --message-format json > "$RUNNER_TEMP/rerun-listed.json" || { echo "::error::rerun-check: cargo nextest list failed. Next: read the build error above"; exit 1; }
+            "${PADDOCK_WORKSPACE:-$GITHUB_WORKSPACE}/dev" ci rerun-check --filter "$FILTER" --listed "$RUNNER_TEMP/rerun-listed.json" || exit 1
+          fi
+          filter=()
+          if [ -n "$FILTER" ]; then echo "::notice::nextest runs only the selected tests (a rerun's failed tests, or the plan's smoke set or affected targets): $FILTER"; filter=(-E "$FILTER" --no-tests=warn)
+          elif [ -n "$TEST_FILTER" ]; then echo "::notice::nextest filter (hostTests, and the packages this change reaches in a member run): $TEST_FILTER"; filter=(-E "$TEST_FILTER" --no-tests=fail); fi
+          if [ -n "$TEST_CACHE_EXCLUDE" ] && [ -z "$FILTER" ] && [ -z "$TEST_FILTER" ]; then echo "::notice::test-cache: nextest leaves out the packages with a reusable pass of the same key: $TEST_CACHE_EXCLUDE"; filter=(-E "$TEST_CACHE_EXCLUDE" --no-tests=warn); fi
+          set -o pipefail
+          cargo nextest run --profile ci --locked --no-fail-fast ${filter[@]+"${filter[@]}"} 2>&1 | tee "$RUNNER_TEMP/nextest-paddock-dev.log"
+
+      # ADR 0116, report-only (ER-41): the test-result record of paddock-dev's package (see the crates leg's step). Unlike the crates
+      # job, paddock-dev's Linux leg runs its tests plainly (no coverage run), so it is cacheable on every runner; but a leg that runs only a
+      # filtered part of the package (hostTests modules on Windows and macOS, a member run's filter) has a non-empty `test_filter` and
+      # records nothing, because the package's pass would then rest on a part of its tests. `record` stores only packages whose tests all
+      # passed on the first try in a whole log (test_cache::records_from_log).
+      - name: Record test results (test cache)
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && !matrix.filter && matrix.test_filter == '' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/train/')) }}
+        continue-on-error: true
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/paddock-dev
+        env:
+          PLAN_TOKEN: ${{ github.token }}
+          PADDOCK_TEST_CACHE_KEY_ID: ${{ secrets.PADDOCK_TEST_CACHE_KEY_ID }}
+          PADDOCK_TEST_CACHE_SECRET: ${{ secrets.PADDOCK_TEST_CACHE_SECRET }}
+          PADDOCK_SCCACHE_S3_ENDPOINT: ${{ vars.PADDOCK_SCCACHE_S3_ENDPOINT }}
+        run: |
+          [ -s "$RUNNER_TEMP/nextest-paddock-dev.log" ] || { echo "::notice::test-cache: no nextest output to record"; exit 0; }
+          "${PADDOCK_WORKSPACE:-$GITHUB_WORKSPACE}/dev" ci test-cache record --workspace tools/paddock-dev --shared --log "$RUNNER_TEMP/nextest-paddock-dev.log"
+
+      # ADR 0121, report-only (ER-41): the cost-class charges the tests recorded; a ::warning:: and a job-summary row per test outside its class.
+      - name: Test cost report
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' }}
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}
+        run: ./dev ci test-cost --wall-asserts --report "$RUNNER_TEMP/test-cost-${{ github.run_id }}-${{ github.run_attempt }}.jsonl"
+
+      # Licences, advisories, sources (tools/paddock-dev/deny.toml, the crates' rules); the image has cargo-deny.
+      - name: Deny
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && runner.os == 'Linux' && !matrix.filter }}
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/paddock-dev
+        run: cargo deny check
+
+      # The kept build folder stays within its cap (this job's own folder only, after the builds).
+      - uses: ./.gitea/actions/prune-build-folder
+        if: always() && runner.os != 'Linux'
+
+      - uses: ./.gitea/actions/sccache-stats
+        if: always()
+
+      # The slot goes back last: the prune and the sccache server's stop act on this slot's folders and port.
+      - uses: ./.gitea/actions/job-isolation
+        if: always()
+        with:
+          mode: release
+
+  # ADR 0116, report-only (ER-41): what the test-result cache would reuse for each runner class of the crates workspace. A job of its own
+  # that nothing needs, so it adds nothing to the critical path (it waits for the plan like the other jobs and no job waits for it). Nothing is skipped (the
+  # switch in docs/test-cache.toml is off until two clean shadow train runs are recorded); a store that cannot be reached is a notice.
+  # Reads nothing in a tag run, a release or the nightly (`./dev ci test-cache` refuses itself).
+  test-cache-shadow:
+    needs: [plan]
+    # A rerun of failed jobs and a reused run end it (rerun_jobs is empty then for the jobs it does not name).
+    if: ${{ contains(fromJSON(needs.plan.outputs.rerun_jobs || '["test-cache-shadow"]'), 'test-cache-shadow') }}
+    name: test cache (shadow report)
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
+    env:
+      PADDOCK_DEV_DOWNLOAD: ${{ (inputs.release == true || startsWith(github.ref, 'refs/tags/')) && '0' || '' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      # Before the first ./dev call of the job (the tool through the Actions cache, with the read token).
+      - env:
+          PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+        uses: ./.gitea/actions/dev-tool-cache
+      - name: Test cache lookup per runner class
+        continue-on-error: true
+        env:
+          PLAN_TOKEN: ${{ github.token }}
+          PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+          # The test cache's own RustFS key (C141: only `./dev ci test-cache` steps name it). Without the secrets the step is a notice.
+          PADDOCK_TEST_CACHE_KEY_ID: ${{ secrets.PADDOCK_TEST_CACHE_KEY_ID }}
+          PADDOCK_TEST_CACHE_SECRET: ${{ secrets.PADDOCK_TEST_CACHE_SECRET }}
+          PADDOCK_SCCACHE_S3_ENDPOINT: ${{ vars.PADDOCK_SCCACHE_S3_ENDPOINT }}
+        run: |
+          for class in Linux-X64 macOS-ARM64 Windows-X64; do
+            echo "::group::test-cache $class"
+            ./dev ci test-cache lookup --workspace crates --class "$class" --shared || true
+            echo "::endgroup::"
+          done
 
   ui:
     needs: [plan]
@@ -388,21 +622,24 @@ jobs:
       - uses: ./.gitea/actions/sccache-stats
         if: always()
 
-  # WebKit is the engine of WKWebView, which the macOS apps render in: the three ui Playwright projects run in it on the Mac host runner
-  # (Playwright's own WebKit build), for v* tags, nightly.yml and a manual ask only (the planner's `webkit`, as the e2e job).
+  # WebKit is the engine of WKWebView, which the macOS apps render in: the three ui Playwright projects run in Playwright's own WebKit
+  # build, for v* tags, nightly.yml and a manual ask only (the planner's `webkit`, as the e2e job). On Linux, in the CI image that bakes
+  # WebKit in: the CI Mac is a LaunchDaemon with no window server (ADR 0120, user decision 2026-11-25), where Playwright's WebKit cannot
+  # register with WindowServer (Playwright #43066). macOS WebKit (the WKWebView build) is then a local run on a Mac with a login session;
+  # no macOS WebKit in CI is accepted for now (user, 2026-11-25).
   e2e-webkit:
-    name: reference apps in WebKit (macOS)
+    name: reference apps in WebKit (Linux)
     needs: [plan]
     if: ${{ needs.plan.outputs.ui == 'true' && (needs.plan.outputs.webkit == 'true' || contains(fromJSON(needs.plan.outputs.rerun_jobs || '[]'), 'e2e-webkit')) && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["e2e-webkit"]'), 'e2e-webkit') }}
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
     env:
       # The graph's selection of this job's project (ADR 0117 §5): `./dev ci run` skips a phase it does not keep and gives a test
       # runner only the affected files (tools/paddock-dev/src/ci_run/select.rs). Empty: every phase, every file.
       PADDOCK_PLAN_SELECTION: ${{ needs.plan.outputs.selection }}
       # A run for a tag builds the tool from source (ADR 0022: release and tag jobs bypass every cache); other runs may download it.
       PADDOCK_DEV_DOWNLOAD: ${{ (inputs.release == true || startsWith(github.ref, 'refs/tags/')) && '0' || '' }}
-      # Read credential for ./dev's prebuilt download (ADR 0022 R0b).
-      PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
     defaults:
       run:
         working-directory: ui
@@ -411,48 +648,45 @@ jobs:
         with:
           persist-credentials: false
 
-      # CARGO_BUILD_JOBS: this runner's share of the host's cores (before job-isolation, which builds paddock-dev).
-      - uses: ./.gitea/actions/build-jobs
+      # Before the first ./dev of the job: it hashes and builds itself with the job's pinned compiler.
+      - env:
+          PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+        uses: ./.gitea/actions/setup-rust
+        with:
+          sccache-s3-access-key-id: ${{ secrets.PADDOCK_SCCACHE_S3_ACCESS_KEY_ID }}
+          sccache-s3-secret-access-key: ${{ secrets.PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY }}
 
-      # A slot of the host (job isolation): its own Angular cache and ports, so two runs of this job can share the Mac.
-      - uses: ./.gitea/actions/job-isolation
-
+      # Playwright's browsers, WebKit with its Linux dependencies included, are baked into the image (ci-image/): nothing is downloaded.
       - uses: ./.gitea/actions/node-caches
+        with:
+          name: e2e-webkit
 
       - name: Install
         working-directory: .
         run: npm ci
 
-      # A host runner has no image: the browser is installed once per Playwright version into a kept host folder (outside the
-      # checkout and the runner user's own caches, rule 7) and only when that folder is missing.
-      - name: WebKit
-        run: |
-          PW_VERSION=$(node -p "require('playwright-core/package.json').version")
-          BROWSERS="${RUNNER_TOOL_CACHE:-$HOME/.cache}/paddock-playwright/$PW_VERSION"
-          echo "PLAYWRIGHT_BROWSERS_PATH=$BROWSERS" >> "$GITHUB_ENV"
-          if [ ! -f "$BROWSERS/.installed-webkit" ]; then
-            PLAYWRIGHT_BROWSERS_PATH="$BROWSERS" npx playwright install webkit
-            touch "$BROWSERS/.installed-webkit"
-          fi
-
+      # CI names its ports (@decryp7/paddock-e2e refuses a default there), apart from the e2e shards' 4300-4312 and nightly.yml's 4330-4332.
       - name: Reference app checks in WebKit
         env:
           PADDOCK_WEBKIT: "1"
+          PW_PORT: "4340"
+          SHELL_DEMO_PORT: "4341"
+          WORKBENCH_DEMO_PORT: "4342"
         run: |
-          # The display stays awake for the step (ADR 0120 WP-0, H2; Playwright #43066: WebKit work on a sleeping display fills
-          # the WindowServer). The handle is kept and the assertion ends with the step (ER-51).
-          caffeinate -d -i -w $$ & caffeinate_pid=$!
-          trap 'kill "$caffeinate_pid" 2>/dev/null || true' EXIT
-          # The job slot's own block of three ports (conformance/ci/ports.txt `webkit`: 4320-4322 for s1).
-          port=$(bash ../conformance/ci/kit.sh isolation port webkit)
-          export PW_PORT=$port SHELL_DEMO_PORT=$((port + 1)) WORKBENCH_DEMO_PORT=$((port + 2))
           npx playwright test --project=gallery-webkit --project=shell-demo-webkit --project=workbench-demo-webkit
           npx playwright test -c projects/paddock-e2e/selftest/playwright.config.ts --project=webkit
 
-      - uses: ./.gitea/actions/job-isolation
-        if: always()
+      # The traces of failed tests (retain-on-failure, paddockTrace) and each failure's error context: nightly 9103's chart spec failed with
+      # only its timeout in the log and nothing kept to show why.
+      - uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v3
+        if: failure()
         with:
-          mode: release
+          name: e2e-webkit-results
+          path: ui/.angular/playwright-results
+          if-no-files-found: ignore
+
+      - uses: ./.gitea/actions/sccache-stats
+        if: always()
 
   # @decryp7/paddock-conformance (conformance/, plan X9): every check has a good and a bad fixture, the release scripts are
   # tested (latest.json byte-equal to the apps' copy), the shared macOS verify runs against a shimmed bundle. One dependency, `yaml`
@@ -508,41 +742,6 @@ jobs:
       - uses: ./.gitea/actions/sccache-stats
         if: always()
 
-  # Secret scan (.gitea/actions/gitleaks): the tree and the commits this branch adds on top of origin/main. It runs on every change,
-  # whatever the plan reaches, because a secret is a leak wherever it is; .gitleaks.toml lists the known fixtures, one entry each.
-  gitleaks:
-    name: gitleaks (secret scan)
-    needs: [plan]
-    if: ${{ contains(fromJSON(needs.plan.outputs.rerun_jobs || '["gitleaks"]'), 'gitleaks') }}
-    runs-on: ubuntu-latest
-    container:
-      image: dev.decryptology.net/decryp7/paddock-ci:v3
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-          # The history scan reads origin/main..HEAD.
-          fetch-depth: 0
-      - uses: ./.gitea/actions/gitleaks
-
-  # Conformance C99 (ADR 0057 §3, rule 72): no shipped process uses the macOS Keychain. Its own job, planned on its inputs
-  # (every Cargo.toml and Cargo.lock under apps/ and crates/, the scanned sources, capabilities, paddock.ci.json, the check's
-  # code; tools/paddock-dev/src/plan.rs C99_INPUT), because it needs cargo and the registry (`cargo fetch`, `cargo tree` for both Apple
-  # triples) and the conformance job above does not. Every release path runs the same action, scoped to its app.
-  c99:
-    name: C99 (no Keychain in a macOS build)
-    needs: [plan]
-    if: ${{ needs.plan.outputs.c99 == 'true' && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["c99"]'), 'c99') }}
-    runs-on: ubuntu-latest
-    container:
-      image: dev.decryptology.net/decryp7/paddock-ci:v3
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-
-      - uses: ./.gitea/actions/keychain
-
   # The shared CI actions' scripts and the dev and host tools (plan X10, X47): every script runs in a scratch folder with a
   # PATH of shims, so no launchd, systemd, Docker or installed app is touched. New-app templates are covered by scripts/.
   tools:
@@ -588,12 +787,11 @@ jobs:
         run: ./dev ci run tools scripts
 
       # The agent hooks' tests (.claude/hooks/*.test.sh, with the rule-55 parity test of places.rs against lib/paddockpaths.py).
-      # Report-only (ER-41): registered as `step:tools/hooks` in docs/gates.toml (review_by, first green run id); `./dev gates check`
-      # fails when the date passes or when this step blocks. A change under .claude/hooks/, places.rs or docs/known-copies.toml marks this job.
+      # Blocking since its first green run on the real tree, ci.yml run 9030 (b3ad2dd2d, 2026-11-25; ER-41).
+      # A change under .claude/hooks/, places.rs or docs/known-copies.toml marks this job.
       - env:
           PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
-        name: Hooks tests (report-only)
-        continue-on-error: true
+        name: Hooks tests
         run: ./dev ci run tools hooks
 
       # ER-40: a committed SVG is generated from its .drawio and never hand-edited. The check re-exports every diagram with the pinned
@@ -617,89 +815,6 @@ jobs:
           PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
         name: SVG drift (ER-40)
         run: ./dev ci run tools svg-drift
-
-      - uses: ./.gitea/actions/sccache-stats
-        if: always()
-
-  # The heavy tool (tools/heavy): the machine-wide heavy-step lock. Its own Cargo workspace; a Linux container, so no build-folder action
-  # (the build folder is tools/heavy/target in the container, git-ignored).
-  heavy:
-    name: heavy tool
-    needs: [plan]
-    if: ${{ needs.plan.outputs.tools == 'true' && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["heavy"]'), 'heavy') }}
-    runs-on: ubuntu-latest
-    container:
-      image: dev.decryptology.net/decryp7/paddock-ci:v3
-    defaults:
-      run:
-        working-directory: tools/heavy
-        shell: bash
-    env:
-      # setup-rust runs ./dev (docs/plans/ci-in-rust.md): the read credential, and a tag or release run builds the tool from source.
-      PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
-      PADDOCK_DEV_DOWNLOAD: ${{ (inputs.release == true || startsWith(github.ref, 'refs/tags/')) && '0' || '' }}
-      CARGO_TERM_COLOR: always
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-
-      - uses: ./.gitea/actions/build-jobs
-
-      - uses: ./.gitea/actions/setup-rust
-        with:
-          components: clippy,rustfmt
-          sccache-s3-access-key-id: ${{ secrets.PADDOCK_SCCACHE_S3_ACCESS_KEY_ID }}
-          sccache-s3-secret-access-key: ${{ secrets.PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY }}
-
-      - name: Lockfile is current
-        run: |
-          cargo metadata --locked --format-version 1 > /dev/null || {
-            echo "::error::tools/heavy/Cargo.lock is stale, run cargo update -w in tools/heavy and commit it"; exit 1; }
-
-      - name: Format
-        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' }}
-        run: cargo fmt --check
-
-      - name: Clippy
-        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' }}
-        run: cargo clippy --all-targets --locked -- -D warnings
-
-      - name: Tests
-        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' }}
-        run: cargo nextest run --profile ci --locked --no-fail-fast
-
-      - name: Deny
-        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' }}
-        run: cargo deny check
-
-      # The tool builds with a plain Rust toolchain: no GTK -sys crate may reach it through the shared crates (the workspace
-      # hack once pulled gtk-sys into paddock-proc on x86_64 Linux, so `cargo install` of heavy needed GTK headers). The
-      # check reads the dependency graph for the Linux target, so it holds on an image that happens to have GTK installed.
-      - name: No GTK in the tool's Linux build
-        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' }}
-        working-directory: .
-        run: |
-          # bash -e -o pipefail: every command that may legitimately fail is handled by hand. grep exits 1 when it finds nothing,
-          # which is the success case here.
-          rc=0
-          for tool in heavy; do
-            tree=$(cd "tools/$tool" && cargo tree --locked --target x86_64-unknown-linux-gnu -e normal,build --prefix none) || {
-              echo "::error::cargo tree failed for tools/$tool (see the lines above). Run it in tools/$tool with the same arguments."
-              rc=1; continue; }
-            # ER-33: the probe must be able to see the thing. The tool links paddock-proc, where the hack's GTK crates arrived.
-            echo "$tree" | grep -q '^paddock-proc ' || {
-              echo "::error::check broken: the dependency graph of tools/$tool has no paddock-proc, so a GTK crate there would not be seen."
-              rc=1; continue; }
-            hits=$(echo "$tree" | grep -E '^(gtk|gdk|gio|glib|gobject|pango|cairo|atk|gdk-pixbuf|soup|webkit2gtk|javascriptcore-rs)[a-z0-9-]*-(sys|sys-rs) ' | sort -u || true)
-            if [ -n "$hits" ]; then
-              echo "::error::tools/$tool depends on GTK -sys crates on x86_64 Linux: $(echo "$hits" | tr '\n' ' '). Add them to crates/.config/hakari.toml traversal-excludes, run cargo hakari generate and refresh the lockfiles."
-              rc=1
-            else
-              echo "tools/$tool: no GTK -sys crate in the x86_64 Linux graph"
-            fi
-          done
-          exit "$rc"
 
       - uses: ./.gitea/actions/sccache-stats
         if: always()
@@ -758,7 +873,11 @@ jobs:
       # region of the macro's generated wrapper to that line, which no test can all reach.
       # This is also Linux's all-features test run (the crate leg skips its own on Linux): the real-browser tests of
       # paddock-chromium must find the image's Chrome for Testing instead of skipping.
+      # Coverage runs only in the nightly (`os_full`), a release's gates and a tag (user decision 2026-11-26, ADR 0116 D4 amended): a train, a
+      # branch and a push to main run plain nextest in the `crate` job's Linux leg, so those tests are cacheable. The same three
+      # conditions are `plan_ci::coverage_run`; conformance/test/coverage-placement.test.mjs keeps them equal.
       - name: Coverage (>= 90 % lines; 99 % security target report-only)
+        if: ${{ (inputs.os_full == true || inputs.os_full == 'true' || github.event.inputs.os_full == 'true' || inputs.release == true || startsWith(github.ref, 'refs/tags/')) }}
         env:
           PADDOCK_REQUIRE_TEST_BROWSER: "1"
         run: ./dev ci run crates coverage
@@ -784,9 +903,11 @@ jobs:
 
   # Every crate on Linux, Windows and macOS (platform-only bugs exist: lessons): clippy and tests with every feature, so the
   # `tauri` adapters are built too, the feature-off runs and the doc tests, as a few workspace-wide steps. On Linux the
-  # all-features test run is the coverage job's (crates), so this leg runs only what that job does not.
+  # all-features test run is the coverage job's (crates) only in the nightly, a release and a tag; otherwise this leg runs it plainly.
   crate:
-    name: crate (${{ matrix.os }})
+    # The Linux tests run as parallel jobs of whole packages when coverage does not run (`matrix.part_label`: `, 2/3`; the plan's
+    # `plan_ci::partition_linux_legs`); every other leg has an empty label.
+    name: crate (${{ matrix.os }}${{ matrix.part_label }})
     needs: [plan]
     if: ${{ needs.plan.outputs.crates == 'true' && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["crate"]'), 'crate') }}
     strategy:
@@ -898,8 +1019,9 @@ jobs:
       # features and rebuilt the shared dependencies). Every step runs even after another failed; nextest and clippy name
       # the crate of every failure. scripts/publish.test.mjs and conformance C37 fail when a workspace member is left out.
       # A leg with a filter (a rerun of failed tests) runs only the test steps below: its other steps passed in the earlier run.
+      # Once per OS: the partitions of the Linux tests (`matrix.part_extra` is "false" on all but the first) do not repeat it.
       - name: Clippy (workspace, every feature)
-        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && !matrix.filter }}
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && !matrix.filter && matrix.part_extra != 'false' }}
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/crates
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
@@ -916,9 +1038,10 @@ jobs:
       # Every crate's tests with every feature, so the `tauri` adapters are built and tested too (the dialogs and panels on the
       # mock runtime, paddock-chromium against its fake browser and against Chrome for Testing: CHROMIUM_TEST_PATH, never an
       # installed browser, rule 7; a missing browser fails instead of skipping). On Linux the coverage job (crates) runs
-      # exactly this run under llvm-cov, so this leg does not run it twice.
+      # exactly this run under llvm-cov in the nightly, a release and a tag, so this leg does not run it twice there; every other run
+      # (a train, a branch, a push to main) runs it here, plainly and cacheable.
       - name: Tests (workspace, every feature)
-        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && runner.os != 'Linux' }}
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && (runner.os != 'Linux' || !(inputs.os_full == true || inputs.os_full == 'true' || github.event.inputs.os_full == 'true' || inputs.release == true || startsWith(github.ref, 'refs/tags/'))) }}
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/crates
         env:
           PADDOCK_REQUIRE_TEST_BROWSER: "1"
@@ -931,6 +1054,9 @@ jobs:
           TEST_PACKAGES: ${{ matrix.test_packages }}
           TEST_FILTER: ${{ matrix.test_filter }}
           TEST_SKIP: ${{ matrix.test_skip }}
+          # The packages whose pass of the same key the test cache reuses (ADR 0116, `./dev plan --ci`): a filterset that leaves them out;
+          # empty while the switch is off. Used only by a leg with no filter of its own, so the run stays whole.
+          TEST_CACHE_EXCLUDE: ${{ matrix.test_cache_exclude }}
           # A failed-only round (since_run): each failed test of FILTER must still select a test (./dev ci rerun-check), never a warning.
           RERUN: ${{ github.event.inputs.since_run }}
         run: |
@@ -946,7 +1072,25 @@ jobs:
             if [ -n "$TEST_PACKAGES" ]; then echo "::notice::nextest tests only the packages with OS-specific code on this runner (hostTests): $TEST_PACKAGES"; sel=(); for p in $TEST_PACKAGES; do sel+=(-p "$p"); done; fi
             if [ -n "$TEST_FILTER" ]; then echo "::notice::nextest filter (hostTests, and the packages this change reaches in a member run): $TEST_FILTER"; filter=(-E "$TEST_FILTER" --no-tests=fail); fi
           fi
-          cargo nextest run "${sel[@]}" --all-features --profile ci ${filter[@]+"${filter[@]}"}
+          # The output is kept for the test-cache record step below (ADR 0116, report-only); pipefail keeps nextest's exit code.
+          set -o pipefail
+          if [ -n "$TEST_CACHE_EXCLUDE" ] && [ -z "$FILTER" ] && [ -z "$TEST_FILTER" ]; then echo "::notice::test-cache: nextest leaves out the packages with a reusable pass of the same key: $TEST_CACHE_EXCLUDE"; filter=(-E "$TEST_CACHE_EXCLUDE" --no-tests=warn); fi
+          cargo nextest run "${sel[@]}" --all-features --profile ci ${filter[@]+"${filter[@]}"} 2>&1 | tee "$RUNNER_TEMP/nextest-crates.log"
+
+      # ADR 0116, report-only (ER-41): stores the pass of every package this run proved (and only a leg with no filter: `test_filter` empty) (whole, first try, no flake) in the shared test-result
+      # store. Only a main or train run writes (`./dev ci test-cache record` refuses any other ref and any rerun itself). Never fails the job.
+      - name: Record test results (test cache)
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && (runner.os != 'Linux' || !(inputs.os_full == true || inputs.os_full == 'true' || github.event.inputs.os_full == 'true' || inputs.release == true || startsWith(github.ref, 'refs/tags/'))) && !matrix.filter && matrix.test_filter == '' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/train/')) }}
+        continue-on-error: true
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/crates
+        env:
+          PLAN_TOKEN: ${{ github.token }}
+          PADDOCK_TEST_CACHE_KEY_ID: ${{ secrets.PADDOCK_TEST_CACHE_KEY_ID }}
+          PADDOCK_TEST_CACHE_SECRET: ${{ secrets.PADDOCK_TEST_CACHE_SECRET }}
+          PADDOCK_SCCACHE_S3_ENDPOINT: ${{ vars.PADDOCK_SCCACHE_S3_ENDPOINT }}
+        run: |
+          [ -s "$RUNNER_TEMP/nextest-crates.log" ] || { echo "::notice::test-cache: no nextest output to record"; exit 0; }
+          "${PADDOCK_WORKSPACE:-$GITHUB_WORKSPACE}/dev" ci test-cache record --workspace crates --shared --log "$RUNNER_TEMP/nextest-crates.log"
 
       - uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v3
         if: failure() && runner.os == 'Windows'
@@ -960,7 +1104,7 @@ jobs:
       # selected crate depends on with a feature on gets its own run: paddock-shell turns on paddock-diag's, paddock-download's
       # and paddock-updater's `tauri`, and paddock-updater turns on paddock-download's default `http`.
       - name: Tests with the optional features off
-        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && !matrix.filter }}
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && !matrix.filter && matrix.part_extra != 'false' }}
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/crates
         run: |
           cargo nextest run -p paddock-shell -p paddock-secrets -p paddock-siblings --profile ci
@@ -977,43 +1121,6 @@ jobs:
         if: always()
         with:
           mode: release
-
-  # Conventional Commits and no AI attribution (rules 4, 8) for every commit of a change, whichever project it touches.
-  # Dependency audits judged against main (docs/ci-schedules.md "Dependency audits"): an advisory that appeared outside the change
-  # (RUSTSEC-2026-0543 run 8214, GHSA-fc5q-39xc-vjpf run 8225) is a warning here, decided on main by the nightly `audit` job; only an
-  # advisory this change adds fails. `./dev audit compare` audits the merge base's lockfiles with the same tools (no list is kept, ER-46).
-  # Report-only until the repository variable PADDOCK_AUDIT_ENFORCE is 1 (ER-41: set after its first green run, recorded in
-  # docs/ci-schedules.md); the plain audit steps of the jobs below stay blocking until then.
-  audit:
-    name: audit (advisories this change adds)
-    needs: [plan]
-    if: ${{ !cancelled() && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["audit"]'), 'audit') }}
-    runs-on: ubuntu-latest
-    container:
-      image: dev.decryptology.net/decryp7/paddock-ci:v3
-    env:
-      PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
-      PADDOCK_DEV_DOWNLOAD: ${{ (inputs.release == true || startsWith(github.ref, 'refs/tags/')) && '0' || '' }}
-      # The merge base's reference: the dispatch's `base` (the commit of main a train is built on), else origin/main (as the conformance job).
-      PADDOCK_BASE_REF: ${{ inputs.base || 'origin/main' }}
-      PADDOCK_AUDIT_ENFORCE: ${{ vars.PADDOCK_AUDIT_ENFORCE }}
-    steps:
-      # The whole history: the merge base can be any older commit.
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-          fetch-depth: 0
-      - uses: ./.gitea/actions/setup-rust
-        with:
-          sccache-s3-access-key-id: ${{ secrets.PADDOCK_SCCACHE_S3_ACCESS_KEY_ID }}
-          sccache-s3-secret-access-key: ${{ secrets.PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY }}
-      - name: Audit against the merge base
-        run: |
-          enforce=()
-          if [ "${PADDOCK_AUDIT_ENFORCE:-}" = "1" ]; then enforce=(--enforce); fi
-          ./dev audit compare --base "$PADDOCK_BASE_REF" ${enforce[@]+"${enforce[@]}"}
-      - uses: ./.gitea/actions/sccache-stats
-        if: always()
 
   # One leg per affected app and operating system (ADR 0014 §6): the app's CI contract (apps/<app>/paddock.ci.json) through
   # the shared app-gates action, only the halves the change reaches (rust, ui). Linux (the paddock-ci image) carries the
@@ -1200,75 +1307,66 @@ jobs:
         with:
           mode: release
 
-  # The developer and CI tool (ADR 0022): its own Cargo workspace and lockfile, tested on every OS it runs on. Linux runs in the
-  # paddock-ci image (git, Node for the golden test's live oracle, nextest); Windows and macOS run on the host.
-  paddock-dev:
-    name: paddock-dev (${{ matrix.os }})
+  # Secret scan (.gitea/actions/gitleaks): the tree and the commits this branch adds on top of origin/main. It runs on every change,
+  # whatever the plan reaches, because a secret is a leak wherever it is; .gitleaks.toml lists the known fixtures, one entry each.
+  gitleaks:
+    name: gitleaks (secret scan)
     needs: [plan]
-    if: ${{ needs.plan.outputs.paddock_dev == 'true' && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["paddock-dev"]'), 'paddock-dev') }}
-    strategy:
-      fail-fast: false
-      matrix:
-        # Every OS; a rerun of a run's failures (since_run) only the failed legs, each with the filter of its failed tests.
-        include: ${{ fromJSON(needs.plan.outputs.paddock_dev_legs) }}
-    runs-on: ${{ matrix.os }}
-    container: ${{ matrix.os == 'ubuntu-latest' && 'dev.decryptology.net/decryp7/paddock-ci:v3' || '' }}
+    if: ${{ contains(fromJSON(needs.plan.outputs.rerun_jobs || '["gitleaks"]'), 'gitleaks') }}
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          # The history scan reads origin/main..HEAD.
+          fetch-depth: 0
+      - uses: ./.gitea/actions/gitleaks
+
+  # The short Linux checks in one job (user, 2026-11-25): each took under 2 minutes as a job of its own (C99 0.7-0.9, the heavy tool
+  # 0.6-1.2, audit 0.9; runs 8226 and 9021), mostly container start, checkout and setup, and each held a Linux lane. The secret scan
+  # stays a job of its own that no plan output can switch off (scripts/gitleaks-config.test.mjs).
+  # Each check is a step that runs when its own job ran before, and a failed check does not skip the next (`!cancelled()`). Last in
+  # the file, so it starts after the long jobs (see paddock-dev's comment).
+  #  - Conformance C99 (ADR 0057 §3, rule 72): no shipped process uses the macOS Keychain. Planned on its own inputs (every Cargo.toml
+  #    and Cargo.lock under apps/ and crates/, the scanned sources, capabilities, paddock.ci.json, the check's code;
+  #    tools/paddock-dev/src/plan.rs C99_INPUT), because it needs cargo and the registry (`cargo fetch`, `cargo tree` for both Apple
+  #    triples) and the conformance job does not. Every release path runs the same action, scoped to its app.
+  #  - Dependency audits judged against main (docs/ci-schedules.md "Dependency audits"): an advisory that appeared outside the change
+  #    (RUSTSEC-2026-0543 run 8214, GHSA-fc5q-39xc-vjpf run 8225) is a warning here, decided on main by the nightly `audit` job; only
+  #    an advisory this change adds fails. `./dev audit compare` audits the merge base's lockfiles with the same tools (no list is kept,
+  #    ER-46). Report-only until the repository variable PADDOCK_AUDIT_ENFORCE is 1 (ER-41: set after its first green run, recorded in
+  #    docs/ci-schedules.md); the plain audit steps of the other jobs stay blocking until then. It runs on every event, as its job did.
+  #  - The heavy tool (tools/throttle): the machine-wide heavy-step lock. Its own Cargo workspace, when the plan marks `tools`; a Linux
+  #    container, so no build-folder action (the build folder is tools/throttle/target in the container, git-ignored).
+  quick:
+    name: quick checks (C99, audit, heavy tool)
+    needs: [plan]
+    if: ${{ !cancelled() && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["quick"]'), 'quick') }}
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
     defaults:
       run:
-        working-directory: tools/paddock-dev
         shell: bash
     env:
-      # A run for a tag builds the tool from source (ADR 0022: release and tag jobs bypass every cache); other runs may download it.
-      PADDOCK_DEV_DOWNLOAD: ${{ (inputs.release == true || startsWith(github.ref, 'refs/tags/')) && '0' || '' }}
-      # Read credential for ./dev's prebuilt download (ADR 0022 R0b), only in the jobs that run ./dev (job-isolation).
+      # setup-rust runs ./dev (docs/plans/ci-in-rust.md): the read credential, and a tag or release run builds the tool from source.
       PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+      PADDOCK_DEV_DOWNLOAD: ${{ (inputs.release == true || startsWith(github.ref, 'refs/tags/')) && '0' || '' }}
+      # The merge base's reference: the dispatch's `base` (the commit of main a train is built on), else origin/main (as the conformance job).
+      PADDOCK_BASE_REF: ${{ inputs.base || 'origin/main' }}
+      PADDOCK_AUDIT_ENFORCE: ${{ vars.PADDOCK_AUDIT_ENFORCE }}
       CARGO_TERM_COLOR: always
     steps:
-      # Linux: the whole tree in the container. Hosts: only the bootstrap folders (the actions, their scripts, paddock-dev's inputs)
-      # as a partial clone; the kept-clone step below brings the slot's own clone to this commit (conformance/ci/checkout-profiles.txt).
+      # The whole history: the audit's merge base can be any older commit.
       - uses: actions/checkout@v4
-        if: runner.os == 'Linux'
         with:
           persist-credentials: false
           fetch-depth: 0
 
-      - uses: actions/checkout@v4
-        if: runner.os != 'Linux'
-        with:
-          persist-credentials: false
-          sparse-checkout: |
-            .cargo
-            .gitea
-            conformance
-            scripts
-            tools
-            crates
-          filter: blob:none
-
-      - name: Git bash on PATH (Windows)
-        if: runner.os == 'Windows'
-        shell: cmd
-        working-directory: .
-        run: |
-          if not exist "%ProgramFiles%\Git\bin\bash.exe" (echo Git for Windows is not installed on this runner & exit /b 1)
-          echo %ProgramFiles%\Git\bin>>"%GITHUB_PATH%"
-
-      # CARGO_BUILD_JOBS: this runner's share of the host's cores (before job-isolation, which builds paddock-dev).
+      # Set up first and unconditionally, so a failed check never leaves the steps after it without their toolchain.
       - uses: ./.gitea/actions/build-jobs
-
-      # A slot of the host (job isolation; after Git bash on Windows): its kept folders and ports are this job's alone.
-      - uses: ./.gitea/actions/job-isolation
-
-      - uses: ./.gitea/actions/kept-clone
-        if: runner.os != 'Linux'
-        with:
-          name: paddock-checkout-${{ runner.os }}
-          profile: lean
-
-      - uses: ./.gitea/actions/build-folder
-        with:
-          workspace: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/paddock-dev
-          name: paddock-${{ github.job }}
 
       - uses: ./.gitea/actions/setup-rust
         with:
@@ -1276,83 +1374,71 @@ jobs:
           sccache-s3-access-key-id: ${{ secrets.PADDOCK_SCCACHE_S3_ACCESS_KEY_ID }}
           sccache-s3-secret-access-key: ${{ secrets.PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY }}
 
-      - uses: ./.gitea/actions/host-tools
+      # The keychain action clears RUSTC_WRAPPER for its own cargo calls (no compile cache), as in its own job.
+      - uses: ./.gitea/actions/keychain
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && needs.plan.outputs.c99 == 'true' }}
 
-      # The tool's lockfile must follow the lockfiles of the crates/ it uses by path (they change dependencies in their own PRs).
-      # A leg with a filter (a rerun of failed tests) runs only the tests: its other steps passed in the earlier run.
-      - name: Lockfile is current
-        if: ${{ !matrix.filter }}
-        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/paddock-dev
+      - name: Audit against the merge base
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' }}
+        run: |
+          enforce=()
+          if [ "${PADDOCK_AUDIT_ENFORCE:-}" = "1" ]; then enforce=(--enforce); fi
+          ./dev audit compare --base "$PADDOCK_BASE_REF" ${enforce[@]+"${enforce[@]}"}
+
+      - name: heavy tool, lockfile is current
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && needs.plan.outputs.tools == 'true' }}
+        working-directory: tools/throttle
         run: |
           cargo metadata --locked --format-version 1 > /dev/null || {
-            echo "::error::tools/paddock-dev/Cargo.lock is stale, run cargo update -w in tools/paddock-dev and commit it"; exit 1; }
+            echo "::error::tools/throttle/Cargo.lock is stale, run cargo update -w in tools/throttle and commit it"; exit 1; }
 
-      - name: Format
-        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && !matrix.filter }}
-        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/paddock-dev
+      - name: heavy tool, format
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && needs.plan.outputs.tools == 'true' }}
+        working-directory: tools/throttle
         run: cargo fmt --check
 
-      - name: Clippy
-        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && !matrix.filter }}
-        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/paddock-dev
+      - name: heavy tool, clippy
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && needs.plan.outputs.tools == 'true' }}
+        working-directory: tools/throttle
         run: cargo clippy --all-targets --locked -- -D warnings
 
-      # The inputs and generator tests read the cargo metadata of tools/heavy offline: its packages must be in
-      # the job's cargo home, not only paddock-dev's (heavy's paddock-env dependency was missing on 2026-11-13, run 8050).
-      - name: Fetch the other tools' dependencies
-        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' }}
-        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools
-        run: |
-          for t in heavy; do
-            (cd "$t" && cargo fetch --locked) || {
-              echo "::error::cargo fetch --locked failed in tools/$t, so the offline metadata tests cannot read it. Next step: run it on the runner to see why"; exit 1; }
-          done
+      - name: heavy tool, tests
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && needs.plan.outputs.tools == 'true' }}
+        working-directory: tools/throttle
+        run: cargo nextest run --profile ci --locked --no-fail-fast
 
-      - name: Tests
-        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' }}
-        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/paddock-dev
-        env:
-          FILTER: ${{ matrix.filter }}
-          # OS-scoped tests (tools/paddock-dev/paddock.ci.json `hostTests`, ./dev plan --ci): the modules this host leg tests, with a member
-          # run's reached packages. Linux tests everything.
-          TEST_FILTER: ${{ matrix.test_filter }}
-          TEST_SKIP: ${{ matrix.test_skip }}
-          PADDOCK_TEST_COST_REPORT: ${{ runner.temp }}/test-cost-${{ github.run_id }}-${{ github.run_attempt }}.jsonl
-          # A failed-only round (since_run): each failed test of FILTER must still select a test (./dev ci rerun-check), never a warning.
-          RERUN: ${{ github.event.inputs.since_run }}
-        run: |
-          # The plan's selection has no test of this workspace (its gates still run above): nothing to test, said, never a filter that selects none.
-          if [ -z "$FILTER" ] && [ "$TEST_SKIP" = true ]; then echo "::notice::this run's selection holds no test of paddock-dev: nothing to test here"; exit 0; fi
-          if [ -n "$FILTER" ] && [ -n "$RERUN" ]; then
-            cargo nextest list --locked -E "$FILTER" --message-format json > "$RUNNER_TEMP/rerun-listed.json" || { echo "::error::rerun-check: cargo nextest list failed. Next: read the build error above"; exit 1; }
-            "${PADDOCK_WORKSPACE:-$GITHUB_WORKSPACE}/dev" ci rerun-check --filter "$FILTER" --listed "$RUNNER_TEMP/rerun-listed.json" || exit 1
-          fi
-          filter=()
-          if [ -n "$FILTER" ]; then echo "::notice::nextest runs only the selected tests (a rerun's failed tests, or the plan's smoke set or affected targets): $FILTER"; filter=(-E "$FILTER" --no-tests=warn)
-          elif [ -n "$TEST_FILTER" ]; then echo "::notice::nextest filter (hostTests, and the packages this change reaches in a member run): $TEST_FILTER"; filter=(-E "$TEST_FILTER" --no-tests=fail); fi
-          cargo nextest run --profile ci --locked --no-fail-fast ${filter[@]+"${filter[@]}"}
-
-      # ADR 0121, report-only (ER-41): the cost-class charges the tests recorded; a ::warning:: and a job-summary row per test outside its class.
-      - name: Test cost report
-        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' }}
-        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}
-        run: ./dev ci test-cost --wall-asserts --report "$RUNNER_TEMP/test-cost-${{ github.run_id }}-${{ github.run_attempt }}.jsonl"
-
-      # Licences, advisories, sources (tools/paddock-dev/deny.toml, the crates' rules); the image has cargo-deny.
-      - name: Deny
-        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && runner.os == 'Linux' && !matrix.filter }}
-        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/paddock-dev
+      - name: heavy tool, deny
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && needs.plan.outputs.tools == 'true' }}
+        working-directory: tools/throttle
         run: cargo deny check
 
-      # The kept build folder stays within its cap (this job's own folder only, after the builds).
-      - uses: ./.gitea/actions/prune-build-folder
-        if: always() && runner.os != 'Linux'
+      # The tool builds with a plain Rust toolchain: no GTK -sys crate may reach it through the shared crates (the workspace
+      # hack once pulled gtk-sys into paddock-proc on x86_64 Linux, so `cargo install` of heavy needed GTK headers). The
+      # check reads the dependency graph for the Linux target, so it holds on an image that happens to have GTK installed.
+      - name: heavy tool, no GTK in its Linux build
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && needs.plan.outputs.tools == 'true' }}
+        working-directory: .
+        run: |
+          # bash -e -o pipefail: every command that may legitimately fail is handled by hand. grep exits 1 when it finds nothing,
+          # which is the success case here.
+          rc=0
+          for tool in throttle; do
+            tree=$(cd "tools/$tool" && cargo tree --locked --target x86_64-unknown-linux-gnu -e normal,build --prefix none) || {
+              echo "::error::cargo tree failed for tools/$tool (see the lines above). Run it in tools/$tool with the same arguments."
+              rc=1; continue; }
+            # ER-33: the probe must be able to see the thing. The tool links paddock-proc, where the hack's GTK crates arrived.
+            echo "$tree" | grep -q '^paddock-proc ' || {
+              echo "::error::check broken: the dependency graph of tools/$tool has no paddock-proc, so a GTK crate there would not be seen."
+              rc=1; continue; }
+            hits=$(echo "$tree" | grep -E '^(gtk|gdk|gio|glib|gobject|pango|cairo|atk|gdk-pixbuf|soup|webkit2gtk|javascriptcore-rs)[a-z0-9-]*-(sys|sys-rs) ' | sort -u || true)
+            if [ -n "$hits" ]; then
+              echo "::error::tools/$tool depends on GTK -sys crates on x86_64 Linux: $(echo "$hits" | tr '\n' ' '). Add them to crates/.config/hakari.toml traversal-excludes, run cargo hakari generate and refresh the lockfiles."
+              rc=1
+            else
+              echo "tools/$tool: no GTK -sys crate in the x86_64 Linux graph"
+            fi
+          done
+          exit "$rc"
 
       - uses: ./.gitea/actions/sccache-stats
         if: always()
-
-      # The slot goes back last: the prune and the sccache server's stop act on this slot's folders and port.
-      - uses: ./.gitea/actions/job-isolation
-        if: always()
-        with:
-          mode: release

@@ -60,10 +60,10 @@ fn run_if_requested_marks_a_plain_process_and_serves_in_the_guardian_process() {
         String::from_utf8_lossy(&plain.stdout).contains("hook-empty=true"),
         "{plain:?}"
     );
-    // As the guardian, with no owner named, it refuses to serve and exits (2, or 3 for root) before printing.
+    // As the guardian, with no owner named, it refuses to serve and exits (REFUSED_EXIT, or 3 for root) before printing.
     let guardian = probe(true);
     assert!(
-        matches!(guardian.status.code(), Some(2 | 3)),
+        matches!(guardian.status.code(), Some(REFUSED_EXIT | 3)),
         "{guardian:?}"
     );
     assert!(!String::from_utf8_lossy(&guardian.stdout).contains("hook-empty"));
@@ -530,6 +530,16 @@ fn guard_owner_process() {
         return;
     };
     enable_in_test_binary(ENTRY);
+    if std::env::var_os(OWNER_DIES_ENV).is_some() {
+        let mut cmd = crate::command("/bin/sleep");
+        // Not this process's output: the test reads that to its end, which must come with this process's death.
+        cmd.arg("60").stdout(Stdio::null()).stderr(Stdio::null());
+        let first = folders.split(':').next().unwrap_or_default();
+        let s = Supervised::spawn_owning_folder(cmd, None, Path::new(first)).unwrap();
+        println!("child {}", s.id().unwrap());
+        // SAFETY: raise takes a signal number; SIGKILL ends this process at once, so none of its clean-up runs.
+        unsafe { libc::raise(libc::SIGKILL) };
+    }
     let mut held = Vec::new();
     for folder in folders.split(':') {
         let mut cmd = crate::command("/bin/sh");
@@ -547,6 +557,25 @@ fn guard_owner_process() {
     let _ = std::io::stdin().read_line(&mut String::new());
     std::process::exit(0);
 }
+
+/// What a failed guard left (ER-27): each process's state, each folder, and the guardian's log.
+fn what_is_left(ids: &[ProcessId], folders: &[PathBuf], log: &Path) -> String {
+    let mut lines: Vec<String> = ids
+        .iter()
+        .map(|id| format!("{id}: {:?}", run_state(*id)))
+        .collect();
+    lines.extend(
+        folders
+            .iter()
+            .map(|f| format!("{}: exists {}", f.display(), f.exists())),
+    );
+    let text = std::fs::read_to_string(log).unwrap_or_default();
+    format!("{}\nthe guardian's log:\n{text}", lines.join("\n"))
+}
+
+/// Set for [`guard_owner_process`]: it starts one guarded child for the first folder, names it, and kills itself the moment the
+/// spawn returns, before its guardian could have done anything else.
+const OWNER_DIES_ENV: &str = "PADDOCK_GUARD_TEST_OWNER_DIES";
 
 /// [`fail`] unless `ok`.
 fn fail_unless(ok: bool, ids: &[ProcessId], why: &str) {
@@ -665,7 +694,10 @@ fn owner_killed(act_as_user: bool) {
     if !gone {
         fail(
             &ids,
-            "the orphaned children's groups did not end, or their folders stayed",
+            &format!(
+                "the orphaned children's groups did not end, or their folders stayed\n{}",
+                what_is_left(&ids, &folders, &log)
+            ),
         );
     }
     // The guardian logs a group after it removed its folder: wait for the lines, not for the folders alone.
@@ -679,6 +711,57 @@ fn owner_killed(act_as_user: bool) {
     // the guardian must read that as emptied (the old code looked 10 s per group and logged "still had members").
     assert_eq!(text.matches(" (emptied) and removed ").count(), 3, "{text}");
     assert!(!text.contains("still had members"), "{text}");
+}
+
+/// The owner dies the moment its guarded spawn returns (no reader of its output, no wait): the guardian must already serve it.
+/// Before the guardian said it served, the spawn returned while the guardian was still starting; the guardian then found its
+/// parent was init, refused, and the child and its folder stayed (the whole-workspace Linux run, 2026-11-25).
+#[test]
+fn an_owner_killed_the_moment_its_guarded_spawn_returns_leaves_no_child() {
+    let dir = tempfile::tempdir().unwrap();
+    let folder = dir.path().join("profile");
+    std::fs::create_dir_all(&folder).unwrap();
+    let log = dir.path().join("guardian.log");
+    let mut owner = crate::command(std::env::current_exe().unwrap())
+        .args([OWNER_TEST, "--exact", "--nocapture"])
+        .env(ACT_AS_USER_ENV, "1")
+        .env(OWNER_FOLDERS_ENV, &folder)
+        .env(OWNER_DIES_ENV, "1")
+        .env(LOG_ENV, &log)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut ids = Vec::new();
+    for line in BufReader::new(owner.stdout.take().unwrap()).lines() {
+        let line = line.unwrap();
+        if let ["child", c] = line.split_whitespace().collect::<Vec<_>>()[..] {
+            // conformance: recorded-pid — the guardian or this test ends it; paddock-proc's tests cannot use paddock-testkit-start (a cycle)
+            ids.extend(ProcessId::of(c.parse().unwrap()));
+        }
+    }
+    let status = owner.wait().unwrap();
+    let folders = [folder];
+    fail_unless(
+        ids.len() == 1
+            && std::os::unix::process::ExitStatusExt::signal(&status) == Some(libc::SIGKILL),
+        &ids,
+        &format!("the owner did not start its child and kill itself ({status}, children {ids:?})"),
+    );
+    let gone = paddock_testkit::wait::poll_until_within(paddock_testkit::wait::HANG_GUARD, || {
+        ids.iter().all(|id| run_state(*id) == RunState::Exited)
+            && folders.iter().all(|f| !f.exists())
+    });
+    if !gone {
+        fail(
+            &ids,
+            &format!(
+                "the child of an owner killed as its spawn returned stayed, or its folder did\n{}",
+                what_is_left(&ids, &folders, &log)
+            ),
+        );
+    }
 }
 
 /// A root process registers nothing (ADR 0076 amendment 2026-11-09); any other user's does.
@@ -708,10 +791,11 @@ fn an_owner_that_ends_its_child_itself_keeps_the_folder_and_ends_the_keeper() {
     let Some(keeper) = keeper else {
         fail(&[child], "the child was not registered");
     };
+    // Keeper first (ADR 0119 WP-1, review round 2): the keeper leads the registered group and the child starts inside it.
     assert_eq!(
-        crate::sys::group_of(keeper.pid()),
-        Some(child.pid()),
-        "the keeper holds the child's group"
+        crate::sys::group_of(child.pid()),
+        Some(keeper.pid()),
+        "the child starts in the keeper's registered group"
     );
     s.kill();
     assert_eq!(run_state(child), RunState::Exited);
@@ -908,7 +992,7 @@ fn refused_guardian(owner_env: Option<String>, stdin: Stdio) -> (Option<i32>, St
 #[test]
 fn a_guardian_without_an_owner_refuses_and_says_so() {
     let (code, text) = refused_guardian(None, Stdio::null());
-    assert_eq!(code, Some(2));
+    assert_eq!(code, Some(REFUSED_EXIT));
     assert!(text.contains("names no owner"), "{text}");
 }
 
@@ -916,10 +1000,13 @@ fn a_guardian_without_an_owner_refuses_and_says_so() {
 fn a_guardian_whose_input_is_not_a_pipe_refuses_and_says_so() {
     // The owner is right (this process, which started it), but its standard input is a null device, not the owner's pipe.
     let (code, text) = refused_guardian(Some(identity_text(me())), Stdio::null());
-    assert_eq!(code, Some(2));
+    assert_eq!(code, Some(REFUSED_EXIT));
     assert!(text.contains("standard input is not a pipe"), "{text}");
 }
 
+/// A guardian that ended is started again for the next child. The test kills the process-wide guardian, so it needs a process of
+/// its own: nextest runs every test in one (the guardian-as-user step and the crates job do), and plain libtest would let this
+/// kill take the keepers of other tests' children with it (CI run 9011).
 #[test]
 fn a_guardian_that_ended_is_started_again_for_the_next_child() {
     enable_in_test_binary(ENTRY);
@@ -952,4 +1039,354 @@ fn the_guardians_plumbing_is_not_counted_as_the_callers_starts() {
     let _ = plumbing("true");
     let _ = crate::command("true");
     assert_eq!(counter.starts(), 1, "only the caller's own command counts");
+}
+
+// ---- the guardian serves before the first child exists (ADR 0119 WP-1, review P1-4) ----
+
+const GATE_OWNER_ENV: &str = "PADDOCK_GUARD_TEST_GATE_OWNER";
+const GATE_OWNER_TEST: &str = "guardian::unix::tests::gate_owner_process";
+const GATE_MARK: &str = "PADDOCK_GUARD_TEST_GATE_MARK";
+
+/// Not a test: an owner that starts one guarded child carrying [`GATE_MARK`], while its guardian is held at the test gate.
+#[test]
+fn gate_owner_process() {
+    let Ok(token) = std::env::var(GATE_OWNER_ENV) else {
+        return;
+    };
+    enable_in_test_binary(ENTRY);
+    let mut cmd = crate::testchild::child(crate::testchild::Mode::Sleep);
+    cmd.env(GATE_MARK, &token);
+    let s = Supervised::spawn(cmd);
+    println!("started {}", s.is_ok());
+    let _ = std::io::stdin().read_line(&mut String::new());
+    std::process::exit(0);
+}
+
+/// The owner is killed while its first guarded start waits for the guardian (held at the gate, before its owner check). The
+/// guardian then finds pid 1 as its parent and refuses: a child started before the guardian served would run on unguarded.
+/// The guardian must serve before any child exists, so nothing carrying the owner's mark is left.
+#[test]
+fn an_owner_killed_while_its_guardian_starts_has_started_no_child() {
+    let dir = tempfile::tempdir().unwrap();
+    let gate = dir.path().join("gate");
+    let token = format!(
+        "gate-{}-{}",
+        std::process::id(),
+        crate::own::now().as_micros()
+    );
+    let mut owner = crate::command(std::env::current_exe().unwrap())
+        .args([GATE_OWNER_TEST, "--exact", "--nocapture"])
+        .env(ACT_AS_USER_ENV, "1")
+        .env(GATE_ENV, &gate)
+        .env(GATE_OWNER_ENV, &token)
+        .env(LOG_ENV, dir.path().join("guardian.log"))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let owner_id = ProcessId::of(owner.id()).unwrap();
+    let waiting = dir.path().join("gate.waiting");
+    let held = paddock_testkit::wait::poll_until_within(paddock_testkit::wait::HANG_GUARD, || {
+        waiting.exists()
+    });
+    if !held {
+        fail(&[owner_id], "the owner's guardian never reached the gate");
+    }
+    owner.kill().unwrap();
+    owner.wait().unwrap();
+    std::fs::write(&gate, b"").unwrap();
+    let since =
+        crate::StartTime::from_micros(owner_id.started().as_micros().saturating_sub(1_000_000));
+    let mut unit = crate::own::Unit::new(since, std::process::id());
+    unit.set_marker(GATE_MARK, &token);
+    let left: Vec<ProcessId> = crate::own::members(&unit.look(), &unit)
+        .iter()
+        .map(|m| m.id)
+        .collect();
+    fail_unless(
+        left.is_empty(),
+        &left,
+        "a child was started before the guardian served, and ran on after the owner was killed",
+    );
+}
+
+// ---- the owner's wait for the guardian's answer (review P2-2) ----
+
+#[test]
+fn the_owner_reads_serving_past_other_lines_and_end_of_file_as_a_refusal() {
+    let (r, mut w) = std::io::pipe().unwrap();
+    w.write_all(format!("running 1 test\n{SERVING}\n").as_bytes())
+        .unwrap();
+    assert_eq!(serving(r, paddock_testkit::wait::HANG_GUARD), Serving::Yes);
+    let (r, mut w) = std::io::pipe().unwrap();
+    w.write_all(b"refused, no answer\n").unwrap();
+    drop(w);
+    assert_eq!(
+        serving(r, paddock_testkit::wait::HANG_GUARD),
+        Serving::Refused
+    );
+}
+
+#[test]
+fn a_guardian_that_never_answers_ends_the_wait_at_its_bound() {
+    let (r, w) = std::io::pipe().unwrap();
+    // conformance: expiry-under-test — the bound itself is what this test examines
+    let bound = Duration::from_millis(100);
+    assert_eq!(serving(r, bound), Serving::NoAnswer);
+    drop(w);
+}
+
+// ---- no window between a child's start and its registration (review round 2, P1-A) ----
+
+const HOLD_OWNER_ENV: &str = "PADDOCK_GUARD_TEST_HOLD_OWNER";
+const HOLD_OWNER_TEST: &str = "guardian::unix::tests::hold_owner_process";
+
+/// Not a test: an owner whose supervised start holds right after its child exists ([`HOLD_ENV`]).
+#[test]
+fn hold_owner_process() {
+    let Ok(token) = std::env::var(HOLD_OWNER_ENV) else {
+        return;
+    };
+    enable_in_test_binary(ENTRY);
+    let mut cmd = crate::testchild::child(crate::testchild::Mode::Sleep);
+    cmd.env(GATE_MARK, &token);
+    let s = Supervised::spawn(cmd);
+    println!("started {}", s.is_ok());
+    let _ = std::io::stdin().read_line(&mut String::new());
+    std::process::exit(0);
+}
+
+/// The owner is killed after its child exists and before its start returned: the child must already be in a group the
+/// guardian holds, so the guardian ends it. A child that was registered only after its start ran on (review round 2, P1-A).
+#[test]
+fn an_owner_killed_right_after_its_child_exists_leaves_no_child() {
+    let dir = tempfile::tempdir().unwrap();
+    let hold = dir.path().join("hold");
+    let token = format!(
+        "hold-{}-{}",
+        std::process::id(),
+        crate::own::now().as_micros()
+    );
+    let mut owner = crate::command(std::env::current_exe().unwrap())
+        .args([HOLD_OWNER_TEST, "--exact", "--nocapture"])
+        .env(ACT_AS_USER_ENV, "1")
+        .env(HOLD_ENV, &hold)
+        .env(HOLD_OWNER_ENV, &token)
+        .env(LOG_ENV, dir.path().join("guardian.log"))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        // conformance: test-steps — every failure path below ends the owner and what carries its mark before it fails
+        .spawn()
+        .unwrap();
+    let owner_id = ProcessId::of(owner.id()).unwrap();
+    let waiting = dir.path().join("hold.waiting");
+    if !paddock_testkit::wait::poll_until_within(paddock_testkit::wait::HANG_GUARD, || {
+        waiting.exists()
+    }) {
+        fail(
+            &[owner_id],
+            "the owner's start never reached the hold point",
+        );
+    }
+    owner.kill().unwrap();
+    owner.wait().unwrap();
+    let since =
+        crate::StartTime::from_micros(owner_id.started().as_micros().saturating_sub(1_000_000));
+    let mut unit = crate::own::Unit::new(since, std::process::id());
+    unit.set_marker(GATE_MARK, &token);
+    let marked = || -> Vec<ProcessId> {
+        crate::own::members(&unit.look(), &unit)
+            .iter()
+            .map(|m| m.id)
+            .collect()
+    };
+    let gone = paddock_testkit::wait::poll_until_within(paddock_testkit::wait::HANG_GUARD, || {
+        marked().is_empty()
+    });
+    let left = marked();
+    fail_unless(
+        gone,
+        &left,
+        "the child started just before its owner was killed ran on: it was not yet in a guarded group",
+    );
+}
+
+// ---- a guarded child's group is ended through its keeper (review round 3, P1-1) ----
+
+/// A guarded child (its group is the keeper's, not its own) that left a helper in that group and exited, with the helper's
+/// identity. `bound` false takes the child out of the map of guarded children (the control: a child `kill_tree` cannot map
+/// to its group). The reader of the child's output comes back too: the helper shares that pipe, and a closed pipe would end
+/// it (its harness's first write fails), which is not the end under test.
+fn guarded_child_with_a_helper(
+    bound: bool,
+) -> (
+    Supervised,
+    ProcessId,
+    ProcessId,
+    BufReader<std::process::ChildStdout>,
+) {
+    enable_in_test_binary(ENTRY);
+    let _acting = ActAsUser::here();
+    let mut cmd = crate::testchild::child(crate::testchild::Mode::Leave);
+    cmd.stdout(Stdio::piped());
+    let mut s = Supervised::spawn(cmd).unwrap();
+    let child = s.process().unwrap();
+    assert!(s.guard.is_some(), "the child is guarded");
+    if !bound {
+        s.guard.as_mut().unwrap().unbind();
+    }
+    // libtest prints its own lines first: read up to the child's line naming its helper.
+    let mut reader = BufReader::new(s.take_stdout().unwrap());
+    let mut line = String::new();
+    let helper_pid: u32 = loop {
+        line.clear();
+        if reader.read_line(&mut line).unwrap_or(0) == 0 {
+            fail(&[child], "the child ended before it named its helper");
+        }
+        if let Some(pid) = crate::testchild::lines(&line)
+            .first()
+            .and_then(|l| l.strip_prefix("pid "))
+            .and_then(|p| p.trim().parse().ok())
+        {
+            break pid;
+        }
+    };
+    // conformance: recorded-pid — the helper sleeps in the child's group for its lifetime; paddock-proc's tests cannot use paddock-testkit-start (a cycle)
+    let helper =
+        ProcessId::of(helper_pid).unwrap_or_else(|| fail(&[child], "the helper has no identity"));
+    let exited =
+        paddock_testkit::wait::poll_until_within(paddock_testkit::wait::HANG_GUARD, || {
+            s.exit_status().is_some()
+        });
+    fail_unless(
+        exited,
+        &[child, helper],
+        "the child did not exit after starting its helper",
+    );
+    (s, child, helper, reader)
+}
+
+/// The map path (review rounds 3 and 4): `kill_tree` of a guarded child ends the helper it left in its group by itself,
+/// before the owner's release runs. Callers (Dyno's cancel, the browser watchdogs, the memory cap, the registry) end a child
+/// with `kill_tree(id)`.
+#[test]
+fn kill_tree_of_a_guarded_child_ends_the_helper_it_left_in_its_group() {
+    let (mut s, child, helper, _out) = guarded_child_with_a_helper(true);
+    kill_tree(child);
+    let gone = paddock_testkit::wait::poll_until_within(paddock_testkit::wait::HANG_GUARD, || {
+        run_state(helper) == RunState::Exited
+    });
+    fail_unless(
+        gone,
+        &[helper],
+        "kill_tree of the guarded child left its helper running",
+    );
+    s.wait();
+}
+
+/// The control: a child the map does not know keeps its helper through `kill_tree` (its pid names no group), and the
+/// owner's release (`wait`) ends it through the keeper.
+#[test]
+fn a_child_kill_tree_cannot_map_keeps_its_helper_until_the_release_ends_the_group() {
+    let (mut s, child, helper, _out) = guarded_child_with_a_helper(false);
+    kill_tree(child);
+    let survived = run_state(helper) == RunState::Running;
+    s.wait();
+    let gone = paddock_testkit::wait::poll_until_within(paddock_testkit::wait::HANG_GUARD, || {
+        run_state(helper) == RunState::Exited
+    });
+    fail_unless(
+        gone,
+        &[helper],
+        "the release did not end the helper in the guarded group",
+    );
+    assert!(
+        survived,
+        "without the map, kill_tree reached the helper: the test above would prove nothing"
+    );
+}
+
+/// A recorder of group signals over the real OS (the guardian's map and tombstones included).
+struct Recorder(Mutex<Vec<u32>>);
+
+impl crate::tree::Os for Recorder {
+    fn table(&self) -> crate::Table {
+        crate::tree::RealOs.table()
+    }
+    fn start_of(&self, pid: u32) -> Option<crate::StartTime> {
+        crate::tree::RealOs.start_of(pid)
+    }
+    fn end_group(&self, root: u32) {
+        self.0.lock().unwrap().push(root);
+    }
+    fn kill_pid(&self, _pid: u32) -> bool {
+        false
+    }
+    fn pinned_group(&self, root: ProcessId) -> Option<(u32, ProcessId)> {
+        crate::tree::RealOs.pinned_group(root)
+    }
+    fn was_guarded(&self, root: ProcessId) -> bool {
+        crate::tree::RealOs.was_guarded(root)
+    }
+}
+
+/// Rule 53 (round 4, P2-2): a caller that still holds a guarded child's identity after the child was reaped and released
+/// never gets the child's pid signalled as a group: that pid may name a stranger's group by then. The control is the same
+/// end of an identity that was never guarded, which does signal it.
+#[test]
+fn a_released_guarded_child_is_never_signalled_as_a_group() {
+    enable_in_test_binary(ENTRY);
+    let _acting = ActAsUser::here();
+    let mut cmd = crate::testchild::child(crate::testchild::Mode::Exit3);
+    cmd.stdout(Stdio::null());
+    let mut s = Supervised::spawn(cmd).unwrap();
+    let id = s.process().unwrap();
+    assert!(s.guard.is_some(), "the child is guarded");
+    s.wait();
+    let rec = Recorder(Mutex::new(Vec::new()));
+    crate::tree::kill_tree_on(&rec, id, false, None);
+    assert!(
+        rec.0.lock().unwrap().is_empty(),
+        "a released guarded child's pid was signalled as a group"
+    );
+    let stranger = ProcessId::new(
+        id.pid(),
+        crate::StartTime::from_micros(id.started().as_micros() + 1),
+    );
+    crate::tree::kill_tree_on(&rec, stranger, false, None);
+    assert_eq!(
+        *rec.0.lock().unwrap(),
+        vec![id.pid()],
+        "the control: an unguarded gone root's group is signalled"
+    );
+}
+
+/// The reap of a guardian that lost a start race is bounded (review round 3, P2-2): one that ends is reaped, one that does not
+/// is ended through its handle at the bound.
+#[test]
+fn a_reap_is_bounded_and_ends_a_process_that_does_not_end() {
+    let mut quick = crate::testchild::child(crate::testchild::Mode::Exit3)
+        .stdout(Stdio::null())
+        // conformance: test-steps — reap_within, the call under test, waits for it and ends it at its bound on every path
+        .spawn()
+        .unwrap();
+    assert!(reap_within(
+        &mut quick,
+        paddock_testkit::wait::HANG_GUARD,
+        "a quick child"
+    ));
+    let mut stays = crate::testchild::child(crate::testchild::Mode::Sleep)
+        // conformance: test-steps — reap_within, the call under test, ends it through its handle at the bound and reaps it
+        .spawn()
+        .unwrap();
+    let id = ProcessId::of(stays.id()).unwrap();
+    // conformance: expiry-under-test — the bound itself is what this test examines
+    assert!(!reap_within(
+        &mut stays,
+        Duration::from_millis(100),
+        "a child that stays"
+    ));
+    assert_eq!(run_state(id), RunState::Exited);
 }

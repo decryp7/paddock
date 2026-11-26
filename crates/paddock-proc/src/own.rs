@@ -8,11 +8,14 @@
 //! - [`become_child_subreaper`] (Linux): orphans of this process's descendants are re-parented to it instead of to init,
 //!   so they stay in its tree.
 //! - [`reap_zombie`] (Linux): collects an ended orphan that was re-parented to this process.
+//! - [`Owned`], [`Unit`], [`members`] (ADR 0112): the owner trait and the pure rule over [`look`]'s rows that says which processes
+//!   belong to one unit of work (see `owner.rs`).
 //! - [`KillOnClose`] (Windows): a kill-on-close job that a child, and everything it starts, joins.
 //!
 //! Nothing here signals a process except [`KillOnClose::terminate`], which acts through a job handle the caller owns.
 
 use crate::identity::{ProcessId, StartTime};
+pub use crate::owner::{Member, Owned, Unit, Waited, Why, members};
 use std::process::Command;
 use sysinfo::{Pid, ProcessRefreshKind, ProcessStatus, ProcessesToUpdate, System, UpdateKind};
 
@@ -48,6 +51,7 @@ pub struct Seen {
 )]
 pub fn look(carry: Option<(&str, &str)>, names: &[&str]) -> Vec<Seen> {
     let identities = crate::usage::snapshot();
+    crate::usage::note_table_read();
     let Ok(mut sys) = System::new() else {
         return Vec::new();
     };
@@ -183,6 +187,21 @@ impl KillOnClose {
     /// Puts `child` into a new kill-on-close job.
     pub fn assign(child: &std::process::Child) -> std::io::Result<KillOnClose> {
         crate::job::Job::assign(child, None).map(KillOnClose)
+    }
+
+    /// A new, empty kill-on-close job: a [`crate::scope::Scope`]'s one job, which each of its children joins ([`KillOnClose::add`]).
+    pub fn new() -> std::io::Result<KillOnClose> {
+        crate::job::Job::create(None).map(KillOnClose)
+    }
+
+    /// Puts `child` into this job too; what it starts afterwards joins as well (nested jobs, Windows 8 and later).
+    pub fn add(&self, child: &std::process::Child) -> std::io::Result<()> {
+        self.0.add(child)
+    }
+
+    /// The job itself, for this crate's starts that join it.
+    pub(crate) fn job(&self) -> &crate::job::Job {
+        &self.0
     }
 
     /// Ends every process in the job now, through the job's handle.

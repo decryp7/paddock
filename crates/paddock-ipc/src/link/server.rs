@@ -188,7 +188,7 @@ impl LinkServer {
             (None, Some(dir)) => Host::listen_in(dir, config.limit, config.protocol)?,
             (None, None) => Host::listen(config.limit, config.protocol)?,
         };
-        let mut host = host.with_clock(config.clock.clone(), config.handshake_timeout);
+        let mut host = host.clocked(config.clock.clone(), config.handshake_timeout);
         #[cfg(any(test, feature = "test-support"))]
         if let Some(gate) = config.act_gate.clone() {
             host = host.with_act_gate(gate);

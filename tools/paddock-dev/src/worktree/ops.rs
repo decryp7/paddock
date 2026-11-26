@@ -308,6 +308,7 @@ pub fn add(repo: &Repo, caller: &Caller, req: &AddRequest<'_>) -> Result<Report,
         Attach::Local(sha) | Attach::Remote(_, sha) => sha.clone(),
     };
     let k = key(&req.root.join(req.name));
+    let overlap_text = overlap_warning(repo, req.branch, &base_sha, &k);
     let branch_name = req.branch.unwrap_or("detached");
     let note = Note {
         role,
@@ -363,7 +364,8 @@ pub fn add(repo: &Repo, caller: &Caller, req: &AddRequest<'_>) -> Result<Report,
     // A full worktree has no `conformance/node_modules`, and the conformance gate then says "check broken" (C111, the yaml package):
     // install them here, bounded and logged; a failure is a warning with the next step, never a failed `add`.
     let deps_note = if req.branch.is_some() {
-        conformance_deps_note(Path::new(&k), &npm_ci)
+        // A warm shared cache (`./dev deps`) gives the whole `node_modules` as a clone, conformance's included; otherwise only that.
+        crate::deps_cache::warm_note(Path::new(&k)).unwrap_or_else(|| conformance_deps_note(Path::new(&k), &npm_ci))
     } else {
         String::new()
     };
@@ -385,15 +387,52 @@ pub fn add(repo: &Repo, caller: &Caller, req: &AddRequest<'_>) -> Result<Report,
     }
     Ok(Report::new(
         json!({"path": k, "branch": req.branch, "head": head, "owner": req.owner, "locked": true, "note": note,
-               "claimed_by": caller.agent.as_ref().map(|a| a.id.clone()), "attached": attach.describe(), "drift": drift.as_ref().map(Drift::json)}),
+               "claimed_by": caller.agent.as_ref().map(|a| a.id.clone()), "attached": attach.describe(), "drift": drift.as_ref().map(Drift::json),
+               "overlap": overlap_text.trim()}),
         format!(
             "Made {k} ({}{}), locked: {note}{record_note}{deps_note}",
             req.branch.map_or("detached".to_string(), |b| format!("branch {b}")),
             attach
                 .describe()
                 .map_or(String::new(), |d| format!(", attached to the existing {d}"))
-        ) + &drift.as_ref().map_or(String::new(), |d| format!("\n{}", d.text(req.base))),
+        ) + &drift.as_ref().map_or(String::new(), |d| format!("\n{}", d.text(req.base)))
+            + &overlap_text,
     ))
+}
+
+/// The overlap warning ([`super::overlap`]) for a worktree about to be made at `k`: other locked worktrees that change files the
+/// base carries or have this branch's topic. Never refuses; a worktree that cannot be read is said so (ER-33). Empty when nothing
+/// overlaps.
+fn overlap_warning(repo: &Repo, branch: Option<&str>, base_sha: &str, k: &str) -> String {
+    use super::overlap;
+    let run = |dir: &Path, args: &[&str]| Git::at(dir).text(args).map_err(|e| e.to_string());
+    let list = match worktrees(repo) {
+        Ok(l) => l,
+        Err(e) => {
+            return format!(
+                "\n::warning::worktree add: the overlap check could not list the worktrees: {e}. Next step: run `./dev worktree list`."
+            );
+        }
+    };
+    let (others, unread) = overlap::gather(&run, &list, k);
+    // The new work's files: what its base carries that main lacks. A base git cannot compare is reported, not taken for empty.
+    let (files, base_note) = match overlap::base_files(&run, &repo.primary, base_sha) {
+        Ok(f) => (f, String::new()),
+        Err(e) => (
+            Default::default(),
+            format!(
+                "\n::warning::worktree add: the overlap check could not compare the base with {}: {e}. Only branch topics were compared.",
+                overlap::MAIN
+            ),
+        ),
+    };
+    let mut text = overlap::render(&overlap::overlaps(branch, &files, &others)) + &base_note;
+    for u in unread {
+        text.push_str(&format!(
+            "\n::warning::worktree add: the overlap check could not read {u}. Next step: look at that worktree by hand."
+        ));
+    }
+    text
 }
 
 /// How long `npm ci -w conformance` may take. Measured 2026-11-13 in a fresh worktree: 0.4 s with a warm npm cache and 0.5 s with an

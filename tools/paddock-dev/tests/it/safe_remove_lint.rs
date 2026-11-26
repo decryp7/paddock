@@ -51,7 +51,6 @@ const ALLOWED: &[(&str, &str)] = &[
         "tools/paddock-dev/src/safe_remove/guard.rs",
         "the shared check itself: the root-and-link guard (`remove_under`) of the CI host steps",
     ),
-    ("tools/heavy/src/lock.rs", "heavy.sh's lock folders, not work folders"),
     (
         "tools/paddock-dev/src/ci_host/guardian_as_user.rs",
         "its own private scratch folder, made and removed by the same step (ci guardian-as-user)",

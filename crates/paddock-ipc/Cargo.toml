@@ -58,6 +58,7 @@ windows-sys = { version = "0.61", features = [
 ] }
 
 [dev-dependencies]
+paddock-jobs = { workspace = true, features = ["test-support"] }
 # The self dev-dependency that turns `test-support` on for this package's own integration tests (rule 99): `Host::with_clock` and
 # `testing::endings` are test-only and never reach a shipped build.
 paddock-ipc = { path = ".", features = ["test-support"] }

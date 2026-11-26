@@ -9,14 +9,15 @@ locked worktree, never in the main checkout (rule 2).
 2. **Merge one member at a time** with `git merge --no-ff`. A conflict that is not trivial sends the member back with the
    conflicting files.
 3. **The member gate.** `./dev merge check --gates HEAD` on the merge: the detectors (dropped hunks, lost tests, workspace-hack,
-   generated files), then the fast gates of `./dev check --pre-push` on the combined tree with `--base HEAD^1`. Load the machine
+   generated files), then the fast gates of `./dev check --pre-push` on the combined tree with `--base HEAD^1`, with the touched
+   workspaces' nextest `ci` profile on macOS (`tests <ws>`); the Linux tests are CI's Linux jobs (no container on this Mac, user 2026-11-26). Load the machine
    lightly: `CARGO_BUILD_JOBS=2`, one member at a time. Only the foundation and the active apps (`docs/ci-active-apps.toml`) get
    their build checks; an inactive app's rows are shown as `inactive`, never as passed (docs/ci-schedules.md, "Active apps").
 4. **A member that fails is taken out, not fixed on the train.** Reset the train branch to `HEAD^1` in your own worktree
    before merging anything else, and send the member back to its author with the failing rows. While the gate is report-only
    (until ADR 0098 records its first green run on a real train) a failure is printed with `::warning::` and the exit code stays
    0: read the output anyway and send the member back for a real failure.
-5. **One CI run per train round**, through `./dev ci dispatch` (the run is queued at once and its first job waits while an older run holds a shared runner). Tests run
+5. **One CI run per train round**, through `./dev ci dispatch` after the fast rows (`--set fast`, step 3); the slow rows run beside it and cancel it on a failure (`--set slow --cancel-ci-run <id>`); landing asks `./dev ci landing-held` (rules.md 50 (h)) (the run is queued at once and its first job waits while an older run holds a shared runner). Tests run
    once per train, not once per member (ER-8).
 6. **A red train run.** `./dev ci triage <run> --members <train-base>` lists the members, each with the projects its own change
    reaches, and for every new failure the members that reach it. Take out every suspect, or fix the cause in its owner's

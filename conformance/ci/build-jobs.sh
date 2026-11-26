@@ -33,9 +33,10 @@
 #                                                 host inventory replaces this table; the runner's runner.envs need no
 #                                                 repo setting, and PADDOCK_CI_JOBS_PER_HOST still overrides it. On the
 #                                                 old 8-core, 16 GB host: 2 build jobs and 2 test threads.
-#        macOS    3          2           32 GB    d7-mac-mini, -2 and -3 (2026-11-08), three runners of capacity 1 on the
-#                                                 developer Mac its agents share: (14 - 2) / 3 = 4 build jobs per job,
-#                                                 the 4 each job had before, and 4 test threads (below; 8 until 2026-11-24). Reserve: 2 cores for the agents' own
+#        macOS    4          2           32 GB    ADR 0120 D8 (user decision 2026-11-25): one runner, d7-mac-mini, a
+#                                                 LaunchDaemon of capacity 4 on the developer Mac its agents share:
+#                                                 (14 - 2) / 4 = 3 build jobs per job and 3 test
+#                                                 threads (below; 3 lanes and 4 until 2026-11-25, 8 until 2026-11-24). Reserve: 2 cores for the agents' own
 #                                                 work and the system, a choice (agents cap themselves at 2 build jobs each, so
 #                                                 more than 1 busy agent still oversubscribes; the lane count is the runner's).
 #                                                 Measured
@@ -120,7 +121,7 @@ class_default() { # <share|cores|ram>
     macOS:doc_cores) echo 14 ;;
     *:doc_cores) echo - ;;
     Windows:share) echo 3 ;;
-    macOS:share) echo 3 ;;
+    macOS:share) echo 4 ;;
     macOS:cores) echo 2 ;;
     macOS:ram) echo 32768 ;;
     *:threads) echo - ;;

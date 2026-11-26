@@ -1,0 +1,9 @@
+# The files and folders that decide the throttle binary: the input hash is git's hash over `git ls-tree HEAD` of these paths plus the
+# compiler lines, as for paddock-dev (tools/paddock-dev/inputs.txt, `dev self hash`). `./dev check --pre-push` builds the tool
+# from them on demand and caches it under ~/.paddock-dev/bin/throttle-<hash>. One path per line, relative to the repository root.
+tools/throttle
+crates/Cargo.toml
+crates/paddock-env
+crates/paddock-proc
+crates/paddock-workspace-hack
+.cargo/config.toml
