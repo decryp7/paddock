@@ -333,6 +333,10 @@ pub struct Request {
     pub write_reverted: Option<PathBuf>,
     /// `--old-base-anyway <reason>`: let a member that lacks the train's base through, and print the reason ([`stale_base`]).
     pub old_base_anyway: Option<String>,
+    /// `--gates-base <ref>`: the base the member gate measures from, instead of the merge's first parent. A member's gate plans only
+    /// that member's delta; the final gate of a train with `--gates-base origin/main` plans the whole train's rows, so the rows the push
+    /// hook and the train-audits guard will ask for already have a pass on this tree and are reused, not run again (user, 2026-11-26).
+    pub gates_base: Option<String>,
 }
 
 /// The step for `--write-reverted`: the lines a re-land explains, written with the message to `file`; says plainly when it tied none.
@@ -614,7 +618,7 @@ fn check(req: &Request) -> Result<Checked, CliError> {
                     Some(if req.commit.is_none() {
                         gates::not_run("a branch is checked before it is merged, so there is no checkout of the result; run `./dev merge check --gates <merge-commit>` after merging")
                     } else {
-                        gates::run(&root, &git, &merge, &gates::Real, gates::ENFORCED)
+                        gates::run_from(&root, &git, &merge, &gates::Real, gates::ENFORCED, req.gates_base.as_deref())
                     }),
                 );
             }

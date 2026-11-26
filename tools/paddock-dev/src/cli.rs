@@ -294,6 +294,10 @@ struct MergeCheckArgs {
     /// printed with the result). The default is an error that says to merge origin/main into the member and rerun its gate.
     #[arg(long, value_name = "REASON")]
     old_base_anyway: Option<String>,
+    /// With `--gates`: measure the member gate from this ref (`origin/main`) instead of the merge's first parent, so it plans the whole
+    /// train's rows and leaves a pass for each: the push hook and the train-audits guard then reuse them on the same tree.
+    #[arg(long, value_name = "REF")]
+    gates_base: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -654,6 +658,7 @@ pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
                     gates: a.gates,
                     write_reverted: a.write_reverted,
                     old_base_anyway: a.old_base_anyway,
+                    gates_base: a.gates_base,
                 },
                 out,
                 err,
@@ -870,6 +875,7 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
             gates: a.gates,
             write_reverted: a.write_reverted,
             old_base_anyway: a.old_base_anyway,
+            gates_base: a.gates_base,
         }),
         Command::Merge {
             command: MergeCommand::SyncMember(a),

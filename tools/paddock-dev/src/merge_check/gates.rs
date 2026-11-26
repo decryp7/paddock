@@ -110,9 +110,16 @@ pub fn not_run(why: &str) -> Step {
 /// Runs the gates on the merge `merge` (checked out in `root`) and turns the answer into a step. `enforced` is [`ENFORCED`] outside
 /// the tests.
 pub fn run(root: &Path, git: &Git, merge: &Merge, gates: &dyn Gates, enforced: bool) -> Step {
-    let Some(base) = merge.parents.first() else {
+    run_from(root, git, merge, gates, enforced, None)
+}
+
+/// [`run`] measured from `base` (`--gates-base`) instead of the merge's first parent: the rows of the whole range, so a later push of
+/// the same tree finds a pass record for each of them.
+pub fn run_from(root: &Path, git: &Git, merge: &Merge, gates: &dyn Gates, enforced: bool, base: Option<&str>) -> Step {
+    let Some(first) = merge.parents.first() else {
         return not_run("the merge has no parents");
     };
+    let base = base.unwrap_or(first.as_str());
     if let Some((why, next)) = checkout_problem(git, merge) {
         let (level, report_only) = wording(enforced);
         return step(
