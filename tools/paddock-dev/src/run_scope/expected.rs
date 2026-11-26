@@ -2,7 +2,9 @@
 //! and writes `{display name: {job, leg}}` into the run's scope line (version 3), so every reader looks a name up instead of
 //! inverting a `name:` template.
 
+#[cfg(test)]
 use super::Scope;
+use paddock_ci_config::expr::{self, Lookup, Tri, Val};
 use paddock_ci_config::jobs::{self, Declared as ModelDeclared, Job, JobModel, Leg, Legs, PROJECT_OUTPUTS};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
@@ -180,45 +182,72 @@ pub fn app_expected(workflow_text: &str, planned: &BTreeMap<String, Vec<Value>>)
     Ok(out)
 }
 
-/// Whether the run ran the job: a key of `ran.jobs` or `ran.apps` names it, by its own id or by a project it runs for.
-fn ran_job(job: &Job, ran: &Scope) -> bool {
-    let projects_ran = PROJECT_OUTPUTS
-        .iter()
-        .filter(|(_, project, plan_key)| job.projects.contains(*project) && (ran.jobs.contains(*plan_key) || ran.jobs.contains(*project)))
-        .count()
-        > 0;
-    let named = ran.jobs.iter().any(|k| k.split('@').next() == Some(job.id.as_str()));
-    let app = job.projects.contains(jobs::APPS_PROJECT) && !ran.apps.is_empty();
-    projects_ran || named || app
+/// The prefix of a plan job output in an `if:`.
+const PLAN_OUTPUT: &str = "needs.plan.outputs.";
+
+/// The plan job's outputs as the planner is about to emit them: the names an `if:` reads, with the text the runner would hand over. An
+/// output the planner emits no value for reads as empty, as the runner reads an unset output.
+struct Outputs<'a>(&'a [(String, String)]);
+
+impl Lookup for Outputs<'_> {
+    fn get(&self, name: &str) -> Val {
+        match name.strip_prefix(PLAN_OUTPUT) {
+            Some(output) => Val::Str(
+                self.0
+                    .iter()
+                    .rev()
+                    .find(|(k, _)| k == output)
+                    .map(|(_, v)| v.clone())
+                    .unwrap_or_default(),
+            ),
+            None => Val::Unknown,
+        }
+    }
 }
 
-/// The legs of a job the run ran: the model's own, or the planner's for a planned matrix.
-fn legs_ran(job: &Job, ran: &Scope, planned: &PlannedLegs) -> Result<Vec<Leg>, String> {
-    let from_values = |legs: &[Value], keep: &dyn Fn(&Leg) -> bool| legs.iter().map(text_leg).filter(|l| keep(l)).collect();
+/// The legs of a job: the model's own, or the planner's for a planned matrix.
+fn legs_of(job: &Job, planned: &PlannedLegs) -> Result<Vec<Leg>, String> {
     Ok(match &job.legs {
         Legs::None => vec![Leg::new()],
         Legs::Static(legs) => legs.clone(),
-        Legs::Planned(output) => match (job.id.as_str(), output.as_str()) {
-            ("crate", "crate_legs") | ("paddock-dev", "paddock_dev_legs") => {
-                let legs = if job.id == "crate" {
-                    planned.crate_legs
-                } else {
-                    planned.paddock_dev_legs
-                };
-                from_values(legs, &|l| ran.jobs.contains(&format!("{}@{}", job.id, l["os"])))
-            }
-            ("app", "apps") => from_values(planned.apps, &|_| true),
-            _ => return Err(format!("job {} has planned legs `{output}` that the planner does not name", job.id)),
-        },
+        Legs::Planned(output) => {
+            let legs = match (job.id.as_str(), output.as_str()) {
+                ("crate", "crate_legs") => planned.crate_legs,
+                ("paddock-dev", "paddock_dev_legs") => planned.paddock_dev_legs,
+                ("app", "apps") => planned.apps,
+                _ => return Err(format!("job {} has planned legs `{output}` that the planner does not name", job.id)),
+            };
+            legs.iter().map(text_leg).collect()
+        }
     })
 }
 
-/// The expected jobs of a run: every job of the model the run ran, rendered over its legs. A name two legs share is refused: a lookup
-/// by name would be ambiguous (the check of ADR 0123 §7 is this, made at the writer).
-pub fn expected_of(model: &JobModel, ran: &Scope, planned: &PlannedLegs) -> Result<ExpectedMap, String> {
+/// The expected jobs of a run (ADR 0123 §3): every job whose `if:` the plan's `outputs` make true, rendered over the legs the planner
+/// emitted. A job without an `if:` always runs and is listed; the plan job itself, which writes the line, is not. An `if:` the evaluator cannot
+/// settle is an error naming the job, never a guess in either direction (ER-33). A name two legs share is refused: a lookup by name
+/// would be ambiguous (the check of ADR 0123 §7 is this, made at the writer).
+pub fn expected_of(model: &JobModel, outputs: &[(String, String)], planned: &PlannedLegs) -> Result<ExpectedMap, String> {
+    let lookup = Outputs(outputs);
     let mut out = ExpectedMap::new();
-    for job in model.jobs.iter().filter(|j| ran_job(j, ran)) {
-        for leg in legs_ran(job, ran, planned)? {
+    for job in &model.jobs {
+        // The plan job writes the line and is not one of the run's jobs it lists; the model marks it by running for `everything`.
+        if job.projects.contains("everything") {
+            continue;
+        }
+        // A job without an `if:` always runs.
+        if let Some(condition) = &job.condition {
+            match expr::condition(condition, &lookup).0 {
+                Tri::Yes => {}
+                Tri::No => continue,
+                Tri::Unknown => {
+                    return Err(format!(
+                        "the `if:` of job {} cannot be evaluated against the plan's outputs ({condition}): the run's jobs cannot be listed",
+                        job.id
+                    ));
+                }
+            }
+        }
+        for leg in legs_of(job, planned)? {
             let name = jobs::render(job, &leg);
             let kept = leg
                 .into_iter()
@@ -238,6 +267,24 @@ pub fn expected_of(model: &JobModel, ran: &Scope, planned: &PlannedLegs) -> Resu
         }
     }
     Ok(out)
+}
+
+/// The plan outputs a test's `ran` scope stands for: each project flag true when its plan key ran (`ui` also when a reference-app job
+/// did), `webkit` when a reference-app job did, `any_app` when an app leg did; no `rerun_jobs` (a full run).
+#[cfg(test)]
+pub fn test_outputs(ran: &Scope) -> Vec<(String, String)> {
+    let webkit = ran.jobs.contains("e2e") || ran.jobs.contains("e2e-webkit");
+    let mut out: Vec<(String, String)> = PROJECT_OUTPUTS
+        .iter()
+        .map(|(output, project, key)| {
+            // The reference-app jobs run for a UI.
+            let on = ran.jobs.contains(*key) || ran.jobs.contains(*project) || (webkit && *project == "ui");
+            (output.to_string(), on.to_string())
+        })
+        .collect();
+    out.push(("webkit".into(), webkit.to_string()));
+    out.push(("any_app".into(), (!ran.apps.is_empty()).to_string()));
+    out
 }
 
 #[cfg(test)]
@@ -279,7 +326,7 @@ mod tests {
             crate_legs: &crate_legs(),
             ..PlannedLegs::default()
         };
-        let map = expected_of(&model(), &all_crate_keys(), &planned).unwrap();
+        let map = expected_of(&model(), &test_outputs(&all_crate_keys()), &planned).unwrap();
         for k in 1..=3 {
             let e = &map[&format!("crate (ubuntu-latest, {k}/3)")];
             assert_eq!(e.job, "crate");
@@ -292,6 +339,95 @@ mod tests {
             !map.contains_key("crate (ubuntu-latest)"),
             "a partitioned leg has no whole-leg name"
         );
+    }
+
+    fn outs(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
+        pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
+    }
+
+    fn jobs_of(map: &ExpectedMap) -> BTreeSet<&str> {
+        map.values().map(|e| e.job.as_str()).collect()
+    }
+
+    #[test]
+    fn a_ui_run_that_selected_no_reference_app_job_does_not_expect_one() {
+        // Run 9167's shape: the UI ran (a train's full run) but the plan emitted `webkit=false`, so the reference-app jobs are skipped.
+        let map = expected_of(
+            &model(),
+            &outs(&[
+                ("ui", "true"),
+                ("eslint", "true"),
+                ("icons", "true"),
+                ("conformance", "true"),
+                ("webkit", "false"),
+            ]),
+            &PlannedLegs::default(),
+        )
+        .unwrap();
+        let jobs = jobs_of(&map);
+        assert!(jobs.contains("ui") && jobs.contains("conformance"), "{jobs:?}");
+        assert!(!jobs.contains("e2e") && !jobs.contains("e2e-webkit"), "{jobs:?}");
+    }
+
+    #[test]
+    fn a_webkit_run_expects_the_reference_app_jobs_with_their_shards() {
+        let map = expected_of(&model(), &outs(&[("ui", "true"), ("webkit", "true")]), &PlannedLegs::default()).unwrap();
+        assert!(
+            map.contains_key("reference apps (shard 1/2)") && map.contains_key("reference apps (shard 2/2)"),
+            "{map:?}"
+        );
+        assert!(jobs_of(&map).contains("e2e-webkit"), "{map:?}");
+        // Positive control: without a UI the reference-app jobs are not expected even when WebKit is wanted.
+        let no_ui = expected_of(&model(), &outs(&[("ui", "false"), ("webkit", "true")]), &PlannedLegs::default()).unwrap();
+        assert!(!jobs_of(&no_ui).contains("e2e"), "{no_ui:?}");
+    }
+
+    #[test]
+    fn a_rerun_round_expects_only_the_jobs_it_names() {
+        let planned = PlannedLegs {
+            crate_legs: &crate_legs(),
+            ..PlannedLegs::default()
+        };
+        let map = expected_of(
+            &model(),
+            &outs(&[("crates", "true"), ("conformance", "true"), ("rerun_jobs", r#"["crate"]"#)]),
+            &planned,
+        )
+        .unwrap();
+        assert_eq!(jobs_of(&map), BTreeSet::from(["crate"]), "{map:?}");
+        // A reused run (the plan emits `rerun_jobs=[]`) expects nothing.
+        let reused = expected_of(&model(), &outs(&[("crates", "true"), ("rerun_jobs", "[]")]), &planned).unwrap();
+        assert!(reused.is_empty(), "{reused:?}");
+    }
+
+    #[test]
+    fn a_job_without_an_if_always_runs_and_the_plan_job_is_not_listed() {
+        let wf = "jobs:\n  plan:\n    runs-on: x\n  always:\n    name: always runs\n    needs: [plan]\n    runs-on: x\n    steps:\n      - run: x\n";
+        let declared = ModelDeclared {
+            projects: BTreeMap::from([
+                ("plan".to_string(), vec!["everything".to_string()]),
+                ("always".to_string(), vec!["conformance".to_string()]),
+            ]),
+            ..ModelDeclared::default()
+        };
+        let model = jobs::model(wf, &declared).unwrap();
+        let map = expected_of(&model, &[], &PlannedLegs::default()).unwrap();
+        assert_eq!(map.keys().map(String::as_str).collect::<Vec<_>>(), ["always runs"], "{map:?}");
+    }
+
+    #[test]
+    fn an_if_the_evaluator_cannot_settle_is_an_error_naming_the_job_never_a_guess() {
+        let wf = "jobs:\n  plan:\n    runs-on: x\n  odd:\n    needs: [plan]\n    if: ${{ github.actor == 'me' }}\n    runs-on: x\n    steps:\n      - run: x\n";
+        let declared = ModelDeclared {
+            projects: BTreeMap::from([
+                ("plan".to_string(), vec!["everything".to_string()]),
+                ("odd".to_string(), vec!["conformance".to_string()]),
+            ]),
+            ..ModelDeclared::default()
+        };
+        let model = jobs::model(wf, &declared).unwrap();
+        let err = expected_of(&model, &[], &PlannedLegs::default()).unwrap_err();
+        assert!(err.contains("odd") && err.contains("cannot be evaluated"), "{err}");
     }
 
     #[test]
@@ -308,7 +444,7 @@ mod tests {
             apps: ["dyno@ubuntu-latest:e2e-1".to_string(), "dyno@macos-latest".to_string()].into(),
             ..Scope::default()
         };
-        let map = expected_of(&model(), &scope, &planned).unwrap();
+        let map = expected_of(&model(), &test_outputs(&scope), &planned).unwrap();
         assert_eq!(map["app dyno (ubuntu-latest, e2e-1)"].leg["e2e_leg"], "e2e-1");
         assert_eq!(map["app dyno (macos-latest)"].leg["app"], "dyno");
         assert!(
@@ -318,19 +454,29 @@ mod tests {
     }
 
     #[test]
-    fn only_the_jobs_of_the_projects_the_run_ran_are_expected() {
-        let map = expected_of(&model(), &ran(&["conformance"]), &PlannedLegs::default()).unwrap();
+    fn only_the_jobs_whose_if_the_plans_outputs_make_true_are_expected() {
+        let map = expected_of(&model(), &test_outputs(&ran(&["conformance"])), &PlannedLegs::default()).unwrap();
         assert!(map.contains_key("conformance (checks, release scripts)"));
         assert!(
             map.keys().any(|n| n.starts_with("quick checks (")),
             "quick runs for conformance: {map:?}"
         );
-        assert!(!map.keys().any(|n| n.starts_with("crate") || n.starts_with("ui (")), "{map:?}");
+        // `ui` and the test-cache shadow have no project gate of their own (their steps are gated), so a full run lists them; the jobs
+        // gated by a project output the plan did not set are not listed.
+        assert!(
+            map.keys().any(|n| n.starts_with("ui (")) && map.keys().any(|n| n.starts_with("test cache")),
+            "{map:?}"
+        );
+        assert!(
+            !map.keys()
+                .any(|n| n.starts_with("crate") || n.starts_with("reference apps") || n.starts_with("app ")),
+            "{map:?}"
+        );
     }
 
     #[test]
     fn a_job_with_a_static_matrix_is_expected_once_per_shard() {
-        let map = expected_of(&model(), &ran(&["e2e"]), &PlannedLegs::default()).unwrap();
+        let map = expected_of(&model(), &test_outputs(&ran(&["e2e"])), &PlannedLegs::default()).unwrap();
         assert!(
             map.contains_key("reference apps (shard 1/2)") && map.contains_key("reference apps (shard 2/2)"),
             "{map:?}"
@@ -345,17 +491,19 @@ mod tests {
             crate_legs: &legs,
             ..PlannedLegs::default()
         };
-        let err = expected_of(&model(), &ran(&["crates", "crate@windows-latest"]), &planned).unwrap_err();
+        let err = expected_of(&model(), &test_outputs(&ran(&["crates", "crate@windows-latest"])), &planned).unwrap_err();
         assert!(err.contains("crate (windows-latest)") && err.contains("twice"), "{err}");
     }
 
     #[test]
-    fn a_leg_whose_runner_the_run_did_not_run_is_not_expected() {
+    fn a_leg_the_planner_did_not_emit_is_not_expected() {
+        // The planner emitted the Windows leg only (the others dropped by the OS split).
+        let windows = vec![json!({"os": "windows-latest"})];
         let planned = PlannedLegs {
-            crate_legs: &crate_legs(),
+            crate_legs: &windows,
             ..PlannedLegs::default()
         };
-        let map = expected_of(&model(), &ran(&["crates", "crate@windows-latest"]), &planned).unwrap();
+        let map = expected_of(&model(), &test_outputs(&ran(&["crates", "crate@windows-latest"])), &planned).unwrap();
         assert!(
             map.contains_key("crate (windows-latest)") && !map.contains_key("crate (macos-latest)"),
             "{map:?}"
@@ -381,7 +529,7 @@ mod tests {
 
     #[test]
     fn each_expected_job_carries_the_projects_of_its_model_job() {
-        let map = expected_of(&model(), &ran(&["conformance"]), &PlannedLegs::default()).unwrap();
+        let map = expected_of(&model(), &test_outputs(&ran(&["conformance"])), &PlannedLegs::default()).unwrap();
         let e = &map["conformance (checks, release scripts)"];
         assert!(e.projects.contains("conformance"), "{e:?}");
         let jobs = model();

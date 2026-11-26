@@ -672,7 +672,7 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
     let empty: Vec<Value> = Vec::new();
     let expected = expected_names(
         root,
-        &ran,
+        &outputs,
         &PlannedLegs {
             crate_legs: emitted_legs.get("crate").unwrap_or(&empty),
             paddock_dev_legs: emitted_legs.get("paddock-dev").unwrap_or(&empty),
@@ -710,16 +710,15 @@ fn scope_model(root: &Path) -> paddock_ci_config::jobs::JobModel {
 
 /// The jobs the run should have by display name ([`expected_of`]); empty for a run that ran nothing. A workflow that cannot be read or
 /// modelled gives an empty map and a warning: the scope reader then reports the run's job names as not measured (ER-33), never a pass.
-fn expected_names(root: &Path, ran: &Scope, planned: &PlannedLegs, log: &dyn Fn(&str)) -> ExpectedMap {
-    if ran.jobs.is_empty() && ran.apps.is_empty() {
-        return ExpectedMap::new();
-    }
-    load_model(root).and_then(|m| expected_of(&m, ran, planned)).unwrap_or_else(|e| {
-        log(&format!(
-            "::warning::dev plan: {e}; the scope line expects no job names, so a reader reports them as not measured"
-        ));
-        ExpectedMap::new()
-    })
+fn expected_names(root: &Path, outputs: &[(String, String)], planned: &PlannedLegs, log: &dyn Fn(&str)) -> ExpectedMap {
+    load_model(root)
+        .and_then(|m| expected_of(&m, outputs, planned))
+        .unwrap_or_else(|e| {
+            log(&format!(
+                "::warning::dev plan: {e}; the scope line expects no job names, so a reader reports them as not measured"
+            ));
+            ExpectedMap::new()
+        })
 }
 
 /// The repository graph's reach of a request (ADR 0117): the model of the head and the reach of its changed files.
@@ -1116,26 +1115,14 @@ mod tests {
     #[test]
     fn a_workflow_that_cannot_be_read_gives_an_empty_expected_map_and_a_warning_never_a_guess() {
         let root = tempfile::tempdir().unwrap();
-        let ran = Scope {
-            jobs: ["conformance".to_string()].into(),
-            ..Scope::default()
-        };
+        let outputs = [("conformance".to_string(), "true".to_string())];
         let warned = std::cell::RefCell::new(String::new());
-        let got = expected_names(root.path(), &ran, &PlannedLegs::default(), &|w| warned.borrow_mut().push_str(w));
+        let got = expected_names(root.path(), &outputs, &PlannedLegs::default(), &|w| warned.borrow_mut().push_str(w));
         assert!(got.is_empty());
         assert!(
             warned.borrow().starts_with("::warning::dev plan: ") && warned.borrow().contains("not measured"),
             "{}",
             warned.borrow()
         );
-        // A run that ran nothing expects nothing and says nothing.
-        let quiet = std::cell::RefCell::new(String::new());
-        assert!(
-            expected_names(root.path(), &Scope::default(), &PlannedLegs::default(), &|w| quiet
-                .borrow_mut()
-                .push_str(w))
-            .is_empty()
-        );
-        assert!(quiet.borrow().is_empty());
     }
 }

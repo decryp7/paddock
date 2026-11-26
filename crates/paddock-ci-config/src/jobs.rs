@@ -57,6 +57,9 @@ pub struct Job {
     pub needs: Vec<String>,
     /// Whether its `if:` runs it when `rerun_jobs` names it and not when `rerun_jobs` names only another job.
     pub asks_rerun_jobs: bool,
+    /// The raw `if:` of the job (`None` when it has none: it is not gated by the plan, like the plan job itself). The planner evaluates
+    /// it against the outputs it is about to emit to know which jobs the run has ([`expr::condition`]).
+    pub condition: Option<String>,
     /// Whether its `if:` reads the plan's `webkit` output: it runs only when the planner wants WebKit (a tag, the nightly, a manual ask).
     pub reads_webkit: bool,
     /// Whether a step that restores the dev tool comes before the first step that runs `./dev`.
@@ -383,6 +386,7 @@ pub fn model(workflow_text: &str, declared: &Declared) -> Result<JobModel, Vec<P
             legs,
             needs: text_list(body.get("needs")),
             asks_rerun_jobs: asks_rerun_jobs(id, body.get_text("if")),
+            condition: body.get_text("if").map(str::to_string),
             reads_webkit: body
                 .get_text("if")
                 .and_then(reads)

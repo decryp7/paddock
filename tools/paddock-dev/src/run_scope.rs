@@ -351,7 +351,15 @@ fn parse_expected(v: &Value) -> Result<ExpectedMap, String> {
 fn parse(text: &str) -> Result<Declared, String> {
     let v: Value = serde_json::from_str(text).map_err(|e| format!("the scope line is not JSON ({e})"))?;
     if v["v"].as_u64() != Some(VERSION) {
-        return Err(format!("the scope line has version {}, this reader knows {VERSION}", v["v"]));
+        let older = v["v"].as_u64().is_some_and(|n| n < VERSION);
+        return Err(if older {
+            format!(
+                "the scope line has version {}, this reader knows {VERSION}: a line of an older shape is never reused (ADR 0123 D2), so a run planned before the job-model change is not measured and the first landing after it runs in full; this is expected, not a fault",
+                v["v"]
+            )
+        } else {
+            format!("the scope line has version {}, this reader knows {VERSION}", v["v"])
+        });
     }
     Ok(Declared {
         workflow: v["workflow"].as_str().ok_or("the scope line has no workflow")?.to_string(),
@@ -725,7 +733,7 @@ mod tests {
             apps: &app_legs,
             ..PlannedLegs::default()
         };
-        let expected = expected_of(&model, &ran, &planned).unwrap();
+        let expected = expected_of(&model, &expected::test_outputs(&ran), &planned).unwrap();
         ci_scope(ran, false, need, true).with_expected(expected)
     }
 
