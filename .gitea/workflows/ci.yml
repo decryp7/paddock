@@ -198,6 +198,20 @@ jobs:
           grep -q '^crate_legs=' "$GITHUB_OUTPUT" || echo "crate_legs=$PLAN_OS_LEGS" >> "$GITHUB_OUTPUT"
           grep -q '^paddock_dev_legs=' "$GITHUB_OUTPUT" || echo "paddock_dev_legs=$PLAN_OS_LEGS" >> "$GITHUB_OUTPUT"
 
+      # ADR 0116, report-only (ER-41): what the test-result cache would reuse for each runner class of the crates workspace. Nothing is
+      # skipped (the switch in docs/test-cache.toml is off until two green train runs are recorded); a store that cannot be reached is a
+      # notice. Reads nothing in a tag run, a release or the nightly (`./dev ci test-cache` refuses itself).
+      - name: Test cache (shadow report)
+        continue-on-error: true
+        env:
+          PLAN_TOKEN: ${{ github.token }}
+        run: |
+          for class in Linux-X64 macOS-ARM64 Windows-X64; do
+            echo "::group::test-cache $class"
+            ./dev ci test-cache lookup --workspace crates --class "$class" --shared || true
+            echo "::endgroup::"
+          done
+
   ui:
     needs: [plan]
     # Also the ESLint preset's tests and the family icons' checks, as steps of their own projects (one job instead of three, user
@@ -936,7 +950,19 @@ jobs:
             if [ -n "$TEST_PACKAGES" ]; then echo "::notice::nextest tests only the packages with OS-specific code on this runner (hostTests): $TEST_PACKAGES"; sel=(); for p in $TEST_PACKAGES; do sel+=(-p "$p"); done; fi
             if [ -n "$TEST_FILTER" ]; then echo "::notice::nextest filter (hostTests, and the packages this change reaches in a member run): $TEST_FILTER"; filter=(-E "$TEST_FILTER" --no-tests=fail); fi
           fi
-          cargo nextest run "${sel[@]}" --all-features --profile ci ${filter[@]+"${filter[@]}"}
+          # The output is kept for the test-cache record step below (ADR 0116, report-only); pipefail keeps nextest's exit code.
+          set -o pipefail
+          cargo nextest run "${sel[@]}" --all-features --profile ci ${filter[@]+"${filter[@]}"} 2>&1 | tee "$RUNNER_TEMP/nextest-crates.log"
+
+      # ADR 0116, report-only (ER-41): stores the pass of every package this run proved (whole, first try, no flake) in the shared test-result
+      # store. Only a main or train run writes (`./dev ci test-cache record` refuses any other ref and any rerun itself). Never fails the job.
+      - name: Record test results (test cache)
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && runner.os != 'Linux' && !matrix.filter && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/train/')) }}
+        continue-on-error: true
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/crates
+        run: |
+          [ -s "$RUNNER_TEMP/nextest-crates.log" ] || { echo "::notice::test-cache: no nextest output to record"; exit 0; }
+          "${PADDOCK_WORKSPACE:-$GITHUB_WORKSPACE}/dev" ci test-cache record --workspace crates --shared --log "$RUNNER_TEMP/nextest-crates.log"
 
       - uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v3
         if: failure() && runner.os == 'Windows'
@@ -1320,7 +1346,17 @@ jobs:
           filter=()
           if [ -n "$FILTER" ]; then echo "::notice::nextest runs only the selected tests (a rerun's failed tests, or the plan's smoke set or affected targets): $FILTER"; filter=(-E "$FILTER" --no-tests=warn)
           elif [ -n "$TEST_FILTER" ]; then echo "::notice::nextest filter (hostTests, and the packages this change reaches in a member run): $TEST_FILTER"; filter=(-E "$TEST_FILTER" --no-tests=fail); fi
-          cargo nextest run --profile ci --locked --no-fail-fast ${filter[@]+"${filter[@]}"}
+          set -o pipefail
+          cargo nextest run --profile ci --locked --no-fail-fast ${filter[@]+"${filter[@]}"} 2>&1 | tee "$RUNNER_TEMP/nextest-paddock-dev.log"
+
+      # ADR 0116, report-only (ER-41): the test-result record of paddock-dev's packages (see the crates leg's step).
+      - name: Record test results (test cache)
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && !matrix.filter && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/train/')) }}
+        continue-on-error: true
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/paddock-dev
+        run: |
+          [ -s "$RUNNER_TEMP/nextest-paddock-dev.log" ] || { echo "::notice::test-cache: no nextest output to record"; exit 0; }
+          "${PADDOCK_WORKSPACE:-$GITHUB_WORKSPACE}/dev" ci test-cache record --workspace tools/paddock-dev --shared --log "$RUNNER_TEMP/nextest-paddock-dev.log"
 
       # ADR 0121, report-only (ER-41): the cost-class charges the tests recorded; a ::warning:: and a job-summary row per test outside its class.
       - name: Test cost report

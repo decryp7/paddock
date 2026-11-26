@@ -37,6 +37,13 @@ pub struct TestCacheArgs {
     /// Only these packages, comma separated (a smaller run, for measuring; the default is every package of the workspace).
     #[arg(long)]
     only: Option<String>,
+    /// The runner class to key for, `Linux-X64`, `macOS-ARM64` or `Windows-X64` (default: this machine's). A plan job on Linux asks
+    /// for the classes of the other runners this way.
+    #[arg(long)]
+    class: Option<String>,
+    /// `record`: the file holding a nextest run's output (stdout and stderr), read as the run's result.
+    #[arg(long)]
+    log: Option<PathBuf>,
     /// The cargo build folder (default: the workspace's own `target`).
     #[arg(long)]
     build_dir: Option<String>,
@@ -83,7 +90,7 @@ fn targets(graph: &paddock_repo_graph::Graph, workspace: &str) -> Vec<Target> {
 }
 
 /// The candidates with their node hashes, in one bulk read.
-fn candidates(root: &Path, workspace: &str) -> Result<Vec<Candidate>, CliError> {
+pub fn candidates(root: &Path, workspace: &str, os: &str) -> Result<Vec<Candidate>, CliError> {
     let history = GitHistory::new(root, READ_TIMEOUT);
     let graph = crate::plan::read_graph(root, &history).map_err(|e| fail(e.to_string()))?;
     let ts = targets(&graph.cargo, workspace);
@@ -103,7 +110,7 @@ fn candidates(root: &Path, workspace: &str) -> Result<Vec<Candidate>, CliError> 
     let ctx = crate::repo_model::hash::HashEnv {
         env: &env,
         vars: &vars,
-        os: std::env::consts::OS,
+        os,
     };
     let nodes: Vec<String> = ts.iter().map(|t| t.node.clone()).collect();
     let hashes = crate::repo_model::hash::node_hashes(&crate::input_hash::Real, &ctx, root, &world, &tree, &nodes)?;
@@ -165,9 +172,10 @@ pub fn command(a: &TestCacheArgs) -> Result<Report, CliError> {
             None => audit(&local),
         }),
         "selfcheck" => selfcheck(shared.as_ref()),
-        "lookup" | "run" | "forget" => {
+        "lookup" | "run" | "forget" | "record" => {
+            let class = class_of(a);
             let cfg = Config::read(&root).map_err(fail)?;
-            let mut cands = candidates(&root, &a.workspace)?;
+            let mut cands = candidates(&root, &a.workspace, os_of(&class))?;
             if let Some(only) = &a.only {
                 let want: Vec<&str> = only.split(',').collect();
                 cands.retain(|c| want.contains(&c.target.package.as_str()));
@@ -181,7 +189,10 @@ pub fn command(a: &TestCacheArgs) -> Result<Report, CliError> {
             if a.action == "forget" {
                 return forget(&cfg, &cands, store);
             }
-            run(a, &root, &cfg, &cands, store)
+            if a.action == "record" {
+                return record(a, &root, &cfg, &cands, store, &class);
+            }
+            run(a, &root, &cfg, &cands, store, &class)
         }
         other => Err(fail(format!(
             "::error::ci test-cache: unknown action `{other}`. Next step: use `run`, `lookup` or `audit`."
@@ -205,8 +216,14 @@ fn audit(store: &FsStore) -> Report {
     )
 }
 
-fn run(a: &TestCacheArgs, root: &Path, cfg: &Config, cands: &[Candidate], store: &dyn Store) -> Result<Report, CliError> {
-    let class = RunnerClass::here();
+fn run(
+    a: &TestCacheArgs,
+    root: &Path,
+    cfg: &Config,
+    cands: &[Candidate],
+    store: &dyn Store,
+    class: &RunnerClass,
+) -> Result<Report, CliError> {
     let started = std::time::Instant::now();
     let mut text: Vec<String> = Vec::new();
     // Whether this run may read at all, and what the lookup said.
@@ -215,7 +232,7 @@ fn run(a: &TestCacheArgs, root: &Path, cfg: &Config, cands: &[Candidate], store:
             cands.iter().map(|_| Decision::Run(super::Why::Off(why.clone()))).collect(),
             Some(why),
         ),
-        Ok(()) => decide(cands, cfg, &class, store, now(), &|_| Ok(())),
+        Ok(()) => decide(cands, cfg, class, store, now(), &trust_check()),
     };
     if let Some(n) = notice {
         text.push(format!("::notice::test-cache: reuse is off for this run: {n}. Every target runs."));
@@ -268,7 +285,7 @@ fn run(a: &TestCacheArgs, root: &Path, cfg: &Config, cands: &[Candidate], store:
             if judged.passed.contains(p) {
                 if !c.dirty && writes.is_ok() {
                     put.push(Record {
-                        key: super::key_of(c, cfg, &class),
+                        key: super::key_of(c, cfg, class),
                         target: c.target.id.clone(),
                         class: class.clone(),
                         run: format!("local-{}", std::process::id()),
@@ -287,7 +304,7 @@ fn run(a: &TestCacheArgs, root: &Path, cfg: &Config, cands: &[Candidate], store:
                     let ask = Lookup {
                         target: c.target.id.clone(),
                         class: class.clone(),
-                        key: super::key_of(c, cfg, &class),
+                        key: super::key_of(c, cfg, class),
                     };
                     match super::invalidate(store, std::slice::from_ref(&ask)) {
                         Ok(gone) => text.extend(gone.iter().map(|r| {
@@ -467,4 +484,98 @@ fn forget(cfg: &Config, cands: &[Candidate], store: &dyn Store) -> Result<Report
         serde_json::json!({"forgot": n}),
         format!("{text}\ntest-cache: {n} record(s) forgotten"),
     ))
+}
+
+/// The runner class to key for: `--class`, else this machine's.
+fn class_of(a: &TestCacheArgs) -> RunnerClass {
+    a.class.as_ref().map_or_else(RunnerClass::here, |c| RunnerClass(c.clone()))
+}
+
+/// The OS a class hashes for (the `os` of the input hash, Rust's name).
+fn os_of(c: &RunnerClass) -> &'static str {
+    match c.0.split('-').next().unwrap_or("") {
+        "macOS" => "macos",
+        "Windows" => "windows",
+        _ => "linux",
+    }
+}
+
+/// A record's reader-side check.
+type Trust = Box<dyn Fn(&Record) -> Result<(), String>>;
+
+/// The reader-side trust check (§7): in CI every record's run is asked of the Gitea API; a local run reads its own store as is. With no
+/// token the check refuses every record (never trusts what it cannot verify).
+fn trust_check() -> Trust {
+    let ci = env_get("GITHUB_ACTIONS").is_some_and(|v| !v.is_empty()) || env_get("GITEA_ACTIONS").is_some_and(|v| !v.is_empty());
+    if !ci {
+        return Box::new(|_| Ok(()));
+    }
+    let token = env_get("PLAN_TOKEN").or_else(|| env_get("GITEA_TOKEN")).unwrap_or_default();
+    let server = env_get("GITHUB_SERVER_URL").unwrap_or_else(|| "https://dev.decryptology.net".into());
+    let repo = env_get("GITHUB_REPOSITORY").unwrap_or_else(|| "decryp7/paddock".into());
+    let p = super::trust::Provenance::new(move |id| {
+        if token.is_empty() {
+            return Err("no API token (PLAN_TOKEN or GITEA_TOKEN)".into());
+        }
+        let mut http = crate::wait::CurlHttp;
+        let mut client = crate::ci_runs::client::Client::new(&mut http, &server, &repo, &token);
+        super::trust::facts(&mut client, id)
+    });
+    Box::new(move |r| p.check(r))
+}
+
+/// `record --log <file>`: stores the pass of every package the log proves (the CI record step, §3, §7). Packages with no test in the
+/// log are not stored (a narrowed run names only its own), and so are the dirty ones. Needs the writer guard; report-only on failure
+/// of the store (the job's own result is the tests').
+fn record(
+    a: &TestCacheArgs,
+    root: &Path,
+    cfg: &Config,
+    cands: &[Candidate],
+    store: &dyn Store,
+    class: &RunnerClass,
+) -> Result<Report, CliError> {
+    if let Err(w) = write_allowed(&env_get) {
+        return Ok(Report::new(
+            serde_json::json!({"stored": 0}),
+            format!("test-cache: nothing stored ({w})"),
+        ));
+    }
+    let path = a
+        .log
+        .as_ref()
+        .ok_or_else(|| fail("::error::ci test-cache record: --log <file> is required. Next step: pass the nextest output file.".into()))?;
+    let log = std::fs::read_to_string(path).map_err(|e| {
+        fail(format!(
+            "::error::ci test-cache record: {} cannot be read: {e}. Next step: check the tee step.",
+            path.display()
+        ))
+    })?;
+    let asked: Vec<String> = cands.iter().map(|c| c.target.package.clone()).collect();
+    let judged = super::result::judge(&log, &asked);
+    let commit = git_text(root, &["rev-parse", "HEAD"]).unwrap_or_default().trim().to_string();
+    let job = env_get("GITHUB_JOB_ID").unwrap_or_default();
+    let run_id = env_get("GITHUB_RUN_ID").unwrap_or_else(|| format!("local-{}", std::process::id()));
+    let put: Vec<Record> = cands
+        .iter()
+        .filter(|c| !c.dirty && judged.passed.contains(&c.target.package))
+        .map(|c| Record {
+            key: super::key_of(c, cfg, class),
+            target: c.target.id.clone(),
+            class: class.clone(),
+            run: run_id.clone(),
+            job: job.clone(),
+            git_ref: env_get("GITHUB_REF").unwrap_or_default(),
+            commit: commit.clone(),
+            tests: judged.tests.get(&c.target.package).copied().unwrap_or(0),
+            secs: 0.0,
+            at: now(),
+            os_build: os_build(),
+        })
+        .collect();
+    let line = match store.put_many(&put) {
+        Ok(()) => format!("test-cache: stored {} pass(es) of {} package(s) in the log", put.len(), asked.len()),
+        Err(e) => format!("::warning::test-cache: records not stored: {e}"),
+    };
+    Ok(Report::new(serde_json::json!({"stored": put.len()}), line))
 }

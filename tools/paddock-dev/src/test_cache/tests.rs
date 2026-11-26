@@ -446,3 +446,54 @@ fn the_nightly_is_recognised_by_its_event_or_its_workflow() {
     )])));
     assert!(!is_nightly(&env(&[("GITHUB_EVENT_NAME", "push")])));
 }
+
+#[test]
+fn a_record_counts_only_when_its_run_is_a_main_or_train_run_with_a_successful_job() {
+    use super::trust::{Provenance, RunFacts};
+    let class = RunnerClass::here();
+    let facts = |r: &str, ok: bool| RunFacts {
+        git_ref: r.into(),
+        jobs: vec![(45047, ok)],
+        success: ok,
+    };
+    let world = |id: u64| match id {
+        8635 => Ok(Some(facts("refs/heads/main", true))),
+        8636 => Ok(Some(facts("refs/heads/train/x", true))),
+        8637 => Ok(Some(facts("refs/heads/feat/branch", true))),
+        8638 => Ok(Some(facts("refs/heads/main", false))),
+        8639 => Err("503".to_string()),
+        _ => Ok(None),
+    };
+    let calls = std::cell::Cell::new(0);
+    let p = Provenance::new(|id| {
+        calls.set(calls.get() + 1);
+        world(id)
+    });
+    let r = |run: &str, job: &str| Record {
+        run: run.into(),
+        job: job.into(),
+        ..rec(&cand("crates/a", "h"), &class, NOW)
+    };
+    assert!(p.check(&r("8635", "45047")).is_ok());
+    assert!(p.check(&r("8635", "45047")).is_ok());
+    assert_eq!(calls.get(), 1, "one call per distinct run");
+    assert!(p.check(&r("8636", "45047")).is_ok());
+    assert!(
+        p.check(&r("8637", "45047")).unwrap_err().contains("not main or a train"),
+        "a branch run"
+    );
+    assert!(
+        p.check(&r("8638", "45047")).unwrap_err().contains("did not end success"),
+        "a failed job"
+    );
+    assert!(
+        p.check(&r("8639", "45047")).unwrap_err().contains("could not be read"),
+        "an unreadable run refuses"
+    );
+    assert!(p.check(&r("9999", "45047")).unwrap_err().contains("does not exist"));
+    assert!(p.check(&r("8635", "1")).unwrap_err().contains("no job 1"), "a job the run lacks");
+    assert!(
+        p.check(&r("local-12", "")).unwrap_err().contains("not a CI run id"),
+        "a local record in CI"
+    );
+}

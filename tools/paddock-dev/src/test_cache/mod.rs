@@ -21,6 +21,7 @@ pub mod s3;
 pub mod store;
 #[cfg(test)]
 mod tests;
+pub mod trust;
 
 use config::Config;
 use key::{KeyParts, RunnerClass, Target, key};
