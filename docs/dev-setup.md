@@ -95,6 +95,16 @@ tools and never by your shell profile (user decision 2026-11-16; docs/research/s
 - `eval "$(./dev sccache env)"` installs the pinned release into `<PADDOCK_DEV_HOME or ~/.paddock-dev>/tools/sccache/0.20.1/` (never
   `~/.cargo`), starts the one server on the default port 4226, and prints `export RUSTC_WRAPPER=...` lines for that shell. Run it
   once per machine to install; the push gates and `./dev gen check` then use the installed copy by themselves and never download.
+- **Always on, in any shell.** Agents' Bash tool starts a fresh shell for every command, so an `eval` per shell never held (2026-11-26:
+  the live server had 0 compile requests in three hours of builds). `./dev sccache env` therefore also writes
+  `<worktree root>/.cargo/config.toml` (first line marks it as this tool's; a file of somebody else's is never touched) with
+  `[build] rustc-wrapper = "<shim>"`. Cargo reads the `.cargo/config.toml` of every folder above where it runs, so every cargo in every
+  worktree, `./dev`'s own build included, compiles through the shim in any shell; the environment's `RUSTC_WRAPPER` still wins (cargo's
+  rule: CI's own, whose checkouts are not below this root, and a developer's). It is a machine file, not a line in the repository, because
+  Windows cannot start an extensionless script as `rustc-wrapper` (and a `.cmd` file is CRLF, which a shell script cannot be, ER-61). The
+  shim sends a rustc compile to sccache only when our server listens on the port; with none, the launcher recorded in
+  `<tool cache>/sccache-run/launcher` starts ours (one start at a time, `start.lock`), and when it is still down the compile runs plain
+  rustc, so a build never fails because of the cache. To switch it off, delete the file.
 - The server starts with `SCCACHE_BASEDIRS` (sccache 0.20: the longest matching base is stripped from every path in a Rust compile's
   key) naming exactly this repository's worktrees, the main checkout included (`git worktree list`, wherever they live; never a
   sibling folder that is another repository), and `SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS=CARGO_MANIFEST_DIR,CARGO_MANIFEST_PATH`
