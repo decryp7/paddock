@@ -199,10 +199,13 @@ jobs:
           grep -q '^paddock_dev_legs=' "$GITHUB_OUTPUT" || echo "paddock_dev_legs=$PLAN_OS_LEGS" >> "$GITHUB_OUTPUT"
 
   # ADR 0116, report-only (ER-41): what the test-result cache would reuse for each runner class of the crates workspace. A job of its own
-  # that nothing needs, so it adds nothing to the critical path (the plan job's outputs gate every other job). Nothing is skipped (the
+  # that nothing needs, so it adds nothing to the critical path (it waits for the plan like the other jobs and no job waits for it). Nothing is skipped (the
   # switch in docs/test-cache.toml is off until two clean shadow train runs are recorded); a store that cannot be reached is a notice.
   # Reads nothing in a tag run, a release or the nightly (`./dev ci test-cache` refuses itself).
   test-cache-shadow:
+    needs: [plan]
+    # A rerun of failed jobs and a reused run end it (rerun_jobs is empty then for the jobs it does not name).
+    if: ${{ contains(fromJSON(needs.plan.outputs.rerun_jobs || '["test-cache-shadow"]'), 'test-cache-shadow') }}
     name: test cache (shadow report)
     runs-on: ubuntu-latest
     container:
@@ -215,6 +218,10 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
+      # Before the first ./dev call of the job (the tool through the Actions cache, with the read token).
+      - env:
+          PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+        uses: ./.gitea/actions/dev-tool-cache
       - name: Test cache lookup per runner class
         continue-on-error: true
         env:
