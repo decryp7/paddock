@@ -448,7 +448,9 @@ pub fn clone_tree(root: &Path, src: &Path, dest: &Path) -> Result<(), String> {
     Err(format!("cannot copy {} to {}: {last}", src.display(), dest.display()))
 }
 
+// The clone is not built for Windows (`clone_tree` refuses there, nothing runs it), so its tests run where it is built.
 #[cfg(test)]
+#[cfg(not(windows))]
 mod tests;
 
 // ---- the commands -------------------------------------------------------------------------------------------------------------
