@@ -1629,6 +1629,7 @@ Rss:              219040 kB\nPss:              131633 kB\nPss_Anon:          900
         // the orphan of an earlier test child (run 9168).
         #[cfg(windows)]
         for kid in OsSource::default().children(identity(pid)) {
+            // conformance: pid-liveness — a child `children` just kept by identity; a host that ended since is skipped below
             let id = Pid::from_u32(kid.pid());
             let mut sys = System::new().expect("a System");
             sys.refresh_processes_specifics(
