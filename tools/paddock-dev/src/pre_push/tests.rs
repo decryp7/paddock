@@ -2617,25 +2617,40 @@ fn heavy_gate(id: &str, rank: u8) -> Planned {
     })
 }
 
-/// Heavy has one machine-wide slot: two heavy steps of one push in flight together only queue behind each other, and that wait
-/// would be told apart from waiting for others only by the heavy tool's own lines.
+/// A push has at most `HEAVY_AT_ONCE` heavy steps in flight, the number docs/benchmarks.md states: two together only queue behind each
+/// other, and that wait could not be told from waiting for others. The executor counts the steps really in flight; the run's own
+/// measure (`peak_heavy`, the concurrency of each row) must say the same, and reach the limit (a positive control: a measure that
+/// never saw a step would also read "never above the limit", ER-33).
 #[test]
-fn a_push_has_one_heavy_step_in_flight_at_a_time() {
+fn a_push_has_at_most_the_documented_number_of_heavy_steps_in_flight() {
+    use crate::pre_push::exec::{HEAVY_AT_ONCE, run_all_detailed};
     let fake = Queued::new(Duration::from_millis(30));
-    let planned = vec![heavy_gate("clippy a", 1), heavy_gate("clippy b", 1), heavy_gate("clippy c", 1)];
-    let rows = run_all_with(
+    let planned = vec![
+        heavy_gate("clippy a", 1),
+        heavy_gate("clippy b", 1),
+        heavy_gate("clippy c", 1),
+        heavy_gate("clippy d", 1),
+    ];
+    let detail = run_all_detailed(
         &planned,
         &fake,
         &RunOpts {
-            workers: 3,
+            workers: 4,
             queue_stall: Duration::from_secs(60),
             stop: &AtomicBool::new(false),
             subject: &test_subject(),
             reuse: None,
         },
     );
-    assert!(rows.iter().all(|(_, v)| v.kind() == Kind::Passed), "{rows:?}");
-    assert_eq!(fake.most.load(std::sync::atomic::Ordering::SeqCst), 1);
+    assert!(detail.rows.iter().all(|(_, v)| v.kind() == Kind::Passed), "{:?}", detail.rows);
+    let seen = fake.most.load(std::sync::atomic::Ordering::SeqCst);
+    assert_eq!(seen, HEAVY_AT_ONCE, "the executor saw this many heavy steps in flight at once");
+    assert_eq!(detail.peak_heavy, seen, "the run's measure agrees with what really ran");
+    assert_eq!(detail.concurrency.len(), 4, "every row that ran has its concurrency");
+    assert!(detail.concurrency.values().all(|&c| c == HEAVY_AT_ONCE), "{:?}", detail.concurrency);
+    let lines = crate::pre_push::row_timings::lines(&detail);
+    assert_eq!(lines.len(), 4);
+    assert!(crate::pre_push::row_timings::table(&lines).is_some_and(|t| t.contains("clippy d")));
 }
 
 /// The 2026-11-14/15 shape: train 10 is being built locally (partly pushed or not at all), a fix branch is stacked on it. The push

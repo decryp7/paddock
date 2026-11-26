@@ -45,11 +45,12 @@ pub mod kept;
 pub mod known;
 pub mod outcome;
 pub mod reuse;
+pub mod row_timings;
 
 use crate::plan::{Request, plan_with_graph};
 use crate::plan_repo::git_text;
 use clap::Args;
-use exec::{Kind, QUEUE_STALL, RealExec, Row, RunOpts, run_all_timed, workers};
+use exec::{Kind, QUEUE_STALL, RealExec, Row, RunOpts, run_all_detailed, workers};
 use gates::{Change, Facts};
 use paddock_cli::{CliError, Exit, Report};
 use paddock_env::winpath;
@@ -580,7 +581,7 @@ fn command_in(
     } else {
         None
     };
-    let (mut rows, timings) = run_all_timed(
+    let detail = run_all_detailed(
         &planned,
         ex,
         &RunOpts {
@@ -591,6 +592,13 @@ fn command_in(
             reuse: reuse.as_ref(),
         },
     );
+    let row_lines = row_timings::lines(&detail);
+    let exec::RunDetail { mut rows, timings, .. } = detail;
+    if let Some(table) = row_timings::table(&row_lines) {
+        eprint!("pre-push: {table}");
+        // The record beside the gate logs (ER-27): best effort, a failed write never changes a verdict.
+        let _ = std::fs::write(real.logs.join("row-timings.tsv"), row_timings::tsv(&row_lines));
+    }
     if let Some(r) = &reuse {
         let gone = r.evict();
         if gone > 0 {

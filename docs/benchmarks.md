@@ -2880,7 +2880,7 @@ for every git start, with disk0 at about 32,000 operations a second (`iostat`, 4
 
 Dev Mac (14 cores, 64 GiB), the CI image native (arm64, `tools/linux-container.sh --ci-image`, 4 CPUs, warm build volume from the
 Linux Clippy). The member is this branch itself (it touches `tools/paddock-dev` only); `./dev check --pre-push --member-gate --base
-origin/main`. Rows run three at a time through the heavy slot; "queued" is the wait for that slot, beside other agents' gates.
+origin/main`. Up to three rows run at once (`workers`: one at machine load 20 or more), but a push has at most one heavy step in flight (`HEAVY_AT_ONCE` = 1, ADR 0102): the rows that compile queue behind each other, and only the cheap rows run beside them. "queued" is the wait for the machine-wide heavy slot, beside other agents' gates. (Corrected 2026-11-26: this said "three at a time through the heavy slot", which was wrong. Since feat/gate-row-timings a run prints and records a per-row table of queued s, run s and concurrency: `row-timings.tsv` in the run's log folder. The `tests-linux` rows below were removed on 2026-11-26: no container runs on this Mac.)
 
 | Row | Selected | Run | Queued | Load (1/5/15) |
 |---|---|---|---|---|
