@@ -321,7 +321,7 @@ jobs:
         if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' }}
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools
         run: |
-          for t in heavy; do
+          for t in throttle; do
             (cd "$t" && cargo fetch --locked) || {
               echo "::error::cargo fetch --locked failed in tools/$t, so the offline metadata tests cannot read it. Next step: run it on the runner to see why"; exit 1; }
           done
