@@ -5,9 +5,10 @@ import { expectNoSeriousViolations } from './axe';
 import { openAppWith, openView, runCommand } from './tools-support';
 import { chooseMenu } from './menu-support';
 import { heldToast, pressInToast, runningToast, toastNamed } from './toast-support';
+import { pressMod } from '@decryp7/paddock-e2e';
 
 async function exportEvents(page: Page) {
-  await page.keyboard.press('ControlOrMeta+Shift+e');
+  await pressMod(page, 'Mod+Shift+e');
   const dialog = page.getByRole('dialog', { name: 'Export events' });
   await expect(dialog.getByRole('status')).toContainText('events will be exported');
   await dialog.getByRole('button', { name: 'Export…' }).click();

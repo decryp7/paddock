@@ -2,12 +2,13 @@ import { expect, test } from './test';
 import { expectNoSeriousViolations } from './axe';
 import { openAiApp } from './ai-support';
 import { anchoredMenu } from './menu-support';
+import { pressMod } from '@decryp7/paddock-e2e';
 
 /** Parsers view ▸ Generate with AI… (ADR 0032), with the scripted AI mock: the engine's verdict is shown. */
 test.describe('AI parser generation', () => {
   test('generates a parser for a file of the window and shows the score, the lines not read and the rounds', async ({ page }, testInfo) => {
     await openAiApp(page);
-    await page.keyboard.press('ControlOrMeta+k');
+    await pressMod(page, 'Mod+k');
     await page.getByRole('combobox', { name: 'Type a command' }).fill('Manage parsers');
     await page.keyboard.press('Enter');
     const parsers = page.locator('debrief-parsers-view');

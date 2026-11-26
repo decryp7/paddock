@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs';
 import type { Page } from '@playwright/test';
 import { gridRows, openApp } from './app';
 import { expectNoSeriousViolations, settleAnimations, settleDockLayout } from './axe';
+import { pressMod } from '@decryp7/paddock-e2e';
 
 /**
  * Every built-in theme in both colour schemes (ADR 0018): the main window passes axe (WCAG 2.2 AA), and the main
@@ -71,7 +72,7 @@ test('switching the theme restyles the timeline: runs, lane fill and surface fol
   await expect(run).toBeVisible();
   // A run is a line in Calm (no fill) and a pill in Console (a tinted, rounded band).
   await expect(run, 'a run is a line in Calm (no fill)').toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
-  await page.keyboard.press('ControlOrMeta+k');
+  await pressMod(page, 'Mod+k');
   await page.getByRole('combobox', { name: 'Type a command' }).fill('theme: console');
   await page.keyboard.press('Enter');
   await expect(html).toHaveAttribute('data-runs', 'pill');

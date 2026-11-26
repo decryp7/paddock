@@ -5,6 +5,7 @@ import { expectNoSeriousViolations } from './axe';
 import { narrativeDialog, openAiApp, releaseMockHolds, rowMenu, runCommand, viewAnswer } from './ai-support';
 import { menuItem, openMenu, showProfileEditor } from './menu-support';
 import { runningToast } from './toast-support';
+import { pressMod } from '@decryp7/paddock-e2e';
 
 // The AI entry points outside the chat (query bar, context menu, Overview, Moment, markers manager, profile
 // editor, infer-regex dialog) and AI being absent when it is unavailable. Scripted AI mock.
@@ -119,7 +120,7 @@ test.describe('AI entry points', () => {
 
   test('without AI in this run, its entry points are absent', async ({ page }) => {
     await openAiApp(page, 'mockAi=off');
-    await page.keyboard.press('ControlOrMeta+k');
+    await pressMod(page, 'Mod+k');
     const input = page.getByRole('combobox', { name: 'Type a command' });
     await input.fill('AI:');
     await expect(page.locator('debrief-command-palette').getByRole('option', { name: /AI: Open the assistant chat/ })).toHaveCount(0);

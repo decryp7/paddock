@@ -2,11 +2,12 @@ import { expect, test } from './test';
 import type { Page } from '@playwright/test';
 import { expectNoSeriousViolations } from './axe';
 import { openAppWith } from './mock-url';
+import { pressMod } from '@decryp7/paddock-e2e';
 
 // Pitwall as the only AI engine (ADR 0059, ADR 0070) against the scripted AI mock (?mockPitwall=...).
 
 async function runCommand(page: Page, text: string): Promise<void> {
-  await page.keyboard.press('ControlOrMeta+k');
+  await pressMod(page, 'Mod+k');
   const input = page.getByRole('combobox', { name: 'Type a command' });
   await input.fill(text);
   await expect(page.locator('debrief-command-palette').getByRole('option').first()).toContainText(text);
@@ -14,7 +15,7 @@ async function runCommand(page: Page, text: string): Promise<void> {
 }
 
 async function openAiSettings(page: Page) {
-  await page.keyboard.press('ControlOrMeta+Comma');
+  await pressMod(page, 'Mod+Comma');
   const settings = page.getByRole('dialog', { name: 'Settings' });
   await settings.getByRole('navigation', { name: 'Settings sections' }).getByRole('button', { name: /AI assistant/ }).click();
   return settings;
@@ -71,7 +72,7 @@ test('with no Pitwall at all, every AI entry point lands on Settings ▸ AI and 
   await expect(page.locator('debrief-activity-bar [data-activity-id="ai-setup"]')).toBeVisible();
   await expect(page.locator('debrief-activity-bar [data-activity-id="ai"]')).toHaveCount(0);
   // Ask AI on the query bar is not a dead button: it leads to the connect path.
-  await page.keyboard.press('ControlOrMeta+f');
+  await pressMod(page, 'Mod+f');
   await page.getByTestId('ai-ask-query').click();
   await expect(page.getByRole('dialog', { name: 'Settings' })).toBeVisible();
   await expect(page.getByRole('dialog', { name: 'Ask AI to write a query' })).toHaveCount(0);

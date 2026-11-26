@@ -2,6 +2,7 @@ import { expect, test } from './test';
 import type { Page } from '@playwright/test';
 import { openApp } from './app';
 import { expectNoSeriousViolations } from './axe';
+import { pressMod } from '@decryp7/paddock-e2e';
 
 // The Parsers view (ADR 0026, I3) against the browser build's mock parser library
 // (src/app/core/mock/mock-parsers.ts): "Import .toml…" picks /demo/parsers/inventory-csv.toml, an invented parser
@@ -11,7 +12,7 @@ const view = (page: Page) => page.locator('debrief-parsers-view');
 const row = (page: Page, id: string) => view(page).locator(`li[data-parser="${id}"]`);
 
 async function openParsers(page: Page) {
-  await page.keyboard.press('ControlOrMeta+k');
+  await pressMod(page, 'Mod+k');
   await page.getByRole('combobox', { name: 'Type a command' }).fill('Manage parsers');
   await page.keyboard.press('Enter');
   await expect(view(page).getByRole('heading', { name: 'Parsers' })).toBeVisible();

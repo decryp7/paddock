@@ -3,6 +3,7 @@ import { openApp } from './app';
 import { expectNoSeriousViolations } from './axe';
 import { chooseMenu } from './menu-support';
 import { expectNotMoving } from '../../../../ui/projects/paddock-e2e/src/ready.ts';
+import { pressMod } from '@decryp7/paddock-e2e';
 
 async function closeWorkspace(page: import('@playwright/test').Page): Promise<void> {
   await chooseMenu(page, 'File', 'Close workspace');
@@ -35,7 +36,7 @@ test.describe('welcome', () => {
     await closeWorkspace(page);
     const welcome = page.locator('debrief-welcome');
     await expect(welcome).toBeVisible();
-    await page.keyboard.press('ControlOrMeta+k');
+    await pressMod(page, 'Mod+k');
     await page.getByRole('combobox', { name: 'Type a command' }).fill('View: Jobs');
     await page.keyboard.press('Enter');
     await expect(welcome).toHaveCount(0);
@@ -46,7 +47,7 @@ test.describe('welcome', () => {
 
   test('"Show welcome" is a command and can be dismissed', async ({ page }) => {
     await openApp(page);
-    await page.keyboard.press('ControlOrMeta+k');
+    await pressMod(page, 'Mod+k');
     await page.getByRole('combobox', { name: 'Type a command' }).fill('welcome');
     await page.keyboard.press('Enter');
     await expect(page.locator('debrief-welcome')).toBeVisible();

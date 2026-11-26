@@ -2,6 +2,7 @@ import { expect, test } from './test';
 import { expectNoSeriousViolations } from './axe';
 import { openAppWith, runCommand } from './tools-support';
 import { heldToast } from './toast-support';
+import { pressMod } from '@decryp7/paddock-e2e';
 
 test.describe('lifecycle banners and elevation', () => {
   test('safe mode shows a banner with Restart normally', async ({ page }, testInfo) => {
@@ -48,7 +49,7 @@ test.describe('lifecycle banners and elevation', () => {
   test('the Administrator badge shows when elevated and the restart command is offered only when it can work', async ({ page }) => {
     await openAppWith(page, '?mock-elevated=1');
     await expect(page.getByTestId('admin-badge')).toHaveText('Administrator');
-    await page.keyboard.press('ControlOrMeta+k');
+    await pressMod(page, 'Mod+k');
     await page.getByRole('combobox', { name: 'Type a command' }).fill('Restart as administrator');
     await expect(page.locator('debrief-command-palette').getByRole('option')).toHaveCount(0);
     await page.keyboard.press('Escape');
@@ -59,7 +60,7 @@ test.describe('lifecycle banners and elevation', () => {
 
     for (const os of ['mac', 'linux']) {
       await openAppWith(page, `?mock-os=${os}`);
-      await page.keyboard.press('ControlOrMeta+k');
+      await pressMod(page, 'Mod+k');
       await page.getByRole('combobox', { name: 'Type a command' }).fill('Restart as administrator');
       await expect(page.locator('debrief-command-palette').getByRole('option')).toHaveCount(0);
       await page.keyboard.press('Escape');

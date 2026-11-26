@@ -2,6 +2,7 @@ import { expect, test } from './test';
 import { openApp } from './app';
 import { expectNoSeriousViolations } from './axe';
 import { openQuery, runCommand } from './analysis-support';
+import { pageModKey } from '@decryp7/paddock-e2e';
 
 test.describe('query bar', () => {
   test.beforeEach(async ({ page }) => openApp(page));
@@ -36,7 +37,7 @@ test.describe('query bar', () => {
     const input = await openQuery(page);
     await input.click();
     await input.fill('level >= error');
-    await input.press('ControlOrMeta+Enter');
+    await input.press(`${await pageModKey(page)}+Enter`);
     const applied = page.locator('[data-testid=query-applied]');
     await expect(applied).toContainText('Filtering with');
     await expect(applied).toContainText('level >= error');
@@ -49,7 +50,7 @@ test.describe('query bar', () => {
     const input = await openQuery(page);
     await input.click();
     await input.fill('| stats count() by level');
-    await input.press('ControlOrMeta+Enter');
+    await input.press(`${await pageModKey(page)}+Enter`);
     const results = page.locator('debrief-query-results-view');
     await expect(results).toBeVisible();
     await expect(results.getByRole('columnheader', { name: 'level' })).toBeVisible();
@@ -72,7 +73,7 @@ test.describe('query bar', () => {
     const input = await openQuery(page);
     await input.click();
     await input.fill('level = fatal');
-    await input.press('ControlOrMeta+Enter');
+    await input.press(`${await pageModKey(page)}+Enter`);
     await expect(page.locator('[data-testid=query-applied]')).toBeVisible();
     await input.fill('');
     await page.getByRole('button', { name: 'Query history' }).click();

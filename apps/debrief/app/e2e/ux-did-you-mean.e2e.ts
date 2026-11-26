@@ -2,6 +2,7 @@ import { expect, test } from './test';
 import { openApp } from './app';
 import { expectNoSeriousViolations } from './axe';
 import { openQuery } from './analysis-support';
+import { pressMod } from '@decryp7/paddock-e2e';
 
 test.describe('did you mean', () => {
   test('the query bar suggests the field name and fixes the query', async ({ page }, testInfo) => {
@@ -21,7 +22,7 @@ test.describe('did you mean', () => {
 
   test('the palette suggests close commands when nothing matches', async ({ page }) => {
     await openApp(page);
-    await page.keyboard.press('ControlOrMeta+k');
+    await pressMod(page, 'Mod+k');
     const input = page.getByRole('combobox', { name: 'Type a command' });
     await input.fill('tgogle sidbar');
     await expect(page.getByTestId('palette-did-you-mean')).toContainText('Did you mean');

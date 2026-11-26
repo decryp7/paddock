@@ -4,9 +4,10 @@ import { gridTotal, initialTotal, openApp } from './app';
 import { expectNoSeriousViolations } from './axe';
 import { openAppWith } from './mock-url';
 import { anchoredMenu } from './menu-support';
+import { pressMod } from '@decryp7/paddock-e2e';
 
 async function runCommand(page: Page, title: string): Promise<void> {
-  await page.keyboard.press('ControlOrMeta+k');
+  await pressMod(page, 'Mod+k');
   const input = page.getByRole('combobox', { name: 'Type a command' });
   await input.fill(title);
   await expect(page.locator('debrief-command-palette').getByRole('option').first()).toContainText(title);

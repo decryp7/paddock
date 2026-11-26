@@ -3,6 +3,7 @@ import type { BrowserContext, ConsoleMessage, Page } from '@playwright/test';
 import { ensureInspector, gridRows, openApp } from './app';
 import { anchoredMenu, chooseMenu } from './menu-support';
 import { heldToast } from './toast-support';
+import { pressMod } from '@decryp7/paddock-e2e';
 
 // The activity log in the browser build: entries go to the console logger (the mock "log sink"), as
 // `[Debrief.Activity] User <operation> via <trigger>` with the entry's properties as the second argument.
@@ -82,7 +83,7 @@ test('a user journey is logged once per operation, in order, with triggers and w
   await popOut(page, context, 'Inspector');
 
   // Change a setting.
-  await page.keyboard.press('ControlOrMeta+Comma');
+  await pressMod(page, 'Mod+Comma');
   const settings = page.getByRole('dialog', { name: 'Settings' });
   await settings.getByRole('navigation', { name: 'Settings sections' }).getByRole('button', { name: 'Diagnostics', exact: true }).click();
   await settings.getByLabel(/^Log level/).click();

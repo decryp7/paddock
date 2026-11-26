@@ -2,9 +2,10 @@ import { expect, test } from './test';
 import type { Page } from '@playwright/test';
 import { gridTotal, initialTotal, openApp } from './app';
 import { expectNoSeriousViolations } from './axe';
+import { pressMod } from '@decryp7/paddock-e2e';
 
 async function runCommand(page: Page, title: string): Promise<void> {
-  await page.keyboard.press('ControlOrMeta+k');
+  await pressMod(page, 'Mod+k');
   const input = page.getByRole('combobox', { name: 'Type a command' });
   await input.fill(title);
   // Scoped to the palette: an open editor's <select> options are options too.

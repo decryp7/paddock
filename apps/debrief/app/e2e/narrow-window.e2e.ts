@@ -3,6 +3,7 @@ import type { Page } from '@playwright/test';
 import { gridRows, openApp } from './app';
 import { expectNoSeriousViolations } from './axe';
 import { anchoredMenu } from './menu-support';
+import { pressMod } from '@decryp7/paddock-e2e';
 
 // Narrow windows: the filter bar folds range, time zone and Clear all into a ⋯ menu (bar < 1000 px), the Explorer
 // closes by itself when the layout plan has no room for it beside the events grid (and comes back with a margin), low-priority
@@ -100,7 +101,7 @@ test.describe('narrow window', () => {
     await expect(more(page)).toHaveCount(0);
     await resize(page, 900);
     await expect(sidebar(page)).toHaveCount(0);
-    await page.keyboard.press('ControlOrMeta+b');
+    await pressMod(page, 'Mod+b');
     await expect(sidebar(page)).toBeVisible();
   });
 
@@ -124,7 +125,7 @@ test.describe('narrow window', () => {
   });
 
   test('an Explorer the user closed stays closed when the window widens', async ({ page }) => {
-    await page.keyboard.press('ControlOrMeta+b');
+    await pressMod(page, 'Mod+b');
     await expect(sidebar(page)).toHaveCount(0);
     await resize(page, 900);
     await resize(page, 1440);

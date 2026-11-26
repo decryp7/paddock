@@ -2,12 +2,13 @@ import { expect, test } from './test';
 import { openApp } from './app';
 import { expectNoSeriousViolations } from './axe';
 import { chooseMenu } from './menu-support';
+import { pressMod } from '@decryp7/paddock-e2e';
 
 test.describe('About Debrief', () => {
   test.beforeEach(async ({ page }) => openApp(page));
 
   test('opens from the palette, shows version and licence, searches the notices', async ({ page }, testInfo) => {
-    await page.keyboard.press('ControlOrMeta+k');
+    await pressMod(page, 'Mod+k');
     const input = page.getByRole('combobox', { name: 'Type a command' });
     await input.fill('About Debrief');
     await expect(page.locator('debrief-command-palette').getByRole('option').first()).toContainText('About Debrief');

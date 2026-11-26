@@ -7,6 +7,7 @@ import { runCommand } from './analysis-support';
 import { anchoredMenu, menuItem, openMenu } from './menu-support';
 import { expectNotMoving } from '../../../../ui/projects/paddock-e2e/src/ready.ts';
 import { clickThatClosesItsPage, untilItsPageCloses } from '../../../../ui/projects/paddock-e2e/src/close-click.ts';
+import { pageModKey } from '@decryp7/paddock-e2e';
 
 // Pop-out windows in the browser build: `window.open` popups of the same app, synced over a BroadcastChannel (the
 // same port interface as the Tauri events between real OS windows).
@@ -54,7 +55,7 @@ test.describe('pop-out windows', () => {
   test('a stats query run in the host shows its table in the Query results pop-out', async ({ page, context }) => {
     const input = await openQuery(page);
     await input.fill('| stats count() by level');
-    await input.press('ControlOrMeta+Enter');
+    await input.press(`${await pageModKey(page)}+Enter`);
     await expect(tab(page, 'Query results')).toBeVisible();
     const popup = await popOut(page, context, 'Query results');
     await expect(popup.locator('debrief-query-results-view')).toBeVisible();

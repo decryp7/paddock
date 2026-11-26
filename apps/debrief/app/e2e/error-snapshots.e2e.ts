@@ -4,6 +4,7 @@ import { CAPTURE_TIMEOUT, openApp, openView } from './app';
 import { openAppWith } from './mock-url';
 import { heldToast, toastByCause } from './toast-support';
 import { expectNotMoving } from '../../../../ui/projects/paddock-e2e/src/ready.ts';
+import { pressMod } from '@decryp7/paddock-e2e';
 
 // Error snapshots: the window is rendered to an image inside the webview (html-to-image), so this runs
 // against the real capture code in every project. The production build is served with the Tauri CSP,
@@ -17,7 +18,7 @@ async function throwUncaught(page: Page, message: string): Promise<void> {
 }
 
 async function openSnapshotsView(page: Page): Promise<void> {
-  await page.keyboard.press('ControlOrMeta+k');
+  await pressMod(page, 'Mod+k');
   const input = page.getByRole('combobox', { name: 'Type a command' });
   await input.fill('Show error snapshots');
   await page.keyboard.press('Enter');
@@ -130,7 +131,7 @@ test('Ctrl/Cmd+Shift+F12 captures a diagnostic screenshot while a chart is on sc
     )
     .toBeGreaterThan(3);
 
-  await page.keyboard.press('ControlOrMeta+Shift+F12');
+  await pressMod(page, 'Mod+Shift+F12');
   await expect(toast(page)).toContainText('Diagnostic screenshot captured.', { timeout: CAPTURE_TIMEOUT });
   await toast(page).getByRole('button', { name: 'View', exact: true }).click();
   const view = page.locator('debrief-error-snapshots-view');
@@ -141,7 +142,7 @@ test('Ctrl/Cmd+Shift+F12 captures a diagnostic screenshot while a chart is on sc
 
 test('the capture command is in the palette', async ({ page }) => {
   await openApp(page);
-  await page.keyboard.press('ControlOrMeta+k');
+  await pressMod(page, 'Mod+k');
   await page.getByRole('combobox', { name: 'Type a command' }).fill('Capture diagnostic');
   await expect(page.locator('debrief-command-palette').getByRole('option').first()).toContainText('Capture diagnostic screenshot');
 });
@@ -172,7 +173,7 @@ test('toasts stack one above the other instead of on top of each other', async (
   await openApp(page);
   await throwUncaught(page, 'stacked boom');
   await expect(toast(page)).toContainText('Something went wrong', { timeout: CAPTURE_TIMEOUT });
-  await page.keyboard.press('ControlOrMeta+s');
+  await pressMod(page, 'Mod+s');
   const notice = toastByCause(page, 'workspace.notice');
   await expect(notice).toContainText('Saved');
   // The stack re-lays out as the second toast arrives: read both once they stand still.

@@ -1,6 +1,7 @@
 import { expect, test } from './test';
 import { gridRows, gridTotal, initialTotal, openApp, parseCount } from './app';
 import { openQuery } from './analysis-support';
+import { pageModKey } from '@decryp7/paddock-e2e';
 
 test.describe('query language filters the workspace', () => {
   test.beforeEach(async ({ page }) => openApp(page));
@@ -10,7 +11,7 @@ test.describe('query language filters the workspace', () => {
     const input = await openQuery(page);
     await input.click();
     await input.fill('level >= error');
-    await input.press('ControlOrMeta+Enter');
+    await input.press(`${await pageModKey(page)}+Enter`);
     await expect(page.locator('[data-testid=query-applied]')).toContainText('level >= error');
 
     await page.getByRole('tab', { name: 'Events', exact: true }).click();

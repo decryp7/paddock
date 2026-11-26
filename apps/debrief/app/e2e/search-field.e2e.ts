@@ -5,6 +5,7 @@ import { expectNoSeriousViolations } from './axe';
 import { runCommand } from './analysis-support';
 import { heldToast } from './toast-support';
 import { expectNotMoving } from '../../../../ui/projects/paddock-e2e/src/ready.ts';
+import { pageModKey, pressMod } from '@decryp7/paddock-e2e';
 
 // The filter bar's ONE search field: plain words search the messages live; text with query structure is a query that
 // runs with Enter or Ctrl/Cmd+Enter. The mock backend classifies like the engine (operator, pipe, exists(), known field).
@@ -74,7 +75,7 @@ test.describe('search field', () => {
   test('Ctrl/Cmd+Enter runs a query and a stats query opens its table', async ({ page }) => {
     await field(page).click();
     await field(page).fill('| stats count() by level');
-    await field(page).press('ControlOrMeta+Enter');
+    await field(page).press(`${await pageModKey(page)}+Enter`);
     await expect(page.locator('debrief-query-results-view')).toBeVisible();
     await expect(page.locator('debrief-query-results-view').getByRole('columnheader', { name: 'level' })).toBeVisible();
   });
@@ -102,7 +103,7 @@ test.describe('search field', () => {
   });
 
   test('with the Explorer closed the field is at least 300 px wide', async ({ page }) => {
-    await page.keyboard.press('ControlOrMeta+b');
+    await pressMod(page, 'Mod+b');
     await expect(page.locator('debrief-sidebar')).toHaveCount(0);
     expect((await page.locator('debrief-query-field').boundingBox())!.width).toBeGreaterThanOrEqual(300);
   });
@@ -118,7 +119,7 @@ test.describe('search field', () => {
 
   test('Ctrl/Cmd+/ and the palette focus the field', async ({ page }) => {
     await page.getByRole('grid', { name: 'Events' }).focus();
-    await page.keyboard.press('ControlOrMeta+/');
+    await pressMod(page, 'Mod+/');
     await expect(field(page)).toBeFocused();
     await page.getByRole('grid', { name: 'Events' }).focus();
     await runCommand(page, 'Query: focus the search field');
