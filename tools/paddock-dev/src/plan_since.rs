@@ -26,8 +26,9 @@
 
 use crate::job_outcome::JobOutcome;
 use crate::log_text::plain;
-use crate::plan_gitea::{CI_JOBS, workflow_jobs};
+use crate::plan_gitea::workflow_jobs;
 use crate::run_scope::ExpectedMap;
+use paddock_ci_config::jobs::PROJECT_OUTPUTS;
 use crate::wait::Http;
 use regex::Regex;
 use serde_json::{Map, Value, json};
@@ -864,7 +865,7 @@ impl SincePlan {
             // A job the plan's outputs cannot gate (unknown, or added after this planner) cannot be rerun on its own.
             reruns
                 .iter()
-                .find(|r| !r.key.as_deref().is_some_and(|k| CI_JOBS.iter().any(|(j, _)| *j == k)))
+                .find(|r| !r.key.as_deref().is_some_and(|k| expected.values().any(|e| e.job == k)))
                 .map(|r| format!("job \"{}\" is not a job of this ci.yml", r.name))
         } else {
             // An app's workflow: its jobs are the file's own; one this checkout does not have cannot be gated.
@@ -1061,19 +1062,11 @@ impl SincePlan {
     pub fn ci_outputs(&self, legs: &[Value], warn: &mut dyn FnMut(String)) -> Vec<(String, String)> {
         let keys: BTreeSet<&str> = self.reruns.iter().filter_map(|r| r.key.as_deref()).collect();
         // One boolean output per project of the job table (`paddock-dev` is `paddock_dev`); `apps` is the legs below.
-        let mut projects: Vec<&str> = Vec::new();
-        for (_, ps) in CI_JOBS {
-            for p in ps.iter().filter(|p| !matches!(**p, "everything" | "apps")) {
-                if !projects.contains(p) {
-                    projects.push(p);
-                }
-            }
-        }
-        let mut out: Vec<(String, String)> = projects
+        let mut out: Vec<(String, String)> = PROJECT_OUTPUTS
             .iter()
-            .map(|p| {
-                let on = keys.iter().any(|k| CI_JOBS.iter().any(|(j, ps)| j == k && ps.contains(p)));
-                (p.replace('-', "_"), on.to_string())
+            .map(|(output, project, _)| {
+                let on = self.expected.values().any(|e| keys.contains(e.job.as_str()) && e.projects.contains(*project));
+                (output.to_string(), on.to_string())
             })
             .collect();
         let mut app_legs: Vec<Value> = Vec::new();
@@ -1519,10 +1512,15 @@ mod tests {
     /// The scope line's `expected` map of the recorded run 7821 (the run predates the line): each job of `jobs()` by display name with
     /// the job and leg its name shows, for the jobs this ci.yml has. A job it does not have (C99, C102) is left out, as unknown.
     fn fixture_expected() -> ExpectedMap {
+        let model = crate::run_scope::load_model_from(
+            include_str!("../../../.gitea/workflows/ci.yml"),
+            include_str!("../../../docs/repo-graph.toml"),
+        )
+        .expect("ci.yml models");
         let entry = |job: &str, leg: &[(&str, &str)]| crate::run_scope::Expected {
             job: job.into(),
             leg: leg.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
-            ..Default::default()
+            projects: model.jobs.iter().find(|j| j.id == job).map(|j| j.projects.clone()).unwrap_or_default(),
         };
         let inside = |n: &str| n.split_once('(').and_then(|(_, r)| r.strip_suffix(')')).unwrap_or("").to_string();
         jobs()
@@ -1878,12 +1876,33 @@ mod tests {
             run: 1,
             workflow: "ci.yml".into(),
             head: "h".into(),
-            reruns,
             not_rerun: 0,
             everything: None,
             full_ran: false,
-            expected: ExpectedMap::new(),
+            expected: model_expected(&reruns),
+            reruns,
         }
+    }
+
+    /// The scope line's `expected` map for reruns of ci.yml: each rerun's job id (the fixtures' names are all alike) with its job and the projects the job model gives it.
+    fn model_expected(reruns: &[Rerun]) -> ExpectedMap {
+        let model = crate::run_scope::load_model_from(
+            include_str!("../../../.gitea/workflows/ci.yml"),
+            include_str!("../../../docs/repo-graph.toml"),
+        )
+        .expect("ci.yml models");
+        reruns
+            .iter()
+            .filter_map(|r| {
+                let job = model.jobs.iter().find(|j| Some(j.id.as_str()) == r.key.as_deref())?;
+                let entry = crate::run_scope::Expected {
+                    job: job.id.clone(),
+                    projects: job.projects.clone(),
+                    ..Default::default()
+                };
+                Some((job.id.clone(), entry))
+            })
+            .collect()
     }
 
     #[test]
@@ -1934,10 +1953,8 @@ mod tests {
             .into_iter()
             .map(|(k, _)| k)
             .collect();
-        for (_, projects) in CI_JOBS {
-            for p in projects.iter().filter(|p| !matches!(**p, "everything" | "apps")) {
-                assert!(out.contains(&p.replace('-', "_")), "{p} in {out:?}");
-            }
+        for (output, _, _) in PROJECT_OUTPUTS {
+            assert!(out.contains(&output.to_string()), "{output} in {out:?}");
         }
         let c99: BTreeMap<String, String> = plan_of(vec![rerun("quick", Leg::default())])
             .ci_outputs(&[], &mut |_| {})

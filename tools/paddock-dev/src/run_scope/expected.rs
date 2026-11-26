@@ -21,6 +21,18 @@ pub struct Expected {
     pub projects: BTreeSet<String>,
 }
 
+impl Expected {
+    /// The project a failure of this job is filed under: the first project of the job model's order ([`PROJECT_OUTPUTS`]) it runs for,
+    /// else the first other one that names a project (not `everything` or `apps`). `None` for a job that runs for none.
+    pub fn primary_project(&self) -> Option<&str> {
+        PROJECT_OUTPUTS
+            .iter()
+            .map(|(_, project, _)| *project)
+            .find(|p| self.projects.contains(*p))
+            .or_else(|| self.projects.iter().map(String::as_str).find(|p| !matches!(*p, "everything" | jobs::APPS_PROJECT)))
+    }
+}
+
 /// The expected jobs of a run by display name.
 pub type ExpectedMap = BTreeMap<String, Expected>;
 
@@ -81,10 +93,15 @@ pub struct Found<'a> {
     pub projects: Option<&'a BTreeSet<String>>,
 }
 
+/// The entry of a job's display name in a run's `expected` map: the name as listed, then without its caller prefix.
+pub fn lookup_entry<'a>(expected: &'a ExpectedMap, name: &str) -> Option<&'a Expected> {
+    expected.get(name).or_else(|| expected.get(strip_caller(name)))
+}
+
 /// Looks a job's display name up in a run's `expected` map: the name as listed, then without its caller prefix. A name the line does
 /// not hold falls back to the `Job:` line of the job's log (`log`), which gives the id and no leg. `None` when neither knows it.
 pub fn lookup<'a>(expected: &'a ExpectedMap, name: &str, log: Option<&str>) -> Option<Found<'a>> {
-    if let Some(e) = expected.get(name).or_else(|| expected.get(strip_caller(name))) {
+    if let Some(e) = lookup_entry(expected, name) {
         return Some(Found {
             job: e.job.clone(),
             leg: Some(&e.leg),

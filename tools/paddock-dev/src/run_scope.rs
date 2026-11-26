@@ -10,7 +10,7 @@
 mod expected;
 
 pub use expected::{
-    Expected, ExpectedMap, Found, LEG_KEYS, PlannedLegs, app_expected, expected_of, load_model, load_model_from, lookup, strip_caller,
+    Expected, ExpectedMap, Found, LEG_KEYS, PlannedLegs, app_expected, expected_of, load_model, load_model_from, lookup, lookup_entry, strip_caller,
 };
 
 use crate::job_outcome::JobOutcome;
