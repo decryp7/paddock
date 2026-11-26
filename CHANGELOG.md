@@ -4,6 +4,14 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### C173: no new non-Rust tooling file (ADR 0022 section 3.7 a and b)
+- `./dev check run --only C173` reads git's tracked list and fails (blocking) on a `.sh`, `.ps1`, `.py`, `.mjs`, `.js`, `.cjs` or `.ts`
+  file in `scripts/`, `tools/`, `conformance/`, `.gitea/`, `ci-image/` or `apps/<app>/scripts/` that `conformance/tooling-files.json`
+  does not name. The list holds 4 permanent entries (the bootstrap and the helpers that run before `./dev` exists) and the baseline of
+  2026-11-26 (443 files), which may only shrink: the shared allow-list reader compares it with the merge base (ER-46). Fixture and
+  golden folders and Playwright and Vitest suite files are not tooling. 11 such files had landed since 2026-11-12 because the check the
+  ADR promised was never built. The growth guard is a warning until the list is on main, then `growth_blocks` flips to true.
+
 ### sccache 0.20.1, with base directories
 - Every sccache pin moves from 0.19.0 to 0.20.1 (setup-rust and its shell twin, the CI image, `./dev sccache env`) with the release's
   own checksums. Setup-rust and the local server now set `SCCACHE_BASEDIRS` (the checkout, the build folder; in CI each job's own

@@ -22,5 +22,9 @@
  [
   "C135",
   "conformance/c135-allow.json"
+ ],
+ [
+  "C173",
+  "conformance/tooling-files.json"
  ]
 ]

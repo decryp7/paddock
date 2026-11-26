@@ -1,0 +1,27 @@
+{
+ "findings": [
+  {
+   "check": "C173",
+   "severity": "error",
+   "rule": 83,
+   "file": "conformance/src/new.mjs",
+   "line": 1,
+   "message": "not measured: conformance/src/new.mjs could not be read, so a tooling file in it cannot be seen",
+   "fix": "Make the file readable (permissions) and run the check again.",
+   "unwaivable": true,
+   "outcome": "not-measured"
+  },
+  {
+   "check": "C173",
+   "severity": "error",
+   "rule": 83,
+   "file": "scripts/new.sh",
+   "line": 1,
+   "message": "new non-Rust tooling file `scripts/new.sh`: tooling is written in Rust and run through `./dev` (ADR 0022 §3.7)",
+   "fix": "Write it in Rust as a `./dev` command (ADR 0022: tooling is Rust; tools/paddock-dev). A file that must stay shell or JavaScript (it runs before `./dev` exists, or the tool it drives is JavaScript) needs an entry in conformance/tooling-files.json, which the user approves."
+  }
+ ],
+ "errors": 2,
+ "warnings": 0,
+ "waived": []
+}
