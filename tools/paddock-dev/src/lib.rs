@@ -52,6 +52,7 @@ pub mod check_ids;
 pub mod child_env;
 pub mod ci_build_env;
 pub mod ci_build_jobs;
+pub mod ci_dyno_linux_units;
 pub mod ci_host;
 pub mod ci_isolation;
 pub mod ci_run;

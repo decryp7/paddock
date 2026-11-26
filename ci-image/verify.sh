@@ -6,7 +6,7 @@
 #
 # Expected values come from the environment the Dockerfile sets: EXPECT_NODE_MAJOR, EXPECT_SCCACHE, EXPECT_CHROME,
 # EXPECT_RUST (the rustc version), EXPECT_PLAYWRIGHT, EXPECT_DUCKDB, EXPECT_SHELLCHECK, EXPECT_DRAWIO, EXPECT_NEXTEST, EXPECT_LLVM_COV,
-# EXPECT_DENY (the last three set only by garage-arm64.Dockerfile). An expectation that is not set is not checked.
+# EXPECT_DENY (an expectation is checked only where an image sets it). An expectation that is not set is not checked.
 set -uo pipefail
 
 manifest=/etc/paddock-ci-release
@@ -36,7 +36,7 @@ fi
 tool cargo cargo --version
 tool rustfmt rustfmt --version
 tool cargo-clippy cargo clippy --version
-# garage's cargo tools: checked against a pin only where the image sets one (the local arm64 stand-in, garage-arm64.Dockerfile).
+# garage's cargo tools: checked against a pin only where the image sets one (an image that sets one).
 for t in nextest llvm-cov deny hakari machete; do
   if tool "cargo-$t" cargo "$t" --version; then
     case $t in nextest) want=${EXPECT_NEXTEST:-} ;; llvm-cov) want=${EXPECT_LLVM_COV:-} ;; deny) want=${EXPECT_DENY:-} ;; *) want= ;; esac

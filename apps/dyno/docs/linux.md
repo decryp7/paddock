@@ -112,9 +112,11 @@ agent side was run at nice 10 to show the unit does not inherit it):
 | Restart cleanup | A recorded leftover unit was stopped; a unit with the same prefix and a foreign InvocationID stayed running; the records were forgotten |
 
 These are `crates/dyno-agent/tests/bench_units.rs` (a scripted runner, no benchmark work). They are `#[ignore]`d in a plain
-`cargo test` and FAIL without a user manager (never a silent pass). Run them with `scripts/linux-units-check.sh` (a release
-checklist step, `docs/releasing.md`), which is `cargo test -p dyno-agent --test bench_units -- --ignored --test-threads=1` on
-`paddock-gate-arm`. On a headless machine start the manager first
+`cargo test` and FAIL without a user manager (never a silent pass). Run them with the `linux-units` job of `dyno-release.yml`
+(`./dev ci dyno-linux-units`, a release checklist step, `docs/releasing.md`), which is
+`cargo test -p dyno-agent --test bench_units -- --ignored --test-threads=1` on the Linux runner. *Note 2026-11-26:* it used to run on an OrbStack
+machine (`scripts/linux-units-check.sh`, deleted); no VM or container runs on the Mac now. Where the job's container has no user manager the step
+ends "not measured" (exit 6), never a pass. On a headless machine start the manager first
 (`sudo loginctl enable-linger $USER`, then `XDG_RUNTIME_DIR=/run/user/$(id -u)`). Unit tests of the pure parts (command
 lines, parsers, cleanup decisions) are in `dyno_core::bench::unit`, and the agent's logic runs against a scripted child.
 `LINUX_UNITS_VERIFIED` in `bench.rs` switches the unit mode off in one place if it ever has to be.
