@@ -63,11 +63,6 @@
       "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
     },
     {
-      "path": "apps/debrief/scripts/ci/e2e-linux-local.sh",
-      "site": "tooling file",
-      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
-    },
-    {
       "path": "apps/debrief/scripts/ci/libduckdb-env.sh",
       "site": "tooling file",
       "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
@@ -99,11 +94,6 @@
     },
     {
       "path": "apps/debrief/scripts/ci/scan-fixtures.test.mjs",
-      "site": "tooling file",
-      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
-    },
-    {
-      "path": "apps/debrief/scripts/ci/smoke-linux-docker.sh",
       "site": "tooling file",
       "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
     },
@@ -253,17 +243,7 @@
       "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
     },
     {
-      "path": "apps/dyno/scripts/linux-container.sh",
-      "site": "tooling file",
-      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
-    },
-    {
       "path": "apps/dyno/scripts/linux-units-check.sh",
-      "site": "tooling file",
-      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
-    },
-    {
-      "path": "apps/dyno/scripts/linux-verify.sh",
       "site": "tooling file",
       "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
     },
@@ -409,16 +389,6 @@
     },
     {
       "path": "apps/pitwall/scripts/linux-bootstrap.sh",
-      "site": "tooling file",
-      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
-    },
-    {
-      "path": "apps/pitwall/scripts/linux-container-inner.sh",
-      "site": "tooling file",
-      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
-    },
-    {
-      "path": "apps/pitwall/scripts/linux-container-verify.sh",
       "site": "tooling file",
       "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
     },
@@ -886,6 +856,16 @@
       "path": "conformance/src/checks/C169-write-atomic.mjs",
       "site": "tooling file",
       "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/checks/C171-abs-path-literals.mjs",
+      "site": "tooling file",
+      "reason": "JS check landed before C173's baseline; Rust port queued (user 2026-11-26)"
+    },
+    {
+      "path": "conformance/src/checks/C172-no-local-vm.mjs",
+      "site": "tooling file",
+      "reason": "JS check landed before C173's baseline; Rust port queued (user 2026-11-26)"
     },
     {
       "path": "conformance/src/checks/C23-process.mjs",
@@ -1393,6 +1373,16 @@
       "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
     },
     {
+      "path": "conformance/test/c171-abs-path-literals.test.mjs",
+      "site": "tooling file",
+      "reason": "JS check landed before C173's baseline; Rust port queued (user 2026-11-26)"
+    },
+    {
+      "path": "conformance/test/c172-no-local-vm.test.mjs",
+      "site": "tooling file",
+      "reason": "JS check landed before C173's baseline; Rust port queued (user 2026-11-26)"
+    },
+    {
       "path": "conformance/test/c23-blocks.test.mjs",
       "site": "tooling file",
       "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
@@ -1611,6 +1601,11 @@
       "path": "conformance/test/core.test.mjs",
       "site": "tooling file",
       "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/coverage-placement.test.mjs",
+      "site": "tooling file",
+      "reason": "conformance test, ported with WP-10"
     },
     {
       "path": "conformance/test/dev-tool-cache.test.mjs",
@@ -2138,11 +2133,6 @@
       "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
     },
     {
-      "path": "tools/linux-container.sh",
-      "site": "tooling file",
-      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
-    },
-    {
       "path": "tools/mac-ci-signing.sh",
       "site": "tooling file",
       "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
@@ -2179,11 +2169,6 @@
     },
     {
       "path": "tools/test/helpers.mjs",
-      "site": "tooling file",
-      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
-    },
-    {
-      "path": "tools/test/linux-container.test.mjs",
       "site": "tooling file",
       "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
     },
