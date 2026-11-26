@@ -26,6 +26,7 @@ mod dev_bin;
 mod dev_tool_publish;
 mod dev_tool_workflow;
 mod doctests_off;
+mod dyno_check_bundle;
 mod escape_gate;
 mod gates_planner;
 mod generators;
