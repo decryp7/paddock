@@ -857,7 +857,13 @@ fn landing_line(base: &str, smoke: &[&str], affected: &[&str]) -> String {
         affected: affected.iter().map(|s| s.to_string()).collect(),
         ..need.clone()
     };
-    format!("{}\n", run_scope::ci_scope(ran, false, need, false).with_base(Some(base)).line())
+    format!(
+        "{}\n",
+        run_scope::ci_scope(ran, false, need, false)
+            .with_expected(run_scope::test_names(&["conformance"]))
+            .with_base(Some(base))
+            .line()
+    )
 }
 
 /// The server of [`server`], plus each run listed under its own commit (`runs?head_sha=`), as the verdict reader asks.

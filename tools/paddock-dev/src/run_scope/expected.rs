@@ -62,6 +62,33 @@ pub fn load_model(root: &std::path::Path) -> Result<JobModel, String> {
     load_model_from(&read(".gitea/workflows/ci.yml")?, &read(crate::repo_inputs::FILE)?)
 }
 
+/// The job name without the calling workflow's job: a run called from another workflow (the nightly's) lists its jobs as
+/// `<caller> / <job>` (ADR 0123 §3). The one place the prefix is stripped.
+pub fn strip_caller(name: &str) -> &str {
+    name.rsplit(" / ").next().unwrap_or(name)
+}
+
+/// A job found in a run's scope line.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Found<'a> {
+    /// The workflow job id.
+    pub job: String,
+    /// The leg the line gives it; `None` when only the job's own log named it (the leg is not measured).
+    pub leg: Option<&'a BTreeMap<String, String>>,
+}
+
+/// Looks a job's display name up in a run's `expected` map: the name as listed, then without its caller prefix. A name the line does
+/// not hold falls back to the `Job:` line of the job's log (`log`), which gives the id and no leg. `None` when neither knows it.
+pub fn lookup<'a>(expected: &'a ExpectedMap, name: &str, log: Option<&str>) -> Option<Found<'a>> {
+    if let Some(e) = expected.get(name).or_else(|| expected.get(strip_caller(name))) {
+        return Some(Found {
+            job: e.job.clone(),
+            leg: Some(&e.leg),
+        });
+    }
+    crate::plan_since::job_key(log?).map(|job| Found { job, leg: None })
+}
+
 /// A scalar of a planned leg as the runner shows it in a name (`2` of a number, `true` of a boolean); anything else is empty.
 fn scalar(v: &Value) -> String {
     match v {
@@ -316,5 +343,42 @@ mod tests {
         assert!(!none.keys().any(|n| n.starts_with("end-to-end")), "{none:?}");
         assert!(none.contains_key("real-app smoke (ubuntu-latest)"));
         assert!(app_expected("name: x\n", &BTreeMap::new()).is_err());
+    }
+
+    fn map() -> ExpectedMap {
+        let part = |k: u8| {
+            (
+                format!("crate (ubuntu-latest, {k}/3)"),
+                Expected {
+                    job: "crate".into(),
+                    leg: BTreeMap::from([
+                        ("os".to_string(), "ubuntu-latest".to_string()),
+                        ("part_label".to_string(), format!(", {k}/3")),
+                    ]),
+                },
+            )
+        };
+        ExpectedMap::from([part(1), part(2), part(3)])
+    }
+
+    #[test]
+    fn a_name_is_looked_up_as_listed_then_without_its_caller_prefix_then_by_the_jobs_own_log() {
+        let m = map();
+        let by_name = lookup(&m, "crate (ubuntu-latest, 3/3)", None).unwrap();
+        assert_eq!(
+            (by_name.job.as_str(), by_name.leg.unwrap()["part_label"].as_str()),
+            ("crate", ", 3/3")
+        );
+        // A caller's prefix is stripped here and nowhere else.
+        let called = lookup(&m, "ci / crate (ubuntu-latest, 2/3)", None).unwrap();
+        assert_eq!(called.leg.unwrap()["part_label"], ", 2/3");
+        // A name the line does not hold: the log's `Job:` line gives the job and no leg.
+        let by_log = lookup(&m, "crate (ubuntu-latest, 4/4)", Some("2026-11-26T00:00:00.0000000Z Job: crate\n")).unwrap();
+        assert_eq!((by_log.job.as_str(), by_log.leg), ("crate", None));
+        // Neither knows it: nothing, never a guess from the name's shape.
+        assert_eq!(lookup(&m, "crate (ubuntu-latest, 4/4)", None), None);
+        assert_eq!(lookup(&m, "crate (ubuntu-latest, 4/4)", Some("no header\n")), None);
+        assert_eq!(strip_caller("a / b / c"), "c");
+        assert_eq!(strip_caller("plain"), "plain");
     }
 }

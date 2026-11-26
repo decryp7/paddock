@@ -912,7 +912,7 @@ mod tests {
             for_app(&mut c, v, app)
         };
         // The foundation-only line: complete, with pitwall inactive (docs/ci-active-apps.toml).
-        let line = run_scope::TEST_COMPLETE.replacen("\"need_whole\":true}", "\"need_whole\":true,\"inactive\":[\"pitwall\"]}", 1);
+        let line = run_scope::TEST_COMPLETE.replacen("\"need_whole\":true,", "\"need_whole\":true,\"inactive\":[\"pitwall\"],", 1);
         assert!(line.contains("inactive"), "the control line names pitwall: {line}");
         let mut f = server(vec![main_push(5, "success")], &[(5, 50, Some(line.as_str()))]);
         assert_eq!(ask(&mut f), Verdict::Green { run: 5 }, "the run is complete for the foundation");
@@ -1364,7 +1364,12 @@ mod tests {
             os_full: true,
             ..Default::default()
         };
-        format!("{}\n", run_scope::ci_scope(scope(ran_jobs), false, scope(need_jobs), true).line())
+        format!(
+            "{}\n",
+            run_scope::ci_scope(scope(ran_jobs), false, scope(need_jobs), true)
+                .with_expected(run_scope::test_names(ran_jobs))
+                .line()
+        )
     }
 
     /// Run 5 (a push to main) with the plan log `log` and these jobs besides its plan job: `(id, name, conclusion)`.

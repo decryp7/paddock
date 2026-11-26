@@ -9,7 +9,9 @@
 
 mod expected;
 
-pub use expected::{Expected, ExpectedMap, LEG_KEYS, PlannedLegs, app_expected, expected_of, load_model, load_model_from};
+pub use expected::{
+    Expected, ExpectedMap, Found, LEG_KEYS, PlannedLegs, app_expected, expected_of, load_model, load_model_from, lookup, strip_caller,
+};
 
 use crate::job_outcome::JobOutcome;
 use crate::log_text::plain;
@@ -431,31 +433,6 @@ pub fn scope_of(plan: &Value, legs: &[Value], webkit: bool, os_legs: &[String], 
     }
 }
 
-/// How a declared job is found among a run's jobs by display name.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum JobName {
-    /// The whole name (a matrix leg: `crate (macos-latest)`).
-    Exact(String),
-    /// The start of the name (a job with a long or sharded name: `ui (`, `reference apps (shard`).
-    Prefix(&'static str),
-    /// Any of these starts: the job's name now and its names before a rename, so a recorded run of the old ci.yml still reads as
-    /// covering its project (`quick checks (|C99 (`: C99 was a job of its own until 2026-11-26).
-    AnyPrefix(Vec<&'static str>),
-    /// The start of the name, built at run time (a leg whose job may carry a partition label: `crate (ubuntu-latest`).
-    Starts(String),
-}
-
-impl JobName {
-    fn matches(&self, name: &str) -> bool {
-        match self {
-            JobName::Exact(n) => name == n,
-            JobName::Prefix(p) => name.starts_with(p),
-            JobName::AnyPrefix(ps) => ps.iter().any(|p| name.starts_with(p)),
-            JobName::Starts(p) => name.starts_with(p.as_str()),
-        }
-    }
-}
-
 /// The display names of the ci.yml jobs each project flag of a plan switches on (`plan_gitea::CI_JOBS` lists them by id; a test reads
 /// ci.yml and checks each prefix names a job there). Jobs whose `if` reads more than the plan (`audit`) are
 /// not here: a skipped one is not a scope that was not covered.
@@ -473,36 +450,6 @@ pub const PROJECT_JOBS: &[(&str, &[&str])] = &[
     ("e2e-webkit", &["reference apps in WebKit"]),
 ];
 
-/// The job names of one declared job of ci.yml, empty for a key no single job stands for (`paddockDev`: its jobs are the
-/// `paddock-dev@os` legs).
-fn names_of_job(key: &str) -> Vec<JobName> {
-    if let Some((_, prefixes)) = PROJECT_JOBS.iter().find(|(k, _)| *k == key) {
-        return prefixes
-            .iter()
-            .map(|p| match p.split_once('|') {
-                Some(_) => JobName::AnyPrefix(p.split('|').collect()),
-                None => JobName::Prefix(p),
-            })
-            .collect();
-    }
-    match key.split_once('@') {
-        // `crate (ubuntu-latest)` or, when its tests are split into parallel jobs, `crate (ubuntu-latest, 2/3)`: every one must have run.
-        Some(("crate", os)) => vec![JobName::Starts(format!("crate ({os}"))],
-        Some(("paddock-dev", os)) => vec![JobName::Exact(format!("paddock-dev ({os})"))],
-        _ => Vec::new(),
-    }
-}
-
-/// The job name of an app leg (`dyno@ubuntu-latest:e2e-1`): `app dyno (ubuntu-latest, e2e-1)`, as ci.yml's `app` job names it.
-fn name_of_leg(leg: &str) -> JobName {
-    let (app_os, e2e) = leg.split_once(':').map_or((leg, None), |(a, e)| (a, Some(e)));
-    let (app, os) = app_os.split_once('@').unwrap_or((app_os, ""));
-    JobName::Exact(match e2e {
-        Some(e) => format!("app {app} ({os}, {e})"),
-        None => format!("app {app} ({os})"),
-    })
-}
-
 /// What `check_ran` found wrong with a run's jobs.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RanProblem {
@@ -512,34 +459,33 @@ pub enum RanProblem {
     Missing(String),
 }
 
-/// "Ran means ran": every job the run declared in `ran` has a job in the run with a matching name, and none of them was skipped or
-/// cancelled. A failed one is left to the run's own conclusion (red). Only ci.yml's jobs are mapped; another workflow's declaration
-/// has no job names and passes (its `gates` job is not one job). `jobs` are `(display name, outcome)`.
+/// "Ran means ran": every job the scope line expects ([`Declared::expected`], the display names the planner rendered from the job
+/// model) has a job of exactly that name in the run, and none of them was skipped or cancelled: a missing `3/3` partition is missing.
+/// A failed one is left to the run's own conclusion (red). Only ci.yml's jobs are mapped; another workflow's declaration has no job
+/// names and passes (its `gates` job is not one job). A run that ran jobs but whose line expects none (the workflow could not be
+/// modelled) is not measured, never a pass (ER-33). `jobs` are `(display name, outcome)`.
 pub fn check_ran(d: &Declared, jobs: &[(String, JobOutcome)]) -> Result<(), RanProblem> {
     if d.workflow != "ci.yml" {
         return Ok(());
     }
-    let declared = d
-        .ran
-        .jobs
-        .iter()
-        .map(|k| (k.as_str(), names_of_job(k)))
-        .chain(d.ran.apps.iter().map(|a| (a.as_str(), vec![name_of_leg(a)])));
-    for (key, names) in declared {
-        for name in names {
-            let found: Vec<&(String, JobOutcome)> = jobs.iter().filter(|(n, _)| name.matches(n)).collect();
-            if found.is_empty() {
-                return Err(RanProblem::Missing(format!("{key}: the run has no job named like {name:?}")));
-            }
-            for (n, o) in found {
-                let c = match o {
-                    // Ran: a failure is the run's own red, not a partial scope.
-                    JobOutcome::Passed | JobOutcome::Failed => continue,
-                    JobOutcome::Unfinished => "not finished",
-                    JobOutcome::Skipped | JobOutcome::Cancelled | JobOutcome::Unknown(_) => o.as_api(),
-                };
-                return Err(RanProblem::NotRun(format!("{key}: its job {n:?} was {c}, not success")));
-            }
+    if d.expected.is_empty() && (!d.ran.jobs.is_empty() || !d.ran.apps.is_empty()) {
+        return Err(RanProblem::Missing(
+            "the scope line names no expected jobs (the planner could not model ci.yml), so the run's jobs are not measured".into(),
+        ));
+    }
+    for (name, expected) in &d.expected {
+        let found: Vec<&(String, JobOutcome)> = jobs.iter().filter(|(n, _)| n == name).collect();
+        if found.is_empty() {
+            return Err(RanProblem::Missing(format!("{}: the run has no job named {name:?}", expected.job)));
+        }
+        for (n, o) in found {
+            let c = match o {
+                // Ran: a failure is the run's own red, not a partial scope.
+                JobOutcome::Passed | JobOutcome::Failed => continue,
+                JobOutcome::Unfinished => "not finished",
+                JobOutcome::Skipped | JobOutcome::Cancelled | JobOutcome::Unknown(_) => o.as_api(),
+            };
+            return Err(RanProblem::NotRun(format!("{}: its job {n:?} was {c}, not success", expected.job)));
         }
     }
     Ok(())
@@ -668,17 +614,40 @@ pub fn with_first_run(text: &str, producer: &str, run: u64) -> Result<String, St
     }
 }
 
+/// The display names a test fixture expects for the few job keys the reader tests use: `conformance`, `e2e` and `e2e-webkit` (the names
+/// their fixture runs carry), by explicit fixture, not by the job model.
+#[cfg(test)]
+pub fn test_names(keys: &[&str]) -> ExpectedMap {
+    let job = |name: &str, job: &str| {
+        (
+            name.to_string(),
+            Expected {
+                job: job.into(),
+                leg: BTreeMap::new(),
+            },
+        )
+    };
+    keys.iter()
+        .flat_map(|k| match *k {
+            "conformance" => vec![job("conformance (checks, release scripts)", "conformance")],
+            "e2e" => vec![job("reference apps (shard 1/2)", "e2e"), job("reference apps (shard 2/2)", "e2e")],
+            "e2e-webkit" => vec![job("reference apps in WebKit (macOS)", "e2e-webkit")],
+            other => panic!("test_names has no fixture for {other}"),
+        })
+        .collect()
+}
+
 /// A complete ci.yml scope line, for the tests of the readers (`verdict`, `reuse`): a run that did what a push to main does.
 #[cfg(test)]
-pub const TEST_COMPLETE: &str = "plan scope: {\"v\":3,\"workflow\":\"ci.yml\",\"rerun\":false,\"ran\":{\"jobs\":[\"conformance\"],\"engines\":[\"chromium\",\"webkit\"],\"apps\":[],\"whole\":true,\"os_full\":true,\"smoke\":[],\"affected\":[]},\"need\":{\"jobs\":[\"conformance\"],\"engines\":[\"chromium\",\"webkit\"],\"apps\":[],\"whole\":true,\"os_full\":true,\"smoke\":[],\"affected\":[]},\"need_whole\":true,\"expected\":{}}\n";
+pub const TEST_COMPLETE: &str = "plan scope: {\"v\":3,\"workflow\":\"ci.yml\",\"rerun\":false,\"ran\":{\"jobs\":[\"conformance\"],\"engines\":[\"chromium\",\"webkit\"],\"apps\":[],\"whole\":true,\"os_full\":true,\"smoke\":[],\"affected\":[]},\"need\":{\"jobs\":[\"conformance\"],\"engines\":[\"chromium\",\"webkit\"],\"apps\":[],\"whole\":true,\"os_full\":true,\"smoke\":[],\"affected\":[]},\"need_whole\":true,\"expected\":{\"conformance (checks, release scripts)\":{\"job\":\"conformance\",\"leg\":{}}}}\n";
 
 /// The line of [`TEST_COMPLETE`] from an `os=linux` run: it covers its `need` here, but it is one operating system's part only.
 #[cfg(test)]
-pub const TEST_OS_ONLY: &str = "plan scope: {\"v\":3,\"workflow\":\"ci.yml\",\"rerun\":false,\"os\":\"linux\",\"ran\":{\"jobs\":[\"conformance\"],\"engines\":[\"chromium\",\"webkit\"],\"apps\":[],\"whole\":true,\"os_full\":true,\"smoke\":[],\"affected\":[]},\"need\":{\"jobs\":[\"conformance\"],\"engines\":[\"chromium\",\"webkit\"],\"apps\":[],\"whole\":true,\"os_full\":true,\"smoke\":[],\"affected\":[]},\"need_whole\":true,\"expected\":{}}\n";
+pub const TEST_OS_ONLY: &str = "plan scope: {\"v\":3,\"workflow\":\"ci.yml\",\"rerun\":false,\"os\":\"linux\",\"ran\":{\"jobs\":[\"conformance\"],\"engines\":[\"chromium\",\"webkit\"],\"apps\":[],\"whole\":true,\"os_full\":true,\"smoke\":[],\"affected\":[]},\"need\":{\"jobs\":[\"conformance\"],\"engines\":[\"chromium\",\"webkit\"],\"apps\":[],\"whole\":true,\"os_full\":true,\"smoke\":[],\"affected\":[]},\"need_whole\":true,\"expected\":{\"conformance (checks, release scripts)\":{\"job\":\"conformance\",\"leg\":{}}}}\n";
 
 /// A ci.yml scope line of a run that missed one engine (WebKit): not complete.
 #[cfg(test)]
-pub const TEST_PARTIAL: &str = "plan scope: {\"v\":3,\"workflow\":\"ci.yml\",\"rerun\":false,\"ran\":{\"jobs\":[\"conformance\"],\"engines\":[\"chromium\"],\"apps\":[],\"whole\":true,\"os_full\":true,\"smoke\":[],\"affected\":[]},\"need\":{\"jobs\":[\"conformance\"],\"engines\":[\"chromium\",\"webkit\"],\"apps\":[],\"whole\":true,\"os_full\":true,\"smoke\":[],\"affected\":[]},\"need_whole\":true,\"expected\":{}}\n";
+pub const TEST_PARTIAL: &str = "plan scope: {\"v\":3,\"workflow\":\"ci.yml\",\"rerun\":false,\"ran\":{\"jobs\":[\"conformance\"],\"engines\":[\"chromium\"],\"apps\":[],\"whole\":true,\"os_full\":true,\"smoke\":[],\"affected\":[]},\"need\":{\"jobs\":[\"conformance\"],\"engines\":[\"chromium\",\"webkit\"],\"apps\":[],\"whole\":true,\"os_full\":true,\"smoke\":[],\"affected\":[]},\"need_whole\":true,\"expected\":{\"conformance (checks, release scripts)\":{\"job\":\"conformance\",\"leg\":{}}}}\n";
 
 #[cfg(test)]
 mod tests {
@@ -712,10 +681,32 @@ mod tests {
         strings(&DEFAULT_OS_LEGS)
     }
 
+    /// The legs the planner would emit for the `crate` job: the Linux tests split into three partitions, one leg on each other runner.
+    fn crate_legs() -> Vec<Value> {
+        let mut l: Vec<Value> = (1..=3)
+            .map(|k| json!({"os": "ubuntu-latest", "part_label": format!(", {k}/3"), "test_packages": format!("p{k}")}))
+            .collect();
+        l.extend([json!({"os": "windows-latest"}), json!({"os": "macos-latest"})]);
+        l
+    }
+
     fn declared(ran_webkit: bool, filters: &[&str]) -> Declared {
         let need = scope_of(&plan(), &legs(true), true, &os(), &[]);
         let ran = scope_of(&plan(), &legs(ran_webkit), ran_webkit, &os(), filters);
-        ci_scope(ran, false, need, true)
+        // The names the run expects, rendered by the job model of the real ci.yml over these legs (what `./dev plan --ci` writes).
+        let model = load_model_from(
+            include_str!("../../../.gitea/workflows/ci.yml"),
+            include_str!("../../../docs/repo-graph.toml"),
+        )
+        .unwrap();
+        let app_legs = legs(ran_webkit);
+        let planned = PlannedLegs {
+            crate_legs: &crate_legs(),
+            apps: &app_legs,
+            ..PlannedLegs::default()
+        };
+        let expected = expected_of(&model, &ran, &planned).unwrap();
+        ci_scope(ran, false, need, true).with_expected(expected)
     }
 
     #[test]
@@ -784,38 +775,31 @@ mod tests {
     #[test]
     fn a_crate_job_split_into_partitions_must_have_every_partition_pass_before_its_declared_job_counts() {
         let d = declared(true, &["", ""]);
-        let job = |n: &str, o: JobOutcome| (n.to_string(), o);
-        let mut jobs: Vec<(String, JobOutcome)> = d
-            .ran
-            .jobs
-            .iter()
-            .filter(|j| !j.starts_with("crate@"))
-            .flat_map(|j| names_of_job(j))
-            .map(|n| match n {
-                JobName::Exact(e) => job(&e, JobOutcome::Passed),
-                JobName::Prefix(p) => job(&format!("{p}x)"), JobOutcome::Passed),
-                JobName::AnyPrefix(ps) => job(&format!("{}x)", ps[0]), JobOutcome::Passed),
-                JobName::Starts(p) => job(&format!("{p})"), JobOutcome::Passed),
-            })
-            .chain(d.ran.apps.iter().map(|a| match name_of_leg(a) {
-                JobName::Exact(e) => job(&e, JobOutcome::Passed),
-                _ => unreachable!(),
-            }))
-            .collect();
-        jobs.extend([
-            job("crate (windows-latest)", JobOutcome::Passed),
-            job("crate (macos-latest)", JobOutcome::Passed),
-            job("crate (ubuntu-latest, 1/3)", JobOutcome::Passed),
-            job("crate (ubuntu-latest, 2/3)", JobOutcome::Passed),
-            job("crate (ubuntu-latest, 3/3)", JobOutcome::Passed),
-        ]);
+        let mut jobs = run_jobs(&d, "success");
+        for k in 1..=3 {
+            assert!(
+                jobs.iter().any(|(n, _)| *n == format!("crate (ubuntu-latest, {k}/3)")),
+                "partition {k} is expected: {jobs:?}"
+            );
+        }
         assert_eq!(check_ran(&d, &jobs), Ok(()), "{jobs:?}");
-        // One partition cancelled is a partial scope, not a pass; and a missing job of the whole name is still missing.
+        // One partition cancelled is a partial scope, not a pass.
         let mut cut = jobs.clone();
         cut.iter_mut().find(|(n, _)| n == "crate (ubuntu-latest, 2/3)").unwrap().1 = JobOutcome::Cancelled;
         assert!(matches!(check_ran(&d, &cut), Err(RanProblem::NotRun(_))));
-        jobs.retain(|(n, _)| !n.starts_with("crate (ubuntu-latest"));
-        assert!(matches!(check_ran(&d, &jobs), Err(RanProblem::Missing(_))));
+        // A partition that never appeared is missing: the old prefix match saw `crate (ubuntu-latest, 1/3)` and called the job present.
+        jobs.retain(|(n, _)| n != "crate (ubuntu-latest, 3/3)");
+        assert!(
+            matches!(check_ran(&d, &jobs), Err(RanProblem::Missing(m)) if m.contains("3/3")),
+            "{:?}",
+            check_ran(&d, &jobs)
+        );
+        // A line that expects no jobs although the run ran some is not measured, never a pass (ER-33).
+        let blind = Declared {
+            expected: ExpectedMap::new(),
+            ..d
+        };
+        assert!(matches!(check_ran(&blind, &jobs), Err(RanProblem::Missing(m)) if m.contains("not measured")));
     }
 
     fn read_err(line: &str) -> String {
@@ -847,9 +831,15 @@ mod tests {
     fn a_version_2_line_is_never_read_and_a_malformed_expected_map_is_refused() {
         let v2 = TEST_COMPLETE.replace("\"v\":3", "\"v\":2");
         assert!(read_err(&v2).contains("version 2"), "{}", read_err(&v2));
-        let missing = TEST_COMPLETE.replace(",\"expected\":{}", "");
+        let missing = TEST_COMPLETE.replace(
+            ",\"expected\":{\"conformance (checks, release scripts)\":{\"job\":\"conformance\",\"leg\":{}}}",
+            "",
+        );
         assert!(read_err(&missing).contains("expected"), "{}", read_err(&missing));
-        let bad = TEST_COMPLETE.replace("\"expected\":{}", "\"expected\":{\"crate (x)\":{\"job\":\"crate\"}}");
+        let bad = TEST_COMPLETE.replace(
+            "{\"conformance (checks, release scripts)\":{\"job\":\"conformance\",\"leg\":{}}}",
+            "{\"crate (x)\":{\"job\":\"crate\"}}",
+        );
         assert!(read_err(&bad).contains("crate (x)"), "{}", read_err(&bad));
     }
 
@@ -1036,7 +1026,7 @@ mod tests {
             (",\"smoke\":[]", ""),
             (",\"need_whole\":true", ""),
             ("\"v\":3", "\"v\":2"),
-            (",\"expected\":{}", ""),
+            ("\"expected\":", "\"expectedx\":"),
         ] {
             assert!(line.contains(from), "{from}");
             assert!(read(&line.replacen(from, to, 1)).unwrap().is_err(), "without {from}");
@@ -1044,43 +1034,8 @@ mod tests {
     }
 
     fn run_jobs(d: &Declared, conclusion: &str) -> Vec<(String, JobOutcome)> {
-        // One job per declared key, named as ci.yml names it, all with `conclusion`.
-        let mut jobs: Vec<(String, JobOutcome)> = Vec::new();
-        for k in &d.ran.jobs {
-            for n in names_of_job(k) {
-                jobs.push((
-                    match n {
-                        JobName::Exact(n) => n,
-                        JobName::Prefix(p) => format!("{p}x)"),
-                        JobName::AnyPrefix(ps) => format!("{}x)", ps[0]),
-                        JobName::Starts(p) => format!("{p})"),
-                    },
-                    JobOutcome::from_api(conclusion),
-                ));
-            }
-        }
-        for a in &d.ran.apps {
-            if let JobName::Exact(n) = name_of_leg(a) {
-                jobs.push((n, JobOutcome::from_api(conclusion)));
-            }
-        }
-        jobs
-    }
-
-    /// A run recorded before the short checks became one job (`quick`, 2026-11-26) has its C99 and heavy tool jobs under their old
-    /// names: the verdict and reuse readers still read it as covering c99 and tools (run 9054 of tests/ci-runs/reuse-push-base).
-    #[test]
-    fn a_run_of_the_older_ci_yml_with_its_own_c99_and_heavy_tool_jobs_still_covers_c99_and_tools() {
-        let finds = |key: &str, job: &str| names_of_job(key).iter().any(|n| n.matches(job));
-        // Today's names.
-        assert!(finds("c99", "quick checks (C99, audit, heavy tool)"));
-        assert!(finds("tools", "quick checks (C99, audit, heavy tool)") && finds("tools", "tools and shared scripts"));
-        // The older ci.yml's own jobs (recorded run 9054 and every run before 2026-11-26).
-        assert!(finds("c99", "C99 (no Keychain in a macOS build)"));
-        assert!(finds("tools", "heavy tool"));
-        // Control: an unrelated job covers neither.
-        assert!(!finds("c99", "crates (fmt, workspace hack, unused deps, coverage, deny)"));
-        assert!(!finds("tools", "gitleaks (secret scan)"));
+        // One job per expected display name, all with `conclusion`.
+        d.expected.keys().map(|n| (n.clone(), JobOutcome::from_api(conclusion))).collect()
     }
 
     #[test]
@@ -1117,7 +1072,7 @@ mod tests {
             .filter(|(n, _)| n != "app dyno (ubuntu-latest, e2e-webkit)")
             .cloned()
             .collect();
-        assert!(matches!(check_ran(&d, &no_leg), Err(RanProblem::Missing(m)) if m.contains("dyno@ubuntu-latest:e2e-webkit")));
+        assert!(matches!(check_ran(&d, &no_leg), Err(RanProblem::Missing(m)) if m.contains("app dyno (ubuntu-latest, e2e-webkit)")));
         // A failed job is the run's own red, not a partial scope.
         let mut failed = all.clone();
         failed[0].1 = JobOutcome::Failed;
@@ -1153,13 +1108,6 @@ mod tests {
                 );
             }
         }
-        // The matrix legs: the `name:` templates the exact names are built from.
-        assert_eq!(name_of("crate"), "crate (${{ matrix.os }}${{ matrix.part_label }})");
-        assert_eq!(name_of("paddock-dev"), "paddock-dev (${{ matrix.os }})");
-        assert_eq!(
-            name_of("app"),
-            "app ${{ matrix.app }} (${{ matrix.os }}${{ matrix.e2e_leg != \'\' && format(\', {0}\', matrix.e2e_leg) || \'\' }})"
-        );
         // Positive control: a prefix that names no job is not found.
         assert!(!wf.jobs.iter().any(|(id, _)| name_of(id).starts_with("no such job")));
     }
