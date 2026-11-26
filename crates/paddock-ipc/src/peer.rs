@@ -1463,7 +1463,7 @@ mod tests {
         drop(theirs);
         peer.close();
         assert_eq!(
-            seen.recv_timeout(Duration::from_secs(30)),
+            seen.recv_timeout(paddock_testkit::HANG_GUARD),
             Ok(("before", true))
         );
         let p3 = peer.clone();
