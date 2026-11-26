@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import { existsSync, realpathSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { TOOLS, calls, run, scratch, shim, write } from './helpers.mjs';
+import { TOOLS, calls, run, scratch, shim, systemFolder, write } from './helpers.mjs';
 import { readFileSync, writeFileSync } from 'node:fs';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { job, loadWorkflow, loadYaml } from '../../conformance/test/lib/workflow.mjs';
 
 /** A fake docker: records every call; `image inspect` fails (no image yet) unless HAVE_IMAGE is set or a build of this fake made that
@@ -371,4 +372,111 @@ test('--image-ready only probes: exit 3 when the native image is not built (no b
   const registry = docker();
   assert.equal(go(registry, ['--id', 'paddock', '--root', repo, '--ci-image', '--image-ready'], { PADDOCK_LINUX_HOST_ARCH: 'x86_64' }).status, 0);
   assert.equal(go(docker(), ['--id', 'paddock', '--root', repo, '--image-ready']).status, 2, '--image-ready needs --ci-image');
+});
+
+// ---- --lock: one kernel lock per build folder of the kept target volume, held for the whole run ----
+
+/** A fake docker whose `run` really runs the command it is given (`sh -c <cmd>`, the last three arguments), in the order of the calls. */
+function runningDocker() {
+  const bin = scratch('paddock-bin-');
+  shim(bin, 'docker', `case "$1 $2" in "image inspect") exit 0;; "volume create") exit 0;; esac
+[ "$1" = run ] && { shift $(($# - 3)); exec "$@"; }; exit 0`);
+  return bin;
+}
+
+/** Starts one row asynchronously: `cmd` runs where the container would, with DIR (the shared scratch folder) in its environment. */
+function startRow(bin, repo, dir, cmd, { lock = true, wait = '60' } = {}) {
+  const args = [join(TOOLS, 'linux-container.sh'), ...(lock ? ['--lock', 'v3/tools-paddock-dev'] : []), '--id', 'paddock', '--root', repo, '--image', 'img', '--', 'sh', '-c', cmd];
+  const child = spawn('bash', args, {
+    env: { PATH: `${bin}:${systemFolder()}`, HOME: dir, TMPDIR: tmpdir(), DOCKER: join(bin, 'docker'), DIR: dir, PADDOCK_LINUX_HOST_ARCH: 'x86_64', PADDOCK_LINUX_LOCK_WAIT: wait },
+  });
+  let out = '';
+  child.stdout.on('data', (d) => (out += d));
+  child.stderr.on('data', (d) => (out += d));
+  const done = new Promise((resolve) => child.on('close', (status) => resolve({ status, out })));
+  return { child, done, output: () => out };
+}
+
+/** Resolves when `ready()` holds; the signal is a file or a line the row printed, the bound only ends a test that never gets it. */
+async function until(what, ready, ms = 20_000) {
+  const end = Date.now() + ms;
+  while (!ready()) {
+    assert.ok(Date.now() < end, `no signal: ${what}`);
+    await new Promise((r) => setTimeout(r, 25)); // conformance: hang-guard — polls a file or an output line the row writes, ends the test after 20 s
+  }
+}
+
+/** Row A builds its binary, then waits for `release-a` and runs it (reads it); row B replaces the binary at once. */
+const ROW_A = `echo A > "$DIR/bin"; : > "$DIR/a-built"; while [ ! -e "$DIR/release-a" ]; do sleep 0.02; done; cat "$DIR/bin" > "$DIR/a-ran"`;
+const ROW_B = `echo B > "$DIR/bin"; : > "$DIR/b-ran"`;
+
+test('without --lock a second row replaces the binary between the first one\'s build and run (the control: the harness sees the race)', async () => {
+  const dir = scratch(), bin = runningDocker(), repo = write(scratch(), { '.git/HEAD': 'x\n' });
+  const a = startRow(bin, repo, dir, ROW_A, { lock: false });
+  await until('A built', () => existsSync(join(dir, 'a-built')));
+  const b = startRow(bin, repo, dir, ROW_B, { lock: false });
+  await until('B ran', () => existsSync(join(dir, 'b-ran')));
+  writeFileSync(join(dir, 'release-a'), '');
+  assert.equal((await a.done).status, 0);
+  assert.equal((await b.done).status, 0);
+  assert.equal(readFileSync(join(dir, 'a-ran'), 'utf8').trim(), 'B', 'A ran the binary B built: the failure of train l');
+});
+
+test('--lock makes a second row on the same build folder wait until the first one has run, and the first runs its own binary', async () => {
+  const dir = scratch(), bin = runningDocker(), repo = write(scratch(), { '.git/HEAD': 'x\n' });
+  const a = startRow(bin, repo, dir, ROW_A);
+  await until('A built', () => existsSync(join(dir, 'a-built')));
+  const b = startRow(bin, repo, dir, ROW_B);
+  await until('B says it waits', () => /waiting for the build folder v3\/tools-paddock-dev of volume paddock-linux-target, held by pid \d+ in /.test(b.output()));
+  assert.ok(!existsSync(join(dir, 'b-ran')), 'B did not run while A holds the folder');
+  writeFileSync(join(dir, 'release-a'), '');
+  const [ra, rb] = [await a.done, await b.done];
+  assert.equal(ra.status, 0, ra.out);
+  assert.equal(rb.status, 0, rb.out);
+  assert.equal(readFileSync(join(dir, 'a-ran'), 'utf8').trim(), 'A', 'A ran the binary it built');
+  assert.equal(readFileSync(join(dir, 'bin'), 'utf8').trim(), 'B', 'B ran after A');
+  assert.match(rb.out, /holding the build folder v3\/tools-paddock-dev/);
+});
+
+test('--lock waits only for a bounded time and then ends with one ::error:: line naming the holder, running nothing', async () => {
+  const dir = scratch(), bin = runningDocker(), repo = write(scratch(), { '.git/HEAD': 'x\n' });
+  const a = startRow(bin, repo, dir, ROW_A);
+  await until('A built', () => existsSync(join(dir, 'a-built')));
+  const b = await startRow(bin, repo, dir, ROW_B, { wait: '1' }).done;
+  assert.equal(b.status, 5, b.out);
+  assert.match(b.out, /::error::linux-container: v3\/tools-paddock-dev of volume paddock-linux-target is still held by pid \d+ in .* after 1 s\. Next step: /);
+  assert.equal(b.out.split('\n').filter((l) => l.startsWith('::error::')).length, 1, b.out);
+  assert.ok(!existsSync(join(dir, 'b-ran')), 'the row that gave up ran nothing');
+  writeFileSync(join(dir, 'release-a'), '');
+  assert.equal((await a.done).status, 0);
+  // The kernel freed the lock with its holder: the next row takes it at once.
+  const c = await startRow(bin, repo, dir, ROW_B, { wait: '1' }).done;
+  assert.equal(c.status, 0, c.out);
+});
+
+test('--lock on different folders never waits, and a bad folder name is a usage error', async () => {
+  const dir = scratch(), bin = runningDocker(), repo = write(scratch(), { '.git/HEAD': 'x\n' });
+  const a = startRow(bin, repo, dir, ROW_A);
+  await until('A built', () => existsSync(join(dir, 'a-built')));
+  const other = spawnSync('bash', [join(TOOLS, 'linux-container.sh'), '--lock', 'v3/crates', '--id', 'paddock', '--root', repo, '--image', 'img', '--', 'sh', '-c', 'true'], {
+    encoding: 'utf8',
+    timeout: 20_000,
+    env: { PATH: `${bin}:${systemFolder()}`, HOME: dir, TMPDIR: tmpdir(), DOCKER: join(bin, 'docker'), PADDOCK_LINUX_HOST_ARCH: 'x86_64', PADDOCK_LINUX_LOCK_WAIT: '1' },
+  });
+  assert.equal(other.status, 0, other.stderr);
+  writeFileSync(join(dir, 'release-a'), '');
+  await a.done;
+  for (const bad of ['../x', '/abs', 'a b', '', 'a//b']) {
+    assert.equal(run('linux-container.sh', ['--lock', bad, '--id', 'paddock', '--image', 'img', '--', 'true'], { bin, cwd: scratch(), env: { DOCKER: join(bin, 'docker') } }).status, 2, bad);
+  }
+});
+
+test('--lock given twice for one folder takes it once instead of waiting for itself', () => {
+  const bin = runningDocker(), repo = write(scratch(), { '.git/HEAD': 'x\n' });
+  const r = spawnSync('bash', [join(TOOLS, 'linux-container.sh'), '--lock', 'v3/crates', '--lock', 'v3/crates', '--id', 'paddock', '--root', repo, '--image', 'img', '--', 'sh', '-c', 'true'], {
+    encoding: 'utf8',
+    timeout: 20_000,
+    env: { PATH: `${bin}:${systemFolder()}`, HOME: repo, TMPDIR: tmpdir(), DOCKER: join(bin, 'docker'), PADDOCK_LINUX_HOST_ARCH: 'x86_64', PADDOCK_LINUX_LOCK_WAIT: '2' },
+  });
+  assert.equal(r.status, 0, r.stderr);
 });
