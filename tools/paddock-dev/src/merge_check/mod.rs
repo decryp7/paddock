@@ -523,6 +523,17 @@ impl Steps {
 /// The merge's label, its findings, the steps after the detectors and the outcome as the wire object (with its evidence).
 type Checked = (String, Vec<Finding>, Steps, serde_json::Value);
 
+/// Runs `a` and `b` at the same time and returns both results: the member gate beside the generated-file check, so the integrator waits
+/// for the longer one. Each closure runs on a thread of its own inside one scope, so neither outlives the call.
+fn both<A: Send, B: Send>(a: impl FnOnce() -> A + Send, b: impl FnOnce() -> B + Send) -> (A, B) {
+    std::thread::scope(|s| {
+        let hb = s.spawn(b);
+        let ra = a();
+        let rb = hb.join().unwrap_or_else(|e| std::panic::resume_unwind(e));
+        (ra, rb)
+    })
+}
+
 fn check(req: &Request) -> Result<Checked, CliError> {
     if req.old_base_anyway.as_deref().is_some_and(|r| r.trim().is_empty()) {
         return Err(CliError::usage("--old-base-anyway needs a reason.")
@@ -544,16 +555,35 @@ fn check(req: &Request) -> Result<Checked, CliError> {
         Outcome::Clean(_) | Outcome::Findings(_) => {
             let found = analysis.found;
             // The generated files are checked in the checkout, so only a merge that exists as a commit has one to check.
-            let step = if !req.generators {
+            // The generated-file check (`./dev gen check`) and the member gate read the merge's checkout and neither writes it, so with
+            // `--gates` on a merge commit they run at the same time, not one after the other (user, 2026-11-26): the integrator waits
+            // for the longer of the two instead of their sum ([`both`]).
+            // (Each closure has its own `Git`: its answer caches are not shared between threads.)
+            let gen_step = || {
+                let git = Git::new(&root);
+                generator_step::run(&root, &git, &merge, &crate::generators::run::Real::new(&root), &|l| {
+                    crate::log_text::eline(l)
+                })
+            };
+            let gates_step = || {
+                let git = Git::new(&root);
+                gates::run(&root, &git, &merge, &gates::Real, gates::ENFORCED)
+            };
+            let (mut pre_gen, mut pre_gates) = (None, None);
+            if req.generators && req.gates && req.commit.is_some() {
+                let (g, ga) = both(gen_step, gates_step);
+                (pre_gen, pre_gates) = (Some(g), Some(ga));
+            }
+            let step = if let Some(s) = pre_gen.take() {
+                s
+            } else if !req.generators {
                 Some(generator_step::not_run("--no-generators"))
             } else if req.commit.is_none() {
                 Some(generator_step::not_run(
                     "a branch is checked before it is merged, so there is no checkout of the result; run `./dev merge check <merge-commit>` after merging",
                 ))
             } else {
-                generator_step::run(&root, &git, &merge, &crate::generators::run::Real::new(&root), &|l| {
-                    crate::log_text::eline(l)
-                })
+                gen_step()
             };
             let mut steps = Steps::default();
             steps.push("generators", step);
@@ -614,7 +644,7 @@ fn check(req: &Request) -> Result<Checked, CliError> {
                     Some(if req.commit.is_none() {
                         gates::not_run("a branch is checked before it is merged, so there is no checkout of the result; run `./dev merge check --gates <merge-commit>` after merging")
                     } else {
-                        gates::run(&root, &git, &merge, &gates::Real, gates::ENFORCED)
+                        pre_gates.take().unwrap_or_else(gates_step)
                     }),
                 );
             }
@@ -696,7 +726,36 @@ pub fn command_json(req: &Request, out: &mut dyn std::io::Write, err: &mut dyn s
 
 #[cfg(test)]
 mod merge_tests {
-    use super::Merge;
+    use super::{Merge, both};
+    use std::sync::{Condvar, Mutex};
+    use std::time::Duration;
+
+    /// The member gate and the generated-file check run at the same time (user, 2026-11-26): each closure announces that it started and
+    /// waits (bounded only as a hang detector, ER-12) until the other has started too. A serial `both` would never let the second start
+    /// while the first waits, so the wait would end at its bound and the assertion below would fail: the test sees overlap by construction,
+    /// not by timing. The results come back in call order.
+    #[test]
+    fn both_runs_the_two_closures_at_the_same_time_and_returns_their_results_in_order() {
+        let started = (Mutex::new(0u32), Condvar::new());
+        let meet = |me: &'static str| {
+            let mut n = started.0.lock().unwrap();
+            *n += 1;
+            started.1.notify_all();
+            let (n, timeout) = started.1.wait_timeout_while(n, Duration::from_secs(60), |n| *n < 2).unwrap();
+            (me, *n, timeout.timed_out())
+        };
+        let (a, b) = both(|| meet("generators"), || meet("gates"));
+        assert_eq!((a.0, b.0), ("generators", "gates"), "the results keep the call order");
+        assert!(!a.2 && !b.2, "each saw the other start while it was itself in flight: {a:?} {b:?}");
+        assert_eq!((a.1, b.1), (2, 2));
+    }
+
+    /// A panic in either closure reaches the caller (a failed step is never silently dropped).
+    #[test]
+    #[should_panic(expected = "the gates step broke")]
+    fn a_panic_in_the_second_closure_reaches_the_caller() {
+        let _ = both(|| 1, || -> u8 { panic!("the gates step broke") });
+    }
 
     #[test]
     fn a_new_merge_names_its_parents_by_short_id_and_has_no_message_or_commit() {
