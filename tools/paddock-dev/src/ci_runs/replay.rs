@@ -31,12 +31,18 @@ enum Touch {
 
 impl Touch {
     fn read(self) -> Option<Touched> {
+        self.read_with(&crate::run_scope::ExpectedMap::new())
+    }
+
+    /// [`Touch::read`] with the expected map of the run's scope line, which places a job's project (a v3 line holds it).
+    fn read_with(self, expected: &crate::run_scope::ExpectedMap) -> Option<Touched> {
+        let base = Touched {
+            expected: expected.clone(),
+            ..Touched::default()
+        };
         match self {
-            Touch::Nothing => Some(Touched::default()),
-            Touch::Everything => Some(Touched {
-                all: true,
-                ..Touched::default()
-            }),
+            Touch::Nothing => Some(base),
+            Touch::Everything => Some(Touched { all: true, ..base }),
             Touch::Unread => None,
         }
     }
@@ -46,7 +52,6 @@ impl Touch {
 #[derive(Debug)]
 enum V {
     Green(u64),
-    GreenWithFixItems(u64, &'static [&'static str]),
     Red(Option<u64>, &'static str),
     NotMeasured(&'static str),
 }
@@ -55,12 +60,13 @@ enum V {
 #[derive(Debug)]
 enum R {
     Skip(u64),
+    Run(&'static str),
 }
 
 /// What the trial reader says, as the table writes it.
 #[derive(Debug)]
 enum T {
-    Green(u64),
+    NotMeasured(&'static str),
 }
 
 /// One recorded shape and what every reader must answer on it.
@@ -91,8 +97,9 @@ struct Shape {
 
 /// The shapes. Add one when a reader changes (docs/testing/ci-replay.md); each answer has its reason in `why`.
 ///
-/// Recorded on origin/main 167e0473a (scope lines v2, plus run 9167's v3). When the job model's WP-2 (ADR 0123, train u) lands, the
-/// v2 shapes read as "not reused" (D2) and 9167 reads as a landing run: update their rows, never loosen them.
+/// Recorded on origin/main 167e0473a (v2 scope lines, the rows marked D2) and 696f472f4 (v3, after job-model WP-2, ADR 0123): a v2 line
+/// is never reused (D2), so the readers say "not measured" for it, expected and not a fault. The old-line column is the report-only
+/// phase's basis and does not read the scope line.
 const SHAPES: &[Shape] = &[
     Shape {
         name: "green-train",
@@ -100,12 +107,12 @@ const SHAPES: &[Shape] = &[
         run: 9170,
         asking: None,
         touched: Touch::Nothing,
-        on_scope: V::Red(None, "a landing run"),
+        on_scope: V::NotMeasured("version 2"),
         on_line: V::Red(None, "plan verdict: complete="),
-        on_landing: V::Green(9170),
+        on_landing: V::NotMeasured("version 2"),
         reuse: None,
         trial: None,
-        why: "a train's dispatch ran its own diff's selection (smoke icons, need_whole false): it lands the train but is no full run",
+        why: "D2: a v2 line (a train landing run of its diff's selection, smoke icons) is not measured by the v3 readers; before WP-2 it landed the train",
     },
     Shape {
         name: "green-refused-by-old-reader",
@@ -113,12 +120,12 @@ const SHAPES: &[Shape] = &[
         run: 9167,
         asking: None,
         touched: Touch::Nothing,
-        on_scope: V::NotMeasured("version 3"),
+        on_scope: V::Red(Some(9167), "reference apps (shard 1/2)"),
         on_line: V::Red(None, "plan verdict: complete="),
-        on_landing: V::NotMeasured("version 3"),
+        on_landing: V::Red(Some(9167), "reference apps (shard 1/2)"),
         reuse: None,
         trial: None,
-        why: "a green run whose scope line is v3 (the expected map): this reader knows v2 and must say not measured, never green; train u's reader flips it",
+        why: "v3 line from before the planner fix: its expected map lists the e2e legs a train skips, so the green run is refused as not run (the 9167 defect, now a planner-side fix; 9180 is the fixed shape)",
     },
     Shape {
         name: "red-one-flaky",
@@ -126,15 +133,12 @@ const SHAPES: &[Shape] = &[
         run: 9168,
         asking: None,
         touched: Touch::Nothing,
-        on_scope: V::Red(None, "a landing run"),
+        on_scope: V::NotMeasured("version 2"),
         on_line: V::Red(None, "plan verdict: complete="),
-        on_landing: V::GreenWithFixItems(
-            9168,
-            &["paddock-proc usage::tests::the_os_source_lists_the_children_of_one_pid_without_a_table"],
-        ),
+        on_landing: V::NotMeasured("version 2"),
         reuse: None,
         trial: None,
-        why: "one FLAKY test of crate (windows-latest), the run red: untouched code makes it a fix item that lands (ER-12); never a full green",
+        why: "D2: a v2 line, not measured; the FLAKY grade itself is replayed from this run's logs in the fix-items test below",
     },
     Shape {
         name: "push-reused",
@@ -142,12 +146,12 @@ const SHAPES: &[Shape] = &[
         run: 9170,
         asking: Some(9171),
         touched: Touch::Nothing,
-        on_scope: V::Red(None, "a landing run"),
+        on_scope: V::NotMeasured("version 2"),
         on_line: V::Red(None, "plan verdict: complete="),
-        on_landing: V::Green(9170),
-        reuse: Some(R::Skip(9170)),
+        on_landing: V::NotMeasured("version 2"),
+        reuse: Some(R::Run("version 2")),
         trial: None,
-        why: "the push 9171 asks about the commit train run 9170 tested; its base (main's run 9074, itself a reuse of 9073) is the landing's, so 9171 skips (ER-49)",
+        why: "D2: the push 9171 asks about a commit whose run has a v2 line, so it is not reused and the push runs in full (before WP-2 it skipped, 9170)",
     },
     Shape {
         name: "failed-only-round",
@@ -155,12 +159,12 @@ const SHAPES: &[Shape] = &[
         run: 9147,
         asking: None,
         touched: Touch::Nothing,
-        on_scope: V::Red(None, "rerun of an earlier run's failures"),
+        on_scope: V::NotMeasured("version 2"),
         on_line: V::Red(None, "plan verdict: complete="),
-        on_landing: V::Red(None, "rerun of an earlier run's failures"),
+        on_landing: V::NotMeasured("version 2"),
         reuse: None,
         trial: None,
-        why: "the green failed-only round (run 9147 reran the one job of 9146): proves nothing for the commit, a landing needs a full green run (ER-10)",
+        why: "D2: the green failed-only round (9147 reran the one job of 9146) has a v2 line: not measured; it proved nothing for the commit before either (ER-10)",
     },
     Shape {
         name: "failed-only-round",
@@ -168,12 +172,12 @@ const SHAPES: &[Shape] = &[
         run: 9146,
         asking: None,
         touched: Touch::Nothing,
-        on_scope: V::Red(None, "rerun of an earlier run's failures"),
+        on_scope: V::NotMeasured("version 2"),
         on_line: V::Red(None, "plan verdict: complete="),
-        on_landing: V::Red(None, "rerun of an earlier run's failures"),
+        on_landing: V::NotMeasured("version 2"),
         reuse: None,
         trial: None,
-        why: "the red failed-only round (a test failed both tries): a partial run, so never the verdict of its commit either",
+        why: "D2: the red failed-only round (a test failed both tries), a v2 line: not measured",
     },
     Shape {
         name: "nightly",
@@ -181,12 +185,12 @@ const SHAPES: &[Shape] = &[
         run: 9103,
         asking: None,
         touched: Touch::Nothing,
-        on_scope: V::Red(None, "declared the scope of ci.yml, not of this workflow"),
+        on_scope: V::NotMeasured("version 2"),
         on_line: V::Red(None, "plan verdict: complete="),
-        on_landing: V::Red(None, "declared the scope of ci.yml, not of this workflow"),
+        on_landing: V::NotMeasured("version 2"),
         reuse: None,
         trial: None,
-        why: "a scheduled nightly (red, 6 jobs failed) declares ci.yml's scope: it never decides a landing or a tag",
+        why: "D2: a scheduled nightly (red, 6 jobs failed), a v2 line. The nightly declares ci.yml's scope, so it never decides a landing or a tag",
     },
     Shape {
         name: "member-trial",
@@ -194,12 +198,51 @@ const SHAPES: &[Shape] = &[
         run: 9163,
         asking: None,
         touched: Touch::Nothing,
-        on_scope: V::Red(None, "did not cover what a push to main does"),
+        on_scope: V::NotMeasured("version 2"),
         on_line: V::Red(None, "plan verdict: complete="),
-        on_landing: V::Red(None, "did not cover what a push to main does"),
+        on_landing: V::NotMeasured("version 2"),
         reuse: None,
-        trial: Some(T::Green(9163)),
-        why: "a member's trial ran its affected jobs: green for the trial reader, never a landing proof (jobs eslint and icons were not run)",
+        trial: Some(T::NotMeasured("version 2")),
+        why: "D2: a member's trial with a v2 line: not measured, never green (a trial is no landing proof either)",
+    },
+    Shape {
+        name: "green-full-v3",
+        workflow: "ci.yml",
+        run: 9180,
+        asking: None,
+        touched: Touch::Nothing,
+        on_scope: V::Green(9180),
+        on_line: V::Red(None, "plan verdict: complete="),
+        on_landing: V::Green(9180),
+        reuse: None,
+        trial: None,
+        why: "a full green train run with a v3 line and a clean shadow: the newest full run decides, green",
+    },
+    Shape {
+        name: "push-reused-v3",
+        workflow: "ci.yml",
+        run: 9180,
+        asking: Some(9181),
+        touched: Touch::Nothing,
+        on_scope: V::Green(9180),
+        on_line: V::Red(None, "plan verdict: complete="),
+        on_landing: V::Green(9180),
+        reuse: Some(R::Skip(9180)),
+        trial: None,
+        why: "the push 9181 asks about the commit train run 9180 fully tested: it skips and reuses 9180 (ER-49)",
+    },
+    Shape {
+        name: "member-trial-v3",
+        workflow: "ci.yml",
+        run: 9179,
+        asking: None,
+        touched: Touch::Nothing,
+        on_scope: V::Red(None, ""),
+        on_line: V::Red(None, "plan verdict: complete="),
+        on_landing: V::Red(None, ""),
+        reuse: None,
+        trial: Some(T::NotMeasured("did not test a full scope")),
+        why: "a member's trial with a v3 line that ran only its affected jobs (eslint and icons not run): the trial reader counts a green trial only for a complete or landing scope (ADR 0123 section 7), so it is not measured",
     },
 ];
 
@@ -244,9 +287,6 @@ fn matches(got: &verdict::Verdict, want: &V) -> bool {
     use verdict::Verdict as G;
     match (got, want) {
         (G::Green { run }, V::Green(w)) => run == w,
-        (G::GreenWithFixItems { run, items }, V::GreenWithFixItems(w, tests)) => {
-            run == w && items.len() == tests.len() && items.iter().zip(*tests).all(|(i, t)| i.test.contains(t))
-        }
         (G::Red { run, reason }, V::Red(w, phrase)) => run == w && reason.contains(phrase),
         (G::NotMeasured(why), V::NotMeasured(phrase)) => why.contains(phrase),
         _ => false,
@@ -306,6 +346,7 @@ fn every_shape_is_answered_as_written_down() {
             );
             let ok = match (&got, want) {
                 (reuse::Reuse::Skip { run, .. }, R::Skip(w)) => run == w,
+                (reuse::Reuse::Run(why), R::Run(phrase)) => why.contains(phrase),
                 _ => false,
             };
             if !ok {
@@ -321,7 +362,7 @@ fn every_shape_is_answered_as_written_down() {
             let mut f = serve(s.name);
             let got = verdict::trial(&mut client(&mut f), s.workflow, &branch, &member);
             let ok = match (&got, want) {
-                (verdict::Trial::Green { run }, T::Green(w)) => *run == *w,
+                (verdict::Trial::NotMeasured(why), T::NotMeasured(phrase)) => why.contains(phrase),
                 _ => false,
             };
             if !ok {
@@ -367,26 +408,43 @@ fn a_wrong_answer_is_caught() {
 
 #[test]
 fn a_flaky_test_is_a_fix_item_in_untouched_code_and_red_in_reached_code_and_not_measured_unread() {
-    // Run 9168 (red-one-flaky): the one grade of ER-12 on all three answers the reader gives for what the change touched.
-    let shape = |touched| Shape {
-        name: "red-one-flaky",
-        workflow: "ci.yml",
-        run: 9168,
-        asking: None,
-        touched,
-        on_scope: V::Green(0),
-        on_line: V::Green(0),
-        on_landing: V::Green(0),
-        reuse: None,
-        trial: None,
-        why: "",
+    // Run 9168 (red-one-flaky, a v2 line the verdict no longer reads, D2): its failed job's real log graded by ER-12's reader on all three
+    // answers for what the change touched, then the fix items recorded as a landing writes them.
+    use super::green::{FailedJob, GradedResult, grade_failures};
+    let jobs: Value = serde_json::from_slice(&std::fs::read(dir_of("red-one-flaky").join("jobs-9168.json")).unwrap()).unwrap();
+    let job = jobs["jobs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|j| j["conclusion"] == "failure")
+        .unwrap();
+    let id = job["id"].as_u64().unwrap();
+    let failed = FailedJob {
+        name: job["name"].as_str().unwrap().to_string(),
+        id,
+        url: job["html_url"].as_str().unwrap().to_string(),
+        failed_steps: job["steps"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|s| s["conclusion"] == "failure")
+            .map(|s| s["name"].as_str().unwrap().to_string())
+            .collect(),
+        log: Some(std::fs::read_to_string(dir_of("red-one-flaky").join(format!("log-{id}.txt"))).unwrap()),
     };
-    let landing = |t| landing_of(&shape(t));
-    let verdict::Verdict::GreenWithFixItems { run, items } = landing(Touch::Nothing) else {
-        panic!("untouched is a fix item")
+    // The job names come from the expected map of a v3 scope line: the plan job of run 9180 (green-full-v3), the same workflow.
+    let plan = std::fs::read_dir(dir_of("green-full-v3"))
+        .unwrap()
+        .filter_map(|e| std::fs::read_to_string(e.unwrap().path()).ok())
+        .find(|t| t.contains("plan scope: "))
+        .unwrap();
+    let expected = crate::run_scope::read(&plan).unwrap().unwrap().expected;
+    let grade = |t: Touch| grade_failures("ci.yml", std::slice::from_ref(&failed), &expected, &mut || t.read_with(&expected));
+    let r = grade(Touch::Nothing);
+    let GradedResult::GreenWithFixItems(items) = r else {
+        panic!("untouched is a fix item: {r:?}")
     };
-    assert_eq!(run, 9168);
-    let lines = fix_items::lines("ci.yml", run, &items);
+    let lines = fix_items::lines("ci.yml", 9168, &items);
     assert_eq!(lines.len(), 1, "{lines:?}");
     assert!(
         lines[0].starts_with("- ci.yml: run 9168, job crate (windows-latest) (id 51509): paddock-proc usage::tests::the_os_source_lists"),
@@ -394,39 +452,43 @@ fn a_flaky_test_is_a_fix_item_in_untouched_code_and_red_in_reached_code_and_not_
     );
     // The lessons entry is added once, and a second call adds nothing (a retried landing writes it once).
     let sha = run_json("red-one-flaky", 9168)["head_sha"].as_str().unwrap().to_string();
-    let once = fix_items::add_to_lessons("# Lessons\n", "ci.yml", run, &sha, &items).expect("added");
+    let once = fix_items::add_to_lessons("# Lessons\n", "ci.yml", 9168, &sha, &items).expect("added");
     assert!(
         once.contains("full ci.yml run 9168 (167e0473a)") && once.contains("(job 51509, crate (windows-latest);"),
         "{once}"
     );
-    assert_eq!(fix_items::add_to_lessons(&once, "ci.yml", run, &sha, &items), None);
+    assert_eq!(fix_items::add_to_lessons(&once, "ci.yml", 9168, &sha, &items), None);
     // Reached code: red, naming the test. Unread: not measured, never a pass.
-    assert!(matches!(landing(Touch::Everything), verdict::Verdict::Red { run: Some(9168), reason } if reason.contains("a FLAKY test")));
-    assert!(
-        matches!(landing(Touch::Unread), verdict::Verdict::NotMeasured(why) if why.contains("cannot be read")),
-        "{:?}",
-        landing(Touch::Unread)
-    );
+    assert!(matches!(grade(Touch::Everything), GradedResult::Red(why) if why.contains("a FLAKY test")));
+    assert!(matches!(grade(Touch::Unread), GradedResult::NotMeasured(why) if why.contains("cannot be read")));
 }
 
 #[test]
 fn controls_a_push_without_a_base_runs_and_another_members_trial_is_no_run() {
-    // The same recordings with the signal hidden go the other way (ER-33): no first-parent line for the push means the landing's base
-    // cannot be matched, so the push runs its own; a trial of another head of the branch is not this member's.
-    let sha = run_json("push-reused", 9171)["head_sha"].as_str().unwrap().to_string();
-    let mut f = serve("push-reused");
+    // The same recordings with the signal hidden go the other way (ER-33): with the log of the landing run's plan job unreadable the
+    // push cannot tell it was a full run, so it runs its own; a trial of another head of the branch is not this member's.
+    let sha = run_json("push-reused-v3", 9181)["head_sha"].as_str().unwrap().to_string();
+    let mut f = serve("push-reused-v3");
+    let jobs: Value = serde_json::from_slice(&std::fs::read(dir_of("push-reused-v3").join("jobs-9180.json")).unwrap()).unwrap();
+    let plan = jobs["jobs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|j| j["name"].as_str().unwrap().starts_with("plan"))
+        .unwrap();
+    f.fail(plan["id"].as_u64().unwrap(), "hidden by the control");
     let got = reuse::decide_with_touched(
         &mut client(&mut f),
         "ci.yml",
         &sha,
-        Some(9171),
+        Some(9181),
         true,
         &mut |_| Vec::new(),
         &mut |_, _| Some(Touched::default()),
         &mut |_, _| false,
     );
     assert!(
-        matches!(&got, reuse::Reuse::Run(why) if why.contains("no complete commit")),
+        matches!(&got, reuse::Reuse::Run(why) if why.contains("hidden by the control")),
         "{got:?}"
     );
     let run = run_json("member-trial", 9163);

@@ -34,17 +34,21 @@ A reader change adds or updates a replay shape (AGENTS.md, "Testing and quality 
    does not flip stays as it is: that is what the suite is for.
 5. `every_recorded_folder_has_a_shape_and_every_shape_a_folder` fails for a recording with no row.
 
-Rows reflect the reader of their commit. Run 9167 has a v3 scope line (job model WP-2, ADR 0123): a reader that knows only v2 must say
-not measured; the reader that knows v3 reads it as a landing run. v2 lines are "not reused" once D2 lands (ADR 0123).
+Rows reflect the reader of their commit. Since job-model WP-2 (ADR 0123, main 696f472f4) the readers know scope line v3 and a v2 line is
+never reused (D2): the v2 shapes say "not measured", expected and not a fault. Run 9167 has a v3 line from before the planner fix (its
+expected map lists the e2e legs a train skips), so the reader refuses it as "declared scope not run"; run 9180 is the fixed shape.
 
 ## Shapes
 
-| Shape | Runs | Is |
-|---|---|---|
-| `green-train` | 9170 | a train's landing run: its diff's selection, no full run |
-| `green-refused-by-old-reader` | 9167 | a green run with a v3 scope line |
-| `red-one-flaky` | 9168 | red with one FLAKY test of untouched code |
-| `push-reused` | 9073, 9074, 9170, 9171 | a push that reuses the train's run |
-| `failed-only-round` | 9146, 9147 | a failed round and its green failed-only rerun |
-| `nightly` | 9103 | a scheduled nightly, red |
-| `member-trial` | 9163 | a member's trial run |
+| Shape | Runs | Is | Answers |
+|---|---|---|---|
+| `green-train` | 9170 | a train's landing run, v2 | not measured (D2) |
+| `green-refused-by-old-reader` | 9167 | a green run, v3 line before the planner fix | red: declared e2e legs skipped |
+| `red-one-flaky` | 9168 | red with one FLAKY test, v2 | not measured (D2); its log still grades as a fix item |
+| `push-reused` | 9073, 9074, 9170, 9171 | a push over a v2 run | not reused (D2) |
+| `failed-only-round` | 9146, 9147 | a failed round and its green rerun, v2 | not measured (D2) |
+| `nightly` | 9103 | a scheduled nightly, red, v2; it declares ci.yml's scope | not measured (D2) |
+| `member-trial` | 9163 | a member's trial, v2 | not measured (D2) |
+| `green-full-v3` | 9180 | a full green train run, v3, clean shadow | green |
+| `push-reused-v3` | 9180, 9181 | the push over it | skip, reusing 9180 |
+| `member-trial-v3` | 9179 | a member's trial, v3, narrowed | not measured: not a full scope |
