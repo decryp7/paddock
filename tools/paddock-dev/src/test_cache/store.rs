@@ -121,6 +121,9 @@ pub trait Store {
     fn get_many(&self, lookups: &[Lookup]) -> Result<Vec<Option<Record>>, StoreError>;
     /// Writes the records, replacing one with the same key.
     fn put_many(&self, records: &[Record]) -> Result<(), StoreError>;
+    /// Deletes the records under these keys and returns each one that was there (the nightly's invalidation names the run a deleted
+    /// pass came from, ADR 0116 §6). One answer per lookup, in order.
+    fn delete_many(&self, lookups: &[Lookup]) -> Result<Vec<Option<Record>>, StoreError>;
 }
 
 /// The local store: `<dir>/v<schema>/<class>/<target slug>/<key>.json`.
@@ -205,6 +208,19 @@ impl FsStore {
 }
 
 impl Store for FsStore {
+    fn delete_many(&self, lookups: &[Lookup]) -> Result<Vec<Option<Record>>, StoreError> {
+        let found = self.get_many(lookups)?;
+        for l in lookups {
+            let p = self.path(&l.target, &l.class, &l.key);
+            match std::fs::remove_file(&p) {
+                Ok(()) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(StoreError(format!("{} cannot be deleted: {e}", p.display()))),
+            }
+        }
+        Ok(found)
+    }
+
     fn get_many(&self, lookups: &[Lookup]) -> Result<Vec<Option<Record>>, StoreError> {
         Ok(lookups
             .iter()

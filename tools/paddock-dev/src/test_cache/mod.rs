@@ -199,3 +199,16 @@ pub fn exclude_filter(reused: &[&Target]) -> String {
             .join(" | ")
     )
 }
+
+/// Whether this run is the nightly (the uncached net, §6): a `schedule` event or `nightly.yml`.
+pub fn is_nightly(env: &dyn Fn(&str) -> Option<String>) -> bool {
+    let get = |k: &str| env(k).unwrap_or_default();
+    get("GITHUB_EVENT_NAME") == "schedule" || get("GITHUB_WORKFLOW_REF").split('@').next().unwrap_or("").ends_with("/nightly.yml")
+}
+
+/// The nightly's net (§6): for every target that failed, deletes the record under its current key and returns the deleted ones, so the
+/// run can name each cached pass the world no longer supports (an environment drift, or a test that reads something its key lacks) and
+/// open a fix item for the key's definition. A target with no record under its key is not in the answer.
+pub fn invalidate(store: &dyn Store, failed: &[Lookup]) -> Result<Vec<Record>, store::StoreError> {
+    Ok(store.delete_many(failed)?.into_iter().flatten().collect())
+}

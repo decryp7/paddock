@@ -22,6 +22,9 @@ pub const REQUEST_SECS: u64 = 5;
 /// The budget of one call (the whole lookup).
 pub const CALL_SECS: u64 = 60;
 
+/// One transfer: URL, file the answer goes to, file to upload, method.
+type Block = (String, PathBuf, Option<PathBuf>, &'static str);
+
 /// The store's address and keys. `Debug` never shows the keys.
 #[derive(Clone)]
 pub struct S3Store {
@@ -73,9 +76,9 @@ impl S3Store {
 
     /// The curl config of a call: one block per transfer. `blocks` are `(url, output file, upload file)`.
     /// Pure, so a test reads it; the keys are in it (it goes to curl's standard input only).
-    fn config(&self, blocks: &[(String, PathBuf, Option<PathBuf>)]) -> String {
+    fn config(&self, blocks: &[Block]) -> String {
         let mut out = String::new();
-        for (i, (url, file, up)) in blocks.iter().enumerate() {
+        for (i, (url, file, up, method)) in blocks.iter().enumerate() {
             if i > 0 {
                 out.push_str("next\n");
             }
@@ -89,12 +92,15 @@ impl S3Store {
             if let Some(up) = up {
                 out.push_str(&format!("upload-file = \"{}\"\n", up.display()));
             }
+            if *method != "GET" && up.is_none() {
+                out.push_str(&format!("request = \"{method}\"\n"));
+            }
         }
         out
     }
 
     /// Runs the blocks in one curl; the status of each transfer, by its output file.
-    fn run(&self, blocks: &[(String, PathBuf, Option<PathBuf>)]) -> Result<Vec<(u16, String)>, StoreError> {
+    fn run(&self, blocks: &[Block]) -> Result<Vec<(u16, String)>, StoreError> {
         if blocks.is_empty() {
             return Ok(Vec::new());
         }
@@ -130,12 +136,19 @@ impl S3Store {
 }
 
 impl Store for S3Store {
+    fn delete_many(&self, lookups: &[Lookup]) -> Result<Vec<Option<Record>>, StoreError> {
+        let found = self.get_many(lookups)?;
+        let rels: Vec<String> = lookups.iter().map(|l| rel_path(&l.target, &l.class, &l.key)).collect();
+        self.delete_many_rels(&rels)?;
+        Ok(found)
+    }
+
     fn get_many(&self, lookups: &[Lookup]) -> Result<Vec<Option<Record>>, StoreError> {
         std::fs::create_dir_all(&self.scratch).map_err(|e| StoreError(format!("{} cannot be made: {e}", self.scratch.display())))?;
         let blocks: Vec<_> = lookups
             .iter()
             .enumerate()
-            .map(|(i, l)| (self.url(&rel_path(&l.target, &l.class, &l.key)), self.body_path(i), None))
+            .map(|(i, l)| (self.url(&rel_path(&l.target, &l.class, &l.key)), self.body_path(i), None, "GET"))
             .collect();
         let done = self.run(&blocks);
         let result = done.and_then(|done| {
@@ -177,6 +190,7 @@ impl Store for S3Store {
                 self.url(&rel_path(&r.target, &RunnerClass(r.class.0.clone()), &r.key)),
                 self.body_path(i),
                 Some(up),
+                "PUT",
             ));
         }
         let done = self.run(&blocks);
@@ -191,5 +205,116 @@ impl Store for S3Store {
             ));
         }
         Ok(())
+    }
+}
+
+/// What the live probe saw, step by step (`ci test-cache selfcheck`).
+#[derive(Debug, PartialEq, Eq)]
+pub struct Probe {
+    /// The object came back with the bytes that were put.
+    pub round_trip: bool,
+    /// The listing under the scratch prefix named it.
+    pub listed: bool,
+    /// After the delete it was gone (404) and the listing no longer named it.
+    pub deleted: bool,
+}
+
+impl S3Store {
+    fn one(&self, rel: &str, method: &'static str, up: Option<&std::path::Path>, tag: &str) -> Result<(u16, String), StoreError> {
+        std::fs::create_dir_all(&self.scratch).map_err(|e| StoreError(format!("{} cannot be made: {e}", self.scratch.display())))?;
+        let out = self.scratch.join(format!("{}-{tag}", std::process::id()));
+        let done = self.run(&[(self.url(rel), out.clone(), up.map(PathBuf::from), method)]);
+        let body = std::fs::read_to_string(&out).unwrap_or_default();
+        let _ = std::fs::remove_file(&out);
+        let (code, _) = done?
+            .into_iter()
+            .next()
+            .ok_or_else(|| StoreError("curl reported no transfer".into()))?;
+        Ok((code, body))
+    }
+
+    /// Deletes the objects under `rels` (paths below the bucket); a missing object is fine (S3 answers 204).
+    pub fn delete_many_rels(&self, rels: &[String]) -> Result<(), StoreError> {
+        let blocks: Vec<Block> = rels
+            .iter()
+            .enumerate()
+            .map(|(i, r)| (self.url(r), self.body_path(i), None, "DELETE"))
+            .collect();
+        let done = self.run(&blocks);
+        for i in 0..rels.len() {
+            let _ = std::fs::remove_file(self.body_path(i));
+        }
+        match done?.iter().find(|(c, _)| !(200..300).contains(c)) {
+            Some((c, _)) => Err(StoreError(format!("the store answered {c} to a delete"))),
+            None => Ok(()),
+        }
+    }
+
+    /// The keys under `prefix` (one page, at most 1000: the probe's and `audit`'s need).
+    pub fn list(&self, prefix: &str) -> Result<Vec<String>, StoreError> {
+        let url = format!("{}/{BUCKET}?list-type=2&prefix={prefix}", self.base);
+        std::fs::create_dir_all(&self.scratch).map_err(|e| StoreError(format!("{} cannot be made: {e}", self.scratch.display())))?;
+        let out = self.scratch.join(format!("{}-list", std::process::id()));
+        let done = self.run(&[(url, out.clone(), None, "GET")]);
+        let body = std::fs::read_to_string(&out).unwrap_or_default();
+        let _ = std::fs::remove_file(&out);
+        match done?.first() {
+            Some((200, _)) => Ok(body
+                .split("<Key>")
+                .skip(1)
+                .filter_map(|p| p.split("</Key>").next())
+                .map(str::to_string)
+                .collect()),
+            Some((c, _)) => Err(StoreError(format!("the store answered {c} to a listing{}", s3_error(&body)))),
+            None => Err(StoreError("curl reported no transfer".into())),
+        }
+    }
+
+    /// Puts, gets, lists and deletes one scratch object under `v<schema>/selfcheck/<token>/` and says what worked. Positive control of the store
+    /// itself (ER-33): a probe that cannot see the object reports it, never a pass. The object is removed on every path.
+    pub fn probe(&self, token: &str) -> Result<Probe, StoreError> {
+        let rel = format!("v{}/selfcheck/{token}/probe.json", super::key::SCHEMA);
+        let body = format!("{{\"probe\":\"{token}\"}}");
+        let up = self.scratch.join(format!("{}-probe-up", std::process::id()));
+        std::fs::create_dir_all(&self.scratch).map_err(|e| StoreError(format!("{} cannot be made: {e}", self.scratch.display())))?;
+        std::fs::write(&up, &body).map_err(|e| StoreError(format!("{} cannot be written: {e}", up.display())))?;
+        let result = (|| {
+            let (c, answer) = self.one(&rel, "PUT", Some(&up), "put")?;
+            if !(200..300).contains(&c) {
+                return Err(StoreError(format!("the store answered {c} to a put{}", s3_error(&answer))));
+            }
+            let (c, got) = self.one(&rel, "GET", None, "get")?;
+            let round_trip = c == 200 && got == body;
+            let listed = self.list(&format!("v{}/selfcheck/{token}/", super::key::SCHEMA))?.contains(&rel);
+            self.delete_many_rels(std::slice::from_ref(&rel))?;
+            let (c, _) = self.one(&rel, "GET", None, "gone")?;
+            let deleted = c == 404 && !self.list(&format!("v{}/selfcheck/{token}/", super::key::SCHEMA))?.contains(&rel);
+            Ok(Probe {
+                round_trip,
+                listed,
+                deleted,
+            })
+        })();
+        if result.is_err() {
+            let _ = self.delete_many_rels(std::slice::from_ref(&rel));
+        }
+        let _ = std::fs::remove_file(&up);
+        result
+    }
+}
+
+/// The error code and message of an S3 error body (`<Code>AccessDenied</Code><Message>..</Message>`), for a log line: both are the
+/// server's words about the request, never the key.
+fn s3_error(body: &str) -> String {
+    let tag = |t: &str| {
+        body.split(&format!("<{t}>"))
+            .nth(1)
+            .and_then(|r| r.split(&format!("</{t}>")).next())
+            .map(str::to_string)
+    };
+    match (tag("Code"), tag("Message")) {
+        (Some(c), Some(m)) => format!(" ({c}: {})", m.chars().take(200).collect::<String>()),
+        (Some(c), None) => format!(" ({c})"),
+        _ => String::new(),
     }
 }

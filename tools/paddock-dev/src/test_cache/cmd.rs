@@ -9,7 +9,7 @@
 
 use super::config::{Config, Mode};
 use super::key::{RunnerClass, Target};
-use super::store::{FsStore, Record, Store};
+use super::store::{FsStore, Lookup, Record, Store};
 use super::{Candidate, Decision, decide, read_allowed, write_allowed};
 use crate::plan_repo::git_text;
 use clap::Args;
@@ -160,7 +160,11 @@ pub fn command(a: &TestCacheArgs) -> Result<Report, CliError> {
         None => &local,
     };
     match a.action.as_str() {
-        "audit" => Ok(audit(&local)),
+        "audit" => Ok(match &shared {
+            Some(s) => audit_shared(s),
+            None => audit(&local),
+        }),
+        "selfcheck" => selfcheck(shared.as_ref()),
         "lookup" | "run" => {
             let cfg = Config::read(&root).map_err(fail)?;
             let mut cands = candidates(&root, &a.workspace)?;
@@ -213,6 +217,7 @@ fn run(a: &TestCacheArgs, root: &Path, cfg: &Config, cands: &[Candidate], store:
     if let Some(n) = notice {
         text.push(format!("::notice::test-cache: reuse is off for this run: {n}. Every target runs."));
     }
+    let nightly = super::is_nightly(&env_get);
     let skip = cfg.mode() == Mode::On || a.reuse;
     let mut reused = 0;
     let mut left: Vec<&Candidate> = Vec::new();
@@ -274,6 +279,23 @@ fn run(a: &TestCacheArgs, root: &Path, cfg: &Config, cands: &[Candidate], store:
                     });
                 }
             } else {
+                // The nightly is the net (§6): a target that fails loses the cached pass under its current key, and the run names it.
+                if nightly {
+                    let ask = Lookup {
+                        target: c.target.id.clone(),
+                        class: class.clone(),
+                        key: super::key_of(c, cfg, &class),
+                    };
+                    match super::invalidate(store, std::slice::from_ref(&ask)) {
+                        Ok(gone) => text.extend(gone.iter().map(|r| {
+                            format!(
+                                "::warning::test-cache: invalidated target={} (a cached pass from run {} that the nightly no longer supports). Next step: fix the key's definition (ADR 0116 §8).",
+                                r.target, r.run
+                            )
+                        })),
+                        Err(e) => text.push(format!("::warning::test-cache: the nightly could not delete a record: {e}")),
+                    }
+                }
                 let why = judged
                     .not_passed
                     .iter()
@@ -368,4 +390,50 @@ fn nextest(a: &TestCacheArgs, root: &Path, cfg: &Config, asked: &[String], whole
     })?;
     let text = format!("{}\n{}", out.stdout_text(), out.stderr_text());
     Ok((text, out.success()))
+}
+
+/// `ci test-cache selfcheck --shared`: put, get, list and delete one scratch object in the shared store. Exit 5 when any step failed,
+/// 6 (not measured) when the store cannot be reached or has no credentials: never a pass (ER-33).
+fn selfcheck(shared: Option<&super::s3::S3Store>) -> Result<Report, CliError> {
+    let Some(s) = shared else {
+        return Ok(Report::new(
+            serde_json::json!({"verdict": "not_measured"}),
+            "::error::ci test-cache selfcheck: no shared store. Next step: pass --shared and set the S3 credentials.".to_string(),
+        )
+        .with_exit(Exit::NotMeasured));
+    };
+    match s.probe(&format!("selfcheck-{}-{}", std::process::id(), now())) {
+        Err(e) => Ok(Report::new(
+            serde_json::json!({"verdict": "not_measured"}),
+            format!("::error::ci test-cache selfcheck: {e}. Next step: check the endpoint, the bucket and the key."),
+        )
+        .with_exit(Exit::NotMeasured)),
+        Ok(p) => {
+            let ok = p.round_trip && p.listed && p.deleted;
+            let text = format!(
+                "test-cache selfcheck: round trip {}, listed {}, deleted {}",
+                p.round_trip, p.listed, p.deleted
+            );
+            let r = Report::new(
+                serde_json::json!({"round_trip": p.round_trip, "listed": p.listed, "deleted": p.deleted}),
+                text,
+            );
+            Ok(if ok { r } else { r.with_exit(Exit::Findings) })
+        }
+    }
+}
+
+/// `audit --shared`: how many records the bucket lists under `v<schema>/` (one page), report-only (ER-51).
+fn audit_shared(s: &super::s3::S3Store) -> Report {
+    match s.list(&format!("v{}/", super::key::SCHEMA)) {
+        Ok(k) => Report::new(
+            serde_json::json!({"records": k.len()}),
+            format!("test-cache shared store: {} record(s) listed (first page)", k.len()),
+        ),
+        Err(e) => Report::new(
+            serde_json::json!({"verdict": "not_measured"}),
+            format!("::error::ci test-cache audit: {e}. Next step: check the endpoint, the bucket and the key."),
+        )
+        .with_exit(Exit::NotMeasured),
+    }
 }

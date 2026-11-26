@@ -171,6 +171,9 @@ impl Store for Down {
     fn put_many(&self, _: &[Record]) -> Result<(), StoreError> {
         Err(StoreError("connection refused".into()))
     }
+    fn delete_many(&self, _: &[Lookup]) -> Result<Vec<Option<Record>>, StoreError> {
+        Err(StoreError("connection refused".into()))
+    }
 }
 
 fn scratch() -> (tempfile::TempDir, FsStore) {
@@ -411,4 +414,35 @@ fn a_pass_on_retry_leaves_its_binary_unclean() {
     .join("\n");
     let ran = crate::nextest_log::ran_binaries(&log);
     assert!(ran.clean.is_empty() && ran.not_clean.contains("pk"), "{ran:?}");
+}
+
+#[test]
+fn the_nightly_deletes_the_cached_pass_of_a_target_that_fails_and_names_its_run() {
+    let (_d, s) = scratch();
+    let class = RunnerClass::here();
+    let (a, b) = (cand("crates/a", "h1"), cand("crates/b", "h2"));
+    s.put_many(&[rec(&a, &class, NOW), rec(&b, &class, NOW)]).unwrap();
+    let ask = |c: &Candidate| Lookup {
+        target: c.target.id.clone(),
+        class: class.clone(),
+        key: key_of(c, &cfg(), &class),
+    };
+    let gone = invalidate(&s, &[ask(&a)]).unwrap();
+    assert_eq!(gone.len(), 1);
+    assert_eq!(gone[0].run, "8635");
+    // Only `a` went; a second delete finds nothing, and `b` still reuses.
+    assert!(invalidate(&s, &[ask(&a)]).unwrap().is_empty());
+    let (d, _) = decide(&[a, b], &cfg(), &class, &s, NOW, OK);
+    assert_eq!(d[0], Decision::Run(Why::Miss));
+    assert!(matches!(d[1], Decision::Reuse(_)));
+}
+
+#[test]
+fn the_nightly_is_recognised_by_its_event_or_its_workflow() {
+    assert!(is_nightly(&env(&[("GITHUB_EVENT_NAME", "schedule")])));
+    assert!(is_nightly(&env(&[(
+        "GITHUB_WORKFLOW_REF",
+        "decryp7/paddock/.gitea/workflows/nightly.yml@refs/heads/main"
+    )])));
+    assert!(!is_nightly(&env(&[("GITHUB_EVENT_NAME", "push")])));
 }
