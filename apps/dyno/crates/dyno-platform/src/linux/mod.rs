@@ -2,8 +2,7 @@
 //! autostart and systemd user units, facts, user activity.
 //!
 //! Everything reads `/proc` and `/sys` through [`paths::HostPaths`] and runs tools through [`tools::Tools`], so the
-//! adapters are tested against temporary trees and scripted tools, and the real thing in a Linux container
-//! (`scripts/linux-container.sh`).
+//! adapters are tested against temporary trees and scripted tools, and the real thing in CI's Linux job.
 
 mod activity;
 mod details;

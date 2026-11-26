@@ -135,8 +135,13 @@ fn scope_mode(run: &RunInfo, jobs: &[super::client::TimedJob], log: &str) -> Mod
         Some(Ok(d)) if d.workflow != run.workflow() => {
             Mode::Partial(format!("its plan job declared the scope of {}, not of this workflow", d.workflow))
         }
-        Some(Ok(d)) => match d.complete() {
+        Some(Ok(d)) => match d.complete().inspect(|()| {
+            d.reuse_notes()
+                .iter()
+                .for_each(|n| super::green::notice(&format!("run {}: {n}", run.id)));
+        }) {
             Err(why) => Mode::Partial(format!("its declared scope is not complete: {why}")),
+            // A verdict that rests on reused passes names each one (ADR 0116 §6, ER-49: the run it relied on).
             Ok(()) if !run.finished() => Mode::Full,
             Ok(()) => {
                 let pairs: Vec<(String, JobOutcome)> = jobs.iter().map(|j| (j.name.clone(), j.outcome.clone())).collect();

@@ -39,3 +39,7 @@ test('C172: developer commands and shared crates are in scope, CI-only dev code 
   assert.deepEqual(localVmSites(t, 'tools/paddock-dev/src/gates/ci.rs'), []);
   assert.deepEqual(localVmSites(t, 'tools/paddock-dev/src/ci_run/x.rs'), []);
 });
+
+test('C172: app developer scripts are in scope', () => {
+  assert.deepEqual(localVmSites('set -e\n"$docker" run x\ndocker run --rm x\n', 'apps/dyno/scripts/linux-verify.sh'), [3]);
+});

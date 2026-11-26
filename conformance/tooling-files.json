@@ -1,0 +1,2206 @@
+{
+  "$comment": "C173 (ADR 0022 section 3.7 a and b). One entry per tracked non-Rust tooling file that may stay. Permanent entries say why they cannot be Rust; every other entry is the baseline of 2026-11-26 and may only shrink: delete the entry in the change that ports or deletes the file. Growth needs the user (ER-46). Review date: 2026-12-26 (ER-41).",
+  "review_by": "2026-12-26",
+  "allow": [
+    {
+      "path": "apps/debrief/scripts/build-plugins.sh",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/debrief/scripts/ci/check-icons.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/debrief/scripts/ci/check-icons.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/debrief/scripts/ci/check-index.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/debrief/scripts/ci/check-index.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/debrief/scripts/ci/check-quarantine.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/debrief/scripts/ci/check-quarantine.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/debrief/scripts/ci/check-smoke-dialogs.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/debrief/scripts/ci/check-smoke-dialogs.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/debrief/scripts/ci/check-temp-leaks.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/debrief/scripts/ci/check-temp-leaks.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/debrief/scripts/ci/check-workflows.py",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/debrief/scripts/ci/libduckdb-env.sh",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/debrief/scripts/ci/libduckdb-env.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/debrief/scripts/ci/macos-smoke.sh",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/debrief/scripts/ci/macos-smoke.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/debrief/scripts/ci/macos-verify-bundle.sh",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/debrief/scripts/ci/scan-fixtures.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/debrief/scripts/ci/scan-fixtures.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/debrief/scripts/ci/startup-bench.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/debrief/scripts/ci/startup-bench.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/debrief/scripts/ci/windows-node-modules.sh",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/debrief/scripts/clean-build-dirs.ps1",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/debrief/scripts/export-diagrams.sh",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/debrief/scripts/macos/build-app.sh",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/debrief/scripts/macos/dev-signing.sh",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/debrief/scripts/perf/gen_large.py",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/debrief/scripts/perf/perf-import.sh",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/debrief/scripts/perf/perf-post.sh",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/debrief/scripts/perf/perfsum.py",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/debrief/scripts/perf/procsample.py",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/debrief/scripts/rename-to-debrief.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/debrief/scripts/update-ffmpeg-runtimes.py",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/dyno/scripts/bench-smoke.sh",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/dyno/scripts/build-world-map.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/dyno/scripts/check-bundle.sh",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/dyno/scripts/check-capabilities.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/dyno/scripts/check-capabilities.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/dyno/scripts/check-logon-entry.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/dyno/scripts/check-logon-entry.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/dyno/scripts/check-pe-subsystem.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/dyno/scripts/check-pe-subsystem.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/dyno/scripts/check-release-notes.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/dyno/scripts/check-release-notes.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/dyno/scripts/check-shipped.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/dyno/scripts/check-shipped.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/dyno/scripts/check-wording.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/dyno/scripts/check-wording.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/dyno/scripts/linux-units-check.sh",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/dyno/scripts/regen-wire-fixtures.sh",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/dyno/scripts/verify-tool-pin.sh",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/dyno/scripts/wp0/held.ps1",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/dyno/scripts/wp0/launch-held.ps1",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/dyno/scripts/wp0/wp0-collect.ps1",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/dyno/scripts/wp0/wp0-run.sh",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/pacenotes/scripts/export-diagrams.sh",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/pacenotes/scripts/release/publish.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/pacenotes/scripts/release/publish.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/pitcrew/scripts/linux-bootstrap.sh",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/pitcrew/scripts/linux-verify.sh",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/pitcrew/scripts/macos-bootstrap.sh",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/pitcrew/scripts/macos-verify.sh",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/pitcrew/scripts/sidecar.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/pitcrew/scripts/windows-retire-legacy-runner.ps1",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/pitwall/scripts/ci/check-icons.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/pitwall/scripts/ci/check-icons.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/pitwall/scripts/ci/controls.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/pitwall/scripts/ci/controls.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/pitwall/scripts/ci/notices-components.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/pitwall/scripts/ci/privacy-check.sh",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/pitwall/scripts/ci/shipped-no-test-support.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/pitwall/scripts/ci/stage-vc-redist.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/pitwall/scripts/ci/stage-vc-redist.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/pitwall/scripts/ci/tokens.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/pitwall/scripts/ci/tokens.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/pitwall/scripts/ci/ui-coverage-guard.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/pitwall/scripts/ci/ui-coverage-guard.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/pitwall/scripts/linux-bootstrap.sh",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/pitwall/scripts/linux-verify.sh",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/pitwall/scripts/macos-verify.sh",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/pitwall/scripts/sidecar.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/pitwall/scripts/tauri-before-build.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/sighter/scripts/export-diagrams.sh",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/sighter/scripts/release/publish.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/sighter/scripts/release/publish.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/spotter/scripts/ci/check-icons.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/spotter/scripts/ci/check-icons.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/spotter/scripts/install-test-browser.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/spotter/scripts/install-test-browser.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/spotter/scripts/pin-chromium.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/spotter/scripts/pin-chromium.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "apps/spotter/scripts/style-guard.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "ci-image/fetch-verified.sh",
+      "site": "tooling file",
+      "reason": "permanent: fetches the verified toolchain before ./dev exists"
+    },
+    {
+      "path": "ci-image/verify.sh",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "conformance/bin/paddock-check-lists.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/bin/paddock-cleanup-baseline.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/bin/paddock-conformance.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/bin/paddock-notices.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/bin/paddock-sidecar.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/bin/paddock-timing-baseline.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/ci/before-build.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/ci/boot-volume.sh",
+      "site": "tooling file",
+      "reason": "permanent: boots the volume before any Rust tool can run"
+    },
+    {
+      "path": "conformance/ci/bounded.sh",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/ci/build-env.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/ci/build-folder.sh",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/ci/build-jobs.sh",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/ci/cache-report.sh",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/ci/check-index.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/ci/check-tag.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/ci/ci-home.sh",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/ci/dev-tool-cache.sh",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/ci/dev-tool-publish.sh",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/ci/first-release-notes.sh",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/ci/guardian-as-user.sh",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/ci/host/host-tools.sh",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/ci/host/node-caches.sh",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/ci/host/sccache-stats.sh",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/ci/host/stable-workspace.sh",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/ci/install-test-browser.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/ci/job-isolation.sh",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/ci/job-tmpdir.sh",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/ci/kept-clone.sh",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/ci/kit.sh",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/ci/pin-runtime.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/ci/plan.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/ci/playwright-browsers.sh",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/ci/rehearse-release.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/ci/release-notes.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/ci/release-verdict.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/ci/request-tag.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/ci/runtime-catalogue.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/ci/safe-rm.sh",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/ci/tag-node-caches.sh",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/ci/tauri-bundle.sh",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/ci/tauri-tools.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/ci/updater-key.sh",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/release/check-per-machine-installer.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/release/latest-json.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/release/macos-verify-bundle.sh",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/release/publish.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/release/strip-keys.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/release/updater-key-check.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/release/windows-crt-imports.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/checks/C03-icons.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/checks/C04-macos-signing.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/checks/C06-key-strip.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/checks/C07-release-preflight.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/checks/C08-release-artifacts.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/checks/C104-doc-links.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/checks/C110-fixture-identity.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/checks/C111-workflow-yaml.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/checks/C112-markdown-tables.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/checks/C113-timing-jobs.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/checks/C114-nextest-hang-bound.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/checks/C115-scoped-cleanup.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/checks/C116-generator-registry.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/checks/C117-job-abort-guard.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/checks/C128-recorded-pid.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/checks/C13-rust-lints.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/checks/C135-leak-detector-opt-outs.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/checks/C136-unit-live-feeds.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/checks/C137-e2e-kit-import.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/checks/C138-owned-scroll.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/checks/C139-e2e-ready-directives.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/checks/C140-per-item-opt-outs.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/checks/C143-spawn-joined-path.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/checks/C15-installed-chrome.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/checks/C156-axe-scan-held-still.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/checks/C16-hardcoded-version.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/checks/C167-growth-test-history.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/checks/C169-write-atomic.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/checks/C171-abs-path-literals.mjs",
+      "site": "tooling file",
+      "reason": "JS check landed before C173's baseline; Rust port queued (user 2026-11-26)"
+    },
+    {
+      "path": "conformance/src/checks/C172-no-local-vm.mjs",
+      "site": "tooling file",
+      "reason": "JS check landed before C173's baseline; Rust port queued (user 2026-11-26)"
+    },
+    {
+      "path": "conformance/src/checks/C23-process.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/checks/C24-reviewed-images.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/checks/C28-baseline.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/checks/C30-wall-clock.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/checks/C31-adr-numbers.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/checks/C32-i18n-catalogs.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/checks/C33-a11y-coverage.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/checks/C34-sidecar-self-test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/checks/C35-untimed-calls.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/checks/C36-parser-hardening.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/checks/C37-test-binaries.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/checks/C43-sticky-headers.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/checks/C45-dialog-markers.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/checks/C48-dialog-capability.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/checks/C50-shell-start.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/checks/C51-start-waits.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/checks/C54-background-qos.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/checks/C56-build-env-names.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/checks/C57-tracked-symlinks.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/checks/C59-updater-installer.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/checks/C61-material-bridge.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/checks/C62-limit-completeness.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/checks/C71-test-timing.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/checks/C78-dialog-sizing.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/checks/C79-orphan-guard-hooks.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/checks/C85-features-register.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/checks/C91-per-machine.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/checks/C98-read-retry-optouts.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/checks/C99-no-keychain.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/checks/index.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/checks/lib/mini-toml.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/cli.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/commit-lint.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/context.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/derived-lists.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/finding.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/index.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/notices/cli.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/notices/generate.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/notices/licences.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/outcome.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/report.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/runner.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/sidecar/sidecar.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/sync/baseline.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/sync/blocks.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/sync/fill.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/sync/main.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/sync/paddock-root.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/sync/plan.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/util/allow-list.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/util/baseline.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/util/fs.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/util/full-checkout.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/util/is-main.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/util/is-tag-run.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/util/keychain-graph.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/util/mask-rust.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/util/md-tables.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/util/png.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/util/rust-test-items.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/util/scope.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/util/shared-enum-matches.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/util/version.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/util/waivers.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/util/windows-bash.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/util/workflows.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/window-weight/cli.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/src/window-weight/measure.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/allow-list.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/app-gates-member-filter.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/app-gates-step.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/audit-enforce.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/baseline.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/c03-icons.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/c04-signing.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/c06-key-strip.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/c07-release.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/c08-release-artifacts.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/c104-doc-links.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/c110-fixture-identity.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/c111-workflow-yaml.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/c112-markdown-tables.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/c113-timing-jobs.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/c114-nextest-hang-bound.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/c115-scoped-cleanup.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/c116-generator-registry.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/c117-job-abort-guard.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/c128-recorded-pid.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/c13-rust-lints.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/c135-leak-detector-opt-outs.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/c136-unit-live-feeds.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/c137-e2e-kit-import.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/c138-owned-scroll.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/c139-e2e-ready-directives.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/c140-per-item-opt-outs.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/c143-spawn-joined-path.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/c15-c16.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/c156-axe-scan-held-still.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/c167-growth-test-history.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/c169-write-atomic.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/c171-abs-path-literals.test.mjs",
+      "site": "tooling file",
+      "reason": "JS check landed before C173's baseline; Rust port queued (user 2026-11-26)"
+    },
+    {
+      "path": "conformance/test/c172-no-local-vm.test.mjs",
+      "site": "tooling file",
+      "reason": "JS check landed before C173's baseline; Rust port queued (user 2026-11-26)"
+    },
+    {
+      "path": "conformance/test/c23-blocks.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/c23-commit-lint.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/c24-reviewed-images.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/c28-baseline.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/c30-wall-clock.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/c31-adr-numbers.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/c32-i18n-catalogs.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/c33-a11y-coverage.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/c34-sidecar-self-test.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/c35-untimed-calls.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/c36-parser-hardening.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/c37-test-binaries.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/c43-sticky-headers.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/c45-dialog-markers.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/c48-dialog-capability.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/c50-shell-start.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/c51-start-waits.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/c54-background-qos.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/c56-build-env-names.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/c57-tracked-symlinks.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/c59-updater-installer.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/c61-material-bridge.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/c62-limit-completeness.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/c71-test-timing.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/c78-dialog-sizing.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/c79-orphan-guard-hooks.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/c85-features-register.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/c91-per-machine.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/c98-read-retry-optouts.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/c99-clippy-fixture.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/c99-graph.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/c99-no-keychain.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/cache-report.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/check-ids-unique.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/check-index.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/check-lists.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/check-tag.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/ci-action-env.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/ci-actions.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/ci-reuse-wiring.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/ci-scripts.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/ci-verdict-reader.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/cli-list.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/core.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/coverage-placement.test.mjs",
+      "site": "tooling file",
+      "reason": "conformance test, ported with WP-10"
+    },
+    {
+      "path": "conformance/test/dev-tool-cache.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/dispatch-handle-clippy.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/dyno-helper-sign.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/first-release-notes.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/full-checkout.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/gated-job-conditions.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/helpers-cleanup.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/helpers.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/job-isolation.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/kept-clone.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/kit.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/known-copies-register.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/latest-json.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/lefthook-paths.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/lib-usage.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/lib/workflow.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/macos-verify-bundle.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/mini-toml.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/notices.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/outcome.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/parity-twins.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/per-machine-installer-gate.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/pin-runtime.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/playwright-browsers.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/publish-release-action.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/publish.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/release-verdict.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/release.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/renovate-config.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/request-tag.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/require-full-tree.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/require-full-tree.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/run-tests.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/run-tests.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/runner-inline-waiver.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/runner-slots.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/rust-test-items.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/safe-rm.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/shared-actions-recognised.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/shared-enum-matches.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/sidecar-target-dir.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/sidecar.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/sync-blocks-only.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/sync-guard.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/tag-rehearsal.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/tauri-tools.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/test-files-run.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/union-merge.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/updater-key-check.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/updater-key-tags.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/waivers-unused.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/window-weight.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/windows-crt-imports.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "conformance/test/workflow-lib.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: conformance JS until WP-10 ports it to ./dev"
+    },
+    {
+      "path": "scripts/bench/busy-host.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "scripts/bench/busy-host.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "scripts/ci-image.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "scripts/coverage-gate.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "scripts/coverage-gate.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "scripts/demo-release.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "scripts/demo-release.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "scripts/demo/bundle.sh",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "scripts/demo/check-agent-version.sh",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "scripts/demo/check-agent-version.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "scripts/demo/verify-macos.sh",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "scripts/dialog-commands.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "scripts/dialog-commands.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "scripts/disk-record.sh",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "scripts/disk-record.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "scripts/gitleaks-config.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "scripts/new-app.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "scripts/new-app.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "scripts/nextest-flaky.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "scripts/notices.sh",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "scripts/npm-audit.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "scripts/npm-audit.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "scripts/perf/link-time/cc-timed.sh",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "scripts/perf/link-time/classify.py",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "scripts/perf/link-time/disfn.sh",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "scripts/publish.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "scripts/publish.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "scripts/setup-dev.sh",
+      "site": "tooling file",
+      "reason": "permanent: first-run setup that runs before ./dev can be built"
+    },
+    {
+      "path": "scripts/shell-demo/build-linux-arm64.sh",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "scripts/shell-demo/build-linux-arm64.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "scripts/shell-demo/smoke-desktop-linux.sh",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "scripts/shell-demo/smoke-service-update-linux.sh",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "scripts/shell-demo/smoke-service-update.sh",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "scripts/shell-demo/smoke-service-update.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "scripts/stage-paddock-setup.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "scripts/stage-paddock-setup.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "scripts/svg-drift.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "scripts/svg-drift.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "scripts/test-helpers/scratch-project.cjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "scripts/test-kit.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "scripts/test-kit.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "scripts/train-ci-hold.sh",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "scripts/vm-lock-run.sh",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "scripts/vm-lock.sh",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "scripts/vm-smoke/helper-readings.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "scripts/vm-smoke/manifest.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "scripts/vm-smoke/release-rows.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "scripts/vm-smoke/verdict.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "scripts/webkit-prefix.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "tools/bootstrap.sh",
+      "site": "tooling file",
+      "reason": "permanent: installs Rust, so it runs before ./dev exists"
+    },
+    {
+      "path": "tools/host-cleanup.sh",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "tools/mac-ci-signing.sh",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "tools/mac-runner-move.sh",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "tools/macos-vm-smoke.sh",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "tools/paddock-dev/src/hook/claude-pre-tool-use.sh",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "tools/prune-build-folders.sh",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "tools/prune-ci-build-folder.sh",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "tools/test/bootstrap.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "tools/test/helpers.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "tools/test/mac-ci-signing.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "tools/test/mac-runner-move.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "tools/test/macos-vm-smoke.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "tools/test/prune-and-cleanup.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "tools/test/verify-installed.test.mjs",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    },
+    {
+      "path": "tools/verify-installed.sh",
+      "site": "tooling file",
+      "reason": "baseline 2026-11-26: ADR 0022 ports it to ./dev, then the entry goes"
+    }
+  ]
+}

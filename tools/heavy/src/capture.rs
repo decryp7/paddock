@@ -224,21 +224,34 @@ impl RunLog {
 mod tests {
     use super::*;
 
+    /// An invented absolute folder of this OS as the text the function reads (`/srv/dt` is not absolute on Windows, so no literal).
+    fn abs_text(parts: &[&str]) -> String {
+        paddock_testkit::path::text(paddock_testkit::path::abs(parts))
+    }
+
     #[test]
     fn dev_targets_follow_the_places_rule() {
-        assert_eq!(dev_targets_of(Some("/srv/dt/"), Some("/x/wt")), Some(PathBuf::from("/srv/dt")));
-        assert_eq!(
-            dev_targets_of(None, Some("/srv/dev-targets/wt")),
-            Some(PathBuf::from("/srv/dev-targets"))
+        use paddock_testkit::assert_same_path;
+        let dt = paddock_testkit::path::abs(["srv", "dt"]);
+        let targets = paddock_testkit::path::abs(["srv", "dev-targets"]);
+        let slashed = |parts: &[&str]| format!("{}/", abs_text(parts));
+        assert_same_path!(
+            dev_targets_of(Some(&slashed(&["srv", "dt"])), Some(&abs_text(&["x", "wt"]))).unwrap(),
+            dt
         );
-        assert_eq!(
-            dev_targets_of(Some("  "), Some("/srv/dev-targets/wt/")),
-            Some(PathBuf::from("/srv/dev-targets"))
+        assert_same_path!(
+            dev_targets_of(None, Some(&abs_text(&["srv", "dev-targets", "wt"]))).unwrap(),
+            targets
         );
-        for bad in [Some("rel/dt"), Some("/"), Some("/a/../b")] {
+        assert_same_path!(
+            dev_targets_of(Some("  "), Some(&slashed(&["srv", "dev-targets", "wt"]))).unwrap(),
+            targets
+        );
+        let dotdot = format!("{}/../b", abs_text(&["a"]));
+        for bad in [Some("rel/dt"), Some(abs_text(&[]).as_str()), Some(dotdot.as_str())] {
             assert_eq!(dev_targets_of(bad, None), None, "{bad:?}");
         }
-        assert_eq!(dev_targets_of(None, Some("/wt")), None, "the parent would be the root");
+        assert_eq!(dev_targets_of(None, Some(&abs_text(&["wt"]))), None, "the parent would be the root");
         assert_eq!(dev_targets_of(None, None), None);
     }
 

@@ -1,6 +1,8 @@
 use paddock_env::Os;
 use paddock_testkit::assert_same_path;
-use paddock_testkit::path::{same_path_from_shell_on, same_path_on, text, text_on, under};
+use paddock_testkit::path::{
+    abs, abs_on, same_path_from_shell_on, same_path_on, text, text_on, under,
+};
 use std::path::{Path, PathBuf};
 
 #[test]
@@ -79,4 +81,25 @@ fn assert_same_path_passes_for_the_same_place_and_shows_both_spellings_when_not(
             && msg.contains("/x/b"),
         "{msg}"
     );
+}
+
+#[test]
+fn an_absolute_path_from_parts_is_rooted_on_every_os_and_has_no_text_to_split() {
+    assert_eq!(
+        text_on(abs_on(["srv", "dt"], Os::Windows), Os::Windows),
+        "C:/srv/dt"
+    );
+    // conformance: abs-path — the expected value of the Unix spelling itself, compared as a value on every OS
+    assert_eq!(abs_on(["srv", "dt"], Os::Linux), PathBuf::from("/srv/dt"));
+    // conformance: abs-path — the same, for macOS
+    assert_eq!(abs_on(["srv", "dt"], Os::MacOs), PathBuf::from("/srv/dt"));
+    // No parts: the root itself, which validators must refuse as a folder.
+    assert_eq!(
+        text_on(abs_on([] as [&str; 0], Os::Windows), Os::Windows),
+        "C:/"
+    );
+    assert_eq!(abs_on([] as [&str; 0], Os::Linux), PathBuf::from("/"));
+    // For the running OS: absolute here, which a Unix literal is not on Windows.
+    assert!(abs(["srv", "dt"]).is_absolute());
+    assert_same_path!(abs(["a", "b"]), under(abs([] as [&str; 0]), "a/b"));
 }

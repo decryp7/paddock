@@ -73,6 +73,30 @@ pub fn under(base: impl AsRef<Path>, rel: &str) -> PathBuf {
         .fold(base.as_ref().to_path_buf(), |p, c| p.join(c))
 }
 
+/// An absolute path on `os` made of `parts`, one folder name each: the drive root `C:\` on Windows, `/` elsewhere. For a test that
+/// needs an invented absolute folder and no real one (a path validator, a pure function of path text): a Unix literal such as `"/srv/dt"`
+/// is not absolute on Windows (no drive), so a test that passes one to `is_absolute` or `dev_targets_of` fails only there. No parts is the
+/// root itself. Names only: a part holding a separator is a mistake, never split. Compare the result with [`same_path`], never as text.
+pub fn abs_on<I, S>(parts: I, os: Os) -> PathBuf
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    let root = if os == Os::Windows { "C:\\" } else { "/" };
+    parts
+        .into_iter()
+        .fold(PathBuf::from(root), |p, c| p.join(c.as_ref()))
+}
+
+/// [`abs_on`] for the running OS. Where a real folder is wanted, build it under a [`crate::tempdir`] with [`under`] instead.
+pub fn abs<I, S>(parts: I) -> PathBuf
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    abs_on(parts, Os::current())
+}
+
 /// The panic message of [`assert_same_path!`]: both spellings as given and as compared.
 #[doc(hidden)]
 pub fn mismatch(actual: &Path, expected: &Path, os: Os) -> String {

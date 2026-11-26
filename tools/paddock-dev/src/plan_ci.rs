@@ -122,6 +122,67 @@ pub fn full_os(env: &dyn Fn(&str) -> Option<String>) -> bool {
         || env("GITHUB_REF").is_some_and(|r| r.starts_with("refs/tags/"))
 }
 
+/// Whether this run measures coverage: the nightly (`os_full`), a release's gates and a tag. A train, a branch, a pull request and a push
+/// to main run plain nextest, so the Linux tests of the `crate` job are cacheable like every other leg (user decision 2026-11-26, ADR 0116
+/// D4 amended; ci.yml's `crates` job guards its coverage step with the same three conditions, and a conformance test keeps them equal).
+pub fn coverage_run(env: &dyn Fn(&str) -> Option<String>) -> bool {
+    let set = |k: &str| env(k).is_some_and(|v| v == "true" || v == "1");
+    set("PLAN_FULL_OS") || set("PLAN_RELEASE") || env("GITHUB_REF").is_some_and(|r| r.starts_with("refs/tags/"))
+}
+
+/// How many parallel jobs the `crate` job's Linux tests are split into when coverage does not run (user decision 2026-11-26).
+pub const LINUX_PARTITIONS: usize = 3;
+
+/// The partition (0-based) of a package: a stable hash of its name, so a package stays in its job from one commit to the next (its build
+/// and its cached pass do not move) and adding a package moves no other.
+pub fn partition_of(package: &str, parts: usize) -> usize {
+    // FNV-1a, 64 bit: a fixed, documented function, never the standard library's randomised hasher.
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in package.bytes() {
+        h ^= u64::from(b);
+        h = h.wrapping_mul(0x0100_0000_01b3);
+    }
+    (h % parts.max(1) as u64) as usize
+}
+
+/// Splits each Linux leg that tests the whole workspace into `parts` legs of whole packages, and labels every leg for the job name and
+/// the steps that must run once per job (`part_extra`: Clippy and the feature-off runs stay on the first partition, `"false"` elsewhere).
+/// A leg that is not split carries none of the three fields (the workflow reads a missing one as empty and `part_extra` as not false).
+/// A package is in exactly one partition, so a partition's run proves whole packages and its record never stores half of one (nextest's
+/// own `--partition` would split a package's tests across jobs). A leg that already has packages or a filter (hostTests, a member run) and
+/// every non-Linux leg is left whole. `packages` are the workspace's package names.
+pub fn partition_linux_legs(legs: Vec<Value>, packages: &[String], parts: usize) -> Vec<Value> {
+    let mut out = Vec::new();
+    for leg in legs {
+        let linux = leg["os"].as_str() == Some(LINUX);
+        let whole = leg["test_packages"].as_str().unwrap_or("").is_empty()
+            && leg["test_filter"].as_str().unwrap_or("").is_empty()
+            && leg["test_skip"].as_str().unwrap_or("").is_empty();
+        if !linux || !whole || parts < 2 || packages.len() < parts {
+            out.push(leg);
+            continue;
+        }
+        for k in 0..parts {
+            let mut p = leg.clone();
+            let mine: Vec<&str> = packages
+                .iter()
+                .filter(|n| partition_of(n, parts) == k)
+                .map(String::as_str)
+                .collect();
+            p["test_packages"] = json!(mine.join(" "));
+            p["part"] = json!(format!("{}/{parts}", k + 1));
+            p["part_label"] = json!(format!(", {}/{parts}", k + 1));
+            p["part_extra"] = json!(if k == 0 { "true" } else { "false" });
+            // A partition with no package has nothing to test (said, never an empty list, which means everything).
+            if mine.is_empty() {
+                p["test_skip"] = json!("true");
+            }
+            out.push(p);
+        }
+    }
+    out
+}
+
 /// The legs of one of the two jobs that are not apps (`crate`, `paddock-dev`): one object per runner of `os_legs` with the packages
 /// (`test_packages`, space-separated, for `-p`; empty: the workspace's) and the nextest filterset (`test_filter`) its tests run. A
 /// Windows or macOS leg tests only what the workspace's `hostTests` names (OS-scoped tests); every leg also keeps the member run's
@@ -1338,5 +1399,106 @@ mod tests {
         ] {
             assert_eq!(args(&a).unwrap_err(), why, "{a:?}");
         }
+    }
+}
+
+#[cfg(test)]
+mod coverage_run_tests {
+    use super::coverage_run;
+
+    fn env<'a>(pairs: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<String> + 'a {
+        move |k| pairs.iter().find(|(n, _)| *n == k).map(|(_, v)| v.to_string())
+    }
+
+    #[test]
+    fn coverage_runs_in_the_nightly_a_release_and_a_tag_and_never_on_a_train_or_a_push() {
+        assert!(coverage_run(&env(&[("PLAN_FULL_OS", "true")])), "the nightly");
+        assert!(coverage_run(&env(&[("PLAN_RELEASE", "true")])), "a release's gates");
+        assert!(coverage_run(&env(&[("GITHUB_REF", "refs/tags/v1.0.0")])), "a tag");
+        assert!(!coverage_run(&env(&[
+            ("GITHUB_REF", "refs/heads/train/2026-11-26-p"),
+            ("GITHUB_EVENT_NAME", "workflow_dispatch")
+        ])));
+        assert!(!coverage_run(&env(&[
+            ("GITHUB_REF", "refs/heads/main"),
+            ("GITHUB_EVENT_NAME", "push")
+        ])));
+        assert!(!coverage_run(&env(&[("GITHUB_REF", "refs/heads/feat/x")])));
+        assert!(
+            !coverage_run(&env(&[("PLAN_APP", "dyno")])),
+            "an app's own gates run no crates coverage"
+        );
+    }
+}
+
+#[cfg(test)]
+mod partition_tests {
+    use super::*;
+
+    fn pkgs() -> Vec<String> {
+        (0..40).map(|i| format!("paddock-p{i}")).collect()
+    }
+
+    fn leg(os: &str) -> Value {
+        json!({"os": os, "test_packages": "", "test_filter": "", "test_skip": ""})
+    }
+
+    #[test]
+    fn every_package_is_in_exactly_one_linux_partition_so_no_pass_is_ever_split() {
+        let legs = partition_linux_legs(vec![leg("ubuntu-latest"), leg("windows-latest")], &pkgs(), 3);
+        let linux: Vec<&Value> = legs.iter().filter(|l| l["os"] == "ubuntu-latest").collect();
+        assert_eq!(linux.len(), 3);
+        let mut seen: Vec<String> = linux
+            .iter()
+            .flat_map(|l| l["test_packages"].as_str().unwrap().split_whitespace().map(str::to_string))
+            .collect();
+        seen.sort();
+        let mut want = pkgs();
+        want.sort();
+        assert_eq!(seen, want, "the partitions cover the workspace, each package once");
+        assert!(
+            linux.iter().all(|l| !l["test_packages"].as_str().unwrap().is_empty()),
+            "no empty partition with 40 packages"
+        );
+        assert_eq!(
+            linux.iter().map(|l| l["part"].as_str().unwrap()).collect::<Vec<_>>(),
+            ["1/3", "2/3", "3/3"]
+        );
+        // Clippy and the feature-off runs stay on the first partition only; the other OS legs are one whole leg, untouched.
+        assert_eq!(
+            linux.iter().map(|l| l["part_extra"].as_str().unwrap()).collect::<Vec<_>>(),
+            ["true", "false", "false"]
+        );
+        let win = legs.iter().find(|l| l["os"] == "windows-latest").unwrap();
+        assert_eq!(win, &leg("windows-latest"), "an unsplit leg is untouched: no new keys");
+    }
+
+    #[test]
+    fn a_package_keeps_its_partition_when_another_is_added() {
+        let before = partition_of("paddock-proc", 3);
+        let mut more = pkgs();
+        more.push("paddock-new".into());
+        assert_eq!(partition_of("paddock-proc", 3), before);
+        let a = partition_linux_legs(vec![leg("ubuntu-latest")], &pkgs(), 3);
+        let b = partition_linux_legs(vec![leg("ubuntu-latest")], &more, 3);
+        for k in 0..3 {
+            let in_a: Vec<&str> = a[k]["test_packages"].as_str().unwrap().split_whitespace().collect();
+            let in_b: Vec<&str> = b[k]["test_packages"].as_str().unwrap().split_whitespace().collect();
+            assert!(
+                in_a.iter().all(|p| in_b.contains(p)),
+                "partition {k} lost a package when one was added"
+            );
+        }
+    }
+
+    #[test]
+    fn a_narrowed_leg_or_a_small_workspace_is_not_split() {
+        let mut host = leg("ubuntu-latest");
+        host["test_packages"] = json!("a b");
+        assert_eq!(partition_linux_legs(vec![host], &pkgs(), 3).len(), 1);
+        let mut member = leg("ubuntu-latest");
+        member["test_filter"] = json!("package(=a)");
+        assert_eq!(partition_linux_legs(vec![member], &pkgs(), 3).len(), 1);
+        assert_eq!(partition_linux_legs(vec![leg("ubuntu-latest")], &pkgs()[..2], 3).len(), 1);
     }
 }

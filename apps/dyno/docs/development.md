@@ -59,9 +59,8 @@ The screenshot spec freezes the clock and fixes locale and timezone so images ar
 
 ### On Linux
 
-`scripts/linux-verify.sh` builds and tests `dyno-platform` in a native Linux container (OrbStack or Docker) once as root and
-once as uid 1000, then runs the portable parsers natively. `scripts/linux-container.sh <command>` runs any cargo command there.
-See [linux.md](linux.md).
+The Linux adapters are built and tested by CI's Linux job on the Linux runner. *Note 2026-11-26:* `scripts/linux-verify.sh` and
+`scripts/linux-container.sh` (a local OrbStack or Docker container) are removed; no container or VM runs on this Mac. See [linux.md](linux.md).
 
 ### Windows
 
