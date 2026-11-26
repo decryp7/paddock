@@ -751,6 +751,7 @@ mod tests {
             .map(|n| match n {
                 JobName::Exact(e) => job(&e, JobOutcome::Passed),
                 JobName::Prefix(p) => job(&format!("{p}x)"), JobOutcome::Passed),
+                JobName::AnyPrefix(ps) => job(&format!("{}x)", ps[0]), JobOutcome::Passed),
                 JobName::Starts(p) => job(&format!("{p})"), JobOutcome::Passed),
             })
             .chain(d.ran.apps.iter().map(|a| match name_of_leg(a) {
