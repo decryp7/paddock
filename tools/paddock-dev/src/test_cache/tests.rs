@@ -497,3 +497,28 @@ fn a_record_counts_only_when_its_run_is_a_main_or_train_run_with_a_successful_jo
         "a local record in CI"
     );
 }
+
+#[test]
+fn ci_uses_its_own_test_cache_key_before_the_machines_usual_source() {
+    use super::s3::S3Store;
+    let d = tempfile::tempdir().unwrap();
+    let env: HashMap<String, String> = [
+        ("PADDOCK_TEST_CACHE_KEY_ID", "CIKEY"),
+        ("PADDOCK_TEST_CACHE_SECRET", "ci-secret"),
+        ("PADDOCK_SCCACHE_ENV_FILE", d.path().join("absent.env").to_str().unwrap()),
+    ]
+    .iter()
+    .map(|(k, v)| (k.to_string(), v.to_string()))
+    .collect();
+    assert!(
+        S3Store::from_env(&env, d.path().join("s")).is_ok(),
+        "no AWS_* needed when CI's key is there"
+    );
+    let mut half = env.clone();
+    half.remove("PADDOCK_TEST_CACHE_SECRET");
+    let e = S3Store::from_env(&half, d.path().join("s")).unwrap_err();
+    assert!(
+        e.contains("PADDOCK_TEST_CACHE_KEY_ID") && !e.contains("CIKEY"),
+        "half a key falls back, then says what is missing: {e}"
+    );
+}

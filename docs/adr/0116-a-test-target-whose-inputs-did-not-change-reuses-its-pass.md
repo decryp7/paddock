@@ -193,6 +193,9 @@ against the merge base for removals.
 - **Keys:** two new RustFS keys, as Gitea repository secrets. `PADDOCK_TEST_CACHE_READ_*` (read-only on the bucket) goes to the plan
   job only; `PADDOCK_TEST_CACHE_WRITE_*` (write-only on `v*/`) goes to one record step at the end of each test job, which runs only on
   a trusted ref (§7). A conformance check in the shape of C141 (on main) keeps each secret to its one step and out of `$GITHUB_ENV`.
+  **Amended 2026-11-26 (user):** CI's key is one separate RustFS key in two Gitea secrets, `PADDOCK_TEST_CACHE_KEY_ID` and
+  `PADDOCK_TEST_CACHE_SECRET` (not the read/write pair above), bucket `test-results-paddock`; C141 itself allows them only in steps that run
+  `./dev ci test-cache`. Locally the machine's usual credential source (the key file outside the repository, else `AWS_*`) is used.
 - **Owner:** `./dev ci test-cache` (paddock-dev), registered as a shared cache with its limit in the cache register of ADR 0111/ER-51.
 - **Size:** about 500 records per full run, 0.5 MB; the bucket's quota is set to 2 GiB.
 - **Eviction, oldest first:** a RustFS lifecycle rule expires records 30 days after they are written (`rc bucket lifecycle rule add

@@ -45,10 +45,19 @@ impl S3Store {
     /// The store from `env` (a map of the process environment); `scratch` is a folder the store owns for the bodies of one call.
     /// `Err` says what is missing, without a value.
     pub fn from_env(env: &std::collections::HashMap<String, String>, scratch: PathBuf) -> Result<S3Store, String> {
-        let creds = crate::local_sccache::read_creds(env)?;
-        let get = |k: &str| creds.pairs().iter().find(|(n, _)| n == k).map(|(_, v)| v.clone());
-        let (Some(id), Some(secret)) = (get("AWS_ACCESS_KEY_ID"), get("AWS_SECRET_ACCESS_KEY")) else {
-            return Err("no S3 credentials (the key file outside the repository, or AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY)".into());
+        // CI's own key first (user decision 2026-11-26: a separate RustFS key for the test cache; C141 lets only `./dev ci test-cache`
+        // steps name its secrets). Elsewhere the machine's usual source: the key file outside the repository, else `AWS_*`.
+        let ci = |k: &str| env.get(k).filter(|v| !v.is_empty()).cloned();
+        let (id, secret) = match (ci("PADDOCK_TEST_CACHE_KEY_ID"), ci("PADDOCK_TEST_CACHE_SECRET")) {
+            (Some(id), Some(secret)) => (id, secret),
+            _ => {
+                let creds = crate::local_sccache::read_creds(env)?;
+                let get = |k: &str| creds.pairs().iter().find(|(n, _)| n == k).map(|(_, v)| v.clone());
+                let (Some(id), Some(secret)) = (get("AWS_ACCESS_KEY_ID"), get("AWS_SECRET_ACCESS_KEY")) else {
+                    return Err("no S3 credentials (CI: the secrets PADDOCK_TEST_CACHE_KEY_ID and PADDOCK_TEST_CACHE_SECRET; elsewhere the key file outside the repository, or AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY)".into());
+                };
+                (id, secret)
+            }
         };
         let endpoint = env
             .get("PADDOCK_SCCACHE_S3_ENDPOINT")
