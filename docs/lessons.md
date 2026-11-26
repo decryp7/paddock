@@ -4423,3 +4423,12 @@ sleep or a raised limit.
 - **Class (ER-21, finished in the same round).** One candidate line, `green::candidate_line` (over `main_line`), is now read by the push's reuse, the
   planner, the landing dispatch, the touched measure and the verdict's "last fully tested commit" hint; the hint had named 62049e300. A test
   asserts the hint and the push base agree. Earlier instance: run 9056's first-parent line.
+
+## Fix item: a FLAKY paddock-ipc link-server endings test on Windows in run 9156 (2026-11-26)
+`paddock-ipc::it endings::ipc_link_server_ends_every_connection_right_or_is_in_the_ratchet` was FLAKY on Windows in ci.yml run 9156
+(job 51298, crate (windows-latest); failed once, passed on its retry; flaky-as-failure kept the run red, ER-12). Train 2026-11-26-s did
+not touch the code it drives (its only paddock-ipc change was `crates/paddock-ipc/fuzz/Cargo.lock`), so it did not block the landing.
+Third Windows instance of this test after runs 8174 and 8425 (the Train A fix items above), and the same crate as run 9150's macOS
+link-server flake. Fixed on train 2026-11-26-t by ADR 0122 WP-2 (`feat/adr-0122-wp2-probe-gate`: the rigs hold the endpoint at the act
+gate and probe the queued bytes) and the link-test determinism ADR (`fix/ipc-link-flakes`: `wait_refused`/`wait_peers`,
+`Peer::when_closed`, stop ordering and a Clippy ban on reading the server's lists without a wait).
