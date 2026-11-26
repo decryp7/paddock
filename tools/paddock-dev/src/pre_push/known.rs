@@ -191,7 +191,14 @@ pub fn write_record(root: &Path, state: &Path, sha: &str, base: &str, gates: &[S
 /// Whether a finished run may leave a record: it ran every gate (no `--only`, `--files`, dry run or override), for one commit, and
 /// everything passed or was skipped by the plan.
 pub fn recordable(args: &PrePushArgs, accepted: usize, extra: usize, exit: Exit) -> bool {
-    args.files.is_empty() && args.base.is_none() && args.only.is_empty() && !args.dry_run && accepted == 0 && extra == 0 && exit == Exit::Ok
+    args.files.is_empty()
+        && args.base.is_none()
+        && args.only.is_empty()
+        && args.set == super::train_split::RowSet::All
+        && !args.dry_run
+        && accepted == 0
+        && extra == 0
+        && exit == Exit::Ok
 }
 
 /// The evidence for every pushed sha (each needs its own), and the trail of what was looked at, for the log (ER-27).

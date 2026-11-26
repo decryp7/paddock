@@ -1130,3 +1130,73 @@ fn claim_takes_a_worktree_name_as_well_as_its_path() {
     let unknown = fx.dev(&["worktree", "claim", "no-such-name", "--agent", "agent-A"]);
     assert_ne!(unknown.code, 0, "{} {}", unknown.json, unknown.err);
 }
+
+/// `worktree add` of `name` on branch `branch` from `base`, as the coordinator, with a `--json` run: the full result.
+fn add_from(fx: &Fixture, name: &str, branch: &str, base: &str, owner: &str) -> super::Run {
+    let r = fx.dev(&["worktree", "add", name, "-b", branch, "--base", base, "--owner", owner]);
+    assert_eq!(r.code, 0, "{} {}", r.json, r.err);
+    r
+}
+
+/// A branch `feat/base-work` off `origin/main` with one unlanded commit that changes `shared.txt`.
+fn base_branch_with_shared_file(fx: &Fixture) {
+    fx.git(&fx.primary, &["checkout", "-q", "-b", "feat/base-work", "origin/main"]);
+    std::fs::write(fx.primary.join("shared.txt"), "x\n").unwrap();
+    fx.git(&fx.primary, &["add", "."]);
+    fx.git(&fx.primary, &["commit", "-q", "-m", "feat: base work"]);
+    fx.git(&fx.primary, &["checkout", "-q", "main"]);
+}
+
+#[test]
+fn add_warns_naming_the_other_worktree_its_owner_and_the_shared_files_and_still_makes_the_worktree() {
+    let fx = Fixture::new();
+    base_branch_with_shared_file(&fx);
+    let first = fx.path("first");
+    add_from(&fx, "first", "feat/first-job", "origin/main", "implementer:T-7");
+    std::fs::write(first.join("shared.txt"), "edit\n").unwrap();
+    let r = add_from(&fx, "second", "feat/second-job", "feat/base-work", "implementer:T-8");
+    let warn = r.json["overlap"].as_str().unwrap();
+    assert!(
+        warn.contains("::warning::worktree add:")
+            && warn.contains(p(&first))
+            && warn.contains("implementer:T-7")
+            && warn.contains("shared.txt")
+            && warn.contains("nothing was refused"),
+        "{warn}"
+    );
+    assert!(fx.path("second").is_dir(), "a warning never blocks");
+}
+
+#[test]
+fn add_warns_for_unlanded_commits_and_for_the_same_topic_and_is_silent_otherwise() {
+    let fx = Fixture::new();
+    base_branch_with_shared_file(&fx);
+    let first = fx.path("first");
+    add_from(&fx, "first", "feat/overlap-job", "origin/main", "implementer:T-7");
+    std::fs::write(first.join("shared.txt"), "committed\n").unwrap();
+    fx.git(&first, &["add", "."]);
+    fx.git(&first, &["commit", "-q", "-m", "feat: first"]);
+    // A commit not on origin/main overlaps the base's file; no uncommitted change is needed.
+    let a = add_from(&fx, "second", "feat/other-thing", "feat/base-work", "implementer:T-8");
+    assert!(a.json["overlap"].as_str().unwrap().contains("shared.txt"), "{}", a.json);
+    // Same topic stem, nothing shared (the base is main).
+    let b = add_from(&fx, "third", "fix/overlap-job-again", "origin/main", "implementer:T-9");
+    let w = b.json["overlap"].as_str().unwrap();
+    assert!(w.contains(p(&first)) && w.contains("same topic"), "{w}");
+    // Nothing shared and another topic: silent.
+    let c = add_from(&fx, "fourth", "feat/something-else", "origin/main", "implementer:T-10");
+    assert_eq!(c.json["overlap"], "", "{}", c.json);
+    assert!(!c.err.contains("overlap"), "{}", c.err);
+}
+
+#[test]
+fn add_ignores_an_unlocked_worktree() {
+    let fx = Fixture::new();
+    base_branch_with_shared_file(&fx);
+    let first = fx.path("first");
+    add_from(&fx, "first", "feat/first-job", "origin/main", "implementer:T-7");
+    std::fs::write(first.join("shared.txt"), "edit\n").unwrap();
+    fx.git(&fx.primary, &["worktree", "unlock", p(&first)]);
+    let r = add_from(&fx, "second", "feat/first-job-two", "feat/base-work", "implementer:T-8");
+    assert_eq!(r.json["overlap"], "", "an unlocked worktree is nobody's: {}", r.json);
+}

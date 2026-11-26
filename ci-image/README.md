@@ -32,7 +32,7 @@ Local smoke test: `docker build --platform linux/amd64 -t paddock-ci-smoke ci-im
 
 ## The local arm64 image
 
-`tools/linux-container.sh --ci-image` on an Apple Silicon Mac builds this Dockerfile for linux/arm64 on `garage-arm64.Dockerfile`,
+*Note 2026-11-26: `tools/linux-container.sh` is removed (no container or VM runs on this Mac), so nothing builds the stand-in below now; it and `garage-release.txt` are kept until a decision to delete them.* It was built by `tools/linux-container.sh --ci-image` on an Apple Silicon Mac from this Dockerfile for linux/arm64 on `garage-arm64.Dockerfile`,
 a local stand-in for garage (which is amd64 only), and never pushes it. The stand-in follows `garage-release.txt`, the record of the
 garage that `GARAGE_IMAGE` names; recapture it as its header says after a `GARAGE_IMAGE` change. The arm64 image has no Chrome for
 Testing or draw.io, so e2e against Chrome for Testing and the SVG drift check stay CI's.

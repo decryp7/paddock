@@ -1,7 +1,7 @@
 use crate::{
     audit, check, check_ids, ci_build_env, ci_build_jobs, ci_host, ci_isolation, ci_run, ci_runs, ci_rust_pin, ci_s3_guard, ci_setup_rust,
     disk, gates, generators, heavy_cmd, heavy_install, hook, input_hash, ipc_endpoints, lessons_driver, load, local_sccache, locks,
-    locks_guard, merge_check, places, plan_cmd, pr, pre_push, queue, release_isolation, slots, test_features, wait, worktree,
+    locks_guard, merge_check, places, plan_cmd, pr, pre_push, queue, release_isolation, slots, test_cache, test_features, wait, worktree,
 };
 use clap::{Args, Parser, Subcommand};
 use paddock_cli::{CliError, Exit, Format, Report, finish};
@@ -368,6 +368,12 @@ enum CiCommand {
     /// over a quarter of its stop, from a run's job logs or a saved nextest output. Report-only (exit 0) unless --fail-on-findings (5);
     /// 6 when no whole nextest run of paddock-dev was read.
     TestCost(ci_runs::TestCostArgs),
+    /// Cancels one CI run by the id `./dev ci dispatch` printed, through that run's own cancel URL (never "the newest run", ER-51). A
+    /// cancelled run reads as "cancelled: not measured". Exit 0 sent or already finished, 6 not measured.
+    Cancel(ci_runs::CancelArgs),
+    /// May the commit land (ER-49)? Needs the complete green CI run AND the green local slow rows (`./dev check --pre-push --member-gate
+    /// --set slow`) on the same commit. Exit 0 landable, 5 refused, 6 not held (an unfinished or missing half is never a pass).
+    LandingHeld(ci_runs::LandingHeldArgs),
     /// Is there a full green run of a workflow on a commit? The one reader of the runs for that verdict (the tag workflow asks
     /// it). A run counts if it is a push to main or its plan job logged `plan mode: full=true`; the newest full run decides.
     /// Exit 0 full green (with `--landing` also green with fix items: FLAKY tests in untouched code), 5 red, only partial runs, or
@@ -380,6 +386,9 @@ enum CiCommand {
     /// The cache keys of the last runs that no job ever saved, read from the `cache-report:` lines of the job logs (ADR 0115).
     /// Report-only (exit 0) unless `--fail-on-never-saved` (5); no report line in the window exits 6, check broken.
     CacheAudit(ci_runs::CacheAuditArgs),
+    /// The test-result cache (ADR 0116): `run` the nextest of a Cargo workspace with each unchanged package's pass reused, `lookup` what
+    /// would be reused, or `audit` the local store. Shadow mode (report-only) until docs/test-cache.toml records two green train runs.
+    TestCache(test_cache::cmd::TestCacheArgs),
     /// Whether a scheduled run ends early because a train's dispatch run is queued or running (skip=true|false to
     /// GITHUB_OUTPUT). Fails open: an unreadable API lets the run proceed, with a warning.
     ScheduleSkip(ci_runs::ScheduleSkipArgs),
@@ -743,6 +752,12 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
             command: CiCommand::RustPin(a),
         } => ci_rust_pin::command(&a),
         Command::Ci {
+            command: CiCommand::Cancel(a),
+        } => ci_runs::cancel_cmd(&a),
+        Command::Ci {
+            command: CiCommand::LandingHeld(a),
+        } => ci_runs::landing_held(&a),
+        Command::Ci {
             command: CiCommand::Verdict(a),
         } => ci_runs::verdict(&a),
         Command::Ci {
@@ -751,6 +766,9 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
         Command::Ci {
             command: CiCommand::CacheAudit(a),
         } => ci_runs::cache_audit(&a),
+        Command::Ci {
+            command: CiCommand::TestCache(a),
+        } => test_cache::cmd::command(&a),
         Command::Ci {
             command: CiCommand::Dispatch(a),
         } => ci_runs::dispatch(&a),
