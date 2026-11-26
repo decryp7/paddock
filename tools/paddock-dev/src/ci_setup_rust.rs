@@ -28,6 +28,8 @@ use crate::ci_isolation::{self, Ctx, Sinks, home};
 use crate::ci_tool::{NETWORK_ENV, Output, TAIL_LINES, ToolCall, error_line, tail};
 use crate::local_sccache::server_env;
 use clap::Args;
+use paddock_ci_config::settings::sccache::{S3Ci, S3Off};
+use paddock_env::Vars;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::io::{Read, Write};
@@ -163,59 +165,8 @@ pub enum Backend {
     /// sccache's disk cache.
     Local,
     /// The job's local disk cache first, the shared S3 store behind it ([`s3_server_settings`]); resolved when the step runs, and
-    /// the local disk alone when S3 cannot be used ([`S3Ci::from_env`]).
+    /// the local disk alone when S3 cannot be used ([`S3Ci::from_vars`]).
     S3,
-}
-
-/// The shared S3 store as the second cache level of a CI job (user decision 2026-11-19, docs/research/2026-11-19-sccache.md WP-8).
-///
-/// Designed against the Redis failure of 2026-10-25 (commit 1383e9898: the shared Dragonfly filled up, the Mac job's server failed
-/// to start and every rustc call failed): the job's own disk stays level 0 and decides alone whether a compile is stored
-/// (`SCCACHE_MULTILEVEL_WRITE_ERROR_POLICY=l0`: an S3 write or startup check that fails is logged, never fatal, and does not latch
-/// the server read-only; sccache v0.19.0 docs/MultiLevel.md); S3 is used only when this step was given its runner class's key
-/// (`PADDOCK_SCCACHE_S3_ACCESS_KEY_ID` and `PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY`, Gitea repository secrets passed through the
-/// setup-rust inputs to this step's environment only and never to `$GITHUB_ENV`; user decision 2026-11-19, least privilege) and its endpoint answers a TCP connect
-/// by its health check ([`S3_HEALTH_PATH`]); the store's size is the store's job (the bucket quota and a lifecycle expiry rule set by the user on
-/// RustFS, since sccache never evicts from S3).
-#[derive(Clone, PartialEq, Eq)]
-pub struct S3Ci {
-    /// `PADDOCK_SCCACHE_S3_BUCKET`.
-    pub bucket: String,
-    /// The `host:port` of `PADDOCK_SCCACHE_S3_ENDPOINT`.
-    pub endpoint: String,
-    /// The endpoint is `https://`.
-    pub ssl: bool,
-    /// One key prefix per runner class: `paddock-ci/<RUNNER_OS>-<arch>`, so one OS's objects can be dropped or expired alone.
-    pub prefix: String,
-    /// The access key id and secret, for the sccache server's start only.
-    pub key: (String, String),
-}
-
-impl std::fmt::Debug for S3Ci {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("S3Ci")
-            .field("bucket", &self.bucket)
-            .field("endpoint", &self.endpoint)
-            .field("prefix", &self.prefix)
-            .field("key", &"<hidden>")
-            .finish()
-    }
-}
-
-/// Why a job does not use S3, and how loudly: a job whose workflow passes no key is not wired yet (a notice); a key that is
-/// passed but wrong, or a store that does not answer, is a warning.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct S3Off {
-    /// `::warning::` rather than `::notice::`.
-    pub warn: bool,
-    /// One sentence, never with a key in it.
-    pub why: String,
-}
-
-/// The S3 key prefix of a runner class: `paddock-ci/<RUNNER_OS>-<arch>` (`os` as `RUNNER_OS` spells it, `arch` as Rust's `ARCH`). The
-/// one definition: CI's [`S3Ci`] and the agents' local server ([`crate::local_sccache::default_prefix`]) both use it.
-pub(crate) fn ci_prefix(os: &str, arch: &str) -> String {
-    format!("paddock-ci/{os}-{arch}")
 }
 
 /// This host's `RUNNER_OS` spelling (`macOS`, `Linux`, `Windows`), for the prefix of a local server.
@@ -295,83 +246,10 @@ pub fn s3_health_url(ssl: bool, endpoint: &str) -> String {
     format!("{}://{endpoint}{S3_HEALTH_PATH}", if ssl { "https" } else { "http" })
 }
 
-impl S3Ci {
-    /// The S3 level from the step's environment, or why it cannot be used. The key is `PADDOCK_SCCACHE_S3_ACCESS_KEY_ID` and
-    /// `PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY` (repository secrets, one key for every runner class, its policy scoped to
-    /// `<bucket>/paddock-ci/*`); their values never appear in an error. The endpoint is a URL, `http://host:port` or
-    /// `https://host:port` (a bare `host:port` is read as http).
-    pub fn from_env(get: &dyn Fn(&str) -> Option<String>, os: &str, arch: &str) -> Result<S3Ci, S3Off> {
-        let warn = |why: String| S3Off { warn: true, why };
-        let value = |k: &str| get(k).map(|v| v.trim().to_string()).filter(|v| !v.is_empty());
-        // A release or tag build never reads the shared store: one key serves every branch, so a branch could write the entries a
-        // release build then trusts (review of 534918839, P2: cache poisoning). Release workflows hold no key either (C141's
-        // NO_SECRET list); this is the second wall, for a key that reaches such a job by another way. The trigger is the release
-        // condition itself: a tag ref, a tag rehearsal, or `PADDOCK_CI_RELEASE` (setup-rust sets it from `kit.sh release-path`, the one
-        // definition). Never PADDOCK_DEV_DOWNLOAD: setup-rust sets that one for any job with no read token too.
-        let truthy = |k: &str| value(k).is_some_and(|v| !matches!(v.as_str(), "0" | "false"));
-        let trigger = if let Some(r) = value("GITHUB_REF").filter(|r| r.starts_with("refs/tags/")) {
-            Some(format!("a tag run (GITHUB_REF is {r})"))
-        } else if value("PADDOCK_TAG_REHEARSAL").as_deref() == Some("1") {
-            Some("a tag rehearsal (PADDOCK_TAG_REHEARSAL=1)".to_string())
-        } else if truthy("PADDOCK_CI_RELEASE") {
-            Some(format!(
-                "a release or rule 54 run (PADDOCK_CI_RELEASE={})",
-                value("PADDOCK_CI_RELEASE").unwrap_or_default()
-            ))
-        } else {
-            None
-        };
-        if let Some(trigger) = trigger {
-            return Err(S3Off {
-                warn: false,
-                why: format!(
-                    "a release or tag build never reads the shared S3 cache (any branch could have written to it); this is {trigger}"
-                ),
-            });
-        }
-        let (id, secret) = match (
-            value("PADDOCK_SCCACHE_S3_ACCESS_KEY_ID"),
-            value("PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY"),
-        ) {
-            (Some(i), Some(s)) => (i, s),
-            (None, None) => {
-                return Err(S3Off {
-                    warn: false,
-                    why: "this workflow passes no S3 key to setup-rust (`sccache-s3-access-key-id`, `sccache-s3-secret-access-key`)".into(),
-                });
-            }
-            (None, Some(_)) => return Err(warn("the secret PADDOCK_SCCACHE_S3_ACCESS_KEY_ID is empty or not passed".into())),
-            (Some(_), None) => {
-                return Err(warn(
-                    "the secret PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY is empty or not passed".into(),
-                ));
-            }
-        };
-        let need = |k: &str| value(k).ok_or_else(|| warn(format!("the variable {k} is not set")));
-        let bucket = need("PADDOCK_SCCACHE_S3_BUCKET")?;
-        let endpoint = need("PADDOCK_SCCACHE_S3_ENDPOINT")?;
-        let (ssl, host_port) = parse_endpoint(&endpoint).map_err(warn)?;
-        Ok(S3Ci {
-            bucket,
-            endpoint: host_port,
-            ssl,
-            prefix: ci_prefix(os, arch),
-            key: (id, secret),
-        })
-    }
-}
-
-impl S3Ci {
-    /// The URL of the health check.
-    pub fn health_url(&self) -> String {
-        s3_health_url(self.ssl, &self.endpoint)
-    }
-}
-
 /// The settings the sccache SERVER starts with (never a build's environment): the multi-level chain `disk,s3` behind the local disk
 /// (`dir`, `size`) and the S3 store. Only the start call gets these; `$GITHUB_ENV` gets [`s3_build_settings`].
 pub fn s3_server_settings(s3: &S3Ci, dir: &str, size: &str) -> Vec<(String, String)> {
-    crate::local_sccache::multilevel_settings(dir, size, &s3.bucket, &s3.endpoint, s3.ssl, &s3.prefix)
+    paddock_ci_config::settings::sccache::multilevel_settings(dir, size, &s3.bucket, &s3.endpoint, s3.ssl, &s3.prefix)
 }
 
 /// The settings every later step of the job gets in `$GITHUB_ENV` when the S3 level is on: the local disk only, the two that keep
@@ -384,7 +262,7 @@ pub fn s3_build_settings(dir: &str, size: &str, error_log: &str) -> Vec<(String,
         ("SCCACHE_CACHE_SIZE".to_string(), size.to_string()),
         ("SCCACHE_ERROR_LOG".to_string(), error_log.to_string()),
     ];
-    v.extend(crate::local_sccache::survival_vars(true));
+    v.extend(paddock_ci_config::settings::sccache::survival_vars(true));
     v
 }
 
@@ -447,7 +325,12 @@ pub fn env_lines(port: &str, settings: &[(String, String)], windows: bool) -> Ve
         format!("SCCACHE_SERVER_PORT={port}"),
     ];
     // After the wrapper: the `CARGO_*` variables sccache hashes into every key, one definition with the agents' shim.
-    lines.splice(1..1, crate::local_sccache::CI_KEY_ENV.iter().map(|(k, v)| format!("{k}={v}")));
+    lines.splice(
+        1..1,
+        paddock_ci_config::settings::sccache::CI_KEY_ENV
+            .iter()
+            .map(|(k, v)| format!("{k}={v}")),
+    );
     if windows {
         lines.push(LEGACY_BUILD_DIR_LAYOUT.to_string());
     }
@@ -463,37 +346,21 @@ pub fn shown_endpoint(endpoint: &str) -> String {
     }
 }
 
-/// The one reading of `PADDOCK_SCCACHE_S3_ENDPOINT` (ER-22): the repository variable holds `http://host:port` (or `https://`), never a bare
-/// `host:port` with the scheme added again and never a path. Returns whether the endpoint speaks TLS and its `host:port` with no scheme and
-/// no trailing slash, the form sccache's own settings take (`SCCACHE_ENDPOINT` with `SCCACHE_S3_USE_SSL`). A bare `host:port` is plain HTTP.
-/// An endpoint with a user, a password or a path is an error that says what the variable should hold.
-pub fn parse_endpoint(endpoint: &str) -> Result<(bool, String), String> {
-    let (ssl, host_port) = if let Some(rest) = endpoint.strip_prefix("https://") {
-        (true, rest)
-    } else {
-        (false, endpoint.strip_prefix("http://").unwrap_or(endpoint))
-    };
-    let host_port = host_port.trim_end_matches('/').to_string();
-    if host_port.contains('@') {
-        // `user:password@host` would put a credential into a variable that is logged and into the health check's URL.
-        return Err(
-            "PADDOCK_SCCACHE_S3_ENDPOINT holds `@`; it is http://host:port with no user or password (the key is the two secrets)".into(),
-        );
-    }
-    if host_port.contains("://") || host_port.contains('/') || !host_port.contains(':') {
-        return Err(format!(
-            "PADDOCK_SCCACHE_S3_ENDPOINT is `{endpoint}`; it is http://host:port (or https://), with no path"
-        ));
-    }
-    Ok((ssl, host_port))
-}
-
 /// The password of a `redis://[user]:password@host` endpoint (or the user part when there is no colon), for masking.
 pub fn endpoint_password(endpoint: &str) -> Option<String> {
     let rest = &endpoint[endpoint.find("://").map_or(0, |s| s + 3)..];
     let (userinfo, _) = rest.rsplit_once('@')?;
     let password = userinfo.split_once(':').map_or(userinfo, |(_, p)| p);
     (!password.is_empty()).then(|| password.to_string())
+}
+
+/// The step's environment as [`Vars`], so the settings read it like any other.
+struct CtxVars<'a>(&'a Ctx);
+
+impl Vars for CtxVars<'_> {
+    fn get(&self, key: &str) -> Option<std::ffi::OsString> {
+        self.0.get(key).map(std::ffi::OsString::from)
+    }
 }
 
 /// The step's environment and streams.
@@ -837,8 +704,7 @@ impl Step<'_> {
                         "check the disk of the runner.",
                     )));
                 }
-                let get = |k: &str| self.get(k).map(str::to_string);
-                let level = S3Ci::from_env(&get, self.os(), std::env::consts::ARCH)
+                let level = S3Ci::from_vars(&CtxVars(&self.ctx), self.os(), std::env::consts::ARCH)
                     .and_then(|s3| self.health(&s3).map(|()| s3))
                     .and_then(|s3| self.start_guard(&s3).map(|g| (s3, g)));
                 match level {
@@ -856,11 +722,11 @@ impl Step<'_> {
                         ];
                         // Gitea masks secrets it passes itself; masking them again here also covers a value reaching the step another way.
                         if self.get("GITHUB_ACTIONS") == Some("true") {
-                            self.say(format!("::add-mask::{}", s3.key.0));
-                            self.say(format!("::add-mask::{}", s3.key.1));
+                            self.say(format!("::add-mask::{}", s3.key.0.expose()));
+                            self.say(format!("::add-mask::{}", s3.key.1.expose()));
                         }
-                        s3_keys.push(("AWS_ACCESS_KEY_ID".into(), s3.key.0.clone()));
-                        s3_keys.push(("AWS_SECRET_ACCESS_KEY".into(), s3.key.1.clone()));
+                        s3_keys.push(("AWS_ACCESS_KEY_ID".into(), s3.key.0.expose().to_string()));
+                        s3_keys.push(("AWS_SECRET_ACCESS_KEY".into(), s3.key.1.expose().to_string()));
                         self.say(format!(
                             "sccache: local disk {dir}, then S3 bucket {} at {} (through the timeout guard on {}) under {} (credentials configured)",
                             s3.bucket, real.endpoint, s3.endpoint, s3.prefix
@@ -893,7 +759,7 @@ impl Step<'_> {
             .iter()
             .filter_map(|k| self.path_var(k))
             .collect();
-        let basedirs = crate::local_sccache::basedir_vars(&roots, self.ctx.windows);
+        let basedirs = paddock_ci_config::settings::sccache::basedir_vars(&roots, self.ctx.windows);
         if let Some((k, v)) = basedirs.first() {
             self.say(format!(
                 "sccache: base directories {v} ({k}; the same source at another slot or work folder hits the same entry)"
@@ -957,7 +823,7 @@ impl Step<'_> {
     /// The S3 store's health check: an HTTP GET that answers 2xx within curl's own limits ([`S3_HEALTH_CONNECT`], [`S3_HEALTH_MAX`]).
     /// A store that accepts a connection and then hangs (or answers an error) is not used: this job runs on its local disk alone.
     fn health(&mut self, s3: &S3Ci) -> Result<(), S3Off> {
-        let url = s3.health_url();
+        let url = s3_health_url(s3.ssl, &s3.endpoint);
         let ran = self.run(&s3_health_call(&url));
         s3_health_verdict(&url, ran).map_err(|why| S3Off { warn: true, why })
     }
@@ -1313,9 +1179,12 @@ mod tests {
         assert!(choose_backend("", "", "").is_err(), "an empty input is refused, as in the shell");
     }
 
-    fn vars(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> {
-        let m: HashMap<String, String> = pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
-        move |k: &str| m.get(k).cloned()
+    fn vars(pairs: &[(&str, &str)]) -> paddock_env::MapVars {
+        pairs.iter().fold(paddock_env::MapVars::new(), |m, (k, v)| m.with(k, *v))
+    }
+
+    fn s3_health_url_of(s3: &S3Ci) -> String {
+        s3_health_url(s3.ssl, &s3.endpoint)
     }
 
     const S3_VARS: [(&str, &str); 4] = [
@@ -1341,9 +1210,9 @@ mod tests {
     #[test]
     fn s3_is_its_own_backend_and_has_one_key_prefix_per_runner_class() {
         assert_eq!(choose_backend("s3", "", ""), Ok(Backend::S3));
-        let s3 = S3Ci::from_env(&vars(&S3_VARS), "Windows", "x86_64").unwrap();
+        let s3 = S3Ci::from_vars(&vars(&S3_VARS), "Windows", "x86_64").unwrap();
         assert_eq!(s3.prefix, "paddock-ci/Windows-x86_64");
-        let linux = S3Ci::from_env(&vars(&S3_VARS), "Linux", "aarch64").unwrap();
+        let linux = S3Ci::from_vars(&vars(&S3_VARS), "Linux", "aarch64").unwrap();
         assert_ne!(s3.prefix, linux.prefix);
         assert_eq!((s3.endpoint.as_str(), s3.ssl), ("192.0.2.10:15000", false));
     }
@@ -1353,7 +1222,7 @@ mod tests {
         let with = |e: &'static str| {
             let mut v = S3_VARS.to_vec();
             v[1] = ("PADDOCK_SCCACHE_S3_ENDPOINT", e);
-            S3Ci::from_env(&vars(&v), "Linux", "x86_64")
+            S3Ci::from_vars(&vars(&v), "Linux", "x86_64")
         };
         let tls = with("https://s3.example.test:443/").unwrap();
         assert_eq!((tls.endpoint.as_str(), tls.ssl), ("s3.example.test:443", true));
@@ -1369,7 +1238,7 @@ mod tests {
         let without =
             |ks: &[&str]| -> Vec<(&'static str, &'static str)> { S3_VARS.iter().copied().filter(|(n, _)| !ks.contains(n)).collect() };
         // No key passed at all: a workflow not wired yet, a notice only.
-        let off = S3Ci::from_env(
+        let off = S3Ci::from_vars(
             &vars(&without(&[
                 "PADDOCK_SCCACHE_S3_ACCESS_KEY_ID",
                 "PADDOCK_SCCACHE_S3_SECRET_ACCESS_KEY",
@@ -1385,19 +1254,19 @@ mod tests {
             "PADDOCK_SCCACHE_S3_BUCKET",
             "PADDOCK_SCCACHE_S3_ENDPOINT",
         ] {
-            let off = S3Ci::from_env(&vars(&without(&[missing])), "macOS", "aarch64").unwrap_err();
+            let off = S3Ci::from_vars(&vars(&without(&[missing])), "macOS", "aarch64").unwrap_err();
             assert!(off.warn && off.why.contains(missing), "{off:?}");
             assert!(!off.why.contains("test-secret") && !off.why.contains("test-key-id"), "{off:?}");
         }
-        let s3 = S3Ci::from_env(&vars(&S3_VARS), "macOS", "aarch64").unwrap();
-        assert_eq!(s3.key, ("test-key-id".to_string(), "test-secret".to_string()));
+        let s3 = S3Ci::from_vars(&vars(&S3_VARS), "macOS", "aarch64").unwrap();
+        assert_eq!((s3.key.0.expose(), s3.key.1.expose()), ("test-key-id", "test-secret"));
         let shown = format!("{s3:?}");
         assert!(!shown.contains("test-secret") && !shown.contains("test-key-id"), "{shown}");
     }
 
     #[test]
     fn the_server_gets_the_chain_and_the_job_only_the_disk() {
-        let s3 = S3Ci::from_env(&vars(&S3_VARS), "Linux", "x86_64").unwrap();
+        let s3 = S3Ci::from_vars(&vars(&S3_VARS), "Linux", "x86_64").unwrap();
         let server = s3_server_settings(&s3, "/sccache", "20G");
         let get = |s: &[(String, String)], k: &str| s.iter().find(|(n, _)| n == k).map(|(_, v)| v.clone());
         assert_eq!(
@@ -1441,7 +1310,7 @@ mod tests {
         let with = |extra: &[(&'static str, &'static str)]| {
             let mut v = S3_VARS.to_vec();
             v.extend_from_slice(extra);
-            S3Ci::from_env(&vars(&v), "macOS", "aarch64")
+            S3Ci::from_vars(&vars(&v), "macOS", "aarch64")
         };
         assert!(with(&[]).is_ok(), "the control: the same inputs on a branch run are accepted");
         // The log names the real trigger (ER-27).
@@ -1470,12 +1339,12 @@ mod tests {
 
     #[test]
     fn the_health_check_is_an_http_get_of_the_stores_own_endpoint() {
-        let s3 = S3Ci::from_env(&vars(&S3_VARS), "Linux", "x86_64").unwrap();
-        assert_eq!(s3.health_url(), "http://192.0.2.10:15000/minio/health/live");
+        let s3 = S3Ci::from_vars(&vars(&S3_VARS), "Linux", "x86_64").unwrap();
+        assert_eq!(s3_health_url(s3.ssl, &s3.endpoint), "http://192.0.2.10:15000/minio/health/live");
         let mut v = S3_VARS.to_vec();
         v[1] = ("PADDOCK_SCCACHE_S3_ENDPOINT", "https://s3.example.test:443");
         assert_eq!(
-            S3Ci::from_env(&vars(&v), "Linux", "x86_64").unwrap().health_url(),
+            s3_health_url_of(&S3Ci::from_vars(&vars(&v), "Linux", "x86_64").unwrap()),
             "https://s3.example.test:443/minio/health/live"
         );
     }
@@ -1484,7 +1353,7 @@ mod tests {
     fn an_endpoint_with_a_user_or_password_is_refused() {
         let mut v = S3_VARS.to_vec();
         v[1] = ("PADDOCK_SCCACHE_S3_ENDPOINT", "http://user:pw@192.0.2.10:15000");
-        let off = S3Ci::from_env(&vars(&v), "Linux", "x86_64").unwrap_err();
+        let off = S3Ci::from_vars(&vars(&v), "Linux", "x86_64").unwrap_err();
         assert!(off.warn && off.why.contains('@') && !off.why.contains("pw"), "{off:?}");
     }
 
