@@ -1530,6 +1530,52 @@ Rss:              219040 kB\nPss:              131633 kB\nPss_Anon:          900
         assert_eq!(resident(u32::MAX - 1), None);
     }
 
+    /// The children of `pid` that are children by identity, as the tree walk counts them (ADR 0033): the process started no earlier
+    /// than `pid`'s process. A listed pid whose process is gone, or started before its "parent", is not one.
+    fn real_children(source: &dyn ProcessSource, pid: u32) -> Vec<u32> {
+        let Some(parent) = source.started(pid) else {
+            return Vec::new();
+        };
+        source
+            .children(pid)
+            .into_iter()
+            .filter(|kid| source.started(*kid).is_some_and(|s| follows(s, parent)))
+            .collect()
+    }
+
+    /// Regression (run 9168): a listing under a reused parent pid holds the orphans of the earlier holder (older than the new
+    /// holder) and a child that has since ended; only the real child is kept. Runs on every OS: the listing is a fake.
+    #[test]
+    fn a_listing_under_a_reused_parent_pid_keeps_only_the_children_that_started_after_it() {
+        struct Reused;
+        impl ProcessSource for Reused {
+            fn memory(&self, _pid: u32) -> Option<u64> {
+                None
+            }
+            fn children(&self, pid: u32) -> Vec<u32> {
+                if pid == 1 { vec![2, 3, 4, 5] } else { vec![] }
+            }
+            fn started(&self, pid: u32) -> Option<StartTime> {
+                match pid {
+                    1 => Some(StartTime::from_micros(100)),
+                    2 => Some(StartTime::from_micros(200)),
+                    3 => Some(StartTime::from_micros(50)),
+                    5 => Some(StartTime::from_micros(100)),
+                    _ => None,
+                }
+            }
+            fn table(&self) -> Table {
+                Table::new()
+            }
+        }
+        // 2 started after 1; 3 is an orphan of an earlier holder of the pid; 4 has ended; 5 started on the same tick (allowed).
+        assert_eq!(real_children(&Reused, 1), vec![2, 5]);
+        assert!(
+            real_children(&Reused, 9).is_empty(),
+            "a parent that is gone has no children"
+        );
+    }
+
     #[test]
     fn the_os_source_lists_the_children_of_one_pid_without_a_table() {
         use crate::testchild::{Mode, child};
@@ -1540,22 +1586,22 @@ Rss:              219040 kB\nPss:              131633 kB\nPss_Anon:          900
         #[cfg(not(windows))]
         assert!(OsSource::default().children(pid).is_empty());
         // On Windows a CREATE_NO_WINDOW child owns conhost.exe hosts and nothing else (CI run 6603; run 7448 saw two of
-        // them at once), so what is asserted is the kind of every child, not how many there are.
+        // them at once), so what is asserted is the kind of every child, not how many there are. Only the children the
+        // product itself would count: a parent pid is only a number on Windows (ADR 0033), so a process whose parent ended
+        // is listed under whatever holds that pid now, here the orphan of an earlier test child (run 9168).
         #[cfg(windows)]
-        {
-            let kids = OsSource::default().children(pid);
-            for kid in kids {
-                let id = Pid::from_u32(kid);
-                let mut sys = System::new().expect("a System");
-                sys.refresh_processes_specifics(
-                    ProcessesToUpdate::Some(&[id]),
-                    true,
-                    ProcessRefreshKind::nothing(),
-                );
-                let name = sys
-                    .process(id)
-                    .map(|p| p.name().to_string_lossy().to_lowercase());
-                assert_eq!(name.as_deref(), Some("conhost.exe"), "pid {kid}");
+        for kid in real_children(&OsSource::default(), pid) {
+            let id = Pid::from_u32(kid);
+            let mut sys = System::new().expect("a System");
+            sys.refresh_processes_specifics(
+                ProcessesToUpdate::Some(&[id]),
+                true,
+                ProcessRefreshKind::nothing(),
+            );
+            // A host that ended since the listing is no wrong kind of child: only a process that is still there is judged.
+            if let Some(p) = sys.process(id) {
+                let name = p.name().to_string_lossy().to_lowercase();
+                assert_eq!(name, "conhost.exe", "pid {kid} of {pid}");
             }
         }
         assert!(OsSource::default().children(u32::MAX - 1).is_empty());
