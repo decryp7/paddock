@@ -548,8 +548,7 @@ fn command_in(
     let mut overridden = String::new();
     if exec::throttle_override(&env).map(|v| v.trim()) == Some("off") && !env.contains_key(exec::TEST_THROTTLE_OFF) {
         overridden =
-            "OVERRIDE SET: PADDOCK_THROTTLE=off is not allowed outside the tests; every compile (clippy, xwin) is not measured\n"
-                .into();
+            "OVERRIDE SET: PADDOCK_THROTTLE=off is not allowed outside the tests; every compile (clippy, xwin) is not measured\n".into();
     } else if exec::throttle_prefix(&env, &|p| ex.has_tool(p)).is_empty() {
         notes.push("no heavy on PATH: the compiles (clippy, xwin) run through the heavy built from tools/throttle (cached under ~/.paddock-dev/bin); if that build fails they are not measured (ER-24)".into());
     }
