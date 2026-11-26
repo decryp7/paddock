@@ -290,7 +290,8 @@ unique (C31).
     full `ci.yml` run is green on that exact commit (rule 54 (a3)).
     (4) A test that fails and then passes on its one retry (FLAKY) blocks the landing only when the train's change touches the test
     itself or the source it exercises (its feature or module: the files it drives, not any file of the same app package or crate;
-    ER-12, user, 2026-11-19). Otherwise the landing goes ahead: the flake is recorded with its log as a
+    ER-12, user, 2026-11-19; decision 95, user, 2026-11-26: the reader judges it by the Cargo package of the test and the planner's Cargo graph,
+    a lockfile touching only the packages whose resolved dependencies changed, and no stricter reading stands in for it). Otherwise the landing goes ahead: the flake is recorded with its log as a
     fix item and fixed in the next train or batch, with a failing reproduction first (rule 5). A test that fails both tries always
     blocks, and a retry never turns the run itself green: the report still marks it FLAKY. *Why (ER-12):* on 2026-11-16 two old
     races in unchanged shared crates (run 8174: `paddock-ipc` endings, plugin-host ETXTBSY) held train 12 for hours. *Why:* release gates cost about 77 minutes of the Mac runner
