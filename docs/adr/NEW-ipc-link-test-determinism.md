@@ -81,9 +81,9 @@ always comes first, which fits the Windows-only record. Not reproduced: there is
 | `bin/test_child.rs` `link_out_of_files` | `refused()` after the client's end | none | **broken (9150)**; fixed here with `wait_refused` |
 | `tests/it/edges.rs` `a_link_server_refuses_a_wrong_token_and_keeps_serving` | `refused()` after the client's Fail | a `yield_now` spin with a guard | fine; moved to `wait_refused` here |
 | `tests/it/clocked.rs` `a_silent_client_...`, `the_refusal_list_keeps_the_latest_64` | `refused()` | `wait_until` spin | fine; moved to `wait_refused` here |
-| `tests/it/clocked.rs` (busy refusal, around line 223) | `refused()` | `wait_until` spin | fine; to move (WP-1) |
-| `tests/it/clocked.rs` `wait_until(|| server.peers().len() == 1)` and `.is_empty()` | `peers()` | `wait_until` spin | fine; to move to `wait_peers` (WP-1) |
-| `tests/it/link.rs` around line 197: `assert_eq!(first.peers().len(), 1)` after the client's call was answered | `peers()` | **none**: the handshake thread pushes the peer after `Peer::start`, so the peer can answer a call before it is in the list | **at risk**, not seen failing; WP-1 |
+| `tests/it/clocked.rs` (busy refusal, around line 223) | `refused()` | `wait_until` spin | fine; moved to `wait_refused` (WP-1) |
+| `tests/it/clocked.rs`: `wait_until` on `server.peers().len() == 1` and on `.is_empty()` | `peers()` | `wait_until` spin | fine; moved to `wait_peers`, `wait_until` deleted (WP-1) |
+| `tests/it/link.rs` around line 197: `assert_eq!(first.peers().len(), 1)` after the client's call was answered | `peers()` | **none**: the handshake thread pushes the peer after `Peer::start`, so the peer can answer a call before it is in the list | **at risk**, not seen failing; moved to `wait_peers` (WP-1), and the same read in `edges.rs` `a_link_server_refuses_a_wrong_token_and_keeps_serving` |
 | endings busy rig (`link::scenario`, Busy) | the server must not refuse before the hello is queued | none | **broken (9156, 8425)**; ADR 0122 WP-2's act gate |
 | endings `client-keeps-writing`, `wrong-account` rigs | input queued before the refusal | one write / order | ADR 0122's table (fixed or fine by order) |
 
