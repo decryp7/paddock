@@ -1,5 +1,5 @@
 import { defineConfig, devices } from '@playwright/test';
-import { assertChromeForTesting, e2ePort, isOn, paddockServers, reuseServer, SCREENSHOT_SPECS, uiConfigGuard } from './projects/paddock-e2e/src/index.ts';
+import { assertChromeForTesting, e2ePort, isOn, paddockServers, paddockTrace, reuseServer, SCREENSHOT_SPECS, uiConfigGuard } from './projects/paddock-e2e/src/index.ts';
 
 /**
  * Browser checks of the reference apps (`npx playwright test`): the gallery (`ng serve gallery`) and the shell demo
@@ -51,9 +51,9 @@ export default assertChromeForTesting(
       { name: 'workbench-demo', testMatch: /workbench-demo(-[a-z]+)?\.spec\.ts$/, use: { baseURL: `http://localhost:${WORKBENCH_DEMO_PORT}` } },
       ...(webkit
         ? [
-            { name: 'gallery-webkit', testMatch: ['gallery.spec.ts', 'data.spec.ts', 'view.spec.ts', 'grid-header.spec.ts', 'table-virtual-blank.spec.ts', 'sunburst.spec.ts'], use: { ...safari, baseURL: `http://localhost:${PORT}` } },
-            { name: 'shell-demo-webkit', testMatch: /shell-demo(-[a-z0-9]+)?\.spec\.ts$/, use: { ...safari, baseURL: `http://localhost:${SHELL_DEMO_PORT}` } },
-            { name: 'workbench-demo-webkit', testMatch: /workbench-demo(-[a-z]+)?\.spec\.ts$/, use: { ...safari, baseURL: `http://localhost:${WORKBENCH_DEMO_PORT}` } },
+            { name: 'gallery-webkit', testMatch: ['gallery.spec.ts', 'data.spec.ts', 'view.spec.ts', 'grid-header.spec.ts', 'table-virtual-blank.spec.ts', 'sunburst.spec.ts'], use: { ...safari, trace: paddockTrace('webkit'), baseURL: `http://localhost:${PORT}` } },
+            { name: 'shell-demo-webkit', testMatch: /shell-demo(-[a-z0-9]+)?\.spec\.ts$/, use: { ...safari, trace: paddockTrace('webkit'), baseURL: `http://localhost:${SHELL_DEMO_PORT}` } },
+            { name: 'workbench-demo-webkit', testMatch: /workbench-demo(-[a-z]+)?\.spec\.ts$/, use: { ...safari, trace: paddockTrace('webkit'), baseURL: `http://localhost:${WORKBENCH_DEMO_PORT}` } },
           ]
         : []),
     ],

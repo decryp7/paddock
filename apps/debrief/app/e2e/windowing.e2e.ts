@@ -2,6 +2,7 @@ import { expect, test } from './test';
 import type { Page } from '@playwright/test';
 import { clickWithTimePaused, gridRows, nextRender, openApp } from './app';
 import { chooseMenu, openMenu } from './menu-support';
+import { pressMod } from '../../../../ui/projects/paddock-e2e/src/keyboard.ts';
 
 // Windows, the close prompt and background work against the browser build's mock windowing backend
 // (src/app/windowing/mock-windowing-backend.ts): each window is a tab with `?window=<label>` and its
@@ -54,7 +55,7 @@ test('Mod+Shift+N opens a new window', async ({ page, context }) => {
   await openApp(page);
   const opened = context.waitForEvent('page');
   await page.locator('body').click({ position: { x: 5, y: 5 } });
-  await page.keyboard.press('ControlOrMeta+Shift+N');
+  await pressMod(page, 'Mod+Shift+N');
   const second = await opened;
   expect(new URL(second.url()).searchParams.get('window')).toMatch(/^w-\d+$/);
 });

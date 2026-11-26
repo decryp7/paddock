@@ -15,7 +15,7 @@ const dir = mkdtempSync(join(tmpdir(), 'paddock-eslint-e2e-'));
 after(() => rmSync(dir, { recursive: true, force: true }));
 
 /** Lints `files` ({ path: text }) with the e2e block over the TypeScript parser (and `extra` config blocks); returns "path:line rule". */
-async function lint(files, extra = [], ready = undefined, transient = 'warn') {
+async function lint(files, extra = [], ready = undefined, transient = 'warn', controlOrMeta = undefined) {
   for (const [p, text] of Object.entries(files)) {
     mkdirSync(dirname(join(dir, p)), { recursive: true });
     writeFileSync(join(dir, p), text);
@@ -23,7 +23,7 @@ async function lint(files, extra = [], ready = undefined, transient = 'warn') {
   const eslint = new ESLint({
     cwd: dir,
     overrideConfigFile: true,
-    overrideConfig: defineConfig({ files: ['**/*.ts'], languageOptions: { parser: tseslint.parser } }, ...extra, ...e2ePinnedClock({ ready, transient })),
+    overrideConfig: defineConfig({ files: ['**/*.ts'], languageOptions: { parser: tseslint.parser } }, ...extra, ...e2ePinnedClock({ ready, transient, controlOrMeta })),
   });
   const results = await eslint.lintFiles(Object.keys(files));
   lintResults = results;
@@ -246,4 +246,28 @@ test('e2e-transient-wait: a spec that finds a menu or a toast itself is reported
 test('e2e-transient-wait is off by default (report-only, ER-41)', async () => {
   const found = await lint({ 'e2e/menu-off.spec.ts': "test('a', async ({ page }) => {\n  page.getByRole('menu');\n});\n" }, [], null, null);
   assert.deepEqual(menuLines(found, 'e2e/menu-off.spec.ts'), []);
+});
+
+const HOST_KEY = 'paddock/e2e-no-control-or-meta';
+const hostKeyLines = (found, file) => found.filter((m) => m.startsWith(`${file}:`) && m.endsWith(HOST_KEY)).map((m) => Number(m.split(' ')[0].split(':')[1]));
+
+test('e2e-no-control-or-meta: the host-following key is reported in a press, a click modifier and a template; pressMod and pageModKey are fine (positive control)', async () => {
+  const found = await lint({
+    'e2e/keys.spec.ts': [
+      "await page.keyboard.press('ControlOrMeta+k');", // 1
+      "await row.click({ modifiers: ['ControlOrMeta'] });", // 2
+      'await input.press(`ControlOrMeta+Enter`);', // 3
+      "await pressMod(page, 'Mod+k');", // 4 ok
+      'await input.press(`${await pageModKey(page)}+Enter`);', // 5 ok
+      "await page.keyboard.press('Control+k');", // 6 ok: a literal key is the spec's choice
+      '',
+    ].join('\n'),
+  });
+  assert.deepEqual(hostKeyLines(found, 'e2e/keys.spec.ts'), [1, 2, 3]);
+  assert.ok(lintResults[0].messages.every((m) => m.severity === 2), 'an error, not a warning');
+});
+
+test('e2e-no-control-or-meta: the severity can be lowered by the config (report-only use in an app that is not clean yet)', async () => {
+  const found = await lint({ 'e2e/off.spec.ts': "await page.keyboard.press('ControlOrMeta+k');\n" }, [], undefined, 'warn', 'off');
+  assert.deepEqual(hostKeyLines(found, 'e2e/off.spec.ts'), []);
 });
