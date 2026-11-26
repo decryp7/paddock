@@ -690,3 +690,90 @@ fn a_run_is_added_to_the_green_runs_once_and_the_file_still_parses() {
     assert!(two.contains("# The switch (ER-41)"), "the comments stay");
     assert!(with_green_run("epoch = 1\n", 1).is_err(), "a text that does not parse is an error");
 }
+
+fn s3_with(endpoint: &str, ssl: Option<&str>) -> super::s3::S3Store {
+    let d = tempfile::tempdir().unwrap();
+    let mut env: HashMap<String, String> = [
+        ("AWS_ACCESS_KEY_ID", "AKIDEXAMPLE"),
+        ("AWS_SECRET_ACCESS_KEY", "s3cr3t-value"),
+        ("PADDOCK_SCCACHE_ENV_FILE", d.path().join("absent.env").to_str().unwrap()),
+        ("PADDOCK_SCCACHE_S3_ENDPOINT", endpoint),
+    ]
+    .iter()
+    .map(|(k, v)| (k.to_string(), v.to_string()))
+    .collect();
+    if let Some(v) = ssl {
+        env.insert("PADDOCK_SCCACHE_S3_SSL".into(), v.into());
+    }
+    super::s3::S3Store::from_env(&env, d.path().join("scratch")).unwrap()
+}
+
+#[test]
+fn the_endpoint_forms_of_the_repository_variable_all_make_one_address() {
+    // CI's exact form (run 9135 log: `PADDOCK_SCCACHE_S3_ENDPOINT: http://172.16.1.220:15000`) was turned into `http://http://...`.
+    let shown = |e: &str, ssl| format!("{:?}", s3_with(e, ssl));
+    assert_eq!(
+        shown("http://172.16.1.220:15000", None),
+        "S3Store(http://172.16.1.220:15000/test-results-paddock)"
+    );
+    assert_eq!(
+        shown("172.16.1.220:15000", None),
+        "S3Store(http://172.16.1.220:15000/test-results-paddock)",
+        "the bare host:port of a local setup"
+    );
+    assert_eq!(
+        shown("http://172.16.1.220:15000/", None),
+        "S3Store(http://172.16.1.220:15000/test-results-paddock)",
+        "a trailing slash"
+    );
+    assert_eq!(
+        shown("https://store.lan:9000", None),
+        "S3Store(https://store.lan:9000/test-results-paddock)"
+    );
+    assert_eq!(
+        shown("172.16.1.220:15000", Some("true")),
+        "S3Store(https://172.16.1.220:15000/test-results-paddock)",
+        "the SSL switch of the compile cache"
+    );
+    // The same reading as the compile cache's (one definition, ER-22): what it refuses, the store refuses too.
+    let d = tempfile::tempdir().unwrap();
+    let bad = |e: &str| {
+        let env: HashMap<String, String> = [
+            ("AWS_ACCESS_KEY_ID", "AKIDEXAMPLE"),
+            ("AWS_SECRET_ACCESS_KEY", "s3cr3t-value"),
+            ("PADDOCK_SCCACHE_ENV_FILE", d.path().join("absent.env").to_str().unwrap()),
+            ("PADDOCK_SCCACHE_S3_ENDPOINT", e),
+        ]
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
+        super::s3::S3Store::from_env(&env, d.path().join("s")).unwrap_err()
+    };
+    assert!(bad("http://user:pw@host:1").contains("no user or password") && !bad("http://user:pw@host:1").contains("pw@"));
+    assert!(bad("http://host:1/path").contains("no path"));
+    assert!(
+        bad("http://http://host:1").contains("no path"),
+        "a doubled scheme is refused, never sent"
+    );
+}
+
+#[test]
+fn a_redirect_is_never_followed_and_is_named_with_its_target() {
+    let e = super::s3::parse_done("308|http://172.16.1.220:15000/test-results-paddock/v1/x|/tmp/body-0\n")
+        .unwrap_err()
+        .to_string();
+    assert!(
+        e.contains("308") && e.contains("a redirect to http://172.16.1.220:15000/test-results-paddock/v1/x") && e.contains("not followed"),
+        "{e}"
+    );
+    let none = super::s3::parse_done("301||/tmp/b\n").unwrap_err().to_string();
+    assert!(none.contains("an address it did not give"), "{none}");
+    // A normal answer and a miss still parse.
+    assert_eq!(
+        super::s3::parse_done("200||/tmp/a\n404||/tmp/b\n").unwrap(),
+        vec![(200, "/tmp/a".to_string()), (404, "/tmp/b".to_string())]
+    );
+    assert!(super::s3::parse_done("garbage").is_err());
+    // The whole call fails on a redirect, so the caller runs everything (fail open), whichever transfer it was.
+    assert!(super::s3::parse_done("200||/tmp/a\n308|http://x/|/tmp/b\n").is_err());
+}
