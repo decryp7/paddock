@@ -1,3 +1,4 @@
+// ci-runs-reader: reads one run by id only to find its own cancel_url; it gives no pass/fail verdict (`ci cancel`)
 //! `ci cancel <run-id>`: stops one CI run by the handle `./dev ci dispatch` printed (`run <id>`), never "the newest run" (ER-51).
 //!
 //! The run is read (`GET .../actions/runs/<id>`), its own `cancel_url` is checked (same server, `.../actions/runs/<id>/cancel`, the id
