@@ -1283,7 +1283,7 @@ pub fn prepare(env: &HashMap<String, String>, install: Install) -> Outcome {
     }
     if matches!(install, Install::OnDemand) {
         // The shim starts our server through this binary when none listens (read by the shim; a stale path is a plain-rustc fallback).
-        if let Ok(me) = std::env::current_exe() {
+        if let Ok(me) = crate::tool_cache::self_exe() {
             let _ = std::fs::write(run.join("launcher"), me.display().to_string());
         }
     }
