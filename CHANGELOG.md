@@ -4,6 +4,12 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### No VM or container on the Mac (user, 2026-11-26)
+- `./dev check --pre-push` and the member gate start no container: `clippy-linux`, `tests-linux`, `--warm-linux` and the guardian container run
+  are gone; their coverage is CI's Linux jobs. `./dev golden confirm` is removed, and `paddock_testkit::golden::rewritten_notice` now takes
+  the path alone and points at CI's Linux job (`confirm_command` and `test_name_of` are removed). Conformance C172 (report-only) flags a
+  container or VM tool in local gate code.
+
 ### sccache 0.20.1, with base directories
 - Every sccache pin moves from 0.19.0 to 0.20.1 (setup-rust and its shell twin, the CI image, `./dev sccache env`) with the release's
   own checksums. Setup-rust and the local server now set `SCCACHE_BASEDIRS` (the checkout, the build folder; in CI each job's own

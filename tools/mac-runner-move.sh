@@ -14,7 +14,19 @@
 #        bash tools/mac-runner-move.sh status   --user <name> --daemon <lane>... [--retire <lane>...]
 #
 # Options: --jobs-per-host N (PADDOCK_CI_JOBS_PER_HOST, default 4: the one runner's capacity), --verify-max SECONDS (how long a
-# started lane may take to declare itself to Gitea, default 90), --label-prefix P (default net.decryptology.gitea-runner.).
+# started lane may take to declare itself to Gitea, default 90), --wait-max SECONDS (how long install and rollback wait for a running
+# job, default 3600), --label-prefix P (default net.decryptology.gitea-runner.).
+#
+# A running job is waited for, visibly and bounded, before anything changes (the 2026-11-26 install stopped a runner under a running job,
+# left the job's helpers behind and never started the new daemon). A lane whose runner has processes of a job is told to take no new
+# job (`launchctl kill SIGTERM`, the runner's own shutdown: "waiting for running jobs"); then install prints which job runs and, every
+# 30 s, how long it has waited, until every job has ended or --wait-max is over. At the end of the wait it fails with the old runner
+# still loaded and nothing changed on disk; it never ends a job or a helper itself (the job's own cleanup does, ER-51), and it finds
+# nothing by name: the runner's pid is read from `launchctl print` of its label, and its jobs are the processes under that pid.
+# Each lane is then booted out with its check for a job and its boot-out back to back (launchd starts a runner that exited, and that
+# one may have taken a job): a job seen there sends install back into the same bounded wait, so a boot-out never meets a job.
+# Only then does it swap and start, and verify: the new daemon must be `state = running` in `launchctl print` and have logged
+# "declare successfully"; a `launchctl bootstrap` that fails is a failed lane too.
 #
 # install: preflight (nothing changes if a lane cannot be rendered), then per lane: the daemon plist to /Library/LaunchDaemons
 # (root:wheel 0644), the old agent booted out (the runner first finishes a running job, up to its shutdown_timeout) and
@@ -49,7 +61,7 @@ PARKED='.before-adr0120'
 
 cmd="${1:-}"
 [ $# -gt 0 ] && shift
-user=""; jobs=4; prefix="net.decryptology.gitea-runner."; dry=0; verify_max=90; sign=1
+user=""; jobs=4; prefix="net.decryptology.gitea-runner."; dry=0; verify_max=90; sign=1; wait_max=3600
 RUNNER_ID='net.decryptology.gitea-runner'
 daemons=(); retire=()
 while [ $# -gt 0 ]; do
@@ -59,6 +71,7 @@ while [ $# -gt 0 ]; do
     --retire) retire+=("${2:?--retire needs a lane name}"); shift ;;
     --jobs-per-host) jobs="${2:?}"; shift ;;
     --verify-max) verify_max="${2:?}"; shift ;;
+    --wait-max) wait_max="${2:?}"; shift ;;
     --label-prefix) prefix="${2:?}"; shift ;;
     --dry-run) dry=1 ;;
     --no-sign) sign=0 ;;
@@ -73,6 +86,8 @@ case "$cmd" in install | rollback | uninstall | status) ;; *) fail "the command 
 [ ${#daemons[@]} -gt 0 ] || [ ${#retire[@]} -gt 0 ] || fail "no lanes named" "pass --daemon (and --retire) with the runner names" 2
 case "$jobs" in '' | *[!0-9]*) fail "--jobs-per-host must be a whole number, not '$jobs'" "" 2 ;; esac
 case "$verify_max" in '' | *[!0-9]*) fail "--verify-max must be seconds, not '$verify_max'" "" 2 ;; esac
+case "$wait_max" in '' | *[!0-9]*) fail "--wait-max must be seconds, not '$wait_max'" "" 2 ;; esac
+poll="${PADDOCK_RUNNER_MOVE_POLL:-5}"; report="${PADDOCK_RUNNER_MOVE_REPORT:-30}" # tests make both small
 [ "${PADDOCK_TOOLS_OS:-$(uname -s)}" = Darwin ] || fail "this moves macOS launchd jobs; it runs on the Mac only" "" 2
 
 [ -n "$user" ] || user="${SUDO_USER:-$(id -un)}"
@@ -189,6 +204,10 @@ verify_lane() {
     text=$(tail -c "+$((offset + 1))" "$log" 2>/dev/null)
     case "$text" in
       *"declare successfully"*)
+        if [ -n "$state" ] && [ "$state" != running ]; then
+          echo "  fail  $name ($domain): the log says it declared itself, but launchd's state is '$state', not running"
+          echo "        next: launchctl print $domain/$label; tail -50 $log"; return 1
+        fi
         who=""; [ -n "$pid" ] && who=$(ps -o user= -p "$pid" 2>/dev/null | tr -d ' ')
         if [ -n "$who" ] && [ "$who" != "$user" ]; then
           echo "  fail  $name ($domain): runs as '$who', not '$user'"; return 1
@@ -298,6 +317,98 @@ preflight() {
   [ "$problems" -eq 0 ] || fail "$problems problem(s) in the preflight; nothing was changed" "fix the lines marked fail above and run it again"
 }
 
+# ---- a running job is waited for before anything changes ----------------------------------------------------------------
+# The launchd domain a lane's runner is loaded in (system for the daemon, gui/<uid> for the agent); nothing when it is not loaded.
+domain_of() {
+  local label; label=$(label_of "$1")
+  if loaded system "$label"; then echo system; elif loaded "gui/$uid" "$label"; then echo "gui/$uid"; fi
+}
+# The runner's pid, from `launchctl print` of its label (the one handle: a pid is never looked up by name).
+runner_pid() { launchctl print "$1/$2" 2>/dev/null | awk -F'= ' '/^\tpid/ {print $2; exit}'; }
+# The processes of the jobs the runner `$1` runs: everything under its pid, one `pid command` per line; none when it is idle.
+job_processes() {
+  ps -axo pid=,ppid=,command= 2>/dev/null | awk -v root="$1" '
+    { id[NR] = $1; par[$1] = $2; $1 = $2 = ""; cmd[id[NR]] = substr($0, 3) }
+    END {
+      under[root] = 1
+      do { grew = 0; for (i = 1; i <= NR; i++) if (!(id[i] in under) && (par[id[i]] in under)) { under[id[i]] = 1; grew = 1 } } while (grew)
+      for (i = 1; i <= NR; i++) if ((id[i] in under) && id[i] != root) print id[i] " " cmd[id[i]]
+    }'
+}
+# The last line the lane's runner logged about a task it took (what it says about the job), or nothing.
+task_line() {
+  local name="$1" domain="$2" log
+  if [ "$domain" = system ]; then log=$(daemon_log "$name"); else log=$(value StandardErrorPath "$(live_agent "$name")") || return 0; fi
+  [ -f "$log" ] && grep -E 'task [0-9]+' "$log" 2>/dev/null | tail -1 | cut -c1-200
+}
+
+# Before anything changes, every loaded lane is stopped without ending a job: its runner is told to take no new job, install waits, up
+# to --wait-max, until no runner runs a job (printing which job runs and how long it has waited), and then boots each lane out. The
+# check and the boot-out of a lane are back to back, and a job seen by the check (one a restarted runner took, since launchd starts a
+# runner that exited) sends install back into the same bounded wait, so a boot-out never meets a job. Past --wait-max it fails with
+# nothing changed: only signals were sent, no lane was booted out and no file touched.
+stop_lanes() {
+  local name domain label pid procs line lanes=() busy=() still stopped=" " again
+  for name in $(all_lanes); do
+    domain=$(domain_of "$name"); [ -n "$domain" ] || continue
+    lanes+=("$name")
+    label=$(label_of "$name"); pid=$(runner_pid "$domain" "$label"); procs=""
+    [ -z "$pid" ] || procs=$(job_processes "$pid")
+    if [ -n "$procs" ]; then
+      busy+=("$name")
+      echo "- $name: a job is running ($domain/$label, runner pid $pid)"
+      line=$(task_line "$name" "$domain"); [ -z "$line" ] || echo "    log: $line"
+      printf '%s\n' "$procs" | head -5 | sed 's/^/    process: /'
+    fi
+    if [ "$dry" -eq 1 ]; then
+      [ -z "$procs" ] || echo "  would wait for the job on $name (at most ${wait_max}s), after telling its runner to take no new job: launchctl kill SIGTERM $domain/$label"
+    else
+      step launchctl kill SIGTERM "$domain/$label" || fail "$name: the runner could not be told to take no new job (launchctl kill failed); nothing was changed" "launchctl print $domain/$label"
+    fi
+  done
+  [ ${#busy[@]} -gt 0 ] || echo "No job is running on any lane."
+  [ "$dry" -eq 0 ] && [ ${#lanes[@]} -gt 0 ] || return 0
+  local began=$SECONDS next=$SECONDS
+  while :; do
+    still=()
+    for name in "${lanes[@]}"; do
+      case "$stopped" in *" $name "*) continue ;; esac
+      domain=$(domain_of "$name"); [ -n "$domain" ] || continue
+      pid=$(runner_pid "$domain" "$(label_of "$name")"); [ -n "$pid" ] || continue
+      procs=$(job_processes "$pid"); [ -z "$procs" ] || still+=("$name")
+    done
+    if [ ${#still[@]} -gt 0 ]; then
+      if [ $((SECONDS - began)) -ge "$wait_max" ]; then
+        fail "${still[0]} still runs a job after ${wait_max} s; nothing was changed: no file and no launchd job, no process was ended (the runner takes no new job, finishes this one and launchd starts it again when it exits)" "wait for the job and run install again, or give it longer with --wait-max SECONDS"
+      fi
+      if [ "$SECONDS" -ge "$next" ]; then
+        echo "  .. waiting for the job on ${still[*]} ($((SECONDS - began)) s of at most ${wait_max} s): $(printf '%s\n' "$procs" | head -1)"
+        next=$((SECONDS + report))
+      fi
+      sleep "$poll"; continue
+    fi
+    [ ${#busy[@]} -eq 0 ] || { echo "  all jobs have finished (waited $((SECONDS - began)) s); stopping the lanes"; busy=(); }
+    # Every runner is idle: stop each lane now, the check and the boot-out back to back. A job seen here is waited for, not stopped.
+    again=0
+    for name in "${lanes[@]}"; do
+      case "$stopped" in *" $name "*) continue ;; esac
+      domain=$(domain_of "$name")
+      if [ -n "$domain" ]; then
+        label=$(label_of "$name"); pid=$(runner_pid "$domain" "$label"); procs=""
+        [ -z "$pid" ] || procs=$(job_processes "$pid")
+        if [ -n "$procs" ]; then
+          echo "  .. a job started on $name before it could be stopped; waiting for it too"
+          step launchctl kill SIGTERM "$domain/$label" || fail "$name: the runner could not be told to take no new job (launchctl kill failed); nothing was booted out" "launchctl print $domain/$label"
+          again=1; break
+        fi
+        step launchctl bootout "$domain/$label"
+      fi
+      stopped="$stopped$name "
+    done
+    [ "$again" -eq 1 ] || return 0
+  done
+}
+
 stop_agent() { # bootout the lane's agent if loaded
   local name="$1"
   if loaded "gui/$uid" "$(label_of "$name")"; then
@@ -321,6 +432,9 @@ register_hint() {
 
 install() {
   preflight
+  echo
+  echo "Jobs"
+  stop_lanes
   echo
   echo "Install"
   local name failed=0 rc
@@ -352,7 +466,7 @@ install() {
       fi
     fi
     log_size "$(daemon_log "$name")" >"$tmp/offset.$name"
-    step launchctl bootstrap system "$target"
+    step launchctl bootstrap system "$target" || echo "$?" >"$tmp/bootfail.$name"
   done
   for name in ${retire[@]+"${retire[@]}"}; do
     if ! loaded "gui/$uid" "$(label_of "$name")" && [ ! -f "$(live_agent "$name")" ]; then
@@ -373,6 +487,11 @@ install() {
   echo
   echo "Verify (each lane must declare itself to Gitea within ${verify_max}s)"
   for name in ${daemons[@]+"${daemons[@]}"}; do
+    if [ -f "$tmp/bootfail.$name" ]; then
+      echo "  fail  $name (system): launchctl bootstrap failed (exit $(cat "$tmp/bootfail.$name")); the daemon is not running"
+      echo "        next: launchctl print system/$(label_of "$name"); plutil -lint $(daemon_plist "$name"); then run install again"
+      failed=$((failed + 1)); continue
+    fi
     verify_lane system "$name" "$(daemon_log "$name")" "$(cat "$tmp/offset.$name")"; rc=$?
     if [ $rc -eq 3 ]; then step launchctl bootout "system/$(label_of "$name")"; register_hint "$name"; fi
     [ $rc -eq 0 ] || failed=$((failed + 1))
@@ -395,6 +514,8 @@ lanes_args() {
 
 rollback() {
   echo "Rollback to the LaunchAgents of $user"
+  echo "Jobs"
+  stop_lanes
   local name restored=() failed=0 rc
   for name in ${daemons[@]+"${daemons[@]}"}; do
     local label target; label=$(label_of "$name"); target=$(daemon_plist "$name")
