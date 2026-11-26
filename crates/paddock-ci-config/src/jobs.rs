@@ -406,9 +406,56 @@ pub fn model(workflow_text: &str, declared: &Declared) -> Result<JobModel, Vec<P
 /// The display name of a job for one leg: the `name:` template evaluated with the leg's values. A value the leg lacks is empty, as
 /// on the runner.
 pub fn render(job: &Job, leg: &Leg) -> String {
+    render_name(&job.name, leg)
+}
+
+/// A job's id, `name:` template and matrix, without the project reading of [`Job`]: what a workflow that is not ci.yml (an app's own)
+/// offers to a reader that only needs its display names.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NamedJob {
+    /// The key under `jobs:`.
+    pub id: String,
+    /// The raw `name:` template (the id when absent).
+    pub name: String,
+    /// The matrix.
+    pub legs: Legs,
+}
+
+/// The jobs of a workflow with their name templates and matrices, in file order; every problem is reported together.
+pub fn named_jobs(workflow_text: &str) -> Result<Vec<NamedJob>, Vec<Problem>> {
+    let doc = yaml::parse(workflow_text).map_err(|e| vec![problem(None, 0, e)])?;
+    let Some(jobs_node) = doc.get("jobs").filter(|j| !j.entries().is_empty()) else {
+        return Err(vec![problem(
+            None,
+            0,
+            "the workflow has no `jobs:` mapping".to_string(),
+        )]);
+    };
+    let mut problems = Vec::new();
+    let mut out = Vec::new();
+    for (id, body) in jobs_node.entries() {
+        let legs = legs_of(id, body).unwrap_or_else(|p| {
+            problems.push(p);
+            Legs::None
+        });
+        out.push(NamedJob {
+            id: id.clone(),
+            name: body.get_text("name").unwrap_or(id).to_string(),
+            legs,
+        });
+    }
+    if problems.is_empty() {
+        Ok(out)
+    } else {
+        Err(problems)
+    }
+}
+
+/// [`render`] of a raw `name:` template.
+pub fn render_name(template: &str, leg: &Leg) -> String {
     let lookup = |name: &str| match name.strip_prefix("matrix.") {
         Some(key) => leg.get(key).map_or(Val::Null, |v| Val::Str(v.clone())),
         None => Val::Unknown,
     };
-    expr::interpolate(&job.name, &lookup).text
+    expr::interpolate(template, &lookup).text
 }

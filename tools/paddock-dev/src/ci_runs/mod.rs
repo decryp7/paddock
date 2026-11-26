@@ -642,6 +642,48 @@ pub struct ScopeArgs {
     /// The engines a full run tests, comma separated (a run that is not full tests the first only).
     #[arg(long, default_value = "chromium")]
     full_engines: String,
+    /// A matrix the plan job emits, `<plan output>=<JSON list of legs>` (`e2e_shards=[{"shard":1}]`), repeatable: the line's `expected`
+    /// map renders the workflow's jobs over it. A planned matrix not given leaves its job out of the map (not measured).
+    #[arg(long = "legs")]
+    legs: Vec<String>,
+}
+
+/// The planned matrices of `--legs`: output name to legs.
+fn planned_legs(args: &[String]) -> Result<std::collections::BTreeMap<String, Vec<serde_json::Value>>, CliError> {
+    let mut out = std::collections::BTreeMap::new();
+    for a in args {
+        let bad = |why: &str| {
+            CliError::usage(format!("--legs {a:?} is not `<plan output>=<JSON list of legs>` ({why})."))
+                .with_hint("For example `--legs e2e_shards='[{\"shard\":1}]'`.")
+        };
+        let (name, json) = a.split_once('=').ok_or_else(|| bad("no `=`"))?;
+        let legs: Vec<serde_json::Value> = serde_json::from_str(json).map_err(|e| bad(&e.to_string()))?;
+        if name.is_empty() || out.insert(name.to_string(), legs).is_some() {
+            return Err(bad("an empty or repeated output name"));
+        }
+    }
+    Ok(out)
+}
+
+/// The line's `expected` map for an app's own workflow under `root` (ADR 0123 §3): its job names over its matrices, so a reader looks a
+/// failed job's leg up. A workflow that cannot be read gives an empty map and a warning (a reader reports the legs as not measured).
+fn scope_expected(root: &std::path::Path, workflow: &str, legs: &[String]) -> Result<crate::run_scope::ExpectedMap, CliError> {
+    if workflow.contains(['/', '\\']) || workflow == ".." {
+        return Err(
+            CliError::usage(format!("--workflow {workflow:?} is not a workflow file name.")).with_hint("Pass `debrief.yml`, not a path.")
+        );
+    }
+    let planned = planned_legs(legs)?;
+    let path = root.join(".gitea/workflows").join(workflow);
+    Ok(std::fs::read_to_string(&path)
+        .map_err(|e| format!("{} cannot be read ({e})", path.display()))
+        .and_then(|t| crate::run_scope::app_expected(&t.replace("\r\n", "\n"), &planned))
+        .unwrap_or_else(|e| {
+            crate::log_text::eline(&format!(
+                "::warning::dev ci scope: {e}; the scope line expects no job names, so a reader reports them as not measured"
+            ));
+            crate::run_scope::ExpectedMap::new()
+        }))
 }
 
 /// `ci scope`: prints the scope line (`plan scope: {json}`) of an app's own workflow; the one reader (`ci verdict`) compares it
@@ -674,6 +716,8 @@ pub fn scope(a: &ScopeArgs) -> Result<Report, CliError> {
     );
     // The active apps (crate::active_apps): an inactive app's run names it, so its verdict never reads as the app's (`--app`).
     let root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let expected = scope_expected(&root, &a.workflow, &a.legs)?;
+    let d = d.with_expected(expected);
     let set = crate::active_apps::ActiveApps::load(&root).map_err(CliError::failure)?;
     let env = |k: &str| std::env::var(k).ok();
     let tag = env("GITHUB_REF").is_some_and(|r| r.starts_with("refs/tags/"));
@@ -1582,5 +1626,31 @@ mod tests {
         assert_eq!(members_exit(Exit::Findings, false), Exit::NotMeasured);
         assert_eq!(members_exit(Exit::Findings, true), Exit::Findings);
         assert_eq!(members_exit(Exit::Ok, true), Exit::Ok);
+    }
+
+    #[test]
+    fn the_scope_line_of_an_app_workflow_names_its_jobs_over_the_legs_the_plan_emitted() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join(".gitea/workflows");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("app.yml"),
+            "jobs:\n  e2e:\n    name: end-to-end (shard ${{ matrix.shard }}/4)\n    strategy:\n      matrix:\n        include: ${{ fromJSON(needs.plan.outputs.e2e_shards) }}\n",
+        )
+        .unwrap();
+        let legs = ["e2e_shards=[{\"shard\":2}]".to_string()];
+        let map = scope_expected(root.path(), "app.yml", &legs).unwrap();
+        assert_eq!(map["end-to-end (shard 2/4)"].leg["shard"], "2", "{map:?}");
+        // No legs given: the job is left out. An unreadable workflow: an empty map. A path, a bad `--legs`: refused.
+        assert!(scope_expected(root.path(), "app.yml", &[]).unwrap().is_empty());
+        assert!(scope_expected(root.path(), "missing.yml", &[]).unwrap().is_empty());
+        for bad in ["../x.yml", "a/b.yml"] {
+            assert!(scope_expected(root.path(), bad, &[]).is_err(), "{bad}");
+        }
+        for bad in ["e2e_shards", "=[]", "e2e_shards=nope", "x=[]"] {
+            let r = scope_expected(root.path(), "app.yml", &[bad.to_string()]);
+            assert_eq!(r.is_err(), bad != "x=[]", "{bad}");
+        }
+        assert!(scope_expected(root.path(), "app.yml", &["a=[]".to_string(), "a=[]".to_string()]).is_err());
     }
 }

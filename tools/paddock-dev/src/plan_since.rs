@@ -27,6 +27,7 @@
 use crate::job_outcome::JobOutcome;
 use crate::log_text::plain;
 use crate::plan_gitea::{CI_JOBS, workflow_jobs};
+use crate::run_scope::ExpectedMap;
 use crate::wait::Http;
 use regex::Regex;
 use serde_json::{Map, Value, json};
@@ -535,40 +536,6 @@ pub fn job_needs(workflow: &str) -> Vec<(String, Vec<String>)> {
         .unwrap_or_default()
 }
 
-/// The matrix values a display name shows through its `name:` template: `end-to-end (shard ${{ matrix.shard }}/4)` and
-/// `end-to-end (shard 2/4)` give `shard = 2`. Other expressions match anything; empty when the name does not fit.
-pub fn matrix_of(name: &str, template: &str) -> BTreeMap<String, String> {
-    static EXPR: LazyLock<Regex> = LazyLock::new(|| re(r"\$\{\{.*?\}\}"));
-    static MATRIX: LazyLock<Regex> = LazyLock::new(|| re(r"^\$\{\{\s*matrix\.([A-Za-z0-9_]+)\s*\}\}$"));
-    let mut pattern = String::from("^");
-    let mut names: Vec<String> = Vec::new();
-    let mut at = 0;
-    for m in EXPR.find_iter(template) {
-        pattern.push_str(&regex::escape(&template[at..m.start()]));
-        match MATRIX.captures(m.as_str()) {
-            Some(c) if !names.contains(&c[1].to_string()) => {
-                pattern.push_str(&format!("(?P<{}>.*?)", &c[1]));
-                names.push(c[1].to_string());
-            }
-            _ => pattern.push_str(".*?"),
-        }
-        at = m.end();
-    }
-    pattern.push_str(&regex::escape(&template[at..]));
-    pattern.push('$');
-    let Ok(r) = Regex::new(&pattern) else {
-        return BTreeMap::new();
-    };
-    r.captures(name)
-        .map(|c| {
-            names
-                .iter()
-                .filter_map(|n| c.name(n).map(|v| (n.clone(), v.as_str().to_string())))
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
 /// A matrix leg of a failed job, read from its display name (`crate (macos-latest)`, `app dyno (ubuntu-latest, e2e-1)`,
 /// `end-to-end (shard 2/4)`). `None` fields are unknown: every leg of that kind reruns.
 #[derive(Debug, Default, Clone, PartialEq)]
@@ -583,16 +550,14 @@ pub struct Leg {
     pub shard: Option<String>,
 }
 
-/// The leg of a job of an app's own workflow, from its `name:` template.
-fn app_leg_of(key: &str, name: &str, templates: &[(String, String)]) -> Leg {
-    let matrix = templates
-        .iter()
-        .find(|(k, _)| k == key)
-        .map(|(_, t)| matrix_of(name, t))
-        .unwrap_or_default();
+/// The leg of a job of an app's own workflow, looked up in the run's scope line (ADR 0123 §3): `None` fields when the line does not
+/// name the job, so every leg of that kind reruns.
+fn app_leg_of(name: &str, expected: &ExpectedMap) -> Leg {
+    let leg = expected.get(name).map(|e| &e.leg);
+    let pick = |k: &str| leg.and_then(|l| l.get(k).cloned());
     Leg {
-        os: matrix.get("os").cloned(),
-        shard: matrix.get("shard").cloned(),
+        os: pick("os"),
+        shard: pick("shard"),
         ..Leg::default()
     }
 }
@@ -700,12 +665,12 @@ pub struct Rerun {
 
 /// Decides what of a failed job reruns. `log` is the job's log or why it could not be read; `workflow` is the run's workflow
 /// file (only the steps of [`TEST_STEPS`] and [`VITEST_STEPS`] are known to take a filter); `templates` are the workflow's
-/// `name:` lines.
-pub fn classify(job: &RunJob, log: Result<&str, &str>, workflow: &str, templates: &[(String, String)]) -> Rerun {
+/// `name:` lines; `expected` is the run's scope line's map of display names to legs.
+pub fn classify(job: &RunJob, log: Result<&str, &str>, workflow: &str, templates: &[(String, String)], expected: &ExpectedMap) -> Rerun {
     let key = log.ok().and_then(job_key).or_else(|| key_by_name(&job.name, templates));
     let leg = match key.as_deref() {
         Some(k) if workflow == "ci.yml" => leg_of(k, &job.name),
-        Some(k) => app_leg_of(k, &job.name, templates),
+        Some(_) => app_leg_of(&job.name, expected),
         None => Leg::default(),
     };
     let vitest = log.map(vitest_failed_files).unwrap_or_default();
@@ -867,6 +832,8 @@ pub struct SincePlan {
     /// Whether the run was a full run of an app's workflow ([`AppWorkflow`]), read by [`read_full`] from its plan job's log. A
     /// rerun of its full-run jobs must be full too.
     pub full_ran: bool,
+    /// The run's scope line's map of display names to jobs and legs (empty when the run has none): where a job's leg is looked up.
+    pub expected: ExpectedMap,
 }
 
 impl SincePlan {
@@ -880,10 +847,29 @@ impl SincePlan {
         let path = run["path"].as_str().unwrap_or("");
         let workflow = workflow_file(path);
         let ci = workflow == "ci.yml";
+        // The plan job's log holds the run's scope line (ADR 0123 §3): the display names of the run's jobs with their legs. A run
+        // without one (another producer, an old line, a log that cannot be read) has no legs to look up: every leg of a kind reruns.
+        let plan_log = match jobs.iter().find(|j| key_by_name(&j.name, templates).as_deref() == Some("plan")) {
+            Some(j) => log(j.id),
+            None => Err("the run has no plan job".into()),
+        };
+        let expected = plan_log
+            .as_deref()
+            .ok()
+            .and_then(crate::run_scope::read)
+            .and_then(Result::ok)
+            .map(|d| d.expected)
+            .unwrap_or_default();
         let mut reruns = Vec::new();
         for j in jobs.iter().filter(|j| j.reruns()) {
             let text = log(j.id);
-            reruns.push(classify(j, text.as_deref().map_err(String::as_str), &workflow, templates));
+            reruns.push(classify(
+                j,
+                text.as_deref().map_err(String::as_str),
+                &workflow,
+                templates,
+                &expected,
+            ));
         }
         let everything = if let Some(r) = reruns.iter().find(|r| r.key.as_deref() == Some("plan")) {
             Some(format!("the plan job failed ({}): nothing after it ran", r.name))
@@ -903,12 +889,7 @@ impl SincePlan {
         let mut everything = everything;
         let mut full_ran = false;
         if let Some(a) = APP_WORKFLOWS.iter().find(|a| a.file == workflow) {
-            let plan_job = jobs.iter().find(|j| key_by_name(&j.name, templates).as_deref() == Some("plan"));
-            let text = match plan_job {
-                Some(j) => log(j.id),
-                None => Err("the run has no plan job".into()),
-            };
-            match read_full(a, run["event"].as_str().unwrap_or(""), text.as_deref().map_err(String::as_str)) {
+            match read_full(a, run["event"].as_str().unwrap_or(""), plan_log.as_deref().map_err(String::as_str)) {
                 Ok(f) => full_ran = f,
                 Err(e) => {
                     everything.get_or_insert(format!("whether run {} was full cannot be told: {e}", run["id"]));
@@ -923,6 +904,7 @@ impl SincePlan {
             reruns,
             everything,
             full_ran,
+            expected,
         }
     }
 
@@ -954,7 +936,7 @@ impl SincePlan {
                 self.reruns.push(Rerun {
                     id: j.id,
                     name: j.name.clone(),
-                    leg: app_leg_of(&key, &j.name, templates),
+                    leg: app_leg_of(&j.name, &self.expected),
                     key: Some(key),
                     scope: Scope::Job(format!("it did not run: {need}, which it needs, failed")),
                     vitest: Vec::new(),
@@ -1579,7 +1561,7 @@ mod tests {
             failure_is_tests("ci.yml", "crates", &job.failed_steps, &early),
             Err(StepProblem::Unknown(_))
         ));
-        let r = classify(&job, Ok(log), "ci.yml", &templates());
+        let r = classify(&job, Ok(log), "ci.yml", &templates(), &ExpectedMap::new());
         assert_eq!(r.key.as_deref(), Some("crates"));
         assert_eq!(
             r.scope,
@@ -1589,7 +1571,7 @@ mod tests {
 
     #[test]
     fn a_job_failed_only_in_its_test_step_reruns_its_failed_tests_and_any_other_failure_the_whole_job() {
-        let mac = classify(&job(33271), Ok(CRATE_MACOS), "ci.yml", &templates());
+        let mac = classify(&job(33271), Ok(CRATE_MACOS), "ci.yml", &templates(), &ExpectedMap::new());
         assert_eq!(mac.key.as_deref(), Some("crate"));
         assert_eq!(mac.leg.os.as_deref(), Some("macos-latest"));
         assert_eq!(
@@ -1600,13 +1582,13 @@ mod tests {
             }
         );
         // Windows also failed in the features-off step, whose first failed command stopped the ones after it: whole job.
-        let win = classify(&job(33273), Ok(CRATE_WINDOWS), "ci.yml", &templates());
+        let win = classify(&job(33273), Ok(CRATE_WINDOWS), "ci.yml", &templates(), &ExpectedMap::new());
         assert_eq!(
             win.scope,
             Scope::Job("step \"Tests with the optional features off\" failed and takes no test filter".into())
         );
         // app-gates: only nextest failed, so the leg's failed tests.
-        let dyno = classify(&job(33275), Ok(APP_DYNO), "ci.yml", &templates());
+        let dyno = classify(&job(33275), Ok(APP_DYNO), "ci.yml", &templates(), &ExpectedMap::new());
         assert_eq!(
             dyno.leg,
             Leg {
@@ -1620,17 +1602,17 @@ mod tests {
         // Another command of app-gates failed too: whole leg.
         let doc = format!("{APP_DYNO}2026-11-09T07:41:30.0000000Z ::error::failed (exit 101): cargo test --workspace --doc\n");
         assert!(
-            matches!(classify(&job(33275), Ok(&doc), "ci.yml", &templates()).scope, Scope::Job(ref w) if w.contains("other than nextest"))
+            matches!(classify(&job(33275), Ok(&doc), "ci.yml", &templates(), &ExpectedMap::new()).scope, Scope::Job(ref w) if w.contains("other than nextest"))
         );
         // A job without a test step (the ui job's node --test scripts), an unreadable log, a run of another workflow.
-        let ui = classify(&job(33261), Ok(UI_SCRIPTS), "ci.yml", &templates());
+        let ui = classify(&job(33261), Ok(UI_SCRIPTS), "ci.yml", &templates(), &ExpectedMap::new());
         assert_eq!(ui.key.as_deref(), Some("ui"));
         assert_eq!(ui.scope, Scope::Job("job ui has no step that takes a test filter".into()));
-        let lost = classify(&job(33271), Err("HTTP 404"), "ci.yml", &templates());
+        let lost = classify(&job(33271), Err("HTTP 404"), "ci.yml", &templates(), &ExpectedMap::new());
         assert_eq!(lost.key.as_deref(), Some("crate"), "the name tells the job when the log is missing");
         assert_eq!(lost.scope, Scope::Job("its log could not be read (HTTP 404)".into()));
         assert!(matches!(
-            classify(&job(33271), Ok(CRATE_MACOS), "debrief.yml", &templates()).scope,
+            classify(&job(33271), Ok(CRATE_MACOS), "debrief.yml", &templates(), &ExpectedMap::new()).scope,
             Scope::Job(_)
         ));
     }
@@ -1642,7 +1624,7 @@ mod tests {
         let log = "2026-11-24T07:30:27.2207850Z ::group::Run cargo nextest list --workspace --all-features --message-format json\n\
                    2026-11-24T07:31:00.0000000Z ::error::rerun-check: the failed test paddock-service per_machine::tests::gone matches no test at this commit (renamed or removed since the run that failed)\n\
                    2026-11-24T07:31:00.1000000Z ##[error]Process completed with exit code 1.\n";
-        let r = classify(&job(33271), Ok(log), "ci.yml", &templates());
+        let r = classify(&job(33271), Ok(log), "ci.yml", &templates(), &ExpectedMap::new());
         assert!(
             matches!(r.scope, Scope::Job(ref why) if why.contains("no nextest run")),
             "{:?}",
@@ -1650,7 +1632,7 @@ mod tests {
         );
         // Positive control: the same job with its nextest failures narrows to them.
         assert!(matches!(
-            classify(&job(33271), Ok(CRATE_MACOS), "ci.yml", &templates()).scope,
+            classify(&job(33271), Ok(CRATE_MACOS), "ci.yml", &templates(), &ExpectedMap::new()).scope,
             Scope::Tests { .. }
         ));
     }
@@ -1809,6 +1791,7 @@ mod tests {
             not_rerun: 0,
             everything: None,
             full_ran: false,
+            expected: ExpectedMap::new(),
         }
     }
 
@@ -1834,16 +1817,18 @@ mod tests {
         // A third failure (notices.sh or the cargo-about install, which print no ::error::) keeps the whole leg.
         let third = format!("{APP_DYNO}2026-11-09T07:46:00.0000000Z ##[error]Process completed with exit code 1.\n");
         assert!(
-            matches!(classify(&job(33275), Ok(&third), "ci.yml", &templates()).scope, Scope::Job(ref w) if w.contains("3 failed steps"))
+            matches!(classify(&job(33275), Ok(&third), "ci.yml", &templates(), &ExpectedMap::new()).scope, Scope::Job(ref w) if w.contains("3 failed steps"))
         );
         let one: String = APP_DYNO
             .lines()
             .filter(|l| !l.contains("07:45:57"))
             .map(|l| format!("{l}\n"))
             .collect();
-        assert!(matches!(classify(&job(33275), Ok(&one), "ci.yml", &templates()).scope, Scope::Job(ref w) if w.contains("1 failed steps")));
+        assert!(
+            matches!(classify(&job(33275), Ok(&one), "ci.yml", &templates(), &ExpectedMap::new()).scope, Scope::Job(ref w) if w.contains("1 failed steps"))
+        );
         assert!(matches!(
-            classify(&job(33275), Ok(APP_DYNO), "ci.yml", &templates()).scope,
+            classify(&job(33275), Ok(APP_DYNO), "ci.yml", &templates(), &ExpectedMap::new()).scope,
             Scope::Tests { .. }
         ));
     }
@@ -1896,6 +1881,7 @@ mod tests {
             not_rerun: 0,
             everything: None,
             full_ran: false,
+            expected: ExpectedMap::new(),
         };
         let mut warned = Vec::new();
         let out: BTreeMap<String, String> = plan
@@ -1951,7 +1937,7 @@ mod tests {
     const DEBRIEF_MACOS: &str = include_str!("../tests/since-run/debrief-rust-test-macos.log");
 
     /// Debrief's jobs as debrief.yml names them and what they need (tests/it/tree.rs checks the real file has these).
-    const DEBRIEF_YML: &str = "name: debrief\non:\n  push:\njobs:\n  plan:\n    name: plan\n  rust-lint:\n    name: rust format + clippy\n    needs: [plan]\n  rust-test:\n    name: rust tests\n    needs: [plan]\n  rust-test-macos:\n    name: rust tests (macOS)\n    needs: [plan]\n  plugin-sdk:\n    name: plugin SDK templates\n    needs: [plan]\n  licences:\n    name: licences, notices + commits\n    needs: [plan]\n  frontend:\n    name: frontend build, lint + unit tests\n    needs: [plan]\n  e2e:\n    name: end-to-end (shard ${{ matrix.shard }}/4)\n    needs: [plan]\n  tauri-smoke:\n    name: real-app smoke (${{ matrix.os }})\n    needs: [plan, rust-lint]\n  bundle:\n    name: bundle (${{ matrix.os }})\n    needs: [plan, rust-lint]\n  keychain:\n    name: C99 (no Keychain in a macOS build)\n    needs: [plan]\n  release:\n    name: release\n    needs: [plan, bundle, tauri-smoke, rust-lint, rust-test, rust-test-macos, plugin-sdk, licences, frontend, e2e, keychain]\n  nightly-mark:\n    name: nightly-mark\n    needs: [rust-lint, rust-test, rust-test-macos, plugin-sdk, licences, frontend, e2e, tauri-smoke, bundle]\n";
+    const DEBRIEF_YML: &str = "name: debrief\non:\n  push:\njobs:\n  plan:\n    name: plan\n  rust-lint:\n    name: rust format + clippy\n    needs: [plan]\n  rust-test:\n    name: rust tests\n    needs: [plan]\n  rust-test-macos:\n    name: rust tests (macOS)\n    needs: [plan]\n  plugin-sdk:\n    name: plugin SDK templates\n    needs: [plan]\n  licences:\n    name: licences, notices + commits\n    needs: [plan]\n  frontend:\n    name: frontend build, lint + unit tests\n    needs: [plan]\n  e2e:\n    name: end-to-end (shard ${{ matrix.shard }}/4)\n    needs: [plan]\n    strategy:\n      matrix:\n        include: ${{ fromJSON(needs.plan.outputs.e2e_shards) }}\n  tauri-smoke:\n    name: real-app smoke (${{ matrix.os }})\n    needs: [plan, rust-lint]\n    strategy:\n      matrix:\n        os: [ubuntu-latest, windows-latest, macos-latest]\n  bundle:\n    name: bundle (${{ matrix.os }})\n    needs: [plan, rust-lint]\n    strategy:\n      matrix:\n        os: [ubuntu-latest, windows-latest, macos-latest]\n  keychain:\n    name: C99 (no Keychain in a macOS build)\n    needs: [plan]\n  release:\n    name: release\n    needs: [plan, bundle, tauri-smoke, rust-lint, rust-test, rust-test-macos, plugin-sdk, licences, frontend, e2e, keychain]\n  nightly-mark:\n    name: nightly-mark\n    needs: [rust-lint, rust-test, rust-test-macos, plugin-sdk, licences, frontend, e2e, tauri-smoke, bundle]\n";
 
     fn debrief_jobs() -> Vec<RunJob> {
         RunJob::list(&serde_json::from_str(DEBRIEF_JOBS).unwrap())
@@ -1980,6 +1966,14 @@ mod tests {
         if let Some(m) = mode {
             l.push_str(&format!("{stamp}{MODE_LINE}{m}\n"));
         }
+        // The scope line the real plan job prints (ADR 0123 §3): the run's display names with their legs, from the real writer.
+        let shards = BTreeMap::from([(
+            "e2e_shards".to_string(),
+            (1..=4).map(|n| json!({"shard": n})).collect::<Vec<Value>>(),
+        )]);
+        let expected = crate::run_scope::app_expected(DEBRIEF_YML, &shards).unwrap();
+        let declared = crate::run_scope::app_scope("debrief.yml", "debrief", true, true, false, false, &["chromium".to_string()]);
+        l.push_str(&format!("{stamp}{}\n", declared.with_expected(expected).line()));
         l
     }
 
@@ -2062,6 +2056,29 @@ mod tests {
     }
 
     #[test]
+    fn the_leg_of_a_failed_app_job_is_looked_up_in_the_scope_line_not_read_from_its_name() {
+        let job = RunJob {
+            id: 9,
+            name: "an unrelated display name".into(),
+            outcome: JobOutcome::Failed,
+            failed_steps: vec![],
+        };
+        let expected = crate::run_scope::ExpectedMap::from([(
+            "an unrelated display name".to_string(),
+            crate::run_scope::Expected {
+                job: "e2e".into(),
+                leg: BTreeMap::from([("shard".to_string(), "3".to_string())]),
+            },
+        )]);
+        let key = Some("e2e".to_string());
+        let looked_up = classify(&job, Ok("Job: e2e\n"), "debrief.yml", &[], &expected);
+        assert_eq!((looked_up.key, looked_up.leg.shard.as_deref()), (key, Some("3")));
+        // Positive control: a line that does not name the job has no leg, so every shard reruns.
+        let unknown = classify(&job, Ok("Job: e2e\n"), "debrief.yml", &[], &crate::run_scope::ExpectedMap::new());
+        assert_eq!(unknown.leg.shard, None);
+    }
+
+    #[test]
     fn a_full_runs_failed_lint_reruns_the_jobs_it_skipped_and_asks_for_a_full_rerun() {
         let jobs = debrief_with(&[(41004, "success", &[]), (41002, "failure", &["Clippy (workspace)"])]);
         let plan = plan_debrief("schedule", &jobs);
@@ -2141,7 +2158,7 @@ mod tests {
     }
 
     #[test]
-    fn vitest_failures_are_counted_against_the_summary_and_the_matrix_is_read_from_the_name() {
+    fn vitest_failures_are_counted_against_the_summary_and_the_needs_are_read() {
         assert_eq!(vitest_failures(VITEST).unwrap().len(), 2);
         let short = VITEST.replace("src/app/watched/watched-folders.spec.ts\u{1b}[2m >", "x");
         assert!(
@@ -2150,14 +2167,6 @@ mod tests {
                 .contains("counts 2 failed files but the log names 1")
         );
         assert!(vitest_failures("nothing").unwrap_err().contains("0 vitest summaries"));
-        let shard = matrix_of("end-to-end (shard 2/4)", "end-to-end (shard ${{ matrix.shard }}/4)");
-        assert_eq!(shard.get("shard").map(String::as_str), Some("2"));
-        let both = matrix_of(
-            "app dyno (ubuntu-latest, e2e-1)",
-            "app ${{ matrix.app }} (${{ matrix.os }}${{ matrix.e2e_leg != '' && format(', {0}', matrix.e2e_leg) || '' }})",
-        );
-        assert_eq!(both.get("app").map(String::as_str), Some("dyno"));
-        assert!(matrix_of("other", "end-to-end (shard ${{ matrix.shard }}/4)").is_empty());
         assert_eq!(
             job_needs(DEBRIEF_YML).into_iter().find(|(k, _)| k == "bundle").unwrap().1,
             ["plan", "rust-lint"]

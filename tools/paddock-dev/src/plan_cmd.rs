@@ -994,6 +994,7 @@ mod tests {
             not_rerun: 19,
             everything: None,
             full_ran,
+            expected: Default::default(),
         }
     }
 

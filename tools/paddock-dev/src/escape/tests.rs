@@ -517,6 +517,7 @@ fn a_failed_job_maps_to_its_project_and_an_unknown_one_is_unmapped() {
         not_rerun: 0,
         everything: None,
         full_ran: false,
+        expected: Default::default(),
     };
     let (f, un) = cmd::failures_of(&plan);
     assert!(

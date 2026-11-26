@@ -62,11 +62,62 @@ pub fn load_model(root: &std::path::Path) -> Result<JobModel, String> {
     load_model_from(&read(".gitea/workflows/ci.yml")?, &read(crate::repo_inputs::FILE)?)
 }
 
+/// A scalar of a planned leg as the runner shows it in a name (`2` of a number, `true` of a boolean); anything else is empty.
+fn scalar(v: &Value) -> String {
+    match v {
+        Value::String(s) => s.clone(),
+        Value::Number(n) => n.to_string(),
+        Value::Bool(b) => b.to_string(),
+        _ => String::new(),
+    }
+}
+
 fn text_leg(leg: &Value) -> Leg {
-    LEG_KEYS
-        .iter()
-        .map(|k| (k.to_string(), leg[*k].as_str().unwrap_or("").to_string()))
-        .collect()
+    LEG_KEYS.iter().map(|k| (k.to_string(), scalar(&leg[*k]))).collect()
+}
+
+/// Every leg of every key a planned leg object holds, as text (an app workflow's shards carry their own keys).
+fn whole_leg(leg: &Value) -> Leg {
+    leg.as_object()
+        .map(|o| o.iter().map(|(k, v)| (k.clone(), scalar(v))).collect())
+        .unwrap_or_default()
+}
+
+/// What an app's own workflow can show as job names (ADR 0123 §3, `./dev ci scope`): every job of the workflow text over its matrix,
+/// the planned matrices taken from `planned` (the plan job's outputs by name). A job whose planned legs the caller did not give is left
+/// out, so a reader finds no leg for it and reports it as not measured. The workflow's names, not only the ones this run ran: a
+/// reader needs the leg of whichever job failed.
+pub fn app_expected(workflow_text: &str, planned: &BTreeMap<String, Vec<Value>>) -> Result<ExpectedMap, String> {
+    let named = jobs::named_jobs(workflow_text).map_err(|p| {
+        let lines: Vec<String> = p.iter().map(|p| format!("line {}: {}", p.line, p.message)).collect();
+        format!("the workflow does not model: {}", lines.join("; "))
+    })?;
+    let mut out = ExpectedMap::new();
+    for job in named {
+        let legs: Vec<Leg> = match &job.legs {
+            Legs::None => vec![Leg::new()],
+            Legs::Static(legs) => legs.clone(),
+            Legs::Planned(output) => planned.get(output).map(|l| l.iter().map(whole_leg).collect()).unwrap_or_default(),
+        };
+        for leg in legs {
+            let name = jobs::render_name(&job.name, &leg);
+            let kept = leg
+                .into_iter()
+                .filter(|(k, v)| LEG_KEYS.contains(&k.as_str()) && !v.is_empty())
+                .collect();
+            let entry = Expected {
+                job: job.id.clone(),
+                leg: kept,
+            };
+            if out.insert(name.clone(), entry).is_some() {
+                return Err(format!(
+                    "two legs of job {} render the name {name:?} twice: the run's jobs could not be told apart",
+                    job.id
+                ));
+            }
+        }
+    }
+    Ok(out)
 }
 
 /// Whether the run ran the job: a key of `ran.jobs` or `ran.apps` names it, by its own id or by a project it runs for.
@@ -248,5 +299,22 @@ mod tests {
             map.contains_key("crate (windows-latest)") && !map.contains_key("crate (macos-latest)"),
             "{map:?}"
         );
+    }
+
+    const APP_WF: &str = "jobs:\n  plan:\n    name: plan\n  e2e:\n    name: end-to-end (shard ${{ matrix.shard }}/4)\n    strategy:\n      matrix:\n        include: ${{ fromJSON(needs.plan.outputs.e2e_shards) }}\n  smoke:\n    name: real-app smoke (${{ matrix.os }})\n    strategy:\n      matrix:\n        os: [ubuntu-latest, windows-latest]\n";
+
+    #[test]
+    fn an_app_workflow_is_expected_over_its_static_matrix_and_the_planned_shards_it_was_given() {
+        let shards = BTreeMap::from([("e2e_shards".to_string(), vec![json!({"shard": 1}), json!({"shard": 4})])]);
+        let map = app_expected(APP_WF, &shards).unwrap();
+        assert_eq!(map["end-to-end (shard 4/4)"].leg["shard"], "4", "{map:?}");
+        assert_eq!(map["real-app smoke (windows-latest)"].leg["os"], "windows-latest");
+        assert_eq!(map["plan"].job, "plan");
+        assert!(map["plan"].leg.is_empty());
+        // Planned legs the caller did not give leave that job out: a reader reports it as not measured, never a guess.
+        let none = app_expected(APP_WF, &BTreeMap::new()).unwrap();
+        assert!(!none.keys().any(|n| n.starts_with("end-to-end")), "{none:?}");
+        assert!(none.contains_key("real-app smoke (ubuntu-latest)"));
+        assert!(app_expected("name: x\n", &BTreeMap::new()).is_err());
     }
 }

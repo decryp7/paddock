@@ -9,7 +9,7 @@
 
 mod expected;
 
-pub use expected::{Expected, ExpectedMap, LEG_KEYS, PlannedLegs, expected_of, load_model, load_model_from};
+pub use expected::{Expected, ExpectedMap, LEG_KEYS, PlannedLegs, app_expected, expected_of, load_model, load_model_from};
 
 use crate::job_outcome::JobOutcome;
 use crate::log_text::plain;
