@@ -17,6 +17,7 @@ on:
       - dev
       - tools/paddock-dev/**
       - crates/Cargo.toml
+      - crates/paddock-ci-config/**
       - crates/paddock-cli/**
       - crates/paddock-download/**
       - crates/paddock-env/**

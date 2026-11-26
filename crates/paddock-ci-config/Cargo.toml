@@ -1,0 +1,19 @@
+[package]
+name = "paddock-ci-config"
+version = "0.1.0"
+description = "The CI job model: ci.yml's jobs, matrices, needs and the projects each job runs for, built once from the workflow text (ADR NEW-ci-job-model). A pure core: no file or process I/O."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+doctest = false # doctests are off (crates/README.md, "Doctests")
+
+[dependencies]
+# The one YAML reader of the CI model (MIT or Apache-2.0): marked events give every node its line.
+yaml-rust2 = "0.13"
+paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
+
+[dev-dependencies]
+paddock-testkit = { workspace = true }

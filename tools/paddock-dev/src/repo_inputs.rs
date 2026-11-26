@@ -28,6 +28,9 @@
 //! release_actions = ["tauri-bundle"]  # actions whose use makes a job a release job
 //! release_gate_phases = ["checks"]    # contract phases a check of a release job runs beside the smoke set (no installers)
 //!
+//! [ci.jobs]                      # ci.yml jobs: the projects each runs for by choice, which no `if:` shows (ADR NEW-ci-job-model; shrink-only, ER-46)
+//! gitleaks = ["conformance"]     # read by `ci_jobs`; the job model derives the rest from the workflow
+//!
 //! [hash]                         # what an input hash reads besides a node's files (ADR 0117 §5)
 //! runner_configs = ["**/.config/nextest.toml", "**/vitest.config.*", "**/playwright.config.*"]
 //! contracts = ["paddock.ci.json"]
@@ -126,6 +129,45 @@ pub fn planner(text: &str) -> Result<Planner, String> {
 pub fn load_planner(root: &Path) -> Result<Planner, String> {
     let text = std::fs::read_to_string(root.join(FILE)).map_err(|e| format!("{FILE} cannot be read: {e}"))?;
     planner(&text)
+}
+
+/// The `[ci.jobs]` table of the inputs file text (ADR NEW-ci-job-model §2): per ci.yml job, the projects it runs for by choice, which
+/// no `if:` shows. Each project is a declared one, `everything` or `apps`; a job that names none is refused (it would run for no
+/// project, and a job is never `always`).
+pub fn ci_jobs(text: &str) -> Result<std::collections::BTreeMap<String, Vec<String>>, String> {
+    let t: toml::Table = text.parse().map_err(|e| format!("{FILE} is not TOML: {e}"))?;
+    let Some(jobs) = t.get("ci").and_then(|c| c.get("jobs")) else {
+        return Ok(std::collections::BTreeMap::new());
+    };
+    let jobs = table(jobs, "[ci.jobs]")?;
+    let known: Vec<String> = tables(&t, "project")?
+        .iter()
+        .filter_map(|p| p.get("id").and_then(toml::Value::as_str).map(str::to_string))
+        .collect();
+    let mut out = std::collections::BTreeMap::new();
+    for (job, v) in jobs {
+        let what = format!("{FILE}: [ci.jobs] {job}");
+        let projects = strings(Some(v), &what)?;
+        if projects.is_empty() {
+            return Err(format!("{what} names no project"));
+        }
+        if let Some(bad) = projects
+            .iter()
+            .find(|p| !known.contains(p) && !matches!(p.as_str(), "everything" | "apps"))
+        {
+            return Err(format!(
+                "{what} names {bad}, which is not a declared project, `everything` or `apps`"
+            ));
+        }
+        out.insert(job.clone(), projects);
+    }
+    Ok(out)
+}
+
+/// [`ci_jobs`] of the inputs file under `root`.
+pub fn load_ci_jobs(root: &Path) -> Result<std::collections::BTreeMap<String, Vec<String>>, String> {
+    let text = std::fs::read_to_string(root.join(FILE)).map_err(|e| format!("{FILE} cannot be read: {e}"))?;
+    ci_jobs(&text)
 }
 
 fn strings(v: Option<&toml::Value>, what: &str) -> Result<Vec<String>, String> {
@@ -334,7 +376,7 @@ fn read(text: &str) -> Result<Inputs, String> {
         t.get("ci").ok_or("the [ci] section is missing (setup_only and release_actions)")?,
         "ci",
     )?;
-    only_keys(ci, &["setup_only", "release_actions", "release_gate_phases"], "[ci]")?;
+    only_keys(ci, &["setup_only", "release_actions", "release_gate_phases", "jobs"], "[ci]")?;
     let setup_only = strings(ci.get("setup_only"), "ci.setup_only")?;
     let release_actions = strings(ci.get("release_actions"), "ci.release_actions")?;
     let gate_phases = strings(ci.get("release_gate_phases"), "ci.release_gate_phases")?;
@@ -418,6 +460,30 @@ mod tests {
             t.push_str("[ci]\n");
         }
         t
+    }
+
+    #[test]
+    fn the_ci_jobs_table_names_the_projects_a_job_runs_for_by_choice() {
+        assert!(ci_jobs(&doc("")).unwrap().is_empty(), "no table: nothing declared");
+        let jobs = ci_jobs(&doc("[ci.jobs]\nplan = [\"everything\"]\nquick = [\"tools\", \"apps\"]\n")).unwrap();
+        assert_eq!(jobs["plan"], ["everything"]);
+        assert_eq!(jobs["quick"], ["tools", "apps"]);
+        // The table is also part of the whole file the other reader takes: `[ci]` knows the key.
+        assert!(parse(&doc("[ci.jobs]\nplan = [\"everything\"]\n")).is_ok());
+    }
+
+    #[test]
+    fn the_ci_jobs_table_refuses_what_it_cannot_trust() {
+        for (body, word) in [
+            ("[ci.jobs]\nplan = \"everything\"\n", "not a list"),
+            ("[ci.jobs]\nplan = []\n", "no project"),
+            ("[ci.jobs]\nplan = [\"nope\"]\n", "nope"),
+            ("[ci.jobs]\nplan = [1]\n", "not a string"),
+        ] {
+            let e = ci_jobs(&doc(body)).unwrap_err();
+            assert!(e.contains(word), "{body}: {e}");
+        }
+        assert!(ci_jobs("not toml [").is_err());
     }
 
     #[test]

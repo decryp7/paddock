@@ -28,7 +28,7 @@ use crate::plan_ci::{
 };
 use crate::plan_repo::git_text;
 use crate::plan_since::{APP_WORKFLOWS, GiteaRuns, SincePlan};
-use crate::run_scope::{DEFAULT_OS_LEGS, Scope, ci_scope, scope_of};
+use crate::run_scope::{Scope, ci_scope, scope_of};
 use crate::wait::{CurlHttp, Http};
 use paddock_cli::{CliError, Report};
 use paddock_repo_graph::GitHistory;
@@ -408,7 +408,7 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
     // The selection record of the escape monitor (ADR 0117 WP-9): what this run's plan runs; never fails the plan.
     if plan_app.is_none() {
         let selected = if graph_mode {
-            crate::plan_graph::escape_selected(&plan, &legs, &os_legs(env))
+            crate::plan_graph::escape_selected(&plan, &legs, &crate::plan_ci::os_legs())
         } else {
             crate::repo_inputs::load(root)
                 .map(|inputs| crate::escape::cmd::rules_selected(&plan, &inputs, &graph))
@@ -512,7 +512,7 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
     plan["webkit"] = serde_json::json!(wants_webkit(env));
     let mut outputs = ci_outputs(&plan, &legs);
     // OS-scoped tests: the legs of the `crate` and `paddock-dev` jobs with what each runner tests (`hostTests` of their contracts).
-    let os_runners = os_legs(env);
+    let os_runners = crate::plan_ci::os_legs();
     let mut workspace_oses: BTreeMap<&str, BTreeSet<String>> = BTreeMap::new();
     // Whether this run is OS-scoped: some leg tests only the packages with OS-specific code (declared in its scope line, `os_full`).
     let mut os_scoped = legs
@@ -598,7 +598,7 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
     if reused {
         outputs.push(("rerun_jobs".into(), "[]".into()));
     }
-    let os_legs = os_legs(env);
+    let os_legs = crate::plan_ci::os_legs();
     let filter_of = |p: &Value, k: &str| p["filters"][k].as_str().unwrap_or("").to_string();
     let mut ran = if reused {
         Scope::default()
@@ -709,19 +709,6 @@ fn read_host_tests(root: &Path, path: &str, derived: &crate::host_tests::Derived
     };
     let contract: Value = serde_json::from_str(&text).map_err(|e| format!("{path} is not valid JSON: {e}"))?;
     crate::host_tests::read(&contract, path, derived)
-}
-
-/// The runners of the `crate` and `paddock-dev` jobs: the `os` of each entry of `PLAN_OS_LEGS` (ci.yml's own default list), or the
-/// three runners when it is not set or not readable.
-fn os_legs(env: &dyn Fn(&str) -> Option<String>) -> Vec<String> {
-    env("PLAN_OS_LEGS")
-        .and_then(|t| serde_json::from_str::<Value>(&t).ok())
-        .and_then(|v| {
-            v.as_array()
-                .map(|a| a.iter().filter_map(|e| e["os"].as_str().map(str::to_string)).collect::<Vec<_>>())
-        })
-        .filter(|v| !v.is_empty())
-        .unwrap_or_else(|| DEFAULT_OS_LEGS.iter().map(|s| s.to_string()).collect())
 }
 
 /// The workflow file a run names (`ci.yml`), from this checkout; `None` for a name that is not a plain file name.
@@ -910,7 +897,7 @@ fn since_ci_with(root: &Path, env: &dyn Fn(&str) -> Option<String>, id: u64, rea
         },
     )
     .map_err(fail)?;
-    let need = scope_of(&everything, &need_legs, true, &os_legs(env), &[]);
+    let need = scope_of(&everything, &need_legs, true, &crate::plan_ci::os_legs(), &[]);
     eprintln!("{}", ci_scope(Scope::default(), true, need, true).with_inactive(inactive).line());
     if let Some(why) = &plan.everything {
         println!("::warning::dev plan --since-run {id}: {why}; this run tests everything");

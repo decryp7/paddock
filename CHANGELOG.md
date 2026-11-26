@@ -4,6 +4,15 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `paddock-ci-config`: the CI job model (ADR NEW-ci-job-model, WP-1)
+- New shared crate `crates/paddock-ci-config` (pure core, `publish = false`): `jobs::model` builds ci.yml's jobs, matrices, `needs` and
+  the projects each job runs for from the workflow text; `jobs::render` evaluates a job's `name:` for one leg. `gates/yaml.rs`,
+  `gates/expr.rs` and `plan_ci::PROJECT_OUTPUTS` moved into it, so `paddock-dev` has one CI parser (`gates::yaml` and `gates::expr`
+  re-export it). `[ci.jobs]` in `docs/repo-graph.toml` declares what no `if:` shows; a test keeps the model's projects equal to
+  `plan_gitea::CI_JOBS` for every job.
+- The OS leg set of the `crate` and `paddock-dev` jobs is written once (`plan_ci::OS_LEGS`): ci.yml's `PLAN_OS_LEGS` and its two
+  fallback lines are gone, and a rerun that does not rerun those jobs writes their whole legs itself.
+
 ### C173: no new non-Rust tooling file (ADR 0022 section 3.7 a and b)
 - `./dev check run --only C173` reads git's tracked list and fails (blocking) on a `.sh`, `.ps1`, `.py`, `.mjs`, `.js`, `.cjs` or `.ts`
   file in `scripts/`, `tools/`, `conformance/`, `.gitea/`, `ci-image/` or `apps/<app>/scripts/` that `conformance/tooling-files.json`

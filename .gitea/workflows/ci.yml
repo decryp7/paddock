@@ -193,8 +193,6 @@ jobs:
           PLAN_WEBKIT: ${{ (inputs.webkit == true || inputs.webkit == 'true') && '1' || '' }}
           # The rerun reads the earlier run's jobs and logs through the API (tools/paddock-dev/src/plan_since.rs).
           PLAN_SINCE_RUN: ${{ github.event.inputs.since_run }}
-          # The crate and paddock-dev legs when the plan names none of its own (every run but a rerun of their failures).
-          PLAN_OS_LEGS: '[{"os":"ubuntu-latest"},{"os":"windows-latest"},{"os":"macos-latest"}]'
           # The scope of a rerun planner's reading of this run (plan_since::MODE_LINE). It is not the verdict: `./dev plan --ci` prints
           # the line `plan scope: {json}` (ADR 0113), what the run does against what a push to main does, and `./dev ci verdict`
           # compares them. No line of this workflow decides "complete".
@@ -210,8 +208,6 @@ jobs:
           # A smoke or affected-only selection (the graph planner's `partial`) is never a full run; the mode line says so (P2-4).
           if grep -q '^partial=true$' "$GITHUB_OUTPUT"; then PLAN_MODE_FULL=false; fi
           echo "plan mode: full=$PLAN_MODE_FULL"
-          grep -q '^crate_legs=' "$GITHUB_OUTPUT" || echo "crate_legs=$PLAN_OS_LEGS" >> "$GITHUB_OUTPUT"
-          grep -q '^paddock_dev_legs=' "$GITHUB_OUTPUT" || echo "paddock_dev_legs=$PLAN_OS_LEGS" >> "$GITHUB_OUTPUT"
 
   # The developer and CI tool (ADR 0022): its own Cargo workspace and lockfile, tested on every OS it runs on. Linux runs in the
   # paddock-ci image (git, Node for the golden test's live oracle, nextest); Windows and macOS run on the host.
