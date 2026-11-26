@@ -148,7 +148,7 @@ export function ciProblem(workflowText, code = planCode(workflowText), { legacy 
  * after `run` is written, names this workflow and app, passes the run flag and the full mode (and the rerun input when the job has
  * one), and no verdict line of the old kind is left.
  */
-export function scopeProblem(code, { file, app, workflowArg = file, full = '"$PLAN_MODE_FULL"', sinceRun = false, runOutput = RUN_OUTPUT, legacy = false, legs = null }) {
+export function scopeProblem(code, { file, app, workflowArg = file, full = '"$PLAN_MODE_FULL"', sinceRun = false, runOutput = RUN_OUTPUT, legacy = false }) {
   if (code.length === 0) return 'it has no plan code';
   const at = code.findIndex((l) => l.startsWith('./dev ci scope ') || l.includes(' ci scope '));
   if (at < 0) return 'it does not run `./dev ci scope`, which prints the `plan scope:` line';
@@ -169,7 +169,6 @@ export function scopeProblem(code, { file, app, workflowArg = file, full = '"$PL
   if (!has('--run "$run"')) return 'its `ci scope` call does not pass `--run "$run"`';
   if (!has(`--full ${full}`)) return `its \`ci scope\` call does not pass \`--full ${full}\``;
   if (sinceRun && !has('--since-run "$PLAN_SINCE_RUN"')) return 'its `ci scope` call does not pass `--since-run "$PLAN_SINCE_RUN"`';
-  if (legs && !has(`--legs "${legs}=`)) return `its \`ci scope\` call does not pass \`--legs "${legs}=..."\`, so the scope line cannot look the planned legs up (ADR 0123 §3)`;
   return null;
 }
 
@@ -188,10 +187,7 @@ test('every app workflow of the tag gate declares its scope through `./dev ci sc
     const sinceRun = planCode(text(file)).some((l) => l.includes('PLAN_SINCE_RUN'));
     assert.equal(scopeProblem(planCode(text(file)), { file, app, sinceRun, legacy: legacyPhase(producerOf(file)) }), null, file);
   }
-  assert.equal(scopeProblem(planCode(text('debrief.yml')), { file: 'debrief.yml', app: 'debrief', sinceRun: true, legacy: legacyPhase('debrief.yml'), legs: 'e2e_shards' }), null);
-  // Positive control: without the --legs argument the same plan code is refused.
-  const noLegs = planCode(text('debrief.yml')).map((l) => l.replace(/ --legs .*$/, ''));
-  assert.match(scopeProblem(noLegs, { file: 'debrief.yml', app: 'debrief', sinceRun: true, legacy: legacyPhase('debrief.yml'), legs: 'e2e_shards' }), /--legs/);
+  assert.equal(scopeProblem(planCode(text('debrief.yml')), { file: 'debrief.yml', app: 'debrief', sinceRun: true, legacy: legacyPhase('debrief.yml') }), null);
 });
 
 /**

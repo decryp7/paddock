@@ -833,7 +833,6 @@ fn since_outputs() -> Vec<String> {
         not_rerun: 0,
         everything: None,
         full_ran: false,
-        expected: Default::default(),
     };
     plan.ci_outputs(&[], &mut |_| {}).into_iter().map(|(k, _)| k).collect()
 }

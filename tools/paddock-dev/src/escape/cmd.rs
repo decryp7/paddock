@@ -124,7 +124,7 @@ pub fn save_ci(root: &Path, req: &Request, selected: BTreeMap<String, Sel>, reac
     }
 }
 
-/// The failures of a nightly's run, from its failed jobs: a job names its project (the run's scope line, or the leg's app) and its OS. A failed
+/// The failures of a nightly's run, from its failed jobs: a job names its project (`CI_JOBS`, or the leg's app) and its OS. A failed
 /// job that cannot be mapped is returned as a line: not measured, never dropped.
 pub fn failures_of(plan: &crate::plan_since::SincePlan) -> (Vec<Failure>, Vec<String>) {
     let (mut out, mut unmapped) = (Vec::new(), Vec::new());
@@ -136,9 +136,11 @@ pub fn failures_of(plan: &crate::plan_since::SincePlan) -> (Vec<Failure>, Vec<St
         let project = if key == "app" {
             r.leg.app.as_ref().map(|a| format!("app:{a}"))
         } else {
-            crate::run_scope::lookup_entry(&plan.expected, &r.name)
-                .and_then(|e| e.primary_project())
-                .map(str::to_string)
+            crate::plan_gitea::CI_JOBS
+                .iter()
+                .find(|(k, _)| *k == key)
+                .and_then(|(_, p)| p.first())
+                .map(|p| p.to_string())
         };
         match (
             project,

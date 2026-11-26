@@ -166,22 +166,6 @@ fn main_run(id: u64, workflow: &str, sha: &str, failed: &[&str]) -> MainRun {
         workflow: workflow.into(),
         sha: sha.into(),
         failed: failed.iter().map(|s| s.to_string()).collect(),
-        // The scope line of the run lists its app jobs with their app leg, as the planner writes them (the name here is a fixture's).
-        expected: failed
-            .iter()
-            .filter_map(|n| {
-                let app = crate::run_scope::strip_caller(n).strip_prefix("app ")?.split(" (").next()?;
-                let leg = [("app".to_string(), app.to_string())].into();
-                Some((
-                    n.to_string(),
-                    crate::run_scope::Expected {
-                        job: "app".into(),
-                        leg,
-                        ..Default::default()
-                    },
-                ))
-            })
-            .collect(),
         created_ms: Some(NOW - 3_600_000.0),
     }
 }
@@ -319,22 +303,12 @@ fn main_is_read_from_the_newest_nightly_that_measured_something_and_the_newest_p
     );
     f.json(
         &format!("{API}/runs/903/jobs?limit=50&page=1"),
-        json!({"jobs": [job(29, "plan", "success"), job(30, "app dyno (macos-latest)", "failure")]}),
+        json!({"jobs": [job(30, "app dyno (macos-latest)", "failure")]}),
     );
-    // The plan job's log holds the scope line that says the app job's app (read only for a run with a failed job).
-    let (line, rest) = crate::run_scope::TEST_COMPLETE.split_once('\n').unwrap();
-    let mut scope: Value = serde_json::from_str(line.strip_prefix("plan scope: ").unwrap()).unwrap();
-    scope["expected"]["app dyno (macos-latest)"] = json!({"job": "app", "leg": {"app": "dyno"}, "projects": []});
-    f.log(29, &format!("plan scope: {scope}\n{rest}"));
     f.json(
         &format!("{API}/runs/901/jobs?limit=50&page=1"),
-        json!({"jobs": [job(10, "gate (main changed since the last green nightly?)", "success"), job(9, "everything / plan", "success"), job(11, "everything / crate (windows-latest)", "failure")]}),
+        json!({"jobs": [job(10, "gate (main changed since the last green nightly?)", "success"), job(11, "everything / crate (windows-latest)", "failure")]}),
     );
-    // The nightly calls ci.yml: the called plan job (`everything / plan`) holds the v3 scope line, and its jobs are listed under the
-    // caller's prefix, which the lookup strips.
-    let mut scope: Value = serde_json::from_str(line.strip_prefix("plan scope: ").unwrap()).unwrap();
-    scope["expected"]["crate (windows-latest)"] = json!({"job": "crate", "leg": {"os": "windows-latest"}, "projects": ["crates"]});
-    f.log(9, &format!("plan scope: {scope}\n{rest}"));
     let mut c = Client::new(&mut f, "https://gitea.invalid", "decryp7/paddock", "t");
     c.backoff_ms = 0;
     let (nightly, push) = read_main(&mut c).unwrap();
@@ -342,18 +316,11 @@ fn main_is_read_from_the_newest_nightly_that_measured_something_and_the_newest_p
         r.created_ms = super::super::time::ts("2026-11-24T05:00:00Z");
         r
     };
-    let mut nightly = nightly.unwrap();
-    // The caller-prefixed failed job is placed through the called plan job's line.
-    assert_eq!(nightly.expected["crate (windows-latest)"].job, "crate");
-    nightly.expected.clear();
     assert_eq!(
         nightly,
-        at(main_run(901, "nightly.yml", OLD, &["everything / crate (windows-latest)"]))
+        Some(at(main_run(901, "nightly.yml", OLD, &["everything / crate (windows-latest)"])))
     );
-    // The fixture's scope line also expects its conformance job; the app job's entry is the one that matters here.
-    let mut push = push.unwrap();
-    push.expected.retain(|name, _| name.starts_with("app "));
-    assert_eq!(push, at(main_run(903, "ci.yml", HEAD, &["app dyno (macos-latest)"])));
+    assert_eq!(push, Some(at(main_run(903, "ci.yml", HEAD, &["app dyno (macos-latest)"]))));
 }
 
 #[test]

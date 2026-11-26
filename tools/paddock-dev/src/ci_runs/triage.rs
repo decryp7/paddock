@@ -569,12 +569,7 @@ fn own_app(workflow: &str) -> Option<String> {
 
 /// Apps whose flake history covers this run: the one named, else the workflow's own and every `app <name>` job; and the failed
 /// jobs of shared code that no history covers.
-fn history_apps(
-    req: &Request,
-    workflow: &str,
-    failed_jobs: &[String],
-    expected: &crate::run_scope::ExpectedMap,
-) -> (Vec<String>, Vec<String>) {
+fn history_apps(req: &Request, workflow: &str, failed_jobs: &[String]) -> (Vec<String>, Vec<String>) {
     if let Some(a) = &req.app {
         return (vec![a.clone()], Vec::new());
     }
@@ -582,15 +577,16 @@ fn history_apps(
     let mut apps: BTreeSet<String> = own.iter().cloned().collect();
     let mut shared = BTreeSet::new();
     for j in failed_jobs {
-        // An app's job is the one the run's scope line gives an `app` leg; any other, or one the line does not hold, is shared.
-        match crate::run_scope::lookup_entry(expected, j).and_then(|e| e.leg.get("app")) {
-            Some(a) if !a.is_empty() => {
-                apps.insert(a.clone());
+        match j.strip_prefix("app ") {
+            Some(rest) => {
+                if let Some(a) = rest.split(|c: char| c.is_whitespace() || c == '(').next().filter(|a| !a.is_empty()) {
+                    apps.insert(a.to_string());
+                }
             }
-            _ if own.is_none() => {
+            None if own.is_none() => {
                 shared.insert(j.clone());
             }
-            _ => {}
+            None => {}
         }
     }
     (apps.into_iter().collect(), shared.into_iter().collect())
@@ -684,8 +680,7 @@ pub fn collect(client: &mut Client, req: &Request, log: &mut dyn FnMut(&str)) ->
     let mut flaky: Flaky = BTreeMap::new();
     if req.history {
         let names: Vec<String> = failed.iter().map(|(j, _, _)| j.name.clone()).collect();
-        let expected = super::verdict::run_expected(client, &jobs);
-        let (apps, shared) = history_apps(req, run.workflow(), &names, &expected);
+        let (apps, shared) = history_apps(req, run.workflow(), &names);
         if apps.is_empty() {
             gaps.push("flake history: none (the flake history reads one app at a time, and this run's failures belong to no app); pass --app to choose one".into());
         } else if !shared.is_empty() {
@@ -1004,25 +999,17 @@ mod tests {
             now_secs: 0,
         };
         let jobs = vec![LINUX.to_string(), "app dyno (ubuntu-latest, e2e-1)".to_string()];
-        let expected = crate::run_scope::ExpectedMap::from([(
-            "app dyno (ubuntu-latest, e2e-1)".to_string(),
-            crate::run_scope::Expected {
-                job: "app".into(),
-                leg: BTreeMap::from([("app".to_string(), "dyno".to_string())]),
-                ..Default::default()
-            },
-        )]);
         assert_eq!(
-            history_apps(&req(None), "debrief.yml", &jobs, &expected),
+            history_apps(&req(None), "debrief.yml", &jobs),
             (vec!["debrief".to_string(), "dyno".to_string()], vec![])
         );
-        assert_eq!(history_apps(&req(None), "dyno-release.yml", &[], &expected).0, ["dyno"]);
+        assert_eq!(history_apps(&req(None), "dyno-release.yml", &[]).0, ["dyno"]);
         assert_eq!(
-            history_apps(&req(None), "ci.yml", &jobs, &expected),
+            history_apps(&req(None), "ci.yml", &jobs),
             (vec!["dyno".to_string()], vec![LINUX.to_string()])
         );
         assert_eq!(
-            history_apps(&req(Some("pitwall")), "ci.yml", &jobs, &expected),
+            history_apps(&req(Some("pitwall")), "ci.yml", &jobs),
             (vec!["pitwall".to_string()], vec![])
         );
     }

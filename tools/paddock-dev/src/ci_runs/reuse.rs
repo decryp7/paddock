@@ -423,7 +423,7 @@ mod tests {
             &format!("{API}/runs/8610/jobs?limit=50&page=1"),
             serde_json::from_str(include_str!("../../tests/ci-runs/run-8610-jobs.json")).unwrap(),
         );
-        f.log(44709, &crate::run_scope::test_complete_8610());
+        f.log(44709, crate::run_scope::TEST_COMPLETE);
         f.log(44761, include_str!("../../tests/ci-runs/nextest-run8610-crate-flaky-only.log"));
         f.log(44768, include_str!("../../tests/ci-runs/nextest-run8610-app-gates-flaky-only.log"));
         let mut c = Client::new(&mut f, "https://gitea.invalid", "decryp7/paddock", "t");

@@ -1,6 +1,5 @@
 use paddock_ci_config::jobs::{
-    APPS_PROJECT, Declared, JobModel, Leg, Legs, PROJECT_OUTPUTS, Problem, model, named_jobs,
-    render, render_name,
+    APPS_PROJECT, Declared, JobModel, Leg, Legs, PROJECT_OUTPUTS, Problem, model, render,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -422,64 +421,4 @@ fn a_job_may_need_several_jobs_and_a_condition_on_a_step_that_is_not_text_reads_
     let wf = "jobs:\n  j:\n    needs: [plan, other]\n    if: ${{ needs.plan.outputs.ui == 'true' }}\n    steps:\n      - if: true\n        run: x\n";
     let m = model(wf, &Declared::default()).unwrap();
     assert_eq!(m.job("j").unwrap().needs, ["plan", "other"]);
-}
-
-/// A workflow that is not ci.yml has no project outputs: its jobs are read for their names and matrices alone.
-const APP_WF: &str = r#"
-jobs:
-  plan:
-    name: plan
-  e2e:
-    name: end-to-end (shard ${{ matrix.shard }}/4)
-    if: needs.plan.outputs.run == 'true'
-    strategy:
-      matrix:
-        include: ${{ fromJSON(needs.plan.outputs.e2e_shards) }}
-  smoke:
-    name: real-app smoke (${{ matrix.os }})
-    strategy:
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-  keychain:
-    runs-on: macos-latest
-"#;
-
-#[test]
-fn named_jobs_read_the_names_and_matrices_of_a_workflow_with_no_project_outputs() {
-    let jobs = named_jobs(APP_WF).expect("names and matrices read");
-    let ids: Vec<&str> = jobs.iter().map(|j| j.id.as_str()).collect();
-    assert_eq!(ids, ["plan", "e2e", "smoke", "keychain"]);
-    assert_eq!(jobs[1].legs, Legs::Planned("e2e_shards".into()));
-    assert_eq!(
-        jobs[2].legs,
-        Legs::Static(vec![
-            leg(&[("os", "ubuntu-latest")]),
-            leg(&[("os", "windows-latest")])
-        ])
-    );
-    assert_eq!(
-        jobs[3].name, "keychain",
-        "a job without a name is named by its id"
-    );
-    assert_eq!(
-        render_name(&jobs[1].name, &leg(&[("shard", "3")])),
-        "end-to-end (shard 3/4)"
-    );
-    // A matrix this reader cannot expand, or a file without jobs, is a problem, never a guess.
-    assert!(
-        named_jobs("jobs:\n  a:\n    strategy:\n      matrix:\n        exclude: [x]\n").is_err()
-    );
-    assert!(
-        named_jobs("name: x\n").unwrap_err()[0]
-            .message
-            .contains("no `jobs:`")
-    );
-}
-
-#[test]
-fn a_job_whose_condition_reads_the_webkit_output_says_so() {
-    let m = built();
-    // The reference-app jobs run only when the planner wants WebKit (a tag, the nightly, a manual ask).
-    assert!(m.job("e2e").unwrap().reads_webkit);
-    assert!(!m.job("ui").unwrap().reads_webkit && !m.job("crate").unwrap().reads_webkit);
 }

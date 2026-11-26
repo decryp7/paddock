@@ -206,7 +206,7 @@ jobs:
           # a tag then cannot rest on it (`ci verdict --tag`).
           os_scoped=false
           if [ -n "$(sed -n 's/^host_packages_macos=//p' "$GITHUB_OUTPUT")" ]; then os_scoped=true; fi
-          ./dev ci scope --workflow debrief.yml --app debrief --full "$PLAN_MODE_FULL" --run "$run" --since-run "$PLAN_SINCE_RUN" --os-scoped "$os_scoped" --full-engines chromium,webkit --legs "e2e_shards=$(sed -n 's/^e2e_shards=//p' "$GITHUB_OUTPUT" | tail -1)"
+          ./dev ci scope --workflow debrief.yml --app debrief --full "$PLAN_MODE_FULL" --run "$run" --since-run "$PLAN_SINCE_RUN" --os-scoped "$os_scoped" --full-engines chromium,webkit
 
       # ADR 0060 3.2: the lint-adoption ratchet of Debrief (docs/gates.toml [[ratchet]] C13) must be empty before the release it names
       # (debrief-v1.2.0) or a later one is tagged. A tag run refuses at once, before anything is built. Only the ratchets of this
