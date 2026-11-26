@@ -614,7 +614,7 @@ jobs:
   # The throttle tool (tools/throttle): the machine-wide heavy-step lock. Its own Cargo workspace; a Linux container, so no build-folder action
   # (the build folder is tools/throttle/target in the container, git-ignored).
   throttle:
-    name: throttle tool
+    name: heavy tool # the display name stays: the recorded CI runs and tools/paddock-dev/src/run_scope.rs know the job by it
     needs: [plan]
     if: ${{ needs.plan.outputs.tools == 'true' && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["throttle"]'), 'throttle') }}
     runs-on: ubuntu-latest

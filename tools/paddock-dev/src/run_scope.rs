@@ -376,7 +376,7 @@ pub const PROJECT_JOBS: &[(&str, &[&str])] = &[
     ("eslint", &["ui ("]),
     ("conformance", &["conformance ("]),
     ("c99", &["C99 ("]),
-    ("tools", &["tools and shared scripts", "throttle tool"]),
+    ("tools", &["tools and shared scripts", "heavy tool"]),
     ("icons", &["ui ("]),
     ("e2e", &["reference apps (shard"]),
     ("e2e-webkit", &["reference apps in WebKit"]),
