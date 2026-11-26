@@ -817,6 +817,21 @@ fn write_shim(bin: &Path) -> std::io::Result<()> {
     })?)
 }
 
+/// The program the shim runs, as `<launcher> sccache env`, to start our server when none listens: the primary checkout's `./dev` script
+/// (it picks the binary for its own hash by itself). Not this run's binary: that is a held hard link removed when the run ends. `None`
+/// when `from` is no repository or the script is not there.
+pub(crate) fn launcher_for(from: &Path) -> Option<PathBuf> {
+    let primary = crate::worktree::git::Repo::discover(from).ok()?.primary;
+    let dev = primary.join("dev");
+    dev.is_file().then_some(dev)
+}
+
+/// Records [`launcher_for`] in the run folder for the shim; returns whether one was written (nothing is written, and an older file stays,
+/// when there is none).
+pub(crate) fn record_launcher(run: &Path, from: &Path) -> bool {
+    launcher_for(from).is_some_and(|dev| std::fs::write(run.join("launcher"), dev.display().to_string()).is_ok())
+}
+
 /// What [`ensure_machine_config`] found or did.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MachineConfig {
@@ -1281,11 +1296,10 @@ pub fn prepare(env: &HashMap<String, String>, install: Install) -> Outcome {
     if let Err(why) = shim {
         return off(why, true);
     }
-    if matches!(install, Install::OnDemand) {
-        // The shim starts our server through this binary when none listens (read by the shim; a stale path is a plain-rustc fallback).
-        if let Ok(me) = crate::tool_cache::self_exe() {
-            let _ = std::fs::write(run.join("launcher"), me.display().to_string());
-        }
+    if matches!(install, Install::OnDemand)
+        && let Ok(cwd) = std::env::current_dir()
+    {
+        record_launcher(&run, &cwd);
     }
     Outcome::Ready(Ready {
         vars: ready_vars(&bin, &backend, &basedirs),
@@ -2908,5 +2922,52 @@ mod tests {
             "somebody's own config stays"
         );
         assert_eq!(std::fs::read_to_string(&file).unwrap(), "[build]\njobs = 3\n");
+    }
+    /// The launcher the shim runs to start our server when it is down must outlive the run that recorded it. A run's own binary is a
+    /// held hard link that is removed when the run ends (2026-11-26: the recorded launcher was always stale, so a down server meant plain
+    /// rustc for good), so the launcher is the primary checkout's `./dev` script: it stays while the repository does, from any worktree.
+    #[test]
+    fn the_recorded_launcher_is_the_primary_checkouts_dev_script_and_outlives_the_recording_run() {
+        let t = tempfile::tempdir().unwrap();
+        let root = paddock_env::winpath::real(t.path()).unwrap();
+        let main = root.join("main");
+        repo_with(&main);
+        git_in(
+            &main,
+            &["worktree", "add", "-q", "-b", "w1", root.join("wt").join("w1").to_str().unwrap()],
+        );
+        let w1 = root.join("wt").join("w1");
+        assert_eq!(
+            launcher_for(&w1),
+            None,
+            "no ./dev script in the repository: nothing is recorded (never a path that is not there)"
+        );
+        std::fs::write(main.join("dev"), "#!/bin/sh\n").unwrap();
+        assert_eq!(
+            launcher_for(&w1),
+            Some(main.join("dev")),
+            "from a worktree, the primary checkout's script"
+        );
+        std::fs::create_dir_all(main.join("crates")).unwrap();
+        assert_eq!(
+            launcher_for(&main.join("crates")),
+            Some(main.join("dev")),
+            "from a folder inside the primary checkout"
+        );
+        // The recording run: writes the file; nothing it holds is the launcher, so it exists after the run's own files are gone.
+        let run = root.join("run");
+        std::fs::create_dir_all(&run).unwrap();
+        assert!(record_launcher(&run, &w1));
+        let recorded = PathBuf::from(std::fs::read_to_string(run.join("launcher")).unwrap());
+        assert_eq!(recorded, main.join("dev"));
+        assert!(recorded.is_file(), "still there after the recording run exits");
+        assert!(
+            !record_launcher(&run, &root.join("plain")),
+            "not a repository: nothing recorded, the old file is left"
+        );
+        assert_eq!(
+            std::fs::read_to_string(run.join("launcher")).unwrap(),
+            main.join("dev").display().to_string()
+        );
     }
 }
