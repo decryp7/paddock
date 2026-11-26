@@ -1,6 +1,8 @@
 //! A member should be built on the train's base: the newest commit of the train's base line that the train has merged so far.
-//! **Report-only** ([`ENFORCED`] is false, ER-41, like `gates::ENFORCED`): a member that lacks it gets a `::warning::` and the
-//! exit code is unchanged, until the check has run green on a real train and the change that records it flips the switch.
+//! **Blocking** ([`ENFORCED`] is true): a member that lacks it is refused with one `::error::` line and the exit code `Findings`;
+//! the user approved the block on 2026-11-25 (the "old-base block"), after four train members built on an older main were pulled in
+//! one day (a renamed feature, the ADR 0119 job API, train l's reuse tests, the heavy share design). It ran report-only before
+//! (ER-41). The emergency override is `--old-base-anyway "<reason>"`: the member passes and the result prints the reason.
 //!
 //! The base line is declared by the train's own history, not by a second list (ER-42): a train stacked on another carries
 //! re-merge commits `chore(train): merge train/<previous> (<sha>) into train N` (also `Merge train/<previous> (<sha>) into
@@ -16,8 +18,12 @@
 
 use super::git::{Git, short};
 
-/// Whether a member without the base fails the check. False until a green run on a real train is recorded (ER-41).
-pub const ENFORCED: bool = false;
+/// Whether a member without the base fails the check. True by the user's decision of 2026-11-25 (the old-base block; ER-41's
+/// report-only phase is over); turning it off again is a change of that record too.
+pub const ENFORCED: bool = true;
+
+// The block is the user's decision; a build that switches it off fails here, as `gates::ENFORCED` does.
+const _: () = assert!(ENFORCED);
 
 /// The newest commits of the first-parent line that are read for a re-merge commit.
 const DEPTH: &str = "2000";
@@ -121,17 +127,28 @@ pub fn base_of(git: &Git, head: &str, target_name: &str) -> Result<Base, String>
     Ok(Base::Commit { sha, line: "main".into() })
 }
 
-/// The text of the problem: a warning with the report-only note, or (`enforced`) an error.
+/// The text of the problem: a warning with the report-only note, or (`enforced`) an error naming the member, the base it lacks
+/// and the next step.
 fn render(sha: &str, line: &str, train: &str, member: &str, enforced: bool) -> String {
     let level = if enforced { "error" } else { "warning" };
+    let from = if line == "main" { "origin/main" } else { line };
     format!(
-        "::{level}::merge check: {member} is built on an old base: it does not contain {}, the newest commit of {line} that {train} has merged. Next step: run `./dev merge sync-member {train}` before you merge the train into it (it lists what to re-apply), merge the train, push, then check it again.{}",
+        "::{level}::merge check: {member} is built on an old base: it does not contain {}, the newest commit of {line} that {train} has merged. Next step: merge {from} into {member} and re-run its gate (`./dev check --pre-push --member-gate --base origin/main`); `./dev merge sync-member {train}` lists what to re-apply; in an emergency pass `--old-base-anyway \"<reason>\"`.{}",
         short(sha),
         if enforced {
             ""
         } else {
             " (report-only: the exit code is unchanged)"
         }
+    )
+}
+
+/// The line printed when `--old-base-anyway` lets an old-base member through: the problem as a warning, then the reason.
+pub fn overridden(problem: &str, reason: &str) -> String {
+    format!(
+        "{} (--old-base-anyway: {})",
+        problem.replacen("::error::", "::warning::", 1).trim_end(),
+        reason.trim()
     )
 }
 

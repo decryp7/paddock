@@ -331,6 +331,8 @@ pub struct Request {
     pub gates: bool,
     /// Write the merge message with the `Reverted:` lines a re-land explains to this file ([`reland`]; findings only).
     pub write_reverted: Option<PathBuf>,
+    /// `--old-base-anyway <reason>`: let a member that lacks the train's base through, and print the reason ([`stale_base`]).
+    pub old_base_anyway: Option<String>,
 }
 
 /// The step for `--write-reverted`: the lines a re-land explains, written with the message to `file`; says plainly when it tied none.
@@ -522,6 +524,10 @@ impl Steps {
 type Checked = (String, Vec<Finding>, Steps, serde_json::Value);
 
 fn check(req: &Request) -> Result<Checked, CliError> {
+    if req.old_base_anyway.as_deref().is_some_and(|r| r.trim().is_empty()) {
+        return Err(CliError::usage("--old-base-anyway needs a reason.")
+            .with_hint("Say why, for example --old-base-anyway \"hotfix, the newer main work is unrelated\"."));
+    }
     let root = crate::gates::command::repo_root(req.root.as_deref())?;
     let git = Git::new(&root);
     let merge = resolve(&git, req)?;
@@ -553,18 +559,29 @@ fn check(req: &Request) -> Result<Checked, CliError> {
             steps.push("generators", step);
             // Report-only (ER-41): a member built on a merge the target reverted; never a finding, never an exit code.
             steps.push("reverted-base", reverted_base::run(&git, &merge));
-            // Report-only (ER-41, stale_base::ENFORCED): a member that lacks the train's base, and a train with no declared base.
+            // A member that lacks the train's base is refused (stale_base::ENFORCED, user 2026-11-25) unless --old-base-anyway names a
+            // reason; a train with no declared base is only noticed.
             if let [train, member] = merge.parents.as_slice() {
                 match stale_base::problem(&git, train, member, &merge.target_name, &merge.member_name) {
-                    Ok(Some(text)) if stale_base::ENFORCED => return Err(CliError::new(Exit::Findings, text)),
-                    Ok(Some(text)) => steps.push(
-                        "stale-base",
-                        Some(generator_step::Step {
-                            text: vec![text],
-                            data: json!({"outcome": "warning"}),
-                            exit: Exit::Ok,
-                        }),
-                    ),
+                    Ok(Some(text)) => match (&req.old_base_anyway, stale_base::ENFORCED) {
+                        (Some(reason), true) => steps.push(
+                            "stale-base",
+                            Some(generator_step::Step {
+                                text: vec![stale_base::overridden(&text, reason)],
+                                data: json!({"outcome": "overridden", "reason": reason}),
+                                exit: Exit::Ok,
+                            }),
+                        ),
+                        (None, true) => return Err(CliError::new(Exit::Findings, text)),
+                        (_, false) => steps.push(
+                            "stale-base",
+                            Some(generator_step::Step {
+                                text: vec![text],
+                                data: json!({"outcome": "warning"}),
+                                exit: Exit::Ok,
+                            }),
+                        ),
+                    },
                     Ok(None) => {}
                     Err(why) => steps.push(
                         "stale-base",

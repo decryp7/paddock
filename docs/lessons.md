@@ -4352,3 +4352,19 @@ startup"; the Chromium start judge, ADR 0031). A start that hands back a handle 
   train; the merge check refuses a member on an old base (the stale-base check made blocking on `ci/old-base-block`).
 - **Class: a green result on an old base was taken for a green result on the tree it joins** (earlier: ER-49 reuse of a landing run,
   ER-8 combined-tree failures, train 8's eight combination failures).
+
+## 2026-11-26: `mac-runner-move.sh install` stopped a runner under a running job
+
+- **What.** The install booted the runner out while a CI job ran. The runner logged "shutdown initiated, waiting 3h0m0s for running jobs",
+  the job's helpers (slot hold, s3-guard) were left behind, and the new daemon was not started until a second install.
+- **Fix (user decision: wait visibly, bounded).** Before any change, `install` and `rollback` find the lanes whose runner has job
+  processes (the processes under the pid `launchctl print` gives for the lane's label), tell the runner to take no new job
+  (`launchctl kill SIGTERM`), print which job runs, and wait up to `--wait-max` (default 3600 s) with a progress line every 30 s. At the
+  end of the wait they fail with nothing changed. Nothing is ended by name or by pid: the job's own cleanup ends its helpers (ER-51). The
+  verify step also requires launchd's `state = running`, and a failing `launchctl bootstrap` is a failed lane.
+- **Not measured.** The log line the wait prints for "which job" (`task <id> ...`) and the rule that an idle runner has no child process
+  were taken from the runner's behaviour as known, not read from a real run; the tests use stand-ins.
+- **Follow-up, the same day.** launchd starts a runner that exited, and a restarted runner could take a job between the end of the wait
+  and the boot-out. Every loaded lane is now told to take no new job at the start, and each lane's check for a job and its boot-out are
+  back to back; a job seen there sends install back into the same bounded wait and tells the runner again. What stays is the time between
+  that check and the boot-out call itself (milliseconds, against a runner that needs seconds to register and fetch a task).
