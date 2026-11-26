@@ -217,25 +217,35 @@ pub struct NightlyRed {
 }
 
 /// The app a failed job of a nightly belongs to, `None` for the foundation: an app's own workflow (`debrief.yml`, `<app>-*.yml`),
-/// a ci.yml app leg (`app <app> (<os>...)`, also under a caller's `<job> / ` prefix) or a nightly installers job
-/// (`installers (<App>, ...)`).
-pub fn app_of_job(workflow: &str, job: &str, apps: &BTreeSet<String>) -> Option<String> {
+/// a job whose entry in the run's scope line (`expected`, also under a caller's `<job> / ` prefix) has an `app` leg, or a nightly
+/// installers job (`installers (<App>, ...)`, a name the planner does not write: registered in docs/known-copies.toml).
+pub fn app_of_job(workflow: &str, job: &str, apps: &BTreeSet<String>, expected: &crate::run_scope::ExpectedMap) -> Option<String> {
     if let Some(a) = crate::plan::app_of_workflow(&format!(".gitea/workflows/{workflow}"), apps) {
         return Some(a.to_string());
     }
-    let name = job.rsplit(" / ").next().unwrap_or(job);
-    let lower = name.to_ascii_lowercase();
+    if let Some(a) = crate::run_scope::lookup_entry(expected, job)
+        .and_then(|e| e.leg.get("app"))
+        .filter(|a| apps.contains(*a))
+    {
+        return Some(a.clone());
+    }
+    let lower = crate::run_scope::strip_caller(job).to_ascii_lowercase();
     apps.iter()
-        .find(|a| name.starts_with(&format!("app {a} (")) || lower.starts_with(&format!("installers ({}", a.to_ascii_lowercase())))
+        .find(|a| lower.starts_with(&format!("installers ({}", a.to_ascii_lowercase())))
         .cloned()
 }
 
 /// Sorts a nightly's failed jobs (`(workflow file, job name)`) by [`NightlyRed`] under the active set of the nightly's commit.
-pub fn classify_nightly(failed: &[(String, String)], active: &BTreeSet<String>, apps: &BTreeSet<String>) -> NightlyRed {
+pub fn classify_nightly(
+    failed: &[(String, String)],
+    active: &BTreeSet<String>,
+    apps: &BTreeSet<String>,
+    expected: &crate::run_scope::ExpectedMap,
+) -> NightlyRed {
     let mut red = NightlyRed::default();
     for (workflow, job) in failed {
         let what = format!("{workflow}: {job}");
-        match app_of_job(workflow, job, apps) {
+        match app_of_job(workflow, job, apps, expected) {
             Some(app) if !active.contains(&app) => red.fix_items.entry(app).or_default().push(what),
             _ => red.blocking.push(what),
         }
@@ -342,7 +352,16 @@ mod tests {
             ("nightly.yml".to_string(), "everything / app dyno (macos-latest)".to_string()),
             ("nightly.yml".to_string(), "everything / crate (windows-latest)".to_string()),
         ];
-        let red = classify_nightly(&failed, &active, &apps());
+        let app = |a: &str| crate::run_scope::Expected {
+            job: "app".into(),
+            leg: [("app".to_string(), a.to_string())].into(),
+            ..Default::default()
+        };
+        let expected = crate::run_scope::ExpectedMap::from([
+            ("app pitwall (ubuntu-latest, e2e-1)".to_string(), app("pitwall")),
+            ("app dyno (macos-latest)".to_string(), app("dyno")),
+        ]);
+        let red = classify_nightly(&failed, &active, &apps(), &expected);
         assert_eq!(red.fix_items["pitwall"].len(), 2);
         assert_eq!(red.fix_items["debrief"], ["debrief.yml: e2e (shard 2)"]);
         assert_eq!(
@@ -353,7 +372,10 @@ mod tests {
             ]
         );
         // Positive control: with pitwall active its failures stop trains too.
-        let all = classify_nightly(&failed, &apps(), &apps());
+        let all = classify_nightly(&failed, &apps(), &apps(), &expected);
+        // Without the run's line only the workflow's own app and the installers name are known: the app job counts as shared.
+        let bare = classify_nightly(&failed, &active, &apps(), &crate::run_scope::ExpectedMap::new());
+        assert_eq!(bare.fix_items["pitwall"].len(), 1, "{bare:?}");
         assert!(all.fix_items.is_empty() && all.blocking.len() == failed.len());
     }
 }

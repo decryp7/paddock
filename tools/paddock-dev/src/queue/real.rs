@@ -58,12 +58,13 @@ pub fn projects_of_plan(plan: &serde_json::Value) -> BTreeSet<String> {
     out
 }
 
-/// The projects a failed row belongs to: the crate of a nextest test (`paddock-service per_machine::x`), the app of an `app
-/// <name> (...)` job, else the job's own name (`ui`, `conformance`).
-pub fn projects_of_row(job: &str, test: &Test) -> BTreeSet<String> {
+/// The projects a failed row belongs to: the crate of a nextest test (`paddock-service per_machine::x`), the app of the job's `app` leg in
+/// the run's scope line (`expected`), else the job's id from the line (`ui`, `conformance`); a job the line does not hold falls back to
+/// the first word of its name.
+pub fn projects_of_row(expected: &crate::run_scope::ExpectedMap, job: &str, test: &Test) -> BTreeSet<String> {
     let mut out = BTreeSet::new();
-    let head = job.split(" (").next().unwrap_or(job);
-    let app = head.strip_prefix("app ");
+    let entry = crate::run_scope::lookup_entry(expected, job);
+    let app = entry.and_then(|e| e.leg.get("app")).filter(|a| !a.is_empty());
     if let Some(app) = app {
         out.insert(norm(app));
     }
@@ -74,7 +75,8 @@ pub fn projects_of_row(job: &str, test: &Test) -> BTreeSet<String> {
             }
         }
         _ if app.is_none() => {
-            out.insert(norm(head));
+            let own = entry.map_or_else(|| job.split(" (").next().unwrap_or(job), |e| e.job.as_str());
+            out.insert(norm(own));
         }
         _ => {}
     }
@@ -976,9 +978,18 @@ pub fn failures_of(report: &triage::Report, run: u64, http: &mut dyn Http, serve
     // The gate jobs (train gates, commit messages) fail on files: read their logs for the paths.
     let is_gate = |job: &str| job.starts_with("train gates") || job.starts_with("commit messages");
     let mut files: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    // The run's plan job log holds its scope line (the display names of its jobs with their app and projects), read once per run.
+    let mut runs = crate::plan_since::GiteaRuns::new(http, server, repo, token.to_string());
+    let jobs = runs.jobs(run).unwrap_or_default();
+    let expected = jobs
+        .iter()
+        .find(|j| crate::plan_since::is_plan_name(&j.name))
+        .and_then(|j| runs.log(j.id).ok())
+        .and_then(|log| crate::run_scope::read(&log))
+        .and_then(Result::ok)
+        .map(|d| d.expected)
+        .unwrap_or_default();
     if report.rows.iter().any(|r| is_gate(&r.job)) {
-        let mut runs = crate::plan_since::GiteaRuns::new(http, server, repo, token.to_string());
-        let jobs = runs.jobs(run).unwrap_or_default();
         for r in report.rows.iter().filter(|r| is_gate(&r.job)) {
             if let Some(j) = jobs.iter().find(|j| j.name == r.job)
                 && let Ok(log) = runs.log(j.id)
@@ -1003,7 +1014,7 @@ pub fn failures_of(report: &triage::Report, run: u64, http: &mut dyn Http, serve
                     Test::Unread(w) => format!("failing tests not readable ({w})"),
                 }
             ),
-            projects: projects_of_row(&r.job, &r.test),
+            projects: projects_of_row(&expected, &r.job, &r.test),
             files: files.get(&r.job).cloned().unwrap_or_default(),
             blame: blame_of(&r.status),
         })
