@@ -301,6 +301,18 @@ fn read_mode_plain(client: &mut Client, run: &RunInfo, scope_decisive: bool) -> 
     }
 }
 
+/// The run's `expected` map (its plan job's scope line, ADR 0123 §3), read once per run from the plan job's log. Empty when the run has
+/// no plan job or its line cannot be read: a reader then cannot place a job by name and reports it as not measured.
+pub(super) fn run_expected(client: &mut Client, jobs: &[super::client::TimedJob]) -> run_scope::ExpectedMap {
+    jobs.iter()
+        .find(|j| j.name == "plan" || j.name.starts_with("plan "))
+        .and_then(|plan| client.log(plan.id).ok().flatten())
+        .and_then(|log| run_scope::read(&log))
+        .and_then(Result::ok)
+        .map(|d| d.expected)
+        .unwrap_or_default()
+}
+
 /// `Some(base)` when the run's declared scope is not complete but a landing may rest on it (`Declared::lands`) and every job it
 /// declared ran (a run still going is not checked yet: the decision waits for it).
 fn landing_of(run: &RunInfo, jobs: &[super::client::TimedJob], log: &str) -> Option<Option<String>> {
