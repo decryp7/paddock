@@ -37,9 +37,10 @@ const TIMEOUT: Duration = Duration::from_secs(4 * 60 * 60);
 
 /// Starts the trial.
 pub trait Dispatcher {
-    /// `ci dispatch ci.yml --trial <member> --onto <train> --max <max>` in `root`, with `PADDOCK_TRIAL_DIR` = `trial_dir`; an error is
-    /// a failure to start.
-    fn dispatch(&self, root: &Path, trial_dir: &Path, member: &str, train: &str, max: &str) -> Result<GateRun, String>;
+    /// `ci dispatch ci.yml --trial <member> --onto <train> --max <max>` in `root`, with `PADDOCK_TRIAL_DIR` = `trial_dir` and one
+    /// `--reland <revert>` for each of `relands` (the full shas of the train's reverts of this member's own merges that the sync tip
+    /// re-applies: the trial's merge carries `Reverted:` lines for them); an error is a failure to start.
+    fn dispatch(&self, root: &Path, trial_dir: &Path, member: &str, train: &str, max: &str, relands: &[String]) -> Result<GateRun, String>;
 }
 
 /// Pushes the sync tip.
@@ -47,6 +48,10 @@ pub trait Pusher {
     /// `git push origin HEAD:refs/heads/<reference>` in `root` with the caller's credentials; `trial_dir` is the scratch folder of the
     /// askpass program and `hold` the longest the push waits while the server is down. An error is git's own words.
     fn push(&self, root: &Path, trial_dir: &Path, reference: &str, hold: &str) -> Result<(), String>;
+
+    /// The refs on origin that would clash with `sync/<member>/<sha>` and `trial/sync/<member>/<sha>`: an old flat `sync/<member>` or
+    /// `trial/sync/<member>` (git cannot hold a ref and a folder of the same name). Empty when none.
+    fn flat_refs(&self, root: &Path, trial_dir: &Path, member: &str) -> Result<Vec<String>, String>;
 }
 
 /// The real pusher: the runner `ci dispatch --trial` pushes with.
@@ -54,18 +59,43 @@ pub struct RealPush;
 
 impl Pusher for RealPush {
     fn push(&self, root: &Path, trial_dir: &Path, reference: &str, hold: &str) -> Result<(), String> {
-        let url = Git::new(root)
-            .text(&["remote", "get-url", "origin"])
-            .map(|t| t.trim().to_string())?;
-        push_with(
-            root,
-            &url,
-            trial_dir,
-            reference,
-            hold,
-            std::env::var("GITEA_TOKEN").ok().filter(|t| !t.is_empty()),
-        )
+        let (url, token) = origin_and_token(root)?;
+        push_with(root, &url, trial_dir, reference, hold, token)
     }
+
+    fn flat_refs(&self, root: &Path, trial_dir: &Path, member: &str) -> Result<Vec<String>, String> {
+        let (url, token) = origin_and_token(root)?;
+        flat_refs_with(root, &url, trial_dir, member, token)
+    }
+}
+
+/// The origin's url and the token, for a runner of the caller's own credentials.
+fn origin_and_token(root: &Path) -> Result<(String, Option<String>), String> {
+    let url = Git::new(root)
+        .text(&["remote", "get-url", "origin"])
+        .map(|t| t.trim().to_string())?;
+    Ok((url, std::env::var("GITEA_TOKEN").ok().filter(|t| !t.is_empty())))
+}
+
+/// [`RealPush::flat_refs`] with the origin's url and the token given: one `ls-remote` through the shared runner.
+fn flat_refs_with(root: &Path, url: &str, trial_dir: &Path, member: &str, token: Option<String>) -> Result<Vec<String>, String> {
+    if url.contains("://") && token.is_none() {
+        return Err("GITEA_TOKEN is not set (reading origin needs the token `ci dispatch --trial` uses)".to_string());
+    }
+    std::fs::create_dir_all(trial_dir).map_err(|e| format!("cannot create {}: {e}", trial_dir.display()))?;
+    let g = GitTrain::for_checkout(root, url, trial_dir, token);
+    let (sync, trial) = (format!("refs/heads/sync/{member}"), format!("refs/heads/trial/sync/{member}"));
+    let (ok, out) = g.run_git(Child::Authed, &["ls-remote", "--heads", "origin", &sync, &trial])?;
+    if !ok {
+        return Err(out.trim().to_string());
+    }
+    Ok(out
+        .lines()
+        .filter_map(|l| l.split_whitespace().nth(1))
+        .filter(|r| *r == sync || *r == trial)
+        .filter_map(|r| r.strip_prefix("refs/heads/"))
+        .map(str::to_string)
+        .collect())
 }
 
 /// [`RealPush::push`] with the token and the origin's url given.
@@ -93,7 +123,7 @@ pub fn trial_dir(root: &Path) -> Result<PathBuf, String> {
 pub struct Real;
 
 impl Dispatcher for Real {
-    fn dispatch(&self, root: &Path, trial_dir: &Path, member: &str, train: &str, max: &str) -> Result<GateRun, String> {
+    fn dispatch(&self, root: &Path, trial_dir: &Path, member: &str, train: &str, max: &str, relands: &[String]) -> Result<GateRun, String> {
         let program = match std::env::var_os("PADDOCK_SYNC_TRIAL_DISPATCH") {
             Some(p) => p.into(),
             None => crate::tool_cache::self_exe().map_err(|e| format!("this program cannot be found: {e}"))?,
@@ -102,9 +132,11 @@ impl Dispatcher for Real {
         cmd.args([
             "ci", "dispatch", "ci.yml", "--trial", member, "--onto", train, "--max", max, "--root",
         ])
-        .arg(root)
-        .env("PADDOCK_TRIAL_DIR", trial_dir)
-        .current_dir(root);
+        .arg(root);
+        for r in relands {
+            cmd.args(["--reland", r]);
+        }
+        cmd.env("PADDOCK_TRIAL_DIR", trial_dir).current_dir(root);
         let out = run_bounded(cmd, Limits::new(TIMEOUT)).map_err(|e| format!("`ci dispatch` could not run: {e}"))?;
         let code = match out.outcome {
             paddock_proc::Outcome::Exited(st) => st.code(),
@@ -153,6 +185,39 @@ pub fn not_run(why: &str) -> Step {
 /// ref, so no push replaces one. `merge check --gates` finds the trial by the same name ([`super::member_trial`]).
 pub fn sync_ref(member: &str, synced_sha: &str) -> String {
     format!("sync/{member}/{}", short(synced_sha))
+}
+
+/// `sync/<member>/<short sha>` as `(member, short sha)`: a last component of exactly nine hex digits (what [`sync_ref`] writes). An
+/// old flat `sync/<member>` (no sha) is `None`.
+pub fn split_sync_ref(reference: &str) -> Option<(&str, &str)> {
+    let (member, sha) = reference.strip_prefix("sync/")?.rsplit_once('/')?;
+    (sha.len() == 9 && sha.bytes().all(|b| b.is_ascii_hexdigit()) && !member.is_empty()).then_some((member, sha))
+}
+
+/// The member a branch name stands for: without a remote prefix, and for a sync branch (`sync/<member>`, `sync/<member>/<sha>`) the
+/// member it carries. The integrator works on `sync/<member>`; the train's merge subjects name `<member>`.
+pub fn member_key(name: &str) -> &str {
+    let n = name.strip_prefix("origin/").unwrap_or(name);
+    match split_sync_ref(n) {
+        Some((member, _)) => member,
+        None => n.strip_prefix("sync/").unwrap_or(n),
+    }
+}
+
+/// An old flat ref on origin blocks the new one: nothing is pushed.
+pub fn flat_ref_blocks(old: &[String], synced: &str) -> Step {
+    let why = format!(
+        "origin holds the old flat ref {} and git cannot hold {synced} beside it",
+        old.join(", ")
+    );
+    Step {
+        text: vec![format!(
+            "::error::merge sync-member: CI trial NOT DISPATCHED: {why}. Next step: delete the old ref(s) once their member has landed (`./dev ci trial-prune` deletes the flat refs of landed members; `git push origin --delete {}` otherwise), then run this again; or --no-trial \"<reason>\".",
+            old.join(" ")
+        )],
+        data: json!({"outcome": "not measured", "why": why, "refs": old}),
+        exit: Exit::NotMeasured,
+    }
 }
 
 /// The sync tip could not be pushed: nothing is dispatched.
@@ -348,6 +413,59 @@ mod tests {
         commit("c");
         assert!(push_with(&work, url, &scratch, "sync/m/bbbbbbbbb", "1m", None).is_err());
         assert_eq!(git(&bare, &["rev-parse", "refs/heads/sync/m/bbbbbbbbb"]), taken);
+    }
+
+    #[test]
+    fn a_sync_ref_splits_into_member_and_sha_and_a_flat_one_does_not() {
+        assert_eq!(split_sync_ref("sync/feat/x/012345678"), Some(("feat/x", "012345678")));
+        assert_eq!(split_sync_ref("sync/feat/x"), None);
+        assert_eq!(split_sync_ref("sync/feat/0123456789"), None);
+        assert_eq!(split_sync_ref("feat/x/012345678"), None);
+        for (name, key) in [
+            ("feat/x", "feat/x"),
+            ("origin/feat/x", "feat/x"),
+            ("sync/feat/x", "feat/x"),
+            ("sync/feat/x/012345678", "feat/x"),
+            ("origin/sync/feat/x", "feat/x"),
+        ] {
+            assert_eq!(member_key(name), key, "{name}");
+        }
+    }
+
+    /// An old flat ref (or flat trial ref) on origin is found, and its absence is an empty answer, not a pass of a blind check.
+    #[test]
+    fn the_old_flat_refs_of_a_member_are_found_on_origin_and_only_those() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (work, bare, scratch) = (tmp.path().join("work"), tmp.path().join("origin.git"), tmp.path().join("trial"));
+        std::fs::create_dir(&work).unwrap();
+        git(&work, &["init", "-q", "-b", "main"]);
+        git(&work, &["init", "-q", "--bare", bare.to_str().unwrap()]);
+        git(&work, &["remote", "add", "origin", bare.to_str().unwrap()]);
+        std::fs::write(work.join("f"), "1\n").unwrap();
+        git(&work, &["add", "f"]);
+        git(
+            &work,
+            &[
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@example.invalid",
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "-q",
+                "-m",
+                "a",
+            ],
+        );
+        let url = bare.to_str().unwrap();
+        assert!(flat_refs_with(&work, url, &scratch, "feat/x", None).unwrap().is_empty());
+        for r in ["sync/feat/x", "trial/sync/feat/x", "sync/feat/y"] {
+            git(&work, &["push", "-q", "origin", &format!("HEAD:refs/heads/{r}")]);
+        }
+        let mut found = flat_refs_with(&work, url, &scratch, "feat/x", None).unwrap();
+        found.sort_unstable();
+        assert_eq!(found, ["sync/feat/x", "trial/sync/feat/x"]);
     }
 
     #[test]
