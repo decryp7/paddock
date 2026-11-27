@@ -11,6 +11,7 @@
 use crate::ci_tool::{ToolCall, tail};
 use crate::disk::record::{self, Kind, Record};
 use crate::input_hash::{self, Real};
+use crate::throttle;
 pub use crate::tool_cache::Held;
 use crate::tool_cache::{exe, home, touch};
 use std::collections::HashMap;
@@ -170,6 +171,51 @@ fn publish(built: &Path, bin: &Path) -> Result<(), String> {
 /// Holds the cached `throttle` at `bin` for this run: the tool cache's one hold ([`crate::tool_cache::hold`]).
 pub fn hold(bin: &Path, env: &HashMap<String, String>) -> Result<Held, String> {
     crate::tool_cache::hold("throttle", bin, env)
+}
+
+/// The command that puts a heavy step through the machine-wide slot: [`throttle::throttle_prefix`], else the `throttle` built from the tree at
+/// `root` (once, kept in `built`; `build_limit` bounds that build), held under a name of this run's own for as long as `built` lives
+/// ([`crate::tool_cache::Held`]), so another agent pruning or replacing the shared cache cannot fail a later step. The one
+/// resolver of the push gate and of `./dev gen check`, so both queue for the same slot. `Err` is the whole explanation; `Ok(empty)` only for the test-only `PADDOCK_THROTTLE=off`.
+pub fn throttle_command_for(
+    root: &Path,
+    env: &HashMap<String, String>,
+    has_tool: &dyn Fn(&str) -> bool,
+    built: &std::sync::OnceLock<Result<crate::tool_cache::Held, String>>,
+    build_limit: Duration,
+) -> Result<Vec<String>, String> {
+    if throttle::throttle_override(env).map(|v| v.trim()) == Some("off") {
+        // Only a test may run without the slot: anything else is an override that makes the gate not measured.
+        return if env.contains_key(throttle::TEST_THROTTLE_OFF) {
+            Ok(Vec::new())
+        } else {
+            Err("PADDOCK_THROTTLE=off is set without the test-only variable PADDOCK_TEST_THROTTLE_OFF, so this is an override of the machine-wide slot (OVERRIDE SET); unset it".into())
+        };
+    }
+    let found = throttle::throttle_prefix(env, has_tool);
+    if !found.is_empty() {
+        return Ok(found);
+    }
+    // A build that failed for a reason that will not pass on its own is remembered for the run; one that timed out (or ran out of budget)
+    // is not: the next step builds it again instead of every row of the run reading a stale timeout.
+    if built.get().is_none() {
+        let result = ensure(root, env, build_limit).and_then(|bin| hold(&bin, env));
+        if let Err(e) = &result
+            && is_transient(e)
+        {
+            return Err(e.clone());
+        }
+        let _ = built.set(result);
+    }
+    match built.get().ok_or_else(|| "the heavy build was not recorded".to_string())? {
+        Ok(held) => Ok(vec![
+            held.path().display().to_string(),
+            "run".into(),
+            "pre-push".into(),
+            "--".into(),
+        ]),
+        Err(e) => Err(e.clone()),
+    }
 }
 
 #[cfg(all(test, unix))]
