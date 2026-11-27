@@ -67,7 +67,7 @@ cmd_probe() {
 }
 
 cmd_store_restore() {
-  local hash="${1:-}" store dest tmp t0="$SECONDS"
+  local hash="${1:-}" store dest tmp="" t0="$SECONDS"
   [[ "$hash" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::dev-tool-cache: store-restore needs the 40-hex input hash, got '$hash'. Next step: pass the key step's hash output."; exit 1; }
   store="$(store_dir)/$hash"
   dest="$(cache_path "$hash")"
@@ -76,15 +76,15 @@ cmd_store_restore() {
     out hit false
     return 0
   fi
-  tmp="$(dirname "$dest")/.store-$hash.$$"
-  if ! { mkdir -p "$(dirname "$dest")" && rm -rf "$tmp" && cp -R "$store/." "$tmp" && [ -n "$(ls -A "$tmp")" ]; }; then
-    rm -rf "$tmp"
+  # A folder this step made beside the destination (same volume, so the final move is a rename); `${tmp:?}` never expands to nothing.
+  if ! { mkdir -p "$(dirname "$dest")" && tmp="$(mktemp -d "$(dirname "$dest")/.store-$hash.XXXXXX")" && cp -R "$store/." "${tmp:?}" && [ -n "$(ls -A "${tmp:?}")" ]; }; then
+    [ -z "${tmp:-}" ] || rm -rf "${tmp:?}"
     echo "::warning::dev-tool-cache: the runner store entry $store could not be copied. Next step: the Actions cache or a build is used; check the /sccache volume."
     out hit false
     return 0
   fi
   # Our own copy replaces nothing running: an entry another step of this job made is only the same hash, as good as this one.
-  if [ -e "$dest" ]; then rm -rf "$tmp"; else mv "$tmp" "$dest"; fi
+  if [ -e "$dest" ]; then rm -rf "${tmp:?}"; else mv "${tmp:?}" "$dest"; fi
   touch "$store" 2>/dev/null || true   # a use, for the store's eviction order
   echo "dev-tool-cache: restored $hash from the runner store in $((SECONDS - t0)) s."
   out hit true
