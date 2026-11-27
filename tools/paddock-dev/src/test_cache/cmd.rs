@@ -230,7 +230,8 @@ pub fn command(a: &TestCacheArgs) -> Result<Report, CliError> {
             if a.action == "record" {
                 return record(a, &root, &cfg, &cands, store, &class);
             }
-            run(a, &root, &cfg, &cands, store, &class)
+            let ask = |asked: &[String], whole: bool, reused_any: bool| nextest(a, &root, &cfg, asked, whole, reused_any);
+            run_with(a, &root, &cfg, &cands, store, &class, &env_get, &trust_check(), &ask)
         }
         other => Err(fail(format!(
             "::error::ci test-cache: unknown action `{other}`. Next step: use `run`, `lookup` or `audit`."
@@ -254,32 +255,46 @@ fn audit(store: &FsStore) -> Report {
     )
 }
 
-fn run(
+/// One nextest run of the asked packages (every package when `whole`): its output and whether it succeeded. Real: [`nextest`].
+type NextestRun<'a> = &'a dyn Fn(&[String], bool, bool) -> Result<(String, bool), CliError>;
+
+/// `ci test-cache run` with the environment, the trust check and the nextest run given (the tests hand stand-ins).
+#[allow(clippy::too_many_arguments)]
+pub(super) fn run_with(
     a: &TestCacheArgs,
     root: &Path,
     cfg: &Config,
     cands: &[Candidate],
     store: &dyn Store,
     class: &RunnerClass,
+    env: &dyn Fn(&str) -> Option<String>,
+    trust: &Trust,
+    nextest_run: NextestRun<'_>,
 ) -> Result<Report, CliError> {
     let started = std::time::Instant::now();
     let filter = filter_of(a);
     let mut text: Vec<String> = Vec::new();
-    // Whether this run may read at all, and what the lookup said.
     // Whether this run may read, and what the lookup said. A run that may not reuse still looks the records up for the write rule
     // ([`super::not_overwriting_trusted`]), so it seeds and refreshes records; only its reuse is off.
-    let looked = decide(cands, cfg, class, &filter, store, now(), &trust_check());
-    let (decisions, notice) = match read_allowed(&env_get) {
+    let looked = decide(cands, cfg, class, &filter, store, now(), trust);
+    let read = read_allowed(env);
+    let (decisions, notice) = match &read {
         Err(why) => (
             cands.iter().map(|_| Decision::Run(super::Why::Off(why.clone()))).collect(),
-            Some(why),
+            Some(why.clone()),
         ),
         Ok(()) => looked.clone(),
     };
     if let Some(n) = notice {
         text.push(format!("::notice::test-cache: reuse is off for this run: {n}. Every target runs."));
     }
-    let nightly = super::is_nightly(&env_get);
+    // A run that may not read still looked the store up: a store that is down is told too, not hidden behind the other cause.
+    if read.is_err()
+        && let Some(down) = &looked.1
+    {
+        text.push(format!("::notice::test-cache: the store could not be read either: {down}."));
+    }
+    let nightly = super::is_nightly(env);
     let skip = cfg.mode() == Mode::On || a.reuse;
     let mut reused = 0;
     let mut why_run: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
@@ -322,7 +337,7 @@ fn run(
     if !left.is_empty() {
         let asked: Vec<String> = left.iter().map(|c| c.target.package.clone()).collect();
         let t0 = std::time::Instant::now();
-        let out = nextest(a, root, cfg, &asked, left.len() == cands.len() && a.only.is_none(), reused > 0)?;
+        let out = nextest_run(&asked, left.len() == cands.len() && a.only.is_none(), reused > 0)?;
         ran_secs = t0.elapsed().as_secs_f64();
         let judged = super::result::judge(&out.0, &asked);
         // One rule with the CI record step (`shadow_outcome`): a finding is a matched target that ran and failed, never one the filter
@@ -343,7 +358,7 @@ fn run(
             text.push(format!("test-cache: not stored target={t} ({why})"));
         }
         let mut put: Vec<Record> = Vec::new();
-        let writes = write_allowed(&env_get);
+        let writes = write_allowed(env);
         for c in &left {
             let p = &c.target.package;
             if judged.passed.contains(p) {
@@ -356,7 +371,7 @@ fn run(
                         run: format!("local-{}", std::process::id()),
                         job: String::new(),
                         attempt: 0,
-                        git_ref: env_get("GITHUB_REF").unwrap_or_default(),
+                        git_ref: env("GITHUB_REF").unwrap_or_default(),
                         commit: git_text(root, &["rev-parse", "HEAD"]).unwrap_or_default().trim().to_string(),
                         tests: judged.tests.get(p).copied().unwrap_or(0),
                         secs: ran_secs,
@@ -385,7 +400,12 @@ fn run(
                 }
             }
         }
-        if outcome.not_seen > 0 {
+        if let Some(why) = &judged.unreadable {
+            // Not "outside its filter": nothing of this run was judged, so nothing is known about any target (ER-33).
+            text.push(format!(
+                "test-cache: not measured: the run's output could not be read whole ({why}); nothing was judged, so nothing is stored"
+            ));
+        } else if outcome.not_seen > 0 {
             text.push(format!(
                 "test-cache: {} target(s) had no test in this run's output (outside its filter, or without tests): not stored",
                 outcome.not_seen
@@ -427,7 +447,6 @@ fn run(
     Ok(Report::new(data, text.join("\n")).with_exit(exit))
 }
 
-/// The runner's OS build as observed (`uname -sr`): reported in each record, never keyed (decision D5).
 /// The runner's OS build as observed (`uname -sr`): reported in each record, never keyed (decision D5).
 fn os_build() -> String {
     let mut cmd = paddock_proc::command("uname");

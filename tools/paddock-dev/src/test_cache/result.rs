@@ -15,6 +15,9 @@ pub struct Judged {
     pub not_passed: Vec<(String, String)>,
     /// Packages that ran and had a test fail, end flaky or pass on a retry (a subset of `not_passed`: not "never seen" or "log cut short").
     pub failed: BTreeSet<String>,
+    /// Why the whole run could not be read (no nextest run in the output, or a log cut short): nothing was judged, every asked package is
+    /// not measured. `None` when the log was read whole.
+    pub unreadable: Option<String>,
     /// How many tests each passed package ran.
     pub tests: std::collections::BTreeMap<String, u64>,
 }
@@ -34,10 +37,12 @@ pub fn judge(log: &str, asked: &[String]) -> Judged {
     };
     match nextest_log::read(log) {
         Err(NextestError::NoRun) => {
+            out.unreadable = Some("no nextest run in the output".into());
             why(&mut out, "no nextest run in the output".into());
             return out;
         }
         Err(NextestError::Partial(w)) => {
+            out.unreadable = Some(w.clone());
             why(&mut out, w);
             return out;
         }
