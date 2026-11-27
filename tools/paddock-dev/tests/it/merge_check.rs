@@ -3593,7 +3593,7 @@ mod merge_member {
         };
         // Paddock-Member alone: the ref is built from the member's head.
         let (head, text, log) = make(&|_| "\n\nPaddock-Member: feat/a\n".to_string());
-        assert!(!text.contains("names no member branch"), "{text}");
+        assert!(!text.contains("names its sync ref"), "{text}");
         assert!(log.contains(&format!("--branch sync/feat/a/{} ", &head[..9])), "{log}\n{text}");
         // Paddock-Sync-Ref: used as it is.
         let (head, text, log) = make(&|h| {
@@ -3605,7 +3605,7 @@ mod merge_member {
         assert!(log.contains(&format!("--branch sync/feat/a/{} ", &head[..9])), "{log}\n{text}");
         // The control: no trailer and a subject that names nothing is NOT read, and says so.
         let (_, text, log) = make(&|_| String::new());
-        assert!(text.contains("names no member branch") && log.is_empty(), "{text}\n{log}");
+        assert!(text.contains("names its sync ref") && log.is_empty(), "{text}\n{log}");
     }
 
     /// A conflict stops the command with the merge in progress, the message prepared, and the next step printed; nothing is resolved.
