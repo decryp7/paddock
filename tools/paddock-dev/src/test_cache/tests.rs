@@ -14,8 +14,24 @@ fn fixture(name: &str) -> String {
     std::fs::read_to_string(format!("{}/tests/ci-runs/{name}", env!("CARGO_MANIFEST_DIR"))).unwrap()
 }
 
+/// The shipped config with `[switch] green_runs` cleared. The runs in it are a record a train writes (`shadow-run --write`), not part of
+/// the schema these tests check, so the tests start from no green run whatever the shipped file holds.
+fn cfg_text() -> String {
+    let lines: Vec<&str> = CFG
+        .lines()
+        .map(|l| {
+            if l.trim_start().starts_with("green_runs") {
+                "green_runs = []"
+            } else {
+                l
+            }
+        })
+        .collect();
+    lines.join("\n") + "\n"
+}
+
 fn cfg() -> Config {
-    Config::parse(CFG).unwrap()
+    Config::parse(&cfg_text()).unwrap()
 }
 
 fn cand(dir: &str, hash: &str) -> Candidate {
@@ -88,7 +104,7 @@ fn the_key_changes_with_each_part_and_only_with_them() {
 }
 
 #[test]
-fn the_shipped_config_is_in_shadow_and_two_distinct_green_runs_switch_it_on() {
+fn a_config_with_no_green_run_is_in_shadow_and_two_distinct_green_runs_switch_it_on() {
     let c = cfg();
     assert_eq!(c.mode(), Mode::Shadow);
     let mut on = c.clone();
@@ -669,6 +685,43 @@ fn a_matched_target_that_ran_and_failed_is_a_soundness_finding_and_a_missing_one
 }
 
 #[test]
+fn a_filtered_local_run_reports_matched_targets_it_never_ran_as_not_seen_never_as_findings() {
+    // Train x's member gate: `test-cache run --filter 'package(=a)'` over a workspace whose other targets b and c matched local records.
+    // Only a ran; b was outside the filter (not seen) and must not be a finding. d ran and failed without a record: not stored.
+    let (a, b, c, d) = (cand("a", "h"), cand("b", "h"), cand("c", "h"), cand("d", "h"));
+    let log = [
+        "    Starting 2 tests across 2 binaries",
+        "        PASS [   0.010s] ( 1/2) a t::ok",
+        "        FAIL [   0.010s] ( 2/2) d t::broken",
+        "     Summary [   0.050s] 2 tests run: 1 passed, 1 failed, 0 skipped",
+        "        FAIL [   0.010s] ( 2/2) d t::broken",
+    ]
+    .join("\n");
+    let judged = judge(&log, &names(&["a", "b", "c", "d"]));
+    let out = super::run_outcome(&[&a, &b, &c, &d], &[&a, &b, &c], &judged);
+    assert_eq!(
+        out.shadow,
+        shadow_outcome(&[&a, &b, &c], &judged),
+        "one rule for the local run and the CI record step"
+    );
+    assert!(
+        out.shadow.findings.is_empty(),
+        "a target outside the filter is not a finding: {:?}",
+        out.shadow.findings
+    );
+    assert_eq!((out.shadow.matched, out.shadow.passed), (1, 1));
+    assert_eq!(out.not_seen, 2, "b and c are not seen");
+    assert_eq!(out.not_stored.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>(), vec!["rust:d"]);
+    // The nightly invalidates only what ran and failed: d, never b or c (not seen) or a (passed).
+    assert!(out.ran_and_failed("rust:d"));
+    assert!(!out.ran_and_failed("rust:a") && !out.ran_and_failed("rust:b") && !out.ran_and_failed("rust:c"));
+    // A matched target that ran and failed is still the finding.
+    let red = super::run_outcome(&[&a, &d], &[&a, &d], &judged);
+    assert_eq!(red.shadow.findings, vec!["rust:d".to_string()]);
+    assert!(red.not_stored.is_empty() && red.not_seen == 0 && red.ran_and_failed("rust:d"));
+}
+
+#[test]
 fn the_shadow_lines_of_several_jobs_sum_and_no_line_is_not_measured() {
     let logs = vec![
         "2026-11-26T00:00:00Z test-cache shadow: matched 3, passed 3, findings 0".to_string(),
@@ -682,7 +735,7 @@ fn the_shadow_lines_of_several_jobs_sum_and_no_line_is_not_measured() {
 
 #[test]
 fn a_run_is_added_to_the_green_runs_once_and_the_file_still_parses() {
-    let one = with_green_run(CFG, 9001).unwrap();
+    let one = with_green_run(&cfg_text(), 9001).unwrap();
     assert_eq!(Config::parse(&one).unwrap().switch.green_runs, vec![9001]);
     assert_eq!(Config::parse(&one).unwrap().mode(), Mode::Shadow);
     assert_eq!(with_green_run(&one, 9001).unwrap(), one, "the same run twice changes nothing");

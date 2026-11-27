@@ -258,6 +258,11 @@ struct SyncMemberArgs {
     /// The longest the trial's dispatch waits for a busy runner (default 30m).
     #[arg(long, value_name = "DURATION", default_value = merge_check::trial_dispatch::DEFAULT_MAX)]
     trial_max: String,
+    /// A revert on the train of the member's own earlier merge that the sync tip re-applies (repeatable); the ones in the member's
+    /// history that `git revert <revert>` already re-applied are found without it. The trial's merge carries a `Reverted:` line for each
+    /// file the revert took out, so the trial's merge check accepts the re-add.
+    #[arg(long, value_name = "REVERT")]
+    reland: Vec<String>,
 }
 
 #[derive(Subcommand)]
@@ -943,6 +948,7 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
                 no_static: a.no_static.as_deref(),
                 no_trial: a.no_trial.as_deref(),
                 trial_max: &a.trial_max,
+                relands: &a.reland,
             },
         ),
         Command::Merge {

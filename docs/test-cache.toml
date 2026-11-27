@@ -21,4 +21,4 @@ no_test_cache = []
 # here by run id. In shadow mode every target still runs, and a target whose key matched a record and then failed is a soundness
 # finding that blocks the switch.
 [switch]
-green_runs = []
+green_runs = [9180]
