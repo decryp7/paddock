@@ -90,7 +90,7 @@ package.json     the one npm workspace and package-lock.json (ui, eslint, icons,
   **only for a member with no green trial of its own on main** (a Linux trial with `--onto origin/main` on its current head, or on a head whose only differences are merges of main; user 2026-11-27).
   A member that has one runs sync-member and joins with `--no-trial "trial <run id> green on main"` (logged); members without one join on the static rows, and **one trial of the
   train tip** after they are merged covers them all (red: pull the member it points to, ER-8, and run it again). Where a member has its own trial, `./dev merge check --gates` reads it
-  (red blocks, running is not a pass; `--no-trial "<reason>"` skips it, logged). The final full CI run and `landing-held` are unchanged (ER-49).
+  (red blocks, running is not a pass; `--no-trial "<reason>"` skips it, logged). A train takes up to 8 ready members (user 2026-11-27, was 3 to 4); a red full run pulls the member its failure points to (ER-8) and the train runs again once. The final full CI run and `landing-held` are unchanged (ER-49).
 - **Train merges are made by `./dev merge member` (user decision 100, 2026-11-27).** In the train's worktree: `./dev merge member <member-branch-or-sync-ref> [--reland <revert>]...`
   does the `git merge --no-ff` itself with the fixed subject `Merge <member> into <train>` and the trailers `Paddock-Member`, `Paddock-Sync-Ref` (a
   `sync/<member>/<sha>` ref was given), `Paddock-Sync-Sha`, the `Reverted:` lines `merge check --write-reverted` would write and `Paddock-Reland`
@@ -165,6 +165,7 @@ package.json     the one npm workspace and package-lock.json (ui, eslint, icons,
   opt in (`windowsClippy`) and the developer tools `tools/paddock-dev` and `tools/throttle` (user, 2026-11-26: Windows-only dead code found
   only by CI four times in a day), as heavy rows in parallel with the others and through sccache; Windows tests stay CI's. The register (`NOT_RUN` in
   `pre_push/gates.rs`) names them CI-owned.
+  A builder may run its affected Linux tests as ONE CI trial of its own pushed branch (`./dev ci dispatch ci.yml --trial <branch> --onto origin/main`, never main or `train/*`; playbook ER-9 amendment, user 2026-11-27); locally only the fast static rows run.
 - The member gate (`./dev check --pre-push --member-gate`, run by `./dev merge check --gates`) also runs the full nextest `ci`
   profile of every touched Cargo workspace (the plan's reached packages, as CI's member run) on the host (`tests <ws>`). Inactive apps
   are skipped and named. A developer's push skips these rows.
@@ -285,6 +286,7 @@ Apply these deliberately. They are not decoration:
 
 ## Working practices
 
+- Flaky or platform-dependent failures cite the vendor's documentation in the commit (ER-28; the bug-fix skill has the steps).
 - Research official sources before choosing libraries or relying on another program's behaviour, and record what you
   found and when in the ADR or doc comment. Prefer well-maintained, permissively licensed dependencies.
 - Navigate code with Serena's symbol tools (find symbol, references, overview) when they are available instead of
