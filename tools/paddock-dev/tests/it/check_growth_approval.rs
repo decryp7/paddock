@@ -242,3 +242,55 @@ fn a_digest_of_other_additions_a_wrong_count_a_line_that_is_not_the_users_or_ano
         assert!(!found[0].message.contains("does not match"), "{}", found[0].message);
     }
 }
+
+/// The JavaScript host (`conformance/src/util/baseline.mjs`, which still blocks C71, C104, C115, C135 and its C139 in CI's conformance
+/// line) reads the same `[[register_growth]]` entries with the same digest: for each case both readers agree on whether the user's entry
+/// approves the additions, and on the digest itself (keys with a NUL, and an astral and a BMP character whose byte order differs from
+/// their UTF-16 order).
+#[test]
+fn the_javascript_reader_agrees_with_the_rust_reader_on_digest_and_approval() {
+    use super::check::{has_node, node, skip};
+    use paddock_dev::check::growth_approval::{GrowthApproval, growth_approval, growth_digest};
+    if !has_node() {
+        return skip("node is not installed");
+    }
+    let keys: Vec<String> = ["a.rs\0h2", "\u{FF5E}", "\u{1F600}", "b"].iter().map(|k| k.to_string()).collect();
+    let right = growth_digest(&keys);
+    let refs: Vec<&str> = keys.iter().map(String::as_str).collect();
+    assert_eq!(right, digest(&refs), "the Rust digest is the definition");
+    let cases: Vec<(String, String)> = vec![
+        ("C139".into(), gates("C139", "user", 4, &right)),
+        ("C139".into(), gates("C139", "user", 4, &digest(&["x"]))),
+        ("C139".into(), gates("C139", "user", 3, &right)),
+        ("C139".into(), gates("C139", "coordinator", 4, &right)),
+        ("C139".into(), gates("C53", "user", 4, &right)),
+        ("C139".into(), "version = 1\n".into()),
+        (
+            "C139".into(),
+            format!("{}\n[[other]]\ncheck = \"C139\"\n", gates("C139", "user", 4, &right)),
+        ),
+    ];
+    let want: Vec<bool> = cases
+        .iter()
+        .map(|(c, g)| growth_approval(Some(g), c, &keys) == GrowthApproval::Approved)
+        .collect();
+    assert_eq!(
+        want,
+        [true, false, false, false, false, false, true],
+        "the Rust reader's own answers"
+    );
+    let input = serde_json::json!({"keys": keys, "cases": cases}).to_string();
+    let js = node(
+        r#"
+import { pathToFileURL } from 'node:url';
+import { join } from 'node:path';
+const { growthApproved, growthDigest } = await import(pathToFileURL(join(process.cwd(), 'conformance/src/util/baseline.mjs')).href);
+const { keys, cases } = JSON.parse(process.env.GA_INPUT);
+process.stdout.write(JSON.stringify({ digest: growthDigest(keys), approved: cases.map(([c, g]) => growthApproved(g, c, keys)) }));
+"#,
+        &[("GA_INPUT", input)],
+    );
+    let js: serde_json::Value = serde_json::from_str(&js).unwrap();
+    assert_eq!(js["digest"], right.as_str());
+    assert_eq!(js["approved"], serde_json::json!(want));
+}

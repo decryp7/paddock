@@ -113,13 +113,14 @@ export class AllowList {
       entriesOf: (json) => expandEntries(parseAllowList(JSON.stringify(json), this.file)),
       ...(this.ctx.options?.git ? { git: this.ctx.options.git } : {}),
       baseRef: targetRef(this.ctx.options),
+      check: id,
     });
     if (g.reason) return [unmeasuredFinding(this.ctx, { id, rule, file: this.file, what: "the allow list", g })];
     if (g.added.length === 0) return [];
     const n = g.added.length;
     // A spec's `growth: 'error'` (C30 once it blocks; JavaScript only, it has no Rust twin) makes the growth an error; the default is a warning.
     const severity = this.spec.growth === 'error' ? error : warn;
-    return [{ ...severity(id, rule, this.file, 1, `the allow list grew: ${n} entr${n === 1 ? 'y is' : 'ies are'} (counting each \`count\`) not in ${this.file} at the merge base ${g.base.slice(0, 9)}; it may only shrink`, "Remove the added entries or lower the raised counts and fix the sites. Growing the list needs the user's approval."), unwaivable: true }];
+    return [{ ...severity(id, rule, this.file, 1, `the allow list grew: ${n} entr${n === 1 ? 'y is' : 'ies are'} (counting each \`count\`) not in ${this.file} at the merge base ${g.base.slice(0, 9)}; it may only shrink`, `Remove the added entries or lower the raised counts and fix the sites. Growing the list needs the user's approval.${g.ask ? ` ${g.ask}` : ''}`), unwaivable: true }];
   }
 
   /**

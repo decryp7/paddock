@@ -5,6 +5,9 @@
 // A check's list has to land on the target branch while the check is still report-only: a list that does not exist at the merge base is an empty base, so every entry
 // of a list created on a branch is growth (ER-46) and the branch gets one finding per file until the list is on the target branch.
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { error, unwaivable, warn } from '../finding.mjs';
 
 /**
@@ -83,13 +86,70 @@ export function isWorkTree(root, git = defaultGit(root)) {
   }
 }
 
+/** The register of the user's approvals of growth (ER-46): docs/gates.toml. Rust host: `check::growth_approval` (the same entries, the same digest). */
+export const GROWTH_REGISTER = 'docs/gates.toml';
+
+/** SHA-256 (hex) of the added keys, sorted by bytes and joined by a newline: what an approval of growth names. */
+export function growthDigest(keys) {
+  const sorted = keys.map((k) => Buffer.from(k)).sort(Buffer.compare).map((b) => b.toString('utf8'));
+  return createHash('sha256').update(sorted.join('\n')).digest('hex');
+}
+
+/** The `[[register_growth]]` tables of the register's text: string and integer values only (as paddock.waivers.toml is read). */
+export function registerGrowth(text) {
+  const out = [];
+  let cur = null;
+  for (const raw of String(text ?? '').split(/\r?\n/)) {
+    const line = raw.trim();
+    if (line.startsWith('[')) {
+      cur = line === '[[register_growth]]' ? {} : null;
+      if (cur) out.push(cur);
+    } else if (cur && line && !line.startsWith('#')) {
+      const m = /^([A-Za-z_]+)\s*=\s*(?:"((?:[^"\\]|\\.)*)"|(-?\d+))\s*(?:#.*)?$/.exec(line);
+      if (m) cur[m[1]] = m[3] === undefined ? m[2] : Number(m[3]);
+    }
+  }
+  return out;
+}
+
+/** Whether an entry of the user in `text` (docs/gates.toml) names exactly these additions of `check`: count and digest. */
+export function growthApproved(text, check, keys) {
+  const digest = growthDigest(keys);
+  return registerGrowth(text).some(
+    (e) => e.check === check && e.by === 'user' && typeof e.date === 'string' && e.date.trim() !== '' && e.count === keys.length && e.digest === digest,
+  );
+}
+
+/** The line the user adds to the register to approve `keys` for `check` (the finding's fix prints it). */
+export const approvalLine = (check, keys) =>
+  `The user records it in ${GROWTH_REGISTER}: [[register_growth]] check = "${check}", by = "user", date = "<day>", count = ${keys.length}, digest = "${growthDigest(keys)}" (ER-46).`;
+
+/**
+ * The growth `g` of check `check` after the user's approval (`register` is the register's text, read from the tree when omitted): approved
+ * additions are dropped (`added` empty); otherwise `g.ask` is the sentence for the fix. A growth without a `check` is returned as it is.
+ */
+function approve(g, { root, check, register, keyOf }) {
+  if (!check || !g.added?.length) return g;
+  const keys = g.added.map(keyOf);
+  let text = register;
+  if (text === undefined) {
+    try {
+      text = readFileSync(join(root, GROWTH_REGISTER), 'utf8');
+    } catch {
+      text = '';
+    }
+  }
+  return growthApproved(text, check, keys) ? { ...g, added: [] } : { ...g, ask: approvalLine(check, keys) };
+}
+
 /**
  * The entries of `current` that the baseline at the merge base does not have (a multiset difference by `keyOf`), or `{ reason }` when
  * it cannot be measured (no git, no merge base, an unreadable file). A baseline absent at the merge base is an empty base (every entry is growth, ER-46).
  * With `looseKeyOf` an entry whose loose key (say the hash) is in the base but whose full key is not is `moved`, not
- * added (`moved: [{ item, from }]`). `entriesOf(json)` reads the list out of the parsed file; `git` and `baseRef` are injectable for tests.
+ * added (`moved: [{ item, from }]`). With `check`, additions the user approved in the register are dropped and the rest carry `ask`. `entriesOf(json)` reads the list out of the parsed file; `git` and `baseRef` are injectable for tests.
  */
-export function baselineGrowth({ root, path, current, keyOf, entriesOf, git = defaultGit(root), baseRef = targetRef(), looseKeyOf }) {
+export function baselineGrowth({ root, path, current, keyOf, entriesOf, git = defaultGit(root), baseRef = targetRef(), looseKeyOf, check, register }) {
+  const done = (g) => approve(g, { root, check, register, keyOf });
   let base;
   let text;
   try {
@@ -106,7 +166,7 @@ export function baselineGrowth({ root, path, current, keyOf, entriesOf, git = de
     // number of entries in silently (a new apps/<app>/app/eslint-suppressions.json with count 5, the second time this class was found).
     if (/does not exist|exists on disk, but not in|not in/.test(String(e.stderr ?? e.message))) {
       const { fresh, moved } = reconcile(current, [], keyOf, looseKeyOf);
-      return { base, added: fresh, moved };
+      return done({ base, added: fresh, moved });
     }
     return { kind: 'unreadable', reason: `the baseline at ${base.slice(0, 9)} cannot be read` };
   }
@@ -117,7 +177,7 @@ export function baselineGrowth({ root, path, current, keyOf, entriesOf, git = de
     return { kind: 'unparsed', reason: `the baseline at ${base.slice(0, 9)} cannot be parsed` };
   }
   const { fresh, moved } = reconcile(current, entries, keyOf, looseKeyOf);
-  return { base, added: fresh, moved };
+  return done({ base, added: fresh, moved });
 }
 
 /**
