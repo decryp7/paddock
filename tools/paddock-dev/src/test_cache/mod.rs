@@ -42,7 +42,8 @@ pub struct Candidate {
     /// A file of the node has uncommitted changes: the hash describes HEAD, so the target runs and is not stored.
     pub dirty: bool,
     /// The reads of its crate the graph cannot resolve (a manifest folder in a variable, `ancestors`, a join with a non-literal, ...),
-    /// one line each: its key cannot say what it reads, so it is never reused (ADR 0116 §2). Recording continues.
+    /// one line each: its key cannot say what it reads, so it is never reused (ADR 0116 §2), and its pass is not stored either: it is not looked
+    /// up, so a record would be written over an unread one, and nothing reads it (user, 2026-11-28).
     pub blind: Vec<String>,
 }
 
@@ -106,8 +107,9 @@ pub fn key_of(c: &Candidate, cfg: &Config, class: &RunnerClass, filter: &str) ->
     )
 }
 
-/// One decision per candidate, in order, from one bulk lookup. A store that errors turns reuse off for every target (fail open,
-/// §5: everything runs, never the other way round); the cause is the second answer, for one notice. `trust` is the reader-side
+/// One decision per candidate, in order, from one bulk lookup. A key the store could not answer turns reuse off for that target only
+/// ([`Why::Off`], fail open per item, §5 as amended 2026-11-28: it runs, never the other way round) and the others keep their answers; the
+/// second answer is one sentence naming how many failed and the first cause, for one notice, `None` when none failed. `trust` is the reader-side
 /// check of a record (§7); `now` is Unix seconds. `filter` is the filterset the run this lookup is for is narrowed to: a record counts
 /// only under the same filter.
 pub fn decide(
@@ -133,11 +135,18 @@ pub fn decide(
             });
         }
     }
-    let found = match store.get_many(&asks) {
-        Ok(f) if f.len() == asks.len() => f,
-        Ok(f) => return off(cands, format!("the store answered {} records for {} keys", f.len(), asks.len())),
-        Err(e) => return off(cands, e.to_string()),
-    };
+    let found = store.get_many(&asks);
+    if found.len() != asks.len() {
+        return off(cands, format!("the store answered {} records for {} keys", found.len(), asks.len()));
+    }
+    let failed: Vec<&store::StoreError> = found.iter().filter_map(|f| f.as_ref().err()).collect();
+    let notice = failed.first().map(|e| {
+        format!(
+            "the store lookup failed for {} of {} keys: {e}. Those targets run; the others keep their answers.",
+            failed.len(),
+            asks.len()
+        )
+    });
     let limit = cfg.max_age();
     let out = cands
         .iter()
@@ -152,7 +161,11 @@ pub fn decide(
                     Why::Dirty
                 });
             };
-            let Some(r) = &found[i] else { return Decision::Run(Why::Miss) };
+            let r = match &found[i] {
+                Ok(Some(r)) => r,
+                Ok(None) => return Decision::Run(Why::Miss),
+                Err(e) => return Decision::Run(Why::Off(e.to_string())),
+            };
             if limit.is_some_and(|l: Duration| now.saturating_sub(r.at) > l.as_secs()) {
                 return Decision::Run(Why::TooOld);
             }
@@ -163,7 +176,7 @@ pub fn decide(
             }
         })
         .collect();
-    (out, None)
+    (out, notice)
 }
 
 /// The blind reads of each crate, split by what covers them (ADR 0116 §2, user decision 122).

@@ -234,8 +234,8 @@ fn a_run_cut_short_or_without_the_package_is_not_a_pass() {
 
 struct Down;
 impl Store for Down {
-    fn get_many(&self, _: &[Lookup]) -> Result<Vec<Option<Record>>, StoreError> {
-        Err(StoreError("connection refused".into()))
+    fn get_many(&self, l: &[Lookup]) -> Vec<Result<Option<Record>, StoreError>> {
+        l.iter().map(|_| Err(StoreError("connection refused".into()))).collect()
     }
     fn put_many(&self, _: &[Record]) -> Result<(), StoreError> {
         Err(StoreError("connection refused".into()))
@@ -329,9 +329,8 @@ fn the_record_step_never_replaces_a_trusted_or_undecided_record_and_names_the_un
     };
     let back: Vec<String> = s
         .get_many(&[key(&a), key(&b), key(&c), key(&n), key(&o)])
-        .unwrap()
         .into_iter()
-        .map(|r| r.unwrap().run)
+        .map(|r| r.unwrap().unwrap().run)
         .collect();
     assert_eq!(
         back,
@@ -395,7 +394,7 @@ fn a_record_step_whose_lookup_failed_says_so_and_counts_its_held_records_under_i
     assert!(
         lines
             .iter()
-            .any(|l| l.starts_with("::notice::test-cache: the store lookup failed: read timed out.")),
+            .any(|l| l.starts_with("::notice::test-cache: the store lookup failed for 2 of 2 keys: read timed out.")),
         "{lines:?}"
     );
     assert!(
@@ -508,14 +507,137 @@ fn the_plan_line_puts_the_counts_before_a_long_filter_and_cuts_the_filter() {
     assert!(line.ends_with(&format!("...` ({} characters))", long.chars().count())), "{line}");
 }
 
+/// A store that answers every key but one: a timeout on that one request (RustFS on a slow disk, user decision 136).
+struct OneKeyTimesOut {
+    inner: FsStore,
+    bad: String,
+}
+impl Store for OneKeyTimesOut {
+    fn get_many(&self, l: &[Lookup]) -> Vec<Result<Option<Record>, StoreError>> {
+        let mut out = self.inner.get_many(l);
+        for (i, k) in l.iter().enumerate() {
+            if k.target == self.bad {
+                out[i] = Err(StoreError(
+                    "curl failed: curl: (28) Operation timed out after 5002 milliseconds".into(),
+                ));
+            }
+        }
+        out
+    }
+    fn put_many(&self, r: &[Record]) -> Result<(), StoreError> {
+        self.inner.put_many(r)
+    }
+    fn delete_many(&self, l: &[Lookup]) -> Result<Vec<Option<Record>>, StoreError> {
+        self.inner.delete_many(l)
+    }
+}
+
+/// ADR 0116 §5 as amended 2026-11-28 (PRINCIPLES, bulk APIs: errors are per item): one key that times out runs that target only, and the
+/// other N-1 keep their answers. Run 9335 turned 56 reusable Linux packages into 0 because one request of 61 timed out.
+#[test]
+fn a_key_whose_lookup_failed_runs_that_target_only_and_the_others_keep_their_answers() {
+    let (_d, s) = scratch();
+    let class = RunnerClass::here();
+    let cands: Vec<Candidate> = ["a", "b", "c"].iter().map(|n| cand(n, "h")).collect();
+    let recs: Vec<Record> = cands.iter().map(|c| rec(c, &class, NOW - 60)).collect();
+    s.put_many(&recs).unwrap();
+    let store = OneKeyTimesOut {
+        inner: s,
+        bad: "rust:b".into(),
+    };
+    let (d, notice) = decide(&cands, &cfg(), &class, "", &store, NOW, OK);
+    assert!(matches!(d[0], Decision::Reuse(_)) && matches!(d[2], Decision::Reuse(_)), "{d:?}");
+    assert!(matches!(&d[1], Decision::Run(Why::Off(w)) if w.contains("(28)")), "{d:?}");
+    let n = notice.unwrap();
+    assert!(n.contains("failed for 1 of 3 keys") && n.contains("(28)"), "{n}");
+    // The record step keeps its shadow line (two answers were read), says the cause, and holds only the failed target's record back.
+    let meta = RunMeta {
+        run: "1".into(),
+        job: "j".into(),
+        attempt: 1,
+        git_ref: "refs/heads/train/x".into(),
+        commit: "c".into(),
+        at: NOW,
+        os_build: String::new(),
+    };
+    let log = [
+        "    Starting 3 tests across 3 binaries",
+        "        PASS [   0.010s] ( 1/3) a t::ok",
+        "        PASS [   0.010s] ( 2/3) b t::ok",
+        "        PASS [   0.010s] ( 3/3) c t::ok",
+        "     Summary [   0.050s] 3 tests run: 3 passed, 0 failed, 0 skipped",
+    ]
+    .join("\n");
+    let (lines, _) = super::cmd::record_with(&log, &cands, &cfg(), &class, "", &meta, &store, OK);
+    assert!(
+        lines.iter().any(|l| l == "test-cache shadow: matched 2, passed 2, findings 0"),
+        "{lines:?}"
+    );
+    assert!(
+        lines
+            .iter()
+            .any(|l| l.starts_with("::notice::test-cache: the store lookup failed for 1 of 3 keys")),
+        "{lines:?}"
+    );
+    assert!(
+        lines.iter().any(|l| l.ends_with(
+            "held back 3: 2 already trusted, 1 store lookup failed (curl failed: curl: (28) Operation timed out after 5002 milliseconds)"
+        )),
+        "{lines:?}"
+    );
+}
+
+/// The S3 store's per-item answers: a block with no answer (status 0) or a 5xx gets one more try, alone; an item that still fails is an
+/// error for that item; a call that fails whole is not tried again.
+#[test]
+fn the_s3_lookup_retries_a_failed_request_once_and_never_fails_the_others() {
+    use super::s3::{Block, fetch_each};
+    let block = |i: usize| -> Block { (format!("http://x/{i}"), std::path::PathBuf::from(format!("/o/{i}")), None, "GET") };
+    let blocks: Vec<Block> = (0..5).map(block).collect();
+    let name = |b: &Block| b.1.display().to_string();
+    // Block 2 times out on the first try and answers on the second.
+    let mut calls: Vec<usize> = Vec::new();
+    let mut try_ = |bs: &[Block]| {
+        calls.push(bs.len());
+        let done = bs
+            .iter()
+            .map(|b| (if name(b) == "/o/2" && calls.len() == 1 { 0 } else { 404 }, name(b)))
+            .collect();
+        Ok((done, Some("curl failed: (28)".to_string())))
+    };
+    let got = fetch_each(&blocks, &mut try_);
+    assert_eq!(calls, [5, 1], "one try for all, one more for the failed one alone");
+    assert!(got.iter().all(|r| matches!(r, Ok(404))), "{got:?}");
+    // Block 3 never answers: that item is an error with curl's words, the other four keep their statuses, and there is one retry only.
+    let mut calls = 0;
+    let mut try_ = |bs: &[Block]| {
+        calls += 1;
+        let done = bs.iter().map(|b| (if name(b) == "/o/3" { 0 } else { 200 }, name(b))).collect();
+        Ok((done, Some("curl failed: (28)".to_string())))
+    };
+    let got = fetch_each(&blocks, &mut try_);
+    assert_eq!(calls, 2);
+    assert!(matches!(&got[3], Err(e) if e.0.contains("(28)")), "{got:?}");
+    assert_eq!(got.iter().filter(|r| matches!(r, Ok(200))).count(), 4, "{got:?}");
+    // A call that failed whole is every item's error and is not tried again.
+    let mut calls = 0;
+    let mut try_ = |_: &[Block]| {
+        calls += 1;
+        Err(StoreError("the store did not answer: timed out".into()))
+    };
+    let got = fetch_each(&blocks, &mut try_);
+    assert_eq!(calls, 1);
+    assert!(got.iter().all(|r| r.is_err()), "{got:?}");
+}
+
 /// A store whose lookups fail and whose writes succeed, counting the records it was given.
 #[derive(Default)]
 struct BlindStore {
     put: std::cell::Cell<usize>,
 }
 impl Store for BlindStore {
-    fn get_many(&self, _: &[Lookup]) -> Result<Vec<Option<Record>>, StoreError> {
-        Err(StoreError("read timed out".into()))
+    fn get_many(&self, l: &[Lookup]) -> Vec<Result<Option<Record>, StoreError>> {
+        l.iter().map(|_| Err(StoreError("read timed out".into()))).collect()
     }
     fn put_many(&self, r: &[Record]) -> Result<(), StoreError> {
         self.put.set(self.put.get() + r.len());
@@ -1552,9 +1674,12 @@ mod run_wiring {
         let a = cand("nxflaky", "h");
         let off = go(std::slice::from_ref(&a), &Down, TAG, &clean_log());
         assert!(off.contains("reuse is off for this run: a tag run"), "{off}");
-        assert!(off.contains("could not be read either: connection refused"), "{off}");
+        assert!(
+            off.contains("could not be read either: the store lookup failed for 1 of 1 keys: connection refused"),
+            "{off}"
+        );
         let on = go(std::slice::from_ref(&a), &Down, &[], &clean_log());
-        assert!(on.contains("reuse is off for this run: connection refused"), "{on}");
+        assert!(on.contains("the store lookup failed for 1 of 1 keys: connection refused"), "{on}");
         assert!(!on.contains("either"), "one cause, said once: {on}");
     }
 

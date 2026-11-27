@@ -460,7 +460,7 @@ jobs:
       - env:
           PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
         uses: ./.gitea/actions/dev-tool-cache
-      - name: Test cache lookup per runner class
+      - name: Test cache lookup (the plan job's own)
         continue-on-error: true
         env:
           PLAN_TOKEN: ${{ github.token }}
@@ -469,12 +469,9 @@ jobs:
           PADDOCK_TEST_CACHE_KEY_ID: ${{ secrets.PADDOCK_TEST_CACHE_KEY_ID }}
           PADDOCK_TEST_CACHE_SECRET: ${{ secrets.PADDOCK_TEST_CACHE_SECRET }}
           PADDOCK_SCCACHE_S3_ENDPOINT: ${{ vars.PADDOCK_SCCACHE_S3_ENDPOINT }}
-        run: |
-          for class in Linux-X64 macOS-ARM64 Windows-X64; do
-            echo "::group::test-cache $class"
-            ./dev ci test-cache lookup --workspace crates --class "$class" --shared || true
-            echo "::endgroup::"
-          done
+        # The plan job's own lookup (every class, both workspaces, every leg filter), so these numbers are the plan's (ER-33: the per-class
+        # `lookup` asked only the whole-package filter and showed 0 for the host legs of macOS and Windows).
+        run: ./dev ci test-cache plan --shared
 
   ui:
     needs: [plan]
