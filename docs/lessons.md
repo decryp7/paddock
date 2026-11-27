@@ -4522,6 +4522,26 @@ before it checks their names, with a failing test first (bug-fix skill). Open; n
   (`moved`, not growth). C171 reads `git diff -M`, and its waiver may sit above the statement that holds the literal. A moved file's changed content is
   judged as usual: a new offending line still fails, and a new entry is still growth.
 
+## A wait ended on a 401 its own token had not earned (2026-11-28, fix/ci-wait-token, ER-28)
+- **What happened.** On 2026-11-27/28 five `./dev wait --ci-run` waiters (runs 9284, 9285, 9286, 9320, 9321) ended after five failed looks with
+  `HTTP 401 invalid username, password or token`, while a fresh `curl` or `./dev ci trial-verdict` with the same `GITEA_TOKEN` worked.
+- **Causes ruled out (ER-28).** A temp config file removed by a reaper: the main-tree client sends the token on standard input (`-K -`), there is no file (the
+  `curl_config` writer on `fix/test-cache-windows-records` is for the S3 and download paths). A child that lost the environment: the token is read once and
+  held in the probe; a running waiter's environment held the same token as `~/.zshenv` (hash compared, never printed), unchanged since 2026-11-14. A lazy
+  or expiring secret: none exists. A per-wait-age timer: the failures end at the same wall-clock minutes for waiters that started at different times
+  (about 00:08 and 00:29), so the cause is not the age of the process. Reproduction: a 10-minute `./dev wait --ci-run` and 17 minutes of the same
+  request through `-K -` every 15 s stayed 200; the refusal did not recur, so it is a transient Gitea or proxy refusal (Gitea behind Caddy), not proven further.
+- **Fix.** `CiRunProbe` holds through a 401 that follows a good look in the same wait (up to 40 looks, 10 minutes at 15 s; the length of a real refusal is
+  not measured), writes one `::warning::` and one "answers again" line, and at the end prints one `::error::` naming the likely causes and the check to run.
+  A 401 on the first look is a wrong token and ends as before.
+- **Shared layer (same branch, coordinator's step, ER-22).** The hold also lives in the one HTTP layer: `CurlHttp` is now `Retrying<CurlOnce>`, so every
+  READ caller (ci_runs client, trial-verdict, verdict, load, the artifact reader) holds and retries a 401 or 5xx with backoff (2, 4, 8, 16, then 30 s,
+  at most 5 minutes in total) for a 401 once the process has had a good answer (a 5xx or a network failure, curl exit 6, 7, 28, 52 or 56, is retried on the first call too: the 2026-11-27 18:00 outage was connect timeouts), with one `::warning::`, one recovery line and one final error naming the causes.
+  Writes (`send_json`, `post_json`: a dispatch, PUT, DELETE) are never retried, because a retried dispatch could start two runs; a test pins it. A 401 before
+  any good answer stays a wrong token. `wait --ci-run` uses `CurlOnce` and keeps its own probe-level hold, which respects `--max` and the clock.
+  `ci_runs::client::Client` lost its own 4-attempt retry and its `backoff_ms` (one mechanism, ER-22): a read through it is retried by the layer's schedule
+  only, once. A first-call blip (before any good answer) is no longer retried at all; the layer holds only after a good answer.
+
 ## A curl config reads backslashes in quotes as escapes (2026-11-27, fix/test-cache-windows-records, run 9265)
 - **What happened.** The Windows crate leg recorded 0 of 61 packages in a green train run: its store lookup failed (no `test-cache shadow:` line, which
   every other leg printed), so every record counted as "no definite answer" and was held back. The record step wrote the scratch paths

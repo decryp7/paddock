@@ -497,13 +497,61 @@ pub struct CiRunProbe<'a> {
     url: String,
     token: String,
     run: u64,
+    /// Looks that Gitea answered since the start of this wait (the token worked).
+    good_looks: u32,
+    /// Looks in a row that Gitea refused the token after `good_looks` > 0: held, not failed ([`REFUSED_HOLD_LOOKS`]).
+    refused_in_a_row: u32,
+    notes: Vec<String>,
+}
+
+/// How many looks in a row a 401 is held through once the same token has been answered in this wait: 40 looks is 10 minutes at
+/// the default 15 s. Cause: on 2026-11-27/28 five waiters (runs 9284, 9285, 9286, 9320, 9321) ended on a 401 for a token that had
+/// worked minutes earlier and that a fresh `curl` accepted, each after the five failed looks (about 2.5 minutes) the wait tolerates;
+/// the real length of such a refusal is not measured, so the hold is bounded and ends with an `::error::` that names the cause.
+pub const REFUSED_HOLD_LOOKS: u32 = 40;
+
+/// Whether a failed look is Gitea refusing the token (curl's `--fail-with-body` text: HTTP 401).
+fn is_refused(error: &str) -> bool {
+    error.contains("error: 401") || error.contains("invalid username, password or token")
 }
 
 impl<'a> CiRunProbe<'a> {
     /// `server` like `https://dev.decryptology.net`, `repo` like `decryp7/paddock`.
     pub fn new(http: &'a mut dyn Http, server: &str, repo: &str, run: u64, token: String) -> CiRunProbe<'a> {
         let url = format!("{}/api/v1/repos/{repo}/actions/runs/{run}", server.trim_end_matches('/'));
-        CiRunProbe { http, url, token, run }
+        CiRunProbe {
+            http,
+            url,
+            token,
+            run,
+            good_looks: 0,
+            refused_in_a_row: 0,
+            notes: Vec::new(),
+        }
+    }
+
+    /// A 401 after good looks: the token is not wrong (it worked), so the wait holds up to [`REFUSED_HOLD_LOOKS`] looks in a row,
+    /// says so once, and only then fails with the likely causes.
+    fn refused(&mut self, error: &str) -> Result<Poll, String> {
+        self.refused_in_a_row += 1;
+        if self.refused_in_a_row == 1 {
+            self.notes.push(format!(
+                "::warning::wait: Gitea answered 401 to a token that worked {} looks earlier in this wait; holding up to {REFUSED_HOLD_LOOKS} looks",
+                self.good_looks
+            ));
+        }
+        if self.refused_in_a_row <= REFUSED_HOLD_LOOKS {
+            return Ok(Poll::Pending(format!(
+                "run {}: Gitea refused the token ({} looks in a row); holding",
+                self.run, self.refused_in_a_row
+            )));
+        }
+        Err(format!(
+            "{error}: the token worked {} looks earlier in this wait, so it is probably not wrong: Gitea or its proxy refused a valid \
+             token for {REFUSED_HOLD_LOOKS}+ looks, or the token was revoked. Check with `curl -H \"Authorization: token $GITEA_TOKEN\" \
+             <server>/api/v1/user` (never print the token), then run the wait again",
+            self.good_looks
+        ))
     }
 }
 
@@ -512,7 +560,19 @@ impl Probe for CiRunProbe<'_> {
         format!("CI run {} to complete", self.run)
     }
     fn poll(&mut self) -> Result<Poll, String> {
-        let v = self.http.get_json(&self.url, &self.token)?;
+        let v = match self.http.get_json(&self.url, &self.token) {
+            Ok(v) => v,
+            Err(e) if is_refused(&e) && self.good_looks > 0 => return self.refused(&e),
+            Err(e) => return Err(e),
+        };
+        if self.refused_in_a_row > 0 {
+            self.notes.push(format!(
+                "Gitea answers the token again after {} refused looks",
+                self.refused_in_a_row
+            ));
+            self.refused_in_a_row = 0;
+        }
+        self.good_looks += 1;
         let status = v.get("status").and_then(Value::as_str).unwrap_or("unknown");
         let conclusion = v.get("conclusion").and_then(Value::as_str).unwrap_or("");
         let finished = matches!(status, "completed" | "success" | "failure" | "cancelled" | "skipped") || !conclusion.is_empty();
@@ -527,6 +587,9 @@ impl Probe for CiRunProbe<'_> {
             Poll::Failed(text)
         })
     }
+    fn take_notes(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.notes)
+    }
     fn next_step(&self) -> String {
         format!(
             "open run {} in the browser to see which job is stuck; a queued run means no runner is free",
@@ -538,13 +601,13 @@ impl Probe for CiRunProbe<'_> {
 /// The `Accept` value of an artifact download, the one request that follows redirects.
 const ACCEPT_ZIP: &str = "application/zip";
 
-/// The real HTTP: `curl`, with the URL and the Authorization header on standard input (`-K -`) so the token is in no argument list.
-pub struct CurlHttp;
+/// One curl call per request, no retry: `curl`, with the URL and the Authorization header on standard input (`-K -`) so the token is in no argument list.
+pub struct CurlOnce;
 
-impl CurlHttp {
+impl CurlOnce {
     /// One GET through curl: the body, at most `max_bytes`, within `seconds`.
     fn get(url: &str, token: &str, accept: &str, max_bytes: u64, seconds: u32) -> Result<Vec<u8>, String> {
-        CurlHttp::request("GET", url, token, accept, None, max_bytes, seconds)
+        CurlOnce::request("GET", url, token, accept, None, max_bytes, seconds)
     }
 
     /// The curl config of one request, every value through [`crate::curl_config`]. An empty token is an anonymous request (the planner reads
@@ -607,7 +670,7 @@ impl CurlHttp {
             .spawn()
             .map_err(|e| format!("cannot start curl: {e}"))?;
         if let Some(mut stdin) = child.stdin.take() {
-            let _ = stdin.write_all(CurlHttp::config(method, url, token, accept, body).as_bytes());
+            let _ = stdin.write_all(CurlOnce::config(method, url, token, accept, body).as_bytes());
         }
         let out = child.wait_with_output().map_err(|e| format!("curl failed: {e}"))?;
         if !out.status.success() {
@@ -628,20 +691,20 @@ impl CurlHttp {
     }
 }
 
-impl Http for CurlHttp {
+impl Http for CurlOnce {
     fn get_json(&mut self, url: &str, token: &str) -> Result<Value, String> {
-        let body = CurlHttp::get(url, token, "application/json", 16 << 20, 20)?;
+        let body = CurlOnce::get(url, token, "application/json", 16 << 20, 20)?;
         serde_json::from_slice(&body).map_err(|e| format!("the server's answer is not JSON: {e}"))
     }
 
     fn get_text(&mut self, url: &str, token: &str) -> Result<String, String> {
         // A job log is a few MB; 64 MiB bounds a runaway one.
-        let body = CurlHttp::get(url, token, "text/plain", 64 << 20, 120)?;
+        let body = CurlOnce::get(url, token, "text/plain", 64 << 20, 120)?;
         Ok(String::from_utf8_lossy(&body).into_owned())
     }
 
     fn get_bytes(&mut self, url: &str, token: &str, max_bytes: u64) -> Result<Vec<u8>, String> {
-        CurlHttp::get(url, token, ACCEPT_ZIP, max_bytes, 120)
+        CurlOnce::get(url, token, ACCEPT_ZIP, max_bytes, 120)
     }
 
     fn get_redirect(&mut self, url: &str, token: &str) -> Result<Option<String>, String> {
@@ -690,11 +753,171 @@ impl Http for CurlHttp {
 
     fn send_json(&mut self, method: &str, url: &str, token: &str, body: Option<&Value>) -> Result<Value, String> {
         let text = body.map(Value::to_string);
-        let answer = CurlHttp::request(method, url, token, "application/json", text.as_deref(), 16 << 20, 30)?;
+        let answer = CurlOnce::request(method, url, token, "application/json", text.as_deref(), 16 << 20, 30)?;
         if answer.iter().all(u8::is_ascii_whitespace) {
             return Ok(Value::Null);
         }
         serde_json::from_slice(&answer).map_err(|e| format!("the server's answer is not JSON: {e}"))
+    }
+}
+
+/// Answers this process has had from the server (a body, or a 4xx other than 401): once there is one, a read that meets a 401 is
+/// held and retried by [`CurlHttp`] ([`Retrying`]); before it, a 401 is a wrong token and ends the call at once. A 5xx or a network
+/// failure is retried on the first call too.
+static GOOD_ANSWERS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// The most a read waits in total for a refusing server (backoff 2, 4, 8, 16, then 30 s). Cause: 2026-11-27/28, Gitea (it shares a
+/// host with the CI lanes) refused valid tokens for at least 2.5 minutes under load; the real length is not measured, so the hold is
+/// bounded and ends with an `::error::` naming the causes.
+pub const READ_HOLD: Duration = Duration::from_secs(300);
+
+/// The HTTP status curl's `--fail-with-body` text carries (`returned error: 401`), if any.
+fn http_status(error: &str) -> Option<u16> {
+    let rest = error.split("error: ").nth(1)?;
+    let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
+    digits.parse().ok().filter(|s| (100..600).contains(s))
+}
+
+/// The exit status of a failed curl call, from the text [`CurlOnce`] makes (`curl exited with exit status: 7: ...`).
+fn curl_exit(error: &str) -> Option<u32> {
+    let rest = error.split("exit status: ").nth(1)?;
+    let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
+    digits.parse().ok()
+}
+
+/// A failure that says nothing about the token and is worth another try at once: any 5xx, or curl failing at the network
+/// (6 resolve, 7 connect, 28 timeout, 52 empty reply, 56 receive; the 2026-11-27 18:00 outage was connect timeouts).
+fn is_blip(error: &str) -> bool {
+    http_status(error).is_some_and(|s| s >= 500) || curl_exit(error).is_some_and(|c| matches!(c, 6 | 7 | 28 | 52 | 56))
+}
+
+/// The pause before retry `attempt` (0-based): 2, 4, 8, 16, then 30 s.
+fn backoff(attempt: u32) -> Duration {
+    Duration::from_secs([2, 4, 8, 16].get(attempt as usize).copied().unwrap_or(30))
+}
+
+/// Wraps an [`Http`]: READS (`get_json`, `get_text`) that meet a 5xx or a network failure, or a 401 after the process has had a good answer, are held and
+/// retried with backoff for at most [`READ_HOLD`], with one `::warning::`, one recovery line, and at the end one error naming the
+/// causes. Writes (`send_json`, `post_json`: a dispatch, a PUT, a DELETE) are passed on once, never retried: a retried dispatch could
+/// start two runs. A 401 before any good answer is a wrong token and is returned at once.
+pub struct Retrying<'g, H: Http> {
+    inner: H,
+    good: &'g std::sync::atomic::AtomicU32,
+    sleep: Box<dyn FnMut(Duration) + 'g>,
+    log: Box<dyn FnMut(&str) + 'g>,
+}
+
+impl<'g, H: Http> Retrying<'g, H> {
+    /// Over `inner`, counting good answers in `good`; `sleep` and `log` are the real ones outside the tests.
+    pub fn new(
+        inner: H,
+        good: &'g std::sync::atomic::AtomicU32,
+        sleep: Box<dyn FnMut(Duration) + 'g>,
+        log: Box<dyn FnMut(&str) + 'g>,
+    ) -> Retrying<'g, H> {
+        Retrying { inner, good, sleep, log }
+    }
+
+    fn read<T>(&mut self, mut once: impl FnMut(&mut H) -> Result<T, String>) -> Result<T, String> {
+        use std::sync::atomic::Ordering::Relaxed;
+        let (mut waited, mut attempt, mut warned) = (Duration::ZERO, 0u32, false);
+        loop {
+            match once(&mut self.inner) {
+                Ok(v) => {
+                    if warned {
+                        (self.log)(&format!(
+                            "the server answers again after {attempt} retries and {}",
+                            fmt_duration(waited)
+                        ));
+                    }
+                    self.good.fetch_add(1, Relaxed);
+                    return Ok(v);
+                }
+                // A 401 is held only after a good answer (before one it is a wrong token); a blip is held on the first call too.
+                Err(e) if is_blip(&e) || (is_refused(&e) && self.good.load(Relaxed) > 0) => {
+                    let pause = backoff(attempt);
+                    if waited + pause > READ_HOLD {
+                        return Err(format!(
+                            "{e}: the read kept failing for {} \
+                             ({attempt} retries): Gitea or its proxy is overloaded or down, the network is down, or (for a 401 after earlier good answers) the token was revoked. Check with \
+                             `curl -H \"Authorization: token $GITEA_TOKEN\" <server>/api/v1/user` (never print the token), then run again",
+                            fmt_duration(waited)
+                        ));
+                    }
+                    if !warned {
+                        warned = true;
+                        (self.log)(&format!(
+                            "::warning::the server refused a read ({}); it answered earlier, so holding and retrying for up to {}",
+                            http_status(&e).map_or("no status".to_string(), |s| format!("HTTP {s}")),
+                            fmt_duration(READ_HOLD)
+                        ));
+                    }
+                    (self.sleep)(pause);
+                    waited += pause;
+                    attempt += 1;
+                }
+                Err(e) => {
+                    // An answer such as 404 shows the server and the token work.
+                    if http_status(&e).is_some_and(|s| (400..500).contains(&s) && s != 401) {
+                        self.good.fetch_add(1, Relaxed);
+                    }
+                    return Err(e);
+                }
+            }
+        }
+    }
+}
+
+impl<H: Http> Http for Retrying<'_, H> {
+    fn get_json(&mut self, url: &str, token: &str) -> Result<Value, String> {
+        self.read(|h| h.get_json(url, token))
+    }
+    fn get_text(&mut self, url: &str, token: &str) -> Result<String, String> {
+        self.read(|h| h.get_text(url, token))
+    }
+    fn get_bytes(&mut self, url: &str, token: &str, max_bytes: u64) -> Result<Vec<u8>, String> {
+        self.read(|h| h.get_bytes(url, token, max_bytes))
+    }
+    fn get_redirect(&mut self, url: &str, token: &str) -> Result<Option<String>, String> {
+        self.read(|h| h.get_redirect(url, token))
+    }
+    fn send_json(&mut self, method: &str, url: &str, token: &str, body: Option<&Value>) -> Result<Value, String> {
+        // Never retried: the call may have reached the server (a dispatch could start two runs).
+        self.inner.send_json(method, url, token, body)
+    }
+}
+
+/// The real HTTP for every caller: [`CurlOnce`] under [`Retrying`], the good-answer count shared by the whole process.
+pub struct CurlHttp;
+
+impl CurlHttp {
+    fn retrying() -> Retrying<'static, CurlOnce> {
+        Retrying::new(
+            CurlOnce,
+            &GOOD_ANSWERS,
+            Box::new(std::thread::sleep),
+            Box::new(|line| {
+                let _ = writeln!(std::io::stderr(), "http: {line}");
+            }),
+        )
+    }
+}
+
+impl Http for CurlHttp {
+    fn get_json(&mut self, url: &str, token: &str) -> Result<Value, String> {
+        CurlHttp::retrying().get_json(url, token)
+    }
+    fn get_text(&mut self, url: &str, token: &str) -> Result<String, String> {
+        CurlHttp::retrying().get_text(url, token)
+    }
+    fn get_bytes(&mut self, url: &str, token: &str, max_bytes: u64) -> Result<Vec<u8>, String> {
+        CurlHttp::retrying().get_bytes(url, token, max_bytes)
+    }
+    fn get_redirect(&mut self, url: &str, token: &str) -> Result<Option<String>, String> {
+        CurlHttp::retrying().get_redirect(url, token)
+    }
+    fn send_json(&mut self, method: &str, url: &str, token: &str, body: Option<&Value>) -> Result<Value, String> {
+        CurlOnce.send_json(method, url, token, body)
     }
 }
 
@@ -765,7 +988,8 @@ pub struct Env<'a> {
 pub fn command(args: &WaitArgs) -> Result<Report, CliError> {
     let var = |k: &str| std::env::var(k).ok();
     let presence = |id: ProcessId| id.presence();
-    let mut http = CurlHttp;
+    // One look per poll: the probe holds through a refusal itself, in step with `--max` and its clock.
+    let mut http = CurlOnce;
     let mut reach = crate::health::CurlReach;
     let vars: std::collections::HashMap<String, String> = crate::process_env::vars().collect();
     let services = wait_services(&args.server, &vars);
@@ -987,7 +1211,7 @@ mod tests {
     /// URL, the token or the body reaches curl as written.
     #[test]
     fn the_request_config_is_written_by_the_shared_curl_writer() {
-        let c = CurlHttp::config(
+        let c = CurlOnce::config(
             "POST",
             "https://h/a\\b?x=\"1\"",
             "t\\k\"n",
@@ -1004,11 +1228,11 @@ mod tests {
             assert!(c.contains(&curl_config::line(k, v)), "{k}: {c}");
         }
         assert!(
-            !CurlHttp::config("GET", "u", "", "a", None).contains("Authorization"),
+            !CurlOnce::config("GET", "u", "", "a", None).contains("Authorization"),
             "an empty token is anonymous"
         );
         // An artifact download follows the server's redirect to its signed URL; a JSON request does not.
-        assert!(CurlHttp::config("GET", "u", "t", ACCEPT_ZIP, None).contains("location\nmax-redirs = 3\n"));
+        assert!(CurlOnce::config("GET", "u", "t", ACCEPT_ZIP, None).contains("location\nmax-redirs = 3\n"));
         assert!(!c.contains("location"), "{c}");
     }
 
@@ -1360,6 +1584,185 @@ mod tests {
             matches!(o, Outcome::Failed { ref detail, .. } if detail.contains("failure")),
             "{o:?}"
         );
+    }
+
+    const REFUSED: &str = "curl exited with exit status: 22: curl: (22) The requested URL returned error: 401 {\"message\":\"invalid username, password or token\"}";
+
+    /// A 401 that follows good looks in the same wait is not a wrong token (it worked): the wait holds through it, says so once
+    /// and goes on when the server answers again (2026-11-27/28: five waiters ended on a 401 their own token had not earned).
+    #[test]
+    fn a_401_after_good_looks_is_held_through_and_named_once() {
+        let mut answers = vec![Ok(json!({"status": "in_progress"})); 3];
+        answers.extend(vec![Err(REFUSED.to_string()); 12]);
+        answers.push(Ok(json!({"status": "completed", "conclusion": "success"})));
+        let mut http = FakeHttp { answers, urls: vec![] };
+        let mut probe = CiRunProbe::new(&mut http, "https://ci.example", "o/r", 77, "tok".into());
+        let (o, log, _) = go(&mut probe, 3600, 15);
+        assert!(matches!(o, Outcome::Done { .. }), "{o:?}\n{log}");
+        assert_eq!(log.matches("::warning::wait: Gitea answered 401").count(), 1, "{log}");
+        assert!(log.contains("answers the token again"), "{log}");
+        assert!(!log.contains("look failed"), "a held 401 is not a failed look: {log}");
+    }
+
+    /// A 401 that never ends is still an end: one `::error::` that names the likely cause, not just "invalid token".
+    #[test]
+    fn a_401_that_outlasts_the_hold_ends_with_one_error_naming_the_cause() {
+        let mut answers = vec![Ok(json!({"status": "in_progress"})); 2];
+        answers.push(Err(REFUSED.to_string()));
+        let mut http = FakeHttp { answers, urls: vec![] };
+        let mut probe = CiRunProbe::new(&mut http, "https://ci.example", "o/r", 77, "tok".into());
+        let (o, log, _) = go(&mut probe, 36000, 15);
+        let Outcome::Broken { error, .. } = &o else {
+            panic!("{o:?}\n{log}")
+        };
+        assert!(error.contains("worked 2 looks earlier"), "{error}");
+        assert!(error.contains("/api/v1/user") && error.contains("revoked"), "{error}");
+        assert!(!error.contains("tok\""), "no token: {error}");
+        assert_eq!(log.matches("::warning::wait: Gitea answered 401").count(), 1, "{log}");
+    }
+
+    /// A 401 on the first look is a wrong token: no hold, the plain error (the existing five strikes).
+    #[test]
+    fn a_401_on_the_first_look_is_not_held() {
+        let mut http = FakeHttp {
+            answers: vec![Err(REFUSED.to_string())],
+            urls: vec![],
+        };
+        let mut probe = CiRunProbe::new(&mut http, "https://ci.example", "o/r", 77, "tok".into());
+        let (o, log, _) = go(&mut probe, 3600, 15);
+        assert!(matches!(o, Outcome::Broken { .. }), "{o:?}");
+        assert_eq!(http.urls.len(), MAX_CONSECUTIVE_ERRORS as usize, "{log}");
+    }
+
+    /// RetryScript answers for the shared retry layer: reads pop `gets` (the last repeats), writes are counted.
+    struct RetryScript {
+        gets: Vec<Result<Value, String>>,
+        get_calls: usize,
+        sends: usize,
+        send_answer: Result<Value, String>,
+    }
+    impl RetryScript {
+        fn new(gets: Vec<Result<Value, String>>) -> RetryScript {
+            RetryScript {
+                gets,
+                get_calls: 0,
+                sends: 0,
+                send_answer: Err("curl exited with exit status: 22: curl: (22) The requested URL returned error: 503".into()),
+            }
+        }
+    }
+    impl Http for RetryScript {
+        fn get_json(&mut self, _url: &str, _token: &str) -> Result<Value, String> {
+            self.get_calls += 1;
+            self.gets[self.get_calls.min(self.gets.len()) - 1].clone()
+        }
+        fn send_json(&mut self, _m: &str, _url: &str, _token: &str, _body: Option<&Value>) -> Result<Value, String> {
+            self.sends += 1;
+            self.send_answer.clone()
+        }
+    }
+
+    const UNAVAILABLE: &str = "curl exited with exit status: 22: curl: (22) The requested URL returned error: 503 upstream down";
+
+    /// Runs `f` over a [`Retrying`] with `good` answers already counted; returns the result, the pauses and the log lines.
+    fn through<T>(inner: &mut RetryScript, good: u32, f: impl FnOnce(&mut dyn Http) -> T) -> (T, Vec<Duration>, Vec<String>) {
+        let counter = std::sync::atomic::AtomicU32::new(good);
+        let (sleeps, lines) = (RefCell::new(Vec::new()), RefCell::new(Vec::new()));
+        let out = {
+            let mut r = Retrying::new(
+                inner,
+                &counter,
+                Box::new(|d| sleeps.borrow_mut().push(d)),
+                Box::new(|l| lines.borrow_mut().push(l.to_string())),
+            );
+            f(&mut r)
+        };
+        (out, sleeps.into_inner(), lines.into_inner())
+    }
+
+    impl Http for &mut RetryScript {
+        fn get_json(&mut self, url: &str, token: &str) -> Result<Value, String> {
+            (**self).get_json(url, token)
+        }
+        fn send_json(&mut self, m: &str, url: &str, token: &str, body: Option<&Value>) -> Result<Value, String> {
+            (**self).send_json(m, url, token, body)
+        }
+    }
+
+    #[test]
+    fn a_read_after_a_good_answer_rides_out_a_401_and_a_5xx_with_backoff() {
+        let mut http = RetryScript::new(vec![
+            Err(REFUSED.into()),
+            Err(UNAVAILABLE.into()),
+            Err(REFUSED.into()),
+            Ok(json!({"a": 1})),
+        ]);
+        let (r, sleeps, lines) = through(&mut http, 1, |h| h.get_json("u", "t"));
+        assert_eq!(r.unwrap(), json!({"a": 1}));
+        assert_eq!(sleeps, [2, 4, 8].map(Duration::from_secs));
+        assert_eq!(lines.iter().filter(|l| l.starts_with("::warning::")).count(), 1, "{lines:?}");
+        assert!(lines.last().unwrap().contains("answers again after 3 retries"), "{lines:?}");
+    }
+
+    #[test]
+    fn a_first_call_5xx_or_connect_failure_is_retried_but_a_first_call_401_is_not() {
+        const CONNECT: &str = "curl exited with exit status: 7: curl: (7) Failed to connect to host port 443";
+        for blip in [UNAVAILABLE, CONNECT] {
+            let mut http = RetryScript::new(vec![Err(blip.into()), Err(blip.into()), Ok(json!({"a": 1}))]);
+            let (r, sleeps, lines) = through(&mut http, 0, |h| h.get_json("u", "t"));
+            assert_eq!(r.unwrap(), json!({"a": 1}), "{blip}");
+            assert_eq!(sleeps, [2, 4].map(Duration::from_secs), "{blip}");
+            assert_eq!(lines.iter().filter(|l| l.starts_with("::warning::")).count(), 1, "{lines:?}");
+        }
+        let mut http = RetryScript::new(vec![Err(REFUSED.into())]);
+        let (r, sleeps, _) = through(&mut http, 0, |h| h.get_json("u", "t"));
+        assert!(
+            r.is_err() && sleeps.is_empty() && http.get_calls == 1,
+            "a first-call 401 is a wrong token"
+        );
+    }
+
+    #[test]
+    fn a_read_before_any_good_answer_is_a_wrong_token_and_is_not_retried() {
+        let mut http = RetryScript::new(vec![Err(REFUSED.into())]);
+        let (r, sleeps, lines) = through(&mut http, 0, |h| h.get_json("u", "t"));
+        assert!(r.unwrap_err().contains("401"));
+        assert!(sleeps.is_empty() && lines.is_empty(), "{sleeps:?} {lines:?}");
+        assert_eq!(http.get_calls, 1);
+    }
+
+    #[test]
+    fn a_read_that_keeps_failing_ends_within_the_hold_with_one_error_naming_the_causes() {
+        let mut http = RetryScript::new(vec![Err(UNAVAILABLE.into())]);
+        let (r, sleeps, lines) = through(&mut http, 1, |h| h.get_json("u", "tok-secret"));
+        let e = r.unwrap_err();
+        assert!(
+            e.contains("503") && e.contains("overloaded or down") && e.contains("revoked"),
+            "{e}"
+        );
+        assert!(!e.contains("tok-secret"));
+        assert!(sleeps.iter().sum::<Duration>() <= READ_HOLD && sleeps.iter().sum::<Duration>() > READ_HOLD - Duration::from_secs(31));
+        assert_eq!(lines.iter().filter(|l| l.starts_with("::warning::")).count(), 1, "{lines:?}");
+    }
+
+    #[test]
+    fn a_404_is_an_answer_and_is_not_retried() {
+        let mut http = RetryScript::new(vec![Err("curl: (22) The requested URL returned error: 404".into())]);
+        let (r, sleeps, _) = through(&mut http, 1, |h| h.get_json("u", "t"));
+        assert!(r.is_err() && sleeps.is_empty());
+        assert_eq!(http.get_calls, 1);
+    }
+
+    #[test]
+    fn a_write_is_never_retried_even_after_a_good_answer_and_a_503() {
+        let mut http = RetryScript::new(vec![Ok(json!(1))]);
+        let (r, sleeps, lines) = through(&mut http, 5, |h| h.post_json("https://x/dispatch", "t", &json!({})));
+        assert!(r.unwrap_err().contains("503"));
+        assert_eq!(http.sends, 1, "a retried dispatch could start two runs");
+        let (_, sleeps2, _) = through(&mut http, 5, |h| h.send_json("DELETE", "u", "t", None));
+        let (_, sleeps3, _) = through(&mut http, 5, |h| h.send_json("PUT", "u", "t", None));
+        assert_eq!(http.sends, 3);
+        assert!(sleeps.is_empty() && sleeps2.is_empty() && sleeps3.is_empty() && lines.is_empty());
     }
 
     fn args(rest: &[&str]) -> WaitArgs {

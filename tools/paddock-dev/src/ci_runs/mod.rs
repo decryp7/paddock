@@ -1249,18 +1249,8 @@ pub fn runner_wait(a: &RunnerWaitArgs) -> Result<Report, CliError> {
         repo: &repo,
         token: &token,
     };
-    let r = dispatch::runner_wait(
-        &mut http,
-        &target,
-        own,
-        max,
-        interval,
-        &read,
-        &mut clock,
-        &mut std::io::stdout(),
-        500,
-    )
-    .map_err(|e| CliError::failure(e).with_hint("Check the workflow file and the job token's read access to Actions runs."))?;
+    let r = dispatch::runner_wait(&mut http, &target, own, max, interval, &read, &mut clock, &mut std::io::stdout())
+        .map_err(|e| CliError::failure(e).with_hint("Check the workflow file and the job token's read access to Actions runs."))?;
     match r {
         dispatch::RunnerWait::Free { waited } => Ok(Report::new(
             serde_json::json!({"waitedMs": waited.as_millis() as u64}),
