@@ -84,6 +84,21 @@ uses it, results in
 
 ## Results of shared tooling
 
+### 2026-11-27, train priority in throttle (feat/throttle-train-priority)
+
+- **Commit:** origin/main 696f472f4 plus this branch's change (a debug build of tools/throttle, the binary the tests ran).
+- **Machine:** Mac mini, 14 cores, macOS 27.2; 1-minute load 6 at the start of the runs; each run in its own empty lock folder (`THROTTLE_DIR`), `THROTTLE_SLOTS=1`, `THROTTLE_POLL=1`, `run --no-gate` of `sleep` commands, so the real queue was not touched. Times are whole seconds from `date +%s`, one run per case (the order, not the second, is the result).
+- **Method:** two shells' worth of runs started by hand, as an agent and an integrator would. Case A: H (normal, `sleep 12`) holds the slot; N (normal, `sleep 2`) starts at t+2 and queues; T (`--high`, `sleep 2`) starts at t+4. Case B: H2 (`sleep 10`) holds the slot; N2 (normal, `sleep 1`) queues at t+2; T2 (`--high`) queues at t+3 and is killed with `kill -9` at t+5.
+- **Numbers:**
+
+  | Case | Result |
+  |---|---|
+  | A: order of the two waiters after H ends (t+12) | T (the later, train) finished at t+15, N (the earlier, normal) at t+17: train went first |
+  | A: what N said while it waited | `normal waiting 2s: waiting behind train work: train (pid <pid>)` |
+  | B: N2 after the killed T2 | H2 ended at t+10, N2 finished at t+11 (ran at once, no wait for the dead marker); high markers left in the folder: 0 |
+
+- **Reading:** a train step goes before an earlier normal waiter, normal work goes on as soon as no train marker is left, a SIGKILLed train waiter blocks nobody (its marker is removed by the next poll), and the wait line says who it waits behind. Fake-clock tests for the same four facts: `tools/throttle/tests/it/priority.rs`. Not measured: a train step among several slots, or on Windows. Method of the run: tools/throttle/README.md, "Train priority".
+
 ### 2026-11-26, slot locks on kernel file locks against directory locks (feat/throttle-rename-filelock)
 
 - **Commit:** origin/main 202d0a181 (directory locks, the release binary of that tree) against the file-lock tree of this branch (a debug build: the handoff time is poll-bound, not code-bound)

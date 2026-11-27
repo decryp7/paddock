@@ -439,8 +439,8 @@ mod tests {
 
     #[test]
     fn a_lock_that_cannot_be_looked_at_is_unknown_not_free() {
-        let dir = std::env::temp_dir().join(format!("paddock-proc-held-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
         let file = dir.join("plain");
         std::fs::write(&file, "x").unwrap();
         // a path below a regular file cannot be opened
@@ -455,6 +455,5 @@ mod tests {
             panic!("the test takes the lock")
         };
         assert_eq!(held_state(&lock), HeldState::Held);
-        std::fs::remove_dir_all(&dir).ok();
     }
 }

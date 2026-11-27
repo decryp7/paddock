@@ -343,6 +343,10 @@ pub struct Options<'a> {
     pub explain: bool,
     /// The root `package-lock.json` before and after.
     pub lock: (Option<String>, Option<String>),
+    /// Each changed `Cargo.lock` outside a crate folder (a workspace's own lock) by path, before and after: the plan names the
+    /// packages whose resolved dependencies changed ([`crate::plan_cargo_lock`]); without a text the lockfile reaches the whole
+    /// workspace.
+    pub cargo_locks: BTreeMap<String, (Option<String>, Option<String>)>,
     /// The `apps/<app>/app/src-tauri` folders that adopt the shared per-machine installer include (see
     /// [`per_machine_apps`]); read from the tree by [`plan_for`].
     pub per_machine_apps: Vec<String>,
@@ -403,6 +407,11 @@ struct State {
     /// Projects with a reason that is not a Cargo reach (a UI file, an installer file, a lockfile, a script, a workflow...): their
     /// whole test set is wanted, never a package subset (`cargoOnly` of the plan).
     beyond_cargo: BTreeSet<String>,
+    /// Projects with a reason beyond Cargo that is not a lockfile whose changed packages were read ([`State::mark_lock`]).
+    beyond_other: BTreeSet<String>,
+    /// Projects with a lockfile reason whose changed packages were read: they run whole (they are in `beyond_cargo`), and only the
+    /// FLAKY grade narrows them (`lockGraded` of the plan).
+    lock_graded: BTreeSet<String>,
     kinds: BTreeMap<String, BTreeSet<&'static str>>,
 }
 
@@ -411,6 +420,17 @@ impl State {
     fn mark(&mut self, project: Option<String>, reason: String) {
         if let Some(p) = project {
             self.beyond_cargo.insert(p.clone());
+            self.beyond_other.insert(p.clone());
+            self.why.entry(p).or_default().push(reason);
+        }
+    }
+
+    /// A lockfile reason whose changed packages were read (decision 95, ER-12): the project's tests still run whole, because a
+    /// lockfile reaches tests no package list names, but the FLAKY grade reads the packages ([`crate::plan_cargo_lock`]).
+    fn mark_lock(&mut self, project: Option<String>, reason: String) {
+        if let Some(p) = project {
+            self.beyond_cargo.insert(p.clone());
+            self.lock_graded.insert(p.clone());
             self.why.entry(p).or_default().push(reason);
         }
     }
@@ -452,6 +472,24 @@ pub fn reaches_conformance(plan: &Value) -> bool {
             .is_some_and(|a| a.iter().any(|x| x != CONFORMANCE_ALWAYS)),
         None => true,
     }
+}
+
+/// The crate folders of the workspace of lockfile `file` whose resolved dependencies changed ([`crate::plan_cargo_lock`]); `None`
+/// (fail closed) when the lock texts are missing or unreadable, or a changed package is no crate of the graph's workspace.
+fn lock_changed_crates(file: &str, graph: &RepoGraph, opts: &Options) -> Option<Vec<String>> {
+    let dir = file.rsplit_once('/').map_or("", |(d, _)| d);
+    let (before, after) = opts.cargo_locks.get(file)?;
+    let names = crate::plan_cargo_lock::changed_members(before.as_deref(), after.as_deref())?;
+    let in_workspace: Vec<(&str, &str)> = graph
+        .cargo
+        .iter()
+        .filter(|(_, n)| n.workspace == dir)
+        .map(|(d, n)| (d, n.name.as_str()))
+        .collect();
+    names
+        .iter()
+        .map(|name| in_workspace.iter().find(|(_, n)| n == name).map(|(d, _)| (*d).to_string()))
+        .collect()
 }
 
 /// The plan for a list of changed files, in the JSON shape the retired `scripts/affected.mjs` printed.
@@ -596,6 +634,18 @@ pub fn affected(files: &[String], graph: &RepoGraph, opts: &Options) -> Result<V
                 if graph.npm.contains(&ws) {
                     push_unique(&mut changed_pkgs, &ws);
                 }
+            }
+            continue;
+        }
+        // A workspace's own lockfile reaches the packages whose resolved dependencies it changed (decision 95, ER-12); a lock that
+        // cannot be read on both sides reaches the whole workspace, as every other file of the workspace that is no crate's.
+        if f.ends_with("Cargo.lock")
+            && graph.cargo.node_of(f).is_none()
+            && let Some(dirs) = lock_changed_crates(f, graph, opts)
+        {
+            st.mark_lock(project_of_dir(f.rsplit_once('/').map_or("", |(d, _)| d)), f.clone());
+            for d in dirs {
+                push_unique(&mut changed_crates, &d);
             }
             continue;
         }
@@ -793,6 +843,12 @@ pub fn affected(files: &[String], graph: &RepoGraph, opts: &Options) -> Result<V
     // The projects whose every reason is a Cargo reach: only these may run a subset of their packages (a member run's nextest filter).
     let cargo_only: Vec<&String> = st.why.keys().filter(|p| !st.beyond_cargo.contains(*p)).collect();
     out.insert("cargoOnly".into(), json!(cargo_only));
+    // Projects whose only reason beyond Cargo is a lockfile with its changed packages read: they run whole, and the FLAKY grade
+    // narrows them like a Cargo-only reach. Absent when there is none.
+    let lock_graded: Vec<&String> = st.lock_graded.iter().filter(|p| !st.beyond_other.contains(*p)).collect();
+    if !lock_graded.is_empty() {
+        out.insert("lockGraded".into(), json!(lock_graded));
+    }
     if opts.explain {
         out.insert("why".into(), json!(st.why));
     }
@@ -979,6 +1035,7 @@ pub fn plan_on_graph(root: &Path, history: &dyn History, req: &Request, graph: &
         all: req.all,
         explain: req.explain,
         lock: (None, None),
+        cargo_locks: BTreeMap::new(),
         per_machine_apps: per_machine_apps(root),
         conformance_apps: conformance_apps(root),
         gitea: gitea.as_ref().map(|g| g as &dyn GiteaSource),
@@ -993,6 +1050,13 @@ pub fn plan_on_graph(root: &Path, history: &dyn History, req: &Request, graph: &
                 history.file_at(base, "package-lock.json")?,
                 history.file_at(&req.head, "package-lock.json")?,
             );
+        }
+        for f in changed.iter().filter(|f| f.ends_with("Cargo.lock")) {
+            // per-item: one `git show` pair for each changed lockfile (a change has a few, the file read is the unit; no bulk reader
+            // for two revisions of a path list exists in `History`)
+            if let (Ok(before), Ok(after)) = (history.file_at(base, f), history.file_at(&req.head, f)) {
+                opts.cargo_locks.insert(f.clone(), (before, after));
+            }
         }
     }
     affected(&changed, graph, &opts)
@@ -1156,6 +1220,79 @@ mod tests {
 
     fn cargo_only(p: &Value, project: &str) -> bool {
         p["cargoOnly"].as_array().is_some_and(|a| a.iter().any(|x| x == project))
+    }
+
+    /// A `crates/Cargo.lock` of the sample graph: paddock-core uses `serde`; paddock-kit and paddock-k use paddock-core and `log`.
+    fn sample_lock(serde: &str, log: &str) -> String {
+        format!(
+            "version = 4\n\
+             [[package]]\nname = \"paddock-core\"\nversion = \"0.1.0\"\ndependencies = [\"serde\"]\n\
+             [[package]]\nname = \"paddock-kit\"\nversion = \"0.1.0\"\ndependencies = [\"log\", \"paddock-core\"]\n\
+             [[package]]\nname = \"paddock-k\"\nversion = \"0.1.0\"\ndependencies = [\"paddock-core\"]\n\
+             [[package]]\nname = \"serde\"\nversion = \"{serde}\"\nsource = \"s\"\nchecksum = \"s{serde}\"\n\
+             [[package]]\nname = \"log\"\nversion = \"{log}\"\nsource = \"s\"\nchecksum = \"l{log}\"\n"
+        )
+    }
+
+    fn lock_plan(before: Option<String>, after: Option<String>, more: &[&str]) -> Value {
+        let mut files = vec!["crates/Cargo.lock".to_string()];
+        files.extend(more.iter().map(|f| f.to_string()));
+        let mut opts = Options {
+            explain: true,
+            ..Options::default()
+        };
+        opts.cargo_locks.insert("crates/Cargo.lock".into(), (before, after));
+        affected(&files, &sample(), &opts).unwrap()
+    }
+
+    #[test]
+    fn a_lockfile_change_reaches_the_packages_whose_resolved_dependencies_changed_and_runs_the_workspace_whole() {
+        // log moves: paddock-kit uses it, paddock-core and paddock-k do not (paddock-k does not use paddock-kit).
+        let p = lock_plan(Some(sample_lock("1", "1")), Some(sample_lock("1", "2")), &[]);
+        assert_eq!(p["packages"]["crates"], json!(["paddock-kit"]), "{p}");
+        // Decision 95: the FLAKY grade reads it like a Cargo reach, while CI still runs the workspace whole (a lockfile reaches tests no
+        // package list names): `cargoOnly` is unchanged, `lockGraded` names the project.
+        assert_eq!(p["lockGraded"], json!(["crates"]), "{p}");
+        assert!(!cargo_only(&p, "crates"), "{}", p["cargoOnly"]);
+        // serde moves: paddock-core uses it, and paddock-k and paddock-kit use paddock-core.
+        let p = lock_plan(Some(sample_lock("1", "1")), Some(sample_lock("2", "1")), &[]);
+        assert_eq!(p["packages"]["crates"], json!(["paddock-core", "paddock-k", "paddock-kit"]), "{p}");
+    }
+
+    #[test]
+    fn a_lockfile_that_changed_no_package_reaches_the_workspace_with_no_package() {
+        // Train t's shape: only the lockfile, and no workspace package's dependencies moved (a registry entry nobody uses).
+        let with_extra = format!(
+            "{}[[package]]\nname = \"unused\"\nversion = \"1\"\nsource = \"s\"\nchecksum = \"u\"\n",
+            sample_lock("1", "1")
+        );
+        let p = lock_plan(Some(sample_lock("1", "1")), Some(with_extra), &[]);
+        assert_eq!(p["crates"], true, "{p}");
+        assert!(p["packages"].get("crates").is_none(), "{p}");
+        assert_eq!(p["lockGraded"], json!(["crates"]), "{p}");
+    }
+
+    #[test]
+    fn a_lockfile_that_cannot_be_read_or_comes_with_another_reason_beyond_cargo_is_not_graded() {
+        // Fail closed: no text on one side, an unreadable text, or a changed package that is no crate of the graph.
+        for (b, a) in [
+            (None, Some(sample_lock("1", "1"))),
+            (Some(sample_lock("1", "1")), Some("not toml [".to_string())),
+            (
+                Some(sample_lock("1", "1")),
+                Some(sample_lock("1", "1") + "[[package]]\nname = \"ghost\"\nversion = \"1\"\n"),
+            ),
+        ] {
+            let p = lock_plan(b, a, &[]);
+            assert!(p.get("lockGraded").is_none(), "{p}");
+        }
+        // Another reason beyond Cargo (a per-machine installer file: the sync test reads it) keeps the project whole for the grade too.
+        let p = lock_plan(
+            Some(sample_lock("1", "1")),
+            Some(sample_lock("1", "2")),
+            &["crates/paddock-setup/nsis/paddock-per-machine.nsh"],
+        );
+        assert!(p.get("lockGraded").is_none(), "{p}");
     }
 
     #[test]

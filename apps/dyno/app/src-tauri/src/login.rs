@@ -1124,18 +1124,12 @@ mod tests {
     }
 
     #[test]
-    #[allow(
-        clippy::disallowed_methods,
-        reason = "a test builds its scratch path from the OS temp folder and removes it"
-    )]
     fn the_switch_as_the_service_manager_reads_it_missing_is_on_damaged_is_unknown() {
-        let dir = std::env::temp_dir().join(format!("dyno-wanted-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = paddock_testkit::canonical_tempdir();
         let file = dir.join("settings.json");
         assert_eq!(wanted_setting(&file), Some(true), "a fresh install: the default");
         std::fs::write(&file, "{ not json").unwrap();
         assert_eq!(wanted_setting(&file), None, "unreadable: nothing is registered unattended");
-        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

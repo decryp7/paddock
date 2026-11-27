@@ -188,6 +188,13 @@ name = "ci-dispatch-guards"
 files = ["docs/ci-dispatch-guards.toml"]
 reaches = ["project:paddock-dev"]
 
+[[input]]
+# The test-result cache's settings and its shadow switch (tools/paddock-dev/src/test_cache/config.rs, its one accessor; `ci test-cache
+# shadow-run --write` its one writer). Declared here since its tests read it through that accessor, not by include_str! (C177).
+name = "test-cache-config"
+files = ["docs/test-cache.toml"]
+reaches = ["project:paddock-dev"]
+
 # The pins of the features Cargo resolves for watched crates (`./dev locks guard`, run by the crates job and train gates).
 [[input]]
 name = "shared-crate-features"

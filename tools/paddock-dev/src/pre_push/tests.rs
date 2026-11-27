@@ -1467,6 +1467,7 @@ mod known_commit {
             no_reuse: false,
             set: Default::default(),
             cancel_ci_run: None,
+            priority: Default::default(),
         }
     }
 
@@ -2115,6 +2116,7 @@ mod base_choice {
             no_reuse: false,
             set: Default::default(),
             cancel_ci_run: None,
+            priority: Default::default(),
         };
         let line = format!("refs/heads/x {two} refs/heads/main {}\n", "0".repeat(40));
         let got = command_in(

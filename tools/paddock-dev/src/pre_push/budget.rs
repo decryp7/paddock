@@ -74,6 +74,11 @@ pub fn is_landing_ref(remote_ref: &str) -> bool {
     }
 }
 
+/// Whether a run's heavy steps take the priority lane: `--priority train`, or a push to a landing ref.
+pub fn takes_priority_lane(priority: crate::priority::Priority, remote_refs: &[&str]) -> bool {
+    priority.is_train() || remote_refs.iter().any(|r| is_landing_ref(r))
+}
+
 /// Seconds, as `throttle` takes them.
 fn secs(d: Duration) -> String {
     format!("{}", d.as_secs().max(1))
@@ -93,6 +98,19 @@ pub fn with_throttle_flags(prefix: &[String], priority: bool, queue_stall: Durat
     flags.extend(["--queue-stall".into(), secs(queue_stall), "--run-max".into(), secs(run_max)]);
     let mut out = prefix[..2].to_vec();
     out.extend(flags);
+    out.extend_from_slice(&prefix[2..]);
+    out
+}
+
+/// `prefix` with only the priority lane (`--high`) when `train`: for a caller that sets no limits of its own (`./dev gen check`). Anything
+/// that is not our `throttle run <agent> --` is returned unchanged.
+pub fn with_priority(prefix: &[String], train: bool) -> Vec<String> {
+    let ours = prefix.len() >= 3 && prefix[1] == "run" && prefix.last().is_some_and(|l| l == "--");
+    if !ours || !train {
+        return prefix.to_vec();
+    }
+    let mut out = prefix[..2].to_vec();
+    out.push("--high".into());
     out.extend_from_slice(&prefix[2..]);
     out
 }
@@ -148,6 +166,27 @@ mod tests {
         ] {
             assert!(!is_landing_ref(no), "{no}");
         }
+    }
+
+    #[test]
+    fn train_priority_or_a_landing_push_takes_the_priority_lane() {
+        use crate::priority::Priority::{Normal, Train};
+        assert!(takes_priority_lane(Train, &["refs/heads/feat/x"]), "asked for by name");
+        assert!(takes_priority_lane(Normal, &["refs/heads/feat/x", "refs/heads/main"]), "a landing");
+        assert!(
+            !takes_priority_lane(Normal, &["refs/heads/feat/x"]),
+            "an ordinary push waits its turn"
+        );
+        assert!(!takes_priority_lane(Normal, &[]));
+    }
+
+    #[test]
+    fn train_work_takes_the_priority_lane_in_our_throttle_only() {
+        let ours: Vec<String> = ["throttle", "run", "pre-push", "--"].map(String::from).to_vec();
+        assert_eq!(with_priority(&ours, true).join(" "), "throttle run --high pre-push --");
+        assert_eq!(with_priority(&ours, false), ours, "normal work is unchanged");
+        let other = vec!["heavy.sh".to_string()];
+        assert_eq!(with_priority(&other, true), other, "someone else's wrapper has no such flag");
     }
 
     #[test]

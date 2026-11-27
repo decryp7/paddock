@@ -176,14 +176,8 @@ mod tests {
     use pitcrew_core::notify::NotificationKind;
     use pitcrew_core::time::Timestamp;
 
-    #[allow(
-        clippy::disallowed_methods,
-        reason = "a test builds its scratch path from the OS temp folder and removes it"
-    )]
-    fn temp(name: &str) -> std::path::PathBuf {
-        let p = std::env::temp_dir().join(format!("pitcrew-it-channels-{name}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&p);
-        p
+    fn temp() -> paddock_testkit::CanonicalTempDir {
+        paddock_testkit::canonical_tempdir()
     }
 
     fn webhook() -> ChannelConfig {
@@ -202,7 +196,7 @@ mod tests {
 
     #[test]
     fn settings_round_trip_and_damage_gives_the_defaults() {
-        let d = temp("rt");
+        let d = temp();
         assert!(load(&d).channels.is_empty(), "off by default");
         let s = Settings { channels: vec![webhook()] };
         save(&d, &s).unwrap();
@@ -222,7 +216,6 @@ mod tests {
             save(&d, &Settings { channels: vec![bad] }).is_err(),
             "invalid settings are not saved"
         );
-        let _ = std::fs::remove_dir_all(d);
     }
 
     #[test]

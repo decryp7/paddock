@@ -58,6 +58,8 @@ pub enum Why {
     TooOld,
     /// A record that failed the trust check, and what it said.
     Untrusted(String),
+    /// A record whose trust check could not answer (the API failed, no token): it runs, and its record is not replaced.
+    Undecided(String),
     /// The store did not answer, or reuse is off for this run (the cause): everything runs.
     Off(String),
 }
@@ -72,6 +74,7 @@ impl Why {
             Why::Miss => "no record under this key".into(),
             Why::TooOld => "its record is older than the limit while the nightly is paused".into(),
             Why::Untrusted(w) => format!("its record failed the trust check: {w}"),
+            Why::Undecided(w) => format!("its record's trust could not be decided: {w}"),
             Why::Off(w) => format!("reuse is off: {w}"),
         }
     }
@@ -81,13 +84,13 @@ impl Why {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Decision {
     /// A valid record exists: the target's pass can be reused.
-    Reuse(Record),
+    Reuse(Box<Record>),
     /// Run the target.
     Run(Why),
 }
 
-/// The key of a candidate under `cfg` on `class`.
-pub fn key_of(c: &Candidate, cfg: &Config, class: &RunnerClass) -> String {
+/// The key of a candidate under `cfg` on `class`, for a run narrowed to nextest filterset `filter` (empty: the whole package).
+pub fn key_of(c: &Candidate, cfg: &Config, class: &RunnerClass, filter: &str) -> String {
     key(
         &c.target,
         &c.node_hash,
@@ -95,20 +98,23 @@ pub fn key_of(c: &Candidate, cfg: &Config, class: &RunnerClass) -> String {
             epoch: cfg.epoch,
             class,
             profile: &cfg.profile,
+            filter,
         },
     )
 }
 
 /// One decision per candidate, in order, from one bulk lookup. A store that errors turns reuse off for every target (fail open,
 /// §5: everything runs, never the other way round); the cause is the second answer, for one notice. `trust` is the reader-side
-/// check of a record (§7); `now` is Unix seconds.
+/// check of a record (§7); `now` is Unix seconds. `filter` is the filterset the run this lookup is for is narrowed to: a record counts
+/// only under the same filter.
 pub fn decide(
     cands: &[Candidate],
     cfg: &Config,
     class: &RunnerClass,
+    filter: &str,
     store: &dyn Store,
     now: u64,
-    trust: &dyn Fn(&Record) -> Result<(), String>,
+    trust: &dyn Fn(&Record) -> Result<(), trust::Distrust>,
 ) -> (Vec<Decision>, Option<String>) {
     let mut asks: Vec<Lookup> = Vec::new();
     let mut at: Vec<Option<usize>> = Vec::new();
@@ -120,7 +126,7 @@ pub fn decide(
             asks.push(Lookup {
                 target: c.target.id.clone(),
                 class: class.clone(),
-                key: key_of(c, cfg, class),
+                key: key_of(c, cfg, class, filter),
             });
         }
     }
@@ -148,8 +154,9 @@ pub fn decide(
                 return Decision::Run(Why::TooOld);
             }
             match trust(r) {
-                Ok(()) => Decision::Reuse(r.clone()),
-                Err(w) => Decision::Run(Why::Untrusted(w)),
+                Ok(()) => Decision::Reuse(Box::new(r.clone())),
+                Err(trust::Distrust::Refused(w)) => Decision::Run(Why::Untrusted(w)),
+                Err(trust::Distrust::Unknown(w)) => Decision::Run(Why::Undecided(w)),
             }
         })
         .collect();
@@ -243,8 +250,10 @@ pub fn invalidate(store: &dyn Store, failed: &[Lookup]) -> Result<Vec<Record>, s
 pub struct RunMeta {
     /// The run (CI run id, or a local token).
     pub run: String,
-    /// The job id when the environment names it, else empty.
+    /// The job's display name (`crate (macos-latest)`), which the reader finds among the run's jobs; empty for a local run.
     pub job: String,
+    /// The run's attempt the job ran in (a rerun of a run is another attempt); 0 for a local run.
+    pub attempt: u64,
     /// The ref.
     pub git_ref: String,
     /// The commit tested.
@@ -257,19 +266,22 @@ pub struct RunMeta {
 
 /// The records a nextest log proves, and no others (ADR 0116 §3, ER-12, ER-33): one per candidate whose package ran in the log with
 /// every test passing on its first try, the log being whole. A package that failed, was flaky, passed on a retry, never appeared, or has
-/// uncommitted changes under its inputs gets none. The one place `record` decides what is stored.
-pub fn records_from_log(log: &str, cands: &[Candidate], cfg: &Config, class: &RunnerClass, m: &RunMeta) -> Vec<Record> {
+/// uncommitted changes under its inputs gets none. Each record is keyed by `filter`, the filterset the run was narrowed to, so a pass of
+/// the selected tests is never read as a pass of the whole package. The one place `record` decides what is stored.
+pub fn records_from_log(log: &str, cands: &[Candidate], cfg: &Config, class: &RunnerClass, filter: &str, m: &RunMeta) -> Vec<Record> {
     let asked: Vec<String> = cands.iter().map(|c| c.target.package.clone()).collect();
     let judged = result::judge(log, &asked);
     cands
         .iter()
         .filter(|c| !c.dirty && judged.passed.contains(&c.target.package))
         .map(|c| Record {
-            key: key_of(c, cfg, class),
+            key: key_of(c, cfg, class, filter),
             target: c.target.id.clone(),
             class: class.clone(),
+            filter: key::normalize_filter(filter),
             run: m.run.clone(),
             job: m.job.clone(),
+            attempt: m.attempt,
             git_ref: m.git_ref.clone(),
             commit: m.commit.clone(),
             tests: judged.tests.get(&c.target.package).copied().unwrap_or(0),
@@ -367,6 +379,46 @@ pub fn run_outcome(ran: &[&Candidate], matched: &[&Candidate], judged: &result::
         }
     }
     out
+}
+
+/// The records a run stores: `put` (one per passed target) limited to the targets whose record the lookup proved replaceable: no record,
+/// one too old, or one the trust check refused. Write-once while trusted, as remote build caches do: a trusted record ([`Decision::Reuse`])
+/// is never replaced, so a red run's leg or a local run cannot make every later lookup untrusted (run 9209 replaced run 9180's records).
+/// Nothing is replaced on an answer that is not definite either: a trust check that could not answer ([`Why::Undecided`]) or a lookup
+/// that did not run or failed ([`Why::Off`]). The second answer is how many records were held back.
+pub fn not_overwriting_trusted(put: Vec<Record>, cands: &[Candidate], decisions: &[Decision]) -> (Vec<Record>, usize) {
+    let replaceable: std::collections::BTreeSet<&str> = cands
+        .iter()
+        .zip(decisions)
+        .filter(|(_, d)| matches!(d, Decision::Run(Why::Miss | Why::TooOld | Why::Untrusted(_))))
+        .map(|(c, _)| c.target.id.as_str())
+        .collect();
+    let before = put.len();
+    let kept: Vec<Record> = put.into_iter().filter(|r| replaceable.contains(r.target.as_str())).collect();
+    let n = before - kept.len();
+    (kept, n)
+}
+
+/// The records a lookup found but did not trust, counted by why: `untrusted 57 (57: job ... did not end success)`, and those whose trust
+/// could not be decided (`undecided 3 (...)`), so a `matched 0` never hides records that are there. `None` when there were none.
+pub fn untrusted_summary(decisions: &[Decision]) -> Option<String> {
+    let mut parts: Vec<String> = Vec::new();
+    for (word, pick) in [("untrusted", true), ("undecided", false)] {
+        let mut by: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
+        for d in decisions {
+            match d {
+                Decision::Run(Why::Untrusted(w)) if pick => *by.entry(w.as_str()).or_default() += 1,
+                Decision::Run(Why::Undecided(w)) if !pick => *by.entry(w.as_str()).or_default() += 1,
+                _ => {}
+            }
+        }
+        let n: usize = by.values().sum();
+        if n > 0 {
+            let why: Vec<String> = by.iter().map(|(w, k)| format!("{k}: {w}")).collect();
+            parts.push(format!("{word} {n} ({})", why.join("; ")));
+        }
+    }
+    (!parts.is_empty()).then(|| parts.join(", "))
 }
 
 /// The shadow lines of job logs, summed: how many lines were read, and the totals. `None` when no log has a line (nothing measured).
