@@ -384,7 +384,15 @@ fn p1_3_a_read_outside_the_readers_crate_is_a_data_node_owning_exactly_that_path
     // Control: a reader with no read emits nothing.
     let mut y = Extracted::default();
     adapter.reads_of(&cand, vec![Some("fn main() {}\n".into())], &files, &mut y, &mut stats, true);
-    assert!(y.nodes.is_empty() && y.edges.is_empty() && y.unresolved.is_empty());
+    assert!(y.nodes.is_empty() && y.edges.is_empty() && y.unresolved.is_empty() && y.blind.is_empty());
+    // A read the extractor cannot follow is a blind read of its crate for the test cache, and never an unresolved reference: an
+    // unresolved one would run every project in full in every plan.
+    let mut z = Extracted::default();
+    let walk = "fn t(p: &std::path::Path) { let _ = p.ancestors(); }\n";
+    adapter.reads_of(&cand, vec![Some(walk.into())], &files, &mut z, &mut stats, true);
+    assert_eq!(z.blind.len(), 1, "{:?}", z.blind);
+    assert_eq!(z.blind[0].referrer, "apps/debrief/crates/debrief-plugins/tests/it/main.rs");
+    assert!(z.unresolved.is_empty(), "{:?}", z.unresolved);
 }
 
 /// The code adapter over the real tree (ADR 0117 §10): every Rust read candidate parses with `syn` (the text scan is a fallback,

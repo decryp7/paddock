@@ -5,9 +5,9 @@
 use crate::procutil::*;
 use paddock_proc::ProcessId;
 use paddock_testkit::{Actions, Spawn, StandIn};
+use paddock_throttle::exit;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
-use throttle::exit;
 
 /// The longest a stand-in naps: under the kit's cap, and far longer than any test here waits.
 const NAP: Duration = Duration::from_secs(110);
@@ -71,7 +71,7 @@ fn the_commands_output_lands_in_the_run_log_and_the_path_and_a_summary_are_print
     assert_eq!(logs.len(), 1, "one log in the agent's folder: {logs:?}\n{e}");
     let name = logs[0].file_name().unwrap().to_string_lossy().into_owned();
     assert!(
-        throttle::capture::is_run_log(&name) && name.ends_with("-talker-build.log"),
+        paddock_throttle::capture::is_run_log(&name) && name.ends_with("-talker-build.log"),
         "{name}"
     );
     let text = std::fs::read_to_string(&logs[0]).unwrap();

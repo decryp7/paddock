@@ -6,7 +6,8 @@
 //! - `git merge --no-ff` of the member's commit, with the fixed subject `Merge <member> into <train>` and trailers
 //!   ([`super::trailers`]): `Paddock-Member`, `Paddock-Sync-Ref` (a sync ref `sync/<member>/<sha>` was given), `Paddock-Sync-Sha`
 //!   (the full sha), the `Reverted:` lines `merge check --write-reverted` ties to a re-land, and for each `--reland <revert>` a
-//!   `Paddock-Reland: <revert>` and a `Reverted:` line for each file the revert changed;
+//!   `Paddock-Reland: <revert>` and a `Reverted:` line for each file the revert changed (a re-land of the member's own reverted
+//!   merge is found from the history; `--reland` names any other);
 //! - a conflict stops it with the merge in progress and the message prepared (git keeps it in `MERGE_MSG`); it prints the next step and
 //!   never resolves anything;
 //! - after the merge it runs `merge check` on the new commit and returns its answer.
@@ -27,7 +28,8 @@ const TIMEOUT: Duration = Duration::from_secs(600);
 
 /// The command line's options.
 pub struct Options<'a> {
-    /// `--reland <revert>` (repeatable): a revert of the train's merge of this member that the member re-applies.
+    /// `--reland <revert>` (repeatable): a revert of the train's merge of this member that the member re-applies, besides the ones
+    /// found in its history ([`super::reland::own_relands`]).
     pub relands: &'a [String],
     /// `--old-base-anyway <reason>`: handed to the merge check.
     pub old_base_anyway: Option<&'a str>,
@@ -82,14 +84,27 @@ pub fn command(root: Option<&Path>, member: &str, opts: &Options) -> Result<Repo
     let who = trailers::named(member);
     let mut relands = Vec::new();
     let mut reland_lines = Vec::new();
-    for given in opts.relands {
-        let full = at(given)?.ok_or_else(|| {
-            CliError::usage(format!("--reland {given} is not a commit."))
-                .with_hint("Give the revert commit the train made of the member's merge (`./dev merge sync-member <train>` names it).")
-        })?;
-        if !git.is_ancestor(&full, "HEAD").map_err(|e| step(e, "run `git status`"))? {
-            return Err(CliError::usage(format!("--reland {given} is not part of {train}."))
-                .with_hint("Give a revert commit that is on the train in HEAD."));
+    // A revert of the member's own earlier merge that the member re-adds is found from the history; `--reland` names any other.
+    let found = super::reland::own_relands(&git, "HEAD", &sha, &who.branch)
+        .map_err(|e| step(e, "run `git log HEAD..<member>` to see why, or name the revert with --reland"))?;
+    let given = opts
+        .relands
+        .iter()
+        .map(|given| {
+            let full = at(given)?.ok_or_else(|| {
+                CliError::usage(format!("--reland {given} is not a commit."))
+                    .with_hint("Give the revert commit the train made of the member's merge (`./dev merge sync-member <train>` names it).")
+            })?;
+            if !git.is_ancestor(&full, "HEAD").map_err(|e| step(e, "run `git status`"))? {
+                return Err(CliError::usage(format!("--reland {given} is not part of {train}."))
+                    .with_hint("Give a revert commit that is on the train in HEAD."));
+            }
+            Ok(full)
+        })
+        .collect::<Result<Vec<_>, CliError>>()?;
+    for full in found.into_iter().chain(given) {
+        if relands.contains(&full) {
+            continue;
         }
         let files = git
             .paths(&[
@@ -104,9 +119,7 @@ pub fn command(root: Option<&Path>, member: &str, opts: &Options) -> Result<Repo
             ])
             .map_err(|e| step(e, "run `git show` on the revert"))?;
         reland_lines.extend(trailers::reland_lines(&full, &files));
-        if !relands.contains(&full) {
-            relands.push(full);
-        }
+        relands.push(full);
     }
     // The `Reverted:` lines the check would ask for, found the way `--write-reverted` finds them, on the merge as it would be made.
     // A merge that conflicts has no result to read: the lines are then left to the check after the person's commit.

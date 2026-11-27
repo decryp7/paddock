@@ -110,6 +110,9 @@ export function rustRewrites({ id, name, identifier }, versions) {
   return {
     'Cargo.toml': [
       [/^# Paddock Shell Demo:.*\n(#.*\n)*/m, `# ${name}: a Paddock app on the \`paddock-shell\` plugin, started from Paddock Shell Demo.\n`],
+      // The files the app's tests read (`test-reads`, ADR 0116): the UI is the app's own `app` folder in the new layout.
+      ['"ui/projects/shell-demo/src/app/generated/*"', '"app/src/app/generated/*"'],
+      ['"apps/shell-demo/CHANGELOG.md"', '"app/CHANGELOG.md"'],
       ['name = "paddock-shell-demo"', `name = "${crate}"`],
       ['default-run = "paddock-shell-demo"', `default-run = "${crate}"`],
       ['name = "paddock_shell_demo"', `name = "${lib}"`],
@@ -212,6 +215,8 @@ export function workbenchRustRewrites({ id, name, identifier }, versions) {
   return {
     'Cargo.toml': [
       [/^# Paddock Workbench Demo:.*\n(#.*\n)*/m, `# ${name}: a Paddock IDE-style app on the \`paddock-shell\` and \`paddock-workbench\` plugins, started from Paddock Workbench Demo.\n`],
+      ['"ui/projects/workbench-demo/public/**"', '"app/public/**"'],
+      ['"ui/projects/workbench-demo/src/app/generated/*"', '"app/src/app/generated/*"'],
       ['name = "paddock-workbench-demo"', `name = "${crate}"`],
       ['default-run = "paddock-workbench-demo"', `default-run = "${crate}"`],
       ['name = "paddock_workbench_demo"', `name = "${lib}"`],

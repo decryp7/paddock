@@ -363,12 +363,8 @@ pub fn add(repo: &Repo, caller: &Caller, req: &AddRequest<'_>) -> Result<Report,
     })?;
     // A full worktree has no `conformance/node_modules`, and the conformance gate then says "check broken" (C111, the yaml package):
     // install them here, bounded and logged; a failure is a warning with the next step, never a failed `add`.
-    let deps_note = if req.branch.is_some() {
-        // A warm shared cache (`./dev deps`) gives the whole `node_modules` as a clone, conformance's included; otherwise only that.
-        crate::deps_cache::warm_note(Path::new(&k)).unwrap_or_else(|| conformance_deps_note(Path::new(&k), &npm_ci))
-    } else {
-        String::new()
-    };
+    // A branch worktree and a full `--detach` copy get the same handling; only a `--sparse` review copy, which reads a few folders, is left.
+    let deps_note = deps_note(Path::new(&k), req, &crate::deps_cache::warm_note, &npm_ci);
     let head = Git::at(Path::new(&k))
         .text(&["rev-parse", "HEAD"])
         .map(|s| s.trim().to_string())
@@ -443,6 +439,16 @@ const NPM_CI_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 /// The arguments of the install: `conformance` is a member of the root npm workspace (it has no lockfile of its own), so the install
 /// is made from the root, for that member only.
 const NPM_CI_ARGS: [&str; 5] = ["ci", "--ignore-scripts", "--no-audit", "--no-fund", "-w=conformance"];
+
+/// The line for the dependencies of a new worktree at `k`: a warm shared cache (`./dev deps`) gives the whole `node_modules` as a clone,
+/// conformance's included; otherwise only conformance's is installed ([`conformance_deps_note`]). A `--sparse` copy has
+/// neither and says nothing. `warm` and `run` are the real ones outside the tests.
+fn deps_note(k: &Path, req: &AddRequest<'_>, warm: &dyn Fn(&Path) -> Option<String>, run: DepsRunner<'_>) -> String {
+    if !req.sparse.is_empty() {
+        return String::new();
+    }
+    warm(k).unwrap_or_else(|| conformance_deps_note(k, run))
+}
 
 /// The conformance gates need their own dependencies (the `yaml` package of C111); a fresh worktree has none. `Ok` is the log line, `Err`
 /// why it failed. The real runner is [`npm_ci`]; tests pass a fake.
@@ -800,6 +806,39 @@ mod tests {
             bad.contains(&format!("Next: cd {} && npm ci --ignore-scripts -w conformance", k.display())),
             "{bad}"
         );
+    }
+
+    /// A `--detach` copy is a full checkout like a branch worktree and gets the same `node_modules` handling (the cache clone, else the
+    /// conformance install); only a `--sparse` review copy is left alone.
+    #[test]
+    fn a_full_detached_copy_gets_the_same_dependencies_as_a_branch_worktree_and_a_sparse_one_none() {
+        let d = tempfile::tempdir().unwrap();
+        let k = d.path();
+        std::fs::create_dir_all(k.join("conformance")).unwrap();
+        std::fs::write(k.join("conformance/package.json"), "{}").unwrap();
+        std::fs::write(k.join("package-lock.json"), "{}").unwrap();
+        fn req<'a>(root: &'a Path, branch: Option<&'a str>, sparse: &'a [String]) -> AddRequest<'a> {
+            AddRequest {
+                name: "w",
+                root,
+                branch,
+                base: "origin/main",
+                owner: "a:b",
+                sparse,
+            }
+        }
+        for branch in [None, Some("w")] {
+            let full = req(k, branch, &[]);
+            let cached = super::deps_note(k, &full, &|_| Some("\ncloned".into()), &|_| {
+                panic!("the cache hit needs no install")
+            });
+            assert_eq!(cached, "\ncloned", "{branch:?}");
+            let installed = super::deps_note(k, &full, &|_| None, &|_| Ok("exit 0".into()));
+            assert!(installed.contains("conformance dependencies installed"), "{branch:?}: {installed}");
+        }
+        let sparse = [String::from("ui")];
+        let none = super::deps_note(k, &req(k, None, &sparse), &|_| panic!("sparse"), &|_| panic!("sparse"));
+        assert_eq!(none, "");
     }
 
     /// The real runner against a fake npm: the command line and the folder it runs in are the ones the message names.

@@ -20,3 +20,12 @@ ureq = { version = "3", default-features = false, features = ["rustls", "platfor
 [dev-dependencies]
 paddock-testkit = { path = "../../../crates/paddock-testkit" }
 tempfile.workspace = true
+
+[package.metadata.paddock]
+# What this crate's tests read that the test cache's reads extractor cannot resolve (ADR 0116 §2, user decision 122), as globs from the
+# repository root; `[]` says the blind reads touch no repository file.
+# `src/main.rs` tests: the sample generator and the libduckdb fetch script, by repository-relative paths.
+test-reads = [
+    "apps/debrief/samples/generate.py",
+    "apps/debrief/crates/debrief-store-duck/scripts/fetch-libduckdb.sh",
+]
