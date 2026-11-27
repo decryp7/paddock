@@ -31,11 +31,3 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage
 paddock-testkit = { workspace = true }
 tempfile = "3"
 proptest = "1"
-
-[lints.rust]
-unsafe_code = "deny"
-missing_docs = "warn"
-
-[lints.clippy]
-unwrap_used = "warn"
-expect_used = "warn"

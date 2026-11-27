@@ -359,10 +359,8 @@ mod tests {
         };
         let (c, _) = Config::from_env(&get, &host);
         // conformance: abs-path — the expected macOS default of a modelled macOS host (Os::MacOs, HOME=/Users/u), compared as path text
-        assert_eq!(
-            c.root,
-            PathBuf::from("/Users/u/Library/Application Support/throttle")
-        );
+        let expected = PathBuf::from("/Users/u/Library/Application Support/throttle");
+        assert_eq!(c.root, expected);
         assert_eq!(
             (c.gate_load, c.slots, c.wait_log),
             (30.0, 2, Duration::from_secs(60))
