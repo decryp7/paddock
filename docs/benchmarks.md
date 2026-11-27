@@ -3182,3 +3182,16 @@ heavy generator is named `deferred` in the merge check (never a pass, ER-33) and
 the union of every merge's; `--heavy-generators` runs them per merge. Fast generators still run per merge. Also seen: the per-merge
 `ci-run-golden` was STALE on a mid-train merge that a later member fixed, so the per-merge run named a member that was not at fault.
 Not measured: the final gen check on a whole train (it runs what the per-merge steps ran before, once).
+
+## paddock-dev host legs: OS-independent areas leave Windows and macOS (expected saving, 2026-11-27, ci/paddock-dev-os-scope)
+
+Expected, not measured: nothing was run on a host. **Source:** the per-area test seconds of run 9212 (jobs 52148 macOS, 52162 Windows) in the
+block "paddock-dev test time by area" of docs/benchmarks.md on branch docs/paddock-dev-test-split (ADR NEW-paddock-dev-test-split). Decision 114
+(user, 2026-11-27): the host legs run only OS-specific tests, so `tools/paddock-dev/paddock.ci.json` skips `merge_check::` (except `merge_check::git::`),
+`ci_runs::` (except `dispatch_guards::`; `reservation::` stays macOS only), `ci_run::`, the planner's model and readers and `repo_model::hash::` and
+`replay::` from both hosts. **Windows:** merge_check 545 s and ci_runs plus ci_run 228 s of 1,191 s summed per-test seconds (65%) leave; the kept
+`merge_check::git::` and `ci_runs::dispatch_guards::` tests are not separated in the source, so the saving is at most 773 s (about 180 s of the
+282 s test step in 9212 if the share holds), plus part of repo_model 53 s and the other skipped areas (not separated in the source).
+**macOS:** merge_check 88 s and ci_runs plus ci_run 86 s of 817 s (21%) at most (the kept git and reservation tests are inside these figures); about
+75 s of the 360 s test step. **Linux** runs everything, unchanged. Limits: per-test seconds sum the threads; the wall share is the sum share. The
+real figure is read from the first run after the change.

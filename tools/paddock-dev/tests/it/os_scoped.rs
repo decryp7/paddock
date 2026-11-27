@@ -434,3 +434,45 @@ fn tree_every_declared_scope_is_unscoped_on_linux_and_scoped_on_the_hosts() {
     }
     assert_eq!(declared, 7);
 }
+
+/// Decision 114 (user, 2026-11-27; ER-52): paddock-dev's Windows and macOS legs run only the OS-specific tests; the OS-independent areas
+/// (pure logic: the merge check, the CI run readers, the planner's model and readers) run on Linux only, which stays unscoped. A module
+/// of those areas that holds OS code itself (`merge_check::git` spawns git, `ci_runs::dispatch_guards` spawns a process) stays on every
+/// host (a test module touching OS-specific code stays on all OSes).
+#[test]
+fn tree_the_paddock_dev_host_legs_leave_out_the_os_independent_areas_and_linux_runs_everything() {
+    let (root, files) = real_files();
+    let contract = "tools/paddock-dev/paddock.ci.json";
+    let v: Value = serde_json::from_str(&std::fs::read_to_string(root.join(contract)).unwrap()).unwrap();
+    let p = derive("tools/paddock-dev", &files, &DiskBulk(root.clone())).unwrap();
+    let h = read(&v, contract, &p.derived).unwrap().unwrap();
+    let linux = h.scope(LINUX);
+    assert!(linux.packages.is_empty() && linux.filter.is_empty(), "Linux runs every test");
+    let independent = [
+        "merge_check::",
+        "ci_runs::",
+        "ci_runs::verdict::",
+        "ci_run::",
+        "ci_run::select::",
+        "plan_graph::",
+        "plan_repo::",
+        "plan_since::",
+        "plan_gitea::",
+        "run_scope::",
+        "repo_model::hash::",
+        "repo_model::replay::",
+    ];
+    // Code that holds OS behaviour itself, or that only a Mac runs, stays where it is.
+    let os_specific = ["merge_check::git::", "ci_runs::dispatch_guards::", "local_sccache::", "pre_push::exec::"];
+    for os in ["windows-latest", "macos-latest"] {
+        let on = h.module_prefixes(os);
+        for m in independent {
+            assert!(!on.iter().any(|l| l == m), "{os} must not run the OS-independent {m}: {on:?}");
+        }
+        for m in os_specific {
+            assert!(on.iter().any(|l| l == m), "{os} still runs the OS-specific {m}");
+        }
+    }
+    assert!(h.module_prefixes("macos-latest").iter().any(|l| l == "ci_runs::reservation::"));
+    assert!(!h.module_prefixes("windows-latest").iter().any(|l| l == "ci_runs::reservation::"));
+}
