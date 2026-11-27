@@ -1,9 +1,10 @@
 //! The push gate with a plan, a list of files and a fake machine: no process starts (ER-14).
 
 use super::budget::Timing;
-use super::exec::{Done, Exec, Kind, Limits, QUEUE_STALL, Row, RunOpts, run_all_timed, run_all_with, test_subject};
+use super::exec::{Done, Exec, Kind, Limits, Row, RunOpts, run_all_timed, run_all_with, test_subject};
 use super::gates::{AUDIT_PROFILE, Change, Facts, Gate, Need, Planned, plan_gates, windows_skip_reason};
 use super::{accept_not_measured, parse_refs, render, render_timed};
+use crate::throttle::QUEUE_STALL;
 use paddock_cli::Exit;
 use serde_json::json;
 use std::collections::BTreeSet;
@@ -3206,7 +3207,7 @@ mod deny_row {
             priority: false,
             wrapper: crate::local_sccache::Lazy::off(),
             watchdog: Arc::new(crate::pre_push::watchdog::Never),
-            row_cap: crate::pre_push::exec::ROW_CAP,
+            row_cap: crate::throttle::ROW_CAP,
             state: d.join("state"),
         }
     }
