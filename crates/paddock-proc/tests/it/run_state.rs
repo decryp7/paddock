@@ -1,6 +1,10 @@
 //! A SIGSTOP-stopped process is read as stopped and a start watch waits for it instead of calling it
 //! idle (ADR 0031). Unix only: the test child is `sleep`, stopped and killed with signals.
 #![cfg(unix)]
+#![allow(
+    clippy::disallowed_methods,
+    reason = "this file tests run_state itself: the reads are the thing under test"
+)]
 
 use paddock_proc::{
     Liveness, Pace, Patience, ProcessId, RunState, StallCause, StartProbe, StartState, StartWatch,

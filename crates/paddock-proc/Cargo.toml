@@ -10,6 +10,11 @@ publish = ["decryp7"]
 [lib]
 doctest = false # doctests are off (crates/README.md, "Doctests")
 
+[features]
+# `statewait`: waits on a process's run state for tests (rule 99: never in a shipped build). paddock-testkit-start turns it on and
+# re-exports it; this package's own unit tests have it under cfg(test).
+test-support = []
+
 [dependencies]
 log = "0.4"
 paddock-env = { workspace = true }
