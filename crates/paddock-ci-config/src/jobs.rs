@@ -210,6 +210,54 @@ fn tool_cache_before_first_dev(steps: &[Node], declared: &Declared) -> bool {
     true
 }
 
+/// Whether `steps` restore the dev tool before the first `./dev` call: a step that uses `restoring` (a local action that restores it)
+/// comes first. A list that never calls `./dev` and never restores is not one that restores.
+fn restores_dev_tool(steps: &[Node], restoring: &BTreeSet<String>) -> bool {
+    for step in steps {
+        if let Some(action) = step
+            .get_text("uses")
+            .and_then(|u| u.strip_prefix("./.gitea/actions/"))
+            && (action == TOOL_CACHE_ACTION || restoring.contains(action))
+        {
+            return true;
+        }
+        if step.get_text("run").is_some_and(runs_dev) {
+            return false;
+        }
+    }
+    false
+}
+
+/// The local actions (by folder name, with their `action.yml` text) that restore the dev tool before any `./dev` of their own: the
+/// action `dev-tool-cache` itself, and every composite action whose steps use one of those first (to a fixed point). What the model's
+/// [`Declared::tool_cache_actions`] is made of, so a new action that restores it counts without a hand list (ADR 0123 §7, ER-42).
+pub fn tool_cache_actions(
+    action_files: &BTreeMap<String, String>,
+) -> Result<BTreeSet<String>, String> {
+    let mut parsed: BTreeMap<&str, Vec<Node>> = BTreeMap::new();
+    for (name, text) in action_files {
+        let doc = yaml::parse(text).map_err(|e| format!("action {name}: {e}"))?;
+        let steps = doc
+            .get("runs")
+            .and_then(|r| r.get("steps"))
+            .map(|s| s.items().to_vec())
+            .unwrap_or_default();
+        parsed.insert(name.as_str(), steps);
+    }
+    let mut found: BTreeSet<String> = BTreeSet::new();
+    loop {
+        let before = found.len();
+        for (name, steps) in &parsed {
+            if *name == TOOL_CACHE_ACTION || restores_dev_tool(steps, &found) {
+                found.insert((*name).to_string());
+            }
+        }
+        if found.len() == before {
+            return Ok(found);
+        }
+    }
+}
+
 /// `${{ fromJSON(needs.plan.outputs.<name>) }}`: the name.
 fn planned_output(text: &str) -> Option<String> {
     let inner = text.trim().strip_prefix("${{")?.strip_suffix("}}")?.trim();

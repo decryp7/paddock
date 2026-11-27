@@ -209,6 +209,17 @@ jobs:
           if grep -q '^partial=true$' "$GITHUB_OUTPUT"; then PLAN_MODE_FULL=false; fi
           echo "plan mode: full=$PLAN_MODE_FULL"
 
+      # ADR 0123 §7: the one check at the source of the job layout (the model builds, every job keeps the conventions, `render` is
+      # injective over the legs the planner emits). Every run, whatever the change (ER-41); the member gate runs it too (`job-model`
+      # row). Report-only (warnings, exit 0) until its first green run on the real tree is recorded in
+      # tools/paddock-dev/src/ci_job_model.rs (`BLOCKING`); `continue-on-error` goes with that change. Review by 2027-02-27.
+      - name: Job model check
+        continue-on-error: true
+        env:
+          PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+          PADDOCK_DEV_DOWNLOAD: ${{ (inputs.release == true || startsWith(github.ref, 'refs/tags/')) && '0' || '' }}
+        run: ./dev ci job-model check
+
   # The developer and CI tool (ADR 0022): its own Cargo workspace and lockfile, tested on every OS it runs on. Linux runs in the
   # paddock-ci image (git, Node for the golden test's live oracle, nextest); Windows and macOS run on the host.
   # Started first (user, 2026-11-25): the longest Linux job is the first job after `plan` in this file, so it takes the first free
