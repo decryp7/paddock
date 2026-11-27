@@ -249,7 +249,11 @@ fn a_queue_that_makes_no_progress_ends_stalled_and_names_the_holder() {
 fn a_queue_that_keeps_moving_is_waited_for_past_the_stall_limit() {
     use std::sync::atomic::{AtomicU64, Ordering};
     let rig = Rig::new();
-    let n = rig.agent(12);
+    // The fake clock sleeps nothing, but every poll reads and writes the real lock folder: at the rig's 200 ms poll these 20-minute waits made
+    // thousands of polls (5 to 7 s on a Mac, over a minute on a Windows runner). A 5 s poll sees the same fake minutes in a few hundred.
+    let mut cfg = rig.cfg();
+    cfg.poll = Duration::from_secs(5);
+    let n = rig.agent_with(12, cfg);
     let args = vec!["true".to_string()];
     let (swaps, last) = (AtomicU64::new(0), AtomicU64::new(rig.now()));
     let start = rig.now();
@@ -298,7 +302,11 @@ fn a_queue_that_keeps_moving_is_waited_for_past_the_stall_limit() {
 fn a_waiter_behind_a_live_holder_inside_its_cap_is_not_stalled() {
     use std::sync::atomic::{AtomicBool, Ordering};
     let rig = Rig::new();
-    let n = rig.agent(12);
+    // The fake clock sleeps nothing, but every poll reads and writes the real lock folder: at the rig's 200 ms poll these 20-minute waits made
+    // thousands of polls (5 to 7 s on a Mac, over a minute on a Windows runner). A 5 s poll sees the same fake minutes in a few hundred.
+    let mut cfg = rig.cfg();
+    cfg.poll = Duration::from_secs(5);
+    let n = rig.agent_with(12, cfg);
     let args = vec!["true".to_string()];
     let start = rig.now();
     rig.procs.run(31, start - 50);
