@@ -36,3 +36,9 @@ default = ["server", "dbghelp"]
 server = ["dep:ureq"]
 # The DbgHelp resolver and stack walker (Windows). Without it the crate is pure: identities, the cache, downloads.
 dbghelp = ["dep:windows"]
+
+# What this crate's tests read that the test cache's reads extractor cannot resolve (ADR 0116 §2, user decision 122), as globs from the
+# repository root; `[]` says the blind reads touch no repository file.
+# `src/cache.rs` removes files and empty folders inside the cache folder a caller names; no repository path.
+[package.metadata.paddock]
+test-reads = []

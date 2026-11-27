@@ -34,3 +34,11 @@ paddock-proc = { path = "../../../../crates/paddock-proc" }
 # Snapshot tests of the importers against /samples (tests/samples.rs, snapshots in tests/snapshots/).
 insta.workspace = true
 proptest.workspace = true
+
+# What this crate's tests read that the test cache's reads extractor cannot resolve (ADR 0116 §2, user decision 122), as globs from the
+# repository root; `[]` says the blind reads touch no repository file.
+# `tests/it/properties.rs` reads this crate's own fixtures and one sample; the minidump test reads its own committed fixture.
+[package.metadata.paddock]
+test-reads = [
+    "apps/debrief/samples/csv/perfmon-export.csv",
+]
