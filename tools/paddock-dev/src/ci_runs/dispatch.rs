@@ -623,7 +623,7 @@ pub fn train_waiters(root: &std::path::Path) -> Result<usize, String> {
 /// The display name of a workflow's runner-wait job (the first job whose steps use [`RUNNER_WAIT_ACTION`]): its `name`, else its id.
 fn waiter_job_name(workflow: &str, read: ReadWorkflow<'_>) -> Option<String> {
     let jobs = runner_jobs(&read(workflow)?).ok()?;
-    jobs.into_iter().find(|j| is_waiter(j)).map(|j| j.name)
+    jobs.into_iter().find(is_waiter).map(|j| j.name)
 }
 
 /// A first job (no `needs`) with a step that uses [`RUNNER_WAIT_ACTION`].
