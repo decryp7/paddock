@@ -89,6 +89,9 @@ mod tests {
         assert!(!wait_exited(id, Duration::from_millis(20)));
         crate::kill_tree(id);
         let _ = c.wait();
+        // Windows keeps an ended process readable while any handle to it is open, and its state is then `Unknown`, never `Exited`
+        // (trial run 9253 waited 40 s here): the handle this test holds closes before it waits for the ending.
+        drop(c);
         assert!(wait_exited(id, HANG_GUARD));
         assert_eq!(state_after(id, || {}), RunState::Exited);
     }
