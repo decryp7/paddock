@@ -183,25 +183,23 @@ pub fn grep_files(code: Option<i32>, stdout: &str, stderr: &str, truncated: bool
         .collect()
 }
 
-/// What `git grep -E` looks for in a Rust source: every construct [`rust_reads`] resolves or marks blind.
-pub const READ_PATTERN: &str =
-    r"include(_str|_bytes)?!|CARGO_MANIFEST_DIR|CARGO_MANIFEST_PATH|#\[path|rerun-if-changed|ancestors\(|current_dir|ls-files|fs::|File::open|read_to_string|read_dir|\.(exists|is_file|is_dir|try_exists)\(";
+/// What `git grep -E` looks for in a Rust source: every construct [`rust_reads`] resolves or marks blind (a relative-literal `fs` read
+/// is a read of the crate, so the `fs` entry points stay; a bare `.exists()` is no read by itself).
+pub const READ_PATTERN: &str = r"include(_str|_bytes)?!|CARGO_MANIFEST_DIR|CARGO_MANIFEST_PATH|#\[path|rerun-if-changed|ancestors\(|current_dir|current_exe|home_dir|ls-files|env::var|var_os|\.pop\(|\.\./|fs::|File::open|read_to_string|read_dir";
 
-/// Text that makes an unparseable source a blind one.
+/// Text that makes an unparseable source a blind one: the roots [`rust_reads`] cannot follow.
 pub const BLIND_TRIGGERS: &[&str] = &[
     "CARGO_MANIFEST_DIR",
     "CARGO_MANIFEST_PATH",
     ".ancestors(",
     "current_dir",
+    "current_exe",
+    "home_dir",
     "ls-files",
-    "fs::",
-    "File::open",
-    "read_to_string",
-    "read_dir",
-    ".exists(",
-    ".is_file(",
-    ".is_dir(",
-    ".try_exists(",
+    "env::var",
+    "var_os",
+    ".pop(",
+    "../",
 ];
 
 /// What a source's reads cannot resolve, one line each (the reference text of a blind read): the [`How::Blind`] reads of a parse, or, for

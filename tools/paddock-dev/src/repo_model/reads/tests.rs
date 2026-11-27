@@ -186,84 +186,81 @@ fn a_read_that_leaves_the_repository_is_blind_not_dropped() {
     assert!(!blind(src).is_empty());
 }
 
-/// A filesystem read whose path is not a resolved literal chain is blind: a parameter, a `.pop()` walk, a `.push(non-literal)`, a
-/// field, a helper's return value. The loaders of the endings register walk up from a `&str` parameter this way.
+/// The root rules (ADR 0116 §2, amendment): a read is judged by where its path starts, not by the fact that it is a read. A path handed
+/// in as a parameter defers to the caller, which is classified where it builds the path; a folder the test made, the crate's own working
+/// folder and a `Vec::pop` are not repository reads.
 #[test]
-fn an_fs_read_of_a_path_that_is_not_a_resolved_literal_chain_is_blind() {
-    let loader = r#"
-pub fn load_from(manifest_dir: &str) -> String {
-    let mut dir = std::path::PathBuf::from(manifest_dir);
-    loop {
-        let candidate = dir.join("docs/x.toml");
-        if candidate.is_file() {
-            return std::fs::read_to_string(&candidate).unwrap();
-        }
-        if !dir.pop() { return String::new(); }
-    }
-}
-"#;
-    let got = blind(loader);
-    assert!(got.len() >= 2, "is_file and read_to_string of a walked path: {got:?}");
+fn a_read_of_a_parameter_a_temp_folder_or_the_working_folder_is_not_blind_the_negative_control() {
     for src in [
         "fn f(p: &std::path::Path) { let _ = std::fs::read(p); }",
-        "fn f(p: &std::path::Path) { let _ = std::fs::File::open(p); }",
-        "fn f(p: &std::path::Path) { let _ = std::fs::read_dir(p); }",
+        "fn f(p: &std::path::Path) { let _ = std::fs::File::open(p); let _ = p.exists(); let _ = std::fs::read_dir(p); }",
         "fn f(s: &S) { let _ = std::fs::read_to_string(&s.path); }",
         "fn f(mut p: std::path::PathBuf, n: &str) { p.push(n); let _ = p.exists(); }",
-    ] {
-        assert!(!blind(src).is_empty(), "{src}");
-    }
-}
-
-/// The controls: a literal, a resolved manifest chain and a write are not blind reads.
-#[test]
-fn an_fs_read_of_a_literal_or_a_resolved_chain_is_not_blind_the_negative_control() {
-    for src in [
-        r#"fn f() { let _ = std::fs::read_to_string("tests/x.txt"); }"#,
-        r#"fn f() { let _ = std::fs::read(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/x")); }"#,
-        r#"fn f() { assert!(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("a").is_dir()); }"#,
-        "fn f(p: &std::path::Path) { let _ = std::fs::write(p, \"x\"); let _ = std::fs::create_dir_all(p); }",
-        "fn f(v: &mut Vec<u8>) { let _ = v.pop(); }",
-    ] {
-        assert!(blind(src).is_empty(), "{src}: {:?}", blind(src));
-    }
-}
-
-/// A path whose root is a folder the test made holds only what the test wrote: its reads are not repository reads. The constructors are
-/// the tempfile ones (`tempdir`, `tempdir_in`, `TempDir::new*`, `NamedTempFile::new*`, `Builder::..tempdir()`) and the testkit's
-/// (`private_tempdir`, `canonical_tempdir`, `PrivateTemp::new*`, `Scratch::new`/`try_new*`), followed through let-bindings, `.path()`,
-/// `.work()`, `.home()`, `.tmp()` and `.join(..)`.
-#[test]
-fn a_read_of_a_path_rooted_in_a_folder_the_test_made_is_not_blind() {
-    for src in [
         "fn t() { let d = tempfile::tempdir().unwrap(); let p = d.path().join(\"a\"); std::fs::write(&p, \"x\").unwrap(); let _ = std::fs::read_to_string(&p); }",
-        "fn t() { let d = paddock_testkit::private_tempdir().unwrap(); assert!(d.path().join(\"s\").is_dir()); let _ = std::fs::read_dir(d.path()); }",
-        "fn t() { let s = Scratch::new(); let f = s.work().join(\"f\"); let _ = std::fs::read(f); }",
-        "fn t() { let d = tempfile::TempDir::new().unwrap(); let r = d.path().to_path_buf(); let _ = std::fs::File::open(r.join(\"x\")); }",
-        "fn t() { let d = tempfile::Builder::new().prefix(\"p\").tempdir().unwrap(); let _ = d.path().join(\"x\").exists(); }",
-        "fn t() { let d = canonical_tempdir(); let p = d.path().join(\"a\").join(\"b\"); let _ = std::fs::metadata(&p); }",
-        "fn t() { let d = tempdir(); let again = d.path().join(\"a\"); let q = again.join(\"b\"); let _ = std::fs::read(q); }",
+        "fn t() { let d = paddock_testkit::private_tempdir().unwrap(); assert!(d.path().join(\"s\").is_dir()); }",
+        "fn t() { let d = tempfile::tempdir().unwrap(); let _ = std::fs::read(d.path().join(\"../x\")); }",
+        "fn t() { let _ = std::fs::read_to_string(\"tests/x.txt\"); let _ = std::path::Path::new(\".\").join(\"x\").exists(); }",
+        "fn t() { let _ = std::fs::read_dir(\".\"); }",
+        r#"fn t() { let _ = std::fs::read(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/x")); }"#,
+        "fn f(v: &mut Vec<u8>) { while let Some(x) = v.pop() { let _ = x; } let _ = v.pop(); }",
+        "fn f() { let ci = std::env::var(\"CI\").is_ok(); let n = std::env::var(\"N\").unwrap_or_default(); let _ = (ci, n); }",
+        "fn f(p: &std::path::Path) { let _ = std::fs::write(p, \"x\"); let _ = std::fs::create_dir_all(p); }",
+        r#"fn f() { assert!(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("a").is_dir()); }"#,
     ] {
         assert!(blind(src).is_empty(), "{src}: {:?}", blind(src));
     }
 }
 
-/// The controls: a temp folder handed through a parameter, a walk out of the folder, a name rebound to something else, and a repository
-/// file copied into the folder (the copy's source is its own site) are blind.
+/// One control per blind root kind: an environment variable turned into a path, the program, the working or the home folder, a `.pop()`
+/// walk upward, and a literal that reaches the repository root.
 #[test]
-fn a_temp_folder_through_a_parameter_a_walk_out_a_rebinding_or_a_copy_source_is_blind() {
-    for src in [
-        "fn read(dir: &std::path::Path) { let _ = std::fs::read(dir.join(\"a\")); }",
-        "fn t() { let d = tempfile::tempdir().unwrap(); let _ = std::fs::read(d.path().join(\"../x\")); }",
-        "fn t(other: &std::path::Path) { let d = tempfile::tempdir().unwrap(); let d = other.join(\"x\"); let _ = std::fs::read(d); }",
-        "fn t(repo: &std::path::Path) { let d = tempfile::tempdir().unwrap(); std::fs::copy(repo.join(\"f\"), d.path().join(\"f\")).unwrap(); }",
-        "fn t() { let d = tempfile::tempdir().unwrap(); let _ = std::fs::read(d.path().join(\"/etc/passwd\")); }",
+fn each_root_that_cannot_be_followed_is_blind_the_positive_control() {
+    for (name, src) in [
+        (
+            "env::var into PathBuf",
+            "fn t() { let _ = std::path::PathBuf::from(std::env::var(\"ROOT\").unwrap()); }",
+        ),
+        (
+            "env::var_os into PathBuf",
+            "fn t() { let _ = std::path::PathBuf::from(std::env::var_os(\"ROOT\").unwrap()); }",
+        ),
+        (
+            "var_os mapped to PathBuf",
+            "fn t() { let _ = std::env::var_os(\"ROOT\").map(std::path::PathBuf::from); }",
+        ),
+        (
+            "env::var into Path::new",
+            "fn t() { let s = std::env::var(\"ROOT\").unwrap(); let _ = std::path::Path::new(&std::env::var(\"R2\").unwrap()); let _ = s; }",
+        ),
+        ("current_exe", "fn t() { let _ = std::env::current_exe(); }"),
+        ("current_dir", "fn t() { let _ = std::env::current_dir(); }"),
+        ("home_dir", "fn t() { let _ = dirs::home_dir(); }"),
+        (
+            "pop as a boolean in if",
+            "fn t(mut d: std::path::PathBuf) { if !d.pop() { return; } }",
+        ),
+        (
+            "pop as a boolean in while",
+            "fn t(mut d: std::path::PathBuf) { while d.pop() { let _ = d.exists(); } }",
+        ),
+        (
+            "a literal that reaches the root",
+            r#"fn t() { let _ = std::path::Path::new("../.."); }"#,
+        ),
+        (
+            "a literal that leaves the root",
+            r#"fn t() { let _ = std::path::PathBuf::from("../../../x"); }"#,
+        ),
     ] {
-        assert!(!blind(src).is_empty(), "{src}");
+        assert!(!blind(src).is_empty(), "{name}: not blind");
     }
-    // The same copy from a resolved manifest chain is not blind, and its source is a read of the repository.
-    let ok = "fn t() { let d = tempfile::tempdir().unwrap(); std::fs::copy(std::path::Path::new(env!(\"CARGO_MANIFEST_DIR\")).join(\"tests/f\"), d.path().join(\"f\")).unwrap(); }";
-    assert!(blind(ok).is_empty(), "{:?}", blind(ok));
+    // A `..` literal that stays inside the repository is a read edge of its crate, not a blind read.
+    let src = r#"fn t() { let _ = std::path::Path::new("../b/x"); }"#;
+    assert!(blind(src).is_empty());
+    assert_eq!(
+        paths(rust_reads("crates/a/tests/it.rs", src, "crates/a")),
+        [("crates/b/x".to_string(), How::ManifestDir)]
+    );
 }
 
 /// A relative literal path read with `fs` is read from the crate's folder: a read of the crate (cargo test starts there).
