@@ -104,6 +104,57 @@ fn the_key_changes_with_each_part_and_only_with_them() {
 }
 
 #[test]
+fn a_packages_whole_repository_tests_are_a_target_of_their_own_keyed_on_the_tree() {
+    let linux = RunnerClass::of("linux", "x86_64");
+    let parts = KeyParts {
+        epoch: 1,
+        class: &linux,
+        profile: "ci",
+    };
+    let (pkg, whole) = Target::split("tools/paddock-dev", "paddock-dev", "tools/paddock-dev");
+    assert_eq!(pkg.id, "rust:tools/paddock-dev");
+    assert_eq!(whole.id, "rust:tools/paddock-dev#whole");
+    assert_ne!(pkg.id, whole.id);
+    // The same node: a never-cached entry for the package covers both of its targets.
+    assert_eq!(pkg.node, whole.node);
+    let k = |t: &Target, node: &str, tree: &str| key(t, &t.key_input(node, tree), &parts);
+    // The package's tests are keyed on its node hash only, the whole-repository tests on the HEAD tree only.
+    assert_eq!(
+        k(&pkg, "sha256:1", "tree-a"),
+        k(&pkg, "sha256:1", "tree-b"),
+        "a change outside the package keeps its key"
+    );
+    assert_ne!(
+        k(&pkg, "sha256:1", "tree-a"),
+        k(&pkg, "sha256:2", "tree-a"),
+        "a change inside the package"
+    );
+    assert_ne!(
+        k(&whole, "sha256:1", "tree-a"),
+        k(&whole, "sha256:1", "tree-b"),
+        "any change to the tree"
+    );
+    assert_eq!(
+        k(&whole, "sha256:1", "tree-a"),
+        k(&whole, "sha256:2", "tree-a"),
+        "the tree already holds the package"
+    );
+    // A tree id can never be read as a node hash of the same target, nor the two targets' keys meet.
+    assert_ne!(k(&whole, "sha256:1", "sha256:1"), k(&pkg, "sha256:1", "sha256:1"));
+}
+
+#[test]
+fn the_two_targets_of_a_split_package_select_every_test_exactly_once() {
+    let w = crate::test_cost::whole_repository_filter();
+    // A package that is not split keeps its one target and filter (every shared crate).
+    assert_eq!(Target::rust("crates/a", "a", "crates").filter(), "package(=a)");
+    let (rest, whole) = Target::split("tools/paddock-dev", "paddock-dev", "tools/paddock-dev");
+    assert_eq!(rest.filter(), format!("package(=paddock-dev) & not {w}"));
+    assert_eq!(whole.filter(), format!("package(=paddock-dev) & {w}"));
+    assert_eq!(rest.package, whole.package);
+}
+
+#[test]
 fn a_config_with_no_green_run_is_in_shadow_and_two_distinct_green_runs_switch_it_on() {
     let c = cfg();
     assert_eq!(c.mode(), Mode::Shadow);

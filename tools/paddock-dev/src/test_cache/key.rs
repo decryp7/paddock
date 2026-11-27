@@ -45,6 +45,20 @@ pub struct Target {
     pub package: String,
     /// The Cargo workspace folder.
     pub workspace: String,
+    /// Which of the package's tests the target holds.
+    pub part: Part,
+}
+
+/// Which tests of a package a target holds (ADR NEW-paddock-dev-test-split §1). A package whose tests read the whole repository is split
+/// in two, so the tests that read only the package keep a key that a change elsewhere does not touch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Part {
+    /// Every test of the package, keyed on its node hash (a package that is not split).
+    Package,
+    /// The tests that read only the package's inputs, keyed on its node hash.
+    Rest,
+    /// The tests that read the whole repository ([`crate::test_cost::reads_whole_repository`]), keyed on the HEAD tree.
+    WholeRepository,
 }
 
 impl Target {
@@ -55,6 +69,41 @@ impl Target {
             node: format!("crate:{dir}"),
             package: package.to_string(),
             workspace: workspace.to_string(),
+            part: Part::Package,
+        }
+    }
+
+    /// The two targets of a split package: its other tests (the package's id, as before the split) and its whole-repository tests
+    /// (`<id>#whole`). Both name the package's node, so a never-cached entry for it covers both.
+    pub fn split(dir: &str, package: &str, workspace: &str) -> (Target, Target) {
+        let rest = Target {
+            part: Part::Rest,
+            ..Target::rust(dir, package, workspace)
+        };
+        let whole = Target {
+            id: format!("{}#whole", rest.id),
+            part: Part::WholeRepository,
+            ..rest.clone()
+        };
+        (rest, whole)
+    }
+
+    /// The nextest filterset that selects the target's tests.
+    pub fn filter(&self) -> String {
+        let package = format!("package(={})", self.package);
+        match self.part {
+            Part::Package => package,
+            Part::Rest => format!("{package} & not {}", crate::test_cost::whole_repository_filter()),
+            Part::WholeRepository => format!("{package} & {}", crate::test_cost::whole_repository_filter()),
+        }
+    }
+
+    /// What the key is computed over: the package's node hash, or for the whole-repository tests the HEAD tree id (`git rev-parse
+    /// HEAD^{tree}`), which changes with any tracked file. The tree id is tagged so it can never be read as a node hash.
+    pub fn key_input<'a>(&self, node_hash: &'a str, head_tree: &str) -> std::borrow::Cow<'a, str> {
+        match self.part {
+            Part::Package | Part::Rest => std::borrow::Cow::Borrowed(node_hash),
+            Part::WholeRepository => std::borrow::Cow::Owned(format!("tree:{head_tree}")),
         }
     }
 }

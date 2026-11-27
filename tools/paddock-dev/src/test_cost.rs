@@ -80,6 +80,22 @@ pub fn declared(test: &str) -> Option<Class> {
     Class::ALL.into_iter().find(|c| last.starts_with(c.prefix()))
 }
 
+/// The prefix of the tests that check the real tree without a cost class (`live_c174_the_real_tree_runs_and_blocks_nothing`).
+const LIVE_PREFIX: &str = "live_";
+
+/// Whether a test reads the whole repository, so a pass of it holds only for the tree it ran on (ADR NEW-paddock-dev-test-split §1):
+/// both cost classes and the `live_` tests. The test cache keys these on the HEAD tree, never on their package's inputs.
+pub fn reads_whole_repository(test: &str) -> bool {
+    let last = test.rsplit("::").next().unwrap_or(test);
+    declared(test).is_some() || last.starts_with(LIVE_PREFIX)
+}
+
+/// The nextest filter that selects exactly the tests [`reads_whole_repository`] names (its test compares them).
+pub fn whole_repository_filter() -> String {
+    let prefixes: Vec<&str> = Class::ALL.into_iter().map(Class::prefix).chain([LIVE_PREFIX]).collect();
+    format!("test(/(^|::)({})[^:]*$/)", prefixes.join("|"))
+}
+
 /// The nextest profiles under which a misplaced charge fails the call. Empty: report-only everywhere (ER-41, ADR 0121 D3 as the user
 /// decided it, 2026-11-24). The step that records the first green CI run of this check on the real tree, by run id here, adds
 /// `default`, `ci` and `member-audits` in the same edit.
@@ -618,6 +634,49 @@ mod tests {
         assert_eq!(declared("graph_x::plain_test"), None);
         assert_eq!(declared("tree::of_a_fixture"), None);
         assert_eq!(declared("cli::the_graph_reads"), None);
+    }
+
+    #[test]
+    fn the_whole_repository_tests_are_both_classes_and_the_live_tests_and_nothing_else() {
+        for name in [
+            "golden::graph_plans",
+            "check::tree_is_clean",
+            "check_c174::live_c174_the_real_tree_runs",
+            "tree_top",
+        ] {
+            assert!(reads_whole_repository(name), "{name}");
+        }
+        for name in [
+            "graph_x::plain",
+            "tree::of_a_fixture",
+            "cli::the_live_reads",
+            "a::b_tree_c",
+            "disk::state::liveness",
+        ] {
+            assert!(!reads_whole_repository(name), "{name}");
+        }
+        // Every class's tests are whole-repository tests: the class table and this target never disagree.
+        for c in Class::ALL {
+            assert!(reads_whole_repository(&format!("m::{}x", c.prefix())), "{c:?}");
+        }
+    }
+
+    #[test]
+    fn the_whole_repository_filter_selects_exactly_what_reads_whole_repository_selects() {
+        let pattern = whole_repository_filter();
+        let re = regex::Regex::new(pattern.trim_start_matches("test(/").trim_end_matches("/)")).unwrap();
+        for name in [
+            "a::graph_b",
+            "a::tree_b",
+            "a::live_b",
+            "live_b",
+            "live::b",
+            "live_x::y",
+            "a::b_live_c",
+            "a::plain",
+        ] {
+            assert_eq!(re.is_match(name), reads_whole_repository(name), "{name}");
+        }
     }
 
     #[test]
