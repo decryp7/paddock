@@ -15,8 +15,7 @@
 //! function must show that function as MISSED and the first as caught, else the row says `check broken` and looks at nothing.
 //!
 //! Everything that starts a program goes through [`Tool`], so the parsing, the cap and the control are tested on canned output and the
-//! real cargo-mutants only in the row. The mutants run in place in a checkout of the committed head (`git archive` and a one-commit
-//! repository of its own) under the run's own scratch folder `<dev-targets>/mutants/run-<pid>-<time>`: cargo-mutants' default copy
+//! real cargo-mutants only in the row. The mutants run in place in a checkout of the committed head (a local `git clone` with its whole history) under the run's own scratch folder `<dev-targets>/mutants/run-<pid>-<time>`: cargo-mutants' default copy
 //! of one workspace folder cannot run these tests (they read the repository around the workspace, and the `../../crates` path
 //! dependencies of dev-dependencies are not rewritten), and mutating the member's own worktree would break the rows that run beside
 //! this one. The folder has an owner record and is removed through [`crate::safe_remove`] when the run ends, whatever its outcome.
@@ -249,52 +248,20 @@ impl Tool for Real {
     }
 
     fn checkout(&self, root: &Path, head: &str, tree: &Path) -> Result<(), String> {
-        let step = Limits::new(Duration::from_secs(600)).max_output(1 << 22);
-        let tar = tree.with_extension("tar");
-        let mut archive = crate::git_env::git();
-        archive
-            .current_dir(root)
-            .args(["archive", "--format=tar", "-o"])
-            .arg(&tar)
-            .arg(head);
-        let out = run_bounded(archive, step).map_err(|e| format!("git archive could not run: {e}"))?;
+        // A local clone (objects hardlinked, so it is quick), with the whole history: tests replay trains from `git log`. Its `origin` is
+        // the repository at `root`, whose branches it holds as remote branches, which is what the safe-remove proof reads. Then `head`.
+        let step = Limits::new(Duration::from_secs(900)).max_output(1 << 22);
+        let mut clone = crate::git_env::git();
+        clone.args(["clone", "--quiet", "--local", "--no-checkout"]).arg(root).arg(tree);
+        let out = run_bounded(clone, step).map_err(|e| format!("git clone could not run: {e}"))?;
         if !out.success() {
-            return Err(format!("git archive {head} failed: {}", tail(&out.stderr_text())));
+            return Err(format!("git clone failed: {}", tail(&out.stderr_text())));
         }
-        std::fs::create_dir_all(tree).map_err(|e| e.to_string())?;
-        let mut untar = command("tar");
-        untar.arg("-xf").arg(&tar).arg("-C").arg(tree);
-        let out = run_bounded(untar, step).map_err(|e| format!("tar could not run: {e}"))?;
+        let mut checkout = crate::git_env::git();
+        checkout.current_dir(tree).args(["checkout", "--quiet", "--detach", head]);
+        let out = run_bounded(checkout, step).map_err(|e| format!("git checkout could not run: {e}"))?;
         if !out.success() {
-            return Err(format!("tar failed: {}", tail(&out.stderr_text())));
-        }
-        std::fs::remove_file(&tar).map_err(|e| e.to_string())?;
-        // One commit, a remote branch at it and no signing: the tests that ask git about the repository they run in get an answer, and
-        // the safe-remove proof (a remote, nothing unpushed) holds. Nothing here reaches the real repository.
-        for a in [
-            vec!["init", "-q"],
-            vec!["add", "-A"],
-            vec![
-                "-c",
-                "user.name=mutants-gate",
-                "-c",
-                "user.email=mutants-gate@invalid",
-                "-c",
-                "commit.gpgsign=false",
-                "commit",
-                "-q",
-                "-m",
-                "checkout",
-            ],
-            vec!["remote", "add", "origin", "https://checkout.invalid/"],
-            vec!["update-ref", "refs/remotes/origin/main", "HEAD"],
-        ] {
-            let mut cmd = crate::git_env::git();
-            cmd.current_dir(tree).args(&a);
-            let out = run_bounded(cmd, step).map_err(|e| format!("git {} could not run: {e}", a[0]))?;
-            if !out.success() {
-                return Err(format!("git {} failed in the checkout: {}", a[0], tail(&out.stderr_text())));
-            }
+            return Err(format!("git checkout {head} failed in the clone: {}", tail(&out.stderr_text())));
         }
         Ok(())
     }
