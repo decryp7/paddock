@@ -1,0 +1,3 @@
+2026-11-27T14:23:05.0695294Z Job: crate
+2026-11-27T14:24:03.2750059Z [32;1m    Starting[0m [1m1758[0m tests across [1m49[0m binaries ([1m2[0m tests [33;1mskipped[0m)
+2026-11-27T14:24:19.2515123Z [32;1m     Summary[0m [  15.977s] [1m1758[0m tests run: [1m1758[0m [32;1mpassed[0m, [1m2[0m [33;1mskipped[0m

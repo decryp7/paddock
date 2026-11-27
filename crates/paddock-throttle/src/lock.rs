@@ -24,13 +24,11 @@ use crate::gate::{CHEAP_LANE, LoadSource, Pressure, is_container_command, load_t
 use crate::log::{Level, Logger};
 use crate::procs::{Presence, Procs, evidence, pid_alive};
 use crate::record::{self, Owner, OwnerRead};
-use crate::slotfile::{self, Held};
+use crate::store::{RealStore, SlotLock, Store};
 use crate::timefmt::{clock_text, day_text, mins, oneline, utc_text};
 use crate::waitfor::{self, Break, Role, Rules, Waiter};
 use paddock_proc::queue_stall::{Holder as QueueHolder, QueueView, within_cap};
 use serde_json::{Value, json};
-use std::fs;
-use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -80,6 +78,9 @@ pub struct Faults {
     /// The wait-for graph is read with the rule from before 7a4aafbee (a drain owner waits for the head of the queue): the model of
     /// the deadlock of 2026-11-18, so a test can see the cycle reported and broken without the deadlock itself being possible.
     pub old_drain_rule: AtomicBool,
+    /// The admission queue follows the rule from before 7a4aafbee: a drain owner waits in the queue behind the head, like every other
+    /// step (the deadlock of 2026-11-18 itself). The control of the queue model: with it on, the model must find a stuck agent.
+    pub admission_follows_queue: AtomicBool,
 }
 
 fn take_one(c: &AtomicU32) -> bool {
@@ -125,6 +126,8 @@ pub struct Throttle {
     pub faults: Faults,
     /// Which file system a folder is on (the OS in the program; a test puts a network one here).
     pub fs_kind: Arc<dyn Fn(&Path) -> FsKind + Send + Sync>,
+    /// The lock folder's operations (the real folder; a test puts an in-memory store here).
+    pub store: Arc<dyn Store>,
     seq: AtomicU64,
 }
 
@@ -167,28 +170,10 @@ pub enum Poll {
 }
 
 enum Take {
-    Taken(Held),
+    Taken(Box<dyn SlotLock>),
     Busy,
     WriteFailed,
     LockFailed(String),
-}
-
-fn mtime(p: &Path) -> Option<u64> {
-    fs::metadata(p)
-        .ok()?
-        .modified()
-        .ok()?
-        .duration_since(std::time::UNIX_EPOCH)
-        .ok()
-        .map(|d| d.as_secs())
-}
-
-fn read_bounded(p: &Path) -> std::io::Result<Vec<u8>> {
-    let mut buf = Vec::new();
-    fs::File::open(p)?
-        .take(record::MAX_RECORD as u64)
-        .read_to_end(&mut buf)?;
-    Ok(buf)
 }
 
 fn file_name(p: &Path) -> String {
@@ -237,6 +222,7 @@ impl Throttle {
             wait_hook: None,
             faults: Faults::default(),
             fs_kind: Arc::new(fsinfo::of),
+            store: Arc::new(RealStore),
             seq: AtomicU64::new(0),
         }
     }
@@ -284,7 +270,7 @@ impl Throttle {
     /// Checks the lock folder before anything is taken in it: it exists and is not on a network file system (kernel file locks there are
     /// not reliable). `Err` is the message to print. A file system the OS did not name is logged and let through.
     pub fn check_root(&self) -> Result<(), String> {
-        let _ = fs::create_dir_all(&self.cfg.root);
+        self.store.create_dir_all(&self.cfg.root);
         let kind = (self.fs_kind)(&self.cfg.root);
         if let FsKind::Unknown(why) = &kind {
             self.log.warn(
@@ -305,15 +291,10 @@ impl Throttle {
     }
 
     fn append(&self, name: &str, msg: &str) {
-        let _ = fs::create_dir_all(&self.cfg.root);
-        if let Ok(mut f) = fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(self.cfg.root.join(name))
-        {
-            use std::io::Write;
-            let _ = writeln!(f, "{} {}", self.stamp(), msg);
-        }
+        self.store.append_line(
+            &self.cfg.root.join(name),
+            &format!("{} {}", self.stamp(), msg),
+        );
     }
 
     /// A line in the breaks log.
@@ -327,7 +308,7 @@ impl Throttle {
     }
 
     fn age_of(&self, p: &Path) -> Option<u64> {
-        mtime(p).map(|m| self.now().saturating_sub(m))
+        self.mtime(p).map(|m| self.now().saturating_sub(m))
     }
 
     fn age_text(&self, p: &Path) -> String {
@@ -338,8 +319,8 @@ impl Throttle {
     /// written its record).
     pub fn read_owner(&self, i: u32) -> OwnerRead {
         let f = self.slot_info(i);
-        match read_bounded(&f) {
-            Ok(b) => record::parse_owner(&b, mtime(&f)),
+        match self.store.read_bounded(&f) {
+            Ok(b) => record::parse_owner(&b, self.mtime(&f)),
             Err(_) => OwnerRead::Empty,
         }
     }
@@ -364,11 +345,11 @@ impl Throttle {
 
     fn write_owner(&self, file: &Path, req: &Request, epoch: u64) -> bool {
         if take_one(&self.faults.owner_fail) {
-            let _ = fs::write(file, b"");
+            let _ = self.store.write(file, b"");
             return false;
         }
         if take_one(&self.faults.owner_empty) {
-            let _ = fs::write(file, b"");
+            let _ = self.store.write(file, b"");
             return true;
         }
         let o = Owner {
@@ -379,32 +360,39 @@ impl Throttle {
             cwd: req.cwd.clone(),
             cmd: req.cmdline.clone(),
         };
-        fs::write(file, record::format_owner(&o, epoch)).is_ok()
+        self.store
+            .write(file, record::format_owner(&o, epoch).as_bytes())
+            .is_ok()
     }
 
-    fn non_empty(p: &Path) -> bool {
-        fs::metadata(p).is_ok_and(|m| m.len() > 0)
+    fn non_empty(&self, p: &Path) -> bool {
+        self.store.stat(p).is_some_and(|m| m.len > 0)
+    }
+
+    /// The modification time of a file of the folder, epoch seconds.
+    fn mtime(&self, p: &Path) -> Option<u64> {
+        self.store.stat(p).and_then(|s| s.mtime)
     }
 
     /// Tries to take slot `i`: the kernel lock first, then the holder's record (an old record is removed, then the new one is written
     /// aside and renamed into place, so a reader sees no record or a whole one). A record that cannot be written gives the slot back.
     fn try_take(&self, i: u32, req: &Request, epoch_out: &mut u64) -> Take {
-        let held = match slotfile::take(&self.slot_lock(i)) {
+        let held = match self.store.take(&self.slot_lock(i)) {
             Ok(Some(h)) => h,
             Ok(None) => return Take::Busy,
             Err(e) => return Take::LockFailed(e.to_string()),
         };
         let info = self.slot_info(i);
-        let _ = fs::remove_file(&info);
+        let _ = self.store.remove_file(&info);
         let tmp = self.tmp_name("");
         let epoch = self.now();
-        let written = self.write_owner(&tmp, req, epoch) && Self::non_empty(&tmp)
+        let written = self.write_owner(&tmp, req, epoch) && self.non_empty(&tmp)
             // conformance: write-atomic — the rename claims a name in the lock protocol (it fails when the name exists); the marker is a few bytes written under this holder's own name
-            && fs::rename(&tmp, &info).is_ok()
-            && Self::non_empty(&info);
+            && self.store.rename(&tmp, &info).is_ok()
+            && self.non_empty(&info);
         if !written {
-            let _ = fs::remove_file(&tmp);
-            let _ = fs::remove_file(&info);
+            let _ = self.store.remove_file(&tmp);
+            let _ = self.store.remove_file(&info);
             drop(held);
             return Take::WriteFailed;
         }
@@ -413,14 +401,12 @@ impl Throttle {
     }
 
     fn dir_entries(&self, prefix: &str) -> Vec<PathBuf> {
-        let mut v: Vec<PathBuf> = match fs::read_dir(&self.cfg.root) {
-            Ok(rd) => rd
-                .filter_map(Result::ok)
-                .map(|e| e.path())
-                .filter(|p| file_name(p).starts_with(prefix))
-                .collect(),
-            Err(_) => Vec::new(),
-        };
+        let mut v: Vec<PathBuf> = self
+            .store
+            .list(&self.cfg.root)
+            .into_iter()
+            .filter(|p| file_name(p).starts_with(prefix))
+            .collect();
         v.sort_by_key(|p| file_name(p));
         v
     }
@@ -431,11 +417,11 @@ impl Throttle {
         for f in self.dir_entries(HIGH_PREFIX) {
             let b = file_name(&f);
             let suffix = &b[HIGH_PREFIX.len()..];
-            let bytes = match read_bounded(&f) {
+            let bytes = match self.store.read_bounded(&f) {
                 Ok(b) => b,
                 Err(_) => continue, // vanished: nothing to judge
             };
-            let ep = record::parse_marker_epoch(&bytes).or_else(|| mtime(&f));
+            let ep = record::parse_marker_epoch(&bytes).or_else(|| self.mtime(&f));
             let pid = record::marker_pid(suffix);
             if pid.is_some_and(|p| pid_alive(&*self.procs, p, ep)) {
                 out.push((
@@ -453,7 +439,7 @@ impl Throttle {
                 &format!("removed the stale high-priority marker {b}"),
                 &[("Evidence", json!(evid))],
             );
-            let _ = fs::remove_file(&f);
+            let _ = self.store.remove_file(&f);
         }
         out
     }
@@ -486,7 +472,7 @@ impl Throttle {
     /// It goes with that process (a dead holder's marker is removed by the next run that sees it) and is ignored after
     /// `ci_priority_max`, so a crashed or hung job cannot hold every agent for good. Err: the marker could not be written.
     pub fn mark(&self, name: &str, pid: u32) -> Result<PathBuf, String> {
-        let _ = fs::create_dir_all(&self.cfg.root);
+        self.store.create_dir_all(&self.cfg.root);
         let m = self.cfg.root.join(format!(
             "{HIGH_PREFIX}{pid}-{}",
             record::sanitize_name(name)
@@ -495,8 +481,9 @@ impl Throttle {
         // The holder started before this call: its record epoch is now.
         let body = record::format_marker(pid, "ci", self.now());
         // conformance: write-atomic — the rename claims a name in the lock protocol (it fails when the name exists); the marker is a few bytes written under this holder's own name
-        if fs::write(&tmp, body).is_err() || fs::rename(&tmp, &m).is_err() {
-            let _ = fs::remove_file(&tmp);
+        if self.store.write(&tmp, body.as_bytes()).is_err() || self.store.rename(&tmp, &m).is_err()
+        {
+            let _ = self.store.remove_file(&tmp);
             return Err(format!(
                 "cannot write the marker {} (is {} writable and not full?)",
                 m.display(),
@@ -517,7 +504,7 @@ impl Throttle {
             "{HIGH_PREFIX}{pid}-{}",
             record::sanitize_name(name)
         ));
-        let gone = fs::remove_file(&m).is_ok();
+        let gone = self.store.remove_file(&m).is_ok();
         self.log.info(
             "throttle.mark",
             "CI job marker removed",
@@ -540,11 +527,11 @@ impl Throttle {
                     .age_of(&f)
                     .is_some_and(|a| a >= self.cfg.unreadable_limit)
                 {
-                    let _ = fs::remove_file(&f);
+                    let _ = self.store.remove_file(&f);
                 }
                 continue;
             }
-            let bytes = match read_bounded(&f) {
+            let bytes = match self.store.read_bounded(&f) {
                 Ok(b) => b,
                 Err(_) => continue, // vanished between listing and reading
             };
@@ -561,12 +548,12 @@ impl Throttle {
                         &format!("removed the unreadable ticket {b}"),
                         &[("Age", json!(self.age_text(&f)))],
                     );
-                    let _ = fs::remove_file(&f);
+                    let _ = self.store.remove_file(&f);
                     continue;
                 }
                 name = "?".into();
             } else {
-                let ep = t.epoch.or_else(|| mtime(&f));
+                let ep = t.epoch.or_else(|| self.mtime(&f));
                 if !t.pid.is_some_and(|p| pid_alive(&*self.procs, p, ep)) {
                     let evid = t.pid.map_or("pid not a number".to_string(), |p| {
                         evidence(&*self.procs, p, ep)
@@ -580,7 +567,7 @@ impl Throttle {
                         &format!("removed the stale ticket {b} of {}", t.name),
                         &[("Evidence", json!(evid))],
                     );
-                    let _ = fs::remove_file(&f);
+                    let _ = self.store.remove_file(&f);
                     continue;
                 }
             }
@@ -636,10 +623,10 @@ impl Throttle {
         for f in self.dir_entries(DRAIN_PREFIX) {
             let b = file_name(&f);
             let suffix = &b[DRAIN_PREFIX.len()..];
-            let Ok(bytes) = read_bounded(&f) else {
+            let Ok(bytes) = self.store.read_bounded(&f) else {
                 continue;
             };
-            let ep = record::parse_marker_epoch(&bytes).or_else(|| mtime(&f));
+            let ep = record::parse_marker_epoch(&bytes).or_else(|| self.mtime(&f));
             let pid = record::marker_pid(suffix);
             if pid.is_some_and(|p| pid_alive(&*self.procs, p, ep)) {
                 if pid != Some(self.pid)
@@ -651,7 +638,7 @@ impl Throttle {
                 continue;
             }
             self.blog(&format!("{who} removed the stale drain marker {b}"));
-            let _ = fs::remove_file(&f);
+            let _ = self.store.remove_file(&f);
         }
         found
     }
@@ -668,7 +655,7 @@ impl Throttle {
     /// that cannot be probed counts as held: an answer that is not known is never read as free (ER-33).
     fn probe(&self, indexes: impl Iterator<Item = u32>) -> Vec<(u32, OwnerRead)> {
         indexes
-            .filter(|&i| match slotfile::is_held(&self.slot_lock(i)) {
+            .filter(|&i| match self.store.is_held(&self.slot_lock(i)) {
                 Ok(held) => held,
                 Err(e) => {
                     self.log.warn(
@@ -808,8 +795,8 @@ impl Throttle {
                 .filter_map(|f| {
                     let b = file_name(f);
                     let suffix = &b[prefix.len()..];
-                    let bytes = read_bounded(f).ok()?;
-                    let ep = record::parse_marker_epoch(&bytes).or_else(|| mtime(f));
+                    let bytes = self.store.read_bounded(f).ok()?;
+                    let ep = record::parse_marker_epoch(&bytes).or_else(|| self.mtime(f));
                     let pid = record::marker_pid(suffix);
                     live(pid, ep).then(|| {
                         (
@@ -831,11 +818,11 @@ impl Throttle {
             if file_name(&f).ends_with(".tmp") {
                 continue;
             }
-            let Ok(bytes) = read_bounded(&f) else {
+            let Ok(bytes) = self.store.read_bounded(&f) else {
                 continue;
             };
             let t = record::parse_ticket(&bytes);
-            if !live(t.pid, t.epoch.or_else(|| mtime(&f))) {
+            if !live(t.pid, t.epoch.or_else(|| self.mtime(&f))) {
                 continue;
             }
             let pid = t.pid.unwrap_or(0);
@@ -936,7 +923,7 @@ impl Throttle {
             if file_name(&f).ends_with(".tmp") {
                 continue;
             }
-            if let Ok(b) = read_bounded(&f) {
+            if let Ok(b) = self.store.read_bounded(&f) {
                 let t = record::parse_ticket(&b);
                 out += &format!("queued: {} pid {}\n", t.name, t.pid_text);
             }
@@ -954,7 +941,7 @@ impl Throttle {
             ("breaks (last 5):", BREAKS_LOG, 5),
             ("activity (last 3):", ACTIVITY_LOG, 3),
         ] {
-            if let Ok(text) = fs::read_to_string(self.cfg.root.join(name)) {
+            if let Ok(text) = self.store.read_to_string(&self.cfg.root.join(name)) {
                 let lines: Vec<&str> = text.lines().collect();
                 out += &format!("{label}\n");
                 for l in &lines[lines.len().saturating_sub(n)..] {
@@ -973,7 +960,7 @@ pub struct Acquirer<'a> {
     pub req: Request,
     ticket: PathBuf,
     marker: Option<PathBuf>,
-    held: Option<(u32, Held)>,
+    held: Option<(u32, Box<dyn SlotLock>)>,
     /// How many steps the rule allowed at once when this run took its slot: its share of the cores is `1/share`
     /// (`gate::step_threads`). 1 until it holds a slot.
     share: u32,
@@ -1027,11 +1014,16 @@ impl<'a> Acquirer<'a> {
             ));
             let tmp = h.tmp_name("high.");
             // conformance: write-atomic — the rename claims a name in the lock protocol (it fails when the name exists); the marker is a few bytes written under this holder's own name
-            let ok = fs::write(&tmp, record::format_marker(h.pid, &h.start_text(), h.now()))
+            let ok = h
+                .store
+                .write(
+                    &tmp,
+                    record::format_marker(h.pid, &h.start_text(), h.now()).as_bytes(),
+                )
                 .is_ok()
-                && fs::rename(&tmp, &m).is_ok();
+                && h.store.rename(&tmp, &m).is_ok();
             if !ok {
-                let _ = fs::remove_file(&tmp);
+                let _ = h.store.remove_file(&tmp);
                 return Err(format!(
                     "cannot write a high-priority marker in {} (is it writable and not full?); giving up, no lock taken",
                     h.cfg.root.display()
@@ -1075,12 +1067,12 @@ impl<'a> Acquirer<'a> {
             is_container_command(&self.req.cmdline),
         );
         let ok = !h.faults.ticket_fail.load(Ordering::SeqCst)
-            && fs::write(&tmp, body).is_ok()
-            && Throttle::non_empty(&tmp)
+            && self.h.store.write(&tmp, body.as_bytes()).is_ok()
+            && h.non_empty(&tmp)
             // conformance: write-atomic — the rename claims a name in the lock protocol (it fails when the name exists); the marker is a few bytes written under this holder's own name
-            && fs::rename(&tmp, &ticket).is_ok();
+            && self.h.store.rename(&tmp, &ticket).is_ok();
         if !ok {
-            let _ = fs::remove_file(&tmp);
+            let _ = self.h.store.remove_file(&tmp);
             return Err(format!(
                 "cannot write a queue ticket in {} (is it writable and not full?); giving up, no lock taken",
                 h.cfg.root.display()
@@ -1175,7 +1167,7 @@ impl<'a> Acquirer<'a> {
         if action == Break::WithdrawDrain
             && let Some(d) = self.drain.take()
         {
-            let _ = fs::remove_file(d);
+            let _ = self.h.store.remove_file(&d);
         }
     }
 
@@ -1203,8 +1195,15 @@ impl<'a> Acquirer<'a> {
                 ));
                 let tmp = h.tmp_name("drain.");
                 // conformance: write-atomic — the rename claims a name in the lock protocol (it fails when the name exists); the marker is a few bytes written under this holder's own name
-                if fs::write(&tmp, record::format_marker(h.pid, &h.start_text(), h.now())).is_ok()
-                    && fs::rename(&tmp, &m).is_ok()
+                if self
+                    .h
+                    .store
+                    .write(
+                        &tmp,
+                        record::format_marker(h.pid, &h.start_text(), h.now()).as_bytes(),
+                    )
+                    .is_ok()
+                    && self.h.store.rename(&tmp, &m).is_ok()
                 {
                     h.log.info(
                         "throttle.wait",
@@ -1213,13 +1212,13 @@ impl<'a> Acquirer<'a> {
                     );
                     self.drain = Some(m);
                 } else {
-                    let _ = fs::remove_file(&tmp);
+                    let _ = self.h.store.remove_file(&tmp);
                 }
             }
             // A container run that asked for the machine to drain goes before the high-priority runs it made wait.
             let role = Role::of(self.req.high, self.drain.is_some());
             let rules = Rules {
-                drain_owner_follows_queue: false,
+                drain_owner_follows_queue: h.faults.admission_follows_queue.load(Ordering::SeqCst),
             };
             if waitfor::yields_to_high(role) {
                 let waited = h.now().saturating_sub(self.t0);
@@ -1278,7 +1277,7 @@ impl<'a> Acquirer<'a> {
             };
             let quick_ok = core::quick_ok(&inputs);
             if waitfor::follows_queue(role, rules) {
-                if !self.ticket.is_file()
+                if !self.h.store.stat(&self.ticket).is_some()
                     && let Err(e) = self.make_ticket()
                 {
                     return Poll::GaveUp(e);
@@ -1408,11 +1407,11 @@ impl<'a> Acquirer<'a> {
                         if h.cfg.slots == 1
                             && let Some(m) = self.marker.take()
                         {
-                            let _ = fs::remove_file(m);
+                            let _ = self.h.store.remove_file(&m);
                         }
-                        let _ = fs::remove_file(&self.ticket);
+                        let _ = self.h.store.remove_file(&self.ticket);
                         if let Some(d) = self.drain.take() {
-                            let _ = fs::remove_file(d);
+                            let _ = self.h.store.remove_file(&d);
                         }
                         return Poll::Held;
                     }
@@ -1486,7 +1485,7 @@ impl<'a> Acquirer<'a> {
     /// A holder whose record is younger than `holder_cap` is `live`: running, and inside the bound this waiter would give its own
     /// command, so the wait behind it is progress, not a stall. `None`: no holder is trusted for any time.
     pub fn queue_view(&self, holder_cap: Option<Duration>) -> QueueView {
-        let position = if self.ticket.is_file() {
+        let position = if self.h.store.stat(&self.ticket).is_some() {
             self.h.queue(&self.ticket, &self.req.name).0
         } else {
             0
@@ -1547,12 +1546,15 @@ impl<'a> Acquirer<'a> {
     /// Gives everything back: the marker, the ticket, and the slot.
     pub fn release(&mut self) {
         if let Some(m) = self.marker.take() {
-            let _ = fs::remove_file(m);
+            let _ = self.h.store.remove_file(&m);
         }
-        let _ = fs::remove_file(&self.ticket);
-        let _ = fs::remove_file(PathBuf::from(format!("{}.tmp", self.ticket.display())));
+        let _ = self.h.store.remove_file(&self.ticket);
+        let _ = self
+            .h
+            .store
+            .remove_file(&PathBuf::from(format!("{}.tmp", self.ticket.display())));
         if let Some(d) = self.drain.take() {
-            let _ = fs::remove_file(d);
+            let _ = self.h.store.remove_file(&d);
         }
         self.release_slot();
     }
@@ -1563,7 +1565,7 @@ impl<'a> Acquirer<'a> {
     /// just as the load gate closed. A high-priority run (no ticket) just waits again.
     pub fn step_back(&mut self) {
         self.release_slot();
-        if self.marker.is_none() && !self.ticket.is_file() {
+        if self.marker.is_none() && !self.h.store.stat(&self.ticket).is_some() {
             let _ = self.write_ticket(self.ticket.clone());
         }
     }
@@ -1572,7 +1574,7 @@ impl<'a> Acquirer<'a> {
     fn release_slot(&mut self) {
         let h = self.h;
         if let Some((i, lock)) = self.held.take() {
-            let _ = fs::remove_file(h.slot_info(i));
+            let _ = self.h.store.remove_file(&h.slot_info(i));
             match lock.release() {
                 Ok(()) => h.log.info(
                     "throttle.release",

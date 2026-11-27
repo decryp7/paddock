@@ -359,7 +359,7 @@ pub struct Reuse {
     run: String,
     dev: Result<Dev, String>,
     cargo: Graph,
-    /// The run's variables: a probe's child gets them through the gates' own policy ([`super::exec::PASS`], ER-47).
+    /// The run's variables: a probe's child gets them through the gates' own policy ([`crate::child_env::PASS`], ER-47).
     env: HashMap<String, String>,
     build_vars: Vec<String>,
     base_ref: String,
@@ -430,7 +430,7 @@ impl Reuse {
         // process's own environment (on macOS CoreFoundation adds `__CF_USER_TEXT_ENCODING` to it; ER-47, ADR 0100).
         let call = crate::ci_tool::ToolCall::new(&cmdline[0])
             .args(&cmdline[1..])
-            .pass(super::exec::PASS.iter().copied())
+            .pass(crate::child_env::PASS.iter().copied())
             .env("RUSTUP_AUTO_INSTALL", "0")
             .cwd(&self.root)
             .timeout(PROBE_LIMIT);

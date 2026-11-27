@@ -265,7 +265,7 @@ fn throttle_bin(ctx: &Ctx) -> Option<PathBuf> {
         .get("GITHUB_WORKSPACE")
         .map(PathBuf::from)
         .or_else(|| std::env::current_dir().ok())?;
-    crate::pre_push::heavy_tool::ensure(&root, &ctx.env_snapshot(), Duration::ZERO).ok()
+    crate::heavy_tool::ensure(&root, &ctx.env_snapshot(), Duration::ZERO).ok()
 }
 
 /// Announces (or withdraws) this job on the agents' heavy queue: `throttle mark ci-<slot> --pid <the slot's holder>`. While the holder

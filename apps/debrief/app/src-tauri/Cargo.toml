@@ -146,6 +146,9 @@ windows = { workspace = true, features = ["Win32_System_Com", "Win32_System_Cons
 # `src/health/commands/tests.rs` runs the store worker binary, built from the worker crate and its dependencies (`cargo build -p
 # debrief-store-worker`; the workspace test build makes it) when it is missing. The other sites: `build.rs` reads this folder's own
 # `windows-app-manifest.xml`; `src/lib.rs` and `src/activity/report/cli.rs` read the process's working folder.
+# Root rules (ADR 0116 §6), read site by site: also `current_exe` (the test binary started again, or files beside it: build output);
+# paths taken from the environment (`HOME`, `XDG_*`, `OUT_DIR`, `CARGO_*`, tool and runtime folders, folders a test passes);
+# `home_dir` (the user's folder). None is a repository file outside the globs.
 test-reads = [
     "apps/debrief/crates/debrief-store-worker/**",
     "apps/debrief/crates/debrief-alloc/**",

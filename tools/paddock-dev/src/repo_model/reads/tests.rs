@@ -185,3 +185,91 @@ fn a_read_that_leaves_the_repository_is_blind_not_dropped() {
     let src = r#"fn t() { let _ = include_str!("../../../../../outside.txt"); }"#;
     assert!(!blind(src).is_empty());
 }
+
+/// The root rules (ADR 0116 §2, amendment): a read is judged by where its path starts, not by the fact that it is a read. A path handed
+/// in as a parameter defers to the caller, which is classified where it builds the path; a folder the test made, the crate's own working
+/// folder and a `Vec::pop` are not repository reads.
+#[test]
+fn a_read_of_a_parameter_a_temp_folder_or_the_working_folder_is_not_blind_the_negative_control() {
+    for src in [
+        "fn f(p: &std::path::Path) { let _ = std::fs::read(p); }",
+        "fn f(p: &std::path::Path) { let _ = std::fs::File::open(p); let _ = p.exists(); let _ = std::fs::read_dir(p); }",
+        "fn f(s: &S) { let _ = std::fs::read_to_string(&s.path); }",
+        "fn f(mut p: std::path::PathBuf, n: &str) { p.push(n); let _ = p.exists(); }",
+        "fn t() { let d = tempfile::tempdir().unwrap(); let p = d.path().join(\"a\"); std::fs::write(&p, \"x\").unwrap(); let _ = std::fs::read_to_string(&p); }",
+        "fn t() { let d = paddock_testkit::private_tempdir().unwrap(); assert!(d.path().join(\"s\").is_dir()); }",
+        "fn t() { let d = tempfile::tempdir().unwrap(); let _ = std::fs::read(d.path().join(\"../x\")); }",
+        "fn t() { let _ = std::fs::read_to_string(\"tests/x.txt\"); let _ = std::path::Path::new(\".\").join(\"x\").exists(); }",
+        "fn t() { let _ = std::fs::read_dir(\".\"); }",
+        r#"fn t() { let _ = std::fs::read(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/x")); }"#,
+        "fn f(v: &mut Vec<u8>) { while let Some(x) = v.pop() { let _ = x; } let _ = v.pop(); }",
+        "fn f() { let ci = std::env::var(\"CI\").is_ok(); let n = std::env::var(\"N\").unwrap_or_default(); let _ = (ci, n); }",
+        "fn f(p: &std::path::Path) { let _ = std::fs::write(p, \"x\"); let _ = std::fs::create_dir_all(p); }",
+        r#"fn f() { assert!(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("a").is_dir()); }"#,
+    ] {
+        assert!(blind(src).is_empty(), "{src}: {:?}", blind(src));
+    }
+}
+
+/// One control per blind root kind: an environment variable turned into a path, the program, the working or the home folder, a `.pop()`
+/// walk upward, and a literal that reaches the repository root.
+#[test]
+fn each_root_that_cannot_be_followed_is_blind_the_positive_control() {
+    for (name, src) in [
+        (
+            "env::var into PathBuf",
+            "fn t() { let _ = std::path::PathBuf::from(std::env::var(\"ROOT\").unwrap()); }",
+        ),
+        (
+            "env::var_os into PathBuf",
+            "fn t() { let _ = std::path::PathBuf::from(std::env::var_os(\"ROOT\").unwrap()); }",
+        ),
+        (
+            "var_os mapped to PathBuf",
+            "fn t() { let _ = std::env::var_os(\"ROOT\").map(std::path::PathBuf::from); }",
+        ),
+        (
+            "env::var into Path::new",
+            "fn t() { let s = std::env::var(\"ROOT\").unwrap(); let _ = std::path::Path::new(&std::env::var(\"R2\").unwrap()); let _ = s; }",
+        ),
+        // Split so the program-path audit (`tool_cache`) does not read this fixture as a use of the program's own path.
+        ("current_exe", concat!("fn t() { let _ = std::env::curr", "ent_exe(); }")),
+        ("current_dir", "fn t() { let _ = std::env::current_dir(); }"),
+        ("home_dir", "fn t() { let _ = dirs::home_dir(); }"),
+        (
+            "pop as a boolean in if",
+            "fn t(mut d: std::path::PathBuf) { if !d.pop() { return; } }",
+        ),
+        (
+            "pop as a boolean in while",
+            "fn t(mut d: std::path::PathBuf) { while d.pop() { let _ = d.exists(); } }",
+        ),
+        (
+            "a literal that reaches the root",
+            r#"fn t() { let _ = std::path::Path::new("../.."); }"#,
+        ),
+        (
+            "a literal that leaves the root",
+            r#"fn t() { let _ = std::path::PathBuf::from("../../../x"); }"#,
+        ),
+    ] {
+        assert!(!blind(src).is_empty(), "{name}: not blind");
+    }
+    // A `..` literal that stays inside the repository is a read edge of its crate, not a blind read.
+    let src = r#"fn t() { let _ = std::path::Path::new("../b/x"); }"#;
+    assert!(blind(src).is_empty());
+    assert_eq!(
+        paths(rust_reads("crates/a/tests/it.rs", src, "crates/a")),
+        [("crates/b/x".to_string(), How::ManifestDir)]
+    );
+}
+
+/// A relative literal path read with `fs` is read from the crate's folder: a read of the crate (cargo test starts there).
+#[test]
+fn an_fs_read_of_a_relative_literal_is_a_read_of_the_crate_folder() {
+    let src = r#"fn t() { let _ = std::fs::read_to_string("../../docs/x.toml"); let _ = std::fs::read("/abs/x"); }"#;
+    assert_eq!(
+        paths(rust_reads("crates/a/tests/it.rs", src, "crates/a")),
+        [("docs/x.toml".to_string(), How::ManifestDir)]
+    );
+}

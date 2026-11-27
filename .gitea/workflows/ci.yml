@@ -205,12 +205,37 @@ jobs:
           PLAN_REUSE: ${{ steps.reuse.outputs.reuse }}
           # The test-result cache's plan (ADR 0116): read when the file is there.
           PLAN_TEST_CACHE_FILE: ${{ runner.temp }}/test-cache-plan.json
+          # The selection record (ADR 0117 D13 amendment): the plan writes it here and the next step uploads it as this run's artifact.
+          PLAN_RECORD_FILE: ${{ runner.temp }}/plan-record/record.json
           EVENT: ${{ github.event_name }}
         run: |
           ./dev plan --ci
           # A smoke or affected-only selection (the graph planner's `partial`) is never a full run; the mode line says so (P2-4).
           if grep -q '^partial=true$' "$GITHUB_OUTPUT"; then PLAN_MODE_FULL=false; fi
           echo "plan mode: full=$PLAN_MODE_FULL"
+
+      # The escape monitor's record of this plan (ADR 0117 §8, D13 amended 2026-11-27): an artifact of this run, so this workflow writes
+      # nothing to the repository (`permissions: contents: read`). The nightly reads it through the Actions API, which lists only v4
+      # artifacts (Gitea 28: routers/api/v1/repo/action.go), so this is the Gitea fork of the v4 action (docs/research/2026-11-ci-artifacts-v4.md). `retention-days` is escape::RETENTION_DAYS (a paddock-dev test ties them). A missing file is a warning: the commit is
+      # then `not measured` at night, never clean.
+      - name: Save the selection record
+        uses: ChristopherHX/gitea-upload-artifact@81f940d004763f986ba3582c007fd842dd5cb0d7 # v4
+        with:
+          name: plan-record
+          path: ${{ runner.temp }}/plan-record/record.json
+          retention-days: 14
+          if-no-files-found: warn
+
+      # ADR 0123 §7: the one check at the source of the job layout (the model builds, every job keeps the conventions, `render` is
+      # injective over the legs the planner emits). Every run, whatever the change (ER-41); the member gate runs it too (`job-model`
+      # row). Report-only (warnings, exit 0) until its first green run on the real tree is recorded in
+      # tools/paddock-dev/src/ci_job_model.rs (`BLOCKING`); `continue-on-error` goes with that change. Review by 2027-02-27.
+      - name: Job model check
+        continue-on-error: true
+        env:
+          PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+          PADDOCK_DEV_DOWNLOAD: ${{ (inputs.release == true || startsWith(github.ref, 'refs/tags/')) && '0' || '' }}
+        run: ./dev ci job-model check
 
   # The developer and CI tool (ADR 0022): its own Cargo workspace and lockfile, tested on every OS it runs on. Linux runs in the
   # paddock-ci image (git, Node for the golden test's live oracle, nextest); Windows and macOS run on the host.
@@ -697,7 +722,7 @@ jobs:
 
       # The traces of failed tests (retain-on-failure, paddockTrace) and each failure's error context: nightly 9103's chart spec failed with
       # only its timeout in the log and nothing kept to show why.
-      - uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v3
+      - uses: ChristopherHX/gitea-upload-artifact@81f940d004763f986ba3582c007fd842dd5cb0d7 # v4
         if: failure()
         with:
           name: e2e-webkit-results
@@ -900,7 +925,7 @@ jobs:
         env:
           PADDOCK_REQUIRE_TEST_BROWSER: "1"
         run: ./dev ci run crates coverage
-      - uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v3
+      - uses: ChristopherHX/gitea-upload-artifact@81f940d004763f986ba3582c007fd842dd5cb0d7 # v4
         if: failure()
         with:
           name: crates-lcov
@@ -1099,6 +1124,21 @@ jobs:
           fi
           cargo nextest run "${sel[@]}" --all-features --profile ci ${filter[@]+"${filter[@]}"} 2>&1 | tee "$RUNNER_TEMP/nextest-crates.log"
 
+      # ADR 0116 amendment (ER-33): the positive control of the record step below. One put, get, list and delete of a scratch object in the
+      # shared store, from this runner, on every OS and every ref (it writes only its own scratch key and removes it). A store that cannot
+      # answer here prints its cause and ends this step red (never the job: continue-on-error); the record step then holds every record
+      # back, and this line says why: the leg's test cache is "not measured". Run 9265's Windows leg recorded nothing and printed no cause.
+      - name: Test cache store check
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && (runner.os != 'Linux' || !(inputs.os_full == true || inputs.os_full == 'true' || github.event.inputs.os_full == 'true' || inputs.release == true || startsWith(github.ref, 'refs/tags/'))) && !matrix.filter }}
+        continue-on-error: true
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/crates
+        env:
+          PADDOCK_TEST_CACHE_KEY_ID: ${{ secrets.PADDOCK_TEST_CACHE_KEY_ID }}
+          PADDOCK_TEST_CACHE_SECRET: ${{ secrets.PADDOCK_TEST_CACHE_SECRET }}
+          PADDOCK_SCCACHE_S3_ENDPOINT: ${{ vars.PADDOCK_SCCACHE_S3_ENDPOINT }}
+        run: |
+          "${PADDOCK_WORKSPACE:-$GITHUB_WORKSPACE}/dev" ci test-cache selfcheck --shared
+
       # ADR 0116, report-only (ER-41): stores the pass of every package this run proved (whole, first try, no flake) in the shared test-result
       # store, keyed by the leg's `test_filter` (a host leg's pass counts only for a later leg with the same filter; user decision 97). Only a main or train run writes (`./dev ci test-cache record` refuses any other ref and any rerun itself). Never fails the job.
       - name: Record test results (test cache)
@@ -1118,7 +1158,7 @@ jobs:
           [ -s "$RUNNER_TEMP/nextest-crates.log" ] || { echo "::notice::test-cache: no nextest output to record"; exit 0; }
           "${PADDOCK_WORKSPACE:-$GITHUB_WORKSPACE}/dev" ci test-cache record --workspace crates --shared --filter "$LEG_FILTER" --log "$RUNNER_TEMP/nextest-crates.log"
 
-      - uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v3
+      - uses: ChristopherHX/gitea-upload-artifact@81f940d004763f986ba3582c007fd842dd5cb0d7 # v4
         if: failure() && runner.os == 'Windows'
         with:
           name: chrome-logs-${{ runner.os }}
@@ -1303,8 +1343,8 @@ jobs:
           e2e-checks: ${{ matrix.e2e_checks }}
           e2e-shard: ${{ matrix.e2e_shard }}
 
-      # The failure report of the app's browser tests (paddock.ci.json `e2eArtifacts`, a folder from the repo root); Gitea has the v3 artifact actions.
-      - uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v3
+      # The failure report of the app's browser tests (paddock.ci.json `e2eArtifacts`, a folder from the repo root); Gitea lists only v4 artifacts, so these are the Gitea fork of the v4 action.
+      - uses: ChristopherHX/gitea-upload-artifact@81f940d004763f986ba3582c007fd842dd5cb0d7 # v4
         if: failure() && matrix.e2e_artifacts != ''
         with:
           name: ${{ matrix.app }}-${{ matrix.e2e_leg || 'ui' }}-results-${{ strategy.job-index }}

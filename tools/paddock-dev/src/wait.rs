@@ -19,6 +19,7 @@
 //! A [`Probe`] answers one question per poll; [`wait_for`] owns the clock, the interval, the limit and the log. Both the probe's
 //! inputs (files, processes, HTTP) and the [`Clock`] are traits, so the tests run with fakes and a fake clock and never sleep.
 
+use crate::curl_config;
 use crate::health::{Health, wait_held};
 use clap::{ArgGroup, Args};
 use paddock_cli::{CliError, Report};
@@ -378,7 +379,7 @@ pub fn plock_log_path(throttle_dir: Option<PathBuf>) -> PathBuf {
 }
 
 /// The lock folder throttle resolves for this environment, asked of the tool itself (`throttle dir`) so there is one definition of it
-/// (ER-22): the binary is found as the push gate finds it ([`crate::pre_push::exec::throttle_command_for`]). `None` when no throttle
+/// (ER-22): the binary is found as the push gate finds it ([`crate::heavy_tool::throttle_command_for`]). `None` when no throttle
 /// can be found or it does not answer with an absolute folder (a bounded call: it never holds a wait up).
 pub fn throttle_dir_from_tool() -> Option<PathBuf> {
     let env: std::collections::HashMap<String, String> = crate::process_env::vars().collect();
@@ -393,12 +394,12 @@ pub fn throttle_dir_from_tool() -> Option<PathBuf> {
 /// [`throttle_dir_from_tool`] for a given tree and environment (`PADDOCK_THROTTLE` names the tool in a test).
 fn throttle_dir_of(root: &Path, env: &std::collections::HashMap<String, String>) -> Option<PathBuf> {
     let built = std::sync::OnceLock::new();
-    let prefix = crate::pre_push::exec::throttle_command_for(
+    let prefix = crate::heavy_tool::throttle_command_for(
         root,
         env,
-        &|p| crate::pre_push::exec::on_path(env, p),
+        &|p| crate::throttle::on_path(env, p),
         &built,
-        crate::pre_push::heavy_tool::BUILD_LIMIT,
+        crate::heavy_tool::BUILD_LIMIT,
     )
     .ok()?;
     let mut cmd = paddock_proc::command(prefix.first()?);
@@ -463,6 +464,17 @@ pub trait Http {
     fn get_json(&mut self, url: &str, token: &str) -> Result<Value, String>;
     /// Fetches `url` as text (a job log); errors are texts without the token.
     fn get_text(&mut self, url: &str, token: &str) -> Result<String, String> {
+        let _ = (url, token);
+        Err("this reader fetches JSON only".into())
+    }
+    /// Fetches `url` as bytes, at most `max_bytes` (an artifact's zip); errors are texts without the token.
+    fn get_bytes(&mut self, url: &str, token: &str, max_bytes: u64) -> Result<Vec<u8>, String> {
+        let _ = (url, token, max_bytes);
+        Err("this reader fetches JSON only".into())
+    }
+    /// The `Location` a GET of `url` answers with, `None` for an answer that is no redirect (the recorder of an artifact download
+    /// keeps it); errors are texts without the token.
+    fn get_redirect(&mut self, url: &str, token: &str) -> Result<Option<String>, String> {
         let _ = (url, token);
         Err("this reader fetches JSON only".into())
     }
@@ -586,6 +598,9 @@ impl Probe for CiRunProbe<'_> {
     }
 }
 
+/// The `Accept` value of an artifact download, the one request that follows redirects.
+const ACCEPT_ZIP: &str = "application/zip";
+
 /// One curl call per request, no retry: `curl`, with the URL and the Authorization header on standard input (`-K -`) so the token is in no argument list.
 pub struct CurlOnce;
 
@@ -593,6 +608,28 @@ impl CurlOnce {
     /// One GET through curl: the body, at most `max_bytes`, within `seconds`.
     fn get(url: &str, token: &str, accept: &str, max_bytes: u64, seconds: u32) -> Result<Vec<u8>, String> {
         CurlOnce::request("GET", url, token, accept, None, max_bytes, seconds)
+    }
+
+    /// The curl config of one request, every value through [`crate::curl_config`]. An empty token is an anonymous request (the planner reads
+    /// public run lists without one).
+    pub(crate) fn config(method: &str, url: &str, token: &str, accept: &str, body: Option<&str>) -> String {
+        let mut out = curl_config::line("url", url);
+        if !token.is_empty() {
+            out.push_str(&curl_config::line("header", &format!("Authorization: token {token}")));
+        }
+        out.push_str(&curl_config::line("header", &format!("Accept: {accept}")));
+        // An artifact download answers 302 to a signed URL on the same server (Gitea 28.4): follow it, a few hops at most.
+        if accept == ACCEPT_ZIP {
+            out.push_str("location\nmax-redirs = 3\n");
+        }
+        if method != "GET" {
+            out.push_str(&curl_config::line("request", method));
+        }
+        if let Some(body) = body {
+            out.push_str(&curl_config::line("header", "Content-Type: application/json"));
+            out.push_str(&curl_config::line("data-binary", body));
+        }
+        out
     }
 
     /// One request through curl; a body is sent as JSON through the config on standard input (never an argument).
@@ -606,8 +643,9 @@ impl CurlOnce {
         seconds: u32,
     ) -> Result<Vec<u8>, String> {
         use std::process::Stdio;
-        if url.contains(['"', '\n', '\\']) || token.contains(['"', '\n', '\\']) {
-            return Err("the URL or the token has a character that cannot be sent".into());
+        // A line break would end the value and start a header of its own, so it is refused; every other character is escaped.
+        if url.contains(['\n', '\r']) || token.contains(['\n', '\r']) {
+            return Err("the URL or the token has a line break, which cannot be sent".into());
         }
         if method.is_empty() || !method.bytes().all(|b| b.is_ascii_uppercase()) {
             return Err(format!("{method:?} is not an HTTP method"));
@@ -632,25 +670,7 @@ impl CurlOnce {
             .spawn()
             .map_err(|e| format!("cannot start curl: {e}"))?;
         if let Some(mut stdin) = child.stdin.take() {
-            // An empty token is an anonymous request (the planner reads public run lists without one).
-            let auth = if token.is_empty() {
-                String::new()
-            } else {
-                format!("header = \"Authorization: token {token}\"\n")
-            };
-            let _ = write!(stdin, "url = \"{url}\"\n{auth}header = \"Accept: {accept}\"\n");
-            if method != "GET" {
-                let _ = writeln!(stdin, "request = \"{method}\"");
-            }
-            if let Some(body) = body {
-                // curl's config quoting: within double quotes only \\ and \" (and \t \n \r \v) are escapes.
-                let quoted = body
-                    .replace('\\', "\\\\")
-                    .replace('"', "\\\"")
-                    .replace('\n', "\\n")
-                    .replace('\r', "\\r");
-                let _ = write!(stdin, "header = \"Content-Type: application/json\"\ndata-binary = \"{quoted}\"\n");
-            }
+            let _ = stdin.write_all(CurlOnce::config(method, url, token, accept, body).as_bytes());
         }
         let out = child.wait_with_output().map_err(|e| format!("curl failed: {e}"))?;
         if !out.status.success() {
@@ -681,6 +701,54 @@ impl Http for CurlOnce {
         // A job log is a few MB; 64 MiB bounds a runaway one.
         let body = CurlOnce::get(url, token, "text/plain", 64 << 20, 120)?;
         Ok(String::from_utf8_lossy(&body).into_owned())
+    }
+
+    fn get_bytes(&mut self, url: &str, token: &str, max_bytes: u64) -> Result<Vec<u8>, String> {
+        CurlOnce::get(url, token, ACCEPT_ZIP, max_bytes, 120)
+    }
+
+    fn get_redirect(&mut self, url: &str, token: &str) -> Result<Option<String>, String> {
+        use std::process::Stdio;
+        if url.contains(['"', '\n', '\\']) || token.contains(['"', '\n', '\\']) {
+            return Err("the URL or the token has a character that cannot be sent".into());
+        }
+        // The same shape as `request`: the URL and the header on standard input, so the token is in no argument list.
+        let mut child = paddock_proc::command("curl")
+            .args([
+                "-q",
+                "-sS",
+                "--max-time",
+                "20",
+                "-o",
+                "/dev/null",
+                "-w",
+                "%{http_code} %{redirect_url}",
+                "-K",
+                "-",
+            ])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|e| format!("cannot start curl: {e}"))?;
+        if let Some(mut stdin) = child.stdin.take() {
+            let mut config = curl_config::line("url", url);
+            if !token.is_empty() {
+                config.push_str(&curl_config::line("header", &format!("Authorization: token {token}")));
+            }
+            let _ = stdin.write_all(config.as_bytes());
+        }
+        let out = child.wait_with_output().map_err(|e| format!("curl failed: {e}"))?;
+        if !out.status.success() {
+            return Err(format!(
+                "curl exited with {}: {}",
+                out.status,
+                truncate(String::from_utf8_lossy(&out.stderr).trim(), 200)
+            ));
+        }
+        let text = String::from_utf8_lossy(&out.stdout).into_owned();
+        let (code, location) = text.split_once(' ').unwrap_or((text.as_str(), ""));
+        Ok((code.starts_with('3') && !location.is_empty()).then(|| location.to_string()))
     }
 
     fn send_json(&mut self, method: &str, url: &str, token: &str, body: Option<&Value>) -> Result<Value, String> {
@@ -807,6 +875,12 @@ impl<H: Http> Http for Retrying<'_, H> {
     fn get_text(&mut self, url: &str, token: &str) -> Result<String, String> {
         self.read(|h| h.get_text(url, token))
     }
+    fn get_bytes(&mut self, url: &str, token: &str, max_bytes: u64) -> Result<Vec<u8>, String> {
+        self.read(|h| h.get_bytes(url, token, max_bytes))
+    }
+    fn get_redirect(&mut self, url: &str, token: &str) -> Result<Option<String>, String> {
+        self.read(|h| h.get_redirect(url, token))
+    }
     fn send_json(&mut self, method: &str, url: &str, token: &str, body: Option<&Value>) -> Result<Value, String> {
         // Never retried: the call may have reached the server (a dispatch could start two runs).
         self.inner.send_json(method, url, token, body)
@@ -835,6 +909,12 @@ impl Http for CurlHttp {
     }
     fn get_text(&mut self, url: &str, token: &str) -> Result<String, String> {
         CurlHttp::retrying().get_text(url, token)
+    }
+    fn get_bytes(&mut self, url: &str, token: &str, max_bytes: u64) -> Result<Vec<u8>, String> {
+        CurlHttp::retrying().get_bytes(url, token, max_bytes)
+    }
+    fn get_redirect(&mut self, url: &str, token: &str) -> Result<Option<String>, String> {
+        CurlHttp::retrying().get_redirect(url, token)
     }
     fn send_json(&mut self, method: &str, url: &str, token: &str, body: Option<&Value>) -> Result<Value, String> {
         CurlOnce.send_json(method, url, token, body)
@@ -1127,6 +1207,35 @@ fn finish(kind: &str, (outcome, next): (Outcome, String), log: &mut dyn Write) -
 
 #[cfg(test)]
 mod tests {
+    /// Run 9265's class: every value of the request config goes through the shared writer (`curl_config`), so a backslash or quote in the
+    /// URL, the token or the body reaches curl as written.
+    #[test]
+    fn the_request_config_is_written_by_the_shared_curl_writer() {
+        let c = CurlOnce::config(
+            "POST",
+            "https://h/a\\b?x=\"1\"",
+            "t\\k\"n",
+            "application/json",
+            Some("{\"a\":\"b\\c\"}\n"),
+        );
+        for (k, v) in [
+            ("url", "https://h/a\\b?x=\"1\""),
+            ("header", "Authorization: token t\\k\"n"),
+            ("header", "Accept: application/json"),
+            ("request", "POST"),
+            ("data-binary", "{\"a\":\"b\\c\"}\n"),
+        ] {
+            assert!(c.contains(&curl_config::line(k, v)), "{k}: {c}");
+        }
+        assert!(
+            !CurlOnce::config("GET", "u", "", "a", None).contains("Authorization"),
+            "an empty token is anonymous"
+        );
+        // An artifact download follows the server's redirect to its signed URL; a JSON request does not.
+        assert!(CurlOnce::config("GET", "u", "t", ACCEPT_ZIP, None).contains("location\nmax-redirs = 3\n"));
+        assert!(!c.contains("location"), "{c}");
+    }
+
     use super::*;
     use std::cell::RefCell;
     use std::collections::HashMap;
@@ -1400,6 +1509,31 @@ mod tests {
             "{o:?}"
         );
         assert!(log.contains("has exited"), "{log}");
+    }
+
+    /// The v4 artifact download answers 302 to a signed URL (Gitea 28.4, trial run 9272): get_bytes follows it, and a JSON GET does not.
+    #[test]
+    fn get_bytes_follows_the_redirect_of_an_artifact_download() {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            for _ in 0..2 {
+                let (mut c, _) = listener.accept().unwrap();
+                let mut buf = [0u8; 2048];
+                let n = c.read(&mut buf).unwrap();
+                let req = String::from_utf8_lossy(&buf[..n]).to_string();
+                let reply = if req.starts_with("GET /zip ") {
+                    format!("HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1:{port}/raw\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                } else {
+                    "HTTP/1.1 200 OK\r\nContent-Length: 3\r\nConnection: close\r\n\r\nPK!".to_string()
+                };
+                c.write_all(reply.as_bytes()).unwrap();
+            }
+        });
+        let got = CurlHttp.get_bytes(&format!("http://127.0.0.1:{port}/zip"), "", 1024).unwrap();
+        assert_eq!(got, b"PK!");
+        server.join().unwrap();
     }
 
     #[test]

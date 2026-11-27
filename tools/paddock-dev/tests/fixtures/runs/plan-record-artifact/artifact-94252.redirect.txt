@@ -1,0 +1,1 @@
+https://gitea.invalid/api/v1/repos/example/paddock/actions/artifacts/94252/zip/raw

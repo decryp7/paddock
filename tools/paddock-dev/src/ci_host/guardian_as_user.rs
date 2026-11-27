@@ -85,7 +85,7 @@ impl Machine for Real<'_> {
     }
 }
 
-/// What the build and the tests may see besides the base list: the gates' list (`pre_push::exec::PASS`: the toolchain, the compile cache,
+/// What the build and the tests may see besides the base list: the gates' list (`child_env::PASS`: the toolchain, the compile cache,
 /// the temp folder), without its `PADDOCK_*` (the job's `PADDOCK_DEV_TOKEN` matches it, and no program here needs it), plus what this step
 /// reads: the image's `DUCKDB_*` and `CHROMIUM_TEST_PATH` (the owner-killed test starts a real browser), the sandbox opt-in of the job
 /// (the container runs as root) and the settings of the step itself, `RUSTDOCFLAGS` and `RUSTC_WORKSPACE_WRAPPER` as cargo's cache key
@@ -103,7 +103,7 @@ pub fn child_pass() -> Vec<&'static str> {
         // A built stand-in the job names (ER-47: the tests keep it); otherwise the step builds one, see `run_with`.
         "PADDOCK_STAND_IN_BIN",
     ];
-    crate::pre_push::exec::PASS
+    crate::child_env::PASS
         .iter()
         .copied()
         .filter(|n| *n != "PADDOCK_*")

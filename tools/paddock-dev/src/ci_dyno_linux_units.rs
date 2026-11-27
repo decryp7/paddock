@@ -136,7 +136,7 @@ impl Machine for Real {
                 "--ignored",
                 "--test-threads=1",
             ])
-            .pass(crate::pre_push::exec::PASS.iter().copied())
+            .pass(crate::child_env::PASS.iter().copied())
             .pass(["RUST_*", "LD_LIBRARY_PATH"])
             .env("XDG_RUNTIME_DIR", runtime_dir)
             .cwd(dir)

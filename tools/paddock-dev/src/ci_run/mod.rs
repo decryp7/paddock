@@ -127,7 +127,7 @@ pub fn find_root(start: &Path) -> Option<PathBuf> {
 pub fn run(args: &RunArgs, out: &mut dyn Write, err: &mut dyn Write) -> i32 {
     let env: HashMap<String, String> = crate::process_env::vars().collect();
     let stop = Arc::new(AtomicBool::new(false));
-    crate::pre_push::stop_on_signals(&stop);
+    crate::stop_signals::stop_on_signals(&stop);
     run_with(args, &env, &stop, out, err)
 }
 
@@ -246,7 +246,7 @@ pub fn run_with(args: &RunArgs, env: &HashMap<String, String>, stop: &Arc<Atomic
 }
 
 fn throttle_prefix(env: &HashMap<String, String>) -> Vec<String> {
-    crate::pre_push::exec::throttle_prefix(env, &|p| crate::pre_push::exec::on_path(env, p))
+    crate::throttle::throttle_prefix(env, &|p| crate::throttle::on_path(env, p))
 }
 
 fn execute(
