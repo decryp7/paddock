@@ -1731,6 +1731,43 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_failed_paddock_dev_linux_partition_reruns_only_that_partition() {
+        // The same scope-line path as the crate job's: `paddock-dev (ubuntu-latest, 2/3)` keeps its os, label and extras; the other two
+        // partitions and the other OS legs are not rerun, and `paddock_dev_legs` is the only matrix that narrows.
+        let name = "paddock-dev (ubuntu-latest, 2/3)";
+        let expected = ExpectedMap::from([(
+            name.to_string(),
+            crate::run_scope::Expected {
+                job: "paddock-dev".into(),
+                leg: BTreeMap::from([
+                    ("os".to_string(), "ubuntu-latest".to_string()),
+                    ("part_label".to_string(), ", 2/3".to_string()),
+                    ("part_extra".to_string(), "false".to_string()),
+                ]),
+                ..Default::default()
+            },
+        )]);
+        let failed = RunJob {
+            id: 6,
+            name: name.into(),
+            outcome: JobOutcome::Failed,
+            failed_steps: vec![],
+        };
+        let r = classify(&failed, Ok("no header\n"), "ci.yml", &expected);
+        assert_eq!(r.key.as_deref(), Some("paddock-dev"));
+        let plan = plan_of(vec![r]);
+        let out: BTreeMap<String, String> = plan.ci_outputs(&[], &mut |_| {}).into_iter().collect();
+        let legs: Vec<Value> = serde_json::from_str(&out["paddock_dev_legs"]).unwrap();
+        assert_eq!(legs.len(), 1, "only the failed partition: {legs:?}");
+        assert_eq!(
+            (legs[0]["os"].as_str(), legs[0]["part_label"].as_str()),
+            (Some("ubuntu-latest"), Some(", 2/3"))
+        );
+        assert_eq!(legs[0]["part_extra"], "false");
+        assert_eq!(out["rerun_jobs"], r#"["paddock-dev"]"#);
+    }
+
     fn run_7821() -> Value {
         json!({"id": 7821, "status": "completed", "path": "ci.yml@refs/heads/train/x", "head_sha": "f1d7e0791f250c88dacd318f7caebf1dcf066cdf"})
     }
