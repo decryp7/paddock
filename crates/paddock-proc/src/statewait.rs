@@ -105,8 +105,8 @@ mod tests {
                 OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
             };
             // SAFETY: OpenProcess takes plain values; the handle is closed in `drop`.
-            // conformance: pid-liveness — the pid is this test's own unreaped child, and the handle only holds its process object open
             let h = unsafe {
+                // conformance: pid-liveness — the pid is this test's own unreaped child, and the handle only holds its process object open
                 OpenProcess(
                     PROCESS_SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION,
                     0,
