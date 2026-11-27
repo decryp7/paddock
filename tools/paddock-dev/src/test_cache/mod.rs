@@ -297,8 +297,12 @@ pub fn records_from_log(log: &str, cands: &[Candidate], cfg: &Config, class: &Ru
     let judged = result::judge(log, &asked);
     cands
         .iter()
-        .filter(|c| !c.dirty && judged.passed.contains(&c.target.package))
-        .map(|c| Record {
+        .filter_map(|c| match judged.outcome(&c.target.package) {
+            // Uncommitted changes under the inputs: the pass proves nothing about the key.
+            result::TestOutcome::Passed { tests } if !c.dirty => Some((c, tests)),
+            result::TestOutcome::Passed { .. } | result::TestOutcome::Failed { .. } | result::TestOutcome::NotSeen { .. } => None,
+        })
+        .map(|(c, tests)| Record {
             key: key_of(c, cfg, class, filter),
             target: c.target.id.clone(),
             class: class.clone(),
@@ -308,7 +312,7 @@ pub fn records_from_log(log: &str, cands: &[Candidate], cfg: &Config, class: &Ru
             attempt: m.attempt,
             git_ref: m.git_ref.clone(),
             commit: m.commit.clone(),
-            tests: judged.tests.get(&c.target.package).copied().unwrap_or(0),
+            tests,
             secs: 0.0,
             at: m.at,
             os_build: m.os_build.clone(),
@@ -346,13 +350,16 @@ impl Shadow {
 pub fn shadow_outcome(matched: &[&Candidate], judged: &result::Judged) -> Shadow {
     let mut s = Shadow::default();
     for c in matched {
-        let p = &c.target.package;
-        if judged.passed.contains(p) {
-            s.matched += 1;
-            s.passed += 1;
-        } else if judged.failed.contains(p) {
-            s.matched += 1;
-            s.findings.push(c.target.id.clone());
+        match judged.outcome(&c.target.package) {
+            result::TestOutcome::Passed { .. } => {
+                s.matched += 1;
+                s.passed += 1;
+            }
+            result::TestOutcome::Failed { .. } => {
+                s.matched += 1;
+                s.findings.push(c.target.id.clone());
+            }
+            result::TestOutcome::NotSeen { .. } => {}
         }
     }
     s
@@ -372,14 +379,6 @@ pub struct RunOutcome {
     pub not_seen: usize,
 }
 
-impl RunOutcome {
-    /// Whether `target` ran in this run and failed (a finding or not stored): the only targets the nightly may invalidate (§6). A target
-    /// the run never saw proves nothing about its record.
-    pub fn ran_and_failed(&self, target: &str) -> bool {
-        self.shadow.findings.iter().any(|t| t == target) || self.not_stored.iter().any(|(t, _)| t == target)
-    }
-}
-
 /// The [`RunOutcome`] of `ran` (every target the run was asked for) given `matched` (those a valid record covered before it).
 pub fn run_outcome(ran: &[&Candidate], matched: &[&Candidate], judged: &result::Judged) -> RunOutcome {
     let mut out = RunOutcome {
@@ -387,19 +386,12 @@ pub fn run_outcome(ran: &[&Candidate], matched: &[&Candidate], judged: &result::
         ..RunOutcome::default()
     };
     for c in ran {
-        let p = &c.target.package;
-        if judged.passed.contains(p) || out.shadow.findings.contains(&c.target.id) {
-            continue;
-        }
-        if judged.failed.contains(p) {
-            let why = judged
-                .not_passed
-                .iter()
-                .find(|(q, _)| q == p)
-                .map_or("no verdict", |(_, w)| w.as_str());
-            out.not_stored.push((c.target.id.clone(), why.to_string()));
-        } else {
-            out.not_seen += 1;
+        match judged.outcome(&c.target.package) {
+            result::TestOutcome::Passed { .. } => {}
+            // A matched target that failed is already a finding.
+            result::TestOutcome::Failed { .. } if out.shadow.findings.contains(&c.target.id) => {}
+            result::TestOutcome::Failed { why } => out.not_stored.push((c.target.id.clone(), why)),
+            result::TestOutcome::NotSeen { .. } => out.not_seen += 1,
         }
     }
     out
