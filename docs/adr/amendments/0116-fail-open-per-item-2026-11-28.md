@@ -1,6 +1,6 @@
 # Amendment to ADR 0116 (2026-11-28): a lookup fails open per item, not per call
 
-- Status: **Proposed**: decided by the coordinator on 2026-11-28 under the user's standing "complete fix" direction; needs the user's yes. Amends ADR 0116 §5.
+- Status: **Accepted** (user, 2026-11-28, in chat: a lookup fails open per key with one retry). Amends ADR 0116 §5.
 - Related: ER-27, ER-33, ER-44; PRINCIPLES "Bulk APIs" (errors are per item unless the operation is atomic); user decision 136 (RustFS stays on a
   slow disk, so timeouts are normal); `tools/paddock-dev/src/test_cache/{store,s3,mod}.rs`.
 
