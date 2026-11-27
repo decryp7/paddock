@@ -1467,7 +1467,9 @@ mod member_gate {
         t.run(&["--gates", "HEAD"], "5");
         let log = fs::read_to_string(t.log()).unwrap();
         assert!(
-            log.contains(&format!("check --pre-push --member-gate --base {first_parent} --root")) && log.contains(&format!("HEAD={head}")),
+            log.contains(&format!(
+                "check --pre-push --member-gate --priority train --base {first_parent} --root"
+            )) && log.contains(&format!("HEAD={head}")),
             "{log}"
         );
     }
@@ -1483,7 +1485,7 @@ mod member_gate {
         t.run(&["--gates", "--gates-base", &base, "HEAD"], "5");
         let log = fs::read_to_string(t.log()).unwrap();
         assert!(
-            log.contains(&format!("check --pre-push --member-gate --base {base} --root")),
+            log.contains(&format!("check --pre-push --member-gate --priority train --base {base} --root")),
             "{log}"
         );
         assert!(

@@ -114,6 +114,10 @@ pub struct PrePushArgs {
     /// With `--set slow`: when a slow row fails, cancel this CI run at once (`./dev ci cancel`; the id `./dev ci dispatch` printed).
     #[arg(long)]
     pub cancel_ci_run: Option<u64>,
+    /// Who the heavy steps are for: `train` takes the priority lane of `throttle` (before normal waiters; [`crate::priority`]). A push to
+    /// a train, `main` or a release tag takes it without this flag. Pass it for an integrator's `--member-gate` and `--set slow` runs.
+    #[arg(long, value_enum, default_value_t = crate::priority::Priority::Normal)]
+    pub priority: crate::priority::Priority,
     /// Run every row even when an earlier green run with the same key is on record ([`reuse`]; `PADDOCK_NO_REUSE=1` is the same switch).
     #[arg(long)]
     pub no_reuse: bool,
@@ -485,7 +489,7 @@ fn command_in(
         stop: Arc::clone(&stop),
         built_throttle: Default::default(),
         live_slot: Default::default(),
-        priority: pushes.iter().any(|p| budget::is_landing_ref(&p.remote_ref)),
+        priority: budget::takes_priority_lane(args.priority, &pushes.iter().map(|p| p.remote_ref.as_str()).collect::<Vec<_>>()),
         wrapper,
         watchdog: Arc::new(stall::StallWatchdog::new(
             watchdog_mode,
@@ -576,7 +580,7 @@ fn command_in(
         real.watchdog.name(),
         queue_stall.as_secs() / 60,
         if real.priority {
-            "priority lane: this push lands on a train, main or a release tag"
+            "priority lane: this push lands on a train, main or a release tag, or `--priority train` was given"
         } else {
             "normal lane"
         },

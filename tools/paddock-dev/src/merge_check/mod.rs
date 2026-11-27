@@ -582,7 +582,7 @@ fn check(req: &Request) -> Result<Checked, CliError> {
                     &git,
                     &merge,
                     req.heavy_generators,
-                    &crate::generators::run::Real::new(&root),
+                    &crate::generators::run::Real::new(&root).with_priority(crate::priority::Priority::Train),
                     &|l| crate::log_text::eline(l),
                 )
             };

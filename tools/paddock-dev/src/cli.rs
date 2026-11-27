@@ -285,6 +285,9 @@ struct GenCheckArgs {
     /// The revision the change is measured against (its merge base with HEAD, working tree included).
     #[arg(long, default_value = "origin/main")]
     base: String,
+    /// `train` for an integrator's run: its heavy builds go before normal waiters in `throttle` (`throttle run --high`).
+    #[arg(long, value_enum, default_value_t = crate::priority::Priority::Normal)]
+    priority: crate::priority::Priority,
 }
 
 #[derive(Args)]
@@ -956,6 +959,7 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
             only: a.only,
             files: a.files,
             base: a.base,
+            priority: a.priority,
         }),
         Command::Plan(a) => plan_cmd::command(&a.args, a.root),
         Command::Hook { .. } => Ok(Report::new(serde_json::json!({}), String::new())),
