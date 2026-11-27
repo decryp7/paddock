@@ -38,7 +38,38 @@ fn main() {
     std::process::exit(process_exit(code, cfg!(windows)));
 }
 
+/// Called by the name of a heavy tool (a link written by `throttle shims install`): the shim, not the lock program.
+fn shim_main(tool: &'static str, argv: &[std::ffi::OsString]) -> i32 {
+    let (int, term, hup) = stop_flags();
+    let stop = move || exit::stop_code(int.load(Ordering::SeqCst), term.load(Ordering::SeqCst), hup.load(Ordering::SeqCst));
+    paddock_shim::run(tool, &argv[0], &argv[1..], &stop)
+}
+
+/// `throttle shims install <dir>`: one line per tool, and a non-zero exit when one was refused.
+fn shims_install(dir: &str) -> i32 {
+    use paddock_shim::install::{Installed, install};
+    let exe = std::env::current_exe()
+        .map(|e| paddock_env::winpath::real_or_given(&e))
+        .unwrap_or_default();
+    let mut refused = false;
+    for (name, r) in install(std::path::Path::new(dir), &exe, paddock_shim::SHIMMED) {
+        match r {
+            Installed::Made(p) => println!("{name}: linked {}", p.display()),
+            Installed::Present(p) => println!("{name}: already {}", p.display()),
+            Installed::Refused(why) => {
+                refused = true;
+                eprintln!("throttle: {name}: {why}");
+            }
+        }
+    }
+    if refused { exit::REFUSED } else { 0 }
+}
+
 fn real_main() -> i32 {
+    let argv: Vec<std::ffi::OsString> = std::env::args_os().collect();
+    if let Some(tool) = paddock_shim::called_as(argv.first().map(|a| a.as_os_str())) {
+        return shim_main(tool, &argv);
+    }
     let args: Vec<String> = std::env::args().skip(1).collect();
     let clock: Arc<dyn Clock> = Arc::new(SystemClock);
     let pid = std::process::id();
@@ -61,6 +92,7 @@ fn real_main() -> i32 {
             println!("throttle {}", env!("CARGO_PKG_VERSION"));
             return 0;
         }
+        Cli::ShimsInstall { dir } => return shims_install(dir),
         _ => {}
     }
     // The dev-targets folder is derived once: the run logs go under it, and `<dev-targets>/throttle` is an old lock folder.

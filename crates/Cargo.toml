@@ -51,6 +51,7 @@ members = [
     "paddock-setup",
     "paddock-settings",
     "paddock-shell",
+    "paddock-shim",
     "paddock-storage",
     "paddock-siblings",
     "paddock-slots",
@@ -132,6 +133,7 @@ paddock-service = { path = "paddock-service", version = "0.1.0", registry = "dec
 paddock-setup = { path = "paddock-setup", version = "1.2.0", registry = "decryp7" }
 paddock-settings = { path = "paddock-settings", version = "0.2.0", registry = "decryp7" }
 paddock-shell = { path = "paddock-shell", version = "0.3.0", registry = "decryp7" }
+paddock-shim = { path = "paddock-shim", version = "0.1.0", registry = "decryp7" }
 paddock-storage = { path = "paddock-storage", version = "0.1.0", registry = "decryp7" }
 paddock-siblings = { path = "paddock-siblings", version = "0.1.0", registry = "decryp7" }
 paddock-slots = { path = "paddock-slots", version = "0.1.0", registry = "decryp7" }

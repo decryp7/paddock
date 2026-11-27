@@ -329,6 +329,13 @@ killed on drop). `tests/it/ported.rs` ports the shell plock.test.sh checks onto 
 `real.rs` (here, in `tools/throttle/tests/it`) runs the binary with real processes; `slots.rs` (in the crate) is the load-aware slot rule; `props.rs` is proptest (in the crate). Gates: `cargo fmt --check`,
 `cargo clippy --all-targets -- -D warnings`, `cargo deny check`, and `cargo xwin check --target x86_64-pc-windows-msvc`.
 
+## Shims (user decision 77)
+
+`throttle shims install <dir>` writes links named `cargo`, `npm`, `npx`, `node`, `playwright` and `ng` that point at this program;
+called by one of those names it is that tool's shim (`crates/paddock-shim`, its README section): the real tool further along PATH, run
+in a throttle slot with the same arguments, streams and exit code, each run recorded in `<dev-targets>/runs/shim/<day>.log`. It does not
+change PATH: put `<dir>` first on it to use the shims. `PADDOCK_SHIM=off` or a `.paddock-shim-off` file in a project opts out.
+
 ## Priority lane (ADR 0102)
 
 `--high` is the lane for a landing push (the pre-push gate of a `train/*`, `main` or release-tag push). A high run announces
