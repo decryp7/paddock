@@ -2889,7 +2889,8 @@ mod member_trial {
     #[test]
     fn a_leftover_origin_at_the_old_shared_name_does_not_reject_the_push() {
         let probe = Repo::new();
-        let stale = probe.path().join("..").join(format!("origin-{}.git", std::process::id()));
+        // A sibling of the repository folder: the old fixture's name in the shared temp parent.
+        let stale = probe.path().with_file_name(format!("origin-{}.git", std::process::id()));
         let _ = std::fs::remove_dir_all(&stale);
         probe.git(&["init", "-q", "--bare", stale.to_str().unwrap()]);
         probe.write("s.txt", "s\n");

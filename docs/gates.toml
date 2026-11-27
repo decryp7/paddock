@@ -1212,3 +1212,10 @@ owner = "ER-21 class: one variable named, parsed and defaulted by hand at many s
 since = 2026-11-26
 review_by = 2026-12-10
 approved = "user"
+
+[[report_only]]
+id = "C176"
+reason = "ER-41: report-only until its first green run on the real tree, recorded by run id here and in tools/paddock-dev/src/check/c176.rs, then flip the mode to Gate. In test code (a tests folder, tests.rs, testutil*.rs or a cfg(test) item), a path joined onto the shared temp folder (temp_dir().join, a name bound to temp_dir() and joined, .path().join(\"..\").join, .path().parent().unwrap().join) instead of a folder the test owns (tempfile::tempdir, paddock_testkit::private_tempdir, Repo::owned_file) is a name every test and run shares (rule 97, ER-51). First count 2026-11-27 on fix/member-trial-temp-origin: 34 sites in 30 files; no baseline file (ER-46): the report is the starting list, a baseline needs the user's approval. Lexical by design: a path that reaches the temp folder through a helper is not seen. Positive control in the check and tests/it/check_c176.rs: a fixture's shared join goes red, the owned form stays green"
+owner = "ER-21 class: member_trial::pushed put its bare origin at <temp parent>/origin-<pid>.git (fetch first under overlapping runs), msg-final.txt and chain-final.txt were fixed names in the same parent"
+since = 2026-11-27
+review_by = 2026-12-11
