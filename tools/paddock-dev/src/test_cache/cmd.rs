@@ -388,12 +388,17 @@ fn run(
                 outcome.not_seen
             ));
         }
+        // Write-once while trusted, as in the record step: a local pass never replaces a trusted record.
+        let (put, kept) = super::not_overwriting_trusted(put, cands, &decisions);
         if let Err(w) = &writes {
             text.push(format!("test-cache: nothing stored ({w})"));
         } else if let Err(e) = store.put_many(&put) {
             text.push(format!("::warning::test-cache: records not stored: {e}"));
         } else {
-            text.push(format!("test-cache: stored {} pass(es)", put.len()));
+            text.push(format!(
+                "test-cache: stored {} pass(es); {kept} trusted record(s) kept, not replaced",
+                put.len()
+            ));
         }
         if !out.1 {
             // The whole output: the gate's row reads the failed tests and the first panic from it.
@@ -648,11 +653,19 @@ fn record(
         lines.extend(shadow.findings.iter().map(|t| {
             format!("::error::test-cache soundness finding: {t} matched a valid record and then failed in this run. Next step: find the input its key misses (ADR 0116 section 8); the switch stays off.")
         }));
-        lines.push(shadow.line());
+        // Records found but not trusted are named with why, so `matched 0` cannot hide them.
+        lines.push(match super::untrusted_summary(&decisions) {
+            Some(u) => format!("{}, {u}", shadow.line()),
+            None => shadow.line(),
+        });
     }
-    let put = super::records_from_log(&log, cands, cfg, class, &filter, &meta);
+    let (put, kept) = super::not_overwriting_trusted(super::records_from_log(&log, cands, cfg, class, &filter, &meta), cands, &decisions);
     lines.push(match store.put_many(&put) {
-        Ok(()) => format!("test-cache: recorded {} packages ({} in the log)", put.len(), asked.len()),
+        Ok(()) => format!(
+            "test-cache: recorded {} packages ({} in the log; {kept} trusted record(s) kept, not replaced)",
+            put.len(),
+            asked.len()
+        ),
         Err(e) => format!("::warning::test-cache: records not stored: {e}"),
     });
     Ok(Report::new(serde_json::json!({"stored": put.len()}), lines.join("\n")))

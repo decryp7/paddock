@@ -354,6 +354,44 @@ pub fn run_outcome(ran: &[&Candidate], matched: &[&Candidate], judged: &result::
     out
 }
 
+/// The records a run stores: `put` without those whose target already holds a trusted record under the same key ([`Decision::Reuse`] in
+/// `decisions`, one per candidate of `cands`): write-once while trusted, as remote build caches do. A record from a red run's leg or a
+/// local run never replaces a trusted one, so it cannot make every later lookup untrusted (run 9209 replaced run 9180's records). A
+/// missing, untrusted or too-old record is replaced. The second answer is how many trusted records were kept.
+pub fn not_overwriting_trusted(put: Vec<Record>, cands: &[Candidate], decisions: &[Decision]) -> (Vec<Record>, usize) {
+    let trusted: std::collections::BTreeSet<(&str, &str)> = cands
+        .iter()
+        .zip(decisions)
+        .filter_map(|(c, d)| match d {
+            Decision::Reuse(r) => Some((c.target.id.as_str(), r.key.as_str())),
+            Decision::Run(_) => None,
+        })
+        .collect();
+    let before = put.len();
+    let kept: Vec<Record> = put
+        .into_iter()
+        .filter(|r| !trusted.contains(&(r.target.as_str(), r.key.as_str())))
+        .collect();
+    let n = before - kept.len();
+    (kept, n)
+}
+
+/// The records a lookup found but did not trust, counted by why: `untrusted 57 (record of run 9209: the run is not a success)`, so a
+/// `matched 0` never hides records that are there. `None` when there were none.
+pub fn untrusted_summary(decisions: &[Decision]) -> Option<String> {
+    let mut by: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
+    for d in decisions {
+        if let Decision::Run(Why::Untrusted(w)) = d {
+            *by.entry(w.as_str()).or_default() += 1;
+        }
+    }
+    let n: usize = by.values().sum();
+    (n > 0).then(|| {
+        let why: Vec<String> = by.iter().map(|(w, k)| format!("{k}: {w}")).collect();
+        format!("untrusted {n} ({})", why.join("; "))
+    })
+}
+
 /// The shadow lines of job logs, summed: how many lines were read, and the totals. `None` when no log has a line (nothing measured).
 pub fn read_shadow(logs: &[String]) -> Option<(usize, Shadow)> {
     let mut lines = 0;

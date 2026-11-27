@@ -258,6 +258,45 @@ fn an_unchanged_target_reuses_and_a_changed_one_runs() {
 }
 
 #[test]
+fn a_trusted_record_is_never_replaced_and_an_untrusted_one_is() {
+    // Run 9209 (red) re-stored the records run 9180 (green) had written under the same keys; every later lookup then refused them.
+    let (_d, s) = scratch();
+    let class = RunnerClass::here();
+    let (a, b) = (cand("crates/a", "h1"), cand("crates/b", "h2"));
+    let good = rec(&a, &class, NOW - 60);
+    s.put_many(&[good.clone(), rec(&b, &class, NOW - 60)]).unwrap();
+    // The trust check accepts run 8635 for a and refuses b's record (a failing job): a is trusted, b is not.
+    let trust = |r: &Record| {
+        if r.target == "rust:crates/b" {
+            Err("the job failed".to_string())
+        } else {
+            Ok(())
+        }
+    };
+    let (d, _) = decide(&[a.clone(), b.clone()], &cfg(), &class, "", &s, NOW, &trust);
+    assert!(matches!(d[0], Decision::Reuse(_)));
+    assert_eq!(d[1], Decision::Run(Why::Untrusted("the job failed".into())));
+    let red = |c: &Candidate| Record {
+        run: "9209".into(),
+        job: "crate (ubuntu-latest, 2/3)".into(),
+        ..rec(c, &class, NOW)
+    };
+    let (put, kept) = super::not_overwriting_trusted(vec![red(&a), red(&b)], &[a.clone(), b.clone()], &d);
+    assert_eq!(kept, 1);
+    s.put_many(&put).unwrap();
+    let key = |c: &Candidate| Lookup {
+        target: c.target.id.clone(),
+        class: class.clone(),
+        key: key_of(c, &cfg(), &class, ""),
+    };
+    let back = s.get_many(&[key(&a), key(&b)]).unwrap();
+    assert_eq!(back[0].as_ref().unwrap().run, "8635", "the trusted record stays");
+    assert_eq!(back[1].as_ref().unwrap().run, "9209", "an untrusted record is replaced");
+    assert_eq!(super::untrusted_summary(&d).as_deref(), Some("untrusted 1 (1: the job failed)"));
+    assert_eq!(super::untrusted_summary(&d[..1]), None);
+}
+
+#[test]
 fn an_unreachable_store_makes_everything_run() {
     let class = RunnerClass::here();
     let (d, notice) = decide(&[cand("crates/a", "h"), cand("crates/b", "h")], &cfg(), &class, "", &Down, NOW, OK);
