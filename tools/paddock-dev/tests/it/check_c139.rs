@@ -1,26 +1,15 @@
 //! C139 (the exceptions to `paddock/e2e-ready-reads`, an `eslint-suppressions.json`, only shrink): the Rust host against its JavaScript port, on
 //! fixture trees (with and without git history) and on this working tree. The check's own test file: nothing in it is read as a spec.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
-use super::check::{has_node, node, repo_root, skip};
+use super::check::{has_node, js_findings, node, repo_root, skip};
 use paddock_dev::check::{RunOptions, registry, run_checks};
 use serde_json::{Value, json};
 use std::path::Path;
 use std::process::Command;
 
-/// The part of a report the JS host also writes. The Rust host's growth finding adds the line the user writes to approve the growth
-/// (`check::growth_approval`, the one reader, Rust only: tested in `check_growth_approval.rs`); the JS port has no such reader, so
-/// that sentence of a `fix` is left out of the comparison.
+/// The part of a report the JS host also writes.
 fn shared_part(v: &Value) -> Value {
-    let mut findings = v["findings"].clone();
-    for f in findings.as_array_mut().into_iter().flatten() {
-        if let Some(fix) = f["fix"]
-            .as_str()
-            .and_then(|t| t.split(" Or the user adds to docs/gates.toml:").next())
-        {
-            f["fix"] = json!(fix);
-        }
-    }
-    json!({"app": v["app"], "checks": v["checks"], "findings": findings, "waived": v["waived"], "errors": v["errors"], "warnings": v["warnings"]})
+    json!({"app": v["app"], "checks": v["checks"], "findings": js_findings(&v["findings"]), "waived": v["waived"], "errors": v["errors"], "warnings": v["warnings"]})
 }
 
 const R: &str = "paddock/e2e-ready-reads";
