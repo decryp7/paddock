@@ -81,10 +81,10 @@ test-support = []
 # `generated_types` test (ADR 0016).
 ts = ["dep:ts-rs"]
 
+[package.metadata.paddock]
 # What this crate's tests read that the test cache's reads extractor cannot resolve (ADR 0116 §2, user decision 122), as globs from the
 # repository root; `[]` says the blind reads touch no repository file.
 # `tests/it/timestamps.rs` opens the whole samples folder; its fixtures are this crate's own.
-[package.metadata.paddock]
 test-reads = [
     "apps/debrief/samples/**",
 ]

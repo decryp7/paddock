@@ -58,10 +58,10 @@ paddock-health = { workspace = true, features = ["test-support"] }
 name = "it"
 required-features = ["tauri"]
 
+[package.metadata.paddock]
 # What this crate's tests read that the test cache's reads extractor cannot resolve (ADR 0116 §2, user decision 122), as globs from the
 # repository root; `[]` says the blind reads touch no repository file.
 # `src/tests.rs`: the generated TypeScript of the workbench entry point and the `src` folders `assert_async` checks.
-[package.metadata.paddock]
 test-reads = [
     "ui/projects/paddock-ui/workbench/generated/*",
     "ui/projects/paddock-ui/workbench/dock/generated/dialog-contracts.ts",

@@ -53,10 +53,10 @@ ts-rs = "11.1"
 # The adapter is tested on Tauri's mock runtime.
 tauri = { workspace = true, features = ["test"] }
 
+[package.metadata.paddock]
 # What this crate's tests read that the test cache's reads extractor cannot resolve (ADR 0116 §2, user decision 122), as globs from the
 # repository root; `[]` says the blind reads touch no repository file.
 # `tests/it/common_controls_manifest.rs` reads every workspace crate's `Cargo.toml` and `build.rs`.
-[package.metadata.paddock]
 test-reads = [
     "crates/*/Cargo.toml",
     "crates/*/build.rs",

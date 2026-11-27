@@ -140,12 +140,12 @@ cairo-rs = "0.18"
 webview2-com = "0.39"
 windows = { workspace = true, features = ["Win32_System_Com", "Win32_System_Console", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 
+[package.metadata.paddock]
 # What this crate's tests read that the test cache's reads extractor cannot resolve (ADR 0116 §2, user decision 122), as globs from the
 # repository root; `[]` says the blind reads touch no repository file.
 # `src/health/commands/tests.rs` runs the store worker binary, built from the worker crate and its dependencies (`cargo build -p
 # debrief-store-worker`; the workspace test build makes it) when it is missing. The other sites: `build.rs` reads this folder's own
 # `windows-app-manifest.xml`; `src/lib.rs` and `src/activity/report/cli.rs` read the process's working folder.
-[package.metadata.paddock]
 test-reads = [
     "apps/debrief/crates/debrief-store-worker/**",
     "apps/debrief/crates/debrief-alloc/**",

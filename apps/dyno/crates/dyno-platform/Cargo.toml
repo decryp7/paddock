@@ -106,11 +106,11 @@ workspace = true
 # Helper tables itself (src/windows/net.rs).
 netstat2 = "0.11"
 
+[package.metadata.paddock]
 # What this crate's tests read that the test cache's reads extractor cannot resolve (ADR 0116 §2, user decision 122), as globs from the
 # repository root; `[]` says the blind reads touch no repository file.
 # `tests/no_keychain_on_macos.rs`: the lock and every manifest of Dyno and the shared crates; `tests/no_ungated_doubles.rs`: the sources of
 # Dyno's crates, `cargo metadata` over Dyno's workspace and the app's `tauri.conf.json`. `src/volumes.rs` walks up a temporary folder.
-[package.metadata.paddock]
 test-reads = [
     "apps/dyno/Cargo.lock",
     "apps/dyno/**/Cargo.toml",

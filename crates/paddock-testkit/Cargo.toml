@@ -28,8 +28,8 @@ libc = "0.2"
 [dev-dependencies]
 dirs = "7"
 
+[package.metadata.paddock]
 # The files this crate's tests read that the test cache's reads extractor cannot resolve (ADR 0116 §2, user decision 122). The one blind
 # site is `src/bin/paddock-stand-in.rs`: the stand-in prints (`{cwd}`) or compares (`cwd_ends`) the working folder a test started it in,
 # and reads no repository file. What its tests read from the repository (`conformance/ci/boot-volume.sh`) is a resolved literal chain.
-[package.metadata.paddock]
 test-reads = []

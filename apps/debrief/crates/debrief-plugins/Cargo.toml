@@ -47,10 +47,10 @@ zip.workspace = true
 serde_json = { workspace = true, features = ["preserve_order"] }
 tempfile.workspace = true
 
+[package.metadata.paddock]
 # What this crate's tests read that the test cache's reads extractor cannot resolve (ADR 0116 §2, user decision 122), as globs from the
 # repository root; `[]` says the blind reads touch no repository file.
 # `tests/it/common/mod.rs`: the whole samples folder, and the `tests/fixtures` of every plugin crate.
-[package.metadata.paddock]
 test-reads = [
     "apps/debrief/samples/**",
     "apps/debrief/crates/*/tests/fixtures/**",

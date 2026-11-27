@@ -67,11 +67,11 @@ name = "show_probe"
 harness = false
 required-features = ["probe"]
 
+[package.metadata.paddock]
 # What this crate's tests read that the test cache's reads extractor cannot resolve (ADR 0116 §2, user decision 122), as globs from the
 # repository root; `[]` says the blind reads touch no repository file.
 # `src/probe.rs`: the real-window probe (`PADDOCK_REAL_WINDOWS=1`, never in a normal run) reads the shell-demo capability and the
 # shell plugin's permission folder beside this crate.
-[package.metadata.paddock]
 test-reads = [
     "apps/shell-demo/src-tauri/capabilities/dialog.json",
     "crates/paddock-shell/permissions/**",

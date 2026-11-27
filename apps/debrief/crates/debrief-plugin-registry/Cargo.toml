@@ -19,10 +19,10 @@ serde_json = { workspace = true, features = ["preserve_order"] }
 [dev-dependencies]
 proptest.workspace = true
 
+[package.metadata.paddock]
 # What this crate's tests read that the test cache's reads extractor cannot resolve (ADR 0116 §2, user decision 122), as globs from the
 # repository root; `[]` says the blind reads touch no repository file.
 # `tests/it/properties.rs` reads one sample.
-[package.metadata.paddock]
 test-reads = [
     "apps/debrief/samples/windows/registry-export.reg",
 ]

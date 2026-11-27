@@ -59,10 +59,10 @@ proptest.workspace = true
 # Waits on a condition with a hang guard instead of a sleep (ADR 0041, conformance C71).
 paddock-testkit = { path = "../../../../crates/paddock-testkit" }
 
+[package.metadata.paddock]
 # What this crate's tests read that the test cache's reads extractor cannot resolve (ADR 0116 §2, user decision 122), as globs from the
 # repository root; `[]` says the blind reads touch no repository file.
 # `examples/eval.rs` (a program run by hand, never by the tests) reads the samples folder.
-[package.metadata.paddock]
 test-reads = [
     "apps/debrief/samples/**",
 ]

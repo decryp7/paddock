@@ -49,10 +49,10 @@ tempfile.workspace = true
 [lints]
 workspace = true
 
+[package.metadata.paddock]
 # What this crate's tests read that the test cache's reads extractor cannot resolve (ADR 0116 §2, user decision 122), as globs from the
 # repository root; `[]` says the blind reads touch no repository file.
 # `src/server.rs` test: the endings register and ratchet. `src/orphan.rs` walks up a path the caller gives (not a repository path).
-[package.metadata.paddock]
 test-reads = [
     "docs/ipc-endpoints.toml",
     "docs/ipc-endpoint-ratchet.toml",
