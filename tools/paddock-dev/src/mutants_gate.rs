@@ -637,8 +637,15 @@ pub fn command_gate(root: Option<PathBuf>, base: &str, shard: Option<&str>) -> R
         .map(|t| t.trim().to_string())
         .filter(|t| !t.is_empty())
         .ok_or_else(|| CliError::failure(format!("{} has no HEAD commit", root.display())))?;
-    let targets = crate::places::dev_targets(&root, &|k| std::env::var(k).ok())?;
-    let parent = targets.join("mutants");
+    // The scratch parent: the dev-targets folder where there is one (a developer's machine), else the job's own temp folder (CI has no
+    // worktree root: `RUNNER_TEMP`, which the runner makes for this job and removes after it).
+    let parent = match crate::places::dev_targets(&root, &|k| std::env::var(k).ok()) {
+        Ok(targets) => targets.join("mutants"),
+        Err(e) => match std::env::var("RUNNER_TEMP").ok().filter(|t| !t.is_empty()) {
+            Some(t) => PathBuf::from(t).join("mutants"),
+            None => return Err(e),
+        },
+    };
     let scratch = parent.join(format!("run-{}-{}", std::process::id(), started_stamp()));
     std::fs::create_dir_all(&scratch)
         .map_err(|e| CliError::failure(format!("the scratch folder {} cannot be made: {e}", scratch.display())))?;
