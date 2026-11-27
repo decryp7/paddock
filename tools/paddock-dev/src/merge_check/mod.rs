@@ -36,7 +36,7 @@
 //! shared process runner closes standard input).
 
 mod backwards;
-mod diff;
+pub(crate) mod diff;
 mod gates;
 mod generated;
 mod generator_step;

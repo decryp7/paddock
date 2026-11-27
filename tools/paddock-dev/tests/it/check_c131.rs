@@ -1,7 +1,7 @@
 //! C131 (a golden file holds no value of the machine that captured it): the Rust host against the answers the JavaScript check gave (recorded in `tests/fixtures/check/recorded`; the JS module is retired, pair P3), on a fixture tree and on this
 //! working tree.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
-use super::check::{LIVE_STALL, repo_root};
+use super::check::{LIVE_STALL, js_findings, repo_root};
 use paddock_dev::check::tree::Tree;
 use paddock_dev::check::{RunOptions, registry, run_checks, run_checks_in};
 use serde_json::{Value, json};
@@ -54,7 +54,7 @@ fn options(root: &Path, app: &str) -> RunOptions {
 }
 
 fn shared_part(v: &Value) -> Value {
-    json!({"app": v["app"], "checks": v["checks"], "findings": v["findings"], "waived": v["waived"], "errors": v["errors"], "warnings": v["warnings"]})
+    json!({"app": v["app"], "checks": v["checks"], "findings": js_findings(&v["findings"]), "waived": v["waived"], "errors": v["errors"], "warnings": v["warnings"]})
 }
 
 fn tree_of(files: &[(&str, &str)]) -> tempfile::TempDir {

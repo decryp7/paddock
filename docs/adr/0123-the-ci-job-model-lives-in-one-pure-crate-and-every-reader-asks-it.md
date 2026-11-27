@@ -41,15 +41,15 @@ place, in the run that makes the change.
 | Copy | What it re-types | Fate |
 |---|---|---|
 | `plan_gitea::CI_JOBS`, `tests/golden/ci-jobs.json` | job id to plan projects | **kept** until ADR 0117 WP-2's remaining deletion (D12); a WP-1 test keeps it equal to the model |
-| `run_scope::PROJECT_JOBS`, `JobName` (4 variants), `names_of_job`, `name_of_leg` | project to display-name prefixes, leg to name, old names | deleted (WP-2) |
-| `run_scope::DEFAULT_OS_LEGS` (:24), `PROJECTS` (:27) | the OS leg set, the project flags | deleted; read from the model |
-| `run_scope` test `name_of(...)` asserts | the three `name:` templates verbatim | deleted |
-| `gates/ci.rs:237-246` | the crate and paddock-dev legs as a hard-coded three-OS axis | the leg set comes from `plan_ci` (the one source), passed in |
-| ci.yml:197 `PLAN_OS_LEGS`, :213-214 fallbacks | the three OS legs in the plan step | deleted: the planner always writes the legs |
-| `plan_since::leg_of`, `key_by_name` | OS and app regexes, template matching over names | lookup in the run's scope line, then the `Job:` log line (:466) |
-| `plan_since` :894, :1093-1105, :1152 | jobs known through `CI_JOBS`; rerun legs written without `part` or `test_packages` | the model's job list and legs; a rerun leg keeps its partition |
-| `ci_runs/green.rs` :300-311 and :340-365 | `crate (`, `crates (`, `paddock-dev (`, `app ` prefixes to project and workspace | lookup |
-| `ci_runs/triage.rs:580`, `queue/real.rs:66`, `active_apps::app_of_job` | `app <name> (` parsing | lookup |
+| `run_scope::PROJECT_JOBS`, `JobName` (4 variants), `names_of_job`, `name_of_leg` | project to display-name prefixes, leg to name, old names | **done**: deleted in aba55ebe7, landed in c2d4bb3c2 |
+| `run_scope::DEFAULT_OS_LEGS` (:24), `PROJECTS` (:27) | the OS leg set, the project flags | **done**: deleted; read from the model (aba55ebe7, c2d4bb3c2) |
+| `run_scope` test `name_of(...)` asserts | the three `name:` templates verbatim | **done** (c2d4bb3c2) |
+| `gates/ci.rs:237-246` | the crate and paddock-dev legs as a hard-coded three-OS axis | the leg set comes from `plan_ci` (the one source), passed in: **done** (`plan_ci::os_legs()`, 2d2b5f6af) |
+| ci.yml:197 `PLAN_OS_LEGS`, :213-214 fallbacks | the three OS legs in the plan step | deleted: the planner always writes the legs: **done** (2d2b5f6af) |
+| `plan_since::leg_of`, `key_by_name` | OS and app regexes, template matching over names | lookup in the run's scope line, then the `Job:` log line (:466): **done** (c2d4bb3c2) |
+| `plan_since` :894, :1093-1105, :1152 | jobs known through `CI_JOBS`; rerun legs written without `part` or `test_packages` | the model's job list and legs; a rerun leg keeps its partition: **done** (c2d4bb3c2) |
+| `ci_runs/green.rs` :300-311 and :340-365 | `crate (`, `crates (`, `paddock-dev (`, `app ` prefixes to project and workspace | lookup: **done** (c2d4bb3c2) |
+| `ci_runs/triage.rs:580`, `queue/real.rs:66`, `active_apps::app_of_job` | `app <name> (` parsing | lookup: **done** (c2d4bb3c2); only the nightly's `installers (` match stays, registered in known-copies.toml |
 | `escape/cmd.rs` `failures_of` | job to project through `CI_JOBS`, OS-less jobs by name | the model |
 | `scripts/publish.mjs` `crateStepsMissing`, `crateCommands` (8cc32c884) and tests | "every crate is clippied and nextested with every feature" as regexes, plus a text rewrite for the Linux leg | ported to Rust (81a), answered by the crate-coverage query |
 | conformance `C37-test-binaries.mjs` :41-43 (`workspaceTests`) and :103 | the "member is tested" half, by regex over command text | that half reads the crate-coverage query (`./dev gates crate-coverage --json`) until ci-in-rust WP-10 ports C37 |

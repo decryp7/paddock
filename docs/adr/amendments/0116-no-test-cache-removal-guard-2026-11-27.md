@@ -1,6 +1,6 @@
 # Amendment to ADR 0116 (2026-11-27): no check guards a removal from the `noTestCache` list
 
-- Status: **Proposed, needs the user's yes** (2026-11-27). The coordinator decided on train/2026-11-27-y to wire the unused guard
+- Status: **Accepted** (user, 2026-11-27, in chat). Proposed 2026-11-27: the coordinator decided on train/2026-11-27-y to wire the unused guard
   where the ADR says or delete it (ER-33: a guard that is never called is not held); the train deleted the dead code. ADR 0116 was
   accepted by the user with §3's sentence "a test compares the list against the merge base for removals", so dropping that
   guarantee is the user's decision: accept this amendment, or ask for the report-only check below. Amends ADR 0116 §3.

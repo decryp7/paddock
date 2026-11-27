@@ -693,6 +693,7 @@ mod dropped {
             smoke: smoke.iter().map(|s| s.to_string()).collect(),
             decls: BTreeMap::new(),
             errors: Vec::new(),
+            test_reads: BTreeMap::new(),
         }
     }
 

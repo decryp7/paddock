@@ -66,3 +66,9 @@ paddock-testkit = { workspace = true }
 ts-rs = "11.1"
 # The adapter is tested on Tauri's mock runtime.
 tauri = { workspace = true, features = ["test"] }
+
+[package.metadata.paddock]
+# What this crate's tests read that the test cache's reads extractor cannot resolve (ADR 0116 §2, user decision 122), as globs from the
+# repository root; `[]` says the blind reads touch no repository file.
+# The tests read fixtures and sources of this crate's own folder, through a helper that joins a name.
+test-reads = []
