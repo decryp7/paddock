@@ -1219,3 +1219,4 @@ reason = "ER-41: report-only until its first green run on the real tree, recorde
 owner = "ER-21 class: member_trial::pushed put its bare origin at <temp parent>/origin-<pid>.git (fetch first under overlapping runs), msg-final.txt and chain-final.txt were fixed names in the same parent"
 since = 2026-11-27
 review_by = 2026-12-11
+approved = "user"
