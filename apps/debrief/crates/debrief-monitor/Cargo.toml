@@ -31,3 +31,10 @@ tempfile.workspace = true
 [[bin]]
 name = "debrief-monitor"
 path = "src/bin/debrief-monitor.rs"
+
+[package.metadata.paddock]
+# What this crate's tests read that the test cache's reads extractor cannot resolve (ADR 0116 §2, user decision 122), as globs from the
+# repository root; `[]` says the blind reads touch no repository file.
+# `src/tests.rs` looks up the test binary's own process name (`current_exe`) and `src/dotnet_win_tests.rs` finds the .NET compiler
+# under `WINDIR`: no repository file.
+test-reads = []
