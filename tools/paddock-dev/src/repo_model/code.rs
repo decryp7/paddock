@@ -185,7 +185,7 @@ pub fn grep_files(code: Option<i32>, stdout: &str, stderr: &str, truncated: bool
 
 /// What `git grep -E` looks for in a Rust source: every construct [`rust_reads`] resolves or marks blind.
 pub const READ_PATTERN: &str =
-    r"include(_str|_bytes)?!|CARGO_MANIFEST_DIR|CARGO_MANIFEST_PATH|#\[path|rerun-if-changed|ancestors\(|current_dir|ls-files";
+    r"include(_str|_bytes)?!|CARGO_MANIFEST_DIR|CARGO_MANIFEST_PATH|#\[path|rerun-if-changed|ancestors\(|current_dir|ls-files|fs::|File::open|read_to_string|read_dir|\.(exists|is_file|is_dir|try_exists)\(";
 
 /// Text that makes an unparseable source a blind one.
 pub const BLIND_TRIGGERS: &[&str] = &[
@@ -194,6 +194,14 @@ pub const BLIND_TRIGGERS: &[&str] = &[
     ".ancestors(",
     "current_dir",
     "ls-files",
+    "fs::",
+    "File::open",
+    "read_to_string",
+    "read_dir",
+    ".exists(",
+    ".is_file(",
+    ".is_dir(",
+    ".try_exists(",
 ];
 
 /// What a source's reads cannot resolve, one line each (the reference text of a blind read): the [`How::Blind`] reads of a parse, or, for

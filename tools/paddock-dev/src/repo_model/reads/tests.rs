@@ -185,3 +185,46 @@ fn a_read_that_leaves_the_repository_is_blind_not_dropped() {
     let src = r#"fn t() { let _ = include_str!("../../../../../outside.txt"); }"#;
     assert!(!blind(src).is_empty());
 }
+
+/// A filesystem read whose path is not a resolved literal chain is blind: a parameter, a `.pop()` walk, a `.push(non-literal)`, a
+/// field, a helper's return value. The loaders of the endings register walk up from a `&str` parameter this way.
+#[test]
+fn an_fs_read_of_a_path_that_is_not_a_resolved_literal_chain_is_blind() {
+    let loader = r#"
+pub fn load_from(manifest_dir: &str) -> String {
+    let mut dir = std::path::PathBuf::from(manifest_dir);
+    loop {
+        let candidate = dir.join("docs/x.toml");
+        if candidate.is_file() {
+            return std::fs::read_to_string(&candidate).unwrap();
+        }
+        if !dir.pop() { return String::new(); }
+    }
+}
+"#;
+    let got = blind(loader);
+    assert!(got.len() >= 2, "is_file and read_to_string of a walked path: {got:?}");
+    for src in [
+        "fn f(p: &std::path::Path) { let _ = std::fs::read(p); }",
+        "fn f(p: &std::path::Path) { let _ = std::fs::File::open(p); }",
+        "fn f(p: &std::path::Path) { let _ = std::fs::read_dir(p); }",
+        "fn f(s: &S) { let _ = std::fs::read_to_string(&s.path); }",
+        "fn f(mut p: std::path::PathBuf, n: &str) { p.push(n); let _ = p.exists(); }",
+    ] {
+        assert!(!blind(src).is_empty(), "{src}");
+    }
+}
+
+/// The controls: a literal, a resolved manifest chain and a write are not blind reads.
+#[test]
+fn an_fs_read_of_a_literal_or_a_resolved_chain_is_not_blind_the_negative_control() {
+    for src in [
+        r#"fn f() { let _ = std::fs::read_to_string("tests/x.txt"); }"#,
+        r#"fn f() { let _ = std::fs::read(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/x")); }"#,
+        r#"fn f() { assert!(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("a").is_dir()); }"#,
+        "fn f(p: &std::path::Path) { let _ = std::fs::write(p, \"x\"); let _ = std::fs::create_dir_all(p); }",
+        "fn f(v: &mut Vec<u8>) { let _ = v.pop(); }",
+    ] {
+        assert!(blind(src).is_empty(), "{src}: {:?}", blind(src));
+    }
+}

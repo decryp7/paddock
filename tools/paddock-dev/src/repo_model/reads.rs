@@ -23,7 +23,7 @@ use proc_macro2::TokenStream;
 use proc_macro2::TokenTree;
 use syn::punctuated::Punctuated;
 use syn::visit::Visit;
-use syn::{Expr, ExprLit, ExprMacro, ExprMethodCall, ItemMod, Lit, LitStr, Macro, Meta, PathSegment, Token};
+use syn::{Expr, ExprCall, ExprLit, ExprMacro, ExprMethodCall, ItemMod, Lit, LitStr, Macro, Meta, PathSegment, Token};
 
 /// How a path is read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -136,6 +136,43 @@ const IDENTITY: &[&str] = &["to_path_buf", "as_path", "to_owned", "clone", "as_r
 
 /// Methods that make a path point somewhere other than the chain they are called on.
 const MOVES: &[&str] = &["parent", "canonicalize", "with_file_name", "pop", "push"];
+
+/// Whether a path expression is a resolved one: a string literal, or a literal chain rooted at the crate folder.
+fn resolved(e: &Expr) -> bool {
+    match e {
+        Expr::Reference(r) => resolved(&r.expr),
+        Expr::Paren(p) => resolved(&p.expr),
+        Expr::Group(g) => resolved(&g.expr),
+        _ => lit_str(e).is_some() || pieces(e).is_some(),
+    }
+}
+
+/// The `fs` functions that read a path given as their first argument.
+const FS_READS: &[&str] = &[
+    "read",
+    "read_to_string",
+    "read_dir",
+    "metadata",
+    "symlink_metadata",
+    "canonicalize",
+    "read_link",
+    "exists",
+    "copy",
+];
+
+/// The methods of a path that look at the file system.
+const PATH_READS: &[&str] = &["exists", "is_file", "is_dir", "try_exists", "read_dir"];
+
+/// Whether a called path is an `fs` read (`fs::read_to_string`, `File::open`, an imported `read_to_string`).
+fn is_fs_read(path: &syn::Path) -> bool {
+    let names: Vec<String> = path.segments.iter().map(|s| s.ident.to_string()).collect();
+    match names.as_slice() {
+        [.., prev, last] if prev == "fs" => FS_READS.contains(&last.as_str()),
+        [.., prev, last] if prev == "File" => last == "open",
+        [only] => only == "read_to_string" || only == "read_dir",
+        _ => false,
+    }
+}
 
 /// `X.join("a")` (and `.to_path_buf()`, `.as_path()`: the same path).
 fn call_pieces(mc: &ExprMethodCall) -> Option<Vec<Piece>> {
@@ -288,11 +325,26 @@ impl Finder<'_> {
 }
 
 impl<'ast> Visit<'ast> for Finder<'_> {
+    /// An `fs` read of a path that is not a resolved literal chain (a parameter, a `.pop()` walk, a field, a helper's value) reads
+    /// something the extractor cannot name.
+    fn visit_expr_call(&mut self, c: &'ast ExprCall) {
+        if let Expr::Path(p) = &*c.func
+            && is_fs_read(&p.path)
+            && c.args.first().is_some_and(|a| !resolved(a))
+        {
+            self.blind("an `fs` read of a path that is not a resolved literal chain");
+        }
+        syn::visit::visit_expr_call(self, c);
+    }
+
     fn visit_macro(&mut self, m: &'ast Macro) {
         self.mac(m);
     }
 
     fn visit_expr_method_call(&mut self, e: &'ast ExprMethodCall) {
+        if e.args.is_empty() && PATH_READS.iter().any(|m| e.method == m) && !resolved(&e.receiver) {
+            self.blind(&format!("`.{}()` of a path that is not a resolved literal chain", e.method));
+        }
         if e.method == "join" {
             if let Some(p) = call_pieces(e) {
                 self.rooted(&p, How::ManifestDir);
