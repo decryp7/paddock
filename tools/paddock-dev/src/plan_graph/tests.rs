@@ -362,8 +362,8 @@ fn the_escape_record_names_what_the_graph_runs_not_the_rule_tables() {
     assert_eq!((sel["app:x"].runs.as_str(), sel["app:x"].targets.is_none()), ("all", true));
 }
 
-/// The declared scope of a landing (or push) whose need is its own diff: the ran and need jobs both pass through
-/// [`on_selected_legs`] over the OS of the legs [`narrow_workspace_legs`] kept, the one definition of a narrowed run's legs.
+/// The declared scope of a landing (or push) whose need is its own diff, through the planner's own call
+/// ([`declare_selected_legs`], as `plan_cmd` makes it) over the OS of the legs [`narrow_workspace_legs`] kept.
 fn landing_declared(plan: &Value, ran_oses: &[&str]) -> crate::run_scope::Declared {
     use crate::run_scope::{Scope, ci_scope};
     let legs: Vec<Value> = ["ubuntu-latest", "windows-latest", "macos-latest"]
@@ -382,17 +382,18 @@ fn landing_declared(plan: &Value, ran_oses: &[&str]) -> crate::run_scope::Declar
         .filter(|j| j.split_once('@').is_none_or(|(_, os)| ran_oses.contains(&os)))
         .cloned()
         .collect();
-    let ran = Scope {
-        jobs: on_selected_legs(&ran_jobs, &oses),
+    let mut ran = Scope {
+        jobs: ran_jobs,
         whole: true,
         smoke,
         ..Scope::default()
     };
-    let need = Scope {
-        jobs: on_selected_legs(&all, &oses),
+    let mut need = Scope {
+        jobs: all,
         whole: true,
         ..Scope::default()
     };
+    declare_selected_legs(&mut ran, &mut need, true, true, &oses);
     ci_scope(ran, false, need, false)
 }
 
@@ -413,4 +414,13 @@ fn a_landing_that_smoke_tests_crates_needs_only_the_legs_its_selection_runs_and_
     );
     let missing = landing_declared(&full, &["ubuntu-latest", "windows-latest"]).lands();
     assert!(missing.as_ref().is_err_and(|e| e.contains("crate@macos-latest")), "{missing:?}");
+    // Control: the whole tree's need (a member run, a tag, a whole dispatch) is never narrowed, whatever the selection kept.
+    let oses: BTreeMap<&str, BTreeSet<String>> = [("crate", BTreeSet::from(["ubuntu-latest".to_string()]))].into();
+    let mut need = crate::run_scope::Scope {
+        jobs: BTreeSet::from(["crate@ubuntu-latest".to_string(), "crate@macos-latest".to_string()]),
+        ..crate::run_scope::Scope::default()
+    };
+    let mut ran = need.clone();
+    declare_selected_legs(&mut ran, &mut need, true, false, &oses);
+    assert!(need.jobs.contains("crate@macos-latest") && !ran.jobs.contains("crate@macos-latest"));
 }

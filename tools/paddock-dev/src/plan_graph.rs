@@ -376,6 +376,25 @@ pub fn on_selected_legs(jobs: &BTreeSet<String>, oses: &BTreeMap<&str, BTreeSet<
         .collect()
 }
 
+/// What a ci.yml plan declares about the `crate` and `paddock-dev` legs (the planner's one call): when the run was narrowed
+/// (`ran_narrowed`: graph mode, not a reused run) its `ran` jobs keep the legs the selection kept, and when the need is the run's own
+/// plan (`need_narrowed`: graph mode, a push's or a landing's diff, not the whole tree) so do the `need` jobs, through
+/// [`on_selected_legs`] over the same `oses`.
+pub fn declare_selected_legs(
+    ran: &mut crate::run_scope::Scope,
+    need: &mut crate::run_scope::Scope,
+    ran_narrowed: bool,
+    need_narrowed: bool,
+    oses: &BTreeMap<&str, BTreeSet<String>>,
+) {
+    if ran_narrowed {
+        ran.jobs = on_selected_legs(&ran.jobs, oses);
+    }
+    if need_narrowed {
+        need.jobs = on_selected_legs(&need.jobs, oses);
+    }
+}
+
 /// The `selection` output: each narrowed project's [`Narrow`] (a project in full is not named).
 pub fn selection_output(plan: &Value) -> Value {
     Value::Object(
