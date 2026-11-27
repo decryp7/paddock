@@ -177,8 +177,6 @@ pub struct Client<'a> {
     server: String,
     repo: String,
     token: String,
-    /// Waits between retries; tests set it to nothing.
-    pub backoff_ms: u64,
 }
 
 impl<'a> Client<'a> {
@@ -189,7 +187,6 @@ impl<'a> Client<'a> {
             server: server.to_string(),
             repo: repo.to_string(),
             token: token.to_string(),
-            backoff_ms: 500,
         }
     }
 
@@ -197,16 +194,14 @@ impl<'a> Client<'a> {
         format!("{}/api/v1/repos/{}/actions", self.server.trim_end_matches('/'), self.repo)
     }
 
+    /// One read; a 404 is `Ok(None)`. There is no retry here: the shared HTTP layer ([`crate::wait::Retrying`]) is the one place a
+    /// refusing server is held and retried (ER-22).
     fn retry<T>(&mut self, mut once: impl FnMut(&mut Client<'a>) -> Result<T, String>) -> Result<Option<T>, String> {
-        for attempt in 0..4u64 {
-            match once(self) {
-                Ok(v) => return Ok(Some(v)),
-                Err(e) if is_not_found(&e) => return Ok(None),
-                Err(e) if attempt >= 3 => return Err(e),
-                Err(_) => std::thread::sleep(std::time::Duration::from_millis(self.backoff_ms * (attempt + 1))),
-            }
+        match once(self) {
+            Ok(v) => Ok(Some(v)),
+            Err(e) if is_not_found(&e) => Ok(None),
+            Err(e) => Err(e),
         }
-        Ok(None)
     }
 
     /// One run by id; `Ok(None)` when the server has no such run (404).
@@ -322,6 +317,59 @@ mod tests {
 
     use super::*;
     use crate::ci_runs::testutil::Fake;
+    use crate::wait::{Http, READ_HOLD, Retrying};
+    use std::cell::RefCell;
+    use std::sync::atomic::AtomicU32;
+    use std::time::Duration;
+
+    /// Fails with a 503 `fail` times (every time when `usize::MAX`), then answers a run; counts the calls.
+    struct Flaky {
+        fail: usize,
+        calls: usize,
+    }
+    impl Http for Flaky {
+        fn get_json(&mut self, _url: &str, _token: &str) -> Result<Value, String> {
+            self.calls += 1;
+            if self.calls <= self.fail {
+                return Err("curl: (22) The requested URL returned error: 503".into());
+            }
+            Ok(serde_json::json!({"id": 9, "status": "completed", "conclusion": "success"}))
+        }
+    }
+
+    impl Http for &mut Flaky {
+        fn get_json(&mut self, url: &str, token: &str) -> Result<Value, String> {
+            (**self).get_json(url, token)
+        }
+    }
+
+    /// The client has no retry loop of its own: a read is retried exactly by the shared layer's schedule, once per layer (ER-22).
+    #[test]
+    fn a_client_read_is_retried_by_the_layer_only() {
+        let (good, sleeps) = (AtomicU32::new(1), RefCell::new(Vec::new()));
+        let mut flaky = Flaky { fail: 2, calls: 0 };
+        let run = {
+            let mut layer = Retrying::new(&mut flaky, &good, Box::new(|d| sleeps.borrow_mut().push(d)), Box::new(|_| {}));
+            Client::new(&mut layer, "https://gitea.invalid", "o/r", "t").run(9).unwrap()
+        };
+        assert!(run.is_some());
+        assert_eq!(flaky.calls, 3, "two refusals and the answer: not 4 attempts per layer attempt");
+        assert_eq!(*sleeps.borrow(), [2, 4].map(Duration::from_secs));
+
+        // Never answering: the layer's whole schedule, not a client schedule on top of it.
+        let (good, sleeps) = (AtomicU32::new(1), RefCell::new(Vec::new()));
+        let mut down = Flaky {
+            fail: usize::MAX,
+            calls: 0,
+        };
+        let err = {
+            let mut layer = Retrying::new(&mut down, &good, Box::new(|d| sleeps.borrow_mut().push(d)), Box::new(|_| {}));
+            Client::new(&mut layer, "https://gitea.invalid", "o/r", "t").run(9).unwrap_err()
+        };
+        assert!(err.contains("503"), "{err}");
+        assert_eq!(down.calls, sleeps.borrow().len() + 1, "one call per pause plus the last");
+        assert!(sleeps.borrow().iter().sum::<Duration>() <= READ_HOLD);
+    }
 
     /// The job list of run 7880 of the real server (a dyno release run), saved through the API.
     const RUN_7880: &str = include_str!("../../tests/ci-runs/run-7880-jobs.json");

@@ -4527,4 +4527,5 @@ before it checks their names, with a failing test first (bug-fix skill). Open; n
   at most 5 minutes in total) once the process has had a good answer, with one `::warning::`, one recovery line and one final error naming the causes.
   Writes (`send_json`, `post_json`: a dispatch, PUT, DELETE) are never retried, because a retried dispatch could start two runs; a test pins it. A 401 before
   any good answer stays a wrong token. `wait --ci-run` uses `CurlOnce` and keeps its own probe-level hold, which respects `--max` and the clock.
-  `ci_runs::client::Client::retry` (4 short attempts on any error) stays as it was; folding it into the layer is open.
+  `ci_runs::client::Client` lost its own 4-attempt retry and its `backoff_ms` (one mechanism, ER-22): a read through it is retried by the layer's schedule
+  only, once. A first-call blip (before any good answer) is no longer retried at all; the layer holds only after a good answer.

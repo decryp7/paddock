@@ -275,9 +275,7 @@ fn serve(name: &str) -> Fake {
 }
 
 fn client(f: &mut Fake) -> Client<'_> {
-    let mut c = Client::new(f, "https://gitea.invalid", "example/paddock", "t");
-    c.backoff_ms = 0;
-    c
+    Client::new(f, "https://gitea.invalid", "example/paddock", "t")
 }
 
 fn run_json(name: &str, run: u64) -> Value {

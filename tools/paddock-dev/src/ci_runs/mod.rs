@@ -1258,7 +1258,6 @@ pub fn runner_wait(a: &RunnerWaitArgs) -> Result<Report, CliError> {
         &read,
         &mut clock,
         &mut std::io::stdout(),
-        500,
     )
     .map_err(|e| CliError::failure(e).with_hint("Check the workflow file and the job token's read access to Actions runs."))?;
     match r {
