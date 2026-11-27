@@ -446,6 +446,18 @@ pub fn run_planner(trusted: &Path, main: &str, head: &str) -> Result<serde_json:
 
 pub use crate::child_env::scrub;
 
+/// The message of the queue's merge of a pull request: the subject it always had, then the trailers every tool-made train merge carries
+/// ([`crate::merge_check::trailers`]). Written here and checked against in [`GitTrain`]'s verification, from this one place.
+pub fn merge_message(branch: &str, head: &str) -> String {
+    use crate::merge_check::trailers;
+    trailers::with_block(
+        &format!("Merge {branch} ({}) into train", head.get(..9).unwrap_or(head)),
+        &trailers::member_lines(&trailers::named(branch), head, &[]),
+    )
+    .trim_end()
+    .to_string()
+}
+
 fn short_id(sha: &str) -> &str {
     sha.get(..10).unwrap_or(sha)
 }
@@ -618,7 +630,7 @@ impl Train for GitTrain {
         let (mut merged, mut dropped) = (Vec::new(), Vec::new());
         for pr in prs {
             let before = self.ok(&["rev-parse", "HEAD"])?.trim().to_string();
-            let msg = format!("Merge {} ({}) into train", pr.branch, pr.head.get(..9).unwrap_or(&pr.head));
+            let msg = merge_message(&pr.branch, &pr.head);
             let (ok, out) = self.git(&["merge", "--no-ff", "--quiet", "-m", &msg, &pr.head])?;
             if !ok {
                 let files = self.git(&["diff", "--name-only", "--diff-filter=U"])?.1;
@@ -751,7 +763,7 @@ impl Train for GitTrain {
                     short_id(&m.head)
                 )));
             }
-            let want = format!("Merge {} ({}) into train\n", m.branch, m.head.get(..9).unwrap_or(&m.head));
+            let want = format!("{}\n", merge_message(&m.branch, &m.head));
             if c.message != want {
                 return Ok(Some(format!(
                     "the merge {} of #{} has a message the queue did not write",
