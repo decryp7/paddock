@@ -19,3 +19,9 @@ serde_json = { workspace = true, features = ["preserve_order"] }
 # Snapshot tests of the importers against /samples (tests/samples.rs, snapshots in tests/snapshots/).
 insta.workspace = true
 proptest.workspace = true
+
+[package.metadata.paddock]
+# What this crate's tests read that the test cache's reads extractor cannot resolve (ADR 0116 §2, user decision 122), as globs from the
+# repository root; `[]` says the blind reads touch no repository file.
+# `tests/it/properties.rs` reads this crate's own fixtures.
+test-reads = []

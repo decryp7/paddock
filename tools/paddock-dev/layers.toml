@@ -1,0 +1,121 @@
+# The layers of tools/paddock-dev's top-level modules, declared once (C178, rule 40, ER-21), in the shape of the crate split of
+# docs/plans/paddock-dev-crate-split.md (branch docs/paddock-dev-split-plan, 9354c6308): section 2's crate table with the recommended
+# diamond (section 2.1: host and repo both use core and not each other), and its seven reassignments of the ADR's sketch (places to host,
+# escape to repo, tool_cache and host_tests to core, ci_run to repo, plan_cmd and load to ci), with generators filed in ci (B6).
+# A layer's name is the crate it would become (the plan's paddock-dev-<name>); a layer `uses` the layers named here, each declared above
+# it, and what those use. A module refers (`crate::<module>`) to its own layer or a used one, never another: the check reads this file and
+# reports each production reference that breaks it, each module of src/ not listed here and each entry with no module in src/.
+#
+# Modules the plan splits (escape: its `cmd` goes to ci; ci_run: its command part goes to ci; ci_tool: two text helpers go to core; the
+# new `git`, `repo_root`, `http`, `registers`, `subject` and `throttle`) are filed here by their whole module, in the layer that holds most
+# of it, so the references those splits remove are reported until they land (the plan's batches B1 to B6, the ADR's WP-4). Review this
+# table with them.
+
+[[layer]]
+name = "core"
+modules = [
+    "cargo_target",
+    "child_env",
+    "full_tree",
+    "git_env",
+    "host_tests",
+    "input_hash",
+    "job_outcome",
+    "log_text",
+    "nextest_log",
+    "pathfind",
+    "plan_cargo_lock",
+    "priority",
+    "process_env",
+    "repo_inputs",
+    "test_cost",
+    "test_sleeper",
+    "tool_cache",
+    "wait_lock",
+]
+
+[[layer]]
+name = "host"
+uses = ["core"]
+modules = [
+    "audit",
+    "ci_build_env",
+    "ci_build_jobs",
+    "ci_dev_tool_store",
+    "ci_dyno_linux_units",
+    "ci_host",
+    "ci_isolation",
+    "ci_rust_pin",
+    "ci_s3_guard",
+    "ci_setup_rust",
+    "ci_tool",
+    "deps_cache",
+    "disk",
+    "health",
+    "heavy_cmd",
+    "heavy_install",
+    "hook",
+    "local_sccache",
+    "locks",
+    "locks_guard",
+    "places",
+    "release_isolation",
+    "safe_remove",
+    "slots",
+    "wait",
+    "worktree",
+]
+
+[[layer]]
+name = "repo"
+uses = ["core"]
+modules = [
+    "active_apps",
+    "check",
+    "check_ids",
+    "ci_run",
+    "escape",
+    "gates",
+    "ipc_endpoints",
+    "lessons_driver",
+    "os_placement",
+    "plan",
+    "plan_ci",
+    "plan_gitea",
+    "plan_graph",
+    "plan_repo",
+    "plan_since",
+    "repo_model",
+    "run_scope",
+    "test_features",
+]
+
+[[layer]]
+name = "ci"
+uses = ["host", "repo"]
+modules = [
+    "ci_runs",
+    "generators",
+    "load",
+    "merge_check",
+    "plan_cmd",
+    "pr",
+    "queue",
+    "test_cache",
+]
+
+[[layer]]
+name = "gates"
+uses = ["ci"]
+modules = [
+    "pre_push",
+]
+
+[[layer]]
+name = "bin"
+uses = ["gates"]
+modules = [
+    "cli",
+    "lib",
+    "main",
+]

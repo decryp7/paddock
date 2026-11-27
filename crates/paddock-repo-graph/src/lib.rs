@@ -27,7 +27,7 @@ mod source;
 pub use cargo::CargoCli;
 pub use cargo::{
     CargoMetadata, CargoTarget, RecordedMetadata, Recording, cargo_graph, parse_metadata,
-    parse_targets,
+    parse_targets, parse_test_reads,
 };
 pub use error::GraphError;
 pub use graph::{Graph, Node};

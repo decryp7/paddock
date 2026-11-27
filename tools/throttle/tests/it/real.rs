@@ -595,7 +595,7 @@ fn heavy_stdin_inherit_is_the_explicit_opt_in_and_the_probe_sees_an_open_pipe() 
 #[test]
 fn a_passing_row_is_recorded_in_the_history_and_a_failing_one_is_not() {
     let w = World::new();
-    let hist = w.root().join(throttle::history::FILE);
+    let hist = w.root().join(paddock_throttle::history::FILE);
     let (code, _o, e) = heavy_out(
         &w,
         &["run", "--no-gate", "R", "--", "sh", "-c", "exit 0"],
@@ -619,7 +619,7 @@ fn a_passing_row_is_recorded_in_the_history_and_a_failing_one_is_not() {
     let w2 = World::new();
     let (code, _o, _e) = heavy_out(&w2, &["run", "--no-gate", "R", "--", "sh", "-c", "exit 0"], &[]);
     assert_eq!(code, 0);
-    assert!(!w2.root().join(throttle::history::FILE).exists());
+    assert!(!w2.root().join(paddock_throttle::history::FILE).exists());
 }
 
 #[test]
@@ -627,7 +627,7 @@ fn the_binary_reads_the_rows_expected_time_from_the_history_and_logs_the_admissi
     // A history that says the row takes a second: the binary reads it by THROTTLE_ROW (which lane it takes depends on this machine's load;
     // the lane rules are tested in admission.rs on a fake load).
     let w = World::new();
-    std::fs::write(w.root().join(throttle::history::FILE), "1\t1000\tquick row\n").unwrap();
+    std::fs::write(w.root().join(paddock_throttle::history::FILE), "1\t1000\tquick row\n").unwrap();
     let env = [("THROTTLE_ROW", "quick row"), ("THROTTLE_SLOTS", "4"), ("THROTTLE_CPUS", "16")];
     let (code, _o, e) = heavy_out(&w, &["run", "--no-gate", "Q", "--", "sh", "-c", "exit 0"], &env);
     assert_eq!(code, 0, "{e}");
@@ -734,5 +734,8 @@ fn a_nested_run_runs_inside_the_held_slot_and_without_the_marker_it_would_wait()
         !text.contains("inner-ran"),
         "without the marker the inner run never got the slot: {text}"
     );
-    assert!(text.contains(&format!("inner-rc={}", throttle::exit::QUEUE_LIMIT)), "{text}\n{e}");
+    assert!(
+        text.contains(&format!("inner-rc={}", paddock_throttle::exit::QUEUE_LIMIT)),
+        "{text}\n{e}"
+    );
 }

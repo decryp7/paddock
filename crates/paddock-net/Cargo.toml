@@ -35,3 +35,10 @@ paddock-net = { path = ".", features = ["test-support"] }
 paddock-jobs = { workspace = true, features = ["test-support"] }
 paddock-testkit = { workspace = true }
 proptest = "1"
+
+[package.metadata.paddock]
+# What this crate's tests read that the test cache's reads extractor cannot resolve (ADR 0116 §2, user decision 122), as globs from the
+# repository root; `[]` says the blind reads touch no repository file.
+# `tests/it/slim.rs` runs `cargo tree --offline --locked -p paddock-net` in this folder: it reads the workspace lock, this crate's manifest and
+# its dependencies' manifests, all of which are in this crate's key already.
+test-reads = []

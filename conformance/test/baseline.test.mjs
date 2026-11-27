@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { baselineGrowth, enforceShrinkOnly, reconcile } from '../src/util/baseline.mjs';
+import { baselineGrowth, enforceShrinkOnly, growthDigest, reconcile } from '../src/util/baseline.mjs';
 
 const gitWith = (base) => (args) => {
   if (args[0] === 'rev-parse') return args[1] === 'HEAD' ? 'def\n' : 'abc\n';
@@ -43,4 +43,31 @@ test('reconcile: the exact key first, then the loose key; counts per key', () =>
   assert.deepEqual(reconcile([{ f: 'b', h: 1 }], [a], exact, loose), { fresh: [], stale: [], moved: [{ item: { f: 'b', h: 1 }, from: a }] });
   assert.equal(reconcile([{ f: 'b', h: 1 }], [a], exact).fresh.length, 1, 'without a loose key a move is new');
   assert.equal(reconcile([{ f: 'a', h: 1 }, { f: 'b', h: 1 }], [a], exact, loose).fresh.length, 1, 'a copy is new');
+});
+
+const gates = (check, by, count, digest) => `version = 1\n[[register_growth]]\ncheck = "${check}"\nby = "${by}"\ndate = "2026-11-27"\ncount = ${count}\ndigest = "${digest}"\n`;
+
+test('growth approval: the digest is the SHA-256 of the sorted keys joined by a newline (the oracle is shasum of "a\\nb")', () => {
+  assert.equal(growthDigest(['b', 'a']), '7e18f737311b2dc3b2f269dd78396b0351f14fb66efa879f768cb23181883c78');
+});
+
+test('growth approval: the user\'s matching entry drops the additions; any other entry keeps them and prints the line to add', () => {
+  const base = JSON.stringify({ jobs: ['a'] });
+  const run = (register) => baselineGrowth({ ...opts(base, ['a', 'b', 'c']), check: 'CX', register });
+  const keys = ['b', 'c'];
+  const right = growthDigest(keys);
+  assert.deepEqual(run(gates('CX', 'user', 2, right)).added, [], 'approved');
+  for (const [name, register] of [
+    ['no register', ''],
+    ['other additions', gates('CX', 'user', 2, growthDigest(['b', 'z']))],
+    ['wrong count', gates('CX', 'user', 3, right)],
+    ['not the user', gates('CX', 'coordinator', 2, right)],
+    ['another check', gates('CY', 'user', 2, right)],
+  ]) {
+    const g = run(register);
+    assert.deepEqual(g.added, keys, name);
+    assert.match(g.ask, new RegExp(`check = "CX", by = "user", date = "<day>", count = 2, digest = "${right}"`), name);
+  }
+  // Without a check id nothing is read: the growth is returned as measured.
+  assert.deepEqual(baselineGrowth({ ...opts(base, ['a', 'b']), register: gates('CX', 'user', 1, growthDigest(['b'])) }).added, ['b']);
 });

@@ -73,3 +73,12 @@ toml = "0.9"
 codegen-units = 1
 lto = true
 strip = true
+
+[package.metadata.paddock]
+# What this crate's tests read that the test cache's reads extractor cannot resolve (ADR 0116 §2, user decision 122), as globs from the
+# repository root; `[]` says the blind reads touch no repository file.
+# `tests/app.rs` compares the generated TypeScript of the demo UI and reads the demo's changelog; `src/lib.rs` reads the working folder.
+test-reads = [
+    "ui/projects/shell-demo/src/app/generated/*",
+    "apps/shell-demo/CHANGELOG.md",
+]

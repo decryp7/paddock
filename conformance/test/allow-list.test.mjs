@@ -161,6 +161,33 @@ test('allow list growth: an unchanged or shrunk list says nothing, a raised coun
   assert.match(added[0].fix, /user's approval/);
 });
 
+/** `growthRepo`'s listed file moved by `git mv` to apps/a/src/moved.spec.ts on the topic commit, whose allow list is `now` (a function of the entry). */
+function movedRepo(now, extraLine = '') {
+  const root = growthRepo([ok(3)], [ok(3)]);
+  sh(root, 'mv', 'apps/a/src/ok.spec.ts', 'apps/a/src/moved.spec.ts');
+  writeFileSync(join(root, 'conformance/c135-allow.json'), allowJson(now));
+  if (extraLine) writeFileSync(join(root, 'apps/a/src/moved.spec.ts'), `installLeakDetector({ mode: 'off' });\n`.repeat(3) + extraLine);
+  sh(root, 'commit', '-q', '-a', '-m', 'move');
+  return root;
+}
+const errorsOf = async (root) => (await findingsOf('C135', root, { options: { baseRef: 'main' } })).filter((f) => f.severity === 'error');
+const moved = (e) => ({ ...e, path: 'apps/a/src/moved.spec.ts' });
+
+test('allow list rename: an entry follows its file when git sees a pure move, whether or not it was rewritten; a rewrite is not growth (ER-21)', async () => {
+  const unrewritten = movedRepo([ok(3)]);
+  assert.deepEqual(await errorsOf(unrewritten), [], 'the old path still counts for the new file');
+  const said = (await findingsOf('C135', unrewritten, { options: { baseRef: 'main' } })).map((f) => f.message);
+  assert.ok(said.some((m) => /follows its file, which moved to apps\/a\/src\/moved\.spec\.ts/.test(m)), 'and the warning asks for the rewrite');
+  assert.deepEqual(await errorsOf(movedRepo([moved(ok(3))])), [], 'a rewritten entry is not growth');
+});
+
+test('allow list rename: a moved file that gains an offending line still fails, and a new entry is still growth', async () => {
+  const more = await errorsOf(movedRepo([moved(ok(3))], "installLeakDetector({ mode: 'off' });\n"));
+  assert.equal(more.length, 1, 'the fourth opt-out is beyond the entry count');
+  const added = await errorsOf(movedRepo([moved(ok(3)), { ...moved(ok(1)), site: 'skip:' }]));
+  assert.ok(added.some((f) => /the list grew: `skip:`/.test(f.message)), 'a new entry needs the user even beside a move');
+});
+
 test('allow list growth: a list new at the merge base is an empty base, so its entries are growth (ER-46); a fixture folder without .git and an unmeasurable base are not', async () => {
   const first = makeApp({ 'apps/a/src/ok.spec.ts': 'x\n', 'conformance/.keep': '' });
   sh(first, 'init', '-q', '-b', 'main');
