@@ -56,6 +56,8 @@ pub struct CheckArgs {
     pub warn: bool,
     /// The revision the register may only shrink against.
     pub base: String,
+    /// Where the check runs ([`paddock_approvals::Stage`]).
+    pub stage: paddock_approvals::Stage,
 }
 
 /// `dev gates check`.
@@ -87,6 +89,7 @@ pub fn check(a: &CheckArgs, dev_commands: std::collections::BTreeSet<String>) ->
         planner: &planner,
         warn: a.warn,
         shallow: edge::is_shallow(&root),
+        stage: a.stage,
     };
     let out = evaluate::evaluate(&input);
     let table = evaluate::summary(&out.rows);
@@ -149,6 +152,7 @@ pub fn list(root: Option<&Path>, base: &str, dev_commands: std::collections::BTr
         planner: &planner,
         warn: true,
         shallow: false,
+        stage: paddock_approvals::Stage::Landing,
     };
     let out = evaluate::evaluate(&input);
     let rows: Vec<Value> = out

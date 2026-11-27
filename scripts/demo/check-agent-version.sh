@@ -9,12 +9,14 @@ agent="${1:?agent binary}"
 want="${2:?expected version}"
 if [ ! -x "$agent" ]; then
   echo "::error::the agent is not an executable file: $agent (expected version $want)"
-  ls -la "$(dirname "$agent")" 2>&1 | head -20 || true
+  listing=$(ls -la "$(dirname "$agent")" 2>&1 || true)
+  sed -n '1,20p' <<<"$listing"
   exit 1
 fi
 report="$("$agent" --self-test 2>&1)"
 status=$?
-got="$(printf '%s\n' "$report" | head -n 1 | awk '{print $2}')"
+first=${report%%$'\n'*}
+got="$(awk '{print $2}' <<<"$first")"
 if [ "$status" -ne 0 ] || [ "$got" != "$want" ]; then
   echo "::error::$agent --self-test exited $status and reports version '$got', expected '$want'. Report:"
   printf '%s\n' "$report"

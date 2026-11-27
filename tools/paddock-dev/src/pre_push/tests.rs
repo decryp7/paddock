@@ -855,7 +855,7 @@ impl Exec for Fake {
             success: !fail,
             how: if fail { "exit 1".into() } else { "exit 0".into() },
             tail: if fail { "error: boom".into() } else { String::new() },
-            log: None,
+            log: fail.then(|| format!("/logs/{}.log", g.id)),
             timing: self.timing,
             ending: crate::pre_push::exec::Ending::Exited,
         })
@@ -891,6 +891,31 @@ fn a_missing_xwin_is_not_measured_with_the_install_line() {
         2,
     );
     assert!(matches!(nm(&verdicts(&rows)["clippy-windows crates"]), Some((_, next)) if next.contains("cargo install cargo-xwin")));
+}
+
+/// The JSON a reader gets names a failed row's cause and its step log, not the verdict alone (ER-27): `merge sync-member` read only
+/// the verdict, so train z's failed `gates-register` printed no reason and no log. A pass carries neither.
+#[test]
+fn a_failed_row_names_its_cause_and_its_log_in_the_json() {
+    let planned = plan_gates(&plan(), &change(&["crates/a.rs"]), &facts());
+    let rows = run_all(
+        &planned,
+        &Fake {
+            fail: vec!["fmt crates".into()],
+            ..Fake::default()
+        },
+        2,
+    );
+    let report = render("h", &rows);
+    let gates = report.data["gates"].as_array().expect("gates");
+    let row = |id: &str| gates.iter().find(|g| g["id"] == id).unwrap_or_else(|| panic!("{id}: {gates:?}"));
+    let failed = row("fmt crates");
+    assert_eq!(failed["verdict"], "failed");
+    assert!(failed["reason"].as_str().is_some_and(|r| r.contains("exit 1")), "{failed}");
+    assert_eq!(failed["log"], "/logs/fmt crates.log", "{failed}");
+    assert!(failed["next"].as_str().is_some_and(|n| n.contains("Re-run alone")), "{failed}");
+    let passed = row("lockfile crates");
+    assert!(passed.get("reason").is_none() && passed.get("log").is_none(), "{passed}");
 }
 
 #[test]
@@ -3889,5 +3914,32 @@ mod member_tests {
             "{:?}",
             tool.args
         );
+    }
+}
+
+/// The approvals' stage (user decision 2026-11-27): a developer's push judges a missing approval as a warning, the member gate as an
+/// error. The rows that judge approvals (the Rust conformance checks and C100) get it from the environment.
+#[test]
+fn the_rows_that_judge_approvals_carry_the_stage_of_the_run() {
+    let stage_of = |member_gate: bool, id: &str| {
+        let f = Facts { member_gate, ..facts() };
+        let planned = plan_gates(
+            &json!({"conformance": false, "apps": [], "packages": {}}),
+            &change(&["docs/x.md"]),
+            &f,
+        );
+        let row = run_gates(&planned)
+            .into_iter()
+            .find(|g| g.id == id)
+            .cloned()
+            .unwrap_or_else(|| panic!("{id} is not run: {planned:?}"));
+        row.env
+            .iter()
+            .find(|(k, _)| k == crate::check::growth_approval::STAGE_ENV)
+            .map(|(_, v)| v.clone())
+    };
+    for id in ["conformance", "gates-register"] {
+        assert_eq!(stage_of(false, id).as_deref(), Some("branch-push"), "{id}: a push");
+        assert_eq!(stage_of(true, id).as_deref(), Some("member-gate"), "{id}: the member gate");
     }
 }

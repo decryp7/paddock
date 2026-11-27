@@ -461,7 +461,6 @@ pub fn run(
             // Staggered: each queued train run holds a Linux slot in its runner-wait job, so at most `train_waiters` wait at
             // once and a Linux slot stays free for the older runs' own Linux jobs.
             let mut client = Client::new(http, server, repo, token);
-            client.backoff_ms = 0;
             let mut probe = WaitersProbe {
                 client: &mut client,
                 read,
@@ -497,7 +496,6 @@ pub fn run(
         // from the branch on every look and again right before sending (unreadable: strict, it waits for every run).
         let train_branch = is_train(&req.git_ref).then(|| req.git_ref.strip_prefix("refs/heads/").unwrap_or(&req.git_ref).to_string());
         let mut client = Client::new(http, server, repo, token);
-        client.backoff_ms = 0;
         let mut probe = BusyProbe {
             client: &mut client,
             read,
@@ -563,7 +561,6 @@ pub fn yield_to_trains(
 ) -> Result<Result<Duration, Dispatched>, String> {
     let before = clock.elapsed();
     let mut client = Client::new(http, target.server, target.repo, target.token);
-    client.backoff_ms = 0;
     let mut probe = TrainFirstProbe {
         client: &mut client,
         workflow: req.workflow.clone(),
@@ -750,13 +747,12 @@ pub enum RunnerWait {
     Unreadable(String),
 }
 
-/// How many times `ci runner-wait` reads its own run before it gives up and goes on (each read already retries in the client).
+/// How many times `ci runner-wait` reads its own run before it gives up and goes on (each read already retries in the shared HTTP layer).
 pub const OWN_RUN_READS: u32 = 5;
 
 /// `ci runner-wait`: the first job of a train run waits, on a Linux runner, until no older run has an unfinished job on one of
 /// its workflow's single-machine runner classes (at most `max`). `own` is this run's id; its workflow file is read from the run
-/// itself (`ci.yml@refs/heads/train/...`), retried [`OWN_RUN_READS`] times `interval` apart before it fails open. `backoff_ms`
-/// is the client's wait between its own retries (tests: 0).
+/// itself (`ci.yml@refs/heads/train/...`), retried [`OWN_RUN_READS`] times `interval` apart before it fails open.
 #[allow(clippy::too_many_arguments)]
 pub fn runner_wait(
     http: &mut dyn Http,
@@ -767,10 +763,8 @@ pub fn runner_wait(
     read: ReadWorkflow<'_>,
     clock: &mut dyn Clock,
     log: &mut dyn Write,
-    backoff_ms: u64,
 ) -> Result<RunnerWait, String> {
     let mut client = Client::new(http, target.server, target.repo, target.token);
-    client.backoff_ms = backoff_ms;
     let mut workflow = None;
     let mut own_train = None;
     let mut last = String::new();
@@ -1035,7 +1029,6 @@ pub fn find_run(
     log: &mut dyn Write,
 ) -> Result<Option<u64>, String> {
     let mut client = Client::new(http, target.server, target.repo, target.token);
-    client.backoff_ms = 0;
     let mut probe = RunFinder {
         client: &mut client,
         workflow,
@@ -1537,7 +1530,6 @@ mod tests {
             &files,
             &mut clock,
             &mut log,
-            0,
         );
         (r, String::from_utf8(log).unwrap(), clock.0)
     }
@@ -1856,8 +1848,8 @@ mod tests {
     #[test]
     fn the_own_run_is_read_again_after_an_error_and_only_a_lasting_error_fails_open() {
         let mut http = train_world(vec![jobs(&[("rust (macos)", "macos-latest", "completed")])]);
-        // The client retries each read 4 times itself; 5 failures outlast one read, so the second read comes 15 s later.
-        http.own_errors = 5;
+        // The client does not retry (the shared HTTP layer does); one failure fails one read, so the second read comes 15 s later.
+        http.own_errors = 1;
         let (r, log, t) = wait_here(&mut http, 8120, "1h");
         assert_eq!(
             r.unwrap(),

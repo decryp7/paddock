@@ -4501,6 +4501,26 @@ before it checks their names, with a failing test first (bug-fix skill). Open; n
   fails, if the ban is removed or stops resolving the path. Callers checked across `crates/`, `apps/` and `tools/`: only `paddock-proc` itself
   (`usage.rs`, `tests/it/orphan.rs`) implements or calls the trait; Debrief's, Dyno's and Pitcrew's `ProcessSource` are their own ports.
 
+## Three FLAKY tests of runs 9225, 9237 and 9238: identity read after the event, a limit over setup, a handle that keeps a process readable (2026-11-27, test/proc-state-waits-flakes-v2)
+- **What happened.** (1) `guardian::unix::tests::an_owner_killed_the_moment_its_guarded_spawn_returns_leaves_no_child` was FLAKY on macOS (9225, 9238):
+  "children []" in 0.03 s. The owner printed the child's bare pid and the test turned it into a `ProcessId` after the guardian had already ended
+  the child, so `ProcessId::of` found nothing. (2) `session::tests::a_child_that_does_not_answer_is_ended_at_the_deadline` was FLAKY on Windows
+  (9238): the 300 ms read limit also bounded the warm-up, and a slow start of a test binary met it. (3) `stable_workspace::tests::a_hung_phase_...`
+  failed both tries on Linux (9237): the slot-folder phase does real work on disk and shared the hang's 1 s limit.
+- **First hypotheses and what refuted them.** The owner dies before it prints: `println!` flushes per line and a pipe keeps what was written. The
+  guardian leaves the child: the retry passes and child and folder are gone. A reused pid: no start time was read. For (2) the quiet read ending
+  early: the panic is at the warm-up unwrap. For (3) the hang fake failing: the error line named the earlier phase.
+- **Confirmed by** a run with the cause forced and a run without it: reading the owner's report only after the guardian finished fails 1 of 1 on
+  the old reader and passes 300 of 300 (20 CPU burners, macOS) with the identity printed by the owner; the old hung-phase shape with a 0 s limit
+  fails with the CI message and the new shape passes 100 of 100. (2) has no macOS reproduction; its evidence is the trial's Windows leg.
+- **Two sub-cases of the class** (ADR 0124: a test reads live process state at one instant, after the event that can change it). (a) The target is
+  named late: a pid looked up after the code under test acted; the identity must come from the holder while it lives (the owner prints pid and start
+  time). (b) On Windows an ended process stays readable, and its state is `Unknown`, never `Exited`, while any handle to it is open (the test's own
+  `Child` included): trial 9253's statewait test waited its 40 s bound until the handle was dropped.
+- **Fix.** The three test shapes above, and a clock mark on every phase of the hung-phase run (ADR 0103). The mechanism that makes (a), (b) and the
+  limit-over-setup case impossible is proposed on `test/proc-identity-ban`: a Clippy ban on `ProcessId::of` in test code, a `wait_ended` that drops
+  the handle first, and the existing `no-clock-mark` check extended to every phase. Open until it lands.
+
 ## Per-member trials on a moving train cost more than they proved; one trial of the tip does (2026-11-27, docs/batched-member-trials, user decision)
 - **What happened.** On train y each member's own CI trial ran on a train that kept moving: the trials went red on other members' defects, proved
   little about the member, and took about 30 minutes each. Train z (2026-11-27) merged 8 members in about 40 minutes with the fast static rows per
@@ -4539,3 +4559,35 @@ before it checks their names, with a failing test first (bug-fix skill). Open; n
   `TestCommand` set all of them inside its private folder. `tests/it/state_folders.rs` fails when the register declares a `*_STATE` setting the harness does not
   set (shown red by dropping one). The owner map, the hook copies and the repository exclude file also live in the common dir, but only worktree, hook and disk
   commands touch them and their tests run in repositories they make. No test started `ci test-cache` or `landing-held` in the checkout.
+
+## A wait ended on a 401 its own token had not earned (2026-11-28, fix/ci-wait-token, ER-28)
+- **What happened.** On 2026-11-27/28 five `./dev wait --ci-run` waiters (runs 9284, 9285, 9286, 9320, 9321) ended after five failed looks with
+  `HTTP 401 invalid username, password or token`, while a fresh `curl` or `./dev ci trial-verdict` with the same `GITEA_TOKEN` worked.
+- **Causes ruled out (ER-28).** A temp config file removed by a reaper: the main-tree client sends the token on standard input (`-K -`), there is no file (the
+  `curl_config` writer on `fix/test-cache-windows-records` is for the S3 and download paths). A child that lost the environment: the token is read once and
+  held in the probe; a running waiter's environment held the same token as `~/.zshenv` (hash compared, never printed), unchanged since 2026-11-14. A lazy
+  or expiring secret: none exists. A per-wait-age timer: the failures end at the same wall-clock minutes for waiters that started at different times
+  (about 00:08 and 00:29), so the cause is not the age of the process. Reproduction: a 10-minute `./dev wait --ci-run` and 17 minutes of the same
+  request through `-K -` every 15 s stayed 200; the refusal did not recur, so it is a transient Gitea or proxy refusal (Gitea behind Caddy), not proven further.
+- **Fix.** `CiRunProbe` holds through a 401 that follows a good look in the same wait (up to 40 looks, 10 minutes at 15 s; the length of a real refusal is
+  not measured), writes one `::warning::` and one "answers again" line, and at the end prints one `::error::` naming the likely causes and the check to run.
+  A 401 on the first look is a wrong token and ends as before.
+- **Shared layer (same branch, coordinator's step, ER-22).** The hold also lives in the one HTTP layer: `CurlHttp` is now `Retrying<CurlOnce>`, so every
+  READ caller (ci_runs client, trial-verdict, verdict, load, the artifact reader) holds and retries a 401 or 5xx with backoff (2, 4, 8, 16, then 30 s,
+  at most 5 minutes in total) for a 401 once the process has had a good answer (a 5xx or a network failure, curl exit 6, 7, 28, 52 or 56, is retried on the first call too: the 2026-11-27 18:00 outage was connect timeouts), with one `::warning::`, one recovery line and one final error naming the causes.
+  Writes (`send_json`, `post_json`: a dispatch, PUT, DELETE) are never retried, because a retried dispatch could start two runs; a test pins it. A 401 before
+  any good answer stays a wrong token. `wait --ci-run` uses `CurlOnce` and keeps its own probe-level hold, which respects `--max` and the clock.
+  `ci_runs::client::Client` lost its own 4-attempt retry and its `backoff_ms` (one mechanism, ER-22): a read through it is retried by the layer's schedule
+  only, once. A first-call blip (before any good answer) is no longer retried at all; the layer holds only after a good answer.
+
+## A curl config reads backslashes in quotes as escapes (2026-11-27, fix/test-cache-windows-records, run 9265)
+- **What happened.** The Windows crate leg recorded 0 of 61 packages in a green train run: its store lookup failed (no `test-cache shadow:` line, which
+  every other leg printed), so every record counted as "no definite answer" and was held back. The record step wrote the scratch paths
+  (`D:\a\_temp\...`) into the curl config in double quotes; curl reads `\\ \" \t \n \r \v` there as escapes and drops a backslash before any other
+  letter (curl `-K` format), so it wrote the answers to other files and the call failed. Linux and macOS paths have no backslash, and
+  paddock-dev (never cached) asks no lookup, so nothing had shown it. The failed lookup printed no cause.
+- **Fix.** One writer, `curl_config::line`, escapes every value paddock-dev writes into a curl config (the test-cache store, `CurlHttp`, the
+  throttle download token), per the `-K` rules of the curl manual; a test per caller proves it uses the writer, a real curl run proves the read-back on
+  a name with `\t\r`; the record step prints a `::warning::` with the cause when its lookup fails (ER-27, ER-44); the crate job runs
+  `ci test-cache selfcheck --shared` on every leg before it records (ER-33). Not covered: the shell and Node scripts that write a config
+  (`conformance/ci/dev-tool-publish.sh`, a token with no backslash or quote) are not Rust and still write their own line.

@@ -501,7 +501,7 @@ test('the sccache-stats action prints the statistics and tolerates a missing scc
     }
     return found;
   };
-  const rustJobs = ['paddock-dev', 'ui', 'e2e', 'e2e-webkit', 'conformance', 'tools', 'crates', 'crate', 'app', 'quick']; // quick: ./dev audit compare and the heavy tool; conformance: ./dev gates check (C100, ADR 0060)
+  const rustJobs = ['paddock-dev', 'mutants', 'ui', 'e2e', 'e2e-webkit', 'conformance', 'tools', 'crates', 'crate', 'app', 'quick']; // quick: ./dev audit compare and the heavy tool; conformance: ./dev gates check (C100, ADR 0060)
   assert.deepEqual(jobsUsing('setup-rust'), rustJobs, 'setup-rust in every job that builds Rust');
   assert.deepEqual(jobsUsing('sccache-stats'), rustJobs, 'stats after each');
   assert.doesNotMatch(ci, /setup-rust\n\s+if: runner\.os/, 'no OS leg is left out');
@@ -2433,7 +2433,7 @@ test('a release or installer job never runs a downloaded ./dev: PADDOCK_DEV_DOWN
     assert.match(job.text, /PADDOCK_DEV_DOWNLOAD: \$\{\{ \(inputs\.release == true \|\| startsWith\(github\.ref, 'refs\/tags\/'\)\) && '0' \|\| '' \}\}/, `ci.yml:${job.id}: a run for a tag builds the tool from source`);
     tagJobs += 1;
   }
-  assert.equal(tagJobs, 6, 'the ci.yml jobs that read the prebuilt tool with the credential at job level: the three that take a host slot, conformance, crates and quick (the heavy tool and audit steps; setup-rust runs ./dev); ui (with the ESLint preset and icons steps), e2e, e2e-webkit (on Linux since 2026-11-25, ADR 0120) and tools (`./dev ci run`) set it on their ./dev steps only (WP-3 review)');
+  assert.equal(tagJobs, 7, 'the ci.yml jobs that read the prebuilt tool with the credential at job level: the three that take a host slot, conformance, crates, mutants (setup-rust runs ./dev) and quick (the heavy tool and audit steps; setup-rust runs ./dev); ui (with the ESLint preset and icons steps), e2e, e2e-webkit (on Linux since 2026-11-25, ADR 0120) and tools (`./dev ci run`) set it on their ./dev steps only (WP-3 review)');
 });
 
 test('dev-tool.yml publishes only from main, in every job (ADR 0022: the store is written only by main)', () => {

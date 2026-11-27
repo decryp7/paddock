@@ -137,7 +137,7 @@ test('ER-46 control: the growth comparison sees a new id, a later review day and
   assert.equal(growth(listText(entry({ reviewBy: '2027-01-10' })), fakeGit(base)).added.length, 1, 'a later review day');
   assert.equal(growth(listText(entry({ approved: '2026-11-19' })), fakeGit(base)).added.length, 1, 'a changed approval day');
   assert.deepEqual(growth(listText(), fakeGit(base)).added, [], 'removing an entry is shrinking');
-  assert.equal(growth(listText(entry({ approvedBy: 'user' })), fakeGit(listText(entry({ approvedBy: 'someone' })))).added.length, 0, 'the approver string is not the signal');
+  assert.equal(growth(listText(entry({ reason: 'other words' })), fakeGit(listText(entry({ reason: 'build tool only' })))).added.length, 0, 'the reason is not the signal');
 });
 
 test('ER-46 control: a base that cannot be found is not measured, never an empty list', () => {
