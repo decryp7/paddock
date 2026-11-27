@@ -4516,5 +4516,8 @@ before it checks their names, with a failing test first (bug-fix skill). Open; n
   (`D:\a\_temp\...`) into the curl config in double quotes; curl reads `\\ \" \t \n \r \v` there as escapes and drops a backslash before any other
   letter (curl `-K` format), so it wrote the answers to other files and the call failed. Linux and macOS paths have no backslash, and
   paddock-dev (never cached) asks no lookup, so nothing had shown it. The failed lookup printed no cause.
-- **Fix.** `s3::quoted` escapes every value written into the config (URL, keys, paths); a test shows the config of a Windows path and a real curl run
-  proves the escape on a name with `\t\r`; the record step prints a `::warning::` line with the cause when its lookup fails (ER-27, ER-44).
+- **Fix.** One writer, `curl_config::line`, escapes every value paddock-dev writes into a curl config (the test-cache store, `CurlHttp`, the
+  throttle download token), per the `-K` rules of the curl manual; a test per caller proves it uses the writer, a real curl run proves the read-back on
+  a name with `\t\r`; the record step prints a `::warning::` with the cause when its lookup fails (ER-27, ER-44); the crate job runs
+  `ci test-cache selfcheck --shared` on every leg before it records (ER-33). Not covered: the shell and Node scripts that write a config
+  (`conformance/ci/dev-tool-publish.sh`, a token with no backslash or quote) are not Rust and still write their own line.

@@ -47,6 +47,7 @@
 pub mod active_apps;
 pub mod audit;
 pub mod cargo_target;
+pub mod curl_config;
 pub mod check;
 pub mod check_ids;
 pub mod child_env;
