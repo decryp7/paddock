@@ -347,12 +347,139 @@ fn the_record_step_never_replaces_a_trusted_or_undecided_record_and_names_the_un
     // The reader of the shadow lines reads the counts of the longer line.
     let (k, sum) = read_shadow(std::slice::from_ref(shadow)).unwrap();
     assert_eq!((k, sum.matched, sum.passed, sum.findings.len()), (1, 1, 1, 0));
-    assert!(lines.iter().any(|l| l.contains("2 held back")), "{lines:?}");
+    // ER-27: the record line says why each pass was held back and what the lookup found, never a bare count.
+    assert!(
+        lines.iter().any(|l| l.ends_with(
+            "recorded 3 packages of 5 candidates (5 passed here; not in this leg's partition or without a test in the log: 0; failed or not clean: 0); \
+             held back 2: 1 already trusted, 1 undecided (no definite answer)"
+        )),
+        "{lines:?}"
+    );
+    assert!(
+        lines.iter().any(|l| l
+            == "test-cache lookup: reused 1 of 5; ran because: no record 1, record too old 1, record untrusted 1, record trust undecided 1"),
+        "{lines:?}"
+    );
     // A store whose lookup fails but whose writes work (an S3 GET times out, the PUT goes through): nothing is replaced, because nothing
     // is known.
     let blind = BlindStore::default();
     let (lines, stored) = super::cmd::record_with(&log, &cands, &cfg(), &class, "", &meta, &blind, &trust);
     assert_eq!((stored, blind.put.get()), (0, 0), "{lines:?}");
+}
+
+/// Run 9335: a lookup that timed out left every Linux and Windows record step with `held back 14` and no cause. The cause is said once as a
+/// notice, no shadow line is printed (nothing was measured, ER-33), and every held record is counted under the failed lookup.
+#[test]
+fn a_record_step_whose_lookup_failed_says_so_and_counts_its_held_records_under_it() {
+    let class = RunnerClass::here();
+    let (a, b) = (cand("a", "h1"), cand("b", "h2"));
+    let meta = RunMeta {
+        run: "9335".into(),
+        job: "crate (ubuntu-latest, 1/3)".into(),
+        attempt: 1,
+        git_ref: "refs/heads/train/x".into(),
+        commit: "c0ffee".into(),
+        at: NOW,
+        os_build: String::new(),
+    };
+    let log = [
+        "    Starting 2 tests across 2 binaries",
+        "        PASS [   0.010s] ( 1/2) a t::ok",
+        "        PASS [   0.010s] ( 2/2) b t::ok",
+        "     Summary [   0.050s] 2 tests run: 2 passed, 0 failed, 0 skipped",
+    ]
+    .join("\n");
+    let blind = BlindStore::default();
+    let (lines, stored) = super::cmd::record_with(&log, &[a, b], &cfg(), &class, "", &meta, &blind, OK);
+    assert_eq!((stored, blind.put.get()), (0, 0), "{lines:?}");
+    assert!(
+        lines
+            .iter()
+            .any(|l| l.starts_with("::notice::test-cache: the store lookup failed: read timed out.")),
+        "{lines:?}"
+    );
+    assert!(
+        !lines.iter().any(|l| l.starts_with("test-cache shadow:")),
+        "nothing was measured: {lines:?}"
+    );
+    assert!(
+        lines
+            .iter()
+            .any(|l| l == "test-cache lookup: reused 0 of 2; ran because: reuse off 2 (read timed out)"),
+        "{lines:?}"
+    );
+    assert!(
+        lines
+            .iter()
+            .any(|l| l.ends_with("held back 2: 2 store lookup failed (read timed out)")),
+        "{lines:?}"
+    );
+}
+
+/// A leg runs a third of the packages: the others are "not in this leg's partition", a number the line states (run 9329 read "61 in the
+/// log" for a log that held 14 of them). Never-cached, blind and dirty targets are held back by name too.
+#[test]
+fn the_record_line_counts_what_the_leg_did_not_run_and_names_blind_never_and_dirty_holds() {
+    let (_d, s) = scratch();
+    let class = RunnerClass::here();
+    let (ran, outside) = (cand("ran", "h1"), cand("outside", "h2"));
+    let mut blind = cand("blind", "h3");
+    blind.blind = vec!["crates/blind/src/x.rs: `.ancestors()`".into()];
+    let never = cand("never", "h4");
+    let mut dirty = cand("dirty", "h5");
+    dirty.dirty = true;
+    let mut c = cfg();
+    c.no_test_cache = vec!["crate:never".into()];
+    let meta = RunMeta {
+        run: "1".into(),
+        job: "j".into(),
+        attempt: 1,
+        git_ref: "refs/heads/train/x".into(),
+        commit: "c0ffee".into(),
+        at: NOW,
+        os_build: String::new(),
+    };
+    let log = [
+        "    Starting 3 tests across 3 binaries",
+        "        PASS [   0.010s] ( 1/3) ran t::ok",
+        "        PASS [   0.010s] ( 2/3) blind t::ok",
+        "        PASS [   0.010s] ( 3/3) never t::ok",
+        "     Summary [   0.050s] 3 tests run: 3 passed, 0 failed, 0 skipped",
+    ]
+    .join("\n");
+    let cands = [ran, outside, blind, never, dirty];
+    let (lines, stored) = super::cmd::record_with(&log, &cands, &c, &class, "", &meta, &s, OK);
+    assert_eq!(stored, 1, "only the target with no record is written: {lines:?}");
+    assert!(
+        lines.iter().any(|l| l.ends_with(
+            "recorded 1 packages of 5 candidates (3 passed here; not in this leg's partition or without a test in the log: 2; failed or not clean: 0); \
+             held back 2: 2 blind or never cached"
+        )),
+        "{lines:?}"
+    );
+    assert!(
+        lines
+            .iter()
+            .any(|l| l == "test-cache lookup: reused 0 of 5; ran because: no record 2, blind 1, never cached 1, dirty 1"),
+        "{lines:?}"
+    );
+}
+
+/// The reasons are counted from the decisions alone: the lookup line of a local run, a plan and a record step is one function.
+#[test]
+fn the_reasons_of_a_lookup_are_counted_per_reason_and_a_full_reuse_says_no_reason() {
+    use super::reasons::Tally;
+    let (_d, s) = scratch();
+    let class = RunnerClass::here();
+    let a = cand("crates/a", "h");
+    s.put_many(&[rec(&a, &class, NOW - 60)]).unwrap();
+    let all = decide(std::slice::from_ref(&a), &cfg(), &class, "", &s, NOW, OK).0;
+    assert_eq!(Tally::of(&all).lookup_line(), "reused 1 of 1");
+    let off = decide(&[a.clone(), a], &cfg(), &class, "", &Down, NOW, OK).0;
+    assert_eq!(
+        Tally::of(&off).lookup_line(),
+        "reused 0 of 2; ran because: reuse off 2 (connection refused)"
+    );
 }
 
 /// A store whose lookups fail and whose writes succeed, counting the records it was given.
@@ -1458,7 +1585,7 @@ mod run_wiring {
         .join("\n");
         let text = go(&[a.clone(), b.clone()], &s, TAG, &both);
         // nxflaky had no record (replaceable), b's is trusted (held back): one stored, one held.
-        assert!(text.contains("stored 1 pass(es); 1 held back"), "{text}");
+        assert!(text.contains("stored 1 pass(es); held back 1: 1 already trusted"), "{text}");
         let _ = a;
     }
 }

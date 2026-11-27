@@ -19,6 +19,7 @@ pub mod config;
 mod declared_tests;
 pub mod key;
 pub mod plan;
+pub mod reasons;
 pub mod result;
 pub mod s3;
 pub mod store;
@@ -436,18 +437,17 @@ pub fn run_outcome(ran: &[&Candidate], matched: &[&Candidate], judged: &result::
 /// one too old, or one the trust check refused. Write-once while trusted, as remote build caches do: a trusted record ([`Decision::Reuse`])
 /// is never replaced, so a red run's leg or a local run cannot make every later lookup untrusted (run 9209 replaced run 9180's records).
 /// Nothing is replaced on an answer that is not definite either: a trust check that could not answer ([`Why::Undecided`]) or a lookup
-/// that did not run or failed ([`Why::Off`]). The second answer is how many records were held back.
-pub fn not_overwriting_trusted(put: Vec<Record>, cands: &[Candidate], decisions: &[Decision]) -> (Vec<Record>, usize) {
-    let replaceable: std::collections::BTreeSet<&str> = cands
-        .iter()
-        .zip(decisions)
-        .filter(|(_, d)| matches!(d, Decision::Run(Why::Miss | Why::TooOld | Why::Untrusted(_))))
-        .map(|(c, _)| c.target.id.as_str())
-        .collect();
-    let before = put.len();
-    let kept: Vec<Record> = put.into_iter().filter(|r| replaceable.contains(r.target.as_str())).collect();
-    let n = before - kept.len();
-    (kept, n)
+/// that did not run or failed ([`Why::Off`]); a target that was never looked up (never cached, blind, dirty) is not replaced either.
+/// The second answer counts the records held back by the reason of their decision ([`reasons::Tally::held_line`]).
+pub fn not_overwriting_trusted(put: Vec<Record>, cands: &[Candidate], decisions: &[Decision]) -> (Vec<Record>, reasons::Tally) {
+    let decision_of: std::collections::BTreeMap<&str, &Decision> =
+        cands.iter().zip(decisions).map(|(c, d)| (c.target.id.as_str(), d)).collect();
+    let replaceable = |d: &Decision| matches!(d, Decision::Run(Why::Miss | Why::TooOld | Why::Untrusted(_)));
+    let (kept, held): (Vec<Record>, Vec<Record>) = put
+        .into_iter()
+        .partition(|r| decision_of.get(r.target.as_str()).is_some_and(|d| replaceable(d)));
+    let tally = reasons::Tally::of(held.iter().filter_map(|r| decision_of.get(r.target.as_str()).copied()));
+    (kept, tally)
 }
 
 /// The records a lookup found but did not trust, counted by why: `untrusted 57 (57: job ... did not end success)`, and those whose trust
