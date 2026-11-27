@@ -559,7 +559,7 @@ Amendments of the same date, no new number: the member gate runs each member's a
 merge check (`./dev merge check`) refuses a member whose base is older than main: the stale-base check, being made blocking on
 `ci/old-base-block` (report-only until it lands). A refused member merges main, re-runs `./dev merge check --gates` on the result and
 is offered again. After merging main (or the train) into the member, `./dev merge sync-member <train>` runs the fast static rows
-(conformance, the gate register, Clippy and Windows Clippy of the touched workspaces) on that sync tip and ends non-zero on a failing
+(rustfmt, conformance, the gate register, Clippy and Windows Clippy of the touched workspaces, in the train lane of the queue) on that sync tip and ends non-zero on a failing
 or unmeasured row; fix it on the member and re-sync. `--no-static "<reason>"` is the logged escape. Once the rows pass it also
 dispatches the member's own narrowed CI run on the train (`ci dispatch ci.yml --trial`, the plan's affected jobs on its Linux and Windows
 legs; the integrator's sync-member pushes the sync tip as the new ref `sync/<member>/<short sha>` first) and prints the run id; a later `./dev merge check --gates` reads that run through the verdict reader: a

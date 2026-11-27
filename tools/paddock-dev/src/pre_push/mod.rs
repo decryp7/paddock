@@ -1375,6 +1375,15 @@ pub fn render_timed(head: &str, rows: &[(String, Row)], timings: &std::collectio
         text.push_str(&line);
         text.push('\n');
         let mut row = json!({"id": id, "verdict": kind});
+        // The cause and the step's log beside the verdict (ER-27): a reader that prints only the verdict (merge sync-member) cannot say
+        // why a row failed, which left a failed `gates-register` with no reason on train z.
+        if !matches!(v.kind(), Kind::Passed | Kind::Skipped) {
+            row["reason"] = json!(reason);
+            row["next"] = json!(v.next);
+            if let Some(l) = &v.log {
+                row["log"] = json!(l);
+            }
+        }
         if let Some(t) = timings.get(id) {
             row["run_secs"] = json!(t.ran);
             row["queued_secs"] = json!(t.queued);
