@@ -1397,7 +1397,7 @@ status = "built"
   note = "The guard hooks' copy (dev_targets_of, dev_targets, main_checkout): Python, because the hooks run before any binary is built; scripts call `./dev places` instead. .claude/hooks/paddockpaths-parity.test.sh runs both on one table (named, root-level, relative, `..`, blank and whitespace values). Goes when the guards move onto `./dev hook pre-tool-use` (ADR 0083)."
 
   [[mechanism.copy]]
-  paths = ["tools/throttle/src/capture.rs", "tools/throttle/src/main.rs"]
+  paths = ["crates/paddock-throttle/src/capture.rs", "crates/paddock-throttle/src/boot.rs"]
   symbols = ["text:dev_targets_of", "text:PADDOCK_DEV_TARGETS", "text:paddock.worktreeRoot"]
   owner = "paddock"
   delete_by = "v0.5.0"
@@ -1602,18 +1602,3 @@ adr = "0123"
   owner = "paddock"
   delete_by = "v0.5.0"
   note = "The nightly's `installers (<App>, ...)` jobs are matched by their display name. They run only in the nightly and are never reused, so the scope line carries no name for them (ADR 0123 §3, out of scope on purpose); the match leaves when the nightly's installer jobs are written into the line or the nightly is split by app."
-
-  [[mechanism.copy]]
-  paths = ["tools/paddock-dev/src/ci_runs/dispatch.rs"]
-  kind = "copy"
-  owner = "paddock"
-  delete_by = "v0.5.0"
-  note = "Reads a workflow's `runs-on` with yaml_rust2 directly (the runner class of its jobs); it moves to the crate's yaml reader when the job model carries `runs-on`."
-
-  [[mechanism.copy]]
-  paths = ["tools/paddock-dev/src/ci_runs/dispatch_guards.rs"]
-  symbols = ["item:takes_since_run"]
-  kind = "copy"
-  owner = "paddock"
-  delete_by = "v0.5.0"
-  note = "Reads the `workflow_dispatch` inputs of a workflow with yaml_rust2 directly; it moves to the crate's yaml reader when the job model carries `on:`."

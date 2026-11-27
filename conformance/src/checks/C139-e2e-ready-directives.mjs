@@ -81,6 +81,7 @@ export default {
         },
         ...(ctx.options?.git ? { git: ctx.options.git } : {}),
         baseRef: targetRef(ctx.options),
+        check: 'C139',
       });
       if (g.reason) {
         out.push(unmeasuredFinding(ctx, { id: 'C139', rule: 49, file: f, what: 'the exception list', g }));
@@ -88,7 +89,7 @@ export default {
       }
       if (g.added.length === 0) continue;
       const n = g.added.length;
-      out.push({ ...error('C139', 49, f, 1, `the exception list grew: ${n} entr${n === 1 ? 'y is' : 'ies are'} (counting each \`count\`) not in ${f} at the merge base ${g.base.slice(0, 9)}; it may only shrink`, FIX_GROW), unwaivable: true });
+      out.push({ ...error('C139', 49, f, 1, `the exception list grew: ${n} entr${n === 1 ? 'y is' : 'ies are'} (counting each \`count\`) not in ${f} at the merge base ${g.base.slice(0, 9)}; it may only shrink`, `${FIX_GROW}${g.ask ? ` ${g.ask}` : ''}`), unwaivable: true });
     }
     return out;
   },

@@ -4400,7 +4400,7 @@ spec `data.spec.ts:301` (theme switch redraws the canvases) failed in the same r
 - **Cause.** The helper was written where it was first needed, not checked against the shared kit (ER-22), and nothing told the next
   fixture author that a per-test git repository is the slow shape.
 - **Fix (user decision 74).** The helper moved to `paddock_testkit::git_fixture` (temp folder from the kit, owner, size limit and eviction
-  rule in its doc), and rule NEW-git-fixtures with the report-only check C174 flags a fixture builder with six or more git starts per test.
+  rule in its doc), and rule 102 with the report-only check C174 flags a fixture builder with six or more git starts per test.
 
 ## A link-server test read the server's refusals the moment its client saw the end, and macOS ends the client first (2026-11-26, fix/ipc-link-flakes)
 - **Symptom.** ci.yml run 9150, job 51219 (`crate (macos-latest)`): `paddock-ipc::it edges::a_link_server_with_no_descriptor_left_to_accept_tells_the_waiting_client_why`
@@ -4500,3 +4500,24 @@ before it checks their names, with a failing test first (bug-fix skill). Open; n
   `#[expect]`). The positive control is `usage::tests::a_raw_listing_is_what_the_clippy_ban_catches`: its `#[expect]` is unfulfilled, and Clippy
   fails, if the ban is removed or stops resolving the path. Callers checked across `crates/`, `apps/` and `tools/`: only `paddock-proc` itself
   (`usage.rs`, `tests/it/orphan.rs`) implements or calls the trait; Debrief's, Dyno's and Pitcrew's `ProcessSource` are their own ports.
+
+## Per-member trials on a moving train cost more than they proved; one trial of the tip does (2026-11-27, docs/batched-member-trials, user decision)
+- **What happened.** On train y each member's own CI trial ran on a train that kept moving: the trials went red on other members' defects, proved
+  little about the member, and took about 30 minutes each. Train z (2026-11-27) merged 8 members in about 40 minutes with the fast static rows per
+  member and one trial of the train tip, against about 90 minutes for one-by-one trials.
+- **Rule 100 amended.** A member has its own trial on the train only when it has no green trial on main (a Linux trial with `--onto origin/main` on its
+  head, or on a head whose only differences are merges of main); with one it joins with `--no-trial "trial <run id> green on main"`. One trial of the tip
+  covers the rest; red means pull the member it points to (ER-8). The final full run and `landing-held` are unchanged (ER-49).
+
+## Path-keyed registers follow a pure rename (2026-11-27, fix/registers-follow-renames, ER-21)
+- **What happened.** The crate move `tools/throttle/src` to `crates/paddock-throttle/src` (45ec96c97, bf651d875) re-registered entries in the C53 baseline
+  and the C30 allow list by hand and re-placed a C171 waiver: the allow-list growth guard read a rewritten path as a new entry (needing the user, ER-46),
+  C171 asked `git diff --no-renames` and so read every line of a moved file as added, and rustfmt put a spread-out call's literal below its waiver comment.
+  The paddock-dev crate split moves about 40 modules and would have hit this on every batch.
+- **Fix (ER-21, the simplest complete fix).** One reader of git's own rename detection per host: `baseline::renames` (Rust, through the `git diff`
+  parser of `merge_check::diff`, `Ctx::renames` once per run) and `renamedFiles` in `util/baseline.mjs` (`git diff -M --name-status -z`). The shared
+  allow-list readers (C131, C173 on Rust; C30, C135, C140 on JavaScript) let an entry follow its file (an entry under the old path counts for the new
+  one and a warning asks for the rewrite), and `baseline::growth_following` and `baselineGrowth({ rekey })` read both sides of the growth comparison under
+  the files' current paths, so a rewritten entry is not growth. C135 and C104 pass a `rekey`; C53's liveness baseline already followed a move by hash
+  (`moved`, not growth). C171 reads `git diff -M`, and its waiver may sit above the statement that holds the literal. A moved file's changed content is
+  judged as usual: a new offending line still fails, and a new entry is still growth.

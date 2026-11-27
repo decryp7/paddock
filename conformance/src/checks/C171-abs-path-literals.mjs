@@ -7,10 +7,11 @@
 // comments and string insides are masked, so only real code is read): a string literal that starts with `/` and a name, given to
 // `Path::new(..)`, `PathBuf::from(..)` or a known validator (VALIDATORS: `dev_targets_of`). Not flagged: an item behind `#[cfg(unix)]`
 // or `#[cfg(not(windows))]`, a file that starts with `#![cfg(unix)]` (a `/dev/null` case is Unix by nature), and a site with
-// `// conformance: abs-path — <why>` on its line or the line above.
+// `// conformance: abs-path — <why>` on its line or the line above, or on the line above the statement that holds it (rustfmt moves a literal
+// of a spread-out call below its comment: the throttle move, bf651d875).
 // Split (user decision 2026-11-26, after a third Windows-only failure of this class, run 9116, `"/dev-targets-y"` in a test of
-// pre_push/exec.rs): a site on a line the change ADDS (`git diff -U0` against the merge base with the gate's base ref, the working tree
-// included) is an ERROR (the check is a gate; ER-41 report-only phase skipped for new lines by that decision, recorded here because a gate has no
+// pre_push/exec.rs): a site on a line the change ADDS (`git diff -M -U0` against the merge base with the gate's base ref, the working tree
+// included; renames are detected, so the lines of a file that only moved are not added, ER-21) is an ERROR (the check is a gate; ER-41 report-only phase skipped for new lines by that decision, recorded here because a gate has no
 // docs/gates.toml register entry), so no new Unix literal lands; every existing site stays a WARNING until the 2026-12-09 review in
 // docs/gates.toml sorts them (ER-41). When the base cannot be read the added lines are unknown: a warning outside CI, a not-measured
 // error in CI (ER-33, ADR 0089: a blocking check that cannot see its base does not pass).
@@ -51,6 +52,28 @@ function isDirectArgument(before) {
   return depth === 0 && /(?:^|[,(])\s*&?\s*$/.test(before);
 }
 
+/**
+ * The 0-based index of the line where the statement holding `index` of `region` (masked text) starts: walks back over brackets (an enclosing
+ * `(`, `[` or `{` of an expression continues, a closed group is skipped) to the previous `;`, an enclosing block's `{` or a closed block's `}`.
+ */
+function statementStartLine(region, index) {
+  let depth = 0;
+  let i = index - 1;
+  for (; i >= 0; i--) {
+    const c = region[i];
+    if (c === ')' || c === ']' || c === '}') {
+      if (c === '}' && depth === 0) break;
+      depth++;
+    } else if (c === '(' || c === '[' || c === '{') {
+      if (depth > 0) depth--;
+      else if (c === '{') break;
+    } else if (c === ';' && depth === 0) break;
+  }
+  let start = i + 1;
+  while (start < index && /\s/.test(region[start])) start++;
+  return region.slice(0, start).split('\n').length - 1;
+}
+
 /** The sites of one file: [{ line }]. Empty for a file that is not Rust test code. */
 export function absPathSites(text, file) {
   if (!file.endsWith('.rs') || SKIP_PATH.test(file)) return [];
@@ -69,7 +92,8 @@ export function absPathSites(text, file) {
       if (region[at] !== '"') continue; // masked away: a comment or the inside of another literal
       if (!isDirectArgument(region.slice(from, at))) continue;
       const line = text.slice(0, at).split('\n').length;
-      if (WAIVER.test(lines[line - 1] ?? '') || WAIVER.test(lines[line - 2] ?? '')) continue;
+      const stmt = statementStartLine(region, m.index) + 1; // 1-based line of the statement's first token
+      if ([line, line - 1, stmt, stmt - 1].some((n) => WAIVER.test(lines[n - 1] ?? ''))) continue;
       if (!out.some((o) => o.line === line)) out.push({ line });
     }
   }
@@ -103,7 +127,7 @@ function addedSince(ctx) {
     const head = git(['rev-parse', 'HEAD']).trim();
     let base = git(['merge-base', 'HEAD', targetRef(ctx.options)]).trim();
     if (base === head) base = git(['rev-parse', 'HEAD^1']).trim();
-    return addedLines(git(['diff', '-U0', '--no-renames', '--no-color', base, '--', '*.rs']));
+    return addedLines(git(['diff', '-U0', '-M', '--no-color', base, '--', '*.rs']));
   } catch (e) {
     return { reason: `no merge base or diff (${String(e.message ?? e).split('\n')[0].slice(0, 120)})` };
   }

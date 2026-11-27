@@ -378,7 +378,7 @@ pub fn plock_log_path(throttle_dir: Option<PathBuf>) -> PathBuf {
 }
 
 /// The lock folder throttle resolves for this environment, asked of the tool itself (`throttle dir`) so there is one definition of it
-/// (ER-22): the binary is found as the push gate finds it ([`crate::pre_push::exec::throttle_command_for`]). `None` when no throttle
+/// (ER-22): the binary is found as the push gate finds it ([`crate::heavy_tool::throttle_command_for`]). `None` when no throttle
 /// can be found or it does not answer with an absolute folder (a bounded call: it never holds a wait up).
 pub fn throttle_dir_from_tool() -> Option<PathBuf> {
     let env: std::collections::HashMap<String, String> = crate::process_env::vars().collect();
@@ -393,12 +393,12 @@ pub fn throttle_dir_from_tool() -> Option<PathBuf> {
 /// [`throttle_dir_from_tool`] for a given tree and environment (`PADDOCK_THROTTLE` names the tool in a test).
 fn throttle_dir_of(root: &Path, env: &std::collections::HashMap<String, String>) -> Option<PathBuf> {
     let built = std::sync::OnceLock::new();
-    let prefix = crate::pre_push::exec::throttle_command_for(
+    let prefix = crate::heavy_tool::throttle_command_for(
         root,
         env,
-        &|p| crate::pre_push::exec::on_path(env, p),
+        &|p| crate::throttle::on_path(env, p),
         &built,
-        crate::pre_push::heavy_tool::BUILD_LIMIT,
+        crate::heavy_tool::BUILD_LIMIT,
     )
     .ok()?;
     let mut cmd = paddock_proc::command(prefix.first()?);

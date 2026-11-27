@@ -152,6 +152,39 @@ pub fn reconcile<T>(
     }
 }
 
+/// Files git's own rename detection pairs between two trees: old path to new path.
+pub type Renames = HashMap<String, String>;
+
+/// Gives an entry the path its file has now ([`growth_following`]).
+pub type Rekey<'a, T> = dyn Fn(T, &Renames) -> T + 'a;
+
+/// The merge base of HEAD and `base_ref`; on the target branch itself (HEAD is its own merge base) the commit's first parent.
+pub(super) fn merge_base(root: &Path, base_ref: &str) -> Result<String, (String, String)> {
+    let head = git(root, &["rev-parse", "HEAD"])?.trim_matches(is_js_space).to_string();
+    let base = git(root, &["merge-base", "HEAD", base_ref])?.trim_matches(is_js_space).to_string();
+    if base == head {
+        return Ok(git(root, &["rev-parse", "HEAD^1"])?.trim_matches(is_js_space).to_string());
+    }
+    Ok(base)
+}
+
+/// The files renamed between `base` and the work tree (committed, staged or not yet committed), as `git diff -M` reports them, read with
+/// the one `git diff` parser ([`crate::merge_check::diff`], ER-22, ER-42). A register keyed by path follows a rename: its entry counts for
+/// the new path, which is neither growth nor a reason to ask the user (ER-46). A rename that changed content is a rename too; whether the
+/// entry still fits is the register's own judgement of the moved text. Empty when git cannot say (a path git quotes, a failed run): the
+/// stricter reading.
+pub fn renames(root: &Path, base: &str) -> Renames {
+    let mut args = vec!["diff", "--diff-filter=R"];
+    args.extend(crate::merge_check::diff::DIFF_FLAGS);
+    args.push(base);
+    let Ok(text) = git(root, &args) else { return Renames::new() };
+    crate::merge_check::diff::parse(&text)
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|f| f.old_path.map(|old| (old, f.path)))
+        .collect()
+}
+
 /// `git args` in `root`: standard output, or the error line the JavaScript reports (`Command failed: git ...`) and the standard error.
 pub(super) fn git(root: &Path, args: &[&str]) -> Result<String, (String, String)> {
     let mut cmd = crate::git_env::git();
@@ -249,6 +282,8 @@ pub enum Growth<T> {
         added: usize,
         /// Entries it has under another exact key.
         moved: Vec<Moved<T>>,
+        /// The exact keys of the added entries, sorted: what the user's approval of the growth names ([`super::growth_approval`]).
+        fresh: Vec<String>,
     },
     /// Not measurable here: a warning (an error in CI for [`Unmeasured::NoBase`]), never silence.
     Unmeasured(Unmeasured),
@@ -286,15 +321,25 @@ pub fn growth<T: Clone>(
     exact: &dyn Fn(&T) -> String,
     loose: Option<&dyn Fn(&T) -> String>,
 ) -> Growth<T> {
-    let lookup = || -> Result<String, (String, String)> {
-        let head = git(root, &["rev-parse", "HEAD"])?.trim_matches(is_js_space).to_string();
-        let mut base = git(root, &["merge-base", "HEAD", base_ref])?.trim_matches(is_js_space).to_string();
-        if base == head {
-            base = git(root, &["rev-parse", "HEAD^1"])?.trim_matches(is_js_space).to_string();
-        }
-        Ok(base)
-    };
-    let base = match lookup() {
+    growth_following(root, base_ref, path, current, entries_of, exact, loose, None)
+}
+
+/// [`growth`] for a register keyed by file path: `rekey(entry, renames)` gives an entry the path git's rename detection says its file
+/// has now ([`renames`], merge base to tree), and is applied to the merge base's entries and to the current ones alike, so an entry
+/// that follows a pure move, written under the old path or rewritten to the new one, is the same entry, not growth (ER-46: only a new
+/// entry needs the user). `None` is [`growth`].
+#[allow(clippy::too_many_arguments, reason = "growth's own arguments and the one rekey hook")]
+pub fn growth_following<T: Clone>(
+    root: &Path,
+    base_ref: &str,
+    path: &str,
+    current: &[T],
+    entries_of: &dyn Fn(&str) -> Option<Vec<T>>,
+    exact: &dyn Fn(&T) -> String,
+    loose: Option<&dyn Fn(&T) -> String>,
+    rekey: Option<&Rekey<'_, T>>,
+) -> Growth<T> {
+    let base = match merge_base(root, base_ref) {
         Ok(b) => b,
         Err((msg, _)) => {
             let first: String = msg.split('\n').next().unwrap_or("").chars().take(120).collect();
@@ -327,8 +372,22 @@ pub fn growth<T: Clone>(
             Vec::new()
         }
     };
-    let r = reconcile(current, &old, exact, loose, &|_, _| true);
+    let (current, old): (Vec<T>, Vec<T>) = match rekey {
+        Some(rekey) => {
+            let map = renames(root, &base);
+            (
+                current.iter().map(|e| rekey(e.clone(), &map)).collect(),
+                old.into_iter().map(|e| rekey(e, &map)).collect(),
+            )
+        }
+        None => (current.to_vec(), old),
+    };
+    let (current, old) = (&current[..], &old[..]);
+    let r = reconcile(current, old, exact, loose, &|_, _| true);
+    let mut fresh: Vec<String> = r.fresh.iter().map(|&n| exact(&current[n])).collect();
+    fresh.sort_unstable();
     Growth::Added {
+        fresh,
         base,
         added: r.fresh.len(),
         moved: r
