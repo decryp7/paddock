@@ -25,6 +25,8 @@ pub mod landing;
 pub mod logfind;
 pub mod members;
 pub mod record;
+#[cfg(test)]
+mod replay;
 pub mod reservation;
 pub mod reuse;
 pub mod schedule_skip;
@@ -301,6 +303,10 @@ pub struct DispatchArgs {
     /// With --trial: the scratch folder, instead of `paddock.trialDir`, PADDOCK_TRIAL_DIR or `<dev-targets>/trials`.
     #[arg(long, value_name = "DIR", requires = "trial")]
     trial_dir: Option<PathBuf>,
+    /// With --trial: a revert on the target of this member's own earlier merge, which the member re-applies (repeatable). The trial's
+    /// merge carries a `Reverted:` line for each file the revert changed, so the merge check accepts the re-add.
+    #[arg(long, value_name = "REVERT", requires = "trial")]
+    reland: Vec<String>,
     /// A workflow input, `key=value` (repeat for more).
     #[arg(long = "input", value_name = "KEY=VALUE")]
     inputs: Vec<String>,
@@ -936,8 +942,11 @@ pub struct RecordArgs {
     #[arg(required = true)]
     runs: Vec<u64>,
     /// The folder the files are written to (create it under the test folder of the tool that reads them).
+    #[arg(long, conflicts_with = "name", required_unless_present = "name")]
+    out: Option<PathBuf>,
+    /// Record a replay shape: the files go to `tools/paddock-dev/tests/fixtures/runs/<name>/` (docs/testing/ci-replay.md).
     #[arg(long)]
-    out: PathBuf,
+    name: Option<String>,
     /// The repository.
     #[arg(long, default_value = "decryp7/paddock")]
     repo: String,
@@ -1529,7 +1538,7 @@ fn trial_merge(
         .map(|_| ())
         .map_err(|e| e.message)
     };
-    match trial::prepare(&g, branch, a.onto.as_deref(), &check).map_err(fail)? {
+    match trial::prepare_with(&g, branch, a.onto.as_deref(), &a.reland, &check).map_err(fail)? {
         trial::Outcome::Ready {
             trial_ref,
             target,

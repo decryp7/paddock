@@ -1,0 +1,2 @@
+2026-11-26T11:28:30.4883097Z Job: ui
+2026-11-26T11:38:12.4225843Z ::error::ci-image/Dockerfile: svg-drift: draw.io '/tmp/svg-drift-test-hoa8rs/no-such-drawio' is not runnable (ENOENT), the pin is 1.2.3. Fix: use the CI image built with DRAWIO_VERSION=1.2.3 (ci-image/README.md), or set DRAWIO to that version of draw.io desktop.

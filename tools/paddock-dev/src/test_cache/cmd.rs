@@ -322,8 +322,24 @@ fn run(
         let out = nextest(a, root, cfg, &asked, left.len() == cands.len() && a.only.is_none(), reused > 0)?;
         ran_secs = t0.elapsed().as_secs_f64();
         let judged = super::result::judge(&out.0, &asked);
+        // One rule with the CI record step (`shadow_outcome`): a finding is a matched target that ran and failed, never one the filter
+        // left out (train/2026-11-27-x: 58 not-seen targets were reported as findings).
+        let outcome = super::run_outcome(&left, &matched, &judged);
+        findings = outcome.shadow.findings.len();
+        for t in &outcome.shadow.findings {
+            let why = left
+                .iter()
+                .find(|c| &c.target.id == t)
+                .and_then(|c| judged.not_passed.iter().find(|(q, _)| *q == c.target.package))
+                .map_or("no verdict", |(_, w)| w.as_str());
+            text.push(format!(
+                "::error::test-cache soundness finding: {t} matched a valid record and then failed ({why}). Next step: find the input its key misses (ADR 0116 §8); the switch stays off."
+            ));
+        }
+        for (t, why) in &outcome.not_stored {
+            text.push(format!("test-cache: not stored target={t} ({why})"));
+        }
         let mut put: Vec<Record> = Vec::new();
-        let mut not_seen = 0usize;
         let writes = write_allowed(&env_get);
         for c in &left {
             let p = &c.target.package;
@@ -346,8 +362,9 @@ fn run(
                     });
                 }
             } else {
-                // The nightly is the net (§6): a target that fails loses the cached pass under its current key, and the run names it.
-                if nightly {
+                // The nightly is the net (§6): a target that ran and failed loses the cached pass under its current key, and the run names
+                // it. One the run never saw (outside its filter, or a log not read whole) keeps its record.
+                if nightly && outcome.ran_and_failed(&c.target.id) {
                     let ask = Lookup {
                         target: c.target.id.clone(),
                         class: class.clone(),
@@ -363,27 +380,12 @@ fn run(
                         Err(e) => text.push(format!("::warning::test-cache: the nightly could not delete a record: {e}")),
                     }
                 }
-                let why = judged
-                    .not_passed
-                    .iter()
-                    .find(|(q, _)| q == p)
-                    .map_or("no verdict", |(_, w)| w.as_str());
-                if matched.iter().any(|m| m.target.id == c.target.id) {
-                    findings += 1;
-                    text.push(format!(
-                        "::error::test-cache soundness finding: {} matched a valid record and then failed ({why}). Next step: find the input its key misses (ADR 0116 §8); the switch stays off.",
-                        c.target.id
-                    ));
-                } else if why.contains("failed") {
-                    text.push(format!("test-cache: not stored target={} ({why})", c.target.id));
-                } else {
-                    not_seen += 1;
-                }
             }
         }
-        if not_seen > 0 {
+        if outcome.not_seen > 0 {
             text.push(format!(
-                "test-cache: {not_seen} target(s) had no test in this run's output (outside its filter, or without tests): not stored"
+                "test-cache: {} target(s) had no test in this run's output (outside its filter, or without tests): not stored",
+                outcome.not_seen
             ));
         }
         if let Err(w) = &writes {

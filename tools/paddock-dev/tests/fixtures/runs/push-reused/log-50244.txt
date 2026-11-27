@@ -1,0 +1,5 @@
+2026-11-25T14:38:57.1824847Z Job: crates
+2026-11-25T14:40:47.0116057Z     Starting 5266 tests across 118 binaries (2 tests skipped)
+2026-11-25T14:42:09.4947785Z      Summary [  82.483s] 5266 tests run: 5266 passed, 2 skipped
+2026-11-25T14:42:32.7463405Z     Starting 46 tests across 4 binaries (433 tests skipped)
+2026-11-25T14:42:32.8759609Z      Summary [   0.130s] 46 tests run: 46 passed, 433 skipped

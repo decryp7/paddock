@@ -307,6 +307,53 @@ pub fn shadow_outcome(matched: &[&Candidate], judged: &result::Judged) -> Shadow
     s
 }
 
+/// What a local `test-cache run` says about the targets it ran that did not pass. `findings` comes from [`shadow_outcome`], the one rule
+/// the local run and a CI record step share: a soundness finding is a matched target that ran and failed. Every other target that did
+/// not pass is `not_stored` when it ran and failed, or `not_seen` when the run's output has no test of it (outside its filter, without
+/// tests, or a log that could not be read whole): never a finding.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct RunOutcome {
+    /// The shadow outcome of the matched targets (the findings and the matched and passed counts).
+    pub shadow: Shadow,
+    /// Targets that ran and did not pass but are not findings (no valid record matched them), with why.
+    pub not_stored: Vec<(String, String)>,
+    /// Targets with no verdict in the output: not stored and not a finding.
+    pub not_seen: usize,
+}
+
+impl RunOutcome {
+    /// Whether `target` ran in this run and failed (a finding or not stored): the only targets the nightly may invalidate (§6). A target
+    /// the run never saw proves nothing about its record.
+    pub fn ran_and_failed(&self, target: &str) -> bool {
+        self.shadow.findings.iter().any(|t| t == target) || self.not_stored.iter().any(|(t, _)| t == target)
+    }
+}
+
+/// The [`RunOutcome`] of `ran` (every target the run was asked for) given `matched` (those a valid record covered before it).
+pub fn run_outcome(ran: &[&Candidate], matched: &[&Candidate], judged: &result::Judged) -> RunOutcome {
+    let mut out = RunOutcome {
+        shadow: shadow_outcome(matched, judged),
+        ..RunOutcome::default()
+    };
+    for c in ran {
+        let p = &c.target.package;
+        if judged.passed.contains(p) || out.shadow.findings.contains(&c.target.id) {
+            continue;
+        }
+        if judged.failed.contains(p) {
+            let why = judged
+                .not_passed
+                .iter()
+                .find(|(q, _)| q == p)
+                .map_or("no verdict", |(_, w)| w.as_str());
+            out.not_stored.push((c.target.id.clone(), why.to_string()));
+        } else {
+            out.not_seen += 1;
+        }
+    }
+    out
+}
+
 /// The shadow lines of job logs, summed: how many lines were read, and the totals. `None` when no log has a line (nothing measured).
 pub fn read_shadow(logs: &[String]) -> Option<(usize, Shadow)> {
     let mut lines = 0;
