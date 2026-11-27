@@ -104,8 +104,8 @@ mod tests {
             use windows_sys::Win32::System::Threading::{
                 OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
             };
-            // conformance: pid-liveness — the pid is this test's own unreaped child, and the handle only holds its process object open
             // SAFETY: OpenProcess takes plain values; the handle is closed in `drop`.
+            // conformance: pid-liveness — the pid is this test's own unreaped child, and the handle only holds its process object open
             let h = unsafe {
                 OpenProcess(
                     PROCESS_SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION,
