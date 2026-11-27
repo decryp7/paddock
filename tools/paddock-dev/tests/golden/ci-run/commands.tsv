@@ -147,6 +147,7 @@ job	conformance			VERSION=0.20.1
 job	conformance			Windows-x86_64)          T=x86_64-pc-windows-msvc
 job	conformance			bash "conformance/ci/dev-tool-cache.sh" key
 job	conformance			bash "conformance/ci/dev-tool-cache.sh" no-download
+job	conformance			bash "conformance/ci/dev-tool-cache.sh" probe
 job	conformance			bash "conformance/ci/dev-tool-cache.sh" store-restore "‹steps.key.outputs.hash›"
 job	conformance			bash "conformance/ci/dev-tool-cache.sh" summary "not run" "‹steps.verify.outputs.save›" "‹steps.confirm.outputs.cache-hit›" "${{ steps.store.outputs.hit == 'true' && 'true' || steps.restore.outputs.cache-hit }}" "${{ steps.store.outputs.hit == 'true' && steps.key.outputs.key || steps.restore.outputs.cache-matched-key }}"
 job	conformance			bash "conformance/ci/dev-tool-cache.sh" verify "${{ steps.store.outputs.hit == 'true' && 'true' || steps.restore.outputs.cache-hit }}" "${{ steps.store.outputs.hit == 'true' && steps.key.outputs.key || steps.restore.outputs.cache-matched-key }}"
@@ -319,6 +320,7 @@ job	crates			VERSION=0.20.1
 job	crates			Windows-x86_64)          T=x86_64-pc-windows-msvc
 job	crates			bash "conformance/ci/dev-tool-cache.sh" key
 job	crates			bash "conformance/ci/dev-tool-cache.sh" no-download
+job	crates			bash "conformance/ci/dev-tool-cache.sh" probe
 job	crates			bash "conformance/ci/dev-tool-cache.sh" store-restore "‹steps.key.outputs.hash›"
 job	crates			bash "conformance/ci/dev-tool-cache.sh" summary "not run" "‹steps.verify.outputs.save›" "‹steps.confirm.outputs.cache-hit›" "${{ steps.store.outputs.hit == 'true' && 'true' || steps.restore.outputs.cache-hit }}" "${{ steps.store.outputs.hit == 'true' && steps.key.outputs.key || steps.restore.outputs.cache-matched-key }}"
 job	crates			bash "conformance/ci/dev-tool-cache.sh" verify "${{ steps.store.outputs.hit == 'true' && 'true' || steps.restore.outputs.cache-hit }}" "${{ steps.store.outputs.hit == 'true' && steps.key.outputs.key || steps.restore.outputs.cache-matched-key }}"
@@ -497,6 +499,7 @@ job	e2e			bash "$r" line Angular "‹steps.angular-cache.outputs.cache-primary-k
 job	e2e			bash "$r" line npm "‹steps.npm-cache.outputs.cache-primary-key›" "‹steps.npm-cache.outputs.cache-hit›" "‹steps.npm-cache.outputs.cache-matched-key›" pending
 job	e2e			bash "conformance/ci/dev-tool-cache.sh" key
 job	e2e			bash "conformance/ci/dev-tool-cache.sh" no-download
+job	e2e			bash "conformance/ci/dev-tool-cache.sh" probe
 job	e2e			bash "conformance/ci/dev-tool-cache.sh" store-restore "‹steps.key.outputs.hash›"
 job	e2e			bash "conformance/ci/dev-tool-cache.sh" summary "not run" "‹steps.verify.outputs.save›" "‹steps.confirm.outputs.cache-hit›" "${{ steps.store.outputs.hit == 'true' && 'true' || steps.restore.outputs.cache-hit }}" "${{ steps.store.outputs.hit == 'true' && steps.key.outputs.key || steps.restore.outputs.cache-matched-key }}"
 job	e2e			bash "conformance/ci/dev-tool-cache.sh" verify "${{ steps.store.outputs.hit == 'true' && 'true' || steps.restore.outputs.cache-hit }}" "${{ steps.store.outputs.hit == 'true' && steps.key.outputs.key || steps.restore.outputs.cache-matched-key }}"
@@ -522,6 +525,7 @@ job	e2e			dl=$(mktemp -d
 job	e2e			do
 job	e2e			echo "$DEST" >> "$GITHUB_PATH"
 job	e2e			echo "$kv"
+job	e2e			echo "- npm and Angular caches: skipped (the Actions cache service did not answer the job's probe)"
 job	e2e			echo "- npm cache: not measured (the step did not run)"
 job	e2e			echo "- sccache lane $PADDOCK_CI_SLOT: LOST ($(printf '%s' "$out" | tr '\n' ' '))" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
 job	e2e			echo "- sccache lane $PADDOCK_CI_SLOT: held to the end" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
@@ -675,6 +679,7 @@ job	tools			VERSION=0.20.1
 job	tools			Windows-x86_64)          T=x86_64-pc-windows-msvc
 job	tools			bash "conformance/ci/dev-tool-cache.sh" key
 job	tools			bash "conformance/ci/dev-tool-cache.sh" no-download
+job	tools			bash "conformance/ci/dev-tool-cache.sh" probe
 job	tools			bash "conformance/ci/dev-tool-cache.sh" store-restore "‹steps.key.outputs.hash›"
 job	tools			bash "conformance/ci/dev-tool-cache.sh" summary "not run" "‹steps.verify.outputs.save›" "‹steps.confirm.outputs.cache-hit›" "${{ steps.store.outputs.hit == 'true' && 'true' || steps.restore.outputs.cache-hit }}" "${{ steps.store.outputs.hit == 'true' && steps.key.outputs.key || steps.restore.outputs.cache-matched-key }}"
 job	tools			bash "conformance/ci/dev-tool-cache.sh" verify "${{ steps.store.outputs.hit == 'true' && 'true' || steps.restore.outputs.cache-hit }}" "${{ steps.store.outputs.hit == 'true' && steps.key.outputs.key || steps.restore.outputs.cache-matched-key }}"
@@ -856,6 +861,7 @@ job	ui			bash "$r" line Angular "‹steps.angular-cache.outputs.cache-primary-ke
 job	ui			bash "$r" line npm "‹steps.npm-cache.outputs.cache-primary-key›" "‹steps.npm-cache.outputs.cache-hit›" "‹steps.npm-cache.outputs.cache-matched-key›" pending
 job	ui			bash "conformance/ci/dev-tool-cache.sh" key
 job	ui			bash "conformance/ci/dev-tool-cache.sh" no-download
+job	ui			bash "conformance/ci/dev-tool-cache.sh" probe
 job	ui			bash "conformance/ci/dev-tool-cache.sh" store-restore "‹steps.key.outputs.hash›"
 job	ui			bash "conformance/ci/dev-tool-cache.sh" summary "not run" "‹steps.verify.outputs.save›" "‹steps.confirm.outputs.cache-hit›" "${{ steps.store.outputs.hit == 'true' && 'true' || steps.restore.outputs.cache-hit }}" "${{ steps.store.outputs.hit == 'true' && steps.key.outputs.key || steps.restore.outputs.cache-matched-key }}"
 job	ui			bash "conformance/ci/dev-tool-cache.sh" verify "${{ steps.store.outputs.hit == 'true' && 'true' || steps.restore.outputs.cache-hit }}" "${{ steps.store.outputs.hit == 'true' && steps.key.outputs.key || steps.restore.outputs.cache-matched-key }}"
@@ -880,6 +886,7 @@ job	ui			dl=$(mktemp -d
 job	ui			do
 job	ui			echo "$DEST" >> "$GITHUB_PATH"
 job	ui			echo "$kv"
+job	ui			echo "- npm and Angular caches: skipped (the Actions cache service did not answer the job's probe)"
 job	ui			echo "- npm cache: not measured (the step did not run)"
 job	ui			echo "- sccache lane $PADDOCK_CI_SLOT: LOST ($(printf '%s' "$out" | tr '\n' ' '))" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
 job	ui			echo "- sccache lane $PADDOCK_CI_SLOT: held to the end" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
