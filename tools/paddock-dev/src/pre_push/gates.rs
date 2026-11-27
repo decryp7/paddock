@@ -501,6 +501,7 @@ fn plan_rows(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> {
         facts,
         Gate {
             args: strs(&["gates", "check"]),
+            env: approval_stage_env(facts),
             ..gate(
                 "gates-register".into(),
                 "",
@@ -572,6 +573,18 @@ fn conformance_not_ready(id: &str, facts: &Facts) -> Option<Planned> {
     })
 }
 
+/// Where this run is for the approvals ([`paddock_approvals::Stage`]): a developer's push is a branch push, the member gate of
+/// `./dev merge check --gates` is the member gate. The rows that judge approvals (the Rust conformance checks and C100) read it from
+/// the environment ([`crate::check::growth_approval::STAGE_ENV`]); a caller that sets nothing (CI) gets landing, the strictest.
+fn approval_stage_env(facts: &Facts) -> Vec<(String, String)> {
+    let stage = if facts.member_gate {
+        paddock_approvals::Stage::MemberGate
+    } else {
+        paddock_approvals::Stage::BranchPush
+    };
+    vec![(crate::check::growth_approval::STAGE_ENV.to_string(), stage.name().to_string())]
+}
+
 /// The conformance row runs on every push, whatever changed and whatever the plan says (ER-41, user 2026-11-14): its checks read
 /// app code, specs and workflows, and a check skipped on the change that brings in its class never sees it. The planner marks
 /// conformance on every plan too (`conformance always runs`); this gate does not depend on that.
@@ -585,6 +598,7 @@ fn conformance(facts: &Facts) -> Planned {
         // so a flag or field added to the contract reaches the push gate with no change here.
         Some(Ok(_)) => dev_run(facts, Gate {
             args: strs(&["ci", "run", "conformance", "paddock"]),
+            env: approval_stage_env(facts),
             ..gate(id, "", "", &[], 0, "fix the finding it printed; the list of checks is the `conformance` field of conformance/paddock.ci.json (CI's \"Paddock itself\" step runs the same)".into())
         }),
         Some(Err(e)) => Planned::Broken { id, cause: e.clone(), next: "fix the `conformance` object in conformance/paddock.ci.json (app, root, only, strict)".into() },

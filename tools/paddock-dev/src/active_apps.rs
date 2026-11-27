@@ -11,6 +11,7 @@
 //! ([`resume`]), so activating an app is one line in the file plus that first full run. docs/ci-schedules.md, "Active apps", is the
 //! how-to.
 
+use paddock_approvals::{Approver, Claim, Verdict};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -79,6 +80,12 @@ impl ActiveApps {
                 .ok_or_else(|| format!("{FILE}: `{k}` is missing or empty"))
         };
         let decided = text_of("decided")?;
+        // Which apps run is the user's decision, and the one judge of an approval is `paddock_approvals` (user decision 125).
+        match Claim::from_word(t.get("by").and_then(toml::Value::as_str)).verdict("by", Approver::User, "by = \"user\"") {
+            Verdict::Approved => {}
+            Verdict::Missing { line_to_add } => return Err(format!("{FILE}: `by` is missing: the user records {line_to_add}")),
+            Verdict::Mismatch { why } | Verdict::Stale { why } => return Err(format!("{FILE}: {why}")),
+        }
         if !is_day(&decided) {
             return Err(format!("{FILE}: `decided` {decided:?} is not a day (YYYY-MM-DD)"));
         }
@@ -281,6 +288,20 @@ mod tests {
         }
         let typo = ActiveApps::parse(&TEXT.replace("active = []", "active = [\"dyon\"]")).unwrap();
         assert!(typo.check_known(&apps()).unwrap_err().contains("dyon"));
+    }
+
+    #[test]
+    fn the_decision_is_the_users_and_no_other_approver_or_word_counts() {
+        assert!(ActiveApps::parse(TEXT).is_ok());
+        for (who, want) in [("coordinator", "needs the user"), ("an agent", "must be"), ("", "`by`")] {
+            let e = ActiveApps::parse(&TEXT.replace("by = \"user\"", &format!("by = \"{who}\""))).unwrap_err();
+            assert!(e.contains(want), "{who:?}: {e}");
+        }
+        assert!(
+            ActiveApps::parse(&TEXT.replace("by = \"user\"\n", ""))
+                .unwrap_err()
+                .contains("`by`")
+        );
     }
 
     #[test]

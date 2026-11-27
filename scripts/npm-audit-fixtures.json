@@ -357,6 +357,36 @@
    "error": "no approvedBy"
   },
   {
+   "name": "an approver that is not the user (ER-46: a new exception needs the user)",
+   "doc": {
+    "allow": [
+     {
+      "id": "GHSA-fc5q-39xc-vjpf",
+      "reason": "build tool only",
+      "approvedBy": "coordinator",
+      "approved": "2026-11-18",
+      "reviewBy": "2026-12-18"
+     }
+    ]
+   },
+   "error": "needs the user"
+  },
+  {
+   "name": "an approver nobody is",
+   "doc": {
+    "allow": [
+     {
+      "id": "GHSA-fc5q-39xc-vjpf",
+      "reason": "build tool only",
+      "approvedBy": "someone",
+      "approved": "2026-11-18",
+      "reviewBy": "2026-12-18"
+     }
+    ]
+   },
+   "error": "approvedBy"
+  },
+  {
    "name": "not a GHSA id",
    "doc": {
     "allow": [

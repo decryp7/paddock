@@ -85,6 +85,8 @@ permissions:
 env:
   # The fallback switch of conformance/ci/kit.sh (WP-1): set the repository variable to shell and every kit step runs its script.
   PADDOCK_CI_KIT: ${{ vars.PADDOCK_CI_KIT }}
+  # The ref this run is on: ./dev reads the stage of the approval checks from it (a train or trial ref is the member gate, else landing).
+  PADDOCK_APPROVAL_STAGE_FROM_REF: ${{ github.ref }}
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
