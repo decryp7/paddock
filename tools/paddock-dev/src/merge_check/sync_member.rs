@@ -135,8 +135,7 @@ fn command_with(
     };
     let mut reverts = live_for_member(&git, &train_tip, &basis).map_err(|e| step(e, "fix what is named, then run it again"))?;
     let mut done = 0;
-    // The reverts of merges that HEAD already re-applies (a `git revert` of the revert is in train..HEAD).
-    let mut reapplied: Vec<(String, String, String, String)> = Vec::new();
+    // The reverts of merges that HEAD already re-applies (a `git revert` of the revert is in train..HEAD) are counted, not listed.
     if after {
         let mut open = Vec::new();
         for r in reverts {
@@ -156,7 +155,6 @@ fn command_with(
                 open.push(r);
             } else {
                 done += 1;
-                reapplied.push(r);
             }
         }
         reverts = open;
@@ -196,8 +194,13 @@ fn command_with(
             short(m)
         ));
     }
-    // The reverts the trial's merge must carry: the member's own, already re-applied, and the ones named with `--reland`.
-    let mut relands: Vec<String> = reapplied.iter().filter(|r| is_own(&r.3, &name)).map(|r| r.1.clone()).collect();
+    // The reverts the trial's merge must carry: the member's own that the sync tip re-applies (the one reader `merge member` uses,
+    // [`super::reland::own_relands`]), and the ones named with `--reland`.
+    let mut relands: Vec<String> = if after {
+        super::reland::own_relands(&git, &train_tip, &head, &name).map_err(|e| step(e, "name the reverts with --reland"))?
+    } else {
+        Vec::new()
+    };
     for given in opts.relands {
         let full = git
             .text(&["rev-parse", "--verify", &format!("{given}^{{commit}}")])

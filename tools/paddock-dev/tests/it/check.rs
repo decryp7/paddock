@@ -84,9 +84,25 @@ fn read_json(p: &Path) -> Value {
     serde_json::from_str(&std::fs::read_to_string(p).unwrap()).unwrap()
 }
 
+/// The findings as the JS host writes them. The Rust host's growth finding adds the line the user writes to approve the growth
+/// (`check::growth_approval`, the one reader, Rust only: tested in `check_growth_approval.rs`); the JS port has no such reader, so that
+/// sentence of a `fix` is left out of a comparison.
+pub fn js_findings(findings: &Value) -> Value {
+    let mut findings = findings.clone();
+    for f in findings.as_array_mut().into_iter().flatten() {
+        if let Some(fix) = f["fix"]
+            .as_str()
+            .and_then(|t| t.split(" The user records it in docs/gates.toml:").next())
+        {
+            f["fix"] = json!(fix);
+        }
+    }
+    findings
+}
+
 /// The part of a report the JS host also writes.
 fn shared_part(v: &Value) -> Value {
-    json!({"app": v["app"], "checks": v["checks"], "findings": v["findings"], "waived": v["waived"], "errors": v["errors"], "warnings": v["warnings"]})
+    json!({"app": v["app"], "checks": v["checks"], "findings": js_findings(&v["findings"]), "waived": v["waived"], "errors": v["errors"], "warnings": v["warnings"]})
 }
 
 #[test]

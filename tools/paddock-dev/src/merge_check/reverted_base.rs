@@ -139,7 +139,7 @@ fn by_subject(git: &Git, from: &str, subject: &str) -> Result<Option<String>, St
 
 /// A commit's subject and the member its trailers (or, for a merge made by hand, its subject) name: one read, one reader
 /// ([`merge_member`]).
-fn subject_and_member(git: &Git, sha: &str) -> Result<(String, trailers::MergeMember), String> {
+pub(super) fn subject_and_member(git: &Git, sha: &str) -> Result<(String, trailers::MergeMember), String> {
     let out = git.text(&["show", "-s", &format!("--format=%s%x00{TRAILERS_FORMAT}"), sha])?;
     let (subject, block) = out.split_once('\0').unwrap_or((out.as_str(), ""));
     let subject = subject.trim().to_string();

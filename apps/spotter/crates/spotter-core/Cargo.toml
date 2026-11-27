@@ -27,3 +27,9 @@ scraper = { version = "0.29", default-features = false }
 
 [lints]
 workspace = true
+
+[package.metadata.paddock]
+# What this crate's tests read that the test cache's reads extractor cannot resolve (ADR 0116 §2, user decision 122), as globs from the
+# repository root; `[]` says the blind reads touch no repository file.
+# `src/source/web_page.rs`: `.ancestors()` of an HTML node (a tree of the page), not a path.
+test-reads = []
