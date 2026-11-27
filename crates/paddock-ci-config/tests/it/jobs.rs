@@ -483,3 +483,32 @@ fn a_job_whose_condition_reads_the_webkit_output_says_so() {
     assert!(m.job("e2e").unwrap().reads_webkit);
     assert!(!m.job("ui").unwrap().reads_webkit && !m.job("crate").unwrap().reads_webkit);
 }
+
+#[test]
+fn the_producer_is_the_first_tool_cache_use_with_producer_true_directly_or_through_a_declared_action()
+ {
+    let d = |extra: &[&str]| Declared {
+        projects: BTreeMap::from([
+            ("a".to_string(), vec!["ui".to_string()]),
+            ("b".to_string(), vec!["ui".to_string()]),
+            ("c".to_string(), vec!["ui".to_string()]),
+        ]),
+        tool_cache_actions: set(extra),
+    };
+    let wf = "jobs:\n  a:\n    steps:\n      - uses: ./.gitea/actions/runner-wait\n        with:\n          producer: \"true\"\n      - run: ./dev plan --ci\n  b:\n    steps:\n      - uses: ./.gitea/actions/dev-tool-cache\n        with:\n          producer: true\n  c:\n    steps:\n      - uses: ./.gitea/actions/runner-wait\n      - uses: ./.gitea/actions/dev-tool-cache\n        with:\n          producer: \"true\"\n";
+    let m = model(wf, &d(&["runner-wait"])).unwrap();
+    assert!(
+        m.job("a").unwrap().tool_cache_producer,
+        "through a declared action that hands the input on"
+    );
+    assert!(m.job("b").unwrap().tool_cache_producer, "the action itself");
+    // Train y, run 9243: a consumer use first does the work, so a later producer use does nothing.
+    assert!(
+        !m.job("c").unwrap().tool_cache_producer,
+        "the first use decides"
+    );
+    // Control: an action the model does not know as a tool-cache use is not the first use.
+    let m = model(wf, &d(&[])).unwrap();
+    assert!(!m.job("a").unwrap().tool_cache_producer);
+    assert!(m.job("c").unwrap().tool_cache_producer);
+}

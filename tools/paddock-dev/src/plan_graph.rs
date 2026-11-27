@@ -357,6 +357,44 @@ pub fn narrow_workspace_legs(legs: Vec<Value>, plan: &Value, graph: &RepoGraph, 
         .collect()
 }
 
+/// The operating systems of `legs` (the `crate` or `paddock-dev` legs a plan emitted).
+pub fn legs_oses(legs: &[Value]) -> BTreeSet<String> {
+    legs.iter().filter_map(|l| l["os"].as_str().map(str::to_string)).collect()
+}
+
+/// The jobs of `jobs` on the legs the selection kept: a `crate@<os>` or `paddock-dev@<os>` job stays only when `oses` holds that OS
+/// for its job (the legs [`narrow_workspace_legs`] left); every other job stays. The one definition of a narrowed run's legs (ER-22):
+/// what the run declares it ran and what a push's or a landing's own diff needs both take it, so a landing whose selection ran a
+/// project's smoke set on Linux only is not asked for that project's macOS and Windows legs (train y, run 9243).
+pub fn on_selected_legs(jobs: &BTreeSet<String>, oses: &BTreeMap<&str, BTreeSet<String>>) -> BTreeSet<String> {
+    jobs.iter()
+        .filter(|j| match j.split_once('@') {
+            Some((job, os)) => oses.get(job).is_none_or(|o| o.contains(os)),
+            None => true,
+        })
+        .cloned()
+        .collect()
+}
+
+/// What a ci.yml plan declares about the `crate` and `paddock-dev` legs (the planner's one call): when the run was narrowed
+/// (`ran_narrowed`: graph mode, not a reused run) its `ran` jobs keep the legs the selection kept, and when the need is the run's own
+/// plan (`need_narrowed`: graph mode, a push's or a landing's diff, not the whole tree) so do the `need` jobs, through
+/// [`on_selected_legs`] over the same `oses`.
+pub fn declare_selected_legs(
+    ran: &mut crate::run_scope::Scope,
+    need: &mut crate::run_scope::Scope,
+    ran_narrowed: bool,
+    need_narrowed: bool,
+    oses: &BTreeMap<&str, BTreeSet<String>>,
+) {
+    if ran_narrowed {
+        ran.jobs = on_selected_legs(&ran.jobs, oses);
+    }
+    if need_narrowed {
+        need.jobs = on_selected_legs(&need.jobs, oses);
+    }
+}
+
 /// The `selection` output: each narrowed project's [`Narrow`] (a project in full is not named).
 pub fn selection_output(plan: &Value) -> Value {
     Value::Object(
