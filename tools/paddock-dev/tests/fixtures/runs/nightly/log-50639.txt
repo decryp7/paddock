@@ -1,0 +1,4 @@
+2026-11-25T21:05:51.3550290Z Job: bundle
+2026-11-25T21:16:32.5667540Z ::error::launchctl could not start the bundled dyno-agent view
+2026-11-25T21:16:54.1675970Z ::error::the launchd job net.decryptology.dyno.checkbundle.86757 (dyno-agent view, output in /Users/user/gitea-runner/tmp/1041fa8532557526/dyno-view-ci.SFTfvA) wrote nothing in 20 s; launchctl print: Bad request.;Could not find service "net.decryptology.dyno.checkbundle.86757" in domain for uid: 501;; TMPDIR=/Users/user/gitea-runner/tmp/1041fa8532557526, output folder /Users/user/gitea-runner/tmp/1041fa8532557526 (macOS denies a launchd job a folder on an external volume, TCC Removable Volumes: see conformance/ci/boot-volume.sh); this is not a code-signing identifier problem
+2026-11-25T21:16:54.2805080Z ##[error]Process completed with exit code 1.

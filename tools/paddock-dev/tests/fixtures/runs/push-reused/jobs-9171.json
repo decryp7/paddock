@@ -1,0 +1,349 @@
+{
+  "jobs": [
+    {
+      "id": 51544,
+      "url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/jobs/51544",
+      "html_url": "https://gitea.invalid/example/paddock/actions/runs/9171/jobs/51544",
+      "run_id": 9171,
+      "run_url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/runs/9171",
+      "name": "plan (affected projects)",
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "run_attempt": 1,
+      "head_sha": "167e0473a803821457f558e027ff0aacd9cf9824",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "success",
+      "runner_id": 31,
+      "runner_name": "runner-1",
+      "steps": [
+        {
+          "name": "Run actions/checkout@v4",
+          "number": 0,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-26T12:27:39Z",
+          "completed_at": "2026-11-26T12:28:09Z"
+        },
+        {
+          "name": "Run ./.gitea/actions/runner-wait",
+          "number": 1,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-26T12:28:09Z",
+          "completed_at": "2026-11-26T12:29:49Z"
+        },
+        {
+          "name": "C100 stays wired",
+          "number": 2,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-26T12:29:49Z",
+          "completed_at": "2026-11-26T12:29:49Z"
+        },
+        {
+          "name": "Reuse a full green run of this commit",
+          "number": 3,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-26T12:29:49Z",
+          "completed_at": "2026-11-26T12:30:06Z"
+        },
+        {
+          "name": "Test cache plan",
+          "number": 4,
+          "status": "completed",
+          "conclusion": "skipped",
+          "started_at": "2026-11-26T12:30:06Z",
+          "completed_at": "2026-11-26T12:30:06Z"
+        },
+        {
+          "name": "Affected projects",
+          "number": 5,
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-11-26T12:30:06Z",
+          "completed_at": "2026-11-26T12:30:23Z"
+        }
+      ],
+      "created_at": "2026-11-26T12:27:35Z",
+      "started_at": "2026-11-26T12:27:38Z",
+      "completed_at": "2026-11-26T12:30:24Z"
+    },
+    {
+      "id": 51545,
+      "url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/jobs/51545",
+      "html_url": "https://gitea.invalid/example/paddock/actions/runs/9171/jobs/51545",
+      "run_id": 9171,
+      "run_url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/runs/9171",
+      "name": "paddock-dev (${{ matrix.os }})",
+      "labels": [
+        "${{ matrix.os }}"
+      ],
+      "run_attempt": 1,
+      "head_sha": "167e0473a803821457f558e027ff0aacd9cf9824",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "skipped",
+      "runner_id": 0,
+      "steps": [],
+      "created_at": "2026-11-26T12:27:35Z",
+      "started_at": "1970-01-01T00:00:00Z",
+      "completed_at": "1970-01-01T00:00:00Z"
+    },
+    {
+      "id": 51546,
+      "url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/jobs/51546",
+      "html_url": "https://gitea.invalid/example/paddock/actions/runs/9171/jobs/51546",
+      "run_id": 9171,
+      "run_url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/runs/9171",
+      "name": "test cache (shadow report)",
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "run_attempt": 1,
+      "head_sha": "167e0473a803821457f558e027ff0aacd9cf9824",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "skipped",
+      "runner_id": 0,
+      "steps": [],
+      "created_at": "2026-11-26T12:27:35Z",
+      "started_at": "1970-01-01T00:00:00Z",
+      "completed_at": "1970-01-01T00:00:00Z"
+    },
+    {
+      "id": 51547,
+      "url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/jobs/51547",
+      "html_url": "https://gitea.invalid/example/paddock/actions/runs/9171/jobs/51547",
+      "run_id": 9171,
+      "run_url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/runs/9171",
+      "name": "ui (tokens, contrast, components, entry points, publish dry run, ESLint preset, icons)",
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "run_attempt": 1,
+      "head_sha": "167e0473a803821457f558e027ff0aacd9cf9824",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "skipped",
+      "runner_id": 0,
+      "steps": [],
+      "created_at": "2026-11-26T12:27:35Z",
+      "started_at": "1970-01-01T00:00:00Z",
+      "completed_at": "1970-01-01T00:00:00Z"
+    },
+    {
+      "id": 51548,
+      "url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/jobs/51548",
+      "html_url": "https://gitea.invalid/example/paddock/actions/runs/9171/jobs/51548",
+      "run_id": 9171,
+      "run_url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/runs/9171",
+      "name": "reference apps (shard 1/2)",
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "run_attempt": 1,
+      "head_sha": "167e0473a803821457f558e027ff0aacd9cf9824",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "skipped",
+      "runner_id": 0,
+      "steps": [],
+      "created_at": "2026-11-26T12:27:35Z",
+      "started_at": "1970-01-01T00:00:00Z",
+      "completed_at": "1970-01-01T00:00:00Z"
+    },
+    {
+      "id": 51549,
+      "url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/jobs/51549",
+      "html_url": "https://gitea.invalid/example/paddock/actions/runs/9171/jobs/51549",
+      "run_id": 9171,
+      "run_url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/runs/9171",
+      "name": "reference apps (shard 2/2)",
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "run_attempt": 1,
+      "head_sha": "167e0473a803821457f558e027ff0aacd9cf9824",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "skipped",
+      "runner_id": 0,
+      "steps": [],
+      "created_at": "2026-11-26T12:27:35Z",
+      "started_at": "1970-01-01T00:00:00Z",
+      "completed_at": "1970-01-01T00:00:00Z"
+    },
+    {
+      "id": 51550,
+      "url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/jobs/51550",
+      "html_url": "https://gitea.invalid/example/paddock/actions/runs/9171/jobs/51550",
+      "run_id": 9171,
+      "run_url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/runs/9171",
+      "name": "reference apps in WebKit (Linux)",
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "run_attempt": 1,
+      "head_sha": "167e0473a803821457f558e027ff0aacd9cf9824",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "skipped",
+      "runner_id": 0,
+      "steps": [],
+      "created_at": "2026-11-26T12:27:35Z",
+      "started_at": "1970-01-01T00:00:00Z",
+      "completed_at": "1970-01-01T00:00:00Z"
+    },
+    {
+      "id": 51551,
+      "url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/jobs/51551",
+      "html_url": "https://gitea.invalid/example/paddock/actions/runs/9171/jobs/51551",
+      "run_id": 9171,
+      "run_url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/runs/9171",
+      "name": "conformance (checks, release scripts)",
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "run_attempt": 1,
+      "head_sha": "167e0473a803821457f558e027ff0aacd9cf9824",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "skipped",
+      "runner_id": 0,
+      "steps": [],
+      "created_at": "2026-11-26T12:27:35Z",
+      "started_at": "1970-01-01T00:00:00Z",
+      "completed_at": "1970-01-01T00:00:00Z"
+    },
+    {
+      "id": 51552,
+      "url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/jobs/51552",
+      "html_url": "https://gitea.invalid/example/paddock/actions/runs/9171/jobs/51552",
+      "run_id": 9171,
+      "run_url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/runs/9171",
+      "name": "tools and shared scripts",
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "run_attempt": 1,
+      "head_sha": "167e0473a803821457f558e027ff0aacd9cf9824",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "skipped",
+      "runner_id": 0,
+      "steps": [],
+      "created_at": "2026-11-26T12:27:35Z",
+      "started_at": "1970-01-01T00:00:00Z",
+      "completed_at": "1970-01-01T00:00:00Z"
+    },
+    {
+      "id": 51553,
+      "url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/jobs/51553",
+      "html_url": "https://gitea.invalid/example/paddock/actions/runs/9171/jobs/51553",
+      "run_id": 9171,
+      "run_url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/runs/9171",
+      "name": "crates (fmt, workspace hack, unused deps, coverage, deny)",
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "run_attempt": 1,
+      "head_sha": "167e0473a803821457f558e027ff0aacd9cf9824",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "skipped",
+      "runner_id": 0,
+      "steps": [],
+      "created_at": "2026-11-26T12:27:35Z",
+      "started_at": "1970-01-01T00:00:00Z",
+      "completed_at": "1970-01-01T00:00:00Z"
+    },
+    {
+      "id": 51554,
+      "url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/jobs/51554",
+      "html_url": "https://gitea.invalid/example/paddock/actions/runs/9171/jobs/51554",
+      "run_id": 9171,
+      "run_url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/runs/9171",
+      "name": "crate (${{ matrix.os }}${{ matrix.part_label }})",
+      "labels": [
+        "${{ matrix.os }}"
+      ],
+      "run_attempt": 1,
+      "head_sha": "167e0473a803821457f558e027ff0aacd9cf9824",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "skipped",
+      "runner_id": 0,
+      "steps": [],
+      "created_at": "2026-11-26T12:27:35Z",
+      "started_at": "1970-01-01T00:00:00Z",
+      "completed_at": "1970-01-01T00:00:00Z"
+    },
+    {
+      "id": 51555,
+      "url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/jobs/51555",
+      "html_url": "https://gitea.invalid/example/paddock/actions/runs/9171/jobs/51555",
+      "run_id": 9171,
+      "run_url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/runs/9171",
+      "name": "app ${{ matrix.app }} (${{ matrix.os }}${{ matrix.e2e_leg != '' && format(', {0}', matrix.e2e_leg) || '' }})",
+      "labels": [
+        "${{ matrix.os }}"
+      ],
+      "run_attempt": 1,
+      "head_sha": "167e0473a803821457f558e027ff0aacd9cf9824",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "skipped",
+      "runner_id": 0,
+      "steps": [],
+      "created_at": "2026-11-26T12:27:35Z",
+      "started_at": "1970-01-01T00:00:00Z",
+      "completed_at": "1970-01-01T00:00:00Z"
+    },
+    {
+      "id": 51556,
+      "url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/jobs/51556",
+      "html_url": "https://gitea.invalid/example/paddock/actions/runs/9171/jobs/51556",
+      "run_id": 9171,
+      "run_url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/runs/9171",
+      "name": "gitleaks (secret scan)",
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "run_attempt": 1,
+      "head_sha": "167e0473a803821457f558e027ff0aacd9cf9824",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "skipped",
+      "runner_id": 0,
+      "steps": [],
+      "created_at": "2026-11-26T12:27:35Z",
+      "started_at": "1970-01-01T00:00:00Z",
+      "completed_at": "1970-01-01T00:00:00Z"
+    },
+    {
+      "id": 51557,
+      "url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/jobs/51557",
+      "html_url": "https://gitea.invalid/example/paddock/actions/runs/9171/jobs/51557",
+      "run_id": 9171,
+      "run_url": "https://gitea.invalid/api/v1/repos/example/paddock/actions/runs/9171",
+      "name": "quick checks (C99, audit, heavy tool)",
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "run_attempt": 1,
+      "head_sha": "167e0473a803821457f558e027ff0aacd9cf9824",
+      "head_branch": "main",
+      "status": "completed",
+      "conclusion": "skipped",
+      "runner_id": 0,
+      "steps": [],
+      "created_at": "2026-11-26T12:27:35Z",
+      "started_at": "1970-01-01T00:00:00Z",
+      "completed_at": "1970-01-01T00:00:00Z"
+    }
+  ],
+  "total_count": 14
+}
