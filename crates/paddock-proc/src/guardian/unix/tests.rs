@@ -411,8 +411,11 @@ fn forged_owner(act_as_user: bool) {
     let mut input = g.stdin.take().unwrap();
     let _ = send_to(&mut input, &line);
     drop(input);
-    let status = g.wait().unwrap();
-    let alive = run_state(victim_id) == RunState::Running;
+    // The event a wrongly acting guardian is done with: it has ended (the wait); then the one read.
+    let mut ended = None;
+    let alive =
+        crate::statewait::still_running_after(victim_id, || ended = Some(g.wait().unwrap()));
+    let status = ended.unwrap();
     let kept = folder.exists();
     // Ended through the handles of this test's own children before any assert can fail (ER-14).
     let _ = keeper.kill();
@@ -536,7 +539,10 @@ fn guard_owner_process() {
         cmd.arg("60").stdout(Stdio::null()).stderr(Stdio::null());
         let first = folders.split(':').next().unwrap_or_default();
         let s = Supervised::spawn_owning_folder(cmd, None, Path::new(first)).unwrap();
-        println!("child {}", s.id().unwrap());
+        // Its identity, read while it is alive and this owner still holds it: the guardian ends the child as soon as the owner is
+        // dead, so a reader that looks the pid up afterwards finds nothing (CI runs 9225 and 9238, macOS).
+        let id = ProcessId::of(s.id().unwrap()).unwrap();
+        println!("child {} {}", id.pid(), id.started().as_micros());
         // SAFETY: raise takes a signal number; SIGKILL ends this process at once, so none of its clean-up runs.
         unsafe { libc::raise(libc::SIGKILL) };
     }
@@ -559,6 +565,10 @@ fn guard_owner_process() {
 }
 
 /// What a failed guard left (ER-27): each process's state, each folder, and the guardian's log.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a failure message: it names each state once and no verdict rests on the read"
+)]
 fn what_is_left(ids: &[ProcessId], folders: &[PathBuf], log: &Path) -> String {
     let mut lines: Vec<String> = ids
         .iter()
@@ -667,6 +677,10 @@ fn owner_killed(act_as_user: bool) {
         }
         owner.kill().unwrap();
         owner.wait().unwrap();
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "one read after the owner was reaped (owner.wait above), the event a guardian would act on; root has none"
+        )]
         let stayed = ids.iter().all(|id| run_state(*id) == RunState::Running);
         fail_unless(
             stayed,
@@ -687,10 +701,12 @@ fn owner_killed(act_as_user: bool) {
     // SIGKILL through the handle of this process's own child: none of the owner's own clean-up runs.
     owner.kill().unwrap();
     owner.wait().unwrap();
-    let gone = paddock_testkit::wait::poll_until_within(paddock_testkit::wait::HANG_GUARD, || {
-        ids.iter().all(|id| run_state(*id) == RunState::Exited)
-            && folders.iter().all(|f| !f.exists())
-    });
+    let gone = ids
+        .iter()
+        .all(|id| crate::statewait::wait_exited(*id, paddock_testkit::wait::HANG_GUARD))
+        && paddock_testkit::wait::poll_until_within(paddock_testkit::wait::HANG_GUARD, || {
+            folders.iter().all(|f| !f.exists())
+        });
     if !gone {
         fail(
             &ids,
@@ -733,26 +749,34 @@ fn an_owner_killed_the_moment_its_guarded_spawn_returns_leaves_no_child() {
         .stderr(Stdio::null())
         .spawn()
         .unwrap();
+    let status = owner.wait().unwrap();
+    let folders = [folder];
+    // The owner's report is read only after the guardian has done its work (the folder is its last step): the worst order of the two
+    // is the only order, so the report has to carry the child's identity, which no look-up of the pid can give any more.
+    let guarded =
+        paddock_testkit::wait::poll_until_within(paddock_testkit::wait::HANG_GUARD, || {
+            folders.iter().all(|f| !f.exists())
+        });
     let mut ids = Vec::new();
     for line in BufReader::new(owner.stdout.take().unwrap()).lines() {
         let line = line.unwrap();
-        if let ["child", c] = line.split_whitespace().collect::<Vec<_>>()[..] {
-            // conformance: recorded-pid — the guardian or this test ends it; paddock-proc's tests cannot use paddock-testkit-start (a cycle)
-            ids.extend(ProcessId::of(c.parse().unwrap()));
+        if let ["child", pid, started] = line.split_whitespace().collect::<Vec<_>>()[..] {
+            ids.push(ProcessId::new(
+                pid.parse().unwrap(),
+                crate::StartTime::from_micros(started.parse().unwrap()),
+            ));
         }
     }
-    let status = owner.wait().unwrap();
-    let folders = [folder];
     fail_unless(
         ids.len() == 1
             && std::os::unix::process::ExitStatusExt::signal(&status) == Some(libc::SIGKILL),
         &ids,
         &format!("the owner did not start its child and kill itself ({status}, children {ids:?})"),
     );
-    let gone = paddock_testkit::wait::poll_until_within(paddock_testkit::wait::HANG_GUARD, || {
-        ids.iter().all(|id| run_state(*id) == RunState::Exited)
-            && folders.iter().all(|f| !f.exists())
-    });
+    let gone = guarded
+        && ids
+            .iter()
+            .all(|id| crate::statewait::wait_exited(*id, paddock_testkit::wait::HANG_GUARD));
     if !gone {
         fail(
             &ids,
@@ -798,10 +822,12 @@ fn an_owner_that_ends_its_child_itself_keeps_the_folder_and_ends_the_keeper() {
         "the child starts in the keeper's registered group"
     );
     s.kill();
-    assert_eq!(run_state(child), RunState::Exited);
-    assert_eq!(
-        run_state(keeper),
-        RunState::Exited,
+    assert!(
+        crate::statewait::wait_exited(child, paddock_testkit::wait::HANG_GUARD),
+        "the child is ended with the registration"
+    );
+    assert!(
+        crate::statewait::wait_exited(keeper, paddock_testkit::wait::HANG_GUARD),
         "the keeper is ended and reaped with the registration"
     );
     assert!(
@@ -1275,9 +1301,7 @@ fn guarded_child_with_a_helper(
 fn kill_tree_of_a_guarded_child_ends_the_helper_it_left_in_its_group() {
     let (mut s, child, helper, _out) = guarded_child_with_a_helper(true);
     kill_tree(child);
-    let gone = paddock_testkit::wait::poll_until_within(paddock_testkit::wait::HANG_GUARD, || {
-        run_state(helper) == RunState::Exited
-    });
+    let gone = crate::statewait::wait_exited(helper, paddock_testkit::wait::HANG_GUARD);
     fail_unless(
         gone,
         &[helper],
@@ -1292,11 +1316,10 @@ fn kill_tree_of_a_guarded_child_ends_the_helper_it_left_in_its_group() {
 fn a_child_kill_tree_cannot_map_keeps_its_helper_until_the_release_ends_the_group() {
     let (mut s, child, helper, _out) = guarded_child_with_a_helper(false);
     kill_tree(child);
-    let survived = run_state(helper) == RunState::Running;
+    // One read after kill_tree returned: the event that would have ended the helper if the map had known the child.
+    let survived = crate::statewait::still_running_after(helper, || {});
     s.wait();
-    let gone = paddock_testkit::wait::poll_until_within(paddock_testkit::wait::HANG_GUARD, || {
-        run_state(helper) == RunState::Exited
-    });
+    let gone = crate::statewait::wait_exited(helper, paddock_testkit::wait::HANG_GUARD);
     fail_unless(
         gone,
         &[helper],
@@ -1388,5 +1411,8 @@ fn a_reap_is_bounded_and_ends_a_process_that_does_not_end() {
         Duration::from_millis(100),
         "a child that stays"
     ));
-    assert_eq!(run_state(id), RunState::Exited);
+    assert!(
+        crate::statewait::wait_exited(id, paddock_testkit::wait::HANG_GUARD),
+        "the child that stayed was ended"
+    );
 }

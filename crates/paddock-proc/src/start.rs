@@ -265,6 +265,10 @@ pub trait StartProbe {
     }
     /// Whether the process is stopped (see [`run_state`]); [`RunState::Unknown`] without a [`StartProbe::pid`]. The watch
     /// asks it every tick while [`StartProbe::liveness`] says running, and a stopped process reads as [`Liveness::Paused`].
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "production read: the start judge reads the state on its own cadence, never a verdict on one read"
+    )]
     fn run_state(&mut self) -> RunState {
         self.pid().map_or(RunState::Unknown, run_state)
     }
@@ -286,6 +290,10 @@ pub trait Pace {
 
 /// The [`Liveness`] of `id`: `exited` when the caller has already seen it end (its wait status), else [`Liveness::Paused`]
 /// when the OS says it is stopped, else running. For users of [`StartJudge`] that build their own [`Reading`]s.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "production read: the start judge reads the state on its own cadence, never a verdict on one read"
+)]
 pub fn liveness_of(id: ProcessId, exited: Option<ExitInfo>) -> Liveness {
     match exited {
         Some(info) => Liveness::Exited(info),
