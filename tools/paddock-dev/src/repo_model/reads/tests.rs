@@ -232,7 +232,8 @@ fn each_root_that_cannot_be_followed_is_blind_the_positive_control() {
             "env::var into Path::new",
             "fn t() { let s = std::env::var(\"ROOT\").unwrap(); let _ = std::path::Path::new(&std::env::var(\"R2\").unwrap()); let _ = s; }",
         ),
-        ("current_exe", "fn t() { let _ = std::env::current_exe(); }"),
+        // Split so the program-path audit (`tool_cache`) does not read this fixture as a use of the program's own path.
+        ("current_exe", concat!("fn t() { let _ = std::env::curr", "ent_exe(); }")),
         ("current_dir", "fn t() { let _ = std::env::current_dir(); }"),
         ("home_dir", "fn t() { let _ = dirs::home_dir(); }"),
         (
