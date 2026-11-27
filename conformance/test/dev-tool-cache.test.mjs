@@ -2,10 +2,12 @@
 // plus OS, architecture and the salt (no restore-keys), a restored binary is judged by what ./dev did with it, a miss says "miss"
 // and is saved only after the tool reported its own hash, and the summary never shows a failed save as a pass (ER-33).
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { spawn, spawnSync } from 'node:child_process';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createServer } from 'node:http';
+import { symlinkSync } from 'node:fs';
 import { test } from 'node:test';
 import { PADDOCK } from './helpers.mjs';
 
@@ -190,4 +192,171 @@ test('a wrapper that gives no hash fails the step loudly, never a silent miss (E
   const bad = run(root, ['key']);
   assert.notEqual(bad.status, 0);
   assert.match(bad.text, /::error::dev-tool-cache: .*unexpected shape/);
+});
+
+// User decision 109: the runner-local store, a folder of the /sccache volume, is read before the Actions cache.
+/** A store with an entry for HASH holding a stand-in tool; returns the store folder. */
+function storeWith(root, hash = HASH, file = 'paddock-dev-linux-x86_64') {
+  const store = join(root, 'store');
+  mkdirSync(join(store, hash), { recursive: true });
+  writeFileSync(join(store, hash, file), '#!/bin/sh\n');
+  return store;
+}
+
+test('a store entry is copied into the job\'s own tool folder, never run from the shared store', () => {
+  const root = fixture();
+  const store = storeWith(root);
+  const r = run(root, ['store-restore', HASH], { PADDOCK_DEV_TOOL_STORE: store });
+  assert.equal(r.status, 0, r.text);
+  assert.equal(r.out.hit, 'true');
+  const mine = join(root, 'home', '.paddock-dev', 'bin', HASH);
+  assert.deepEqual(readdirSync(mine), ['paddock-dev-linux-x86_64'], 'the entry is copied into <home>/bin/<hash>, the folder the launcher reads');
+  assert.notEqual(mine, join(store, HASH));
+  assert.deepEqual(readdirSync(join(root, 'home', '.paddock-dev', 'bin')), [HASH], 'no temp copy is left behind');
+});
+
+test('no entry for the hash, a store that is not there, and an entry for another hash are all a miss that never fails the job', () => {
+  const root = fixture();
+  assert.equal(run(root, ['store-restore', HASH], { PADDOCK_DEV_TOOL_STORE: join(root, 'no-such-store') }).out.hit, 'false');
+  const other = storeWith(root, 'b'.repeat(40));
+  const r = run(root, ['store-restore', HASH], { PADDOCK_DEV_TOOL_STORE: other });
+  assert.equal(r.status, 0, r.text);
+  assert.equal(r.out.hit, 'false', 'a binary of another hash is never restored');
+  assert.equal(existsSync(join(root, 'home', '.paddock-dev', 'bin', HASH)), false);
+  // Positive control: the same store with the right entry hits.
+  assert.equal(run(root, ['store-restore', 'b'.repeat(40)], { PADDOCK_DEV_TOOL_STORE: other }).out.hit, 'true');
+});
+
+test('an empty store entry is a warned miss, and a bad hash is refused before any path is built from it', () => {
+  const root = fixture();
+  const store = join(root, 'store');
+  mkdirSync(join(store, HASH), { recursive: true });
+  const r = run(root, ['store-restore', HASH], { PADDOCK_DEV_TOOL_STORE: store });
+  assert.equal(r.out.hit, 'false');
+  assert.match(r.text, /::warning::dev-tool-cache: the runner store entry .* could not be copied/);
+  const bad = run(root, ['store-restore', '../../etc'], { PADDOCK_DEV_TOOL_STORE: store });
+  assert.notEqual(bad.status, 0);
+  assert.match(bad.text, /::error::dev-tool-cache: store-restore needs the 40-hex input hash/);
+});
+
+test('the summary says a hit came from the runner store, and still names the Actions cache otherwise', () => {
+  const root = fixture();
+  const sum = (env) => run(root, ['summary', 'hit', 'false', '', 'true', 'the-key'], { KEY: 'the-key', ...env }).sum;
+  assert.match(sum({ SOURCE: 'store' }), /exact hit from the runner store \(verified for its hash\)/);
+  assert.match(sum({}), /exact hit from the Actions cache/);
+});
+
+// User decision 109: one producer. A consumer job (SAVES=false) restores only: its miss is "not by this job", never a failed save, and its
+// audit line is n/a, so `ci cache-audit` does not read it as a key nobody saved.
+test('a job that only restores says so on a miss, prints saved=n/a and warns of nothing', () => {
+  const root = fixture();
+  const r = run(root, ['summary', 'miss', 'true', 'false', '', ''], { KEY: 'the-key', SAVES: 'false' });
+  assert.match(r.sum, /restored: miss \(built\); saved: not by this job \(only the plan job saves\)/);
+  assert.match(r.text, /cache-report: name=dev-tool outcome=miss saved=n\/a key=the-key/);
+  assert.doesNotMatch(r.text, /::warning::/, 'a consumer that did not save is no failure');
+  // Positive control: the producer (SAVES unset or true) with the same inputs reports the unconfirmed save.
+  for (const env of [{}, { SAVES: 'true' }]) {
+    const w = run(root, ['summary', 'miss', 'true', 'false', '', ''], { KEY: 'the-key', ...env });
+    assert.match(w.sum, /saved: NOT confirmed/);
+    assert.match(w.text, /saved=no key=the-key/);
+  }
+});
+
+// User decision 109: the circuit breaker. A real local HTTP server stands in for the cache service; curl is the real one.
+/** Serves `status` for every request on a free port; returns [url, close]. */
+async function service(status) {
+  const server = createServer((req, res) => { res.statusCode = status; res.end(); });
+  await new Promise((ok) => server.listen(0, '127.0.0.1', ok));
+  return [`http://127.0.0.1:${server.address().port}/`, () => new Promise((ok) => server.close(ok))];
+}
+const CURL_PATH = `${process.env.PATH ?? ''}:/usr/bin:/bin`;
+/** `probe` as a child that does not block this process: the stand-in service answers from this very event loop. */
+async function probe(root, env) {
+  const gh = join(root, 'github-env');
+  const outputs = join(root, 'output');
+  const summary = join(root, 'summary');
+  writeFileSync(gh, '');
+  writeFileSync(outputs, '');
+  const child = spawn('/bin/bash', [SCRIPT, 'probe'], {
+    env: { PATH: CURL_PATH, HOME: join(root, 'home'), PADDOCK_REPO: root, RUNNER_OS: 'Linux', RUNNER_ARCH: 'X64', GITHUB_OUTPUT: outputs, GITHUB_ENV: gh, GITHUB_STEP_SUMMARY: summary, PADDOCK_CACHE_PROBE_SECONDS: '2', ...env },
+  });
+  let text = '';
+  child.stdout.on('data', (d) => { text += d; });
+  child.stderr.on('data', (d) => { text += d; });
+  const status = await new Promise((ok) => child.on('close', ok));
+  const out = Object.fromEntries(readFileSync(outputs, 'utf8').split('\n').filter(Boolean).map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1)]));
+  let sum = '';
+  try { sum = readFileSync(summary, 'utf8'); } catch { /* none */ }
+  return { status, text, out, sum, env: readFileSync(gh, 'utf8') };
+}
+
+test('a cache service that answers (even with an error status) keeps the cache steps on', async () => {
+  const root = fixture();
+  for (const status of [204, 404, 500]) {
+    const [url, close] = await service(status);
+    const r = await probe(root, { ACTIONS_CACHE_URL: url });
+    await close();
+    assert.equal(r.status, 0, r.text);
+    assert.equal(r.out.down, 'false', `HTTP ${status} is an answer`);
+    assert.doesNotMatch(r.env, /CACHE_DOWN/);
+    assert.match(r.env, /PADDOCK_ACTIONS_CACHE_PROBED=1/, 'the job asks once');
+  }
+});
+
+test('a cache service that does not answer in time switches every cache step off with one warning, and the job goes on', async () => {
+  const root = fixture();
+  // A port nothing listens on: the answer is refused at once. A server that accepts and never answers is the stall case below.
+  const [url, close] = await service(204);
+  await close();
+  const r = await probe(root, { ACTIONS_CACHE_URL: url });
+  assert.equal(r.status, 0, 'the probe never fails the job');
+  assert.equal(r.out.down, 'true');
+  assert.match(r.env, /PADDOCK_ACTIONS_CACHE_DOWN=1/);
+  assert.equal((r.text.match(/::warning::/g) ?? []).length, 1, 'exactly one warning');
+  assert.match(r.text, /::warning::dev-tool-cache: the Actions cache service .* did not answer within 2 s.* Next step:/);
+  assert.match(r.sum, /Actions cache service: NOT answering/);
+});
+
+test('a service that accepts the connection and never answers is cut at the limit (the run 9180 stall)', async () => {
+  const root = fixture();
+  const server = createServer(() => { /* never answers */ });
+  await new Promise((ok) => server.listen(0, '127.0.0.1', ok));
+  const t0 = Date.now();
+  const r = await probe(root, { ACTIONS_CACHE_URL: `http://127.0.0.1:${server.address().port}/` });
+  const took = Date.now() - t0;
+  server.closeAllConnections();
+  await new Promise((ok) => server.close(ok));
+  assert.equal(r.out.down, 'true');
+  assert.ok(took < 30_000, `the probe is bounded by its own limit (${took} ms), not the cache client's 5 tries`);
+});
+
+test('a job with no service address or no curl cannot ask: not measured, the steps run as they are (ER-33)', async () => {
+  const root = fixture();
+  const r = await probe(root, { ACTIONS_CACHE_URL: '' });
+  assert.equal(r.out.down, 'false');
+  assert.match(r.text, /::notice::dev-tool-cache: the Actions cache service was not probed .* Not measured/);
+  assert.doesNotMatch(r.env, /CACHE_DOWN/);
+  // A PATH with dirname (the script needs it to find itself) and no curl; bash is found through the parent's PATH.
+  const bin = join(root, 'bin');
+  mkdirSync(bin);
+  symlinkSync('/usr/bin/dirname', join(bin, 'dirname'));
+  const noCurl = await probe(root, { ACTIONS_CACHE_URL: 'http://127.0.0.1:1/', PATH: bin });
+  assert.equal(noCurl.out.down, 'false');
+  assert.match(noCurl.text, /was not probed/);
+});
+
+test('a second use in the same job does not ask again and repeats the first answer', () => {
+  const root = fixture();
+  const r = run(root, ['probe'], { ACTIONS_CACHE_URL: 'http://127.0.0.1:1/', PADDOCK_ACTIONS_CACHE_PROBED: '1', PADDOCK_ACTIONS_CACHE_DOWN: '1' });
+  assert.equal(r.out.down, '1');
+  assert.doesNotMatch(r.text, /::warning::/);
+});
+
+test('with the service down the summary says the restore was skipped, not that it missed', () => {
+  const root = fixture();
+  const r = run(root, ['summary', 'miss', 'false', '', '', ''], { KEY: 'the-key', PADDOCK_ACTIONS_CACHE_DOWN: '1', SAVES: 'false' });
+  assert.match(r.sum, /restored: skipped \(the Actions cache service did not answer; built\)/);
+  const w = run(root, ['summary', 'miss', 'false', '', '', ''], { KEY: 'the-key', PADDOCK_ACTIONS_CACHE_DOWN: '1' });
+  assert.match(w.sum, /saved: skipped \(service down\)/);
+  assert.doesNotMatch(w.text, /::warning::/, 'a skipped save is not a failed one');
 });
