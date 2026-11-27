@@ -51,4 +51,4 @@ expected map lists the e2e legs a train skips), so the reader refuses it as "dec
 | `member-trial` | 9163 | a member's trial, v2 | not measured (D2) |
 | `green-full-v3` | 9180 | a full green train run, v3, clean shadow | green |
 | `push-reused-v3` | 9180, 9181 | the push over it | skip, reusing 9180 |
-| `member-trial-v3` | 9179 | a member's trial, v3, narrowed | not measured: not a full scope |
+| `member-trial-v3` | 9179 | a member's trial, v3, narrowed | green: its own scope line ran |

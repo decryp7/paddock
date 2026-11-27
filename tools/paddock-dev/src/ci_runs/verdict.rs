@@ -384,20 +384,45 @@ pub fn trial(client: &mut Client, workflow: &str, branch: &str, member_sha: &str
     Trial::NoRun
 }
 
-/// A trial run that ended green counts only when its declared scope ran, as for `ci verdict --landing`: every job its scope line
-/// expects ran and passed, and the line covers a full run or a landing's own diff (ADR 0113, ADR 0123 §7). A narrowed run, a run whose
-/// plan job logged no readable line and a declared job that was skipped are never green (ER-33).
+/// A trial run that ended green counts when its OWN declared scope ran: the trial is narrowed by design (only the member's affected
+/// jobs), so every job its scope line expects must have run and passed (a skipped or missing one is red), never a full scope: that
+/// belongs to the landing verdict ([`verdict`]). A plan job with no readable scope line, or the scope of another workflow, is not
+/// measured (ER-33).
 fn declared_scope_of_trial(client: &mut Client, run: &RunInfo) -> Trial {
-    let read = read_mode_jobs_for(client, run, true, false);
-    match read.mode {
-        Mode::Full => Trial::Green { run: run.id },
-        Mode::Partial(_) if read.landing.is_some() => Trial::Green { run: run.id },
-        Mode::Incomplete(why) => Trial::Red {
+    let not_measured = |why: String| Trial::NotMeasured(format!("run {}: its declared scope cannot be read ({why})", run.id));
+    let jobs = match client.timed_jobs(run.id) {
+        Ok(Some(j)) => j,
+        Ok(None) => return not_measured("the server has no job list for the run".into()),
+        Err(e) => return not_measured(format!("the jobs could not be listed: {e}")),
+    };
+    let Some(plan) = jobs.iter().find(|j| crate::plan_since::is_plan_name(&j.name)) else {
+        return not_measured("no plan job".into());
+    };
+    let log = match client.log(plan.id) {
+        Ok(Some(log)) => log,
+        Ok(None) => return not_measured("the plan job has no log".into()),
+        Err(e) => return not_measured(format!("the plan job's log could not be read: {e}")),
+    };
+    let d = match run_scope::read(&log) {
+        Some(Ok(d)) if d.workflow == run.workflow() => d,
+        Some(Ok(d)) => return not_measured(format!("its plan job declared the scope of {}", d.workflow)),
+        Some(Err(e)) => return not_measured(e),
+        None => return not_measured(format!("its plan job logged no \"{SCOPE_LINE}\" line")),
+    };
+    if d.expected.is_empty() {
+        return not_measured("its scope line expects no job, so nothing was measured".into());
+    }
+    let pairs: Vec<(String, JobOutcome)> = jobs.iter().map(|j| (j.name.clone(), j.outcome.clone())).collect();
+    match run_scope::check_ran(&d, &pairs) {
+        Ok(()) => Trial::Green { run: run.id },
+        Err(run_scope::RanProblem::NotRun(why)) => Trial::Red {
             run: run.id,
             reason: format!("the run is green but its declared scope was not run ({why})"),
         },
-        Mode::Partial(why) => Trial::NotMeasured(format!("run {} is green but did not test a full scope ({why})", run.id)),
-        Mode::Unknown(why) => Trial::NotMeasured(format!("run {}: its declared scope cannot be read ({why})", run.id)),
+        Err(run_scope::RanProblem::Missing(why)) => Trial::NotMeasured(format!(
+            "run {}: its declared scope cannot be checked against its jobs ({why})",
+            run.id
+        )),
     }
 }
 
@@ -1916,8 +1941,19 @@ mod tests {
         assert_eq!(green(run_scope::TEST_COMPLETE, "success"), Trial::Green { run: 9 });
         // A declared job skipped although the run ended green (the shape of run 9167's e2e): red, not a pass.
         assert!(matches!(green(run_scope::TEST_COMPLETE, "skipped"), Trial::Red { run: 9, .. }));
-        // A narrowed run (its scope is not what a push to main does, and no landing's own diff): not a pass.
-        assert!(matches!(green(run_scope::TEST_PARTIAL, "success"), Trial::NotMeasured(_)));
+        // A narrowed run is a trial by design: green when every job its own scope line expects ran and passed.
+        assert_eq!(green(run_scope::TEST_PARTIAL, "success"), Trial::Green { run: 9 });
+        // The narrowed run with an expected job skipped: red.
+        assert!(matches!(green(run_scope::TEST_PARTIAL, "skipped"), Trial::Red { run: 9, .. }));
+        // A scope line expecting no job: nothing was measured, never a pass (ER-33).
+        let empty = run_scope::TEST_PARTIAL.replace(
+            "{\"conformance (checks, release scripts)\":{\"job\":\"conformance\",\"leg\":{},\"projects\":[\"conformance\"]}}",
+            "{}",
+        );
+        // Nothing ran either, so `check_ran` alone would pass it.
+        let empty = empty.replacen("\"ran\":{\"jobs\":[\"conformance\"]", "\"ran\":{\"jobs\":[]", 1);
+        assert_ne!(empty, run_scope::TEST_PARTIAL);
+        assert!(matches!(green(&empty, "success"), Trial::NotMeasured(_)));
         // A plan job with no readable scope line: not measured.
         assert!(matches!(green("plan verdict: complete=true\n", "success"), Trial::NotMeasured(_)));
     }
