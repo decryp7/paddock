@@ -28,8 +28,10 @@ modules = [
     "priority",
     "process_env",
     "repo_inputs",
+    "stop_signals",
     "test_cost",
     "test_sleeper",
+    "throttle",
     "tool_cache",
     "wait_lock",
 ]
@@ -54,6 +56,7 @@ modules = [
     "health",
     "heavy_cmd",
     "heavy_install",
+    "heavy_tool",
     "hook",
     "local_sccache",
     "locks",
@@ -94,6 +97,7 @@ modules = [
 name = "ci"
 uses = ["host", "repo"]
 modules = [
+    "ci_job_model",
     "ci_runs",
     "generators",
     "load",

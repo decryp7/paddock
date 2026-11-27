@@ -3,6 +3,7 @@
 //! the default port is never stopped: only CI's own server, whose port setup-rust sets (`SCCACHE_SERVER_PORT`).
 //!
 //! A job whose cache missed everywhere gets one `::warning::` ([`miss_warning`]; report-only until [`MISS_WARNING_REVIEW_BY`]).
+//! A job on a kept build folder whose few executed requests all missed gets one `::notice::` ([`warm_label`]): its 0% is not a fault.
 //!
 //! sccache gets `SCCACHE_*` only (the server's port and settings), never the job's tokens ([`ToolCall`]). Never fails the job.
 
@@ -52,6 +53,30 @@ pub(super) fn miss_warning(stats: &str, leg: &str, slot: &str) -> Option<String>
     })
 }
 
+/// The most requests a job may execute and still be a warm job (the miss warning above speaks over [`MISS_WARNING_ABOVE`] misses).
+const WARM_EXECUTED_AT_MOST: u64 = MISS_WARNING_ABOVE;
+
+/// The label of a job on a kept build folder whose hit rate reads 0% and is not a fault (run 9248: the Mac and Windows paddock-dev legs,
+/// 3 requests executed, 101 non-cacheable calls): cargo asks rustc only for the crates that changed, so the few requests sccache
+/// executed are the changed first-party crates, all misses, and the rest were fresh in the kept folder. `Some(notice line)` when no
+/// request hit and 1 to [`WARM_EXECUTED_AT_MOST`] were executed, all of them misses. `None` when the counters are missing (not
+/// measured, ER-33), a request hit (the rate speaks for itself), nothing executed, or more executed than a warm job needs (a cold
+/// job: [`miss_warning`]'s case).
+pub(super) fn warm_label(stats: &str) -> Option<String> {
+    let (executed, hits, misses) = (
+        stat(stats, "Compile requests executed")?,
+        stat(stats, "Cache hits")?,
+        stat(stats, "Cache misses")?,
+    );
+    let probes = stat(stats, "Non-cacheable calls").unwrap_or(0);
+    (hits == 0 && misses == executed && (1..=WARM_EXECUTED_AT_MOST).contains(&executed)).then(|| {
+        format!(
+            "::notice::sccache-stats: warm build folder: {executed} executed, all changed first-party crates; the rest fresh in the kept folder \
+             ({probes} non-cacheable calls are not compiles). A hit rate of 0% here is not a fault."
+        )
+    })
+}
+
 /// The command over the real machine.
 pub fn run(env: &HashMap<String, String>, out: &mut dyn Write) -> i32 {
     let mut step = Step {
@@ -78,6 +103,9 @@ pub fn run(env: &HashMap<String, String>, out: &mut dyn Write) -> i32 {
                 step.var("GITHUB_WORKFLOW").unwrap_or("?"),
                 step.var("GITHUB_JOB").unwrap_or("?")
             );
+            if let Some(line) = warm_label(&r.stdout) {
+                step.say(line);
+            }
             if let Some(line) = miss_warning(&r.stdout, &leg, step.var("PADDOCK_CI_SLOT").unwrap_or("none")) {
                 step.say(line);
             }
@@ -200,6 +228,76 @@ Multi-level cache levels              2
         );
         assert!(w.contains("cache keys may contain a changing path"), "{w}");
         assert!(w.contains(MISS_WARNING_REVIEW_BY), "the review date is in the line: {w}");
+    }
+
+    /// The counters of a Mac paddock-dev leg on its kept build folder (run 9248: 3 requests executed, 101 non-cacheable calls): only
+    /// the 2 changed first-party crates and the tool's own crate compiled, so the hit rate reads 0% and is not a fault. As sccache
+    /// 0.20.1 prints them, without the cache location lines (machine paths, ER-46).
+    const KEPT_FOLDER: &str = "Compile requests                    104
+Compile requests executed             3
+Cache hits                            0
+Cache misses                          3
+Cache hits rate                    0.00 %
+Cache timeouts                        0
+Compilations                          3
+Compilation failures                  0
+Non-cacheable compilations            0
+Non-cacheable calls                 101
+Non-compilation calls                 0
+Multi-level cache levels              2
+  L0 (disk) hits                      0
+  L0 (disk) misses                    3
+  L1 (s3) hits                        0
+  L1 (s3) misses                      3
+";
+
+    #[test]
+    fn a_zero_percent_job_with_few_executed_requests_is_labelled_warm_not_a_fault() {
+        let l = warm_label(KEPT_FOLDER).unwrap();
+        assert!(l.starts_with("::notice::sccache-stats:") && !l.contains('\n'), "{l}");
+        assert!(
+            l.contains("3 executed") && l.contains("changed first-party crates") && l.contains("fresh in the kept"),
+            "{l}"
+        );
+        assert!(l.contains("101 non-cacheable"), "the probes are named so 0% is read right: {l}");
+        // The label and the miss warning never both speak: the warning needs more than 20 misses, the label at most 20 executed.
+        assert_eq!(miss_warning(KEPT_FOLDER, "CI/paddock-dev", "s1"), None);
+    }
+
+    #[test]
+    fn a_cold_job_a_hitting_job_and_unreadable_counters_get_no_warm_label() {
+        // Cold: 90 requests executed, none hit: the miss warning's case, never labelled warm.
+        let cold = KEPT_FOLDER
+            .replace("executed             3", "executed            90")
+            .replace("misses                          3", "misses                         90");
+        assert_eq!(warm_label(&cold), None, "90 executed is a cold job");
+        let twenty = KEPT_FOLDER
+            .replace("executed             3", "executed            20")
+            .replace("misses                          3", "misses                         20");
+        assert!(warm_label(&twenty).is_some(), "20 is not above the bound");
+        let hit = KEPT_FOLDER.replace("Cache hits                            0", "Cache hits                            2");
+        assert_eq!(warm_label(&hit), None, "a job that hit is warm by its rate");
+        let nothing = KEPT_FOLDER.replace("executed             3", "executed             0");
+        assert_eq!(warm_label(&nothing), None, "nothing executed says nothing");
+        // Old counters without the executed line (COLD/WARM above) and garbage: not measured (ER-33).
+        for text in [COLD, WARM, "", "Compile requests executed   x\nCache hits  0\nCache misses 3"] {
+            assert_eq!(warm_label(text), None, "not measured: {text:?}");
+        }
+    }
+
+    #[test]
+    fn the_step_prints_the_warm_label_after_the_statistics_and_exits_0() {
+        let d = crate::ci_host::canonical_tempdir();
+        let calls = d.path().join("calls").display().to_string();
+        StandIn::new(d.path(), "sccache")
+            .answers(Actions::new().appends_with(&calls, CALL_LINE).stdout(KEPT_FOLDER))
+            .install()
+            .unwrap();
+        let (code, out, _) = go(d.path(), &[]);
+        assert_eq!(code, 0);
+        assert_eq!(out.matches("::notice::sccache-stats: warm").count(), 1, "{out}");
+        assert!(out.find("Compile requests").unwrap() < out.find("::notice::sccache-stats").unwrap());
+        assert!(!out.contains("::warning::sccache-stats"), "{out}");
     }
 
     #[test]

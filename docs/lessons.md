@@ -3865,8 +3865,12 @@ first and records the second (`ci fix-items`) is part of the queued green-main w
   - Train 2026-11-25-a's landing run ci.yml 8976 (plan job 48889) could not save the escape monitor's selection record:
     `::warning::the selection record of this plan was not saved (git push origin refs/paddock/plan-records/*:refs/paddock/plan-records/*:
     fatal: could not read Username for 'http://172.16.1.220:7400': No such device or address); the next nightly counts this commit as
-    not measured`. The plan job pushes the refs with no credentials over the http remote; likely fix: push with the job token, the way
-    checkout authenticates (to be fixed with the dispatch guards, train c).
+    not measured`. The plan job pushed the refs with no credentials over the http remote. A token for it was the wrong fix: train y's
+    push, with the token, was refused too ("User permission denied for writing"), because ci.yml is read-only by design
+    (`permissions: contents: read`; no job writes to the repository). **Resolved (user, 2026-11-27):** the record is an Actions artifact
+    `plan-record` of the plan job's own run (14 days), read by the nightly through the Actions API; the refs, the push and the prune are
+    deleted (ADR 0117 amendment `0117-plan-records-artifact-2026-11-27.md`). Class: a mechanism that needs a write path in a workflow
+    that is read-only on purpose; check that a new store fits the workflow's permissions before wiring it.
   - The same plan printed its `::notice::inactive:` glued to the end of that warning: `eprintln!` writes a line's text and its newline
     as two writes, and the runner merged the notice from standard output between them. Fixed in this train (`log_text::write_line`,
     one write per line, for the plan and the eleven `|l| eprintln!("{l}")` log closures). Still open: the other `eprintln!` calls with
@@ -4516,6 +4520,14 @@ before it checks their names, with a failing test first (bug-fix skill). Open; n
 - **Fix.** The three test shapes above, and a clock mark on every phase of the hung-phase run (ADR 0103). The mechanism that makes (a), (b) and the
   limit-over-setup case impossible is proposed on `test/proc-identity-ban`: a Clippy ban on `ProcessId::of` in test code, a `wait_ended` that drops
   the handle first, and the existing `no-clock-mark` check extended to every phase. Open until it lands.
+
+## Per-member trials on a moving train cost more than they proved; one trial of the tip does (2026-11-27, docs/batched-member-trials, user decision)
+- **What happened.** On train y each member's own CI trial ran on a train that kept moving: the trials went red on other members' defects, proved
+  little about the member, and took about 30 minutes each. Train z (2026-11-27) merged 8 members in about 40 minutes with the fast static rows per
+  member and one trial of the train tip, against about 90 minutes for one-by-one trials.
+- **Rule 100 amended.** A member has its own trial on the train only when it has no green trial on main (a Linux trial with `--onto origin/main` on its
+  head, or on a head whose only differences are merges of main); with one it joins with `--no-trial "trial <run id> green on main"`. One trial of the tip
+  covers the rest; red means pull the member it points to (ER-8). The final full run and `landing-held` are unchanged (ER-49).
 
 ## Path-keyed registers follow a pure rename (2026-11-27, fix/registers-follow-renames, ER-21)
 - **What happened.** The crate move `tools/throttle/src` to `crates/paddock-throttle/src` (45ec96c97, bf651d875) re-registered entries in the C53 baseline
