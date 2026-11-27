@@ -13,6 +13,9 @@
 //! - `.path().join("..").join(..)` and `.path().parent().unwrap().join(..)`: the parent of a testkit temp folder is the shared one
 //!   (a parent only read or passed on, as in `GIT_CEILING_DIRECTORIES`, writes nothing and is not a finding).
 //!
+//! A site that is not a shared name (a test that builds a traversal path on purpose, never writing it) is waived in place with
+//! `// conformance: shared-temp-parent — <why>` on its line or the line above; the report lists it under `waived` with the reason.
+//!
 //! The reading is lexical by design (a path that reaches the temp folder through a helper or a field is not seen, and a
 //! `.path().parent()` of a file path is a false positive): a report-only check whose count is the starting list.
 //!
@@ -20,6 +23,7 @@
 //! (`[[report_only]]` C176, review by 2026-12-11). Lists only shrink (ER-46): no baseline file. Rust host only: born in Rust.
 
 use super::finding::Finding;
+use super::inline_waiver::{CommentView, Kind};
 use super::jsre::rx;
 use super::lex::rust::{mask, production_lines};
 use super::record::Precondition;
@@ -125,6 +129,8 @@ fn test_file(rel: &str) -> bool {
     is_test_file(rel) || rel.rsplit('/').next().is_some_and(|n| n.starts_with("testutil"))
 }
 
+const FIX: &str = "Make the test's own folder (`tempfile::tempdir()` or `paddock_testkit::private_tempdir`, kept for the whole use) and join onto its path; for a file beside a fixture repository use a helper that owns the folder, as `Repo::owned_file` does (rule 97, ER-51).";
+
 /// The check.
 pub struct C176;
 
@@ -175,6 +181,10 @@ impl Check for C176 {
                     "// std::env::temp_dir().join(\"x\") is the shared parent\nfn f() {}\n",
                 ),
                 (
+                    "crates/a/tests/it/waived.rs",
+                    "fn f(r: &Repo) {\n    // conformance: shared-temp-parent — a traversal path built to be refused, never written\n    let m = r.path().join(\"..\").join(\"x\");\n}\n",
+                ),
+                (
                     "crates/a/src/lib.rs",
                     "pub fn scratch() -> std::path::PathBuf {\n    std::env::temp_dir().join(\"x\")\n}\n",
                 ),
@@ -197,15 +207,31 @@ impl Check for C176 {
         for f in ctx.files().iter().filter(|f| f.ends_with(".rs")) {
             let Some(text) = ctx.read(f) else { continue };
             probes += 1;
-            for s in scan(&text, test_file(f)) {
-                findings.push(Finding::warn(
+            let sites = scan(&text, test_file(f));
+            let view = (!sites.is_empty()).then(|| CommentView::of(&text, Kind::Rust));
+            for s in sites {
+                let site = Finding::warn(
                     "C176",
                     RULE,
                     f,
                     s.line,
-                    format!("a path is joined onto the shared temp folder ({}): every test and every run shares that parent", s.via),
-                    "Make the test's own folder (`tempfile::tempdir()` or `paddock_testkit::private_tempdir`, kept for the whole use) and join onto its path; for a file beside a fixture repository use a helper that owns the folder, as `Repo::owned_file` does (rule 97, ER-51).",
-                ));
+                    format!(
+                        "a path is joined onto the shared temp folder ({}): every test and every run shares that parent",
+                        s.via
+                    ),
+                    FIX,
+                );
+                let Some(view) = &view else { continue };
+                findings.push(view.waiver(s.line, "shared-temp-parent").apply(site, || {
+                    Finding::warn(
+                        "C176",
+                        RULE,
+                        f,
+                        s.line,
+                        "the shared-temp-parent waiver gives no reason",
+                        "Write `// conformance: shared-temp-parent — <why this path is never a name tests share>`.",
+                    )
+                }));
             }
         }
         CheckOutput {

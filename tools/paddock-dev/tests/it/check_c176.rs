@@ -68,6 +68,18 @@ fn c176_passes_an_owned_folder_and_production_code() {
     assert!(r.findings.is_empty(), "{:?}", r.findings);
 }
 
+/// A site waived in place with its reason is listed as waived and is no warning; a waiver without a reason stays a warning.
+#[test]
+fn c176_a_waiver_with_a_reason_lists_the_site_and_one_without_does_not() {
+    let waived = "fn f(r: &Repo) {\n    // conformance: shared-temp-parent — a traversal path built to be refused, never written\n    let m = r.path().join(\"..\").join(\"x\");\n}\n";
+    let bare = "fn f(r: &Repo) {\n    // conformance: shared-temp-parent\n    let m = r.path().join(\"..\").join(\"x\");\n}\n";
+    let tree = tree_of(&[("crates/a/tests/it/waived.rs", waived), ("crates/b/tests/it/bare.rs", bare)]);
+    let r = run_checks(&options(tree.path(), "fixture"), &registry()).unwrap();
+    assert_eq!((r.errors(), r.warnings()), (0, 1), "{:?}", r.findings);
+    assert_eq!(r.waived.len(), 1, "{:?}", r.waived);
+    assert!(r.findings.iter().any(|f| f.message.contains("gives no reason")), "{:?}", r.findings);
+}
+
 /// The positive control (ER-33): the host ran the check over its own planted tree and it saw the shared joins.
 #[test]
 fn c176_control_sees_a_builder() {
