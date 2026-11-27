@@ -237,7 +237,7 @@ fn touched(apps: &[&str]) -> Touched {
     }
 }
 
-/// The plan reached every crate by a reason that is not a Cargo reach (a UI file, a script): every test of it is touched.
+/// The plan reached every crate (the strict interim reading: a FLAKY test of a reached crate is red).
 fn reached() -> Touched {
     Touched {
         flags: ["crates".to_string()].into(),
@@ -339,9 +339,8 @@ fn the_base_is_found_among_first_parent_commits_whatever_their_push_run_conclude
 }
 
 #[test]
-fn a_flaky_test_in_a_project_the_plan_reached_beyond_cargo_is_red() {
-    // A project reached for a reason that is not a Cargo reach (a UI file, a script) touches every test of it. (The strict reading of
-    // 2026-11-23 is gone: a Cargo-only reach grades per package, see train_t_ below; decision 95, user 2026-11-26.)
+fn a_flaky_test_in_a_crate_or_app_the_plan_reached_is_red_interim_strict() {
+    // User decision 2026-11-23: any crate or app the plan reached makes a FLAKY red, until ADR 0117's module edges land.
     let c = sha(2);
     let r = Run::train(8610, &c, "failure").failing(CRATE, CRATE_FLAKY);
     let mut f = server(std::slice::from_ref(&r));
@@ -1498,32 +1497,33 @@ fn the_landing_queues_port_lands_a_train_on_its_narrowed_landing_run_without_a_s
 }
 
 /// The package level (user decision 2026-11-24): the plan reached the crates workspace through Cargo alone, at the packages `reached`;
-/// the workspace holds paddock-chromium (the 8610 FLAKY test's package) and paddock-core.
-fn packages(reached: &[&str]) -> Touched {
+/// the workspace holds paddock-chromium (the 8610 FLAKY test's package) and paddock-core. `narrow`: the package level decides.
+fn packages(reached: &[&str], narrow: bool) -> Touched {
     Touched {
         flags: ["crates".to_string()].into(),
         cargo_only: ["crates".to_string()].into(),
         packages: [("crates".to_string(), reached.iter().map(|p| p.to_string()).collect())].into(),
         members: [("crates".to_string(), ["paddock-chromium", "paddock-core"].map(String::from).into())].into(),
+        narrow,
         expected: fixture_expected(),
         ..Touched::default()
     }
 }
 
 #[test]
-fn a_flaky_test_in_an_untouched_package_is_a_fix_item_and_landable() {
+fn a_flaky_test_in_an_untouched_package_is_a_fix_item_and_landable_once_the_package_level_decides() {
     // The 8610 log: a FLAKY test of paddock-chromium. The change reached the crates workspace, but only paddock-core.
     let c = sha(2);
     let r = Run::train(8610, &c, "failure").failing(CRATE, CRATE_FLAKY);
     let mut f = server(std::slice::from_ref(&r));
-    let o = grade(&mut f, &r, packages(&["paddock-core"]));
+    let o = grade(&mut f, &r, packages(&["paddock-core"], true));
     assert!(o.lands() && !o.is_tag_green(), "{o:?}");
     let items = fix_items(&o);
     assert_eq!(items.len(), 1);
     assert!(items[0].test.starts_with("paddock-chromium::it "), "{items:?}");
-    // Positive control (ER-33): with the test's own package changed, the same run blocks.
-    let o = grade(&mut f, &r, packages(&["paddock-chromium"]));
-    assert!(matches!(&o.result, GradedResult::Red(why) if why.contains("touched code")), "{o:?}");
+    // Positive control (ER-33): the same run in the report-only phase is red on the job level: the package level is what lands it.
+    let o = grade(&mut f, &r, packages(&["paddock-core"], false));
+    assert!(matches!(&o.result, GradedResult::Red(why) if why.contains("reached")), "{o:?}");
     assert!(!o.lands());
 }
 
@@ -1535,6 +1535,7 @@ fn ipc_untouched() -> Touched {
         cargo_only: ["crates".to_string()].into(),
         packages: [("crates".to_string(), ["paddock-core".to_string()].into())].into(),
         members: [("crates".to_string(), ["paddock-ipc", "paddock-core"].map(String::from).into())].into(),
+        narrow: true,
         expected: fixture_expected(),
         ..Touched::default()
     }
@@ -1580,11 +1581,11 @@ fn the_same_flaky_test_in_a_touched_package_blocks() {
     let c = sha(2);
     let r = Run::train(8610, &c, "failure").failing(CRATE, CRATE_FLAKY);
     let mut f = server(std::slice::from_ref(&r));
-    let o = grade(&mut f, &r, packages(&["paddock-chromium", "paddock-core"]));
+    let o = grade(&mut f, &r, packages(&["paddock-chromium", "paddock-core"], true));
     assert!(matches!(&o.result, GradedResult::Red(why) if why.contains("touched code")), "{o:?}");
     assert!(!o.lands());
     // A project reached for a reason that is not a Cargo reach (a UI file, a lockfile) touches every test of it.
-    let mut whole = packages(&["paddock-core"]);
+    let mut whole = packages(&["paddock-core"], true);
     whole.cargo_only.clear();
     assert!(matches!(grade(&mut f, &r, whole).result, GradedResult::Red(_)));
 }
@@ -1594,7 +1595,7 @@ fn a_test_that_failed_both_tries_blocks_on_the_package_level_too() {
     let c = sha(2);
     let r = Run::train(8610, &c, "failure").failing(CRATE, &format!("Job: crate\n{BOTH_TRIES}"));
     let mut f = server(std::slice::from_ref(&r));
-    let o = grade(&mut f, &r, packages(&[]));
+    let o = grade(&mut f, &r, packages(&[], true));
     assert!(matches!(&o.result, GradedResult::Red(why) if why.contains("both tries")), "{o:?}");
 }
 
@@ -1604,21 +1605,21 @@ fn a_flaky_test_the_graph_cannot_place_blocks() {
     let r = Run::train(8610, &c, "failure").failing(CRATE, CRATE_FLAKY);
     let mut f = server(std::slice::from_ref(&r));
     // The crate is no package of the job's workspace (a renamed crate, a log of another workspace): fail closed.
-    let mut unknown = packages(&["paddock-core"]);
+    let mut unknown = packages(&["paddock-core"], true);
     unknown.members.insert("crates".into(), ["paddock-core".to_string()].into());
     let o = grade(&mut f, &r, unknown);
     assert!(matches!(&o.result, GradedResult::Red(why) if why.contains("cannot place")), "{o:?}");
     // The workspace's packages were not read at all: fail closed too.
-    let mut unread = packages(&["paddock-core"]);
+    let mut unread = packages(&["paddock-core"], true);
     unread.members.clear();
     assert!(matches!(grade(&mut f, &r, unread).result, GradedResult::Red(_)));
     // Positive control: with the package known the same run lands.
-    assert!(grade(&mut f, &r, packages(&["paddock-core"])).lands());
+    assert!(grade(&mut f, &r, packages(&["paddock-core"], true)).lands());
 }
 
 #[test]
 fn the_package_level_reads_the_job_test_and_plan() {
-    let t = packages(&["paddock-core"]);
+    let t = packages(&["paddock-core"], true);
     assert!(matches!(t.reaches_test(CRATE, "paddock-core::it a::b"), Reach::Touched(_)));
     assert!(matches!(t.reaches_test(CRATE, "paddock-chromium a::b"), Reach::Untouched(_)));
     // Not reached at the job level: untouched whatever the package.
@@ -1634,6 +1635,7 @@ fn the_package_level_reads_the_job_test_and_plan() {
         cargo_only: ["app:spotter".to_string()].into(),
         app_cargo: [("spotter".to_string(), "apps/spotter/app/src-tauri".to_string())].into(),
         members: [("apps/spotter/app/src-tauri".to_string(), ["spotter-render".to_string()].into())].into(),
+        narrow: true,
         expected: fixture_expected(),
         ..Touched::default()
     };
@@ -1647,33 +1649,10 @@ fn the_package_level_reads_the_job_test_and_plan() {
     // The plan's JSON gives the packages and cargoOnly.
     let p = Touched::from_plan(&json!({"crates": true, "apps": [], "packages": {"crates": ["paddock-core"]}, "cargoOnly": ["crates"]}));
     assert_eq!(p.packages["crates"], ["paddock-core".to_string()].into());
-    assert!(p.cargo_only.contains("crates"));
+    assert!(p.cargo_only.contains("crates") && !p.narrow);
     // `all`: the change cannot be bounded, everything is touched.
     let all = Touched { all: true, ..t };
     assert!(matches!(all.reaches_test(CRATE, "paddock-chromium a::b"), Reach::Touched(_)));
-}
-
-/// Train t's shape (decision 95, user 2026-11-26; ER-12): the plan reached the crates workspace through the lockfile alone, and
-/// the lock diff left no package of the workspace changed. The plan's own JSON is read (`from_plan`), so no flag is set by hand.
-fn lock_only_plan(changed: &[&str]) -> Touched {
-    let plan = json!({"crates": true, "apps": [], "packages": {"crates": changed}, "cargoOnly": ["crates"]});
-    let mut t = Touched::from_plan(&plan);
-    t.members = [("crates".to_string(), ["paddock-chromium", "paddock-core"].map(String::from).into())].into();
-    t
-}
-
-#[test]
-fn train_t_a_flaky_test_in_a_package_the_lock_diff_left_unchanged_is_a_fix_item_and_lands() {
-    let c = sha(2);
-    let r = Run::train(8610, &c, "failure").failing(CRATE, CRATE_FLAKY);
-    let mut f = server(std::slice::from_ref(&r));
-    let o = grade(&mut f, &r, lock_only_plan(&[]));
-    assert!(o.lands() && !o.is_tag_green(), "{o:?}");
-    assert_eq!(fix_items(&o).len(), 1, "{o:?}");
-    // Positive control (ER-33): the same run with the test's package changed blocks.
-    let o = grade(&mut f, &r, lock_only_plan(&["paddock-chromium"]));
-    assert!(matches!(&o.result, GradedResult::Red(why) if why.contains("touched code")), "{o:?}");
-    assert!(!o.lands());
 }
 
 #[test]

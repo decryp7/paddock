@@ -273,16 +273,11 @@ recorded (ADR 0113 §5) the old `plan verdict: complete=` line also says false w
 - A **whole-tree** run (the nightly, a tag, `--all`) is `Complete` whatever its base: it tested everything, so the base recursion
   stops there (review round 3, P2).
 
-**"Touched" for a FLAKY test** (review round 3, P1-C; the user's decision of 2026-11-23: a strict interim, then the feature level; the
-interim ended on 2026-11-26, user decision 95, below):
+**"Touched" for a FLAKY test** (review round 3, P1-C; the user's decision of 2026-11-23: a strict interim, then the feature level):
 
-- **Ended 2026-11-26 (user decision 95).** The strict interim (a FLAKY test in any crate or app the run's reach marks makes the run `Red`) is
-  gone from `ci_runs/green.rs`: it held train 2026-11-26-t, which reached the crates workspace through `crates/Cargo.lock` alone, for a test in
-  a package it did not touch (run 9168). The reader is back at ER-12 at the package level: a FLAKY test blocks only when the Cargo package that
-  holds it changed or depends on a changed crate, judged by the planner's Cargo graph. A lockfile touches the workspace packages whose resolved
-  dependencies changed (`plan_cargo_lock`: the dependency closure of each package before and after; the plan's `lockGraded` list), and a lock
-  that cannot be read on both sides reaches the whole workspace. A project reached for any other reason beyond Cargo (a UI file, a script) still
-  touches every test of it.
+- **TEMPORARY, until module edges land (WP-3's `imports`/`reads` and WP-6's Rust `use crate::` edges):** a FLAKY test in any crate or
+  app that the run's reach marks (any kind) makes the run `Red`. This is stricter than ER-12 on purpose, because without module
+  edges the reader cannot tell which feature a test exercises; the user chose strict over guessed.
 - **Then, exactly ER-12's feature level** (WP-3b, below): a FLAKY test makes the run `Red` only if the test's own file changed, or the
   change reaches that file through `imports`, `reads` or Rust `use crate::` edges; for an e2e spec, if the spec, its helpers (its
   import closure) or the contract's declared feature sources for that spec changed. Otherwise it is a fix item
@@ -291,7 +286,7 @@ interim ended on 2026-11-26, user decision 95, below):
 
 `Complete × Green` and `Complete × GreenWithFixItems` are the only green outcomes, for every reader: the landing check, the base of a
 push or landing run, `ci reuse` (ER-49) and the run scope. A tag needs `Complete × Green`; a tag's run on a `GreenWithFixItems`
-commit is the one allowed flake retry (ER-12, ER-49). Controls: a FLAKY test inside a touched target makes the run `Red` (a Cargo package that changed or depends on a changed crate; the interim of 2026-11-23 ended 2026-11-26); a step
+commit is the one allowed flake retry (ER-12, ER-49). Controls: a FLAKY test inside a touched target makes the run `Red` (in the interim, any reached crate or app); a step
 skipped because an earlier one failed makes it `Partial`; a both-tries failure is `Red`; an unreadable report is `NotMeasured`.
 
 FLAKY comes from the run's own reports, nextest JUnit and Playwright JSON, through one accessor pinned to the run (review round 2,
@@ -665,7 +660,7 @@ than they do; D15 offers the common option. (Sources from the review rounds of t
 | WP-1 | Node and edge types, the `Extractor` port and its registry (§15), the inputs file and accessor, owners with precedence and fail-closed in the plan job, content extractors (`attributes`, `npm-lock`, `guards`), the bulk reader with a spawn budget, `reach` with kinds, the positive-control harness, the benchmark | 1.7 |
 | WP-2 | The CI reader moved into the crate, `uses`/`runs` edges (contract check lines included), action and script nodes, mention vs use (G4), plan-job inputs (G5); `plan_gitea` deleted | 1.3 |
 | WP-3 | Test files and targets from `src_path`, the `reads` extractor (`syn`), `imports` through oxc without `node_modules` and its determinism test, contract `tests`/`smoke` declarations, `selection`, per-package runs (G11), the ci.yml and app-gates wiring | 2.0 |
-| WP-3b | The FLAKY "touched" test at ER-12's feature level (§6): refines the package level (the interim, any reached crate or app is `Red`, ended 2026-11-26) once WP-3's `imports`/`reads` edges and WP-6's Rust module edges land; the control of §6 (one import edge makes it `Red`, removing it makes it a fix item) | 0.3 |
+| WP-3b | The FLAKY "touched" test at ER-12's feature level (§6): replaces the interim (any reached crate or app is `Red`) once WP-3's `imports`/`reads` edges and WP-6's Rust module edges land; the control of §6 (one import edge makes it `Red`, removing it makes it a fix item) | 0.3 |
 | WP-4 | Run scope v2, complete only on a complete base, the base from the verdict reader, the smoke-then-code golden; the reader fixes of §6 (first-parent candidates, one typed outcome shared with the landing check, FLAKY-only runs as `GreenWithFixItems`, reuse through it), failing tests first | 1.3 |
 | WP-5 | `--compare` with dropped targets, train replay (trains 15 to 20), one golden per migrated rule, the listed differences, regenerated goldens | 2.0 |
 | WP-6 | OS derivation with the wider signals, the `Command` measurement, `hostTests` cut to exceptions, C155 as the consistency check | 1.3 |

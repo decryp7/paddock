@@ -4450,31 +4450,6 @@ link-server flake. Fixed on train 2026-11-26-t by ADR 0122 WP-2 (`feat/adr-0122-
 gate and probe the queued bytes) and ADR 0124 (`fix/ipc-link-flakes`: `wait_refused`/`wait_peers`,
 `Peer::when_closed`, stop ordering and a Clippy ban on reading the server's lists without a wait).
 
-## The strict FLAKY reading held train t for a test it never touched, and the test read raw parent links (2026-11-26, fix/flaky-er12-and-proc)
-- **What happened.** Train 2026-11-26-t reached the crates workspace through `crates/Cargo.lock` alone. ci.yml run 9168 (job 51509, crate
-  (windows-latest)) had one FLAKY test, `paddock-proc usage::tests::the_os_source_lists_the_children_of_one_pid_without_a_table` (failed
-  once, passed on its retry). The interim strict reading of 2026-11-23 (ADR 0117 section 6) treated every test of a reached project as touched,
-  and a lockfile reaches the project for a reason that is not a Cargo reach, so the flake blocked a train that changed no source.
-- **Cause 1 (policy, user decision 95, 2026-11-26).** The strict reading was a stop-gap until module edges landed; the package level was
-  already built and graded report-only, but a lockfile reach never narrowed. **Fix.** ER-12 is the rule again: the package level decides
-  (`PACKAGE_LEVEL_FIRST_GREEN_RUN` and `Touched::narrow` are gone), and a `Cargo.lock` change touches the workspace packages whose resolved
-  dependencies changed: the planner diffs the lock before and after with the TOML parser (`plan_cargo_lock`: the dependency closure of each
-  workspace package, entry by entry; a version, source or checksum that moved, or an edge added or removed, below the package touches it, and its
-  dependents follow through the Cargo graph). A lock that is missing or unreadable on a side, or names a package the graph lacks, reaches the whole
-  workspace as before (fail closed). CI still runs the workspace whole on a lockfile change (`cargoOnly` is unchanged; the plan's `lockGraded`
-  list narrows only the grade). Any other FLAKY is a fix item, recorded from the landing run by `./dev ci fix-items`.
-- **Cause 2 (the test).** The Windows branch of the test asserted that every pid listed under the test child's pid is `conhost.exe`. On
-  Windows a parent pid is only a number and outlives its process (ADR 0033; the same class as run 8694): a process whose parent ended is listed
-  under whatever holds that pid now. This crate's tests leave orphans on purpose (`Mode::Leave`, `Mode::Tree` sleepers), so a test child that
-  receives a recycled pid is listed with a stranger. The product's tree walk already refuses a child that started before its parent; the test read
-  the raw list. Ruled in by: a kid whose start precedes the child's. Ruled out by reading the code: a child not yet visible (the first assertion on
-  the same list passed, or the test would have failed there) and a sleep child that ended (it lives for the whole test). Not provable from run 9168:
-  its log reaches the reader without the assertion message, and Windows is CI-only here. **Fix.** The test keeps the children that started no
-  earlier than the child (`real_children`, the walk's rule) and skips a host that ended since the listing; a portable test with a fake source (an
-  orphan older than its parent, an ended child, an equal-tick child) pins the rule, and the assertion message names both pids.
-- **Class (ER-21).** A test that asserts on live OS process state through the raw list instead of the product's identity rule (second instance:
-  run 8694's runner counting an orphan's tree). No new check: the product's rule is the one definition, and the test now calls it.
-
 ## Fix item: a FLAKY paddock-proc child-listing test on Windows in run 9168 (2026-11-26)
 `paddock-proc usage::tests::the_os_source_lists_the_children_of_one_pid_without_a_table` was FLAKY on Windows in ci.yml run 9168
 (job 51509, crate (windows-latest); failed once at `usage.rs:1558`, passed on its retry; flaky-as-failure kept the run red, ER-12).
@@ -4484,15 +4459,3 @@ the test's child (here a compile-cache server) can name the child's pid as its p
 tree walks drop such a stranger by start time (ADR 0033, `orphan::descendants_skip_a_stranger_older_than_its_claimed_parent`), but
 this test asserts the raw listing. Fix: the test keeps only children that started no earlier than its child (`ProcessSource::started`)
 before it checks their names, with a failing test first (bug-fix skill). Open; not fixed on train 2026-11-26-u.
-
-## The raw child listing of a pid is private to its filter, with a Clippy ban (2026-11-27, feat/proc-children-filtered, user decision 98)
-- **What happened.** Runs 6603, 7448 and 9168 were three tests of `paddock-proc` that read `OsSource::children(pid)` raw and asserted on what it
-  listed (the last: every child of a test child is `conhost.exe`). A parent pid is only a number and on Windows it outlives its process
-  (ADR 0033), so the raw list can hold the orphans of an earlier holder of the pid. The tree walk already refused such a child; the tests did not.
-- **Fix (ER-21, the class named, the simplest complete fix).** The trait method that lists is now `ProcessSource::listed_children` (hidden, raw,
-  implemented by the sources). The only listing callers get is `ProcessSource::children(parent: ProcessId) -> Vec<ProcessId>`, which keeps a child
-  that started no earlier than its parent and no later than the scan that listed it, and returns nothing when the pid now names another process;
-  the tree walk uses it. `crates/clippy.toml` bans `paddock_proc::usage::ProcessSource::listed_children` everywhere (the one default body carries the
-  `#[expect]`). The positive control is `usage::tests::a_raw_listing_is_what_the_clippy_ban_catches`: its `#[expect]` is unfulfilled, and Clippy
-  fails, if the ban is removed or stops resolving the path. Callers checked across `crates/`, `apps/` and `tools/`: only `paddock-proc` itself
-  (`usage.rs`, `tests/it/orphan.rs`) implements or calls the trait; Debrief's, Dyno's and Pitcrew's `ProcessSource` are their own ports.

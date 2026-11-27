@@ -89,7 +89,6 @@ pub mod os_placement;
 pub mod pathfind;
 pub mod places;
 pub mod plan;
-pub mod plan_cargo_lock;
 pub mod plan_ci;
 pub mod plan_cmd;
 pub mod plan_gitea;

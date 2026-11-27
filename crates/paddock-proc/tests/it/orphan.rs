@@ -59,7 +59,7 @@ impl ProcessSource for ByParent {
     fn memory(&self, pid: u32) -> Option<u64> {
         self.0.get(&pid).map(|e| e.rss)
     }
-    fn listed_children(&self, pid: u32) -> Vec<u32> {
+    fn children(&self, pid: u32) -> Vec<u32> {
         self.0
             .iter()
             .filter(|(k, row)| **k != pid && row.parent == Some(pid))
