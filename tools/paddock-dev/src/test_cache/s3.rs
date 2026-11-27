@@ -26,7 +26,12 @@ pub const REQUEST_SECS: u64 = 5;
 pub const CALL_SECS: u64 = 60;
 
 /// One transfer: URL, file the answer goes to, file to upload, method.
-type Block = (String, PathBuf, Option<PathBuf>, &'static str);
+/// What one curl run said per transfer, and curl's own words when it exited non-zero.
+type Each = (Vec<(u16, String)>, Option<String>);
+/// A try of some blocks, as [`S3Store::run_each`].
+type TryFn<'a> = &'a mut dyn FnMut(&[Block]) -> Result<Each, StoreError>;
+
+pub(super) type Block = (String, PathBuf, Option<PathBuf>, &'static str);
 
 /// The store's address and keys. `Debug` never shows the keys.
 #[derive(Clone)]
@@ -107,10 +112,22 @@ impl S3Store {
         out
     }
 
-    /// Runs the blocks in one curl; the status of each transfer, by its output file.
+    /// Runs the blocks in one curl; the status of each transfer, by its output file. Any transfer that failed is an error for the call (a
+    /// write, a delete or a listing is atomic); [`S3Store::run_each`] is the form a lookup uses.
     fn run(&self, blocks: &[Block]) -> Result<Vec<(u16, String)>, StoreError> {
+        let (done, failed) = self.run_each(blocks)?;
+        match failed {
+            Some(why) => Err(StoreError(why)),
+            None => Ok(done),
+        }
+    }
+
+    /// Runs the blocks in one curl and keeps what each transfer said even when curl exits non-zero (one request timed out): status 0
+    /// is a transfer that got no answer. The second answer is curl's own words when it exited non-zero. `Err` only when curl said
+    /// nothing readable for the blocks (it did not start, the call's budget ended, a redirect).
+    fn run_each(&self, blocks: &[Block]) -> Result<Each, StoreError> {
         if blocks.is_empty() {
-            return Ok(Vec::new());
+            return Ok((Vec::new(), None));
         }
         let cmd = {
             let mut c = paddock_proc::command("curl");
@@ -119,13 +136,20 @@ impl S3Store {
         };
         let out = run_bounded_with_input(cmd, self.config(blocks).into_bytes(), Limits::new(Duration::from_secs(CALL_SECS)))
             .map_err(|e| StoreError(self.mask(&format!("the store did not answer: {e}"))))?;
-        if !out.success() {
-            return Err(StoreError(self.mask(&format!(
+        let why = || {
+            self.mask(&format!(
                 "curl failed: {}",
                 out.stderr_text().trim().chars().take(200).collect::<String>()
-            ))));
+            ))
+        };
+        let done = parse_done(&out.stdout_text());
+        if out.success() {
+            return Ok((done?, None));
         }
-        parse_done(&out.stdout_text())
+        match done {
+            Ok(d) if d.len() == blocks.len() => Ok((d, Some(why()))),
+            _ => Err(StoreError(why())),
+        }
     }
 
     fn mask(&self, t: &str) -> String {
@@ -139,46 +163,41 @@ impl S3Store {
 
 impl Store for S3Store {
     fn delete_many(&self, lookups: &[Lookup]) -> Result<Vec<Option<Record>>, StoreError> {
-        let found = self.get_many(lookups)?;
+        let found = self.get_many(lookups).into_iter().collect::<Result<Vec<_>, _>>()?;
         let rels: Vec<String> = lookups.iter().map(|l| rel_path(&l.target, &l.class, &l.key)).collect();
         self.delete_many_rels(&rels)?;
         Ok(found)
     }
 
-    fn get_many(&self, lookups: &[Lookup]) -> Result<Vec<Option<Record>>, StoreError> {
-        std::fs::create_dir_all(&self.scratch).map_err(|e| StoreError(format!("{} cannot be made: {e}", self.scratch.display())))?;
+    fn get_many(&self, lookups: &[Lookup]) -> Vec<Result<Option<Record>, StoreError>> {
+        let all_fail = |e: StoreError| lookups.iter().map(|_| Err(StoreError(e.0.clone()))).collect::<Vec<_>>();
+        if let Err(e) = std::fs::create_dir_all(&self.scratch) {
+            return all_fail(StoreError(format!("{} cannot be made: {e}", self.scratch.display())));
+        }
         let blocks: Vec<_> = lookups
             .iter()
             .enumerate()
             .map(|(i, l)| (self.url(&rel_path(&l.target, &l.class, &l.key)), self.body_path(i), None, "GET"))
             .collect();
-        let done = self.run(&blocks);
-        let result = done.and_then(|done| {
-            let mut out = Vec::new();
-            for (i, l) in lookups.iter().enumerate() {
-                let file = self.body_path(i);
-                let code = done.iter().find(|(_, f)| *f == file.display().to_string()).map(|(c, _)| *c);
-                match code {
-                    Some(200) => out.push(
-                        std::fs::read_to_string(&file)
-                            .ok()
-                            .and_then(|t| Record::parse(&t, &l.key, &l.target, &l.class)),
-                    ),
-                    Some(404) => out.push(None),
-                    other => {
-                        return Err(StoreError(format!(
-                            "the store answered {} for a record (credentials, bucket or a down server)",
-                            other.map_or("nothing".into(), |c| c.to_string())
-                        )));
-                    }
-                }
-            }
-            Ok(out)
-        });
+        let codes = fetch_each(&blocks, &mut |b| self.run_each(b));
+        let out = lookups
+            .iter()
+            .zip(codes)
+            .enumerate()
+            .map(|(i, (l, code))| match code? {
+                200 => Ok(std::fs::read_to_string(self.body_path(i))
+                    .ok()
+                    .and_then(|t| Record::parse(&t, &l.key, &l.target, &l.class))),
+                404 => Ok(None),
+                other => Err(StoreError(format!(
+                    "the store answered {other} for a record (credentials, bucket or a down server)"
+                ))),
+            })
+            .collect();
         for i in 0..lookups.len() {
             let _ = std::fs::remove_file(self.body_path(i));
         }
-        result
+        out
     }
 
     fn put_many(&self, records: &[Record]) -> Result<(), StoreError> {
@@ -303,6 +322,42 @@ impl S3Store {
         let _ = std::fs::remove_file(&up);
         result
     }
+}
+
+/// The status of every block, from one try and at most one more for the blocks that got no answer or a server error (status 0 or 5xx):
+/// per item, never per call (PRINCIPLES, bulk APIs: errors are per item unless the operation is atomic; ADR 0116 §5, amended
+/// 2026-11-28). `Err` is that item's cause. `try_` runs blocks and answers as [`S3Store::run_each`] does.
+pub(super) fn fetch_each(blocks: &[Block], try_: TryFn<'_>) -> Vec<Result<u16, StoreError>> {
+    // The answers per block, and whether the call failed whole.
+    let one = |blocks: &[Block], try_: TryFn<'_>| match try_(blocks) {
+        Ok((done, why)) => (
+            blocks
+                .iter()
+                .map(|b| {
+                    let file = b.1.display().to_string();
+                    match done.iter().find(|(_, f)| *f == file).map(|(c, _)| *c) {
+                        Some(0) | None => Err(StoreError(why.clone().unwrap_or_else(|| "the store gave no answer".into()))),
+                        Some(c) => Ok(c),
+                    }
+                })
+                .collect::<Vec<_>>(),
+            false,
+        ),
+        Err(e) => (blocks.iter().map(|_| Err(StoreError(e.0.clone()))).collect(), true),
+    };
+    let (mut first, whole) = one(blocks, try_);
+    // A call that failed whole (curl did not start, the call's budget ended, a redirect) is not retried: another 60 s would not help.
+    let retry: Vec<usize> = (0..blocks.len())
+        .filter(|&i| !whole && first[i].as_ref().map_or(true, |c| *c >= 500))
+        .collect();
+    if retry.is_empty() {
+        return first;
+    }
+    let again: Vec<Block> = retry.iter().map(|&i| blocks[i].clone()).collect();
+    for (&i, r) in retry.iter().zip(one(&again, try_).0) {
+        first[i] = r;
+    }
+    first
 }
 
 /// The error code and message of an S3 error body (`<Code>AccessDenied</Code><Message>..</Message>`), for a log line: both are the
