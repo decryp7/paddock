@@ -164,6 +164,10 @@ mod tests {
         // (trial run 9253 waited 40 s here): the handle this test holds closes before it waits for the ending.
         drop(c);
         assert!(wait_exited(id, HANG_GUARD));
+        // The table read says `Exited` only on Unix, where the reaped pid is gone. On Windows any handle held by anyone (another test,
+        // the runner, a scanner) keeps the ended process listed as `Unknown`, so the guarantee there is the signaled handle that
+        // `wait_exited` just returned on (train ab run 9344, job 54061: `Unknown` against `Exited`).
+        #[cfg(unix)]
         assert_eq!(state_after(id, || {}), RunState::Exited);
     }
 }
