@@ -589,18 +589,18 @@ fn nextest(
 
 /// `ci test-cache selfcheck --shared`: put, get, list and delete one scratch object in the shared store. Exit 5 when any step failed,
 /// 6 (not measured) when the store cannot be reached or has no credentials: never a pass (ER-33).
-fn selfcheck(shared: Option<&super::s3::S3Store>) -> Result<Report, CliError> {
+pub(super) fn selfcheck(shared: Option<&super::s3::S3Store>) -> Result<Report, CliError> {
     let Some(s) = shared else {
         return Ok(Report::new(
             serde_json::json!({"verdict": "not_measured"}),
-            "::error::ci test-cache selfcheck: no shared store. Next step: pass --shared and set the S3 credentials.".to_string(),
+            "::error::ci test-cache selfcheck: no shared store, so this leg's test cache is not measured. Next step: pass --shared and set the S3 credentials.".to_string(),
         )
         .with_exit(Exit::NotMeasured));
     };
     match s.probe(&format!("selfcheck-{}-{}", std::process::id(), now())) {
         Err(e) => Ok(Report::new(
             serde_json::json!({"verdict": "not_measured"}),
-            format!("::error::ci test-cache selfcheck: {e}. Next step: check the endpoint, the bucket and the key."),
+            format!("::error::ci test-cache selfcheck: {e}, so this leg's test cache is not measured. Next step: check the endpoint, the bucket and the key."),
         )
         .with_exit(Exit::NotMeasured)),
         Ok(p) => {
@@ -609,6 +609,11 @@ fn selfcheck(shared: Option<&super::s3::S3Store>) -> Result<Report, CliError> {
                 "test-cache selfcheck: round trip {}, listed {}, deleted {}",
                 p.round_trip, p.listed, p.deleted
             );
+            let text = if ok {
+                text
+            } else {
+                format!("{text}\n::error::ci test-cache selfcheck: the store did not do every step, so this leg's test cache is not measured. Next step: check the bucket and the key.")
+            };
             let r = Report::new(
                 serde_json::json!({"round_trip": p.round_trip, "listed": p.listed, "deleted": p.deleted}),
                 text,
@@ -760,6 +765,13 @@ pub(super) fn record_with(
     // soundness finding: the key missed an input). Read before this run's own records are stored, and only when the lookup answered.
     let mut lines: Vec<String> = Vec::new();
     let (decisions, notice) = decide(cands, cfg, class, filter, store, meta.at, trust);
+    // A lookup that failed leaves every record "not definite", so nothing is replaced: say why, or the held-back count has no cause
+    // (run 9265: the Windows leg printed only "recorded 0", ER-27).
+    if let Some(n) = &notice {
+        lines.push(format!(
+            "::warning::test-cache: the lookup failed, so no record is replaced and none is written: {n}. Next step: fix the store's answer (credentials, address, curl), the cache cannot record without it."
+        ));
+    }
     if notice.is_none() {
         let matched: Vec<&Candidate> = cands
             .iter()
