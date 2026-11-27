@@ -2754,6 +2754,18 @@ test('dev-tool-cache saves and confirms only for the producer: every other job r
   assert.doesNotMatch(steps.find((s) => s.id === 'store').if, /producer/);
 });
 
+test('the breaker: the probe comes first, and every actions/cache step of dev-tool-cache and node-caches is skipped when it found the service down', () => {
+  const down = /env\.PADDOCK_ACTIONS_CACHE_DOWN != '1'/;
+  const dtc = stepsOf(loadAction('dev-tool-cache'));
+  assert.equal(dtc[0].id, 'probe', 'the probe is the first step, before any cache call');
+  assert.match(dtc[0].run, /dev-tool-cache\.sh" probe/);
+  const cacheSteps = [...dtc, ...stepsOf(loadAction('node-caches'))].filter((st) => /^actions\/cache(?:\/(?:save|restore))?@/.test(st.uses ?? ''));
+  assert.equal(cacheSteps.length, 5, 'restore, save and confirm of the tool, npm and Angular: the finder sees them all');
+  for (const st of cacheSteps) assert.match(st.if ?? '', down, `${st.id}: skipped when the cache service is down`);
+  // Positive control: a cache step without the guard is seen.
+  assert.doesNotMatch("runner.os == 'Linux'", down);
+});
+
 test('only the plan action passes producer: true to dev-tool-cache (the one writer)', () => {
   const producers = [];
   for (const n of names) {

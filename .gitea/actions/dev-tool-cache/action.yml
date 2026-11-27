@@ -7,6 +7,14 @@ inputs:
 runs:
   using: composite
   steps:
+    # The circuit breaker (user decision 109): one short lookup of the Actions cache service per job, before any actions/cache step. When
+    # it does not answer in time, PADDOCK_ACTIONS_CACHE_DOWN=1 and every actions/cache step of the job (this action's and node-caches') is
+    # skipped with one ::warning::; the job never fails for it. Later uses in the job do not ask again (PADDOCK_ACTIONS_CACHE_PROBED).
+    - name: Probe the Actions cache service
+      id: probe
+      if: runner.os == 'Linux' && env.PADDOCK_DEV_TOOL_CACHE_DONE != '1' && env.PADDOCK_ACTIONS_CACHE_PROBED != '1'
+      shell: bash
+      run: bash "${{ github.action_path }}/../../../conformance/ci/dev-tool-cache.sh" probe
     - name: Key of the tool
       id: key
       if: runner.os == 'Linux' && env.PADDOCK_DEV_TOOL_CACHE_DONE != '1'
@@ -20,7 +28,7 @@ runs:
       run: bash "${{ github.action_path }}/../../../conformance/ci/dev-tool-cache.sh" store-restore "${{ steps.key.outputs.hash }}"
     - name: Restore the tool
       id: restore
-      if: runner.os == 'Linux' && env.PADDOCK_DEV_TOOL_CACHE_DONE != '1' && steps.key.outputs.usable == 'true' && steps.store.outputs.hit != 'true'
+      if: runner.os == 'Linux' && env.PADDOCK_DEV_TOOL_CACHE_DONE != '1' && steps.key.outputs.usable == 'true' && steps.store.outputs.hit != 'true' && env.PADDOCK_ACTIONS_CACHE_DOWN != '1'
       uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
       with:
         path: ${{ steps.key.outputs.path }}
@@ -41,7 +49,7 @@ runs:
       run: bash "${{ github.action_path }}/../../../dev" ci dev-tool-store publish --hash "${{ steps.key.outputs.hash }}" --from "${{ steps.key.outputs.path }}" $REPLACE
     - name: Save the verified tool
       id: save
-      if: inputs.producer == 'true' && runner.os == 'Linux' && env.PADDOCK_DEV_TOOL_CACHE_DONE != '1' && steps.key.outputs.usable == 'true' && steps.verify.outputs.save == 'true'
+      if: inputs.producer == 'true' && runner.os == 'Linux' && env.PADDOCK_DEV_TOOL_CACHE_DONE != '1' && steps.key.outputs.usable == 'true' && steps.verify.outputs.save == 'true' && env.PADDOCK_ACTIONS_CACHE_DOWN != '1'
       continue-on-error: true
       uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
       with:
@@ -49,7 +57,7 @@ runs:
         key: ${{ steps.key.outputs.key }}
     - name: Confirm the save
       id: confirm
-      if: inputs.producer == 'true' && runner.os == 'Linux' && env.PADDOCK_DEV_TOOL_CACHE_DONE != '1' && steps.key.outputs.usable == 'true' && steps.verify.outputs.save == 'true'
+      if: inputs.producer == 'true' && runner.os == 'Linux' && env.PADDOCK_DEV_TOOL_CACHE_DONE != '1' && steps.key.outputs.usable == 'true' && steps.verify.outputs.save == 'true' && env.PADDOCK_ACTIONS_CACHE_DOWN != '1'
       continue-on-error: true
       # A failed save is only a warning in the save step; looking the key up again is the proof it is there.
       uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0

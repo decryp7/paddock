@@ -2,10 +2,12 @@
 // plus OS, architecture and the salt (no restore-keys), a restored binary is judged by what ./dev did with it, a miss says "miss"
 // and is saved only after the tool reported its own hash, and the summary never shows a failed save as a pass (ER-33).
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createServer } from 'node:http';
+import { symlinkSync } from 'node:fs';
 import { test } from 'node:test';
 import { PADDOCK } from './helpers.mjs';
 
@@ -258,4 +260,103 @@ test('a job that only restores says so on a miss, prints saved=n/a and warns of 
     assert.match(w.sum, /saved: NOT confirmed/);
     assert.match(w.text, /saved=no key=the-key/);
   }
+});
+
+// User decision 109: the circuit breaker. A real local HTTP server stands in for the cache service; curl is the real one.
+/** Serves `status` for every request on a free port; returns [url, close]. */
+async function service(status) {
+  const server = createServer((req, res) => { res.statusCode = status; res.end(); });
+  await new Promise((ok) => server.listen(0, '127.0.0.1', ok));
+  return [`http://127.0.0.1:${server.address().port}/`, () => new Promise((ok) => server.close(ok))];
+}
+const CURL_PATH = `${process.env.PATH ?? ''}:/usr/bin:/bin`;
+/** `probe` as a child that does not block this process: the stand-in service answers from this very event loop. */
+async function probe(root, env) {
+  const gh = join(root, 'github-env');
+  const outputs = join(root, 'output');
+  const summary = join(root, 'summary');
+  writeFileSync(gh, '');
+  writeFileSync(outputs, '');
+  const child = spawn('/bin/bash', [SCRIPT, 'probe'], {
+    env: { PATH: CURL_PATH, HOME: join(root, 'home'), PADDOCK_REPO: root, RUNNER_OS: 'Linux', RUNNER_ARCH: 'X64', GITHUB_OUTPUT: outputs, GITHUB_ENV: gh, GITHUB_STEP_SUMMARY: summary, PADDOCK_CACHE_PROBE_SECONDS: '2', ...env },
+  });
+  let text = '';
+  child.stdout.on('data', (d) => { text += d; });
+  child.stderr.on('data', (d) => { text += d; });
+  const status = await new Promise((ok) => child.on('close', ok));
+  const out = Object.fromEntries(readFileSync(outputs, 'utf8').split('\n').filter(Boolean).map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1)]));
+  let sum = '';
+  try { sum = readFileSync(summary, 'utf8'); } catch { /* none */ }
+  return { status, text, out, sum, env: readFileSync(gh, 'utf8') };
+}
+
+test('a cache service that answers (even with an error status) keeps the cache steps on', async () => {
+  const root = fixture();
+  for (const status of [204, 404, 500]) {
+    const [url, close] = await service(status);
+    const r = await probe(root, { ACTIONS_CACHE_URL: url });
+    await close();
+    assert.equal(r.status, 0, r.text);
+    assert.equal(r.out.down, 'false', `HTTP ${status} is an answer`);
+    assert.doesNotMatch(r.env, /CACHE_DOWN/);
+    assert.match(r.env, /PADDOCK_ACTIONS_CACHE_PROBED=1/, 'the job asks once');
+  }
+});
+
+test('a cache service that does not answer in time switches every cache step off with one warning, and the job goes on', async () => {
+  const root = fixture();
+  // A port nothing listens on: the answer is refused at once. A server that accepts and never answers is the stall case below.
+  const [url, close] = await service(204);
+  await close();
+  const r = await probe(root, { ACTIONS_CACHE_URL: url });
+  assert.equal(r.status, 0, 'the probe never fails the job');
+  assert.equal(r.out.down, 'true');
+  assert.match(r.env, /PADDOCK_ACTIONS_CACHE_DOWN=1/);
+  assert.equal((r.text.match(/::warning::/g) ?? []).length, 1, 'exactly one warning');
+  assert.match(r.text, /::warning::dev-tool-cache: the Actions cache service .* did not answer within 2 s.* Next step:/);
+  assert.match(r.sum, /Actions cache service: NOT answering/);
+});
+
+test('a service that accepts the connection and never answers is cut at the limit (the run 9180 stall)', async () => {
+  const root = fixture();
+  const server = createServer(() => { /* never answers */ });
+  await new Promise((ok) => server.listen(0, '127.0.0.1', ok));
+  const t0 = Date.now();
+  const r = await probe(root, { ACTIONS_CACHE_URL: `http://127.0.0.1:${server.address().port}/` });
+  const took = Date.now() - t0;
+  server.closeAllConnections();
+  await new Promise((ok) => server.close(ok));
+  assert.equal(r.out.down, 'true');
+  assert.ok(took < 30_000, `the probe is bounded by its own limit (${took} ms), not the cache client's 5 tries`);
+});
+
+test('a job with no service address or no curl cannot ask: not measured, the steps run as they are (ER-33)', async () => {
+  const root = fixture();
+  const r = await probe(root, { ACTIONS_CACHE_URL: '' });
+  assert.equal(r.out.down, 'false');
+  assert.match(r.text, /::notice::dev-tool-cache: the Actions cache service was not probed .* Not measured/);
+  assert.doesNotMatch(r.env, /CACHE_DOWN/);
+  // A PATH with dirname (the script needs it to find itself) and no curl; bash is found through the parent's PATH.
+  const bin = join(root, 'bin');
+  mkdirSync(bin);
+  symlinkSync('/usr/bin/dirname', join(bin, 'dirname'));
+  const noCurl = await probe(root, { ACTIONS_CACHE_URL: 'http://127.0.0.1:1/', PATH: bin });
+  assert.equal(noCurl.out.down, 'false');
+  assert.match(noCurl.text, /was not probed/);
+});
+
+test('a second use in the same job does not ask again and repeats the first answer', () => {
+  const root = fixture();
+  const r = run(root, ['probe'], { ACTIONS_CACHE_URL: 'http://127.0.0.1:1/', PADDOCK_ACTIONS_CACHE_PROBED: '1', PADDOCK_ACTIONS_CACHE_DOWN: '1' });
+  assert.equal(r.out.down, '1');
+  assert.doesNotMatch(r.text, /::warning::/);
+});
+
+test('with the service down the summary says the restore was skipped, not that it missed', () => {
+  const root = fixture();
+  const r = run(root, ['summary', 'miss', 'false', '', '', ''], { KEY: 'the-key', PADDOCK_ACTIONS_CACHE_DOWN: '1', SAVES: 'false' });
+  assert.match(r.sum, /restored: skipped \(the Actions cache service did not answer; built\)/);
+  const w = run(root, ['summary', 'miss', 'false', '', '', ''], { KEY: 'the-key', PADDOCK_ACTIONS_CACHE_DOWN: '1' });
+  assert.match(w.sum, /saved: skipped \(service down\)/);
+  assert.doesNotMatch(w.text, /::warning::/, 'a skipped save is not a failed one');
 });

@@ -7,6 +7,9 @@
 #   dev-tool-cache.sh verify <hit> <matched-key>   runs the tool (./dev rebuilds a binary that does not run or is not for its hash), checks that
 #                                         it reports the expected hash, and says what happened (outputs: state hit|miss|rejected, save)
 #   dev-tool-cache.sh summary <state> <saved> <verified> [<hit> <matched-key>]   the job-summary line (cache key, restore, save result)
+#   dev-tool-cache.sh probe               asks the Actions cache service once per job, with a short timeout, whether it answers (outputs: down);
+#                                         when it does not, PADDOCK_ACTIONS_CACHE_DOWN=1 goes to $GITHUB_ENV and every actions/cache step of the job
+#                                         (this action's and node-caches') is skipped, with one ::warning:: naming why. Never fails the job
 #   dev-tool-cache.sh store-restore <hash>   the runner-local store first (user decision 109): copies /sccache/paddock-dev-tools/<hash>/ into the
 #                                         job's own tool folder (output: hit); `verify` still checks the copy for its hash. The store is written
 #                                         by `./dev ci dev-tool-store publish` (the plan job only; tools/paddock-dev/src/ci_dev_tool_store.rs)
@@ -36,6 +39,32 @@ cache_path() {
 
 # The runner-local store of the tool (a folder of the /sccache volume the lanes already mount); PADDOCK_DEV_TOOL_STORE moves it.
 store_dir() { printf '%s\n' "${PADDOCK_DEV_TOOL_STORE:-/sccache/paddock-dev-tools}"; }
+
+# The circuit breaker (user decision 109): in run 9180 the Actions cache service timed out in every call of a Rust job (restore, save and
+# the confirming lookup, 5 tries each, 171 s). One cheap lookup per job, as the sccache S3 health check does (curl --max-time 5): any HTTP
+# answer, a 404 or 204 included, means the service is there; no answer in time means every actions/cache step of the job is skipped. A job
+# without the service's address or without curl cannot ask: it is `not measured` and the steps run as before (ER-33).
+cmd_probe() {
+  [ "${PADDOCK_ACTIONS_CACHE_PROBED:-}" != 1 ] || { out down "${PADDOCK_ACTIONS_CACHE_DOWN:-0}"; return 0; }
+  local url="${ACTIONS_CACHE_URL:-}" max="${PADDOCK_CACHE_PROBE_SECONDS:-5}" code
+  if [ -n "${GITHUB_ENV:-}" ]; then echo "PADDOCK_ACTIONS_CACHE_PROBED=1" >> "$GITHUB_ENV"; fi
+  if [ -z "$url" ] || ! command -v curl >/dev/null 2>&1; then
+    echo "::notice::dev-tool-cache: the Actions cache service was not probed (no ACTIONS_CACHE_URL or no curl in this job); its steps run as they are. Not measured."
+    out down false
+    return 0
+  fi
+  # A lookup of a key that does not exist: the service answers 204 (or an error status); only no answer in time is a down service.
+  code="$(curl -s -o /dev/null -m "$max" -w '%{http_code}' "${url%/}/_apis/artifactcache/cache?keys=paddock-probe&version=paddock-probe" 2>/dev/null)" || code=000
+  if [ -z "$code" ] || [ "$code" = 000 ]; then
+    echo "::warning::dev-tool-cache: the Actions cache service ${url} did not answer within ${max} s, so every actions/cache step of this job is skipped (the ./dev tool comes from the runner store or is built, npm and Angular caches start cold). Next step: check the runner's cache server (act_runner cache, RustFS); the job goes on."
+    if [ -n "${GITHUB_ENV:-}" ]; then echo "PADDOCK_ACTIONS_CACHE_DOWN=1" >> "$GITHUB_ENV"; fi
+    echo "- Actions cache service: NOT answering within ${max} s; the job's cache steps were skipped" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+    out down true
+  else
+    echo "dev-tool-cache: the Actions cache service answered (HTTP $code)."
+    out down false
+  fi
+}
 
 cmd_store_restore() {
   local hash="${1:-}" store dest tmp t0="$SECONDS"
@@ -136,15 +165,16 @@ cmd_summary() {
   local key="${KEY:-}" state="${1:-miss}" saved="${2:-}" verified="${3:-}" hit="${4:-}" matched="${5:-}" line
   # SAVES=false: a job that only restores (the plan job is the one writer, user decision 109); unset keeps the writer's wording.
   # SOURCE: store (the runner-local store) or empty (the Actions cache); DOWN=1: the cache service did not answer the job's probe.
-  # SAVES=false: a job that only restores (the plan job is the one writer, user decision 109); unset keeps the writer's wording.
-  # SOURCE: store (the runner-local store) or empty (the Actions cache).
-  local saves="${SAVES:-true}" source="${SOURCE:-}" from="the Actions cache"
+  local saves="${SAVES:-true}" source="${SOURCE:-}" down="${PADDOCK_ACTIONS_CACHE_DOWN:-}" from="the Actions cache"
   [ "$source" != store ] || from="the runner store"
   case "$state" in
     hit) line="restored: exact hit from $from (verified for its hash); saved: not needed" ;;
     rejected) line="restored: exact hit from $from but NOT usable (rebuilt); saved: NO (the key exists)" ;;
     miss)
-      if [ "$saves" = false ]; then line="restored: miss (built); saved: not by this job (only the plan job saves)"
+      if [ "$saves" = false ]; then
+        if [ "$down" = 1 ]; then line="restored: skipped (the Actions cache service did not answer; built); saved: not by this job (only the plan job saves)"
+        else line="restored: miss (built); saved: not by this job (only the plan job saves)"; fi
+      elif [ "$down" = 1 ]; then line="restored: skipped (the Actions cache service did not answer; built); saved: skipped (service down)"
       elif [ "$saved" = true ] && [ "$verified" = true ]; then line="restored: miss (built); saved: yes (found again by key)"
       elif [ "$saved" = true ]; then line="restored: miss (built); saved: NOT confirmed (the cache lookup after the save found nothing)"
       else line="restored: miss (built); saved: NO"; fi ;;
@@ -168,6 +198,7 @@ case "${1:-}" in
   no-download) cmd_no_download ;;
   verify) shift; cmd_verify "$@" ;;
   summary) shift; cmd_summary "$@" ;;
+  probe) cmd_probe ;;
   store-restore) shift; cmd_store_restore "$@" ;;
-  *) echo "usage: dev-tool-cache.sh store-restore <hash> | key | verify <hit> <matched-key> | summary <state> <saved> <verified> [<hit> <matched-key>]" >&2; exit 2 ;;
+  *) echo "usage: dev-tool-cache.sh probe | store-restore <hash> | key | verify <hit> <matched-key> | summary <state> <saved> <verified> [<hit> <matched-key>]" >&2; exit 2 ;;
 esac
