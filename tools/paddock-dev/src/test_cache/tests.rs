@@ -176,7 +176,7 @@ fn a_config_with_no_green_run_is_in_shadow_and_two_distinct_green_runs_switch_it
 
 #[test]
 fn removing_a_never_cached_entry_is_found_and_adding_one_is_not() {
-    let with = |l: &str| CFG.replace("no_test_cache = [\"crate:tools/paddock-dev\"]", &format!("no_test_cache = [{l}]"));
+    let with = |l: &str| CFG.replace("no_test_cache = []", &format!("no_test_cache = [{l}]"));
     assert_eq!(
         removed(&with("\"crate:a\", \"crate:b\""), &with("\"crate:a\"")).unwrap(),
         vec!["crate:b".to_string()]
@@ -387,9 +387,11 @@ fn an_unreachable_store_makes_everything_run() {
 }
 
 /// Decision 113 (user, 2026-11-27): paddock-dev's whole-repository tests (tree_*, graph_*, live_*) read the whole tree, which its node
-/// key does not cover, so the shipped `docs/test-cache.toml` never offers it for reuse even when a record of the same key exists.
+/// key does not cover, so `docs/test-cache.toml` lists it in `no_test_cache` and it is never offered for reuse even when a record of
+/// the same key exists. The settings are the tests' copy with that entry (the shipped file's list is not asserted, see [`CFG`]; taking
+/// the entry out of the shipped file is a removal `config::removed` reports against the merge base).
 #[test]
-fn the_shipped_config_never_offers_paddock_dev_for_reuse_but_still_offers_other_targets() {
+fn a_never_cached_paddock_dev_is_not_offered_for_reuse_but_other_targets_still_are() {
     let (_d, s) = scratch();
     let class = RunnerClass::here();
     let dev = Candidate {
@@ -400,7 +402,8 @@ fn the_shipped_config_never_offers_paddock_dev_for_reuse_but_still_offers_other_
     let other = cand("crates/a", "h");
     s.put_many(&[rec(&dev, &class, NOW - 3600), rec(&other, &class, NOW - 3600)])
         .unwrap();
-    let (d, _) = decide(&[dev.clone(), other], &cfg(), &class, &s, NOW, OK);
+    let never_dev = Config::parse(&CFG.replace("no_test_cache = []", "no_test_cache = [\"crate:tools/paddock-dev\"]")).unwrap();
+    let (d, _) = decide(&[dev.clone(), other], &never_dev, &class, "", &s, NOW, OK);
     assert_eq!(
         d[0],
         Decision::Run(Why::Never),
