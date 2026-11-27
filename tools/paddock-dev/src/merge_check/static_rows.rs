@@ -83,7 +83,10 @@ pub fn not_yet(train: &str) -> Step {
 
 /// The step for what `check --pre-push` answered, read per row; the exit code alone is never read as a pass.
 pub fn interpret(answer: Result<GateRun, String>, base: &str) -> Step {
-    let cmd = format!("./dev check --pre-push --priority train --only {} --base {base}", SELECTORS.join(","));
+    let cmd = format!(
+        "./dev check --pre-push --priority train --only {} --base {base}",
+        SELECTORS.join(",")
+    );
     let not_measured = |why: String, mut text: Vec<String>| {
         text.push(format!(
             "::error::merge sync-member: static rows NOT MEASURED: {why}. Next step: run `{cmd}` yourself in this worktree, fix what it prints on the member, then re-sync; a sync tip whose static rows did not run is not one that passed."
@@ -113,7 +116,9 @@ pub fn interpret(answer: Result<GateRun, String>, base: &str) -> Step {
     let why = |id: &str| -> String {
         let row = gates.iter().find(|g| g.get("id").and_then(|i| i.as_str()) == Some(id));
         let field = |k: &str| row.and_then(|r| r.get(k)).and_then(|v| v.as_str()).filter(|v| !v.is_empty());
-        let cause = field("reason").map_or("no cause in the row's answer".to_string(), |r| r.lines().next().unwrap_or(r).to_string());
+        let cause = field("reason").map_or("no cause in the row's answer".to_string(), |r| {
+            r.lines().next().unwrap_or(r).to_string()
+        });
         match field("log") {
             Some(log) => format!("{id}: {cause} (log: {log})"),
             None => format!("{id}: {cause}"),
@@ -139,7 +144,12 @@ pub fn interpret(answer: Result<GateRun, String>, base: &str) -> Step {
     };
     let exit = if !broken.is_empty() {
         let described: Vec<String> = broken.iter().map(|id| why(id)).collect();
-        fail(described.iter().map(String::as_str).collect(), Exit::CheckBroken, "CHECK BROKEN", &mut text)
+        fail(
+            described.iter().map(String::as_str).collect(),
+            Exit::CheckBroken,
+            "CHECK BROKEN",
+            &mut text,
+        )
     } else if !failed.is_empty() {
         let described: Vec<String> = failed.iter().map(|id| why(id)).collect();
         fail(described.iter().map(String::as_str).collect(), Exit::Findings, "FAILED", &mut text)
@@ -226,7 +236,11 @@ mod tests {
             json!({"id": "gates-register", "verdict": "failed", "reason": "gates check (exit 1)\nsecond line", "log": "/runs/gr.log"}),
             json!({"id": "fmt crates", "verdict": "failed"}),
         ];
-        let answer = Ok(GateRun { code: Some(5), text: String::new(), wire: Some(json!({"gates": gates})) });
+        let answer = Ok(GateRun {
+            code: Some(5),
+            text: String::new(),
+            wire: Some(json!({"gates": gates})),
+        });
         let s = interpret(answer, "abc");
         assert_eq!(s.exit, Exit::Findings);
         let text = s.text.join("\n");

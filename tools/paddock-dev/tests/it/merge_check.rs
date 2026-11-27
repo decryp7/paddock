@@ -2813,13 +2813,20 @@ mod sync_static {
         let r = merged();
         let (code, text, log) = run(&r, GREEN, "0", &[]);
         assert_eq!(code, 0, "{text}");
-        for row in ["fmt crates", "conformance", "gates-register", "clippy crates", "clippy-windows crates"] {
+        for row in [
+            "fmt crates",
+            "conformance",
+            "gates-register",
+            "clippy crates",
+            "clippy-windows crates",
+        ] {
             assert!(text.contains(row), "{row}: {text}");
         }
         assert!(text.contains("static rows: passed"), "{text}");
         let main = r.git(&["rev-parse", "main"]);
         assert!(
-            log.contains("--priority train --only fmt,conformance,gates-register,clippy,clippy-windows") && log.contains(&format!("--base {main}")),
+            log.contains("--priority train --only fmt,conformance,gates-register,clippy,clippy-windows")
+                && log.contains(&format!("--base {main}")),
             "{log}"
         );
     }
