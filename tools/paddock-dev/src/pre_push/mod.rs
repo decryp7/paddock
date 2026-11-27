@@ -49,8 +49,8 @@ pub mod train_split;
 
 use crate::plan::{Request, plan_with_graph};
 use crate::plan_repo::git_text;
-use clap::Args;
 use crate::throttle::{QUEUE_STALL, ROW_CAP};
+use clap::Args;
 use exec::{Kind, RealExec, Row, RunOpts, heavy_limit, run_all_limited, workers};
 use gates::{Change, Facts};
 use paddock_cli::{CliError, Exit, Report};

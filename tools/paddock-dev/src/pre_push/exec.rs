@@ -9,8 +9,7 @@ use super::stacks;
 use super::watchdog::{Observation, StepInfo, StepWatch, Stuck, WATCH_POLL, Watchdog, phase_line, stuck_how};
 use crate::ci_tool::{Output, ToolCall, tail};
 use crate::throttle::{
-    CAP_GRACE, LOCK_TAKEN, QUEUE_STALL, ROW_CAP, WAIT_BACKSTOP, on_path, slot_wait, stall_line_holder, throttle_prefix, with_agent_name,
-    wait_status,
+    CAP_GRACE, LOCK_TAKEN, QUEUE_STALL, ROW_CAP, WAIT_BACKSTOP, on_path, slot_wait, stall_line_holder, wait_status, with_agent_name,
 };
 use paddock_cli::{CheckId, Finding, Outcome, Reason, Subject, ToolVersion, UnixSeconds, measure};
 use std::collections::{BTreeMap, HashMap, VecDeque};
@@ -2798,7 +2797,10 @@ exit $rc
         /// would end the tree themselves.
         #[test]
         fn the_grace_beyond_the_row_cap_outlasts_the_stack_capture() {
-            assert!(CAP_GRACE >= crate::throttle::STACK_CAPTURE_LIMIT + Duration::from_secs(15), "{CAP_GRACE:?}");
+            assert!(
+                CAP_GRACE >= crate::throttle::STACK_CAPTURE_LIMIT + Duration::from_secs(15),
+                "{CAP_GRACE:?}"
+            );
             assert_eq!(own_run_limit(&gate("x", "true")), ROW_CAP + CAP_GRACE);
         }
 

@@ -2,9 +2,9 @@
 
 use super::budget::Timing;
 use super::exec::{Done, Exec, Kind, Limits, Row, RunOpts, run_all_timed, run_all_with, test_subject};
-use crate::throttle::QUEUE_STALL;
 use super::gates::{AUDIT_PROFILE, Change, Facts, Gate, Need, Planned, plan_gates, windows_skip_reason};
 use super::{accept_not_measured, parse_refs, render, render_timed};
+use crate::throttle::QUEUE_STALL;
 use paddock_cli::Exit;
 use serde_json::json;
 use std::collections::BTreeSet;
