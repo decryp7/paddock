@@ -44,7 +44,8 @@ pub struct RunArgs {
     /// Run every line even after one failed (the exit code is then 1); the default stops at the first failure.
     #[arg(long)]
     pub keep_going: bool,
-    /// Print the lines of the phase, one per line with the folder they run in, and run nothing.
+    /// Print the lines of the phase, one per line with the folder they run in, and run nothing. The run's selection
+    /// (`PADDOCK_PLAN_SELECTION`) does not narrow the list: it is what the contract declares.
     #[arg(long)]
     pub list: bool,
     /// The most seconds one line may run before its process tree is ended.
@@ -166,9 +167,15 @@ pub fn run_with(args: &RunArgs, env: &HashMap<String, String>, stop: &Arc<Atomic
         Err(e) => return fail(out, e, "fix the phase in the project's paddock.ci.json"),
     };
     // The plan's selection of this project (ADR 0117 §5): a phase it does not keep is skipped, a test runner gets only its affected
-    // files. A value that cannot be read runs everything (never less than declared) and says so.
+    // files. A value that cannot be read runs everything (never less than declared) and says so. `--list` answers what the phase
+    // declares, so the selection does not narrow it (a test that reads the contract from inside a CI job, train run 9240).
     let id = select::project_id(&args.project);
-    match select::of(env.get(select::ENV).map(String::as_str).unwrap_or(""), &id) {
+    let selection = if args.list {
+        ""
+    } else {
+        env.get(select::ENV).map(String::as_str).unwrap_or("")
+    };
+    match select::of(selection, &id) {
         Ok(Some(n)) => {
             if n.phases.as_ref().is_some_and(|p| !p.contains(&args.phase)) {
                 let _ = writeln!(

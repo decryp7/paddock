@@ -1228,3 +1228,10 @@ owner = "ER-21 class: tests assert the live content of a tool-written register (
 since = 2026-11-27
 review_by = 2026-12-11
 approved = "user"
+
+[[register_growth]]
+check = "C155"
+by = "user"
+date = "2026-11-27"
+count = 16
+digest = "9f5c42619c0600fee89c2e0a4c805e59c13fc31a92851034e7ee5937702dd031"
