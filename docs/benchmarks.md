@@ -3182,3 +3182,19 @@ heavy generator is named `deferred` in the merge check (never a pass, ER-33) and
 the union of every merge's; `--heavy-generators` runs them per merge. Fast generators still run per merge. Also seen: the per-merge
 `ci-run-golden` was STALE on a mid-train merge that a later member fixed, so the per-merge run named a member that was not at fault.
 Not measured: the final gen check on a whole train (it runs what the per-merge steps ran before, once).
+
+## paddock-dev test time by area and churn per train (2026-11-27, docs/paddock-dev-test-split, base e60b56d27)
+
+Read-only, from CI logs (no test was run). **Source:** nextest's per-test `PASS [ Ns]` lines of the paddock-dev jobs of runs 9212 (jobs
+52161 Linux, 52148 macOS, 52162 Windows) and 9180 (51687, 51674, 51688), fetched through the Gitea API; history from `git log
+--first-parent --diff-merges=first-parent origin/main`. **Test step against job:** 9212 Linux 302 s of 11.8 min (the `./dev` tool cache
+missed: 4.7 min), macOS 360 s of 8.1 min, Windows 282 s of 10.5 min; 9180: 295 s of 8.4, 329 s of 5.8, 458 s of 8.9 min. **Sum of per-test
+seconds** (9212): Linux 861 s over 2,702 tests, macOS 817 s over 2,379, Windows 1,191 s over 1,322. **Whole-repository classes** (ADR 0121
+`graph_`, `tree_`, `live_`): Linux 480 s (56%; 9180: 58%), macOS 143 s (17%), Windows 146 s (12%); 450 of Linux's 480 s are in `tests/it`.
+**Largest areas:** Linux it/tree 159 s, it/repo_graph_net 85 s, pre_push (unit and it) 129 s, it/host_steps 68 s, it/wrapper 60 s;
+macOS pre_push 154 s, merge_check 88 s, ci_runs and ci_run 86 s, it/wrapper 82 s; Windows merge_check 545 s (46%), ci_runs and ci_run
+228 s. **Module graph:** 45 of 66 top-level `src/` modules (125,963 of 140,334 lines) form one strongly connected component of `crate::`
+references; about 65 items cross a five-layer sketch upwards. **Churn:** 20 of 20 trains in two weeks changed tools/paddock-dev; the 15
+trains of 2026-11-26/27 touched 16 areas on average, and 11 of 15 changed a layer every area uses. **Replay** (share of today's test seconds
+each option would have run; whole-repository classes keyed on the whole tree): trains 93 to 98% for every option, members 55 to 78% against
+82% today. Limits: the layering is a sketch; per-test seconds sum the threads. Quoted by ADR NEW-paddock-dev-test-split.
