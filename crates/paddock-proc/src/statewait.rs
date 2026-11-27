@@ -4,6 +4,10 @@
 //! it caused: a state read right after `kill`, `wait` or a signal races whatever the OS and the other process do next (CI runs 6603,
 //! 7448, 9168 and 9201). So a test never reads [`run_state`](crate::run_state) directly (a Clippy ban in `crates/clippy.toml`):
 //!
+//! Windows does not read a live process as [`RunState::Running`] (its state is [`RunState::Unknown`] until `IsFrozen` is read, ADR 0031
+//! section 4; run 9225 waited 40 s for `Running`): a test that must work there waits for `Exited`, or for a state that is not
+//! `Exited` (`|s| s != RunState::Exited`), and keeps `Running` and `Stopped` for Unix tests.
+//!
 //! - [`wait_state`] / [`wait_exited`]: the state the test expects arrives, polled on the condition and bounded (no sleep decides
 //!   anything, ER-12);
 //! - [`state_after`] / [`still_running_after`]: a state that must hold ("it stays running") is read once, after the event that would
@@ -75,7 +79,11 @@ mod tests {
     fn a_running_process_is_waited_for_until_it_ends_and_the_ending_is_seen() {
         let mut c = crate::Supervised::spawn(child(Mode::Sleep)).unwrap();
         let id = ProcessId::of(c.id().unwrap()).unwrap();
-        assert!(wait_state(id, HANG_GUARD, |s| s == RunState::Running));
+        // Alive, not `Running`: a live process reads `Unknown` on Windows (run 9225).
+        assert!(wait_state(id, HANG_GUARD, |s| s != RunState::Exited));
+        assert_ne!(state_after(id, || {}), RunState::Exited);
+        // `Running` is a Unix reading (see the module text).
+        #[cfg(unix)]
         assert!(still_running_after(id, || {}));
         // A bound that passes with the state not reached is a `false`, not a hang or a panic.
         assert!(!wait_exited(id, Duration::from_millis(20)));
