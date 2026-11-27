@@ -4533,3 +4533,9 @@ before it checks their names, with a failing test first (bug-fix skill). Open; n
 - **Fix (ER-44).** `PADDOCK_PREPUSH_STATE` names the state folder of a run (test-only in the settings register); `dev_heavy` in
   `tools/paddock-dev/tests/it/pre_push.rs` gives every run one under the test's own folder, which fixes all the `tree_` tests that run a gate row at once.
   `tree_a_run_takes_its_build_folder_lock_in_the_state_folder_it_was_given` fails if the variable is ignored.
+- **The class (ER-21), closed in the same change.** Tool state under the git common dir (`<common>/paddock-pre-push`, `<common>/paddock/waits`) is
+  shared by every worktree. Each such folder has a test-only `*_STATE` row in the settings register (`PADDOCK_PREPUSH_STATE`, read by `pre_push::state_dir`, which
+  the test cache and the slow-row records use too; `PADDOCK_WAIT_STATE`, read by `wait_lock::dir_for`), and `paddock_testkit::process::STATE_FOLDERS` makes every
+  `TestCommand` set all of them inside its private folder. `tests/it/state_folders.rs` fails when the register declares a `*_STATE` setting the harness does not
+  set (shown red by dropping one). The owner map, the hook copies and the repository exclude file also live in the common dir, but only worktree, hook and disk
+  commands touch them and their tests run in repositories they make. No test started `ci test-cache` or `landing-held` in the checkout.

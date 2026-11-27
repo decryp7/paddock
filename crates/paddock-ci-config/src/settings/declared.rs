@@ -224,6 +224,7 @@ pub const DECLARED: &[Decl] = &[
     d("PADDOCK_VM", Text, Machine, None, "Names a test machine for a VM gate."),
     d("PADDOCK_VM_DATA", Path, Machine, None, "Where test machines keep their data."),
     d("PADDOCK_VM_LOCK_ROOT", Path, Machine, None, "Where test machines' locks live."),
+    d("PADDOCK_WAIT_STATE", Path, TestOnly, None, "The folder of `./dev wait`'s lock files: a test gives its own, never the repository's."),
     d("PADDOCK_WORKSPACE", Path, Handoff, None, "The job's checkout; a base folder of the compile cache."),
     d("PADDOCK_WORKTREE_ROOT", Path, Machine, None, "The folder worktrees are made in (git config paddock.worktreeRoot is the other source)."),
     d("PADDOCK_ZIP", Path, Handoff, None, "The archive a host tool packs (set by setup-rust for its child)."),
