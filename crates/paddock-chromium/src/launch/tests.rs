@@ -206,7 +206,9 @@ fn a_fake_browser_ends_when_its_owner_dies_even_without_a_guardian() {
     assert!(browser.confirmed_running());
     owner.kill().unwrap();
     owner.wait().unwrap();
-    let gone = paddock_testkit_start::wait_exited(browser, paddock_testkit::wait::HANG_GUARD);
+    let gone = paddock_testkit::wait::poll_until_within(paddock_testkit::wait::HANG_GUARD, || {
+        paddock_proc::run_state(browser) == paddock_proc::RunState::Exited
+    });
     if !gone {
         // Ended by identity before the test fails, so a failure leaves no browser behind (ER-14).
         paddock_proc::kill_tree(browser);
@@ -263,9 +265,8 @@ fn started_in_the_background_end(dir: &Path, exe: &Path, launcher: &str) {
     }
     let gone = paddock_testkit::wait::poll_until_within(paddock_testkit::wait::HANG_GUARD, || {
         started.iter().all(|p| {
-            p.running().is_none_or(|id| {
-                paddock_testkit_start::wait_exited(id, paddock_testkit::wait::HANG_GUARD)
-            })
+            p.running()
+                .is_none_or(|id| paddock_proc::run_state(id) == paddock_proc::RunState::Exited)
         })
     });
     if !gone {
@@ -336,14 +337,16 @@ fn a_browser_whose_owner_is_killed_is_ended_and_its_throwaway_profile_removed() 
             kept,
             "a root owner's profile was removed without a guardian"
         );
-        let ended = paddock_testkit_start::wait_exited(browser, paddock_testkit::wait::HANG_GUARD);
+        let ended =
+            paddock_testkit::wait::poll_until_within(paddock_testkit::wait::HANG_GUARD, || {
+                paddock_proc::run_state(browser) == paddock_proc::RunState::Exited
+            });
         assert!(ended, "the orphaned browser did not end");
         return;
     }
-    let gone = paddock_testkit_start::wait_exited(browser, paddock_testkit::wait::HANG_GUARD)
-        && paddock_testkit::wait::poll_until_within(paddock_testkit::wait::HANG_GUARD, || {
-            !profile.exists()
-        });
+    let gone = paddock_testkit::wait::poll_until_within(paddock_testkit::wait::HANG_GUARD, || {
+        paddock_proc::run_state(browser) == paddock_proc::RunState::Exited && !profile.exists()
+    });
     if !gone {
         // Ended by identity before the test fails, so a failure leaves no browser behind (ER-14).
         paddock_proc::kill_tree(browser);
@@ -795,11 +798,7 @@ fn a_browser_stopped_at_start_is_paused_and_waited_for_not_called_idle() {
             paddock_testkit_start::recorded::look_pid_file(&pid_file)
                 .ok()
                 .and_then(paddock_testkit_start::Recorded::running)
-                .is_some_and(|id| {
-                    paddock_testkit_start::wait_state(id, Duration::ZERO, |s| {
-                        s == paddock_proc::RunState::Stopped
-                    })
-                })
+                .is_some_and(|id| paddock_proc::run_state(id) == paddock_proc::RunState::Stopped)
         });
         while !h.is_finished() {
             if clock.waiters() >= 1 {

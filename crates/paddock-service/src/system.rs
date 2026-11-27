@@ -121,10 +121,6 @@ impl System for RealSystem {
         paddock_proc::ProcessId::of(pid).and_then(paddock_proc::tree_cpu_time)
     }
 
-    #[expect(
-        clippy::disallowed_methods,
-        reason = "production read: the service's facts about a process, never a verdict on one read"
-    )]
     fn run_state(&mut self, pid: u32) -> paddock_proc::RunState {
         paddock_proc::ProcessId::of(pid)
             .map_or(paddock_proc::RunState::Unknown, paddock_proc::run_state)
