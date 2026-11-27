@@ -351,7 +351,13 @@ fn what_the_change_does_not_reach_is_skipped_with_a_reason() {
     }
     let skipped_ids: Vec<String> = planned
         .iter()
-        .filter_map(|p| if let Planned::Skip { id, .. } = p { Some(id.as_str()) } else { None })
+        .filter_map(|p| {
+            if let Planned::Skip { id, .. } = p {
+                Some(id.as_str())
+            } else {
+                None
+            }
+        })
         .flat_map(|id| id.split(", "))
         .map(String::from)
         .collect();
