@@ -15,7 +15,12 @@ profile = "ci"
 # Targets that are never cached, by model node id (ADR 0116 §3, the `noTestCache` list). An entry makes CI stricter: adding one
 # needs no approval; removing one is a weakening and needs the user's approval in the change (ER-46 read in its own direction;
 # `test_cache::config::removed` compares this list with the merge base's).
-no_test_cache = []
+#
+# crate:tools/paddock-dev (decision 113, user 2026-11-27): its whole-repository tests (tree_*, graph_*, live_*) read the whole tree,
+# and its node key (the crate's own inputs) does not cover that, so a pass of the same key proves nothing about them. It runs every
+# time and is still recorded (the evidence builds up) until those tests get their own tree-keyed target; then remove this entry
+# (a weakening: it needs the user's approval in that change).
+no_test_cache = ["crate:tools/paddock-dev"]
 
 # The switch (ER-41): reuse is report-only (shadow) until the first two green train runs with zero soundness findings are recorded
 # here by run id. In shadow mode every target still runs, and a target whose key matched a record and then failed is a soundness

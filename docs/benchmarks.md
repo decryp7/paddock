@@ -3209,3 +3209,16 @@ clippy 230.1 s (844 steps), clippy-windows 291.0 s (352), conformance-tests 294.
 900 s (`HANG_LIMITS` in `pre_push/budget.rs`, which holds the measured gaps beside them). A hung row ends with exit 81 and reads "not measured: hung (no
 output, no CPU for S s)" with the next step, never a pass; a hung row now costs 10 to 15 minutes, not 60. Not measured: a real sccache hang through the
 gate (the stand-in test exercises the reading of exit 81; `throttle`'s own tests end a silent idle command and leave a silent busy one alone).
+
+## paddock-dev host legs: OS-independent areas leave Windows and macOS (expected saving, 2026-11-27, ci/paddock-dev-os-scope)
+
+Expected, not measured: nothing was run on a host. **Source:** the per-area test seconds of run 9212 (jobs 52148 macOS, 52162 Windows) in the
+block "paddock-dev test time by area" of docs/benchmarks.md on branch docs/paddock-dev-test-split (ADR NEW-paddock-dev-test-split). Decision 114
+(user, 2026-11-27): the host legs run only OS-specific tests, so `tools/paddock-dev/paddock.ci.json` skips `merge_check::` (except `merge_check::git::`),
+`ci_runs::` (except `dispatch_guards::`; `reservation::` stays macOS only), `ci_run::`, the planner's model and readers and `repo_model::hash::` and
+`replay::` from both hosts. **Windows:** merge_check 545 s and ci_runs plus ci_run 228 s of 1,191 s summed per-test seconds (65%) leave; the kept
+`merge_check::git::` and `ci_runs::dispatch_guards::` tests are not separated in the source, so the saving is at most 773 s (about 180 s of the
+282 s test step in 9212 if the share holds), plus part of repo_model 53 s and the other skipped areas (not separated in the source).
+**macOS:** merge_check 88 s and ci_runs plus ci_run 86 s of 817 s (21%) at most (the kept git and reservation tests are inside these figures); about
+75 s of the 360 s test step. **Linux** runs everything, unchanged. Limits: per-test seconds sum the threads; the wall share is the sum share. The
+real figure is read from the first run after the change.
