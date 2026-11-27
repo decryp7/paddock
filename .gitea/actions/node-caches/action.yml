@@ -1,5 +1,5 @@
 name: node-caches
-description: "Keeps npm's download cache and the Angular build cache between runs: on a host runner in the job slot's own kept folders (job-isolation: npm-<slot> and angular/<name>-<slot>); in a Linux container in the job's own folders under RUNNER_TEMP, filled and kept through actions/cache (the runners' RustFS S3): npm keyed by OS, Node and the lockfile with restore-keys, Angular by the lockfile (which holds the Angular version) and the app's sources, falling back to the same lockfile's older entry (content-addressed, so partial is safe). No folder of the shared /sccache mount is used (ADR 0111). The job summary gets each cache's key, exact hit, partial hit or miss, and the save (pending: it runs in actions/cache's post step, whose log says if it failed)."
+description: "Skips both Actions-cache steps when the job's probe (dev-tool-cache, the first step here) found the cache service not answering. Keeps npm's download cache and the Angular build cache between runs: on a host runner in the job slot's own kept folders (job-isolation: npm-<slot> and angular/<name>-<slot>); in a Linux container in the job's own folders under RUNNER_TEMP, filled and kept through actions/cache (the runners' RustFS S3): npm keyed by OS, Node and the lockfile with restore-keys, Angular by the lockfile (which holds the Angular version) and the app's sources, falling back to the same lockfile's older entry (content-addressed, so partial is safe). No folder of the shared /sccache mount is used (ADR 0111). The job summary gets each cache's key, exact hit, partial hit or miss, and the save (pending: it runs in actions/cache's post step, whose log says if it failed)."
 inputs:
   angular-dir:
     description: "The Angular workspace whose .angular/cache is kept (relative to the checkout); empty keeps only the npm cache."
@@ -28,7 +28,8 @@ runs:
       run: echo "version=$(node --version 2>/dev/null || echo none)" >> "$GITHUB_OUTPUT"
     - name: npm download cache
       id: npm-cache
-      if: runner.os == 'Linux'
+      # Skipped when the job's probe found the Actions cache service not answering (dev-tool-cache, the first step of this action).
+      if: runner.os == 'Linux' && env.PADDOCK_ACTIONS_CACHE_DOWN != '1'
       uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
       with:
         path: ${{ runner.temp }}/node-caches/npm
@@ -37,7 +38,7 @@ runs:
           npm-v1-${{ runner.os }}-${{ runner.arch }}-node-${{ steps.node.outputs.version }}-
     - name: Angular build cache
       id: angular-cache
-      if: runner.os == 'Linux' && inputs.angular-dir != ''
+      if: runner.os == 'Linux' && inputs.angular-dir != '' && env.PADDOCK_ACTIONS_CACHE_DOWN != '1'
       uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
       with:
         path: ${{ runner.temp }}/node-caches/angular
@@ -62,6 +63,7 @@ runs:
         r="${{ github.action_path }}/../../../conformance/ci/cache-report.sh"
         {
           if [ -n "$NPM_KEY" ]; then bash "$r" line npm "$NPM_KEY" "$NPM_HIT" "$NPM_MATCHED" pending
+          elif [ "${PADDOCK_ACTIONS_CACHE_DOWN:-}" = 1 ]; then echo "- npm and Angular caches: skipped (the Actions cache service did not answer the job's probe)" | tee -a "$GITHUB_STEP_SUMMARY"
           else echo "- npm cache: not measured (the step did not run)" | tee -a "$GITHUB_STEP_SUMMARY"; fi
           [ -z "$NG_KEY" ] || bash "$r" line Angular "$NG_KEY" "$NG_HIT" "$NG_MATCHED" pending
         }

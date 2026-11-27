@@ -400,6 +400,65 @@ mod tests {
         assert!(reused.is_empty(), "{reused:?}");
     }
 
+    /// The local actions whose steps use the dev-tool cache action, read through the job model's own YAML parser (ER-42).
+    fn tool_cache_actions(root: &std::path::Path) -> BTreeSet<String> {
+        let mut out = BTreeSet::new();
+        for e in std::fs::read_dir(root.join(".gitea/actions")).unwrap() {
+            let dir = e.unwrap().path();
+            let Ok(text) = std::fs::read_to_string(dir.join("action.yml")) else {
+                continue;
+            };
+            let doc = paddock_ci_config::yaml::parse(&text).unwrap();
+            let steps = doc
+                .get("runs")
+                .and_then(|r| r.get("steps"))
+                .map(|s| s.items().to_vec())
+                .unwrap_or_default();
+            if steps
+                .iter()
+                .any(|st| st.get_text("uses") == Some("./.gitea/actions/dev-tool-cache"))
+            {
+                out.insert(dir.file_name().unwrap().to_string_lossy().into_owned());
+            }
+        }
+        out
+    }
+
+    /// User decision 109: one job of ci.yml writes the ./dev runner store and the Actions cache. Train y (run 9243) had none: the plan
+    /// job's first tool-cache use, inside runner-wait, was a consumer and every later use did nothing, so no job ever published.
+    #[test]
+    fn exactly_one_job_of_ci_yml_produces_the_dev_tool_and_its_action_hands_the_input_on() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let read = |rel: &str| std::fs::read_to_string(root.join(rel)).unwrap().replace("\r\n", "\n");
+        let actions = tool_cache_actions(&root);
+        assert!(
+            actions.contains("runner-wait"),
+            "the finder sees the action the plan job starts with: {actions:?}"
+        );
+        let declared = ModelDeclared {
+            projects: crate::repo_inputs::ci_jobs(&read("docs/repo-graph.toml")).unwrap(),
+            tool_cache_actions: actions,
+        };
+        let model = jobs::model(&read(".gitea/workflows/ci.yml"), &declared).unwrap();
+        let producers: Vec<&str> = model.jobs.iter().filter(|j| j.tool_cache_producer).map(|j| j.id.as_str()).collect();
+        assert_eq!(producers, ["plan"], "the plan job is ci.yml's one producer");
+        // The action the plan job's producer input goes to hands it on to its own dev-tool-cache use.
+        let wait = paddock_ci_config::yaml::parse(&read(".gitea/actions/runner-wait/action.yml")).unwrap();
+        let handed = wait
+            .get("runs")
+            .and_then(|r| r.get("steps"))
+            .map(|s| s.items().to_vec())
+            .unwrap_or_default()
+            .into_iter()
+            .find(|st| st.get_text("uses") == Some("./.gitea/actions/dev-tool-cache"))
+            .and_then(|st| st.get("with").and_then(|w| w.get_text("producer")).map(str::to_string));
+        assert_eq!(handed.as_deref(), Some("${{ inputs.producer }}"));
+        // Control: without the input on the plan job, ci.yml has no producer and the check sees it.
+        let without = read(".gitea/workflows/ci.yml").replacen("          producer: \"true\"\n", "", 1);
+        let model = jobs::model(&without, &declared).unwrap();
+        assert!(model.jobs.iter().all(|j| !j.tool_cache_producer));
+    }
+
     #[test]
     fn a_job_without_an_if_always_runs_and_the_plan_job_is_not_listed() {
         let wf = "jobs:\n  plan:\n    runs-on: x\n  always:\n    name: always runs\n    needs: [plan]\n    runs-on: x\n    steps:\n      - run: x\n";
