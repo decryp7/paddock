@@ -1453,7 +1453,10 @@ jobs:
               echo "::error::cargo tree failed for tools/$tool (see the lines above). Run it in tools/$tool with the same arguments."
               rc=1; continue; }
             # ER-33: the probe must be able to see the thing. The tool links paddock-proc, where the hack's GTK crates arrived.
-            echo "$tree" | grep -q '^paddock-proc ' || {
+            # A here-string, not a pipe into `grep -q` (which stops at its first match and, under `pipefail`, can turn the writer's SIGPIPE into a
+            # failure); on a miss the first lines of the graph are printed, so a broken probe says what it saw (ER-27).
+            grep '^paddock-proc ' <<<"$tree" >/dev/null || {
+              echo "$tree" | head -n 5 >&2 || true
               echo "::error::check broken: the dependency graph of tools/$tool has no paddock-proc, so a GTK crate there would not be seen."
               rc=1; continue; }
             hits=$(echo "$tree" | grep -E '^(gtk|gdk|gio|glib|gobject|pango|cairo|atk|gdk-pixbuf|soup|webkit2gtk|javascriptcore-rs)[a-z0-9-]*-(sys|sys-rs) ' | sort -u || true)

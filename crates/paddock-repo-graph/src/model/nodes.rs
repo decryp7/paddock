@@ -220,6 +220,7 @@ pub struct Model {
     edges: BTreeSet<Edge>,
     rev: BTreeMap<String, BTreeSet<(String, EdgeKind)>>,
     unresolved: BTreeSet<Unresolved>,
+    blind: BTreeSet<Unresolved>,
     /// Each file entry of a node (a file, or a folder with its trailing `/`) to the ids of the nodes that list it: a path's owners
     /// are found by looking up the path and each folder above it, not by visiting every node (ER-20; a whole-tree reach visited
     /// about 4,600 nodes per changed file, three times).
@@ -285,6 +286,16 @@ impl Model {
     /// Records a reference an extractor could not resolve.
     pub fn add_unresolved(&mut self, u: Unresolved) {
         self.unresolved.insert(u);
+    }
+
+    /// Records a read an adapter cannot follow: unlike an unresolved reference it does not widen a plan; the test cache reads it.
+    pub fn add_blind(&mut self, u: Unresolved) {
+        self.blind.insert(u);
+    }
+
+    /// Every blind read, sorted.
+    pub fn blind(&self) -> Vec<&Unresolved> {
+        self.blind.iter().collect()
     }
 
     /// Every unresolved reference, sorted.

@@ -17,6 +17,7 @@
 
 use super::baseline::{self, Growth};
 use super::finding::Finding;
+use super::growth_approval::{self, Standing};
 use super::jsre::rx;
 use super::outcome::Outcome;
 use super::record::Precondition;
@@ -165,21 +166,24 @@ impl Check for C139 {
             match baseline::growth(ctx.root(), &ctx.base_ref(), f, &current, &of, &exact, None) {
                 Growth::Unmeasured(why) => findings.push(baseline::unmeasured_finding(ctx.in_ci(), "C139", 49, f, "the exception list", &why)),
                 Growth::Added { added: 0, .. } => {}
-                Growth::Added { base, added, .. } => findings.push(
-                    Finding::error(
-                        "C139",
-                        49,
-                        f,
-                        1,
-                        format!(
-                            "the exception list grew: {added} entr{} (counting each `count`) not in {f} at the merge base {}; it may only shrink",
-                            if added == 1 { "y is" } else { "ies are" },
-                            &base[..base.len().min(9)]
-                        ),
-                        FIX_GROW,
-                    )
-                    .unwaivable(),
-                ),
+                Growth::Added { base, added, fresh, .. } => match growth_approval::standing(ctx, "C139", &fresh) {
+                    Standing::Approved => {}
+                    Standing::Stands { detail, ask } => findings.push(
+                        Finding::error(
+                            "C139",
+                            49,
+                            f,
+                            1,
+                            format!(
+                                "the exception list grew: {added} entr{} (counting each `count`) not in {f} at the merge base {}; it may only shrink{detail}",
+                                if added == 1 { "y is" } else { "ies are" },
+                                &base[..base.len().min(9)]
+                            ),
+                            format!("{FIX_GROW} {ask}"),
+                        )
+                        .unwaivable(),
+                    ),
+                },
             }
         }
         CheckOutput {

@@ -26,8 +26,8 @@ use std::time::Duration;
 pub const ENFORCED: bool = true;
 
 /// An outer bound on the gate run (ER-32). `check --pre-push` has no total of its own: each row has its own cap on its own run time
-/// ([`ROW_CAP`](crate::pre_push::exec::ROW_CAP) and the grace beyond it for the stack capture), and a wait for the heavy slot goes on
-/// while the queue moves and ends only after [`QUEUE_STALL`](crate::pre_push::exec::QUEUE_STALL) without progress. So this one only
+/// ([`ROW_CAP`](crate::throttle::ROW_CAP) and the grace beyond it for the stack capture), and a wait for the heavy slot goes on
+/// while the queue moves and ends only after [`QUEUE_STALL`](crate::throttle::QUEUE_STALL) without progress. So this one only
 /// ends a hang of the gate itself and must never end a healthy run: at least one worst row (a whole wait for the slot, the row cap and
 /// its grace) and one heavy build; the figure is the measured one below.
 ///
@@ -74,7 +74,12 @@ impl Gates for Real {
 /// Runs `<this tool> --json check --pre-push <extra> --base <base> --root <root>` in `root` and reads what it printed (the member gate
 /// and the static rows of `merge sync-member` differ only in `extra`).
 pub fn run_pre_push(root: &Path, base: &str, extra: &[&str]) -> Result<GateRun, String> {
-    let mut cmd = command(program()?);
+    run_pre_push_with(&program()?, root, base, extra)
+}
+
+/// [`run_pre_push`] with the program given (`merge sync-member` runs the sync tip's own `./dev`).
+pub fn run_pre_push_with(program: &Path, root: &Path, base: &str, extra: &[&str]) -> Result<GateRun, String> {
+    let mut cmd = command(program);
     cmd.args(["--json", "check", "--pre-push"])
         .args(extra)
         .args(["--base", base, "--root"])
@@ -370,9 +375,8 @@ mod tests {
     /// anything.
     #[test]
     fn the_outer_bound_outlasts_everything_the_gate_allows_itself() {
-        use crate::pre_push::exec::WAIT_BACKSTOP;
-        use crate::pre_push::exec::{CAP_GRACE, ROW_CAP};
-        use crate::pre_push::heavy_tool::BUILD_LIMIT;
+        use crate::heavy_tool::BUILD_LIMIT;
+        use crate::throttle::{CAP_GRACE, ROW_CAP, WAIT_BACKSTOP};
         let worst_row = ROW_CAP + CAP_GRACE + WAIT_BACKSTOP;
         assert!(TIMEOUT > worst_row + BUILD_LIMIT + Duration::from_secs(5 * 60), "{TIMEOUT:?}");
         assert_eq!(

@@ -209,12 +209,14 @@ export default {
         path: BASELINE_PATH,
         current: list,
         keyOf: (e) => `${e.file}\0${e.target}`,
+        rekey: (e, map) => ({ ...e, file: map.get(e.file) ?? e.file }), // an entry follows its document's rename (not growth, ER-46)
         entriesOf: (j) => j[key] ?? [],
         ...(ctx.options.git ? { git: ctx.options.git } : {}),
         baseRef: targetRef(ctx.options),
+        check: 'C104',
       });
       if (g.reason) out.push(unmeasuredFinding(ctx, { id: 'C104', rule: 40, file: BASELINE_PATH, g }));
-      else for (const a of g.added) out.push(error('C104', 40, BASELINE_PATH, 1, `the baseline grew: \`${a.target}\` in ${a.file} is not in the baseline at the merge base ${g.base.slice(0, 9)}`, 'Remove the entry and fix the text; growing the baseline needs the user\'s approval.'));
+      else for (const a of g.added) out.push(error('C104', 40, BASELINE_PATH, 1, `the baseline grew: \`${a.target}\` in ${a.file} is not in the baseline at the merge base ${g.base.slice(0, 9)}`, 'Remove the entry and fix the text; growing the baseline needs the user\'s approval.' + (g.ask ? ` ${g.ask}` : '')));
     }
     return out;
   },

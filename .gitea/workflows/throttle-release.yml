@@ -1,12 +1,12 @@
 # Releases the `throttle` tool (tools/throttle) from a throttle-v* tag, and only from one (rule 9): binaries for macOS arm64, Linux x86_64 and
 # arm64 and Windows x86_64 plus a SHA256SUMS file go to the Gitea release of the tag (conformance/release/publish.mjs, as the apps'
-# releases do), and the crate `paddock-throttle` goes to the cargo registry `decryp7` when its dependencies are there. A machine then
+# releases do). The core is the shared crate `paddock-throttle` (crates/paddock-throttle), published with the other crates by a v* tag (publish.yml); this tool is only the binary. A machine then
 # installs it with `./dev throttle-install` (downloads the asset for its OS, verifies the checksum, installs atomically into
 # <dev-targets>/throttle/bin/throttle, records the version; tools/throttle/README.md). The tag is requested through the tag workflow
 # (throttle-vX.Y.Z: conformance/ci/request-tag.mjs reads the version from tools/throttle/Cargo.toml and asks ci.yml's verdict).
 # First green run: pending (ER-41: this workflow has not run yet; the first throttle-v* tag is its first run, recorded here by run id).
 # The Linux binaries are built in the garage image (Ubuntu 24.04): they need glibc 2.39 or newer (tools/throttle/README.md).
-# Secrets: RELEASE_TOKEN (write:repository, as the apps' releases), DOCKER_USERNAME / DOCKER_PASSWORD (the cargo registry, as publish.yml).
+# Secrets: RELEASE_TOKEN (write:repository, as the apps' releases).
 
 name: throttle-release
 
@@ -193,32 +193,3 @@ jobs:
           (cd release && sha256sum throttle-* > SHA256SUMS && cat SHA256SUMS)
           mkdir notes && printf 'throttle %s: the machine-wide heavy-step lock. Install: `./dev throttle-install` in a Paddock checkout (it checks SHA256SUMS).\n' "${GITHUB_REF_NAME#throttle-v}" > notes/NOTES.md
           node conformance/release/publish.mjs --api "${{ github.server_url }}/api/v1" --repo "${{ github.repository }}" --tag "$GITHUB_REF_NAME" --notes notes/NOTES.md --dir release
-
-  crate:
-    name: crate (cargo registry decryp7)
-    needs: [release]
-    runs-on: ubuntu-latest
-    # Cheap and optional: the release above is what machines install from. The dry run fails when a dependency (paddock-proc, paddock-env)
-    # is not in the registry at the version tools/throttle asks for: a v* tag (publish.yml) publishes the crates first.
-    continue-on-error: true
-    container:
-      image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
-    env:
-      RUSTUP_TOOLCHAIN: stable
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-
-      - name: Dry run, then publish
-        working-directory: tools/throttle
-        env:
-          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
-          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
-        run: |
-          DOCKER_USERNAME=$(printf '%s' "$DOCKER_USERNAME" | tr -d '[:space:]')
-          DOCKER_PASSWORD=$(printf '%s' "$DOCKER_PASSWORD" | tr -d '[:space:]')
-          auth=$(printf '%s:%s' "$DOCKER_USERNAME" "$DOCKER_PASSWORD" | base64 | tr -d '\n')
-          echo "::add-mask::$auth"
-          export CARGO_REGISTRIES_DECRYP7_TOKEN="Basic $auth"
-          cargo publish --dry-run --locked --registry decryp7 || { echo "::warning::the dry run of paddock-throttle failed (a dependency is probably not in the registry at the version tools/throttle/Cargo.toml asks for: publish the crates with a v* tag first). The release assets are published; the crate is not."; echo "crate not published (dry run failed)" >> "$GITHUB_STEP_SUMMARY"; exit 1; }
-          cargo publish --locked --registry decryp7 || { echo "::error::cargo publish of paddock-throttle failed. Next step: read the output above; the release assets are published and installable, only the crate is not."; echo "crate not published" >> "$GITHUB_STEP_SUMMARY"; exit 1; }
-          echo "crate paddock-throttle published" >> "$GITHUB_STEP_SUMMARY"
