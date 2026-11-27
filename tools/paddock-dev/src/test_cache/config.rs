@@ -136,11 +136,3 @@ impl Config {
         self.no_test_cache.iter().any(|n| n == node)
     }
 }
-
-/// The `no_test_cache` entries the merge base has and `head` does not: a weakening that needs the user's approval (ER-46 read in its
-/// own direction). A text that cannot be read counts as having no entries on the head side, so the check never passes on a broken file.
-pub fn removed(base: &str, head: &str) -> Result<Vec<String>, String> {
-    let base = Config::parse(base)?;
-    let head = Config::parse(head)?;
-    Ok(base.no_test_cache.into_iter().filter(|n| !head.no_test_cache.contains(n)).collect())
-}
