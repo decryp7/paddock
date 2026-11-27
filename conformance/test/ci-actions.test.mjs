@@ -126,7 +126,7 @@ test('in a job that moves the checkout (stable-workspace), every upload-artifact
   for (const file of readdirSync(WORKFLOWS).filter((x) => /\.ya?ml$/.test(x))) {
     for (const job of parseJobs(read(join(WORKFLOWS, file)))) {
       if (!stable.test(job.text)) continue;
-      for (const step of parseSteps(job.text).filter((st) => /actions\/upload-artifact@/.test(st.uses ?? ''))) {
+      for (const step of parseSteps(job.text).filter((st) => /(actions\/|gitea-)upload-artifact@/.test(st.uses ?? ''))) {
         const path = /^\s+path: (.+)$/m.exec(step.text)?.[1] ?? '';
         // A path that is not a build output (a failure report under the app, uploaded `if: failure()`) is judged by its step.
         if (/if: failure\(\)/.test(step.text)) continue;
@@ -1248,7 +1248,7 @@ test('the real-browser tests of the crates and of Debrief take turns under nexte
 test("a kit app's end-to-end legs and failure report: ci.yml forwards the shard, the webkit input and uploads the report from the stable workspace", () => {
   const ci = read(join(WORKFLOWS, 'ci.yml'));
   assert.match(ci, /e2e-checks: \$\{\{ matrix\.e2e_checks \}\}\n\s+e2e-shard: \$\{\{ matrix\.e2e_shard \}\}/);
-  const step = /- uses: actions\/upload-artifact@\S+ # v3\n\s+if: failure\(\) && matrix\.e2e_artifacts != ''\n[\s\S]*?\n\n/.exec(ci)?.[0] ?? '';
+  const step = /- uses: ChristopherHX\/gitea-upload-artifact@\S+ # v4\n\s+if: failure\(\) && matrix\.e2e_artifacts != ''\n[\s\S]*?\n\n/.exec(ci)?.[0] ?? '';
   assert.match(step, /path: \$\{\{ env\.PADDOCK_WORKSPACE \|\| github\.workspace \}\}\/\$\{\{ matrix\.e2e_artifacts \}\}/, 'under the stable workspace');
   assert.match(step, /name: \$\{\{ matrix\.app \}\}-\$\{\{ matrix\.e2e_leg \|\| 'ui' \}\}-results-\$\{\{ strategy\.job-index \}\}/, 'one name per leg');
   // `./dev ci run` derives E2E_INDEX (i of i/N) from E2E_SHARD (tools/paddock-dev/src/ci_run/tests.rs); the step hands it the shard.

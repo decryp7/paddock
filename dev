@@ -436,12 +436,99 @@ config_path() {
   if command -v cygpath > /dev/null 2>&1; then cygpath -m "$1"; else printf '%s\n' "$1"; fi
 }
 
-build() {
-  refuse_build_target
+# run_cargo_build <target dir> <hash> [extra cargo arguments]: the one cargo call of a self-build.
+run_cargo_build() {
+  _rt=$1 _rh=$2
+  shift 2
   # The build folder as cargo configuration, never CARGO_TARGET_DIR: sccache hashes every CARGO_* variable (lessons.md; src/cargo_target.rs).
   # A caller's own CARGO_TARGET_DIR is dropped, because the variable would outrank the configuration.
-  (cd "$tool" && unset CARGO_TARGET_DIR CARGO_BUILD_TARGET_DIR && PADDOCK_DEV_HASH="${2:-dirty}" cargo build --release --locked --quiet --config "build.target-dir='$(config_path "$1")'") || {
-    code=$?
+  (cd "$tool" && unset CARGO_TARGET_DIR CARGO_BUILD_TARGET_DIR && PADDOCK_DEV_HASH="$_rh" cargo build --release --locked --quiet "$@" --config "build.target-dir='$(config_path "$_rt")'")
+}
+
+# selfbuild_cache: in a CI job on a runner with the kept volume, the cold self-build compiles through a local-disk sccache in a folder of
+# that volume (docs/benchmarks.md, 2026-11-27, "the tool's own build"): the dependencies come from it and only the tool's own crate
+# compiles. Sets `sb_dir` and `sb_lock` when the cache is to be used, empty otherwise. Not used when: this is not a CI job; RUSTC_WRAPPER
+# is set (an explicit wrapper wins: setup-rust's, a developer's shim); sccache is missing; the kept volume (PADDOCK_SCCACHE_MOUNT, default
+# /sccache) is not a writable folder; the run is a release, rule 54 or tag run (a tag build reads nothing kept, ADR 0085: the test of
+# conformance/ci/kit.sh release_reason, where PADDOCK_DEV_DOWNLOAD=0 also stands for a job with no read token); or
+# PADDOCK_DEV_SELFBUILD_CACHE=off. None of these variables is in the hash (input_hash.rs), so the tool's key is the same either way.
+selfbuild_cache() {
+  sb_dir=
+  sb_lock=
+  [ "${GITHUB_ACTIONS:-}" = true ] || return 0
+  [ "${PADDOCK_DEV_SELFBUILD_CACHE:-}" = off ] && return 0
+  [ -z "${RUSTC_WRAPPER:-}" ] || return 0
+  case "${GITHUB_REF:-}" in refs/tags/*) return 0 ;; esac
+  [ "${PADDOCK_TAG_REHEARSAL:-}" = 1 ] && return 0
+  [ "${PADDOCK_DEV_DOWNLOAD:-}" = 0 ] && return 0
+  command -v sccache >/dev/null 2>&1 || return 0
+  _m=${PADDOCK_SCCACHE_MOUNT:-/sccache}
+  { [ -d "$_m" ] && [ -w "$_m" ]; } || return 0
+  if ! command -v flock >/dev/null 2>&1; then
+    echo "::notice::./dev builds paddock-dev without the compile cache: no flock to hold the cache folder's lock (ER-33: a cache that cannot confirm its lock is not used)." >&2
+    return 0
+  fi
+  mkdir -p "$_m/paddock-dev-build-cache" || return 0
+  sb_dir=$_m/paddock-dev-build-cache
+  sb_lock=$_m/paddock-dev-build-cache.lock
+}
+
+# selfbuild_cached <target dir> <hash>: the build through the compile cache. The folder has one owner at a time (ER-51): the lock is
+# held for the whole use, the server's life included, and neither the server nor cargo inherits it (9>&-). The server is ours alone:
+# a stale one is stopped, ours ends with the build. Own limit: 5 GB, evicted by sccache's LRU. The job count goes by flag, and the
+# two CARGO_* variables CI's setup-rust fixes are fixed here, since sccache hashes every CARGO_* variable and the keys must not differ
+# between runners or jobs. Returns cargo's code, or 99 (nothing built) when the cache could not be used.
+selfbuild_cached() {
+  _ct=$1 _ch=$2
+  (
+    exec 9>"$sb_lock" || exit 99
+    flock -w 1800 9 || {
+      echo "::notice::./dev builds paddock-dev without the compile cache: the cache folder's lock was not free in 30 min." >&2
+      exit 99
+    }
+    export SCCACHE_DIR=$sb_dir SCCACHE_CACHE_SIZE=5G SCCACHE_SERVER_PORT=4229 SCCACHE_IGNORE_SERVER_IO_ERROR=1
+    export SCCACHE_BASEDIRS="$root" SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS=CARGO_MANIFEST_DIR,CARGO_MANIFEST_PATH
+    sccache --stop-server >/dev/null 2>&1 9>&- || true
+    if ! sccache --start-server >/dev/null 2>&1 9>&-; then
+      echo "::notice::./dev builds paddock-dev without the compile cache: the sccache server did not start." >&2
+      exit 99
+    fi
+    _jobs=
+    if [ -n "${CARGO_BUILD_JOBS:-}" ]; then
+      _jobs=$CARGO_BUILD_JOBS
+      unset CARGO_BUILD_JOBS
+    fi
+    _rc=0
+    if [ -n "$_jobs" ]; then
+      RUSTC_WRAPPER=sccache CARGO_INCREMENTAL=0 CARGO_TERM_COLOR=always run_cargo_build "$_ct" "$_ch" -j "$_jobs" 9>&- || _rc=$?
+    else
+      RUSTC_WRAPPER=sccache CARGO_INCREMENTAL=0 CARGO_TERM_COLOR=always run_cargo_build "$_ct" "$_ch" 9>&- || _rc=$?
+    fi
+    _st=$(sccache --show-stats 2>/dev/null 9>&-) || _st=
+    _h=$(printf '%s\n' "$_st" | awk '$1 == "Cache" && $2 == "hits" && NF == 3 { print $3; exit }')
+    _x=$(printf '%s\n' "$_st" | awk '$1 == "Cache" && $2 == "misses" && NF == 3 { print $3; exit }')
+    echo "dev: compile cache of the self-build ($sb_dir): ${_h:-unknown} hits, ${_x:-unknown} misses." >&2
+    sccache --stop-server >/dev/null 2>&1 9>&- || true
+    exit "$_rc"
+  )
+}
+
+build() {
+  refuse_build_target
+  selfbuild_cache
+  code=0
+  if [ -n "$sb_dir" ]; then
+    selfbuild_cached "$1" "${2:-dirty}" || code=$?
+    # 99: the cache could not be used and nothing was built; the build below is the plain one.
+    [ "$code" -eq 99 ] && code=-1
+  else
+    code=-1
+  fi
+  if [ "$code" -eq -1 ]; then
+    code=0
+    run_cargo_build "$1" "${2:-dirty}" || code=$?
+  fi
+  [ "$code" -eq 0 ] || {
     toolchain_changed "$code" || return $?
     echo "::error::./dev could not build paddock-dev (hash ${2:-dirty}, cargo exit $code, build folder $1). Run 'cargo build --release --locked' in tools/paddock-dev to see why; a stale tools/paddock-dev/Cargo.lock is the usual cause." >&2
     return 1

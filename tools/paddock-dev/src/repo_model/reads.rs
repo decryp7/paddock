@@ -10,11 +10,16 @@
 //!   round 3 P1-A).
 //! - `println!("cargo:rerun-if-changed=x")` in a build script: relative to the crate.
 //!
-//! - Anything else that reads the crate folder or walks the tree is a [`How::Blind`] read, never silence: `CARGO_MANIFEST_DIR` or
-//!   `CARGO_MANIFEST_PATH` outside a fully resolved literal chain (in a variable, a helper, behind `.parent()`, a non-literal
-//!   `join`, `env::var`), `.ancestors()`, `current_dir`, a `"ls-files"` argument, and a chain that normalises to the repository
-//!   root or out of it. The crate is then blind: the test cache never reuses it (ADR 0116 §2), unless the crate declares what its tests
-//!   read (`[package.metadata.paddock] test-reads`, [`super::test_reads`]).
+//! - A read is judged by its **root**, where the path starts, not by the fact that it reads (ADR 0116 §2, root-based amendment). A
+//!   literal or resolved `CARGO_MANIFEST_DIR` chain is resolved to its files; a folder the test made, the crate's own working folder
+//!   (`"."` or a relative literal: cargo and nextest start tests in the crate folder, which is in the key) and a path handed in as a
+//!   parameter (the caller builds it, and is classified where it does) are not blind.
+//! - A root the extractor cannot follow is a [`How::Blind`] read, never silence: `CARGO_MANIFEST_DIR` or `CARGO_MANIFEST_PATH` outside
+//!   a fully resolved literal chain (in a variable, a helper, behind `.parent()`, a non-literal `join`, `env::var`), a path built from
+//!   another environment variable (`PathBuf::from(env::var(..))`, `var_os(..).map(PathBuf::from)`), `current_exe`, `current_dir`,
+//!   `home_dir`, `.ancestors()`, `.pop()` used as a boolean (an upward walk), a `"ls-files"` argument, and a literal `..` chain that
+//!   reaches the repository root or leaves it. The crate is then blind: the test cache never reuses it (ADR 0116 §2), unless the crate
+//!   declares what its tests read (`[package.metadata.paddock] test-reads`, [`super::test_reads`]).
 //!
 //! Macro bodies (`assert!`, `vec!`, a test macro) are parsed as expressions where they can be, so a read inside them counts. A
 //! source that `syn` cannot parse falls back to the caller's text scan ([`Parsed::Fallback`]), measured beside this one.
@@ -23,7 +28,10 @@ use proc_macro2::TokenStream;
 use proc_macro2::TokenTree;
 use syn::punctuated::Punctuated;
 use syn::visit::Visit;
-use syn::{Expr, ExprLit, ExprMacro, ExprMethodCall, ItemMod, Lit, LitStr, Macro, Meta, PathSegment, Token};
+use syn::{
+    BinOp, Expr, ExprCall, ExprIf, ExprLit, ExprMacro, ExprMethodCall, ExprUnary, ExprWhile, ItemMod, Lit, LitStr, Macro, Meta,
+    PathSegment, Token, UnOp,
+};
 
 /// How a path is read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -37,7 +45,7 @@ pub enum How {
     /// A build script's `rerun-if-changed`.
     Rerun,
     /// A read the extractor cannot resolve (a manifest folder held in a variable or a helper, a join with a non-literal, `parent`,
-    /// `ancestors`, `current_dir`, `git ls-files`, a path that normalises to the repository root or leaves it): [`Read::path`] says
+    /// `ancestors`, an environment-variable root, `current_exe`, `current_dir`, `home_dir`, a `.pop()` walk, `git ls-files`, a path that normalises to the repository root or leaves it): [`Read::path`] says
     /// which. The test cache never reuses the crate (ADR 0116 §2); the plan is not widened by it.
     Blind,
 }
@@ -137,6 +145,30 @@ const IDENTITY: &[&str] = &["to_path_buf", "as_path", "to_owned", "clone", "as_r
 /// Methods that make a path point somewhere other than the chain they are called on.
 const MOVES: &[&str] = &["parent", "canonicalize", "with_file_name", "pop", "push"];
 
+/// The `fs` functions that read a path given as their first argument.
+const FS_READS: &[&str] = &[
+    "read",
+    "read_to_string",
+    "read_dir",
+    "metadata",
+    "symlink_metadata",
+    "canonicalize",
+    "read_link",
+    "exists",
+    "copy",
+];
+
+/// Whether a called path is an `fs` read (`fs::read_to_string`, `File::open`, an imported `read_to_string`).
+fn is_fs_read(path: &syn::Path) -> bool {
+    let names: Vec<String> = path.segments.iter().map(|s| s.ident.to_string()).collect();
+    match names.as_slice() {
+        [.., prev, last] if prev == "fs" => FS_READS.contains(&last.as_str()),
+        [.., prev, last] if prev == "File" => last == "open",
+        [only] => only == "read_to_string" || only == "read_dir",
+        _ => false,
+    }
+}
+
 /// `X.join("a")` (and `.to_path_buf()`, `.as_path()`: the same path).
 fn call_pieces(mc: &ExprMethodCall) -> Option<Vec<Piece>> {
     let ExprMethodCall {
@@ -220,7 +252,9 @@ impl Finder<'_> {
         for t in tokens {
             match t {
                 TokenTree::Group(g) => self.scan_tokens(g.stream()),
-                TokenTree::Ident(i) if i == "ancestors" || i == "current_dir" => self.blind(&format!("`{i}` inside a macro")),
+                TokenTree::Ident(i) if i == "ancestors" || ROOT_FUNCTIONS.iter().any(|(n, _)| i == n) => {
+                    self.blind(&format!("`{i}` inside a macro"))
+                }
                 TokenTree::Literal(l) => {
                     let text = l.to_string();
                     let text = text.trim_matches('"');
@@ -288,11 +322,67 @@ impl Finder<'_> {
 }
 
 impl<'ast> Visit<'ast> for Finder<'_> {
+    /// A relative literal path read with `fs` is read from the folder the test starts in (the crate's own, cargo and nextest run
+    /// tests there): a read of the crate. A path built from an environment variable is blind.
+    fn visit_expr_call(&mut self, c: &'ast ExprCall) {
+        if let Expr::Path(p) = &*c.func {
+            if is_fs_read(&p.path)
+                && let Some(rel) = c.args.first().and_then(lit_str)
+                && !rel.starts_with('/')
+                && !rel.contains(':')
+            {
+                let crate_dir = self.crate_dir.to_string();
+                self.add(&crate_dir, &rel, How::ManifestDir);
+            } else if is_path_ctor(&p.path)
+                && let Some(arg) = c.args.first()
+            {
+                if has_env_var(arg) {
+                    self.blind("a path built from an environment variable");
+                } else if let Some(rel) = lit_str(arg).filter(|r| {
+                    !r.starts_with('/')
+                        && std::path::Path::new(r)
+                            .components()
+                            .any(|c| matches!(c, std::path::Component::ParentDir))
+                }) {
+                    // A relative literal that climbs: a read edge, or blind when it reaches the repository root or leaves it.
+                    let crate_dir = self.crate_dir.to_string();
+                    self.add(&crate_dir, &rel, How::ManifestDir);
+                }
+            }
+        }
+        syn::visit::visit_expr_call(self, c);
+    }
+
+    /// `.pop()` as a boolean is an upward walk (`if !d.pop()`, `while d.pop()`): where it stops is unknown.
+    fn visit_expr_if(&mut self, e: &'ast ExprIf) {
+        if bare_pop(&e.cond) {
+            self.blind("`.pop()` walks a path upward");
+        }
+        syn::visit::visit_expr_if(self, e);
+    }
+
+    fn visit_expr_while(&mut self, e: &'ast ExprWhile) {
+        if bare_pop(&e.cond) {
+            self.blind("`.pop()` walks a path upward");
+        }
+        syn::visit::visit_expr_while(self, e);
+    }
+
+    fn visit_expr_unary(&mut self, e: &'ast ExprUnary) {
+        if matches!(e.op, UnOp::Not(_)) && bare_pop(&e.expr) {
+            self.blind("`.pop()` walks a path upward");
+        }
+        syn::visit::visit_expr_unary(self, e);
+    }
+
     fn visit_macro(&mut self, m: &'ast Macro) {
         self.mac(m);
     }
 
     fn visit_expr_method_call(&mut self, e: &'ast ExprMethodCall) {
+        if e.method == "map" && e.args.len() == 1 && has_env_var(&e.receiver) && e.args.first().is_some_and(is_path_ctor_value) {
+            self.blind("a path built from an environment variable");
+        }
         if e.method == "join" {
             if let Some(p) = call_pieces(e) {
                 self.rooted(&p, How::ManifestDir);
@@ -323,8 +413,10 @@ impl<'ast> Visit<'ast> for Finder<'_> {
     }
 
     fn visit_path_segment(&mut self, s: &'ast PathSegment) {
-        if s.ident == "current_dir" {
-            self.blind("`current_dir` depends on where the test is started");
+        for (name, why) in ROOT_FUNCTIONS {
+            if s.ident == name {
+                self.blind(why);
+            }
         }
         syn::visit::visit_path_segment(self, s);
     }
@@ -340,6 +432,59 @@ impl<'ast> Visit<'ast> for Finder<'_> {
             }
         }
         syn::visit::visit_item_mod(self, m);
+    }
+}
+
+/// Functions whose result is a root that depends on the machine or on how the test was started.
+const ROOT_FUNCTIONS: &[(&str, &str)] = &[
+    ("current_dir", "`current_dir` depends on where the test is started"),
+    ("current_exe", "`current_exe` is the test program's own location"),
+    ("home_dir", "`home_dir` is the user's folder"),
+];
+
+/// `Path::new` and `PathBuf::from`: the calls that turn a value into a path.
+fn is_path_ctor(path: &syn::Path) -> bool {
+    let names: Vec<String> = path.segments.iter().map(|s| s.ident.to_string()).collect();
+    matches!(names.as_slice(), [.., t, f] if (t == "PathBuf" && f == "from") || (t == "Path" && f == "new"))
+}
+
+/// `PathBuf::from` as a value (`.map(PathBuf::from)`).
+fn is_path_ctor_value(e: &Expr) -> bool {
+    matches!(e, Expr::Path(p) if is_path_ctor(&p.path))
+}
+
+/// Whether an expression calls `env::var`, `env::var_os` or an imported `var_os`: an environment variable read at run time (`env!` is
+/// a compile-time literal, handled apart).
+fn has_env_var(e: &Expr) -> bool {
+    struct V(bool);
+    impl<'ast> Visit<'ast> for V {
+        fn visit_expr_call(&mut self, c: &'ast ExprCall) {
+            if let Expr::Path(p) = &*c.func {
+                let names: Vec<String> = p.path.segments.iter().map(|s| s.ident.to_string()).collect();
+                match names.as_slice() {
+                    [.., env, f] if env == "env" && (f == "var" || f == "var_os") => self.0 = true,
+                    [only] if only == "var_os" => self.0 = true,
+                    _ => {}
+                }
+            }
+            syn::visit::visit_expr_call(self, c);
+        }
+    }
+    let mut v = V(false);
+    v.visit_expr(e);
+    v.0
+}
+
+/// Whether a condition is, or is made of (`!`, `&&`, `||`, parentheses), a bare `.pop()` call: `PathBuf::pop` returns a bool, `Vec::pop`
+/// an `Option` that is bound with `while let`.
+fn bare_pop(e: &Expr) -> bool {
+    match e {
+        Expr::MethodCall(m) => m.method == "pop" && m.args.is_empty(),
+        Expr::Paren(p) => bare_pop(&p.expr),
+        Expr::Group(g) => bare_pop(&g.expr),
+        Expr::Unary(u) if matches!(u.op, UnOp::Not(_)) => bare_pop(&u.expr),
+        Expr::Binary(b) if matches!(b.op, BinOp::And(_) | BinOp::Or(_)) => bare_pop(&b.left) || bare_pop(&b.right),
+        _ => false,
     }
 }
 

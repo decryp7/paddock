@@ -44,3 +44,10 @@ proptest.workspace = true
 
 [features]
 ts = ["dep:ts-rs"]
+
+[package.metadata.paddock]
+# What this crate's tests read that the test cache's reads extractor cannot resolve (ADR 0116 §2, user decision 122), as globs from the
+# repository root; `[]` says the blind reads touch no repository file.
+# `src/bin/fake_ffmpeg.rs` reads its own name and a `fake-mode` file beside it (`current_exe`) that the test wrote: no repository
+# file.
+test-reads = []

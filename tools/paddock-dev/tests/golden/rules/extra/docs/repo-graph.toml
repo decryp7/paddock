@@ -321,6 +321,14 @@ node = "none"
 setup_only = ["setup-rust", "build-jobs", "node-caches", "dev-tool-cache", "sccache-stats", "cache-report"]
 release_actions = ["tauri-bundle", "publish-release", "macos-verify", "keychain", "strip-signing-keys"]
 
+# The toy ci.yml of the fixture (tests/golden/fixture/.gitea/workflows/ci.yml) has no `if:` that reads a project output, so its jobs'
+# projects are declared: with them the job model builds and the scope lines carry the job names (ADR 0123 §2).
+[ci.jobs]
+plan = ["everything"]
+ui = ["ui"]
+crates = ["crates"]
+app = ["apps"]
+
 [hash]
 runner_configs = ["**/.config/nextest.toml", "**/vitest.config.*", "**/playwright.config.*", "**/angular.json"]
 contracts = ["paddock.ci.json"]

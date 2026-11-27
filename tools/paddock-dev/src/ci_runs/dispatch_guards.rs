@@ -924,12 +924,9 @@ fn kind_from_plan_log(client: &mut Client, run: u64) -> Option<RunKind> {
 
 /// Whether `workflow` takes the `since_run` input (its failures can be rerun alone): only such a workflow has the failed-first guard.
 pub fn takes_since_run(workflow: &str, read: ReadWorkflow<'_>) -> bool {
-    let Some(text) = read(workflow) else { return false };
-    let Ok(docs) = yaml_rust2::YamlLoader::load_from_str(&text) else {
-        return false;
-    };
-    docs.iter()
-        .any(|d| !d["on"]["workflow_dispatch"]["inputs"]["since_run"].is_badvalue())
+    read(workflow)
+        .and_then(|text| paddock_ci_config::jobs::triggers(&text).ok())
+        .is_some_and(|t| t.takes_input("since_run"))
 }
 
 /// The apps of the checkout at `root` (`apps/<app>/paddock.ci.json`).
