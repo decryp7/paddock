@@ -11,6 +11,12 @@
 //! [`super::Check::allow_list`]. The port of `conformance/src/util/allow-list.mjs`; `tests/it/check_allow_list.rs` compares the error
 //! paths of every user on both hosts.
 //!
+//! A rename is not a change to the list: the reader takes git's own rename detection between the merge base and the tree
+//! ([`Ctx::renames`]) and an entry follows its file. An entry written under the old path counts for the new one (and says so in a warning
+//! that asks for the rewrite), and the growth comparison reads the merge base's and the current entries under the paths their files have
+//! now, so a rewritten entry is not growth and needs no approval. The text of a moved file is judged as ever: an entry whose site is no
+//! longer on the line matches nothing, a new offending line is a finding (ER-21: the throttle move re-registered entries by hand).
+//!
 //! The list only ever shrinks (ER-12, ER-21): the reader compares every entry, counted `count` times,
 //! with the list at the merge base (`baseline::growth`, the one comparison C53 and C115 use), and an entry the merge base lacks, or a
 //! raised `count`, is one unwaivable finding at the allow file that needs the user's approval. The comparison runs only on a checkout
@@ -20,7 +26,7 @@
 //! warning for a report-only user (ER-41) and an error for a blocking one ([`Spec::growth_blocks`]: C131); the blocking
 //! baselines (C53, C71, C104, C115) use the same target ref and stay errors.
 
-use super::baseline::{self, Growth};
+use super::baseline::{self, Growth, Renames};
 use super::finding::Finding;
 use super::growth_approval::{self, Standing};
 use super::outcome::Outcome;
@@ -62,7 +68,7 @@ pub fn read<T>(
         .map(|t| parse(&t))
         .unwrap_or_else(|| Err(format!("{} cannot be read", spec.file)));
     match parsed {
-        Ok((entries, data)) => Ok((AllowList::new(spec, entries), data)),
+        Ok((entries, data)) => Ok((AllowList::new(spec, entries).following(ctx.renames()), data)),
         Err(why) => Err(Box::new(CheckOutput {
             findings: vec![
                 Finding::warn(
@@ -193,6 +199,7 @@ pub struct AllowList {
     hits: Vec<usize>,
     scanned: HashSet<String>,
     unread: HashSet<String>,
+    renames: Rc<Renames>,
 }
 
 impl AllowList {
@@ -205,7 +212,19 @@ impl AllowList {
             hits,
             scanned: HashSet::new(),
             unread: HashSet::new(),
+            renames: Rc::default(),
         }
+    }
+
+    /// The list with its entries following the files `renames` says moved (old path to new).
+    pub fn following(mut self, renames: Rc<Renames>) -> AllowList {
+        self.renames = renames;
+        self
+    }
+
+    /// The path an entry's file has now: the new one when git saw it renamed, else the entry's own.
+    fn at<'a>(&'a self, e: &'a Entry) -> &'a str {
+        self.renames.get(&e.path).map_or(e.path.as_str(), String::as_str)
     }
 
     /// The text of `path`, a file the check looks at, or, when it cannot be read, a not-measured error at that file, which the check
@@ -257,7 +276,7 @@ impl AllowList {
     /// it at its own file and line.
     pub fn admit(&mut self, path: &str, matches: impl Fn(&str) -> bool) -> Admit {
         let named: Vec<usize> = (0..self.entries.len())
-            .filter(|&i| self.entries[i].path == path && matches(&self.entries[i].site))
+            .filter(|&i| self.at(&self.entries[i]) == path && matches(&self.entries[i].site))
             .collect();
         if named.is_empty() {
             return Admit::Unlisted;
@@ -293,7 +312,12 @@ impl AllowList {
         let current = expand(&self.entries);
         let entries_of = |text: &str| parse(text, file).ok().map(|e| expand(&e));
         let exact = |k: &String| k.clone();
-        match baseline::growth(ctx.root(), &ctx.base_ref(), file, &current, &entries_of, &exact, None) {
+        // An entry key is `path NUL site`: its path follows the file's rename on both sides of the comparison.
+        let rekey = |k: String, map: &Renames| match k.split_once('\0') {
+            Some((p, site)) => format!("{}\u{0}{site}", map.get(p).map_or(p, String::as_str)),
+            None => k,
+        };
+        match baseline::growth_following(ctx.root(), &ctx.base_ref(), file, &current, &entries_of, &exact, None, Some(&rekey)) {
             Growth::Unmeasured(why) => vec![baseline::unmeasured_finding(ctx.in_ci(), id, rule, file, "the allow list", &why)],
             Growth::Added { added: 0, .. } => growth_approval::stale_finding(ctx, id, rule).into_iter().collect(),
             Growth::Added { base, added, fresh, .. } => {
@@ -329,10 +353,22 @@ impl AllowList {
         let Spec { id, rule, file, .. } = *self.spec;
         let mut out = self.growth_findings(ctx);
         let looked = |p: &str| self.scanned.contains(p) || (!self.unread.contains(p) && ctx.read(p).is_none());
+        let moved = |a: &Entry| self.at(a) != a.path;
         let files = ctx.files();
         let run: HashSet<&str> = files.iter().map(String::as_str).collect();
         for (a, &hits) in self.entries.iter().zip(&self.hits) {
-            if run.contains(a.path.as_str()) && !self.scanned.contains(&a.path) && !self.unread.contains(&a.path) {
+            let at = self.at(a);
+            if moved(a) {
+                out.push(Finding::warn(
+                    id,
+                    rule,
+                    file,
+                    1,
+                    format!("allow entry ({}: {}) follows its file, which moved to {at}", a.path, a.site),
+                    format!("Rewrite its `path` in {file} to {at}: a rename is not growth and needs no approval."),
+                ));
+            }
+            if run.contains(at) && !self.scanned.contains(at) && !self.unread.contains(at) {
                 out.push(Finding::warn(
                     id,
                     rule,
@@ -341,7 +377,7 @@ impl AllowList {
                     format!("allow entry ({}: {}) names a file this check does not read", a.path, a.site),
                     format!("Remove it from {file}: no site in that file can need it."),
                 ));
-            } else if hits < a.count && looked(&a.path) {
+            } else if hits < a.count && looked(at) {
                 let (what, fix) = if hits == 0 {
                     ("matches no site".to_string(), format!("Remove it from {file}."))
                 } else {

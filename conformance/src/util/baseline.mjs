@@ -142,20 +142,56 @@ function approve(g, { root, check, register, keyOf }) {
   return growthApproved(text, check, keys) ? { ...g, added: [] } : { ...g, ask: approvalLine(check, keys) };
 }
 
+/** The merge base of HEAD and `baseRef`; on the target branch itself, the commit's first parent. Throws when git cannot say. */
+function mergeBaseOf(git, baseRef) {
+  const head = git(['rev-parse', 'HEAD']).trim();
+  const base = git(['merge-base', 'HEAD', baseRef]).trim();
+  return base === head ? git(['rev-parse', 'HEAD^1']).trim() : base; // on the target branch itself: this commit against its parent
+}
+
+/**
+ * The files git's own rename detection pairs between `base` and the work tree (committed, staged or not): a Map of old path to new path,
+ * read from `git diff -M --name-status -z` (its NUL-separated format, split, not matched: ER-42). A register keyed by path follows a
+ * rename (an entry counts for the new path; ER-46: not growth). Empty when git cannot say: the stricter reading. Rust host:
+ * `renames` in tools/paddock-dev/src/check/baseline.rs.
+ */
+export function renamedFiles(git, base) {
+  const map = new Map();
+  let out;
+  try {
+    out = git(['diff', '-M', '--diff-filter=R', '--name-status', '-z', '--no-color', '--no-ext-diff', base]);
+  } catch {
+    return map;
+  }
+  const t = out.split('\0');
+  for (let i = 0; i + 2 < t.length; i += 3) if (t[i].startsWith('R')) map.set(t[i + 1], t[i + 2]);
+  return map;
+}
+
+/** The renames ([`renamedFiles`]) between the merge base with `baseRef` and the work tree of `root`; empty when git cannot give a merge base. */
+export function renamesSinceBase({ root, git = defaultGit(root), baseRef = targetRef() }) {
+  try {
+    return renamedFiles(git, mergeBaseOf(git, baseRef));
+  } catch {
+    return new Map();
+  }
+}
+
 /**
  * The entries of `current` that the baseline at the merge base does not have (a multiset difference by `keyOf`), or `{ reason }` when
  * it cannot be measured (no git, no merge base, an unreadable file). A baseline absent at the merge base is an empty base (every entry is growth, ER-46).
  * With `looseKeyOf` an entry whose loose key (say the hash) is in the base but whose full key is not is `moved`, not
- * added (`moved: [{ item, from }]`). With `check`, additions the user approved in the register are dropped and the rest carry `ask`. `entriesOf(json)` reads the list out of the parsed file; `git` and `baseRef` are injectable for tests.
+ * added (`moved: [{ item, from }]`). With `rekey(item, renames)` an entry takes the path git's rename detection gives its file now, on the
+ * merge base's side and the current one alike, so an entry that follows a pure move is the same entry (a register keyed by path). With
+ * `check`, additions the user approved in the register are dropped and the rest carry `ask`. `entriesOf(json)` reads the list out of the
+ * parsed file; `git` and `baseRef` are injectable for tests.
  */
-export function baselineGrowth({ root, path, current, keyOf, entriesOf, git = defaultGit(root), baseRef = targetRef(), looseKeyOf, check, register }) {
+export function baselineGrowth({ root, path, current, keyOf, entriesOf, git = defaultGit(root), baseRef = targetRef(), looseKeyOf, rekey, check, register }) {
   const done = (g) => approve(g, { root, check, register, keyOf });
   let base;
   let text;
   try {
-    const head = git(['rev-parse', 'HEAD']).trim();
-    base = git(['merge-base', 'HEAD', baseRef]).trim();
-    if (base === head) base = git(['rev-parse', 'HEAD^1']).trim(); // on the target branch itself: this commit against its parent
+    base = mergeBaseOf(git, baseRef);
   } catch (e) {
     return { kind: 'no-base', reason: `no merge base (${String(e.message ?? e).split('\n')[0].slice(0, 120)})` };
   }
@@ -175,6 +211,11 @@ export function baselineGrowth({ root, path, current, keyOf, entriesOf, git = de
     entries = entriesOf(JSON.parse(text));
   } catch {
     return { kind: 'unparsed', reason: `the baseline at ${base.slice(0, 9)} cannot be parsed` };
+  }
+  if (rekey) {
+    const map = renamedFiles(git, base);
+    current = current.map((e) => rekey(e, map));
+    entries = entries.map((e) => rekey(e, map));
   }
   const { fresh, moved } = reconcile(current, entries, keyOf, looseKeyOf);
   return done({ base, added: fresh, moved });

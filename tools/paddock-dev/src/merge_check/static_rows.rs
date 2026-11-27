@@ -9,10 +9,10 @@
 //! A pass needs both always-present rows (`conformance`, `gates-register`) to say `passed`: a run that printed no rows, left one out
 //! or could not look is NOT MEASURED, never a pass (ER-33). The escape is `--no-static "<reason>"`, logged like `--old-base-anyway`.
 
-use super::gates::{GateRun, run_pre_push};
+use super::gates::{GateRun, run_pre_push_with};
 use paddock_cli::Exit;
 use serde_json::json;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// The `--only` selectors: whole row names or a row's first word. `clippy` and `clippy-windows` are per workspace, and the plan
 /// keeps only the workspaces the change reaches.
@@ -27,13 +27,20 @@ pub trait StaticGates {
     fn run(&self, root: &Path, base: &str) -> Result<GateRun, String>;
 }
 
-/// The real run: this tool (or `PADDOCK_MERGE_CHECK_GATES`, the stand-in the tests use).
+/// The program that runs the rows: the sync tip's own `./dev` (its wrapper builds or fetches the tool that tip's inputs name), so a
+/// command the member adds exists for its own rows. `stand_in` (`PADDOCK_MERGE_CHECK_GATES`, the tests') wins when set.
+fn program_for_tip(root: &Path, stand_in: Option<std::ffi::OsString>) -> PathBuf {
+    stand_in.map_or_else(|| root.join("dev"), PathBuf::from)
+}
+
+/// The real run: the sync tip's own `./dev` (or `PADDOCK_MERGE_CHECK_GATES`, the stand-in the tests use).
 pub struct Real;
 
 impl StaticGates for Real {
     fn run(&self, root: &Path, base: &str) -> Result<GateRun, String> {
         let only = SELECTORS.join(",");
-        run_pre_push(root, base, &["--only", &only])
+        let program = program_for_tip(root, std::env::var_os("PADDOCK_MERGE_CHECK_GATES"));
+        run_pre_push_with(&program, root, base, &["--only", &only])
     }
 }
 
@@ -164,6 +171,16 @@ mod tests {
         ("clippy crates", "passed"),
         ("clippy-windows crates", "passed"),
     ];
+
+    /// The rows run the SYNC TIP's own `./dev`, not the train's: a member that adds a `./dev` command would otherwise fail its own
+    /// static row ("does not exist"). Only the stand-in override (the tests') wins.
+    #[test]
+    fn the_rows_run_the_sync_tips_own_dev_unless_the_stand_in_is_set() {
+        let root = Path::new("wt/member");
+        assert_eq!(program_for_tip(root, None), root.join("dev"));
+        let stand_in = std::ffi::OsString::from("x/rows");
+        assert_eq!(program_for_tip(root, Some(stand_in)), Path::new("x/rows"));
+    }
 
     #[test]
     fn the_rows_asked_are_conformance_the_gate_register_and_both_clippy_kinds() {

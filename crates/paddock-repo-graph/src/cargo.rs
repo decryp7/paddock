@@ -57,6 +57,49 @@ pub fn parse_metadata(
     Ok(())
 }
 
+/// The files each package declares its tests read (`[package.metadata.paddock] test-reads`, ADR 0116 §2): package folder to the globs,
+/// relative to the repository root, from one `cargo metadata --no-deps` JSON text. A package without the key is left out; a value that
+/// is not a list of strings is an error (a declaration that cannot be read never counts as one).
+pub fn parse_test_reads(
+    json: &str,
+    root: &str,
+) -> Result<std::collections::BTreeMap<String, Vec<String>>, GraphError> {
+    let bad = |reason: String| GraphError::Metadata {
+        manifest: "cargo metadata".to_string(),
+        reason,
+    };
+    let v: Value = serde_json::from_str(json).map_err(|e| bad(e.to_string()))?;
+    let mut out = std::collections::BTreeMap::new();
+    for p in v
+        .get("packages")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let Some(declared) = p.pointer("/metadata/paddock/test-reads") else {
+            continue;
+        };
+        let name = p.get("name").and_then(Value::as_str).unwrap_or("?");
+        let globs: Option<Vec<String>> = declared
+            .as_array()
+            .and_then(|a| a.iter().map(|g| g.as_str().map(str::to_string)).collect());
+        let Some(globs) = globs else {
+            return Err(bad(format!(
+                "package {name}: `[package.metadata.paddock] test-reads` is not a list of strings (globs relative to the repository root)"
+            )));
+        };
+        let manifest = p
+            .get("manifest_path")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        out.insert(
+            relative(root, &dirname(&manifest.replace('\\', "/"))),
+            globs,
+        );
+    }
+    Ok(out)
+}
+
 /// One Cargo target of `cargo metadata` (ADR 0117 §4 `tests`, review P2-5: test targets from `targets[].src_path` and `kind`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CargoTarget {
@@ -311,6 +354,43 @@ mod tests {
             })
             .collect();
         format!(r#"{{"packages":[{}]}}"#, list.join(","))
+    }
+
+    #[test]
+    fn test_reads_come_from_the_package_metadata_and_a_bad_value_is_refused() {
+        let json = |metadata: &str| {
+            format!(
+                r#"{{"packages":[{{"name":"a","manifest_path":"/r/crates/a/Cargo.toml","metadata":{metadata}}},{{"name":"b","manifest_path":"/r/crates/b/Cargo.toml","metadata":null}}]}}"#
+            )
+        };
+        let got = parse_test_reads(
+            &json(r#"{"paddock":{"test-reads":["docs/x.toml","crates/a/tests/**"]}}"#),
+            "/r",
+        )
+        .unwrap();
+        assert_eq!(
+            got.len(),
+            1,
+            "a package without the key is left out: {got:?}"
+        );
+        assert_eq!(
+            got["crates/a"],
+            vec!["docs/x.toml".to_string(), "crates/a/tests/**".to_string()]
+        );
+        // A declaration that cannot be read never counts as one.
+        for bad in [
+            r#"{"paddock":{"test-reads":"docs/x"}}"#,
+            r#"{"paddock":{"test-reads":[1]}}"#,
+        ] {
+            let e = parse_test_reads(&json(bad), "/r").unwrap_err().to_string();
+            assert!(e.contains("test-reads") && e.contains("package a"), "{e}");
+        }
+        // Control: other metadata (another tool's table) declares nothing.
+        assert!(
+            parse_test_reads(&json(r#"{"docs":{"rs":{}}}"#), "/r")
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]

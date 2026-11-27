@@ -4,10 +4,10 @@
 
 use crate::procutil::*;
 use paddock_env::Os;
+use paddock_throttle::config::Config;
+use paddock_throttle::places::Host;
 use std::fs;
 use std::path::{Path, PathBuf};
-use throttle::config::Config;
-use throttle::places::Host;
 
 /// The settings and state folder of the platform under `home` (macOS convention; XDG elsewhere, none of its variables set in a test).
 fn state_under(home: &Path) -> PathBuf {

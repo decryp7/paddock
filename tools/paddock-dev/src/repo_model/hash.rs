@@ -60,6 +60,46 @@ fn runner_configs_for(configs: &[String], paths: &[String]) -> Vec<String> {
         .collect()
 }
 
+/// What decides how a Cargo package of `dir` builds beyond its own folder (ADR 0116 §2, audit G1 and G2): the lockfile of its workspace
+/// (the closest folder above it that tracks a `Cargo.lock`), that workspace's root `Cargo.toml`, and every tracked file of a `.cargo`
+/// folder from the workspace folder up to the repository root (the config cargo reads, with what `include` pulls in). Coarse by
+/// workspace on purpose: a bump of one external crate moves every key of the workspace, the safe direction.
+fn workspace_files(decl: &paddock_repo_graph::model::inputs::HashDecl, files: &[String], dir: &str) -> Vec<String> {
+    let tracked: BTreeSet<&str> = files.iter().map(String::as_str).collect();
+    let up = |d: &str| -> Option<String> { d.rsplit_once('/').map(|(p, _)| p.to_string()) };
+    let join = |d: &str, f: &str| if d.is_empty() { f.to_string() } else { format!("{d}/{f}") };
+    // The workspace folder: the closest one at or above the package that tracks the first file `workspace_files` declares (the lockfile).
+    let lock = decl.workspace_files.first();
+    let mut ws: Option<String> = None;
+    let mut at = Some(dir.to_string());
+    while let Some(d) = at {
+        if lock.is_some_and(|l| tracked.contains(join(&d, l).as_str())) {
+            ws = Some(d);
+            break;
+        }
+        at = up(&d).or_else(|| (!d.is_empty()).then(String::new));
+    }
+    let Some(ws) = ws else { return Vec::new() };
+    let mut out: BTreeSet<String> = BTreeSet::new();
+    for f in &decl.workspace_files {
+        out.insert(join(&ws, f));
+    }
+    let mut at = Some(ws);
+    while let Some(d) = at {
+        for folder in &decl.cargo_config_folders {
+            let prefix = join(&d, &format!("{folder}/"));
+            out.extend(
+                files
+                    .iter()
+                    .filter(|f| f.starts_with(&prefix) && !f[prefix.len()..].contains('/'))
+                    .cloned(),
+            );
+        }
+        at = up(&d).or_else(|| (!d.is_empty()).then(String::new));
+    }
+    out.into_iter().filter(|f| tracked.contains(f.as_str())).collect()
+}
+
 /// The `git ls-tree` line for each path, by path (a folder entry is the folder's tree id).
 fn tree_map(exec: &dyn Exec, root: &Path, paths: &[String]) -> Result<BTreeMap<String, String>, CliError> {
     let mut out = BTreeMap::new();
@@ -129,7 +169,12 @@ pub fn node_hashes(
     let mut own: BTreeMap<String, Vec<String>> = BTreeMap::new();
     let mut all: BTreeSet<String> = decl.hash.image_files.iter().cloned().collect();
     for n in &needed {
-        let files = files_of(model, &read_set(model, n));
+        let mut files = files_of(model, &read_set(model, n));
+        if let Some(dir) = n.strip_prefix("crate:") {
+            files.extend(workspace_files(&decl.hash, tree.files, dir));
+            files.sort();
+            files.dedup();
+        }
         all.extend(files.iter().cloned());
         own.insert(n.clone(), files);
     }
@@ -271,6 +316,11 @@ mod tests {
                 ("crates/a/paddock.ci.json", "c111"),
                 ("ci-image/VERSION", "v111"),
                 ("data/table.toml", "d111"),
+                ("crates/Cargo.lock", "l111"),
+                ("crates/Cargo.toml", "t111"),
+                ("crates/.cargo/config.toml", "g111"),
+                (".cargo/config.toml", "r111"),
+                ("apps/x/Cargo.lock", "x111"),
             ];
             Fake {
                 oids: RefCell::new(oids.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()),
@@ -313,6 +363,8 @@ mod tests {
                     runner_configs: vec!["**/.config/nextest.toml".into()],
                     contracts: vec!["paddock.ci.json".into()],
                     image_files: vec!["ci-image/VERSION".into()],
+                    workspace_files: vec!["Cargo.lock".into(), "Cargo.toml".into()],
+                    cargo_config_folders: vec![".cargo".into()],
                 },
                 ..Inputs::default()
             },
@@ -321,11 +373,17 @@ mod tests {
                 "crates/a/build.rs".into(),
                 "crates/a/.config/nextest.toml".into(),
                 "crates/a/paddock.ci.json".into(),
+                "crates/Cargo.lock".into(),
+                "crates/Cargo.toml".into(),
+                "crates/.cargo/config.toml".into(),
+                ".cargo/config.toml".into(),
+                "apps/x/Cargo.lock".into(),
             ],
             model,
             smoke: Default::default(),
             decls: Default::default(),
             errors: Vec::new(),
+            test_reads: Default::default(),
         }
     }
 
@@ -454,5 +512,40 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(err.contains("crate:gone"), "{err}");
+    }
+
+    #[test]
+    fn a_workspaces_lockfile_manifest_and_cargo_config_move_every_key_of_that_workspace_and_no_other() {
+        // ADR 0116 §2, audit G1 and G2: bumping one external crate in `crates/Cargo.lock` is not in any crate's own folder.
+        let fake = Fake::new();
+        let ids = ["crate:crates/a", "crate:crates/b"];
+        let before = hashes(&base(&fake), &ids);
+        for (file, what) in [
+            ("crates/Cargo.lock", "the workspace lockfile"),
+            ("crates/Cargo.toml", "the workspace root manifest"),
+            ("crates/.cargo/config.toml", "the workspace's own cargo config"),
+            (".cargo/config.toml", "the repository root's cargo config"),
+        ] {
+            fake.set(file, "changed");
+            let moved = hashes(&base(&fake), &ids);
+            for id in ids {
+                assert_ne!(before[id].hash, moved[id].hash, "{what} must move {id}");
+            }
+            let original = match file {
+                "crates/Cargo.lock" => "l111",
+                "crates/Cargo.toml" => "t111",
+                "crates/.cargo/config.toml" => "g111",
+                _ => "r111",
+            };
+            fake.set(file, original);
+            assert_eq!(before, hashes(&base(&fake), &ids), "{what} put back: the base again");
+        }
+        // The control: another workspace's lockfile is not this workspace's input.
+        fake.set("apps/x/Cargo.lock", "changed");
+        assert_eq!(
+            before,
+            hashes(&base(&fake), &ids),
+            "another workspace's lockfile moves nothing here"
+        );
     }
 }

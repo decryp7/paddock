@@ -84,6 +84,7 @@ export default {
       path: ALLOW,
       current: allow.entries,
       keyOf: (e) => `${e.path}\0${e.site}`,
+      rekey: (e, map) => ({ ...e, path: map.get(e.path) ?? e.path }), // an entry follows its file's rename (not growth, ER-46)
       entriesOf: (j) => j.allow ?? [],
       ...(ctx.options.git ? { git: ctx.options.git } : {}),
       ...(ctx.options.baseRef ? { baseRef: ctx.options.baseRef } : {}),

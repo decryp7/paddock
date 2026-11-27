@@ -128,3 +128,11 @@ tiny-skia = { version = "0.11", default-features = false, features = ["std", "pn
 
 [lints]
 workspace = true
+
+[package.metadata.paddock]
+# What this crate's tests read that the test cache's reads extractor cannot resolve (ADR 0116 §2, user decision 122), as globs from the
+# repository root; `[]` says the blind reads touch no repository file.
+# `src/service_ops.rs` tests walk the agent's service sources; `src/lib.rs` and `src/report.rs` read the process's working folder.
+test-reads = [
+    "apps/dyno/crates/dyno-agent/src/service/**",
+]

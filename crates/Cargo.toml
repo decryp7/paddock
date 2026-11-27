@@ -52,6 +52,7 @@ members = [
     "paddock-setup",
     "paddock-settings",
     "paddock-shell",
+    "paddock-shim",
     "paddock-storage",
     "paddock-siblings",
     "paddock-slots",
@@ -59,6 +60,7 @@ members = [
     "paddock-testkit",
     "paddock-testkit-start",
     "paddock-testplan",
+    "paddock-throttle",
     "paddock-updater",
     "paddock-view",
     "paddock-watch",
@@ -132,6 +134,7 @@ paddock-service = { path = "paddock-service", version = "0.1.0", registry = "dec
 paddock-setup = { path = "paddock-setup", version = "1.2.0", registry = "decryp7" }
 paddock-settings = { path = "paddock-settings", version = "0.2.0", registry = "decryp7" }
 paddock-shell = { path = "paddock-shell", version = "0.3.0", registry = "decryp7" }
+paddock-shim = { path = "paddock-shim", version = "0.1.0", registry = "decryp7" }
 paddock-storage = { path = "paddock-storage", version = "0.1.0", registry = "decryp7" }
 paddock-siblings = { path = "paddock-siblings", version = "0.1.0", registry = "decryp7" }
 paddock-slots = { path = "paddock-slots", version = "0.1.0", registry = "decryp7" }
@@ -139,6 +142,7 @@ paddock-startup = { path = "paddock-startup", version = "0.2.0", registry = "dec
 paddock-testkit = { path = "paddock-testkit", version = "0.1.0", registry = "decryp7" }
 paddock-testkit-start = { path = "paddock-testkit-start", version = "0.1.0", registry = "decryp7" }
 paddock-testplan = { path = "paddock-testplan", version = "0.1.0", registry = "decryp7" }
+paddock-throttle = { path = "paddock-throttle", version = "0.1.0", registry = "decryp7" }
 paddock-updater = { path = "paddock-updater", version = "0.2.0", registry = "decryp7" }
 paddock-view = { path = "paddock-view", version = "0.1.0", registry = "decryp7" }
 paddock-watch = { path = "paddock-watch", version = "0.1.0", registry = "decryp7" }

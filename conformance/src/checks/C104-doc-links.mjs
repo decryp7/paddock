@@ -209,6 +209,7 @@ export default {
         path: BASELINE_PATH,
         current: list,
         keyOf: (e) => `${e.file}\0${e.target}`,
+        rekey: (e, map) => ({ ...e, file: map.get(e.file) ?? e.file }), // an entry follows its document's rename (not growth, ER-46)
         entriesOf: (j) => j[key] ?? [],
         ...(ctx.options.git ? { git: ctx.options.git } : {}),
         baseRef: targetRef(ctx.options),

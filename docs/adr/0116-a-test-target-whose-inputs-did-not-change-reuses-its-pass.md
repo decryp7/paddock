@@ -412,6 +412,33 @@ record and failed is a soundness finding like any other.
 Not measured: the added reuse on the host legs (no CI run has recorded under a filter yet); no number is quoted. Named costs: a few more
 bulk lookups per plan (one per class, workspace and filter), and no host-leg reuse in a member run whose own filter differs.
 
+## Amendment 2026-11-27: a crate declares the files its tests read (user decision 122)
+
+The key-soundness change made the cache fail closed: a crate whose tests read files the static reads extractor cannot resolve (a
+manifest folder in a variable, `.ancestors()`, `current_dir`, a `git ls-files`, a join with a non-literal) is **blind**, and so is every
+crate that depends on it (`blind through <dependency>`). On macOS-ARM64 that left 121 of 137 test crates `Never`; the main cause was
+`paddock-testkit`, a dev-dependency of nearly every crate. Common practice for a read no tool can see is to **declare it**: Bazel's
+`data`, Nx's and Turborepo's `inputs` (§Common practice). Decision 122 adopts that.
+
+1. **The declaration.** A crate lists the files its tests read, as globs relative to the repository root, in its `Cargo.toml`:
+   `[package.metadata.paddock] test-reads = ["docs/x.toml", "conformance/ci/**"]`. It is read through `cargo metadata`
+   (`paddock_repo_graph::parse_test_reads`, ER-42); a value that is not a list of strings is an error. A glob is anchored at the root.
+   An empty list is a declaration too: the blind reads touch no repository file (a test double that prints its working folder); the
+   manifest says so in a comment.
+2. **The key.** The tracked files the globs match become one node per crate (`declared:<crate folder>`, `repo_model::test_reads`)
+   with a `reads` edge from the crate, so their content is in the crate's input hash and, as the dependencies' hashes are, in the key of
+   every crate that depends on it. A dependent that was blind only through the declared crate is cacheable again; a change to a declared
+   file also reaches the crate in a plan.
+3. **Coverage.** A blind site counts as covered when its crate has a declaration that holds. `ci test-cache blind` lists every blind
+   site with the declaration that covers it, or says why the crate stays `Never`. A crate with sites and no declaration stays `Never`
+   with the reasons printed; nothing becomes cacheable without a declaration someone wrote. A declared glob that matches no tracked file
+   is a finding: the crate stays `Never` with that reason first (a stale declaration cannot be trusted), even when it has no blind site.
+4. **Report-only check** `C179` (ER-41) lists each crate with blind sites and no declaration, and a declaration that matches nothing.
+5. **Limits, said plainly.** A declaration is the author's statement, not a measurement: a file a test reads and the glob omits is a
+   key that misses an input, which the shadow switch and the nightly (§6, §8) are there to catch. Reads of the machine (the installed
+   git, a tool on `PATH`) are outside the repository and in no key, as before. A deleted declared file does not reach its crate in a
+   plan (the base tree is not read for declarations); the key moves, so the cache is not affected.
+
 ## Consequences
 
 - A change to shared CI configuration, docs or another app no longer reruns an app's unchanged tests; a change to a shared crate reruns

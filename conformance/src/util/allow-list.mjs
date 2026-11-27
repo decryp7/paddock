@@ -8,6 +8,10 @@
 // diverge on an error path": C125 in 865498235, then C121 and C124): an allow file that is missing, not JSON, without its list or with
 // a malformed entry is one unwaivable check-broken finding and nothing else (`readAllowList`), and a file the check cannot read is a
 // not-measured error at that file (`AllowList.read`).
+// A rename is not a change to the list: the reader takes git's own rename detection between the merge base and the tree (`renamedFiles`) and an
+// entry follows its file. An entry written under the old path counts for the new one (and says so in a warning that asks for the rewrite), and the growth
+// comparison reads the merge base's and the current entries under the paths their files have now, so a rewritten entry is not growth. The text of a moved
+// file is judged as ever. Rust host: `AllowList::following` in tools/paddock-dev/src/check/allow_list.rs.
 // The list only ever shrinks (ER-12, ER-21): `warnings` compares every entry, counted `count` times, with the list at
 // the merge base (`baselineGrowth`, the one comparison C53 and C115 use), and an entry the merge base lacks, or a raised `count`, is one unwaivable finding
 // at the allow file that needs the user's approval. It runs only on a checkout (a folder git accepts as a work tree): a fixture folder has nothing to compare, and says
@@ -19,7 +23,7 @@
 // Used by C30, C135 and C140 here and C131 on the Rust host, each declaring the spec it reads with as `allowList` (Rust: `Check::allow_list`). Rust host: tools/paddock-dev/src/check/allow_list.rs (same
 // entries, same findings; tools/paddock-dev/tests/it/check_allow_list.rs compares the error paths of every user on both hosts).
 import { error, unwaivable, warn } from '../finding.mjs';
-import { baselineGrowth, isWorkTree, targetRef, unmeasuredFinding } from './baseline.mjs';
+import { baselineGrowth, isWorkTree, renamesSinceBase, targetRef, unmeasuredFinding } from './baseline.mjs';
 
 const UNREAD_FIX = 'Make the file readable (permissions) and run the check again.';
 
@@ -63,6 +67,20 @@ export class AllowList {
     this.hits = entries.map(() => 0);
     this.scanned = new Set();
     this.unread = new Set();
+    this.renames = null;
+  }
+
+  /** The files git saw renamed between the merge base and the tree (old path to new), read once; empty off a checkout or where git cannot say. */
+  renamed() {
+    if (this.renames) return this.renames;
+    const root = this.ctx.root;
+    this.renames = root && isWorkTree(root) ? renamesSinceBase({ root, ...(this.ctx.options?.git ? { git: this.ctx.options.git } : {}), baseRef: targetRef(this.ctx.options) }) : new Map();
+    return this.renames;
+  }
+
+  /** The path an entry's file has now: the new one when git saw it renamed, else the entry's own. */
+  at(entry) {
+    return this.renamed().get(entry.path) ?? entry.path;
   }
 
   /**
@@ -92,7 +110,7 @@ export class AllowList {
    * its own file and line; 'unlisted' means no entry names it.
    */
   admit(path, matches) {
-    const named = this.entries.flatMap((a, i) => (a.path === path && matches(a.site) ? [i] : []));
+    const named = this.entries.flatMap((a, i) => (this.at(a) === path && matches(a.site) ? [i] : []));
     if (named.length === 0) return 'unlisted';
     const free = named.find((i) => this.hits[i] < this.entries[i].count);
     if (free === undefined) return 'beyond';
@@ -110,6 +128,11 @@ export class AllowList {
       path: this.file,
       current,
       keyOf: (k) => k,
+      // An entry key is `path NUL site`: its path follows the file's rename on both sides of the comparison.
+      rekey: (k, map) => {
+        const at = k.indexOf('\u0000');
+        return at < 0 ? k : `${map.get(k.slice(0, at)) ?? k.slice(0, at)}${k.slice(at)}`;
+      },
       entriesOf: (json) => expandEntries(parseAllowList(JSON.stringify(json), this.file)),
       ...(this.ctx.options?.git ? { git: this.ctx.options.git } : {}),
       baseRef: targetRef(this.ctx.options),
@@ -137,9 +160,11 @@ export class AllowList {
     const out = [...grew];
     this.entries.forEach((a, i) => {
       const hits = this.hits[i];
-      if (run.has(a.path) && !this.scanned.has(a.path) && !this.unread.has(a.path)) {
+      const at = this.at(a);
+      if (at !== a.path) out.push(warn(id, rule, this.file, 1, `allow entry (${a.path}: ${a.site}) follows its file, which moved to ${at}`, `Rewrite its \`path\` in ${this.file} to ${at}: a rename is not growth and needs no approval.`));
+      if (run.has(at) && !this.scanned.has(at) && !this.unread.has(at)) {
         out.push(warn(id, rule, this.file, 1, `allow entry (${a.path}: ${a.site}) names a file this check does not read`, `Remove it from ${this.file}: no site in that file can need it.`));
-      } else if (hits < a.count && looked(a.path)) {
+      } else if (hits < a.count && looked(at)) {
         const what = hits === 0 ? 'matches no site' : `matches only ${hits} of its ${a.count} sites`;
         out.push(warn(id, rule, this.file, 1, `stale allow entry (${a.path}: ${a.site}) ${what}`, hits === 0 ? `Remove it from ${this.file}.` : `Lower its \`count\` to ${hits}.`));
       }
