@@ -40,3 +40,10 @@ paddock-testkit-start = { path = "../../../../crates/paddock-testkit-start" }
 
 [target.'cfg(unix)'.dependencies]
 libc = { workspace = true }
+
+[package.metadata.paddock]
+# What this crate's tests read that the test cache's reads extractor cannot resolve (ADR 0116 §2, user decision 122), as globs from the
+# repository root; `[]` says the blind reads touch no repository file.
+# `src/fake.rs` starts the test binary again (`current_exe`) as a fake browser and passes the loader's `DYLD_*` variables: no
+# repository file.
+test-reads = []

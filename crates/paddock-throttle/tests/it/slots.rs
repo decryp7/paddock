@@ -2,11 +2,19 @@
 //! a container run is alone; a waiter holds a ticket and never a slot (ER-43). Fixture folders and fake loads only (ER-14).
 use crate::helpers::*;
 use paddock_throttle::clock::Clock;
+use paddock_throttle::clock::FakeClock;
 use paddock_throttle::config::Config;
+use paddock_throttle::gate::FakeLoad;
 use paddock_throttle::gate::{
     Pressure, SLOT_LOAD_SHARE, allowed_slots, auto_max_slots, is_container_command,
 };
-use paddock_throttle::lock::{Acquirer, Poll, Request};
+use paddock_throttle::lock::{Acquirer, Poll, Request, Throttle};
+use paddock_throttle::log::Logger;
+use paddock_throttle::procs::FakeProcs;
+use paddock_throttle::store::{RealStore, Store};
+use std::collections::BTreeSet;
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 
 fn rig_with(max: u32) -> (Rig, paddock_throttle::config::Config) {
     let rig = Rig::new();
@@ -523,11 +531,130 @@ fn a_drain_owner_behind_the_head_still_takes_the_machine_when_it_is_free() {
     );
 }
 
+/// The world of one model run: the fake clock, process table and load, and a lock folder that is either a real temp folder or in memory.
+/// Every file operation goes through a [`Recording`] store, so a sweep says which operations on which files it reached.
+struct Sim {
+    clock: Arc<FakeClock>,
+    procs: Arc<FakeProcs>,
+    load: Arc<FakeLoad>,
+    store: Arc<dyn Store>,
+    mem: Option<Arc<MemStore>>,
+    root: PathBuf,
+    _dir: Option<tempfile::TempDir>,
+}
+
+type Seen = Arc<Mutex<BTreeSet<String>>>;
+
+impl Sim {
+    fn new(real: bool, seen: &Seen) -> Sim {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(1_800_000_000, |d| d.as_secs());
+        let clock = Arc::new(FakeClock::at_secs(now));
+        let (inner, mem, dir, root): (Arc<dyn Store>, _, _, _) = if real {
+            let d = tempfile::tempdir().expect("tempdir");
+            let root = d.path().to_path_buf();
+            (Arc::new(RealStore), None, Some(d), root)
+        } else {
+            let m = Arc::new(MemStore::new(clock.clone()));
+            (
+                m.clone(),
+                Some(m),
+                None,
+                std::env::temp_dir().join("model-lock-folder"),
+            )
+        };
+        Sim {
+            clock,
+            procs: Arc::new(FakeProcs::new()),
+            load: Arc::new(FakeLoad::new(1.0)),
+            store: Arc::new(Recording {
+                inner,
+                seen: Arc::clone(seen),
+            }),
+            mem,
+            root,
+            _dir: dir,
+        }
+    }
+
+    fn cfg(&self, max: u32) -> Config {
+        let (mut c, _) = Config::from_env(&|_| None, &paddock_throttle::places::Host::none());
+        c.root = self.root.clone();
+        c.poll = std::time::Duration::from_millis(200);
+        c.wait_log = std::time::Duration::from_secs(1);
+        c.unreadable_limit = 3;
+        c.cpus = 16;
+        c.slots = max;
+        c.drain_after = std::time::Duration::from_secs(4);
+        c
+    }
+
+    fn agent(&self, pid: u32, cfg: Config) -> Agent {
+        self.procs
+            .run(pid, self.clock.now_secs().saturating_sub(100));
+        let said = Arc::new(Mutex::new(Vec::new()));
+        let s2 = Arc::clone(&said);
+        // The real folder keeps its troubleshooting log there too; the in-memory run needs none.
+        let log_file = self
+            .mem
+            .is_none()
+            .then(|| self.root.join(format!("log-{pid}.clef")));
+        let log = Arc::new(Logger::new(
+            format!("run-{pid}"),
+            pid,
+            self.clock.clone(),
+            log_file,
+            false,
+        ));
+        let mut h = Throttle::new(
+            cfg,
+            self.clock.clone(),
+            self.procs.clone(),
+            self.load.clone(),
+            log,
+            pid,
+            Arc::new(move |m: &str| {
+                if let Ok(mut v) = s2.lock() {
+                    v.push(m.to_string());
+                }
+            }),
+        );
+        h.store = self.store.clone();
+        Agent { h, said }
+    }
+
+    /// The slots with a holder's record now.
+    fn holders(&self) -> usize {
+        self.store
+            .list(&self.root)
+            .iter()
+            .filter(|p| {
+                let n = p.file_name().map(|n| n.to_string_lossy().into_owned());
+                n.is_some_and(|n| n.starts_with("throttle-") && n.ends_with(".info"))
+            })
+            .count()
+    }
+}
+
+/// The ways a model run can be broken on purpose (the controls): the model must find each.
+#[derive(Clone, Copy, Default)]
+struct Broken {
+    /// The admission queue keeps a drain owner behind the head (the deadlock of 2026-11-18).
+    drain_owner_in_queue: bool,
+    /// The model checks against a maximum one lower than the configured one: its over-maximum check must fire.
+    check_one_below_max: bool,
+    /// The model takes every agent for a container run when it checks for one beside another step: that check must fire.
+    check_all_as_container: bool,
+}
+
 /// A model of the queue: random agents (normal, high-priority, container) arrive at random rounds, run a few rounds once they hold a
 /// slot, and the load flips between low and high. Every agent must finish (no wait cycle between the queue, the drain, the high markers
 /// and the step-back), no more than the maximum hold slots at the end of a round, and a container run is never beside another step then.
-/// 400 seeds. The control: with the drain owner's queue bypass taken out the model finds a stuck agent (`model_stuck_with`).
-fn model_stuck_with(seed: u64, max: u32) -> Option<String> {
+/// The rules do not depend on the disk, so 400 seeds per maximum run against an in-memory folder; a few run against the real one (the
+/// OS's renames, removes and locks) and must reach every kind of operation the full sweep reaches. The controls: with a [`Broken`] rule
+/// the model finds a stuck agent, or more holders than the maximum.
+fn model_stuck_with(seed: u64, max: u32, sim: &Sim, broken: Broken) -> Option<String> {
     let mut x = seed
         .wrapping_mul(6364136223846793005)
         .wrapping_add(1442695040888963407);
@@ -537,21 +664,25 @@ fn model_stuck_with(seed: u64, max: u32) -> Option<String> {
             .wrapping_add(1442695040888963407);
         (x >> 33) % n
     };
-    let rig = Rig::new();
-    let mut cfg = rig.cfg();
-    cfg.slots = max;
-    cfg.drain_after = std::time::Duration::from_secs(4);
+    let cfg = sim.cfg(max);
     let n = 3 + rnd(5) as usize;
     let kinds: Vec<u64> = (0..n).map(|_| rnd(4)).collect(); // 0,1 normal, 2 high, 3 container
     let arrive: Vec<u64> = (0..n).map(|_| rnd(6)).collect();
     let agents: Vec<_> = (0..n)
-        .map(|i| rig.agent_with(200 + i as u32, cfg.clone()))
+        .map(|i| {
+            let a = sim.agent(200 + i as u32, cfg.clone());
+            a.h.faults.admission_follows_queue.store(
+                broken.drain_owner_in_queue,
+                std::sync::atomic::Ordering::SeqCst,
+            );
+            a
+        })
         .collect();
     let mut acq: Vec<Option<Acquirer<'_>>> = (0..n).map(|_| None).collect();
     let mut ran_for: Vec<Option<u64>> = vec![None; n];
     let mut done = vec![false; n];
     for round in 0..500u64 {
-        rig.load.set(if rnd(3) == 0 { 15.0 } else { 1.0 });
+        sim.load.set(if rnd(3) == 0 { 15.0 } else { 1.0 });
         let mut order: Vec<usize> = (0..n).collect();
         for i in (1..n).rev() {
             order.swap(i, rnd(i as u64 + 1) as usize);
@@ -580,11 +711,13 @@ fn model_stuck_with(seed: u64, max: u32) -> Option<String> {
                 ran_for[i] = Some(round);
             }
         }
-        let holders = rig.held("throttle-");
-        if holders > max as usize {
+        let holders = sim.holders();
+        if holders > (max as usize).saturating_sub(usize::from(broken.check_one_below_max)) {
             return Some(format!("seed {seed}: {holders} holders, max {max}"));
         }
-        let container_holding = (0..n).any(|i| kinds[i] == 3 && ran_for[i].is_some() && !done[i]);
+        let container_holding = (0..n).any(|i| {
+            (kinds[i] == 3 || broken.check_all_as_container) && ran_for[i].is_some() && !done[i]
+        });
         if container_holding && holders > 1 {
             return Some(format!(
                 "seed {seed}: a container run beside {} other holder(s) in round {round}",
@@ -594,7 +727,7 @@ fn model_stuck_with(seed: u64, max: u32) -> Option<String> {
         if done.iter().all(|d| *d) {
             return None;
         }
-        rig.clock.advance(std::time::Duration::from_secs(1));
+        sim.clock.advance(std::time::Duration::from_secs(1));
     }
     Some(format!(
         "seed {seed}: stuck after 500 rounds: kinds {kinds:?} arrive {arrive:?} done {done:?} ran {ran_for:?}; said: {}",
@@ -609,14 +742,81 @@ fn model_stuck_with(seed: u64, max: u32) -> Option<String> {
     ))
 }
 
-#[test]
-fn the_queue_model_has_no_wait_cycle_and_never_exceeds_the_maximum() {
-    for max in [1u32, 3, 5] {
-        for seed in 0..400u64 {
-            if let Some(why) = model_stuck_with(seed, max) {
-                panic!("{why}");
+const MAXIMA: [u32; 3] = [1, 3, 5];
+/// Seeds per maximum of the full sweep (in memory).
+const MODEL_SEEDS: u64 = 400;
+/// Seeds per maximum against the real folder: 2 reach every kind of operation the full sweep reaches (measured, docs/benchmarks.md,
+/// "2026-11-28, the queue model in memory"); 4 keep a margin, and the test names what is missed if that ever changes.
+const REAL_SEEDS: u64 = 4;
+
+/// Runs `seeds` seeds per maximum in a fresh world each, in memory or on the real folder; returns the first failure and what it reached.
+fn sweep(real: bool, seeds: u64, broken: Broken) -> (Option<String>, BTreeSet<String>) {
+    let seen: Seen = Arc::default();
+    for max in MAXIMA {
+        for seed in 0..seeds {
+            let sim = Sim::new(real, &seen);
+            if let Some(why) = model_stuck_with(seed, max, &sim, broken) {
+                let reached = seen.lock().unwrap().clone();
+                return (Some(why), reached);
             }
         }
+    }
+    let reached = seen.lock().unwrap().clone();
+    (None, reached)
+}
+
+#[test]
+fn the_queue_model_has_no_wait_cycle_and_never_exceeds_the_maximum() {
+    let (why, _) = sweep(false, MODEL_SEEDS, Broken::default());
+    assert!(why.is_none(), "{}", why.unwrap_or_default());
+}
+
+#[test]
+fn the_queue_model_on_the_real_folder_reaches_every_operation_the_full_sweep_reaches() {
+    let (why, full) = sweep(false, MODEL_SEEDS, Broken::default());
+    assert!(why.is_none(), "{}", why.unwrap_or_default());
+    let (why, real) = sweep(true, REAL_SEEDS, Broken::default());
+    assert!(why.is_none(), "{}", why.unwrap_or_default());
+    let missed: Vec<_> = full.difference(&real).collect();
+    assert!(
+        missed.is_empty(),
+        "the real-folder seeds miss what the in-memory sweep reaches (raise REAL_SEEDS to the measured number): {missed:?}"
+    );
+}
+
+/// The controls (ER-33): a model that cannot see the thing is not a check.
+#[test]
+fn the_queue_model_finds_the_deadlock_of_2026_11_18_when_the_drain_owner_waits_in_the_queue() {
+    let broken = Broken {
+        drain_owner_in_queue: true,
+        ..Broken::default()
+    };
+    let (why, _) = sweep(false, MODEL_SEEDS, broken);
+    let why = why.expect("the model must find a stuck agent with the old queue rule");
+    assert!(why.contains("stuck after 500 rounds"), "{why}");
+}
+
+#[test]
+fn the_queue_models_checks_see_an_over_maximum_and_a_container_run_beside_another_step() {
+    for (broken, want) in [
+        (
+            Broken {
+                check_one_below_max: true,
+                ..Broken::default()
+            },
+            "holders, max",
+        ),
+        (
+            Broken {
+                check_all_as_container: true,
+                ..Broken::default()
+            },
+            "a container run beside",
+        ),
+    ] {
+        let (why, _) = sweep(false, MODEL_SEEDS, broken);
+        let why = why.expect("the check must fire on a model that breaks its limit");
+        assert!(why.contains(want), "{why}");
     }
 }
 

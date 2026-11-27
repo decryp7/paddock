@@ -1,5 +1,5 @@
-//! The fast static rows `./dev merge sync-member` runs on the sync tip (the member with the train merged in): conformance, the gate
-//! register, Clippy and the Windows Clippy of the workspaces the member touches.
+//! The fast static rows `./dev merge sync-member` runs on the sync tip (the member with the train merged in): rustfmt, conformance, the
+//! gate register, Clippy and the Windows Clippy of the workspaces the member touches.
 //!
 //! The failure it prevents (trains p and q, C171 and C173): a member built on an older main failed checks that landed on main since,
 //! and the train's long member gate was the first place anyone saw it. These rows are the cheap part of that gate; they run through
@@ -14,9 +14,16 @@ use paddock_cli::Exit;
 use serde_json::json;
 use std::path::{Path, PathBuf};
 
-/// The `--only` selectors: whole row names or a row's first word. `clippy` and `clippy-windows` are per workspace, and the plan
-/// keeps only the workspaces the change reaches.
-pub const SELECTORS: &[&str] = &["conformance", "gates-register", "clippy", "clippy-windows"];
+/// The `--only` selectors: whole row names or a row's first word. `fmt`, `clippy` and `clippy-windows` are per workspace, and the plan
+/// keeps only the workspaces the change reaches. `fmt` is in because a formatting failure is the cheapest to find here and was the
+/// one static row train z's members lacked.
+pub const SELECTORS: &[&str] = &["fmt", "conformance", "gates-register", "clippy", "clippy-windows"];
+
+/// The arguments after `check --pre-push` for the rows: the train's lane of `throttle` (`--priority train`, so the rows go before
+/// normal waiters instead of waiting 50 minutes in the queue, train z) and the selected rows.
+fn extra_args() -> Vec<String> {
+    ["--priority", "train", "--only", &SELECTORS.join(",")].map(String::from).to_vec()
+}
 
 /// Rows that are always in the plan: a pass without both of them is not measured.
 const REQUIRED: &[&str] = &["conformance", "gates-register"];
@@ -38,9 +45,9 @@ pub struct Real;
 
 impl StaticGates for Real {
     fn run(&self, root: &Path, base: &str) -> Result<GateRun, String> {
-        let only = SELECTORS.join(",");
         let program = program_for_tip(root, std::env::var_os("PADDOCK_MERGE_CHECK_GATES"));
-        run_pre_push_with(&program, root, base, &["--only", &only])
+        let extra = extra_args();
+        run_pre_push_with(&program, root, base, &extra.iter().map(String::as_str).collect::<Vec<_>>())
     }
 }
 
@@ -76,7 +83,10 @@ pub fn not_yet(train: &str) -> Step {
 
 /// The step for what `check --pre-push` answered, read per row; the exit code alone is never read as a pass.
 pub fn interpret(answer: Result<GateRun, String>, base: &str) -> Step {
-    let cmd = format!("./dev check --pre-push --only {} --base {base}", SELECTORS.join(","));
+    let cmd = format!(
+        "./dev check --pre-push --priority train --only {} --base {base}",
+        SELECTORS.join(",")
+    );
     let not_measured = |why: String, mut text: Vec<String>| {
         text.push(format!(
             "::error::merge sync-member: static rows NOT MEASURED: {why}. Next step: run `{cmd}` yourself in this worktree, fix what it prints on the member, then re-sync; a sync tip whose static rows did not run is not one that passed."
@@ -101,6 +111,19 @@ pub fn interpret(answer: Result<GateRun, String>, base: &str) -> Step {
         .iter()
         .filter_map(|g| Some((g.get("id")?.as_str()?.to_string(), g.get("verdict")?.as_str()?.to_string())))
         .collect();
+    // A row's one-line cause and the log of its step, as `check --pre-push --json` names them (ER-27): without them a failed row is
+    // only a name (train z's failed `gates-register`). An older sync tip's tool prints neither, and the line says so.
+    let why = |id: &str| -> String {
+        let row = gates.iter().find(|g| g.get("id").and_then(|i| i.as_str()) == Some(id));
+        let field = |k: &str| row.and_then(|r| r.get(k)).and_then(|v| v.as_str()).filter(|v| !v.is_empty());
+        let cause = field("reason").map_or("no cause in the row's answer".to_string(), |r| {
+            r.lines().next().unwrap_or(r).to_string()
+        });
+        match field("log") {
+            Some(log) => format!("{id}: {cause} (log: {log})"),
+            None => format!("{id}: {cause}"),
+        }
+    };
     let mut text: Vec<String> = rows.iter().map(|(id, v)| format!("static row  {v:<13} {id}")).collect();
     let named = |bad: &dyn Fn(&str) -> bool| rows.iter().filter(|(_, v)| bad(v)).map(|(id, _)| id.as_str()).collect::<Vec<_>>();
     let broken = named(&|v| v == "broken");
@@ -120,11 +143,18 @@ pub fn interpret(answer: Result<GateRun, String>, base: &str) -> Step {
         exit
     };
     let exit = if !broken.is_empty() {
-        fail(broken, Exit::CheckBroken, "CHECK BROKEN", &mut text)
+        let described: Vec<String> = broken.iter().map(|id| why(id)).collect();
+        fail(
+            described.iter().map(String::as_str).collect(),
+            Exit::CheckBroken,
+            "CHECK BROKEN",
+            &mut text,
+        )
     } else if !failed.is_empty() {
-        fail(failed, Exit::Findings, "FAILED", &mut text)
+        let described: Vec<String> = failed.iter().map(|id| why(id)).collect();
+        fail(described.iter().map(String::as_str).collect(), Exit::Findings, "FAILED", &mut text)
     } else if !unproven.is_empty() || !missing.is_empty() || run.code != Some(0) {
-        let mut ids: Vec<String> = unproven.iter().map(|s| s.to_string()).collect();
+        let mut ids: Vec<String> = unproven.iter().map(|id| why(id)).collect();
         ids.extend(missing.iter().map(|r| format!("{r} (no passed row)")));
         if ids.is_empty() {
             ids.push(format!("`check --pre-push` exited {:?} though no row failed", run.code));
@@ -183,8 +213,41 @@ mod tests {
     }
 
     #[test]
-    fn the_rows_asked_are_conformance_the_gate_register_and_both_clippy_kinds() {
-        assert_eq!(SELECTORS, ["conformance", "gates-register", "clippy", "clippy-windows"]);
+    fn the_rows_asked_are_rustfmt_conformance_the_gate_register_and_both_clippy_kinds() {
+        assert_eq!(SELECTORS, ["fmt", "conformance", "gates-register", "clippy", "clippy-windows"]);
+    }
+
+    /// The rows go through the train's lane of `throttle`: run outside it, they waited 50 minutes in a 20-entry queue on train z.
+    #[test]
+    fn the_rows_run_in_the_trains_lane_of_the_queue() {
+        let args = extra_args();
+        let at = args.iter().position(|a| a == "--priority").expect("--priority");
+        assert_eq!(args[at + 1], "train", "{args:?}");
+        let only = args.iter().position(|a| a == "--only").expect("--only");
+        assert_eq!(args[only + 1], SELECTORS.join(","), "{args:?}");
+    }
+
+    /// A failed row prints its one-line cause and its step's log, not its name alone (ER-27, train z: a failed gates-register with no
+    /// reason). A tool that prints no cause is said so, and the first line of a long cause is the one shown.
+    #[test]
+    fn a_failing_row_prints_its_cause_and_its_log() {
+        let gates = vec![
+            json!({"id": "conformance", "verdict": "passed"}),
+            json!({"id": "gates-register", "verdict": "failed", "reason": "gates check (exit 1)\nsecond line", "log": "/runs/gr.log"}),
+            json!({"id": "fmt crates", "verdict": "failed"}),
+        ];
+        let answer = Ok(GateRun {
+            code: Some(5),
+            text: String::new(),
+            wire: Some(json!({"gates": gates})),
+        });
+        let s = interpret(answer, "abc");
+        assert_eq!(s.exit, Exit::Findings);
+        let text = s.text.join("\n");
+        assert_eq!(text.matches("::error::").count(), 1, "{text}");
+        assert!(text.contains("gates-register: gates check (exit 1) (log: /runs/gr.log)"), "{text}");
+        assert!(!text.contains("second line"), "{text}");
+        assert!(text.contains("fmt crates: no cause in the row's answer"), "{text}");
     }
 
     #[test]

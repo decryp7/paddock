@@ -17,6 +17,9 @@ test feeds them invented runs. A replay feeds them what the server really answer
 - `tools/paddock-dev/src/ci_runs/replay.rs` serves a shape as the server (`testutil::Fake`) and asks each reader: the verdict on the
   declared scope and on the old `plan verdict:` line, the landing verdict, the reuse decision of a push, the trial verdict of a member,
   and the fix items (`fix_items::lines`, `add_to_lessons`). The `SHAPES` table holds the answer of each, with a one-line reason.
+- The recorder also keeps a run's artifacts when it has any (2026-11-27, the escape monitor's `plan-record`): `artifacts-<run>.json` (the
+  list as the API answers it), `artifact-<id>.redirect.txt` (where the download redirects, signature dropped) and `artifact-<id>.zip.hex`
+  (the zip, as hex so a recording stays text). `ARTIFACT_SHAPES` in `replay.rs` replays them through `escape::artifact::ArtifactStore`.
 - What a replay cannot hold is git. A shape declares what the change touched (`Touch`) and the first-parent line the reuse reader walks;
   the table says which.
 
@@ -52,3 +55,4 @@ expected map lists the e2e legs a train skips), so the reader refuses it as "dec
 | `green-full-v3` | 9180 | a full green train run, v3, clean shadow | green |
 | `push-reused-v3` | 9180, 9181 | the push over it | skip, reusing 9180 |
 | `member-trial-v3` | 9179 | a member's trial, v3, narrowed | green: its own scope line ran |
+| `plan-record-artifact` | 9272 | a trial's plan job whose v4 upload `plan-record` the REST API lists; the zip download answers 302 to `/zip/raw` | read back to the run's record (`ARTIFACT_SHAPES`) |

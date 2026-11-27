@@ -147,6 +147,8 @@ paddock-menu = { path = "../../../../crates/paddock-menu", features = ["tauri"] 
 # What this crate's tests read that the test cache's reads extractor cannot resolve (ADR 0116 §2, user decision 122), as globs from the
 # repository root; `[]` says the blind reads touch no repository file.
 # `tests/it/shell.rs` compares the generated TypeScript of the app; `src/lib.rs` reads the process's working folder.
+# Root rules (ADR 0116 §6), read site by site: also `current_exe` (the test binary started again, or files beside it: build output).
+# None is a repository file outside the globs.
 test-reads = [
     "apps/pitwall/app/src/app/generated/*",
 ]

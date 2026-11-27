@@ -40,3 +40,10 @@ tempfile.workspace = true
 # Without it the crate is the pure capture library, which is what the fuzz targets build.
 default = ["plugin"]
 plugin = ["dep:debrief-plugin-api", "dep:anyhow", "dep:serde_json"]
+
+[package.metadata.paddock]
+# What this crate's tests read that the test cache's reads extractor cannot resolve (ADR 0116 §2, user decision 122), as globs from the
+# repository root; `[]` says the blind reads touch no repository file.
+# `tests/it/real_runtime.rs` finds the .NET SDK (`DEBRIEF_DOTNET`, `HOME`) and builds its fixtures under the cargo target folder
+# (`CARGO_TARGET_DIR`): tools and build output, no repository file.
+test-reads = []

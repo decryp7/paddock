@@ -1,7 +1,7 @@
 use crate::{
-    audit, check, check_ids, ci_build_env, ci_build_jobs, ci_dev_tool_store, ci_dyno_linux_units, ci_host, ci_isolation, ci_run, ci_runs,
-    ci_rust_pin, ci_s3_guard, ci_setup_rust, deps_cache, disk, gates, generators, heavy_cmd, heavy_install, hook, input_hash,
-    ipc_endpoints, lessons_driver, load, local_sccache, locks, locks_guard, merge_check, places, plan_cmd, pr, pre_push, queue,
+    audit, check, check_ids, ci_build_env, ci_build_jobs, ci_dev_tool_store, ci_dyno_linux_units, ci_host, ci_isolation, ci_job_model,
+    ci_run, ci_runs, ci_rust_pin, ci_s3_guard, ci_setup_rust, deps_cache, disk, gates, generators, heavy_cmd, heavy_install, hook,
+    input_hash, ipc_endpoints, lessons_driver, load, local_sccache, locks, locks_guard, merge_check, places, plan_cmd, pr, pre_push, queue,
     release_isolation, slots, test_cache, test_features, wait, worktree,
 };
 use clap::{Args, Parser, Subcommand};
@@ -220,8 +220,8 @@ enum MergeCommand {
     /// Before merging the train into a member branch: list the commands that re-apply the member's own work the train reverted
     /// (`git revert <sha>`, git's "revert a faulty merge"; run them after `git merge <train>`), and warn about reverts of other
     /// branches' merges the member holds. Run it before the merge of the train: it changes nothing. Run it again after the merge and it
-    /// also runs the fast static rows on the sync tip (`check --pre-push --only conformance,gates-register,clippy,clippy-windows
-    /// --base <train>`); a failing row is exit 5 (6 not measured) with the rows and the next step, unless `--no-static` says why not. Once
+    /// also runs the fast static rows on the sync tip (`check --pre-push --priority train --only fmt,conformance,gates-register,clippy,clippy-windows
+    /// --base <train>`, in the train lane of the queue); a failing row is exit 5 (6 not measured) with the rows and the next step, unless `--no-static` says why not. Once
     /// they pass it dispatches the member's own CI trial: it pushes the sync tip as the new ref `sync/<member>/<short sha>` (integrator role only) and runs `ci dispatch ci.yml
     /// --trial sync/<member>/<short sha> --onto <train>` (the affected jobs of the member on the train), printing the run id, unless `--no-trial` says why not.
     SyncMember(SyncMemberArgs),
@@ -402,6 +402,9 @@ enum CiCommand {
     /// The compiler a release job builds with is the exact version `rust-toolchain.toml` pins (`rustc --version` against its `channel`, read
     /// with the TOML parser): one `::error::` line naming both versions when they differ or the channel floats.
     RustPin(ci_rust_pin::RustPinArgs),
+    /// ci.yml's job model (ADR 0123 §7): `check` builds it and fails on a job that breaks the conventions or a `render` that is not injective
+    /// over the legs the planner emits. Report-only (warnings, exit 0) until its first green run is recorded; the plan job and the member gate run it.
+    JobModel(ci_job_model::JobModelArgs),
     /// Dyno's release step 2c in CI (ported from the shell script of chore/dyno-linux-units-on-ci, which never landed): the benchmark-unit tests (`cargo test -p
     /// dyno-agent --test bench_units -- --ignored`) in a systemd user manager. No manager is exit 6, not measured, never a pass; failing
     /// tests are exit 1.
@@ -840,6 +843,9 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
         Command::Ci {
             command: CiCommand::RustPin(a),
         } => ci_rust_pin::command(&a),
+        Command::Ci {
+            command: CiCommand::JobModel(a),
+        } => ci_job_model::command(&a),
         Command::Ci {
             command: CiCommand::DynoLinuxUnits(a),
         } => ci_dyno_linux_units::command(&a),

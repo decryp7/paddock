@@ -8,9 +8,10 @@
 //!   here, not a gap that is hidden: the capture's own note says "no stack tool on this OS".
 //!
 //! At most [`MAX_PROCESSES`] processes are sampled, the root first. The capture never changes what it looks at (ER-45) and never keeps
-//! a kill waiting longer than [`TOTAL_LIMIT`]; a failed look is written into the file as the cause, never a silent gap.
+//! a kill waiting longer than [`STACK_CAPTURE_LIMIT`]; a failed look is written into the file as the cause, never a silent gap.
 
 use crate::ci_tool::{Output, ToolCall};
+use crate::throttle::STACK_CAPTURE_LIMIT;
 use paddock_proc::ProcessId;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -23,9 +24,6 @@ pub const MAX_PROCESSES: usize = 8;
 /// How long one look (one `sample`, `eu-stack`, `ps`) may take: `sample` takes 1.1 s itself (measured), `eu-stack` of a large
 /// process a few seconds; a look that takes longer is written as a timeout.
 const LOOK_LIMIT: Duration = Duration::from_secs(15);
-
-/// The whole capture's bound: the kill is never held longer than this by the looks.
-pub const TOTAL_LIMIT: Duration = Duration::from_secs(60);
 
 /// The most of one look's output that is kept in the file.
 const KEEP_BYTES: usize = 64 * 1024;
@@ -153,14 +151,14 @@ pub fn capture(
     let mut text = format!("# {why}\n# processes: {pids:?}\n# stacks: {}\n", stack_tool(os, have));
     let started = std::time::Instant::now();
     for look in looks(os, pids, dir, have) {
-        if started.elapsed() > TOTAL_LIMIT {
+        if started.elapsed() > STACK_CAPTURE_LIMIT {
             text.push_str("\n$ (the capture's own time limit ran out; the remaining looks were not made)\n");
             break;
         }
         text.push_str(&format!("\n$ {} {}\n", look.program, look.args.join(" ")));
         let ran = ToolCall::new(look.program.clone())
             .args(look.args.clone())
-            .pass(crate::pre_push::exec::PASS.iter().copied())
+            .pass(crate::child_env::PASS.iter().copied())
             .timeout(LOOK_LIMIT)
             .output(Output::Capture)
             .run(env, &mut std::io::sink());
@@ -254,7 +252,7 @@ mod tests {
         let mut child = paddock_proc::command(step.program()).spawn().unwrap();
         let id = ProcessId::of(child.id()).expect("the child's identity");
         let env: HashMap<String, String> = paddock_env::vars().collect();
-        let on_path = |p: &str| crate::pre_push::exec::on_path(&env, p);
+        let on_path = |p: &str| crate::throttle::on_path(&env, p);
         let c = capture(this_os(), &[id.pid()], "stand-in hung", d.path(), "hangs", &env, &on_path);
         paddock_proc::kill_tree(id);
         let _ = child.wait();

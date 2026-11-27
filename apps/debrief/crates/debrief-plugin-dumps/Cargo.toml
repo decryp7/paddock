@@ -45,3 +45,10 @@ tempfile.workspace = true
 # what the fuzz targets build.
 default = ["plugin"]
 plugin = ["dep:debrief-plugin-api", "dep:anyhow", "dep:windows", "dep:paddock-proc"]
+
+[package.metadata.paddock]
+# What this crate's tests read that the test cache's reads extractor cannot resolve (ADR 0116 §2, user decision 122), as globs from the
+# repository root; `[]` says the blind reads touch no repository file.
+# `src/capture.rs` dumps a copy of the test binary (`current_exe`) and `src/pdb_symbols.rs` reads the PDB beside it: build output,
+# no repository file.
+test-reads = []

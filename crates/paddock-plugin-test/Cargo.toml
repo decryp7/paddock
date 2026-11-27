@@ -44,3 +44,10 @@ paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
 
 [dev-dependencies]
 tempfile = "3"
+
+[package.metadata.paddock]
+# What this crate's tests read that the test cache's reads extractor cannot resolve (ADR 0116 §2, user decision 122), as globs from the
+# repository root; `[]` says the blind reads touch no repository file.
+# `src/fixture.rs` finds the built plugin binary beside the test binary (`current_exe`, cargo's profile folder) and
+# `src/bin/misbehaving.rs` reads its own name: no repository file.
+test-reads = []

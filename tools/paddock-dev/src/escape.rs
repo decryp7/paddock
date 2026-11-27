@@ -5,10 +5,13 @@
 //! the previous nightly: a failure of a target that a commit's change could reach (its `reach`) but its plan did not run is an
 //! **escape**. When several commits dropped the target, the culprit is bisected within [`MAX_COMMITS`] commits and [`MAX_RUNS`] runs;
 //! past the bound, or with a record missing or unreadable, the answer is `not measured`, never a guess and never clean. No database
-//! (D13): the records are blobs under `refs/paddock/plan-records/` ([`GitRefs`]), kept [`RETENTION_DAYS`] days ([`prune`]).
+//! (D13, amended 2026-11-27): the plan job writes its record to a file ([`artifact::FileSink`]) that ci.yml uploads as the run's
+//! artifact `plan-record`, kept [`RETENTION_DAYS`] days by the server; the nightly reads the artifacts of the commits' runs through
+//! the Actions API ([`artifact::ArtifactStore`]). ci.yml stays read-only: nothing pushes a ref.
 //!
 //! The old planner's rule tables may be deleted only after [`register::REQUIRED`] consecutive clean nightlies ([`register`]).
 
+pub mod artifact;
 pub mod cmd;
 pub mod register;
 #[cfg(test)]
@@ -24,7 +27,7 @@ pub const VERSION: u64 = 1;
 pub const MAX_COMMITS: usize = 30;
 /// The most runs of a failing target a nightly's bisects use together.
 pub const MAX_RUNS: usize = 10;
-/// How long a record is kept: from one nightly to the next across a weekend and a paused nightly (ADR 0117 §8).
+/// How long a record is kept (the artifact's `retention-days`, which a test ties to ci.yml): from one nightly to the next across a weekend and a paused nightly (ADR 0117 §8).
 pub const RETENTION_DAYS: i64 = 14;
 /// The whole-job target: a job failed and the report names no test.
 pub const WHOLE_JOB: &str = "*";
@@ -66,7 +69,7 @@ pub struct Record {
     pub commit: String,
     /// The base it was diffed against, when it had one.
     pub base: Option<String>,
-    /// The commit time (seconds since the epoch), for [`prune`].
+    /// The commit time (seconds since the epoch).
     pub at: i64,
     /// Per project, why the change could reach it (the graph's reasons); a project not here could not have been affected.
     pub reach: BTreeMap<String, Vec<String>>,
@@ -149,192 +152,24 @@ pub enum Load {
     Unreadable(String),
 }
 
-/// Where records live (D13: no database).
+/// Where the nightly reads records from (D13: no database).
 pub trait Store {
-    /// Saves a record, replacing one of the same commit.
-    fn put(&self, r: &Record) -> Result<(), String>;
     /// The record of a commit.
     fn get(&self, commit: &str) -> Load;
-    /// Every commit with a record (readable or not).
-    fn commits(&self) -> Result<Vec<String>, String>;
-    /// Removes a commit's record.
-    fn remove(&self, commit: &str) -> Result<(), String>;
+}
+
+/// Where a plan run writes its record.
+pub trait Sink {
+    /// Saves a record, replacing one of the same commit.
+    fn put(&self, r: &Record) -> Result<(), String>;
 }
 
 /// The one writer of selection records.
-pub fn save(store: &dyn Store, r: &Record) -> Result<(), String> {
+pub fn save(sink: &dyn Sink, r: &Record) -> Result<(), String> {
     if !valid_commit(&r.commit) {
         return Err(format!("{:?} is not a commit id", r.commit));
     }
-    store.put(r)
-}
-
-/// Removes the records older than [`RETENTION_DAYS`] days at `now`; the commits removed. A record that cannot be read has no age and
-/// stays (it is reported by [`judge`] when a nightly needs it).
-pub fn prune(store: &dyn Store, now: i64) -> Result<Vec<String>, String> {
-    let mut gone = Vec::new();
-    for c in store.commits()? {
-        if let Load::Ok(r) = store.get(&c)
-            && now - r.at > RETENTION_DAYS * 86_400
-        {
-            store.remove(&c)?;
-            gone.push(c);
-        }
-    }
-    Ok(gone)
-}
-
-/// The prefix of the refs that hold the records.
-pub const REF_PREFIX: &str = "refs/paddock/plan-records/";
-
-/// The job's token for git over http: `PLAN_TOKEN`, then `GITEA_TOKEN` (the plan step has the first; empty means none).
-pub fn job_token(env: &dyn Fn(&str) -> Option<String>) -> Option<String> {
-    ["PLAN_TOKEN", "GITEA_TOKEN"]
-        .iter()
-        .filter_map(|k| env(k))
-        .map(|t| t.trim().to_string())
-        .find(|t| !t.is_empty())
-}
-
-/// Records as blobs under [`REF_PREFIX`] in a repository: a ref per commit, so a fetch of the prefix brings them all and a push
-/// shares them (best effort; a record that was not pushed is `Missing` to the nightly, which is `not measured`).
-pub struct GitRefs<'a> {
-    /// The repository.
-    pub root: &'a Path,
-}
-
-impl GitRefs<'_> {
-    fn git(&self) -> std::process::Command {
-        let mut c = crate::git_env::git();
-        c.arg("-C").arg(self.root);
-        c
-    }
-
-    /// A git command that talks to `origin`: with a token, the header actions/checkout sends (`AUTHORIZATION: basic` of
-    /// `x-access-token:<token>`) as `http.extraheader` in git's environment only, never on the command line. The plan job checks out
-    /// with `persist-credentials: false`, so without it the push asked for a user name and failed (ci.yml 8976). Never a prompt.
-    fn remote(&self, token: Option<&str>) -> std::process::Command {
-        use base64::Engine;
-        let mut c = self.git();
-        c.env("GIT_TERMINAL_PROMPT", "0");
-        if let Some(t) = token {
-            let basic = base64::engine::general_purpose::STANDARD.encode(format!("x-access-token:{t}"));
-            c.env("GIT_CONFIG_COUNT", "1")
-                .env("GIT_CONFIG_KEY_0", "http.extraheader")
-                .env("GIT_CONFIG_VALUE_0", format!("AUTHORIZATION: basic {basic}"));
-        }
-        c
-    }
-
-    fn run(&self, args: &[&str], stdin: Option<&[u8]>) -> Result<std::process::Output, String> {
-        self.run_in(self.git(), args, stdin)
-    }
-
-    fn run_in(&self, mut cmd: std::process::Command, args: &[&str], stdin: Option<&[u8]>) -> Result<std::process::Output, String> {
-        use std::io::Write;
-        cmd.args(args).stdin(if stdin.is_some() {
-            std::process::Stdio::piped()
-        } else {
-            std::process::Stdio::null()
-        });
-        cmd.stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped());
-        let mut child = cmd.spawn().map_err(|e| format!("git {}: {e}", args.first().unwrap_or(&"")))?;
-        if let (Some(bytes), Some(mut si)) = (stdin, child.stdin.take()) {
-            si.write_all(bytes)
-                .map_err(|e| format!("git {}: {e}", args.first().unwrap_or(&"")))?;
-        }
-        child
-            .wait_with_output()
-            .map_err(|e| format!("git {}: {e}", args.first().unwrap_or(&"")))
-    }
-
-    /// Pushes every record ref to `origin`; the error says what to do (a record that is not pushed is not measured, never clean).
-    pub fn push(&self) -> Result<(), String> {
-        let spec = format!("{REF_PREFIX}*:{REF_PREFIX}*");
-        let token = job_token(&|k| std::env::var(k).ok());
-        let o = self.run_in(self.remote(token.as_deref()), &["push", "--quiet", "origin", &spec], None)?;
-        if o.status.success() {
-            Ok(())
-        } else {
-            Err(format!("git push origin {spec}: {}", String::from_utf8_lossy(&o.stderr).trim()))
-        }
-    }
-
-    /// Fetches every record ref of `origin`.
-    pub fn fetch(&self) -> Result<(), String> {
-        let spec = format!("+{REF_PREFIX}*:{REF_PREFIX}*");
-        let token = job_token(&|k| std::env::var(k).ok());
-        let o = self.run_in(self.remote(token.as_deref()), &["fetch", "--quiet", "origin", &spec], None)?;
-        if o.status.success() {
-            Ok(())
-        } else {
-            Err(format!("git fetch origin {spec}: {}", String::from_utf8_lossy(&o.stderr).trim()))
-        }
-    }
-}
-
-impl Store for GitRefs<'_> {
-    fn put(&self, r: &Record) -> Result<(), String> {
-        let text = serde_json::to_string(&r.to_json()).map_err(|e| e.to_string())?;
-        let o = self.run(&["hash-object", "-w", "--stdin"], Some(text.as_bytes()))?;
-        if !o.status.success() {
-            return Err(format!("git hash-object: {}", String::from_utf8_lossy(&o.stderr).trim()));
-        }
-        let blob = String::from_utf8_lossy(&o.stdout).trim().to_string();
-        let name = format!("{REF_PREFIX}{}", r.commit);
-        let o = self.run(&["update-ref", &name, &blob], None)?;
-        if o.status.success() {
-            Ok(())
-        } else {
-            Err(format!("git update-ref {name}: {}", String::from_utf8_lossy(&o.stderr).trim()))
-        }
-    }
-
-    fn get(&self, commit: &str) -> Load {
-        if !valid_commit(commit) {
-            return Load::Unreadable(format!("{commit:?} is not a commit id"));
-        }
-        let name = format!("{REF_PREFIX}{commit}");
-        match self.run(&["rev-parse", "--verify", "--quiet", &name], None) {
-            Ok(o) if !o.status.success() => return Load::Missing,
-            Err(e) => return Load::Unreadable(e),
-            Ok(_) => {}
-        }
-        match self.run(&["cat-file", "blob", &name], None) {
-            Ok(o) if o.status.success() => match Record::parse(&String::from_utf8_lossy(&o.stdout)) {
-                Ok(r) if r.commit == commit => Load::Ok(Box::new(r)),
-                Ok(r) => Load::Unreadable(format!("the record under {commit} is for {}", r.commit)),
-                Err(e) => Load::Unreadable(e),
-            },
-            Ok(o) => Load::Unreadable(String::from_utf8_lossy(&o.stderr).trim().to_string()),
-            Err(e) => Load::Unreadable(e),
-        }
-    }
-
-    fn commits(&self) -> Result<Vec<String>, String> {
-        let o = self.run(&["for-each-ref", "--format=%(refname)", REF_PREFIX], None)?;
-        if !o.status.success() {
-            return Err(format!("git for-each-ref: {}", String::from_utf8_lossy(&o.stderr).trim()));
-        }
-        Ok(String::from_utf8_lossy(&o.stdout)
-            .lines()
-            .filter_map(|l| l.strip_prefix(REF_PREFIX))
-            .map(str::to_string)
-            .collect())
-    }
-
-    fn remove(&self, commit: &str) -> Result<(), String> {
-        if !valid_commit(commit) {
-            return Err(format!("{commit:?} is not a commit id"));
-        }
-        let name = format!("{REF_PREFIX}{commit}");
-        let o = self.run(&["update-ref", "-d", &name], None)?;
-        if o.status.success() {
-            Ok(())
-        } else {
-            Err(format!("git update-ref -d {name}: {}", String::from_utf8_lossy(&o.stderr).trim()))
-        }
-    }
+    sink.put(r)
 }
 
 /// The records a nightly judges, oldest first: from `head` back along each record's base until `reached` says the previous nightly's
