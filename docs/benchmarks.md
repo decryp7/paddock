@@ -3182,3 +3182,15 @@ heavy generator is named `deferred` in the merge check (never a pass, ER-33) and
 the union of every merge's; `--heavy-generators` runs them per merge. Fast generators still run per merge. Also seen: the per-merge
 `ci-run-golden` was STALE on a mid-train merge that a later member fixed, so the per-merge run named a member that was not at fault.
 Not measured: the final gen check on a whole train (it runs what the per-merge steps ran before, once).
+
+
+## Push gate hang limits of the long rows (2026-11-27, fix/gate-row-stall)
+
+ER-12, ER-36, a Mac with 14 cores. When the local sccache server hung on 2026-11-27 a gate row sat idle until the 60-minute row cap: the rows had
+`--queue-stall` and `--run-max` and no `throttle --stall`. **Measured** (`step-history.jsonl` of this checkout, passed steps only; `max_gap_secs` is
+the longest time between two progress events, so an upper bound of the time with no output and no CPU that `--stall` counts): longest gap
+clippy 230.1 s (844 steps), clippy-windows 291.0 s (352), conformance-tests 294.8 s (592), member-audits 113.1 s (201), tests 291.5 s (123).
+**Change:** each of these rows runs under `throttle --stall S`, S at least three times the longest gap, in 5-minute steps: 900 s, 900 s, 900 s, 600 s,
+900 s (`HANG_LIMITS` in `pre_push/budget.rs`, which holds the measured gaps beside them). A hung row ends with exit 81 and reads "not measured: hung (no
+output, no CPU for S s)" with the next step, never a pass; a hung row now costs 10 to 15 minutes, not 60. Not measured: a real sccache hang through the
+gate (the stand-in test exercises the reading of exit 81; `throttle`'s own tests end a silent idle command and leave a silent busy one alone).
