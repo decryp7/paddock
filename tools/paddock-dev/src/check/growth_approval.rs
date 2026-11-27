@@ -90,10 +90,21 @@ pub fn at_severity(mut finding: Finding, severity: Severity) -> Finding {
 }
 
 /// The variable through which a caller says where the run is ([`paddock_approvals::Stage`]): the push gate and the member gate set it
-/// for their rows; a caller that sets nothing (CI) gets the strictest stage, landing.
+/// for their rows; a caller that sets nothing (CI) gets the stage of its ref ([`STAGE_FROM_REF_ENV`]), else the strictest, landing.
 pub const STAGE_ENV: &str = "PADDOCK_APPROVAL_STAGE";
 
-/// The stage of this run from the environment `get` reads; an unknown name is an error to report, never a default.
+/// The variable through which CI says the ref it runs on (ci.yml declares `${{ github.ref }}` once); the ref-to-stage mapping is
+/// [`paddock_approvals::Stage::from_ref`], the one definition.
+pub const STAGE_FROM_REF_ENV: &str = "PADDOCK_APPROVAL_STAGE_FROM_REF";
+
+/// The stage of this run from the environment `get` reads: an explicit [`STAGE_ENV`] wins (a name that is no stage is an error to
+/// report, never a default), else the stage of the [`STAGE_FROM_REF_ENV`] ref, else landing.
 pub fn stage_from_env(get: &dyn Fn(&str) -> Option<String>) -> Result<paddock_approvals::Stage, String> {
-    paddock_approvals::Stage::or_strictest(get(STAGE_ENV).as_deref()).map_err(|e| format!("{STAGE_ENV}: {e}"))
+    let explicit = get(STAGE_ENV).filter(|n| !n.trim().is_empty());
+    if explicit.is_none()
+        && let Some(r) = get(STAGE_FROM_REF_ENV)
+    {
+        return Ok(paddock_approvals::Stage::from_ref(&r));
+    }
+    paddock_approvals::Stage::or_strictest(explicit.as_deref()).map_err(|e| format!("{STAGE_ENV}: {e}"))
 }

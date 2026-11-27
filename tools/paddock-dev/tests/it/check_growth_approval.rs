@@ -295,3 +295,40 @@ process.stdout.write(JSON.stringify({ digest: growthDigest(keys), approved: case
     assert_eq!(js["digest"], right.as_str());
     assert_eq!(js["approved"], serde_json::json!(want));
 }
+
+/// The stage of a run: an explicit `PADDOCK_APPROVAL_STAGE` wins, else the ref CI says (`PADDOCK_APPROVAL_STAGE_FROM_REF`, mapped by
+/// `paddock_approvals::Stage::from_ref`), else landing, the strictest (user decision 125).
+#[test]
+fn the_stage_is_the_explicit_variable_else_the_ref_else_landing() {
+    use paddock_approvals::Stage;
+    use paddock_dev::check::growth_approval::{STAGE_ENV, STAGE_FROM_REF_ENV, stage_from_env};
+    let stage = |pairs: &[(&str, &str)]| {
+        let pairs: Vec<(String, String)> = pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
+        stage_from_env(&|k| pairs.iter().find(|(n, _)| n == k).map(|(_, v)| v.clone()))
+    };
+    assert_eq!(stage(&[]), Ok(Stage::Landing));
+    assert_eq!(stage(&[(STAGE_FROM_REF_ENV, "refs/heads/train/x")]), Ok(Stage::MemberGate));
+    assert_eq!(stage(&[(STAGE_FROM_REF_ENV, "refs/heads/trial/x")]), Ok(Stage::MemberGate));
+    assert_eq!(stage(&[(STAGE_FROM_REF_ENV, "refs/heads/main")]), Ok(Stage::Landing));
+    assert_eq!(stage(&[(STAGE_FROM_REF_ENV, "")]), Ok(Stage::Landing), "an empty ref (a skipped expression) is landing");
+    // the explicit name wins over the ref, either way
+    assert_eq!(stage(&[(STAGE_ENV, "branch-push"), (STAGE_FROM_REF_ENV, "refs/heads/main")]), Ok(Stage::BranchPush));
+    assert_eq!(stage(&[(STAGE_ENV, "landing"), (STAGE_FROM_REF_ENV, "refs/heads/train/x")]), Ok(Stage::Landing));
+    // a name that is no stage is an error, never a default, even beside a ref
+    let e = stage(&[(STAGE_ENV, "nonsense"), (STAGE_FROM_REF_ENV, "refs/heads/main")]).unwrap_err();
+    assert!(e.contains(STAGE_ENV) && e.contains("nonsense"), "{e}");
+}
+
+/// ci.yml declares the ONE line that tells `./dev` the ref (a shared file: a single declared line), at the workflow level so every job
+/// that runs a check inherits it; read through paddock-ci-config's YAML parser, never a regex (ER-42).
+#[test]
+fn ci_yml_declares_the_one_ref_line_for_the_stage() {
+    use paddock_dev::check::growth_approval::STAGE_FROM_REF_ENV;
+    let root = super::check::repo_root();
+    let text = std::fs::read_to_string(root.join(".gitea/workflows/ci.yml")).unwrap();
+    let doc = paddock_ci_config::yaml::parse(&text).unwrap();
+    let env = doc.get("env").expect("ci.yml has a workflow-level env");
+    assert_eq!(env.get_text(STAGE_FROM_REF_ENV), Some("${{ github.ref }}"));
+    // positive control: the reader does see a line that is not there
+    assert_eq!(env.get_text("PADDOCK_NO_SUCH_LINE"), None);
+}
