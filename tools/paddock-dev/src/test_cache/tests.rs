@@ -1292,3 +1292,37 @@ fn the_record_steps_carry_their_jobs_name_and_the_leg_filter_as_the_workflow_nam
         );
     }
 }
+
+#[test]
+fn a_crate_that_depends_on_a_blind_crate_is_blind_through_it_and_an_independent_one_is_not() {
+    use paddock_repo_graph::model::nodes::{Edge, EdgeKind, Model, ModelNode, NodeKind};
+    // a -> b -> c, and d alone: only c reads something the graph cannot resolve.
+    let mut m = Model::new();
+    for d in ["a", "b", "c", "d"] {
+        m.add_node(ModelNode::new(
+            &format!("crate:crates/{d}"),
+            NodeKind::Project,
+            &[&format!("crates/{d}/")],
+        ));
+    }
+    m.add_edge(Edge::new("crate:crates/a", "crate:crates/b", EdgeKind::Depends));
+    m.add_edge(Edge::new("crate:crates/b", "crate:crates/c", EdgeKind::Depends));
+    let own = std::collections::BTreeMap::from([("crates/c".to_string(), vec!["crates/c/src/x.rs: `.ancestors()`".to_string()])]);
+    let got = super::spread_blind(&m, &own);
+    assert_eq!(got["crates/c"], own["crates/c"], "its own reasons stay as they were");
+    for dependent in ["crates/a", "crates/b"] {
+        assert_eq!(got[dependent], vec!["blind through crates/c".to_string()], "{dependent}");
+    }
+    assert!(
+        !got.contains_key("crates/d"),
+        "control: a crate that depends on nothing blind stays cacheable"
+    );
+    // And the reason a run prints for the dependent names the dependency.
+    let (_d, s) = scratch();
+    let class = RunnerClass::here();
+    let mut a = cand("crates/a", "h");
+    s.put_many(&[rec(&a, &class, NOW - 3600)]).unwrap();
+    a.blind = got["crates/a"].clone();
+    let d = decide(std::slice::from_ref(&a), &cfg(), &class, "", &s, NOW, OK).0.remove(0);
+    assert!(d_text(&d).contains("blind through crates/c"), "{}", d_text(&d));
+}

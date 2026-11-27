@@ -163,6 +163,30 @@ pub fn decide(
     (out, None)
 }
 
+/// The blind reads of every crate, spread to its dependents (ADR 0116 §2): a crate's tests run its dependencies' code, whose unhashed reads
+/// its own key cannot see, so a crate that depends (normal, dev or build, transitively, inside the repository) on a blind crate is blind
+/// too, with the reason `blind through <dependency folder>`. `own` is each blind crate's folder and its own reasons.
+pub fn spread_blind(
+    model: &paddock_repo_graph::model::nodes::Model,
+    own: &std::collections::BTreeMap<String, Vec<String>>,
+) -> std::collections::BTreeMap<String, Vec<String>> {
+    let mut out = own.clone();
+    for n in model.nodes() {
+        let Some(dir) = n.id.strip_prefix("crate:") else { continue };
+        for dep in paddock_repo_graph::model::hash::dependencies(model, &n.id) {
+            let Some(dep_dir) = dep.strip_prefix("crate:") else { continue };
+            if own.contains_key(dep_dir) {
+                let r = format!("blind through {dep_dir}");
+                let e = out.entry(dir.to_string()).or_default();
+                if !e.contains(&r) {
+                    e.push(r);
+                }
+            }
+        }
+    }
+    out
+}
+
 /// The reasons of a blind target in one line: the target, how many, and the first two (the full list is `./dev plan --explain`).
 fn blind_text(target: &str, reasons: &[String]) -> String {
     let shown: Vec<&str> = reasons.iter().take(2).map(String::as_str).collect();

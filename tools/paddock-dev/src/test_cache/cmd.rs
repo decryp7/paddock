@@ -162,7 +162,7 @@ pub fn candidates_in(root: &Path, w: &World, workspace: &str, os: &str) -> Resul
     };
     let nodes: Vec<String> = ts.iter().map(|t| t.node.clone()).collect();
     let hashes = crate::repo_model::hash::node_hashes(&crate::input_hash::Real, &ctx, root, world, &tree, &nodes)?;
-    let blind = blind_reads(&w.graph.cargo, world.model.blind());
+    let blind = super::spread_blind(&world.model, &blind_reads(&w.graph.cargo, world.model.blind()));
     ts.into_iter()
         .map(|t| {
             let h = hashes.get(&t.node).ok_or_else(|| {
