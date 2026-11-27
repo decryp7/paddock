@@ -126,19 +126,13 @@ impl LogWriter {
 mod tests {
     use super::*;
 
-    #[allow(
-        clippy::disallowed_methods,
-        reason = "a test builds its scratch path from the OS temp folder and removes it"
-    )]
-    fn temp(name: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("pitcrew-it-log-{name}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
-        d
+    fn temp() -> paddock_testkit::CanonicalTempDir {
+        paddock_testkit::canonical_tempdir()
     }
 
     #[test]
     fn writes_and_rotates_without_losing_lines() {
-        let d = temp("rotate");
+        let d = temp();
         let mut w = LogWriter::open(&d, "runner.log", RotationPolicy { max_bytes: 100, keep: 2 });
         assert!(!w.failed());
         for i in 0..30 {
@@ -150,13 +144,12 @@ mod tests {
         assert!(d.join("runner.log.1").exists());
         assert!(d.join("runner.log.2").exists());
         assert!(!d.join("runner.log.3").exists(), "only `keep` files are kept");
-        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]
     fn an_unwritable_folder_is_reported_not_fatal() {
-        let d = temp("blocked");
-        std::fs::create_dir_all(d.parent().unwrap()).unwrap();
+        let scratch = temp();
+        let d = scratch.join("blocked");
         // A file where the folder should be.
         std::fs::write(&d, b"x").unwrap();
         let mut w = LogWriter::open(&d, "runner.log", RotationPolicy::default());
@@ -165,6 +158,5 @@ mod tests {
         w.set_policy(RotationPolicy { max_bytes: 1, keep: 0 });
         w.rotate();
         assert!(w.failed());
-        let _ = std::fs::remove_file(&d);
     }
 }

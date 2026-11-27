@@ -317,6 +317,7 @@ fn issues_export_as_json_lines_to_a_chosen_file_only() {
     for bad in [
         "relative.jsonl",
         &dir.path().join("x.txt").to_string_lossy(),
+        // conformance: shared-temp-parent — a traversal path the agent must refuse, built from the test's own folder and never written
         &dir.path().join("..").join("x.jsonl").to_string_lossy(),
         &dir.path().join("missing").join("x.jsonl").to_string_lossy(),
     ] {

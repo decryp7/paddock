@@ -59,40 +59,33 @@ impl AppState {
 mod tests {
     use super::*;
 
-    #[allow(
-        clippy::disallowed_methods,
-        reason = "a test builds its scratch path from the OS temp folder and removes it"
-    )]
-    fn temp(name: &str) -> std::path::PathBuf {
-        let p = std::env::temp_dir().join(format!("pitcrew-it-appstate-{name}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&p);
-        std::fs::create_dir_all(&p).unwrap();
-        p
+    fn temp() -> paddock_testkit::CanonicalTempDir {
+        paddock_testkit::canonical_tempdir()
     }
 
     #[test]
     fn the_state_round_trips_and_a_missing_file_gives_defaults() {
-        let d = temp("roundtrip");
-        assert_eq!(AppState::load(d.as_path()), AppState::default());
+        let d = temp();
+        assert_eq!(AppState::load(d.path()), AppState::default());
         let s = AppState {
             service_registered_version: Some("9.9.9".into()),
             ..AppState::default()
         };
-        s.save(&d.as_path().join("sub")).unwrap();
-        assert_eq!(AppState::load(&d.as_path().join("sub")), s);
+        s.save(&d.path().join("sub")).unwrap();
+        assert_eq!(AppState::load(&d.path().join("sub")), s);
     }
 
     #[test]
     fn an_old_file_without_the_new_key_loads_and_a_damaged_or_newer_one_falls_back() {
-        let d = temp("damaged");
-        let f = d.as_path().join(FILE_NAME);
+        let d = temp();
+        let f = d.path().join(FILE_NAME);
         std::fs::write(&f, r#"{"version":1}"#).unwrap();
-        assert_eq!(AppState::load(d.as_path()).service_registered_version, None);
+        assert_eq!(AppState::load(d.path()).service_registered_version, None);
         std::fs::write(&f, "{ not json").unwrap();
-        assert_eq!(AppState::load(d.as_path()), AppState::default());
+        assert_eq!(AppState::load(d.path()), AppState::default());
         std::fs::write(&f, r#"{"version":99,"serviceRegisteredVersion":"1"}"#).unwrap();
-        assert_eq!(AppState::load(d.as_path()), AppState::default());
+        assert_eq!(AppState::load(d.path()), AppState::default());
         std::fs::write(&f, vec![b' '; 70 * 1024]).unwrap();
-        assert_eq!(AppState::load(d.as_path()), AppState::default());
+        assert_eq!(AppState::load(d.path()), AppState::default());
     }
 }

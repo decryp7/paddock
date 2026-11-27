@@ -32,13 +32,10 @@ fn connect(_data: &std::path::Path) -> Box<dyn Stream> {
 }
 
 #[test]
-#[allow(
-    clippy::disallowed_methods,
-    reason = "a test builds its scratch path from the OS temp folder and removes it"
-)]
 fn a_client_talks_to_the_running_service() {
-    let data = std::env::temp_dir().join(format!("pitcrew-it-transport-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&data);
+    let scratch = paddock_testkit::canonical_tempdir();
+    // A short name: the Unix socket of the service lives in this folder (the length limit of a socket path).
+    let data = scratch.join("pt");
     std::fs::create_dir_all(&data).unwrap();
     std::fs::write(data.join("pitcrew.toml"), "schema_version = 1\n").unwrap();
     let host = pitcrew_service::host::Host::start(data.clone(), |e| panic!("the IPC server failed: {e}")).unwrap();
@@ -88,5 +85,4 @@ fn a_client_talks_to_the_running_service() {
     }
     drop((c, sub));
     host.stop();
-    let _ = std::fs::remove_dir_all(&data);
 }

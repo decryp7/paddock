@@ -76,6 +76,14 @@ impl Rig {
         c
     }
 
+    /// One poll after the fake clock has passed the wait-line rate limit (`wait_log`): a wait line is said at most once per `wait_log`, so a
+    /// test that reads `said()` right after the first poll sees nothing. Use this, not a hand-picked `advance`, before asserting a wait line.
+    pub fn poll_said(&self, a: &mut Acquirer<'_>) -> Poll {
+        let wait_log = self.cfg().wait_log;
+        self.clock.advance(wait_log + Duration::from_secs(1));
+        a.poll()
+    }
+
     pub fn now(&self) -> u64 {
         self.clock.now_secs()
     }

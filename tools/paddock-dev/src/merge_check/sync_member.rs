@@ -7,7 +7,7 @@
 //!
 //! Run it BEFORE `git merge <train>`: it reads `member..train`, and a merged revert is no longer in that range. It lists
 //!
-//! - for each live train revert of a merge of this member's own branch (`branch_of(subject)` equals the branch, with or without a
+//! - for each live train revert of a merge of this member's own branch (the merge's `Paddock-Member` trailer, else the old reading of its subject, equals the branch, with or without a
 //!   remote prefix such as `origin/`): the `git revert <revert>` to run after the merge, oldest revert first;
 //! - for a revert of another branch's merge that this member holds: a `::warning::` (re-base on the train, or land that branch
 //!   first): that work is not this member's to re-apply.

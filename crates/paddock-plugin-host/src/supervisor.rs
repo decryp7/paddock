@@ -992,19 +992,20 @@ mod tests {
     use paddock_plugin_api::compat::HostInfo;
     use paddock_view::{Node, SCHEMA};
 
-    fn supervisor() -> (Supervisor, Arc<Quarantine>) {
+    /// The supervisor, its quarantine and the folder its outputs go to (kept by the caller for the whole test: it is removed on drop).
+    fn supervisor() -> (Supervisor, Arc<Quarantine>, tempfile::TempDir) {
         let manifest = Manifest::parse(
             "format = 1\n[plugin]\nid = \"net.example.p\"\nname = \"P\"\nversion = \"1.0.0\"\npublisher = \"E\"\nprotocol = \"2.0\"\nbinary = \"p\"\ntargets = [\"x86_64-unknown-linux-gnu\"]\n",
         )
         .unwrap();
         let clock: Arc<dyn Clock> = Arc::new(FakeClock::new());
         let quarantine = Arc::new(Quarantine::new(QuarantinePolicy::default(), clock.clone()));
-        let dir = std::env::temp_dir();
+        let dir = paddock_testkit::tempdir();
         let cfg = Arc::new(HostConfig::new(
             HostInfo::new("TestApp"),
             clock,
             quarantine.clone(),
-            dir.join("paddock-plugin-host-unit-out"),
+            dir.path().join("out"),
         ));
         let record = InstallRecord {
             id: "net.example.p".into(),
@@ -1029,12 +1030,12 @@ mod tests {
             data_dir: "/does/not/exist-data".into(),
             sha256: [0; 32],
         };
-        (Supervisor::new(cfg, installed), quarantine)
+        (Supervisor::new(cfg, installed), quarantine, dir)
     }
 
     #[test]
     fn a_view_the_app_refuses_is_a_counted_fault_of_the_plugin() {
-        let (s, q) = supervisor();
+        let (s, q, _dir) = supervisor();
         let doc = |title: &str| ViewDoc {
             schema: SCHEMA,
             title: title.into(),
@@ -1089,7 +1090,7 @@ mod tests {
 
     #[test]
     fn a_process_that_ended_by_itself_is_noticed_as_a_crash_when_nothing_is_calling() {
-        let (s, q) = supervisor();
+        let (s, q, _dir) = supervisor();
         // No process: nothing to notice.
         assert_eq!(s.status(), Status::Stopped);
         s.reap();
@@ -1109,7 +1110,7 @@ mod tests {
 
     #[test]
     fn every_ipc_failure_is_a_typed_failure_a_refusal_or_a_counted_fault() {
-        let (s, q) = supervisor();
+        let (s, q, _dir) = supervisor();
         let cancelled = s.classify(IpcError::Remote(RemoteError::new(codes::CANCELLED, "stop")));
         assert_eq!(cancelled, HostError::Cancelled);
         let refused = s.classify(IpcError::Remote(RemoteError::new("x.failed", "no")));
@@ -1164,7 +1165,7 @@ mod tests {
 
     #[test]
     fn a_disabled_plugin_that_was_installed_off_starts_off() {
-        let (s, _q) = supervisor();
+        let (s, _q, _dir) = supervisor();
         s.set_enabled(false);
         assert_eq!(s.status(), Status::Disabled);
         s.set_enabled(false);

@@ -20,10 +20,14 @@ pub struct Record {
     pub target: String,
     /// The runner class.
     pub class: RunnerClass,
-    /// The run (a CI run id, or the local run's token) and the job it came from.
+    /// The nextest filterset the run was narrowed to ([`super::key::normalize_filter`]); empty for a whole-package run. Part of the key.
+    pub filter: String,
+    /// The run (a CI run id, or the local run's token) the record came from.
     pub run: String,
-    /// The CI job id, empty for a local run.
+    /// The CI job's display name (`crate (macos-latest)`), which the reader finds among the run's jobs; empty for a local run.
     pub job: String,
+    /// The run's attempt the job ran in; 0 for a local run.
+    pub attempt: u64,
     /// The ref the run was on (`refs/heads/main`, `refs/heads/train/...`, or a local branch).
     pub git_ref: String,
     /// The commit the run tested.
@@ -41,8 +45,8 @@ pub struct Record {
 impl Record {
     /// The record as its file holds it.
     pub fn json(&self) -> Value {
-        json!({"schema": SCHEMA, "key": self.key, "target": self.target, "class": self.class.0, "verdict": "pass", "run": self.run,
-               "job": self.job, "ref": self.git_ref, "commit": self.commit, "tests": self.tests, "secs": self.secs, "at": self.at,
+        json!({"schema": SCHEMA, "key": self.key, "target": self.target, "class": self.class.0, "verdict": "pass", "filter": self.filter,
+               "run": self.run, "job": self.job, "attempt": self.attempt, "ref": self.git_ref, "commit": self.commit, "tests": self.tests, "secs": self.secs, "at": self.at,
                "os_build": self.os_build})
     }
 
@@ -59,8 +63,10 @@ impl Record {
             key: key.to_string(),
             target: target.to_string(),
             class: class.clone(),
+            filter: s("filter"),
             run: s("run"),
             job: s("job"),
+            attempt: v["attempt"].as_u64().unwrap_or(0),
             git_ref: s("ref"),
             commit: s("commit"),
             tests: v["tests"].as_u64().unwrap_or(0),
@@ -79,7 +85,7 @@ impl Record {
         let job = if self.job.is_empty() {
             String::new()
         } else {
-            format!(" job {}", self.job)
+            format!(" job `{}` attempt {}", self.job, self.attempt)
         };
         format!(
             "test-cache: reused target={}@{} key={} from run {}{job} (commit {}, {} tests, {when})",
