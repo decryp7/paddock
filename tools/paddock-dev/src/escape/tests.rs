@@ -500,6 +500,9 @@ fn a_zip_entry_is_read_stored_or_deflated_and_bounded() {
 
 use paddock_ci_config::yaml::{self, Node};
 
+/// The upload action's prefix: the Gitea fork of v4 (docs/research/2026-11-ci-artifacts-v4.md).
+const UPLOAD_ACTION: &str = "ChristopherHX/gitea-upload-artifact@";
+
 /// What in a workflow gives write access to the repository or pushes a ref: a `contents: write` (or `write-all`) permission at any
 /// level, and a step that runs `git push` or `update-ref` (read through the YAML model, not by a text match, ER-42).
 fn repository_writes(doc: &Node) -> Vec<String> {
@@ -568,13 +571,13 @@ fn the_plan_job_uploads_the_record_as_the_runs_artifact_for_the_retention() {
         .map(Node::items)
         .unwrap_or_default()
         .iter()
-        .filter(|s| s.get_text("uses").is_some_and(|u| u.starts_with("actions/upload-artifact@")))
+        .filter(|s| s.get_text("uses").is_some_and(|u| u.starts_with(UPLOAD_ACTION)))
         .collect();
     assert_eq!(uploads.len(), 1, "the plan job has one upload step");
     let with = uploads[0].get("with").expect("with");
     assert_eq!(with.get_text("name"), Some(ARTIFACT_NAME));
     assert_eq!(with.get_text("retention-days"), Some(RETENTION_DAYS.to_string().as_str()));
-    // The pin is the one the other jobs use (v3: v4 aborts on Gitea; ER-26).
+    // The Gitea fork of the v4 action: the REST API lists only v4 artifacts, and upstream v4 refuses Gitea. One pin in the file (ER-26).
     let pins: std::collections::BTreeSet<&str> = doc
         .get("jobs")
         .map(Node::entries)
@@ -582,7 +585,7 @@ fn the_plan_job_uploads_the_record_as_the_runs_artifact_for_the_retention() {
         .iter()
         .flat_map(|(_, j)| j.get("steps").map(Node::items).unwrap_or_default())
         .filter_map(|s| s.get_text("uses"))
-        .filter(|u| u.starts_with("actions/upload-artifact@"))
+        .filter(|u| u.starts_with(UPLOAD_ACTION))
         .collect();
     assert_eq!(pins.len(), 1, "one pin of upload-artifact: {pins:?}");
     // The file it uploads is the one the plan step writes.
