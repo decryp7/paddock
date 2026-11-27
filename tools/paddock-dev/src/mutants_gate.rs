@@ -356,6 +356,23 @@ fn version_of(text: &str) -> Option<&str> {
     text.split_whitespace().nth(1)
 }
 
+/// The first failing lines of the baseline's log (`FAIL`, `TIMEOUT`, `SIG...` lines of nextest, and its `error` lines), at most ten and
+/// 200 characters each: what a person needs to see why the unmutated tree did not pass, since the scratch folder is gone by then.
+pub fn baseline_failures(log: &str) -> String {
+    let lines: Vec<String> = log
+        .lines()
+        .map(str::trim)
+        .filter(|l| l.starts_with("FAIL ") || l.starts_with("TIMEOUT ") || l.starts_with("SIG") || l.starts_with("error"))
+        .take(10)
+        .map(|l| l.chars().take(200).collect())
+        .collect();
+    if lines.is_empty() {
+        "(none found in the baseline log)".to_string()
+    } else {
+        lines.join(" | ")
+    }
+}
+
 /// The positive control: [`CONTROL_LIB`] must show [`CONTROL_MISSED`] as MISSED and a caught mutant, else the check cannot see
 /// what it is for. `Err` is the cause.
 fn control(tool: &dyn Tool, scratch: &Path) -> Result<(), String> {
@@ -532,8 +549,9 @@ pub fn measure(tool: &dyn Tool, root: &Path, head: &str, base: &str, shard: Opti
         };
         if o.baseline != Baseline::Passed {
             s.not_measured.push(format!(
-                "{ws}: the tests of the unmutated tree did not pass (baseline {:?}), so no mutant's verdict means anything; fix the tests, then re-run `./dev mutants gate`",
-                o.baseline
+                "{ws}: the tests of the unmutated tree did not pass (baseline {:?}), so no mutant's verdict means anything; fix the tests, then re-run `./dev mutants gate`. First failures: {}",
+                o.baseline,
+                baseline_failures(&std::fs::read_to_string(out.join("mutants.out/log/baseline.log")).unwrap_or_default())
             ));
             continue;
         }
@@ -1031,6 +1049,15 @@ mod tests {
         );
         assert_eq!((s.tested, s.over_cap), (0, MAX_PER_SHARD + 1), "{:?}", s.lines);
         assert!(s.lines.iter().any(|l| l.contains("plan more shards")), "{:?}", s.lines);
+    }
+
+    #[test]
+    fn the_baseline_failures_are_the_first_failing_lines_of_its_log() {
+        let log = "   Compiling x\n        PASS [ 1s] a::b\n        FAIL [ 2s] a::c\nerror: test run failed\n";
+        assert_eq!(baseline_failures(log), "FAIL [ 2s] a::c | error: test run failed");
+        assert_eq!(baseline_failures("all fine\n"), "(none found in the baseline log)");
+        let many: String = (0..30).map(|i| format!("FAIL [ 1s] t{i}\n")).collect();
+        assert_eq!(baseline_failures(&many).matches(" | ").count(), 9, "at most ten");
     }
 
     #[test]
