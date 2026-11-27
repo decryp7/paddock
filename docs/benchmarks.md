@@ -3199,6 +3199,24 @@ the union of every merge's; `--heavy-generators` runs them per merge. Fast gener
 Not measured: the final gen check on a whole train (it runs what the per-merge steps ran before, once).
 
 
+## Mutation testing of the diff in the member gate (2026-11-27, feat/member-gate-mutants, base 7da64dedb)
+
+ER-12, ER-36, user decision 127, a Mac with 14 cores at a 15-minute load of 10 to 17. The `mutants` row runs cargo-mutants 27.1.0 `--in-diff` (nextest `ci`
+profile, `--in-place` in a scratch checkout of the committed head) over the Rust functions changed in `tools/paddock-dev` and `crates/`
+(`./dev mutants gate --base <merge base>`, `mutants_gate.rs`). **Measured** on the members of train y, each run at the member's merged commit against its
+first parent, report-only: (a) `refactor/test-cache-outcome-type` (1229b913b, `tools/paddock-dev/src/test_cache`): 20 mutants listed. The unmutated
+build took 51 s and the package's tests 170 s; each mutant took 8 s of build and about 150 s of tests (about 2.7 minutes). The run was cut by the first
+run limit (3300 s) after 20 verdicts: 16 caught, 2 MISSED, 2 unviable, 0 timeouts. Missed: `test_cache/cmd.rs:333` `replace == with != in run` and
+`cmd.rs:369` `replace match guard nightly with true in run`. (b) `test/proc-state-waits` (7f00c206c, `crates`): 18 listed, 9 run (the cap's slice), 115 s
+in all: 4 caught, 2 MISSED, 3 unviable, 0 timeouts. Missed: `paddock-proc/src/statewait.rs:49` `replace * with / in wait_state` and
+`paddock-chromium/src/launch/tests.rs:247` `replace started_in_the_background_end with ()`. (c) `fix/gate-row-stall` (33d79dc62, `pre_push/budget.rs` and
+`exec.rs`): 23 listed, 12 run, 3162 s (queued 359 s before): 12 caught, 0 MISSED, 0 timeouts. **Choices:** the per-mutant hang detector is 900 s (six
+times the longest measured test run, a hang detector and no speed limit); the cap is 12 mutants, one slice `--shard 0/ceil(n/12)` of consecutive mutants
+(the rest is counted "not measured", never a pass), because 12 mutants in `tools/paddock-dev` took 53 minutes against the 60-minute row cap of a push step;
+`crates` mutants are cheap (13 s). **Why in place:** cargo-mutants' default copy of one workspace folder cannot run `tools/paddock-dev`'s tests: they read the
+repository around it and its dev-dependencies' `../../crates` paths are not rewritten (the baseline failed in 6 s). Limits: three diffs, one run each,
+a busy machine (queue time excluded); the findings were read from the run's own output and not yet judged one by one for true positives.
+
 ## Push gate hang limits of the long rows (2026-11-27, fix/gate-row-stall)
 
 ER-12, ER-36, a Mac with 14 cores. When the local sccache server hung on 2026-11-27 a gate row sat idle until the 60-minute row cap: the rows had
