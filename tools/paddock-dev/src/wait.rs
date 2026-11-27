@@ -466,6 +466,11 @@ pub trait Http {
         let _ = (url, token);
         Err("this reader fetches JSON only".into())
     }
+    /// Fetches `url` as bytes, at most `max_bytes` (an artifact's zip); errors are texts without the token.
+    fn get_bytes(&mut self, url: &str, token: &str, max_bytes: u64) -> Result<Vec<u8>, String> {
+        let _ = (url, token, max_bytes);
+        Err("this reader fetches JSON only".into())
+    }
     /// Sends `body` (or nothing) with `method` (`POST`, `PUT`, `PATCH`, `DELETE`) and returns the JSON answer (`null` for an
     /// empty one); errors are texts without the token. Only writers (`./dev pr`) use it.
     fn send_json(&mut self, method: &str, url: &str, token: &str, body: Option<&Value>) -> Result<Value, String> {
@@ -618,6 +623,10 @@ impl Http for CurlHttp {
         // A job log is a few MB; 64 MiB bounds a runaway one.
         let body = CurlHttp::get(url, token, "text/plain", 64 << 20, 120)?;
         Ok(String::from_utf8_lossy(&body).into_owned())
+    }
+
+    fn get_bytes(&mut self, url: &str, token: &str, max_bytes: u64) -> Result<Vec<u8>, String> {
+        CurlHttp::get(url, token, "application/zip", max_bytes, 120)
     }
 
     fn send_json(&mut self, method: &str, url: &str, token: &str, body: Option<&Value>) -> Result<Value, String> {

@@ -205,12 +205,26 @@ jobs:
           PLAN_REUSE: ${{ steps.reuse.outputs.reuse }}
           # The test-result cache's plan (ADR 0116): read when the file is there.
           PLAN_TEST_CACHE_FILE: ${{ runner.temp }}/test-cache-plan.json
+          # The selection record (ADR 0117 D13 amendment): the plan writes it here and the next step uploads it as this run's artifact.
+          PLAN_RECORD_FILE: ${{ runner.temp }}/plan-record/record.json
           EVENT: ${{ github.event_name }}
         run: |
           ./dev plan --ci
           # A smoke or affected-only selection (the graph planner's `partial`) is never a full run; the mode line says so (P2-4).
           if grep -q '^partial=true$' "$GITHUB_OUTPUT"; then PLAN_MODE_FULL=false; fi
           echo "plan mode: full=$PLAN_MODE_FULL"
+
+      # The escape monitor's record of this plan (ADR 0117 §8, D13 amended 2026-11-27): an artifact of this run, so this workflow writes
+      # nothing to the repository (`permissions: contents: read`). The nightly reads it through the Actions API. v3 (v4 aborts on
+      # Gitea). `retention-days` is escape::RETENTION_DAYS (a paddock-dev test ties them). A missing file is a warning: the commit is
+      # then `not measured` at night, never clean.
+      - name: Save the selection record
+        uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v3
+        with:
+          name: plan-record
+          path: ${{ runner.temp }}/plan-record/record.json
+          retention-days: 14
+          if-no-files-found: warn
 
   # The developer and CI tool (ADR 0022): its own Cargo workspace and lockfile, tested on every OS it runs on. Linux runs in the
   # paddock-ci image (git, Node for the golden test's live oracle, nextest); Windows and macOS run on the host.

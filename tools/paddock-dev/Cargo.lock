@@ -2254,11 +2254,11 @@ dependencies = [
 name = "paddock-dev"
 version = "0.1.0"
 dependencies = [
- "base64",
  "clap",
  "ctrlc",
  "jiff",
  "libc",
+ "miniz_oxide",
  "oxc_allocator",
  "oxc_ast",
  "oxc_ast_visit",
