@@ -661,3 +661,40 @@ fn guard_config_reader() {
         ]
     );
 }
+
+// A participant that speaks for itself (the shim) takes the wait as a value, so it never reads the wording of the line (ER-42).
+#[test]
+fn a_wait_is_also_told_as_a_typed_note_to_the_hook() {
+    let rig = Rig::new();
+    let (h, mut w) = (rig.agent(11), rig.agent(12));
+    let notes = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let sink = std::sync::Arc::clone(&notes);
+    w.h.wait_hook = Some(std::sync::Arc::new(
+        move |n: &paddock_throttle::lock::WaitNote| {
+            sink.lock().unwrap().push(n.clone());
+        },
+    ));
+    let mut holder = Acquirer::new(&h.h, req("Holder")).unwrap();
+    assert_eq!(holder.poll(), Poll::Held);
+    let mut waiter = Acquirer::new(&w.h, req("Waiter")).unwrap();
+    for _ in 0..8 {
+        assert_eq!(waiter.poll(), Poll::Waiting);
+        rig.clock.advance(std::time::Duration::from_millis(300));
+    }
+    let got = notes.lock().unwrap().clone();
+    assert!(
+        !got.is_empty(),
+        "the wait line was said, so the hook was told"
+    );
+    assert_eq!(got[0].who, "Waiter");
+    assert!(got[0].cause.contains("held by Holder"), "{got:?}");
+    // The note and the line are one event: every note has its line.
+    assert_eq!(
+        got.len(),
+        w.said()
+            .lines()
+            .filter(|l| l.contains("Waiter waiting"))
+            .count()
+    );
+    holder.release();
+}

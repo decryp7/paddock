@@ -291,3 +291,28 @@ fn the_installer_never_replaces_a_file_it_did_not_write() {
         String::from_utf8_lossy(&again.stdout)
     );
 }
+
+// ER-42: the shim says a wait in its own words, built from the typed note. If throttle's wording changes the shim still speaks; if the
+// typed path breaks (the filter that read the text broke the same way) this fails.
+#[test]
+fn a_shim_that_waits_for_a_slot_says_so_in_its_own_words() {
+    use std::io::{BufRead, BufReader};
+    let r = rig();
+    let (flag, out) = (r.w.flag(), r.w.path("out"));
+    let hold = heavy_env(&r.w, &hold_args("H", flag.to_str().unwrap(), out.to_str().unwrap()), &[]);
+    wait_until("H holds the slot", || r.w.locked());
+    let mut g = r.start(&["build"], &[]);
+    let stderr = g.child.stderr.take().unwrap();
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        for l in BufReader::new(stderr).lines().map_while(Result::ok) {
+            let _ = tx.send(l);
+        }
+    });
+    let line = rx.recv_timeout(DEADLINE).expect("the shim says that it waits");
+    assert!(line.starts_with("paddock-shim: cargo is waiting for a slot ("), "{line}");
+    assert!(line.contains("held by H"), "the cause comes from the note: {line}");
+    r.w.release();
+    assert!(g.finish().success());
+    drop(hold);
+}
