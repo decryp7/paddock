@@ -1397,7 +1397,7 @@ status = "built"
   note = "The guard hooks' copy (dev_targets_of, dev_targets, main_checkout): Python, because the hooks run before any binary is built; scripts call `./dev places` instead. .claude/hooks/paddockpaths-parity.test.sh runs both on one table (named, root-level, relative, `..`, blank and whitespace values). Goes when the guards move onto `./dev hook pre-tool-use` (ADR 0083)."
 
   [[mechanism.copy]]
-  paths = ["crates/paddock-throttle/src/capture.rs", "tools/throttle/src/main.rs"]
+  paths = ["crates/paddock-throttle/src/capture.rs", "crates/paddock-throttle/src/boot.rs"]
   symbols = ["text:dev_targets_of", "text:PADDOCK_DEV_TARGETS", "text:paddock.worktreeRoot"]
   owner = "paddock"
   delete_by = "v0.5.0"

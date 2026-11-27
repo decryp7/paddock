@@ -50,10 +50,15 @@ pub const HELD_VAR: &str = "THROTTLE_HELD";
 /// The holder a `THROTTLE_HELD` value names, when that process is still alive: `Some(text)` to run inside its slot, `None` to queue as
 /// usual (no marker, a malformed one, or a holder that is gone: a marker left in a shell that outlived its run).
 pub fn held_by(h: &Throttle, value: Option<&str>) -> Option<String> {
+    held_by_procs(h.procs.as_ref(), value)
+}
+
+/// [`held_by`] over a process table alone: for a caller that decides before it has booted a [`Throttle`] (the shim's nested pass-through).
+pub fn held_by_procs(procs: &dyn crate::procs::Procs, value: Option<&str>) -> Option<String> {
     let v = value?.trim();
     let (_, pid) = v.rsplit_once(':')?;
     let pid: u32 = pid.parse().ok()?;
-    crate::procs::pid_alive(h.procs.as_ref(), pid, None).then(|| v.to_string())
+    crate::procs::pid_alive(procs, pid, None).then(|| v.to_string())
 }
 
 /// A run inside the slot an ancestor holds ([`HELD_VAR`]): no ticket, no queue, no load gate; the command runs with the same run
@@ -142,23 +147,28 @@ fn ms(a: Instant) -> u64 {
     u64::try_from(a.elapsed().as_millis()).unwrap_or(u64::MAX)
 }
 
-/// Runs `args` under the lock. Returns the exit code.
-pub fn run(h: &Throttle, req: Request, args: &[String], opts: RunOpts, stop: Stop<'_>) -> i32 {
+/// A slot taken: the holder's handle and what the wait cost.
+pub struct Admitted<'a> {
+    /// The slot, held until released or dropped.
+    pub acq: Acquirer<'a>,
+    /// Seconds from the first ticket to the slot (queue and load gate).
+    pub queued: f64,
+    /// Whole seconds waited, as the lines say it.
+    pub waited: u64,
+    /// Epoch second the slot was taken.
+    pub held_from: u64,
+}
+
+/// Admission of one run: a ticket, the queue, the load gate and the slot, with every wait timed and logged and the queue limit, the queue
+/// stall, a stop request and a lock that cannot be taken ending it with the exit code to leave with. The run itself ([`run`]) and a
+/// participant that supervises its own command (the shim) both take their slot through it, so the rules are written once (ER-22).
+pub fn admit<'a>(
+    h: &'a Throttle,
+    req: &Request,
+    opts: &RunOpts,
+    stop: Stop<'_>,
+) -> Result<Admitted<'a>, i32> {
     let name = req.name.clone();
-    h.log.info(
-        "throttle.run",
-        "run starts",
-        &[
-            ("Agent", json!(name)),
-            ("Command", json!(req.cmdline)),
-            ("Cwd", json!(req.cwd)),
-            ("High", json!(req.high)),
-            ("Gate", json!(opts.gate)),
-            ("GateLoad", json!(h.cfg.gate_load)),
-            ("Slots", json!(h.cfg.slots)),
-            ("Root", json!(h.cfg.root.to_string_lossy())),
-        ],
-    );
     let mut acq = match Acquirer::new(h, req.clone()) {
         Ok(a) => a,
         Err(e) => {
@@ -171,7 +181,7 @@ pub fn run(h: &Throttle, req: Request, args: &[String], opts: RunOpts, stop: Sto
                 &e,
                 &format!("make {} writable or set THROTTLE_DIR", h.cfg.root.display()),
             );
-            return exit::LOCK_NOT_TAKEN;
+            return Err(exit::LOCK_NOT_TAKEN);
         }
     };
     let q0 = h.clock.now_micros();
@@ -259,7 +269,7 @@ pub fn run(h: &Throttle, req: Request, args: &[String], opts: RunOpts, stop: Sto
     let mut gate_waited = Duration::ZERO;
     loop {
         if over_queue_limit() {
-            return queue_limit("taken");
+            return Err(queue_limit("taken"));
         }
         if let Some(code) = stop() {
             h.log.warn(
@@ -273,7 +283,7 @@ pub fn run(h: &Throttle, req: Request, args: &[String], opts: RunOpts, stop: Sto
                 "stopped by a signal while waiting for the lock",
                 "run it again when you want the step",
             );
-            return code;
+            return Err(code);
         }
         if gate_on && let Some(msg) = h.gate_closed() {
             gate_wait_start.get_or_insert_with(Instant::now);
@@ -281,7 +291,7 @@ pub fn run(h: &Throttle, req: Request, args: &[String], opts: RunOpts, stop: Sto
                 let view = acq.queue_view(opts.run_max);
                 if let Some(quiet) = sc.observe(&view, h.clock.now_micros()) {
                     acq.release();
-                    return queue_stalled(quiet, &format!("the load gate ({msg})"));
+                    return Err(queue_stalled(quiet, &format!("the load gate ({msg})")));
                 }
             }
             if !gate_logged {
@@ -297,8 +307,7 @@ pub fn run(h: &Throttle, req: Request, args: &[String], opts: RunOpts, stop: Sto
             }
             if h.now().saturating_sub(gate_said) as f64 >= h.cfg.wait_log.as_secs_f64() {
                 let w = h.now().saturating_sub(acq.t0());
-                (h.say)(&format!("{name} waiting {w}s: {msg}"));
-                h.alog(&format!("{name} waiting {w}s: {msg}"));
+                h.note_wait(&name, w, &msg);
                 h.log.info(
                     "throttle.gate",
                     &format!("still waiting: {msg}"),
@@ -320,7 +329,7 @@ pub fn run(h: &Throttle, req: Request, args: &[String], opts: RunOpts, stop: Sto
                     "stopped by a signal at the load gate",
                     "run it again when the load is lower",
                 );
-                return code;
+                return Err(code);
             }
             continue;
         }
@@ -362,13 +371,13 @@ pub fn run(h: &Throttle, req: Request, args: &[String], opts: RunOpts, stop: Sto
                         h.cfg.root.display()
                     ),
                 );
-                return exit::LOCK_NOT_TAKEN;
+                return Err(exit::LOCK_NOT_TAKEN);
             }
             Poll::Waiting => {
                 if let Some(sc) = stall.as_mut() {
                     let view = acq.queue_view(opts.run_max);
                     if let Some(quiet) = sc.observe(&view, h.clock.now_micros()) {
-                        return queue_stalled(quiet, &view.holders_text());
+                        return Err(queue_stalled(quiet, &view.holders_text()));
                     }
                 }
                 if !h.nap(h.cfg.poll, &|| stop().is_some()) {
@@ -384,7 +393,7 @@ pub fn run(h: &Throttle, req: Request, args: &[String], opts: RunOpts, stop: Sto
                         "stopped by a signal while waiting for the lock",
                         "run it again when you want the step",
                     );
-                    return code;
+                    return Err(code);
                 }
             }
         }
@@ -407,9 +416,44 @@ pub fn run(h: &Throttle, req: Request, args: &[String], opts: RunOpts, stop: Sto
     if over_queue_limit() {
         // The slot came, but only after the limit (the load gate took the time): the limit is about waiting, not about running.
         acq.release();
-        return queue_limit("taken before the load gate opened");
+        return Err(queue_limit("taken before the load gate opened"));
     }
     let queued = queued_secs();
+    Ok(Admitted {
+        acq,
+        queued,
+        waited,
+        held_from: t1,
+    })
+}
+
+/// Runs `args` under the lock. Returns the exit code.
+pub fn run(h: &Throttle, req: Request, args: &[String], opts: RunOpts, stop: Stop<'_>) -> i32 {
+    let name = req.name.clone();
+    h.log.info(
+        "throttle.run",
+        "run starts",
+        &[
+            ("Agent", json!(name)),
+            ("Command", json!(req.cmdline)),
+            ("Cwd", json!(req.cwd)),
+            ("High", json!(req.high)),
+            ("Gate", json!(opts.gate)),
+            ("GateLoad", json!(h.cfg.gate_load)),
+            ("Slots", json!(h.cfg.slots)),
+            ("Root", json!(h.cfg.root.to_string_lossy())),
+        ],
+    );
+    let Admitted {
+        mut acq,
+        queued,
+        waited,
+        held_from: t1,
+    } = match admit(h, &req, &opts, stop) {
+        Ok(a) => a,
+        Err(code) => return code,
+    };
+    let timing = |q: f64, r: f64| (h.say)(&format!("{name} timing queued {q:.1} s, ran {r:.1} s"));
 
     let t2 = h.now();
     let run_log = open_run_log(h, &name, args);

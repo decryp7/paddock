@@ -19,6 +19,12 @@ pub enum Cli {
         /// Withdraw the marker instead.
         remove: bool,
     },
+    /// `shims install <dir>`: write the shim links (`cargo`, `npm`, ... as this program) into `<dir>` (paddock-shim). The parser only reads
+    /// it; the program that has the shim crate does the work.
+    ShimsInstall {
+        /// The folder to write the links into.
+        dir: String,
+    },
     /// `--help`.
     Help,
     /// `--version`.
@@ -57,7 +63,7 @@ pub struct RunArgs {
 }
 
 /// Usage text.
-pub const USAGE: &str = "usage: throttle run [--high] [--no-gate] [--low] [--gate-load N] [--slots N] [--queue-max S] [--queue-stall S] [--run-max S] [--stall S] [--verbose] [--log-file FILE] <agent-name> -- <command...>\n       throttle status\n       throttle dir   (print the lock folder: THROTTLE_DIR, else config.toml `dir`, else the per-user state folder)\n       throttle mark [--remove] ci-<name> --pid P   (a CI job on this host: normal runs yield while it lives, up to THROTTLE_CI_MAX)\nExit codes: the command's own; 64 usage, 75 lock not taken, 78 refused (home guard), 79 queue limit or stalled queue, 80 run limit, 81 hung (--stall), 126/127 cannot run it, 129/130/143 stopped by a signal.\n";
+pub const USAGE: &str = "usage: throttle run [--high] [--no-gate] [--low] [--gate-load N] [--slots N] [--queue-max S] [--queue-stall S] [--run-max S] [--stall S] [--verbose] [--log-file FILE] <agent-name> -- <command...>\n       throttle status\n       throttle dir   (print the lock folder: THROTTLE_DIR, else config.toml `dir`, else the per-user state folder)\n       throttle mark [--remove] ci-<name> --pid P   (a CI job on this host: normal runs yield while it lives, up to THROTTLE_CI_MAX)\n       throttle shims install <dir>   (links named cargo, npm, npx, node, playwright, ng that run those tools through a slot; put <dir> first on PATH to use them)\nExit codes: the command's own; 64 usage, 75 lock not taken, 78 refused (home guard), 79 queue limit or stalled queue, 80 run limit, 81 hung (--stall), 126/127 cannot run it, 129/130/143 stopped by a signal.\n";
 
 /// Parses the arguments after the program name. Err is the message to print (exit 64).
 pub fn parse(args: &[String]) -> Result<Cli, String> {
@@ -134,6 +140,12 @@ pub fn parse(args: &[String]) -> Result<Cli, String> {
             }
             Ok(Cli::Run(r))
         }
+        Some("shims") => match (it.next().map(String::as_str), it.next(), it.next()) {
+            (Some("install"), Some(dir), None) if !dir.starts_with("--") => {
+                Ok(Cli::ShimsInstall { dir: dir.clone() })
+            }
+            _ => Err("usage: shims install <dir>".into()),
+        },
         Some("mark") => {
             let (mut remove, mut pid, mut name) = (false, None, None);
             while let Some(a) = it.next() {
@@ -162,7 +174,7 @@ pub fn parse(args: &[String]) -> Result<Cli, String> {
                 remove,
             })
         }
-        _ => Err("expected run, status or mark".into()),
+        _ => Err("expected run, status, mark or shims".into()),
     }
 }
 
@@ -195,6 +207,20 @@ mod tests {
         assert!(p("mark agent --pid 77").unwrap_err().contains("ci-"));
         assert!(p("mark ci-s2").unwrap_err().contains("--pid"));
         assert!(p("mark ci-s2 --pid x").is_err());
+    }
+
+    #[test]
+    fn shims_install_takes_exactly_one_folder() {
+        assert_eq!(
+            p("shims install /x/shims"),
+            Ok(Cli::ShimsInstall {
+                dir: "/x/shims".into()
+            })
+        );
+        assert!(p("shims install").is_err());
+        assert!(p("shims install a b").is_err());
+        assert!(p("shims remove a").is_err());
+        assert!(p("shims").is_err());
     }
 
     #[test]
