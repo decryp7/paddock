@@ -316,3 +316,27 @@ fn a_shim_that_waits_for_a_slot_says_so_in_its_own_words() {
     assert!(g.finish().success());
     drop(hold);
 }
+
+// ER-33 positive controls. The stall test and the SIGKILL test each assert something that could be blind; these show the same rigs can
+// see the opposite, so a green result means something.
+#[test]
+fn control_with_the_detector_off_the_same_quiet_tool_is_not_reported() {
+    let r = rig();
+    let (code, _, err) = r.run(&["slow"], &[("PADDOCK_SHIM_STALL", "0"), ("STAND_SLEEP", "4")]);
+    assert_eq!(code, 0, "{err}");
+    assert!(!err.contains("may be stuck"), "{err}");
+    assert!(!r.run_log().contains("shim-stall"), "{}", r.run_log());
+}
+
+#[test]
+fn control_the_slot_probe_sees_a_slot_that_is_held_and_one_that_is_not() {
+    let r = rig();
+    let lock = r.slot_lock();
+    let held = paddock_throttle::slotfile::take(&lock).unwrap().expect("free");
+    assert!(paddock_throttle::slotfile::is_held(&lock).unwrap(), "a held lock reads as held");
+    drop(held);
+    assert!(
+        !paddock_throttle::slotfile::is_held(&lock).unwrap(),
+        "a released lock reads as free"
+    );
+}
