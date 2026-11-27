@@ -561,7 +561,7 @@ impl Sim {
                 m.clone(),
                 Some(m),
                 None,
-                PathBuf::from("/model-lock-folder"),
+                std::env::temp_dir().join("model-lock-folder"),
             )
         };
         Sim {
