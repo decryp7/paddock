@@ -27,6 +27,7 @@
 //! This crate owns real time for tests, as `paddock_testkit::wait` does (conformance C71 skips both). It is its own crate
 //! because `paddock-proc`'s tests use `paddock-testkit`: the kit depending on `paddock-proc` made a publish cycle (ci.yml 7989).
 
+pub use paddock_proc::statewait::{state_after, still_running_after, wait_exited, wait_state};
 use paddock_proc::{
     ExitInfo, Liveness, Pace, Patience, Presence, ProcessId, RunState, StallCause, StartProbe,
     StartState, StartWatch, Watched,
@@ -425,6 +426,10 @@ fn state_of<S: Started>(child: &mut S, id: Option<ProcessId>) -> &'static str {
     if matches!(child.liveness(), Liveness::Exited(_)) {
         return "gone";
     }
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the diagnosis of a hang reads the state once, for its message; no verdict rests on it"
+    )]
     match id.map(paddock_proc::run_state) {
         Some(RunState::Stopped) => "stopped (paused by a signal or the OS)",
         Some(RunState::Running) => "alive",
