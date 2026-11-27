@@ -3,6 +3,7 @@
 //! the default port is never stopped: only CI's own server, whose port setup-rust sets (`SCCACHE_SERVER_PORT`).
 //!
 //! A job whose cache missed everywhere gets one `::warning::` ([`miss_warning`]; report-only until [`MISS_WARNING_REVIEW_BY`]).
+//! A job on a kept build folder whose few executed requests all missed gets one `::notice::` ([`warm_label`]): its 0% is not a fault.
 //!
 //! sccache gets `SCCACHE_*` only (the server's port and settings), never the job's tokens ([`ToolCall`]). Never fails the job.
 
