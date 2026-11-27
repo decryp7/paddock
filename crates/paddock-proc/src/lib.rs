@@ -74,6 +74,8 @@ pub mod self_test;
 mod session;
 mod stall;
 mod start;
+#[cfg(any(test, feature = "test-support"))]
+pub mod statewait;
 mod supervised;
 mod sys;
 mod tree;
