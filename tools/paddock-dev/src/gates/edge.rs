@@ -456,7 +456,14 @@ mod tests {
         use crate::gates::register::date_history;
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
-        let init = ["-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false"];
+        let init = [
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+        ];
         let git_c = |args: &[&str]| git(root, &[&init[..], args].concat());
         let write = |text: String| {
             std::fs::create_dir_all(root.join("docs")).unwrap();
@@ -469,9 +476,19 @@ mod tests {
         // three moves, each with the approval line written another way: inside prose, as the subject, and as a real trailer
         let t = |old: &str, new: &str| format!("Gates-date: X {old} -> {new}; approved: user");
         let moves = [
-            ("2026-12-06", "2026-12-07", "docs: one".to_string(), format!("The line {} is how a move is approved.", t("2026-12-06", "2026-12-07"))),
+            (
+                "2026-12-06",
+                "2026-12-07",
+                "docs: one".to_string(),
+                format!("The line {} is how a move is approved.", t("2026-12-06", "2026-12-07")),
+            ),
             ("2026-12-07", "2026-12-08", t("2026-12-07", "2026-12-08"), String::new()),
-            ("2026-12-08", "2026-12-09", "docs: three".to_string(), format!("why\n\n{}", t("2026-12-08", "2026-12-09"))),
+            (
+                "2026-12-08",
+                "2026-12-09",
+                "docs: three".to_string(),
+                format!("why\n\n{}", t("2026-12-08", "2026-12-09")),
+            ),
         ];
         for (_, new, subject, body) in &moves {
             write(entry(new));
@@ -479,10 +496,18 @@ mod tests {
         }
         let h = register_history(root, "main").unwrap();
         let problems = date_history(&h);
-        let flagged: Vec<&str> = h.iter().map(|v| v.sha.as_str()).filter(|sha| problems.iter().any(|p| p.message.contains(&sha[..9]))).collect();
+        let flagged: Vec<&str> = h
+            .iter()
+            .map(|v| v.sha.as_str())
+            .filter(|sha| problems.iter().any(|p| p.message.contains(&sha[..9])))
+            .collect();
         let shas = Real.run("git", &["log", "--reverse", "--format=%H"], root, None).unwrap();
         let shas: Vec<&str> = shas.lines().collect();
-        assert_eq!(flagged, [shas[1], shas[2]], "prose and subject approve nothing, the real trailer does: {problems:?}");
+        assert_eq!(
+            flagged,
+            [shas[1], shas[2]],
+            "prose and subject approve nothing, the real trailer does: {problems:?}"
+        );
     }
 
     #[test]
@@ -490,7 +515,14 @@ mod tests {
         use crate::gates::register::date_history;
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
-        let init = ["-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false"];
+        let init = [
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+        ];
         let git_c = |args: &[&str]| git(root, &[&init[..], args].concat());
         let write = |text: String| {
             std::fs::create_dir_all(root.join("docs")).unwrap();
@@ -505,7 +537,11 @@ mod tests {
         git_c(&["commit", "-q", "-am", "docs: re-plan"]);
         let h = register_history(root, "main").unwrap();
         assert_eq!(h.last().map(|v| v.sha.as_str()), Some("HEAD"), "{h:?}");
-        assert!(date_history(&h).iter().any(|p| p.message.contains("without a `Gates-date:")), "{:?}", date_history(&h));
+        assert!(
+            date_history(&h).iter().any(|p| p.message.contains("without a `Gates-date:")),
+            "{:?}",
+            date_history(&h)
+        );
     }
 
     #[test]
@@ -614,7 +650,11 @@ mod tests {
         assert_eq!(h[0].text, "version = 1\n# base\n");
         assert_eq!(h[1].sha, "HEAD");
         // git's own trailer parser gives the trailers (ER-42), never the prose of the messages
-        assert!(h[1].trailers.contains("Gates-date: x 2026-01-01") && !h[1].trailers.contains("first move"), "{:?}", h[1].trailers);
+        assert!(
+            h[1].trailers.contains("Gates-date: x 2026-01-01") && !h[1].trailers.contains("first move"),
+            "{:?}",
+            h[1].trailers
+        );
         // a branch that creates the register has no history to judge
         assert!(register_history(root, "nope").is_err() || register_history(root, "nope").unwrap().is_empty());
     }

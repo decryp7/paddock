@@ -310,10 +310,20 @@ fn the_stage_is_the_explicit_variable_else_the_ref_else_landing() {
     assert_eq!(stage(&[(STAGE_FROM_REF_ENV, "refs/heads/train/x")]), Ok(Stage::MemberGate));
     assert_eq!(stage(&[(STAGE_FROM_REF_ENV, "refs/heads/trial/x")]), Ok(Stage::MemberGate));
     assert_eq!(stage(&[(STAGE_FROM_REF_ENV, "refs/heads/main")]), Ok(Stage::Landing));
-    assert_eq!(stage(&[(STAGE_FROM_REF_ENV, "")]), Ok(Stage::Landing), "an empty ref (a skipped expression) is landing");
+    assert_eq!(
+        stage(&[(STAGE_FROM_REF_ENV, "")]),
+        Ok(Stage::Landing),
+        "an empty ref (a skipped expression) is landing"
+    );
     // the explicit name wins over the ref, either way
-    assert_eq!(stage(&[(STAGE_ENV, "branch-push"), (STAGE_FROM_REF_ENV, "refs/heads/main")]), Ok(Stage::BranchPush));
-    assert_eq!(stage(&[(STAGE_ENV, "landing"), (STAGE_FROM_REF_ENV, "refs/heads/train/x")]), Ok(Stage::Landing));
+    assert_eq!(
+        stage(&[(STAGE_ENV, "branch-push"), (STAGE_FROM_REF_ENV, "refs/heads/main")]),
+        Ok(Stage::BranchPush)
+    );
+    assert_eq!(
+        stage(&[(STAGE_ENV, "landing"), (STAGE_FROM_REF_ENV, "refs/heads/train/x")]),
+        Ok(Stage::Landing)
+    );
     // a name that is no stage is an error, never a default, even beside a ref
     let e = stage(&[(STAGE_ENV, "nonsense"), (STAGE_FROM_REF_ENV, "refs/heads/main")]).unwrap_err();
     assert!(e.contains(STAGE_ENV) && e.contains("nonsense"), "{e}");

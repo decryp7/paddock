@@ -1024,7 +1024,12 @@ approved = "user"
     fn version(sha: &str, message: &str, text: &str) -> Version {
         Version {
             sha: sha.into(),
-            trailers: message.lines().skip(1).filter(|l| l.starts_with("Gates-date: ")).collect::<Vec<_>>().join("\n"),
+            trailers: message
+                .lines()
+                .skip(1)
+                .filter(|l| l.starts_with("Gates-date: "))
+                .collect::<Vec<_>>()
+                .join("\n"),
             text: text.into(),
         }
     }
@@ -1237,7 +1242,13 @@ approved = "user"
         let line = "Gates-date: C13 2026-12-06 -> 2026-12-20; approved: coordinator";
         assert!(date_history(&[version("a1", "x", GOOD), version("b2", &format!("x\n\n{line}"), &a)]).is_empty());
         assert!(!date_history(&[version("a1", "x", GOOD), version("b2", &format!("x\n\n{line} maybe"), &a)]).is_empty());
-        assert!(!date_history(&[version("a1", "x", GOOD), version("b2", "x\n\nGates-date: C13 2026-12-06 -> 2026-12-20; approved: nobody", &a)]).is_empty());
+        assert!(
+            !date_history(&[
+                version("a1", "x", GOOD),
+                version("b2", "x\n\nGates-date: C13 2026-12-06 -> 2026-12-20; approved: nobody", &a)
+            ])
+            .is_empty()
+        );
     }
 
     #[test]

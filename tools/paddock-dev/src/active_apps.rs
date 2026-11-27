@@ -297,7 +297,11 @@ mod tests {
             let e = ActiveApps::parse(&TEXT.replace("by = \"user\"", &format!("by = \"{who}\""))).unwrap_err();
             assert!(e.contains(want), "{who:?}: {e}");
         }
-        assert!(ActiveApps::parse(&TEXT.replace("by = \"user\"\n", "")).unwrap_err().contains("`by`"));
+        assert!(
+            ActiveApps::parse(&TEXT.replace("by = \"user\"\n", ""))
+                .unwrap_err()
+                .contains("`by`")
+        );
     }
 
     #[test]
