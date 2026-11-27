@@ -445,32 +445,9 @@ pub fn run(
         }
     }
     if !is_train(&req.git_ref) {
-        let before = clock.elapsed();
-        let mut client = Client::new(http, server, repo, token);
-        client.backoff_ms = 0;
-        let mut probe = TrainFirstProbe {
-            client: &mut client,
-            workflow: req.workflow.clone(),
-        };
-        match wait_held(&mut probe, health.as_deref_mut(), clock, req.max, req.interval, log) {
-            // The wait's own time (the clock also counts a health hold before it); a class wait below reports the clock's total.
-            Outcome::Done { .. } => waited = clock.elapsed() - before,
-            Outcome::TimedOut { .. } if health.as_deref().is_some_and(|h| !h.down_now().is_empty()) => {
-                return Ok(service_down(&req.workflow, health.as_deref(), req.max, log));
-            }
-            Outcome::TimedOut { last, max } => {
-                let _ = writeln!(
-                    log,
-                    "::error::dispatch: not dispatching {} on {}: {last} after {} (--max). Next: {}.",
-                    req.workflow,
-                    req.git_ref,
-                    fmt_duration(max),
-                    probe.next_step()
-                );
-                return Ok(Dispatched::StillBusy { last });
-            }
-            Outcome::Broken { error, .. } => return Err(format!("the run list could not be read: {error}")),
-            Outcome::Failed { detail, .. } => return Err(detail),
+        match yield_to_trains(http, target, req, clock, log, health.as_deref_mut())? {
+            Ok(yielded) => waited = yielded,
+            Err(ended) => return Ok(ended),
         }
     }
     if wanted.is_empty() {
@@ -570,6 +547,47 @@ pub fn run(
         }
     }
     send(http, target, req, waited, log)
+}
+
+/// Waits while a `train/*` run of `req.workflow` is queued or running ([`TrainFirstProbe`]). `Ok(Ok(waited))`: none is left, after
+/// `waited`; `Ok(Err(ended))`: the dispatch ends without sending (a train held it for `--max`, or Gitea was down), the `::error::`
+/// already logged; `Err`: the run list could not be read. `./dev ci dispatch --trial` asks this before it pushes the trial ref, so a
+/// trial that never gets its turn leaves nothing on origin; [`run`] asks again right before it sends (a train may have come since).
+pub fn yield_to_trains(
+    http: &mut dyn Http,
+    target: &Target<'_>,
+    req: &Request,
+    clock: &mut dyn Clock,
+    log: &mut dyn Write,
+    mut health: Option<&mut Health<'_>>,
+) -> Result<Result<Duration, Dispatched>, String> {
+    let before = clock.elapsed();
+    let mut client = Client::new(http, target.server, target.repo, target.token);
+    client.backoff_ms = 0;
+    let mut probe = TrainFirstProbe {
+        client: &mut client,
+        workflow: req.workflow.clone(),
+    };
+    match wait_held(&mut probe, health.as_deref_mut(), clock, req.max, req.interval, log) {
+        // The wait's own time (the clock also counts a health hold before it); a class wait later reports the clock's total.
+        Outcome::Done { .. } => Ok(Ok(clock.elapsed() - before)),
+        Outcome::TimedOut { .. } if health.as_deref().is_some_and(|h| !h.down_now().is_empty()) => {
+            Ok(Err(service_down(&req.workflow, health.as_deref(), req.max, log)))
+        }
+        Outcome::TimedOut { last, max } => {
+            let _ = writeln!(
+                log,
+                "::error::dispatch: not dispatching {} on {}: {last} after {} (--max). Next: {}.",
+                req.workflow,
+                req.git_ref,
+                fmt_duration(max),
+                probe.next_step()
+            );
+            Ok(Err(Dispatched::StillBusy { last }))
+        }
+        Outcome::Broken { error, .. } => Err(format!("the run list could not be read: {error}")),
+        Outcome::Failed { detail, .. } => Err(detail),
+    }
 }
 
 /// The `::error::` of a dispatch that held for `--max` while a service was down, and its outcome.
@@ -1974,6 +1992,30 @@ mod tests {
             "{log}"
         );
         assert!(http.posts.is_empty(), "nothing is dispatched while the train runs");
+    }
+
+    #[test]
+    fn the_train_wait_alone_sends_nothing_so_a_trial_can_wait_before_it_pushes_its_ref() {
+        let req = parse_request("linux.yml", "trial/fix/x", &[], "1m", Some("15s")).unwrap();
+        let target = Target {
+            server: SERVER,
+            repo: REPO,
+            token: "secret-token",
+        };
+        let ask = |http: &mut Script| {
+            let (mut clock, mut log) = (FakeClock(Duration::ZERO), Vec::new());
+            let r = yield_to_trains(http, &target, &req, &mut clock, &mut log, None);
+            (r, String::from_utf8(log).unwrap())
+        };
+        let mut held = Script::new(vec![train_run(9248, "linux.yml", "queued")]);
+        let (r, log) = ask(&mut held);
+        assert!(matches!(r, Ok(Err(Dispatched::StillBusy { .. }))), "{log}");
+        assert!(log.contains("train run 9248") && held.posts.is_empty(), "{log}");
+        // Positive control: with the train run gone it is free at once and still sends nothing.
+        let mut free = Script::new(vec![runs(&[])]);
+        let (r, _) = ask(&mut free);
+        assert!(matches!(r, Ok(Ok(d)) if d.is_zero()));
+        assert!(free.posts.is_empty());
     }
 
     #[test]
