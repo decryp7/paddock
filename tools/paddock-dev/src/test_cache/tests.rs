@@ -394,6 +394,7 @@ fn a_never_cached_paddock_dev_is_not_offered_for_reuse_but_other_targets_still_a
         target: Target::rust("tools/paddock-dev", "paddock-dev", "tools/paddock-dev"),
         node_hash: "h".into(),
         dirty: false,
+        blind: Vec::new(),
     };
     let other = cand("crates/a", "h");
     s.put_many(&[rec(&dev, &class, NOW - 3600), rec(&other, &class, NOW - 3600)])
