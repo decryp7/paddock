@@ -63,10 +63,6 @@ fn machine() -> Vec<RawProcess> {
     ]
 }
 
-#[allow(
-    clippy::disallowed_methods,
-    reason = "a test builds its scratch path from the OS temp folder and removes it"
-)]
 fn run(
     caller: Caller,
 ) -> (
@@ -74,7 +70,8 @@ fn run(
     Vec<dyno_core::process::ProcessSample>,
     Vec<dyno_core::process::ProcessSample>,
 ) {
-    let dir = std::env::temp_dir().join(format!("dyno-helper-processes-{}-{:?}", std::process::id(), caller));
+    let scratch = paddock_testkit::canonical_tempdir();
+    let dir = scratch.join("helper");
     std::fs::create_dir_all(&dir).unwrap();
     let d = dispatcher(
         HelperHost::Linux,
@@ -94,7 +91,6 @@ fn run(
     clock.advance(Duration::from_secs(5));
     w.sweep_once();
     let second = src.processes();
-    let _ = std::fs::remove_dir_all(&dir);
     (src, first, second)
 }
 

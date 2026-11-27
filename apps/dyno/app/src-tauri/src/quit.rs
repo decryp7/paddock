@@ -458,7 +458,7 @@ mod tests {
 
     #[test]
     fn the_marker_waits_for_the_repair_lock_instead_of_racing_the_repair() {
-        let dir = temp("lockwait");
+        let dir = temp();
         std::fs::create_dir_all(&dir).unwrap();
         let held = record(&dir).lock().unwrap();
         // The lock is let go by the writer's own pause: the writer has seen it taken and is about to wait, so it must wait.
@@ -471,23 +471,17 @@ mod tests {
         .unwrap();
         assert!(pauses >= 1, "the writer saw the lock taken and waited");
         assert_eq!(peek_marker(&dir), Some(7));
-        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
-    #[allow(
-        clippy::disallowed_methods,
-        reason = "a test builds its scratch path from the OS temp folder and removes it"
-    )]
     fn the_marker_is_peeked_at_and_removed_only_when_asked() {
-        let dir = std::env::temp_dir().join(format!("dyno-quit-marker-{}", std::process::id()));
+        let dir = paddock_testkit::canonical_tempdir();
         assert_eq!(peek_marker(&dir), None);
         write_marker(&dir, 1234).unwrap();
         assert_eq!(peek_marker(&dir), Some(1234));
         assert_eq!(peek_marker(&dir), Some(1234), "peeking removes nothing");
         clear_marker(&dir);
         assert_eq!(peek_marker(&dir), None);
-        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
@@ -708,17 +702,13 @@ mod tests {
         }
     }
 
-    #[allow(
-        clippy::disallowed_methods,
-        reason = "a test builds its scratch path from the OS temp folder and removes it"
-    )]
-    fn temp(name: &str) -> std::path::PathBuf {
-        std::env::temp_dir().join(format!("dyno-quit-{name}-{}", std::process::id()))
+    fn temp() -> paddock_testkit::CanonicalTempDir {
+        paddock_testkit::canonical_tempdir()
     }
 
     #[test]
     fn opening_dyno_after_a_stop_on_request_starts_the_service_again_once() {
-        let dir = temp("resume");
+        let dir = temp();
         write_marker(&dir, 5).unwrap();
         let mut svc = Svc::default();
         assert_eq!(
@@ -732,12 +722,11 @@ mod tests {
             "the marker is read once"
         );
         assert_eq!(svc.resumed, 1);
-        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
     fn a_refused_location_starts_nothing_and_keeps_the_stop_marker_for_the_right_place() {
-        let dir = temp("location");
+        let dir = temp();
         write_marker(&dir, 5).unwrap();
         let mut svc = Svc::default();
         let from_a_disk_image = || Err("move Dyno to Applications".to_string());
@@ -751,7 +740,6 @@ mod tests {
             StartOutcome::Resumed(Ok(true)),
             "the next start from a good place still resumes"
         );
-        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
@@ -759,20 +747,19 @@ mod tests {
         // From a disk image macOS has no record of the item, so nothing looks installed (`NONE`): the marker was lost here
         // when it was taken before the location was looked at.
         for state in [NONE, STOPPED_SERVICE, SUPERVISED] {
-            let dir = temp("location-any");
+            let dir = temp();
             write_marker(&dir, 5).unwrap();
             let mut svc = Svc::default();
             let out = resume_at_start(&dir, &|| state, Err("move Dyno to Applications".to_string()), &mut svc);
             assert_eq!(out, StartOutcome::Resumed(Err("move Dyno to Applications".into())));
             assert_eq!(peek_marker(&dir), Some(5), "{state:?}");
             assert_eq!(svc.resumed, 0);
-            std::fs::remove_dir_all(&dir).unwrap();
         }
     }
 
     #[test]
     fn a_resume_that_failed_keeps_the_marker_and_one_that_was_done_clears_it() {
-        let dir = temp("keep");
+        let dir = temp();
         write_marker(&dir, 5).unwrap();
         let mut failing = Svc {
             fail: true,
@@ -783,12 +770,11 @@ mod tests {
         let mut svc = Svc::default();
         resume_at_start(&dir, &|| STOPPED_SERVICE, Ok(()), &mut svc);
         assert_eq!(peek_marker(&dir), None);
-        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
     fn a_service_that_cannot_start_is_reported_and_the_app_starts_its_own_agent_as_before() {
-        let dir = temp("fail");
+        let dir = temp();
         write_marker(&dir, 5).unwrap();
         let mut svc = Svc {
             fail: true,
@@ -798,12 +784,11 @@ mod tests {
             resume_at_start(&dir, &|| STOPPED_SERVICE, Ok(()), &mut svc),
             StartOutcome::Resumed(Err("launchd refused".into()))
         );
-        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
     fn no_second_agent_is_started_beside_a_supervising_service_or_without_a_marker() {
-        let dir = temp("nosecond");
+        let dir = temp();
         write_marker(&dir, 5).unwrap();
         let mut svc = Svc::default();
         assert_eq!(
@@ -814,13 +799,12 @@ mod tests {
         write_marker(&dir, 6).unwrap();
         assert_eq!(resume_at_start(&dir, &|| NONE, Ok(()), &mut svc), StartOutcome::StoppedOnRequest);
         assert_eq!(svc.resumed, 0, "the service was never started in these three");
-        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
     fn the_live_agent_is_nothing_to_stop_when_no_discovery_file_exists() {
-        let dir = temp("live");
-        let mut live = LiveAgent::new(dyno_agent::paths::Dirs::at(&dir));
+        let dir = temp();
+        let mut live = LiveAgent::new(dyno_agent::paths::Dirs::at(dir.path()));
         assert_eq!(live.ask_to_exit(), Ok(false));
         assert!(live.gone());
     }
@@ -841,8 +825,8 @@ mod tests {
 
     #[test]
     fn a_live_agent_that_does_not_answer_is_an_error_not_gone_and_a_stale_file_is_nothing_to_stop() {
-        let dir = temp("alive");
-        let dirs = dyno_agent::paths::Dirs::at(&dir);
+        let dir = temp();
+        let dirs = dyno_agent::paths::Dirs::at(dir.path());
         // this very process, written now (so it started before): alive, but nothing listens on the endpoint
         let now = i64::try_from(
             std::time::SystemTime::now()
@@ -858,7 +842,6 @@ mod tests {
         // a file written long before its holder started (a handed-on pid) is stale
         write_discovery(&dirs, std::process::id(), 1_000);
         assert_eq!(LiveAgent::new(dirs).ask_to_exit(), Ok(false));
-        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
@@ -881,8 +864,8 @@ mod tests {
 
     #[test]
     fn gone_is_the_process_by_identity_not_the_discovery_file() {
-        let dir = temp("gone");
-        let dirs = dyno_agent::paths::Dirs::at(&dir);
+        let dir = temp();
+        let dirs = dyno_agent::paths::Dirs::at(dir.path());
         let mut child = long_process();
         let now = i64::try_from(
             std::time::SystemTime::now()
@@ -901,13 +884,12 @@ mod tests {
         child.wait().unwrap();
         assert!(dirs.discovery().exists());
         assert!(live.gone(), "the process ended although the file is still there");
-        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
     fn a_held_lock_with_no_usable_discovery_file_is_an_error_and_a_free_lock_is_none_found() {
-        let dir = temp("hidden");
-        let dirs = dyno_agent::paths::Dirs::at(&dir);
+        let dir = temp();
+        let dirs = dyno_agent::paths::Dirs::at(dir.path());
         std::fs::create_dir_all(&dir).unwrap();
         assert_eq!(
             LiveAgent::new(dirs.clone()).with_wait(Duration::from_millis(100)).ask_to_exit(),
@@ -932,7 +914,6 @@ mod tests {
         assert!(!live.gone(), "without a target the held lock says it runs");
         drop(_agent);
         assert!(live.gone());
-        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     /// The menu bar's entry is wired: the manifest the UI is checked against names its command and the menu, and the Rust side
@@ -953,8 +934,8 @@ mod tests {
 
     #[test]
     fn an_agent_that_is_already_exiting_is_waited_for_before_the_hidden_agent_error() {
-        let dir = temp("exiting");
-        let dirs = dyno_agent::paths::Dirs::at(&dir);
+        let dir = temp();
+        let dirs = dyno_agent::paths::Dirs::at(dir.path());
         std::fs::create_dir_all(&dir).unwrap();
         // the agent removed its discovery file and still holds the lock for a moment (the lock is released in the app's pause)
         let held = dyno_agent::instance::InstanceLock::acquire(&dirs).unwrap();
@@ -977,12 +958,11 @@ mod tests {
             .ask_to_exit()
             .unwrap_err();
         assert!(e.contains("holds this data folder"), "{e}");
-        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
     fn a_lock_that_cannot_be_looked_at_is_not_taken_for_free() {
-        let dir = temp("unknownlock");
+        let dir = temp();
         std::fs::create_dir_all(&dir).unwrap();
         let blocker = dir.join("data");
         std::fs::write(&blocker, "a file where the data folder should be").unwrap();
@@ -991,6 +971,5 @@ mod tests {
             .ask_to_exit()
             .unwrap_err();
         assert!(e.contains("could not be looked at"), "{e}");
-        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

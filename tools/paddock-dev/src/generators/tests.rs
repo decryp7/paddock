@@ -324,6 +324,7 @@ fn the_limit_follows_the_cost_class() {
 mod real {
     use super::super::registry::Cost;
     use super::super::run::{Ran, Real, Runner, Spec, ran_from};
+    use crate::priority::Priority;
     use paddock_testkit::{Actions, Exec, StandIn};
     use std::collections::HashMap;
     use std::path::PathBuf;
@@ -410,6 +411,37 @@ mod real {
             "kept and recorded"
         );
         assert!(!want.starts_with(&f.repo), "never inside the worktree");
+    }
+
+    /// The fake takes `run [--high] gen -- <command>` and records what it was given before the command.
+    fn recording_slot(f: &Fixture) -> HashMap<String, String> {
+        let mut e = env(f);
+        let t = f.dir.path().join("bin/fake-throttle").display().to_string();
+        e.insert("PADDOCK_THROTTLE".into(), format!("{t} run gen --"));
+        e
+    }
+
+    fn spec() -> Spec<'static> {
+        Spec {
+            heavy: true,
+            workspace: "crates",
+        }
+    }
+
+    #[test]
+    fn train_work_asks_throttle_for_the_priority_lane_and_normal_work_does_not() {
+        for (priority, want) in [(Priority::Train, true), (Priority::Normal, false)] {
+            let f = fixture(
+                Actions::new()
+                    .appends_with("{dir}/../throttle-args", "{args}\n")
+                    .execs(&Exec::call_arguments().after("--")),
+            );
+            let real = Real::with(&f.repo, recording_slot(&f), Vec::new()).with_priority(priority);
+            let ran = real.run(&f.repo, &argv(), Duration::from_secs(20), &spec());
+            assert!(matches!(ran, Ran::Exited { code: Some(0), .. }), "{ran:?}");
+            let given = std::fs::read_to_string(f.dir.path().join("throttle-args")).unwrap();
+            assert_eq!(given.contains("run --high gen --"), want, "{priority:?}: {given}");
+        }
     }
 
     #[test]

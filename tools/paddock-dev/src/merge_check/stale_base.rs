@@ -47,7 +47,12 @@ fn is_main_name(name: &str) -> bool {
 /// The earlier train a re-merge subject names (`train/<name>`), `None` when the subject is no re-merge of a train. Any case. After
 /// `merge ` comes the name, in one of three spellings: `train/<name>` (the integrator's), `branch 'train/<name>'` (git's default
 /// message) or `remote-tracking branch 'origin/train/<name>'` (the remote prefix is dropped); a trailing `(sha)` is not part of it.
-fn remerged_line(subject: &str) -> Option<String> {
+fn remerged_line(subject: &str, trailers: &str) -> Option<String> {
+    // A merge made by `merge member` says its member in a trailer, whatever its subject says; the subject is the fallback.
+    let said = super::trailers::merge_member(subject, trailers);
+    if said.from_trailer {
+        return said.branch.to_ascii_lowercase().starts_with("train/").then_some(said.branch);
+    }
     let lower = subject.to_ascii_lowercase();
     let mut at = lower.find("merge ")? + "merge ".len();
     let mut remote = false;
@@ -89,19 +94,20 @@ pub fn base_of(git: &Git, head: &str, target_name: &str) -> Result<Base, String>
         "--first-parent".into(),
         "-n".into(),
         DEPTH.into(),
-        "--format=%H%x00%P%x00%s".into(),
+        format!("--format=%H%x00%P%x00%s%x00{}%x01", super::trailers::TRAILERS_FORMAT),
         head.into(),
     ];
     args.extend(main.iter().chain(local_main.iter()).map(|m| format!("^{m}")));
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
-    for rec in git.text(&args)?.lines() {
-        let mut f = rec.splitn(3, '\0');
-        let (Some(_), Some(parents), Some(subject)) = (f.next(), f.next(), f.next()) else {
+    // Records end in \x01: a trailer block spans lines.
+    for rec in git.text(&args)?.split('\u{1}') {
+        let mut f = rec.trim_start().splitn(4, '\0');
+        let (Some(_), Some(parents), Some(subject), Some(block)) = (f.next(), f.next(), f.next(), f.next()) else {
             continue;
         };
         let parents: Vec<&str> = parents.split_whitespace().collect();
         if parents.len() == 2
-            && let Some(line) = remerged_line(subject)
+            && let Some(line) = remerged_line(subject, block)
         {
             return Ok(Base::Commit {
                 sha: parents[1].to_string(),
@@ -186,7 +192,7 @@ mod tests {
             ("Merge train/x (abc1234) into train/y", "train/x"),
             ("CHORE(TRAIN): MERGE TRAIN/Old (abc1234) INTO TRAIN 3", "TRAIN/Old"),
         ] {
-            assert_eq!(remerged_line(s).as_deref(), Some(want), "{s}");
+            assert_eq!(remerged_line(s, "").as_deref(), Some(want), "{s}");
         }
         for s in [
             "chore(train): merge feat/x (abc1234) into train 14",
@@ -196,7 +202,7 @@ mod tests {
             "Merge remote-tracking branch 'origin/feat/x' into train/y",
             "Merge branch 'origin/train/x' into train/y",
         ] {
-            assert_eq!(remerged_line(s), None, "{s}");
+            assert_eq!(remerged_line(s, ""), None, "{s}");
         }
     }
 

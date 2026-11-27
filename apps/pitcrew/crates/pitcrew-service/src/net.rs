@@ -196,10 +196,6 @@ pub(crate) mod tests {
     }
 
     #[test]
-    #[allow(
-        clippy::disallowed_methods,
-        reason = "a test builds its scratch path from the OS temp folder and removes it"
-    )]
     fn downloads_and_hashes_and_refuses_plain_http() {
         let base = serve(vec![
             ("/v.json".into(), 200, br#"{"latest":{"version":"5.2.0"}}"#.to_vec()),
@@ -210,7 +206,8 @@ pub(crate) mod tests {
         assert!(http.text(&format!("{base}/v.json"), 1024, Some("t")).unwrap().contains("5.2.0"));
         assert!(http.text(&format!("{base}/v.json"), 5, None).unwrap_err().contains("more than"));
         assert!(http.text(&format!("{base}/gone"), 5, None).unwrap_err().contains("HTTP 500"));
-        let dest = std::env::temp_dir().join(format!("pitcrew-it-dl-{}", std::process::id()));
+        let scratch = paddock_testkit::canonical_tempdir();
+        let dest = scratch.join("it-dl");
         let d = http.download(&format!("{base}/bin"), &dest, 10_000).unwrap();
         assert_eq!(d, Sha256Digest::of_bytes(&[7u8; 5000]));
         assert_eq!(file_digest(&dest).unwrap(), d);

@@ -169,10 +169,10 @@ pub fn prepare_with(
         return Ok(Outcome::Conflict { target, files });
     }
     let tree = out.lines().next().unwrap_or("").trim().to_string();
-    let mut message = format!(
-        "Merge {branch} ({}) into trial of {target}\n",
-        branch_sha.get(..9).unwrap_or(&branch_sha)
-    );
+    // The trial's merge carries the same trailers as a real one (`merge member`), written by the one helper: the member, its commit,
+    // and for each re-landed revert a `Paddock-Reland` and the `Reverted:` lines that make the merge check accept the re-add.
+    let mut relanded = Vec::new();
+    let mut reverted = Vec::new();
     for r in relands {
         let revert = git(g, Child::Local, &["rev-parse", "--verify", &format!("{r}^{{commit}}")])
             .map_err(|e| format!("--reland {r} is not a commit of the clone: {e}"))?
@@ -197,14 +197,19 @@ pub fn prepare_with(
                 &revert,
             ],
         )?;
-        message.push('\n');
-        for f in files.lines().map(str::trim).filter(|f| !f.is_empty()) {
-            message.push_str(&format!(
-                "Reverted: {f}: the member re-lands the work the revert {} took out (--reland)\n",
-                revert.get(..9).unwrap_or(&revert)
-            ));
-        }
+        let files: Vec<String> = files.lines().map(str::trim).filter(|f| !f.is_empty()).map(str::to_string).collect();
+        reverted.extend(crate::merge_check::trailers::reland_lines(&revert, &files));
+        relanded.push(revert);
     }
+    let mut lines = crate::merge_check::trailers::member_lines(&crate::merge_check::trailers::named(branch), &branch_sha, &relanded);
+    lines.extend(reverted);
+    let message = crate::merge_check::trailers::with_block(
+        &format!(
+            "Merge {branch} ({}) into trial of {target}",
+            branch_sha.get(..9).unwrap_or(&branch_sha)
+        ),
+        &lines,
+    );
     let head = git(
         g,
         Child::Local,
@@ -546,6 +551,29 @@ mod tests {
 
     /// `--onto` names any pushed branch (a trial of an experiment on another experiment): it is fetched, not only main and
     /// `train/*` (the trial clone never had it, so the merge target did not resolve).
+    /// The trial's merge carries the trailers a real train merge has, so the readers see the member without its subject.
+    #[test]
+    fn the_trial_merge_carries_the_member_trailers() {
+        let w = world();
+        commit(&w, "feat/a", "a.txt", "a", "main");
+        let g = open(&w);
+        let seen = std::cell::RefCell::new(String::new());
+        let record = |root: &Path, head: &str| -> Result<(), String> {
+            *seen.borrow_mut() = git_in(root, &["show", "-s", "--format=%s%x00%(trailers:only,unfold)", head]);
+            Ok(())
+        };
+        let Outcome::Ready { .. } = prepare(&g, "feat/a", None, &record).unwrap() else {
+            panic!()
+        };
+        let shown = seen.borrow().clone();
+        let (subject, block) = shown.split_once('\0').unwrap();
+        let read = crate::merge_check::trailers::merge_member("whatever", block);
+        assert!(
+            read.from_trailer && read.branch == "feat/a" && read.sync_sha.is_some(),
+            "{subject}: {block}"
+        );
+    }
+
     #[test]
     fn onto_a_branch_that_is_neither_main_nor_a_train_fetches_it() {
         let w = world();
