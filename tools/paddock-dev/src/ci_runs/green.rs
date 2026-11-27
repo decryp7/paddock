@@ -264,7 +264,11 @@ impl Touched {
             all: false,
             packages,
             // A lockfile reason whose changed packages the plan read (`lockGraded`) narrows the grade like a Cargo reach.
-            cargo_only: strings(&plan["cargoOnly"]).union(&strings(&plan["lockGraded"])).cloned().collect(),
+            // A ci.yml reason that cannot alter a test (`ciGraded`) narrows the same way.
+            cargo_only: [&plan["cargoOnly"], &plan["lockGraded"], &plan["ciGraded"]]
+                .iter()
+                .flat_map(|v| strings(v))
+                .collect(),
             ..Touched::default()
         }
     }

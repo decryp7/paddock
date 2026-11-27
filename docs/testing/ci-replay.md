@@ -56,3 +56,4 @@ expected map lists the e2e legs a train skips), so the reader refuses it as "dec
 | `push-reused-v3` | 9180, 9181 | the push over it | skip, reusing 9180 |
 | `member-trial-v3` | 9179 | a member's trial, v3, narrowed | green: its own scope line ran |
 | `plan-record-artifact` | 9272 | a trial's plan job whose v4 upload `plan-record` the REST API lists; the zip download answers 302 to `/zip/raw` | read back to the run's record (`ARTIFACT_SHAPES`) |
+| `flaky-noncargo-reach` | 9329 | train aa before its fix: a FLAKY paddock-throttle test while ci.yml's plan job and upload steps made the plan reach crates | landing green with one fix item (`FixItems`, nothing touched); the FLAKY grade on the planner's `ciGraded` reach is the test `a_flaky_test_of_a_package_a_ci_yml_change...` |

@@ -5,7 +5,7 @@
 //! Paddock's own rules (which paths are global inputs, which markdown is read by code, who owns a folder) live here and not
 //! in `paddock-repo-graph`: they are this repository's, the graph crate is generic (ADR 0022 §6, "CI-only").
 
-use crate::plan_gitea::{GiteaSource, TRACED_SCRIPT, gitea_targets};
+use crate::plan_gitea::{GiteaSource, TRACED_SCRIPT, ci_change_is_inert, gitea_targets};
 use paddock_repo_graph::{CargoCli, FileSource, Graph, GraphError, History, cargo_graph, lock_diff, npm_graph};
 use regex::Regex;
 use serde_json::{Map, Value, json};
@@ -412,6 +412,9 @@ struct State {
     /// Projects with a lockfile reason whose changed packages were read: they run whole (they are in `beyond_cargo`), and only the
     /// FLAKY grade narrows them (`lockGraded` of the plan).
     lock_graded: BTreeSet<String>,
+    /// Projects reached by a ci.yml change that cannot alter what a package builds or tests (`plan_gitea::ci_change_is_inert`): they
+    /// run whole, and only the FLAKY grade narrows them (`ciGraded` of the plan).
+    ci_graded: BTreeSet<String>,
     kinds: BTreeMap<String, BTreeSet<&'static str>>,
 }
 
@@ -431,6 +434,15 @@ impl State {
         if let Some(p) = project {
             self.beyond_cargo.insert(p.clone());
             self.lock_graded.insert(p.clone());
+            self.why.entry(p).or_default().push(reason);
+        }
+    }
+
+    /// A ci.yml reason that cannot alter what a package builds or tests: the project still runs whole, the FLAKY grade reads packages.
+    fn mark_ci_graded(&mut self, project: Option<String>, reason: String) {
+        if let Some(p) = project {
+            self.beyond_cargo.insert(p.clone());
+            self.ci_graded.insert(p.clone());
             self.why.entry(p).or_default().push(reason);
         }
     }
@@ -516,6 +528,14 @@ pub fn affected(files: &[String], graph: &RepoGraph, opts: &Options) -> Result<V
             st.kind(Some(p), "all");
         }
     };
+    // The same for a ci.yml change that cannot alter what a package builds or tests: everything runs, the grade reads packages.
+    let mark_all_ci = |st: &mut State, reason: &str, everything: &mut bool| {
+        *everything = true;
+        for p in &every {
+            st.mark_ci_graded(Some(p.clone()), reason.to_string());
+            st.kind(Some(p), "all");
+        }
+    };
     if opts.all {
         mark_all(&mut st, "everything (no base)", &mut everything);
     }
@@ -570,19 +590,34 @@ pub fn affected(files: &[String], graph: &RepoGraph, opts: &Options) -> Result<V
             if ci_file {
                 st.mark(Some("conformance".to_string()), format!("ci files {f}"));
             }
+            let inert = f == ".gitea/workflows/ci.yml"
+                && opts
+                    .gitea
+                    .is_some_and(|g| ci_change_is_inert(g.before(f).as_deref(), g.after(f).as_deref()));
+            let mark = |st: &mut State, p: Option<String>, reason: String| {
+                if inert {
+                    st.mark_ci_graded(p, reason);
+                } else {
+                    st.mark(p, reason);
+                }
+            };
             for (p, reason) in hit {
                 if p == "everything" {
-                    mark_all(&mut st, &reason, &mut everything);
+                    if inert {
+                        mark_all_ci(&mut st, &reason, &mut everything);
+                    } else {
+                        mark_all(&mut st, &reason, &mut everything);
+                    }
                 } else if p == "apps" {
                     for a in &graph.apps {
-                        st.mark(Some(format!("app:{a}")), reason.clone());
+                        mark(&mut st, Some(format!("app:{a}")), reason.clone());
                         st.kind(Some(&format!("app:{a}")), "all");
                     }
                 } else if p.starts_with("app:") {
-                    st.mark(Some(p.clone()), reason);
+                    mark(&mut st, Some(p.clone()), reason);
                     st.kind(Some(&p), "all");
                 } else {
-                    st.mark(Some(p), reason);
+                    mark(&mut st, Some(p), reason);
                 }
             }
             if !ci_file {
@@ -848,6 +883,11 @@ pub fn affected(files: &[String], graph: &RepoGraph, opts: &Options) -> Result<V
     let lock_graded: Vec<&String> = st.lock_graded.iter().filter(|p| !st.beyond_other.contains(*p)).collect();
     if !lock_graded.is_empty() {
         out.insert("lockGraded".into(), json!(lock_graded));
+    }
+    // Projects reached beyond Cargo only by ci.yml changes that cannot alter a package's build or tests, and by lockfiles read: same.
+    let ci_graded: Vec<&String> = st.ci_graded.iter().filter(|p| !st.beyond_other.contains(*p)).collect();
+    if !ci_graded.is_empty() {
+        out.insert("ciGraded".into(), json!(ci_graded));
     }
     if opts.explain {
         out.insert("why".into(), json!(st.why));
@@ -1879,6 +1919,61 @@ mod tests {
             "identical revisions: everything"
         );
         assert_eq!(changed_jobs(Some(&ci_text("a", "b")), Some("jobs:\nx: 1")), None);
+    }
+
+    /// `ci_text` with an artifact upload step in the `crates` job.
+    fn ci_with_upload(action: &str) -> String {
+        ci_text("node a", "node b").replace(
+            "      - uses: ./.gitea/actions/install-test-browser\n",
+            &format!("      - uses: ./.gitea/actions/install-test-browser\n      - uses: {action}\n        if: failure()\n        with:\n          name: x\n"),
+        )
+    }
+
+    #[test]
+    fn a_ci_yml_change_that_only_swaps_an_artifact_upload_or_edits_the_plan_job_is_graded_by_package() {
+        // Train aa (run 9329): the plan job and the upload-artifact steps changed. Everything still runs, but no job's tests changed, so
+        // the FLAKY grade reads the packages (`ciGraded`), not "every test of the project" (ER-12).
+        let mut t = base_tree();
+        t.insert(CI_FILE.into(), ci_with_upload("actions/upload-artifact@v3"));
+        let plan_job = ci_with_upload("fork/upload-artifact@v4").replace("plan-only", "plan-only2");
+        let r = gitea_plan(&[CI_FILE], &fixed(&t, &[(CI_FILE, plan_job)], None));
+        assert_eq!(r["all"], true, "{r}");
+        let graded: Vec<&str> = r["ciGraded"].as_array().unwrap().iter().filter_map(Value::as_str).collect();
+        assert!(
+            ["crates", "ui", "paddock-dev", "app:debrief", "app:dyno"]
+                .iter()
+                .all(|p| graded.contains(p)),
+            "{r}"
+        );
+        assert!(!graded.contains(&"conformance"), "conformance always runs for its own reasons: {r}");
+        assert!(!cargo_only(&r, "crates"), "it runs whole: {}", r["cargoOnly"]);
+        // Only the upload step of the crates job changed.
+        let mut t = base_tree();
+        t.insert(CI_FILE.into(), ci_with_upload("actions/upload-artifact@v3"));
+        let r = gitea_plan(
+            &[CI_FILE],
+            &fixed(&t, &[(CI_FILE, ci_with_upload("fork/upload-artifact@v4"))], None),
+        );
+        assert_eq!(r["all"], false, "{r}");
+        assert_eq!(r["ciGraded"], json!(["crates"]), "{r}");
+    }
+
+    #[test]
+    fn a_ci_yml_change_that_can_alter_what_a_job_runs_is_not_graded_by_package() {
+        // Control (ER-33): a changed run step, a new job, a changed upload step that is not an upload, a header change: no `ciGraded`.
+        let t = base_tree();
+        for text in [
+            ci_text("node a", "node b").replace("build-folder", "build-folder2"),
+            ci_with_upload("./.gitea/actions/something-else"),
+            ci_text("node a", "node b").replace("install-test-browser", "install-test-browser --x"),
+        ] {
+            let r = gitea_plan(&[CI_FILE], &fixed(&t, &[(CI_FILE, text.clone())], None));
+            assert!(r.get("ciGraded").is_none(), "{text}\n{r}");
+        }
+        // A step that is an upload and also changes a test step in the same job: not inert.
+        let mixed = ci_with_upload("fork/upload-artifact@v4").replace("build-folder", "build-folder2");
+        let r = gitea_plan(&[CI_FILE], &fixed(&t, &[(CI_FILE, mixed)], None));
+        assert!(r.get("ciGraded").is_none(), "{r}");
     }
 
     #[test]
