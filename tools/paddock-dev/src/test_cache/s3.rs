@@ -26,6 +26,11 @@ pub const REQUEST_SECS: u64 = 5;
 pub const CALL_SECS: u64 = 60;
 
 /// One transfer: URL, file the answer goes to, file to upload, method.
+/// What one curl run said per transfer, and curl's own words when it exited non-zero.
+type Each = (Vec<(u16, String)>, Option<String>);
+/// A try of some blocks, as [`S3Store::run_each`].
+type TryFn<'a> = &'a mut dyn FnMut(&[Block]) -> Result<Each, StoreError>;
+
 pub(super) type Block = (String, PathBuf, Option<PathBuf>, &'static str);
 
 /// The store's address and keys. `Debug` never shows the keys.
@@ -120,7 +125,7 @@ impl S3Store {
     /// Runs the blocks in one curl and keeps what each transfer said even when curl exits non-zero (one request timed out): status 0
     /// is a transfer that got no answer. The second answer is curl's own words when it exited non-zero. `Err` only when curl said
     /// nothing readable for the blocks (it did not start, the call's budget ended, a redirect).
-    fn run_each(&self, blocks: &[Block]) -> Result<(Vec<(u16, String)>, Option<String>), StoreError> {
+    fn run_each(&self, blocks: &[Block]) -> Result<Each, StoreError> {
         if blocks.is_empty() {
             return Ok((Vec::new(), None));
         }
@@ -322,13 +327,9 @@ impl S3Store {
 /// The status of every block, from one try and at most one more for the blocks that got no answer or a server error (status 0 or 5xx):
 /// per item, never per call (PRINCIPLES, bulk APIs: errors are per item unless the operation is atomic; ADR 0116 §5, amended
 /// 2026-11-28). `Err` is that item's cause. `try_` runs blocks and answers as [`S3Store::run_each`] does.
-pub(super) fn fetch_each(
-    blocks: &[Block],
-    try_: &mut dyn FnMut(&[Block]) -> Result<(Vec<(u16, String)>, Option<String>), StoreError>,
-) -> Vec<Result<u16, StoreError>> {
-    type Try<'a> = &'a mut dyn FnMut(&[Block]) -> Result<(Vec<(u16, String)>, Option<String>), StoreError>;
+pub(super) fn fetch_each(blocks: &[Block], try_: TryFn<'_>) -> Vec<Result<u16, StoreError>> {
     // The answers per block, and whether the call failed whole.
-    let one = |blocks: &[Block], try_: Try<'_>| match try_(blocks) {
+    let one = |blocks: &[Block], try_: TryFn<'_>| match try_(blocks) {
         Ok((done, why)) => (
             blocks
                 .iter()
